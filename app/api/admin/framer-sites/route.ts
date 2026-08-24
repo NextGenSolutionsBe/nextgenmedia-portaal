@@ -61,8 +61,12 @@ export async function GET() {
       throw new Error(error.message)
     }
 
-    const { data: clientRijen } = await admin.from('clients').select('id, name').order('name')
-    const clients = (clientRijen ?? []) as { id: string; name: string | null }[]
+    // LET OP: de kolom heet company_name, niet name. Met 'name' faalt de query
+    // stil en blijft de klantenlijst leeg zonder foutmelding.
+    const { data: clientRijen } = await admin
+      .from('clients').select('id, company_name').order('company_name')
+    const clients = ((clientRijen ?? []) as { id: string; company_name: string | null }[])
+      .map((c) => ({ id: c.id, name: c.company_name }))
     const naamVan = new Map(clients.map((c) => [c.id, c.name]))
 
     const nu = new Date()
