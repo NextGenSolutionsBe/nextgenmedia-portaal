@@ -241,20 +241,24 @@ async function roepTool(naam, args) {
 
     // De telling vóór de inhoud: als er weinig tekst is, moet dat meteen
     // duidelijk zijn en niet pas nadat je door twintig lege items gescrold hebt.
-    const kop = [
+    // LET OP bij het aanpassen: filter hier NIET op lege regels. Die lege
+    // strings ZIJN de witregels; wegfilteren plakt de koptekst tegen het eerste
+    // item aan en je krijgt "24 zonder.---### 1.".
+    const regels = [
       `# ${klant.naam} — ${periode}`,
       '',
       `${items.length} item(s), waarvan **${metTekst.length} met tekst** en ${items.length - metTekst.length} zonder.`,
-      metTekst.length === 0
-        ? '\n> Let op: bij geen enkel item staat tekst ingevuld — niet in script, niet bij de media-notities, nergens.'
-        : '',
-      afgekapt ? `\n> Er zijn er meer dan ${MAX_ITEMS}; enkel de eerste ${MAX_ITEMS} staan hieronder. Vraag een kortere periode voor de rest.` : '',
-      '',
-      '---',
-      '',
-    ].filter((r) => r !== '').join('\n')
+    ]
+    if (metTekst.length === 0) {
+      regels.push('', '> Let op: bij geen enkel item staat tekst ingevuld — niet in script, niet bij de media-notities, nergens.')
+    }
+    if (afgekapt) {
+      regels.push('', `> Er zijn er meer dan ${MAX_ITEMS}; enkel de eerste ${MAX_ITEMS} staan hieronder. Vraag een kortere periode voor de rest.`)
+    }
+    regels.push('', '---', '')
 
-    return kop + getoond.map((i, n) => itemAlsTekst(i, n + 1)).join('\n\n---\n\n')
+    return regels.join('\n') + '\n'
+      + getoond.map((it, n) => itemAlsTekst(it, n + 1)).join('\n\n---\n\n') + '\n'
   }
 
   throw new Error(`Onbekend gereedschap: ${naam}`)
