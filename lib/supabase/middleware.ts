@@ -140,6 +140,12 @@ export async function updateSession(request: NextRequest) {
     path.startsWith('/sign/') ||
     path.startsWith('/_next') ||
     path.startsWith('/api') ||
+    // Ontdekkingspaden moeten een EERLIJK antwoord geven, niet een omleiding.
+    // Claude zoekt hier de OAuth-gegevens van de MCP-connector. Kreeg het een
+    // 307 naar /login, dan las het onze inlogpagina als een kapotte
+    // "sign-in service" — vandaar die registratiefout. Laten passeren betekent
+    // hier een nette 404, en dat is precies wat "geen OAuth" hoort te zeggen.
+    path.startsWith('/.well-known/') ||
     path === '/favicon.ico'
   ) {
     return supabaseResponse
