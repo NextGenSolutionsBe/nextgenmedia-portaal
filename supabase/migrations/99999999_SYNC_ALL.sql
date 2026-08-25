@@ -2483,3 +2483,43 @@ CREATE INDEX IF NOT EXISTS mcp_oauth_codes_verval_idx
 ALTER TABLE public.mcp_oauth_clients ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.mcp_oauth_codes   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.mcp_oauth_tokens  ENABLE ROW LEVEL SECURITY;
+
+-- ── Klantuploads ("dropbox") ────────────────────────────────────────────────
+-- Klanten leveren zelf beeldmateriaal aan, met een titel en een beschrijving
+-- erbij. Bewust een EIGEN tabel en geen kolom bij social content: op het moment
+-- van uploaden weet niemand nog bij welke post het hoort. Koppelen kan later.
+CREATE TABLE IF NOT EXISTS public.client_uploads (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id     uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  titel         text NOT NULL,
+  beschrijving  text,
+  -- Pad in de bucket. Begint ALTIJD met het client_id, zodat een pad nooit naar
+  -- het materiaal van een andere klant kan wijzen.
+  bestandspad   text NOT NULL,
+  bestandsnaam  text NOT NULL,
+  mimetype      text,
+  grootte       bigint,
+  -- Wie leverde dit aan? Een klant kan meerdere subaccounts hebben.
+  door_email    text,
+  door_naam     text,
+  auth_user_id  uuid,
+  -- nieuw → gezien → verwerkt. Zo blijft zichtbaar wat nog aandacht nodig heeft.
+  status        text NOT NULL DEFAULT 'nieuw',
+  admin_notitie text,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS client_uploads_client_idx
+  ON public.client_uploads (client_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS client_uploads_status_idx
+  ON public.client_uploads (status) WHERE status = 'nieuw';
+
+-- Zoals de rest van het portaal: lezen en schrijven gebeurt server-side met de
+-- service-role, ná het oplossen van de sessie. RLS staat aan als tweede laag.
+ALTER TABLE public.client_uploads ENABLE ROW LEVEL SECURITY;
+
+-- Privébucket. Nooit publiek: het gaat om materiaal van klanten, dat alleen via
+-- een tijdelijke ondertekende link zichtbaar hoort te zijn.
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('client-uploads', 'client-uploads', false)
+ON CONFLICT (id) DO NOTHING;

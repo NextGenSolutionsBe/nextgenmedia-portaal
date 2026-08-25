@@ -24,6 +24,7 @@ const nl: Dict = {
   'nav.cms': 'Website-CMS',
   'nav.website': 'Website',
   'nav.blogs': 'Blogs',
+  'nav.files': 'Bestanden',
   // Dashboard
   'dash.noProfile': 'Geen klantprofiel gevonden. Contacteer NextGenMedia.',
   'dash.welcome': 'Welkom, {name}',
@@ -63,6 +64,7 @@ const en: Dict = {
   'nav.cms': 'Website CMS',
   'nav.website': 'Website',
   'nav.blogs': 'Blogs',
+  'nav.files': 'Files',
   'dash.noProfile': 'No client profile found. Please contact NextGenMedia.',
   'dash.welcome': 'Welcome, {name}',
   'dash.subtitle': 'Your client portal at NextGenMedia',

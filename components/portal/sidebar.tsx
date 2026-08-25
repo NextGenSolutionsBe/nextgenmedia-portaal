@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { useRefresh } from '@/lib/use-refresh'
 import { Logo } from '@/components/logo'
-import { LayoutDashboard, FileText, Calendar, Globe, LogOut, RefreshCcw, Menu, X, ListChecks, Newspaper, CalendarClock, Database } from 'lucide-react'
+import { LayoutDashboard, FileText, Calendar, Globe, LogOut, RefreshCcw, Menu, X, ListChecks, Newspaper, CalendarClock, Database, FolderUp } from 'lucide-react'
 import { MODULE_IMPLEMENTED, type PortalModule } from '@/lib/portal-permissions'
 import { t, type Lang } from '@/lib/i18n'
 import { LangToggle } from '@/components/lang-toggle'
@@ -34,6 +34,9 @@ const NAV: NavItem[] = [
   { tKey: 'nav.cms',        href: '/portal/cms',           icon: Database, requiresCms: true, module: 'cms' },
   { tKey: 'nav.website',    href: '/portal/website',       icon: Globe,    requiresService: 'webdesign', requiresWebsitePage: true, module: 'website' },
   { tKey: 'nav.blogs',      href: '/portal/blogs',         icon: Newspaper, requiresBlogs: true, module: 'blogs' },
+  // Aanleveren van beeldmateriaal. Bewust GEEN requiresService: ook een klant
+  // zonder lopend socialmediapakket moet ons foto's kunnen doorsturen.
+  { tKey: 'nav.files',      href: '/portal/bestanden',     icon: FolderUp, module: 'files' },
 ]
 
 export function PortalSidebar({

@@ -27,12 +27,13 @@ export const MODULE_LABELS: Record<PortalModule, string> = {
   contracts:    'Contracten',
   blogs:        'Blogs',
   tasks:        'Taken',
-  files:        'Bestanden',
+  files:        'Bestanden aanleveren',
 }
 
-// Welke modules hebben een werkende pagina/route. 'files' bestaat nog niet —
-// niet misleidend tonen alsof het al werkt. 'metricool'/'cms' tonen enkel als de
-// klant óók gekoppeld is (gating in layout/nav).
+// Welke modules hebben een werkende pagina/route. Een module die hier op false
+// staat wordt nergens getoond en geeft 404 in de guard — niet misleidend tonen
+// alsof het al werkt. 'metricool'/'cms' tonen enkel als de klant óók gekoppeld
+// is (gating in layout/nav).
 export const MODULE_IMPLEMENTED: Record<PortalModule, boolean> = {
   social_media: true,
   metricool:    true,
@@ -41,7 +42,7 @@ export const MODULE_IMPLEMENTED: Record<PortalModule, boolean> = {
   contracts:    true,
   blogs:        FEATURES.blogs,   // tijdelijk uit — zie lib/features.ts
   tasks:        true,
-  files:        false,
+  files:        true,             // /portal/bestanden — aanleveren van beeldmateriaal
 }
 
 export const ACTION_LABELS: Record<string, string> = {
@@ -85,7 +86,9 @@ export type PresetKey = 'eigenaar' | 'marketing' | 'website' | 'financieel' | 'r
 
 export const PRESETS: { key: PresetKey; label: string; description: string; permissions: () => Permissions }[] = [
   { key: 'eigenaar',   label: 'Eigenaar',          description: 'Alle rechten',                       permissions: fullPermissions },
-  { key: 'marketing',  label: 'Marketing',         description: 'Social Media + Metricool + Blogs + Taken', permissions: () => only(['social_media', 'metricool', 'blogs', 'tasks']) },
+  // Marketing levert in de praktijk óók het beeldmateriaal aan; zonder 'files'
+  // zou zo iemand foto's alleen per mail kwijt kunnen.
+  { key: 'marketing',  label: 'Marketing',         description: 'Social Media + Metricool + Blogs + Taken + Bestanden', permissions: () => only(['social_media', 'metricool', 'blogs', 'tasks', 'files']) },
   { key: 'website',    label: 'Websitebeheerder',  description: 'Website-CMS + Website + Taken',        permissions: () => only(['cms', 'website', 'tasks']) },
   { key: 'financieel', label: 'Financieel',        description: 'Contracten bekijken + downloaden',    permissions: () => ({ contracts: { view: true, sign: false, download: true } }) },
   { key: 'readonly',   label: 'Alleen lezen',      description: 'Alles bekijken, niets aanpassen',     permissions: viewOnly },
