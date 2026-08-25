@@ -82,6 +82,8 @@ const SECTIONS: NavSection[] = [
       { label: 'Pipeline',            href: '/admin/sales/pipeline',     icon: KanbanSquare, module: 'sales' },
       { label: 'Bevestigingen',       href: '/admin/sales/herinneringen', icon: PhoneCall,   module: 'sales' },
       { label: 'Resultaten',          href: '/admin/sales/resultaten',   icon: BarChart3,    module: 'sales' },
+      // Apart van Resultaten: dat gaat over geld, dit over conversie.
+      { label: 'Statistieken',        href: '/admin/sales/statistieken', icon: TrendingUp,   module: 'sales' },
     ],
   },
   {
