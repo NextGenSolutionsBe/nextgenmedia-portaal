@@ -32,6 +32,10 @@ for (const naam of ['.env', '.env.local']) {
   }
 }
 
+// Lokaal mag schrijven: dit programma draait op de eigen machine en is niet
+// vanaf het internet bereikbaar. Uitzetten kan met MCP_SCHRIJVEN=0.
+const MAG_SCHRIJVEN = process.env.MCP_SCHRIJVEN !== '0'
+
 const URL_ = process.env.NEXT_PUBLIC_SUPABASE_URL
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 
@@ -61,10 +65,10 @@ process.stdin.on('data', async (stuk) => {
     if (!regel) continue
     let bericht
     try { bericht = JSON.parse(regel) } catch { log('[fout] onleesbaar bericht'); continue }
-    const antwoord = await behandelBericht(supabase, bericht)
+    const antwoord = await behandelBericht(supabase, bericht, MAG_SCHRIJVEN)
     if (antwoord) process.stdout.write(JSON.stringify(antwoord) + '\n')
   }
 })
 process.stdin.on('end', () => process.exit(0))
 
-log('nextgenmedia-portaal MCP-server gestart' + (URL_ && KEY ? '' : ' — LET OP: Supabase-omgeving ontbreekt'))
+log('nextgenmedia-portaal MCP-server gestart' + (MAG_SCHRIJVEN ? ' (lezen + schrijven)' : ' (alleen lezen)') + (URL_ && KEY ? '' : ' — LET OP: Supabase-omgeving ontbreekt'))

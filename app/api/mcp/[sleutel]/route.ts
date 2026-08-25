@@ -62,7 +62,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sle
   const binnen = Array.isArray(bericht) ? bericht : [bericht]
   const uit = []
   for (const b of binnen) {
-    const antwoord = await behandelBericht(supabase, b)
+    // Schrijven staat hier BEWUST uit. De enige beveiliging is een sleutel in
+    // het adres; wie die heeft zou anders content van alle klanten kunnen
+    // aanmaken en overschrijven. Zet dit pas aan als er echte OAuth staat.
+    const antwoord = await behandelBericht(supabase, b, false)
     if (antwoord) uit.push(antwoord)
   }
 
