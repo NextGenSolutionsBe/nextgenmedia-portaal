@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { safeMessage } from '@/lib/api-error'
-import { BUCKET, STATUSSEN, type Status } from '@/lib/client-uploads'
+import { BUCKET, LOSSE_BESTANDEN, STATUSSEN, type Status } from '@/lib/client-uploads'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,20 +25,34 @@ export async function GET(req: NextRequest) {
     const status = String(req.nextUrl.searchParams.get('status') ?? '').trim()
     const klant = String(req.nextUrl.searchParams.get('client') ?? '').trim()
 
-    let vraag = admin
-      .from('client_uploads')
-      .select('id, client_id, titel, beschrijving, bestandspad, bestandsnaam, mimetype, grootte, status, admin_notitie, door_naam, door_email, created_at')
-      .order('created_at', { ascending: false })
-      .limit(500)
+    const KOLOMMEN = 'id, client_id, titel, beschrijving, bestandspad, bestandsnaam, mimetype, grootte, status, admin_notitie, door_naam, door_email, created_at, map_id'
 
-    if (status && (STATUSSEN as readonly string[]).includes(status)) vraag = vraag.eq('status', status)
-    if (klant) vraag = vraag.eq('client_id', klant)
+    const haal = async (kolommen: string) => {
+      let vraag = admin
+        .from('client_uploads')
+        .select(kolommen)
+        .order('created_at', { ascending: false })
+        .limit(500)
+      if (status && (STATUSSEN as readonly string[]).includes(status)) vraag = vraag.eq('status', status)
+      if (klant) vraag = vraag.eq('client_id', klant)
+      return vraag
+    }
 
-    const { data, error } = await vraag
+    // Zonder de kolom map_id (migratie nog niet gedraaid) valt de selectie
+    // terug, zodat het scherm blijft werken in plaats van leeg te blijven.
+    let { data, error } = await haal(KOLOMMEN)
+    if (error && /map_id/i.test(error.message)) {
+      ;({ data, error } = await haal(KOLOMMEN.replace(', map_id', '')))
+    }
     if (error) {
       if (MIST.test(error.message)) return NextResponse.json({ uploads: [], clients: [], hint: HINT })
       throw new Error(error.message)
     }
+
+    const { data: mapRijen } = await admin.from('client_upload_folders').select('id, naam')
+    const mapNaam = new Map(
+      ((mapRijen ?? []) as { id: string; naam: string }[]).map((m) => [m.id, m.naam]),
+    )
 
     // LET OP: de kolom heet company_name, niet name.
     const { data: klantRijen } = await admin
@@ -48,7 +62,7 @@ export async function GET(req: NextRequest) {
     const naamVan = new Map(clients.map((c) => [c.id, c.naam]))
 
     const uploads = await Promise.all((data ?? []).map(async (r) => {
-      const rij = r as Record<string, unknown>
+      const rij = r as unknown as Record<string, unknown>
       const { data: s } = await admin.storage
         .from(BUCKET).createSignedUrl(String(rij.bestandspad), 60 * 60)
       const { bestandspad: _weg, ...rest } = rij
@@ -56,6 +70,7 @@ export async function GET(req: NextRequest) {
       return {
         ...rest,
         client_naam: naamVan.get(String(rij.client_id)) ?? '(onbekende klant)',
+        map_naam: rij.map_id ? mapNaam.get(String(rij.map_id)) ?? LOSSE_BESTANDEN : LOSSE_BESTANDEN,
         url: s?.signedUrl ?? null,
       }
     }))

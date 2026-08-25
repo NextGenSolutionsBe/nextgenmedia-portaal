@@ -76,8 +76,35 @@ export function padHoortBij(pad: unknown, clientId: string): boolean {
   return typeof pad === 'string' && pad.startsWith(`${clientId}/`) && !pad.includes('..')
 }
 
+/** Hoe een map heet die er (nog) niet is. Eén plek, zodat portaal en admin
+ *  hetzelfde woord gebruiken. */
+export const LOSSE_BESTANDEN = 'Losse bestanden'
+
+export const MAP_NAAM_MAX = 80
+
 /**
- * Bestandsnaam opschonen voor weergave en download.
+ * Mapnaam opschonen en controleren.
+ *
+ * Geeft de opgeschoonde naam terug, of een uitleg waarom het zo niet kan.
+ * Bewust één functie voor beide: zou de controle elders staan dan kan er een
+ * naam door die de opschoning daarna alsnog leegmaakt.
+ */
+export function leesMapNaam(invoer: unknown): { naam: string } | { fout: string } {
+  // LET OP: schoon(), niet schooneNaam(). Die laatste valt terug op "bestand"
+  // als er niets overblijft — dan zou een lege mapnaam stilletjes een map
+  // "bestand" opleveren in plaats van een foutmelding.
+  const naam = schoon(invoer).slice(0, MAP_NAAM_MAX).trim()
+  if (!naam) return { fout: 'Geef de map een naam.' }
+  // Anders staan er straks twee dingen met dezelfde naam in de lijst, waarvan
+  // er één geen echte map is.
+  if (naam.toLowerCase() === LOSSE_BESTANDEN.toLowerCase()) {
+    return { fout: `"${LOSSE_BESTANDEN}" is gereserveerd. Kies een andere naam.` }
+  }
+  return { naam }
+}
+
+/**
+ * Tekst van een gebruiker geschikt maken als naam.
  *
  * Schuine strepen worden streepjes — anders leest een downloadnaam als een pad.
  * Stuurtekens gaan eruit, want die kunnen een naam in een HTTP-koptekst laten
@@ -85,9 +112,13 @@ export function padHoortBij(pad: unknown, clientId: string): boolean {
  *
  * Bewust met een codepunt-filter en niet met een reguliere expressie vol
  * stuurtekens: zo'n expressie staat vol onzichtbare bytes in de broncode.
+ *
+ * Geeft een lege string terug als er niets overblijft. De aanroeper beslist wat
+ * dat betekent — een bestand krijgt een terugvalnaam, een map hoort geweigerd
+ * te worden.
  */
-export function schooneNaam(naam: unknown): string {
-  const uit = String(naam ?? '')
+export function schoon(tekst: unknown): string {
+  return String(tekst ?? '')
     .replace(/[\\/]/g, '-')
     .split('')
     .filter((teken) => {
@@ -96,6 +127,10 @@ export function schooneNaam(naam: unknown): string {
     })
     .join('')
     .trim()
-    .slice(0, 200)
-  return uit || 'bestand'
+}
+
+/** Bestandsnaam voor weergave en download. Blijft er niets over, dan een
+ *  terugvalnaam: een bestand zonder naam kan je nergens tonen. */
+export function schooneNaam(naam: unknown): string {
+  return schoon(naam).slice(0, 200) || 'bestand'
 }

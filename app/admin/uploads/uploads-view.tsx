@@ -10,6 +10,8 @@ export type AdminUpload = {
   id: string
   client_id: string
   client_naam: string
+  /** Naam van de map, of "Losse bestanden" als er geen map is. */
+  map_naam: string
   titel: string
   beschrijving: string | null
   bestandsnaam: string
@@ -35,6 +37,7 @@ const KLEUR: Record<Status, string> = {
 export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
   const [lijst, setLijst] = useState(initieel)
   const [klant, setKlant] = useState('')
+  const [mapNaam, setMapNaam] = useState('')
   const [status, setStatus] = useState('')
   const [open, setOpen] = useState<AdminUpload | null>(null)
   const [fout, setFout] = useState<string | null>(null)
@@ -44,8 +47,17 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
     [lijst],
   )
 
+  // Mappen van de gekozen klant. Alle mappen van iedereen door elkaar in één
+  // keuzelijst zou onbruikbaar zijn zodra er twee klanten "Gevel" gebruiken.
+  const mappen = useMemo(() => {
+    const relevant = klant ? lijst.filter((u) => u.client_naam === klant) : lijst
+    return [...new Set(relevant.map((u) => u.map_naam))].sort((a, b) => a.localeCompare(b))
+  }, [lijst, klant])
+
   const zichtbaar = lijst.filter(
-    (u) => (!klant || u.client_naam === klant) && (!status || u.status === status),
+    (u) => (!klant || u.client_naam === klant)
+      && (!mapNaam || u.map_naam === mapNaam)
+      && (!status || u.status === status),
   )
 
   const nieuwAantal = lijst.filter((u) => u.status === 'nieuw').length
@@ -79,11 +91,22 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
       {/* ── Filters ── */}
       <div className="flex flex-wrap items-center gap-2">
         <select
-          value={klant} onChange={(e) => setKlant(e.target.value)}
+          value={klant}
+          // Bij een andere klant vervalt de mapkeuze: die map bestaat daar
+          // waarschijnlijk niet, en je zou naar een lege lijst kijken.
+          onChange={(e) => { setKlant(e.target.value); setMapNaam('') }}
           className="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white"
         >
           <option value="">Alle klanten</option>
           {klanten.map((k) => <option key={k} value={k}>{k}</option>)}
+        </select>
+
+        <select
+          value={mapNaam} onChange={(e) => setMapNaam(e.target.value)}
+          className="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white"
+        >
+          <option value="">Alle mappen</option>
+          {mappen.map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
 
         <div className="flex gap-1">
@@ -141,7 +164,7 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
 
               <div className="p-3 flex-1 flex flex-col gap-1">
                 <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide truncate">
-                  {u.client_naam}
+                  {u.client_naam} · {u.map_naam}
                 </p>
                 <p className="font-semibold text-sm leading-tight">{u.titel}</p>
                 {u.beschrijving && (
@@ -169,7 +192,9 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
           >
             <div className="flex items-start justify-between p-4 border-b border-gray-100">
               <div className="min-w-0">
-                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">{open.client_naam}</p>
+                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">
+                  {open.client_naam} · {open.map_naam}
+                </p>
                 <h2 className="font-bold text-lg leading-tight">{open.titel}</h2>
               </div>
               <button onClick={() => setOpen(null)} className="h-8 w-8 rounded-lg hover:bg-gray-100 flex items-center justify-center shrink-0">

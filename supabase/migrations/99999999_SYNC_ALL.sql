@@ -2523,3 +2523,37 @@ ALTER TABLE public.client_uploads ENABLE ROW LEVEL SECURITY;
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('client-uploads', 'client-uploads', false)
 ON CONFLICT (id) DO NOTHING;
+
+-- ── Mappen bij klantuploads ─────────────────────────────────────────────────
+-- Klanten leveren zelden één foto aan; het is een reeks van een shoot, een
+-- pand, een evenement. Zonder mappen wordt dat één lange stroom waarin niemand
+-- meer terugvindt wat bij elkaar hoort.
+CREATE TABLE IF NOT EXISTS public.client_upload_folders (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id    uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  naam         text NOT NULL,
+  beschrijving text,
+  door_naam    text,
+  door_email   text,
+  auth_user_id uuid,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+
+-- Twee mappen met dezelfde naam bij één klant is altijd een vergissing, en je
+-- merkt het pas als je in de verkeerde zoekt. Hoofdletterongevoelig, want
+-- "Gevel" en "gevel" zijn voor een mens dezelfde map.
+CREATE UNIQUE INDEX IF NOT EXISTS client_upload_folders_naam_uniek
+  ON public.client_upload_folders (client_id, lower(naam));
+CREATE INDEX IF NOT EXISTS client_upload_folders_client_idx
+  ON public.client_upload_folders (client_id, created_at DESC);
+
+ALTER TABLE public.client_upload_folders ENABLE ROW LEVEL SECURITY;
+
+-- LET OP: ON DELETE SET NULL, bewust NIET CASCADE. Een map weggooien mag nooit
+-- het beeldmateriaal van een klant meenemen; de bestanden komen dan gewoon
+-- weer bij de losse bestanden te staan.
+ALTER TABLE public.client_uploads
+  ADD COLUMN IF NOT EXISTS map_id uuid REFERENCES public.client_upload_folders(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS client_uploads_map_idx
+  ON public.client_uploads (map_id) WHERE map_id IS NOT NULL;

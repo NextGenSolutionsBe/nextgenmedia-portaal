@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { FolderUp } from 'lucide-react'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
-import { BUCKET } from '@/lib/client-uploads'
+import { BUCKET, LOSSE_BESTANDEN } from '@/lib/client-uploads'
 import { UploadsView, type AdminUpload } from './uploads-view'
 
 /**
@@ -15,11 +15,19 @@ import { UploadsView, type AdminUpload } from './uploads-view'
 export default async function AdminUploadsPage() {
   const admin = createAdminSupabaseClient()
 
-  const { data, error } = await admin
+  const KOLOMMEN = 'id, client_id, titel, beschrijving, bestandspad, bestandsnaam, mimetype, grootte, status, admin_notitie, door_naam, door_email, created_at, map_id'
+
+  const haal = (kolommen: string) => admin
     .from('client_uploads')
-    .select('id, client_id, titel, beschrijving, bestandspad, bestandsnaam, mimetype, grootte, status, admin_notitie, door_naam, door_email, created_at')
+    .select(kolommen)
     .order('created_at', { ascending: false })
     .limit(500)
+
+  // Zonder de kolom map_id (migratie nog niet gedraaid) valt de selectie terug.
+  let { data, error } = await haal(KOLOMMEN)
+  if (error && /map_id/i.test(error.message)) {
+    ;({ data, error } = await haal(KOLOMMEN.replace(', map_id', '')))
+  }
 
   const mistTabel = !!error && /client_uploads|does not exist|schema cache/i.test(error.message)
 
@@ -32,8 +40,13 @@ export default async function AdminUploadsPage() {
         .map((c) => [c.id, c.company_name ?? '(zonder naam)']),
     )
 
+    const { data: mapRijen } = await admin.from('client_upload_folders').select('id, naam')
+    const mapNaam = new Map(
+      ((mapRijen ?? []) as { id: string; naam: string }[]).map((m) => [m.id, m.naam]),
+    )
+
     uploads = await Promise.all((data ?? []).map(async (r) => {
-      const rij = r as Record<string, unknown>
+      const rij = r as unknown as Record<string, unknown>
       const { data: s } = await admin.storage
         .from(BUCKET).createSignedUrl(String(rij.bestandspad), 60 * 60)
       const { bestandspad: _weg, ...rest } = rij
@@ -41,6 +54,7 @@ export default async function AdminUploadsPage() {
       return {
         ...rest,
         client_naam: naamVan.get(String(rij.client_id)) ?? '(onbekende klant)',
+        map_naam: rij.map_id ? mapNaam.get(String(rij.map_id)) ?? LOSSE_BESTANDEN : LOSSE_BESTANDEN,
         url: s?.signedUrl ?? null,
       } as AdminUpload
     }))

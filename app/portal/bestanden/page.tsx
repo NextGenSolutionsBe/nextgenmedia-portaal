@@ -1,14 +1,12 @@
 export const dynamic = 'force-dynamic'
 
 import { FolderUp } from 'lucide-react'
-import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { requirePortalView, sessionCan } from '@/lib/portal-auth'
-import { BUCKET } from '@/lib/client-uploads'
-import { Uploader, type Bestaand } from './uploader'
+import { MappenOverzicht } from './mappen-overzicht'
+import { laadOverzicht } from './data'
 
 /**
- * De aanleverplek voor klanten: foto's en video's insturen met een titel en een
- * beschrijving erbij.
+ * De aanleverplek voor klanten, met mappen als startpunt.
  *
  * Bewust een eigen scherm en niet iets onder Social Media. Materiaal wordt
  * meestal aangeleverd lang voordat duidelijk is bij welke post het hoort — en
@@ -17,34 +15,8 @@ import { Uploader, type Bestaand } from './uploader'
  */
 export default async function PortalBestandenPage() {
   const session = await requirePortalView('files')
-  const magUploaden = sessionCan(session, 'files', 'upload')
-
-  let uploads: Bestaand[] = []
-  let hint: string | null = null
-
-  const admin = createAdminSupabaseClient()
-  const { data, error } = await admin
-    .from('client_uploads')
-    .select('id, titel, beschrijving, bestandspad, bestandsnaam, mimetype, grootte, status, door_naam, created_at')
-    .eq('client_id', session.clientId)
-    .order('created_at', { ascending: false })
-    .limit(500)
-
-  if (error) {
-    hint = /client_uploads|does not exist|schema cache/i.test(error.message)
-      ? 'Deze module is nog niet klaar voor gebruik — de migratie moet nog draaien.'
-      : null
-  } else {
-    // Privébucket: per bestand een tijdelijke link, nooit een vast adres.
-    uploads = await Promise.all((data ?? []).map(async (r) => {
-      const rij = r as Record<string, unknown>
-      const { data: s } = await admin.storage
-        .from(BUCKET).createSignedUrl(String(rij.bestandspad), 60 * 60)
-      const { bestandspad: _weg, ...rest } = rij
-      void _weg
-      return { ...rest, url: s?.signedUrl ?? null } as Bestaand
-    }))
-  }
+  const magBeheren = sessionCan(session, 'files', 'upload')
+  const overzicht = await laadOverzicht(session.clientId)
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -53,15 +25,22 @@ export default async function PortalBestandenPage() {
           <FolderUp className="h-6 w-6" />Bestanden
         </h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          Stuur ons foto&apos;s en video&apos;s door. Vertel er kort bij wat we zien — dan weten we
-          waarvoor we het kunnen gebruiken.
+          Maak een map per shoot of onderwerp en sleep er in één keer al je foto&apos;s in.
+          Vertel er kort bij wat we zien — dan weten we waarvoor we het kunnen gebruiken.
         </p>
       </div>
 
-      {hint ? (
-        <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">{hint}</p>
+      {overzicht.nogNietKlaar ? (
+        <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+          Deze module is nog niet klaar voor gebruik — de migratie moet nog draaien.
+        </p>
       ) : (
-        <Uploader initieel={uploads} magUploaden={magUploaden} />
+        <MappenOverzicht
+          mappen={overzicht.mappen}
+          losAantal={overzicht.losAantal}
+          losVoorbeeld={overzicht.losVoorbeeld}
+          magBeheren={magBeheren}
+        />
       )}
     </div>
   )

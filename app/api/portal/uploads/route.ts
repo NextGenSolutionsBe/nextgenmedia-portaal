@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { createAdminSupabaseClient, insertResilient } from '@/lib/supabase/server'
 import { requirePortalPermission, logPortalAction } from '@/lib/portal-auth'
 import { safeMessage } from '@/lib/api-error'
 import {
@@ -13,21 +13,50 @@ const HINT = 'De tabel voor klantuploads bestaat nog niet. Draai supabase/migrat
 
 /** Wat de klant zelf van zijn uploads te zien krijgt. `admin_notitie` zit hier
  *  bewust NIET bij: dat is een interne aantekening. */
-const KOLOMMEN = 'id, titel, beschrijving, bestandspad, bestandsnaam, mimetype, grootte, status, door_naam, created_at'
+const KOLOMMEN = 'id, titel, beschrijving, bestandspad, bestandsnaam, mimetype, grootte, status, door_naam, created_at, map_id'
 
-/** Eigen uploads bekijken. */
-export async function GET() {
+/** Zonder de kolom map_id (nog geen migratie) valt de selectie terug, zodat de
+ *  pagina blijft werken in plaats van leeg te blijven met een stille fout. */
+const KOLOMMEN_ZONDER_MAP = KOLOMMEN.replace(', map_id', '')
+
+/** Hoort deze map bij deze klant? Een meegestuurd id van een andere klant zou
+ *  anders bestanden in andermans map laten belanden. */
+async function mapVanKlant(
+  admin: ReturnType<typeof createAdminSupabaseClient>, mapId: string, clientId: string,
+): Promise<boolean> {
+  const { data } = await admin
+    .from('client_upload_folders').select('id')
+    .eq('id', mapId).eq('client_id', clientId).maybeSingle()
+  return !!data
+}
+
+/** Eigen uploads bekijken. Optioneel gefilterd op map (?map=<id> of ?map=los). */
+export async function GET(req: NextRequest) {
   try {
     const g = await requirePortalPermission('files', 'view')
     if (!g.ok) return g.response
 
     const admin = createAdminSupabaseClient()
-    const { data, error } = await admin
-      .from('client_uploads')
-      .select(KOLOMMEN)
-      .eq('client_id', g.session.clientId)
-      .order('created_at', { ascending: false })
-      .limit(500)
+    const map = String(req.nextUrl.searchParams.get('map') ?? '').trim()
+
+    const haal = async (kolommen: string) => {
+      let vraag = admin
+        .from('client_uploads')
+        .select(kolommen)
+        .eq('client_id', g.session.clientId)
+        .order('created_at', { ascending: false })
+        .limit(500)
+      if (kolommen.includes('map_id')) {
+        if (map === 'los') vraag = vraag.is('map_id', null)
+        else if (map) vraag = vraag.eq('map_id', map)
+      }
+      return vraag
+    }
+
+    let { data, error } = await haal(KOLOMMEN)
+    if (error && /map_id/i.test(error.message)) {
+      ;({ data, error } = await haal(KOLOMMEN_ZONDER_MAP))
+    }
 
     if (error) {
       if (MIST.test(error.message)) return NextResponse.json({ uploads: [], hint: HINT })
@@ -36,7 +65,7 @@ export async function GET() {
 
     // Privébucket: een tijdelijke link per bestand, nooit een vast adres.
     const uploads = await Promise.all((data ?? []).map(async (r) => {
-      const rij = r as Record<string, unknown>
+      const rij = r as unknown as Record<string, unknown>
       const { data: s } = await admin.storage
         .from(BUCKET).createSignedUrl(String(rij.bestandspad), 60 * 60)
       const { bestandspad: _weg, ...rest } = rij
@@ -98,7 +127,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Dit bestand is te groot.' }, { status: 400 })
     }
 
-    const { data: nieuw, error } = await admin.from('client_uploads').insert({
+    // In welke map? Leeg = losse bestanden. Een map van iemand anders weigeren
+    // we, in plaats van hem stilletjes te negeren.
+    const mapId = String(b.map_id ?? '').trim()
+    if (mapId && !(await mapVanKlant(admin, mapId, g.session.clientId))) {
+      await admin.storage.from(BUCKET).remove([pad])
+      return NextResponse.json({ error: 'Die map bestaat niet.' }, { status: 400 })
+    }
+
+    // insertResilient laat de kolom map_id vallen als de migratie nog niet
+    // gedraaid is, zodat uploaden dan gewoon blijft werken.
+    const { data: nieuw, error } = await insertResilient(admin, 'client_uploads', {
       client_id: g.session.clientId,
       titel: titel.slice(0, 200),
       beschrijving: beschrijving.slice(0, 4000) || null,
@@ -110,7 +149,8 @@ export async function POST(req: NextRequest) {
       door_naam: g.session.name,
       auth_user_id: g.session.userId,
       status: 'nieuw',
-    }).select('id').single()
+      map_id: mapId || null,
+    }, { required: ['client_id', 'titel', 'bestandspad'] })
 
     if (error) {
       // Geen weesbestand achterlaten als de rij niet gemaakt kon worden.
@@ -119,10 +159,75 @@ export async function POST(req: NextRequest) {
       throw new Error(error.message)
     }
 
+    const id = String(nieuw?.id ?? '')
     await logPortalAction(g.session, 'portal.upload.toegevoegd',
-      { type: 'client_upload', id: (nieuw as { id: string }).id }, { req, meta: { titel } })
+      { type: 'client_upload', id }, { req, meta: { titel, map_id: mapId || null } })
 
-    return NextResponse.json({ ok: true, id: (nieuw as { id: string }).id })
+    return NextResponse.json({ ok: true, id })
+  } catch (err) {
+    return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
+  }
+}
+
+/**
+ * Een eigen upload bijwerken: titel, beschrijving, of naar een andere map.
+ *
+ * Dit is wat bulk-uploaden bruikbaar maakt. Twintig foto's tegelijk insturen
+ * kan alleen als je niet vooraf twintig formulieren moet invullen — dus gaan
+ * ze eerst naar binnen met hun bestandsnaam als titel, en kan je daarna
+ * bijschaven wat de moeite waard is.
+ */
+export async function PATCH(req: NextRequest) {
+  try {
+    const g = await requirePortalPermission('files', 'upload')
+    if (!g.ok) return g.response
+
+    const b = await req.json().catch(() => ({}))
+    const id = String(b.id ?? '').trim()
+    if (!id) return NextResponse.json({ error: 'Geen upload opgegeven' }, { status: 400 })
+
+    const admin = createAdminSupabaseClient()
+    const wijziging: Record<string, unknown> = {}
+
+    if (b.titel !== undefined) {
+      const titel = String(b.titel).trim().slice(0, 200)
+      if (!titel) return NextResponse.json({ error: 'De titel mag niet leeg zijn.' }, { status: 400 })
+      wijziging.titel = titel
+    }
+    if (b.beschrijving !== undefined) {
+      wijziging.beschrijving = String(b.beschrijving).trim().slice(0, 4000) || null
+    }
+    if (b.map_id !== undefined) {
+      const mapId = String(b.map_id ?? '').trim()
+      if (mapId && !(await mapVanKlant(admin, mapId, g.session.clientId))) {
+        return NextResponse.json({ error: 'Die map bestaat niet.' }, { status: 400 })
+      }
+      wijziging.map_id = mapId || null
+    }
+    if (Object.keys(wijziging).length === 0) {
+      return NextResponse.json({ error: 'Niets om te wijzigen.' }, { status: 400 })
+    }
+
+    // De filter op client_id is de beveiliging: zonder dat kan een id van een
+    // andere klant meegestuurd worden.
+    const { data, error } = await admin
+      .from('client_uploads')
+      .update(wijziging)
+      .eq('id', id).eq('client_id', g.session.clientId)
+      .select('id')
+
+    if (error) {
+      if (/map_id/i.test(error.message)) return NextResponse.json({ error: HINT }, { status: 503 })
+      throw new Error(error.message)
+    }
+    if (!data || data.length === 0) {
+      return NextResponse.json({ error: 'Upload niet gevonden' }, { status: 404 })
+    }
+
+    await logPortalAction(g.session, 'portal.upload.bijgewerkt',
+      { type: 'client_upload', id }, { req, meta: wijziging })
+
+    return NextResponse.json({ ok: true })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
