@@ -2426,3 +2426,60 @@ DO $fr$ BEGIN
   CREATE TRIGGER trg_framer_sites_updated BEFORE UPDATE ON public.framer_sites
     FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 EXCEPTION WHEN duplicate_object THEN NULL; END $fr$;
+
+-- ── MCP-connector: OAuth ────────────────────────────────────────────────────
+-- De connector over HTTP was enkel beveiligd met een sleutel in het adres. Dat
+-- is een gedeeld geheim: wie de URL heeft, heeft toegang. Met OAuth wordt elke
+-- verbinding goedgekeurd door een ingelogde beheerder, en is de URL op zichzelf
+-- waardeloos.
+--
+-- Tokens worden NOOIT als tekst bewaard, alleen als SHA-256. Lekt deze tabel,
+-- dan kan er niemand mee inloggen.
+
+-- Clients registreren zichzelf (RFC 7591). Claude doet dat bij elke nieuwe
+-- verbinding, dus deze tabel groeit; oude rijen mogen weg.
+CREATE TABLE IF NOT EXISTS public.mcp_oauth_clients (
+  client_id     text PRIMARY KEY,
+  client_name   text,
+  redirect_uris text[] NOT NULL DEFAULT '{}',
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+-- Autorisatiecodes: kortlevend en eenmalig.
+CREATE TABLE IF NOT EXISTS public.mcp_oauth_codes (
+  code_hash      text PRIMARY KEY,
+  client_id      text NOT NULL,
+  user_id        uuid NOT NULL,
+  redirect_uri   text NOT NULL,
+  code_challenge text NOT NULL,          -- PKCE, altijd S256
+  scope          text NOT NULL DEFAULT 'mcp',
+  expires_at     timestamptz NOT NULL,
+  used_at        timestamptz,            -- hergebruik is een aanval, geen vergissing
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.mcp_oauth_tokens (
+  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  access_token_hash  text UNIQUE NOT NULL,
+  refresh_token_hash text UNIQUE,
+  client_id          text NOT NULL,
+  user_id            uuid NOT NULL,
+  scope              text NOT NULL DEFAULT 'mcp',
+  expires_at         timestamptz NOT NULL,
+  revoked_at         timestamptz,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  last_used_at       timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS mcp_oauth_tokens_refresh_idx
+  ON public.mcp_oauth_tokens (refresh_token_hash) WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS mcp_oauth_tokens_user_idx
+  ON public.mcp_oauth_tokens (user_id) WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS mcp_oauth_codes_verval_idx
+  ON public.mcp_oauth_codes (expires_at);
+
+-- Alles dicht: deze tabellen worden uitsluitend server-side gelezen en
+-- geschreven. Er is geen enkele reden voor een gebruiker om erbij te kunnen.
+ALTER TABLE public.mcp_oauth_clients ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.mcp_oauth_codes   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.mcp_oauth_tokens  ENABLE ROW LEVEL SECURITY;

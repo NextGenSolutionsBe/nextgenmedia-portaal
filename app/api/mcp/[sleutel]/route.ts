@@ -9,8 +9,12 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 /**
- * MCP-connector over HTTP, zodat het portaal als "custom connector" in Claude
- * gezet kan worden — ook in de browser, waar een lokaal programma niet bereikbaar is.
+ * MCP-connector over HTTP — DE OUDE INGANG, ALLEEN-LEZEN.
+ *
+ * OPGEVOLGD DOOR /api/mcp, dat met OAuth beveiligd is en wél mag schrijven.
+ * Gebruik voor nieuwe koppelingen dat adres. Deze route blijft bestaan zodat
+ * een bestaande connector niet plots stukgaat; hij mag weg zodra niemand hem
+ * meer gebruikt (en dan kan MCP_SECRET ook uit de omgeving).
  *
  * BEVEILIGING. Dit endpoint staat op het open internet en geeft toegang tot de
  * content van alle klanten. Er is bewust GEEN sessie: een connector heeft geen

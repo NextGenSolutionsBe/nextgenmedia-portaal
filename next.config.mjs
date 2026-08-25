@@ -67,6 +67,34 @@ const nextConfig = {
       },
     ]
   },
+  // OAuth-ontdekking voor de MCP-connector. Deze documenten MOETEN op
+  // /.well-known/ staan — dat schrijven RFC 8414 en RFC 9728 voor, en Claude
+  // zoekt er letterlijk daar naar. Een map die met een punt begint werkt niet
+  // betrouwbaar in de router van Next, dus leiden we ze om naar gewone routes.
+  //
+  // De varianten mét pad zijn geen overbodige luxe: een client die
+  // https://…/api/mcp wil gebruiken, vraagt eerst
+  // /.well-known/oauth-protected-resource/api/mcp op en pas daarna het kale pad.
+  async rewrites() {
+    return [
+      {
+        source: '/.well-known/oauth-authorization-server',
+        destination: '/api/mcp/oauth/metadata/authorization-server',
+      },
+      {
+        source: '/.well-known/oauth-authorization-server/:pad*',
+        destination: '/api/mcp/oauth/metadata/authorization-server',
+      },
+      {
+        source: '/.well-known/oauth-protected-resource',
+        destination: '/api/mcp/oauth/metadata/protected-resource',
+      },
+      {
+        source: '/.well-known/oauth-protected-resource/:pad*',
+        destination: '/api/mcp/oauth/metadata/protected-resource',
+      },
+    ]
+  },
 }
 
 export default nextConfig
