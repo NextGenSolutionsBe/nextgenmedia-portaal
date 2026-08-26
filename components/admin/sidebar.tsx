@@ -80,6 +80,7 @@ const SECTIONS: NavSection[] = [
     items: [
       { label: 'Appointment setting', href: '/admin/sales/appointments', icon: CalendarClock, module: 'sales' },
       { label: 'Pipeline',            href: '/admin/sales/pipeline',     icon: KanbanSquare, module: 'sales' },
+      { label: 'Belscripts',          href: '/admin/sales/scripts',      icon: FileText,     module: 'sales' },
       { label: 'Bevestigingen',       href: '/admin/sales/herinneringen', icon: PhoneCall,   module: 'sales' },
       { label: 'Resultaten',          href: '/admin/sales/resultaten',   icon: BarChart3,    module: 'sales' },
       // Apart van Resultaten: dat gaat over geld, dit over conversie.

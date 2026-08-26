@@ -8,8 +8,11 @@ type Field = { key: string; label: string; required?: boolean }
 type Analysis = {
   headers: string[]
   rowCount: number
+  /** Rijen die in Excel verborgen waren (filter) en NIET meegaan. */
+  verborgenRijen?: number
   sample: string[][]
   mapping: Record<string, string>
+  schoonVerslag?: { opgeschoond: number; perVeld: Record<string, number> }
   fields: Field[]
   aiUsed: boolean
   table: { headers: string[]; rows: string[][] }
@@ -118,6 +121,23 @@ export function ImportModal({ pipelineId, onClose, onDone }: {
                   <b>{a.rowCount}</b> rij(en) gevonden. {a.aiUsed ? 'De onbekende kolommen zijn automatisch geduid.' : 'Kolommen automatisch herkend.'}
                 </span>
               </div>
+
+              {(a.verborgenRijen ?? 0) > 0 && (
+                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-start gap-1.5">
+                  <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                  <span>
+                    <b>{a.verborgenRijen} rij(en) zijn in Excel verborgen</b> (een actief filter) en gaan
+                    níét mee. Wil je ze wel importeren, hef dan het filter op in Excel en upload opnieuw.
+                  </span>
+                </p>
+              )}
+
+              {(a.schoonVerslag?.opgeschoond ?? 0) > 0 && (
+                <p className="text-[11px] text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                  {a.schoonVerslag!.opgeschoond} onbruikbare veldwaarde(n) opgeschoond — kale getallen of
+                  ongeldige waarden in telefoon-, e-mail- of websitekolommen worden leeg geïmporteerd, nooit fout.
+                </p>
+              )}
 
               <div className="space-y-1.5">
                 {a.headers.map((h) => {

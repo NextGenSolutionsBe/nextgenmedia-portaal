@@ -7,7 +7,8 @@ import {
   parseCsv, guessMapping, sanitizeMapping, applyMapping, IMPORT_FIELDS,
   type ColumnMapping, type ParsedTable,
 } from '@/lib/sales/import'
-import { parseXlsx } from '@/lib/sales/xlsx'
+import { parseXlsxMetVerborgen } from '@/lib/sales/xlsx'
+import { schoonRijen } from '@/lib/sales/lead-schoon'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -32,9 +33,15 @@ export async function POST(req: NextRequest) {
 
     const name = (file.name ?? '').toLowerCase()
     let table: ParsedTable
+    // Rijen die in Excel verborgen zijn (een actief filter, of handmatig).
+    // Die nemen we NIET stilletjes mee: wat de gebruiker in Excel ziet, is wat
+    // er geïmporteerd wordt. We melden wel hoeveel er buiten beeld bleven.
+    let verborgenRijen = 0
     if (name.endsWith('.xlsx')) {
       // Eigen lezer, zonder externe bibliotheek — zie lib/sales/xlsx.ts.
-      table = parseXlsx(Buffer.from(await file.arrayBuffer()))
+      const s = parseXlsxMetVerborgen(Buffer.from(await file.arrayBuffer()))
+      table = { headers: s.headers, rows: s.rows }
+      verborgenRijen = s.verborgen.length
     } else if (name.endsWith('.xls')) {
       return NextResponse.json({
         error: 'Dit is het oude Excel-formaat (.xls). Open het en kies “Opslaan als” → .xlsx of CSV.',
@@ -70,13 +77,17 @@ export async function POST(req: NextRequest) {
       } catch { /* AI is hulp, geen voorwaarde */ }
     }
 
-    const preview = applyMapping(table, mapping).slice(0, 10)
+    // Het voorbeeld toont de rijen zoals ze er ná de schoonmaak uitzien —
+    // anders keurt de gebruiker data goed die er straks anders in komt.
+    const geschoond = schoonRijen(applyMapping(table, mapping))
     return NextResponse.json({
       headers: table.headers,
       rowCount: table.rows.length,
+      verborgenRijen,
       sample: table.rows.slice(0, 5),
       mapping,
-      preview,
+      preview: geschoond.rijen.slice(0, 10),
+      schoonVerslag: geschoond.verslag,
       fields: IMPORT_FIELDS,
       aiUsed,
       // De ingelezen tabel gaat terug mee, zodat stap 2 niets opnieuw hoeft te
@@ -147,11 +158,13 @@ export async function PUT(req: NextRequest) {
     }
     if (table.rows.length > MAX_ROWS) return NextResponse.json({ error: `Maximaal ${MAX_ROWS} rijen.` }, { status: 400 })
 
-    const rows = applyMapping(table, clean)
+    // Dezelfde schoonmaak als in het voorbeeld: wat de gebruiker zag, is wat
+    // er wordt opgeslagen. Kale getallen in telefoon/e-mail/website sneuvelen.
+    const geschoond = schoonRijen(applyMapping(table, clean))
     let created = 0, duplicate = 0, skipped = 0
     const problems: string[] = []
 
-    for (const [i, r] of rows.entries()) {
+    for (const [i, r] of geschoond.rijen.entries()) {
       const companyName = (r.company.name ?? '').trim()
       if (!companyName) { skipped++; continue }   // rij zonder bedrijf is onbruikbaar
       const res = await createLead({
@@ -163,6 +176,10 @@ export async function PUT(req: NextRequest) {
           employees: r.company.employees ? Number(String(r.company.employees).replace(/\D/g, '')) || undefined : undefined,
           city: r.company.city, region: r.company.region, country: r.company.country,
           phone: r.company.phone, linkedin: r.company.linkedin,
+          email: r.company.email, werkklasse: r.company.werkklasse,
+          activiteit: r.company.activiteit,
+          ondernemingsnummer: r.company.ondernemingsnummer,
+          prioriteit: r.company.prioriteit,
         },
         contact: {
           name: r.contact.name, role: r.contact.role, email: r.contact.email,
@@ -174,7 +191,10 @@ export async function PUT(req: NextRequest) {
       else { skipped++; if (problems.length < 10) problems.push(`Rij ${i + 2}: ${res.error}`) }
     }
 
-    return NextResponse.json({ ok: true, created, duplicate, skipped, problems })
+    return NextResponse.json({
+      ok: true, created, duplicate, skipped, problems,
+      opgeschoond: geschoond.verslag.opgeschoond,
+    })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }

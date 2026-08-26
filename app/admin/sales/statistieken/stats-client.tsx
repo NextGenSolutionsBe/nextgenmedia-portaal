@@ -13,10 +13,15 @@ import { ArrowDown, ArrowUp, Loader2, TrendingUp } from 'lucide-react'
 const euro = new Intl.NumberFormat('nl-BE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
 const getal = new Intl.NumberFormat('nl-BE')
 
+type SectorInteresse = {
+  sector: string; totaal: number; interesse: number; geenInteresse: number; bezig: number
+}
+
 type Antwoord = {
   stats: Statistieken
   setters: { id: string; naam: string }[]
   sectoren: string[]
+  leadInteresse?: { perSector: SectorInteresse[]; redenen: { reden: string; aantal: number }[] }
   isAdmin: boolean
   meId?: string
 }
@@ -270,6 +275,70 @@ export function StatsClient() {
             eersteKop="Sector"
           />
           <Tabel titel="Per bron" uitleg="Waar de leads vandaan komen." groepen={data!.stats.perBron} eersteKop="Bron" />
+
+          {/* ── Interesse op leadniveau: de hele pipeline ── */}
+          {(data!.leadInteresse?.perSector.length ?? 0) > 0 && (
+            <div className="card-base">
+              <h2 className="font-semibold mb-1">Interesse per sector — hele pipeline</h2>
+              <div className="text-xs text-gray-400 mb-3">
+                De huidige stand van alle leads, los van de gekozen periode. Zo zie je na verloop van
+                tijd waar het werkt en waar niet.
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-[11px] uppercase tracking-wide text-gray-400 border-b border-gray-100">
+                      <th className="text-left font-semibold py-2 pr-3">Sector</th>
+                      <th className="text-right font-semibold py-2 px-2">Leads</th>
+                      <th className="text-right font-semibold py-2 px-2">Interesse</th>
+                      <th className="text-right font-semibold py-2 px-2" title="Interesse, afspraak of gewonnen — als aandeel van de besliste leads">% interesse</th>
+                      <th className="text-right font-semibold py-2 px-2">Geen interesse</th>
+                      <th className="text-right font-semibold py-2 px-2" title="Nog te bellen of nog in gesprek">Nog bezig</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data!.leadInteresse!.perSector.map((s) => (
+                      <tr key={s.sector} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/60">
+                        <td className="py-2 pr-3 font-medium">{s.sector}</td>
+                        <td className="text-right py-2 px-2 tabular-nums">{getal.format(s.totaal)}</td>
+                        <td className="text-right py-2 px-2 tabular-nums text-green-700">{getal.format(s.interesse)}</td>
+                        <td className="text-right py-2 px-2 tabular-nums font-semibold">
+                          {toonPercentage(percentage(s.interesse, s.interesse + s.geenInteresse))}
+                        </td>
+                        <td className="text-right py-2 px-2 tabular-nums text-red-600">{getal.format(s.geenInteresse)}</td>
+                        <td className="text-right py-2 px-2 tabular-nums text-gray-400">{getal.format(s.bezig)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[11px] text-gray-400 mt-2">
+                Het percentage rekent op de besliste leads (interesse + geen interesse) — wie nog gebeld
+                moet worden telt niet mee, anders lijkt elke verse lijst een slechte sector.
+              </p>
+            </div>
+          )}
+
+          {(data!.leadInteresse?.redenen.length ?? 0) > 0 && (
+            <div className="card-base">
+              <h2 className="font-semibold mb-1">Waarom geen interesse?</h2>
+              <div className="text-xs text-gray-400 mb-3">Vastgelegd bij het afwijzen, over de hele pipeline</div>
+              <div className="space-y-1.5">
+                {data!.leadInteresse!.redenen.map((r) => {
+                  const grootste = data!.leadInteresse!.redenen[0].aantal
+                  return (
+                    <div key={r.reden} className="flex items-center gap-3 text-sm">
+                      <span className="w-56 shrink-0 truncate" title={r.reden}>{r.reden}</span>
+                      <div className="flex-1 h-4 bg-gray-100 rounded overflow-hidden">
+                        <div className="h-full bg-red-400 rounded" style={{ width: `${(r.aantal / grootste) * 100}%` }} />
+                      </div>
+                      <span className="w-8 text-right tabular-nums text-gray-500">{r.aantal}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {data!.stats.verliesredenen.length > 0 && (
             <div className="card-base">

@@ -2585,3 +2585,48 @@ ALTER TABLE public.contracts ADD CONSTRAINT contracts_status_check CHECK (
     'getekend', 'geannuleerd', 'verlopen', 'vervangen'
   )
 );
+
+-- ── Belmodule: rijkere leaddata, terugbelnotitie en belscripts ──────────────
+-- De vaste leadlijsten (FAFO-formaat) dragen meer mee dan het oude
+-- bedrijvenmodel kon bewaren. Alles additief.
+ALTER TABLE public.sales_companies
+  ADD COLUMN IF NOT EXISTS email             text,   -- algemeen adres (info@)
+  ADD COLUMN IF NOT EXISTS werkklasse        text,   -- "10–19", "20–49" — het ruwe label
+  ADD COLUMN IF NOT EXISTS activiteit        text,   -- omschrijving uit de lijst (NACE-tekst)
+  ADD COLUMN IF NOT EXISTS ondernemingsnummer text,  -- KBO, voor de opzoeklink in Focus Mode
+  ADD COLUMN IF NOT EXISTS prioriteit        text;   -- A/B/C uit de lijst
+
+-- Terugbelafspraken: "bel over een uur terug" krijgt een notitie erbij, zodat
+-- in Focus Mode zichtbaar is WAAROM die lead straks weer bovenaan springt.
+ALTER TABLE public.sales_leads
+  ADD COLUMN IF NOT EXISTS callback_note text;
+
+CREATE INDEX IF NOT EXISTS sales_leads_callback_idx
+  ON public.sales_leads (callback_at) WHERE callback_at IS NOT NULL;
+
+-- Belscripts: het coldcallingscript van een setter, plus de AI-analyse ervan
+-- (secties, bezwaren met reacties, weetjes) als jsonb. De ruwe tekst blijft de
+-- bron; de analyse is een weergave en kan altijd opnieuw gemaakt worden.
+CREATE TABLE IF NOT EXISTS public.sales_scripts (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  sales_client_id  uuid NOT NULL REFERENCES public.sales_clients(id) ON DELETE CASCADE,
+  naam             text NOT NULL,
+  -- NULL = algemeen script voor iedereen; anders het script van één setter.
+  eigenaar_auth_id uuid,
+  -- NULL = geldt voor alle merken.
+  pipeline_id      uuid REFERENCES public.sales_pipelines(id) ON DELETE SET NULL,
+  ruwe_tekst       text NOT NULL,
+  bron_bestand     text,
+  analyse          jsonb,
+  analyse_model    text,
+  geanalyseerd_op  timestamptz,
+  actief           boolean NOT NULL DEFAULT true,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  updated_at       timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS sales_scripts_client_idx
+  ON public.sales_scripts (sales_client_id, actief);
+
+-- Zoals de hele verkoop-module: server-side via service-role; RLS als slot.
+ALTER TABLE public.sales_scripts ENABLE ROW LEVEL SECURITY;

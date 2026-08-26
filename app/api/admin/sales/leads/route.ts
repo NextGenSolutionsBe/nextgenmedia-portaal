@@ -9,12 +9,29 @@ export const dynamic = 'force-dynamic'
 
 type LeadRow = {
   id: string; stage_key: string; labels: string[]; callback_at: string | null
+  callback_note?: string | null
   archived_at: string | null; do_not_call: boolean; assigned_to: string | null
   updated_at: string; lost_reason: string | null; email_brief: string | null
   pipeline_id: string | null
-  sales_companies: { id: string; name: string; website: string | null; sector: string | null; city: string | null; region: string | null; phone: string | null } | null
-  sales_contacts: { id: string; name: string | null; email: string | null; phone: string | null; mobile: string | null; phone_digits: string | null; role: string | null } | null
+  sales_companies: {
+    id: string; name: string; website: string | null; sector: string | null
+    city: string | null; region: string | null; phone: string | null
+    email?: string | null; werkklasse?: string | null; activiteit?: string | null
+    ondernemingsnummer?: string | null; prioriteit?: string | null
+    linkedin?: string | null; employees?: number | null
+  } | null
+  sales_contacts: { id: string; name: string | null; email: string | null; phone: string | null; mobile: string | null; phone_digits: string | null; role: string | null; linkedin?: string | null } | null
 }
+
+// De volledige selectie mét de kolommen uit de migratie, en de smalle variant
+// als terugval zolang die migratie nog niet gedraaid is — anders blijft het
+// hele scherm leeg met een stille kolomfout.
+const SELECT_BREED = `id, stage_key, labels, callback_at, callback_note, archived_at, do_not_call, assigned_to, updated_at, lost_reason, email_brief, pipeline_id,
+  sales_companies ( id, name, website, sector, city, region, phone, email, werkklasse, activiteit, ondernemingsnummer, prioriteit, linkedin, employees ),
+  sales_contacts  ( id, name, email, phone, mobile, phone_digits, role, linkedin )`
+const SELECT_SMAL = `id, stage_key, labels, callback_at, archived_at, do_not_call, assigned_to, updated_at, lost_reason, email_brief, pipeline_id,
+  sales_companies ( id, name, website, sector, city, region, phone ),
+  sales_contacts  ( id, name, email, phone, mobile, phone_digits, role )`
 
 // GET — alle leads uit de algemene pipeline, met zoeken en filters (§4).
 // Zoeken matcht op bedrijf, contactpersoon, e-mail én telefoon (cijfer-
@@ -35,26 +52,30 @@ export async function GET(req: NextRequest) {
     const pipelineId = pipelines.find((p) => p.id === wanted)?.id ?? pipelines[0]?.id ?? ''
 
     const admin = createAdminSupabaseClient()
-    let q = admin
-      .from('sales_leads')
-      .select(`id, stage_key, labels, callback_at, archived_at, do_not_call, assigned_to, updated_at, lost_reason, email_brief, pipeline_id,
-               sales_companies ( id, name, website, sector, city, region, phone ),
-               sales_contacts  ( id, name, email, phone, mobile, phone_digits, role )`)
-      .eq('sales_client_id', salesClientId)
-      .order('updated_at', { ascending: false })
-      .limit(1000)
+    const bouw = (selectie: string) => {
+      let q = admin
+        .from('sales_leads')
+        .select(selectie)
+        .eq('sales_client_id', salesClientId)
+        .order('updated_at', { ascending: false })
+        .limit(4000)
 
-    if (!allPipelines) q = q.eq('pipeline_id', pipelineId)
+      if (!allPipelines) q = q.eq('pipeline_id', pipelineId)
 
-    // Archief staat standaard uit: gearchiveerde leads zijn zacht verwijderd.
-    if (sp.get('archived') === '1') q = q.not('archived_at', 'is', null)
-    else q = q.is('archived_at', null)
+      // Archief staat standaard uit: gearchiveerde leads zijn zacht verwijderd.
+      if (sp.get('archived') === '1') q = q.not('archived_at', 'is', null)
+      else q = q.is('archived_at', null)
 
-    const stage = sp.get('stage')
-    if (stage) q = q.eq('stage_key', stage)
-    if (sp.get('hideDnc') === '1') q = q.eq('do_not_call', false)
+      const stage = sp.get('stage')
+      if (stage) q = q.eq('stage_key', stage)
+      if (sp.get('hideDnc') === '1') q = q.eq('do_not_call', false)
+      return q
+    }
 
-    const { data, error } = await q
+    let { data, error } = await bouw(SELECT_BREED)
+    if (error && /callback_note|werkklasse|activiteit|ondernemingsnummer|prioriteit|column/i.test(error.message)) {
+      ;({ data, error } = await bouw(SELECT_SMAL))
+    }
     if (error) throw new Error(error.message)
     let rows = (data ?? []) as unknown as LeadRow[]
 

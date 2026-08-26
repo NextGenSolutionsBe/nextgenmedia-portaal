@@ -86,6 +86,68 @@ export type Statistieken = {
   perUur: { uur: number; gesprekken: number; afspraken: number }[]
 }
 
+// ── Interesse op leadniveau ─────────────────────────────────────────────────
+// Beantwoordt "hoeveel procent van de bouwbedrijven is geïnteresseerd?" — dat
+// is een andere vraag dan de afsprakentrechter hierboven: dit telt op wat er
+// NU in de pipeline staat, over alle belpogingen heen.
+
+export type LeadInteresseRij = {
+  id: string
+  company_id: string | null
+  stage_key: string
+  lost_reason: string | null
+}
+
+export type SectorInteresse = {
+  sector: string
+  totaal: number
+  /** Interesse getoond: fase interesse, afspraak of gewonnen. */
+  interesse: number
+  /** Expliciet afgehaakt: geen interesse of verloren. */
+  geenInteresse: number
+  /** De rest: nog te bellen of nog in gesprek. */
+  bezig: number
+}
+
+const INTERESSE_FASEN = new Set(['interested', 'appointment', 'won'])
+const AFGEHAAKT_FASEN = new Set(['not_interested', 'lost'])
+
+/**
+ * Interesse per sector plus de redenen waarom mensen afhaken.
+ * `redenGroep` haalt de vaste reden uit een opgeslagen lost_reason, zodat
+ * "Anders — wil eerst een website" gewoon onder "Anders" telt.
+ */
+export function berekenLeadInteresse(
+  leads: LeadInteresseRij[],
+  bedrijven: BedrijfRij[],
+  redenGroep: (v: string | null | undefined) => string | null,
+): { perSector: SectorInteresse[]; redenen: { reden: string; aantal: number }[] } {
+  const sectorVan = new Map(bedrijven.map((b) => [b.id, b.sector?.trim() || ONBEKEND]))
+  const perSector = new Map<string, SectorInteresse>()
+  const redenen = new Map<string, number>()
+
+  for (const l of leads) {
+    const sector = (l.company_id ? sectorVan.get(l.company_id) : null) ?? ONBEKEND
+    let s = perSector.get(sector)
+    if (!s) { s = { sector, totaal: 0, interesse: 0, geenInteresse: 0, bezig: 0 }; perSector.set(sector, s) }
+    s.totaal++
+    if (INTERESSE_FASEN.has(l.stage_key)) s.interesse++
+    else if (AFGEHAAKT_FASEN.has(l.stage_key)) {
+      s.geenInteresse++
+      const reden = redenGroep(l.lost_reason) ?? 'Geen reden ingevuld'
+      redenen.set(reden, (redenen.get(reden) ?? 0) + 1)
+    } else s.bezig++
+  }
+
+  return {
+    // Grootste sectoren bovenaan: daar is de statistiek het meest waard.
+    perSector: [...perSector.values()].sort((a, b) => b.totaal - a.totaal || a.sector.localeCompare(b.sector)),
+    redenen: [...redenen.entries()]
+      .map(([reden, aantal]) => ({ reden, aantal }))
+      .sort((a, b) => b.aantal - a.aantal),
+  }
+}
+
 export const leegTrechter = (): Trechter => ({
   gesprekken: 0, leadsGebeld: 0, afspraken: 0, doorgegaan: 0, noShows: 0,
   geannuleerd: 0, gewonnen: 0, verloren: 0, open: 0, dealWaardeCent: 0,

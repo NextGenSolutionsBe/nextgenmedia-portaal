@@ -71,7 +71,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
 
     if (Array.isArray(b.labels)) patch.labels = b.labels.map(String)
-    if (b.callback_at !== undefined) patch.callback_at = b.callback_at ? new Date(b.callback_at).toISOString() : null
+    if (b.callback_at !== undefined) {
+      patch.callback_at = b.callback_at ? new Date(b.callback_at).toISOString() : null
+      // Zonder terugbelmoment heeft de notitie erbij geen betekenis meer.
+      if (!b.callback_at) patch.callback_note = null
+    }
+    if (b.callback_note !== undefined) {
+      patch.callback_note = String(b.callback_note ?? '').trim().slice(0, 300) || null
+    }
     if (b.lost_reason !== undefined) patch.lost_reason = String(b.lost_reason ?? '') || null
     if (b.email_brief !== undefined) patch.email_brief = String(b.email_brief ?? '') || null
     if (typeof b.do_not_call === 'boolean') {
@@ -83,7 +90,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (b.assigned_to !== undefined) patch.assigned_to = b.assigned_to || null
 
     if (Object.keys(patch).length > 0) {
-      const { error } = await admin.from('sales_leads').update(patch).eq('id', id)
+      let { error } = await admin.from('sales_leads').update(patch).eq('id', id)
+      // callback_note bestaat pas na de migratie; zonder die kolom moet de
+      // rest van de wijziging gewoon doorgaan.
+      if (error && /callback_note/i.test(error.message)) {
+        delete patch.callback_note
+        if (Object.keys(patch).length > 0) {
+          ;({ error } = await admin.from('sales_leads').update(patch).eq('id', id))
+        } else {
+          error = null
+        }
+      }
       if (error) throw new Error(error.message)
     }
 

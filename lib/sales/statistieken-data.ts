@@ -3,8 +3,11 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { getOrCreateSalesOrg } from '@/lib/sales/service'
 import { listSetters } from '@/lib/sales/setters'
 import {
-  bereken, type AfspraakRij, type BedrijfRij, type GesprekRij, type LeadRij, type Statistieken,
+  bereken, berekenLeadInteresse,
+  type AfspraakRij, type BedrijfRij, type GesprekRij, type LeadRij,
+  type LeadInteresseRij, type SectorInteresse, type Statistieken,
 } from '@/lib/sales/statistieken'
+import { redenGroep } from '@/lib/sales/redenen'
 
 /**
  * Het ophaalwerk achter de statistiekenpagina.
@@ -55,6 +58,12 @@ export type Uitkomst = {
   stats: Statistieken
   setters: { id: string; naam: string }[]
   sectoren: string[]
+  /**
+   * Interesse per sector op LEADNIVEAU — de huidige stand van de hele
+   * pipeline, niet periode-gebonden. Beantwoordt "hoeveel procent van de
+   * bouwbedrijven is geïnteresseerd?" en waarom de rest afhaakte.
+   */
+  leadInteresse: { perSector: SectorInteresse[]; redenen: { reden: string; aantal: number }[] }
 }
 
 export async function laadStatistieken(filter: Filter): Promise<Uitkomst> {
@@ -168,5 +177,29 @@ export async function laadStatistieken(filter: Filter): Promise<Uitkomst> {
     setters: alleSetters.map((s) => ({ id: s.id, naam: s.name, auth_user_id: s.auth_user_id })),
   })
 
-  return { stats, setters: setterLijst, sectoren }
+  // ── Interesse op leadniveau: de HELE actieve pipeline, niet de periode ────
+  const { data: alleLeadData } = await admin
+    .from('sales_leads')
+    .select('id, company_id, stage_key, lost_reason')
+    .eq('sales_client_id', org.id)
+    .is('archived_at', null)
+    .limit(10000)
+  const alleLeads = (alleLeadData ?? []) as LeadInteresseRij[]
+
+  // Sectoren van bedrijven die nog niet geladen waren erbij halen, in blokken.
+  const bekendeBedrijven = new Set(bedrijven.map((b) => b.id))
+  const missendeIds = [...new Set(
+    alleLeads.map((l) => l.company_id).filter((x): x is string => !!x && !bekendeBedrijven.has(x)),
+  )]
+  const alleBedrijven = [...bedrijven]
+  for (let i = 0; i < missendeIds.length; i += 500) {
+    const { data } = await admin
+      .from('sales_companies').select('id, sector')
+      .in('id', missendeIds.slice(i, i + 500))
+    alleBedrijven.push(...((data ?? []) as BedrijfRij[]))
+  }
+
+  const leadInteresse = berekenLeadInteresse(alleLeads, alleBedrijven, redenGroep)
+
+  return { stats, setters: setterLijst, sectoren, leadInteresse }
 }

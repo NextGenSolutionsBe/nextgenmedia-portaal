@@ -65,18 +65,23 @@ function guessDelimiter(src: string): string {
 export const IMPORT_FIELDS = [
   { key: 'company.name',     label: 'Bedrijfsnaam', required: true },
   { key: 'company.website',  label: 'Website' },
-  { key: 'company.sector',   label: 'Sector' },
+  { key: 'company.sector',   label: 'Sector/segment' },
+  { key: 'company.activiteit', label: 'Activiteit (omschrijving)' },
   { key: 'company.employees', label: 'Aantal werknemers' },
+  { key: 'company.werkklasse', label: 'Werkklasse (bv. 10–19)' },
   { key: 'company.city',     label: 'Stad' },
   { key: 'company.region',   label: 'Provincie/regio' },
   { key: 'company.country',  label: 'Land' },
   { key: 'company.phone',    label: 'Telefoon bedrijf' },
+  { key: 'company.email',    label: 'Algemeen e-mailadres' },
   { key: 'company.linkedin', label: 'LinkedIn bedrijf' },
+  { key: 'company.ondernemingsnummer', label: 'Ondernemingsnummer' },
+  { key: 'company.prioriteit', label: 'Prioriteit (A/B/C)' },
   { key: 'contact.name',     label: 'Contactpersoon' },
   { key: 'contact.role',     label: 'Functie' },
-  { key: 'contact.email',    label: 'E-mail' },
+  { key: 'contact.email',    label: 'E-mail contactpersoon' },
   { key: 'contact.phone',    label: 'Telefoon contact' },
-  { key: 'contact.mobile',   label: 'GSM' },
+  { key: 'contact.mobile',   label: 'GSM / rechtstreeks nummer' },
   { key: 'contact.linkedin', label: 'LinkedIn contact' },
 ] as const
 
@@ -92,13 +97,29 @@ const FIELD_KEYS = new Set(IMPORT_FIELDS.map((f) => f.key))
  */
 export function guessMapping(headers: string[]): ColumnMapping {
   const rules: [RegExp, ImportFieldKey][] = [
+    // ── Het vaste lijstformaat (FAFO-batches) eerst, exact op kopnaam. ──────
+    // Deze lijsten zijn de standaard-aanvoer; raden op deelwoorden zou hier
+    // fout gaan ("Algemeen e-mail" zou anders bij het contact belanden, en
+    // "Sector / activiteit" zou het nette segment overschrijven).
+    [/^prioriteit$/i, 'company.prioriteit'],
+    [/^segment$/i, 'company.sector'],
+    [/^ondernemingsnummer$/i, 'company.ondernemingsnummer'],
+    [/^werknemers$/i, 'company.werkklasse'],
+    [/^telefoon$/i, 'company.phone'],
+    [/algemeen\s*e-?mail/i, 'company.email'],
+    [/direct\s*e-?mail/i, 'contact.email'],
+    [/mobiel\s*\/?\s*rechtstreeks|rechtstreeks/i, 'contact.mobile'],
+    [/functie\s*\/?\s*dmu/i, 'contact.role'],
+    [/sector\s*\/?\s*activiteit/i, 'company.activiteit'],
+    [/^contactpersoon$/i, 'contact.name'],
+    // ── Daarna de generieke regels voor alle andere lijstformaten. ─────────
     [/^(bedrijf|bedrijfsnaam|company|organisatie|organization|account|naam bedrijf)$/i, 'company.name'],
     [/(website|url|site|domein|domain)/i, 'company.website'],
     [/(sector|branche|industry|industrie)/i, 'company.sector'],
     [/(werknemers|employees|medewerkers|size|grootte)/i, 'company.employees'],
     [/(stad|city|gemeente|plaats|woonplaats)/i, 'company.city'],
     [/(provincie|regio|region|state)/i, 'company.region'],
-    [/(land|country)/i, 'company.country'],
+    [/^(land|country)$/i, 'company.country'],
     [/(linkedin).*(bedrijf|company)|company.*linkedin/i, 'company.linkedin'],
     [/(functie|titel|title|role|job)/i, 'contact.role'],
     [/(e-?mail|mail address|emailadres)/i, 'contact.email'],

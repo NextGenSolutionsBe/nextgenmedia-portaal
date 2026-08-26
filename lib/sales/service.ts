@@ -1,7 +1,8 @@
 import 'server-only'
-import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { createAdminSupabaseClient, insertResilient } from '@/lib/supabase/server'
 import { STAGES } from '@/lib/sales/stages'
 import { companyDedupeKey, normalizePhone } from '@/lib/sales/dedupe'
+import { werkklasseNaarAantal } from '@/lib/sales/lead-schoon'
 import {
   bookableSegments, type Interval, type WorkRule, type WorkException,
 } from '@/lib/sales/availability'
@@ -94,7 +95,12 @@ export type NewLeadInput = {
   salesClientId: string
   /** Voor welk merk bellen we deze lead: NextGenMedia of NextGenSolutions. */
   pipelineId: string
-  company: { name: string; website?: string; sector?: string; employees?: number; city?: string; region?: string; country?: string; phone?: string; linkedin?: string }
+  company: {
+    name: string; website?: string; sector?: string; employees?: number
+    city?: string; region?: string; country?: string; phone?: string; linkedin?: string
+    email?: string; werkklasse?: string; activiteit?: string
+    ondernemingsnummer?: string; prioriteit?: string
+  }
   contact: { name?: string; role?: string; email?: string; phone?: string; mobile?: string; linkedin?: string }
   labels?: string[]
 }
@@ -135,19 +141,32 @@ export async function createLead(input: NewLeadInput): Promise<NewLeadResult> {
       return { ok: false, error: `Er staat al een lead voor ${name} in deze pipeline.`, existingLeadId: openLead.id as string }
     }
   } else {
-    const { data: created, error } = await admin.from('sales_companies').insert({
+    // Aantal werknemers: het ruwe lijstlabel ("10–19") is leidend; de
+    // numerieke kolom krijgt de ondergrens zodat er ook op te sorteren valt.
+    const uitWerkklasse = input.company.werkklasse
+      ? werkklasseNaarAantal(input.company.werkklasse) : null
+
+    // insertResilient: de nieuwe kolommen (email, werkklasse, activiteit,
+    // ondernemingsnummer, prioriteit) mogen vóór de migratie nog ontbreken —
+    // dan valt die kolom weg en werkt de import gewoon.
+    const { data: created, error } = await insertResilient(admin, 'sales_companies', {
       sales_client_id: input.salesClientId,
       name,
       website: input.company.website || null,
       dedupe_key: dedupe,
       sector: input.company.sector || null,
-      employees: input.company.employees ?? null,
+      employees: input.company.employees ?? uitWerkklasse,
       city: input.company.city || null,
       region: input.company.region || null,
       country: input.company.country || null,
       phone: input.company.phone || null,
       linkedin: input.company.linkedin || null,
-    }).select('id').single()
+      email: input.company.email || null,
+      werkklasse: input.company.werkklasse || null,
+      activiteit: input.company.activiteit || null,
+      ondernemingsnummer: input.company.ondernemingsnummer || null,
+      prioriteit: input.company.prioriteit || null,
+    }, { required: ['sales_client_id', 'name', 'dedupe_key'] })
     if (error || !created) return { ok: false, error: error?.message ?? 'Bedrijf aanmaken mislukt' }
     companyId = created.id as string
   }

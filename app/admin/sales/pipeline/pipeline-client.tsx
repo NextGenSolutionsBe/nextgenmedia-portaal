@@ -332,6 +332,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
       {focus && (
         <FocusMode
           leads={leads}
+          pipelineId={pipelineId}
           onClose={() => { setFocus(false); load() }}
           onChanged={() => { /* lijst wordt bij sluiten ververst */ }}
         />
