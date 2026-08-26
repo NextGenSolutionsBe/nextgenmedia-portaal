@@ -28,7 +28,12 @@ export default async function SignContractPage({ params }: { params: { token: st
       isExpired = true
       // Best-effort: markeer verlopen + log (één keer).
       if (contract.status !== 'expired') {
-        try { await admin.from('contracts').update({ status: 'expired' }).eq('id', contract.id) } catch { }
+        // NIET stil wegslikken. Deze update faalde jarenlang op een te enge
+        // CHECK-constraint zonder dat iemand het merkte; de status "Verlopen"
+        // bestond wel in het scherm maar werd nooit bereikt. De ontvanger mag
+        // er niets van merken, maar wij willen het in de logs zien.
+        const { error } = await admin.from('contracts').update({ status: 'expired' }).eq('id', contract.id)
+        if (error) console.error('[sign page] status → expired mislukt:', error.message)
         try { await logContractEvent(admin, contract.id, 'expired', { meta: { via: 'sign-page' } }) } catch { }
       }
     }
@@ -58,7 +63,8 @@ export default async function SignContractPage({ params }: { params: { token: st
   if (!alreadySignedStatus) {
     try { await logContractEvent(admin, contract.id, 'opened', { meta: { via: 'sign-page' } }) } catch { }
     if (contract.status === 'sent') {
-      try { await admin.from('contracts').update({ status: 'viewed' }).eq('id', contract.id) } catch { }
+      const { error } = await admin.from('contracts').update({ status: 'viewed' }).eq('id', contract.id)
+      if (error) console.error('[sign page] status → viewed mislukt:', error.message)
     }
   }
 

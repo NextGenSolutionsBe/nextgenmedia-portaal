@@ -50,7 +50,10 @@ export async function POST(req: NextRequest) {
     }
     // Vervaldatum: verlopen tekenlink mag niet meer ondertekend worden.
     if (contract.expires_at && String(contract.expires_at).slice(0, 10) < new Date().toISOString().slice(0, 10)) {
-      try { await admin.from('contracts').update({ status: 'expired' }).eq('id', contract_id) } catch { }
+      // Bewust niet stil: deze update faalde eerder op een te enge
+      // CHECK-constraint. Het antwoord aan de ondertekenaar blijft hetzelfde.
+      const { error: expErr } = await admin.from('contracts').update({ status: 'expired' }).eq('id', contract_id)
+      if (expErr) console.error('[sign] status → expired mislukt:', expErr.message)
       return NextResponse.json({ error: 'Deze tekenlink is verlopen.' }, { status: 410 })
     }
 

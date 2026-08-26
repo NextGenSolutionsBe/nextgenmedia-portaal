@@ -121,6 +121,30 @@ export async function statsFor(period: Period, setterId?: string): Promise<Sette
   const fromIso = period.from.toISOString()
   const toIso = period.to.toISOString()
 
+  /**
+   * Afspraken hangen aan een setter via twee velden, en je moet ze allebei
+   * gebruiken.
+   *
+   * `setter_profile_id` wordt sinds kort al bij het boeken gezet, maar oudere
+   * afspraken hebben enkel `setter_id` (de auth-gebruiker) — dat veld werd
+   * vroeger pas ingevuld bij het registreren van de afloop. Kijk je alleen naar
+   * het profiel, dan verdwijnt elke afspraak die nog opgevolgd moet worden uit
+   * de cijfers. Vandaar deze filter op beide velden, plus de brug hieronder.
+   */
+  const authIds = wanted.map((s) => s.auth_user_id).filter((x): x is string => !!x)
+  const profielVanAuth = new Map(
+    wanted.filter((s) => s.auth_user_id).map((s) => [s.auth_user_id as string, s.id]),
+  )
+  const opSetter = authIds.length > 0
+    ? `setter_profile_id.in.(${ids.join(',')}),setter_id.in.(${authIds.join(',')})`
+    : null
+
+  /** Bij welke setter hoort deze afspraak? Profiel wint; anders wie boekte. */
+  const hoortBij = (a: { setter_profile_id: string | null; setter_id: string | null }): string | null =>
+    a.setter_profile_id ?? (a.setter_id ? profielVanAuth.get(a.setter_id) ?? null : null)
+
+  const KOLOMMEN = 'setter_profile_id, setter_id, status, outcome, deal_value_cents, commission_cents'
+
   const [{ data: times }, { data: appts }] = await Promise.all([
     // Ook blokken die vóór de periode begonnen maar er nog in doorlopen.
     admin.from('sales_time_entries')
@@ -128,20 +152,24 @@ export async function statsFor(period: Period, setterId?: string): Promise<Sette
       .in('setter_id', ids)
       .lt('started_at', toIso)
       .or(`ended_at.is.null,ended_at.gte.${fromIso}`),
-    admin.from('sales_appointments')
-      .select('setter_profile_id, status, outcome, deal_value_cents, commission_cents, starts_at')
-      .in('setter_profile_id', ids)
-      .gte('starts_at', fromIso)
-      .lt('starts_at', toIso),
+    (() => {
+      const q = admin.from('sales_appointments')
+        .select(`${KOLOMMEN}, starts_at`)
+        .gte('starts_at', fromIso)
+        .lt('starts_at', toIso)
+      return opSetter ? q.or(opSetter) : q.in('setter_profile_id', ids)
+    })(),
   ])
 
   // Afgesloten contracten van DEZE maand, ongeacht wanneer de afspraak stond.
-  const { data: closed } = await admin.from('sales_appointments')
-    .select('setter_profile_id, status, outcome, deal_value_cents, commission_cents, outcome_at')
-    .in('setter_profile_id', ids)
-    .not('outcome', 'is', null)
-    .gte('outcome_at', fromIso)
-    .lt('outcome_at', toIso)
+  const { data: closed } = await (() => {
+    const q = admin.from('sales_appointments')
+      .select(`${KOLOMMEN}, outcome_at`)
+      .not('outcome', 'is', null)
+      .gte('outcome_at', fromIso)
+      .lt('outcome_at', toIso)
+    return opSetter ? q.or(opSetter) : q.in('setter_profile_id', ids)
+  })()
 
   const timeBySetter = new Map<string, Interval[]>()
   for (const t of (times ?? []) as { setter_id: string; started_at: string; ended_at: string | null }[]) {
@@ -161,15 +189,17 @@ export async function statsFor(period: Period, setterId?: string): Promise<Sette
     const running = entries.find((e) => e.ended_at === null)
     const closedSeconds = totalSeconds(entries.filter((e) => e.ended_at !== null), now)
 
-    const mine = ((appts ?? []) as {
-      setter_profile_id: string; status: string; outcome: string | null
+    type ApptRij = {
+      setter_profile_id: string | null; setter_id: string | null
+      status: string; outcome: string | null
       deal_value_cents: number | null; commission_cents: number | null
-    }[]).filter((a) => a.setter_profile_id === setter.id && a.status !== 'cancelled')
+    }
 
-    const closedMine = ((closed ?? []) as {
-      setter_profile_id: string; status: string; outcome: string | null
-      deal_value_cents: number | null; commission_cents: number | null
-    }[]).filter((a) => a.setter_profile_id === setter.id && a.status !== 'cancelled')
+    const mine = ((appts ?? []) as unknown as ApptRij[])
+      .filter((a) => hoortBij(a) === setter.id && a.status !== 'cancelled')
+
+    const closedMine = ((closed ?? []) as unknown as ApptRij[])
+      .filter((a) => hoortBij(a) === setter.id && a.status !== 'cancelled')
 
     const won = closedMine.filter((a) => a.outcome === 'won')
     const lost = closedMine.filter((a) => a.outcome === 'lost')

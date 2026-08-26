@@ -2557,3 +2557,31 @@ ALTER TABLE public.client_uploads
 
 CREATE INDEX IF NOT EXISTS client_uploads_map_idx
   ON public.client_uploads (map_id) WHERE map_id IS NOT NULL;
+
+-- ── Contractstatus: constraint gelijktrekken met wat de app schrijft ─────────
+-- De oude constraint liet enkel draft|sent|signed|cancelled toe, terwijl de
+-- code óók 'viewed' (ontvanger opent de tekenlink) en 'expired' (link vervallen)
+-- wegschrijft. Die updates stonden in een lege catch en faalden dus STIL: in de
+-- praktijk stond er geen enkel contract op 'viewed', ook niet nadat de link
+-- geopend was. De statussen "Geopend" en "Verlopen" bestonden wel in het scherm
+-- maar werden nooit bereikt.
+--
+-- De nieuwe lijst is exact de verzameling die lib/contract-status.ts kan lezen
+-- (de ALIAS-tabel daar). Regel: wat de app kan tonen, moet de app ook kunnen
+-- opslaan. Zowel de Engelse/oude waarden als de Nederlandse canonieke waarden
+-- staan erin, zodat er later zonder migratie naar de Nederlandse kan worden
+-- overgeschakeld.
+--
+-- Puur verruimend: de oude vier zitten er nog steeds in, dus geen enkele
+-- bestaande rij wordt ongeldig en er wordt geen data gewijzigd.
+ALTER TABLE public.contracts DROP CONSTRAINT IF EXISTS contracts_status_check;
+ALTER TABLE public.contracts ADD CONSTRAINT contracts_status_check CHECK (
+  status IN (
+    -- oude/Engelse waarden zoals ze vandaag in de database staan
+    'draft', 'sent', 'viewed', 'opened', 'filled', 'signed',
+    'cancelled', 'canceled', 'expired', 'replaced', 'template',
+    -- canonieke Nederlandse waarden (lib/contract-status.ts)
+    'klaar_voor_verzenden', 'verzonden', 'geopend', 'ingevuld',
+    'getekend', 'geannuleerd', 'verlopen', 'vervangen'
+  )
+);

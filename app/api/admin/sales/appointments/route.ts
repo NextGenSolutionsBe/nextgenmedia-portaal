@@ -1,6 +1,7 @@
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
+import { createAdminSupabaseClient, requireAdmin, requireStaff } from '@/lib/supabase/server'
+import { getOrCreateSetter } from '@/lib/sales/setters'
 import { loadCalendar, logLeadEvent, getOrCreateSalesOrg, moveLeadToPipeline } from '@/lib/sales/service'
 import { isBookable } from '@/lib/sales/availability'
 import { APPOINTMENT_STAGE } from '@/lib/sales/stages'
@@ -58,6 +59,34 @@ async function assertBookable(
   }
 }
 
+/**
+ * Het setterprofiel van wie boekt, of null.
+ *
+ * Bestaat er al een profiel, dan gebruiken we dat. Bestaat het niet, dan maken
+ * we er enkel één aan voor een niet-admin — zie de toelichting bij de aanroep.
+ * Faalt dit om welke reden ook, dan geven we null terug: een boeking mag hier
+ * nooit op stuklopen, en setter_id blijft altijd als terugval staan.
+ */
+async function bepaalSetterProfiel(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  actor: { id: string; email?: string | null },
+): Promise<string | null> {
+  try {
+    const { data } = await admin.from('sales_setters')
+      .select('id').eq('auth_user_id', actor.id).maybeSingle()
+    const bestaand = (data as { id: string } | null)?.id
+    if (bestaand) return bestaand
+
+    if (await requireAdmin()) return null
+
+    const naam = actor.email?.split('@')[0] ?? 'Appointment setter'
+    const nieuw = await getOrCreateSetter(actor.id, naam, actor.email ?? null)
+    return nieuw?.id ?? null
+  } catch {
+    return null
+  }
+}
+
 // POST — boeken (§5). Transactioneel van opzet: mislukt Google, dan rollen we
 // de afspraak terug zodat er nooit een afspraak zonder agenda-item bestaat.
 export async function POST(req: NextRequest) {
@@ -86,6 +115,20 @@ export async function POST(req: NextRequest) {
 
     const admin = createAdminSupabaseClient()
     const leadId = b.leadId ? String(b.leadId) : null
+
+    // Aan wie hangt deze afspraak?
+    //
+    // We zetten het setterprofiel HIER al, niet pas bij het registreren van de
+    // afloop. Deed je dat later, dan heeft elke nog openstaande afspraak geen
+    // profiel — precies degene die opgevolgd moeten worden vallen dan uit alle
+    // cijfers per setter. Dat was de situatie: álle bestaande afspraken hadden
+    // wel setter_id en geen setter_profile_id.
+    //
+    // Een profiel AANMAKEN doen we enkel voor wie geen admin is, net als in
+    // /api/admin/sales/stats. Anders krijgt elke admin die eens voor iemand
+    // inboekt een setterprofiel met uurtarief en commissie, en duikt hij op in
+    // de setterlijsten.
+    const setterProfileId = await bepaalSetterProfiel(admin, actor)
 
     // Contact + e-mail bepalen. Een handmatig ingevuld adres overschrijft het
     // adres van de lead in de CRM (§5).
@@ -129,6 +172,7 @@ export async function POST(req: NextRequest) {
       lead_id: leadId,
       contact_id: contactId,
       setter_id: actor.id,
+      setter_profile_id: setterProfileId,
       calendar_id: ownerId,
       starts_at: new Date(start).toISOString(),
       ends_at: new Date(end).toISOString(),
