@@ -8,6 +8,7 @@ import {
   MailCheck,
 } from 'lucide-react'
 import { MANUAL_STAGES, stageLabel, STAGES } from '@/lib/sales/stages'
+import { GEEN_INTERESSE_REDENEN } from '@/lib/sales/redenen'
 import { FocusMode } from './focus-mode'
 import { ImportModal } from './import-modal'
 import { ReminderSettings } from './reminder-settings'
@@ -64,6 +65,9 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
   // Selectie voor bulk-acties (§4).
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
+  // Meer leads dan de 4000 die de server teruggeeft? Dan MOET dat zichtbaar zijn.
+  const [afgekapt, setAfgekapt] = useState(false)
+  const [totaal, setTotaal] = useState(0)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -81,6 +85,8 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
       const res = await fetch(`/api/admin/sales/leads?${p}`)
       const j = await res.json(); if (!res.ok) throw new Error(j.error)
       setLeads(j.leads ?? [])
+      setAfgekapt(!!j.afgekapt)
+      setTotaal(Number(j.totaal ?? (j.leads ?? []).length))
       // Keuzelijsten vullen we uit de ONGEFILTERDE lijst, anders verdwijnen de
       // andere opties zodra je één filter kiest en kom je er niet meer uit.
       if (!sector && !region && !city && !label) setPool(j.leads ?? [])
@@ -143,6 +149,12 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
 
   return (
     <div className="space-y-4">
+      {afgekapt && (
+        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          Er zijn {totaal} leads, maar het scherm toont er maximaal 4000 — de minst recent
+          aangeraakte vallen buiten beeld. Filter op merk of status om alles te zien.
+        </p>
+      )}
       {/* Kop: merk, zoeken, knoppen */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
@@ -240,7 +252,11 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
           <select className="input-base w-auto text-sm" defaultValue="" disabled={bulkBusy}
             onChange={(e) => { if (e.target.value) { bulk({ stage: e.target.value }, 'Status gewijzigd'); e.target.value = '' } }}>
             <option value="">Status wijzigen…</option>
-            {MANUAL_STAGES.map((s) => <option key={s} value={s}>{stageLabel(s)}</option>)}
+            {/* "Geen interesse" staat hier bewust NIET bij: die eist per lead
+                een reden, en dertig leads tegelijk dezelfde reden geven maakt
+                de sectorstatistiek waardeloos. Dat gaat per lead, in het
+                detailpaneel of in Focus Mode. */}
+            {MANUAL_STAGES.filter((s) => s !== 'not_interested').map((s) => <option key={s} value={s}>{stageLabel(s)}</option>)}
           </select>
           <button disabled={bulkBusy} className="btn-secondary text-sm"
             onClick={() => { const l = prompt('Label toevoegen aan de selectie:'); if (l?.trim()) bulk({ labels: [l.trim()] }, 'Label toegevoegd') }}>
@@ -333,6 +349,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
         <FocusMode
           leads={leads}
           pipelineId={pipelineId}
+          stageFilter={stage || undefined}
           onClose={() => { setFocus(false); load() }}
           onChanged={() => { /* lijst wordt bij sluiten ververst */ }}
         />
@@ -411,7 +428,18 @@ function LeadDetail({ lead, pipelines, onChanged, onClose }: {
       <div>
         <label className="block text-xs font-medium text-gray-600 mb-1">Status</label>
         <select className="input-base" value={lead.stage_key} disabled={busy}
-          onChange={(e) => patch({ stage: e.target.value }, 'Status bijgewerkt.')}>
+          onChange={(e) => {
+            const naar = e.target.value
+            // "Geen interesse" eist een reden — de server weigert het anders.
+            // De vaste lijst houdt de statistiek telbaar; eigen tekst mag ook.
+            if (naar === 'not_interested' && !lead.lost_reason) {
+              const reden = prompt(`Waarom geen interesse?\n\nBv.: ${GEEN_INTERESSE_REDENEN.slice(0, -1).join(' · ')}`)
+              if (!reden?.trim()) return
+              patch({ stage: naar, lost_reason: reden.trim() }, 'Status bijgewerkt.')
+              return
+            }
+            patch({ stage: naar }, 'Status bijgewerkt.')
+          }}>
           {/* "Afspraak ingepland" staat bewust NIET in de lijst: die ontstaat
               alleen door een echte boeking (§3). Wel tonen als huidige waarde. */}
           {lead.stage_key === 'appointment' && <option value="appointment">{stageLabel('appointment')}</option>}
@@ -439,9 +467,11 @@ function LeadDetail({ lead, pipelines, onChanged, onClose }: {
         </div>
       )}
 
-      {lead.stage_key === 'lost' && (
+      {(lead.stage_key === 'lost' || lead.stage_key === 'not_interested') && (
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Verliesreden</label>
+          <label className="block text-xs font-medium text-gray-600 mb-1">
+            {lead.stage_key === 'lost' ? 'Verliesreden' : 'Reden geen interesse'}
+          </label>
           <input className="input-base" defaultValue={lead.lost_reason ?? ''}
             onBlur={(e) => e.target.value !== (lead.lost_reason ?? '') && patch({ lost_reason: e.target.value })} />
         </div>

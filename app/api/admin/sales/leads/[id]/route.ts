@@ -37,7 +37,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const admin = createAdminSupabaseClient()
 
     const { data: current } = await admin.from('sales_leads')
-      .select('id, stage_key, contact_id, pipeline_id, company_id, sales_client_id')
+      .select('id, stage_key, contact_id, pipeline_id, company_id, sales_client_id, lost_reason')
       .eq('id', id).maybeSingle()
     if (!current) return NextResponse.json({ error: 'Lead niet gevonden' }, { status: 404 })
 
@@ -66,6 +66,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (typeof b.stage === 'string' && b.stage !== current.stage_key) {
       if (b.stage === APPOINTMENT_STAGE || !canTransition(current.stage_key, b.stage)) {
         return NextResponse.json({ error: transitionError(current.stage_key, b.stage) ?? 'Niet toegestaan' }, { status: 400 })
+      }
+      // "Geen interesse" EIST een reden — hier, niet alleen in het scherm.
+      // De sectorstatistiek draait erop, en een controle die alleen in de
+      // browser leeft is geen controle. De reden mag in dezelfde aanvraag
+      // meekomen of al op de lead staan.
+      if (b.stage === 'not_interested') {
+        const reden = String(b.lost_reason ?? '').trim()
+          || String((current as { lost_reason?: string | null }).lost_reason ?? '').trim()
+        if (!reden) {
+          return NextResponse.json({
+            error: 'Geef een reden op waarom er geen interesse is — daar draait de statistiek op.',
+          }, { status: 400 })
+        }
       }
       patch.stage_key = b.stage
     }

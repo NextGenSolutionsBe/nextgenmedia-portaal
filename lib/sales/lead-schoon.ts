@@ -24,10 +24,22 @@ export function schoonTelefoon(v: string): string {
   return cijfers.length >= 8 ? s : ''
 }
 
-/** E-mail: iets@iets.iets — meer eisen we niet, minder ook niet. */
+/**
+ * E-mail: iets@iets.iets — meer eisen we niet, minder ook niet.
+ *
+ * Lijsten dragen geregeld TWEE adressen in één cel ("info@x.be; jan@x.be").
+ * De hele cel afkeuren zou allebei de geldige adressen weggooien; we nemen
+ * het eerste dat klopt. Kale getallen ("33") halen nog steeds niets.
+ */
 export function schoonEmail(v: string): string {
   const s = v.trim()
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s) ? s : ''
+  if (!s) return ''
+  const geldig = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (geldig.test(s)) return s
+  for (const deel of s.split(/[\s;,/|]+/)) {
+    if (geldig.test(deel)) return deel
+  }
+  return ''
 }
 
 /** Website: moet op een domein lijken. Kale getallen en e-mailadressen niet. */
@@ -65,6 +77,10 @@ export type RuweRij = {
 
 /** Welke schoonmaak hoort bij welk veld. Wat hier niet staat, blijft zoals het is. */
 const REGELS: Record<string, (v: string) => string> = {
+  // Ook de bedrijfsnaam: een kaal getal als naam zou een echte lead worden,
+  // en die belt iemand dan op. Sneuvelt de naam, dan wordt de rij overgeslagen
+  // en gerapporteerd — precies wat er met zo'n rij hoort te gebeuren.
+  'company.name': schoonTekst,
   'company.phone': schoonTelefoon,
   'company.email': schoonEmail,
   'company.website': schoonWebsite,

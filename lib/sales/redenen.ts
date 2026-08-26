@@ -12,7 +12,10 @@ export const GEEN_INTERESSE_REDENEN = [
   'Geen budget',
   'Geen behoefte',
   'Slechte ervaring met bureaus',
-  'Geen tijd — later opnieuw proberen',
+  // Bewust ZONDER de belofte "later opnieuw proberen": deze fase is een
+  // eindpunt. Wil de prospect echt later gebeld worden, dan is dat geen
+  // afwijzing maar een terugbelafspraak — daar is de terugbelknop voor.
+  'Niet nu — geen tijd',
   'Anders',
 ] as const
 

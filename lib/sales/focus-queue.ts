@@ -23,6 +23,10 @@ export type QueueLead = {
  *  daarbij: die mensen bel je via de bevestigingslijst, niet via prospectie. */
 const KLAAR = new Set(['appointment', 'won', 'lost', 'not_interested'])
 
+/** Is dit zo'n afgeronde fase? De aanroeper gebruikt dit om te zien of een
+ *  bewust gekozen filter de overslaan-regel moet uitschakelen. */
+export const isKlaarFase = (stage: string): boolean => KLAAR.has(stage)
+
 export type Wachtrij<L extends QueueLead> = {
   /** Nu te bellen, in volgorde. Vervallen terugbelafspraken staan vooraan. */
   nu: L[]
@@ -35,15 +39,23 @@ export type Wachtrij<L extends QueueLead> = {
 /**
  * De aangeleverde lijst opdelen en ordenen. `volgorde` van de invoer blijft
  * behouden voor gewone leads; alleen terugbelafspraken worden verplaatst.
+ *
+ * `klaarOverslaan: false` schakelt de fase-filter uit. Nodig wanneer iemand het
+ * bord BEWUST op "geen interesse" filtert om die lijst opnieuw te bellen —
+ * anders levert precies die keuze een lege belronde op. "Niet bellen" wordt
+ * nooit overruled.
  */
-export function bouwWachtrij<L extends QueueLead>(leads: L[], nu: number): Wachtrij<L> {
+export function bouwWachtrij<L extends QueueLead>(
+  leads: L[], nu: number, opts?: { klaarOverslaan?: boolean },
+): Wachtrij<L> {
+  const klaarOverslaan = opts?.klaarOverslaan !== false
   const vervallen: { lead: L; om: number }[] = []
   const gepland: { lead: L; om: number }[] = []
   const gewoon: L[] = []
   let overgeslagen = 0
 
   for (const l of leads) {
-    if (l.do_not_call || KLAAR.has(l.stage_key)) { overgeslagen++; continue }
+    if (l.do_not_call || (klaarOverslaan && KLAAR.has(l.stage_key))) { overgeslagen++; continue }
     const om = l.callback_at ? new Date(l.callback_at).getTime() : NaN
     if (Number.isFinite(om)) {
       if (om <= nu) vervallen.push({ lead: l, om })

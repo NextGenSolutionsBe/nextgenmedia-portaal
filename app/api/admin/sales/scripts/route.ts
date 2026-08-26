@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
+import { createAdminSupabaseClient, requireAdmin, requireStaff } from '@/lib/supabase/server'
 import { getOrCreateSalesOrg } from '@/lib/sales/service'
 import { listPipelines } from '@/lib/sales/pipelines'
 import { analyseerScript, lijstScripts, SCRIPTS_HINT } from '@/lib/sales/scripts'
@@ -80,7 +80,16 @@ export async function POST(req: NextRequest) {
       || 'Belscript'
 
     // Van wie is dit script? 'mij' = de indiener zelf; 'algemeen' = iedereen.
-    const eigenaar = String(fd.get('eigenaar') ?? 'mij') === 'algemeen' ? null : actor.id
+    // Een ALGEMEEN script raakt iedereen die belt, dus dat zet alleen een
+    // admin neer — anders overschrijft de ene setter stilzwijgend wat de
+    // andere in Focus Mode voorgeschoteld krijgt.
+    const wilAlgemeen = String(fd.get('eigenaar') ?? 'mij') === 'algemeen'
+    if (wilAlgemeen && !(await requireAdmin())) {
+      return NextResponse.json({
+        error: 'Een script voor iedereen kan alleen een beheerder plaatsen. Bewaar het als je eigen script.',
+      }, { status: 403 })
+    }
+    const eigenaar = wilAlgemeen ? null : actor.id
 
     // Merk is optioneel; een onbekend id wordt genegeerd, niet overgenomen.
     const pipelines = await listPipelines()
@@ -120,6 +129,20 @@ export async function POST(req: NextRequest) {
   }
 }
 
+/**
+ * Mag deze persoon dit script beheren?
+ *
+ * De eigenaar mag zijn eigen script bewerken en weggooien; een admin mag
+ * alles. Een ALGEMEEN script (eigenaar null) is van iedereen en dus van
+ * niemand — dat beheert alleen een admin. Zonder deze controle kon elke
+ * werknemer het belscript van een collega overschrijven of verwijderen, en
+ * dat merk je pas midden in een belronde.
+ */
+async function magBeheren(script: { eigenaar_auth_id: string | null }, actorId: string): Promise<boolean> {
+  if (script.eigenaar_auth_id === actorId) return true
+  return !!(await requireAdmin())
+}
+
 /** Bijwerken: naam, tekst (→ nieuwe analyse), actief, merk, eigenaar. */
 export async function PATCH(req: NextRequest) {
   try {
@@ -132,9 +155,14 @@ export async function PATCH(req: NextRequest) {
     const admin = createAdminSupabaseClient()
     const org = await getOrCreateSalesOrg()
     const { data: bestaand } = await admin
-      .from('sales_scripts').select('id, ruwe_tekst')
+      .from('sales_scripts').select('id, naam, ruwe_tekst, eigenaar_auth_id')
       .eq('id', id).eq('sales_client_id', org.id).maybeSingle()
     if (!bestaand) return NextResponse.json({ error: 'Script niet gevonden' }, { status: 404 })
+    if (!(await magBeheren(bestaand as { eigenaar_auth_id: string | null }, actor.id))) {
+      return NextResponse.json({
+        error: 'Dit script is van een collega. Alleen de eigenaar of een beheerder kan het aanpassen.',
+      }, { status: 403 })
+    }
 
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
     if (b.naam !== undefined) {
@@ -143,7 +171,17 @@ export async function PATCH(req: NextRequest) {
       patch.naam = naam
     }
     if (b.actief !== undefined) patch.actief = !!b.actief
-    if (b.eigenaar !== undefined) patch.eigenaar_auth_id = b.eigenaar === 'algemeen' ? null : actor.id
+    if (b.eigenaar !== undefined) {
+      // 'algemeen' maken raakt iedereen die belt → alleen een admin.
+      if (b.eigenaar === 'algemeen') {
+        if (!(await requireAdmin())) {
+          return NextResponse.json({ error: 'Alleen een beheerder kan een script voor iedereen zetten.' }, { status: 403 })
+        }
+        patch.eigenaar_auth_id = null
+      } else {
+        patch.eigenaar_auth_id = actor.id
+      }
+    }
     if (b.pipelineId !== undefined) {
       const pipelines = await listPipelines()
       patch.pipeline_id = pipelines.find((p) => p.id === String(b.pipelineId ?? ''))?.id ?? null
@@ -165,6 +203,14 @@ export async function PATCH(req: NextRequest) {
 
     const { error } = await admin.from('sales_scripts').update(patch).eq('id', id)
     if (error) throw new Error(error.message)
+
+    const meta = requestMeta(req)
+    await logAudit({
+      action: 'sales.script.update', entityType: 'sales_script', entityId: id,
+      summary: `Belscript "${(bestaand as { naam: string }).naam}" bijgewerkt`,
+      actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'admin',
+      ip: meta.ip, userAgent: meta.userAgent,
+    })
     return NextResponse.json({ ok: true })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
@@ -180,6 +226,16 @@ export async function DELETE(req: NextRequest) {
 
     const admin = createAdminSupabaseClient()
     const org = await getOrCreateSalesOrg()
+    const { data: bestaand } = await admin
+      .from('sales_scripts').select('id, naam, eigenaar_auth_id')
+      .eq('id', id).eq('sales_client_id', org.id).maybeSingle()
+    if (!bestaand) return NextResponse.json({ error: 'Script niet gevonden' }, { status: 404 })
+    if (!(await magBeheren(bestaand as { eigenaar_auth_id: string | null }, actor.id))) {
+      return NextResponse.json({
+        error: 'Dit script is van een collega. Alleen de eigenaar of een beheerder kan het verwijderen.',
+      }, { status: 403 })
+    }
+
     const { data, error } = await admin
       .from('sales_scripts').delete()
       .eq('id', id).eq('sales_client_id', org.id)

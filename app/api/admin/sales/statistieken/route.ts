@@ -30,9 +30,13 @@ export async function GET(req: NextRequest) {
       if (!ik) return NextResponse.json({ error: 'Geen setterprofiel gevonden' }, { status: 403 })
       const uit = await laadStatistieken({ periode, sector, setterId: ik.id })
       // Ook de setterlijst beperken: anders lees je uit de keuzelijst af wie er
-      // nog meer werkt, terwijl je hun cijfers niet mag zien.
+      // nog meer werkt, terwijl je hun cijfers niet mag zien. En de org-brede
+      // leadinteresse gaat er hier ook uit: "een setter ziet alleen zichzelf"
+      // geldt voor álles op deze pagina, niet alleen voor de trechter.
+      const { leadInteresse: _weg, ...eigen } = uit
+      void _weg
       return NextResponse.json({
-        ...uit,
+        ...eigen,
         setters: uit.setters.filter((s) => s.id === ik.id),
         isAdmin: false,
         meId: ik.id,

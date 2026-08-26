@@ -10,7 +10,7 @@ import {
 import { cn } from '@/lib/utils'
 import { FOCUS_ACTIONS, stageLabel } from '@/lib/sales/stages'
 import {
-  bouwWachtrij, aftelLabel, terugbelMoment, TERUGBEL_KEUZES,
+  bouwWachtrij, aftelLabel, terugbelMoment, isKlaarFase, TERUGBEL_KEUZES,
 } from '@/lib/sales/focus-queue'
 import { GEEN_INTERESSE_REDENEN, bouwReden } from '@/lib/sales/redenen'
 import { kiesScript, sectieKleur, type ScriptAnalyse } from '@/lib/sales/script-analyse'
@@ -53,8 +53,15 @@ type ScriptRij = {
   pipeline_id: string | null; actief: boolean; analyse: ScriptAnalyse | null
 }
 
-export function FocusMode({ leads, pipelineId, onClose, onChanged }: {
-  leads: Lead[]; pipelineId?: string | null; onClose: () => void; onChanged: () => void
+export function FocusMode({ leads, pipelineId, stageFilter, onClose, onChanged }: {
+  leads: Lead[]
+  pipelineId?: string | null
+  /** Het actieve fasefilter van het bord. Filtert iemand bewust op een
+   *  afgeronde fase ("geen interesse" nog eens nabellen), dan slaan we die
+   *  fase hier niet over — anders levert die keuze een lege belronde op. */
+  stageFilter?: string
+  onClose: () => void
+  onChanged: () => void
 }) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
@@ -96,8 +103,12 @@ export function FocusMode({ leads, pipelineId, onClose, onChanged }: {
     [leads, gedaan, lokaal],
   )
   const wachtrij = useMemo(
-    () => bouwWachtrij(metLokaal.map((l) => ({ ...l, callback_at: l.callback_at ?? null })), nu),
-    [metLokaal, nu],
+    () => bouwWachtrij(
+      metLokaal.map((l) => ({ ...l, callback_at: l.callback_at ?? null })),
+      nu,
+      { klaarOverslaan: !(stageFilter && isKlaarFase(stageFilter)) },
+    ),
+    [metLokaal, nu, stageFilter],
   )
 
   // De huidige lead staat VAST tot er een uitkomst gekozen is. Zonder dit zou
@@ -142,6 +153,11 @@ export function FocusMode({ leads, pipelineId, onClose, onChanged }: {
     const a = FOCUS_ACTIONS.find((x) => x.key === key)
     if (!a) return
     if (a.opensBooking) {
+      // Het boekscherm is een andere pagina; dit scherm verdwijnt. Wat er in
+      // het notitieveld staat zou anders stil verloren gaan — eerst loggen.
+      if (note.trim()) {
+        await stuur({ noteKind: 'call', note: note.trim() }, true)
+      }
       router.push(`/admin/sales/appointments?lead=${lead.id}`)
       return
     }

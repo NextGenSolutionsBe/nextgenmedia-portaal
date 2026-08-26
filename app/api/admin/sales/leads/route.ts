@@ -53,9 +53,12 @@ export async function GET(req: NextRequest) {
 
     const admin = createAdminSupabaseClient()
     const bouw = (selectie: string) => {
+      // count: 'exact' zodat we WETEN wanneer de limiet afkapt. Zonder dat
+      // verdwijnen bij >4000 leads precies de oudste, nooit gebelde leads —
+      // stil, want elke belpoging duwt een lead weer naar boven in de sortering.
       let q = admin
         .from('sales_leads')
-        .select(selectie)
+        .select(selectie, { count: 'exact' })
         .eq('sales_client_id', salesClientId)
         .order('updated_at', { ascending: false })
         .limit(4000)
@@ -72,12 +75,14 @@ export async function GET(req: NextRequest) {
       return q
     }
 
-    let { data, error } = await bouw(SELECT_BREED)
+    let { data, error, count } = await bouw(SELECT_BREED)
     if (error && /callback_note|werkklasse|activiteit|ondernemingsnummer|prioriteit|column/i.test(error.message)) {
-      ;({ data, error } = await bouw(SELECT_SMAL))
+      ;({ data, error, count } = await bouw(SELECT_SMAL))
     }
     if (error) throw new Error(error.message)
     let rows = (data ?? []) as unknown as LeadRow[]
+    const totaal = count ?? rows.length
+    const afgekapt = totaal > rows.length
 
     // Vrij zoeken doen we in code: telefoon moet cijfer-genormaliseerd matchen
     // en dat kan een gewone SQL-ilike niet betrouwbaar.
@@ -109,7 +114,7 @@ export async function GET(req: NextRequest) {
       rows = rows.filter((r) => r.callback_at && new Date(r.callback_at).getTime() <= end.getTime())
     }
 
-    return NextResponse.json({ leads: rows })
+    return NextResponse.json({ leads: rows, totaal, afgekapt })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
