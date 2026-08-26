@@ -2617,7 +2617,10 @@ CREATE TABLE IF NOT EXISTS public.sales_scripts (
   pipeline_id      uuid REFERENCES public.sales_pipelines(id) ON DELETE SET NULL,
   ruwe_tekst       text NOT NULL,
   bron_bestand     text,
-  analyse          jsonb,
+  -- Aanhalingstekens verplicht: ANALYSE is in Postgres een gereserveerd woord
+  -- (de Britse spelling van ANALYZE). De kolom heet gewoon analyse; alleen
+  -- kale SQL moet hem quoten — PostgREST doet dat vanzelf.
+  "analyse"        jsonb,
   analyse_model    text,
   geanalyseerd_op  timestamptz,
   actief           boolean NOT NULL DEFAULT true,
