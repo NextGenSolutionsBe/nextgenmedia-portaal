@@ -1,8 +1,9 @@
 import 'server-only'
 import { createAdminSupabaseClient, insertResilient } from '@/lib/supabase/server'
 import { STAGES } from '@/lib/sales/stages'
-import { companyDedupeKey, normalizePhone } from '@/lib/sales/dedupe'
+import { companyDedupeKey, normalizePhone, isBekendeKlant, type KlantIndex } from '@/lib/sales/dedupe'
 import { werkklasseNaarAantal } from '@/lib/sales/lead-schoon'
+
 import {
   bookableSegments, type Interval, type WorkRule, type WorkException,
 } from '@/lib/sales/availability'
@@ -103,11 +104,14 @@ export type NewLeadInput = {
   }
   contact: { name?: string; role?: string; email?: string; phone?: string; mobile?: string; linkedin?: string }
   labels?: string[]
+  /** Bestaande klanten, één keer opgehaald met laadKlantIndex(). Meegeven bij
+   *  een import: dan belandt een klant nooit in de belijst. */
+  klantIndex?: KlantIndex
 }
 
 export type NewLeadResult =
   | { ok: true; leadId: string }
-  | { ok: false; error: string; existingLeadId?: string }
+  | { ok: false; error: string; existingLeadId?: string; alKlant?: boolean }
 
 /**
  * Lead aanmaken met ontdubbeling op bedrijf (§11): bestaat er al een ACTIEVE
@@ -118,6 +122,14 @@ export async function createLead(input: NewLeadInput): Promise<NewLeadResult> {
   const admin = createAdminSupabaseClient()
   const name = input.company.name.trim()
   if (!name) return { ok: false, error: 'Bedrijfsnaam is verplicht' }
+
+  // AL KLANT? Dan hoort dit bedrijf niet in de belijst. Een dubbele lead is
+  // rommelig; een bestaande klant koud opbellen met een verkooppraatje is
+  // gênant — en dat gebeurt met gekochte lijsten vanzelf. De index wordt één
+  // keer per import opgehaald, dus dit kost hier niets.
+  if (input.klantIndex && isBekendeKlant(input.klantIndex, name, input.company.website)) {
+    return { ok: false, error: `${name} is al klant.`, alKlant: true }
+  }
 
   const dedupe = companyDedupeKey(name, input.company.website)
 

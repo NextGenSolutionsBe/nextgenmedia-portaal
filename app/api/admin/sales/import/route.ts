@@ -2,6 +2,7 @@ import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireStaff } from '@/lib/supabase/server'
 import { createLead, getOrCreateSalesOrg } from '@/lib/sales/service'
+import { laadKlantIndex } from '@/lib/sales/klanten'
 import { listPipelines, defaultPipelineId } from '@/lib/sales/pipelines'
 import {
   parseCsv, guessMapping, sanitizeMapping, applyMapping, IMPORT_FIELDS,
@@ -161,7 +162,10 @@ export async function PUT(req: NextRequest) {
     // Dezelfde schoonmaak als in het voorbeeld: wat de gebruiker zag, is wat
     // er wordt opgeslagen. Kale getallen in telefoon/e-mail/website sneuvelen.
     const geschoond = schoonRijen(applyMapping(table, clean))
-    let created = 0, duplicate = 0, skipped = 0
+    // Eén keer ophalen: onze bestaande klanten. Zonder dit belandt een klant
+    // uit een gekochte lijst gewoon in de belijst.
+    const klantIndex = await laadKlantIndex(salesClientId)
+    let created = 0, duplicate = 0, skipped = 0, alKlant = 0
     const problems: string[] = []
 
     for (const [i, r] of geschoond.rijen.entries()) {
@@ -170,6 +174,7 @@ export async function PUT(req: NextRequest) {
       const res = await createLead({
         salesClientId,
         pipelineId,
+        klantIndex,
         company: {
           name: companyName,
           website: r.company.website, sector: r.company.sector,
@@ -187,12 +192,13 @@ export async function PUT(req: NextRequest) {
         },
       })
       if (res.ok) created++
+      else if (res.alKlant) alKlant++
       else if (res.existingLeadId) duplicate++
       else { skipped++; if (problems.length < 10) problems.push(`Rij ${i + 2}: ${res.error}`) }
     }
 
     return NextResponse.json({
-      ok: true, created, duplicate, skipped, problems,
+      ok: true, created, duplicate, skipped, alKlant, problems,
       opgeschoond: geschoond.verslag.opgeschoond,
     })
   } catch (err) {

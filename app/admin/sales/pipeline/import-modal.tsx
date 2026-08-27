@@ -29,7 +29,7 @@ export function ImportModal({ pipelineId, onClose, onDone }: {
   const [busy, setBusy] = useState(false)
   const [a, setA] = useState<Analysis | null>(null)
   const [mapping, setMapping] = useState<Record<string, string>>({})
-  const [result, setResult] = useState<{ created: number; duplicate: number; skipped: number; problems: string[] } | null>(null)
+  const [result, setResult] = useState<{ created: number; duplicate: number; skipped: number; alKlant?: number; problems: string[] } | null>(null)
 
   const analyse = async (file: File) => {
     setBusy(true)
@@ -80,6 +80,11 @@ export function ImportModal({ pipelineId, onClose, onDone }: {
                 <CheckCircle2 className="h-5 w-5" />
                 <span className="font-semibold">{result.created} lead(s) toegevoegd</span>
               </div>
+              {(result.alKlant ?? 0) > 0 && (
+                <p className='text-sm text-gray-600'>
+                  {result.alKlant} rij(en) overgeslagen — dat bedrijf is <b>al klant</b>. Die belanden nooit in de belijst.
+                </p>
+              )}
               {result.duplicate > 0 && (
                 <p className="text-sm text-gray-600">
                   {result.duplicate} rij(en) overgeslagen — dat bedrijf stond al in deze pipeline.
@@ -176,7 +181,7 @@ export function ImportModal({ pipelineId, onClose, onDone }: {
               )}
 
               <p className="text-[11px] text-gray-500">
-                Staat een bedrijf al in deze pipeline, dan slaan we die rij over. Er ontstaan nooit dubbele leads.
+Staat een bedrijf al in deze pipeline, dan slaan we die rij over. Bedrijven die al klant zijn worden er ook uitgehouden — er ontstaan nooit dubbele leads en je belt nooit je eigen klanten.
               </p>
             </div>
           )}
