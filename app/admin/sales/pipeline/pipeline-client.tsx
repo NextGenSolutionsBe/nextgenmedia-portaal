@@ -151,8 +151,8 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
     <div className="space-y-4">
       {afgekapt && (
         <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-          Er zijn {totaal} leads, maar het scherm toont er maximaal 4000 — de minst recent
-          aangeraakte vallen buiten beeld. Filter op merk of status om alles te zien.
+          Er zijn {totaal} leads, maar het scherm toont er {leads.length} — de rest valt buiten
+          beeld. Filter op status of merk om de rest te zien.
         </p>
       )}
       {/* Kop: merk, zoeken, knoppen */}

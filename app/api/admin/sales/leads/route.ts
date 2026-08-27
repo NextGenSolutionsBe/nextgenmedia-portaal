@@ -52,16 +52,17 @@ export async function GET(req: NextRequest) {
     const pipelineId = pipelines.find((p) => p.id === wanted)?.id ?? pipelines[0]?.id ?? ''
 
     const admin = createAdminSupabaseClient()
-    const bouw = (selectie: string) => {
-      // count: 'exact' zodat we WETEN wanneer de limiet afkapt. Zonder dat
-      // verdwijnen bij >4000 leads precies de oudste, nooit gebelde leads —
-      // stil, want elke belpoging duwt een lead weer naar boven in de sortering.
+    const bouw = (selectie: string, van: number, tot: number) => {
       let q = admin
         .from('sales_leads')
         .select(selectie, { count: 'exact' })
         .eq('sales_client_id', salesClientId)
         .order('updated_at', { ascending: false })
-        .limit(4000)
+        // Stabiele tweede sortering: updated_at is bij een verse import voor
+        // duizenden rijen identiek, en zonder tiebreaker kan dezelfde rij dan
+        // in twee pagina's opduiken terwijl een andere nooit langskomt.
+        .order('id', { ascending: true })
+        .range(van, tot)
 
       if (!allPipelines) q = q.eq('pipeline_id', pipelineId)
 
@@ -75,13 +76,34 @@ export async function GET(req: NextRequest) {
       return q
     }
 
-    let { data, error, count } = await bouw(SELECT_BREED)
-    if (error && /callback_note|werkklasse|activiteit|ondernemingsnummer|prioriteit|column/i.test(error.message)) {
-      ;({ data, error, count } = await bouw(SELECT_SMAL))
+    /**
+     * In pagina's ophalen. PostgREST kapt ELKE query af op 1000 rijen — een
+     * hogere `limit` helpt niet, die grens staat aan de serverkant. Met 2670
+     * leads kreeg je er dus stilletjes 1000, en de rest bestond niet voor de
+     * pipeline én niet voor Focus Mode. Vandaar `range` tot alles binnen is.
+     */
+    const PAGINA = 1000
+    const MAX_LEADS = 20_000        // vangnet tegen een oneindige lus
+    let rows: LeadRow[] = []
+    let totaal = 0
+    let selectie = SELECT_BREED
+
+    for (let van = 0; van < MAX_LEADS; van += PAGINA) {
+      let { data, error, count } = await bouw(selectie, van, van + PAGINA - 1)
+      // Kolommen uit de migratie ontbreken nog? Eén keer terugvallen op de
+      // smalle selectie en deze pagina opnieuw ophalen.
+      if (error && /callback_note|werkklasse|activiteit|ondernemingsnummer|prioriteit|column/i.test(error.message)) {
+        selectie = SELECT_SMAL
+        ;({ data, error, count } = await bouw(selectie, van, van + PAGINA - 1))
+      }
+      if (error) throw new Error(error.message)
+      const stuk = (data ?? []) as unknown as LeadRow[]
+      if (count !== null && count !== undefined) totaal = count
+      rows.push(...stuk)
+      if (stuk.length < PAGINA) break
     }
-    if (error) throw new Error(error.message)
-    let rows = (data ?? []) as unknown as LeadRow[]
-    const totaal = count ?? rows.length
+
+    if (totaal === 0) totaal = rows.length
     const afgekapt = totaal > rows.length
 
     // Vrij zoeken doen we in code: telefoon moet cijfer-genormaliseerd matchen
