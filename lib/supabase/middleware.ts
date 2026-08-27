@@ -29,6 +29,23 @@ function copyAuthCookies(from: NextResponse, to: NextResponse): NextResponse {
   return to
 }
 
+// ── Rol doorgeven aan de layout ──────────────────────────────────────────────
+//
+// De middleware heeft de rol en de modulerechten al opgezocht. Zonder deze
+// headers deed app/admin/layout.tsx datzelfde werk nog eens over: twee extra
+// netwerkoproepen naar Supabase, achter elkaar, vóór er pagina-inhoud kwam.
+//
+// LET OP — DIT IS BEVEILIGINGSGEVOELIG. Een bezoeker kan zelf een header met
+// deze naam meesturen. Daarom wordt in doorgeven() ELKE binnenkomende variant
+// eerst weggegooid en pas daarna onze eigen waarde gezet, en loopt IEDERE
+// doorloop-return via die functie — nooit rechtstreeks via supabaseResponse.
+// De layout controleert bovendien of het meegegeven gebruikers-id overeenkomt
+// met de werkelijke sessie, en valt anders terug op de database.
+const HDR_USER = 'x-ngm-user'
+const HDR_ROLE = 'x-ngm-role'
+const HDR_MODULES = 'x-ngm-modules'
+const ONZE_HEADERS = [HDR_USER, HDR_ROLE, HDR_MODULES]
+
 export async function updateSession(request: NextRequest) {
   /**
    * Zonder deze twee waarden gooit createServerClient hieronder, klapt de hele
@@ -56,6 +73,28 @@ export async function updateSession(request: NextRequest) {
   }
 
   let supabaseResponse = NextResponse.next({ request })
+
+  /**
+   * De enige manier waarop een verzoek deze middleware levend verlaat.
+   *
+   * Bouwt een verse doorloop-response waarin onze eigen headers eerst worden
+   * WEGGEGOOID (wat de bezoeker ook meestuurde) en daarna eventueel opnieuw
+   * gezet met wat wij zelf hebben vastgesteld. Gebruik dit overal in plaats van
+   * `return supabaseResponse`: zo kan een meegestuurde `x-ngm-role: admin`
+   * nooit bij de layout aankomen.
+   */
+  const doorgeven = (identiteit?: { userId: string; role: string; modules?: string[] }) => {
+    const headers = new Headers(request.headers)
+    for (const h of ONZE_HEADERS) headers.delete(h)
+    if (identiteit) {
+      headers.set(HDR_USER, identiteit.userId)
+      headers.set(HDR_ROLE, identiteit.role)
+      if (identiteit.modules) headers.set(HDR_MODULES, JSON.stringify(identiteit.modules))
+    }
+    // De cookies van supabaseResponse (o.a. een vernieuwd auth-token) moeten
+    // mee — zie copyAuthCookies hierboven voor waarom dat niet vanzelf gaat.
+    return copyAuthCookies(supabaseResponse, NextResponse.next({ request: { headers } }))
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const supabase = createServerClient<any>(
@@ -111,7 +150,7 @@ export async function updateSession(request: NextRequest) {
       if (!twoFaOk && await twoFactorRequired(db, user.id)) {
         return NextResponse.json({ error: 'Verificatie vereist', code: '2fa_required' }, { status: 401 })
       }
-      return supabaseResponse
+      return doorgeven()
     }
 
     // Geen admin → enkel actieve werknemers, binnen hun modules.
@@ -123,7 +162,7 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.json({ error: 'Verificatie vereist', code: '2fa_required' }, { status: 401 })
     }
     if (isStaffApiDenied(path)) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
-    if (STAFF_API_WHITELIST.some((p) => path === p || path.startsWith(p + '?'))) return supabaseResponse
+    if (STAFF_API_WHITELIST.some((p) => path === p || path.startsWith(p + '?'))) return doorgeven()
     const perms = Array.isArray(staff!.permissions) ? (staff!.permissions as string[]) : []
     // Toegang tot een dashboard = alle acties in dat dashboard. Gedeelde endpoints
     // geven meerdere modules; de werknemer passeert met één ervan. Ongemapte
@@ -132,7 +171,7 @@ export async function updateSession(request: NextRequest) {
     if (!allowedModules || !allowedModules.some((m) => canSeeModule(perms, m))) {
       return NextResponse.json({ error: 'Geen toegang tot deze module' }, { status: 403 })
     }
-    return supabaseResponse
+    return doorgeven()
   }
 
   // Public routes
@@ -151,7 +190,7 @@ export async function updateSession(request: NextRequest) {
     path.startsWith('/.well-known/') ||
     path === '/favicon.ico'
   ) {
-    return supabaseResponse
+    return doorgeven()
   }
 
   // Not logged in → redirect to login
@@ -239,5 +278,17 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  return supabaseResponse
+  // Rol en modules meegeven aan de layout, zodat die ze niet opnieuw hoeft op
+  // te zoeken. Enkel voor interne accounts: alleen de adminshell leest ze.
+  if (role === 'admin' || role === 'employee') {
+    return doorgeven({
+      userId: user.id,
+      role,
+      modules: role === 'employee' && Array.isArray(staff?.permissions)
+        ? (staff!.permissions as string[])
+        : undefined,
+    })
+  }
+
+  return doorgeven()
 }

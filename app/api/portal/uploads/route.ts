@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminSupabaseClient, insertResilient } from '@/lib/supabase/server'
+import { createAdminSupabaseClient, insertResilient, signedUrlMap } from '@/lib/supabase/server'
 import { requirePortalPermission, logPortalAction } from '@/lib/portal-auth'
 import { safeMessage } from '@/lib/api-error'
 import {
@@ -64,14 +64,14 @@ export async function GET(req: NextRequest) {
     }
 
     // Privébucket: een tijdelijke link per bestand, nooit een vast adres.
-    const uploads = await Promise.all((data ?? []).map(async (r) => {
-      const rij = r as unknown as Record<string, unknown>
-      const { data: s } = await admin.storage
-        .from(BUCKET).createSignedUrl(String(rij.bestandspad), 60 * 60)
+    // Alle links in één oproep — anders is het één HTTP-verzoek per foto.
+    const rijen = (data ?? []) as unknown as Record<string, unknown>[]
+    const urls = await signedUrlMap(admin, BUCKET, rijen.map((r) => String(r.bestandspad)), 60 * 60)
+    const uploads = rijen.map((rij) => {
       const { bestandspad: _weg, ...rest } = rij
       void _weg
-      return { ...rest, url: s?.signedUrl ?? null }
-    }))
+      return { ...rest, url: urls.get(String(rij.bestandspad)) ?? null }
+    })
 
     return NextResponse.json({ uploads })
   } catch (err) {

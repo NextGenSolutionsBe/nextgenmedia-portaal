@@ -142,6 +142,40 @@ export async function trySignedUrl(admin: SupabaseClient<any>, bucket: string, p
 }
 
 /**
+ * Ondertekende URL's voor een hele lijst bestanden, in ÉÉN oproep.
+ *
+ * `createSignedUrl` (enkelvoud) per rij aanroepen betekent één HTTP-verzoek per
+ * bestand: bij een map met 300 foto's zijn dat 300 verzoeken vóór de pagina
+ * verschijnt. `createSignedUrls` (meervoud) tekent ze in één keer.
+ *
+ * Geeft een Map terug van bestandspad → URL. Een pad dat niet getekend kon
+ * worden ontbreekt gewoon; de oproeper toont dan geen link, zoals voorheen.
+ */
+export async function signedUrlMap(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: SupabaseClient<any>,
+  bucket: string,
+  paths: (string | null | undefined)[],
+  ttlSeconds = 3600,
+): Promise<Map<string, string>> {
+  const uit = new Map<string, string>()
+  // Dubbels eruit: dezelfde foto twee keer laten tekenen heeft geen zin.
+  const schoon = [...new Set(paths.filter((p): p is string => !!p))]
+  if (!schoon.length) return uit
+  try {
+    const { data, error } = await admin.storage.from(bucket).createSignedUrls(schoon, ttlSeconds)
+    if (error || !data) return uit
+    for (const rij of data) {
+      // De volgorde van het antwoord is niet gegarandeerd, dus koppelen op pad.
+      if (rij.path && rij.signedUrl) uit.set(rij.path, rij.signedUrl)
+    }
+  } catch {
+    // Netwerkfout of ontbrekende bucket → geen URL's, geen stukke pagina.
+  }
+  return uit
+}
+
+/**
  * Insert a row, automatically dropping any column the live schema doesn't have.
  * PostgREST reports a missing column as code PGRST204 with the column name in the
  * message. We strip that column and retry, so a write succeeds regardless of which

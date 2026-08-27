@@ -2601,8 +2601,11 @@ ALTER TABLE public.sales_companies
 ALTER TABLE public.sales_leads
   ADD COLUMN IF NOT EXISTS callback_note text;
 
-CREATE INDEX IF NOT EXISTS sales_leads_callback_idx
-  ON public.sales_leads (callback_at) WHERE callback_at IS NOT NULL;
+-- De index op callback_at staat al hierboven als `sales_leads_callback`. Deze
+-- regel maakte er per ongeluk een tweede, identieke naast — dubbel schrijfwerk
+-- bij elke wijziging, zonder dat lezen er iets mee opschiet. Weggehaald, en de
+-- dubbel wordt hieronder opgeruimd als hij er al staat.
+DROP INDEX IF EXISTS public.sales_leads_callback_idx;
 
 -- Belscripts: het coldcallingscript van een setter, plus de AI-analyse ervan
 -- (secties, bezwaren met reacties, weetjes) als jsonb. De ruwe tekst blijft de

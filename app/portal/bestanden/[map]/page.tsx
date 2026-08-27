@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ChevronLeft, Files, Folder } from 'lucide-react'
-import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { createAdminSupabaseClient, signedUrlMap } from '@/lib/supabase/server'
 import { requirePortalView, sessionCan } from '@/lib/portal-auth'
 import { BUCKET, LOSSE_BESTANDEN } from '@/lib/client-uploads'
 import { Uploader, type Bestaand } from '../uploader'
@@ -49,15 +49,19 @@ export default async function PortalMapPage({ params }: { params: Promise<{ map:
   const { data, error } = await vraag
   if (error && !/map_id|does not exist|schema cache/i.test(error.message)) throw new Error(error.message)
 
-  const uploads: Bestaand[] = await Promise.all(((data ?? []) as Record<string, unknown>[]).map(async (rij) => {
-    const { data: s } = await admin.storage
-      .from(BUCKET).createSignedUrl(String(rij.bestandspad), 60 * 60)
+  const rijen = (data ?? []) as Record<string, unknown>[]
+  // Eén oproep voor alle links; per foto tekenen betekende één HTTP-verzoek per
+  // foto, en een map met honderden foto's is precies waar dit voor bedoeld is.
+  const [urls, mappen] = await Promise.all([
+    signedUrlMap(admin, BUCKET, rijen.map((r) => String(r.bestandspad)), 60 * 60),
+    laadMapKeuzes(session.clientId),
+  ])
+
+  const uploads: Bestaand[] = rijen.map((rij) => {
     const { bestandspad: _weg, ...rest } = rij
     void _weg
-    return { ...rest, url: s?.signedUrl ?? null } as Bestaand
-  }))
-
-  const mappen = await laadMapKeuzes(session.clientId)
+    return { ...rest, url: urls.get(String(rij.bestandspad)) ?? null } as Bestaand
+  })
 
   return (
     <div className="space-y-6 animate-fade-in">

@@ -50,6 +50,33 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: '10mb',
     },
+    // Deze pakketten zijn "barrels": één index die alles doorexporteert.
+    // Zonder deze regel verwerkt de bundelaar bij elke import de hele
+    // verzameling (lucide-react alleen al zijn er meer dan duizend iconen).
+    // Next herschrijft ze dan naar directe imports — kortere builds en een
+    // kleinere bundel, zonder dat er één regel code hoeft te veranderen.
+    optimizePackageImports: [
+      'lucide-react',
+      'date-fns',
+      'recharts',
+      '@radix-ui/react-accordion',
+      '@radix-ui/react-alert-dialog',
+      '@radix-ui/react-avatar',
+      '@radix-ui/react-checkbox',
+      '@radix-ui/react-dialog',
+      '@radix-ui/react-dropdown-menu',
+      '@radix-ui/react-label',
+      '@radix-ui/react-popover',
+      '@radix-ui/react-progress',
+      '@radix-ui/react-scroll-area',
+      '@radix-ui/react-select',
+      '@radix-ui/react-separator',
+      '@radix-ui/react-slot',
+      '@radix-ui/react-switch',
+      '@radix-ui/react-tabs',
+      '@radix-ui/react-toast',
+      '@radix-ui/react-tooltip',
+    ],
   },
   images: {
     remotePatterns: [

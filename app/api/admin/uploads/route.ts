@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
+import { createAdminSupabaseClient, requireStaff, signedUrlMap } from '@/lib/supabase/server'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { safeMessage } from '@/lib/api-error'
 import { BUCKET, LOSSE_BESTANDEN, STATUSSEN, type Status } from '@/lib/client-uploads'
@@ -61,19 +61,20 @@ export async function GET(req: NextRequest) {
       .map((c) => ({ id: c.id, naam: c.company_name ?? '(zonder naam)' }))
     const naamVan = new Map(clients.map((c) => [c.id, c.naam]))
 
-    const uploads = await Promise.all((data ?? []).map(async (r) => {
-      const rij = r as unknown as Record<string, unknown>
-      const { data: s } = await admin.storage
-        .from(BUCKET).createSignedUrl(String(rij.bestandspad), 60 * 60)
+    const rijen = (data ?? []) as unknown as Record<string, unknown>[]
+    // Alle bestanden in één keer laten tekenen in plaats van één per rij.
+    const urls = await signedUrlMap(admin, BUCKET, rijen.map((r) => String(r.bestandspad)), 60 * 60)
+
+    const uploads = rijen.map((rij) => {
       const { bestandspad: _weg, ...rest } = rij
       void _weg
       return {
         ...rest,
         client_naam: naamVan.get(String(rij.client_id)) ?? '(onbekende klant)',
         map_naam: rij.map_id ? mapNaam.get(String(rij.map_id)) ?? LOSSE_BESTANDEN : LOSSE_BESTANDEN,
-        url: s?.signedUrl ?? null,
+        url: urls.get(String(rij.bestandspad)) ?? null,
       }
-    }))
+    })
 
     return NextResponse.json({ uploads, clients })
   } catch (err) {

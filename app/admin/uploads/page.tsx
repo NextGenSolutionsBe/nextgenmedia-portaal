@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { FolderUp } from 'lucide-react'
-import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { createAdminSupabaseClient, signedUrlMap } from '@/lib/supabase/server'
 import { BUCKET, LOSSE_BESTANDEN } from '@/lib/client-uploads'
 import { UploadsView, type AdminUpload } from './uploads-view'
 
@@ -45,19 +45,20 @@ export default async function AdminUploadsPage() {
       ((mapRijen ?? []) as { id: string; naam: string }[]).map((m) => [m.id, m.naam]),
     )
 
-    uploads = await Promise.all((data ?? []).map(async (r) => {
-      const rij = r as unknown as Record<string, unknown>
-      const { data: s } = await admin.storage
-        .from(BUCKET).createSignedUrl(String(rij.bestandspad), 60 * 60)
+    const rijen = (data ?? []) as unknown as Record<string, unknown>[]
+    // Alle bestanden in één keer laten tekenen in plaats van één per rij.
+    const urls = await signedUrlMap(admin, BUCKET, rijen.map((r) => String(r.bestandspad)), 60 * 60)
+
+    uploads = rijen.map((rij) => {
       const { bestandspad: _weg, ...rest } = rij
       void _weg
       return {
         ...rest,
         client_naam: naamVan.get(String(rij.client_id)) ?? '(onbekende klant)',
         map_naam: rij.map_id ? mapNaam.get(String(rij.map_id)) ?? LOSSE_BESTANDEN : LOSSE_BESTANDEN,
-        url: s?.signedUrl ?? null,
+        url: urls.get(String(rij.bestandspad)) ?? null,
       } as AdminUpload
-    }))
+    })
   }
 
   return (

@@ -1,34 +1,20 @@
 import { redirect } from 'next/navigation'
-import { getSessionUser, getUserRole, getStaffRow } from '@/lib/supabase/server'
+import { leesAdminIdentiteit } from '@/lib/admin-identiteit'
 import { AdminSidebar } from '@/components/admin/sidebar'
 import { AdminTopBar } from '@/components/admin/admin-topbar'
 import { AiAssistant } from '@/components/admin/ai-assistant'
 import { Toaster } from 'sonner'
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const user = await getSessionUser()
-  if (!user) redirect('/login')
-
-  // Rol + rechten via service-role lezen (bypasst de restrictive user_roles-RLS;
-  // een werknemer kan zijn eigen rol anders niet lezen → login-loop).
-  // Deze lezingen zijn gedeeld binnen het verzoek (React cache), dus als een
-  // pagina of guard hieronder hetzelfde opvraagt kost dat geen tweede rondgang.
-  let role = await getUserRole(user.id)
-
+  // Rol + modulerechten komen bij voorkeur uit de middleware, die ze net al
+  // opzocht; anders leest dit ze alsnog uit de database. Zie
+  // lib/admin-identiteit.ts — daar staat ook waarom die header veilig is.
   // Werknemer = enkel toegestane modules in de sidebar (admin = alles → undefined).
-  // staff_members is de bron van waarheid: een actieve staff-rij maakt de
-  // gebruiker werknemer, ook als de user_roles-rol ontbreekt (app_role-enum kan
-  // 'employee' missen).
-  let allowedModules: string[] | undefined
-  if (role !== 'admin') {
-    const staff = await getStaffRow(user.id)
-    if (staff && staff.active !== false) {
-      role = 'employee'
-      allowedModules = Array.isArray(staff.permissions) ? (staff.permissions as string[]) : []
-    } else if (staff && staff.active === false) {
-      redirect('/login')
-    }
-  }
+  const ik = await leesAdminIdentiteit()
+  if (!ik) redirect('/login')
+
+  const role = ik.role
+  const allowedModules = ik.modules
 
   if (role !== 'admin' && role !== 'employee') redirect('/login')
 
