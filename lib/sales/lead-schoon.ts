@@ -15,13 +15,32 @@ export type SchoonVerslag = {
   perVeld: Record<string, number>
 }
 
-/** Telefoonnummer: minstens 8 cijfers (Belgische nummers hebben er 9 of 10;
- *  8 laat buitenlandse randgevallen door). "34" is er geen. */
+/**
+ * Telefoonnummer: minstens 8 cijfers (Belgische nummers hebben er 9 of 10;
+ * 8 laat buitenlandse randgevallen door). "34" is er geen.
+ *
+ * HERSTELT OOK DE LEIDENDE NUL. Excel behandelt een kolom met nummers als
+ * getallen en gooit de voorloopnul weg: "0479641277" wordt "479641277" en
+ * "09/329.08.78" wordt "93290878". Zo'n nummer verbindt niet als je erop klikt.
+ * Een Belgisch nummer zonder landcode dat met 1–9 begint en 8 of 9 cijfers
+ * telt, hoort er één voor te krijgen.
+ *
+ * Nummers mét landcode (+32, 0032) of die al met 0 beginnen laten we met rust,
+ * en buitenlandse nummers van andere lengtes ook — daar zouden we het alleen
+ * maar erger maken.
+ */
 export function schoonTelefoon(v: string): string {
   const s = v.trim()
   if (!s) return ''
   const cijfers = s.replace(/\D/g, '')
-  return cijfers.length >= 8 ? s : ''
+  if (cijfers.length < 8) return ''
+  const heeftLandcode = /^\+/.test(s) || /^00/.test(cijfers)
+  if (!heeftLandcode && /^[1-9]/.test(cijfers) && (cijfers.length === 8 || cijfers.length === 9)) {
+    // De opmaak van de bron is hier al weg (Excel gaf een kaal getal terug),
+    // dus we geven het nummer terug als aaneengesloten cijfers mét de nul.
+    return `0${cijfers}`
+  }
+  return s
 }
 
 /**

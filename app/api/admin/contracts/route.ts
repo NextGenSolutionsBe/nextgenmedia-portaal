@@ -1,4 +1,5 @@
 import { safeMessage } from '@/lib/api-error'
+import { MAX_UPLOAD_MB, fileTooBig } from '@/lib/upload'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient, insertResilient , isActiveStaff } from '@/lib/supabase/server'
 import { randomUUID } from 'crypto'
@@ -37,6 +38,12 @@ export async function POST(req: NextRequest) {
     // tekenlink / intern). Enkel een PDF en titel zijn verplicht.
     if (!pdf || !title) {
       return NextResponse.json({ error: 'PDF en titel zijn verplicht' }, { status: 400 })
+    }
+    // Zelfde grens als het formulier (lib/upload.ts) — maar hier afgedwongen,
+    // want een browsercontrole is te omzeilen. Boven ~4,5 MB zou Vercel het
+    // verzoek sowieso kaal weigeren; zo blijft de melding altijd de onze.
+    if (fileTooBig(pdf)) {
+      return NextResponse.json({ error: `PDF te groot — max ${MAX_UPLOAD_MB} MB. Comprimeer het bestand (bv. "Opslaan als PDF met verkleind formaat") en probeer opnieuw.` }, { status: 413 })
     }
 
     // Aantal maanden afleiden uit het contractduur-type (eenmalig/onbepaald = geen einddatum).

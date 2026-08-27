@@ -1,4 +1,5 @@
 import { safeMessage } from '@/lib/api-error'
+import { MAX_UPLOAD_MB, fileTooBig } from '@/lib/upload'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient, insertResilient , isActiveStaff } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
@@ -42,6 +43,10 @@ export async function POST(req: NextRequest) {
     const name = (formData.get('name') as string)?.trim()
     const category = (formData.get('category') as string)?.trim() || null
     if (!name) return NextResponse.json({ error: 'Naam is verplicht' }, { status: 400 })
+    // Zelfde grens als het formulier (lib/upload.ts); zie contracts/route.ts.
+    if (pdf && fileTooBig(pdf)) {
+      return NextResponse.json({ error: `PDF te groot — max ${MAX_UPLOAD_MB} MB. Comprimeer het bestand en probeer opnieuw.` }, { status: 413 })
+    }
 
     const { data: tpl, error: tplErr } = await insertResilient(
       admin,
