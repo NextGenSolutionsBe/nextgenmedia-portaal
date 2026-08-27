@@ -1,7 +1,13 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import { createClient as createAdminClient, type SupabaseClient } from '@supabase/supabase-js'
+import { cache } from 'react'
+import { type SupabaseClient } from '@supabase/supabase-js'
 import type { User } from '@supabase/supabase-js'
+import { createAdminSupabaseClient } from './admin-client'
+
+// De service-role client woont in een eigen bestand (zie daar waarom), maar
+// blijft hier gewoon beschikbaar zodat bestaande imports ongemoeid blijven.
+export { createAdminSupabaseClient }
 
 export async function createClient() {
   const cookieStore = await cookies()
@@ -29,20 +35,60 @@ export async function createClient() {
   )
 }
 
-export function createAdminSupabaseClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY!
-  if (!key) throw new Error('SUPABASE_SERVICE_ROLE_KEY is niet ingesteld')
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return createAdminClient<any>(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    // Deze database wordt gedeeld met een tweede applicatie, die in een eigen
-    // schema woont. Wij pinnen ons expliciet op `public` in plaats van op de
-    // standaard te vertrouwen: dan kan een wijziging elders nooit stilletjes
-    // onze queries naar het verkeerde schema laten wijzen.
-    db: { schema: 'public' },
-  })
-}
+// ── Wie ben je? Eén keer per verzoek vragen, niet vier keer ──────────────────
+//
+// De layout, de pagina en elke guard stelden allemaal dezelfde twee vragen:
+// "wie ben je" en "welke rol heb je". Dat waren vier opeenvolgende netwerk-
+// oproepen naar Supabase (Frankfurt → Ierland) vóór er ook maar één byte
+// pagina-inhoud opgehaald werd.
+//
+// React's cache() lost dat op: de eerste aanroep binnen één verzoek doet het
+// werk, de rest krijgt hetzelfde antwoord terug. De cache leeft precies zo lang
+// als het verzoek — niets lekt naar de volgende bezoeker, en niets wordt
+// hergebruikt over gebruikers heen. Het antwoord is dus even vers als voorheen;
+// enkel het aantal keer dat we het opvragen verandert.
+
+/** De ingelogde gebruiker. Gedeeld binnen één verzoek. */
+export const getSessionUser = cache(async (): Promise<User | null> => {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  return user ?? null
+})
+
+/**
+ * De rol uit user_roles, via service-role (bypasst de restrictive RLS die een
+ * werknemer zijn eigen rij niet laat lezen → login-loop).
+ */
+export const getUserRole = cache(async (userId: string): Promise<string | undefined> => {
+  try {
+    const admin = createAdminSupabaseClient()
+    const { data } = await admin
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', userId)
+      .maybeSingle()
+    return (data as { role?: string } | null)?.role
+  } catch {
+    return undefined
+  }
+})
+
+/** De staff-rij (actief + rechten). staff_members is de bron van waarheid. */
+export const getStaffRow = cache(async (
+  userId: string,
+): Promise<{ active?: boolean; permissions?: string[] } | null> => {
+  try {
+    const admin = createAdminSupabaseClient()
+    const { data } = await admin
+      .from('staff_members')
+      .select('active, permissions')
+      .eq('auth_user_id', userId)
+      .maybeSingle()
+    return (data as { active?: boolean; permissions?: string[] } | null) ?? null
+  } catch {
+    return null
+  }
+})
 
 /**
  * Server-side admin guard. Returns the authenticated User when the caller has
@@ -51,16 +97,9 @@ export function createAdminSupabaseClient() {
  * Rol wordt via service-role gelezen (RLS-proof — zie memory: login-loop les).
  */
 export async function requireAdmin(): Promise<User | null> {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getSessionUser()
   if (!user) return null
-  const admin = createAdminSupabaseClient()
-  const { data } = await admin
-    .from('user_roles')
-    .select('role')
-    .eq('user_id', user.id)
-    .maybeSingle()
-  return data?.role === 'admin' ? user : null
+  return (await getUserRole(user.id)) === 'admin' ? user : null
 }
 
 /**
@@ -68,17 +107,8 @@ export async function requireAdmin(): Promise<User | null> {
  * Service-role lezing; staff_members is de bron van waarheid voor werknemer-zijn.
  */
 export async function isActiveStaff(userId: string): Promise<boolean> {
-  try {
-    const admin = createAdminSupabaseClient()
-    const { data } = await admin
-      .from('staff_members')
-      .select('active')
-      .eq('auth_user_id', userId)
-      .maybeSingle()
-    return !!data && data.active !== false
-  } catch {
-    return false
-  }
+  const staff = await getStaffRow(userId)
+  return !!staff && staff.active !== false
 }
 
 /**
@@ -88,16 +118,9 @@ export async function isActiveStaff(userId: string): Promise<boolean> {
  * Gevoelige routes (staff-beheer, AI, credentials, …) blijven requireAdmin gebruiken.
  */
 export async function requireStaff(): Promise<User | null> {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getSessionUser()
   if (!user) return null
-  const admin = createAdminSupabaseClient()
-  const { data } = await admin
-    .from('user_roles')
-    .select('role')
-    .eq('user_id', user.id)
-    .maybeSingle()
-  if (data?.role === 'admin') return user
+  if ((await getUserRole(user.id)) === 'admin') return user
   return (await isActiveStaff(user.id)) ? user : null
 }
 

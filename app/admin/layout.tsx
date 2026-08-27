@@ -1,25 +1,19 @@
 import { redirect } from 'next/navigation'
-import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
+import { getSessionUser, getUserRole, getStaffRow } from '@/lib/supabase/server'
 import { AdminSidebar } from '@/components/admin/sidebar'
 import { AdminTopBar } from '@/components/admin/admin-topbar'
 import { AiAssistant } from '@/components/admin/ai-assistant'
 import { Toaster } from 'sonner'
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getSessionUser()
   if (!user) redirect('/login')
 
   // Rol + rechten via service-role lezen (bypasst de restrictive user_roles-RLS;
   // een werknemer kan zijn eigen rol anders niet lezen → login-loop).
-  const admin = createAdminSupabaseClient()
-  const { data: roleData } = await admin
-    .from('user_roles')
-    .select('role')
-    .eq('user_id', user.id)
-    .maybeSingle()
-
-  let role = roleData?.role as string | undefined
+  // Deze lezingen zijn gedeeld binnen het verzoek (React cache), dus als een
+  // pagina of guard hieronder hetzelfde opvraagt kost dat geen tweede rondgang.
+  let role = await getUserRole(user.id)
 
   // Werknemer = enkel toegestane modules in de sidebar (admin = alles → undefined).
   // staff_members is de bron van waarheid: een actieve staff-rij maakt de
@@ -27,11 +21,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   // 'employee' missen).
   let allowedModules: string[] | undefined
   if (role !== 'admin') {
-    const { data: staff } = await admin
-      .from('staff_members')
-      .select('active, permissions')
-      .eq('auth_user_id', user.id)
-      .maybeSingle()
+    const staff = await getStaffRow(user.id)
     if (staff && staff.active !== false) {
       role = 'employee'
       allowedModules = Array.isArray(staff.permissions) ? (staff.permissions as string[]) : []

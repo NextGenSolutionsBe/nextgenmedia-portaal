@@ -3,7 +3,10 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { pathToModule, canSeeModule, STAFF_API_WHITELIST, isStaffApiDenied, modulesForApiPath } from '@/lib/staff'
 import { isDisabledPath } from '@/lib/features'
 import { verifyToken, TWO_FA_COOKIE, twoFactorRequired } from '@/lib/two-factor'
-import { createAdminSupabaseClient } from '@/lib/supabase/server'
+// Bewust uit admin-client.ts en NIET uit server.ts: die laatste gebruikt
+// React's cache(), en dat bestaat niet in de edge-runtime waar deze middleware
+// draait. Zie de toelichting in lib/supabase/admin-client.ts.
+import { createAdminSupabaseClient } from '@/lib/supabase/admin-client'
 
 // Rol/rechten worden via de service-role client gelezen (bypasst RLS). Reden:
 // user_roles heeft een RESTRICTIVE admin-only policy, waardoor een niet-admin

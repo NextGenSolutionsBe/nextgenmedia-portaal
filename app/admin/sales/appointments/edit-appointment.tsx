@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2, X, CalendarClock, Trash2, AlertTriangle } from 'lucide-react'
 import { OutcomePanel } from './outcome-panel'
+import { LeadKiezer, type LeadOption } from './lead-kiezer'
 
 type Appt = {
   id: string; starts_at: string; ends_at: string
@@ -13,7 +14,6 @@ type Appt = {
   deal_value_cents?: number | null
   commission_pct?: number | null
 }
-type LeadOption = { id: string; label: string; email: string | null; pipelineId: string | null }
 type Pipeline = { id: string; name: string }
 
 /** Datum-tijd voor een <input type="datetime-local">, in lokale tijd. */
@@ -31,9 +31,8 @@ function forInput(iso: string | number): string {
  * zien en raakt de herinneringsmail — dat hoort niet per ongeluk te kunnen
  * gebeuren omdat je de muis liet slippen.
  */
-export function EditAppointment({ appt, leads, pipelines, isAdmin, onClose, onSaved }: {
+export function EditAppointment({ appt, pipelines, isAdmin, onClose, onSaved }: {
   appt: Appt
-  leads: LeadOption[]
   pipelines: Pipeline[]
   /** Enkel een admin legt gewonnen/verloren vast — daar hangt commissie aan. */
   isAdmin?: boolean
@@ -42,7 +41,19 @@ export function EditAppointment({ appt, leads, pipelines, isAdmin, onClose, onSa
 }) {
   const [start, setStart] = useState(forInput(appt.starts_at))
   const [end, setEnd] = useState(forInput(appt.ends_at))
-  const [leadId, setLeadId] = useState(appt.lead_id ?? '')
+  // De afspraak draagt de bedrijfs- en contactnaam zelf al mee, dus de
+  // gekoppelde lead is meteen toonbaar zonder hem eerst op te halen.
+  const [lead, setLead] = useState<LeadOption | null>(
+    appt.lead_id
+      ? {
+          id: appt.lead_id,
+          label: [appt.company, appt.contact].filter(Boolean).join(' · ') || 'Lead',
+          email: null,
+          pipelineId: appt.pipeline_id ?? null,
+        }
+      : null,
+  )
+  const leadId = lead?.id ?? ''
   // Het merk kan hier ook nog wisselen — bv. wanneer tijdens het gesprek blijkt
   // dat de prospect beter bij het andere bedrijf past.
   const [pipelineId, setPipelineId] = useState(appt.pipeline_id ?? pipelines[0]?.id ?? '')
@@ -54,7 +65,6 @@ export function EditAppointment({ appt, leads, pipelines, isAdmin, onClose, onSa
     || leadId !== (appt.lead_id ?? '') || pipelineId !== (appt.pipeline_id ?? '')
   const valid = Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs
 
-  const lead = leads.find((l) => l.id === leadId)
   const leadPipeline = lead ? pipelines.find((p) => p.id === lead.pipelineId) ?? null : null
 
   const save = async () => {
@@ -106,10 +116,7 @@ export function EditAppointment({ appt, leads, pipelines, isAdmin, onClose, onSa
         <div className="p-5 space-y-3 overflow-y-auto">
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Lead</label>
-            <select className="input-base" value={leadId} onChange={(e) => setLeadId(e.target.value)}>
-              <option value="">Geen lead koppelen</option>
-              {leads.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
-            </select>
+            <LeadKiezer waarde={lead} onKies={setLead} />
           </div>
 
           <div>

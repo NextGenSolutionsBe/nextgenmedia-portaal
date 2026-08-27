@@ -1,4 +1,5 @@
 import 'server-only'
+import { cache } from 'react'
 import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 import { redirect } from 'next/navigation'
@@ -25,8 +26,15 @@ export type PortalSession = {
   name: string | null
 }
 
-/** Resolveert de portaalsessie van de huidige gebruiker, of null. */
-export async function resolvePortalSession(): Promise<PortalSession | null> {
+/**
+ * Resolveert de portaalsessie van de huidige gebruiker, of null.
+ *
+ * Gedeeld binnen één verzoek (React cache): de layout, de pagina en elke
+ * API-guard vroegen dit los van elkaar op, wat telkens drie netwerkoproepen
+ * naar Supabase kostte. De uitkomst is identiek — enkel het aantal keer dat we
+ * ernaar vragen verandert, en de cache leeft niet langer dan het verzoek.
+ */
+export const resolvePortalSession = cache(async (): Promise<PortalSession | null> => {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
@@ -70,7 +78,7 @@ export async function resolvePortalSession(): Promise<PortalSession | null> {
   }
 
   return null
-}
+})
 
 /** Heeft de sessie een bepaald recht? Owner mag altijd alles. */
 export function sessionCan(session: PortalSession | null, module: PortalModule, action = 'view'): boolean {

@@ -8,6 +8,7 @@ import { AvailabilityPanel } from './availability-panel'
 import { BusyCalendarsPanel } from './busy-calendars'
 import { AgendaDialog } from './agenda-dialog'
 import { EditAppointment } from './edit-appointment'
+import { LeadKiezer, type LeadOption } from './lead-kiezer'
 
 type SalesClient = {
   id: string; name: string; timezone: string
@@ -21,7 +22,6 @@ type Appt = {
   deal_value_cents?: number | null
   commission_pct?: number | null
 }
-type LeadOption = { id: string; label: string; email: string | null; pipelineId: string | null }
 type Pipeline = { id: string; name: string }
 
 // Zichtbaar dagvenster. Buiten deze uren is toch alles grijs; dit houdt de
@@ -53,7 +53,6 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId }: {
   const [segments, setSegments] = useState<Interval[]>([])
   const [appointments, setAppointments] = useState<Appt[]>([])
   const [connected, setConnected] = useState(false)
-  const [leads, setLeads] = useState<LeadOption[]>([])
   // Agenda's (personen) van deze klant — Bram, Marco, …
   const [owners, setOwners] = useState<{
     id: string; name: string; account_email: string | null; status: string
@@ -98,24 +97,9 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId }: {
   }, [from, to, ownerId])
   useEffect(() => { load() }, [load])
 
-  // Leads voor de koppeling in het boekingspaneel.
-  useEffect(() => {
-    // 'all': je moet hier een lead uit beide merken kunnen kiezen.
-    fetch('/api/admin/sales/leads?pipeline=all')
-      .then((r) => r.json())
-      .then((j) => setLeads((j.leads ?? []).map((l: {
-        id: string
-        pipeline_id?: string | null
-        sales_companies?: { name?: string } | null
-        sales_contacts?: { name?: string; email?: string } | null
-      }) => ({
-        id: l.id,
-        label: [l.sales_companies?.name, l.sales_contacts?.name].filter(Boolean).join(' · ') || 'Lead',
-        email: l.sales_contacts?.email ?? null,
-        pipelineId: l.pipeline_id ?? null,
-      }))))
-      .catch(() => setLeads([]))
-  }, [])
+  // De leadkiezer haalt zijn eigen treffers op terwijl je typt — zie
+  // LeadKiezer hieronder. Vroeger stond hier een fetch van álle leads
+  // (2711 stuks, 2,7 MB) waarvan het paneel enkel naam en e-mail gebruikte.
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => new Date(from + i * 86400000)), [from])
 
@@ -346,7 +330,6 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId }: {
         <BookingPanel
           start={booking.start}
           end={booking.end}
-          leads={leads}
           pipelines={pipelines}
           initialLeadId={initialLeadId}
           ownerId={ownerId}
@@ -359,7 +342,6 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId }: {
       {editing && (
         <EditAppointment
           appt={editing}
-          leads={leads}
           pipelines={pipelines}
           isAdmin={isAdmin}
           onClose={() => setEditing(null)}
@@ -400,13 +382,14 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId }: {
 }
 
 // ── Boekingspaneel ───────────────────────────────────────────────────────────
-function BookingPanel({ ownerId, ownerName, start, end, leads, pipelines, initialLeadId, onClose, onBooked }: {
+function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId, onClose, onBooked }: {
   ownerId: string; ownerName: string | null
   start: number; end: number
-  leads: LeadOption[]; pipelines: Pipeline[]; initialLeadId?: string
+  pipelines: Pipeline[]; initialLeadId?: string
   onClose: () => void; onBooked: () => void
 }) {
-  const [leadId, setLeadId] = useState(initialLeadId ?? '')
+  const [lead, setLead] = useState<LeadOption | null>(null)
+  const leadId = lead?.id ?? ''
   /**
    * Voor welk merk is deze afspraak? Standaard dat van de lead, maar je kunt
    * het wisselen: aan de telefoon blijkt soms dat iemand uit de ene pipeline
@@ -422,7 +405,6 @@ function BookingPanel({ ownerId, ownerName, start, end, leads, pipelines, initia
   const [withMeet, setWithMeet] = useState(true)
   const [saving, setSaving] = useState(false)
 
-  const lead = leads.find((l) => l.id === leadId)
   const leadPipeline = lead ? pipelines.find((p) => p.id === lead.pipelineId) ?? null : null
 
   // Lead gekozen en zelf nog niets aangeduid → het merk van die lead volgen.
@@ -467,10 +449,7 @@ function BookingPanel({ ownerId, ownerName, start, end, leads, pipelines, initia
         <div className="p-5 space-y-3 overflow-y-auto">
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Lead koppelen <span className="text-gray-400">— optioneel</span></label>
-            <select className="input-base" value={leadId} onChange={(e) => setLeadId(e.target.value)}>
-              <option value="">Geen lead koppelen</option>
-              {leads.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
-            </select>
+            <LeadKiezer waarde={lead} initialId={initialLeadId} onKies={setLead} />
             {leadId && <p className="text-[11px] text-gray-500 mt-1">Deze lead springt na het boeken naar “Afspraak ingepland”.</p>}
           </div>
 

@@ -1,5 +1,5 @@
 import 'server-only'
-import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
+import { getSessionUser, getUserRole, getStaffRow } from '@/lib/supabase/server'
 
 export type Actor = {
   userId: string
@@ -18,17 +18,15 @@ export type Actor = {
  * i.p.v. de werknemer volledig buiten te sluiten.
  */
 export async function getActor(): Promise<Actor | null> {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  // Alle drie de lezingen zijn gedeeld binnen één verzoek (React cache in
+  // lib/supabase/server.ts), dus een route die hiernaast nog een guard
+  // aanroept betaalt daar geen tweede rondgang naar Supabase voor.
+  const user = await getSessionUser()
   if (!user) return null
 
-  const admin = createAdminSupabaseClient()
-  const { data: roleRow } = await admin
-    .from('user_roles').select('role').eq('user_id', user.id).maybeSingle()
-  if (roleRow?.role === 'admin') return { userId: user.id, isAdmin: true, modules: null }
+  if ((await getUserRole(user.id)) === 'admin') return { userId: user.id, isAdmin: true, modules: null }
 
-  const { data: staff } = await admin
-    .from('staff_members').select('active, permissions').eq('auth_user_id', user.id).maybeSingle()
+  const staff = await getStaffRow(user.id)
   if (!staff || staff.active === false) return null
 
   const perms = Array.isArray(staff.permissions) ? (staff.permissions as string[]) : []

@@ -52,10 +52,13 @@ export async function GET(req: NextRequest) {
     const pipelineId = pipelines.find((p) => p.id === wanted)?.id ?? pipelines[0]?.id ?? ''
 
     const admin = createAdminSupabaseClient()
-    const bouw = (selectie: string, van: number, tot: number) => {
+    // `tel` enkel op de EERSTE pagina: een exacte telling laat Postgres de hele
+    // gefilterde verzameling aflopen. Dat drie keer vragen levert drie keer
+    // hetzelfde getal op voor drie keer de kosten.
+    const bouw = (selectie: string, van: number, tot: number, tel: boolean) => {
       let q = admin
         .from('sales_leads')
-        .select(selectie, { count: 'exact' })
+        .select(selectie, tel ? { count: 'exact' } : undefined)
         .eq('sales_client_id', salesClientId)
         .order('updated_at', { ascending: false })
         // Stabiele tweede sortering: updated_at is bij een verse import voor
@@ -89,12 +92,13 @@ export async function GET(req: NextRequest) {
     let selectie = SELECT_BREED
 
     for (let van = 0; van < MAX_LEADS; van += PAGINA) {
-      let { data, error, count } = await bouw(selectie, van, van + PAGINA - 1)
+      const tel = van === 0
+      let { data, error, count } = await bouw(selectie, van, van + PAGINA - 1, tel)
       // Kolommen uit de migratie ontbreken nog? Eén keer terugvallen op de
       // smalle selectie en deze pagina opnieuw ophalen.
       if (error && /callback_note|werkklasse|activiteit|ondernemingsnummer|prioriteit|column/i.test(error.message)) {
         selectie = SELECT_SMAL
-        ;({ data, error, count } = await bouw(selectie, van, van + PAGINA - 1))
+        ;({ data, error, count } = await bouw(selectie, van, van + PAGINA - 1, tel))
       }
       if (error) throw new Error(error.message)
       const stuk = (data ?? []) as unknown as LeadRow[]
