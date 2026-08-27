@@ -10,7 +10,7 @@ import {
 import { cn } from '@/lib/utils'
 import { FOCUS_ACTIONS, stageLabel } from '@/lib/sales/stages'
 import {
-  bouwWachtrij, aftelLabel, terugbelMoment, isKlaarFase, TERUGBEL_KEUZES,
+  bouwWachtrij, aftelLabel, terugbelMoment, leesTijdstip, isKlaarFase, TERUGBEL_KEUZES,
 } from '@/lib/sales/focus-queue'
 import { GEEN_INTERESSE_REDENEN, bouwReden } from '@/lib/sales/redenen'
 import { kiesScript, sectieKleur, type ScriptAnalyse } from '@/lib/sales/script-analyse'
@@ -74,7 +74,11 @@ export function FocusMode({ leads, pipelineId, stageFilter, onClose, onChanged }
   const [redenOpen, setRedenOpen] = useState(false)
   const [script, setScript] = useState<{ naam: string; analyse: ScriptAnalyse } | null | 'laden'>('laden')
   const [openBezwaar, setOpenBezwaar] = useState<number | null>(null)
+  // Vrij ingetypt terugbeltijdstip, bv. '14u30'.
+  const [eigenTijd, setEigenTijd] = useState('')
   const doorlopen = useRef(0)
+  // Ankers voor de springlinks naar de scriptsecties.
+  const sectieRefs = useRef<(HTMLElement | null)[]>([])
 
   useEffect(() => {
     const t = setInterval(() => setNu(Date.now()), 30_000)
@@ -122,6 +126,18 @@ export function FocusMode({ leads, pipelineId, stageFilter, onClose, onChanged }
   }, [lead, vastId])
   const bedrijf = lead?.sales_companies
   const contact = lead?.sales_contacts
+
+  // Meelezen terwijl je typt: "14u30" → "over 2 u 15". Zo zie je meteen of de
+  // app hetzelfde begrijpt als wat je bedoelt, vóór je op Zet klikt.
+  const eigenTijdVoorbeeld = useMemo(() => {
+    if (!eigenTijd.trim()) return null
+    const m = leesTijdstip(eigenTijd, nu)
+    if (m === null) return 'niet begrepen'
+    const wanneer = new Date(m).toLocaleString('nl-BE', {
+      weekday: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Brussels',
+    })
+    return `${wanneer} · ${aftelLabel(new Date(m).toISOString(), nu)}`
+  }, [eigenTijd, nu])
 
   const volgende = useCallback((id: string) => {
     setNote('')
@@ -174,9 +190,9 @@ export function FocusMode({ leads, pipelineId, stageFilter, onClose, onChanged }
 
   /** Terugbelafspraak: moment zetten, loggen, en de lead lokaal verplaatsen
    *  zodat hij meteen in de wachtlijst verschijnt (en straks terug opspringt). */
-  const terugbellen = useCallback(async (minuten: number, label: string) => {
+  const zetTerugbel = useCallback(async (omMs: number, label: string) => {
     if (!lead) return
-    const om = new Date(terugbelMoment(minuten, Date.now())).toISOString()
+    const om = new Date(omMs).toISOString()
     const notitie = note.trim()
     const okGelukt = await stuur({
       callback_at: om,
@@ -189,9 +205,26 @@ export function FocusMode({ leads, pipelineId, stageFilter, onClose, onChanged }
       setNote('')
       setOpenBezwaar(null)
       doorlopen.current += 1
+      setEigenTijd('')
       toast.success(`Komt terug ${aftelLabel(om, Date.now())}`)
     }
   }, [lead, note, stuur])
+
+  /** Snelknop: "over zoveel minuten" (of morgen 9u bij -1). */
+  const terugbellen = useCallback(
+    (minuten: number, label: string) => zetTerugbel(terugbelMoment(minuten, Date.now()), label),
+    [zetTerugbel],
+  )
+
+  /** Vrij ingetypt tijdstip, bv. "14u30" of "+45". */
+  const opEigenTijd = useCallback(() => {
+    const moment = leesTijdstip(eigenTijd, Date.now())
+    if (moment === null) {
+      toast.error('Dat tijdstip begrijp ik niet. Probeer "14u30", "9:00" of "+45".')
+      return
+    }
+    return zetTerugbel(moment, aftelLabel(new Date(moment).toISOString(), Date.now()))
+  }, [eigenTijd, zetTerugbel])
 
   const geenInteresse = useCallback(async (reden: string, toelichting: string) => {
     const lostReason = bouwReden(reden, toelichting)
@@ -401,12 +434,34 @@ export function FocusMode({ leads, pipelineId, stageFilter, onClose, onChanged }
           {script === 'laden' ? (
             <div className="text-center text-gray-400 pt-16"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div>
           ) : script ? (
-            <div className="max-w-2xl mx-auto space-y-5">
-              <p className="text-[10px] uppercase tracking-wide text-gray-400 flex items-center gap-1">
-                <FileText className="h-3 w-3" />{script.naam}
-              </p>
+            <div className="max-w-2xl mx-auto space-y-4">
+              <div className="flex items-center justify-between gap-2 sticky top-0 bg-gray-50 py-1 z-10">
+                <p className="text-[10px] uppercase tracking-wide text-gray-400 flex items-center gap-1">
+                  <FileText className="h-3 w-3" />{script.naam}
+                </p>
+                {/* Springlinks: bij een lang script wil je tijdens een gesprek
+                    niet scrollen — één klik en je staat bij het juiste stuk. */}
+                <div className="flex flex-wrap gap-1 justify-end">
+                  {script.analyse.secties.map((s, i) => (
+                    <button
+                      key={`nav-${i}`}
+                      onClick={() => sectieRefs.current[i]?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                      className={cn(
+                        'text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border border-gray-200 hover:bg-white',
+                        sectieKleur(s.kop),
+                      )}
+                    >
+                      {s.kop.split(/[\s/]/)[0].slice(0, 10)}
+                    </button>
+                  ))}
+                </div>
+              </div>
               {script.analyse.secties.map((s, i) => (
-                <section key={`${i}-${s.kop}`}>
+                <section
+                  key={`${i}-${s.kop}`}
+                  ref={(el) => { sectieRefs.current[i] = el }}
+                  className="scroll-mt-10"
+                >
                   <h2 className={cn('text-sm font-bold uppercase tracking-wide mb-1.5', sectieKleur(s.kop))}>
                     {s.kop}
                   </h2>
@@ -471,9 +526,9 @@ export function FocusMode({ leads, pipelineId, stageFilter, onClose, onChanged }
 
           <div>
             <h3 className="text-[10px] uppercase tracking-wide text-gray-400 font-bold mb-1.5 flex items-center gap-1">
-              <Clock className="h-3 w-3" />Terugbellen over…
+              <Clock className="h-3 w-3" />Terugbellen
             </h3>
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="grid grid-cols-3 gap-1.5">
               {TERUGBEL_KEUZES.map((k) => (
                 <button key={k.label} onClick={() => terugbellen(k.minuten, k.label)} disabled={busy}
                   className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-40">
@@ -481,8 +536,31 @@ export function FocusMode({ leads, pipelineId, stageFilter, onClose, onChanged }
                 </button>
               ))}
             </div>
+
+            {/* Vrij tijdstip — dít is wat een gesprek echt oplevert: "bel me
+                om twee uur terug". Vaste knoppen dekken dat nooit. */}
+            <div className="flex gap-1.5 mt-1.5">
+              <input
+                value={eigenTijd}
+                onChange={(e) => setEigenTijd(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') opEigenTijd() }}
+                placeholder="of: 14u30, 9:00, +45"
+                className="input-base text-xs flex-1 min-w-0"
+              />
+              <button
+                onClick={opEigenTijd}
+                disabled={busy || !eigenTijd.trim()}
+                className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-40 shrink-0"
+              >
+                Zet
+              </button>
+            </div>
+            {eigenTijdVoorbeeld && (
+              <p className="text-[10px] text-gray-500 mt-1">→ {eigenTijdVoorbeeld}</p>
+            )}
             <p className="text-[10px] text-gray-400 mt-1">
               De lead springt na dat moment als eerste terug in de rij. Je notitie gaat mee.
+              Een uur dat al voorbij is, wordt morgen.
             </p>
           </div>
 

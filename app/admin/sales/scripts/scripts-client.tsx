@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { sectieKleur, type ScriptAnalyse } from '@/lib/sales/script-analyse'
+import { readJson } from '@/lib/upload'
 
 type Script = {
   id: string; naam: string; eigenaar_auth_id: string | null; pipeline_id: string | null
@@ -23,6 +24,8 @@ export function ScriptsClient() {
   const [laden, setLaden] = useState(true)
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState<string | null>(null)
+  // Welke stap loopt er? Zonder dit lijkt een trage analyse op 'er gebeurt niks'.
+  const [stap, setStap] = useState<'opslaan' | 'analyseren' | null>(null)
 
   // Uploadformulier
   const [naam, setNaam] = useState('')
@@ -46,9 +49,16 @@ export function ScriptsClient() {
   }, [])
   useEffect(() => { laad() }, [laad])
 
+  /**
+   * Twee stappen, bewust apart. Het opslaan is snel en lukt vrijwel altijd;
+   * de AI-analyse duurt tientallen seconden. Door ze te scheiden zie je het
+   * script meteen verschijnen en gaat er bij een mislukte analyse niets
+   * verloren — je klikt gewoon op "opnieuw analyseren".
+   */
   const upload = async () => {
     if (!bestand && !tekst.trim()) { toast.error('Kies een bestand of plak de scripttekst.'); return }
     setBusy(true)
+    setStap('opslaan')
     try {
       const fd = new FormData()
       if (bestand) fd.append('bestand', bestand)
@@ -56,15 +66,33 @@ export function ScriptsClient() {
       fd.append('naam', naam.trim())
       fd.append('eigenaar', eigenaar)
       if (merk) fd.append('pipelineId', merk)
+
       const r = await fetch('/api/admin/sales/scripts', { method: 'POST', body: fd })
-      const j = await r.json()
-      if (!r.ok) throw new Error(j.error)
-      toast.success('Script geanalyseerd en klaar voor Focus Mode.')
+      const j = await readJson(r)   // vangt ook een HTML-foutpagina netjes af
+      const id = String(j.id ?? '')
+
       setNaam(''); setTekst(''); setBestand(null)
+      await laad()
+
+      // Stap 2: analyseren. Faalt dit, dan blijft het script gewoon staan.
+      setStap('analyseren')
+      try {
+        const r2 = await fetch('/api/admin/sales/scripts', {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, heranalyse: true }),
+        })
+        await readJson(r2)
+        toast.success('Script geanalyseerd en klaar voor Focus Mode.')
+      } catch (e) {
+        toast.warning(
+          `Het script is opgeslagen, maar de analyse lukte niet: ${e instanceof Error ? e.message : 'onbekende fout'}. `
+          + 'Klik op het vernieuwicoon om het opnieuw te proberen.',
+        )
+      }
       await laad()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Uploaden mislukt')
-    } finally { setBusy(false) }
+    } finally { setBusy(false); setStap(null) }
   }
 
   const wijzig = async (id: string, body: Record<string, unknown>, melding?: string) => {
@@ -141,10 +169,11 @@ export function ScriptsClient() {
           placeholder="Plak hier je volledige belscript…" className="input-base text-sm" />
         <button onClick={upload} disabled={busy} className="btn-primary disabled:opacity-40">
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-          Uploaden en analyseren
+          {stap === 'opslaan' ? 'Opslaan…' : stap === 'analyseren' ? 'Analyseren met AI…' : 'Uploaden en analyseren'}
         </button>
         <p className="text-[11px] text-gray-500">
-          De AI deelt het script in — de tekst zelf blijft woordelijk de jouwe. Controleer het resultaat hieronder.
+          De AI deelt het script in — de tekst zelf blijft woordelijk de jouwe. De analyse duurt
+          doorgaans 20 tot 60 seconden; het script verschijnt meteen in de lijst en wordt daarna ingevuld.
         </p>
       </div>
 
@@ -169,7 +198,9 @@ export function ScriptsClient() {
                       {s.eigenaar_auth_id ? (s.eigenaar_auth_id === mijnId ? 'Mijn script' : 'Van een collega') : 'Voor iedereen'}
                     </span>
                     <span>· {pipelines.find((p) => p.id === s.pipeline_id)?.name ?? 'Alle merken'}</span>
-                    {s.analyse && <span>· {s.analyse.secties.length} secties, {s.analyse.bezwaren.length} bezwaren</span>}
+                    {s.analyse
+                      ? <span>· {s.analyse.secties.length} secties, {s.analyse.bezwaren.length} bezwaren</span>
+                      : <span className='text-amber-700 font-medium'>· nog niet geanalyseerd</span>}
                   </div>
                 </button>
                 <div className="flex items-center gap-1.5 shrink-0">

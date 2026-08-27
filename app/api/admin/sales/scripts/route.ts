@@ -41,8 +41,13 @@ export async function GET() {
 
 /**
  * Nieuw script. multipart met `bestand` (pdf/docx/txt) óf een veld `tekst`.
- * De analyse draait meteen: een script zonder analyse is in Focus Mode niets
- * waard, dus dan hoor je de fout nú, niet pas tijdens het bellen.
+ *
+ * BEWUST ZONDER ANALYSE. Die draaide hier eerst mee, en dat was fout: de
+ * AI-stap duurt tientallen seconden, dus na een klik op "uploaden" gebeurde er
+ * ogenschijnlijk niets — en ging bij een fout ook de geüploade tekst verloren.
+ * Nu wordt het script eerst OPGESLAGEN (snel, altijd) en pas daarna
+ * geanalyseerd via PATCH { heranalyse: true }. Mislukt die analyse, dan staat
+ * het script er nog steeds en kan je het opnieuw proberen.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -95,8 +100,6 @@ export async function POST(req: NextRequest) {
     const pipelines = await listPipelines()
     const pipelineId = pipelines.find((p) => p.id === String(fd.get('pipelineId') ?? ''))?.id ?? null
 
-    const { analyse, model } = await analyseerScript(tekst)
-
     const admin = createAdminSupabaseClient()
     const org = await getOrCreateSalesOrg()
     const { data, error } = await admin.from('sales_scripts').insert({
@@ -106,9 +109,6 @@ export async function POST(req: NextRequest) {
       pipeline_id: pipelineId,
       ruwe_tekst: tekst,
       bron_bestand: bronBestand,
-      analyse,
-      analyse_model: model,
-      geanalyseerd_op: new Date().toISOString(),
     }).select('id').single()
 
     if (error) {
@@ -119,11 +119,12 @@ export async function POST(req: NextRequest) {
     const meta = requestMeta(req)
     await logAudit({
       action: 'sales.script.create', entityType: 'sales_script', entityId: (data as { id: string }).id,
-      summary: `Belscript "${naam}" toegevoegd en geanalyseerd`,
+      summary: `Belscript "${naam}" toegevoegd`,
       actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'admin',
       ip: meta.ip, userAgent: meta.userAgent,
     })
-    return NextResponse.json({ ok: true, id: (data as { id: string }).id, analyse })
+    // De analyse volgt in een tweede verzoek — zie de toelichting hierboven.
+    return NextResponse.json({ ok: true, id: (data as { id: string }).id, tekens: tekst.length })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }

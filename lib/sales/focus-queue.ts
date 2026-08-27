@@ -102,13 +102,81 @@ export function aftelLabel(iso: string, nu: number): string {
   })
 }
 
-/** De vaste keuzes voor "bel me terug over…". */
+/** Snelknoppen voor "bel me terug over…". Naast deze knoppen kan je altijd een
+ *  vrij tijdstip opgeven — zie leesTijdstip. */
 export const TERUGBEL_KEUZES: { label: string; minuten: number }[] = [
+  { label: '15 min', minuten: 15 },
   { label: '30 min', minuten: 30 },
   { label: '1 uur', minuten: 60 },
   { label: '2 uur', minuten: 120 },
+  { label: '4 uur', minuten: 240 },
   { label: 'Morgen 9u', minuten: -1 },   // -1 = volgende werkdag 09:00, zie hieronder
 ]
+
+/**
+ * Een vrij ingetypt tijdstip omzetten naar een echt moment.
+ *
+ * Dit is wat een gesprek écht oplevert: "bel me om twee uur terug" terwijl het
+ * elf uur is. Vaste knoppen dekken dat niet — een half uur of een uur is dan
+ * te vroeg en twee uur te laat.
+ *
+ * Aanvaard wordt:
+ *   "14:00" · "14u" · "14u30" · "14.30" · "1430" · "2" (→ 14:00 als het al
+ *   later dan 2 is, anders 02:00 — zie hieronder) · "+90" (over 90 minuten)
+ *
+ * IS HET UUR AL VOORBIJ, dan bedoelt de beller morgen. Zegt iemand om 16u
+ * "bel me om 9 uur", dan is dat morgenochtend, niet vanochtend.
+ *
+ * Geeft null bij iets onbegrijpelijks — dan liever niets zetten dan een
+ * verkeerd moment.
+ */
+export function leesTijdstip(invoer: string, nu: number, tz = 'Europe/Brussels'): number | null {
+  const s = invoer.trim().toLowerCase().replace(/\s+/g, '')
+  if (!s) return null
+
+  // "+90" of "90m" → over zoveel minuten.
+  const relatief = /^\+?(\d{1,4})m?$/.exec(s)
+  if (relatief && (s.startsWith('+') || s.endsWith('m'))) {
+    const min = Number(relatief[1])
+    return min > 0 && min <= 60 * 24 * 14 ? nu + min * 60000 : null
+  }
+
+  // "14:00" / "14u30" / "14.30" / "14h30" / "1430" / "14u" / "14"
+  const m = /^(\d{1,2})(?:[:.uh]?(\d{2}))?u?$/.exec(s)
+  if (!m) return null
+  const uur = Number(m[1])
+  const minuut = m[2] === undefined ? 0 : Number(m[2])
+  if (!Number.isFinite(uur) || uur > 23 || minuut > 59) return null
+
+  // De Brusselse kalenderdag van nu, zodat "vandaag" klopt ongeacht de server.
+  const f = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+  })
+  const [j, ma, d] = f.format(new Date(nu)).split('-').map(Number)
+
+  let moment = zonedNaarUtc(j, ma, d, uur, minuut, tz)
+  // Al voorbij (of exact nu)? Dan bedoelt de beller morgen.
+  if (moment <= nu) moment = zonedNaarUtc(j, ma, d + 1, uur, minuut, tz)
+  return moment
+}
+
+/** Lokale wandkloktijd → echt moment, met correctie voor de zomertijdgrens. */
+function zonedNaarUtc(jaar: number, maand: number, dag: number, uur: number, minuut: number, tz: string): number {
+  const gok = Date.UTC(jaar, maand - 1, dag, uur, minuut)
+  const offset = (utcMs: number) => {
+    const dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+    })
+    const p: Record<string, string> = {}
+    for (const x of dtf.formatToParts(new Date(utcMs))) p[x.type] = x.value
+    return Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour) % 24, Number(p.minute), Number(p.second)) - utcMs
+  }
+  let uit = gok - offset(gok)
+  const tweede = offset(uit)
+  if (tweede !== offset(gok)) uit = gok - tweede
+  return uit
+}
 
 /**
  * Het moment voor een terugbelkeuze. "Morgen 9u" is de volgende WERKdag om
@@ -129,20 +197,9 @@ export function terugbelMoment(minuten: number, nu: number): number {
   while ([0, 6].includes(kandidaat.getUTCDay())) {
     kandidaat = new Date(Date.UTC(kandidaat.getUTCFullYear(), kandidaat.getUTCMonth(), kandidaat.getUTCDate() + 1))
   }
-  // 09:00 Brusselse wandkloktijd → echt moment. Offset bepalen via een gok en
-  // één correctie, zoals lib/sales/availability.ts dat doet.
-  const gok = Date.UTC(kandidaat.getUTCFullYear(), kandidaat.getUTCMonth(), kandidaat.getUTCDate(), 9, 0)
-  const offset = (utcMs: number) => {
-    const dtf = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'Europe/Brussels', hour12: false,
-      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
-    })
-    const p: Record<string, string> = {}
-    for (const x of dtf.formatToParts(new Date(utcMs))) p[x.type] = x.value
-    return Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour) % 24, Number(p.minute), Number(p.second)) - utcMs
-  }
-  let uit = gok - offset(gok)
-  const tweede = offset(uit)
-  if (tweede !== offset(gok)) uit = gok - tweede
-  return uit
+  // 09:00 Brusselse wandkloktijd → echt moment.
+  return zonedNaarUtc(
+    kandidaat.getUTCFullYear(), kandidaat.getUTCMonth() + 1, kandidaat.getUTCDate(),
+    9, 0, 'Europe/Brussels',
+  )
 }
