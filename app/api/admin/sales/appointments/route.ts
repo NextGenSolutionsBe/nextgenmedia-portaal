@@ -9,6 +9,7 @@ import { createEvent, moveEvent, deleteEvent } from '@/lib/sales/google-calendar
 import { normalizePhone } from '@/lib/sales/dedupe'
 import { bouwAgendaOmschrijving, bouwAgendaTitel, bouwKlantOmschrijving } from '@/lib/sales/briefing'
 import { listPipelines, defaultPipelineId } from '@/lib/sales/pipelines'
+import { googleKleurId } from '@/lib/sales/merk'
 import {
   maakClickupTaak, werkClickupTaakBij, sluitClickupTaak, stuurInterneMelding,
   type AfspraakGegevens,
@@ -266,9 +267,15 @@ export async function POST(req: NextRequest) {
       }
 
       // Titel: wat de setter intikte, anders "Bedrijf — Merk". De prospect
-      // ziet deze titel in zijn uitnodiging, dus hij is instelbaar.
+      // ziet deze titel in zijn uitnodiging, dus hij is instelbaar. Het merk
+      // hoort er ALTIJD in — beide merken boeken in dezelfde agenda per
+      // persoon, dus zonder merk in de titel weet je in Google niet meer
+      // voor welk bedrijf de afspraak is.
       const eigenTitel = String(b.titel ?? '').trim().slice(0, 120)
-      const titel = eigenTitel || bouwAgendaTitel(briefing)
+      let titel = eigenTitel || bouwAgendaTitel(briefing)
+      if (merk && !titel.toLowerCase().includes(merk.toLowerCase())) {
+        titel = `${titel} — ${merk}`
+      }
 
       /**
        * Omschrijving hangt af van wie meekijkt. MET genodigde leest de
@@ -283,6 +290,9 @@ export async function POST(req: NextRequest) {
         location: briefing.adres,
         startsAt: start, endsAt: end, timezone: client.timezone,
         attendeeEmail: attendee, withMeet: b.withMeet !== false,
+        // Geel blok = NextGenMedia, blauw blok = NextGenSolutions — dezelfde
+        // kleuren als de mappen in ClickUp.
+        colorId: googleKleurId(pipelines.find((p) => p.id === pipelineId)?.key),
       })
       meetUrl = ev.meetUrl
       await admin.from('sales_appointments')

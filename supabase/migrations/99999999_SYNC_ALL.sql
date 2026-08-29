@@ -2742,3 +2742,8 @@ ON CONFLICT (sleutel) DO NOTHING;
 -- dezelfde taken dubbel aan in Google. De databank dwingt dat nu af.
 CREATE UNIQUE INDEX IF NOT EXISTS clickup_agenda_runs_een_open
   ON public.clickup_agenda_runs ((true)) WHERE klaar IS NULL;
+
+-- Vaste closer per merk: NextGenMedia → Bram, NextGenSolutions → Marco.
+ALTER TABLE public.sales_pipelines
+  ADD COLUMN IF NOT EXISTS default_calendar_id uuid
+  REFERENCES public.sales_calendar_connections(id) ON DELETE SET NULL;

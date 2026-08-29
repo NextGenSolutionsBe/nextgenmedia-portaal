@@ -23,7 +23,7 @@ type Appt = {
   deal_value_cents?: number | null
   commission_pct?: number | null
 }
-type Pipeline = { id: string; key: string; name: string }
+type Pipeline = { id: string; key: string; name: string; defaultCalendarId?: string | null }
 
 // Zichtbaar dagvenster. Buiten deze uren is toch alles grijs; dit houdt de
 // kalender compact zonder dat je 24 uur moet scrollen.
@@ -76,27 +76,42 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId, initi
 
   const kiesMerk = (id: string) => {
     setMerkFilter(id)
-    // Valt de huidige agenda buiten het merk, spring dan naar de eerste die
-    // er wél bij hoort — anders kijk je naar een agenda die je niet mag boeken.
-    if (id) {
-      const huidige = owners.find((o) => o.id === ownerId)
-      if (huidige?.pipeline_id && huidige.pipeline_id !== id) {
-        const eerste = owners.find((o) => !o.pipeline_id || o.pipeline_id === id)
-        if (eerste) setOwnerId(eerste.id)
-      }
+    if (!id) return
+    // Elk merk heeft een vaste closer (NextGenMedia → Bram, NextGenSolutions →
+    // Marco): die agenda staat meteen klaar. Wisselen kan daarna gewoon.
+    const standaard = pipelines.find((p) => p.id === id)?.defaultCalendarId
+    if (standaard && owners.some((o) => o.id === standaard)) {
+      setOwnerId(standaard)
+      return
+    }
+    // Geen standaard ingesteld: dan minstens een agenda die bij het merk past.
+    const huidige = owners.find((o) => o.id === ownerId)
+    if (huidige?.pipeline_id && huidige.pipeline_id !== id) {
+      const eerste = owners.find((o) => !o.pipeline_id || o.pipeline_id === id)
+      if (eerste) setOwnerId(eerste.id)
     }
   }
 
-  // Vangnet naast kiesMerk: ook wanneer de agendalijst pas na de merkkeuze
-  // binnenkomt (eerste load is traag door Google), of wanneer de SERVER een
-  // agenda koos die buiten het filter valt, springt de keuze alsnog goed.
+  // Vangnet naast kiesMerk: wanneer de agendalijst pas ná de merkkeuze
+  // binnenkomt (deeplink vanuit de pipeline; de eerste load is traag door
+  // Google), moet de vaste closer van dat merk alsnog klaargezet worden.
+  // Eén keer per merk — een handmatige wissel daarna blijft gewoon staan.
+  const defaultToegepastVoor = useRef<string>('')
   useEffect(() => {
     if (!merkFilter || owners.length === 0) return
+    if (defaultToegepastVoor.current !== merkFilter) {
+      defaultToegepastVoor.current = merkFilter
+      const standaard = pipelines.find((p) => p.id === merkFilter)?.defaultCalendarId
+      if (standaard && owners.some((o) => o.id === standaard) && standaard !== ownerId) {
+        setOwnerId(standaard)
+        return
+      }
+    }
     const huidige = owners.find((o) => o.id === ownerId)
     if (huidige && (!huidige.pipeline_id || huidige.pipeline_id === merkFilter)) return
     const eerste = owners.find((o) => !o.pipeline_id || o.pipeline_id === merkFilter)
     if (eerste && eerste.id !== ownerId) setOwnerId(eerste.id)
-  }, [owners, merkFilter, ownerId])
+  }, [owners, merkFilter, ownerId, pipelines])
 
   /**
    * Mag er in dit beeld geboekt worden? Niet wanneer het merkfilter aanstaat

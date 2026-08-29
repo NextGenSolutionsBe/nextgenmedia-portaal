@@ -38,3 +38,14 @@ const STIJLEN: Record<string, MerkStijl> = {
 export function merkStijl(pipelineKey: string | null | undefined): MerkStijl {
   return STIJLEN[pipelineKey ?? ''] ?? NEUTRAAL
 }
+
+/**
+ * Kleur van het afspraakblok in Google Calendar, passend bij de mappen in
+ * ClickUp: geel = NextGenMedia, blauw = NextGenSolutions. Google werkt met
+ * vaste kleurnummers: 5 = geel ("Banana"), 9 = blauw ("Blueberry").
+ */
+export function googleKleurId(pipelineKey: string | null | undefined): string | null {
+  if (pipelineKey === 'nextgenmedia') return '5'
+  if (pipelineKey === 'nextgensolutions') return '9'
+  return null
+}

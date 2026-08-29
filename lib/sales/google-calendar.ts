@@ -388,6 +388,8 @@ export async function createEvent(connectionId: string, opts: {
   timezone: string
   attendeeEmail?: string | null
   withMeet?: boolean
+  /** Google-kleurnummer van het blok (merk: geel NGM, blauw NGS). */
+  colorId?: string | null
 }): Promise<CreatedEvent> {
   const auth = await accessToken(connectionId)
   if (!auth) throw new Error('Deze agenda is niet (meer) gekoppeld')
@@ -399,6 +401,7 @@ export async function createEvent(connectionId: string, opts: {
     start: { dateTime: new Date(opts.startsAt).toISOString(), timeZone: opts.timezone },
     end: { dateTime: new Date(opts.endsAt).toISOString(), timeZone: opts.timezone },
   }
+  if (opts.colorId) body.colorId = opts.colorId
   if (opts.attendeeEmail) body.attendees = [{ email: opts.attendeeEmail }]
   if (opts.withMeet) {
     body.conferenceData = { createRequest: { requestId: `ngm-${Date.now()}`, conferenceSolutionKey: { type: 'hangoutsMeet' } } }

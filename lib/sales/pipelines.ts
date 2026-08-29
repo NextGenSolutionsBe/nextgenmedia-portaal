@@ -26,6 +26,8 @@ export type SalesPipeline = {
   clickup_list_id?: string | null
   /** Intern adres dat bij elke nieuw geboekte afspraak een melding krijgt. */
   notify_email?: string | null
+  /** Vaste closer van dit merk: de agenda die het boekscherm klaarzet. */
+  default_calendar_id?: string | null
 }
 
 type Seed = {
