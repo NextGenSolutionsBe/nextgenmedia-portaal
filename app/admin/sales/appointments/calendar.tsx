@@ -42,11 +42,13 @@ const hhmm = (ms: number) =>
   new Date(ms).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })
 
 /** Eén algemene pipeline; de keuze die telt is WIENS agenda je bekijkt. */
-export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId }: {
+export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId, initialMerkId }: {
   client: SalesClient
   pipelines: Pipeline[]
   isAdmin?: boolean
   initialLeadId?: string
+  /** Merk waarmee het scherm opent (bv. van de lead uit de pipeline). */
+  initialMerkId?: string
 }) {
   const clientId = client.id
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()))
@@ -63,7 +65,7 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId }: {
   }[]>([])
   const [ownerId, setOwnerId] = useState<string>('')
   // Merkfilter: toon enkel de agenda's van dit merk. '' = alle agenda's.
-  const [merkFilter, setMerkFilter] = useState<string>('')
+  const [merkFilter, setMerkFilter] = useState<string>(initialMerkId ?? '')
 
   // Welke agenda's passen bij het gekozen merk? Een agenda zonder merk hoort
   // overal bij — zo blijft een bestaande installatie gewoon werken.
@@ -431,6 +433,7 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId }: {
       {agendaDialog && (
         <AgendaDialog
           pipelines={pipelines}
+          owners={owners}
           existing={agendaDialog === 'new' ? null : owners.find((o) => o.id === agendaDialog) ?? null}
           onClose={() => setAgendaDialog(null)}
           onSaved={() => { setAgendaDialog(null); load() }}
@@ -528,8 +531,21 @@ function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
           <div>
-            <h3 className="font-semibold text-gray-900 flex items-center gap-2"><CalendarClock className="h-4 w-4 text-gray-400" />Afspraak boeken</h3>
+            <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+              <CalendarClock className="h-4 w-4 text-gray-400" />Afspraak boeken
+              {(() => {
+                const gekozen = pipelines.find((p) => p.id === pipelineId)
+                if (!gekozen) return null
+                const stijl = merkStijl(gekozen.key)
+                return (
+                  <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${stijl.badge}`}>
+                    {gekozen.name}
+                  </span>
+                )
+              })()}
+            </h3>
             <p className="text-sm text-gray-600 mt-0.5">
+              {ownerName ? <>Bij <b>{ownerName}</b> · </> : null}
               {new Date(start).toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' })} · {hhmm(start)}–{hhmm(end)}
             </p>
           </div>

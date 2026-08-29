@@ -18,6 +18,9 @@ type Existing = {
 
 type Pipeline = { id: string; key: string; name: string }
 type ClickupLid = { id: number; naam: string }
+/** Een al gekoppeld Google-account waaruit een agenda afgesplitst kan worden. */
+type Bron = { id: string; name: string; account_email: string | null }
+type GoogleAgenda = { id: string; summary: string; primary: boolean; accessRole: string }
 
 /**
  * Agenda koppelen of bewerken: van wie is deze agenda, en welke handtekening
@@ -26,9 +29,11 @@ type ClickupLid = { id: number; naam: string }
  * Bij een nieuwe koppeling reizen naam en handtekening mee naar Google en komen
  * ze terug in de callback, zodat alles meteen goed staat na één keer inloggen.
  */
-export function AgendaDialog({ existing, pipelines = [], onClose, onSaved }: {
+export function AgendaDialog({ existing, pipelines = [], owners = [], onClose, onSaved }: {
   existing?: Existing | null
   pipelines?: Pipeline[]
+  /** Bestaande koppelingen: bron voor "agenda uit een gekoppeld account". */
+  owners?: Bron[]
   onClose: () => void
   onSaved?: () => void
 }) {
@@ -44,6 +49,79 @@ export function AgendaDialog({ existing, pipelines = [], onClose, onSaved }: {
   const [leden, setLeden] = useState<ClickupLid[]>([])
   const [clickupIngesteld, setClickupIngesteld] = useState(true)
   const [saving, setSaving] = useState(false)
+
+  /**
+   * Twee wegen naar een nieuwe agenda:
+   *  · 'bestaand'  — een agenda uit een al gekoppeld Google-account (de
+   *    gewone weg: alle vier de agenda's staan in één account, dus niemand
+   *    hoeft vier keer bij Google in te loggen);
+   *  · 'oauth'     — een écht nieuw Google-account koppelen.
+   * Eén account kan meerdere koppelingen hebben; als bron volstaat één per
+   * account, dus we ontdubbelen op e-mailadres.
+   */
+  const bronnen = owners.filter((o, i) =>
+    o.account_email && owners.findIndex((x) => x.account_email === o.account_email) === i)
+  const [modus, setModus] = useState<'bestaand' | 'oauth'>(bronnen.length > 0 ? 'bestaand' : 'oauth')
+  const [bronId, setBronId] = useState(bronnen[0]?.id ?? '')
+  const [agendas, setAgendas] = useState<GoogleAgenda[]>([])
+  const [agendasLaden, setAgendasLaden] = useState(false)
+  const [googleCalId, setGoogleCalId] = useState('')
+  // Onthoudt de laatst voorgestelde naam: eigen invoer overschrijven we nooit.
+  const [naamSuggestie, setNaamSuggestie] = useState('')
+
+  // Agenda's van het gekozen bron-account ophalen (enkel bij het afsplitspad).
+  useEffect(() => {
+    if (existing || modus !== 'bestaand' || !bronId) return
+    setAgendasLaden(true)
+    setAgendas([]); setGoogleCalId('')
+    fetch(`/api/admin/sales/calendar/calendars?connection=${bronId}`)
+      .then((r) => r.json())
+      .then((j) => setAgendas(((j.calendars ?? []) as GoogleAgenda[])
+        // Enkel agenda's waarin we kunnen schrijven: daar komt de afspraak in.
+        .filter((c) => c.accessRole === 'owner' || c.accessRole === 'writer')))
+      .catch(() => setAgendas([]))
+      .finally(() => setAgendasLaden(false))
+  }, [existing, modus, bronId])
+
+  const kiesGoogleAgenda = (id: string) => {
+    setGoogleCalId(id)
+    const gekozen = agendas.find((c) => c.id === id)
+    // Naam voorstellen op basis van de agendanaam ("Marco - NextGenMedia"),
+    // maar alleen zolang de gebruiker er zelf nog niets van gemaakt heeft.
+    if (gekozen && (!name.trim() || name === naamSuggestie)) {
+      setName(gekozen.summary)
+      setNaamSuggestie(gekozen.summary)
+    }
+    // Merk automatisch herkennen in de agendanaam — scheelt een klik en
+    // vooral een vergissing.
+    if (gekozen && !merkId) {
+      const naamLC = gekozen.summary.toLowerCase().replace(/[^a-z]/g, '')
+      // 'nextgenmedia' zit ook in 'nextgenmediax' — match op de langste eerst.
+      const merk = pipelines.find((pl) => naamLC.includes(pl.key)) ??
+        (naamLC.includes('solutions') ? pipelines.find((pl) => pl.key === 'nextgensolutions') : undefined) ??
+        (naamLC.includes('media') ? pipelines.find((pl) => pl.key === 'nextgenmedia') : undefined)
+      if (merk) setMerkId(merk.id)
+    }
+  }
+
+  const afsplitsen = async () => {
+    if (!bronId || !googleCalId) { toast.error('Kies eerst een agenda'); return }
+    if (!name.trim()) { toast.error('Geef de agenda een naam'); return }
+    setSaving(true)
+    try {
+      const r = await fetch('/api/admin/sales/calendar/afsplitsen', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bronId, googleCalendarId: googleCalId, naam: name.trim(),
+          pipelineId: merkId || null,
+          clickupAssigneeId: clickupId ? Number(clickupId) : null,
+        }),
+      })
+      const j = await r.json(); if (!r.ok) throw new Error(j.error)
+      toast.success('Agenda toegevoegd.')
+      onSaved?.()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Toevoegen mislukt') } finally { setSaving(false) }
+  }
 
   // Wie kan er in ClickUp toegewezen worden? Live uit ClickUp, nooit een kopie.
   useEffect(() => {
@@ -99,17 +177,72 @@ export function AgendaDialog({ existing, pipelines = [], onClose, onSaved }: {
             <p className="text-sm text-gray-600 mt-0.5">
               {existing
                 ? 'Van wie is deze agenda, en welke handtekening hoort onder de mails?'
-                : 'Vul dit in vóór je inlogt bij Google — dan staat alles meteen goed.'}
+                : modus === 'bestaand' && bronnen.length > 0
+                  ? 'Kies een agenda uit het gekoppelde account — inloggen bij Google hoeft niet.'
+                  : 'Vul dit in vóór je inlogt bij Google — dan staat alles meteen goed.'}
             </p>
           </div>
           <button onClick={onClose} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100"><X className="h-4 w-4" /></button>
         </div>
 
         <div className="p-5 space-y-4 overflow-y-auto">
+          {/* Twee wegen bij een NIEUWE agenda: uit een gekoppeld account (geen
+              Google-login nodig) of een heel nieuw account koppelen. */}
+          {!existing && bronnen.length > 0 && (
+            <div className="inline-flex w-full rounded-lg border border-gray-200 p-0.5 bg-gray-50">
+              <button type="button" onClick={() => setModus('bestaand')}
+                className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  modus === 'bestaand' ? 'bg-white text-black shadow-sm' : 'text-gray-500 hover:text-black'}`}>
+                Agenda uit gekoppeld account
+              </button>
+              <button type="button" onClick={() => setModus('oauth')}
+                className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  modus === 'oauth' ? 'bg-white text-black shadow-sm' : 'text-gray-500 hover:text-black'}`}>
+                Nieuw Google-account
+              </button>
+            </div>
+          )}
+
+          {!existing && modus === 'bestaand' && bronnen.length > 0 && (
+            <>
+              {bronnen.length > 1 && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Uit welk account?</label>
+                  <select className="input-base" value={bronId} onChange={(e) => setBronId(e.target.value)}>
+                    {bronnen.map((br) => (
+                      <option key={br.id} value={br.id}>{br.account_email ?? br.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Welke Google-agenda?</label>
+                {agendasLaden ? (
+                  <p className="text-xs text-gray-500 flex items-center gap-2 py-2">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />Agenda&apos;s ophalen bij Google…
+                  </p>
+                ) : (
+                  <select className="input-base" value={googleCalId} onChange={(e) => kiesGoogleAgenda(e.target.value)}>
+                    <option value="">Kies een agenda…</option>
+                    {agendas.map((c) => (
+                      <option key={c.id} value={c.id}>{c.summary}{c.primary ? ' (hoofdagenda)' : ''}</option>
+                    ))}
+                  </select>
+                )}
+                <p className="text-[11px] text-gray-500 mt-1">
+                  De afspraken worden in déze agenda gezet. De uitnodiging naar de prospect vertrekt
+                  vanuit het gekoppelde account ({bronnen.find((br) => br.id === bronId)?.account_email ?? 'Google'}).
+                </p>
+              </div>
+            </>
+          )}
+
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Van wie is deze agenda?</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              {existing || modus === 'oauth' ? 'Van wie is deze agenda?' : 'Naam in de app'}
+            </label>
             <input className="input-base" value={name} onChange={(e) => setName(e.target.value)}
-              placeholder="Bram" autoFocus />
+              placeholder={existing || modus === 'oauth' ? 'Bram' : 'Marco — NextGenMedia'} autoFocus />
             <p className="text-[11px] text-gray-500 mt-1">
               Deze naam staat bij de agendakiezer en onder “Met vriendelijke groeten”.
             </p>
@@ -186,6 +319,11 @@ export function AgendaDialog({ existing, pipelines = [], onClose, onSaved }: {
           {existing ? (
             <button onClick={save} disabled={saving} className="btn-primary flex-1">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Opslaan
+            </button>
+          ) : modus === 'bestaand' && bronnen.length > 0 ? (
+            <button onClick={afsplitsen} disabled={saving || !googleCalId} className="btn-primary flex-1">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Agenda toevoegen
             </button>
           ) : (
             <button onClick={connect} disabled={saving} className="btn-primary flex-1">

@@ -51,6 +51,12 @@ export async function PATCH(req: NextRequest) {
     }
 
     let { error } = await admin.from('sales_calendar_connections').update(payload).eq('id', id)
+    // Zelfde Google-agenda + zelfde merk bestaat al als aparte koppeling.
+    if (error && /duplicate|unique|23505/i.test(error.message)) {
+      return NextResponse.json({
+        error: 'Er bestaat al een koppeling van deze Google-agenda voor dat merk. Pas die aan, of kies hier een ander merk.',
+      }, { status: 409 })
+    }
     if (error && /signature_|pipeline_id|clickup_|PGRST204|schema cache/i.test(error.message)) {
       // Kolommen bestaan nog niet → op zijn minst de naam bewaren.
       ;({ error } = await admin.from('sales_calendar_connections').update({ name }).eq('id', id))
