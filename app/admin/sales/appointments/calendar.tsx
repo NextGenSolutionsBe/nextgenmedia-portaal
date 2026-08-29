@@ -489,6 +489,7 @@ function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId
   const [pipelineId, setPipelineId] = useState(merkVoorkeur || (pipelines[0]?.id ?? ''))
   const [touched, setTouched] = useState(false)
   const [email, setEmail] = useState('')
+  const [titel, setTitel] = useState('')
   const [notes, setNotes] = useState('')
   const [adres, setAdres] = useState('')
   const [clientNote, setClientNote] = useState('')
@@ -513,6 +514,7 @@ function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId
         body: JSON.stringify({
           ownerId: ownerId || null, pipelineId: pipelineId || null,
           startsAt: start, endsAt: end,
+          titel: titel.trim() || null,
           leadId: leadId || null, attendeeEmail: email.trim() || null,
           notes, clientNote, adres, withMeet,
         }),
@@ -557,6 +559,16 @@ function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId
             <label className="block text-xs font-medium text-gray-600 mb-1">Lead koppelen <span className="text-gray-400">— optioneel</span></label>
             <LeadKiezer waarde={lead} initialId={initialLeadId} onKies={setLead} />
             {leadId && <p className="text-[11px] text-gray-500 mt-1">Deze lead springt na het boeken naar “Afspraak ingepland”.</p>}
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Titel van de afspraak</label>
+            <input className="input-base" value={titel} onChange={(e) => setTitel(e.target.value)}
+              maxLength={120}
+              placeholder={`${(lead?.label.split(' · ')[0] ?? 'Bedrijf')} — ${pipelines.find((p) => p.id === pipelineId)?.name ?? 'merk'}`} />
+            <p className="text-[11px] text-gray-500 mt-1">
+              Dit wordt de titel van de agenda-uitnodiging — de prospect ziet hem ook. Leeg = het voorbeeld hierboven.
+            </p>
           </div>
 
           {/* Voor welk bedrijf is deze afspraak? Bepaalt de brochure en de

@@ -2678,3 +2678,7 @@ DROP INDEX IF EXISTS public.sales_calconn_unique_cal;
 CREATE UNIQUE INDEX IF NOT EXISTS sales_calconn_unique_cal_merk
   ON public.sales_calendar_connections
   (sales_client_id, provider, calendar_id, COALESCE(pipeline_id, '00000000-0000-0000-0000-000000000000'::uuid));
+
+-- Eigen titel voor het agenda-item van een afspraak. De prospect ziet de
+-- event-titel in zijn uitnodiging, dus de setter moet hem kunnen bepalen.
+ALTER TABLE public.sales_appointments ADD COLUMN IF NOT EXISTS titel text;

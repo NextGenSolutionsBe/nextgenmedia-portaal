@@ -7,7 +7,7 @@ import { isBookable } from '@/lib/sales/availability'
 import { APPOINTMENT_STAGE } from '@/lib/sales/stages'
 import { createEvent, moveEvent, deleteEvent } from '@/lib/sales/google-calendar'
 import { normalizePhone } from '@/lib/sales/dedupe'
-import { bouwAgendaOmschrijving, bouwAgendaTitel } from '@/lib/sales/briefing'
+import { bouwAgendaOmschrijving, bouwAgendaTitel, bouwKlantOmschrijving } from '@/lib/sales/briefing'
 import { listPipelines, defaultPipelineId } from '@/lib/sales/pipelines'
 import {
   maakClickupTaak, werkClickupTaakBij, sluitClickupTaak, stuurInterneMelding,
@@ -265,9 +265,21 @@ export async function POST(req: NextRequest) {
         klantNotitie: String(b.clientNote ?? '').trim() || null,
       }
 
+      // Titel: wat de setter intikte, anders "Bedrijf — Merk". De prospect
+      // ziet deze titel in zijn uitnodiging, dus hij is instelbaar.
+      const eigenTitel = String(b.titel ?? '').trim().slice(0, 120)
+      const titel = eigenTitel || bouwAgendaTitel(briefing)
+
+      /**
+       * Omschrijving hangt af van wie meekijkt. MET genodigde leest de
+       * prospect de tekst mee in zijn uitnodiging → de nette klantversie
+       * (adres, merk, afspraken, Meet); de interne briefing gaat dan enkel
+       * naar ClickUp en de interne melding. ZONDER genodigde is het event
+       * puur intern en blijft de volledige briefing gewoon staan.
+       */
       const ev = await createEvent(ownerId, {
-        summary: bouwAgendaTitel(briefing),
-        description: bouwAgendaOmschrijving(briefing),
+        summary: titel,
+        description: attendee ? bouwKlantOmschrijving(briefing) : bouwAgendaOmschrijving(briefing),
         location: briefing.adres,
         startsAt: start, endsAt: end, timezone: client.timezone,
         attendeeEmail: attendee, withMeet: b.withMeet !== false,
@@ -275,6 +287,9 @@ export async function POST(req: NextRequest) {
       meetUrl = ev.meetUrl
       await admin.from('sales_appointments')
         .update({ external_event_id: ev.eventId, meet_url: ev.meetUrl }).eq('id', appt.id)
+      // Titel apart en best-effort: de kolom bestaat pas na de migratie, en
+      // een boeking mag daar nooit op stuklopen.
+      await admin.from('sales_appointments').update({ titel }).eq('id', appt.id)
 
       gegevens = {
         apptId: appt.id as string,
