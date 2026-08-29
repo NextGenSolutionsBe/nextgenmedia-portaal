@@ -521,18 +521,31 @@ export async function upsertAssignmentTask(input: AssignmentTaskInput, existingT
 export type AfspraakTaak = {
   naam: string
   omschrijving: string
-  /** Begin van de afspraak (ms sinds epoch) — wordt de due date mét tijd. */
+  /** Begin van de afspraak (ms sinds epoch) — wordt de starttijd van de taak. */
   startMs: number
+  /**
+   * Einde van de afspraak — wordt de due date. Zonder eindtijd toonde ClickUp
+   * één los momentje op het beginuur in plaats van een blok van-tot, en zou
+   * een ClickUp→Google-synchronisatie het uur ook verkeerd neerzetten.
+   */
+  eindMs: number
   /** ClickUp-lid dat toegewezen wordt; null = niemand toewijzen. */
   assigneeId: number | null
+}
+
+/** De tijdvelden van een afspraaktaak: loopt van start tot einde, mét uren. */
+function afspraakTijden(t: Pick<AfspraakTaak, 'startMs' | 'eindMs'>): Record<string, unknown> {
+  return {
+    start_date: t.startMs, start_date_time: true,
+    due_date: t.eindMs, due_date_time: true,
+  }
 }
 
 export async function maakAfspraakTaak(listId: string, t: AfspraakTaak): Promise<string> {
   const body: Record<string, unknown> = {
     name: t.naam,
     description: t.omschrijving,
-    due_date: t.startMs,
-    due_date_time: true,
+    ...afspraakTijden(t),
   }
   if (t.assigneeId) body.assignees = [t.assigneeId]
   const task = await clickupJson<{ id: string }>(`/list/${listId}/task`, {
@@ -545,7 +558,7 @@ export async function maakAfspraakTaak(listId: string, t: AfspraakTaak): Promise
 export async function werkAfspraakTaakBij(taskId: string, t: Omit<AfspraakTaak, 'assigneeId'>): Promise<void> {
   await clickupJson(`/task/${taskId}`, {
     method: 'PUT',
-    body: JSON.stringify({ name: t.naam, description: t.omschrijving, due_date: t.startMs, due_date_time: true }),
+    body: JSON.stringify({ name: t.naam, description: t.omschrijving, ...afspraakTijden(t) }),
   })
 }
 

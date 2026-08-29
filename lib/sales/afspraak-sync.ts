@@ -85,6 +85,7 @@ export async function maakClickupTaak(
       naam: taakNaam(g),
       omschrijving: taakOmschrijving(g, pipeline.name),
       startMs: g.startMs,
+      eindMs: g.endMs,
       assigneeId,
     })
     const admin = createAdminSupabaseClient()
@@ -109,6 +110,7 @@ export async function werkClickupTaakBij(
       naam: taakNaam(g),
       omschrijving: taakOmschrijving(g, pipeline?.name ?? ''),
       startMs: g.startMs,
+      eindMs: g.endMs,
     })
     return null
   } catch (e) {
@@ -129,6 +131,85 @@ export async function sluitClickupTaak(taskId: string | null): Promise<string | 
   }
 }
 
+const esc = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+/** Merkkleur voor de meldingsmail: geel NGM, blauw NGS, grijs onbekend. */
+function mailKleur(key: string | undefined): { bg: string; tekst: string } {
+  if (key === 'nextgenmedia') return { bg: '#fff848', tekst: '#111111' }
+  if (key === 'nextgensolutions') return { bg: '#3b82f6', tekst: '#ffffff' }
+  return { bg: '#e5e7eb', tekst: '#111111' }
+}
+
+/**
+ * De HTML van de interne melding. Bewust ouderwets gebouwd — tabellen en
+ * inline stijlen — want dit wordt in Outlook gelezen, en die kan geen
+ * moderne CSS aan (zelfs white-space:pre-wrap negeert hij, waardoor de
+ * eerste versie als één brij tekst binnenkwam).
+ */
+function meldingHtml(merk: string, merkKey: string | undefined, g: AfspraakGegevens): string {
+  const kleur = mailKleur(merkKey)
+  const rij = (label: string, waarde: string, html = false) => `
+    <tr>
+      <td style="padding:6px 16px 6px 0;font-size:13px;color:#6b7280;white-space:nowrap;vertical-align:top">${esc(label)}</td>
+      <td style="padding:6px 0;font-size:14px;color:#111111;vertical-align:top">${html ? waarde : esc(waarde)}</td>
+    </tr>`
+
+  const rijen = [
+    rij('Wanneer', `${fmtDatum(g.startMs)}, ${fmtUur(g.startMs)}–${fmtUur(g.endMs)}`),
+    rij('Bedrijf', g.bedrijf),
+    ...(g.contact ? [rij('Contact', g.contact)] : []),
+    ...(g.telefoon ? [rij('Telefoon', g.telefoon)] : []),
+    ...(g.email ? [rij('E-mail', g.email)] : []),
+    ...(g.adres ? [rij('Adres', g.adres)] : []),
+    ...(g.agendaNaam ? [rij('Agenda', g.agendaNaam)] : []),
+    ...(g.meetUrl ? [rij('Google Meet', `<a href="${esc(g.meetUrl)}" style="color:#2563eb">${esc(g.meetUrl)}</a>`, true)] : []),
+  ].join('')
+
+  const briefing = g.notities ? `
+    <tr><td style="padding:14px 24px 0 24px">
+      <div style="font-size:13px;color:#6b7280;margin-bottom:4px">Briefing van de setter</div>
+      <div style="font-size:14px;color:#111111;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px">${esc(g.notities)}</div>
+    </td></tr>` : ''
+
+  return `
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:24px 0">
+    <tr><td align="center">
+      <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;font-family:Segoe UI,system-ui,Arial,sans-serif">
+        <tr>
+          <td style="background:${kleur.bg};padding:14px 24px;font-size:14px;font-weight:bold;color:${kleur.tekst}">
+            Nieuwe afspraak — ${esc(merk)}
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:20px 24px 4px 24px;font-size:18px;font-weight:bold;color:#111111">
+            ${esc(g.bedrijf)}${g.contact ? ` <span style="font-weight:normal;color:#6b7280">· ${esc(g.contact)}</span>` : ''}
+          </td>
+        </tr>
+        <tr><td style="padding:8px 24px 0 24px">
+          <table role="presentation" cellpadding="0" cellspacing="0">${rijen}</table>
+        </td></tr>
+        ${briefing}
+        <tr><td style="padding:18px 24px 22px 24px">
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+            <td style="background:#111111;border-radius:8px">
+              <a href="${esc(baseUrl())}/admin/sales/appointments"
+                 style="display:inline-block;padding:10px 18px;font-size:13px;font-weight:bold;color:#ffffff;text-decoration:none">
+                Open in de app
+              </a>
+            </td>
+          </tr></table>
+        </td></tr>
+        <tr>
+          <td style="padding:12px 24px;border-top:1px solid #f3f4f6;font-size:12px;color:#9ca3af">
+            Geboekt${g.setterEmail ? ` door ${esc(g.setterEmail)}` : ''} via het NextGen-portaal.
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>`
+}
+
 /**
  * De interne "er is een afspraak ingeboekt"-mail naar het merk-adres.
  * Afzender blijft bewust de standaard (info@nextgenmedia.be) — dit is een
@@ -142,6 +223,7 @@ export async function stuurInterneMelding(
   if (!naar) return null // geen adres ingesteld = geen melding gewenst
   const merk = pipeline?.name ?? 'Verkoop'
 
+  // De platte tekst blijft bestaan als terugval voor mailclients zonder HTML.
   const regels = [
     `Er is een nieuwe afspraak ingeboekt voor ${merk}.`,
     '',
@@ -163,6 +245,7 @@ export async function stuurInterneMelding(
     to: naar,
     subject: `Nieuwe afspraak ${merk} — ${g.bedrijf}, ${fmtDatum(g.startMs)} om ${fmtUur(g.startMs)}`,
     text: regels.join('\n'),
+    html: meldingHtml(merk, pipeline?.key, g),
   })
   return res.ok ? null : `De afspraak staat geboekt, maar de melding naar ${naar} is niet verstuurd: ${res.error}`
 }
