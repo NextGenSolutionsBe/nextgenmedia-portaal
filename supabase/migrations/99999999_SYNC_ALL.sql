@@ -2737,3 +2737,8 @@ ALTER TABLE public.cron_geheimen          ENABLE ROW LEVEL SECURITY;
 INSERT INTO public.cron_geheimen (sleutel, waarde)
 VALUES ('clickup_agenda', replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''))
 ON CONFLICT (sleutel) DO NOTHING;
+
+-- Er mag maar ÉÉN sync tegelijk lopen: twee overlappende runs maakten
+-- dezelfde taken dubbel aan in Google. De databank dwingt dat nu af.
+CREATE UNIQUE INDEX IF NOT EXISTS clickup_agenda_runs_een_open
+  ON public.clickup_agenda_runs ((true)) WHERE klaar IS NULL;

@@ -543,3 +543,41 @@ export async function verwijderTaakEvent(connectionId: string, calendarId: strin
     throw new Error(`Google weigerde het verwijderen (${res.status})`)
   }
 }
+
+/**
+ * Alle door de sync geplaatste events in een doelagenda (herkenbaar aan het
+ * clickupTaskId-waarmerk). Voor de wezenopruiming: een event dat niet meer in
+ * onze administratie staat — bv. door een afgebroken run — wordt verwijderd.
+ * Handmatig toegevoegde events hebben dat waarmerk niet en blijven met rust.
+ */
+export async function lijstTaakEvents(
+  connectionId: string, calendarId: string, vanMs: number,
+): Promise<{ eventId: string; taskId: string }[]> {
+  const auth = await accessToken(connectionId)
+  if (!auth) throw new Error('De Google-koppeling werkt niet (meer)')
+  const uit: { eventId: string; taskId: string }[] = []
+  let pageToken = ''
+  // Vangnet van 5 pagina's à 250: ver boven wat hier ooit in staat.
+  for (let i = 0; i < 5; i++) {
+    const p = new URLSearchParams({
+      timeMin: new Date(vanMs).toISOString(),
+      maxResults: '250', singleEvents: 'false', showDeleted: 'false',
+      ...(pageToken ? { pageToken } : {}),
+    })
+    const res = await fetchMetLimiet(`${API}/calendars/${encodeURIComponent(calendarId)}/events?${p}`, {
+      headers: { Authorization: `Bearer ${auth.token}` },
+    })
+    if (!res.ok) throw new Error(`Google weigerde de eventlijst (${res.status})`)
+    const j = await res.json() as {
+      items?: { id?: string; extendedProperties?: { private?: Record<string, string> } }[]
+      nextPageToken?: string
+    }
+    for (const ev of j.items ?? []) {
+      const taskId = ev.extendedProperties?.private?.clickupTaskId
+      if (ev.id && taskId) uit.push({ eventId: ev.id, taskId })
+    }
+    if (!j.nextPageToken) break
+    pageToken = j.nextPageToken
+  }
+  return uit
+}

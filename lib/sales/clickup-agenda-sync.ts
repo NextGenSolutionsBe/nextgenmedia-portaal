@@ -1,7 +1,7 @@
 import 'server-only'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { haalSyncTaken, clickupConfigured, type SyncTaak } from '@/lib/clickup'
-import { maakSubAgenda, schrijfTaakEvent, verwijderTaakEvent, type TaakEvent } from '@/lib/sales/google-calendar'
+import { maakSubAgenda, schrijfTaakEvent, verwijderTaakEvent, lijstTaakEvents, type TaakEvent } from '@/lib/sales/google-calendar'
 import { sendEmail } from '@/lib/email'
 
 /**
@@ -87,6 +87,8 @@ const vingerafdruk = (t: SyncTaak): string =>
 export type SyncResultaat = {
   ok: boolean
   fout: string | null
+  /** Er liep al een run; deze aanroep heeft niets gedaan. */
+  alBezig?: boolean
   aangemaakt: number
   bijgewerkt: number
   verwijderd: number
@@ -95,8 +97,26 @@ export type SyncResultaat = {
 
 export async function draaiClickupAgendaSync(): Promise<SyncResultaat> {
   const admin = createAdminSupabaseClient()
-  const { data: runRij } = await admin.from('clickup_agenda_runs')
+
+  // ── Runlock ────────────────────────────────────────────────────────────────
+  // Er mag maar één run tegelijk lopen: twee overlappende runs zagen elkaars
+  // administratie niet en zetten dezelfde taken dubbel in Google. Een partial
+  // unique index (één open run) maakt de insert hieronder atomisch: wie de
+  // rij niet krijgt, doet niets. Een run die ooit crashte zonder af te ronden
+  // wordt eerst afgesloten, anders zou het slot eeuwig dicht blijven.
+  await admin.from('clickup_agenda_runs')
+    .update({ klaar: new Date().toISOString(), ok: false, fout: 'Afgebroken (niet afgerond binnen 5 minuten)' })
+    .is('klaar', null)
+    .lt('gestart', new Date(Date.now() - 5 * 60000).toISOString())
+
+  const { data: runRij, error: runErr } = await admin.from('clickup_agenda_runs')
     .insert({}).select('id').single()
+  if (runErr) {
+    if (/duplicate|unique|23505/i.test(runErr.message)) {
+      return { ok: true, fout: null, alBezig: true, aangemaakt: 0, bijgewerkt: 0, verwijderd: 0, overgeslagen: 0 }
+    }
+    return { ok: false, fout: runErr.message, aangemaakt: 0, bijgewerkt: 0, verwijderd: 0, overgeslagen: 0 }
+  }
   const runId = (runRij as { id: string } | null)?.id
 
   const r: SyncResultaat = { ok: false, fout: null, aangemaakt: 0, bijgewerkt: 0, verwijderd: 0, overgeslagen: 0 }
@@ -170,11 +190,19 @@ export async function draaiClickupAgendaSync(): Promise<SyncResultaat> {
           }).eq('id', item.id)
           r.bijgewerkt++
         } else {
-          await admin.from('clickup_agenda_items').insert({
+          const { error: insErr } = await admin.from('clickup_agenda_items').insert({
             target_id: target.id, clickup_task_id: taskId,
             google_event_id: eventId, vingerafdruk: vinger, due_ms: taak.dueMs,
           })
-          r.aangemaakt++
+          if (insErr) {
+            // Toch een botsing (zou met het runlock niet meer mogen): dan is
+            // het zonet gemaakte Google-event een wees — meteen opruimen.
+            await verwijderTaakEvent(
+              target.bron_connection_id as string, target.google_calendar_id as string, eventId,
+            ).catch(() => { /* de opruimronde hieronder vangt hem anders */ })
+          } else {
+            r.aangemaakt++
+          }
         }
       }
 
@@ -186,6 +214,35 @@ export async function draaiClickupAgendaSync(): Promise<SyncResultaat> {
           target.bron_connection_id as string, target.google_calendar_id as string, item.google_event_id,
         )
         await admin.from('clickup_agenda_items').delete().eq('id', item.id)
+        r.verwijderd++
+      }
+
+      /**
+       * Wezenopruiming: de administratie (clickup_agenda_items) is de bron van
+       * waarheid. Elk sync-event in de doelagenda dat daar niet in staat is
+       * een wees — bv. van een run die halverwege afbrak. Zonder deze ronde
+       * blijft zo'n dubbel blok eeuwig staan en lijkt de agenda voller dan
+       * hij is. Enkel events mét ons waarmerk; handmatige items blijven staan.
+       */
+      const geldig = new Set<string>()
+      for (const [taskId2, taak2] of gewenst) {
+        const rij = bestaand.get(taskId2)
+        if (rij) geldig.add(rij.google_event_id)
+        void taak2
+      }
+      // Vers aangemaakte events van déze run ook meerekenen.
+      const { data: verseItems } = await admin.from('clickup_agenda_items')
+        .select('google_event_id').eq('target_id', target.id)
+      for (const v of (verseItems ?? []) as { google_event_id: string }[]) geldig.add(v.google_event_id)
+
+      const inAgenda = await lijstTaakEvents(
+        target.bron_connection_id as string, target.google_calendar_id as string, nu - VENSTER_TERUG_MS,
+      )
+      for (const ev of inAgenda) {
+        if (geldig.has(ev.eventId)) continue
+        await verwijderTaakEvent(
+          target.bron_connection_id as string, target.google_calendar_id as string, ev.eventId,
+        )
         r.verwijderd++
       }
     }
