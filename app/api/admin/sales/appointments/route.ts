@@ -9,6 +9,10 @@ import { createEvent, moveEvent, deleteEvent } from '@/lib/sales/google-calendar
 import { normalizePhone } from '@/lib/sales/dedupe'
 import { bouwAgendaOmschrijving, bouwAgendaTitel } from '@/lib/sales/briefing'
 import { listPipelines, defaultPipelineId } from '@/lib/sales/pipelines'
+import {
+  maakClickupTaak, werkClickupTaakBij, sluitClickupTaak, stuurInterneMelding,
+  type AfspraakGegevens,
+} from '@/lib/sales/afspraak-sync'
 import { logAudit, requestMeta } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
@@ -164,6 +168,17 @@ export async function POST(req: NextRequest) {
     // de standaard. Een onbekend id wordt genegeerd, niet overgenomen.
     pipelineId = chosen ?? pipelineId ?? await defaultPipelineId()
 
+    // Hoort de gekozen agenda wel bij dit merk? Elke agenda-koppeling kan aan
+    // één merk hangen (Marco×NextGenMedia is een andere agenda dan
+    // Marco×NextGenSolutions). Een merkloze agenda mag voor beide boeken.
+    const agenda = cal?.owners.find((o) => o.id === ownerId) ?? null
+    if (agenda?.pipeline_id && agenda.pipeline_id !== pipelineId) {
+      const agendaMerk = pipelines.find((p) => p.id === agenda.pipeline_id)?.name ?? 'een ander merk'
+      return NextResponse.json({
+        error: `De agenda van ${agenda.name ?? 'deze persoon'} hoort bij ${agendaMerk}. Kies de agenda van het juiste merk, of wissel het merk van de afspraak.`,
+      }, { status: 400 })
+    }
+
     // 2) Afspraak vastleggen. De exclusion-constraint in de database is de
     //    laatste rem tegen dubbel boeken bij gelijktijdige verzoeken.
     const { data: appt, error: apptErr } = await admin.from('sales_appointments').insert({
@@ -187,8 +202,41 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: dup ? 'Er staat al een afspraak op dit moment.' : 'Afspraak opslaan mislukt' }, { status: 409 })
     }
 
+    // 2b) Nacontrole over de ZUSTER-agenda's. De exclusion-constraint werkt per
+    //     agenda-koppeling, maar "Marco × NextGenMedia" en "Marco ×
+    //     NextGenSolutions" zijn twee koppelingen op hetzelfde Google-account:
+    //     boeken twee setters exact tegelijk hetzelfde slot op die twee, dan
+    //     ziet de constraint geen botsing en staat Marco twee keer geboekt.
+    //     Daarom kijken we ná onze insert nog één keer of er een overlappende
+    //     afspraak op een zuster-agenda staat; zo ja, trekken we de onze terug.
+    //     (Kruisen twee verzoeken elkaar exact, dan zien beide de ander en
+    //     trekken beide terug — een niet-boeking is altijd veiliger dan een
+    //     dubbele boeking.)
+    const zusterIds = (cal?.owners ?? [])
+      .filter((o) => o.id !== ownerId && !!agenda?.account_email && o.account_email === agenda.account_email)
+      .map((o) => o.id)
+    if (zusterIds.length > 0) {
+      const { data: botsing } = await admin.from('sales_appointments')
+        .select('id')
+        .in('calendar_id', zusterIds)
+        .neq('status', 'cancelled')
+        .lt('starts_at', new Date(end).toISOString())
+        .gt('ends_at', new Date(start).toISOString())
+        .limit(1)
+      if ((botsing ?? []).length > 0) {
+        await admin.from('sales_appointments').delete().eq('id', appt.id)
+        return NextResponse.json({
+          error: `${agenda?.name ?? 'Deze persoon'} heeft op dit moment al een afspraak in zijn andere agenda.`,
+        }, { status: 409 })
+      }
+    }
+
     // 3) Google-event aanmaken. Mislukt dit → afspraak terugdraaien.
     let meetUrl: string | null = null
+    // Buiten de try: de ClickUp-taak en de interne melding (stap 3b) hebben
+    // dezelfde gegevens nodig, en die stappen mogen de afspraak nooit
+    // terugrollen — dus die staan bewust ná het try/catch-blok.
+    let gegevens: AfspraakGegevens | null = null
     try {
       // Alles wat de closer nodig heeft komt in het agenda-item zelf: hij
       // opent 's ochtends zijn agenda en mag daarvoor de app niet in hoeven.
@@ -227,9 +275,37 @@ export async function POST(req: NextRequest) {
       meetUrl = ev.meetUrl
       await admin.from('sales_appointments')
         .update({ external_event_id: ev.eventId, meet_url: ev.meetUrl }).eq('id', appt.id)
+
+      gegevens = {
+        apptId: appt.id as string,
+        startMs: start, endMs: end,
+        bedrijf: company,
+        contact: briefing.contact,
+        telefoon: briefing.telefoon,
+        email: briefing.email,
+        adres: briefing.adres,
+        meetUrl: ev.meetUrl,
+        notities: briefing.briefing,
+        agendaNaam: agenda?.name ?? null,
+        setterEmail: actor.email ?? null,
+      }
     } catch (e) {
       await admin.from('sales_appointments').delete().eq('id', appt.id)
       return NextResponse.json({ error: `De afspraak is niet geboekt: ${e instanceof Error ? e.message : 'agenda-fout'}` }, { status: 502 })
+    }
+
+    // 3b) ClickUp-taak in de agenda-lijst van het merk + interne melding naar
+    //     het merk-adres. Best-effort en parallel: de afspraak staat al vast in
+    //     de database én in Google — wat hier misgaat wordt een waarschuwing op
+    //     het scherm, nooit een mislukte boeking.
+    const waarschuwingen: string[] = []
+    if (gegevens) {
+      const pipeline = pipelines.find((p) => p.id === pipelineId) ?? null
+      const [taakW, mailW] = await Promise.all([
+        maakClickupTaak(pipeline, agenda?.clickup_assignee_id ?? null, gegevens),
+        stuurInterneMelding(pipeline, gegevens),
+      ])
+      for (const w of [taakW, mailW]) if (w) waarschuwingen.push(w)
     }
 
     // 4) DE KOPPELING (§6): een geslaagde boeking — en alleen dat — zet de lead
@@ -246,7 +322,6 @@ export async function POST(req: NextRequest) {
     // 4b) Boek je een lead voor het ándere merk, dan hoort die lead daar
     //     voortaan ook thuis: blijkt aan de telefoon dat iemand uit de ene
     //     pipeline beter bij het andere past, dan verhuist hij mee.
-    let leadMoveWarning: string | null = null
     if (leadId && pipelineId && leadPipelineId && pipelineId !== leadPipelineId) {
       const moved = await moveLeadToPipeline(leadId, pipelineId)
       if (moved.ok) {
@@ -255,7 +330,7 @@ export async function POST(req: NextRequest) {
           actorId: actor.id, actorEmail: actor.email ?? null,
         })
       } else {
-        leadMoveWarning = `De afspraak staat geboekt, maar de lead kon niet mee verhuizen: ${moved.error}`
+        waarschuwingen.push(`De afspraak staat geboekt, maar de lead kon niet mee verhuizen: ${moved.error}`)
       }
     }
 
@@ -269,7 +344,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true, id: appt.id, meetUrl,
-      waarschuwing: leadMoveWarning,
+      waarschuwing: waarschuwingen.length ? waarschuwingen.join('\n') : null,
     })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
@@ -289,9 +364,17 @@ export async function PATCH(req: NextRequest) {
     }
 
     const admin = createAdminSupabaseClient()
+    // '*': clickup_task_id bestaat pas na de migratie; een vaste kolomlijst zou
+    // dan de hele query breken. We gebruiken enkel velden die zeker bestaan.
     const { data: appt } = await admin.from('sales_appointments')
-      .select('id, sales_client_id, external_event_id, status, calendar_id, lead_id, starts_at, ends_at')
-      .eq('id', id).maybeSingle()
+      .select('*')
+      .eq('id', id).maybeSingle() as { data: {
+        id: string; sales_client_id: string; external_event_id: string | null
+        status: string; calendar_id: string | null; lead_id: string | null
+        starts_at: string; ends_at: string; pipeline_id: string | null
+        clickup_task_id?: string | null; attendee_email: string | null
+        adres: string | null; notes: string | null; meet_url: string | null
+      } | null }
     if (!appt) return NextResponse.json({ error: 'Afspraak niet gevonden' }, { status: 404 })
     if (appt.status === 'cancelled') return NextResponse.json({ error: 'Deze afspraak is geannuleerd' }, { status: 400 })
 
@@ -331,6 +414,25 @@ export async function PATCH(req: NextRequest) {
     // Een uitdrukkelijke merkkeuze wint van wat de lead zegt.
     if (wantedPipeline) patch.pipeline_id = wantedPipeline
 
+    // Zelfde regel als bij het boeken: hoort de agenda van deze afspraak bij
+    // één merk, dan kan de afspraak niet naar het ándere merk wisselen —
+    // anders staat een NextGenSolutions-afspraak in de NextGenMedia-agenda.
+    const { data: agendaRijRuw } = appt.calendar_id
+      ? await admin.from('sales_calendar_connections')
+        .select('*').eq('id', appt.calendar_id).maybeSingle()
+      : { data: null }
+    const agendaRij = agendaRijRuw as {
+      name?: string | null; account_email?: string | null
+      pipeline_id?: string | null; clickup_assignee_id?: number | null
+    } | null
+    const doelPipelineId = (patch.pipeline_id as string | null | undefined) ?? appt.pipeline_id
+    if (agendaRij?.pipeline_id && doelPipelineId && agendaRij.pipeline_id !== doelPipelineId) {
+      const agendaMerk = allPipelines.find((p) => p.id === agendaRij.pipeline_id)?.name ?? 'een ander merk'
+      return NextResponse.json({
+        error: `De agenda van ${agendaRij.name ?? 'deze persoon'} hoort bij ${agendaMerk}. Boek de afspraak opnieuw in de agenda van het juiste merk in plaats van het merk hier te wisselen.`,
+      }, { status: 400 })
+    }
+
     const { error } = await admin.from('sales_appointments').update(patch).eq('id', id)
     if (error) {
       const dup = /exclusion|overlap/i.test(error.message)
@@ -357,6 +459,69 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
+    // De ClickUp-taak laat meebewegen. Bij een merkwissel hoort de taak in de
+    // lijst van het ándere merk: dan EERST de nieuwe maken, en pas als dat
+    // gelukt is de oude dichtzetten. Andersom zou een ClickUp-storing de taak
+    // van een gewoon doorgaande afspraak op [GEANNULEERD] zetten zonder dat er
+    // ooit een nieuwe komt.
+    const clickupWaarschuwingen: string[] = []
+    if (appt.clickup_task_id) {
+      const nieuwPipelineId = (patch.pipeline_id as string | undefined) ?? appt.pipeline_id
+      const nieuwePipeline = allPipelines.find((p) => p.id === nieuwPipelineId) ?? null
+
+      // Verse lead-gegevens voor naam en omschrijving van de taak.
+      const effLeadId = (('lead_id' in patch ? patch.lead_id : appt.lead_id) as string | null)
+      const { data: infoRow } = effLeadId
+        ? await admin.from('sales_leads')
+          .select('sales_companies ( name ), sales_contacts ( name, phone, mobile, email )')
+          .eq('id', effLeadId).maybeSingle()
+        : { data: null }
+      const info = infoRow as {
+        sales_companies?: { name?: string } | null
+        sales_contacts?: { name?: string; phone?: string; mobile?: string; email?: string } | null
+      } | null
+
+      const gegevens: AfspraakGegevens = {
+        apptId: id, startMs: start, endMs: end,
+        bedrijf: info?.sales_companies?.name ?? 'Prospect',
+        contact: info?.sales_contacts?.name ?? null,
+        telefoon: info?.sales_contacts?.mobile || info?.sales_contacts?.phone || null,
+        email: (patch.attendee_email as string | undefined) ?? appt.attendee_email,
+        adres: appt.adres,
+        meetUrl: appt.meet_url,
+        notities: appt.notes,
+        agendaNaam: agendaRij?.name ?? null,
+        setterEmail: actor.email ?? null,
+      }
+
+      const merkGewisseld = !!nieuwPipelineId && !!appt.pipeline_id && nieuwPipelineId !== appt.pipeline_id
+      if (merkGewisseld) {
+        if (nieuwePipeline?.clickup_list_id) {
+          // maakClickupTaak schrijft bij succes zelf het nieuwe taak-id op de
+          // afspraak; daarna mag de oude taak pas dicht.
+          const maakW = await maakClickupTaak(nieuwePipeline, agendaRij?.clickup_assignee_id ?? null, gegevens)
+          if (maakW) {
+            clickupWaarschuwingen.push(`${maakW} De oude taak blijft daarom gewoon staan.`)
+          } else {
+            const sluitW = await sluitClickupTaak(appt.clickup_task_id)
+            if (sluitW) clickupWaarschuwingen.push(sluitW)
+          }
+        } else {
+          // Het nieuwe merk heeft geen ClickUp-lijst: de oude taak hoort niet
+          // meer in de lijst van het oude merk, dus netjes afsluiten en de
+          // koppeling wissen — en dat eerlijk melden.
+          const sluitW = await sluitClickupTaak(appt.clickup_task_id)
+          await admin.from('sales_appointments').update({ clickup_task_id: null }).eq('id', id)
+          clickupWaarschuwingen.push(
+            sluitW ?? `${nieuwePipeline?.name ?? 'Het nieuwe merk'} heeft geen ClickUp-lijst ingesteld; de oude ClickUp-taak is afgesloten en er is geen nieuwe aangemaakt.`,
+          )
+        }
+      } else {
+        const w = await werkClickupTaakBij(appt.clickup_task_id, nieuwePipeline, gegevens)
+        if (w) clickupWaarschuwingen.push(w)
+      }
+    }
+
     const meta2 = requestMeta(req)
     await logAudit({
       action: 'sales.appointment.move', entityType: 'sales_appointment', entityId: id,
@@ -365,7 +530,10 @@ export async function PATCH(req: NextRequest) {
       ip: meta2.ip, userAgent: meta2.userAgent,
     })
 
-    return NextResponse.json({ ok: true, reminderNote })
+    return NextResponse.json({
+      ok: true, reminderNote,
+      waarschuwing: clickupWaarschuwingen.length ? clickupWaarschuwingen.join('\n') : null,
+    })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
@@ -381,15 +549,21 @@ export async function DELETE(req: NextRequest) {
     if (!id) return NextResponse.json({ error: 'id vereist' }, { status: 400 })
 
     const admin = createAdminSupabaseClient()
+    // '*': zie PATCH — clickup_task_id kan op een oudere installatie ontbreken.
     const { data: appt } = await admin.from('sales_appointments')
-      .select('id, sales_client_id, external_event_id, calendar_id').eq('id', id).maybeSingle()
+      .select('*').eq('id', id).maybeSingle() as { data: {
+        id: string; external_event_id: string | null; calendar_id: string | null
+        clickup_task_id?: string | null
+      } | null }
     if (!appt) return NextResponse.json({ error: 'Afspraak niet gevonden' }, { status: 404 })
 
     await admin.from('sales_appointments').update({ status: 'cancelled' }).eq('id', id)
     if (appt.external_event_id) {
       await deleteEvent(appt.calendar_id as string, appt.external_event_id as string)
     }
-    return NextResponse.json({ ok: true })
+    // ClickUp-taak dichtzetten met [GEANNULEERD] — best-effort.
+    const waarschuwing = await sluitClickupTaak(appt.clickup_task_id ?? null)
+    return NextResponse.json({ ok: true, waarschuwing })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }

@@ -507,3 +507,95 @@ export async function upsertAssignmentTask(input: AssignmentTaskInput, existingT
     return { taskId: task.id, ok: true }
   } catch (e) { return { taskId: existingTaskId ?? null, ok: false, error: e instanceof Error ? e.message : 'ClickUp-fout' } }
 }
+
+// ── Verkoopafspraken → ClickUp ───────────────────────────────────────────────
+//
+// Elke geboekte afspraak wordt gespiegeld als taak in de "agenda"-lijst van
+// het merk (NextGenMedia of NextGenSolutions), toegewezen aan de closer van
+// die agenda (Bram of Marco). Beheer blijft in ClickUp — de invite naar de
+// prospect gaat via Google Calendar, maar het team kijkt in ClickUp.
+//
+// Alles hier is BEST-EFFORT voor de oproeper: een boeking mag nooit stuklopen
+// omdat ClickUp even hapert. De oproeper vangt fouten en toont een waarschuwing.
+
+export type AfspraakTaak = {
+  naam: string
+  omschrijving: string
+  /** Begin van de afspraak (ms sinds epoch) — wordt de due date mét tijd. */
+  startMs: number
+  /** ClickUp-lid dat toegewezen wordt; null = niemand toewijzen. */
+  assigneeId: number | null
+}
+
+export async function maakAfspraakTaak(listId: string, t: AfspraakTaak): Promise<string> {
+  const body: Record<string, unknown> = {
+    name: t.naam,
+    description: t.omschrijving,
+    due_date: t.startMs,
+    due_date_time: true,
+  }
+  if (t.assigneeId) body.assignees = [t.assigneeId]
+  const task = await clickupJson<{ id: string }>(`/list/${listId}/task`, {
+    method: 'POST', body: JSON.stringify(body),
+  })
+  return task.id
+}
+
+/** Naam/omschrijving/tijdstip bijwerken (verzetten, andere lead). */
+export async function werkAfspraakTaakBij(taskId: string, t: Omit<AfspraakTaak, 'assigneeId'>): Promise<void> {
+  await clickupJson(`/task/${taskId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ name: t.naam, description: t.omschrijving, due_date: t.startMs, due_date_time: true }),
+  })
+}
+
+/**
+ * Taak sluiten bij annulering. We VERWIJDEREN bewust niet: een spoorloos
+ * verdwenen taak roept vragen op ("stond hier niet iets?"), een taak met
+ * [GEANNULEERD] ervoor en de status dicht vertelt wat er gebeurd is.
+ * De sluitstatus verschilt per lijst, dus we vragen hem op.
+ */
+export async function annuleerAfspraakTaak(taskId: string): Promise<void> {
+  const task = await clickupJson<{ name?: string; list?: { id?: string } }>(`/task/${taskId}`)
+  let dicht: string | null = null
+  if (task.list?.id) {
+    try {
+      const lijst = await clickupJson<{ statuses?: { status: string; type: string }[] }>(`/list/${task.list.id}`)
+      dicht = (lijst.statuses ?? []).find((s) => s.type === 'closed')?.status ?? null
+    } catch { /* geen statussen op te vragen → enkel hernoemen */ }
+  }
+  const naam = String(task.name ?? '').replace(/^\[GEANNULEERD\]\s*/, '')
+  await clickupJson(`/task/${taskId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ name: `[GEANNULEERD] ${naam}`, ...(dicht ? { status: dicht } : {}) }),
+  })
+}
+
+export type ClickupLijst = { id: string; naam: string; pad: string }
+
+/**
+ * Alle lijsten van de hele werkruimte, met hun pad (space / folder / lijst).
+ * Voor de instellingen-dropdown "in welke ClickUp-lijst komen de afspraken van
+ * dit merk". Best-effort: zonder sleutel of bij een fout een lege lijst.
+ */
+export async function listAlleLijsten(): Promise<ClickupLijst[]> {
+  if (!clickupConfigured()) return []
+  try {
+    const { teams } = await clickupJson<{ teams: Array<{ id: string }> }>(`/team`)
+    const uit: ClickupLijst[] = []
+    for (const team of teams ?? []) {
+      const { spaces } = await clickupJson<{ spaces: Array<{ id: string; name: string }> }>(`/team/${team.id}/space?archived=false`)
+      for (const space of spaces ?? []) {
+        const [{ folders }, { lists: los }] = await Promise.all([
+          clickupJson<{ folders: Array<{ id: string; name: string; lists?: CuList[] }> }>(`/space/${space.id}/folder?archived=false`),
+          clickupJson<{ lists: CuList[] }>(`/space/${space.id}/list?archived=false`),
+        ])
+        for (const f of folders ?? []) {
+          for (const l of f.lists ?? []) uit.push({ id: l.id, naam: l.name, pad: `${space.name} / ${f.name} / ${l.name}` })
+        }
+        for (const l of los ?? []) uit.push({ id: l.id, naam: l.name, pad: `${space.name} / ${l.name}` })
+      }
+    }
+    return uit
+  } catch { return [] }
+}

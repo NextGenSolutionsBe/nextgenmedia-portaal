@@ -14,7 +14,7 @@ type Appt = {
   deal_value_cents?: number | null
   commission_pct?: number | null
 }
-type Pipeline = { id: string; name: string }
+type Pipeline = { id: string; key: string; name: string }
 
 /** Datum-tijd voor een <input type="datetime-local">, in lokale tijd. */
 function forInput(iso: string | number): string {
@@ -83,6 +83,7 @@ export function EditAppointment({ appt, pipelines, isAdmin, onClose, onSaved }: 
       // Was de herinnering al vertrokken, dan moet je dat weten — vandaar een
       // aparte, blijvende melding in plaats van een vluchtige toast.
       if (j.reminderNote) toast.warning(j.reminderNote, { duration: 12000 })
+      if (j.waarschuwing) toast.warning(j.waarschuwing, { duration: 12000 })
       onSaved()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Verzetten mislukt') } finally { setSaving(false) }
   }
@@ -94,6 +95,7 @@ export function EditAppointment({ appt, pipelines, isAdmin, onClose, onSaved }: 
       const r = await fetch(`/api/admin/sales/appointments?id=${appt.id}`, { method: 'DELETE' })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
       toast.success('Afspraak geannuleerd.')
+      if (j.waarschuwing) toast.warning(j.waarschuwing, { duration: 12000 })
       onSaved()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Annuleren mislukt') } finally { setSaving(false) }
   }

@@ -1553,8 +1553,10 @@ CREATE TABLE IF NOT EXISTS public.sales_leads (
   updated_at         timestamptz NOT NULL DEFAULT now()
 );
 -- Eén actieve lead per bedrijf per klant (§11). Gearchiveerde tellen niet mee.
-CREATE UNIQUE INDEX IF NOT EXISTS sales_leads_one_per_company
-  ON public.sales_leads (sales_client_id, company_id) WHERE archived_at IS NULL;
+-- (vervallen) sales_leads_one_per_company is verderop VERVANGEN door
+-- sales_leads_one_per_company_pipeline (één actieve lead per bedrijf PER
+-- MERK). Opnieuw aanmaken zou een rerun laten falen zodra hetzelfde bedrijf
+-- in beide pipelines een actieve lead heeft — ondersteund gedrag.
 CREATE INDEX IF NOT EXISTS sales_leads_stage    ON public.sales_leads (sales_client_id, stage_key);
 CREATE INDEX IF NOT EXISTS sales_leads_callback ON public.sales_leads (callback_at) WHERE callback_at IS NOT NULL;
 
@@ -1592,8 +1594,9 @@ CREATE TABLE IF NOT EXISTS public.sales_availability_exceptions (
   end_time        time,
   note            text
 );
-CREATE UNIQUE INDEX IF NOT EXISTS sales_avail_exc_day
-  ON public.sales_availability_exceptions (sales_client_id, date);
+-- (vervallen) sales_avail_exc_day — één uitzondering per dag per klant — is
+-- verderop GEDROPT toen uitzonderingen per agenda gingen gelden. Opnieuw
+-- aanmaken zou een rerun laten falen bij bv. een feestdag in beide agenda's.
 
 -- ── Agendakoppeling (provider-agnostisch: google nu, clickup later) ──────────
 CREATE TABLE IF NOT EXISTS public.sales_calendar_connections (
@@ -1609,8 +1612,10 @@ CREATE TABLE IF NOT EXISTS public.sales_calendar_connections (
   created_at       timestamptz NOT NULL DEFAULT now(),
   updated_at       timestamptz NOT NULL DEFAULT now()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS sales_calconn_client
-  ON public.sales_calendar_connections (sales_client_id, provider);
+-- (vervallen) sales_calconn_client — één agenda per provider per klant — is
+-- verderop GEDROPT toen meerdere agenda's de kernfeature werden. Hem hier
+-- opnieuw aanmaken zou een rerun laten falen zodra Bram én Marco allebei
+-- Google gebruiken; daarom staat hier enkel nog deze verwijzing.
 
 -- ── Afspraken ────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS public.sales_appointments (
@@ -1772,8 +1777,11 @@ ALTER TABLE public.sales_calendar_connections
 -- De oude regel liet maar één agenda per klant toe.
 DROP INDEX IF EXISTS public.sales_calconn_client;
 -- Wel: nooit twee keer dezelfde Google-agenda binnen dezelfde klant.
-CREATE UNIQUE INDEX IF NOT EXISTS sales_calconn_unique_cal
-  ON public.sales_calendar_connections (sales_client_id, provider, calendar_id);
+-- LET OP: deze index is verderop VERVANGEN door sales_calconn_unique_cal_merk
+-- (één rij per account PER MERK). Hem hier opnieuw aanmaken zou falen zodra
+-- één account voor twee merken gekoppeld is — en dan is dit hele bestand niet
+-- meer herdraaibaar. Daarom staat hier enkel nog de verwijzing; de echte index
+-- staat bij het blok "Vier agenda's, twee merken".
 
 -- Werkuren en uitzonderingen mogen nu per agenda gelden.
 -- NULL = geldt voor de hele klant (en dus voor elke agenda zonder eigen uren).
@@ -2636,3 +2644,37 @@ CREATE INDEX IF NOT EXISTS sales_scripts_client_idx
 
 -- Zoals de hele verkoop-module: server-side via service-role; RLS als slot.
 ALTER TABLE public.sales_scripts ENABLE ROW LEVEL SECURITY;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Vier agenda's, twee merken: Bram×NGM, Bram×NGS, Marco×NGM, Marco×NGS.
+--
+-- Een gekoppelde agenda hoort voortaan bij één merk (pipeline). NULL blijft
+-- betekenen: zichtbaar voor beide merken — zo verandert er niets aan een
+-- bestaande installatie tot iemand het merk expliciet instelt.
+ALTER TABLE public.sales_calendar_connections
+  ADD COLUMN IF NOT EXISTS pipeline_id uuid REFERENCES public.sales_pipelines(id) ON DELETE SET NULL;
+
+-- Wie in ClickUp toegewezen wordt op de afspraaktaak (Bram of Marco).
+ALTER TABLE public.sales_calendar_connections
+  ADD COLUMN IF NOT EXISTS clickup_assignee_id bigint;
+
+-- Per merk: de ClickUp-lijst ("agenda") waar afspraaktaken in komen, en het
+-- interne adres dat bij elke nieuwe afspraak een melding krijgt.
+ALTER TABLE public.sales_pipelines
+  ADD COLUMN IF NOT EXISTS clickup_list_id text;
+ALTER TABLE public.sales_pipelines
+  ADD COLUMN IF NOT EXISTS notify_email text;
+
+-- De ClickUp-taak die bij een afspraak hoort: nodig om hem bij verzetten mee
+-- te verplaatsen en bij annuleren op te ruimen.
+ALTER TABLE public.sales_appointments
+  ADD COLUMN IF NOT EXISTS clickup_task_id text;
+
+-- Eén Google-account mag voortaan per MERK een koppeling hebben: "Marco ×
+-- NextGenMedia" en "Marco × NextGenSolutions" zijn twee agenda's in de app,
+-- ook als ze hetzelfde Google-account gebruiken. De oude sleutel (één rij per
+-- account) hield dat tegen.
+DROP INDEX IF EXISTS public.sales_calconn_unique_cal;
+CREATE UNIQUE INDEX IF NOT EXISTS sales_calconn_unique_cal_merk
+  ON public.sales_calendar_connections
+  (sales_client_id, provider, calendar_id, COALESCE(pipeline_id, '00000000-0000-0000-0000-000000000000'::uuid));

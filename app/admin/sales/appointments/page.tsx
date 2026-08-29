@@ -29,7 +29,7 @@ export default async function SalesAppointmentsPage({ searchParams }: { searchPa
           slot_interval_min: pipeline.slot_interval_min,
           default_duration_min: pipeline.default_duration_min,
         }}
-        pipelines={pipelines.map((p) => ({ id: p.id, name: p.name }))}
+        pipelines={pipelines.map((p) => ({ id: p.id, key: p.key, name: p.name }))}
         isAdmin={!!admin}
         initialLeadId={sp.lead}
       />

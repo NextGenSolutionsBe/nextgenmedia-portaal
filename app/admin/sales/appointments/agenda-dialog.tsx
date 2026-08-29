@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2, X, Link2, Save, UserRound } from 'lucide-react'
 import { SIGNATURES, matchSignature } from '@/lib/sales/signatures'
+import { merkStijl } from '@/lib/sales/merk'
 
 type Existing = {
   id: string
@@ -11,7 +12,12 @@ type Existing = {
   signature_image_url?: string | null
   signature_phone?: string | null
   signature_email?: string | null
+  pipeline_id?: string | null
+  clickup_assignee_id?: number | null
 }
+
+type Pipeline = { id: string; key: string; name: string }
+type ClickupLid = { id: number; naam: string }
 
 /**
  * Agenda koppelen of bewerken: van wie is deze agenda, en welke handtekening
@@ -20,8 +26,9 @@ type Existing = {
  * Bij een nieuwe koppeling reizen naam en handtekening mee naar Google en komen
  * ze terug in de callback, zodat alles meteen goed staat na één keer inloggen.
  */
-export function AgendaDialog({ existing, onClose, onSaved }: {
+export function AgendaDialog({ existing, pipelines = [], onClose, onSaved }: {
   existing?: Existing | null
+  pipelines?: Pipeline[]
   onClose: () => void
   onSaved?: () => void
 }) {
@@ -32,7 +39,19 @@ export function AgendaDialog({ existing, onClose, onSaved }: {
 
   const [name, setName] = useState(existing?.name ?? '')
   const [sigKey, setSigKey] = useState(initialSig)
+  const [merkId, setMerkId] = useState(existing?.pipeline_id ?? '')
+  const [clickupId, setClickupId] = useState(existing?.clickup_assignee_id ? String(existing.clickup_assignee_id) : '')
+  const [leden, setLeden] = useState<ClickupLid[]>([])
+  const [clickupIngesteld, setClickupIngesteld] = useState(true)
   const [saving, setSaving] = useState(false)
+
+  // Wie kan er in ClickUp toegewezen worden? Live uit ClickUp, nooit een kopie.
+  useEffect(() => {
+    fetch('/api/admin/sales/clickup-opties')
+      .then((r) => r.json())
+      .then((j) => { setLeden(j.leden ?? []); setClickupIngesteld(j.ingesteld !== false) })
+      .catch(() => setLeden([]))
+  }, [])
 
   // Nog niets gekozen? Dan tonen we alvast de handtekening die bij de naam past.
   const effectiveKey = sigKey || matchSignature(name)?.key || ''
@@ -41,7 +60,10 @@ export function AgendaDialog({ existing, onClose, onSaved }: {
   const connect = () => {
     if (!name.trim()) { toast.error('Vul in van wie deze agenda is'); return }
     setSaving(true)
-    const p = new URLSearchParams({ name: name.trim(), signature: effectiveKey })
+    const p = new URLSearchParams({
+      name: name.trim(), signature: effectiveKey,
+      pipeline: merkId, clickup: clickupId,
+    })
     window.location.href = `/api/admin/sales/calendar/connect?${p}`
   }
 
@@ -52,7 +74,11 @@ export function AgendaDialog({ existing, onClose, onSaved }: {
     try {
       const r = await fetch('/api/admin/sales/calendar/agenda', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: existing.id, name: name.trim(), signature: effectiveKey }),
+        body: JSON.stringify({
+          id: existing.id, name: name.trim(), signature: effectiveKey,
+          pipelineId: merkId || null,
+          clickupAssigneeId: clickupId ? Number(clickupId) : null,
+        }),
       })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
       if (j.warning) toast.warning(j.warning)
@@ -86,6 +112,47 @@ export function AgendaDialog({ existing, onClose, onSaved }: {
               placeholder="Bram" autoFocus />
             <p className="text-[11px] text-gray-500 mt-1">
               Deze naam staat bij de agendakiezer en onder “Met vriendelijke groeten”.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Voor welk merk is deze agenda?</label>
+            <div className="flex gap-2">
+              {pipelines.map((pl) => {
+                const stijl = merkStijl(pl.key)
+                const gekozen = merkId === pl.id
+                return (
+                  <button key={pl.id} type="button"
+                    onClick={() => setMerkId(gekozen ? '' : pl.id)}
+                    className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all ${
+                      gekozen ? `${stijl.badge} ring-2 ring-offset-1 ring-gray-300` : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                    {pl.name}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-[11px] text-gray-500 mt-1">
+              {merkId
+                ? 'Deze agenda verschijnt enkel bij dat merk. Zo boek je "Marco — NextGenMedia" nooit per ongeluk voor het andere merk.'
+                : 'Geen merk gekozen = deze agenda is voor beide merken boekbaar.'}
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Wie krijgt de taak in ClickUp?</label>
+            <select className="input-base" value={clickupId} onChange={(e) => setClickupId(e.target.value)}>
+              <option value="">Niemand toewijzen</option>
+              {/* De huidige toegewezene blijft zichtbaar, ook als ClickUp even
+                  geen ledenlijst geeft — anders zou openen+opslaan hem wissen. */}
+              {clickupId && !leden.some((l) => String(l.id) === clickupId) && (
+                <option value={clickupId}>Huidige persoon ({clickupId})</option>
+              )}
+              {leden.map((l) => <option key={l.id} value={String(l.id)}>{l.naam}</option>)}
+            </select>
+            <p className="text-[11px] text-gray-500 mt-1">
+              {clickupIngesteld
+                ? 'Elke afspraak in deze agenda wordt in ClickUp een taak, toegewezen aan deze persoon.'
+                : 'De ClickUp-koppeling is niet ingesteld (CLICKUP_API_KEY ontbreekt) — er worden geen taken aangemaakt.'}
             </p>
           </div>
 

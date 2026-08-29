@@ -22,12 +22,18 @@ export type SalesPipeline = {
   brochure_filename: string | null
   reminder_from: string | null
   reminder_reply_to: string | null
+  /** ClickUp-lijst ("agenda") van dit merk: hier komen de afspraaktaken in. */
+  clickup_list_id?: string | null
+  /** Intern adres dat bij elke nieuw geboekte afspraak een melding krijgt. */
+  notify_email?: string | null
 }
 
 type Seed = {
   key: string; name: string; position: number; brochure_filename: string
   /** Vast afzenderadres van dit merk. Leeg = de algemene afzender (EMAIL_FROM). */
   from: string | null
+  /** Waar de interne "nieuwe afspraak"-melding van dit merk heen gaat. */
+  notify: string | null
 }
 
 const SEED: Seed[] = [
@@ -36,11 +42,13 @@ const SEED: Seed[] = [
     brochure_filename: 'Kennismaking_NextGenMedia.pdf',
     // Leeg: dit merk volgt de algemene afzender uit de omgeving.
     from: null,
+    notify: 'info@nextgenmedia.be',
   },
   {
     key: 'nextgensolutions', name: 'NextGenSolutions', position: 2,
     brochure_filename: 'Kennismaking_NextGenSolutions.pdf',
     from: 'NextGenSolutions <info@nextgensolutions.be>',
+    notify: 'info@nextgensolutions.be',
   },
 ]
 
@@ -67,18 +75,26 @@ export async function listPipelines(): Promise<SalesPipeline[]> {
 
   const missing = SEED.filter((s) => !rows.some((r) => r.key === s.key))
   if (missing.length > 0) {
-    await admin.from('sales_pipelines').upsert(
+    const zaai = (metNotify: boolean) => admin.from('sales_pipelines').upsert(
       missing.map((s) => ({
         sales_client_id: org.id,
         key: s.key, name: s.name, position: s.position,
         brochure_filename: s.brochure_filename,
         reminder_from: s.from,
+        // Het meldingsadres hoort bij de AANMAAK, niet bij een backfill-lus:
+        // een lus die elke lege waarde opnieuw vult, maakt "leeg = geen
+        // melding" (de belofte in de instellingen) voorgoed onmogelijk.
+        ...(metNotify ? { notify_email: s.notify } : {}),
         // Relatief pad: de brochure wordt bij verzenden pas tot een volledige
         // URL gemaakt, zodat een domeinwissel niets breekt.
         brochure_url: `/brochures/${s.brochure_filename}`,
       })),
       { onConflict: 'sales_client_id,key' },
     )
+    // Kolom notify_email nog niet gemigreerd? Dan zonder — de pipelines zelf
+    // mogen daar nooit op stuklopen.
+    const { error: zaaiErr } = await zaai(true)
+    if (zaaiErr && /notify_email|PGRST204|schema cache/i.test(zaaiErr.message)) await zaai(false)
     const { data: again } = await admin.from('sales_pipelines')
       .select('*').eq('sales_client_id', org.id).order('position')
     rows = (again ?? []) as SalesPipeline[]
@@ -101,13 +117,16 @@ export async function listPipelines(): Promise<SalesPipeline[]> {
   // ontbreekt er niets, en dan zou deze aanvulling nooit gebeuren. Wat iemand
   // zelf ingevuld heeft blijft ongemoeid — enkel lege velden worden gevuld.
   for (const seed of SEED) {
-    if (!seed.from) continue
     const row = rows.find((r) => r.key === seed.key)
-    if (row && !row.reminder_from) {
+    if (!row) continue
+    if (seed.from && !row.reminder_from) {
       await admin.from('sales_pipelines')
         .update({ reminder_from: seed.from }).eq('id', row.id).is('reminder_from', null)
       row.reminder_from = seed.from
     }
+    // Het meldingsadres wordt hier BEWUST niet aangevuld: wie het veld leegt,
+    // kiest "geen melding" — en dat moet leeg blijven. De beginwaarde komt bij
+    // de aanmaak mee (zie de zaai hierboven).
   }
 
   return rows

@@ -228,6 +228,10 @@ export async function logLeadEvent(leadId: string, e: {
 export type CalendarOwner = {
   id: string; name: string; account_email: string | null; status: string; active: boolean
   signature_image_url?: string | null
+  /** Merk van deze agenda (sales_pipelines.id). NULL = beschikbaar voor beide. */
+  pipeline_id?: string | null
+  /** ClickUp-lid dat op afspraaktaken van deze agenda toegewezen wordt. */
+  clickup_assignee_id?: number | null
 }
 
 export type CalendarData = {
@@ -247,14 +251,21 @@ export type CalendarData = {
 /** Alle gekoppelde agenda's (personen) van een klant. */
 export async function listOwners(salesClientId: string): Promise<CalendarOwner[]> {
   const admin = createAdminSupabaseClient()
-  // Bewust '*': de handtekeningkolommen bestaan pas na de migratie, en een
-  // vaste kolomlijst zou de hele query dan laten falen.
+  // Bewust '*': de handtekening- en merkkolommen bestaan pas na de migratie,
+  // en een vaste kolomlijst zou de hele query dan laten falen.
   const { data } = await admin
     .from('sales_calendar_connections')
     .select('*')
     .eq('sales_client_id', salesClientId)
     .order('name')
-  return ((data ?? []) as CalendarOwner[]).filter((o) => o.active !== false)
+  return ((data ?? []) as (CalendarOwner & Record<string, unknown>)[])
+    .filter((o) => o.active !== false)
+    // Deze lijst reist integraal naar de browser (agendakiezer). De Google-
+    // tokens zijn versleuteld, maar horen daar hoe dan ook niet: strippen.
+    .map(({ access_token: _a, refresh_token: _b, ...rest }) => {
+      void _a; void _b
+      return rest as CalendarOwner
+    })
 }
 
 /**
@@ -302,10 +313,25 @@ export async function loadCalendar(
     pipeline_id: string | null
     outcome?: string | null; deal_value_cents?: number | null; commission_pct?: number | null
   }[]
-  // Alleen de afspraken van déze persoon blokkeren zijn agenda; een afspraak
-  // van Marco mag Bram niet in de weg zitten.
+  /**
+   * Welke afspraken blokkeren déze agenda? Die van de persoon zelf — en dat is
+   * sinds de merksplitsing meer dan één rij: "Marco × NextGenMedia" en
+   * "Marco × NextGenSolutions" zijn twee koppelingen op hetzelfde Google-
+   * account. Een afspraak op de ene moet de andere blokkeren, anders staat
+   * Marco om 10 uur bij twee prospects tegelijk. Daarom tellen alle agenda's
+   * met hetzelfde account-e-mailadres mee ("siblings"). Een afspraak van Bram
+   * blijft Marco uiteraard niet in de weg zitten.
+   */
+  const siblingIds = new Set(
+    active
+      ? owners
+        .filter((o) => o.id === active.id
+          || (!!active.account_email && o.account_email === active.account_email))
+        .map((o) => o.id)
+      : [],
+  )
   const appointments = active
-    ? allAppts.filter((a) => a.calendar_id === active.id || a.calendar_id === null)
+    ? allAppts.filter((a) => a.calendar_id === null || siblingIds.has(a.calendar_id))
     : allAppts
 
   const busy = active ? await fetchBusy(active.id, from, to) : []

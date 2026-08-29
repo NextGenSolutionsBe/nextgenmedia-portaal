@@ -11,11 +11,17 @@ type Pipeline = {
   brochure_filename: string | null
   reminder_from: string | null
   reminder_reply_to: string | null
+  /** ClickUp-lijst waar de afspraaktaken van dit merk in komen. */
+  clickup_list_id?: string | null
+  /** Intern adres dat bij elke nieuwe afspraak van dit merk een melding krijgt. */
+  notify_email?: string | null
   /** Heeft dit merk een eigen Resend-sleutel in de omgeving staan? */
   ownKey?: boolean
   /** Wat er vertrekt als het afzenderveld leeg blijft. */
   fallbackFrom?: string
 }
+
+type ClickupLijst = { id: string; naam: string; pad: string }
 
 /**
  * De herinneringsmail per merk. Die gaat 24 uur voor de afspraak uit, of een
@@ -32,6 +38,8 @@ export function ReminderSettings({ onClose }: { onClose: () => void }) {
   const [active, setActive] = useState(0)
   const [defaultFrom, setDefaultFrom] = useState('')
   const [testTo, setTestTo] = useState('')
+  const [lijsten, setLijsten] = useState<ClickupLijst[]>([])
+  const [clickupIngesteld, setClickupIngesteld] = useState(true)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -43,6 +51,15 @@ export function ReminderSettings({ onClose }: { onClose: () => void }) {
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Laden mislukt') } finally { setLoading(false) }
   }, [])
   useEffect(() => { load() }, [load])
+
+  // De ClickUp-lijsten los laden: zijn die traag of niet ingesteld, dan staat
+  // de rest van het paneel er al.
+  useEffect(() => {
+    fetch('/api/admin/sales/clickup-opties')
+      .then((r) => r.json())
+      .then((j) => { setLijsten(j.lijsten ?? []); setClickupIngesteld(j.ingesteld !== false) })
+      .catch(() => setLijsten([]))
+  }, [])
 
   const p = rows[active]
   const set = (patch: Partial<Pipeline>) =>
@@ -162,6 +179,43 @@ export function ReminderSettings({ onClose }: { onClose: () => void }) {
                 Een pad dat met <code>/</code> begint verwijst naar een bestand in de app; een volledige
                 https-link mag ook. Laat je dit leeg, dan gaat de mail zónder bijlage.
               </p>
+            </div>
+
+            {/* ── ClickUp & interne melding per merk ─────────────────────── */}
+            <div className="border-t border-gray-100 pt-4 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Melding bij elke nieuwe afspraak naar
+                </label>
+                <input className="input-base" type="email" value={p.notify_email ?? ''}
+                  onChange={(e) => set({ notify_email: e.target.value })}
+                  placeholder={p.key === 'nextgensolutions' ? 'info@nextgensolutions.be' : 'info@nextgenmedia.be'} />
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Wordt er voor {p.name} een afspraak ingeboekt, dan gaat er meteen een mail met alle
+                  gegevens naar dit adres. Leeg = geen melding.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  ClickUp-lijst voor afspraken van {p.name}
+                </label>
+                <select className="input-base" value={p.clickup_list_id ?? ''}
+                  onChange={(e) => set({ clickup_list_id: e.target.value })}>
+                  <option value="">Geen ClickUp-taak aanmaken</option>
+                  {/* Een opgeslagen lijst die (even) niet in ClickUp gevonden wordt
+                      blijft zichtbaar, anders zou openen+opslaan hem stilletjes wissen. */}
+                  {p.clickup_list_id && !lijsten.some((l) => l.id === p.clickup_list_id) && (
+                    <option value={p.clickup_list_id}>Huidige lijst ({p.clickup_list_id})</option>
+                  )}
+                  {lijsten.map((l) => <option key={l.id} value={l.id}>{l.pad}</option>)}
+                </select>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  {clickupIngesteld
+                    ? 'Elke geboekte afspraak wordt hier als taak gezet, toegewezen aan de closer van de gekozen agenda, met de afspraakdatum als deadline. Verzetten en annuleren bewegen mee.'
+                    : 'De ClickUp-koppeling is niet ingesteld (CLICKUP_API_KEY ontbreekt of hapert) — er kunnen nu geen lijsten opgehaald en geen taken aangemaakt worden.'}
+                </p>
+              </div>
             </div>
 
             <div className="border-t border-gray-100 pt-4">

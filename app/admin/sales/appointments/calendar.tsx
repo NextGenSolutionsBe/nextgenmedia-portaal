@@ -9,6 +9,7 @@ import { BusyCalendarsPanel } from './busy-calendars'
 import { AgendaDialog } from './agenda-dialog'
 import { EditAppointment } from './edit-appointment'
 import { LeadKiezer, type LeadOption } from './lead-kiezer'
+import { merkStijl } from '@/lib/sales/merk'
 
 type SalesClient = {
   id: string; name: string; timezone: string
@@ -22,7 +23,7 @@ type Appt = {
   deal_value_cents?: number | null
   commission_pct?: number | null
 }
-type Pipeline = { id: string; name: string }
+type Pipeline = { id: string; key: string; name: string }
 
 // Zichtbaar dagvenster. Buiten deze uren is toch alles grijs; dit houdt de
 // kalender compact zonder dat je 24 uur moet scrollen.
@@ -53,12 +54,55 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId }: {
   const [segments, setSegments] = useState<Interval[]>([])
   const [appointments, setAppointments] = useState<Appt[]>([])
   const [connected, setConnected] = useState(false)
-  // Agenda's (personen) van deze klant — Bram, Marco, …
+  // Agenda's (personen) van deze klant — Bram×NGM, Bram×NGS, Marco×NGM, …
   const [owners, setOwners] = useState<{
     id: string; name: string; account_email: string | null; status: string
     signature_image_url?: string | null
+    pipeline_id?: string | null
+    clickup_assignee_id?: number | null
   }[]>([])
   const [ownerId, setOwnerId] = useState<string>('')
+  // Merkfilter: toon enkel de agenda's van dit merk. '' = alle agenda's.
+  const [merkFilter, setMerkFilter] = useState<string>('')
+
+  // Welke agenda's passen bij het gekozen merk? Een agenda zonder merk hoort
+  // overal bij — zo blijft een bestaande installatie gewoon werken.
+  const zichtbareOwners = merkFilter
+    ? owners.filter((o) => !o.pipeline_id || o.pipeline_id === merkFilter)
+    : owners
+
+  const kiesMerk = (id: string) => {
+    setMerkFilter(id)
+    // Valt de huidige agenda buiten het merk, spring dan naar de eerste die
+    // er wél bij hoort — anders kijk je naar een agenda die je niet mag boeken.
+    if (id) {
+      const huidige = owners.find((o) => o.id === ownerId)
+      if (huidige?.pipeline_id && huidige.pipeline_id !== id) {
+        const eerste = owners.find((o) => !o.pipeline_id || o.pipeline_id === id)
+        if (eerste) setOwnerId(eerste.id)
+      }
+    }
+  }
+
+  // Vangnet naast kiesMerk: ook wanneer de agendalijst pas na de merkkeuze
+  // binnenkomt (eerste load is traag door Google), of wanneer de SERVER een
+  // agenda koos die buiten het filter valt, springt de keuze alsnog goed.
+  useEffect(() => {
+    if (!merkFilter || owners.length === 0) return
+    const huidige = owners.find((o) => o.id === ownerId)
+    if (huidige && (!huidige.pipeline_id || huidige.pipeline_id === merkFilter)) return
+    const eerste = owners.find((o) => !o.pipeline_id || o.pipeline_id === merkFilter)
+    if (eerste && eerste.id !== ownerId) setOwnerId(eerste.id)
+  }, [owners, merkFilter, ownerId])
+
+  /**
+   * Mag er in dit beeld geboekt worden? Niet wanneer het merkfilter aanstaat
+   * en de getoonde agenda bij het andere merk hoort (bv. merk B gekozen
+   * terwijl er alleen merk-A-agenda's bestaan). Zonder deze rem bleef het
+   * grid gewoon boekbaar op de verborgen agenda van het verkeerde merk.
+   */
+  const huidigeOwner = owners.find((o) => o.id === ownerId)
+  const boekbaar = !merkFilter || !huidigeOwner?.pipeline_id || huidigeOwner.pipeline_id === merkFilter
 
   // Sleep-selectie
   const [drag, setDrag] = useState<{ segIdx: number; start: number; end: number } | null>(null)
@@ -103,12 +147,16 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId }: {
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => new Date(from + i * 86400000)), [from])
 
+  // Niet boekbaar (agenda hoort bij het andere merk) -> geen witte segmenten,
+  // dus ook niets om op te slepen. Beeld en gedrag blijven zo een geheel.
+  const zichtbareSegments = boekbaar ? segments : []
+
   // Grijs = het COMPLEMENT van wit. Dezelfde bron, dus beeld en gedrag kunnen
   // niet uiteenlopen: waar geen wit segment ligt, kun je ook niet slepen.
   const greyByDay = useMemo(() => days.map((d) => {
     const s = d.getTime(), e = s + 86400000
-    return complement(segments.filter((x) => x.end > s && x.start < e), s, e)
-  }), [days, segments])
+    return complement(zichtbareSegments.filter((x) => x.end > s && x.start < e), s, e)
+  }), [days, zichtbareSegments])
 
   const dayTop = (d: Date) => new Date(d).setHours(DAY_START_H, 0, 0, 0)
   const yOf = (ms: number, d: Date) => ((ms - dayTop(d)) / 60000) * PX_PER_MIN
@@ -161,18 +209,47 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId }: {
 
   return (
     <div className="space-y-4">
-      {/* Kop: wiens agenda, week, koppeling */}
+      {/* Kop: welk merk, wiens agenda, week, koppeling */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Eerst het merk: geel = NextGenMedia, blauw = NextGenSolutions.
+              Zo zie je in één oogopslag waarvoor je aan het boeken bent. */}
+          <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50">
+            <button onClick={() => kiesMerk('')}
+              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                !merkFilter ? 'bg-white text-black shadow-sm' : 'text-gray-500 hover:text-black'}`}>
+              Alle
+            </button>
+            {pipelines.map((pl) => {
+              const stijl = merkStijl(pl.key)
+              return (
+                <button key={pl.id} onClick={() => kiesMerk(pl.id)}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors flex items-center gap-1.5 ${
+                    merkFilter === pl.id ? `${stijl.badge} border shadow-sm` : 'text-gray-500 hover:text-black'}`}>
+                  <span className={`inline-block h-2 w-2 rounded-full ${stijl.stip}`} />
+                  {pl.name}
+                </button>
+              )
+            })}
+          </div>
           {/* De belangrijkste keuze op dit scherm: voor wie boek je? */}
-          {owners.length > 0 && (
+          {zichtbareOwners.length > 0 && (
             <label className="flex items-center gap-1.5 text-sm text-gray-600">
               Agenda van
               <select className="input-base w-auto" value={ownerId} onChange={(e) => setOwnerId(e.target.value)}
                 title="Voor wie boek je?">
-                {owners.map((o) => <option key={o.id} value={o.id}>{o.name || o.account_email || 'Agenda'}</option>)}
+                {zichtbareOwners.map((o) => {
+                  const merk = pipelines.find((p) => p.id === o.pipeline_id)
+                  const naam = o.name || o.account_email || 'Agenda'
+                  return <option key={o.id} value={o.id}>{merk ? `${naam} — ${merk.name}` : naam}</option>
+                })}
               </select>
             </label>
+          )}
+          {zichtbareOwners.length === 0 && owners.length > 0 && (
+            <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+              Nog geen agenda voor dit merk — koppel er een via “Agenda toevoegen”.
+            </span>
           )}
           <div className="flex items-center gap-1">
             <button onClick={() => setWeekStart(new Date(from - 7 * 86400000))} className="btn-secondary px-2" aria-label="Vorige week"><ChevronLeft className="h-4 w-4" /></button>
@@ -186,8 +263,8 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId }: {
         <div className="flex items-center gap-2">
           {ownerId && (
             <button onClick={() => setAgendaDialog(ownerId)} className="btn-secondary text-sm"
-              title="Naam en e-mailhandtekening van deze agenda">
-              <UserRound className="h-4 w-4" />Handtekening
+              title="Naam, merk, ClickUp-persoon en e-mailhandtekening van deze agenda">
+              <UserRound className="h-4 w-4" />Agenda bewerken
             </button>
           )}
           {ownerId && (
@@ -262,7 +339,7 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId }: {
                 })}
 
                 {/* Wit: enkel hierop kun je slepen */}
-                {segments.map((seg, si) => {
+                {zichtbareSegments.map((seg, si) => {
                   const dayS = day.getTime(), dayE = dayS + 86400000
                   if (seg.end <= dayS || seg.start >= dayE) return null
                   const s = Math.max(seg.start, dayS), e = Math.min(seg.end, dayE)
@@ -282,7 +359,7 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId }: {
                 })}
 
                 {/* Actieve sleep-selectie */}
-                {drag && segments[drag.segIdx] && drag.start >= day.getTime() && drag.start < day.getTime() + 86400000 && (
+                {drag && zichtbareSegments[drag.segIdx] && drag.start >= day.getTime() && drag.start < day.getTime() + 86400000 && (
                   <div className="absolute inset-x-0.5 rounded bg-amber-300/70 border border-amber-500 pointer-events-none flex items-center justify-center"
                     style={{ top: yOf(drag.start, day), height: Math.max(14, yOf(drag.end, day) - yOf(drag.start, day)) }}>
                     <span className="text-[10px] font-semibold text-amber-900">{hhmm(drag.start)}–{hhmm(drag.end)}</span>
@@ -332,6 +409,8 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId }: {
           end={booking.end}
           pipelines={pipelines}
           initialLeadId={initialLeadId}
+          merkVoorkeur={owners.find((o) => o.id === ownerId)?.pipeline_id ?? merkFilter}
+          merkVast={!!owners.find((o) => o.id === ownerId)?.pipeline_id}
           ownerId={ownerId}
           ownerName={owners.find((o) => o.id === ownerId)?.name ?? null}
           onClose={() => setBooking(null)}
@@ -351,6 +430,7 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId }: {
 
       {agendaDialog && (
         <AgendaDialog
+          pipelines={pipelines}
           existing={agendaDialog === 'new' ? null : owners.find((o) => o.id === agendaDialog) ?? null}
           onClose={() => setAgendaDialog(null)}
           onSaved={() => { setAgendaDialog(null); load() }}
@@ -375,17 +455,24 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId }: {
       )}
 
       {appointments.length > 0 && (
-        <AppointmentList appointments={appointments} onChanged={load} />
+        <AppointmentList appointments={appointments} pipelines={pipelines} onChanged={load} />
       )}
     </div>
   )
 }
 
 // ── Boekingspaneel ───────────────────────────────────────────────────────────
-function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId, onClose, onBooked }: {
+function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId, merkVoorkeur, merkVast, onClose, onBooked }: {
   ownerId: string; ownerName: string | null
   start: number; end: number
   pipelines: Pipeline[]; initialLeadId?: string
+  /** Merk van de gekozen agenda (of het actieve merkfilter): wordt de
+   *  beginstand van "Afspraak voor", zodat agenda en merk samen kloppen. */
+  merkVoorkeur?: string
+  /** De gekozen agenda hoort bij een merk: dan ligt het merk VAST. De server
+   *  weigert een andere combinatie toch, dus de keuze tonen zou enkel een
+   *  gegarandeerde foutmelding opleveren. */
+  merkVast?: boolean
   onClose: () => void; onBooked: () => void
 }) {
   const [lead, setLead] = useState<LeadOption | null>(null)
@@ -396,7 +483,7 @@ function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId
    * beter bij het andere merk past. `touched` onthoudt of je zelf gekozen hebt,
    * zodat een latere leadwissel jouw keuze niet stilletjes overschrijft.
    */
-  const [pipelineId, setPipelineId] = useState(pipelines[0]?.id ?? '')
+  const [pipelineId, setPipelineId] = useState(merkVoorkeur || (pipelines[0]?.id ?? ''))
   const [touched, setTouched] = useState(false)
   const [email, setEmail] = useState('')
   const [notes, setNotes] = useState('')
@@ -407,10 +494,13 @@ function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId
 
   const leadPipeline = lead ? pipelines.find((p) => p.id === lead.pipelineId) ?? null : null
 
-  // Lead gekozen en zelf nog niets aangeduid → het merk van die lead volgen.
+  // Lead gekozen en zelf nog niets aangeduid -> het merk van die lead volgen.
+  // MAAR: hoort de agenda bij een vast merk, dan wint de agenda. Anders zou
+  // het kiezen van een lead uit het andere merk hier stilletjes een combinatie
+  // instellen die de server gegarandeerd weigert.
   useEffect(() => {
-    if (!touched && leadPipeline) setPipelineId(leadPipeline.id)
-  }, [touched, leadPipeline])
+    if (!merkVast && !touched && leadPipeline) setPipelineId(leadPipeline.id)
+  }, [merkVast, touched, leadPipeline])
 
   const book = async () => {
     setSaving(true)
@@ -428,7 +518,7 @@ function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId
       toast.success(leadId ? 'Geboekt. De lead staat nu op “Afspraak ingepland”.' : 'Afspraak geboekt.')
       // De boeking is gelukt, maar de herinnering niet — dat mag niet stil
       // blijven, want dan merk je het pas als de prospect niet komt opdagen.
-      if (j.reminderWarning) toast.warning(j.reminderWarning, { duration: 12000 })
+      if (j.waarschuwing) toast.warning(j.waarschuwing, { duration: 12000 })
       onBooked()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Boeken mislukt') } finally { setSaving(false) }
   }
@@ -456,15 +546,32 @@ function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId
           {/* Voor welk bedrijf is deze afspraak? Bepaalt de brochure en de
               afzender van de herinneringsmail die de dag ervoor uitgaat. */}
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Afspraak voor</label>
-            <select className="input-base" value={pipelineId}
+            <label className="block text-xs font-medium text-gray-600 mb-1 flex items-center gap-2">
+              Afspraak voor
+              {(() => {
+                const gekozen = pipelines.find((p) => p.id === pipelineId)
+                if (!gekozen) return null
+                const stijl = merkStijl(gekozen.key)
+                return (
+                  <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${stijl.badge}`}>
+                    {gekozen.name}
+                  </span>
+                )
+              })()}
+            </label>
+            <select className="input-base" value={pipelineId} disabled={merkVast}
               onChange={(e) => { setTouched(true); setPipelineId(e.target.value) }}>
               {pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
+            {merkVast && (
+              <p className="text-[11px] text-gray-500 mt-1">
+                Deze agenda hoort bij dit merk. Voor het andere merk kies je eerst de agenda van dat merk.
+              </p>
+            )}
             <p className="text-[11px] text-gray-500 mt-1">
               Bepaalt welke one-pager en welke afzender bij de herinneringsmail horen.
               {leadPipeline && pipelineId !== leadPipeline.id && (
-                <> De lead zelf blijft in <b>{leadPipeline.name}</b> staan; enkel deze afspraak telt voor het
+                <> De lead staat nu in <b>{leadPipeline.name}</b> en verhuist bij het boeken mee naar het
                 gekozen merk.</>
               )}
               {leadPipeline && pipelineId === leadPipeline.id && <> Overgenomen van de lead.</>}
@@ -521,13 +628,14 @@ function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId
 }
 
 // ── Lijst met geboekte afspraken (annuleren) ─────────────────────────────────
-function AppointmentList({ appointments, onChanged }: { appointments: Appt[]; onChanged: () => void }) {
+function AppointmentList({ appointments, pipelines, onChanged }: { appointments: Appt[]; pipelines: Pipeline[]; onChanged: () => void }) {
   const cancel = async (id: string) => {
     if (!confirm('Deze afspraak annuleren? Het agenda-item wordt verwijderd.')) return
     try {
       const res = await fetch(`/api/admin/sales/appointments?id=${id}`, { method: 'DELETE' })
       const j = await res.json(); if (!res.ok) throw new Error(j.error)
       toast.success('Afspraak geannuleerd.')
+      if (j.waarschuwing) toast.warning(j.waarschuwing, { duration: 12000 })
       onChanged()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Annuleren mislukt') }
   }
@@ -537,6 +645,16 @@ function AppointmentList({ appointments, onChanged }: { appointments: Appt[]; on
       <div className="divide-y divide-gray-50">
         {appointments.map((a) => (
           <div key={a.id} className="flex items-center gap-3 px-4 py-2.5">
+            {/* Merkstip: geel = NextGenMedia, blauw = NextGenSolutions. */}
+            {(() => {
+              const merk = pipelines.find((p) => p.id === a.pipeline_id)
+              return (
+                <span
+                  className={`inline-block h-2.5 w-2.5 rounded-full shrink-0 ${merkStijl(merk?.key).stip}`}
+                  title={merk?.name ?? 'Zonder merk'}
+                />
+              )
+            })()}
             <div className="min-w-0 flex-1">
               <div className="text-sm font-medium truncate">{a.company ?? 'Afspraak'}{a.contact ? ` · ${a.contact}` : ''}</div>
               <div className="text-xs text-gray-500">

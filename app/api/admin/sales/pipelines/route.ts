@@ -1,6 +1,6 @@
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
+import { createAdminSupabaseClient, requireStaff, requireAdmin } from '@/lib/supabase/server'
 import { listPipelines, defaultFromFor } from '@/lib/sales/pipelines'
 import { reminderBody } from '@/lib/sales/reminders'
 import { sendEmail, baseUrl, EMAIL_FROM, resendKeyFor } from '@/lib/email'
@@ -45,13 +45,45 @@ export async function PATCH(req: NextRequest) {
     }
 
     const admin = createAdminSupabaseClient()
-    const { error } = await admin.from('sales_pipelines').update({
+    const patch: Record<string, unknown> = {
       reminder_enabled: b.reminder_enabled !== false,
       reminder_from: text(b.reminder_from),
       reminder_reply_to: text(b.reminder_reply_to),
       brochure_url: text(b.brochure_url),
       brochure_filename: text(b.brochure_filename),
-    }).eq('id', target.id)
+    }
+    // ClickUp-lijst en intern meldingsadres van dit merk. Enkel meenemen als
+    // het veld meegestuurd is, zodat een oudere UI deze waarden niet wist.
+    //
+    // ADMIN-ONLY: waar de afspraakgegevens heen gemaild worden en in welke
+    // lijst ze belanden is beheer, geen setterwerk. Een setter die dit paneel
+    // opent kan de herinneringsmail aanpassen (bestaand gedrag), maar deze
+    // twee velden worden voor niet-admins stil genegeerd.
+    if (await requireAdmin()) {
+      if ('clickup_list_id' in b) {
+        const lijst = text(b.clickup_list_id)
+        // ClickUp-lijst-ids zijn numeriek; al het andere is per definitie fout.
+        if (lijst && !/^\d{1,20}$/.test(lijst)) {
+          return NextResponse.json({ error: 'Dat is geen geldige ClickUp-lijst.' }, { status: 400 })
+        }
+        patch.clickup_list_id = lijst
+      }
+      if ('notify_email' in b) {
+        const adres = text(b.notify_email)
+        if (adres && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adres)) {
+          return NextResponse.json({ error: 'Dat is geen geldig e-mailadres voor de melding.' }, { status: 400 })
+        }
+        patch.notify_email = adres
+      }
+    }
+
+    let { error } = await admin.from('sales_pipelines').update(patch).eq('id', target.id)
+    // Nieuwe kolommen nog niet gemigreerd → zonder die velden opnieuw.
+    if (error && /clickup_list_id|notify_email|PGRST204|schema cache/i.test(error.message)) {
+      delete patch.clickup_list_id
+      delete patch.notify_email
+      ;({ error } = await admin.from('sales_pipelines').update(patch).eq('id', target.id))
+    }
     if (error) throw new Error(error.message)
 
     const meta = requestMeta(req)

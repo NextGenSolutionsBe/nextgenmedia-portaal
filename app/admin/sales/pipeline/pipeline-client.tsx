@@ -10,6 +10,7 @@ import {
 import { MANUAL_STAGES, stageLabel, STAGES } from '@/lib/sales/stages'
 import { GEEN_INTERESSE_REDENEN } from '@/lib/sales/redenen'
 import { FocusMode } from './focus-mode'
+import { merkStijl } from '@/lib/sales/merk'
 import { ImportModal } from './import-modal'
 import { ReminderSettings } from './reminder-settings'
 
@@ -159,14 +160,21 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
           {/* Voor welk bedrijf bel je? Bepaalt ook welke one-pager meegaat. */}
+          {/* Geel = NextGenMedia, blauw = NextGenSolutions: de actieve knop
+              draagt de merkkleur, zodat je nooit in de verkeerde pipeline werkt. */}
           <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50">
-            {pipelines.map((p) => (
-              <button key={p.id} onClick={() => { setPipelineId(p.id); setSelected(null); setPicked(new Set()) }}
-                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                  p.id === pipelineId ? 'bg-white text-black shadow-sm' : 'text-gray-500 hover:text-black'}`}>
-                {p.name}
-              </button>
-            ))}
+            {pipelines.map((p) => {
+              const stijl = merkStijl(p.key)
+              const actief = p.id === pipelineId
+              return (
+                <button key={p.id} onClick={() => { setPipelineId(p.id); setSelected(null); setPicked(new Set()) }}
+                  className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors flex items-center gap-1.5 ${
+                    actief ? `${stijl.badge} border shadow-sm` : 'text-gray-500 hover:text-black'}`}>
+                  <span className={`inline-block h-2 w-2 rounded-full ${stijl.stip}`} />
+                  {p.name}
+                </button>
+              )
+            })}
           </div>
           <div className="relative">
             <Search className="h-4 w-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
@@ -349,6 +357,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
         <FocusMode
           leads={leads}
           pipelineId={pipelineId}
+          merk={pipelines.find((p) => p.id === pipelineId) ?? null}
           stageFilter={stage || undefined}
           onClose={() => { setFocus(false); load() }}
           onChanged={() => { /* lijst wordt bij sluiten ververst */ }}

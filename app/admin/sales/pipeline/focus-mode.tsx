@@ -8,6 +8,7 @@ import {
   Building2, MapPin, Users, BadgeInfo, PhoneOff, AlertTriangle, ChevronDown, FileText,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { merkStijl } from '@/lib/sales/merk'
 import { FOCUS_ACTIONS, stageLabel } from '@/lib/sales/stages'
 import {
   bouwWachtrij, aftelLabel, terugbelMoment, leesTijdstip, isKlaarFase, TERUGBEL_KEUZES,
@@ -53,9 +54,12 @@ type ScriptRij = {
   pipeline_id: string | null; actief: boolean; analyse: ScriptAnalyse | null
 }
 
-export function FocusMode({ leads, pipelineId, stageFilter, onClose, onChanged }: {
+export function FocusMode({ leads, pipelineId, merk, stageFilter, onClose, onChanged }: {
   leads: Lead[]
   pipelineId?: string | null
+  /** Het merk waarin je aan het bellen bent — als badge in de kop, zodat
+   *  iedereen op elk moment ziet: geel = NextGenMedia, blauw = NextGenSolutions. */
+  merk?: { key: string; name: string } | null
   /** Het actieve fasefilter van het bord. Filtert iemand bewust op een
    *  afgeronde fase ("geen interesse" nog eens nabellen), dan slaan we die
    *  fase hier niet over — anders levert die keuze een lege belronde op. */
@@ -283,9 +287,16 @@ export function FocusMode({ leads, pipelineId, stageFilter, onClose, onChanged }
 
   return (
     <div className="fixed inset-0 z-50 bg-gray-50 flex flex-col">
+      {/* Gekleurde bovenrand: het merk waarin je werkt, altijd in beeld. */}
+      {merk && <div className={`h-1 shrink-0 ${merkStijl(merk.key).balk}`} />}
       {/* ── Kop ── */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-white">
         <div className="flex items-center gap-3 min-w-0">
+          {merk && (
+            <span className={`text-xs font-bold px-2.5 py-1 rounded-full border shrink-0 ${merkStijl(merk.key).badge}`}>
+              {merk.name}
+            </span>
+          )}
           <span className="text-sm text-gray-500 shrink-0">
             Nog <b className="text-gray-900">{wachtrij.nu.length}</b> te bellen
           </span>

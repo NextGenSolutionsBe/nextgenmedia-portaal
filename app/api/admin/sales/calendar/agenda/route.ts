@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { getOrCreateSalesOrg } from '@/lib/sales/service'
 import { SIGNATURES } from '@/lib/sales/signatures'
+import { listPipelines } from '@/lib/sales/pipelines'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,8 +39,19 @@ export async function PATCH(req: NextRequest) {
       signature_email: String(b.email ?? '').trim() || sig?.email || null,
     }
 
+    // Merk van deze agenda: enkel een pipeline van onszelf, of leeg (= beide).
+    if ('pipelineId' in b) {
+      const pipelines = await listPipelines()
+      payload.pipeline_id = pipelines.find((p) => p.id === String(b.pipelineId ?? ''))?.id ?? null
+    }
+    // Wie in ClickUp toegewezen wordt op afspraaktaken van deze agenda.
+    if ('clickupAssigneeId' in b) {
+      const n = Number(b.clickupAssigneeId)
+      payload.clickup_assignee_id = Number.isFinite(n) && n > 0 ? Math.round(n) : null
+    }
+
     let { error } = await admin.from('sales_calendar_connections').update(payload).eq('id', id)
-    if (error && /signature_|PGRST204|schema cache/i.test(error.message)) {
+    if (error && /signature_|pipeline_id|clickup_|PGRST204|schema cache/i.test(error.message)) {
       // Kolommen bestaan nog niet → op zijn minst de naam bewaren.
       ;({ error } = await admin.from('sales_calendar_connections').update({ name }).eq('id', id))
       if (!error) {

@@ -32,7 +32,10 @@ export function redirectUri(): string {
  * Naam en handtekening reizen mee in `state`, zodat de callback ze meteen kan
  * opslaan — die weet verder niets van het scherm waar je vandaan komt.
  */
-export function authUrl(salesClientId: string, state: string, name: string, signature = ''): string {
+export function authUrl(
+  salesClientId: string, state: string, name: string, signature = '',
+  pipelineId = '', clickupAssignee = '',
+): string {
   const p = new URLSearchParams({
     client_id: process.env.GOOGLE_CLIENT_ID ?? '',
     redirect_uri: redirectUri(),
@@ -40,7 +43,12 @@ export function authUrl(salesClientId: string, state: string, name: string, sign
     scope: SCOPES.join(' '),
     access_type: 'offline',       // nodig voor een refresh token
     prompt: 'consent',            // dwingt een refresh token af, ook bij herkoppelen
-    state: `${salesClientId}:${state}:${encodeURIComponent(name)}:${encodeURIComponent(signature)}`,
+    // Merk en ClickUp-persoon reizen mee door de state, net als naam en
+    // handtekening: dan staat na één keer inloggen bij Google álles goed.
+    state: [
+      salesClientId, state, encodeURIComponent(name), encodeURIComponent(signature),
+      encodeURIComponent(pipelineId), encodeURIComponent(clickupAssignee),
+    ].join(':'),
   })
   return `${AUTH_URL}?${p.toString()}`
 }
@@ -61,6 +69,7 @@ async function tokenRequest(body: Record<string, string>): Promise<TokenResponse
 /** Stap 2: code omruilen voor tokens en de koppeling opslaan. */
 export async function exchangeCode(
   salesClientId: string, code: string, name: string, signature?: SignatureFields,
+  merk?: { pipelineId?: string | null; clickupAssigneeId?: number | null },
 ): Promise<void> {
   const tok = await tokenRequest({
     code,
@@ -82,11 +91,20 @@ export async function exchangeCode(
   } catch { /* niet kritiek */ }
 
   const admin = createAdminSupabaseClient()
-  // Eén agenda per Google-account binnen dezelfde klant. Koppel je hetzelfde
-  // account opnieuw, dan verversen we de tokens i.p.v. een tweede rij te maken.
-  // Zonder e-mailadres valt 'primary' terug op één rij per klant.
+  /**
+   * Eén agenda per Google-account PER MERK. Koppel je hetzelfde account voor
+   * hetzelfde merk opnieuw, dan verversen we de tokens van die rij; koppel je
+   * het voor het ándere merk, dan komt er een tweede rij bij — dat zijn de
+   * "Marco × NextGenMedia" en "Marco × NextGenSolutions" agenda's.
+   *
+   * Geen PostgREST-upsert meer: de unieke index gebruikt COALESCE(pipeline_id)
+   * en zo'n expressie kan niet als onConflict-doel. Dus zelf zoeken → update
+   * of insert; bij een botsing (twee koppelingen tegelijk) vangt de unieke
+   * index de tweede af en proberen we die als update opnieuw.
+   */
   const calendarId = email ?? 'primary'
-  const base = {
+  const pipelineId = merk?.pipelineId ?? null
+  const base: Record<string, unknown> = {
     sales_client_id: salesClientId,
     provider: 'google',
     name: name || email || 'Agenda',
@@ -98,16 +116,81 @@ export async function exchangeCode(
     token_expires_at: new Date(Date.now() + (tok.expires_in ?? 3600) * 1000).toISOString(),
     status: 'connected',
   }
-  const save = (payload: Record<string, unknown>) => admin
-    .from('sales_calendar_connections')
-    .upsert(payload, { onConflict: 'sales_client_id,provider,calendar_id' })
-    .select('id').single()
+  const merkVelden: Record<string, unknown> = {
+    pipeline_id: pipelineId,
+    ...(merk?.clickupAssigneeId ? { clickup_assignee_id: merk.clickupAssigneeId } : {}),
+  }
 
-  let { data: saved, error: saveErr } = await save({ ...base, ...(signature ?? {}) })
-  // Bestaan de handtekeningkolommen nog niet, dan mag de koppeling daar niet op
-  // stuklopen — die is het belangrijkste. Handtekening kan nadien.
-  if (saveErr && /signature_|PGRST204|schema cache/i.test(saveErr.message)) {
-    ({ data: saved } = await save(base))
+  const zoekBestaande = async (): Promise<string | null> => {
+    let q = admin.from('sales_calendar_connections').select('id, pipeline_id')
+      .eq('sales_client_id', salesClientId).eq('provider', 'google').eq('calendar_id', calendarId)
+    q = pipelineId ? q.eq('pipeline_id', pipelineId) : q.is('pipeline_id', null)
+    const { data, error } = await q.maybeSingle()
+    // Kolom pipeline_id bestaat nog niet (oude databank)? Dan op de oude
+    // sleutel zoeken — er kán dan maar één rij per account bestaan.
+    if (error && /pipeline_id|PGRST204|schema cache|column/i.test(error.message)) {
+      const { data: oud } = await admin.from('sales_calendar_connections').select('id')
+        .eq('sales_client_id', salesClientId).eq('provider', 'google').eq('calendar_id', calendarId)
+        .maybeSingle()
+      return (oud as { id: string } | null)?.id ?? null
+    }
+    if (data) return (data as { id: string }).id
+
+    /**
+     * Geen exacte merk-match, maar wél een merk gekozen? Kijk dan of er nog
+     * een MERKLOZE rij van dit account bestaat en neem die over. Dit is het
+     * pad van elke bestaande installatie: de oude koppeling had geen merk, en
+     * wie hem opnieuw koppelt mét merk verwacht dat die ene agenda een merk
+     * krijgt — niet dat er stilletjes een tweede rij naast komt te staan.
+     */
+    if (pipelineId) {
+      const { data: merkloos } = await admin.from('sales_calendar_connections').select('id')
+        .eq('sales_client_id', salesClientId).eq('provider', 'google').eq('calendar_id', calendarId)
+        .is('pipeline_id', null)
+        .maybeSingle()
+      return (merkloos as { id: string } | null)?.id ?? null
+    }
+    return null
+  }
+
+  const opslaan = async (extra: Record<string, unknown>): Promise<{ id: string } | null> => {
+    const bestaand = await zoekBestaande()
+    if (bestaand) {
+      const { error } = await admin.from('sales_calendar_connections')
+        .update({ ...base, ...extra }).eq('id', bestaand)
+      if (error) throw new Error(error.message)
+      return { id: bestaand }
+    }
+    const { data, error } = await admin.from('sales_calendar_connections')
+      .insert({ ...base, ...extra }).select('id').single()
+    if (error) {
+      // Race: net door een parallelle koppeling aangemaakt → als update afronden.
+      if (/duplicate|unique|23505/i.test(error.message)) {
+        const alsnog = await zoekBestaande()
+        if (alsnog) {
+          const { error: e2 } = await admin.from('sales_calendar_connections')
+            .update({ ...base, ...extra }).eq('id', alsnog)
+          if (e2) throw new Error(e2.message)
+          return { id: alsnog }
+        }
+      }
+      throw new Error(error.message)
+    }
+    return data as { id: string }
+  }
+
+  let saved: { id: string } | null = null
+  try {
+    saved = await opslaan({ ...(signature ?? {}), ...merkVelden })
+  } catch (e) {
+    // Bestaan de handtekening- of merkkolommen nog niet, dan mag de koppeling
+    // daar niet op stuklopen — die is het belangrijkste. De rest kan nadien.
+    const msg = e instanceof Error ? e.message : ''
+    if (/signature_|pipeline_id|clickup_|PGRST204|schema cache|column/i.test(msg)) {
+      saved = await opslaan({})
+    } else {
+      throw e
+    }
   }
 
   // Meteen alle agenda's van dit account als bezet meetellen. Wie er eentje
@@ -284,8 +367,9 @@ export async function fetchBusy(connectionId: string, from: number, to: number):
       (c.busy ?? []).map((b) => ({ start: new Date(b.start).getTime(), end: new Date(b.end).getTime() })),
     )
   } catch {
-    // Agenda onbereikbaar → geen bezet-informatie. We tonen dan enkel onze eigen
-    // afspraken als bezet; de DB-constraint voorkomt hoe dan ook dubbele boeking.
+    // Agenda onbereikbaar → geen bezet-informatie. We tonen dan enkel onze
+    // eigen afspraken als bezet — inclusief die op zuster-agenda's van
+    // hetzelfde account (zie loadCalendar), plus de nacontrole bij het boeken.
     return []
   }
 }
