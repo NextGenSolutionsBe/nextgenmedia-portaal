@@ -2682,3 +2682,58 @@ CREATE UNIQUE INDEX IF NOT EXISTS sales_calconn_unique_cal_merk
 -- Eigen titel voor het agenda-item van een afspraak. De prospect ziet de
 -- event-titel in zijn uitnodiging, dus de setter moet hem kunnen bepalen.
 ALTER TABLE public.sales_appointments ADD COLUMN IF NOT EXISTS titel text;
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- ClickUp → Google Calendar synchronisatie (eigen bouw: ClickUp's native sync
+-- kan niet "assignee → specifieke agenda").
+
+CREATE TABLE IF NOT EXISTS public.clickup_agenda_targets (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  clickup_assignee_id bigint NOT NULL UNIQUE,
+  naam                text NOT NULL,
+  google_calendar_id  text,
+  bron_connection_id  uuid REFERENCES public.sales_calendar_connections(id) ON DELETE SET NULL,
+  active              boolean NOT NULL DEFAULT true,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.clickup_agenda_items (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  target_id        uuid NOT NULL REFERENCES public.clickup_agenda_targets(id) ON DELETE CASCADE,
+  clickup_task_id  text NOT NULL,
+  google_event_id  text NOT NULL,
+  vingerafdruk     text NOT NULL,
+  due_ms           bigint,
+  updated_at       timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (target_id, clickup_task_id)
+);
+CREATE INDEX IF NOT EXISTS clickup_agenda_items_due ON public.clickup_agenda_items (due_ms);
+
+CREATE TABLE IF NOT EXISTS public.clickup_agenda_runs (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  gestart     timestamptz NOT NULL DEFAULT now(),
+  klaar       timestamptz,
+  ok          boolean,
+  fout        text,
+  aangemaakt  int NOT NULL DEFAULT 0,
+  bijgewerkt  int NOT NULL DEFAULT 0,
+  verwijderd  int NOT NULL DEFAULT 0,
+  overgeslagen int NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS clickup_agenda_runs_gestart ON public.clickup_agenda_runs (gestart DESC);
+
+CREATE TABLE IF NOT EXISTS public.cron_geheimen (
+  sleutel text PRIMARY KEY,
+  waarde  text NOT NULL
+);
+
+ALTER TABLE public.clickup_agenda_targets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.clickup_agenda_items   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.clickup_agenda_runs    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cron_geheimen          ENABLE ROW LEVEL SECURITY;
+
+INSERT INTO public.cron_geheimen (sleutel, waarde)
+VALUES ('clickup_agenda', replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''))
+ON CONFLICT (sleutel) DO NOTHING;

@@ -442,3 +442,104 @@ export async function deleteEvent(connectionId: string, eventId: string): Promis
     method: 'DELETE', headers: { Authorization: `Bearer ${auth.token}` },
   }).catch(() => {})
 }
+
+// ── ClickUp-taken als Google-events (de "assignee → agenda"-sync) ────────────
+//
+// Deze drie functies bedienen lib/sales/clickup-agenda-sync.ts. Ze schrijven
+// naar een EXPLICIET opgegeven agenda in plaats van naar de schrijfagenda van
+// de koppeling: de taken van Bram horen in "Bram — ClickUp", welke koppeling
+// de tokens ook levert. Nooit sendUpdates: dit zijn interne blokken, er mag
+// nooit een uitnodiging van vertrekken.
+
+export type TaakEvent = {
+  summary: string
+  description: string
+  /** Zonder uur: één dagvak dat NIET blokkeert (transparent). */
+  heleDag: boolean
+  /** Bij heleDag: de datum (YYYY-MM-DD, Brussels). */
+  datum?: string
+  /** Bij een echt tijdvak: begin en einde in ms. */
+  startMs?: number
+  endMs?: number
+  timezone: string
+}
+
+function taakEventBody(ev: TaakEvent, taskId: string): Record<string, unknown> {
+  const tijd = ev.heleDag
+    ? {
+        start: { date: ev.datum },
+        // Google wil de dag NA de laatste dag als einde van een all-day event.
+        end: { date: volgendeDag(ev.datum ?? '') },
+        // Een taak zonder uur mag geen hele dag dichtzetten in vrij/bezet.
+        transparency: 'transparent',
+      }
+    : {
+        start: { dateTime: new Date(ev.startMs ?? 0).toISOString(), timeZone: ev.timezone },
+        end: { dateTime: new Date(ev.endMs ?? 0).toISOString(), timeZone: ev.timezone },
+        transparency: 'opaque',
+      }
+  return {
+    summary: ev.summary,
+    description: ev.description,
+    ...tijd,
+    // Waarmerk: zo is een event altijd terug te herleiden tot zijn taak, ook
+    // als onze administratie ooit zoekraakt.
+    extendedProperties: { private: { clickupTaskId: taskId } },
+  }
+}
+
+function volgendeDag(datum: string): string {
+  const d = new Date(`${datum}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
+}
+
+/** Secundaire agenda aanmaken in het account van de koppeling → agenda-id. */
+export async function maakSubAgenda(connectionId: string, naam: string): Promise<string> {
+  const auth = await accessToken(connectionId)
+  if (!auth) throw new Error('De Google-koppeling werkt niet (meer)')
+  const res = await fetchMetLimiet(`${API}/calendars`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ summary: naam, timeZone: 'Europe/Brussels' }),
+  })
+  const j = await res.json().catch(() => ({})) as { id?: string; error?: { message?: string } }
+  if (!res.ok || !j.id) throw new Error(j.error?.message ?? `Google kon de agenda "${naam}" niet aanmaken`)
+  return j.id
+}
+
+/** Event aanmaken of bijwerken in een expliciete agenda → event-id. */
+export async function schrijfTaakEvent(
+  connectionId: string, calendarId: string, eventId: string | null, ev: TaakEvent, taskId: string,
+): Promise<string> {
+  const auth = await accessToken(connectionId)
+  if (!auth) throw new Error('De Google-koppeling werkt niet (meer)')
+  const pad = eventId
+    ? `${API}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`
+    : `${API}/calendars/${encodeURIComponent(calendarId)}/events`
+  const res = await fetchMetLimiet(pad, {
+    method: eventId ? 'PUT' : 'POST',
+    headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(taakEventBody(ev, taskId)),
+  })
+  // Bestond het event niet meer (handmatig verwijderd in Google)? Dan opnieuw
+  // aanmaken in plaats van blijven duwen tegen een 404.
+  if ((res.status === 404 || res.status === 410) && eventId) {
+    return schrijfTaakEvent(connectionId, calendarId, null, ev, taskId)
+  }
+  const j = await res.json().catch(() => ({})) as { id?: string; error?: { message?: string } }
+  if (!res.ok || !j.id) throw new Error(j.error?.message ?? 'Google weigerde het taak-event')
+  return j.id
+}
+
+/** Event verwijderen uit een expliciete agenda. Al weg = geen fout. */
+export async function verwijderTaakEvent(connectionId: string, calendarId: string, eventId: string): Promise<void> {
+  const auth = await accessToken(connectionId)
+  if (!auth) throw new Error('De Google-koppeling werkt niet (meer)')
+  const res = await fetchMetLimiet(`${API}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, {
+    method: 'DELETE', headers: { Authorization: `Bearer ${auth.token}` },
+  })
+  if (!res.ok && res.status !== 404 && res.status !== 410) {
+    throw new Error(`Google weigerde het verwijderen (${res.status})`)
+  }
+}

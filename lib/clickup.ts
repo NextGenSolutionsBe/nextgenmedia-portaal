@@ -612,3 +612,71 @@ export async function listAlleLijsten(): Promise<ClickupLijst[]> {
     return uit
   } catch { return [] }
 }
+
+// ── Taken lezen voor de agenda-sync (ClickUp → Google Calendar) ──────────────
+
+export type SyncTaak = {
+  id: string
+  naam: string
+  /** ClickUp-leden op de taak. */
+  assigneeIds: number[]
+  startMs: number | null
+  dueMs: number
+  url: string
+  lijstNaam: string
+}
+
+/** Het (enige) team-id van de werkruimte. */
+async function teamId(): Promise<string> {
+  const { teams } = await clickupJson<{ teams: Array<{ id: string }> }>(`/team`)
+  const id = teams?.[0]?.id
+  if (!id) throw new Error('Geen ClickUp-werkruimte gevonden')
+  return id
+}
+
+/**
+ * Alle OPEN taken met een deadline binnen het venster, toegewezen aan één van
+ * de opgegeven leden. Gesloten taken blijven bewust buiten beeld: wat af is
+ * hoeft niemands agenda meer te blokkeren — de sync ruimt het event dan op.
+ */
+export async function haalSyncTaken(
+  assigneeIds: number[], vanMs: number, totMs: number,
+): Promise<SyncTaak[]> {
+  if (!clickupConfigured() || assigneeIds.length === 0) return []
+  const team = await teamId()
+  const uit: SyncTaak[] = []
+
+  // ClickUp pagineert per 100; het vangnet van 10 pagina's is ver boven wat
+  // twee agenda's aan taken kunnen dragen.
+  for (let page = 0; page < 10; page++) {
+    const p = new URLSearchParams({
+      page: String(page),
+      due_date_gt: String(vanMs),
+      due_date_lt: String(totMs),
+      include_closed: 'false',
+      subtasks: 'true',
+    })
+    for (const a of assigneeIds) p.append('assignees[]', String(a))
+
+    const { tasks } = await clickupJson<{ tasks: Array<{
+      id: string; name: string; due_date: string | null; start_date: string | null
+      url: string; assignees?: Array<{ id: number }>; list?: { name?: string }
+    }> }>(`/team/${team}/task?${p}`)
+
+    for (const t of tasks ?? []) {
+      const due = Number(t.due_date)
+      if (!Number.isFinite(due) || due <= 0) continue
+      uit.push({
+        id: t.id,
+        naam: t.name,
+        assigneeIds: (t.assignees ?? []).map((x) => x.id),
+        startMs: t.start_date ? Number(t.start_date) : null,
+        dueMs: due,
+        url: t.url,
+        lijstNaam: t.list?.name ?? '',
+      })
+    }
+    if ((tasks ?? []).length < 100) break
+  }
+  return uit
+}

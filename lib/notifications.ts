@@ -2,6 +2,7 @@ import 'server-only'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { followUp } from '@/lib/contract-status'
 import { FEATURES } from '@/lib/features'
+import { syncGezondheid, SYNC_VEROUDERD_MIN } from '@/lib/sales/clickup-agenda-sync'
 
 // Eén bron voor meldingen + "Vandaag": alles live afgeleid uit bestaande data
 // (geen nieuwe tabel). Gelezen/niet-gelezen wordt client-side in localStorage
@@ -46,6 +47,31 @@ export async function buildNotifications(): Promise<Notif[]> {
 
   const names = new Map(clientMap.map((c) => [c.id, c.company_name]))
   const out: Notif[] = []
+
+  // ClickUp→Google-agendasync: ligt die stil, dan zien de setters niet wat er
+  // in ClickUp gepland staat en kán er dubbel geboekt worden. Dat verdient de
+  // hoogste prioriteit in de bel — naast de mail die de sync zelf al stuurt.
+  try {
+    const sync = await syncGezondheid()
+    if (sync.actief && sync.verouderd) {
+      out.push({
+        id: `clickupsync:verouderd:${sync.laatsteOkOp ?? 'nooit'}`,
+        kind: 'sales', priority: 'high',
+        title: sync.laatsteOkOp
+          ? `ClickUp-agendasync draait niet meer (laatste keer gelukt: ${Math.round(sync.minutenSindsOk ?? 0)} min geleden — hoort elke 10 min)`
+          : `ClickUp-agendasync is nog nooit gelukt (hoort elke ${SYNC_VEROUDERD_MIN / 3} min te draaien)`,
+        date: sync.laatsteOkOp?.slice(0, 10) ?? null,
+        href: '/admin/sales/appointments',
+      })
+    } else if (sync.actief && sync.laatsteFout) {
+      out.push({
+        id: 'clickupsync:fout',
+        kind: 'sales', priority: 'high',
+        title: `ClickUp-agendasync geeft een fout: ${sync.laatsteFout.slice(0, 120)}`,
+        date: todayISO(), href: '/admin/sales/appointments',
+      })
+    }
+  } catch { /* meldingen mogen nooit stuklopen op de waakhond */ }
 
   for (const i of invoices) {
     const due = (i.invoice_month ?? '') <= thisMonth()

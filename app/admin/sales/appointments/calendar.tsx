@@ -56,6 +56,7 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId, initi
   const [segments, setSegments] = useState<Interval[]>([])
   const [appointments, setAppointments] = useState<Appt[]>([])
   const [connected, setConnected] = useState(false)
+  const [syncWaarschuwing, setSyncWaarschuwing] = useState<string | null>(null)
   // Agenda's (personen) van deze klant — Bram×NGM, Bram×NGS, Marco×NGM, …
   const [owners, setOwners] = useState<{
     id: string; name: string; account_email: string | null; status: string
@@ -136,6 +137,7 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId, initi
       setSegments(j.segments ?? [])
       setAppointments(j.appointments ?? [])
       setConnected(!!j.connected)
+      setSyncWaarschuwing(j.syncWaarschuwing ?? null)
       setOwners(j.owners ?? [])
       // De server bepaalt welke agenda getoond wordt als er nog geen keuze is.
       if (j.ownerId && j.ownerId !== ownerId) setOwnerId(j.ownerId)
@@ -294,6 +296,14 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId, initi
         <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
           Nog geen agenda gekoppeld. Zonder agenda zien we geen bezette momenten en kan er niet geboekt worden.
           Koppel per persoon (Bram, Marco, ...) een eigen Google-agenda.
+        </p>
+      )}
+
+      {/* Ligt de ClickUp→Google-sync stil, dan kan wat net in ClickUp gepland
+          is hier nog vrij lijken — het gevaarlijkste moment om te boeken. */}
+      {syncWaarschuwing && (
+        <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <b>Dubbelboekingsrisico:</b> {syncWaarschuwing}
         </p>
       )}
 
