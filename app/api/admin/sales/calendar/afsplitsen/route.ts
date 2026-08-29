@@ -88,9 +88,24 @@ export async function POST(req: NextRequest) {
       status: 'connected',
       pipeline_id: pipelineId,
       clickup_assignee_id: clickupAssigneeId,
-      // Wat blokkeert erft van de bron: daar is al gekozen welke agenda's van
-      // dit account meetellen. Aanpassen kan per agenda via "Agenda's".
-      busy_calendar_ids: bronRij.busy_calendar_ids ?? null,
+      /**
+       * Wat blokkeert deze agenda? NIET blind de keuze van de bron erven: daar
+       * staan vaak álle merkagenda's aangevinkt, en dan zou een afspraak van
+       * Bram de agenda van Marco dichtzetten — twee verschillende mensen die
+       * gerust tegelijk een afspraak kunnen hebben.
+       *
+       * Voorstel: de schrijfagenda zelf + alle agenda's van DEZELFDE persoon
+       * (zelfde eerste woord in de agendanaam: "Marco - NGM" hoort bij
+       * "Marco - NGS", niet bij "Bram - NGM"). Bijstellen kan altijd via de
+       * knop "Agenda's" — daar staat precies deze lijst met vinkjes.
+       */
+      busy_calendar_ids: (() => {
+        const persoon = gekozen.summary.trim().split(/[\s—–-]+/)[0]?.toLowerCase() ?? ''
+        const zelfdePersoon = persoon.length >= 3
+          ? agendas.filter((c) => c.summary.trim().toLowerCase().startsWith(persoon)).map((c) => c.id)
+          : []
+        return [...new Set([googleCalendarId, ...zelfdePersoon])]
+      })(),
       // De handtekening hoort bij de PERSOON; de naam zegt wie dat is, dus die
       // velden laten we bewust leeg tot iemand ze via "Handtekening" instelt.
     }
