@@ -1,3 +1,5 @@
+import { fetchMetLimiet } from '@/lib/fetch-met-limiet'
+
 // ── ClickUp integratie (server-side only) ────────────────────────────────────
 // App → ClickUp, één richting. Wordt UITSLUITEND server-side gebruikt; de API key
 // komt enkel uit process.env.CLICKUP_API_KEY en mag nooit in client-code lekken.
@@ -161,7 +163,7 @@ async function clickupFetch(path: string, init: RequestInit = {}, attempt = 0): 
   if (wait > 0) await sleep(wait)
   lastRequestAt = Date.now()
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchMetLimiet(`${API_BASE}${path}`, {
     ...init,
     headers: {
       Authorization: key,

@@ -46,6 +46,80 @@ const HDR_ROLE = 'x-ngm-role'
 const HDR_MODULES = 'x-ngm-modules'
 const ONZE_HEADERS = [HDR_USER, HDR_ROLE, HDR_MODULES]
 
+// ── Nooit onbeperkt wachten ──────────────────────────────────────────────────
+//
+// Deze middleware draait vóór ELK verzoek. Blijft één databaselezing hangen,
+// dan hangt daarmee de hele app — en kapt Vercel het af met een 504 waar de
+// bezoeker alleen "This Routing Middleware has timed out" van ziet.
+//
+// Deze lezingen duren normaal één à twee milliseconden. Drie seconden is dus
+// bijzonder ruim; wie daar overheen gaat, is stuk en niet traag.
+const DB_TIJDSLIMIET_MS = 3000
+
+/** Wacht hooguit `ms` op een belofte; daarna `terugval`. */
+async function metTijdslimiet<T>(belofte: PromiseLike<T>, ms: number, terugval: T): Promise<T> {
+  let klok: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      Promise.resolve(belofte),
+      new Promise<T>((los) => { klok = setTimeout(() => los(terugval), ms) }),
+    ])
+  } catch {
+    // Een mislukte lezing behandelen we als "onbekend", net als een tijdsoverschrijding.
+    return terugval
+  } finally {
+    if (klok) clearTimeout(klok)
+  }
+}
+
+/** Uitkomst van een lezing: gelukt (met of zonder rij), of niet gelukt. */
+type Lezing<T> = { ok: true; data: T | null } | { ok: false }
+
+/** Eén databaselezing, met tijdslimiet. Traag of stuk → `{ ok: false }`. */
+function lees<T>(vraag: PromiseLike<{ data: T | null }>): Promise<Lezing<T>> {
+  return metTijdslimiet<Lezing<T>>(
+    Promise.resolve(vraag).then((r) => ({ ok: true as const, data: r.data })),
+    DB_TIJDSLIMIET_MS,
+    { ok: false },
+  )
+}
+
+/**
+ * Antwoord wanneer we de rechten niet kunnen ophalen.
+ *
+ * Bewust GEEN doorlaten: zonder rol weten we niet of iemand admin is, en dan
+ * hoort de deur dicht te blijven. Ook bewust geen omleiding naar /login — dat
+ * zou lijken alsof je uitgelogd bent terwijl je sessie prima in orde is. Een
+ * eerlijke 503 met "probeer opnieuw" is duidelijker en zelfherstellend.
+ */
+function databankOnbereikbaar(path: string): NextResponse {
+  if (path.startsWith('/api/')) {
+    return NextResponse.json(
+      { error: 'De databank reageert even niet. Probeer het zo opnieuw.' },
+      { status: 503, headers: { 'Retry-After': '5' } },
+    )
+  }
+  return new NextResponse(
+    `<!doctype html><html lang="nl"><head><meta charset="utf-8">
+     <meta name="viewport" content="width=device-width,initial-scale=1">
+     <title>Even geen verbinding</title>
+     <style>
+       body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#f9fafb;color:#111;
+            display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:1.5rem}
+       .k{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:2rem;max-width:26rem;text-align:center}
+       h1{font-size:1.125rem;margin:0 0 .5rem}
+       p{color:#4b5563;font-size:.9rem;line-height:1.5;margin:0 0 1.25rem}
+       a{display:inline-block;background:#fff848;color:#111;text-decoration:none;font-weight:600;
+         font-size:.875rem;padding:.6rem 1.1rem;border-radius:10px}
+     </style></head><body><div class="k">
+       <h1>Even geen verbinding met de databank</h1>
+       <p>Je bent nog gewoon ingelogd. Dit duurt meestal een paar seconden.</p>
+       <a href="${path.replace(/"/g, '&quot;')}">Opnieuw proberen</a>
+     </div></body></html>`,
+    { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Retry-After': '5' } },
+  )
+}
+
 export async function updateSession(request: NextRequest) {
   /**
    * Zonder deze twee waarden gooit createServerClient hieronder, klapt de hele
@@ -119,9 +193,74 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
-  const { data: { user } } = await supabase.auth.getUser()
-
+  /**
+   * Wie is dit? Via getClaims(), NIET via getUser().
+   *
+   * getUser() belt bij ELK verzoek naar de Auth-server van Supabase om de token
+   * te laten nakijken. Dat is een netwerkoproep per paginabezoek, per API-call
+   * én per vooruit opgehaalde link — tienduizenden per week. Wordt die server
+   * even traag, dan hangt deze middleware, en dan is de HELE app onbereikbaar
+   * (504 MIDDLEWARE_INVOCATION_TIMEOUT).
+   *
+   * Dit project ondertekent zijn tokens met ES256 (asymmetrisch, na te kijken
+   * op /auth/v1/.well-known/jwks.json). Daardoor controleert getClaims() de
+   * handtekening LOKAAL met WebCrypto; de publieke sleutel wordt gecachet.
+   * Even veilig — een token vervalsen kan niet zonder de private sleutel —
+   * maar zonder de afhankelijkheid van een externe dienst per verzoek.
+   *
+   * Eén verschil om te weten: een token blijft geldig tot het verloopt (een
+   * uur). Zet je iemand middenin dat uur op non-actief, dan verliest die de
+   * toegang niet via de token maar via de rol- en staff-controle hieronder —
+   * die leest wél live uit de databank.
+   */
   const path = request.nextUrl.pathname
+
+  type Wie = { id: string; email?: string }
+  /**
+   * `null` = niet ingelogd (een geldig antwoord).
+   * `'onbekend'` = we kónden het niet vaststellen. Dat is iets ánders dan
+   * uitgelogd: iemand met een prima sessie mag daar niet om buitengezet worden.
+   */
+  let user: Wie | null | 'onbekend' = 'onbekend'
+  try {
+    // getClaims kan gooien (bv. als de publieke sleutel niet opgehaald raakt).
+    // Ongevangen zou dat de hele middleware laten klappen — een 500 op élke
+    // pagina. Vandaar dit vangnet, mét tijdslimiet.
+    const res = await metTijdslimiet(
+      supabase.auth.getClaims(),
+      DB_TIJDSLIMIET_MS,
+      null as Awaited<ReturnType<typeof supabase.auth.getClaims>> | null,
+    )
+    if (res) {
+      const sub = res.data?.claims?.sub
+      user = sub ? { id: sub as string, email: res.data?.claims?.email as string | undefined } : null
+    }
+  } catch {
+    user = 'onbekend'
+  }
+
+  // Lukte de lokale controle niet, probeer dan alsnog de oude weg (navraag bij
+  // de Auth-server). Zo blijft een hapering in de sleutelcache onzichtbaar.
+  if (user === 'onbekend') {
+    try {
+      const res = await metTijdslimiet(
+        supabase.auth.getUser(),
+        DB_TIJDSLIMIET_MS,
+        null as Awaited<ReturnType<typeof supabase.auth.getUser>> | null,
+      )
+      if (res) user = res.data.user ? { id: res.data.user.id, email: res.data.user.email } : null
+    } catch {
+      user = 'onbekend'
+    }
+  }
+
+  // Allebei mislukt: eerlijk zeggen dat het even niet lukt. Publieke paden
+  // mogen gewoon door — die hebben geen identiteit nodig.
+  if (user === 'onbekend' && (path.startsWith('/admin') || path.startsWith('/api/admin')
+    || path.startsWith('/portal') || path.startsWith('/partner'))) {
+    return databankOnbereikbaar(path)
+  }
+  if (user === 'onbekend') user = null
 
   // Uitgeschakelde features (lib/features.ts) centraal dichtzetten — voor
   // IEDEREEN, ook admin, zodat een verborgen module ook niet via een directe URL
@@ -136,29 +275,39 @@ export async function updateSession(request: NextRequest) {
   if (path.startsWith('/api/admin')) {
     if (!user) return NextResponse.json({ error: 'Niet ingelogd' }, { status: 401 })
     const db = roleReader(supabase)
-    const { data: roleData } = await db
-      .from('user_roles').select('role').eq('user_id', user.id).limit(1).maybeSingle()
+    const rol = await lees<{ role?: string }>(
+      db.from('user_roles').select('role').eq('user_id', user.id).limit(1).maybeSingle(),
+    )
+    if (!rol.ok) return databankOnbereikbaar(path)
+    const roleData = rol.data
 
     // Interne accounts moeten óók de tweestapsverificatie hebben doorlopen —
     // anders zou een geldig wachtwoord alleen al volstaan voor de API's.
+    // verifyToken rekent enkel lokaal; geen tijdslimiet nodig.
     const twoFaOk = await verifyToken(request.cookies.get(TWO_FA_COOKIE)?.value, user.id)
+    // Bij twijfel de code vragen: een tijdsoverschrijding mag nooit een
+    // vrijstelling opleveren.
+    const codeVerplicht = () => metTijdslimiet(twoFactorRequired(db, user.id), DB_TIJDSLIMIET_MS, true)
 
     if (roleData?.role === 'admin') {
       // Een account kan van de code vrijgesteld zijn (login_settings). We vragen
       // dat pas op als de code ontbreekt, zodat de normale weg geen extra
       // databasebevraging kost.
-      if (!twoFaOk && await twoFactorRequired(db, user.id)) {
+      if (!twoFaOk && await codeVerplicht()) {
         return NextResponse.json({ error: 'Verificatie vereist', code: '2fa_required' }, { status: 401 })
       }
       return doorgeven()
     }
 
     // Geen admin → enkel actieve werknemers, binnen hun modules.
-    const { data: staff } = await db
-      .from('staff_members').select('active, permissions').eq('auth_user_id', user.id).maybeSingle()
+    const staffLezing = await lees<{ active?: boolean; permissions?: unknown }>(
+      db.from('staff_members').select('active, permissions').eq('auth_user_id', user.id).maybeSingle(),
+    )
+    if (!staffLezing.ok) return databankOnbereikbaar(path)
+    const staff = staffLezing.data
     const activeStaff = !!staff && staff.active !== false
     if (!activeStaff) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
-    if (!twoFaOk && await twoFactorRequired(db, user.id)) {
+    if (!twoFaOk && await codeVerplicht()) {
       return NextResponse.json({ error: 'Verificatie vereist', code: '2fa_required' }, { status: 401 })
     }
     if (isStaffApiDenied(path)) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
@@ -203,14 +352,14 @@ export async function updateSession(request: NextRequest) {
 
   // Fetch role (via service-role — zie roleReader hierboven)
   const db = roleReader(supabase)
-  const { data: roleData } = await db
-    .from('user_roles')
-    .select('role')
-    .eq('user_id', user.id)
-    .limit(1)
-    .maybeSingle()
+  const rolLezing = await lees<{ role?: string }>(
+    db.from('user_roles').select('role').eq('user_id', user.id).limit(1).maybeSingle(),
+  )
+  // Geen rol kunnen lezen = niet weten of iemand admin is. Dan de deur dicht
+  // houden en dat eerlijk zeggen, in plaats van 25 seconden blijven hangen.
+  if (!rolLezing.ok) return databankOnbereikbaar(path)
 
-  let role = roleData?.role as string | undefined
+  let role = rolLezing.data?.role as string | undefined
 
   // staff_members = bron van waarheid voor werknemers. Het app_role-enum bevat
   // mogelijk (nog) geen 'employee', waardoor de rol-rij kan ontbreken; een
@@ -218,12 +367,11 @@ export async function updateSession(request: NextRequest) {
   // de rol geen bekende non-employee is (bespaart een query voor admin/klant/partner).
   let staff: { active?: boolean; permissions?: string[] } | null = null
   if (role !== 'admin' && role !== 'client' && role !== 'freelancer') {
-    const { data } = await db
-      .from('staff_members')
-      .select('active, permissions')
-      .eq('auth_user_id', user.id)
-      .maybeSingle()
-    staff = data
+    const staffLezing = await lees<{ active?: boolean; permissions?: string[] }>(
+      db.from('staff_members').select('active, permissions').eq('auth_user_id', user.id).maybeSingle(),
+    )
+    if (!staffLezing.ok) return databankOnbereikbaar(path)
+    staff = staffLezing.data
     if (staff && staff.active !== false) role = 'employee'
   }
 
@@ -233,7 +381,7 @@ export async function updateSession(request: NextRequest) {
     const twoFaOk = await verifyToken(request.cookies.get(TWO_FA_COOKIE)?.value, user.id)
     // Vrijgesteld? Dan volstaat e-mail + wachtwoord. Staat er niets ingesteld,
     // dan blijft de code verplicht — zie twoFactorRequired().
-    if (!twoFaOk && await twoFactorRequired(db, user.id)) {
+    if (!twoFaOk && await metTijdslimiet(twoFactorRequired(db, user.id), DB_TIJDSLIMIET_MS, true)) {
       const url = request.nextUrl.clone()
       url.pathname = '/login/verify'
       url.search = ''

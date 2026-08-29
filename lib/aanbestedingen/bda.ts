@@ -1,4 +1,5 @@
 import 'server-only'
+import { fetchMetLimiet } from '@/lib/fetch-met-limiet'
 
 /**
  * Koppeling met publicprocurement.be (BDA).
@@ -49,7 +50,7 @@ export class BdaClient {
     if (this.token && Date.now() < this.verlooptOp - 60_000) return this.token
     if (!this.secret) throw new BdaError('BDA_AUTH_CLIENT_SECRET ontbreekt in de omgeving.')
 
-    const res = await fetch(`${BASE}/auth/realms/supplier/protocol/openid-connect/token`, {
+    const res = await fetchMetLimiet(`${BASE}/auth/realms/supplier/protocol/openid-connect/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -81,7 +82,7 @@ export class BdaClient {
   /** Het filterobject achter een deel-link (shortLink). */
   async filterVanShortLink(shortLink: string): Promise<Record<string, unknown>> {
     const url = `${BASE}/api/sea/search/publications/filtersByShortLink/${encodeURIComponent(shortLink)}`
-    const res = await fetch(url, { headers: await this.headers(), cache: 'no-store' })
+    const res = await fetchMetLimiet(url, { headers: await this.headers(), cache: 'no-store' })
     if (res.status === 404) throw new BdaError('Deze filterlink bestaat niet (meer) bij publicprocurement.be.', 404)
     if (!res.ok) throw new BdaError(`Filter ophalen mislukt (${res.status})`, res.status)
     return await res.json() as Record<string, unknown>
@@ -117,7 +118,7 @@ export class BdaClient {
 
     // Harde bovengrens: bij een onverwacht antwoord nooit eindeloos doorgaan.
     for (let ronde = 0; ronde < 200; ronde++) {
-      const res = await fetch(`${BASE}/api/sea/search/publications`, {
+      const res = await fetchMetLimiet(`${BASE}/api/sea/search/publications`, {
         method: 'POST',
         headers: await this.headers(),
         body: JSON.stringify({ ...basis, page }),
@@ -141,7 +142,7 @@ export class BdaClient {
 
   /** De bestekdocumenten van één opdracht (workspace). */
   async documenten(workspaceId: string): Promise<BdaDocument[]> {
-    const res = await fetch(`${BASE}/api/dos/publication-workspaces/${encodeURIComponent(workspaceId)}/documents`, {
+    const res = await fetchMetLimiet(`${BASE}/api/dos/publication-workspaces/${encodeURIComponent(workspaceId)}/documents`, {
       headers: await this.headers(), cache: 'no-store',
     })
     if (!res.ok) throw new BdaError(`Documentenlijst mislukt (${res.status})`, res.status)
@@ -170,7 +171,7 @@ export class BdaClient {
    * die URL ZONDER onze auth-headers ophalen — met headers weigert de opslag.
    */
   async download(versionId: string, maxBytes = 40 * 1024 * 1024): Promise<Uint8Array | null> {
-    const res = await fetch(
+    const res = await fetchMetLimiet(
       `${BASE}/api/dos/publication-workspace-document-versions/${encodeURIComponent(versionId)}/download-url`,
       { headers: await this.headers(), cache: 'no-store' },
     )
@@ -183,7 +184,7 @@ export class BdaClient {
     const url = (await res.json() as { value?: string }).value
     if (!url) return null
 
-    const bestand = await fetch(url, { cache: 'no-store' })   // GEEN auth-headers
+    const bestand = await fetchMetLimiet(url, { cache: 'no-store' })   // GEEN auth-headers
     if (bestand.status === 403 || bestand.status === 404) return null
     if (!bestand.ok) throw new BdaError(`Bestand ophalen mislukt (${bestand.status})`, bestand.status)
     const buf = new Uint8Array(await bestand.arrayBuffer())

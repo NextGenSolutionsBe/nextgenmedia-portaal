@@ -3,6 +3,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { encryptSecret, decryptSecret } from '@/lib/crypto'
 import { baseUrl } from '@/lib/email'
 import type { Interval } from '@/lib/sales/availability'
+import { fetchMetLimiet } from '@/lib/fetch-met-limiet'
 
 // Google Calendar per klant (§7). Bewust provider-agnostisch opgezet: de
 // koppeltabel heeft een `provider`-kolom, zodat ClickUp later als tweede
@@ -47,7 +48,7 @@ export function authUrl(salesClientId: string, state: string, name: string, sign
 type TokenResponse = { access_token?: string; refresh_token?: string; expires_in?: number; error_description?: string; id_token?: string }
 
 async function tokenRequest(body: Record<string, string>): Promise<TokenResponse> {
-  const res = await fetch(TOKEN_URL, {
+  const res = await fetchMetLimiet(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(body).toString(),
@@ -73,7 +74,7 @@ export async function exchangeCode(
   // E-mailadres van het gekoppelde account tonen we in de UI ("gekoppeld als …").
   let email: string | null = null
   try {
-    const r = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+    const r = await fetchMetLimiet('https://openidconnect.googleapis.com/v1/userinfo', {
       headers: { Authorization: `Bearer ${tok.access_token}` },
     })
     const info = await r.json() as { email?: string }
@@ -223,7 +224,7 @@ export async function listCalendars(connectionId: string): Promise<GoogleCalenda
   const auth = await accessToken(connectionId)
   if (!auth) return []
   try {
-    const res = await fetch(`${API}/users/me/calendarList?maxResults=250&minAccessRole=freeBusyReader`, {
+    const res = await fetchMetLimiet(`${API}/users/me/calendarList?maxResults=250&minAccessRole=freeBusyReader`, {
       headers: { Authorization: `Bearer ${auth.token}` },
     })
     if (!res.ok) return []
@@ -267,7 +268,7 @@ export async function fetchBusy(connectionId: string, from: number, to: number):
   ids = ids.slice(0, 50)
 
   try {
-    const res = await fetch(`${API}/freeBusy`, {
+    const res = await fetchMetLimiet(`${API}/freeBusy`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -320,7 +321,7 @@ export async function createEvent(connectionId: string, opts: {
   }
 
   const params = new URLSearchParams({ conferenceDataVersion: opts.withMeet ? '1' : '0', sendUpdates: opts.attendeeEmail ? 'all' : 'none' })
-  const res = await fetch(`${API}/calendars/${encodeURIComponent(auth.calendarId)}/events?${params}`, {
+  const res = await fetchMetLimiet(`${API}/calendars/${encodeURIComponent(auth.calendarId)}/events?${params}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -334,7 +335,7 @@ export async function createEvent(connectionId: string, opts: {
 export async function moveEvent(connectionId: string, eventId: string, startsAt: number, endsAt: number, timezone: string): Promise<void> {
   const auth = await accessToken(connectionId)
   if (!auth) throw new Error('Deze agenda is niet (meer) gekoppeld')
-  const res = await fetch(`${API}/calendars/${encodeURIComponent(auth.calendarId)}/events/${encodeURIComponent(eventId)}`, {
+  const res = await fetchMetLimiet(`${API}/calendars/${encodeURIComponent(auth.calendarId)}/events/${encodeURIComponent(eventId)}`, {
     method: 'PATCH',
     headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -353,7 +354,7 @@ export async function deleteEvent(connectionId: string, eventId: string): Promis
   const auth = await accessToken(connectionId)
   if (!auth) return
   // 404/410 = al weg; dat is geen fout voor ons.
-  await fetch(`${API}/calendars/${encodeURIComponent(auth.calendarId)}/events/${encodeURIComponent(eventId)}?sendUpdates=all`, {
+  await fetchMetLimiet(`${API}/calendars/${encodeURIComponent(auth.calendarId)}/events/${encodeURIComponent(eventId)}?sendUpdates=all`, {
     method: 'DELETE', headers: { Authorization: `Bearer ${auth.token}` },
   }).catch(() => {})
 }

@@ -1,5 +1,6 @@
 import 'server-only'
 import type { ClickupMember } from '@/lib/clickup'
+import { fetchMetLimiet } from '@/lib/fetch-met-limiet'
 
 // Matcht een partnernaam op een ClickUp-lid. Namen komen vaak niet exact overeen,
 // dus: eerst exact, dan fuzzy, dan AI (Claude) als laatste redmiddel.
@@ -42,7 +43,7 @@ ${list}
 
 Geef UITSLUITEND JSON: {"id": <lid-id of null>, "confidence": <0-1>}. null als er geen redelijke match is.`
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetchMetLimiet('https://api.anthropic.com/v1/messages', {
       method: 'POST', headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify({ model, max_tokens: 100, messages: [{ role: 'user', content: prompt }] }),
     })

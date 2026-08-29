@@ -1,3 +1,5 @@
+import { fetchMetLimiet } from '@/lib/fetch-met-limiet'
+
 // ── Metricool integratie (server-side only) ──────────────────────────────────
 // READ-ONLY. App → Metricool, nooit terug. Uitsluitend server-side; de sleutels
 // komen enkel uit process.env (METRICOOL_USER_TOKEN + METRICOOL_USER_ID) en mogen
@@ -37,7 +39,7 @@ async function mcFetch(path: string, query: Record<string, string | number | und
     if (v !== undefined && v !== '') url.searchParams.set(k, String(v))
   }
 
-  const res = await fetch(url.toString(), {
+  const res = await fetchMetLimiet(url.toString(), {
     headers: { 'X-Mc-Auth': token, 'Content-Type': 'application/json' },
     cache: 'no-store',
   })
