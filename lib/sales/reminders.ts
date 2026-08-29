@@ -1,7 +1,8 @@
 import 'server-only'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import {
-  sendEmail, cancelScheduledEmail, baseUrl, SCHEDULE_HORIZON_MS, RESTRICTED_KEY_HINT,
+  sendEmail,
+  sendEmailMetAfzenderTerugval, cancelScheduledEmail, baseUrl, SCHEDULE_HORIZON_MS, RESTRICTED_KEY_HINT,
   resendKeyFor,
 } from '@/lib/email'
 import { listPipelines, defaultFromFor, type SalesPipeline } from '@/lib/sales/pipelines'
@@ -283,7 +284,7 @@ export async function scheduleReminderFor(
   const { built } = b
   if (built.due - now.getTime() > SCHEDULE_HORIZON_MS) return { outcome: 'too_far' }
 
-  const res = await sendEmail({
+  const res = await sendEmailMetAfzenderTerugval({
     to: built.to, subject: built.subject, text: built.text, html: built.html,
     from: built.from, replyTo: built.replyTo, attachments: built.attachments,
     apiKey: built.apiKey,
@@ -418,7 +419,7 @@ export async function rescheduleReminder(
     }
   }
 
-  const res = await sendEmail({
+  const res = await sendEmailMetAfzenderTerugval({
     to: built.to, subject: built.subject, text: built.text, html: built.html,
     from: built.from, replyTo: built.replyTo, attachments: built.attachments,
     apiKey: built.apiKey,

@@ -92,6 +92,9 @@ export function ReminderSettings({ onClose }: { onClose: () => void }) {
       })
       const j = await res.json(); if (!res.ok) throw new Error(j.error)
       toast.success(j.attached ? 'Testmail verstuurd, met brochure.' : 'Testmail verstuurd — zonder brochure!')
+      if (j.afzenderTeruggevallen) {
+        toast.warning('Let op: verstuurd vanaf het hoofdadres, want het domein van dit merk is niet geverifieerd bij Resend. Antwoorden komen wel bij het merk aan.', { duration: 12000 })
+      }
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Testmail mislukt') } finally { setTesting(false) }
   }
 

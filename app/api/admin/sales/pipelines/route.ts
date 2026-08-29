@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff, requireAdmin } from '@/lib/supabase/server'
 import { listPipelines, defaultFromFor } from '@/lib/sales/pipelines'
 import { reminderBody } from '@/lib/sales/reminders'
-import { sendEmail, baseUrl, EMAIL_FROM, resendKeyFor } from '@/lib/email'
+import { sendEmailMetAfzenderTerugval, baseUrl, EMAIL_FROM, resendKeyFor } from '@/lib/email'
 import { logAudit, requestMeta } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
         }]
       : []
 
-    const res = await sendEmail({
+    const res = await sendEmailMetAfzenderTerugval({
       to,
       subject: `[TEST — ${p.name}] Tot morgen om 14:00`,
       text: lines.join('\n'),
@@ -138,7 +138,13 @@ export async function POST(req: NextRequest) {
       apiKey: resendKeyFor(p.key),
     })
     if (!res.ok) return NextResponse.json({ error: res.error ?? 'Versturen mislukt' }, { status: 502 })
-    return NextResponse.json({ ok: true, attached: attachments.length > 0 })
+    return NextResponse.json({
+      ok: true,
+      attached: attachments.length > 0,
+      // Vertrokken vanaf het hoofdadres omdat het merkdomein niet geverifieerd
+      // is bij Resend — goed om te weten, geen fout.
+      afzenderTeruggevallen: !!res.afzenderTeruggevallen,
+    })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }

@@ -68,6 +68,44 @@ export async function sendEmail(opts: {
 /** Uiterste horizon van Resend voor een ingeplande mail. */
 export const SCHEDULE_HORIZON_MS = 72 * 3600 * 1000
 
+/** Weigerde Resend omdat het AFZENDERDOMEIN niet geverifieerd is? */
+function isDomeinFout(msg: string | null | undefined): boolean {
+  return /is not verified|verify your domain|domain (is )?not (verified|found)|not authorized to send/i.test(msg ?? '')
+}
+
+/**
+ * Als sendEmail, maar met een vangnet op de afzender.
+ *
+ * Wij mailen voor twee merken met (meestal) één Resend-sleutel. Vertrekt een
+ * mail met afzender info@nextgensolutions.be terwijl dat domein niet onder de
+ * gebruikte sleutel geverifieerd is, dan weigert Resend hem — en een
+ * herinnering naar een prospect mag nooit stil sneuvelen op een
+ * domeininstelling. Dan liever verzonden vanaf het hoofdadres, met de
+ * displaynaam van het merk en het merkadres als antwoordadres, zodat een
+ * reply alsnog op de juiste plek aankomt.
+ *
+ * `afzenderTeruggevallen` in het resultaat vertelt de oproeper dat dit
+ * gebeurd is (bv. om het in een testmail-melding te tonen).
+ */
+export async function sendEmailMetAfzenderTerugval(
+  opts: Parameters<typeof sendEmail>[0],
+): Promise<SendResult & { afzenderTeruggevallen?: boolean }> {
+  const eerste = await sendEmail(opts)
+  if (eerste.ok || !opts.from || !isDomeinFout(eerste.error)) return eerste
+
+  // Displaynaam van het merk behouden; adres wordt dat van het hoofddomein.
+  const merkNaam = opts.from.match(/^([^<]+)</)?.[1]?.trim()
+  const hoofdAdres = EMAIL_FROM.match(/<([^>]+)>/)?.[1] ?? EMAIL_FROM
+  const merkAdres = opts.from.match(/<([^>]+)>/)?.[1] ?? opts.from
+
+  const tweede = await sendEmail({
+    ...opts,
+    from: merkNaam ? `${merkNaam} <${hoofdAdres}>` : EMAIL_FROM,
+    replyTo: opts.replyTo || merkAdres,
+  })
+  return tweede.ok ? { ...tweede, afzenderTeruggevallen: true } : tweede
+}
+
 /**
  * Een Resend-sleutel kan beperkt zijn tot "alleen verzenden". Versturen lukt
  * dan wel, maar een ingeplande mail intrekken of een status opvragen niet.
