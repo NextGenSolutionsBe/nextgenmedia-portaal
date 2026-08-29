@@ -156,6 +156,7 @@ function NavItem({
               <Link
                 key={child.href}
                 href={child.href}
+                prefetch={false}
                 onClick={onNavigate}
                 className={cn('sidebar-item text-xs', (child.exact ? pathname === child.href : pathname.startsWith(child.href)) && 'active')}
               >
@@ -170,8 +171,16 @@ function NavItem({
   }
 
   return (
+    // prefetch={false} — ZONDER dit haalde de browser bij elke adminpagina
+    // ALLE 34 menu-items vooruit op. Elke adminpagina is force-dynamic en er is
+    // geen loading.tsx, dus zo'n vooruitgehaalde pagina wordt VOLLEDIG op de
+    // server gerenderd, mét al zijn databasequery's. Eén keer inloggen zette
+    // daardoor ~25 volledige paginarenders tegelijk in gang — genoeg om op het
+    // gratis Supabase-plan de middleware te laten vastlopen (MIDDLEWARE_-
+    // INVOCATION_TIMEOUT, en dan is de hele app onbereikbaar).
     <Link
       href={item.href}
+      prefetch={false}
       onClick={onNavigate}
       className={cn('sidebar-item', isActive && 'active')}
     >
