@@ -6,6 +6,7 @@ import {
   type RevenueEntry, type CostEntry, type FiscalSettings,
 } from '@/lib/finance'
 import { normalizeInvoiceStatus, recurringActiveInMonth, type RecurringInvoice } from '@/lib/invoices'
+import { kantoorPerMaand } from '@/lib/kantoor/finance'
 
 /** Factuurregel zoals gebruikt voor de omzetberekening. */
 export type InvoiceRow = {
@@ -32,6 +33,9 @@ export type FinanceCore = {
   kostenManualFY: number; ebitdaFY: number
   /** Kost van de appointment setters (uren + commissie), per maand en per jaar. */
   setterPerMonth: number[]; setterCostFY: number
+  /** Omzet en kosten uit de samenwerkingen in het Kantoor, per maand en per jaar. */
+  kantoorOmzetPerMonth: number[]; kantoorOmzetFY: number
+  kantoorKostPerMonth: number[]; kantoorKostFY: number
   jaarloon: number; socialAnnual: number; socialPerQuarter: number
   socialAsCostFY: number; socialPerMonth: number
   winstFY: number; taxFY: number; netFY: number
@@ -44,6 +48,8 @@ export function computeCore(
   recurring: RecurringInvoice[] = [], recurringStatus: Map<string, string> = new Map(),
   /** Kost van de appointment setters per maand, in euro. */
   setterPerMonth: number[] = [],
+  /** Omzet en kosten uit het Kantoor per maand, in euro. */
+  kantoor: { omzet: number[]; kosten: number[] } = { omzet: [], kosten: [] },
 ): FinanceCore {
   // Omzet komt uit FACTUREN — losse facturen ÉN terugkerende facturen.
   // Geannuleerde tellen niet mee; bedragen excl. btw (= omzet).
@@ -73,13 +79,19 @@ export function computeCore(
   const monthly = Array.from({ length: 12 }, (_, mi) => {
     const r = revenueForMonth(entries, year, mi)   // legacy prognose-uitsplitsing
     const inv = invMonth(mi)
+    // Samenwerkingen uit het Kantoor tellen mee vanaf de maand waarin ze
+    // afgerond zijn. Ze staan NIET in cost_entries/invoices — ze worden
+    // afgeleid (lib/kantoor/finance.ts), zodat ze nooit dubbel tellen en een
+    // gewijzigde opdracht meteen doorwerkt.
+    const kOmzet = Number(kantoor.omzet[mi] ?? 0)
+    const kKost = Number(kantoor.kosten[mi] ?? 0)
     return {
       mi,
-      omzet: inv.total,
-      omzetInvoiced: inv.invoiced,
+      omzet: inv.total + kOmzet,
+      omzetInvoiced: inv.invoiced + kOmzet,
       omzetOpen: inv.open,
       omzetRec: r.recurring, omzetOne: r.one_time,
-      kostenManual: costForMonth(costs, year, mi),
+      kostenManual: costForMonth(costs, year, mi) + kKost,
     }
   })
   const omzetFY = monthly.reduce((s, m) => s + m.omzet, 0)
@@ -88,6 +100,10 @@ export function computeCore(
   const omzetRecFY = monthly.reduce((s, m) => s + m.omzetRec, 0)
   const omzetOneFY = monthly.reduce((s, m) => s + m.omzetOne, 0)
   const kostenManualFY = monthly.reduce((s, m) => s + m.kostenManual, 0)
+  const kantoorOmzetPerMonth = Array.from({ length: 12 }, (_, mi) => Number(kantoor.omzet[mi] ?? 0))
+  const kantoorKostPerMonth = Array.from({ length: 12 }, (_, mi) => Number(kantoor.kosten[mi] ?? 0))
+  const kantoorOmzetFY = kantoorOmzetPerMonth.reduce((s, v) => s + v, 0)
+  const kantoorKostFY = kantoorKostPerMonth.reduce((s, v) => s + v, 0)
 
   // Setterkost telt mee als gewone bedrijfskost. Bewust apart bijgehouden en
   // niet in kostenManual gemengd: die staat voor de handmatig ingevoerde
@@ -115,6 +131,7 @@ export function computeCore(
     settings, entries, costs, invoices, clientMap, year, monthly,
     omzetFY, omzetInvoicedFY, omzetOpenFY, omzetRecFY, omzetOneFY, kostenManualFY, ebitdaFY,
     setterPerMonth: setters, setterCostFY,
+    kantoorOmzetPerMonth, kantoorOmzetFY, kantoorKostPerMonth, kantoorKostFY,
     jaarloon, socialAnnual: social.annual, socialPerQuarter: social.perQuarter,
     socialAsCostFY, socialPerMonth, winstFY, taxFY, netFY,
     mrr: currentMRR(entries), recurringCostNow: currentRecurringCost(costs),
@@ -148,11 +165,15 @@ export async function loadCore(year: number): Promise<FinanceCore> {
   // het hele dashboard te laten stuklopen.
   let setterPerMonth: number[] = []
   try { setterPerMonth = await setterCostByMonth(year) } catch { setterPerMonth = [] }
+  // Zelfde principe: haperen de kantoortabellen, dan tonen we de financiën
+  // gewoon zonder die bijdrage.
+  let kantoor = { omzet: [] as number[], kosten: [] as number[] }
+  try { kantoor = await kantoorPerMaand(year) } catch { /* laat leeg */ }
 
   return computeCore(
     (entries ?? []) as RevenueEntry[], (costs ?? []) as CostEntry[], settings, year, clientMap,
     (invoices ?? []) as InvoiceRow[], (recurring ?? []) as RecurringInvoice[], recStatus,
-    setterPerMonth,
+    setterPerMonth, kantoor,
   )
 }
 

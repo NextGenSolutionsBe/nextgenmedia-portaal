@@ -2772,3 +2772,68 @@ CREATE INDEX IF NOT EXISTS opdrachten_open_deadline
   WHERE status NOT IN ('afgerond','geannuleerd');
 CREATE INDEX IF NOT EXISTS opdrachten_client ON public.opdrachten (client_id);
 ALTER TABLE public.opdrachten ENABLE ROW LEVEL SECURITY;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Kantoor: samenwerking tussen bedrijven (onderaanneming en doorverwijzing).
+CREATE TABLE IF NOT EXISTS public.kantoor_bedrijven (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam        text NOT NULL,
+  is_eigen    boolean NOT NULL DEFAULT false,
+  email       text,
+  actief      boolean NOT NULL DEFAULT true,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS kantoor_bedrijven_naam ON public.kantoor_bedrijven (lower(naam));
+
+CREATE TABLE IF NOT EXISTS public.kantoor_leden (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  bedrijf_id    uuid NOT NULL REFERENCES public.kantoor_bedrijven(id) ON DELETE CASCADE,
+  auth_user_id  uuid,
+  email         text NOT NULL,
+  naam          text,
+  actief        boolean NOT NULL DEFAULT true,
+  uitgenodigd_op timestamptz,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (bedrijf_id, email)
+);
+CREATE INDEX IF NOT EXISTS kantoor_leden_user ON public.kantoor_leden (auth_user_id) WHERE auth_user_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS public.kantoor_opdrachten (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  soort             text NOT NULL,
+  factureert_id     uuid NOT NULL REFERENCES public.kantoor_bedrijven(id) ON DELETE RESTRICT,
+  ontvangt_id       uuid NOT NULL REFERENCES public.kantoor_bedrijven(id) ON DELETE RESTRICT,
+  titel             text NOT NULL,
+  omschrijving      text,
+  klant_naam        text,
+  totaal_cents      bigint NOT NULL DEFAULT 0,
+  vergoeding_cents  bigint NOT NULL DEFAULT 0,
+  vergoeding_pct    numeric(5,2),
+  bedragen_zichtbaar boolean NOT NULL DEFAULT false,
+  status            text NOT NULL DEFAULT 'lopend',
+  afgerond_op       timestamptz,
+  aangemaakt_door   uuid,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  updated_at        timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT kantoor_opdr_soort  CHECK (soort  IN ('onderaanneming','doorverwijzing')),
+  CONSTRAINT kantoor_opdr_status CHECK (status IN ('lopend','afgerond','geannuleerd')),
+  CONSTRAINT kantoor_opdr_twee_partijen CHECK (factureert_id <> ontvangt_id),
+  CONSTRAINT kantoor_opdr_bedragen CHECK (
+    totaal_cents >= 0 AND vergoeding_cents >= 0 AND vergoeding_cents <= totaal_cents
+  )
+);
+CREATE INDEX IF NOT EXISTS kantoor_opdr_partijen ON public.kantoor_opdrachten (factureert_id, ontvangt_id);
+CREATE INDEX IF NOT EXISTS kantoor_opdr_afgerond ON public.kantoor_opdrachten (afgerond_op) WHERE status = 'afgerond';
+
+ALTER TABLE public.kantoor_bedrijven  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.kantoor_leden      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.kantoor_opdrachten ENABLE ROW LEVEL SECURITY;
+
+INSERT INTO public.kantoor_bedrijven (naam, is_eigen, email)
+SELECT v.naam, v.eigen, v.email FROM (VALUES
+  ('NextGenMedia',           true,  'info@nextgenmedia.be'),
+  ('NextGenSolutions',       true,  'info@nextgensolutions.be'),
+  ('Small Steps Big Impact', false, NULL),
+  ('Fully Booked',           false, NULL)
+) AS v(naam, eigen, email)
+WHERE NOT EXISTS (SELECT 1 FROM public.kantoor_bedrijven b WHERE lower(b.naam) = lower(v.naam));

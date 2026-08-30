@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
   Info, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, UserCog, CalendarClock, BarChart3, KanbanSquare,
-  MailCheck, PhoneCall, Stamp, FolderUp,
+  MailCheck, PhoneCall, Stamp, FolderUp, Handshake,
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
@@ -71,6 +71,13 @@ const SECTIONS: NavSection[] = [
       // Partners: dat zijn freelance-opdrachten, dit gaat over onze eigen
       // klantklussen. De badge telt wat te laat is.
       { label: 'Opdrachten', href: '/admin/opdrachten', icon: ClipboardList, module: 'opdrachten', badge: 'opdrachten' },
+    ],
+  },
+  {
+    title: 'Kantoor',
+    items: [
+      // Samenwerking tussen onze eigen bedrijven en externe partners.
+      { label: 'Kantoor', href: '/admin/kantoor', icon: Handshake, module: 'kantoor' },
     ],
   },
   {

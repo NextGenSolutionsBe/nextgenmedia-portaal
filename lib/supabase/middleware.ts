@@ -394,6 +394,33 @@ export async function updateSession(request: NextRequest) {
     }
   }
 
+  /**
+   * Het Kantoor: toegankelijk voor ons eigen team én voor partners van
+   * samenwerkende bedrijven. Partners hebben geen rol in user_roles — hun
+   * toegang blijkt uit een actieve rij in kantoor_leden. Die controle staat
+   * hier zodat een partner nooit ergens anders in de app terechtkomt.
+   */
+  if (path.startsWith('/kantoor')) {
+    if (role === 'admin' || role === 'employee') return doorgeven({ userId: user.id, role })
+    const lidLezing = await lees<{ id: string }>(
+      db.from('kantoor_leden').select('id')
+        .eq('auth_user_id', user.id).eq('actief', true).limit(1).maybeSingle(),
+    )
+    if (!lidLezing.ok) return databankOnbereikbaar(path)
+    if (lidLezing.data) return doorgeven()
+    // Geen lidmaatschap op gebruikers-id? Dan kan de uitnodiging nog op het
+    // e-mailadres staan (account net aangemaakt, koppeling nog niet gelegd).
+    const opEmail = user.email
+      ? await lees<{ id: string }>(
+          db.from('kantoor_leden').select('id')
+            .eq('email', user.email).eq('actief', true).limit(1).maybeSingle(),
+        )
+      : { ok: true as const, data: null }
+    if (!opEmail.ok) return databankOnbereikbaar(path)
+    if (opEmail.data) return doorgeven()
+    return NextResponse.redirect(new URL('/login', request.url))
+  }
+
   // Role-based routing
   if (path.startsWith('/admin')) {
     // Admin = volledige toegang. Werknemer = enkel toegestane modules.
