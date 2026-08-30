@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRefresh } from '@/lib/use-refresh'
 import { Logo } from '@/components/logo'
 
@@ -25,6 +25,8 @@ type NavEntry = {
   module?: string
   adminOnly?: boolean
   children?: NavChild[]
+  /** Sleutel uit /api/admin/badges: toont een rood telbolletje. */
+  badge?: string
 }
 type NavSection = { title?: string; items: NavEntry[] }
 
@@ -65,6 +67,10 @@ const SECTIONS: NavSection[] = [
       // Eigen ingang, geen tabblad onder Social Media: materiaal komt binnen
       // los van de kalender en je wil in één lijst zien wat er nieuw is.
       { label: 'Klantuploads', href: '/admin/uploads', icon: FolderUp, module: 'uploads' },
+      // Werk dat binnenkomt en opgevolgd moet worden. Bewust hier en niet bij
+      // Partners: dat zijn freelance-opdrachten, dit gaat over onze eigen
+      // klantklussen. De badge telt wat te laat is.
+      { label: 'Opdrachten', href: '/admin/opdrachten', icon: ClipboardList, module: 'opdrachten', badge: 'opdrachten' },
     ],
   },
   {
@@ -126,9 +132,12 @@ const SECTIONS: NavSection[] = [
 function NavItem({
   item,
   onNavigate,
+  badge = 0,
 }: {
   item: NavEntry
   onNavigate: () => void
+  /** Aantal voor het rode bolletje; 0 = niets tonen. */
+  badge?: number
 }) {
   const pathname = usePathname()
   const [open, setOpen] = useState(() =>
@@ -185,7 +194,15 @@ function NavItem({
       className={cn('sidebar-item', isActive && 'active')}
     >
       <Icon className="h-4 w-4 shrink-0" />
-      {item.label}
+      <span className="flex-1">{item.label}</span>
+      {/* Rood telbolletje: iets is te laat en vraagt aandacht. */}
+      {badge > 0 && (
+        <span
+          title={`${badge} ${badge === 1 ? 'opdracht is' : 'opdrachten zijn'} te laat`}
+          className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
     </Link>
   )
 }
@@ -194,6 +211,17 @@ export function AdminSidebar({ allowedModules, isEmployee = false }: { allowedMo
   const router = useRouter()
   const { refresh, spinning } = useRefresh()
   const [mobileOpen, setMobileOpen] = useState(false)
+  // Telbolletjes. Los van de rest opgehaald: haperen ze, dan staat het menu er
+  // gewoon zonder — een bolletje is nooit de reden om navigatie op te houden.
+  const [badges, setBadges] = useState<Record<string, number>>({})
+  useEffect(() => {
+    let levend = true
+    fetch('/api/admin/badges')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (levend && j) setBadges(j) })
+      .catch(() => { /* stil */ })
+    return () => { levend = false }
+  }, [])
 
   // Werknemer ziet enkel toegestane modules; admin (allowedModules undefined) ziet alles.
   const canSee = (item: NavEntry) => {
@@ -285,7 +313,8 @@ export function AdminSidebar({ allowedModules, isEmployee = false }: { allowedMo
               )}
               <div className="space-y-0.5">
                 {section.items.map((item) => (
-                  <NavItem key={item.href} item={item} onNavigate={closeMobile} />
+                  <NavItem key={item.href} item={item} onNavigate={closeMobile}
+                    badge={item.badge ? (badges[item.badge] ?? 0) : 0} />
                 ))}
               </div>
             </div>

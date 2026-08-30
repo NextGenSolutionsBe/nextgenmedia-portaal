@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { getActor, actorCanSee } from '@/lib/actor-modules'
 import { FEATURES } from '@/lib/features'
+import { statusInfo } from '@/lib/opdrachten'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const safe = async <T,>(p: PromiseLike<{ data: T[] | null }>): Promise<T[]> => { try { return (await p).data ?? [] } catch { return [] } }
 
-    const [clients, contracts, blogs, invoices, forecast, tasks, partners] = await Promise.all([
+    const [clients, contracts, blogs, invoices, forecast, tasks, partners, opdrachten] = await Promise.all([
       safe(admin.from('clients').select('id, company_name, btw_nummer').ilike('company_name', like).limit(L)),
       safe(admin.from('contracts').select('id, title, signer_name, signer_email').or(`title.ilike.${like},signer_name.ilike.${like},signer_email.ilike.${like}`).limit(L)),
       safe(admin.from('blogs').select('id, titel, status').ilike('titel', like).limit(L)),
@@ -38,6 +39,7 @@ export async function GET(req: NextRequest) {
       safe(admin.from('revenue_entries').select('id, title, client_id').ilike('title', like).limit(L)),
       safe(admin.from('client_tasks').select('id, title, client_id, status').ilike('title', like).limit(L)),
       safe(admin.from('freelancers').select('id, name').ilike('name', like).limit(L)),
+      safe(admin.from('opdrachten').select('id, titel, status').ilike('titel', like).limit(L)),
     ]) as [
       { id: string; company_name: string; btw_nummer?: string | null }[],
       { id: string; title: string; signer_name?: string | null; signer_email?: string | null }[],
@@ -46,6 +48,7 @@ export async function GET(req: NextRequest) {
       { id: string; title?: string | null; client_id?: string | null }[],
       { id: string; title: string; client_id?: string | null; status?: string | null }[],
       { id: string; name: string }[],
+      { id: string; titel: string; status?: string | null }[],
     ]
 
     // Vaste prioriteitsvolgorde: klanten → contracten → facturen → taken → blogs → prognose → partners.
@@ -58,6 +61,7 @@ export async function GET(req: NextRequest) {
     if (FEATURES.blogs && may('blogs')) for (const b of blogs) results.push({ type: 'blog', label: 'Blog', title: b.titel, subtitle: b.status ?? undefined, href: `/admin/blogs` })
     // Prognose bestaat niet meer als los concept — omzet volgt uit facturen.
     if (FEATURES.partners && may('partners')) for (const p of partners) results.push({ type: 'partner', label: 'Partner', title: p.name, href: `/admin/partners/${p.id}` })
+    if (may('opdrachten')) for (const o of opdrachten) results.push({ type: 'opdracht', label: 'Opdracht', title: o.titel, subtitle: statusInfo(o.status).label, href: '/admin/opdrachten' })
 
     return NextResponse.json({ results })
   } catch (err) {

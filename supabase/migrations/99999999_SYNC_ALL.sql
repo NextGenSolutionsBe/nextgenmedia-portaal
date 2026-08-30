@@ -2747,3 +2747,28 @@ CREATE UNIQUE INDEX IF NOT EXISTS clickup_agenda_runs_een_open
 ALTER TABLE public.sales_pipelines
   ADD COLUMN IF NOT EXISTS default_calendar_id uuid
   REFERENCES public.sales_calendar_connections(id) ON DELETE SET NULL;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Opdrachten: werk dat binnenkomt en opgevolgd moet worden — een contentshoot,
+-- een voorstel dat de deur uit is, iets waar we op de klant wachten.
+CREATE TABLE IF NOT EXISTS public.opdrachten (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id     uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  klant_vrij    text,
+  titel         text NOT NULL,
+  omschrijving  text,
+  status        text NOT NULL DEFAULT 'open',
+  deadline      date,
+  wie           text,
+  afgerond_op   timestamptz,
+  aangemaakt_door_email text,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT opdrachten_status_check
+    CHECK (status IN ('open','bezig','wacht','afgerond','geannuleerd'))
+);
+CREATE INDEX IF NOT EXISTS opdrachten_open_deadline
+  ON public.opdrachten (deadline)
+  WHERE status NOT IN ('afgerond','geannuleerd');
+CREATE INDEX IF NOT EXISTS opdrachten_client ON public.opdrachten (client_id);
+ALTER TABLE public.opdrachten ENABLE ROW LEVEL SECURITY;

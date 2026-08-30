@@ -3,6 +3,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { followUp } from '@/lib/contract-status'
 import { FEATURES } from '@/lib/features'
 import { syncGezondheid, SYNC_VEROUDERD_MIN } from '@/lib/sales/clickup-agenda-sync'
+import { OPEN_STATUSSEN, vandaagISO, deadlineTekst } from '@/lib/opdrachten'
 
 // Eén bron voor meldingen + "Vandaag": alles live afgeleid uit bestaande data
 // (geen nieuwe tabel). Gelezen/niet-gelezen wordt client-side in localStorage
@@ -29,13 +30,17 @@ export async function buildNotifications(): Promise<Notif[]> {
   const safe = async <T,>(p: PromiseLike<{ data: T[] | null }>): Promise<T[]> => { try { return (await p).data ?? [] } catch { return [] } }
 
   const since = new Date(Date.now() - 7 * 86400000).toISOString()
-  const [invoices, contracts, blogs, webRequests, clients, clientMap] = await Promise.all([
+  const [invoices, contracts, blogs, webRequests, clients, clientMap, teLateOpdrachten] = await Promise.all([
     safe(admin.from('invoices').select('id, description, status, invoice_month, client_id').eq('status', 'te_factureren').limit(50)),
     safe(admin.from('contracts').select('id, title, status, sent_at, created_at, expires_at, client_id').limit(300)),
     safe(admin.from('blogs').select('id, titel, status').eq('status', 'goedgekeurd').limit(50)),
     safe(admin.from('webdesign_change_requests').select('id, title, status, created_at').eq('status', 'new').limit(50)),
     safe(admin.from('clients').select('id, company_name, created_at').gte('created_at', since).limit(50)),
     safe(admin.from('clients').select('id, company_name').limit(2000)),
+    // Te late opdrachten: open werk waarvan de deadline gepasseerd is.
+    safe(admin.from('opdrachten')
+      .select('id, titel, deadline, status')
+      .in('status', OPEN_STATUSSEN).lt('deadline', vandaagISO()).limit(50)),
   ]) as [
     { id: string; description?: string | null; status: string; invoice_month?: string | null; client_id?: string | null }[],
     { id: string; title: string; status: string; sent_at?: string | null; created_at?: string | null; expires_at?: string | null; client_id?: string | null }[],
@@ -43,6 +48,7 @@ export async function buildNotifications(): Promise<Notif[]> {
     { id: string; title: string; status: string; created_at?: string | null }[],
     { id: string; company_name: string; created_at?: string | null }[],
     { id: string; company_name: string }[],
+    { id: string; titel: string; deadline: string | null; status: string }[],
   ]
 
   const names = new Map(clientMap.map((c) => [c.id, c.company_name]))
@@ -72,6 +78,16 @@ export async function buildNotifications(): Promise<Notif[]> {
       })
     }
   } catch { /* meldingen mogen nooit stuklopen op de waakhond */ }
+
+  // Opdrachten die over hun deadline zijn: het hele punt van die module is dat
+  // zulk werk niet stilletjes blijft liggen.
+  for (const o of teLateOpdrachten) {
+    out.push({
+      id: `opdracht:${o.id}`, kind: 'opdracht', priority: 'high',
+      title: `Opdracht te laat — ${o.titel} (${deadlineTekst(o.deadline) ?? 'deadline gepasseerd'})`,
+      date: o.deadline, href: '/admin/opdrachten',
+    })
+  }
 
   for (const i of invoices) {
     const due = (i.invoice_month ?? '') <= thisMonth()
