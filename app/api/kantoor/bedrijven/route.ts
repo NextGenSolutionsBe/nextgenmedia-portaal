@@ -144,11 +144,85 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// DELETE ?lid= — toegang intrekken.
+/**
+ * PATCH — een bedrijf op non-actief zetten of weer aanzetten.
+ *
+ * Dit is het alternatief voor verwijderen zodra er opdrachten aan hangen: het
+ * bedrijf verdwijnt uit alle keuzelijsten, maar de historie en de cijfers
+ * blijven kloppen.
+ */
+export async function PATCH(req: NextRequest) {
+  try {
+    const actor = await requireAdmin()
+    if (!actor) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
+    const b = await req.json().catch(() => ({}))
+    const id = String(b.bedrijf_id ?? '')
+    if (!id) return NextResponse.json({ error: 'bedrijf_id ontbreekt' }, { status: 400 })
+
+    const admin = createAdminSupabaseClient()
+    const { error } = await admin.from('kantoor_bedrijven')
+      .update({ actief: !!b.actief }).eq('id', id)
+    if (error) throw new Error(error.message)
+
+    const meta = requestMeta(req)
+    await logAudit({
+      action: b.actief ? 'kantoor.bedrijf.activate' : 'kantoor.bedrijf.archive',
+      entityType: 'kantoor_bedrijf', entityId: id,
+      summary: `Kantoor: bedrijf ${b.actief ? 'weer actief' : 'op non-actief'} gezet`,
+      actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'admin',
+      ip: meta.ip, userAgent: meta.userAgent,
+    })
+    return NextResponse.json({ ok: true })
+  } catch (err) {
+    return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
+  }
+}
+
+// DELETE ?lid= — toegang intrekken. DELETE ?bedrijf= — bedrijf verwijderen.
 export async function DELETE(req: NextRequest) {
   try {
     const actor = await requireAdmin()
     if (!actor) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
+
+    // ── Bedrijf verwijderen ──────────────────────────────────────────────────
+    const bedrijfId = req.nextUrl.searchParams.get('bedrijf') ?? ''
+    if (bedrijfId) {
+      const admin = createAdminSupabaseClient()
+      const { data: bedrijf } = await admin.from('kantoor_bedrijven')
+        .select('id, naam').eq('id', bedrijfId).maybeSingle()
+      if (!bedrijf) return NextResponse.json({ error: 'Bedrijf niet gevonden' }, { status: 404 })
+
+      /**
+       * Hangen er opdrachten aan, dan verwijderen we NIET. Die opdrachten
+       * dragen bedragen die in de omzet- en kostencijfers meetellen; het
+       * bedrijf weghalen zou die cijfers stilletjes veranderen. In dat geval
+       * is "op non-actief zetten" het juiste antwoord — dat zeggen we ook.
+       */
+      const { count } = await admin.from('kantoor_opdrachten')
+        .select('id', { count: 'exact', head: true })
+        .or(`factureert_id.eq.${bedrijfId},ontvangt_id.eq.${bedrijfId}`)
+      if ((count ?? 0) > 0) {
+        return NextResponse.json({
+          error: `Dit bedrijf staat bij ${count} opdracht${count === 1 ? '' : 'en'}. Die tellen mee in de cijfers, dus verwijderen kan niet — zet het bedrijf op non-actief.`,
+          kanArchiveren: true,
+        }, { status: 409 })
+      }
+
+      // Geen opdrachten → echt weg. De leden verdwijnen mee (cascade); de
+      // ACCOUNTS blijven bestaan, die kunnen bij een ander bedrijf horen.
+      const { error } = await admin.from('kantoor_bedrijven').delete().eq('id', bedrijfId)
+      if (error) throw new Error(error.message)
+
+      const meta0 = requestMeta(req)
+      await logAudit({
+        action: 'kantoor.bedrijf.delete', entityType: 'kantoor_bedrijf', entityId: bedrijfId,
+        summary: `Kantoor: bedrijf "${(bedrijf as { naam: string }).naam}" verwijderd`,
+        actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'admin',
+        ip: meta0.ip, userAgent: meta0.userAgent,
+      })
+      return NextResponse.json({ ok: true })
+    }
+
     const lidId = req.nextUrl.searchParams.get('lid') ?? ''
     if (!lidId) return NextResponse.json({ error: 'lid ontbreekt' }, { status: 400 })
 

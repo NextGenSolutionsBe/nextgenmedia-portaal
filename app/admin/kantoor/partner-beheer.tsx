@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Loader2, Plus, Trash2, Building2, Mail, ShieldCheck, Clock } from 'lucide-react'
+import { Loader2, Plus, Trash2, Building2, Mail, ShieldCheck, Clock, Archive, RotateCcw } from 'lucide-react'
 
 type Bedrijf = { id: string; naam: string; is_eigen: boolean; email: string | null; actief: boolean }
 type Lid = {
@@ -71,6 +71,41 @@ export function PartnerBeheer() {
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Uitnodigen mislukt') } finally { setBezig(false) }
   }
 
+  const verwijderBedrijf = async (b: Bedrijf) => {
+    if (!confirm(`"${b.naam}" verwijderen?
+
+Dit kan alleen als er nog geen opdrachten aan hangen. Uitnodigingen voor dit bedrijf verdwijnen mee; de accounts zelf blijven bestaan.`)) return
+    try {
+      const res = await fetch(`/api/kantoor/bedrijven?bedrijf=${b.id}`, { method: 'DELETE' })
+      const j = await res.json()
+      if (!res.ok) {
+        // Er hangen opdrachten aan: verwijderen zou de cijfers veranderen.
+        // Meteen de juiste uitweg aanbieden in plaats van enkel te weigeren.
+        if (j.kanArchiveren && confirm(`${j.error}
+
+Wil je "${b.naam}" nu op non-actief zetten? Dan verdwijnt het uit alle keuzelijsten, maar blijven de cijfers kloppen.`)) {
+          await zetActief(b, false)
+          return
+        }
+        throw new Error(j.error)
+      }
+      toast.success(`"${b.naam}" verwijderd.`)
+      laad()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt') }
+  }
+
+  const zetActief = async (b: Bedrijf, actief: boolean) => {
+    try {
+      const res = await fetch('/api/kantoor/bedrijven', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bedrijf_id: b.id, actief }),
+      })
+      const j = await res.json(); if (!res.ok) throw new Error(j.error)
+      toast.success(actief ? `"${b.naam}" staat weer actief.` : `"${b.naam}" op non-actief gezet.`)
+      laad()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Bijwerken mislukt') }
+  }
+
   const trekIn = async (l: Lid) => {
     if (!confirm(`Toegang van ${l.email} intrekken?\n\nHet account zelf blijft bestaan — enkel de koppeling met dit bedrijf gaat weg.`)) return
     try {
@@ -116,7 +151,8 @@ export function PartnerBeheer() {
           <h3 className="text-sm font-semibold">Iemand uitnodigen</h3>
           <select className="input-base" value={uitnodigenVoor} onChange={(e) => setUitnodigenVoor(e.target.value)}>
             <option value="">Voor welk bedrijf?</option>
-            {bedrijven.map((b) => <option key={b.id} value={b.id}>{b.naam}</option>)}
+            {/* Non-actieve bedrijven horen hier niet: daar mag niemand meer bij. */}
+            {bedrijven.filter((b) => b.actief).map((b) => <option key={b.id} value={b.id}>{b.naam}</option>)}
           </select>
           <input className="input-base" type="email" value={uitnodigEmail}
             onChange={(e) => setUitnodigEmail(e.target.value)} placeholder="naam@bedrijf.be" />
@@ -135,15 +171,38 @@ export function PartnerBeheer() {
           return (
             <div key={b.id} className="card-base p-3">
               <div className="flex items-center gap-2 mb-2">
-                <span className="font-medium text-sm">{b.naam}</span>
+                <span className={`font-medium text-sm ${b.actief ? '' : 'text-gray-400'}`}>{b.naam}</span>
                 {b.is_eigen && (
                   <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-[#fff848] border border-yellow-400 text-gray-900">
                     eigen bedrijf
                   </span>
                 )}
+                {!b.actief && (
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 border border-gray-200 text-gray-500">
+                    non-actief
+                  </span>
+                )}
                 <span className="text-xs text-gray-400 ml-auto">
                   {eigen.length} {eigen.length === 1 ? 'persoon' : 'personen'}
                 </span>
+                {b.actief ? (
+                  <button onClick={() => zetActief(b, false)}
+                    className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700"
+                    title="Op non-actief zetten — verdwijnt uit de keuzelijsten, cijfers blijven">
+                    <Archive className="h-3.5 w-3.5" />
+                  </button>
+                ) : (
+                  <button onClick={() => zetActief(b, true)}
+                    className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-green-50 text-gray-400 hover:text-green-700"
+                    title="Weer actief maken">
+                    <RotateCcw className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                <button onClick={() => verwijderBedrijf(b)}
+                  className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600"
+                  title="Bedrijf verwijderen">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
               </div>
               {eigen.length === 0 ? (
                 <p className="text-xs text-gray-400">Nog niemand uitgenodigd.</p>
