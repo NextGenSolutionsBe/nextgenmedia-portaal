@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import {
   Loader2, Plus, Search, Phone, Mail, X, CalendarClock, Archive, PhoneOff, Tag, Clock, Headphones, Upload,
-  MailCheck, Pencil, ShieldQuestion, UserCheck,
+  MailCheck, Pencil, ShieldQuestion, UserCheck, History,
 } from 'lucide-react'
 import { MANUAL_STAGES, stageLabel, STAGES } from '@/lib/sales/stages'
 import { GEEN_INTERESSE_REDENEN } from '@/lib/sales/redenen'
@@ -14,6 +14,7 @@ import { merkStijl } from '@/lib/sales/merk'
 import { ImportModal } from './import-modal'
 import { ReminderSettings } from './reminder-settings'
 import { LeadGegevens } from './lead-gegevens'
+import { LeadTijdlijn } from './lead-tijdlijn'
 
 type Lead = {
   id: string; stage_key: string; labels: string[]; callback_at: string | null
@@ -66,7 +67,13 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
   const [region, setRegion] = useState('')
   const [city, setCity] = useState('')
   const [label, setLabel] = useState('')
-  const [selected, setSelected] = useState<Lead | null>(null)
+  /**
+   * De geselecteerde lead bewaren we op ID, niet als object. Zo blijft het
+   * paneel na een wijziging naar DEZELFDE, net herladen lead kijken. Met een
+   * vastgehouden kopie moest het paneel na elke opslag dicht, en dat is precies
+   * waardoor het leek alsof een notitie niet bewaard werd.
+   */
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [newLead, setNewLead] = useState(false)
   const [focus, setFocus] = useState(false)
   const [importing, setImporting] = useState(false)
@@ -105,6 +112,16 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
 
   // Kleine vertraging bij typen, zodat we niet bij elke toetsaanslag zoeken.
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t) }, [load])
+
+  /**
+   * De lead achter de selectie, telkens vers uit de lijst. Verdwijnt hij uit
+   * het huidige filter (bv. door een fasewissel), dan sluit het paneel — dat is
+   * hetzelfde gedrag als voorheen, maar nu enkel wanneer hij écht wegvalt.
+   */
+  const selected = useMemo(
+    () => (selectedId ? leads.find((l) => l.id === selectedId) ?? null : null),
+    [leads, selectedId],
+  )
 
   const counts = useMemo(() => {
     const m = new Map<string, number>()
@@ -176,7 +193,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
               const stijl = merkStijl(p.key)
               const actief = p.id === pipelineId
               return (
-                <button key={p.id} onClick={() => { setPipelineId(p.id); setSelected(null); setPicked(new Set()) }}
+                <button key={p.id} onClick={() => { setPipelineId(p.id); setSelectedId(null); setPicked(new Set()) }}
                   className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors flex items-center gap-1.5 ${
                     actief ? `${stijl.badge} border shadow-sm` : 'text-gray-500 hover:text-black'}`}>
                   <span className={`inline-block h-2 w-2 rounded-full ${stijl.stip}`} />
@@ -315,8 +332,8 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {leads.map((l) => (
-                    <tr key={l.id} onClick={() => setSelected(l)}
-                      className={`hover:bg-gray-50 cursor-pointer ${selected?.id === l.id ? 'bg-[#fff848]/10' : ''}`}>
+                    <tr key={l.id} onClick={() => setSelectedId(l.id)}
+                      className={`hover:bg-gray-50 cursor-pointer ${selectedId === l.id ? 'bg-[#fff848]/10' : ''}`}>
                       <td className="table-td" onClick={(e) => e.stopPropagation()}>
                         <input type="checkbox" aria-label="Selecteer lead"
                           checked={picked.has(l.id)} onChange={() => toggle(l.id)} />
@@ -357,7 +374,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
         {/* Detailpaneel */}
         <div>
           {selected
-            ? <LeadDetail key={selected.id} lead={selected} pipelines={pipelines} onChanged={() => { load(); setSelected(null) }} onClose={() => setSelected(null)} />
+            ? <LeadDetail key={selected.id} lead={selected} pipelines={pipelines} onChanged={load} onClose={() => setSelectedId(null)} />
             : <div className="card-base text-sm text-gray-500">Kies een lead om de details te zien.</div>}
         </div>
       </div>
@@ -390,10 +407,13 @@ function LeadDetail({ lead, pipelines, onChanged, onClose }: {
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
   const [bewerken, setBewerken] = useState(false)
+  // Loopt op na elke bewaarde notitie of wijziging: de tijdlijn haalt zich dan
+  // opnieuw op, zodat je meteen ziet dát het opgeslagen is.
+  const [ververs, setVerversen] = useState(0)
   const [callback, setCallback] = useState(lead.callback_at ? lead.callback_at.slice(0, 16) : '')
   const phone = lead.sales_contacts?.phone || lead.sales_contacts?.mobile || lead.sales_companies?.phone || ''
 
-  const patch = async (body: Record<string, unknown>, okMsg?: string) => {
+  const patch = async (body: Record<string, unknown>, okMsg?: string): Promise<boolean> => {
     setBusy(true)
     try {
       const res = await fetch(`/api/admin/sales/leads/${lead.id}`, {
@@ -401,8 +421,13 @@ function LeadDetail({ lead, pipelines, onChanged, onClose }: {
       })
       const j = await res.json(); if (!res.ok) throw new Error(j.error)
       if (okMsg) toast.success(okMsg)
+      setVerversen((n) => n + 1)
       onChanged()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt') } finally { setBusy(false) }
+      return true
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Opslaan mislukt')
+      return false
+    } finally { setBusy(false) }
   }
 
   return (
@@ -539,9 +564,26 @@ function LeadDetail({ lead, pipelines, onChanged, onClose }: {
 
       <div>
         <label className="block text-xs font-medium text-gray-600 mb-1">Notitie toevoegen</label>
-        <textarea rows={2} className="input-base" value={note} onChange={(e) => setNote(e.target.value)} />
-        <button onClick={() => { if (note.trim()) { patch({ note }, 'Notitie opgeslagen.'); setNote('') } }}
+        <textarea rows={2} className="input-base" value={note} onChange={(e) => setNote(e.target.value)}
+          placeholder="Wat is er afgesproken?" />
+        {/* Het veld wordt pas leeggemaakt als de opslag ECHT gelukt is. Ging
+            het mis, dan staat je tekst er nog en kun je opnieuw proberen. */}
+        <button
+          onClick={async () => {
+            if (!note.trim()) return
+            const gelukt = await patch({ note: note.trim(), noteKind: 'note' }, 'Notitie opgeslagen.')
+            if (gelukt) setNote('')
+          }}
           disabled={busy || !note.trim()} className="btn-secondary text-sm mt-2 w-full">Opslaan</button>
+      </div>
+
+      {/* De tijdlijn. Notities werden altijd al bewaard, maar nergens getoond —
+          daardoor leek het alsof ze verdwenen. */}
+      <div className="border-t border-gray-100 pt-3">
+        <h3 className="text-[10px] uppercase tracking-wide text-gray-400 font-bold mb-2 flex items-center gap-1">
+          <History className="h-3 w-3" />Historiek
+        </h3>
+        <LeadTijdlijn leadId={lead.id} verversSleutel={ververs} />
       </div>
 
       <div className="flex gap-2 pt-1 border-t border-gray-100">

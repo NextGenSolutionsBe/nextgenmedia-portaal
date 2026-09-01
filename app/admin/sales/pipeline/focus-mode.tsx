@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import {
   Loader2, X, Phone, Mail, Globe, SkipForward, CheckCircle2, Clock, Search,
   Building2, MapPin, Users, BadgeInfo, PhoneOff, AlertTriangle, ChevronDown, FileText,
-  Pencil, ShieldQuestion, UserCheck,
+  Pencil, ShieldQuestion, UserCheck, Save, History, CalendarClock,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { merkStijl } from '@/lib/sales/merk'
@@ -18,6 +18,7 @@ import {
 import { GEEN_INTERESSE_REDENEN, bouwReden } from '@/lib/sales/redenen'
 import { kiesScript, sectieKleur, type ScriptAnalyse } from '@/lib/sales/script-analyse'
 import { LeadGegevens } from './lead-gegevens'
+import { LeadTijdlijn } from './lead-tijdlijn'
 
 /**
  * Focus Mode — het belscherm, volledig scherm, gemodelleerd naar hoe een echt
@@ -96,6 +97,10 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
   const [bewerken, setBewerken] = useState(false)
   // Vrij ingetypt terugbeltijdstip, bv. '14u30'.
   const [eigenTijd, setEigenTijd] = useState('')
+  // Terugbellen op een concrete datum + uur, uit de kalenderkiezer.
+  const [datumTijd, setDatumTijd] = useState('')
+  // Loopt op na elke bewaarde notitie: de tijdlijn haalt zich dan opnieuw op.
+  const [ververs, setVerversen] = useState(0)
   const doorlopen = useRef(0)
   // Ankers voor de springlinks naar de scriptsecties.
   const sectieRefs = useRef<(HTMLElement | null)[]>([])
@@ -230,6 +235,7 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
   const volgende = useCallback((id: string) => {
     setNote('')
     setOpenBezwaar(null)
+    setDatumTijd('')
     doorlopen.current += 1
     setGedaan((s) => new Set(s).add(id))
   }, [])
@@ -243,6 +249,7 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       })
       const j = await res.json(); if (!res.ok) throw new Error(j.error)
+      setVerversen((n) => n + 1)
       onChanged()
       if (!blijf) volgende(lead.id)
       return true
@@ -251,6 +258,39 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
       return false
     } finally { setBusy(false) }
   }, [lead, busy, onChanged, volgende])
+
+  /**
+   * De notitie bewaren zonder verder te gaan.
+   *
+   * Tot nu ging een notitie enkel mee met een uitkomstknop. Wie iets noteerde
+   * en dan oversloeg of het scherm sloot, was zijn tekst kwijt — en in de
+   * pipeline zag je nooit iets verschijnen. Nu kan het los, en komt het meteen
+   * op de tijdlijn van de lead te staan.
+   */
+  const bewaarNotitie = useCallback(async () => {
+    if (!lead || !note.trim()) return false
+    const gelukt = await stuur({ noteKind: 'note', note: note.trim() }, true)
+    // Het veld pas leegmaken als het écht bewaard is: ging het mis, dan staat
+    // je tekst er nog en kun je opnieuw proberen.
+    if (gelukt) { setNote(''); toast.success('Notitie bewaard bij deze lead.') }
+    return gelukt
+  }, [lead, note, stuur])
+
+  /**
+   * Verdergaan zonder uitkomst. Staat er nog een notitie in het veld, dan gaat
+   * die eerst mee — anders verdwijnt wat je net hoorde geruisloos.
+   */
+  const slaOver = useCallback(async () => {
+    if (!lead) return
+    if (note.trim()) await stuur({ noteKind: 'note', note: note.trim() }, true)
+    volgende(lead.id)
+  }, [lead, note, stuur, volgende])
+
+  /** Het belscherm sluiten, met dezelfde bescherming voor een losse notitie. */
+  const sluitVeilig = useCallback(async () => {
+    if (note.trim()) await stuur({ noteKind: 'note', note: note.trim() }, true)
+    onClose()
+  }, [note, stuur, onClose])
 
   const actie = useCallback(async (key: string) => {
     if (!lead || busy) return
@@ -314,6 +354,7 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
       setOpenBezwaar(null)
       doorlopen.current += 1
       setEigenTijd('')
+      setDatumTijd('')
       toast.success(`Komt terug ${aftelLabel(om, Date.now())}`)
     }
   }, [lead, note, stuur])
@@ -354,12 +395,12 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
       const el = e.target as HTMLElement | null
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return
       if (redenOpen) { if (e.key === 'Escape') setRedenOpen(false); return }
-      if (e.key === 'Escape') { onClose(); return }
+      if (e.key === 'Escape') { void sluitVeilig(); return }
       if (FOCUS_ACTIONS.some((a) => a.key === e.key)) { e.preventDefault(); void actie(e.key) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [actie, onClose, redenOpen])
+  }, [actie, sluitVeilig, redenOpen])
 
   // ── Klaar ──────────────────────────────────────────────────────────────────
   if (!lead) {
@@ -416,10 +457,10 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => volgende(lead.id)} className="btn-secondary text-sm">
+          <button onClick={slaOver} disabled={busy} className="btn-secondary text-sm">
             <SkipForward className="h-4 w-4" />Overslaan
           </button>
-          <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-gray-100">
+          <button onClick={sluitVeilig} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-gray-100">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -706,6 +747,25 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
             </label>
             <textarea rows={3} className="input-base text-sm" value={note} onChange={(e) => setNote(e.target.value)}
               placeholder="Wat is er gezegd?" />
+            {/* Los bewaren. Een notitie ging voorheen alleen mee met een
+                uitkomstknop; wie noteerde en oversloeg, was ze kwijt. */}
+            <button onClick={bewaarNotitie} disabled={busy || !note.trim()}
+              className="btn-secondary text-xs w-full mt-1.5">
+              <Save className="h-3.5 w-3.5" />Notitie bewaren
+            </button>
+            <p className="text-[10px] text-gray-400 mt-1">
+              Komt bij de lead in de pipeline te staan. Gaat ook automatisch mee
+              met een uitkomst, een terugbelafspraak of "Overslaan".
+            </p>
+          </div>
+
+          {/* Wat er eerder genoteerd is — zodat je weet waar het vorige gesprek
+              gebleven was vóór je opnieuw belt. */}
+          <div className="border-t border-gray-100 pt-3">
+            <h3 className="text-[10px] uppercase tracking-wide text-gray-400 font-bold mb-1.5 flex items-center gap-1">
+              <History className="h-3 w-3" />Eerder genoteerd
+            </h3>
+            <LeadTijdlijn leadId={lead.id} verversSleutel={ververs} max={5} compact />
           </div>
 
           <div>
@@ -742,6 +802,35 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
             {eigenTijdVoorbeeld && (
               <p className="text-[10px] text-gray-500 mt-1">→ {eigenTijdVoorbeeld}</p>
             )}
+
+            {/* Een echte datum, uit de kalender. Getypt gaat sneller tijdens een
+                gesprek, maar voor "de derde week van oktober" wil je gewoon een
+                datumkiezer in plaats van te moeten rekenen. */}
+            <div className="flex gap-1.5 mt-1.5">
+              <input
+                type="datetime-local"
+                value={datumTijd}
+                min={new Date(Date.now() - 5 * 60_000).toISOString().slice(0, 16)}
+                onChange={(e) => setDatumTijd(e.target.value)}
+                className="input-base text-xs flex-1 min-w-0"
+              />
+              <button
+                onClick={() => {
+                  const ms = new Date(datumTijd).getTime()
+                  if (!datumTijd || !Number.isFinite(ms)) { toast.error('Kies eerst een datum en uur.'); return }
+                  // Een moment in het verleden komt meteen weer boven in de rij;
+                  // dat is bijna nooit de bedoeling, dus dat weigeren we.
+                  if (ms < Date.now() - 60_000) { toast.error('Dat moment is al voorbij.'); return }
+                  void zetTerugbel(ms, new Date(ms).toLocaleString('nl-BE', {
+                    weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+                  }))
+                }}
+                disabled={busy || !datumTijd}
+                className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-40 shrink-0 inline-flex items-center gap-1"
+              >
+                <CalendarClock className="h-3 w-3" />Zet
+              </button>
+            </div>
             <p className="text-[10px] text-gray-400 mt-1">
               De lead springt na dat moment als eerste terug in de rij. Je notitie gaat mee.
               Een uur dat al voorbij is, wordt morgen.
