@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import {
   Loader2, X, Phone, Mail, Globe, SkipForward, CheckCircle2, Clock, Search,
   Building2, MapPin, Users, BadgeInfo, PhoneOff, AlertTriangle, ChevronDown, FileText,
+  Pencil, ShieldQuestion, UserCheck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { merkStijl } from '@/lib/sales/merk'
@@ -16,6 +17,7 @@ import {
 } from '@/lib/sales/focus-queue'
 import { GEEN_INTERESSE_REDENEN, bouwReden } from '@/lib/sales/redenen'
 import { kiesScript, sectieKleur, type ScriptAnalyse } from '@/lib/sales/script-analyse'
+import { LeadGegevens } from './lead-gegevens'
 
 /**
  * Focus Mode — het belscherm, volledig scherm, gemodelleerd naar hoe een echt
@@ -38,6 +40,8 @@ type Bedrijf = {
   email?: string | null; werkklasse?: string | null; activiteit?: string | null
   ondernemingsnummer?: string | null; prioriteit?: string | null
   linkedin?: string | null; employees?: number | null
+  /** Wie je moet passeren, en wie er beslist. */
+  gatekeeper_naam?: string | null; dmu_naam?: string | null; dmu_functie?: string | null
 }
 type Contact = {
   name: string | null; email: string | null; phone: string | null
@@ -88,6 +92,8 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
   // tijdens het bellen in plaats van één vast script.
   const [scriptKeuzes, setScriptKeuzes] = useState<{ naam: string; analyse: ScriptAnalyse }[]>([])
   const [openBezwaar, setOpenBezwaar] = useState<number | null>(null)
+  // Gegevens rechtzetten terwijl je belt — daar hoor je ze immers.
+  const [bewerken, setBewerken] = useState(false)
   // Vrij ingetypt terugbeltijdstip, bv. '14u30'.
   const [eigenTijd, setEigenTijd] = useState('')
   const doorlopen = useRef(0)
@@ -438,6 +444,50 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
             </p>
             <p className="text-xs text-gray-400 mt-0.5">{stageLabel(lead.stage_key)}</p>
           </div>
+
+          {/* WIE JE MOET PASSEREN, EN WIE JE MOET HEBBEN.
+              Aan de telefoon leer je meestal eerst de balie kennen en pas
+              daarna de naam van de zaakvoerder. Die twee namen staan hier
+              apart en niet in een notitie: bij de volgende poging vraag je
+              gericht naar de juiste persoon in plaats van opnieuw langs de
+              balie te moeten. Ze horen bij het bedrijf, dus ze blijven staan
+              ook als we later vanuit het andere merk bellen. */}
+          <div className="rounded-xl border border-gray-200 bg-gray-50/70 px-3 py-2 space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] uppercase tracking-wide text-gray-400">Wie spreek je</span>
+              <button onClick={() => setBewerken((v) => !v)} title="Gegevens aanpassen"
+                className={`h-6 w-6 flex items-center justify-center rounded-md hover:bg-white ${bewerken ? 'bg-white text-black' : 'text-gray-400'}`}>
+                <Pencil className="h-3 w-3" />
+              </button>
+            </div>
+            <div className="flex items-start gap-1.5 text-sm">
+              <ShieldQuestion className="h-3.5 w-3.5 text-gray-400 mt-0.5 shrink-0" />
+              <span className={bedrijf?.gatekeeper_naam ? '' : 'text-gray-400'}>
+                {bedrijf?.gatekeeper_naam || 'Gatekeeper nog niet gekend'}
+              </span>
+            </div>
+            <div className="flex items-start gap-1.5 text-sm">
+              <UserCheck className="h-3.5 w-3.5 text-gray-400 mt-0.5 shrink-0" />
+              <span className={bedrijf?.dmu_naam ? 'font-medium' : 'text-gray-400'}>
+                {bedrijf?.dmu_naam
+                  ? `${bedrijf.dmu_naam}${bedrijf.dmu_functie ? ` · ${bedrijf.dmu_functie}` : ''}`
+                  : 'Beslissingnemer nog niet gekend'}
+              </span>
+            </div>
+          </div>
+
+          {bewerken && (
+            <div className="rounded-xl border border-gray-200 p-3">
+              <LeadGegevens
+                leadId={lead.id}
+                bedrijf={bedrijf}
+                contact={contact}
+                compact
+                onOpgeslagen={onChanged}
+                onKlaar={() => setBewerken(false)}
+              />
+            </div>
+          )}
 
           {/* Nummers: groot en klikbaar, met label — je moet ZIEN of je de
               zaakvoerder rechtstreeks belt of de receptie. */}

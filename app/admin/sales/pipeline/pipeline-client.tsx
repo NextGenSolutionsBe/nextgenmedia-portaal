@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import {
   Loader2, Plus, Search, Phone, Mail, X, CalendarClock, Archive, PhoneOff, Tag, Clock, Headphones, Upload,
-  MailCheck,
+  MailCheck, Pencil, ShieldQuestion, UserCheck,
 } from 'lucide-react'
 import { MANUAL_STAGES, stageLabel, STAGES } from '@/lib/sales/stages'
 import { GEEN_INTERESSE_REDENEN } from '@/lib/sales/redenen'
@@ -13,13 +13,18 @@ import { FocusMode } from './focus-mode'
 import { merkStijl } from '@/lib/sales/merk'
 import { ImportModal } from './import-modal'
 import { ReminderSettings } from './reminder-settings'
+import { LeadGegevens } from './lead-gegevens'
 
 type Lead = {
   id: string; stage_key: string; labels: string[]; callback_at: string | null
   pipeline_id?: string | null
   do_not_call: boolean; updated_at: string; lost_reason: string | null; email_brief: string | null
   geen_gehoor_count?: number | null
-  sales_companies: { id: string; name: string; website: string | null; sector: string | null; city: string | null; region: string | null; phone: string | null } | null
+  sales_companies: {
+    id: string; name: string; website: string | null; sector: string | null
+    city: string | null; region: string | null; phone: string | null
+    gatekeeper_naam?: string | null; dmu_naam?: string | null; dmu_functie?: string | null
+  } | null
   sales_contacts: { id: string; name: string | null; email: string | null; phone: string | null; mobile: string | null; role: string | null } | null
 }
 
@@ -384,6 +389,7 @@ function LeadDetail({ lead, pipelines, onChanged, onClose }: {
 }) {
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
+  const [bewerken, setBewerken] = useState(false)
   const [callback, setCallback] = useState(lead.callback_at ? lead.callback_at.slice(0, 16) : '')
   const phone = lead.sales_contacts?.phone || lead.sales_contacts?.mobile || lead.sales_companies?.phone || ''
 
@@ -408,8 +414,48 @@ function LeadDetail({ lead, pipelines, onChanged, onClose }: {
             {lead.sales_contacts?.name}{lead.sales_contacts?.role ? ` · ${lead.sales_contacts.role}` : ''}
           </p>
         </div>
-        <button onClick={onClose} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100"><X className="h-4 w-4" /></button>
+        <div className="flex items-center gap-1 shrink-0">
+          <button onClick={() => setBewerken((v) => !v)} title="Gegevens aanpassen"
+            className={`h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100 ${bewerken ? 'bg-gray-100 text-black' : 'text-gray-400'}`}>
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button onClick={onClose} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100"><X className="h-4 w-4" /></button>
+        </div>
       </div>
+
+      {/* Namen en nummers rechtzetten. Uit een geïmporteerde lijst komt niet
+          alles klopt binnen, en aan de telefoon hoor je de juiste gegevens. */}
+      {bewerken && (
+        <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-3">
+          <LeadGegevens
+            leadId={lead.id}
+            bedrijf={lead.sales_companies}
+            contact={lead.sales_contacts}
+            onOpgeslagen={onChanged}
+            onKlaar={() => setBewerken(false)}
+          />
+        </div>
+      )}
+
+      {/* Wie je moet passeren en wie je moet hebben — hier zichtbaar zodat je
+          het weet vóór je belt, niet pas wanneer de balie opneemt. */}
+      {!bewerken && (lead.sales_companies?.gatekeeper_naam || lead.sales_companies?.dmu_naam) && (
+        <div className="text-xs text-gray-600 space-y-1">
+          {lead.sales_companies?.gatekeeper_naam && (
+            <div className="flex items-center gap-1.5">
+              <ShieldQuestion className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+              <span className="text-gray-400">Gatekeeper:</span> {lead.sales_companies.gatekeeper_naam}
+            </div>
+          )}
+          {lead.sales_companies?.dmu_naam && (
+            <div className="flex items-center gap-1.5">
+              <UserCheck className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+              <span className="text-gray-400">Beslist:</span> {lead.sales_companies.dmu_naam}
+              {lead.sales_companies.dmu_functie ? ` · ${lead.sales_companies.dmu_functie}` : ''}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Voor welk merk bellen we deze lead? Verhuizen kan zolang er nog geen
           afspraak staat; blijkt aan de telefoon dat iemand beter bij het andere

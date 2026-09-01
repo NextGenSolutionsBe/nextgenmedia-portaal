@@ -20,6 +20,7 @@ type LeadRow = {
     email?: string | null; werkklasse?: string | null; activiteit?: string | null
     ondernemingsnummer?: string | null; prioriteit?: string | null
     linkedin?: string | null; employees?: number | null
+    gatekeeper_naam?: string | null; dmu_naam?: string | null; dmu_functie?: string | null
   } | null
   sales_contacts: { id: string; name: string | null; email: string | null; phone: string | null; mobile: string | null; phone_digits: string | null; role: string | null; linkedin?: string | null } | null
 }
@@ -28,7 +29,7 @@ type LeadRow = {
 // als terugval zolang die migratie nog niet gedraaid is — anders blijft het
 // hele scherm leeg met een stille kolomfout.
 const SELECT_BREED = `id, stage_key, labels, callback_at, callback_note, archived_at, do_not_call, assigned_to, updated_at, lost_reason, email_brief, geen_gehoor_count, pipeline_id,
-  sales_companies ( id, name, website, sector, city, region, phone, email, werkklasse, activiteit, ondernemingsnummer, prioriteit, linkedin, employees ),
+  sales_companies ( id, name, website, sector, city, region, phone, email, werkklasse, activiteit, ondernemingsnummer, prioriteit, linkedin, employees, gatekeeper_naam, dmu_naam, dmu_functie ),
   sales_contacts  ( id, name, email, phone, mobile, phone_digits, role, linkedin )`
 const SELECT_SMAL = `id, stage_key, labels, callback_at, archived_at, do_not_call, assigned_to, updated_at, lost_reason, email_brief, pipeline_id,
   sales_companies ( id, name, website, sector, city, region, phone ),

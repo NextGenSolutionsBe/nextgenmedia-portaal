@@ -2604,6 +2604,17 @@ ALTER TABLE public.sales_companies
   ADD COLUMN IF NOT EXISTS ondernemingsnummer text,  -- KBO, voor de opzoeklink in Focus Mode
   ADD COLUMN IF NOT EXISTS prioriteit        text;   -- A/B/C uit de lijst
 
+-- Wie je aan de lijn krijgt vóór je de juiste persoon spreekt, en wie die
+-- juiste persoon dan is. Twee namen die een setter aan de telefoon leert en
+-- die anders in een losse notitie verdwijnen: bij de volgende poging vraag je
+-- gericht naar de zaakvoerder in plaats van opnieuw langs de balie te moeten.
+-- Ze staan bij het BEDRIJF en niet bij de lead: dezelfde receptioniste zit er
+-- ook als we het bedrijf vanuit het andere merk bellen.
+ALTER TABLE public.sales_companies
+  ADD COLUMN IF NOT EXISTS gatekeeper_naam text,   -- balie/secretariaat
+  ADD COLUMN IF NOT EXISTS dmu_naam        text,   -- de beslissingnemer zelf
+  ADD COLUMN IF NOT EXISTS dmu_functie     text;   -- zijn functie, als je die hoorde
+
 -- Terugbelafspraken: "bel over een uur terug" krijgt een notitie erbij, zodat
 -- in Focus Mode zichtbaar is WAAROM die lead straks weer bovenaan springt.
 ALTER TABLE public.sales_leads

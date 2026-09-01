@@ -5,7 +5,7 @@ import { canTransition, transitionError, APPOINTMENT_STAGE } from '@/lib/sales/s
 import { MAX_GEEN_GEHOOR, GEEN_GEHOOR_UREN } from '@/lib/sales/focus-queue'
 import { logLeadEvent, moveLeadToPipeline } from '@/lib/sales/service'
 import { listPipelines } from '@/lib/sales/pipelines'
-import { normalizePhone } from '@/lib/sales/dedupe'
+import { normalizePhone, companyDedupeKey } from '@/lib/sales/dedupe'
 
 export const dynamic = 'force-dynamic'
 
@@ -151,16 +151,100 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (error) throw new Error(error.message)
     }
 
-    // Contactgegevens bijwerken (o.a. e-mail overschrijven vanuit de boeking).
-    if (b.contact && current.contact_id) {
+    /**
+     * Bedrijfsgegevens bijwerken.
+     *
+     * Twee dingen om in de gaten te houden:
+     *
+     * 1. Een bedrijf hangt onder MEER dan deze ene lead — hetzelfde bedrijf kan
+     *    in beide merken staan. Wie hier de naam verbetert, verbetert hem dus
+     *    overal. Dat is de bedoeling (één bedrijf, één naam), maar het scherm
+     *    zegt het er wel bij.
+     * 2. De ontdubbelsleutel is afgeleid van website of naam. Verandert er een
+     *    van beide, dan moet die sleutel mee — anders duikt hetzelfde bedrijf
+     *    bij de volgende import alsnog een tweede keer op.
+     */
+    if (b.company && typeof b.company === 'object' && current.company_id) {
+      const { data: bedrijf } = await admin.from('sales_companies')
+        .select('id, name, website').eq('id', current.company_id).maybeSingle()
+      const huidig = (bedrijf ?? { name: '', website: null }) as { name: string; website: string | null }
+
+      const c: Record<string, unknown> = {}
+      for (const k of [
+        'website', 'sector', 'city', 'region', 'country', 'phone', 'linkedin',
+        'gatekeeper_naam', 'dmu_naam', 'dmu_functie',
+      ] as const) {
+        if (b.company[k] !== undefined) c[k] = String(b.company[k] ?? '').trim() || null
+      }
+      if (b.company.name !== undefined) {
+        const naam = String(b.company.name ?? '').trim()
+        // Een bedrijf zonder naam is in elke lijst onvindbaar. Liever weigeren
+        // dan een lege rij die niemand nog terugvindt.
+        if (!naam) return NextResponse.json({ error: 'Een bedrijf moet een naam houden.' }, { status: 400 })
+        c.name = naam
+      }
+      if (b.company.employees !== undefined) {
+        const n = Number(b.company.employees)
+        c.employees = Number.isFinite(n) && n > 0 ? Math.floor(n) : null
+      }
+
+      if (Object.keys(c).length) {
+        if (c.name !== undefined || c.website !== undefined) {
+          c.dedupe_key = companyDedupeKey(
+            String(c.name ?? huidig.name),
+            (c.website as string | null | undefined) ?? huidig.website,
+          )
+        }
+        let { error: cErr } = await admin.from('sales_companies').update(c).eq('id', current.company_id)
+        // Gatekeeper en beslissingnemer zijn nieuwe kolommen: zolang de migratie
+        // niet gedraaid is, mag de rest van de wijziging gewoon doorgaan.
+        if (cErr && /gatekeeper_naam|dmu_naam|dmu_functie/i.test(cErr.message)) {
+          delete c.gatekeeper_naam; delete c.dmu_naam; delete c.dmu_functie
+          if (Object.keys(c).length) {
+            ;({ error: cErr } = await admin.from('sales_companies').update(c).eq('id', current.company_id))
+          } else {
+            cErr = null
+          }
+        }
+        if (cErr) {
+          // De unieke sleutel botst: er staat al een ánder bedrijf met deze
+          // naam of website. Dat samenvoegen is geen bewerking maar een fusie,
+          // en die doen we niet stilzwijgend.
+          if (/duplicate|unique|23505/i.test(cErr.message)) {
+            return NextResponse.json({
+              error: 'Er staat al een ander bedrijf met deze naam of website. Pas een van beide aan, of werk verder in die andere lead.',
+            }, { status: 409 })
+          }
+          throw new Error(cErr.message)
+        }
+      }
+    }
+
+    /**
+     * Contactgegevens bijwerken (o.a. e-mail overschrijven vanuit de boeking).
+     *
+     * Heeft de lead nog géén contactpersoon — dat komt voor bij een import waar
+     * alleen het bedrijf bekend was — dan maken we die hier alsnog aan. Anders
+     * kun je aan de telefoon de naam die je net hoort nergens kwijt.
+     */
+    if (b.contact && typeof b.contact === 'object') {
       const c: Record<string, unknown> = {}
       for (const k of ['name', 'role', 'email', 'phone', 'mobile', 'linkedin'] as const) {
-        if (b.contact[k] !== undefined) c[k] = String(b.contact[k] ?? '') || null
+        if (b.contact[k] !== undefined) c[k] = String(b.contact[k] ?? '').trim() || null
       }
       if (b.contact.phone !== undefined || b.contact.mobile !== undefined) {
         c.phone_digits = normalizePhone(String(b.contact.phone ?? b.contact.mobile ?? ''))
       }
-      if (Object.keys(c).length) await admin.from('sales_contacts').update(c).eq('id', current.contact_id)
+
+      if (Object.keys(c).length && current.contact_id) {
+        await admin.from('sales_contacts').update(c).eq('id', current.contact_id)
+      } else if (Object.keys(c).length && current.company_id) {
+        const { data: nieuwContact } = await admin.from('sales_contacts')
+          .insert({ company_id: current.company_id, ...c }).select('id').single()
+        if (nieuwContact) {
+          await admin.from('sales_leads').update({ contact_id: (nieuwContact as { id: string }).id }).eq('id', id)
+        }
+      }
     }
 
     if (patch.stage_key) {
@@ -168,6 +252,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         kind: 'stage', fromStage: current.stage_key, toStage: String(patch.stage_key),
         actorId: actor.id, actorEmail: actor.email ?? null,
       })
+    }
+    // Wie gegevens aanpast, laat een spoor na op de tijdlijn. Bij een fout
+    // nummer of een verkeerde naam wil je later kunnen zien wanneer het
+    // veranderde en door wie.
+    if (b.company || b.contact) {
+      const velden = [
+        ...Object.keys((b.company ?? {}) as Record<string, unknown>).map((k) => `bedrijf.${k}`),
+        ...Object.keys((b.contact ?? {}) as Record<string, unknown>).map((k) => `contact.${k}`),
+      ]
+      if (velden.length) {
+        await logLeadEvent(id, {
+          kind: 'system', body: `Gegevens aangepast: ${velden.join(', ')}`,
+          actorId: actor.id, actorEmail: actor.email ?? null,
+        })
+      }
     }
     if (typeof b.note === 'string' && b.note.trim()) {
       await logLeadEvent(id, { kind: b.noteKind === 'call' ? 'call' : 'note', body: b.note.trim(), actorId: actor.id, actorEmail: actor.email ?? null })
