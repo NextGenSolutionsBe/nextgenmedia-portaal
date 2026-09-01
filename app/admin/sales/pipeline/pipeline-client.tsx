@@ -21,6 +21,8 @@ type Lead = {
   pipeline_id?: string | null
   do_not_call: boolean; updated_at: string; lost_reason: string | null; email_brief: string | null
   geen_gehoor_count?: number | null
+  /** De laatste notitie, meegeleverd met de lijst zodat je ze ziet zonder klikken. */
+  laatste_notitie?: string | null; laatste_notitie_op?: string | null
   sales_companies: {
     id: string; name: string; website: string | null; sector: string | null
     city: string | null; region: string | null; phone: string | null
@@ -327,6 +329,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
                     <th className="table-th">Bedrijf</th>
                     <th className="table-th">Contact</th>
                     <th className="table-th">Telefoon</th>
+                    <th className="table-th">Laatste notitie</th>
                     <th className="table-th">Status</th>
                   </tr>
                 </thead>
@@ -358,6 +361,21 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
                           <button onClick={(e) => { e.stopPropagation(); setQ(phoneOf(l)) }}
                             className="text-gray-700 hover:underline" title="Filter op dit nummer">{phoneOf(l)}</button>
                         ) : <span className="text-gray-400">—</span>}
+                      </td>
+                      {/* De laatste notitie meteen in de lijst. Zonder dit moest
+                          je elke lead openen om terug te vinden waar je iets
+                          over noteerde. */}
+                      <td className="table-td max-w-[16rem]">
+                        {l.laatste_notitie ? (
+                          <div title={l.laatste_notitie}>
+                            <div className="text-[12px] text-gray-700 line-clamp-2 leading-snug">{l.laatste_notitie}</div>
+                            {l.laatste_notitie_op && (
+                              <div className="text-[10px] text-gray-400">
+                                {new Date(l.laatste_notitie_op).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' })}
+                              </div>
+                            )}
+                          </div>
+                        ) : <span className="text-gray-300">—</span>}
                       </td>
                       <td className="table-td">
                         <span className={`status-badge ${STAGE_STYLE[l.stage_key] ?? 'bg-gray-100 text-gray-700'}`}>{stageLabel(l.stage_key)}</span>
@@ -498,6 +516,18 @@ function LeadDetail({ lead, pipelines, onChanged, onClose }: {
               </button>
             )
           })}
+        </div>
+      )}
+
+      {lead.laatste_notitie && (
+        <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">Laatste notitie</div>
+          <p className="text-[13px] text-gray-800 whitespace-pre-wrap break-words">{lead.laatste_notitie}</p>
+          {lead.laatste_notitie_op && (
+            <p className="text-[10px] text-gray-400 mt-0.5">
+              {new Date(lead.laatste_notitie_op).toLocaleString('nl-BE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+            </p>
+          )}
         </div>
       )}
 

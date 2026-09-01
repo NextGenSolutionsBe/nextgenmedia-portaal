@@ -2615,6 +2615,31 @@ ALTER TABLE public.sales_companies
   ADD COLUMN IF NOT EXISTS dmu_naam        text,   -- de beslissingnemer zelf
   ADD COLUMN IF NOT EXISTS dmu_functie     text;   -- zijn functie, als je die hoorde
 
+-- ── Laatste notitie op de lead zelf ─────────────────────────────────────────
+-- De notities staan in sales_lead_events, maar dan zijn ze pas te zien nadat
+-- je een lead opent. In een lijst van honderden leads vind je zo nooit terug
+-- waar je gisteren iets over noteerde. Daarom staat de LAATSTE notitie ook op
+-- de lead zelf: één kolom die meekomt met de lijst, zonder extra query per rij.
+-- De tijdlijn blijft de bron; dit is een kopie voor de leesbaarheid.
+ALTER TABLE public.sales_leads
+  ADD COLUMN IF NOT EXISTS laatste_notitie    text,
+  ADD COLUMN IF NOT EXISTS laatste_notitie_op timestamptz;
+
+-- Eenmalig vullen vanuit de bestaande tijdlijn. Idempotent: draai je dit
+-- opnieuw, dan verandert er niets aan wat al klopt.
+WITH laatste AS (
+  SELECT DISTINCT ON (lead_id) lead_id, body, created_at
+  FROM public.sales_lead_events
+  WHERE kind IN ('note', 'call') AND coalesce(btrim(body), '') <> ''
+  ORDER BY lead_id, created_at DESC
+)
+UPDATE public.sales_leads l
+SET laatste_notitie = left(laatste.body, 300), laatste_notitie_op = laatste.created_at
+FROM laatste
+WHERE laatste.lead_id = l.id
+  AND (l.laatste_notitie IS DISTINCT FROM left(laatste.body, 300)
+       OR l.laatste_notitie_op IS DISTINCT FROM laatste.created_at);
+
 -- Terugbelafspraken: "bel over een uur terug" krijgt een notitie erbij, zodat
 -- in Focus Mode zichtbaar is WAAROM die lead straks weer bovenaan springt.
 ALTER TABLE public.sales_leads

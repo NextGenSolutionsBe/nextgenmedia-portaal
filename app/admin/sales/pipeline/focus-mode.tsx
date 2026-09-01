@@ -53,6 +53,8 @@ type Lead = {
   callback_at?: string | null; callback_note?: string | null
   /** Aantal keer vergeefs gebeld; bij MAX_GEEN_GEHOOR gaat de lead uit de rij. */
   geen_gehoor_count?: number | null
+  /** De laatste notitie, zodat je vóór het bellen weet wat er gezegd is. */
+  laatste_notitie?: string | null
   sales_companies: Bedrijf | null
   sales_contacts: Contact | null
 }
@@ -308,7 +310,16 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
     // "Geen interesse" vraagt altijd een reden: daar draait de statistiek op.
     if (a.stage === 'not_interested') { setRedenOpen(true); return }
 
-    const body: Record<string, unknown> = { noteKind: 'call', note: note.trim() || a.label }
+    /**
+     * De uitkomst én de notitie samen op de tijdlijn: "Interesse — vragen naar
+     * Noël". Enkel de notitie bewaren zou de uitkomst verliezen bij een actie
+     * die de fase niet verandert; enkel het label zou je tekst weggooien.
+     */
+    const tekst = note.trim()
+    const body: Record<string, unknown> = {
+      noteKind: 'call',
+      note: tekst ? `${a.label} — ${tekst}` : a.label,
+    }
 
     /**
      * "Geen antwoord" laat de server tellen en het terugbelmoment zetten
@@ -608,6 +619,15 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
           {lead.callback_note && (
             <div className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-2.5 py-2">
               <b>Bij de terugbelafspraak:</b> {lead.callback_note}
+            </div>
+          )}
+
+          {/* Wat er de vorige keer gezegd is — meteen in beeld, nog vóór je
+              belt, in plaats van in de kolom rechts. */}
+          {lead.laatste_notitie && (
+            <div className="text-xs bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-2">
+              <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">Laatste notitie</div>
+              <p className="text-gray-800 whitespace-pre-wrap break-words">{lead.laatste_notitie}</p>
             </div>
           )}
 

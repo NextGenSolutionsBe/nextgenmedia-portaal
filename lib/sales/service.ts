@@ -223,6 +223,29 @@ export async function logLeadEvent(leadId: string, e: {
     from_stage: e.fromStage ?? null, to_stage: e.toStage ?? null,
     actor_id: e.actorId ?? null, actor_email: e.actorEmail ?? null,
   })
+
+  /**
+   * Dezelfde tekst ook op de lead zelf zetten.
+   *
+   * De tijdlijn blijft de bron, maar die zie je pas als je een lead opent. In
+   * een lijst van honderden leads vind je zo nooit terug waar je gisteren iets
+   * over noteerde. Deze kopie komt gewoon mee met de lijst — geen extra query
+   * per rij, en dus geen trage pipeline.
+   *
+   * Enkel wat een MENS noteerde: fasewissels en systeemregels horen hier niet,
+   * die zouden de laatste echte notitie wegduwen.
+   */
+  const tekst = (e.body ?? '').trim()
+  if ((e.kind === 'note' || e.kind === 'call') && tekst) {
+    const { error } = await admin.from('sales_leads')
+      .update({ laatste_notitie: tekst.slice(0, 300), laatste_notitie_op: new Date().toISOString() })
+      .eq('id', leadId)
+    // Vóór de migratie bestaan deze kolommen nog niet. De notitie zelf staat
+    // dan al veilig in de tijdlijn, dus dit mag stil mislukken.
+    if (error && !/laatste_notitie/i.test(error.message)) {
+      console.error('[sales] laatste notitie bijwerken mislukt:', error.message)
+    }
+  }
 }
 
 export type CalendarOwner = {
