@@ -82,6 +82,11 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
   const [nu, setNu] = useState(() => Date.now())
   const [redenOpen, setRedenOpen] = useState(false)
   const [script, setScript] = useState<{ naam: string; analyse: ScriptAnalyse } | null | 'laden'>('laden')
+  // Alle scripts die deze setter mag gebruiken. Marco heeft er drie — één per
+  // situatie (mooie website zonder socials, mét socials, geen website) — en
+  // welke past weet je pas als je het bedrijf bekijkt. Vandaar een keuze
+  // tijdens het bellen in plaats van één vast script.
+  const [scriptKeuzes, setScriptKeuzes] = useState<{ naam: string; analyse: ScriptAnalyse }[]>([])
   const [openBezwaar, setOpenBezwaar] = useState<number | null>(null)
   // Vrij ingetypt terugbeltijdstip, bv. '14u30'.
   const [eigenTijd, setEigenTijd] = useState('')
@@ -103,9 +108,22 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
         const j = await r.json()
         if (weg || !r.ok) { if (!weg) setScript(null); return }
         const scripts = (j.scripts ?? []) as ScriptRij[]
-        const i = kiesScript(scripts, String(j.mijnAuthId ?? ''), pipelineId ?? null)
+        const mij = String(j.mijnAuthId ?? '')
+        // Alles wat voor mij bruikbaar is: eigen scripts en algemene, van dit
+        // merk of van alle merken. Zelfde regels als kiesScript, maar dan de
+        // hele lijst in plaats van enkel de beste.
+        const bruikbaar = scripts.filter((x) =>
+          x.actief && x.analyse
+          && (x.eigenaar_auth_id === mij || x.eigenaar_auth_id === null)
+          && (x.pipeline_id === null || x.pipeline_id === (pipelineId ?? null)))
+          .map((x) => ({ naam: x.naam, analyse: x.analyse as ScriptAnalyse }))
+        setScriptKeuzes(bruikbaar)
+
+        const i = kiesScript(scripts, mij, pipelineId ?? null)
         const s = i >= 0 ? scripts[i] : null
-        setScript(s?.analyse ? { naam: s.naam, analyse: s.analyse } : null)
+        // Het beste script staat klaar; bruikbaar[0] als terugval zodat er
+        // altijd íets getoond wordt wanneer er scripts zijn.
+        setScript(s?.analyse ? { naam: s.naam, analyse: s.analyse } : (bruikbaar[0] ?? null))
       } catch { if (!weg) setScript(null) }
     })()
     return () => { weg = true }
@@ -526,6 +544,31 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
             <div className="text-center text-gray-400 pt-16"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div>
           ) : script ? (
             <div className="max-w-2xl mx-auto space-y-4">
+              {/* Meerdere scripts? Dan kies je hier welk gesprek je voert. Dat
+                  hangt af van wat je op de website ziet, en dat weet je pas
+                  wanneer de lead voor je staat — vandaar hier en niet vooraf. */}
+              {scriptKeuzes.length > 1 && (
+                <div className="sticky top-0 bg-gray-50 pt-1 pb-2 z-20">
+                  <div className="flex flex-wrap gap-1">
+                    {scriptKeuzes.map((k) => (
+                      <button
+                        key={k.naam}
+                        onClick={() => setScript(k)}
+                        title={k.naam}
+                        className={cn(
+                          'text-[11px] font-medium px-2 py-1 rounded-lg border transition-colors',
+                          k.naam === script.naam
+                            ? 'bg-[#fff848] border-yellow-400 text-gray-900'
+                            : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300',
+                        )}
+                      >
+                        {k.naam}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center justify-between gap-2 sticky top-0 bg-gray-50 py-1 z-10">
                 <p className="text-[10px] uppercase tracking-wide text-gray-400 flex items-center gap-1">
                   <FileText className="h-3 w-3" />{script.naam}
