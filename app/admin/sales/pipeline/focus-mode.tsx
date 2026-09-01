@@ -54,8 +54,10 @@ type ScriptRij = {
   pipeline_id: string | null; actief: boolean; analyse: ScriptAnalyse | null
 }
 
-export function FocusMode({ leads, pipelineId, merk, stageFilter, onClose, onChanged }: {
+export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, onClose, onChanged }: {
   leads: Lead[]
+  /** Leads die een collega NU aan het bellen is (lead-id → naam). */
+  bezet?: Record<string, string>
   pipelineId?: string | null
   /** Het merk waarin je aan het bellen bent — als badge in de kop, zodat
    *  iedereen op elk moment ziet: geel = NextGenMedia, blauw = NextGenSolutions. */
@@ -106,9 +108,23 @@ export function FocusMode({ leads, pipelineId, merk, stageFilter, onClose, onCha
     return () => { weg = true }
   }, [pipelineId])
 
+  /**
+   * Leads die een collega vasthoudt vallen uit de wachtrij. Twee bronnen:
+   * `bezet` (stand bij het openen) en `zelfBezet` (wat we tijdens het bellen
+   * tegenkomen). Ze verdwijnen dus zonder dat je het merkt — precies de
+   * bedoeling: je krijgt gewoon de volgende die wél vrij is.
+   */
+  const [zelfBezet, setZelfBezet] = useState<Map<string, string>>(() => new Map())
+  const isBezet = useCallback(
+    (id: string) => !!bezet[id] || zelfBezet.has(id),
+    [bezet, zelfBezet],
+  )
+
   const metLokaal = useMemo(
-    () => leads.filter((l) => !gedaan.has(l.id)).map((l) => ({ ...l, ...(lokaal.get(l.id) ?? {}) })),
-    [leads, gedaan, lokaal],
+    () => leads
+      .filter((l) => !gedaan.has(l.id) && !isBezet(l.id))
+      .map((l) => ({ ...l, ...(lokaal.get(l.id) ?? {}) })),
+    [leads, gedaan, lokaal, isBezet],
   )
   const wachtrij = useMemo(
     () => bouwWachtrij(
@@ -128,6 +144,47 @@ export function FocusMode({ leads, pipelineId, merk, stageFilter, onClose, onCha
     if (lead && lead.id !== vastId) setVastId(lead.id)
     if (!lead && vastId) setVastId(null)
   }, [lead, vastId])
+
+  /**
+   * Deze lead voor mij vastzetten zolang ik ermee bezig ben.
+   *
+   * Lukt het niet, dan is een collega hem net voor: we markeren hem als bezet
+   * en de wachtrij schuift vanzelf door naar de volgende. De hartslag
+   * vernieuwt het slot elke minuut; klapt de browser dicht, dan verloopt het
+   * na drie minuten vanzelf en kan de ander verder.
+   */
+  const huidigeId = lead?.id ?? null
+  useEffect(() => {
+    if (!huidigeId) return
+    let weg = false
+
+    const claim = async () => {
+      try {
+        const r = await fetch('/api/admin/sales/leads/claim', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ leadId: huidigeId }),
+        })
+        if (weg) return
+        if (r.status === 409) {
+          const j = await r.json().catch(() => ({}))
+          setZelfBezet((m) => new Map(m).set(huidigeId, j.bezetDoor ?? 'een collega'))
+          toast.info(`${j.bezetDoor ?? 'Een collega'} is deze prospect net aan het bellen — je krijgt de volgende.`)
+        }
+      } catch { /* netwerk hapert: doorbellen is belangrijker dan het slot */ }
+    }
+    claim()
+    const klok = setInterval(claim, 60_000)
+
+    return () => {
+      weg = true
+      clearInterval(klok)
+      // Slot loslaten zodra je verdergaat. `keepalive` zorgt dat dit ook nog
+      // vertrekt als het tabblad meteen daarna sluit; lukt het toch niet, dan
+      // regelt de vervaltijd van drie minuten het.
+      fetch(`/api/admin/sales/leads/claim?leadId=${huidigeId}`, { method: 'DELETE', keepalive: true })
+        .catch(() => { /* vervaltijd vangt dit op */ })
+    }
+  }, [huidigeId])
   const bedrijf = lead?.sales_companies
   const contact = lead?.sales_contacts
 

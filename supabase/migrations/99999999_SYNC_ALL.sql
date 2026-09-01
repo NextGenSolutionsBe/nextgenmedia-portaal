@@ -2837,3 +2837,35 @@ SELECT v.naam, v.eigen, v.email FROM (VALUES
   ('Fully Booked',           false, NULL)
 ) AS v(naam, eigen, email)
 WHERE NOT EXISTS (SELECT 1 FROM public.kantoor_bedrijven b WHERE lower(b.naam) = lower(v.naam));
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Twee setters die tegelijk bellen mogen nooit dezelfde lead krijgen.
+CREATE TABLE IF NOT EXISTS public.sales_lead_claims (
+  lead_id      uuid PRIMARY KEY REFERENCES public.sales_leads(id) ON DELETE CASCADE,
+  auth_user_id uuid NOT NULL,
+  naam         text,
+  verloopt_op  timestamptz NOT NULL,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS sales_lead_claims_verloop ON public.sales_lead_claims (verloopt_op);
+ALTER TABLE public.sales_lead_claims ENABLE ROW LEVEL SECURITY;
+
+-- De hele beslissing in ÉÉN statement: hier kunnen twee setters elkaar kruisen.
+CREATE OR REPLACE FUNCTION public.claim_lead(
+  p_lead uuid, p_user uuid, p_naam text, p_minuten int DEFAULT 3
+)
+RETURNS TABLE (lead_id uuid, auth_user_id uuid, naam text, verloopt_op timestamptz)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  INSERT INTO public.sales_lead_claims AS c (lead_id, auth_user_id, naam, verloopt_op)
+  VALUES (p_lead, p_user, p_naam, now() + make_interval(mins => p_minuten))
+  ON CONFLICT (lead_id) DO UPDATE
+    SET auth_user_id = EXCLUDED.auth_user_id,
+        naam         = EXCLUDED.naam,
+        verloopt_op  = EXCLUDED.verloopt_op
+    WHERE c.auth_user_id = EXCLUDED.auth_user_id
+       OR c.verloopt_op < now()
+  RETURNING c.lead_id, c.auth_user_id, c.naam, c.verloopt_op;
+$$;

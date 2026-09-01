@@ -140,7 +140,27 @@ export async function GET(req: NextRequest) {
       rows = rows.filter((r) => r.callback_at && new Date(r.callback_at).getTime() <= end.getTime())
     }
 
-    return NextResponse.json({ leads: rows, totaal, afgekapt })
+    /**
+     * Wie is er op dit moment door een collega vastgehouden?
+     *
+     * Alleen NIET-verlopen sloten van een ÁNDER tellen: je eigen lead moet je
+     * gewoon blijven zien, en een verlopen slot (browser dicht) mag niemand
+     * blokkeren. Faalt dit, dan gaat de lijst gewoon door zonder sloten —
+     * bellen mag nooit stoppen omdat een extra tabel hapert.
+     */
+    let bezet: Record<string, string> = {}
+    try {
+      const actor = await requireStaff()
+      const { data: claims } = await admin.from('sales_lead_claims')
+        .select('lead_id, naam, auth_user_id')
+        .gt('verloopt_op', new Date().toISOString())
+      for (const c of (claims ?? []) as { lead_id: string; naam: string | null; auth_user_id: string }[]) {
+        if (actor && c.auth_user_id === actor.id) continue
+        bezet[c.lead_id] = c.naam ?? 'een collega'
+      }
+    } catch { bezet = {} }
+
+    return NextResponse.json({ leads: rows, totaal, afgekapt, bezet })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }

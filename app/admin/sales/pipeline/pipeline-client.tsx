@@ -46,6 +46,8 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
 }) {
   const [pipelineId, setPipelineId] = useState(initialPipelineId)
   const [leads, setLeads] = useState<Lead[]>([])
+  // Leads die een collega op dit moment aan het bellen is (lead-id → naam).
+  const [bezet, setBezet] = useState<Record<string, string>>({})
   // Voorraad om de filter-keuzelijsten mee te vullen (zonder actieve filters).
   const [pool, setPool] = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
@@ -86,6 +88,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
       const res = await fetch(`/api/admin/sales/leads?${p}`)
       const j = await res.json(); if (!res.ok) throw new Error(j.error)
       setLeads(j.leads ?? [])
+      setBezet(j.bezet ?? {})
       setAfgekapt(!!j.afgekapt)
       setTotaal(Number(j.totaal ?? (j.leads ?? []).length))
       // Keuzelijsten vullen we uit de ONGEFILTERDE lijst, anders verdwijnen de
@@ -356,6 +359,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
       {focus && (
         <FocusMode
           leads={leads}
+          bezet={bezet}
           pipelineId={pipelineId}
           merk={pipelines.find((p) => p.id === pipelineId) ?? null}
           stageFilter={stage || undefined}
