@@ -2,6 +2,7 @@ import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff, requireAdmin } from '@/lib/supabase/server'
 import { getOrCreateSetter, listSetters, monthPeriod } from '@/lib/sales/setters'
+import { valideerPeriode, type Blok } from '@/lib/sales/tijd-invoer'
 import { logAudit, requestMeta } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
@@ -63,6 +64,88 @@ export async function GET(req: NextRequest) {
     }[]).map((e) => ({ ...e, setterName: nameById.get(e.setter_id) ?? 'Setter' }))
 
     return NextResponse.json({ entries, isAdmin: s.isAdmin })
+  } catch (err) {
+    return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
+  }
+}
+
+/**
+ * POST — een gewerkte periode handmatig bijboeken (van–tot).
+ *
+ * Naast de timer, niet in de plaats ervan: wie vergeet te starten of belt
+ * terwijl de app dicht staat, moet die tijd achteraf kunnen noteren.
+ *
+ * Deze uren worden uitbetaald, dus de controle hoort HIER en niet enkel in het
+ * scherm. De zwaarste is de overlaptoets: twee blokken over hetzelfde uur
+ * betekent twee keer betalen, en dat valt op een maandoverzicht niet op.
+ */
+export async function POST(req: NextRequest) {
+  try {
+    const s = await scope()
+    if (!s) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
+    const b = await req.json().catch(() => ({}))
+
+    // Voor wie? Een admin mag voor iemand anders boeken, een setter enkel voor
+    // zichzelf — ook als het scherm iets anders meestuurt.
+    let setterId: string
+    if (s.isAdmin) {
+      const gevraagd = String(b.setterId ?? '')
+      const all = await listSetters()
+      if (!all.some((x) => x.id === gevraagd)) {
+        return NextResponse.json({ error: 'Kies eerst voor wie je de tijd boekt.' }, { status: 400 })
+      }
+      setterId = gevraagd
+    } else {
+      if (!s.meId) return NextResponse.json({ error: 'Geen setterprofiel' }, { status: 403 })
+      setterId = s.meId
+    }
+
+    const admin = createAdminSupabaseClient()
+
+    /**
+     * Alles ophalen wat kán overlappen. Een blok van hoogstens MAX_UREN kan
+     * nooit verder terugreiken dan een dag vóór de nieuwe start, dus een venster
+     * van twee dagen rondom de invoer volstaat — en dat blijft klein.
+     *
+     * De lopende timer (ended_at is null) kan ouder zijn dan dat venster, dus
+     * die halen we er apart bij.
+     */
+    const ruwStart = new Date(String(b.startIso ?? '')).getTime()
+    const vanaf = new Date((Number.isFinite(ruwStart) ? ruwStart : Date.now()) - 36 * 3600_000).toISOString()
+    const tot = new Date((Number.isFinite(ruwStart) ? ruwStart : Date.now()) + 36 * 3600_000).toISOString()
+
+    const [{ data: rond }, { data: lopend }] = await Promise.all([
+      admin.from('sales_time_entries').select('started_at, ended_at')
+        .eq('setter_id', setterId).gte('started_at', vanaf).lt('started_at', tot).limit(200),
+      admin.from('sales_time_entries').select('started_at, ended_at')
+        .eq('setter_id', setterId).is('ended_at', null).limit(5),
+    ])
+    const bestaande = [...((rond ?? []) as Blok[]), ...((lopend ?? []) as Blok[])]
+
+    const check = valideerPeriode(String(b.startIso ?? ''), String(b.eindIso ?? ''), bestaande)
+    if (!check.ok) return NextResponse.json({ error: check.fout }, { status: 400 })
+
+    const { error } = await admin.from('sales_time_entries').insert({
+      setter_id: setterId,
+      started_at: new Date(check.startMs).toISOString(),
+      ended_at: new Date(check.eindMs).toISOString(),
+      note: String(b.note ?? '').trim().slice(0, 200) || null,
+      source: 'manual',
+    })
+    if (error) throw new Error(error.message)
+
+    // Handmatig geboekte uren horen in het logboek: ze zijn niet door de timer
+    // gestempeld, dus dit is de enige plek waar zichtbaar blijft wie ze inbracht.
+    const meta = requestMeta(req)
+    const uren = ((check.eindMs - check.startMs) / 3600_000).toFixed(2)
+    await logAudit({
+      action: 'sales.time.manual', entityType: 'sales_setter', entityId: setterId,
+      summary: `Verkoop: ${uren} u handmatig geboekt op ${new Date(check.startMs).toLocaleString('nl-BE')}`,
+      actorUserId: s.actor.id, actorEmail: s.actor.email ?? null, actorRole: s.isAdmin ? 'admin' : 'employee',
+      ip: meta.ip, userAgent: meta.userAgent,
+    })
+
+    return NextResponse.json({ ok: true })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }

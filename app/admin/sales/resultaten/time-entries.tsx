@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Loader2, Trash2, Clock } from 'lucide-react'
+import { Loader2, Trash2, Clock, Plus, X } from 'lucide-react'
 import { secondsOf, hoursText, euro, earnedCents } from '@/lib/sales/earnings'
+import { uitFormulier, valideerPeriode } from '@/lib/sales/tijd-invoer'
 
 type Entry = {
   id: string
@@ -36,6 +37,13 @@ export function TimeEntries({ month, setterId, hourlyRateCents, onChanged }: {
   const [entries, setEntries] = useState<Entry[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
+  // Handmatig bijboeken: van–tot op één dag.
+  const [openForm, setOpenForm] = useState(false)
+  const [datum, setDatum] = useState(() => new Date().toISOString().slice(0, 10))
+  const [van, setVan] = useState('')
+  const [tot, setTot] = useState('')
+  const [notitie, setNotitie] = useState('')
+  const [bewaren, setBewaren] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -72,6 +80,45 @@ export function TimeEntries({ month, setterId, hourlyRateCents, onChanged }: {
     finally { setBusy(null) }
   }
 
+  /**
+   * Handmatig bijboeken. Dezelfde controle draait hier én op de server: hier
+   * om je meteen te zeggen wat er niet klopt, daar omdat een controle die
+   * alleen in de browser leeft geen controle is.
+   */
+  const bewaar = async () => {
+    const stukken = uitFormulier(datum, van, tot)
+    if (!stukken) { toast.error('Vul een datum en een begin- en einduur in.'); return }
+
+    const check = valideerPeriode(stukken.startIso, stukken.eindIso, entries)
+    if (!check.ok) { toast.error(check.fout); return }
+
+    setBewaren(true)
+    try {
+      const r = await fetch('/api/admin/sales/time', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...stukken, note: notitie, setterId }),
+      })
+      const j = await r.json(); if (!r.ok) throw new Error(j.error)
+      const secs = Math.round((check.eindMs - check.startMs) / 1000)
+      toast.success(`${hoursText(secs)} geboekt — ${euro(earnedCents(secs, hourlyRateCents))}.`)
+      setVan(''); setTot(''); setNotitie(''); setOpenForm(false)
+      await load()
+      onChanged()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Boeken mislukt') }
+    finally { setBewaren(false) }
+  }
+
+  // Wat je nu invult, meteen doorgerekend: je ziet vóór het opslaan hoeveel
+  // tijd en hoeveel geld je bijboekt.
+  const voorbeeld = (() => {
+    const stukken = uitFormulier(datum, van, tot)
+    if (!stukken) return null
+    const check = valideerPeriode(stukken.startIso, stukken.eindIso, entries)
+    if (!check.ok) return { fout: check.fout }
+    const secs = Math.round((check.eindMs - check.startMs) / 1000)
+    return { tekst: `${hoursText(secs)} · ${euro(earnedCents(secs, hourlyRateCents))}` }
+  })()
+
   if (loading) {
     return <div className="card-base py-8 text-center text-gray-400"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div>
   }
@@ -82,7 +129,48 @@ export function TimeEntries({ month, setterId, hourlyRateCents, onChanged }: {
         <Clock className="h-4 w-4 text-gray-400" />
         <h2 className="text-sm font-semibold text-gray-900">Gewerkte periodes</h2>
         <span className="text-xs text-gray-400">({entries.length})</span>
+        <button onClick={() => setOpenForm((v) => !v)}
+          className="ml-auto btn-secondary text-xs py-1 px-2">
+          {openForm ? <><X className="h-3.5 w-3.5" />Sluiten</> : <><Plus className="h-3.5 w-3.5" />Tijd toevoegen</>}
+        </button>
       </div>
+
+      {/* Handmatig bijboeken — voor wie de timer vergat, of belde terwijl de
+          app dicht stond. Van–tot in plaats van starten en stoppen. */}
+      {openForm && (
+        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/70 space-y-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <label className="text-[11px] text-gray-500">
+              Datum
+              <input type="date" className="input-base mt-0.5 text-sm" value={datum}
+                max={new Date().toISOString().slice(0, 10)}
+                onChange={(e) => setDatum(e.target.value)} />
+            </label>
+            <label className="text-[11px] text-gray-500">
+              Van
+              <input type="time" className="input-base mt-0.5 text-sm" value={van}
+                onChange={(e) => setVan(e.target.value)} />
+            </label>
+            <label className="text-[11px] text-gray-500">
+              Tot
+              <input type="time" className="input-base mt-0.5 text-sm" value={tot}
+                onChange={(e) => setTot(e.target.value)} />
+            </label>
+            <label className="text-[11px] text-gray-500 col-span-2 sm:col-span-1">
+              Notitie <span className="text-gray-400">(optioneel)</span>
+              <input className="input-base mt-0.5 text-sm" value={notitie} maxLength={200}
+                placeholder="bv. belronde bouw" onChange={(e) => setNotitie(e.target.value)} />
+            </label>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <button onClick={bewaar} disabled={bewaren || !van || !tot} className="btn-primary text-sm">
+              {bewaren ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}Boeken
+            </button>
+            {voorbeeld?.fout && <span className="text-xs text-red-600">{voorbeeld.fout}</span>}
+            {voorbeeld?.tekst && <span className="text-xs text-gray-600 tabular">{voorbeeld.tekst}</span>}
+          </div>
+        </div>
+      )}
 
       {entries.length === 0 ? (
         <div className="empty-state text-sm">Deze maand is er nog geen tijd geregistreerd.</div>
