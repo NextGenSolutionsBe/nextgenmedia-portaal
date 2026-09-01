@@ -270,6 +270,21 @@ export async function payoutsFor(month: Date): Promise<Payout[]> {
 
   const out: Payout[] = []
   for (const s of stats) {
+    /**
+     * Onbezoldigde setters (zaakvoerders die zelf bellen) horen hier NIET.
+     * Een regel van € 0,00 met een knop "op betaald zetten" is geen nul —
+     * het is ruis die elke maand om aandacht vraagt en de indruk wekt dat er
+     * nog iets moet gebeuren.
+     *
+     * Reeds UITBETAALDE regels blijven wel staan: is er ooit iets betaald
+     * voordat iemand op onbezoldigd ging, dan hoort die betaling in de
+     * historie te blijven en niet uit beeld te verdwijnen.
+     */
+    const heeftBetaling = ['hours', 'commission'].some(
+      (k) => savedByKey.get(`${s.setter.id}|${k}`)?.status === 'paid',
+    )
+    if (s.setter.onbezoldigd && !heeftBetaling) continue
+
     for (const kind of ['hours', 'commission'] as const) {
       const live = kind === 'hours' ? s.earnedCents : s.commissionCents
       const row = savedByKey.get(`${s.setter.id}|${kind}`)
