@@ -2882,3 +2882,8 @@ CREATE INDEX IF NOT EXISTS clickup_agenda_runs_opruiming
 -- iets anders dan "tarief nog niet ingevuld".
 ALTER TABLE public.sales_setters
   ADD COLUMN IF NOT EXISTS onbezoldigd boolean NOT NULL DEFAULT false;
+
+-- Belpogingen tellen: na MAX_GEEN_GEHOOR vergeefse pogingen gaat een lead naar
+-- de fase 'max_pogingen' en uit de belronde.
+ALTER TABLE public.sales_leads
+  ADD COLUMN IF NOT EXISTS geen_gehoor_count int NOT NULL DEFAULT 0;

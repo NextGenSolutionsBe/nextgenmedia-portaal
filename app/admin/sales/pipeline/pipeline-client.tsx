@@ -18,6 +18,7 @@ type Lead = {
   id: string; stage_key: string; labels: string[]; callback_at: string | null
   pipeline_id?: string | null
   do_not_call: boolean; updated_at: string; lost_reason: string | null; email_brief: string | null
+  geen_gehoor_count?: number | null
   sales_companies: { id: string; name: string; website: string | null; sector: string | null; city: string | null; region: string | null; phone: string | null } | null
   sales_contacts: { id: string; name: string | null; email: string | null; phone: string | null; mobile: string | null; role: string | null } | null
 }

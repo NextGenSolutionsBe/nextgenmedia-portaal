@@ -12,6 +12,7 @@ import { merkStijl } from '@/lib/sales/merk'
 import { FOCUS_ACTIONS, stageLabel } from '@/lib/sales/stages'
 import {
   bouwWachtrij, aftelLabel, terugbelMoment, leesTijdstip, isKlaarFase, TERUGBEL_KEUZES,
+  MAX_GEEN_GEHOOR, GEEN_GEHOOR_UREN,
 } from '@/lib/sales/focus-queue'
 import { GEEN_INTERESSE_REDENEN, bouwReden } from '@/lib/sales/redenen'
 import { kiesScript, sectieKleur, type ScriptAnalyse } from '@/lib/sales/script-analyse'
@@ -45,6 +46,8 @@ type Contact = {
 type Lead = {
   id: string; stage_key: string; do_not_call: boolean
   callback_at?: string | null; callback_note?: string | null
+  /** Aantal keer vergeefs gebeld; bij MAX_GEEN_GEHOOR gaat de lead uit de rij. */
+  geen_gehoor_count?: number | null
   sales_companies: Bedrijf | null
   sales_contacts: Contact | null
 }
@@ -242,6 +245,26 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
     if (a.stage === 'not_interested') { setRedenOpen(true); return }
 
     const body: Record<string, unknown> = { noteKind: 'call', note: note.trim() || a.label }
+
+    /**
+     * "Geen antwoord" laat de server tellen en het terugbelmoment zetten
+     * (25 uur later, zodat je niet elke dag op hetzelfde uur belt). Na zes
+     * vergeefse pogingen gaat de lead naar "Max. belpogingen" en uit de rij.
+     * Fase en terugbelmoment komen dan van de server, dus die zetten we hier
+     * bewust niet — anders schrijven we zijn beslissing weer over.
+     */
+    if (a.key === '1') {
+      body.geen_gehoor = true
+      const gelukt = await stuur(body)
+      if (gelukt) {
+        const pogingen = (lead.geen_gehoor_count ?? 0) + 1
+        toast.info(pogingen >= MAX_GEEN_GEHOOR
+          ? `${pogingen}× geen gehoor — deze staat nu op "Max. belpogingen".`
+          : `Geen gehoor (${pogingen}/${MAX_GEEN_GEHOOR}) — komt over ${GEEN_GEHOOR_UREN} uur terug.`)
+      }
+      return
+    }
+
     if (a.stage && a.stage !== lead.stage_key) body.stage = a.stage
     // Een afgehandelde terugbelafspraak moet gewist worden — anders blijft
     // deze lead voor altijd als "te laat" vooraan in elke volgende belronde.

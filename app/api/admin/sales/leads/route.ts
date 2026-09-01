@@ -12,6 +12,7 @@ type LeadRow = {
   callback_note?: string | null
   archived_at: string | null; do_not_call: boolean; assigned_to: string | null
   updated_at: string; lost_reason: string | null; email_brief: string | null
+  geen_gehoor_count?: number | null
   pipeline_id: string | null
   sales_companies: {
     id: string; name: string; website: string | null; sector: string | null
@@ -26,7 +27,7 @@ type LeadRow = {
 // De volledige selectie mét de kolommen uit de migratie, en de smalle variant
 // als terugval zolang die migratie nog niet gedraaid is — anders blijft het
 // hele scherm leeg met een stille kolomfout.
-const SELECT_BREED = `id, stage_key, labels, callback_at, callback_note, archived_at, do_not_call, assigned_to, updated_at, lost_reason, email_brief, pipeline_id,
+const SELECT_BREED = `id, stage_key, labels, callback_at, callback_note, archived_at, do_not_call, assigned_to, updated_at, lost_reason, email_brief, geen_gehoor_count, pipeline_id,
   sales_companies ( id, name, website, sector, city, region, phone, email, werkklasse, activiteit, ondernemingsnummer, prioriteit, linkedin, employees ),
   sales_contacts  ( id, name, email, phone, mobile, phone_digits, role, linkedin )`
 const SELECT_SMAL = `id, stage_key, labels, callback_at, archived_at, do_not_call, assigned_to, updated_at, lost_reason, email_brief, pipeline_id,

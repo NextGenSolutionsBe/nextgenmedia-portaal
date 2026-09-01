@@ -9,8 +9,12 @@ export const STAGES = [
   { key: 'email_todo',   label: 'E-mail versturen',   position: 5 },
   { key: 'email_sent',   label: 'E-mail verstuurd',   position: 6 },
   { key: 'appointment',  label: 'Afspraak ingepland', position: 7 },
-  { key: 'won',          label: 'Closed Won',         position: 8, isWon: true },
-  { key: 'lost',         label: 'Closed Lost',        position: 9, isLost: true },
+  // Zes keer vergeefs gebeld. Bewust een eigen fase en geen "geen interesse":
+  // deze mensen hébben niets gezegd, en dat is iets anders dan nee. Zo blijven
+  // ze terugvindbaar voor een latere poging of een mailronde.
+  { key: 'max_pogingen', label: 'Max. belpogingen',   position: 8 },
+  { key: 'won',          label: 'Closed Won',         position: 9, isWon: true },
+  { key: 'lost',         label: 'Closed Lost',        position: 10, isLost: true },
 ] as const
 
 export type StageKey = (typeof STAGES)[number]['key']

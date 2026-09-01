@@ -2,6 +2,7 @@ import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { canTransition, transitionError, APPOINTMENT_STAGE } from '@/lib/sales/stages'
+import { MAX_GEEN_GEHOOR, GEEN_GEHOOR_UREN } from '@/lib/sales/focus-queue'
 import { logLeadEvent, moveLeadToPipeline } from '@/lib/sales/service'
 import { listPipelines } from '@/lib/sales/pipelines'
 import { normalizePhone } from '@/lib/sales/dedupe'
@@ -37,7 +38,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const admin = createAdminSupabaseClient()
 
     const { data: current } = await admin.from('sales_leads')
-      .select('id, stage_key, contact_id, pipeline_id, company_id, sales_client_id, lost_reason')
+      .select('id, stage_key, contact_id, pipeline_id, company_id, sales_client_id, lost_reason, geen_gehoor_count')
       .eq('id', id).maybeSingle()
     if (!current) return NextResponse.json({ error: 'Lead niet gevonden' }, { status: 404 })
 
@@ -81,6 +82,39 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         }
       }
       patch.stage_key = b.stage
+    }
+
+    /**
+     * "Geen gehoor" — de belpoging tellen en de lead op de juiste manier
+     * laten terugkomen.
+     *
+     * Dit gebeurt op de SERVER en niet in het belscherm: twee setters kunnen
+     * dezelfde lead na elkaar proberen, en een teller die in de browser leeft
+     * telt dan verkeerd of helemaal niet. Bovendien is dit precies het pad
+     * waarlangs een lead voorgoed uit de belronde verdwijnt.
+     */
+    if (b.geen_gehoor === true) {
+      const huidig = Number((current as { geen_gehoor_count?: number }).geen_gehoor_count ?? 0)
+      const nieuw = huidig + 1
+      patch.geen_gehoor_count = nieuw
+
+      if (nieuw >= MAX_GEEN_GEHOOR) {
+        // Genoeg geprobeerd. Eigen eindfase, en het terugbelmoment weg — anders
+        // zou de lead ondanks de fase toch nog blijven opduiken.
+        patch.stage_key = 'max_pogingen'
+        patch.callback_at = null
+        patch.callback_note = null
+        await logLeadEvent(id, {
+          kind: 'system',
+          body: `${nieuw}× geen gehoor — uit de belronde gehaald`,
+          actorId: actor.id, actorEmail: actor.email ?? null,
+        })
+      } else {
+        patch.callback_at = new Date(Date.now() + GEEN_GEHOOR_UREN * 3600_000).toISOString()
+        patch.callback_note = `Geen gehoor (poging ${nieuw} van ${MAX_GEEN_GEHOOR})`
+        // Nog niet gesproken, maar wel geprobeerd: dat is "gecontacteerd".
+        if (current.stage_key === 'to_contact') patch.stage_key = 'contacted'
+      }
     }
 
     if (Array.isArray(b.labels)) patch.labels = b.labels.map(String)
