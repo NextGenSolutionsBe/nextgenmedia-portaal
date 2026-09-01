@@ -1,10 +1,15 @@
 export const dynamic = 'force-dynamic'
 
 import { ResultsClient } from './results-client'
+import { SetterTarieven } from './setter-tarieven'
+import { requireAdmin } from '@/lib/supabase/server'
 
 // Resultaten van de appointment setters: gebelde uren, afspraken, gewonnen
 // deals, commissie en wat er uitbetaald moet worden.
-export default function SalesResultsPage() {
+export default async function SalesResultsPage() {
+  // Tarieven bepalen wat er uitbetaald wordt: enkel voor admins.
+  const isAdmin = !!(await requireAdmin())
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
@@ -14,6 +19,7 @@ export default function SalesResultsPage() {
         </p>
       </div>
       <ResultsClient />
+      {isAdmin && <SetterTarieven />}
     </div>
   )
 }

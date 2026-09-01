@@ -21,7 +21,20 @@ export type Setter = {
   hourly_rate_cents: number
   commission_pct: number
   active: boolean
+  /** Zaakvoerder die zelf belt: geen uurloon, geen commissie. */
+  onbezoldigd?: boolean
 }
+
+/**
+ * Het uurtarief dat voor de BEREKENING geldt.
+ *
+ * Bij een onbezoldigde setter is dat nul, ongeacht wat er in het veld staat.
+ * Zo kan een oud tarief nooit blijven meetellen nadat iemand op onbezoldigd
+ * gezet is — en dat zou stil gebeuren, want die kost duikt enkel op in het
+ * financiële dashboard.
+ */
+export const effectiefUurtarief = (s: Pick<Setter, 'hourly_rate_cents' | 'onbezoldigd'>): number =>
+  s.onbezoldigd ? 0 : (s.hourly_rate_cents ?? 0)
 
 export type SetterStats = {
   setter: Setter
@@ -204,14 +217,14 @@ export async function statsFor(period: Period, setterId?: string): Promise<Sette
     const won = closedMine.filter((a) => a.outcome === 'won')
     const lost = closedMine.filter((a) => a.outcome === 'lost')
     const commission = won.reduce((sum, a) => sum + (a.commission_cents ?? 0), 0)
-    const hours = earnedCents(seconds, setter.hourly_rate_cents)
+    const hours = earnedCents(seconds, effectiefUurtarief(setter))
 
     return {
       setter,
       seconds,
       earnedCents: hours,
       closedSeconds,
-      closedEarnedCents: earnedCents(closedSeconds, setter.hourly_rate_cents),
+      closedEarnedCents: earnedCents(closedSeconds, effectiefUurtarief(setter)),
       runningSince: running?.started_at ?? null,
       appointments: mine.length,
       won: won.length,
@@ -292,7 +305,8 @@ export async function setterCostByMonth(year: number): Promise<number[]> {
 
   const setters = await listSetters()
   if (setters.length === 0) return months
-  const rateById = new Map(setters.map((s) => [s.id, s.hourly_rate_cents]))
+  // Onbezoldigde setters tellen als kost NIET mee in de financiën.
+  const rateById = new Map(setters.map((s) => [s.id, effectiefUurtarief(s)]))
   const ids = setters.map((s) => s.id)
 
   const from = new Date(year, 0, 1)

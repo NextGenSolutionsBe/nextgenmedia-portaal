@@ -2877,3 +2877,8 @@ ALTER TABLE public.clickup_agenda_runs
   ADD COLUMN IF NOT EXISTS opruiming boolean NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS clickup_agenda_runs_opruiming
   ON public.clickup_agenda_runs (gestart DESC) WHERE opruiming;
+
+-- Een zaakvoerder die zelf belt krijgt geen uurloon en geen commissie. Dat is
+-- iets anders dan "tarief nog niet ingevuld".
+ALTER TABLE public.sales_setters
+  ADD COLUMN IF NOT EXISTS onbezoldigd boolean NOT NULL DEFAULT false;

@@ -70,12 +70,22 @@ export async function POST(req: NextRequest) {
       }
       const cents = Math.round(euros * 100)
 
+      /**
+       * Commissiepercentage van deze setter. Een ONBEZOLDIGDE setter (een
+       * zaakvoerder die zelf belt) krijgt 0 — anders zou de standaard van 7%
+       * stilletjes een commissie opbouwen voor iemand die er geen krijgt.
+       */
       let pct = 7
       if (setterProfileId) {
         const { data: s } = await admin.from('sales_setters')
-          .select('commission_pct').eq('id', setterProfileId).maybeSingle()
-        const v = Number((s as { commission_pct?: number } | null)?.commission_pct)
-        if (Number.isFinite(v) && v > 0) pct = v
+          .select('commission_pct, onbezoldigd').eq('id', setterProfileId).maybeSingle()
+        const rij = s as { commission_pct?: number; onbezoldigd?: boolean } | null
+        if (rij?.onbezoldigd) {
+          pct = 0
+        } else {
+          const v = Number(rij?.commission_pct)
+          if (Number.isFinite(v) && v > 0) pct = v
+        }
       }
 
       patch.deal_value_cents = cents
