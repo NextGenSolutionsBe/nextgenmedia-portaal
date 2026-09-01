@@ -2869,3 +2869,11 @@ AS $$
        OR c.verloopt_op < now()
   RETURNING c.lead_id, c.auth_user_id, c.naam, c.verloopt_op;
 $$;
+
+-- De wezenopruiming is het duurste deel van een sync-run; bij een sync per
+-- minuut hoeft die niet elke keer mee. Deze vlag onthoudt wanneer er voor het
+-- laatst opgeruimd is.
+ALTER TABLE public.clickup_agenda_runs
+  ADD COLUMN IF NOT EXISTS opruiming boolean NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS clickup_agenda_runs_opruiming
+  ON public.clickup_agenda_runs (gestart DESC) WHERE opruiming;

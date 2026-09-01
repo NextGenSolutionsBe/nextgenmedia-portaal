@@ -32,6 +32,9 @@ const VENSTER_VOORUIT_MS = 60 * 24 * 3600 * 1000
 /** Na zoveel minuten zonder geslaagde run is de sync "verouderd". */
 export const SYNC_VEROUDERD_MIN = 30
 
+/** Hoe vaak de (dure) wezenopruiming minstens moet draaien. */
+const OPRUIM_INTERVAL_MIN = 10
+
 type Target = {
   id: string
   clickup_assignee_id: number
@@ -93,6 +96,8 @@ export type SyncResultaat = {
   bijgewerkt: number
   verwijderd: number
   overgeslagen: number
+  /** Heeft deze run ook de wezenopruiming gedaan? */
+  opruiming?: boolean
 }
 
 export async function draaiClickupAgendaSync(): Promise<SyncResultaat> {
@@ -164,6 +169,27 @@ export async function draaiClickupAgendaSync(): Promise<SyncResultaat> {
     const { data: itemData } = await admin.from('clickup_agenda_items').select('*')
     const items = (itemData ?? []) as Item[]
 
+    /**
+     * Ruimt deze run ook wezen op?
+     *
+     * De opruiming doorloopt de volledige doelagenda's bij Google en is
+     * daarmee het duurste deel van een run. Ze is een vangnet — voor events
+     * van een run die halverwege afbrak — en geen dagelijkse noodzaak. Bij
+     * een sync die elke minuut draait zou ze de kosten vertienvoudigen zonder
+     * dat er iets mee opgelost wordt.
+     *
+     * Vandaar op tempo: minstens elke OPRUIM_INTERVAL_MIN minuten. Bewust
+     * afgeleid uit de laatste geslaagde opruiming en niet uit de klok, zodat
+     * een gemiste of trage run zichzelf inhaalt.
+     */
+    const { data: laatsteOpruiming } = await admin.from('clickup_agenda_runs')
+      .select('gestart').eq('opruiming', true).eq('ok', true)
+      .order('gestart', { ascending: false }).limit(1).maybeSingle()
+    const opruimenNodig = !laatsteOpruiming
+      || (Date.now() - new Date((laatsteOpruiming as { gestart: string }).gestart).getTime())
+         > OPRUIM_INTERVAL_MIN * 60_000
+    if (opruimenNodig) r.opruiming = true
+
     for (const target of targets) {
       const gewenst = new Map<string, SyncTaak>()
       for (const taak of taken) {
@@ -224,6 +250,8 @@ export async function draaiClickupAgendaSync(): Promise<SyncResultaat> {
        * blijft zo'n dubbel blok eeuwig staan en lijkt de agenda voller dan
        * hij is. Enkel events mét ons waarmerk; handmatige items blijven staan.
        */
+      if (!opruimenNodig) continue
+
       const geldig = new Set<string>()
       for (const [taskId2, taak2] of gewenst) {
         const rij = bestaand.get(taskId2)
@@ -257,6 +285,7 @@ export async function draaiClickupAgendaSync(): Promise<SyncResultaat> {
       klaar: new Date().toISOString(), ok: r.ok, fout: r.fout,
       aangemaakt: r.aangemaakt, bijgewerkt: r.bijgewerkt,
       verwijderd: r.verwijderd, overgeslagen: r.overgeslagen,
+      opruiming: !!r.opruiming,
     }).eq('id', runId)
   }
 
