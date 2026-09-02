@@ -2914,6 +2914,12 @@ ALTER TABLE public.clickup_agenda_runs
 CREATE INDEX IF NOT EXISTS clickup_agenda_runs_opruiming
   ON public.clickup_agenda_runs (gestart DESC) WHERE opruiming;
 
+-- Onthoudt of er voor DEZE storing al een alarmmail vertrok. Zonder die vlag
+-- kun je niet één keer per storing waarschuwen: je weet dan enkel dat de vorige
+-- run ook mislukte, niet of er al post over de deur ging.
+ALTER TABLE public.clickup_agenda_runs
+  ADD COLUMN IF NOT EXISTS alarm_verstuurd boolean NOT NULL DEFAULT false;
+
 -- Een zaakvoerder die zelf belt krijgt geen uurloon en geen commissie. Dat is
 -- iets anders dan "tarief nog niet ingevuld".
 ALTER TABLE public.sales_setters

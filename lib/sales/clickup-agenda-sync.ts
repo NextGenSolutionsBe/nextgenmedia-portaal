@@ -35,6 +35,20 @@ export const SYNC_VEROUDERD_MIN = 30
 /** Hoe vaak de (dure) wezenopruiming minstens moet draaien. */
 const OPRUIM_INTERVAL_MIN = 10
 
+/**
+ * Hoeveel mislukte runs ACHTER ELKAAR er nodig zijn voor een alarmmail.
+ *
+ * De sync draait elke minuut. Eén mislukking is meestal een hikje aan de kant
+ * van ClickUp — we zagen een 404 met ECODE SHARD_006 op /team, die bij de
+ * volgende run vanzelf weg was. Daar meteen een mail over sturen leert je
+ * vooral om alarmen te negeren, en dát is gevaarlijk bij een sync die dubbele
+ * boekingen moet voorkomen.
+ *
+ * Drie op rij betekent drie minuten zonder sync: kort genoeg om er snel bij te
+ * zijn, lang genoeg om ruis te dempen.
+ */
+const ALARM_DREMPEL = 3
+
 type Target = {
   id: string
   clickup_assignee_id: number
@@ -289,27 +303,75 @@ export async function draaiClickupAgendaSync(): Promise<SyncResultaat> {
     }).eq('id', runId)
   }
 
-  // Eén alarmmail bij de OVERGANG goed → stuk, niet elke tien minuten opnieuw.
-  if (!r.ok) {
-    const { data: vorige } = await admin.from('clickup_agenda_runs')
-      .select('ok').not('id', 'eq', runId ?? '').not('klaar', 'is', null)
-      .order('gestart', { ascending: false }).limit(1).maybeSingle()
-    const vorigeOk = (vorige as { ok: boolean | null } | null)?.ok
-    if (vorigeOk !== false) {
+  /**
+   * Alarmeren — maar alleen als het écht stuk is.
+   *
+   * Vroeger vertrok er een mail bij de EERSTE mislukte run. Met een sync die
+   * elke minuut draait, is dat een alarm voor elk hikje van ClickUp, terwijl de
+   * volgende run een minuut later gewoon slaagt. Die mail beweerde bovendien
+   * dat het boekscherm een waarschuwing toonde, en dat klopte niet: die
+   * verschijnt pas na SYNC_VEROUDERD_MIN minuten zonder geslaagde run.
+   *
+   * Nu: pas bij ALARM_DREMPEL mislukkingen op rij, precies één keer per
+   * storing, en met een bericht zodra het weer loopt.
+   */
+  try {
+    const { data: recent } = await admin.from('clickup_agenda_runs')
+      .select('id, ok, alarm_verstuurd, gestart').not('klaar', 'is', null)
+      .order('gestart', { ascending: false }).limit(12)
+    const vorige = ((recent ?? []) as { id: string; ok: boolean | null; alarm_verstuurd?: boolean; gestart: string }[])
+      .filter((x) => x.id !== runId)
+
+    // Hoeveel mislukkingen staan er, deze meegerekend, op rij? En is er voor
+    // déze storing al gewaarschuwd?
+    let opRij = r.ok ? 0 : 1
+    let alGewaarschuwd = false
+    for (const v of vorige) {
+      if (v.ok !== false) break
+      if (!r.ok) opRij++
+      if (v.alarm_verstuurd) { alGewaarschuwd = true; break }
+    }
+
+    if (!r.ok && opRij >= ALARM_DREMPEL && !alGewaarschuwd) {
       await sendEmail({
         to: 'info@nextgenmedia.be',
-        subject: 'Let op: de ClickUp-agendasync is gestopt',
+        subject: 'Let op: de ClickUp-agendasync loopt niet meer',
         text: [
-          'De synchronisatie van ClickUp-taken naar Google Calendar is zonet MISLUKT.',
+          `De synchronisatie van ClickUp naar Google Calendar is ${opRij} keer na elkaar mislukt.`,
+          `Ze draait elke minuut, dus dat is ongeveer ${opRij} minuten zonder sync.`,
           '',
           `Fout: ${r.fout}`,
           '',
-          'Zolang dit stuk is, zien de appointment setters niet wat er in ClickUp',
-          'gepland staat — en kan er dubbel geboekt worden. Het boekscherm toont',
-          'nu een waarschuwing.',
+          'Wat dit betekent: nieuwe of verplaatste ClickUp-taken komen nu niet in',
+          'de agenda. Wie een afspraak boekt, ziet die uren als vrij — kijk dus',
+          'even in ClickUp zelf tot dit weer loopt.',
+          '',
+          `Blijft het langer dan ${SYNC_VEROUDERD_MIN} minuten stil, dan zet het boekscherm er`,
+          'zelf een waarschuwing bij. Zodra een run weer slaagt, krijg je bericht.',
         ].join('\n'),
       }).catch(() => { /* het alarm mag zelf nooit een run laten klappen */ })
+      if (runId) await admin.from('clickup_agenda_runs').update({ alarm_verstuurd: true }).eq('id', runId)
     }
+
+    // Weer opgelost? Enkel melden als er ook echt gealarmeerd is — anders
+    // stuurt een hikje alsnog post.
+    if (r.ok && alGewaarschuwd) {
+      const stukSinds = [...vorige].reverse().find((v) => v.ok === false)?.gestart ?? null
+      await sendEmail({
+        to: 'info@nextgenmedia.be',
+        subject: 'De ClickUp-agendasync loopt weer',
+        text: [
+          'De synchronisatie van ClickUp naar Google Calendar is er weer.',
+          stukSinds ? `Ze lag stil vanaf ${new Date(stukSinds).toLocaleString('nl-BE')}.` : '',
+          '',
+          'Wat er intussen in ClickUp veranderde, is bij deze run meteen ingehaald:',
+          'de sync kijkt elke keer naar het volledige venster, niet enkel naar wat',
+          'er sinds de vorige keer bij kwam.',
+        ].filter(Boolean).join('\n'),
+      }).catch(() => { /* idem */ })
+    }
+  } catch {
+    // De alarmlogica mag de sync zelf nooit laten mislukken.
   }
 
   return r

@@ -179,6 +179,28 @@ async function clickupFetch(path: string, init: RequestInit = {}, attempt = 0): 
     await sleep(backoff)
     return clickupFetch(path, init, attempt + 1)
   }
+
+  /**
+   * Hikjes aan de kant van ClickUp opnieuw proberen.
+   *
+   * Twee soorten. Een 5xx spreekt voor zich. En een 404 met ECODE "SHARD_…":
+   * dat is géén ontbrekende taak maar een ClickUp-server die zijn eigen shard
+   * even niet vindt — we zagen het op /team, waar niets kan ontbreken. Zo'n
+   * antwoord komt bij de volgende poging gewoon goed.
+   *
+   * Alleen bij LEZEN. Een POST of PUT opnieuw sturen zou een tweede taak of een
+   * tweede agenda-item kunnen maken, en dubbele afspraken zijn precies wat deze
+   * sync moet voorkomen.
+   */
+  const leesActie = !init.method || init.method.toUpperCase() === 'GET'
+  if (leesActie && attempt < 3) {
+    const hikje = res.status >= 500
+      || (res.status === 404 && /"ECODE"\s*:\s*"SHARD_/i.test(await res.clone().text().catch(() => '')))
+    if (hikje) {
+      await sleep(Math.min(2 ** attempt * 1000, 4000))
+      return clickupFetch(path, init, attempt + 1)
+    }
+  }
   return res
 }
 
