@@ -2,20 +2,16 @@
 
 import { useState, useEffect } from 'react'
 import { X, Loader2, CalendarDays, Sparkles, CheckCircle2, Info } from 'lucide-react'
+import { KANALEN, normaliseerKanalen } from '@/lib/social-platforms'
 
 const MONTH_NAMES = [
   'Januari', 'Februari', 'Maart', 'April', 'Mei', 'Juni',
   'Juli', 'Augustus', 'September', 'Oktober', 'November', 'December',
 ]
 
-const ALL_PLATFORMS = [
-  { slug: 'instagram', label: 'Instagram' },
-  { slug: 'facebook',  label: 'Facebook' },
-  { slug: 'linkedin',  label: 'LinkedIn' },
-  { slug: 'tiktok',    label: 'TikTok' },
-  { slug: 'pinterest', label: 'Pinterest' },
-  { slug: 'twitter',   label: 'Twitter/X' },
-]
+// Kanalen komen uit één lijst (lib/social-platforms.ts): Instagram en Facebook
+// staan daar samen als Meta, want je plant er nooit apart voor.
+const ALL_PLATFORMS = KANALEN
 
 interface ClientConfig {
   niche: string
@@ -77,7 +73,10 @@ export function GenerateDialog({ clientId, onClose, onGenerated }: GenerateDialo
         setStoriesPerMonth(json.storiesPerMonth)
         setSelectedMonths(getDefaultMonths(json.start_date))
         // Pre-select the platforms the client has configured (admin can adjust)
-        setSelectedPlatforms(json.channels?.length > 0 ? json.channels : ['instagram'])
+        // Oude klantinstellingen kunnen nog 'instagram'/'facebook' bevatten;
+        // normaliseren maakt daar één keer Meta van in plaats van twee vinkjes.
+        const kanalen = normaliseerKanalen(json.channels)
+        setSelectedPlatforms(kanalen.length > 0 ? kanalen : ['meta'])
       })
       .catch(() => setError('Kan configuratie niet laden'))
       .finally(() => setLoadingConfig(false))
@@ -119,7 +118,7 @@ export function GenerateDialog({ clientId, onClose, onGenerated }: GenerateDialo
           postsPerMonth,
           reelsPerMonth,
           storiesPerMonth,
-          channels: selectedPlatforms.length > 0 ? selectedPlatforms : ['instagram'],
+          channels: selectedPlatforms.length > 0 ? selectedPlatforms : ['meta'],
           niche: config?.niche ?? '',
         }),
       })

@@ -2929,3 +2929,22 @@ ALTER TABLE public.sales_setters
 -- de fase 'max_pogingen' en uit de belronde.
 ALTER TABLE public.sales_leads
   ADD COLUMN IF NOT EXISTS geen_gehoor_count int NOT NULL DEFAULT 0;
+
+-- ── Instagram + Facebook = één kanaal "meta" ────────────────────────────────
+-- Je plant er in de praktijk nooit apart voor: dezelfde post gaat naar allebei.
+-- Twee losse kanalen leverden enkel dubbele regels in de kalender op. De lijst
+-- staat nu in lib/social-platforms.ts; dit brengt de bestaande content mee.
+-- Idempotent: draai je het opnieuw, dan is er niets meer te veranderen.
+UPDATE public.social_content_items
+SET platforms = ARRAY(
+  SELECT g.k FROM (
+    SELECT CASE WHEN p IN ('instagram','facebook') THEN 'meta' ELSE p END AS k, MIN(ord) AS o
+    FROM unnest(platforms) WITH ORDINALITY AS t(p, ord)
+    GROUP BY 1
+  ) g ORDER BY g.o
+)
+WHERE platforms && ARRAY['instagram','facebook']::text[];
+
+UPDATE public.social_content_items
+SET platform = 'meta'
+WHERE platform IN ('instagram','facebook');

@@ -1,4 +1,5 @@
 import { safeMessage } from '@/lib/api-error'
+import { normaliseerKanalen } from '@/lib/social-platforms'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient , isActiveStaff } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
@@ -47,11 +48,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Geen klant geselecteerd — kies eerst een klant.' }, { status: 400 })
     }
 
-    // Support both `platforms` (array) and legacy `platform` (string)
-    const resolvedPlatforms: string[] = Array.isArray(platforms) && platforms.length > 0
-      ? platforms
-      : platform ? [platform] : []
-    const primaryPlatform: string = resolvedPlatforms[0] ?? platform ?? ''
+    // Support both `platforms` (array) and legacy `platform` (string).
+    // Normaliseren gebeurt hier, op de server: wat er ook binnenkomt — een oud
+    // scherm, de ClickUp-sync, een script — 'instagram' en 'facebook' worden
+    // één 'meta'. Zo staat er nooit meer een dubbele regel in de kalender.
+    const resolvedPlatforms: string[] = normaliseerKanalen(
+      Array.isArray(platforms) && platforms.length > 0 ? platforms : platform,
+    )
+    const primaryPlatform: string = resolvedPlatforms[0] ?? ''
 
     const { data: row, error } = await admin
       .from('social_content_items')
@@ -85,11 +89,11 @@ export async function PATCH(req: NextRequest) {
     }
     // Sync platforms array + primary platform
     if (rawPlatforms !== undefined || rawPlatform !== undefined) {
-      const resolvedPlatforms: string[] = Array.isArray(rawPlatforms) && rawPlatforms.length > 0
-        ? rawPlatforms
-        : rawPlatform ? [rawPlatform] : []
+      const resolvedPlatforms: string[] = normaliseerKanalen(
+        Array.isArray(rawPlatforms) && rawPlatforms.length > 0 ? rawPlatforms : rawPlatform,
+      )
       clean.platforms = resolvedPlatforms
-      clean.platform = resolvedPlatforms[0] ?? rawPlatform ?? null
+      clean.platform = resolvedPlatforms[0] ?? null
     }
     const { error } = await admin.from('social_content_items').update(clean).eq('id', id)
     if (error) throw new Error(error.message)

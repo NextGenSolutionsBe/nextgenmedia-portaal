@@ -2,6 +2,7 @@ import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient , isActiveStaff } from '@/lib/supabase/server'
 import { generatePlan } from '@/lib/content-planner'
+import { normaliseerKanalen } from '@/lib/social-platforms'
 import { revalidatePath } from 'next/cache'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
@@ -75,8 +76,10 @@ export async function POST(req: NextRequest) {
     }
 
     // Channels MUST come from request body — admin chooses per generation.
-    // Falls back to instagram only when nothing is selected (UI prevents this).
-    const planChannels = Array.isArray(channels) && channels.length > 0 ? channels : ['instagram']
+    // Kanalen normaliseren (Instagram/Facebook → Meta) en pas terugvallen op
+    // Meta als er echt niets gekozen is; het scherm voorkomt dat normaal.
+    const genormaliseerd = normaliseerKanalen(channels)
+    const planChannels = genormaliseerd.length > 0 ? genormaliseerd : ['meta']
 
     const planned = generatePlan({
       months,

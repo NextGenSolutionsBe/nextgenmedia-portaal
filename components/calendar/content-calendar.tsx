@@ -6,6 +6,7 @@ import {
   Send, Pencil, Save, Image, Video, FileText, Plus,
 } from 'lucide-react'
 import { ymd } from '@/lib/utils'
+import { KANAAL_SLUGS, kanaalLabel, normaliseerKanalen } from '@/lib/social-platforms'
 
 export type SocialContentStatus =
   | 'draft' | 'ready_for_review' | 'approved'
@@ -326,7 +327,9 @@ function ScriptPanel({
     if (!isAdmin || !actions.onUpdate || !form) return
     setBusy(true)
     try {
-      const resolvedPlatforms = form.platforms?.length > 0 ? form.platforms : [form.platform]
+      const resolvedPlatforms = normaliseerKanalen(
+        form.platforms?.length > 0 ? form.platforms : [form.platform],
+      )
       await actions.onUpdate(item.id, {
         title: form.title,
         platforms: resolvedPlatforms,
@@ -338,10 +341,11 @@ function ScriptPanel({
     } finally { setBusy(false) }
   }
 
-  const ALL_PLATFORMS = ['instagram', 'facebook', 'tiktok', 'linkedin', 'pinterest', 'twitter']
+  // Eén bron (lib/social-platforms.ts); Instagram + Facebook = Meta.
+  const ALL_PLATFORMS = KANAAL_SLUGS
   const togglePlatform = (p: string) => {
     if (!form) return
-    const current = form.platforms?.length > 0 ? form.platforms : [form.platform]
+    const current = normaliseerKanalen(form.platforms?.length > 0 ? form.platforms : [form.platform])
     const next = current.includes(p) ? current.filter((x) => x !== p) : [...current, p]
     setForm({ ...form, platforms: next.length > 0 ? next : [p], platform: next[0] ?? p })
   }
@@ -365,8 +369,10 @@ function ScriptPanel({
             <h3 className="font-semibold text-gray-900 leading-snug">{f.title}</h3>
           )}
           <div className="text-xs text-gray-400 mt-1 flex items-center gap-1 flex-wrap">
-            {(f.platforms?.length > 0 ? f.platforms : [f.platform]).map((p) => (
-              <span key={p} className="capitalize bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-[10px]">{p}</span>
+            {/* Oude items staan nog op 'instagram'/'facebook'; normaliseren
+                toont die als één Meta-badge in plaats van twee. */}
+            {normaliseerKanalen(f.platforms?.length > 0 ? f.platforms : [f.platform]).map((p) => (
+              <span key={p} className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-[10px]">{kanaalLabel(p)}</span>
             ))}
             <span>· {f.content_type}</span>
           </div>
@@ -400,19 +406,21 @@ function ScriptPanel({
               </span>
               <div className="flex flex-wrap gap-1.5">
                 {ALL_PLATFORMS.map((p) => {
-                  const active = (f.platforms?.length > 0 ? f.platforms : [f.platform]).includes(p)
+                  const active = normaliseerKanalen(
+                    f.platforms?.length > 0 ? f.platforms : [f.platform],
+                  ).includes(p)
                   return (
                     <button
                       key={p}
                       type="button"
                       onClick={() => togglePlatform(p)}
-                      className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors capitalize ${
+                      className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
                         active
                           ? 'border-[#fff848] bg-[#fff848]/10 text-black'
                           : 'border-gray-200 text-gray-500 hover:border-gray-300'
                       }`}
                     >
-                      {p}
+                      {kanaalLabel(p)}
                     </button>
                   )
                 })}

@@ -8,10 +8,12 @@ import { GenerateDialog } from './generate-dialog'
 import { ClickUpSyncControl } from '@/components/admin/clickup-sync-control'
 import { ShootBriefings } from '@/components/admin/shoot-briefings'
 import { SendMailButton } from '@/components/admin/send-mail-button'
+import { KANAAL_SLUGS, kanaalLabel } from '@/lib/social-platforms'
 
 type Client = { id: string; company_name: string }
 
-const PLATFORMS = ['instagram', 'facebook', 'tiktok', 'linkedin', 'pinterest', 'twitter']
+// Eén bron voor de kanalen; Meta vervangt Instagram + Facebook.
+const PLATFORMS = KANAAL_SLUGS
 const TYPES = ['post', 'reel', 'story', 'carousel']
 
 function CreateDialog({
@@ -28,7 +30,7 @@ function CreateDialog({
   const [loading, setLoading] = useState(false)
   const [form, setForm] = useState({
     title: '',
-    platforms: ['instagram'] as string[],
+    platforms: ['meta'] as string[],
     content_type: 'post',
     planned_date: defaultDate || new Date().toISOString().slice(0, 10),
     caption: '',
@@ -119,13 +121,13 @@ function CreateDialog({
                   key={p}
                   type="button"
                   onClick={() => togglePlatform(p)}
-                  className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors capitalize ${
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
                     form.platforms.includes(p)
                       ? 'border-[#fff848] bg-[#fff848]/10 text-black'
                       : 'border-gray-200 text-gray-500 hover:border-gray-300'
                   }`}
                 >
-                  {p}
+                  {kanaalLabel(p)}
                 </button>
               ))}
             </div>
