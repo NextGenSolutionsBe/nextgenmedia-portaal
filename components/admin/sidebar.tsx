@@ -214,7 +214,14 @@ function NavItem({
   )
 }
 
-export function AdminSidebar({ allowedModules, isEmployee = false }: { allowedModules?: string[]; isEmployee?: boolean } = {}) {
+export function AdminSidebar({ allowedModules, isEmployee = false, naam, email }: {
+  allowedModules?: string[]
+  isEmployee?: boolean
+  /** Voornaam van wie er ingelogd is — voor de begroeting bovenaan. */
+  naam?: string
+  /** Het e-mailadres eronder: het harde antwoord op "welk account is dit?". */
+  email?: string
+} = {}) {
   const router = useRouter()
   const { refresh, spinning } = useRefresh()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -308,6 +315,26 @@ export function AdminSidebar({ allowedModules, isEmployee = false }: { allowedMo
             </button>
           </div>
         </div>
+
+        {/* WIE ZIT HIER?
+            Op een gedeelde laptop, of met twee accounts naast elkaar, wil je in
+            één oogopslag zien namens wie je werkt — zeker bij het bellen, waar
+            een lead aan de verkeerde setter toegewezen raakt als je het
+            misgokt. Daarom de voornaam groot en het e-mailadres eronder: de
+            naam voor het gemak, het adres als het harde antwoord. */}
+        {(naam || email) && (
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2.5">
+            <div className="h-8 w-8 shrink-0 rounded-full bg-[#fff848] text-black flex items-center justify-center text-sm font-bold">
+              {(naam || email || '?').charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-gray-900 leading-tight truncate">
+                {naam ? `Welkom, ${naam}` : 'Welkom'}
+              </div>
+              {email && <div className="text-[10px] text-gray-400 truncate" title={email}>{email}</div>}
+            </div>
+          </div>
+        )}
 
         {/* Navigation */}
         <nav className="flex-1 px-3 py-4 overflow-y-auto">

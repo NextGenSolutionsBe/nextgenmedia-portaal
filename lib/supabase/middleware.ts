@@ -44,7 +44,8 @@ function copyAuthCookies(from: NextResponse, to: NextResponse): NextResponse {
 const HDR_USER = 'x-ngm-user'
 const HDR_ROLE = 'x-ngm-role'
 const HDR_MODULES = 'x-ngm-modules'
-const ONZE_HEADERS = [HDR_USER, HDR_ROLE, HDR_MODULES]
+const HDR_NAAM = 'x-ngm-naam'
+const ONZE_HEADERS = [HDR_USER, HDR_ROLE, HDR_MODULES, HDR_NAAM]
 
 // ── Nooit onbeperkt wachten ──────────────────────────────────────────────────
 //
@@ -157,13 +158,18 @@ export async function updateSession(request: NextRequest) {
    * `return supabaseResponse`: zo kan een meegestuurde `x-ngm-role: admin`
    * nooit bij de layout aankomen.
    */
-  const doorgeven = (identiteit?: { userId: string; role: string; modules?: string[] }) => {
+  const doorgeven = (identiteit?: { userId: string; role: string; modules?: string[]; naam?: string | null }) => {
     const headers = new Headers(request.headers)
     for (const h of ONZE_HEADERS) headers.delete(h)
     if (identiteit) {
       headers.set(HDR_USER, identiteit.userId)
       headers.set(HDR_ROLE, identiteit.role)
       if (identiteit.modules) headers.set(HDR_MODULES, JSON.stringify(identiteit.modules))
+      // De naam van de werknemer komt uit de rij die we hier tóch al lazen, dus
+      // de shell hoeft er geen tweede opzoeking voor te doen. Headers dragen
+      // enkel latin-1; een accent zou de hele response laten klappen, vandaar
+      // percent-codering (de layout decodeert weer).
+      if (identiteit.naam) headers.set(HDR_NAAM, encodeURIComponent(identiteit.naam))
     }
     // De cookies van supabaseResponse (o.a. een vernieuwd auth-token) moeten
     // mee — zie copyAuthCookies hierboven voor waarom dat niet vanzelf gaat.
@@ -365,10 +371,10 @@ export async function updateSession(request: NextRequest) {
   // mogelijk (nog) geen 'employee', waardoor de rol-rij kan ontbreken; een
   // actieve staff-rij maakt de gebruiker sowieso werknemer. Enkel opzoeken als
   // de rol geen bekende non-employee is (bespaart een query voor admin/klant/partner).
-  let staff: { active?: boolean; permissions?: string[] } | null = null
+  let staff: { active?: boolean; permissions?: string[]; name?: string | null } | null = null
   if (role !== 'admin' && role !== 'client' && role !== 'freelancer') {
-    const staffLezing = await lees<{ active?: boolean; permissions?: string[] }>(
-      db.from('staff_members').select('active, permissions').eq('auth_user_id', user.id).maybeSingle(),
+    const staffLezing = await lees<{ active?: boolean; permissions?: string[]; name?: string | null }>(
+      db.from('staff_members').select('active, permissions, name').eq('auth_user_id', user.id).maybeSingle(),
     )
     if (!staffLezing.ok) return databankOnbereikbaar(path)
     staff = staffLezing.data
@@ -462,6 +468,7 @@ export async function updateSession(request: NextRequest) {
       modules: role === 'employee' && Array.isArray(staff?.permissions)
         ? (staff!.permissions as string[])
         : undefined,
+      naam: staff?.name ?? null,
     })
   }
 

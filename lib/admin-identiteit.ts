@@ -25,9 +25,14 @@ import { getSessionUser, getUserRole, getStaffRow } from '@/lib/supabase/server'
 const HDR_USER = 'x-ngm-user'
 const HDR_ROLE = 'x-ngm-role'
 const HDR_MODULES = 'x-ngm-modules'
+const HDR_NAAM = 'x-ngm-naam'
 
 export type AdminIdentiteit = {
   userId: string
+  /** Voornaam zoals die in de shell getoond wordt ("Welkom, Fabio"). */
+  naam: string
+  /** Het e-mailadres van de sessie — het harde antwoord op "welk account is dit?". */
+  email: string
   /** 'admin' | 'employee', of undefined als de gebruiker geen van beide is. */
   role: string | undefined
   /** undefined = admin (alles); anders de toegestane module-keys. */
@@ -58,22 +63,67 @@ export async function leesAdminIdentiteit(): Promise<AdminIdentiteit | null> {
         } catch { /* modules blijft leeg */ }
       }
     }
-    return { userId: user.id, role: headerRole, modules, bron: 'header' }
+    // De middleware codeert de naam (headers dragen geen accenten); stukke
+    // codering mag nooit de hele shell laten klappen voor een begroeting.
+    let headerNaam: string | null = null
+    const ruweNaam = h.get(HDR_NAAM)
+    if (ruweNaam) { try { headerNaam = decodeURIComponent(ruweNaam) } catch { headerNaam = null } }
+
+    return { userId: user.id, ...naamVan(user, headerNaam), role: headerRole, modules, bron: 'header' }
   }
 
   // Terugval: gewoon opvragen. Gebeurt als de middleware niet liep, of als de
   // header niet bij deze sessie hoort.
   let role = await getUserRole(user.id)
   let modules: string[] | undefined
+  let staffNaam: string | null = null
   if (role !== 'admin') {
     const staff = await getStaffRow(user.id)
+    staffNaam = staff?.name ?? null
     if (staff && staff.active !== false) {
       role = 'employee'
       modules = Array.isArray(staff.permissions) ? (staff.permissions as string[]) : []
     } else if (staff && staff.active === false) {
       // Uitgeschakelde werknemer — geen rol, de layout stuurt door naar /login.
-      return { userId: user.id, role: undefined, modules: undefined, bron: 'database' }
+      return { userId: user.id, ...naamVan(user, staff?.name ?? null), role: undefined, modules: undefined, bron: 'database' }
     }
   }
-  return { userId: user.id, role, modules, bron: 'database' }
+  return { userId: user.id, ...naamVan(user, staffNaam), role, modules, bron: 'database' }
+}
+
+/**
+ * Hoe heet de ingelogde persoon?
+ *
+ * Drie bronnen, in deze volgorde: de naam op het account, de naam bij de
+ * werknemer (die de middleware al ophaalde voor de rechten — dus gratis), en
+ * anders het stuk vóór de @ van het e-mailadres.
+ *
+ * GEEN extra databankoproep. Dit draait op élke adminpagina; de authketen was
+ * eerder al de traagste schakel van de app en daar zetten we geen query bij
+ * voor een begroeting.
+ *
+ * Bij een gedeelde postbus (info@, admin@, sales@) geven we GEEN naam terug:
+ * "Welkom, Info" slaat nergens op. Dan toont de shell enkel "Welkom" met het
+ * adres eronder — dat adres is toch het echte antwoord op "welk account is dit?".
+ */
+const GEDEELD = new Set(['info', 'admin', 'contact', 'hallo', 'hello', 'team', 'sales', 'noreply'])
+
+function naamVan(
+  user: { email?: string | null; user_metadata?: Record<string, unknown> },
+  staffNaam: string | null,
+): { naam: string; email: string } {
+  const email = user.email ?? ''
+  const uitMeta = (k: string) => {
+    const v = user.user_metadata?.[k]
+    return typeof v === 'string' && v.trim() ? v.trim() : ''
+  }
+  const lokaal = email.split('@')[0] ?? ''
+  const ruw = uitMeta('name') || uitMeta('full_name') || (staffNaam ?? '').trim()
+    || (GEDEELD.has(lokaal.toLowerCase()) ? '' : lokaal)
+  if (!ruw) return { naam: '', email }
+
+  // Alleen de voornaam, met een hoofdletter: "Welkom, Fabio" leest beter dan
+  // "Welkom, fabio.vandenberghe".
+  const eerste = ruw.split(/[\s._-]+/)[0]
+  return { naam: eerste.charAt(0).toUpperCase() + eerste.slice(1), email }
 }

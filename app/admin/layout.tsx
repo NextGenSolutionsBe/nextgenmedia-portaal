@@ -21,7 +21,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   return (
     <div className="flex min-h-screen bg-gray-50">
       <Toaster richColors position="top-right" />
-      <AdminSidebar allowedModules={allowedModules} isEmployee={role === 'employee'} />
+      <AdminSidebar
+        allowedModules={allowedModules}
+        isEmployee={role === 'employee'}
+        naam={ik.naam}
+        email={ik.email}
+      />
       <main className="flex-1 min-w-0 md:ml-[var(--sidebar-width)] min-h-screen">
         <div className="max-w-[1400px] mx-auto px-4 pt-16 pb-8 md:pt-6 md:px-6 lg:px-8">
           {/* Topbar (zoek/notificaties/AI) is admin-only: de onderliggende
