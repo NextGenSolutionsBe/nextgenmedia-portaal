@@ -2,12 +2,33 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Loader2, Plus, Trash2, Building2, Mail, ShieldCheck, Clock, Archive, RotateCcw } from 'lucide-react'
+import { Loader2, Plus, Trash2, Building2, Mail, ShieldCheck, Clock, Archive, RotateCcw, KeyRound, Copy, Check } from 'lucide-react'
 
 type Bedrijf = { id: string; naam: string; is_eigen: boolean; email: string | null; actief: boolean }
 type Lid = {
   id: string; bedrijf_id: string; email: string; naam: string | null
-  actief: boolean; actief_account: boolean; uitgenodigd_op: string | null
+  actief: boolean; uitgenodigd_op: string | null
+  /** 'klaar' = kan inloggen · 'wacht' = account bestaat maar is nooit gebruikt · 'geen' = nog geen account. */
+  toestand: 'klaar' | 'wacht' | 'geen'
+  kan_inloggen: boolean
+  laatste_login: string | null
+}
+
+/**
+ * Een sterk wachtwoord, in de BROWSER gemaakt.
+ *
+ * Bewust hier en niet op de server: zo staat het nergens in een log en gaat het
+ * enkel over de lijn wanneer jij op opslaan klikt. Vier woorden-achtige blokken
+ * zijn makkelijk door te bellen ("kx7m — streepje — ..."), en dat is precies wat
+ * er met dit wachtwoord gebeurt.
+ */
+function maakWachtwoord(): string {
+  // Zonder i/l/1/O/0: die haal je door de telefoon altijd door elkaar.
+  const alfabet = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  const bytes = new Uint32Array(16)
+  crypto.getRandomValues(bytes)
+  const tekens = [...bytes].map((n) => alfabet[n % alfabet.length])
+  return [0, 4, 8, 12].map((i) => tekens.slice(i, i + 4).join('')).join('-')
 }
 
 /**
@@ -25,7 +46,14 @@ export function PartnerBeheer() {
   const [eigenBedrijf, setEigenBedrijf] = useState(false)
   const [uitnodigenVoor, setUitnodigenVoor] = useState('')
   const [uitnodigEmail, setUitnodigEmail] = useState('')
+  const [uitnodigNaam, setUitnodigNaam] = useState('')
+  const [wachtwoord, setWachtwoord] = useState('')
+  const [stuurMail, setStuurMail] = useState(false)
   const [bezig, setBezig] = useState(false)
+  // Wat je net instelde, één keer zichtbaar met een kopieerknop. Daarna weg —
+  // we bewaren het nergens, dus dit is je enige kans om het door te geven.
+  const [gezet, setGezet] = useState<{ email: string; wachtwoord: string } | null>(null)
+  const [gekopieerd, setGekopieerd] = useState(false)
 
   const laad = useCallback(async () => {
     setLaden(true)
@@ -59,16 +87,65 @@ export function PartnerBeheer() {
     try {
       const res = await fetch('/api/kantoor/bedrijven', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ actie: 'uitnodigen', bedrijf_id: uitnodigenVoor, email: uitnodigEmail.trim() }),
+        body: JSON.stringify({
+          actie: 'uitnodigen',
+          bedrijf_id: uitnodigenVoor,
+          email: uitnodigEmail.trim(),
+          naam: uitnodigNaam.trim() || undefined,
+          wachtwoord: wachtwoord || undefined,
+          stuurMail,
+        }),
       })
       const j = await res.json(); if (!res.ok) throw new Error(j.error)
-      if (j.mailStatus && j.mailStatus !== 'verstuurd') {
-        toast.warning(`Toegang staat klaar, maar de mail ging niet uit — ${j.mailStatus}`, { duration: 12000 })
+
+      if (j.wachtwoordGezet) {
+        // Eén keer tonen: hierna staat dit nergens meer. Bewust géén mail met
+        // het wachtwoord erin — dat geef je zelf door.
+        setGezet({ email: uitnodigEmail.trim(), wachtwoord })
+        toast.success('Toegang staat klaar. Geef het wachtwoord door.')
+      } else if (j.bestaandAccount) {
+        toast.success('Gekoppeld. Deze persoon logt in met zijn bestaande wachtwoord.')
       } else {
-        toast.success('Uitgenodigd. Hij kiest zelf een wachtwoord.')
+        toast.success('Toegang staat klaar.')
       }
-      setUitnodigEmail(''); laad()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Uitnodigen mislukt') } finally { setBezig(false) }
+      if (j.mailStatus && j.mailStatus !== 'verstuurd') {
+        toast.warning(`De mail ging niet uit — ${j.mailStatus}`, { duration: 12000 })
+      }
+
+      setUitnodigEmail(''); setUitnodigNaam(''); setWachtwoord(''); setGekopieerd(false)
+      laad()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Toevoegen mislukt') } finally { setBezig(false) }
+  }
+
+  /** Wachtwoord (opnieuw) instellen voor een bestaand lid. */
+  const zetWachtwoord = async (l: Lid) => {
+    const nieuw = maakWachtwoord()
+    const waarschuwing = l.kan_inloggen
+      ? `
+
+LET OP: dit account wordt al gebruikt. Het oude wachtwoord werkt hierna niet meer.`
+      : ''
+    if (!confirm(`Nieuw wachtwoord instellen voor ${l.email}?${waarschuwing}
+
+Je krijgt het daarna één keer te zien om door te geven.`)) return
+    try {
+      const res = await fetch('/api/kantoor/bedrijven', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actie: 'wachtwoord', lid_id: l.id, wachtwoord: nieuw, bevestigd: true }),
+      })
+      const j = await res.json(); if (!res.ok) throw new Error(j.error)
+      setGezet({ email: l.email, wachtwoord: nieuw })
+      setGekopieerd(false)
+      toast.success('Wachtwoord ingesteld.')
+      laad()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Instellen mislukt') }
+  }
+
+  const kopieer = async (tekst: string) => {
+    try {
+      await navigator.clipboard.writeText(tekst)
+      setGekopieerd(true)
+    } catch { toast.error('Kopiëren lukte niet — selecteer het handmatig.') }
   }
 
   const verwijderBedrijf = async (b: Bedrijf) => {
@@ -148,7 +225,7 @@ Wil je "${b.naam}" nu op non-actief zetten? Dan verdwijnt het uit alle keuzelijs
         </div>
 
         <div className="card-base p-4 space-y-2">
-          <h3 className="text-sm font-semibold">Iemand uitnodigen</h3>
+          <h3 className="text-sm font-semibold">Partner toegang geven</h3>
           <select className="input-base" value={uitnodigenVoor} onChange={(e) => setUitnodigenVoor(e.target.value)}>
             <option value="">Voor welk bedrijf?</option>
             {/* Non-actieve bedrijven horen hier niet: daar mag niemand meer bij. */}
@@ -156,12 +233,58 @@ Wil je "${b.naam}" nu op non-actief zetten? Dan verdwijnt het uit alle keuzelijs
           </select>
           <input className="input-base" type="email" value={uitnodigEmail}
             onChange={(e) => setUitnodigEmail(e.target.value)} placeholder="naam@bedrijf.be" />
+          <input className="input-base" value={uitnodigNaam} maxLength={120}
+            onChange={(e) => setUitnodigNaam(e.target.value)} placeholder="Naam (optioneel)" />
+
+          {/* JIJ kiest het wachtwoord. De oude weg -- een uitnodigingsmail
+              waarmee de partner er zelf een koos -- strandde te vaak: het
+              account werd wel aangemaakt, de mail kwam niet aan, en in dit
+              scherm stond hij dan als "toegevoegd" terwijl hij nergens in kon. */}
+          <div className="flex gap-2">
+            <input className="input-base font-mono text-sm" value={wachtwoord}
+              onChange={(e) => setWachtwoord(e.target.value)} placeholder="Wachtwoord (min. 10 tekens)" />
+            <button type="button" onClick={() => setWachtwoord(maakWachtwoord())}
+              className="btn-secondary text-xs shrink-0" title="Sterk wachtwoord maken">
+              <KeyRound className="h-3.5 w-3.5" />Maak er een
+            </button>
+          </div>
+
+          <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+            <input type="checkbox" className="h-4 w-4 rounded border-gray-300 accent-[#fff848]"
+              checked={stuurMail} onChange={(e) => setStuurMail(e.target.checked)} />
+            Stuur hem een mailtje met de link
+          </label>
           <p className="text-[11px] text-gray-500">
-            Hij krijgt een uitnodiging en kiest <b>zelf</b> een wachtwoord. Wij zien dat nooit.
+            Het wachtwoord staat <b>niet</b> in die mail &mdash; dat geef je zelf door.
+            Bestaat het adres al als account, dan koppelen we het gewoon en blijft
+            zijn eigen wachtwoord staan.
           </p>
+
           <button onClick={nodigUit} disabled={bezig} className="btn-secondary text-sm w-full">
-            <Mail className="h-4 w-4" />Uitnodiging sturen
+            {bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}Toegang geven
           </button>
+
+          {/* Een keer zichtbaar. Daarna staat dit nergens meer -- ook niet bij ons. */}
+          {gezet && (
+            <div className="rounded-xl border border-[#fff848] bg-[#fff848]/15 p-3 space-y-1.5">
+              <div className="text-[11px] uppercase tracking-wide text-gray-600">Geef dit door aan {gezet.email}</div>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 font-mono text-sm bg-white border border-gray-200 rounded-lg px-2 py-1.5 select-all break-all">
+                  {gezet.wachtwoord}
+                </code>
+                <button type="button" onClick={() => kopieer(gezet.wachtwoord)}
+                  className="btn-secondary text-xs shrink-0">
+                  {gekopieerd ? <><Check className="h-3.5 w-3.5" />Gekopieerd</> : <><Copy className="h-3.5 w-3.5" />Kopieer</>}
+                </button>
+              </div>
+              <p className="text-[11px] text-gray-600">
+                Je ziet dit maar een keer. Sluit je dit venster, dan kun je enkel een nieuw wachtwoord instellen.
+              </p>
+              <button type="button" onClick={() => setGezet(null)} className="text-[11px] underline text-gray-500">
+                Klaar, verberg dit
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -210,13 +333,29 @@ Wil je "${b.naam}" nu op non-actief zetten? Dan verdwijnt het uit alle keuzelijs
                 <div className="space-y-1">
                   {eigen.map((l) => (
                     <div key={l.id} className="flex items-center gap-2 text-xs">
-                      {l.actief_account
-                        ? <ShieldCheck className="h-3.5 w-3.5 text-green-600" aria-label="Account actief" />
-                        : <Clock className="h-3.5 w-3.5 text-amber-500" aria-label="Uitnodiging verstuurd" />}
+                      {/* De toestand komt van het ECHTE account, niet van het
+                          bestaan van een rij: een uitnodiging maakte vroeger al
+                          een account aan waar niemand mee kon inloggen. */}
+                      {l.toestand === 'klaar'
+                        ? <ShieldCheck className="h-3.5 w-3.5 text-green-600" aria-label="Kan inloggen" />
+                        : <Clock className="h-3.5 w-3.5 text-amber-500" aria-label="Kan nog niet inloggen" />}
                       <span className="text-gray-700">{l.email}</span>
-                      {!l.actief_account && <span className="text-amber-600">wacht op activatie</span>}
+                      {l.toestand === 'klaar' && (
+                        <span className="text-gray-400">
+                          {l.laatste_login
+                            ? 'laatst ingelogd ' + new Date(l.laatste_login).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' })
+                            : 'kan inloggen'}
+                        </span>
+                      )}
+                      {l.toestand === 'wacht' && <span className="text-amber-600">nog nooit ingelogd &mdash; geef een wachtwoord</span>}
+                      {l.toestand === 'geen' && <span className="text-amber-600">nog geen account</span>}
+                      <button onClick={() => zetWachtwoord(l)}
+                        className="ml-auto h-6 w-6 flex items-center justify-center rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700"
+                        title="Wachtwoord instellen">
+                        <KeyRound className="h-3 w-3" />
+                      </button>
                       <button onClick={() => trekIn(l)}
-                        className="ml-auto h-6 w-6 flex items-center justify-center rounded hover:bg-red-50 text-gray-400 hover:text-red-600"
+                        className="h-6 w-6 flex items-center justify-center rounded hover:bg-red-50 text-gray-400 hover:text-red-600"
                         title="Toegang intrekken">
                         <Trash2 className="h-3 w-3" />
                       </button>

@@ -22,6 +22,26 @@ const tekst = (v: unknown, max: number): string | null => {
 }
 const isEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)
 
+/** Kortste wachtwoord dat we aanvaarden. Korter is geen wachtwoord maar een gok. */
+const MIN_WACHTWOORD = 10
+
+/**
+ * Het auth-account bij een e-mailadres, mét de twee velden die zeggen of het
+ * ooit gebruikt is. Supabase heeft geen "zoek op e-mail", vandaar de lijst.
+ */
+async function zoekAuthGebruiker(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  email: string,
+): Promise<{ id: string; last_sign_in_at?: string | null; email_confirmed_at?: string | null } | null> {
+  try {
+    const { data: lijst } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+    const u = lijst?.users.find((x) => (x.email ?? '').toLowerCase() === email.toLowerCase())
+    return u ? { id: u.id, last_sign_in_at: u.last_sign_in_at, email_confirmed_at: u.email_confirmed_at } : null
+  } catch {
+    return null
+  }
+}
+
 export async function GET() {
   try {
     if (!(await requireAdmin())) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
@@ -36,9 +56,45 @@ export async function GET() {
       }
       throw new Error(error.message)
     }
-    // auth_user_id niet naar de browser: alleen of iemand al actief is.
-    const veiligeLeden = ((leden ?? []) as { id: string; bedrijf_id: string; email: string; naam: string | null; actief: boolean; auth_user_id: string | null; uitgenodigd_op: string | null }[])
-      .map(({ auth_user_id, ...rest }) => ({ ...rest, actief_account: !!auth_user_id }))
+    /**
+     * De ECHTE toestand van elk account erbij zoeken.
+     *
+     * Hier zat de leugen in het scherm: het toonde "actief" zodra er een
+     * auth_user_id stond. Maar een uitnodiging maakt dat account meteen aan —
+     * zónder wachtwoord en onbevestigd. Er stond dus "toegevoegd" bij iemand
+     * die er nooit in geraakte. Nu kijken we naar wat telt: kan deze persoon
+     * inloggen (bevestigd of ooit ingelogd), of niet?
+     */
+    const rijen = ((leden ?? []) as {
+      id: string; bedrijf_id: string; email: string; naam: string | null
+      actief: boolean; auth_user_id: string | null; uitgenodigd_op: string | null
+    }[])
+
+    const perEmail = new Map<string, { bevestigd: boolean; laatsteLogin: string | null }>()
+    try {
+      const { data: lijst } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+      for (const u of lijst?.users ?? []) {
+        if (!u.email) continue
+        perEmail.set(u.email.toLowerCase(), {
+          bevestigd: !!u.email_confirmed_at,
+          laatsteLogin: u.last_sign_in_at ?? null,
+        })
+      }
+    } catch { /* zonder deze lijst tonen we gewoon "onbekend" i.p.v. te falen */ }
+
+    // auth_user_id gaat niet naar de browser; enkel de afgeleide toestand.
+    const veiligeLeden = rijen.map(({ auth_user_id, ...rest }) => {
+      const auth = perEmail.get(rest.email.toLowerCase())
+      const kanInloggen = !!auth && (auth.bevestigd || !!auth.laatsteLogin)
+      return {
+        ...rest,
+        heeft_account: !!auth || !!auth_user_id,
+        kan_inloggen: kanInloggen,
+        laatste_login: auth?.laatsteLogin ?? null,
+        /** 'klaar' = kan inloggen · 'wacht' = account bestaat maar is nooit gebruikt · 'geen' = nog geen account. */
+        toestand: kanInloggen ? 'klaar' : (auth || auth_user_id) ? 'wacht' : 'geen',
+      }
+    })
     return NextResponse.json({ bedrijven: bedrijven ?? [], leden: veiligeLeden })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
@@ -69,24 +125,77 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, id: (data as { id: string }).id })
     }
 
-    // ── Iemand uitnodigen ────────────────────────────────────────────────────
+    /**
+     * ── Iemand toegang geven ─────────────────────────────────────────────────
+     *
+     * WAAROM DIT ANDERS WERKT DAN VOORHEEN. De oude weg was een Supabase-invite:
+     * die maakt het account meteen aan (zonder wachtwoord, onbevestigd) en
+     * stuurt een mail via de mailer van Supabase — niet via onze eigen Resend.
+     * Kwam die mail niet aan, dan stond de partner er in ons scherm als
+     * "toegevoegd" terwijl hij nergens in kon. Precies wat er gebeurde.
+     *
+     * Nu kiezen WIJ een wachtwoord en is het account meteen bruikbaar. Geen
+     * mail die moet aankomen, geen link die kan verlopen: je geeft het
+     * wachtwoord door zoals jij wil, en de partner logt gewoon in.
+     *
+     * Twee gevallen bij een adres dat AL een account heeft:
+     *  · nog nooit ingelogd (bv. een oude, mislukte uitnodiging) → we mogen er
+     *    veilig een wachtwoord op zetten;
+     *  · wél eerder ingelogd → we raken dat wachtwoord NIET aan. Die persoon
+     *    heeft een lopend account; we koppelen enkel het bedrijf erbij.
+     */
     if (b.actie === 'uitnodigen') {
       const bedrijfId = String(b.bedrijf_id ?? '')
       const email = String(b.email ?? '').trim().toLowerCase()
+      const wachtwoord = String(b.wachtwoord ?? '')
       if (!bedrijfId) return NextResponse.json({ error: 'Kies een bedrijf.' }, { status: 400 })
       if (!isEmail(email)) return NextResponse.json({ error: 'Dat is geen geldig e-mailadres.' }, { status: 400 })
+      if (wachtwoord && wachtwoord.length < MIN_WACHTWOORD) {
+        return NextResponse.json({ error: `Een wachtwoord van minstens ${MIN_WACHTWOORD} tekens, graag.` }, { status: 400 })
+      }
 
       const { data: bedrijf } = await admin.from('kantoor_bedrijven')
         .select('id, naam').eq('id', bedrijfId).maybeSingle()
       if (!bedrijf) return NextResponse.json({ error: 'Dat bedrijf bestaat niet.' }, { status: 400 })
+      const bedrijfNaam = (bedrijf as { naam: string }).naam
 
-      // Bestaat het account al? Dan meteen koppelen; anders komt de koppeling
-      // tot stand zodra deze persoon voor het eerst inlogt (zie lib/kantoor/auth.ts).
-      let authUserId: string | null = null
-      try {
-        const { data: lijst } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
-        authUserId = lijst?.users.find((u) => (u.email ?? '').toLowerCase() === email)?.id ?? null
-      } catch { /* niet kritiek */ }
+      const bestaand = await zoekAuthGebruiker(admin, email)
+      const heeftGebruikt = !!bestaand && (!!bestaand.last_sign_in_at || !!bestaand.email_confirmed_at)
+
+      let authUserId = bestaand?.id ?? null
+      let wachtwoordGezet = false
+
+      if (!bestaand) {
+        // Nieuw account. Zonder wachtwoord heeft dit geen zin: dat is exact de
+        // situatie waarin iemand "toegevoegd" leek maar niet binnen geraakte.
+        if (!wachtwoord) {
+          return NextResponse.json({
+            error: 'Kies een wachtwoord voor deze partner — anders bestaat het account wel, maar kan er niemand mee inloggen.',
+            wachtwoordNodig: true,
+          }, { status: 400 })
+        }
+        const { data: gemaakt, error: maakErr } = await admin.auth.admin.createUser({
+          email,
+          password: wachtwoord,
+          // Meteen bevestigd: er komt geen bevestigingsmail aan te pas, dus
+          // wachten op een klik zou het account eeuwig onbruikbaar houden.
+          email_confirm: true,
+          user_metadata: { name: tekst(b.naam, 120) ?? undefined },
+        })
+        if (maakErr || !gemaakt?.user) {
+          return NextResponse.json({ error: `Account aanmaken mislukt: ${maakErr?.message ?? 'onbekend'}` }, { status: 400 })
+        }
+        authUserId = gemaakt.user.id
+        wachtwoordGezet = true
+      } else if (wachtwoord && !heeftGebruikt) {
+        // Slapend account uit een eerdere, mislukte uitnodiging: veilig om er
+        // alsnog een wachtwoord op te zetten.
+        const { error: zetErr } = await admin.auth.admin.updateUserById(bestaand.id, {
+          password: wachtwoord, email_confirm: true,
+        })
+        if (zetErr) return NextResponse.json({ error: `Wachtwoord instellen mislukt: ${zetErr.message}` }, { status: 400 })
+        wachtwoordGezet = true
+      }
 
       const { error } = await admin.from('kantoor_leden').insert({
         bedrijf_id: bedrijfId, email, naam: tekst(b.naam, 120),
@@ -100,42 +209,100 @@ export async function POST(req: NextRequest) {
       }
 
       /**
-       * Uitnodiging versturen. Bestaat het account nog niet, dan stuurt
-       * Supabase een invite waarmee de partner ZELF een wachtwoord kiest.
-       * Bestaat het al, dan volstaat een mail met de link.
+       * Een berichtje via ONZE mailer (Resend) — dezelfde weg als alle andere
+       * mail in de app, dus die komt aan. Het WACHTWOORD staat er bewust niet
+       * in: dat geef je zelf door, per telefoon of bericht. Standaard sturen we
+       * niets; enkel als je het vinkje aanzet.
        */
-      let mailStatus = 'verstuurd'
-      const link = `${baseUrl()}/kantoor`
-      if (!authUserId) {
-        try {
-          const { error: invErr } = await admin.auth.admin.inviteUserByEmail(email, { redirectTo: link })
-          if (invErr) mailStatus = `uitnodiging mislukt: ${invErr.message}`
-        } catch (e) {
-          mailStatus = `uitnodiging mislukt: ${e instanceof Error ? e.message : 'onbekend'}`
-        }
-      } else {
+      let mailStatus: string | null = null
+      if (b.stuurMail) {
+        const link = `${baseUrl()}/kantoor`
         const res = await sendEmail({
           to: email,
-          subject: `Je bent toegevoegd aan het Kantoor van ${(bedrijf as { naam: string }).naam}`,
+          subject: `Je hebt toegang tot het Kantoor van ${bedrijfNaam}`,
           text: [
-            `Je hebt nu toegang tot het Kantoor namens ${(bedrijf as { naam: string }).naam}.`,
+            `Je hebt nu toegang tot het Kantoor namens ${bedrijfNaam}.`,
             '',
             'Daar zie je de opdrachten die we aan elkaar doorgeven en wat je eraan verdient.',
             '',
             link,
+            '',
+            heeftGebruikt
+              ? 'Je logt in met je bestaande e-mailadres en wachtwoord.'
+              : 'Het wachtwoord krijg je apart van ons doorgestuurd.',
           ].join('\n'),
         })
-        if (!res.ok) mailStatus = `mail mislukt: ${res.error}`
+        mailStatus = res.ok ? 'verstuurd' : `mail mislukt: ${res.error}`
       }
 
       const meta = requestMeta(req)
       await logAudit({
         action: 'kantoor.lid.invite', entityType: 'kantoor_bedrijf', entityId: bedrijfId,
-        summary: `Kantoor: ${email} uitgenodigd voor ${(bedrijf as { naam: string }).naam}`,
+        // Het wachtwoord zelf komt hier NOOIT in — enkel dát er één gezet is.
+        summary: `Kantoor: ${email} toegang gegeven tot ${bedrijfNaam}${wachtwoordGezet ? ' (wachtwoord ingesteld)' : ''}`,
         actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'admin',
         ip: meta.ip, userAgent: meta.userAgent,
       })
-      return NextResponse.json({ ok: true, mailStatus })
+      return NextResponse.json({
+        ok: true, mailStatus, wachtwoordGezet,
+        bestaandAccount: heeftGebruikt,
+      })
+    }
+
+    /**
+     * ── Wachtwoord (opnieuw) instellen ───────────────────────────────────────
+     *
+     * Voor wie zijn wachtwoord kwijt is, of voor een lid dat nog uit de oude
+     * uitnodigingsflow komt. Bij een account dat AL gebruikt wordt, vragen we
+     * eerst een uitdrukkelijke bevestiging: dan zet je iemand buiten tot je hem
+     * het nieuwe wachtwoord bezorgt.
+     */
+    if (b.actie === 'wachtwoord') {
+      const lidId = String(b.lid_id ?? '')
+      const wachtwoord = String(b.wachtwoord ?? '')
+      if (!lidId) return NextResponse.json({ error: 'Kies eerst een lid.' }, { status: 400 })
+      if (wachtwoord.length < MIN_WACHTWOORD) {
+        return NextResponse.json({ error: `Een wachtwoord van minstens ${MIN_WACHTWOORD} tekens, graag.` }, { status: 400 })
+      }
+
+      const { data: lid } = await admin.from('kantoor_leden')
+        .select('id, email, auth_user_id').eq('id', lidId).maybeSingle()
+      if (!lid) return NextResponse.json({ error: 'Dit lid bestaat niet (meer).' }, { status: 404 })
+      const l = lid as { id: string; email: string; auth_user_id: string | null }
+
+      const bestaand = await zoekAuthGebruiker(admin, l.email)
+      const heeftGebruikt = !!bestaand && (!!bestaand.last_sign_in_at || !!bestaand.email_confirmed_at)
+      if (heeftGebruikt && !b.bevestigd) {
+        return NextResponse.json({
+          error: 'Dit account is al in gebruik. Een nieuw wachtwoord sluit deze persoon buiten tot je het doorgeeft — bevestig als je dat wil.',
+          bevestigingNodig: true,
+        }, { status: 409 })
+      }
+
+      if (bestaand) {
+        const { error: zetErr } = await admin.auth.admin.updateUserById(bestaand.id, {
+          password: wachtwoord, email_confirm: true,
+        })
+        if (zetErr) return NextResponse.json({ error: `Wachtwoord instellen mislukt: ${zetErr.message}` }, { status: 400 })
+        if (!l.auth_user_id) await admin.from('kantoor_leden').update({ auth_user_id: bestaand.id }).eq('id', l.id)
+      } else {
+        const { data: gemaakt, error: maakErr } = await admin.auth.admin.createUser({
+          email: l.email, password: wachtwoord, email_confirm: true,
+        })
+        if (maakErr || !gemaakt?.user) {
+          return NextResponse.json({ error: `Account aanmaken mislukt: ${maakErr?.message ?? 'onbekend'}` }, { status: 400 })
+        }
+        await admin.from('kantoor_leden').update({ auth_user_id: gemaakt.user.id }).eq('id', l.id)
+      }
+
+      const meta = requestMeta(req)
+      await logAudit({
+        action: 'kantoor.lid.wachtwoord', entityType: 'kantoor_lid', entityId: l.id,
+        summary: `Kantoor: wachtwoord ingesteld voor ${l.email}`,
+        actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'admin',
+        ip: meta.ip, userAgent: meta.userAgent,
+      })
+      return NextResponse.json({ ok: true })
     }
 
     return NextResponse.json({ error: 'Onbekende actie.' }, { status: 400 })

@@ -31,5 +31,28 @@ export default async function Home() {
   if (role === 'client') redirect('/portal')
   if (role === 'freelancer') redirect('/partner')
 
+  /**
+   * Kantoorpartners hebben GEEN rol in user_roles — hun toegang blijkt uit een
+   * actieve rij in kantoor_leden. Zonder deze tak viel zo iemand hieronder door
+   * naar /login, terwijl hij net correct was ingelogd: een lus waar je met het
+   * juiste wachtwoord niet uit kwam. Precies daarom leek "toevoegen" te werken
+   * maar kon de partner er nooit in.
+   *
+   * Koppelen kan nog op e-mailadres staan: de rij wordt aangemaakt vóór het
+   * account bestaat, dus auth_user_id is dan nog leeg (resolveKantoorSessie
+   * legt die koppeling bij het eerste bezoek).
+   */
+  const lidFilter = user.email
+    ? `auth_user_id.eq.${user.id},email.eq.${user.email}`
+    : `auth_user_id.eq.${user.id}`
+  const { data: kantoorLid } = await admin
+    .from('kantoor_leden')
+    .select('id')
+    .or(lidFilter)
+    .eq('actief', true)
+    .limit(1)
+    .maybeSingle()
+  if (kantoorLid) redirect('/kantoor')
+
   redirect('/login')
 }
