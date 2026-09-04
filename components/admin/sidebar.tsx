@@ -50,13 +50,9 @@ const SECTIONS: NavSection[] = [
           { label: 'Website',      href: '/admin/services/website',      icon: Globe },
         ],
       },
-      {
-        label: 'Metricool', href: '/admin/metricool', icon: CalendarClock, module: 'metricool',
-        children: [
-          { label: 'Kalender',     href: '/admin/metricool',       icon: CalendarClock, exact: true },
-          { label: 'Statistieken', href: '/admin/metricool/stats', icon: BarChart3 },
-        ],
-      },
+      // Enkel de kalender: de statistieken zijn eruit (Metricool zelf toont ze
+      // beter en actueler dan wij ze konden nabouwen).
+      { label: 'Metricool', href: '/admin/metricool', icon: CalendarClock, module: 'metricool', exact: true },
       {
         label: 'Blogs', href: '/admin/blog-calendar', icon: Newspaper, module: 'blogs',
         children: [

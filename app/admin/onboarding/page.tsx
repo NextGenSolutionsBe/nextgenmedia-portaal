@@ -263,8 +263,8 @@ export default async function OnboardingInfoPage({
           <h2 className="font-semibold mb-1">Rechtstreeks naartoe</h2>
           <div className="text-xs text-gray-400 mb-3">Wat je tijdens dit gesprek nodig hebt</div>
           <div className="flex flex-wrap gap-2">
-            <Link href="/admin/metricool/stats" className="text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 hover:bg-gray-50 inline-flex items-center gap-2">
-              <BarChart3 className="h-4 w-4 text-gray-400" />Metricool-statistieken
+            <Link href="/admin/metricool" className="text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 hover:bg-gray-50 inline-flex items-center gap-2">
+              <BarChart3 className="h-4 w-4 text-gray-400" />Metricool-kalender
             </Link>
             <Link href="/admin/uploads" className="text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 hover:bg-gray-50 inline-flex items-center gap-2">
               <FolderUp className="h-4 w-4 text-gray-400" />Klantuploads
