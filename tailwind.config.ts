@@ -19,7 +19,18 @@ const config: Config = {
         brand: '#fff848',
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
+        // LET OP — de fallback staat BINNEN var(), en dat is bewust.
+        // Bij `var(--font-sans)` zonder fallback wordt de HELE font-family-regel
+        // ongeldig zodra die variabele ontbreekt (bv. als het lettertype bij de
+        // build niet opgehaald kon worden). De browser valt dan terug op zijn
+        // eigen standaard — een serif, oftewel Times New Roman. Met een fallback
+        // binnen var() blijft de regel altijd geldig en zakken we netjes door
+        // naar de systeemletters. Een serif kan zo nooit meer verschijnen.
+        sans: [
+          'var(--font-sans, ui-sans-serif)',
+          'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto',
+          'Helvetica Neue', 'Arial', 'sans-serif',
+        ],
       },
       borderRadius: {
         lg: '0.625rem',

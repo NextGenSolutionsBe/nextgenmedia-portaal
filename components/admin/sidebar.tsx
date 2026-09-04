@@ -5,75 +5,147 @@ import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import {
-  LayoutDashboard,
-  Users,
-  FileText,
-  UserSquare2,
-  ArrowLeftRight,
-  TrendingUp,
-  LogOut,
-  ChevronDown,
-  Globe,
-  Calendar,
-  Briefcase,
-  RefreshCcw,
+  LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
+  LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
+  Info, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, UserCog, CalendarClock, BarChart3, KanbanSquare,
+  MailCheck, PhoneCall, Stamp, FolderUp, Handshake,
 } from 'lucide-react'
-import { useState, useTransition } from 'react'
+import { canSeeModule } from '@/lib/staff'
+import { DISABLED_MODULE_KEYS } from '@/lib/features'
+import { useEffect, useState } from 'react'
+import { useRefresh } from '@/lib/use-refresh'
+import { Logo } from '@/components/logo'
 
-const NAV = [
+type NavChild = { label: string; href: string; icon: React.ElementType; exact?: boolean }
+type NavEntry = {
+  label: string
+  href: string
+  icon: React.ElementType
+  exact?: boolean
+  module?: string
+  adminOnly?: boolean
+  children?: NavChild[]
+  /** Sleutel uit /api/admin/badges: toont een rood telbolletje. */
+  badge?: string
+}
+type NavSection = { title?: string; items: NavEntry[] }
+
+// Gegroepeerd per thema zodat de zijbalk overzichtelijk blijft. Volgorde binnen
+// een sectie = werkvolgorde. Gating (module/adminOnly) blijft per item behouden.
+const SECTIONS: NavSection[] = [
   {
-    label: 'Command Center',
-    href: '/admin',
-    icon: LayoutDashboard,
-    exact: true,
-  },
-  {
-    label: 'Klanten',
-    href: '/admin/clients',
-    icon: Users,
-  },
-  {
-    label: 'Contracten',
-    href: '/admin/contracts',
-    icon: FileText,
-  },
-  {
-    label: 'Diensten',
-    href: '/admin/services',
-    icon: Briefcase,
-    children: [
-      { label: 'Social Media', href: '/admin/services/social-media', icon: Calendar },
-      { label: 'Website', href: '/admin/services/website', icon: Globe },
+    items: [
+      { label: 'Command Center', href: '/admin', icon: LayoutDashboard, exact: true },
     ],
   },
   {
-    label: 'Partners',
-    href: '/admin/partners',
-    icon: UserSquare2,
+    title: 'Klanten & content',
+    items: [
+      { label: 'Klanten',    href: '/admin/clients',   icon: Users, module: 'clients' },
+      { label: 'Contracten', href: '/admin/contracts', icon: FileText, module: 'contracts' },
+      {
+        label: 'Diensten', href: '/admin/services', icon: Briefcase, module: 'content',
+        children: [
+          { label: 'Social Media', href: '/admin/services/social-media', icon: Calendar },
+          { label: 'Website',      href: '/admin/services/website',      icon: Globe },
+        ],
+      },
+      // Enkel de kalender: de statistieken zijn eruit (Metricool zelf toont ze
+      // beter en actueler dan wij ze konden nabouwen).
+      { label: 'Metricool', href: '/admin/metricool', icon: CalendarClock, module: 'metricool', exact: true },
+      {
+        label: 'Blogs', href: '/admin/blog-calendar', icon: Newspaper, module: 'blogs',
+        children: [
+          { label: 'Projecten', href: '/admin/blogaccounts',  icon: Newspaper },
+          { label: 'Kalender',  href: '/admin/blog-calendar', icon: CalendarDays },
+        ],
+      },
+      // Eigen ingang, geen tabblad onder Social Media: materiaal komt binnen
+      // los van de kalender en je wil in één lijst zien wat er nieuw is.
+      { label: 'Klantuploads', href: '/admin/uploads', icon: FolderUp, module: 'uploads' },
+      // Werk dat binnenkomt en opgevolgd moet worden. Bewust hier en niet bij
+      // Partners: dat zijn freelance-opdrachten, dit gaat over onze eigen
+      // klantklussen. De badge telt wat te laat is.
+      { label: 'Opdrachten', href: '/admin/opdrachten', icon: ClipboardList, module: 'opdrachten', badge: 'opdrachten' },
+    ],
   },
   {
-    label: 'Opdrachten',
-    href: '/admin/assignments',
-    icon: Briefcase,
+    title: 'Kantoor',
+    items: [
+      // Samenwerking tussen onze eigen bedrijven en externe partners.
+      { label: 'Kantoor', href: '/admin/kantoor', icon: Handshake, module: 'kantoor' },
+    ],
   },
   {
-    label: 'Settlements',
-    href: '/admin/settlements',
-    icon: ArrowLeftRight,
+    title: 'Partners',
+    items: [
+      { label: 'Partners',    href: '/admin/partners',    icon: UserSquare2, module: 'partners' },
+      { label: 'Opdrachten',  href: '/admin/assignments', icon: Briefcase, module: 'assignments' },
+      { label: 'Settlements', href: '/admin/settlements', icon: ArrowLeftRight, module: 'settlements' },
+    ],
   },
   {
-    label: 'Omzet',
-    href: '/admin/revenue',
-    icon: TrendingUp,
+    title: 'Verkoop',
+    items: [
+      { label: 'Appointment setting', href: '/admin/sales/appointments', icon: CalendarClock, module: 'sales' },
+      { label: 'Pipeline',            href: '/admin/sales/pipeline',     icon: KanbanSquare, module: 'sales' },
+      { label: 'Belscripts',          href: '/admin/sales/scripts',      icon: FileText,     module: 'sales' },
+      { label: 'Bevestigingen',       href: '/admin/sales/herinneringen', icon: PhoneCall,   module: 'sales' },
+      { label: 'Resultaten',          href: '/admin/sales/resultaten',   icon: BarChart3,    module: 'sales' },
+      // Apart van Resultaten: dat gaat over geld, dit over conversie.
+      { label: 'Statistieken',        href: '/admin/sales/statistieken', icon: TrendingUp,   module: 'sales' },
+    ],
+  },
+  {
+    title: 'Aanbestedingen',
+    items: [
+      { label: 'Aanbestedingen', href: '/admin/aanbestedingen', icon: Stamp, module: 'aanbestedingen' },
+    ],
+  },
+  {
+    title: 'Financieel',
+    items: [
+      { label: 'Financiën', href: '/admin/revenue/omzet', icon: TrendingUp, module: 'finance' },
+      { label: 'Facturen', href: '/admin/invoices',      icon: Receipt, module: 'invoices' },
+      { label: 'Vesting',  href: '/admin/vesting',       icon: Rocket, module: 'vesting' },
+      { label: 'Aankopen', href: '/admin/purchases',     icon: ShoppingCart, module: 'purchases' },
+    ],
+  },
+  {
+    title: 'Overig',
+    items: [
+      { label: 'E-mailcenter', href: '/admin/email', icon: Mail, module: 'email' },
+      {
+        label: 'Informatief', href: '/admin/informatief', icon: Info, module: 'info',
+        children: [
+          { label: 'Onboarding Info', href: '/admin/onboarding',   icon: ClipboardList },
+          { label: 'Maandplanning',   href: '/admin/maandplanning', icon: CalendarDays },
+        ],
+      },
+    ],
+  },
+  {
+    title: 'Beheer',
+    items: [
+      { label: 'Werknemers', href: '/admin/werknemers', icon: UserCog, adminOnly: true },
+    ],
   },
 ]
 
-function NavItem({ item, depth = 0 }: { item: typeof NAV[0]; depth?: number }) {
+function NavItem({
+  item,
+  onNavigate,
+  badge = 0,
+}: {
+  item: NavEntry
+  onNavigate: () => void
+  /** Aantal voor het rode bolletje; 0 = niets tonen. */
+  badge?: number
+}) {
   const pathname = usePathname()
   const [open, setOpen] = useState(() =>
     item.children?.some((c) => pathname.startsWith(c.href)) || pathname.startsWith(item.href)
   )
-
   const isActive = item.exact ? pathname === item.href : pathname.startsWith(item.href)
   const Icon = item.icon
 
@@ -82,10 +154,7 @@ function NavItem({ item, depth = 0 }: { item: typeof NAV[0]; depth?: number }) {
       <div>
         <button
           onClick={() => setOpen(!open)}
-          className={cn(
-            'sidebar-item w-full justify-between',
-            isActive && 'active'
-          )}
+          className={cn('sidebar-item w-full justify-between', isActive && 'active')}
         >
           <span className="flex items-center gap-3">
             <Icon className="h-4 w-4 shrink-0" />
@@ -99,10 +168,9 @@ function NavItem({ item, depth = 0 }: { item: typeof NAV[0]; depth?: number }) {
               <Link
                 key={child.href}
                 href={child.href}
-                className={cn(
-                  'sidebar-item text-xs',
-                  pathname.startsWith(child.href) && 'active'
-                )}
+                prefetch={false}
+                onClick={onNavigate}
+                className={cn('sidebar-item text-xs', (child.exact ? pathname === child.href : pathname.startsWith(child.href)) && 'active')}
               >
                 <child.icon className="h-3.5 w-3.5 shrink-0" />
                 {child.label}
@@ -115,69 +183,185 @@ function NavItem({ item, depth = 0 }: { item: typeof NAV[0]; depth?: number }) {
   }
 
   return (
+    // prefetch={false} — ZONDER dit haalde de browser bij elke adminpagina
+    // ALLE 34 menu-items vooruit op. Elke adminpagina is force-dynamic en er is
+    // geen loading.tsx, dus zo'n vooruitgehaalde pagina wordt VOLLEDIG op de
+    // server gerenderd, mét al zijn databasequery's. Eén keer inloggen zette
+    // daardoor ~25 volledige paginarenders tegelijk in gang — genoeg om op het
+    // gratis Supabase-plan de middleware te laten vastlopen (MIDDLEWARE_-
+    // INVOCATION_TIMEOUT, en dan is de hele app onbereikbaar).
     <Link
       href={item.href}
+      prefetch={false}
+      onClick={onNavigate}
       className={cn('sidebar-item', isActive && 'active')}
     >
       <Icon className="h-4 w-4 shrink-0" />
-      {item.label}
+      <span className="flex-1">{item.label}</span>
+      {/* Rood telbolletje: iets is te laat en vraagt aandacht. */}
+      {badge > 0 && (
+        <span
+          title={`${badge} ${badge === 1 ? 'opdracht is' : 'opdrachten zijn'} te laat`}
+          className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
     </Link>
   )
 }
 
-export function AdminSidebar() {
+export function AdminSidebar({ allowedModules, isEmployee = false, naam, email }: {
+  allowedModules?: string[]
+  isEmployee?: boolean
+  /** Voornaam van wie er ingelogd is — voor de begroeting bovenaan. */
+  naam?: string
+  /** Het e-mailadres eronder: het harde antwoord op "welk account is dit?". */
+  email?: string
+} = {}) {
   const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  const { refresh, spinning } = useRefresh()
+  const [mobileOpen, setMobileOpen] = useState(false)
+  // Telbolletjes. Los van de rest opgehaald: haperen ze, dan staat het menu er
+  // gewoon zonder — een bolletje is nooit de reden om navigatie op te houden.
+  const [badges, setBadges] = useState<Record<string, number>>({})
+  useEffect(() => {
+    let levend = true
+    fetch('/api/admin/badges')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (levend && j) setBadges(j) })
+      .catch(() => { /* stil */ })
+    return () => { levend = false }
+  }, [])
+
+  // Werknemer ziet enkel toegestane modules; admin (allowedModules undefined) ziet alles.
+  const canSee = (item: NavEntry) => {
+    // Uitgeschakelde features (lib/features.ts) tonen we voor niemand — ook niet
+    // voor admin; de middleware blokkeert die paden sowieso.
+    if (item.module && DISABLED_MODULE_KEYS.includes(item.module)) return false
+    if (item.adminOnly && isEmployee) return false
+    if (!item.module || !allowedModules) return true
+    return canSeeModule(allowedModules, item.module)
+  }
+  const visibleSections = SECTIONS
+    .map((s) => ({ title: s.title, items: s.items.filter(canSee) }))
+    .filter((s) => s.items.length > 0)
 
   const handleLogout = async () => {
     const supabase = createClient()
+    // Ook de verificatie-cookie wissen, zodat opnieuw inloggen weer een code vraagt.
+    try { await fetch('/api/auth/2fa/logout', { method: 'POST' }) } catch { }
     await supabase.auth.signOut()
     router.replace('/login')
   }
 
-  const handleRefresh = () => {
-    startTransition(() => { router.refresh() })
-  }
+  const closeMobile = () => setMobileOpen(false)
 
   return (
-    <aside className="fixed left-0 top-0 h-screen w-[var(--sidebar-width)] bg-white border-r border-gray-200 flex flex-col z-30">
-      {/* Logo + refresh */}
-      <div className="px-4 py-5 border-b border-gray-100">
-        <div className="flex items-center gap-3">
-          <div className="h-8 w-8 rounded-lg bg-[#fff848] flex items-center justify-center shrink-0">
-            <span className="font-bold text-black text-xs">NG</span>
+    <>
+      {/* ── Mobile hamburger button ── */}
+      <button
+        className="md:hidden fixed top-3 left-3 z-50 h-10 w-10 flex items-center justify-center rounded-xl bg-white border border-gray-200 shadow-sm"
+        onClick={() => setMobileOpen(true)}
+        aria-label="Menu openen"
+      >
+        <Menu className="h-5 w-5" />
+      </button>
+
+      {/* ── Backdrop ── */}
+      {mobileOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/40 backdrop-blur-sm z-40"
+          onClick={closeMobile}
+        />
+      )}
+
+      {/* ── Sidebar panel ── */}
+      <aside
+        className={cn(
+          'fixed left-0 top-0 h-screen w-[var(--sidebar-width)] bg-white border-r border-gray-200 flex flex-col z-40',
+          'transition-transform duration-300 ease-in-out',
+          'md:translate-x-0',
+          mobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full',
+        )}
+      >
+        {/* Logo + close */}
+        <div className="px-4 py-5 border-b border-gray-100">
+          <div className="flex items-center gap-3">
+            <Logo className="h-8 w-8 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-bold text-black leading-tight">NextGenMedia</div>
+              <div className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">Admin</div>
+            </div>
+            {/* Refresh */}
+            <button
+              onClick={refresh}
+              disabled={spinning}
+              title="Pagina vernieuwen"
+              className="h-7 w-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+            >
+              <RefreshCcw className={cn('h-3.5 w-3.5', spinning && 'animate-spin')} />
+            </button>
+            {/* Close (mobile) */}
+            <button
+              onClick={closeMobile}
+              className="md:hidden h-7 w-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100"
+              aria-label="Menu sluiten"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-bold text-black leading-tight">NextGenMedia</div>
-            <div className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">Admin</div>
+        </div>
+
+        {/* WIE ZIT HIER?
+            Op een gedeelde laptop, of met twee accounts naast elkaar, wil je in
+            één oogopslag zien namens wie je werkt — zeker bij het bellen, waar
+            een lead aan de verkeerde setter toegewezen raakt als je het
+            misgokt. Daarom de voornaam groot en het e-mailadres eronder: de
+            naam voor het gemak, het adres als het harde antwoord. */}
+        {(naam || email) && (
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2.5">
+            <div className="h-8 w-8 shrink-0 rounded-full bg-[#fff848] text-black flex items-center justify-center text-sm font-bold">
+              {(naam || email || '?').charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-gray-900 leading-tight truncate">
+                {naam ? `Welkom, ${naam}` : 'Welkom'}
+              </div>
+              {email && <div className="text-[10px] text-gray-400 truncate" title={email}>{email}</div>}
+            </div>
           </div>
+        )}
+
+        {/* Navigation */}
+        <nav className="flex-1 px-3 py-4 overflow-y-auto">
+          {visibleSections.map((section, si) => (
+            <div key={section.title ?? `sec-${si}`} className={si > 0 ? 'mt-4' : ''}>
+              {section.title && (
+                <div className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                  {section.title}
+                </div>
+              )}
+              <div className="space-y-0.5">
+                {section.items.map((item) => (
+                  <NavItem key={item.href} item={item} onNavigate={closeMobile}
+                    badge={item.badge ? (badges[item.badge] ?? 0) : 0} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </nav>
+
+        {/* Logout */}
+        <div className="px-3 py-4 border-t border-gray-100">
           <button
-            onClick={handleRefresh}
-            title="Pagina vernieuwen"
-            className="h-7 w-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+            onClick={handleLogout}
+            className="sidebar-item w-full text-red-500 hover:text-red-600 hover:bg-red-50"
           >
-            <RefreshCcw className={cn('h-3.5 w-3.5', isPending && 'animate-spin')} />
+            <LogOut className="h-4 w-4 shrink-0" />
+            Uitloggen
           </button>
         </div>
-      </div>
-
-      {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        {NAV.map((item) => (
-          <NavItem key={item.href} item={item} />
-        ))}
-      </nav>
-
-      {/* Logout */}
-      <div className="px-3 py-4 border-t border-gray-100">
-        <button
-          onClick={handleLogout}
-          className="sidebar-item w-full text-red-500 hover:text-red-600 hover:bg-red-50"
-        >
-          <LogOut className="h-4 w-4 shrink-0" />
-          Uitloggen
-        </button>
-      </div>
-    </aside>
+      </aside>
+    </>
   )
 }

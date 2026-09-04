@@ -1,63 +1,52 @@
-import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
-import { redirect } from 'next/navigation'
+import { createAdminSupabaseClient, trySignedUrl } from '@/lib/supabase/server'
 import { formatDate } from '@/lib/utils'
 import Link from 'next/link'
-import { FileText, CheckCircle2, Download, Eye, ExternalLink, Clock } from 'lucide-react'
+import { FileText, CheckCircle2, Download, Eye, Clock } from 'lucide-react'
+import { canonicalStatus, statusInfo } from '@/lib/contract-status'
+import { requirePortalView, canAccessContract } from '@/lib/portal-auth'
 
 export const dynamic = 'force-dynamic'
 
 export default async function PortalContractsPage() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
-
-  const { data: client } = await supabase
-    .from('clients').select('id').eq('owner_user_id', user.id).maybeSingle()
-  if (!client) redirect('/portal')
+  const session = await requirePortalView('contracts')
+  // Alle contracten op deze pagina horen bij session.clientId; rechten centraal via canAccessContract.
+  const canSign = canAccessContract(session, { client_id: session.clientId }, 'sign')
+  const canDownload = canAccessContract(session, { client_id: session.clientId }, 'download')
 
   const admin = createAdminSupabaseClient()
 
-  const { data: contractsRaw } = await admin
+  // Use select('*') so missing columns (e.g. signed_pdf_path before migration) never
+  // cause a silent PostgREST error that returns null data.
+  const { data: contractsRaw, error: fetchErr } = await admin
     .from('contracts')
-    .select('id, title, status, signed_at, sent_at, created_at, access_token, pdf_path, signed_pdf_path')
-    .eq('client_id', client.id)
+    .select('*')
+    .eq('client_id', session.clientId)
     .order('created_at', { ascending: false })
+
+  if (fetchErr) {
+    console.error('[portal/contracts] fetch error:', fetchErr.message)
+  }
 
   const contracts = await Promise.all(
     (contractsRaw ?? []).map(async (c) => {
-      // Signed PDF (with signature embedded)
-      let signedPdfUrl: string | null = null
-      if (c.signed_pdf_path) {
-        const { data } = await admin.storage
-          .from('contracts')
-          .createSignedUrl(c.signed_pdf_path, 3600)
-        signedPdfUrl = data?.signedUrl ?? null
-      }
-      // Original PDF (for viewing before/after signing)
-      let originalPdfUrl: string | null = null
-      if (c.pdf_path) {
-        const { data } = await admin.storage
-          .from('contracts')
-          .createSignedUrl(c.pdf_path, 3600)
-        originalPdfUrl = data?.signedUrl ?? null
-      }
+      // Both signed and original URLs in parallel
+      const [signedPdfUrl, originalPdfUrl] = await Promise.all([
+        // Try stored path, then conventional fallback
+        (async () => {
+          const url = await trySignedUrl(admin, 'contracts', c.signed_pdf_path, 3600 * 24)
+          if (url) return url
+          return trySignedUrl(admin, 'contracts', `signed/${c.id}.pdf`, 3600 * 24)
+        })(),
+        trySignedUrl(admin, 'contracts', c.pdf_path, 3600),
+      ])
       return { ...c, signedPdfUrl, originalPdfUrl }
     })
   )
 
-  const pendingContracts = contracts.filter((c) => ['sent', 'viewed'].includes(c.status))
-  const signedContracts = contracts.filter((c) => c.status === 'signed')
-  const otherContracts = contracts.filter((c) => !['sent', 'viewed', 'signed'].includes(c.status))
-
-  const STATUS_MAP: Record<string, { cls: string; label: string }> = {
-    draft:      { cls: 'bg-gray-100 text-gray-500',    label: 'Concept' },
-    sent:       { cls: 'bg-amber-100 text-amber-700',  label: 'Wacht op handtekening' },
-    viewed:     { cls: 'bg-amber-100 text-amber-700',  label: 'Bekeken' },
-    signed:     { cls: 'bg-green-100 text-green-700',  label: 'Getekend' },
-    expired:    { cls: 'bg-red-100 text-red-700',      label: 'Verlopen' },
-    cancelled:  { cls: 'bg-gray-100 text-gray-400',    label: 'Geannuleerd' },
-    vervangen:  { cls: 'bg-orange-100 text-orange-700', label: 'Vervangen' },
-  }
+  // Contracts waiting for signature — include verzonden/geopend; exclude klaar_voor_verzenden (not yet sent to client)
+  const pendingContracts = contracts.filter((c) => ['verzonden', 'geopend', 'ingevuld'].includes(canonicalStatus(c.status)))
+  const signedContracts = contracts.filter((c) => canonicalStatus(c.status) === 'getekend')
+  const otherContracts = contracts.filter((c) => !['verzonden', 'geopend', 'ingevuld', 'getekend'].includes(canonicalStatus(c.status)))
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -85,7 +74,7 @@ export default async function PortalContractsPage() {
                 {pendingContracts.map((c) => (
                   <div
                     key={c.id}
-                    className="flex items-center justify-between gap-4 p-4 rounded-xl border-2 border-[#fff848] bg-[#fff848]/5"
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl border-2 border-[#fff848] bg-[#fff848]/5"
                   >
                     <div className="flex items-center gap-4 min-w-0">
                       <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0 bg-amber-100">
@@ -104,19 +93,21 @@ export default async function PortalContractsPage() {
                           href={c.originalPdfUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="btn-secondary text-xs"
+                          className="btn-secondary text-xs flex-1 sm:flex-none justify-center"
                           title="Bekijk contract"
                         >
                           <Eye className="h-3.5 w-3.5" />
                           Bekijken
                         </a>
                       )}
-                      <Link
-                        href={`/sign/${c.access_token}`}
-                        className="btn-primary text-xs"
-                      >
-                        ✍️ Ondertekenen
-                      </Link>
+                      {canSign && (
+                        <Link
+                          href={`/sign/${c.access_token}`}
+                          className="btn-primary text-xs flex-1 sm:flex-none justify-center"
+                        >
+                          ✍️ Ondertekenen
+                        </Link>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -162,7 +153,7 @@ export default async function PortalContractsPage() {
                             Bekijken
                           </a>
                         )}
-                        {c.signedPdfUrl && (
+                        {c.signedPdfUrl && canDownload && (
                           <a
                             href={c.signedPdfUrl}
                             download
@@ -186,7 +177,7 @@ export default async function PortalContractsPage() {
               <h2 className="text-sm font-semibold text-gray-500 mb-2">Overige</h2>
               <div className="space-y-2">
                 {otherContracts.map((c) => {
-                  const style = STATUS_MAP[c.status] ?? STATUS_MAP.draft
+                  const style = statusInfo(c.status)
                   return (
                     <div
                       key={c.id}

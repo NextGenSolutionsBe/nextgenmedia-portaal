@@ -1,13 +1,19 @@
+import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
+import { createClient, createAdminSupabaseClient , isActiveStaff } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { randomUUID } from 'crypto'
+import { logContractEvent } from '@/lib/contract-audit'
+
+// Gebruikt cookies/sessie: nooit statisch renderen.
+export const dynamic = 'force-dynamic'
 
 async function requireAdmin() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
   const { data } = await supabase.from('user_roles').select('role').eq('user_id', user.id).maybeSingle()
-  return data?.role === 'admin' ? user : null
+  return data?.role === 'admin' || (await isActiveStaff(user.id)) ? user : null
 }
 
 // PATCH — update contract status (send / cancel)
@@ -18,9 +24,56 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!user) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
 
     const admin = createAdminSupabaseClient()
-    const { action } = await req.json()
+    const body = await req.json()
+    const { action } = body
 
-    if (action === 'send') {
+    if (action === 'regenerate_token') {
+      const newToken = randomUUID()
+      const { error } = await admin
+        .from('contracts')
+        .update({ status: 'draft', access_token: newToken })
+        .eq('id', id)
+      if (error) throw new Error(error.message)
+      await logContractEvent(admin, id, 'token_regenerated', { actor: user.email ?? user.id })
+      try {
+        revalidatePath('/admin/contracts'); revalidatePath(`/admin/contracts/${id}`)
+      } catch { }
+      return NextResponse.json({ ok: true, access_token: newToken })
+    } else if (action === 'set_expiry') {
+      // expires_at: 'YYYY-MM-DD' of null om te wissen.
+      const expires_at = body.expires_at ? String(body.expires_at).slice(0, 10) : null
+      // Veerkrachtig: kolom kan ontbreken vóór migratie.
+      let err: { message: string } | null = null
+      {
+        const { error } = await admin.from('contracts').update({ expires_at }).eq('id', id)
+        err = error
+      }
+      if (err) {
+        const col = String(err.message || '').match(/Could not find the '([^']+)' column/)?.[1]
+        if (col !== 'expires_at') throw new Error(err.message)
+        return NextResponse.json({ error: 'Vervaldatum vereist een database-migratie (expires_at).' }, { status: 400 })
+      }
+      try { revalidatePath(`/admin/contracts/${id}`) } catch { }
+      return NextResponse.json({ ok: true, expires_at })
+    } else if (action === 'invoice_settings') {
+      // Facturatie-instellingen op het contract (verwacht aantal / frequentie / bedrag).
+      const patch: Record<string, unknown> = {
+        expected_invoice_count: body.expected_invoice_count != null && body.expected_invoice_count !== '' ? Math.max(0, parseInt(String(body.expected_invoice_count), 10) || 0) : null,
+        invoice_frequency: body.invoice_frequency || null,
+        expected_invoice_amount_excl: body.expected_invoice_amount_excl != null && body.expected_invoice_amount_excl !== '' ? Number(body.expected_invoice_amount_excl) : null,
+      }
+      // Veerkrachtig: laat ontbrekende kolommen vallen vóór migratie.
+      const p = { ...patch }
+      for (let i = 0; i < 4; i++) {
+        const { error } = await admin.from('contracts').update(p).eq('id', id)
+        if (!error) break
+        const col = String(error.message || '').match(/Could not find the '([^']+)' column/)?.[1]
+        if (col && col in p) { delete p[col]; continue }
+        throw new Error(error.message)
+      }
+      try { revalidatePath(`/admin/contracts/${id}`) } catch { }
+      return NextResponse.json({ ok: true })
+    } else if (action === 'send') {
       const { error } = await admin
         .from('contracts')
         .update({ status: 'sent', sent_at: new Date().toISOString() })
@@ -48,7 +101,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     return NextResponse.json({ ok: true })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Fout' }, { status: 400 })
+    return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
 }
 
@@ -103,6 +156,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
     return NextResponse.json({ ok: true })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Fout' }, { status: 400 })
+    return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
 }
