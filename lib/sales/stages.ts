@@ -4,17 +4,27 @@
 export const STAGES = [
   { key: 'to_contact',   label: 'Nog te contacteren', position: 1 },
   { key: 'contacted',    label: 'Gecontacteerd',      position: 2 },
-  { key: 'interested',   label: 'Interesse',          position: 3 },
-  { key: 'not_interested', label: 'Geen interesse',   position: 4 },
-  { key: 'email_todo',   label: 'E-mail versturen',   position: 5 },
-  { key: 'email_sent',   label: 'E-mail verstuurd',   position: 6 },
-  { key: 'appointment',  label: 'Afspraak ingepland', position: 7 },
+  /**
+   * De mailreeks is op, er kwam geen antwoord — nu bellen.
+   *
+   * Harrie (het acquisitiesysteem) zet leads hier neer nadat hij drie of vier
+   * keer vergeefs heeft opgevolgd. Dat is een ANDERE lead dan een koude: hij
+   * kent onze naam al, want er liggen vier mails van ons in zijn postvak. Zo'n
+   * lead hoort dus niet onderaan de koude lijst maar vooraan in de belronde,
+   * en dat doet Focus Mode ook.
+   */
+  { key: 'te_bellen',    label: 'Opbellen',           position: 3 },
+  { key: 'interested',   label: 'Interesse',          position: 4 },
+  { key: 'not_interested', label: 'Geen interesse',   position: 5 },
+  { key: 'email_todo',   label: 'E-mail versturen',   position: 6 },
+  { key: 'email_sent',   label: 'E-mail verstuurd',   position: 7 },
+  { key: 'appointment',  label: 'Afspraak ingepland', position: 8 },
   // Zes keer vergeefs gebeld. Bewust een eigen fase en geen "geen interesse":
   // deze mensen hébben niets gezegd, en dat is iets anders dan nee. Zo blijven
   // ze terugvindbaar voor een latere poging of een mailronde.
-  { key: 'max_pogingen', label: 'Max. belpogingen',   position: 8 },
-  { key: 'won',          label: 'Closed Won',         position: 9, isWon: true },
-  { key: 'lost',         label: 'Closed Lost',        position: 10, isLost: true },
+  { key: 'max_pogingen', label: 'Max. belpogingen',   position: 9 },
+  { key: 'won',          label: 'Closed Won',         position: 10, isWon: true },
+  { key: 'lost',         label: 'Closed Lost',        position: 11, isLost: true },
 ] as const
 
 export type StageKey = (typeof STAGES)[number]['key']

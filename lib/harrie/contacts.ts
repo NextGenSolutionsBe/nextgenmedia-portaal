@@ -70,11 +70,14 @@ type LeadRij = {
   sales_companies: {
     name: string; website: string | null; phone: string | null; email: string | null
     ondernemingsnummer: string | null; updated_at: string | null
+    city: string | null; sector: string | null
   } | null
   sales_contacts: {
     name: string | null; email: string | null; phone: string | null; mobile: string | null
     updated_at: string | null
   } | null
+  callback_at?: string | null
+  do_not_call_reason?: string | null
 }
 
 function uitLead(l: LeadRij, geblokkeerdeFases: string[], naamPerId: Map<string, string>): HarrieContact {
@@ -96,6 +99,15 @@ function uitLead(l: LeadRij, geblokkeerdeFases: string[], naamPerId: Map<string,
     phones: uniek([c?.phone, c?.mobile, b?.phone]),
     website: b?.website ?? null,
     stage: stageLabel(l.stage_key),
+    // De stabiele sleutel erbij: labels mogen we hernoemen, sleutels niet.
+    // Hiermee kan Harrie onze fase spiegelen zonder op tekst te matchen.
+    stageKey: l.stage_key,
+    contactName: c?.name ?? null,
+    city: b?.city ?? null,
+    sector: b?.sector ?? null,
+    callbackAt: l.callback_at ?? null,
+    labels: l.labels ?? [],
+    doNotContactReason: l.do_not_call ? (l.do_not_call_reason ?? 'Bel-me-niet') : null,
     doNotContact: weg ? false : blokkeer({
       stageKey: l.stage_key, doNotCall: l.do_not_call, geblokkeerdeFases,
       vanHarrie: (l.labels ?? []).includes(HARRIE_LABEL),
@@ -160,8 +172,9 @@ export async function haalContacten(opties: {
   // ── 1. De pipeline ─────────────────────────────────────────────────────────
   if (bron === 'lead') {
     let q = admin.from('sales_leads')
-      .select(`id, stage_key, do_not_call, archived_at, updated_at, assigned_to, labels,
-        sales_companies ( name, website, phone, email, ondernemingsnummer, updated_at ),
+      .select(`id, stage_key, do_not_call, do_not_call_reason, archived_at, updated_at,
+        assigned_to, labels, callback_at,
+        sales_companies ( name, website, phone, email, ondernemingsnummer, updated_at, city, sector ),
         sales_contacts  ( name, email, phone, mobile, updated_at )`)
       .order('updated_at', { ascending: true }).order('id', { ascending: true })
       .limit(limiet + 1)
@@ -213,6 +226,8 @@ export async function haalContacten(opties: {
         phones: [],
         website: k.website_url,
         stage: k.archived_at ? 'oud-klant' : 'klant',
+        stageKey: k.archived_at ? 'oud_klant' : 'klant',
+        doNotContactReason: 'Is klant van ons',
         // Ook een oud-klant blijft geblokkeerd: een koude wervingsmail naar
         // iemand die ons kent, leest als "ze weten niet eens wie ik ben".
         doNotContact: true,
@@ -255,6 +270,8 @@ export async function haalContacten(opties: {
         phones: [],
         website: null,
         stage: b.is_eigen ? 'eigen bedrijf' : 'partner',
+        stageKey: b.is_eigen ? 'eigen_bedrijf' : 'partner',
+        doNotContactReason: b.is_eigen ? 'Ons eigen bedrijf' : 'Partner waarmee we samenwerken',
         doNotContact: true,
         owner: null,
         updatedAt: nieuwste([b.created_at]),

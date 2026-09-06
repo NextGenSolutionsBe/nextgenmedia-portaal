@@ -2996,8 +2996,12 @@ CREATE INDEX IF NOT EXISTS harrie_events_lead ON public.harrie_events (lead_id);
 -- prospects van Harrie terechtkomen.
 CREATE TABLE IF NOT EXISTS public.harrie_instellingen (
   id                 boolean PRIMARY KEY DEFAULT true CHECK (id),
+  -- 'to_contact', 'contacted' en 'te_bellen' staan er BEWUST niet in: dat zijn
+  -- de fases waarin Harrie zelf werkt. Zou 'contacted' blokkeren, dan zag hij
+  -- na zijn eigen eerste mail zijn eigen prospect als verboden en annuleerde
+  -- hij zijn eigen opvolgreeks.
   geblokkeerde_fases text[] NOT NULL DEFAULT ARRAY[
-    'contacted','interested','not_interested','email_todo','email_sent',
+    'interested','not_interested','email_todo','email_sent',
     'appointment','max_pogingen','won','lost'
   ],
   pipeline_id        uuid REFERENCES public.sales_pipelines(id) ON DELETE SET NULL,

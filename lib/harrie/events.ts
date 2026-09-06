@@ -201,7 +201,14 @@ export async function verwerkGebeurtenis(body: {
   const lead = huidig as { id: string; stage_key: string; labels: string[] | null; lost_reason: string | null } | null
   if (!lead) return { ok: false, status: 500, fout: 'Lead verdween tijdens het verwerken.' }
 
-  if (gevolg.fase && gevolg.fase !== lead.stage_key) patch.stage_key = gevolg.fase
+  /**
+   * De fase zetten — met één rem. `imported` mag een BESTAANDE lead nooit
+   * terugzetten naar "Nog te contacteren": een prospect die al in gesprek is,
+   * hoort niet terug op de koude lijst omdat Harrie hem opnieuw oplaadt.
+   */
+  const faseMag = gevolg.fase && gevolg.fase !== lead.stage_key
+    && !(gevolg.enkelBijNieuw && !aangemaakt)
+  if (faseMag) patch.stage_key = gevolg.fase
   if (gevolg.reden && !lead.lost_reason) patch.lost_reason = gevolg.reden
 
   if (gevolg.nietMeerBenaderen) {
@@ -218,6 +225,15 @@ export async function verwerkGebeurtenis(body: {
   if (gevolg.belTaak) {
     patch.callback_at = new Date().toISOString()
     patch.callback_note = (detail ? `Harrie: ${detail}` : 'Reageerde op de koude benadering — bellen').slice(0, 300)
+  }
+
+  /**
+   * Net gebeld? Dan het terugbelmoment weghalen, anders blijft de lead vooraan
+   * in de belrij staan en belt de volgende setter hem vanmiddag opnieuw.
+   */
+  if (gevolg.belTaakWissen) {
+    patch.callback_at = null
+    patch.callback_note = null
   }
 
   // Labels: het Harrie-label zodat je de herkomst ziet, plus wat de

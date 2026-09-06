@@ -24,8 +24,26 @@ export type HarrieContact = {
   website: string | null
   /** Vrije tekst, enkel ter informatie. Harrie toont dit, beslist er niets mee. */
   stage: string
+  /**
+   * De STABIELE sleutel van diezelfde fase ('to_contact', 'te_bellen', …).
+   *
+   * Staat niet in het oorspronkelijke contract en is dus optioneel, maar wie de
+   * pipeline wil SPIEGELEN heeft hem nodig: labels mogen we morgen hernoemen,
+   * sleutels niet. Harrie leest hiermee onze fase en toont die in zijn eigen
+   * scherm zonder op tekst te moeten matchen.
+   */
+  stageKey?: string
   doNotContact: boolean
+  /** Waarom er niet benaderd mag worden — enkel gevuld als we het weten. */
+  doNotContactReason?: string | null
   owner: string | null
+  /** Naam van de contactpersoon, zodat Harrie niet "Beste heer/mevrouw" schrijft. */
+  contactName?: string | null
+  city?: string | null
+  sector?: string | null
+  /** Staat er bij ons een terugbelmoment gepland? */
+  callbackAt?: string | null
+  labels?: string[]
   updatedAt: string
   /** Weg uit de pipeline: Harrie mag deze partij weer vrijgeven. */
   deleted?: boolean
@@ -103,11 +121,24 @@ export function uniek(waarden: (string | null | undefined)[]): string[] {
 
 // ── Wat Harrie meldt, en wat wij daarmee doen ────────────────────────────────
 
-/** De gebeurtenissen uit het contract. Onbekende types weigeren we. */
+/**
+ * De gebeurtenissen die Harrie kan melden. Onbekende types weigeren we met een
+ * 400 — beter een duidelijke fout dan een melding die stil verdwijnt.
+ *
+ * De eerste rij staat in het oorspronkelijke contract. De tweede rij is er
+ * bijgekomen omdat Harrie niet alleen meldt maar ook WERKT in deze pipeline:
+ * hij laadt prospects op, volgt ze een aantal keer op, en geeft ze daarna aan
+ * ons door om te bellen.
+ */
 export const HARRIE_TYPES = [
   'sent', 'linkedin_request', 'linkedin_message', 'replied',
   'booked', 'booking_moved', 'booking_cancelled',
   'declined', 'unsubscribed', 'bounced', 'lost', 'manual_reply',
+  // Uitbreidingen voor de tweerichtingswerking:
+  'imported',       // prospect opgeladen (bv. uit het KBO) — nog niet benaderd
+  'followup_sent',  // zoveelste opvolgmail; telt mee, verandert de fase niet
+  'needs_call',     // reeks op, geen antwoord → nu opbellen
+  'called',         // Harrie meldt dat er gebeld is (uitkomst in `detail`)
 ] as const
 export type HarrieType = (typeof HARRIE_TYPES)[number]
 
@@ -117,6 +148,10 @@ export const isHarrieType = (v: unknown): v is HarrieType =>
 export type Gevolg = {
   /** Onze fase waar de lead naartoe gaat; null = fase ongemoeid laten. */
   fase: string | null
+  /** Fase alleen zetten bij een NIEUWE lead — nooit een bestaande terugzetten. */
+  enkelBijNieuw?: boolean
+  /** Terugbelmoment weghalen: deze is net gebeld. */
+  belTaakWissen?: boolean
   /** Nooit meer benaderen (bel-me-niet). */
   nietMeerBenaderen?: boolean
   /** Een beltaak voor de eigenaar: de lead springt vooraan in de belrij. */
@@ -187,6 +222,50 @@ export function gevolgVan(type: HarrieType, detail?: string | null): Gevolg {
       }
     case 'manual_reply':
       return { fase: null, omschrijving: `Harrie: handmatig antwoord${tekst ? ` · ${tekst}` : ''}` }
+
+    /**
+     * Opgeladen, nog niet benaderd. Deze landt op "Nog te contacteren" — zodat
+     * hij in ONZE belijst verschijnt en Marco hem gewoon kan bellen, ook al
+     * heeft Harrie er nog niets mee gedaan. Bestaat de lead al, dan laten we
+     * de fase met rust: een prospect die al verder staat, mag niet door een
+     * import terugvallen.
+     */
+    case 'imported':
+      return {
+        fase: 'to_contact', enkelBijNieuw: true,
+        omschrijving: `Harrie: prospect opgeladen${tekst ? ` · ${tekst}` : ''}`,
+      }
+
+    /**
+     * Opvolgmail. Verandert de fase NIET — die staat al op "Gecontacteerd" —
+     * maar komt wel op de tijdlijn, zodat een setter voor het bellen ziet
+     * hoeveel mails er al uit zijn en wat erin stond.
+     */
+    case 'followup_sent':
+      return { fase: null, omschrijving: `Harrie: opvolgmail verstuurd${tekst ? ` · ${tekst}` : ''}` }
+
+    /**
+     * De mailreeks is op zonder antwoord. Nu is bellen aan de beurt: deze lead
+     * hoort vooraan in de belronde, want hij kent onze naam al uit vier mails.
+     */
+    case 'needs_call':
+      return {
+        fase: 'te_bellen', belTaak: true,
+        omschrijving: `Harrie: mailreeks zonder antwoord — nu opbellen${tekst ? ` · ${tekst}` : ''}`,
+      }
+
+    /**
+     * Er is gebeld, maar wat kwam eruit? Dat weet alleen de beller. De uitkomst
+     * zetten we daarom NIET automatisch — die komt met een eigen gebeurtenis
+     * (`replied`, `booked`, `declined`). Hier leggen we enkel vast dát er
+     * gebeld is, en halen we de lead uit de belrij zodat niemand hem
+     * vanmiddag nog eens belt.
+     */
+    case 'called':
+      return {
+        fase: 'contacted', belTaakWissen: true,
+        omschrijving: `Harrie: gebeld${tekst ? ` · ${tekst}` : ''}`,
+      }
   }
 }
 

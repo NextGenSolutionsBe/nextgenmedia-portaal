@@ -60,6 +60,8 @@ export function bouwWachtrij<L extends QueueLead>(
   const vervallen: { lead: L; om: number }[] = []
   const gepland: { lead: L; om: number }[] = []
   const gewoon: L[] = []
+  /** Leads die al een mailreeks gehad hebben: die bel je eerst. */
+  const opgewarmd: L[] = []
   let overgeslagen = 0
 
   for (const l of leads) {
@@ -68,6 +70,10 @@ export function bouwWachtrij<L extends QueueLead>(
     if (Number.isFinite(om)) {
       if (om <= nu) vervallen.push({ lead: l, om })
       else gepland.push({ lead: l, om })
+    } else if (l.stage_key === 'te_bellen') {
+      // Mailreeks gehad, geen antwoord: deze kent onze naam al. Warmer dan een
+      // koude lead, dus vóór de gewone lijst — zie hieronder.
+      opgewarmd.push(l)
     } else {
       gewoon.push(l)
     }
@@ -77,8 +83,16 @@ export function bouwWachtrij<L extends QueueLead>(
   vervallen.sort((a, b) => a.om - b.om)
   gepland.sort((a, b) => a.om - b.om)
 
+  /**
+   * De volgorde van de belronde, van warm naar koud:
+   *
+   *  1. VERVALLEN TERUGBELAFSPRAKEN — iemand vroeg zelf om dit uur.
+   *  2. OPBELLEN — Harrie mailde ze een paar keer zonder antwoord. Ze kennen
+   *     onze naam; dat gesprek begint heel anders dan een koude bel.
+   *  3. DE REST — de koude lijst, in de volgorde van het bord.
+   */
   return {
-    nu: [...vervallen.map((x) => x.lead), ...gewoon],
+    nu: [...vervallen.map((x) => x.lead), ...opgewarmd, ...gewoon],
     later: gepland.map((x) => x.lead),
     overgeslagen,
   }
