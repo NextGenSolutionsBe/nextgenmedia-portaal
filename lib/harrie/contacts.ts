@@ -2,8 +2,8 @@ import 'server-only'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { stageLabel } from '@/lib/sales/stages'
 import {
-  blokkeer, domeinVanEmail, domeinVanWebsite, normaliseerKbo, schoonEmail, uniek,
-  HARRIE_LABEL, type HarrieContact,
+  domeinVanEmail, domeinVanWebsite, normaliseerKbo, schoonEmail, uniek,
+  type HarrieContact,
 } from '@/lib/harrie/model'
 
 /**
@@ -11,7 +11,8 @@ import {
  *
  * Drie bronnen, want ze staan alle drie ergens anders in deze app:
  *
- *  1. SALES_LEADS — de pipeline. Per fase instelbaar of die blokkeert.
+ *  1. SALES_LEADS — de VOLLEDIGE pipeline, elke fase, ook Closed Won. Harrie
+ *                   ziet de status en beslist zelf wat hij ermee doet.
  *  2. CLIENTS     — onze échte klanten. ALTIJD geblokkeerd, ook als ze nooit
  *                   in de pipeline gestaan hebben. Dit is de belangrijkste van
  *                   de drie: een koude wervingsmail naar een klant is het
@@ -30,16 +31,12 @@ export type ContactPagina = {
   nextCursor: string | null
 }
 
-/** Instellingen: welke fases blokkeren, en waar nieuwe prospects landen. */
-export async function harrieInstellingen(): Promise<{ geblokkeerdeFases: string[]; pipelineId: string | null }> {
+/** De enige instelling die overblijft: waar landen nieuwe prospects van Harrie? */
+export async function harrieInstellingen(): Promise<{ pipelineId: string | null }> {
   const admin = createAdminSupabaseClient()
   const { data } = await admin.from('harrie_instellingen')
-    .select('geblokkeerde_fases, pipeline_id').eq('id', true).maybeSingle()
-  const rij = data as { geblokkeerde_fases: string[] | null; pipeline_id: string | null } | null
-  return {
-    geblokkeerdeFases: rij?.geblokkeerde_fases ?? [],
-    pipelineId: rij?.pipeline_id ?? null,
-  }
+    .select('pipeline_id').eq('id', true).maybeSingle()
+  return { pipelineId: (data as { pipeline_id: string | null } | null)?.pipeline_id ?? null }
 }
 
 /**
@@ -80,7 +77,7 @@ type LeadRij = {
   do_not_call_reason?: string | null
 }
 
-function uitLead(l: LeadRij, geblokkeerdeFases: string[], naamPerId: Map<string, string>): HarrieContact {
+function uitLead(l: LeadRij, naamPerId: Map<string, string>): HarrieContact {
   const b = l.sales_companies
   const c = l.sales_contacts
   const emails = uniek([schoonEmail(c?.email), schoonEmail(b?.email)])
@@ -90,10 +87,12 @@ function uitLead(l: LeadRij, geblokkeerdeFases: string[], naamPerId: Map<string,
   ])
   // Een gearchiveerde lead telt niet meer mee: Harrie mag die weer oppakken.
   const weg = !!l.archived_at
-  const geblokkeerd = weg ? false : blokkeer({
-    stageKey: l.stage_key, doNotCall: l.do_not_call, geblokkeerdeFases,
-    vanHarrie: (l.labels ?? []).includes(HARRIE_LABEL),
-  })
+  /**
+   * Alleen bel-me-niet blokkeert. Verder krijgt Harrie de fase te zien en
+   * beslist hij zelf: een lead op Closed Won is een klant, dat leest hij aan
+   * `stageKey` af zonder dat wij een lijst hoeven bij te houden.
+   */
+  const geblokkeerd = weg ? false : l.do_not_call
   return {
     id: `lead_${l.id}`,
     company: b?.name ?? 'Onbekend bedrijf',
@@ -116,8 +115,7 @@ function uitLead(l: LeadRij, geblokkeerdeFases: string[], naamPerId: Map<string,
     // zijn scherm meteen ziet of het om een klant gaat of om een lopend gesprek
     // — en niet hoeft te gokken waarom iemand er niet doorheen komt.
     doNotContactReason: !geblokkeerd ? null
-      : l.do_not_call ? (l.do_not_call_reason ?? 'Staat op bel-me-niet')
-      : `Staat in de pipeline op: ${stageLabel(l.stage_key)}`,
+      : (l.do_not_call_reason ?? 'Staat op bel-me-niet'),
     owner: l.assigned_to ? (naamPerId.get(l.assigned_to) ?? null) : null,
     // ENKEL de tijd van de lead zelf, niet die van het bedrijf of het contact.
     // Harrie onthoudt de hoogste waarde en vraagt daarmee de volgende keer
@@ -159,7 +157,6 @@ export async function haalContacten(opties: {
 }): Promise<ContactPagina> {
   const admin = createAdminSupabaseClient()
   const limiet = Math.min(Math.max(opties.limit || 200, 1), PAGINA_MAX)
-  const { geblokkeerdeFases } = await harrieInstellingen()
   const sinds = opties.updatedSince
   const cursor = leesCursor(opties.cursor)
 
@@ -191,7 +188,7 @@ export async function haalContacten(opties: {
     if (error) throw new Error(error.message)
     const rijen = (data ?? []) as unknown as LeadRij[]
     const meer = rijen.length > limiet
-    for (const l of rijen.slice(0, limiet)) items.push(uitLead(l, geblokkeerdeFases, naamPerId))
+    for (const l of rijen.slice(0, limiet)) items.push(uitLead(l, naamPerId))
 
     if (meer) {
       const laatste = rijen[limiet - 1]

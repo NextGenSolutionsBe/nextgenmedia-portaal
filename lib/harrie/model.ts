@@ -8,9 +8,14 @@
  * pipeline weet wie er NIET benaderd mag worden — klanten, mensen in gesprek,
  * wie al nee zei, wie op bel-me-niet staat. Die kennis geven we hier door.
  *
- * De enige beslissende waarde is `doNotContact`. Harrie kent onze fasenamen
- * niet en hoeft ze niet te kennen; die mogen morgen veranderen zonder dat er
- * aan de andere kant iets stukgaat.
+ * WAT WIJ WEL EN NIET BESLISSEN. Harrie krijgt de VOLLEDIGE pipeline te zien,
+ * elke fase, ook Closed Won. Hij beslist zelf wat hij ermee doet — een bedrijf
+ * dat bij ons klant is, hoeft hij niet eens op te laden. Wij sturen dus geen
+ * blokkeerlijst mee en houden hier geen opvolgadministratie bij: hoeveel mails
+ * er al uit zijn en wie wanneer gebeld moet worden, weet Harrie zelf.
+ *
+ * `doNotContact` blijft bestaan voor de twee gevallen die geen oordeel vragen:
+ * iemand die op bel-me-niet staat, en onze eigen klanten en partners.
  */
 
 /** Wat er per partij naar Harrie gaat. Vorm ligt vast in het contract. */
@@ -25,7 +30,7 @@ export type HarrieContact = {
   /** Vrije tekst, enkel ter informatie. Harrie toont dit, beslist er niets mee. */
   stage: string
   /**
-   * De STABIELE sleutel van diezelfde fase ('to_contact', 'te_bellen', …).
+   * De STABIELE sleutel van diezelfde fase ('to_contact', 'won', …).
    *
    * Staat niet in het oorspronkelijke contract en is dus optioneel, maar wie de
    * pipeline wil SPIEGELEN heeft hem nodig: labels mogen we morgen hernoemen,
@@ -122,23 +127,21 @@ export function uniek(waarden: (string | null | undefined)[]): string[] {
 // ── Wat Harrie meldt, en wat wij daarmee doen ────────────────────────────────
 
 /**
- * De gebeurtenissen die Harrie kan melden. Onbekende types weigeren we met een
- * 400 — beter een duidelijke fout dan een melding die stil verdwijnt.
+ * De gebeurtenissen die Harrie kan melden — het contract, plus `imported`.
  *
- * De eerste rij staat in het oorspronkelijke contract. De tweede rij is er
- * bijgekomen omdat Harrie niet alleen meldt maar ook WERKT in deze pipeline:
- * hij laadt prospects op, volgt ze een aantal keer op, en geeft ze daarna aan
- * ons door om te bellen.
+ * Die ene toevoeging is er omdat Harrie zelf prospects opzoekt (KBO, LinkedIn)
+ * en die in onze pipeline moet kunnen zetten, zodat hij bij een volgende
+ * ophaling ziet dat ze er al staan en niets dubbel oplaadt.
+ *
+ * Wat hier BEWUST niet staat: opvolgmails tellen, "moet gebeld worden"
+ * bijhouden, gebelde gesprekken loggen. Dat is Harrie's eigen administratie.
+ * Wij bewaren alleen waar een lead in ONZE pipeline staat.
  */
 export const HARRIE_TYPES = [
+  'imported',
   'sent', 'linkedin_request', 'linkedin_message', 'replied',
   'booked', 'booking_moved', 'booking_cancelled',
   'declined', 'unsubscribed', 'bounced', 'lost', 'manual_reply',
-  // Uitbreidingen voor de tweerichtingswerking:
-  'imported',       // prospect opgeladen (bv. uit het KBO) — nog niet benaderd
-  'followup_sent',  // zoveelste opvolgmail; telt mee, verandert de fase niet
-  'needs_call',     // reeks op, geen antwoord → nu opbellen
-  'called',         // Harrie meldt dat er gebeld is (uitkomst in `detail`)
 ] as const
 export type HarrieType = (typeof HARRIE_TYPES)[number]
 
@@ -150,12 +153,8 @@ export type Gevolg = {
   fase: string | null
   /** Fase alleen zetten bij een NIEUWE lead — nooit een bestaande terugzetten. */
   enkelBijNieuw?: boolean
-  /** Terugbelmoment weghalen: deze is net gebeld. */
-  belTaakWissen?: boolean
   /** Nooit meer benaderen (bel-me-niet). */
   nietMeerBenaderen?: boolean
-  /** Een beltaak voor de eigenaar: de lead springt vooraan in de belrij. */
-  belTaak?: boolean
   /** Reden bij een verloren lead — onze pipeline eist die. */
   reden?: string
   /** Label dat op de lead gezet wordt. */
@@ -167,13 +166,10 @@ export type Gevolg = {
 /**
  * Van Harrie-gebeurtenis naar onze pipeline.
  *
- * Twee keuzes die uitleg verdienen:
+ * Elke gebeurtenis doet één ding: de fase zetten. Geen terugbelafspraken, geen
+ * opvolgtellers — dat blijft in Harrie.
  *
- *  · "replied" zet géén afspraak maar wél een BELTAAK: de lead komt met een
- *    terugbelmoment van nu bovenaan in Focus Mode. Dat is exact wat er moet
- *    gebeuren — iemand reageerde positief, dus bel hem vandaag nog.
- *
- *  · "booked" zet de fase op 'appointment'. Elders in deze app kan die fase
+ * Eén keuze verdient uitleg: "booked" zet de fase op 'appointment'. Elders in deze app kan die fase
  *    alleen ontstaan uit een boeking in ons eigen scherm; hier maken we een
  *    uitzondering, want Harrie's afspraak IS een echte afspraak — hij staat
  *    alleen in zijn agenda in plaats van in de onze. Zonder die uitzondering
@@ -191,8 +187,8 @@ export function gevolgVan(type: HarrieType, detail?: string | null): Gevolg {
       return { fase: 'contacted', omschrijving: 'Harrie: LinkedIn-bericht verstuurd' }
     case 'replied':
       return {
-        fase: 'interested', belTaak: true,
-        omschrijving: `Harrie: prospect reageerde — bellen${tekst ? ` · ${tekst}` : ''}`,
+        fase: 'interested',
+        omschrijving: `Harrie: prospect reageerde${tekst ? ` · ${tekst}` : ''}`,
       }
     case 'booked':
       return { fase: 'appointment', omschrijving: `Harrie: afspraak geboekt${tekst ? ` · ${tekst}` : ''}` }
@@ -235,69 +231,8 @@ export function gevolgVan(type: HarrieType, detail?: string | null): Gevolg {
         fase: 'to_contact', enkelBijNieuw: true,
         omschrijving: `Harrie: prospect opgeladen${tekst ? ` · ${tekst}` : ''}`,
       }
-
-    /**
-     * Opvolgmail. Verandert de fase NIET — die staat al op "Gecontacteerd" —
-     * maar komt wel op de tijdlijn, zodat een setter voor het bellen ziet
-     * hoeveel mails er al uit zijn en wat erin stond.
-     */
-    case 'followup_sent':
-      return { fase: null, omschrijving: `Harrie: opvolgmail verstuurd${tekst ? ` · ${tekst}` : ''}` }
-
-    /**
-     * De mailreeks is op zonder antwoord. Nu is bellen aan de beurt: deze lead
-     * hoort vooraan in de belronde, want hij kent onze naam al uit vier mails.
-     */
-    case 'needs_call':
-      return {
-        fase: 'te_bellen', belTaak: true,
-        omschrijving: `Harrie: mailreeks zonder antwoord — nu opbellen${tekst ? ` · ${tekst}` : ''}`,
-      }
-
-    /**
-     * Er is gebeld, maar wat kwam eruit? Dat weet alleen de beller. De uitkomst
-     * zetten we daarom NIET automatisch — die komt met een eigen gebeurtenis
-     * (`replied`, `booked`, `declined`). Hier leggen we enkel vast dát er
-     * gebeld is, en halen we de lead uit de belrij zodat niemand hem
-     * vanmiddag nog eens belt.
-     */
-    case 'called':
-      return {
-        fase: 'contacted', belTaakWissen: true,
-        omschrijving: `Harrie: gebeld${tekst ? ` · ${tekst}` : ''}`,
-      }
   }
 }
 
 /** Het label waaraan we leads herkennen die uit Harrie zelf komen. */
 export const HARRIE_LABEL = 'Harrie'
-
-/**
- * Mag Harrie deze partij benaderen?
- *
- * Bewust ruim: bel-me-niet weegt altijd zwaarder dan de fase. Bij twijfel
- * blokkeren — een gemiste blokkade is een klant die een koude wervingsmail
- * krijgt, een overbodige blokkade is één prospect minder.
- *
- * EÉN UITZONDERING, en die is essentieel. Zodra Harrie een eerste mail stuurt,
- * meldt hij dat terug en zetten wij de lead op "Gecontacteerd". Staat die fase
- * in de blokkeerlijst — en dat hoort zo, want ónze setter belde hem dan — dan
- * zou Harrie bij de volgende ophaling zijn eigen prospect geblokkeerd zien en
- * zijn eigen opvolgmails annuleren. Eén mail en dan stilte: precies wat een
- * reeks kapotmaakt.
- *
- * Daarom: een lead die Harrie zelf aanbracht blijft vrij zolang hij niet
- * verder staat dan "gecontacteerd". Reageert de prospect, dan gaat hij naar
- * "interesse" en klapt de blokkade wél dicht — vanaf dat moment nemen wij over.
- */
-export function blokkeer(opties: {
-  stageKey: string
-  doNotCall: boolean
-  geblokkeerdeFases: string[]
-  /** Draagt de lead het Harrie-label? */
-  vanHarrie?: boolean
-}): boolean {
-  if (opties.doNotCall) return true
-  if (opties.vanHarrie && opties.stageKey === 'contacted') return false
-  return opties.geblokkeerdeFases.includes(opties.stageKey)
-}

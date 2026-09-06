@@ -2994,16 +2994,11 @@ CREATE INDEX IF NOT EXISTS harrie_events_lead ON public.harrie_events (lead_id);
 
 -- Instellingen: één rij. Welke fases blokkeren, en in welke pipeline nieuwe
 -- prospects van Harrie terechtkomen.
+-- Eén instelling, één rij: waar landen nieuwe prospects van Harrie? Meer valt
+-- er niet in te stellen — Harrie krijgt de volledige pipeline en beslist zelf
+-- wat hij ermee doet.
 CREATE TABLE IF NOT EXISTS public.harrie_instellingen (
   id                 boolean PRIMARY KEY DEFAULT true CHECK (id),
-  -- 'to_contact', 'contacted' en 'te_bellen' staan er BEWUST niet in: dat zijn
-  -- de fases waarin Harrie zelf werkt. Zou 'contacted' blokkeren, dan zag hij
-  -- na zijn eigen eerste mail zijn eigen prospect als verboden en annuleerde
-  -- hij zijn eigen opvolgreeks.
-  geblokkeerde_fases text[] NOT NULL DEFAULT ARRAY[
-    'interested','not_interested','email_todo','email_sent',
-    'appointment','max_pogingen','won','lost'
-  ],
   pipeline_id        uuid REFERENCES public.sales_pipelines(id) ON DELETE SET NULL,
   updated_at         timestamptz NOT NULL DEFAULT now()
 );
@@ -3062,3 +3057,6 @@ CREATE TRIGGER trg_bedrijf_raakt_leads AFTER UPDATE ON public.sales_companies
 DROP TRIGGER IF EXISTS trg_contact_raakt_leads ON public.sales_contacts;
 CREATE TRIGGER trg_contact_raakt_leads AFTER UPDATE ON public.sales_contacts
   FOR EACH ROW EXECUTE FUNCTION public.raak_leads_van_contact_aan();
+
+-- De blokkeerlijst is er weer uit: Harrie ziet elke fase en beslist zelf.
+ALTER TABLE public.harrie_instellingen DROP COLUMN IF EXISTS geblokkeerde_fases;

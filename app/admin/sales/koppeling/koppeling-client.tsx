@@ -9,17 +9,15 @@ import {
 /**
  * De koppeling met Harrie, ons acquisitiesysteem.
  *
- * Harrie stuurt koude mails en LinkedIn-berichten. Hij haalt hier op wie hij
- * met rust moet laten en meldt terug wat hij deed. Dit scherm doet drie dingen:
- * een sleutel maken, instellen wélke fases blokkeren, en tonen wat er
- * binnenkwam.
+ * Harrie stuurt koude mails en LinkedIn-berichten. Hij haalt hier de volledige
+ * pipeline op en meldt terug wat hij deed. Dit scherm doet drie dingen: een
+ * sleutel maken, kiezen waar nieuwe prospects landen, en tonen wat er binnenkwam.
  */
 
 type Token = {
   id: string; naam: string; prefix: string; created_at: string
   laatst_gebruikt: string | null; aantal_verzoeken: number; ingetrokken_op: string | null
 }
-type Stage = { key: string; label: string; aantal: number }
 type Pipeline = { id: string; name: string; key: string }
 type Gebeurtenis = {
   id: string; type: string; gebeurd_op: string | null; detail: string | null
@@ -33,11 +31,9 @@ const tijd = (iso: string | null) =>
 export function KoppelingClient({ basisUrl }: { basisUrl: string }) {
   const [laden, setLaden] = useState(true)
   const [tokens, setTokens] = useState<Token[]>([])
-  const [stages, setStages] = useState<Stage[]>([])
   const [pipelines, setPipelines] = useState<Pipeline[]>([])
   const [events, setEvents] = useState<Gebeurtenis[]>([])
-  const [altijd, setAltijd] = useState({ klanten: 0, kantoorbedrijven: 0 })
-  const [geblokkeerd, setGeblokkeerd] = useState<string[]>([])
+  const [omvang, setOmvang] = useState({ leads: 0, klanten: 0, kantoorbedrijven: 0 })
   const [pipelineId, setPipelineId] = useState('')
   const [naam, setNaam] = useState('Harrie')
   const [bezig, setBezig] = useState(false)
@@ -51,11 +47,9 @@ export function KoppelingClient({ basisUrl }: { basisUrl: string }) {
       const r = await fetch('/api/admin/sales/harrie', { cache: 'no-store' })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
       setTokens(j.tokens ?? [])
-      setStages(j.stages ?? [])
       setPipelines(j.pipelines ?? [])
       setEvents(j.events ?? [])
-      setAltijd(j.altijdGeblokkeerd ?? { klanten: 0, kantoorbedrijven: 0 })
-      setGeblokkeerd(j.instellingen?.geblokkeerde_fases ?? [])
+      setOmvang(j.omvang ?? { leads: 0, klanten: 0, kantoorbedrijven: 0 })
       setPipelineId(j.instellingen?.pipeline_id ?? '')
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Laden mislukt') }
     finally { setLaden(false) }
@@ -93,7 +87,7 @@ export function KoppelingClient({ basisUrl }: { basisUrl: string }) {
     try {
       const r = await fetch('/api/admin/sales/harrie', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ actie: 'instellingen', geblokkeerde_fases: geblokkeerd, pipeline_id: pipelineId || null }),
+        body: JSON.stringify({ actie: 'instellingen', pipeline_id: pipelineId || null }),
       })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
       toast.success('Bewaard. Harrie ziet dit bij zijn volgende ophaling.')
@@ -106,16 +100,11 @@ export function KoppelingClient({ basisUrl }: { basisUrl: string }) {
     catch { toast.error('Kopiëren lukte niet — selecteer het handmatig.') }
   }
 
-  const wissel = (key: string) =>
-    setGeblokkeerd((p) => p.includes(key) ? p.filter((x) => x !== key) : [...p, key])
-
   if (laden) {
     return <div className="card-base py-12 text-center text-gray-400"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div>
   }
 
   const actieveTokens = tokens.filter((t) => !t.ingetrokken_op)
-  const geblokkeerdAantal = stages.filter((s) => geblokkeerd.includes(s.key))
-    .reduce((n, s) => n + s.aantal, 0)
 
   return (
     <div className="space-y-4">
@@ -207,42 +196,38 @@ export function KoppelingClient({ basisUrl }: { basisUrl: string }) {
         )}
       </div>
 
-      {/* ── Wie blokkeren we ── */}
+      {/* ── Wat Harrie ziet ── */}
       <div className="card-base space-y-3">
         <div>
-          <h2 className="font-semibold flex items-center gap-2"><ShieldAlert className="h-4 w-4 text-gray-400" />Wie Harrie met rust laat</h2>
+          <h2 className="font-semibold flex items-center gap-2">
+            <ShieldAlert className="h-4 w-4 text-gray-400" />Wat Harrie ziet
+          </h2>
           <p className="text-sm text-gray-500 mt-0.5">
-            Aangevinkte fases worden geblokkeerd: Harrie stuurt die bedrijven geen koude mail
-            of LinkedIn-bericht, en annuleert wat er voor hen klaarstond.
+            De volledige pipeline, elke fase. Harrie leest de status en beslist zelf:
+            een bedrijf dat bij ons op Closed Won staat, laadt hij niet als prospect op.
           </p>
         </div>
 
-        <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
-          <b>Altijd geblokkeerd, ongeacht deze vinkjes:</b> onze {altijd.klanten} klanten,
-          de {altijd.kantoorbedrijven} bedrijven uit het Kantoor, en elke lead met
-          bel-me-niet. Die staan niet in de lijst hieronder omdat er niets aan te kiezen valt.
-        </div>
-
-        <div className="grid sm:grid-cols-2 gap-1.5">
-          {stages.map((s) => (
-            <label key={s.key}
-              className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 cursor-pointer transition-colors ${
-                geblokkeerd.includes(s.key) ? 'border-[#fff848] bg-[#fff848]/10' : 'border-gray-200 hover:border-gray-300'
-              }`}>
-              <input type="checkbox" className="h-4 w-4 rounded border-gray-300 accent-[#fff848]"
-                checked={geblokkeerd.includes(s.key)} onChange={() => wissel(s.key)} />
-              <span className="text-sm flex-1">{s.label}</span>
-              <span className="text-[11px] text-gray-400 tabular-nums">{s.aantal}</span>
-            </label>
-          ))}
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
+            <div className="text-lg font-bold tabular-nums">{omvang.leads}</div>
+            <div className="text-[11px] text-gray-500">leads uit de pipeline</div>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
+            <div className="text-lg font-bold tabular-nums">{omvang.klanten}</div>
+            <div className="text-[11px] text-gray-500">klanten</div>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
+            <div className="text-lg font-bold tabular-nums">{omvang.kantoorbedrijven}</div>
+            <div className="text-[11px] text-gray-500">eigen bedrijven en partners</div>
+          </div>
         </div>
 
         <p className="text-[11px] text-gray-500">
-          Nu geblokkeerd: <b className="tabular-nums">{geblokkeerdAantal}</b> leads
-          {' '}+ {altijd.klanten + altijd.kantoorbedrijven} klanten en bedrijven.
-          {' '}Eén uitzondering die de code zelf bewaakt: een lead die Harrie zélf aanbracht
-          blijft vrij zolang die op &quot;Gecontacteerd&quot; staat — anders zou hij zijn eigen
-          opvolgmails annuleren.
+          Enkel bij <b>bel-me-niet</b> en bij onze klanten en partners zetten we
+          <code className="font-mono mx-1">doNotContact</code>op waar — dat zijn de
+          twee gevallen waar niets aan te beslissen valt. Al de rest komt gewoon
+          mee met zijn fase.
         </p>
 
         <div className="border-t border-gray-100 pt-3">

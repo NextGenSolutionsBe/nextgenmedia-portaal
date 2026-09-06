@@ -32,32 +32,38 @@ niemand iemand die net gemaild is, en mailt Harrie nooit een klant.
 
 ## 2. De fases
 
-| Sleutel | Label | Wat het betekent | Wie werkt eraan |
-|---|---|---|---|
-| `to_contact` | Nog te contacteren | Opgeladen, nog niets mee gedaan | Harrie **en** Marco |
-| `contacted` | Gecontacteerd | Eerste mail of LinkedIn-bericht uit | Harrie (opvolgreeks) |
-| `te_bellen` | **Opbellen** | Reeks op, geen antwoord → nu bellen | Marco |
-| `interested` | Interesse | Prospect reageerde positief | Marco |
-| `not_interested` | Geen interesse | Zei nee | — |
-| `email_todo` / `email_sent` | E-mail versturen / verstuurd | Wij sturen zelf iets | Marco |
-| `appointment` | Afspraak ingepland | Afspraak staat vast | Marco |
-| `max_pogingen` | Max. belpogingen | 6× vergeefs gebeld | — |
-| `won` / `lost` | Closed Won / Lost | Afgerond | — |
+| Sleutel | Label |
+|---|---|
+| `to_contact` | Nog te contacteren |
+| `contacted` | Gecontacteerd |
+| `interested` | Interesse |
+| `not_interested` | Geen interesse |
+| `email_todo` / `email_sent` | E-mail versturen / verstuurd |
+| `appointment` | Afspraak ingepland |
+| `max_pogingen` | Max. belpogingen |
+| `won` / `lost` | Closed Won / Lost |
 
 `stage` in de API is het **label** (vrije tekst, mag veranderen); `stageKey` is
 de **sleutel** (stabiel). Match op `stageKey`.
 
+Harrie krijgt **elke** fase te zien, ook Closed Won. Dat is met opzet: staat een
+bedrijf bij ons op Closed Won, dan is het een klant en hoeft Harrie het niet
+eens als prospect op te laden. Wij houden dus geen blokkeerlijst bij — Harrie
+leest de status en beslist zelf.
+
 ### De normale gang van zaken
 
 ```
-  imported        →  to_contact    Harrie laadt een KBO-prospect op
-  sent            →  contacted     eerste koude mail          ← Marco belt niet meer
-  followup_sent   →  (blijft)      opvolgmail 2, 3, 4
-  needs_call      →  te_bellen     geen antwoord → Marco belt ← vooraan in Focus Mode
-  called          →  contacted     gebeld, uitkomst volgt apart
-  replied         →  interested    prospect reageerde         ← Harrie stopt met mailen
-  booked          →  appointment   afspraak vast
+  imported   →  to_contact     Harrie laadt een KBO-prospect op
+  sent       →  contacted      eerste koude mail of LinkedIn-bericht
+  replied    →  interested     prospect reageerde
+  booked     →  appointment    afspraak vast
+  declined   →  not_interested gebeld of gemaild, geen interesse
 ```
+
+Wat Harrie ZELF bijhoudt en niet naar ons stuurt: hoeveel opvolgmails er al uit
+zijn, wanneer de volgende moet, en welke prospects er in zijn eigen bellijst
+staan. Onze pipeline bewaart alleen wáár een lead staat.
 
 ---
 
@@ -109,9 +115,6 @@ Alles wat in onze pipeline staat, plus onze klanten en partners.
 }
 ```
 
-**`doNotContact` is beslissend.** `true` = niet benaderen, en wat klaarstond
-annuleren. `false` = vrij. De rest is informatie.
-
 **`id`** is stabiel en draagt een voorvoegsel per bron: `lead_…` (pipeline),
 `client_…` (onze klanten), `kantoor_…` (eigen bedrijven en partners).
 
@@ -123,29 +126,16 @@ contactpersoon. Neem de hoogste waarde uit het antwoord en gebruik die als
 **Verwijderd of gearchiveerd** komt mee met `"deleted": true` en
 `doNotContact: false` — die partij is weer vrij.
 
-### Wie altijd geblokkeerd is
+### `doNotContact`
 
-Ongeacht de instellingen:
+Staat enkel op `true` in de twee gevallen waar niets te beslissen valt:
 
-- **onze klanten** (`client_…`), ook oud-klanten. Zij staan lang niet allemaal
-  in de pipeline; dit is de belangrijkste blokkade van de drie.
-- **onze eigen bedrijven en partners** (`kantoor_…`).
-- **elke lead met bel-me-niet.**
+- een lead met **bel-me-niet** (`do_not_call` in onze app);
+- **onze klanten en partners** (`client_…` en `kantoor_…`) — die zijn geen
+  prospect.
 
-Welke *fases* blokkeren, staat in het scherm *Verkoop → Koppeling*. Standaard:
-`interested`, `not_interested`, `email_todo`, `email_sent`, `appointment`,
-`max_pogingen`, `won`, `lost`.
-
-`to_contact`, `contacted` en `te_bellen` blokkeren **niet** — dat zijn de fases
-waarin Harrie werkt.
-
-### Eén uitzondering, en waarom
-
-Zou `contacted` ooit toch blokkeren, dan zag Harrie na zijn eigen eerste mail
-zijn eigen prospect als verboden en annuleerde hij zijn eigen opvolgreeks: één
-mail en dan stilte. De app bewaakt dat — een lead met het label `Harrie` blijft
-vrij zolang hij niet verder staat dan `contacted`. Vanaf `interested` klapt de
-blokkade wél dicht: dan nemen wij over.
+Alle andere partijen komen mee met `doNotContact: false` en hun echte
+`stageKey`. Wat Harrie daarmee doet, bepaalt hij zelf.
 
 ---
 
@@ -182,16 +172,15 @@ Eén gebeurtenis per verzoek.
 | `imported` | `to_contact` | Alleen bij een **nieuwe** lead; een bestaande valt nooit terug. |
 | `sent` | `contacted` | |
 | `linkedin_request` / `linkedin_message` | `contacted` | |
-| `followup_sent` | *ongewijzigd* | Komt op de tijdlijn, zodat de setter ziet hoeveel mails er al uit zijn. |
-| `needs_call` | `te_bellen` | Zet een terugbelmoment op **nu** → vooraan in Focus Mode. |
-| `called` | `contacted` | Haalt het terugbelmoment weg. Zet géén uitkomst — die komt met een eigen gebeurtenis. |
-| `replied` | `interested` | Terugbelmoment op nu, met de tekst van de prospect erbij. |
+| `replied` | `interested` | |
 | `booked` / `booking_moved` | `appointment` | Moment in `detail`. |
 | `booking_cancelled` | `interested` | |
 | `declined` / `lost` | `not_interested` | Reden uit `detail`. |
 | `unsubscribed` | *ongewijzigd* | Zet bel-me-niet — blijvend geblokkeerd. |
 | `bounced` | *ongewijzigd* | Label "e-mail ongeldig". Het adres blijft staan. |
-| `manual_reply` | *ongewijzigd* | Enkel een notitie. |
+| `manual_reply` | *ongewijzigd* | Enkel een notitie op de tijdlijn. |
+
+Elke gebeurtenis komt ook als regel op de tijdlijn van de lead.
 
 ### Antwoorden
 
@@ -238,8 +227,8 @@ hadden, nemen we over.
 ## 7. Wat je in de app ziet
 
 *Verkoop → Koppeling*: de sleutels (met laatste gebruik en aantal verzoeken),
-welke fases blokkeren met het aantal leads per fase, in welke pipeline nieuwe
-prospects landen, en de laatste dertig gebeurtenissen die Harrie meldde.
+hoeveel er via de koppeling te zien is, in welke pipeline nieuwe prospects
+landen, en de laatste dertig gebeurtenissen die Harrie meldde.
 
 Elke gebeurtenis komt ook op de **tijdlijn van de lead zelf**, zichtbaar in het
 detailpaneel van de pipeline. Een setter ziet dus vóór hij belt hoeveel mails er

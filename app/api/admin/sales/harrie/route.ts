@@ -2,7 +2,6 @@ import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireAdmin } from '@/lib/supabase/server'
 import { maakToken } from '@/lib/harrie/auth'
-import { STAGES } from '@/lib/sales/stages'
 import { listPipelines } from '@/lib/sales/pipelines'
 import { logAudit, requestMeta } from '@/lib/audit'
 
@@ -22,37 +21,28 @@ export async function GET() {
       admin.from('harrie_tokens')
         .select('id, naam, prefix, created_at, laatst_gebruikt, aantal_verzoeken, ingetrokken_op')
         .order('created_at', { ascending: false }),
-      admin.from('harrie_instellingen').select('geblokkeerde_fases, pipeline_id').eq('id', true).maybeSingle(),
+      admin.from('harrie_instellingen').select('pipeline_id').eq('id', true).maybeSingle(),
       admin.from('harrie_events')
         .select('id, type, gebeurd_op, detail, resultaat, created_at, lead_id, prospect')
         .order('created_at', { ascending: false }).limit(30),
       listPipelines(),
     ])
 
-    /**
-     * Hoeveel leads staan er per fase? Zonder die getallen is de keuze "welke
-     * fase blokkeert" een gok: je ziet niet dat je met één vinkje 3.000
-     * prospects afsluit of juist vrijgeeft.
-     */
-    const telling: Record<string, number> = {}
-    const { data: fases } = await admin.from('sales_leads')
-      .select('stage_key').is('archived_at', null).limit(20000)
-    for (const r of (fases ?? []) as { stage_key: string }[]) {
-      telling[r.stage_key] = (telling[r.stage_key] ?? 0) + 1
-    }
-
-    const [{ count: klanten }, { count: bedrijven }] = await Promise.all([
+    const [{ count: leads }, { count: klanten }, { count: bedrijven }] = await Promise.all([
+      admin.from('sales_leads').select('id', { count: 'exact', head: true }).is('archived_at', null),
       admin.from('clients').select('id', { count: 'exact', head: true }),
       admin.from('kantoor_bedrijven').select('id', { count: 'exact', head: true }),
     ])
 
     return NextResponse.json({
       tokens: tokens ?? [],
-      instellingen: instellingen ?? { geblokkeerde_fases: [], pipeline_id: null },
+      instellingen: instellingen ?? { pipeline_id: null },
       events: events ?? [],
       pipelines,
-      stages: STAGES.map((s) => ({ key: s.key, label: s.label, aantal: telling[s.key] ?? 0 })),
-      altijdGeblokkeerd: { klanten: klanten ?? 0, kantoorbedrijven: bedrijven ?? 0 },
+      // Wat er via de koppeling te zien is. Bewust met `count: 'exact'` geteld
+      // en niet door rijen op te halen: PostgREST kapt elke query af op 1000,
+      // dus tellen in code gaf hier een verkeerd (te laag) beeld.
+      omvang: { leads: leads ?? 0, klanten: klanten ?? 0, kantoorbedrijven: bedrijven ?? 0 },
     })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
@@ -89,13 +79,8 @@ export async function POST(req: NextRequest) {
 
     // ── Instellingen ─────────────────────────────────────────────────────────
     if (b.actie === 'instellingen') {
-      const geldig = new Set(STAGES.map((s) => s.key as string))
-      const fases = Array.isArray(b.geblokkeerde_fases)
-        ? [...new Set(b.geblokkeerde_fases.map(String).filter((f: string) => geldig.has(f)))]
-        : []
       const pipelineId = b.pipeline_id ? String(b.pipeline_id) : null
       const { error } = await admin.from('harrie_instellingen').update({
-        geblokkeerde_fases: fases,
         pipeline_id: pipelineId,
         updated_at: new Date().toISOString(),
       }).eq('id', true)

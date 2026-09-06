@@ -216,26 +216,6 @@ export async function verwerkGebeurtenis(body: {
     patch.do_not_call_reason = 'Uitgeschreven via Harrie'
   }
 
-  /**
-   * "Gereageerd" is geen statuswijziging maar een OPDRACHT: bel deze persoon.
-   * Door het terugbelmoment op nu te zetten springt de lead vooraan in Focus
-   * Mode, met de tekst van de prospect erbij. Zo hoeft niemand een mailtje of
-   * een logboek af te speuren om te weten wie er wacht.
-   */
-  if (gevolg.belTaak) {
-    patch.callback_at = new Date().toISOString()
-    patch.callback_note = (detail ? `Harrie: ${detail}` : 'Reageerde op de koude benadering — bellen').slice(0, 300)
-  }
-
-  /**
-   * Net gebeld? Dan het terugbelmoment weghalen, anders blijft de lead vooraan
-   * in de belrij staan en belt de volgende setter hem vanmiddag opnieuw.
-   */
-  if (gevolg.belTaakWissen) {
-    patch.callback_at = null
-    patch.callback_note = null
-  }
-
   // Labels: het Harrie-label zodat je de herkomst ziet, plus wat de
   // gebeurtenis zelf oplevert (bv. "e-mail ongeldig").
   const labels = new Set([...(lead.labels ?? []), HARRIE_LABEL])
@@ -285,7 +265,6 @@ export async function verwerkGebeurtenis(body: {
     // staan dat we hem verzet hebben.
     faseMag ? `fase → ${gevolg.fase}`
       : gevolg.fase && gevolg.fase !== lead.stage_key ? `fase blijft ${lead.stage_key}` : null,
-    gevolg.belTaak ? 'beltaak gezet' : null,
     gevolg.nietMeerBenaderen ? 'op niet-benaderen gezet' : null,
   ].filter(Boolean).join(', ')
 
