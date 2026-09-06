@@ -96,6 +96,8 @@ export type LeadInteresseRij = {
   company_id: string | null
   stage_key: string
   warm?: boolean | null
+  /** Gestructureerde afwijsreden; hierop wordt geteld. */
+  reden_code?: string | null
   lost_reason: string | null
 }
 
@@ -117,12 +119,16 @@ const AFGEHAAKT_FASEN = new Set(['not_interested', 'lost'])
 
 /**
  * Interesse per sector plus de redenen waarom mensen afhaken.
- * `redenGroep` haalt de vaste reden uit een opgeslagen lost_reason, zodat
- * "Anders — wil eerst een website" gewoon onder "Anders" telt.
+ *
+ * De redenen tellen op `reden_code`, niet op de vrije tekst. Dat is het hele
+ * punt van die kolom: Harrie stuurt "Vinden het veel te duur voor wat het is"
+ * en een setter kiest "Te duur" — zonder code zouden dat twee aparte redenen
+ * zijn en telt er niets. Rijen van vóór die kolom vallen terug op de tekst.
  */
 export function berekenLeadInteresse(
   leads: LeadInteresseRij[],
   bedrijven: BedrijfRij[],
+  redenLabel: (code: string | null | undefined) => string,
   redenGroep: (v: string | null | undefined) => string | null,
 ): { perSector: SectorInteresse[]; redenen: { reden: string; aantal: number }[] } {
   const sectorVan = new Map(bedrijven.map((b) => [b.id, b.sector?.trim() || ONBEKEND]))
@@ -137,7 +143,9 @@ export function berekenLeadInteresse(
     if (INTERESSE_FASEN.has(l.stage_key) || l.warm) s.interesse++
     else if (AFGEHAAKT_FASEN.has(l.stage_key)) {
       s.geenInteresse++
-      const reden = redenGroep(l.lost_reason) ?? 'Geen reden ingevuld'
+      const reden = l.reden_code
+        ? redenLabel(l.reden_code)
+        : (redenGroep(l.lost_reason) ?? 'Geen reden ingevuld')
       redenen.set(reden, (redenen.get(reden) ?? 0) + 1)
     } else s.bezig++
   }

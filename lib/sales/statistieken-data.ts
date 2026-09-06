@@ -7,7 +7,7 @@ import {
   type AfspraakRij, type BedrijfRij, type GesprekRij, type LeadRij,
   type LeadInteresseRij, type SectorInteresse, type Statistieken,
 } from '@/lib/sales/statistieken'
-import { redenGroep } from '@/lib/sales/redenen'
+import { redenGroep, redenLabel } from '@/lib/sales/redenen'
 
 /**
  * Het ophaalwerk achter de statistiekenpagina.
@@ -180,7 +180,7 @@ export async function laadStatistieken(filter: Filter): Promise<Uitkomst> {
   // ── Interesse op leadniveau: de HELE actieve pipeline, niet de periode ────
   const { data: alleLeadData } = await admin
     .from('sales_leads')
-    .select('id, company_id, stage_key, lost_reason')
+    .select('id, company_id, stage_key, lost_reason, reden_code, warm')
     .eq('sales_client_id', org.id)
     .is('archived_at', null)
     .limit(10000)
@@ -199,7 +199,7 @@ export async function laadStatistieken(filter: Filter): Promise<Uitkomst> {
     alleBedrijven.push(...((data ?? []) as BedrijfRij[]))
   }
 
-  const leadInteresse = berekenLeadInteresse(alleLeads, alleBedrijven, redenGroep)
+  const leadInteresse = berekenLeadInteresse(alleLeads, alleBedrijven, redenLabel, redenGroep)
 
   return { stats, setters: setterLijst, sectoren, leadInteresse }
 }
