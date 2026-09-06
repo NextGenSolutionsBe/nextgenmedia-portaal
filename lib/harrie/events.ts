@@ -280,7 +280,11 @@ export async function verwerkGebeurtenis(body: {
 
   const resultaat = [
     aangemaakt ? 'nieuwe lead aangemaakt' : 'gekoppeld aan bestaande lead',
-    gevolg.fase ? `fase → ${gevolg.fase}` : null,
+    // Wat er ECHT gebeurde, niet wat het gevolg voorschreef: bij een `imported`
+    // op een bestaande lead houdt de rem de fase tegen, en dan mag hier niet
+    // staan dat we hem verzet hebben.
+    faseMag ? `fase → ${gevolg.fase}`
+      : gevolg.fase && gevolg.fase !== lead.stage_key ? `fase blijft ${lead.stage_key}` : null,
     gevolg.belTaak ? 'beltaak gezet' : null,
     gevolg.nietMeerBenaderen ? 'op niet-benaderen gezet' : null,
   ].filter(Boolean).join(', ')

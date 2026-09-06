@@ -90,6 +90,10 @@ function uitLead(l: LeadRij, geblokkeerdeFases: string[], naamPerId: Map<string,
   ])
   // Een gearchiveerde lead telt niet meer mee: Harrie mag die weer oppakken.
   const weg = !!l.archived_at
+  const geblokkeerd = weg ? false : blokkeer({
+    stageKey: l.stage_key, doNotCall: l.do_not_call, geblokkeerdeFases,
+    vanHarrie: (l.labels ?? []).includes(HARRIE_LABEL),
+  })
   return {
     id: `lead_${l.id}`,
     company: b?.name ?? 'Onbekend bedrijf',
@@ -107,11 +111,13 @@ function uitLead(l: LeadRij, geblokkeerdeFases: string[], naamPerId: Map<string,
     sector: b?.sector ?? null,
     callbackAt: l.callback_at ?? null,
     labels: l.labels ?? [],
-    doNotContactReason: l.do_not_call ? (l.do_not_call_reason ?? 'Bel-me-niet') : null,
-    doNotContact: weg ? false : blokkeer({
-      stageKey: l.stage_key, doNotCall: l.do_not_call, geblokkeerdeFases,
-      vanHarrie: (l.labels ?? []).includes(HARRIE_LABEL),
-    }),
+    doNotContact: geblokkeerd,
+    // Waarom geblokkeerd? Harrie kan dat tonen naast de prospect, zodat je in
+    // zijn scherm meteen ziet of het om een klant gaat of om een lopend gesprek
+    // — en niet hoeft te gokken waarom iemand er niet doorheen komt.
+    doNotContactReason: !geblokkeerd ? null
+      : l.do_not_call ? (l.do_not_call_reason ?? 'Staat op bel-me-niet')
+      : `Staat in de pipeline op: ${stageLabel(l.stage_key)}`,
     owner: l.assigned_to ? (naamPerId.get(l.assigned_to) ?? null) : null,
     // ENKEL de tijd van de lead zelf, niet die van het bedrijf of het contact.
     // Harrie onthoudt de hoogste waarde en vraagt daarmee de volgende keer
