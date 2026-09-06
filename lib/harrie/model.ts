@@ -153,6 +153,17 @@ export type Gevolg = {
   fase: string | null
   /** Fase alleen zetten bij een NIEUWE lead — nooit een bestaande terugzetten. */
   enkelBijNieuw?: boolean
+  /**
+   * Deze fase mag alleen VOORUIT.
+   *
+   * Staat een lead al op "Afspraak ingepland" en meldt Harrie nog een
+   * verstuurde mail uit een lopende reeks, dan is dat een regel op de tijdlijn
+   * en geen stap terug. Geldt voor contactmeldingen; een annulering of een
+   * afwijzing mag wél terug, want dat is nieuwe informatie.
+   */
+  alleenVooruit?: boolean
+  /** Zet de warme markering: de prospect reageerde zelf. */
+  markeerWarm?: boolean
   /** Nooit meer benaderen (bel-me-niet). */
   nietMeerBenaderen?: boolean
   /** Reden bij een verloren lead — onze pipeline eist die. */
@@ -176,26 +187,56 @@ export type Gevolg = {
  *    zou Marco iemand nabellen die al een afspraak heeft staan, en dat is
  *    precies wat deze koppeling moet voorkomen.
  */
-export function gevolgVan(type: HarrieType, detail?: string | null): Gevolg {
+export function gevolgVan(
+  type: HarrieType,
+  detail?: string | null,
+  /** Het kanaal uit het harrie-blokje; bepaalt of het mail of LinkedIn wordt. */
+  kanaal?: string | null,
+): Gevolg {
   const tekst = (detail ?? '').trim()
+  const viaLinkedIn = /linkedin/i.test(kanaal ?? '')
+  /** Waar valt een lead op terug als een afspraak afgezegd wordt? */
+  const terugNaarKanaal = viaLinkedIn ? 'contacted_linkedin' : 'contacted_mail'
+
   switch (type) {
     case 'sent':
-      return { fase: 'contacted', omschrijving: 'Harrie: koude mail verstuurd' }
+      return {
+        fase: 'contacted_mail', alleenVooruit: true,
+        omschrijving: `Harrie: koude mail verstuurd${tekst ? ` · ${tekst}` : ''}`,
+      }
     case 'linkedin_request':
-      return { fase: 'contacted', omschrijving: 'Harrie: LinkedIn-verzoek verstuurd' }
+      return {
+        fase: 'contacted_linkedin', alleenVooruit: true,
+        omschrijving: `Harrie: LinkedIn-verzoek verstuurd${tekst ? ` · ${tekst}` : ''}`,
+      }
     case 'linkedin_message':
-      return { fase: 'contacted', omschrijving: 'Harrie: LinkedIn-bericht verstuurd' }
+      return {
+        fase: 'contacted_linkedin', alleenVooruit: true,
+        omschrijving: `Harrie: LinkedIn-bericht verstuurd${tekst ? ` · ${tekst}` : ''}`,
+      }
+
+    /**
+     * DE BELANGRIJKSTE. Iemand die op een koude mail of een LinkedIn-bericht
+     * antwoordt, is de warmste lead die er is. De fase BLIJFT staan — het
+     * kanaal waarlangs het gesprek loopt verandert immers niet — maar de lead
+     * krijgt een warme markering, en die is in de lijst niet te missen.
+     */
     case 'replied':
       return {
-        fase: 'interested',
+        fase: null, markeerWarm: true,
         omschrijving: `Harrie: prospect reageerde${tekst ? ` · ${tekst}` : ''}`,
       }
+
     case 'booked':
       return { fase: 'appointment', omschrijving: `Harrie: afspraak geboekt${tekst ? ` · ${tekst}` : ''}` }
     case 'booking_moved':
       return { fase: 'appointment', omschrijving: `Harrie: afspraak verzet${tekst ? ` · ${tekst}` : ''}` }
     case 'booking_cancelled':
-      return { fase: 'interested', omschrijving: `Harrie: afspraak geannuleerd${tekst ? ` · ${tekst}` : ''}` }
+      return {
+        fase: terugNaarKanaal,
+        omschrijving: `Harrie: afspraak geannuleerd${tekst ? ` · ${tekst}` : ''}`,
+      }
+
     case 'declined':
       return {
         fase: 'not_interested', reden: tekst || 'Afgewezen na koude benadering (Harrie)',
@@ -206,6 +247,7 @@ export function gevolgVan(type: HarrieType, detail?: string | null): Gevolg {
         fase: 'not_interested', reden: tekst || 'Afgesloten in Harrie',
         omschrijving: `Harrie: afgesloten${tekst ? ` · ${tekst}` : ''}`,
       }
+
     case 'unsubscribed':
       return {
         fase: null, nietMeerBenaderen: true,
@@ -232,6 +274,57 @@ export function gevolgVan(type: HarrieType, detail?: string | null): Gevolg {
         omschrijving: `Harrie: prospect opgeladen${tekst ? ` · ${tekst}` : ''}`,
       }
   }
+}
+
+/** Wat Harrie per gebeurtenis meestuurt over de stand van zijn eigen reeks. */
+export type HarrieBlok = {
+  kanaal?: string | null
+  stap?: number | null
+  berichtenVerstuurd?: number | null
+  laatsteContact?: string | null
+  dagenSindsContact?: number | null
+  reageerde?: boolean | null
+  laatsteReactie?: string | null
+  afspraak?: string | null
+  nogBezig?: boolean | null
+  uitgeschreven?: boolean | null
+  belAdvies?: string | null
+}
+
+/**
+ * Het blokje opschonen voor we het bewaren.
+ *
+ * Alles is optioneel — Harrie vult wat hij weet — maar wat er binnenkomt moet
+ * wél van het juiste type zijn: dit gaat rechtstreeks naar een scherm waar een
+ * setter een belbeslissing op neemt.
+ */
+export function schoonHarrieBlok(ruw: unknown): HarrieBlok | null {
+  if (!ruw || typeof ruw !== 'object') return null
+  const h = ruw as Record<string, unknown>
+  const tekst = (v: unknown, max: number): string | null => {
+    const t = String(v ?? '').trim()
+    return t ? t.slice(0, max) : null
+  }
+  const getal = (v: unknown): number | null => {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
+  }
+  const bool = (v: unknown): boolean | null => (typeof v === 'boolean' ? v : null)
+
+  const uit: HarrieBlok = {
+    kanaal: tekst(h.kanaal, 40),
+    stap: getal(h.stap),
+    berichtenVerstuurd: getal(h.berichtenVerstuurd),
+    laatsteContact: tekst(h.laatsteContact, 40),
+    dagenSindsContact: getal(h.dagenSindsContact),
+    reageerde: bool(h.reageerde),
+    laatsteReactie: tekst(h.laatsteReactie, 1000),
+    afspraak: tekst(h.afspraak, 200),
+    nogBezig: bool(h.nogBezig),
+    uitgeschreven: bool(h.uitgeschreven),
+    belAdvies: tekst(h.belAdvies, 500),
+  }
+  return Object.values(uit).some((v) => v !== null) ? uit : null
 }
 
 /** Het label waaraan we leads herkennen die uit Harrie zelf komen. */

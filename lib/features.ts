@@ -10,12 +10,25 @@ export const FEATURES = {
   partners: false,
   /** Blogs: admin (projecten/kalender) én het klantportaal. */
   blogs: false,
+  /**
+   * De REST-koppeling met Harrie (/api/harrie/* plus het sleutelscherm).
+   *
+   * UIT, want Harrie praat nu RECHTSTREEKS met Supabase: hij leest de view
+   * `harrie_pipeline` en schrijft één rij in `harrie_events`, waarna een trigger
+   * de faseregels toepast. Dat is één schakel minder tussen hem en de data.
+   *
+   * De code blijft staan. Wil je ooit terug naar een eigen API met een eigen
+   * token — bijvoorbeeld omdat een derde partij niet in Supabase mag — dan zet
+   * je deze vlag op `true` en werkt alles weer.
+   */
+  harrieApi: false,
 } as const
 
 /** Module-keys (lib/staff.ts) die verborgen zijn zolang de vlag uit staat. */
 export const DISABLED_MODULE_KEYS: string[] = [
   ...(FEATURES.partners ? [] : ['partners', 'assignments', 'settlements']),
   ...(FEATURES.blogs ? [] : ['blogs']),
+  ...(FEATURES.harrieApi ? [] : ['harrie_api']),
 ]
 
 /** Pad-prefixen die volledig geblokkeerd worden (pagina's én API's), voor
@@ -33,6 +46,10 @@ export const DISABLED_PATH_PREFIXES: string[] = [
     '/api/admin/blogs', '/api/admin/blog-accounts', '/api/admin/blog-seo', '/api/admin/blog-settings',
     '/portal/blogs', '/api/portal/blogs',
     '/api/cron/blog-generate',
+  ]),
+  ...(FEATURES.harrieApi ? [] : [
+    '/api/harrie',
+    '/admin/sales/koppeling', '/api/admin/sales/harrie',
   ]),
 ]
 

@@ -14,6 +14,8 @@
 export type QueueLead = {
   id: string
   stage_key: string
+  /** Het laatste blokje van Harrie; bepaalt of bellen nu wel of niet past. */
+  harrie?: { nogBezig?: boolean; reageerde?: boolean } | null
   do_not_call: boolean
   callback_at: string | null
   callback_note?: string | null
@@ -22,6 +24,23 @@ export type QueueLead = {
 /** Fases waarvoor bellen geen zin (meer) heeft. "Afspraak ingepland" hoort
  *  daarbij: die mensen bel je via de bevestigingslijst, niet via prospectie. */
 const KLAAR = new Set(['appointment', 'won', 'lost', 'not_interested', 'max_pogingen'])
+
+/**
+ * Loopt er een reeks van Harrie op deze lead? Dan bel je hem NIET.
+ *
+ * Dat is de kern van "geen dubbel werk": Harrie is aan het mailen of aan het
+ * LinkedIn'en, en een setter die daar tussendoor belt, overvalt iemand die net
+ * een mail kreeg. Zodra Harrie klaar is (`nogBezig: false`) komt de lead
+ * gewoon weer in de belronde.
+ *
+ * Reageerde de prospect zélf, dan blijft hij ook uit de rij: dat gesprek volgt
+ * Marco persoonlijk op, niet de belronde. Het belAdvies in het detailpaneel
+ * zegt dat er ook bij.
+ */
+function harrieIsBezig(l: { harrie?: { nogBezig?: boolean; reageerde?: boolean } | null }): boolean {
+  const h = l.harrie
+  return !!h && (h.nogBezig === true || h.reageerde === true)
+}
 
 /** Zo vaak vergeefs bellen, dan gaat de lead uit de belronde. */
 export const MAX_GEEN_GEHOOR = 6
@@ -64,6 +83,7 @@ export function bouwWachtrij<L extends QueueLead>(
 
   for (const l of leads) {
     if (l.do_not_call || (klaarOverslaan && KLAAR.has(l.stage_key))) { overgeslagen++; continue }
+    if (klaarOverslaan && harrieIsBezig(l)) { overgeslagen++; continue }
     const om = l.callback_at ? new Date(l.callback_at).getTime() : NaN
     if (Number.isFinite(om)) {
       if (om <= nu) vervallen.push({ lead: l, om })

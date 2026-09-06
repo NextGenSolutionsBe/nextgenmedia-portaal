@@ -5,8 +5,11 @@ import { listPipelines } from '@/lib/sales/pipelines'
 import { normalizePhone, companyDedupeKey } from '@/lib/sales/dedupe'
 import { harrieInstellingen } from '@/lib/harrie/contacts'
 import {
-  gevolgVan, isHarrieType, normaliseerKbo, schoonEmail, HARRIE_LABEL, type HarrieType,
+  gevolgVan, isHarrieType, normaliseerKbo, schoonEmail, schoonHarrieBlok,
+  HARRIE_LABEL, type HarrieType,
 } from '@/lib/harrie/model'
+import { stageRang } from '@/lib/sales/stages'
+import { redenUitTekst } from '@/lib/sales/redenen'
 
 /**
  * Wat Harrie meldt, verwerken in onze pipeline.
@@ -132,6 +135,8 @@ export async function verwerkGebeurtenis(body: {
   at?: unknown
   prospect?: HarrieProspect
   detail?: unknown
+  /** De stand van Harrie's eigen reeks; zie schoonHarrieBlok. */
+  harrie?: unknown
 }): Promise<Uitkomst> {
   const sleutel = tekst(body.idempotencyKey, 200)
   if (!sleutel) return { ok: false, status: 400, fout: 'idempotencyKey ontbreekt.' }
@@ -193,23 +198,60 @@ export async function verwerkGebeurtenis(body: {
   }
 
   // ── De gevolgen toepassen ──────────────────────────────────────────────────
-  const gevolg = gevolgVan(type, detail)
+  const blok = schoonHarrieBlok(body.harrie)
+  const gevolg = gevolgVan(type, detail, blok?.kanaal)
   const patch: Record<string, unknown> = {}
 
   const { data: huidig } = await admin.from('sales_leads')
-    .select('id, stage_key, labels, lost_reason').eq('id', leadId).maybeSingle()
-  const lead = huidig as { id: string; stage_key: string; labels: string[] | null; lost_reason: string | null } | null
+    .select('id, stage_key, labels, lost_reason, reden_code, warm').eq('id', leadId).maybeSingle()
+  const lead = huidig as {
+    id: string; stage_key: string; labels: string[] | null
+    lost_reason: string | null; reden_code: string | null; warm: boolean | null
+  } | null
   if (!lead) return { ok: false, status: 500, fout: 'Lead verdween tijdens het verwerken.' }
 
   /**
-   * De fase zetten — met één rem. `imported` mag een BESTAANDE lead nooit
-   * terugzetten naar "Nog te contacteren": een prospect die al in gesprek is,
-   * hoort niet terug op de koude lijst omdat Harrie hem opnieuw oplaadt.
+   * De fase zetten — met twee remmen.
+   *
+   *  1. `imported` mag een BESTAANDE lead nooit terugzetten naar "Nog te
+   *     contacteren": een prospect die al in gesprek is, hoort niet terug op de
+   *     koude lijst omdat Harrie hem opnieuw oplaadt.
+   *  2. Een contactmelding mag alleen VOORUIT. Staat een lead al op "Afspraak
+   *     ingepland" en meldt Harrie nog een mail uit een lopende reeks, dan is
+   *     dat een regel op de tijdlijn en geen stap terug.
    */
-  const faseMag = gevolg.fase && gevolg.fase !== lead.stage_key
+  const tegengehouden = gevolg.alleenVooruit
+    && gevolg.fase !== null
+    && stageRang(gevolg.fase) < stageRang(lead.stage_key)
+  const faseMag = !!gevolg.fase && gevolg.fase !== lead.stage_key
     && !(gevolg.enkelBijNieuw && !aangemaakt)
+    && !tegengehouden
   if (faseMag) patch.stage_key = gevolg.fase
-  if (gevolg.reden && !lead.lost_reason) patch.lost_reason = gevolg.reden
+
+  /**
+   * De reden bij een afwijzing. Harrie stuurt vrije tekst in `detail`; die
+   * leggen we op een vaste code, anders valt zijn afwijzing buiten elke
+   * telling. Staat er al een reden, dan blijft die staan.
+   */
+  if (gevolg.reden && !lead.reden_code) {
+    const afgeleid = redenUitTekst(gevolg.reden)
+    if (afgeleid) { patch.reden_code = afgeleid.code; patch.lost_reason = afgeleid.tekst }
+    else if (!lead.lost_reason) patch.lost_reason = gevolg.reden
+  }
+
+  /**
+   * Warm: de prospect antwoordde zélf op een koude benadering. Dat is de
+   * warmste lead die er is, en de reden dat we hem niet als eigen fase maar als
+   * markering bewaren — zo blijft zichtbaar via welk kanaal het gesprek loopt.
+   */
+  if ((gevolg.markeerWarm || blok?.reageerde === true) && !lead.warm) {
+    patch.warm = true
+    patch.warm_op = new Date().toISOString()
+  }
+
+  // Het laatste blokje van Harrie bewaren: kanaal, berichten, en vooral het
+  // belAdvies dat een setter leest vóór hij belt.
+  if (blok) patch.harrie = blok
 
   if (gevolg.nietMeerBenaderen) {
     patch.do_not_call = true
@@ -225,8 +267,12 @@ export async function verwerkGebeurtenis(body: {
   if (Object.keys(patch).length > 0) {
     let { error } = await admin.from('sales_leads').update(patch).eq('id', leadId)
     // callback_note bestaat pas na de migratie; de rest moet dan gewoon door.
-    if (error && /callback_note/i.test(error.message)) {
+    if (error && /callback_note|reden_code|warm|harrie/i.test(error.message)) {
       delete patch.callback_note
+      delete patch.reden_code
+      delete patch.warm
+      delete patch.warm_op
+      delete patch.harrie
       ;({ error } = await admin.from('sales_leads').update(patch).eq('id', leadId))
     }
     if (error) return { ok: false, status: 500, fout: error.message }
@@ -265,6 +311,7 @@ export async function verwerkGebeurtenis(body: {
     // staan dat we hem verzet hebben.
     faseMag ? `fase → ${gevolg.fase}`
       : gevolg.fase && gevolg.fase !== lead.stage_key ? `fase blijft ${lead.stage_key}` : null,
+    patch.warm ? 'gemarkeerd als warm' : null,
     gevolg.nietMeerBenaderen ? 'op niet-benaderen gezet' : null,
   ].filter(Boolean).join(', ')
 

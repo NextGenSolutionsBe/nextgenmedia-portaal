@@ -15,7 +15,7 @@ import {
   bouwWachtrij, aftelLabel, terugbelMoment, leesTijdstip, isKlaarFase, TERUGBEL_KEUZES,
   MAX_GEEN_GEHOOR, GEEN_GEHOOR_UREN,
 } from '@/lib/sales/focus-queue'
-import { GEEN_INTERESSE_REDENEN, bouwReden } from '@/lib/sales/redenen'
+import { REDENEN, redenTekst } from '@/lib/sales/redenen'
 import { kiesScript, sectieKleur, type ScriptAnalyse } from '@/lib/sales/script-analyse'
 import { LeadGegevens } from './lead-gegevens'
 import { LeadTijdlijn } from './lead-tijdlijn'
@@ -341,6 +341,9 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
     }
 
     if (a.stage && a.stage !== lead.stage_key) body.stage = a.stage
+    // "Interesse" verandert het kanaal niet — het zet een warme markering, net
+    // zoals een antwoord op een mail van Harrie dat doet.
+    if (a.markeerWarm) body.warm = true
     // Een afgehandelde terugbelafspraak moet gewist worden — anders blijft
     // deze lead voor altijd als "te laat" vooraan in elke volgende belronde.
     if (lead.callback_at) body.callback_at = null
@@ -387,10 +390,12 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
   }, [eigenTijd, zetTerugbel])
 
   const geenInteresse = useCallback(async (reden: string, toelichting: string) => {
-    const lostReason = bouwReden(reden, toelichting)
+    const lostReason = redenTekst(reden, toelichting)
     if (!lostReason) return
     const okGelukt = await stuur({
       stage: 'not_interested',
+      reden_code: reden,
+      reden_toelichting: toelichting || undefined,
       lost_reason: lostReason,
       // Ook hier de terugbelafspraak opruimen: wie afhaakt, wordt niet meer gebeld.
       ...(lead?.callback_at ? { callback_at: null } : {}),
@@ -923,17 +928,17 @@ function RedenKiezer({ busy, onKies, onSluit }: {
           Hierop draait de statistiek — zo zien we per sector waarom het niet lukt.
         </p>
         <div className="space-y-1">
-          {GEEN_INTERESSE_REDENEN.map((r) => (
-            <label key={r} className={cn(
+          {REDENEN.map((r) => (
+            <label key={r.code} className={cn(
               'flex items-center gap-2 text-sm px-2.5 py-1.5 rounded-lg border cursor-pointer',
-              reden === r ? 'border-black bg-gray-50 font-medium' : 'border-gray-200 hover:bg-gray-50',
+              reden === r.code ? 'border-black bg-gray-50 font-medium' : 'border-gray-200 hover:bg-gray-50',
             )}>
-              <input type="radio" name="reden" checked={reden === r} onChange={() => setReden(r)} className="accent-black" />
-              {r}
+              <input type="radio" name="reden" checked={reden === r.code} onChange={() => setReden(r.code)} className="accent-black" />
+              {r.label}
             </label>
           ))}
         </div>
-        {reden === 'Anders' && (
+        {reden === 'anders' && (
           <input
             autoFocus
             value={toelichting}

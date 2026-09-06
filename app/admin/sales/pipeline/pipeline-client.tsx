@@ -5,10 +5,10 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import {
   Loader2, Plus, Search, Phone, Mail, X, CalendarClock, Archive, PhoneOff, Tag, Clock, Headphones, Upload,
-  MailCheck, Pencil, ShieldQuestion, UserCheck, History,
+  MailCheck, Pencil, ShieldQuestion, UserCheck, History, Flame, Bot,
 } from 'lucide-react'
 import { MANUAL_STAGES, stageLabel, STAGES } from '@/lib/sales/stages'
-import { GEEN_INTERESSE_REDENEN } from '@/lib/sales/redenen'
+import { REDENEN, redenTekst } from '@/lib/sales/redenen'
 import { FocusMode } from './focus-mode'
 import { merkStijl } from '@/lib/sales/merk'
 import { ImportModal } from './import-modal'
@@ -29,14 +29,38 @@ type Lead = {
     gatekeeper_naam?: string | null; dmu_naam?: string | null; dmu_functie?: string | null
   } | null
   sales_contacts: { id: string; name: string | null; email: string | null; phone: string | null; mobile: string | null; role: string | null } | null
+  /** Reageerde zelf op een benadering — de warmste lead die er is. */
+  warm?: boolean | null
+  reden_code?: string | null
+  /** Het laatste blokje van Harrie. */
+  harrie?: HarrieBlok | null
 }
 
+/** Wat Harrie per lead meestuurt. Alles optioneel: hij vult wat hij weet. */
+export type HarrieBlok = {
+  kanaal?: string | null
+  stap?: number | null
+  berichtenVerstuurd?: number | null
+  laatsteContact?: string | null
+  dagenSindsContact?: number | null
+  reageerde?: boolean | null
+  laatsteReactie?: string | null
+  afspraak?: string | null
+  nogBezig?: boolean | null
+  uitgeschreven?: boolean | null
+  /** De ene regel die een setter moet lezen vóór hij belt. */
+  belAdvies?: string | null
+}
+
+// Kleur per KANAAL, zodat je aan het bord ziet waar de opvolging ligt:
+// blauw = bellen (wij), paars = LinkedIn en mail (Harrie), amber = onze mail.
 const STAGE_STYLE: Record<string, string> = {
   to_contact: 'bg-gray-100 text-gray-700',
-  contacted: 'bg-blue-100 text-blue-700',
-  interested: 'bg-green-100 text-green-700',
+  contacted_call: 'bg-blue-100 text-blue-700',
+  contacted_linkedin: 'bg-violet-100 text-violet-700',
+  contacted_mail: 'bg-purple-100 text-purple-700',
   not_interested: 'bg-gray-200 text-gray-700',
-  email_todo: 'bg-amber-100 text-amber-700',
+  email_after_call: 'bg-amber-100 text-amber-700',
   email_sent: 'bg-amber-100 text-amber-800',
   appointment: 'bg-[#fff848] text-black',
   won: 'bg-green-200 text-green-900',
@@ -65,6 +89,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
   const [archived, setArchived] = useState(false)
   const [hideDnc, setHideDnc] = useState(true)
   const [callbackToday, setCallbackToday] = useState(false)
+  const [alleenWarm, setAlleenWarm] = useState(false)
   const [sector, setSector] = useState('')
   const [region, setRegion] = useState('')
   const [city, setCity] = useState('')
@@ -96,6 +121,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
       if (archived) p.set('archived', '1')
       if (hideDnc) p.set('hideDnc', '1')
       if (callbackToday) p.set('callbackToday', '1')
+      if (alleenWarm) p.set('warm', '1')
       if (sector) p.set('sector', sector)
       if (region) p.set('region', region)
       if (city) p.set('city', city)
@@ -110,7 +136,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
       // andere opties zodra je één filter kiest en kom je er niet meer uit.
       if (!sector && !region && !city && !label) setPool(j.leads ?? [])
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Laden mislukt') } finally { setLoading(false) }
-  }, [pipelineId, q, stage, archived, hideDnc, callbackToday, sector, region, city, label])
+  }, [pipelineId, q, stage, archived, hideDnc, callbackToday, alleenWarm, sector, region, city, label])
 
   // Kleine vertraging bij typen, zodat we niet bij elke toetsaanslag zoeken.
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t) }, [load])
@@ -143,10 +169,10 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
     }
   }, [pool])
 
-  const anyFilter = !!(sector || region || city || label || stage || callbackToday || archived || q.trim())
+  const anyFilter = !!(sector || region || city || label || stage || callbackToday || alleenWarm || archived || q.trim())
   const clearFilters = () => {
     setSector(''); setRegion(''); setCity(''); setLabel('')
-    setStage(''); setCallbackToday(false); setArchived(false); setQ('')
+    setStage(''); setCallbackToday(false); setAlleenWarm(false); setArchived(false); setQ('')
   }
 
   const phoneOf = (l: Lead) => l.sales_contacts?.phone || l.sales_contacts?.mobile || l.sales_companies?.phone || ''
@@ -237,6 +263,10 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
           </button>
         ))}
         <span className="mx-1 h-4 w-px bg-gray-200" />
+        <label className="text-xs text-gray-600 flex items-center gap-1 cursor-pointer">
+          <input type="checkbox" checked={alleenWarm} onChange={(e) => setAlleenWarm(e.target.checked)} />
+          <Flame className="h-3 w-3 text-orange-500" />Alleen warme
+        </label>
         <label className="text-xs text-gray-600 flex items-center gap-1 cursor-pointer">
           <input type="checkbox" checked={callbackToday} onChange={(e) => setCallbackToday(e.target.checked)} />Terugbellen vandaag
         </label>
@@ -329,6 +359,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
                     <th className="table-th">Bedrijf</th>
                     <th className="table-th">Contact</th>
                     <th className="table-th">Telefoon</th>
+                    <th className="table-th">Harrie</th>
                     <th className="table-th">Laatste notitie</th>
                     <th className="table-th">Status</th>
                   </tr>
@@ -362,6 +393,28 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
                             className="text-gray-700 hover:underline" title="Filter op dit nummer">{phoneOf(l)}</button>
                         ) : <span className="text-gray-400">—</span>}
                       </td>
+                      {/* Waar Harrie mee bezig is: hoeveel berichten eruit zijn
+                          en wat de prospect terugzei. Zo zie je aan het rijtje
+                          al of er een gesprek loopt. */}
+                      <td className="table-td max-w-[14rem]">
+                        {l.harrie ? (
+                          <div className="text-[11px] leading-snug">
+                            <div className="flex items-center gap-1 text-gray-600">
+                              {l.harrie.kanaal && <span className="font-medium">{l.harrie.kanaal}</span>}
+                              {typeof l.harrie.berichtenVerstuurd === 'number' && (
+                                <span className="text-gray-400">· {l.harrie.berichtenVerstuurd}×</span>
+                              )}
+                              {l.harrie.nogBezig && <span className="text-blue-600">· loopt</span>}
+                            </div>
+                            {l.harrie.laatsteReactie && (
+                              <div className="text-gray-700 line-clamp-2 italic" title={l.harrie.laatsteReactie}>
+                                “{l.harrie.laatsteReactie}”
+                              </div>
+                            )}
+                          </div>
+                        ) : <span className="text-gray-300">—</span>}
+                      </td>
+
                       {/* De laatste notitie meteen in de lijst. Zonder dit moest
                           je elke lead openen om terug te vinden waar je iets
                           over noteerde. */}
@@ -379,6 +432,13 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
                       </td>
                       <td className="table-td">
                         <span className={`status-badge ${STAGE_STYLE[l.stage_key] ?? 'bg-gray-100 text-gray-700'}`}>{stageLabel(l.stage_key)}</span>
+                        {/* Reageerde zelf. Dit is de warmste lead die er is en
+                            mag een setter dus niet ontgaan. */}
+                        {l.warm && (
+                          <span className="ml-1 status-badge bg-orange-100 text-orange-800 border border-orange-300 font-semibold">
+                            <Flame className="h-3 w-3" />warm
+                          </span>
+                        )}
                         {l.do_not_call && <span className="ml-1 status-badge bg-red-100 text-red-700">niet bellen</span>}
                       </td>
                     </tr>
@@ -425,6 +485,10 @@ function LeadDetail({ lead, pipelines, onChanged, onClose }: {
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
   const [bewerken, setBewerken] = useState(false)
+  /** Naar welke fase wachten we op een reden? null = geen kiezer open. */
+  const [redenOpen, setRedenOpen] = useState<string | null>(null)
+  const [reden, setReden] = useState('')
+  const [redenToelichting, setRedenToelichting] = useState('')
   // Loopt op na elke bewaarde notitie of wijziging: de tijdlijn haalt zich dan
   // opnieuw op, zodat je meteen ziet dát het opgeslagen is.
   const [ververs, setVerversen] = useState(0)
@@ -519,6 +583,37 @@ function LeadDetail({ lead, pipelines, onChanged, onClose }: {
         </div>
       )}
 
+      {/* HET BELADVIES. Dit is de ene regel die een setter moet lezen vóór hij
+          belt: of bellen kan, en waarom niet als het niet kan. Daarom staat hij
+          bovenaan en niet ergens tussen de tijdlijn. */}
+      {lead.harrie?.belAdvies && (
+        <div className={`rounded-xl border px-3 py-2 ${
+          lead.harrie.reageerde
+            ? 'border-orange-300 bg-orange-50'
+            : lead.harrie.nogBezig ? 'border-blue-200 bg-blue-50' : 'border-gray-200 bg-gray-50'
+        }`}>
+          <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-0.5 flex items-center gap-1">
+            {lead.harrie.reageerde ? <Flame className="h-3 w-3 text-orange-600" /> : <Bot className="h-3 w-3" />}
+            Advies van Harrie
+          </div>
+          <p className="text-[13px] text-gray-900 font-medium leading-snug">{lead.harrie.belAdvies}</p>
+          <p className="text-[10px] text-gray-500 mt-1">
+            {[
+              lead.harrie.kanaal,
+              typeof lead.harrie.berichtenVerstuurd === 'number' ? `${lead.harrie.berichtenVerstuurd} bericht(en)` : null,
+              typeof lead.harrie.dagenSindsContact === 'number'
+                ? (lead.harrie.dagenSindsContact === 0 ? 'vandaag nog contact' : `${lead.harrie.dagenSindsContact} dagen geleden`)
+                : null,
+              lead.harrie.nogBezig ? 'reeks loopt nog' : null,
+              lead.harrie.uitgeschreven ? 'uitgeschreven' : null,
+            ].filter(Boolean).join(' · ')}
+          </p>
+          {lead.harrie.laatsteReactie && (
+            <p className="text-[12px] text-gray-700 italic mt-1">“{lead.harrie.laatsteReactie}”</p>
+          )}
+        </div>
+      )}
+
       {lead.laatste_notitie && (
         <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
           <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">Laatste notitie</div>
@@ -547,12 +642,7 @@ function LeadDetail({ lead, pipelines, onChanged, onClose }: {
             const naar = e.target.value
             // "Geen interesse" eist een reden — de server weigert het anders.
             // De vaste lijst houdt de statistiek telbaar; eigen tekst mag ook.
-            if (naar === 'not_interested' && !lead.lost_reason) {
-              const reden = prompt(`Waarom geen interesse?\n\nBv.: ${GEEN_INTERESSE_REDENEN.slice(0, -1).join(' · ')}`)
-              if (!reden?.trim()) return
-              patch({ stage: naar, lost_reason: reden.trim() }, 'Status bijgewerkt.')
-              return
-            }
+            if (naar === 'not_interested' && !lead.reden_code) { setRedenOpen(naar); return }
             patch({ stage: naar }, 'Status bijgewerkt.')
           }}>
           {/* "Afspraak ingepland" staat bewust NIET in de lijst: die ontstaat
@@ -587,8 +677,14 @@ function LeadDetail({ lead, pipelines, onChanged, onClose }: {
           <label className="block text-xs font-medium text-gray-600 mb-1">
             {lead.stage_key === 'lost' ? 'Verliesreden' : 'Reden geen interesse'}
           </label>
-          <input className="input-base" defaultValue={lead.lost_reason ?? ''}
-            onBlur={(e) => e.target.value !== (lead.lost_reason ?? '') && patch({ lost_reason: e.target.value })} />
+          {/* Vaste keuzes, want hierop wordt geteld. De toelichting bij "Anders"
+              staat in lost_reason en blijft leesbaar op de tijdlijn. */}
+          <select className="input-base" value={lead.reden_code ?? ''} disabled={busy}
+            onChange={(e) => e.target.value && patch({ reden_code: e.target.value }, 'Reden bijgewerkt.')}>
+            <option value="">— kies een reden —</option>
+            {REDENEN.map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
+          </select>
+          {lead.lost_reason && <p className="text-[11px] text-gray-500 mt-1">{lead.lost_reason}</p>}
         </div>
       )}
 
@@ -625,6 +721,37 @@ function LeadDetail({ lead, pipelines, onChanged, onClose }: {
           <Archive className="h-3.5 w-3.5" />Archiveer
         </button>
       </div>
+
+      {/* Waarom geen interesse? Vaste keuzes — hierop draait de statistiek, en
+          op vrije tekst valt niet te tellen. */}
+      {redenOpen && (
+        <div className="rounded-xl border border-gray-300 bg-gray-50 p-3 space-y-2">
+          <div className="text-xs font-semibold text-gray-900">Waarom geen interesse?</div>
+          <select className="input-base text-sm" value={reden} onChange={(e) => setReden(e.target.value)}>
+            <option value="">— kies een reden —</option>
+            {REDENEN.map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
+          </select>
+          {reden === 'anders' && (
+            <input className="input-base text-sm" value={redenToelichting} autoFocus
+              onChange={(e) => setRedenToelichting(e.target.value)} placeholder="Korte toelichting" />
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={async () => {
+                if (!reden) return
+                const gelukt = await patch({
+                  stage: redenOpen,
+                  reden_code: reden,
+                  reden_toelichting: redenToelichting || undefined,
+                  lost_reason: redenTekst(reden, redenToelichting),
+                }, 'Status bijgewerkt.')
+                if (gelukt) { setRedenOpen(null); setReden(''); setRedenToelichting('') }
+              }}
+              disabled={!reden || busy} className="btn-primary text-sm flex-1">Vastleggen</button>
+            <button onClick={() => setRedenOpen(null)} className="btn-secondary text-sm">Annuleer</button>
+          </div>
+        </div>
+      )}
 
       {lead.labels?.length > 0 && (
         <div className="flex flex-wrap gap-1">

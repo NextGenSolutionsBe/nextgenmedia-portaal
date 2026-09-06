@@ -15,6 +15,12 @@ type LeadRow = {
   geen_gehoor_count?: number | null
   /** Kopie van de laatste notitie, zodat de lijst ze kan tonen. */
   laatste_notitie?: string | null; laatste_notitie_op?: string | null
+  /** Gestructureerde reden bij "Geen interesse". */
+  reden_code?: string | null
+  /** Reageerde zelf op een benadering — de warmste lead die er is. */
+  warm?: boolean | null; warm_op?: string | null
+  /** Het laatste blokje van Harrie: kanaal, berichten, belAdvies. */
+  harrie?: Record<string, unknown> | null
   pipeline_id: string | null
   sales_companies: {
     id: string; name: string; website: string | null; sector: string | null
@@ -30,7 +36,7 @@ type LeadRow = {
 // De volledige selectie mét de kolommen uit de migratie, en de smalle variant
 // als terugval zolang die migratie nog niet gedraaid is — anders blijft het
 // hele scherm leeg met een stille kolomfout.
-const SELECT_BREED = `id, stage_key, labels, callback_at, callback_note, archived_at, do_not_call, assigned_to, updated_at, lost_reason, email_brief, geen_gehoor_count, pipeline_id, laatste_notitie, laatste_notitie_op,
+const SELECT_BREED = `id, stage_key, labels, callback_at, callback_note, archived_at, do_not_call, assigned_to, updated_at, lost_reason, reden_code, warm, warm_op, harrie, email_brief, geen_gehoor_count, pipeline_id, laatste_notitie, laatste_notitie_op,
   sales_companies ( id, name, website, sector, city, region, phone, email, werkklasse, activiteit, ondernemingsnummer, prioriteit, linkedin, employees, gatekeeper_naam, dmu_naam, dmu_functie ),
   sales_contacts  ( id, name, email, phone, mobile, phone_digits, role, linkedin )`
 const SELECT_SMAL = `id, stage_key, labels, callback_at, archived_at, do_not_call, assigned_to, updated_at, lost_reason, email_brief, pipeline_id,
@@ -100,7 +106,7 @@ export async function GET(req: NextRequest) {
       let { data, error, count } = await bouw(selectie, van, van + PAGINA - 1, tel)
       // Kolommen uit de migratie ontbreken nog? Eén keer terugvallen op de
       // smalle selectie en deze pagina opnieuw ophalen.
-      if (error && /callback_note|werkklasse|activiteit|ondernemingsnummer|prioriteit|column/i.test(error.message)) {
+      if (error && /callback_note|werkklasse|activiteit|ondernemingsnummer|prioriteit|reden_code|warm|harrie|column/i.test(error.message)) {
         selectie = SELECT_SMAL
         ;({ data, error, count } = await bouw(selectie, van, van + PAGINA - 1, tel))
       }
@@ -138,6 +144,8 @@ export async function GET(req: NextRequest) {
     const city = sp.get('city');     if (city) rows = rows.filter((r) => r.sales_companies?.city === city)
     const region = sp.get('region'); if (region) rows = rows.filter((r) => r.sales_companies?.region === region)
     const label = sp.get('label');   if (label) rows = rows.filter((r) => (r.labels ?? []).includes(label))
+    // Alleen warme leads: wie zelf reageerde op een benadering.
+    if (sp.get('warm') === '1') rows = rows.filter((r) => !!r.warm)
     if (sp.get('hasPhone') === '1') rows = rows.filter((r) => !!(r.sales_contacts?.phone || r.sales_contacts?.mobile || r.sales_companies?.phone))
     if (sp.get('hasEmail') === '1') rows = rows.filter((r) => !!r.sales_contacts?.email)
     if (sp.get('hasWebsite') === '1') rows = rows.filter((r) => !!r.sales_companies?.website)

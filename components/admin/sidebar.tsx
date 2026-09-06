@@ -94,9 +94,10 @@ const SECTIONS: NavSection[] = [
       { label: 'Resultaten',          href: '/admin/sales/resultaten',   icon: BarChart3,    module: 'sales' },
       // Apart van Resultaten: dat gaat over geld, dit over conversie.
       { label: 'Statistieken',        href: '/admin/sales/statistieken', icon: TrendingUp,   module: 'sales' },
-      // De brug naar Harrie, het acquisitiesysteem: sleutel, blokkeerregels en
-      // het logboek van wat hij meldde.
-      { label: 'Koppeling',           href: '/admin/sales/koppeling',    icon: Plug,         module: 'sales', adminOnly: true },
+      // Harrie praat rechtstreeks met Supabase; het sleutelscherm staat uit via
+      // lib/features.ts. De regel blijft staan zodat hij terugkomt zodra die
+      // vlag weer aan gaat.
+      { label: 'Koppeling',           href: '/admin/sales/koppeling',    icon: Plug,         module: 'harrie_api', adminOnly: true },
     ],
   },
   {

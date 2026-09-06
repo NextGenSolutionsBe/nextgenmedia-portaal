@@ -2,6 +2,7 @@ import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { canTransition, transitionError, APPOINTMENT_STAGE } from '@/lib/sales/stages'
+import { isRedenCode, redenTekst, redenUitTekst } from '@/lib/sales/redenen'
 import { MAX_GEEN_GEHOOR, GEEN_GEHOOR_UREN } from '@/lib/sales/focus-queue'
 import { logLeadEvent, moveLeadToPipeline } from '@/lib/sales/service'
 import { listPipelines } from '@/lib/sales/pipelines'
@@ -38,7 +39,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const admin = createAdminSupabaseClient()
 
     const { data: current } = await admin.from('sales_leads')
-      .select('id, stage_key, contact_id, pipeline_id, company_id, sales_client_id, lost_reason, geen_gehoor_count')
+      .select('id, stage_key, contact_id, pipeline_id, company_id, sales_client_id, lost_reason, reden_code, geen_gehoor_count, warm')
       .eq('id', id).maybeSingle()
     if (!current) return NextResponse.json({ error: 'Lead niet gevonden' }, { status: 404 })
 
@@ -73,11 +74,30 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // browser leeft is geen controle. De reden mag in dezelfde aanvraag
       // meekomen of al op de lead staan.
       if (b.stage === 'not_interested') {
-        const reden = String(b.lost_reason ?? '').trim()
+        /**
+         * De reden is verplicht, en gestructureerd. Op vrije tekst valt niet
+         * te tellen — "te duur", "geen budget" en "budget zit er niet in"
+         * zouden dan drie redenen zijn, en juist dat tellen is waarom we dit
+         * vastleggen. De code mag meekomen in dit verzoek of al op de lead
+         * staan.
+         */
+        const code = String(b.reden_code ?? '').trim()
+          || String((current as { reden_code?: string | null }).reden_code ?? '').trim()
+        const vrijeTekst = String(b.lost_reason ?? '').trim()
           || String((current as { lost_reason?: string | null }).lost_reason ?? '').trim()
-        if (!reden) {
+
+        if (code && isRedenCode(code)) {
+          patch.reden_code = code
+          patch.lost_reason = redenTekst(code, b.reden_toelichting as string | undefined) ?? vrijeTekst
+        } else if (vrijeTekst) {
+          // Vrije tekst zonder code (oude rij, of Harrie's `detail`): alsnog op
+          // een code leggen, anders valt die afwijzing buiten elke telling.
+          const afgeleid = redenUitTekst(vrijeTekst)
+          if (afgeleid) { patch.reden_code = afgeleid.code; patch.lost_reason = afgeleid.tekst }
+        } else {
           return NextResponse.json({
             error: 'Geef een reden op waarom er geen interesse is — daar draait de statistiek op.',
+            redenNodig: true,
           }, { status: 400 })
         }
       }
@@ -113,9 +133,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         patch.callback_at = new Date(Date.now() + GEEN_GEHOOR_UREN * 3600_000).toISOString()
         patch.callback_note = `Geen gehoor (poging ${nieuw} van ${MAX_GEEN_GEHOOR})`
         // Nog niet gesproken, maar wel geprobeerd: dat is "gecontacteerd".
-        if (current.stage_key === 'to_contact') patch.stage_key = 'contacted'
+        if (current.stage_key === 'to_contact') patch.stage_key = 'contacted_call'
       }
     }
+
+    /**
+     * Warm: deze prospect toonde zélf interesse — aan de telefoon, of door op
+     * een mail van Harrie te antwoorden. Dat is de warmste lead die er is,
+     * dus hij krijgt een eigen markering in plaats van een eigen fase: het
+     * kanaal waarlangs het contact liep, blijft zo bewaard.
+     */
+    if (b.warm === true && !(current as { warm?: boolean }).warm) {
+      patch.warm = true
+      patch.warm_op = new Date().toISOString()
+    }
+    if (b.warm === false) { patch.warm = false; patch.warm_op = null }
 
     if (Array.isArray(b.labels)) patch.labels = b.labels.map(String)
     if (b.callback_at !== undefined) {
@@ -140,8 +172,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       let { error } = await admin.from('sales_leads').update(patch).eq('id', id)
       // callback_note bestaat pas na de migratie; zonder die kolom moet de
       // rest van de wijziging gewoon doorgaan.
-      if (error && /callback_note/i.test(error.message)) {
+      if (error && /callback_note|reden_code|warm|harrie/i.test(error.message)) {
         delete patch.callback_note
+        delete patch.reden_code
+        delete patch.warm
+        delete patch.warm_op
         if (Object.keys(patch).length > 0) {
           ;({ error } = await admin.from('sales_leads').update(patch).eq('id', id))
         } else {

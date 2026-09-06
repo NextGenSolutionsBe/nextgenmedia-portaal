@@ -1,155 +1,132 @@
 # Koppeling NextGenMedia Operations ↔ Harrie
 
-Hoe het acquisitiesysteem (Harrie) en de pipeline van de operations-app samen
-één lijst bijhouden. Dit document beschrijft wat de operations-app aanbiedt en
-is bedoeld voor wie Harrie bouwt.
+Eén pipeline, drie kanalen: cold calling gebeurt in deze app, cold e-mail en
+LinkedIn door Harrie. Dit document beschrijft hoe Harrie die pipeline leest en
+bijwerkt.
 
-**Basisadres:** `https://app.nextgenmedia.be/api`
-**Sleutel:** aanmaken bij *Verkoop → Koppeling* in de operations-app.
-
-Elk verzoek draagt:
+**Harrie praat rechtstreeks met Supabase** — geen tussenliggende API meer. Hij
+leest de view `harrie_pipeline` en schrijft één rij in `harrie_events`; een
+trigger bepaalt daarna wat dat voor de pipeline betekent. Zo staat de faselogica
+op één plek en hoeft Harrie geen enkele regel te kennen.
 
 ```
-Authorization: Bearer <token>
-Accept: application/json
+  SUPABASE_URL      https://ibxumffitfdygguofaxd.supabase.co
+  Authorization     Bearer <service_role key>
+  apikey            <service_role key>
 ```
 
-Fout of ontbrekend token → `401`. De sleutel wordt bij ons enkel als hash
-bewaard; hij is één keer zichtbaar, bij het aanmaken. Intrekken werkt
-onmiddellijk.
+De sleutel staat in Supabase onder *Project Settings → API*. Behandel hem als
+een wachtwoord: hij geeft volledige toegang tot de databank.
 
 ---
 
-## 1. Het idee in één alinea
+## 1. De fases
 
-De operations-app is de **enige waarheid** over de pipeline. Harrie haalt die
-op, werkt erin, en meldt elke stap terug. Wat Marco in de app doet (bellen,
-afspraak boeken, "geen interesse") ziet Harrie bij zijn volgende ophaling; wat
-Harrie doet (mailen, opvolgen, boeken) staat meteen in de pipeline. Zo belt
-niemand iemand die net gemaild is, en mailt Harrie nooit een klant.
+| `stageKey` | Label | Betekenis |
+|---|---|---|
+| `to_contact` | Nog te contacteren | Verzamelbak. Alles komt hier binnen, ongeacht de bron. |
+| `contacted_call` | Gecontacteerd · Bellen | Gebeld; opvolging via de belworkflow. |
+| `contacted_linkedin` | Gecontacteerd · LinkedIn | Verzoek of bericht verstuurd; Harrie volgt op. |
+| `contacted_mail` | Gecontacteerd · Mail | Mail verstuurd; Harrie volgt op. |
+| `email_after_call` | E-mail versturen na bellen | Gebeld, mail beloofd. Actie voor de beller. |
+| `email_sent` | E-mail verstuurd | Die beloofde mail is de deur uit. |
+| `not_interested` | Geen interesse | Reden verplicht. |
+| `appointment` | Afspraak ingepland | |
+| `max_pogingen` | Max. belpogingen | Onbereikbaar na zes pogingen. |
+| `won` | Closed Won | Klant. |
+| `lost` | Closed Lost | |
+
+`stageKey` is **stabiel**; `stage` is het label en mag veranderen. Match altijd
+op `stageKey`.
+
+**De fase zegt waar de volgende stap ligt, niet wat er allemaal gebeurd is.** Een
+lead kan via drie kanalen benaderd zijn; de volledige geschiedenis staat op de
+tijdlijn (`sales_lead_events`).
+
+### Warm
+
+Er is géén fase "Interesse". Wie zelf reageert — op een mail, een
+LinkedIn-bericht of aan de telefoon — krijgt het veld **`warm = true`**. Zo
+blijft zichtbaar via welk kanaal het gesprek loopt, en dat gaat verloren zodra
+je er een eigen fase van maakt. In de lijst staat er een oranje badge; er is een
+filter *Alleen warme*.
 
 ---
 
-## 2. De fases
+## 2. Lezen: `harrie_pipeline`
 
-| Sleutel | Label |
+```
+GET /rest/v1/harrie_pipeline?select=*&order=updatedAt.asc&limit=500
+GET /rest/v1/harrie_pipeline?updatedAt=gt.2026-09-06T14:02:11Z
+```
+
+Eén rij per partij, uit drie bronnen:
+
+| `id` | Bron |
 |---|---|
-| `to_contact` | Nog te contacteren |
-| `contacted` | Gecontacteerd |
-| `interested` | Interesse |
-| `not_interested` | Geen interesse |
-| `email_todo` / `email_sent` | E-mail versturen / verstuurd |
-| `appointment` | Afspraak ingepland |
-| `max_pogingen` | Max. belpogingen |
-| `won` / `lost` | Closed Won / Lost |
-
-`stage` in de API is het **label** (vrije tekst, mag veranderen); `stageKey` is
-de **sleutel** (stabiel). Match op `stageKey`.
-
-Harrie krijgt **elke** fase te zien, ook Closed Won. Dat is met opzet: staat een
-bedrijf bij ons op Closed Won, dan is het een klant en hoeft Harrie het niet
-eens als prospect op te laden. Wij houden dus geen blokkeerlijst bij — Harrie
-leest de status en beslist zelf.
-
-### De normale gang van zaken
-
-```
-  imported   →  to_contact     Harrie laadt een KBO-prospect op
-  sent       →  contacted      eerste koude mail of LinkedIn-bericht
-  replied    →  interested     prospect reageerde
-  booked     →  appointment    afspraak vast
-  declined   →  not_interested gebeld of gemaild, geen interesse
-```
-
-Wat Harrie ZELF bijhoudt en niet naar ons stuurt: hoeveel opvolgmails er al uit
-zijn, wanneer de volgende moet, en welke prospects er in zijn eigen bellijst
-staan. Onze pipeline bewaart alleen wáár een lead staat.
-
----
-
-## 3. `GET /harrie/ping`
-
-Verbindingstest.
-
-```json
-{ "ok": true, "app": "NextGenMedia Operations", "version": "f04bb85" }
-```
-
----
-
-## 4. `GET /harrie/contacts`
-
-Alles wat in onze pipeline staat, plus onze klanten en partners.
-
-| Parameter | Betekenis |
-|---|---|
-| `updated_since` | ISO-8601. Enkel wat daarna wijzigde. Ontbreekt → alles. |
-| `cursor` | Uit `nextCursor` van het vorige antwoord. |
-| `limit` | Max. per blad (standaard 200, hoogstens 500). |
+| `lead_…` | de pipeline |
+| `client_…` | onze klanten (ook oud-klanten) |
+| `kantoor_…` | onze eigen bedrijven en partners |
 
 ```json
 {
-  "items": [
-    {
-      "id": "lead_8f3a…",
-      "company": "Bakkerij Verdonck BV",
-      "kbo": "0437476235",
-      "emails": ["lotte@verdonck.be", "info@verdonck.be"],
-      "domains": ["verdonck.be"],
-      "phones": ["+32 9 123 45 67"],
-      "website": "https://www.verdonck.be",
-      "stage": "Nog te contacteren",
-      "stageKey": "to_contact",
-      "doNotContact": false,
-      "doNotContactReason": null,
-      "owner": "Marco",
-      "contactName": "Lotte Verdonck",
-      "city": "GENT",
-      "sector": "Bakkerij",
-      "callbackAt": null,
-      "labels": ["Harrie"],
-      "updatedAt": "2026-09-06T14:02:11Z"
-    }
-  ],
-  "nextCursor": null
+  "id": "lead_8f3a…",
+  "company": "Bakkerij Verdonck BV",
+  "kbo": "0437476235",
+  "emails": ["lotte@verdonck.be", "info@verdonck.be"],
+  "domains": ["verdonck.be"],
+  "phones": ["+32 9 123 45 67"],
+  "website": "https://www.verdonck.be",
+  "stage": "Gecontacteerd · Mail",
+  "stageKey": "contacted_mail",
+  "doNotContact": false,
+  "doNotContactReason": null,
+  "contactName": "Lotte Verdonck",
+  "city": "GENT", "sector": "Bakkerij",
+  "callbackAt": null,
+  "labels": ["Harrie"],
+  "warm": true,
+  "redenCode": null,
+  "redenTekst": null,
+  "harrie": { "kanaal": "E-mail", "berichtenVerstuurd": 2, "belAdvies": "…" },
+  "deleted": false,
+  "updatedAt": "2026-09-06T14:02:11Z"
 }
 ```
 
-**`id`** is stabiel en draagt een voorvoegsel per bron: `lead_…` (pipeline),
-`client_…` (onze klanten), `kantoor_…` (eigen bedrijven en partners).
+**`updatedAt`** is de hoogste van lead, bedrijf en contactpersoon — een gewijzigd
+telefoonnummer telt dus mee. Neem de hoogste waarde uit je antwoord en gebruik
+die de volgende keer als `updatedAt=gt.…`.
 
-**`updatedAt`** is de tijd waarop *iets* aan die lead veranderde — ook een
-gewijzigd telefoonnummer bij het bedrijf of een nieuw e-mailadres bij de
-contactpersoon. Neem de hoogste waarde uit het antwoord en gebruik die als
-`updated_since` voor de volgende ophaling.
+**`doNotContact`** staat enkel op `true` bij bel-me-niet en bij onze klanten en
+partners: de twee gevallen waar niets te beslissen valt. Voor de rest lees je
+`stageKey` en beslis je zelf.
 
-**Verwijderd of gearchiveerd** komt mee met `"deleted": true` en
-`doNotContact: false` — die partij is weer vrij.
+### Wat de fase betekent voor Harrie
 
-### `doNotContact`
-
-Staat enkel op `true` in de twee gevallen waar niets te beslissen valt:
-
-- een lead met **bel-me-niet** (`do_not_call` in onze app);
-- **onze klanten en partners** (`client_…` en `kantoor_…`) — die zijn geen
-  prospect.
-
-Alle andere partijen komen mee met `doNotContact: false` en hun echte
-`stageKey`. Wat Harrie daarmee doet, bepaalt hij zelf.
+| `stageKey` | Wat Harrie doet |
+|---|---|
+| `won`, `lost`, `not_interested`, `max_pogingen` | blijft eraf |
+| `appointment`, `email_after_call` | begint er niet aan, stopt een lopende reeks |
+| `contacted_call` | begint er niet aan — een collega is bezig |
+| `contacted_mail`, `contacted_linkedin`, `email_sent` | meestal zijn eigen spoor; gaat door |
+| `to_contact` | vrij |
 
 ---
 
-## 5. `POST /harrie/events`
+## 3. Schrijven: één rij in `harrie_events`
 
-Eén gebeurtenis per verzoek.
+```
+POST /rest/v1/harrie_events
+Prefer: return=representation
+```
 
 ```json
 {
-  "idempotencyKey": "harrie-412-replied-1757080931000",
+  "idempotency_key": "harrie-412-replied-1757080931000",
   "type": "replied",
-  "at": "2026-09-06T14:02:11Z",
+  "gebeurd_op": "2026-09-06T14:02:11Z",
   "prospect": {
-    "harrieId": 412,
     "company": "Kinepraktijk Noor",
     "name": "Bram Maes",
     "role": "Praktijkhouder",
@@ -158,78 +135,106 @@ Eén gebeurtenis per verzoek.
     "kbo": "0222222222",
     "city": "ANTWERPEN",
     "sector": "Kinesitherapie",
-    "linkedinUrl": null,
-    "source": "kbo-csv"
+    "website": "https://noor.be",
+    "linkedinUrl": null
   },
-  "detail": "Klinkt interessant, bel me gerust na 14u."
+  "detail": "Klinkt interessant, bel me na 14u",
+  "harrie": {
+    "kanaal": "E-mail",
+    "stap": 2,
+    "berichtenVerstuurd": 2,
+    "laatsteContact": "2026-09-06T13:39:21Z",
+    "dagenSindsContact": 0,
+    "reageerde": true,
+    "laatsteReactie": "Klinkt interessant, bel me na 14u",
+    "afspraak": null,
+    "nogBezig": false,
+    "uitgeschreven": false,
+    "belAdvies": "Warm — reageerde op Harrie. Marco volgt dit zelf op; bel enkel na overleg."
+  }
 }
 ```
 
+Het antwoord bevat `lead_id` en `resultaat`, bijvoorbeeld
+`"gekoppeld aan bestaande lead, gemarkeerd als warm"`.
+
+**Idempotentie:** `idempotency_key` is uniek. Een tweede poging geeft
+`409` (unieke sleutel geschonden) — beschouw dat als geslaagd.
+
 ### De types
 
-| Type | Fase wordt | Extra |
-|---|---|---|
-| `imported` | `to_contact` | Alleen bij een **nieuwe** lead; een bestaande valt nooit terug. |
-| `sent` | `contacted` | |
-| `linkedin_request` / `linkedin_message` | `contacted` | |
-| `replied` | `interested` | |
-| `booked` / `booking_moved` | `appointment` | Moment in `detail`. |
-| `booking_cancelled` | `interested` | |
-| `declined` / `lost` | `not_interested` | Reden uit `detail`. |
-| `unsubscribed` | *ongewijzigd* | Zet bel-me-niet — blijvend geblokkeerd. |
-| `bounced` | *ongewijzigd* | Label "e-mail ongeldig". Het adres blijft staan. |
-| `manual_reply` | *ongewijzigd* | Enkel een notitie op de tijdlijn. |
-
-Elke gebeurtenis komt ook als regel op de tijdlijn van de lead.
-
-### Antwoorden
-
-| Code | Betekenis |
+| Type | Fase wordt |
 |---|---|
-| `200` | Verwerkt, gekoppeld aan een bestaande lead. |
-| `201` | Verwerkt, nieuwe lead aangemaakt. |
-| `409` | Deze `idempotencyKey` was al gekend — beschouw als geslaagd. |
-| `400` | Onbekend type, of geen bedrijfsnaam bij een nieuwe prospect. |
-| `401` | Token fout of ontbrekend. |
-| `5xx` | Bij ons stuk. Later opnieuw proberen. |
+| `imported` | `to_contact` — alleen bij een **nieuwe** lead |
+| `sent` | `contacted_mail` |
+| `linkedin_request`, `linkedin_message` | `contacted_linkedin` |
+| `replied` | **blijft staan**, `warm = true` |
+| `booked`, `booking_moved` | `appointment` |
+| `booking_cancelled` | terug naar `contacted_mail` of `contacted_linkedin` (naar `harrie.kanaal`) |
+| `declined`, `lost` | `not_interested`, met de reden uit `detail` |
+| `unsubscribed` | fase blijft, zet bel-me-niet |
+| `bounced` | fase blijft, label "e-mail ongeldig" |
+| `manual_reply` | fase blijft, notitie op de tijdlijn |
 
-Bij succes:
-
-```json
-{ "ok": true, "leadId": "83894f15-…", "resultaat": "nieuwe lead aangemaakt, fase → contacted" }
-```
+**Een lead valt nooit terug naar een vroegere fase.** Staat hij al op
+`appointment` en komt er nog een `sent` binnen, dan wordt dat een tijdlijnregel
+zonder fasewijziging (`resultaat` zegt dan "fase blijft appointment").
 
 ### Hoe wij koppelen
 
-In deze volgorde van zekerheid: **e-mailadres van de contactpersoon** →
-**ondernemingsnummer** (elke notatie mag, wij normaliseren) → **algemeen
-e-mailadres van het bedrijf** → **bedrijfsnaam** (via dezelfde ontdubbelsleutel
-als de rest van de app, dus "Acme BV" en "acme bvba" komen op hetzelfde dossier
-uit).
+In volgorde van zekerheid: **e-mail van de contactpersoon** → **ondernemings­nummer**
+(elke notatie mag) → **algemeen e-mailadres** → **bedrijfsnaam** via dezelfde
+ontdubbelsleutel als de app, dus "Acme BV" en "acme bvba" komen op hetzelfde
+dossier uit. Vindt hij niets en is er een bedrijfsnaam, dan maken we bedrijf,
+contactpersoon en lead aan.
 
-Vindt hij niets, dan maken we een nieuwe lead met dezelfde functie als het
-scherm "Nieuwe lead", inclusief ontdubbeling op bedrijf. Hoe meer velden je
-meestuurt, hoe zekerder de koppeling. Een telefoonnummer dat wij nog niet
-hadden, nemen we over.
+### Het harrie-blokje
+
+Het veld `harrie` wordt op de lead bewaard (laatste versie). In het detailpaneel
+staat **`belAdvies` bovenaan, boven de tijdlijn** — de ene regel die een setter
+leest vóór hij belt. In de lijst staan `berichtenVerstuurd` en `laatsteReactie`.
+
+`nogBezig: true` of `reageerde: true` haalt de lead uit de belronde van Focus
+Mode. Dat is de kern van "geen dubbel werk": zolang Harrie mailt of de prospect
+zelf reageerde, belt er niemand tussendoor.
 
 ---
 
-## 6. Ritme
+## 4. De reden bij "Geen interesse"
 
-- **Elk kwartier** wijzigingen ophalen met `updated_since`.
-- **Eén keer per dag** alles, zonder `updated_since`. Dan valt weg wat niet meer
-  meekomt.
-- Gebeurtenissen per stuk, enkele tientallen per dag.
+Verplicht en gestructureerd; op vrije tekst valt niet te tellen.
+
+| `redenCode` | Label |
+|---|---|
+| `te_duur` | Te duur |
+| `intern` | Doen we intern |
+| `al_partner` | Werken al met iemand |
+| `geen_behoefte` | Geen behoefte |
+| `geen_budget` | Geen budget |
+| `verkeerde_persoon` | Verkeerde persoon |
+| `timing` | Timing — nu niet |
+| `slechte_ervaring` | Slechte ervaring met bureaus |
+| `anders` | Anders (met toelichting) |
+
+Stuurt Harrie bij een `declined` vrije tekst mee in `detail`, dan leggen we die
+zelf op een code: "Vinden het veel te duur" wordt `te_duur`. Herkennen we niets,
+dan wordt het `anders` mét de tekst, zodat de afwijzing telbaar blijft.
+
+---
+
+## 5. Ritme
+
+- **Elk kwartier** wijzigingen ophalen met `updatedAt=gt.…`.
+- **Eén keer per dag** alles, zonder filter.
+- Gebeurtenissen per stuk.
 - Geen webhooks: Harrie draait niet altijd, dus hij vraagt zelf.
 
 ---
 
-## 7. Wat je in de app ziet
+## 6. De oude REST-API
 
-*Verkoop → Koppeling*: de sleutels (met laatste gebruik en aantal verzoeken),
-hoeveel er via de koppeling te zien is, in welke pipeline nieuwe prospects
-landen, en de laatste dertig gebeurtenissen die Harrie meldde.
-
-Elke gebeurtenis komt ook op de **tijdlijn van de lead zelf**, zichtbaar in het
-detailpaneel van de pipeline. Een setter ziet dus vóór hij belt hoeveel mails er
-al uit zijn en wat de prospect antwoordde.
+`/api/harrie/ping`, `/api/harrie/contacts` en `/api/harrie/events` met een eigen
+Bearer-token bestaan nog in de code, maar staan **uit** via `FEATURES.harrieApi`
+in `lib/features.ts`. Zet die vlag op `true` en de endpoints plus het
+sleutelscherm (*Verkoop → Koppeling*) komen terug — bijvoorbeeld wanneer een
+derde partij wél moet kunnen koppelen maar niet in Supabase mag.

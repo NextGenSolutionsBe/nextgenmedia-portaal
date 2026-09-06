@@ -95,6 +95,7 @@ export type LeadInteresseRij = {
   id: string
   company_id: string | null
   stage_key: string
+  warm?: boolean | null
   lost_reason: string | null
 }
 
@@ -109,7 +110,9 @@ export type SectorInteresse = {
   bezig: number
 }
 
-const INTERESSE_FASEN = new Set(['interested', 'appointment', 'won'])
+// "Interesse" is geen fase meer maar een markering (sales_leads.warm); een
+// afspraak of een gewonnen deal telt uiteraard nog steeds als interesse.
+const INTERESSE_FASEN = new Set(['appointment', 'won'])
 const AFGEHAAKT_FASEN = new Set(['not_interested', 'lost'])
 
 /**
@@ -131,7 +134,7 @@ export function berekenLeadInteresse(
     let s = perSector.get(sector)
     if (!s) { s = { sector, totaal: 0, interesse: 0, geenInteresse: 0, bezig: 0 }; perSector.set(sector, s) }
     s.totaal++
-    if (INTERESSE_FASEN.has(l.stage_key)) s.interesse++
+    if (INTERESSE_FASEN.has(l.stage_key) || l.warm) s.interesse++
     else if (AFGEHAAKT_FASEN.has(l.stage_key)) {
       s.geenInteresse++
       const reden = redenGroep(l.lost_reason) ?? 'Geen reden ingevuld'
