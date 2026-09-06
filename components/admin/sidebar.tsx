@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
   Info, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, UserCog, CalendarClock, BarChart3, KanbanSquare,
-  MailCheck, PhoneCall, Stamp, FolderUp, Handshake,
+  MailCheck, PhoneCall, Stamp, FolderUp, Handshake, Plug,
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
@@ -94,6 +94,9 @@ const SECTIONS: NavSection[] = [
       { label: 'Resultaten',          href: '/admin/sales/resultaten',   icon: BarChart3,    module: 'sales' },
       // Apart van Resultaten: dat gaat over geld, dit over conversie.
       { label: 'Statistieken',        href: '/admin/sales/statistieken', icon: TrendingUp,   module: 'sales' },
+      // De brug naar Harrie, het acquisitiesysteem: sleutel, blokkeerregels en
+      // het logboek van wat hij meldde.
+      { label: 'Koppeling',           href: '/admin/sales/koppeling',    icon: Plug,         module: 'sales', adminOnly: true },
     ],
   },
   {

@@ -2948,3 +2948,85 @@ WHERE platforms && ARRAY['instagram','facebook']::text[];
 UPDATE public.social_content_items
 SET platform = 'meta'
 WHERE platform IN ('instagram','facebook');
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- HARRIE-KOPPELING — pipeline delen met het acquisitiesysteem
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Harrie stuurt koude mails en LinkedIn-berichten. Hij mag NOOIT iemand
+-- benaderen die al klant is of met wie we in gesprek zijn: dat kost ons de
+-- reputatie van het adres waarmee we mailen. Daarom haalt hij hier op wie er
+-- geblokkeerd is, en meldt hij terug wat hij deed.
+--
+-- Machine-naar-machine: één Bearer-token, geen sessie. Vandaar eigen tabellen.
+
+-- Tokens. We bewaren enkel de HASH — net als bij wachtwoorden. Wie de databank
+-- leest, kan er dus niet mee inloggen; het token zelf zie je één keer, bij het
+-- aanmaken. `prefix` is louter om de sleutel in de lijst te herkennen.
+CREATE TABLE IF NOT EXISTS public.harrie_tokens (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam             text NOT NULL,
+  token_hash       text NOT NULL UNIQUE,
+  prefix           text NOT NULL,
+  aangemaakt_door  uuid,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  laatst_gebruikt  timestamptz,
+  aantal_verzoeken bigint NOT NULL DEFAULT 0,
+  ingetrokken_op   timestamptz
+);
+CREATE INDEX IF NOT EXISTS harrie_tokens_actief ON public.harrie_tokens (token_hash) WHERE ingetrokken_op IS NULL;
+
+-- Het logboek van wat Harrie meldde. `idempotency_key` is uniek: stuurt hij
+-- dezelfde gebeurtenis twee keer (na een haperende verbinding), dan verwerken
+-- we ze één keer en antwoorden we 409.
+CREATE TABLE IF NOT EXISTS public.harrie_events (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  idempotency_key text NOT NULL UNIQUE,
+  type            text NOT NULL,
+  gebeurd_op      timestamptz,
+  prospect        jsonb NOT NULL DEFAULT '{}'::jsonb,
+  detail          text,
+  lead_id         uuid REFERENCES public.sales_leads(id) ON DELETE SET NULL,
+  resultaat       text,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS harrie_events_tijd ON public.harrie_events (created_at DESC);
+CREATE INDEX IF NOT EXISTS harrie_events_lead ON public.harrie_events (lead_id);
+
+-- Instellingen: één rij. Welke fases blokkeren, en in welke pipeline nieuwe
+-- prospects van Harrie terechtkomen.
+CREATE TABLE IF NOT EXISTS public.harrie_instellingen (
+  id                 boolean PRIMARY KEY DEFAULT true CHECK (id),
+  geblokkeerde_fases text[] NOT NULL DEFAULT ARRAY[
+    'contacted','interested','not_interested','email_todo','email_sent',
+    'appointment','max_pogingen','won','lost'
+  ],
+  pipeline_id        uuid REFERENCES public.sales_pipelines(id) ON DELETE SET NULL,
+  updated_at         timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO public.harrie_instellingen (id) VALUES (true) ON CONFLICT (id) DO NOTHING;
+
+ALTER TABLE public.harrie_tokens       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.harrie_events       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.harrie_instellingen ENABLE ROW LEVEL SECURITY;
+
+-- Klanten hadden geen `updated_at`. Zonder dat veld kan Harrie niet vragen
+-- "wat is er sinds gisteren veranderd" en moet hij élke keer alles ophalen.
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+DO $$ BEGIN
+  CREATE TRIGGER trg_clients_updated BEFORE UPDATE ON public.clients
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL; WHEN undefined_function THEN NULL; END $$;
+
+-- Eén statement dat optelt, zodat twee gelijktijdige verzoeken elkaars telling
+-- niet overschrijven. SECURITY DEFINER omdat de tabel achter RLS zit.
+CREATE OR REPLACE FUNCTION public.harrie_token_gebruikt(p_token_id uuid)
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  UPDATE public.harrie_tokens
+  SET laatst_gebruikt = now(), aantal_verzoeken = aantal_verzoeken + 1
+  WHERE id = p_token_id;
+$$;
+REVOKE ALL ON FUNCTION public.harrie_token_gebruikt(uuid) FROM public, anon, authenticated;
