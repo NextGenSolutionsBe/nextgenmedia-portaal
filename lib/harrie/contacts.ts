@@ -101,7 +101,14 @@ function uitLead(l: LeadRij, geblokkeerdeFases: string[], naamPerId: Map<string,
       vanHarrie: (l.labels ?? []).includes(HARRIE_LABEL),
     }),
     owner: l.assigned_to ? (naamPerId.get(l.assigned_to) ?? null) : null,
-    updatedAt: nieuwste([l.updated_at, b?.updated_at, c?.updated_at]),
+    // ENKEL de tijd van de lead zelf, niet die van het bedrijf of het contact.
+    // Harrie onthoudt de hoogste waarde en vraagt daarmee de volgende keer
+    // `updated_since`; wij filteren en sorteren op sales_leads.updated_at.
+    // Stuurden we hier een nieuwere tijd uit een andere tabel, dan sloeg Harrie
+    // een tijdstip op dat vóór ons filter ligt en glipten er wijzigingen langs.
+    // Een databanktrigger tikt deze kolom aan zodra het bedrijf of de
+    // contactpersoon verandert, dus hij loopt nooit achter.
+    updatedAt: nieuwste([l.updated_at]),
     ...(weg ? { deleted: true } : {}),
   }
 }

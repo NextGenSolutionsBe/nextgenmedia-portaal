@@ -3030,3 +3030,31 @@ AS $$
   WHERE id = p_token_id;
 $$;
 REVOKE ALL ON FUNCTION public.harrie_token_gebruikt(uuid) FROM public, anon, authenticated;
+
+-- Harrie vraagt "wat is er sinds X gewijzigd" en filtert op sales_leads.updated_at.
+-- Maar een verbeterd telefoonnummer staat bij het BEDRIJF en een nieuw
+-- e-mailadres bij de CONTACTPERSOON. Zonder deze twee triggers verschuift de
+-- lead dan niet en ziet Harrie die correctie pas bij de volledige ophaling van
+-- de volgende dag — terwijl het net het nummer is waarmee hij belt. Nu is
+-- sales_leads.updated_at de enige waarheid: "er is iets aan deze lead veranderd".
+CREATE OR REPLACE FUNCTION public.raak_leads_van_bedrijf_aan()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  UPDATE public.sales_leads SET updated_at = now() WHERE company_id = NEW.id;
+  RETURN NEW;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.raak_leads_van_contact_aan()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  UPDATE public.sales_leads SET updated_at = now() WHERE contact_id = NEW.id;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS trg_bedrijf_raakt_leads ON public.sales_companies;
+CREATE TRIGGER trg_bedrijf_raakt_leads AFTER UPDATE ON public.sales_companies
+  FOR EACH ROW EXECUTE FUNCTION public.raak_leads_van_bedrijf_aan();
+
+DROP TRIGGER IF EXISTS trg_contact_raakt_leads ON public.sales_contacts;
+CREATE TRIGGER trg_contact_raakt_leads AFTER UPDATE ON public.sales_contacts
+  FOR EACH ROW EXECUTE FUNCTION public.raak_leads_van_contact_aan();
