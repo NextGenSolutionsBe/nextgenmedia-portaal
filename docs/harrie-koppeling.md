@@ -15,8 +15,35 @@ op één plek en hoeft Harrie geen enkele regel te kennen.
   apikey            <service_role key>
 ```
 
-De sleutel staat in Supabase onder *Project Settings → API*. Behandel hem als
-een wachtwoord: hij geeft volledige toegang tot de databank.
+**Het moet de `service_role`-sleutel zijn**, niet de anon-sleutel. Die laatste is
+publiek — hij zit in elke browser — en krijgt hier bewust `401`: de view en de
+gebeurtenissentabel zijn enkel voor `service_role` opengezet. Werkt Harrie niet
+en zie je overal 401, dan staat de verkeerde sleutel ingesteld.
+
+De sleutel staat in Supabase onder *Project Settings → API → service_role*.
+Behandel hem als een wachtwoord: hij geeft volledige toegang tot de databank.
+
+---
+
+## 0. Twee dingen die je niet mag missen
+
+**Pagineer.** PostgREST geeft standaard hoogstens **1.000 rijen** terug, zonder
+foutmelding. De view telt er ruim 4.000, dus zonder paginering mist Harrie
+driekwart van de pipeline — en denkt hij dat klanten vrij zijn om te mailen.
+
+```
+GET /rest/v1/harrie_pipeline?select=*&order=updatedAt.asc
+Range: 0-999
+Prefer: count=exact
+→ Content-Range: 0-999/4087       ← het totaal staat achter de schuine streep
+```
+
+Blijf bladeren met `Range: 1000-1999`, `2000-2999`, … tot het eerste getal van
+`Content-Range` het totaal bereikt.
+
+**Onthoud de hoogste `updatedAt`.** Die gebruik je de volgende keer als
+`updatedAt=gt.…`, zodat je enkel de wijzigingen ophaalt. Eén keer per dag haal
+je alles op zonder dat filter; wat dan niet meer meekomt, is weg.
 
 ---
 
@@ -60,7 +87,33 @@ GET /rest/v1/harrie_pipeline?select=*&order=updatedAt.asc&limit=500
 GET /rest/v1/harrie_pipeline?updatedAt=gt.2026-09-06T14:02:11Z
 ```
 
-Eén rij per partij, uit drie bronnen:
+Eén rij per partij, uit drie bronnen. De kolommen liggen vast:
+
+| Kolom | Type | Betekenis |
+|---|---|---|
+| `id` | text | Stabiel, met bronvoorvoegsel. |
+| `lead_id` | uuid | Enkel bij `lead_…`; `null` bij klanten en partners. |
+| `company` | text | |
+| `kbo` | text | Enkel cijfers, tien lang. `null` als we het niet hebben. |
+| `emails` | text[] | Ontdubbeld. |
+| `domains` | text[] | Uit website én e-mailadressen, ontdubbeld. |
+| `phones` | text[] | Contactpersoon eerst, dan het bedrijf. |
+| `website` | text | |
+| `stage` | text | Het label. Mag veranderen. |
+| `stageKey` | text | **De sleutel. Match hierop.** |
+| `doNotContact` | bool | Absoluut. Zie hieronder. |
+| `doNotContactReason` | text | Waarom, als hij op `true` staat. |
+| `contactName` | text | Zodat je niet "Beste heer/mevrouw" schrijft. |
+| `city`, `sector` | text | |
+| `callbackAt` | timestamptz | Staat er bij ons een belafspraak gepland? |
+| `labels` | text[] | Bevat `Harrie` als hij van jou komt. |
+| `warm` | bool | Reageerde zelf. |
+| `redenCode`, `redenTekst` | text | Waarom afgehaakt. |
+| `harrie` | jsonb | Jouw laatste blokje, zoals wij het bewaarden. |
+| `deleted` | bool | Gearchiveerd — weer vrij. |
+| `updatedAt` | timestamptz | Hoogste van lead, bedrijf en contactpersoon. |
+
+De drie bronnen:
 
 | `id` | Bron |
 |---|---|

@@ -3244,6 +3244,16 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $fn$
   FROM (SELECT lower(coalesce(tekst, '')) AS t) x;
 $fn$;
 
+-- Lijsten ontdubbelen: het adres van de contactpersoon is vaak hetzelfde als
+-- dat van het bedrijf, en het domein komt uit drie bronnen. Harrie matcht op
+-- deze lijsten; drie keer hetzelfde domein maakt dat enkel trager.
+CREATE OR REPLACE FUNCTION public.harrie_uniek(arr text[])
+RETURNS text[] LANGUAGE sql IMMUTABLE AS $fn$
+  SELECT coalesce(array_agg(DISTINCT x), ARRAY[]::text[])
+  FROM unnest(coalesce(arr, ARRAY[]::text[])) x
+  WHERE x IS NOT NULL AND btrim(x) <> '';
+$fn$;
+
 -- ── De view waaruit Harrie leest ───────────────────────────────────────────
 -- BEVEILIGING. Een view draait standaard met de rechten van zijn EIGENAAR, niet
 -- van wie hem bevraagt. Zonder de twee regels onderaan omzeilt deze view dus de
@@ -3254,12 +3264,12 @@ CREATE OR REPLACE VIEW public.harrie_pipeline AS
 SELECT
   'lead_' || l.id::text AS id, l.id AS lead_id, c.name AS company,
   regexp_replace(coalesce(c.ondernemingsnummer,''), '\D', '', 'g') AS kbo,
-  array_remove(ARRAY[lower(ct.email), lower(c.email)], NULL) AS emails,
-  array_remove(ARRAY[
+  public.harrie_uniek(ARRAY[lower(ct.email), lower(c.email)]) AS emails,
+  public.harrie_uniek(ARRAY[
     nullif(regexp_replace(lower(coalesce(c.website,'')), '^https?://(www\.)?|/.*$', '', 'g'), ''),
     nullif(split_part(lower(coalesce(ct.email,'')), '@', 2), ''),
-    nullif(split_part(lower(coalesce(c.email,'')),  '@', 2), '')], NULL) AS domains,
-  array_remove(ARRAY[ct.phone, ct.mobile, c.phone], NULL) AS phones,
+    nullif(split_part(lower(coalesce(c.email,'')),  '@', 2), '')]) AS domains,
+  public.harrie_uniek(ARRAY[ct.phone, ct.mobile, c.phone]) AS phones,
   c.website, s.label AS stage, l.stage_key AS "stageKey",
   l.do_not_call AS "doNotContact",
   CASE WHEN l.do_not_call THEN coalesce(l.do_not_call_reason, 'Staat op bel-me-niet') END AS "doNotContactReason",
