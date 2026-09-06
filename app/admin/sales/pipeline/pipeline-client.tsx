@@ -663,7 +663,7 @@ function LeadDetail({ lead, pipelines, onChanged, onClose }: {
         </div>
       </div>
 
-      {lead.stage_key === 'email_todo' && (
+      {lead.stage_key === 'email_after_call' && (
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Briefing voor de klant</label>
           <textarea rows={3} className="input-base" defaultValue={lead.email_brief ?? ''}
