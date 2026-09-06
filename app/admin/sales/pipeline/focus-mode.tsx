@@ -50,6 +50,10 @@ type Contact = {
 }
 type Lead = {
   id: string; stage_key: string; do_not_call: boolean
+  /** Het hoofdmerk: bepaalt de brochure en de agenda bij een afspraak. */
+  pipeline_id?: string | null
+  /** Alle merken waarvoor deze lead telt. */
+  merken?: string[] | null
   callback_at?: string | null; callback_note?: string | null
   /** Aantal keer vergeefs gebeld; bij MAX_GEEN_GEHOOR gaat de lead uit de rij. */
   geen_gehoor_count?: number | null
@@ -64,14 +68,16 @@ type ScriptRij = {
   pipeline_id: string | null; actief: boolean; analyse: ScriptAnalyse | null
 }
 
-export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, onClose, onChanged }: {
+export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilter, onClose, onChanged }: {
   leads: Lead[]
   /** Leads die een collega NU aan het bellen is (lead-id → naam). */
   bezet?: Record<string, string>
+  /** Onze merken. Je schakelt er tijdens het bellen tussen: dat kiest het
+   *  script én het bedrijf waarvoor je een afspraak inboekt. */
+  pipelines: { id: string; name: string; key: string }[]
+  /** Staat het bord op één merk gefilterd, dan bel je daar ook in. Is het
+   *  filter leeg ("alle merken"), dan volgt het merk de lead zelf. */
   pipelineId?: string | null
-  /** Het merk waarin je aan het bellen bent — als badge in de kop, zodat
-   *  iedereen op elk moment ziet: geel = NextGenMedia, blauw = NextGenSolutions. */
-  merk?: { key: string; name: string } | null
   /** Het actieve fasefilter van het bord. Filtert iemand bewust op een
    *  afgeronde fase ("geen interesse" nog eens nabellen), dan slaan we die
    *  fase hier niet over — anders levert die keuze een lege belronde op. */
@@ -88,6 +94,15 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
   // Elke 30 s hertellen: aftellingen lopen en vervallen afspraken springen terug.
   const [nu, setNu] = useState(() => Date.now())
   const [redenOpen, setRedenOpen] = useState(false)
+  /**
+   * Het merk waarvoor je dit gesprek voert. Eén lijst, twee bedrijven: je
+   * schakelt hier tussen NextGenMedia en NextGenSolutions, en dan wisselt het
+   * script mee. Boek je vanuit dit scherm een afspraak, dan gaat die naar dít
+   * merk — de brochure en de agenda horen bij het verhaal dat je net verteld
+   * hebt, niet bij het vakje waar de lead ooit in belandde.
+   */
+  const [merkId, setMerkId] = useState<string>(() => pipelineId || pipelines[0]?.id || '')
+  const merk = pipelines.find((p) => p.id === merkId) ?? null
   const [script, setScript] = useState<{ naam: string; analyse: ScriptAnalyse } | null | 'laden'>('laden')
   // Alle scripts die deze setter mag gebruiken. Marco heeft er drie — één per
   // situatie (mooie website zonder socials, mét socials, geen website) — en
@@ -128,11 +143,11 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
         const bruikbaar = scripts.filter((x) =>
           x.actief && x.analyse
           && (x.eigenaar_auth_id === mij || x.eigenaar_auth_id === null)
-          && (x.pipeline_id === null || x.pipeline_id === (pipelineId ?? null)))
+          && (x.pipeline_id === null || x.pipeline_id === (merkId || null)))
           .map((x) => ({ naam: x.naam, analyse: x.analyse as ScriptAnalyse }))
         setScriptKeuzes(bruikbaar)
 
-        const i = kiesScript(scripts, mij, pipelineId ?? null)
+        const i = kiesScript(scripts, mij, merkId || null)
         const s = i >= 0 ? scripts[i] : null
         // Het beste script staat klaar; bruikbaar[0] als terugval zodat er
         // altijd íets getoond wordt wanneer er scripts zijn.
@@ -140,7 +155,7 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
       } catch { if (!weg) setScript(null) }
     })()
     return () => { weg = true }
-  }, [pipelineId])
+  }, [merkId])
 
   /**
    * Leads die een collega vasthoudt vallen uit de wachtrij. Twee bronnen:
@@ -178,6 +193,21 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
     if (lead && lead.id !== vastId) setVastId(lead.id)
     if (!lead && vastId) setVastId(null)
   }, [lead, vastId])
+
+  /**
+   * Elke nieuwe lead begint bij zijn eigen merk. Schakel je halverwege om,
+   * dan geldt dat voor dít gesprek en niet voor de rest van de belronde —
+   * anders bel je twintig leads verder nog altijd met het verkeerde script
+   * zonder dat je het doorhebt. Filtert het bord op één merk, dan blijft dat
+   * merk staan: dan is de keuze al gemaakt.
+   */
+  const leadId = lead?.id ?? null
+  const leadMerk = lead?.pipeline_id ?? null
+  useEffect(() => {
+    if (!leadId) return
+    setMerkId(pipelineId || leadMerk || pipelines[0]?.id || '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leadId])
 
   /**
    * Deze lead voor mij vastzetten zolang ik ermee bezig ben.
@@ -303,6 +333,21 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
       // het notitieveld staat zou anders stil verloren gaan — eerst loggen.
       if (note.trim()) {
         await stuur({ noteKind: 'call', note: note.trim() }, true)
+      }
+      // Belde je namens het andere merk, dan verhuist de lead eerst. Het
+      // boekscherm leest de brochure, de afzender en de agenda uit het merk
+      // van de lead — zonder deze stap komt de verkeerde one-pager mee.
+      if (merkId && lead.pipeline_id && merkId !== lead.pipeline_id) {
+        try {
+          const r = await fetch(`/api/admin/sales/leads/${lead.id}`, {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pipelineId: merkId }),
+          })
+          if (!r.ok) {
+            const j = await r.json().catch(() => ({}))
+            toast.warning(j.error || 'Kon het merk niet omzetten — controleer het in het boekscherm.')
+          }
+        } catch { toast.warning('Kon het merk niet omzetten — controleer het in het boekscherm.') }
       }
       router.push(`/admin/sales/appointments?lead=${lead.id}`)
       return
@@ -453,10 +498,24 @@ export function FocusMode({ leads, bezet = {}, pipelineId, merk, stageFilter, on
       {/* ── Kop ── */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-white">
         <div className="flex items-center gap-3 min-w-0">
-          {merk && (
-            <span className={`text-xs font-bold px-2.5 py-1 rounded-full border shrink-0 ${merkStijl(merk.key).badge}`}>
-              {merk.name}
-            </span>
+          {/* Voor wie bel je nu? Eén lijst, twee bedrijven — dus is dit een
+              knop en geen etiket. De keuze wisselt het script mee en bepaalt
+              waar een afspraak terechtkomt. */}
+          {pipelines.length > 1 && (
+            <div className="inline-flex rounded-full border border-gray-200 p-0.5 bg-gray-50 shrink-0">
+              {pipelines.map((p) => {
+                const stijl = merkStijl(p.key)
+                const aan = p.id === merkId
+                return (
+                  <button key={p.id} onClick={() => setMerkId(p.id)} title={`Bellen namens ${p.name}`}
+                    className={`px-2.5 py-1 text-xs font-bold rounded-full transition-colors flex items-center gap-1.5 ${
+                      aan ? `${stijl.badge} border` : 'text-gray-500 hover:text-black'}`}>
+                    <span className={`inline-block h-2 w-2 rounded-full ${stijl.stip}`} />
+                    {p.name}
+                  </button>
+                )
+              })}
+            </div>
           )}
           <span className="text-sm text-gray-500 shrink-0">
             Nog <b className="text-gray-900">{wachtrij.nu.length}</b> te bellen

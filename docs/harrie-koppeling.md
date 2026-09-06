@@ -66,9 +66,30 @@ je alles op zonder dat filter; wat dan niet meer meekomt, is weg.
 `stageKey` is **stabiel**; `stage` is het label en mag veranderen. Match altijd
 op `stageKey`.
 
+`appointment` ontstond vroeger uitsluitend door een geslaagde boeking. Sinds
+september 2026 kan een setter die status ook met de hand zetten — een afspraak
+wordt nu eenmaal ook wel eens ter plekke of via een ander kanaal vastgelegd.
+Voor Harrie verandert er niets: de fase betekent hetzelfde en blijft een reden
+om er zelf van af te blijven.
+
 **De fase zegt waar de volgende stap ligt, niet wat er allemaal gebeurd is.** Een
 lead kan via drie kanalen benaderd zijn; de volledige geschiedenis staat op de
 tijdlijn (`sales_lead_events`).
+
+### Twee merken, één lijst
+
+We verkopen onder twee namen: **NextGenMedia** (social media, content) en
+**NextGenSolutions** (websites, software). Dat was vroeger één lijst per merk;
+nu is het één pipeline waarin elke partij zelf zijn merk draagt.
+
+`pipeline` is het **hoofdmerk** — daar hangen de brochure, de afzender en de
+agenda aan vast. `merken` zegt voor wie de lead verder nog telt en kan er dus
+twee bevatten: een zaak die een website nodig heeft, wil vaak ook social media.
+Het hoofdmerk zit altijd in `merken`.
+
+Schrijf hier niets zelf naartoe. Voeg je een prospect toe, dan komt die in het
+merk terecht dat bij de campagne hoort; het aanvinken van een tweede merk is een
+beslissing die aan de telefoon valt.
 
 ### Warm
 
@@ -112,6 +133,10 @@ Eén rij per partij, uit drie bronnen. De kolommen liggen vast:
 | `harrie` | jsonb | Jouw laatste blokje, zoals wij het bewaarden. |
 | `deleted` | bool | Gearchiveerd — weer vrij. |
 | `updatedAt` | timestamptz | Hoogste van lead, bedrijf en contactpersoon. |
+| `pipeline` | text | Hoofdmerk: `nextgenmedia` of `nextgensolutions`. |
+| `pipelineNaam` | text | Datzelfde merk, uitgeschreven. |
+| `aangemaaktOp` | timestamptz | Wanneer de lead bij ons binnenkwam. |
+| `merken` | text[] | **Alle** merken waarvoor de lead telt. Kan er twee bevatten. |
 
 De drie bronnen:
 

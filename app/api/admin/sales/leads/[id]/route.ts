@@ -1,7 +1,7 @@
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
-import { canTransition, transitionError, APPOINTMENT_STAGE } from '@/lib/sales/stages'
+import { canTransition, transitionError } from '@/lib/sales/stages'
 import { isRedenCode, redenTekst, redenUitTekst } from '@/lib/sales/redenen'
 import { MAX_GEEN_GEHOOR, GEEN_GEHOOR_UREN } from '@/lib/sales/focus-queue'
 import { logLeadEvent, moveLeadToPipeline } from '@/lib/sales/service'
@@ -39,7 +39,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const admin = createAdminSupabaseClient()
 
     const { data: current } = await admin.from('sales_leads')
-      .select('id, stage_key, contact_id, pipeline_id, company_id, sales_client_id, lost_reason, reden_code, geen_gehoor_count, warm')
+      .select('id, stage_key, contact_id, pipeline_id, company_id, sales_client_id, lost_reason, reden_code, geen_gehoor_count, warm, merken')
       .eq('id', id).maybeSingle()
     if (!current) return NextResponse.json({ error: 'Lead niet gevonden' }, { status: 404 })
 
@@ -63,10 +63,51 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     const patch: Record<string, unknown> = {}
 
-    // Fasewissel — "Afspraak ingepland" kan hier NOOIT gezet worden (§3): die
-    // ontstaat uitsluitend via een geslaagde boeking in Appointment setting.
+    /**
+     * Voor welke van onze twee bedrijven telt deze lead? Beide mag.
+     *
+     * `pipeline_id` blijft het HOOFDmerk: daar hangen de brochure, de afzender,
+     * de agendakleur en de ClickUp-lijst aan vast, en die moeten één ding zijn.
+     * Vink je het hoofdmerk uit, dan verhuist de lead dus écht — met dezelfde
+     * controle als de verhuisknop, zodat een bedrijf nooit twee keer actief in
+     * hetzelfde merk staat.
+     */
+    if (Array.isArray(b.merken)) {
+      const pipelines = await listPipelines()
+      const geldig = pipelines.map((p) => p.key)
+      const keuze = [...new Set((b.merken as unknown[]).map((v) => String(v)))]
+        .filter((k) => geldig.includes(k))
+      if (keuze.length === 0) {
+        return NextResponse.json({ error: 'Kies minstens één merk.' }, { status: 400 })
+      }
+      const huidig = pipelines.find((p) => p.id === (current as { pipeline_id: string | null }).pipeline_id)
+      if (huidig && !keuze.includes(huidig.key)) {
+        const doel = pipelines.find((p) => p.key === keuze[0])
+        if (doel) {
+          const moved = await moveLeadToPipeline(id, doel.id)
+          if (!moved.ok) return NextResponse.json({ error: moved.error }, { status: 409 })
+          await logLeadEvent(id, {
+            kind: 'system', body: `Verhuisd naar ${doel.name}`,
+            actorId: actor.id, actorEmail: actor.email ?? null,
+          })
+        }
+      }
+      const vorig = ((current as { merken?: string[] | null }).merken ?? []).slice().sort()
+      if (JSON.stringify(vorig) !== JSON.stringify(keuze.slice().sort())) {
+        const namen = keuze.map((k) => pipelines.find((p) => p.key === k)?.name ?? k)
+        await logLeadEvent(id, {
+          kind: 'system', body: `Merk: ${namen.join(' + ')}`,
+          actorId: actor.id, actorEmail: actor.email ?? null,
+        })
+      }
+      patch.merken = keuze
+    }
+
+    // Fasewissel. "Afspraak ingepland" mag hier ook gezet worden: niet elke
+    // afspraak ontstaat in het boekscherm, en een status die je niet kunt
+    // rechtzetten is erger dan een status die je zelf moet waarmaken.
     if (typeof b.stage === 'string' && b.stage !== current.stage_key) {
-      if (b.stage === APPOINTMENT_STAGE || !canTransition(current.stage_key, b.stage)) {
+      if (!canTransition(current.stage_key, b.stage)) {
         return NextResponse.json({ error: transitionError(current.stage_key, b.stage) ?? 'Niet toegestaan' }, { status: 400 })
       }
       // "Geen interesse" EIST een reden — hier, niet alleen in het scherm.

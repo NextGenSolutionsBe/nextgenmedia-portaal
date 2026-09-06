@@ -71,25 +71,27 @@ const RANG: Record<string, number> = {
 export const stageRang = (key: string): number => RANG[key] ?? 0
 
 /**
- * "Afspraak ingepland" ontstaat UITSLUITEND door een geslaagde boeking (§3, §6).
- * Daarom staat die fase nergens in een dropdown en kan hij niet via de gewone
- * status-API gezet worden — enkel de boekingsroute en Harrie's boeking mogen
- * hem toekennen.
+ * De fase die een geslaagde boeking zet. Die route blijft bestaan, dus een
+ * afspraak die via Appointment setting geboekt wordt komt nog altijd vanzelf
+ * hier terecht.
+ *
+ * Vroeger kon deze fase UITSLUITEND zo ontstaan en stond hij in geen enkele
+ * keuzelijst. Dat is losgelaten: een afspraak wordt ook wel eens ter plekke
+ * of via een ander kanaal vastgelegd, en dan moet je hem gewoon kunnen zetten
+ * in plaats van een boeking na te spelen die al gebeurd is.
  */
 export const APPOINTMENT_STAGE: StageKey = 'appointment'
 
-/** Fases die een mens handmatig mag kiezen. */
-export const MANUAL_STAGES: StageKey[] = STAGE_KEYS.filter((k) => k !== APPOINTMENT_STAGE)
+/** Fases die een mens handmatig mag kiezen — alle, dus. */
+export const MANUAL_STAGES: StageKey[] = [...STAGE_KEYS]
 
 /**
- * Mag deze overgang handmatig? Setters bewegen vrij door alle belfases; alleen
- * "Afspraak ingepland" is verboden als doel. Bewust ruim: een setter die aan de
- * telefoon hangt moet niet vechten met een statusmachine — de enige harde regel
- * is dat een afspraak-status altijd een échte afspraak weerspiegelt.
+ * Mag deze overgang handmatig? Setters bewegen vrij door alle fases. Bewust
+ * ruim: een setter die aan de telefoon hangt moet niet vechten met een
+ * statusmachine.
  */
 export function canTransition(from: string, to: string): boolean {
   if (!isStageKey(to)) return false
-  if (to === APPOINTMENT_STAGE) return false      // alleen via een boeking
   if (from === to) return false
   return true
 }
@@ -97,9 +99,6 @@ export function canTransition(from: string, to: string): boolean {
 /** Reden waarom een overgang geweigerd wordt (voor een nette melding). */
 export function transitionError(from: string, to: string): string | null {
   if (canTransition(from, to)) return null
-  if (to === APPOINTMENT_STAGE) {
-    return 'Deze status ontstaat automatisch zodra je een afspraak boekt in Appointment setting.'
-  }
   if (!isStageKey(to)) return 'Onbekende status.'
   if (from === to) return 'De lead staat al op deze status.'
   return 'Deze statuswijziging is niet toegestaan.'

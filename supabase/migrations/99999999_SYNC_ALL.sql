@@ -3260,10 +3260,47 @@ $fn$;
 -- RLS op sales_leads en kan IEDEREEN met de publieke anon-sleutel — die in elke
 -- browser zit — de volledige pipeline lezen: namen, nummers, e-mailadressen.
 -- Dat is precies wat hier misging bij het bouwen. Beide sloten moeten blijven.
+-- ── Eén pipeline, twee merken ──────────────────────────────────────────────
+-- Een lead kan voor NextGenMedia én NextGenSolutions interessant zijn. Daarom
+-- blijft pipeline_id het HOOFDmerk — daar hangen de brochure, de afzender, de
+-- agendakleur en de ClickUp-lijst aan vast — en zegt `merken` voor wie de lead
+-- verder nog telt. Het hoofdmerk zit ALTIJD in merken; dat wordt hieronder in
+-- de databank afgedwongen en niet in de app, want leads komen ook binnen via
+-- import en via Harrie's trigger, en een regel die maar op één van die drie
+-- paden geldt is geen regel.
+ALTER TABLE public.sales_leads ADD COLUMN IF NOT EXISTS merken text[] NOT NULL DEFAULT '{}'::text[];
+CREATE INDEX IF NOT EXISTS sales_leads_merken_idx ON public.sales_leads USING gin (merken);
+
+CREATE OR REPLACE FUNCTION public.sales_leads_merken_sync() RETURNS trigger
+LANGUAGE plpgsql AS $fn$
+DECLARE v_key text;
+BEGIN
+  IF NEW.pipeline_id IS NOT NULL THEN
+    SELECT key INTO v_key FROM public.sales_pipelines WHERE id = NEW.pipeline_id;
+    -- array_append en niet `||`: dat laatste is ambigu tussen array en tekst en
+    -- levert een "malformed array literal" op.
+    IF v_key IS NOT NULL AND NOT (coalesce(NEW.merken, '{}'::text[]) @> ARRAY[v_key]) THEN
+      NEW.merken := array_append(coalesce(NEW.merken, '{}'::text[]), v_key);
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$fn$;
+
+DROP TRIGGER IF EXISTS sales_leads_merken_sync ON public.sales_leads;
+CREATE TRIGGER sales_leads_merken_sync
+BEFORE INSERT OR UPDATE OF pipeline_id, merken ON public.sales_leads
+FOR EACH ROW EXECUTE FUNCTION public.sales_leads_merken_sync();
+
+-- Wat er al stond eenmalig aanvullen. Raakt alleen rijen die nog leeg zijn.
+UPDATE public.sales_leads l SET merken = ARRAY[p.key]
+FROM public.sales_pipelines p
+WHERE p.id = l.pipeline_id AND (l.merken IS NULL OR l.merken = '{}'::text[]);
+
 CREATE OR REPLACE VIEW public.harrie_pipeline AS
 SELECT
   'lead_' || l.id::text AS id, l.id AS lead_id, c.name AS company,
-  regexp_replace(coalesce(c.ondernemingsnummer,''), '\D', '', 'g') AS kbo,
+  nullif(regexp_replace(coalesce(c.ondernemingsnummer,''), '\D', '', 'g'), '') AS kbo,
   public.harrie_uniek(ARRAY[lower(ct.email), lower(c.email)]) AS emails,
   public.harrie_uniek(ARRAY[
     nullif(regexp_replace(lower(coalesce(c.website,'')), '^https?://(www\.)?|/.*$', '', 'g'), ''),
@@ -3276,33 +3313,38 @@ SELECT
   ct.name AS "contactName", c.city, c.sector, l.callback_at AS "callbackAt",
   l.labels, l.warm, l.lost_reason AS "redenTekst", l.reden_code AS "redenCode",
   l.harrie, l.archived_at IS NOT NULL AS deleted,
-  GREATEST(l.updated_at, c.updated_at, coalesce(ct.updated_at, l.updated_at)) AS "updatedAt"
+  GREATEST(l.updated_at, c.updated_at, coalesce(ct.updated_at, l.updated_at)) AS "updatedAt",
+  pl.key AS pipeline, pl.name AS "pipelineNaam", l.created_at AS "aangemaaktOp",
+  coalesce(l.merken, '{}'::text[]) AS merken
 FROM public.sales_leads l
 JOIN public.sales_companies c ON c.id = l.company_id
 LEFT JOIN public.sales_contacts ct ON ct.id = l.contact_id
 LEFT JOIN public.sales_stages s ON s.key = l.stage_key AND s.sales_client_id = l.sales_client_id
+LEFT JOIN public.sales_pipelines pl ON pl.id = l.pipeline_id
 UNION ALL
 SELECT 'client_' || k.id::text, NULL, k.company_name,
-  regexp_replace(coalesce(k.btw_nummer,''), '\D', '', 'g'),
-  array_remove(ARRAY[lower(k.email)], NULL),
-  array_remove(ARRAY[
+  nullif(regexp_replace(coalesce(k.btw_nummer,''), '\D', '', 'g'), ''),
+  public.harrie_uniek(ARRAY[lower(k.email)]),
+  public.harrie_uniek(ARRAY[
     nullif(regexp_replace(lower(coalesce(k.website_url,'')), '^https?://(www\.)?|/.*$', '', 'g'), ''),
-    nullif(split_part(lower(coalesce(k.email,'')), '@', 2), '')], NULL),
+    nullif(split_part(lower(coalesce(k.email,'')), '@', 2), '')]),
   ARRAY[]::text[], k.website_url,
   CASE WHEN k.archived_at IS NOT NULL THEN 'Oud-klant' ELSE 'Klant' END,
   CASE WHEN k.archived_at IS NOT NULL THEN 'oud_klant' ELSE 'klant' END,
   true, 'Is klant van ons', k.contact_name, NULL, k.niche, NULL,
-  ARRAY[]::text[], false, NULL, NULL, NULL, false, k.updated_at
+  ARRAY[]::text[], false, NULL, NULL, NULL, false, k.updated_at,
+  NULL, NULL, k.created_at, ARRAY[]::text[]
 FROM public.clients k
 UNION ALL
 SELECT 'kantoor_' || b.id::text, NULL, b.naam, NULL,
-  array_remove(ARRAY[lower(b.email)], NULL),
-  array_remove(ARRAY[nullif(split_part(lower(coalesce(b.email,'')), '@', 2), '')], NULL),
+  public.harrie_uniek(ARRAY[lower(b.email)]),
+  public.harrie_uniek(ARRAY[nullif(split_part(lower(coalesce(b.email,'')), '@', 2), '')]),
   ARRAY[]::text[], NULL,
   CASE WHEN b.is_eigen THEN 'Eigen bedrijf' ELSE 'Partner' END,
   CASE WHEN b.is_eigen THEN 'eigen_bedrijf' ELSE 'partner' END,
   true, CASE WHEN b.is_eigen THEN 'Ons eigen bedrijf' ELSE 'Partner waarmee we samenwerken' END,
-  NULL, NULL, NULL, NULL, ARRAY[]::text[], false, NULL, NULL, NULL, false, b.created_at
+  NULL, NULL, NULL, NULL, ARRAY[]::text[], false, NULL, NULL, NULL, false, b.created_at,
+  NULL, NULL, b.created_at, ARRAY[]::text[]
 FROM public.kantoor_bedrijven b;
 
 ALTER VIEW public.harrie_pipeline SET (security_invoker = on);

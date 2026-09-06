@@ -22,6 +22,8 @@ type LeadRow = {
   /** Het laatste blokje van Harrie: kanaal, berichten, belAdvies. */
   harrie?: Record<string, unknown> | null
   pipeline_id: string | null
+  /** Voor welke van onze merken telt deze lead? Beide mag. */
+  merken?: string[] | null
   sales_companies: {
     id: string; name: string; website: string | null; sector: string | null
     city: string | null; region: string | null; phone: string | null
@@ -36,7 +38,7 @@ type LeadRow = {
 // De volledige selectie mét de kolommen uit de migratie, en de smalle variant
 // als terugval zolang die migratie nog niet gedraaid is — anders blijft het
 // hele scherm leeg met een stille kolomfout.
-const SELECT_BREED = `id, stage_key, labels, callback_at, callback_note, archived_at, do_not_call, assigned_to, updated_at, lost_reason, reden_code, warm, warm_op, harrie, email_brief, geen_gehoor_count, pipeline_id, laatste_notitie, laatste_notitie_op,
+const SELECT_BREED = `id, stage_key, labels, callback_at, callback_note, archived_at, do_not_call, assigned_to, updated_at, lost_reason, reden_code, warm, warm_op, harrie, email_brief, geen_gehoor_count, pipeline_id, merken, laatste_notitie, laatste_notitie_op,
   sales_companies ( id, name, website, sector, city, region, phone, email, werkklasse, activiteit, ondernemingsnummer, prioriteit, linkedin, employees, gatekeeper_naam, dmu_naam, dmu_functie ),
   sales_contacts  ( id, name, email, phone, mobile, phone_digits, role, linkedin )`
 const SELECT_SMAL = `id, stage_key, labels, callback_at, archived_at, do_not_call, assigned_to, updated_at, lost_reason, email_brief, pipeline_id,
@@ -52,19 +54,28 @@ export async function GET(req: NextRequest) {
     const sp = req.nextUrl.searchParams
     const salesClientId = (await getOrCreateSalesOrg()).id
 
-    // Welk merk? Enkel een pipeline die echt van ons is telt; een onbekend id
-    // valt terug op de standaard i.p.v. stilletjes alles te tonen.
-    // 'all' bestaat voor de leadkiezer bij het boeken: daar moet je een lead
-    // uit beide merken kunnen aanduiden.
+    /**
+     * Welk merk? De pipeline is ÉÉN lijst geworden: standaard krijg je alles,
+     * en de merkkeuze is een filter i.p.v. twee gescheiden werelden. Vandaar
+     * dat een leeg of onbekend `pipeline` nu 'alles' betekent en niet meer
+     * stilletjes op NextGenMedia terugvalt — anders zou je de helft van je
+     * eigen bestand niet zien zonder dat het scherm dat zegt.
+     */
     const pipelines = await listPipelines()
     const wanted = sp.get('pipeline') ?? ''
-    const allPipelines = wanted === 'all'
-    const pipelineId = pipelines.find((p) => p.id === wanted)?.id ?? pipelines[0]?.id ?? ''
+    const gekozen = pipelines.find((p) => p.id === wanted) ?? null
+    const allPipelines = !gekozen
+    const pipelineId = gekozen?.id ?? ''
+    const pipelineKey = gekozen?.key ?? ''
 
     const admin = createAdminSupabaseClient()
     // `tel` enkel op de EERSTE pagina: een exacte telling laat Postgres de hele
     // gefilterde verzameling aflopen. Dat drie keer vragen levert drie keer
     // hetzelfde getal op voor drie keer de kosten.
+    // Staat de kolom `merken` er nog niet, dan valt zowel de selectie als het
+    // filter terug op enkel het hoofdmerk. Zo blijft het scherm werken vóór de
+    // migratie gedraaid is.
+    let metMerken = true
     const bouw = (selectie: string, van: number, tot: number, tel: boolean) => {
       let q = admin
         .from('sales_leads')
@@ -77,7 +88,13 @@ export async function GET(req: NextRequest) {
         .order('id', { ascending: true })
         .range(van, tot)
 
-      if (!allPipelines) q = q.eq('pipeline_id', pipelineId)
+      // Op het merk filteren betekent: hoofdmerk óf meegemarkeerd. Een lead
+      // die voor beide bedrijven telt hoort in beide lijsten te staan.
+      if (!allPipelines) {
+        q = metMerken && pipelineKey
+          ? q.or(`pipeline_id.eq.${pipelineId},merken.cs.{${pipelineKey}}`)
+          : q.eq('pipeline_id', pipelineId)
+      }
 
       // Archief staat standaard uit: gearchiveerde leads zijn zacht verwijderd.
       if (sp.get('archived') === '1') q = q.not('archived_at', 'is', null)
@@ -106,8 +123,9 @@ export async function GET(req: NextRequest) {
       let { data, error, count } = await bouw(selectie, van, van + PAGINA - 1, tel)
       // Kolommen uit de migratie ontbreken nog? Eén keer terugvallen op de
       // smalle selectie en deze pagina opnieuw ophalen.
-      if (error && /callback_note|werkklasse|activiteit|ondernemingsnummer|prioriteit|reden_code|warm|harrie|column/i.test(error.message)) {
+      if (error && /callback_note|werkklasse|activiteit|ondernemingsnummer|prioriteit|reden_code|warm|merken|harrie|column/i.test(error.message)) {
         selectie = SELECT_SMAL
+        metMerken = false
         ;({ data, error, count } = await bouw(selectie, van, van + PAGINA - 1, tel))
       }
       if (error) throw new Error(error.message)
