@@ -158,7 +158,27 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (b.callback_note !== undefined) {
       patch.callback_note = String(b.callback_note ?? '').trim().slice(0, 300) || null
     }
-    if (b.lost_reason !== undefined) patch.lost_reason = String(b.lost_reason ?? '') || null
+    /**
+     * De reden los aanpassen, zonder de fase te wijzigen.
+     *
+     * Dat gebeurt in het detailpaneel: staat een lead al op "Geen interesse" en
+     * kies je een andere reden, dan komt er GEEN stage mee in dit verzoek. De
+     * afhandeling hierboven zit in de fasewissel-tak en slaat dan over, waardoor
+     * je keuze stil verloren ging.
+     */
+    if (b.reden_code !== undefined && patch.reden_code === undefined) {
+      const code = String(b.reden_code ?? '').trim()
+      if (code && isRedenCode(code)) {
+        patch.reden_code = code
+        patch.lost_reason = redenTekst(code, b.reden_toelichting as string | undefined)
+      } else if (!code) {
+        patch.reden_code = null
+      }
+    }
+
+    if (b.lost_reason !== undefined && patch.lost_reason === undefined) {
+      patch.lost_reason = String(b.lost_reason ?? '') || null
+    }
     if (b.email_brief !== undefined) patch.email_brief = String(b.email_brief ?? '') || null
     if (typeof b.do_not_call === 'boolean') {
       patch.do_not_call = b.do_not_call
