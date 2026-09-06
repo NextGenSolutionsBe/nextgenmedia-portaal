@@ -72,34 +72,41 @@ const STAGE_STYLE: Record<string, string> = {
 type Pipeline = { id: string; name: string; key: string }
 
 /**
- * De merken van een lead, in de volgorde van de pipelines.
+ * Het VASTGELEGDE merk van een lead. Leeg tot er een afspraak staat.
  *
- * Terugval op het hoofdmerk voor rijen van vóór de merken-kolom: die hebben
- * wel een pipeline_id maar nog geen lijstje, en zonder deze terugval zou zo'n
- * lead nergens bij horen.
+ * Bewust geen terugval op pipeline_id. Dat veld bestaat nog — het houdt bij uit
+ * welke lijst een lead komt en zorgt dat hetzelfde bedrijf niet twee keer
+ * binnenkomt — maar het zegt niets over voor wie er gebeld wordt. Zou dit
+ * terugvallen, dan stond er bij élke lead een merk waar niemand voor gekozen
+ * heeft.
  */
-function merkenVan(lead: { merken?: string[] | null; pipeline_id?: string | null }, pipelines: Pipeline[]): Pipeline[] {
+function merkenVan(lead: { merken?: string[] | null }, pipelines: Pipeline[]): Pipeline[] {
   const keys = lead.merken ?? []
-  const uit = pipelines.filter((p) => keys.includes(p.key))
-  if (uit.length > 0) return uit
-  const eigen = pipelines.find((p) => p.id === lead.pipeline_id)
-  return eigen ? [eigen] : []
+  return pipelines.filter((p) => keys.includes(p.key))
 }
 
+/** Vanaf hier ligt het merk vast: er is een afspraak geweest. */
+const MERK_VAST: string[] = ['appointment', 'won', 'lost']
+
 /**
- * ÉÉN PIPELINE, TWEE MERKEN.
+ * ÉÉN PIPELINE. HET MERK LIGT PAS VAST BIJ DE AFSPRAAK.
  *
- * Er stonden hier vroeger twee gescheiden lijsten. Dat klopte niet met hoe er
- * gebeld wordt: dezelfde prospect kan voor NextGenMedia én NextGenSolutions
- * interessant zijn, en wie in de ene lijst zat bestond niet in de andere.
- * Nu is het één bestand met een merkfilter, en draagt elke lead zelf zijn
- * merk(en). Het hoofdmerk — de knop met de kleur in het detailpaneel — bepaalt
- * de brochure, de afzender en de agenda bij een afspraak.
+ * Er stonden hier vroeger twee gescheiden lijsten, één per merk. Dat klopte
+ * niet met hoe er gebeld wordt: je pakt de telefoon en hoort pas tijdens het
+ * gesprek of iemand een website nodig heeft of social media. Vooraf een merk
+ * moeten kiezen is dus een keuze op het verkeerde moment.
+ *
+ * Daarom: één lijst, geen merk op een lead. In Focus Mode schakel je tussen de
+ * scripts van de twee bedrijven; boek je een afspraak, dán ligt het merk vast
+ * en verschijnt het ook in de lijst. Vanaf dat punt hangt er iets aan: de
+ * brochure, de afzender en de agenda.
  */
 export function PipelineClient({ pipelines, initialPipelineId }: {
   pipelines: Pipeline[]; initialPipelineId: string
 }) {
-  const [pipelineId, setPipelineId] = useState(initialPipelineId)
+  // Geen merkkeuze meer bovenaan: je belt uit één lijst. Wel blijft ?pipeline
+  // werken, zodat een link vanuit de statistieken op één lijst kan uitkomen.
+  const [pipelineId] = useState(initialPipelineId)
   const [leads, setLeads] = useState<Lead[]>([])
   // Leads die een collega op dit moment aan het bellen is (lead-id → naam).
   const [bezet, setBezet] = useState<Record<string, string>>({})
@@ -253,29 +260,6 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
       {/* Kop: merk, zoeken, knoppen */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Eén lijst, met een merkfilter erboven. "Alle merken" staat vooraan
-              omdat dat de normale manier van werken is; de twee andere knoppen
-              zijn er voor wanneer je bewust één bedrijf wil afbellen. Geel =
-              NextGenMedia, blauw = NextGenSolutions. */}
-          <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50">
-            <button onClick={() => { setPipelineId(''); setSelectedId(null); setPicked(new Set()) }}
-              className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors ${
-                pipelineId === '' ? 'bg-white text-black border border-gray-200 shadow-sm' : 'text-gray-500 hover:text-black'}`}>
-              Alle merken
-            </button>
-            {pipelines.map((p) => {
-              const stijl = merkStijl(p.key)
-              const actief = p.id === pipelineId
-              return (
-                <button key={p.id} onClick={() => { setPipelineId(p.id); setSelectedId(null); setPicked(new Set()) }}
-                  className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors flex items-center gap-1.5 ${
-                    actief ? `${stijl.badge} border shadow-sm` : 'text-gray-500 hover:text-black'}`}>
-                  <span className={`inline-block h-2 w-2 rounded-full ${stijl.stip}`} />
-                  {p.name}
-                </button>
-              )
-            })}
-          </div>
           <div className="relative">
             <Search className="h-4 w-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
             <input className="input-base pl-8 w-64" value={q} onChange={(e) => setQ(e.target.value)}
@@ -420,13 +404,17 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
                       </td>
                       <td className="table-td">
                         <div className="flex items-center gap-1.5 min-w-0">
-                          {/* Voor welk merk telt deze lead? Twee stippen = beide. */}
-                          <span className="flex items-center gap-0.5 shrink-0">
-                            {merkenVan(l, pipelines).map((p) => (
-                              <span key={p.id} title={p.name}
-                                className={`inline-block h-2 w-2 rounded-full ${merkStijl(p.key).stip}`} />
-                            ))}
-                          </span>
+                          {/* Een stip verschijnt pas als het merk vastligt — dus
+                              vanaf de afspraak. Daarvóór staat er niets, want
+                              dan is er ook niets beslist. */}
+                          {merkenVan(l, pipelines).length > 0 && (
+                            <span className="flex items-center gap-0.5 shrink-0">
+                              {merkenVan(l, pipelines).map((p) => (
+                                <span key={p.id} title={p.name}
+                                  className={`inline-block h-2 w-2 rounded-full ${merkStijl(p.key).stip}`} />
+                              ))}
+                            </span>
+                          )}
                           <span className="font-medium truncate">{l.sales_companies?.name ?? '—'}</span>
                           {(dubbel.get(l.sales_companies?.id ?? '') ?? 0) > 1 && (
                             <span title="Dit bedrijf staat twee keer in de lijst: een aparte lead per merk."
@@ -530,15 +518,13 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
 
       {reminders && <ReminderSettings onClose={() => setReminders(false)} />}
 
-      {/* Toevoegen en importeren vragen wél één merk: een nieuwe lead moet
-          weten welke brochure en welke agenda bij hem horen. Staat het filter
-          op "alle", dan is dat het eerste merk — met een keuze in het scherm. */}
       {importing && (
-        <ImportModal pipelineId={pipelineId || pipelines[0]?.id || ''} onClose={() => setImporting(false)} onDone={load} />
+        <ImportModal pipelines={pipelines} pipelineId={pipelineId || pipelines[0]?.id || ''}
+          onClose={() => setImporting(false)} onDone={load} />
       )}
 
       {newLead && (
-        <NewLeadModal pipelines={pipelines} pipelineId={pipelineId || pipelines[0]?.id || ''}
+        <NewLeadModal pipelineId={pipelineId || pipelines[0]?.id || ''}
           onClose={() => setNewLead(false)} onCreated={() => { setNewLead(false); load() }} />
       )}
     </div>
@@ -631,12 +617,12 @@ function LeadDetail({ lead, pipelines, onChanged, onClose }: {
         </div>
       )}
 
-      {/* Voor welk merk telt deze lead? Beide mag: een zaak die een website
-          nodig heeft, wil vaak ook social media. Klik een merk aan of uit.
-          Het HOOFDmerk draagt zijn kleur — dat is het merk waarvan de
-          brochure, de afzender en de agenda meegaan bij een afspraak. Zet je
-          dat uit, dan verhuist de lead echt naar het andere. */}
-      {pipelines.length > 1 && (
+      {/* Het merk verschijnt pas vanaf de afspraak. Daarvóór bel je voor eender
+          welk bedrijf en valt er niets te kiezen; het script schakel je in
+          Focus Mode. Vanaf de afspraak hangt er wél iets aan — brochure,
+          afzender, agenda — en dan mag je het hier ook rechtzetten. Beide
+          aanvinken kan; zet je het gekleurde merk uit, dan verhuist de lead. */}
+      {pipelines.length > 1 && MERK_VAST.includes(lead.stage_key) && (
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Merk</label>
           <div className="flex gap-1.5">
@@ -666,8 +652,8 @@ function LeadDetail({ lead, pipelines, onChanged, onClose }: {
             })}
           </div>
           <p className="text-[11px] text-gray-500 mt-1">
-            Beide aanvinken mag. Het gekleurde merk is het hoofdmerk: daarvan gaan de
-            brochure, de afzender en de agenda mee bij een afspraak.
+            Vastgelegd bij de afspraak. Het gekleurde merk is het hoofdmerk: daarvan
+            gaan de brochure, de afzender en de agenda mee.
           </p>
         </div>
       )}
@@ -856,13 +842,10 @@ function LeadDetail({ lead, pipelines, onChanged, onClose }: {
 }
 
 // ── Nieuwe lead ──────────────────────────────────────────────────────────────
-function NewLeadModal({ pipelines, pipelineId, onClose, onCreated }: {
-  pipelines: Pipeline[]; pipelineId: string; onClose: () => void; onCreated: () => void
+function NewLeadModal({ pipelineId, onClose, onCreated }: {
+  pipelineId: string; onClose: () => void; onCreated: () => void
 }) {
   const [f, setF] = useState({ company: '', website: '', sector: '', city: '', companyPhone: '', contact: '', role: '', email: '', phone: '' })
-  // Voor welk merk komt deze lead binnen? Achteraf kan je er het andere merk
-  // bij aanvinken, maar één ervan moet er nu al bij staan.
-  const [merk, setMerk] = useState(pipelineId)
   const [saving, setSaving] = useState(false)
   const set = (k: keyof typeof f, v: string) => setF((p) => ({ ...p, [k]: v }))
 
@@ -873,7 +856,7 @@ function NewLeadModal({ pipelines, pipelineId, onClose, onCreated }: {
       const res = await fetch('/api/admin/sales/leads', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          pipelineId: merk,
+          pipelineId,
           company: { name: f.company, website: f.website, sector: f.sector, city: f.city, phone: f.companyPhone },
           contact: { name: f.contact, role: f.role, email: f.email, phone: f.phone },
         }),
@@ -887,25 +870,6 @@ function NewLeadModal({ pipelines, pipelineId, onClose, onCreated }: {
 
   return (
     <Modal title="Nieuwe lead" onClose={onClose} onSave={save} saving={saving}>
-      {pipelines.length > 1 && (
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Merk</label>
-          <div className="flex gap-1.5">
-            {pipelines.map((p) => {
-              const stijl = merkStijl(p.key)
-              const aan = p.id === merk
-              return (
-                <button key={p.id} type="button" onClick={() => setMerk(p.id)}
-                  className={`flex-1 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors flex items-center justify-center gap-1.5 ${
-                    aan ? `${stijl.badge} shadow-sm` : 'border-gray-200 text-gray-400 hover:text-black'}`}>
-                  <span className={`inline-block h-2 w-2 rounded-full ${aan ? stijl.stip : 'bg-gray-300'}`} />
-                  {p.name}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      )}
       <Field label="Bedrijfsnaam *" value={f.company} onChange={(v) => set('company', v)} />
       <Field label="Website" value={f.website} onChange={(v) => set('website', v)} placeholder="bedrijf.be" />
       <div className="grid grid-cols-2 gap-2">
@@ -920,7 +884,10 @@ function NewLeadModal({ pipelines, pipelineId, onClose, onCreated }: {
         <Field label="Telefoon" value={f.phone} onChange={(v) => set('phone', v)} />
       </div>
       <Field label="E-mail" value={f.email} onChange={(v) => set('email', v)} type="email" />
-      <p className="text-[11px] text-gray-500">Bestaat dit bedrijf al in deze pipeline, dan melden we dat — er komt nooit een dubbele lead bij.</p>
+      <p className="text-[11px] text-gray-500">
+        Geen merk nodig: dat ligt pas vast bij de afspraak. Bestaat dit bedrijf al in de
+        lijst, dan melden we dat — er komt nooit een dubbele lead bij.
+      </p>
     </Modal>
   )
 }

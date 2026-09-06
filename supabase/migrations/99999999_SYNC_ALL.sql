@@ -3260,28 +3260,31 @@ $fn$;
 -- RLS op sales_leads en kan IEDEREEN met de publieke anon-sleutel — die in elke
 -- browser zit — de volledige pipeline lezen: namen, nummers, e-mailadressen.
 -- Dat is precies wat hier misging bij het bouwen. Beide sloten moeten blijven.
--- ── Eén pipeline, twee merken ──────────────────────────────────────────────
--- Een lead kan voor NextGenMedia én NextGenSolutions interessant zijn. Daarom
--- blijft pipeline_id het HOOFDmerk — daar hangen de brochure, de afzender, de
--- agendakleur en de ClickUp-lijst aan vast — en zegt `merken` voor wie de lead
--- verder nog telt. Het hoofdmerk zit ALTIJD in merken; dat wordt hieronder in
--- de databank afgedwongen en niet in de app, want leads komen ook binnen via
--- import en via Harrie's trigger, en een regel die maar op één van die drie
--- paden geldt is geen regel.
+-- ── Eén lijst; het merk ligt pas vast bij de afspraak ──────────────────────
+-- Vooraf een merk kiezen is een keuze op het verkeerde moment: je hoort pas
+-- tijdens het gesprek of iemand een website nodig heeft of social media. Dus
+-- belt iedereen uit één lijst en blijft `merken` leeg tot er een afspraak
+-- staat. Vanaf dat punt hangt er wél iets aan het merk — de brochure, de
+-- afzender, de agendakleur en de ClickUp-lijst — en wordt het vastgelegd.
+--
+-- `pipeline_id` blijft bestaan, maar betekent voortaan HERKOMST: uit welke
+-- lijst een lead komt. Het is ook de ontdubbelbak (zie de unieke index
+-- sales_leads_one_per_company_pipeline), dus het mag niet zomaar leeg.
 ALTER TABLE public.sales_leads ADD COLUMN IF NOT EXISTS merken text[] NOT NULL DEFAULT '{}'::text[];
 CREATE INDEX IF NOT EXISTS sales_leads_merken_idx ON public.sales_leads USING gin (merken);
 
+-- Afdwingen in de databank en niet in de app: leads komen ook binnen via
+-- import en via Harrie's trigger, en een regel die maar op één van die drie
+-- paden geldt is geen regel.
 CREATE OR REPLACE FUNCTION public.sales_leads_merken_sync() RETURNS trigger
 LANGUAGE plpgsql AS $fn$
 DECLARE v_key text;
 BEGIN
-  IF NEW.pipeline_id IS NOT NULL THEN
+  IF NEW.stage_key IN ('appointment', 'won', 'lost')
+     AND coalesce(array_length(NEW.merken, 1), 0) = 0
+     AND NEW.pipeline_id IS NOT NULL THEN
     SELECT key INTO v_key FROM public.sales_pipelines WHERE id = NEW.pipeline_id;
-    -- array_append en niet `||`: dat laatste is ambigu tussen array en tekst en
-    -- levert een "malformed array literal" op.
-    IF v_key IS NOT NULL AND NOT (coalesce(NEW.merken, '{}'::text[]) @> ARRAY[v_key]) THEN
-      NEW.merken := array_append(coalesce(NEW.merken, '{}'::text[]), v_key);
-    END IF;
+    IF v_key IS NOT NULL THEN NEW.merken := ARRAY[v_key]; END IF;
   END IF;
   RETURN NEW;
 END;
@@ -3289,13 +3292,15 @@ $fn$;
 
 DROP TRIGGER IF EXISTS sales_leads_merken_sync ON public.sales_leads;
 CREATE TRIGGER sales_leads_merken_sync
-BEFORE INSERT OR UPDATE OF pipeline_id, merken ON public.sales_leads
+BEFORE INSERT OR UPDATE OF pipeline_id, merken, stage_key ON public.sales_leads
 FOR EACH ROW EXECUTE FUNCTION public.sales_leads_merken_sync();
 
--- Wat er al stond eenmalig aanvullen. Raakt alleen rijen die nog leeg zijn.
+-- Vanaf de afspraak: merk uit de herkomst, als het er nog niet stond.
 UPDATE public.sales_leads l SET merken = ARRAY[p.key]
 FROM public.sales_pipelines p
-WHERE p.id = l.pipeline_id AND (l.merken IS NULL OR l.merken = '{}'::text[]);
+WHERE p.id = l.pipeline_id
+  AND l.stage_key IN ('appointment', 'won', 'lost')
+  AND l.merken = '{}'::text[];
 
 CREATE OR REPLACE VIEW public.harrie_pipeline AS
 SELECT

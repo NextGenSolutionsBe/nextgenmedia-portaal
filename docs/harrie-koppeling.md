@@ -76,20 +76,26 @@ om er zelf van af te blijven.
 lead kan via drie kanalen benaderd zijn; de volledige geschiedenis staat op de
 tijdlijn (`sales_lead_events`).
 
-### Twee merken, één lijst
+### Het merk ligt pas vast bij de afspraak
 
 We verkopen onder twee namen: **NextGenMedia** (social media, content) en
-**NextGenSolutions** (websites, software). Dat was vroeger één lijst per merk;
-nu is het één pipeline waarin elke partij zelf zijn merk draagt.
+**NextGenSolutions** (websites, software). Vroeger was dat één lijst per merk.
+Dat klopte niet met hoe er gebeld wordt: je hoort pas tijdens het gesprek wat
+iemand nodig heeft. Nu is het één pipeline zonder merk op de lead.
 
-`pipeline` is het **hoofdmerk** — daar hangen de brochure, de afzender en de
-agenda aan vast. `merken` zegt voor wie de lead verder nog telt en kan er dus
-twee bevatten: een zaak die een website nodig heeft, wil vaak ook social media.
-Het hoofdmerk zit altijd in `merken`.
+- `merken` — het **vastgelegde** merk. **Leeg zolang er geen afspraak staat**,
+  en dat is de normale toestand voor bijna elke rij. Vanaf `appointment` (en
+  daarna `won`/`lost`) staat er één merk in; twee kan, maar is zeldzaam.
+- `pipeline` / `pipelineNaam` — de **herkomst**: uit welke lijst de lead komt.
+  Dit is géén merk en géén keuze van iemand. Het bestaat om te ontdubbelen en
+  om bij het boeken een merk voor te stellen.
 
-Schrijf hier niets zelf naartoe. Voeg je een prospect toe, dan komt die in het
-merk terecht dat bij de campagne hoort; het aanvinken van een tweede merk is een
-beslissing die aan de telefoon valt.
+**Kleur of segmenteer dus niet op `pipeline`.** Wil je weten of iets van
+NextGenMedia of NextGenSolutions is, kijk dan naar `merken` — en accepteer dat
+dat bij het overgrote deel leeg is, omdat er dan gewoon nog niets beslist is.
+
+Schrijf hier niets naartoe. Het merk wordt bij ons gezet op het moment dat de
+afspraak geboekt wordt.
 
 ### Warm
 
@@ -133,10 +139,10 @@ Eén rij per partij, uit drie bronnen. De kolommen liggen vast:
 | `harrie` | jsonb | Jouw laatste blokje, zoals wij het bewaarden. |
 | `deleted` | bool | Gearchiveerd — weer vrij. |
 | `updatedAt` | timestamptz | Hoogste van lead, bedrijf en contactpersoon. |
-| `pipeline` | text | Hoofdmerk: `nextgenmedia` of `nextgensolutions`. |
-| `pipelineNaam` | text | Datzelfde merk, uitgeschreven. |
+| `pipeline` | text | Herkomst van de lijst, geen merk. Niet op segmenteren. |
+| `pipelineNaam` | text | Diezelfde herkomst, uitgeschreven. |
 | `aangemaaktOp` | timestamptz | Wanneer de lead bij ons binnenkwam. |
-| `merken` | text[] | **Alle** merken waarvoor de lead telt. Kan er twee bevatten. |
+| `merken` | text[] | Het vastgelegde merk. **Leeg tot er een afspraak staat.** |
 
 De drie bronnen:
 

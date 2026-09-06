@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2, X, Upload, Sparkles, CheckCircle2, AlertTriangle } from 'lucide-react'
+import { merkStijl } from '@/lib/sales/merk'
 
 type Field = { key: string; label: string; required?: boolean }
 type Analysis = {
@@ -23,9 +24,19 @@ type Analysis = {
  * controleert en bevestigt → pas dán worden er leads aangemaakt.
  * Er wordt niets opgeslagen vóór de bevestiging.
  */
-export function ImportModal({ pipelineId, onClose, onDone }: {
+export function ImportModal({ pipelines, pipelineId, onClose, onDone }: {
+  pipelines: { id: string; name: string; key: string }[]
   pipelineId: string; onClose: () => void; onDone: () => void
 }) {
+  /**
+   * Uit welke lijst komt dit bestand?
+   *
+   * Dit is GEEN merk op de lead — dat ligt pas vast bij de afspraak. Het houdt
+   * enkel bij waar de lijst vandaan komt, en daarop wordt ontdubbeld: importeer
+   * je een NextGenSolutions-lijst in de verkeerde bak, dan komen bedrijven die
+   * er al in staan er een tweede keer bij.
+   */
+  const [lijst, setLijst] = useState(pipelineId)
   const [busy, setBusy] = useState(false)
   const [a, setA] = useState<Analysis | null>(null)
   const [mapping, setMapping] = useState<Record<string, string>>({})
@@ -50,7 +61,7 @@ export function ImportModal({ pipelineId, onClose, onDone }: {
     try {
       const res = await fetch('/api/admin/sales/import', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pipelineId, table: a.table, mapping }),
+        body: JSON.stringify({ pipelineId: lijst, table: a.table, mapping }),
       })
       const j = await res.json(); if (!res.ok) throw new Error(j.error)
       setResult(j)
@@ -73,6 +84,32 @@ export function ImportModal({ pipelineId, onClose, onDone }: {
         </div>
 
         <div className="p-5 overflow-y-auto space-y-4">
+          {/* Waar komt deze lijst vandaan? Enkel om te ontdubbelen — je belt
+              straks uit één lijst, en het merk ligt pas vast bij de afspraak. */}
+          {!result && pipelines.length > 1 && (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Welke lijst is dit?</label>
+              <div className="flex gap-1.5">
+                {pipelines.map((p) => {
+                  const stijl = merkStijl(p.key)
+                  const aan = p.id === lijst
+                  return (
+                    <button key={p.id} type="button" onClick={() => setLijst(p.id)}
+                      className={`flex-1 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors flex items-center justify-center gap-1.5 ${
+                        aan ? `${stijl.badge} shadow-sm` : 'border-gray-200 text-gray-400 hover:text-black'}`}>
+                      <span className={`inline-block h-2 w-2 rounded-full ${aan ? stijl.stip : 'bg-gray-300'}`} />
+                      {p.name}
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="text-[11px] text-gray-500 mt-1">
+                Alleen om dubbels te voorkomen. De leads komen gewoon in de gedeelde lijst
+                terecht; het merk ligt pas vast bij de afspraak.
+              </p>
+            </div>
+          )}
+
           {/* Klaar */}
           {result ? (
             <div className="space-y-3">

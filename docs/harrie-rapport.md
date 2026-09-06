@@ -63,18 +63,18 @@ Twee dingen die vaak fout gaan:
 
 ### De stand nu (om je eigen telling mee te controleren)
 
-| `stageKey` | Aantal |
-|---|---|
-| `to_contact` | 3957 |
-| `klant` | 48 |
-| `won` | 43 |
-| `not_interested` | 17 |
-| `contacted_call` | 11 |
-| `email_after_call` | 7 |
-| `email_sent` | 2 |
-| `eigen_bedrijf` | 2 |
-| `appointment` | 1 |
-| **totaal** | **4088** |
+| `stageKey` | Aantal | Ring |
+|---|---|---|
+| `to_contact` | 3956 | buitenrand |
+| `klant` | 48 | kern |
+| `won` | 43 | kern |
+| `not_interested` | 17 | buiten beeld |
+| `contacted_call` | 11 | rood |
+| `email_after_call` | 7 | rood |
+| `email_sent` | 2 | rood |
+| `eigen_bedrijf` | 2 | kern |
+| `appointment` | 2 | groen |
+| **totaal** | **4088** | |
 
 Klopt jouw totaal niet met 4088, dan pagineer je niet.
 
@@ -103,22 +103,33 @@ Klopt jouw totaal niet met 4088, dan pagineer je niet.
 
 ---
 
-## 4. Twee merken in één lijst
+## 4. Het merk ligt pas vast bij de afspraak
 
 We verkopen onder twee namen: **NextGenMedia** (social media, content) en
-**NextGenSolutions** (websites, software). Dat is nu één pipeline
-in plaats van twee gescheiden lijsten (sinds 6 september 2026).
+**NextGenSolutions** (websites, software). Er is geen aparte lijst per merk meer,
+en een lead draagt vooraf géén merk. Dat is een bewuste keuze: onze setters
+horen pas tijdens het gesprek of iemand een website nodig heeft of social media,
+dus vooraf kiezen zou een keuze op het verkeerde moment zijn.
 
-- `pipeline` — het **hoofdmerk**: `nextgenmedia` of `nextgensolutions`. Daar
-  hangen de brochure, de afzender en de agenda aan vast.
-- `merken` — **alle** merken waarvoor de lead telt. Kan er twee bevatten: een
-  zaak die een website nodig heeft, wil vaak ook social media.
+- **`merken`** — het vastgelegde merk. **Leeg zolang er geen afspraak staat**,
+  en dat is de normale toestand voor bijna elke rij. Vanaf `appointment` (en
+  daarna `won`/`lost`) staat er één merk in.
+- **`pipeline` / `pipelineNaam`** — alleen de **herkomst**: uit welke lijst de
+  lead ooit binnenkwam. Dit is géén merk en niemand heeft ervoor gekozen. Het
+  bestaat om dubbels te voorkomen.
 
-Het hoofdmerk zit altijd in `merken`. Gebruik dit om je aanspreking en je
-one-pager te kiezen. Vink zelf geen tweede merk aan — dat is een beslissing die
-aan de telefoon valt.
+**Twee regels voor jou:**
 
----
+1. **Segmenteer of kleur nooit op `pipeline`.** Dat zou een merk suggereren dat
+   niemand heeft toegekend. Kijk naar `merken`, en accepteer dat dat bij het
+   overgrote deel leeg is — dat is geen ontbrekende data, dat is de stand van
+   zaken.
+2. **Een lege `merken` betekent: vrij voor allebei.** Je mag zo iemand vanuit
+   elk verhaal benaderen. Staat er wél een merk, dan is dat beslist en hou je
+   je daaraan.
+
+Op dit moment hebben **45 van de 4038 leads** een merk: 43 klanten (`won`) en
+2 lopende afspraken. De rest is bewust leeg.
 
 ## 5. Wat je terugschrijft
 
