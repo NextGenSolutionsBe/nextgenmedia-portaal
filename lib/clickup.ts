@@ -1,4 +1,4 @@
-import { fetchMetLimiet } from '@/lib/fetch-met-limiet'
+import { fetchMetLimiet, TijdslimietFout, STANDAARD_LIMIET_MS } from '@/lib/fetch-met-limiet'
 
 // ── ClickUp integratie (server-side only) ────────────────────────────────────
 // App → ClickUp, één richting. Wordt UITSLUITEND server-side gebruikt; de API key
@@ -155,6 +155,21 @@ let lastRequestAt = 0
 const MIN_INTERVAL_MS = 650 // ~92 req/min, ruim onder de limiet
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/**
+ * Lezen bij ClickUp mag langer duren dan de standaard tien seconden.
+ *
+ * De agendasync haalt elke minuut de takenlijst op; die komt normaal in twee
+ * tot vijf seconden binnen. Maar ClickUp heeft periodes waarin hij er elf tot
+ * veertien over doet, en dan sloeg de sync stuk op een dienst die gewoon traag
+ * was in plaats van kapot. Achttien seconden dekt wat we in de praktijk zien,
+ * en blijft — ook mét één herkansing — ruim onder de zestig seconden die de
+ * cronfunctie krijgt.
+ *
+ * SCHRIJVEN houdt de tien seconden. Een POST die blijft hangen mag je niet
+ * zomaar laten doorlopen: dan weet je niet of de taak er nu wel of niet staat.
+ */
+const LEES_LIMIET_MS = 18_000
+
 async function clickupFetch(path: string, init: RequestInit = {}, attempt = 0): Promise<Response> {
   const key = process.env.CLICKUP_API_KEY
   if (!key) throw new Error('CLICKUP_API_KEY is niet ingesteld')
@@ -163,15 +178,37 @@ async function clickupFetch(path: string, init: RequestInit = {}, attempt = 0): 
   if (wait > 0) await sleep(wait)
   lastRequestAt = Date.now()
 
-  const res = await fetchMetLimiet(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      Authorization: key,
-      'Content-Type': 'application/json',
-      ...(init.headers ?? {}),
-    },
-    cache: 'no-store',
-  })
+  const leesActie = !init.method || init.method.toUpperCase() === 'GET'
+
+  let res: Response
+  try {
+    res = await fetchMetLimiet(`${API_BASE}${path}`, {
+      ...init,
+      headers: {
+        Authorization: key,
+        'Content-Type': 'application/json',
+        ...(init.headers ?? {}),
+      },
+      cache: 'no-store',
+    }, leesActie ? LEES_LIMIET_MS : STANDAARD_LIMIET_MS)
+  } catch (err) {
+    /**
+     * Een tijdslimiet is bij ClickUp een hikje, geen storing — net als de
+     * SHARD-fout hieronder. Dit werd tot nu toe NIET opnieuw geprobeerd, want
+     * fetchMetLimiet gooit vóór er een antwoord is en de herkansingen hieronder
+     * kijken naar een statuscode. Eén trage minuut werd zo meteen een mislukte
+     * run en een alarmmail.
+     *
+     * Enkel bij lezen. Een POST opnieuw sturen zou een tweede taak of een
+     * tweede agenda-item kunnen maken, en dubbele afspraken zijn precies wat
+     * deze sync moet voorkomen.
+     */
+    if (err instanceof TijdslimietFout && leesActie && attempt < 1) {
+      await sleep(1000)
+      return clickupFetch(path, init, attempt + 1)
+    }
+    throw err
+  }
 
   if (res.status === 429 && attempt < 5) {
     const retryAfter = Number(res.headers.get('retry-after') ?? 0)
@@ -192,7 +229,6 @@ async function clickupFetch(path: string, init: RequestInit = {}, attempt = 0): 
    * tweede agenda-item kunnen maken, en dubbele afspraken zijn precies wat deze
    * sync moet voorkomen.
    */
-  const leesActie = !init.method || init.method.toUpperCase() === 'GET'
   if (leesActie && attempt < 3) {
     const hikje = res.status >= 500
       || (res.status === 404 && /"ECODE"\s*:\s*"SHARD_/i.test(await res.clone().text().catch(() => '')))
