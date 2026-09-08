@@ -1553,10 +1553,9 @@ CREATE TABLE IF NOT EXISTS public.sales_leads (
   updated_at         timestamptz NOT NULL DEFAULT now()
 );
 -- Eén actieve lead per bedrijf per klant (§11). Gearchiveerde tellen niet mee.
--- (vervallen) sales_leads_one_per_company is verderop VERVANGEN door
--- sales_leads_one_per_company_pipeline (één actieve lead per bedrijf PER
--- MERK). Opnieuw aanmaken zou een rerun laten falen zodra hetzelfde bedrijf
--- in beide pipelines een actieve lead heeft — ondersteund gedrag.
+-- De index zelf staat verderop: hij is een tijdlang per pipeline geweest en is
+-- daarna teruggezet naar per bedrijf. Hier aanmaken zou die geschiedenis in de
+-- verkeerde volgorde afspelen.
 CREATE INDEX IF NOT EXISTS sales_leads_stage    ON public.sales_leads (sales_client_id, stage_key);
 CREATE INDEX IF NOT EXISTS sales_leads_callback ON public.sales_leads (callback_at) WHERE callback_at IS NOT NULL;
 
@@ -1871,16 +1870,9 @@ ALTER TABLE public.sales_appointments
   ADD COLUMN IF NOT EXISTS pipeline_id uuid REFERENCES public.sales_pipelines(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS sales_leads_pipeline ON public.sales_leads (pipeline_id, stage_key);
 
--- Eén actieve lead per bedrijf PER PIPELINE. Hetzelfde bedrijf mag dus zowel
--- bij NextGenMedia als bij NextGenSolutions in de lijst staan — dat zijn twee
--- verschillende gesprekken. Het bedrijfsdossier zelf blijft gedeeld.
-DROP INDEX IF EXISTS public.sales_leads_one_per_company;
-CREATE UNIQUE INDEX IF NOT EXISTS sales_leads_one_per_company_pipeline
-  ON public.sales_leads (
-    sales_client_id,
-    COALESCE(pipeline_id, '00000000-0000-0000-0000-000000000000'::uuid),
-    company_id
-  ) WHERE archived_at IS NULL;
+-- De grendel op dubbels staat verderop, bij "Eén lead per bedrijf". Hij is
+-- een tijdlang per pipeline geweest — hetzelfde bedrijf mocht dan zowel bij
+-- NextGenMedia als bij NextGenSolutions staan — en dat is teruggedraaid.
 
 ALTER TABLE public.sales_pipelines ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "sales_pipelines admin all" ON public.sales_pipelines;
@@ -3260,6 +3252,66 @@ $fn$;
 -- RLS op sales_leads en kan IEDEREEN met de publieke anon-sleutel — die in elke
 -- browser zit — de volledige pipeline lezen: namen, nummers, e-mailadressen.
 -- Dat is precies wat hier misging bij het bouwen. Beide sloten moeten blijven.
+-- ── Eén lead per bedrijf ───────────────────────────────────────────────────
+-- Er stond één lead per bedrijf PER LIJST. Nu het merk pas bij de afspraak
+-- vastligt, is dat onzin geworden: hetzelfde bedrijf stond twee keer, met twee
+-- geschiedenissen, en een setter belde het twee keer.
+--
+-- De dubbels zijn SAMENGEVOEGD, niet gewist. De lead die het verst stond is
+-- gebleven; de andere stond zijn labels af en is gearchiveerd. Wie wat werd
+-- staat in sales_lead_samenvoegingen, dus het is terug te draaien.
+CREATE TABLE IF NOT EXISTS public.sales_lead_samenvoegingen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  winnaar_id uuid NOT NULL REFERENCES public.sales_leads(id) ON DELETE CASCADE,
+  verliezer_id uuid NOT NULL REFERENCES public.sales_leads(id) ON DELETE CASCADE,
+  labels_overgenomen text[] NOT NULL DEFAULT '{}'::text[],
+  wanneer timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (verliezer_id)
+);
+ALTER TABLE public.sales_lead_samenvoegingen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.sales_lead_samenvoegingen FROM anon, authenticated;
+
+INSERT INTO public.sales_lead_samenvoegingen (winnaar_id, verliezer_id, labels_overgenomen)
+WITH d AS (
+  SELECT company_id FROM public.sales_leads WHERE archived_at IS NULL
+  GROUP BY 1 HAVING count(*) > 1),
+g AS (
+  SELECT l.id, l.company_id, l.labels,
+    row_number() OVER (PARTITION BY l.company_id ORDER BY
+      CASE l.stage_key
+        WHEN 'won' THEN 99 WHEN 'lost' THEN 95 WHEN 'not_interested' THEN 90
+        WHEN 'max_pogingen' THEN 80 WHEN 'appointment' THEN 50 WHEN 'email_sent' THEN 40
+        WHEN 'email_after_call' THEN 30 WHEN 'contacted_call' THEN 20
+        WHEN 'contacted_linkedin' THEN 20 WHEN 'contacted_mail' THEN 20
+        WHEN 'to_contact' THEN 10 ELSE 0 END DESC,
+      (SELECT count(*) FROM public.sales_lead_events e WHERE e.lead_id = l.id) DESC,
+      l.created_at ASC) AS rn
+  FROM public.sales_leads l JOIN d ON d.company_id = l.company_id
+  WHERE l.archived_at IS NULL)
+SELECT w.id, v.id,
+  coalesce((SELECT array_agg(DISTINCT x) FROM unnest(v.labels) x
+            WHERE NOT (coalesce(w.labels, '{}'::text[]) @> ARRAY[x])), '{}'::text[])
+FROM g w JOIN g v ON v.company_id = w.company_id AND w.rn = 1 AND v.rn = 2
+ON CONFLICT (verliezer_id) DO NOTHING;
+
+-- Labels van de verliezer erbij: zo blijft "Boekhouding" doorzoekbaar.
+UPDATE public.sales_leads w
+SET labels = (SELECT array_agg(DISTINCT x)
+              FROM unnest(coalesce(w.labels, '{}'::text[]) || s.labels_overgenomen) x)
+FROM public.sales_lead_samenvoegingen s
+WHERE w.id = s.winnaar_id AND coalesce(array_length(s.labels_overgenomen, 1), 0) > 0;
+
+UPDATE public.sales_leads SET archived_at = now()
+WHERE id IN (SELECT verliezer_id FROM public.sales_lead_samenvoegingen)
+  AND archived_at IS NULL;
+
+-- Eerst de nieuwe grendel zetten, pas daarna de oude weghalen: mislukt de
+-- nieuwe omdat er toch nog een dubbel staat, dan blijft de oude bescherming
+-- overeind in plaats van dat er even helemaal geen is.
+CREATE UNIQUE INDEX IF NOT EXISTS sales_leads_one_per_company
+  ON public.sales_leads (sales_client_id, company_id) WHERE archived_at IS NULL;
+DROP INDEX IF EXISTS public.sales_leads_one_per_company_pipeline;
+
 -- ── Eén lijst; het merk ligt pas vast bij de afspraak ──────────────────────
 -- Vooraf een merk kiezen is een keuze op het verkeerde moment: je hoort pas
 -- tijdens het gesprek of iemand een website nodig heeft of social media. Dus
@@ -3326,6 +3378,11 @@ JOIN public.sales_companies c ON c.id = l.company_id
 LEFT JOIN public.sales_contacts ct ON ct.id = l.contact_id
 LEFT JOIN public.sales_stages s ON s.key = l.stage_key AND s.sales_client_id = l.sales_client_id
 LEFT JOIN public.sales_pipelines pl ON pl.id = l.pipeline_id
+-- Samengevoegde dubbels horen hier niet meer thuis. Ze staan gearchiveerd, en
+-- `deleted` betekent voor Harrie "weer vrij" — maar dat zijn ze niet: hun
+-- gesprek loopt gewoon door op de lead waarin ze zijn opgegaan.
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.sales_lead_samenvoegingen sv WHERE sv.verliezer_id = l.id)
 UNION ALL
 SELECT 'client_' || k.id::text, NULL, k.company_name,
   nullif(regexp_replace(coalesce(k.btw_nummer,''), '\D', '', 'g'), ''),

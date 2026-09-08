@@ -29,7 +29,7 @@ en dan denk je dat bestaande klanten vrij zijn om te mailen.
 GET /rest/v1/harrie_pipeline?select=*&order=updatedAt.asc
 Range: 0-999
 Prefer: count=exact
-→ Content-Range: 0-999/4088        ← het totaal staat achter de schuine streep
+→ Content-Range: 0-999/4050        ← het totaal staat achter de schuine streep
 ```
 
 Blijf bladeren met `Range: 1000-1999`, `2000-2999`, … tot je het totaal hebt.
@@ -65,18 +65,20 @@ Twee dingen die vaak fout gaan:
 
 | `stageKey` | Aantal | Ring |
 |---|---|---|
-| `to_contact` | 3956 | buitenrand |
+| `to_contact` | 3864 | buitenrand |
 | `klant` | 48 | kern |
 | `won` | 43 | kern |
-| `not_interested` | 17 | buiten beeld |
-| `contacted_call` | 11 | rood |
-| `email_after_call` | 7 | rood |
-| `email_sent` | 2 | rood |
+| `not_interested` | 37 | buiten beeld |
+| `contacted_call` | 18 | rood |
+| `contacted_mail` | 18 | rood |
+| `email_sent` | 13 | rood |
+| `appointment` | 4 | groen |
+| `email_after_call` | 2 | rood |
 | `eigen_bedrijf` | 2 | kern |
-| `appointment` | 2 | groen |
-| **totaal** | **4088** | |
+| `lost` | 1 | buiten beeld |
+| **totaal** | **4050** | |
 
-Klopt jouw totaal niet met 4088, dan pagineer je niet.
+Klopt jouw totaal niet met 4050, dan pagineer je niet.
 
 ---
 
@@ -103,7 +105,23 @@ Klopt jouw totaal niet met 4088, dan pagineer je niet.
 
 ---
 
-## 4. Het merk ligt pas vast bij de afspraak
+## 4. Eén lead per bedrijf
+
+Er staat nog hoogstens **één actieve lead per bedrijf**. Dat was ooit één per
+lijst, waardoor dezelfde firma twee keer in de pipeline stond — twee kaarten,
+twee geschiedenissen, en twee keer gebeld. Die 49 dubbels zijn samengevoegd.
+
+Wat dat voor jou betekent:
+
+- **Kom je hetzelfde bedrijf twee keer tegen in de view, dan is er iets mis.**
+  Meld het; ontdubbel het niet zelf.
+- **`deleted = true` blijft "weer vrij"**, maar de samengevoegde dubbels staan
+  niet meer in de view. Je krijgt dus geen gearchiveerde kaart te zien waarvan
+  het gesprek in werkelijkheid gewoon doorloopt op een andere rij.
+
+---
+
+## 5. Het merk ligt pas vast bij de afspraak
 
 We verkopen onder twee namen: **NextGenMedia** (social media, content) en
 **NextGenSolutions** (websites, software). Er is geen aparte lijst per merk meer,
@@ -115,8 +133,8 @@ dus vooraf kiezen zou een keuze op het verkeerde moment zijn.
   en dat is de normale toestand voor bijna elke rij. Vanaf `appointment` (en
   daarna `won`/`lost`) staat er één merk in.
 - **`pipeline` / `pipelineNaam`** — alleen de **herkomst**: uit welke lijst de
-  lead ooit binnenkwam. Dit is géén merk en niemand heeft ervoor gekozen. Het
-  bestaat om dubbels te voorkomen.
+  lead ooit binnenkwam. Dit is géén merk en niemand heeft ervoor gekozen; het
+  staat er nog als geschiedenis en mag `null` zijn.
 
 **Twee regels voor jou:**
 
@@ -128,10 +146,10 @@ dus vooraf kiezen zou een keuze op het verkeerde moment zijn.
    elk verhaal benaderen. Staat er wél een merk, dan is dat beslist en hou je
    je daaraan.
 
-Op dit moment hebben **45 van de 4038 leads** een merk: 43 klanten (`won`) en
-2 lopende afspraken. De rest is bewust leeg.
+Op dit moment hebben **47 van de 3998 leads** een merk: 43 klanten (`won`) en
+4 lopende afspraken. De rest is bewust leeg.
 
-## 5. Wat je terugschrijft
+## 6. Wat je terugschrijft
 
 Eén rij in `harrie_events`. Een trigger bepaalt daarna wat dat voor de pipeline
 betekent; jij hoeft geen enkele faseregel te kennen.
@@ -192,7 +210,7 @@ jij mailt of de prospect zelf reageerde, belt er niemand tussendoor.
 
 ---
 
-## 6. De reden bij "Geen interesse"
+## 7. De reden bij "Geen interesse"
 
 Verplicht en gestructureerd; op vrije tekst valt niet te tellen. Stuur bij een
 `declined` gewoon je eigen tekst mee in `detail` — wij leggen die zelf op een
@@ -212,7 +230,7 @@ code.
 
 ---
 
-## 7. Ritme
+## 8. Ritme
 
 - Elk kwartier de wijzigingen ophalen met `updatedAt=gt.…`.
 - Eén keer per dag alles, zonder filter. Wat dan niet meer meekomt, is weg.

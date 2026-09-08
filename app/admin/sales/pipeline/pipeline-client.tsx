@@ -181,23 +181,6 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
     [leads, selectedId],
   )
 
-  /**
-   * Bedrijven die twee keer in de lijst staan.
-   *
-   * Bij het samenvoegen van de twee pipelines kwamen 49 bedrijven boven water
-   * die in beide merken een eigen lead hadden — twee gesprekken, twee
-   * geschiedenissen. Die samenvoegen zou notities weggooien, dus ze blijven
-   * allebei staan en krijgen een merkje. Zo lijkt het geen fout in de lijst.
-   */
-  const dubbel = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const l of leads) {
-      const c = l.sales_companies?.id
-      if (c) m.set(c, (m.get(c) ?? 0) + 1)
-    }
-    return m
-  }, [leads])
-
   const counts = useMemo(() => {
     const m = new Map<string, number>()
     for (const l of leads) m.set(l.stage_key, (m.get(l.stage_key) ?? 0) + 1)
@@ -416,10 +399,6 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
                             </span>
                           )}
                           <span className="font-medium truncate">{l.sales_companies?.name ?? '—'}</span>
-                          {(dubbel.get(l.sales_companies?.id ?? '') ?? 0) > 1 && (
-                            <span title="Dit bedrijf staat twee keer in de lijst: een aparte lead per merk."
-                              className="text-[9px] font-bold text-gray-500 bg-gray-100 border border-gray-200 rounded px-1 shrink-0">2×</span>
-                          )}
                         </div>
                         <div className="text-[11px] text-gray-500 truncate">
                           {[l.sales_companies?.sector, l.sales_companies?.city].filter(Boolean).join(' · ')}
@@ -519,7 +498,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
       {reminders && <ReminderSettings onClose={() => setReminders(false)} />}
 
       {importing && (
-        <ImportModal pipelines={pipelines} pipelineId={pipelineId || pipelines[0]?.id || ''}
+        <ImportModal pipelineId={pipelineId || pipelines[0]?.id || ''}
           onClose={() => setImporting(false)} onDone={load} />
       )}
 

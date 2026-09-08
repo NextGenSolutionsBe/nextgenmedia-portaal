@@ -76,6 +76,13 @@ om er zelf van af te blijven.
 lead kan via drie kanalen benaderd zijn; de volledige geschiedenis staat op de
 tijdlijn (`sales_lead_events`).
 
+### Eén lead per bedrijf
+
+Er staat nog hoogstens **één actieve lead per bedrijf**. Dat was ooit één per
+lijst, waardoor dezelfde firma twee keer in de pipeline stond; die dubbels zijn
+samengevoegd. Kom je hetzelfde bedrijf toch twee keer tegen in de view, dan is
+er iets mis en horen we dat graag.
+
 ### Het merk ligt pas vast bij de afspraak
 
 We verkopen onder twee namen: **NextGenMedia** (social media, content) en
@@ -86,9 +93,9 @@ iemand nodig heeft. Nu is het één pipeline zonder merk op de lead.
 - `merken` — het **vastgelegde** merk. **Leeg zolang er geen afspraak staat**,
   en dat is de normale toestand voor bijna elke rij. Vanaf `appointment` (en
   daarna `won`/`lost`) staat er één merk in; twee kan, maar is zeldzaam.
-- `pipeline` / `pipelineNaam` — de **herkomst**: uit welke lijst de lead komt.
-  Dit is géén merk en géén keuze van iemand. Het bestaat om te ontdubbelen en
-  om bij het boeken een merk voor te stellen.
+- `pipeline` / `pipelineNaam` — de **herkomst**: uit welke lijst de lead ooit
+  binnenkwam. Dit is géén merk en géén keuze van iemand; het is er alleen nog
+  als geschiedenis.
 
 **Kleur of segmenteer dus niet op `pipeline`.** Wil je weten of iets van
 NextGenMedia of NextGenSolutions is, kijk dan naar `merken` — en accepteer dat
@@ -137,9 +144,9 @@ Eén rij per partij, uit drie bronnen. De kolommen liggen vast:
 | `warm` | bool | Reageerde zelf. |
 | `redenCode`, `redenTekst` | text | Waarom afgehaakt. |
 | `harrie` | jsonb | Jouw laatste blokje, zoals wij het bewaarden. |
-| `deleted` | bool | Gearchiveerd — weer vrij. |
+| `deleted` | bool | Gearchiveerd — weer vrij. Samengevoegde dubbels staan hier niet in. |
 | `updatedAt` | timestamptz | Hoogste van lead, bedrijf en contactpersoon. |
-| `pipeline` | text | Herkomst van de lijst, geen merk. Niet op segmenteren. |
+| `pipeline` | text | Herkomst van de lijst, geen merk. Niet op segmenteren. Mag `null` zijn. |
 | `pipelineNaam` | text | Diezelfde herkomst, uitgeschreven. |
 | `aangemaaktOp` | timestamptz | Wanneer de lead bij ons binnenkwam. |
 | `merken` | text[] | Het vastgelegde merk. **Leeg tot er een afspraak staat.** |

@@ -117,6 +117,12 @@ export type NewLeadResult =
  * Lead aanmaken met ontdubbeling op bedrijf (§11): bestaat er al een ACTIEVE
  * lead voor dit bedrijf bij deze klant, dan maken we er geen tweede maar
  * verwijzen we naar de bestaande.
+ *
+ * ÉÉN LEAD PER BEDRIJF, punt. Dat was ooit één per bedrijf PER LIJST, zodat
+ * dezelfde firma bij NextGenMedia én bij NextGenSolutions kon staan. Nu het
+ * merk pas bij de afspraak vastligt, leverde dat alleen nog dubbel bellen op:
+ * twee kaarten, twee geschiedenissen, dezelfde zaakvoerder twee keer aan de
+ * lijn. De labels van de tweede lijst komen bij de bestaande lead terecht.
  */
 export async function createLead(input: NewLeadInput): Promise<NewLeadResult> {
   const admin = createAdminSupabaseClient()
@@ -142,15 +148,28 @@ export async function createLead(input: NewLeadInput): Promise<NewLeadResult> {
   let companyId = existingCompany?.id as string | undefined
 
   if (companyId) {
-    // Ontdubbelen gebeurt PER PIPELINE. Hetzelfde bedrijf mag dus wel bij
-    // NextGenMedia én bij NextGenSolutions staan — dat zijn twee gesprekken.
     const { data: openLead } = await admin
-      .from('sales_leads').select('id')
+      .from('sales_leads').select('id, labels')
       .eq('sales_client_id', input.salesClientId).eq('company_id', companyId)
-      .eq('pipeline_id', input.pipelineId)
       .is('archived_at', null).maybeSingle()
     if (openLead) {
-      return { ok: false, error: `Er staat al een lead voor ${name} in deze pipeline.`, existingLeadId: openLead.id as string }
+      /**
+       * Wél de labels overnemen.
+       *
+       * Zonder dit zou een tweede lijst zijn label stil verliezen: importeer je
+       * een boekhouderslijst en staat de helft er al in, dan draagt die helft
+       * geen "Boekhouding" en kun je er nooit meer op filteren. De lead komt er
+       * niet dubbel bij, maar waar hij vandaan komt blijft wel bewaard.
+       */
+      const nieuwe = (input.labels ?? [])
+        .map((l) => l.trim()).filter(Boolean)
+        .filter((l) => !((openLead.labels ?? []) as string[]).includes(l))
+      if (nieuwe.length > 0) {
+        await admin.from('sales_leads')
+          .update({ labels: [...((openLead.labels ?? []) as string[]), ...nieuwe] })
+          .eq('id', openLead.id as string)
+      }
+      return { ok: false, error: `${name} staat al in de pipeline.`, existingLeadId: openLead.id as string }
     }
   } else {
     // Aantal werknemers: het ruwe lijstlabel ("10–19") is leidend; de
@@ -406,41 +425,23 @@ export async function loadCalendar(
 }
 
 /**
- * Een lead naar het andere merk verhuizen.
+ * Het merk van een lead zetten. Gebeurt bij het boeken van een afspraak: dan
+ * pas ligt vast of het NextGenMedia of NextGenSolutions wordt, en daar hangen
+ * de brochure, de afzender en de agenda aan vast.
  *
- * Er mag maar één actieve lead per bedrijf per pipeline bestaan. Staat datzelfde
- * bedrijf daar al, dan verhuizen we NIET en zeggen we waarom — twee open
- * gesprekken met dezelfde firma binnen één merk is precies wat die regel moet
- * voorkomen, en stil samenvoegen zou werk van iemand anders kunnen wissen.
+ * Er kan hier niets meer botsen: sinds er nog maar één actieve lead per bedrijf
+ * bestaat, is er geen tweede kaart om tegenaan te lopen. De controle op een
+ * dubbele sleutel blijft staan als vangnet, niet als verwacht pad.
  */
 export async function moveLeadToPipeline(
   leadId: string, pipelineId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const admin = createAdminSupabaseClient()
 
-  const { data: lead } = await admin.from('sales_leads')
-    .select('id, company_id, sales_client_id, sales_companies ( name )')
-    .eq('id', leadId).maybeSingle()
-  if (!lead) return { ok: false, error: 'Lead niet gevonden' }
-
-  const row = lead as { company_id: string; sales_client_id: string; sales_companies?: { name?: string } | null }
-  const { data: clash } = await admin.from('sales_leads')
-    .select('id')
-    .eq('sales_client_id', row.sales_client_id)
-    .eq('company_id', row.company_id)
-    .eq('pipeline_id', pipelineId)
-    .is('archived_at', null)
-    .neq('id', leadId)
-    .maybeSingle()
-  if (clash) {
-    const name = row.sales_companies?.name ?? 'Dit bedrijf'
-    return { ok: false, error: `${name} staat daar al in de lijst. Werk die lead bij of archiveer hem eerst.` }
-  }
-
   const { error } = await admin.from('sales_leads').update({ pipeline_id: pipelineId }).eq('id', leadId)
   if (error) {
     const dup = /duplicate key|unique/i.test(error.message)
-    return { ok: false, error: dup ? 'Dit bedrijf staat al in die pipeline.' : 'Verhuizen mislukt' }
+    return { ok: false, error: dup ? 'Dit bedrijf staat al in de pipeline.' : 'Merk zetten mislukt' }
   }
   return { ok: true }
 }
