@@ -118,7 +118,7 @@ export function WebsiteAdmin({
                   <Globe className="h-4 w-4 text-gray-400 shrink-0" />
                   <div className="font-medium text-sm truncate">{c.company_name}</div>
                 </div>
-                <span className={`status-badge text-xs shrink-0 ${c.active ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500'}`}>
+                <span className={`status-badge text-xs shrink-0 ${c.active ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-700'}`}>
                   {c.active ? 'Actief' : 'Wacht op toegang'}
                 </span>
               </div>
@@ -135,7 +135,7 @@ export function WebsiteAdmin({
         <FilterBtn value="archived" label="Gearchiveerd" count={counts.archived} />
       </div>
 
-      <div className="flex gap-4">
+      <div className="flex flex-col lg:flex-row gap-4">
         {/* List */}
         <div className="flex-1 bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
           {filtered.length === 0 ? (
@@ -160,7 +160,7 @@ export function WebsiteAdmin({
                           {r.clients?.company_name ?? '—'} · {KIND_LABEL[friendlyKind] ?? friendlyKind} · {formatDate(r.created_at)}
                         </div>
                       </div>
-                      <span className={`status-badge shrink-0 ${STATUS_STYLE[r.status] ?? 'bg-gray-100 text-gray-500'}`}>
+                      <span className={`status-badge shrink-0 ${STATUS_STYLE[r.status] ?? 'bg-gray-100 text-gray-600'}`}>
                         {STATUS_LABEL[r.status] ?? r.status}
                       </span>
                     </div>
@@ -171,12 +171,12 @@ export function WebsiteAdmin({
           )}
         </div>
 
-        {/* Detail panel */}
+        {/* Detail panel — mobile: full-screen overlay; desktop: sidebar */}
         {selected && (() => {
           const selectedKind = resolveFriendlyKind(selected)
           const selectedDescription = cleanDescription(selected.description)
           return (
-          <div className="w-80 bg-white border border-gray-200 rounded-xl shadow-sm h-fit sticky top-6">
+          <div className="lg:w-80 w-full bg-white border border-gray-200 rounded-xl shadow-sm h-fit lg:sticky lg:top-6">
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
               <h3 className="font-semibold text-sm">Detail</h3>
               <button onClick={() => setSelected(null)} className="h-6 w-6 flex items-center justify-center rounded hover:bg-gray-100">
@@ -297,7 +297,7 @@ export function WebsiteAdmin({
       {/* Delete confirmation modal */}
       {deleteOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center gap-2 p-5 border-b border-gray-100">
               <AlertTriangle className="h-5 w-5 text-red-500 shrink-0" />
               <h3 className="font-semibold text-gray-900">Aanvraag verwijderen</h3>

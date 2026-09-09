@@ -2,7 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 @layer base {
   :root {
@@ -33,9 +32,32 @@
     border-color: hsl(var(--border));
   }
 
+  /* Vangnet: ook als Tailwind's font-sans om wat voor reden ook niet toegepast
+     wordt, staat hier al een sans-serif. Zo kan er nergens een serif opduiken. */
+  html {
+    font-family: var(--font-sans, ui-sans-serif), ui-sans-serif, system-ui,
+      -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  }
+
   body {
     @apply bg-white text-[#0a0a0a] font-sans antialiased;
+    /* Inter-specifieke letterversies (o.a. een rechte kleine a en l). */
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Bedragen en tabellen: cijfers even breed, zodat kolommen netjes uitlijnen.
+     In een app vol facturen/bedragen is dit het verschil tussen "af" en slordig. */
+  table,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Hard guard tegen horizontale scroll op mobiel: niets mag breder zijn dan
+     het scherm. Vangt sub-pixel-overflow en losse brede elementen af. */
+  html, body {
+    max-width: 100%;
+    overflow-x: hidden;
   }
 
   h1, h2, h3, h4, h5, h6 {
@@ -56,42 +78,92 @@
   }
 
   .card-base {
-    @apply bg-white border border-gray-200 rounded-xl p-5 shadow-sm;
+    @apply bg-white border border-gray-200/80 rounded-2xl p-5 md:p-6 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_1px_3px_rgba(15,23,42,0.03)];
   }
 
   .stat-card {
-    @apply bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow;
+    @apply bg-white border border-gray-200/80 rounded-2xl p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] hover:shadow-[0_4px_16px_rgba(15,23,42,0.06)] transition-shadow duration-200;
   }
 
   .btn-primary {
-    @apply inline-flex items-center gap-2 px-4 py-2 bg-[#fff848] text-black font-semibold rounded-lg hover:bg-[#f5ee30] transition-colors text-sm;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 bg-[#fff848] text-black font-semibold rounded-lg shadow-sm hover:bg-[#f5ee30] active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fff848]/60 transition-all duration-150 text-sm disabled:opacity-50 disabled:pointer-events-none;
   }
 
   .btn-secondary {
-    @apply inline-flex items-center gap-2 px-4 py-2 bg-white text-black font-medium rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors text-sm;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 bg-white text-gray-800 font-medium rounded-lg border border-gray-200 shadow-sm hover:bg-gray-50 hover:border-gray-300 active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-200 transition-all duration-150 text-sm disabled:opacity-50 disabled:pointer-events-none;
   }
 
   .btn-danger {
-    @apply inline-flex items-center gap-2 px-4 py-2 bg-red-50 text-red-700 font-medium rounded-lg border border-red-200 hover:bg-red-100 transition-colors text-sm;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 bg-red-50 text-red-700 font-medium rounded-lg border border-red-200 shadow-sm hover:bg-red-100 active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200 transition-all duration-150 text-sm disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  /* Micro-interacties: subtiel en functioneel. Staat bewust ná de knop-definities
+     zodat deze regels winnen. Een knop mag "meegeven" bij een klik, maar niets
+     beweegt dat geen feedback geeft — dit is een werkomgeving, geen landingspagina.
+     prefers-reduced-motion schakelt alles uit (zie onderaan dit bestand). */
+  .btn-primary:hover {
+    box-shadow: 0 2px 12px rgba(255, 248, 72, 0.5);
+  }
+  .btn-primary:active,
+  .btn-secondary:active,
+  .btn-danger:active {
+    transform: scale(0.98);
+  }
+  /* Kaarten in klikbare lijsten liften heel licht op bij hover. */
+  a.card-base:hover {
+    @apply shadow-[0_4px_16px_rgba(15,23,42,0.07)] border-gray-300/80;
   }
 
   .input-base {
-    @apply w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848] transition-colors;
+    @apply w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848] transition-colors;
   }
 
   .table-th {
-    @apply px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider;
+    @apply px-4 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider;
   }
 
   .table-td {
-    @apply px-4 py-3 text-sm text-gray-900;
+    @apply px-4 py-3 text-sm text-gray-800;
   }
 
   .status-badge {
-    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ring-1 ring-inset ring-black/[0.04];
+  }
+
+  /* Nette lege staat — consistent over alle modules */
+  .empty-state {
+    @apply text-center py-12 text-gray-400;
   }
 }
 
+/* ── Mobile responsive helpers ─────────────────────────────────────────────── */
+
+/* Media can never exceed its container — prevents accidental horizontal overflow
+   from images/SVG/canvas/video on small screens. */
+img, svg, video, canvas {
+  max-width: 100%;
+}
+
+/* All modals: constrain height + scroll on small screens.
+   Apply to every modal's inner panel (the white rounded box). */
+.modal-panel {
+  @apply max-h-[90dvh] overflow-y-auto;
+}
+
+/* Tables: horizontal scroll wrapper */
+.table-wrap {
+  @apply overflow-x-auto;
+}
+
+/* Responsive header rows: stack on mobile when there are many action buttons */
+.page-header {
+  @apply flex items-start justify-between gap-3 flex-wrap;
+}
+.page-header-actions {
+  @apply flex items-center gap-2 flex-wrap;
+}
+
+/* ── Scrollbar ────────────────────────────────────────────────────────────── */
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 5px;
@@ -114,4 +186,17 @@
 }
 [draggable=true]:active {
   cursor: grabbing;
+}
+
+/* Toegankelijkheid: wie in zijn systeem "minder beweging" heeft ingesteld,
+   krijgt geen animaties of transities. Verplicht bij micro-interacties. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

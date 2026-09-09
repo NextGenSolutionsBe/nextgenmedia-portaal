@@ -1,185 +1,137 @@
 export const dynamic = 'force-dynamic'
 
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
-import { formatDate, formatEuro } from '@/lib/utils'
-import { ArrowLeftRight, TrendingUp, TrendingDown } from 'lucide-react'
+import { formatEuro, normalizeDirection } from '@/lib/utils'
+import { ArrowLeftRight, TrendingUp, TrendingDown, Wallet, ChevronRight, Clock } from 'lucide-react'
+import Link from 'next/link'
+
+type LedgerRow = { freelancer_id: string; status: string; amount: number; direction?: string | null }
+type PaymentRow = { freelancer_id: string; status: string; amount: number; direction: string }
+type PartnerRow = { id: string; name: string | null }
 
 async function getData() {
   try {
     const admin = createAdminSupabaseClient()
-    const [{ data: assignmentRows }, { data: partnerRows }, { data: clientRows }] = await Promise.all([
-      admin.from('freelancer_assignments')
-        .select('id, title, budget, payout, deadline, created_at, freelancer_id, client_id')
-        .in('status', ['completed'])
-        .order('created_at', { ascending: false }),
-      admin.from('freelancers')
-        .select('id, name, commission_pct')
-        .eq('active', true)
-        .order('name'),
-      admin.from('clients').select('id, company_name'),
+    const [{ data: partnerRows }, { data: ledgerRows }, { data: paymentRows }] = await Promise.all([
+      admin.from('freelancers').select('id, name').order('name'),
+      admin.from('partner_ledger_entries').select('freelancer_id, status, amount, direction'),
+      admin.from('partner_payments').select('freelancer_id, status, amount, direction'),
     ])
-
-    const freelancerMap = new Map((partnerRows ?? []).map((f) => [f.id, f as { id: string; name: string; commission_pct: number | null }]))
-    const clientMap = new Map((clientRows ?? []).map((c) => [c.id, c as { id: string; company_name: string }]))
-
-    const assignments = (assignmentRows ?? []).map((a) => ({
-      ...a,
-      freelancers: a.freelancer_id ? (freelancerMap.get(a.freelancer_id) ?? null) : null,
-      clients: a.client_id ? { company_name: clientMap.get(a.client_id)?.company_name ?? '' } : null,
-    }))
-
-    return { assignments, partners: partnerRows ?? [] }
+    return {
+      partners: (partnerRows ?? []) as PartnerRow[],
+      ledger: (ledgerRows ?? []) as LedgerRow[],
+      payments: (paymentRows ?? []) as PaymentRow[],
+    }
   } catch {
-    return { assignments: [], partners: [] }
+    return { partners: [] as PartnerRow[], ledger: [] as LedgerRow[], payments: [] as PaymentRow[] }
   }
-}
-
-type DoneAssignment = {
-  id: string
-  title: string
-  budget: number | null
-  deadline: string | null
-  created_at: string
-  freelancers: { id: string; name: string; commission_pct: number | null } | null
-  clients: { company_name: string } | null
 }
 
 export default async function SettlementsPage() {
-  const { assignments, partners } = await getData()
+  const { partners, ledger, payments } = await getData()
+  const partnerName = new Map(partners.map((p) => [p.id, p.name ?? 'Partner']))
 
-  // Group by partner
-  const byPartner = new Map<string, {
-    partner: { id: string; name: string; commission_pct: number | null }
-    assignments: DoneAssignment[]
-    totalPayout: number
-    totalCommission: number
-  }>()
-
-  for (const a of assignments as DoneAssignment[]) {
-    if (!a.freelancers) continue
-    const partnerId = a.freelancers.id
-    if (!byPartner.has(partnerId)) {
-      byPartner.set(partnerId, {
-        partner: a.freelancers,
-        assignments: [],
-        totalPayout: 0,
-        totalCommission: 0,
-      })
-    }
-    const entry = byPartner.get(partnerId)!
-    entry.assignments.push(a)
-    const payout = a.budget ?? 0
-    const commissionPct = a.freelancers.commission_pct ?? 10
-    entry.totalPayout += payout
-    entry.totalCommission += payout * (commissionPct / 100)
+  type Agg = { partnerId: string; openToPartner: number; openByPartner: number }
+  const byPartner = new Map<string, Agg>()
+  const ensure = (pid: string): Agg => {
+    let a = byPartner.get(pid)
+    if (!a) { a = { partnerId: pid, openToPartner: 0, openByPartner: 0 }; byPartner.set(pid, a) }
+    return a
   }
 
-  const totalPayouts = [...byPartner.values()].reduce((s, e) => s + e.totalPayout, 0)
-  const totalCommissions = [...byPartner.values()].reduce((s, e) => s + e.totalCommission, 0)
-  const netBalance = totalCommissions - totalPayouts
+  // Verplichtingen (niet-geannuleerd)
+  for (const l of ledger) {
+    if (l.status === 'cancelled') continue
+    const a = ensure(l.freelancer_id)
+    if (normalizeDirection(l.direction, l.amount) === 'we_pay_partner') a.openToPartner += Math.abs(Number(l.amount))
+    else a.openByPartner += Math.abs(Number(l.amount))
+  }
+  // Goedgekeurde betalingen vereffenen
+  let pendingApprovals = 0
+  for (const p of payments) {
+    if (p.status === 'pending') { pendingApprovals++; continue }
+    if (p.status !== 'approved') continue
+    const a = ensure(p.freelancer_id)
+    if (p.direction === 'we_pay_partner') a.openToPartner -= Math.abs(Number(p.amount))
+    else a.openByPartner -= Math.abs(Number(p.amount))
+  }
+
+  const rows = [...byPartner.values()]
+    .map((a) => ({ ...a, net: a.openByPartner - a.openToPartner }))
+    .filter((a) => Math.abs(a.openToPartner) > 0.005 || Math.abs(a.openByPartner) > 0.005)
+    .sort((x, y) => Math.abs(y.net) - Math.abs(x.net))
+
+  const totalWePay = rows.reduce((s, a) => s + Math.max(0, a.openToPartner), 0)
+  const totalPartnerPays = rows.reduce((s, a) => s + Math.max(0, a.openByPartner), 0)
+  const openTotal = totalWePay + totalPartnerPays
 
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
         <h1 className="text-2xl font-bold">Settlements</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Overzicht van balansen tussen NextGenMedia en partners</p>
+        <p className="text-sm text-gray-500 mt-0.5">Openstaande balansen tussen NextGenMedia en partners — commissie (beide richtingen) en onderaanneming, na aftrek van geregistreerde betalingen</p>
       </div>
 
-      {/* Summary */}
-      <div className="grid grid-cols-3 gap-4">
+      {/* KPI's */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="stat-card">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs text-gray-500 uppercase tracking-wide">Totaal te betalen</span>
-            <TrendingDown className="h-4 w-4 text-red-500" />
-          </div>
-          <div className="text-2xl font-bold text-red-600">{formatEuro(totalPayouts)}</div>
-          <div className="text-xs text-gray-400 mt-1">Aan partners</div>
+          <div className="flex items-center justify-between mb-3"><span className="text-xs text-gray-500 uppercase tracking-wide">Wij moeten betalen</span><TrendingUp className="h-4 w-4 text-green-500" /></div>
+          <div className="text-2xl font-bold text-green-600">{formatEuro(totalWePay)}</div>
+          <div className="text-xs text-gray-400 mt-1">aan partners</div>
         </div>
         <div className="stat-card">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs text-gray-500 uppercase tracking-wide">Commissies</span>
-            <TrendingUp className="h-4 w-4 text-green-500" />
-          </div>
-          <div className="text-2xl font-bold text-green-600">{formatEuro(totalCommissions)}</div>
-          <div className="text-xs text-gray-400 mt-1">Van partners te ontvangen</div>
+          <div className="flex items-center justify-between mb-3"><span className="text-xs text-gray-500 uppercase tracking-wide">Partners moeten ons</span><TrendingDown className="h-4 w-4 text-red-500" /></div>
+          <div className="text-2xl font-bold text-red-600">{formatEuro(totalPartnerPays)}</div>
+          <div className="text-xs text-gray-400 mt-1">te ontvangen</div>
         </div>
         <div className="stat-card">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs text-gray-500 uppercase tracking-wide">Nettosaldo</span>
-            <ArrowLeftRight className="h-4 w-4 text-gray-400" />
-          </div>
-          <div className={`text-2xl font-bold ${netBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-            {formatEuro(Math.abs(netBalance))}
-          </div>
-          <div className="text-xs text-gray-400 mt-1">
-            {netBalance >= 0 ? 'In ons voordeel' : 'Wij moeten betalen'}
-          </div>
+          <div className="flex items-center justify-between mb-3"><span className="text-xs text-gray-500 uppercase tracking-wide">Open saldo totaal</span><Wallet className="h-4 w-4 text-[#c5b800]" /></div>
+          <div className="text-2xl font-bold">{formatEuro(openTotal)}</div>
+          <div className="text-xs text-gray-400 mt-1">nog te vereffenen</div>
+        </div>
+        <div className="stat-card">
+          <div className="flex items-center justify-between mb-3"><span className="text-xs text-gray-500 uppercase tracking-wide">Open settlements</span><ArrowLeftRight className="h-4 w-4 text-gray-400" /></div>
+          <div className="text-2xl font-bold">{rows.length}</div>
+          <div className="text-xs text-gray-400 mt-1">{pendingApprovals > 0 ? <span className="text-amber-600 inline-flex items-center gap-1"><Clock className="h-3 w-3" />{pendingApprovals} betaling(en) te keuren</span> : 'partners met saldo'}</div>
         </div>
       </div>
 
       {/* Per partner */}
       <div className="space-y-4">
-        <h2 className="font-semibold text-gray-900">Per partner</h2>
-        {byPartner.size === 0 ? (
+        <h2 className="font-semibold text-gray-900">Openstaand per partner</h2>
+        {rows.length === 0 ? (
           <div className="card-base text-center py-10 text-gray-400">
             <ArrowLeftRight className="h-8 w-8 mx-auto mb-3 opacity-30" />
-            <p className="text-sm">Nog geen afgeronde opdrachten voor settlements</p>
+            <p className="text-sm">Geen openstaande posten</p>
           </div>
         ) : (
-          [...byPartner.values()].map(({ partner, assignments, totalPayout, totalCommission }) => {
-            const balance = totalCommission - totalPayout
-            return (
-              <div key={partner.id} className="card-base">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="font-semibold">{partner.name}</h3>
-                    <div className="text-xs text-gray-400">{assignments.length} afgeronde opdrachten · Commissie {partner.commission_pct ?? 10}%</div>
+          <div className="space-y-3">
+            {rows.map((a) => (
+              <Link key={a.partnerId} href={`/admin/partners/${a.partnerId}`} className="card-base flex items-center justify-between gap-4 hover:border-gray-300 transition-colors">
+                <div className="min-w-0">
+                  <div className="font-semibold truncate">{partnerName.get(a.partnerId) ?? 'Partner'}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">{a.net >= 0 ? 'partner moet ons betalen' : 'wij moeten partner betalen'}</div>
+                </div>
+                <div className="flex items-center gap-5 shrink-0">
+                  <div className="text-right hidden sm:block">
+                    <div className="text-[11px] text-gray-400">Wij betalen</div>
+                    <div className="text-sm font-semibold text-green-600">{formatEuro(Math.max(0, a.openToPartner))}</div>
+                  </div>
+                  <div className="text-right hidden sm:block">
+                    <div className="text-[11px] text-gray-400">Partner betaalt</div>
+                    <div className="text-sm font-semibold text-red-600">{formatEuro(Math.max(0, a.openByPartner))}</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-sm text-gray-500">Saldo</div>
-                    <div className={`font-bold text-lg ${balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {balance >= 0 ? '+' : '-'}{formatEuro(Math.abs(balance))}
-                    </div>
+                    <div className="text-[11px] text-gray-400">Netto</div>
+                    <div className={`font-bold ${a.net >= 0 ? 'text-red-600' : 'text-green-600'}`}>{a.net >= 0 ? '+' : '−'}{formatEuro(Math.abs(a.net))}</div>
                   </div>
+                  <ChevronRight className="h-4 w-4 text-gray-300" />
                 </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-100">
-                        <th className="text-left py-2 text-xs text-gray-500 font-medium">Opdracht</th>
-                        <th className="text-left py-2 text-xs text-gray-500 font-medium">Klant</th>
-                        <th className="text-right py-2 text-xs text-gray-500 font-medium">Payout</th>
-                        <th className="text-right py-2 text-xs text-gray-500 font-medium">Commissie</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {assignments.map((a) => {
-                        const payout = a.budget ?? 0
-                        const comm = payout * ((partner.commission_pct ?? 10) / 100)
-                        return (
-                          <tr key={a.id}>
-                            <td className="py-2 text-gray-700">{a.title}</td>
-                            <td className="py-2 text-gray-500">{a.clients?.company_name ?? '—'}</td>
-                            <td className="py-2 text-right text-red-600">{formatEuro(payout)}</td>
-                            <td className="py-2 text-right text-green-600">{formatEuro(comm)}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                    <tfoot>
-                      <tr className="border-t border-gray-200 font-semibold">
-                        <td colSpan={2} className="py-2">Totaal</td>
-                        <td className="py-2 text-right text-red-600">{formatEuro(totalPayout)}</td>
-                        <td className="py-2 text-right text-green-600">{formatEuro(totalCommission)}</td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              </div>
-            )
-          })
+              </Link>
+            ))}
+          </div>
         )}
+        <p className="text-xs text-gray-400">Netto positief = de partner moet ons betalen. Netto negatief = wij moeten de partner betalen. Klik een partner aan om betalingen te registreren of goed te keuren.</p>
       </div>
     </div>
   )

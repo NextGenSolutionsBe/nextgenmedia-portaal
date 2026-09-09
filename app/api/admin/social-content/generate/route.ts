@@ -1,7 +1,12 @@
+import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
+import { createClient, createAdminSupabaseClient , isActiveStaff } from '@/lib/supabase/server'
 import { generatePlan } from '@/lib/content-planner'
+import { normaliseerKanalen } from '@/lib/social-platforms'
 import { revalidatePath } from 'next/cache'
+
+// Gebruikt cookies/sessie: nooit statisch renderen.
+export const dynamic = 'force-dynamic'
 
 // GET — fetch the social-media config for a client (pre-fills the dialog)
 export async function GET(req: NextRequest) {
@@ -12,6 +17,10 @@ export async function GET(req: NextRequest) {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Niet ingelogd' }, { status: 401 })
+    // This is an /api/admin route returning client business data — require admin,
+    // not merely an authenticated session.
+    const { data: roleData } = await supabase.from('user_roles').select('role').eq('user_id', user.id).maybeSingle()
+    if (roleData?.role !== 'admin' && !(await isActiveStaff(user.id))) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
 
     const admin = createAdminSupabaseClient()
 
@@ -37,7 +46,7 @@ export async function GET(req: NextRequest) {
       channels: Array.isArray(cfg.channels) ? (cfg.channels as string[]) : [],
     })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Fout' }, { status: 400 })
+    return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
 }
 
@@ -50,7 +59,7 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Niet ingelogd' }, { status: 401 })
     const { data: roleData } = await supabase.from('user_roles').select('role').eq('user_id', user.id).maybeSingle()
-    if (roleData?.role !== 'admin') return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
+    if (roleData?.role !== 'admin' && !(await isActiveStaff(user.id))) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
 
     const {
       clientId,
@@ -67,8 +76,10 @@ export async function POST(req: NextRequest) {
     }
 
     // Channels MUST come from request body — admin chooses per generation.
-    // Falls back to instagram only when nothing is selected (UI prevents this).
-    const planChannels = Array.isArray(channels) && channels.length > 0 ? channels : ['instagram']
+    // Kanalen normaliseren (Instagram/Facebook → Meta) en pas terugvallen op
+    // Meta als er echt niets gekozen is; het scherm voorkomt dat normaal.
+    const genormaliseerd = normaliseerKanalen(channels)
+    const planChannels = genormaliseerd.length > 0 ? genormaliseerd : ['meta']
 
     const planned = generatePlan({
       months,
@@ -104,6 +115,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, created: data?.length ?? 0, items: data ?? [] })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Fout' }, { status: 400 })
+    return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
 }

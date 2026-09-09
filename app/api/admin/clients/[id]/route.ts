@@ -1,7 +1,18 @@
+import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
+import { createClient, createAdminSupabaseClient , isActiveStaff } from '@/lib/supabase/server'
+import { logAudit, requestMeta } from '@/lib/audit'
 import { revalidatePath } from 'next/cache'
+import { validateBtw } from '@/lib/btw'
+import { clickupConfigured, deleteList } from '@/lib/clickup'
 
+// Gebruikt cookies/sessie: nooit statisch renderen.
+export const dynamic = 'force-dynamic'
+
+// Klant-verwijdering ruimt ook storage, auth en (best-effort) ClickUp op.
+export const maxDuration = 60
+
+// Strikt admin (voor destructieve acties zoals klant-DELETE).
 async function requireAdmin(supabase: Awaited<ReturnType<typeof createClient>>) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
@@ -9,12 +20,20 @@ async function requireAdmin(supabase: Awaited<ReturnType<typeof createClient>>) 
   return data?.role === 'admin' ? user : null
 }
 
+// Admin óf actieve werknemer (module-afscherming zit in de middleware).
+async function requireStaffLocal(supabase: Awaited<ReturnType<typeof createClient>>) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+  const { data } = await supabase.from('user_roles').select('role').eq('user_id', user.id).maybeSingle()
+  return data?.role === 'admin' || (await isActiveStaff(user.id)) ? user : null
+}
+
 // PATCH — update client fields
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
     const supabase = await createClient()
-    const user = await requireAdmin(supabase)
+    const user = await requireStaffLocal(supabase)
     if (!user) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
 
     const body = await req.json()
@@ -25,8 +44,24 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (body.contact_name !== undefined) patch.contact_name = body.contact_name || null
     if (body.niche !== undefined) patch.niche = body.niche || null
     if (body.website_url !== undefined) patch.website_url = body.website_url || null
+    if (body.customer_since !== undefined) patch.customer_since = body.customer_since || null
+    if (body.btw_nummer !== undefined) {
+      const v = validateBtw(body.btw_nummer)
+      if (!v.ok) return NextResponse.json({ error: v.error }, { status: 400 })
+      patch.btw_nummer = v.value || null
+    }
 
-    const { error } = await admin.from('clients').update(patch).eq('id', id)
+    // Update resiliently: drop columns that don't exist yet (customer_since / btw_nummer).
+    let { error } = await admin.from('clients').update(patch).eq('id', id)
+    while (error) {
+      const col = String(error.message ?? '').match(/'([^']+)' column|column "([^"]+)"/)?.[1]
+        ?? (/customer_since/i.test(error.message ?? '') ? 'customer_since' : /btw_nummer/i.test(error.message ?? '') ? 'btw_nummer' : null)
+      if (col && col in patch) {
+        delete patch[col]
+        if (Object.keys(patch).length === 0) { error = null; break }
+        ;({ error } = await admin.from('clients').update(patch).eq('id', id))
+      } else break
+    }
     if (error) throw new Error(error.message)
 
     // Handle service updates
@@ -103,7 +138,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     return NextResponse.json({ ok: true })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Fout' }, { status: 400 })
+    return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
 }
 
@@ -123,7 +158,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     // Verify the confirmed name matches
     const { data: client } = await admin
       .from('clients')
-      .select('company_name, owner_user_id')
+      .select('company_name, owner_user_id, clickup_list_id')
       .eq('id', id)
       .maybeSingle()
 
@@ -158,6 +193,13 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       admin.from('webdesign_change_requests').delete().eq('client_id', id),
     ])
 
+    // 3b. ClickUp: verwijder de volledige CONTENTKALENDER-lijst van deze klant
+    //     (spiegelt de verwijdering — alle gesyncte taken verdwijnen in één call).
+    //     Best-effort: mag de klant-verwijdering nooit blokkeren.
+    if (clickupConfigured() && client.clickup_list_id) {
+      try { await deleteList(client.clickup_list_id as string) } catch { }
+    }
+
     // 4. Delete client record (cascades: client_services, service_contracts, revenue_entries)
     const { error: clientErr } = await admin.from('clients').delete().eq('id', id)
     if (clientErr) throw new Error(clientErr.message)
@@ -166,6 +208,21 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     if (client.owner_user_id) {
       try { await admin.auth.admin.deleteUser(client.owner_user_id) } catch { }
     }
+
+    // GDPR: record the erasure (no personal data beyond the company name)
+    const meta = requestMeta(req)
+    await logAudit({
+      action: 'client.delete',
+      entityType: 'client',
+      entityId: id,
+      summary: `Klant "${client.company_name}" en alle gekoppelde gegevens definitief verwijderd`,
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      actorRole: 'admin',
+      metadata: { company_name: client.company_name },
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    })
 
     // 6. Invalidate caches so the clients list updates immediately
     try {
@@ -176,6 +233,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
     return NextResponse.json({ ok: true })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Fout' }, { status: 400 })
+    return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
 }

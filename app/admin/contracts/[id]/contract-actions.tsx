@@ -98,7 +98,7 @@ export function ContractActions({
       {/* Delete confirmation modal */}
       {deleteOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center gap-2 p-5 border-b border-gray-100">
               <AlertTriangle className="h-5 w-5 text-red-500 shrink-0" />
               <h3 className="font-semibold text-gray-900">Contract verwijderen</h3>

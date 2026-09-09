@@ -1,3 +1,17 @@
+# Next.js build output
+.next/
+out/
+next-env.d.ts
+
+# Build info / caches
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# Environment files (never commit secrets)
+.env
+.env.local
+.env*.local
+
 # Logs
 logs
 *.log

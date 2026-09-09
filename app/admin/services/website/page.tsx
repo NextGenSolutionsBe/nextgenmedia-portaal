@@ -1,5 +1,6 @@
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { WebsiteAdmin } from './website-admin'
+import { MaintenanceOverview } from './maintenance-overview'
 
 export const dynamic = 'force-dynamic'
 
@@ -81,6 +82,7 @@ export default async function WebsitePage() {
         <h1 className="text-2xl font-bold">Website</h1>
         <p className="text-sm text-gray-500 mt-0.5">Onderhoudsvragen en websiteklanten beheren</p>
       </div>
+      <MaintenanceOverview />
       <WebsiteAdmin
         initialRequests={requests as Array<{
           id: string; title: string; description: string | null; kind: string;

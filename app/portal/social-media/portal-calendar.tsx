@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { ContentCalendar, type SocialContentItem, type SocialContentStatus } from '@/components/calendar/content-calendar'
 
 export function PortalCalendar({
-  initialItems, clientId,
+  initialItems, clientId, canApprove = true, canFeedback = true,
 }: {
   initialItems: Array<{
     id: string; client_id: string; planned_date: string; platform: string;
@@ -14,7 +14,10 @@ export function PortalCalendar({
     reviewed_at: string | null; created_at: string;
   }>
   clientId: string
+  canApprove?: boolean
+  canFeedback?: boolean
 }) {
+  void clientId
   const [items, setItems] = useState<SocialContentItem[]>(initialItems as unknown as SocialContentItem[])
 
   const handleApprove = async (id: string) => {
@@ -44,8 +47,8 @@ export function PortalCalendar({
       items={items}
       mode="client"
       actions={{
-        onApprove: handleApprove,
-        onRequestChanges: handleRequestChanges,
+        onApprove: canApprove ? handleApprove : undefined,
+        onRequestChanges: canFeedback ? handleRequestChanges : undefined,
       }}
     />
   )
