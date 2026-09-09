@@ -22,14 +22,14 @@ hier bewust `401`.
 ### Pagineer — dit is de enige manier waarop dit stil misgaat
 
 PostgREST geeft standaard **hoogstens 1.000 rijen** terug, zonder foutmelding.
-De view telt er ruim 4.000. Zonder paginering mis je driekwart van de pipeline,
+De view telt er bijna 3.000. Zonder paginering mis je twee derde van de pipeline,
 en dan denk je dat bestaande klanten vrij zijn om te mailen.
 
 ```
 GET /rest/v1/harrie_pipeline?select=*&order=updatedAt.asc
 Range: 0-999
 Prefer: count=exact
-→ Content-Range: 0-999/4050        ← het totaal staat achter de schuine streep
+→ Content-Range: 0-999/2805        ← het totaal staat achter de schuine streep
 ```
 
 Blijf bladeren met `Range: 1000-1999`, `2000-2999`, … tot je het totaal hebt.
@@ -65,20 +65,20 @@ Twee dingen die vaak fout gaan:
 
 | `stageKey` | Aantal | Ring |
 |---|---|---|
-| `to_contact` | 3864 | buitenrand |
+| `to_contact` | 2579 | buitenrand |
+| `not_interested` | 53 | buiten beeld |
 | `klant` | 48 | kern |
 | `won` | 43 | kern |
-| `not_interested` | 37 | buiten beeld |
-| `contacted_call` | 18 | rood |
-| `contacted_mail` | 18 | rood |
+| `contacted_call` | 27 | rood |
+| `contacted_mail` | 26 | rood |
 | `email_sent` | 13 | rood |
-| `appointment` | 4 | groen |
-| `email_after_call` | 2 | rood |
+| `appointment` | 10 | groen |
+| `email_after_call` | 3 | rood |
 | `eigen_bedrijf` | 2 | kern |
 | `lost` | 1 | buiten beeld |
-| **totaal** | **4050** | |
+| **totaal** | **2805** | |
 
-Klopt jouw totaal niet met 4050, dan pagineer je niet.
+Klopt jouw totaal niet met 2805, dan pagineer je niet.
 
 ---
 
@@ -105,7 +105,28 @@ Klopt jouw totaal niet met 4050, dan pagineer je niet.
 
 ---
 
-## 4. Eén lead per bedrijf
+## 4. Boekhouders zijn uit de doelgroep
+
+**Boekhouders, accountants en belastingconsulenten worden niet meer benaderd.**
+1250 van hen zijn uit de pipeline gehaald. Die staan gearchiveerd en **komen
+niet meer in de view voor** — ook niet als `deleted`.
+
+Dat laatste is belangrijk. `deleted = true` betekent in dit contract "weer
+vrij", en dat is precies het omgekeerde van wat hier bedoeld is. Kreeg je ze
+alsnog door, dan las je een bewuste verwijdering als een uitnodiging om er
+achteraan te gaan.
+
+**Er staan er nog 61.** Dat zijn de boekhouders waarmee al contact is geweest:
+gebeld, gemaild, een terugbelafspraak, of jouw eigen lopende reeks. Die blijven
+staan omdat een lopend gesprek afbreken erger is dan een lead te veel. Ze staan
+gewoon in de view met hun echte fase — behandel ze zoals elke andere lead, maar
+**begin er geen nieuwe reeks voor**.
+
+Voeg ook geen boekhouders meer toe via `imported`.
+
+---
+
+## 5. Eén lead per bedrijf
 
 Er staat nog hoogstens **één actieve lead per bedrijf**. Dat was ooit één per
 lijst, waardoor dezelfde firma twee keer in de pipeline stond — twee kaarten,
@@ -121,7 +142,7 @@ Wat dat voor jou betekent:
 
 ---
 
-## 5. Het merk ligt pas vast bij de afspraak
+## 6. Het merk ligt pas vast bij de afspraak
 
 We verkopen onder twee namen: **NextGenMedia** (social media, content) en
 **NextGenSolutions** (websites, software). Er is geen aparte lijst per merk meer,
@@ -146,10 +167,10 @@ dus vooraf kiezen zou een keuze op het verkeerde moment zijn.
    elk verhaal benaderen. Staat er wél een merk, dan is dat beslist en hou je
    je daaraan.
 
-Op dit moment hebben **47 van de 3998 leads** een merk: 43 klanten (`won`) en
-4 lopende afspraken. De rest is bewust leeg.
+Op dit moment hebben **53 van de 2753 leads** een merk: de klanten (`won`) en
+de lopende afspraken. De rest is bewust leeg.
 
-## 6. Wat je terugschrijft
+## 7. Wat je terugschrijft
 
 Eén rij in `harrie_events`. Een trigger bepaalt daarna wat dat voor de pipeline
 betekent; jij hoeft geen enkele faseregel te kennen.
@@ -210,7 +231,7 @@ jij mailt of de prospect zelf reageerde, belt er niemand tussendoor.
 
 ---
 
-## 7. De reden bij "Geen interesse"
+## 8. De reden bij "Geen interesse"
 
 Verplicht en gestructureerd; op vrije tekst valt niet te tellen. Stuur bij een
 `declined` gewoon je eigen tekst mee in `detail` — wij leggen die zelf op een
@@ -230,7 +251,7 @@ code.
 
 ---
 
-## 8. Ritme
+## 9. Ritme
 
 - Elk kwartier de wijzigingen ophalen met `updatedAt=gt.…`.
 - Eén keer per dag alles, zonder filter. Wat dan niet meer meekomt, is weg.

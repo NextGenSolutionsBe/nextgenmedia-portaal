@@ -76,6 +76,16 @@ om er zelf van af te blijven.
 lead kan via drie kanalen benaderd zijn; de volledige geschiedenis staat op de
 tijdlijn (`sales_lead_events`).
 
+### Uit de doelgroep
+
+Een hele beroepsgroep kan uit de doelgroep gehaald worden — dat gebeurde met de
+boekhouders en accountants. Die leads staan gearchiveerd met het label
+`Uit doelgroep` en **komen niet in de view voor**, ook niet als `deleted`.
+
+Dat is bewust. `deleted` betekent "weer vrij", en dat is precies het omgekeerde
+van wat hier bedoeld is. Zag je ze wél, dan las je een bewuste verwijdering als
+een uitnodiging.
+
 ### Eén lead per bedrijf
 
 Er staat nog hoogstens **één actieve lead per bedrijf**. Dat was ooit één per
@@ -144,7 +154,7 @@ Eén rij per partij, uit drie bronnen. De kolommen liggen vast:
 | `warm` | bool | Reageerde zelf. |
 | `redenCode`, `redenTekst` | text | Waarom afgehaakt. |
 | `harrie` | jsonb | Jouw laatste blokje, zoals wij het bewaarden. |
-| `deleted` | bool | Gearchiveerd — weer vrij. Samengevoegde dubbels staan hier niet in. |
+| `deleted` | bool | Gearchiveerd — weer vrij. Samengevoegde dubbels en wie uit de doelgroep gehaald is, staan hier niet in. |
 | `updatedAt` | timestamptz | Hoogste van lead, bedrijf en contactpersoon. |
 | `pipeline` | text | Herkomst van de lijst, geen merk. Niet op segmenteren. Mag `null` zijn. |
 | `pipelineNaam` | text | Diezelfde herkomst, uitgeschreven. |

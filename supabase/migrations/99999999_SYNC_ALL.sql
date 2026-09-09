@@ -3383,6 +3383,10 @@ LEFT JOIN public.sales_pipelines pl ON pl.id = l.pipeline_id
 -- gesprek loopt gewoon door op de lead waarin ze zijn opgegaan.
 WHERE NOT EXISTS (
   SELECT 1 FROM public.sales_lead_samenvoegingen sv WHERE sv.verliezer_id = l.id)
+-- En om diezelfde reden: wie UIT DE DOELGROEP gehaald is, is niet vrijgegeven
+-- maar juist bewust weggehaald. Zou die als `deleted` doorgegeven worden, dan
+-- las Harrie dat als een uitnodiging om er alsnog achteraan te gaan.
+AND NOT (l.archived_at IS NOT NULL AND l.labels @> ARRAY['Uit doelgroep'])
 UNION ALL
 SELECT 'client_' || k.id::text, NULL, k.company_name,
   nullif(regexp_replace(coalesce(k.btw_nummer,''), '\D', '', 'g'), ''),
