@@ -3,16 +3,27 @@
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import Link from 'next/link'
 import {
   Loader2, Plus, X, Trash2, Pencil, Rocket, Users, Layers, Briefcase, Settings2, CalendarRange, AlertTriangle, Archive,
+  Link2, Receipt, CheckCircle2, ExternalLink, Ban, Undo2, ChevronDown, ChevronRight,
 } from 'lucide-react'
 import { formatEuro, formatDate } from '@/lib/utils'
 import {
-  berekenVesting, leesInstellingen, pct, totaalwaarde, duurUitData, toerekeningsfactor,
-  STATUS_LABEL, ERKENNING_LABEL, JAAR_LABEL, DIENSTEN,
-  type Contract, type WamRij, type WamKost, type ContractBerekend, type ContractStatus, type Erkenning,
-  type VestingInstellingen,
+  berekenVesting, leesInstellingen, pct, totaalwaarde, duurUitData, toerekeningsfactor, wamSchema,
+  STATUS_LABEL, ERKENNING_LABEL, JAAR_LABEL, DIENSTEN, FREQUENTIES, TERMIJN_LABEL,
+  type Contract, type WamRij, type WamKost, type WamTermijn, type WamRijBerekend, type TermijnStatus, type Frequentie,
+  type ContractBerekend, type ContractStatus, type Erkenning, type VestingInstellingen,
 } from '@/lib/vesting'
+
+/** Een contract uit de Contractenmodule, zoals de picker het toont. */
+type ModuleContract = { id: string; titel: string; status: string; client_id: string | null; klant: string | null; start_date: string | null; end_date: string | null; signed_at: string | null; service_slug: string | null }
+type Klant = { id: string; naam: string }
+
+const TERMIJN_STIJL: Record<TermijnStatus, string> = {
+  gepland: 'bg-gray-100 text-gray-700', gefactureerd: 'bg-blue-100 text-blue-800', betaald: 'bg-green-100 text-green-800', geannuleerd: 'bg-red-100 text-red-700',
+}
+const CONTRACT_STATUS_LABEL: Record<string, string> = { draft: 'Concept', sent: 'Verstuurd', viewed: 'Bekeken', signed: 'Ondertekend' }
 
 type Tab = 'overzicht' | 'contracten' | 'wam' | 'jaren' | 'instellingen'
 
@@ -34,14 +45,37 @@ function naarContract(r: Record<string, unknown>): Contract {
     closed_door_marco: r.closed_door_marco === true,
     laatste_betaalde_maand: d(r.laatste_betaalde_maand), reden_stop: (r.reden_stop as string | null) ?? null,
     notitie: (r.notitie as string | null) ?? null,
+    contract_id: (r.contract_id as string | null) ?? null,
   }
 }
 function naarWam(r: Record<string, unknown>): WamRij {
+  const freq = FREQUENTIES.find((f) => f.key === r.frequentie)?.key ?? null
   return {
     id: String(r.id), nr: String(r.nr ?? ''), klant: String(r.klant ?? ''),
+    client_id: (r.client_id as string | null) ?? null,
     contractwaarde: n(r.contractwaarde) ?? 0, netto_ontvangen: n(r.netto_ontvangen) ?? 0,
     status: (['actief', 'voltooid', 'stopgezet', 'niet_betaler'].includes(String(r.status)) ? r.status : 'actief') as ContractStatus,
     betalingen_op_schema: r.betalingen_op_schema !== false, notitie: (r.notitie as string | null) ?? null,
+    start_datum: d(r.start_datum), contract_maanden: n(r.contract_maanden), bedrag_per_factuur: n(r.bedrag_per_factuur),
+    frequentie: freq, btw_pct: n(r.btw_pct) ?? 21, omschrijving: (r.omschrijving as string | null) ?? null,
+  }
+}
+function naarTermijn(r: Record<string, unknown>): WamTermijn {
+  return {
+    id: String(r.id), wam_id: String(r.wam_id), volgnr: n(r.volgnr) ?? 0, periode: String(r.periode ?? '').slice(0, 7),
+    factuurdatum: d(r.factuurdatum) ?? '', bedrag_excl: n(r.bedrag_excl) ?? 0, btw_pct: n(r.btw_pct) ?? 21,
+    status: (['gepland', 'gefactureerd', 'betaald', 'geannuleerd'].includes(String(r.status)) ? r.status : 'gepland') as TermijnStatus,
+    betaald_op: d(r.betaald_op), invoice_id: (r.invoice_id as string | null) ?? null,
+    clickup_task_id: (r.clickup_task_id as string | null) ?? null, notitie: (r.notitie as string | null) ?? null,
+  }
+}
+function naarModuleContract(r: Record<string, unknown>): ModuleContract {
+  const c = r.clients as { company_name?: string | null } | { company_name?: string | null }[] | null | undefined
+  const klant = Array.isArray(c) ? (c[0]?.company_name ?? null) : (c?.company_name ?? null)
+  return {
+    id: String(r.id), titel: String(r.title ?? 'Contract'), status: String(r.status ?? 'draft'),
+    client_id: (r.client_id as string | null) ?? null, klant: klant ?? null,
+    start_date: d(r.start_date), end_date: d(r.end_date), signed_at: d(r.signed_at), service_slug: (r.service_slug as string | null) ?? null,
   }
 }
 function naarKost(r: Record<string, unknown>): WamKost {
@@ -53,24 +87,32 @@ const ERKENNING_STIJL: Record<Erkenning, string> = {
   uitgesloten: 'bg-red-100 text-red-700', onvolledig: 'bg-gray-100 text-gray-600',
 }
 
-export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRijen, oudeRegistraties }: {
+export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRijen, oudeRegistraties, termijnRijen = [], moduleContracten = [], klanten = [] }: {
   instellingenRij: Record<string, unknown> | null
   contractRijen: Record<string, unknown>[]
   wamRijen: Record<string, unknown>[]
   kostRijen: Record<string, unknown>[]
   oudeRegistraties: Record<string, unknown>[]
+  termijnRijen?: Record<string, unknown>[]
+  moduleContracten?: Record<string, unknown>[]
+  klanten?: Klant[]
 }) {
   const router = useRouter()
   const [tab, setTab] = useState<Tab>('overzicht')
   const [contractDialoog, setContractDialoog] = useState<Contract | 'nieuw' | null>(null)
   const [wamDialoog, setWamDialoog] = useState<WamRij | 'nieuw' | null>(null)
   const [kostDialoog, setKostDialoog] = useState<WamKost | 'nieuw' | null>(null)
+  const [openWam, setOpenWam] = useState<string | null>(null)
+  const [extraTermijn, setExtraTermijn] = useState<WamRij | null>(null)
 
   const inst = useMemo(() => leesInstellingen(instellingenRij), [instellingenRij])
   const contracten = useMemo(() => contractRijen.map(naarContract), [contractRijen])
   const wam = useMemo(() => wamRijen.map(naarWam), [wamRijen])
   const kosten = useMemo(() => kostRijen.map(naarKost), [kostRijen])
-  const v = useMemo(() => berekenVesting(contracten, wam, kosten, inst), [contracten, wam, kosten, inst])
+  const termijnen = useMemo(() => termijnRijen.map(naarTermijn), [termijnRijen])
+  const module = useMemo(() => moduleContracten.map(naarModuleContract), [moduleContracten])
+  const modulePerId = useMemo(() => new Map(module.map((m) => [m.id, m])), [module])
+  const v = useMemo(() => berekenVesting(contracten, wam, kosten, inst, termijnen), [contracten, wam, kosten, inst, termijnen])
 
   const verwijder = async (resource: 'contract' | 'wam' | 'kost', id: string, naam: string) => {
     if (!confirm(`"${naam}" verwijderen? Dit is niet terug te draaien.`)) return
@@ -196,7 +238,8 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
             <div className="card-base">
               <h2 className="font-semibold mb-3">WAM-portefeuille</h2>
               <div className="grid grid-cols-2 gap-3">
-                <Box label="Netto ontvangen" value={formatEuro(v.wam.nettoOntvangen)} />
+                <Box label="Prognose omzet" value={formatEuro(v.wam.prognose)} sub={v.wam.openstaand > 0 ? `${formatEuro(v.wam.openstaand)} openstaand` : undefined} />
+                <Box label="Effectief ontvangen" value={formatEuro(v.wam.nettoOntvangen)} color="text-green-700" />
                 <Box label="Kosten bij WAM" value={formatEuro(v.wam.kosten)} color="text-red-600" />
                 <Box label="Netto meetellend" value={formatEuro(v.wam.nettoMeetellend)} />
                 <Box label="Aandeel via WAM" value={`${pct(v.wam.voorlopig)} · def. ${pct(v.wam.definitief)}`} />
@@ -272,6 +315,13 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                         <td className="table-td">
                           <div className="font-medium">{c.klant}</div>
                           <div className="text-[11px] text-gray-500 font-mono">{c.nr}</div>
+                          {c.contract_id && (
+                            <Link href={`/admin/contracts/${c.contract_id}`} onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center gap-1 text-[11px] text-blue-700 hover:underline mt-0.5" title="Open in de Contractenmodule">
+                              <Link2 className="h-3 w-3" />{modulePerId.get(c.contract_id)?.titel ?? 'Contract'}
+                              {modulePerId.get(c.contract_id)?.status && <span className="text-gray-400">· {CONTRACT_STATUS_LABEL[modulePerId.get(c.contract_id)!.status] ?? modulePerId.get(c.contract_id)!.status}</span>}
+                            </Link>
+                          )}
                         </td>
                         <td className="table-td">
                           <div className="text-gray-700 whitespace-nowrap">{formatDate(c.ondertekend_op)}</div>
@@ -333,8 +383,13 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
             </div>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
-            <Box label="Netto ontvangen" value={formatEuro(v.wam.nettoOntvangen)} />
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <Box label="Prognose omzet" value={formatEuro(v.wam.prognose)} sub="historiek + alle termijnen" />
+            <Box label="Gefactureerd" value={formatEuro(v.wam.gefactureerd)} sub="termijnen met een factuur" color="text-blue-700" />
+            <Box label="Effectief ontvangen" value={formatEuro(v.wam.nettoOntvangen)} sub="historiek + betaalde termijnen — dit telt" color="text-green-700" />
+            <Box label="Openstaand" value={formatEuro(v.wam.openstaand)} sub="gefactureerd, nog niet betaald" color={v.wam.openstaand > 0 ? 'text-amber-700' : undefined} />
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
             <Box label="Kosten bij WAM" value={formatEuro(v.wam.kosten)} color="text-red-600" />
             <Box label="Netto meetellend" value={formatEuro(v.wam.nettoMeetellend)} />
             <Box label="Voorlopig aandeel" value={pct(v.wam.voorlopig)} color="text-amber-700" />
@@ -344,26 +399,52 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="card-base p-0 overflow-hidden lg:col-span-2">
-              <div className="px-4 py-3 border-b border-gray-100 text-sm font-semibold">Klanten</div>
+              <div className="px-4 py-3 border-b border-gray-100 text-sm font-semibold flex items-center justify-between">
+                <span>Klanten</span>
+                <span className="text-[11px] font-normal text-gray-400">Klik een klant open voor de termijnen en facturen.</span>
+              </div>
               {v.wam.rijen.length === 0 ? <div className="empty-state text-sm">Nog geen WAM-klanten.</div> : (
                 <div className="table-wrap"><table className="w-full text-sm">
                   <thead><tr className="border-b border-gray-100">
-                    <th className="table-th">Nr.</th><th className="table-th">Klant</th><th className="table-th text-right">Contractwaarde</th><th className="table-th text-right">Netto ontvangen</th><th className="table-th text-right">Meetellend</th><th className="table-th">Status</th><th className="table-th"></th>
+                    <th className="table-th w-6"></th><th className="table-th">Klant</th><th className="table-th text-right">Prognose</th><th className="table-th text-right">Gefactureerd</th><th className="table-th text-right">Ontvangen</th><th className="table-th text-right">Meetellend</th><th className="table-th">Status</th><th className="table-th w-16"></th>
                   </tr></thead>
                   <tbody className="divide-y divide-gray-50">
-                    {v.wam.rijen.map((r) => (
-                      <tr key={r.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setWamDialoog(r)}>
-                        <td className="table-td font-mono text-xs">{r.nr}</td>
-                        <td className="table-td"><div className="font-medium">{r.klant}</div>{r.notitie && <div className="text-[11px] text-gray-500">{r.notitie}</div>}</td>
-                        <td className="table-td text-right tabular">{formatEuro(r.contractwaarde)}</td>
-                        <td className="table-td text-right tabular">{formatEuro(r.netto_ontvangen)}</td>
-                        <td className="table-td text-right tabular font-semibold">{formatEuro(r.meetellend)}</td>
-                        <td className="table-td"><span className={`status-badge ${ERKENNING_STIJL[r.erkenning]}`}>{ERKENNING_LABEL[r.erkenning]}</span></td>
-                        <td className="table-td" onClick={(e) => e.stopPropagation()}>
-                          <button onClick={() => verwijder('wam', r.id, `${r.nr} ${r.klant}`)} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
-                        </td>
-                      </tr>
-                    ))}
+                    {v.wam.rijen.map((r) => {
+                      const open = openWam === r.id
+                      const freq = FREQUENTIES.find((f) => f.key === r.frequentie)
+                      return (
+                        <WamRijen key={r.id}>
+                          <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setOpenWam(open ? null : r.id)}>
+                            <td className="table-td text-gray-400">{open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</td>
+                            <td className="table-td">
+                              <div className="font-medium">{r.klant}</div>
+                              <div className="text-[11px] text-gray-500">
+                                <span className="font-mono">{r.nr}</span>
+                                {freq && r.bedrag_per_factuur ? <> · {formatEuro(r.bedrag_per_factuur)} {freq.label.toLowerCase()}{r.contract_maanden ? ` · ${r.contract_maanden} mnd` : ''}</> : <> · geen facturatieschema</>}
+                              </div>
+                            </td>
+                            <td className="table-td text-right tabular">{formatEuro(r.prognose > 0 ? r.prognose : r.contractwaarde)}</td>
+                            <td className="table-td text-right tabular text-blue-800">{formatEuro(r.gefactureerd)}{r.openstaand > 0 && <div className="text-[11px] text-amber-700">{formatEuro(r.openstaand)} open</div>}</td>
+                            <td className="table-td text-right tabular text-green-800">{formatEuro(r.ontvangen)}{r.netto_ontvangen > 0 && r.betaald > 0 && <div className="text-[11px] text-gray-400">waarvan {formatEuro(r.netto_ontvangen)} historiek</div>}</td>
+                            <td className="table-td text-right tabular font-semibold">{formatEuro(r.meetellend)}</td>
+                            <td className="table-td"><span className={`status-badge ${ERKENNING_STIJL[r.erkenning]}`}>{ERKENNING_LABEL[r.erkenning]}</span><div className="text-[11px] text-gray-500 mt-0.5">{STATUS_LABEL[r.status]}</div></td>
+                            <td className="table-td" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex gap-1 justify-end">
+                                <button onClick={() => setWamDialoog(r)} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400" title="Wijzigen"><Pencil className="h-3.5 w-3.5" /></button>
+                                <button onClick={() => verwijder('wam', r.id, `${r.nr} ${r.klant}`)} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600" title="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></button>
+                              </div>
+                            </td>
+                          </tr>
+                          {open && (
+                            <tr className="bg-gray-50/60">
+                              <td colSpan={8} className="px-4 py-3">
+                                <Termijnen rij={r} onExtra={() => setExtraTermijn(r)} />
+                              </td>
+                            </tr>
+                          )}
+                        </WamRijen>
+                      )
+                    })}
                   </tbody>
                 </table></div>
               )}
@@ -444,10 +525,11 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
       {tab === 'instellingen' && <Instellingen inst={inst} />}
 
       {contractDialoog && (
-        <ContractDialoog contract={contractDialoog === 'nieuw' ? null : contractDialoog} inst={inst}
+        <ContractDialoog contract={contractDialoog === 'nieuw' ? null : contractDialoog} inst={inst} module={module}
           onClose={() => setContractDialoog(null)} />
       )}
-      {wamDialoog && <WamDialoog rij={wamDialoog === 'nieuw' ? null : wamDialoog} onClose={() => setWamDialoog(null)} />}
+      {wamDialoog && <WamDialoog rij={wamDialoog === 'nieuw' ? null : wamDialoog} klanten={klanten} onClose={() => setWamDialoog(null)} />}
+      {extraTermijn && <ExtraTermijnDialoog rij={extraTermijn} onClose={() => setExtraTermijn(null)} />}
       {kostDialoog && <KostDialoog rij={kostDialoog === 'nieuw' ? null : kostDialoog} onClose={() => setKostDialoog(null)} />}
     </div>
   )
@@ -455,11 +537,11 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
 
 // ── Contractformulier ────────────────────────────────────────────────────────
 
-function ContractDialoog({ contract, inst, onClose }: { contract: Contract | null; inst: VestingInstellingen; onClose: () => void }) {
+function ContractDialoog({ contract, inst, module, onClose }: { contract: Contract | null; inst: VestingInstellingen; module: ModuleContract[]; onClose: () => void }) {
   const router = useRouter()
   const vandaag = new Date().toISOString().slice(0, 10)
   const [f, setF] = useState({
-    nr: contract?.nr ?? '', klant: contract?.klant ?? '',
+    nr: contract?.nr ?? '', klant: contract?.klant ?? '', contract_id: contract?.contract_id ?? '',
     ondertekend_op: contract?.ondertekend_op ?? vandaag,
     start_dienst: contract?.start_dienst ?? '', einde_dienst: contract?.einde_dienst ?? '',
     dienst: contract?.dienst ?? 'Social media management',
@@ -487,6 +569,23 @@ function ContractDialoog({ contract, inst, onClose }: { contract: Contract | nul
   const netto = totaal === null ? null : Math.max(0, totaal - (n(f.uitgesloten_kosten) ?? 0))
   const afgeleideDuur = duurUitData(f.start_dienst || null, f.einde_dienst || null)
   const gestopt = f.status === 'stopgezet' || f.status === 'niet_betaler'
+  const gekoppeld = module.find((m) => m.id === f.contract_id) ?? null
+
+  // Koppelen aan een contract uit de Contractenmodule: wat daar al ingevuld is,
+  // nemen we over — maar nooit over iets heen dat hier al is ingetypt.
+  const koppel = (id: string) => {
+    const m = module.find((x) => x.id === id)
+    setF((p) => ({
+      ...p, contract_id: id,
+      klant: p.klant || m?.klant || '',
+      ondertekend_op: m?.signed_at && (!contract || !p.ondertekend_op || p.ondertekend_op === vandaag) ? m.signed_at : p.ondertekend_op,
+      start_dienst: p.start_dienst || m?.start_date || '',
+      einde_dienst: p.einde_dienst || m?.end_date || '',
+    }))
+  }
+  const moduleOpties = [{ v: '', l: '— Geen koppeling —' }, ...module
+    .slice().sort((a, b) => (a.klant ?? '').localeCompare(b.klant ?? '') || a.titel.localeCompare(b.titel))
+    .map((m) => ({ v: m.id, l: `${m.klant ? m.klant + ' · ' : ''}${m.titel} (${CONTRACT_STATUS_LABEL[m.status] ?? m.status}${m.signed_at ? `, ${formatDate(m.signed_at)}` : ''})` }))]
 
   const bewaar = async () => {
     setBezig(true)
@@ -503,6 +602,16 @@ function ContractDialoog({ contract, inst, onClose }: { contract: Contract | nul
 
   return (
     <Dialoog titel={contract ? `${contract.nr} — ${contract.klant}` : 'Nieuw contract'} onClose={onClose} onSave={bewaar} bezig={bezig} breed>
+      <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3 space-y-2">
+        <Keuze label="Contract uit de Contractenmodule" value={f.contract_id} onChange={koppel} opties={moduleOpties} />
+        <p className="text-[11px] text-gray-500 flex items-center gap-1.5 flex-wrap">
+          <Link2 className="h-3 w-3" />
+          {gekoppeld ? (
+            <>Gekoppeld aan <Link href={`/admin/contracts/${gekoppeld.id}`} className="text-blue-700 hover:underline inline-flex items-center gap-0.5">{gekoppeld.titel}<ExternalLink className="h-3 w-3" /></Link>
+              {gekoppeld.klant ? ` van ${gekoppeld.klant}` : ''} — klant, ondertekening en looptijd worden overgenomen als ze hier nog leeg zijn.</>
+          ) : <>Koppel dit vestingcontract aan het echte contract, zodat status, ondertekening en facturen op één plek te volgen zijn.</>}
+        </p>
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <Veld label="Klant *" value={f.klant} onChange={(v) => set('klant', v)} />
         <Veld label="Contractnr." value={f.nr} onChange={(v) => set('nr', v)} placeholder="automatisch" />
@@ -566,33 +675,80 @@ function ContractDialoog({ contract, inst, onClose }: { contract: Contract | nul
   )
 }
 
-function WamDialoog({ rij, onClose }: { rij: WamRij | null; onClose: () => void }) {
+function WamDialoog({ rij, klanten, onClose }: { rij: WamRij | null; klanten: Klant[]; onClose: () => void }) {
   const router = useRouter()
   const [f, setF] = useState({
-    nr: rij?.nr ?? '', klant: rij?.klant ?? '', contractwaarde: rij?.contractwaarde?.toString() ?? '',
+    nr: rij?.nr ?? '', klant: rij?.klant ?? '', client_id: rij?.client_id ?? '',
+    contractwaarde: rij?.contractwaarde?.toString() ?? '',
     netto_ontvangen: rij?.netto_ontvangen?.toString() ?? '', status: rij?.status ?? 'actief',
     betalingen_op_schema: rij?.betalingen_op_schema ?? true, notitie: rij?.notitie ?? '',
+    start_datum: rij?.start_datum ?? '', contract_maanden: rij?.contract_maanden?.toString() ?? '',
+    bedrag_per_factuur: rij?.bedrag_per_factuur?.toString() ?? '', frequentie: (rij?.frequentie ?? 'maandelijks') as Frequentie,
+    btw_pct: rij?.btw_pct?.toString() ?? '21', omschrijving: rij?.omschrijving ?? '',
   })
   const [bezig, setBezig] = useState(false)
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((p) => ({ ...p, [k]: v }))
+
+  // Klant uit het klantenbestand kiezen vult de naam in; een vrije naam mag ook.
+  const kiesKlant = (id: string) => {
+    const k = klanten.find((x) => x.id === id)
+    setF((p) => ({ ...p, client_id: id, klant: k ? k.naam : p.klant }))
+  }
+
+  // Meelezen: hoeveel termijnen levert dit schema op, en wat is de prognose?
+  const schema = wamSchema({
+    start_datum: f.start_datum || null, contract_maanden: n(f.contract_maanden), bedrag_per_factuur: n(f.bedrag_per_factuur),
+    frequentie: f.frequentie, btw_pct: n(f.btw_pct) ?? 21,
+  })
+  const prognoseSchema = schema.reduce((t, x) => t + x.bedrag_excl, 0)
+  const historiek = n(f.netto_ontvangen) ?? 0
+  const gefactureerdeTermijnen = rij ? null : 0 // enkel informatief bij nieuw
+
   const bewaar = async () => {
     setBezig(true)
     try {
       const body: Record<string, unknown> = { resource: 'wam', ...f }
       if (!body.nr) delete body.nr
+      if (!body.client_id) body.client_id = null
+      // Zonder schema geen prognose: contractwaarde = wat het schema oplevert, tenzij bewust anders ingevuld.
+      if (!body.contractwaarde && prognoseSchema > 0) body.contractwaarde = prognoseSchema + historiek
       if (rij) body.id = rij.id
       const r = await fetch('/api/admin/vesting', { method: rij ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
-      toast.success('Opgeslagen.'); router.refresh(); onClose()
+      toast.success(rij ? 'WAM-klant bijgewerkt — de geplande termijnen volgen het schema.' : 'WAM-klant toegevoegd met facturatieschema.'); router.refresh(); onClose()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt') } finally { setBezig(false) }
   }
   return (
-    <Dialoog titel={rij ? `${rij.nr} — ${rij.klant}` : 'Nieuwe WAM-klant'} onClose={onClose} onSave={bewaar} bezig={bezig}>
-      <Veld label="Klant *" value={f.klant} onChange={(v) => set('klant', v)} />
-      <Veld label="Nr." value={f.nr} onChange={(v) => set('nr', v)} placeholder="automatisch" />
+    <Dialoog titel={rij ? `${rij.nr} — ${rij.klant}` : 'Nieuwe WAM-klant'} onClose={onClose} onSave={bewaar} bezig={bezig} breed>
       <div className="grid grid-cols-2 gap-3">
-        <Veld label="Contractwaarde (€)" value={f.contractwaarde} onChange={(v) => set('contractwaarde', v)} inputMode="decimal" />
-        <Veld label="Netto ontvangen (€)" value={f.netto_ontvangen} onChange={(v) => set('netto_ontvangen', v)} inputMode="decimal" hint="Dit telt; niet de contractwaarde." />
+        <Keuze label="Klant uit het klantenbestand" value={f.client_id} onChange={kiesKlant}
+          opties={[{ v: '', l: '— Niet gekoppeld —' }, ...klanten.map((k) => ({ v: k.id, l: k.naam }))]} />
+        <Veld label="Naam op de factuur *" value={f.klant} onChange={(v) => set('klant', v)} hint="Wordt ingevuld vanuit het klantenbestand; vrij aanpasbaar." />
+      </div>
+
+      <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-3 space-y-3">
+        <div className="text-xs font-semibold text-gray-700 flex items-center gap-1.5"><Receipt className="h-3.5 w-3.5" />Facturatieschema</div>
+        <div className="grid grid-cols-2 gap-3">
+          <Veld label="Start facturatie" type="date" value={f.start_datum} onChange={(v) => set('start_datum', v)} hint="Datum van de eerste factuur." />
+          <Veld label="Lengte contract (maanden)" value={f.contract_maanden} onChange={(v) => set('contract_maanden', v)} inputMode="decimal" placeholder={f.frequentie === 'eenmalig' ? 'n.v.t.' : 'bv. 12'} />
+          <Veld label="Prijs per factuur (€ excl. btw)" value={f.bedrag_per_factuur} onChange={(v) => set('bedrag_per_factuur', v)} inputMode="decimal" />
+          <Keuze label="Frequentie facturatie" value={f.frequentie} onChange={(v) => set('frequentie', v as Frequentie)} opties={FREQUENTIES.map((x) => ({ v: x.key, l: x.label }))} />
+          <Veld label="Btw %" value={f.btw_pct} onChange={(v) => set('btw_pct', v)} inputMode="decimal" />
+          <Veld label="Omschrijving op de factuur" value={f.omschrijving} onChange={(v) => set('omschrijving', v)} placeholder="bv. Websitebeheer" />
+        </div>
+        <div className="rounded-lg bg-white border border-gray-200 p-2.5 text-xs text-gray-600">
+          {schema.length === 0 ? (
+            <>Vul start, prijs en frequentie in (en de looptijd, tenzij eenmalig) — dan maakt de app de termijnen aan.</>
+          ) : (
+            <><b>{schema.length}</b> {schema.length === 1 ? 'termijn' : 'termijnen'} van {formatEuro(schema[0].bedrag_excl)} excl. btw, van {formatDate(schema[0].factuurdatum)} t.e.m. {formatDate(schema[schema.length - 1].factuurdatum)} — prognose <b>{formatEuro(prognoseSchema)}</b>{historiek > 0 ? <> + {formatEuro(historiek)} historiek = <b>{formatEuro(prognoseSchema + historiek)}</b></> : null}.
+              {rij && <span className="block text-gray-400 mt-1">Termijnen die al gefactureerd of betaald zijn, blijven ongewijzigd.</span>}</>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Veld label="Al ontvangen vóór de app (€)" value={f.netto_ontvangen} onChange={(v) => set('netto_ontvangen', v)} inputMode="decimal" hint="Historiek: betalingen van vóór de facturatie via de app. Telt mee voor het aandeel." />
+        <Veld label="Contractwaarde (€)" value={f.contractwaarde} onChange={(v) => set('contractwaarde', v)} inputMode="decimal" placeholder={prognoseSchema > 0 ? `${Math.round(prognoseSchema + historiek)} uit het schema` : ''} hint="Leeg = afgeleid uit het schema." />
       </div>
       <div className="grid grid-cols-2 gap-3">
         <Keuze label="Status" value={f.status} onChange={(v) => set('status', v as ContractStatus)}
@@ -600,9 +756,151 @@ function WamDialoog({ rij, onClose }: { rij: WamRij | null; onClose: () => void 
         <JaNee label="Betalingen op schema?" value={f.betalingen_op_schema} onChange={(v) => set('betalingen_op_schema', v)} />
       </div>
       <Veld label="Notitie" value={f.notitie} onChange={(v) => set('notitie', v)} />
+      {gefactureerdeTermijnen === 0 && null}
     </Dialoog>
   )
 }
+
+/** De termijnen van één WAM-klant: factuur aanmaken, betaald zetten, annuleren. */
+function Termijnen({ rij, onExtra }: { rij: WamRijBerekend; onExtra: () => void }) {
+  const router = useRouter()
+  const [bezig, setBezig] = useState<string | null>(null)
+
+  const patch = async (t: WamTermijn, body: Record<string, unknown>, melding: string) => {
+    setBezig(t.id)
+    try {
+      const r = await fetch('/api/admin/vesting', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resource: 'termijn', id: t.id, ...body }) })
+      const j = await r.json(); if (!r.ok) throw new Error(j.error)
+      toast.success(melding); router.refresh()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(null) }
+  }
+  const factureer = async (t: WamTermijn) => {
+    if (!confirm(`Factuur aanmaken voor ${rij.klant} — termijn ${t.volgnr} (${t.periode}, ${formatEuro(t.bedrag_excl)} excl. btw)?\n\nDe factuur komt in Facturen en er wordt een ClickUp-taak aangemaakt.`)) return
+    setBezig(t.id)
+    try {
+      const r = await fetch('/api/admin/vesting', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resource: 'termijn', action: 'factuur', id: t.id }) })
+      const j = await r.json(); if (!r.ok) throw new Error(j.error)
+      if (j.warning) toast.warning(j.warning)
+      toast.success('Factuur aangemaakt — staat in Facturen en in ClickUp.'); router.refresh()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Factuur aanmaken mislukt') } finally { setBezig(null) }
+  }
+  const verwijder = async (t: WamTermijn) => {
+    if (!confirm(`Termijn ${t.volgnr} (${t.periode}) verwijderen?`)) return
+    setBezig(t.id)
+    try {
+      const r = await fetch(`/api/admin/vesting?resource=termijn&id=${t.id}`, { method: 'DELETE' })
+      const j = await r.json(); if (!r.ok) throw new Error(j.error)
+      toast.success('Termijn verwijderd.'); router.refresh()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(null) }
+  }
+
+  const knop = 'inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors disabled:opacity-50'
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="text-xs font-semibold text-gray-700">Termijnen — {rij.klant}</div>
+        <div className="flex items-center gap-3 text-[11px] text-gray-500">
+          <span>Prognose <b className="text-gray-800">{formatEuro(rij.prognose)}</b></span>
+          <span>Gefactureerd <b className="text-blue-800">{formatEuro(rij.gefactureerd)}</b></span>
+          <span>Betaald <b className="text-green-800">{formatEuro(rij.betaald)}</b></span>
+          {rij.openstaand > 0 && <span>Open <b className="text-amber-700">{formatEuro(rij.openstaand)}</b></span>}
+          <button onClick={onExtra} className={`${knop} bg-white border-gray-200 text-gray-700 hover:border-gray-400`}><Plus className="h-3 w-3" />Extra termijn</button>
+        </div>
+      </div>
+      {rij.termijnen.length === 0 ? (
+        <div className="text-xs text-gray-500 py-2">Nog geen termijnen. Vul het facturatieschema in bij <button onClick={onExtra} className="underline">een losse termijn</button> of via <b>Wijzigen</b>.</div>
+      ) : (
+        <div className="table-wrap rounded-lg border border-gray-200 bg-white">
+          <table className="w-full text-xs">
+            <thead><tr className="border-b border-gray-100">
+              <th className="table-th">#</th><th className="table-th">Periode</th><th className="table-th">Factuurdatum</th><th className="table-th text-right">Excl. btw</th><th className="table-th text-right">Incl. btw</th><th className="table-th">Status</th><th className="table-th">Factuur</th><th className="table-th text-right">Actie</th>
+            </tr></thead>
+            <tbody className="divide-y divide-gray-50">
+              {rij.termijnen.map((t) => {
+                const incl = Math.round(t.bedrag_excl * (1 + t.btw_pct / 100) * 100) / 100
+                const b = bezig === t.id
+                return (
+                  <tr key={t.id} className={t.status === 'geannuleerd' ? 'opacity-60' : ''}>
+                    <td className="table-td font-mono">{t.volgnr}</td>
+                    <td className="table-td">{t.periode}</td>
+                    <td className="table-td whitespace-nowrap">{formatDate(t.factuurdatum)}</td>
+                    <td className="table-td text-right tabular">{formatEuro(t.bedrag_excl)}</td>
+                    <td className="table-td text-right tabular text-gray-500">{formatEuro(incl)}</td>
+                    <td className="table-td">
+                      <span className={`status-badge ${TERMIJN_STIJL[t.status]}`}>{TERMIJN_LABEL[t.status]}</span>
+                      {t.status === 'betaald' && t.betaald_op && <div className="text-[10px] text-gray-400 mt-0.5">op {formatDate(t.betaald_op)}</div>}
+                    </td>
+                    <td className="table-td">
+                      {t.invoice_id ? (
+                        <div className="flex items-center gap-2">
+                          <Link href={`/admin/invoices?maand=${t.periode}`} className="text-blue-700 hover:underline inline-flex items-center gap-0.5"><Receipt className="h-3 w-3" />Facturen</Link>
+                          {t.clickup_task_id && <a href={`https://app.clickup.com/t/${t.clickup_task_id}`} target="_blank" rel="noreferrer" className="text-gray-500 hover:underline inline-flex items-center gap-0.5">ClickUp<ExternalLink className="h-3 w-3" /></a>}
+                        </div>
+                      ) : <span className="text-gray-400">—</span>}
+                    </td>
+                    <td className="table-td">
+                      <div className="flex gap-1 justify-end flex-wrap">
+                        {b && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />}
+                        {t.status === 'gepland' && (
+                          <>
+                            <button disabled={b} onClick={() => factureer(t)} className={`${knop} bg-black text-white border-black hover:bg-gray-800`}><Receipt className="h-3 w-3" />Factuur aanmaken</button>
+                            <button disabled={b} onClick={() => patch(t, { status: 'betaald' }, 'Termijn als betaald gemarkeerd.')} className={`${knop} bg-white border-gray-200 text-gray-600 hover:border-green-500 hover:text-green-700`} title="Betaald zonder factuur via de app (bv. al gefactureerd buiten de app)"><CheckCircle2 className="h-3 w-3" />Betaald</button>
+                            <button disabled={b} onClick={() => verwijder(t)} className={`${knop} bg-white border-gray-200 text-gray-400 hover:text-red-600 hover:border-red-300`} title="Verwijderen"><Trash2 className="h-3 w-3" /></button>
+                          </>
+                        )}
+                        {t.status === 'gefactureerd' && (
+                          <>
+                            <button disabled={b} onClick={() => patch(t, { status: 'betaald' }, 'Termijn als betaald gemarkeerd.')} className={`${knop} bg-green-600 text-white border-green-600 hover:bg-green-700`}><CheckCircle2 className="h-3 w-3" />Betaald</button>
+                            <button disabled={b} onClick={() => { if (confirm('Termijn annuleren? De factuur wordt mee geannuleerd.')) patch(t, { status: 'geannuleerd' }, 'Termijn en factuur geannuleerd.') }} className={`${knop} bg-white border-gray-200 text-gray-500 hover:text-red-600 hover:border-red-300`}><Ban className="h-3 w-3" />Annuleer</button>
+                          </>
+                        )}
+                        {t.status === 'betaald' && (
+                          <button disabled={b} onClick={() => patch(t, { status: t.invoice_id ? 'gefactureerd' : 'gepland' }, 'Betaling teruggedraaid.')} className={`${knop} bg-white border-gray-200 text-gray-500 hover:border-gray-400`}><Undo2 className="h-3 w-3" />Toch niet betaald</button>
+                        )}
+                        {t.status === 'geannuleerd' && (
+                          <button disabled={b} onClick={() => patch(t, { status: t.invoice_id ? 'gefactureerd' : 'gepland' }, 'Termijn hersteld.')} className={`${knop} bg-white border-gray-200 text-gray-500 hover:border-gray-400`}><Undo2 className="h-3 w-3" />Herstel</button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Een losse termijn buiten het schema (bv. een extra prestatie). */
+function ExtraTermijnDialoog({ rij, onClose }: { rij: WamRij; onClose: () => void }) {
+  const router = useRouter()
+  const [f, setF] = useState({ factuurdatum: new Date().toISOString().slice(0, 10), bedrag_excl: rij.bedrag_per_factuur?.toString() ?? '', btw_pct: rij.btw_pct.toString(), notitie: '' })
+  const [bezig, setBezig] = useState(false)
+  const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((p) => ({ ...p, [k]: v }))
+  const bewaar = async () => {
+    setBezig(true)
+    try {
+      const r = await fetch('/api/admin/vesting', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resource: 'termijn', wam_id: rij.id, ...f, periode: f.factuurdatum.slice(0, 7) }) })
+      const j = await r.json(); if (!r.ok) throw new Error(j.error)
+      toast.success('Termijn toegevoegd.'); router.refresh(); onClose()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt') } finally { setBezig(false) }
+  }
+  return (
+    <Dialoog titel={`Extra termijn — ${rij.klant}`} onClose={onClose} onSave={bewaar} bezig={bezig}>
+      <Veld label="Factuurdatum *" type="date" value={f.factuurdatum} onChange={(v) => set('factuurdatum', v)} />
+      <div className="grid grid-cols-2 gap-3">
+        <Veld label="Bedrag (€ excl. btw) *" value={f.bedrag_excl} onChange={(v) => set('bedrag_excl', v)} inputMode="decimal" />
+        <Veld label="Btw %" value={f.btw_pct} onChange={(v) => set('btw_pct', v)} inputMode="decimal" />
+      </div>
+      <Veld label="Notitie" value={f.notitie} onChange={(v) => set('notitie', v)} placeholder="bv. extra pagina's" />
+    </Dialoog>
+  )
+}
+
+/** Fragment-wrapper zodat een klant twee tabelrijen mag zijn (rij + termijnen). */
+function WamRijen({ children }: { children: React.ReactNode }) { return <>{children}</> }
 
 function KostDialoog({ rij, onClose }: { rij: WamKost | null; onClose: () => void }) {
   const router = useRouter()

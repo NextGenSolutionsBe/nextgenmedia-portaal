@@ -100,14 +100,74 @@ export type Contract = {
   laatste_betaalde_maand: string | null
   reden_stop: string | null
   notitie: string | null
+  /** Het contract in de Contractenmodule waar dit op slaat, als het er is. */
+  contract_id: string | null
 }
+
+export type Frequentie = 'maandelijks' | 'kwartaal' | 'halfjaar' | 'jaarlijks' | 'eenmalig'
+export const FREQUENTIES: { key: Frequentie; label: string; maanden: number }[] = [
+  { key: 'maandelijks', label: 'Maandelijks', maanden: 1 },
+  { key: 'kwartaal', label: 'Per kwartaal', maanden: 3 },
+  { key: 'halfjaar', label: 'Per half jaar', maanden: 6 },
+  { key: 'jaarlijks', label: 'Jaarlijks', maanden: 12 },
+  { key: 'eenmalig', label: 'Eenmalig', maanden: 0 },
+]
 
 export type WamRij = {
   id: string; nr: string; klant: string
-  contractwaarde: number; netto_ontvangen: number
+  /** Gekoppelde klant uit het klantenbestand; nodig om een factuur op naam te zetten. */
+  client_id: string | null
+  contractwaarde: number
+  /** Wat er al binnen was VÓÓR de facturatie via de app liep (historiek). */
+  netto_ontvangen: number
   status: ContractStatus; betalingen_op_schema: boolean; notitie: string | null
+  // Het facturatieschema. Leeg = geen schema; dan telt enkel de historiek.
+  start_datum: string | null
+  contract_maanden: number | null
+  bedrag_per_factuur: number | null
+  frequentie: Frequentie | null
+  btw_pct: number
+  omschrijving: string | null
 }
 export type WamKost = { id: string; datum: string | null; omschrijving: string; bedrag: number }
+
+export type TermijnStatus = 'gepland' | 'gefactureerd' | 'betaald' | 'geannuleerd'
+export const TERMIJN_LABEL: Record<TermijnStatus, string> = {
+  gepland: 'Gepland', gefactureerd: 'Gefactureerd', betaald: 'Betaald', geannuleerd: 'Geannuleerd',
+}
+export type WamTermijn = {
+  id: string; wam_id: string; volgnr: number; periode: string; factuurdatum: string
+  bedrag_excl: number; btw_pct: number; status: TermijnStatus; betaald_op: string | null
+  invoice_id: string | null; clickup_task_id: string | null; notitie: string | null
+}
+
+/**
+ * Het facturatieschema van een WAM-klant: welke termijnen horen er te zijn?
+ *
+ * Maandelijks over 6 maanden = 6 termijnen; per kwartaal over 6 maanden = 2;
+ * eenmalig = 1. De factuurdatum is de eerste dag van de periode. Dit is de
+ * PROGNOSE; wat er effectief gefactureerd en betaald is staat op de termijnen
+ * zelf, zodat een gewijzigd schema nooit een betaalde termijn overschrijft.
+ */
+export function wamSchema(r: Pick<WamRij, 'start_datum' | 'contract_maanden' | 'bedrag_per_factuur' | 'frequentie' | 'btw_pct'>):
+  { volgnr: number; periode: string; factuurdatum: string; bedrag_excl: number; btw_pct: number }[] {
+  const start = dag(r.start_datum)
+  const bedrag = n(r.bedrag_per_factuur)
+  if (!start || !r.frequentie || bedrag <= 0) return []
+  const freq = FREQUENTIES.find((f) => f.key === r.frequentie)
+  if (!freq) return []
+  const maanden = Math.max(0, Math.round(n(r.contract_maanden)))
+  const aantal = freq.maanden === 0 ? 1 : (maanden > 0 ? Math.ceil(maanden / freq.maanden) : 0)
+  const uit: { volgnr: number; periode: string; factuurdatum: string; bedrag_excl: number; btw_pct: number }[] = []
+  for (let i = 0; i < aantal; i++) {
+    const d = new Date(start.getFullYear(), start.getMonth() + i * (freq.maanden || 0), 1)
+    const periode = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    const dagNr = Math.min(start.getDate(), new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate())
+    const factuurdatum = `${periode}-${String(dagNr).padStart(2, '0')}`
+    uit.push({ volgnr: i + 1, periode, factuurdatum, bedrag_excl: bedrag, btw_pct: n(r.btw_pct) || 21 })
+  }
+  return uit
+}
 
 const n = (v: unknown): number => { const x = Number(v); return Number.isFinite(x) ? x : 0 }
 const dag = (s: string | null | undefined): Date | null => {
@@ -211,9 +271,30 @@ export function betaaldeMaanden(start: string | null, laatsteBetaald: string | n
 
 // ── De WAM-portefeuille ──────────────────────────────────────────────────────
 
+export type WamRijBerekend = WamRij & {
+  meetellend: number
+  erkenning: Erkenning
+  termijnen: WamTermijn[]
+  /** Historiek + alle geplande/gefactureerde/betaalde termijnen. */
+  prognose: number
+  /** Termijnen waarvoor een factuur bestaat (gefactureerd of betaald). */
+  gefactureerd: number
+  /** Betaalde termijnen. */
+  betaald: number
+  /** Historiek + betaald: wat er effectief binnen is. Dít telt voor de vesting. */
+  ontvangen: number
+  /** Gefactureerd maar nog niet betaald. */
+  openstaand: number
+}
+
 export type WamBerekend = {
-  rijen: (WamRij & { meetellend: number; erkenning: Erkenning })[]
+  rijen: WamRijBerekend[]
+  /** Som van `ontvangen` over alle klanten (historiek + betaald). */
   nettoOntvangen: number
+  prognose: number
+  gefactureerd: number
+  betaald: number
+  openstaand: number
   kosten: number
   /** Netto ontvangen min kosten, nooit negatief. */
   nettoMeetellend: number
@@ -225,22 +306,41 @@ export type WamBerekend = {
   volgendeDrempel: number | null
 }
 
-export function berekenWam(rijen: WamRij[], kosten: WamKost[], i: VestingInstellingen): WamBerekend {
-  const uitgewerkt = rijen.map((r) => {
-    // Bij WAM telt wat er effectief ontvangen is; de status zegt enkel of
-    // dat voorlopig of definitief is. Stopgezet of niet-betaler: €0.
+export function berekenWam(rijen: WamRij[], kosten: WamKost[], i: VestingInstellingen, termijnen: WamTermijn[] = []): WamBerekend {
+  const uitgewerkt: WamRijBerekend[] = rijen.map((r) => {
+    const eigen = termijnen.filter((t) => t.wam_id === r.id).sort((a, b) => a.volgnr - b.volgnr)
+    const som = (f: (t: WamTermijn) => boolean) => eigen.filter(f).reduce((s, t) => s + n(t.bedrag_excl), 0)
+    const gefactureerd = som((t) => t.status === 'gefactureerd' || t.status === 'betaald')
+    const betaald = som((t) => t.status === 'betaald')
+    const historiek = n(r.netto_ontvangen)
+    const prognose = historiek + som((t) => t.status !== 'geannuleerd')
+    // Wat er effectief binnen is: de historiek van vóór de app, plus wat via
+    // de termijnen als betaald is aangeduid. Alleen dít telt voor het aandeel.
+    const ontvangen = historiek + betaald
+    // Stopgezet of niet-betaler: €0, hoeveel er ook binnenkwam.
     const uit = r.status === 'stopgezet' || r.status === 'niet_betaler' || !r.betalingen_op_schema
-    return { ...r, meetellend: uit ? 0 : n(r.netto_ontvangen), erkenning: erkenningVan(r, 'jaar1') }
+    return {
+      ...r, termijnen: eigen, prognose, gefactureerd, betaald, ontvangen,
+      openstaand: Math.max(0, gefactureerd - betaald),
+      meetellend: uit ? 0 : ontvangen, erkenning: erkenningVan(r, 'jaar1'),
+    }
   })
-  const nettoOntvangen = rijen.reduce((s, r) => s + n(r.netto_ontvangen), 0)
+  const nettoOntvangen = uitgewerkt.reduce((s, r) => s + r.ontvangen, 0)
   const kostenTotaal = kosten.reduce((s, k) => s + n(k.bedrag), 0)
-  const nettoMeetellend = Math.max(0, nettoOntvangen - kostenTotaal)
+  const nettoMeetellend = Math.max(0, uitgewerkt.reduce((s, r) => s + r.meetellend, 0) - kostenTotaal)
   const heel = (bedrag: number) => Math.min(i.wam_max_aandeel, Math.floor(bedrag / i.wam_bedrag_per_pct) / 100)
   const voorlopig = heel(nettoMeetellend)
   const voltooid = uitgewerkt.filter((r) => r.status === 'voltooid').reduce((s, r) => s + r.meetellend, 0)
   const definitief = heel(Math.max(0, voltooid - kostenTotaal))
   const volgendeDrempel = voorlopig >= i.wam_max_aandeel ? null : (Math.round(voorlopig * 100) + 1) * i.wam_bedrag_per_pct
-  return { rijen: uitgewerkt, nettoOntvangen, kosten: kostenTotaal, nettoMeetellend, voorlopig, definitief, volgendeDrempel }
+  return {
+    rijen: uitgewerkt, nettoOntvangen,
+    prognose: uitgewerkt.reduce((s, r) => s + r.prognose, 0),
+    gefactureerd: uitgewerkt.reduce((s, r) => s + r.gefactureerd, 0),
+    betaald: uitgewerkt.reduce((s, r) => s + r.betaald, 0),
+    openstaand: uitgewerkt.reduce((s, r) => s + r.openstaand, 0),
+    kosten: kostenTotaal, nettoMeetellend, voorlopig, definitief, volgendeDrempel,
+  }
 }
 
 // ── Alles samen ──────────────────────────────────────────────────────────────
@@ -285,8 +385,9 @@ export type VestingOverzicht = {
  */
 export function berekenVesting(
   contractRijen: Contract[], wamRijen: WamRij[], wamKosten: WamKost[], i: VestingInstellingen,
+  wamTermijnen: WamTermijn[] = [],
 ): VestingOverzicht {
-  const wam = berekenWam(wamRijen, wamKosten, i)
+  const wam = berekenWam(wamRijen, wamKosten, i, wamTermijnen)
 
   /**
    * De goedkope schijf loopt tot een TOTAAL aandeel van 10%, WAM inbegrepen.
@@ -342,7 +443,7 @@ export function berekenVesting(
   const meetellendeWaarde = wam.nettoMeetellend + contracten.reduce((s, c) => s + c.meetellend, 0)
   const uitgevallenWaarde = contracten.reduce((s, c) => s + c.uitgevallen, 0)
     + wam.kosten
-    + wamRijen.reduce((s, r) => s + Math.max(0, n(r.contractwaarde) - n(r.netto_ontvangen)), 0)
+    + wam.rijen.reduce((s, r) => s + Math.max(0, (r.prognose > 0 ? r.prognose : n(r.contractwaarde)) - r.ontvangen), 0)
 
   const perJaar: JaarOverzicht[] = (['jaar1', 'jaar2', 'jaar3'] as const).map((jaar) => {
     const van = contracten.filter((c) => c.jaar === jaar)

@@ -55,8 +55,8 @@ function monthsBetween(fromYM: string, toYM: string): number {
   return (ty - fy) * 12 + (tm - fm)
 }
 
-export function InvoicesPanel() {
-  const [month, setMonth] = useState(thisMonthYM)
+export function InvoicesPanel({ initialMonth }: { initialMonth?: string } = {}) {
+  const [month, setMonth] = useState(initialMonth ?? thisMonthYM)
   const [rows, setRows] = useState<Row[]>([])
   const [omzet, setOmzet] = useState<ExpandedRevenue[]>([])
   const [clients, setClients] = useState<ClientOpt[]>([])

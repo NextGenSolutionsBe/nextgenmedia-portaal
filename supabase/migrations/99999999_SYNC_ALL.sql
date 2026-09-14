@@ -3791,3 +3791,44 @@ INSERT INTO public.ez_aannames (jaar) VALUES (2026) ON CONFLICT DO NOTHING;
 -- 1 = zeer laag … 5 = zeer hoog. Weegt de projectwaarde af tegen hoeveel werk
 -- de uitvoering vraagt (factor 1 / 0,9 / 0,75 / 0,6 / 0,4).
 ALTER TABLE public.sales_appointments ADD COLUMN IF NOT EXISTS tijdsbelasting smallint CHECK (tijdsbelasting BETWEEN 1 AND 5);
+
+-- ── WAM-portefeuille: contract, facturatieschema en betaalopvolging ──────────
+ALTER TABLE public.vesting_wam
+  ADD COLUMN IF NOT EXISTS client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS start_datum date,
+  ADD COLUMN IF NOT EXISTS contract_maanden integer,
+  ADD COLUMN IF NOT EXISTS bedrag_per_factuur numeric,
+  ADD COLUMN IF NOT EXISTS frequentie text CHECK (frequentie IN ('maandelijks','kwartaal','halfjaar','jaarlijks','eenmalig')),
+  ADD COLUMN IF NOT EXISTS btw_pct numeric NOT NULL DEFAULT 21,
+  ADD COLUMN IF NOT EXISTS omschrijving text;
+
+-- Eén rij per te factureren termijn. Gepland → gefactureerd (er is een echte
+-- factuur + ClickUp-taak) → betaald. Betaald wordt HIER bijgehouden en niet
+-- in de Facturen-module: die volgt bewust enkel het versturen, maar de vesting
+-- draait op wat er effectief binnenkomt.
+CREATE TABLE IF NOT EXISTS public.vesting_wam_termijnen (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  wam_id          uuid NOT NULL REFERENCES public.vesting_wam(id) ON DELETE CASCADE,
+  volgnr          integer NOT NULL,
+  periode         text NOT NULL,
+  factuurdatum    date NOT NULL,
+  bedrag_excl     numeric NOT NULL DEFAULT 0,
+  btw_pct         numeric NOT NULL DEFAULT 21,
+  status          text NOT NULL DEFAULT 'gepland' CHECK (status IN ('gepland','gefactureerd','betaald','geannuleerd')),
+  betaald_op      date,
+  invoice_id      uuid REFERENCES public.invoices(id) ON DELETE SET NULL,
+  clickup_task_id text,
+  notitie         text,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (wam_id, volgnr)
+);
+ALTER TABLE public.vesting_wam_termijnen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.vesting_wam_termijnen FROM anon, authenticated;
+
+-- Een factuur weet van welke WAM-termijn hij komt (soort 'wam' in Facturen).
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS wam_id uuid REFERENCES public.vesting_wam(id) ON DELETE SET NULL;
+
+-- ── Vestingcontract ↔ Contractenmodule ─────────────────────────────────────
+ALTER TABLE public.vesting_contracten ADD COLUMN IF NOT EXISTS contract_id uuid REFERENCES public.contracts(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS vesting_contracten_contract ON public.vesting_contracten (contract_id) WHERE contract_id IS NOT NULL;
