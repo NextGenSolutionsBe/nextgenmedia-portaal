@@ -213,7 +213,13 @@ export function InvoicesPanel({ initialMonth }: { initialMonth?: string } = {}) 
                       </span>
                       {/* Een afrekening die WIJ ontvangen — geen omzet. Dat moet
                           in één oogopslag duidelijk zijn tussen de klantfacturen. */}
-                      {r.invoiceKind && r.invoiceKind !== 'client' && (
+                      {r.invoiceKind === 'wam' ? (
+                        // Een factuur uit Marco's WAM-portefeuille (Vesting): wél te versturen,
+                        // maar geen NGM-klantomzet — Financiën telt ze niet mee.
+                        <span className="status-badge text-[10px] bg-yellow-100 text-yellow-800" title="Aangemaakt vanuit Vesting → WAM-portefeuille. Telt niet mee als NGM-omzet.">
+                          WAM · Vesting
+                        </span>
+                      ) : r.invoiceKind && r.invoiceKind !== 'client' && (
                         <span className="status-badge text-[10px] bg-orange-100 text-orange-800">
                           Te betalen · {SETTER_KIND[r.invoiceKind] ?? 'appointment setter'}
                         </span>

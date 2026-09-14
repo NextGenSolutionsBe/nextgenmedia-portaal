@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Link from 'next/link'
@@ -538,7 +538,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
 // ── Contractformulier ────────────────────────────────────────────────────────
 
 function ContractDialoog({ contract, inst, module, onClose }: { contract: Contract | null; inst: VestingInstellingen; module: ModuleContract[]; onClose: () => void }) {
-  const router = useRouter()
+  const sluit = useSluitNaVerversen(onClose)
   const vandaag = new Date().toISOString().slice(0, 10)
   const [f, setF] = useState({
     nr: contract?.nr ?? '', klant: contract?.klant ?? '', contract_id: contract?.contract_id ?? '',
@@ -596,8 +596,8 @@ function ContractDialoog({ contract, inst, module, onClose }: { contract: Contra
       const r = await fetch('/api/admin/vesting', { method: contract ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
       toast.success(contract ? 'Contract bijgewerkt.' : 'Contract toegevoegd.')
-      router.refresh(); onClose()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt') } finally { setBezig(false) }
+      sluit()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt'); setBezig(false) }
   }
 
   return (
@@ -676,7 +676,7 @@ function ContractDialoog({ contract, inst, module, onClose }: { contract: Contra
 }
 
 function WamDialoog({ rij, klanten, onClose }: { rij: WamRij | null; klanten: Klant[]; onClose: () => void }) {
-  const router = useRouter()
+  const sluit = useSluitNaVerversen(onClose)
   const [f, setF] = useState({
     nr: rij?.nr ?? '', klant: rij?.klant ?? '', client_id: rij?.client_id ?? '',
     contractwaarde: rij?.contractwaarde?.toString() ?? '',
@@ -715,8 +715,9 @@ function WamDialoog({ rij, klanten, onClose }: { rij: WamRij | null; klanten: Kl
       if (rij) body.id = rij.id
       const r = await fetch('/api/admin/vesting', { method: rij ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
-      toast.success(rij ? 'WAM-klant bijgewerkt — de geplande termijnen volgen het schema.' : 'WAM-klant toegevoegd met facturatieschema.'); router.refresh(); onClose()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt') } finally { setBezig(false) }
+      toast.success(rij ? 'WAM-klant bijgewerkt — de geplande termijnen volgen het schema.' : 'WAM-klant toegevoegd met facturatieschema.')
+      sluit()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt'); setBezig(false) }
   }
   return (
     <Dialoog titel={rij ? `${rij.nr} — ${rij.klant}` : 'Nieuwe WAM-klant'} onClose={onClose} onSave={bewaar} bezig={bezig} breed>
@@ -765,14 +766,19 @@ function WamDialoog({ rij, klanten, onClose }: { rij: WamRij | null; klanten: Kl
 function Termijnen({ rij, onExtra }: { rij: WamRijBerekend; onExtra: () => void }) {
   const router = useRouter()
   const [bezig, setBezig] = useState<string | null>(null)
+  // De pagina ververst server-side; dat duurt even. De knop blijft draaien
+  // tot de nieuwe data er echt staat, anders lijkt de klik niets te doen.
+  const [ververst, startVerversen] = useTransition()
+  useEffect(() => { if (!ververst) setBezig(null) }, [ververst])
 
+  const klaar = () => startVerversen(() => router.refresh())
   const patch = async (t: WamTermijn, body: Record<string, unknown>, melding: string) => {
     setBezig(t.id)
     try {
       const r = await fetch('/api/admin/vesting', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resource: 'termijn', id: t.id, ...body }) })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
-      toast.success(melding); router.refresh()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(null) }
+      toast.success(melding); klaar()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt'); setBezig(null) }
   }
   const factureer = async (t: WamTermijn) => {
     if (!confirm(`Factuur aanmaken voor ${rij.klant} — termijn ${t.volgnr} (${t.periode}, ${formatEuro(t.bedrag_excl)} excl. btw)?\n\nDe factuur komt in Facturen en er wordt een ClickUp-taak aangemaakt.`)) return
@@ -781,8 +787,8 @@ function Termijnen({ rij, onExtra }: { rij: WamRijBerekend; onExtra: () => void 
       const r = await fetch('/api/admin/vesting', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resource: 'termijn', action: 'factuur', id: t.id }) })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
       if (j.warning) toast.warning(j.warning)
-      toast.success('Factuur aangemaakt — staat in Facturen en in ClickUp.'); router.refresh()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Factuur aanmaken mislukt') } finally { setBezig(null) }
+      toast.success('Factuur aangemaakt — staat in Facturen en in ClickUp.'); klaar()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Factuur aanmaken mislukt'); setBezig(null) }
   }
   const verwijder = async (t: WamTermijn) => {
     if (!confirm(`Termijn ${t.volgnr} (${t.periode}) verwijderen?`)) return
@@ -790,8 +796,8 @@ function Termijnen({ rij, onExtra }: { rij: WamRijBerekend; onExtra: () => void 
     try {
       const r = await fetch(`/api/admin/vesting?resource=termijn&id=${t.id}`, { method: 'DELETE' })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
-      toast.success('Termijn verwijderd.'); router.refresh()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(null) }
+      toast.success('Termijn verwijderd.'); klaar()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt'); setBezig(null) }
   }
 
   const knop = 'inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors disabled:opacity-50'
@@ -810,10 +816,10 @@ function Termijnen({ rij, onExtra }: { rij: WamRijBerekend; onExtra: () => void 
       {rij.termijnen.length === 0 ? (
         <div className="text-xs text-gray-500 py-2">Nog geen termijnen. Vul het facturatieschema in bij <button onClick={onExtra} className="underline">een losse termijn</button> of via <b>Wijzigen</b>.</div>
       ) : (
-        <div className="table-wrap rounded-lg border border-gray-200 bg-white">
-          <table className="w-full text-xs">
+        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+          <table className="w-full text-xs min-w-[760px]">
             <thead><tr className="border-b border-gray-100">
-              <th className="table-th">#</th><th className="table-th">Periode</th><th className="table-th">Factuurdatum</th><th className="table-th text-right">Excl. btw</th><th className="table-th text-right">Incl. btw</th><th className="table-th">Status</th><th className="table-th">Factuur</th><th className="table-th text-right">Actie</th>
+              <th className="table-th">#</th><th className="table-th whitespace-nowrap">Periode</th><th className="table-th whitespace-nowrap">Factuurdatum</th><th className="table-th text-right whitespace-nowrap">Excl. btw</th><th className="table-th text-right whitespace-nowrap">Incl. btw</th><th className="table-th">Status</th><th className="table-th">Factuur</th><th className="table-th text-right">Actie</th>
             </tr></thead>
             <tbody className="divide-y divide-gray-50">
               {rij.termijnen.map((t) => {
@@ -822,7 +828,7 @@ function Termijnen({ rij, onExtra }: { rij: WamRijBerekend; onExtra: () => void 
                 return (
                   <tr key={t.id} className={t.status === 'geannuleerd' ? 'opacity-60' : ''}>
                     <td className="table-td font-mono">{t.volgnr}</td>
-                    <td className="table-td">{t.periode}</td>
+                    <td className="table-td whitespace-nowrap">{t.periode}</td>
                     <td className="table-td whitespace-nowrap">{formatDate(t.factuurdatum)}</td>
                     <td className="table-td text-right tabular">{formatEuro(t.bedrag_excl)}</td>
                     <td className="table-td text-right tabular text-gray-500">{formatEuro(incl)}</td>
@@ -838,12 +844,12 @@ function Termijnen({ rij, onExtra }: { rij: WamRijBerekend; onExtra: () => void 
                         </div>
                       ) : <span className="text-gray-400">—</span>}
                     </td>
-                    <td className="table-td">
-                      <div className="flex gap-1 justify-end flex-wrap">
+                    <td className="table-td whitespace-nowrap">
+                      <div className="flex gap-1 justify-end items-center">
                         {b && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />}
                         {t.status === 'gepland' && (
                           <>
-                            <button disabled={b} onClick={() => factureer(t)} className={`${knop} bg-black text-white border-black hover:bg-gray-800`}><Receipt className="h-3 w-3" />Factuur aanmaken</button>
+                            <button disabled={b} onClick={() => factureer(t)} className={`${knop} bg-black text-white border-black hover:bg-gray-800`}><Receipt className="h-3 w-3" />Factuur</button>
                             <button disabled={b} onClick={() => patch(t, { status: 'betaald' }, 'Termijn als betaald gemarkeerd.')} className={`${knop} bg-white border-gray-200 text-gray-600 hover:border-green-500 hover:text-green-700`} title="Betaald zonder factuur via de app (bv. al gefactureerd buiten de app)"><CheckCircle2 className="h-3 w-3" />Betaald</button>
                             <button disabled={b} onClick={() => verwijder(t)} className={`${knop} bg-white border-gray-200 text-gray-400 hover:text-red-600 hover:border-red-300`} title="Verwijderen"><Trash2 className="h-3 w-3" /></button>
                           </>
@@ -875,7 +881,7 @@ function Termijnen({ rij, onExtra }: { rij: WamRijBerekend; onExtra: () => void 
 
 /** Een losse termijn buiten het schema (bv. een extra prestatie). */
 function ExtraTermijnDialoog({ rij, onClose }: { rij: WamRij; onClose: () => void }) {
-  const router = useRouter()
+  const sluit = useSluitNaVerversen(onClose)
   const [f, setF] = useState({ factuurdatum: new Date().toISOString().slice(0, 10), bedrag_excl: rij.bedrag_per_factuur?.toString() ?? '', btw_pct: rij.btw_pct.toString(), notitie: '' })
   const [bezig, setBezig] = useState(false)
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((p) => ({ ...p, [k]: v }))
@@ -884,8 +890,8 @@ function ExtraTermijnDialoog({ rij, onClose }: { rij: WamRij; onClose: () => voi
     try {
       const r = await fetch('/api/admin/vesting', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resource: 'termijn', wam_id: rij.id, ...f, periode: f.factuurdatum.slice(0, 7) }) })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
-      toast.success('Termijn toegevoegd.'); router.refresh(); onClose()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt') } finally { setBezig(false) }
+      toast.success('Termijn toegevoegd.'); sluit()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt'); setBezig(false) }
   }
   return (
     <Dialoog titel={`Extra termijn — ${rij.klant}`} onClose={onClose} onSave={bewaar} bezig={bezig}>
@@ -903,7 +909,7 @@ function ExtraTermijnDialoog({ rij, onClose }: { rij: WamRij; onClose: () => voi
 function WamRijen({ children }: { children: React.ReactNode }) { return <>{children}</> }
 
 function KostDialoog({ rij, onClose }: { rij: WamKost | null; onClose: () => void }) {
-  const router = useRouter()
+  const sluit = useSluitNaVerversen(onClose)
   const [f, setF] = useState({ datum: rij?.datum ?? new Date().toISOString().slice(0, 10), omschrijving: rij?.omschrijving ?? '', bedrag: rij?.bedrag?.toString() ?? '' })
   const [bezig, setBezig] = useState(false)
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((p) => ({ ...p, [k]: v }))
@@ -914,8 +920,8 @@ function KostDialoog({ rij, onClose }: { rij: WamKost | null; onClose: () => voi
       if (rij) body.id = rij.id
       const r = await fetch('/api/admin/vesting', { method: rij ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
-      toast.success('Opgeslagen.'); router.refresh(); onClose()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt') } finally { setBezig(false) }
+      toast.success('Opgeslagen.'); sluit()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt'); setBezig(false) }
   }
   return (
     <Dialoog titel={rij ? 'Kost wijzigen' : 'Kost bij WAM'} onClose={onClose} onSave={bewaar} bezig={bezig}>
@@ -993,6 +999,19 @@ function Instellingen({ inst }: { inst: VestingInstellingen }) {
 }
 
 // ── Bouwstenen ───────────────────────────────────────────────────────────────
+
+/**
+ * Sluit een dialoogvenster pas wanneer de server-side verversing binnen is.
+ * De pagina rendert op de server; dat duurt een paar seconden. Zou het venster
+ * meteen dichtgaan, dan staart de gebruiker even naar oude cijfers. Binnen één
+ * transition houdt React het oude scherm vast tot de nieuwe data er is, en
+ * verdwijnt het venster samen met het verschijnen van de nieuwe cijfers.
+ */
+function useSluitNaVerversen(onClose: () => void) {
+  const router = useRouter()
+  const [, start] = useTransition()
+  return () => start(() => { router.refresh(); onClose() })
+}
 
 function Kpi({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
   return (
