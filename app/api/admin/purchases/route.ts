@@ -4,6 +4,8 @@ import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { FOUNDER_EMAILS } from '@/lib/founders'
 import { randomUUID } from 'crypto'
+import { bevestigAankoop, volgendNummer } from '@/lib/aankopen/bewijs'
+import { laadAankoopActor, rechtenVoor } from '@/lib/aankopen/rechten'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
@@ -56,7 +58,12 @@ export async function POST(req: NextRequest) {
       if (!upErr) attachmentPath = path
     }
 
+    // Aanvraagnummer (AA-2026-001), per jaar genummerd.
+    let reference: string | null = null
+    try { reference = await volgendNummer(admin, 'aanvraag', new Date().getFullYear()) } catch { reference = null }
+
     const { data, error } = await admin.from('purchases').insert({
+      reference,
       title, description: (fd.get('description') as string)?.trim() || null,
       amount_excl: amountExcl, vat_pct: vatPct,
       supplier: (fd.get('supplier') as string)?.trim() || null,
@@ -66,6 +73,8 @@ export async function POST(req: NextRequest) {
       attachment_path: attachmentPath, status, needs_approval: needsApproval,
     }).select('id').single()
     if (error) throw new Error(error.message)
+    // Onder de drempel is de aanvraag meteen bevestigd → bewijsdocument (best-effort).
+    if (status === 'approved_under_threshold') { try { await bevestigAankoop(admin, data.id, actor.email ?? null) } catch (e) { console.error('[purchases] bewijs:', e instanceof Error ? e.message : e) } }
 
     const meta = requestMeta(req)
     await logAudit({
@@ -92,6 +101,7 @@ export async function PATCH(req: NextRequest) {
 
     const { data: p } = await admin.from('purchases').select('*').eq('id', purchase_id).maybeSingle()
     if (!p) return NextResponse.json({ error: 'Aankoop niet gevonden' }, { status: 404 })
+    if (p.deleted_at) return NextResponse.json({ error: 'Deze aanvraag is verwijderd. Herstel ze eerst vanuit het archief.' }, { status: 409 })
     const meta = requestMeta(req)
 
     if (action === 'decide') {
@@ -110,6 +120,8 @@ export async function PATCH(req: NextRequest) {
 
       const newStatus = await recomputeStatus(admin, purchase_id, p.requester_email, p.needs_approval)
       await admin.from('purchases').update({ status: newStatus }).eq('id', purchase_id)
+      // Beide zaakvoerders akkoord → officieel bevestigd → bewijsdocument (best-effort, één keer per versie).
+      if (newStatus === 'approved') { try { await bevestigAankoop(admin, purchase_id, actor.email ?? null) } catch (e) { console.error('[purchases] bewijs:', e instanceof Error ? e.message : e) } }
 
       await logAudit({
         action: decision === 'approved' ? 'purchase.approve' : 'purchase.reject',
@@ -123,6 +135,7 @@ export async function PATCH(req: NextRequest) {
     if (action === 'submit') {
       const newStatus = p.needs_approval ? 'pending' : 'approved_under_threshold'
       await admin.from('purchases').update({ status: newStatus }).eq('id', purchase_id)
+      if (newStatus === 'approved_under_threshold') { try { await bevestigAankoop(admin, purchase_id, actor.email ?? null) } catch (e) { console.error('[purchases] bewijs:', e instanceof Error ? e.message : e) } }
       return NextResponse.json({ ok: true, status: newStatus })
     }
 
@@ -150,16 +163,24 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
-// DELETE ?id= — alleen eigen concept/aanvraag
+// DELETE ?id= — veilig verwijderen (soft-delete naar het archief; nooit definitief)
 export async function DELETE(req: NextRequest) {
   try {
-    const actor = await requireStaff()
+    const actor = await laadAankoopActor()
     if (!actor) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
     const id = req.nextUrl.searchParams.get('id')
     if (!id) return NextResponse.json({ error: 'id vereist' }, { status: 400 })
     const admin = createAdminSupabaseClient()
-    const { error } = await admin.from('purchases').delete().eq('id', id)
+    const { data: p } = await admin.from('purchases').select('*').eq('id', id).maybeSingle()
+    if (!p) return NextResponse.json({ error: 'Aankoop niet gevonden' }, { status: 404 })
+    if (p.deleted_at) return NextResponse.json({ ok: true, alVerwijderd: true })
+    if (!rechtenVoor(actor, p).verwijderen) return NextResponse.json({ error: 'Je mag deze aanvraag niet verwijderen.' }, { status: 403 })
+    const nu = new Date().toISOString()
+    const { error } = await admin.from('purchases').update({ deleted_at: nu, deleted_by_email: actor.email, deleted_by_user_id: actor.id }).eq('id', id).is('deleted_at', null)
     if (error) throw new Error(error.message)
+    await admin.from('purchase_edits').insert({ purchase_id: id, version: p.version ?? 1, actie: 'verwijderd', actor_user_id: actor.id, actor_email: actor.email, oud: { status: p.status }, nieuw: { deleted_at: nu } })
+    const meta = requestMeta(req)
+    await logAudit({ action: 'purchase.delete', entityType: 'purchase', entityId: id, summary: `Aankoopaanvraag ${p.reference ?? ''} "${p.title ?? ''}" verwijderd (archief)`, actorUserId: actor.id, actorEmail: actor.email, actorRole: actor.isAdmin ? 'admin' : 'staff', ip: meta.ip, userAgent: meta.userAgent })
     return NextResponse.json({ ok: true })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })

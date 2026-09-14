@@ -3970,3 +3970,89 @@ REVOKE ALL ON public.invoice_cost_log FROM anon, authenticated;
 -- Expliciete bevestiging "geen directe kosten" (nooit aangenomen).
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS geen_directe_kosten_bevestigd_op timestamptz;
 ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS geen_directe_kosten_bevestigd_op timestamptz;
+
+-- ── Aankopen: aanvraagnummer, versies, soft-delete, bewijsdocument ─────────
+ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS reference text;
+ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS version integer NOT NULL DEFAULT 1;
+ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS deleted_by_email text;
+ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS deleted_by_user_id uuid;
+ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS confirmed_at timestamptz;
+ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS confirmed_by_email text;
+CREATE UNIQUE INDEX IF NOT EXISTS purchases_reference_uniek ON public.purchases (reference) WHERE reference IS NOT NULL;
+CREATE INDEX IF NOT EXISTS purchases_deleted ON public.purchases (deleted_at) WHERE deleted_at IS NOT NULL;
+
+-- Tellers per soort en jaar (AA-2026-001 voor aanvragen, BEV-2026-001 voor bewijsdocumenten).
+CREATE TABLE IF NOT EXISTS public.purchase_counters (
+  soort text NOT NULL,
+  jaar integer NOT NULL,
+  laatste integer NOT NULL DEFAULT 0,
+  PRIMARY KEY (soort, jaar)
+);
+ALTER TABLE public.purchase_counters ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.purchase_counters FROM anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.volgend_purchase_nummer(p_soort text, p_jaar integer)
+RETURNS integer LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  INSERT INTO public.purchase_counters (soort, jaar, laatste) VALUES (p_soort, p_jaar, 1)
+  ON CONFLICT (soort, jaar) DO UPDATE SET laatste = public.purchase_counters.laatste + 1
+  RETURNING laatste;
+$$;
+REVOKE ALL ON FUNCTION public.volgend_purchase_nummer(text, integer) FROM public, anon, authenticated;
+
+-- Bestaande aanvragen krijgen alsnog een nummer, in volgorde van aanmaak.
+DO $$
+DECLARE r record; n integer;
+BEGIN
+  FOR r IN SELECT id, created_at FROM public.purchases WHERE reference IS NULL ORDER BY created_at, id LOOP
+    n := public.volgend_purchase_nummer('aanvraag', EXTRACT(YEAR FROM r.created_at)::int);
+    UPDATE public.purchases SET reference = 'AA-' || EXTRACT(YEAR FROM r.created_at)::int || '-' || lpad(n::text, 3, '0') WHERE id = r.id;
+  END LOOP;
+END $$;
+
+CREATE TABLE IF NOT EXISTS public.purchase_versions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  purchase_id uuid NOT NULL REFERENCES public.purchases(id) ON DELETE CASCADE,
+  version integer NOT NULL,
+  snapshot jsonb NOT NULL,
+  reden text,
+  created_by_email text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (purchase_id, version)
+);
+ALTER TABLE public.purchase_versions ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.purchase_versions FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.purchase_edits (
+  id bigserial PRIMARY KEY,
+  purchase_id uuid NOT NULL REFERENCES public.purchases(id) ON DELETE CASCADE,
+  version integer,
+  actie text NOT NULL,
+  actor_user_id uuid,
+  actor_email text,
+  oud jsonb,
+  nieuw jsonb,
+  opmerking text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS purchase_edits_purchase ON public.purchase_edits (purchase_id, created_at DESC);
+ALTER TABLE public.purchase_edits ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.purchase_edits FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.purchase_certificates (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  purchase_id uuid NOT NULL REFERENCES public.purchases(id) ON DELETE CASCADE,
+  version integer NOT NULL,
+  certificate_no text NOT NULL UNIQUE,
+  storage_path text NOT NULL,
+  file_name text NOT NULL,
+  status text NOT NULL DEFAULT 'actueel' CHECK (status IN ('actueel','vervangen')),
+  sha256 text,
+  confirmed_at timestamptz NOT NULL,
+  confirmed_by_email text,
+  generated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (purchase_id, version)
+);
+CREATE INDEX IF NOT EXISTS purchase_certificates_purchase ON public.purchase_certificates (purchase_id);
+ALTER TABLE public.purchase_certificates ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.purchase_certificates FROM anon, authenticated;
