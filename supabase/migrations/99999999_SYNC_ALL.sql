@@ -3892,3 +3892,81 @@ CREATE TABLE IF NOT EXISTS public.contract_facturatie_log (
 CREATE INDEX IF NOT EXISTS contract_facturatie_log_contract ON public.contract_facturatie_log (contract_id, created_at DESC);
 ALTER TABLE public.contract_facturatie_log ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.contract_facturatie_log FROM anon, authenticated;
+
+-- ── Factuurlijnen, directe kosten en winst per factuur ─────────────────────
+-- De klantfactuur (amount_excl/amount_incl) blijft wat ze is. Dit is de
+-- interne laag eronder: welke lijnen zitten erin, welke kosten hebben we
+-- ervoor gemaakt, en wat is dan de werkelijke winst die meetelt.
+CREATE TABLE IF NOT EXISTS public.invoice_lines (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  invoice_id uuid REFERENCES public.invoices(id) ON DELETE CASCADE,
+  recurring_id uuid REFERENCES public.recurring_invoices(id) ON DELETE CASCADE,
+  volgnr integer NOT NULL DEFAULT 1,
+  omschrijving text NOT NULL,
+  aantal numeric NOT NULL DEFAULT 1,
+  prijs_excl numeric NOT NULL DEFAULT 0,
+  btw_pct numeric NOT NULL DEFAULT 21,
+  classificatie text NOT NULL DEFAULT 'dienst' CHECK (classificatie IN ('dienst','doorgerekende_kost','gemengd')),
+  opmerking text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK ((invoice_id IS NOT NULL)::int + (recurring_id IS NOT NULL)::int = 1)
+);
+CREATE INDEX IF NOT EXISTS invoice_lines_invoice ON public.invoice_lines (invoice_id);
+CREATE INDEX IF NOT EXISTS invoice_lines_recurring ON public.invoice_lines (recurring_id);
+ALTER TABLE public.invoice_lines ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.invoice_lines FROM anon, authenticated;
+
+-- Eén kost = één record, aan een factuur (of een maand van een recurring
+-- factuur) en optioneel aan één lijn. Nooit aan beide: zo telt ze één keer.
+CREATE TABLE IF NOT EXISTS public.invoice_costs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  invoice_id uuid REFERENCES public.invoices(id) ON DELETE CASCADE,
+  recurring_id uuid REFERENCES public.recurring_invoices(id) ON DELETE CASCADE,
+  maand text,
+  line_id uuid REFERENCES public.invoice_lines(id) ON DELETE SET NULL,
+  omschrijving text NOT NULL,
+  categorie text,
+  leverancier text,
+  kostprijs_excl numeric,
+  datum date,
+  bewijs_url text,
+  opmerking text,
+  status text NOT NULL DEFAULT 'actief' CHECK (status IN ('actief','geannuleerd')),
+  created_by uuid,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK ((invoice_id IS NOT NULL)::int + (recurring_id IS NOT NULL)::int = 1),
+  CHECK (recurring_id IS NULL OR maand ~ '^\d{4}-\d{2}$')
+);
+CREATE INDEX IF NOT EXISTS invoice_costs_invoice ON public.invoice_costs (invoice_id);
+CREATE INDEX IF NOT EXISTS invoice_costs_recurring ON public.invoice_costs (recurring_id, maand);
+ALTER TABLE public.invoice_costs ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.invoice_costs FROM anon, authenticated;
+
+-- Auditgeschiedenis: wie, wanneer, oud, nieuw, effect.
+CREATE TABLE IF NOT EXISTS public.invoice_cost_log (
+  id bigserial PRIMARY KEY,
+  invoice_id uuid,
+  recurring_id uuid,
+  maand text,
+  line_id uuid,
+  cost_id uuid,
+  actie text NOT NULL,
+  oud jsonb,
+  nieuw jsonb,
+  effect_winst numeric,
+  effect_vesting numeric,
+  reden text,
+  actor_user_id uuid,
+  actor_email text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS invoice_cost_log_invoice ON public.invoice_cost_log (invoice_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS invoice_cost_log_recurring ON public.invoice_cost_log (recurring_id, maand, created_at DESC);
+ALTER TABLE public.invoice_cost_log ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.invoice_cost_log FROM anon, authenticated;
+
+-- Expliciete bevestiging "geen directe kosten" (nooit aangenomen).
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS geen_directe_kosten_bevestigd_op timestamptz;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS geen_directe_kosten_bevestigd_op timestamptz;

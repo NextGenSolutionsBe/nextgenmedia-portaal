@@ -8,6 +8,8 @@ import {
 } from '@/lib/invoices'
 import { removeAutoSetterInvoices } from '@/lib/sales/setter-invoices'
 import { createInvoiceTask, completeInvoiceTask, clickupConfigured, INVOICE_ASSIGNEE_NAME } from '@/lib/clickup'
+import { kostenPerFactuur, logKost, type FactuurRef } from '@/lib/facturen/kosten-data'
+import { stelClassificatieVoor, type KostenStatus, type Classificatie } from '@/lib/facturen/kosten-winst'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
@@ -60,6 +62,43 @@ async function linkOrCreateForecast(admin: Admin, p: {
 // Veerkrachtig insert/upsert: als een (nog niet gemigreerde) kolom ontbreekt
 // ("Could not find the 'X' column"), laat die kolom vallen en probeer opnieuw.
 // Zo blijven facturen werken ook al is de migratie nog niet gedraaid.
+/**
+ * Factuurlijnen die bij het opmaken meegegeven zijn (intern: classificatie,
+ * kostprijs, leverancier). Raakt het factuurbedrag niet — dat staat al vast.
+ * Best-effort: een fout hier laat de factuur zelf staan.
+ */
+type LijnInvoer = { omschrijving?: unknown; aantal?: unknown; prijs_excl?: unknown; btw_pct?: unknown; classificatie?: unknown; opmerking?: unknown; kostprijs_excl?: unknown; leverancier?: unknown; categorie?: unknown }
+async function slaLijnenOp(admin: Admin, ref: FactuurRef, lijnen: unknown, actor: { id: string; email?: string | null }): Promise<void> {
+  if (!Array.isArray(lijnen) || lijnen.length === 0) return
+  const num = (v: unknown): number | null => { if (v === null || v === undefined || v === '') return null; const x = Number(String(v).replace(',', '.')); return Number.isFinite(x) ? x : null }
+  const txt = (v: unknown): string | null => { const t = String(v ?? '').trim(); return t || null }
+  let volgnr = 0
+  for (const raw of lijnen as LijnInvoer[]) {
+    const omschrijving = txt(raw.omschrijving); if (!omschrijving) continue
+    volgnr++
+    const classificatie: Classificatie = ['dienst', 'doorgerekende_kost', 'gemengd'].includes(String(raw.classificatie)) ? (raw.classificatie as Classificatie) : 'dienst'
+    try {
+      const { data: l, error } = await admin.from('invoice_lines').insert({
+        invoice_id: ref.invoice_id ?? null, recurring_id: ref.recurring_id ?? null, volgnr, omschrijving,
+        aantal: num(raw.aantal) ?? 1, prijs_excl: num(raw.prijs_excl) ?? 0, btw_pct: num(raw.btw_pct) ?? DEFAULT_VAT, classificatie, opmerking: txt(raw.opmerking),
+      }).select('id').single()
+      if (error || !l) continue
+      const kostprijs = num(raw.kostprijs_excl)
+      let costId: string | null = null
+      // Een kostprijs of leverancier bij de lijn → één kostrecord aan die lijn.
+      // Bij een recurring factuur hoort de kost bij de startmaand; latere maanden krijgen hun kost apart.
+      if (kostprijs !== null || txt(raw.leverancier)) {
+        const { data: k } = await admin.from('invoice_costs').insert({
+          invoice_id: ref.invoice_id ?? null, recurring_id: ref.recurring_id ?? null, maand: ref.maand ?? null, line_id: l.id,
+          omschrijving, categorie: txt(raw.categorie) ?? stelClassificatieVoor(omschrijving).categorie, leverancier: txt(raw.leverancier), kostprijs_excl: kostprijs, created_by: actor.id,
+        }).select('id').single()
+        costId = (k?.id as string | undefined) ?? null
+      }
+      await logKost(admin, { ref, line_id: l.id as string, cost_id: costId, actie: 'lijn_toevoegen', nieuw: { omschrijving, classificatie, prijs_excl: num(raw.prijs_excl), kostprijs_excl: kostprijs }, effect_winst: kostprijs !== null ? -kostprijs : null, actor_user_id: actor.id, actor_email: actor.email ?? null, reden: 'bij het opmaken van de factuur' })
+    } catch { /* best-effort */ }
+  }
+}
+
 async function safeInsertId(admin: Admin, table: string, row: Record<string, unknown>): Promise<string> {
   const r: Record<string, unknown> = { ...row }
   for (let i = 0; i < 6; i++) {
@@ -98,6 +137,13 @@ type Row = {
    *  die een appointment setter ONS stuurt. */
   invoiceKind: string
   setterName: string | null
+  /** Kosten en winst (intern): directe kosten, werkelijke winst, status. */
+  kosten?: KostenSamenvatting
+}
+type KostenSamenvatting = {
+  directeKosten: number; winst: number; margePct: number | null; vestingWaarde: number; nietMeetellend: number
+  status: KostenStatus; aantalKosten: number; kostenOnbekend: number; waarschuwingen: string[]
+  details: { omschrijving: string; categorie: string | null; leverancier: string | null; kostprijs_excl: number | null; lijn: string | null; datum: string | null; status: string; bewijs_url: string | null }[]
 }
 
 // GET ?month=YYYY-MM → samengevoegde facturen (eenmalig + recurring) + omzet + klanten
@@ -175,6 +221,24 @@ export async function GET(req: NextRequest) {
       })
     }
 
+    // Kosten en winst per rij (intern). Best-effort: de tabellen kunnen nog
+    // niet gemigreerd zijn; dan blijft de lijst gewoon zonder kostenlaag.
+    try {
+      const per = await kostenPerFactuur(admin,
+        rows.filter((r) => r.kind === 'eenmalig').map((r) => r.sourceId),
+        rows.filter((r) => r.kind === 'recurring').map((r) => ({ recurring_id: r.sourceId, maand: r.month })))
+      for (const r of rows) {
+        const f = per.get(r.rowId)
+        if (!f) continue
+        const lijnNaam = new Map(f.lijnen.map((l) => [l.id, l.omschrijving]))
+        r.kosten = {
+          directeKosten: f.berekend.directeKosten, winst: f.berekend.winst, margePct: f.berekend.margePct, vestingWaarde: f.berekend.vestingWaarde, nietMeetellend: f.berekend.nietMeetellend,
+          status: f.berekend.status, aantalKosten: f.berekend.aantalKosten, kostenOnbekend: f.berekend.kostenOnbekend, waarschuwingen: f.berekend.waarschuwingen,
+          details: f.kosten.map((k) => ({ omschrijving: k.omschrijving, categorie: k.categorie, leverancier: k.leverancier, kostprijs_excl: k.kostprijs_excl, lijn: k.line_id ? (lijnNaam.get(k.line_id) ?? null) : null, datum: k.datum, status: k.status, bewijs_url: k.bewijs_url })),
+        }
+      }
+    } catch { /* kostenlaag nog niet beschikbaar */ }
+
     const omzet = expandRevenueForMonth((revenue ?? []) as RevenueEntry[], month)
     const omzetExcl = omzet.reduce((s, x) => s + x.amount_excl, 0)
 
@@ -228,6 +292,8 @@ export async function POST(req: NextRequest) {
         status, revenue_id: revenueId, created_by: actor.id, clickup_task_id: task.taskId,
         contract_id: b.contract_id || null,
       })
+      // Interne factuurlijnen (classificatie/kostprijs) uit het formulier — best-effort.
+      await slaLijnenOp(admin, { invoice_id: id }, b.lines, actor)
       // Meteen verstuurd aangemaakt? → taak ook afronden.
       if (status === 'verstuurd' && task.taskId) await completeInvoiceTask(task.taskId)
       // Ook prognose/omzet + klant-hub verversen zodat een auto-aangemaakte prognose direct zichtbaar is.
@@ -251,6 +317,7 @@ export async function POST(req: NextRequest) {
         amount_excl: excl, vat_pct: vat, amount_incl: inclFromExcl(excl, vat),
         active: b.active !== false, revenue_id: revenueId, invoice_day: invoiceDay, created_by: actor.id,
       })
+      await slaLijnenOp(admin, { recurring_id: id, maand: start }, b.lines, actor)
       try {
         revalidatePath('/admin/invoices'); revalidatePath('/admin/revenue/omzet'); revalidatePath('/admin/revenue')
         if (b.client_id) revalidatePath(`/admin/clients/${b.client_id}`)

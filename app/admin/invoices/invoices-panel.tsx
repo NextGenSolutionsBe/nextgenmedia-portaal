@@ -10,7 +10,9 @@ import {
   inclFromExcl, lastDayOfMonth, monthLabel, thisMonthYM, shiftYM, type ExpandedRevenue,
 } from '@/lib/invoices'
 import { ExportKnop } from '@/components/admin/export-knop'
-import { facturenWerkmap } from '@/lib/excel/rapporten/facturen'
+import { facturenWerkmap, type FactuurKostenExport } from '@/lib/excel/rapporten/facturen'
+import { KostenEnWinstDialoog, STATUS_STIJL } from './kosten-en-winst'
+import { KOSTEN_STATUS_LABEL, CLASSIFICATIE_LABEL, stelClassificatieVoor, type Classificatie, type KostenStatus } from '@/lib/facturen/kosten-winst'
 
 type Row = {
   rowId: string; kind: 'eenmalig' | 'recurring'; sourceId: string; month: string
@@ -22,6 +24,8 @@ type Row = {
   /** 'client' = onze omzet; setter_* = een afrekening die WIJ ontvangen. */
   invoiceKind?: string
   setterName?: string | null
+  /** Kosten en winst (intern), door de API meegeleverd. */
+  kosten?: FactuurKostenExport
 }
 
 const SETTER_KIND: Record<string, string> = {
@@ -66,6 +70,7 @@ export function InvoicesPanel({ initialMonth }: { initialMonth?: string } = {}) 
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  const [kostenVan, setKostenVan] = useState<Row | null>(null)
   const [clickupEnabled, setClickupEnabled] = useState(false)
   const [fClient, setFClient] = useState(''); const [fService, setFService] = useState(''); const [fStatus, setFStatus] = useState(''); const [fType, setFType] = useState(''); const [fContract, setFContract] = useState('')
 
@@ -256,6 +261,15 @@ export function InvoicesPanel({ initialMonth }: { initialMonth?: string } = {}) 
                     <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5">
                       {ws.map((w, i) => <span key={i} className={`text-[11px] ${w.tone}`}>{w.icon} {w.text}</span>)}
                     </div>
+                    {/* Kosten en winst (intern): wat er van deze factuur écht overblijft. */}
+                    {r.invoiceKind !== 'wam' && !(r.invoiceKind && r.invoiceKind !== 'client') && (
+                      <button type="button" onClick={() => setKostenVan(r)} className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] rounded-lg border border-gray-200 px-2 py-1 hover:border-gray-400 text-left" title="Kosten en winst — intern, wijzigt de klantfactuur niet">
+                        <span className={`status-badge text-[10px] ${STATUS_STIJL[(r.kosten?.status ?? 'ongecontroleerd') as KostenStatus]}`}>{KOSTEN_STATUS_LABEL[(r.kosten?.status ?? 'ongecontroleerd') as KostenStatus]}</span>
+                        {r.kosten && r.kosten.aantalKosten > 0
+                          ? <span className="text-gray-600">kosten {formatEuro(r.kosten.directeKosten)} · winst <b className={r.kosten.winst < 0 ? 'text-red-600' : ''}>{formatEuro(r.kosten.winst)}</b>{r.kosten.margePct !== null && <> ({Math.round(r.kosten.margePct * 100)}%)</>}</span>
+                          : <span className="text-gray-500">Kosten en winst</span>}
+                      </button>
+                    )}
                   </div>
 
                   {/* Snelle acties (geen aparte schermen) */}
@@ -274,6 +288,13 @@ export function InvoicesPanel({ initialMonth }: { initialMonth?: string } = {}) 
       )}
 
       {creating && <CreateDialog month={month} clients={clients} onClose={() => setCreating(false)} onSaved={(warning) => { setCreating(false); if (warning) toast.warning(warning); load() }} />}
+      {kostenVan && (
+        <KostenEnWinstDialoog
+          ref={kostenVan.kind === 'recurring' ? { recurring_id: kostenVan.sourceId, maand: kostenVan.month } : { invoice_id: kostenVan.sourceId }}
+          titel={`${kostenVan.client_id ? (clientName.get(kostenVan.client_id) ?? '—') : '—'} · ${monthLabel(kostenVan.month)} · ${formatEuro(kostenVan.amount_excl)} excl. btw${kostenVan.description ? ` · ${kostenVan.description}` : ''}`}
+          clientId={kostenVan.client_id}
+          onClose={() => setKostenVan(null)} onChanged={load} />
+      )}
     </div>
   )
 }
@@ -296,6 +317,24 @@ function CreateDialog({ month, clients, onClose, onSaved }: { month: string; cli
   const [error, setError] = useState<string | null>(null)
   const [matches, setMatches] = useState<ExpandedRevenue[]>([])
   const [matchLoading, setMatchLoading] = useState(false)
+  // Interne factuurlijnen (optioneel): classificatie + kostprijs per onderdeel.
+  // Zijn er lijnen, dan is het factuurbedrag de som van de lijnen.
+  type LijnVorm = { omschrijving: string; aantal: string; prijs_excl: string; classificatie: Classificatie; kostprijs_excl: string; leverancier: string; opmerking: string; voorstel: string }
+  const [lijnen, setLijnen] = useState<LijnVorm[]>([])
+  const [toonLijnen, setToonLijnen] = useState(false)
+  const lijnenSom = lijnen.reduce((t, l) => t + (parseFloat(l.aantal.replace(',', '.')) || 0) * (parseFloat(l.prijs_excl.replace(',', '.')) || 0), 0)
+  useEffect(() => { if (lijnen.length > 0) setForm((f) => (f.amount_excl === String(Math.round(lijnenSom * 100) / 100) ? f : { ...f, amount_excl: String(Math.round(lijnenSom * 100) / 100) })) }, [lijnenSom, lijnen.length])
+  const zetLijn = (i: number, w: Partial<LijnVorm>) => setLijnen((ls) => ls.map((l, j) => (j === i ? { ...l, ...w } : l)))
+  const stelLijnVoor = async (i: number, omschrijving: string) => {
+    const lokaal = stelClassificatieVoor(omschrijving)
+    zetLijn(i, { classificatie: lokaal.classificatie, voorstel: lokaal.reden })
+    try {
+      const r = await fetch(`/api/admin/invoices/kosten?suggestie=1&omschrijving=${encodeURIComponent(omschrijving)}&client_id=${form.client_id}`)
+      const j = await r.json(); const k = j?.kostprijs
+      const waarde = type === 'recurring' ? k?.kostprijs_maand : k?.kostprijs_jaar
+      if (k && waarde !== null && waarde !== undefined) setLijnen((ls) => ls.map((l, j) => (j === i && !l.kostprijs_excl ? { ...l, kostprijs_excl: String(waarde), voorstel: `${lokaal.reden} Kostprijs voorgesteld uit ${k.bron}.` } : l)))
+    } catch { /* best-effort */ }
+  }
   const excl = parseFloat(form.amount_excl) || 0
   const vat = parseFloat(form.vat_pct) || 0
   const incl = inclFromExcl(excl, vat)
@@ -343,9 +382,10 @@ function CreateDialog({ month, clients, onClose, onSaved }: { month: string; cli
     if (excl <= 0) { setError('Bedrag excl. btw is verplicht'); return }
     setLoading(true); setError(null)
     try {
+      const lines = lijnen.filter((l) => l.omschrijving.trim()).map((l) => ({ omschrijving: l.omschrijving, aantal: l.aantal, prijs_excl: l.prijs_excl, btw_pct: vat, classificatie: l.classificatie, kostprijs_excl: l.kostprijs_excl === '' ? null : l.kostprijs_excl, leverancier: l.leverancier, opmerking: l.opmerking }))
       const body = type === 'recurring'
-        ? { action: 'recurring', client_id: form.client_id, service_slug: form.service_slug, description: form.description, amount_excl: excl, vat_pct: vat, start_month: form.start_month, end_month: form.end_month || null, active: form.active, revenue_id: form.revenue_id, invoice_day: form.invoice_day }
-        : { action: 'one_time', client_id: form.client_id, service_slug: form.service_slug, description: form.description, amount_excl: excl, vat_pct: vat, status: form.status, revenue_id: form.revenue_id, invoice_month: form.invoice_month, invoice_date: oneTimeInvoiceDate() }
+        ? { action: 'recurring', client_id: form.client_id, service_slug: form.service_slug, description: form.description, amount_excl: excl, vat_pct: vat, start_month: form.start_month, end_month: form.end_month || null, active: form.active, revenue_id: form.revenue_id, invoice_day: form.invoice_day, lines }
+        : { action: 'one_time', client_id: form.client_id, service_slug: form.service_slug, description: form.description, amount_excl: excl, vat_pct: vat, status: form.status, revenue_id: form.revenue_id, invoice_month: form.invoice_month, invoice_date: oneTimeInvoiceDate(), lines }
       const res = await fetch('/api/admin/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const j = await res.json(); if (!res.ok) throw new Error(j.error)
       onSaved(j.warning)
@@ -414,6 +454,40 @@ function CreateDialog({ month, clients, onClose, onSaved }: { month: string; cli
           </div>
           <div className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2 text-sm flex items-center justify-between">
             <span className="text-gray-500">Btw {formatEuro(incl - excl)} · Incl. btw</span><span className="font-bold">{formatEuro(incl)}</span>
+          </div>
+
+          {/* Interne factuurlijnen: dienst / doorgerekende kost / gemengd, met kostprijs. */}
+          <div className="rounded-xl border border-gray-200 p-3 space-y-2">
+            <button type="button" onClick={() => { setToonLijnen((v) => !v); if (!toonLijnen && lijnen.length === 0) setLijnen([{ omschrijving: form.description, aantal: '1', prijs_excl: form.amount_excl, classificatie: stelClassificatieVoor(form.description).classificatie, kostprijs_excl: '', leverancier: '', opmerking: '', voorstel: '' }]) }} className="w-full flex items-center justify-between text-xs font-medium text-gray-700">
+              <span>Factuurlijnen en kosten (intern){lijnen.length > 0 && <span className="text-gray-400 font-normal"> · {lijnen.length} lijn{lijnen.length === 1 ? '' : 'en'}</span>}</span>
+              <span className="text-gray-400">{toonLijnen ? 'verbergen' : 'openen'}</span>
+            </button>
+            {toonLijnen && (
+              <div className="space-y-2">
+                <p className="text-[11px] text-gray-500">Per onderdeel: is het een dienst waarop we winst maken, een doorgerekende kost, of een kost met marge? Vul de werkelijke kostprijs in als je die kent; anders blijft de winst voorlopig. Zijn er lijnen, dan is het factuurbedrag de som ervan.</p>
+                {lijnen.map((l, i) => (
+                  <div key={i} className="rounded-lg bg-gray-50 border border-gray-100 p-2 space-y-1.5">
+                    <div className="grid grid-cols-6 gap-1.5">
+                      <input className={`${inp} col-span-3`} placeholder="Omschrijving (bv. Hosting)" value={l.omschrijving} onChange={(e) => zetLijn(i, { omschrijving: e.target.value })} onBlur={(e) => { if (e.target.value.trim()) stelLijnVoor(i, e.target.value) }} />
+                      <input className={inp} inputMode="decimal" placeholder="Aantal" value={l.aantal} onChange={(e) => zetLijn(i, { aantal: e.target.value })} />
+                      <input className={`${inp} col-span-2`} inputMode="decimal" placeholder="Prijs excl." value={l.prijs_excl} onChange={(e) => zetLijn(i, { prijs_excl: e.target.value })} />
+                      <select className={`${inp} col-span-3`} value={l.classificatie} onChange={(e) => zetLijn(i, { classificatie: e.target.value as Classificatie })}>{(Object.keys(CLASSIFICATIE_LABEL) as Classificatie[]).map((c) => <option key={c} value={c}>{CLASSIFICATIE_LABEL[c]}</option>)}</select>
+                      <input className={`${inp} col-span-3`} inputMode="decimal" placeholder={l.classificatie === 'dienst' ? 'Kostprijs (optioneel)' : 'Werkelijke kostprijs excl.'} value={l.kostprijs_excl} onChange={(e) => zetLijn(i, { kostprijs_excl: e.target.value })} />
+                      <input className={`${inp} col-span-3`} placeholder="Leverancier" value={l.leverancier} onChange={(e) => zetLijn(i, { leverancier: e.target.value })} />
+                      <input className={`${inp} col-span-3`} placeholder="Interne opmerking" value={l.opmerking} onChange={(e) => zetLijn(i, { opmerking: e.target.value })} />
+                    </div>
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-gray-500">{l.voorstel || ' '}{l.classificatie !== 'dienst' && !l.kostprijs_excl && <span className="text-amber-700"> Kostprijs nog aan te vullen.</span>}</span>
+                      <button type="button" onClick={() => setLijnen((ls) => ls.filter((_, j) => j !== i))} className="text-gray-400 hover:text-red-600">verwijder</button>
+                    </div>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between">
+                  <button type="button" onClick={() => setLijnen((ls) => [...ls, { omschrijving: '', aantal: '1', prijs_excl: '', classificatie: 'dienst', kostprijs_excl: '', leverancier: '', opmerking: '', voorstel: '' }])} className="btn-secondary text-xs"><Plus className="h-3.5 w-3.5" />Lijn</button>
+                  {lijnen.length > 0 && <span className="text-xs text-gray-600">Som lijnen: <b>{formatEuro(lijnenSom)}</b> excl. btw</span>}
+                </div>
+              </div>
+            )}
           </div>
 
           {type === 'eenmalig' && (

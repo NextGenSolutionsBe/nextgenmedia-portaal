@@ -102,6 +102,17 @@ export type Contract = {
   notitie: string | null
   /** Het contract in de Contractenmodule waar dit op slaat, als het er is. */
   contract_id: string | null
+  /**
+   * Directe (doorgerekende) kosten op de facturen van het gekoppelde contract,
+   * excl. btw — afgeleid, niet ingevoerd. null = geen koppeling of geen facturen.
+   * Telt mee als aftrek, maar nooit bovenop `uitgesloten_kosten`: het hoogste
+   * van de twee wordt gebruikt, zodat niets dubbel wordt afgetrokken.
+   */
+  directe_kosten_facturen?: number | null
+  /** Status van de kostengegevens op die facturen (volledig / voorlopig / …). */
+  kostenstatus_facturen?: 'volledig' | 'voorlopig' | 'controle_vereist' | 'geen_directe_kosten' | 'ongecontroleerd' | null
+  /** Aantal klantfacturen dat aan het contract hangt. */
+  facturen_gekoppeld?: number | null
 }
 
 export type Frequentie = 'maandelijks' | 'kwartaal' | 'halfjaar' | 'jaarlijks' | 'eenmalig'
@@ -207,8 +218,12 @@ export type ContractBerekend = Contract & {
   duur: number | null
   /** Totale contractwaarde: maandbedrag × duur, of de handmatige waarde. */
   totaal: number | null
-  /** Totaal min uitgesloten kosten, nooit negatief. */
+  /** Totaal min de kostenaftrek, nooit negatief. */
   netto: number | null
+  /** Wat er effectief afgetrokken is: het hoogste van `uitgesloten_kosten` en de directe kosten uit facturen. */
+  kostenAftrek: number
+  /** Waarschuwing over de kostengegevens (voorlopig, conflict handmatig ↔ facturen, definitief met onvolledige kosten). */
+  kostenWaarschuwing: string | null
   /** Marco's aandeel in het binnenhalen: 0 / 0,5 / 1. */
   factor: number
   /** Wat er in de aandelenpot telt: netto × factor, of €0. */
@@ -406,7 +421,19 @@ export function berekenVesting(
     const tarief = jaartarief(jaar, i)
     const duur = c.duur_maanden ?? duurUitData(c.start_dienst, c.einde_dienst)
     const totaal = totaalwaarde(c)
-    const netto = totaal === null ? null : Math.max(0, totaal - n(c.uitgesloten_kosten))
+    // Kostenaftrek: het handmatige veld óf de directe kosten uit de facturen van
+    // het gekoppelde contract — het hoogste van de twee, nooit de som.
+    const uitFacturen = c.directe_kosten_facturen ?? null
+    const handmatig = n(c.uitgesloten_kosten)
+    const kostenAftrek = Math.max(handmatig, uitFacturen ?? 0)
+    const netto = totaal === null ? null : Math.max(0, totaal - kostenAftrek)
+    const waarschuwingen: string[] = []
+    if (uitFacturen !== null && handmatig > 0 && Math.abs(uitFacturen - handmatig) > 0.005) waarschuwingen.push(`handmatig ${Math.round(handmatig)} ≠ uit facturen ${Math.round(uitFacturen)}; het hoogste telt`)
+    const ks = c.kostenstatus_facturen ?? null
+    if (ks === 'voorlopig' || ks === 'controle_vereist' || ks === 'ongecontroleerd') {
+      waarschuwingen.push(c.status === 'voltooid' ? `definitief met onvolledige kosten (${ks === 'voorlopig' ? 'voorlopig' : ks === 'controle_vereist' ? 'controle vereist' : 'nog niet gecontroleerd'})` : `kosten op facturen ${ks === 'voorlopig' ? 'voorlopig' : ks === 'controle_vereist' ? 'onder controle' : 'nog niet gecontroleerd'}`)
+    }
+    const kostenWaarschuwing = waarschuwingen.length ? waarschuwingen.join(' · ') : null
     const factor = toerekeningsfactor(c)
     const erkenning = erkenningVan(c, jaar)
     const meetellend = erkenning === 'uitgesloten' || netto === null ? 0 : netto * factor
@@ -425,7 +452,7 @@ export function berekenVesting(
       ? Math.max(0, totaal - (ontvangenVoorStop ?? 0)) : 0
 
     const uit: ContractBerekend = {
-      ...c, jaar, tarief, duur, totaal, netto, factor, meetellend, erkenning,
+      ...c, jaar, tarief, duur, totaal, netto, kostenAftrek, kostenWaarschuwing, factor, meetellend, erkenning,
       cumulatiefVoor: cumulatief, goedkopeSchijf, jaarschijf, ruweVesting,
       betaaldeMaanden: maanden, ontvangenVoorStop, uitgevallen,
     }

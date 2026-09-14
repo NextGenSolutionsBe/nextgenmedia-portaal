@@ -11,6 +11,7 @@ import { vestingWerkmap } from '@/lib/excel/rapporten/vesting'
 import { resultatenWerkmap } from '@/lib/excel/rapporten/resultaten'
 import { statistiekenWerkmap } from '@/lib/excel/rapporten/statistieken'
 import { naarContract, naarWam, naarKost, naarTermijn } from '@/lib/vesting-rijen'
+import { directeKostenVoorContracten, directeKostenPerJaar } from '@/lib/facturen/kosten-data'
 import { schrijfWerkmap } from '@/lib/excel/xlsx-schrijf'
 import { xlsxAntwoord } from '@/lib/excel/antwoord'
 import type { Werkmap, Blad } from '@/lib/excel/spec'
@@ -46,12 +47,20 @@ export async function GET(req: NextRequest) {
       laadStatistieken({ periode: { van: new Date(year, 0, 1), tot: new Date(year, 11, 31, 23, 59, 59) } }).catch(() => null),
     ])
 
-    const delen: Werkmap[] = [financienWerkmap({ core, year, period, quarter, month })]
+    let kostenlaag = null
+    try { kostenlaag = await directeKostenPerJaar(admin, year) } catch { kostenlaag = null }
+    const delen: Werkmap[] = [financienWerkmap({ core, year, period, quarter, month, kosten: kostenlaag })]
 
     const instellingen = leesInstellingen((inst.data ?? null) as Record<string, unknown> | null)
     const wamKosten = ((kosten.data ?? []) as Record<string, unknown>[]).map(naarKost)
+    let contractRijen = (contracten.data ?? []) as Record<string, unknown>[]
+    try {
+      const ids = Array.from(new Set(contractRijen.map((r) => r.contract_id).filter(Boolean))) as string[]
+      const kosten = await directeKostenVoorContracten(admin, ids)
+      contractRijen = contractRijen.map((r) => { const k = r.contract_id ? kosten.get(String(r.contract_id)) : undefined; return k ? { ...r, directe_kosten_facturen: k.directeKosten, kostenstatus_facturen: k.status, facturen_gekoppeld: k.aantalFacturen } : r })
+    } catch { }
     const v = berekenVesting(
-      ((contracten.data ?? []) as Record<string, unknown>[]).map(naarContract),
+      contractRijen.map(naarContract),
       ((wam.data ?? []) as Record<string, unknown>[]).map(naarWam),
       wamKosten, instellingen,
       ((termijnen.data ?? []) as Record<string, unknown>[]).map(naarTermijn),

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAdmin } from '@/lib/supabase/server'
+import { requireAdmin, createAdminSupabaseClient } from '@/lib/supabase/server'
+import { directeKostenPerJaar } from '@/lib/facturen/kosten-data'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { safeMessage } from '@/lib/api-error'
 import { loadCore, readPeriodParams } from '@/lib/finance-data'
@@ -21,7 +22,9 @@ export async function GET(req: NextRequest) {
     const sp = Object.fromEntries(req.nextUrl.searchParams.entries())
     const { year, period, quarter, month } = readPeriodParams(sp)
     const core = await loadCore(year)
-    const uit = schrijfWerkmap(financienWerkmap({ core, year, period, quarter, month }))
+    let kosten = null
+    try { kosten = await directeKostenPerJaar(createAdminSupabaseClient(), year) } catch { kosten = null }
+    const uit = schrijfWerkmap(financienWerkmap({ core, year, period, quarter, month, kosten }))
 
     const meta = requestMeta(req)
     await logAudit({

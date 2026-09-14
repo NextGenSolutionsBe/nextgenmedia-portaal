@@ -48,6 +48,9 @@ function naarContract(r: Record<string, unknown>): Contract {
     laatste_betaalde_maand: d(r.laatste_betaalde_maand), reden_stop: (r.reden_stop as string | null) ?? null,
     notitie: (r.notitie as string | null) ?? null,
     contract_id: (r.contract_id as string | null) ?? null,
+    directe_kosten_facturen: n(r.directe_kosten_facturen),
+    kostenstatus_facturen: (r.kostenstatus_facturen as Contract['kostenstatus_facturen']) ?? null,
+    facturen_gekoppeld: n(r.facturen_gekoppeld),
   }
 }
 function naarWam(r: Record<string, unknown>): WamRij {
@@ -341,7 +344,10 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                         <td className="table-td text-right tabular whitespace-nowrap">
                           {c.netto === null ? <span className="text-red-600">ontbreekt</span> : formatEuro(c.netto)}
                           {c.totaal !== null && c.netto !== null && c.totaal !== c.netto && (
-                            <div className="text-[11px] text-gray-400">van {formatEuro(c.totaal)}</div>
+                            <div className="text-[11px] text-gray-400">van {formatEuro(c.totaal)} − {formatEuro(c.kostenAftrek)} kosten{(c.directe_kosten_facturen ?? 0) > 0 && (c.directe_kosten_facturen ?? 0) >= c.uitgesloten_kosten ? ' (uit facturen)' : ''}</div>
+                          )}
+                          {c.kostenWaarschuwing && (
+                            <div className="text-[11px] text-amber-700 whitespace-normal max-w-[180px]" title={c.kostenWaarschuwing}>⚠ {c.kostenWaarschuwing}</div>
                           )}
                         </td>
                         <td className="table-td text-right tabular">{Math.round(c.factor * 100)}%</td>
@@ -573,7 +579,7 @@ function ContractDialoog({ contract, inst, module, onClose }: { contract: Contra
     start_dienst: f.start_dienst || null, einde_dienst: f.einde_dienst || null,
   })
   const factor = toerekeningsfactor({ appointment_door_marco: f.appointment_door_marco, closed_door_marco: f.closed_door_marco })
-  const netto = totaal === null ? null : Math.max(0, totaal - (n(f.uitgesloten_kosten) ?? 0))
+  const netto = totaal === null ? null : Math.max(0, totaal - Math.max(n(f.uitgesloten_kosten) ?? 0, contract?.directe_kosten_facturen ?? 0))
   const afgeleideDuur = duurUitData(f.start_dienst || null, f.einde_dienst || null)
   const gestopt = f.status === 'stopgezet' || f.status === 'niet_betaler'
   const gekoppeld = module.find((m) => m.id === f.contract_id) ?? null
@@ -643,7 +649,9 @@ function ContractDialoog({ contract, inst, module, onClose }: { contract: Contra
           <Veld label="Totaalwaarde (€ excl. btw)" value={f.handmatige_totaalwaarde} onChange={(v) => set('handmatige_totaalwaarde', v)} inputMode="decimal" />
         )}
         <Veld label="Uitgesloten kosten (€)" value={f.uitgesloten_kosten} onChange={(v) => set('uitgesloten_kosten', v)} inputMode="decimal"
-          hint="Doorgerekende kosten die niet als omzet tellen." />
+          hint={contract?.directe_kosten_facturen != null
+            ? `Doorgerekende kosten die niet als omzet tellen. Uit de gekoppelde facturen: ${formatEuro(contract.directe_kosten_facturen)} (${contract.facturen_gekoppeld ?? 0} facturen, ${contract.kostenstatus_facturen ?? 'onbekend'}). Het hoogste van beide telt; nooit de som.`
+            : 'Doorgerekende kosten die niet als omzet tellen. Koppel het contract aan de Contractenmodule om de directe kosten uit de facturen automatisch te laten meetellen.'} />
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-3 space-y-3">

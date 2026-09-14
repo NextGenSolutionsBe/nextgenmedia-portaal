@@ -8,12 +8,20 @@ import { Kpi } from '../kpi'
 import { OmzetCharts } from '../omzet-charts'
 import { FinanceWidget } from '../../finance-widget'
 import { ExportKnop } from '@/components/admin/export-knop'
+import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { directeKostenPerJaar, type DirecteKostenJaar } from '@/lib/facturen/kosten-data'
+import { KOSTEN_STATUS_LABEL } from '@/lib/facturen/kosten-winst'
 
 // Omzet is GEEN prognose meer: het zijn de feiten uit je facturen. Hier log je
 // enkel kosten (tab Kosten); winst = omzet (facturen) − kosten.
 export default async function FinanceOverviewPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const { year, period, quarter, month } = readPeriodParams(await searchParams)
   const c = await loadCore(year)
+
+  // Doorgerekende (directe) kosten op de facturen — de laag onder de omzet.
+  // Best-effort: zonder kostenlaag toont het blok gewoon nullen.
+  let dk: DirecteKostenJaar | null = null
+  try { dk = await directeKostenPerJaar(createAdminSupabaseClient(), year) } catch { dk = null }
 
   const [aMi, bMi] = periodRange(period, quarter, month)
   const slice = c.monthly.slice(aMi, bMi + 1)
@@ -24,6 +32,9 @@ export default async function FinanceOverviewPage({ searchParams }: { searchPara
   const kostenPeriod = slice.reduce((s, m) => s + m.kostenManual, 0) + setterPeriod
   const winstPeriod = omzetPeriod - kostenPeriod
   const periodLabel = period === 'fy' ? `boekjaar ${year}` : period === 'quarter' ? `Q${quarter} ${year}` : `${MONTHS[month - 1]} ${year}`
+  const dkPeriod = dk ? dk.perMaand.slice(aMi, bMi + 1).reduce((s, v) => s + v, 0) : 0
+  const dkOmzetPeriod = dk ? dk.omzetPerMaand.slice(aMi, bMi + 1).reduce((s, v) => s + v, 0) : omzetPeriod
+  const bijdragend = dkOmzetPeriod - dkPeriod
 
   const monthlyChart = c.monthly.map((m) => ({ label: MONTHS[m.mi], recurring: Math.round(m.omzetInvoiced), eenmalig: Math.round(m.omzetOpen) }))
   const quarters = [0, 1, 2, 3].map((q) => ({ label: `Q${q + 1}`, omzet: Math.round(c.monthly.slice(q * 3, q * 3 + 3).reduce((s, m) => s + m.omzet, 0)) }))
@@ -60,6 +71,28 @@ export default async function FinanceOverviewPage({ searchParams }: { searchPara
             ? `Kosten: ${formatEuro(kostenPeriod)} · waarvan ${formatEuro(setterPeriod)} appointment setting`
             : `Kosten: ${formatEuro(kostenPeriod)}`}
           color={winstPeriod >= 0 ? 'text-green-600' : 'text-red-600'} Icon={Wallet} />
+      </div>
+
+      {/* Scheiding: omzet die bijdraagt aan de winst ↔ kosten die we doorrekenen. */}
+      <div className="card-base">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="font-semibold">Omzet, doorgerekende kosten en winst</h2>
+            <div className="text-xs text-gray-400">{periodLabel} · uit de kostenlaag van de facturen (Facturen → Kosten en winst)</div>
+          </div>
+          <Link href="/admin/vesting" className="text-xs text-blue-700 hover:underline">Naar de vestingberekening →</Link>
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
+          <Kpi label="Factuuromzet excl. btw" value={formatEuro(dkOmzetPeriod)} sub="klantfacturen, geannuleerde niet" Icon={TrendingUp} />
+          <Kpi label="Doorgerekende kosten" value={formatEuro(dkPeriod)} sub="directe kosten op facturen — tellen niet als winst" color="text-red-600" Icon={Receipt} />
+          <Kpi label="Omzet die bijdraagt aan de winst" value={formatEuro(bijdragend)} sub={dkOmzetPeriod > 0 ? `marge ${Math.round((bijdragend / dkOmzetPeriod) * 100)}%` : undefined} color="text-green-600" Icon={Wallet} />
+          <Kpi label="Kostenstatus facturen" value={dk ? `${dk.statusTelling.volledig + dk.statusTelling.geen_directe_kosten} / ${dk.aantalFacturen}` : '—'}
+            sub={dk ? `${dk.statusTelling.voorlopig} ${KOSTEN_STATUS_LABEL.voorlopig.toLowerCase()} · ${dk.statusTelling.controle_vereist} controle · ${dk.statusTelling.ongecontroleerd} nog niet gecontroleerd (boekjaar)` : undefined}
+            color={dk && (dk.statusTelling.voorlopig + dk.statusTelling.controle_vereist + dk.statusTelling.ongecontroleerd) > 0 ? 'text-amber-600' : 'text-gray-600'} Icon={Clock} />
+        </div>
+        <p className="text-[11px] text-gray-500 mt-3">
+          Alleen de omzet na aftrek van doorgerekende kosten telt als werkelijke winst en als waarde voor het vesting-/investeringsprincipe. Zolang facturen "voorlopig" of "nog niet gecontroleerd" zijn, is dit cijfer voorlopig. De bestaande Winst-KPI hierboven blijft omzet − ingevoerde kosten.
+        </p>
       </div>
 
       <OmzetCharts monthly={monthlyChart} quarters={quarters} year={year} />

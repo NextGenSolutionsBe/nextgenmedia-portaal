@@ -27,6 +27,9 @@ export function naarContract(r: Record<string, unknown>): Contract {
     laatste_betaalde_maand: d(r.laatste_betaalde_maand), reden_stop: (r.reden_stop as string | null) ?? null,
     notitie: (r.notitie as string | null) ?? null,
     contract_id: (r.contract_id as string | null) ?? null,
+    directe_kosten_facturen: n(r.directe_kosten_facturen),
+    kostenstatus_facturen: (r.kostenstatus_facturen as Contract['kostenstatus_facturen']) ?? null,
+    facturen_gekoppeld: n(r.facturen_gekoppeld),
   }
 }
 

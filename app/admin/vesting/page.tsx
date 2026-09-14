@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { redirect } from 'next/navigation'
 import { createAdminSupabaseClient, requireAdmin } from '@/lib/supabase/server'
 import { VestingClient } from './vesting-client'
+import { directeKostenVoorContracten } from '@/lib/facturen/kosten-data'
 
 /**
  * Vestigingsprincipe — het contractmodel van de samenwerkingsovereenkomst.
@@ -27,10 +28,22 @@ export default async function VestingPage() {
     admin.from('clients').select('id, company_name').order('company_name'),
   ])
 
+  // Directe kosten op de facturen van gekoppelde contracten → aftrek in de
+  // nettoberekening (afgeleid; het handmatige veld blijft bestaan).
+  let contractRijen = (contracten.data ?? []) as Record<string, unknown>[]
+  try {
+    const ids = Array.from(new Set(contractRijen.map((r) => r.contract_id).filter(Boolean))) as string[]
+    const kosten = await directeKostenVoorContracten(admin, ids)
+    contractRijen = contractRijen.map((r) => {
+      const k = r.contract_id ? kosten.get(String(r.contract_id)) : undefined
+      return k ? { ...r, directe_kosten_facturen: k.directeKosten, kostenstatus_facturen: k.status, facturen_gekoppeld: k.aantalFacturen } : r
+    })
+  } catch { /* kostenlaag nog niet beschikbaar */ }
+
   return (
     <VestingClient
       instellingenRij={(inst.data ?? null) as Record<string, unknown> | null}
-      contractRijen={(contracten.data ?? []) as Record<string, unknown>[]}
+      contractRijen={contractRijen}
       wamRijen={(wam.data ?? []) as Record<string, unknown>[]}
       kostRijen={(kosten.data ?? []) as Record<string, unknown>[]}
       oudeRegistraties={(oud.data ?? []) as Record<string, unknown>[]}

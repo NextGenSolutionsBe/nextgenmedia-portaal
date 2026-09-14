@@ -3,6 +3,8 @@ import { MONTHS, periodRange } from '@/lib/finance-data'
 import { costActive, toMonthly, type CostEntry } from '@/lib/finance'
 import { SERVICE_LABELS, SERVICE_SLUGS } from '@/lib/utils'
 import { INVOICE_STATUS_LABEL } from '@/lib/invoices'
+import { KOSTEN_STATUS_LABEL } from '@/lib/facturen/kosten-winst'
+import type { DirecteKostenJaar } from '@/lib/facturen/kosten-data'
 import {
   type Werkmap, type Blad, type Cel, layoutVan, bladBereik, euro, pct, datum, aantal, formule, som,
 } from '../spec'
@@ -22,6 +24,8 @@ export type FinancienExportInvoer = {
   period: 'month' | 'quarter' | 'fy'
   quarter: number
   month: number
+  /** Kostenlaag van de facturen (directe kosten, winst, status); optioneel. */
+  kosten?: DirecteKostenJaar | null
 }
 
 const FREQ_LABEL: Record<string, string> = { monthly: 'maandelijks', quarterly: 'per kwartaal', 'semi-annual': 'per half jaar', annual: 'jaarlijks' }
@@ -38,7 +42,7 @@ function kostWaardeJaar(c: CostEntry, year: number): number {
 }
 
 export function financienWerkmap(inv: FinancienExportInvoer): Werkmap {
-  const { core: c, year, period, quarter, month } = inv
+  const { core: c, year, period, quarter, month, kosten: dk } = inv
   const [aMi, bMi] = periodRange(period, quarter, month)
   const periodLabel = period === 'fy' ? `boekjaar ${year}` : period === 'quarter' ? `Q${quarter} ${year}` : `${MONTHS[month - 1]} ${year}`
   const slice = c.monthly.slice(aMi, bMi + 1)
@@ -118,6 +122,40 @@ export function financienWerkmap(inv: FinancienExportInvoer): Werkmap {
     }],
   }
 
+  // ── Kosten en winst per factuur (kostenlaag) ───────────────────────────────
+  const kfacturen = (dk?.facturen ?? []).filter((f) => f.kop.kind === 'client')
+  const ref = (f: (typeof kfacturen)[number]) => f.kop.ref.invoice_id ? `F-${f.kop.ref.invoice_id.slice(0, 8).toUpperCase()}` : `REC-${(f.kop.ref.recurring_id ?? '').slice(0, 8).toUpperCase()}-${f.kop.ref.maand}`
+  const winstBlad: Blad = {
+    naam: 'Winst per factuur', titel: `Omzet, directe kosten en winst per factuur — ${year}`,
+    toelichting: ['Werkelijke winst = omzet excl. btw − directe kosten excl. btw (formule). Vesting-/investeringswaarde = werkelijke winst; niet-meetellend = de doorgerekende kosten. Status "Nog niet gecontroleerd" = nog geen kosten of bevestiging.'],
+    blokken: [{
+      soort: 'tabel', titel: 'Per factuur',
+      kolommen: [
+        { kop: 'Factuurnr.' }, { kop: 'Maand' }, { kop: 'Klant' }, { kop: 'Project / omschrijving' }, { kop: 'Status' },
+        { kop: 'Omzet excl. btw', stijl: 'euro' }, { kop: 'Btw', stijl: 'euro' }, { kop: 'Omzet incl. btw', stijl: 'euro' },
+        { kop: 'Directe kosten excl. btw', stijl: 'euro' }, { kop: 'Werkelijke winst', stijl: 'euro' }, { kop: 'Marge', stijl: 'pct' }, { kop: 'Vesting-/investeringswaarde', stijl: 'euro' }, { kop: 'Niet-meetellend', stijl: 'euro' }, { kop: 'Kostenstatus' },
+      ],
+      rijen: kfacturen.map((f) => [
+        ref(f), f.kop.invoice_month ?? '', f.kop.client_id ? (c.clientMap.get(f.kop.client_id) ?? '—') : '—', f.kop.omschrijving ?? '', INVOICE_STATUS_LABEL[f.kop.factuurstatus] ?? f.kop.factuurstatus,
+        euro(f.berekend.omzetExcl), euro(f.berekend.btw), formule('F{R}+G{R}', f.berekend.omzetIncl),
+        euro(f.berekend.directeKosten), formule('F{R}-I{R}', f.berekend.winst), formule('IFERROR(J{R}/F{R},"")', f.berekend.margePct ?? ''), formule('J{R}', f.berekend.vestingWaarde), formule('I{R}', f.berekend.nietMeetellend),
+        KOSTEN_STATUS_LABEL[f.berekend.status],
+      ] as Cel[]),
+      totaal: ['Totaal', null, null, null, null, som('F'), som('G'), som('H'), som('I', dk?.totaal), som('J'), formule('IFERROR(SUM(J{R1}:J{R2})/SUM(F{R1}:F{R2}),"")', undefined, 'totaal_pct'), som('L'), som('M'), null],
+      leeg: 'Nog geen kostenlaag beschikbaar.',
+    }, {
+      soort: 'tabel', titel: 'Kosten per factuur',
+      kolommen: [{ kop: 'Factuurnr.' }, { kop: 'Klant' }, { kop: 'Kost' }, { kop: 'Categorie' }, { kop: 'Leverancier' }, { kop: 'Kostprijs excl. btw', stijl: 'euro' }, { kop: 'Status' }, { kop: 'Gekoppelde lijn' }, { kop: 'Datum', stijl: 'datum' }, { kop: 'Bewijsstuk' }],
+      rijen: kfacturen.flatMap((f) => f.kosten.map((k) => [
+        ref(f), f.kop.client_id ? (c.clientMap.get(f.kop.client_id) ?? '—') : '—', k.omschrijving, k.categorie ?? '', k.leverancier ?? '',
+        k.kostprijs_excl === null ? null : euro(k.kostprijs_excl), k.kostprijs_excl === null ? 'Kostprijs nog aan te vullen' : (k.status === 'geannuleerd' ? 'Geannuleerd' : 'Actief'),
+        k.line_id ? (f.lijnen.find((l) => l.id === k.line_id)?.omschrijving ?? '—') : 'Hele factuur', datum(k.datum), k.bewijs_url ?? '',
+      ] as Cel[])),
+      totaal: ['Totaal (actief)', null, null, null, null, formule('SUMIF(G{R1}:G{R2},"Actief",F{R1}:F{R2})', dk?.totaal, 'totaal_euro'), null, null, null, null],
+      leeg: 'Geen kosten gekoppeld.',
+    }],
+  }
+
   // ── Kosten ─────────────────────────────────────────────────────────────────
   const kostenRijen: Cel[][] = c.costs.map((k) => {
     const waarde = kostWaardeJaar(k, year)
@@ -166,7 +204,7 @@ export function financienWerkmap(inv: FinancienExportInvoer): Werkmap {
   }
 
   // ── Samenvatting: formules naar het maandblad, zodat alles blijft kloppen ──
-  const bladen = [maandBlad, dienstBlad, factuurBlad, kostenBlad]
+  const bladen = [maandBlad, dienstBlad, factuurBlad, winstBlad, kostenBlad]
   const L = layoutVan(werkmap, maandBlad)[0]
   const van = L.eersteDataRij! + aMi
   const tot = L.eersteDataRij! + bMi
@@ -185,6 +223,8 @@ export function financienWerkmap(inv: FinancienExportInvoer): Werkmap {
           { label: 'Kosten', waarde: formule(maandSom('G'), kostenPeriod), stijl: 'euro', toelichting: 'ingevoerde kosten + appointment setters' },
           { label: 'waarvan appointment setting', waarde: formule(maandSom('F'), setterPeriod), stijl: 'euro' },
           { label: 'Winst', waarde: formule(maandSom('H'), winstPeriod), stijl: 'euro' },
+          { label: 'Doorgerekende (directe) kosten op facturen', waarde: euro(dk ? dk.perMaand.slice(aMi, bMi + 1).reduce((s, v) => s + v, 0) : 0), toelichting: 'tellen niet als winst; zie blad "Winst per factuur"' },
+          { label: 'Omzet die bijdraagt aan de winst', waarde: euro(dk ? dk.omzetPerMaand.slice(aMi, bMi + 1).reduce((s, v) => s + v, 0) - dk.perMaand.slice(aMi, bMi + 1).reduce((s, v) => s + v, 0) : omzetPeriod), toelichting: 'factuuromzet − doorgerekende kosten (vesting-/investeringswaarde)' },
         ],
       },
       {
