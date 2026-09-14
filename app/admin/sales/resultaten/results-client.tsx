@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  Loader2, ChevronLeft, ChevronRight, Trophy, CalendarCheck, Clock, Euro, Check, Receipt,
+  Loader2, ChevronLeft, ChevronRight, Trophy, CalendarCheck, Clock, Euro, Check, Receipt, TrendingUp,
 } from 'lucide-react'
-import { euro, hoursText, monthLabel, withVat, VAT_PCT } from '@/lib/sales/earnings'
+import { euro, hoursText, monthLabel, withVat, VAT_PCT, roiText, TIJDSBELASTING } from '@/lib/sales/earnings'
 import { TimerCard } from './timer-card'
 import { TimeEntries } from './time-entries'
 
@@ -23,6 +23,10 @@ type Stat = {
   dealValueCents: number
   commissionCents: number
   totalCents: number
+  gewogenOmzetCents: number
+  resultaatCents: number
+  roi: number | null
+  deals: { id: string; bedrijf: string; dealValueCents: number; tijdsbelasting: number | null; gewogenCents: number; commissionCents: number }[]
 }
 type Payout = {
   setterId: string; setterName: string; month: string
@@ -181,6 +185,85 @@ export function ResultsClient() {
               </table>
             </div>
           </div>
+
+          {/* ROI: wat leverde de setter op tegenover wat hij kostte?
+              Gewogen omzet = de gewonnen deals, afgewogen naar hoeveel werk de
+              uitvoering vraagt (tijdsbelasting). Kost = uren + commissie van
+              dezelfde maand. Enkel voor de admin: dit is een oordeel over de
+              samenwerking, niet iets wat een setter over zichzelf moet zien. */}
+          {isAdmin && (
+            <div className="card-base p-0 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-100">
+                <div className="text-sm font-semibold flex items-center gap-2"><TrendingUp className="h-4 w-4 text-gray-400" />Rendement per setter</div>
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  Gewogen omzet na tijdsbelasting, tegenover uren en commissie van deze maand. ROI = (gewogen omzet − kost) / kost.
+                </p>
+              </div>
+              <div className="table-wrap">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100">
+                      <th className="table-th">Setter</th>
+                      <th className="table-th text-right">Uren</th>
+                      <th className="table-th text-right">Kost</th>
+                      <th className="table-th text-right">Omzet</th>
+                      <th className="table-th text-right">Gewogen omzet</th>
+                      <th className="table-th text-right">Resultaat</th>
+                      <th className="table-th text-right">ROI</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {stats.map((s) => (
+                      <tr key={s.setter.id}>
+                        <td className="table-td font-medium">{s.setter.name}</td>
+                        <td className="table-td text-right tabular text-gray-500">{hoursText(s.seconds)}</td>
+                        <td className="table-td text-right tabular">{euro(s.totalCents)}</td>
+                        <td className="table-td text-right tabular text-gray-500">{euro(s.dealValueCents)}</td>
+                        <td className="table-td text-right tabular">{euro(s.gewogenOmzetCents)}</td>
+                        <td className={`table-td text-right tabular font-semibold ${s.resultaatCents < 0 ? 'text-red-600' : s.resultaatCents > 0 ? 'text-green-700' : ''}`}>{euro(s.resultaatCents)}</td>
+                        <td className={`table-td text-right tabular font-semibold ${s.roi !== null && s.roi < 0 ? 'text-red-600' : s.roi !== null && s.roi > 0 ? 'text-green-700' : ''}`}>{roiText(s.roi)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {stats.some((s) => s.deals.length > 0) && (
+                <div className="border-t border-gray-100">
+                  <div className="px-4 py-2 text-[11px] font-medium text-gray-500 uppercase tracking-wide">Gewonnen deals deze maand</div>
+                  <div className="table-wrap">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-100">
+                          <th className="table-th">Bedrijf</th>
+                          <th className="table-th">Setter</th>
+                          <th className="table-th text-right">Projectwaarde</th>
+                          <th className="table-th">Tijdsbelasting</th>
+                          <th className="table-th text-right">Gewogen</th>
+                          <th className="table-th text-right">Commissie</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {stats.flatMap((s) => s.deals.map((d) => (
+                          <tr key={d.id}>
+                            <td className="table-td font-medium">{d.bedrijf}</td>
+                            <td className="table-td text-gray-500">{s.setter.name}</td>
+                            <td className="table-td text-right tabular">{euro(d.dealValueCents)}</td>
+                            <td className="table-td text-gray-600">
+                              {d.tijdsbelasting
+                                ? `${d.tijdsbelasting} · ${TIJDSBELASTING.find((t) => t.waarde === d.tijdsbelasting)?.label ?? ''}`
+                                : <span className="text-gray-400">niet ingeschat — telt volledig</span>}
+                            </td>
+                            <td className="table-td text-right tabular">{euro(d.gewogenCents)}</td>
+                            <td className="table-td text-right tabular text-gray-500">{euro(d.commissionCents)}</td>
+                          </tr>
+                        )))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Wat de setter zelf moet factureren. Staat bewust HIER en niet bij
               Facturen: dat scherm gaat over wat wij aan klanten sturen. */}

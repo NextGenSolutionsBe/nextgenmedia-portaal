@@ -1,9 +1,7 @@
 import 'server-only'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { getOrCreateSalesOrg } from '@/lib/sales/service'
-import {
-  totalSeconds, earnedCents, monthKey, type Interval,
-} from '@/lib/sales/earnings'
+import { totalSeconds, earnedCents, monthKey, type Interval, gewogenWaardeCents, roi } from '@/lib/sales/earnings'
 
 /**
  * Appointment setters: wie ze zijn, hoeveel ze werkten en wat ze verdienden.
@@ -60,6 +58,22 @@ export type SetterStats = {
   dealValueCents: number
   commissionCents: number
   totalCents: number
+  /** Som van de gewonnen deals na tijdsbelasting. */
+  gewogenOmzetCents: number
+  /** Gewogen omzet min uren en commissie. */
+  resultaatCents: number
+  /** (gewogen omzet − kost) / kost; null zonder kost. */
+  roi: number | null
+  deals: DealRij[]
+}
+
+export type DealRij = {
+  id: string
+  bedrijf: string
+  dealValueCents: number
+  tijdsbelasting: number | null
+  gewogenCents: number
+  commissionCents: number
 }
 
 /**
@@ -156,7 +170,7 @@ export async function statsFor(period: Period, setterId?: string): Promise<Sette
   const hoortBij = (a: { setter_profile_id: string | null; setter_id: string | null }): string | null =>
     a.setter_profile_id ?? (a.setter_id ? profielVanAuth.get(a.setter_id) ?? null : null)
 
-  const KOLOMMEN = 'setter_profile_id, setter_id, status, outcome, deal_value_cents, commission_cents'
+  const KOLOMMEN = 'id, titel, setter_profile_id, setter_id, status, outcome, deal_value_cents, commission_cents, tijdsbelasting, sales_leads ( sales_companies ( name ) )'
 
   const [{ data: times }, { data: appts }] = await Promise.all([
     // Ook blokken die vóór de periode begonnen maar er nog in doorlopen.
@@ -203,9 +217,12 @@ export async function statsFor(period: Period, setterId?: string): Promise<Sette
     const closedSeconds = totalSeconds(entries.filter((e) => e.ended_at !== null), now)
 
     type ApptRij = {
+      id: string; titel: string | null
       setter_profile_id: string | null; setter_id: string | null
       status: string; outcome: string | null
       deal_value_cents: number | null; commission_cents: number | null
+      tijdsbelasting: number | null
+      sales_leads?: { sales_companies?: { name?: string | null } | null } | null
     }
 
     const mine = ((appts ?? []) as unknown as ApptRij[])
@@ -218,6 +235,23 @@ export async function statsFor(period: Period, setterId?: string): Promise<Sette
     const lost = closedMine.filter((a) => a.outcome === 'lost')
     const commission = won.reduce((sum, a) => sum + (a.commission_cents ?? 0), 0)
     const hours = earnedCents(seconds, effectiefUurtarief(setter))
+
+    /**
+     * ROI van deze setter, deze maand: wat leverden zijn deals op na
+     * tijdsbelasting, tegenover wat hij kostte aan uren en commissie.
+     * Uren en deals zitten in hetzelfde maandvenster, anders vergelijk je
+     * appels met peren.
+     */
+    const deals: DealRij[] = won.map((a) => ({
+      id: a.id,
+      bedrijf: a.sales_leads?.sales_companies?.name ?? a.titel ?? '—',
+      dealValueCents: a.deal_value_cents ?? 0,
+      tijdsbelasting: a.tijdsbelasting ?? null,
+      gewogenCents: gewogenWaardeCents(a.deal_value_cents ?? 0, a.tijdsbelasting),
+      commissionCents: a.commission_cents ?? 0,
+    }))
+    const gewogenOmzetCents = deals.reduce((sum, d) => sum + d.gewogenCents, 0)
+    const kostCents = hours + commission
 
     return {
       setter,
@@ -234,6 +268,10 @@ export async function statsFor(period: Period, setterId?: string): Promise<Sette
       dealValueCents: won.reduce((sum, a) => sum + (a.deal_value_cents ?? 0), 0),
       commissionCents: commission,
       totalCents: hours + commission,
+      gewogenOmzetCents,
+      resultaatCents: gewogenOmzetCents - kostCents,
+      roi: roi(gewogenOmzetCents, kostCents),
+      deals,
     }
   })
 }

@@ -57,6 +57,7 @@ export async function POST(req: NextRequest) {
       deal_value_cents: null,
       commission_cents: null,
       commission_pct: null,
+      tijdsbelasting: null,
     }
 
     // De reden bij een verloren afspraak is bewust optioneel.
@@ -91,6 +92,11 @@ export async function POST(req: NextRequest) {
       patch.deal_value_cents = cents
       patch.commission_pct = pct
       patch.commission_cents = commissionCents(cents, pct)
+
+      // Hoeveel werk vraagt dit project? Weegt de waarde in de ROI van de
+      // setter. Optioneel: zonder keuze telt de deal volledig mee.
+      const tb = Number(b.tijdsbelasting)
+      patch.tijdsbelasting = Number.isInteger(tb) && tb >= 1 && tb <= 5 ? tb : null
     }
 
     const { error } = await admin.from('sales_appointments').update(patch).eq('id', id)

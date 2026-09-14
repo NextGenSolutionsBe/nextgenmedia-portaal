@@ -24,7 +24,7 @@ export const ADMIN_MODULES: AdminModule[] = [
   { key: 'partners',    label: 'Partners',             prefixes: ['/admin/partners', '/api/admin/partners'] },
   { key: 'assignments', label: 'Opdrachten',           prefixes: ['/admin/assignments', '/api/admin/assignments'] },
   { key: 'settlements', label: 'Settlements',          prefixes: ['/admin/settlements'] },
-  { key: 'finance',     label: 'Financiën'          , prefixes: ['/admin/revenue', '/api/admin/revenue', '/api/admin/costs', '/api/admin/fiscal-settings'] },
+  { key: 'finance',     label: 'Financiën'          , prefixes: ['/admin/revenue', '/api/admin/revenue', '/api/admin/costs', '/api/admin/fiscal-settings', '/api/admin/bv-transitie'] },
   { key: 'sales',       label: 'Verkoop',              prefixes: ['/admin/sales', '/api/admin/sales'] },
   { key: 'aanbestedingen', label: 'Aanbestedingen',    prefixes: ['/admin/aanbestedingen', '/api/admin/aanbestedingen'] },
   { key: 'invoices',    label: 'Facturen',             prefixes: ['/admin/invoices', '/api/admin/invoices'] },

@@ -3,22 +3,24 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2, Trophy, XCircle, RotateCcw } from 'lucide-react'
-import { commissionCents, euro } from '@/lib/sales/earnings'
+import { commissionCents, euro, TIJDSBELASTING, gewogenWaardeCents } from '@/lib/sales/earnings'
 
 /**
  * Gewonnen of verloren afsluiten. Alleen zichtbaar voor een admin: hier hangt
  * de commissie van de setter aan vast, dus dat is niets wat iemand over zijn
  * eigen afspraken beslist.
  */
-export function OutcomePanel({ appointmentId, outcome, dealValueCents, commissionPct, onDone }: {
+export function OutcomePanel({ appointmentId, outcome, dealValueCents, commissionPct, tijdsbelasting, onDone }: {
   appointmentId: string
   outcome: 'won' | 'lost' | null
   dealValueCents?: number | null
   commissionPct?: number | null
+  tijdsbelasting?: number | null
   onDone: () => void
 }) {
   const [mode, setMode] = useState<'won' | 'lost' | null>(outcome)
   const [value, setValue] = useState(dealValueCents ? String(dealValueCents / 100) : '')
+  const [belasting, setBelasting] = useState<number | ''>(tijdsbelasting ?? '')
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -33,7 +35,7 @@ export function OutcomePanel({ appointmentId, outcome, dealValueCents, commissio
     try {
       const r = await fetch('/api/admin/sales/outcome', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ appointmentId, outcome: next, dealValue: value, reason }),
+        body: JSON.stringify({ appointmentId, outcome: next, dealValue: value, reason, tijdsbelasting: belasting || null }),
       })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
       toast.success(
@@ -79,6 +81,24 @@ export function OutcomePanel({ appointmentId, outcome, dealValueCents, commissio
               ? <>Commissie voor de setter: <b>{euro(preview)}</b> ({pct}%).</>
               : <>Hier wordt {pct}% van berekend als commissie voor de setter.</>}
           </p>
+
+          {/* Hoeveel werk vraagt dit project? Weegt de waarde in de ROI van de
+              setter: een zware klus van €3.000 is niet evenveel waard als een
+              lichte van €3.000. */}
+          <label className="block text-[11px] font-medium text-gray-600 mb-1 mt-2">
+            Tijdsbelasting <span className="text-gray-400">— voor de ROI, optioneel</span>
+          </label>
+          <select className="input-base" value={belasting} onChange={(e) => setBelasting(e.target.value ? Number(e.target.value) : '')}>
+            <option value="">— niet ingeschat —</option>
+            {TIJDSBELASTING.map((t) => (
+              <option key={t.waarde} value={t.waarde}>{t.waarde} · {t.label} ({Math.round(t.factor * 100)}% telt mee)</option>
+            ))}
+          </select>
+          {belasting && Number.isFinite(euros) && euros > 0 && (
+            <p className="text-[11px] text-gray-500 mt-1">
+              Gewogen waarde: <b>{euro(gewogenWaardeCents(Math.round(euros * 100), Number(belasting)))}</b>
+            </p>
+          )}
           <button onClick={() => save('won')} disabled={busy || preview <= 0} className="btn-primary w-full text-sm mt-2">
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trophy className="h-4 w-4" />}Gewonnen vastleggen
           </button>

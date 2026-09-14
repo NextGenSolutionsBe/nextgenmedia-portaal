@@ -3573,3 +3573,221 @@ CREATE TRIGGER trg_harrie_event BEFORE INSERT ON public.harrie_events
 
 -- PostgREST kent een nieuwe view of kolom pas na een herlading van zijn cache.
 NOTIFY pgrst, 'reload schema';
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- Drie Excel-bestanden vervangen door de app (14 september 2026)
+--   1. MARCO VESTIGINGSPRINCIPE.xlsx  → vesting_* (nieuw contractmodel)
+--   2. BV_transitie_opvolger.xlsx     → bv_* en ez_*
+--   3. Cold_Caller_ROI_Tracker-4.xlsx → sales_appointments.tijdsbelasting
+-- Additief en idempotent. De oude tabellen vesting_config / vesting_revenue
+-- blijven staan: niets wordt gewist.
+-- ══════════════════════════════════════════════════════════════════════════
+
+-- ── 1. Vestigingsprincipe — het contractmodel ─────────────────────────────
+-- Eén rij. Alle drempels en tarieven uit de samenwerkingsovereenkomst staan
+-- hier, zodat de rekenkern geen enkel getal hard hoeft te kennen.
+CREATE TABLE IF NOT EXISTS public.vesting_instellingen (
+  id                    integer PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  max_aandeel_marco     numeric NOT NULL DEFAULT 0.33,
+  vast_aandeel_chiara   numeric NOT NULL DEFAULT 0.33,
+  startaandeel_marco    numeric NOT NULL DEFAULT 0,
+  startaandeel_bram     numeric NOT NULL DEFAULT 0.67,
+  wam_bedrag_per_pct    numeric NOT NULL DEFAULT 5000,
+  wam_max_aandeel       numeric NOT NULL DEFAULT 0.05,
+  regulier_tarief       numeric NOT NULL DEFAULT 5000,   -- € per 1% tot de goedkope grens
+  einde_goedkope_schijf numeric NOT NULL DEFAULT 0.10,   -- totaal aandeel waar het reguliere tarief stopt
+  jaar1_start date NOT NULL DEFAULT '2026-04-01', jaar1_eind date NOT NULL DEFAULT '2027-06-01', jaar1_tarief numeric NOT NULL DEFAULT 10000,
+  jaar2_start date NOT NULL DEFAULT '2027-06-01', jaar2_eind date NOT NULL DEFAULT '2028-06-01', jaar2_tarief numeric NOT NULL DEFAULT 12000,
+  jaar3_start date NOT NULL DEFAULT '2028-06-01', jaar3_eind date NOT NULL DEFAULT '2029-06-01', jaar3_tarief numeric NOT NULL DEFAULT 15000,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO public.vesting_instellingen (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- Het contractenregister. De ondertekeningsdatum vergrendelt het jaartarief;
+-- de status bepaalt of de waarde voorlopig, definitief of €0 is.
+CREATE TABLE IF NOT EXISTS public.vesting_contracten (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nr                    text NOT NULL UNIQUE,            -- C-001
+  klant                 text NOT NULL,
+  client_id             uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  ondertekend_op        date NOT NULL,
+  start_dienst          date,
+  einde_dienst          date,
+  dienst                text,                            -- Social media management, Webdesign, …
+  facturatiemodel       text NOT NULL DEFAULT 'maandcontract' CHECK (facturatiemodel IN ('maandcontract','eenmalig')),
+  maandbedrag           numeric,                         -- bij maandcontract
+  duur_maanden          numeric,                         -- bij maandcontract; anders afgeleid
+  handmatige_totaalwaarde numeric,                       -- bij eenmalig project
+  uitgesloten_kosten    numeric NOT NULL DEFAULT 0,
+  status                text NOT NULL DEFAULT 'actief' CHECK (status IN ('actief','voltooid','stopgezet','niet_betaler')),
+  betalingen_op_schema  boolean NOT NULL DEFAULT true,
+  appointment_door_marco boolean NOT NULL DEFAULT false,
+  closed_door_marco     boolean NOT NULL DEFAULT false,
+  laatste_betaalde_maand date,                           -- enkel bij stop / niet-betaler
+  reden_stop            text,
+  notitie               text,
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  updated_at            timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS vesting_contracten_ondertekend ON public.vesting_contracten (ondertekend_op, nr);
+
+-- De WAM-portefeuille: Marco's eigen klanten van vóór de samenwerking. Elke
+-- volledige €5.000 netto ontvangen levert 1% op, tot 5%. Kosten gaan eraf.
+CREATE TABLE IF NOT EXISTS public.vesting_wam (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nr                    text NOT NULL UNIQUE,            -- CW-1
+  klant                 text NOT NULL,
+  contractwaarde        numeric NOT NULL DEFAULT 0,
+  netto_ontvangen       numeric NOT NULL DEFAULT 0,
+  status                text NOT NULL DEFAULT 'actief' CHECK (status IN ('actief','voltooid','stopgezet','niet_betaler')),
+  betalingen_op_schema  boolean NOT NULL DEFAULT true,
+  notitie               text,
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  updated_at            timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.vesting_wam_kosten (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  datum         date,
+  omschrijving  text NOT NULL,
+  bedrag        numeric NOT NULL DEFAULT 0,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.vesting_instellingen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vesting_contracten   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vesting_wam          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vesting_wam_kosten   ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.vesting_instellingen, public.vesting_contracten, public.vesting_wam, public.vesting_wam_kosten FROM anon, authenticated;
+
+-- Beginstand = het Excel-register. Eenmalig; bestaande rijen blijven ongemoeid.
+INSERT INTO public.vesting_contracten
+  (nr, klant, ondertekend_op, start_dienst, einde_dienst, dienst, facturatiemodel, maandbedrag, duur_maanden,
+   handmatige_totaalwaarde, uitgesloten_kosten, status, betalingen_op_schema, appointment_door_marco, closed_door_marco,
+   laatste_betaalde_maand, reden_stop, notitie)
+VALUES
+  ('C-001','Metaalwerken Bartels','2026-05-04','2026-05-04','2026-06-01','Grafisch ontwerp','eenmalig',NULL,1,3744,0,'voltooid',true,true,false,NULL,NULL,
+   'Grafisch ontwerp; prijs staat enkel in aparte offerte en ontbreekt in dit contract — bedrag aanvullen.'),
+  ('C-002','Metaalwerken Bartels','2026-05-04','2026-07-01','2026-12-31','Social media management','maandcontract',979,6,NULL,0,'actief',true,true,false,NULL,NULL,
+   'Social media Groei: 6 maanden × €979 excl. btw.'),
+  ('C-003','TM Technics BV','2026-05-06','2026-05-06','2026-07-01','Webdesign','eenmalig',NULL,2,3200,0,'voltooid',true,true,false,NULL,NULL,
+   'Website Multipager; eenmalige projectvergoeding €3.200 excl. btw.'),
+  ('C-004','YES!talents','2026-05-08','2026-07-01','2026-12-31','Social media management','maandcontract',979,6,NULL,0,'actief',true,true,false,NULL,NULL,
+   'Social media Groei: initiële 6 maanden × €979 excl. btw.'),
+  ('C-005','Remels BV','2026-05-28','2026-07-01','2026-12-31','Social media management','maandcontract',979,6,NULL,0,'stopgezet',true,true,false,'2026-09-01',
+   'Vroegtijdig beëindigd; betaald t.e.m. oktober 2026',
+   '€979 per maand van juni t.e.m. december (7 maanden). Laatste betaalde maand: oktober 2026; daarom volledig €0 in de aandelenpot.'),
+  ('C-006','TM Technics BV','2026-06-02','2026-06-02','2026-12-01','Social media management','maandcontract',979,6,NULL,0,'actief',true,true,false,NULL,NULL,
+   'Social media Groei: 6 maanden × €979 excl. btw; handgeschreven ondertekening 2 juni 2026.')
+ON CONFLICT (nr) DO NOTHING;
+
+INSERT INTO public.vesting_wam (nr, klant, contractwaarde, netto_ontvangen, status, betalingen_op_schema, notitie)
+VALUES ('CW-1','Bistro',5000,5000,'voltooid',true,'Website voor Bistri')
+ON CONFLICT (nr) DO NOTHING;
+
+INSERT INTO public.vesting_wam_kosten (datum, omschrijving, bedrag)
+SELECT '2026-10-01','Afsluitkosten boekhouding',3000
+WHERE NOT EXISTS (SELECT 1 FROM public.vesting_wam_kosten WHERE omschrijving = 'Afsluitkosten boekhouding');
+
+-- ── 2. BV-transitie ───────────────────────────────────────────────────────
+-- Wat staat er per zaakvoerder nog persoonlijk te goed in de BV, wat heeft
+-- de BV voor iemand privé gedragen, en hoe wordt de gezamenlijke winst van de
+-- overgangsmaanden verdeeld. Plus een raming van sociale bijdragen en
+-- personenbelasting per eenmanszaak.
+CREATE TABLE IF NOT EXISTS public.bv_rechten (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  datum         date NOT NULL,
+  persoon       text NOT NULL CHECK (persoon IN ('bram','chiara','marco')),
+  type          text NOT NULL CHECK (type IN ('factuur_bv_ez','prive_voordeel','terugbetaling','correctie')),
+  omschrijving  text,
+  bedrag_excl   numeric NOT NULL,
+  richting      smallint NOT NULL DEFAULT 1 CHECK (richting IN (1,-1)),
+  bewijs        text,
+  notitie       text,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.bv_kosten (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  datum           date NOT NULL,
+  leverancier     text,
+  categorie       text,
+  omschrijving    text,
+  bedrag_excl     numeric NOT NULL,
+  btw_pct         numeric NOT NULL DEFAULT 21,
+  betaald_door    text NOT NULL DEFAULT 'bv' CHECK (betaald_door IN ('bv','bram_prive','chiara_prive','marco_prive')),
+  verrekenen_met  text CHECK (verrekenen_met IN ('bram','chiara','marco')),
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.bv_winstverdeling (
+  persoon                 text PRIMARY KEY CHECK (persoon IN ('bram','chiara','marco')),
+  ontvangen_op_rekening   numeric NOT NULL DEFAULT 0,
+  nog_te_ontvangen        numeric NOT NULL DEFAULT 0,
+  zakelijke_kosten_betaald numeric NOT NULL DEFAULT 0,
+  prive_gebruikt          numeric NOT NULL DEFAULT 0,
+  al_ontvangen            numeric NOT NULL DEFAULT 0,
+  updated_at              timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.ez_fiscaal (
+  persoon           text NOT NULL CHECK (persoon IN ('bram','chiara','marco')),
+  jaar              integer NOT NULL,
+  winst             numeric NOT NULL DEFAULT 0,      -- boekhoudkundige winst vóór sociale bijdragen
+  andere_inkomsten  numeric NOT NULL DEFAULT 0,
+  aftrekken         numeric NOT NULL DEFAULT 0,
+  statuut           text NOT NULL DEFAULT 'bijberoep' CHECK (statuut IN ('hoofdberoep','bijberoep','primostarter')),
+  kwartalen         integer NOT NULL DEFAULT 4,
+  updated_at        timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (persoon, jaar)
+);
+CREATE TABLE IF NOT EXISTS public.ez_aannames (
+  jaar                    integer PRIMARY KEY,
+  gemeentebelasting       numeric NOT NULL DEFAULT 0.07,
+  beheerskost_fonds       numeric NOT NULL DEFAULT 0.0305,
+  soc_laag                numeric NOT NULL DEFAULT 0.205,
+  soc_hoog                numeric NOT NULL DEFAULT 0.1416,
+  soc_grens1              numeric NOT NULL DEFAULT 75024.54,
+  soc_grens2              numeric NOT NULL DEFAULT 110562.42,
+  min_jaarbijdrage_hoofd  numeric NOT NULL DEFAULT 3561.68,
+  vrijstelling_bijberoep  numeric NOT NULL DEFAULT 1922.16,
+  belastingvrije_som      numeric NOT NULL DEFAULT 11180,
+  schijf1_grens           numeric NOT NULL DEFAULT 16720,
+  schijf1_tarief          numeric NOT NULL DEFAULT 0.25,
+  schijf2_grens           numeric NOT NULL DEFAULT 29510,
+  schijf2_tarief          numeric NOT NULL DEFAULT 0.40,
+  schijf3_grens           numeric NOT NULL DEFAULT 51070,
+  schijf3_tarief          numeric NOT NULL DEFAULT 0.45,
+  schijf4_tarief          numeric NOT NULL DEFAULT 0.50,
+  updated_at              timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.bv_rechten       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bv_kosten        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bv_winstverdeling ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ez_fiscaal       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ez_aannames      ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.bv_rechten, public.bv_kosten, public.bv_winstverdeling, public.ez_fiscaal, public.ez_aannames FROM anon, authenticated;
+
+-- Beginstand uit het Excel.
+INSERT INTO public.bv_rechten (datum, persoon, type, omschrijving, bedrag_excl, richting, bewijs, notitie)
+SELECT * FROM (VALUES
+  ('2026-10-01'::date,'bram','factuur_bv_ez','Factuur van de BV -> EZ, waar Bram nog recht op heeft',20000::numeric,1::smallint,'F-12039','Dit zijn winsten geboekt in de EZ, die gefactureerd zijn geweest voor in boekhouding van de BV'),
+  ('2026-10-01','chiara','factuur_bv_ez','Factuur van de BV -> EZ, waar Chiara nog recht op heeft',300,1,'F-92839','Dit zijn winsten geboekt in de EZ, die gefactureerd zijn geweest voor in boekhouding van de BV'),
+  ('2026-10-01','marco','factuur_bv_ez','Factuur van de BV -> EZ, waar Marco nog recht op heeft',4000,1,NULL,'Dit zijn winsten geboekt in de EZ, die gefactureerd zijn geweest voor in boekhouding van de BV')
+) v(datum, persoon, type, omschrijving, bedrag_excl, richting, bewijs, notitie)
+WHERE NOT EXISTS (SELECT 1 FROM public.bv_rechten);
+
+INSERT INTO public.bv_kosten (datum, leverancier, categorie, omschrijving, bedrag_excl, btw_pct, betaald_door, verrekenen_met)
+SELECT * FROM (VALUES
+  ('2026-10-01'::date,'Kurt Walmagh','Auto / huur','Maandelijkse huur lichte vracht',250::numeric,21::numeric,'bv','bram'),
+  ('2026-10-01','Kurt Walmagh','Auto / huur','Maandelijkse huur lichte vracht',250,21,'bv','chiara')
+) v(datum, leverancier, categorie, omschrijving, bedrag_excl, btw_pct, betaald_door, verrekenen_met)
+WHERE NOT EXISTS (SELECT 1 FROM public.bv_kosten);
+
+INSERT INTO public.bv_winstverdeling (persoon) VALUES ('bram'),('chiara'),('marco') ON CONFLICT DO NOTHING;
+
+INSERT INTO public.ez_fiscaal (persoon, jaar, winst, statuut, kwartalen) VALUES
+  ('bram',2026,35012,'bijberoep',4), ('chiara',2026,8277,'bijberoep',4), ('marco',2026,7824,'bijberoep',4)
+ON CONFLICT DO NOTHING;
+INSERT INTO public.ez_aannames (jaar) VALUES (2026) ON CONFLICT DO NOTHING;
+
+-- ── 3. Cold caller ROI — tijdsbelasting per gewonnen deal ─────────────────
+-- 1 = zeer laag … 5 = zeer hoog. Weegt de projectwaarde af tegen hoeveel werk
+-- de uitvoering vraagt (factor 1 / 0,9 / 0,75 / 0,6 / 0,4).
+ALTER TABLE public.sales_appointments ADD COLUMN IF NOT EXISTS tijdsbelasting smallint CHECK (tijdsbelasting BETWEEN 1 AND 5);

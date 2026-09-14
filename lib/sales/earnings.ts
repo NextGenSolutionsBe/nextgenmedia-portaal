@@ -108,3 +108,47 @@ export function withVat(cents: number, pct = VAT_PCT): number {
   if (cents <= 0) return 0
   return Math.round(cents * (1 + pct / 100))
 }
+
+// ── Tijdsbelasting en ROI (uit de Cold Caller ROI Tracker) ──────────────────
+
+/**
+ * Hoeveel werk vraagt een gewonnen deal in de uitvoering?
+ *
+ * Een contract van €3.000 dat vijf keer zoveel uren kost als een ander van
+ * €3.000 is niet evenveel waard. Daarom weegt de projectwaarde met een factor
+ * naar de tijdsbelasting: zeer laag telt volledig, zeer hoog nog voor 40%.
+ * De factoren komen letterlijk uit het rekenblad dat hiervoor gebruikt werd.
+ */
+export const TIJDSBELASTING: { waarde: 1 | 2 | 3 | 4 | 5; label: string; factor: number }[] = [
+  { waarde: 1, label: 'Zeer laag', factor: 1 },
+  { waarde: 2, label: 'Laag', factor: 0.9 },
+  { waarde: 3, label: 'Gemiddeld', factor: 0.75 },
+  { waarde: 4, label: 'Hoog', factor: 0.6 },
+  { waarde: 5, label: 'Zeer hoog', factor: 0.4 },
+]
+
+/** Factor bij een tijdsbelasting; onbekend of leeg telt volledig mee. */
+export function tijdsbelastingFactor(waarde: number | null | undefined): number {
+  return TIJDSBELASTING.find((t) => t.waarde === waarde)?.factor ?? 1
+}
+
+/** Projectwaarde na tijdsbelasting, in centen, naar beneden afgerond. */
+export function gewogenWaardeCents(dealValueCents: number, tijdsbelasting: number | null | undefined): number {
+  if (dealValueCents <= 0) return 0
+  return Math.floor(dealValueCents * tijdsbelastingFactor(tijdsbelasting))
+}
+
+/**
+ * Rendement op de setter: (gewogen omzet − kost) / kost.
+ * `null` zolang er geen kost is — dan valt er niets te delen.
+ */
+export function roi(gewogenCents: number, kostCents: number): number | null {
+  if (kostCents <= 0) return null
+  return (gewogenCents - kostCents) / kostCents
+}
+
+/** "167%" of "−23%". */
+export function roiText(r: number | null): string {
+  if (r === null) return '—'
+  return `${Math.round(r * 100).toLocaleString('nl-BE')}%`
+}

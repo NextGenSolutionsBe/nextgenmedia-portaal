@@ -22,6 +22,7 @@ type Appt = {
   outcome?: 'won' | 'lost' | null
   deal_value_cents?: number | null
   commission_pct?: number | null
+  tijdsbelasting?: number | null
 }
 type Pipeline = { id: string; key: string; name: string; defaultCalendarId?: string | null }
 

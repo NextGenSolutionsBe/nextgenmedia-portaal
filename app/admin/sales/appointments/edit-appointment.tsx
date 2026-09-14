@@ -13,6 +13,7 @@ type Appt = {
   outcome?: 'won' | 'lost' | null
   deal_value_cents?: number | null
   commission_pct?: number | null
+  tijdsbelasting?: number | null
 }
 type Pipeline = { id: string; key: string; name: string }
 
@@ -168,6 +169,7 @@ export function EditAppointment({ appt, pipelines, isAdmin, onClose, onSaved }: 
               outcome={appt.outcome ?? null}
               dealValueCents={appt.deal_value_cents}
               commissionPct={appt.commission_pct}
+              tijdsbelasting={appt.tijdsbelasting}
               onDone={onSaved}
             />
           )}

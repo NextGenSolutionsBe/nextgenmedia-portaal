@@ -1,92 +1,392 @@
-// Vestigingsprincipe (informatief). Marco verwerft aandelen op basis van
-// gerealiseerde "vestigingsomzet" via drie schijven. Wijzigt geen echte aandelen.
+/**
+ * Vestigingsprincipe — het contractmodel van de samenwerkingsovereenkomst.
+ *
+ * Marco verwerft aandelen (0% → maximaal 33%) op twee manieren:
+ *
+ *  1. De WAM-portefeuille: zijn eigen klanten van vóór de samenwerking. Elke
+ *     volledige €5.000 netto ontvangen levert 1% op, tot 5%. Kosten die bij
+ *     WAM gemaakt worden gaan er eerst af.
+ *  2. Contracten die hij binnenhaalt. De ONDERTEKENINGSDATUM bepaalt het
+ *     contractjaar en daarmee het tarief boven de eerste 10%: jaar 1 €10.000
+ *     per procent, jaar 2 €12.000, jaar 3 €15.000. Tot een totaal van 10%
+ *     geldt een goedkoper regulier tarief van €5.000 per procent.
+ *
+ * Wat meetelt hangt af van de status. Actief = voorlopig, voltooid =
+ * definitief, vroegtijdig stopgezet of niet-betaler = €0. Een contract telt
+ * naar rato van Marco's aandeel in het binnenhalen: 50% voor de afspraak, 50%
+ * voor het closen.
+ *
+ * Bram krijgt wat Marco niet verwerft; Chiara staat vast op 33%.
+ *
+ * PURE MODULE. Geen database, geen server-only imports: dezelfde berekening
+ * draait op de server en in het scherm, en is los te controleren tegen het
+ * Excel waaruit dit model komt (MARCO VESTIGINGSPRINCIPE.xlsx). Alle drempels
+ * komen uit `VestingInstellingen`; er staat hier geen enkel getal hard.
+ *
+ * Wijzigt geen echte aandelen. Dit is de berekening, niet de notaris.
+ */
 
-export type VestingConfig = {
-  start_date: string | null
-  schijf2_per: number   // € netto omzet per extra % in schijf 2 (5% → 10%)
-  schijf3_y1: number    // € per extra % in schijf 3, jaar 1 (10% → 30%)
-  schijf3_y2: number    // jaar 2
-  schijf3_y3: number    // jaar 3
-  inbound_pct: number   // toerekening inbound %
-  website_pct: number   // toerekening website %
+export type ContractStatus = 'actief' | 'voltooid' | 'stopgezet' | 'niet_betaler'
+export type Facturatiemodel = 'maandcontract' | 'eenmalig'
+export type Contractjaar = 'jaar1' | 'jaar2' | 'jaar3' | 'buiten'
+export type Erkenning = 'voorlopig' | 'definitief' | 'uitgesloten' | 'onvolledig'
+
+export const STATUS_LABEL: Record<ContractStatus, string> = {
+  actief: 'Actief', voltooid: 'Voltooid', stopgezet: 'Vroegtijdig stopgezet', niet_betaler: 'Niet-betaler',
+}
+export const ERKENNING_LABEL: Record<Erkenning, string> = {
+  voorlopig: 'Voorlopig', definitief: 'Definitief', uitgesloten: 'Uitgesloten', onvolledig: 'Onvolledig',
+}
+export const JAAR_LABEL: Record<Contractjaar, string> = {
+  jaar1: 'Jaar 1', jaar2: 'Jaar 2', jaar3: 'Jaar 3', buiten: 'Buiten periode',
+}
+export const DIENSTEN = [
+  'Social media management', 'Webdesign', 'Websiteverhuur', 'Grafisch ontwerp',
+  'E-mailmarketing', 'AI-automatisatie', 'AI-project NextGenSolutions', 'Andere',
+] as const
+
+export type VestingInstellingen = {
+  max_aandeel_marco: number
+  vast_aandeel_chiara: number
+  startaandeel_marco: number
+  startaandeel_bram: number
+  wam_bedrag_per_pct: number
+  wam_max_aandeel: number
+  regulier_tarief: number
+  einde_goedkope_schijf: number
+  jaar1_start: string; jaar1_eind: string; jaar1_tarief: number
+  jaar2_start: string; jaar2_eind: string; jaar2_tarief: number
+  jaar3_start: string; jaar3_eind: string; jaar3_tarief: number
 }
 
-export const DEFAULT_VESTING_CONFIG: VestingConfig = {
-  start_date: null, schijf2_per: 5000, schijf3_y1: 10000, schijf3_y2: 12000, schijf3_y3: 15000,
-  inbound_pct: 30, website_pct: 100,
+export const STANDAARD_INSTELLINGEN: VestingInstellingen = {
+  max_aandeel_marco: 0.33, vast_aandeel_chiara: 0.33, startaandeel_marco: 0, startaandeel_bram: 0.67,
+  wam_bedrag_per_pct: 5000, wam_max_aandeel: 0.05, regulier_tarief: 5000, einde_goedkope_schijf: 0.10,
+  jaar1_start: '2026-04-01', jaar1_eind: '2027-06-01', jaar1_tarief: 10000,
+  jaar2_start: '2027-06-01', jaar2_eind: '2028-06-01', jaar2_tarief: 12000,
+  jaar3_start: '2028-06-01', jaar3_eind: '2029-06-01', jaar3_tarief: 15000,
 }
 
-// Vaste contractparameters
-export const START_PCT = 5        // schijf 1: reeds verworven
-export const SCHIJF2_END = 10     // einde schijf 2
-export const MAX_PCT = 30         // maximum aandeel Marco
-// Aandeelhouders (informatieve weergave)
-export const BRAM_NOW = 65, BRAM_MIN = 40, CHIARA_FIXED = 30
-
-export function mergeVestingConfig(row: Partial<VestingConfig> | null | undefined): VestingConfig {
-  const d = { ...DEFAULT_VESTING_CONFIG }
-  if (!row) return d
-  for (const k of Object.keys(d) as (keyof VestingConfig)[]) {
-    const v = row[k]
-    if (v !== undefined && v !== null) (d as Record<string, unknown>)[k] = v
+/** Database-rijen komen als tekst of null binnen; hier worden het getallen. */
+export function leesInstellingen(rij: Record<string, unknown> | null | undefined): VestingInstellingen {
+  const uit = { ...STANDAARD_INSTELLINGEN }
+  if (!rij) return uit
+  for (const k of Object.keys(uit) as (keyof VestingInstellingen)[]) {
+    const v = rij[k]
+    if (v === undefined || v === null || v === '') continue
+    if (typeof uit[k] === 'number') (uit as Record<string, unknown>)[k] = Number(v)
+    else (uit as Record<string, unknown>)[k] = String(v).slice(0, 10)
   }
-  return d
+  return uit
 }
 
-/** Vestigingsjaar (1..3) o.b.v. de startdatum en vandaag. */
-export function vestingYear(startDate: string | null, now = new Date()): number {
-  if (!startDate) return 1
-  const s = new Date(startDate.slice(0, 10) + 'T00:00:00')
-  let years = now.getFullYear() - s.getFullYear()
-  const anniv = new Date(s); anniv.setFullYear(s.getFullYear() + years)
-  if (now < anniv) years -= 1
-  return Math.min(3, Math.max(1, years + 1))
+export type Contract = {
+  id: string
+  nr: string
+  klant: string
+  ondertekend_op: string
+  start_dienst: string | null
+  einde_dienst: string | null
+  dienst: string | null
+  facturatiemodel: Facturatiemodel
+  maandbedrag: number | null
+  duur_maanden: number | null
+  handmatige_totaalwaarde: number | null
+  uitgesloten_kosten: number
+  status: ContractStatus
+  betalingen_op_schema: boolean
+  appointment_door_marco: boolean
+  closed_door_marco: boolean
+  laatste_betaalde_maand: string | null
+  reden_stop: string | null
+  notitie: string | null
 }
 
-export function schijf3Rate(cfg: VestingConfig, year: number): number {
-  return year === 1 ? cfg.schijf3_y1 : year === 2 ? cfg.schijf3_y2 : cfg.schijf3_y3
+export type WamRij = {
+  id: string; nr: string; klant: string
+  contractwaarde: number; netto_ontvangen: number
+  status: ContractStatus; betalingen_op_schema: boolean; notitie: string | null
+}
+export type WamKost = { id: string; datum: string | null; omschrijving: string; bedrag: number }
+
+const n = (v: unknown): number => { const x = Number(v); return Number.isFinite(x) ? x : 0 }
+const dag = (s: string | null | undefined): Date | null => {
+  if (!s) return null
+  const d = new Date(String(s).slice(0, 10) + 'T00:00:00')
+  return Number.isFinite(d.getTime()) ? d : null
 }
 
-/** Cumulatieve vestigingsomzet nodig om een geheel percentage p te bereiken. */
-export function thresholdForPct(p: number, cfg: VestingConfig, s3rate: number): number {
-  if (p <= START_PCT) return 0
-  if (p <= SCHIJF2_END) return (p - START_PCT) * cfg.schijf2_per
-  return (SCHIJF2_END - START_PCT) * cfg.schijf2_per + (p - SCHIJF2_END) * s3rate
+// ── Contractjaar en tarief ───────────────────────────────────────────────────
+
+/** In welk contractjaar valt een ondertekening? Grenzen zijn inclusief, zoals in het Excel. */
+export function contractjaar(ondertekendOp: string, i: VestingInstellingen): Contractjaar {
+  const d = dag(ondertekendOp)
+  if (!d) return 'buiten'
+  const t = d.getTime()
+  const in_ = (a: string, b: string) => { const x = dag(a), y = dag(b); return !!x && !!y && t >= x.getTime() && t <= y.getTime() }
+  if (in_(i.jaar1_start, i.jaar1_eind)) return 'jaar1'
+  if (in_(i.jaar2_start, i.jaar2_eind)) return 'jaar2'
+  if (in_(i.jaar3_start, i.jaar3_eind)) return 'jaar3'
+  return 'buiten'
 }
 
-/** Continu percentage (5..30) op basis van totale vestigingsomzet. */
-export function pctFromRevenue(total: number, cfg: VestingConfig, s3rate: number): number {
-  if (total <= 0) return START_PCT
-  const schijf2Cap = (SCHIJF2_END - START_PCT) * cfg.schijf2_per
-  if (total <= schijf2Cap) return START_PCT + total / cfg.schijf2_per
-  const pct = SCHIJF2_END + (total - schijf2Cap) / s3rate
-  return Math.min(MAX_PCT, pct)
+/** € omzet per 1% boven de goedkope schijf, voor dit contractjaar. */
+export function jaartarief(jaar: Contractjaar, i: VestingInstellingen): number | null {
+  if (jaar === 'jaar1') return i.jaar1_tarief
+  if (jaar === 'jaar2') return i.jaar2_tarief
+  if (jaar === 'jaar3') return i.jaar3_tarief
+  return null
 }
 
-/** Volledige progressie-status. */
-export function vestingStatus(total: number, cfg: VestingConfig, now = new Date()) {
-  const year = vestingYear(cfg.start_date, now)
-  const s3rate = schijf3Rate(cfg, year)
-  const pct = pctFromRevenue(total, cfg, s3rate)
-  const currentInt = Math.min(MAX_PCT, Math.floor(pct + 1e-9))
-  const nextInt = Math.min(MAX_PCT, currentInt + 1)
-  const atMax = currentInt >= MAX_PCT
-  const thrNext = thresholdForPct(nextInt, cfg, s3rate)
-  const thrCur = thresholdForPct(currentInt, cfg, s3rate)
-  const neededForNext = atMax ? 0 : Math.max(0, thrNext - total)
-  const costStep = atMax ? 0 : thrNext - thrCur
-  return { year, s3rate, pct, currentInt, nextInt, atMax, neededForNext, costStep }
+// ── Eén contract ─────────────────────────────────────────────────────────────
+
+export type ContractBerekend = Contract & {
+  jaar: Contractjaar
+  tarief: number | null
+  /** Duur in maanden: ingevoerd, anders afgeleid uit start en einde. */
+  duur: number | null
+  /** Totale contractwaarde: maandbedrag × duur, of de handmatige waarde. */
+  totaal: number | null
+  /** Totaal min uitgesloten kosten, nooit negatief. */
+  netto: number | null
+  /** Marco's aandeel in het binnenhalen: 0 / 0,5 / 1. */
+  factor: number
+  /** Wat er in de aandelenpot telt: netto × factor, of €0. */
+  meetellend: number
+  erkenning: Erkenning
+  /** Som van `meetellend` van alle eerdere contracten (chronologisch). */
+  cumulatiefVoor: number
+  /** Deel dat nog tegen het reguliere tarief gaat. */
+  goedkopeSchijf: number
+  /** Deel dat tegen het jaartarief gaat. */
+  jaarschijf: number
+  /** Verworven aandeel uit dit contract, als fractie (0,0123 = 1,23%). */
+  ruweVesting: number
+  /** Bij stop: aantal betaalde maanden, uit de laatste betaalde maand. */
+  betaaldeMaanden: number | null
+  /** Bij stop: wat er werkelijk ontvangen is vóór de stop. */
+  ontvangenVoorStop: number | null
+  /** Bij stop of niet-betaler: wat er van de contractwaarde wegvalt. */
+  uitgevallen: number
 }
 
-// Toerekening (vast volgens overeenkomst):
-//   Outbound = outreach (50%) + closing (50%)  → 0 / 50 / 100%
-//   Inbound  = closing (25%)                    → 0 / 25%
-export const OUTREACH_PCT = 50
-export const CLOSING_OUTBOUND_PCT = 50
-export const CLOSING_INBOUND_PCT = 25
-
-export function attributionFor(type: string, opts: { outreach?: boolean; closing?: boolean }): number {
-  if (type === 'outbound') return (opts.outreach ? OUTREACH_PCT : 0) + (opts.closing ? CLOSING_OUTBOUND_PCT : 0)
-  // inbound
-  return opts.closing ? CLOSING_INBOUND_PCT : 0
+/** Maanden tussen twee data, afgerond op één cijfer — 30,4375 dagen per maand zoals in het Excel. */
+export function duurUitData(start: string | null, einde: string | null): number | null {
+  const s = dag(start), e = dag(einde)
+  if (!s || !e) return null
+  return Math.round(((e.getTime() - s.getTime()) / 86_400_000 / 30.4375) * 10) / 10
 }
+
+export function totaalwaarde(c: Pick<Contract, 'facturatiemodel' | 'maandbedrag' | 'duur_maanden' | 'handmatige_totaalwaarde' | 'start_dienst' | 'einde_dienst'>): number | null {
+  if (c.facturatiemodel === 'maandcontract') {
+    const duur = c.duur_maanden ?? duurUitData(c.start_dienst, c.einde_dienst)
+    if (c.maandbedrag === null || c.maandbedrag === undefined || duur === null) return null
+    return n(c.maandbedrag) * duur
+  }
+  return c.handmatige_totaalwaarde === null || c.handmatige_totaalwaarde === undefined ? null : n(c.handmatige_totaalwaarde)
+}
+
+export function toerekeningsfactor(c: Pick<Contract, 'appointment_door_marco' | 'closed_door_marco'>): number {
+  return Math.min(1, (c.appointment_door_marco ? 0.5 : 0) + (c.closed_door_marco ? 0.5 : 0))
+}
+
+/** Telt dit contract mee? Nee bij stop, niet-betaler, betalingen niet op schema of buiten de periode. */
+export function isUitgesloten(c: Pick<Contract, 'status' | 'betalingen_op_schema'>, jaar: Contractjaar): boolean {
+  return c.status === 'stopgezet' || c.status === 'niet_betaler' || !c.betalingen_op_schema || jaar === 'buiten'
+}
+
+export function erkenningVan(c: Pick<Contract, 'status' | 'betalingen_op_schema'>, jaar: Contractjaar): Erkenning {
+  if (isUitgesloten(c, jaar)) return 'uitgesloten'
+  if (c.status === 'voltooid') return 'definitief'
+  if (c.status === 'actief') return 'voorlopig'
+  return 'onvolledig'
+}
+
+/** Betaalde maanden bij een stop: van startmaand t.e.m. laatste betaalde maand. */
+export function betaaldeMaanden(start: string | null, laatsteBetaald: string | null): number | null {
+  const s = dag(start), l = dag(laatsteBetaald)
+  if (!s || !l) return null
+  return Math.max(0, (l.getFullYear() - s.getFullYear()) * 12 + l.getMonth() - s.getMonth() + 1)
+}
+
+// ── De WAM-portefeuille ──────────────────────────────────────────────────────
+
+export type WamBerekend = {
+  rijen: (WamRij & { meetellend: number; erkenning: Erkenning })[]
+  nettoOntvangen: number
+  kosten: number
+  /** Netto ontvangen min kosten, nooit negatief. */
+  nettoMeetellend: number
+  /** Aandeel op basis van alles wat ontvangen is (fractie). */
+  voorlopig: number
+  /** Aandeel op basis van enkel voltooide klanten (fractie). */
+  definitief: number
+  /** Hoeveel € netto tot de volgende hele procent; null bij het maximum. */
+  volgendeDrempel: number | null
+}
+
+export function berekenWam(rijen: WamRij[], kosten: WamKost[], i: VestingInstellingen): WamBerekend {
+  const uitgewerkt = rijen.map((r) => {
+    // Bij WAM telt wat er effectief ontvangen is; de status zegt enkel of
+    // dat voorlopig of definitief is. Stopgezet of niet-betaler: €0.
+    const uit = r.status === 'stopgezet' || r.status === 'niet_betaler' || !r.betalingen_op_schema
+    return { ...r, meetellend: uit ? 0 : n(r.netto_ontvangen), erkenning: erkenningVan(r, 'jaar1') }
+  })
+  const nettoOntvangen = rijen.reduce((s, r) => s + n(r.netto_ontvangen), 0)
+  const kostenTotaal = kosten.reduce((s, k) => s + n(k.bedrag), 0)
+  const nettoMeetellend = Math.max(0, nettoOntvangen - kostenTotaal)
+  const heel = (bedrag: number) => Math.min(i.wam_max_aandeel, Math.floor(bedrag / i.wam_bedrag_per_pct) / 100)
+  const voorlopig = heel(nettoMeetellend)
+  const voltooid = uitgewerkt.filter((r) => r.status === 'voltooid').reduce((s, r) => s + r.meetellend, 0)
+  const definitief = heel(Math.max(0, voltooid - kostenTotaal))
+  const volgendeDrempel = voorlopig >= i.wam_max_aandeel ? null : (Math.round(voorlopig * 100) + 1) * i.wam_bedrag_per_pct
+  return { rijen: uitgewerkt, nettoOntvangen, kosten: kostenTotaal, nettoMeetellend, voorlopig, definitief, volgendeDrempel }
+}
+
+// ── Alles samen ──────────────────────────────────────────────────────────────
+
+export type JaarOverzicht = {
+  jaar: Contractjaar
+  label: string
+  periode: { van: string; tot: string } | null
+  tarief: number | null
+  meetellend: number
+  ruweVesting: number
+  aantal: number
+}
+
+export type VestingOverzicht = {
+  instellingen: VestingInstellingen
+  contracten: ContractBerekend[]
+  wam: WamBerekend
+  /** WAM netto + alle meetellende contractwaarde. */
+  meetellendeWaarde: number
+  /** Marco's aandeel nu, als fractie, op hele procenten afgekapt. */
+  marcoVoorlopig: number
+  /** Marco's aandeel op basis van enkel definitieve contracten. */
+  marcoDefinitief: number
+  bram: number
+  chiara: number
+  /** Contractwaarde die wegviel door stop, niet-betaling of WAM-kosten. */
+  uitgevallenWaarde: number
+  perJaar: JaarOverzicht[]
+  /** Hoeveel € meetellende waarde nog tot de volgende hele procent. */
+  volgendeProcent: { nodig: number; tarief: number } | null
+}
+
+/**
+ * Het hele model doorrekenen.
+ *
+ * De contracten worden hier CHRONOLOGISCH op ondertekeningsdatum verwerkt,
+ * ongeacht de volgorde waarin ze zijn ingevoerd. Dat moet, want de goedkope
+ * schijf wordt in volgorde opgebruikt: het eerste contract krijgt het
+ * reguliere tarief, wat er daarna komt schuift op naar het jaartarief. In het
+ * Excel hing dat af van de rijvolgorde — hier niet meer.
+ */
+export function berekenVesting(
+  contractRijen: Contract[], wamRijen: WamRij[], wamKosten: WamKost[], i: VestingInstellingen,
+): VestingOverzicht {
+  const wam = berekenWam(wamRijen, wamKosten, i)
+
+  /**
+   * De goedkope schijf loopt tot een TOTAAL aandeel van 10%, WAM inbegrepen.
+   * Wat WAM al opleverde, gaat er dus af. (Het Excel verwees hier naar een
+   * lege cel en rekende daardoor altijd met de volle 10%; de bedoeling staat
+   * in de instellingen: "regulier tarief tot totaal 10%".)
+   */
+  const goedkoopBudget = Math.max(0, (i.einde_goedkope_schijf - wam.voorlopig) * 100 * i.regulier_tarief)
+
+  const gesorteerd = [...contractRijen].sort((a, b) =>
+    a.ondertekend_op.localeCompare(b.ondertekend_op) || a.nr.localeCompare(b.nr, 'nl', { numeric: true }))
+
+  let cumulatief = 0
+  const contracten: ContractBerekend[] = gesorteerd.map((c) => {
+    const jaar = contractjaar(c.ondertekend_op, i)
+    const tarief = jaartarief(jaar, i)
+    const duur = c.duur_maanden ?? duurUitData(c.start_dienst, c.einde_dienst)
+    const totaal = totaalwaarde(c)
+    const netto = totaal === null ? null : Math.max(0, totaal - n(c.uitgesloten_kosten))
+    const factor = toerekeningsfactor(c)
+    const erkenning = erkenningVan(c, jaar)
+    const meetellend = erkenning === 'uitgesloten' || netto === null ? 0 : netto * factor
+
+    const goedkopeSchijf = Math.min(meetellend, Math.max(0, goedkoopBudget - cumulatief))
+    const jaarschijf = Math.max(0, meetellend - goedkopeSchijf)
+    const ruweVesting = goedkopeSchijf / i.regulier_tarief / 100 + (tarief ? jaarschijf / tarief / 100 : 0)
+
+    const maanden = betaaldeMaanden(c.start_dienst, c.laatste_betaalde_maand)
+    const ontvangenVoorStop = maanden === null || totaal === null ? null
+      : c.facturatiemodel === 'maandcontract' && c.maandbedrag !== null ? Math.min(totaal, maanden * n(c.maandbedrag))
+      : null
+    // Uitgevallen = wat de klant nooit betaalde van een gestopt of niet-betaald
+    // contract. Zonder stopinfo: de hele contractwaarde.
+    const uitgevallen = (c.status === 'stopgezet' || c.status === 'niet_betaler') && totaal !== null
+      ? Math.max(0, totaal - (ontvangenVoorStop ?? 0)) : 0
+
+    const uit: ContractBerekend = {
+      ...c, jaar, tarief, duur, totaal, netto, factor, meetellend, erkenning,
+      cumulatiefVoor: cumulatief, goedkopeSchijf, jaarschijf, ruweVesting,
+      betaaldeMaanden: maanden, ontvangenVoorStop, uitgevallen,
+    }
+    cumulatief += meetellend
+    return uit
+  })
+
+  // Hele procenten, afgekapt: 2,45% is 2%. Zo staat het in de overeenkomst.
+  const afkap = (fractie: number) => Math.floor(fractie * 100 + 1e-9) / 100
+  const somVesting = contracten.reduce((s, c) => s + c.ruweVesting, 0)
+  const somDefinitief = contracten.filter((c) => c.erkenning === 'definitief').reduce((s, c) => s + c.ruweVesting, 0)
+  const marcoVoorlopig = Math.min(i.max_aandeel_marco, wam.voorlopig + afkap(somVesting))
+  const marcoDefinitief = Math.min(i.max_aandeel_marco, wam.definitief + afkap(somDefinitief))
+
+  const meetellendeWaarde = wam.nettoMeetellend + contracten.reduce((s, c) => s + c.meetellend, 0)
+  const uitgevallenWaarde = contracten.reduce((s, c) => s + c.uitgevallen, 0)
+    + wam.kosten
+    + wamRijen.reduce((s, r) => s + Math.max(0, n(r.contractwaarde) - n(r.netto_ontvangen)), 0)
+
+  const perJaar: JaarOverzicht[] = (['jaar1', 'jaar2', 'jaar3'] as const).map((jaar) => {
+    const van = contracten.filter((c) => c.jaar === jaar)
+    const periode = jaar === 'jaar1' ? { van: i.jaar1_start, tot: i.jaar1_eind }
+      : jaar === 'jaar2' ? { van: i.jaar2_start, tot: i.jaar2_eind }
+      : { van: i.jaar3_start, tot: i.jaar3_eind }
+    return {
+      jaar, label: JAAR_LABEL[jaar], periode, tarief: jaartarief(jaar, i),
+      meetellend: van.reduce((s, c) => s + c.meetellend, 0),
+      ruweVesting: van.reduce((s, c) => s + c.ruweVesting, 0),
+      aantal: van.length,
+    }
+  })
+
+  // Hoeveel omzet nog tot de volgende hele procent, tegen het tarief dat NU
+  // geldt: goedkoop zolang het budget niet op is, anders het tarief van het
+  // huidige contractjaar.
+  let volgendeProcent: VestingOverzicht['volgendeProcent'] = null
+  if (marcoVoorlopig < i.max_aandeel_marco) {
+    const resterendGoedkoop = Math.max(0, goedkoopBudget - cumulatief)
+    const huidigJaar = contractjaar(new Date().toISOString().slice(0, 10), i)
+    const tariefNu = resterendGoedkoop > 0 ? i.regulier_tarief : (jaartarief(huidigJaar, i) ?? i.jaar3_tarief)
+    const fractieOver = somVesting - Math.floor(somVesting * 100 + 1e-9) / 100   // wat al richting de volgende % staat
+    const nodig = Math.max(0, (0.01 - fractieOver) * 100 * tariefNu)
+    volgendeProcent = { nodig, tarief: tariefNu }
+  }
+
+  const bram = i.startaandeel_bram - (marcoVoorlopig - i.startaandeel_marco)
+
+  return {
+    instellingen: i, contracten, wam, meetellendeWaarde,
+    marcoVoorlopig, marcoDefinitief, bram, chiara: i.vast_aandeel_chiara,
+    uitgevallenWaarde, perJaar, volgendeProcent,
+  }
+}
+
+/** "C-007" — het eerstvolgende nummer in een reeks. */
+export function volgendNr(bestaande: string[], voorvoegsel: 'C' | 'CW'): string {
+  const hoogste = bestaande
+    .map((s) => { const m = new RegExp(`^${voorvoegsel}-(\\d+)$`, 'i').exec(s.trim()); return m ? Number(m[1]) : 0 })
+    .reduce((a, b) => Math.max(a, b), 0)
+  const volgend = hoogste + 1
+  return voorvoegsel === 'C' ? `C-${String(volgend).padStart(3, '0')}` : `CW-${volgend}`
+}
+
+export const pct = (fractie: number, cijfers = 0): string =>
+  `${(fractie * 100).toLocaleString('nl-BE', { minimumFractionDigits: cijfers, maximumFractionDigits: cijfers })}%`
