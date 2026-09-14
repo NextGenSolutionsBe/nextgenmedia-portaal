@@ -414,7 +414,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                       const freq = FREQUENTIES.find((f) => f.key === r.frequentie)
                       return (
                         <WamRijen key={r.id}>
-                          <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setOpenWam(open ? null : r.id)}>
+                          <tr className={`cursor-pointer ${open ? 'bg-[#fff848]/20' : 'hover:bg-gray-50'}`} onClick={() => setOpenWam(open ? null : r.id)}>
                             <td className="table-td text-gray-400">{open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</td>
                             <td className="table-td">
                               <div className="font-medium">{r.klant}</div>
@@ -435,13 +435,6 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                               </div>
                             </td>
                           </tr>
-                          {open && (
-                            <tr className="bg-gray-50/60">
-                              <td colSpan={8} className="px-4 py-3">
-                                <Termijnen rij={r} onExtra={() => setExtraTermijn(r)} />
-                              </td>
-                            </tr>
-                          )}
                         </WamRijen>
                       )
                     })}
@@ -468,6 +461,15 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
               )}
             </div>
           </div>
+
+          {openWam && (() => {
+            const r = v.wam.rijen.find((x) => x.id === openWam)
+            return r ? (
+              <div className="card-base">
+                <Termijnen rij={r} onExtra={() => setExtraTermijn(r)} />
+              </div>
+            ) : null
+          })()}
         </div>
       )}
 
@@ -804,7 +806,7 @@ function Termijnen({ rij, onExtra }: { rij: WamRijBerekend; onExtra: () => void 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="text-xs font-semibold text-gray-700">Termijnen — {rij.klant}</div>
+        <div className="font-semibold text-gray-900">Termijnen — {rij.klant}</div>
         <div className="flex items-center gap-3 text-[11px] text-gray-500">
           <span>Prognose <b className="text-gray-800">{formatEuro(rij.prognose)}</b></span>
           <span>Gefactureerd <b className="text-blue-800">{formatEuro(rij.gefactureerd)}</b></span>
@@ -817,7 +819,7 @@ function Termijnen({ rij, onExtra }: { rij: WamRijBerekend; onExtra: () => void 
         <div className="text-xs text-gray-500 py-2">Nog geen termijnen. Vul het facturatieschema in bij <button onClick={onExtra} className="underline">een losse termijn</button> of via <b>Wijzigen</b>.</div>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-          <table className="w-full text-xs min-w-[760px]">
+          <table className="w-full text-sm">
             <thead><tr className="border-b border-gray-100">
               <th className="table-th">#</th><th className="table-th whitespace-nowrap">Periode</th><th className="table-th whitespace-nowrap">Factuurdatum</th><th className="table-th text-right whitespace-nowrap">Excl. btw</th><th className="table-th text-right whitespace-nowrap">Incl. btw</th><th className="table-th">Status</th><th className="table-th">Factuur</th><th className="table-th text-right">Actie</th>
             </tr></thead>
