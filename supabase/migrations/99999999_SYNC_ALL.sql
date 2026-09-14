@@ -4086,3 +4086,19 @@ REVOKE ALL ON public.gebruikers_voorkeuren FROM anon, authenticated;
 -- Medewerkers: archiveren i.p.v. definitief verwijderen + uitnodiging op vraag
 ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS verwijderd_at timestamptz;
 ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS uitnodiging_verzonden_at timestamptz;
+
+-- ── ClickUp-taakregister: enkel taken die de app zelf kent mogen bij reconciliatie weg ──
+CREATE TABLE IF NOT EXISTS public.clickup_taak_register (
+  task_id text PRIMARY KEY,
+  client_id uuid,
+  item_id uuid,
+  bron text NOT NULL DEFAULT 'content',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS clickup_taak_register_client ON public.clickup_taak_register (client_id);
+ALTER TABLE public.clickup_taak_register ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.clickup_taak_register FROM anon, authenticated;
+INSERT INTO public.clickup_taak_register (task_id, client_id, item_id, bron)
+SELECT clickup_task_id, client_id, id, 'content' FROM public.social_content_items
+WHERE clickup_task_id IS NOT NULL
+ON CONFLICT (task_id) DO NOTHING;

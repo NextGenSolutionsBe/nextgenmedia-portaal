@@ -21,6 +21,7 @@ import {
   syncHash,
   isTaskGone,
   isNotFound,
+  lijstToegang,
   type CuTask,
 } from '@/lib/clickup'
 
@@ -64,10 +65,17 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       syncedCount = count ?? 0
     } catch { /* kolom mogelijk nog niet gemigreerd */ }
 
+    // Bestaat de gekoppelde lijst nog? 'weg' = bij de volgende sync wordt de
+    // klantstructuur opnieuw opgezocht (bestaande folder/lijst hergebruikt).
+    let lijst: 'ok' | 'weg' | 'fout' | null = null
+    if (client.clickup_list_id && clickupConfigured()) lijst = await lijstToegang(client.clickup_list_id)
+
     return NextResponse.json({
       configured: clickupConfigured(),
       enabled: Boolean(client.clickup_sync_enabled),
       linked: Boolean(client.clickup_list_id),
+      listId: client.clickup_list_id ?? null,
+      lijst,
       syncedCount,
     })
   } catch (err) {
@@ -134,6 +142,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // Resolve (of maak) de klant-lijst in ClickUp; sla id's op zodat we niet
     // telkens opnieuw zoeken.
     let listId = client.clickup_list_id as string | null
+    let lijstHersteld = false
+    if (listId) {
+      // Bestaat de opgeslagen lijst nog? Een lijst kan in ClickUp verwijderd of
+      // naar een andere werkruimte verhuisd zijn; dan liepen álle items vast op
+      // een onbereikbare lijst. Nu zoeken we de klantstructuur opnieuw op
+      // (bestaande folder + CONTENTKALENDER-lijst worden hergebruikt).
+      const toegang = await lijstToegang(listId)
+      if (toegang === 'fout') {
+        return NextResponse.json({ error: 'ClickUp is momenteel niet bereikbaar. Probeer het straks opnieuw; er is niets gewijzigd.' }, { status: 502 })
+      }
+      if (toegang === 'weg') { listId = null; lijstHersteld = true }
+    }
     if (!listId) {
       const ref = await findOrCreateClientList(client.company_name)
       listId = ref.listId
@@ -148,6 +168,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     let existingTasks: CuTask[] = []
     try { existingTasks = await fetchListTasks(listId) } catch { existingTasks = [] }
 
+    // Register van taken die de app zelf aanmaakte of adopteerde. Enkel díe
+    // mogen bij de reconciliatie verwijderd worden; taken die het team
+    // rechtstreeks in ClickUp zette (of via de kalender-skill) blijven staan.
+    const register = new Set<string>()
+    try {
+      const { data: reg } = await admin.from('clickup_taak_register').select('task_id').eq('client_id', id)
+      for (const r of (reg ?? []) as { task_id: string }[]) register.add(r.task_id)
+    } catch { /* tabel ontbreekt → niets verwijderen (veilige kant) */ }
+    const registreer = async (taskId: string, itemId: string) => {
+      register.add(taskId)
+      try { await admin.from('clickup_taak_register').upsert({ task_id: taskId, client_id: id, item_id: itemId, bron: 'content' }, { onConflict: 'task_id' }) } catch { /* best-effort */ }
+    }
+
     const { data: itemsRaw } = await admin
       .from('social_content_items')
       .select('id, title, content_type, platform, platforms, caption, status, planned_date, clickup_task_id, clickup_sync_hash')
@@ -155,7 +188,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       .order('planned_date', { ascending: true })
     const items = (itemsRaw ?? []) as ContentItem[]
 
-    const summary = { total: items.length, created: 0, updated: 0, skipped: 0, failed: 0, fieldLimited: 0, deleted: 0 }
+    const summary = { total: items.length, created: 0, updated: 0, skipped: 0, failed: 0, fieldLimited: 0, deleted: 0, lijstHersteld }
     const errors: Array<{ id: string; title: string; error: string }> = []
 
     // Tijdsbudget per call zodat de serverless-functie nooit time-out: items die
@@ -204,6 +237,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         // Niets gewijzigd én reeds bekend → skip (geen onnodige API-calls)
         if (taskId && item.clickup_task_id === taskId && item.clickup_sync_hash === hash) {
           claimed.add(taskId)
+          if (!register.has(taskId)) await registreer(taskId, item.id)
           summary.skipped++
           continue
         }
@@ -248,6 +282,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         if (created) summary.created++
         else summary.updated++
         claimed.add(taskId)
+        await registreer(taskId, item.id)
 
         // Per item committen → sync is hervatbaar als hij halverwege stopt
         await admin
@@ -271,15 +306,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // verwijderen. Taken met dezelfde naam+datum zijn eerder al geadopteerd,
     // dus enkel echte wezen sneuvelen. Loopt cleanup uit het tijdsbudget, dan
     // done=false → de client roept opnieuw en we maken het af (convergeert).
+    // Enkel taken die de app zelf kent (register) én waar geen item meer bij hoort.
+    // Onbekende taken — handmatig aangemaakt in ClickUp — worden nooit geraakt.
     if (done && items.length > 0) {
-      const orphans = existingTasks.filter((t) => !claimed.has(t.id))
+      const orphans = existingTasks.filter((t) => !claimed.has(t.id) && register.has(t.id))
       const CLEANUP_BUDGET_MS = 14000
       for (const t of orphans) {
         if (Date.now() - startedAt > CLEANUP_BUDGET_MS) { done = false; break }
         try {
           const ok = await deleteTask(t.id)
-          if (ok) summary.deleted++
-          else summary.failed++
+          if (ok) {
+            summary.deleted++
+            try { await admin.from('clickup_taak_register').delete().eq('task_id', t.id) } catch { /* best-effort */ }
+          } else summary.failed++
         } catch { summary.failed++ }
       }
     }
@@ -289,7 +328,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       action: 'client.clickup_sync.run',
       entityType: 'client',
       entityId: id,
-      summary: `ClickUp-sync ${client.company_name}: ${summary.created} nieuw, ${summary.updated} bijgewerkt, ${summary.skipped} ongewijzigd, ${summary.deleted} verwijderd, ${summary.failed} mislukt`,
+      summary: `ClickUp-sync ${client.company_name}: ${summary.created} nieuw, ${summary.updated} bijgewerkt, ${summary.skipped} ongewijzigd, ${summary.deleted} verwijderd, ${summary.failed} mislukt${lijstHersteld ? ` (lijst opnieuw gekoppeld: ${listId})` : ''}`,
       actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'admin',
       metadata: { ...summary }, ip: meta.ip, userAgent: meta.userAgent,
     })

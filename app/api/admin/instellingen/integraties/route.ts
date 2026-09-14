@@ -4,7 +4,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { eisBeheer, eisHoofdbeheerder, maskeer } from '@/lib/instellingen/api'
 import type { Integratie } from '@/lib/instellingen/integraties'
-import { clickupConfigured, clickupTest, facturatieLijst } from '@/lib/clickup'
+import { clickupConfigured, clickupTest, facturatieLijst, facturatieAssigneeId, findMemberId, INVOICE_ASSIGNEE_NAME } from '@/lib/clickup'
 import { sleutelRechten } from '@/lib/email'
 import { metricoolConfigured, listBrands } from '@/lib/metricool'
 import { googleConfigured } from '@/lib/sales/google-calendar'
@@ -108,7 +108,11 @@ export async function POST(req: NextRequest) {
         resultaat = { ok: !r.fout, bericht: r.fout ? `Synchronisatie mislukt: ${String(r.fout).slice(0, 200)}` : `Synchronisatie klaar: ${r.aangemaakt ?? 0} aangemaakt, ${r.bijgewerkt ?? 0} bijgewerkt, ${r.verwijderd ?? 0} verwijderd.` }
       } else if (key === 'clickup') {
         const r = await clickupTest()
-        resultaat = { ok: true, bericht: `Verbonden als ${r.gebruiker} (werkruimte ${r.workspace}).` }
+        const [assignee, bramId, lijst] = await Promise.all([facturatieAssigneeId(), findMemberId(INVOICE_ASSIGNEE_NAME), facturatieLijst()])
+        resultaat = {
+          ok: true,
+          bericht: `Verbonden als ${r.gebruiker} (werkruimte ${r.workspace}). Facturatielijst: ${lijst.ok ? lijst.pad : lijst.reden}. Verantwoordelijke facturatietaken: ${assignee ?? 'geen'}; ${INVOICE_ASSIGNEE_NAME} gevonden als lid: ${bramId ?? 'niet gevonden'}.`,
+        }
       } else if (key === 'resend') {
         const r = await sleutelRechten(process.env.RESEND_API_KEY)
         resultaat = { ok: r === 'volledig' || r === 'beperkt', bericht: r === 'volledig' ? 'Sleutel werkt (volledige rechten).' : r === 'beperkt' ? 'Sleutel werkt, maar met beperkte rechten (ingeplande mails intrekken lukt niet).' : r === 'ontbreekt' ? 'Geen sleutel ingesteld.' : 'Resend gaf geen bruikbaar antwoord.' }

@@ -361,7 +361,27 @@ export type TaskResult = { id: string; fieldsBlocked: number }
 /** Taak bestaat niet meer in ClickUp (verwijderd) → opnieuw aanmaken. */
 export function isTaskGone(err: unknown): boolean {
   const m = err instanceof Error ? err.message : String(err)
-  return /ITEM_013|task not found|not found, deleted/i.test(m)
+  // 'Team not authorized' (OAUTH_027): de taak zit in een werkruimte waar de
+  // sleutel niet (meer) bij kan — voor de sync is dat hetzelfde als weg.
+  return /ITEM_013|task not found|not found, deleted|Team not authorized|OAUTH_027/i.test(m)
+}
+
+export type LijstToegang = 'ok' | 'weg' | 'fout'
+
+/**
+ * Is een opgeslagen lijst nog bereikbaar? 'weg' = verwijderd of in een
+ * werkruimte waar de sleutel niet bij kan (dan moet de klantstructuur opnieuw
+ * opgezocht worden); 'fout' = ClickUp tijdelijk onbereikbaar (niets veranderen).
+ */
+export async function lijstToegang(listId: string): Promise<LijstToegang> {
+  try {
+    await clickupJson(`/list/${listId}`)
+    return 'ok'
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e)
+    if (/→\s*404\b|Team not authorized|OAUTH_027|→\s*401\b/.test(m)) return 'weg'
+    return 'fout'
+  }
 }
 
 /** Generieke 404 (bv. lijst verwijderd) → structuur opnieuw opbouwen. */
@@ -423,7 +443,7 @@ export async function deleteList(listId: string): Promise<boolean> {
 
 // ── Facturen → ClickUp (best-effort, breekt nooit de facturatie-flow) ─────────
 // Bij het aanmaken van een factuur wordt een taak "Factuur versturen — [Klant]"
-// gemaakt en toegewezen aan Bram Rekken; bij status 'verstuurd' → Completed.
+// gemaakt en toegewezen aan Bram Reinquin; bij status 'verstuurd' → Completed.
 
 const INVOICE_LIST_NAME = 'Facturen'
 const INVOICE_ASSIGNEE = 'Bram Reinquin'
@@ -432,20 +452,21 @@ type CuMemberUser = { id: number; username?: string | null; email?: string | nul
 
 /** Zoekt het ClickUp-gebruikers-id op naam (of e-mail), workspace-breed. */
 export async function findMemberId(name: string): Promise<number | null> {
-  try {
-    const { teams } = await clickupJson<{ teams: Array<{ members: Array<{ user: CuMemberUser }> }> }>(`/team`)
-    const want = name.trim().toLowerCase()
-    const first = want.split(/\s+/)[0]
-    for (const t of teams ?? []) {
-      for (const m of t.members ?? []) {
-        const u = m.user
-        const uname = (u.username ?? '').trim().toLowerCase()
-        const email = (u.email ?? '').trim().toLowerCase()
-        if (uname === want || (uname && want && (uname.includes(want) || want.includes(uname))) || (first && email.startsWith(first))) return u.id
-      }
-    }
-  } catch { /* best-effort */ }
-  return null
+  const want = name.trim().toLowerCase()
+  if (!want) return null
+  const leden = await listClickupMembers().catch(() => [] as ClickupMember[])
+  const norm = (v: string | null | undefined) => (v ?? '').trim().toLowerCase()
+  // 1. Exacte naam of exact e-mailadres.
+  const exact = leden.find((m) => norm(m.username) === want || norm(m.email) === want)
+  if (exact) return exact.id
+  // 2. Voornaam + achternaam als losse woorden in de gebruikersnaam (bv. "Bram R." vs "Bram Reinquin").
+  const woorden = want.split(/\s+/).filter(Boolean)
+  const perWoord = leden.filter((m) => { const u = norm(m.username); return woorden.every((w) => u.includes(w)) })
+  if (perWoord.length === 1) return perWoord[0].id
+  // 3. Deeltreffer op naam of e-mail — enkel wanneer er precies één kandidaat is,
+  //    anders liever geen verantwoordelijke dan de verkeerde.
+  const los = leden.filter((m) => { const u = norm(m.username), e = norm(m.email); return (u && (u.includes(want) || want.includes(u))) || (e && e.startsWith(woorden[0] ?? want)) })
+  return los.length === 1 ? los[0].id : null
 }
 
 /** Vindt (of maakt) de folderloze lijst "Facturen" in de NextGenMedia-space. */
@@ -483,16 +504,23 @@ let facturatieLijstCache: { id: string; tot: number; resultaat: FacturatieLijst 
  * sleutel 'facturatie'). Leeg = de omgevingsvariabele geldt. De waarde komt
  * daar enkel terecht ná een geslaagde structuurcontrole én bevestiging.
  */
-async function facturatieOverschrijving(): Promise<{ lijstId: string; assigneeId: string }> {
+async function facturatieOverschrijving(): Promise<{ lijstId: string; assigneeId: string; syncAan: boolean }> {
   try {
     const admin = createAdminSupabaseClient()
     const { data } = await admin.from('app_settings').select('value').eq('key', 'facturatie').maybeSingle()
-    const v = (data?.value ?? {}) as { clickup_lijst_id?: unknown; clickup_assignee_id?: unknown }
+    const v = (data?.value ?? {}) as { clickup_lijst_id?: unknown; clickup_assignee_id?: unknown; clickup_sync_aan?: unknown }
     return {
       lijstId: typeof v.clickup_lijst_id === 'string' ? v.clickup_lijst_id.trim() : '',
       assigneeId: typeof v.clickup_assignee_id === 'string' ? v.clickup_assignee_id.trim() : '',
+      // Standaard aan; enkel een uitdrukkelijke 'false' zet de facturatietaken uit.
+      syncAan: v.clickup_sync_aan !== false,
     }
-  } catch { return { lijstId: '', assigneeId: '' } }
+  } catch { return { lijstId: '', assigneeId: '', syncAan: true } }
+}
+
+/** Staat "Facturatietaken naar ClickUp sturen" aan (Instellingen → Facturatie)? */
+export async function facturatieSyncAan(): Promise<boolean> {
+  return (await facturatieOverschrijving()).syncAan
 }
 
 /** Is de vaste facturatielijst ingesteld (env of instellingen)? Zegt niets over geldigheid. */
@@ -542,6 +570,7 @@ export async function controleerFacturatieLijst(id: string): Promise<LijstContro
  */
 export async function facturatieLijst(): Promise<FacturatieLijst> {
   const over = await facturatieOverschrijving()
+  if (!over.syncAan) return { ok: false, ingesteld: true, reden: 'De ClickUp-synchronisatie voor facturatie staat uit (Instellingen → Facturatie-instellingen).' }
   const id = over.lijstId || (process.env[INVOICING_LIST_ENV] ?? '').trim()
   if (!id) return { ok: false, ingesteld: false, reden: `${INVOICING_LIST_ENV} is niet ingesteld. Vul het lijst-id van "${VERWACHTE_FACTURATIELOCATIE.folder} → ${VERWACHTE_FACTURATIELOCATIE.list}" in (omgeving of Instellingen → Facturatie).` }
   if (!/^\d+$/.test(id)) return { ok: false, ingesteld: true, reden: `${INVOICING_LIST_ENV} is geen geldig ClickUp lijst-id (enkel cijfers).` }
@@ -641,6 +670,7 @@ export type InvoiceTaskResult = { taskId: string | null; assigneeFound: boolean 
  *  assignee (Bram Reinquin) gevonden is, zodat de app kan waarschuwen. */
 export async function createInvoiceTask(input: InvoiceTaskInput): Promise<InvoiceTaskResult> {
   if (!clickupConfigured()) return { taskId: null, assigneeFound: true } // geen ClickUp = geen waarschuwing
+  if (!(await facturatieSyncAan())) return { taskId: null, assigneeFound: true } // bewust uitgezet in Instellingen
   try {
     // Is de vaste facturatielijst ingesteld, dan gaan ÁLLE factuurtaken daarheen
     // (Bram Reinquin (Growth) → Facturen & Boekhouding → List). Klopt die

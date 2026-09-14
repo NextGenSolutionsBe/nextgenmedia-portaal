@@ -140,7 +140,7 @@ export async function DELETE(req: NextRequest) {
           .filter((v): v is string => !!v)
         for (const t of taskIds) {
           const ok = await deleteTask(t)
-          if (ok) clickupDeleted++
+          if (ok) { clickupDeleted++; try { await admin.from('clickup_taak_register').delete().eq('task_id', t) } catch { /* best-effort */ } }
           else clickupFailed++
         }
       } catch { /* kolom mogelijk niet gemigreerd — negeren, app-delete gaat door */ }
