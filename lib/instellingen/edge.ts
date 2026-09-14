@@ -8,7 +8,7 @@ import { samenvoegen, standaardInstellingen, type AlleInstellingen, type Instell
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = { from: (t: string) => any }
 
-const CACHE_MS = 20_000
+const CACHE_MS = 5_000
 let cache: { tot: number; waarde: AlleInstellingen } | null = null
 
 /** Cache leegmaken (na een wijziging vanuit dezelfde instantie). */

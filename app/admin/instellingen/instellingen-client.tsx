@@ -107,7 +107,7 @@ export function InstellingenClient({ tab, verborgen, isAdmin }: { tab: string; v
   const verborgenLabel = verborgen ? data.modules.find((m) => m.key === verborgen)?.label ?? verborgen : null
 
   return (
-    <div className="grid md:grid-cols-[230px_1fr] gap-5 items-start">
+    <div className="grid md:grid-cols-[250px_1fr] gap-5 items-start">
       <nav className="card-base p-2 md:sticky md:top-6">
         <div className="flex md:flex-col gap-0.5 overflow-x-auto">
           {TABS.map((t) => {
@@ -115,7 +115,7 @@ export function InstellingenClient({ tab, verborgen, isAdmin }: { tab: string; v
             const aan = t.key === actief
             return (
               <button key={t.key} type="button" onClick={() => ga(t.key)}
-                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm whitespace-nowrap text-left transition-colors ${aan ? 'bg-black text-white' : 'text-gray-700 hover:bg-gray-100'}`}>
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm whitespace-nowrap md:whitespace-normal text-left transition-colors ${aan ? 'bg-black text-white' : 'text-gray-700 hover:bg-gray-100'}`}>
                 <Icon className="h-4 w-4 shrink-0" />{t.label}
               </button>
             )
