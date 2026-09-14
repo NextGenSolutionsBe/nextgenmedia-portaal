@@ -94,8 +94,13 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
 
   // Oude registraties die niet in het register terugkomen. Ze tellen niet mee;
   // de klantnaam is de enige brug, dus dit is een hint en geen zekerheid.
-  const klantenInRegister = new Set(contracten.map((c) => c.klant.trim().toLowerCase()))
-  const nietOvergenomen = oudeRegistraties.filter((r) => !klantenInRegister.has(String(r.client_name ?? '').trim().toLowerCase()))
+  // "TM Technics BV" en "TM Technics" zijn hetzelfde bedrijf: rechtsvorm en
+  // leestekens tellen niet mee bij het vergelijken.
+  const kern = (naam: string) => naam.toLowerCase()
+    .replace(/\b(bvba|bv|nv|vof|comm\.?v|cv|srl|sprl|sa|gcv|vzw)\b/g, '')
+    .replace(/[^a-z0-9]+/g, ' ').trim()
+  const klantenInRegister = new Set(contracten.map((c) => kern(c.klant)))
+  const nietOvergenomen = oudeRegistraties.filter((r) => !klantenInRegister.has(kern(String(r.client_name ?? ''))))
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -249,35 +254,47 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
               <div className="empty-state text-sm">Nog geen contracten.</div>
             ) : (
               <div className="table-wrap">
-                <table className="w-full text-sm min-w-[1100px]">
+                <table className="w-full text-sm">
                   <thead><tr className="border-b border-gray-100">
-                    <th className="table-th">Nr.</th><th className="table-th">Klant</th><th className="table-th">Ondertekend</th><th className="table-th">Jaar</th>
-                    <th className="table-th">Dienst</th><th className="table-th text-right">Totaal</th><th className="table-th text-right">Netto</th>
-                    <th className="table-th text-right">Factor</th><th className="table-th text-right">Meetellend</th>
-                    <th className="table-th text-right">Goedkoop / jaar</th><th className="table-th text-right">Vesting</th>
-                    <th className="table-th">Status</th><th className="table-th"></th>
+                    <th className="table-th">Contract</th>
+                    <th className="table-th">Ondertekend</th>
+                    <th className="table-th">Dienst</th>
+                    <th className="table-th text-right">Netto</th>
+                    <th className="table-th text-right">Factor</th>
+                    <th className="table-th text-right">Meetellend</th>
+                    <th className="table-th text-right">Vesting</th>
+                    <th className="table-th">Status</th>
+                    <th className="table-th w-16"></th>
                   </tr></thead>
                   <tbody className="divide-y divide-gray-50">
                     {v.contracten.map((c) => (
                       <tr key={c.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setContractDialoog(c)}>
-                        <td className="table-td font-mono text-xs">{c.nr}</td>
                         <td className="table-td">
                           <div className="font-medium">{c.klant}</div>
-                          {c.notitie && <div className="text-[11px] text-gray-500 truncate max-w-[16rem]" title={c.notitie}>{c.notitie}</div>}
+                          <div className="text-[11px] text-gray-500 font-mono">{c.nr}</div>
                         </td>
-                        <td className="table-td text-gray-600">{formatDate(c.ondertekend_op)}</td>
                         <td className="table-td">
-                          <span className={`status-badge ${c.jaar === 'buiten' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>{JAAR_LABEL[c.jaar]}</span>
+                          <div className="text-gray-700 whitespace-nowrap">{formatDate(c.ondertekend_op)}</div>
+                          <span className={`status-badge mt-0.5 ${c.jaar === 'buiten' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>{JAAR_LABEL[c.jaar]}</span>
                         </td>
                         <td className="table-td text-gray-600">
                           {c.dienst ?? '—'}
-                          <div className="text-[11px] text-gray-400">{c.facturatiemodel === 'maandcontract' ? `${formatEuro(c.maandbedrag ?? 0)} × ${c.duur ?? '?'} mnd` : 'eenmalig'}</div>
+                          <div className="text-[11px] text-gray-400 whitespace-nowrap">
+                            {c.facturatiemodel === 'maandcontract' ? `${formatEuro(c.maandbedrag ?? 0)} × ${c.duur ?? '?'} mnd` : 'eenmalig'}
+                          </div>
                         </td>
-                        <td className="table-td text-right tabular">{c.totaal === null ? <span className="text-red-600">ontbreekt</span> : formatEuro(c.totaal)}</td>
-                        <td className="table-td text-right tabular">{c.netto === null ? '—' : formatEuro(c.netto)}</td>
+                        <td className="table-td text-right tabular whitespace-nowrap">
+                          {c.netto === null ? <span className="text-red-600">ontbreekt</span> : formatEuro(c.netto)}
+                          {c.totaal !== null && c.netto !== null && c.totaal !== c.netto && (
+                            <div className="text-[11px] text-gray-400">van {formatEuro(c.totaal)}</div>
+                          )}
+                        </td>
                         <td className="table-td text-right tabular">{Math.round(c.factor * 100)}%</td>
-                        <td className="table-td text-right tabular font-semibold">{formatEuro(c.meetellend)}</td>
-                        <td className="table-td text-right tabular text-gray-500">{formatEuro(c.goedkopeSchijf)} / {formatEuro(c.jaarschijf)}</td>
+                        <td className="table-td text-right tabular font-semibold whitespace-nowrap"
+                          title={`Goedkope schijf ${formatEuro(c.goedkopeSchijf)} · jaarschijf ${formatEuro(c.jaarschijf)} · cumulatief vóór dit contract ${formatEuro(c.cumulatiefVoor)}`}>
+                          {formatEuro(c.meetellend)}
+                          {c.jaarschijf > 0 && <div className="text-[11px] text-gray-400 font-normal">{formatEuro(c.jaarschijf)} aan jaartarief</div>}
+                        </td>
                         <td className="table-td text-right tabular">{pct(c.ruweVesting, 2)}</td>
                         <td className="table-td">
                           <span className={`status-badge ${ERKENNING_STIJL[c.erkenning]}`}>{ERKENNING_LABEL[c.erkenning]}</span>
@@ -399,7 +416,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
             </table>
           </div>
           <div className="card-base p-0 overflow-hidden">
-            <div className="table-wrap"><table className="w-full text-sm min-w-[900px]">
+            <div className="table-wrap"><table className="w-full text-sm">
               <thead><tr className="border-b border-gray-100">
                 <th className="table-th">Nr.</th><th className="table-th">Klant</th><th className="table-th">Ondertekend</th><th className="table-th">Jaar</th><th className="table-th">Dienst</th><th className="table-th">Model</th><th className="table-th text-right">Maandbedrag</th><th className="table-th text-right">Duur</th><th className="table-th text-right">Totaal</th><th className="table-th text-right">Factor</th><th className="table-th text-right">Meetellend</th><th className="table-th">Erkenning</th>
               </tr></thead>
