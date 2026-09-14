@@ -1,4 +1,5 @@
 import { fetchMetLimiet, TijdslimietFout, STANDAARD_LIMIET_MS } from '@/lib/fetch-met-limiet'
+import { createAdminSupabaseClient } from '@/lib/supabase/admin-client'
 
 // ── ClickUp integratie (server-side only) ────────────────────────────────────
 // App → ClickUp, één richting. Wordt UITSLUITEND server-side gebruikt; de API key
@@ -475,11 +476,62 @@ export type FacturatieLijst =
   | { ok: false; reden: string; ingesteld: boolean }
 
 const norm = (s: string | null | undefined) => (s ?? '').trim().toLowerCase()
-let facturatieLijstCache: { tot: number; resultaat: FacturatieLijst } | null = null
+let facturatieLijstCache: { id: string; tot: number; resultaat: FacturatieLijst } | null = null
 
-/** Is de vaste facturatielijst ingesteld (env aanwezig)? Zegt niets over geldigheid. */
-export function facturatieLijstIngesteld(): boolean {
-  return !!(process.env[INVOICING_LIST_ENV] ?? '').trim()
+/**
+ * Overschrijving uit Instellingen → Facturatie-instellingen (app_settings,
+ * sleutel 'facturatie'). Leeg = de omgevingsvariabele geldt. De waarde komt
+ * daar enkel terecht ná een geslaagde structuurcontrole én bevestiging.
+ */
+async function facturatieOverschrijving(): Promise<{ lijstId: string; assigneeId: string }> {
+  try {
+    const admin = createAdminSupabaseClient()
+    const { data } = await admin.from('app_settings').select('value').eq('key', 'facturatie').maybeSingle()
+    const v = (data?.value ?? {}) as { clickup_lijst_id?: unknown; clickup_assignee_id?: unknown }
+    return {
+      lijstId: typeof v.clickup_lijst_id === 'string' ? v.clickup_lijst_id.trim() : '',
+      assigneeId: typeof v.clickup_assignee_id === 'string' ? v.clickup_assignee_id.trim() : '',
+    }
+  } catch { return { lijstId: '', assigneeId: '' } }
+}
+
+/** Is de vaste facturatielijst ingesteld (env of instellingen)? Zegt niets over geldigheid. */
+export async function facturatieLijstIngesteld(): Promise<boolean> {
+  if ((process.env[INVOICING_LIST_ENV] ?? '').trim()) return true
+  return !!(await facturatieOverschrijving()).lijstId
+}
+
+export type LijstControle = {
+  ok: boolean; listId: string; workspace: string; space: string; folder: string; list: string; pad: string; url: string
+  afwijkingen: string[]
+}
+
+/**
+ * Haalt de structuur van een lijst op (workspace → space → folder → lijst) en
+ * vergelijkt ze met de verwachte locatie. Leest enkel; maakt of verplaatst
+ * nooit iets. Gooit bij een onbekend id of onbereikbare ClickUp.
+ */
+export async function controleerFacturatieLijst(id: string): Promise<LijstControle> {
+  if (!/^\d+$/.test(id)) throw new Error('Geen geldig ClickUp lijst-id (enkel cijfers).')
+  if (!clickupConfigured()) throw new Error('CLICKUP_API_KEY is niet ingesteld.')
+  const lijst = await clickupJson<{ id: string; name: string; folder?: { id: string; name: string; hidden?: boolean } | null; space?: { id: string; name?: string } | null }>(`/list/${id}`)
+  const folderNaam = lijst.folder && !lijst.folder.hidden ? lijst.folder.name : ''
+  let spaceNaam = lijst.space?.name ?? ''
+  if (!spaceNaam && lijst.space?.id) {
+    const space = await clickupJson<{ id: string; name: string }>(`/space/${lijst.space.id}`)
+    spaceNaam = space.name
+  }
+  const team = await clickupJson<{ teams: Array<{ id: string; name: string }> }>(`/team`).then((r) => r.teams?.[0] ?? null).catch(() => null)
+  const pad = `${team?.name ?? '?'} → ${spaceNaam || '?'} → ${folderNaam || '(geen folder)'} → ${lijst.name}`
+  const afwijkingen: string[] = []
+  if (norm(spaceNaam) !== norm(VERWACHTE_FACTURATIELOCATIE.space)) afwijkingen.push(`space is "${spaceNaam || '?'}" i.p.v. "${VERWACHTE_FACTURATIELOCATIE.space}"`)
+  if (norm(folderNaam) !== norm(VERWACHTE_FACTURATIELOCATIE.folder)) afwijkingen.push(`folder is "${folderNaam || 'geen'}" i.p.v. "${VERWACHTE_FACTURATIELOCATIE.folder}"`)
+  if (norm(lijst.name) !== norm(VERWACHTE_FACTURATIELOCATIE.list)) afwijkingen.push(`lijst heet "${lijst.name}" i.p.v. "${VERWACHTE_FACTURATIELOCATIE.list}"`)
+  return {
+    ok: afwijkingen.length === 0, listId: lijst.id, workspace: team?.name ?? '', space: spaceNaam, folder: folderNaam, list: lijst.name, pad,
+    url: team ? `https://app.clickup.com/${team.id}/v/l/li/${lijst.id}` : `https://app.clickup.com/v/l/li/${lijst.id}`,
+    afwijkingen,
+  }
 }
 
 /**
@@ -489,34 +541,23 @@ export function facturatieLijstIngesteld(): boolean {
  * een herstelde configuratie snel doorwerkt zonder ClickUp te overvragen.
  */
 export async function facturatieLijst(): Promise<FacturatieLijst> {
-  const id = (process.env[INVOICING_LIST_ENV] ?? '').trim()
-  if (!id) return { ok: false, ingesteld: false, reden: `${INVOICING_LIST_ENV} is niet ingesteld. Vul het lijst-id van "${VERWACHTE_FACTURATIELOCATIE.folder} → ${VERWACHTE_FACTURATIELOCATIE.list}" in.` }
+  const over = await facturatieOverschrijving()
+  const id = over.lijstId || (process.env[INVOICING_LIST_ENV] ?? '').trim()
+  if (!id) return { ok: false, ingesteld: false, reden: `${INVOICING_LIST_ENV} is niet ingesteld. Vul het lijst-id van "${VERWACHTE_FACTURATIELOCATIE.folder} → ${VERWACHTE_FACTURATIELOCATIE.list}" in (omgeving of Instellingen → Facturatie).` }
   if (!/^\d+$/.test(id)) return { ok: false, ingesteld: true, reden: `${INVOICING_LIST_ENV} is geen geldig ClickUp lijst-id (enkel cijfers).` }
   if (!clickupConfigured()) return { ok: false, ingesteld: true, reden: 'CLICKUP_API_KEY is niet ingesteld.' }
-  if (facturatieLijstCache && facturatieLijstCache.tot > Date.now()) return facturatieLijstCache.resultaat
+  if (facturatieLijstCache && facturatieLijstCache.id === id && facturatieLijstCache.tot > Date.now()) return facturatieLijstCache.resultaat
 
   const onthoud = (r: FacturatieLijst): FacturatieLijst => {
-    facturatieLijstCache = { tot: Date.now() + (r.ok ? 10 * 60_000 : 60_000), resultaat: r }
+    facturatieLijstCache = { id, tot: Date.now() + (r.ok ? 10 * 60_000 : 60_000), resultaat: r }
     return r
   }
   try {
-    const lijst = await clickupJson<{ id: string; name: string; folder?: { id: string; name: string; hidden?: boolean } | null; space?: { id: string; name?: string } | null }>(`/list/${id}`)
-    const folderNaam = lijst.folder && !lijst.folder.hidden ? lijst.folder.name : ''
-    let spaceNaam = lijst.space?.name ?? ''
-    if (!spaceNaam && lijst.space?.id) {
-      const space = await clickupJson<{ id: string; name: string }>(`/space/${lijst.space.id}`)
-      spaceNaam = space.name
+    const c = await controleerFacturatieLijst(id)
+    if (!c.ok) {
+      return onthoud({ ok: false, ingesteld: true, reden: `Lijst ${id} staat op "${c.pad}" — ${c.afwijkingen.join('; ')}. Er worden geen taken aangemaakt tot dit klopt.` })
     }
-    const pad = `${spaceNaam || '?'} / ${folderNaam || '(geen folder)'} / ${lijst.name}`
-    const afwijkingen: string[] = []
-    if (norm(spaceNaam) !== norm(VERWACHTE_FACTURATIELOCATIE.space)) afwijkingen.push(`space is "${spaceNaam || '?'}" i.p.v. "${VERWACHTE_FACTURATIELOCATIE.space}"`)
-    if (norm(folderNaam) !== norm(VERWACHTE_FACTURATIELOCATIE.folder)) afwijkingen.push(`folder is "${folderNaam || 'geen'}" i.p.v. "${VERWACHTE_FACTURATIELOCATIE.folder}"`)
-    if (norm(lijst.name) !== norm(VERWACHTE_FACTURATIELOCATIE.list)) afwijkingen.push(`lijst heet "${lijst.name}" i.p.v. "${VERWACHTE_FACTURATIELOCATIE.list}"`)
-    if (afwijkingen.length) {
-      return onthoud({ ok: false, ingesteld: true, reden: `Lijst ${id} staat op "${pad}" — ${afwijkingen.join('; ')}. Er worden geen taken aangemaakt tot dit klopt.` })
-    }
-    const team = await teamId().catch(() => '')
-    return onthoud({ ok: true, listId: lijst.id, pad, url: team ? `https://app.clickup.com/${team}/v/l/li/${lijst.id}` : `https://app.clickup.com/v/l/li/${lijst.id}` })
+    return onthoud({ ok: true, listId: c.listId, pad: c.pad, url: c.url })
   } catch (e) {
     // Onbereikbaar of onbekend id: geen taak, wel een duidelijke reden.
     const boodschap = e instanceof Error ? e.message : String(e)
@@ -524,10 +565,18 @@ export async function facturatieLijst(): Promise<FacturatieLijst> {
   }
 }
 
-/** Het ingestelde assignee-id voor facturatietaken; leeg = taak zonder verantwoordelijke. */
-export function facturatieAssigneeId(): number | null {
-  const v = (process.env[INVOICING_ASSIGNEE_ENV] ?? '').trim()
+/** Het ingestelde assignee-id voor facturatietaken (instellingen vóór env); leeg = taak zonder verantwoordelijke. */
+export async function facturatieAssigneeId(): Promise<number | null> {
+  const over = await facturatieOverschrijving()
+  const v = over.assigneeId || (process.env[INVOICING_ASSIGNEE_ENV] ?? '').trim()
   return /^\d+$/.test(v) ? Number(v) : null
+}
+
+/** Verbindingstest voor Instellingen → Integraties. Geeft nooit de sleutel terug. */
+export async function clickupTest(): Promise<{ gebruiker: string; workspace: string }> {
+  const u = await clickupJson<{ user?: { username?: string; email?: string } }>(`/user`)
+  const t = await clickupJson<{ teams?: Array<{ name: string }> }>(`/team`).catch(() => ({ teams: [] as Array<{ name: string }> }))
+  return { gebruiker: u.user?.username || u.user?.email || '?', workspace: t.teams?.[0]?.name ?? '?' }
 }
 
 export type OpdrachtTaak = {
@@ -539,7 +588,7 @@ export type OpdrachtTaak = {
   hoog: boolean
 }
 
-function opdrachtTaakBody(t: OpdrachtTaak, nieuw: boolean): Record<string, unknown> {
+function opdrachtTaakBody(t: OpdrachtTaak, nieuw: boolean, assignee: number | null): Record<string, unknown> {
   const body: Record<string, unknown> = {
     name: t.naam, description: t.beschrijving,
     // ClickUp: 1 = urgent, 2 = high, 3 = normal, 4 = low
@@ -547,7 +596,6 @@ function opdrachtTaakBody(t: OpdrachtTaak, nieuw: boolean): Record<string, unkno
   }
   const due = Date.parse(`${t.deadline}T12:00:00Z`)
   if (!Number.isNaN(due)) { body.due_date = due; body.due_date_time = false }
-  const assignee = facturatieAssigneeId()
   if (nieuw) {
     body.status = STATUS_NEW
     if (assignee) body.assignees = [assignee]
@@ -566,13 +614,13 @@ function opdrachtTaakBody(t: OpdrachtTaak, nieuw: boolean): Record<string, unkno
 export async function maakOpdrachtTaak(t: OpdrachtTaak): Promise<{ taskId: string; url: string }> {
   const lijst = await facturatieLijst()
   if (!lijst.ok) throw new Error(lijst.reden)
-  const task = await clickupJson<{ id: string; url?: string }>(`/list/${lijst.listId}/task`, { method: 'POST', body: JSON.stringify(opdrachtTaakBody(t, true)) })
+  const task = await clickupJson<{ id: string; url?: string }>(`/list/${lijst.listId}/task`, { method: 'POST', body: JSON.stringify(opdrachtTaakBody(t, true, await facturatieAssigneeId())) })
   return { taskId: task.id, url: task.url ?? `https://app.clickup.com/t/${task.id}` }
 }
 
 /** Werkt een bestaande opdrachttaak bij (naam, omschrijving, deadline, prioriteit). */
 export async function werkOpdrachtTaakBij(taskId: string, t: OpdrachtTaak): Promise<void> {
-  await clickupJson(`/task/${taskId}`, { method: 'PUT', body: JSON.stringify(opdrachtTaakBody(t, false)) })
+  await clickupJson(`/task/${taskId}`, { method: 'PUT', body: JSON.stringify(opdrachtTaakBody(t, false, await facturatieAssigneeId())) })
 }
 
 /** Bestaat de taak nog in ClickUp? (Voor "opnieuw synchroniseren" zonder dubbels.) */
@@ -598,7 +646,7 @@ export async function createInvoiceTask(input: InvoiceTaskInput): Promise<Invoic
     // (Bram Reinquin (Growth) → Facturen & Boekhouding → List). Klopt die
     // configuratie niet, dan liever geen taak dan een taak op de verkeerde plek.
     let listId: string | null
-    if (facturatieLijstIngesteld()) {
+    if (await facturatieLijstIngesteld()) {
       const lijst = await facturatieLijst()
       if (!lijst.ok) { console.error('[clickup] factuurtaak niet aangemaakt:', lijst.reden); return { taskId: null, assigneeFound: true } }
       listId = lijst.listId

@@ -4056,3 +4056,33 @@ CREATE TABLE IF NOT EXISTS public.purchase_certificates (
 CREATE INDEX IF NOT EXISTS purchase_certificates_purchase ON public.purchase_certificates (purchase_id);
 ALTER TABLE public.purchase_certificates ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.purchase_certificates FROM anon, authenticated;
+
+-- ── Centrale instellingen ───────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.app_settings (
+  key text PRIMARY KEY,
+  value jsonb NOT NULL DEFAULT '{}'::jsonb,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by_email text
+);
+ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.app_settings FROM anon, authenticated;
+
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS voornaam text;
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS achternaam text;
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS functie text;
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS rol text NOT NULL DEFAULT 'medewerker';
+DO $$ BEGIN
+  ALTER TABLE public.staff_members ADD CONSTRAINT staff_members_rol_check CHECK (rol IN ('beheerder','medewerker','alleen_lezen'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS public.gebruikers_voorkeuren (
+  auth_user_id uuid PRIMARY KEY,
+  verborgen_modules text[] NOT NULL DEFAULT '{}',
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.gebruikers_voorkeuren ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.gebruikers_voorkeuren FROM anon, authenticated;
+
+-- Medewerkers: archiveren i.p.v. definitief verwijderen + uitnodiging op vraag
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS verwijderd_at timestamptz;
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS uitnodiging_verzonden_at timestamptz;

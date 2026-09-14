@@ -76,15 +76,15 @@ export const getUserRole = cache(async (userId: string): Promise<string | undefi
 /** De staff-rij (actief + rechten). staff_members is de bron van waarheid. */
 export const getStaffRow = cache(async (
   userId: string,
-): Promise<{ active?: boolean; permissions?: string[]; name?: string | null } | null> => {
+): Promise<{ id?: string; active?: boolean; permissions?: string[]; name?: string | null; rol?: string } | null> => {
   try {
     const admin = createAdminSupabaseClient()
     const { data } = await admin
       .from('staff_members')
-      .select('active, permissions, name')
+      .select('id, active, permissions, name, rol')
       .eq('auth_user_id', userId)
       .maybeSingle()
-    return (data as { active?: boolean; permissions?: string[]; name?: string | null } | null) ?? null
+    return (data as { id?: string; active?: boolean; permissions?: string[]; name?: string | null; rol?: string } | null) ?? null
   } catch {
     return null
   }

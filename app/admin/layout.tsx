@@ -4,6 +4,8 @@ import { AdminSidebar } from '@/components/admin/sidebar'
 import { AdminTopBar } from '@/components/admin/admin-topbar'
 import { AiAssistant } from '@/components/admin/ai-assistant'
 import { Toaster } from 'sonner'
+import { leesInstellingen, leesPersoon, leesVoorkeuren } from '@/lib/instellingen/laden'
+import { moduleBeschikbaar, magActie, MODULE_INSTELLINGEN_KEY } from '@/lib/instellingen/model'
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   // Rol + modulerechten komen bij voorkeur uit de middleware, die ze net al
@@ -18,6 +20,13 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   if (role !== 'admin' && role !== 'employee') redirect('/login')
 
+  // Centrale instellingen voor de zijbalk (zichtbaarheid per tabblad, rol,
+  // persoonlijke voorkeuren). Faalt dit, dan toont de zijbalk alles zoals vroeger.
+  const [instellingen, persoon] = await Promise.all([leesInstellingen(), leesPersoon()])
+  const verborgenPersoonlijk = persoon ? await leesVoorkeuren(persoon.userId) : []
+  const rol = persoon?.rol ?? (role === 'admin' ? 'hoofdbeheerder' : 'medewerker')
+  const toonInstellingen = role === 'admin' || (!!persoon && moduleBeschikbaar(instellingen, persoon, MODULE_INSTELLINGEN_KEY) && magActie(instellingen, persoon, MODULE_INSTELLINGEN_KEY, 'instellingen'))
+
   return (
     <div className="flex min-h-screen bg-gray-50">
       <Toaster richColors position="top-right" />
@@ -26,6 +35,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         isEmployee={role === 'employee'}
         naam={ik.naam}
         email={ik.email}
+        instellingen={instellingen}
+        rol={rol}
+        verborgenPersoonlijk={verborgenPersoonlijk}
+        toonInstellingen={toonInstellingen}
       />
       <main className="flex-1 min-w-0 md:ml-[var(--sidebar-width)] min-h-screen">
         <div className="max-w-[1400px] mx-auto px-4 pt-16 pb-8 md:pt-6 md:px-6 lg:px-8">

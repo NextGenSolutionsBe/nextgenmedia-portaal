@@ -8,10 +8,11 @@ import {
   LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
   Info, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, UserCog, CalendarClock, BarChart3, KanbanSquare,
-  MailCheck, PhoneCall, Stamp, FolderUp, Handshake, Plug,
+  MailCheck, PhoneCall, Stamp, FolderUp, Handshake, Plug, Settings,
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
+import { moduleBeschikbaar, MODULE_DASHBOARD_KEY, type AlleInstellingen, type Rol } from '@/lib/instellingen/model'
 import { useEffect, useState } from 'react'
 import { useRefresh } from '@/lib/use-refresh'
 import { Logo } from '@/components/logo'
@@ -214,13 +215,20 @@ function NavItem({
   )
 }
 
-export function AdminSidebar({ allowedModules, isEmployee = false, naam, email }: {
+export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, instellingen, rol = 'hoofdbeheerder', verborgenPersoonlijk = [], toonInstellingen = false }: {
   allowedModules?: string[]
   isEmployee?: boolean
   /** Voornaam van wie er ingelogd is — voor de begroeting bovenaan. */
   naam?: string
   /** Het e-mailadres eronder: het harde antwoord op "welk account is dit?". */
   email?: string
+  /** Centrale instellingen (globale zichtbaarheid + toegang per rol). Zonder = alles zoals vroeger. */
+  instellingen?: AlleInstellingen
+  rol?: Rol
+  /** Tabbladen die deze gebruiker enkel voor zichzelf verborg. */
+  verborgenPersoonlijk?: string[]
+  /** Knop "Instellingen" onderaan tonen (hoofdbeheerder, of beheerder met dat recht). */
+  toonInstellingen?: boolean
 } = {}) {
   const router = useRouter()
   const { refresh, spinning } = useRefresh()
@@ -238,16 +246,31 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email }
   }, [])
 
   // Werknemer ziet enkel toegestane modules; admin (allowedModules undefined) ziet alles.
+  const padNu = usePathname() ?? ''
   const canSee = (item: NavEntry) => {
     // Uitgeschakelde features (lib/features.ts) tonen we voor niemand — ook niet
     // voor admin; de middleware blokkeert die paden sowieso.
     if (item.module && DISABLED_MODULE_KEYS.includes(item.module)) return false
     if (item.adminOnly && isEmployee) return false
+    // Centrale instellingen: globaal verborgen wint van alles; daarna toegang
+    // per rol; daarna de persoonlijke keuze van de gebruiker zelf.
+    const sleutel = item.module ?? (item.href === '/admin' ? MODULE_DASHBOARD_KEY : item.href === '/admin/werknemers' ? 'werknemers' : null)
+    if (instellingen && sleutel && !moduleBeschikbaar(instellingen, { rol, modules: allowedModules ?? null }, sleutel)) return false
+    if (sleutel && verborgenPersoonlijk.includes(sleutel)) return false
     if (!item.module || !allowedModules) return true
     return canSeeModule(allowedModules, item.module)
   }
+  // Volgorde uit Instellingen → Tabbladen (standaard = de volgorde hieronder).
+  const volgordeVan = (item: NavEntry): number => {
+    const k = item.module ?? (item.href === '/admin' ? MODULE_DASHBOARD_KEY : item.href === '/admin/werknemers' ? 'werknemers' : null)
+    const v = k ? instellingen?.modules[k]?.volgorde : undefined
+    return typeof v === 'number' ? v : Number.MAX_SAFE_INTEGER
+  }
   const visibleSections = SECTIONS
-    .map((s) => ({ title: s.title, items: s.items.filter(canSee) }))
+    .map((s) => ({
+      title: s.title,
+      items: s.items.filter(canSee).map((it, i) => [it, i] as const).sort((a, b) => (volgordeVan(a[0]) - volgordeVan(b[0])) || (a[1] - b[1])).map(([it]) => it),
+    }))
     .filter((s) => s.items.length > 0)
 
   const handleLogout = async () => {
@@ -355,8 +378,15 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email }
           ))}
         </nav>
 
-        {/* Logout */}
-        <div className="px-3 py-4 border-t border-gray-100">
+        {/* Instellingen (centraal beheer) + uitloggen */}
+        <div className="px-3 py-4 border-t border-gray-100 space-y-0.5">
+          {toonInstellingen && (
+            <Link href="/admin/instellingen" prefetch={false} onClick={closeMobile}
+              className={cn('sidebar-item', padNu.startsWith('/admin/instellingen') && 'active')}>
+              <Settings className="h-4 w-4 shrink-0" />
+              Instellingen
+            </Link>
+          )}
           <button
             onClick={handleLogout}
             className="sidebar-item w-full text-red-500 hover:text-red-600 hover:bg-red-50"

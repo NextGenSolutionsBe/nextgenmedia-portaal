@@ -2,6 +2,8 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { pathToModule, canSeeModule, STAFF_API_WHITELIST, isStaffApiDenied, modulesForApiPath } from '@/lib/staff'
 import { isDisabledPath } from '@/lib/features'
+import { leesInstellingenEdge } from '@/lib/instellingen/edge'
+import { moduleBeschikbaar, magActie, actieVoorMethode, rolVanStaff, MODULE_INSTELLINGEN_KEY, MODULE_WERKNEMERS_KEY, type Persoon } from '@/lib/instellingen/model'
 import { verifyToken, TWO_FA_COOKIE, twoFactorRequired } from '@/lib/two-factor'
 // Bewust uit admin-client.ts en NIET uit server.ts: die laatste gebruikt
 // React's cache(), en dat bestaat niet in de edge-runtime waar deze middleware
@@ -302,12 +304,22 @@ export async function updateSession(request: NextRequest) {
       if (!twoFaOk && await codeVerplicht()) {
         return NextResponse.json({ error: 'Verificatie vereist', code: '2fa_required' }, { status: 401 })
       }
+      // Centrale instellingen: een globaal verborgen tabblad is ook voor een
+      // hoofdbeheerder dicht (de weg terug loopt via Instellingen, dat zelf
+      // nooit verborgen kan zijn). Mislukt de lezing → standaard = alles open.
+      const apiModule = pathToModule(path)
+      if (apiModule && !path.startsWith('/api/admin/instellingen')) {
+        const inst = await leesInstellingenEdge(db)
+        if (!moduleBeschikbaar(inst, { rol: 'hoofdbeheerder', modules: null }, apiModule)) {
+          return NextResponse.json({ error: 'Deze module is verborgen. Zet ze weer aan via Instellingen → Tabbladen en modules.', code: 'module_verborgen' }, { status: 403 })
+        }
+      }
       return doorgeven()
     }
 
     // Geen admin → enkel actieve werknemers, binnen hun modules.
-    const staffLezing = await lees<{ active?: boolean; permissions?: unknown }>(
-      db.from('staff_members').select('active, permissions').eq('auth_user_id', user.id).maybeSingle(),
+    const staffLezing = await lees<{ active?: boolean; permissions?: unknown; rol?: string | null }>(
+      db.from('staff_members').select('active, permissions, rol').eq('auth_user_id', user.id).maybeSingle(),
     )
     if (!staffLezing.ok) return databankOnbereikbaar(path)
     const staff = staffLezing.data
@@ -322,9 +334,31 @@ export async function updateSession(request: NextRequest) {
     // Toegang tot een dashboard = alle acties in dat dashboard. Gedeelde endpoints
     // geven meerdere modules; de werknemer passeert met één ervan. Ongemapte
     // admin-API's blijven dicht (default-deny).
+    const persoon: Persoon = { rol: rolVanStaff(staff!.rol), modules: perms }
+    // Instellingen-API: enkel wie de instellingen mag beheren (beheerder via de
+    // rechtenmatrix). Persoonlijke voorkeuren mag elke interne gebruiker zetten.
+    if (path.startsWith('/api/admin/instellingen')) {
+      if (path.startsWith('/api/admin/instellingen/voorkeuren')) return doorgeven()
+      const inst = await leesInstellingenEdge(db)
+      if (!moduleBeschikbaar(inst, persoon, MODULE_INSTELLINGEN_KEY) || !magActie(inst, persoon, MODULE_INSTELLINGEN_KEY, 'instellingen')) {
+        return NextResponse.json({ error: 'Geen toegang tot de instellingen' }, { status: 403 })
+      }
+      return doorgeven()
+    }
     const allowedModules = modulesForApiPath(path)
     if (!allowedModules || !allowedModules.some((m) => canSeeModule(perms, m))) {
       return NextResponse.json({ error: 'Geen toegang tot deze module' }, { status: 403 })
+    }
+    // Centrale instellingen: globale zichtbaarheid, toegang per rol én de actie
+    // (bekijken/toevoegen/aanpassen/verwijderen/exporteren) per rol — op de
+    // backend, zodat een verborgen knop nooit de enige drempel is.
+    const actie = actieVoorMethode(request.method, path)
+    const inst = await leesInstellingenEdge(db)
+    const toegestaan = allowedModules.some((m) => canSeeModule(perms, m) && moduleBeschikbaar(inst, persoon, m) && magActie(inst, persoon, m, actie))
+    if (!toegestaan) {
+      const werkwoord: Record<string, string> = { toevoegen: 'toevoegen', aanpassen: 'aanpassen', verwijderen: 'verwijderen', exporteren: 'exporteren', goedkeuren: 'goedkeuren', instellingen: 'instellen' }
+      const fout = actie === 'bekijken' ? 'Deze module is voor jouw rol niet beschikbaar' : `Jouw rol mag hier niet ${werkwoord[actie] ?? actie}`
+      return NextResponse.json({ error: fout, code: 'geen_recht' }, { status: 403 })
     }
     return doorgeven()
   }
@@ -333,6 +367,7 @@ export async function updateSession(request: NextRequest) {
   if (
     path === '/login' ||
     path === '/login/verify' ||   // stap 2 van het inloggen (eigen controle in de pagina)
+    path === '/login/wachtwoord' ||   // wachtwoord kiezen na een uitnodiging (eenmalige token in de link)
     path === '/' ||
     path.startsWith('/sign/') ||
     path.startsWith('/_next') ||
@@ -371,10 +406,10 @@ export async function updateSession(request: NextRequest) {
   // mogelijk (nog) geen 'employee', waardoor de rol-rij kan ontbreken; een
   // actieve staff-rij maakt de gebruiker sowieso werknemer. Enkel opzoeken als
   // de rol geen bekende non-employee is (bespaart een query voor admin/klant/partner).
-  let staff: { active?: boolean; permissions?: string[]; name?: string | null } | null = null
+  let staff: { active?: boolean; permissions?: string[]; name?: string | null; rol?: string | null } | null = null
   if (role !== 'admin' && role !== 'client' && role !== 'freelancer') {
-    const staffLezing = await lees<{ active?: boolean; permissions?: string[]; name?: string | null }>(
-      db.from('staff_members').select('active, permissions, name').eq('auth_user_id', user.id).maybeSingle(),
+    const staffLezing = await lees<{ active?: boolean; permissions?: string[]; name?: string | null; rol?: string | null }>(
+      db.from('staff_members').select('active, permissions, name, rol').eq('auth_user_id', user.id).maybeSingle(),
     )
     if (!staffLezing.ok) return databankOnbereikbaar(path)
     staff = staffLezing.data
@@ -430,8 +465,18 @@ export async function updateSession(request: NextRequest) {
   // Role-based routing
   if (path.startsWith('/admin')) {
     // Admin = volledige toegang. Werknemer = enkel toegestane modules.
+    // Daarbovenop de centrale instellingen: een globaal verborgen tabblad is
+    // voor niemand bereikbaar (ook niet via de URL); per rol geldt de matrix.
+    const paginaModule = path.startsWith('/admin/instellingen') ? MODULE_INSTELLINGEN_KEY
+      : path.startsWith('/admin/werknemers') ? MODULE_WERKNEMERS_KEY
+      : pathToModule(path)
     if (role === 'admin') {
-      // ok
+      if (paginaModule && paginaModule !== MODULE_INSTELLINGEN_KEY) {
+        const inst = await leesInstellingenEdge(db)
+        if (!moduleBeschikbaar(inst, { rol: 'hoofdbeheerder', modules: null }, paginaModule)) {
+          return NextResponse.redirect(new URL('/admin/instellingen?tab=modules&verborgen=' + encodeURIComponent(paginaModule), request.url))
+        }
+      }
     } else if (role === 'employee') {
       // Inactieve werknemer → geen toegang.
       if (staff && staff.active === false) {
@@ -441,10 +486,19 @@ export async function updateSession(request: NextRequest) {
       if (path.startsWith('/admin/werknemers')) {
         return NextResponse.redirect(new URL('/admin', request.url))
       }
-      const moduleKey = pathToModule(path)
-      if (moduleKey) {
-        const perms = Array.isArray(staff?.permissions) ? (staff!.permissions as string[]) : []
-        if (!canSeeModule(perms, moduleKey)) {
+      const perms = Array.isArray(staff?.permissions) ? (staff!.permissions as string[]) : []
+      const persoon: Persoon = { rol: rolVanStaff(staff?.rol), modules: perms }
+      if (paginaModule === MODULE_INSTELLINGEN_KEY) {
+        const inst = await leesInstellingenEdge(db)
+        if (!moduleBeschikbaar(inst, persoon, MODULE_INSTELLINGEN_KEY) || !magActie(inst, persoon, MODULE_INSTELLINGEN_KEY, 'instellingen')) {
+          return NextResponse.redirect(new URL('/admin', request.url))
+        }
+      } else if (paginaModule) {
+        if (!canSeeModule(perms, paginaModule)) {
+          return NextResponse.redirect(new URL('/admin', request.url))
+        }
+        const inst = await leesInstellingenEdge(db)
+        if (!moduleBeschikbaar(inst, persoon, paginaModule)) {
           return NextResponse.redirect(new URL('/admin', request.url))
         }
       }

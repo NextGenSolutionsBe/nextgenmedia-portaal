@@ -4,6 +4,8 @@ import path from 'path'
 import { createHash, randomUUID } from 'crypto'
 import { PDFDocument, StandardFonts, rgb, type PDFFont } from 'pdf-lib'
 import { founderName } from '@/lib/founders'
+import { leesInstellingen } from '@/lib/instellingen/laden'
+import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { BEVESTIGD } from './status'
 
 /**
@@ -80,10 +82,26 @@ function wrap(font: PDFFont, tekst: string, size: number, breedte: number): stri
 const veilig = (s: string) => s.replace(/[^\x20-\x7E -ÿ€–—‘’“”…]/g, '?')
 
 export async function maakBewijsPdf(p: AankoopVolledig, goedkeuringen: Goedkeuring[], certificateNo: string, certificateId: string): Promise<Uint8Array> {
+  // Huisstijl uit Instellingen → Documenten en branding. Enkel documenten die
+  // vanaf nu gemaakt worden volgen de nieuwe instellingen; bestaande PDF's
+  // blijven zoals ze zijn. Zonder instellingen gelden de vaste standaarden.
+  const inst = await leesInstellingen().catch(() => null)
+  const doc = inst?.documenten
+  const org = inst?.organisatie
+  const kleur = (hex: string | undefined, terugval: ReturnType<typeof rgb>) => {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex ?? '')
+    if (!m) return terugval
+    const n = parseInt(m[1], 16)
+    return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255)
+  }
+  const ACCENT = kleur(doc?.primaire_kleur, GEEL)
+  const TEKST = kleur(doc?.secundaire_kleur, ZWART)
+  const bedrijfsnaam = veilig(org?.handelsnaam || org?.vennootschapsnaam || 'NextGenMedia')
+
   const pdf = await PDFDocument.create()
   pdf.setTitle(`Bevestiging aankoopaanvraag ${p.reference ?? ''}`)
-  pdf.setAuthor('NextGenMedia portaal')
-  pdf.setCreator('NextGenMedia portaal')
+  pdf.setAuthor(`${bedrijfsnaam} portaal`)
+  pdf.setCreator(`${bedrijfsnaam} portaal`)
   const page = pdf.addPage([595.28, 841.89])   // A4
   const font = await pdf.embedFont(StandardFonts.Helvetica)
   const vet = await pdf.embedFont(StandardFonts.HelveticaBold)
@@ -93,19 +111,28 @@ export async function maakBewijsPdf(p: AankoopVolledig, goedkeuringen: Goedkeuri
 
   // Logo + naam
   try {
-    // Kleine variant voor in de PDF (het volledige logo is 1,3 MB); valt terug op het origineel.
-    const logoBytes = await readFile(path.join(process.cwd(), 'public', 'logo-pdf.png')).catch(() => readFile(path.join(process.cwd(), 'public', 'logo.png')))
-    const logo = await pdf.embedPng(logoBytes)
+    // Eigen logo uit de instellingen (private bucket); anders de kleine
+    // standaardvariant (het volledige logo is 1,3 MB), anders het origineel.
+    let logoBytes: Uint8Array | null = null
+    if (doc?.logo_path) {
+      try {
+        const { data } = await createAdminSupabaseClient().storage.from(BUCKET).download(doc.logo_path)
+        if (data) logoBytes = new Uint8Array(await data.arrayBuffer())
+      } catch { logoBytes = null }
+    }
+    if (!logoBytes) logoBytes = new Uint8Array(await readFile(path.join(process.cwd(), 'public', 'logo-pdf.png')).catch(() => readFile(path.join(process.cwd(), 'public', 'logo.png'))))
+    const isJpeg = logoBytes[0] === 0xff && logoBytes[1] === 0xd8
+    const logo = isJpeg ? await pdf.embedJpg(logoBytes) : await pdf.embedPng(logoBytes)
     const h = 42, w = (logo.width / logo.height) * h
     page.drawImage(logo, { x: marge, y: y - h, width: w, height: h })
   } catch { /* zonder logo verder */ }
-  page.drawText('NextGenMedia', { x: page.getWidth() - marge - vet.widthOfTextAtSize('NextGenMedia', 12), y: y - 14, size: 12, font: vet, color: ZWART })
+  page.drawText(bedrijfsnaam, { x: page.getWidth() - marge - vet.widthOfTextAtSize(bedrijfsnaam, 12), y: y - 14, size: 12, font: vet, color: TEKST })
   page.drawText('Intern bewijsdocument', { x: page.getWidth() - marge - font.widthOfTextAtSize('Intern bewijsdocument', 9), y: y - 28, size: 9, font, color: GRIJS })
   y -= 62
-  page.drawRectangle({ x: marge, y, width: breedte, height: 4, color: GEEL })
+  page.drawRectangle({ x: marge, y, width: breedte, height: 4, color: ACCENT })
   y -= 30
 
-  page.drawText('Bevestiging aankoopaanvraag', { x: marge, y, size: 20, font: vet, color: ZWART })
+  page.drawText('Bevestiging aankoopaanvraag', { x: marge, y, size: 20, font: vet, color: TEKST })
   y -= 18
   page.drawText(veilig(`Aanvraag ${p.reference ?? p.id} · versie ${p.version} · certificaat ${certificateNo}`), { x: marge, y, size: 10, font, color: GRIJS })
   y -= 26
@@ -126,7 +153,7 @@ export async function maakBewijsPdf(p: AankoopVolledig, goedkeuringen: Goedkeuri
     ['Ingediend op', datumNl(p.entry_date)],
     ['Bevestigd op', tijdNl(p.confirmed_at)],
     ['Aanvrager', `${founderName(p.requester_email)}${p.requester_email ? ` (${p.requester_email})` : ''}`],
-    ['Bedrijf / afdeling', `NextGenMedia${p.category ? ` · ${p.category}` : ''}`],
+    ['Bedrijf / afdeling', `${bedrijfsnaam}${p.category ? ` · ${p.category}` : ''}`],
     ['Leverancier', p.supplier ?? '—'],
     ['Omschrijving', `${p.title ?? ''}${p.description ? `\n${p.description}` : ''}`],
     ['Bedrag exclusief btw', euro(excl)],
@@ -152,10 +179,10 @@ export async function maakBewijsPdf(p: AankoopVolledig, goedkeuringen: Goedkeuri
   }
 
   // Voettekst
-  const voet = `Dit document werd automatisch gegenereerd door het NextGenMedia-portaal op ${tijdNl(new Date().toISOString())}. Het is een interne bevestiging van een aankoopaanvraag en geen factuur of betalingsbewijs.`
+  const voet = veilig(`${(doc?.voettekst || 'Dit document werd automatisch gegenereerd door het NextGenMedia-portaal.').trim()} Gegenereerd op ${tijdNl(new Date().toISOString())}. Het is een interne bevestiging van een aankoopaanvraag en geen factuur of betalingsbewijs.${doc?.contactregel ? ` ${doc.contactregel}` : ''}`)
   const vr = wrap(font, voet, 8, breedte)
   let vy = marge + 6 + (vr.length - 1) * 10
-  page.drawRectangle({ x: marge, y: vy + 14, width: breedte, height: 1, color: GEEL })
+  page.drawRectangle({ x: marge, y: vy + 14, width: breedte, height: 1, color: ACCENT })
   for (const r of vr) { page.drawText(r, { x: marge, y: vy, size: 8, font, color: GRIJS }); vy -= 10 }
 
   return pdf.save()
