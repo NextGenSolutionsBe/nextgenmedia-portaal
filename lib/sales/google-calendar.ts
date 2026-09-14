@@ -3,7 +3,8 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { encryptSecret, decryptSecret } from '@/lib/crypto'
 import { baseUrl } from '@/lib/email'
 import type { Interval } from '@/lib/sales/availability'
-import { fetchMetLimiet } from '@/lib/fetch-met-limiet'
+import { fetchMetLimiet, TijdslimietFout } from '@/lib/fetch-met-limiet'
+import { metHerkansing, DATABANK_TIJDELIJK } from '@/lib/supabase/herkansing'
 
 // Google Calendar per klant (§7). Bewust provider-agnostisch opgezet: de
 // koppeltabel heeft een `provider`-kolom, zodat ClickUp later als tweede
@@ -237,10 +238,14 @@ async function accessToken(
   const admin = createAdminSupabaseClient()
   // Bewust '*': busy_calendar_ids bestaat pas na de migratie, en een expliciete
   // kolomlijst zou dan de hele query laten falen.
-  const { data } = await admin
-    .from('sales_calendar_connections').select('*')
-    .eq('id', connectionId).maybeSingle()
-  const conn = data as (Connection & { busy_calendar_ids?: string[] | null }) | null
+  // Mét herkansing: een mislukte lezing betekende hier "geen koppeling", en
+  // dan las de sync dat als "de Google-koppeling werkt niet (meer)" terwijl er
+  // niets mis was met Google. Lukt het ook de tweede keer niet, dan is dat een
+  // tijdelijke fout — géén verlopen koppeling.
+  const { data, error } = await metHerkansing<Connection & { busy_calendar_ids?: string[] | null }>(() =>
+    admin.from('sales_calendar_connections').select('*').eq('id', connectionId).maybeSingle())
+  if (error) throw new Error(`${DATABANK_TIJDELIJK}: Google-koppeling niet gelezen`)
+  const conn = data
   if (!conn?.access_token) return null
 
   const calendarId = conn.calendar_id || 'primary'
@@ -268,7 +273,13 @@ async function accessToken(
       client_secret: process.env.GOOGLE_CLIENT_SECRET ?? '',
       grant_type: 'refresh_token',
     })
-  } catch {
+  } catch (e) {
+    // Google niet BEREIKT (tijdslimiet, netwerk) is iets anders dan Google dat
+    // NEE zegt. Alleen in het tweede geval is de koppeling echt verlopen; in
+    // het eerste geval zou 'expired' zetten een werkende koppeling afkeuren.
+    if (e instanceof TijdslimietFout || e instanceof TypeError) {
+      throw new Error('Google is even niet bereikbaar (tijdelijk)')
+    }
     await admin.from('sales_calendar_connections').update({ status: 'expired' }).eq('id', conn.id)
     return null
   }

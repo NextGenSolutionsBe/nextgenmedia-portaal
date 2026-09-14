@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { draaiClickupAgendaSync } from '@/lib/sales/clickup-agenda-sync'
+import { metHerkansing, DATABANK_TIJDELIJK } from '@/lib/supabase/herkansing'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -14,23 +15,37 @@ export const maxDuration = 60
  * worden. De Vercel-CRON_SECRET wordt óók aanvaard, zodat een Vercel-cron
  * als reserve kan dienen.
  */
-async function geautoriseerd(req: NextRequest): Promise<boolean> {
+/**
+ * Drie uitkomsten, niet twee. "Het geheim kon niet gelezen worden" is iets
+ * anders dan "het geheim klopt niet": in het eerste geval hapert de databank
+ * even en hoort het antwoord een 503 te zijn, geen 401. Voorheen viel een
+ * mislukte lezing stil terug op CRON_SECRET (die pg_cron niet meestuurt) en
+ * werd élke hapering een "Niet geautoriseerd" — tientallen per dag.
+ */
+async function geautoriseerd(req: NextRequest): Promise<'ja' | 'nee' | 'onbereikbaar'> {
   const meegegeven = req.headers.get('x-sync-secret') ?? req.nextUrl.searchParams.get('key') ?? ''
+  let onbereikbaar = false
   if (meegegeven) {
     try {
       const admin = createAdminSupabaseClient()
-      const { data } = await admin.from('cron_geheimen')
-        .select('waarde').eq('sleutel', 'clickup_agenda').maybeSingle()
-      const echt = (data as { waarde: string } | null)?.waarde
-      if (echt && meegegeven === echt) return true
-    } catch { /* tabel ontbreekt → alleen CRON_SECRET werkt */ }
+      const { data, error } = await metHerkansing<{ waarde: string }>(() =>
+        admin.from('cron_geheimen').select('waarde').eq('sleutel', 'clickup_agenda').maybeSingle())
+      if (error && !/does not exist|schema cache/i.test(error.message)) onbereikbaar = true
+      const echt = data?.waarde
+      if (echt && meegegeven === echt) return 'ja'
+    } catch { onbereikbaar = true }
   }
   const cronSecret = process.env.CRON_SECRET
-  return !!cronSecret && req.headers.get('authorization') === `Bearer ${cronSecret}`
+  if (!!cronSecret && req.headers.get('authorization') === `Bearer ${cronSecret}`) return 'ja'
+  return onbereikbaar ? 'onbereikbaar' : 'nee'
 }
 
 export async function POST(req: NextRequest) {
-  if (!(await geautoriseerd(req))) return NextResponse.json({ error: 'Niet geautoriseerd' }, { status: 401 })
+  const toegang = await geautoriseerd(req)
+  if (toegang === 'onbereikbaar') {
+    return NextResponse.json({ error: DATABANK_TIJDELIJK }, { status: 503, headers: { 'Retry-After': '30' } })
+  }
+  if (toegang === 'nee') return NextResponse.json({ error: 'Niet geautoriseerd' }, { status: 401 })
   const r = await draaiClickupAgendaSync()
   return NextResponse.json(r, { status: r.ok ? 200 : 500 })
 }

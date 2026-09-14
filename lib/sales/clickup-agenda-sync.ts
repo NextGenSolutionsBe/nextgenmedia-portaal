@@ -3,6 +3,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { haalSyncTaken, clickupConfigured, type SyncTaak } from '@/lib/clickup'
 import { maakSubAgenda, schrijfTaakEvent, verwijderTaakEvent, lijstTaakEvents, type TaakEvent } from '@/lib/sales/google-calendar'
 import { sendEmail } from '@/lib/email'
+import { metHerkansing, DATABANK_TIJDELIJK } from '@/lib/supabase/herkansing'
 
 /**
  * ClickUp → Google Calendar, elke tien minuten.
@@ -34,6 +35,25 @@ export const SYNC_VEROUDERD_MIN = 30
 
 /** Hoe vaak de (dure) wezenopruiming minstens moet draaien. */
 const OPRUIM_INTERVAL_MIN = 10
+
+/**
+ * Hoelang één run mag werken vóór ze netjes stopt.
+ *
+ * Vercel kapt de functie af op 60 seconden, en dat gebeurde: een trage
+ * Google-ronde, en de run verdween zonder af te ronden. Erger dan die ene
+ * gemiste minuut was het gevolg: de open run hield het slot vast, en de sync
+ * lag daarna minutenlang stil. Nu stopt een run zelf ruim vóór die grens en
+ * laat ze de rest aan de volgende minuut — de sync is idempotent, dus dat is
+ * gewoon verder werken waar ze gebleven was.
+ */
+const TIJDSBUDGET_MS = 40_000
+
+/**
+ * Na hoeveel seconden een open run als dood geldt. Een run kán niet langer
+ * leven dan de 60 s van Vercel, dus alles ouder dan dat is zeker afgebroken.
+ * Dit stond op vijf minuten, en elke afgebroken run kostte zo vijf minuten sync.
+ */
+const DODE_RUN_NA_MS = 90_000
 
 /**
  * Hoeveel mislukte runs ACHTER ELKAAR er nodig zijn voor een alarmmail.
@@ -112,6 +132,8 @@ export type SyncResultaat = {
   overgeslagen: number
   /** Heeft deze run ook de wezenopruiming gedaan? */
   opruiming?: boolean
+  /** Gestopt op het tijdsbudget; de volgende minuut werkt verder. */
+  afgekapt?: boolean
 }
 
 export async function draaiClickupAgendaSync(): Promise<SyncResultaat> {
@@ -124,9 +146,9 @@ export async function draaiClickupAgendaSync(): Promise<SyncResultaat> {
   // rij niet krijgt, doet niets. Een run die ooit crashte zonder af te ronden
   // wordt eerst afgesloten, anders zou het slot eeuwig dicht blijven.
   await admin.from('clickup_agenda_runs')
-    .update({ klaar: new Date().toISOString(), ok: false, fout: 'Afgebroken (niet afgerond binnen 5 minuten)' })
+    .update({ klaar: new Date().toISOString(), ok: false, fout: 'Afgebroken (door Vercel gestopt, niet afgerond)' })
     .is('klaar', null)
-    .lt('gestart', new Date(Date.now() - 5 * 60000).toISOString())
+    .lt('gestart', new Date(Date.now() - DODE_RUN_NA_MS).toISOString())
 
   const { data: runRij, error: runErr } = await admin.from('clickup_agenda_runs')
     .insert({}).select('id').single()
@@ -139,12 +161,17 @@ export async function draaiClickupAgendaSync(): Promise<SyncResultaat> {
   const runId = (runRij as { id: string } | null)?.id
 
   const r: SyncResultaat = { ok: false, fout: null, aangemaakt: 0, bijgewerkt: 0, verwijderd: 0, overgeslagen: 0 }
+  const gestartOp = Date.now()
+  const overTijd = () => Date.now() - gestartOp > TIJDSBUDGET_MS
 
   try {
     if (!clickupConfigured()) throw new Error('CLICKUP_API_KEY is niet ingesteld')
 
-    const { data: targetData } = await admin.from('clickup_agenda_targets')
-      .select('*').eq('active', true)
+    // Mét herkansing en mét controle op `error`: een mislukte lezing is geen
+    // lege tabel. Voorheen las een haperende verbinding als "geen doelen".
+    const { data: targetData, error: targetErr } = await metHerkansing<Target[]>(() =>
+      admin.from('clickup_agenda_targets').select('*').eq('active', true))
+    if (targetErr) throw new Error(`${DATABANK_TIJDELIJK}: doelen niet gelezen`)
     const targets = ((targetData ?? []) as Target[]).filter((t) => t.bron_connection_id)
     if (targets.length === 0) throw new Error('Geen actieve synchronisatiedoelen (clickup_agenda_targets)')
 
@@ -215,6 +242,7 @@ export async function draaiClickupAgendaSync(): Promise<SyncResultaat> {
 
       // Nieuw of gewijzigd → schrijven.
       for (const [taskId, taak] of gewenst) {
+        if (overTijd()) { r.afgekapt = true; break }
         const item = bestaand.get(taskId)
         const vinger = vingerafdruk(taak)
         if (item && item.vingerafdruk === vinger) continue
@@ -250,6 +278,7 @@ export async function draaiClickupAgendaSync(): Promise<SyncResultaat> {
       // opruimen. Wat af is mag niemands agenda meer blokkeren.
       for (const [taskId, item] of bestaand) {
         if (gewenst.has(taskId)) continue
+        if (overTijd()) { r.afgekapt = true; break }
         await verwijderTaakEvent(
           target.bron_connection_id as string, target.google_calendar_id as string, item.google_event_id,
         )
@@ -264,7 +293,10 @@ export async function draaiClickupAgendaSync(): Promise<SyncResultaat> {
        * blijft zo'n dubbel blok eeuwig staan en lijkt de agenda voller dan
        * hij is. Enkel events mét ons waarmerk; handmatige items blijven staan.
        */
+      // Geen tijd meer voor de opruiming? Dan telt deze run niet als opruimrun,
+      // zodat de volgende minuut ze alsnog doet.
       if (!opruimenNodig) continue
+      if (overTijd()) { r.opruiming = false; r.afgekapt = true; continue }
 
       const geldig = new Set<string>()
       for (const [taskId2, taak2] of gewenst) {
@@ -282,6 +314,7 @@ export async function draaiClickupAgendaSync(): Promise<SyncResultaat> {
       )
       for (const ev of inAgenda) {
         if (geldig.has(ev.eventId)) continue
+        if (overTijd()) { r.opruiming = false; r.afgekapt = true; break }
         await verwijderTaakEvent(
           target.bron_connection_id as string, target.google_calendar_id as string, ev.eventId,
         )
