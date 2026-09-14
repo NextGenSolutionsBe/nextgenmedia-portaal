@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { draaiClickupAgendaSync } from '@/lib/sales/clickup-agenda-sync'
 import { metHerkansing, DATABANK_TIJDELIJK } from '@/lib/supabase/herkansing'
+import { herprobeerSyncs } from '@/lib/facturatie/opdrachten'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -47,7 +48,11 @@ export async function POST(req: NextRequest) {
   }
   if (toegang === 'nee') return NextResponse.json({ error: 'Niet geautoriseerd' }, { status: 401 })
   const r = await draaiClickupAgendaSync()
-  return NextResponse.json(r, { status: r.ok ? 200 : 500 })
+  // Facturatieopdrachten die ClickUp niet haalden: elke run een paar opnieuw,
+  // met oplopende wachttijd. Mag de agendasync nooit laten falen.
+  let facturatie: { geprobeerd: number; gelukt: number } | null = null
+  try { facturatie = await herprobeerSyncs(createAdminSupabaseClient(), 10) } catch { facturatie = null }
+  return NextResponse.json({ ...r, facturatie }, { status: r.ok ? 200 : 500 })
 }
 
 // pg_net kan ook met GET uit de voeten; zelfde werk, zelfde slot.

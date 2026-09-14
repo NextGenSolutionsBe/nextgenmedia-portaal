@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Loader2, Plus, X, Trash2, Pencil, Scale, Receipt, PieChart, Calculator, Settings2, Info } from 'lucide-react'
 import { formatEuro, formatDate } from '@/lib/utils'
+import { ExportKnop } from '@/components/admin/export-knop'
+import { bvWerkmap } from '@/lib/excel/rapporten/bv'
 import {
   PERSONEN, PERSOON_LABEL, RECHT_TYPES, KOST_CATEGORIEEN, BETAALD_DOOR_LABEL, STATUUT_LABEL, STANDAARD_AANNAMES,
   rechtenPerPersoon, kerncijfers, berekenVerdeling, berekenEz, leesAannames, rechtEffect, kostEffect, kostBtw, kostIncl,
@@ -92,6 +94,9 @@ export function BvClient({ jaar, rechtenRijen, kostenRijen, verdelingRijen, ezRi
 
   return (
     <div className="space-y-6">
+      <div className="flex justify-end">
+        <ExportKnop werkmap={() => bvWerkmap({ jaar, rechten, kosten, verdeling, aannames, ezInvoer, perPersoon, kern, vd, ez })} />
+      </div>
       <div className="border-b border-gray-200 -mb-px overflow-x-auto">
         <div className="flex gap-1 min-w-max">
           {TABS.map((t) => (

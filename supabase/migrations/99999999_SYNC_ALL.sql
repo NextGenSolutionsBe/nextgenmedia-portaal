@@ -3832,3 +3832,63 @@ ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS wam_id uuid REFERENCES publ
 -- ── Vestingcontract ↔ Contractenmodule ─────────────────────────────────────
 ALTER TABLE public.vesting_contracten ADD COLUMN IF NOT EXISTS contract_id uuid REFERENCES public.contracts(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS vesting_contracten_contract ON public.vesting_contracten (contract_id) WHERE contract_id IS NOT NULL;
+
+-- ── Contract ondertekend → facturatieopdrachten → ClickUp ─────────────────
+-- Eén rij per facturatiemoment van een ondertekend contract. Geen factuur
+-- (die maakt het team in Facturen), wél de opdracht om ze te maken, met de
+-- synchronisatie naar ClickUp. Uniek per contract + factuurdatum + type: een
+-- herhaalde verwerking kan nooit een tweede opdracht opleveren.
+CREATE TABLE IF NOT EXISTS public.contract_facturatie_opdrachten (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id uuid NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
+  client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  volgnr integer NOT NULL DEFAULT 1,
+  aantal integer NOT NULL DEFAULT 1,
+  type text NOT NULL DEFAULT 'volledig' CHECK (type IN ('voorschot','saldo','periodiek','volledig')),
+  factuurdatum date NOT NULL,
+  periode text,
+  bedrag_excl numeric,
+  btw_pct numeric NOT NULL DEFAULT 21,
+  bedrag_incl numeric,
+  omschrijving text,
+  betalingstermijn_dagen integer,
+  status text NOT NULL DEFAULT 'open' CHECK (status IN ('open','controle_vereist','afgehandeld','geannuleerd')),
+  ontbrekend text[] NOT NULL DEFAULT '{}',
+  aandachtspunten text[] NOT NULL DEFAULT '{}',
+  sync_status text NOT NULL DEFAULT 'in_afwachting' CHECK (sync_status IN ('in_afwachting','gesynchroniseerd','mislukt','controle_vereist')),
+  clickup_task_id text,
+  clickup_url text,
+  sync_fout text,
+  sync_pogingen integer NOT NULL DEFAULT 0,
+  laatste_sync_op timestamptz,
+  sync_bezig_sinds timestamptz,
+  vingerafdruk text,
+  invoice_id uuid REFERENCES public.invoices(id) ON DELETE SET NULL,
+  bron text NOT NULL DEFAULT 'automatisch',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (contract_id, factuurdatum, type)
+);
+CREATE INDEX IF NOT EXISTS contract_facturatie_opdrachten_contract ON public.contract_facturatie_opdrachten (contract_id);
+CREATE INDEX IF NOT EXISTS contract_facturatie_opdrachten_sync ON public.contract_facturatie_opdrachten (sync_status) WHERE sync_status IN ('in_afwachting','mislukt');
+ALTER TABLE public.contract_facturatie_opdrachten ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.contract_facturatie_opdrachten FROM anon, authenticated;
+
+-- Technische log: wat is er wanneer gebeurd, met welke uitkomst.
+CREATE TABLE IF NOT EXISTS public.contract_facturatie_log (
+  id bigserial PRIMARY KEY,
+  contract_id uuid,
+  opdracht_id uuid,
+  gebeurtenis text NOT NULL,
+  contractstatus text,
+  verwerking_sleutel text,
+  clickup_task_id text,
+  sync_status text,
+  fout text,
+  poging integer,
+  details jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS contract_facturatie_log_contract ON public.contract_facturatie_log (contract_id, created_at DESC);
+ALTER TABLE public.contract_facturatie_log ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.contract_facturatie_log FROM anon, authenticated;

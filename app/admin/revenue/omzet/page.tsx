@@ -7,6 +7,7 @@ import { loadCore, readPeriodParams, periodRange, MONTHS } from '@/lib/finance-d
 import { Kpi } from '../kpi'
 import { OmzetCharts } from '../omzet-charts'
 import { FinanceWidget } from '../../finance-widget'
+import { ExportKnop } from '@/components/admin/export-knop'
 
 // Omzet is GEEN prognose meer: het zijn de feiten uit je facturen. Hier log je
 // enkel kosten (tab Kosten); winst = omzet (facturen) − kosten.
@@ -39,6 +40,10 @@ export default async function FinanceOverviewPage({ searchParams }: { searchPara
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-end gap-2 flex-wrap">
+        <ExportKnop url={`/api/admin/export/alles?fy=${year}&period=${period}&q=${quarter}&mo=${month}`} label="Alle dashboards exporteren" title="Financiën, Vesting, Resultaten en Statistieken in één Excel-werkmap" />
+        <ExportKnop url={`/api/admin/export/financien?fy=${year}&period=${period}&q=${quarter}&mo=${month}`} />
+      </div>
       <FinanceWidget />
 
       <p className="text-xs text-gray-500">

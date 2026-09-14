@@ -6,6 +6,8 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatEuro } from '@/lib/utils'
+import { ExportKnop } from '@/components/admin/export-knop'
+import { framerWerkmap } from '@/lib/excel/rapporten/framer'
 
 /**
  * Framer-sites onder Financiën.
@@ -219,9 +221,12 @@ export default function FramerPage() {
             Welke klantwebsites op Framer draaien, wat ze kosten en wanneer ze verlengen.
           </p>
         </div>
-        <button onClick={() => { setForm({ ...LEEG }); setFout(null) }} className="btn-secondary shrink-0">
-          <Plus className="h-4 w-4" />Site toevoegen
-        </button>
+        <div className="flex gap-2 shrink-0">
+          <ExportKnop werkmap={() => framerWerkmap({ lopend, gestopt, perMaandTotaal })} />
+          <button onClick={() => { setForm({ ...LEEG }); setFout(null) }} className="btn-secondary shrink-0">
+            <Plus className="h-4 w-4" />Site toevoegen
+          </button>
+        </div>
       </div>
 
       {hint && <div className="card-base bg-amber-50 border-amber-200 text-sm text-amber-800">{hint}</div>}

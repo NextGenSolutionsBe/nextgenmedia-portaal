@@ -54,6 +54,22 @@ export async function buildNotifications(): Promise<Notif[]> {
   const names = new Map(clientMap.map((c) => [c.id, c.company_name]))
   const out: Notif[] = []
 
+  // Facturatieopdrachten (contract ondertekend → ClickUp): een mislukte
+  // synchronisatie of ontbrekende gegevens moet iemand zien, anders wordt er
+  // niet gefactureerd. Best-effort: de tabel kan nog niet gemigreerd zijn.
+  try {
+    const opdrachten = await safe<{ id: string; contract_id: string; omschrijving: string | null; status: string; sync_status: string; factuurdatum: string }>(
+      admin.from('contract_facturatie_opdrachten').select('id, contract_id, omschrijving, status, sync_status, factuurdatum')
+        .in('status', ['open', 'controle_vereist']).or('sync_status.eq.mislukt,status.eq.controle_vereist').limit(50))
+    for (const o of opdrachten) {
+      if (o.sync_status === 'mislukt') {
+        out.push({ id: `facturatie-sync:${o.id}`, kind: 'invoice', priority: 'high', title: `Facturatieopdracht niet in ClickUp — ${o.omschrijving ?? 'contract'} (opnieuw synchroniseren)`, date: o.factuurdatum, href: `/admin/contracts/${o.contract_id}#facturatie` })
+      } else if (o.status === 'controle_vereist') {
+        out.push({ id: `facturatie-controle:${o.id}`, kind: 'invoice', priority: 'med', title: `Facturatieopdracht: controle vereist — ${o.omschrijving ?? 'contract'}`, date: o.factuurdatum, href: `/admin/contracts/${o.contract_id}#facturatie` })
+      }
+    }
+  } catch { /* meldingen mogen nooit stuklopen */ }
+
   // ClickUp→Google-agendasync: ligt die stil, dan zien de setters niet wat er
   // in ClickUp gepland staat en kán er dubbel geboekt worden. Dat verdient de
   // hoogste prioriteit in de bel — naast de mail die de sync zelf al stuurt.

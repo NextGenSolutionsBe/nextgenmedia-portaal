@@ -11,6 +11,7 @@ import { ContractLinkManager } from './contract-link-manager'
 import { ContractPdfPreview } from './contract-pdf-preview'
 import { ContractTimeline } from './contract-timeline'
 import { ContractInvoices } from './contract-invoices'
+import { ContractFacturatie } from './contract-facturatie'
 import { statusInfo, canonicalStatus } from '@/lib/contract-status'
 import { baseUrl } from '@/lib/email'
 
@@ -184,6 +185,9 @@ export default async function ContractDetailPage({ params }: { params: { id: str
             invoiceFrequency={c.invoice_frequency ?? null}
             expectedAmountExcl={c.expected_invoice_amount_excl ?? null}
           />
+
+          {/* Facturatieopdrachten na ondertekening (+ ClickUp-synchronisatie) */}
+          {isSigned && <ContractFacturatie contractId={c.id} clientId={clientId} serviceSlug={c.service_slug ?? null} />}
 
           {/* Sign link — only for unsigned contracts */}
           {!isSigned && statusKey !== 'geannuleerd' && (

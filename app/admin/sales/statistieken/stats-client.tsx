@@ -9,6 +9,8 @@ import {
   percentage, toonPercentage, type Groep, type Statistieken,
 } from '@/lib/sales/statistieken'
 import { ArrowDown, ArrowUp, Loader2, TrendingUp } from 'lucide-react'
+import { ExportKnop } from '@/components/admin/export-knop'
+import { statistiekenWerkmap } from '@/lib/excel/rapporten/statistieken'
 
 const euro = new Intl.NumberFormat('nl-BE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
 const getal = new Intl.NumberFormat('nl-BE')
@@ -101,6 +103,15 @@ export function StatsClient() {
     <div className="space-y-6">
       {/* ── Filters ── */}
       <div className="card-base flex flex-wrap items-end gap-3">
+        {data && (
+          <div className="order-last ml-auto">
+            <ExportKnop werkmap={() => statistiekenWerkmap({
+              stats: data.stats, bereik, isAdmin: data.isAdmin,
+              setterNaam: setter ? (data.setters.find((s) => s.id === setter)?.naam ?? null) : null,
+              sector: sector || null, leadInteresse: data.leadInteresse ?? null,
+            })} />
+          </div>
+        )}
         <div className="flex gap-1">
           {opties.map((o) => (
             <button

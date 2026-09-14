@@ -458,6 +458,128 @@ async function findOrCreateInvoiceList(): Promise<string | null> {
   } catch { return null }
 }
 
+// ── De vaste facturatielijst (Bram Reinquin (Growth) → Facturen & Boekhouding → List) ──
+//
+// Facturatietaken horen op precies één plek. Die plek wordt met haar unieke
+// lijst-id ingesteld (env CLICKUP_INVOICING_LIST_ID) en bij gebruik geverifieerd
+// tegen de verwachte structuur: klopt space, folder of lijstnaam niet, dan is
+// dat een configuratiefout en wordt er NIETS aangemaakt — nooit ergens anders,
+// nooit in een nieuwe lijst, nooit op naam gezocht.
+
+export const INVOICING_LIST_ENV = 'CLICKUP_INVOICING_LIST_ID'
+export const INVOICING_ASSIGNEE_ENV = 'CLICKUP_INVOICING_ASSIGNEE_ID'
+export const VERWACHTE_FACTURATIELOCATIE = { space: 'Bram Reinquin (Growth)', folder: 'Facturen & Boekhouding', list: 'List' } as const
+
+export type FacturatieLijst =
+  | { ok: true; listId: string; pad: string; url: string }
+  | { ok: false; reden: string; ingesteld: boolean }
+
+const norm = (s: string | null | undefined) => (s ?? '').trim().toLowerCase()
+let facturatieLijstCache: { tot: number; resultaat: FacturatieLijst } | null = null
+
+/** Is de vaste facturatielijst ingesteld (env aanwezig)? Zegt niets over geldigheid. */
+export function facturatieLijstIngesteld(): boolean {
+  return !!(process.env[INVOICING_LIST_ENV] ?? '').trim()
+}
+
+/**
+ * Haalt de ingestelde lijst op en controleert dat ze werkelijk onder
+ * Bram Reinquin (Growth) → Facturen & Boekhouding → List hangt.
+ * Een goed resultaat wordt 10 minuten onthouden; een fout één minuut, zodat
+ * een herstelde configuratie snel doorwerkt zonder ClickUp te overvragen.
+ */
+export async function facturatieLijst(): Promise<FacturatieLijst> {
+  const id = (process.env[INVOICING_LIST_ENV] ?? '').trim()
+  if (!id) return { ok: false, ingesteld: false, reden: `${INVOICING_LIST_ENV} is niet ingesteld. Vul het lijst-id van "${VERWACHTE_FACTURATIELOCATIE.folder} → ${VERWACHTE_FACTURATIELOCATIE.list}" in.` }
+  if (!/^\d+$/.test(id)) return { ok: false, ingesteld: true, reden: `${INVOICING_LIST_ENV} is geen geldig ClickUp lijst-id (enkel cijfers).` }
+  if (!clickupConfigured()) return { ok: false, ingesteld: true, reden: 'CLICKUP_API_KEY is niet ingesteld.' }
+  if (facturatieLijstCache && facturatieLijstCache.tot > Date.now()) return facturatieLijstCache.resultaat
+
+  const onthoud = (r: FacturatieLijst): FacturatieLijst => {
+    facturatieLijstCache = { tot: Date.now() + (r.ok ? 10 * 60_000 : 60_000), resultaat: r }
+    return r
+  }
+  try {
+    const lijst = await clickupJson<{ id: string; name: string; folder?: { id: string; name: string; hidden?: boolean } | null; space?: { id: string; name?: string } | null }>(`/list/${id}`)
+    const folderNaam = lijst.folder && !lijst.folder.hidden ? lijst.folder.name : ''
+    let spaceNaam = lijst.space?.name ?? ''
+    if (!spaceNaam && lijst.space?.id) {
+      const space = await clickupJson<{ id: string; name: string }>(`/space/${lijst.space.id}`)
+      spaceNaam = space.name
+    }
+    const pad = `${spaceNaam || '?'} / ${folderNaam || '(geen folder)'} / ${lijst.name}`
+    const afwijkingen: string[] = []
+    if (norm(spaceNaam) !== norm(VERWACHTE_FACTURATIELOCATIE.space)) afwijkingen.push(`space is "${spaceNaam || '?'}" i.p.v. "${VERWACHTE_FACTURATIELOCATIE.space}"`)
+    if (norm(folderNaam) !== norm(VERWACHTE_FACTURATIELOCATIE.folder)) afwijkingen.push(`folder is "${folderNaam || 'geen'}" i.p.v. "${VERWACHTE_FACTURATIELOCATIE.folder}"`)
+    if (norm(lijst.name) !== norm(VERWACHTE_FACTURATIELOCATIE.list)) afwijkingen.push(`lijst heet "${lijst.name}" i.p.v. "${VERWACHTE_FACTURATIELOCATIE.list}"`)
+    if (afwijkingen.length) {
+      return onthoud({ ok: false, ingesteld: true, reden: `Lijst ${id} staat op "${pad}" — ${afwijkingen.join('; ')}. Er worden geen taken aangemaakt tot dit klopt.` })
+    }
+    const team = await teamId().catch(() => '')
+    return onthoud({ ok: true, listId: lijst.id, pad, url: team ? `https://app.clickup.com/${team}/v/l/li/${lijst.id}` : `https://app.clickup.com/v/l/li/${lijst.id}` })
+  } catch (e) {
+    // Onbereikbaar of onbekend id: geen taak, wel een duidelijke reden.
+    const boodschap = e instanceof Error ? e.message : String(e)
+    return onthoud({ ok: false, ingesteld: true, reden: /→ 404/.test(boodschap) ? `Lijst ${id} bestaat niet (of de API-sleutel heeft er geen toegang toe).` : `ClickUp niet bereikbaar: ${boodschap.slice(0, 200)}` })
+  }
+}
+
+/** Het ingestelde assignee-id voor facturatietaken; leeg = taak zonder verantwoordelijke. */
+export function facturatieAssigneeId(): number | null {
+  const v = (process.env[INVOICING_ASSIGNEE_ENV] ?? '').trim()
+  return /^\d+$/.test(v) ? Number(v) : null
+}
+
+export type OpdrachtTaak = {
+  naam: string
+  beschrijving: string
+  /** YYYY-MM-DD: de dag waarop de factuur verstuurd moet zijn. */
+  deadline: string
+  /** High wanneer de factuur vandaag of binnen twee werkdagen weg moet. */
+  hoog: boolean
+}
+
+function opdrachtTaakBody(t: OpdrachtTaak, nieuw: boolean): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    name: t.naam, description: t.beschrijving,
+    // ClickUp: 1 = urgent, 2 = high, 3 = normal, 4 = low
+    priority: t.hoog ? 2 : 3,
+  }
+  const due = Date.parse(`${t.deadline}T12:00:00Z`)
+  if (!Number.isNaN(due)) { body.due_date = due; body.due_date_time = false }
+  const assignee = facturatieAssigneeId()
+  if (nieuw) {
+    body.status = STATUS_NEW
+    if (assignee) body.assignees = [assignee]
+  } else if (assignee) {
+    body.assignees = { add: [assignee] }
+  }
+  return body
+}
+
+/**
+ * Maakt de taak voor één facturatieopdracht in de vaste facturatielijst.
+ * Gooit een fout (met reden) als de lijst niet ingesteld/geldig/bereikbaar is,
+ * zodat de aanroeper de synchronisatie als "mislukt" kan registreren en later
+ * opnieuw kan proberen — zónder dat er ergens anders een taak belandt.
+ */
+export async function maakOpdrachtTaak(t: OpdrachtTaak): Promise<{ taskId: string; url: string }> {
+  const lijst = await facturatieLijst()
+  if (!lijst.ok) throw new Error(lijst.reden)
+  const task = await clickupJson<{ id: string; url?: string }>(`/list/${lijst.listId}/task`, { method: 'POST', body: JSON.stringify(opdrachtTaakBody(t, true)) })
+  return { taskId: task.id, url: task.url ?? `https://app.clickup.com/t/${task.id}` }
+}
+
+/** Werkt een bestaande opdrachttaak bij (naam, omschrijving, deadline, prioriteit). */
+export async function werkOpdrachtTaakBij(taskId: string, t: OpdrachtTaak): Promise<void> {
+  await clickupJson(`/task/${taskId}`, { method: 'PUT', body: JSON.stringify(opdrachtTaakBody(t, false)) })
+}
+
+/** Bestaat de taak nog in ClickUp? (Voor "opnieuw synchroniseren" zonder dubbels.) */
+export async function opdrachtTaakBestaat(taskId: string): Promise<boolean> {
+  try { await clickupJson(`/task/${taskId}`); return true } catch (e) { if (isTaskGone(e)) return false; throw e }
+}
+
 export type InvoiceTaskInput = {
   clientName: string; amountIncl: number; invoiceDate: string; dueDate?: string | null; type: string
   /** Eigen titel; leeg = "Factuur versturen — [naam]". Gebruikt voor
@@ -472,7 +594,17 @@ export type InvoiceTaskResult = { taskId: string | null; assigneeFound: boolean 
 export async function createInvoiceTask(input: InvoiceTaskInput): Promise<InvoiceTaskResult> {
   if (!clickupConfigured()) return { taskId: null, assigneeFound: true } // geen ClickUp = geen waarschuwing
   try {
-    const listId = await findOrCreateInvoiceList()
+    // Is de vaste facturatielijst ingesteld, dan gaan ÁLLE factuurtaken daarheen
+    // (Bram Reinquin (Growth) → Facturen & Boekhouding → List). Klopt die
+    // configuratie niet, dan liever geen taak dan een taak op de verkeerde plek.
+    let listId: string | null
+    if (facturatieLijstIngesteld()) {
+      const lijst = await facturatieLijst()
+      if (!lijst.ok) { console.error('[clickup] factuurtaak niet aangemaakt:', lijst.reden); return { taskId: null, assigneeFound: true } }
+      listId = lijst.listId
+    } else {
+      listId = await findOrCreateInvoiceList()
+    }
     if (!listId) return { taskId: null, assigneeFound: true }
     const assignee = await findMemberId(INVOICE_ASSIGNEE)
     const desc = [

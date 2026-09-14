@@ -9,6 +9,8 @@ import {
   INVOICE_STATUSES, INVOICE_STATUS_LABEL, DEFAULT_VAT, INVOICE_DAYS, INVOICE_DAY_LABEL,
   inclFromExcl, lastDayOfMonth, monthLabel, thisMonthYM, shiftYM, type ExpandedRevenue,
 } from '@/lib/invoices'
+import { ExportKnop } from '@/components/admin/export-knop'
+import { facturenWerkmap } from '@/lib/excel/rapporten/facturen'
 
 type Row = {
   rowId: string; kind: 'eenmalig' | 'recurring'; sourceId: string; month: string
@@ -144,6 +146,17 @@ export function InvoicesPanel({ initialMonth }: { initialMonth?: string } = {}) 
           {month !== thisMonthYM() && <button onClick={() => setMonth(thisMonthYM())} className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50">Deze maand</button>}
         </div>
         <div className="flex items-center gap-2">
+          <ExportKnop werkmap={() => facturenWerkmap({
+            month, rijen: filtered, alleRijen: rows, summary, clickupEnabled,
+            klantNaam: (id) => (id ? (clientName.get(id) ?? '—') : '—'),
+            filters: [
+              fClient ? { label: 'Klant', waarde: clientName.get(fClient) ?? fClient } : null,
+              fService ? { label: 'Dienst', waarde: svcLabel(fService) } : null,
+              fStatus ? { label: 'Status', waarde: INVOICE_STATUS_LABEL[fStatus] ?? fStatus } : null,
+              fType ? { label: 'Type', waarde: fType === 'recurring' ? 'Recurring' : 'Eenmalig' } : null,
+              fContract ? { label: 'Contract', waarde: fContract === 'with' ? 'Met contract' : 'Zonder contract' } : null,
+            ].filter((f): f is { label: string; waarde: string } => f !== null),
+          })} />
           <Link href="/admin/invoices/planner" className="btn-secondary text-sm"><CalendarDays className="h-4 w-4" />Planner</Link>
           <button onClick={() => setCreating(true)} className="btn-primary text-sm"><Plus className="h-4 w-4" />Nieuwe factuur</button>
         </div>

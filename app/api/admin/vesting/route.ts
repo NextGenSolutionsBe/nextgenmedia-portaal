@@ -328,17 +328,25 @@ export async function POST(req: NextRequest) {
       rij.status = 'gepland'
     }
 
-    const { data, error } = await admin.from(TABEL[resource]).insert(rij).select('id, nr').maybeSingle()
+    // Enkel contracten en WAM-klanten hebben een nummer. Kosten en termijnen
+    // niet — `select('id, nr')` op die tabellen werd `RETURNING id, nr` en gaf
+    // "column nr does not exist", waardoor elke nieuwe kost strandde (niets
+    // opgeslagen, wel een foutmelding).
+    const metNr = resource === 'contract' || resource === 'wam'
+    const { data, error } = metNr
+      ? await admin.from(TABEL[resource]).insert(rij).select('id, nr').maybeSingle()
+      : await admin.from(TABEL[resource]).insert(rij).select('id').maybeSingle()
     if (error) {
       if (/duplicate key|unique/i.test(error.message)) return NextResponse.json({ error: 'Dat nummer bestaat al.' }, { status: 409 })
       throw new Error(error.message)
     }
-    const nieuwId = (data as { id?: string } | null)?.id ?? null
+    const rijTerug = data as unknown as { id?: string; nr?: string } | null
+    const nieuwId = rijTerug?.id ?? null
     if (resource === 'wam' && nieuwId) await synchroniseerTermijnen(admin, nieuwId)
 
     await logAudit({
       action: `vesting.${resource}.create`, entityType: TABEL[resource], entityId: nieuwId,
-      summary: `Vesting: ${resource} toegevoegd${(data as { nr?: string } | null)?.nr ? ` (${(data as { nr: string }).nr})` : ''}`,
+      summary: `Vesting: ${resource} toegevoegd${rijTerug?.nr ? ` (${rijTerug.nr})` : ''}`,
       actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'admin',
       ip: meta.ip, userAgent: meta.userAgent,
     })

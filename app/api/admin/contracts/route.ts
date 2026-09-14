@@ -5,6 +5,7 @@ import { createClient, createAdminSupabaseClient, insertResilient , isActiveStaf
 import { randomUUID } from 'crypto'
 import { revalidatePath } from 'next/cache'
 import { logContractEvent } from '@/lib/contract-audit'
+import { verwerkOndertekening } from '@/lib/facturatie/opdrachten'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
@@ -106,6 +107,13 @@ export async function POST(req: NextRequest) {
       // Clean up contract if upload fails
       await admin.from('contracts').delete().eq('id', contractId)
       throw new Error(`PDF upload mislukt: ${uploadErr.message}`)
+    }
+
+    // Een contract dat al getekend binnenkomt, is meteen definitief: dezelfde
+    // facturatieopdrachten als bij de tekenlink (best-effort).
+    if (alreadySigned) {
+      try { await verwerkOndertekening(admin, contractId, 'upload_getekend', user.email ?? null) }
+      catch (e) { console.error('[contracts] facturatieopdrachten:', e instanceof Error ? e.message : e) }
     }
 
     // For an already-signed upload, the uploaded PDF IS the signed document, so

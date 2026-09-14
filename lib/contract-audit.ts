@@ -11,6 +11,8 @@ export type ContractEvent =
   | 'filled' | 'signed' | 'pdf_generated' | 'downloaded'
   | 'downloaded_original' | 'downloaded_signed'
   | 'template_created' | 'created_from_template' | 'token_regenerated' | 'expired'
+  // Facturatieopdrachten na ondertekening (lib/facturatie/opdrachten.ts).
+  | 'facturatie_opdrachten_aangemaakt' | 'facturatie_sync_ok' | 'facturatie_sync_mislukt' | 'facturatie_controle_vereist'
 
 export async function logContractEvent(
   admin: Admin,

@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 import { logContractEvent } from '@/lib/contract-audit'
 import { resolvePortalSession, canAccessContract } from '@/lib/portal-auth'
 import { FIELD_FONT_PT, baselineFromTopPct } from '@/lib/contract-render'
+import { verwerkOndertekening } from '@/lib/facturatie/opdrachten'
 
 export const maxDuration = 60
 
@@ -207,6 +208,13 @@ export async function POST(req: NextRequest) {
     }
     await logContractEvent(admin, contract_id, 'signed', { actor: signer_email, ip, ua: userAgent })
     if (signedPdfPath) await logContractEvent(admin, contract_id, 'pdf_generated', { actor: signer_email, ip, ua: userAgent })
+
+    // ── Facturatieopdrachten + ClickUp — best-effort ──────────────────────────
+    // Het contract is nu definitief ondertekend (één ondertekenaar, dus alle
+    // handtekeningen zijn binnen). Dit maakt de facturatieopdrachten aan en zet
+    // ze in ClickUp; een fout hier mag de ondertekening nooit laten falen.
+    try { await verwerkOndertekening(admin, contract_id, 'tekenlink', signer_email) }
+    catch (e) { console.error('[sign] facturatieopdrachten:', e instanceof Error ? e.message : e) }
 
     // ── Invalidate caches so admin/portal pages refresh immediately ───────────
     try {

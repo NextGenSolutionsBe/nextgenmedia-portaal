@@ -9,6 +9,8 @@ import {
   SOORTEN, STATUSSEN, euro, standaardZichtbaar,
   type Bedrijf, type Soort, type ZichtbareOpdracht, type Samenvatting,
 } from '@/lib/kantoor/model'
+import { ExportKnop } from '@/components/admin/export-knop'
+import { kantoorWerkmap } from '@/lib/excel/rapporten/kantoor'
 
 /**
  * Het Kantoor: waar onze bedrijven en partners elkaar werk doorgeven.
@@ -82,9 +84,12 @@ export function KantoorClient() {
             Werk dat we aan elkaar doorgeven — onderaanneming en doorverwijzing, met wat iedereen eraan verdient.
           </p>
         </div>
-        <button onClick={() => setNieuw(true)} className="btn-primary text-sm" disabled={!actief}>
-          <Plus className="h-4 w-4" />Nieuwe samenwerking
-        </button>
+        <div className="flex gap-2 flex-wrap">
+          <ExportKnop werkmap={() => kantoorWerkmap({ bedrijfNaam: actief?.naam ?? 'Kantoor', rijen: zichtbaar, alleRijen: rijen, cijfers, zoekterm: q.trim() || undefined })} />
+          <button onClick={() => setNieuw(true)} className="btn-primary text-sm" disabled={!actief}>
+            <Plus className="h-4 w-4" />Nieuwe samenwerking
+          </button>
+        </div>
       </div>
 
       {hint && <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">{hint}</p>}

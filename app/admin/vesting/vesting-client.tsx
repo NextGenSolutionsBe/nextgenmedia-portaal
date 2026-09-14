@@ -9,6 +9,8 @@ import {
   Link2, Receipt, CheckCircle2, ExternalLink, Ban, Undo2, ChevronDown, ChevronRight,
 } from 'lucide-react'
 import { formatEuro, formatDate } from '@/lib/utils'
+import { ExportKnop } from '@/components/admin/export-knop'
+import { vestingWerkmap } from '@/lib/excel/rapporten/vesting'
 import {
   berekenVesting, leesInstellingen, pct, totaalwaarde, duurUitData, toerekeningsfactor, wamSchema,
   STATUS_LABEL, ERKENNING_LABEL, JAAR_LABEL, DIENSTEN, FREQUENTIES, TERMIJN_LABEL,
@@ -153,9 +155,12 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
             Het vestigingsprincipe uit de samenwerkingsovereenkomst — uitsluitend informatief, wijzigt geen aandelen.
           </p>
         </div>
-        <button onClick={() => { setTab('contracten'); setContractDialoog('nieuw') }} className="btn-primary text-sm">
-          <Plus className="h-4 w-4" />Contract toevoegen
-        </button>
+        <div className="flex gap-2 flex-wrap">
+          <ExportKnop werkmap={() => vestingWerkmap({ v, inst, kosten, tab: TABS.find((t) => t.key === tab)?.label })} />
+          <button onClick={() => { setTab('contracten'); setContractDialoog('nieuw') }} className="btn-primary text-sm">
+            <Plus className="h-4 w-4" />Contract toevoegen
+          </button>
+        </div>
       </div>
 
       <div className="border-b border-gray-200 -mb-px overflow-x-auto">

@@ -8,6 +8,8 @@ import {
 import { euro, hoursText, monthLabel, withVat, VAT_PCT, roiText, TIJDSBELASTING } from '@/lib/sales/earnings'
 import { TimerCard } from './timer-card'
 import { TimeEntries } from './time-entries'
+import { ExportKnop } from '@/components/admin/export-knop'
+import { resultatenWerkmap } from '@/lib/excel/rapporten/resultaten'
 
 type Stat = {
   setter: { id: string; name: string; hourly_rate_cents: number; commission_pct: number }
@@ -109,6 +111,12 @@ export function ResultsClient() {
           <button onClick={() => shift(1)} className="btn-secondary px-2" aria-label="Volgende maand"><ChevronRight className="h-4 w-4" /></button>
         </div>
         <span className="text-sm font-medium capitalize">{monthLabel(monthParam(month))}</span>
+        {stats.length > 0 && (
+          <ExportKnop werkmap={() => resultatenWerkmap({
+            monthParam: monthParam(month), stats, payouts, isAdmin,
+            focusNaam: focus ? (stats.find((s) => s.setter.id === focus)?.setter.name ?? null) : null,
+          })} />
+        )}
 
         {isAdmin && stats.length > 0 && (
           <select className="input-base w-auto text-sm ml-auto" value={focus} onChange={(e) => setFocus(e.target.value)}>

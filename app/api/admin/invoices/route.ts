@@ -217,7 +217,10 @@ export async function POST(req: NextRequest) {
       const status = INVOICE_STATUSES.includes(b.status) ? b.status : 'te_versturen'
       // ClickUp-taak "Factuur versturen — [klant]" (best-effort).
       const clientName = await clientNameFor(admin, b.client_id || null)
-      const task = await createInvoiceTask({ clientName, amountIncl: incl, invoiceDate, type: 'Eenmalig' })
+      // Komt de factuur uit een facturatieopdracht (contract ondertekend), dan
+      // bestaat de ClickUp-taak al: die nemen we over in plaats van een tweede te maken.
+      const bestaandeTaak = typeof b.clickup_task_id === 'string' && b.clickup_task_id.trim() ? b.clickup_task_id.trim() : null
+      const task = bestaandeTaak ? { taskId: bestaandeTaak, assigneeFound: true } : await createInvoiceTask({ clientName, amountIncl: incl, invoiceDate, type: 'Eenmalig' })
       const id = await safeInsertId(admin, 'invoices', {
         client_id: b.client_id || null, service_slug: b.service_slug || null, invoice_month: month,
         invoice_date: invoiceDate, description: b.description || null,

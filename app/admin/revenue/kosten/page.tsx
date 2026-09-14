@@ -8,6 +8,7 @@ import { Kpi } from '../kpi'
 import { KostenCharts } from '../kosten-charts'
 import { CostForm } from '../cost-form'
 import { CostTable } from '../cost-table'
+import { ExportKnop } from '@/components/admin/export-knop'
 
 function costYearValue(c: CostEntry, year: number): number {
   if (c.type === 'recurring') {
@@ -20,7 +21,7 @@ function costYearValue(c: CostEntry, year: number): number {
 }
 
 export default async function KostenPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
-  const { year } = readPeriodParams(await searchParams)
+  const { year, period, quarter, month } = readPeriodParams(await searchParams)
   const c = await loadCore(year)
 
   const recurringCostFY = c.costs.filter(x => x.type === 'recurring').reduce((s, x) => s + costYearValue(x, year), 0)
@@ -46,7 +47,10 @@ export default async function KostenPage({ searchParams }: { searchParams: Promi
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-end"><CostForm /></div>
+      <div className="flex items-center justify-end gap-2">
+        <ExportKnop url={`/api/admin/export/financien?fy=${year}&period=${period}&q=${quarter}&mo=${month}`} />
+        <CostForm />
+      </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         <Kpi label={`Totale kosten ${year}`} value={formatEuro(totaalFY)} sub="excl. btw" color="text-red-600" Icon={TrendingDown} />
