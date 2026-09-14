@@ -10,10 +10,9 @@ const TABS = [
   { href: '/admin/revenue/omzet', label: 'Overzicht' },
   { href: '/admin/revenue/kosten', label: 'Kosten' },
   { href: '/admin/revenue/framer', label: 'Framer' },
-  // De overgang van drie eenmanszaken naar de BV: rechtenbalans, kosten,
-  // winstverdeling en de EZ-raming. Enkel admins komen erin (de pagina zelf
-  // stuurt anderen terug).
-  { href: '/admin/revenue/bv-transitie', label: 'BV-transitie' },
+  // BV-transitie (rechtenbalans, winstverdeling, EZ-raming) staat bewust niet
+  // in de tabs: op vraag van de zaakvoerders. De pagina bestaat nog op
+  // /admin/revenue/bv-transitie en de data blijft staan.
 ]
 
 export function TabNav() {
