@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
+import { useVuilMelder } from '@/lib/vuil-register'
 import { useRouter } from 'next/navigation'
 import { Loader2, RefreshCw, CalendarClock, Save } from 'lucide-react'
 import { toast } from 'sonner'
@@ -14,7 +15,7 @@ export function ContractLinkManager({
   const [savingExpiry, setSavingExpiry] = useState(false)
   const [regenerating, setRegenerating] = useState(false)
 
-  const saveExpiry = async () => {
+  const saveExpiry = useCallback(async (): Promise<boolean> => {
     setSavingExpiry(true)
     try {
       const res = await fetch(`/api/admin/contracts/${contractId}`, {
@@ -24,8 +25,11 @@ export function ContractLinkManager({
       const j = await res.json(); if (!res.ok) throw new Error(j.error)
       toast.success(expiresAt ? 'Vervaldatum opgeslagen' : 'Vervaldatum gewist')
       router.refresh()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setSavingExpiry(false) }
-  }
+      return true
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt'); return false } finally { setSavingExpiry(false) }
+  }, [contractId, expiresAt, router])
+  // Gewijzigde vervaldatum die nog niet opgeslagen is → de contractnavigatie vraagt eerst.
+  useVuilMelder(`tekenlink:${contractId}`, 'Vervaldatum tekenlink', expiresAt !== (initialExpiresAt ? initialExpiresAt.slice(0, 10) : ''), saveExpiry)
 
   const regenerate = async () => {
     if (!confirm('Nieuwe tekenlink genereren? De oude link werkt dan niet meer.')) return

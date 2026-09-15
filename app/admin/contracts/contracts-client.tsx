@@ -6,6 +6,7 @@ import { Plus, FileText, Filter as FilterIcon, X, Search, Bell } from 'lucide-re
 import { formatDate, SERVICE_LABELS } from '@/lib/utils'
 import { statusInfo, canonicalStatus, STATUS_FILTER_OPTIONS, followUp, averageSignDays, CONTRACT_TYPES, DURATION_TYPES } from '@/lib/contract-status'
 import { ContractTabs } from './contract-tabs'
+import { bewaarNavigatie, bewaarContext, leesContext } from '@/lib/contract-navigatie'
 
 type Contract = {
   id: string
@@ -86,6 +87,24 @@ export function ContractsClient({
   // Debounce de zoekterm (vlot bij grote lijsten).
   useEffect(() => { const t = setTimeout(() => setDq(query), 200); return () => clearTimeout(t) }, [query])
 
+  // Terugkeer vanuit een contract: zoekterm en scrollpositie van daarnet herstellen.
+  const [hersteld, setHersteld] = useState(false)
+  useEffect(() => {
+    const ctx = leesContext()
+    if (ctx?.query) { setQuery(ctx.query); setDq(ctx.query) }
+    setHersteld(true)
+  }, [])
+  useEffect(() => {
+    if (!hersteld) return
+    const ctx = leesContext()
+    if (ctx && ctx.scrollY > 0) requestAnimationFrame(() => window.scrollTo({ top: ctx.scrollY }))
+    let klok: ReturnType<typeof setTimeout> | undefined
+    const opScroll = () => { if (klok) return; klok = setTimeout(() => { klok = undefined; bewaarContext({ scrollY: window.scrollY }) }, 150) }
+    window.addEventListener('scroll', opScroll, { passive: true })
+    return () => { window.removeEventListener('scroll', opScroll); if (klok) clearTimeout(klok) }
+  }, [hersteld])
+  useEffect(() => { if (hersteld) bewaarContext({ query }) }, [query, hersteld])
+
   const filtered = useMemo(() => {
     const q = dq.trim().toLowerCase()
     return initialContracts.filter((c) => {
@@ -112,6 +131,10 @@ export function ContractsClient({
       return true
     })
   }, [initialContracts, filterClient, filterService, filterStatus, filterTemplate, filterType, filterDuration, filterLinked, filterInvoice, dateFrom, dateTo, dq, templateName])
+
+  // De zichtbare volgorde (filters + zoekopdracht) is wat "vorig/volgend" op de
+  // detailpagina volgt. Enkel id's, in de sessie van dit tabblad.
+  useEffect(() => { bewaarNavigatie(filtered.map((c) => c.id), `${filtered.length} contracten`) }, [filtered])
 
   // ── Dashboard-cijfers (over alle contracten) ───────────────────────────────
   const stats = useMemo(() => {

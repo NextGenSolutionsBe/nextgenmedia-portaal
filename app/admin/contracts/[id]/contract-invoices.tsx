@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { useVuilMelder } from '@/lib/vuil-register'
 import { useRouter } from 'next/navigation'
 import { Receipt, Loader2, Plus, Link2, Unlink, Save } from 'lucide-react'
 import { toast } from 'sonner'
@@ -59,7 +60,7 @@ export function ContractInvoices({
   const totalIncl = linked.filter((i) => normalizeInvoiceStatus(i.status) !== 'geannuleerd').reduce((s, i) => s + Number(i.amount_incl || 0), 0)
   const pct = expected > 0 ? Math.min(100, Math.round((sentCount / expected) * 100)) : (linked.length > 0 ? 100 : 0)
 
-  const saveSettings = async () => {
+  const saveSettings = useCallback(async (): Promise<boolean> => {
     setSavingSettings(true)
     try {
       const res = await fetch(`/api/admin/contracts/${contractId}`, {
@@ -68,8 +69,12 @@ export function ContractInvoices({
       })
       if (!res.ok) throw new Error((await res.json()).error)
       toast.success('Facturatie-instellingen opgeslagen'); router.refresh()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setSavingSettings(false) }
-  }
+      return true
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt'); return false } finally { setSavingSettings(false) }
+  }, [contractId, expCount, freq, expAmount, router])
+  // Gewijzigde, nog niet opgeslagen facturatie-instellingen → de contractnavigatie vraagt eerst.
+  const instellingenVuil = expCount !== (expectedCount != null ? String(expectedCount) : '') || freq !== (invoiceFrequency ?? '') || expAmount !== (expectedAmountExcl != null ? String(expectedAmountExcl) : '')
+  useVuilMelder(`factuurinstellingen:${contractId}`, 'Facturatie-instellingen van dit contract', instellingenVuil, saveSettings)
 
   const linkExisting = async () => {
     if (!linkId) return
@@ -182,6 +187,8 @@ function CreateInvoice({ contractId, clientId, serviceSlug, contractTitle, defau
   const [amount, setAmount] = useState(defaultAmount || '')
   const [description, setDescription] = useState(contractTitle)
   const [saving, setSaving] = useState(false)
+  // Een ingevuld maar nog niet aangemaakt factuurformulier: niet automatisch op te slaan.
+  useVuilMelder(`nieuwefactuur:${contractId}`, 'Nieuwe factuur (nog niet aangemaakt)', amount !== (defaultAmount || '') || description !== contractTitle)
 
   const submit = async () => {
     if (!amount) { toast.error('Bedrag vereist'); return }

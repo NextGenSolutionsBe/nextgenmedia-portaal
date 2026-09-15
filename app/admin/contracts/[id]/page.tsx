@@ -12,6 +12,7 @@ import { ContractPdfPreview } from './contract-pdf-preview'
 import { ContractTimeline } from './contract-timeline'
 import { ContractInvoices } from './contract-invoices'
 import { ContractFacturatie } from './contract-facturatie'
+import { ContractNavigatie } from './contract-navigatie'
 import { statusInfo, canonicalStatus } from '@/lib/contract-status'
 import { baseUrl } from '@/lib/email'
 
@@ -70,10 +71,11 @@ export default async function ContractDetailPage({ params }: { params: { id: str
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-start gap-3 flex-wrap">
-        <Link href="/admin/contracts" className="btn-secondary px-2 shrink-0">
+        <Link href="/admin/contracts" className="btn-secondary px-2 shrink-0" title="Terug naar het overzicht">
           <ChevronLeft className="h-4 w-4" />
         </Link>
-        <div className="flex-1 min-w-0">
+        <ContractNavigatie contractId={c.id} />
+        <div className="flex-1 min-w-0 basis-full sm:basis-auto">
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <h1 className="text-xl sm:text-2xl font-bold truncate">{c.title}</h1>
             <span className={`status-badge ${style.cls}`}>{style.label}</span>
