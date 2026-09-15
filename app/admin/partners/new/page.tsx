@@ -116,7 +116,7 @@ export default function NewPartnerPage() {
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="card-base space-y-4">
           <h2 className="font-semibold">Persoonsgegevens</h2>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className={lbl}>Volledige naam *</label>
               <input required className={inp} value={form.full_name} onChange={(e) => setForm((p) => ({ ...p, full_name: e.target.value }))} />
@@ -156,7 +156,7 @@ export default function NewPartnerPage() {
           <h2 className="font-semibold">Expertise & tarieven</h2>
           <div>
             <label className={lbl}>Rollen / expertise *</label>
-            <div className="grid grid-cols-4 gap-2 mt-1">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-1">
               {ROLES.map((r) => (
                 <button
                   key={r.slug}
@@ -173,7 +173,7 @@ export default function NewPartnerPage() {
               ))}
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className={lbl}>Uurtarief (€)</label>
               <input type="number" min="0" className={inp} value={form.hourly_rate} onChange={(e) => setForm((p) => ({ ...p, hourly_rate: e.target.value }))} placeholder="75" />

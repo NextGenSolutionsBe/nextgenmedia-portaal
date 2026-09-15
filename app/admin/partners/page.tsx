@@ -36,7 +36,7 @@ export default async function PartnersPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold">Partners</h1>
           <p className="text-sm text-gray-500 mt-0.5">{activeCount} actieve partners</p>
@@ -58,7 +58,8 @@ export default async function PartnersPage() {
             </Link>
           </div>
         ) : (
-          <table className="w-full">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px]">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="table-th">Partner</th>
@@ -105,7 +106,7 @@ export default async function PartnersPage() {
                         : '—'}
                     </td>
                     <td className="table-td">
-                      <span className={`status-badge ${p.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                      <span className={`status-badge ${p.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
                         {p.active ? 'Actief' : 'Inactief'}
                       </span>
                     </td>
@@ -114,6 +115,7 @@ export default async function PartnersPage() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>
