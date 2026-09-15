@@ -246,6 +246,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         ok: true, mailStatus, wachtwoordGezet,
         bestaandAccount: heeftGebruikt,
+        // Er was een wachtwoord ingevuld, maar het account bestond al en werd
+        // gebruikt: dan is dat wachtwoord bewust NIET toegepast. Dat moet het
+        // scherm luid zeggen, anders geef je iemand een wachtwoord dat niet werkt.
+        wachtwoordGenegeerd: !!wachtwoord && !wachtwoordGezet,
       })
     }
 

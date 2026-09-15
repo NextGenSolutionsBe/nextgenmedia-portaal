@@ -275,7 +275,9 @@ export async function updateSession(request: NextRequest) {
   // bereikbaar is. De code blijft bestaan; enkel de toegang is geblokkeerd.
   if (isDisabledPath(path)) {
     if (path.startsWith('/api/')) return NextResponse.json({ error: 'Niet beschikbaar' }, { status: 404 })
-    return NextResponse.redirect(new URL(user ? '/admin' : '/login', request.url))
+    // Naar de startpagina: die kiest per rol het juiste portaal (admin, portaal,
+    // Kantoor). Rechtstreeks naar /admin sturen zette niet-admins in een lus.
+    return NextResponse.redirect(new URL(user ? '/' : '/login', request.url))
   }
 
   // Admin-API's: werknemers centraal per module afschermen (de route-guards

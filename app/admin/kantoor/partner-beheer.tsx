@@ -103,6 +103,8 @@ export function PartnerBeheer() {
         // het wachtwoord erin — dat geef je zelf door.
         setGezet({ email: uitnodigEmail.trim(), wachtwoord })
         toast.success('Toegang staat klaar. Geef het wachtwoord door.')
+      } else if (j.bestaandAccount && j.wachtwoordGenegeerd) {
+        toast.warning(`Let op: ${uitnodigEmail.trim()} had al een account dat gebruikt is. Het ingevulde wachtwoord is NIET toegepast — deze persoon logt in met zijn bestaande wachtwoord. Wil je het toch vervangen? Gebruik dan "Wachtwoord instellen" bij dit lid en geef het nieuwe wachtwoord door.`, { duration: 20000 })
       } else if (j.bestaandAccount) {
         toast.success('Gekoppeld. Deze persoon logt in met zijn bestaande wachtwoord.')
       } else {

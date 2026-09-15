@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
+import { FEATURES } from '@/lib/features'
 
 export default async function Home() {
   const supabase = await createClient()
@@ -29,7 +30,14 @@ export default async function Home() {
   // Werknemers horen — net als admins — in het admin-portaal.
   if (role === 'admin' || role === 'employee') redirect('/admin')
   if (role === 'client') redirect('/portal')
-  if (role === 'freelancer') redirect('/partner')
+
+  /**
+   * Kantoorlidmaatschap gaat vóór een oude partnerrol ('freelancer'). Een
+   * account dat vroeger partner was en nu een Kantoor-partner is, moet in het
+   * Kantoor belanden — zeker nu de partnermodule uit staat: /partner leidt dan
+   * naar een omleiding naar /admin, die de gebruiker weer naar /login stuurt.
+   * Zo leek "inloggen lukt niet", terwijl het wachtwoord gewoon klopte.
+   */
 
   /**
    * Kantoorpartners hebben GEEN rol in user_roles — hun toegang blijkt uit een
@@ -54,5 +62,8 @@ export default async function Home() {
     .maybeSingle()
   if (kantoorLid) redirect('/kantoor')
 
-  redirect('/login')
+  // Oude partnerrol zonder Kantoor: enkel naar het partnerportaal als dat aanstaat.
+  if (role === 'freelancer' && FEATURES.partners) redirect('/partner')
+
+  redirect('/login?reden=geen_toegang')
 }

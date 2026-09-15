@@ -15,6 +15,8 @@ function LoginForm() {
   // namaaksite stuurt (open redirect). '//host' is óók extern.
   const rawRedirect = params.get('redirect') || '/'
   const redirect = rawRedirect.startsWith('/') && !rawRedirect.startsWith('//') ? rawRedirect : '/'
+  // Aangemeld maar nergens toegang toe (geen rol, geen Kantoor-lidmaatschap): zeg dat eerlijk.
+  const geenToegang = params.get('reden') === 'geen_toegang'
   const supabase = createClient()
 
   const [email, setEmail] = useState('')
@@ -84,6 +86,11 @@ function LoginForm() {
         </div>
       </div>
 
+      {geenToegang && !error && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          Dit account is wel bekend, maar heeft nog geen toegang tot een portaal. Neem contact op met NextGenMedia om je toegang te laten activeren.
+        </div>
+      )}
       {error && (
         <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
           {error}
