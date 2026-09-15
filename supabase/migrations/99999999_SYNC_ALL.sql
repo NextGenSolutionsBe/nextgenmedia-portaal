@@ -4102,3 +4102,21 @@ INSERT INTO public.clickup_taak_register (task_id, client_id, item_id, bron)
 SELECT clickup_task_id, client_id, id, 'content' FROM public.social_content_items
 WHERE clickup_task_id IS NOT NULL
 ON CONFLICT (task_id) DO NOTHING;
+
+-- ── Facturatieplanner: terugkerende facturaties stopzetten i.p.v. wissen; momentopname per maand ──
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS deleted_by_email text;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS billing_date date;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS amount_excl numeric;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS vat_pct numeric;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS amount_incl numeric;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS invoice_id uuid;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS cancelled_at timestamptz;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS cancelled_by_email text;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS note text;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS cancelled_at timestamptz;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS cancelled_by_email text;
+ALTER TABLE public.contract_facturatie_opdrachten ADD COLUMN IF NOT EXISTS geannuleerd_op timestamptz;
+ALTER TABLE public.contract_facturatie_opdrachten ADD COLUMN IF NOT EXISTS geannuleerd_door text;
+CREATE INDEX IF NOT EXISTS idx_invoices_invoice_date ON public.invoices (invoice_date);
+CREATE INDEX IF NOT EXISTS idx_cfo_factuurdatum ON public.contract_facturatie_opdrachten (factuurdatum);

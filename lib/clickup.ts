@@ -852,6 +852,35 @@ export async function annuleerAfspraakTaak(taskId: string): Promise<void> {
   })
 }
 
+/**
+ * Factuurtaak annuleren zonder ze te verwijderen: naam krijgt [GEANNULEERD],
+ * status gaat naar de 'closed'-status van de lijst (bestaande statussen), en
+ * er komt een opmerking bij. Maakt nooit een nieuwe taak aan; gooit bij fout.
+ */
+export async function annuleerFactuurTaak(taskId: string, opmerking: string): Promise<void> {
+  const task = await clickupJson<{ name?: string; list?: { id?: string }; status?: { type?: string } }>(`/task/${taskId}`)
+  let dicht: string | null = null
+  if (task.list?.id) {
+    try {
+      const lijst = await clickupJson<{ statuses?: { status: string; type: string }[] }>(`/list/${task.list.id}`)
+      dicht = (lijst.statuses ?? []).find((s) => s.type === 'closed')?.status ?? null
+    } catch { /* geen statussen → enkel hernoemen + opmerking */ }
+  }
+  const naam = String(task.name ?? '').replace(/^\[GEANNULEERD\]\s*/, '')
+  await clickupJson(`/task/${taskId}`, { method: 'PUT', body: JSON.stringify({ name: `[GEANNULEERD] ${naam}`, ...(dicht ? { status: dicht } : {}) }) })
+  try { await clickupJson(`/task/${taskId}/comment`, { method: 'POST', body: JSON.stringify({ comment_text: opmerking, notify_all: false }) }) } catch { /* opmerking is best-effort */ }
+}
+
+/** Naam, factuurdatum en/of omschrijving van een bestaande factuurtaak bijwerken (nooit aanmaken). */
+export async function werkFactuurTaakBij(taskId: string, w: { naam?: string; dueDate?: string; omschrijving?: string }): Promise<void> {
+  const body: Record<string, unknown> = {}
+  if (w.naam) body.name = w.naam
+  if (w.omschrijving) body.description = w.omschrijving
+  if (w.dueDate) { const ms = Date.parse(`${w.dueDate}T12:00:00Z`); if (!Number.isNaN(ms)) { body.due_date = ms; body.due_date_time = false } }
+  if (Object.keys(body).length === 0) return
+  await clickupJson(`/task/${taskId}`, { method: 'PUT', body: JSON.stringify(body) })
+}
+
 export type ClickupLijst = { id: string; naam: string; pad: string }
 
 /**
