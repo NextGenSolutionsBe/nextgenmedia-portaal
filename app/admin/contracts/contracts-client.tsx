@@ -97,11 +97,14 @@ export function ContractsClient({
   useEffect(() => {
     if (!hersteld) return
     const ctx = leesContext()
-    if (ctx && ctx.scrollY > 0) requestAnimationFrame(() => window.scrollTo({ top: ctx.scrollY }))
+    // Next zet de pagina na een navigatie zelf bovenaan; daarom herstellen we
+    // de positie pas daarna (twee pogingen), en pas dan luisteren we naar scrollen.
+    const doel = ctx && ctx.scrollY > 0 ? ctx.scrollY : 0
     let klok: ReturnType<typeof setTimeout> | undefined
     const opScroll = () => { if (klok) return; klok = setTimeout(() => { klok = undefined; bewaarContext({ scrollY: window.scrollY }) }, 150) }
-    window.addEventListener('scroll', opScroll, { passive: true })
-    return () => { window.removeEventListener('scroll', opScroll); if (klok) clearTimeout(klok) }
+    const t1 = setTimeout(() => { if (doel) window.scrollTo({ top: doel }) }, 80)
+    const t2 = setTimeout(() => { if (doel && Math.abs(window.scrollY - doel) > 20) window.scrollTo({ top: doel }); window.addEventListener('scroll', opScroll, { passive: true }) }, 450)
+    return () => { clearTimeout(t1); clearTimeout(t2); window.removeEventListener('scroll', opScroll); if (klok) clearTimeout(klok) }
   }, [hersteld])
   useEffect(() => { if (hersteld) bewaarContext({ query }) }, [query, hersteld])
 
