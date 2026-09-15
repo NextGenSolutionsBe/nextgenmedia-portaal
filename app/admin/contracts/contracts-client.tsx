@@ -104,7 +104,10 @@ export function ContractsClient({
     const opScroll = () => { if (klok) return; klok = setTimeout(() => { klok = undefined; bewaarContext({ scrollY: window.scrollY }) }, 150) }
     const t1 = setTimeout(() => { if (doel) window.scrollTo({ top: doel }) }, 80)
     const t2 = setTimeout(() => { if (doel && Math.abs(window.scrollY - doel) > 20) window.scrollTo({ top: doel }); window.addEventListener('scroll', opScroll, { passive: true }) }, 450)
-    return () => { clearTimeout(t1); clearTimeout(t2); window.removeEventListener('scroll', opScroll); if (klok) clearTimeout(klok) }
+    // Zeker weten: bij het aanklikken van een contract de positie van dát moment bewaren.
+    const opKlik = (e: MouseEvent) => { if ((e.target as Element | null)?.closest?.('a[href^="/admin/contracts/"]')) bewaarContext({ scrollY: window.scrollY }) }
+    document.addEventListener('click', opKlik, true)
+    return () => { clearTimeout(t1); clearTimeout(t2); window.removeEventListener('scroll', opScroll); document.removeEventListener('click', opKlik, true); if (klok) clearTimeout(klok) }
   }, [hersteld])
   useEffect(() => { if (hersteld) bewaarContext({ query }) }, [query, hersteld])
 
