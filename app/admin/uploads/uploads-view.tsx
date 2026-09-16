@@ -1,10 +1,11 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
 import { cn } from '@/lib/utils'
 import { STATUSSEN, STATUS_LABELS, isVideo, leesbareGrootte, type Status } from '@/lib/client-uploads'
-import { Download, Film, ImageIcon, Trash2, ExternalLink, X } from 'lucide-react'
+import { maakZipSchrijver, verdeelInDelen, uniekeNaam, zipBestandsnaam, zipSegment } from '@/lib/zip-browser'
+import { Archive, Download, Film, ImageIcon, Loader2, Trash2, ExternalLink, X } from 'lucide-react'
 
 export type AdminUpload = {
   id: string
@@ -28,6 +29,43 @@ export type AdminUpload = {
 const datum = (s: string) =>
   new Date(s).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' })
 
+type Voortgang = { klaar: number; totaal: number; bytes: number; fase: string }
+type Doel = { schrijf: (d: Uint8Array) => Promise<void>; sluit: (afgebroken: boolean) => Promise<void> }
+
+/**
+ * Waar de ZIP naartoe gaat. Kan de browser rechtstreeks naar een bestand op
+ * schijf schrijven (Chrome/Edge), dan stroomt alles daarheen en blijft het
+ * geheugen leeg. Anders verzamelen we de delen en bieden we het geheel aan als
+ * één download. Moet in de klik zelf gebeuren: het opslagvenster mag enkel
+ * open na een handeling van de gebruiker.
+ */
+async function openDoel(naam: string): Promise<Doel> {
+  type Schrijfbaar = { write: (d: Uint8Array) => Promise<void>; close: () => Promise<void>; abort: () => Promise<void> }
+  const w = window as unknown as { showSaveFilePicker?: (o: unknown) => Promise<{ createWritable: () => Promise<Schrijfbaar> }> }
+  if (typeof w.showSaveFilePicker === 'function') {
+    try {
+      const handle = await w.showSaveFilePicker({ suggestedName: naam, types: [{ description: 'ZIP-archief', accept: { 'application/zip': ['.zip'] } }] })
+      const ws = await handle.createWritable()
+      return { schrijf: (d) => ws.write(d), sluit: async (afgebroken) => { if (afgebroken) await ws.abort(); else await ws.close() } }
+    } catch (e) {
+      if ((e as { name?: string })?.name === 'AbortError') throw new Error('Opslaan geannuleerd.')
+      // Geen toestemming of niet beschikbaar: terugvallen op een gewone download.
+    }
+  }
+  const delen: Uint8Array[] = []
+  return {
+    schrijf: async (d) => { delen.push(d) },
+    sluit: async (afgebroken) => {
+      if (afgebroken) return
+      const blob = new Blob(delen as unknown as BlobPart[], { type: 'application/zip' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url; a.download = naam
+      document.body.appendChild(a); a.click(); a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    },
+  }
+}
+
 const KLEUR: Record<Status, string> = {
   nieuw: 'bg-[#fff848] text-black',
   gezien: 'bg-blue-100 text-blue-700',
@@ -41,6 +79,8 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
   const [status, setStatus] = useState('')
   const [open, setOpen] = useState<AdminUpload | null>(null)
   const [fout, setFout] = useState<string | null>(null)
+  const [bulk, setBulk] = useState<Voortgang | null>(null)
+  const stopRef = useRef<{ nu: boolean } | null>(null)
 
   const klanten = useMemo(
     () => [...new Set(lijst.map((u) => u.client_naam))].sort((a, b) => a.localeCompare(b)),
@@ -75,6 +115,70 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
     if (!r.ok) {
       setLijst(vorige)
       setFout((await r.json()).error ?? 'Bijwerken mislukt.')
+    }
+  }
+
+  /**
+   * Alles wat nu zichtbaar is (dus binnen de gekozen klant/map/status) in één
+   * keer downloaden als ZIP met de structuur Klant/Map/bestand. De browser
+   * haalt de bestanden zelf op via verse getekende links en pakt ze in —
+   * zonder servergrens op grootte of duur, met voortgang en een stopknop.
+   */
+  const downloadAlles = async () => {
+    if (zichtbaar.length === 0 || bulk) return
+    setFout(null)
+    const stop = { nu: false }; stopRef.current = stop
+    const meld = (deel: Partial<Voortgang>) => setBulk((b) => ({ ...(b ?? { klaar: 0, totaal: zichtbaar.length, bytes: 0, fase: '' }), ...deel }))
+    const basis = klant ? `klantuploads-${zipSegment(klant)}` : 'klantuploads'
+    const mislukt: string[] = []
+    let klaar = 0, bytes = 0
+    try {
+      // De verdeling in delen kennen we vooraf (de groottes staan in de lijst),
+      // zodat het opslagvenster voor deel 1 nog binnen de klik kan openen.
+      const delenVooraf = verdeelInDelen(zichtbaar)
+      const eersteDoel = await openDoel(zipBestandsnaam(basis, 1, delenVooraf.length, new Date()))
+      meld({ fase: 'Downloadlinks ophalen…', totaal: zichtbaar.length })
+
+      const r = await fetch('/api/admin/uploads/download', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: zichtbaar.map((u) => u.id) }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j.error ?? 'Kon de bestanden niet ophalen.')
+      const bestanden = (j.bestanden ?? []) as { id: string; pad: string; url: string | null; grootte: number | null }[]
+      const delen = verdeelInDelen(bestanden)
+
+      for (let d = 0; d < delen.length; d++) {
+        if (stop.nu) break
+        const doel = d === 0 ? eersteDoel : await openDoel(zipBestandsnaam(basis, d + 1, delen.length, new Date()))
+        const zip = maakZipSchrijver(doel.schrijf)
+        const gebruikt = new Set<string>()
+        try {
+          for (const b of delen[d]) {
+            if (stop.nu) break
+            meld({ fase: `${d + 1}/${delen.length} · ${b.pad}`, klaar, bytes })
+            if (!b.url) { mislukt.push(b.pad); klaar++; continue }
+            try {
+              const res = await fetch(b.url)
+              if (!res.ok) throw new Error(String(res.status))
+              const data = new Uint8Array(await res.arrayBuffer())
+              await zip.voegToe(uniekeNaam(gebruikt, b.pad), data)
+              bytes += data.length
+            } catch { mislukt.push(b.pad) }
+            klaar++
+            meld({ klaar, bytes })
+          }
+          if (!stop.nu) await zip.sluit()
+        } finally {
+          await doel.sluit(stop.nu)
+        }
+      }
+      if (stop.nu) setFout('Download gestopt.')
+      else if (mislukt.length > 0) setFout(`${mislukt.length} bestand(en) konden niet opgehaald worden en zitten niet in de ZIP: ${mislukt.slice(0, 5).join(', ')}${mislukt.length > 5 ? ' …' : ''}`)
+    } catch (e) {
+      setFout(e instanceof Error ? e.message : 'Downloaden mislukt.')
+    } finally {
+      setBulk(null); stopRef.current = null
     }
   }
 
@@ -129,7 +233,38 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
             </button>
           ))}
         </div>
+
+        <button
+          type="button"
+          onClick={downloadAlles}
+          disabled={zichtbaar.length === 0 || !!bulk}
+          title={klant || mapNaam || status ? 'Downloadt alles binnen de gekozen filters als één ZIP (Klant/Map/bestand).' : 'Downloadt alle klantuploads als één ZIP (Klant/Map/bestand).'}
+          className="ml-auto text-xs font-semibold px-3 py-2 rounded-xl bg-[#fff848] text-black hover:brightness-95 disabled:opacity-50 disabled:hover:brightness-100 flex items-center gap-1.5"
+        >
+          {bulk ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Archive className="h-3.5 w-3.5" />}
+          Alles downloaden ({zichtbaar.length} · {leesbareGrootte(zichtbaar.reduce((s, u) => s + (Number(u.grootte) || 0), 0))})
+        </button>
       </div>
+
+      {bulk && (
+        <div className="rounded-xl border border-gray-200 px-4 py-3 text-sm flex items-center gap-3 bg-white">
+          <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="font-medium">ZIP maken · {bulk.klaar} van {bulk.totaal} bestanden · {leesbareGrootte(bulk.bytes)}</p>
+            <p className="text-xs text-gray-500 truncate">{bulk.fase}</p>
+            <div className="mt-1.5 h-1.5 rounded-full bg-gray-100 overflow-hidden">
+              <div className="h-full bg-[#fff848] transition-all" style={{ width: `${bulk.totaal ? Math.round((bulk.klaar / bulk.totaal) * 100) : 0}%` }} />
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => { if (stopRef.current) stopRef.current.nu = true }}
+            className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 shrink-0"
+          >
+            Stoppen
+          </button>
+        </div>
+      )}
 
       {fout && (
         <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-2">{fout}</p>

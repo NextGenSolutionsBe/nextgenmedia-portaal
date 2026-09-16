@@ -7,7 +7,7 @@ import {
   recurringActiveInMonth, INVOICE_STATUSES, INVOICE_DAYS, DEFAULT_VAT, type RevenueEntry, type RecurringInvoice,
 } from '@/lib/invoices'
 import { removeAutoSetterInvoices } from '@/lib/sales/setter-invoices'
-import { createInvoiceTask, completeInvoiceTask, clickupConfigured, INVOICE_ASSIGNEE_NAME } from '@/lib/clickup'
+import { createInvoiceTask, completeInvoiceTask, werkFactuurTaakBij, clickupConfigured, INVOICE_ASSIGNEE_NAME } from '@/lib/clickup'
 import { kostenPerFactuur, logKost, type FactuurRef } from '@/lib/facturen/kosten-data'
 import { stelClassificatieVoor, type KostenStatus, type Classificatie } from '@/lib/facturen/kosten-winst'
 import { stopRecurring, zetMaandStatus, werkToekomstigeMaandenBij } from '@/lib/facturatie/recurring'
@@ -206,7 +206,7 @@ export async function GET(req: NextRequest) {
         setterName: i.setter_id ? (setterNames.get(i.setter_id as string) ?? null) : null,
       })
     }
-    const recRow = new Map((recMonths ?? []).map((m: { recurring_id: string; status: string; clickup_task_id: string | null }) => [m.recurring_id, m]))
+    const recRow = new Map((recMonths ?? []).map((m: { recurring_id: string; status: string; clickup_task_id: string | null; billing_date?: string | null }) => [m.recurring_id, m]))
     for (const r of (recurring ?? []) as RecurringInvoice[]) {
       if (!recurringActiveInMonth(r, month)) continue
       const mr = recRow.get(r.id)
@@ -215,7 +215,8 @@ export async function GET(req: NextRequest) {
         client_id: r.client_id, service_slug: r.service_slug, description: r.description,
         amount_excl: Number(r.amount_excl), vat_pct: Number(r.vat_pct), amount_incl: Number(r.amount_incl),
         status: normalizeInvoiceStatus(mr?.status ?? 'te_versturen'), revenue_id: r.revenue_id,
-        billing_date: billingDateFor(month, r.invoice_day), clickup_task_id: mr?.clickup_task_id ?? null,
+        // Een verplaatste maand heeft haar eigen datum; anders de vaste factuurdag.
+        billing_date: (mr?.billing_date ?? '').slice(0, 10) || billingDateFor(month, r.invoice_day), clickup_task_id: mr?.clickup_task_id ?? null,
         recurring_start: (r.start_month ?? '').slice(0, 7) || null, recurring_end: r.end_month ? r.end_month.slice(0, 7) : null, invoice_day: r.invoice_day ?? 'last',
         // Terugkerende facturen zijn altijd klantfacturen.
         invoiceKind: 'client', setterName: null,
@@ -375,7 +376,11 @@ export async function PATCH(req: NextRequest) {
       if (b.active !== undefined) patch.active = !!b.active
       if (b.invoice_day !== undefined) patch.invoice_day = INVOICE_DAYS.includes(b.invoice_day) ? b.invoice_day : 'last'
     } else {
-      if (b.invoice_date !== undefined) patch.invoice_date = b.invoice_date || null
+      if (b.invoice_date !== undefined) {
+        patch.invoice_date = b.invoice_date || null
+        // De maand volgt de datum, anders staat de factuur in het verkeerde maandoverzicht.
+        if (/^\d{4}-\d{2}-\d{2}/.test(String(b.invoice_date ?? ''))) patch.invoice_month = String(b.invoice_date).slice(0, 7)
+      }
     }
     if (b.amount_excl !== undefined || b.vat_pct !== undefined) {
       const { data: cur } = await admin.from(table).select('amount_excl, vat_pct').eq('id', b.id).maybeSingle()
@@ -386,6 +391,13 @@ export async function PATCH(req: NextRequest) {
     if (Object.keys(patch).length === 0) return NextResponse.json({ error: 'Geen wijzigingen' }, { status: 400 })
     const { error } = await admin.from(table).update(patch).eq('id', b.id)
     if (error) throw new Error(error.message)
+    // Nieuwe factuurdatum (ook na versturen toegestaan): de ClickUp-taak, als
+    // die er is, krijgt dezelfde vervaldag. Lukt dat niet, dan blijft de datum
+    // in de app leidend.
+    if (b.kind !== 'recurring' && typeof patch.invoice_date === 'string' && clickupConfigured()) {
+      const { data: inv } = await admin.from('invoices').select('clickup_task_id').eq('id', b.id).maybeSingle()
+      if (inv?.clickup_task_id) { try { await werkFactuurTaakBij(inv.clickup_task_id, { dueDate: patch.invoice_date }) } catch { /* zie boven */ } }
+    }
     // Terugkerend: enkel toekomstige, nog niet uitgevoerde maanden volgen de
     // wijziging (historiek heeft haar eigen momentopname); hun ClickUp-taken mee.
     let clickup: { bijgewerkt: number; fouten: string[] } | null = null

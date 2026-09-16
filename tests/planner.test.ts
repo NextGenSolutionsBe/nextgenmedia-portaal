@@ -1,5 +1,6 @@
 // Acceptatietests facturatieplanner (pure logica). Uitvoeren: npx tsx tests/planner.test.ts
 import assert from 'node:assert/strict'
+import { magVerplaatsen } from '../lib/facturatie/planner-model'
 import {
   bepaalStatus, samenvatting, pasFiltersToe, LEEG_FILTERS, dagTotalen, sorteer, maandRooster, weekBereik, roosterBereik,
   vandaagBrussel, momentSleutel, ontleedSleutel, kort, plusDagen, weekdag, euro, type Moment,
@@ -116,6 +117,11 @@ test('10. Compacte kalenderregel en btw-bedragen', () => {
   assert.equal(kort(m), `Verheyen Tegels – ${euro(680)} – Maandfactuur`)   // Intl zet een vaste spatie na €
   assert.match(kort(m), /^Verheyen Tegels – €\s?680 – Maandfactuur$/)
   assert.equal(m.bedrag_incl, 822.8)
+})
+
+test('11. Factuurdatum altijd te verplaatsen, behalve bij een geannuleerd moment', () => {
+  for (const s of ['gepland', 'te_versturen', 'controle_vereist', 'verstuurd', 'betaald', 'achterstallig'] as const) assert.equal(magVerplaatsen(s), true, s)
+  assert.equal(magVerplaatsen('geannuleerd'), false)
 })
 
 console.log(`\n${n} tests geslaagd`)

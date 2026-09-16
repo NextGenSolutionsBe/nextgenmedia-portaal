@@ -103,6 +103,7 @@ export function PlannerDetail({ moment: m, onSluit, onActie, bezig }: { moment: 
             </div>
             <button type="button" disabled={bezig || !isDatum(nieuweDatum) || nieuweDatum === m.datum} onClick={async () => { const ok = await onActie('verplaats', m, { datum: nieuweDatum }); if (ok) setVerplaatsen(false) }} className="btn-primary text-xs">Verplaatsen</button>
             <button type="button" onClick={() => setVerplaatsen(false)} className="btn-secondary text-xs">Annuleren</button>
+            {(m.status === 'verstuurd' || m.status === 'betaald') && <p className="w-full text-[11px] text-gray-500">Ook een verstuurde of betaalde factuur mag van datum veranderen; een gekoppelde ClickUp-taak krijgt dezelfde vervaldag.</p>}
           </div>
         )}
         {!a.kanVerstuurd && !a.kanVerplaatsen && !a.kanAnnuleren && m.bron === 'wam' && <p className="text-[11px] text-gray-500">WAM-termijnen beheer je in Vesting → WAM-portefeuille.</p>}

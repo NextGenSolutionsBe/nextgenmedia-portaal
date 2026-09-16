@@ -21,6 +21,13 @@ export const STATUS_INFO = Object.fromEntries(PLANNER_STATUSSEN.map((s) => [s.ke
 /** Statussen die nog werk vragen (tellen mee in "te versturen" en in het maandbedrag). */
 export const OPEN_STATUSSEN: PlannerStatus[] = ['gepland', 'te_versturen', 'controle_vereist', 'achterstallig']
 
+/**
+ * De facturatiedatum mag ALTIJD aangepast worden — ook van een verstuurde of
+ * betaalde factuur: een verkeerde datum moet je kunnen rechtzetten. Enkel een
+ * geannuleerd moment verplaats je niet meer, want dat bestaat niet meer.
+ */
+export const magVerplaatsen = (status: PlannerStatus): boolean => status !== 'geannuleerd'
+
 // ── Herkomst ─────────────────────────────────────────────────────────────────
 export type Herkomst = 'eenmalig' | 'recurring' | 'contract' | 'wam'
 export const HERKOMST_LABEL: Record<Herkomst, string> = {

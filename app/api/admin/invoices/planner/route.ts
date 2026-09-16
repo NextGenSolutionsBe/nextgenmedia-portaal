@@ -84,7 +84,8 @@ export async function POST(req: NextRequest) {
       }
       if (b.actie === 'verplaats') {
         if (!isDatum(b.datum ?? '')) return NextResponse.json({ error: 'Geef een geldige datum.' }, { status: 400 })
-        if (definitief) return NextResponse.json({ error: 'Een verstuurde factuur verplaats je niet meer.' }, { status: 400 })
+        // Ook een verstuurde of betaalde factuur mag van datum veranderen (een
+        // verkeerde datum moet je kunnen rechtzetten); de ClickUp-taak volgt mee.
         const { error } = await admin.from('invoices').update({ invoice_date: b.datum, invoice_month: ymVan(b.datum!) }).eq('id', inv.id)
         if (error) throw new Error(error.message)
         await verplaatsTaak(inv.clickup_task_id, b.datum!)
@@ -126,10 +127,12 @@ export async function POST(req: NextRequest) {
       }
       if (b.actie === 'verplaats') {
         if (!isDatum(b.datum ?? '')) return NextResponse.json({ error: 'Geef een geldige datum.' }, { status: 400 })
-        if (definitief) return NextResponse.json({ error: 'Een verstuurde maand verplaats je niet meer.' }, { status: 400 })
+        // Ook een verstuurde maand mag van datum veranderen; een gekoppelde factuur volgt mee.
         const r: Record<string, unknown> = { recurring_id: rec.id, month: sleutel.maand, status: rij?.status ?? 'te_versturen', clickup_task_id: rij?.clickup_task_id ?? null, billing_date: b.datum }
         const { error } = await admin.from('recurring_invoice_months').upsert(r, { onConflict: 'recurring_id,month' })
         if (error) throw new Error(error.message)
+        // Hangt er al een echte factuur aan deze maand, dan krijgt die dezelfde datum.
+        if (rij?.invoice_id) await admin.from('invoices').update({ invoice_date: b.datum, invoice_month: ymVan(b.datum!) }).eq('id', rij.invoice_id)
         await verplaatsTaak(rij?.clickup_task_id ?? null, b.datum!)
         await audit(`Factuurdatum maand ${sleutel.maand} verplaatst ${huidigeDatum} → ${b.datum}`, { van: huidigeDatum, naar: b.datum })
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
@@ -168,7 +171,7 @@ export async function POST(req: NextRequest) {
       }
       if (b.actie === 'verplaats') {
         if (!isDatum(b.datum ?? '')) return NextResponse.json({ error: 'Geef een geldige datum.' }, { status: 400 })
-        if (o.status === 'afgehandeld' || o.status === 'geannuleerd') return NextResponse.json({ error: 'Deze opdracht kan niet meer verplaatst worden.' }, { status: 400 })
+        if (o.status === 'geannuleerd') return NextResponse.json({ error: 'Een geannuleerde opdracht verplaats je niet meer.' }, { status: 400 })
         const { error } = await admin.from('contract_facturatie_opdrachten').update({ factuurdatum: b.datum, updated_at: new Date().toISOString() }).eq('id', o.id)
         if (error) throw new Error(error.message)
         // De taak volgt via de gewone synchronisatie (vingerafdruk verandert).

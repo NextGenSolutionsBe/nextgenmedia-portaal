@@ -4,7 +4,7 @@ import { SERVICE_LABELS } from '@/lib/utils'
 import { clickupConfigured } from '@/lib/clickup'
 import { leesInstellingen } from '@/lib/instellingen/laden'
 import { TYPE_LABEL, type OpdrachtType } from './schema'
-import { bepaalStatus, ymVan, momentSleutel, type Moment, type Herkomst, type ClickupSync } from './planner-model'
+import { bepaalStatus, ymVan, momentSleutel, magVerplaatsen, type Moment, type Herkomst, type ClickupSync } from './planner-model'
 
 /**
  * De ENIGE plek die facturatiemomenten samenstelt. Kalender, lijst en de
@@ -100,7 +100,7 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
       recurring_id: null, invoice_id: String(i.id), wam_id: (i.wam_id as string | null) ?? null, schema: null, opmerking: (i.note as string | null) ?? null,
       acties: {
         bekijkenUrl: `/admin/invoices?maand=${maand}`, aanpassenUrl: `/admin/invoices?maand=${maand}`, voorbereidenUrl: null,
-        kanVerstuurd: actief, kanVerplaatsen: actief, kanAnnuleren: actief, kanSync: clickup && actief && !i.clickup_task_id,
+        kanVerstuurd: actief, kanVerplaatsen: magVerplaatsen(status), kanAnnuleren: actief, kanSync: clickup && actief && !i.clickup_task_id,
       },
     })
   }
@@ -137,7 +137,7 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
         opmerking: rij?.note ?? null,
         acties: {
           bekijkenUrl: `/admin/invoices?maand=${m}`, aanpassenUrl: `/admin/invoices?maand=${m}`, voorbereidenUrl: null,
-          kanVerstuurd: actief, kanVerplaatsen: actief, kanAnnuleren: actief, kanSync: clickup && actief && !rij?.clickup_task_id,
+          kanVerstuurd: actief, kanVerplaatsen: magVerplaatsen(status), kanAnnuleren: actief, kanSync: clickup && actief && !rij?.clickup_task_id,
         },
       })
     }
@@ -166,7 +166,7 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
       schema: o.periode, opmerking: (o.aandachtspunten ?? []).join(' · ') || null,
       acties: {
         bekijkenUrl: `/admin/contracts/${o.contract_id}#facturatie`, aanpassenUrl: `/admin/contracts/${o.contract_id}#facturatie`, voorbereidenUrl: actief ? `/admin/contracts/${o.contract_id}#facturatie` : null,
-        kanVerstuurd: false, kanVerplaatsen: actief, kanAnnuleren: actief, kanSync: clickup && actief,
+        kanVerstuurd: false, kanVerplaatsen: magVerplaatsen(status), kanAnnuleren: actief, kanSync: clickup && actief,
       },
     })
   }

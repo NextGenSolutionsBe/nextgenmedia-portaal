@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ChevronLeft, ChevronRight, Plus, X, Loader2, Trash2, Send, Repeat, FileText, Ban, User, CalendarDays, CheckCircle2, AlertTriangle } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, X, Loader2, Trash2, Send, Repeat, FileText, Ban, User, CalendarDays, CalendarClock, CheckCircle2, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatEuro, SERVICE_LABELS } from '@/lib/utils'
 import {
@@ -134,6 +134,21 @@ export function InvoicesPanel({ initialMonth }: { initialMonth?: string } = {}) 
     setBusy(r.rowId)
     try { const res = await fetch('/api/admin/invoices', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: r.kind, id: r.sourceId, revenue_id }) }); const j = await res.json(); if (!res.ok) throw new Error(j.error); await load() }
     catch (e) { toast.error(e instanceof Error ? e.message : 'Fout') } finally { setBusy(null) }
+  }
+  // Factuurdatum wijzigen — altijd, ook na versturen. Loopt via de planner-API
+  // zodat maand, gekoppelde factuur en ClickUp-taak op één plek meebewegen.
+  const verplaats = async (r: Row, datum: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(datum) || datum === r.billing_date) return
+    setBusy(r.rowId)
+    try {
+      const id = r.kind === 'recurring' ? `rec:${r.sourceId}:${r.month}` : `inv:${r.sourceId}`
+      const res = await fetch('/api/admin/invoices/planner', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actie: 'verplaats', id, datum }) })
+      const j = await res.json(); if (!res.ok) throw new Error(j.error)
+      for (const w of (j.waarschuwingen ?? []) as string[]) toast.warning(w)
+      const nieuweMaand = datum.slice(0, 7)
+      toast.success(r.kind === 'eenmalig' && nieuweMaand !== r.month ? `Factuurdatum aangepast — de factuur staat nu in ${monthLabel(nieuweMaand)}.` : 'Factuurdatum aangepast.')
+      await load()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Fout') } finally { setBusy(null) }
   }
   const remove = async (r: Row) => {
     if (!confirm(r.kind === 'recurring' ? 'Recurring factuur (alle maanden) verwijderen?' : 'Factuur verwijderen?')) return
@@ -274,6 +289,12 @@ export function InvoicesPanel({ initialMonth }: { initialMonth?: string } = {}) 
 
                   {/* Snelle acties (geen aparte schermen) */}
                   <div className="flex items-center gap-1 shrink-0">
+                    {!cancelled && (
+                      <label className="flex items-center gap-1 text-gray-400 mr-1" title="Factuurdatum — altijd aan te passen, ook na versturen">
+                        <CalendarClock className="h-3.5 w-3.5" />
+                        <input type="date" value={r.billing_date} disabled={busy === r.rowId} onChange={(e) => verplaats(r, e.target.value)} className="rounded-lg border border-gray-200 px-1.5 py-1 text-xs text-gray-700" aria-label="Factuurdatum" />
+                      </label>
+                    )}
                     {r.status === 'te_versturen' && <button onClick={() => setStatus(r, 'verstuurd')} disabled={busy === r.rowId} className="btn-primary text-xs" title="Markeer als verstuurd">{busy === r.rowId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}Verstuurd</button>}
                     {r.status === 'verstuurd' && <button onClick={() => setStatus(r, 'te_versturen')} disabled={busy === r.rowId} className="btn-secondary text-xs" title="Terug naar te versturen">Te versturen</button>}
                     {!cancelled && <button onClick={() => setStatus(r, 'geannuleerd')} disabled={busy === r.rowId} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400" title="Annuleren"><Ban className="h-3.5 w-3.5" /></button>}
