@@ -47,11 +47,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: DATABANK_TIJDELIJK }, { status: 503, headers: { 'Retry-After': '30' } })
   }
   if (toegang === 'nee') return NextResponse.json({ error: 'Niet geautoriseerd' }, { status: 401 })
+  const gestart = Date.now()
   const r = await draaiClickupAgendaSync()
   // Facturatieopdrachten die ClickUp niet haalden: elke run een paar opnieuw,
-  // met oplopende wachttijd. Mag de agendasync nooit laten falen.
+  // met oplopende wachttijd. Mag de agendasync nooit laten falen — en mag de
+  // functie ook nooit over de 60 seconden van Vercel duwen: enkel als de
+  // agendasync vlot ging (< 30 s) en hooguit drie per run; de volgende minuut
+  // komt er toch een nieuwe kans.
   let facturatie: { geprobeerd: number; gelukt: number } | null = null
-  try { facturatie = await herprobeerSyncs(createAdminSupabaseClient(), 10) } catch { facturatie = null }
+  if (Date.now() - gestart < 30_000) {
+    try { facturatie = await herprobeerSyncs(createAdminSupabaseClient(), 3) } catch { facturatie = null }
+  }
   return NextResponse.json({ ...r, facturatie }, { status: r.ok ? 200 : 500 })
 }
 
