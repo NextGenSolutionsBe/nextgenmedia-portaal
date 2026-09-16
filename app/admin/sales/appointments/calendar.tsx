@@ -23,6 +23,8 @@ type Appt = {
   deal_value_cents?: number | null
   commission_pct?: number | null
   tijdsbelasting?: number | null
+  notes?: string | null
+  client_note?: string | null
 }
 type Pipeline = { id: string; key: string; name: string; defaultCalendarId?: string | null }
 

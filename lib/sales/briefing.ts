@@ -86,3 +86,34 @@ export function bouwKlantOmschrijving(i: BriefingInput): string {
   if (schoon(i.meetUrl)) blokken.push(`Online deelnemen: ${schoon(i.meetUrl)}`)
   return blokken.join('\n\n')
 }
+
+/**
+ * Leesbaar moment van een afspraak in de tijdzone van de agenda, bv.
+ * "24/09/2026 om 16:00". Bewust zonder Intl-eigenaardigheden (komma's,
+ * vaste spaties) zodat dezelfde tekst ook vanuit SQL te maken is.
+ */
+export function afspraakMoment(wanneer: string | number | Date, timeZone = 'Europe/Brussels'): string {
+  const d = new Date(wanneer)
+  const delen = new Intl.DateTimeFormat('nl-BE', {
+    timeZone, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(d)
+  const v = (t: string) => delen.find((x) => x.type === t)?.value ?? ''
+  return `${v('day')}/${v('month')}/${v('year')} om ${v('hour')}:${v('minute')}`
+}
+
+/**
+ * De notitie die bij het boeken op de tijdlijn van de lead komt.
+ *
+ * De briefing stond tot nu enkel op de afspraak zelf (en in het agenda-item,
+ * de ClickUp-taak en de interne mail). In de app zag je daar niets van terug:
+ * de tijdlijn toonde "niets genoteerd" terwijl de setter net een halve pagina
+ * had ingetikt. Niets ingetikt → null, dan komt er geen lege regel bij.
+ */
+export function afspraakNotitie(i: { startMs: number; briefing?: string | null; klantNotitie?: string | null; timeZone?: string }): string | null {
+  const briefing = schoon(i.briefing), klant = schoon(i.klantNotitie)
+  if (!briefing && !klant) return null
+  const kop = `Briefing bij de afspraak van ${afspraakMoment(i.startMs, i.timeZone)}:`
+  const delen = [briefing ? `${kop}\n${briefing}` : kop]
+  if (klant) delen.push(`Afgesproken met de prospect: ${klant}`)
+  return delen.join('\n\n')
+}

@@ -286,6 +286,8 @@ export type CalendarData = {
     lead_id: string | null; company: string | null; contact: string | null
     calendar_id: string | null; pipeline_id: string | null
     outcome: string | null; deal_value_cents: number | null; commission_pct: number | null
+    /** Briefing van de setter en afspraak met de prospect, voor het detail. */
+    notes: string | null; client_note: string | null
   }[]
   connected: boolean
 }
@@ -354,6 +356,7 @@ export async function loadCalendar(
     lead_id: string | null; contact_id: string | null; calendar_id: string | null
     pipeline_id: string | null
     outcome?: string | null; deal_value_cents?: number | null; commission_pct?: number | null
+    notes?: string | null; client_note?: string | null
   }[]
   /**
    * Welke afspraken blokkeren déze agenda? Die van de persoon zelf — en dat is
@@ -418,6 +421,7 @@ export async function loadCalendar(
       outcome: a.outcome ?? null,
       deal_value_cents: a.deal_value_cents ?? null,
       commission_pct: a.commission_pct ?? null,
+      notes: a.notes ?? null, client_note: a.client_note ?? null,
       company: a.lead_id ? nameByLead.get(a.lead_id)?.company ?? null : null,
       contact: a.lead_id ? nameByLead.get(a.lead_id)?.contact ?? null : null,
     })),

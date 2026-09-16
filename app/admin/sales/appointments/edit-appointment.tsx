@@ -14,6 +14,9 @@ type Appt = {
   deal_value_cents?: number | null
   commission_pct?: number | null
   tijdsbelasting?: number | null
+  /** Briefing van de setter, ingetikt bij het boeken. */
+  notes?: string | null
+  client_note?: string | null
 }
 type Pipeline = { id: string; key: string; name: string }
 
@@ -117,6 +120,24 @@ export function EditAppointment({ appt, pipelines, isAdmin, onClose, onSaved }: 
         </div>
 
         <div className="p-5 space-y-3 overflow-y-auto">
+          {/* Wat de setter bij het boeken noteerde. Stond tot nu enkel in het
+              agenda-item en de ClickUp-taak; hier hoort het ook te staan. */}
+          {(appt.notes || appt.client_note) && (
+            <div className="rounded-xl bg-[#fffde6] border border-[#fff848] p-3 space-y-2">
+              {appt.notes && (
+                <div>
+                  <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Briefing van de setter</p>
+                  <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{appt.notes}</p>
+                </div>
+              )}
+              {appt.client_note && (
+                <div>
+                  <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Afgesproken met de prospect</p>
+                  <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{appt.client_note}</p>
+                </div>
+              )}
+            </div>
+          )}
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Lead</label>
             <LeadKiezer waarde={lead} onKies={setLead} />

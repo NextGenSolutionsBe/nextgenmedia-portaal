@@ -7,7 +7,7 @@ import { isBookable } from '@/lib/sales/availability'
 import { APPOINTMENT_STAGE } from '@/lib/sales/stages'
 import { createEvent, moveEvent, deleteEvent } from '@/lib/sales/google-calendar'
 import { normalizePhone } from '@/lib/sales/dedupe'
-import { bouwAgendaOmschrijving, bouwAgendaTitel, bouwKlantOmschrijving } from '@/lib/sales/briefing'
+import { bouwAgendaOmschrijving, bouwAgendaTitel, bouwKlantOmschrijving, afspraakMoment, afspraakNotitie } from '@/lib/sales/briefing'
 import { listPipelines, defaultPipelineId } from '@/lib/sales/pipelines'
 import { googleKleurId } from '@/lib/sales/merk'
 import {
@@ -339,9 +339,14 @@ export async function POST(req: NextRequest) {
       await admin.from('sales_leads').update({ stage_key: APPOINTMENT_STAGE }).eq('id', leadId)
       await logLeadEvent(leadId, {
         kind: 'stage', fromStage: leadStage, toStage: APPOINTMENT_STAGE,
-        body: `Afspraak geboekt op ${new Date(start).toISOString()}`,
+        body: `Afspraak geboekt op ${afspraakMoment(start, client.timezone)}${agenda?.name ? ` (agenda ${agenda.name})` : ''}`,
         actorId: actor.id, actorEmail: actor.email ?? null,
       })
+      // De briefing hoort óók op de tijdlijn van de lead (en dus in "laatste
+      // notitie"). Tot nu stond ze enkel op de afspraak en in Google/ClickUp/
+      // mail, waardoor de app "niets genoteerd" toonde.
+      const notitie = afspraakNotitie({ startMs: start, briefing: String(b.notes ?? ''), klantNotitie: String(b.clientNote ?? ''), timeZone: client.timezone })
+      if (notitie) await logLeadEvent(leadId, { kind: 'note', body: notitie, actorId: actor.id, actorEmail: actor.email ?? null })
     }
 
     // 4b) Boek je een lead voor het ándere merk, dan hoort die lead daar

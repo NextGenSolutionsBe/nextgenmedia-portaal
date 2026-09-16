@@ -16,14 +16,22 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     if (!(await requireStaff())) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
     const { id } = await params
     const admin = createAdminSupabaseClient()
-    const [{ data: lead }, { data: events }] = await Promise.all([
+    const [{ data: lead }, { data: events }, { data: afspraken }] = await Promise.all([
       admin.from('sales_leads')
         .select(`*, sales_companies ( * ), sales_contacts ( * )`)
         .eq('id', id).maybeSingle(),
       admin.from('sales_lead_events').select('*').eq('lead_id', id).order('created_at', { ascending: false }).limit(100),
+      // De afspraken mét briefing: wat de setter bij het boeken intikte moet
+      // in de app terug te lezen zijn, niet enkel in Google of ClickUp.
+      admin.from('sales_appointments').select('*').eq('lead_id', id).order('starts_at', { ascending: false }).limit(5),
     ])
     if (!lead) return NextResponse.json({ error: 'Lead niet gevonden' }, { status: 404 })
-    return NextResponse.json({ lead, events: events ?? [] })
+    const afsprakenUit = ((afspraken ?? []) as Record<string, unknown>[]).map((a) => ({
+      id: a.id, starts_at: a.starts_at, ends_at: a.ends_at, status: a.status, outcome: a.outcome ?? null,
+      titel: a.titel ?? null, adres: a.adres ?? null, meet_url: a.meet_url ?? null,
+      notes: a.notes ?? null, client_note: a.client_note ?? null,
+    }))
+    return NextResponse.json({ lead, events: events ?? [], afspraken: afsprakenUit })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
