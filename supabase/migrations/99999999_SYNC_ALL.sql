@@ -4120,3 +4120,12 @@ ALTER TABLE public.contract_facturatie_opdrachten ADD COLUMN IF NOT EXISTS geann
 ALTER TABLE public.contract_facturatie_opdrachten ADD COLUMN IF NOT EXISTS geannuleerd_door text;
 CREATE INDEX IF NOT EXISTS idx_invoices_invoice_date ON public.invoices (invoice_date);
 CREATE INDEX IF NOT EXISTS idx_cfo_factuurdatum ON public.contract_facturatie_opdrachten (factuurdatum);
+
+-- Indexen op foreign keys van de facturatietabellen (adviezen Supabase, 16 sep 2026)
+CREATE INDEX IF NOT EXISTS idx_invoices_client ON public.invoices (client_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_wam ON public.invoices (wam_id);
+CREATE INDEX IF NOT EXISTS idx_recurring_invoices_client ON public.recurring_invoices (client_id);
+CREATE INDEX IF NOT EXISTS idx_recurring_invoices_revenue ON public.recurring_invoices (revenue_id);
+CREATE INDEX IF NOT EXISTS idx_invoice_costs_line ON public.invoice_costs (line_id);
+CREATE INDEX IF NOT EXISTS idx_cfo_client ON public.contract_facturatie_opdrachten (client_id);
+CREATE INDEX IF NOT EXISTS idx_cfo_invoice ON public.contract_facturatie_opdrachten (invoice_id);
