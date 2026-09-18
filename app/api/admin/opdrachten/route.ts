@@ -2,7 +2,7 @@ import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import {
-  isStatus, statusInfo, afgeleideStatus, magAutomatischNaar, vandaagISO,
+  isStatus, statusInfo, afgeleideStatus, magAutomatischNaar, vandaagISO, waardeVan,
   type OpdrachtStatus, type Koppelingen, type ContractKoppeling, type FactuurKoppeling,
 } from '@/lib/opdrachten'
 import { canonicalStatus, statusInfo as contractStatusInfo } from '@/lib/contract-status'
@@ -14,9 +14,9 @@ const MIST = /relation .*opdrachten|does not exist|schema cache/i
 const HINT = 'De tabel voor opdrachten bestaat nog niet. Draai supabase/migrations/99999999_SYNC_ALL.sql.'
 
 const KOLOMMEN_BASIS = 'id, client_id, klant_vrij, titel, omschrijving, status, deadline, wie, afgerond_op, created_at'
-const KOLOMMEN = `${KOLOMMEN_BASIS}, contract_id, invoice_id, lead_id, status_bron, auto_status, status_gewijzigd_op`
+const KOLOMMEN = `${KOLOMMEN_BASIS}, contract_id, invoice_id, lead_id, status_bron, auto_status, status_gewijzigd_op, bedrag_excl`
 /** Kolommen die pas na de statusflow-migratie bestaan. */
-const NIEUWE_KOLOMMEN = /contract_id|invoice_id|lead_id|status_bron|auto_status|status_gewijzigd_op/i
+const NIEUWE_KOLOMMEN = /contract_id|invoice_id|lead_id|status_bron|auto_status|status_gewijzigd_op|bedrag_excl/i
 
 const geldigeStatus = (v: unknown): OpdrachtStatus | null => (isStatus(v) ? v : null)
 
@@ -30,6 +30,15 @@ const datum = (v: unknown): string | null | undefined => {
   const s = String(v ?? '').trim()
   if (!s) return null
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : undefined
+}
+
+/** Bedrag in euro (komma of punt), >= 0. Leeg = null; onzin = undefined (weigeren). */
+const bedrag = (v: unknown): number | null | undefined => {
+  if (v === null || v === undefined) return null
+  const t = String(v).trim().replace(/\s|€/g, '').replace(',', '.')
+  if (!t) return null
+  const n = Number(t)
+  return Number.isFinite(n) && n >= 0 && n < 1e9 ? Math.round(n * 100) / 100 : undefined
 }
 
 const uuid = (v: unknown): string | null => {
@@ -58,8 +67,8 @@ async function laadKoppelingen(admin: Admin, rijen: Rij[]): Promise<Map<string, 
 
   const [{ data: contracten }, { data: perContract }, { data: los }, { data: opdrachtRijen }] = await Promise.all([
     contractIds.length ? admin.from('contracts').select('id, title, status').in('id', contractIds) : { data: [] },
-    contractIds.length ? admin.from('invoices').select('id, status, invoice_date, amount_incl, description, contract_id').in('contract_id', contractIds) : { data: [] },
-    invoiceIds.length ? admin.from('invoices').select('id, status, invoice_date, amount_incl, description, contract_id').in('id', invoiceIds) : { data: [] },
+    contractIds.length ? admin.from('invoices').select('id, status, invoice_date, amount_incl, amount_excl, description, contract_id').in('contract_id', contractIds) : { data: [] },
+    invoiceIds.length ? admin.from('invoices').select('id, status, invoice_date, amount_incl, amount_excl, description, contract_id').in('id', invoiceIds) : { data: [] },
     contractIds.length ? admin.from('contract_facturatie_opdrachten').select('contract_id, status, factuurdatum').in('contract_id', contractIds).in('status', ['open', 'controle_vereist']) : { data: [] },
   ])
   const contractVan = new Map<string, ContractKoppeling>()
@@ -80,7 +89,7 @@ async function laadKoppelingen(admin: Admin, rijen: Rij[]): Promise<Map<string, 
     if (o.factuurdatum && String(o.factuurdatum).slice(0, 10) <= vandaag) facturatieOpen.add(o.contract_id)
   }
 
-  const kaal = (f: F): FactuurKoppeling => ({ id: f.id, status: f.status, invoice_date: f.invoice_date, amount_incl: f.amount_incl, description: f.description })
+  const kaal = (f: F): FactuurKoppeling => ({ id: f.id, status: f.status, invoice_date: f.invoice_date, amount_incl: f.amount_incl, amount_excl: f.amount_excl ?? null, description: f.description })
   for (const r of rijen) {
     if (!r.contract_id && !r.invoice_id) continue
     const contract = r.contract_id ? contractVan.get(r.contract_id) ?? null : null
@@ -145,13 +154,18 @@ export async function GET() {
         const { error: e } = await admin.from('opdrachten').update(patch).eq('id', o.id)
         if (!e) { status = afgeleid as OpdrachtStatus; o.status_bron = 'automatisch'; o.status_gewijzigd_op = nu }
       }
+      const bedragExcl = o.bedrag_excl === null || o.bedrag_excl === undefined ? null : Number(o.bedrag_excl)
+      const w = waardeVan({ bedrag_excl: bedragExcl, facturen: k?.facturen ?? [] })
       return {
         ...o,
         status,
+        bedrag_excl: bedragExcl,
         klant_naam: o.client_id ? naamVan.get(String(o.client_id)) ?? null : (o.klant_vrij ?? null),
         contract: k?.contract ?? null,
         facturen: k?.facturen ?? [],
         afgeleid,
+        waarde: w.waarde,
+        waarde_bron: w.bron,
       }
     }))
 
@@ -199,7 +213,7 @@ async function schrijf(doe: (patch: Record<string, unknown>) => PromiseLike<{ da
   let r = await doe(patch)
   if (r.error && NIEUWE_KOLOMMEN.test(r.error.message)) {
     const kaal = { ...patch }
-    for (const k of ['contract_id', 'invoice_id', 'lead_id', 'status_bron', 'auto_status', 'status_gewijzigd_op']) delete kaal[k]
+    for (const k of ['contract_id', 'invoice_id', 'lead_id', 'status_bron', 'auto_status', 'status_gewijzigd_op', 'bedrag_excl']) delete kaal[k]
     r = await doe(kaal)
   }
   return r
@@ -229,7 +243,10 @@ export async function POST(req: NextRequest) {
     }
 
     const status = geldigeStatus(b.status) ?? 'open'
+    const bedragExcl = bedrag(b.bedrag_excl)
+    if (bedragExcl === undefined) return NextResponse.json({ error: 'Dat bedrag begrijpen we niet.' }, { status: 400 })
     const rij: Record<string, unknown> = {
+      bedrag_excl: bedragExcl,
       client_id: clientId,
       klant_vrij: clientId ? null : tekst(b.klant_vrij, 120),
       titel,
@@ -298,6 +315,11 @@ export async function PATCH(req: NextRequest) {
       }
     }
     if ('klant_vrij' in b && !patch.client_id) patch.klant_vrij = tekst(b.klant_vrij, 120)
+    if ('bedrag_excl' in b) {
+      const w = bedrag(b.bedrag_excl)
+      if (w === undefined) return NextResponse.json({ error: 'Dat bedrag begrijpen we niet.' }, { status: 400 })
+      patch.bedrag_excl = w
+    }
 
     const fout = await leesKoppelingen(admin, b, patch)
     if (fout) return NextResponse.json({ error: fout }, { status: 400 })

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import {
   STATUSSEN, FASEN, OPEN_STATUSSEN, statusInfo, volgorde, volgendeStatus, afgeleideStatus, magAutomatischNaar,
-  pastInFilter, isTeLaat, sorteer, type Opdracht, type Koppelingen,
+  pastInFilter, isTeLaat, sorteer, waardeVan, verslag, type Opdracht, type Koppelingen,
 } from '../lib/opdrachten'
 
 let n = 0
@@ -101,6 +101,31 @@ test('10. Labels zijn de gevraagde benamingen', () => {
   assert.equal(statusInfo('getekend').label, 'Getekend')
   assert.equal(statusInfo('factuur_verstuurd').label, 'Factuur verstuurd')
   assert.equal(statusInfo('onbekend').key, 'open', 'onbekende waarde valt terug op Nieuw')
+})
+
+test('11. Waarde: ingevuld bedrag wint, anders de som van de gekoppelde facturen (excl. btw)', () => {
+  const fac = [{ ...f('verstuurd'), amount_excl: 1000 }, { ...f('te_versturen', 'b'), amount_excl: 500 }, { ...f('geannuleerd', 'c'), amount_excl: 999 }]
+  assert.deepEqual(waardeVan({ bedrag_excl: 4950, facturen: fac }), { waarde: 4950, bron: 'opdracht' })
+  assert.deepEqual(waardeVan({ bedrag_excl: null, facturen: fac }), { waarde: 1500, bron: 'facturen' })
+  assert.deepEqual(waardeVan({ bedrag_excl: 0, facturen: fac }), { waarde: 0, bron: 'opdracht' })
+  assert.deepEqual(waardeVan({ bedrag_excl: null, facturen: [] }), { waarde: null, bron: null })
+})
+
+test('12. Verslag: aantallen en waarde per stuk van de flow', () => {
+  const nu = new Date('2026-09-18T10:00:00Z')
+  const r = (status: Opdracht['status'], bedrag_excl: number | null, deadline: string | null = null) => ({ status, bedrag_excl, deadline, facturen: [] })
+  const v = verslag([
+    r('voorstel_gevraagd', 4950), r('interesse', 7950), r('geen_interesse', 3000),
+    r('getekend', 14950, '2026-09-10'), r('bezig', null), r('factuur_verstuurd', 1250), r('betaald', 2450), r('geannuleerd', 100), r('afgerond', 800),
+  ], nu)
+  assert.deepEqual(v.open, { aantal: 5, waarde: 29100, zonderWaarde: 1 })
+  assert.deepEqual(v.voorstel, { aantal: 2, waarde: 12900, zonderWaarde: 0 })
+  assert.deepEqual(v.contract, { aantal: 1, waarde: 14950, zonderWaarde: 0 })
+  assert.deepEqual(v.uitvoering, { aantal: 1, waarde: 0, zonderWaarde: 1 })
+  assert.deepEqual(v.facturatie, { aantal: 1, waarde: 1250, zonderWaarde: 0 })
+  assert.deepEqual(v.betaald, { aantal: 1, waarde: 2450, zonderWaarde: 0 })
+  assert.deepEqual(v.verloren, { aantal: 2, waarde: 3100, zonderWaarde: 0 })
+  assert.deepEqual(v.teLaat, { aantal: 1, waarde: 14950, zonderWaarde: 0 })
 })
 
 console.log(`\n${n} tests geslaagd`)

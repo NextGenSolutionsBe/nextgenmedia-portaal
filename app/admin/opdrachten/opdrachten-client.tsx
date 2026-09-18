@@ -5,12 +5,12 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import {
   Loader2, Plus, X, Trash2, Check, AlertTriangle, CalendarClock, Search, ClipboardList,
-  FileSignature, Receipt, ArrowRight, Link2,
+  FileSignature, Receipt, ArrowRight, Link2, Euro,
 } from 'lucide-react'
 import {
   STATUSSEN, FASEN, statusInfo, faseInfo, statussenPerFase, sorteer, isTeLaat, isVandaag, deadlineTekst,
-  OPEN_STATUSSEN, volgendeStatus, pastInFilter,
-  type Opdracht, type OpdrachtStatus, type Fase,
+  OPEN_STATUSSEN, volgendeStatus, pastInFilter, verslag, waardeVan,
+  type Opdracht, type OpdrachtStatus, type Fase, type VerslagRegel,
 } from '@/lib/opdrachten'
 import { formatEuro } from '@/lib/utils'
 
@@ -71,6 +71,8 @@ export function OpdrachtenClient() {
     for (const o of rijen) { const f = statusInfo(o.status).fase; m.set(f, (m.get(f) ?? 0) + 1) }
     return m
   }, [rijen])
+  const cijfers = useMemo(() => verslag(rijen), [rijen])
+  const selectieWaarde = useMemo(() => zichtbaar.reduce((t, o) => t + (o.waarde ?? waardeVan(o).waarde ?? 0), 0), [zichtbaar])
 
   const zetStatus = async (o: Opdracht, s: OpdrachtStatus) => {
     // Meteen tonen; bij een fout draaien we terug. Statussen wisselen doe je
@@ -140,6 +142,24 @@ export function OpdrachtenClient() {
         </div>
       )}
 
+      {/* Het verslag: hoeveel werk staat er open en wat is het waard. Elke
+          kaart is meteen een filter. */}
+      <div className="grid gap-2 grid-cols-2 md:grid-cols-4 xl:grid-cols-7">
+        <VerslagKaart titel="Openstaand" regel={cijfers.open} accent="border-gray-900" actief={fase === 'open' && !status} onClick={() => { setFase('open'); setStatus(''); setToonAfgesloten(false) }} hint="Alle opdrachten die nog niet afgesloten zijn." />
+        <VerslagKaart titel="Projectvoorstel" regel={cijfers.voorstel} accent="border-purple-300" actief={fase === 'voorstel' && !status} onClick={() => { setFase('voorstel'); setStatus('') }} hint="Nieuw, gevraagd, in opmaak, klaar, voorgelegd of interesse." />
+        <VerslagKaart titel="Contract" regel={cijfers.contract} accent="border-blue-300" actief={fase === 'contract' && !status} onClick={() => { setFase('contract'); setStatus('') }} hint="Contract verstuurd of getekend." />
+        <VerslagKaart titel="Uitvoering" regel={cijfers.uitvoering} accent="border-amber-300" actief={fase === 'uitvoering' && !status} onClick={() => { setFase('uitvoering'); setStatus('') }} hint="In uitvoering, wacht op klant of opgeleverd." />
+        <VerslagKaart titel="Te factureren / verstuurd" regel={cijfers.facturatie} accent="border-emerald-300" actief={fase === 'facturatie' && !status} onClick={() => { setFase('facturatie'); setStatus('') }} hint="Geld dat onderweg is: te factureren of factuur verstuurd." />
+        <VerslagKaart titel="Betaald" regel={cijfers.betaald} accent="border-green-400" actief={status === 'betaald'} onClick={() => { setStatus('betaald') }} hint="Betaalde opdrachten." />
+        <VerslagKaart titel="Verloren" regel={cijfers.verloren} accent="border-gray-300" actief={status === 'geen_interesse' || status === 'geannuleerd'} onClick={() => { setStatus('geen_interesse') }} hint="Geen interesse na het voorstel, of geannuleerd." gedempt />
+      </div>
+      {(cijfers.open.zonderWaarde > 0 || cijfers.teLaat.aantal > 0) && (
+        <p className="text-[11px] text-gray-500 -mt-3">
+          {cijfers.open.zonderWaarde > 0 && <>{cijfers.open.zonderWaarde} open {cijfers.open.zonderWaarde === 1 ? 'opdracht heeft' : 'opdrachten hebben'} nog geen waarde — vul ze in via de opdracht, dan klopt het verslag. </>}
+          {cijfers.teLaat.aantal > 0 && <>Te laat: {cijfers.teLaat.aantal} ({formatEuro(cijfers.teLaat.waarde)}).</>}
+        </p>
+      )}
+
       {/* Filters: fase-chips, precieze status, zoeken. */}
       <div className="space-y-2">
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -173,7 +193,7 @@ export function OpdrachtenClient() {
               Toon afgesloten
             </label>
           )}
-          <span className="text-sm text-gray-500 ml-auto">{zichtbaar.length} van {rijen.length}</span>
+          <span className="text-sm text-gray-500 ml-auto">{zichtbaar.length} van {rijen.length}{selectieWaarde > 0 && <> · {formatEuro(selectieWaarde)} excl. btw</>}</span>
         </div>
       </div>
 
@@ -206,6 +226,22 @@ export function OpdrachtenClient() {
         />
       )}
     </div>
+  )
+}
+
+function VerslagKaart({ titel, regel, accent, actief, onClick, hint, gedempt }: {
+  titel: string; regel: VerslagRegel; accent: string; actief: boolean; onClick: () => void; hint: string; gedempt?: boolean
+}) {
+  return (
+    <button type="button" onClick={onClick} title={hint}
+      className={`card-base p-3 text-left border-t-4 ${accent} transition-shadow hover:shadow-md ${actief ? 'ring-2 ring-black' : ''} ${gedempt ? 'opacity-70' : ''}`}>
+      <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide truncate">{titel}</p>
+      <p className="text-lg font-bold text-gray-900 leading-tight mt-1">{formatEuro(regel.waarde)}</p>
+      <p className="text-[11px] text-gray-500 mt-0.5">
+        {regel.aantal} {regel.aantal === 1 ? 'opdracht' : 'opdrachten'}
+        {regel.zonderWaarde > 0 && <span className="text-amber-700"> · {regel.zonderWaarde} zonder waarde</span>}
+      </p>
+    </button>
   )
 }
 
@@ -261,6 +297,11 @@ function OpdrachtRij({ o, onStatus, onOpen, onVerwijder }: {
         </div>
         <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-2 flex-wrap">
           {o.klant_naam && <span>{o.klant_naam}</span>}
+          {(o.waarde ?? null) !== null && (
+            <span className="font-medium text-gray-700" title={o.waarde_bron === 'facturen' ? 'Som van de gekoppelde facturen (excl. btw)' : 'Waarde van de opdracht (excl. btw)'}>
+              · {formatEuro(o.waarde as number)}{o.waarde_bron === 'facturen' ? ' (facturen)' : ''}
+            </span>
+          )}
           {o.wie && <span>· {o.wie}</span>}
           {o.deadline && !laat && !nu && <span>· {o.deadline} ({tekst})</span>}
           {o.omschrijving && <span className="truncate max-w-md">· {o.omschrijving}</span>}
@@ -330,6 +371,7 @@ function OpdrachtDialoog({ bestaand, klanten, contracten, facturen, onClose, onO
   const [status, setStatus] = useState<OpdrachtStatus>(bestaand?.status ?? 'open')
   const [deadline, setDeadline] = useState(bestaand?.deadline ?? '')
   const [wie, setWie] = useState(bestaand?.wie ?? '')
+  const [bedragExcl, setBedragExcl] = useState(bestaand?.bedrag_excl !== null && bestaand?.bedrag_excl !== undefined ? String(bestaand.bedrag_excl) : '')
   const [contractId, setContractId] = useState(bestaand?.contract_id ?? '')
   const [invoiceId, setInvoiceId] = useState(bestaand?.invoice_id ?? '')
   const [bezig, setBezig] = useState(false)
@@ -358,6 +400,7 @@ function OpdrachtDialoog({ bestaand, klanten, contracten, facturen, onClose, onO
         klant_vrij: clientId ? null : klantVrij,
         contract_id: contractId || null,
         invoice_id: invoiceId || null,
+        bedrag_excl: bedragExcl.trim() === '' ? null : bedragExcl,
       }
       const res = await fetch('/api/admin/opdrachten', {
         method: bestaand ? 'PATCH' : 'POST',
@@ -457,6 +500,18 @@ function OpdrachtDialoog({ bestaand, klanten, contracten, facturen, onClose, onO
                 </optgroup>
               </select>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Waarde van de opdracht <span className="text-gray-400">— excl. btw</span></label>
+            <div className="relative">
+              <Euro className="h-4 w-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input type="text" inputMode="decimal" className="input-base pl-8" value={bedragExcl}
+                onChange={(e) => setBedragExcl(e.target.value)} placeholder="4950" />
+            </div>
+            <p className="text-[11px] text-gray-500 mt-1">
+              Telt mee in het verslag bovenaan. Leeg maar wel facturen gekoppeld? Dan telt de som van die facturen.
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-2">

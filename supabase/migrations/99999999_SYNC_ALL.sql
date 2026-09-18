@@ -4147,3 +4147,6 @@ CREATE INDEX IF NOT EXISTS idx_opdrachten_contract ON public.opdrachten (contrac
 CREATE INDEX IF NOT EXISTS idx_opdrachten_invoice ON public.opdrachten (invoice_id);
 CREATE INDEX IF NOT EXISTS idx_opdrachten_lead ON public.opdrachten (lead_id);
 CREATE INDEX IF NOT EXISTS idx_opdrachten_status ON public.opdrachten (status);
+
+-- ── Opdrachten: waarde van de opdracht (excl. btw) voor het verslag bovenaan (18 sep 2026)
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS bedrag_excl numeric(12,2);

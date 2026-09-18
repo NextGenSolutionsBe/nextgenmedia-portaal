@@ -149,6 +149,7 @@ export type FactuurKoppeling = {
   status: string
   invoice_date: string | null
   amount_incl: number | null
+  amount_excl?: number | null
   description: string | null
 }
 
@@ -219,12 +220,71 @@ export type Opdracht = {
   lead_id?: string | null
   status_bron?: string | null
   status_gewijzigd_op?: string | null
+  /** Waarde van de opdracht, excl. btw (handmatig ingevuld). */
+  bedrag_excl?: number | null
   /** Meegeleverd door de API, niet in de tabel. */
   klant_naam?: string | null
   contract?: ContractKoppeling | null
   facturen?: FactuurKoppeling[]
   /** Wat contract/factuur zeggen — ter info, ook als de status handmatig anders staat. */
   afgeleid?: OpdrachtStatus | null
+  /** De waarde die telt in het verslag (zie waardeVan). */
+  waarde?: number | null
+  waarde_bron?: 'opdracht' | 'facturen' | null
+}
+
+// ── Waarde en verslag ────────────────────────────────────────────────────────
+
+/**
+ * Wat is deze opdracht waard? Het ingevulde bedrag wint; zonder bedrag maar
+ * mét gekoppelde facturen telt de som van die facturen (excl. btw, zonder de
+ * geannuleerde). Zo staat een opdracht die al gefactureerd is nooit op nul.
+ */
+export function waardeVan(o: Pick<Opdracht, 'bedrag_excl' | 'facturen'>): { waarde: number | null; bron: 'opdracht' | 'facturen' | null } {
+  const b = Number(o.bedrag_excl)
+  if (o.bedrag_excl !== null && o.bedrag_excl !== undefined && Number.isFinite(b) && b >= 0) return { waarde: Math.round(b * 100) / 100, bron: 'opdracht' }
+  const facturen = (o.facturen ?? []).filter((f) => f.status !== 'geannuleerd' && f.amount_excl !== null && f.amount_excl !== undefined)
+  if (facturen.length === 0) return { waarde: null, bron: null }
+  const som = facturen.reduce((t, f) => t + (Number(f.amount_excl) || 0), 0)
+  return { waarde: Math.round(som * 100) / 100, bron: 'facturen' }
+}
+
+export type VerslagRegel = { aantal: number; waarde: number; zonderWaarde: number }
+export type Verslag = {
+  /** Alles wat nog openstaat (alle open statussen samen). */
+  open: VerslagRegel
+  /** Open werk per fase — de voorstelfase zonder "geen interesse". */
+  voorstel: VerslagRegel
+  contract: VerslagRegel
+  uitvoering: VerslagRegel
+  /** Te factureren + factuur verstuurd: geld dat onderweg is. */
+  facturatie: VerslagRegel
+  betaald: VerslagRegel
+  /** Geen interesse + geannuleerd. */
+  verloren: VerslagRegel
+  teLaat: VerslagRegel
+}
+
+const leeg = (): VerslagRegel => ({ aantal: 0, waarde: 0, zonderWaarde: 0 })
+const tel = (r: VerslagRegel, w: number | null) => { r.aantal++; if (w === null) r.zonderWaarde++; else r.waarde = Math.round((r.waarde + w) * 100) / 100 }
+
+/** Het verslag bovenaan de pagina: aantallen en waarde per stuk van de flow. */
+export function verslag(rijen: Pick<Opdracht, 'status' | 'deadline' | 'bedrag_excl' | 'facturen' | 'waarde'>[], nu: Date = new Date()): Verslag {
+  const v: Verslag = { open: leeg(), voorstel: leeg(), contract: leeg(), uitvoering: leeg(), facturatie: leeg(), betaald: leeg(), verloren: leeg(), teLaat: leeg() }
+  for (const o of rijen) {
+    const info = statusInfo(o.status)
+    const w = o.waarde !== undefined ? o.waarde : waardeVan(o).waarde
+    if (info.openstaand) tel(v.open, w)
+    if (info.openstaand && info.fase === 'voorstel') tel(v.voorstel, w)
+    if (info.openstaand && info.fase === 'aanvraag') tel(v.voorstel, w)
+    if (info.fase === 'contract') tel(v.contract, w)
+    if (info.fase === 'uitvoering') tel(v.uitvoering, w)
+    if (o.status === 'te_factureren' || o.status === 'factuur_verstuurd') tel(v.facturatie, w)
+    if (o.status === 'betaald') tel(v.betaald, w)
+    if (o.status === 'geen_interesse' || o.status === 'geannuleerd') tel(v.verloren, w)
+    if (isTeLaat(o, nu)) tel(v.teLaat, w)
+  }
+  return v
 }
 
 /** Vandaag in Brussel als YYYY-MM-DD — een deadline is een DAG, geen moment. */
