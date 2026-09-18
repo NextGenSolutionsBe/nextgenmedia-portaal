@@ -4129,3 +4129,21 @@ CREATE INDEX IF NOT EXISTS idx_recurring_invoices_revenue ON public.recurring_in
 CREATE INDEX IF NOT EXISTS idx_invoice_costs_line ON public.invoice_costs (line_id);
 CREATE INDEX IF NOT EXISTS idx_cfo_client ON public.contract_facturatie_opdrachten (client_id);
 CREATE INDEX IF NOT EXISTS idx_cfo_invoice ON public.contract_facturatie_opdrachten (invoice_id);
+
+-- ── Opdrachten: volledige statusflow (voorstel → contract → uitvoering → facturatie)
+--    + koppelingen met contract, factuur en lead (18 sep 2026) ───────────────
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS contract_id uuid REFERENCES public.contracts(id) ON DELETE SET NULL;
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS invoice_id uuid REFERENCES public.invoices(id) ON DELETE SET NULL;
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS lead_id uuid REFERENCES public.sales_leads(id) ON DELETE SET NULL;
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS status_bron text;            -- 'handmatig' | 'automatisch'
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS auto_status text;            -- laatst afgeleide status (contract/factuur), om niet te blijven overschrijven
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS status_gewijzigd_op timestamptz;
+ALTER TABLE public.opdrachten DROP CONSTRAINT IF EXISTS opdrachten_status_check;
+ALTER TABLE public.opdrachten ADD CONSTRAINT opdrachten_status_check CHECK (status = ANY (ARRAY[
+  'open','voorstel_gevraagd','voorstel_bezig','voorstel_klaar','voorstel_voorgelegd','interesse','geen_interesse',
+  'contract_verstuurd','getekend','bezig','wacht','opgeleverd','te_factureren','factuur_verstuurd','betaald',
+  'afgerond','geannuleerd']));
+CREATE INDEX IF NOT EXISTS idx_opdrachten_contract ON public.opdrachten (contract_id);
+CREATE INDEX IF NOT EXISTS idx_opdrachten_invoice ON public.opdrachten (invoice_id);
+CREATE INDEX IF NOT EXISTS idx_opdrachten_lead ON public.opdrachten (lead_id);
+CREATE INDEX IF NOT EXISTS idx_opdrachten_status ON public.opdrachten (status);
