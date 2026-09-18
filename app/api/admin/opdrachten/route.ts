@@ -35,8 +35,11 @@ const datum = (v: unknown): string | null | undefined => {
 /** Bedrag in euro (komma of punt), >= 0. Leeg = null; onzin = undefined (weigeren). */
 const bedrag = (v: unknown): number | null | undefined => {
   if (v === null || v === undefined) return null
-  const t = String(v).trim().replace(/\s|€/g, '').replace(',', '.')
+  let t = String(v).trim().replace(/\s|€/g, '')
   if (!t) return null
+  // Belgische notatie: "4.950,50" → punten zijn duizendtallen, de komma is het decimaalteken.
+  if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.')
+  if (!/^\d+(\.\d+)?$/.test(t)) return undefined
   const n = Number(t)
   return Number.isFinite(n) && n >= 0 && n < 1e9 ? Math.round(n * 100) / 100 : undefined
 }
