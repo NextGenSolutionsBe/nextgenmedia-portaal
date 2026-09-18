@@ -64,14 +64,14 @@ export type ModuleInfo = {
 const SECTIE_VAN: Record<string, string> = {
   clients: 'Klanten & content', contracts: 'Klanten & content', content: 'Klanten & content', metricool: 'Klanten & content', blogs: 'Klanten & content', uploads: 'Klanten & content', opdrachten: 'Klanten & content',
   kantoor: 'Kantoor', partners: 'Partners', assignments: 'Partners', settlements: 'Partners',
-  sales: 'Verkoop', harrie_api: 'Verkoop', aanbestedingen: 'Aanbestedingen',
+  sales: 'Verkoop', harrie_api: 'Verkoop',
   finance: 'Financieel', invoices: 'Financieel', vesting: 'Financieel', purchases: 'Financieel',
   email: 'Overig', info: 'Overig',
 }
 const HREF_VAN: Record<string, string> = {
   clients: '/admin/clients', contracts: '/admin/contracts', content: '/admin/services', metricool: '/admin/metricool', blogs: '/admin/blog-calendar', uploads: '/admin/uploads', opdrachten: '/admin/opdrachten',
   kantoor: '/admin/kantoor', partners: '/admin/partners', assignments: '/admin/assignments', settlements: '/admin/settlements',
-  sales: '/admin/sales/appointments', harrie_api: '/admin/sales/koppeling', aanbestedingen: '/admin/aanbestedingen',
+  sales: '/admin/sales/appointments', harrie_api: '/admin/sales/koppeling',
   finance: '/admin/revenue/omzet', invoices: '/admin/invoices', vesting: '/admin/vesting', purchases: '/admin/purchases',
   email: '/admin/email', info: '/admin/informatief',
 }

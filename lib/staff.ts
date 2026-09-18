@@ -26,7 +26,6 @@ export const ADMIN_MODULES: AdminModule[] = [
   { key: 'settlements', label: 'Settlements',          prefixes: ['/admin/settlements'] },
   { key: 'finance',     label: 'Financiën'          , prefixes: ['/admin/revenue', '/api/admin/revenue', '/api/admin/costs', '/api/admin/fiscal-settings', '/api/admin/bv-transitie'] },
   { key: 'sales',       label: 'Verkoop',              prefixes: ['/admin/sales', '/api/admin/sales'] },
-  { key: 'aanbestedingen', label: 'Aanbestedingen',    prefixes: ['/admin/aanbestedingen', '/api/admin/aanbestedingen'] },
   { key: 'invoices',    label: 'Facturen',             prefixes: ['/admin/invoices', '/api/admin/invoices'] },
   { key: 'vesting',     label: 'Vesting',              prefixes: ['/admin/vesting', '/api/admin/vesting'] },
   { key: 'purchases',   label: 'Aankopen',             prefixes: ['/admin/purchases', '/api/admin/purchases'] },
@@ -130,6 +129,4 @@ export const STAFF_PRESETS: StaffPreset[] = [
   // Appointment setter: werkt uitsluitend in de Verkoop-module (pipeline +
   // agenda) en ziet verder niets van het platform.
   { key: 'setter', label: 'Appointment setter (enkel Verkoop)', modules: ['sales'] },
-  // Volgt overheidsopdrachten op met een eigen zoekfilter.
-  { key: 'aanbestedingen', label: 'Aanbestedingen (enkel overheidsopdrachten)', modules: ['aanbestedingen'] },
 ]

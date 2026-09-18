@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
   Info, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, UserCog, CalendarClock, BarChart3, KanbanSquare,
-  MailCheck, PhoneCall, Stamp, FolderUp, Handshake, Plug, Settings,
+  MailCheck, PhoneCall, FolderUp, Handshake, Plug, Settings,
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
@@ -99,12 +99,6 @@ const SECTIONS: NavSection[] = [
       // lib/features.ts. De regel blijft staan zodat hij terugkomt zodra die
       // vlag weer aan gaat.
       { label: 'Koppeling',           href: '/admin/sales/koppeling',    icon: Plug,         module: 'harrie_api', adminOnly: true },
-    ],
-  },
-  {
-    title: 'Aanbestedingen',
-    items: [
-      { label: 'Aanbestedingen', href: '/admin/aanbestedingen', icon: Stamp, module: 'aanbestedingen' },
     ],
   },
   {

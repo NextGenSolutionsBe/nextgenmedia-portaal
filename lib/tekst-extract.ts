@@ -38,7 +38,7 @@ async function extractPdf(data: Uint8Array): Promise<ExtractResultaat> {
   } catch (e) {
     // Zonder deze regel is "pdf_lezer_ontbreekt" niet te onderscheiden van een
     // verkeerd geïnstalleerd pakket, en dat kost onnodig zoekwerk.
-    console.error('[aanbestedingen] pdf-lezer laadt niet:', e instanceof Error ? e.message : e)
+    console.error('[tekst-extract] pdf-lezer laadt niet:', e instanceof Error ? e.message : e)
     return leeg('pdf_lezer_ontbreekt', 'pdf')
   }
 
@@ -92,7 +92,7 @@ async function extractPdf(data: Uint8Array): Promise<ExtractResultaat> {
     if (/password/i.test(msg)) return leeg('pdf_versleuteld', 'pdf')
     // De reden meeloggen: "pdf_corrupt" zonder uitleg maakte een bibliotheek-
     // fout ononderscheidbaar van een echt kapot bestand, en dat kostte tijd.
-    console.error('[aanbestedingen] pdf onleesbaar:', msg)
+    console.error('[tekst-extract] pdf onleesbaar:', msg)
     return leeg('pdf_corrupt', 'pdf')
   }
 }

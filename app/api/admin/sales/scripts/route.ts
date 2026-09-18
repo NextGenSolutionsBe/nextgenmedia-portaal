@@ -3,7 +3,7 @@ import { createAdminSupabaseClient, requireAdmin, requireStaff } from '@/lib/sup
 import { getOrCreateSalesOrg } from '@/lib/sales/service'
 import { listPipelines } from '@/lib/sales/pipelines'
 import { analyseerScript, lijstScripts, SCRIPTS_HINT } from '@/lib/sales/scripts'
-import { extractText } from '@/lib/aanbestedingen/extract'
+import { extractText } from '@/lib/tekst-extract'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { safeMessage } from '@/lib/api-error'
 
