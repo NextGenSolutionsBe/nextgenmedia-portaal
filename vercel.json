@@ -1,0 +1,20 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/blog-generate",
+      "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/metricool-daily?slot=a",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/metricool-daily?slot=b",
+      "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/maintenance-reminder",
+      "schedule": "0 8 * * *"
+    }
+  ]
+}
