@@ -1,11 +1,11 @@
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
 import { cn } from '@/lib/utils'
 import { STATUSSEN, STATUS_LABELS, isVideo, leesbareGrootte, type Status } from '@/lib/client-uploads'
 import { maakZipSchrijver, verdeelInDelen, uniekeNaam, zipBestandsnaam, zipSegment } from '@/lib/zip-browser'
-import { Archive, Download, Film, ImageIcon, Loader2, Trash2, ExternalLink, X } from 'lucide-react'
+import { Archive, CheckSquare, Download, Film, ImageIcon, Loader2, Square, Trash2, ExternalLink, X } from 'lucide-react'
 
 export type AdminUpload = {
   id: string
@@ -81,6 +81,30 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
   const [fout, setFout] = useState<string | null>(null)
   const [bulk, setBulk] = useState<Voortgang | null>(null)
   const stopRef = useRef<{ nu: boolean } | null>(null)
+  const [selectie, setSelectie] = useState<Set<string>>(new Set())
+
+  /**
+   * Een geopende foto krijgt een eigen plek in de browsergeschiedenis. Zo
+   * sluit de terugknop de foto in plaats van de hele pagina te verlaten —
+   * dat was de reden dat je na "terug" op de startpagina belandde.
+   */
+  const openFoto = (u: AdminUpload) => {
+    setOpen(u)
+    try { window.history.pushState({ ngmUpload: u.id }, '') } catch { /* privémodus */ }
+  }
+  const sluitFoto = () => {
+    let viaGeschiedenis = false
+    try { viaGeschiedenis = !!(window.history.state as { ngmUpload?: string } | null)?.ngmUpload } catch { /* */ }
+    if (viaGeschiedenis) window.history.back()
+    else setOpen(null)
+  }
+  useEffect(() => {
+    const terug = () => setOpen(null)
+    window.addEventListener('popstate', terug)
+    return () => window.removeEventListener('popstate', terug)
+  }, [])
+
+  const toggleSelectie = (id: string) => setSelectie((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
 
   const klanten = useMemo(
     () => [...new Set(lijst.map((u) => u.client_naam))].sort((a, b) => a.localeCompare(b)),
@@ -124,24 +148,23 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
    * haalt de bestanden zelf op via verse getekende links en pakt ze in —
    * zonder servergrens op grootte of duur, met voortgang en een stopknop.
    */
-  const downloadAlles = async () => {
-    if (zichtbaar.length === 0 || bulk) return
+  const downloadLijst = async (lijst: AdminUpload[], basis: string) => {
+    if (lijst.length === 0 || bulk) return
     setFout(null)
     const stop = { nu: false }; stopRef.current = stop
-    const meld = (deel: Partial<Voortgang>) => setBulk((b) => ({ ...(b ?? { klaar: 0, totaal: zichtbaar.length, bytes: 0, fase: '' }), ...deel }))
-    const basis = klant ? `klantuploads-${zipSegment(klant)}` : 'klantuploads'
+    const meld = (deel: Partial<Voortgang>) => setBulk((b) => ({ ...(b ?? { klaar: 0, totaal: lijst.length, bytes: 0, fase: '' }), ...deel }))
     const mislukt: string[] = []
     let klaar = 0, bytes = 0
     try {
       // De verdeling in delen kennen we vooraf (de groottes staan in de lijst),
       // zodat het opslagvenster voor deel 1 nog binnen de klik kan openen.
-      const delenVooraf = verdeelInDelen(zichtbaar)
+      const delenVooraf = verdeelInDelen(lijst)
       const eersteDoel = await openDoel(zipBestandsnaam(basis, 1, delenVooraf.length, new Date()))
-      meld({ fase: 'Downloadlinks ophalen…', totaal: zichtbaar.length })
+      meld({ fase: 'Downloadlinks ophalen…', totaal: lijst.length })
 
       const r = await fetch('/api/admin/uploads/download', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: zichtbaar.map((u) => u.id) }),
+        body: JSON.stringify({ ids: lijst.map((u) => u.id) }),
       })
       const j = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(j.error ?? 'Kon de bestanden niet ophalen.')
@@ -182,12 +205,18 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
     }
   }
 
+  const naamBasis = klant ? `klantuploads-${zipSegment(klant)}` : 'klantuploads'
+  const downloadAlles = () => downloadLijst(zichtbaar, naamBasis)
+  const downloadSelectie = () => downloadLijst(zichtbaar.filter((u) => selectie.has(u.id)), `${naamBasis}-selectie`)
+  const geselecteerdZichtbaar = zichtbaar.filter((u) => selectie.has(u.id))
+
   const verwijder = async (id: string) => {
     if (!confirm('Dit bestand definitief verwijderen? Ook uit de opslag.')) return
     const r = await fetch(`/api/admin/uploads?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
     if (!r.ok) { setFout((await r.json()).error ?? 'Verwijderen mislukt.'); return }
     setLijst((l) => l.filter((u) => u.id !== id))
-    setOpen(null)
+    setSelectie((sel) => { const n = new Set(sel); n.delete(id); return n })
+    sluitFoto()
   }
 
   return (
@@ -246,6 +275,29 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
         </button>
       </div>
 
+      {/* Selectie: meerdere foto's kiezen en in één keer downloaden. */}
+      <div className="flex items-center gap-2 flex-wrap text-sm">
+        <button type="button" onClick={() => setSelectie(new Set(zichtbaar.map((u) => u.id)))} disabled={zichtbaar.length === 0}
+          className="text-xs font-semibold px-3 py-1.5 rounded-xl border border-gray-200 hover:bg-gray-50 disabled:opacity-50">
+          Alles zichtbaar selecteren
+        </button>
+        {selectie.size > 0 && (
+          <>
+            <button type="button" onClick={() => setSelectie(new Set())} className="text-xs font-semibold px-3 py-1.5 rounded-xl border border-gray-200 hover:bg-gray-50">
+              Selectie wissen
+            </button>
+            <button type="button" onClick={downloadSelectie} disabled={geselecteerdZichtbaar.length === 0 || !!bulk}
+              className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-black text-white hover:bg-gray-800 disabled:opacity-50 flex items-center gap-1.5">
+              <Download className="h-3.5 w-3.5" />
+              Selectie downloaden ({geselecteerdZichtbaar.length} · {leesbareGrootte(geselecteerdZichtbaar.reduce((s, u) => s + (Number(u.grootte) || 0), 0))})
+            </button>
+            {geselecteerdZichtbaar.length < selectie.size && (
+              <span className="text-[11px] text-gray-500">{selectie.size - geselecteerdZichtbaar.length} geselecteerde foto's vallen buiten de huidige filters.</span>
+            )}
+          </>
+        )}
+      </div>
+
       {bulk && (
         <div className="rounded-xl border border-gray-200 px-4 py-3 text-sm flex items-center gap-3 bg-white">
           <Loader2 className="h-4 w-4 animate-spin shrink-0" />
@@ -278,9 +330,9 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {zichtbaar.map((u) => (
-            <div key={u.id} className="border border-gray-200 rounded-2xl overflow-hidden flex flex-col bg-white">
+            <div key={u.id} className={cn('border rounded-2xl overflow-hidden flex flex-col bg-white relative', selectie.has(u.id) ? 'border-black ring-2 ring-[#fff848]' : 'border-gray-200')}>
               <button
-                onClick={() => setOpen(u)}
+                onClick={() => openFoto(u)}
                 className="aspect-[4/3] bg-gray-100 flex items-center justify-center overflow-hidden group relative"
               >
                 {u.url && !isVideo(u.mimetype)
@@ -295,6 +347,18 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
                 )}>
                   {STATUS_LABELS[u.status]}
                 </span>
+              </button>
+              {/* Selecteren voor een gebundelde download. Los van de kaartknop,
+                  zodat een vinkje de foto niet opent. */}
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); toggleSelectie(u.id) }}
+                className={cn('absolute top-2 right-2 h-7 w-7 rounded-lg flex items-center justify-center border shadow-sm',
+                  selectie.has(u.id) ? 'bg-[#fff848] border-black text-black' : 'bg-white/90 border-gray-200 text-gray-500 hover:text-black')}
+                title={selectie.has(u.id) ? 'Uit selectie halen' : 'Selecteren'}
+                aria-pressed={selectie.has(u.id)}
+              >
+                {selectie.has(u.id) ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
               </button>
 
               <div className="p-3 flex-1 flex flex-col gap-1">
@@ -319,7 +383,7 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
       {open && (
         <div
           className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={() => setOpen(null)}
+          onClick={sluitFoto}
         >
           <div
             className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-auto"
@@ -332,7 +396,7 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
                 </p>
                 <h2 className="font-bold text-lg leading-tight">{open.titel}</h2>
               </div>
-              <button onClick={() => setOpen(null)} className="h-8 w-8 rounded-lg hover:bg-gray-100 flex items-center justify-center shrink-0">
+              <button onClick={sluitFoto} className="h-8 w-8 rounded-lg hover:bg-gray-100 flex items-center justify-center shrink-0">
                 <X className="h-4 w-4" />
               </button>
             </div>

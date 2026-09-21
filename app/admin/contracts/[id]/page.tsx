@@ -230,8 +230,18 @@ export default async function ContractDetailPage({ params }: { params: { id: str
                     <Download className="h-3.5 w-3.5" />
                     Download getekende PDF
                   </a>
+                  <a
+                    href={`/api/admin/contracts/${c.id}/certificaat`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn-secondary w-full justify-center text-sm"
+                    title="Wie tekende, wanneer, van waar en met welke documentvingerafdruk — uit het beschermde contractarchief"
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                    Ondertekeningscertificaat (PDF)
+                  </a>
                   <p className="text-xs text-gray-400 text-center">
-                    Handtekening is rechtstreeks op het contract geplaatst
+                    Handtekening is rechtstreeks op het contract geplaatst. Contract en certificaat staan in het contractarchief.
                   </p>
                 </div>
               ) : (
@@ -253,6 +263,15 @@ export default async function ContractDetailPage({ params }: { params: { id: str
                   >
                     <FileText className="h-3.5 w-3.5" />
                     Ondertekeningsbewijs
+                  </a>
+                  <a
+                    href={`/api/admin/contracts/${c.id}/certificaat`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn-secondary w-full justify-center text-sm"
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                    Ondertekeningscertificaat (PDF)
                   </a>
                   <p className="text-xs text-gray-400 text-center">
                     De ingebedde getekende PDF is niet beschikbaar — gebruik het origineel + bewijs als juridisch bewijs.

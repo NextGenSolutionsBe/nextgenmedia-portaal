@@ -4150,3 +4150,39 @@ CREATE INDEX IF NOT EXISTS idx_opdrachten_status ON public.opdrachten (status);
 
 -- ── Opdrachten: waarde van de opdracht (excl. btw) voor het verslag bovenaan (18 sep 2026)
 ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS bedrag_excl numeric(12,2);
+
+-- ── Contractarchief: beschermde, onveranderlijke kopie van elk ondertekend
+--    contract (getekende PDF + ondertekeningscertificaat + dossier.json) in de
+--    privébucket contract-archief, met een register dat niet gewijzigd of
+--    gewist kan worden (21 sep 2026) ────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.contract_archief (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id uuid NOT NULL REFERENCES public.contracts(id) ON DELETE RESTRICT,
+  versie integer NOT NULL DEFAULT 1,
+  bron text NOT NULL,                                -- tekenlink | upload_getekend | backfill | handmatig
+  titel text,
+  klant_naam text,
+  signer_name text,
+  signer_email text,
+  signed_at timestamptz,
+  sha256_contract text NOT NULL,
+  sha256_certificaat text NOT NULL,
+  pad_contract text NOT NULL,
+  pad_certificaat text NOT NULL,
+  pad_dossier text NOT NULL,
+  dossier jsonb NOT NULL DEFAULT '{}'::jsonb,
+  gearchiveerd_op timestamptz NOT NULL DEFAULT now(),
+  gearchiveerd_door text,
+  UNIQUE (contract_id, versie)
+);
+CREATE INDEX IF NOT EXISTS idx_contract_archief_contract ON public.contract_archief (contract_id);
+ALTER TABLE public.contract_archief ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.contract_archief FROM anon, authenticated;
+CREATE OR REPLACE FUNCTION public.contract_archief_onveranderlijk() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'Het contractarchief is onveranderlijk: rijen kunnen niet gewijzigd of gewist worden.';
+END $$;
+DROP TRIGGER IF EXISTS trg_contract_archief_onveranderlijk ON public.contract_archief;
+CREATE TRIGGER trg_contract_archief_onveranderlijk BEFORE UPDATE OR DELETE ON public.contract_archief
+  FOR EACH ROW EXECUTE FUNCTION public.contract_archief_onveranderlijk();
+INSERT INTO storage.buckets (id, name, public) VALUES ('contract-archief', 'contract-archief', false) ON CONFLICT (id) DO NOTHING;

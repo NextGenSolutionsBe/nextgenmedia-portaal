@@ -13,6 +13,8 @@ export type ContractEvent =
   | 'template_created' | 'created_from_template' | 'token_regenerated' | 'expired'
   // Facturatieopdrachten na ondertekening (lib/facturatie/opdrachten.ts).
   | 'facturatie_opdrachten_aangemaakt' | 'facturatie_sync_ok' | 'facturatie_sync_mislukt' | 'facturatie_controle_vereist'
+  // Contractarchief en interne melding (lib/contract-archief.ts).
+  | 'gearchiveerd' | 'melding_verstuurd' | 'melding_mislukt'
 
 export async function logContractEvent(
   admin: Admin,

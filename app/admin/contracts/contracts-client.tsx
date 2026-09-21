@@ -6,6 +6,7 @@ import { Plus, FileText, Filter as FilterIcon, X, Search, Bell } from 'lucide-re
 import { formatDate, SERVICE_LABELS } from '@/lib/utils'
 import { statusInfo, canonicalStatus, STATUS_FILTER_OPTIONS, followUp, averageSignDays, CONTRACT_TYPES, DURATION_TYPES } from '@/lib/contract-status'
 import { ContractTabs } from './contract-tabs'
+import { ArchiefKnop } from './archief-knop'
 import { bewaarNavigatie, bewaarContext, leesContext } from '@/lib/contract-navigatie'
 
 type Contract = {
@@ -191,10 +192,13 @@ export function ContractsClient({
           <h1 className="text-2xl font-bold">Contracten</h1>
           <p className="text-sm text-gray-500 mt-0.5">{filtered.length} van {initialContracts.length} contracten</p>
         </div>
-        <Link href="/admin/contracts/new" className="btn-primary shrink-0">
-          <Plus className="h-4 w-4" />
-          Nieuw contract
-        </Link>
+        <div className="flex items-center gap-2 shrink-0">
+          <ArchiefKnop />
+          <Link href="/admin/contracts/new" className="btn-primary shrink-0">
+            <Plus className="h-4 w-4" />
+            Nieuw contract
+          </Link>
+        </div>
       </div>
 
       {/* Dashboard — klikbare cijfers */}

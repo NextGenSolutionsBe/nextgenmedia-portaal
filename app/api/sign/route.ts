@@ -7,6 +7,7 @@ import { logContractEvent } from '@/lib/contract-audit'
 import { resolvePortalSession, canAccessContract } from '@/lib/portal-auth'
 import { FIELD_FONT_PT, baselineFromTopPct } from '@/lib/contract-render'
 import { verwerkOndertekening } from '@/lib/facturatie/opdrachten'
+import { naOndertekening, type FacturatieSamenvatting } from '@/lib/contract-archief'
 
 export const maxDuration = 60
 
@@ -213,8 +214,15 @@ export async function POST(req: NextRequest) {
     // Het contract is nu definitief ondertekend (één ondertekenaar, dus alle
     // handtekeningen zijn binnen). Dit maakt de facturatieopdrachten aan en zet
     // ze in ClickUp; een fout hier mag de ondertekening nooit laten falen.
-    try { await verwerkOndertekening(admin, contract_id, 'tekenlink', signer_email) }
+    let facturatie: FacturatieSamenvatting = null
+    try { facturatie = await verwerkOndertekening(admin, contract_id, 'tekenlink', signer_email) }
     catch (e) { console.error('[sign] facturatieopdrachten:', e instanceof Error ? e.message : e) }
+
+    // ── Contractarchief + interne melding — best-effort ───────────────────────
+    // Onveranderlijke kopie (getekende PDF, certificaat, dossier) in de
+    // beschermde archiefbucket, en één mail naar het team met beide PDF's,
+    // zodat de factuur meteen kan vertrekken.
+    await naOndertekening(admin, contract_id, 'tekenlink', facturatie, signer_email)
 
     // ── Invalidate caches so admin/portal pages refresh immediately ───────────
     try {

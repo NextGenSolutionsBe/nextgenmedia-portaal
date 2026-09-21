@@ -94,6 +94,22 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
     finally { setBezig(false) }
   }, [])
 
+  // ── Slepen: een te versturen factuur naar een andere dag ──
+  const [sleepDoel, setSleepDoel] = useState<string | null>(null)
+  const sleepStart = (e: React.DragEvent, m: Moment) => {
+    if (!m.acties.kanVerplaatsen) { e.preventDefault(); return }
+    e.dataTransfer.setData('text/plain', m.id); e.dataTransfer.effectAllowed = 'move'
+  }
+  const sleepOver = (e: React.DragEvent, d: string) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (sleepDoel !== d) setSleepDoel(d) }
+  const laatVallen = async (e: React.DragEvent, d: string) => {
+    e.preventDefault(); setSleepDoel(null)
+    const id = e.dataTransfer.getData('text/plain')
+    const m = alle.find((x) => x.id === id)
+    if (!m || !m.acties.kanVerplaatsen || m.datum === d) return
+    await voerUit('verplaats', m, { datum: d })
+  }
+  const sleepbaar = (m: Moment) => m.acties.kanVerplaatsen && m.status !== 'geannuleerd'
+
   const ga = (richting: -1 | 1) => setAnker((a) => (weergave === 'week' ? plusDagen(a, 7 * richting) : `${shiftYM(ymVan(a), richting)}-01`))
   const zetCategorie = (c: Categorie) => { setFilters((f) => ({ ...f, categorie: f.categorie === c ? null : c })); if (filters.categorie !== c) setWeergave('lijst') }
   const zet = <K extends keyof Filters>(k: K, v: Filters[K]) => setFilters((f) => ({ ...f, [k]: v }))
@@ -171,15 +187,17 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
               const isVandaag = d === vandaag
               const toon = items.slice(0, 3), meer = items.length - toon.length
               return (
-                <div key={d} className={`min-h-[64px] sm:min-h-[112px] border-b border-r border-gray-100 p-1 sm:p-1.5 flex flex-col ${inMaand ? 'bg-white' : 'bg-gray-50/60'} ${isVandaag ? 'ring-2 ring-inset ring-[#fff848]' : ''}`}>
+                <div key={d} onDragOver={(e) => sleepOver(e, d)} onDragLeave={() => setSleepDoel((x) => (x === d ? null : x))} onDrop={(e) => laatVallen(e, d)}
+                  className={`min-h-[64px] sm:min-h-[112px] border-b border-r border-gray-100 p-1 sm:p-1.5 flex flex-col transition-colors ${inMaand ? 'bg-white' : 'bg-gray-50/60'} ${isVandaag ? 'ring-2 ring-inset ring-[#fff848]' : ''} ${sleepDoel === d ? 'bg-[#fff848]/30 ring-2 ring-inset ring-black' : ''}`}>
                   <button type="button" onClick={() => setDag(d)} className="flex items-start justify-between gap-1 text-left w-full">
                     <span className={`text-xs font-medium h-5 min-w-5 px-1 inline-flex items-center justify-center rounded-full ${isVandaag ? 'bg-[#fff848] text-black' : inMaand ? 'text-gray-800' : 'text-gray-400'}`}>{Number(d.slice(8, 10))}</span>
                     {t && <span className="text-[10px] text-gray-500 text-right leading-tight"><b className="text-gray-800">{t.aantal}</b><span className="hidden sm:inline"> · {euro(t.bedrag)}</span></span>}
                   </button>
                   <div className="hidden sm:flex flex-col gap-0.5 mt-1">
                     {toon.map((m) => (
-                      <button key={m.id} type="button" onClick={() => setGeselecteerd(m.id)} title={`${kort(m)} · ${STATUS_INFO[m.status].label}`}
-                        className={`text-left text-[10.5px] leading-tight px-1.5 py-0.5 rounded border-l-2 truncate ${STATUS_INFO[m.status].cls} ${m.status === 'geannuleerd' ? 'line-through' : ''}`}>
+                      <button key={m.id} type="button" onClick={() => setGeselecteerd(m.id)} title={`${kort(m)} · ${STATUS_INFO[m.status].label}${sleepbaar(m) ? ' · sleep naar een andere dag om te verplaatsen' : ''}`}
+                        draggable={sleepbaar(m)} onDragStart={(e) => sleepStart(e, m)}
+                        className={`text-left text-[10.5px] leading-tight px-1.5 py-0.5 rounded border-l-2 truncate ${STATUS_INFO[m.status].cls} ${m.status === 'geannuleerd' ? 'line-through' : ''} ${sleepbaar(m) ? 'cursor-grab active:cursor-grabbing' : ''}`}>
                         {kort(m)}
                       </button>
                     ))}
@@ -190,6 +208,7 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
               )
             })}
           </div>
+          <p className="px-3 pt-2 text-[11px] text-gray-500 hidden sm:block">Sleep een factuur naar een andere dag om de facturatiedatum te verplaatsen. Verstuurde facturen kun je ook verplaatsen; geannuleerde niet.</p>
           <Legenda />
         </div>
       )}
@@ -202,14 +221,16 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
               const t = totalen.get(d)
               const isVandaag = d === vandaag
               return (
-                <div key={d} className={`min-h-[120px] sm:min-h-[260px] p-2 ${isVandaag ? 'bg-[#fff848]/10' : ''}`}>
+                <div key={d} onDragOver={(e) => sleepOver(e, d)} onDragLeave={() => setSleepDoel((x) => (x === d ? null : x))} onDrop={(e) => laatVallen(e, d)}
+                  className={`min-h-[120px] sm:min-h-[260px] p-2 transition-colors ${isVandaag ? 'bg-[#fff848]/10' : ''} ${sleepDoel === d ? 'bg-[#fff848]/30 ring-2 ring-inset ring-black' : ''}`}>
                   <button type="button" onClick={() => setDag(d)} className="w-full text-left flex items-center justify-between gap-2 mb-2">
                     <span className={`text-xs font-semibold capitalize ${isVandaag ? 'bg-[#fff848] rounded-full px-2 py-0.5' : 'text-gray-700'}`}>{DAGEN_KORT[i(d)]} {Number(d.slice(8, 10))}</span>
                     {t && <span className="text-[10px] text-gray-500">{t.aantal} · {euro(t.bedrag)}</span>}
                   </button>
                   <div className="space-y-1">
                     {items.map((m) => (
-                      <button key={m.id} type="button" onClick={() => setGeselecteerd(m.id)} className={`w-full text-left rounded-lg border px-2 py-1.5 ${STATUS_INFO[m.status].cls} ${m.status === 'geannuleerd' ? 'line-through opacity-70' : ''}`}>
+                      <button key={m.id} type="button" onClick={() => setGeselecteerd(m.id)} draggable={sleepbaar(m)} onDragStart={(e) => sleepStart(e, m)} title={sleepbaar(m) ? 'Sleep naar een andere dag om de facturatiedatum te verplaatsen' : undefined}
+                        className={`w-full text-left rounded-lg border px-2 py-1.5 ${STATUS_INFO[m.status].cls} ${m.status === 'geannuleerd' ? 'line-through opacity-70' : ''} ${sleepbaar(m) ? 'cursor-grab active:cursor-grabbing' : ''}`}>
                         <div className="text-xs font-medium truncate">{m.klant}</div>
                         <div className="text-[10.5px] truncate">{euro(m.bedrag_excl)} · {m.type}</div>
                       </button>
@@ -220,6 +241,7 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
               )
             })}
           </div>
+          <p className="px-3 pt-2 text-[11px] text-gray-500 hidden sm:block">Sleep een factuur naar een andere dag om de facturatiedatum te verplaatsen. Verstuurde facturen kun je ook verplaatsen; geannuleerde niet.</p>
           <Legenda />
         </div>
       )}
