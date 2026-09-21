@@ -202,7 +202,7 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
                       <button key={m.id} type="button" onClick={() => setGeselecteerd(m.id)} title={`${kort(m)} · ${STATUS_INFO[m.status].label}${sleepbaar(m) ? ' · sleep naar een andere dag om te verplaatsen' : ''}`}
                         draggable={sleepbaar(m)} onDragStart={(e) => sleepStart(e, m)}
                         className={`text-left text-[10.5px] leading-tight px-1.5 py-0.5 rounded border-l-2 truncate ${STATUS_INFO[m.status].cls} ${m.status === 'geannuleerd' ? 'line-through' : ''} ${sleepbaar(m) ? 'cursor-grab active:cursor-grabbing' : ''}`}>
-                        {kort(m)}
+                        {kort(m)}{m.contract_titel ? <span className="opacity-70"> · {m.contract_titel}</span> : null}
                       </button>
                     ))}
                     {meer > 0 && <button type="button" onClick={() => setDag(d)} className="text-[10.5px] text-gray-500 hover:text-black text-left px-1.5">+{meer} meer</button>}
