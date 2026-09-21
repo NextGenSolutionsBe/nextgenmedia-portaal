@@ -4332,3 +4332,187 @@ BEGIN
   RETURN jsonb_build_object('aangemaakt', v_aangemaakt, 'overgeslagen', v_overgeslagen, 'invoice_ids', to_jsonb(v_ids));
 END $$;
 REVOKE ALL ON FUNCTION public.bevestig_factuurplanning(uuid, uuid, text, uuid[]) FROM public, anon, authenticated;
+
+-- ── Vereenvoudigde facturenmodule + archief los van contract (21 sep 2026) ────
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS verantwoordelijke text;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS sent_by_email text;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS sent_at timestamptz;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS sent_by_email text;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS verantwoordelijke text;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS payment_term_days integer;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS contract_id uuid REFERENCES public.contracts(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS recurring_invoices_contract_idx ON public.recurring_invoices(contract_id);
+-- Het archief overleeft het verwijderen van een contract (geen FK, wel index).
+ALTER TABLE public.contract_archief DROP CONSTRAINT IF EXISTS contract_archief_contract_id_fkey;
+CREATE INDEX IF NOT EXISTS contract_archief_contract_idx ON public.contract_archief(contract_id);
+-- Uniek certificaatnummer per ondertekening.
+CREATE SEQUENCE IF NOT EXISTS public.contract_certificaat_seq;
+ALTER TABLE public.contract_archief ADD COLUMN IF NOT EXISTS certificaat_nr text;
+CREATE OR REPLACE FUNCTION public.volgend_certificaatnummer() RETURNS text LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  SELECT 'NGM-CERT-' || to_char(now() AT TIME ZONE 'Europe/Brussels', 'YYYY') || '-' || lpad(nextval('public.contract_certificaat_seq')::text, 5, '0');
+$$;
+REVOKE ALL ON FUNCTION public.volgend_certificaatnummer() FROM public, anon, authenticated;
+-- Metricool-feedbacklink per klant.
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS metricool_feedback_url text;
+
+-- ── Kanban-pipeline + salesactiviteiten (21 sep 2026) ────────────────────────
+-- Eén horizontaal bord met negen kolommen (lib/sales/stages.ts). Leadbron los
+-- van de fase; positie per kolom; opvolgdatum als datum (callback_at blijft het
+-- exacte terugbelmoment); dealwaarde/sluiting/verliesreden op de lead zelf.
+ALTER TABLE public.sales_leads ADD COLUMN IF NOT EXISTS leadbron          text NOT NULL DEFAULT 'outbound';
+-- positie bewust NULLABLE: een nieuwe kaart (NULL) staat bovenaan zijn kolom
+-- (ORDER BY positie NULLS FIRST, updated_at DESC); na een sleep nummert
+-- sales_herorden() de hele kolom.
+ALTER TABLE public.sales_leads ADD COLUMN IF NOT EXISTS positie           integer;
+ALTER TABLE public.sales_leads ADD COLUMN IF NOT EXISTS dienst            text;
+ALTER TABLE public.sales_leads ADD COLUMN IF NOT EXISTS opvolgdatum       date;
+ALTER TABLE public.sales_leads ADD COLUMN IF NOT EXISTS deal_waarde_cents bigint;
+ALTER TABLE public.sales_leads ADD COLUMN IF NOT EXISTS gesloten_op       timestamptz;
+ALTER TABLE public.sales_leads ADD COLUMN IF NOT EXISTS verlies_reden     text;
+ALTER TABLE public.sales_leads ADD COLUMN IF NOT EXISTS website_aanvraag  jsonb;
+CREATE INDEX IF NOT EXISTS sales_leads_kolom_positie ON public.sales_leads (sales_client_id, stage_key, positie);
+CREATE INDEX IF NOT EXISTS sales_leads_opvolgdatum   ON public.sales_leads (opvolgdatum) WHERE opvolgdatum IS NOT NULL;
+
+-- Vangnet: wie nog een OUDE fasesleutel schrijft (Harrie's databanktrigger
+-- harrie_verwerk_event, oude code), krijgt die stil vertaald naar de nieuwe
+-- kolom. Harrie-leads krijgen bij aanmaak leadbron 'harrie'.
+-- Naam begint met 'f' zodat hij vóór sales_leads_merken_sync draait
+-- (BEFORE-triggers lopen alfabetisch).
+CREATE OR REPLACE FUNCTION public.sales_leads_fase_normaliseren() RETURNS trigger
+LANGUAGE plpgsql AS $fn$
+BEGIN
+  NEW.stage_key := CASE NEW.stage_key
+    WHEN 'to_contact'         THEN 'outbound'
+    WHEN 'contacted_call'     THEN 'gebeld'
+    WHEN 'contacted_linkedin' THEN 'email_verstuurd'
+    WHEN 'contacted_mail'     THEN 'email_verstuurd'
+    WHEN 'email_after_call'   THEN 'opvolgen'
+    WHEN 'email_sent'         THEN 'email_verstuurd'
+    WHEN 'not_interested'     THEN 'verloren'
+    WHEN 'appointment'        THEN 'afspraak'
+    WHEN 'max_pogingen'       THEN 'opvolgen'
+    WHEN 'won'                THEN 'gewonnen'
+    WHEN 'lost'               THEN 'verloren'
+    ELSE NEW.stage_key END;
+  IF TG_OP = 'INSERT' AND NEW.source = 'harrie' AND NEW.leadbron = 'outbound' THEN
+    NEW.leadbron := 'harrie';
+  END IF;
+  RETURN NEW;
+END;
+$fn$;
+DROP TRIGGER IF EXISTS sales_leads_fase_normaliseren ON public.sales_leads;
+CREATE TRIGGER sales_leads_fase_normaliseren
+BEFORE INSERT OR UPDATE OF stage_key ON public.sales_leads
+FOR EACH ROW EXECUTE FUNCTION public.sales_leads_fase_normaliseren();
+
+-- Merk vastleggen vanaf de afspraak: nu op de nieuwe sleutels (de oude blijven
+-- erin staan voor het geval de vertaaltrigger hierboven nog niet bestaat).
+CREATE OR REPLACE FUNCTION public.sales_leads_merken_sync() RETURNS trigger
+LANGUAGE plpgsql AS $fn$
+DECLARE v_key text;
+BEGIN
+  IF NEW.stage_key IN ('afspraak', 'voorstel', 'gewonnen', 'verloren', 'appointment', 'won', 'lost')
+     AND coalesce(array_length(NEW.merken, 1), 0) = 0
+     AND NEW.pipeline_id IS NOT NULL THEN
+    SELECT key INTO v_key FROM public.sales_pipelines WHERE id = NEW.pipeline_id;
+    IF v_key IS NOT NULL THEN NEW.merken := ARRAY[v_key]; END IF;
+  END IF;
+  RETURN NEW;
+END;
+$fn$;
+
+-- Rang voor Harrie's "enkel vooruit"-rem, voor oude én nieuwe sleutels
+-- (spiegelt RANG in lib/sales/stages.ts).
+CREATE OR REPLACE FUNCTION public.harrie_stage_rang(fase text)
+RETURNS int LANGUAGE sql IMMUTABLE AS $fn$
+  SELECT CASE fase
+    WHEN 'outbound' THEN 10 WHEN 'inbound' THEN 10 WHEN 'to_contact' THEN 10
+    WHEN 'gebeld' THEN 20 WHEN 'email_verstuurd' THEN 20
+    WHEN 'contacted_call' THEN 20 WHEN 'contacted_linkedin' THEN 20 WHEN 'contacted_mail' THEN 20 WHEN 'email_sent' THEN 20
+    WHEN 'opvolgen' THEN 30 WHEN 'email_after_call' THEN 30 WHEN 'max_pogingen' THEN 30
+    WHEN 'afspraak' THEN 50 WHEN 'appointment' THEN 50
+    WHEN 'voorstel' THEN 60
+    WHEN 'verloren' THEN 90 WHEN 'not_interested' THEN 90 WHEN 'lost' THEN 90
+    WHEN 'gewonnen' THEN 99 WHEN 'won' THEN 99
+    ELSE 0 END;
+$fn$;
+
+-- Volgorde binnen één kolom in één statement (POST /api/admin/sales/leads/herorden).
+CREATE OR REPLACE FUNCTION public.sales_herorden(p_stage text, p_ids uuid[])
+RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public AS $fn$
+  UPDATE public.sales_leads l
+     SET positie = x.ord - 1, stage_key = p_stage
+    FROM unnest(p_ids) WITH ORDINALITY AS x(id, ord)
+   WHERE l.id = x.id;
+$fn$;
+REVOKE ALL ON FUNCTION public.sales_herorden(text, uuid[]) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.sales_herorden(text, uuid[]) TO service_role;
+
+-- Bestaande leads naar de nieuwe kolommen (LEGACY_STAGE_MAP). Idempotent:
+-- enkel rijen die nog een oude sleutel dragen.
+UPDATE public.sales_leads SET stage_key = CASE stage_key
+  WHEN 'to_contact'         THEN 'outbound'
+  WHEN 'contacted_call'     THEN 'gebeld'
+  WHEN 'contacted_linkedin' THEN 'email_verstuurd'
+  WHEN 'contacted_mail'     THEN 'email_verstuurd'
+  WHEN 'email_after_call'   THEN 'opvolgen'
+  WHEN 'email_sent'         THEN 'email_verstuurd'
+  WHEN 'not_interested'     THEN 'verloren'
+  WHEN 'appointment'        THEN 'afspraak'
+  WHEN 'max_pogingen'       THEN 'opvolgen'
+  WHEN 'won'                THEN 'gewonnen'
+  WHEN 'lost'               THEN 'verloren'
+  ELSE stage_key END
+WHERE stage_key IN ('to_contact','contacted_call','contacted_linkedin','contacted_mail','email_after_call',
+                    'email_sent','not_interested','appointment','max_pogingen','won','lost');
+-- Geen verdere datawijzigingen: de oude verliesreden (lost_reason) en de
+-- Harrie-herkomst (label 'Harrie') leest de app zelf als terugval.
+ALTER TABLE public.sales_leads ALTER COLUMN stage_key SET DEFAULT 'outbound';
+
+-- Kolomlabels per organisatie (ensureStages() houdt dit ook bij).
+INSERT INTO public.sales_stages (sales_client_id, key, label, position, is_won, is_lost)
+SELECT c.id, v.key, v.label, v.pos, v.won, v.lost
+FROM public.sales_clients c
+CROSS JOIN (VALUES
+  ('outbound','Outbound leads',1,false,false),
+  ('inbound','Inbound leads',2,false,false),
+  ('gebeld','Gebeld',3,false,false),
+  ('email_verstuurd','E-mail verstuurd',4,false,false),
+  ('opvolgen','Opvolgen',5,false,false),
+  ('afspraak','Afspraak gepland',6,false,false),
+  ('voorstel','Voorstel verstuurd',7,false,false),
+  ('gewonnen','Gewonnen',8,true,false),
+  ('verloren','Verloren',9,false,true)
+) AS v(key,label,pos,won,lost)
+ON CONFLICT (sales_client_id, key) DO NOTHING;
+-- De oude fase-labels blijven staan (niets verwijderen); er verwijst na de
+-- vertaling hierboven gewoon geen lead meer naar.
+
+-- Salesactiviteiten: wat een medewerker deed op een lead. Hier draaien de
+-- statistieken op; de tijdlijn (sales_lead_events) krijgt van elke activiteit
+-- ook een regel. Zacht verwijderen via verwijderd_op.
+CREATE TABLE IF NOT EXISTS public.sales_activiteiten (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  lead_id          uuid NOT NULL REFERENCES public.sales_leads(id) ON DELETE CASCADE,
+  medewerker_id    uuid,
+  medewerker_email text,
+  type             text NOT NULL CHECK (type IN ('telefoongesprek','email_verstuurd','lead_afgehandeld','opvolging',
+                     'afspraak_gepland','voorstel_verstuurd','deal_gewonnen','deal_verloren','interne_notitie','fase_gewijzigd')),
+  duur_seconden    integer,
+  uitkomst         text,
+  notitie          text,
+  opvolgdatum      date,
+  naar_fase        text,
+  afspraak_id      uuid,
+  verwijderd_op    timestamptz,
+  created_at       timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS sales_activiteiten_medewerker ON public.sales_activiteiten (medewerker_id, created_at);
+CREATE INDEX IF NOT EXISTS sales_activiteiten_lead       ON public.sales_activiteiten (lead_id, created_at);
+ALTER TABLE public.sales_activiteiten ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "sales_activiteiten admin all" ON public.sales_activiteiten;
+CREATE POLICY "sales_activiteiten admin all" ON public.sales_activiteiten FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+-- Back-up van de fase per lead vóór de kanbanmigratie (21 sep 2026), om terug te kunnen.
+CREATE TABLE IF NOT EXISTS public.sales_leads_fase_backup_20260921 AS SELECT id, stage_key, now() AS bewaard_op FROM public.sales_leads WHERE false;

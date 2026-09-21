@@ -19,8 +19,8 @@ export default function SalesStatistiekenPage() {
       <div>
         <h1 className="text-2xl font-bold">Statistieken</h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          Conversie van gesprek tot getekend contract, per setter, sector en bron.
-          Een afspraak telt mee in de periode waarin ze gepland stond.
+          Wat het team deed: gebeld, gemaild, opgevolgd, afspraken gezet en deals gesloten — per
+          medewerker en voor het team. Een activiteit telt in de periode waarin ze geregistreerd werd.
         </p>
       </div>
       <StatsClient />

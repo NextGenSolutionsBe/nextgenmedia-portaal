@@ -345,6 +345,8 @@ export async function POST(req: NextRequest) {
         start_month: start, end_month: end, description: b.description || null,
         amount_excl: excl, vat_pct: vat, amount_incl: inclFromExcl(excl, vat),
         active: b.active !== false, revenue_id: revenueId, invoice_day: invoiceDay, created_by: actor.id,
+        contract_id: b.contract_id || null, verantwoordelijke: b.verantwoordelijke ? String(b.verantwoordelijke).slice(0, 120) : null,
+        payment_term_days: b.payment_term_days === undefined || b.payment_term_days === null || b.payment_term_days === '' ? null : Math.max(0, Math.round(Number(b.payment_term_days) || 30)),
       })
       await slaLijnenOp(admin, { recurring_id: id, maand: start }, b.lines, actor)
       try {
@@ -368,8 +370,8 @@ export async function POST(req: NextRequest) {
         if (!b.source_id) return NextResponse.json({ error: 'source_id vereist' }, { status: 400 })
         const { data: inv } = await admin.from('invoices').select('id, status, sent_at').eq('id', b.source_id).maybeSingle()
         const patch: Record<string, unknown> = { status, updated_at: new Date().toISOString() }
-        if (status === 'verstuurd') patch.sent_at = inv?.sent_at ?? new Date().toISOString()
-        if (status === 'te_versturen') patch.sent_at = null
+        if (status === 'verstuurd') { patch.sent_at = inv?.sent_at ?? new Date().toISOString(); patch.sent_by_email = actor.email ?? null }
+        if (status === 'te_versturen') { patch.sent_at = null; patch.sent_by_email = null }
         const { error } = await admin.from('invoices').update(patch).eq('id', b.source_id)
         if (error) throw new Error(error.message)
         try { await admin.from('invoice_wijzigingen').insert({ invoice_id: b.source_id, actie: status === 'verstuurd' ? 'verstuurd' : status === 'geannuleerd' ? 'geannuleerd' : 'aangepast', veld: 'status', oud: inv?.status ?? null, nieuw: status, actor_email: actor.email ?? null }) } catch { /* */ }

@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
       }
       if (b.actie === 'verstuurd') {
-        const { error } = await admin.from('invoices').update({ status: 'verstuurd' }).eq('id', inv.id)
+        const { error } = await admin.from('invoices').update({ status: 'verstuurd', sent_at: new Date().toISOString(), sent_by_email: actor.email ?? null }).eq('id', inv.id)
         if (error) throw new Error(error.message)
         await audit('Factuur gemarkeerd als verstuurd')
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
       if (b.actie === 'verplaats') {
         if (!isDatum(b.datum ?? '')) return NextResponse.json({ error: 'Geef een geldige datum.' }, { status: 400 })
         // Ook een verstuurde maand mag van datum veranderen; een gekoppelde factuur volgt mee.
-        const r: Record<string, unknown> = { recurring_id: rec.id, month: sleutel.maand, status: rij?.status ?? 'te_versturen', clickup_task_id: rij?.clickup_task_id ?? null, billing_date: b.datum }
+        const r: Record<string, unknown> = { recurring_id: rec.id, month: sleutel.maand, status: rij?.status ?? 'te_versturen', billing_date: b.datum }
         const { error } = await admin.from('recurring_invoice_months').upsert(r, { onConflict: 'recurring_id,month' })
         if (error) throw new Error(error.message)
         // Hangt er al een echte factuur aan deze maand, dan krijgt die dezelfde datum.
@@ -117,33 +117,10 @@ export async function POST(req: NextRequest) {
       if (b.actie === 'verstuurd') {
         const r = await zetMaandStatus(admin, rec.id, sleutel.maand, 'verstuurd', { id: actor.id, email: actor.email ?? null })
         if (r.warning) waarschuwingen.push(r.warning)
+        try { await admin.from('recurring_invoice_months').update({ sent_at: new Date().toISOString(), sent_by_email: actor.email ?? null }).eq('recurring_id', rec.id).eq('month', sleutel.maand) } catch { /* kolommen bestaan pas na migratie */ }
         await audit(`Maand ${sleutel.maand} gemarkeerd als verstuurd`)
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
       }
-    }
-
-    // ── Facturatieopdracht (ondertekend contract) ──
-    if (sleutel.bron === 'opdracht') {
-      const { data: o } = await admin.from('contract_facturatie_opdrachten').select('*').eq('id', sleutel.bronId).maybeSingle()
-      if (!o) return NextResponse.json({ error: 'Facturatieopdracht niet gevonden.' }, { status: 404 })
-      if (b.actie === 'annuleer') {
-        if (o.status === 'afgehandeld' || o.invoice_id) return NextResponse.json({ error: NIET_TE_ANNULEREN }, { status: 400 })
-        let { error } = await admin.from('contract_facturatie_opdrachten').update({ status: 'geannuleerd', geannuleerd_op: new Date().toISOString(), geannuleerd_door: actor.email ?? null, updated_at: new Date().toISOString() }).eq('id', o.id)
-        if (error && /geannuleerd_/.test(error.message)) ({ error } = await admin.from('contract_facturatie_opdrachten').update({ status: 'geannuleerd', updated_at: new Date().toISOString() }).eq('id', o.id))
-        if (error) throw new Error(error.message)
-        try { await admin.from('contract_facturatie_log').insert({ contract_id: o.contract_id, opdracht_id: o.id, gebeurtenis: 'status_geannuleerd', clickup_task_id: o.clickup_task_id, sync_status: o.sync_status, details: { door: actor.email ?? actor.id, via: 'facturatieplanner', clickup_fouten: waarschuwingen } }) } catch { /* */ }
-        await audit(`Facturatieopdracht ${o.volgnr}/${o.aantal} geannuleerd`)
-        klaar(); return NextResponse.json({ ok: true, waarschuwingen })
-      }
-      if (b.actie === 'verplaats') {
-        if (!isDatum(b.datum ?? '')) return NextResponse.json({ error: 'Geef een geldige datum.' }, { status: 400 })
-        if (o.status === 'geannuleerd') return NextResponse.json({ error: 'Een geannuleerde opdracht verplaats je niet meer.' }, { status: 400 })
-        const { error } = await admin.from('contract_facturatie_opdrachten').update({ factuurdatum: b.datum, updated_at: new Date().toISOString() }).eq('id', o.id)
-        if (error) throw new Error(error.message)
-        await audit(`Factuurdatum opdracht verplaatst ${o.factuurdatum} → ${b.datum}`, { van: o.factuurdatum, naar: b.datum })
-        klaar(); return NextResponse.json({ ok: true, waarschuwingen })
-      }
-      if (b.actie === 'verstuurd') return NextResponse.json({ error: 'Maak eerst de factuur aan vanuit het contract; die markeer je daarna als verstuurd.' }, { status: 400 })
     }
 
     if (sleutel.bron === 'wam') return NextResponse.json({ error: 'WAM-termijnen beheer je in Vesting.' }, { status: 400 })

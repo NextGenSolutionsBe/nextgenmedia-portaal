@@ -54,25 +54,6 @@ export async function buildNotifications(): Promise<Notif[]> {
   const names = new Map(clientMap.map((c) => [c.id, c.company_name]))
   const out: Notif[] = []
 
-  // Factuurvoorstellen uit ondertekende contracten die nog op een mens wachten:
-  // ontbrekende gegevens (controle vereist) of een voorstel waarvan de eerste
-  // factuurdatum al bereikt is. Best-effort.
-  try {
-    const vandaag = vandaagISO()
-    const voorstellen = await safe<{ id: string; contract_id: string; omschrijving: string | null; status: string; factuurdatum: string }>(
-      admin.from('contract_facturatie_opdrachten').select('id, contract_id, omschrijving, status, factuurdatum')
-        .in('status', ['open', 'controle_vereist']).is('invoice_id', null).limit(80))
-    const perContract = new Map<string, { n: number; controle: number; eerste: string }>()
-    for (const o of voorstellen) {
-      const p = perContract.get(o.contract_id) ?? { n: 0, controle: 0, eerste: o.factuurdatum }
-      p.n++; if (o.status === 'controle_vereist') p.controle++; if (o.factuurdatum < p.eerste) p.eerste = o.factuurdatum
-      perContract.set(o.contract_id, p)
-    }
-    for (const [cid, p] of perContract) {
-      const laat = p.eerste <= vandaag
-      out.push({ id: `factuurvoorstel:${cid}:${p.n}:${p.controle}`, kind: 'invoice', priority: laat ? 'high' : 'med', title: `Factuurvoorstel te bevestigen — ${p.n} factuur${p.n === 1 ? '' : 'en'}${p.controle ? `, ${p.controle} met controle vereist` : ''}${laat ? ' (eerste factuurdatum al bereikt)' : ''}`, date: p.eerste, href: `/admin/contracts/${cid}#facturatie` })
-    }
-  } catch { /* meldingen mogen nooit stuklopen */ }
 
   // ClickUp→Google-agendasync: ligt die stil, dan zien de setters niet wat er
   // in ClickUp gepland staat en kán er dubbel geboekt worden. Dat verdient de

@@ -136,6 +136,15 @@ export async function POST(req: NextRequest) {
     // BTW-nummer (best effort — kolom kan nog ontbreken vóór migratie).
     if (btw.value) { try { await admin.from('clients').update({ btw_nummer: btw.value }).eq('id', client.id) } catch { } }
 
+    // Klantmap voor uploads: de map zelf is virtueel (alles hangt aan client_id),
+    // maar een standaard submap "Algemeen" maakt dat de klant en wij meteen
+    // ergens in kunnen werken. Best-effort: een dubbel (unieke index op
+    // client_id + lower(naam)) of ontbrekende tabel mag het aanmaken van de
+    // klant nooit laten mislukken.
+    try {
+      await admin.from('client_upload_folders').insert({ client_id: client.id, naam: 'Algemeen', door_naam: 'NextGenMedia' })
+    } catch { /* zie klantmap onder Klantuploads */ }
+
     // Create client_services — active: false by default.
     // Portal access is granted separately by admin AFTER the client signs the contract.
     const serviceRows = data.services.map((slug) => ({

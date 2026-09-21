@@ -30,7 +30,7 @@ export type HarrieContact = {
   /** Vrije tekst, enkel ter informatie. Harrie toont dit, beslist er niets mee. */
   stage: string
   /**
-   * De STABIELE sleutel van diezelfde fase ('to_contact', 'won', …).
+   * De STABIELE sleutel van diezelfde fase ('outbound', 'gewonnen', …).
    *
    * Staat niet in het oorspronkelijke contract en is dus optioneel, maar wie de
    * pipeline wil SPIEGELEN heeft hem nodig: labels mogen we morgen hernoemen,
@@ -180,7 +180,7 @@ export type Gevolg = {
  * Elke gebeurtenis doet één ding: de fase zetten. Geen terugbelafspraken, geen
  * opvolgtellers — dat blijft in Harrie.
  *
- * Eén keuze verdient uitleg: "booked" zet de fase op 'appointment'. Elders in deze app kan die fase
+ * Eén keuze verdient uitleg: "booked" zet de fase op 'afspraak'. Elders in deze app kan die fase
  *    alleen ontstaan uit een boeking in ons eigen scherm; hier maken we een
  *    uitzondering, want Harrie's afspraak IS een echte afspraak — hij staat
  *    alleen in zijn agenda in plaats van in de onze. Zonder die uitzondering
@@ -190,28 +190,31 @@ export type Gevolg = {
 export function gevolgVan(
   type: HarrieType,
   detail?: string | null,
-  /** Het kanaal uit het harrie-blokje; bepaalt of het mail of LinkedIn wordt. */
-  kanaal?: string | null,
+  /**
+   * Het kanaal uit het harrie-blokje. Het bord kent geen aparte LinkedIn-kolom:
+   * elke schriftelijke benadering (mail of LinkedIn) staat in "E-mail
+   * verstuurd"; het kanaal blijft zichtbaar op de tijdlijnregel.
+   */
+  _kanaal?: string | null,
 ): Gevolg {
   const tekst = (detail ?? '').trim()
-  const viaLinkedIn = /linkedin/i.test(kanaal ?? '')
   /** Waar valt een lead op terug als een afspraak afgezegd wordt? */
-  const terugNaarKanaal = viaLinkedIn ? 'contacted_linkedin' : 'contacted_mail'
+  const terugNaarKanaal = 'email_verstuurd'
 
   switch (type) {
     case 'sent':
       return {
-        fase: 'contacted_mail', alleenVooruit: true,
+        fase: 'email_verstuurd', alleenVooruit: true,
         omschrijving: `Harrie: koude mail verstuurd${tekst ? ` · ${tekst}` : ''}`,
       }
     case 'linkedin_request':
       return {
-        fase: 'contacted_linkedin', alleenVooruit: true,
+        fase: 'email_verstuurd', alleenVooruit: true,
         omschrijving: `Harrie: LinkedIn-verzoek verstuurd${tekst ? ` · ${tekst}` : ''}`,
       }
     case 'linkedin_message':
       return {
-        fase: 'contacted_linkedin', alleenVooruit: true,
+        fase: 'email_verstuurd', alleenVooruit: true,
         omschrijving: `Harrie: LinkedIn-bericht verstuurd${tekst ? ` · ${tekst}` : ''}`,
       }
 
@@ -228,9 +231,9 @@ export function gevolgVan(
       }
 
     case 'booked':
-      return { fase: 'appointment', omschrijving: `Harrie: afspraak geboekt${tekst ? ` · ${tekst}` : ''}` }
+      return { fase: 'afspraak', omschrijving: `Harrie: afspraak geboekt${tekst ? ` · ${tekst}` : ''}` }
     case 'booking_moved':
-      return { fase: 'appointment', omschrijving: `Harrie: afspraak verzet${tekst ? ` · ${tekst}` : ''}` }
+      return { fase: 'afspraak', omschrijving: `Harrie: afspraak verzet${tekst ? ` · ${tekst}` : ''}` }
     case 'booking_cancelled':
       return {
         fase: terugNaarKanaal,
@@ -239,12 +242,12 @@ export function gevolgVan(
 
     case 'declined':
       return {
-        fase: 'not_interested', reden: tekst || 'Afgewezen na koude benadering (Harrie)',
+        fase: 'verloren', reden: tekst || 'Afgewezen na koude benadering (Harrie)',
         omschrijving: `Harrie: prospect zei nee${tekst ? ` · ${tekst}` : ''}`,
       }
     case 'lost':
       return {
-        fase: 'not_interested', reden: tekst || 'Afgesloten in Harrie',
+        fase: 'verloren', reden: tekst || 'Afgesloten in Harrie',
         omschrijving: `Harrie: afgesloten${tekst ? ` · ${tekst}` : ''}`,
       }
 
@@ -270,7 +273,7 @@ export function gevolgVan(
      */
     case 'imported':
       return {
-        fase: 'to_contact', enkelBijNieuw: true,
+        fase: 'outbound', enkelBijNieuw: true,
         omschrijving: `Harrie: prospect opgeladen${tekst ? ` · ${tekst}` : ''}`,
       }
   }

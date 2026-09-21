@@ -5,6 +5,7 @@ import { ShootBriefingView, type Shoot } from '@/components/portal/shoot-briefin
 import { type Feedback } from '@/components/portal/shoot-feedback'
 import { type Idea } from '@/components/portal/shoot-ideas'
 import { requirePortalView, sessionCan } from '@/lib/portal-auth'
+import { ShootDocumentKnop } from '@/components/shoot-document-knop'
 
 type FeedbackRow = Feedback & { shoot_id: string }
 type IdeaRow = Idea & { shoot_id: string; attachment_path: string | null }
@@ -72,16 +73,24 @@ export default async function PortalSocialMediaPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">Social Media Kalender</h1>
           <p className="text-sm text-gray-500 mt-0.5">{client?.company_name}</p>
         </div>
-        {pendingCount > 0 && (
-          <div className="status-badge bg-amber-100 text-amber-700 text-sm px-3 py-1.5">
-            {pendingCount} wachten op goedkeuring
-          </div>
-        )}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+          {pendingCount > 0 && (
+            <div className="status-badge bg-amber-100 text-amber-700 text-sm px-3 py-1.5 self-start sm:self-auto">
+              {pendingCount} wachten op goedkeuring
+            </div>
+          )}
+          <ShootDocumentKnop
+            href="/api/portal/social-media/shoot-document"
+            label="Shootdocument downloaden"
+            className="w-full sm:w-auto justify-center"
+            title="Print-klare checklist voor de eerstvolgende shoot (scripts + medianotities)"
+          />
+        </div>
       </div>
 
       <PortalCalendar

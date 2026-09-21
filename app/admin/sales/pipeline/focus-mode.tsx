@@ -6,11 +6,12 @@ import { toast } from 'sonner'
 import {
   Loader2, X, Phone, Mail, Globe, SkipForward, CheckCircle2, Clock, Search,
   Building2, MapPin, Users, BadgeInfo, PhoneOff, AlertTriangle, ChevronDown, FileText,
-  Pencil, ShieldQuestion, UserCheck, Save, History, CalendarClock,
+  Pencil, ShieldQuestion, UserCheck, Save, History, CalendarClock, Play, Square, Timer,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { merkStijl } from '@/lib/sales/merk'
-import { FOCUS_ACTIONS, stageLabel } from '@/lib/sales/stages'
+import { FOCUS_ACTIONS, focusDoelFase, stageLabel } from '@/lib/sales/stages'
+import { formatDuur, parseDuur } from '@/lib/sales/activiteiten-model'
 import {
   bouwWachtrij, aftelLabel, terugbelMoment, leesTijdstip, isKlaarFase, TERUGBEL_KEUZES,
   MAX_GEEN_GEHOOR, GEEN_GEHOOR_UREN,
@@ -33,6 +34,12 @@ import { LeadTijdlijn } from './lead-tijdlijn'
  * uur springt hij ALS EERSTE terug binnen (ook live, terwijl je zit te bellen —
  * de wachtrij herrekent elke halve minuut). De zijlijst toont wie er wanneer
  * terugkomt ("over 47 min").
+ *
+ * ACTIVITEITEN (kanbanbord, 21 sep 2026). Elke uitkomstknop registreert een
+ * echte salesactiviteit (POST /api/admin/sales/activiteiten) — die telt in de
+ * statistieken. De gespreksduur is optioneel: timer of mm:ss, nooit geschat.
+ * De wachtrij komt uit Outbound → Inbound → Opvolgen, met vervallen
+ * terugbelmomenten en opvolgdatums vooraan (lib/sales/focus-queue.ts).
  */
 
 type Bedrijf = {
@@ -59,6 +66,9 @@ type Lead = {
   geen_gehoor_count?: number | null
   /** De laatste notitie, zodat je vóór het bellen weet wat er gezegd is. */
   laatste_notitie?: string | null
+  /** Volgende opvolgdatum (JJJJ-MM-DD); vandaag of vroeger = vooraan in de rij. */
+  opvolgdatum?: string | null
+  harrie?: { nogBezig?: boolean | null; reageerde?: boolean | null } | null
   sales_companies: Bedrijf | null
   sales_contacts: Contact | null
 }
@@ -118,6 +128,15 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
   const [datumTijd, setDatumTijd] = useState('')
   // Loopt op na elke bewaarde notitie: de tijdlijn haalt zich dan opnieuw op.
   const [ververs, setVerversen] = useState(0)
+  // Gespreksduur van DEZE belpoging: mm:ss of de timer. Leeg = geen duur.
+  const [duur, setDuur] = useState('')
+  const [timerStart, setTimerStart] = useState<number | null>(null)
+  const [timerNu, setTimerNu] = useState(() => Date.now())
+  useEffect(() => {
+    if (timerStart === null) return
+    const t = setInterval(() => setTimerNu(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [timerStart])
   const doorlopen = useRef(0)
   // Ankers voor de springlinks naar de scriptsecties.
   const sectieRefs = useRef<(HTMLElement | null)[]>([])
@@ -268,9 +287,50 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
     setNote('')
     setOpenBezwaar(null)
     setDatumTijd('')
+    setDuur('')
+    setTimerStart(null)
     doorlopen.current += 1
     setGedaan((s) => new Set(s).add(id))
   }, [])
+
+  /**
+   * De gespreksduur in seconden. Loopt de timer, dan telt die (tot nu); anders
+   * het ingetypte mm:ss. Leeg → null (geen duur). 'fout' bij onleesbare invoer.
+   */
+  const leesDuur = useCallback((): number | null | 'fout' => {
+    if (timerStart !== null) return Math.max(0, Math.round((Date.now() - timerStart) / 1000))
+    if (!duur.trim()) return null
+    const s = parseDuur(duur)
+    return s === null ? 'fout' : s
+  }, [timerStart, duur])
+
+  /** Eén salesactiviteit registreren voor de huidige lead. */
+  const registreer = useCallback(async (body: Record<string, unknown>): Promise<boolean> => {
+    if (!lead) return false
+    try {
+      const r = await fetch('/api/admin/sales/activiteiten', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leadId: lead.id, ...body }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j.error ?? 'Registreren mislukt')
+      return true
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Registreren mislukt')
+      return false
+    }
+  }, [lead])
+
+  /** Een telefoongesprek registreren met de duur en de notitie van dit scherm. */
+  const registreerGesprek = useCallback(async (uitkomst: string, opts?: { kop?: string; naarFase?: string | null }) => {
+    const s = leesDuur()
+    if (s === 'fout') { toast.error('Gespreksduur als mm:ss, bv. 3:20 — of laat leeg.'); return false }
+    const tekst = note.trim()
+    const notitie = opts?.kop ? (tekst ? `${opts.kop} — ${tekst}` : opts.kop) : (tekst || null)
+    return registreer({
+      type: 'telefoongesprek', uitkomst, duurSeconden: s, notitie, naarFase: opts?.naarFase ?? null,
+    })
+  }, [leesDuur, note, registreer])
 
   /** PATCH op de huidige lead; bij succes door naar de volgende. */
   const stuur = useCallback(async (body: Record<string, unknown>, blijf = false) => {
@@ -329,11 +389,13 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
     const a = FOCUS_ACTIONS.find((x) => x.key === key)
     if (!a) return
     if (a.opensBooking) {
-      // Het boekscherm is een andere pagina; dit scherm verdwijnt. Wat er in
-      // het notitieveld staat zou anders stil verloren gaan — eerst loggen.
-      if (note.trim()) {
-        await stuur({ noteKind: 'call', note: note.trim() }, true)
-      }
+      // Het boekscherm is een andere pagina; dit scherm verdwijnt. Eerst het
+      // gesprek registreren (uitkomst "afspraak gepland", met duur en
+      // notitie) — de afspraak zelf registreert het boekscherm.
+      setBusy(true)
+      const ok = await registreerGesprek(a.uitkomst ?? 'afspraak_gepland')
+      setBusy(false)
+      if (!ok) return
       // Belde je namens het andere merk, dan verhuist de lead eerst. Het
       // boekscherm leest de brochure, de afzender en de agenda uit het merk
       // van de lead — zonder deze stap komt de verkeerde one-pager mee.
@@ -352,48 +414,55 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
       router.push(`/admin/sales/appointments?lead=${lead.id}`)
       return
     }
-    // "Geen interesse" vraagt altijd een reden: daar draait de statistiek op.
-    if (a.stage === 'not_interested') { setRedenOpen(true); return }
+    // "Geen interesse" vraagt eerst een reden: daar draait de statistiek op.
+    if (a.vraagtReden) { setRedenOpen(true); return }
 
     /**
-     * De uitkomst én de notitie samen op de tijdlijn: "Interesse — vragen naar
-     * Noël". Enkel de notitie bewaren zou de uitkomst verliezen bij een actie
-     * die de fase niet verandert; enkel het label zou je tekst weggooien.
+     * 1) De activiteit — telefoongesprek met uitkomst, of e-mail verstuurd —
+     *    met de notitie erbij ("Interesse — vragen naar Noël"). De kaart
+     *    schuift hoogstens VOORUIT (focusDoelFase): een lead in Opvolgen die
+     *    je opnieuw belt, blijft in Opvolgen.
      */
-    const tekst = note.trim()
-    const body: Record<string, unknown> = {
-      noteKind: 'call',
-      note: tekst ? `${a.label} — ${tekst}` : a.label,
+    const naarFase = focusDoelFase(lead.stage_key, a.stage)
+    setBusy(true)
+    let ok: boolean
+    if (a.activiteit === 'email_verstuurd') {
+      ok = await registreer({ type: 'email_verstuurd', notitie: note.trim() || null, naarFase })
+    } else {
+      ok = await registreerGesprek(a.uitkomst ?? 'contact_gehad', {
+        kop: a.markeerWarm ? 'Interesse' : undefined, naarFase,
+      })
     }
+    setBusy(false)
+    if (!ok) return
 
     /**
-     * "Geen antwoord" laat de server tellen en het terugbelmoment zetten
-     * (25 uur later, zodat je niet elke dag op hetzelfde uur belt). Na zes
-     * vergeefse pogingen gaat de lead naar "Max. belpogingen" en uit de rij.
-     * Fase en terugbelmoment komen dan van de server, dus die zetten we hier
-     * bewust niet — anders schrijven we zijn beslissing weer over.
+     * 2) De lead zelf bijwerken (en door naar de volgende).
+     *    "Geen antwoord" laat de server tellen en het terugbelmoment zetten
+     *    (25 uur later, zodat je niet elke dag op hetzelfde uur belt). Na zes
+     *    vergeefse pogingen valt de lead uit de belronde — zonder fasewissel.
      */
+    const body: Record<string, unknown> = {}
     if (a.key === '1') {
       body.geen_gehoor = true
       const gelukt = await stuur(body)
       if (gelukt) {
         const pogingen = (lead.geen_gehoor_count ?? 0) + 1
         toast.info(pogingen >= MAX_GEEN_GEHOOR
-          ? `${pogingen}× geen gehoor — deze staat nu op "Max. belpogingen".`
+          ? `${pogingen}× geen gehoor — deze lead gaat uit de belronde.`
           : `Geen gehoor (${pogingen}/${MAX_GEEN_GEHOOR}) — komt over ${GEEN_GEHOOR_UREN} uur terug.`)
       }
       return
     }
-
-    if (a.stage && a.stage !== lead.stage_key) body.stage = a.stage
-    // "Interesse" verandert het kanaal niet — het zet een warme markering, net
-    // zoals een antwoord op een mail van Harrie dat doet.
+    // "Interesse" zet een warme markering, net zoals een antwoord op een mail
+    // van Harrie dat doet.
     if (a.markeerWarm) body.warm = true
     // Een afgehandelde terugbelafspraak moet gewist worden — anders blijft
     // deze lead voor altijd als "te laat" vooraan in elke volgende belronde.
     if (lead.callback_at) body.callback_at = null
-    await stuur(body)
-  }, [lead, busy, note, router, stuur])
+    if (Object.keys(body).length) await stuur(body)
+    else { setVerversen((n) => n + 1); onChanged(); volgende(lead.id) }
+  }, [lead, busy, note, router, stuur, merkId, registreer, registreerGesprek, onChanged, volgende])
 
   /** Terugbelafspraak: moment zetten, loggen, en de lead lokaal verplaatsen
    *  zodat hij meteen in de wachtlijst verschijnt (en straks terug opspringt). */
@@ -401,22 +470,27 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
     if (!lead) return
     const om = new Date(omMs).toISOString()
     const notitie = note.trim()
+    // "Bel me terug" = er is gesproken: telefoongesprek met uitkomst terugbellen.
+    setBusy(true)
+    const geregistreerd = await registreerGesprek('terugbellen', { kop: `Terugbelafspraak (${label})` })
+    setBusy(false)
+    if (!geregistreerd) return
     const okGelukt = await stuur({
       callback_at: om,
       callback_note: notitie || null,
-      noteKind: 'call',
-      note: `Terugbelafspraak (${label})${notitie ? ` — ${notitie}` : ''}`,
     }, true)
     if (okGelukt) {
       setLokaal((m) => new Map(m).set(lead.id, { callback_at: om, callback_note: notitie || null }))
       setNote('')
       setOpenBezwaar(null)
+      setDuur('')
+      setTimerStart(null)
       doorlopen.current += 1
       setEigenTijd('')
       setDatumTijd('')
       toast.success(`Komt terug ${aftelLabel(om, Date.now())}`)
     }
-  }, [lead, note, stuur])
+  }, [lead, note, stuur, registreerGesprek])
 
   /** Snelknop: "over zoveel minuten" (of morgen 9u bij -1). */
   const terugbellen = useCallback(
@@ -437,18 +511,23 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
   const geenInteresse = useCallback(async (reden: string, toelichting: string) => {
     const lostReason = redenTekst(reden, toelichting)
     if (!lostReason) return
+    // 1) Het gesprek zelf: uitkomst "geen interesse", met duur en notitie.
+    setBusy(true)
+    const geregistreerd = await registreerGesprek('geen_interesse', { kop: `Geen interesse — ${lostReason}` })
+    setBusy(false)
+    if (!geregistreerd) return
+    // 2) De lead naar Verloren, met de reden (registreert "deal verloren").
     const okGelukt = await stuur({
-      stage: 'not_interested',
+      ...(lead && lead.stage_key !== 'verloren' ? { stage: 'verloren' } : {}),
       reden_code: reden,
       reden_toelichting: toelichting || undefined,
       lost_reason: lostReason,
+      verlies_reden: lostReason,
       // Ook hier de terugbelafspraak opruimen: wie afhaakt, wordt niet meer gebeld.
       ...(lead?.callback_at ? { callback_at: null } : {}),
-      noteKind: 'call',
-      note: `Geen interesse — ${lostReason}${note.trim() ? ` · ${note.trim()}` : ''}`,
     })
     if (okGelukt) setRedenOpen(false)
-  }, [stuur, note, lead])
+  }, [stuur, lead, registreerGesprek])
 
   // Sneltoetsen — niet terwijl je typt of terwijl de redenkiezer open staat.
   useEffect(() => {
@@ -825,6 +904,31 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
             </div>
           )}
 
+          {/* Gespreksduur — optioneel. Timer die je zelf start/stopt, of mm:ss.
+              Nooit geschat: leeg laten = geen duur in de statistiek. */}
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-bold mb-1 flex items-center gap-1">
+              <Timer className="h-3 w-3" />Gespreksduur (optioneel)
+            </label>
+            <div className="flex gap-1.5 items-center">
+              <input className="input-base text-sm w-24" inputMode="numeric" placeholder="mm:ss"
+                disabled={timerStart !== null}
+                value={timerStart !== null ? formatDuur(Math.max(0, Math.round((timerNu - timerStart) / 1000))) : duur}
+                onChange={(e) => setDuur(e.target.value)} />
+              {timerStart !== null ? (
+                <button type="button" className="btn-secondary text-xs"
+                  onClick={() => { setDuur(formatDuur(Math.max(0, Math.round((Date.now() - timerStart) / 1000)))); setTimerStart(null) }}>
+                  <Square className="h-3 w-3 text-red-600" />Stop
+                </button>
+              ) : (
+                <button type="button" className="btn-secondary text-xs"
+                  onClick={() => { setTimerNu(Date.now()); setTimerStart(Date.now()) }}>
+                  <Play className="h-3 w-3" />Start
+                </button>
+              )}
+            </div>
+          </div>
+
           <div>
             <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-bold mb-1">
               Notitie bij deze belpoging
@@ -923,7 +1027,7 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
 
           <div className="border-t border-gray-100 pt-3 flex flex-wrap gap-1.5">
             <button
-              onClick={() => stuur({ do_not_call: true, do_not_call_reason: note.trim() || 'Gevraagd tijdens gesprek', noteKind: 'call', note: 'Bel-me-niet gevraagd' })}
+              onClick={() => stuur({ do_not_call: true, do_not_call_reason: note.trim() || 'Gevraagd tijdens gesprek', noteKind: 'note', note: 'Bel-me-niet gevraagd' })}
               disabled={busy}
               className="text-xs px-2 py-1 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 inline-flex items-center gap-1 disabled:opacity-40"
             >
@@ -953,6 +1057,9 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
               )}>
               <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-gray-900 text-white text-[11px] font-bold mr-1.5">{a.key}</span>
               {a.label}
+              {focusDoelFase(lead.stage_key, a.stage) && (
+                <span className="block text-[10px] text-gray-400 mt-0.5">→ {stageLabel(a.stage)}</span>
+              )}
             </button>
           ))}
         </div>

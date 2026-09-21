@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { Toaster } from 'sonner'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { PortalSidebar } from '@/components/portal/sidebar'
 import { resolvePortalSession, sessionCan, touchLastLogin } from '@/lib/portal-auth'
@@ -80,6 +81,7 @@ export default async function PortalLayout({ children }: { children: React.React
           {children}
         </div>
       </main>
+      <Toaster richColors position="top-right" />
     </div>
   )
 }

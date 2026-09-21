@@ -1,374 +1,375 @@
 /**
- * Cijfers van het appointment setten: waar lekt de trechter, wie zet om, en
- * welke sector levert het meeste op.
+ * Salesstatistieken — wat het team DEED: gebeld, gemaild, opgevolgd, afspraken
+ * gezet, voorstellen verstuurd, deals gewonnen of verloren.
  *
  * Pure module — geen database, geen server-only imports. Alles rekent op rijen
- * die je meegeeft. Zo is dit te testen zonder database, en dat is nodig ook:
- * een conversiepercentage dat er plausibel uitziet maar verkeerd gerekend is,
- * merk je nooit.
+ * die je meegeeft (sales_activiteiten, aangevuld met oude belregistraties), zo
+ * is elke ratio los te testen (tests/sales-statistieken.test.ts).
  *
- * NIET te verwarren met lib/sales/setters.ts. Dat gaat over geld — gewerkte
- * uren, commissie, uitbetalingen. Dit gaat over prestaties.
+ * TELREGELS
+ *  · Zacht verwijderde activiteiten tellen niet.
+ *  · Een lead drie keer gebeld = 3 telefoongesprekken, 1 unieke lead.
+ *  · Een afspraak telt één keer, ook als ze verplaatst werd (ontdubbeld op
+ *    afspraak_id); een geannuleerde afspraak telt niet.
+ *  · Een deal telt hoogstens één keer per lead: de LAATSTE sluiting (gewonnen
+ *    of verloren) in de periode is de uitkomst.
+ *  · Een ratio zonder noemer is null ("—"), nooit NaN of 0%.
+ *
+ * NIET te verwarren met lib/sales/setters.ts (geld: uren, commissie,
+ * uitbetalingen — het scherm "Resultaten").
  */
 
-export type AfspraakRij = {
-  id: string
-  lead_id: string | null
-  setter_profile_id: string | null
-  /**
-   * De auth-gebruiker die boekte.
-   *
-   * NODIG ALS TERUGVAL. Bij het boeken wordt alleen dit veld gezet;
-   * setter_profile_id wordt pas ingevuld zodra er een uitkomst geregistreerd
-   * wordt. Zonder deze terugval hangt elke nog openstaande afspraak aan
-   * niemand, en dan klopt geen enkel cijfer per setter.
-   */
-  setter_id: string | null
-  /** scheduled | completed | no_show | cancelled */
-  status: string
-  /** won | lost | null */
-  outcome: string | null
-  outcome_reason: string | null
-  deal_value_cents: number | null
-  starts_at: string
-}
+import { GESLAAGD_CONTACT, formatDuur } from '@/lib/sales/activiteiten-model'
+import { isInboundBron, leadbronLabel, normaliseerLeadbron } from '@/lib/sales/leadbron'
 
-export type GesprekRij = {
+export type StatActiviteit = {
+  id: string
   lead_id: string
-  /** auth-user van wie belde; kan ontbreken bij oude registraties. */
-  actor_id: string | null
+  medewerker_id: string | null
+  medewerker_email?: string | null
+  type: string
+  duur_seconden: number | null
+  uitkomst: string | null
+  afspraak_id?: string | null
   created_at: string
+  verwijderd_op?: string | null
 }
 
-export type LeadRij = {
+export type StatLead = {
   id: string
-  company_id: string | null
-  source: string | null
-  lost_reason: string | null
+  leadbron: string | null
+  dienst: string | null
+  deal_waarde_cents: number | null
 }
 
-export type BedrijfRij = { id: string; sector: string | null }
+export type StatMedewerker = { id: string; naam: string }
 
-export type SetterRij = { id: string; naam: string; auth_user_id: string | null }
+export type StatFilter = {
+  /** Auth-gebruiker. */
+  medewerkerId?: string
+  richting?: 'inbound' | 'outbound'
+  dienst?: string
+  leadbron?: string
+}
 
-/**
- * De trechter. Elk getal is een aantal, geen percentage — percentages worden
- * pas op het scherm gerekend, zodat er nooit een afgerond percentage verder
- * gerekend wordt.
- */
-export type Trechter = {
-  gesprekken: number
-  /** Leads waarmee minstens één gesprek is geregistreerd. */
-  leadsGebeld: number
-  /** Geboekte afspraken, exclusief geannuleerde. */
+export type TrendPer = 'dag' | 'week' | 'maand'
+
+export type Cijfers = {
+  telefoongesprekken: number
+  beltijdSeconden: number
+  /** Gesprekken MET een geregistreerde duur (noemer van het gemiddelde). */
+  gesprekkenMetDuur: number
+  emails: number
+  /** Unieke leads waarop iets gedaan is (alles behalve een fasewissel). */
+  uniekeLeads: number
+  opvolgingen: number
   afspraken: number
-  /** Afspraak is doorgegaan. */
-  doorgegaan: number
-  noShows: number
-  geannuleerd: number
+  voorstellen: number
   gewonnen: number
   verloren: number
-  /** Afspraak geweest, uitkomst nog niet ingevuld. */
-  open: number
-  dealWaardeCent: number
+  waardeGewonnenCent: number
+  /** Unieke leads met geslaagd contact (gesprek met contact, e-mail, of afspraak). */
+  leadsMetContact: number
+  /** Unieke leads met minstens één (niet-geannuleerde) afspraak. */
+  leadsMetAfspraak: number
+  gemiddeldeDuurSeconden: number | null
+  /** gewonnen ÷ (gewonnen + verloren) × 100 */
+  closingRate: number | null
+  /** leads met afspraak ÷ leads met geslaagd contact × 100 */
+  appointmentRate: number | null
+  /** leads met geslaagd contact ÷ unieke behandelde leads × 100 */
+  contactRate: number | null
 }
 
-export type Groep = Trechter & { sleutel: string; label: string }
+export type Rij = Cijfers & { sleutel: string; label: string }
+
+export type TrendPunt = {
+  sleutel: string
+  telefoongesprekken: number
+  emails: number
+  afspraken: number
+  gewonnen: number
+}
+
+export type Uitblinker = { titel: string; naam: string; waarde: string }
 
 export type Statistieken = {
-  totaal: Trechter
-  perSetter: Groep[]
-  perSector: Groep[]
-  perBron: Groep[]
-  verliesredenen: { reden: string; aantal: number }[]
-  perMaand: { maand: string; gesprekken: number; afspraken: number; gewonnen: number }[]
-  perWeekdag: { dag: string; gesprekken: number; afspraken: number }[]
-  perUur: { uur: number; gesprekken: number; afspraken: number }[]
+  team: Cijfers
+  perMedewerker: Rij[]
+  perLeadbron: Rij[]
+  trend: TrendPunt[]
+  trendPer: TrendPer
+  vergelijking: Uitblinker[]
 }
 
-// ── Interesse op leadniveau ─────────────────────────────────────────────────
-// Beantwoordt "hoeveel procent van de bouwbedrijven is geïnteresseerd?" — dat
-// is een andere vraag dan de afsprakentrechter hierboven: dit telt op wat er
-// NU in de pipeline staat, over alle belpogingen heen.
-
-export type LeadInteresseRij = {
-  id: string
-  company_id: string | null
-  stage_key: string
-  warm?: boolean | null
-  /** Gestructureerde afwijsreden; hierop wordt geteld. */
-  reden_code?: string | null
-  lost_reason: string | null
-}
-
-export type SectorInteresse = {
-  sector: string
-  totaal: number
-  /** Interesse getoond: fase interesse, afspraak of gewonnen. */
-  interesse: number
-  /** Expliciet afgehaakt: geen interesse of verloren. */
-  geenInteresse: number
-  /** De rest: nog te bellen of nog in gesprek. */
-  bezig: number
-}
-
-// "Interesse" is geen fase meer maar een markering (sales_leads.warm); een
-// afspraak of een gewonnen deal telt uiteraard nog steeds als interesse.
-const INTERESSE_FASEN = new Set(['appointment', 'won'])
-const AFGEHAAKT_FASEN = new Set(['not_interested', 'lost'])
-
-/**
- * Interesse per sector plus de redenen waarom mensen afhaken.
- *
- * De redenen tellen op `reden_code`, niet op de vrije tekst. Dat is het hele
- * punt van die kolom: Harrie stuurt "Vinden het veel te duur voor wat het is"
- * en een setter kiest "Te duur" — zonder code zouden dat twee aparte redenen
- * zijn en telt er niets. Rijen van vóór die kolom vallen terug op de tekst.
- */
-export function berekenLeadInteresse(
-  leads: LeadInteresseRij[],
-  bedrijven: BedrijfRij[],
-  redenLabel: (code: string | null | undefined) => string,
-  redenGroep: (v: string | null | undefined) => string | null,
-): { perSector: SectorInteresse[]; redenen: { reden: string; aantal: number }[] } {
-  const sectorVan = new Map(bedrijven.map((b) => [b.id, b.sector?.trim() || ONBEKEND]))
-  const perSector = new Map<string, SectorInteresse>()
-  const redenen = new Map<string, number>()
-
-  for (const l of leads) {
-    const sector = (l.company_id ? sectorVan.get(l.company_id) : null) ?? ONBEKEND
-    let s = perSector.get(sector)
-    if (!s) { s = { sector, totaal: 0, interesse: 0, geenInteresse: 0, bezig: 0 }; perSector.set(sector, s) }
-    s.totaal++
-    if (INTERESSE_FASEN.has(l.stage_key) || l.warm) s.interesse++
-    else if (AFGEHAAKT_FASEN.has(l.stage_key)) {
-      s.geenInteresse++
-      const reden = l.reden_code
-        ? redenLabel(l.reden_code)
-        : (redenGroep(l.lost_reason) ?? 'Geen reden ingevuld')
-      redenen.set(reden, (redenen.get(reden) ?? 0) + 1)
-    } else s.bezig++
-  }
-
-  return {
-    // Grootste sectoren bovenaan: daar is de statistiek het meest waard.
-    perSector: [...perSector.values()].sort((a, b) => b.totaal - a.totaal || a.sector.localeCompare(b.sector)),
-    redenen: [...redenen.entries()]
-      .map(([reden, aantal]) => ({ reden, aantal }))
-      .sort((a, b) => b.aantal - a.aantal),
-  }
-}
-
-export const leegTrechter = (): Trechter => ({
-  gesprekken: 0, leadsGebeld: 0, afspraken: 0, doorgegaan: 0, noShows: 0,
-  geannuleerd: 0, gewonnen: 0, verloren: 0, open: 0, dealWaardeCent: 0,
-})
+// ── Kleine rekenhulpen ───────────────────────────────────────────────────────
 
 /**
  * Een percentage, of null als er niets is om over te rekenen.
- *
- * NULL EN NIET NUL. "0% van 0 afspraken" leest als een slecht resultaat,
- * terwijl er gewoon niets gebeurd is. Het scherm toont daar een streepje.
+ * NULL EN NIET NUL: "0% van 0" leest als een slecht resultaat, terwijl er
+ * gewoon niets gebeurd is. Het scherm toont daar een streepje.
  */
 export function percentage(deel: number, geheel: number): number | null {
   if (!Number.isFinite(deel) || !Number.isFinite(geheel) || geheel <= 0) return null
-  return (deel / geheel) * 100
+  const p = (deel / geheel) * 100
+  return Number.isFinite(p) ? p : null
 }
 
-export const toonPercentage = (p: number | null): string =>
-  p === null ? '—' : `${p.toFixed(1).replace('.', ',')}%`
+export const toonPercentage = (p: number | null | undefined): string =>
+  p === null || p === undefined || !Number.isFinite(p) ? '—' : `${p.toFixed(1).replace('.', ',')}%`
 
-/**
- * De datumdelen zoals ze in Brussel zijn.
- *
- * NIET via toISOString(): dat rekent in UTC, en dan valt een gesprek van
- * 00u30 in de vorige dag en een avondafspraak in de verkeerde maand. Dat is in
- * dit project al eens misgegaan bij de verlengingsdatums.
- */
+/** Gemiddelde, of null zonder noemer. */
+export function gemiddelde(som: number, n: number): number | null {
+  if (!Number.isFinite(som) || !Number.isFinite(n) || n <= 0) return null
+  return som / n
+}
+
 const DEEL = new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'Europe/Brussels',
-  year: 'numeric', month: '2-digit', day: '2-digit',
-  hour: '2-digit', hour12: false,
+  timeZone: 'Europe/Brussels', year: 'numeric', month: '2-digit', day: '2-digit',
 })
 
-export const WEEKDAGEN = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'] as const
-
-export function brusselDelen(iso: string): { maand: string; uur: number; weekdag: number } | null {
+/** JJJJ-MM-DD zoals het in Brussel is (niet via toISOString: dat is UTC). */
+export function brusselDag(iso: string): string | null {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return null
-  const delen = Object.fromEntries(DEEL.formatToParts(d).map((p) => [p.type, p.value]))
+  return DEEL.format(d)
+}
 
-  const jaar = Number(delen.year)
-  const maandNr = Number(delen.month)
-  const dag = Number(delen.day)
-  const uur = Number(delen.hour)
-  if (!Number.isFinite(jaar) || !Number.isFinite(maandNr) || !Number.isFinite(dag)) return null
+/** De sleutel van het trendvak waarin een moment valt. Week = maandag. */
+export function trendSleutel(iso: string, per: TrendPer): string | null {
+  const dag = brusselDag(iso)
+  if (!dag) return null
+  if (per === 'dag') return dag
+  if (per === 'maand') return dag.slice(0, 7)
+  const [j, m, d] = dag.split('-').map(Number)
+  const t = new Date(Date.UTC(j, m - 1, d, 12))
+  const naarMaandag = (t.getUTCDay() + 6) % 7
+  t.setUTCDate(t.getUTCDate() - naarMaandag)
+  return t.toISOString().slice(0, 10)
+}
 
-  // De weekdag rekenen we UIT DE DATUM, niet uit een vertaalde naam. Sommige
-  // omgevingen geven "Mon." met een punt terug; dan mislukt elke opzoeking en
-  // valt alles stilletjes op maandag.
-  const zondagEerst = new Date(Date.UTC(jaar, maandNr - 1, dag)).getUTCDay()
+/** Automatische trendgranulariteit voor een periode (in dagen). */
+export function kiesTrendPer(dagen: number): TrendPer {
+  if (dagen <= 31) return 'dag'
+  if (dagen <= 120) return 'week'
+  return 'maand'
+}
 
+// ── Oude belregistraties ─────────────────────────────────────────────────────
+
+export type LegacyGesprek = { id?: string; lead_id: string; actor_id: string | null; actor_email?: string | null; created_at: string }
+
+/**
+ * Oude belregistraties (sales_lead_events kind='call') van VÓÓR de eerste
+ * activiteitenrij tellen mee als telefoongesprek zonder duur en zonder
+ * uitkomst. Daarna schrijft elk gesprek zowel een activiteit als een
+ * tijdlijnregel — die tijdlijnregels mogen dus niet nog eens meetellen.
+ */
+export function legacyGesprekken(events: LegacyGesprek[], eersteActiviteitOp: string | null): StatActiviteit[] {
+  const grens = eersteActiviteitOp ? new Date(eersteActiviteitOp).getTime() : Infinity
+  return events
+    .filter((e) => new Date(e.created_at).getTime() < grens)
+    .map((e, i) => ({
+      id: e.id ? `legacy-${e.id}` : `legacy-${i}`,
+      lead_id: e.lead_id,
+      medewerker_id: e.actor_id,
+      medewerker_email: e.actor_email ?? null,
+      type: 'telefoongesprek',
+      duur_seconden: null,
+      uitkomst: null,
+      afspraak_id: null,
+      created_at: e.created_at,
+      verwijderd_op: null,
+    }))
+}
+
+// ── Ontdubbelen ──────────────────────────────────────────────────────────────
+
+/**
+ * Welke afspraak- en sluitingsactiviteiten tellen? Globaal bepaald, zodat
+ * teamtotaal en de som per medewerker nooit uit elkaar lopen.
+ */
+export function getelde(acts: StatActiviteit[], geannuleerd: Set<string>): { afspraken: Set<string>; sluitingen: Set<string> } {
+  const afspraken = new Set<string>()
+  const perAfspraak = new Set<string>()
+  const laatsteSluiting = new Map<string, StatActiviteit>()
+  const opTijd = [...acts].sort((a, b) => a.created_at.localeCompare(b.created_at))
+  for (const a of opTijd) {
+    if (a.type === 'afspraak_gepland') {
+      if (a.afspraak_id && geannuleerd.has(a.afspraak_id)) continue
+      const sleutel = a.afspraak_id ? `a:${a.afspraak_id}` : `x:${a.id}`
+      if (perAfspraak.has(sleutel)) continue
+      perAfspraak.add(sleutel)
+      afspraken.add(a.id)
+    } else if (a.type === 'deal_gewonnen' || a.type === 'deal_verloren') {
+      laatsteSluiting.set(a.lead_id, a)
+    }
+  }
+  return { afspraken, sluitingen: new Set([...laatsteSluiting.values()].map((a) => a.id)) }
+}
+
+// ── Tellen ───────────────────────────────────────────────────────────────────
+
+export function telCijfers(
+  acts: StatActiviteit[],
+  leadById: Map<string, StatLead>,
+  geteld: { afspraken: Set<string>; sluitingen: Set<string> },
+): Cijfers {
+  let telefoongesprekken = 0, beltijdSeconden = 0, gesprekkenMetDuur = 0
+  let emails = 0, opvolgingen = 0, afspraken = 0, voorstellen = 0, gewonnen = 0, verloren = 0
+  let waardeGewonnenCent = 0
+  const behandeld = new Set<string>()
+  const contact = new Set<string>()
+  const metAfspraak = new Set<string>()
+
+  for (const a of acts) {
+    if (a.type !== 'fase_gewijzigd') behandeld.add(a.lead_id)
+    switch (a.type) {
+      case 'telefoongesprek': {
+        telefoongesprekken++
+        const d = a.duur_seconden
+        if (typeof d === 'number' && Number.isFinite(d) && d >= 0) { beltijdSeconden += d; gesprekkenMetDuur++ }
+        if (a.uitkomst && GESLAAGD_CONTACT.has(a.uitkomst)) contact.add(a.lead_id)
+        break
+      }
+      case 'email_verstuurd': emails++; contact.add(a.lead_id); break
+      case 'opvolging': opvolgingen++; break
+      case 'voorstel_verstuurd': voorstellen++; break
+      case 'afspraak_gepland':
+        if (geteld.afspraken.has(a.id)) {
+          afspraken++
+          metAfspraak.add(a.lead_id)
+          // Een geboekte afspraak veronderstelt contact.
+          contact.add(a.lead_id)
+        }
+        break
+      case 'deal_gewonnen':
+        if (geteld.sluitingen.has(a.id)) {
+          gewonnen++
+          const w = leadById.get(a.lead_id)?.deal_waarde_cents
+          if (typeof w === 'number' && Number.isFinite(w) && w > 0) waardeGewonnenCent += w
+        }
+        break
+      case 'deal_verloren':
+        if (geteld.sluitingen.has(a.id)) verloren++
+        break
+    }
+  }
+
+  const uniekeLeads = behandeld.size
+  const leadsMetContact = contact.size
+  const leadsMetAfspraak = metAfspraak.size
   return {
-    maand: `${delen.year}-${delen.month}`,
-    // Middernacht komt er in sommige omgevingen uit als 24; dat is uur 0.
-    uur: Number.isFinite(uur) ? uur % 24 : 0,
-    // getUTCDay begint op zondag; onze week begint op maandag.
-    weekdag: (zondagEerst + 6) % 7,
+    telefoongesprekken, beltijdSeconden, gesprekkenMetDuur, emails, uniekeLeads, opvolgingen,
+    afspraken, voorstellen, gewonnen, verloren, waardeGewonnenCent, leadsMetContact, leadsMetAfspraak,
+    gemiddeldeDuurSeconden: gemiddelde(beltijdSeconden, gesprekkenMetDuur),
+    closingRate: percentage(gewonnen, gewonnen + verloren),
+    appointmentRate: percentage(leadsMetAfspraak, leadsMetContact),
+    contactRate: percentage(leadsMetContact, uniekeLeads),
   }
 }
 
-/** Telt één afspraak op bij een trechter. */
-function tel(t: Trechter, a: AfspraakRij): void {
-  if (a.status === 'cancelled') { t.geannuleerd++; return }
-  t.afspraken++
-  if (a.status === 'completed') t.doorgegaan++
-  if (a.status === 'no_show') t.noShows++
-  if (a.outcome === 'won') { t.gewonnen++; t.dealWaardeCent += a.deal_value_cents ?? 0 }
-  else if (a.outcome === 'lost') t.verloren++
-  else t.open++
+export const legeCijfers = (): Cijfers => telCijfers([], new Map(), { afspraken: new Set(), sluitingen: new Set() })
+
+/** Past de filters toe (medewerker, inbound/outbound, dienst, leadbron) en gooit verwijderde rijen weg. */
+export function filterActiviteiten(acts: StatActiviteit[], leadById: Map<string, StatLead>, f: StatFilter = {}): StatActiviteit[] {
+  return acts.filter((a) => {
+    if (a.verwijderd_op) return false
+    if (f.medewerkerId && a.medewerker_id !== f.medewerkerId) return false
+    if (f.richting || f.dienst || f.leadbron) {
+      const lead = leadById.get(a.lead_id)
+      if (!lead) return false
+      const bron = normaliseerLeadbron(lead.leadbron)
+      if (f.richting === 'inbound' && !isInboundBron(bron)) return false
+      if (f.richting === 'outbound' && isInboundBron(bron)) return false
+      if (f.leadbron && bron !== f.leadbron) return false
+      if (f.dienst && (lead.dienst ?? '').trim().toLowerCase() !== f.dienst.trim().toLowerCase()) return false
+    }
+    return true
+  })
 }
 
-/** Groepen op aantal gewonnen, dan afspraken. Wat het meeste oplevert bovenaan. */
-const sorteer = (a: Groep, b: Groep) =>
-  b.gewonnen - a.gewonnen || b.afspraken - a.afspraken || a.label.localeCompare(b.label)
-
-const ONBEKEND = 'Onbekend'
+const ONBEKEND = 'onbekend'
 
 export function bereken(bron: {
-  afspraken: AfspraakRij[]
-  gesprekken: GesprekRij[]
-  leads: LeadRij[]
-  bedrijven: BedrijfRij[]
-  setters: SetterRij[]
-}): Statistieken {
+  activiteiten: StatActiviteit[]
+  leads: StatLead[]
+  medewerkers: StatMedewerker[]
+  geannuleerdeAfspraken?: Iterable<string>
+  trendPer?: TrendPer
+}, filter: StatFilter = {}): Statistieken {
   const leadById = new Map(bron.leads.map((l) => [l.id, l]))
-  const sectorVanBedrijf = new Map(bron.bedrijven.map((b) => [b.id, b.sector?.trim() || ONBEKEND]))
-  const setterById = new Map(bron.setters.map((s) => [s.id, s]))
-  // Een gesprek registreert de auth-gebruiker, een afspraak het setterprofiel.
-  // Zonder deze brug kan je gesprekken en afspraken niet bij dezelfde persoon
-  // optellen, en klopt elke conversie per setter niet.
-  const setterVanAuth = new Map(
-    bron.setters.filter((s) => s.auth_user_id).map((s) => [s.auth_user_id as string, s]),
-  )
+  const acts = filterActiviteiten(bron.activiteiten, leadById, filter)
+  const geteld = getelde(acts, new Set(bron.geannuleerdeAfspraken ?? []))
+  const trendPer = bron.trendPer ?? 'dag'
 
-  const sectorVanLead = (leadId: string | null): string => {
-    if (!leadId) return ONBEKEND
-    const lead = leadById.get(leadId)
-    if (!lead?.company_id) return ONBEKEND
-    return sectorVanBedrijf.get(lead.company_id) ?? ONBEKEND
-  }
-  const bronVanLead = (leadId: string | null): string => {
-    if (!leadId) return ONBEKEND
-    return leadById.get(leadId)?.source?.trim() || ONBEKEND
-  }
+  const team = telCijfers(acts, leadById, geteld)
 
-  const totaal = leegTrechter()
-  const perSetter = new Map<string, Groep>()
-  const perSector = new Map<string, Groep>()
-  const perBron = new Map<string, Groep>()
-  const maanden = new Map<string, { gesprekken: number; afspraken: number; gewonnen: number }>()
-  const weekdagen = WEEKDAGEN.map(() => ({ gesprekken: 0, afspraken: 0 }))
-  const uren = Array.from({ length: 24 }, () => ({ gesprekken: 0, afspraken: 0 }))
-  const verlies = new Map<string, number>()
-
-  const pak = (kaart: Map<string, Groep>, sleutel: string, label: string): Groep => {
-    let g = kaart.get(sleutel)
-    if (!g) { g = { sleutel, label, ...leegTrechter() }; kaart.set(sleutel, g) }
-    return g
-  }
-  const maand = (sleutel: string) => {
-    let m = maanden.get(sleutel)
-    if (!m) { m = { gesprekken: 0, afspraken: 0, gewonnen: 0 }; maanden.set(sleutel, m) }
-    return m
-  }
-
-  // ── Afspraken ────────────────────────────────────────────────────────────
-  for (const a of bron.afspraken) {
-    tel(totaal, a)
-
-    // Eerst het profiel, anders wie er boekte. Zie AfspraakRij.setter_id.
-    const setter = (a.setter_profile_id ? setterById.get(a.setter_profile_id) : undefined)
-      ?? (a.setter_id ? setterVanAuth.get(a.setter_id) : undefined)
-    tel(pak(perSetter, setter?.id ?? ONBEKEND, setter?.naam ?? ONBEKEND), a)
-
-    const sector = sectorVanLead(a.lead_id)
-    tel(pak(perSector, sector, sector), a)
-    const bronNaam = bronVanLead(a.lead_id)
-    tel(pak(perBron, bronNaam, bronNaam), a)
-
-    if (a.status !== 'cancelled') {
-      const d = brusselDelen(a.starts_at)
-      if (d) {
-        maand(d.maand).afspraken++
-        if (a.outcome === 'won') maand(d.maand).gewonnen++
-        weekdagen[d.weekdag].afspraken++
-        uren[d.uur].afspraken++
-      }
-      if (a.outcome === 'lost') {
-        // De reden van de afspraak wint; anders die van de lead.
-        const reden = a.outcome_reason?.trim()
-          || (a.lead_id ? leadById.get(a.lead_id)?.lost_reason?.trim() : null)
-          || 'Geen reden ingevuld'
-        verlies.set(reden, (verlies.get(reden) ?? 0) + 1)
-      }
+  // Per medewerker
+  const naamVan = new Map(bron.medewerkers.map((m) => [m.id, m.naam]))
+  const groepen = new Map<string, { label: string; acts: StatActiviteit[] }>()
+  for (const a of acts) {
+    const sleutel = a.medewerker_id ?? ONBEKEND
+    let g = groepen.get(sleutel)
+    if (!g) {
+      const label = (a.medewerker_id && naamVan.get(a.medewerker_id))
+        || a.medewerker_email?.split('@')[0]
+        || (a.medewerker_id ? 'Onbekende medewerker' : 'Onbekend')
+      g = { label, acts: [] }
+      groepen.set(sleutel, g)
     }
+    g.acts.push(a)
   }
+  const perMedewerker: Rij[] = [...groepen.entries()]
+    .map(([sleutel, g]) => ({ sleutel, label: g.label, ...telCijfers(g.acts, leadById, geteld) }))
+    .sort((a, b) => b.telefoongesprekken - a.telefoongesprekken || b.afspraken - a.afspraken || a.label.localeCompare(b.label))
 
-  // ── Gesprekken ───────────────────────────────────────────────────────────
-  // Per setter/sector/bron bijhouden welke leads al geteld zijn, zodat
-  // "leads gebeld" echt unieke leads telt en niet het aantal belpogingen.
-  const gezien = { totaal: new Set<string>() }
-  const gezienPer = new Map<string, Set<string>>()
-  const uniek = (kaart: Map<string, Groep>, sleutel: string, leadId: string) => {
-    const k = `${kaart === perSetter ? 's' : kaart === perSector ? 'c' : 'b'}|${sleutel}`
-    let set = gezienPer.get(k)
-    if (!set) { set = new Set(); gezienPer.set(k, set) }
-    if (set.has(leadId)) return false
-    set.add(leadId)
-    return true
+  // Per leadbron
+  const perBron = new Map<string, StatActiviteit[]>()
+  for (const a of acts) {
+    const b = normaliseerLeadbron(leadById.get(a.lead_id)?.leadbron)
+    const lijst = perBron.get(b) ?? []
+    lijst.push(a)
+    perBron.set(b, lijst)
   }
+  const perLeadbron: Rij[] = [...perBron.entries()]
+    .map(([sleutel, lijst]) => ({ sleutel, label: leadbronLabel(sleutel), ...telCijfers(lijst, leadById, geteld) }))
+    .sort((a, b) => b.uniekeLeads - a.uniekeLeads || a.label.localeCompare(b.label))
 
-  for (const g of bron.gesprekken) {
-    totaal.gesprekken++
-    if (!gezien.totaal.has(g.lead_id)) { gezien.totaal.add(g.lead_id); totaal.leadsGebeld++ }
+  // Trend
+  const vakken = new Map<string, TrendPunt>()
+  for (const a of acts) {
+    const sleutel = trendSleutel(a.created_at, trendPer)
+    if (!sleutel) continue
+    let v = vakken.get(sleutel)
+    if (!v) { v = { sleutel, telefoongesprekken: 0, emails: 0, afspraken: 0, gewonnen: 0 }; vakken.set(sleutel, v) }
+    if (a.type === 'telefoongesprek') v.telefoongesprekken++
+    else if (a.type === 'email_verstuurd') v.emails++
+    else if (a.type === 'afspraak_gepland' && geteld.afspraken.has(a.id)) v.afspraken++
+    else if (a.type === 'deal_gewonnen' && geteld.sluitingen.has(a.id)) v.gewonnen++
+  }
+  const trend = [...vakken.values()].sort((a, b) => a.sleutel.localeCompare(b.sleutel))
 
-    const setter = g.actor_id ? setterVanAuth.get(g.actor_id) : undefined
-    const sSleutel = setter?.id ?? ONBEKEND
-    const sGroep = pak(perSetter, sSleutel, setter?.naam ?? ONBEKEND)
-    sGroep.gesprekken++
-    if (uniek(perSetter, sSleutel, g.lead_id)) sGroep.leadsGebeld++
+  return { team, perMedewerker, perLeadbron, trend, trendPer, vergelijking: vergelijk(perMedewerker) }
+}
 
-    const sector = sectorVanLead(g.lead_id)
-    const secGroep = pak(perSector, sector, sector)
-    secGroep.gesprekken++
-    if (uniek(perSector, sector, g.lead_id)) secGroep.leadsGebeld++
-
-    const bronNaam = bronVanLead(g.lead_id)
-    const bGroep = pak(perBron, bronNaam, bronNaam)
-    bGroep.gesprekken++
-    if (uniek(perBron, bronNaam, g.lead_id)) bGroep.leadsGebeld++
-
-    const d = brusselDelen(g.created_at)
-    if (d) {
-      maand(d.maand).gesprekken++
-      weekdagen[d.weekdag].gesprekken++
-      uren[d.uur].gesprekken++
+/** Wie deed het meest? Enkel echte medewerkers, en enkel als er iets te winnen viel. */
+export function vergelijk(rijen: Rij[]): Uitblinker[] {
+  const echt = rijen.filter((r) => r.sleutel !== ONBEKEND)
+  const beste = (titel: string, waarde: (r: Rij) => number | null, toon: (v: number) => string): Uitblinker | null => {
+    let top: { r: Rij; v: number } | null = null
+    for (const r of echt) {
+      const v = waarde(r)
+      if (v === null || !Number.isFinite(v) || v <= 0) continue
+      if (!top || v > top.v) top = { r, v }
     }
+    return top ? { titel, naam: top.r.label, waarde: toon(top.v) } : null
   }
-
-  return {
-    totaal,
-    perSetter: [...perSetter.values()].sort(sorteer),
-    perSector: [...perSector.values()].sort(sorteer),
-    perBron: [...perBron.values()].sort(sorteer),
-    verliesredenen: [...verlies.entries()]
-      .map(([reden, aantal]) => ({ reden, aantal }))
-      .sort((a, b) => b.aantal - a.aantal),
-    perMaand: [...maanden.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([maand, v]) => ({ maand, ...v })),
-    perWeekdag: weekdagen.map((v, i) => ({ dag: WEEKDAGEN[i], ...v })),
-    perUur: uren.map((v, i) => ({ uur: i, ...v })),
-  }
+  return [
+    beste('Meeste telefoongesprekken', (r) => r.telefoongesprekken, (v) => String(v)),
+    beste('Meeste beltijd', (r) => r.beltijdSeconden, (v) => formatDuur(v)),
+    beste('Meeste afspraken', (r) => r.afspraken, (v) => String(v)),
+    beste('Meeste deals', (r) => r.gewonnen, (v) => String(v)),
+    beste('Beste closing rate', (r) => (r.gewonnen + r.verloren > 0 ? r.closingRate : null), (v) => toonPercentage(v)),
+  ].filter((x): x is Uitblinker => x !== null)
 }

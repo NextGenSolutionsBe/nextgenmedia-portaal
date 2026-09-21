@@ -1,18 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin, requireStaff } from '@/lib/supabase/server'
 import { safeMessage } from '@/lib/api-error'
-import { getOrCreateSetter, listSetters } from '@/lib/sales/setters'
 import { laadStatistieken, leesPeriode } from '@/lib/sales/statistieken-data'
+import { isLeadbron } from '@/lib/sales/leadbron'
+import type { TrendPer } from '@/lib/sales/statistieken'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * Cijfers van het appointment setten.
+ * Salesstatistieken (activiteiten per medewerker en voor het team).
  *
- * WIE ZIET WAT. Een admin ziet iedereen; een setter ziet ALLEEN zichzelf. Dat
- * wordt hier afgedwongen en niet in het scherm — wie de knoppen in de browser
- * omzeilt, krijgt nog altijd enkel zijn eigen cijfers. Dezelfde regel als bij
- * /api/admin/sales/stats; die twee horen niet uit elkaar te lopen.
+ * GET ?van=JJJJ-MM-DD&tot=JJJJ-MM-DD[&medewerker=<auth-id>][&richting=inbound|outbound]
+ *     [&dienst=…][&leadbron=…][&trend=dag|week|maand]
+ *
+ * WIE ZIET WAT. Een admin ziet iedereen; een setter/werknemer ziet ALLEEN
+ * zichzelf. Dat wordt hier afgedwongen en niet in het scherm.
  */
 export async function GET(req: NextRequest) {
   try {
@@ -22,33 +24,23 @@ export async function GET(req: NextRequest) {
 
     const sp = req.nextUrl.searchParams
     const periode = leesPeriode(sp.get('van'), sp.get('tot'))
-    const sector = sp.get('sector')?.trim() || undefined
+    const richtingRuw = sp.get('richting')
+    const richting = richtingRuw === 'inbound' || richtingRuw === 'outbound' ? richtingRuw : undefined
+    const dienst = sp.get('dienst')?.trim() || undefined
+    const leadbronRuw = sp.get('leadbron')?.trim() || ''
+    const leadbron = isLeadbron(leadbronRuw) ? leadbronRuw : undefined
+    const trendRuw = sp.get('trend')
+    const trendPer: TrendPer | undefined = trendRuw === 'dag' || trendRuw === 'week' || trendRuw === 'maand' ? trendRuw : undefined
 
-    if (!isAdmin) {
-      const naam = actor.email?.split('@')[0] ?? 'Setter'
-      const ik = await getOrCreateSetter(actor.id, naam, actor.email ?? null)
-      if (!ik) return NextResponse.json({ error: 'Geen setterprofiel gevonden' }, { status: 403 })
-      const uit = await laadStatistieken({ periode, sector, setterId: ik.id })
-      // Ook de setterlijst beperken: anders lees je uit de keuzelijst af wie er
-      // nog meer werkt, terwijl je hun cijfers niet mag zien. En de org-brede
-      // leadinteresse gaat er hier ook uit: "een setter ziet alleen zichzelf"
-      // geldt voor álles op deze pagina, niet alleen voor de trechter.
-      const { leadInteresse: _weg, ...eigen } = uit
-      void _weg
-      return NextResponse.json({
-        ...eigen,
-        setters: uit.setters.filter((s) => s.id === ik.id),
-        isAdmin: false,
-        meId: ik.id,
-      })
-    }
+    const medewerkerId = isAdmin ? (sp.get('medewerker')?.trim() || undefined) : actor.id
+    const uit = await laadStatistieken({ periode, medewerkerId, richting, dienst, leadbron, trendPer })
 
-    const gevraagd = sp.get('setter')?.trim() || ''
-    const bestaat = gevraagd ? (await listSetters()).some((s) => s.id === gevraagd) : false
-    const uit = await laadStatistieken({
-      periode, sector, setterId: bestaat ? gevraagd : undefined,
-    })
-    return NextResponse.json({ ...uit, isAdmin: true })
+    // Een setter ziet in de keuzelijst ook enkel zichzelf.
+    const medewerkers = isAdmin
+      ? uit.medewerkers
+      : [{ id: actor.id, naam: uit.medewerkers.find((m) => m.id === actor.id)?.naam ?? actor.email?.split('@')[0] ?? 'Ik' }]
+
+    return NextResponse.json({ ...uit, medewerkers, isAdmin, meId: actor.id })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }

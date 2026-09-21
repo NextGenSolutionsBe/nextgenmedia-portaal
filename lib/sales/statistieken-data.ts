@@ -1,28 +1,22 @@
 import 'server-only'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { getOrCreateSalesOrg } from '@/lib/sales/service'
-import { listSetters } from '@/lib/sales/setters'
+import { listSalesMedewerkers } from '@/lib/sales/medewerkers'
 import {
-  bereken, berekenLeadInteresse,
-  type AfspraakRij, type BedrijfRij, type GesprekRij, type LeadRij,
-  type LeadInteresseRij, type SectorInteresse, type Statistieken,
+  bereken, kiesTrendPer, legacyGesprekken,
+  type LegacyGesprek, type StatActiviteit, type StatFilter, type StatLead, type StatMedewerker,
+  type Statistieken, type TrendPer,
 } from '@/lib/sales/statistieken'
-import { redenGroep, redenLabel } from '@/lib/sales/redenen'
 
 /**
- * Het ophaalwerk achter de statistiekenpagina.
+ * Het ophaalwerk achter de statistiekenpagina. Het rekenen zelf gebeurt in
+ * lib/sales/statistieken.ts (puur, getest).
  *
- * Los van lib/sales/statistieken.ts, dat alleen rekent. Die scheiding is niet
- * netheid om de netheid: de rekenkant is zo te testen zonder database, en dat
- * is bij conversiecijfers het verschil tussen "het ziet er plausibel uit" en
- * "het klopt".
- *
- * WELK VENSTER. Een afspraak telt mee in de periode waarin ze GEPLAND STAAT,
- * met de uitkomst die er nu op staat — ook als die later is ingevuld. Dat
- * beantwoordt de vraag waar dit scherm over gaat: "van de afspraken die ik in
- * maart boekte, hoeveel werden er klant?". Voor het GELD geldt een ander
- * venster (de maand van afsluiten); dat staat in lib/sales/setters.ts en hoort
- * daar ook thuis.
+ * BRON: sales_activiteiten (niet zacht verwijderd), gefilterd op het moment
+ * van registreren. Oude belregistraties (sales_lead_events kind='call') van
+ * vóór de eerste activiteitenrij tellen mee als telefoongesprek zonder duur.
+ * Bestaat de tabel nog niet (migratie niet gedraaid), dan tellen enkel die
+ * oude belregistraties.
  */
 
 export type Periode = { van: Date; tot: Date }
@@ -35,35 +29,30 @@ export function maandPeriode(d = new Date()): Periode {
   }
 }
 
-/** Losse datums uit de URL, met de huidige maand als terugval. */
+/** Losse datums uit de URL (tot en met), met de huidige maand als terugval. */
 export function leesPeriode(van: string | null, tot: string | null): Periode {
   const a = van ? new Date(`${van}T00:00:00`) : null
   const b = tot ? new Date(`${tot}T00:00:00`) : null
   if (!a || Number.isNaN(a.getTime()) || !b || Number.isNaN(b.getTime())) return maandPeriode()
-  // Omgedraaid ingevuld: stilzwijgend rechtzetten in plaats van een lege pagina.
   const [start, eind] = a <= b ? [a, b] : [b, a]
-  // `tot` is exclusief; de gekozen einddag hoort er wél bij.
   return { van: start, tot: new Date(eind.getFullYear(), eind.getMonth(), eind.getDate() + 1) }
 }
 
-export type Filter = {
-  periode: Periode
-  /** Beperken tot één setterprofiel. Verplicht voor wie zelf setter is. */
-  setterId?: string
-  /** Alleen deze sector. */
-  sector?: string
-}
+export type Filter = StatFilter & { periode: Periode; trendPer?: TrendPer }
 
 export type Uitkomst = {
   stats: Statistieken
-  setters: { id: string; naam: string }[]
-  sectoren: string[]
-  /**
-   * Interesse per sector op LEADNIVEAU — de huidige stand van de hele
-   * pipeline, niet periode-gebonden. Beantwoordt "hoeveel procent van de
-   * bouwbedrijven is geïnteresseerd?" en waarom de rest afhaakte.
-   */
-  leadInteresse: { perSector: SectorInteresse[]; redenen: { reden: string; aantal: number }[] }
+  medewerkers: StatMedewerker[]
+  /** false = sales_activiteiten bestaat nog niet; enkel oude belregistraties. */
+  metActiviteiten: boolean
+}
+
+const BLOK = 500
+const PAGINA = 1000
+const MAX_RIJEN = 50_000
+
+function isTabelFout(msg: string): boolean {
+  return /sales_activiteiten|does not exist|schema cache|relation/i.test(msg)
 }
 
 export async function laadStatistieken(filter: Filter): Promise<Uitkomst> {
@@ -72,134 +61,120 @@ export async function laadStatistieken(filter: Filter): Promise<Uitkomst> {
   const vanIso = filter.periode.van.toISOString()
   const totIso = filter.periode.tot.toISOString()
 
-  const alleSetters = await listSetters()
-  const setterLijst = alleSetters.map((s) => ({ id: s.id, naam: s.name }))
-  const authVanSetter = new Map(alleSetters.map((s) => [s.id, s.auth_user_id]))
-
-  // ── Afspraken ────────────────────────────────────────────────────────────
-  let afspraakVraag = admin
-    .from('sales_appointments')
-    .select('id, lead_id, setter_profile_id, setter_id, status, outcome, outcome_reason, deal_value_cents, starts_at')
-    .eq('sales_client_id', org.id)
-    .gte('starts_at', vanIso)
-    .lt('starts_at', totIso)
-  if (filter.setterId) {
-    // Op BEIDE velden filteren: een nog openstaande afspraak heeft alleen
-    // setter_id ingevuld. Enkel op setter_profile_id filteren laat precies de
-    // afspraken weg die nog moeten worden opgevolgd.
-    const auth = authVanSetter.get(filter.setterId)
-    afspraakVraag = auth
-      ? afspraakVraag.or(`setter_profile_id.eq.${filter.setterId},setter_id.eq.${auth}`)
-      : afspraakVraag.eq('setter_profile_id', filter.setterId)
-  }
-
-  // ── Gesprekken ───────────────────────────────────────────────────────────
-  // sales_lead_events heeft geen org-kolom; we schiften straks op de leads.
-  let gesprekVraag = admin
-    .from('sales_lead_events')
-    .select('lead_id, actor_id, created_at')
-    .eq('kind', 'call')
-    .gte('created_at', vanIso)
-    .lt('created_at', totIso)
-    .limit(20000)
-  if (filter.setterId) {
-    const auth = authVanSetter.get(filter.setterId)
-    // Geen gekoppelde auth-gebruiker betekent dat er geen gesprek aan deze
-    // setter te hangen valt. Dan liever niets dan andermans gesprekken.
-    gesprekVraag = gesprekVraag.eq('actor_id', auth ?? '00000000-0000-0000-0000-000000000000')
-  }
-
-  const [{ data: afspraakData, error: afspraakFout }, { data: gesprekData }] =
-    await Promise.all([afspraakVraag, gesprekVraag])
-
-  if (afspraakFout) throw new Error(afspraakFout.message)
-
-  const afspraken = (afspraakData ?? []) as AfspraakRij[]
-  const ruweGesprekken = (gesprekData ?? []) as GesprekRij[]
-
-  // ── Leads en bedrijven erbij ─────────────────────────────────────────────
-  const leadIds = [...new Set([
-    ...afspraken.map((a) => a.lead_id).filter((x): x is string => !!x),
-    ...ruweGesprekken.map((g) => g.lead_id).filter(Boolean),
-  ])]
-
-  let leads: LeadRij[] = []
-  if (leadIds.length > 0) {
-    // In blokken opvragen: één `in`-filter met duizenden waarden geeft een
-    // URL die de database weigert.
-    for (let i = 0; i < leadIds.length; i += 500) {
-      const { data } = await admin
-        .from('sales_leads')
-        .select('id, company_id, source, lost_reason')
-        .eq('sales_client_id', org.id)
-        .in('id', leadIds.slice(i, i + 500))
-      leads.push(...((data ?? []) as LeadRij[]))
+  // ── 1) Wanneer begon de activiteitenregistratie? ─────────────────────────
+  let metActiviteiten = true
+  let eersteActiviteitOp: string | null = null
+  {
+    const { data, error } = await admin.from('sales_activiteiten')
+      .select('created_at').order('created_at', { ascending: true }).limit(1).maybeSingle()
+    if (error) {
+      if (!isTabelFout(error.message)) throw new Error(error.message)
+      metActiviteiten = false
+    } else {
+      eersteActiviteitOp = (data as { created_at: string } | null)?.created_at ?? null
     }
   }
 
-  const bedrijfIds = [...new Set(leads.map((l) => l.company_id).filter((x): x is string => !!x))]
-  const bedrijven: BedrijfRij[] = []
-  for (let i = 0; i < bedrijfIds.length; i += 500) {
-    const { data } = await admin
-      .from('sales_companies')
-      .select('id, sector')
-      .in('id', bedrijfIds.slice(i, i + 500))
-    bedrijven.push(...((data ?? []) as BedrijfRij[]))
+  // ── 2) Activiteiten in de periode ────────────────────────────────────────
+  const activiteiten: StatActiviteit[] = []
+  if (metActiviteiten) {
+    for (let van = 0; van < MAX_RIJEN; van += PAGINA) {
+      let q = admin.from('sales_activiteiten')
+        .select('id, lead_id, medewerker_id, medewerker_email, type, duur_seconden, uitkomst, afspraak_id, created_at, verwijderd_op')
+        .is('verwijderd_op', null)
+        .gte('created_at', vanIso).lt('created_at', totIso)
+        .order('created_at', { ascending: true }).order('id', { ascending: true })
+        .range(van, van + PAGINA - 1)
+      if (filter.medewerkerId) q = q.eq('medewerker_id', filter.medewerkerId)
+      const { data, error } = await q
+      if (error) throw new Error(error.message)
+      const stuk = (data ?? []) as StatActiviteit[]
+      activiteiten.push(...stuk)
+      if (stuk.length < PAGINA) break
+    }
   }
 
-  // Gesprekken van leads buiten deze organisatie horen hier niet bij.
+  // ── 3) Oude belregistraties van vóór de eerste activiteit ────────────────
+  const legacy: LegacyGesprek[] = []
+  const legacyTot = eersteActiviteitOp && eersteActiviteitOp < totIso ? eersteActiviteitOp : totIso
+  if (legacyTot > vanIso) {
+    for (let van = 0; van < MAX_RIJEN; van += PAGINA) {
+      let q = admin.from('sales_lead_events')
+        .select('id, lead_id, actor_id, actor_email, created_at')
+        .eq('kind', 'call')
+        .gte('created_at', vanIso).lt('created_at', legacyTot)
+        .order('created_at', { ascending: true }).order('id', { ascending: true })
+        .range(van, van + PAGINA - 1)
+      if (filter.medewerkerId) q = q.eq('actor_id', filter.medewerkerId)
+      const { data, error } = await q
+      if (error) throw new Error(error.message)
+      const stuk = (data ?? []) as LegacyGesprek[]
+      legacy.push(...stuk)
+      if (stuk.length < PAGINA) break
+    }
+  }
+  const alles = [...activiteiten, ...legacyGesprekken(legacy, eersteActiviteitOp)]
+
+  // ── 4) De leads erbij (leadbron, dienst, dealwaarde), enkel van onze org ──
+  const leadIds = [...new Set(alles.map((a) => a.lead_id).filter(Boolean))]
+  const leads: StatLead[] = []
+  let breed = true
+  for (let i = 0; i < leadIds.length; i += BLOK) {
+    const ids = leadIds.slice(i, i + BLOK)
+    let rijen: Record<string, unknown>[] = []
+    if (breed) {
+      const { data, error } = await admin.from('sales_leads')
+        .select('id, leadbron, dienst, deal_waarde_cents, labels')
+        .eq('sales_client_id', org.id).in('id', ids)
+      if (error) breed = false
+      else rijen = (data ?? []) as Record<string, unknown>[]
+    }
+    if (!breed) {
+      const { data, error } = await admin.from('sales_leads')
+        .select('id, labels').eq('sales_client_id', org.id).in('id', ids)
+      if (error) throw new Error(error.message)
+      rijen = (data ?? []) as Record<string, unknown>[]
+    }
+    for (const r of rijen) {
+      const labels = Array.isArray(r.labels) ? (r.labels as string[]) : []
+      let bron = typeof r.leadbron === 'string' ? r.leadbron : null
+      // Harrie-leads van vóór de leadbron-kolom herkennen aan hun label.
+      if ((!bron || bron === 'outbound') && labels.includes('Harrie')) bron = 'harrie'
+      leads.push({
+        id: String(r.id),
+        leadbron: bron,
+        dienst: typeof r.dienst === 'string' ? r.dienst : null,
+        deal_waarde_cents: typeof r.deal_waarde_cents === 'number' ? r.deal_waarde_cents : null,
+      })
+    }
+  }
   const bekend = new Set(leads.map((l) => l.id))
-  let gesprekken = ruweGesprekken.filter((g) => bekend.has(g.lead_id))
+  const eigen = alles.filter((a) => bekend.has(a.lead_id))
 
-  // ── Sectorfilter ─────────────────────────────────────────────────────────
-  const sectorVanBedrijf = new Map(bedrijven.map((b) => [b.id, b.sector?.trim() || 'Onbekend']))
-  const sectorVanLead = new Map(
-    leads.map((l) => [l.id, (l.company_id ? sectorVanBedrijf.get(l.company_id) : null) ?? 'Onbekend']),
-  )
-
-  // De keuzelijst toont álle sectoren van de periode, ook als er nu op één
-  // gefilterd wordt — anders kan je na het filteren niet meer terug.
-  const sectoren = [...new Set(sectorVanLead.values())].sort((a, b) => a.localeCompare(b))
-
-  let gefilterdeAfspraken = afspraken
-  if (filter.sector) {
-    const hoort = (leadId: string | null) => !!leadId && sectorVanLead.get(leadId) === filter.sector
-    gefilterdeAfspraken = afspraken.filter((a) => hoort(a.lead_id))
-    gesprekken = gesprekken.filter((g) => hoort(g.lead_id))
-    leads = leads.filter((l) => sectorVanLead.get(l.id) === filter.sector)
+  // ── 5) Geannuleerde afspraken tellen niet ────────────────────────────────
+  const afspraakIds = [...new Set(eigen.map((a) => a.afspraak_id).filter((x): x is string => !!x))]
+  const geannuleerd: string[] = []
+  for (let i = 0; i < afspraakIds.length; i += BLOK) {
+    const { data } = await admin.from('sales_appointments')
+      .select('id, status').in('id', afspraakIds.slice(i, i + BLOK))
+    for (const r of (data ?? []) as { id: string; status: string }[]) {
+      if (r.status === 'cancelled') geannuleerd.push(r.id)
+    }
   }
+
+  const medewerkers = await listSalesMedewerkers()
+  const dagen = Math.max(1, Math.round((filter.periode.tot.getTime() - filter.periode.van.getTime()) / 86_400_000))
 
   const stats = bereken({
-    afspraken: gefilterdeAfspraken,
-    gesprekken,
+    activiteiten: eigen,
     leads,
-    bedrijven,
-    setters: alleSetters.map((s) => ({ id: s.id, naam: s.name, auth_user_id: s.auth_user_id })),
+    medewerkers,
+    geannuleerdeAfspraken: geannuleerd,
+    trendPer: filter.trendPer ?? kiesTrendPer(dagen),
+  }, {
+    // De medewerker is al in de query gefilterd; de rest hier.
+    richting: filter.richting, dienst: filter.dienst, leadbron: filter.leadbron,
   })
 
-  // ── Interesse op leadniveau: de HELE actieve pipeline, niet de periode ────
-  const { data: alleLeadData } = await admin
-    .from('sales_leads')
-    .select('id, company_id, stage_key, lost_reason, reden_code, warm')
-    .eq('sales_client_id', org.id)
-    .is('archived_at', null)
-    .limit(10000)
-  const alleLeads = (alleLeadData ?? []) as LeadInteresseRij[]
-
-  // Sectoren van bedrijven die nog niet geladen waren erbij halen, in blokken.
-  const bekendeBedrijven = new Set(bedrijven.map((b) => b.id))
-  const missendeIds = [...new Set(
-    alleLeads.map((l) => l.company_id).filter((x): x is string => !!x && !bekendeBedrijven.has(x)),
-  )]
-  const alleBedrijven = [...bedrijven]
-  for (let i = 0; i < missendeIds.length; i += 500) {
-    const { data } = await admin
-      .from('sales_companies').select('id, sector')
-      .in('id', missendeIds.slice(i, i + 500))
-    alleBedrijven.push(...((data ?? []) as BedrijfRij[]))
-  }
-
-  const leadInteresse = berekenLeadInteresse(alleLeads, alleBedrijven, redenLabel, redenGroep)
-
-  return { stats, setters: setterLijst, sectoren, leadInteresse }
+  return { stats, medewerkers, metActiviteiten }
 }

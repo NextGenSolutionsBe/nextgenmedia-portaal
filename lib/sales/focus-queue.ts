@@ -9,21 +9,43 @@
 //     maar in een zijlijst mét aftelling ("over 47 min"), zodat de setter ziet
 //     wat eraan komt.
 //   · "Niet bellen" komt nooit voorbij. Fases die geen belpoging meer vragen
-//     (gewonnen, verloren, afspraak staat al) evenmin.
+//     (afspraak staat al, voorstel loopt, gewonnen, verloren) evenmin.
+//
+// WELKE LEADS, IN WELKE VOLGORDE (kanbanbord, 21 sep 2026):
+//   1. vervallen terugbelafspraken (oudste eerst);
+//   2. leads waarvan de opvolgdatum vandaag of vroeger is (oudste eerst) —
+//      uit eender welke open kolom, ook "Gebeld" of "E-mail verstuurd";
+//   3. dan de kolommen Outbound → Inbound → Opvolgen, in bordvolgorde.
+// Een lead met een opvolgdatum in de toekomst wacht tot die dag.
+
+import { normaliseerStage } from '@/lib/sales/stages'
 
 export type QueueLead = {
   id: string
   stage_key: string
   /** Het laatste blokje van Harrie; bepaalt of bellen nu wel of niet past. */
-  harrie?: { nogBezig?: boolean; reageerde?: boolean } | null
+  harrie?: { nogBezig?: boolean | null; reageerde?: boolean | null } | null
   do_not_call: boolean
   callback_at: string | null
   callback_note?: string | null
+  /** Volgende opvolgdatum (JJJJ-MM-DD). */
+  opvolgdatum?: string | null
+  /** Vergeefse belpogingen; vanaf MAX_GEEN_GEHOOR uit de belronde. */
+  geen_gehoor_count?: number | null
 }
 
-/** Fases waarvoor bellen geen zin (meer) heeft. "Afspraak ingepland" hoort
+/** Fases waarvoor bellen geen zin (meer) heeft. "Afspraak gepland" hoort
  *  daarbij: die mensen bel je via de bevestigingslijst, niet via prospectie. */
-const KLAAR = new Set(['appointment', 'won', 'lost', 'not_interested', 'max_pogingen'])
+const KLAAR = new Set(['afspraak', 'voorstel', 'gewonnen', 'verloren'])
+/** De kolommen die de belronde voedt, in deze volgorde. */
+const BELKOLOMMEN = ['outbound', 'inbound', 'opvolgen']
+
+/** Vandaag (JJJJ-MM-DD) in Brussel. */
+function vandaagBrussel(nu: number): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Brussels', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(nu))
+}
 
 /**
  * Loopt er een reeks van Harrie op deze lead? Dan bel je hem NIET.
@@ -37,7 +59,7 @@ const KLAAR = new Set(['appointment', 'won', 'lost', 'not_interested', 'max_pogi
  * Marco persoonlijk op, niet de belronde. Het belAdvies in het detailpaneel
  * zegt dat er ook bij.
  */
-function harrieIsBezig(l: { harrie?: { nogBezig?: boolean; reageerde?: boolean } | null }): boolean {
+function harrieIsBezig(l: { harrie?: { nogBezig?: boolean | null; reageerde?: boolean | null } | null }): boolean {
   const h = l.harrie
   return !!h && (h.nogBezig === true || h.reageerde === true)
 }
@@ -52,7 +74,7 @@ export const GEEN_GEHOOR_UREN = 25
 
 /** Is dit zo'n afgeronde fase? De aanroeper gebruikt dit om te zien of een
  *  bewust gekozen filter de overslaan-regel moet uitschakelen. */
-export const isKlaarFase = (stage: string): boolean => KLAAR.has(stage)
+export const isKlaarFase = (stage: string): boolean => KLAAR.has(normaliseerStage(stage))
 
 export type Wachtrij<L extends QueueLead> = {
   /** Nu te bellen, in volgorde. Vervallen terugbelafspraken staan vooraan. */
@@ -76,29 +98,45 @@ export function bouwWachtrij<L extends QueueLead>(
   leads: L[], nu: number, opts?: { klaarOverslaan?: boolean },
 ): Wachtrij<L> {
   const klaarOverslaan = opts?.klaarOverslaan !== false
+  const vandaag = vandaagBrussel(nu)
   const vervallen: { lead: L; om: number }[] = []
   const gepland: { lead: L; om: number }[] = []
-  const gewoon: L[] = []
+  const opvolgen: { lead: L; dag: string }[] = []
+  const perKolom = new Map<string, L[]>(BELKOLOMMEN.map((k) => [k, []]))
   let overgeslagen = 0
 
   for (const l of leads) {
-    if (l.do_not_call || (klaarOverslaan && KLAAR.has(l.stage_key))) { overgeslagen++; continue }
+    const fase = normaliseerStage(l.stage_key)
+    if (l.do_not_call || (klaarOverslaan && KLAAR.has(fase))) { overgeslagen++; continue }
     if (klaarOverslaan && harrieIsBezig(l)) { overgeslagen++; continue }
+    if (klaarOverslaan && (l.geen_gehoor_count ?? 0) >= MAX_GEEN_GEHOOR) { overgeslagen++; continue }
     const om = l.callback_at ? new Date(l.callback_at).getTime() : NaN
     if (Number.isFinite(om)) {
       if (om <= nu) vervallen.push({ lead: l, om })
       else gepland.push({ lead: l, om })
-    } else {
-      gewoon.push(l)
+      continue
     }
+    const dag = l.opvolgdatum ? l.opvolgdatum.slice(0, 10) : ''
+    if (dag && dag <= vandaag) { opvolgen.push({ lead: l, dag }); continue }
+    // Opvolgdatum in de toekomst: nog niet aan de beurt.
+    if (dag && klaarOverslaan) { overgeslagen++; continue }
+    const kolom = perKolom.get(fase)
+    if (kolom) kolom.push(l)
+    else if (!klaarOverslaan) perKolom.get('outbound')!.push(l)
+    else overgeslagen++
   }
 
   // Oudste afspraak eerst: wie het langst wacht, is het meest te laat.
   vervallen.sort((a, b) => a.om - b.om)
   gepland.sort((a, b) => a.om - b.om)
+  opvolgen.sort((a, b) => a.dag.localeCompare(b.dag))
 
   return {
-    nu: [...vervallen.map((x) => x.lead), ...gewoon],
+    nu: [
+      ...vervallen.map((x) => x.lead),
+      ...opvolgen.map((x) => x.lead),
+      ...BELKOLOMMEN.flatMap((k) => perKolom.get(k) ?? []),
+    ],
     later: gepland.map((x) => x.lead),
     overgeslagen,
   }

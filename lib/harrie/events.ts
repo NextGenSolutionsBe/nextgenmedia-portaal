@@ -8,7 +8,7 @@ import {
   gevolgVan, isHarrieType, normaliseerKbo, schoonEmail, schoonHarrieBlok,
   HARRIE_LABEL, type HarrieType,
 } from '@/lib/harrie/model'
-import { stageRang } from '@/lib/sales/stages'
+import { normaliseerStage, stageRang } from '@/lib/sales/stages'
 import { redenUitTekst } from '@/lib/sales/redenen'
 
 /**
@@ -191,6 +191,7 @@ export async function verwerkGebeurtenis(body: {
         linkedin: tekst(p.linkedinUrl, 300) ?? undefined,
       },
       labels: [HARRIE_LABEL],
+      leadbron: 'harrie',
     })
     if (res.ok) { leadId = res.leadId; aangemaakt = true }
     else if (res.existingLeadId) leadId = res.existingLeadId
@@ -220,6 +221,7 @@ export async function verwerkGebeurtenis(body: {
    *     ingepland" en meldt Harrie nog een mail uit een lopende reeks, dan is
    *     dat een regel op de tijdlijn en geen stap terug.
    */
+  lead.stage_key = normaliseerStage(lead.stage_key)
   const tegengehouden = gevolg.alleenVooruit
     && gevolg.fase !== null
     && stageRang(gevolg.fase) < stageRang(lead.stage_key)

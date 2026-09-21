@@ -1,6 +1,7 @@
 import 'server-only'
 import { createAdminSupabaseClient, insertResilient } from '@/lib/supabase/server'
-import { STAGES } from '@/lib/sales/stages'
+import { STAGES, type StageKey } from '@/lib/sales/stages'
+import { isInboundBron, leadbronLabel, normaliseerLeadbron, type Leadbron } from '@/lib/sales/leadbron'
 import { companyDedupeKey, normalizePhone, isBekendeKlant, type KlantIndex } from '@/lib/sales/dedupe'
 import { werkklasseNaarAantal } from '@/lib/sales/lead-schoon'
 
@@ -107,6 +108,20 @@ export type NewLeadInput = {
   /** Bestaande klanten, één keer opgehaald met laadKlantIndex(). Meegeven bij
    *  een import: dan belandt een klant nooit in de belijst. */
   klantIndex?: KlantIndex
+  /** Hoe de lead binnenkwam (lib/sales/leadbron.ts). Standaard 'outbound'. */
+  leadbron?: Leadbron
+  /** Startkolom op het bord. Standaard 'outbound'. */
+  stage?: StageKey
+  /** Dienst waar interesse in is. */
+  dienst?: string | null
+  /** Verantwoordelijke medewerker (auth user id). */
+  assignedTo?: string | null
+  /** Volgende opvolgdatum, JJJJ-MM-DD. */
+  opvolgdatum?: string | null
+  /** Ruwe websiteaanvraag (formulier + UTM), enkel bij leadbron 'website'. */
+  websiteAanvraag?: Record<string, unknown> | null
+  /** Wie de lead aanmaakte; komt op de tijdlijnregel "Lead aangemaakt". */
+  actor?: { id: string | null; email: string | null }
 }
 
 export type NewLeadResult =
@@ -214,17 +229,36 @@ export async function createLead(input: NewLeadInput): Promise<NewLeadResult> {
     phone_digits: normalizePhone(phone),
   }).select('id').single()
 
-  const { data: lead, error: leadErr } = await admin.from('sales_leads').insert({
+  const leadbron = normaliseerLeadbron(input.leadbron)
+  const stage = input.stage ?? (isInboundBron(leadbron) ? 'inbound' : 'outbound')
+  // insertResilient: de kanban-kolommen (leadbron, positie, dienst, opvolgdatum,
+  // website_aanvraag) mogen vóór de migratie nog ontbreken — dan valt die kolom
+  // weg en komt de lead er gewoon in.
+  const { data: lead, error: leadErr } = await insertResilient(admin, 'sales_leads', {
     sales_client_id: input.salesClientId,
     pipeline_id: input.pipelineId,
     company_id: companyId,
     contact_id: contact?.id ?? null,
-    stage_key: 'to_contact',
+    stage_key: stage,
     labels: input.labels ?? [],
-  }).select('id').single()
+    assigned_to: input.assignedTo || null,
+    leadbron,
+    dienst: input.dienst?.trim() || null,
+    opvolgdatum: input.opvolgdatum || null,
+    website_aanvraag: input.websiteAanvraag ?? null,
+  }, { required: ['sales_client_id', 'company_id', 'stage_key'] })
   if (leadErr || !lead) return { ok: false, error: leadErr?.message ?? 'Lead aanmaken mislukt' }
+  const leadId = lead.id as string
 
-  return { ok: true, leadId: lead.id as string }
+  // De eerste regel op de tijdlijn: waar de lead vandaan komt.
+  await logLeadEvent(leadId, {
+    kind: 'system',
+    body: `Lead aangemaakt · ${leadbronLabel(leadbron)}`,
+    actorId: input.actor?.id ?? null,
+    actorEmail: input.actor?.email ?? null,
+  })
+
+  return { ok: true, leadId }
 }
 
 /** Gebeurtenis op de tijdlijn van een lead (belpoging, notitie, fasewissel). */
@@ -235,6 +269,12 @@ export async function logLeadEvent(leadId: string, e: {
   toStage?: string | null
   actorId?: string | null
   actorEmail?: string | null
+  /**
+   * Wat er als "laatste notitie" op de kaart komt. Standaard de body van een
+   * notitie of gesprek; een eigen tekst (bv. enkel de notitie zonder de
+   * gesprekskop) mag ook, en `false` laat de kaart ongemoeid.
+   */
+  laatsteNotitie?: string | false
 }): Promise<void> {
   const admin = createAdminSupabaseClient()
   await admin.from('sales_lead_events').insert({
@@ -242,6 +282,7 @@ export async function logLeadEvent(leadId: string, e: {
     from_stage: e.fromStage ?? null, to_stage: e.toStage ?? null,
     actor_id: e.actorId ?? null, actor_email: e.actorEmail ?? null,
   })
+  if (e.laatsteNotitie === false) return
 
   /**
    * Dezelfde tekst ook op de lead zelf zetten.
@@ -254,8 +295,8 @@ export async function logLeadEvent(leadId: string, e: {
    * Enkel wat een MENS noteerde: fasewissels en systeemregels horen hier niet,
    * die zouden de laatste echte notitie wegduwen.
    */
-  const tekst = (e.body ?? '').trim()
-  if ((e.kind === 'note' || e.kind === 'call') && tekst) {
+  const tekst = (typeof e.laatsteNotitie === 'string' ? e.laatsteNotitie : (e.body ?? '')).trim()
+  if ((typeof e.laatsteNotitie === 'string' || e.kind === 'note' || e.kind === 'call') && tekst) {
     const { error } = await admin.from('sales_leads')
       .update({ laatste_notitie: tekst.slice(0, 300), laatste_notitie_op: new Date().toISOString() })
       .eq('id', leadId)

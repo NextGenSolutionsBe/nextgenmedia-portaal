@@ -69,6 +69,9 @@ export function PlannerDetail({ moment: m, onSluit, onActie, bezig, onOpenFactuu
         <Rij label="Btw">{m.btw_pct.toLocaleString('nl-BE')} % · {euro2(m.bedrag_incl - m.bedrag_excl)}</Rij>
         <Rij label="Bedrag incl. btw">{euro2(m.bedrag_incl)}</Rij>
         <Rij label="Type factuur">{m.type}</Rij>
+        <Rij label="Betaaltermijn">{m.betaaltermijn} dagen</Rij>
+        {m.verzonden_op && <Rij label="Verstuurd op">{datumNl(m.verzonden_op)}{m.verzonden_door ? ` · door ${m.verzonden_door.split('@')[0]}` : ''}</Rij>}
+        {m.status !== 'geannuleerd' && m.status !== 'gecrediteerd' && <Rij label="Verwacht binnen">{datumNl(m.verwacht_op)} <span className="text-gray-400">(verzenddatum + termijn)</span></Rij>}
         {m.schema && <Rij label="Terugkerend schema"><span className="inline-flex items-center gap-1"><Repeat className="h-3 w-3" />{m.schema}</span></Rij>}
         {m.contract_id && <Rij label="Contract"><Link href={`/admin/contracts/${m.contract_id}`} prefetch={false} className="underline decoration-gray-300 hover:decoration-black">{m.contract_titel || m.contract_id.slice(0, 8)}</Link></Rij>}
         <Rij label="Status"><StatusBadge status={m.status} /></Rij>

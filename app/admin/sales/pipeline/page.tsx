@@ -14,11 +14,12 @@ export default async function SalesPipelinePage({ searchParams }: { searchParams
   const initial = pipelines.find((p) => p.id === sp.pipeline)?.id ?? ''
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       <div>
         <h1 className="text-2xl font-bold">Pipeline</h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          Alle prospects, voor beide merken. Interesse? Boek de afspraak via de knop bij de lead.
+          Alle prospects van beide merken op één bord. Sleep kaarten tussen de kolommen; gesprekken
+          en e-mails registreer je met de knoppen op de kaart.
         </p>
       </div>
       <PipelineClient

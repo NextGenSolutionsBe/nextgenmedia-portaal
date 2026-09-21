@@ -4,8 +4,11 @@ import { notFound } from 'next/navigation'
 import { createAdminSupabaseClient, trySignedUrl } from '@/lib/supabase/server'
 import { formatDate } from '@/lib/utils'
 import Link from 'next/link'
-import { ChevronLeft, FileText, CheckCircle2, ExternalLink, Settings2, Download } from 'lucide-react'
+import { ChevronLeft, CheckCircle2, ExternalLink, Settings2 } from 'lucide-react'
 import { ContractActions } from './contract-actions'
+import { GetekendeDocumenten } from './getekende-documenten'
+import { laatsteArchief } from '@/lib/contract-archief'
+import { laatsteMeldingStatus, meldingOpnieuwNodig } from '@/lib/contract-archief-model'
 import { ContractMailButton } from '@/components/admin/contract-mail-button'
 import { ContractLinkManager } from './contract-link-manager'
 import { ContractPdfPreview } from './contract-pdf-preview'
@@ -33,13 +36,15 @@ async function getContract(id: string) {
     // For signed PDFs we speculatively request both the stored path AND the
     // conventional `signed/{id}.pdf` fallback — whichever resolves wins.
     const isSigned = canonicalStatus(contract.status) === 'getekend'
-    const [clientRowResult, pdfUrl, signedPdfStored, signedPdfFallback] = await Promise.all([
+    const [clientRowResult, pdfUrl, signedPdfStored, signedPdfFallback, archief] = await Promise.all([
       contract.client_id
         ? admin.from('clients').select('id, company_name, btw_nummer').eq('id', contract.client_id).maybeSingle()
         : Promise.resolve({ data: null }),
       trySignedUrl(admin, 'contracts', contract.pdf_path),
       isSigned ? trySignedUrl(admin, 'contracts', contract.signed_pdf_path) : Promise.resolve(null),
       isSigned ? trySignedUrl(admin, 'contracts', `signed/${contract.id}.pdf`) : Promise.resolve(null),
+      // Nieuwste archiefversie (certificaatnummer, datum) — enkel relevant als getekend.
+      isSigned ? laatsteArchief(admin, contract.id).catch(() => null) : Promise.resolve(null),
     ])
 
     return {
@@ -51,6 +56,7 @@ async function getContract(id: string) {
       events: events ?? [],
       pdfUrl,
       signedPdfUrl: signedPdfStored ?? signedPdfFallback,
+      archief,
     }
   } catch {
     return null
@@ -61,11 +67,14 @@ export default async function ContractDetailPage({ params }: { params: { id: str
   const data = await getContract(params.id)
   if (!data) notFound()
 
-  const { contract: c, clientName, clientId, clientBtw, signatures, events, pdfUrl, signedPdfUrl } = data
+  const { contract: c, clientName, clientId, clientBtw, signatures, events, pdfUrl, signedPdfUrl, archief } = data
   const style = statusInfo(c.status)
   const statusKey = canonicalStatus(c.status)
   const isSigned = statusKey === 'getekend'
   const signLink = `${baseUrl()}/sign/${c.access_token}`
+  const meldingEvents = (events as { event_type: string; created_at: string; meta?: Record<string, unknown> | null }[])
+  const laatsteMelding = laatsteMeldingStatus(meldingEvents)
+  const meldingOpnieuw = isSigned && meldingOpnieuwNodig(meldingEvents, !!archief)
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -108,16 +117,6 @@ export default async function ContractDetailPage({ params }: { params: { id: str
               <span className="sm:hidden">Velden</span>
             </Link>
           )}
-          {isSigned && (
-            <a
-              href={`/api/admin/contracts/${c.id}/download?type=signed`}
-              className="btn-primary flex items-center gap-2 text-sm"
-            >
-              <Download className="h-4 w-4" />
-              <span className="hidden sm:inline">Getekend contract</span>
-              <span className="sm:hidden">Download</span>
-            </a>
-          )}
         </div>
       </div>
 
@@ -125,6 +124,21 @@ export default async function ContractDetailPage({ params }: { params: { id: str
         {/* PDF Preview — schakel tussen origineel en getekend/ingevuld */}
         <div className="lg:col-span-2 space-y-6">
           <ContractPdfPreview originalUrl={pdfUrl} signedUrl={signedPdfUrl} />
+          {/* Getekende documenten: contract + certificaat uit het archief, met downloads/afdrukken en de Legal-melding. */}
+          {isSigned && (
+            <GetekendeDocumenten
+              contractId={c.id}
+              accessToken={c.access_token}
+              heeftGetekendePdf={!!signedPdfUrl}
+              heeftOrigineel={!!pdfUrl}
+              certificaatNr={archief?.certificaat_nr ?? null}
+              gearchiveerdOp={archief?.gearchiveerd_op ?? null}
+              archiefVersie={archief?.versie ?? null}
+              signedAt={c.signed_at ?? null}
+              meldingOpnieuw={meldingOpnieuw}
+              laatsteMelding={laatsteMelding}
+            />
+          )}
           {/* Facturatie: voorstel controleren en bevestigen, facturen van dit contract, voortgang. */}
           <ContractFacturatie
             contractId={c.id} clientId={clientId} serviceSlug={c.service_slug ?? null} contractTitle={c.title} isSigned={!!isSigned}
@@ -205,73 +219,6 @@ export default async function ContractDetailPage({ params }: { params: { id: str
             </>
           )}
 
-          {/* Signed PDF — only when signed */}
-          {isSigned && (
-            <div className="card-base space-y-3">
-              <h2 className="font-semibold text-sm flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-green-500" />
-                Getekend contract
-              </h2>
-              {signedPdfUrl ? (
-                <div className="space-y-2">
-                  <a
-                    href={`/api/admin/contracts/${c.id}/download?type=signed`}
-                    className="btn-primary w-full justify-center text-sm"
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    Download getekende PDF
-                  </a>
-                  <a
-                    href={`/api/admin/contracts/${c.id}/certificaat`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn-secondary w-full justify-center text-sm"
-                    title="Wie tekende, wanneer, van waar en met welke documentvingerafdruk — uit het beschermde contractarchief"
-                  >
-                    <FileText className="h-3.5 w-3.5" />
-                    Ondertekeningscertificaat (PDF)
-                  </a>
-                  <p className="text-xs text-gray-400 text-center">
-                    Handtekening is rechtstreeks op het contract geplaatst. Contract en certificaat staan in het contractarchief.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {pdfUrl && (
-                    <a
-                      href={`/api/admin/contracts/${c.id}/download?type=original`}
-                      className="btn-secondary w-full justify-center text-sm"
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      Download origineel contract
-                    </a>
-                  )}
-                  <a
-                    href={`/sign/${c.access_token}/receipt`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn-secondary w-full justify-center text-sm"
-                  >
-                    <FileText className="h-3.5 w-3.5" />
-                    Ondertekeningsbewijs
-                  </a>
-                  <a
-                    href={`/api/admin/contracts/${c.id}/certificaat`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn-secondary w-full justify-center text-sm"
-                  >
-                    <FileText className="h-3.5 w-3.5" />
-                    Ondertekeningscertificaat (PDF)
-                  </a>
-                  <p className="text-xs text-gray-400 text-center">
-                    De ingebedde getekende PDF is niet beschikbaar — gebruik het origineel + bewijs als juridisch bewijs.
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Setup link — only for unsigned contracts */}
           {!isSigned && c.pdf_path && (
             <div className="card-base space-y-2">
@@ -287,7 +234,7 @@ export default async function ContractDetailPage({ params }: { params: { id: str
           )}
 
           {/* Actions */}
-          <ContractActions contract={{ id: c.id, status: c.status, access_token: c.access_token }} />
+          <ContractActions contract={{ id: c.id, status: c.status, access_token: c.access_token, title: c.title, clientName }} />
 
           {/* Signatures */}
           {signatures.length > 0 && (

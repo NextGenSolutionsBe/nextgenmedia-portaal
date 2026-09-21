@@ -1,11 +1,11 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Loader2, Link2, X, Check, AlertTriangle, RefreshCw } from 'lucide-react'
+import { Loader2, Link2, X, Check, AlertTriangle, RefreshCw, MessageSquare } from 'lucide-react'
 import { MetricoolCalendarView, colorFor, type MetricoolCalPost } from '@/components/metricool/calendar-view'
 
 type Brand = { blogId: string; name: string; picture?: string | null }
-type ClientRow = { id: string; company_name: string; metricool_blog_id: string | null; metricool_brand_name: string | null }
+type ClientRow = { id: string; company_name: string; metricool_blog_id: string | null; metricool_brand_name: string | null; metricool_feedback_url?: string | null }
 
 // ── Naam-matching voor auto-koppelen (klant ↔ Metricool-merk) ─────────────────
 function normName(s: string) { return s.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]/g, '') }
@@ -222,19 +222,22 @@ function LinkDialog({
           )}
 
           {clients.map((c) => (
-            <div key={c.id} className="flex items-center gap-2">
-              <div className="flex-1 min-w-0 text-sm font-medium truncate">{c.company_name}</div>
-              <select
-                value={c.metricool_blog_id ?? ''}
-                disabled={saving === c.id || !migrated}
-                onChange={(e) => setLink(c, e.target.value)}
-                className="w-52 px-2 py-1.5 text-xs border border-gray-200 rounded-lg"
-              >
-                <option value="">— niet gekoppeld —</option>
-                {brands.map((b) => <option key={b.blogId} value={b.blogId}>{b.name}</option>)}
-              </select>
-              {c.metricool_blog_id && <Check className="h-4 w-4 text-green-600 shrink-0" />}
-              {saving === c.id && <Loader2 className="h-4 w-4 animate-spin text-gray-400 shrink-0" />}
+            <div key={c.id} className="py-1.5 border-b border-gray-100 last:border-0 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <div className="flex-1 min-w-0 text-sm font-medium truncate">{c.company_name}</div>
+                <select
+                  value={c.metricool_blog_id ?? ''}
+                  disabled={saving === c.id || !migrated}
+                  onChange={(e) => setLink(c, e.target.value)}
+                  className="w-52 px-2 py-1.5 text-xs border border-gray-200 rounded-lg"
+                >
+                  <option value="">— niet gekoppeld —</option>
+                  {brands.map((b) => <option key={b.blogId} value={b.blogId}>{b.name}</option>)}
+                </select>
+                {c.metricool_blog_id && <Check className="h-4 w-4 text-green-600 shrink-0" />}
+                {saving === c.id && <Loader2 className="h-4 w-4 animate-spin text-gray-400 shrink-0" />}
+              </div>
+              {migrated && c.metricool_blog_id && <FeedbackUrlVeld client={c} onSaved={onChanged} />}
             </div>
           ))}
         </div>
@@ -242,6 +245,61 @@ function LinkDialog({
           <button onClick={onClose} className="btn-primary text-sm">Klaar</button>
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Feedbacklink (Metricool) per gekoppelde klant. Wordt in het portaal getoond
+ * als knop "Feedback geven in Metricool". Opslaan bij blur/Enter; de server
+ * eist https:// + host op metricool.com; leeg = link wissen.
+ */
+function FeedbackUrlVeld({ client, onSaved }: { client: ClientRow; onSaved: () => void }) {
+  const opgeslagen = client.metricool_feedback_url ?? ''
+  const [waarde, setWaarde] = useState(opgeslagen)
+  const [bezig, setBezig] = useState(false)
+  const [fout, setFout] = useState<string | null>(null)
+  const [ok, setOk] = useState(false)
+
+  useEffect(() => { setWaarde(opgeslagen); setOk(false) }, [opgeslagen])
+
+  const opslaan = async () => {
+    const nieuw = waarde.trim()
+    if (nieuw === opgeslagen) return
+    setBezig(true); setFout(null); setOk(false)
+    try {
+      const res = await fetch('/api/admin/metricool/link', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId: client.id, feedbackUrl: nieuw }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) { setFout(j?.error || 'Opslaan mislukt.'); return }
+      setOk(true)
+      onSaved()
+    } catch { setFout('Opslaan mislukt. Probeer opnieuw.') } finally { setBezig(false) }
+  }
+
+  return (
+    <div className="pl-0.5">
+      <label className="flex items-center gap-1 text-[11px] text-gray-500 mb-0.5">
+        <MessageSquare className="h-3 w-3" /> Feedbacklink (Metricool)
+      </label>
+      <div className="flex items-center gap-2">
+        <input
+          type="url"
+          inputMode="url"
+          value={waarde}
+          onChange={(e) => { setWaarde(e.target.value); setFout(null); setOk(false) }}
+          onBlur={opslaan}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.currentTarget as HTMLInputElement).blur() } }}
+          placeholder="https://app.metricool.com/… (leeg = geen knop in het portaal)"
+          className={`flex-1 min-w-0 px-2 py-1.5 text-xs border rounded-lg ${fout ? 'border-red-300 bg-red-50/40' : 'border-gray-200'}`}
+        />
+        <span className="w-4 shrink-0">
+          {bezig ? <Loader2 className="h-4 w-4 animate-spin text-gray-400" /> : ok ? <Check className="h-4 w-4 text-green-600" /> : null}
+        </span>
+      </div>
+      {fout && <p className="text-[11px] text-red-600 mt-0.5">{fout}</p>}
     </div>
   )
 }

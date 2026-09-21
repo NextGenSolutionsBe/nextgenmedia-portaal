@@ -13,7 +13,7 @@ export type Verzendstatus = 'te_versturen' | 'verstuurd' | 'geannuleerd' | 'gecr
 export type StatusInfo<K extends string> = { key: K; label: string; cls: string; stip: string; uitleg: string }
 
 export const VERZENDSTATUSSEN: StatusInfo<Verzendstatus>[] = [
-  { key: 'te_versturen', label: 'Te versturen', cls: 'bg-gray-100 text-gray-700 border-gray-200', stip: 'bg-gray-400', uitleg: 'De factuur staat gepland maar is nog niet verstuurd.' },
+  { key: 'te_versturen', label: 'Te factureren', cls: 'bg-gray-100 text-gray-700 border-gray-200', stip: 'bg-gray-400', uitleg: 'De factuur moet nog opgemaakt en verstuurd worden.' },
   { key: 'verstuurd', label: 'Verstuurd', cls: 'bg-green-100 text-green-800 border-green-200', stip: 'bg-green-500', uitleg: 'De factuur werd effectief naar de klant verstuurd.' },
   { key: 'geannuleerd', label: 'Geannuleerd', cls: 'bg-red-100 text-red-700 border-red-200', stip: 'bg-red-500', uitleg: 'De factuur hoeft niet meer verstuurd te worden.' },
   { key: 'gecrediteerd', label: 'Gecrediteerd', cls: 'bg-red-100 text-red-700 border-red-200', stip: 'bg-red-600', uitleg: 'De factuur werd geheel gecrediteerd.' },

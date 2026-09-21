@@ -6,8 +6,7 @@ import { revalidatePath } from 'next/cache'
 import { logContractEvent } from '@/lib/contract-audit'
 import { resolvePortalSession, canAccessContract } from '@/lib/portal-auth'
 import { FIELD_FONT_PT, baselineFromTopPct } from '@/lib/contract-render'
-import { verwerkOndertekening } from '@/lib/facturatie/opdrachten'
-import { naOndertekening, type FacturatieSamenvatting } from '@/lib/contract-archief'
+import { naOndertekening } from '@/lib/contract-archief'
 
 export const maxDuration = 60
 
@@ -210,19 +209,14 @@ export async function POST(req: NextRequest) {
     await logContractEvent(admin, contract_id, 'signed', { actor: signer_email, ip, ua: userAgent })
     if (signedPdfPath) await logContractEvent(admin, contract_id, 'pdf_generated', { actor: signer_email, ip, ua: userAgent })
 
-    // ── Facturatieopdrachten + ClickUp — best-effort ──────────────────────────
-    // Het contract is nu definitief ondertekend (één ondertekenaar, dus alle
-    // handtekeningen zijn binnen). Dit maakt de facturatieopdrachten aan en zet
-    // ze in ClickUp; een fout hier mag de ondertekening nooit laten falen.
-    let facturatie: FacturatieSamenvatting = null
-    try { facturatie = await verwerkOndertekening(admin, contract_id, 'tekenlink', signer_email) }
-    catch (e) { console.error('[sign] facturatieopdrachten:', e instanceof Error ? e.message : e) }
+    // Facturen worden NIET automatisch uit het contract afgeleid: het team voegt
+    // ze zelf toe op de contractpagina (eenmalig, meerdere of maandelijks).
 
     // ── Contractarchief + interne melding — best-effort ───────────────────────
     // Onveranderlijke kopie (getekende PDF, certificaat, dossier) in de
     // beschermde archiefbucket, en één mail naar het team met beide PDF's,
     // zodat de factuur meteen kan vertrekken.
-    await naOndertekening(admin, contract_id, 'tekenlink', facturatie, signer_email)
+    await naOndertekening(admin, contract_id, 'tekenlink', null, signer_email)
 
     // ── Invalidate caches so admin/portal pages refresh immediately ───────────
     try {

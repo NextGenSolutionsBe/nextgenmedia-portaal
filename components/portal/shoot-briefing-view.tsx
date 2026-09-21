@@ -2,6 +2,7 @@ import { Camera, Calendar, Clock, MapPin, FileText } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 import { ShootFeedback, type Feedback } from './shoot-feedback'
 import { ShootIdeas, type Idea } from './shoot-ideas'
+import { ShootDocumentKnop } from '@/components/shoot-document-knop'
 
 export type Shoot = {
   id: string
@@ -65,6 +66,16 @@ export function ShootBriefingView({
                 </p>
               </div>
             )}
+
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <ShootDocumentKnop
+                href={`/api/portal/social-media/shoot-document?shoot=${s.id}`}
+                label="Shootdocument downloaden"
+                className="w-full sm:w-auto justify-center"
+                title="Print-klare checklist met de scripts en medianotities voor deze shoot"
+              />
+              <span className="text-xs text-gray-500">PDF om af te drukken en af te vinken tijdens de shoot.</span>
+            </div>
 
             <ShootFeedback shootId={s.id} initialFeedback={feedbackByShoot[s.id] ?? []} />
             <ShootIdeas shootId={s.id} initialIdeas={ideasByShoot[s.id] ?? []} />

@@ -4,6 +4,7 @@ import { createClient, createAdminSupabaseClient , isActiveStaff } from '@/lib/s
 import { revalidatePath } from 'next/cache'
 import { randomUUID } from 'crypto'
 import { logContractEvent } from '@/lib/contract-audit'
+import { logAudit, requestMeta } from '@/lib/audit'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
@@ -112,57 +113,107 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 }
 
-// DELETE — permanently remove a contract and its storage files
+/** Databasefout bij het verwijderen vertalen naar één leesbare Nederlandse zin. */
+function verwijderFoutTekst(message: string): string {
+  const m = message || ''
+  const fk = m.match(/violates foreign key constraint "[^"]+" on table "([^"]+)"/i)
+  if (fk) return `Verwijderen geblokkeerd door een gekoppeld record: ${fk[1]}. Koppel dat eerst los en probeer opnieuw.`
+  if (/onveranderlijk/i.test(m)) return 'Het contractarchief is onveranderlijk en wordt niet mee verwijderd; het contract zelf kon niet gewist worden.'
+  if (/permission denied/i.test(m)) return 'Geen rechten in de database om dit contract te verwijderen.'
+  if (/(fetch failed|ECONNREFUSED|ETIMEDOUT|timeout)/i.test(m)) return 'De database was even niet bereikbaar. Probeer het opnieuw.'
+  return safeMessage(new Error(m), 'contracts.DELETE')
+}
+
+/** Rijen die naar het contract verwijzen loskoppelen (contract_id → null). Tabel of kolom ontbreekt → 0. */
+async function koppelLos(admin: ReturnType<typeof createAdminSupabaseClient>, tabel: string, contractId: string): Promise<number> {
+  try {
+    const { data, error } = await admin.from(tabel).update({ contract_id: null }).eq('contract_id', contractId).select('id')
+    if (error) {
+      // Kolom/tabel bestaat (nog) niet vóór migratie: niets te ontkoppelen.
+      if (/does not exist|schema cache|Could not find/i.test(error.message)) return 0
+      throw new Error(error.message)
+    }
+    return (data ?? []).length
+  } catch (e) {
+    if (e instanceof Error && /does not exist|schema cache|Could not find/i.test(e.message)) return 0
+    throw e
+  }
+}
+
+/**
+ * DELETE — een contract definitief verwijderen.
+ *  - Gekoppelde facturen (eenmalig + recurring), opdrachten en vestingcontracten
+ *    worden NIET verwijderd maar losgekoppeld: ze blijven als losse records bestaan.
+ *  - Het contractarchief (getekende PDF + certificaat) blijft onaangeroerd; het
+ *    is onveranderlijk en overleeft het contract.
+ *  - Gebeurtenissen, handtekeningen en factuurvoorstellen gaan mee (CASCADE),
+ *    het facturatielog wordt expliciet opgeruimd.
+ *  - Bestanden in de contracts-bucket: best-effort weg.
+ */
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
     const user = await requireAdmin()
     if (!user) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: 'Ongeldig id' }, { status: 400 })
 
     const admin = createAdminSupabaseClient()
 
-    // Prevent deleting a signed contract by accident — require explicit force
-    // Read body FIRST (stream can only be read once)
-    const { force } = await req.json().catch(() => ({ force: false }))
+    // Body eerst lezen (de stream kan maar één keer gelezen worden).
+    const { force } = await req.json().catch(() => ({ force: false })) as { force?: boolean }
 
-    // Fetch storage paths before deleting
-    const { data: contract, error: fetchError } = await admin
-      .from('contracts')
-      .select('*')
-      .eq('id', id)
-      .maybeSingle()
-
+    const { data: contract, error: fetchError } = await admin.from('contracts').select('*').eq('id', id).maybeSingle()
     if (fetchError) throw new Error(fetchError.message)
-    if (!contract) return NextResponse.json({ error: 'Contract niet gevonden' }, { status: 404 })
-    if (contract.status === 'signed' && !force) {
-      return NextResponse.json(
-        { error: 'Dit contract is ondertekend. Stuur force: true mee om toch te verwijderen.' },
-        { status: 409 }
-      )
+    if (!contract) return NextResponse.json({ error: 'Dit contract bestaat niet (meer).' }, { status: 404 })
+    const getekend = contract.status === 'signed' || contract.status === 'getekend'
+    if (getekend && !force) {
+      return NextResponse.json({ error: 'Dit contract is ondertekend. Bevestig expliciet dat het toch verwijderd mag worden.' }, { status: 409 })
     }
 
-    // Delete contract (cascades: contract_signatures, contract_events)
-    const { error } = await admin.from('contracts').delete().eq('id', id)
-    if (error) throw new Error(error.message)
+    // 1. Loskoppelen — niet vertrouwen op ON DELETE SET NULL.
+    const [facturen, recurring, opdrachten, vesting] = await Promise.all([
+      koppelLos(admin, 'invoices', id),
+      koppelLos(admin, 'recurring_invoices', id),
+      koppelLos(admin, 'opdrachten', id),
+      koppelLos(admin, 'vesting_contracten', id),
+    ])
 
-    // Clean up storage files — best effort
-    const paths = [contract.pdf_path, contract.signed_pdf_path].filter((p): p is string => !!p)
+    // 2. Facturatielog opruimen (geen FK, dus expliciet).
+    try { await admin.from('contract_facturatie_log').delete().eq('contract_id', id) } catch { /* tabel kan ontbreken */ }
+
+    // 3. Het contract zelf (CASCADE: contract_events, contract_signatures, contract_facturatie_opdrachten).
+    const { error } = await admin.from('contracts').delete().eq('id', id)
+    if (error) return NextResponse.json({ error: verwijderFoutTekst(error.message) }, { status: 409 })
+
+    // 4. Bestanden in de contracts-bucket — best-effort. Het archief blijft.
+    const paths = [contract.pdf_path, contract.signed_pdf_path, `signed/${id}.pdf`].filter((p, i, a): p is string => !!p && a.indexOf(p) === i)
     if (paths.length > 0) {
       try { await admin.storage.from('contracts').remove(paths) } catch { }
     }
 
-    // Invalidate caches so deleted contract disappears from all lists immediately
+    // 5. Audit.
+    const meta = requestMeta(req)
+    await logAudit({
+      action: 'contract.deleted', entityType: 'contract', entityId: id,
+      summary: `Contract "${contract.title}" verwijderd${getekend ? ' (was getekend)' : ''}; losgekoppeld: ${facturen} facturen, ${recurring} recurring, ${opdrachten} opdrachten, ${vesting} vesting`,
+      actorUserId: user.id, actorEmail: user.email ?? null, actorRole: 'admin',
+      metadata: { titel: contract.title, status: contract.status, client_id: contract.client_id ?? null, losgekoppeld: { facturen, recurring, opdrachten, vesting }, archief_behouden: true },
+      ip: meta.ip, userAgent: meta.userAgent,
+    })
+
+    // 6. Caches ongeldig maken zodat het contract meteen uit alle lijsten verdwijnt.
     try {
       revalidatePath('/admin/contracts')
+      revalidatePath(`/admin/contracts/${id}`)
+      revalidatePath('/admin/invoices')
       revalidatePath('/portal/contracts')
       revalidatePath('/portal')
-      if (contract.client_id) {
-        revalidatePath(`/admin/clients/${contract.client_id}`)
-      }
+      if (contract.client_id) revalidatePath(`/admin/clients/${contract.client_id}`)
     } catch { }
 
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({ ok: true, losgekoppeld: { facturen, recurring, opdrachten, vesting } })
   } catch (err) {
-    return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
+    const msg = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ error: verwijderFoutTekst(msg) }, { status: 400 })
   }
 }

@@ -3,15 +3,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, CalendarDays, CalendarRange, List, Loader2, X, ArrowUpDown, Send, Eye, AlertTriangle, Clock, Wallet, FileWarning, CalendarCheck, Filter } from 'lucide-react'
+import { ChevronLeft, ChevronRight, CalendarDays, CalendarRange, List, Loader2, X, ArrowUpDown, Send, Eye, AlertTriangle, Wallet, Filter, Search, StickyNote, Pencil } from 'lucide-react'
 import {
   vandaagBrussel, isDatum, ymVan, plusDagen, maandStart, maandEind, maandRooster, roosterBereik, weekBereik, shiftYM,
-  maandNaam, datumKort, datumLang, DAGEN_KORT, euro, euro2, kort, samenvatting, pasFiltersToe, dagTotalen, sorteer, filtersActief,
+  maandNaam, datumKort, datumLang, DAGEN_KORT, euro, euro2, kort, samenvatting, maandKpi, pasFiltersToe, dagTotalen, sorteer, filtersActief,
   LEEG_FILTERS, PLANNER_STATUSSEN, STATUS_INFO, HERKOMST_LABEL,
   type Moment, type Filters, type Categorie, type Sortering,
 } from '@/lib/facturatie/planner-model'
 import { PlannerDetail, DagPaneel, StatusBadge, type Actie } from './planner-detail'
 import { FactuurEditor } from '../factuur-editor'
+import { ExportKnop } from '@/components/admin/export-knop'
+import { facturenWerkmap, type FactuurExportRij } from '@/lib/excel/rapporten/facturen'
 import { Plus } from 'lucide-react'
 
 type Data = { momenten: Moment[]; klanten: { id: string; company_name: string }[]; vandaag: string; verantwoordelijke: string }
@@ -74,6 +76,7 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
   const alle = useMemo(() => data?.momenten ?? [], [data])
   const basis = useMemo(() => pasFiltersToe(alle, { ...filters, categorie: null }, vandaag), [alle, filters, vandaag])
   const sam = useMemo(() => samenvatting(basis, vandaag), [basis, vandaag])
+  const kpi = useMemo(() => maandKpi(basis, ym), [basis, ym])
   const zichtbaar = useMemo(() => pasFiltersToe(basis, { ...LEEG_FILTERS, categorie: filters.categorie, toonGeannuleerd: filters.toonGeannuleerd, status: filters.status }, vandaag), [basis, filters.categorie, filters.toonGeannuleerd, filters.status, vandaag])
   const perDag = useMemo(() => { const m = new Map<string, Moment[]>(); for (const x of zichtbaar) { const l = m.get(x.datum) ?? []; l.push(x); m.set(x.datum, l) } return m }, [zichtbaar])
   const totalen = useMemo(() => dagTotalen(zichtbaar), [zichtbaar])
@@ -119,18 +122,41 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
   const zet = <K extends keyof Filters>(k: K, v: Filters[K]) => setFilters((f) => ({ ...f, [k]: v }))
   const sorteerOp = (veld: Sortering['veld']) => setSortering((s) => ({ veld, richting: s.veld === veld && s.richting === 'asc' ? 'desc' : 'asc' }))
 
+  // Excel-export van wat er nu in de lijst staat (zelfde bron als lijst en kalender).
+  const naarExport = (m: Moment): FactuurExportRij => ({
+    kind: m.bron === 'recurring' ? 'recurring' : 'eenmalig', sourceId: m.bronId, client_id: m.client_id, service_slug: null,
+    description: [m.project ?? m.dienst, m.omschrijving].filter(Boolean).join(' — ') || null,
+    amount_excl: m.bedrag_excl, vat_pct: m.btw_pct, amount_incl: m.bedrag_incl,
+    status: m.status === 'verstuurd' || m.status === 'betaald' ? 'verstuurd' : m.status === 'geannuleerd' || m.status === 'gecrediteerd' ? 'geannuleerd' : 'te_versturen',
+    billing_date: m.datum, contract_title: m.contract_titel,
+  })
+  const exportWerkmap = () => {
+    const klantNamen = new Map((data?.klanten ?? []).map((k) => [k.id, k.company_name]))
+    const alle = zichtbaar.filter((m) => ymVan(m.datum) === ym).map(naarExport)
+    return facturenWerkmap({
+      month: ym, rijen: lijst.map(naarExport), alleRijen: alle,
+      klantNaam: (id) => (id ? klantNamen.get(id) ?? '—' : '—'),
+      filters: filtersActief(filters) ? [{ label: 'Filters', waarde: 'actief' }] : [],
+      summary: { omzetExcl: kpi.gepland, openExcl: kpi.teFactureren, doneExcl: kpi.verstuurd, pct: kpi.gepland > 0 ? Math.round((kpi.verstuurd / kpi.gepland) * 100) : 0 },
+    })
+  }
+
   const titel = weergave === 'week' ? `Week van ${datumLang(zicht.van)} t/m ${datumKort(zicht.tot)}` : maandNaam(ym)
 
   return (
     <div className="space-y-4">
-      {/* ── Samenvatting ── */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-        <Kaart actief={filters.categorie === 'vandaag'} onClick={() => zetCategorie('vandaag')} icon={CalendarCheck} label="Te versturen vandaag" waarde={String(sam.vandaag)} kleur={sam.vandaag > 0 ? 'text-yellow-700' : 'text-gray-900'} />
-        <Kaart actief={filters.categorie === 'week'} onClick={() => zetCategorie('week')} icon={Clock} label="Te versturen deze week" waarde={String(sam.week)} />
-        <Kaart actief={filters.categorie === 'maand'} onClick={() => zetCategorie('maand')} icon={CalendarDays} label="Te versturen deze maand" waarde={String(sam.maand)} />
-        <Kaart actief={filters.categorie === 'maand'} onClick={() => zetCategorie('maand')} icon={Wallet} label="Te factureren deze maand" waarde={euro(sam.maandBedrag)} sub={`excl. btw · ${euro(sam.maandBedragTotaal)} incl. verstuurd`} />
-        <Kaart actief={filters.categorie === 'achterstallig'} onClick={() => zetCategorie('achterstallig')} icon={AlertTriangle} label="Achterstallig" waarde={String(sam.achterstallig)} kleur={sam.achterstallig > 0 ? 'text-red-600' : 'text-green-600'} />
-        <Kaart actief={filters.categorie === 'ontbrekend'} onClick={() => zetCategorie('ontbrekend')} icon={FileWarning} label="Ontbrekende gegevens" waarde={String(sam.ontbrekend)} kleur={sam.ontbrekend > 0 ? 'text-orange-600' : 'text-green-600'} />
+      {/* ── Maandoverzicht: vier eenvoudige kaarten voor de gekozen maand (excl. btw) ── */}
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+        <Kaart actief={false} onClick={() => { setWeergave('lijst'); setFilters((f) => ({ ...f, status: '', categorie: null })) }} icon={Wallet} label={`Nog te factureren · ${maandNaam(ym)}`} waarde={euro(kpi.teFactureren)} sub={`${kpi.teFacturerenAantal} factu${kpi.teFacturerenAantal === 1 ? 'ur' : 'ren'} met status Te factureren`} kleur={kpi.teFactureren > 0 ? 'text-gray-900' : 'text-gray-400'} />
+        <Kaart actief={false} onClick={() => { setWeergave('lijst'); setFilters((f) => ({ ...f, status: 'verstuurd', categorie: null })) }} icon={Send} label="Reeds verstuurd deze maand" waarde={euro(kpi.verstuurd)} sub={`${kpi.verstuurdAantal} factu${kpi.verstuurdAantal === 1 ? 'ur' : 'ren'} effectief verstuurd`} kleur="text-green-700" />
+        <Kaart actief={false} onClick={() => setWeergave('lijst')} icon={CalendarDays} label="Totaal gepland deze maand" waarde={euro(kpi.gepland)} sub="nog te factureren + reeds verstuurd" />
+        <Kaart actief={false} onClick={() => setWeergave('lijst')} icon={ArrowUpDown} label="Verwacht binnen deze maand" waarde={euro(kpi.verwachtBinnen)} sub={`${kpi.verwachtBinnenAantal} verstuurde factu${kpi.verwachtBinnenAantal === 1 ? 'ur' : 'ren'} · verzenddatum + betaaltermijn`} kleur="text-emerald-700" />
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-600 -mt-1">
+        <span className="text-gray-400">Bedragen excl. btw · geannuleerd telt nergens mee · Snel:</span>
+        {([['vandaag', 'Te factureren vandaag', sam.vandaag], ['week', 'Deze week', sam.week], ['achterstallig', 'Datum voorbij', sam.achterstallig], ['ontbrekend', 'Gegevens ontbreken', sam.ontbrekend]] as const).map(([c, label, n]) => (
+          <button key={c} type="button" onClick={() => zetCategorie(c)} className={`rounded-full border px-2 py-0.5 ${filters.categorie === c ? 'bg-black text-white border-black' : n > 0 ? (c === 'achterstallig' || c === 'ontbrekend' ? 'border-orange-300 text-orange-800 bg-orange-50' : 'border-gray-200 bg-white') : 'border-gray-100 text-gray-400 bg-white'}`}>{label} · {n}</button>
+        ))}
       </div>
 
       {/* ── Werkbalk ── */}
@@ -141,9 +167,11 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
             <button type="button" onClick={() => setAnker(vandaag)} className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50">Vandaag</button>
             <button type="button" onClick={() => ga(1)} className="rounded-lg border border-gray-200 p-2 hover:bg-gray-50" aria-label="Volgende periode"><ChevronRight className="h-4 w-4" /></button>
             <span className="text-sm font-semibold capitalize ml-1">{titel}</span>
+            <input type="month" value={ym} onChange={(e) => { if (/^\d{4}-\d{2}$/.test(e.target.value)) setAnker(`${e.target.value}-01`) }} className={`${sel} ml-1`} aria-label="Maand kiezen" />
             {laden && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <div className="relative"><Search className="h-3.5 w-3.5 text-gray-400 absolute left-2 top-1/2 -translate-y-1/2" /><input className={`${sel} pl-7 w-52`} placeholder="Zoeken: klant, project, omschrijving…" value={filters.project} onChange={(e) => zet('project', e.target.value)} aria-label="Zoeken" /></div>
             <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50">
               {([['maand', CalendarDays, 'Maand'], ['week', CalendarRange, 'Week'], ['lijst', List, 'Lijst']] as const).map(([w, Icon, label]) => (
                 <button key={w} type="button" onClick={() => setWeergave(w)} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${weergave === w ? 'bg-black text-white' : 'text-gray-600 hover:bg-white'}`}><Icon className="h-3.5 w-3.5" />{label}</button>
@@ -151,13 +179,14 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
             </div>
             <button type="button" onClick={() => setToonFilters((v) => !v)} className={`btn-secondary text-xs ${toonFilters || filtersActief(filters) ? 'ring-1 ring-black' : ''}`}><Filter className="h-3.5 w-3.5" />Filters{filtersActief(filters) ? ' •' : ''}</button>
             {filtersActief(filters) && <button type="button" onClick={() => setFilters(LEEG_FILTERS)} className="btn-secondary text-xs"><X className="h-3.5 w-3.5" />Filters wissen</button>}
-            <button type="button" onClick={() => setEditor({ datum: vandaag })} className="btn-primary text-xs"><Plus className="h-3.5 w-3.5" />Nieuwe factuur</button>
+            <ExportKnop werkmap={exportWerkmap} label="Excel" className="btn-secondary text-xs" title="Exporteer de facturen in de lijst naar Excel" />
+            <button type="button" onClick={() => setEditor({ datum: ymVan(vandaag) === ym ? vandaag : `${ym}-01` })} className="btn-primary text-xs"><Plus className="h-3.5 w-3.5" />Nieuwe factuur toevoegen</button>
           </div>
         </div>
 
         {filters.categorie && (
           <div className="flex items-center gap-2 text-xs text-gray-700 bg-[#fff848]/30 border border-yellow-200 rounded-lg px-3 py-1.5 w-fit">
-            Gefilterd op: <b>{{ vandaag: 'te versturen vandaag', week: 'te versturen deze week', maand: 'deze maand', achterstallig: 'achterstallig', ontbrekend: 'ontbrekende gegevens' }[filters.categorie]}</b>
+            Gefilterd op: <b>{{ vandaag: 'te factureren vandaag', week: 'te factureren deze week', maand: 'deze maand', achterstallig: 'datum voorbij', ontbrekend: 'ontbrekende gegevens' }[filters.categorie]}</b>
             <button type="button" onClick={() => zet('categorie', null)} className="ml-1 rounded p-0.5 hover:bg-yellow-200" aria-label="Categoriefilter wissen"><X className="h-3 w-3" /></button>
           </div>
         )}
@@ -166,7 +195,6 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
           <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-2 pt-2 border-t border-gray-100">
             <div className="flex items-center gap-1 col-span-2"><input type="date" className={`${sel} flex-1`} value={filters.van} onChange={(e) => zet('van', e.target.value)} aria-label="Periode van" /><span className="text-xs text-gray-400">–</span><input type="date" className={`${sel} flex-1`} value={filters.tot} onChange={(e) => zet('tot', e.target.value)} aria-label="Periode tot" /></div>
             <select className={sel} value={filters.klant} onChange={(e) => zet('klant', e.target.value)}><option value="">Alle klanten</option>{(data?.klanten ?? []).map((k) => <option key={k.id} value={k.id}>{k.company_name}</option>)}</select>
-            <input className={sel} placeholder="Project of omschrijving…" value={filters.project} onChange={(e) => zet('project', e.target.value)} />
             <select className={sel} value={filters.status} onChange={(e) => zet('status', e.target.value as Filters['status'])}><option value="">Alle statussen</option>{PLANNER_STATUSSEN.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
             <select className={sel} value={filters.type} onChange={(e) => zet('type', e.target.value)}><option value="">Alle factuurtypes</option>{typen.map((t) => <option key={t} value={t}>{t}</option>)}</select>
             <select className={sel} value={filters.terugkerend} onChange={(e) => zet('terugkerend', e.target.value as Filters['terugkerend'])}><option value="">Eenmalig en terugkerend</option><option value="eenmalig">Eenmalig</option><option value="terugkerend">Terugkerend</option></select>
@@ -202,7 +230,7 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
                       <button key={m.id} type="button" onClick={() => setGeselecteerd(m.id)} title={`${kort(m)} · ${STATUS_INFO[m.status].label}${sleepbaar(m) ? ' · sleep naar een andere dag om te verplaatsen' : ''}`}
                         draggable={sleepbaar(m)} onDragStart={(e) => sleepStart(e, m)}
                         className={`text-left text-[10.5px] leading-tight px-1.5 py-0.5 rounded border-l-2 truncate ${STATUS_INFO[m.status].cls} ${m.status === 'geannuleerd' ? 'line-through' : ''} ${sleepbaar(m) ? 'cursor-grab active:cursor-grabbing' : ''}`}>
-                        {kort(m)}{m.contract_titel ? <span className="opacity-70"> · {m.contract_titel}</span> : null}
+                        {kort(m)}
                       </button>
                     ))}
                     {meer > 0 && <button type="button" onClick={() => setDag(d)} className="text-[10.5px] text-gray-500 hover:text-black text-left px-1.5">+{meer} meer</button>}
@@ -236,8 +264,7 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
                       <button key={m.id} type="button" onClick={() => setGeselecteerd(m.id)} draggable={sleepbaar(m)} onDragStart={(e) => sleepStart(e, m)} title={sleepbaar(m) ? 'Sleep naar een andere dag om de facturatiedatum te verplaatsen' : undefined}
                         className={`w-full text-left rounded-lg border px-2 py-1.5 ${STATUS_INFO[m.status].cls} ${m.status === 'geannuleerd' ? 'line-through opacity-70' : ''} ${sleepbaar(m) ? 'cursor-grab active:cursor-grabbing' : ''}`}>
                         <div className="text-xs font-medium truncate">{m.klant}</div>
-                        <div className="text-[10.5px] truncate">{euro(m.bedrag_excl)} · {m.type}</div>
-                        {m.contract_titel && <div className="text-[10px] truncate opacity-70">📄 {m.contract_titel}</div>}
+                        <div className="text-[10.5px] truncate">{euro(m.bedrag_excl)} · {m.project ?? m.dienst ?? m.type}</div>
                       </button>
                     ))}
                     {items.length === 0 && <div className="text-[11px] text-gray-300">—</div>}
@@ -261,36 +288,37 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
             <table className="w-full text-sm min-w-[1080px]">
               <thead>
                 <tr className="text-left text-[11px] text-gray-500 uppercase tracking-wide bg-gray-50">
-                  <Kop veld="datum" sortering={sortering} onClick={sorteerOp}>Facturatiedatum</Kop>
+                  <Kop veld="datum" sortering={sortering} onClick={sorteerOp}>Geplande datum</Kop>
                   <Kop veld="klant" sortering={sortering} onClick={sorteerOp}>Klant</Kop>
-                  <th className="px-3 py-2 font-medium">Project</th>
-                  <th className="px-3 py-2 font-medium">Type</th>
+                  <th className="px-3 py-2 font-medium">Dienst / project</th>
+                  <th className="px-3 py-2 font-medium">Omschrijving</th>
                   <Kop veld="bedrag" sortering={sortering} onClick={sorteerOp} rechts>Excl. btw</Kop>
-                  <th className="px-3 py-2 font-medium text-right">Btw</th>
                   <th className="px-3 py-2 font-medium text-right">Incl. btw</th>
+                  <th className="px-3 py-2 font-medium text-right">Termijn</th>
+                  <th className="px-3 py-2 font-medium">Verwacht binnen</th>
                   <Kop veld="status" sortering={sortering} onClick={sorteerOp}>Status</Kop>
-                  <th className="px-3 py-2 font-medium">Herkomst</th>
                   <th className="px-3 py-2 font-medium">Verantw.</th>
                   <th className="px-3 py-2 font-medium text-right">Acties</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {lijst.length === 0 && <tr><td colSpan={11} className="px-3 py-8 text-center text-gray-400">Geen facturatiemomenten voor deze selectie.</td></tr>}
+                {lijst.length === 0 && <tr><td colSpan={11} className="px-3 py-8 text-center text-gray-400">Geen facturen voor deze selectie. Klik op “Nieuwe factuur” om er een toe te voegen.</td></tr>}
                 {lijst.map((m) => (
-                  <tr key={m.id} onClick={() => setGeselecteerd(m.id)} className={`hover:bg-gray-50 cursor-pointer ${m.status === 'geannuleerd' ? 'opacity-60' : ''}`}>
+                  <tr key={m.id} onClick={() => (m.bron === 'invoice' && m.invoice_id ? setEditor({ invoiceId: m.invoice_id }) : setGeselecteerd(m.id))} className={`hover:bg-gray-50 cursor-pointer ${m.status === 'geannuleerd' || m.status === 'gecrediteerd' ? 'opacity-60' : ''}`} title={m.bron === 'invoice' ? 'Klik om de factuur te openen en aan te passen' : 'Klik voor details'}>
                     <td className="px-3 py-2 whitespace-nowrap">{datumNlKort(m.datum)}</td>
                     <td className="px-3 py-2 font-medium">{m.klant}{!m.volledig && <AlertTriangle className="h-3 w-3 text-orange-500 inline ml-1 -mt-0.5" />}</td>
-                    <td className="px-3 py-2 text-gray-600 max-w-[220px] truncate">{m.project ?? m.omschrijving ?? '—'}</td>
-                    <td className="px-3 py-2 text-gray-600">{m.type}</td>
+                    <td className="px-3 py-2 text-gray-600 max-w-[200px] truncate">{m.project ?? m.dienst ?? '—'}{m.terugkerend && <span className="text-[10px] text-purple-700 ml-1">· maandelijks</span>}</td>
+                    <td className="px-3 py-2 text-gray-600 max-w-[220px] truncate">{m.omschrijving ?? '—'}{m.opmerking && <StickyNote className="h-3 w-3 text-amber-500 inline ml-1 -mt-0.5" aria-label="Heeft een interne notitie" />}</td>
                     <td className="px-3 py-2 text-right font-medium tabular-nums">{euro2(m.bedrag_excl)}</td>
-                    <td className="px-3 py-2 text-right text-gray-500 tabular-nums">{m.btw_pct.toLocaleString('nl-BE')} %</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{euro2(m.bedrag_incl)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-gray-500">{euro2(m.bedrag_incl)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-gray-500">{m.betaaltermijn} d</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-gray-600">{m.status === 'geannuleerd' || m.status === 'gecrediteerd' ? '—' : datumNlKort(m.verwacht_op)}{m.verzonden_op && <span className="block text-[10px] text-green-700">verstuurd {datumNlKort(m.verzonden_op)}</span>}</td>
                     <td className="px-3 py-2"><StatusBadge status={m.status} /></td>
-                    <td className="px-3 py-2 text-gray-600 text-xs">{HERKOMST_LABEL[m.herkomst]}</td>
                     <td className="px-3 py-2 text-gray-600 text-xs">{m.verantwoordelijke ?? '—'}</td>
                     <td className="px-3 py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                       {m.acties.kanVerstuurd && <button type="button" disabled={bezig} onClick={() => voerUit('verstuurd', m)} className="btn-primary text-xs h-7 px-2" title="Markeren als verstuurd"><Send className="h-3 w-3" /></button>}
-                      {m.invoice_id && m.bron === 'invoice' ? <button type="button" onClick={() => setEditor({ invoiceId: m.invoice_id! })} className="btn-secondary text-xs h-7 px-2 ml-1" title="Factuur openen"><Eye className="h-3 w-3" /></button>
+                      {m.invoice_id && m.bron === 'invoice' ? <button type="button" onClick={() => setEditor({ invoiceId: m.invoice_id! })} className="btn-secondary text-xs h-7 px-2 ml-1" title="Factuur openen en aanpassen"><Pencil className="h-3 w-3" /></button>
+                        : m.bron === 'recurring' ? <button type="button" onClick={() => setGeselecteerd(m.id)} className="btn-secondary text-xs h-7 px-2 ml-1" title="Details"><Eye className="h-3 w-3" /></button>
                         : m.acties.bekijkenUrl && <Link href={m.acties.bekijkenUrl} prefetch={false} className="btn-secondary text-xs h-7 px-2 ml-1" title="Bekijken"><Eye className="h-3 w-3" /></Link>}
                     </td>
                   </tr>

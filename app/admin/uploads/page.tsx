@@ -1,64 +1,52 @@
 export const dynamic = 'force-dynamic'
 
+import { redirect } from 'next/navigation'
 import { FolderUp } from 'lucide-react'
-import { createAdminSupabaseClient, signedUrlMap } from '@/lib/supabase/server'
-import { BUCKET, LOSSE_BESTANDEN } from '@/lib/client-uploads'
-import { UploadsView, type AdminUpload } from './uploads-view'
+import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { MappenView, type KlantMap } from './mappen-view'
+import { NIET_TOEGEWEZEN, isUuid, laadKlanten, laadTelling } from './laad'
 
 /**
- * Wat klanten hebben aangeleverd — alle klanten in één lijst.
+ * Klantuploads als mappen: één map per klant, zoals een gedeelde schijf.
+ *
+ * Elke niet-gearchiveerde klant krijgt een map, ook zonder bestanden — zo
+ * bestaat de map "automatisch" zodra de klant bestaat en hoeft niemand iets
+ * aan te maken. De inhoud staat op /admin/uploads/[clientId].
  *
  * De identiteits- en modulecontrole gebeurt centraal in de middleware
- * (pathToModule op /admin-paden), dus hier geen losse rolcheck: dat zou een
- * tweede plek zijn waar rechten geregeld worden.
+ * (pathToModule op /admin-paden), dus hier geen losse rolcheck.
  */
-export default async function AdminUploadsPage() {
+export default async function AdminUploadsPage({
+  searchParams,
+}: {
+  searchParams?: { client?: string }
+}) {
+  // Oude diepe links (?client=<id>) blijven werken: rechtstreeks de map in.
+  const oud = String(searchParams?.client ?? '').trim()
+  if (oud && isUuid(oud)) redirect(`/admin/uploads/${oud}`)
+
   const admin = createAdminSupabaseClient()
+  const [klanten, telling] = await Promise.all([laadKlanten(admin), laadTelling(admin)])
 
-  const KOLOMMEN = 'id, client_id, titel, beschrijving, bestandspad, bestandsnaam, mimetype, grootte, status, admin_notitie, door_naam, door_email, created_at, map_id'
+  const mistTabel = !!telling.error && /client_uploads|does not exist|schema cache/i.test(telling.error.message)
 
-  const haal = (kolommen: string) => admin
-    .from('client_uploads')
-    .select(kolommen)
-    .order('created_at', { ascending: false })
-    .limit(500)
-
-  // Zonder de kolom map_id (migratie nog niet gedraaid) valt de selectie terug.
-  let { data, error } = await haal(KOLOMMEN)
-  if (error && /map_id/i.test(error.message)) {
-    ;({ data, error } = await haal(KOLOMMEN.replace(', map_id', '')))
-  }
-
-  const mistTabel = !!error && /client_uploads|does not exist|schema cache/i.test(error.message)
-
-  let uploads: AdminUpload[] = []
-  if (!error) {
-    const { data: klantRijen } = await admin
-      .from('clients').select('id, company_name').order('company_name')
-    const naamVan = new Map(
-      ((klantRijen ?? []) as { id: string; company_name: string | null }[])
-        .map((c) => [c.id, c.company_name ?? '(zonder naam)']),
-    )
-
-    const { data: mapRijen } = await admin.from('client_upload_folders').select('id, naam')
-    const mapNaam = new Map(
-      ((mapRijen ?? []) as { id: string; naam: string }[]).map((m) => [m.id, m.naam]),
-    )
-
-    const rijen = (data ?? []) as unknown as Record<string, unknown>[]
-    // Alle bestanden in één keer laten tekenen in plaats van één per rij.
-    const urls = await signedUrlMap(admin, BUCKET, rijen.map((r) => String(r.bestandspad)), 60 * 60)
-
-    uploads = rijen.map((rij) => {
-      const { bestandspad: _weg, ...rest } = rij
-      void _weg
-      return {
-        ...rest,
-        client_naam: naamVan.get(String(rij.client_id)) ?? '(onbekende klant)',
-        map_naam: rij.map_id ? mapNaam.get(String(rij.map_id)) ?? LOSSE_BESTANDEN : LOSSE_BESTANDEN,
-        url: urls.get(String(rij.bestandspad)) ?? null,
-      } as AdminUpload
+  const mappen: KlantMap[] = klanten
+    .filter((k) => !k.archived_at)
+    .map((k) => {
+      const t = telling.perKlant.get(k.id)
+      return { id: k.id, naam: k.naam, aantal: t?.aantal ?? 0, laatste: t?.laatste ?? null }
     })
+
+  // Bestanden waarvan de klant niet (meer) bestaat. Hoort niet voor te komen
+  // (client_id is verplicht en cascadeert), maar als het toch gebeurt moet
+  // het materiaal ergens zichtbaar zijn in plaats van stil te verdwijnen.
+  const bekend = new Set(klanten.map((k) => k.id))
+  let wees: KlantMap | null = null
+  for (const [clientId, t] of telling.perKlant) {
+    if (bekend.has(clientId)) continue
+    if (!wees) wees = { id: NIET_TOEGEWEZEN, naam: 'Niet toegewezen', aantal: 0, laatste: null }
+    wees.aantal += t.aantal
+    if (t.laatste && (!wees.laatste || t.laatste > wees.laatste)) wees.laatste = t.laatste
   }
 
   return (
@@ -68,7 +56,7 @@ export default async function AdminUploadsPage() {
           <FolderUp className="h-6 w-6" />Klantuploads
         </h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          Beeldmateriaal dat klanten zelf aanleverden, met hun eigen titel en toelichting.
+          Eén map per klant met alles wat die aanleverde — en wat wij er zelf bij zetten.
         </p>
       </div>
 
@@ -78,12 +66,12 @@ export default async function AdminUploadsPage() {
           <code className="mx-1 px-1.5 py-0.5 bg-amber-100 rounded">supabase/migrations/99999999_SYNC_ALL.sql</code>
           in Supabase.
         </p>
-      ) : error ? (
+      ) : telling.error ? (
         <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
           Kon de uploads niet laden.
         </p>
       ) : (
-        <UploadsView initieel={uploads} />
+        <MappenView mappen={mappen} wees={wees} />
       )}
     </div>
   )

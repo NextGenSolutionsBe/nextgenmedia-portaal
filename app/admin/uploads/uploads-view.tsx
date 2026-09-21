@@ -2,10 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
+import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { STATUSSEN, STATUS_LABELS, isVideo, leesbareGrootte, type Status } from '@/lib/client-uploads'
 import { maakZipSchrijver, verdeelInDelen, uniekeNaam, zipBestandsnaam, zipSegment } from '@/lib/zip-browser'
-import { Archive, CheckSquare, Download, Film, ImageIcon, Loader2, Square, Trash2, ExternalLink, X } from 'lucide-react'
+import { Archive, CheckSquare, Download, Film, FolderInput, ImageIcon, Loader2, Square, Trash2, ExternalLink, X } from 'lucide-react'
+import { AdminUploader } from './admin-uploader'
 
 export type AdminUpload = {
   id: string
@@ -13,6 +15,7 @@ export type AdminUpload = {
   client_naam: string
   /** Naam van de map, of "Losse bestanden" als er geen map is. */
   map_naam: string
+  map_id?: string | null
   titel: string
   beschrijving: string | null
   bestandsnaam: string
@@ -72,7 +75,28 @@ const KLEUR: Record<Status, string> = {
   verwerkt: 'bg-green-100 text-green-700',
 }
 
-export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
+/**
+ * Het raster met klantuploads.
+ *
+ * Zonder `clientId` (oude situatie) staat er een klantfilter bij. In een
+ * klantmap (`clientId` = uuid) valt die filter weg en komt er een uploadknop
+ * bij; in de map "Niet toegewezen" (`clientId` = null, `klantKeuze` gevuld)
+ * kan elk bestand aan een klant gekoppeld worden.
+ */
+export function UploadsView({
+  initieel, clientId, klantNaam, mappen: submappen = [], klantKeuze,
+}: {
+  initieel: AdminUpload[]
+  /** uuid = map van één klant; null = map "Niet toegewezen"; weggelaten = alle klanten. */
+  clientId?: string | null
+  klantNaam?: string
+  /** Submappen van de klant, voor de mapkeuze bij het uploaden. */
+  mappen?: { id: string; naam: string }[]
+  /** Klanten om een weesbestand aan te koppelen. */
+  klantKeuze?: { id: string; naam: string }[]
+}) {
+  const router = useRouter()
+  const inMap = clientId !== undefined
   const [lijst, setLijst] = useState(initieel)
   const [klant, setKlant] = useState('')
   const [mapNaam, setMapNaam] = useState('')
@@ -82,6 +106,12 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
   const [bulk, setBulk] = useState<Voortgang | null>(null)
   const stopRef = useRef<{ nu: boolean } | null>(null)
   const [selectie, setSelectie] = useState<Set<string>>(new Set())
+  const [doelKlant, setDoelKlant] = useState('')
+  const [toewijzen, setToewijzen] = useState(false)
+
+  // Na een upload haalt de serverpagina de lijst opnieuw op (router.refresh);
+  // dan moet het scherm die verse lijst ook echt overnemen.
+  useEffect(() => { setLijst(initieel) }, [initieel])
 
   /**
    * Een geopende foto krijgt een eigen plek in de browsergeschiedenis. Zo
@@ -205,7 +235,7 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
     }
   }
 
-  const naamBasis = klant ? `klantuploads-${zipSegment(klant)}` : 'klantuploads'
+  const naamBasis = (klant || (inMap && klantNaam)) ? `klantuploads-${zipSegment(klant || klantNaam || '')}` : 'klantuploads'
   const downloadAlles = () => downloadLijst(zichtbaar, naamBasis)
   const downloadSelectie = () => downloadLijst(zichtbaar.filter((u) => selectie.has(u.id)), `${naamBasis}-selectie`)
   const geselecteerdZichtbaar = zichtbaar.filter((u) => selectie.has(u.id))
@@ -219,20 +249,48 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
     sluitFoto()
   }
 
+  /**
+   * Een weesbestand aan een klant hangen. Het bestand blijft waar het staat in
+   * de opslag; enkel de koppeling verandert. Daarna hoort het niet meer in
+   * deze map thuis, dus het verdwijnt uit de lijst.
+   */
+  const wijsToe = async (id: string) => {
+    if (!doelKlant || toewijzen) return
+    setFout(null); setToewijzen(true)
+    try {
+      const r = await fetch('/api/admin/uploads', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, client_id: doelKlant }),
+      })
+      if (!r.ok) { setFout((await r.json()).error ?? 'Toewijzen mislukt.'); return }
+      setLijst((l) => l.filter((u) => u.id !== id))
+      setSelectie((sel) => { const n = new Set(sel); n.delete(id); return n })
+      sluitFoto()
+      router.refresh()
+    } finally {
+      setToewijzen(false)
+    }
+  }
+
+  const standaardMapId = submappen.find((m) => m.naam === mapNaam)?.id ?? null
+
   return (
     <div className="space-y-5">
       {/* ── Filters ── */}
       <div className="flex flex-wrap items-center gap-2">
-        <select
-          value={klant}
-          // Bij een andere klant vervalt de mapkeuze: die map bestaat daar
-          // waarschijnlijk niet, en je zou naar een lege lijst kijken.
-          onChange={(e) => { setKlant(e.target.value); setMapNaam('') }}
-          className="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white"
-        >
-          <option value="">Alle klanten</option>
-          {klanten.map((k) => <option key={k} value={k}>{k}</option>)}
-        </select>
+        {!inMap && (
+          <select
+            value={klant}
+            // Bij een andere klant vervalt de mapkeuze: die map bestaat daar
+            // waarschijnlijk niet, en je zou naar een lege lijst kijken.
+            onChange={(e) => { setKlant(e.target.value); setMapNaam('') }}
+            className="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white"
+          >
+            <option value="">Alle klanten</option>
+            {klanten.map((k) => <option key={k} value={k}>{k}</option>)}
+          </select>
+        )}
 
         <select
           value={mapNaam} onChange={(e) => setMapNaam(e.target.value)}
@@ -263,12 +321,23 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
           ))}
         </div>
 
+        {clientId && (
+          <span className="ml-auto">
+            <AdminUploader
+              clientId={clientId}
+              mappen={submappen}
+              standaardMapId={standaardMapId}
+              onKlaar={() => router.refresh()}
+            />
+          </span>
+        )}
+
         <button
           type="button"
           onClick={downloadAlles}
           disabled={zichtbaar.length === 0 || !!bulk}
           title={klant || mapNaam || status ? 'Downloadt alles binnen de gekozen filters als één ZIP (Klant/Map/bestand).' : 'Downloadt alle klantuploads als één ZIP (Klant/Map/bestand).'}
-          className="ml-auto text-xs font-semibold px-3 py-2 rounded-xl bg-[#fff848] text-black hover:brightness-95 disabled:opacity-50 disabled:hover:brightness-100 flex items-center gap-1.5"
+          className={cn('text-xs font-semibold px-3 py-2 rounded-xl bg-[#fff848] text-black hover:brightness-95 disabled:opacity-50 disabled:hover:brightness-100 flex items-center gap-1.5', !clientId && 'ml-auto')}
         >
           {bulk ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Archive className="h-3.5 w-3.5" />}
           Alles downloaden ({zichtbaar.length} · {leesbareGrootte(zichtbaar.reduce((s, u) => s + (Number(u.grootte) || 0), 0))})
@@ -325,7 +394,7 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
       {/* ── Raster ── */}
       {zichtbaar.length === 0 ? (
         <p className="text-sm text-gray-500 border border-gray-200 rounded-2xl px-4 py-12 text-center">
-          Niets gevonden met deze filters.
+          {lijst.length === 0 && inMap ? 'Nog geen uploads in deze map.' : 'Niets gevonden met deze filters.'}
         </p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -363,7 +432,7 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
 
               <div className="p-3 flex-1 flex flex-col gap-1">
                 <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide truncate">
-                  {u.client_naam} · {u.map_naam}
+                  {clientId ? u.map_naam : `${u.client_naam} · ${u.map_naam}`}
                 </p>
                 <p className="font-semibold text-sm leading-tight">{u.titel}</p>
                 {u.beschrijving && (
@@ -392,7 +461,7 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
             <div className="flex items-start justify-between p-4 border-b border-gray-100">
               <div className="min-w-0">
                 <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">
-                  {open.client_naam} · {open.map_naam}
+                  {clientId ? open.map_naam : `${open.client_naam} · ${open.map_naam}`}
                 </p>
                 <h2 className="font-bold text-lg leading-tight">{open.titel}</h2>
               </div>
@@ -432,6 +501,29 @@ export function UploadsView({ initieel }: { initieel: AdminUpload[] }) {
                   <p className="font-medium truncate">{open.bestandsnaam} · {leesbareGrootte(open.grootte)}</p>
                 </div>
               </div>
+
+              {klantKeuze && klantKeuze.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100">
+                  <FolderInput className="h-4 w-4 text-gray-400 shrink-0" />
+                  <select
+                    value={doelKlant}
+                    onChange={(e) => setDoelKlant(e.target.value)}
+                    className="text-sm border border-gray-200 rounded-xl px-3 py-1.5 bg-white flex-1 min-w-[180px]"
+                  >
+                    <option value="">Kies een klant…</option>
+                    {klantKeuze.map((k) => <option key={k.id} value={k.id}>{k.naam}</option>)}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => wijsToe(open.id)}
+                    disabled={!doelKlant || toewijzen}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-black text-white hover:bg-gray-800 disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    {toewijzen && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    Toewijzen aan klant
+                  </button>
+                </div>
+              )}
 
               <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100">
                 {STATUSSEN.map((s) => (

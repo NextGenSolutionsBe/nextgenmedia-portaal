@@ -4,7 +4,8 @@ import { createAdminSupabaseClient, requireAdmin, requireStaff } from '@/lib/sup
 import { getOrCreateSetter } from '@/lib/sales/setters'
 import { loadCalendar, logLeadEvent, getOrCreateSalesOrg, moveLeadToPipeline } from '@/lib/sales/service'
 import { isBookable } from '@/lib/sales/availability'
-import { APPOINTMENT_STAGE } from '@/lib/sales/stages'
+import { APPOINTMENT_STAGE, normaliseerStage } from '@/lib/sales/stages'
+import { registreerActiviteit } from '@/lib/sales/activiteiten'
 import { createEvent, moveEvent, deleteEvent } from '@/lib/sales/google-calendar'
 import { normalizePhone } from '@/lib/sales/dedupe'
 import { bouwAgendaOmschrijving, bouwAgendaTitel, bouwKlantOmschrijving, afspraakMoment, afspraakNotitie } from '@/lib/sales/briefing'
@@ -337,11 +338,19 @@ export async function POST(req: NextRequest) {
     //    op "Afspraak ingepland".
     if (leadId) {
       await admin.from('sales_leads').update({ stage_key: APPOINTMENT_STAGE }).eq('id', leadId)
-      await logLeadEvent(leadId, {
-        kind: 'stage', fromStage: leadStage, toStage: APPOINTMENT_STAGE,
-        body: `Afspraak geboekt op ${afspraakMoment(start, client.timezone)}${agenda?.name ? ` (agenda ${agenda.name})` : ''}`,
-        actorId: actor.id, actorEmail: actor.email ?? null,
+      // Eén activiteit "afspraak gepland" mét afspraak-id (verplaatsen maakt
+      // er nooit een tweede), plus de fasewissel als aparte regel.
+      await registreerActiviteit(admin, {
+        leadId, medewerkerId: actor.id, medewerkerEmail: actor.email ?? null,
+        type: 'afspraak_gepland', afspraakId: appt.id as string,
+        extra: `${afspraakMoment(start, client.timezone)}${agenda?.name ? ` (agenda ${agenda.name})` : ''}`,
       })
+      if (normaliseerStage(leadStage) !== APPOINTMENT_STAGE) {
+        await registreerActiviteit(admin, {
+          leadId, medewerkerId: actor.id, medewerkerEmail: actor.email ?? null,
+          type: 'fase_gewijzigd', vanFase: normaliseerStage(leadStage), naarFase: APPOINTMENT_STAGE,
+        })
+      }
       // De briefing hoort óók op de tijdlijn van de lead (en dus in "laatste
       // notitie"). Tot nu stond ze enkel op de afspraak en in Google/ClickUp/
       // mail, waardoor de app "niets genoteerd" toonde.

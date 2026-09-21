@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { getOrCreateSalesOrg } from '@/lib/sales/service'
+import { stageKeysVoor } from '@/lib/sales/stages'
 import { PhoneCall, CalendarClock, ArrowRight, Target } from 'lucide-react'
 
 // Command Center-blok voor de Verkoop-module: wat staat er vandaag te doen in
@@ -20,7 +21,7 @@ export async function SalesToday() {
 
   const [{ count: toCall }, { count: callbacks }, { count: appts }] = await Promise.all([
     admin.from('sales_leads').select('id', { count: 'exact', head: true })
-      .eq('sales_client_id', pipelineId).eq('stage_key', 'to_contact')
+      .eq('sales_client_id', pipelineId).in('stage_key', [...stageKeysVoor('outbound'), ...stageKeysVoor('inbound')])
       .is('archived_at', null).eq('do_not_call', false),
     admin.from('sales_leads').select('id', { count: 'exact', head: true })
       .eq('sales_client_id', pipelineId).is('archived_at', null)

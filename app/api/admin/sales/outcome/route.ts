@@ -4,6 +4,8 @@ import { createAdminSupabaseClient, requireAdmin } from '@/lib/supabase/server'
 import { getOrCreateSalesOrg } from '@/lib/sales/service'
 import { commissionCents } from '@/lib/sales/earnings'
 import { logAudit, requestMeta } from '@/lib/audit'
+import { LOST_STAGE, WON_STAGE, normaliseerStage } from '@/lib/sales/stages'
+import { registreerActiviteit } from '@/lib/sales/activiteiten'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,7 +35,7 @@ export async function POST(req: NextRequest) {
     const admin = createAdminSupabaseClient()
     const org = await getOrCreateSalesOrg()
     const { data: appt } = await admin.from('sales_appointments')
-      .select('id, setter_profile_id, setter_id')
+      .select('id, setter_profile_id, setter_id, lead_id')
       .eq('id', id).eq('sales_client_id', org.id).maybeSingle()
     if (!appt) return NextResponse.json({ error: 'Afspraak niet gevonden' }, { status: 404 })
 
@@ -107,6 +109,46 @@ export async function POST(req: NextRequest) {
         }, { status: 503 })
       }
       throw new Error(error.message)
+    }
+
+    /**
+     * De lead mee: een gewonnen afspraak is een gewonnen deal op het bord, een
+     * verloren afspraak een verloren lead. Best-effort — de commissie staat al
+     * vast — en enkel als de kaart er nog niet staat, zodat een correctie geen
+     * tweede deal-activiteit oplevert.
+     */
+    const leadId = (appt as { lead_id?: string | null }).lead_id ?? null
+    if (leadId && outcome !== 'open') {
+      try {
+        const { data: leadRij } = await admin.from('sales_leads').select('id, stage_key, dienst').eq('id', leadId).maybeSingle()
+        const lead = leadRij as { id: string; stage_key: string; dienst?: string | null } | null
+        const doel = outcome === 'won' ? WON_STAGE : LOST_STAGE
+        if (lead && normaliseerStage(lead.stage_key) !== doel) {
+          const van = normaliseerStage(lead.stage_key)
+          const leadPatch: Record<string, unknown> = { stage_key: doel, gesloten_op: new Date().toISOString() }
+          if (outcome === 'won') leadPatch.deal_waarde_cents = patch.deal_value_cents
+          if (outcome === 'lost' && patch.outcome_reason) leadPatch.verlies_reden = patch.outcome_reason
+          let { error: lErr } = await admin.from('sales_leads').update(leadPatch).eq('id', leadId)
+          if (lErr && /gesloten_op|deal_waarde|verlies_reden|schema cache|PGRST204/i.test(lErr.message)) {
+            ;({ error: lErr } = await admin.from('sales_leads').update({ stage_key: doel }).eq('id', leadId))
+          }
+          if (!lErr) {
+            await registreerActiviteit(admin, {
+              leadId, medewerkerId: actor.id, medewerkerEmail: actor.email ?? null,
+              type: outcome === 'won' ? 'deal_gewonnen' : 'deal_verloren', vanFase: van, naarFase: doel,
+              extra: outcome === 'won'
+                ? `€ ${(Number(patch.deal_value_cents) / 100).toLocaleString('nl-BE')}${lead.dienst ? ` · ${lead.dienst}` : ''}`
+                : (patch.outcome_reason as string | null) ?? null,
+            })
+            await registreerActiviteit(admin, {
+              leadId, medewerkerId: actor.id, medewerkerEmail: actor.email ?? null,
+              type: 'fase_gewijzigd', vanFase: van, naarFase: doel,
+            })
+          }
+        }
+      } catch (e) {
+        console.error('[sales] lead mee sluiten na afloop mislukt:', e instanceof Error ? e.message : e)
+      }
     }
 
     const meta = requestMeta(req)

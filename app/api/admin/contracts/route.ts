@@ -5,8 +5,7 @@ import { createClient, createAdminSupabaseClient, insertResilient , isActiveStaf
 import { randomUUID } from 'crypto'
 import { revalidatePath } from 'next/cache'
 import { logContractEvent } from '@/lib/contract-audit'
-import { verwerkOndertekening } from '@/lib/facturatie/opdrachten'
-import { naOndertekening, type FacturatieSamenvatting } from '@/lib/contract-archief'
+import { naOndertekening } from '@/lib/contract-archief'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
@@ -110,14 +109,6 @@ export async function POST(req: NextRequest) {
       throw new Error(`PDF upload mislukt: ${uploadErr.message}`)
     }
 
-    // Een contract dat al getekend binnenkomt, is meteen definitief: dezelfde
-    // facturatieopdrachten als bij de tekenlink (best-effort).
-    let facturatie: FacturatieSamenvatting = null
-    if (alreadySigned) {
-      try { facturatie = await verwerkOndertekening(admin, contractId, 'upload_getekend', user.email ?? null) }
-      catch (e) { console.error('[contracts] facturatieopdrachten:', e instanceof Error ? e.message : e) }
-    }
-
     // For an already-signed upload, the uploaded PDF IS the signed document, so
     // store it as signed_pdf_path too (client + admin can download it directly).
     await admin.from('contracts').update({ pdf_path: pdfPath }).eq('id', contractId)
@@ -125,7 +116,7 @@ export async function POST(req: NextRequest) {
       // Separate update so a missing signed_pdf_path column doesn't block pdf_path.
       try { await admin.from('contracts').update({ signed_pdf_path: pdfPath }).eq('id', contractId) } catch { }
       // Ook een opgeladen getekend contract gaat het archief in, met melding.
-      await naOndertekening(admin, contractId, 'upload_getekend', facturatie, user.email ?? null)
+      await naOndertekening(admin, contractId, 'upload_getekend', null, user.email ?? null)
     }
 
     await logContractEvent(admin, contractId, 'uploaded', { actor: user.email ?? user.id, meta: { title } })

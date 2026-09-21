@@ -8,15 +8,18 @@ import { lastDayOfMonth, shiftYM } from '@/lib/invoices'
 export type PlannerStatus = 'gepland' | 'te_versturen' | 'controle_vereist' | 'verstuurd' | 'betaald' | 'achterstallig' | 'geannuleerd' | 'gecrediteerd'
 
 export const PLANNER_STATUSSEN: { key: PlannerStatus; label: string; cls: string; stip: string }[] = [
-  // Grijs = te versturen (gepland of vandaag), groen = verstuurd, rood = geannuleerd/gecrediteerd — dezelfde kleuren als in Facturen en op het contract.
-  { key: 'gepland', label: 'Te versturen (gepland)', cls: 'bg-gray-50 text-gray-600 border-gray-200', stip: 'bg-gray-300' },
-  { key: 'te_versturen', label: 'Te versturen', cls: 'bg-gray-100 text-gray-800 border-gray-300', stip: 'bg-gray-500' },
-  { key: 'controle_vereist', label: 'Controle vereist', cls: 'bg-amber-50 text-amber-800 border-amber-200', stip: 'bg-amber-500' },
+  // Drie kleuren, zoals afgesproken: grijs = te factureren, groen = verstuurd,
+  // rood = geannuleerd. De fijnere sleutels (vandaag, datum voorbij, gegevens
+  // ontbreken, betaald bij WAM) blijven bestaan voor filters en volgorde, maar
+  // vallen visueel binnen die drie kleuren.
+  { key: 'gepland', label: 'Te factureren', cls: 'bg-gray-50 text-gray-700 border-gray-200', stip: 'bg-gray-400' },
+  { key: 'te_versturen', label: 'Te factureren · vandaag', cls: 'bg-gray-100 text-gray-900 border-gray-300', stip: 'bg-gray-600' },
+  { key: 'controle_vereist', label: 'Te factureren · gegevens ontbreken', cls: 'bg-gray-100 text-amber-800 border-amber-200', stip: 'bg-amber-500' },
   { key: 'verstuurd', label: 'Verstuurd', cls: 'bg-green-100 text-green-800 border-green-200', stip: 'bg-green-500' },
-  { key: 'betaald', label: 'Betaald', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200', stip: 'bg-emerald-600' },
-  { key: 'achterstallig', label: 'Te versturen · datum voorbij', cls: 'bg-orange-50 text-orange-800 border-orange-300', stip: 'bg-orange-500' },
+  { key: 'betaald', label: 'Verstuurd · betaald', cls: 'bg-green-100 text-green-900 border-green-300', stip: 'bg-green-600' },
+  { key: 'achterstallig', label: 'Te factureren · datum voorbij', cls: 'bg-gray-100 text-gray-900 border-orange-300', stip: 'bg-orange-500' },
   { key: 'geannuleerd', label: 'Geannuleerd', cls: 'bg-red-50 text-red-700 border-red-200', stip: 'bg-red-500' },
-  { key: 'gecrediteerd', label: 'Gecrediteerd', cls: 'bg-red-100 text-red-700 border-red-200', stip: 'bg-red-600' },
+  { key: 'gecrediteerd', label: 'Geannuleerd (gecrediteerd)', cls: 'bg-red-50 text-red-700 border-red-200', stip: 'bg-red-600' },
 ]
 export const STATUS_INFO = Object.fromEntries(PLANNER_STATUSSEN.map((s) => [s.key, s])) as Record<PlannerStatus, (typeof PLANNER_STATUSSEN)[number]>
 
@@ -70,6 +73,16 @@ export type Moment = {
   wam_id: string | null
   schema: string | null
   opmerking: string | null
+  /** Dienst (service-label) los van het contract/project. */
+  dienst: string | null
+  /** Betaaltermijn in dagen (standaard 30). */
+  betaaltermijn: number
+  /** Werkelijke verzenddatum 'YYYY-MM-DD' zodra verstuurd. */
+  verzonden_op: string | null
+  /** Door wie de factuur als verstuurd gemarkeerd werd. */
+  verzonden_door: string | null
+  /** Verwachte ontvangstdatum = (verzenddatum of geplande datum) + betaaltermijn. */
+  verwacht_op: string
   acties: {
     bekijkenUrl: string | null
     aanpassenUrl: string | null
@@ -139,7 +152,10 @@ export function bepaalStatus(p: { ruweStatus: string | null | undefined; datum: 
 }
 
 /** Compacte weergave in een kalendercel: 'Verheyen Tegels – €680 – Maandfactuur'. */
-export const kort = (m: Moment): string => `${m.klant} – ${euro(m.bedrag_excl)} – ${m.type}`
+export const kort = (m: Moment): string => `${m.klant} – ${euro(m.bedrag_excl)} – ${m.project ?? m.dienst ?? m.type}`
+
+/** Verwachte ontvangstdatum: verzenddatum (of geplande datum) + betaaltermijn. */
+export const verwachtOp = (verzondenOp: string | null, datum: string, termijn: number): string => plusDagen(verzondenOp ?? datum, Math.max(0, Math.round(termijn)))
 
 // ── Samenvatting (dashboardkaarten) ─────────────────────────────────────────
 export type Samenvatting = {
@@ -174,6 +190,30 @@ export function samenvatting(momenten: Moment[], vandaag: string): Samenvatting 
   }
 }
 
+/**
+ * De vier kaarten bovenaan Facturen, voor één gekozen maand (excl. btw):
+ *  · nog te factureren: actieve facturen met geplande datum in de maand;
+ *  · reeds verstuurd: facturen die in die maand effectief verstuurd zijn;
+ *  · totaal gepland: de som van beide;
+ *  · verwacht binnen: verstuurde facturen waarvan de verwachte ontvangstdatum
+ *    (verzenddatum + betaaltermijn) in de maand valt — bewust "verwacht", niet
+ *    "ontvangen": de app heeft geen betaal- of boekhoudkoppeling.
+ * Geannuleerd telt nergens mee.
+ */
+export type MaandKpi = { teFactureren: number; teFacturerenAantal: number; verstuurd: number; verstuurdAantal: number; gepland: number; verwachtBinnen: number; verwachtBinnenAantal: number }
+export function maandKpi(momenten: Moment[], ym: string): MaandKpi {
+  let teFactureren = 0, nTe = 0, verstuurd = 0, nV = 0, verwacht = 0, nW = 0
+  for (const m of momenten) {
+    if (m.status === 'geannuleerd' || m.status === 'gecrediteerd') continue
+    const isVerstuurd = m.status === 'verstuurd' || m.status === 'betaald'
+    if (!isVerstuurd && ymVan(m.datum) === ym) { teFactureren += m.bedrag_excl; nTe++ }
+    if (isVerstuurd && ymVan(m.verzonden_op ?? m.datum) === ym) { verstuurd += m.bedrag_excl; nV++ }
+    if (isVerstuurd && ymVan(m.verwacht_op) === ym) { verwacht += m.bedrag_excl; nW++ }
+  }
+  const r = (n: number) => Math.round(n * 100) / 100
+  return { teFactureren: r(teFactureren), teFacturerenAantal: nTe, verstuurd: r(verstuurd), verstuurdAantal: nV, gepland: r(teFactureren + verstuurd), verwachtBinnen: r(verwacht), verwachtBinnenAantal: nW }
+}
+
 // ── Filters ─────────────────────────────────────────────────────────────────
 export type Filters = {
   categorie: Categorie | null
@@ -194,7 +234,7 @@ export function pasFiltersToe(momenten: Moment[], f: Filters, vandaag: string): 
     if (f.van && m.datum < f.van) return false
     if (f.tot && m.datum > f.tot) return false
     if (f.klant && m.client_id !== f.klant) return false
-    if (f.project && !`${m.project ?? ''} ${m.contract_titel ?? ''} ${m.omschrijving ?? ''}`.toLowerCase().includes(f.project.toLowerCase())) return false
+    if (f.project && !`${m.klant} ${m.project ?? ''} ${m.dienst ?? ''} ${m.contract_titel ?? ''} ${m.omschrijving ?? ''} ${m.opmerking ?? ''}`.toLowerCase().includes(f.project.toLowerCase())) return false
     if (f.status && m.status !== f.status) return false
     if (f.type && m.type !== f.type) return false
     if (f.terugkerend === 'terugkerend' && !m.terugkerend) return false

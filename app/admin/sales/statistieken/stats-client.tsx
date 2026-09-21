@@ -2,72 +2,59 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Bar, BarChart, CartesianGrid, Legend, Line, ComposedChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
+import { ArrowDown, ArrowUp, Loader2, Trophy } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import {
-  percentage, toonPercentage, type Groep, type Statistieken,
-} from '@/lib/sales/statistieken'
-import { ArrowDown, ArrowUp, Loader2, TrendingUp } from 'lucide-react'
+import { toonPercentage, type Cijfers, type Rij, type Statistieken } from '@/lib/sales/statistieken'
+import { formatDuur } from '@/lib/sales/activiteiten-model'
+import { DIENSTEN, LEADBRONNEN, leadbronLabel } from '@/lib/sales/leadbron'
 import { ExportKnop } from '@/components/admin/export-knop'
 import { statistiekenWerkmap } from '@/lib/excel/rapporten/statistieken'
 
 const euro = new Intl.NumberFormat('nl-BE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
 const getal = new Intl.NumberFormat('nl-BE')
 
-type SectorInteresse = {
-  sector: string; totaal: number; interesse: number; geenInteresse: number; bezig: number
-}
-
 type Antwoord = {
   stats: Statistieken
-  setters: { id: string; naam: string }[]
-  sectoren: string[]
-  leadInteresse?: { perSector: SectorInteresse[]; redenen: { reden: string; aantal: number }[] }
+  medewerkers: { id: string; naam: string }[]
+  metActiviteiten: boolean
   isAdmin: boolean
-  meId?: string
+  meId: string
 }
-
-/** Een datum als JJJJ-MM-DD, in lokale tijd. Niet via toISOString: dat rekent
- *  in UTC en levert hier de verkeerde dag op. */
-const dagTekst = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
 type Bereik = { van: string; tot: string }
 
-function presets(): { key: string; label: string; bereik: () => Bereik }[] {
+/** JJJJ-MM-DD in lokale tijd (niet via toISOString: dat is UTC). */
+const dagTekst = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+function bereikVoor(preset: string): Bereik {
   const nu = new Date()
-  const j = nu.getFullYear()
-  const m = nu.getMonth()
-  const maand = (jaar: number, maandNr: number): Bereik => ({
-    van: dagTekst(new Date(jaar, maandNr, 1)),
-    tot: dagTekst(new Date(jaar, maandNr + 1, 0)),
-  })
-  return [
-    { key: 'deze-maand', label: 'Deze maand', bereik: () => maand(j, m) },
-    { key: 'vorige-maand', label: 'Vorige maand', bereik: () => maand(j, m - 1) },
-    {
-      key: 'kwartaal',
-      label: 'Dit kwartaal',
-      bereik: () => {
-        const start = Math.floor(m / 3) * 3
-        return { van: dagTekst(new Date(j, start, 1)), tot: dagTekst(new Date(j, start + 3, 0)) }
-      },
-    },
-    {
-      key: 'jaar',
-      label: 'Dit jaar',
-      bereik: () => ({ van: dagTekst(new Date(j, 0, 1)), tot: dagTekst(new Date(j, 11, 31)) }),
-    },
-  ]
+  if (preset === 'vandaag') return { van: dagTekst(nu), tot: dagTekst(nu) }
+  if (preset === 'week') {
+    const ma = new Date(nu); ma.setDate(nu.getDate() - ((nu.getDay() + 6) % 7))
+    const zo = new Date(ma); zo.setDate(ma.getDate() + 6)
+    return { van: dagTekst(ma), tot: dagTekst(zo) }
+  }
+  return { van: dagTekst(new Date(nu.getFullYear(), nu.getMonth(), 1)), tot: dagTekst(new Date(nu.getFullYear(), nu.getMonth() + 1, 0)) }
 }
 
+const PRESETS = [
+  { key: 'vandaag', label: 'Vandaag' },
+  { key: 'week', label: 'Deze week' },
+  { key: 'maand', label: 'Deze maand' },
+  { key: 'eigen', label: 'Eigen periode' },
+]
+
 export function StatsClient() {
-  const opties = useMemo(presets, [])
-  const [preset, setPreset] = useState('deze-maand')
-  const [bereik, setBereik] = useState<Bereik>(() => opties[0].bereik())
-  const [setter, setSetter] = useState('')
-  const [sector, setSector] = useState('')
+  const [preset, setPreset] = useState('maand')
+  const [bereik, setBereik] = useState<Bereik>(() => bereikVoor('maand'))
+  const [medewerker, setMedewerker] = useState('')
+  const [richting, setRichting] = useState('')
+  const [dienst, setDienst] = useState('')
+  const [leadbron, setLeadbron] = useState('')
+  const [trend, setTrend] = useState('')
   const [data, setData] = useState<Antwoord | null>(null)
   const [bezig, setBezig] = useState(true)
   const [fout, setFout] = useState<string | null>(null)
@@ -75,306 +62,160 @@ export function StatsClient() {
   const haal = useCallback(async () => {
     setBezig(true); setFout(null)
     const q = new URLSearchParams({ van: bereik.van, tot: bereik.tot })
-    if (setter) q.set('setter', setter)
-    if (sector) q.set('sector', sector)
+    if (medewerker) q.set('medewerker', medewerker)
+    if (richting) q.set('richting', richting)
+    if (dienst) q.set('dienst', dienst)
+    if (leadbron) q.set('leadbron', leadbron)
+    if (trend) q.set('trend', trend)
     try {
-      const r = await fetch(`/api/admin/sales/statistieken?${q}`)
+      const r = await fetch(`/api/admin/sales/statistieken?${q}`, { cache: 'no-store' })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error ?? 'Kon de cijfers niet laden.')
       setData(d)
     } catch (e) {
       setFout((e as Error).message)
-    } finally {
-      setBezig(false)
-    }
-  }, [bereik, setter, sector])
+    } finally { setBezig(false) }
+  }, [bereik, medewerker, richting, dienst, leadbron, trend])
 
   useEffect(() => { haal() }, [haal])
 
-  const kiesPreset = (key: string) => {
+  const kies = (key: string) => {
     setPreset(key)
-    const p = opties.find((o) => o.key === key)
-    if (p) setBereik(p.bereik())
+    if (key !== 'eigen') setBereik(bereikVoor(key))
   }
 
-  const t = data?.stats.totaal
+  const t = data?.stats.team
+  const exportFilters = [
+    richting ? { label: 'Richting', waarde: richting === 'inbound' ? 'Inbound' : 'Outbound' } : null,
+    dienst ? { label: 'Dienst', waarde: dienst } : null,
+    leadbron ? { label: 'Leadbron', waarde: leadbronLabel(leadbron) } : null,
+  ].filter((x): x is { label: string; waarde: string } => !!x)
 
   return (
     <div className="space-y-6">
       {/* ── Filters ── */}
       <div className="card-base flex flex-wrap items-end gap-3">
-        {data && (
-          <div className="order-last ml-auto">
-            <ExportKnop werkmap={() => statistiekenWerkmap({
-              stats: data.stats, bereik, isAdmin: data.isAdmin,
-              setterNaam: setter ? (data.setters.find((s) => s.id === setter)?.naam ?? null) : null,
-              sector: sector || null, leadInteresse: data.leadInteresse ?? null,
-            })} />
-          </div>
-        )}
-        <div className="flex gap-1">
-          {opties.map((o) => (
-            <button
-              key={o.key}
-              onClick={() => kiesPreset(o.key)}
-              className={cn(
-                'text-xs font-semibold px-3 py-2 rounded-xl border transition-colors',
-                preset === o.key ? 'bg-black text-white border-black' : 'border-gray-200 hover:bg-gray-50',
-              )}
-            >
+        <div className="flex gap-1 flex-wrap">
+          {PRESETS.map((o) => (
+            <button key={o.key} onClick={() => kies(o.key)}
+              className={cn('text-xs font-semibold px-3 py-2 rounded-xl border transition-colors',
+                preset === o.key ? 'bg-black text-white border-black' : 'border-gray-200 hover:bg-gray-50')}>
               {o.label}
             </button>
           ))}
         </div>
-
-        <div className="flex items-end gap-2">
-          <label className="text-xs text-gray-500">
-            Van
-            <input
-              type="date" value={bereik.van}
-              onChange={(e) => { setPreset(''); setBereik((b) => ({ ...b, van: e.target.value })) }}
-              className="block text-sm border border-gray-200 rounded-xl px-3 py-1.5 mt-1"
-            />
-          </label>
-          <label className="text-xs text-gray-500">
-            Tot en met
-            <input
-              type="date" value={bereik.tot}
-              onChange={(e) => { setPreset(''); setBereik((b) => ({ ...b, tot: e.target.value })) }}
-              className="block text-sm border border-gray-200 rounded-xl px-3 py-1.5 mt-1"
-            />
-          </label>
-        </div>
-
-        {/* Een setter ziet alleen zichzelf; dan is de keuzelijst zinloos. */}
-        {data?.isAdmin && data.setters.length > 1 && (
-          <label className="text-xs text-gray-500">
-            Setter
-            <select
-              value={setter} onChange={(e) => setSetter(e.target.value)}
-              className="block text-sm border border-gray-200 rounded-xl px-3 py-1.5 mt-1 bg-white min-w-[10rem]"
-            >
-              <option value="">Iedereen</option>
-              {data.setters.map((s) => <option key={s.id} value={s.id}>{s.naam}</option>)}
-            </select>
-          </label>
+        {preset === 'eigen' && (
+          <div className="flex items-end gap-2">
+            <label className="text-xs text-gray-500">Van
+              <input type="date" value={bereik.van} onChange={(e) => setBereik((b) => ({ ...b, van: e.target.value }))}
+                className="block text-sm border border-gray-200 rounded-xl px-3 py-1.5 mt-1" />
+            </label>
+            <label className="text-xs text-gray-500">Tot en met
+              <input type="date" value={bereik.tot} onChange={(e) => setBereik((b) => ({ ...b, tot: e.target.value }))}
+                className="block text-sm border border-gray-200 rounded-xl px-3 py-1.5 mt-1" />
+            </label>
+          </div>
         )}
-
-        {(data?.sectoren.length ?? 0) > 1 && (
-          <label className="text-xs text-gray-500">
-            Sector
-            <select
-              value={sector} onChange={(e) => setSector(e.target.value)}
-              className="block text-sm border border-gray-200 rounded-xl px-3 py-1.5 mt-1 bg-white min-w-[10rem]"
-            >
-              <option value="">Alle sectoren</option>
-              {data!.sectoren.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </label>
+        {data?.isAdmin && (
+          <Keuze label="Medewerker" waarde={medewerker} onChange={setMedewerker}
+            opties={[{ v: '', l: 'Iedereen' }, ...data.medewerkers.map((m) => ({ v: m.id, l: m.naam }))]} />
         )}
-
+        <Keuze label="Inbound / outbound" waarde={richting} onChange={setRichting}
+          opties={[{ v: '', l: 'Alles' }, { v: 'inbound', l: 'Inbound' }, { v: 'outbound', l: 'Outbound' }]} />
+        <Keuze label="Dienst" waarde={dienst} onChange={setDienst}
+          opties={[{ v: '', l: 'Alle diensten' }, ...DIENSTEN.map((d) => ({ v: d, l: d }))]} />
+        <Keuze label="Leadbron" waarde={leadbron} onChange={setLeadbron}
+          opties={[{ v: '', l: 'Alle bronnen' }, ...LEADBRONNEN.map((b) => ({ v: b.key, l: b.label }))]} />
+        <Keuze label="Trend per" waarde={trend} onChange={setTrend}
+          opties={[{ v: '', l: 'Automatisch' }, { v: 'dag', l: 'Dag' }, { v: 'week', l: 'Week' }, { v: 'maand', l: 'Maand' }]} />
         {bezig && <Loader2 className="h-4 w-4 animate-spin text-gray-400 mb-2" />}
+        {data && (
+          <div className="ml-auto">
+            <ExportKnop werkmap={() => statistiekenWerkmap({
+              stats: data.stats, bereik, isAdmin: data.isAdmin, filters: exportFilters,
+              medewerkerNaam: medewerker ? (data.medewerkers.find((m) => m.id === medewerker)?.naam ?? null) : null,
+            })} />
+          </div>
+        )}
       </div>
 
-      {fout && (
-        <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3">{fout}</p>
+      {fout && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3">{fout}</p>}
+      {data && !data.metActiviteiten && (
+        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2">
+          De activiteitenregistratie is nog niet actief (databankmigratie). Tot dan tellen enkel de oude
+          belregistraties, zonder duur of uitkomst.
+        </p>
       )}
 
-      {t && (
+      {t && data && (
         <>
-          {/* ── Kerncijfers ── */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-3">
-            <Kaart label="Gesprekken" waarde={getal.format(t.gesprekken)} onder={`${getal.format(t.leadsGebeld)} unieke leads`} />
-            <Kaart label="Afspraken" waarde={getal.format(t.afspraken)} onder={`${getal.format(t.geannuleerd)} geannuleerd`} />
-            <Kaart
-              label="Boekingsratio"
-              waarde={toonPercentage(percentage(t.afspraken, t.gesprekken))}
-              onder="afspraak per gesprek"
-            />
-            <Kaart
-              label="Opkomst"
-              waarde={toonPercentage(percentage(t.doorgegaan, t.afspraken))}
-              onder={`${getal.format(t.noShows)} no-shows`}
-            />
-            <Kaart
-              label="Sluitingsratio"
-              waarde={toonPercentage(percentage(t.gewonnen, t.gewonnen + t.verloren))}
-              onder={`${getal.format(t.gewonnen)} gewonnen · ${getal.format(t.open)} open`}
-              accent
-            />
-            <Kaart label="Contractwaarde" waarde={euro.format(t.dealWaardeCent / 100)} onder="gewonnen deals" />
+          {/* ── Teamtotalen ── */}
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
+            <Kaart label="Telefoongesprekken" waarde={getal.format(t.telefoongesprekken)} onder={`${getal.format(t.uniekeLeads)} unieke leads`} />
+            <Kaart label="Totale beltijd" waarde={formatDuur(t.beltijdSeconden)} onder={`${getal.format(t.gesprekkenMetDuur)} met duur`} />
+            <Kaart label="Gem. gespreksduur" waarde={formatDuur(t.gemiddeldeDuurSeconden)} onder="enkel gesprekken met duur" />
+            <Kaart label="E-mails" waarde={getal.format(t.emails)} />
+            <Kaart label="Opvolgingen" waarde={getal.format(t.opvolgingen)} />
+            <Kaart label="Afspraken" waarde={getal.format(t.afspraken)} />
+            <Kaart label="Voorstellen" waarde={getal.format(t.voorstellen)} />
+            <Kaart label="Gewonnen" waarde={getal.format(t.gewonnen)} onder={`${getal.format(t.verloren)} verloren`} />
+            <Kaart label="Closing rate" waarde={toonPercentage(t.closingRate)} onder="gewonnen ÷ (gewonnen + verloren)" accent />
+            <Kaart label="Appointment setting" waarde={toonPercentage(t.appointmentRate)} onder="leads met afspraak ÷ leads met contact" accent />
+            <Kaart label="Contact rate" waarde={toonPercentage(t.contactRate)} onder="leads met contact ÷ behandelde leads" />
+            <Kaart label="Waarde gewonnen" waarde={euro.format(t.waardeGewonnenCent / 100)} />
           </div>
 
-          {/* ── Trechter ── */}
-          <div className="card-base">
-            <h2 className="font-semibold mb-1">Waar loopt het weg?</h2>
-            <div className="text-xs text-gray-400 mb-4">
-              Elke stap als aandeel van de vorige. Open afspraken tellen niet mee bij gewonnen of verloren.
-            </div>
-            <Trechterbalken totaal={t} />
-          </div>
-
-          {/* ── Verloop ── */}
-          {data!.stats.perMaand.length > 1 && (
+          {/* ── Vergelijking ── */}
+          {data.isAdmin && data.stats.perMedewerker.length > 1 && data.stats.vergelijking.length > 0 && (
             <div className="card-base">
-              <h2 className="font-semibold mb-1">Verloop per maand</h2>
-              <div className="text-xs text-gray-400 mb-3">Gesprekken tegenover geboekte en gewonnen afspraken</div>
+              <h2 className="font-semibold mb-3">Vergelijking</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                {data.stats.vergelijking.map((v) => (
+                  <div key={v.titel} className="rounded-xl border border-gray-200 px-3 py-2">
+                    <div className="text-[11px] text-gray-400 uppercase tracking-wide flex items-center gap-1"><Trophy className="h-3 w-3 text-amber-500" />{v.titel}</div>
+                    <div className="font-semibold mt-0.5 truncate">{v.naam}</div>
+                    <div className="text-sm text-gray-600 tabular-nums">{v.waarde}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Per medewerker ── */}
+          {data.isAdmin && (
+            <Tabel titel="Per medewerker" eersteKop="Medewerker" rijen={data.stats.perMedewerker} team={t}
+              uitleg="Unieke leads zijn per medewerker geteld; de teamrij telt elke lead één keer." />
+          )}
+
+          {/* ── Trend ── */}
+          {data.stats.trend.length > 0 && (
+            <div className="card-base">
+              <h2 className="font-semibold mb-1">Trend per {data.stats.trendPer}</h2>
+              <div className="text-xs text-gray-400 mb-3">Gesprekken en e-mails tegenover geplande afspraken en gewonnen deals</div>
               <ResponsiveContainer width="100%" height={260}>
-                <ComposedChart data={data!.stats.perMaand} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
+                <ComposedChart data={data.stats.trend} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis dataKey="maand" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                  <YAxis yAxisId="l" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                  <YAxis yAxisId="r" orientation="right" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
+                  <XAxis dataKey="sleutel" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
+                  <YAxis yAxisId="l" allowDecimals={false} tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
+                  <YAxis yAxisId="r" orientation="right" allowDecimals={false} tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
                   <Tooltip labelStyle={{ fontWeight: 600 }} />
                   <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                  <Bar yAxisId="l" dataKey="gesprekken" name="Gesprekken" fill="#e5e7eb" radius={[3, 3, 0, 0]} />
-                  <Bar yAxisId="r" dataKey="afspraken" name="Afspraken" fill="#3b82f6" radius={[3, 3, 0, 0]} />
+                  <Bar yAxisId="l" dataKey="telefoongesprekken" name="Telefoongesprekken" fill="#d1d5db" radius={[3, 3, 0, 0]} />
+                  <Bar yAxisId="l" dataKey="emails" name="E-mails" fill="#fde68a" radius={[3, 3, 0, 0]} />
+                  <Line yAxisId="r" type="monotone" dataKey="afspraken" name="Afspraken" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
                   <Line yAxisId="r" type="monotone" dataKey="gewonnen" name="Gewonnen" stroke="#16a34a" strokeWidth={2} dot={{ r: 3 }} />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
           )}
 
-          {/* ── Wanneer bellen ── */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="card-base">
-              <h2 className="font-semibold mb-1">Per weekdag</h2>
-              <div className="text-xs text-gray-400 mb-3">Wanneer wordt er gebeld, en wanneer levert het op?</div>
-              <ResponsiveContainer width="100%" height={220}>
-                <ComposedChart data={data!.stats.perWeekdag} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis dataKey="dag" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                  <YAxis yAxisId="l" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                  <YAxis yAxisId="r" orientation="right" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                  <Tooltip labelStyle={{ fontWeight: 600 }} />
-                  <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                  <Bar yAxisId="l" dataKey="gesprekken" name="Gesprekken" fill="#e5e7eb" radius={[3, 3, 0, 0]} />
-                  <Bar yAxisId="r" dataKey="afspraken" name="Afspraken" fill="#3b82f6" radius={[3, 3, 0, 0]} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
+          {/* ── Per leadbron ── */}
+          <Tabel titel="Resultaten per leadbron" eersteKop="Leadbron" rijen={data.stats.perLeadbron} team={t}
+            uitleg="Waar leveren de leads het meest op?" />
 
-            <div className="card-base">
-              <h2 className="font-semibold mb-1">Per uur</h2>
-              <div className="text-xs text-gray-400 mb-3">Belgische tijd · alleen uren waarin er iets gebeurde</div>
-              <ResponsiveContainer width="100%" height={220}>
-                <ComposedChart
-                  data={data!.stats.perUur.filter((u) => u.gesprekken > 0 || u.afspraken > 0)}
-                  margin={{ top: 4, right: 8, left: 8, bottom: 4 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis dataKey="uur" tickFormatter={(u: number) => `${u}u`} tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                  <YAxis yAxisId="l" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                  <YAxis yAxisId="r" orientation="right" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                  <Tooltip labelFormatter={(u) => `${u}u — ${Number(u) + 1}u`} labelStyle={{ fontWeight: 600 }} />
-                  <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                  <Bar yAxisId="l" dataKey="gesprekken" name="Gesprekken" fill="#e5e7eb" radius={[3, 3, 0, 0]} />
-                  <Bar yAxisId="r" dataKey="afspraken" name="Afspraken" fill="#3b82f6" radius={[3, 3, 0, 0]} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* ── Tabellen ── */}
-          {data!.isAdmin && (
-            <Tabel titel="Per setter" uitleg="Wie boekt, en wie boekt afspraken die ook doorgaan." groepen={data!.stats.perSetter} eersteKop="Setter" />
-          )}
-          <Tabel
-            titel="Per sector"
-            uitleg="Waar zit de beste conversie? Sectoren met weinig gesprekken zeggen weinig — kijk naar het aantal ernaast."
-            groepen={data!.stats.perSector}
-            eersteKop="Sector"
-          />
-          <Tabel titel="Per bron" uitleg="Waar de leads vandaan komen." groepen={data!.stats.perBron} eersteKop="Bron" />
-
-          {/* ── Interesse op leadniveau: de hele pipeline ── */}
-          {(data!.leadInteresse?.perSector.length ?? 0) > 0 && (
-            <div className="card-base">
-              <h2 className="font-semibold mb-1">Interesse per sector — hele pipeline</h2>
-              <div className="text-xs text-gray-400 mb-3">
-                De huidige stand van alle leads, los van de gekozen periode. Zo zie je na verloop van
-                tijd waar het werkt en waar niet.
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-[11px] uppercase tracking-wide text-gray-400 border-b border-gray-100">
-                      <th className="text-left font-semibold py-2 pr-3">Sector</th>
-                      <th className="text-right font-semibold py-2 px-2">Leads</th>
-                      <th className="text-right font-semibold py-2 px-2">Interesse</th>
-                      <th className="text-right font-semibold py-2 px-2" title="Interesse, afspraak of gewonnen — als aandeel van de besliste leads">% interesse</th>
-                      <th className="text-right font-semibold py-2 px-2">Geen interesse</th>
-                      <th className="text-right font-semibold py-2 px-2" title="Nog te bellen of nog in gesprek">Nog bezig</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data!.leadInteresse!.perSector.map((s) => (
-                      <tr key={s.sector} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/60">
-                        <td className="py-2 pr-3 font-medium">{s.sector}</td>
-                        <td className="text-right py-2 px-2 tabular-nums">{getal.format(s.totaal)}</td>
-                        <td className="text-right py-2 px-2 tabular-nums text-green-700">{getal.format(s.interesse)}</td>
-                        <td className="text-right py-2 px-2 tabular-nums font-semibold">
-                          {toonPercentage(percentage(s.interesse, s.interesse + s.geenInteresse))}
-                        </td>
-                        <td className="text-right py-2 px-2 tabular-nums text-red-600">{getal.format(s.geenInteresse)}</td>
-                        <td className="text-right py-2 px-2 tabular-nums text-gray-400">{getal.format(s.bezig)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <p className="text-[11px] text-gray-400 mt-2">
-                Het percentage rekent op de besliste leads (interesse + geen interesse) — wie nog gebeld
-                moet worden telt niet mee, anders lijkt elke verse lijst een slechte sector.
-              </p>
-            </div>
-          )}
-
-          {(data!.leadInteresse?.redenen.length ?? 0) > 0 && (
-            <div className="card-base">
-              <h2 className="font-semibold mb-1">Waarom geen interesse?</h2>
-              <div className="text-xs text-gray-400 mb-3">Vastgelegd bij het afwijzen, over de hele pipeline</div>
-              <div className="space-y-1.5">
-                {data!.leadInteresse!.redenen.map((r) => {
-                  const grootste = data!.leadInteresse!.redenen[0].aantal
-                  return (
-                    <div key={r.reden} className="flex items-center gap-3 text-sm">
-                      <span className="w-56 shrink-0 truncate" title={r.reden}>{r.reden}</span>
-                      <div className="flex-1 h-4 bg-gray-100 rounded overflow-hidden">
-                        <div className="h-full bg-red-400 rounded" style={{ width: `${(r.aantal / grootste) * 100}%` }} />
-                      </div>
-                      <span className="w-8 text-right tabular-nums text-gray-500">{r.aantal}</span>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {data!.stats.verliesredenen.length > 0 && (
-            <div className="card-base">
-              <h2 className="font-semibold mb-1">Waarom ging het niet door?</h2>
-              <div className="text-xs text-gray-400 mb-3">Reden bij de verloren afspraken</div>
-              <div className="space-y-1.5">
-                {data!.stats.verliesredenen.map((r) => {
-                  const grootste = data!.stats.verliesredenen[0].aantal
-                  return (
-                    <div key={r.reden} className="flex items-center gap-3 text-sm">
-                      <span className="w-56 shrink-0 truncate" title={r.reden}>{r.reden}</span>
-                      <div className="flex-1 h-4 bg-gray-100 rounded overflow-hidden">
-                        <div className="h-full bg-red-400 rounded" style={{ width: `${(r.aantal / grootste) * 100}%` }} />
-                      </div>
-                      <span className="w-8 text-right tabular-nums text-gray-500">{r.aantal}</span>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {t.gesprekken === 0 && t.afspraken === 0 && (
+          {t.telefoongesprekken === 0 && t.emails === 0 && t.afspraken === 0 && t.gewonnen === 0 && t.verloren === 0 && (
             <p className="text-sm text-gray-500 border border-gray-200 rounded-2xl px-4 py-12 text-center">
-              Geen gesprekken of afspraken in deze periode.
+              Geen activiteiten in deze periode.
             </p>
           )}
         </>
@@ -383,9 +224,21 @@ export function StatsClient() {
   )
 }
 
-function Kaart({ label, waarde, onder, accent }: {
-  label: string; waarde: string; onder?: string; accent?: boolean
+function Keuze({ label, waarde, onChange, opties }: {
+  label: string; waarde: string; onChange: (v: string) => void; opties: { v: string; l: string }[]
 }) {
+  return (
+    <label className="text-xs text-gray-500">
+      {label}
+      <select value={waarde} onChange={(e) => onChange(e.target.value)}
+        className="block text-sm border border-gray-200 rounded-xl px-3 py-1.5 mt-1 bg-white min-w-[9rem]">
+        {opties.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
+      </select>
+    </label>
+  )
+}
+
+function Kaart({ label, waarde, onder, accent }: { label: string; waarde: string; onder?: string; accent?: boolean }) {
   return (
     <div className={cn('card-base', accent && 'ring-2 ring-[#fff848]')}>
       <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">{label}</div>
@@ -395,88 +248,43 @@ function Kaart({ label, waarde, onder, accent }: {
   )
 }
 
-/** De trechter als staven, elk als aandeel van de vorige stap. */
-function Trechterbalken({ totaal }: { totaal: Statistieken['totaal'] }) {
-  const stappen = [
-    { label: 'Gesprekken', waarde: totaal.gesprekken, van: null as number | null, kleur: 'bg-gray-300' },
-    { label: 'Unieke leads gebeld', waarde: totaal.leadsGebeld, van: totaal.gesprekken, kleur: 'bg-gray-400' },
-    { label: 'Afspraken geboekt', waarde: totaal.afspraken, van: totaal.leadsGebeld, kleur: 'bg-blue-400' },
-    { label: 'Afspraak doorgegaan', waarde: totaal.doorgegaan, van: totaal.afspraken, kleur: 'bg-blue-500' },
-    { label: 'Gewonnen', waarde: totaal.gewonnen, van: totaal.doorgegaan, kleur: 'bg-green-500' },
-  ]
-  const grootste = Math.max(...stappen.map((s) => s.waarde), 1)
-
-  return (
-    <div className="space-y-2">
-      {stappen.map((s) => (
-        <div key={s.label} className="flex items-center gap-3 text-sm">
-          <span className="w-44 shrink-0 text-gray-600">{s.label}</span>
-          <div className="flex-1 h-6 bg-gray-50 rounded overflow-hidden">
-            <div className={cn('h-full rounded', s.kleur)} style={{ width: `${(s.waarde / grootste) * 100}%` }} />
-          </div>
-          <span className="w-14 text-right tabular-nums font-semibold">{getal.format(s.waarde)}</span>
-          <span className="w-16 text-right tabular-nums text-xs text-gray-400">
-            {s.van === null ? '' : toonPercentage(percentage(s.waarde, s.van))}
-          </span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-type Kolom = {
-  kop: string
-  titel?: string
-  waarde: (g: Groep) => number | null
-  toon: (g: Groep) => string
-}
+type Kolom = { kop: string; titel?: string; waarde: (c: Cijfers) => number | null; toon: (c: Cijfers) => string }
 
 const KOLOMMEN: Kolom[] = [
-  { kop: 'Gesprekken', waarde: (g) => g.gesprekken, toon: (g) => getal.format(g.gesprekken) },
-  { kop: 'Leads', titel: 'Unieke leads waarmee gebeld is', waarde: (g) => g.leadsGebeld, toon: (g) => getal.format(g.leadsGebeld) },
-  { kop: 'Afspraken', waarde: (g) => g.afspraken, toon: (g) => getal.format(g.afspraken) },
-  {
-    kop: 'Boeking', titel: 'Afspraken per gesprek',
-    waarde: (g) => percentage(g.afspraken, g.gesprekken),
-    toon: (g) => toonPercentage(percentage(g.afspraken, g.gesprekken)),
-  },
-  {
-    kop: 'Opkomst', titel: 'Afspraken die doorgingen',
-    waarde: (g) => percentage(g.doorgegaan, g.afspraken),
-    toon: (g) => toonPercentage(percentage(g.doorgegaan, g.afspraken)),
-  },
-  { kop: 'Gewonnen', waarde: (g) => g.gewonnen, toon: (g) => getal.format(g.gewonnen) },
-  {
-    kop: 'Sluiting', titel: 'Gewonnen van de besliste afspraken — open afspraken tellen niet mee',
-    waarde: (g) => percentage(g.gewonnen, g.gewonnen + g.verloren),
-    toon: (g) => toonPercentage(percentage(g.gewonnen, g.gewonnen + g.verloren)),
-  },
-  { kop: 'Waarde', waarde: (g) => g.dealWaardeCent, toon: (g) => euro.format(g.dealWaardeCent / 100) },
+  { kop: 'Gesprekken', waarde: (c) => c.telefoongesprekken, toon: (c) => getal.format(c.telefoongesprekken) },
+  { kop: 'Beltijd', waarde: (c) => c.beltijdSeconden, toon: (c) => formatDuur(c.beltijdSeconden) },
+  { kop: 'Gem. duur', titel: 'Enkel gesprekken met een geregistreerde duur', waarde: (c) => c.gemiddeldeDuurSeconden, toon: (c) => formatDuur(c.gemiddeldeDuurSeconden) },
+  { kop: 'E-mails', waarde: (c) => c.emails, toon: (c) => getal.format(c.emails) },
+  { kop: 'Leads', titel: 'Unieke behandelde leads', waarde: (c) => c.uniekeLeads, toon: (c) => getal.format(c.uniekeLeads) },
+  { kop: 'Opvolg.', titel: 'Opvolgingen', waarde: (c) => c.opvolgingen, toon: (c) => getal.format(c.opvolgingen) },
+  { kop: 'Afspraken', waarde: (c) => c.afspraken, toon: (c) => getal.format(c.afspraken) },
+  { kop: 'Voorst.', titel: 'Voorstellen', waarde: (c) => c.voorstellen, toon: (c) => getal.format(c.voorstellen) },
+  { kop: 'Gew.', titel: 'Gewonnen', waarde: (c) => c.gewonnen, toon: (c) => getal.format(c.gewonnen) },
+  { kop: 'Verl.', titel: 'Verloren', waarde: (c) => c.verloren, toon: (c) => getal.format(c.verloren) },
+  { kop: 'Closing', titel: 'Gewonnen ÷ (gewonnen + verloren)', waarde: (c) => c.closingRate, toon: (c) => toonPercentage(c.closingRate) },
+  { kop: 'Afspr.-rate', titel: 'Leads met afspraak ÷ leads met geslaagd contact', waarde: (c) => c.appointmentRate, toon: (c) => toonPercentage(c.appointmentRate) },
+  { kop: 'Contact', titel: 'Leads met geslaagd contact ÷ behandelde leads', waarde: (c) => c.contactRate, toon: (c) => toonPercentage(c.contactRate) },
+  { kop: 'Waarde', titel: 'Waarde gewonnen deals', waarde: (c) => c.waardeGewonnenCent, toon: (c) => euro.format(c.waardeGewonnenCent / 100) },
 ]
 
-function Tabel({ titel, uitleg, groepen, eersteKop }: {
-  titel: string; uitleg: string; groepen: Groep[]; eersteKop: string
+function Tabel({ titel, uitleg, rijen, eersteKop, team }: {
+  titel: string; uitleg: string; rijen: Rij[]; eersteKop: string; team: Cijfers
 }) {
   const [sorteerOp, setSorteerOp] = useState<number | null>(null)
   const [omgekeerd, setOmgekeerd] = useState(false)
-
-  const rijen = useMemo(() => {
-    if (sorteerOp === null) return groepen
-    const kolom = KOLOMMEN[sorteerOp]
-    return [...groepen].sort((a, b) => {
-      // Een leeg percentage (niets om over te rekenen) hoort onderaan, niet
-      // bovenaan als "0".
-      const va = kolom.waarde(a)
-      const vb = kolom.waarde(b)
+  const gesorteerd = useMemo(() => {
+    if (sorteerOp === null) return rijen
+    const k = KOLOMMEN[sorteerOp]
+    return [...rijen].sort((a, b) => {
+      const va = k.waarde(a), vb = k.waarde(b)
       if (va === null && vb === null) return 0
       if (va === null) return 1
       if (vb === null) return -1
       return omgekeerd ? va - vb : vb - va
     })
-  }, [groepen, sorteerOp, omgekeerd])
+  }, [rijen, sorteerOp, omgekeerd])
 
-  if (groepen.length === 0) return null
-
+  if (rijen.length === 0) return null
   const klik = (i: number) => {
     if (sorteerOp === i) setOmgekeerd((o) => !o)
     else { setSorteerOp(i); setOmgekeerd(false) }
@@ -493,36 +301,27 @@ function Tabel({ titel, uitleg, groepen, eersteKop }: {
               <th className="text-left font-semibold py-2 pr-3">{eersteKop}</th>
               {KOLOMMEN.map((k, i) => (
                 <th key={k.kop} className="text-right font-semibold py-2 px-2 whitespace-nowrap">
-                  <button
-                    onClick={() => klik(i)}
-                    title={k.titel}
-                    className="inline-flex items-center gap-1 hover:text-gray-700"
-                  >
-                    {k.kop}
-                    {sorteerOp === i && (omgekeerd ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)}
+                  <button onClick={() => klik(i)} title={k.titel} className="inline-flex items-center gap-1 hover:text-gray-700">
+                    {k.kop}{sorteerOp === i && (omgekeerd ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)}
                   </button>
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {rijen.map((g) => (
-              <tr key={g.sleutel} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/60">
-                <td className="py-2 pr-3 font-medium">{g.label}</td>
-                {KOLOMMEN.map((k) => (
-                  <td key={k.kop} className="text-right py-2 px-2 tabular-nums whitespace-nowrap">
-                    {k.toon(g)}
-                  </td>
-                ))}
+            {gesorteerd.map((r) => (
+              <tr key={r.sleutel} className="border-b border-gray-50 hover:bg-gray-50/60">
+                <td className="py-2 pr-3 font-medium whitespace-nowrap">{r.label}</td>
+                {KOLOMMEN.map((k) => <td key={k.kop} className="text-right py-2 px-2 tabular-nums whitespace-nowrap">{k.toon(r)}</td>)}
               </tr>
             ))}
+            <tr className="border-t border-gray-200 font-semibold">
+              <td className="py-2 pr-3">Team</td>
+              {KOLOMMEN.map((k) => <td key={k.kop} className="text-right py-2 px-2 tabular-nums whitespace-nowrap">{k.toon(team)}</td>)}
+            </tr>
           </tbody>
         </table>
       </div>
-      <p className="text-[11px] text-gray-400 mt-3 flex items-center gap-1.5">
-        <TrendingUp className="h-3 w-3" />
-        Klik op een kolomkop om te sorteren.
-      </p>
     </div>
   )
 }

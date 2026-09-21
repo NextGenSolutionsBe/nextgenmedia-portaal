@@ -1,7 +1,7 @@
 import { createAdminSupabaseClient, trySignedUrl } from '@/lib/supabase/server'
 import { formatDate } from '@/lib/utils'
 import Link from 'next/link'
-import { FileText, CheckCircle2, Download, Eye, Clock } from 'lucide-react'
+import { FileText, CheckCircle2, Download, Eye, Clock, ShieldCheck } from 'lucide-react'
 import { canonicalStatus, statusInfo } from '@/lib/contract-status'
 import { requirePortalView, canAccessContract } from '@/lib/portal-auth'
 
@@ -161,6 +161,16 @@ export default async function PortalContractsPage() {
                           >
                             <Download className="h-3.5 w-3.5" />
                             Downloaden
+                          </a>
+                        )}
+                        {canDownload && (
+                          <a
+                            href={`/api/portal/contracts/${c.id}/certificaat`}
+                            className="btn-secondary text-xs"
+                            title="Ondertekeningscertificaat: wie tekende, wanneer en met welke documentvingerafdruk"
+                          >
+                            <ShieldCheck className="h-3.5 w-3.5" />
+                            Certificaat
                           </a>
                         )}
                       </div>

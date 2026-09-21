@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Camera, Plus, Pencil, Trash2, Loader2, Check, X, Calendar, Clock, MapPin, MessageSquare, Lightbulb, Paperclip } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
+import { ShootDocumentKnop } from '@/components/shoot-document-knop'
 
 type Feedback = { id: string; author_role: string; message: string; resolved: boolean; created_at: string }
 type Idea = { id: string; title: string | null; description: string | null; attachment_url: string | null; status: string; admin_note: string | null; created_at: string }
@@ -91,7 +92,7 @@ export function ShootBriefings({ clientId }: { clientId: string }) {
                 onSaved={() => { setEditingId(null); load() }}
               />
             ) : (
-              <ShootCard key={s.id} shoot={s} base={base} onEdit={() => { setEditingId(s.id); setAdding(false) }} onDeleted={load} />
+              <ShootCard key={s.id} shoot={s} base={base} clientId={clientId} onEdit={() => { setEditingId(s.id); setAdding(false) }} onDeleted={load} />
             )
           )}
         </div>
@@ -100,8 +101,8 @@ export function ShootBriefings({ clientId }: { clientId: string }) {
   )
 }
 
-function ShootCard({ shoot, base, onEdit, onDeleted }: {
-  shoot: Shoot; base: string; onEdit: () => void; onDeleted: () => void
+function ShootCard({ shoot, base, clientId, onEdit, onDeleted }: {
+  shoot: Shoot; base: string; clientId: string; onEdit: () => void; onDeleted: () => void
 }) {
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState<Feedback[]>([])
@@ -152,13 +153,14 @@ function ShootCard({ shoot, base, onEdit, onDeleted }: {
 
   return (
     <div className="border border-gray-200 rounded-xl p-4">
-      <div className="flex items-start justify-between gap-3 mb-2">
+      <div className="flex items-start justify-between gap-3 mb-2 flex-wrap">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
           <span className="flex items-center gap-1.5 font-medium"><Calendar className="h-3.5 w-3.5 text-gray-400" />{shoot.shoot_date ? formatDate(shoot.shoot_date) : 'Datum n.t.b.'}</span>
           {time && <span className="flex items-center gap-1.5 text-gray-600"><Clock className="h-3.5 w-3.5 text-gray-400" />{time}</span>}
           {shoot.location && <span className="flex items-center gap-1.5 text-gray-600"><MapPin className="h-3.5 w-3.5 text-gray-400" />{shoot.location}</span>}
         </div>
         <div className="flex items-center gap-1 shrink-0">
+          <ShootDocumentKnop href={`/api/admin/clients/${clientId}/shoot-document?shoot=${shoot.id}`} label="Shootdocument" className="text-xs !py-1.5 !px-2.5 mr-1" />
           <button onClick={onEdit} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400" title="Bewerken"><Pencil className="h-3.5 w-3.5" /></button>
           <button onClick={remove} disabled={busy} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-red-50 text-red-400" title="Verwijderen">
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}

@@ -1,6 +1,7 @@
 import 'server-only'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { nieuweKlantIndex, voegKlantToe, type KlantIndex } from '@/lib/sales/dedupe'
+import { stageKeysVoor } from '@/lib/sales/stages'
 
 /**
  * De klantindex vullen uit de database. Het herkennen zelf staat in
@@ -8,7 +9,7 @@ import { nieuweKlantIndex, voegKlantToe, type KlantIndex } from '@/lib/sales/ded
  *
  * Twee bronnen, allebei nodig:
  *  · public.clients — klanten met een portaaldossier;
- *  · leads die al op 'won' staan — klanten zonder portaal, of pas gewonnen.
+ *  · leads die al op 'gewonnen' staan — klanten zonder portaal, of pas gewonnen.
  */
 export async function laadKlantIndex(salesClientId: string): Promise<KlantIndex> {
   const index = nieuweKlantIndex()
@@ -33,7 +34,7 @@ export async function laadKlantIndex(salesClientId: string): Promise<KlantIndex>
     .from('sales_leads')
     .select('sales_companies ( name, website )')
     .eq('sales_client_id', salesClientId)
-    .eq('stage_key', 'won')
+    .in('stage_key', stageKeysVoor('gewonnen'))
     .limit(5000)
   for (const rij of (gewonnen ?? []) as unknown as { sales_companies: { name: string | null; website: string | null } | null }[]) {
     voegKlantToe(index, rij.sales_companies?.name, rij.sales_companies?.website)

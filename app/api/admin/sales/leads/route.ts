@@ -1,29 +1,34 @@
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
+import { createAdminSupabaseClient, requireAdmin, requireStaff } from '@/lib/supabase/server'
 import { createLead, getOrCreateSalesOrg } from '@/lib/sales/service'
 import { listPipelines, defaultPipelineId } from '@/lib/sales/pipelines'
+import { listSalesMedewerkers } from '@/lib/sales/medewerkers'
 import { normalizePhone, looksLikePhone } from '@/lib/sales/dedupe'
+import { isStageKey, normaliseerStage, stageKeysVoor } from '@/lib/sales/stages'
+import { isInboundBron, normaliseerLeadbron } from '@/lib/sales/leadbron'
+import { registreerActiviteit } from '@/lib/sales/activiteiten'
 
 export const dynamic = 'force-dynamic'
 
-type LeadRow = {
+export type LeadRow = {
   id: string; stage_key: string; labels: string[]; callback_at: string | null
   callback_note?: string | null
   archived_at: string | null; do_not_call: boolean; assigned_to: string | null
-  updated_at: string; lost_reason: string | null; email_brief: string | null
-  geen_gehoor_count?: number | null
-  /** Kopie van de laatste notitie, zodat de lijst ze kan tonen. */
+  updated_at: string; created_at?: string; lost_reason: string | null; email_brief: string | null
+  /** Kopie van de laatste notitie, zodat de kaart ze kan tonen. */
   laatste_notitie?: string | null; laatste_notitie_op?: string | null
-  /** Gestructureerde reden bij "Geen interesse". */
+  geen_gehoor_count?: number | null
   reden_code?: string | null
-  /** Reageerde zelf op een benadering — de warmste lead die er is. */
   warm?: boolean | null; warm_op?: string | null
-  /** Het laatste blokje van Harrie: kanaal, berichten, belAdvies. */
   harrie?: Record<string, unknown> | null
   pipeline_id: string | null
-  /** Voor welke van onze merken telt deze lead? Beide mag. */
   merken?: string[] | null
+  /** Kanban-velden (na de migratie). */
+  leadbron?: string | null; positie?: number | null; dienst?: string | null
+  opvolgdatum?: string | null; deal_waarde_cents?: number | null
+  gesloten_op?: string | null; verlies_reden?: string | null
+  website_aanvraag?: Record<string, unknown> | null
   sales_companies: {
     id: string; name: string; website: string | null; sector: string | null
     city: string | null; region: string | null; phone: string | null
@@ -35,32 +40,40 @@ type LeadRow = {
   sales_contacts: { id: string; name: string | null; email: string | null; phone: string | null; mobile: string | null; phone_digits: string | null; role: string | null; linkedin?: string | null } | null
 }
 
-// De volledige selectie mét de kolommen uit de migratie, en de smalle variant
-// als terugval zolang die migratie nog niet gedraaid is — anders blijft het
-// hele scherm leeg met een stille kolomfout.
-const SELECT_BREED = `id, stage_key, labels, callback_at, callback_note, archived_at, do_not_call, assigned_to, updated_at, lost_reason, reden_code, warm, warm_op, harrie, email_brief, geen_gehoor_count, pipeline_id, merken, laatste_notitie, laatste_notitie_op,
+// De volledige selectie mét de kolommen uit de migraties, en twee smallere
+// varianten als terugval zolang een migratie nog niet gedraaid is — anders
+// blijft het hele bord leeg met een stille kolomfout.
+const SELECT_KANBAN = `id, stage_key, labels, callback_at, callback_note, archived_at, do_not_call, assigned_to, updated_at, created_at, lost_reason, reden_code, warm, warm_op, harrie, email_brief, pipeline_id, merken, laatste_notitie, laatste_notitie_op, geen_gehoor_count,
+  leadbron, positie, dienst, opvolgdatum, deal_waarde_cents, gesloten_op, verlies_reden, website_aanvraag,
   sales_companies ( id, name, website, sector, city, region, phone, email, werkklasse, activiteit, ondernemingsnummer, prioriteit, linkedin, employees, gatekeeper_naam, dmu_naam, dmu_functie ),
   sales_contacts  ( id, name, email, phone, mobile, phone_digits, role, linkedin )`
-const SELECT_SMAL = `id, stage_key, labels, callback_at, archived_at, do_not_call, assigned_to, updated_at, lost_reason, email_brief, pipeline_id,
+const SELECT_BREED = `id, stage_key, labels, callback_at, callback_note, archived_at, do_not_call, assigned_to, updated_at, created_at, lost_reason, reden_code, warm, warm_op, harrie, email_brief, pipeline_id, merken, laatste_notitie, laatste_notitie_op, geen_gehoor_count,
+  sales_companies ( id, name, website, sector, city, region, phone, email, werkklasse, activiteit, ondernemingsnummer, prioriteit, linkedin, employees, gatekeeper_naam, dmu_naam, dmu_functie ),
+  sales_contacts  ( id, name, email, phone, mobile, phone_digits, role, linkedin )`
+const SELECT_SMAL = `id, stage_key, labels, callback_at, archived_at, do_not_call, assigned_to, updated_at, created_at, lost_reason, email_brief, pipeline_id,
   sales_companies ( id, name, website, sector, city, region, phone ),
   sales_contacts  ( id, name, email, phone, mobile, phone_digits, role )`
 
-// GET — alle leads uit de algemene pipeline, met zoeken en filters (§4).
-// Zoeken matcht op bedrijf, contactpersoon, e-mail én telefoon (cijfer-
-// genormaliseerd, zodat +32470…, 0470… en 470… allemaal hetzelfde vinden).
+/** Vandaag als JJJJ-MM-DD in Brussel. */
+function vandaagBrussel(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Brussels', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+}
+function plusDagen(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+
+// GET — alle leads voor het bord, met zoeken en filters.
+// Zoeken matcht op bedrijf, contactpersoon, e-mail, website én telefoon
+// (cijfer-genormaliseerd, zodat +32470…, 0470… en 470… hetzelfde vinden).
 export async function GET(req: NextRequest) {
   try {
-    if (!(await requireStaff())) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
+    const actor = await requireStaff()
+    if (!actor) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
     const sp = req.nextUrl.searchParams
     const salesClientId = (await getOrCreateSalesOrg()).id
 
-    /**
-     * Welk merk? De pipeline is ÉÉN lijst geworden: standaard krijg je alles,
-     * en de merkkeuze is een filter i.p.v. twee gescheiden werelden. Vandaar
-     * dat een leeg of onbekend `pipeline` nu 'alles' betekent en niet meer
-     * stilletjes op NextGenMedia terugvalt — anders zou je de helft van je
-     * eigen bestand niet zien zonder dat het scherm dat zegt.
-     */
+    // Eén bord voor beide merken; ?pipeline= blijft werken als filter.
     const pipelines = await listPipelines()
     const wanted = sp.get('pipeline') ?? ''
     const gekozen = pipelines.find((p) => p.id === wanted) ?? null
@@ -69,63 +82,54 @@ export async function GET(req: NextRequest) {
     const pipelineKey = gekozen?.key ?? ''
 
     const admin = createAdminSupabaseClient()
-    // `tel` enkel op de EERSTE pagina: een exacte telling laat Postgres de hele
-    // gefilterde verzameling aflopen. Dat drie keer vragen levert drie keer
-    // hetzelfde getal op voor drie keer de kosten.
-    // Staat de kolom `merken` er nog niet, dan valt zowel de selectie als het
-    // filter terug op enkel het hoofdmerk. Zo blijft het scherm werken vóór de
-    // migratie gedraaid is.
     let metMerken = true
+    let metPositie = true
     const bouw = (selectie: string, van: number, tot: number, tel: boolean) => {
       let q = admin
         .from('sales_leads')
         .select(selectie, tel ? { count: 'exact' } : undefined)
         .eq('sales_client_id', salesClientId)
-        .order('updated_at', { ascending: false })
-        // Stabiele tweede sortering: updated_at is bij een verse import voor
-        // duizenden rijen identiek, en zonder tiebreaker kan dezelfde rij dan
-        // in twee pagina's opduiken terwijl een andere nooit langskomt.
-        .order('id', { ascending: true })
-        .range(van, tot)
+      // Volgorde binnen een kolom: positie, dan recentst gewijzigd. Zo overleeft
+      // een sleep een herlaad. Nieuwe kaarten (nog geen positie) bovenaan.
+      // Stabiele tiebreaker op id voor de paginering.
+      if (metPositie) q = q.order('positie', { ascending: true, nullsFirst: true })
+      q = q.order('updated_at', { ascending: false }).order('id', { ascending: true }).range(van, tot)
 
-      // Op het merk filteren betekent: hoofdmerk óf meegemarkeerd. Een lead
-      // die voor beide bedrijven telt hoort in beide lijsten te staan.
       if (!allPipelines) {
         q = metMerken && pipelineKey
           ? q.or(`pipeline_id.eq.${pipelineId},merken.cs.{${pipelineKey}}`)
           : q.eq('pipeline_id', pipelineId)
       }
-
-      // Archief staat standaard uit: gearchiveerde leads zijn zacht verwijderd.
       if (sp.get('archived') === '1') q = q.not('archived_at', 'is', null)
       else q = q.is('archived_at', null)
 
       const stage = sp.get('stage')
-      if (stage) q = q.eq('stage_key', stage)
+      if (stage) q = q.in('stage_key', stageKeysVoor(normaliseerStage(stage)))
       if (sp.get('hideDnc') === '1') q = q.eq('do_not_call', false)
       return q
     }
 
-    /**
-     * In pagina's ophalen. PostgREST kapt ELKE query af op 1000 rijen — een
-     * hogere `limit` helpt niet, die grens staat aan de serverkant. Met 2670
-     * leads kreeg je er dus stilletjes 1000, en de rest bestond niet voor de
-     * pipeline én niet voor Focus Mode. Vandaar `range` tot alles binnen is.
-     */
+    // In pagina's ophalen: PostgREST kapt elke query af op 1000 rijen.
     const PAGINA = 1000
-    const MAX_LEADS = 20_000        // vangnet tegen een oneindige lus
+    const MAX_LEADS = 20_000
     let rows: LeadRow[] = []
     let totaal = 0
-    let selectie = SELECT_BREED
+    let selectie = SELECT_KANBAN
 
     for (let van = 0; van < MAX_LEADS; van += PAGINA) {
       const tel = van === 0
       let { data, error, count } = await bouw(selectie, van, van + PAGINA - 1, tel)
-      // Kolommen uit de migratie ontbreken nog? Eén keer terugvallen op de
-      // smalle selectie en deze pagina opnieuw ophalen.
+      // Kanban-kolommen ontbreken nog? Terugvallen op de bredere selectie
+      // zonder positie; dan nog een keer op de smalle.
+      if (error && selectie === SELECT_KANBAN && /leadbron|positie|dienst|opvolgdatum|deal_waarde|gesloten_op|verlies_reden|website_aanvraag|column/i.test(error.message)) {
+        selectie = SELECT_BREED
+        metPositie = false
+        ;({ data, error, count } = await bouw(selectie, van, van + PAGINA - 1, tel))
+      }
       if (error && /callback_note|werkklasse|activiteit|ondernemingsnummer|prioriteit|reden_code|warm|merken|harrie|column/i.test(error.message)) {
         selectie = SELECT_SMAL
         metMerken = false
+        metPositie = false
         ;({ data, error, count } = await bouw(selectie, van, van + PAGINA - 1, tel))
       }
       if (error) throw new Error(error.message)
@@ -138,8 +142,16 @@ export async function GET(req: NextRequest) {
     if (totaal === 0) totaal = rows.length
     const afgekapt = totaal > rows.length
 
-    // Vrij zoeken doen we in code: telefoon moet cijfer-genormaliseerd matchen
-    // en dat kan een gewone SQL-ilike niet betrouwbaar.
+    // Oude fasesleutels normaliseren zodat het bord ook vóór de migratie klopt.
+    for (const r of rows) {
+      r.stage_key = normaliseerStage(r.stage_key)
+      r.leadbron = normaliseerLeadbron(r.leadbron)
+      // Harrie-leads van vóór de leadbron-kolom herkennen aan hun label.
+      if (r.leadbron === 'outbound' && (r.labels ?? []).includes('Harrie')) r.leadbron = 'harrie'
+      // Oude verliesreden tonen zolang er geen nieuwe is.
+      if (!r.verlies_reden && r.lost_reason && r.stage_key === 'verloren') r.verlies_reden = r.lost_reason
+    }
+
     const search = (sp.get('q') ?? '').trim()
     if (search) {
       const needle = search.toLowerCase()
@@ -150,64 +162,85 @@ export async function GET(req: NextRequest) {
           const cands = [r.sales_contacts?.phone_digits, normalizePhone(r.sales_contacts?.phone), normalizePhone(r.sales_contacts?.mobile), normalizePhone(r.sales_companies?.phone)]
           if (cands.some((c) => c && c.includes(digits))) return true
         }
-        // Ook op de notitie zoeken: "wie was dat ook weer waar ik iets over
-        // schreef" is precies waarvoor je een zoekveld gebruikt.
-        return [r.sales_companies?.name, r.sales_contacts?.name, r.sales_contacts?.email, r.laatste_notitie]
+        return [r.sales_companies?.name, r.sales_contacts?.name, r.sales_contacts?.email, r.sales_companies?.website, r.sales_companies?.email, r.laatste_notitie]
           .some((v) => (v ?? '').toLowerCase().includes(needle))
       })
     }
 
-    // Overige filters (combineerbaar).
+    const leadbron = sp.get('leadbron')
+    if (leadbron === 'inbound') rows = rows.filter((r) => isInboundBron(r.leadbron))
+    else if (leadbron === 'outbound_alle') rows = rows.filter((r) => !isInboundBron(r.leadbron))
+    else if (leadbron) rows = rows.filter((r) => r.leadbron === leadbron)
+    const verantwoordelijke = sp.get('verantwoordelijke')
+    if (verantwoordelijke === 'niemand') rows = rows.filter((r) => !r.assigned_to)
+    else if (verantwoordelijke) rows = rows.filter((r) => r.assigned_to === verantwoordelijke)
+    const dienst = sp.get('dienst')
+    if (dienst) rows = rows.filter((r) => (r.dienst ?? '').toLowerCase() === dienst.toLowerCase())
     const sector = sp.get('sector'); if (sector) rows = rows.filter((r) => r.sales_companies?.sector === sector)
-    const city = sp.get('city');     if (city) rows = rows.filter((r) => r.sales_companies?.city === city)
-    const region = sp.get('region'); if (region) rows = rows.filter((r) => r.sales_companies?.region === region)
     const label = sp.get('label');   if (label) rows = rows.filter((r) => (r.labels ?? []).includes(label))
-    // Alleen warme leads: wie zelf reageerde op een benadering.
     if (sp.get('warm') === '1') rows = rows.filter((r) => !!r.warm)
-    if (sp.get('hasPhone') === '1') rows = rows.filter((r) => !!(r.sales_contacts?.phone || r.sales_contacts?.mobile || r.sales_companies?.phone))
-    if (sp.get('hasEmail') === '1') rows = rows.filter((r) => !!r.sales_contacts?.email)
-    if (sp.get('hasWebsite') === '1') rows = rows.filter((r) => !!r.sales_companies?.website)
-    if (sp.get('callbackToday') === '1') {
-      const end = new Date(); end.setHours(23, 59, 59, 999)
-      rows = rows.filter((r) => r.callback_at && new Date(r.callback_at).getTime() <= end.getTime())
+
+    // Opvolgdatum: vandaag / deze week / verlopen. Een terugbelmoment
+    // (callback_at) telt mee als opvolgmoment als er geen datum staat.
+    const opvolg = sp.get('opvolg')
+    if (opvolg) {
+      const vandaag = vandaagBrussel()
+      const weekEind = plusDagen(vandaag, 7 - ((new Date(`${vandaag}T00:00:00Z`).getUTCDay() + 6) % 7) - 1)
+      const datumVan = (r: LeadRow): string | null =>
+        r.opvolgdatum ? r.opvolgdatum.slice(0, 10)
+          : r.callback_at ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Brussels', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(r.callback_at))
+            : null
+      rows = rows.filter((r) => {
+        const d = datumVan(r)
+        if (!d) return false
+        if (opvolg === 'vandaag') return d <= vandaag
+        if (opvolg === 'week') return d <= weekEind
+        if (opvolg === 'verlopen') return d < vandaag
+        return true
+      })
     }
 
-    /**
-     * Wie is er op dit moment door een collega vastgehouden?
-     *
-     * Alleen NIET-verlopen sloten van een ÁNDER tellen: je eigen lead moet je
-     * gewoon blijven zien, en een verlopen slot (browser dicht) mag niemand
-     * blokkeren. Faalt dit, dan gaat de lijst gewoon door zonder sloten —
-     * bellen mag nooit stoppen omdat een extra tabel hapert.
-     */
+    // Medewerkers voor "verantwoordelijke": setters en werknemers met de
+    // verkoopmodule. Geen tarieven of commissies — enkel id en naam.
+    const medewerkers = await listSalesMedewerkers()
+    if (!medewerkers.some((m) => m.id === actor.id)) {
+      medewerkers.push({ id: actor.id, naam: actor.email?.split('@')[0] ?? 'ik' })
+    }
+    const isAdmin = !!(await requireAdmin())
+
+    // Leads die een collega NU in Focus Mode belt (slot uit sales_lead_claims).
     let bezet: Record<string, string> = {}
     try {
-      const actor = await requireStaff()
       const { data: claims } = await admin.from('sales_lead_claims')
         .select('lead_id, naam, auth_user_id')
         .gt('verloopt_op', new Date().toISOString())
       for (const c of (claims ?? []) as { lead_id: string; naam: string | null; auth_user_id: string }[]) {
-        if (actor && c.auth_user_id === actor.id) continue
+        if (c.auth_user_id === actor.id) continue
         bezet[c.lead_id] = c.naam ?? 'een collega'
       }
     } catch { bezet = {} }
 
-    return NextResponse.json({ leads: rows, totaal, afgekapt, bezet })
+    return NextResponse.json({ leads: rows, totaal, afgekapt, medewerkers, meId: actor.id, isAdmin, bezet })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
 }
 
-// POST — nieuwe lead (manueel). Ontdubbelt op bedrijf binnen de pipeline.
+// POST — nieuwe lead (manueel of snel-toevoegen). Ontdubbelt op bedrijf.
 export async function POST(req: NextRequest) {
   try {
-    if (!(await requireStaff())) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
+    const actor = await requireStaff()
+    if (!actor) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
     const b = await req.json()
     const salesClientId = (await getOrCreateSalesOrg()).id
 
     const pipelines = await listPipelines()
     const pipelineId = pipelines.find((p) => p.id === String(b.pipelineId ?? ''))?.id
       ?? await defaultPipelineId()
+
+    const stage = isStageKey(b.stage) ? b.stage : undefined
+    const opvolgdatum = typeof b.opvolgdatum === 'string' && /^\d{4}-\d{2}-\d{2}/.test(b.opvolgdatum)
+      ? b.opvolgdatum.slice(0, 10) : null
 
     const res = await createLead({
       salesClientId,
@@ -223,9 +256,30 @@ export async function POST(req: NextRequest) {
         name: b.contact?.name, role: b.contact?.role, email: b.contact?.email,
         phone: b.contact?.phone, mobile: b.contact?.mobile, linkedin: b.contact?.linkedin,
       },
-      labels: Array.isArray(b.labels) ? b.labels : [],
+      labels: Array.isArray(b.labels) ? b.labels.map(String) : [],
+      leadbron: normaliseerLeadbron(b.leadbron),
+      stage,
+      dienst: typeof b.dienst === 'string' ? b.dienst : null,
+      assignedTo: typeof b.assigned_to === 'string' && b.assigned_to ? b.assigned_to : null,
+      opvolgdatum,
+      actor: { id: actor.id, email: actor.email ?? null },
     })
     if (!res.ok) return NextResponse.json({ error: res.error, existingLeadId: res.existingLeadId }, { status: 409 })
+
+    const admin = createAdminSupabaseClient()
+    const notitie = String(b.note ?? '').trim()
+    if (notitie) {
+      await registreerActiviteit(admin, {
+        leadId: res.leadId, medewerkerId: actor.id, medewerkerEmail: actor.email ?? null,
+        type: 'interne_notitie', notitie,
+      })
+    }
+    if (opvolgdatum) {
+      await registreerActiviteit(admin, {
+        leadId: res.leadId, medewerkerId: actor.id, medewerkerEmail: actor.email ?? null,
+        type: 'opvolging', opvolgdatum,
+      })
+    }
     return NextResponse.json({ ok: true, id: res.leadId })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })

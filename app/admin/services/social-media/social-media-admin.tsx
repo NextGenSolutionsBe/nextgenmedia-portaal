@@ -8,6 +8,7 @@ import { GenerateDialog } from './generate-dialog'
 import { ClickUpSyncControl } from '@/components/admin/clickup-sync-control'
 import { ShootBriefings } from '@/components/admin/shoot-briefings'
 import { SendMailButton } from '@/components/admin/send-mail-button'
+import { ShootDocumentKnop } from '@/components/shoot-document-knop'
 import { KANAAL_SLUGS, kanaalLabel } from '@/lib/social-platforms'
 
 type Client = { id: string; company_name: string }
@@ -342,6 +343,11 @@ export function SocialMediaAdmin({
               <>
                 <SendMailButton clientId={selectedClient} kind="scripts" label="Verstuur mail" />
                 <SendMailButton clientId={selectedClient} kind="shoot" label="Verstuur uitnodiging" />
+                <ShootDocumentKnop
+                  href={`/api/admin/clients/${selectedClient}/shoot-document`}
+                  label="Shootdocument"
+                  title="Print-klare checklist voor de eerstvolgende shoot (scripts + medianotities)"
+                />
                 <button
                   onClick={() => { setShiftFrom(thisMonth()); setShiftTo(nextMonthStr()); setShiftOpen(true) }}
                   className="btn-secondary"

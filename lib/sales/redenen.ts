@@ -32,8 +32,8 @@ export const isRedenCode = (v: unknown): v is RedenCode =>
 export const redenLabel = (code: string | null | undefined): string =>
   REDENEN.find((r) => r.code === code)?.label ?? (code ?? '—')
 
-/** Bij welke fases is een reden verplicht? */
-export const REDEN_VERPLICHT = new Set(['not_interested'])
+/** Bij welke fases is een reden verplicht? Geen: een verliesreden is optioneel. */
+export const REDEN_VERPLICHT = new Set<string>()
 
 /**
  * De leesbare tekst die in lost_reason komt: het label, bij "Anders" met de

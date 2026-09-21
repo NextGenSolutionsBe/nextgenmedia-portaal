@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
     const maandParam = `${nu.getFullYear()}-${String(nu.getMonth() + 1).padStart(2, '0')}-01`
     delen.push(resultatenWerkmap({ monthParam: maandParam, stats, payouts, isAdmin: true }))
     if (statistieken) {
-      delen.push(statistiekenWerkmap({ stats: statistieken.stats, bereik: { van: `${year}-01-01`, tot: `${year}-12-31` }, isAdmin: true, leadInteresse: statistieken.leadInteresse }))
+      delen.push(statistiekenWerkmap({ stats: statistieken.stats, bereik: { van: `${year}-01-01`, tot: `${year}-12-31` }, isAdmin: true }))
     }
 
     // Eén werkmap: bladen krijgen een voorvoegsel per dashboard zodat de namen uniek en herkenbaar blijven.
@@ -90,8 +90,8 @@ export async function GET(req: NextRequest) {
           { label: `Kosten boekjaar ${year}`, waarde: { v: core.kostenManualFY + core.socialAsCostFY + core.setterCostFY, stijl: 'euro' } },
           { label: 'Marco voorlopig (vesting)', waarde: { v: v.marcoVoorlopig, stijl: 'pct' } },
           { label: 'WAM effectief ontvangen', waarde: { v: v.wam.nettoOntvangen, stijl: 'euro' } },
-          { label: 'Gesprekken dit jaar', waarde: { v: statistieken?.stats.totaal.gesprekken ?? 0, stijl: 'aantal' } },
-          { label: 'Afspraken dit jaar', waarde: { v: statistieken?.stats.totaal.afspraken ?? 0, stijl: 'aantal' } },
+          { label: 'Gesprekken dit jaar', waarde: { v: statistieken?.stats.team.telefoongesprekken ?? 0, stijl: 'aantal' } },
+          { label: 'Afspraken dit jaar', waarde: { v: statistieken?.stats.team.afspraken ?? 0, stijl: 'aantal' } },
         ],
       }],
     }

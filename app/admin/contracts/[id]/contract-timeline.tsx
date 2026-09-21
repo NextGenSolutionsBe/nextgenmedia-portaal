@@ -22,6 +22,9 @@ const META: Record<string, { label: string; icon: React.ComponentType<{ classNam
   token_regenerated:     { label: 'Nieuwe tekenlink',      icon: RefreshCw,   cls: 'bg-gray-100 text-gray-600' },
   expired:               { label: 'Verlopen',              icon: Clock,       cls: 'bg-red-100 text-red-600' },
   cancelled:             { label: 'Geannuleerd',           icon: XCircle,     cls: 'bg-gray-100 text-gray-600' },
+  gearchiveerd:          { label: 'Gearchiveerd (certificaat aangemaakt)', icon: FileCheck2, cls: 'bg-green-100 text-green-600' },
+  melding_verstuurd:     { label: 'Melding naar Legal verstuurd', icon: Send, cls: 'bg-blue-100 text-blue-600' },
+  melding_mislukt:       { label: 'Melding naar Legal mislukt',   icon: XCircle, cls: 'bg-red-100 text-red-600' },
 }
 
 export function ContractTimeline({ events }: { events: Event[] }) {

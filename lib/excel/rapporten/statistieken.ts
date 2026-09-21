@@ -1,141 +1,168 @@
-import { percentage, type Statistieken, type Groep, type SectorInteresse } from '@/lib/sales/statistieken'
-import { type Werkmap, type Cel, type TabelBlok, euro, formule, som, aantal, pct } from '../spec'
+import { percentage, type Cijfers, type Rij, type Statistieken } from '@/lib/sales/statistieken'
+import { type Werkmap, type Cel, type TabelBlok, euro, formule, aantal, getal, pct } from '../spec'
 
 /**
- * Excel-export van Verkoop → Statistieken. Percentages zijn formules op de
- * aantallen ernaast (boeking = afspraken / gesprekken, opkomst = doorgegaan /
- * afspraken, sluiting = gewonnen / (gewonnen + verloren), open afspraken tellen niet mee), met IFERROR voor lege noemers —
- * dezelfde definities als `percentage()` op het scherm.
+ * Excel-export van Verkoop → Statistieken (salesactiviteiten).
+ *
+ * Ratio's zijn formules op de aantallen ernaast, met IFERROR voor een lege
+ * noemer — dezelfde definities als op het scherm:
+ *   gemiddelde duur   = beltijd ÷ gesprekken MET duur
+ *   closing rate      = gewonnen ÷ (gewonnen + verloren)
+ *   appointment rate  = leads met afspraak ÷ leads met geslaagd contact
+ *   contact rate      = leads met geslaagd contact ÷ unieke behandelde leads
+ * De totaalrij bevat de TEAMcijfers (unieke leads zijn niet op te tellen over
+ * medewerkers heen: één lead kan door twee mensen behandeld zijn).
  */
 
 export type StatistiekenExportInvoer = {
   stats: Statistieken
   bereik: { van: string; tot: string }
-  setterNaam?: string | null
-  sector?: string | null
-  leadInteresse?: { perSector: SectorInteresse[]; redenen: { reden: string; aantal: number }[] } | null
+  medewerkerNaam?: string | null
+  filters?: { label: string; waarde: string }[]
   isAdmin: boolean
 }
 
 const p = (deel: number, geheel: number) => { const x = percentage(deel, geheel); return x === null ? '' : x / 100 }
+const minuten = (sec: number) => Math.round((sec / 60) * 10) / 10
 
-function groepTabel(titel: string, eersteKop: string, groepen: Groep[], leeg: string): TabelBlok {
+function rijCellen(label: string, c: Cijfers): Cel[] {
+  return [
+    label,
+    aantal(c.telefoongesprekken),
+    aantal(c.gesprekkenMetDuur),
+    getal(minuten(c.beltijdSeconden)),
+    formule('IFERROR(D{R}/C{R},"")', c.gemiddeldeDuurSeconden === null ? '' : minuten(c.gemiddeldeDuurSeconden), 'getal'),
+    aantal(c.emails),
+    aantal(c.uniekeLeads),
+    aantal(c.opvolgingen),
+    aantal(c.afspraken),
+    aantal(c.voorstellen),
+    aantal(c.gewonnen),
+    aantal(c.verloren),
+    formule('IFERROR(K{R}/(K{R}+L{R}),"")', p(c.gewonnen, c.gewonnen + c.verloren), 'pct'),
+    aantal(c.leadsMetContact),
+    aantal(c.leadsMetAfspraak),
+    formule('IFERROR(O{R}/N{R},"")', p(c.leadsMetAfspraak, c.leadsMetContact), 'pct'),
+    formule('IFERROR(N{R}/G{R},"")', p(c.leadsMetContact, c.uniekeLeads), 'pct'),
+    euro(c.waardeGewonnenCent / 100),
+  ]
+}
+
+function totaalCellen(c: Cijfers): Cel[] {
+  return [
+    'Team',
+    { v: c.telefoongesprekken, stijl: 'totaal_aantal' },
+    { v: c.gesprekkenMetDuur, stijl: 'totaal_aantal' },
+    { v: minuten(c.beltijdSeconden), stijl: 'totaal_getal' },
+    { v: c.gemiddeldeDuurSeconden === null ? '' : minuten(c.gemiddeldeDuurSeconden), stijl: 'totaal_getal' },
+    { v: c.emails, stijl: 'totaal_aantal' },
+    { v: c.uniekeLeads, stijl: 'totaal_aantal' },
+    { v: c.opvolgingen, stijl: 'totaal_aantal' },
+    { v: c.afspraken, stijl: 'totaal_aantal' },
+    { v: c.voorstellen, stijl: 'totaal_aantal' },
+    { v: c.gewonnen, stijl: 'totaal_aantal' },
+    { v: c.verloren, stijl: 'totaal_aantal' },
+    { v: p(c.gewonnen, c.gewonnen + c.verloren), stijl: 'totaal_pct' },
+    { v: c.leadsMetContact, stijl: 'totaal_aantal' },
+    { v: c.leadsMetAfspraak, stijl: 'totaal_aantal' },
+    { v: p(c.leadsMetAfspraak, c.leadsMetContact), stijl: 'totaal_pct' },
+    { v: p(c.leadsMetContact, c.uniekeLeads), stijl: 'totaal_pct' },
+    { v: c.waardeGewonnenCent / 100, stijl: 'totaal_euro' },
+  ]
+}
+
+const KOLOMMEN = (eerste: string): TabelBlok['kolommen'] => [
+  { kop: eerste },
+  { kop: 'Telefoongesprekken', stijl: 'aantal' },
+  { kop: 'Gesprekken met duur', stijl: 'aantal' },
+  { kop: 'Beltijd (min)', stijl: 'getal' },
+  { kop: 'Gem. gespreksduur (min)', stijl: 'getal' },
+  { kop: 'E-mails', stijl: 'aantal' },
+  { kop: 'Unieke leads', stijl: 'aantal' },
+  { kop: 'Opvolgingen', stijl: 'aantal' },
+  { kop: 'Afspraken', stijl: 'aantal' },
+  { kop: 'Voorstellen', stijl: 'aantal' },
+  { kop: 'Gewonnen', stijl: 'aantal' },
+  { kop: 'Verloren', stijl: 'aantal' },
+  { kop: 'Closing rate', stijl: 'pct' },
+  { kop: 'Leads met contact', stijl: 'aantal' },
+  { kop: 'Leads met afspraak', stijl: 'aantal' },
+  { kop: 'Appointment setting rate', stijl: 'pct' },
+  { kop: 'Contact rate', stijl: 'pct' },
+  { kop: 'Waarde gewonnen deals', stijl: 'euro' },
+]
+
+function tabel(titel: string, eerste: string, rijen: Rij[], team: Cijfers): TabelBlok {
   return {
-    soort: 'tabel', titel,
-    kolommen: [
-      { kop: eersteKop }, { kop: 'Gesprekken', stijl: 'aantal' }, { kop: 'Unieke leads', stijl: 'aantal' }, { kop: 'Afspraken', stijl: 'aantal' }, { kop: 'Boeking', stijl: 'pct' },
-      { kop: 'Doorgegaan', stijl: 'aantal' }, { kop: 'Opkomst', stijl: 'pct' }, { kop: 'No-shows', stijl: 'aantal' }, { kop: 'Geannuleerd', stijl: 'aantal' },
-      { kop: 'Gewonnen', stijl: 'aantal' }, { kop: 'Verloren', stijl: 'aantal' }, { kop: 'Open', stijl: 'aantal' }, { kop: 'Sluiting', stijl: 'pct' }, { kop: 'Contractwaarde', stijl: 'euro' },
-    ],
-    rijen: groepen.map((g) => [
-      g.label, aantal(g.gesprekken), aantal(g.leadsGebeld), aantal(g.afspraken), formule('IFERROR(D{R}/B{R},"")', p(g.afspraken, g.gesprekken)),
-      aantal(g.doorgegaan), formule('IFERROR(F{R}/D{R},"")', p(g.doorgegaan, g.afspraken)), aantal(g.noShows), aantal(g.geannuleerd),
-      aantal(g.gewonnen), aantal(g.verloren), aantal(g.open), formule('IFERROR(J{R}/(J{R}+K{R}),"")', p(g.gewonnen, g.gewonnen + g.verloren)), euro(g.dealWaardeCent / 100),
-    ] as Cel[]),
-    totaal: ['Totaal', som('B', undefined, 'totaal_aantal'), som('C', undefined, 'totaal_aantal'), som('D', undefined, 'totaal_aantal'), formule('IFERROR(SUM(D{R1}:D{R2})/SUM(B{R1}:B{R2}),"")', undefined, 'totaal_pct'),
-      som('F', undefined, 'totaal_aantal'), formule('IFERROR(SUM(F{R1}:F{R2})/SUM(D{R1}:D{R2}),"")', undefined, 'totaal_pct'), som('H', undefined, 'totaal_aantal'), som('I', undefined, 'totaal_aantal'),
-      som('J', undefined, 'totaal_aantal'), som('K', undefined, 'totaal_aantal'), som('L', undefined, 'totaal_aantal'), formule('IFERROR(SUM(J{R1}:J{R2})/(SUM(J{R1}:J{R2})+SUM(K{R1}:K{R2})),"")', undefined, 'totaal_pct'), som('N')],
-    leeg,
+    soort: 'tabel', titel, kolommen: KOLOMMEN(eerste),
+    rijen: rijen.map((r) => rijCellen(r.label, r)),
+    totaal: totaalCellen(team),
+    leeg: 'Geen activiteiten in deze periode.',
   }
 }
 
 export function statistiekenWerkmap(inv: StatistiekenExportInvoer): Werkmap {
-  const t = inv.stats.totaal
+  const t = inv.stats.team
   const filters = [{ label: 'Periode', waarde: `${inv.bereik.van} t.e.m. ${inv.bereik.tot}` }]
-  if (inv.setterNaam) filters.push({ label: 'Setter', waarde: inv.setterNaam })
-  if (inv.sector) filters.push({ label: 'Sector', waarde: inv.sector })
-  const werkmap: Werkmap = { bestandsnaam: `NextGenMedia_Statistieken_${inv.bereik.van}_${inv.bereik.tot}`, titel: 'Verkoop — statistieken', filters, bladen: [] }
+  if (inv.medewerkerNaam) filters.push({ label: 'Medewerker', waarde: inv.medewerkerNaam })
+  for (const f of inv.filters ?? []) filters.push(f)
+  const werkmap: Werkmap = {
+    bestandsnaam: `NextGenMedia_Salesstatistieken_${inv.bereik.van}_${inv.bereik.tot}`,
+    titel: 'Verkoop — statistieken', filters, bladen: [],
+  }
 
   const samenvatting = {
-    naam: 'Samenvatting', titel: 'Statistieken — trechter',
+    naam: 'Samenvatting', titel: 'Teamtotalen',
     blokken: [
       {
         soort: 'kpis' as const, titel: 'Kerncijfers',
         items: [
-          { label: 'Gesprekken', waarde: aantal(t.gesprekken), toelichting: `${t.leadsGebeld} unieke leads` },
-          { label: 'Afspraken', waarde: aantal(t.afspraken), toelichting: `${t.geannuleerd} geannuleerd` },
-          { label: 'Boekingsratio (afspraken / gesprekken)', waarde: pct(p(t.afspraken, t.gesprekken)) },
-          { label: 'Opkomst (doorgegaan / afspraken)', waarde: pct(p(t.doorgegaan, t.afspraken)), toelichting: `${t.noShows} no-shows` },
-          { label: 'Sluitingsratio (gewonnen / besliste afspraken)', waarde: pct(p(t.gewonnen, t.gewonnen + t.verloren)), toelichting: `${t.gewonnen} gewonnen · ${t.verloren} verloren · ${t.open} open` },
-          { label: 'Contractwaarde gewonnen deals', waarde: euro(t.dealWaardeCent / 100) },
+          { label: 'Telefoongesprekken', waarde: aantal(t.telefoongesprekken), toelichting: `${t.uniekeLeads} unieke leads behandeld` },
+          { label: 'Totale beltijd (min)', waarde: getal(minuten(t.beltijdSeconden)) },
+          { label: 'Gemiddelde gespreksduur (min)', waarde: getal(t.gemiddeldeDuurSeconden === null ? '' : minuten(t.gemiddeldeDuurSeconden)), toelichting: `over ${t.gesprekkenMetDuur} gesprekken met duur` },
+          { label: 'E-mails', waarde: aantal(t.emails) },
+          { label: 'Opvolgingen', waarde: aantal(t.opvolgingen) },
+          { label: 'Geplande afspraken', waarde: aantal(t.afspraken) },
+          { label: 'Voorstellen', waarde: aantal(t.voorstellen) },
+          { label: 'Gewonnen / verloren', waarde: `${t.gewonnen} / ${t.verloren}` },
+          { label: 'Closing rate', waarde: pct(p(t.gewonnen, t.gewonnen + t.verloren)) },
+          { label: 'Appointment setting rate', waarde: pct(p(t.leadsMetAfspraak, t.leadsMetContact)) },
+          { label: 'Contact rate', waarde: pct(p(t.leadsMetContact, t.uniekeLeads)) },
+          { label: 'Waarde gewonnen deals', waarde: euro(t.waardeGewonnenCent / 100) },
         ],
       },
-      {
-        soort: 'tabel' as const, titel: 'Trechter',
-        kolommen: [{ kop: 'Stap' }, { kop: 'Aantal', stijl: 'aantal' as const }, { kop: 'T.o.v. gesprekken', stijl: 'pct' as const }],
-        rijen: [
-          ['Gesprekken', aantal(t.gesprekken), null],
-          ['Unieke leads gebeld', aantal(t.leadsGebeld), formule('IFERROR(B{R}/B{R1},"")', p(t.leadsGebeld, t.gesprekken))],
-          ['Afspraken geboekt', aantal(t.afspraken), formule('IFERROR(B{R}/B{R1},"")', p(t.afspraken, t.gesprekken))],
-          ['Afspraak doorgegaan', aantal(t.doorgegaan), formule('IFERROR(B{R}/B{R1},"")', p(t.doorgegaan, t.gesprekken))],
-          ['Gewonnen', aantal(t.gewonnen), formule('IFERROR(B{R}/B{R1},"")', p(t.gewonnen, t.gesprekken))],
-        ] as Cel[][],
+      ...(inv.stats.vergelijking.length ? [{
+        soort: 'tabel' as const, titel: 'Vergelijking',
+        kolommen: [{ kop: 'Wat' }, { kop: 'Wie' }, { kop: 'Waarde' }],
+        rijen: inv.stats.vergelijking.map((v) => [v.titel, v.naam, v.waarde] as Cel[]),
         filter: false,
-      },
+      }] : []),
     ],
   }
 
-  const groepen = {
-    naam: 'Per setter-sector-bron', titel: 'Per setter, sector en bron',
-    blokken: [
-      ...(inv.isAdmin ? [groepTabel('Per setter', 'Setter', inv.stats.perSetter, 'Geen gegevens.')] : []),
-      groepTabel('Per sector', 'Sector', inv.stats.perSector, 'Geen gegevens.'),
-      groepTabel('Per bron', 'Bron', inv.stats.perBron, 'Geen gegevens.'),
-    ],
+  const perMedewerker = {
+    naam: 'Per medewerker', titel: 'Per medewerker',
+    blokken: [tabel('Per medewerker', 'Medewerker', inv.stats.perMedewerker, t)],
+  }
+  const perBron = {
+    naam: 'Per leadbron', titel: 'Resultaten per leadbron',
+    blokken: [tabel('Per leadbron', 'Leadbron', inv.stats.perLeadbron, t)],
+  }
+  const trend = {
+    naam: 'Trend', titel: `Trend per ${inv.stats.trendPer}`,
+    blokken: [{
+      soort: 'tabel' as const, titel: `Per ${inv.stats.trendPer}`,
+      kolommen: [
+        { kop: inv.stats.trendPer === 'week' ? 'Week van' : inv.stats.trendPer === 'maand' ? 'Maand' : 'Dag' },
+        { kop: 'Telefoongesprekken', stijl: 'aantal' as const }, { kop: 'E-mails', stijl: 'aantal' as const },
+        { kop: 'Afspraken', stijl: 'aantal' as const }, { kop: 'Gewonnen', stijl: 'aantal' as const },
+      ],
+      rijen: inv.stats.trend.map((r) => [r.sleutel, aantal(r.telefoongesprekken), aantal(r.emails), aantal(r.afspraken), aantal(r.gewonnen)] as Cel[]),
+      leeg: 'Geen activiteiten in deze periode.',
+      filter: false,
+    }],
   }
 
-  const verloop = {
-    naam: 'Verloop', titel: 'Verloop in de tijd',
-    blokken: [
-      {
-        soort: 'tabel' as const, titel: 'Per maand',
-        kolommen: [{ kop: 'Maand' }, { kop: 'Gesprekken', stijl: 'aantal' as const }, { kop: 'Afspraken', stijl: 'aantal' as const }, { kop: 'Gewonnen', stijl: 'aantal' as const }, { kop: 'Boeking', stijl: 'pct' as const }],
-        rijen: inv.stats.perMaand.map((m) => [m.maand, aantal(m.gesprekken), aantal(m.afspraken), aantal(m.gewonnen), formule('IFERROR(C{R}/B{R},"")', p(m.afspraken, m.gesprekken))] as Cel[]),
-        totaal: ['Totaal', som('B', undefined, 'totaal_aantal'), som('C', undefined, 'totaal_aantal'), som('D', undefined, 'totaal_aantal'), formule('IFERROR(SUM(C{R1}:C{R2})/SUM(B{R1}:B{R2}),"")', undefined, 'totaal_pct')],
-        filter: false,
-      },
-      {
-        soort: 'tabel' as const, titel: 'Per weekdag',
-        kolommen: [{ kop: 'Dag' }, { kop: 'Gesprekken', stijl: 'aantal' as const }, { kop: 'Afspraken', stijl: 'aantal' as const }, { kop: 'Boeking', stijl: 'pct' as const }],
-        rijen: inv.stats.perWeekdag.map((d) => [d.dag, aantal(d.gesprekken), aantal(d.afspraken), formule('IFERROR(C{R}/B{R},"")', p(d.afspraken, d.gesprekken))] as Cel[]),
-        filter: false,
-      },
-      {
-        soort: 'tabel' as const, titel: 'Per uur',
-        kolommen: [{ kop: 'Uur', stijl: 'aantal' as const }, { kop: 'Gesprekken', stijl: 'aantal' as const }, { kop: 'Afspraken', stijl: 'aantal' as const }, { kop: 'Boeking', stijl: 'pct' as const }],
-        rijen: inv.stats.perUur.map((u) => [aantal(u.uur), aantal(u.gesprekken), aantal(u.afspraken), formule('IFERROR(C{R}/B{R},"")', p(u.afspraken, u.gesprekken))] as Cel[]),
-        filter: false,
-      },
-    ],
-  }
-
-  const redenen = {
-    naam: 'Interesse en redenen', titel: 'Interesse per sector en redenen',
-    blokken: [
-      {
-        soort: 'tabel' as const, titel: 'Interesse per sector — hele pipeline',
-        kolommen: [{ kop: 'Sector' }, { kop: 'Leads', stijl: 'aantal' as const }, { kop: 'Interesse', stijl: 'aantal' as const }, { kop: '% interesse', stijl: 'pct' as const }, { kop: 'Geen interesse', stijl: 'aantal' as const }, { kop: 'Nog bezig', stijl: 'aantal' as const }],
-        rijen: (inv.leadInteresse?.perSector ?? []).map((s) => [s.sector, aantal(s.totaal), aantal(s.interesse), formule('IFERROR(C{R}/B{R},"")', p(s.interesse, s.totaal)), aantal(s.geenInteresse), aantal(s.bezig)] as Cel[]),
-        totaal: ['Totaal', som('B', undefined, 'totaal_aantal'), som('C', undefined, 'totaal_aantal'), formule('IFERROR(SUM(C{R1}:C{R2})/SUM(B{R1}:B{R2}),"")', undefined, 'totaal_pct'), som('E', undefined, 'totaal_aantal'), som('F', undefined, 'totaal_aantal')],
-        leeg: 'Geen gegevens.',
-      },
-      {
-        soort: 'tabel' as const, titel: 'Afwijsredenen (pipeline)',
-        kolommen: [{ kop: 'Reden' }, { kop: 'Aantal', stijl: 'aantal' as const }, { kop: 'Aandeel', stijl: 'pct' as const }],
-        rijen: (inv.leadInteresse?.redenen ?? []).map((r) => [r.reden, aantal(r.aantal), formule('IFERROR(B{R}/SUM(B{R1}:B{R2}),"")')] as Cel[]),
-        totaal: ['Totaal', som('B', undefined, 'totaal_aantal'), null],
-        leeg: 'Geen afwijsredenen.',
-      },
-      {
-        soort: 'tabel' as const, titel: 'Verliesredenen (afspraken)',
-        kolommen: [{ kop: 'Reden' }, { kop: 'Aantal', stijl: 'aantal' as const }, { kop: 'Aandeel', stijl: 'pct' as const }],
-        rijen: inv.stats.verliesredenen.map((r) => [r.reden, aantal(r.aantal), formule('IFERROR(B{R}/SUM(B{R1}:B{R2}),"")')] as Cel[]),
-        totaal: ['Totaal', som('B', undefined, 'totaal_aantal'), null],
-        leeg: 'Geen verliesredenen.',
-      },
-    ],
-  }
-
-  werkmap.bladen = [samenvatting, groepen, verloop, redenen]
+  werkmap.bladen = inv.isAdmin ? [samenvatting, perMedewerker, perBron, trend] : [samenvatting, perBron, trend]
   return werkmap
 }
