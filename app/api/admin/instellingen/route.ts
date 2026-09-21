@@ -8,7 +8,6 @@ import { eisBeheer } from '@/lib/instellingen/api'
 import { vergeetInstellingenCache } from '@/lib/instellingen/edge'
 import { INSTELLINGEN_SLEUTELS, MODULES, type InstellingenSleutel, type AlleInstellingen } from '@/lib/instellingen/model'
 import { valideerOrganisatie, valideerFacturatie, valideerDocumenten, valideerModules, valideerRechten, verschillen, uittreksel } from '@/lib/instellingen/valideer'
-import { controleerFacturatieLijst, INVOICING_LIST_ENV, INVOICING_ASSIGNEE_ENV } from '@/lib/clickup'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,8 +27,7 @@ export async function GET() {
       modules: MODULES,
       persoon: { rol: g.persoon.rol, isAdmin: g.persoon.isAdmin, email: g.persoon.email },
       bijgewerkt: Object.fromEntries(((rijen ?? []) as { key: string; updated_at: string; updated_by_email: string | null }[]).map((r) => [r.key, { op: r.updated_at, door: r.updated_by_email }])),
-      // Het lijst-id is geen geheim; het toont welke waarde de omgeving voorstelt.
-      omgeving: { clickupLijstEnv: (process.env[INVOICING_LIST_ENV] ?? '').trim() || null, clickupAssigneeEnv: (process.env[INVOICING_ASSIGNEE_ENV] ?? '').trim() || null },
+      omgeving: { clickupLijstEnv: null, clickupAssigneeEnv: null },
     })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
@@ -55,25 +53,8 @@ export async function PUT(req: NextRequest) {
       case 'documenten': { const v = valideerDocumenten(b.waarde, huidig.documenten); if (!v.ok) return NextResponse.json({ error: v.fout }, { status: 400 }); nieuw = v.waarde; break }
       case 'facturatie': {
         const v = valideerFacturatie(b.waarde); if (!v.ok) return NextResponse.json({ error: v.fout }, { status: 400 })
-        const w = v.waarde
-        // De ClickUp-lijst wijzigt enkel na een geslaagde structuurcontrole via
-        // de API én een uitdrukkelijke bevestiging. Er wordt nooit een lijst
-        // aangemaakt of gezocht, en bestaande taken blijven waar ze staan.
-        if (w.clickup_lijst_id !== huidig.facturatie.clickup_lijst_id) {
-          if (w.clickup_lijst_id) {
-            if (!bevestigingen.includes('clickup_lijst')) return NextResponse.json({ error: 'Controleer en bevestig eerst de ClickUp-lijst voordat je opslaat.' }, { status: 400 })
-            let c
-            try { c = await controleerFacturatieLijst(w.clickup_lijst_id) }
-            catch (e) { return NextResponse.json({ error: `De lijst kon niet gecontroleerd worden: ${e instanceof Error ? e.message.slice(0, 200) : 'onbekende fout'}. Er is niets gewijzigd.` }, { status: 400 }) }
-            if (!c.ok) return NextResponse.json({ error: `De lijst staat niet op de verwachte plaats (${c.afwijkingen.join('; ')}). Er is niets gewijzigd.` }, { status: 400 })
-            w.clickup_lijst_pad = c.pad
-            extra = { clickup_lijst: { id: c.listId, pad: c.pad } }
-          } else {
-            w.clickup_lijst_pad = ''
-          }
-        } else {
-          w.clickup_lijst_pad = huidig.facturatie.clickup_lijst_pad
-        }
+        // Facturen gaan niet meer naar ClickUp; de oude lijstvelden blijven bewaard maar sturen niets meer aan.
+        const w = { ...v.waarde, clickup_sync_aan: false, clickup_lijst_pad: huidig.facturatie.clickup_lijst_pad }
         nieuw = w
         break
       }

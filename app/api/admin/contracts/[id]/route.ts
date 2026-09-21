@@ -71,6 +71,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         if (col && col in p) { delete p[col]; continue }
         throw new Error(error.message)
       }
+      // Is de factuurplanning al bevestigd? Dan raken we bestaande facturen NIET
+      // aan, maar markeren we het contract zodat het scherm de keuze voorlegt:
+      // planning behouden, toekomstige facturen herberekenen, of zelf aanpassen.
+      try {
+        const { data: c } = await admin.from('contracts').select('facturatie_bevestigd_op').eq('id', id).maybeSingle()
+        if (c?.facturatie_bevestigd_op) await admin.from('contracts').update({ facturatie_gewijzigd_na_bevestiging: true }).eq('id', id)
+      } catch { /* kolommen bestaan pas na migratie */ }
       try { revalidatePath(`/admin/contracts/${id}`) } catch { }
       return NextResponse.json({ ok: true })
     } else if (action === 'send') {

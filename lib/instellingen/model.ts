@@ -111,6 +111,8 @@ export type FacturatieInstellingen = {
   clickup_sync_aan: boolean
   /** Overschrijft de env CLICKUP_INVOICING_LIST_ID; enkel na validatie via de ClickUp-API. */
   clickup_lijst_id: string; clickup_lijst_pad: string; clickup_assignee_id: string; clickup_assignee_naam: string
+  /** Wie de facturen opmaakt en verstuurt (planner, voorstellen). */
+  verantwoordelijke_naam: string
 }
 export type DocumentenInstellingen = {
   logo_path: string; primaire_kleur: string; secundaire_kleur: string; voettekst: string; contactregel: string; bestandsnaam_patroon: string
@@ -125,7 +127,8 @@ export const STANDAARD_FACTURATIE: FacturatieInstellingen = {
   standaard_btw_pct: 21, betalingstermijn_dagen: 30, standaard_omschrijving: '',
   factuurnummer_prefix: 'F-', factuurnummer_volgend: 1, creditnota_prefix: 'CN-', creditnota_volgend: 1,
   betaalgegevens: '', standaard_status: 'te_versturen',
-  clickup_sync_aan: true, clickup_lijst_id: '', clickup_lijst_pad: '', clickup_assignee_id: '', clickup_assignee_naam: '',
+  clickup_sync_aan: false, clickup_lijst_id: '', clickup_lijst_pad: '', clickup_assignee_id: '', clickup_assignee_naam: '',
+  verantwoordelijke_naam: 'Bram Reinquin',
 }
 export const STANDAARD_DOCUMENTEN: DocumentenInstellingen = {
   logo_path: '', primaire_kleur: '#fff848', secundaire_kleur: '#111111',

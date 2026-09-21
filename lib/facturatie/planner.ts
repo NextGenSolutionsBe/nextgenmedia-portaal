@@ -1,10 +1,9 @@
 import 'server-only'
 import { recurringActiveInMonth, billingDateFor, inclFromExcl, normalizeInvoiceStatus, shiftYM, type RecurringInvoice } from '@/lib/invoices'
 import { SERVICE_LABELS } from '@/lib/utils'
-import { clickupConfigured } from '@/lib/clickup'
 import { leesInstellingen } from '@/lib/instellingen/laden'
 import { TYPE_LABEL, type OpdrachtType } from './schema'
-import { bepaalStatus, ymVan, momentSleutel, magVerplaatsen, type Moment, type Herkomst, type ClickupSync } from './planner-model'
+import { bepaalStatus, ymVan, momentSleutel, magVerplaatsen, type Moment, type Herkomst } from './planner-model'
 
 /**
  * De ENIGE plek die facturatiemomenten samenstelt. Kalender, lijst en de
@@ -23,7 +22,6 @@ type Admin = { from: (t: string) => any }
 type Klant = { id: string; company_name: string | null; btw_nummer: string | null; email: string | null }
 
 const svc = (s: string | null) => (s ? (SERVICE_LABELS[s] ?? s) : null)
-const taakUrl = (id: string | null) => (id ? `https://app.clickup.com/t/${id}` : null)
 
 function maandenTussen(van: string, tot: string): string[] {
   const uit: string[] = []
@@ -33,9 +31,8 @@ function maandenTussen(van: string, tot: string): string[] {
   return uit
 }
 
-export async function laadMomenten(admin: Admin, van: string, tot: string, vandaag: string): Promise<{ momenten: Moment[]; klanten: { id: string; company_name: string }[]; verantwoordelijke: string; clickup: boolean }> {
+export async function laadMomenten(admin: Admin, van: string, tot: string, vandaag: string): Promise<{ momenten: Moment[]; klanten: { id: string; company_name: string }[]; verantwoordelijke: string }> {
   const maanden = maandenTussen(van, tot)
-  const clickup = clickupConfigured()
   const [inst, { data: klantRijen }, { data: facturen }, { data: recurring }, { data: maandRijen }, { data: opdrachten }, { data: termijnen }] = await Promise.all([
     leesInstellingen(),
     admin.from('clients').select('id, company_name, btw_nummer, email').order('company_name'),
@@ -45,7 +42,7 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
     admin.from('contract_facturatie_opdrachten').select('*').gte('factuurdatum', van).lte('factuurdatum', tot).neq('status', 'afgehandeld'),
     admin.from('vesting_wam_termijnen').select('id, wam_id, volgnr, periode, factuurdatum, bedrag_excl, btw_pct, status, betaald_op, invoice_id, clickup_task_id, notitie').gte('factuurdatum', van).lte('factuurdatum', tot).is('invoice_id', null),
   ])
-  const verantwoordelijke = inst.facturatie.clickup_assignee_naam || 'Bram Reinquin'
+  const verantwoordelijke = inst.facturatie.verantwoordelijke_naam || inst.facturatie.clickup_assignee_naam || 'Bram Reinquin'
   const klanten = new Map<string, Klant>(((klantRijen ?? []) as Klant[]).map((k) => [k.id, k]))
   const naam = (id: string | null) => (id ? (klanten.get(id)?.company_name ?? 'Onbekende klant') : 'Geen klant')
 
@@ -70,7 +67,6 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
   }
 
   const uit: Moment[] = []
-  const sync = (taskId: string | null, fout?: string | null): ClickupSync => (!clickup ? 'nvt' : fout ? 'mislukt' : taskId ? 'gesynchroniseerd' : 'geen')
 
   // ── Eenmalige facturen ──
   for (const i of (facturen ?? []) as Record<string, unknown>[]) {
@@ -84,7 +80,7 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
     const ruwe = normalizeInvoiceStatus(i.status as string)
     const status = bepaalStatus({ ruweStatus: ruwe, datum, ontbrekend, vandaag })
     const herkomst: Herkomst = i.contract_id ? 'contract' : kind === 'wam' ? 'wam' : 'eenmalig'
-    const actief = status !== 'verstuurd' && status !== 'betaald' && status !== 'geannuleerd'
+    const actief = status !== 'verstuurd' && status !== 'betaald' && status !== 'geannuleerd' && status !== 'gecrediteerd'
     const maand = ymVan(datum)
     uit.push({
       id: momentSleutel('invoice', String(i.id)), bron: 'invoice', bronId: String(i.id), maand, datum,
@@ -94,13 +90,12 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
       type: kind === 'wam' ? 'WAM-factuur' : 'Eenmalig',
       bedrag_excl: bedrag, btw_pct: Number(i.vat_pct) || 0, bedrag_incl: Number(i.amount_incl) || inclFromExcl(bedrag, Number(i.vat_pct) || 0),
       status, ruweStatus: ruwe, herkomst, terugkerend: false, verantwoordelijke,
-      clickup_task_id: (i.clickup_task_id as string | null) ?? null, clickup_url: taakUrl((i.clickup_task_id as string | null) ?? null), clickup_sync: sync((i.clickup_task_id as string | null) ?? null), clickup_fout: null,
       volledig: ontbrekend.length === 0, ontbrekend,
       contract_id: (i.contract_id as string | null) ?? null, contract_titel: i.contract_id ? (contractTitel.get(String(i.contract_id)) ?? null) : null,
       recurring_id: null, invoice_id: String(i.id), wam_id: (i.wam_id as string | null) ?? null, schema: null, opmerking: (i.note as string | null) ?? null,
       acties: {
         bekijkenUrl: `/admin/invoices?maand=${maand}`, aanpassenUrl: `/admin/invoices?maand=${maand}`, voorbereidenUrl: null,
-        kanVerstuurd: actief, kanVerplaatsen: magVerplaatsen(status), kanAnnuleren: actief, kanSync: clickup && actief && !i.clickup_task_id,
+        kanVerstuurd: actief, kanVerplaatsen: magVerplaatsen(status), kanAnnuleren: actief, 
       },
     })
   }
@@ -130,14 +125,13 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
         client_id: r.client_id, klant: naam(r.client_id), project: svc(r.service_slug), omschrijving: r.description,
         type: 'Maandfactuur', bedrag_excl: excl, btw_pct: btw, bedrag_incl: incl,
         status, ruweStatus: ruwe, herkomst: 'recurring', terugkerend: true, verantwoordelijke,
-        clickup_task_id: rij?.clickup_task_id ?? null, clickup_url: taakUrl(rij?.clickup_task_id ?? null), clickup_sync: sync(rij?.clickup_task_id ?? null), clickup_fout: null,
         volledig: ontbrekend.length === 0, ontbrekend,
         contract_id: null, contract_titel: null, recurring_id: r.id, invoice_id: rij?.invoice_id ?? null, wam_id: null,
         schema: `Maandelijks (${dagLabel}) · ${start} → ${eind ?? 'doorlopend'}${r.deleted_at ? ' · stopgezet' : ''}`,
         opmerking: rij?.note ?? null,
         acties: {
           bekijkenUrl: `/admin/invoices?maand=${m}`, aanpassenUrl: `/admin/invoices?maand=${m}`, voorbereidenUrl: null,
-          kanVerstuurd: actief, kanVerplaatsen: magVerplaatsen(status), kanAnnuleren: actief, kanSync: clickup && actief && !rij?.clickup_task_id,
+          kanVerstuurd: actief, kanVerplaatsen: magVerplaatsen(status), kanAnnuleren: actief, 
         },
       })
     }
@@ -160,13 +154,12 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
       client_id: o.client_id, klant: naam(o.client_id), project: contractTitel.get(o.contract_id) || null, omschrijving: o.omschrijving,
       type: typeLabel, bedrag_excl: excl, btw_pct: btw, bedrag_incl: Number(o.bedrag_incl) || inclFromExcl(excl, btw),
       status, ruweStatus: o.status, herkomst: 'contract', terugkerend: o.type === 'periodiek', verantwoordelijke,
-      clickup_task_id: o.clickup_task_id, clickup_url: o.clickup_url ?? taakUrl(o.clickup_task_id), clickup_sync: sync(o.clickup_task_id, o.sync_status === 'mislukt' ? (o.sync_fout ?? 'mislukt') : null), clickup_fout: o.sync_status === 'mislukt' ? o.sync_fout : null,
       volledig: ontbrekend.length === 0, ontbrekend,
       contract_id: o.contract_id, contract_titel: contractTitel.get(o.contract_id) ?? null, recurring_id: null, invoice_id: null, wam_id: null,
       schema: o.periode, opmerking: (o.aandachtspunten ?? []).join(' · ') || null,
       acties: {
         bekijkenUrl: `/admin/contracts/${o.contract_id}#facturatie`, aanpassenUrl: `/admin/contracts/${o.contract_id}#facturatie`, voorbereidenUrl: actief ? `/admin/contracts/${o.contract_id}#facturatie` : null,
-        kanVerstuurd: false, kanVerplaatsen: magVerplaatsen(status), kanAnnuleren: actief, kanSync: clickup && actief,
+        kanVerstuurd: false, kanVerplaatsen: magVerplaatsen(status), kanAnnuleren: actief, 
       },
     })
   }
@@ -183,11 +176,10 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
       client_id: null, klant: info?.klant ?? 'WAM-klant', project: info ? `${info.nr} · ${t.periode}` : t.periode, omschrijving: null,
       type: `WAM-termijn ${t.volgnr}`, bedrag_excl: excl, btw_pct: btw, bedrag_incl: inclFromExcl(excl, btw),
       status, ruweStatus: t.status, herkomst: 'wam', terugkerend: true, verantwoordelijke,
-      clickup_task_id: t.clickup_task_id, clickup_url: taakUrl(t.clickup_task_id), clickup_sync: sync(t.clickup_task_id), clickup_fout: null,
       volledig: true, ontbrekend: [],
       contract_id: null, contract_titel: null, recurring_id: null, invoice_id: null, wam_id: t.wam_id,
       schema: 'WAM-schema (Vesting)', opmerking: t.notitie,
-      acties: { bekijkenUrl: '/admin/vesting', aanpassenUrl: '/admin/vesting', voorbereidenUrl: '/admin/vesting', kanVerstuurd: false, kanVerplaatsen: false, kanAnnuleren: false, kanSync: false },
+      acties: { bekijkenUrl: '/admin/vesting', aanpassenUrl: '/admin/vesting', voorbereidenUrl: '/admin/vesting', kanVerstuurd: false, kanVerplaatsen: false, kanAnnuleren: false },
     })
   }
 
@@ -195,6 +187,6 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
   return {
     momenten: uit,
     klanten: [...klanten.values()].map((k) => ({ id: k.id, company_name: k.company_name ?? 'Onbekende klant' })),
-    verantwoordelijke, clickup,
+    verantwoordelijke,
   }
 }

@@ -13,12 +13,14 @@ import { ExportKnop } from '@/components/admin/export-knop'
 import { facturenWerkmap, type FactuurKostenExport } from '@/lib/excel/rapporten/facturen'
 import { KostenEnWinstDialoog, STATUS_STIJL } from './kosten-en-winst'
 import { KOSTEN_STATUS_LABEL, CLASSIFICATIE_LABEL, stelClassificatieVoor, type Classificatie, type KostenStatus } from '@/lib/facturen/kosten-winst'
+import { FactuurEditor } from './factuur-editor'
+import { Pencil } from 'lucide-react'
 
 type Row = {
   rowId: string; kind: 'eenmalig' | 'recurring'; sourceId: string; month: string
   client_id: string | null; service_slug: string | null; description: string | null
   amount_excl: number; vat_pct: number; amount_incl: number; status: string; revenue_id: string | null
-  billing_date: string; clickup_task_id: string | null
+  billing_date: string
   recurring_start: string | null; recurring_end: string | null; invoice_day: string | null
   contract_id?: string | null; contract_title?: string | null
   /** 'client' = onze omzet; setter_* = een afrekening die WIJ ontvangen. */
@@ -70,8 +72,8 @@ export function InvoicesPanel({ initialMonth }: { initialMonth?: string } = {}) 
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  const [openFactuur, setOpenFactuur] = useState<string | null>(null)
   const [kostenVan, setKostenVan] = useState<Row | null>(null)
-  const [clickupEnabled, setClickupEnabled] = useState(false)
   const [fClient, setFClient] = useState(''); const [fService, setFService] = useState(''); const [fStatus, setFStatus] = useState(''); const [fType, setFType] = useState(''); const [fContract, setFContract] = useState('')
 
   // Performance: enkel de geopende maand laden; bij maandwissel opnieuw.
@@ -80,7 +82,7 @@ export function InvoicesPanel({ initialMonth }: { initialMonth?: string } = {}) 
     try {
       const res = await fetch(`/api/admin/invoices?month=${month}`)
       const j = await res.json()
-      if (res.ok) { setRows(j.rows ?? []); setOmzet(j.omzet ?? []); setClients(j.clients ?? []); setSummary(j.summary); setClickupEnabled(!!j.clickup_enabled) }
+      if (res.ok) { setRows(j.rows ?? []); setOmzet(j.omzet ?? []); setClients(j.clients ?? []); setSummary(j.summary) }
     } catch { /* stil */ } finally { setLoading(false) }
   }, [month])
   useEffect(() => { load() }, [load])
@@ -115,12 +117,11 @@ export function InvoicesPanel({ initialMonth }: { initialMonth?: string } = {}) 
   }
 
   const warnings = (r: Row): { icon: string; text: string; tone: string }[] => {
-    if (r.status === 'geannuleerd') return [{ icon: '⚪', text: 'Geannuleerd', tone: 'text-gray-400' }]
+    if (r.status === 'geannuleerd' || r.status === 'gecrediteerd') return [{ icon: '🔴', text: INVOICE_STATUS_LABEL[r.status] ?? r.status, tone: 'text-red-600' }]
     const w: { icon: string; text: string; tone: string }[] = []
     // Prognoses zijn uit het platform verdwenen; daar wordt hier dus ook niet
     // meer op gewezen.
     if (r.status === 'te_versturen' && r.billing_date && r.billing_date < todayStr()) w.push({ icon: '🔴', text: 'Factuurdatum voorbij — nog niet verstuurd', tone: 'text-red-600' })
-    if (clickupEnabled && !r.clickup_task_id && r.status !== 'geannuleerd') w.push({ icon: '🟠', text: 'Geen ClickUp-taak', tone: 'text-amber-600' })
     if (w.length === 0) w.push({ icon: '🟢', text: 'In orde', tone: 'text-green-600' })
     return w
   }
@@ -136,7 +137,7 @@ export function InvoicesPanel({ initialMonth }: { initialMonth?: string } = {}) 
     catch (e) { toast.error(e instanceof Error ? e.message : 'Fout') } finally { setBusy(null) }
   }
   // Factuurdatum wijzigen — altijd, ook na versturen. Loopt via de planner-API
-  // zodat maand, gekoppelde factuur en ClickUp-taak op één plek meebewegen.
+  // zodat maand, gekoppelde factuur en contract op één plek meebewegen.
   const verplaats = async (r: Row, datum: string) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(datum) || datum === r.billing_date) return
     setBusy(r.rowId)
@@ -167,7 +168,7 @@ export function InvoicesPanel({ initialMonth }: { initialMonth?: string } = {}) 
         </div>
         <div className="flex items-center gap-2">
           <ExportKnop werkmap={() => facturenWerkmap({
-            month, rijen: filtered, alleRijen: rows, summary, clickupEnabled,
+            month, rijen: filtered, alleRijen: rows, summary,
             klantNaam: (id) => (id ? (clientName.get(id) ?? '—') : '—'),
             filters: [
               fClient ? { label: 'Klant', waarde: clientName.get(fClient) ?? fClient } : null,
@@ -180,12 +181,6 @@ export function InvoicesPanel({ initialMonth }: { initialMonth?: string } = {}) 
           <Link href="/admin/invoices/planner" className="btn-secondary text-sm"><CalendarDays className="h-4 w-4" />Planner</Link>
           <button onClick={() => setCreating(true)} className="btn-primary text-sm"><Plus className="h-4 w-4" />Nieuwe factuur</button>
         </div>
-      </div>
-
-      {/* ClickUp sync-status */}
-      <div className="inline-flex items-center gap-1.5 text-xs rounded-lg border px-2.5 py-1.5 w-fit" style={{ borderColor: clickupEnabled ? '#bbf7d0' : '#e5e7eb', background: clickupEnabled ? '#f0fdf4' : '#f9fafb' }}>
-        <span className={`h-2 w-2 rounded-full ${clickupEnabled ? 'bg-green-500' : 'bg-gray-300'}`} />
-        ClickUp sync: <b className={clickupEnabled ? 'text-green-700' : 'text-gray-500'}>{clickupEnabled ? 'Actief' : 'Niet geconfigureerd'}</b>
       </div>
 
       {/* 4 kaarten */}
@@ -295,6 +290,7 @@ export function InvoicesPanel({ initialMonth }: { initialMonth?: string } = {}) 
                         <input type="date" value={r.billing_date} disabled={busy === r.rowId} onChange={(e) => verplaats(r, e.target.value)} className="rounded-lg border border-gray-200 px-1.5 py-1 text-xs text-gray-700" aria-label="Factuurdatum" />
                       </label>
                     )}
+                    {r.kind === 'eenmalig' && <button onClick={() => setOpenFactuur(r.sourceId)} className="btn-secondary text-xs" title="Factuur openen: regels, statussen, betaling en historiek"><Pencil className="h-3.5 w-3.5" />Openen</button>}
                     {r.status === 'te_versturen' && <button onClick={() => setStatus(r, 'verstuurd')} disabled={busy === r.rowId} className="btn-primary text-xs" title="Markeer als verstuurd">{busy === r.rowId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}Verstuurd</button>}
                     {r.status === 'verstuurd' && <button onClick={() => setStatus(r, 'te_versturen')} disabled={busy === r.rowId} className="btn-secondary text-xs" title="Terug naar te versturen">Te versturen</button>}
                     {!cancelled && <button onClick={() => setStatus(r, 'geannuleerd')} disabled={busy === r.rowId} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400" title="Annuleren"><Ban className="h-3.5 w-3.5" /></button>}
@@ -309,6 +305,7 @@ export function InvoicesPanel({ initialMonth }: { initialMonth?: string } = {}) 
       )}
 
       {creating && <CreateDialog month={month} clients={clients} onClose={() => setCreating(false)} onSaved={(warning) => { setCreating(false); if (warning) toast.warning(warning); load() }} />}
+      {openFactuur && <FactuurEditor invoiceId={openFactuur} onClose={() => setOpenFactuur(null)} onSaved={() => load()} />}
       {kostenVan && (
         <KostenEnWinstDialoog
           ref={kostenVan.kind === 'recurring' ? { recurring_id: kostenVan.sourceId, maand: kostenVan.month } : { invoice_id: kostenVan.sourceId }}

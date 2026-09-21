@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, CalendarDays, CalendarRange, List, Loader2, X, ArrowUpDown, ExternalLink, Send, Eye, AlertTriangle, CheckCircle2, Clock, Wallet, FileWarning, CalendarCheck, Filter } from 'lucide-react'
+import { ChevronLeft, ChevronRight, CalendarDays, CalendarRange, List, Loader2, X, ArrowUpDown, Send, Eye, AlertTriangle, Clock, Wallet, FileWarning, CalendarCheck, Filter } from 'lucide-react'
 import {
   vandaagBrussel, isDatum, ymVan, plusDagen, maandStart, maandEind, maandRooster, roosterBereik, weekBereik, shiftYM,
   maandNaam, datumKort, datumLang, DAGEN_KORT, euro, euro2, kort, samenvatting, pasFiltersToe, dagTotalen, sorteer, filtersActief,
@@ -11,8 +11,10 @@ import {
   type Moment, type Filters, type Categorie, type Sortering,
 } from '@/lib/facturatie/planner-model'
 import { PlannerDetail, DagPaneel, StatusBadge, type Actie } from './planner-detail'
+import { FactuurEditor } from '../factuur-editor'
+import { Plus } from 'lucide-react'
 
-type Data = { momenten: Moment[]; klanten: { id: string; company_name: string }[]; vandaag: string; verantwoordelijke: string; clickup: boolean }
+type Data = { momenten: Moment[]; klanten: { id: string; company_name: string }[]; vandaag: string; verantwoordelijke: string }
 type Weergave = 'maand' | 'week' | 'lijst'
 const WEERGAVEN: Weergave[] = ['maand', 'week', 'lijst']
 const CATEGORIEEN: Categorie[] = ['vandaag', 'week', 'maand', 'achterstallig', 'ontbrekend']
@@ -32,6 +34,8 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
   const [dag, setDag] = useState<string | null>(null)
   const [bezig, setBezig] = useState(false)
   const [toonFilters, setToonFilters] = useState(false)
+  // Factuureditor: bestaande factuur openen, of een nieuwe op een gekozen dag.
+  const [editor, setEditor] = useState<{ invoiceId: string } | { datum: string } | null>(null)
   const cache = useRef(new Map<string, Data>())
   const onderweg = useRef(new Map<string, Promise<Data>>())
   const [versie, setVersie] = useState(0)
@@ -87,7 +91,7 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
       const r = await fetch('/api/admin/invoices/planner', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actie, id: m.id, datum: extra?.datum }) })
       const j = await r.json(); if (!r.ok) throw new Error(j.error || 'Actie mislukt')
       for (const w of (j.waarschuwingen ?? []) as string[]) toast.warning(w)
-      toast.success({ verstuurd: 'Gemarkeerd als verstuurd.', verplaats: `Facturatiedatum verplaatst naar ${extra?.datum ? datumLang(extra.datum) : ''}.`, annuleer: 'Facturatieopdracht geannuleerd.', sync: 'ClickUp gesynchroniseerd.' }[actie])
+      toast.success({ verstuurd: 'Gemarkeerd als verstuurd.', verplaats: `Facturatiedatum verplaatst naar ${extra?.datum ? datumLang(extra.datum) : ''}.`, annuleer: 'Facturatieopdracht geannuleerd.' }[actie])
       ververs()
       return true
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Actie mislukt'); return false }
@@ -147,6 +151,7 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
             </div>
             <button type="button" onClick={() => setToonFilters((v) => !v)} className={`btn-secondary text-xs ${toonFilters || filtersActief(filters) ? 'ring-1 ring-black' : ''}`}><Filter className="h-3.5 w-3.5" />Filters{filtersActief(filters) ? ' •' : ''}</button>
             {filtersActief(filters) && <button type="button" onClick={() => setFilters(LEEG_FILTERS)} className="btn-secondary text-xs"><X className="h-3.5 w-3.5" />Filters wissen</button>}
+            <button type="button" onClick={() => setEditor({ datum: vandaag })} className="btn-primary text-xs"><Plus className="h-3.5 w-3.5" />Nieuwe factuur</button>
           </div>
         </div>
 
@@ -166,7 +171,6 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
             <select className={sel} value={filters.type} onChange={(e) => zet('type', e.target.value)}><option value="">Alle factuurtypes</option>{typen.map((t) => <option key={t} value={t}>{t}</option>)}</select>
             <select className={sel} value={filters.terugkerend} onChange={(e) => zet('terugkerend', e.target.value as Filters['terugkerend'])}><option value="">Eenmalig en terugkerend</option><option value="eenmalig">Eenmalig</option><option value="terugkerend">Terugkerend</option></select>
             <select className={sel} value={filters.verantwoordelijke} onChange={(e) => zet('verantwoordelijke', e.target.value)}><option value="">Alle verantwoordelijken</option>{verantwoordelijken.map((v) => <option key={v} value={v}>{v}</option>)}</select>
-            <select className={sel} value={filters.clickup} onChange={(e) => zet('clickup', e.target.value as Filters['clickup'])}><option value="">ClickUp: alles</option><option value="gesynchroniseerd">Gesynchroniseerd</option><option value="geen">Geen taak</option><option value="mislukt">Sync mislukt</option></select>
             <select className={sel} value={filters.volledig} onChange={(e) => zet('volledig', e.target.value as Filters['volledig'])}><option value="">Volledig en onvolledig</option><option value="volledig">Volledige gegevens</option><option value="ontbrekend">Ontbrekende gegevens</option></select>
             <label className="flex items-center gap-1.5 text-xs text-gray-600"><input type="checkbox" checked={filters.toonGeannuleerd} onChange={(e) => zet('toonGeannuleerd', e.target.checked)} />Toon geannuleerd (geschiedenis)</label>
           </div>
@@ -208,7 +212,7 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
               )
             })}
           </div>
-          <p className="px-3 pt-2 text-[11px] text-gray-500 hidden sm:block">Sleep een factuur naar een andere dag om de facturatiedatum te verplaatsen. Verstuurde facturen kun je ook verplaatsen; geannuleerde niet.</p>
+          <p className="px-3 pt-2 text-[11px] text-gray-500 hidden sm:block">Sleep een factuur naar een andere dag om de facturatiedatum te verplaatsen; de datum wijzigt meteen in Facturen en op het contract. Geannuleerde of gecrediteerde facturen verplaats je niet.</p>
           <Legenda />
         </div>
       )}
@@ -233,6 +237,7 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
                         className={`w-full text-left rounded-lg border px-2 py-1.5 ${STATUS_INFO[m.status].cls} ${m.status === 'geannuleerd' ? 'line-through opacity-70' : ''} ${sleepbaar(m) ? 'cursor-grab active:cursor-grabbing' : ''}`}>
                         <div className="text-xs font-medium truncate">{m.klant}</div>
                         <div className="text-[10.5px] truncate">{euro(m.bedrag_excl)} · {m.type}</div>
+                        {m.contract_titel && <div className="text-[10px] truncate opacity-70">📄 {m.contract_titel}</div>}
                       </button>
                     ))}
                     {items.length === 0 && <div className="text-[11px] text-gray-300">—</div>}
@@ -241,7 +246,7 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
               )
             })}
           </div>
-          <p className="px-3 pt-2 text-[11px] text-gray-500 hidden sm:block">Sleep een factuur naar een andere dag om de facturatiedatum te verplaatsen. Verstuurde facturen kun je ook verplaatsen; geannuleerde niet.</p>
+          <p className="px-3 pt-2 text-[11px] text-gray-500 hidden sm:block">Sleep een factuur naar een andere dag om de facturatiedatum te verplaatsen; de datum wijzigt meteen in Facturen en op het contract. Geannuleerde of gecrediteerde facturen verplaats je niet.</p>
           <Legenda />
         </div>
       )}
@@ -266,12 +271,11 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
                   <Kop veld="status" sortering={sortering} onClick={sorteerOp}>Status</Kop>
                   <th className="px-3 py-2 font-medium">Herkomst</th>
                   <th className="px-3 py-2 font-medium">Verantw.</th>
-                  <th className="px-3 py-2 font-medium">ClickUp</th>
                   <th className="px-3 py-2 font-medium text-right">Acties</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {lijst.length === 0 && <tr><td colSpan={12} className="px-3 py-8 text-center text-gray-400">Geen facturatiemomenten voor deze selectie.</td></tr>}
+                {lijst.length === 0 && <tr><td colSpan={11} className="px-3 py-8 text-center text-gray-400">Geen facturatiemomenten voor deze selectie.</td></tr>}
                 {lijst.map((m) => (
                   <tr key={m.id} onClick={() => setGeselecteerd(m.id)} className={`hover:bg-gray-50 cursor-pointer ${m.status === 'geannuleerd' ? 'opacity-60' : ''}`}>
                     <td className="px-3 py-2 whitespace-nowrap">{datumNlKort(m.datum)}</td>
@@ -284,13 +288,10 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
                     <td className="px-3 py-2"><StatusBadge status={m.status} /></td>
                     <td className="px-3 py-2 text-gray-600 text-xs">{HERKOMST_LABEL[m.herkomst]}</td>
                     <td className="px-3 py-2 text-gray-600 text-xs">{m.verantwoordelijke ?? '—'}</td>
-                    <td className="px-3 py-2 text-xs">
-                      {m.clickup_task_id ? <a href={m.clickup_url ?? '#'} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 text-green-700"><CheckCircle2 className="h-3 w-3" />Taak<ExternalLink className="h-3 w-3" /></a>
-                        : m.clickup_sync === 'mislukt' ? <span className="text-red-600">Mislukt</span> : m.clickup_sync === 'nvt' ? <span className="text-gray-400">n.v.t.</span> : <span className="text-amber-700">Geen taak</span>}
-                    </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                       {m.acties.kanVerstuurd && <button type="button" disabled={bezig} onClick={() => voerUit('verstuurd', m)} className="btn-primary text-xs h-7 px-2" title="Markeren als verstuurd"><Send className="h-3 w-3" /></button>}
-                      {m.acties.bekijkenUrl && <Link href={m.acties.bekijkenUrl} prefetch={false} className="btn-secondary text-xs h-7 px-2 ml-1" title="Bekijken"><Eye className="h-3 w-3" /></Link>}
+                      {m.invoice_id && m.bron === 'invoice' ? <button type="button" onClick={() => setEditor({ invoiceId: m.invoice_id! })} className="btn-secondary text-xs h-7 px-2 ml-1" title="Factuur openen"><Eye className="h-3 w-3" /></button>
+                        : m.acties.bekijkenUrl && <Link href={m.acties.bekijkenUrl} prefetch={false} className="btn-secondary text-xs h-7 px-2 ml-1" title="Bekijken"><Eye className="h-3 w-3" /></Link>}
                     </td>
                   </tr>
                 ))}
@@ -300,8 +301,9 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
         </div>
       )}
 
-      {dag && <DagPaneel datum={dag} momenten={perDag.get(dag) ?? []} onSluit={() => setDag(null)} onKies={(m) => { setDag(null); setGeselecteerd(m.id) }} />}
-      {geselecteerdMoment && <PlannerDetail moment={geselecteerdMoment} onSluit={() => setGeselecteerd(null)} onActie={voerUit} bezig={bezig} />}
+      {dag && <DagPaneel datum={dag} momenten={perDag.get(dag) ?? []} onSluit={() => setDag(null)} onKies={(m) => { setDag(null); setGeselecteerd(m.id) }} onNieuw={(d) => { setDag(null); setEditor({ datum: d }) }} />}
+      {geselecteerdMoment && <PlannerDetail moment={geselecteerdMoment} onSluit={() => setGeselecteerd(null)} onActie={voerUit} bezig={bezig} onOpenFactuur={(id) => setEditor({ invoiceId: id })} />}
+      {editor && <FactuurEditor invoiceId={'invoiceId' in editor ? editor.invoiceId : null} standaard={'datum' in editor ? { invoice_date: editor.datum } : undefined} onClose={() => setEditor(null)} onSaved={() => ververs()} />}
     </div>
   )
 }

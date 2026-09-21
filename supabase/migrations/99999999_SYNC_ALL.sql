@@ -4186,3 +4186,149 @@ DROP TRIGGER IF EXISTS trg_contract_archief_onveranderlijk ON public.contract_ar
 CREATE TRIGGER trg_contract_archief_onveranderlijk BEFORE UPDATE OR DELETE ON public.contract_archief
   FOR EACH ROW EXECUTE FUNCTION public.contract_archief_onveranderlijk();
 INSERT INTO storage.buckets (id, name, public) VALUES ('contract-archief', 'contract-archief', false) ON CONFLICT (id) DO NOTHING;
+
+-- ── Contract → factuurvoorstel → bevestigde facturen (21 sep 2026) ────────────
+-- Facturen: verzend- en betaalstatus apart, vervaldatum, referentie, valuta,
+-- contractueel deel, reden bij annulering/creditering. Regels: artikel,
+-- eenheid, korting, extra kost. Wijzigingshistoriek per factuur. Voorstellen
+-- (contract_facturatie_opdrachten) met regels en de bron per veld, en een
+-- databankfunctie die de bevestiging in één transactie uitvoert.
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS due_date date;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS payment_term_days integer;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS reference text;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS currency text NOT NULL DEFAULT 'EUR';
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS periode text;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS sent_at timestamptz;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS betaalstatus text NOT NULL DEFAULT 'niet_betaald';
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS betaald_bedrag numeric(12,2) NOT NULL DEFAULT 0;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS betaald_op date;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS credited_at timestamptz;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS status_reden text;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS contract_bedrag_excl numeric(12,2);
+-- Een eventuele statuscontrole op invoices zou 'gecrediteerd' weigeren; de app bewaakt de statussen.
+DO $$ DECLARE c text; BEGIN
+  SELECT conname INTO c FROM pg_constraint WHERE conrelid = 'public.invoices'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) ILIKE '%status%' LIMIT 1;
+  IF c IS NOT NULL THEN EXECUTE format('ALTER TABLE public.invoices DROP CONSTRAINT %I', c); END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_invoices_due_date ON public.invoices (due_date);
+CREATE INDEX IF NOT EXISTS idx_invoices_betaalstatus ON public.invoices (betaalstatus);
+
+ALTER TABLE public.invoice_lines ADD COLUMN IF NOT EXISTS artikel text;
+ALTER TABLE public.invoice_lines ADD COLUMN IF NOT EXISTS eenheid text NOT NULL DEFAULT 'stuk';
+ALTER TABLE public.invoice_lines ADD COLUMN IF NOT EXISTS korting_pct numeric(6,2) NOT NULL DEFAULT 0;
+ALTER TABLE public.invoice_lines ADD COLUMN IF NOT EXISTS is_extra boolean NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS idx_invoice_lines_invoice ON public.invoice_lines (invoice_id);
+
+CREATE TABLE IF NOT EXISTS public.invoice_wijzigingen (
+  id bigserial PRIMARY KEY,
+  invoice_id uuid NOT NULL REFERENCES public.invoices(id) ON DELETE CASCADE,
+  actie text NOT NULL,                 -- aangemaakt | aangepast | verplaatst | verstuurd | geannuleerd | gecrediteerd | betaalstatus | bevestigd
+  veld text,
+  oud text,
+  nieuw text,
+  reden text,
+  actor_email text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_wijzigingen_invoice ON public.invoice_wijzigingen (invoice_id, created_at DESC);
+ALTER TABLE public.invoice_wijzigingen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.invoice_wijzigingen FROM anon, authenticated;
+
+ALTER TABLE public.contract_facturatie_opdrachten ADD COLUMN IF NOT EXISTS regels jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE public.contract_facturatie_opdrachten ADD COLUMN IF NOT EXISTS bron_velden jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE public.contract_facturatie_opdrachten ADD COLUMN IF NOT EXISTS handmatig_gewijzigd boolean NOT NULL DEFAULT false;
+ALTER TABLE public.contract_facturatie_opdrachten ADD COLUMN IF NOT EXISTS bevestigd_op timestamptz;
+ALTER TABLE public.contract_facturatie_opdrachten ADD COLUMN IF NOT EXISTS bevestigd_door text;
+ALTER TABLE public.contract_facturatie_opdrachten ADD COLUMN IF NOT EXISTS vervaldatum date;
+-- Twee voorstellen op dezelfde dag (bv. een extra factuur ervoor of erna) moeten kunnen.
+ALTER TABLE public.contract_facturatie_opdrachten DROP CONSTRAINT IF EXISTS contract_facturatie_opdrachte_contract_id_factuurdatum_type_key;
+
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS facturatie_bevestigd_op timestamptz;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS facturatie_gewijzigd_na_bevestiging boolean NOT NULL DEFAULT false;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS facturatie_gestopt_op date;
+
+-- De bevestiging: alle open voorstellen van een contract in één transactie
+-- omzetten naar facturen (+ regels). Idempotent: een voorstel met invoice_id
+-- wordt overgeslagen, en de rijen worden vergrendeld zodat een dubbele klik
+-- geen dubbele facturen kan maken. Mislukt er iets, dan wordt niets aangemaakt.
+CREATE OR REPLACE FUNCTION public.bevestig_factuurplanning(p_contract_id uuid, p_actor_id uuid, p_actor_email text, p_ids uuid[] DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  r record; l jsonb; v_inv uuid; v_aangemaakt int := 0; v_overgeslagen int := 0; v_ids uuid[] := '{}';
+  v_volgnr int; v_excl numeric; v_btw numeric; v_incl numeric; v_titel text; v_client uuid; v_service text; v_termijn int;
+  v_r_excl numeric; v_r_btw numeric;
+BEGIN
+  SELECT client_id, service_slug, title INTO v_client, v_service, v_titel FROM contracts WHERE id = p_contract_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Contract niet gevonden.'; END IF;
+
+  FOR r IN
+    SELECT * FROM contract_facturatie_opdrachten
+    WHERE contract_id = p_contract_id AND (p_ids IS NULL OR id = ANY(p_ids))
+    ORDER BY factuurdatum, volgnr FOR UPDATE
+  LOOP
+    IF r.invoice_id IS NOT NULL OR r.status IN ('afgehandeld', 'geannuleerd') THEN
+      v_overgeslagen := v_overgeslagen + 1; CONTINUE;
+    END IF;
+    IF r.status = 'controle_vereist' THEN
+      RAISE EXCEPTION 'Voorstel % (%) vereist nog controle. Vul de ontbrekende gegevens in en markeer het als gecontroleerd.', r.volgnr, to_char(r.factuurdatum, 'DD/MM/YYYY');
+    END IF;
+    IF coalesce(r.client_id, v_client) IS NULL THEN RAISE EXCEPTION 'Er is geen klant gekoppeld aan dit contract.'; END IF;
+    IF r.omschrijving IS NULL OR btrim(r.omschrijving) = '' THEN RAISE EXCEPTION 'Voorstel % heeft geen omschrijving.', r.volgnr; END IF;
+
+    -- Bedrag: uit de regels als die er zijn (in centen gerekend), anders het losse bedrag.
+    v_excl := 0; v_btw := 0;
+    IF r.regels IS NOT NULL AND jsonb_typeof(r.regels) = 'array' AND jsonb_array_length(r.regels) > 0 THEN
+      FOR l IN SELECT * FROM jsonb_array_elements(r.regels) LOOP
+        v_r_excl := round(coalesce((l->>'aantal')::numeric, 1) * coalesce((l->>'prijs_excl')::numeric, 0) * (1 - least(100, greatest(0, coalesce((l->>'korting_pct')::numeric, 0))) / 100), 2);
+        v_r_btw := round(v_r_excl * coalesce((l->>'btw_pct')::numeric, coalesce(r.btw_pct, 21)) / 100, 2);
+        v_excl := v_excl + v_r_excl; v_btw := v_btw + v_r_btw;
+      END LOOP;
+    ELSE
+      v_excl := round(coalesce(r.bedrag_excl, 0), 2);
+      v_btw := round(v_excl * coalesce(r.btw_pct, 21) / 100, 2);
+    END IF;
+    IF v_excl <= 0 THEN RAISE EXCEPTION 'Voorstel % (%) heeft geen bedrag.', r.volgnr, to_char(r.factuurdatum, 'DD/MM/YYYY'); END IF;
+    v_incl := v_excl + v_btw;
+    v_termijn := coalesce(r.betalingstermijn_dagen, 30);
+
+    INSERT INTO invoices (client_id, service_slug, invoice_month, invoice_date, description, amount_excl, vat_pct, amount_incl, status,
+                          contract_id, created_by, kind, source, due_date, payment_term_days, contract_bedrag_excl, periode, currency, betaalstatus, betaald_bedrag)
+    VALUES (coalesce(r.client_id, v_client), v_service, coalesce(r.periode, to_char(r.factuurdatum, 'YYYY-MM')), r.factuurdatum, r.omschrijving,
+            v_excl, coalesce(r.btw_pct, 21), v_incl, 'te_versturen',
+            p_contract_id, p_actor_id, 'client', 'contract', coalesce(r.vervaldatum, r.factuurdatum + v_termijn), v_termijn,
+            (SELECT coalesce(sum(round(coalesce((x->>'aantal')::numeric, 1) * coalesce((x->>'prijs_excl')::numeric, 0) * (1 - least(100, greatest(0, coalesce((x->>'korting_pct')::numeric, 0))) / 100), 2)), v_excl)
+               FROM jsonb_array_elements(CASE WHEN jsonb_typeof(r.regels) = 'array' AND jsonb_array_length(r.regels) > 0 THEN r.regels ELSE '[]'::jsonb END) x
+               WHERE coalesce((x->>'is_extra')::boolean, false) = false),
+            r.periode, 'EUR', 'niet_betaald', 0)
+    RETURNING id INTO v_inv;
+
+    v_volgnr := 0;
+    IF r.regels IS NOT NULL AND jsonb_typeof(r.regels) = 'array' AND jsonb_array_length(r.regels) > 0 THEN
+      FOR l IN SELECT * FROM jsonb_array_elements(r.regels) LOOP
+        v_volgnr := v_volgnr + 1;
+        INSERT INTO invoice_lines (invoice_id, volgnr, omschrijving, artikel, aantal, eenheid, prijs_excl, btw_pct, korting_pct, is_extra, classificatie, opmerking)
+        VALUES (v_inv, v_volgnr, coalesce(nullif(l->>'omschrijving', ''), nullif(l->>'artikel', ''), r.omschrijving), nullif(l->>'artikel', ''),
+                coalesce((l->>'aantal')::numeric, 1), coalesce(nullif(l->>'eenheid', ''), 'stuk'), coalesce((l->>'prijs_excl')::numeric, 0),
+                coalesce((l->>'btw_pct')::numeric, coalesce(r.btw_pct, 21)), coalesce((l->>'korting_pct')::numeric, 0),
+                coalesce((l->>'is_extra')::boolean, false), coalesce(nullif(l->>'classificatie', ''), 'dienst'), nullif(l->>'opmerking', ''));
+      END LOOP;
+    ELSE
+      INSERT INTO invoice_lines (invoice_id, volgnr, omschrijving, artikel, aantal, eenheid, prijs_excl, btw_pct, korting_pct, is_extra, classificatie)
+      VALUES (v_inv, 1, r.omschrijving, left(coalesce(v_titel, r.omschrijving), 120), 1, 'forfait', v_excl, coalesce(r.btw_pct, 21), 0, false, 'dienst');
+    END IF;
+
+    INSERT INTO invoice_wijzigingen (invoice_id, actie, veld, oud, nieuw, actor_email)
+    VALUES (v_inv, 'bevestigd', 'voorstel', null, 'Aangemaakt uit het bevestigde factuurvoorstel van contract ' || p_contract_id::text || ' (voorstel ' || r.volgnr || '/' || r.aantal || ')', p_actor_email);
+
+    UPDATE contract_facturatie_opdrachten
+       SET invoice_id = v_inv, status = 'afgehandeld', bevestigd_op = now(), bevestigd_door = p_actor_email, updated_at = now()
+     WHERE id = r.id;
+    v_aangemaakt := v_aangemaakt + 1; v_ids := v_ids || v_inv;
+  END LOOP;
+
+  IF v_aangemaakt > 0 THEN
+    UPDATE contracts SET facturatie_bevestigd_op = now(), facturatie_gewijzigd_na_bevestiging = false WHERE id = p_contract_id;
+  END IF;
+  RETURN jsonb_build_object('aangemaakt', v_aangemaakt, 'overgeslagen', v_overgeslagen, 'invoice_ids', to_jsonb(v_ids));
+END $$;
+REVOKE ALL ON FUNCTION public.bevestig_factuurplanning(uuid, uuid, text, uuid[]) FROM public, anon, authenticated;

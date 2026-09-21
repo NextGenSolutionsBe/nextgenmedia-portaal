@@ -5,16 +5,18 @@
 import { lastDayOfMonth, shiftYM } from '@/lib/invoices'
 
 // ── Statussen ────────────────────────────────────────────────────────────────
-export type PlannerStatus = 'gepland' | 'te_versturen' | 'controle_vereist' | 'verstuurd' | 'betaald' | 'achterstallig' | 'geannuleerd'
+export type PlannerStatus = 'gepland' | 'te_versturen' | 'controle_vereist' | 'verstuurd' | 'betaald' | 'achterstallig' | 'geannuleerd' | 'gecrediteerd'
 
 export const PLANNER_STATUSSEN: { key: PlannerStatus; label: string; cls: string; stip: string }[] = [
-  { key: 'gepland', label: 'Gepland', cls: 'bg-blue-50 text-blue-700 border-blue-200', stip: 'bg-blue-500' },
-  { key: 'te_versturen', label: 'Te versturen', cls: 'bg-[#fff848]/50 text-yellow-900 border-yellow-300', stip: 'bg-yellow-400' },
-  { key: 'controle_vereist', label: 'Controle vereist', cls: 'bg-orange-50 text-orange-800 border-orange-200', stip: 'bg-orange-500' },
-  { key: 'verstuurd', label: 'Verstuurd', cls: 'bg-green-50 text-green-700 border-green-200', stip: 'bg-green-500' },
-  { key: 'betaald', label: 'Betaald', cls: 'bg-emerald-50 text-emerald-800 border-emerald-200', stip: 'bg-emerald-600' },
-  { key: 'achterstallig', label: 'Achterstallig', cls: 'bg-red-50 text-red-700 border-red-200', stip: 'bg-red-500' },
-  { key: 'geannuleerd', label: 'Geannuleerd', cls: 'bg-gray-100 text-gray-500 border-gray-200', stip: 'bg-gray-400' },
+  // Grijs = te versturen (gepland of vandaag), groen = verstuurd, rood = geannuleerd/gecrediteerd — dezelfde kleuren als in Facturen en op het contract.
+  { key: 'gepland', label: 'Te versturen (gepland)', cls: 'bg-gray-50 text-gray-600 border-gray-200', stip: 'bg-gray-300' },
+  { key: 'te_versturen', label: 'Te versturen', cls: 'bg-gray-100 text-gray-800 border-gray-300', stip: 'bg-gray-500' },
+  { key: 'controle_vereist', label: 'Controle vereist', cls: 'bg-amber-50 text-amber-800 border-amber-200', stip: 'bg-amber-500' },
+  { key: 'verstuurd', label: 'Verstuurd', cls: 'bg-green-100 text-green-800 border-green-200', stip: 'bg-green-500' },
+  { key: 'betaald', label: 'Betaald', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200', stip: 'bg-emerald-600' },
+  { key: 'achterstallig', label: 'Te versturen · datum voorbij', cls: 'bg-orange-50 text-orange-800 border-orange-300', stip: 'bg-orange-500' },
+  { key: 'geannuleerd', label: 'Geannuleerd', cls: 'bg-red-50 text-red-700 border-red-200', stip: 'bg-red-500' },
+  { key: 'gecrediteerd', label: 'Gecrediteerd', cls: 'bg-red-100 text-red-700 border-red-200', stip: 'bg-red-600' },
 ]
 export const STATUS_INFO = Object.fromEntries(PLANNER_STATUSSEN.map((s) => [s.key, s])) as Record<PlannerStatus, (typeof PLANNER_STATUSSEN)[number]>
 
@@ -26,7 +28,7 @@ export const OPEN_STATUSSEN: PlannerStatus[] = ['gepland', 'te_versturen', 'cont
  * betaalde factuur: een verkeerde datum moet je kunnen rechtzetten. Enkel een
  * geannuleerd moment verplaats je niet meer, want dat bestaat niet meer.
  */
-export const magVerplaatsen = (status: PlannerStatus): boolean => status !== 'geannuleerd'
+export const magVerplaatsen = (status: PlannerStatus): boolean => status !== 'geannuleerd' && status !== 'gecrediteerd'
 
 // ── Herkomst ─────────────────────────────────────────────────────────────────
 export type Herkomst = 'eenmalig' | 'recurring' | 'contract' | 'wam'
@@ -35,7 +37,6 @@ export const HERKOMST_LABEL: Record<Herkomst, string> = {
 }
 
 export type Bron = 'invoice' | 'recurring' | 'opdracht' | 'wam'
-export type ClickupSync = 'gesynchroniseerd' | 'geen' | 'mislukt' | 'nvt'
 
 /** Eén gepland facturatiemoment, ongeacht waar het vandaan komt. */
 export type Moment = {
@@ -60,10 +61,6 @@ export type Moment = {
   herkomst: Herkomst
   terugkerend: boolean
   verantwoordelijke: string | null
-  clickup_task_id: string | null
-  clickup_url: string | null
-  clickup_sync: ClickupSync
-  clickup_fout: string | null
   volledig: boolean
   ontbrekend: string[]
   contract_id: string | null
@@ -80,7 +77,6 @@ export type Moment = {
     kanVerstuurd: boolean
     kanVerplaatsen: boolean
     kanAnnuleren: boolean
-    kanSync: boolean
   }
 }
 
@@ -133,6 +129,7 @@ export const euro2 = (n: number): string => new Intl.NumberFormat('nl-BE', { sty
 export function bepaalStatus(p: { ruweStatus: string | null | undefined; datum: string; ontbrekend: string[]; vandaag: string }): PlannerStatus {
   const r = (p.ruweStatus ?? '').toLowerCase()
   if (r === 'geannuleerd') return 'geannuleerd'
+  if (r === 'gecrediteerd') return 'gecrediteerd'
   if (r === 'betaald') return 'betaald'
   if (r === 'verstuurd' || r === 'gefactureerd' || r === 'afgehandeld') return 'verstuurd'
   if (r === 'controle_vereist' || p.ontbrekend.length > 0) return 'controle_vereist'
@@ -165,7 +162,7 @@ export function inCategorie(m: Moment, cat: Categorie, vandaag: string): boolean
 
 export function samenvatting(momenten: Moment[], vandaag: string): Samenvatting {
   const ym = ymVan(vandaag)
-  const maandAlle = momenten.filter((m) => ymVan(m.datum) === ym && m.status !== 'geannuleerd')
+  const maandAlle = momenten.filter((m) => ymVan(m.datum) === ym && m.status !== 'geannuleerd' && m.status !== 'gecrediteerd')
   return {
     vandaag: momenten.filter((m) => inCategorie(m, 'vandaag', vandaag)).length,
     week: momenten.filter((m) => inCategorie(m, 'week', vandaag)).length,
@@ -184,16 +181,15 @@ export type Filters = {
   klant: string; project: string; status: PlannerStatus | ''; type: string
   terugkerend: '' | 'eenmalig' | 'terugkerend'
   verantwoordelijke: string
-  clickup: '' | ClickupSync
   volledig: '' | 'volledig' | 'ontbrekend'
   toonGeannuleerd: boolean
 }
-export const LEEG_FILTERS: Filters = { categorie: null, van: '', tot: '', klant: '', project: '', status: '', type: '', terugkerend: '', verantwoordelijke: '', clickup: '', volledig: '', toonGeannuleerd: false }
+export const LEEG_FILTERS: Filters = { categorie: null, van: '', tot: '', klant: '', project: '', status: '', type: '', terugkerend: '', verantwoordelijke: '', volledig: '', toonGeannuleerd: false }
 export const filtersActief = (f: Filters): boolean => JSON.stringify({ ...f, van: '', tot: '' }) !== JSON.stringify(LEEG_FILTERS) || !!f.van || !!f.tot
 
 export function pasFiltersToe(momenten: Moment[], f: Filters, vandaag: string): Moment[] {
   return momenten.filter((m) => {
-    if (m.status === 'geannuleerd' && !f.toonGeannuleerd && f.status !== 'geannuleerd') return false
+    if ((m.status === 'geannuleerd' || m.status === 'gecrediteerd') && !f.toonGeannuleerd && f.status !== m.status) return false
     if (f.categorie && !inCategorie(m, f.categorie, vandaag)) return false
     if (f.van && m.datum < f.van) return false
     if (f.tot && m.datum > f.tot) return false
@@ -204,7 +200,6 @@ export function pasFiltersToe(momenten: Moment[], f: Filters, vandaag: string): 
     if (f.terugkerend === 'terugkerend' && !m.terugkerend) return false
     if (f.terugkerend === 'eenmalig' && m.terugkerend) return false
     if (f.verantwoordelijke && (m.verantwoordelijke ?? '') !== f.verantwoordelijke) return false
-    if (f.clickup && m.clickup_sync !== f.clickup) return false
     if (f.volledig === 'volledig' && !m.volledig) return false
     if (f.volledig === 'ontbrekend' && m.volledig) return false
     return true
@@ -215,7 +210,7 @@ export function pasFiltersToe(momenten: Moment[], f: Filters, vandaag: string): 
 export function dagTotalen(momenten: Moment[]): Map<string, { aantal: number; bedrag: number }> {
   const uit = new Map<string, { aantal: number; bedrag: number }>()
   for (const m of momenten) {
-    if (m.status === 'geannuleerd') continue
+    if (m.status === 'geannuleerd' || m.status === 'gecrediteerd') continue
     const t = uit.get(m.datum) ?? { aantal: 0, bedrag: 0 }
     t.aantal++; t.bedrag += m.bedrag_excl
     uit.set(m.datum, t)
@@ -224,7 +219,7 @@ export function dagTotalen(momenten: Moment[]): Map<string, { aantal: number; be
 }
 
 export type Sortering = { veld: 'datum' | 'klant' | 'bedrag' | 'status'; richting: 'asc' | 'desc' }
-const STATUS_VOLGORDE: PlannerStatus[] = ['achterstallig', 'te_versturen', 'controle_vereist', 'gepland', 'verstuurd', 'betaald', 'geannuleerd']
+const STATUS_VOLGORDE: PlannerStatus[] = ['achterstallig', 'te_versturen', 'controle_vereist', 'gepland', 'verstuurd', 'betaald', 'geannuleerd', 'gecrediteerd']
 export function sorteer(momenten: Moment[], s: Sortering): Moment[] {
   const r = s.richting === 'asc' ? 1 : -1
   return [...momenten].sort((a, b) => {

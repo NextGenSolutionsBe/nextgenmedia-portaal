@@ -2,11 +2,11 @@
 
 import { useState, type ReactNode } from 'react'
 import Link from 'next/link'
-import { X, ExternalLink, Send, CalendarClock, Ban, RefreshCw, Eye, Pencil, FilePlus2, Loader2, AlertTriangle, Repeat } from 'lucide-react'
+import { X, Send, CalendarClock, Ban, Eye, Pencil, FilePlus2, Loader2, AlertTriangle, Repeat, Plus } from 'lucide-react'
 import { Bevestig, INP } from '@/app/admin/instellingen/ui'
 import { STATUS_INFO, HERKOMST_LABEL, datumLang, datumNl, euro2, isDatum, type Moment } from '@/lib/facturatie/planner-model'
 
-export type Actie = 'verstuurd' | 'verplaats' | 'annuleer' | 'sync'
+export type Actie = 'verstuurd' | 'verplaats' | 'annuleer'
 export type ActieUitvoerder = (actie: Actie, moment: Moment, extra?: { datum?: string }) => Promise<boolean>
 
 function Rij({ label, children }: { label: string; children: ReactNode }) {
@@ -39,7 +39,8 @@ function Lade({ titel, onSluit, children, breed }: { titel: ReactNode; onSluit: 
 }
 
 /** Detailpaneel van één facturatiemoment, met enkel de acties die van toepassing zijn. */
-export function PlannerDetail({ moment: m, onSluit, onActie, bezig }: { moment: Moment; onSluit: () => void; onActie: ActieUitvoerder; bezig: boolean }) {
+export function PlannerDetail({ moment: m, onSluit, onActie, bezig, onOpenFactuur }: { moment: Moment; onSluit: () => void; onActie: ActieUitvoerder; bezig: boolean; onOpenFactuur?: (invoiceId: string) => void }) {
+  const isFactuur = m.bron === 'invoice' && !!m.invoice_id && !!onOpenFactuur
   const [verplaatsen, setVerplaatsen] = useState(false)
   const [nieuweDatum, setNieuweDatum] = useState(m.datum)
   const [vraagAnnuleer, setVraagAnnuleer] = useState(false)
@@ -73,12 +74,6 @@ export function PlannerDetail({ moment: m, onSluit, onActie, bezig }: { moment: 
         <Rij label="Status"><StatusBadge status={m.status} /></Rij>
         <Rij label="Herkomst">{HERKOMST_LABEL[m.herkomst]}</Rij>
         <Rij label="Verantwoordelijke">{m.verantwoordelijke ?? '—'}</Rij>
-        <Rij label="ClickUp-taak">
-          {m.clickup_task_id
-            ? <a href={m.clickup_url ?? '#'} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline decoration-gray-300 hover:decoration-black">{m.clickup_task_id}<ExternalLink className="h-3 w-3" /></a>
-            : <span className={m.clickup_sync === 'nvt' ? 'text-gray-400' : 'text-amber-700'}>{m.clickup_sync === 'nvt' ? 'ClickUp niet ingesteld' : 'Geen taak'}</span>}
-          {m.clickup_fout && <div className="text-[11px] text-red-600 mt-0.5">Laatste sync mislukt: {m.clickup_fout}</div>}
-        </Rij>
         {m.opmerking && <Rij label="Interne opmerkingen">{m.opmerking}</Rij>}
         <Rij label="Referentie"><code className="text-[11px] bg-gray-100 rounded px-1">{m.id}</code></Rij>
       </dl>
@@ -86,13 +81,12 @@ export function PlannerDetail({ moment: m, onSluit, onActie, bezig }: { moment: 
       <div className="mt-4 space-y-2">
         <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">Acties</div>
         <div className="flex flex-wrap gap-2">
-          {a.bekijkenUrl && <Link href={a.bekijkenUrl} prefetch={false} className="btn-secondary text-xs"><Eye className="h-3.5 w-3.5" />Bekijken</Link>}
-          {a.aanpassenUrl && <Link href={a.aanpassenUrl} prefetch={false} className="btn-secondary text-xs"><Pencil className="h-3.5 w-3.5" />Aanpassen</Link>}
+          {isFactuur && <button type="button" onClick={() => onOpenFactuur!(m.invoice_id!)} className="btn-primary text-xs"><Pencil className="h-3.5 w-3.5" />{m.status === 'te_versturen' || m.status === 'gepland' ? 'Factuur openen en bewerken' : 'Factuur openen'}</button>}
+          {!isFactuur && a.bekijkenUrl && <Link href={a.bekijkenUrl} prefetch={false} className="btn-secondary text-xs"><Eye className="h-3.5 w-3.5" />Bekijken</Link>}
+          {!isFactuur && a.aanpassenUrl && <Link href={a.aanpassenUrl} prefetch={false} className="btn-secondary text-xs"><Pencil className="h-3.5 w-3.5" />Aanpassen</Link>}
           {a.voorbereidenUrl && <Link href={a.voorbereidenUrl} prefetch={false} className="btn-secondary text-xs"><FilePlus2 className="h-3.5 w-3.5" />Factuur voorbereiden</Link>}
           {a.kanVerstuurd && <button type="button" disabled={bezig} onClick={() => onActie('verstuurd', m)} className="btn-primary text-xs">{bezig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}Markeren als verstuurd</button>}
           {a.kanVerplaatsen && <button type="button" disabled={bezig} onClick={() => setVerplaatsen((v) => !v)} className="btn-secondary text-xs"><CalendarClock className="h-3.5 w-3.5" />Facturatiedatum verplaatsen</button>}
-          {m.clickup_url && <a href={m.clickup_url} target="_blank" rel="noreferrer" className="btn-secondary text-xs"><ExternalLink className="h-3.5 w-3.5" />ClickUp-taak openen</a>}
-          {a.kanSync && <button type="button" disabled={bezig} onClick={() => onActie('sync', m)} className="btn-secondary text-xs"><RefreshCw className="h-3.5 w-3.5" />{m.clickup_task_id ? 'Opnieuw synchroniseren' : 'ClickUp-taak aanmaken'}</button>}
           {a.kanAnnuleren && <button type="button" disabled={bezig} onClick={() => setVraagAnnuleer(true)} className="btn-secondary text-xs text-red-600"><Ban className="h-3.5 w-3.5" />Opdracht annuleren</button>}
         </div>
         {verplaatsen && (
@@ -103,7 +97,7 @@ export function PlannerDetail({ moment: m, onSluit, onActie, bezig }: { moment: 
             </div>
             <button type="button" disabled={bezig || !isDatum(nieuweDatum) || nieuweDatum === m.datum} onClick={async () => { const ok = await onActie('verplaats', m, { datum: nieuweDatum }); if (ok) setVerplaatsen(false) }} className="btn-primary text-xs">Verplaatsen</button>
             <button type="button" onClick={() => setVerplaatsen(false)} className="btn-secondary text-xs">Annuleren</button>
-            {(m.status === 'verstuurd' || m.status === 'betaald') && <p className="w-full text-[11px] text-gray-500">Ook een verstuurde of betaalde factuur mag van datum veranderen; een gekoppelde ClickUp-taak krijgt dezelfde vervaldag.</p>}
+            {(m.status === 'verstuurd' || m.status === 'betaald') && <p className="w-full text-[11px] text-gray-500">Ook een verstuurde of betaalde factuur mag van datum veranderen; de nieuwe datum staat meteen in Facturen en op het contract.</p>}
           </div>
         )}
         {!a.kanVerstuurd && !a.kanVerplaatsen && !a.kanAnnuleren && m.bron === 'wam' && <p className="text-[11px] text-gray-500">WAM-termijnen beheer je in Vesting → WAM-portefeuille.</p>}
@@ -111,7 +105,7 @@ export function PlannerDetail({ moment: m, onSluit, onActie, bezig }: { moment: 
 
       {vraagAnnuleer && (
         <Bevestig titel="Facturatieopdracht annuleren" gevaarlijk bezig={bezig} bevestigLabel="Ja, annuleren"
-          tekst={<>Je annuleert de facturatie van <b>{m.klant}</b> op {datumNl(m.datum)} ({euro2(m.bedrag_excl)} excl. btw). Het item verdwijnt uit de standaardplanner maar blijft in de geschiedenis. Een gekoppelde ClickUp-taak wordt afgesloten, niet verwijderd.</>}
+          tekst={<>Je annuleert de facturatie van <b>{m.klant}</b> op {datumNl(m.datum)} ({euro2(m.bedrag_excl)} excl. btw). Het item verdwijnt uit de standaardplanner maar blijft in de geschiedenis.</>}
           onAnnuleer={() => setVraagAnnuleer(false)}
           onBevestig={async () => { const ok = await onActie('annuleer', m); if (ok) { setVraagAnnuleer(false); onSluit() } }} />
       )}
@@ -120,7 +114,7 @@ export function PlannerDetail({ moment: m, onSluit, onActie, bezig }: { moment: 
 }
 
 /** Alle momenten van één dag (na "+N meer" of klik op een dag). */
-export function DagPaneel({ datum, momenten, onSluit, onKies }: { datum: string; momenten: Moment[]; onSluit: () => void; onKies: (m: Moment) => void }) {
+export function DagPaneel({ datum, momenten, onSluit, onKies, onNieuw }: { datum: string; momenten: Moment[]; onSluit: () => void; onKies: (m: Moment) => void; onNieuw?: (datum: string) => void }) {
   const totaal = momenten.filter((m) => m.status !== 'geannuleerd').reduce((s, m) => s + m.bedrag_excl, 0)
   return (
     <Lade onSluit={onSluit} breed titel={
@@ -129,6 +123,7 @@ export function DagPaneel({ datum, momenten, onSluit, onKies }: { datum: string;
         <div className="text-xs text-gray-500 mt-0.5">{momenten.length} facturatiemoment{momenten.length === 1 ? '' : 'en'} · {euro2(totaal)} excl. btw</div>
       </>
     }>
+      {onNieuw && <button type="button" onClick={() => onNieuw(datum)} className="btn-secondary text-xs mb-3"><Plus className="h-3.5 w-3.5" />Nieuwe factuur op deze dag</button>}
       {momenten.length === 0 ? <p className="text-sm text-gray-400">Niets gepland op deze dag.</p> : (
         <div className="divide-y divide-gray-50">
           {momenten.map((m) => (

@@ -5,7 +5,6 @@ import { createAdminSupabaseClient, requireAdmin } from '@/lib/supabase/server'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { volgendNr, wamSchema, DIENSTEN, FREQUENTIES, type Frequentie } from '@/lib/vesting'
 import { inclFromExcl } from '@/lib/invoices'
-import { createInvoiceTask, completeInvoiceTask, INVOICE_ASSIGNEE_NAME } from '@/lib/clickup'
 
 export const dynamic = 'force-dynamic'
 
@@ -210,7 +209,7 @@ async function synchroniseerTermijnen(admin: Admin, wamId: string): Promise<void
   if (teVer.length) await admin.from('vesting_wam_termijnen').delete().in('id', teVer)
 }
 
-/** Een echte factuur voor één termijn: rij in Facturen + ClickUp-taak voor Bram. */
+/** Een echte factuur voor één termijn: rij in Facturen (en dus in de planner). */
 async function factureerTermijn(admin: Admin, termijnId: string, actorId: string): Promise<{ invoiceId: string; waarschuwing: string | null }> {
   const { data: t } = await admin.from('vesting_wam_termijnen').select('*').eq('id', termijnId).maybeSingle()
   if (!t) throw new Error('Termijn niet gevonden.')
@@ -232,7 +231,6 @@ async function factureerTermijn(admin: Admin, termijnId: string, actorId: string
     if (c?.company_name) klantnaam = String(c.company_name)
   }
 
-  const taak = await createInvoiceTask({ clientName: klantnaam, amountIncl: incl, invoiceDate: factuurdatum, type: `WAM ${wam.nr ?? ''}`.trim() })
   const omschrijving = [`WAM ${wam.nr ?? ''}`.trim(), klantnaam, wam.omschrijving ? String(wam.omschrijving) : null, `termijn ${t.volgnr} · ${periode}`].filter(Boolean).join(' · ')
 
   // kind 'wam': dit is omzet van Marco's WAM-portefeuille, geen NGM-klantomzet.
@@ -240,14 +238,14 @@ async function factureerTermijn(admin: Admin, termijnId: string, actorId: string
   const invoiceId = await veiligInsertId(admin, 'invoices', {
     client_id: wam.client_id ?? null, service_slug: null, invoice_month: periode, invoice_date: factuurdatum,
     description: omschrijving, amount_excl: excl, vat_pct: btw, amount_incl: incl,
-    status: 'te_versturen', created_by: actorId, clickup_task_id: taak.taskId,
-    kind: 'wam', source: 'vesting', wam_id: wam.id,
+    status: 'te_versturen', created_by: actorId,
+    kind: 'wam', source: 'vesting', wam_id: wam.id, contract_bedrag_excl: excl, currency: 'EUR',
   })
   await admin.from('vesting_wam_termijnen').update({
-    status: 'gefactureerd', invoice_id: invoiceId, clickup_task_id: taak.taskId, updated_at: new Date().toISOString(),
+    status: 'gefactureerd', invoice_id: invoiceId, updated_at: new Date().toISOString(),
   }).eq('id', termijnId)
   try { revalidatePath('/admin/invoices') } catch { }
-  return { invoiceId, waarschuwing: taak.assigneeFound ? null : `ClickUp-gebruiker "${INVOICE_ASSIGNEE_NAME}" niet gevonden — taak zonder verantwoordelijke aangemaakt.` }
+  return { invoiceId, waarschuwing: null }
 }
 
 /** Alles wat het scherm over de WAM-termijnen en de Contractenmodule nodig heeft. */
@@ -388,10 +386,9 @@ export async function PATCH(req: NextRequest) {
         if (nieuweStatus !== 'betaald' && rij.status !== undefined) rij.betaald_op = null
         // Terug naar 'gepland' kan enkel zonder factuur; met factuur is het minstens 'gefactureerd'.
         if (nieuweStatus === 'gepland' && oud.invoice_id) rij.status = 'gefactureerd'
-        // Annuleren met factuur: de factuur mee annuleren en de ClickUp-taak afsluiten.
+        // Annuleren met factuur: de factuur mee annuleren.
         if (nieuweStatus === 'geannuleerd' && oud.invoice_id && oud.status !== 'geannuleerd') {
           await admin.from('invoices').update({ status: 'geannuleerd', updated_at: rij.updated_at }).eq('id', oud.invoice_id)
-          if (oud.clickup_task_id) await completeInvoiceTask(String(oud.clickup_task_id))
           try { revalidatePath('/admin/invoices') } catch { }
         }
       }

@@ -22,7 +22,7 @@ export type FactuurExportRij = {
   sourceId?: string
   client_id: string | null; service_slug: string | null; description: string | null
   amount_excl: number; vat_pct: number; amount_incl: number; status: string
-  billing_date: string; clickup_task_id: string | null
+  billing_date: string
   contract_title?: string | null; invoiceKind?: string; setterName?: string | null
   recurring_start?: string | null; recurring_end?: string | null
   kosten?: FactuurKostenExport
@@ -35,7 +35,6 @@ export type FactuurExportInvoer = {
   klantNaam: (id: string | null) => string
   filters: { label: string; waarde: string }[]
   summary: { omzetExcl: number; openExcl?: number; doneExcl?: number; pct: number }
-  clickupEnabled: boolean
 }
 
 const SOORT: Record<string, string> = { client: 'Klantfactuur', wam: 'WAM · Vesting', setter_hours: 'Te betalen · uren setter', setter_commission: 'Te betalen · commissie setter' }
@@ -57,7 +56,7 @@ export function facturenWerkmap(inv: FactuurExportInvoer): Werkmap {
   const rijen: Cel[][] = inv.rijen.map((r) => {
     const aandacht = r.status === 'geannuleerd' ? 'Geannuleerd'
       : r.status === 'te_versturen' && r.billing_date && r.billing_date < vandaag ? 'Factuurdatum voorbij — nog niet verstuurd'
-      : inv.clickupEnabled && !r.clickup_task_id ? 'Geen ClickUp-taak' : 'In orde'
+      : 'In orde'
     const k = r.kosten
     const geannuleerd = r.status === 'geannuleerd'
     return [
@@ -78,7 +77,6 @@ export function facturenWerkmap(inv: FactuurExportInvoer): Werkmap {
       formule('N{R}', k ? k.nietMeetellend : 0),
       KOSTEN_STATUS_LABEL[k?.status ?? 'ongecontroleerd'],
       r.kind === 'recurring' && r.recurring_start ? `${r.recurring_start}${r.recurring_end ? ` → ${r.recurring_end}` : ' → onbepaald'}` : '',
-      r.clickup_task_id ? `https://app.clickup.com/t/${r.clickup_task_id}` : '',
       aandacht,
     ]
   })
@@ -93,7 +91,7 @@ export function facturenWerkmap(inv: FactuurExportInvoer): Werkmap {
         { kop: 'Factuurdatum', stijl: 'datum' }, { kop: 'Status' },
         { kop: 'Omzet excl. btw', stijl: 'euro' }, { kop: 'Btw %', stijl: 'getal' }, { kop: 'Btw', stijl: 'euro' }, { kop: 'Omzet incl. btw', stijl: 'euro' },
         { kop: 'Directe kosten excl. btw', stijl: 'euro' }, { kop: 'Werkelijke winst', stijl: 'euro' }, { kop: 'Marge', stijl: 'pct' }, { kop: 'Vesting-/investeringswaarde', stijl: 'euro' }, { kop: 'Niet-meetellend', stijl: 'euro' }, { kop: 'Kostenstatus' },
-        { kop: 'Looptijd recurring' }, { kop: 'ClickUp-taak' }, { kop: 'Aandachtspunt' },
+        { kop: 'Looptijd recurring' }, { kop: 'Aandachtspunt' },
       ],
       rijen,
       totaal: ['Totaal', null, null, null, null, null, null, null, null,

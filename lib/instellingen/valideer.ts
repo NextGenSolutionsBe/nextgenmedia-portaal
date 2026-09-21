@@ -77,6 +77,7 @@ export function valideerFacturatie(ruw: unknown): Validatie<FacturatieInstelling
     clickup_sync_aan: r.clickup_sync_aan !== false,
     clickup_lijst_id: tekst(r.clickup_lijst_id, 40), clickup_lijst_pad: tekst(r.clickup_lijst_pad, 300),
     clickup_assignee_id: tekst(r.clickup_assignee_id, 40), clickup_assignee_naam: tekst(r.clickup_assignee_naam, 120),
+    verantwoordelijke_naam: tekst(r.verantwoordelijke_naam, 120) || 'Bram Reinquin',
   }
   if (w.standaard_btw_pct < 0 || w.standaard_btw_pct > 100) return { ok: false, fout: 'Het btw-percentage moet tussen 0 en 100 liggen.' }
   if (w.betalingstermijn_dagen < 0 || w.betalingstermijn_dagen > 365) return { ok: false, fout: 'De betalingstermijn moet tussen 0 en 365 dagen liggen.' }

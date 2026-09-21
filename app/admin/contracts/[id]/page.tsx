@@ -10,7 +10,6 @@ import { ContractMailButton } from '@/components/admin/contract-mail-button'
 import { ContractLinkManager } from './contract-link-manager'
 import { ContractPdfPreview } from './contract-pdf-preview'
 import { ContractTimeline } from './contract-timeline'
-import { ContractInvoices } from './contract-invoices'
 import { ContractFacturatie } from './contract-facturatie'
 import { ContractNavigatie } from './contract-navigatie'
 import { statusInfo, canonicalStatus } from '@/lib/contract-status'
@@ -124,8 +123,13 @@ export default async function ContractDetailPage({ params }: { params: { id: str
 
       <div className="grid lg:grid-cols-3 gap-6">
         {/* PDF Preview — schakel tussen origineel en getekend/ingevuld */}
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-2 space-y-6">
           <ContractPdfPreview originalUrl={pdfUrl} signedUrl={signedPdfUrl} />
+          {/* Facturatie: voorstel controleren en bevestigen, facturen van dit contract, voortgang. */}
+          <ContractFacturatie
+            contractId={c.id} clientId={clientId} serviceSlug={c.service_slug ?? null} contractTitle={c.title} isSigned={!!isSigned}
+            expectedCount={c.expected_invoice_count ?? null} invoiceFrequency={c.invoice_frequency ?? null} expectedAmountExcl={c.expected_invoice_amount_excl ?? null}
+          />
         </div>
 
         {/* Sidebar */}
@@ -177,19 +181,6 @@ export default async function ContractDetailPage({ params }: { params: { id: str
             </div>
           </div>
 
-          {/* Facturen gekoppeld aan dit contract */}
-          <ContractInvoices
-            contractId={c.id}
-            clientId={clientId}
-            serviceSlug={c.service_slug ?? null}
-            contractTitle={c.title}
-            expectedCount={c.expected_invoice_count ?? null}
-            invoiceFrequency={c.invoice_frequency ?? null}
-            expectedAmountExcl={c.expected_invoice_amount_excl ?? null}
-          />
-
-          {/* Facturatieopdrachten na ondertekening (+ ClickUp-synchronisatie) */}
-          {isSigned && <ContractFacturatie contractId={c.id} clientId={clientId} serviceSlug={c.service_slug ?? null} />}
 
           {/* Sign link — only for unsigned contracts */}
           {!isSigned && statusKey !== 'geannuleerd' && (

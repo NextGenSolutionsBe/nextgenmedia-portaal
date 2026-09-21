@@ -6,8 +6,6 @@ import { logAudit, requestMeta } from '@/lib/audit'
 import { laadMomenten } from '@/lib/facturatie/planner'
 import { vandaagBrussel, isDatum, ontleedSleutel, ymVan } from '@/lib/facturatie/planner-model'
 import { zetMaandStatus, ANNULERING_OPMERKING } from '@/lib/facturatie/recurring'
-import { synchroniseerOpdracht } from '@/lib/facturatie/opdrachten'
-import { annuleerFactuurTaak, werkFactuurTaakBij, createInvoiceTask, completeInvoiceTask, clickupConfigured } from '@/lib/clickup'
 import { billingDateFor, inclFromExcl } from '@/lib/invoices'
 
 export const dynamic = 'force-dynamic'
@@ -36,18 +34,18 @@ export async function GET(req: NextRequest) {
   }
 }
 
-const NIET_TE_ANNULEREN = 'Een verstuurde of betaalde factuur kan niet geannuleerd worden.'
+const NIET_TE_ANNULEREN = 'Een verstuurde of betaalde factuur kan niet geannuleerd worden. Crediteer ze via de factuur zelf.'
 
 /**
- * POST { actie, id, datum? } — annuleer | verplaats | verstuurd | sync.
- * Werkt op de bron achter het moment; een mislukte ClickUp-stap blokkeert
+ * POST { actie, id, datum? } — annuleer | verplaats | verstuurd.
+ * Werkt op de bron achter het moment; een mislukte nevenstap blokkeert
  * de actie niet maar wordt wél teruggemeld en gelogd.
  */
 export async function POST(req: NextRequest) {
   try {
     const actor = await requireStaff()
     if (!actor) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
-    const b = (await req.json().catch(() => null)) as { actie?: string; id?: string; datum?: string } | null
+    const b = (await req.json().catch(() => null)) as { actie?: string; id?: string; datum?: string; reden?: string } | null
     const sleutel = b?.id ? ontleedSleutel(b.id) : null
     if (!b || !sleutel) return NextResponse.json({ error: 'Onbekend planneritem.' }, { status: 400 })
     const admin = createAdminSupabaseClient()
@@ -58,15 +56,6 @@ export async function POST(req: NextRequest) {
       actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'staff', metadata: { moment: b.id, ...extra, waarschuwingen }, ip: meta.ip, userAgent: meta.userAgent,
     })
     const klaar = () => { try { revalidatePath('/admin/invoices'); revalidatePath('/admin/invoices/planner') } catch { /* */ } }
-    const annuleerTaak = async (taskId: string | null, opmerking = 'Deze facturatieopdracht werd geannuleerd vanuit de facturatieplanner.') => {
-      if (!taskId || !clickupConfigured()) return
-      try { await annuleerFactuurTaak(taskId, opmerking) } catch (e) { waarschuwingen.push(`ClickUp-taak ${taskId} kon niet afgesloten worden: ${e instanceof Error ? e.message.slice(0, 120) : 'fout'}`) }
-    }
-    const verplaatsTaak = async (taskId: string | null, datum: string) => {
-      if (!taskId || !clickupConfigured()) return
-      try { await werkFactuurTaakBij(taskId, { dueDate: datum }) } catch (e) { waarschuwingen.push(`ClickUp-taak ${taskId} kon niet verplaatst worden: ${e instanceof Error ? e.message.slice(0, 120) : 'fout'}`) }
-    }
-
     // ── Eenmalige factuur ──
     if (sleutel.bron === 'invoice') {
       const { data: inv } = await admin.from('invoices').select('*').eq('id', sleutel.bronId).maybeSingle()
@@ -78,35 +67,25 @@ export async function POST(req: NextRequest) {
         let { error } = await admin.from('invoices').update(patch).eq('id', inv.id)
         if (error && /cancelled_/.test(error.message)) ({ error } = await admin.from('invoices').update({ status: 'geannuleerd' }).eq('id', inv.id))
         if (error) throw new Error(error.message)
-        await annuleerTaak(inv.clickup_task_id)
+        try { await admin.from('invoice_wijzigingen').insert({ invoice_id: inv.id, actie: 'geannuleerd', veld: 'status', oud: String(inv.status), nieuw: 'geannuleerd', reden: String(b.reden ?? 'Geannuleerd in de facturatieplanner'), actor_email: actor.email ?? null }) } catch { /* */ }
         await audit(`Factuur geannuleerd (${inv.invoice_date}, € ${Number(inv.amount_excl).toFixed(2)})`)
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
       }
       if (b.actie === 'verplaats') {
         if (!isDatum(b.datum ?? '')) return NextResponse.json({ error: 'Geef een geldige datum.' }, { status: 400 })
         // Ook een verstuurde of betaalde factuur mag van datum veranderen (een
-        // verkeerde datum moet je kunnen rechtzetten); de ClickUp-taak volgt mee.
-        const { error } = await admin.from('invoices').update({ invoice_date: b.datum, invoice_month: ymVan(b.datum!) }).eq('id', inv.id)
+        // verkeerde datum moet je kunnen rechtzetten); contract en Facturen volgen mee.
+        const { error } = await admin.from('invoices').update({ invoice_date: b.datum, invoice_month: ymVan(b.datum!), updated_at: new Date().toISOString() }).eq('id', inv.id)
         if (error) throw new Error(error.message)
-        await verplaatsTaak(inv.clickup_task_id, b.datum!)
+        try { await admin.from('invoice_wijzigingen').insert({ invoice_id: inv.id, actie: 'verplaatst', veld: 'invoice_date', oud: String(inv.invoice_date).slice(0, 10), nieuw: b.datum, reden: 'Verplaatst in de facturatieplanner', actor_email: actor.email ?? null }) } catch { /* */ }
         await audit(`Factuurdatum verplaatst ${inv.invoice_date} → ${b.datum}`, { van: inv.invoice_date, naar: b.datum })
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
       }
       if (b.actie === 'verstuurd') {
         const { error } = await admin.from('invoices').update({ status: 'verstuurd' }).eq('id', inv.id)
         if (error) throw new Error(error.message)
-        if (inv.clickup_task_id) await completeInvoiceTask(inv.clickup_task_id)
         await audit('Factuur gemarkeerd als verstuurd')
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
-      }
-      if (b.actie === 'sync') {
-        if (inv.clickup_task_id) return NextResponse.json({ ok: true, waarschuwingen: ['Er bestaat al een ClickUp-taak.'] })
-        const { data: k } = inv.client_id ? await admin.from('clients').select('company_name').eq('id', inv.client_id).maybeSingle() : { data: null }
-        const t = await createInvoiceTask({ clientName: k?.company_name ?? 'Onbekende klant', amountIncl: Number(inv.amount_incl) || 0, invoiceDate: String(inv.invoice_date), type: 'Eenmalig' })
-        if (!t.taskId) return NextResponse.json({ error: 'ClickUp-taak kon niet aangemaakt worden (zie Instellingen → Integraties).' }, { status: 502 })
-        await admin.from('invoices').update({ clickup_task_id: t.taskId }).eq('id', inv.id)
-        await audit('ClickUp-taak aangemaakt', { taskId: t.taskId })
-        klaar(); return NextResponse.json({ ok: true, taskId: t.taskId, waarschuwingen })
       }
     }
 
@@ -121,7 +100,6 @@ export async function POST(req: NextRequest) {
         if (definitief) return NextResponse.json({ error: NIET_TE_ANNULEREN }, { status: 400 })
         await zetMaandStatus(admin, rec.id, sleutel.maand, 'geannuleerd', { id: actor.id, email: actor.email ?? null })
         await admin.from('recurring_invoice_months').update({ cancelled_at: new Date().toISOString(), cancelled_by_email: actor.email ?? null, billing_date: huidigeDatum }).eq('recurring_id', rec.id).eq('month', sleutel.maand)
-        await annuleerTaak(rij?.clickup_task_id ?? null, ANNULERING_OPMERKING.replace('omdat de terugkerende facturatie in de applicatie werd verwijderd', 'vanuit de facturatieplanner'))
         await audit(`Maand ${sleutel.maand} van terugkerende facturatie geannuleerd`)
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
       }
@@ -133,7 +111,6 @@ export async function POST(req: NextRequest) {
         if (error) throw new Error(error.message)
         // Hangt er al een echte factuur aan deze maand, dan krijgt die dezelfde datum.
         if (rij?.invoice_id) await admin.from('invoices').update({ invoice_date: b.datum, invoice_month: ymVan(b.datum!) }).eq('id', rij.invoice_id)
-        await verplaatsTaak(rij?.clickup_task_id ?? null, b.datum!)
         await audit(`Factuurdatum maand ${sleutel.maand} verplaatst ${huidigeDatum} → ${b.datum}`, { van: huidigeDatum, naar: b.datum })
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
       }
@@ -142,16 +119,6 @@ export async function POST(req: NextRequest) {
         if (r.warning) waarschuwingen.push(r.warning)
         await audit(`Maand ${sleutel.maand} gemarkeerd als verstuurd`)
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
-      }
-      if (b.actie === 'sync') {
-        if (rij?.clickup_task_id) return NextResponse.json({ ok: true, waarschuwingen: ['Er bestaat al een ClickUp-taak.'] })
-        const { data: k } = rec.client_id ? await admin.from('clients').select('company_name').eq('id', rec.client_id).maybeSingle() : { data: null }
-        const t = await createInvoiceTask({ clientName: k?.company_name ?? 'Onbekende klant', amountIncl: Number(rec.amount_incl) || inclFromExcl(Number(rec.amount_excl) || 0, Number(rec.vat_pct) || 0), invoiceDate: huidigeDatum, type: 'Recurring' })
-        if (!t.taskId) return NextResponse.json({ error: 'ClickUp-taak kon niet aangemaakt worden (zie Instellingen → Integraties).' }, { status: 502 })
-        const { error } = await admin.from('recurring_invoice_months').upsert({ recurring_id: rec.id, month: sleutel.maand, status: rij?.status ?? 'te_versturen', clickup_task_id: t.taskId, billing_date: rij?.billing_date ?? null }, { onConflict: 'recurring_id,month' })
-        if (error) throw new Error(error.message)
-        await audit('ClickUp-taak aangemaakt', { taskId: t.taskId })
-        klaar(); return NextResponse.json({ ok: true, taskId: t.taskId, waarschuwingen })
       }
     }
 
@@ -164,7 +131,6 @@ export async function POST(req: NextRequest) {
         let { error } = await admin.from('contract_facturatie_opdrachten').update({ status: 'geannuleerd', geannuleerd_op: new Date().toISOString(), geannuleerd_door: actor.email ?? null, updated_at: new Date().toISOString() }).eq('id', o.id)
         if (error && /geannuleerd_/.test(error.message)) ({ error } = await admin.from('contract_facturatie_opdrachten').update({ status: 'geannuleerd', updated_at: new Date().toISOString() }).eq('id', o.id))
         if (error) throw new Error(error.message)
-        await annuleerTaak(o.clickup_task_id)
         try { await admin.from('contract_facturatie_log').insert({ contract_id: o.contract_id, opdracht_id: o.id, gebeurtenis: 'status_geannuleerd', clickup_task_id: o.clickup_task_id, sync_status: o.sync_status, details: { door: actor.email ?? actor.id, via: 'facturatieplanner', clickup_fouten: waarschuwingen } }) } catch { /* */ }
         await audit(`Facturatieopdracht ${o.volgnr}/${o.aantal} geannuleerd`)
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
@@ -174,17 +140,8 @@ export async function POST(req: NextRequest) {
         if (o.status === 'geannuleerd') return NextResponse.json({ error: 'Een geannuleerde opdracht verplaats je niet meer.' }, { status: 400 })
         const { error } = await admin.from('contract_facturatie_opdrachten').update({ factuurdatum: b.datum, updated_at: new Date().toISOString() }).eq('id', o.id)
         if (error) throw new Error(error.message)
-        // De taak volgt via de gewone synchronisatie (vingerafdruk verandert).
-        const s = await synchroniseerOpdracht(admin, o.id)
-        if (!s.ok && s.fout) waarschuwingen.push(`ClickUp: ${s.fout.slice(0, 160)}`)
         await audit(`Factuurdatum opdracht verplaatst ${o.factuurdatum} → ${b.datum}`, { van: o.factuurdatum, naar: b.datum })
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
-      }
-      if (b.actie === 'sync') {
-        const s = await synchroniseerOpdracht(admin, o.id)
-        await audit(`ClickUp-sync ${s.ok ? 'gelukt' : 'mislukt'}`, { fout: s.fout ?? null })
-        klaar()
-        return s.ok ? NextResponse.json({ ok: true, taskId: s.taskId ?? null, waarschuwingen }) : NextResponse.json({ error: s.fout ?? 'Synchronisatie mislukt' }, { status: 502 })
       }
       if (b.actie === 'verstuurd') return NextResponse.json({ error: 'Maak eerst de factuur aan vanuit het contract; die markeer je daarna als verstuurd.' }, { status: 400 })
     }

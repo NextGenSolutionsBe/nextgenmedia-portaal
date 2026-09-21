@@ -4,7 +4,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { eisBeheer, eisHoofdbeheerder, maskeer } from '@/lib/instellingen/api'
 import type { Integratie } from '@/lib/instellingen/integraties'
-import { clickupConfigured, clickupTest, facturatieLijst, facturatieAssigneeId, findMemberId, INVOICE_ASSIGNEE_NAME } from '@/lib/clickup'
+import { clickupConfigured, clickupTest } from '@/lib/clickup'
 import { sleutelRechten } from '@/lib/email'
 import { metricoolConfigured, listBrands } from '@/lib/metricool'
 import { googleConfigured } from '@/lib/sales/google-calendar'
@@ -25,8 +25,7 @@ async function laatste(admin: Admin, tabel: string, kolom: string): Promise<stri
 
 async function overzicht(): Promise<Integratie[]> {
   const admin = createAdminSupabaseClient()
-  const [lijst, agenda, contentSync, mailLaatste, framerLaatste, google] = await Promise.all([
-    clickupConfigured() ? facturatieLijst().catch(() => null) : Promise.resolve(null),
+  const [agenda, contentSync, mailLaatste, framerLaatste, google] = await Promise.all([
     syncGezondheid().catch(() => null),
     laatste(admin, 'social_content_items', 'clickup_synced_at').then((v) => v ?? laatste(admin, 'social_content_items', 'synced_at')),
     laatste(admin, 'email_messages', 'created_at'),
@@ -36,11 +35,10 @@ async function overzicht(): Promise<Integratie[]> {
 
   const uit: Integratie[] = []
   uit.push({
-    key: 'clickup', naam: 'ClickUp', omschrijving: 'Contentkalender, afspraken en facturatietaken.',
+    key: 'clickup', naam: 'ClickUp', omschrijving: 'Contentkalender (social media) en afspraken. Facturen en contracten lopen niet via ClickUp.',
     status: clickupConfigured() ? 'actief' : 'niet_ingesteld', sleutel: maskeer(process.env.CLICKUP_API_KEY),
     laatsteSync: agenda?.laatsteOkOp ?? contentSync ?? null,
     details: [
-      lijst ? (lijst.ok ? `Facturatielijst: ${lijst.pad}` : `Facturatielijst: ${lijst.reden}`) : 'Facturatielijst: niet gecontroleerd',
       agenda?.actief ? `Agendasync: ${agenda.verouderd ? 'verouderd' : 'in orde'}${agenda.laatsteFout ? ` · laatste fout: ${agenda.laatsteFout.slice(0, 120)}` : ''}` : 'Agendasync: niet actief',
     ],
     kanTesten: clickupConfigured(), kanSync: clickupConfigured() && !!agenda?.actief,
@@ -108,11 +106,7 @@ export async function POST(req: NextRequest) {
         resultaat = { ok: !r.fout, bericht: r.fout ? `Synchronisatie mislukt: ${String(r.fout).slice(0, 200)}` : `Synchronisatie klaar: ${r.aangemaakt ?? 0} aangemaakt, ${r.bijgewerkt ?? 0} bijgewerkt, ${r.verwijderd ?? 0} verwijderd.` }
       } else if (key === 'clickup') {
         const r = await clickupTest()
-        const [assignee, bramId, lijst] = await Promise.all([facturatieAssigneeId(), findMemberId(INVOICE_ASSIGNEE_NAME), facturatieLijst()])
-        resultaat = {
-          ok: true,
-          bericht: `Verbonden als ${r.gebruiker} (werkruimte ${r.workspace}). Facturatielijst: ${lijst.ok ? lijst.pad : lijst.reden}. Verantwoordelijke facturatietaken: ${assignee ?? 'geen'}; ${INVOICE_ASSIGNEE_NAME} gevonden als lid: ${bramId ?? 'niet gevonden'}.`,
-        }
+        resultaat = { ok: true, bericht: `Verbonden als ${r.gebruiker} (werkruimte ${r.workspace}). Contentkalender en afspraken synchroniseren; facturen en contracten niet.` }
       } else if (key === 'resend') {
         const r = await sleutelRechten(process.env.RESEND_API_KEY)
         resultaat = { ok: r === 'volledig' || r === 'beperkt', bericht: r === 'volledig' ? 'Sleutel werkt (volledige rechten).' : r === 'beperkt' ? 'Sleutel werkt, maar met beperkte rechten (ingeplande mails intrekken lukt niet).' : r === 'ontbreekt' ? 'Geen sleutel ingesteld.' : 'Resend gaf geen bruikbaar antwoord.' }

@@ -1,18 +1,21 @@
 // Pure helpers voor het facturenpaneel (client-safe).
 
 // Betaald/onbetaald bestaat niet meer in deze module — enkel verstuur-opvolging.
-export const INVOICE_STATUSES = ['te_versturen', 'verstuurd', 'geannuleerd'] as const
+export const INVOICE_STATUSES = ['te_versturen', 'verstuurd', 'geannuleerd', 'gecrediteerd'] as const
 export type InvoiceStatus = (typeof INVOICE_STATUSES)[number]
 
 export const INVOICE_STATUS_LABEL: Record<string, string> = {
   te_versturen: 'Te versturen',
   verstuurd: 'Verstuurd',
   geannuleerd: 'Geannuleerd',
+  gecrediteerd: 'Gecrediteerd',
 }
+// Grijs = nog te versturen (geen foutstatus), groen = verstuurd, rood = geannuleerd/gecrediteerd — overal dezelfde kleuren.
 export const INVOICE_STATUS_CLS: Record<string, string> = {
-  te_versturen: 'bg-amber-100 text-amber-700',
-  verstuurd: 'bg-green-100 text-green-700',
-  geannuleerd: 'bg-gray-100 text-gray-500',
+  te_versturen: 'bg-gray-100 text-gray-700',
+  verstuurd: 'bg-green-100 text-green-800',
+  geannuleerd: 'bg-red-100 text-red-700',
+  gecrediteerd: 'bg-red-100 text-red-700',
 }
 
 /** Zet oude statuswaarden om naar het nieuwe model (backward-compatible). */
@@ -20,6 +23,7 @@ export function normalizeInvoiceStatus(s: string | null | undefined): InvoiceSta
   switch (s) {
     case 'verstuurd': case 'gefactureerd': case 'betaald': return 'verstuurd'
     case 'geannuleerd': return 'geannuleerd'
+    case 'gecrediteerd': return 'gecrediteerd'
     default: return 'te_versturen' // te_factureren / onbekend / null
   }
 }

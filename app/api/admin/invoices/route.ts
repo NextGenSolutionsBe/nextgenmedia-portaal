@@ -7,11 +7,12 @@ import {
   recurringActiveInMonth, INVOICE_STATUSES, INVOICE_DAYS, DEFAULT_VAT, type RevenueEntry, type RecurringInvoice,
 } from '@/lib/invoices'
 import { removeAutoSetterInvoices } from '@/lib/sales/setter-invoices'
-import { createInvoiceTask, completeInvoiceTask, werkFactuurTaakBij, clickupConfigured, INVOICE_ASSIGNEE_NAME } from '@/lib/clickup'
+import { normaliseerRegels, berekenTotalen, regelUitBedrag } from '@/lib/facturen/regels'
 import { kostenPerFactuur, logKost, type FactuurRef } from '@/lib/facturen/kosten-data'
 import { stelClassificatieVoor, type KostenStatus, type Classificatie } from '@/lib/facturen/kosten-winst'
 import { stopRecurring, zetMaandStatus, werkToekomstigeMaandenBij } from '@/lib/facturatie/recurring'
 import { requestMeta } from '@/lib/audit'
+import { magIk } from '@/lib/instellingen/laden'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
@@ -121,11 +122,6 @@ async function safeUpsert(admin: Admin, table: string, row: Record<string, unkno
     if (col && col in r) { delete r[col]; continue }
     throw new Error(error.message)
   }
-}
-
-async function clientNameFor(admin: Admin, clientId: string | null): Promise<string> {
-  if (!clientId) return 'Onbekende klant'
-  try { const { data } = await admin.from('clients').select('company_name').eq('id', clientId).maybeSingle(); return data?.company_name ?? 'Onbekende klant' } catch { return 'Onbekende klant' }
 }
 
 type Row = {
@@ -257,7 +253,6 @@ export async function GET(req: NextRequest) {
       rows, omzet, clients: clients ?? [],
       summary: { omzetExcl, openExcl, doneExcl, linkedExcl: doneExcl, verschil: openExcl, pct },
       billingDate: lastDayOfMonth(month),
-      clickup_enabled: clickupConfigured(),
     })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
@@ -282,29 +277,60 @@ export async function POST(req: NextRequest) {
       const revenueId = b.revenue_id || await linkOrCreateForecast(admin, { client_id: b.client_id || null, service_slug: b.service_slug || null, month, amount_excl: excl, description: b.description || null, recurring: false })
       const incl = inclFromExcl(excl, vat)
       const status = INVOICE_STATUSES.includes(b.status) ? b.status : 'te_versturen'
-      // ClickUp-taak "Factuur versturen — [klant]" (best-effort).
-      const clientName = await clientNameFor(admin, b.client_id || null)
-      // Komt de factuur uit een facturatieopdracht (contract ondertekend), dan
-      // bestaat de ClickUp-taak al: die nemen we over in plaats van een tweede te maken.
-      const bestaandeTaak = typeof b.clickup_task_id === 'string' && b.clickup_task_id.trim() ? b.clickup_task_id.trim() : null
-      const task = bestaandeTaak ? { taskId: bestaandeTaak, assigneeFound: true } : await createInvoiceTask({ clientName, amountIncl: incl, invoiceDate, type: 'Eenmalig' })
       const id = await safeInsertId(admin, 'invoices', {
         client_id: b.client_id || null, service_slug: b.service_slug || null, invoice_month: month,
         invoice_date: invoiceDate, description: b.description || null,
         amount_excl: excl, vat_pct: vat, amount_incl: incl,
-        status, revenue_id: revenueId, created_by: actor.id, clickup_task_id: task.taskId,
-        contract_id: b.contract_id || null,
+        status, revenue_id: revenueId, created_by: actor.id,
+        contract_id: b.contract_id || null, contract_bedrag_excl: excl, currency: 'EUR',
       })
       // Interne factuurlijnen (classificatie/kostprijs) uit het formulier — best-effort.
       await slaLijnenOp(admin, { invoice_id: id }, b.lines, actor)
-      // Meteen verstuurd aangemaakt? → taak ook afronden.
-      if (status === 'verstuurd' && task.taskId) await completeInvoiceTask(task.taskId)
       // Ook prognose/omzet + klant-hub verversen zodat een auto-aangemaakte prognose direct zichtbaar is.
       try {
         revalidatePath('/admin/invoices'); revalidatePath('/admin/revenue/omzet'); revalidatePath('/admin/revenue')
         if (b.client_id) revalidatePath(`/admin/clients/${b.client_id}`)
       } catch { }
-      return NextResponse.json({ id, revenue_id: revenueId, warning: task.assigneeFound ? null : `ClickUp-gebruiker "${INVOICE_ASSIGNEE_NAME}" niet gevonden — taak zonder verantwoordelijke aangemaakt.` })
+      return NextResponse.json({ id, revenue_id: revenueId, warning: null })
+    }
+
+    // Factuur met regels (uit de factuureditor: planner, contractdetail of Facturen).
+    if (b.action === 'aanmaken') {
+      const mag = await magIk('invoices', 'toevoegen')
+      if (!mag) return NextResponse.json({ error: 'Je hebt geen recht om facturen aan te maken.' }, { status: 403 })
+      const invoiceDate = typeof b.invoice_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b.invoice_date) ? b.invoice_date : null
+      if (!invoiceDate) return NextResponse.json({ error: 'Geplande factuurdatum vereist' }, { status: 400 })
+      if (!b.client_id) return NextResponse.json({ error: 'Selecteer een klant voor deze factuur.' }, { status: 400 })
+      const btw = b.vat_pct != null ? Number(b.vat_pct) : DEFAULT_VAT
+      let regels = normaliseerRegels(b.regels, btw)
+      if (regels.length === 0 && excl > 0) regels = [regelUitBedrag(String(b.description || 'Factuur'), excl, btw)]
+      if (regels.length === 0) return NextResponse.json({ error: 'Voeg minstens één factuurregel toe.' }, { status: 400 })
+      const t = berekenTotalen(regels)
+      if (t.excl <= 0) return NextResponse.json({ error: 'Het factuurbedrag moet groter zijn dan nul.' }, { status: 400 })
+      if (b.contract_id) { const { data: c } = await admin.from('contracts').select('id').eq('id', String(b.contract_id)).maybeSingle(); if (!c) return NextResponse.json({ error: 'Contract niet gevonden.' }, { status: 400 }) }
+      const month = invoiceDate.slice(0, 7)
+      const termijn = b.payment_term_days != null && Number.isFinite(Number(b.payment_term_days)) ? Math.max(0, Math.round(Number(b.payment_term_days))) : 30
+      const vervaldatum = typeof b.due_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b.due_date) ? b.due_date : (() => { const d = new Date(invoiceDate + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + termijn); return d.toISOString().slice(0, 10) })()
+      const revenueId = b.revenue_id || await linkOrCreateForecast(admin, { client_id: b.client_id || null, service_slug: b.service_slug || null, month, amount_excl: t.excl, description: b.description || null, recurring: false })
+      const id = await safeInsertId(admin, 'invoices', {
+        client_id: b.client_id, service_slug: b.service_slug || null, invoice_month: month, invoice_date: invoiceDate, periode: b.periode || month,
+        description: b.description || regels[0].omschrijving, amount_excl: t.excl, vat_pct: t.perBtw.length === 1 ? t.perBtw[0].pct : btw, amount_incl: t.incl,
+        status: 'te_versturen', revenue_id: revenueId, created_by: actor.id, contract_id: b.contract_id || null,
+        contract_bedrag_excl: t.contractueel.excl, currency: 'EUR', due_date: vervaldatum, payment_term_days: termijn, reference: b.reference || null, note: b.note || null,
+        kind: 'client', source: b.contract_id ? 'contract' : 'handmatig', betaalstatus: 'niet_betaald', betaald_bedrag: 0,
+      })
+      const { error: le } = await admin.from('invoice_lines').insert(regels.map((r) => ({
+        invoice_id: id, volgnr: r.volgnr, omschrijving: r.omschrijving, artikel: r.artikel, aantal: r.aantal, eenheid: r.eenheid,
+        prijs_excl: r.prijs_excl, btw_pct: r.btw_pct, korting_pct: r.korting_pct, is_extra: r.is_extra, classificatie: r.classificatie, opmerking: r.opmerking ?? null,
+      })))
+      if (le) throw new Error(le.message)
+      try { await admin.from('invoice_wijzigingen').insert({ invoice_id: id, actie: 'aangemaakt', veld: null, oud: null, nieuw: `${regels.length} regel(s), € ${t.excl.toFixed(2)} excl. btw`, actor_email: actor.email ?? null }) } catch { /* */ }
+      try {
+        revalidatePath('/admin/invoices'); revalidatePath('/admin/invoices/planner'); revalidatePath('/admin/revenue/omzet')
+        if (b.client_id) revalidatePath(`/admin/clients/${b.client_id}`)
+        if (b.contract_id) revalidatePath(`/admin/contracts/${b.contract_id}`)
+      } catch { }
+      return NextResponse.json({ id, revenue_id: revenueId })
     }
 
     // Recurring factuur-definitie
@@ -334,17 +360,19 @@ export async function POST(req: NextRequest) {
       if (b.kind === 'recurring') {
         if (!b.source_id || !b.month) return NextResponse.json({ error: 'source_id en month vereist' }, { status: 400 })
         const month = String(b.month).slice(0, 7)
-        // Centrale helper: maakt de ClickUp-taak zodra de maand opgevolgd wordt,
-        // rondt ze af bij 'verstuurd' en legt dan bedrag + factuurdatum vast.
+        // Centrale helper: legt bij 'verstuurd' bedrag + factuurdatum vast als momentopname.
         const r = await zetMaandStatus(admin, b.source_id, month, status, { id: actor.id, email: actor.email ?? null })
         try { revalidatePath('/admin/invoices'); revalidatePath('/admin/invoices/planner') } catch { }
         return NextResponse.json({ ok: true, warning: r.warning })
       } else {
         if (!b.source_id) return NextResponse.json({ error: 'source_id vereist' }, { status: 400 })
-        const { data: inv } = await admin.from('invoices').select('*').eq('id', b.source_id).maybeSingle()
-        const { error } = await admin.from('invoices').update({ status }).eq('id', b.source_id)
+        const { data: inv } = await admin.from('invoices').select('id, status, sent_at').eq('id', b.source_id).maybeSingle()
+        const patch: Record<string, unknown> = { status, updated_at: new Date().toISOString() }
+        if (status === 'verstuurd') patch.sent_at = inv?.sent_at ?? new Date().toISOString()
+        if (status === 'te_versturen') patch.sent_at = null
+        const { error } = await admin.from('invoices').update(patch).eq('id', b.source_id)
         if (error) throw new Error(error.message)
-        if (status === 'verstuurd' && inv?.clickup_task_id) await completeInvoiceTask(inv.clickup_task_id)
+        try { await admin.from('invoice_wijzigingen').insert({ invoice_id: b.source_id, actie: status === 'verstuurd' ? 'verstuurd' : status === 'geannuleerd' ? 'geannuleerd' : 'aangepast', veld: 'status', oud: inv?.status ?? null, nieuw: status, actor_email: actor.email ?? null }) } catch { /* */ }
       }
       try { revalidatePath('/admin/invoices') } catch { }
       return NextResponse.json({ ok: true })
@@ -391,21 +419,14 @@ export async function PATCH(req: NextRequest) {
     if (Object.keys(patch).length === 0) return NextResponse.json({ error: 'Geen wijzigingen' }, { status: 400 })
     const { error } = await admin.from(table).update(patch).eq('id', b.id)
     if (error) throw new Error(error.message)
-    // Nieuwe factuurdatum (ook na versturen toegestaan): de ClickUp-taak, als
-    // die er is, krijgt dezelfde vervaldag. Lukt dat niet, dan blijft de datum
-    // in de app leidend.
-    if (b.kind !== 'recurring' && typeof patch.invoice_date === 'string' && clickupConfigured()) {
-      const { data: inv } = await admin.from('invoices').select('clickup_task_id').eq('id', b.id).maybeSingle()
-      if (inv?.clickup_task_id) { try { await werkFactuurTaakBij(inv.clickup_task_id, { dueDate: patch.invoice_date }) } catch { /* zie boven */ } }
-    }
     // Terugkerend: enkel toekomstige, nog niet uitgevoerde maanden volgen de
-    // wijziging (historiek heeft haar eigen momentopname); hun ClickUp-taken mee.
-    let clickup: { bijgewerkt: number; fouten: string[] } | null = null
+    // wijziging (historiek heeft haar eigen momentopname).
+    let maanden: { bijgewerkt: number; fouten: string[] } | null = null
     if (b.kind === 'recurring' && (b.invoice_day !== undefined || b.amount_excl !== undefined || b.vat_pct !== undefined || b.description !== undefined || b.client_id !== undefined)) {
-      clickup = await werkToekomstigeMaandenBij(admin, b.id)
+      maanden = await werkToekomstigeMaandenBij(admin, b.id)
     }
     try { revalidatePath('/admin/invoices'); revalidatePath('/admin/invoices/planner') } catch { }
-    return NextResponse.json({ ok: true, clickup })
+    return NextResponse.json({ ok: true, maanden })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
@@ -422,7 +443,7 @@ export async function DELETE(req: NextRequest) {
     const admin = createAdminSupabaseClient()
     if (kind === 'recurring') {
       // Nooit hard verwijderen: toekomstige maanden annuleren, historiek en
-      // verstuurde facturen behouden, ClickUp-taken afsluiten, prognose stoppen.
+      // verstuurde facturen behouden, prognose stoppen.
       const meta = requestMeta(req)
       const r = await stopRecurring(admin, id, { id: actor.id, email: actor.email ?? null }, meta.ip, meta.userAgent)
       try { revalidatePath('/admin/invoices'); revalidatePath('/admin/invoices/planner'); revalidatePath('/admin/revenue/omzet') } catch { }

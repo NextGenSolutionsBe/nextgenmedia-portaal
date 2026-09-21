@@ -54,19 +54,23 @@ export async function buildNotifications(): Promise<Notif[]> {
   const names = new Map(clientMap.map((c) => [c.id, c.company_name]))
   const out: Notif[] = []
 
-  // Facturatieopdrachten (contract ondertekend → ClickUp): een mislukte
-  // synchronisatie of ontbrekende gegevens moet iemand zien, anders wordt er
-  // niet gefactureerd. Best-effort: de tabel kan nog niet gemigreerd zijn.
+  // Factuurvoorstellen uit ondertekende contracten die nog op een mens wachten:
+  // ontbrekende gegevens (controle vereist) of een voorstel waarvan de eerste
+  // factuurdatum al bereikt is. Best-effort.
   try {
-    const opdrachten = await safe<{ id: string; contract_id: string; omschrijving: string | null; status: string; sync_status: string; factuurdatum: string }>(
-      admin.from('contract_facturatie_opdrachten').select('id, contract_id, omschrijving, status, sync_status, factuurdatum')
-        .in('status', ['open', 'controle_vereist']).or('sync_status.eq.mislukt,status.eq.controle_vereist').limit(50))
-    for (const o of opdrachten) {
-      if (o.sync_status === 'mislukt') {
-        out.push({ id: `facturatie-sync:${o.id}`, kind: 'invoice', priority: 'high', title: `Facturatieopdracht niet in ClickUp — ${o.omschrijving ?? 'contract'} (opnieuw synchroniseren)`, date: o.factuurdatum, href: `/admin/contracts/${o.contract_id}#facturatie` })
-      } else if (o.status === 'controle_vereist') {
-        out.push({ id: `facturatie-controle:${o.id}`, kind: 'invoice', priority: 'med', title: `Facturatieopdracht: controle vereist — ${o.omschrijving ?? 'contract'}`, date: o.factuurdatum, href: `/admin/contracts/${o.contract_id}#facturatie` })
-      }
+    const vandaag = vandaagISO()
+    const voorstellen = await safe<{ id: string; contract_id: string; omschrijving: string | null; status: string; factuurdatum: string }>(
+      admin.from('contract_facturatie_opdrachten').select('id, contract_id, omschrijving, status, factuurdatum')
+        .in('status', ['open', 'controle_vereist']).is('invoice_id', null).limit(80))
+    const perContract = new Map<string, { n: number; controle: number; eerste: string }>()
+    for (const o of voorstellen) {
+      const p = perContract.get(o.contract_id) ?? { n: 0, controle: 0, eerste: o.factuurdatum }
+      p.n++; if (o.status === 'controle_vereist') p.controle++; if (o.factuurdatum < p.eerste) p.eerste = o.factuurdatum
+      perContract.set(o.contract_id, p)
+    }
+    for (const [cid, p] of perContract) {
+      const laat = p.eerste <= vandaag
+      out.push({ id: `factuurvoorstel:${cid}:${p.n}:${p.controle}`, kind: 'invoice', priority: laat ? 'high' : 'med', title: `Factuurvoorstel te bevestigen — ${p.n} factuur${p.n === 1 ? '' : 'en'}${p.controle ? `, ${p.controle} met controle vereist` : ''}${laat ? ' (eerste factuurdatum al bereikt)' : ''}`, date: p.eerste, href: `/admin/contracts/${cid}#facturatie` })
     }
   } catch { /* meldingen mogen nooit stuklopen */ }
 

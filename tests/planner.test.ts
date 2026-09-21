@@ -15,9 +15,9 @@ const maak = (p: Partial<Moment> & { datum: string; status?: Moment['status'] })
   client_id: p.client_id ?? 'k1', klant: p.klant ?? 'Verheyen Tegels', project: null, omschrijving: null, type: p.type ?? 'Maandfactuur',
   bedrag_excl: p.bedrag_excl ?? 680, btw_pct: 21, bedrag_incl: Math.round((p.bedrag_excl ?? 680) * 1.21 * 100) / 100,
   status: p.status ?? 'gepland', ruweStatus: 'te_versturen', herkomst: p.herkomst ?? 'recurring', terugkerend: p.terugkerend ?? true, verantwoordelijke: 'Bram Reinquin',
-  clickup_task_id: p.clickup_task_id ?? null, clickup_url: null, clickup_sync: p.clickup_sync ?? 'geen', clickup_fout: null, volledig: p.volledig ?? true, ontbrekend: p.ontbrekend ?? [],
+  volledig: p.volledig ?? true, ontbrekend: p.ontbrekend ?? [],
   contract_id: null, contract_titel: null, recurring_id: null, invoice_id: null, wam_id: null, schema: null, opmerking: null,
-  acties: { bekijkenUrl: null, aanpassenUrl: null, voorbereidenUrl: null, kanVerstuurd: true, kanVerplaatsen: true, kanAnnuleren: true, kanSync: false },
+  acties: { bekijkenUrl: null, aanpassenUrl: null, voorbereidenUrl: null, kanVerstuurd: true, kanVerplaatsen: true, kanAnnuleren: true},
 })
 
 console.log('Facturatieplanner')

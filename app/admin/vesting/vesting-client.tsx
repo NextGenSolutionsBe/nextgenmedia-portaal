@@ -802,7 +802,7 @@ function Termijnen({ rij, onExtra }: { rij: WamRijBerekend; onExtra: () => void 
       const r = await fetch('/api/admin/vesting', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resource: 'termijn', action: 'factuur', id: t.id }) })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
       if (j.warning) toast.warning(j.warning)
-      toast.success('Factuur aangemaakt — staat in Facturen en in ClickUp.'); klaar()
+      toast.success('Factuur aangemaakt — staat in Facturen en in de planner.'); klaar()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Factuur aanmaken mislukt'); setBezig(null) }
   }
   const verwijder = async (t: WamTermijn) => {

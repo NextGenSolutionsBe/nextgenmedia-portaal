@@ -15,6 +15,8 @@ export type ContractEvent =
   | 'facturatie_opdrachten_aangemaakt' | 'facturatie_sync_ok' | 'facturatie_sync_mislukt' | 'facturatie_controle_vereist'
   // Contractarchief en interne melding (lib/contract-archief.ts).
   | 'gearchiveerd' | 'melding_verstuurd' | 'melding_mislukt'
+  // Factuurplanning bevestigd (voorstellen → facturen) en contract vroegtijdig gestopt.
+  | 'facturatie_bevestigd' | 'facturatie_gestopt'
 
 export async function logContractEvent(
   admin: Admin,
