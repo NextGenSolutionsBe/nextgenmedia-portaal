@@ -3,7 +3,7 @@ import { revalidatePath } from 'next/cache'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { safeMessage } from '@/lib/api-error'
-import { facturatieLijst, VERWACHTE_FACTURATIELOCATIE } from '@/lib/clickup'
+import { facturatieLijst, VERWACHTE_FACTURATIELOCATIE, clickupConfigured, completeInvoiceTask, plaatsTaakOpmerking } from '@/lib/clickup'
 import { verwerkOndertekening, synchroniseerOpdracht, type Opdracht } from '@/lib/facturatie/opdrachten'
 
 export const dynamic = 'force-dynamic'
@@ -105,6 +105,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       if (!inv) return NextResponse.json({ error: 'Factuur niet gevonden' }, { status: 404 })
       const { error } = await admin.from('contract_facturatie_opdrachten').update({ invoice_id: b.invoice_id, status: 'afgehandeld', updated_at: new Date().toISOString() }).eq('id', o.id)
       if (error) throw new Error(error.message)
+      // De factuur bestaat: de ClickUp-taak voor Bram mag dicht, anders wordt er
+      // een tweede keer gefactureerd. Met een opmerking erbij die zegt waarom.
+      if (o.clickup_task_id && clickupConfigured()) {
+        const { data: f } = await admin.from('invoices').select('invoice_date, amount_excl').eq('id', b.invoice_id).maybeSingle()
+        await plaatsTaakOpmerking(o.clickup_task_id, `Deze facturatieopdracht is gekoppeld aan een bestaande factuur${f?.invoice_date ? ` van ${String(f.invoice_date).slice(0, 10)}` : ''}${f?.amount_excl != null ? ` (€ ${Number(f.amount_excl).toFixed(2)} excl. btw)` : ''} en is daarmee afgehandeld — niet opnieuw factureren.`)
+        await completeInvoiceTask(o.clickup_task_id)
+      }
       try { await admin.from('contract_facturatie_log').insert({ contract_id: params.id, opdracht_id: o.id, gebeurtenis: 'factuur_aangemaakt', clickup_task_id: o.clickup_task_id, sync_status: o.sync_status, details: { invoice_id: b.invoice_id, door: actor.email ?? actor.id } }) } catch { }
       await audit(`Factuur aangemaakt vanuit facturatieopdracht ${o.volgnr}/${o.aantal}`, o.id)
       ververs()

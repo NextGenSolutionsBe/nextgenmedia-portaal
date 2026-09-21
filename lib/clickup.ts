@@ -712,6 +712,11 @@ export async function completeInvoiceTask(taskId: string): Promise<void> {
   try { await clickupJson(`/task/${taskId}`, { method: 'PUT', body: JSON.stringify({ status: STATUS_DONE }) }) } catch { /* best-effort */ }
 }
 
+/** Een opmerking op een taak zetten (best-effort, zonder iedereen te verwittigen). */
+export async function plaatsTaakOpmerking(taskId: string, tekst: string): Promise<void> {
+  try { await clickupJson(`/task/${taskId}/comment`, { method: 'POST', body: JSON.stringify({ comment_text: tekst, notify_all: false }) }) } catch { /* best-effort */ }
+}
+
 // ── Opdrachten (partner-assignments) → ClickUp ───────────────────────────────
 const ASSIGNMENT_LIST_NAME = 'Opdrachten'
 
