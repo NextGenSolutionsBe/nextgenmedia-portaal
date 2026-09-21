@@ -113,7 +113,30 @@ export async function laadStatistieken(filter: Filter): Promise<Uitkomst> {
       if (stuk.length < PAGINA) break
     }
   }
-  const alles = [...activiteiten, ...legacyGesprekken(legacy, eersteActiviteitOp)]
+  // ── 3b) Oude afspraken en sluitingen van vóór de eerste activiteit ────────
+  // Afspraken staan in sales_appointments (geboekt door setter_id); gewonnen
+  // en verloren stonden enkel als fasewissel op de tijdlijn. Zonder deze
+  // terugval zou de historiek van vóór de activiteitenregistratie wegvallen.
+  const historiek: StatActiviteit[] = []
+  if (legacyTot > vanIso) {
+    const { data: afs } = await admin.from('sales_appointments')
+      .select('id, lead_id, setter_id, created_at, status')
+      .gte('created_at', vanIso).lt('created_at', legacyTot).not('lead_id', 'is', null).limit(MAX_RIJEN)
+    for (const a of (afs ?? []) as { id: string; lead_id: string; setter_id: string | null; created_at: string; status: string }[]) {
+      if (filter.medewerkerId && a.setter_id !== filter.medewerkerId) continue
+      historiek.push({ id: `legacy-afspraak-${a.id}`, lead_id: a.lead_id, medewerker_id: a.setter_id, type: 'afspraak_gepland', duur_seconden: null, uitkomst: null, afspraak_id: a.id, created_at: a.created_at, verwijderd_op: null })
+    }
+    let q = admin.from('sales_lead_events')
+      .select('id, lead_id, actor_id, actor_email, to_stage, created_at')
+      .eq('kind', 'stage').in('to_stage', ['won', 'gewonnen', 'lost', 'not_interested', 'verloren'])
+      .gte('created_at', vanIso).lt('created_at', legacyTot).limit(MAX_RIJEN)
+    if (filter.medewerkerId) q = q.eq('actor_id', filter.medewerkerId)
+    const { data: sluit } = await q
+    for (const e of (sluit ?? []) as { id: string; lead_id: string; actor_id: string | null; actor_email: string | null; to_stage: string; created_at: string }[]) {
+      historiek.push({ id: `legacy-fase-${e.id}`, lead_id: e.lead_id, medewerker_id: e.actor_id, medewerker_email: e.actor_email, type: e.to_stage === 'won' || e.to_stage === 'gewonnen' ? 'deal_gewonnen' : 'deal_verloren', duur_seconden: null, uitkomst: null, afspraak_id: null, created_at: e.created_at, verwijderd_op: null })
+    }
+  }
+  const alles = [...activiteiten, ...legacyGesprekken(legacy, eersteActiviteitOp), ...historiek]
 
   // ── 4) De leads erbij (leadbron, dienst, dealwaarde), enkel van onze org ──
   const leadIds = [...new Set(alles.map((a) => a.lead_id).filter(Boolean))]

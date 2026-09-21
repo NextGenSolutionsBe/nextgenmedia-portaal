@@ -283,23 +283,23 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
 
       {/* ── Filters ── */}
       <div className="flex items-center gap-2 flex-wrap">
-        <select className="input-base w-auto text-xs" value={leadbron} onChange={(e) => setLeadbron(e.target.value)} aria-label="Leadbron">
+        <select className="input-base !w-auto max-w-[220px] text-xs" value={leadbron} onChange={(e) => setLeadbron(e.target.value)} aria-label="Leadbron">
           <option value="">Alle leadbronnen</option>
           <option value="inbound">Alle inbound</option>
           <option value="outbound_alle">Alle outbound</option>
           {LEADBRONNEN.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
         </select>
-        <select className="input-base w-auto text-xs" value={verantwoordelijke} onChange={(e) => setVerantwoordelijke(e.target.value)} aria-label="Verantwoordelijke">
+        <select className="input-base !w-auto max-w-[220px] text-xs" value={verantwoordelijke} onChange={(e) => setVerantwoordelijke(e.target.value)} aria-label="Verantwoordelijke">
           <option value="">Alle verantwoordelijken</option>
           {meId && <option value={meId}>Mijn leads</option>}
           <option value="niemand">Niemand toegewezen</option>
           {medewerkers.filter((m) => m.id !== meId).map((m) => <option key={m.id} value={m.id}>{m.naam}</option>)}
         </select>
-        <select className="input-base w-auto text-xs" value={dienst} onChange={(e) => setDienst(e.target.value)} aria-label="Dienst">
+        <select className="input-base !w-auto max-w-[220px] text-xs" value={dienst} onChange={(e) => setDienst(e.target.value)} aria-label="Dienst">
           <option value="">Alle diensten</option>
           {DIENSTEN.map((d) => <option key={d} value={d}>{d}</option>)}
         </select>
-        <select className="input-base w-auto text-xs" value={opvolg} onChange={(e) => setOpvolg(e.target.value)} aria-label="Opvolgdatum">
+        <select className="input-base !w-auto max-w-[220px] text-xs" value={opvolg} onChange={(e) => setOpvolg(e.target.value)} aria-label="Opvolgdatum">
           <option value="">Opvolgdatum: alle</option>
           <option value="vandaag">Vandaag (en verlopen)</option>
           <option value="week">Deze week</option>
