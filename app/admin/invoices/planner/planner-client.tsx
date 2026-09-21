@@ -94,7 +94,7 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
       const r = await fetch('/api/admin/invoices/planner', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actie, id: m.id, datum: extra?.datum }) })
       const j = await r.json(); if (!r.ok) throw new Error(j.error || 'Actie mislukt')
       for (const w of (j.waarschuwingen ?? []) as string[]) toast.warning(w)
-      toast.success({ verstuurd: 'Gemarkeerd als verstuurd.', verplaats: `Facturatiedatum verplaatst naar ${extra?.datum ? datumLang(extra.datum) : ''}.`, annuleer: 'Facturatieopdracht geannuleerd.' }[actie])
+      toast.success({ verstuurd: 'Gemarkeerd als verstuurd.', verplaats: `Facturatiedatum verplaatst naar ${extra?.datum ? datumLang(extra.datum) : ''}.`, annuleer: 'Factuur geannuleerd.', heropen: 'Teruggezet naar te factureren.' }[actie])
       ververs()
       return true
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Actie mislukt'); return false }

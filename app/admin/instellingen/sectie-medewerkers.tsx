@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
-import { Plus, Loader2, Power, Archive, RotateCcw, Mail, Pencil, KeyRound, ShieldCheck, ShieldOff } from 'lucide-react'
+import { Plus, Loader2, Power, Archive, RotateCcw, Mail, Pencil, KeyRound, ShieldCheck, ShieldOff, Trash2 } from 'lucide-react'
 import { VISIBLE_ADMIN_MODULES, STAFF_PRESETS, ADMIN_MODULES } from '@/lib/staff'
 import { STAFF_ROLLEN, ROL_LABEL, ROLLEN, type Rol } from '@/lib/instellingen/model'
 import { volledigeNaam, type Medewerker } from '@/lib/instellingen/medewerkers'
@@ -13,7 +13,7 @@ const moduleLabel = (k: string) => ADMIN_MODULES.find((m) => m.key === k)?.label
 const API = '/api/admin/instellingen/medewerkers'
 
 type Vraag =
-  | { soort: 'deactiveer' | 'activeer' | 'archiveer' | 'herstel' | 'uitnodiging'; m: Medewerker }
+  | { soort: 'deactiveer' | 'activeer' | 'archiveer' | 'herstel' | 'uitnodiging' | 'definitief'; m: Medewerker }
 
 /**
  * Medewerkers: overzicht + beheer. Zelfstandig (haalt eigen data op), zodat
@@ -27,6 +27,7 @@ export function SectieMedewerkers({ isAdmin }: { isAdmin: boolean }) {
   const [bewerk, setBewerk] = useState<Medewerker | null>(null)
   const [vraag, setVraag] = useState<Vraag | null>(null)
   const [bezig, setBezig] = useState(false)
+  const [bevestigTekst, setBevestigTekst] = useState('')
 
   const laad = useCallback(async () => {
     try {
@@ -45,10 +46,12 @@ export function SectieMedewerkers({ isAdmin }: { isAdmin: boolean }) {
       let r: Response
       if (soort === 'deactiveer' || soort === 'activeer') r = await fetch(`${API}/${m.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actief: soort === 'activeer' }) })
       else if (soort === 'archiveer') r = await fetch(`${API}/${m.id}`, { method: 'DELETE' })
+      else if (soort === 'definitief') r = await fetch(`${API}/${m.id}?definitief=1`, { method: 'DELETE' })
       else if (soort === 'herstel') r = await fetch(`${API}/${m.id}`, { method: 'POST' })
       else r = await fetch(`${API}/${m.id}/uitnodiging`, { method: 'POST' })
       const j = await r.json(); if (!r.ok) throw new Error(j.error || 'Mislukt')
-      toast.success({ deactiveer: 'Account gedeactiveerd. Inloggen is niet meer mogelijk.', activeer: 'Account weer actief.', archiveer: 'De medewerker werd gearchiveerd. Niets is definitief verwijderd.', herstel: 'Medewerker hersteld.', uitnodiging: `Uitnodiging verstuurd naar ${m.email}.` }[soort])
+      if (soort === 'definitief') { toast.success(j.loginVerwijderd ? `${volledigeNaam(m)} en het login-account zijn definitief verwijderd.` : j.ookAnders?.length ? `Werknemerstoegang verwijderd. Het login-account blijft bestaan omdat het ook gebruikt wordt als ${j.ookAnders.join(', ')}.` : `${volledigeNaam(m)} is definitief verwijderd.`); setVraag(null); setBevestigTekst(''); laad(); return }
+      toast.success({ deactiveer: 'Account gedeactiveerd. Inloggen is niet meer mogelijk.', activeer: 'Account weer actief.', archiveer: 'De medewerker werd gearchiveerd. Niets is definitief verwijderd.', herstel: 'Medewerker hersteld.', uitnodiging: `Uitnodiging verstuurd naar ${m.email}.` }[soort as Exclude<Vraag['soort'], 'definitief'>])
       setVraag(null); laad()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(false) }
   }
@@ -61,10 +64,11 @@ export function SectieMedewerkers({ isAdmin }: { isAdmin: boolean }) {
   return (
     <div className="space-y-4">
       <div className="card-base">
-        <Kop titel="Medewerkers" tekst="Interne accounts: hoofdbeheerders en werknemers, hun rol, functie en modules. Verwijderen archiveert; er wordt nooit iets definitief gewist. Een uitnodigingsmail vertrekt enkel als je dat uitdrukkelijk bevestigt."
+        <Kop titel="Medewerkers" tekst="Interne accounts: hoofdbeheerders en werknemers, hun rol, functie en modules. Verwijderen archiveert eerst; vanuit het archief kun je een account definitief verwijderen. Een uitnodigingsmail vertrekt enkel als je dat uitdrukkelijk bevestigt."
           rechts={isAdmin ? <button type="button" onClick={() => setNieuw(true)} className="btn-primary"><Plus className="h-4 w-4" />Nieuwe medewerker</button> : undefined} />
         <div className="flex items-center gap-3 mb-3 text-xs text-gray-500 flex-wrap">
           <span>{rijen.filter((m) => !m.gearchiveerd).length} accounts · {actieveHoofd} actieve hoofdbeheerder{actieveHoofd === 1 ? '' : 's'}</span>
+          {archief > 0 && !toonArchief && <span className="text-gray-400">Definitief verwijderen doe je vanuit de gearchiveerde accounts.</span>}
           {archief > 0 && <label className="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" checked={toonArchief} onChange={(e) => setToonArchief(e.target.checked)} />Toon gearchiveerde ({archief})</label>}
         </div>
         <div className="overflow-x-auto -mx-1">
@@ -100,6 +104,7 @@ export function SectieMedewerkers({ isAdmin }: { isAdmin: boolean }) {
                           {!m.isAdmin && !m.gearchiveerd && m.email && <Knop titel="Uitnodiging versturen" onClick={() => setVraag({ soort: 'uitnodiging', m })}><Mail className="h-3.5 w-3.5" /></Knop>}
                           {!m.isAdmin && !m.gearchiveerd && !zelf && <Knop titel="Verwijderen (archiveren)" rood onClick={() => setVraag({ soort: 'archiveer', m })}><Archive className="h-3.5 w-3.5" /></Knop>}
                           {m.gearchiveerd && <Knop titel="Herstellen" onClick={() => setVraag({ soort: 'herstel', m })}><RotateCcw className="h-3.5 w-3.5" /></Knop>}
+                          {m.gearchiveerd && !m.isAdmin && !zelf && <Knop titel="Definitief verwijderen" rood onClick={() => { setBevestigTekst(''); setVraag({ soort: 'definitief', m }) }}><Trash2 className="h-3.5 w-3.5" /></Knop>}
                         </div>
                       )}
                     </td>
@@ -117,18 +122,31 @@ export function SectieMedewerkers({ isAdmin }: { isAdmin: boolean }) {
 
       {(nieuw || bewerk) && <Formulier m={bewerk} onSluit={() => { setNieuw(false); setBewerk(null) }} onKlaar={() => { setNieuw(false); setBewerk(null); laad() }} />}
 
-      {vraag && (
+      {vraag && vraag.soort === 'definitief' && (
+        <Dialoog titel="Medewerker definitief verwijderen" onSluit={() => setVraag(null)}>
+          <div className="space-y-3 text-sm">
+            <p><b>{volledigeNaam(vraag.m)}</b> wordt definitief verwijderd, samen met het login-account. Dit kan niet ongedaan gemaakt worden. De historiek en het logboek blijven bewaard.</p>
+            <p className="text-xs text-gray-500">Wordt dezelfde login ook gebruikt als klant of freelancer, dan blijft die login bestaan en verdwijnt enkel de werknemerstoegang.</p>
+            <Veld label={<span>Typ <b>{vraag.m.email}</b> om te bevestigen</span>}><input className={INP} value={bevestigTekst} onChange={(e) => setBevestigTekst(e.target.value)} autoFocus /></Veld>
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secondary" onClick={() => setVraag(null)} disabled={bezig}>Annuleren</button>
+              <button type="button" className="btn-primary bg-red-600 hover:bg-red-700 text-white border-red-600" disabled={bezig || bevestigTekst.trim().toLowerCase() !== (vraag.m.email ?? '').toLowerCase()} onClick={voerUit}>{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Definitief verwijderen</button>
+            </div>
+          </div>
+        </Dialoog>
+      )}
+      {vraag && vraag.soort !== 'definitief' && (
         <Bevestig bezig={bezig} onAnnuleer={() => setVraag(null)} onBevestig={voerUit}
           gevaarlijk={vraag.soort === 'deactiveer' || vraag.soort === 'archiveer'}
-          titel={{ deactiveer: 'Account deactiveren', activeer: 'Account activeren', archiveer: 'Medewerker verwijderen', herstel: 'Medewerker herstellen', uitnodiging: 'Uitnodiging versturen' }[vraag.soort]}
-          bevestigLabel={{ deactiveer: 'Deactiveren', activeer: 'Activeren', archiveer: 'Verwijderen (archiveren)', herstel: 'Herstellen', uitnodiging: 'Ja, verstuur de uitnodiging' }[vraag.soort]}
+          titel={{ deactiveer: 'Account deactiveren', activeer: 'Account activeren', archiveer: 'Medewerker verwijderen', herstel: 'Medewerker herstellen', uitnodiging: 'Uitnodiging versturen' }[vraag.soort as Exclude<Vraag['soort'], 'definitief'>]}
+          bevestigLabel={{ deactiveer: 'Deactiveren', activeer: 'Activeren', archiveer: 'Verwijderen (archiveren)', herstel: 'Herstellen', uitnodiging: 'Ja, verstuur de uitnodiging' }[vraag.soort as Exclude<Vraag['soort'], 'definitief'>]}
           tekst={{
             deactiveer: <><b>{volledigeNaam(vraag.m)}</b> kan daarna niet meer inloggen. Gegevens, rechten en geschiedenis blijven bewaard; je kunt het account later opnieuw activeren.</>,
             activeer: <><b>{volledigeNaam(vraag.m)}</b> kan daarna weer inloggen met de bestaande rechten.</>,
-            archiveer: <><b>{volledigeNaam(vraag.m)}</b> wordt gearchiveerd: het account kan niet meer inloggen en verdwijnt uit de lijst. Er wordt niets definitief verwijderd; herstellen kan altijd via "Toon gearchiveerde".</>,
+            archiveer: <><b>{volledigeNaam(vraag.m)}</b> wordt gearchiveerd: het account kan niet meer inloggen en verdwijnt uit de lijst. Herstellen kan via "Toon gearchiveerde"; daar kun je het account ook definitief verwijderen.</>,
             herstel: <><b>{volledigeNaam(vraag.m)}</b> komt terug in de lijst en kan weer inloggen met de vroegere rechten.</>,
             uitnodiging: <>Er vertrekt nu een e-mail naar <b>{vraag.m.email}</b> met een link om een wachtwoord te kiezen en in te loggen. Dit gebeurt alleen als je hier bevestigt.</>,
-          }[vraag.soort]} />
+          }[vraag.soort as Exclude<Vraag['soort'], 'definitief'>]} />
       )}
     </div>
   )
@@ -155,11 +173,11 @@ function Formulier({ m, onSluit, onKlaar }: { m: Medewerker | null; onSluit: () 
   const submit = async () => {
     setFout(null)
     if (!voornaam.trim()) { setFout('Voornaam is verplicht.'); return }
-    if (!admin && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim())) { setFout('Vul een geldig e-mailadres in.'); return }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim())) { setFout('Vul een geldig e-mailadres in.'); return }
     if (password && password.length < 8) { setFout('Een wachtwoord telt minstens 8 tekens.'); return }
     setSaving(true)
     try {
-      const body = admin ? { voornaam, achternaam } : { voornaam, achternaam, email: email.trim(), functie, rol, permissions: perms, ...(password ? { password } : {}) }
+      const body = admin ? { voornaam, achternaam, email: email.trim(), ...(password ? { password } : {}) } : { voornaam, achternaam, email: email.trim(), functie, rol, permissions: perms, ...(password ? { password } : {}) }
       const r = await fetch(isEdit ? `${API}/${m!.id}` : API, { method: isEdit ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const j = await r.json(); if (!r.ok) throw new Error(j.error || 'Mislukt')
       toast.success(isEdit ? 'Medewerker bijgewerkt.' : j.uitnodigingNodig ? 'Medewerker aangemaakt. Verstuur een uitnodiging zodra je wilt dat hij of zij kan inloggen.' : 'Medewerker aangemaakt.')
@@ -173,8 +191,13 @@ function Formulier({ m, onSluit, onKlaar }: { m: Medewerker | null; onSluit: () 
         <div className="grid sm:grid-cols-2 gap-2">
           <Veld label="Voornaam *"><input className={INP} value={voornaam} onChange={(e) => setVoornaam(e.target.value)} /></Veld>
           <Veld label="Achternaam"><input className={INP} value={achternaam} onChange={(e) => setAchternaam(e.target.value)} /></Veld>
+          <Veld label="E-mailadres (login) *"><input type="email" className={INP} value={email} onChange={(e) => setEmail(e.target.value)} /></Veld>
+          {admin && (
+            <Veld label={<span><KeyRound className="h-3 w-3 inline mr-1" />Nieuw wachtwoord (optioneel)</span>} hint="Laat leeg om niet te wijzigen.">
+              <input type="text" autoComplete="off" className={INP} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Min. 8 tekens" />
+            </Veld>
+          )}
           {!admin && <>
-            <Veld label="E-mailadres (login) *"><input type="email" className={INP} value={email} onChange={(e) => setEmail(e.target.value)} /></Veld>
             <Veld label="Functie"><input className={INP} value={functie} onChange={(e) => setFunctie(e.target.value)} placeholder="bv. Contentmarketeer" /></Veld>
             <Veld label="Rol" hint={ROLLEN.find((r) => r.key === rol)?.uitleg}>
               <select className={INP} value={rol} onChange={(e) => setRol(e.target.value as Rol)}>{STAFF_ROLLEN.map((r) => <option key={r} value={r}>{ROL_LABEL[r]}</option>)}</select>
@@ -185,7 +208,7 @@ function Formulier({ m, onSluit, onKlaar }: { m: Medewerker | null; onSluit: () 
             </Veld>
           </>}
         </div>
-        {isEdit && !admin && email.trim().toLowerCase() !== (m?.email ?? '').toLowerCase() && (
+        {isEdit && email.trim().toLowerCase() !== (m?.email ?? '').toLowerCase() && (
           <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">Dit adres is ook de login. Na het opslaan werkt <b>{m?.email}</b> niet meer om aan te melden; dat wordt <b>{email.trim()}</b>.</div>
         )}
         {!admin && (
@@ -200,7 +223,7 @@ function Formulier({ m, onSluit, onKlaar }: { m: Medewerker | null; onSluit: () 
             <p className="text-[11px] text-gray-400 mt-1">Wat iemand binnen een module mag (toevoegen, aanpassen, …) volgt uit de rol: zie Gebruikersrechten. Het Command Center is altijd zichtbaar.</p>
           </div>
         )}
-        {admin && <p className="text-xs text-gray-500">Een hoofdbeheerder heeft altijd alle modules en rechten. E-mailadres en wachtwoord van een hoofdbeheerder wijzig je via het eigen account.</p>}
+        {admin && <p className="text-xs text-gray-500">Een hoofdbeheerder heeft altijd alle modules en rechten.</p>}
         {fout && <div className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{fout}</div>}
         <div className="flex gap-2 justify-end pt-1">
           <button type="button" onClick={onSluit} className="btn-secondary" disabled={saving}>Annuleren</button>

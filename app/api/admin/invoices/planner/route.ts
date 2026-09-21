@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
 const NIET_TE_ANNULEREN = 'Een verstuurde of betaalde factuur kan niet geannuleerd worden. Crediteer ze via de factuur zelf.'
 
 /**
- * POST { actie, id, datum? } — annuleer | verplaats | verstuurd.
+ * POST { actie, id, datum? } — annuleer | verplaats | verstuurd | heropen (terug naar te factureren).
  * Werkt op de bron achter het moment; een mislukte nevenstap blokkeert
  * de actie niet maar wordt wél teruggemeld en gelogd.
  */
@@ -81,6 +81,13 @@ export async function POST(req: NextRequest) {
         await audit(`Factuurdatum verplaatst ${inv.invoice_date} → ${b.datum}`, { van: inv.invoice_date, naar: b.datum })
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
       }
+      if (b.actie === 'heropen') {
+        const { error } = await admin.from('invoices').update({ status: 'te_versturen', sent_at: null, sent_by_email: null, cancelled_at: null, cancelled_by_email: null, status_reden: null, updated_at: new Date().toISOString() }).eq('id', inv.id)
+        if (error) throw new Error(error.message)
+        try { await admin.from('invoice_wijzigingen').insert({ invoice_id: inv.id, actie: 'aangepast', veld: 'status', oud: String(inv.status), nieuw: 'te_versturen', reden: 'Teruggezet in de facturatieplanner', actor_email: actor.email ?? null }) } catch { /* */ }
+        await audit('Factuur teruggezet naar te factureren')
+        klaar(); return NextResponse.json({ ok: true, waarschuwingen })
+      }
       if (b.actie === 'verstuurd') {
         const { error } = await admin.from('invoices').update({ status: 'verstuurd', sent_at: new Date().toISOString(), sent_by_email: actor.email ?? null }).eq('id', inv.id)
         if (error) throw new Error(error.message)
@@ -112,6 +119,12 @@ export async function POST(req: NextRequest) {
         // Hangt er al een echte factuur aan deze maand, dan krijgt die dezelfde datum.
         if (rij?.invoice_id) await admin.from('invoices').update({ invoice_date: b.datum, invoice_month: ymVan(b.datum!) }).eq('id', rij.invoice_id)
         await audit(`Factuurdatum maand ${sleutel.maand} verplaatst ${huidigeDatum} → ${b.datum}`, { van: huidigeDatum, naar: b.datum })
+        klaar(); return NextResponse.json({ ok: true, waarschuwingen })
+      }
+      if (b.actie === 'heropen') {
+        await zetMaandStatus(admin, rec.id, sleutel.maand, 'te_versturen', { id: actor.id, email: actor.email ?? null })
+        try { await admin.from('recurring_invoice_months').update({ cancelled_at: null, cancelled_by_email: null, sent_at: null, sent_by_email: null }).eq('recurring_id', rec.id).eq('month', sleutel.maand) } catch { /* kolommen kunnen ontbreken */ }
+        await audit(`Maand ${sleutel.maand} teruggezet naar te factureren`)
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
       }
       if (b.actie === 'verstuurd') {

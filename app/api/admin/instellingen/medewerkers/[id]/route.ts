@@ -58,6 +58,25 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           wijzigingen.push('naam')
         }
       }
+      // E-mailadres (= login) en wachtwoord van een hoofdbeheerder.
+      if (typeof b.email === 'string' && b.email.trim()) {
+        const nieuw = b.email.trim().toLowerCase()
+        const { data: huidig } = await admin.auth.admin.getUserById(uid)
+        if (nieuw !== (huidig?.user?.email ?? '').toLowerCase()) {
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(nieuw)) return NextResponse.json({ error: 'Dat is geen geldig e-mailadres.' }, { status: 400 })
+          const { data: bezet } = await admin.from('staff_members').select('id').eq('email', nieuw).maybeSingle()
+          if (bezet) return NextResponse.json({ error: 'Dat adres is al van een werknemer.' }, { status: 409 })
+          const { error } = await admin.auth.admin.updateUserById(uid, { email: nieuw, email_confirm: true })
+          if (error) return NextResponse.json({ error: /already|exists|registered/i.test(error.message) ? 'Dat adres is al in gebruik als login.' : error.message }, { status: 400 })
+          wijzigingen.push(`e-mail → ${nieuw}`)
+        }
+      }
+      if (typeof b.password === 'string' && b.password) {
+        if (b.password.length < 8) return NextResponse.json({ error: 'Een wachtwoord telt minstens 8 tekens.' }, { status: 400 })
+        const { error } = await admin.auth.admin.updateUserById(uid, { password: b.password, email_confirm: true })
+        if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+        wijzigingen.push('wachtwoord')
+      }
       await logAudit({
         action: 'staff.admin.updated', entityType: 'auth_user', entityId: uid, summary: `Hoofdbeheerder bijgewerkt (${wijzigingen.join(', ') || 'geen wijzigingen'})`,
         actorUserId: g.persoon.userId, actorEmail: g.persoon.email, actorRole: 'admin', metadata: { wijzigingen }, ip: meta.ip, userAgent: meta.userAgent,
@@ -137,16 +156,61 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 }
 
-// DELETE — archiveren (nooit definitief): inactief + verwijderd_at + login geblokkeerd.
+// DELETE — standaard archiveren (inactief + verwijderd_at + login geblokkeerd).
+// Met ?definitief=1 (enkel voor een gearchiveerde werknemer): de werknemer en
+// het login-account worden echt verwijderd. Is hetzelfde login-account ook
+// klant, klant-subaccount of freelancer, dan blijft de login bestaan en
+// verdwijnt enkel de werknemerstoegang.
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const g = await eisHoofdbeheerder(); if (!g.ok) return g.response
     const { id } = await params
     if (isAdminId(id)) return NextResponse.json({ error: 'Een hoofdbeheerder kan niet verwijderd worden. Deactiveer het account als het niet meer mag inloggen.' }, { status: 400 })
     const admin = createAdminSupabaseClient()
-    const { data: staff } = await admin.from('staff_members').select('id, auth_user_id, email').eq('id', id).maybeSingle()
+    const { data: staff } = await admin.from('staff_members').select('id, auth_user_id, email, name, verwijderd_at').eq('id', id).maybeSingle()
     if (!staff) return NextResponse.json({ error: 'Medewerker niet gevonden.' }, { status: 404 })
     if (staff.auth_user_id === g.persoon.userId) return NextResponse.json({ error: 'Je kunt je eigen account niet verwijderen.' }, { status: 400 })
+
+    if (new URL(req.url).searchParams.get('definitief') === '1') {
+      if (!staff.verwijderd_at) return NextResponse.json({ error: 'Archiveer de medewerker eerst; definitief verwijderen kan enkel vanuit het archief.' }, { status: 400 })
+      const uid = staff.auth_user_id as string | null
+      // Hangt aan dezelfde login nog iets anders dan de werknemerstoegang?
+      let ookAnders: string[] = []
+      if (uid) {
+        const [{ data: owner }, { data: sub }, { data: fl }, { data: rollen }] = await Promise.all([
+          admin.from('clients').select('id').eq('owner_user_id', uid).limit(1),
+          admin.from('client_users').select('id').eq('auth_user_id', uid).limit(1),
+          admin.from('freelancers').select('id').eq('user_id', uid).limit(1),
+          admin.from('user_roles').select('role').eq('user_id', uid),
+        ])
+        if ((owner ?? []).length) ookAnders.push('klant')
+        if ((sub ?? []).length) ookAnders.push('klant-subaccount')
+        if ((fl ?? []).length) ookAnders.push('freelancer')
+        if (((rollen ?? []) as { role: string }[]).some((r) => r.role === 'admin')) ookAnders.push('hoofdbeheerder')
+        ookAnders = [...new Set(ookAnders)]
+      }
+      const { error: dErr } = await admin.from('staff_members').delete().eq('id', id)
+      if (dErr) throw new Error(dErr.message)
+      let loginVerwijderd = false
+      if (uid && ookAnders.length === 0) {
+        try { await admin.from('user_roles').delete().eq('user_id', uid) } catch { /* cascade doet de rest */ }
+        const { error } = await admin.auth.admin.deleteUser(uid)
+        if (error) {
+          // De werknemer is weg; het login-account blijft geblokkeerd bestaan.
+          await admin.auth.admin.updateUserById(uid, { ban_duration: BAN_DUUR }).catch(() => {})
+        } else loginVerwijderd = true
+      } else if (uid) {
+        try { await admin.from('user_roles').delete().eq('user_id', uid).eq('role', 'staff') } catch { /* */ }
+      }
+      const meta = requestMeta(req)
+      await logAudit({
+        action: 'staff.deleted', entityType: 'staff_member', entityId: id,
+        summary: `Medewerker definitief verwijderd: ${staff.email ?? id}${loginVerwijderd ? ' (login verwijderd)' : ookAnders.length ? ` (login behouden: ook ${ookAnders.join(', ')})` : ''}`,
+        actorUserId: g.persoon.userId, actorEmail: g.persoon.email, actorRole: 'admin', metadata: { loginVerwijderd, ookAnders }, ip: meta.ip, userAgent: meta.userAgent,
+      })
+      herlaad()
+      return NextResponse.json({ ok: true, loginVerwijderd, ookAnders })
+    }
     const { error } = await admin.from('staff_members').update({ active: false, verwijderd_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', id)
     if (error) throw new Error(error.message)
     if (staff.auth_user_id) await admin.auth.admin.updateUserById(staff.auth_user_id, { ban_duration: BAN_DUUR }).catch(() => {})

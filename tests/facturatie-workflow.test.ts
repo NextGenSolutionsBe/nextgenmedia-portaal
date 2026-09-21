@@ -88,9 +88,9 @@ test('labels en kleuren', () => {
 })
 test('oude statuswaarden worden genormaliseerd; inhoud enkel bewerkbaar vóór versturen; reden verplicht bij annuleren', () => {
   assert.equal(normaliseerVerzendstatus('gefactureerd'), 'verstuurd'); assert.equal(normaliseerVerzendstatus(null), 'te_versturen')
-  assert.equal(magInhoudBewerken('te_versturen'), true); assert.equal(magInhoudBewerken('verstuurd'), false)
+  assert.equal(magInhoudBewerken('te_versturen'), true); assert.equal(magInhoudBewerken('verstuurd'), true, 'interne planner: altijd bewerkbaar')
   assert.equal(redenVerplicht('geannuleerd'), true); assert.equal(isAfgesloten('geannuleerd'), true)
-  assert.equal(magNaar('te_versturen', 'verstuurd').ok, true); assert.equal(magNaar('verstuurd', 'te_versturen', 100).ok, false)
+  assert.equal(magNaar('te_versturen', 'verstuurd').ok, true); assert.equal(magNaar('verstuurd', 'te_versturen', 100).ok, true); assert.equal(magNaar('geannuleerd', 'verstuurd').ok, true); assert.equal(magNaar('verstuurd', 'verstuurd').ok, false)
 })
 test('betaalstatus enkel voor verstuurde facturen', () => {
   const b = (p: Partial<Parameters<typeof afgeleideBetaalstatus>[0]>) => afgeleideBetaalstatus({ verzendstatus: 'verstuurd', betaaldBedrag: 0, totaalIncl: 1184.59, vervaldatum: '2026-10-31', vandaag: NU, ...p })

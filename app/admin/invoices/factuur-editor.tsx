@@ -8,7 +8,7 @@ import { formatEuro } from '@/lib/utils'
 import { DEFAULT_VAT } from '@/lib/invoices'
 import { factuurdagVan } from '@/lib/facturatie/reeks'
 import { berekenTotalen, berekenRegel, nieuweRegel, hernummer, verplaatsRegel, dupliceerRegel, verwijderRegel, getal, EENHEDEN, type FactuurRegel } from '@/lib/facturen/regels'
-import { VERZENDSTATUS, BETAALSTATUS, magNaar, redenVerplicht, type Verzendstatus, type Betaalstatus } from '@/lib/facturen/status'
+import { VERZENDSTATUS, BETAALSTATUS, KIESBARE_STATUSSEN, redenVerplicht, normaliseerVerzendstatus, type Verzendstatus, type Betaalstatus } from '@/lib/facturen/status'
 import { Bevestig, INP } from '@/app/admin/instellingen/ui'
 
 /**
@@ -132,6 +132,7 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
   const [reden, setReden] = useState('')
   const [betaling, setBetaling] = useState<{ bedrag: string; op: string } | null>(null)
   const [toonHistoriek, setToonHistoriek] = useState(false)
+  const [verzendDatum, setVerzendDatum] = useState('')
 
   const [kop, setKop] = useState({
     invoice_date: standaard?.invoice_date ?? new Date().toISOString().slice(0, 10), due_date: '', payment_term_days: '30', periode: '',
@@ -154,7 +155,7 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
         const inv = f.factuur as Factuur
         setFactuur(inv); setWijzigingen(f.wijzigingen ?? [])
         const k2 = { invoice_date: dag(inv.invoice_date), due_date: dag(inv.due_date), payment_term_days: inv.payment_term_days === null || inv.payment_term_days === undefined ? '' : String(inv.payment_term_days), periode: inv.periode ?? '', client_id: inv.client_id ?? '', contract_id: inv.contract_id ?? '', description: inv.description ?? '', reference: inv.reference ?? '', currency: inv.currency ?? 'EUR', note: inv.note ?? '', vat_pct: String(inv.vat_pct ?? DEFAULT_VAT), verantwoordelijke: inv.verantwoordelijke ?? '' }
-        setKop(k2); setRegels(f.regels ?? []); setOrigineel(JSON.stringify({ k: k2, r: f.regels ?? [] }))
+        setKop(k2); setRegels(f.regels ?? []); setOrigineel(JSON.stringify({ k: k2, r: f.regels ?? [], v: dag(inv.sent_at) })); setVerzendDatum(dag(inv.sent_at))
       }
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Laden mislukt') } finally { setLaden(false) }
   }, [invoiceId])
@@ -162,9 +163,9 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
 
   const btw = getal(kop.vat_pct, DEFAULT_VAT)
   const totalen = useMemo(() => berekenTotalen(regels), [regels])
-  const vuil = nieuw || JSON.stringify({ k: kop, r: regels }) !== origineel
+  const vuil = nieuw || JSON.stringify({ k: kop, r: regels, v: verzendDatum }) !== origineel
   const magInhoud = nieuw || (factuur?.magInhoud ?? false)
-  const status: Verzendstatus = factuur?.verzendstatus ?? 'te_versturen'
+  const status: Verzendstatus = factuur?.verzendstatus ? (factuur.verzendstatus === 'gecrediteerd' ? 'geannuleerd' : normaliseerVerzendstatus(factuur.verzendstatus)) : 'te_versturen'
   const contractOpties = useMemo(() => contracten.filter((c) => !kop.client_id || !c.client_id || c.client_id === kop.client_id), [contracten, kop.client_id])
   const ontbreekt: string[] = []
   if (!kop.client_id) ontbreekt.push('klant')
@@ -182,7 +183,7 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
         ? (herhaling === 'maandelijks'
           ? await fetch('/api/admin/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'recurring', client_id: body.client_id, contract_id: body.contract_id, start_month: kop.invoice_date.slice(0, 7), end_month: null, description: kop.description, amount_excl: totalen.excl, vat_pct: btw, invoice_day: factuurdagVan(kop.invoice_date), verantwoordelijke: kop.verantwoordelijke, payment_term_days: body.payment_term_days, lines: regels.map((x) => ({ omschrijving: x.omschrijving || x.artikel, aantal: x.aantal, prijs_excl: x.prijs_excl, classificatie: x.classificatie })) }) })
           : await fetch('/api/admin/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'aanmaken', ...body }) }))
-        : await fetch(`/api/admin/invoices/${invoiceId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(magInhoud ? body : { invoice_date: kop.invoice_date, due_date: kop.due_date || null, periode: kop.periode, reference: kop.reference, note: kop.note, payment_term_days: body.payment_term_days, contract_id: body.contract_id, verantwoordelijke: kop.verantwoordelijke }) })
+        : await fetch(`/api/admin/invoices/${invoiceId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, ...(status === 'verstuurd' && verzendDatum ? { sent_at: verzendDatum } : {}) }) })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
       toast.success(nieuw ? (herhaling === 'maandelijks' ? 'Maandelijkse facturatie aangemaakt — elke maand verschijnt ze in de lijst en de planner.' : 'Factuur aangemaakt — staat in Facturen, in de planner en op het contract.') : 'Factuur opgeslagen.')
       onSaved?.(nieuw ? j.id : invoiceId!)
@@ -240,12 +241,13 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
           {laden ? <div className="py-12 text-center text-gray-400"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div> : (
             <>
-              {!magInhoud && (
+              {false && (
                 <div className="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-900 flex gap-2">
                   <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-                  <div>Deze factuur is {status === 'verstuurd' ? 'verstuurd' : VERZENDSTATUS[status].label.toLowerCase()}. Klant, regels en bedragen liggen vast; datum, vervaldatum, referentie, verantwoordelijke, contractkoppeling en interne notitie kun je nog aanpassen.</div>
+                  <div>Deze factuur is {VERZENDSTATUS[status].label.toLowerCase()}.</div>
                 </div>
               )}
+              {!nieuw && status === 'verstuurd' && <div className="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-900">Deze factuur is al verstuurd. Je kunt alles nog aanpassen; vergeet niet dezelfde wijziging in de boekhouding door te voeren. Elke wijziging komt in de historiek.</div>}
               {ontbreekt.length > 0 && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">Nog in te vullen: {ontbreekt.join(', ')}.</div>}
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -254,12 +256,12 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
                 <div><label className="block text-xs font-medium text-gray-600 mb-1">Vervaldatum</label><input type="date" className={INP} value={kop.due_date} onChange={(e) => setKop((k) => ({ ...k, due_date: e.target.value }))} /></div>
                 <div><label className="block text-xs font-medium text-gray-600 mb-1">Factuurperiode</label><input className={INP} value={kop.periode} onChange={(e) => setKop((k) => ({ ...k, periode: e.target.value }))} placeholder="bv. 2026-09 of Q4 2026" /></div>
                 <div className="col-span-2"><label className="block text-xs font-medium text-gray-600 mb-1">Klant</label>
-                  <select className={INP} value={kop.client_id} disabled={!magInhoud} onChange={(e) => setKop((k) => ({ ...k, client_id: e.target.value }))}><option value="">— Kies klant —</option>{klanten.map((k) => <option key={k.id} value={k.id}>{k.naam}</option>)}</select>
+                  <select className={INP} value={kop.client_id} onChange={(e) => setKop((k) => ({ ...k, client_id: e.target.value }))}><option value="">— Kies klant —</option>{klanten.map((k) => <option key={k.id} value={k.id}>{k.naam}</option>)}</select>
                 </div>
                 <div className="col-span-2"><label className="block text-xs font-medium text-gray-600 mb-1">Contract of project <span className="text-gray-400">— optioneel</span></label>
                   <select className={INP} value={kop.contract_id} onChange={(e) => setKop((k) => ({ ...k, contract_id: e.target.value }))}><option value="">— Losse factuur, geen contract —</option>{contractOpties.map((c) => <option key={c.id} value={c.id}>{c.titel} · {c.label}</option>)}</select>
                 </div>
-                <div className="col-span-2"><label className="block text-xs font-medium text-gray-600 mb-1">Omschrijving</label><input className={INP} value={kop.description} disabled={!magInhoud} onChange={(e) => setKop((k) => ({ ...k, description: e.target.value }))} placeholder="Wat staat er bovenaan de factuur?" /></div>
+                <div className="col-span-2"><label className="block text-xs font-medium text-gray-600 mb-1">Omschrijving</label><input className={INP} value={kop.description} onChange={(e) => setKop((k) => ({ ...k, description: e.target.value }))} placeholder="Wat staat er bovenaan de factuur?" /></div>
                 <div><label className="block text-xs font-medium text-gray-600 mb-1">Referentie</label><input className={INP} value={kop.reference} onChange={(e) => setKop((k) => ({ ...k, reference: e.target.value }))} placeholder="PO-nummer, kenmerk klant" /></div>
                 <div><label className="block text-xs font-medium text-gray-600 mb-1">Verantwoordelijke</label><input className={INP} list="ngm-verantwoordelijken" value={kop.verantwoordelijke} onChange={(e) => setKop((k) => ({ ...k, verantwoordelijke: e.target.value }))} placeholder="Bv. Bram Reinquin" /><datalist id="ngm-verantwoordelijken"><option value="Bram Reinquin" /><option value="Marco Castermans" /></datalist></div>
                 {nieuw && (
@@ -268,14 +270,14 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
                   </div>
                 )}
                 <div className="grid grid-cols-2 gap-2">
-                  <div><label className="block text-xs font-medium text-gray-600 mb-1">Valuta</label><input className={INP} value={kop.currency} disabled={!magInhoud} onChange={(e) => setKop((k) => ({ ...k, currency: e.target.value.toUpperCase().slice(0, 3) }))} /></div>
-                  <div><label className="block text-xs font-medium text-gray-600 mb-1">Std. btw %</label><input className={INP} inputMode="decimal" value={kop.vat_pct} disabled={!magInhoud} onChange={(e) => setKop((k) => ({ ...k, vat_pct: e.target.value }))} /></div>
+                  <div><label className="block text-xs font-medium text-gray-600 mb-1">Valuta</label><input className={INP} value={kop.currency} onChange={(e) => setKop((k) => ({ ...k, currency: e.target.value.toUpperCase().slice(0, 3) }))} /></div>
+                  <div><label className="block text-xs font-medium text-gray-600 mb-1">Std. btw %</label><input className={INP} inputMode="decimal" value={kop.vat_pct} onChange={(e) => setKop((k) => ({ ...k, vat_pct: e.target.value }))} /></div>
                 </div>
               </div>
 
               <div>
                 <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-2">Factuurregels</div>
-                <RegelsEditor regels={regels} onChange={setRegels} btw={btw} alleenLezen={!magInhoud} />
+                <RegelsEditor regels={regels} onChange={setRegels} btw={btw} alleenLezen={false} />
               </div>
 
               <div><label className="block text-xs font-medium text-gray-600 mb-1">Interne notitie <span className="text-gray-400">— niet voor de klant</span></label><textarea rows={2} className={INP} value={kop.note} onChange={(e) => setKop((k) => ({ ...k, note: e.target.value }))} /></div>
@@ -283,12 +285,22 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
               {!nieuw && factuur && (
                 <div className="rounded-xl border border-gray-200 p-3 space-y-2">
                   <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">Status</div>
-                  <div className="flex flex-wrap gap-2">
-                    {status === 'te_versturen' && <button type="button" disabled={!!bezig || vuil} title={vuil ? 'Sla eerst je wijzigingen op' : undefined} onClick={() => zetStatus('verstuurd')} className="btn-primary text-xs"><Send className="h-3.5 w-3.5" />Markeren als verstuurd</button>}
-                    {status === 'verstuurd' && magNaar('verstuurd', 'te_versturen', factuur.betaald_bedrag).ok && <button type="button" disabled={!!bezig} onClick={() => zetStatus('te_versturen')} className="btn-secondary text-xs"><RotateCcw className="h-3.5 w-3.5" />Terug naar te factureren</button>}
-                    {status === 'te_versturen' && <button type="button" disabled={!!bezig} onClick={() => setVraag({ naar: 'geannuleerd' })} className="btn-secondary text-xs text-red-600"><Ban className="h-3.5 w-3.5" />Annuleren</button>}
-                    {status === 'geannuleerd' && <button type="button" disabled={!!bezig} onClick={() => zetStatus('te_versturen')} className="btn-secondary text-xs"><RotateCcw className="h-3.5 w-3.5" />Heropenen (te factureren)</button>}
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div>
+                      <label className="block text-[11px] text-gray-500 mb-1">Status</label>
+                      <select className={`${INP} w-48`} value={status} disabled={!!bezig} onChange={(e) => { const naar = e.target.value as Verzendstatus; if (naar === status) return; if (vuil) { toast.error('Sla eerst je wijzigingen op.'); return } if (redenVerplicht(naar)) setVraag({ naar }); else zetStatus(naar) }}>
+                        {KIESBARE_STATUSSEN.map((k) => <option key={k} value={k}>{VERZENDSTATUS[k].label}</option>)}
+                      </select>
+                    </div>
+                    {status === 'verstuurd' && (
+                      <div>
+                        <label className="block text-[11px] text-gray-500 mb-1">Werkelijke verzenddatum</label>
+                        <input type="date" className={`${INP} w-44`} value={verzendDatum} onChange={(e) => setVerzendDatum(e.target.value)} />
+                      </div>
+                    )}
+                    {bezig && bezig !== 'opslaan' && <Loader2 className="h-4 w-4 animate-spin text-gray-400 mb-2.5" />}
                   </div>
+                  {status === 'verstuurd' && factuur.sent_by_email && <p className="text-[11px] text-gray-500">Als verstuurd gemarkeerd door {factuur.sent_by_email.split('@')[0]}. Verwacht binnen = verzenddatum + betaaltermijn.</p>}
                   {status === 'verstuurd' && (
                     <div className="pt-2 border-t border-gray-100 space-y-2">
                       <div className="flex items-center gap-2 flex-wrap text-xs">

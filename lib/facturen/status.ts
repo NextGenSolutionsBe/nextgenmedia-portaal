@@ -60,18 +60,22 @@ export function afgeleideBetaalstatus(p: {
   return 'niet_betaald'
 }
 
-/** Inhoud (regels, bedragen, klant) mag enkel veranderen zolang de factuur niet verstuurd is. */
-export const magInhoudBewerken = (s: Verzendstatus): boolean => s === 'te_versturen'
+/**
+ * De facturenmodule is een interne planner, geen boekhouding: een factuur blijft
+ * in elke status volledig bewerkbaar (klant, regels, bedragen, datums). Elke
+ * wijziging komt in de historiek.
+ */
+export const magInhoudBewerken = (_s: Verzendstatus): boolean => true
 /** Geannuleerd of gecrediteerd: telt nergens meer mee als te versturen of te ontvangen. */
 export const isAfgesloten = (s: Verzendstatus): boolean => s === 'geannuleerd' || s === 'gecrediteerd'
 /** Voor deze overgangen is een reden verplicht (die komt in de historiek). */
 export const redenVerplicht = (naar: Verzendstatus): boolean => naar === 'geannuleerd' || naar === 'gecrediteerd'
 
-/** Welke overgangen zijn toegestaan? Verstuurd kan niet terug naar te versturen als er al betaald is. */
-export function magNaar(van: Verzendstatus, naar: Verzendstatus, betaaldBedrag = 0): { ok: boolean; reden?: string } {
+/** Elke statuswissel is toegestaan (ook terug); enkel "naar dezelfde status" heeft geen zin. */
+export function magNaar(van: Verzendstatus, naar: Verzendstatus, _betaaldBedrag = 0): { ok: boolean; reden?: string } {
   if (van === naar) return { ok: false, reden: 'De factuur staat al op deze status.' }
-  if (van === 'gecrediteerd') return { ok: false, reden: 'Een gecrediteerde factuur kan niet meer van status veranderen.' }
-  if (naar === 'gecrediteerd' && van !== 'verstuurd') return { ok: false, reden: 'Enkel een verstuurde factuur kan gecrediteerd worden; een niet-verstuurde factuur annuleer je.' }
-  if (naar === 'te_versturen' && van === 'verstuurd' && betaaldBedrag > 0) return { ok: false, reden: 'Er is al een betaling geregistreerd; zet de betaling eerst op nul.' }
   return { ok: true }
 }
+
+/** De drie statussen die de gebruiker kiest (gecrediteerd is een oude variant van geannuleerd). */
+export const KIESBARE_STATUSSEN: Verzendstatus[] = ['te_versturen', 'verstuurd', 'geannuleerd']

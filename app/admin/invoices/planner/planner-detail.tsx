@@ -2,11 +2,11 @@
 
 import { useState, type ReactNode } from 'react'
 import Link from 'next/link'
-import { X, Send, CalendarClock, Ban, Eye, Pencil, FilePlus2, Loader2, AlertTriangle, Repeat, Plus } from 'lucide-react'
+import { X, RotateCcw, Send, CalendarClock, Ban, Eye, Pencil, FilePlus2, Loader2, AlertTriangle, Repeat, Plus } from 'lucide-react'
 import { Bevestig, INP } from '@/app/admin/instellingen/ui'
 import { STATUS_INFO, HERKOMST_LABEL, datumLang, datumNl, euro2, isDatum, type Moment } from '@/lib/facturatie/planner-model'
 
-export type Actie = 'verstuurd' | 'verplaats' | 'annuleer'
+export type Actie = 'verstuurd' | 'verplaats' | 'annuleer' | 'heropen'
 export type ActieUitvoerder = (actie: Actie, moment: Moment, extra?: { datum?: string }) => Promise<boolean>
 
 function Rij({ label, children }: { label: string; children: ReactNode }) {
@@ -90,7 +90,8 @@ export function PlannerDetail({ moment: m, onSluit, onActie, bezig, onOpenFactuu
           {a.voorbereidenUrl && <Link href={a.voorbereidenUrl} prefetch={false} className="btn-secondary text-xs"><FilePlus2 className="h-3.5 w-3.5" />Factuur voorbereiden</Link>}
           {a.kanVerstuurd && <button type="button" disabled={bezig} onClick={() => onActie('verstuurd', m)} className="btn-primary text-xs">{bezig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}Markeren als verstuurd</button>}
           {a.kanVerplaatsen && <button type="button" disabled={bezig} onClick={() => setVerplaatsen((v) => !v)} className="btn-secondary text-xs"><CalendarClock className="h-3.5 w-3.5" />Facturatiedatum verplaatsen</button>}
-          {a.kanAnnuleren && <button type="button" disabled={bezig} onClick={() => setVraagAnnuleer(true)} className="btn-secondary text-xs text-red-600"><Ban className="h-3.5 w-3.5" />Opdracht annuleren</button>}
+          {(m.bron === 'invoice' || m.bron === 'recurring') && ['verstuurd', 'betaald', 'geannuleerd', 'gecrediteerd'].includes(m.status) && <button type="button" disabled={bezig} onClick={() => onActie('heropen', m)} className="btn-secondary text-xs"><RotateCcw className="h-3.5 w-3.5" />Terug naar te factureren</button>}
+          {a.kanAnnuleren && <button type="button" disabled={bezig} onClick={() => setVraagAnnuleer(true)} className="btn-secondary text-xs text-red-600"><Ban className="h-3.5 w-3.5" />Annuleren</button>}
         </div>
         {verplaatsen && (
           <div className="rounded-xl border border-gray-200 p-3 flex items-end gap-2 flex-wrap">

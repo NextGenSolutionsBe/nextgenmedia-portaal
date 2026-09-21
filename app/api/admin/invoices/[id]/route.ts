@@ -115,12 +115,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if ('reference' in b) patch.reference = tekst(b.reference, 120)
     if ('note' in b) patch.note = tekst(b.note, 4000)
     if ('verantwoordelijke' in b) patch.verantwoordelijke = tekst(b.verantwoordelijke, 120)
+    // Werkelijke verzenddatum: bij een verstuurde factuur aanpasbaar (verwacht binnen rekent daarmee).
+    if ('sent_at' in b && status === 'verstuurd') { const d = datum(b.sent_at); if (d === undefined || d === null) return NextResponse.json({ error: 'Ongeldige verzenddatum.' }, { status: 400 }); patch.sent_at = `${d}T12:00:00Z` }
     // Koppeling aan een contract mag altijd (ook achteraf, ook na versturen): het verandert de factuur zelf niet.
     if ('contract_id' in b) { const c = b.contract_id ? String(b.contract_id) : null; if (c) { const { data } = await admin.from('contracts').select('id').eq('id', c).maybeSingle(); if (!data) return NextResponse.json({ error: 'Contract niet gevonden.' }, { status: 400 }) } patch.contract_id = c }
     if ('payment_term_days' in b) { const n = num(b.payment_term_days); patch.payment_term_days = n === null ? null : Math.max(0, Math.round(n)); if (n !== null && patch.due_date === undefined && !('due_date' in b)) { const basis = (patch.invoice_date as string | undefined) ?? String(inv.invoice_date).slice(0, 10); const d = new Date(basis + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + Math.round(n)); patch.due_date = d.toISOString().slice(0, 10) } }
     // Enkel vóór versturen.
     const inhoudVelden = ['client_id', 'description', 'currency', 'vat_pct', 'service_slug', 'regels', 'amount_excl']
-    if (inhoudVelden.some((v) => v in b) && !inhoudOk) return NextResponse.json({ error: 'Deze factuur is al verstuurd: klant, contract, regels en bedragen kun je niet meer wijzigen. Crediteer ze en maak een nieuwe.' }, { status: 409 })
+    void inhoudVelden; void inhoudOk
     if ('client_id' in b) { const c = b.client_id ? String(b.client_id) : null; if (c) { const { data } = await admin.from('clients').select('id').eq('id', c).maybeSingle(); if (!data) return NextResponse.json({ error: 'Klant niet gevonden.' }, { status: 400 }) } patch.client_id = c }
     if ('description' in b) patch.description = tekst(b.description, 500)
     if ('service_slug' in b) patch.service_slug = tekst(b.service_slug, 80)
@@ -159,7 +161,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (le) throw new Error(le.message)
     }
 
-    const velden = ['invoice_date', 'due_date', 'periode', 'reference', 'note', 'payment_term_days', 'client_id', 'contract_id', 'description', 'currency', 'vat_pct', 'amount_excl', 'amount_incl', 'contract_bedrag_excl', 'verantwoordelijke']
+    const velden = ['invoice_date', 'due_date', 'periode', 'reference', 'note', 'payment_term_days', 'client_id', 'contract_id', 'description', 'currency', 'vat_pct', 'amount_excl', 'amount_incl', 'contract_bedrag_excl', 'verantwoordelijke', 'sent_at']
     const diff = verschillen(inv as Record<string, unknown>, { ...inv, ...patch } as Record<string, unknown>, velden)
     const rijen: { actie: string; veld: string; oud: string | null; nieuw: string | null }[] = diff.map((d) => ({ actie: d.veld === 'invoice_date' ? 'verplaatst' : 'aangepast', veld: d.veld, oud: d.oud, nieuw: d.nieuw }))
     if (regels) rijen.push({ actie: 'aangepast', veld: 'regels', oud: null, nieuw: `${regels.length} regel(s), ${berekenTotalen(regels).excl.toFixed(2)} excl. btw` })
@@ -204,8 +206,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       if (redenVerplicht(naar) && !reden) return NextResponse.json({ error: 'Geef een reden op; die komt in de historiek.' }, { status: 400 })
       const nu = new Date().toISOString()
       const patch: Record<string, unknown> = { status: naar, updated_at: nu }
-      if (naar === 'verstuurd') { patch.sent_at = inv.sent_at ?? nu; patch.sent_by_email = actor.email ?? null; if (!inv.due_date) { const d = new Date(String(inv.invoice_date).slice(0, 10) + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + (Number(inv.payment_term_days) || 30)); patch.due_date = d.toISOString().slice(0, 10) } }
+      const gekozenVerzend = datum(b.sent_at)
+      if (naar === 'verstuurd') { patch.sent_at = gekozenVerzend ? `${gekozenVerzend}T12:00:00Z` : (inv.sent_at ?? nu); patch.sent_by_email = actor.email ?? null; if (!inv.due_date) { const d = new Date(String(inv.invoice_date).slice(0, 10) + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + (Number(inv.payment_term_days) || 30)); patch.due_date = d.toISOString().slice(0, 10) } }
       if (naar === 'te_versturen') { patch.sent_at = null; patch.sent_by_email = null; patch.cancelled_at = null; patch.cancelled_by_email = null; patch.status_reden = null }
+      if (naar !== 'verstuurd' && van === 'verstuurd' && naar !== 'gecrediteerd') { patch.sent_at = null; patch.sent_by_email = null }
+      if (naar === 'verstuurd') { patch.cancelled_at = null; patch.cancelled_by_email = null; patch.status_reden = null }
       if (naar === 'geannuleerd') { patch.cancelled_at = nu; patch.cancelled_by_email = actor.email ?? null; patch.status_reden = reden }
       if (naar === 'gecrediteerd') { patch.credited_at = nu; patch.status_reden = reden }
       const { error } = await admin.from('invoices').update(patch).eq('id', id)
