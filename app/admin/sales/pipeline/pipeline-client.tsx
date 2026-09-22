@@ -5,11 +5,13 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import {
   Loader2, Plus, Search, Upload, MailCheck, Headphones, PhoneCall, MailPlus, StickyNote,
-  CalendarClock, CalendarPlus, MoreHorizontal, FileText, Trophy, XCircle, ExternalLink, User, Flame, PhoneOff,
+  CalendarClock, CalendarPlus, MoreHorizontal, FileText, Trophy, XCircle, ExternalLink, User, Flame, PhoneOff, Briefcase,
 } from 'lucide-react'
 import { STAGES, STAGE_KEYS, STAGE_STYLE, stageLabel, type StageKey } from '@/lib/sales/stages'
 import { DIENSTEN, LEADBRONNEN, LEADBRON_STYLE, leadbronLabel, normaliseerLeadbron } from '@/lib/sales/leadbron'
 import { merkStijl } from '@/lib/sales/merk'
+import { kolomSamenvatting, opdrachtSamenvatting, pipelineTotalen } from '@/lib/sales/opdrachten-model'
+import { BeltijdKnop } from '@/components/admin/sales-beltijd'
 import { ImportModal } from './import-modal'
 import { ReminderSettings } from './reminder-settings'
 import { FocusMode } from './focus-mode'
@@ -104,6 +106,14 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
 
   useEffect(() => { laad() }, [laad])
 
+  // Deep-link vanuit de globale zoek: /admin/sales/pipeline?lead=<id> opent die lead.
+  useEffect(() => {
+    try {
+      const id = new URLSearchParams(window.location.search).get('lead')
+      if (id) setSelectedId(id)
+    } catch { /* geen URL → niets */ }
+  }, [])
+
   // Menu sluiten bij een klik ernaast.
   useEffect(() => {
     if (!menuId) return
@@ -117,6 +127,9 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
     for (const l of leads) (m.get(l.stage_key as StageKey) ?? m.get('outbound')!).push(l)
     return m
   }, [leads])
+
+  // Waarde per kolom en de totalen bovenaan — altijd op de GEFILTERDE leads.
+  const totalen = useMemo(() => pipelineTotalen(leads), [leads])
 
   const leadVan = useCallback((id: string | null) => (id ? leads.find((l) => l.id === id) ?? null : null), [leads])
   const selected = leadVan(selectedId)
@@ -265,6 +278,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
             placeholder="Zoek bedrijf, contact, telefoon, e-mail of website…" />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <BeltijdKnop />
           <button onClick={() => setFocus(true)} disabled={leads.length === 0} className="btn-secondary text-sm"
             title="Belmodus: één lead per keer, sneltoetsen 1–6">
             <Headphones className="h-4 w-4" />Focus Mode
@@ -312,12 +326,21 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
         {laden && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
       </div>
 
+      {/* ── Waarde in de pijplijn ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <Totaal label="Open pijplijn" waarde={euro(totalen.openCents)}
+          onder={`${totalen.openAantal} ${totalen.openAantal === 1 ? 'lead' : 'leads'} buiten gewonnen/verloren`} />
+        <Totaal label="Gewonnen" waarde={euro(totalen.gewonnenCents)} kleur="text-green-700" onder={`${kolommen.get('gewonnen')?.length ?? 0} leads`} />
+        <Totaal label="Verloren" waarde={euro(totalen.verlorenCents)} kleur="text-red-600" onder={`${kolommen.get('verloren')?.length ?? 0} leads`} />
+      </div>
+      {filtersActief && <p className="text-[11px] text-gray-400 -mt-1">Bedragen volgen de actieve filters.</p>}
+
       {/* ── Het bord ── */}
       <div className="flex gap-3 overflow-x-auto pb-3 -mx-1 px-1 snap-x">
         {STAGES.map((s) => {
           const lijst = kolommen.get(s.key) ?? []
           const max = zichtbaar[s.key] ?? PER_KOLOM
-          const waarde = s.key === 'gewonnen' ? lijst.reduce((t, l) => t + (l.deal_waarde_cents ?? 0), 0) : 0
+          const { aantal, waardeCents } = kolomSamenvatting(lijst)
           const isDoel = doel?.stage === s.key
           return (
             <section key={s.key}
@@ -325,9 +348,12 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
               <header className="px-3 py-2 flex items-center justify-between gap-2 border-b border-gray-200">
                 <div className="flex items-center gap-1.5 min-w-0">
                   <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${STAGE_STYLE[s.key]}`}>{s.label}</span>
-                  <span className="text-xs text-gray-500 tabular-nums">{lijst.length}</span>
+                  <span className="text-xs text-gray-500 tabular-nums">{aantal}</span>
                 </div>
-                {s.key === 'gewonnen' && waarde > 0 && <span className="text-xs font-semibold text-green-700 tabular-nums">{euro(waarde)}</span>}
+                <span title={`Totale waarde van de ${aantal} leads in ${s.label}`}
+                  className={`text-xs font-semibold tabular-nums ${waardeCents === 0 ? 'text-gray-300' : s.key === 'gewonnen' ? 'text-green-700' : s.key === 'verloren' ? 'text-red-600' : 'text-gray-800'}`}>
+                  {euro(waardeCents)}
+                </span>
               </header>
 
               {s.key === 'outbound' && (
@@ -451,6 +477,8 @@ function Kaart({
   const opvolg = lead.opvolgdatum?.slice(0, 10) ?? ''
   const vandaagIso = vandaag()
   const stop = (e: React.SyntheticEvent) => e.stopPropagation()
+  const waarde = lead.waarde_cents ?? 0
+  const opdrachtTekst = opdrachtSamenvatting(lead.opdrachten)
 
   return (
     <article
@@ -492,10 +520,20 @@ function Kaart({
             <CalendarClock className="h-2.5 w-2.5" />{korteDatum(opvolg)}
           </span>
         )}
-        {lead.stage_key === 'gewonnen' && typeof lead.deal_waarde_cents === 'number' && (
-          <span className="text-[10px] font-semibold text-green-700">{euro(lead.deal_waarde_cents)}</span>
-        )}
       </div>
+
+      {(opdrachtTekst || waarde > 0) && (
+        <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px]">
+          <span className="flex items-center gap-1 text-gray-600 min-w-0">
+            {opdrachtTekst && <><Briefcase className="h-3 w-3 shrink-0 text-gray-400" /><span className="truncate" title={(lead.opdrachten ?? []).map((o) => o.titel).join(', ')}>{opdrachtTekst}</span></>}
+          </span>
+          {waarde > 0 && (
+            <span className={`font-semibold tabular-nums shrink-0 ${lead.stage_key === 'gewonnen' ? 'text-green-700' : lead.stage_key === 'verloren' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+              {euro(waarde)}
+            </span>
+          )}
+        </div>
+      )}
 
       {lead.laatste_notitie && (
         <p className="mt-1.5 text-[11px] text-gray-500 line-clamp-2 leading-snug" title={lead.laatste_notitie}>{lead.laatste_notitie}</p>
@@ -527,6 +565,16 @@ function Kaart({
         </div>
       </div>
     </article>
+  )
+}
+
+function Totaal({ label, waarde, onder, kleur = 'text-gray-900' }: { label: string; waarde: string; onder?: string; kleur?: string }) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white px-3 py-2">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{label}</div>
+      <div className={`text-lg font-bold tabular-nums leading-tight ${kleur}`}>{waarde}</div>
+      {onder && <div className="text-[10px] text-gray-400">{onder}</div>}
+    </div>
   )
 }
 

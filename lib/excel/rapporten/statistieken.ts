@@ -10,6 +10,8 @@ import { type Werkmap, type Cel, type TabelBlok, euro, formule, aantal, getal, p
  *   closing rate      = gewonnen ÷ (gewonnen + verloren)
  *   appointment rate  = leads met afspraak ÷ leads met geslaagd contact
  *   contact rate      = leads met geslaagd contact ÷ unieke behandelde leads
+ * "Beltijd (min)" = totale GESPREKSDUUR (som van de duur per gesprek);
+ * "Gelogde beltijd (min)" = som van de belsessies. Nooit opgeteld.
  * De totaalrij bevat de TEAMcijfers (unieke leads zijn niet op te tellen over
  * medewerkers heen: één lead kan door twee mensen behandeld zijn).
  */
@@ -24,6 +26,7 @@ export type StatistiekenExportInvoer = {
 
 const p = (deel: number, geheel: number) => { const x = percentage(deel, geheel); return x === null ? '' : x / 100 }
 const minuten = (sec: number) => Math.round((sec / 60) * 10) / 10
+const gelogd = (c: Cijfers) => (c.gelogdeBeltijdSeconden === null || c.gelogdeBeltijdSeconden === undefined ? '' : minuten(c.gelogdeBeltijdSeconden))
 
 function rijCellen(label: string, c: Cijfers): Cel[] {
   return [
@@ -45,6 +48,7 @@ function rijCellen(label: string, c: Cijfers): Cel[] {
     formule('IFERROR(O{R}/N{R},"")', p(c.leadsMetAfspraak, c.leadsMetContact), 'pct'),
     formule('IFERROR(N{R}/G{R},"")', p(c.leadsMetContact, c.uniekeLeads), 'pct'),
     euro(c.waardeGewonnenCent / 100),
+    getal(gelogd(c)),
   ]
 }
 
@@ -68,6 +72,7 @@ function totaalCellen(c: Cijfers): Cel[] {
     { v: p(c.leadsMetAfspraak, c.leadsMetContact), stijl: 'totaal_pct' },
     { v: p(c.leadsMetContact, c.uniekeLeads), stijl: 'totaal_pct' },
     { v: c.waardeGewonnenCent / 100, stijl: 'totaal_euro' },
+    { v: gelogd(c), stijl: 'totaal_getal' },
   ]
 }
 
@@ -75,7 +80,7 @@ const KOLOMMEN = (eerste: string): TabelBlok['kolommen'] => [
   { kop: eerste },
   { kop: 'Telefoongesprekken', stijl: 'aantal' },
   { kop: 'Gesprekken met duur', stijl: 'aantal' },
-  { kop: 'Beltijd (min)', stijl: 'getal' },
+  { kop: 'Gespreksduur (min)', stijl: 'getal' },
   { kop: 'Gem. gespreksduur (min)', stijl: 'getal' },
   { kop: 'E-mails', stijl: 'aantal' },
   { kop: 'Unieke leads', stijl: 'aantal' },
@@ -90,6 +95,8 @@ const KOLOMMEN = (eerste: string): TabelBlok['kolommen'] => [
   { kop: 'Appointment setting rate', stijl: 'pct' },
   { kop: 'Contact rate', stijl: 'pct' },
   { kop: 'Waarde gewonnen deals', stijl: 'euro' },
+  // Achteraan, zodat de formules hierboven (kolomletters) niet verschuiven.
+  { kop: 'Gelogde beltijd (min)', stijl: 'getal' },
 ]
 
 function tabel(titel: string, eerste: string, rijen: Rij[], team: Cijfers): TabelBlok {
@@ -118,7 +125,8 @@ export function statistiekenWerkmap(inv: StatistiekenExportInvoer): Werkmap {
         soort: 'kpis' as const, titel: 'Kerncijfers',
         items: [
           { label: 'Telefoongesprekken', waarde: aantal(t.telefoongesprekken), toelichting: `${t.uniekeLeads} unieke leads behandeld` },
-          { label: 'Totale beltijd (min)', waarde: getal(minuten(t.beltijdSeconden)) },
+          { label: 'Gelogde beltijd (min)', waarde: getal(gelogd(t)), toelichting: 'belsessies (start/stop of handmatig)' },
+          { label: 'Totale gespreksduur (min)', waarde: getal(minuten(t.beltijdSeconden)), toelichting: 'som van de duur per gesprek' },
           { label: 'Gemiddelde gespreksduur (min)', waarde: getal(t.gemiddeldeDuurSeconden === null ? '' : minuten(t.gemiddeldeDuurSeconden)), toelichting: `over ${t.gesprekkenMetDuur} gesprekken met duur` },
           { label: 'E-mails', waarde: aantal(t.emails) },
           { label: 'Opvolgingen', waarde: aantal(t.opvolgingen) },

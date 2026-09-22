@@ -3,10 +3,13 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { getOrCreateSalesOrg } from '@/lib/sales/service'
 import { listSalesMedewerkers } from '@/lib/sales/medewerkers'
 import {
-  bereken, kiesTrendPer, legacyGesprekken,
-  type LegacyGesprek, type StatActiviteit, type StatFilter, type StatLead, type StatMedewerker,
+  bereken, bouwAccounts, kiesTrendPer, legacyGesprekken,
+  type AccountRij, type LegacyGesprek, type StatActiviteit, type StatFilter, type StatLead, type StatMedewerker,
   type Statistieken, type TrendPer,
 } from '@/lib/sales/statistieken'
+import { laadAlleLopende, laadBeltijd } from '@/lib/sales/beltijd-data'
+import { laadOpdrachtenPerLead } from '@/lib/sales/lead-opdrachten'
+import { leadWaardeCents } from '@/lib/sales/opdrachten-model'
 
 /**
  * Het ophaalwerk achter de statistiekenpagina. Het rekenen zelf gebeurt in
@@ -38,13 +41,25 @@ export function leesPeriode(van: string | null, tot: string | null): Periode {
   return { van: start, tot: new Date(eind.getFullYear(), eind.getMonth(), eind.getDate() + 1) }
 }
 
-export type Filter = StatFilter & { periode: Periode; trendPer?: TrendPer }
+export type Filter = StatFilter & {
+  periode: Periode
+  trendPer?: TrendPer
+  /**
+   * Admin: ook het overzicht per account berekenen. Dan wordt alles geladen en
+   * pas in het geheugen op de gekozen medewerker gefilterd.
+   */
+  accountsOverzicht?: boolean
+}
 
 export type Uitkomst = {
   stats: Statistieken
   medewerkers: StatMedewerker[]
   /** false = sales_activiteiten bestaat nog niet; enkel oude belregistraties. */
   metActiviteiten: boolean
+  /** Eén rij per account (admin: iedereen; anders enkel jezelf), ongeacht de medewerkerfilter. */
+  accounts: AccountRij[]
+  /** false = sales_beltijd bestaat nog niet (migratie). */
+  metBeltijd: boolean
 }
 
 const BLOK = 500
@@ -60,6 +75,8 @@ export async function laadStatistieken(filter: Filter): Promise<Uitkomst> {
   const org = await getOrCreateSalesOrg()
   const vanIso = filter.periode.van.toISOString()
   const totIso = filter.periode.tot.toISOString()
+  // In de query filteren kan enkel als er geen accountoverzicht nodig is.
+  const qMedewerker = filter.accountsOverzicht ? undefined : filter.medewerkerId
 
   // ── 1) Wanneer begon de activiteitenregistratie? ─────────────────────────
   let metActiviteiten = true
@@ -85,7 +102,7 @@ export async function laadStatistieken(filter: Filter): Promise<Uitkomst> {
         .gte('created_at', vanIso).lt('created_at', totIso)
         .order('created_at', { ascending: true }).order('id', { ascending: true })
         .range(van, van + PAGINA - 1)
-      if (filter.medewerkerId) q = q.eq('medewerker_id', filter.medewerkerId)
+      if (qMedewerker) q = q.eq('medewerker_id', qMedewerker)
       const { data, error } = await q
       if (error) throw new Error(error.message)
       const stuk = (data ?? []) as StatActiviteit[]
@@ -105,7 +122,7 @@ export async function laadStatistieken(filter: Filter): Promise<Uitkomst> {
         .gte('created_at', vanIso).lt('created_at', legacyTot)
         .order('created_at', { ascending: true }).order('id', { ascending: true })
         .range(van, van + PAGINA - 1)
-      if (filter.medewerkerId) q = q.eq('actor_id', filter.medewerkerId)
+      if (qMedewerker) q = q.eq('actor_id', qMedewerker)
       const { data, error } = await q
       if (error) throw new Error(error.message)
       const stuk = (data ?? []) as LegacyGesprek[]
@@ -123,14 +140,14 @@ export async function laadStatistieken(filter: Filter): Promise<Uitkomst> {
       .select('id, lead_id, setter_id, created_at, status')
       .gte('created_at', vanIso).lt('created_at', legacyTot).not('lead_id', 'is', null).limit(MAX_RIJEN)
     for (const a of (afs ?? []) as { id: string; lead_id: string; setter_id: string | null; created_at: string; status: string }[]) {
-      if (filter.medewerkerId && a.setter_id !== filter.medewerkerId) continue
+      if (qMedewerker && a.setter_id !== qMedewerker) continue
       historiek.push({ id: `legacy-afspraak-${a.id}`, lead_id: a.lead_id, medewerker_id: a.setter_id, type: 'afspraak_gepland', duur_seconden: null, uitkomst: null, afspraak_id: a.id, created_at: a.created_at, verwijderd_op: null })
     }
     let q = admin.from('sales_lead_events')
       .select('id, lead_id, actor_id, actor_email, to_stage, created_at')
       .eq('kind', 'stage').in('to_stage', ['won', 'gewonnen', 'lost', 'not_interested', 'verloren'])
       .gte('created_at', vanIso).lt('created_at', legacyTot).limit(MAX_RIJEN)
-    if (filter.medewerkerId) q = q.eq('actor_id', filter.medewerkerId)
+    if (qMedewerker) q = q.eq('actor_id', qMedewerker)
     const { data: sluit } = await q
     for (const e of (sluit ?? []) as { id: string; lead_id: string; actor_id: string | null; actor_email: string | null; to_stage: string; created_at: string }[]) {
       historiek.push({ id: `legacy-fase-${e.id}`, lead_id: e.lead_id, medewerker_id: e.actor_id, medewerker_email: e.actor_email, type: e.to_stage === 'won' || e.to_stage === 'gewonnen' ? 'deal_gewonnen' : 'deal_verloren', duur_seconden: null, uitkomst: null, afspraak_id: null, created_at: e.created_at, verwijderd_op: null })
@@ -171,6 +188,15 @@ export async function laadStatistieken(filter: Filter): Promise<Uitkomst> {
       })
     }
   }
+  // Waarde van een lead = som van zijn opdrachten, anders de dealwaarde —
+  // dezelfde regel als op het bord (lib/sales/opdrachten-model.ts).
+  try {
+    const perLead = await laadOpdrachtenPerLead(admin, new Set(leads.map((l) => l.id)))
+    if (perLead) for (const l of leads) {
+      const lijst = perLead.get(l.id)
+      if (lijst?.length) l.deal_waarde_cents = leadWaardeCents({ opdrachten: lijst, deal_waarde_cents: l.deal_waarde_cents })
+    }
+  } catch { /* opdrachten optioneel: dan de dealwaarde */ }
   const bekend = new Set(leads.map((l) => l.id))
   const eigen = alles.filter((a) => bekend.has(a.lead_id))
 
@@ -188,16 +214,35 @@ export async function laadStatistieken(filter: Filter): Promise<Uitkomst> {
   const medewerkers = await listSalesMedewerkers()
   const dagen = Math.max(1, Math.round((filter.periode.tot.getTime() - filter.periode.van.getTime()) / 86_400_000))
 
-  const stats = bereken({
+  // ── 6) Gelogde beltijd (belsessies) in de periode ────────────────────────
+  const beltijd = await laadBeltijd(admin, { van: filter.periode.van, tot: filter.periode.tot, medewerkerId: qMedewerker })
+    .catch(() => null)
+  const metBeltijd = beltijd !== null
+  const lopend = metBeltijd ? (await laadAlleLopende(admin)).map((s) => s.medewerker_id) : []
+  const nu = Date.now()
+
+  const bron = {
     activiteiten: eigen,
     leads,
     medewerkers,
     geannuleerdeAfspraken: geannuleerd,
     trendPer: filter.trendPer ?? kiesTrendPer(dagen),
-  }, {
-    // De medewerker is al in de query gefilterd; de rest hier.
-    richting: filter.richting, dienst: filter.dienst, leadbron: filter.leadbron,
-  })
+    beltijd: beltijd ?? undefined,
+    nu,
+  }
+  const rest = { richting: filter.richting, dienst: filter.dienst, leadbron: filter.leadbron }
+  const stats = bereken(bron, { ...rest, medewerkerId: filter.medewerkerId })
 
-  return { stats, medewerkers, metActiviteiten }
+  // Het accountoverzicht negeert de medewerkerfilter (klik op een kaart = filter).
+  let accounts: AccountRij[]
+  if (filter.accountsOverzicht) {
+    const alle = filter.medewerkerId ? bereken(bron, rest) : stats
+    accounts = bouwAccounts(alle.perMedewerker, medewerkers, lopend, metBeltijd)
+  } else {
+    const ik = filter.medewerkerId
+    const eigenLijst = ik ? medewerkers.filter((m) => m.id === ik) : []
+    accounts = bouwAccounts(stats.perMedewerker.filter((r) => r.sleutel === ik), eigenLijst, lopend, metBeltijd)
+  }
+
+  return { stats, medewerkers, metActiviteiten, accounts, metBeltijd }
 }

@@ -3,8 +3,11 @@
 import assert from 'node:assert/strict'
 import {
   bereken, percentage, gemiddelde, toonPercentage, legacyGesprekken, trendSleutel, kiesTrendPer,
-  type StatActiviteit, type StatLead,
+  bouwAccounts, type StatActiviteit, type StatLead,
 } from '../lib/sales/statistieken'
+import {
+  beltijdSeconden, beltijdPerMedewerker, sessieSeconden, lopendeSessie, brusselNaarUtc, toonUren, type BeltijdSessie,
+} from '../lib/sales/beltijd'
 
 let n = 0
 const test = (naam: string, f: () => void) => { f(); n++; console.log(`  ok ${naam}`) }
@@ -181,12 +184,91 @@ test('10. Trend in Brusselse tijd; week begint op maandag; vergelijking kiest de
   })
   const wie = Object.fromEntries(s.vergelijking.map((v) => [v.titel, v.naam]))
   assert.equal(wie['Meeste telefoongesprekken'], 'Marco')
-  assert.equal(wie['Meeste beltijd'], 'Bram')
+  assert.equal(wie['Meeste gespreksduur'], 'Bram')
+  assert.equal(wie['Meeste gelogde beltijd'], undefined, 'geen belsessies → geen winnaar')
   assert.equal(wie['Meeste deals'], 'Bram')
   assert.equal(wie['Beste closing rate'], 'Bram')
   assert.equal(wie['Meeste afspraken'], undefined, 'niemand heeft afspraken → geen winnaar')
   assert.equal(s.trend.length, 1)
   assert.equal(s.trend[0].telefoongesprekken, 3)
+})
+
+// ── Gelogde beltijd (sales_beltijd) ──────────────────────────────────────────
+const NU = Date.parse('2026-09-22T10:00:00Z')
+const sessie = (deel: Partial<BeltijdSessie> & Pick<BeltijdSessie, 'id' | 'start_op'>): BeltijdSessie => ({
+  medewerker_id: 'marco', einde_op: null, duur_seconden: null, verwijderd_op: null, ...deel,
+})
+const sessies: BeltijdSessie[] = [
+  // afgesloten: 30 min
+  sessie({ id: 's1', start_op: '2026-09-22T07:00:00Z', einde_op: '2026-09-22T07:30:00Z', duur_seconden: 1800 }),
+  // lopend sinds 09:15 UTC → telt tot NU = 45 min
+  sessie({ id: 's2', start_op: '2026-09-22T09:15:00Z' }),
+  // zacht verwijderd: telt niet
+  sessie({ id: 's3', start_op: '2026-09-22T06:00:00Z', einde_op: '2026-09-22T08:00:00Z', duur_seconden: 7200, verwijderd_op: '2026-09-22T08:05:00Z' }),
+  // van Bram: 20 min, duur leeg → uit start/einde
+  sessie({ id: 's4', medewerker_id: 'bram', start_op: '2026-09-22T08:00:00Z', einde_op: '2026-09-22T08:20:00Z' }),
+  // buiten de periode (vorige maand)
+  sessie({ id: 's5', start_op: '2026-08-30T08:00:00Z', einde_op: '2026-08-30T09:00:00Z', duur_seconden: 3600 }),
+]
+
+test('11. Gelogde beltijd: afgesloten + lopende sessie tot nu; verwijderd en buiten de periode tellen niet', () => {
+  const periode = { van: '2026-09-01T00:00:00Z', tot: '2026-10-01T00:00:00Z', nu: NU }
+  assert.equal(sessieSeconden(sessies[1], NU), 45 * 60)
+  assert.equal(sessieSeconden(sessies[2], NU), 0, 'verwijderd = 0')
+  assert.equal(sessieSeconden(sessie({ id: 'x', start_op: '2026-09-22T11:00:00Z' }), NU), 0, 'start in de toekomst → nooit negatief')
+  assert.equal(beltijdSeconden(sessies, { ...periode, medewerkerId: 'marco' }), 30 * 60 + 45 * 60)
+  assert.equal(beltijdSeconden(sessies, periode), 30 * 60 + 45 * 60 + 20 * 60)
+  const per = beltijdPerMedewerker(sessies, periode)
+  assert.equal(per.get('marco'), 75 * 60)
+  assert.equal(per.get('bram'), 20 * 60)
+  assert.equal(lopendeSessie(sessies, 'marco')?.id, 's2')
+  assert.equal(lopendeSessie(sessies, 'bram'), null)
+  assert.equal(toonUren(75 * 60), '1 u 15 min')
+  assert.equal(toonUren(null), '—')
+})
+
+test('12. Beltijd in de statistieken: apart van de gespreksduur, nooit opgeteld; medewerkerfilter geldt', () => {
+  const periodeSessies = sessies.filter((s) => s.start_op >= '2026-09-01')
+  const bron = {
+    activiteiten: [act({ type: 'telefoongesprek', lead_id: 'L1', medewerker_id: 'marco', duur_seconden: 120, uitkomst: 'contact_gehad' })],
+    leads: [lead('L1')], medewerkers, beltijd: periodeSessies, nu: NU,
+  }
+  const s = bereken(bron)
+  assert.equal(s.team.beltijdSeconden, 120, 'gespreksduur blijft de som per gesprek')
+  assert.equal(s.team.gelogdeBeltijdSeconden, 95 * 60)
+  const bram = s.perMedewerker.find((r) => r.sleutel === 'bram')
+  assert.ok(bram, 'wie enkel beltijd logde staat ook in de lijst')
+  assert.equal(bram!.telefoongesprekken, 0)
+  assert.equal(bram!.gelogdeBeltijdSeconden, 20 * 60)
+  assert.equal(s.perLeadbron[0].gelogdeBeltijdSeconden, null, 'beltijd hangt niet aan een leadbron')
+  const enkelMarco = bereken(bron, { medewerkerId: 'marco' })
+  assert.equal(enkelMarco.team.gelogdeBeltijdSeconden, 75 * 60)
+  assert.equal(bereken({ activiteiten: [], leads: [], medewerkers }).team.gelogdeBeltijdSeconden, null, 'zonder beltijdbron: niet beschikbaar')
+  const wie = Object.fromEntries(s.vergelijking.map((v) => [v.titel, v.naam]))
+  assert.equal(wie['Meeste gelogde beltijd'], 'Marco')
+})
+
+test('13. Accounts: elk account een kaart (ook zonder activiteit), onbekend valt weg, lopende sessie gemarkeerd', () => {
+  const s = bereken({
+    activiteiten: [
+      act({ type: 'telefoongesprek', lead_id: 'L1', medewerker_id: 'marco' }),
+      act({ type: 'telefoongesprek', lead_id: 'L2', medewerker_id: null }),
+    ],
+    leads: [lead('L1'), lead('L2')], medewerkers,
+  })
+  const acc = bouwAccounts(s.perMedewerker, [...medewerkers, { id: 'lisa', naam: 'Lisa' }], ['lisa'], true)
+  assert.deepEqual(acc.map((a) => a.label), ['Marco', 'Bram', 'Lisa'])
+  assert.equal(acc.find((a) => a.sleutel === 'lisa')!.beltijdLoopt, true)
+  assert.equal(acc.find((a) => a.sleutel === 'lisa')!.gelogdeBeltijdSeconden, 0)
+  assert.equal(acc.find((a) => a.sleutel === 'bram')!.closingRate, null)
+  assert.ok(!acc.some((a) => a.sleutel === 'onbekend'))
+})
+
+test('14. Handmatige beltijd: Brusselse tijd → UTC, in zomer- en wintertijd', () => {
+  assert.equal(brusselNaarUtc('2026-09-22', '09:30')!.toISOString(), '2026-09-22T07:30:00.000Z')
+  assert.equal(brusselNaarUtc('2026-01-15', '09:30')!.toISOString(), '2026-01-15T08:30:00.000Z')
+  assert.equal(brusselNaarUtc('2026-13-01', '09:00'), null)
+  assert.equal(brusselNaarUtc('gisteren', '09:00'), null)
 })
 
 console.log(`\n${n} tests geslaagd.`)

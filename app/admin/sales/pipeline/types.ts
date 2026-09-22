@@ -42,6 +42,10 @@ export type Lead = {
   deal_waarde_cents?: number | null
   gesloten_op?: string | null
   verlies_reden?: string | null
+  /** Opdrachten (titel + bedrag excl. btw); leeg = geen. */
+  opdrachten?: { id: string; titel: string; bedrag_cents: number }[]
+  /** Waarde van de lead: som van de opdrachten, anders de dealwaarde. */
+  waarde_cents?: number
   sales_companies: {
     id: string; name: string; website: string | null; sector: string | null
     city: string | null; region: string | null; phone: string | null

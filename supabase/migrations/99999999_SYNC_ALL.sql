@@ -4585,3 +4585,206 @@ REVOKE ALL ON public.formulier_inzendingen FROM anon, authenticated;
 INSERT INTO storage.buckets (id, name, public, file_size_limit)
 VALUES ('formulier-bestanden', 'formulier-bestanden', false, 20971520)
 ON CONFLICT (id) DO NOTHING;
+
+-- ── Pipeline-opdrachten + beltijd (22 sep 2026) ─────────────────────────────
+-- De Opdrachten-pagina is opgegaan in de pipeline: een lead draagt één of meer
+-- opdrachten (titel + bedrag excl. btw); hun som is de waarde van de lead en
+-- telt per kolom op het bord op. Daarnaast: beltijd loggen per account.
+-- Alles additief en idempotent. De tabel `opdrachten` blijft integraal bestaan
+-- (archief); enkel opdrachten.lead_id wordt ingevuld voor de overgezette rijen.
+
+-- 1) Opdrachten op een lead
+CREATE TABLE IF NOT EXISTS public.sales_lead_opdrachten (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  lead_id          uuid NOT NULL REFERENCES public.sales_leads(id) ON DELETE CASCADE,
+  titel            text NOT NULL,
+  bedrag_cents     bigint NOT NULL DEFAULT 0 CHECK (bedrag_cents >= 0),
+  dienst           text,
+  notitie          text,
+  positie          integer,
+  created_by       uuid,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  updated_at       timestamptz NOT NULL DEFAULT now(),
+  verwijderd_op    timestamptz,
+  -- Herkomst uit de oude tabel `opdrachten` (migratie hieronder); uniek zodat
+  -- een tweede run niets dubbel overzet.
+  bron_opdracht_id uuid UNIQUE REFERENCES public.opdrachten(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS sales_lead_opdrachten_lead
+  ON public.sales_lead_opdrachten (lead_id, positie) WHERE verwijderd_op IS NULL;
+ALTER TABLE public.sales_lead_opdrachten ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "sales_lead_opdrachten admin all" ON public.sales_lead_opdrachten;
+CREATE POLICY "sales_lead_opdrachten admin all" ON public.sales_lead_opdrachten FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+REVOKE ALL ON public.sales_lead_opdrachten FROM anon;
+DO $sales$ BEGIN
+  CREATE TRIGGER trg_sales_lead_opdrachten_updated BEFORE UPDATE ON public.sales_lead_opdrachten
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL; END $sales$;
+
+-- 2) Beltijd: sessies per medewerker (start/stop of handmatig). Hoogstens één
+--    lopende sessie per medewerker.
+CREATE TABLE IF NOT EXISTS public.sales_beltijd (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  medewerker_id    uuid NOT NULL,
+  medewerker_email text,
+  start_op         timestamptz NOT NULL,
+  einde_op         timestamptz,
+  duur_seconden    integer CHECK (duur_seconden IS NULL OR duur_seconden >= 0),
+  notitie          text,
+  aangemaakt_door  uuid,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  verwijderd_op    timestamptz,
+  CONSTRAINT sales_beltijd_einde_na_start CHECK (einde_op IS NULL OR einde_op >= start_op)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS sales_beltijd_een_lopend
+  ON public.sales_beltijd (medewerker_id) WHERE einde_op IS NULL AND verwijderd_op IS NULL;
+CREATE INDEX IF NOT EXISTS sales_beltijd_medewerker_start ON public.sales_beltijd (medewerker_id, start_op);
+CREATE INDEX IF NOT EXISTS sales_beltijd_start ON public.sales_beltijd (start_op) WHERE verwijderd_op IS NULL;
+ALTER TABLE public.sales_beltijd ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "sales_beltijd admin all" ON public.sales_beltijd;
+CREATE POLICY "sales_beltijd admin all" ON public.sales_beltijd FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+REVOKE ALL ON public.sales_beltijd FROM anon;
+
+-- 3) Bestaande opdrachten overzetten naar leads (idempotent, veilig herhaalbaar).
+--    Per opdracht zonder lead_id (en nog niet overgezet):
+--      · bedrijf zoeken op dedupe-sleutel (zoals createLead: harrie_dedupe_key =
+--        companyDedupeKey), anders aanmaken — naam = klant, anders klant_vrij, anders titel;
+--      · heeft dat bedrijf al een ACTIEVE lead (één lead per bedrijf), dan komt de
+--        opdracht op die lead (fase/labels van die lead blijven ongemoeid);
+--        anders een nieuwe lead: fase volgens de oude status, leadbron 'manueel',
+--        label 'Opdracht', laatste notitie = omschrijving;
+--      · opdracht erop (bron_opdracht_id = opdrachten.id) + tijdlijnregel;
+--      · opdrachten.lead_id = die lead.
+--    De CASE spiegelt OUDE_STATUS_NAAR_FASE in lib/sales/opdrachten-model.ts.
+DO $migratie$
+DECLARE
+  o          record;
+  v_org      uuid;
+  v_pipeline uuid;
+  v_naam     text;
+  v_key      text;
+  v_company  uuid;
+  v_lead     uuid;
+  v_stage    text;
+  v_notitie  text;
+  v_bedrag   bigint;
+  v_nieuw    int := 0;
+  v_bestaand int := 0;
+BEGIN
+  IF to_regclass('public.opdrachten') IS NULL OR to_regclass('public.sales_lead_opdrachten') IS NULL THEN
+    RETURN;
+  END IF;
+
+  -- Onze organisatie, zoals getOrCreateSalesOrg(): niet gearchiveerd, bij
+  -- meerdere de rij met een gekoppelde agenda, anders de oudste.
+  SELECT c.id INTO v_org
+    FROM public.sales_clients c
+   WHERE c.status IS DISTINCT FROM 'archived'
+   ORDER BY (EXISTS (SELECT 1 FROM public.sales_calendar_connections k WHERE k.sales_client_id = c.id)) DESC,
+            c.created_at ASC
+   LIMIT 1;
+  IF v_org IS NULL THEN
+    RAISE NOTICE 'Opdrachten-migratie overgeslagen: geen sales-organisatie gevonden.';
+    RETURN;
+  END IF;
+  -- Herkomstlijst zoals defaultPipelineId(): de eerste op positie.
+  SELECT p.id INTO v_pipeline FROM public.sales_pipelines p
+   WHERE p.sales_client_id = v_org ORDER BY p.position ASC LIMIT 1;
+
+  FOR o IN
+    SELECT op.id, op.titel, op.omschrijving, op.status, op.klant_vrij, op.bedrag_excl,
+           op.created_at, op.updated_at, op.afgerond_op, op.status_gewijzigd_op,
+           cl.company_name
+      FROM public.opdrachten op
+      LEFT JOIN public.clients cl ON cl.id = op.client_id
+     WHERE op.lead_id IS NULL
+       AND NOT EXISTS (SELECT 1 FROM public.sales_lead_opdrachten x WHERE x.bron_opdracht_id = op.id)
+     ORDER BY op.created_at ASC, op.id ASC
+  LOOP
+    v_naam := coalesce(nullif(btrim(o.company_name), ''), nullif(btrim(o.klant_vrij), ''), btrim(o.titel));
+    v_key := public.harrie_dedupe_key(v_naam, NULL);
+    v_notitie := nullif(btrim(coalesce(o.omschrijving, '')), '');
+    v_bedrag := greatest(0, round(coalesce(o.bedrag_excl, 0) * 100))::bigint;
+
+    -- Bedrijf: bestaand (zelfde dedupe-sleutel) of nieuw.
+    v_company := NULL;
+    SELECT id INTO v_company FROM public.sales_companies
+     WHERE sales_client_id = v_org AND dedupe_key = v_key LIMIT 1;
+    IF v_company IS NULL THEN
+      INSERT INTO public.sales_companies (sales_client_id, name, dedupe_key)
+      VALUES (v_org, v_naam, v_key)
+      ON CONFLICT (sales_client_id, dedupe_key) DO NOTHING
+      RETURNING id INTO v_company;
+      IF v_company IS NULL THEN
+        SELECT id INTO v_company FROM public.sales_companies
+         WHERE sales_client_id = v_org AND dedupe_key = v_key LIMIT 1;
+      END IF;
+    END IF;
+
+    -- Fase uit de oude status.
+    v_stage := CASE o.status
+      WHEN 'open'                THEN 'inbound'
+      WHEN 'voorstel_gevraagd'   THEN 'opvolgen'
+      WHEN 'voorstel_bezig'      THEN 'opvolgen'
+      WHEN 'voorstel_klaar'      THEN 'opvolgen'
+      WHEN 'voorstel_voorgelegd' THEN 'voorstel'
+      WHEN 'interesse'           THEN 'voorstel'
+      WHEN 'contract_verstuurd'  THEN 'voorstel'
+      WHEN 'geen_interesse'      THEN 'verloren'
+      WHEN 'geannuleerd'         THEN 'verloren'
+      WHEN 'getekend'            THEN 'gewonnen'
+      WHEN 'bezig'               THEN 'gewonnen'
+      WHEN 'wacht'               THEN 'gewonnen'
+      WHEN 'opgeleverd'          THEN 'gewonnen'
+      WHEN 'te_factureren'       THEN 'gewonnen'
+      WHEN 'factuur_verstuurd'   THEN 'gewonnen'
+      WHEN 'betaald'             THEN 'gewonnen'
+      WHEN 'afgerond'            THEN 'gewonnen'
+      ELSE 'inbound' END;
+
+    -- Eén actieve lead per bedrijf: bestaat die al, dan komt de opdracht erop.
+    v_lead := NULL;
+    SELECT id INTO v_lead FROM public.sales_leads
+     WHERE sales_client_id = v_org AND company_id = v_company AND archived_at IS NULL
+     ORDER BY created_at ASC LIMIT 1;
+
+    IF v_lead IS NULL THEN
+      INSERT INTO public.sales_leads
+        (sales_client_id, pipeline_id, company_id, stage_key, source, labels, leadbron,
+         laatste_notitie, laatste_notitie_op, gesloten_op, created_at)
+      VALUES
+        (v_org, v_pipeline, v_company, v_stage, 'manual', ARRAY['Opdracht']::text[], 'manueel',
+         left(v_notitie, 300), CASE WHEN v_notitie IS NOT NULL THEN o.created_at END,
+         CASE WHEN v_stage IN ('gewonnen', 'verloren') THEN coalesce(o.afgerond_op, o.status_gewijzigd_op, o.updated_at, o.created_at) END,
+         o.created_at)
+      RETURNING id INTO v_lead;
+      INSERT INTO public.sales_lead_events (lead_id, kind, body, created_at)
+      VALUES (v_lead, 'system', 'Lead aangemaakt · Manueel (overgezet uit Opdrachten)', o.created_at);
+      v_nieuw := v_nieuw + 1;
+    ELSE
+      v_bestaand := v_bestaand + 1;
+    END IF;
+
+    INSERT INTO public.sales_lead_opdrachten (lead_id, titel, bedrag_cents, notitie, positie, created_at, bron_opdracht_id)
+    VALUES (v_lead, btrim(o.titel), v_bedrag, v_notitie,
+            (SELECT count(*) FROM public.sales_lead_opdrachten x WHERE x.lead_id = v_lead AND x.verwijderd_op IS NULL)::int,
+            o.created_at, o.id)
+    ON CONFLICT (bron_opdracht_id) DO NOTHING;
+    INSERT INTO public.sales_lead_events (lead_id, kind, body, created_at)
+    VALUES (v_lead, 'system',
+            'Opdracht toegevoegd: ' || btrim(o.titel) || ' — € ' || replace(to_char(v_bedrag / 100.0, 'FM999999990.00'), '.', ','),
+            o.created_at);
+
+    UPDATE public.opdrachten SET lead_id = v_lead WHERE id = o.id AND lead_id IS NULL;
+  END LOOP;
+
+  RAISE NOTICE 'Opdrachten-migratie: % nieuwe leads, % opdrachten op een bestaande lead.', v_nieuw, v_bestaand;
+END $migratie$;
+
+-- Controle na het draaien (verwacht: 0 open rijen; som ≈ de oude som van bedrag_excl):
+--   SELECT count(*) FILTER (WHERE lead_id IS NULL) AS nog_open, count(*) AS totaal FROM public.opdrachten;
+--   SELECT count(*), sum(bedrag_cents) / 100.0 AS euro FROM public.sales_lead_opdrachten WHERE bron_opdracht_id IS NOT NULL;

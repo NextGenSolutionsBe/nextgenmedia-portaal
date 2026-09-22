@@ -13,6 +13,7 @@ import { merkStijl } from '@/lib/sales/merk'
 import { LeadGegevens } from './lead-gegevens'
 import { LeadTijdlijn } from './lead-tijdlijn'
 import { DienstenLijst } from './lead-dialogen'
+import { LeadOpdrachten } from './lead-opdrachten'
 import {
   type Lead, type Medewerker, type Pipeline, emailVan, euro, korteDatum, merkenVan, telefoonVan,
 } from './types'
@@ -247,12 +248,17 @@ export function LeadDetail({
             </div>
           </div>
 
+          {/* Opdrachten: titel + bedrag; hun som is de waarde van de lead */}
+          <LeadOpdrachten leadId={lead.id} onChanged={onChanged} />
+
           {/* Gewonnen / verloren */}
           {lead.stage_key === 'gewonnen' && (
             <div className="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-sm">
               <b className="text-green-800">Gewonnen</b>
               {lead.gesloten_op && <> op {new Date(lead.gesloten_op).toLocaleDateString('nl-BE')}</>}
-              {typeof lead.deal_waarde_cents === 'number' && <> · {euro(lead.deal_waarde_cents)}</>}
+              {(lead.waarde_cents ?? 0) > 0
+                ? <> · {euro(lead.waarde_cents)}</>
+                : typeof lead.deal_waarde_cents === 'number' && <> · {euro(lead.deal_waarde_cents)}</>}
               {lead.dienst && <> · {lead.dienst}</>}
             </div>
           )}

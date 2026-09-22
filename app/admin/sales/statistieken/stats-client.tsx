@@ -4,9 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
-import { ArrowDown, ArrowUp, Loader2, Trophy } from 'lucide-react'
+import { ArrowDown, ArrowUp, Loader2, Trophy, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { toonPercentage, type Cijfers, type Rij, type Statistieken } from '@/lib/sales/statistieken'
+import { toonPercentage, type AccountRij, type Cijfers, type Rij, type Statistieken } from '@/lib/sales/statistieken'
+import { toonUren } from '@/lib/sales/beltijd'
+import { BeltijdKaart } from '@/components/admin/sales-beltijd'
 import { formatDuur } from '@/lib/sales/activiteiten-model'
 import { DIENSTEN, LEADBRONNEN, leadbronLabel } from '@/lib/sales/leadbron'
 import { ExportKnop } from '@/components/admin/export-knop'
@@ -19,6 +21,8 @@ type Antwoord = {
   stats: Statistieken
   medewerkers: { id: string; naam: string }[]
   metActiviteiten: boolean
+  metBeltijd: boolean
+  accounts: AccountRij[]
   isAdmin: boolean
   meId: string
 }
@@ -85,6 +89,8 @@ export function StatsClient() {
   }
 
   const t = data?.stats.team
+  const gekozenNaam = medewerker ? (data?.medewerkers.find((m) => m.id === medewerker)?.naam ?? null) : null
+  const leadFilters = !!(richting || dienst || leadbron)
   const exportFilters = [
     richting ? { label: 'Richting', waarde: richting === 'inbound' ? 'Inbound' : 'Outbound' } : null,
     dienst ? { label: 'Dienst', waarde: dienst } : null,
@@ -139,6 +145,36 @@ export function StatsClient() {
         )}
       </div>
 
+      {/* ── Accounts: één kaart per account; klik = alle cijfers van dat account ── */}
+      {data && data.accounts.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <h2 className="font-semibold">{data.isAdmin ? 'Accounts' : 'Mijn cijfers'}</h2>
+            {data.isAdmin && medewerker && (
+              <button onClick={() => setMedewerker('')} className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center gap-1">
+                <X className="h-3 w-3" />Toon iedereen
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {data.accounts.map((a) => (
+              <AccountKaart key={a.sleutel} rij={a} actief={medewerker === a.sleutel} klikbaar={data.isAdmin}
+                onKlik={() => setMedewerker(medewerker === a.sleutel ? '' : a.sleutel)} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Beltijd loggen (eigen account, of het gekozen account voor een admin) ── */}
+      {data && (
+        <BeltijdKaart key={medewerker || 'ik'} medewerkerId={data.isAdmin && medewerker ? medewerker : undefined}
+          accountNaam={gekozenNaam} onGewijzigd={() => haal()} />
+      )}
+
+      {data?.isAdmin && gekozenNaam && (
+        <p className="text-sm font-semibold -mb-2">Alle statistieken van {gekozenNaam}</p>
+      )}
+
       {fout && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3">{fout}</p>}
       {data && !data.metActiviteiten && (
         <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2">
@@ -152,7 +188,9 @@ export function StatsClient() {
           {/* ── Teamtotalen ── */}
           <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
             <Kaart label="Telefoongesprekken" waarde={getal.format(t.telefoongesprekken)} onder={`${getal.format(t.uniekeLeads)} unieke leads`} />
-            <Kaart label="Totale beltijd" waarde={formatDuur(t.beltijdSeconden)} onder={`${getal.format(t.gesprekkenMetDuur)} met duur`} />
+            <Kaart label="Gelogde beltijd" waarde={data.metBeltijd ? toonUren(t.gelogdeBeltijdSeconden) : '—'}
+              onder={!data.metBeltijd ? 'na de databankmigratie' : leadFilters ? 'belsessies · lead-filters gelden hier niet' : 'belsessies (start/stop of handmatig)'} />
+            <Kaart label="Totale gespreksduur" waarde={formatDuur(t.beltijdSeconden)} onder={`som van ${getal.format(t.gesprekkenMetDuur)} gesprekken met duur`} />
             <Kaart label="Gem. gespreksduur" waarde={formatDuur(t.gemiddeldeDuurSeconden)} onder="enkel gesprekken met duur" />
             <Kaart label="E-mails" waarde={getal.format(t.emails)} />
             <Kaart label="Opvolgingen" waarde={getal.format(t.opvolgingen)} />
@@ -224,6 +262,38 @@ export function StatsClient() {
   )
 }
 
+function AccountKaart({ rij, actief, klikbaar, onKlik }: { rij: AccountRij; actief: boolean; klikbaar: boolean; onKlik: () => void }) {
+  const inhoud = (
+    <>
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-semibold truncate">{rij.label}</span>
+        {rij.beltijdLoopt && <span className="text-[10px] font-semibold text-green-700 bg-green-50 border border-green-200 rounded-full px-1.5 py-0.5 shrink-0">belt nu</span>}
+      </div>
+      <dl className="mt-2 grid grid-cols-3 gap-x-2 gap-y-1.5 text-left">
+        <Mini label="Gesprekken" waarde={getal.format(rij.telefoongesprekken)} />
+        <Mini label="Beltijd" waarde={toonUren(rij.gelogdeBeltijdSeconden)} />
+        <Mini label="Afspraken" waarde={getal.format(rij.afspraken)} />
+        <Mini label="Gewonnen" waarde={getal.format(rij.gewonnen)} />
+        <Mini label="Closing" waarde={toonPercentage(rij.closingRate)} />
+        <Mini label="Afspr.-rate" waarde={toonPercentage(rij.appointmentRate)} />
+      </dl>
+    </>
+  )
+  const stijl = cn('card-base !p-3 w-full text-left transition-colors', actief && 'ring-2 ring-black', klikbaar && 'hover:border-gray-300 cursor-pointer')
+  return klikbaar
+    ? <button type="button" onClick={onKlik} className={stijl} aria-pressed={actief} title={actief ? 'Toon iedereen' : `Alle statistieken van ${rij.label}`}>{inhoud}</button>
+    : <div className={stijl}>{inhoud}</div>
+}
+
+function Mini({ label, waarde }: { label: string; waarde: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[10px] uppercase tracking-wide text-gray-400 truncate">{label}</dt>
+      <dd className="text-sm font-bold tabular-nums truncate">{waarde}</dd>
+    </div>
+  )
+}
+
 function Keuze({ label, waarde, onChange, opties }: {
   label: string; waarde: string; onChange: (v: string) => void; opties: { v: string; l: string }[]
 }) {
@@ -252,7 +322,8 @@ type Kolom = { kop: string; titel?: string; waarde: (c: Cijfers) => number | nul
 
 const KOLOMMEN: Kolom[] = [
   { kop: 'Gesprekken', waarde: (c) => c.telefoongesprekken, toon: (c) => getal.format(c.telefoongesprekken) },
-  { kop: 'Beltijd', waarde: (c) => c.beltijdSeconden, toon: (c) => formatDuur(c.beltijdSeconden) },
+  { kop: 'Gelogd', titel: 'Gelogde beltijd (belsessies)', waarde: (c) => c.gelogdeBeltijdSeconden, toon: (c) => toonUren(c.gelogdeBeltijdSeconden) },
+  { kop: 'Gespreksduur', titel: 'Totale gespreksduur: som van de duur per gesprek', waarde: (c) => c.beltijdSeconden, toon: (c) => formatDuur(c.beltijdSeconden) },
   { kop: 'Gem. duur', titel: 'Enkel gesprekken met een geregistreerde duur', waarde: (c) => c.gemiddeldeDuurSeconden, toon: (c) => formatDuur(c.gemiddeldeDuurSeconden) },
   { kop: 'E-mails', waarde: (c) => c.emails, toon: (c) => getal.format(c.emails) },
   { kop: 'Leads', titel: 'Unieke behandelde leads', waarde: (c) => c.uniekeLeads, toon: (c) => getal.format(c.uniekeLeads) },

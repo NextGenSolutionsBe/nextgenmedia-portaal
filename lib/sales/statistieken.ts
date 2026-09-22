@@ -14,6 +14,9 @@
  *  · Een deal telt hoogstens één keer per lead: de LAATSTE sluiting (gewonnen
  *    of verloren) in de periode is de uitkomst.
  *  · Een ratio zonder noemer is null ("—"), nooit NaN of 0%.
+ *  · "Totale gespreksduur" = som van de duur per geregistreerd gesprek;
+ *    "Gelogde beltijd" = som van de belsessies (lib/sales/beltijd.ts). Twee
+ *    verschillende metingen, apart getoond en NOOIT bij elkaar opgeteld.
  *
  * NIET te verwarren met lib/sales/setters.ts (geld: uren, commissie,
  * uitbetalingen — het scherm "Resultaten").
@@ -21,6 +24,7 @@
 
 import { GESLAAGD_CONTACT, formatDuur } from '@/lib/sales/activiteiten-model'
 import { isInboundBron, leadbronLabel, normaliseerLeadbron } from '@/lib/sales/leadbron'
+import { beltijdPerMedewerker, beltijdSeconden, type BeltijdSessie } from '@/lib/sales/beltijd'
 
 export type StatActiviteit = {
   id: string
@@ -56,6 +60,7 @@ export type TrendPer = 'dag' | 'week' | 'maand'
 
 export type Cijfers = {
   telefoongesprekken: number
+  /** TOTALE GESPREKSDUUR: som van de duur die bij de gesprekken werd ingevuld. */
   beltijdSeconden: number
   /** Gesprekken MET een geregistreerde duur (noemer van het gemiddelde). */
   gesprekkenMetDuur: number
@@ -79,6 +84,12 @@ export type Cijfers = {
   appointmentRate: number | null
   /** leads met geslaagd contact ÷ unieke behandelde leads × 100 */
   contactRate: number | null
+  /**
+   * GELOGDE BELTIJD: som van de belsessies (start/stop of handmatig). null =
+   * niet van toepassing (bv. per leadbron: een sessie hangt niet aan een lead)
+   * of niet beschikbaar (tabel nog niet gemigreerd).
+   */
+  gelogdeBeltijdSeconden: number | null
 }
 
 export type Rij = Cijfers & { sleutel: string; label: string }
@@ -266,6 +277,7 @@ export function telCijfers(
     closingRate: percentage(gewonnen, gewonnen + verloren),
     appointmentRate: percentage(leadsMetAfspraak, leadsMetContact),
     contactRate: percentage(leadsMetContact, uniekeLeads),
+    gelogdeBeltijdSeconden: null,
   }
 }
 
@@ -297,6 +309,10 @@ export function bereken(bron: {
   medewerkers: StatMedewerker[]
   geannuleerdeAfspraken?: Iterable<string>
   trendPer?: TrendPer
+  /** Belsessies in de periode (al op periode gefilterd). Weglaten = niet beschikbaar. */
+  beltijd?: BeltijdSessie[]
+  /** "Nu" voor lopende sessies (ms). Standaard Date.now(). */
+  nu?: number
 }, filter: StatFilter = {}): Statistieken {
   const leadById = new Map(bron.leads.map((l) => [l.id, l]))
   const acts = filterActiviteiten(bron.activiteiten, leadById, filter)
@@ -304,6 +320,10 @@ export function bereken(bron: {
   const trendPer = bron.trendPer ?? 'dag'
 
   const team = telCijfers(acts, leadById, geteld)
+  // Gelogde beltijd hangt aan een medewerker, niet aan een lead: enkel de
+  // medewerkerfilter geldt (richting/dienst/leadbron niet).
+  const beltijdPer = bron.beltijd ? beltijdPerMedewerker(bron.beltijd, { medewerkerId: filter.medewerkerId, nu: bron.nu }) : null
+  if (bron.beltijd) team.gelogdeBeltijdSeconden = beltijdSeconden(bron.beltijd, { medewerkerId: filter.medewerkerId, nu: bron.nu })
 
   // Per medewerker
   const naamVan = new Map(bron.medewerkers.map((m) => [m.id, m.naam]))
@@ -320,8 +340,16 @@ export function bereken(bron: {
     }
     g.acts.push(a)
   }
+  // Wie enkel beltijd logde (nog geen activiteit) hoort er ook bij.
+  for (const [id, sec] of beltijdPer ?? []) {
+    if (sec > 0 && !groepen.has(id)) groepen.set(id, { label: naamVan.get(id) ?? bron.beltijd?.find((b) => b.medewerker_id === id)?.medewerker_email?.split('@')[0] ?? 'Onbekende medewerker', acts: [] })
+  }
   const perMedewerker: Rij[] = [...groepen.entries()]
-    .map(([sleutel, g]) => ({ sleutel, label: g.label, ...telCijfers(g.acts, leadById, geteld) }))
+    .map(([sleutel, g]) => {
+      const c = telCijfers(g.acts, leadById, geteld)
+      if (beltijdPer) c.gelogdeBeltijdSeconden = sleutel === ONBEKEND ? null : (beltijdPer.get(sleutel) ?? 0)
+      return { sleutel, label: g.label, ...c }
+    })
     .sort((a, b) => b.telefoongesprekken - a.telefoongesprekken || b.afspraken - a.afspraken || a.label.localeCompare(b.label))
 
   // Per leadbron
@@ -367,9 +395,40 @@ export function vergelijk(rijen: Rij[]): Uitblinker[] {
   }
   return [
     beste('Meeste telefoongesprekken', (r) => r.telefoongesprekken, (v) => String(v)),
-    beste('Meeste beltijd', (r) => r.beltijdSeconden, (v) => formatDuur(v)),
+    beste('Meeste gespreksduur', (r) => r.beltijdSeconden, (v) => formatDuur(v)),
+    beste('Meeste gelogde beltijd', (r) => r.gelogdeBeltijdSeconden, (v) => formatDuur(v)),
     beste('Meeste afspraken', (r) => r.afspraken, (v) => String(v)),
     beste('Meeste deals', (r) => r.gewonnen, (v) => String(v)),
     beste('Beste closing rate', (r) => (r.gewonnen + r.verloren > 0 ? r.closingRate : null), (v) => toonPercentage(v)),
   ].filter((x): x is Uitblinker => x !== null)
+}
+
+// ── Accounts ─────────────────────────────────────────────────────────────────
+
+export type AccountRij = Rij & { beltijdLoopt: boolean }
+
+/**
+ * Eén kaart per account voor het overzicht bovenaan de statistieken: iedereen
+ * uit de medewerkerslijst (ook zonder activiteit, zodat elk account te kiezen
+ * is) plus wie activiteit had maar niet (meer) in de lijst staat. "Onbekend"
+ * (activiteit zonder medewerker) is geen account en valt weg.
+ */
+export function bouwAccounts(perMedewerker: Rij[], medewerkers: StatMedewerker[], lopend: Iterable<string> = [], metBeltijd = false): AccountRij[] {
+  const loopt = new Set(lopend)
+  const perId = new Map(perMedewerker.map((r) => [r.sleutel, r]))
+  const uit: AccountRij[] = []
+  for (const m of medewerkers) {
+    const r = perId.get(m.id)
+    const basis: Rij = r ? { ...r, label: m.naam } : { sleutel: m.id, label: m.naam, ...legeCijfers(), gelogdeBeltijdSeconden: metBeltijd ? 0 : null }
+    uit.push({ ...basis, beltijdLoopt: loopt.has(m.id) })
+  }
+  for (const r of perMedewerker) {
+    if (r.sleutel === ONBEKEND || medewerkers.some((m) => m.id === r.sleutel)) continue
+    uit.push({ ...r, beltijdLoopt: loopt.has(r.sleutel) })
+  }
+  return uit.sort((a, b) =>
+    b.telefoongesprekken - a.telefoongesprekken
+    || (b.gelogdeBeltijdSeconden ?? 0) - (a.gelogdeBeltijdSeconden ?? 0)
+    || b.afspraken - a.afspraken
+    || a.label.localeCompare(b.label))
 }

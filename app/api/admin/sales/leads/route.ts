@@ -8,6 +8,8 @@ import { normalizePhone, looksLikePhone } from '@/lib/sales/dedupe'
 import { isStageKey, normaliseerStage, stageKeysVoor } from '@/lib/sales/stages'
 import { isInboundBron, normaliseerLeadbron } from '@/lib/sales/leadbron'
 import { registreerActiviteit } from '@/lib/sales/activiteiten'
+import { laadOpdrachtenPerLead, voegOpdrachtToe } from '@/lib/sales/lead-opdrachten'
+import { leadWaardeCents, leesOpdrachtInvoer, type OpdrachtKort } from '@/lib/sales/opdrachten-model'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,6 +31,9 @@ export type LeadRow = {
   opvolgdatum?: string | null; deal_waarde_cents?: number | null
   gesloten_op?: string | null; verlies_reden?: string | null
   website_aanvraag?: Record<string, unknown> | null
+  /** Opdrachten (titel + bedrag) en de afgeleide waarde van de lead. */
+  opdrachten?: OpdrachtKort[]
+  waarde_cents?: number
   sales_companies: {
     id: string; name: string; website: string | null; sector: string | null
     city: string | null; region: string | null; phone: string | null
@@ -208,6 +213,22 @@ export async function GET(req: NextRequest) {
     }
     const isAdmin = !!(await requireAdmin())
 
+    // Opdrachten (titel + bedrag) per lead en de waarde van elke lead. Vóór de
+    // migratie bestaat de tabel niet: dan is de waarde de dealwaarde.
+    let opdrachtenBeschikbaar = true
+    try {
+      const perLead = await laadOpdrachtenPerLead(admin, new Set(rows.map((r) => r.id)))
+      if (perLead === null) opdrachtenBeschikbaar = false
+      for (const r of rows) {
+        const lijst = perLead?.get(r.id)
+        if (lijst?.length) r.opdrachten = lijst
+        r.waarde_cents = leadWaardeCents({ opdrachten: lijst, deal_waarde_cents: r.deal_waarde_cents })
+      }
+    } catch (e) {
+      console.error('[sales] opdrachten laden mislukt:', e instanceof Error ? e.message : e)
+      for (const r of rows) r.waarde_cents = leadWaardeCents({ deal_waarde_cents: r.deal_waarde_cents })
+    }
+
     // Leads die een collega NU in Focus Mode belt (slot uit sales_lead_claims).
     let bezet: Record<string, string> = {}
     try {
@@ -220,7 +241,7 @@ export async function GET(req: NextRequest) {
       }
     } catch { bezet = {} }
 
-    return NextResponse.json({ leads: rows, totaal, afgekapt, medewerkers, meId: actor.id, isAdmin, bezet })
+    return NextResponse.json({ leads: rows, totaal, afgekapt, medewerkers, meId: actor.id, isAdmin, bezet, opdrachtenBeschikbaar })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
@@ -241,6 +262,13 @@ export async function POST(req: NextRequest) {
     const stage = isStageKey(b.stage) ? b.stage : undefined
     const opvolgdatum = typeof b.opvolgdatum === 'string' && /^\d{4}-\d{2}-\d{2}/.test(b.opvolgdatum)
       ? b.opvolgdatum.slice(0, 10) : null
+
+    // Optioneel: de eerste opdracht (titel + bedrag). Eerst controleren, zodat
+    // een fout bedrag geen lead zonder opdracht achterlaat.
+    const opdrachtRuw = b.opdracht && typeof b.opdracht === 'object' ? (b.opdracht as Record<string, unknown>) : null
+    const metOpdracht = !!opdrachtRuw && (String(opdrachtRuw.titel ?? '').trim() !== '' || String(opdrachtRuw.bedrag ?? '').trim() !== '')
+    const opdracht = metOpdracht ? leesOpdrachtInvoer(opdrachtRuw as Record<string, unknown>, true) : null
+    if (opdracht && !opdracht.ok) return NextResponse.json({ error: opdracht.error }, { status: 400 })
 
     const res = await createLead({
       salesClientId,
@@ -280,7 +308,16 @@ export async function POST(req: NextRequest) {
         type: 'opvolging', opvolgdatum,
       })
     }
-    return NextResponse.json({ ok: true, id: res.leadId })
+    let waarschuwing: string | undefined
+    if (opdracht?.ok) {
+      const o = await voegOpdrachtToe(admin, {
+        leadId: res.leadId,
+        invoer: { ...opdracht.invoer, titel: opdracht.invoer.titel as string, bedrag_cents: opdracht.invoer.bedrag_cents ?? 0 },
+        actor: { id: actor.id, email: actor.email ?? null },
+      })
+      if (!o.ok) waarschuwing = `Lead toegevoegd, maar de opdracht niet: ${o.error}`
+    }
+    return NextResponse.json({ ok: true, id: res.leadId, waarschuwing })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }

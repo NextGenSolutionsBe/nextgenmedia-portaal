@@ -3,7 +3,7 @@ import { requireAdmin, requireStaff } from '@/lib/supabase/server'
 import { safeMessage } from '@/lib/api-error'
 import { laadStatistieken, leesPeriode } from '@/lib/sales/statistieken-data'
 import { isLeadbron } from '@/lib/sales/leadbron'
-import type { TrendPer } from '@/lib/sales/statistieken'
+import { bouwAccounts, type TrendPer } from '@/lib/sales/statistieken'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,14 +33,19 @@ export async function GET(req: NextRequest) {
     const trendPer: TrendPer | undefined = trendRuw === 'dag' || trendRuw === 'week' || trendRuw === 'maand' ? trendRuw : undefined
 
     const medewerkerId = isAdmin ? (sp.get('medewerker')?.trim() || undefined) : actor.id
-    const uit = await laadStatistieken({ periode, medewerkerId, richting, dienst, leadbron, trendPer })
+    const uit = await laadStatistieken({ periode, medewerkerId, richting, dienst, leadbron, trendPer, accountsOverzicht: isAdmin })
 
     // Een setter ziet in de keuzelijst ook enkel zichzelf.
+    const ik = { id: actor.id, naam: uit.medewerkers.find((m) => m.id === actor.id)?.naam ?? actor.email?.split('@')[0] ?? 'Ik' }
     const medewerkers = isAdmin
-      ? uit.medewerkers
-      : [{ id: actor.id, naam: uit.medewerkers.find((m) => m.id === actor.id)?.naam ?? actor.email?.split('@')[0] ?? 'Ik' }]
+      ? (uit.medewerkers.some((m) => m.id === actor.id) ? uit.medewerkers : [...uit.medewerkers, ik])
+      : [ik]
+    // Zonder eigen rij (nog nergens in de lijst): toch één (lege) kaart voor jezelf.
+    const accounts = !isAdmin && uit.accounts.length === 0
+      ? bouwAccounts([], [ik], [], uit.metBeltijd)
+      : uit.accounts
 
-    return NextResponse.json({ ...uit, medewerkers, isAdmin, meId: actor.id })
+    return NextResponse.json({ ...uit, accounts, medewerkers, isAdmin, meId: actor.id })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }

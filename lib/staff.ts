@@ -30,7 +30,6 @@ export const ADMIN_MODULES: AdminModule[] = [
   { key: 'vesting',     label: 'Vesting',              prefixes: ['/admin/vesting', '/api/admin/vesting'] },
   { key: 'purchases',   label: 'Aankopen',             prefixes: ['/admin/purchases', '/api/admin/purchases'] },
   { key: 'uploads',     label: 'Klantuploads',         prefixes: ['/admin/uploads', '/api/admin/uploads'] },
-  { key: 'opdrachten',  label: 'Opdrachten (klanten)', prefixes: ['/admin/opdrachten', '/api/admin/opdrachten'] },
   { key: 'formulieren', label: 'Formulieren',          prefixes: ['/admin/formulieren', '/api/admin/formulieren'] },
   { key: 'kantoor',     label: 'Kantoor',              prefixes: ['/admin/kantoor', '/api/kantoor'] },
   { key: 'email',       label: 'E-mailcenter',         prefixes: ['/admin/email', '/api/admin/email'] },
