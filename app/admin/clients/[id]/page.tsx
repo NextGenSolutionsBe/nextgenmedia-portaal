@@ -17,6 +17,7 @@ import { ClientTasks } from './client-tasks'
 import { ClientBlogs } from './client-blogs'
 import { FEATURES } from '@/lib/features'
 import { ClientCms } from './client-cms'
+import { ClientFormulieren } from './client-formulieren'
 
 async function getClient(id: string) {
   const admin = createAdminSupabaseClient()
@@ -179,6 +180,9 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           <div id="taken" className="scroll-mt-20">
             <ClientTasks clientId={id} />
           </div>
+
+          {/* Formulieren: inzendingen van deze klant + formulier versturen */}
+          <ClientFormulieren clientId={id} />
 
           {/* Blogs — tijdelijk verborgen via lib/features.ts */}
           {FEATURES.blogs && <ClientBlogs clientId={id} />}

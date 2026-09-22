@@ -2,13 +2,13 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { Search, Loader2, FileText, Users, Newspaper, Receipt, TrendingUp, ListChecks, UserSquare2, CornerDownLeft } from 'lucide-react'
+import { Search, Loader2, FileText, Users, Newspaper, Receipt, TrendingUp, ListChecks, UserSquare2, CornerDownLeft, ClipboardPen } from 'lucide-react'
 
 type Result = { type: string; label: string; title: string; subtitle?: string; href: string }
 
 const ICON: Record<string, React.ElementType> = {
   client: Users, contract: FileText, blog: Newspaper, invoice: Receipt,
-  forecast: TrendingUp, task: ListChecks, partner: UserSquare2,
+  forecast: TrendingUp, task: ListChecks, partner: UserSquare2, formulier: ClipboardPen,
 }
 
 // Globale fuzzy zoekbalk met Cmd/Ctrl+K. Resultaten zijn direct klikbaar (deep-links).

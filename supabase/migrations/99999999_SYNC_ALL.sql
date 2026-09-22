@@ -4516,3 +4516,72 @@ CREATE POLICY "sales_activiteiten admin all" ON public.sales_activiteiten FOR AL
   WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
 -- Back-up van de fase per lead vóór de kanbanmigratie (21 sep 2026), om terug te kunnen.
 CREATE TABLE IF NOT EXISTS public.sales_leads_fase_backup_20260921 AS SELECT id, stage_key, now() AS bewaard_op FROM public.sales_leads WHERE false;
+
+-- ── Formulieren (22 sep 2026) ───────────────────────────────────────────────
+-- Intake- en algemene formulieren die de klant via een link invult. Alles loopt
+-- server-side via de service-role (admin-routes + publieke /f/<token>-route);
+-- RLS staat aan zonder policies, en anon/authenticated krijgen geen rechten.
+CREATE TABLE IF NOT EXISTS public.formulieren (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  titel           text NOT NULL,
+  beschrijving    text,
+  dienst          text NOT NULL DEFAULT 'algemeen',
+  doel            text,
+  velden          jsonb NOT NULL DEFAULT '[]'::jsonb,
+  instellingen    jsonb NOT NULL DEFAULT '{}'::jsonb,
+  status          text NOT NULL DEFAULT 'concept' CHECK (status IN ('concept','actief','gesloten')),
+  created_by      uuid,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now(),
+  gearchiveerd_op timestamptz
+);
+CREATE INDEX IF NOT EXISTS formulieren_status ON public.formulieren (status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.formulier_links (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  formulier_id   uuid NOT NULL REFERENCES public.formulieren(id) ON DELETE CASCADE,
+  client_id      uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  token          text NOT NULL UNIQUE CHECK (char_length(token) >= 32),
+  label          text,
+  verloopt_op    timestamptz,
+  ingetrokken_op timestamptz,
+  eenmalig       boolean NOT NULL DEFAULT false,
+  created_by     uuid,
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS formulier_links_formulier ON public.formulier_links (formulier_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS formulier_links_client    ON public.formulier_links (client_id) WHERE client_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS public.formulier_inzendingen (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  formulier_id    uuid NOT NULL REFERENCES public.formulieren(id) ON DELETE CASCADE,
+  link_id         uuid REFERENCES public.formulier_links(id) ON DELETE SET NULL,
+  client_id       uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  antwoorden      jsonb NOT NULL DEFAULT '{}'::jsonb,
+  velden_snapshot jsonb,
+  naam            text,
+  email           text,
+  status          text NOT NULL DEFAULT 'nieuw' CHECK (status IN ('nieuw','gezien','verwerkt')),
+  admin_notitie   text,
+  ip              text,
+  user_agent      text,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS formulier_inzendingen_formulier ON public.formulier_inzendingen (formulier_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS formulier_inzendingen_link      ON public.formulier_inzendingen (link_id);
+CREATE INDEX IF NOT EXISTS formulier_inzendingen_client    ON public.formulier_inzendingen (client_id, created_at DESC) WHERE client_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS formulier_inzendingen_nieuw     ON public.formulier_inzendingen (formulier_id) WHERE status = 'nieuw';
+
+ALTER TABLE public.formulieren           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.formulier_links       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.formulier_inzendingen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.formulieren           FROM anon, authenticated;
+REVOKE ALL ON public.formulier_links       FROM anon, authenticated;
+REVOKE ALL ON public.formulier_inzendingen FROM anon, authenticated;
+
+-- Privébucket voor bestanden uit formulieren (logo's, voorbeelden, briefings).
+-- Uploads gebeuren met een door de server uitgegeven ondertekende uploadlink;
+-- downloaden enkel via tijdelijke ondertekende links in de admin. 20 MB/bestand.
+INSERT INTO storage.buckets (id, name, public, file_size_limit)
+VALUES ('formulier-bestanden', 'formulier-bestanden', false, 20971520)
+ON CONFLICT (id) DO NOTHING;

@@ -372,6 +372,7 @@ export async function updateSession(request: NextRequest) {
     path === '/login/wachtwoord' ||   // wachtwoord kiezen na een uitnodiging (eenmalige token in de link)
     path === '/' ||
     path.startsWith('/sign/') ||
+    path.startsWith('/f/') ||     // publieke formulieren (token in de link, eigen controle in de pagina)
     path.startsWith('/_next') ||
     path.startsWith('/api') ||
     // Ontdekkingspaden moeten een EERLIJK antwoord geven, niet een omleiding.

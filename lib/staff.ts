@@ -31,6 +31,7 @@ export const ADMIN_MODULES: AdminModule[] = [
   { key: 'purchases',   label: 'Aankopen',             prefixes: ['/admin/purchases', '/api/admin/purchases'] },
   { key: 'uploads',     label: 'Klantuploads',         prefixes: ['/admin/uploads', '/api/admin/uploads'] },
   { key: 'opdrachten',  label: 'Opdrachten (klanten)', prefixes: ['/admin/opdrachten', '/api/admin/opdrachten'] },
+  { key: 'formulieren', label: 'Formulieren',          prefixes: ['/admin/formulieren', '/api/admin/formulieren'] },
   { key: 'kantoor',     label: 'Kantoor',              prefixes: ['/admin/kantoor', '/api/kantoor'] },
   { key: 'email',       label: 'E-mailcenter',         prefixes: ['/admin/email', '/api/admin/email'] },
   { key: 'info',        label: 'Informatief',          prefixes: ['/admin/informatief', '/admin/onboarding', '/admin/maandplanning', '/api/admin/month-planning', '/api/admin/month-planning-clients'] },
@@ -81,7 +82,7 @@ const SHARED_API: Array<{ test: (p: string) => boolean; modules: string[] }> = [
   // Mail-composer: content (scripts/shoot), klanten (hub), contracten, blogs, partners.
   {
     test: (p) => p.startsWith('/api/admin/email/send') || p.startsWith('/api/admin/email/context') || p.startsWith('/api/admin/email/templates'),
-    modules: ['email', 'content', 'clients', 'contracts', 'blogs', 'partners'],
+    modules: ['email', 'content', 'clients', 'contracts', 'blogs', 'partners', 'formulieren'],
   },
 ]
 

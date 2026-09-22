@@ -15,6 +15,8 @@ export type MailContext =
   | { type: 'contract'; contractId: string; contractTitle: string; signLink: string; defaultEmail?: string | null; signerName?: string | null; clientName?: string | null; expiresAt?: string | null }
   | { type: 'access'; clientId: string; clientName: string; toEmail: string; tempPassword?: string }
   | { type: 'generic'; toEmail?: string }
+  // Formulierlink (Formulieren → Delen): onderwerp/tekst/knop voorgevuld, ontvanger aanpasbaar.
+  | { type: 'formulier'; link: string; formulierTitel: string; clientId?: string | null; clientName?: string | null; verlooptOp?: string | null }
 
 export function MailComposer({ context, label = 'Verstuur mail', className = 'btn-secondary text-sm' }: { context: MailContext; label?: string; className?: string }) {
   const [open, setOpen] = useState(false)
@@ -78,6 +80,19 @@ function Dialog({ context, onClose }: { context: MailContext; onClose: () => voi
           setSubject('Toegang tot NextGenMedia portaal')
           setBody(`Beste,\n\nJe hebt toegang gekregen tot het NextGenMedia klantenportaal van ${context.clientName}.\n\nLogin: ${context.toEmail}${context.tempPassword ? `\nTijdelijk wachtwoord: ${context.tempPassword}` : ''}\n\nLog in via de knop hieronder en wijzig daarna je wachtwoord.\n\nMet vriendelijke groet,\nNextGenMedia`)
           setCtaText('Inloggen'); setCtaLink(`${window.location.origin}/login`)
+        } else if (context.type === 'formulier') {
+          // E-mailadres van de klant voorstellen (best effort); blijft aanpasbaar.
+          if (context.clientId) {
+            try {
+              const ctxRes = await fetch(`/api/admin/email/context?${new URLSearchParams({ client_id: context.clientId }).toString()}`)
+              const ctx = await ctxRes.json()
+              if (ctxRes.ok) setToEmail(ctx.toEmail ?? '')
+            } catch { /* ontvanger dan zelf invullen */ }
+          }
+          const tot = context.verlooptOp ? new Date(context.verlooptOp).toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' }) : ''
+          setSubject(context.formulierTitel)
+          setBody(`Beste${context.clientName ? ` ${context.clientName}` : ''},\n\nMag ik je vragen om het formulier "${context.formulierTitel}" in te vullen? Zo hebben we alle informatie om voor jou aan de slag te gaan.\n\nKlik op de knop hieronder om het formulier te openen.${tot ? `\n\nDe link is geldig tot ${tot}.` : ''}\n\nMet vriendelijke groet,\nNextGenMedia`)
+          setCtaText('Formulier invullen'); setCtaLink(context.link)
         } else {
           setToEmail(context.toEmail ?? '')
         }
@@ -116,7 +131,7 @@ function Dialog({ context, onClose }: { context: MailContext; onClose: () => voi
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             to_email: toEmail,
-            to_client_id: (context.type === 'client' || context.type === 'access') ? context.clientId : null,
+            to_client_id: (context.type === 'client' || context.type === 'access') ? context.clientId : context.type === 'formulier' ? (context.clientId ?? null) : null,
             subject, body, cta_text: ctaText || null, cta_link: ctaLink || null,
             template_id: templateId || null, template_name: tpl?.name ?? null,
             kind: context.type === 'client' ? (context.kind ?? 'generic') : 'generic',

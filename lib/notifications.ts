@@ -54,6 +54,29 @@ export async function buildNotifications(): Promise<Notif[]> {
   const names = new Map(clientMap.map((c) => [c.id, c.company_name]))
   const out: Notif[] = []
 
+  // Nieuwe formulierinzendingen: één signaal per formulier (status 'nieuw').
+  // De id bevat de laatste inzending, zodat een nieuwe inzending opnieuw ongelezen is.
+  try {
+    const nieuweInzendingen = await safe(admin.from('formulier_inzendingen')
+      .select('formulier_id, created_at').eq('status', 'nieuw').order('created_at', { ascending: false }).limit(500)) as { formulier_id: string; created_at: string }[]
+    if (nieuweInzendingen.length) {
+      const perFormulier = new Map<string, { n: number; laatste: string }>()
+      for (const r of nieuweInzendingen) {
+        const x = perFormulier.get(r.formulier_id)
+        if (x) x.n++; else perFormulier.set(r.formulier_id, { n: 1, laatste: r.created_at })
+      }
+      const titels = await safe(admin.from('formulieren').select('id, titel').in('id', [...perFormulier.keys()])) as { id: string; titel: string }[]
+      const titel = new Map(titels.map((f) => [f.id, f.titel]))
+      for (const [id, { n, laatste }] of perFormulier) {
+        out.push({
+          id: `formulier:${id}:${laatste}`, kind: 'formulier', priority: 'med',
+          title: `${n} nieuwe formulierinzending${n === 1 ? '' : 'en'} — ${titel.get(id) ?? 'Formulier'}`,
+          date: laatste.slice(0, 10), href: `/admin/formulieren/${id}?tab=inzendingen`,
+        })
+      }
+    }
+  } catch { /* tabel nog niet gemigreerd → geen signaal */ }
+
 
   // ClickUp→Google-agendasync: ligt die stil, dan zien de setters niet wat er
   // in ClickUp gepland staat en kán er dubbel geboekt worden. Dat verdient de
