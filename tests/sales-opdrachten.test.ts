@@ -87,17 +87,18 @@ test('5. Migratie-mapping: elke oude status naar een bestaande kolom, en gelijk 
   }
 })
 
-test('6. Oude Opdrachten-module is weg; opgeslagen rechten met "opdrachten" breken niets', () => {
-  for (const f of ['lib/opdrachten.ts', 'app/api/admin/opdrachten/route.ts', 'app/admin/opdrachten/opdrachten-client.tsx', 'app/api/admin/badges/route.ts']) {
-    assert.ok(!existsSync(join(root, f)), `${f} hoort weg te zijn`)
+test('6. Opdrachten-pagina is de bron; de pipeline leest dezelfde tabel', () => {
+  for (const f of ['lib/opdrachten.ts', 'app/api/admin/opdrachten/route.ts', 'app/admin/opdrachten/opdrachten-client.tsx']) {
+    assert.ok(existsSync(join(root, f)), `${f} hoort terug te zijn`)
   }
-  assert.match(readFileSync(join(root, 'app/admin/opdrachten/page.tsx'), 'utf8'), /redirect\('\/admin\/sales\/pipeline'\)/)
-  assert.ok(!ADMIN_MODULES.some((m) => m.key === 'opdrachten'))
-  assert.deepEqual(sanitizeModules(['sales', 'opdrachten', 'clients']), ['sales', 'clients'])
-  assert.equal(pathToModule('/admin/sales/pipeline'), 'sales')
-  assert.equal(pathToModule('/api/admin/sales/beltijd'), 'sales')
+  assert.ok(ADMIN_MODULES.some((m) => m.key === 'opdrachten'))
+  assert.equal(pathToModule('/admin/opdrachten'), 'opdrachten')
+  const lib = readFileSync(join(root, 'lib/sales/lead-opdrachten.ts'), 'utf8')
+  assert.ok(lib.includes("const TABEL = 'opdrachten'"), 'pipeline leest de tabel opdrachten')
+  assert.ok(!lib.includes('sales_lead_opdrachten'), 'geen tweede bron')
+  assert.ok(readFileSync(join(root, 'app/api/admin/opdrachten/route.ts'), 'utf8').includes('koppelAanLead'), 'nieuwe opdracht wordt aan de pipeline gekoppeld')
   assert.equal(pathToModule('/api/admin/sales/leads/x/opdrachten'), 'sales')
-  // Partneropdrachten (assignments) blijven ongemoeid.
+  assert.deepEqual(sanitizeModules(['sales', 'opdrachten', 'onbekend']), ['sales', 'opdrachten'])
   assert.ok(ADMIN_MODULES.some((m) => m.key === 'assignments'))
 })
 

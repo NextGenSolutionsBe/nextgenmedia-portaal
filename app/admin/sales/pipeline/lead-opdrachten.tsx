@@ -73,8 +73,8 @@ export function LeadOpdrachten({ leadId, verversSleutel, onChanged }: {
   }
 
   const verwijder = async (o: LeadOpdracht) => {
-    if (!window.confirm(`Opdracht "${o.titel}" verwijderen?`)) return
-    await stuur(`/api/admin/sales/leads/${leadId}/opdrachten/${o.id}`, 'DELETE', undefined, 'Opdracht verwijderd.')
+    if (!window.confirm(`Opdracht "${o.titel}" loskoppelen van deze lead? De opdracht blijft bestaan op de Opdrachten-pagina.`)) return
+    await stuur(`/api/admin/sales/leads/${leadId}/opdrachten/${o.id}`, 'DELETE', undefined, 'Opdracht losgekoppeld.')
   }
 
   const bedragTekst = (cents: number) => (cents / 100).toLocaleString('nl-BE', { maximumFractionDigits: 2 })
@@ -86,6 +86,7 @@ export function LeadOpdrachten({ leadId, verversSleutel, onChanged }: {
         <Briefcase className="h-3 w-3" />Opdrachten
         {lijst && lijst.length > 0 && <span className="ml-auto normal-case tracking-normal text-xs font-semibold text-gray-900 tabular-nums">Totaal {euro(totaal)}</span>}
       </h3>
+      <p className="text-[11px] text-gray-500 mb-2">Status, deadline, contract en factuur beheer je op de <a href="/admin/opdrachten" className="underline hover:text-black">Opdrachten-pagina</a>; nieuwe opdrachten hier komen daar ook bij.</p>
 
       {!beschikbaar ? (
         <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
@@ -95,7 +96,7 @@ export function LeadOpdrachten({ leadId, verversSleutel, onChanged }: {
         <div className="py-2 text-center text-gray-300"><Loader2 className="h-4 w-4 animate-spin mx-auto" /></div>
       ) : (
         <div className="space-y-1.5">
-          {lijst.length === 0 && <p className="text-xs text-gray-400">Nog geen opdrachten. Voeg er een toe met titel en bedrag.</p>}
+          {lijst.length === 0 && <p className="text-xs text-gray-400">Nog geen opdrachten voor deze klant. Voeg er een toe met titel en bedrag.</p>}
           {lijst.map((o) => (
             <div key={o.id} className="rounded-lg border border-gray-100 bg-gray-50 px-2.5 py-1.5">
               {bewerk?.id === o.id ? (
@@ -114,7 +115,7 @@ export function LeadOpdrachten({ leadId, verversSleutel, onChanged }: {
                   <button onClick={() => setBewerk({ id: o.id, titel: o.titel, bedrag: bedragTekst(o.bedrag_cents) })} disabled={bezig}
                     className="h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-gray-200 hover:text-black" title="Aanpassen"><Pencil className="h-3.5 w-3.5" /></button>
                   <button onClick={() => verwijder(o)} disabled={bezig}
-                    className="h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-600" title="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></button>
+                    className="h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-600" title="Loskoppelen van deze lead"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
               )}
               {o.notitie && bewerk?.id !== o.id && <p className="text-[11px] text-gray-500 mt-0.5 line-clamp-2">{o.notitie}</p>}

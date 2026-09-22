@@ -2,28 +2,29 @@ import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { logLeadEvent } from '@/lib/sales/service'
-import { isOntbrekendeTabel, MIGRATIE_NODIG } from '@/lib/sales/lead-opdrachten'
 import { leesOpdrachtInvoer, opdrachtRegel } from '@/lib/sales/opdrachten-model'
 
 export const dynamic = 'force-dynamic'
 
+/**
+ * Eén opdracht van een lead, vanuit de pipeline. De opdracht zelf staat in de
+ * tabel `opdrachten` (de Opdrachten-pagina): titel, bedrag en omschrijving
+ * aanpassen gebeurt daar rechtstreeks. "Verwijderen" in de pipeline maakt de
+ * opdracht enkel LOS van de lead; de opdracht blijft bestaan op de Opdrachten-pagina.
+ */
 type Params = { params: Promise<{ id: string; opdrachtId: string }> }
-type Rij = { id: string; lead_id: string; titel: string; bedrag_cents: number | string }
+type Rij = { id: string; lead_id: string; titel: string; bedrag_excl: number | string | null }
+const cents = (v: number | string | null) => Math.max(0, Math.round((Number(v) || 0) * 100))
 
 async function haalRij(id: string, opdrachtId: string): Promise<{ rij: Rij | null; fout: NextResponse | null }> {
   const admin = createAdminSupabaseClient()
-  const { data, error } = await admin.from('sales_lead_opdrachten')
-    .select('id, lead_id, titel, bedrag_cents')
-    .eq('id', opdrachtId).eq('lead_id', id).is('verwijderd_op', null).maybeSingle()
-  if (error) {
-    if (isOntbrekendeTabel(error.message)) return { rij: null, fout: NextResponse.json({ error: MIGRATIE_NODIG }, { status: 503 }) }
-    throw new Error(error.message)
-  }
+  const { data, error } = await admin.from('opdrachten').select('id, lead_id, titel, bedrag_excl').eq('id', opdrachtId).eq('lead_id', id).maybeSingle()
+  if (error) throw new Error(error.message)
   if (!data) return { rij: null, fout: NextResponse.json({ error: 'Opdracht niet gevonden' }, { status: 404 }) }
   return { rij: data as Rij, fout: null }
 }
 
-// PATCH { titel?, bedrag? | bedrag_cents?, dienst?, notitie? }
+// PATCH { titel?, bedrag? | bedrag_cents?, notitie? }
 export async function PATCH(req: NextRequest, { params }: Params) {
   try {
     const actor = await requireStaff()
@@ -34,20 +35,18 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     if (!gelezen.ok) return NextResponse.json({ error: gelezen.error }, { status: 400 })
     const { rij, fout } = await haalRij(id, opdrachtId)
     if (fout || !rij) return fout!
-
-    const patch: Record<string, unknown> = { ...gelezen.invoer, updated_at: new Date().toISOString() }
+    const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (gelezen.invoer.titel !== undefined) patch.titel = gelezen.invoer.titel
+    if (gelezen.invoer.bedrag_cents !== undefined) patch.bedrag_excl = gelezen.invoer.bedrag_cents / 100
+    if (gelezen.invoer.notitie !== undefined) patch.omschrijving = gelezen.invoer.notitie
     if (Object.keys(patch).length === 1) return NextResponse.json({ ok: true })
     const admin = createAdminSupabaseClient()
-    const { error } = await admin.from('sales_lead_opdrachten').update(patch).eq('id', opdrachtId)
+    const { error } = await admin.from('opdrachten').update(patch).eq('id', opdrachtId)
     if (error) throw new Error(error.message)
-
     const titel = gelezen.invoer.titel ?? rij.titel
-    const bedrag = gelezen.invoer.bedrag_cents ?? (Number(rij.bedrag_cents) || 0)
-    if (titel !== rij.titel || bedrag !== (Number(rij.bedrag_cents) || 0)) {
-      await logLeadEvent(id, {
-        kind: 'system', body: opdrachtRegel('aangepast', titel, bedrag),
-        actorId: actor.id, actorEmail: actor.email ?? null,
-      })
+    const bedrag = gelezen.invoer.bedrag_cents ?? cents(rij.bedrag_excl)
+    if (titel !== rij.titel || bedrag !== cents(rij.bedrag_excl)) {
+      await logLeadEvent(id, { kind: 'system', body: opdrachtRegel('aangepast', titel, bedrag), actorId: actor.id, actorEmail: actor.email ?? null })
     }
     return NextResponse.json({ ok: true })
   } catch (err) {
@@ -55,7 +54,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 }
 
-// DELETE — zacht: verwijderd_op zetten. De rij blijft bestaan (niets hard wissen).
+// DELETE — loskoppelen van de lead (de opdracht blijft bestaan).
 export async function DELETE(_req: NextRequest, { params }: Params) {
   try {
     const actor = await requireStaff()
@@ -64,13 +63,9 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     const { rij, fout } = await haalRij(id, opdrachtId)
     if (fout || !rij) return fout!
     const admin = createAdminSupabaseClient()
-    const nu = new Date().toISOString()
-    const { error } = await admin.from('sales_lead_opdrachten').update({ verwijderd_op: nu, updated_at: nu }).eq('id', opdrachtId)
+    const { error } = await admin.from('opdrachten').update({ lead_id: null, updated_at: new Date().toISOString() }).eq('id', opdrachtId)
     if (error) throw new Error(error.message)
-    await logLeadEvent(id, {
-      kind: 'system', body: opdrachtRegel('verwijderd', rij.titel, Number(rij.bedrag_cents) || 0),
-      actorId: actor.id, actorEmail: actor.email ?? null,
-    })
+    await logLeadEvent(id, { kind: 'system', body: `Opdracht losgekoppeld: ${rij.titel}`, actorId: actor.id, actorEmail: actor.email ?? null })
     return NextResponse.json({ ok: true })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })

@@ -1,10 +1,14 @@
-import { redirect } from 'next/navigation'
+export const dynamic = 'force-dynamic'
+
+import { OpdrachtenClient } from './opdrachten-client'
 
 /**
- * De Opdrachten-pagina is opgegaan in de pipeline (22 sep 2026): een opdracht
- * is nu een titel + bedrag op een lead, en de waarde per fase staat op het bord.
- * Oude links en bladwijzers komen zo gewoon op de pipeline uit.
+ * Opdrachten — werk dat binnenkomt en opgevolgd moet worden.
+ *
+ * De identiteits- en modulecontrole gebeurt centraal in de middleware
+ * (pathToModule op /admin-paden), dus hier geen losse rolcheck: dat zou een
+ * tweede plek zijn waar rechten geregeld worden.
  */
 export default function OpdrachtenPage() {
-  redirect('/admin/sales/pipeline')
+  return <OpdrachtenClient />
 }

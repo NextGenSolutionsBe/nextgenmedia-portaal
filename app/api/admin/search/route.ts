@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { getActor, actorCanSee } from '@/lib/actor-modules'
 import { FEATURES } from '@/lib/features'
-import { euroTekst } from '@/lib/sales/opdrachten-model'
+import { statusInfo } from '@/lib/opdrachten'
 import { dienstLabel } from '@/lib/formulieren/model'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
@@ -40,8 +40,7 @@ export async function GET(req: NextRequest) {
       safe(admin.from('revenue_entries').select('id, title, client_id').ilike('title', like).limit(L)),
       safe(admin.from('client_tasks').select('id, title, client_id, status').ilike('title', like).limit(L)),
       safe(admin.from('freelancers').select('id, name').ilike('name', like).limit(L)),
-      // Opdrachten leven op leads in de pipeline (titel + bedrag).
-      safe(admin.from('sales_lead_opdrachten').select('id, lead_id, titel, bedrag_cents, sales_leads ( sales_companies ( name ) )').is('verwijderd_op', null).ilike('titel', like).limit(L)),
+      safe(admin.from('opdrachten').select('id, titel, status').ilike('titel', like).limit(L)),
       safe(admin.from('formulieren').select('id, titel, dienst, doel').is('gearchiveerd_op', null).or(`titel.ilike.${like},doel.ilike.${like}`).limit(L)),
     ]) as [
       { id: string; company_name: string; btw_nummer?: string | null }[],
@@ -51,7 +50,7 @@ export async function GET(req: NextRequest) {
       { id: string; title?: string | null; client_id?: string | null }[],
       { id: string; title: string; client_id?: string | null; status?: string | null }[],
       { id: string; name: string }[],
-      { id: string; lead_id: string; titel: string; bedrag_cents: number | null; sales_leads?: { sales_companies?: { name?: string | null } | null } | null }[],
+      { id: string; titel: string; status?: string | null }[],
       { id: string; titel: string; dienst?: string | null; doel?: string | null }[],
     ]
 
@@ -65,10 +64,7 @@ export async function GET(req: NextRequest) {
     if (FEATURES.blogs && may('blogs')) for (const b of blogs) results.push({ type: 'blog', label: 'Blog', title: b.titel, subtitle: b.status ?? undefined, href: `/admin/blogs` })
     // Prognose bestaat niet meer als los concept — omzet volgt uit facturen.
     if (FEATURES.partners && may('partners')) for (const p of partners) results.push({ type: 'partner', label: 'Partner', title: p.name, href: `/admin/partners/${p.id}` })
-    if (may('sales')) for (const o of opdrachten) {
-      const bedrijf = o.sales_leads?.sales_companies?.name
-      results.push({ type: 'opdracht', label: 'Opdracht', title: o.titel, subtitle: [bedrijf, euroTekst(Number(o.bedrag_cents) || 0)].filter(Boolean).join(' · '), href: `/admin/sales/pipeline?lead=${o.lead_id}` })
-    }
+    if (may('opdrachten')) for (const o of opdrachten) results.push({ type: 'opdracht', label: 'Opdracht', title: o.titel, subtitle: statusInfo(o.status).label, href: '/admin/opdrachten' })
     if (may('formulieren')) for (const f of formulieren) results.push({ type: 'formulier', label: 'Formulier', title: f.titel, subtitle: f.doel ?? dienstLabel(f.dienst), href: `/admin/formulieren/${f.id}` })
 
     return NextResponse.json({ results })
