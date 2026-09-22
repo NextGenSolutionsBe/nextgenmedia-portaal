@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import {
   Loader2, Plus, Search, Upload, MailCheck, Headphones, PhoneCall, MailPlus, StickyNote,
   CalendarClock, CalendarPlus, MoreHorizontal, FileText, Trophy, XCircle, ExternalLink, User, Flame, PhoneOff, Briefcase,
+  X,
 } from 'lucide-react'
 import { STAGES, STAGE_KEYS, STAGE_STYLE, stageLabel, type StageKey } from '@/lib/sales/stages'
 import { DIENSTEN, LEADBRONNEN, LEADBRON_STYLE, leadbronLabel, normaliseerLeadbron } from '@/lib/sales/leadbron'
@@ -60,6 +61,19 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
   const [verantwoordelijke, setVerantwoordelijke] = useState('')
   const [dienst, setDienst] = useState('')
   const [opvolg, setOpvolg] = useState('')
+  // Firmografie: gericht bellen op sector, regio, stad, … (ook Focus Mode volgt deze filters).
+  const [sector, setSector] = useState('')
+  const [regio, setRegio] = useState('')
+  const [stad, setStad] = useState('')
+  const [werkklasse, setWerkklasse] = useState('')
+  const [activiteit, setActiviteit] = useState('')
+  const [prioriteit, setPrioriteit] = useState('')
+  const [label, setLabel] = useState('')
+  const [merk, setMerk] = useState('')
+  const [grootte, setGrootte] = useState('')
+  const [alleenWarm, setAlleenWarm] = useState(false)
+  const [toonMeer, setToonMeer] = useState(false)
+  const [opties, setOpties] = useState<{ sectoren: string[]; regios: string[]; steden: string[]; werkklassen: string[]; activiteiten: string[]; prioriteiten: string[]; labels: string[] }>({ sectoren: [], regios: [], steden: [], werkklassen: [], activiteiten: [], prioriteiten: [], labels: [] })
   const [toonDnc, setToonDnc] = useState(false)
   useEffect(() => { const t = setTimeout(() => setZoek(q.trim()), 250); return () => clearTimeout(t) }, [q])
 
@@ -88,6 +102,16 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
       if (verantwoordelijke) p.set('verantwoordelijke', verantwoordelijke)
       if (dienst) p.set('dienst', dienst)
       if (opvolg) p.set('opvolg', opvolg)
+      if (sector) p.set('sector', sector)
+      if (regio) p.set('regio', regio)
+      if (stad) p.set('stad', stad)
+      if (werkklasse) p.set('werkklasse', werkklasse)
+      if (activiteit) p.set('activiteit', activiteit)
+      if (prioriteit) p.set('prioriteit', prioriteit)
+      if (label) p.set('label', label)
+      if (merk) p.set('merk', merk)
+      if (grootte) p.set('grootte', grootte)
+      if (alleenWarm) p.set('warm', '1')
       if (!toonDnc) p.set('hideDnc', '1')
       const r = await fetch(`/api/admin/sales/leads?${p}`, { cache: 'no-store' })
       const j = await r.json()
@@ -99,10 +123,11 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
       setBezet(j.bezet ?? {})
       setAfgekapt(!!j.afgekapt)
       setTotaal(Number(j.totaal ?? (j.leads ?? []).length))
+      if (j.opties) setOpties(j.opties)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Laden mislukt')
     } finally { if (!opts?.stil) setLaden(false) }
-  }, [pipelineId, zoek, leadbron, verantwoordelijke, dienst, opvolg, toonDnc])
+  }, [pipelineId, zoek, leadbron, verantwoordelijke, dienst, opvolg, toonDnc, sector, regio, stad, werkklasse, activiteit, prioriteit, label, merk, grootte, alleenWarm])
 
   useEffect(() => { laad() }, [laad])
 
@@ -136,8 +161,12 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
   const dialoogLead = leadVan(dialoog?.leadId ?? null)
   const naamVan = (id: string | null) => (id ? medewerkers.find((m) => m.id === id)?.naam ?? null : null)
 
-  const filtersActief = !!(q || leadbron || verantwoordelijke || dienst || opvolg || toonDnc)
-  const wisFilters = () => { setQ(''); setLeadbron(''); setVerantwoordelijke(''); setDienst(''); setOpvolg(''); setToonDnc(false) }
+  const firmoActief = [sector, regio, stad, werkklasse, activiteit, prioriteit, label, merk, grootte].filter(Boolean).length + (alleenWarm ? 1 : 0)
+  const filtersActief = !!(q || leadbron || verantwoordelijke || dienst || opvolg || toonDnc || firmoActief)
+  const wisFilters = () => {
+    setQ(''); setLeadbron(''); setVerantwoordelijke(''); setDienst(''); setOpvolg(''); setToonDnc(false)
+    setSector(''); setRegio(''); setStad(''); setWerkklasse(''); setActiviteit(''); setPrioriteit(''); setLabel(''); setMerk(''); setGrootte(''); setAlleenWarm(false)
+  }
 
   // ── Verplaatsen (slepen, fasekeuze, gewonnen/verloren) ────────────────────
   const verplaats = useCallback(async (id: string, stage: StageKey, index: number, extra?: SluitGegevens): Promise<boolean> => {
@@ -319,12 +348,68 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
           <option value="week">Deze week</option>
           <option value="verlopen">Verlopen</option>
         </select>
+        {opties.sectoren.length > 0 && (
+          <select className="input-base !w-auto max-w-[220px] text-xs" value={sector} onChange={(e) => setSector(e.target.value)} aria-label="Sector">
+            <option value="">Alle sectoren</option>
+            {opties.sectoren.map((v) => <option key={v} value={v}>{v}</option>)}
+          </select>
+        )}
+        {opties.regios.length > 0 && (
+          <select className="input-base !w-auto max-w-[220px] text-xs" value={regio} onChange={(e) => setRegio(e.target.value)} aria-label="Regio">
+            <option value="">Alle regio's</option>
+            {opties.regios.map((v) => <option key={v} value={v}>{v}</option>)}
+          </select>
+        )}
+        {opties.steden.length > 0 && <ZoekFilter waarde={stad} onKies={setStad} opties={opties.steden} placeholder="Stad of gemeente…" lijstId="pl-steden" />}
+        <button type="button" onClick={() => setToonMeer((v) => !v)} className="text-xs text-gray-600 hover:text-black underline">
+          {toonMeer ? 'Minder filters' : `Meer filters${firmoActief ? ` (${firmoActief})` : ''}`}
+        </button>
         <label className="text-xs text-gray-600 flex items-center gap-1 cursor-pointer">
           <input type="checkbox" checked={toonDnc} onChange={(e) => setToonDnc(e.target.checked)} />Toon niet-bellen
         </label>
         {filtersActief && <button onClick={wisFilters} className="text-xs text-gray-500 hover:text-black underline">Filters wissen</button>}
         {laden && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
+        <span className="text-xs text-gray-500 ml-auto">{leads.length} lead{leads.length === 1 ? '' : 's'}{filtersActief ? ' in deze selectie' : ''} · Focus Mode belt deze selectie</span>
       </div>
+      {toonMeer && (
+        <div className="flex items-center gap-2 flex-wrap -mt-1">
+          {opties.werkklassen.length > 0 && (
+            <select className="input-base !w-auto max-w-[220px] text-xs" value={werkklasse} onChange={(e) => setWerkklasse(e.target.value)} aria-label="Werkklasse">
+              <option value="">Alle werkklassen</option>
+              {opties.werkklassen.map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
+          )}
+          {opties.activiteiten.length > 0 && <ZoekFilter waarde={activiteit} onKies={setActiviteit} opties={opties.activiteiten} placeholder="Activiteit (bv. bakkerij)…" lijstId="pl-activiteiten" />}
+          {opties.prioriteiten.length > 0 && (
+            <select className="input-base !w-auto max-w-[220px] text-xs" value={prioriteit} onChange={(e) => setPrioriteit(e.target.value)} aria-label="Prioriteit">
+              <option value="">Alle prioriteiten</option>
+              {opties.prioriteiten.map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
+          )}
+          {opties.labels.length > 0 && (
+            <select className="input-base !w-auto max-w-[220px] text-xs" value={label} onChange={(e) => setLabel(e.target.value)} aria-label="Label">
+              <option value="">Alle labels</option>
+              {opties.labels.map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
+          )}
+          <select className="input-base !w-auto max-w-[220px] text-xs" value={merk} onChange={(e) => setMerk(e.target.value)} aria-label="Merk">
+            <option value="">Beide merken</option>
+            {pipelines.map((p) => <option key={p.key} value={p.key}>{p.name}</option>)}
+            <option value="geen">Nog geen merk</option>
+          </select>
+          <select className="input-base !w-auto max-w-[220px] text-xs" value={grootte} onChange={(e) => setGrootte(e.target.value)} aria-label="Bedrijfsgrootte">
+            <option value="">Elke grootte</option>
+            <option value="1-4">1–4 werknemers</option>
+            <option value="5-9">5–9 werknemers</option>
+            <option value="10-49">10–49 werknemers</option>
+            <option value="50-">50+ werknemers</option>
+            <option value="onbekend">Grootte onbekend</option>
+          </select>
+          <label className="text-xs text-gray-600 flex items-center gap-1 cursor-pointer">
+            <input type="checkbox" checked={alleenWarm} onChange={(e) => setAlleenWarm(e.target.checked)} />Enkel warme leads
+          </label>
+        </div>
+      )}
 
       {/* ── Waarde in de pijplijn ── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -450,6 +535,26 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
         />
       )}
     </div>
+  )
+}
+
+/**
+ * Zoekfilter met suggesties voor lange lijsten (steden, activiteiten): typen en
+ * Enter (of een suggestie kiezen) past de filter toe; filtert op een deel van
+ * de naam. Leegmaken zet de filter uit.
+ */
+function ZoekFilter({ waarde, onKies, opties, placeholder, lijstId }: { waarde: string; onKies: (v: string) => void; opties: string[]; placeholder: string; lijstId: string }) {
+  const [tekst, setTekst] = useState(waarde)
+  useEffect(() => { setTekst(waarde) }, [waarde])
+  const pasToe = (v: string) => { if (v.trim() !== waarde) onKies(v.trim()) }
+  return (
+    <span className="relative inline-flex items-center">
+      <input className={`input-base !w-auto max-w-[200px] text-xs pr-6 ${waarde ? 'ring-1 ring-black' : ''}`} list={lijstId} value={tekst} placeholder={placeholder} aria-label={placeholder}
+        onChange={(e) => { setTekst(e.target.value); if (opties.includes(e.target.value) || e.target.value === '') pasToe(e.target.value) }}
+        onKeyDown={(e) => { if (e.key === 'Enter') pasToe(tekst) }} onBlur={() => pasToe(tekst)} />
+      {waarde && <button type="button" onClick={() => { setTekst(''); onKies('') }} className="absolute right-1.5 text-gray-400 hover:text-black" aria-label="Filter wissen"><X className="h-3 w-3" /></button>}
+      <datalist id={lijstId}>{opties.slice(0, 500).map((v) => <option key={v} value={v} />)}</datalist>
+    </span>
   )
 }
 

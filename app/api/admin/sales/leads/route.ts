@@ -157,6 +157,20 @@ export async function GET(req: NextRequest) {
       if (!r.verlies_reden && r.lost_reason && r.stage_key === 'verloren') r.verlies_reden = r.lost_reason
     }
 
+    // Keuzelijsten voor de filters: alle waarden die in de (niet-gefilterde)
+    // pipeline voorkomen, zodat je na één filter nog altijd verder kunt kiezen.
+    const uniek = (vals: (string | null | undefined)[]) =>
+      [...new Set(vals.map((v) => (v ?? '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'nl'))
+    const opties = {
+      sectoren: uniek(rows.map((r) => r.sales_companies?.sector)),
+      regios: uniek(rows.map((r) => r.sales_companies?.region)),
+      steden: uniek(rows.map((r) => r.sales_companies?.city)),
+      werkklassen: uniek(rows.map((r) => r.sales_companies?.werkklasse)),
+      activiteiten: uniek(rows.map((r) => r.sales_companies?.activiteit)),
+      prioriteiten: uniek(rows.map((r) => r.sales_companies?.prioriteit)),
+      labels: uniek(rows.flatMap((r) => r.labels ?? [])),
+    }
+
     const search = (sp.get('q') ?? '').trim()
     if (search) {
       const needle = search.toLowerCase()
@@ -182,6 +196,22 @@ export async function GET(req: NextRequest) {
     const dienst = sp.get('dienst')
     if (dienst) rows = rows.filter((r) => (r.dienst ?? '').toLowerCase() === dienst.toLowerCase())
     const sector = sp.get('sector'); if (sector) rows = rows.filter((r) => r.sales_companies?.sector === sector)
+    const regio = sp.get('regio'); if (regio) rows = rows.filter((r) => r.sales_companies?.region === regio)
+    const bevat = (v: string | null | undefined, zoek: string) => (v ?? '').toLowerCase().includes(zoek.trim().toLowerCase())
+    const stad = sp.get('stad'); if (stad) rows = rows.filter((r) => bevat(r.sales_companies?.city, stad))
+    const werkklasse = sp.get('werkklasse'); if (werkklasse) rows = rows.filter((r) => r.sales_companies?.werkklasse === werkklasse)
+    const activiteit = sp.get('activiteit'); if (activiteit) rows = rows.filter((r) => bevat(r.sales_companies?.activiteit, activiteit))
+    const prioriteit = sp.get('prioriteit'); if (prioriteit) rows = rows.filter((r) => r.sales_companies?.prioriteit === prioriteit)
+    const merk = sp.get('merk'); if (merk) rows = rows.filter((r) => merk === 'geen' ? !(r.merken ?? []).length : (r.merken ?? []).includes(merk))
+    const grootte = sp.get('grootte')
+    if (grootte) {
+      const [min, max] = grootte.split('-').map((x) => (x === '' ? null : Number(x)))
+      rows = rows.filter((r) => {
+        const n = Number((r.sales_companies as { employees?: number | null } | null)?.employees)
+        if (!Number.isFinite(n) || n <= 0) return grootte === 'onbekend'
+        return (min === null || n >= (min as number)) && (max === null || n <= (max as number))
+      })
+    }
     const label = sp.get('label');   if (label) rows = rows.filter((r) => (r.labels ?? []).includes(label))
     if (sp.get('warm') === '1') rows = rows.filter((r) => !!r.warm)
 
@@ -241,7 +271,7 @@ export async function GET(req: NextRequest) {
       }
     } catch { bezet = {} }
 
-    return NextResponse.json({ leads: rows, totaal, afgekapt, medewerkers, meId: actor.id, isAdmin, bezet, opdrachtenBeschikbaar })
+    return NextResponse.json({ leads: rows, totaal, afgekapt, medewerkers, meId: actor.id, isAdmin, bezet, opdrachtenBeschikbaar, opties })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
