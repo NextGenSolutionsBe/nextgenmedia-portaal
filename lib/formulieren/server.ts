@@ -63,13 +63,10 @@ export async function laadPubliekeLink(token: unknown): Promise<PubliekeLink> {
     .eq('id', link.formulier_id).maybeSingle()
   if (!formulier) return { status: 'onbekend' }
 
+  // Een formulier blijft altijd opnieuw invulbaar: elke inzending komt er
+  // gewoon bij. Enkel intrekken, verlopen of sluiten houdt een link tegen.
   const instellingen = normaliseerInstellingen(formulier.instellingen)
-  let aantal = 0
-  if (link.eenmalig || !instellingen.meerdere_inzendingen) {
-    const { count } = await admin.from('formulier_inzendingen').select('id', { count: 'exact', head: true }).eq('link_id', link.id)
-    aantal = count ?? 0
-  }
-  const status = linkStatusVan(link, formulier, aantal)
+  const status = linkStatusVan({ ...link, eenmalig: false }, formulier, 0)
 
   let klantNaam: string | null = null
   if (status === 'ok' && link.client_id) {

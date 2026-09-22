@@ -114,10 +114,6 @@ export function DelenTab({ formulier, links, klantId, vuil, onLinksGewijzigd, ac
             <span className="block text-xs font-medium text-gray-600 mb-1">Geldig tot (optioneel)</span>
             <input type="date" className="input-base" value={verloopt} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setVerloopt(e.target.value)} />
           </label>
-          <label className="flex items-center gap-2 text-sm cursor-pointer select-none sm:pt-6">
-            <input type="checkbox" checked={eenmalig} onChange={(e) => setEenmalig(e.target.checked)} className="accent-black h-4 w-4" />
-            Eenmalig: de link werkt maar voor één inzending
-          </label>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button onClick={maakLink} disabled={bezig} className="btn-primary">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}Link aanmaken</button>
@@ -147,7 +143,7 @@ export function DelenTab({ formulier, links, klantId, vuil, onLinksGewijzigd, ac
                         {l.klant_naam ?? 'Algemene link'}{l.label && <span className="text-gray-500 font-normal">· {l.label}</span>}
                       </div>
                       <div className="text-xs text-gray-400 mt-0.5">
-                        Aangemaakt {datum(l.created_at)}{l.verloopt_op ? ` · geldig tot ${datum(l.verloopt_op)}` : ''}{l.eenmalig ? ' · eenmalig' : ''} · {l.inzendingen} inzending{l.inzendingen === 1 ? '' : 'en'}
+                        Aangemaakt {datum(l.created_at)}{l.verloopt_op ? ` · geldig tot ${datum(l.verloopt_op)}` : ''} · {l.inzendingen} inzending{l.inzendingen === 1 ? '' : 'en'}
                       </div>
                     </div>
                     <span className={cn('status-badge', STATUS_KLEUR[st])}>{LINK_STATUS_LABEL[st]}</span>

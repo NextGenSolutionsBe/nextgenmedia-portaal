@@ -79,10 +79,7 @@ export function InstellingenTab({ formulier, concept, wijzig, aantalInzendingen,
         <Veld label="Bedanktekst">
           <textarea className="input-base" rows={3} value={inst.bedankt_tekst} maxLength={2000} onChange={(e) => zetInst({ bedankt_tekst: e.target.value })} />
         </Veld>
-        <label className="flex items-start gap-2 text-sm cursor-pointer select-none">
-          <input type="checkbox" className="accent-black h-4 w-4 mt-0.5" checked={inst.meerdere_inzendingen} onChange={(e) => zetInst({ meerdere_inzendingen: e.target.checked })} />
-          <span>Meerdere inzendingen per link toestaan<span className="block text-xs text-gray-500">Uit: elke link werkt maar voor één inzending (zoals een eenmalige link).</span></span>
-        </label>
+        <p className="text-xs text-gray-500">Een formulier kan onbeperkt opnieuw ingevuld worden; elke inzending komt apart binnen.</p>
         <p className="text-xs text-gray-400">Wijzigingen worden bewaard met de knop <strong>Opslaan</strong> bovenaan.</p>
       </div>
 
