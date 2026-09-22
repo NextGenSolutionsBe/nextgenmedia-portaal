@@ -177,6 +177,7 @@ function VeldWeergave({ veld, waarde, zet, fout, uploader, voorbeeld }: {
         <fieldset aria-describedby={beschrijving}>
           <Label veld={veld} as="legend" />
           <Hulp veld={veld} />
+          <div className="inline-flex flex-col max-w-full">
           <div className="flex flex-wrap gap-1.5" role="radiogroup">
             {punten.map((p) => {
               const aan = tekst === String(p)
@@ -189,8 +190,9 @@ function VeldWeergave({ veld, waarde, zet, fout, uploader, voorbeeld }: {
             })}
           </div>
           {(veld.minLabel || veld.maxLabel) && (
-            <div className="flex justify-between text-xs text-gray-500 mt-1 max-w-md"><span>{veld.minLabel}</span><span>{veld.maxLabel}</span></div>
+            <div className="flex justify-between gap-4 text-xs text-gray-500 mt-1"><span>{veld.minLabel}</span><span className="text-right">{veld.maxLabel}</span></div>
           )}
+          </div>
           <Fout id={veld.id} fout={fout} />
         </fieldset>
       )
