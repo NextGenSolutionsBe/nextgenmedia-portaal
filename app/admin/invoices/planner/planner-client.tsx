@@ -8,10 +8,11 @@ import {
   vandaagBrussel, isDatum, ymVan, plusDagen, maandStart, maandEind, maandRooster, roosterBereik, weekBereik, shiftYM,
   maandNaam, datumKort, datumLang, DAGEN_KORT, euro, euro2, kort, samenvatting, maandKpi, pasFiltersToe, dagTotalen, sorteer, filtersActief,
   LEEG_FILTERS, PLANNER_STATUSSEN, STATUS_INFO, HERKOMST_LABEL,
-  FASEN, FASE_INFO, faseVan, faseKpi, volgendeStap, vorigeStap, naStap,
+  FASEN, FASE_INFO, faseVan, faseKpi, volgendeStap, vorigeStap, naStap, winstVan, margeVan, resultaat,
   type Moment, type Filters, type Categorie, type Sortering, type Fase, type StapActie,
 } from '@/lib/facturatie/planner-model'
 import { Bevestig } from '@/app/admin/instellingen/ui'
+import { KostenEnWinstDialoog } from '../kosten-en-winst'
 import { PlannerDetail, DagPaneel, StatusBadge, type Actie } from './planner-detail'
 import { FactuurEditor } from '../factuur-editor'
 import { ExportKnop } from '@/components/admin/export-knop'
@@ -25,7 +26,7 @@ const CATEGORIEEN: Categorie[] = ['vandaag', 'week', 'maand', 'achterstallig', '
 const MAX_DAGEN = 400
 const sel = 'rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs'
 
-export function PlannerClient({ startCategorie, startWeergave, startDatum }: { startCategorie: string | null; startWeergave: string | null; startDatum: string | null }) {
+export function PlannerClient({ startCategorie, startWeergave, startDatum, startFactuur = null }: { startCategorie: string | null; startWeergave: string | null; startDatum: string | null; startFactuur?: string | null }) {
   const [vandaag] = useState(() => vandaagBrussel())
   const [weergave, setWeergave] = useState<Weergave>(WEERGAVEN.includes(startWeergave as Weergave) ? (startWeergave as Weergave) : 'maand')
   const [anker, setAnker] = useState<string>(isDatum(startDatum) ? startDatum : vandaag)
@@ -39,7 +40,9 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
   const [bezig, setBezig] = useState(false)
   const [toonFilters, setToonFilters] = useState(false)
   // Factuureditor: bestaande factuur openen, of een nieuwe op een gekozen dag.
-  const [editor, setEditor] = useState<{ invoiceId: string } | { datum: string } | null>(null)
+  const [editor, setEditor] = useState<{ invoiceId: string } | { datum: string } | null>(startFactuur ? { invoiceId: startFactuur } : null)
+  // Kosten en winst van één factuur (of recurring maand) rechtstreeks vanuit de lijst.
+  const [kostenVan, setKostenVan] = useState<Moment | null>(null)
   // Statusknop aangeklikt: eerst bevestigen, dan pas uitvoeren.
   const [vraagStap, setVraagStap] = useState<{ actie: StapActie; m: Moment } | null>(null)
   const cache = useRef(new Map<string, Data>())
@@ -91,6 +94,8 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
   const lijst = useMemo(() => sorteer(zichtbaar.filter((m) => m.datum >= lijstBereik.van && m.datum <= lijstBereik.tot), sortering), [zichtbaar, lijstBereik.van, lijstBereik.tot, sortering])
   // De drie overzichtskaarten: alle facturen in de gekozen periode, met de actieve filters.
   const fk = useMemo(() => faseKpi(zichtbaarAlle.filter((m) => m.datum >= lijstBereik.van && m.datum <= lijstBereik.tot)), [zichtbaarAlle, lijstBereik.van, lijstBereik.tot])
+  // Omzet, kosten en winst van wat er in de lijst staat (na alle filters).
+  const res = useMemo(() => resultaat(lijst), [lijst])
   const periodeLabel = !filters.categorie && !filters.van && !filters.tot && weergave !== 'week' ? maandNaam(ym) : `${datumNlKort(lijstBereik.van)} – ${datumNlKort(lijstBereik.tot)}`
   const lijstTotaal = lijst.filter((m) => m.status !== 'geannuleerd').reduce((s, m) => s + m.bedrag_excl, 0)
   const geselecteerdMoment = geselecteerd ? alle.find((m) => m.id === geselecteerd) ?? null : null
@@ -193,6 +198,13 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
             </button>
           )
         })}
+      </div>
+      <div className="card-base p-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+        <span className="text-xs text-gray-500">Resultaat van de lijst · excl. btw</span>
+        <span>Omzet <b className="tabular-nums">{euro2(res.omzet)}</b></span>
+        <span>Kosten bij facturen <b className="tabular-nums text-red-600">{euro2(res.kosten)}</b></span>
+        <span>Winst <b className={`tabular-nums ${res.winst < 0 ? 'text-red-600' : 'text-green-700'}`}>{euro2(res.winst)}</b>{res.marge !== null && <span className="text-xs text-gray-500"> · marge {res.marge}%</span>}</span>
+        <span className="text-xs text-gray-400 ml-auto">Kosten log je per factuur via “Kosten” in de lijst; ze staan ook in Financiën → Kosten, per maand.</span>
       </div>
       <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-600 -mt-1">
         <span className="text-gray-400">Geannuleerd telt nergens mee · Snel:</span>
@@ -330,7 +342,7 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
         <div className="card-base p-0 overflow-hidden">
           <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-gray-100 text-xs text-gray-500 flex-wrap">
             <span>{lijst.length} facturatiemoment{lijst.length === 1 ? '' : 'en'} · {datumNlKort(lijstBereik.van)} – {datumNlKort(lijstBereik.tot)}</span>
-            <span>Totaal excl. btw: <b className="text-gray-900">{euro2(lijstTotaal)}</b></span>
+            <span>Totaal excl. btw: <b className="text-gray-900">{euro2(lijstTotaal)}</b> · kosten <b className="text-red-600">{euro2(res.kosten)}</b> · winst <b className={res.winst < 0 ? 'text-red-600' : 'text-green-700'}>{euro2(res.winst)}</b></span>
           </div>
           {/* Mobiel en tablet (smal): kaarten met dezelfde kleuren en knoppen */}
           <div className="md:hidden divide-y divide-gray-100">
@@ -351,6 +363,12 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
                       <div className="text-[10px] text-gray-500 tabular-nums">{euro2(m.bedrag_incl)} incl.</div>
                     </div>
                   </div>
+                  {(m.bron === 'invoice' || m.bron === 'recurring') && (
+                    <div className="flex items-center gap-3 text-[11px]">
+                      <button type="button" onClick={() => setKostenVan(m)} className={(m.kosten ?? 0) > 0 ? 'text-red-600 font-medium' : 'text-gray-500 underline'}>{(m.kostenAantal ?? 0) > 0 ? `Kosten ${euro2(m.kosten ?? 0)}` : '+ kost loggen'}</button>
+                      <span className={winstVan(m) < 0 ? 'text-red-600 font-medium' : 'text-green-700 font-medium'}>Winst {euro2(winstVan(m))}</span>
+                    </div>
+                  )}
                   <div className="flex items-center gap-2 flex-wrap text-[11px] text-gray-600">
                     <StatusBadge status={m.status} />
                     <span>gepland {datumNlKort(m.datum)}</span>
@@ -368,7 +386,7 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
             })}
           </div>
           <div className="hidden md:block overflow-x-auto">
-            <table className="w-full text-sm min-w-[1180px]">
+            <table className="w-full text-sm min-w-[1320px]">
               <thead>
                 <tr className="text-left text-[11px] text-gray-500 uppercase tracking-wide bg-gray-50">
                   <Kop veld="datum" sortering={sortering} onClick={sorteerOp}>Geplande datum</Kop>
@@ -376,6 +394,8 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
                   <th className="px-3 py-2 font-medium">Dienst / project</th>
                   <th className="px-3 py-2 font-medium">Omschrijving</th>
                   <Kop veld="bedrag" sortering={sortering} onClick={sorteerOp} rechts>Excl. btw</Kop>
+                  <th className="px-3 py-2 font-medium text-right">Kosten</th>
+                  <th className="px-3 py-2 font-medium text-right">Winst</th>
                   <th className="px-3 py-2 font-medium text-right">Incl. btw</th>
                   <th className="px-3 py-2 font-medium text-right">Termijn</th>
                   <th className="px-3 py-2 font-medium">Verwacht binnen</th>
@@ -385,7 +405,7 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {lijst.length === 0 && <tr><td colSpan={11} className="px-3 py-8 text-center text-gray-400">Geen facturen voor deze selectie. Klik op “Nieuwe factuur” om er een toe te voegen.</td></tr>}
+                {lijst.length === 0 && <tr><td colSpan={13} className="px-3 py-8 text-center text-gray-400">Geen facturen voor deze selectie. Klik op “Nieuwe factuur” om er een toe te voegen.</td></tr>}
                 {lijst.map((m) => { const f = faseVan(m); const stap = volgendeStap(m); const terug = vorigeStap(m); return (
                   <tr key={m.id} onClick={() => (m.bron === 'invoice' && m.invoice_id ? setEditor({ invoiceId: m.invoice_id }) : setGeselecteerd(m.id))} className={`border-l-4 cursor-pointer transition-[filter] hover:brightness-[0.97] ${f ? `${FASE_INFO[f].rij} ${FASE_INFO[f].rand}` : 'bg-white border-l-red-200 opacity-60'}`} title={m.bron === 'invoice' ? 'Klik om de factuur te openen en aan te passen' : 'Klik voor details'}>
                     <td className="px-3 py-2 whitespace-nowrap">{datumNlKort(m.datum)}</td>
@@ -393,6 +413,12 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
                     <td className="px-3 py-2 text-gray-600 max-w-[200px] truncate">{m.project ?? m.dienst ?? '—'}{m.terugkerend && <span className="text-[10px] text-purple-700 ml-1">· maandelijks</span>}</td>
                     <td className="px-3 py-2 text-gray-600 max-w-[220px] truncate">{m.omschrijving ?? '—'}{m.opmerking && <StickyNote className="h-3 w-3 text-amber-500 inline ml-1 -mt-0.5" aria-label="Heeft een interne notitie" />}</td>
                     <td className="px-3 py-2 text-right font-medium tabular-nums">{euro2(m.bedrag_excl)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums" onClick={(e) => e.stopPropagation()}>
+                      {m.bron === 'invoice' || m.bron === 'recurring'
+                        ? <button type="button" onClick={() => setKostenVan(m)} className={`hover:underline ${(m.kosten ?? 0) > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}`} title="Interne kosten van deze factuur bekijken of loggen">{(m.kostenAantal ?? 0) > 0 ? euro2(m.kosten ?? 0) : '+ kost'}{(m.kostenOnbekend ?? 0) > 0 && <span className="text-amber-600"> ?</span>}</button>
+                        : <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className={`px-3 py-2 text-right tabular-nums font-medium ${winstVan(m) < 0 ? 'text-red-600' : 'text-green-700'}`}>{euro2(winstVan(m))}{margeVan(m) !== null && (m.kosten ?? 0) > 0 && <span className="block text-[10px] text-gray-500 font-normal">{margeVan(m)}%</span>}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-gray-500">{euro2(m.bedrag_incl)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-gray-500">{m.betaaltermijn} d</td>
                     <td className="px-3 py-2 whitespace-nowrap text-gray-600">{m.status === 'geannuleerd' || m.status === 'gecrediteerd' ? '—' : datumNlKort(m.verwacht_op)}{m.verzonden_op && <span className="block text-[10px] text-green-700">verstuurd {datumNlKort(m.verzonden_op)}</span>}</td>
@@ -415,6 +441,15 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum }: { s
 
       {dag && <DagPaneel datum={dag} momenten={perDag.get(dag) ?? []} onSluit={() => setDag(null)} onKies={(m) => { setDag(null); setGeselecteerd(m.id) }} onNieuw={(d) => { setDag(null); setEditor({ datum: d }) }} />}
       {geselecteerdMoment && <PlannerDetail moment={geselecteerdMoment} onSluit={() => setGeselecteerd(null)} onActie={vraagOfVoerUit} bezig={bezig} onOpenFactuur={(id) => setEditor({ invoiceId: id })} />}
+      {kostenVan && (
+        <KostenEnWinstDialoog
+          factuur={kostenVan.bron === 'invoice' ? { invoice_id: kostenVan.bronId } : { recurring_id: kostenVan.bronId, maand: kostenVan.maand }}
+          titel={`${kostenVan.klant} · ${datumNlKort(kostenVan.datum)} · ${euro2(kostenVan.bedrag_excl)} excl. btw${kostenVan.omschrijving ? ` · ${kostenVan.omschrijving}` : ''}`}
+          clientId={kostenVan.client_id}
+          onClose={() => setKostenVan(null)}
+          onChanged={() => ververs()}
+        />
+      )}
       {vraagStap && (
         <Bevestig
           titel={{ verstuurd: 'Markeren als verstuurd?', betaald: 'Markeren als betaald?', heropen: 'Verzending terugdraaien?', onbetaald: 'Betaling terugdraaien?' }[vraagStap.actie]}

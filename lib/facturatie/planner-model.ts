@@ -84,6 +84,11 @@ export type Moment = {
   verzonden_door: string | null
   /** Datum waarop de factuur als betaald gemarkeerd werd ('YYYY-MM-DD'). */
   betaald_op: string | null
+  /** Interne kosten die bij deze factuur gelogd zijn (excl. btw) — nooit zichtbaar voor de klant. */
+  kosten?: number
+  /** Aantal gelogde kosten, en hoeveel daarvan nog zonder bedrag. */
+  kostenAantal?: number
+  kostenOnbekend?: number
   /** Verwachte ontvangstdatum = (verzenddatum of geplande datum) + betaaltermijn. */
   verwacht_op: string
   acties: {
@@ -282,6 +287,23 @@ export function naStap(m: Moment, actie: StapActie, vandaag: string): Moment {
   if (actie === 'onbetaald') return { ...m, status: 'verstuurd', ruweStatus: 'verstuurd', betaald_op: null }
   const status = bepaalStatus({ ruweStatus: 'te_versturen', datum: m.datum, ontbrekend: m.ontbrekend, vandaag })
   return { ...m, status, ruweStatus: 'te_versturen', verzonden_op: null, verzonden_door: null, betaald_op: null }
+}
+
+// ── Omzet, kosten en winst per factuur ──────────────────────────────────────
+/** Winst van één factuur: omzet excl. btw − de kosten die erbij gelogd zijn. */
+export const winstVan = (m: Pick<Moment, 'bedrag_excl' | 'kosten'>) => Math.round((m.bedrag_excl - (m.kosten ?? 0)) * 100) / 100
+/** Marge in % (null bij € 0 omzet). */
+export const margeVan = (m: Pick<Moment, 'bedrag_excl' | 'kosten'>) => (m.bedrag_excl > 0 ? Math.round((winstVan(m) / m.bedrag_excl) * 1000) / 10 : null)
+/** Omzet, kosten en winst van een lijst facturen; geannuleerd telt niet mee. */
+export function resultaat(momenten: Moment[]): { omzet: number; kosten: number; winst: number; marge: number | null; metKosten: number } {
+  let omzet = 0, kosten = 0, metKosten = 0
+  for (const m of momenten) {
+    if (m.status === 'geannuleerd' || m.status === 'gecrediteerd') continue
+    omzet += m.bedrag_excl; kosten += m.kosten ?? 0
+    if ((m.kostenAantal ?? 0) > 0) metKosten++
+  }
+  const r = (x: number) => Math.round(x * 100) / 100
+  return { omzet: r(omzet), kosten: r(kosten), winst: r(omzet - kosten), marge: omzet > 0 ? Math.round(((omzet - kosten) / omzet) * 1000) / 10 : null, metKosten }
 }
 
 // ── Filters ─────────────────────────────────────────────────────────────────

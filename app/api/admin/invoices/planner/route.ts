@@ -7,6 +7,7 @@ import { laadMomenten } from '@/lib/facturatie/planner'
 import { vandaagBrussel, isDatum, ontleedSleutel, ymVan } from '@/lib/facturatie/planner-model'
 import { zetMaandStatus, ANNULERING_OPMERKING } from '@/lib/facturatie/recurring'
 import { billingDateFor, inclFromExcl } from '@/lib/invoices'
+import { kostenPerFactuur, rijSleutel } from '@/lib/facturen/kosten-data'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -28,6 +29,20 @@ export async function GET(req: NextRequest) {
     const vandaag = vandaagBrussel()
     const admin = createAdminSupabaseClient()
     const r = await laadMomenten(admin, van, tot, vandaag)
+    // Per factuur de interne kosten erbij (Facturen → Kosten en winst), zodat de
+    // lijst omzet, kosten en winst per factuur toont. Best-effort.
+    try {
+      const inv = r.momenten.filter((m) => m.bron === 'invoice').map((m) => m.bronId)
+      const rec = r.momenten.filter((m) => m.bron === 'recurring').map((m) => ({ recurring_id: m.bronId, maand: m.maand }))
+      const per = await kostenPerFactuur(admin, inv, rec)
+      for (const m of r.momenten) {
+        const f = per.get(m.bron === 'invoice' ? rijSleutel({ invoice_id: m.bronId }) : m.bron === 'recurring' ? rijSleutel({ recurring_id: m.bronId, maand: m.maand }) : '')
+        if (!f) continue
+        m.kosten = f.berekend.directeKosten
+        m.kostenAantal = f.berekend.aantalKosten + f.berekend.kostenOnbekend
+        m.kostenOnbekend = f.berekend.kostenOnbekend
+      }
+    } catch { /* lijst werkt ook zonder kosten */ }
     return NextResponse.json({ ...r, vandaag, van, tot })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })

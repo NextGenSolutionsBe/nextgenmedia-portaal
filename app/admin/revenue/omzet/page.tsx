@@ -30,6 +30,7 @@ export default async function FinanceOverviewPage({ searchParams }: { searchPara
   const openPeriod = slice.reduce((s, m) => s + m.omzetOpen, 0)
   const setterPeriod = slice.reduce((s, m) => s + (c.setterPerMonth[m.mi] ?? 0), 0)
   const kostenPeriod = slice.reduce((s, m) => s + m.kostenManual, 0) + setterPeriod
+  const factuurKostPeriod = slice.reduce((s, m) => s + (c.factuurKostPerMonth[m.mi] ?? 0), 0)
   const winstPeriod = omzetPeriod - kostenPeriod
   const periodLabel = period === 'fy' ? `boekjaar ${year}` : period === 'quarter' ? `Q${quarter} ${year}` : `${MONTHS[month - 1]} ${year}`
   const dkPeriod = dk ? dk.perMaand.slice(aMi, bMi + 1).reduce((s, v) => s + v, 0) : 0
@@ -59,7 +60,7 @@ export default async function FinanceOverviewPage({ searchParams }: { searchPara
 
       <p className="text-xs text-gray-500">
         Omzet komt automatisch uit je <b>facturen</b> (excl. btw, geannuleerde niet meegeteld) — je hoeft hier niets in te vullen.
-        Alleen <b>kosten</b> log je zelf onder het tabblad Kosten. Winst = omzet − kosten.
+        Alleen <b>kosten</b> log je zelf: onder het tabblad Kosten, of rechtstreeks bij een factuur (onderaanneming, materiaal…). Winst = omzet − alle kosten.
       </p>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -67,9 +68,7 @@ export default async function FinanceOverviewPage({ searchParams }: { searchPara
         <Kpi label="Gefactureerd" value={formatEuro(invoicedPeriod)} sub="verstuurd of betaald" color="text-green-600" Icon={Receipt} />
         <Kpi label="Nog te factureren" value={formatEuro(openPeriod)} color={openPeriod > 0 ? 'text-amber-600' : 'text-gray-600'} Icon={Clock} />
         <Kpi label="Winst" value={formatEuro(winstPeriod)}
-          sub={setterPeriod > 0
-            ? `Kosten: ${formatEuro(kostenPeriod)} · waarvan ${formatEuro(setterPeriod)} appointment setting`
-            : `Kosten: ${formatEuro(kostenPeriod)}`}
+          sub={[`Kosten: ${formatEuro(kostenPeriod)}`, factuurKostPeriod > 0 ? `waarvan ${formatEuro(factuurKostPeriod)} bij facturen` : null, setterPeriod > 0 ? `${formatEuro(setterPeriod)} appointment setting` : null].filter(Boolean).join(' · ')}
           color={winstPeriod >= 0 ? 'text-green-600' : 'text-red-600'} Icon={Wallet} />
       </div>
 
@@ -91,7 +90,7 @@ export default async function FinanceOverviewPage({ searchParams }: { searchPara
             color={dk && (dk.statusTelling.voorlopig + dk.statusTelling.controle_vereist + dk.statusTelling.ongecontroleerd) > 0 ? 'text-amber-600' : 'text-gray-600'} Icon={Clock} />
         </div>
         <p className="text-[11px] text-gray-500 mt-3">
-          Alleen de omzet na aftrek van doorgerekende kosten telt als werkelijke winst en als waarde voor het vesting-/investeringsprincipe. Zolang facturen "voorlopig" of "nog niet gecontroleerd" zijn, is dit cijfer voorlopig. De bestaande Winst-KPI hierboven blijft omzet − ingevoerde kosten.
+          Alleen de omzet na aftrek van doorgerekende kosten telt als werkelijke winst en als waarde voor het vesting-/investeringsprincipe. Zolang facturen "voorlopig" of "nog niet gecontroleerd" zijn, is dit cijfer voorlopig. De Winst-KPI hierboven trekt al deze kosten af: omzet − (ingevoerde kosten + kosten bij facturen + appointment setters).
         </p>
       </div>
 

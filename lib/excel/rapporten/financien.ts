@@ -231,7 +231,7 @@ export function financienWerkmap(inv: FinancienExportInvoer): Werkmap {
         soort: 'kpis', titel: `Boekjaar ${year}`,
         items: [
           { label: 'Omzet boekjaar', waarde: formule(jaarSom('D'), c.omzetFY), stijl: 'euro' },
-          { label: 'Totale kosten boekjaar', waarde: euro(c.kostenManualFY + c.socialAsCostFY + c.setterCostFY), toelichting: 'ingevoerd + sociale bijdragen + appointment setters (tab Kosten)' },
+          { label: 'Totale kosten boekjaar', waarde: euro(c.kostenManualFY + c.socialAsCostFY + c.setterCostFY), toelichting: 'ingevoerd + kosten bij facturen + Kantoor + sociale bijdragen + appointment setters (tab Kosten)' },
           { label: 'Abonnementen', waarde: euro(recurringCostFY), toelichting: `${abonnementenNu} lopend · ${Math.round(c.recurringCostNow)} per maand` },
           { label: 'Eenmalige kosten', waarde: euro(oneTimeCostFY) },
           { label: 'Appointment setters', waarde: formule(jaarSom('F'), c.setterCostFY), stijl: 'euro' },

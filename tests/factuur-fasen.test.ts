@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict'
 import {
-  faseVan, faseKpi, volgendeStap, vorigeStap, naStap, pasFiltersToe, LEEG_FILTERS, STATUS_INFO,
+  faseVan, faseKpi, volgendeStap, vorigeStap, naStap, pasFiltersToe, LEEG_FILTERS, STATUS_INFO, winstVan, margeVan, resultaat,
   type Moment, type PlannerStatus,
 } from '../lib/facturatie/planner-model'
 
@@ -80,6 +80,16 @@ test('7. Filter per fase ("klik op de kaart")', () => {
 
 test('8. Betaald toont uitdrukkelijk "Verstuurd & betaald"', () => {
   assert.equal(STATUS_INFO.betaald.label, 'Verstuurd & betaald')
+})
+
+test('9. Omzet, kosten en winst per factuur; geannuleerd telt niet mee', () => {
+  const a = m('a', 'verstuurd', 1000, { kosten: 300, kostenAantal: 1 })
+  assert.equal(winstVan(a), 700)
+  assert.equal(margeVan(a), 70)
+  assert.equal(winstVan(m('b', 'gepland', 500)), 500)
+  assert.equal(margeVan(m('z', 'gepland', 0)), null)
+  const r = resultaat([a, m('b', 'gepland', 500), m('c', 'geannuleerd', 9999, { kosten: 50, kostenAantal: 1 })])
+  assert.deepEqual(r, { omzet: 1500, kosten: 300, winst: 1200, marge: 80, metKosten: 1 })
 })
 
 console.log(`\n${n} tests geslaagd\n`)
