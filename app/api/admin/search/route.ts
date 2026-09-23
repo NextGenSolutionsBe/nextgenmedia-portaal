@@ -5,6 +5,7 @@ import { getActor, actorCanSee } from '@/lib/actor-modules'
 import { FEATURES } from '@/lib/features'
 import { statusInfo } from '@/lib/opdrachten'
 import { dienstLabel } from '@/lib/formulieren/model'
+import { typeVanContract } from '@/lib/contracten/types'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest) {
 
     const [clients, contracts, blogs, invoices, forecast, tasks, partners, opdrachten, formulieren] = await Promise.all([
       safe(admin.from('clients').select('id, company_name, btw_nummer').ilike('company_name', like).limit(L)),
-      safe(admin.from('contracts').select('id, title, signer_name, signer_email').or(`title.ilike.${like},signer_name.ilike.${like},signer_email.ilike.${like}`).limit(L)),
+      safe(admin.from('contracts').select('id, title, signer_name, signer_email, contract_type').or(`title.ilike.${like},signer_name.ilike.${like},signer_email.ilike.${like},contract_type.ilike.${like}`).limit(L)),
       safe(admin.from('blogs').select('id, titel, status').ilike('titel', like).limit(L)),
       safe(admin.from('invoices').select('id, description, status, client_id, amount_incl').or(`description.ilike.${like}`).limit(L)),
       safe(admin.from('revenue_entries').select('id, title, client_id').ilike('title', like).limit(L)),
@@ -44,7 +45,7 @@ export async function GET(req: NextRequest) {
       safe(admin.from('formulieren').select('id, titel, dienst, doel').is('gearchiveerd_op', null).or(`titel.ilike.${like},doel.ilike.${like}`).limit(L)),
     ]) as [
       { id: string; company_name: string; btw_nummer?: string | null }[],
-      { id: string; title: string; signer_name?: string | null; signer_email?: string | null }[],
+      { id: string; title: string; signer_name?: string | null; signer_email?: string | null; contract_type?: string | null }[],
       { id: string; titel: string; status?: string | null }[],
       { id: string; description?: string | null; status?: string | null; client_id?: string | null; amount_incl?: number | null }[],
       { id: string; title?: string | null; client_id?: string | null }[],
@@ -57,7 +58,11 @@ export async function GET(req: NextRequest) {
     // Vaste prioriteitsvolgorde: klanten → contracten → facturen → taken → blogs → prognose → partners.
     const results: Result[] = []
     if (may('clients')) for (const c of clients) results.push({ type: 'client', label: 'Klant', title: c.company_name, subtitle: c.btw_nummer ?? undefined, href: `/admin/clients/${c.id}` })
-    if (may('contracts')) for (const c of contracts) results.push({ type: 'contract', label: 'Contract', title: c.title, subtitle: c.signer_name ?? c.signer_email ?? undefined, href: `/admin/contracts/${c.id}` })
+    if (may('contracts')) for (const c of contracts) {
+      // Contracttype eerst in de ondertitel: dat is waarop de klantmappen gefilterd worden.
+      const ondertitel = [typeVanContract(c.contract_type), c.signer_name ?? c.signer_email ?? null].filter(Boolean).join(' · ')
+      results.push({ type: 'contract', label: 'Contract', title: c.title, subtitle: ondertitel || undefined, href: `/admin/contracts/${c.id}` })
+    }
     if (may('invoices')) for (const i of invoices) results.push({ type: 'invoice', label: 'Factuur', title: i.description || 'Factuur', subtitle: i.status ?? undefined, href: `/admin/invoices` })
     if (may('clients')) for (const t of tasks) results.push({ type: 'task', label: 'Taak', title: t.title, subtitle: t.status ?? undefined, href: t.client_id ? `/admin/clients/${t.client_id}#taken` : '/admin/clients' })
     // Uitgeschakelde features niet in de zoekresultaten (lib/features.ts).

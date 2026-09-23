@@ -4788,3 +4788,94 @@ END $migratie$;
 -- Controle na het draaien (verwacht: 0 open rijen; som ≈ de oude som van bedrag_excl):
 --   SELECT count(*) FILTER (WHERE lead_id IS NULL) AS nog_open, count(*) AS totaal FROM public.opdrachten;
 --   SELECT count(*), sum(bedrag_cents) / 100.0 AS euro FROM public.sales_lead_opdrachten WHERE bron_opdracht_id IS NOT NULL;
+
+-- ── Contracttypes + klantmappen (23 sep 2026) ────────────────────────────────
+-- Contracttypes worden data i.p.v. een vaste lijst in de code. De waarde zelf
+-- blijft in `contracts.contract_type` staan (tekst), zodat bestaande contracten
+-- ongemoeid blijven; deze tabel beheert enkel WELKE namen er in de keuzelijst
+-- staan. "Overige — <eigen omschrijving>" wordt bewust als één typewaarde
+-- bewaard; er komt géén extra kolom voor een toelichting.
+CREATE TABLE IF NOT EXISTS public.contract_types (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam       text NOT NULL,
+  actief     boolean NOT NULL DEFAULT true,
+  volgorde   integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by uuid
+);
+ALTER TABLE public.contract_types
+  ADD COLUMN IF NOT EXISTS naam       text,
+  ADD COLUMN IF NOT EXISTS actief     boolean NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS volgorde   integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS created_by uuid;
+
+-- Eén rij per naam, hoofdletterongevoelig ("Overige" en "overige" zijn hetzelfde).
+CREATE UNIQUE INDEX IF NOT EXISTS contract_types_naam_uniek ON public.contract_types (lower(btrim(naam)));
+CREATE INDEX IF NOT EXISTS contract_types_actief_idx ON public.contract_types (actief, volgorde);
+
+ALTER TABLE public.contract_types ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "contract types admin all" ON public.contract_types;
+CREATE POLICY "contract types admin all" ON public.contract_types
+  FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+REVOKE ALL ON public.contract_types FROM anon;
+
+-- 1. Contracten zonder type krijgen de zichtbare terugval 'Niet toegewezen'.
+UPDATE public.contracts
+   SET contract_type = 'Niet toegewezen'
+ WHERE contract_type IS NULL OR btrim(contract_type) = '';
+
+-- 2. Startlijst: de historische lijst uit de code + de door NextGenMedia
+--    gevraagde types. Bijna-dubbels zijn samengevoegd op de schrijfwijze die
+--    al op contracten staat ('Overig' → 'Overige', 'Geheimhouding/NDA' →
+--    'NDA / geheimhouding', 'Freelancer' → 'Freelancecontract',
+--    'Samenwerking' → 'Samenwerkingsovereenkomst'). 'Niet toegewezen' staat
+--    achteraan. Idempotent: bestaande rijen blijven ongewijzigd.
+INSERT INTO public.contract_types (naam, actief, volgorde)
+SELECT v.naam, true, v.volgorde
+  FROM (VALUES
+    ('Klantcontract', 10),
+    ('Websitecontract', 20),
+    ('Social Media contract', 30),
+    ('Brandingcontract', 40),
+    ('Foto/videografiecontract', 50),
+    ('Partnercontract', 60),
+    ('Onderaannemerscontract', 70),
+    ('Freelancecontract', 80),
+    ('Samenwerkingsovereenkomst', 90),
+    ('NDA / geheimhouding', 100),
+    ('Overige', 110),
+    ('Dienstverlening', 120),
+    ('Socialmediamanagement', 130),
+    ('Marketing', 140),
+    ('Software of ontwikkeling', 150),
+    ('Onderhoud', 160),
+    ('Verhuur', 170),
+    ('Algemene voorwaarden', 180),
+    ('Niet toegewezen', 999)
+  ) AS v(naam, volgorde)
+ WHERE NOT EXISTS (
+   SELECT 1 FROM public.contract_types t WHERE lower(btrim(t.naam)) = lower(btrim(v.naam))
+ );
+
+-- 3. Types die al op een contract staan maar nog geen rij hebben, gaan mee —
+--    zo verliest geen enkel bestaand contract zijn type uit de keuzelijst.
+--    Een "Overige — <omschrijving>" is een eenmalige waarde en hoort niet in
+--    de beheerde lijst; die wordt hier overgeslagen.
+INSERT INTO public.contract_types (naam, actief, volgorde)
+SELECT DISTINCT ON (lower(btrim(c.contract_type))) btrim(c.contract_type), true, 500
+  FROM public.contracts c
+ WHERE c.contract_type IS NOT NULL
+   AND btrim(c.contract_type) <> ''
+   AND btrim(c.contract_type) NOT LIKE '%' || chr(8212) || '%'   -- geen "Overige — ..."
+   AND NOT EXISTS (
+     SELECT 1 FROM public.contract_types t WHERE lower(btrim(t.naam)) = lower(btrim(c.contract_type))
+   )
+ ORDER BY lower(btrim(c.contract_type)), c.created_at;
+
+-- Controle na het draaien:
+--   SELECT naam, actief, volgorde FROM public.contract_types ORDER BY volgorde, naam;
+--   SELECT contract_type, count(*) FROM public.contracts GROUP BY 1 ORDER BY 2 DESC;
+--   SELECT count(*) FROM public.contracts WHERE contract_type IS NULL OR btrim(contract_type) = '';  -- verwacht 0

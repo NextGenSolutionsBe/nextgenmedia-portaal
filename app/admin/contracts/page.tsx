@@ -1,7 +1,8 @@
 export const dynamic = 'force-dynamic'
 
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
-import { ContractsClient } from './contracts-client'
+import { ContractsClient, type Contract } from './contracts-client'
+import { typeNamen } from '@/lib/contracten/db'
 
 async function getContracts() {
   const admin = createAdminSupabaseClient()
@@ -30,7 +31,7 @@ async function getContracts() {
     invByContract.set(r.contract_id, cur)
   }
 
-  const enriched = (contracts ?? []).map((c) => {
+  const enriched: Contract[] = (contracts ?? []).map((c) => {
     const inv = invByContract.get(c.id) ?? { count: 0, sent: 0 }
     const expected = c.expected_invoice_count ?? null
     const invoiceState = inv.count === 0 ? 'none'
@@ -45,6 +46,9 @@ async function getContracts() {
       sent_at: c.sent_at ?? null,
       created_at: c.created_at,
       expires_at: c.expires_at ?? null,
+      // start/end bestaan mogelijk niet op een oudere tabel → altijd null-safe.
+      start_date: c.start_date ?? null,
+      end_date: c.end_date ?? null,
       access_token: c.access_token,
       client_id: c.client_id ?? null,
       template_id: c.template_id ?? null,
@@ -60,41 +64,24 @@ async function getContracts() {
     }
   })
 
-  return { contracts: enriched, clients: clients ?? [], templates: templates ?? [] }
+  // Keuzelijst voor het contracttype-filter (valt vóór de migratie terug op de startlijst).
+  const contracttypes = await typeNamen(admin)
+
+  return { contracts: enriched, clients: clients ?? [], templates: templates ?? [], contracttypes }
 }
 
 export default async function ContractsPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
-  const { contracts, clients, templates } = await getContracts()
+  const { contracts, clients, templates, contracttypes } = await getContracts()
   const sp = await searchParams
   const initialStatus = typeof sp?.status === 'string' ? sp.status : 'all'
 
   return (
     <ContractsClient
       initialStatus={initialStatus}
-      initialContracts={contracts as Array<{
-        id: string
-        title: string
-        status: string
-        service_slug: string | null
-        signed_at: string | null
-        sent_at: string | null
-        created_at: string
-        expires_at: string | null
-        access_token: string
-        client_id: string | null
-        template_id: string | null
-        contract_type: string | null
-        duration_type: string | null
-        signer_name: string | null
-        signer_email: string | null
-        invoice_count: number
-        invoice_sent: number
-        expected_invoice_count: number | null
-        invoice_state: 'none' | 'partial' | 'full'
-        client: { id: string; company_name: string } | null
-      }>}
+      initialContracts={contracts}
       clients={clients as Array<{ id: string; company_name: string }>}
       templates={templates as Array<{ id: string; name: string }>}
+      contracttypes={contracttypes}
     />
   )
 }

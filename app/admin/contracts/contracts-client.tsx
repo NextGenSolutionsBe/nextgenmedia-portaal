@@ -1,27 +1,29 @@
 'use client'
 
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { Plus, FileText, Filter as FilterIcon, X, Search, Bell } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
+import {
+  Plus, FileText, Filter as FilterIcon, X, Search, Bell, Folder, FolderOpen, ChevronRight,
+  Download, Trash2, Loader2,
+} from 'lucide-react'
 import { formatDate, SERVICE_LABELS } from '@/lib/utils'
-import { statusInfo, canonicalStatus, STATUS_FILTER_OPTIONS, followUp, averageSignDays, CONTRACT_TYPES, DURATION_TYPES } from '@/lib/contract-status'
+import { statusInfo, canonicalStatus, STATUS_FILTER_OPTIONS, followUp, averageSignDays, DURATION_TYPES } from '@/lib/contract-status'
+import { typeVanContract, isNietToegewezen } from '@/lib/contracten/types'
+import {
+  bouwKlantmappen, typeOpties, totalen, ZONDER_KLANT,
+  type OverzichtContract, type Sortering,
+} from '@/lib/contracten/overzicht'
 import { ContractTabs } from './contract-tabs'
 import { ArchiefKnop } from './archief-knop'
 import { bewaarNavigatie, bewaarContext, leesContext } from '@/lib/contract-navigatie'
 
-type Contract = {
-  id: string
-  title: string
-  status: string
+export type Contract = OverzichtContract & {
   service_slug: string | null
-  signed_at: string | null
-  sent_at: string | null
-  created_at: string
   expires_at: string | null
   access_token: string
-  client_id: string | null
   template_id: string | null
-  contract_type: string | null
   duration_type: string | null
   signer_name: string | null
   signer_email: string | null
@@ -29,22 +31,24 @@ type Contract = {
   invoice_sent: number
   expected_invoice_count: number | null
   invoice_state: 'none' | 'partial' | 'full'
-  client: { id: string; company_name: string } | null
 }
 
 type Client = { id: string; company_name: string }
 type Template = { id: string; name: string }
 
 const ALL_SERVICES = ['social-media', 'webdesign', 'foto-video', 'grafisch-ontwerp', 'marketing-consultancy', 'ads']
+const MAPPEN_SLEUTEL = 'ngm.contractMappen'
 
 export function ContractsClient({
-  initialContracts, clients, templates = [], initialStatus = 'all',
+  initialContracts, clients, templates = [], contracttypes = [], initialStatus = 'all',
 }: {
   initialContracts: Contract[]
   clients: Client[]
   templates?: Template[]
+  contracttypes?: string[]
   initialStatus?: string
 }) {
+  const router = useRouter()
   const [filterClient, setFilterClient] = useState<string>('all')
   const [filterService, setFilterService] = useState<string>('all')
   const [filterStatus, setFilterStatus] = useState<string>(initialStatus)
@@ -55,8 +59,11 @@ export function ContractsClient({
   const [filterInvoice, setFilterInvoice] = useState<string>('all') // all | none | partial | full
   const [dateFrom, setDateFrom] = useState<string>('')
   const [dateTo, setDateTo] = useState<string>('')
+  const [sorteer, setSorteer] = useState<Sortering>('klant')
   const [query, setQuery] = useState('')
   const [dq, setDq] = useState('') // debounced query
+  const [openMappen, setOpenMappen] = useState<string[]>([])
+  const [verwijderBezig, setVerwijderBezig] = useState<string | null>(null)
 
   const templateName = useMemo(() => new Map(templates.map((t) => [t.id, t.name])), [templates])
 
@@ -76,17 +83,29 @@ export function ContractsClient({
         if (s.filterInvoice) setFilterInvoice(s.filterInvoice)
         if (s.dateFrom) setDateFrom(s.dateFrom)
         if (s.dateTo) setDateTo(s.dateTo)
+        if (s.sorteer) setSorteer(s.sorteer)
       }
     } catch { /* negeer */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   useEffect(() => {
     try {
-      localStorage.setItem('ngm.contractFilters', JSON.stringify({ filterClient, filterService, filterStatus, filterTemplate, filterType, filterDuration, filterLinked, filterInvoice, dateFrom, dateTo }))
+      localStorage.setItem('ngm.contractFilters', JSON.stringify({ filterClient, filterService, filterStatus, filterTemplate, filterType, filterDuration, filterLinked, filterInvoice, dateFrom, dateTo, sorteer }))
     } catch { /* negeer */ }
-  }, [filterClient, filterService, filterStatus, filterTemplate, filterType, filterDuration, filterLinked, filterInvoice, dateFrom, dateTo])
+  }, [filterClient, filterService, filterStatus, filterTemplate, filterType, filterDuration, filterLinked, filterInvoice, dateFrom, dateTo, sorteer])
   // Debounce de zoekterm (vlot bij grote lijsten).
   useEffect(() => { const t = setTimeout(() => setDq(query), 200); return () => clearTimeout(t) }, [query])
+
+  // Open/dicht per klantmap overleeft de sessie van dit tabblad.
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(MAPPEN_SLEUTEL)
+      if (raw) { const s = JSON.parse(raw); if (Array.isArray(s)) setOpenMappen(s.filter((x) => typeof x === 'string')) }
+    } catch { /* negeer */ }
+  }, [])
+  useEffect(() => {
+    try { sessionStorage.setItem(MAPPEN_SLEUTEL, JSON.stringify(openMappen)) } catch { /* negeer */ }
+  }, [openMappen])
 
   // Terugkeer vanuit een contract: zoekterm en scrollpositie van daarnet herstellen.
   const [hersteld, setHersteld] = useState(false)
@@ -112,36 +131,44 @@ export function ContractsClient({
   }, [hersteld])
   useEffect(() => { if (hersteld) bewaarContext({ query }) }, [query, hersteld])
 
-  const filtered = useMemo(() => {
-    const q = dq.trim().toLowerCase()
+  // Filters die niets met de mappen te maken hebben (klant, dienst, template,
+  // duur, koppeling, facturatie, datums). Zoeken + type + status doet de
+  // mappen-module zelf, zodat treffers gemarkeerd kunnen worden.
+  const voorgefilterd = useMemo(() => {
     return initialContracts.filter((c) => {
       if (filterClient !== 'all' && c.client_id !== filterClient) return false
       if (filterService !== 'all' && (c.service_slug ?? '') !== filterService) return false
-      if (filterStatus !== 'all' && canonicalStatus(c.status) !== filterStatus) return false
       if (filterTemplate !== 'all') {
         if (filterTemplate === 'none' ? !!c.template_id : c.template_id !== filterTemplate) return false
       }
-      if (filterType !== 'all' && (c.contract_type ?? '') !== filterType) return false
       if (filterDuration !== 'all' && (c.duration_type ?? '') !== filterDuration) return false
       if (filterLinked === 'yes' && !c.client_id) return false
       if (filterLinked === 'no' && !!c.client_id) return false
       if (filterInvoice !== 'all' && c.invoice_state !== filterInvoice) return false
       if (dateFrom && (c.created_at ?? '').slice(0, 10) < dateFrom) return false
       if (dateTo && (c.created_at ?? '').slice(0, 10) > dateTo) return false
-      if (q) {
-        const hay = [
-          c.title, c.client?.company_name, c.signer_name, c.signer_email,
-          c.service_slug, statusInfo(c.status).label, c.template_id ? templateName.get(c.template_id) : '',
-        ].filter(Boolean).join(' ').toLowerCase()
-        if (!hay.includes(q)) return false
-      }
       return true
-    })
-  }, [initialContracts, filterClient, filterService, filterStatus, filterTemplate, filterType, filterDuration, filterLinked, filterInvoice, dateFrom, dateTo, dq, templateName])
+    }).map((c) => ({
+      ...c,
+      zoekExtra: [c.signer_name, c.signer_email, c.service_slug ? SERVICE_LABELS[c.service_slug] ?? c.service_slug : '', c.template_id ? templateName.get(c.template_id) : '']
+        .filter(Boolean).join(' '),
+    }))
+  }, [initialContracts, filterClient, filterService, filterTemplate, filterDuration, filterLinked, filterInvoice, dateFrom, dateTo, templateName])
 
-  // De zichtbare volgorde (filters + zoekopdracht) is wat "vorig/volgend" op de
+  const mappen = useMemo(
+    () => bouwKlantmappen(voorgefilterd, { zoek: dq, type: filterType, status: filterStatus, sorteer }),
+    [voorgefilterd, dq, filterType, filterStatus, sorteer],
+  )
+  const cijfers = useMemo(() => totalen(mappen), [mappen])
+  const zichtbareContracten = useMemo(() => mappen.flatMap((m) => m.contracten), [mappen])
+
+  const typeKeuzes = useMemo(() => typeOpties(initialContracts, contracttypes), [initialContracts, contracttypes])
+
+  // De zichtbare volgorde (mappen + filters) is wat "vorig/volgend" op de
   // detailpagina volgt. Enkel id's, in de sessie van dit tabblad.
-  useEffect(() => { bewaarNavigatie(filtered.map((c) => c.id), `${filtered.length} contracten`) }, [filtered])
+  useEffect(() => {
+    bewaarNavigatie(zichtbareContracten.map((c) => c.id), `${zichtbareContracten.length} contracten`)
+  }, [zichtbareContracten])
 
   // ── Dashboard-cijfers (over alle contracten) ───────────────────────────────
   const stats = useMemo(() => {
@@ -182,6 +209,30 @@ export function ContractsClient({
   // Stat-kaart klik → filtert de lijst op die status.
   const filterByKey = (key: string) => { clearFilters(); setFilterStatus(key) }
 
+  const wissel = useCallback((sleutel: string) => {
+    setOpenMappen((p) => (p.includes(sleutel) ? p.filter((x) => x !== sleutel) : [...p, sleutel]))
+  }, [])
+
+  const verwijder = async (c: Contract) => {
+    const getekend = canonicalStatus(c.status) === 'getekend'
+    const vraag = getekend
+      ? `"${c.title}" is ONDERTEKEND. Verwijderen? De getekende versie en het certificaat blijven in het contractarchief.`
+      : `"${c.title}" definitief verwijderen?`
+    if (!confirm(vraag)) return
+    setVerwijderBezig(c.id)
+    try {
+      const res = await fetch(`/api/admin/contracts/${c.id}`, {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: getekend }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j.error || 'Verwijderen mislukt')
+      toast.success(`Contract "${c.title}" verwijderd.`)
+      router.refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt')
+    } finally { setVerwijderBezig(null) }
+  }
+
   const sel = 'px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]'
 
   return (
@@ -190,7 +241,9 @@ export function ContractsClient({
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold">Contracten</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{filtered.length} van {initialContracts.length} contracten</p>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {cijfers.mappen} klantmap{cijfers.mappen === 1 ? '' : 'pen'} · {cijfers.contracten} van {initialContracts.length} contracten
+          </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <ArchiefKnop />
@@ -250,11 +303,11 @@ export function ContractsClient({
         </div>
       )}
 
-      {/* Filters */}
+      {/* Werkbalk + filters */}
       <div className="card-base">
         <div className="flex items-center gap-2 mb-3">
           <FilterIcon className="h-4 w-4 text-gray-400" />
-          <h2 className="text-sm font-semibold text-gray-700">Filters</h2>
+          <h2 className="text-sm font-semibold text-gray-700">Zoeken & filteren</h2>
           {hasActiveFilters && (
             <button onClick={clearFilters} className="ml-auto text-xs text-gray-500 hover:text-black flex items-center gap-1">
               <X className="h-3 w-3" />
@@ -262,15 +315,30 @@ export function ContractsClient({
             </button>
           )}
         </div>
-        {/* Zoeken */}
-        <div className="relative mb-3">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Zoek op titel, klant, ontvanger, e-mail, type, status…"
-            className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]"
-          />
+        {/* Zoeken + de drie hoofdkeuzes van het mappenoverzicht */}
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))] mb-3">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Zoek op klantnaam, contractnaam of contracttype…"
+              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]"
+            />
+          </div>
+          <select className={`${sel} w-full`} value={filterType} onChange={(e) => setFilterType(e.target.value)} aria-label="Contracttype">
+            <option value="all">Alle contracttypes</option>
+            {typeKeuzes.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <select className={`${sel} w-full`} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} aria-label="Status">
+            <option value="all">Alle statussen</option>
+            {STATUS_FILTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <select className={`${sel} w-full`} value={sorteer} onChange={(e) => setSorteer(e.target.value as Sortering)} aria-label="Sorteren">
+            <option value="klant">Sorteer: klantnaam A→Z</option>
+            <option value="aantal">Sorteer: aantal contracten</option>
+            <option value="recent">Sorteer: meest recente contract</option>
+          </select>
         </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
@@ -292,29 +360,13 @@ export function ContractsClient({
             </select>
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Status</label>
-            <select className={`${sel} w-full`} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
-              <option value="all">Alle statussen</option>
-              {STATUS_FILTER_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
             <label className="block text-xs text-gray-500 mb-1">Template</label>
             <select className={`${sel} w-full`} value={filterTemplate} onChange={(e) => setFilterTemplate(e.target.value)}>
-              <option value="all">Alle types</option>
+              <option value="all">Alle templates</option>
               <option value="none">Zonder template</option>
               {templates.map((t) => (
                 <option key={t.id} value={t.id}>{t.name}</option>
               ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Contracttype</label>
-            <select className={`${sel} w-full`} value={filterType} onChange={(e) => setFilterType(e.target.value)}>
-              <option value="all">Alle types</option>
-              {CONTRACT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <div>
@@ -352,108 +404,162 @@ export function ContractsClient({
         </div>
       </div>
 
-      {/* Table */}
-      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-        {filtered.length === 0 ? (
-          <div className="text-center py-16 text-gray-400">
-            <FileText className="h-8 w-8 mx-auto mb-3 opacity-30" />
-            <p className="text-sm">
-              {initialContracts.length === 0 ? 'Nog geen contracten' : 'Geen contracten matchen de filters'}
-            </p>
-            {initialContracts.length === 0 && (
-              <Link href="/admin/contracts/new" className="btn-primary mt-4 inline-flex">
-                <Plus className="h-4 w-4" />
-                Eerste contract aanmaken
-              </Link>
-            )}
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-          <table className="w-full min-w-[700px]">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="table-th">Contract</th>
-                <th className="table-th">Klant</th>
-                <th className="table-th">Dienst</th>
-                <th className="table-th">Status</th>
-                <th className="table-th">Facturen</th>
-                <th className="table-th">Datum</th>
-                <th className="table-th">Acties</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filtered.map((c) => {
-                const style = statusInfo(c.status)
-                return (
-                  <tr key={c.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="table-td">
-                      <Link href={`/admin/contracts/${c.id}`} className="font-medium hover:text-black">
-                        {c.title}
+      {/* Klantmappen */}
+      {mappen.length === 0 ? (
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm text-center py-16 text-gray-400">
+          <FileText className="h-8 w-8 mx-auto mb-3 opacity-30" />
+          <p className="text-sm">
+            {initialContracts.length === 0 ? 'Nog geen contracten — maak het eerste contract aan.' : 'Geen resultaten voor deze zoekopdracht of filters.'}
+          </p>
+          {initialContracts.length === 0 ? (
+            <Link href="/admin/contracts/new" className="btn-primary mt-4 inline-flex">
+              <Plus className="h-4 w-4" />
+              Eerste contract aanmaken
+            </Link>
+          ) : (
+            <button onClick={clearFilters} className="btn-secondary mt-4 inline-flex">
+              <X className="h-4 w-4" />
+              Filters wissen
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {mappen.map((map) => {
+            const geopend = openMappen.includes(map.sleutel) || (dq.trim() !== '' && map.treffers.length > 0)
+            const treffers = new Set(map.treffers)
+            return (
+              <div key={map.sleutel} className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+                {/* Mapkop */}
+                <button
+                  type="button"
+                  onClick={() => wissel(map.sleutel)}
+                  aria-expanded={geopend}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+                >
+                  <ChevronRight className={`h-4 w-4 text-gray-400 shrink-0 transition-transform ${geopend ? 'rotate-90' : ''}`} />
+                  {geopend
+                    ? <FolderOpen className="h-5 w-5 text-[#d6cf00] shrink-0" />
+                    : <Folder className="h-5 w-5 text-gray-400 shrink-0" />}
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold truncate">
+                      {map.klantId
+                        ? map.klantNaam
+                        : <span className="text-gray-600 italic">{map.klantNaam}</span>}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-x-3 gap-y-0.5 flex-wrap">
+                      <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 font-medium">{map.aantal} contract{map.aantal === 1 ? '' : 'en'}</span>
+                      <span className="text-green-600">{map.actief} actief</span>
+                      <span className="text-gray-400">{map.beeindigd} beëindigd</span>
+                      <span>Laatste: {map.laatsteDatum ? formatDate(map.laatsteDatum) : '—'}</span>
+                    </div>
+                  </div>
+                </button>
+
+                {/* Mapinhoud */}
+                {geopend && (
+                  <div className="border-t border-gray-100">
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[860px]">
+                        <thead className="bg-gray-50 border-b border-gray-200">
+                          <tr>
+                            <th className="table-th">Contract</th>
+                            <th className="table-th">Contracttype</th>
+                            <th className="table-th">Status</th>
+                            <th className="table-th">Facturen</th>
+                            <th className="table-th">Start</th>
+                            <th className="table-th">Einde</th>
+                            <th className="table-th">Ondertekend</th>
+                            <th className="table-th">Acties</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {map.contracten.map((raw) => {
+                            const c = raw as Contract
+                            const style = statusInfo(c.status)
+                            const type = typeVanContract(c.contract_type)
+                            const treffer = treffers.has(c.id)
+                            return (
+                              <tr key={c.id} className={`transition-colors ${treffer ? 'bg-[#fff848]/20 hover:bg-[#fff848]/30' : 'hover:bg-gray-50'}`}>
+                                <td className="table-td">
+                                  <Link href={`/admin/contracts/${c.id}`} className="font-medium hover:text-black">
+                                    {c.title}
+                                  </Link>
+                                  {c.service_slug && (
+                                    <div className="text-xs text-gray-400 mt-0.5">{SERVICE_LABELS[c.service_slug] ?? c.service_slug}</div>
+                                  )}
+                                </td>
+                                <td className="table-td">
+                                  <span className={`status-badge ${isNietToegewezen(type) ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>{type}</span>
+                                </td>
+                                <td className="table-td">
+                                  <span className={`status-badge ${style.cls}`}>{style.label}</span>
+                                </td>
+                                <td className="table-td">
+                                  {c.invoice_count === 0 ? (
+                                    <span className="text-xs text-gray-300">—</span>
+                                  ) : (
+                                    <span className={`inline-flex items-center gap-1.5 text-xs ${c.invoice_state === 'full' ? 'text-green-600' : 'text-amber-600'}`}>
+                                      <span className={`h-1.5 w-1.5 rounded-full ${c.invoice_state === 'full' ? 'bg-green-500' : 'bg-amber-500'}`} />
+                                      {c.invoice_sent}{c.expected_invoice_count ? `/${c.expected_invoice_count}` : `/${c.invoice_count}`}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="table-td text-gray-500">{c.start_date ? formatDate(c.start_date) : '—'}</td>
+                                <td className="table-td text-gray-500">{c.end_date ? formatDate(c.end_date) : '—'}</td>
+                                <td className="table-td text-gray-500">{c.signed_at ? formatDate(c.signed_at) : '—'}</td>
+                                <td className="table-td">
+                                  <div className="flex items-center gap-2 whitespace-nowrap">
+                                    <Link href={`/admin/contracts/${c.id}`} className="text-xs text-gray-500 hover:text-black underline">
+                                      Bekijken
+                                    </Link>
+                                    {['verzonden', 'geopend'].includes(canonicalStatus(c.status)) && (
+                                      <a href={`/sign/${c.access_token}`} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">
+                                        Signelink
+                                      </a>
+                                    )}
+                                    <a
+                                      href={`/api/admin/contracts/${c.id}/download?type=${canonicalStatus(c.status) === 'getekend' ? 'signed' : 'original'}`}
+                                      className="text-gray-400 hover:text-black"
+                                      title="PDF downloaden"
+                                    >
+                                      <Download className="h-3.5 w-3.5" />
+                                    </a>
+                                    <button
+                                      type="button"
+                                      onClick={() => void verwijder(c)}
+                                      disabled={verwijderBezig === c.id}
+                                      className="text-gray-400 hover:text-red-600 disabled:opacity-50"
+                                      title="Contract verwijderen"
+                                    >
+                                      {verwijderBezig === c.id
+                                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        : <Trash2 className="h-3.5 w-3.5" />}
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="px-4 py-3 border-t border-gray-100 bg-gray-50/60">
+                      <Link
+                        href={map.sleutel === ZONDER_KLANT ? '/admin/contracts/new' : `/admin/contracts/new?client=${map.klantId}`}
+                        className="btn-secondary text-xs"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Nieuw contract{map.sleutel === ZONDER_KLANT ? '' : ' voor deze klant'}
                       </Link>
-                    </td>
-                    <td className="table-td">
-                      {c.client ? (
-                        <Link href={`/admin/clients/${c.client.id}`} className="text-gray-600 hover:text-black">
-                          {c.client.company_name}
-                        </Link>
-                      ) : '—'}
-                    </td>
-                    <td className="table-td">
-                      {c.service_slug ? (
-                        <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded">
-                          {SERVICE_LABELS[c.service_slug] ?? c.service_slug}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-300">—</span>
-                      )}
-                    </td>
-                    <td className="table-td">
-                      <span className={`status-badge ${style.cls}`}>
-                        {style.label}
-                      </span>
-                    </td>
-                    <td className="table-td">
-                      {c.invoice_count === 0 ? (
-                        <span className="text-xs text-gray-300">—</span>
-                      ) : (
-                        <span className={`inline-flex items-center gap-1.5 text-xs ${c.invoice_state === 'full' ? 'text-green-600' : 'text-amber-600'}`}>
-                          <span className={`h-1.5 w-1.5 rounded-full ${c.invoice_state === 'full' ? 'bg-green-500' : 'bg-amber-500'}`} />
-                          {c.invoice_sent}{c.expected_invoice_count ? `/${c.expected_invoice_count}` : `/${c.invoice_count}`}
-                        </span>
-                      )}
-                    </td>
-                    <td className="table-td text-gray-500">
-                      {c.signed_at
-                        ? formatDate(c.signed_at)
-                        : c.sent_at
-                        ? formatDate(c.sent_at)
-                        : formatDate(c.created_at)}
-                    </td>
-                    <td className="table-td">
-                      <div className="flex items-center gap-2">
-                        <Link href={`/admin/contracts/${c.id}`} className="text-xs text-gray-500 hover:text-black underline">
-                          Bekijken
-                        </Link>
-                        {['verzonden', 'geopend'].includes(canonicalStatus(c.status)) && (
-                          <a
-                            href={`/sign/${c.access_token}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-xs text-blue-600 hover:underline"
-                          >
-                            Signelink
-                          </a>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-          </div>
-        )}
-      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

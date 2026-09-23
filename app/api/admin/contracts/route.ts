@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto'
 import { revalidatePath } from 'next/cache'
 import { logContractEvent } from '@/lib/contract-audit'
 import { naOndertekening } from '@/lib/contract-archief'
+import { typeVanContract } from '@/lib/contracten/types'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
@@ -23,7 +24,8 @@ export async function POST(req: NextRequest) {
     const pdf = formData.get('pdf') as File | null
     const client_id = formData.get('client_id') as string
     const title = formData.get('title') as string
-    const contract_type = (formData.get('contract_type') as string | null) || null
+    // Elk contract heeft een type; niets gekozen → 'Niet toegewezen'.
+    const contract_type = typeVanContract(formData.get('contract_type'))
     const duration_type = (formData.get('duration_type') as string | null) || null
     const service_slug = formData.get('service_slug') as string | null
     const signer_name = formData.get('signer_name') as string | null

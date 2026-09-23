@@ -10,6 +10,7 @@ import { factuurdagVan } from '@/lib/facturatie/reeks'
 import { berekenTotalen, berekenRegel, nieuweRegel, hernummer, verplaatsRegel, dupliceerRegel, verwijderRegel, getal, EENHEDEN, type FactuurRegel } from '@/lib/facturen/regels'
 import { VERZENDSTATUS, BETAALSTATUS, KIESBARE_STATUSSEN, redenVerplicht, normaliseerVerzendstatus, type Verzendstatus, type Betaalstatus } from '@/lib/facturen/status'
 import { Bevestig, INP } from '@/app/admin/instellingen/ui'
+import { KostenEnWinstDialoog } from './kosten-en-winst'
 
 /**
  * De factuureditor: één venster voor een nieuwe én een bestaande factuur, vanuit
@@ -135,6 +136,8 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
   const [reden, setReden] = useState('')
   const [betaling, setBetaling] = useState<{ bedrag: string; op: string } | null>(null)
   const [vraagVerwijder, setVraagVerwijder] = useState(false)
+  // Interne kosten (onderaanneming, materiaal, …): enkel voor ons, nooit voor de klant.
+  const [kosten, setKosten] = useState(false)
   const [toonHistoriek, setToonHistoriek] = useState(false)
   const [verzendDatum, setVerzendDatum] = useState('')
 
@@ -299,6 +302,16 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
 
               <div><label className="block text-xs font-medium text-gray-600 mb-1">Interne notitie <span className="text-gray-400">— niet voor de klant</span></label><textarea rows={2} className={INP} value={kop.note} onChange={(e) => setKop((k) => ({ ...k, note: e.target.value }))} /></div>
 
+              {!nieuw && (
+                <div className="rounded-xl border border-gray-200 p-3 flex items-start justify-between gap-3 flex-wrap">
+                  <div>
+                    <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">Interne kosten en winst</div>
+                    <p className="text-xs text-gray-600 mt-0.5">Wat deze factuur ons kost: onderaanneming, freelancers, materiaal, advertentiebudget, drukwerk… Zo zie je de winst per factuur en in Financiën. <b>De klant ziet dit nooit</b>; het staat niet op de factuur.</p>
+                  </div>
+                  <button type="button" onClick={() => setKosten(true)} className="btn-secondary text-xs whitespace-nowrap"><Wallet className="h-3.5 w-3.5" />Kosten en winst</button>
+                </div>
+              )}
+
               {!nieuw && factuur && (
                 <div className="rounded-xl border border-gray-200 p-3 space-y-2">
                   <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">Status</div>
@@ -379,6 +392,15 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
         </div>
       </div>
 
+      {kosten && !nieuw && factuur && (
+        <KostenEnWinstDialoog
+          factuur={{ invoice_id: invoiceId! }}
+          titel={`${klantNaam} · ${dag(factuur.invoice_date).split('-').reverse().join('/')} · ${formatEuro(factuur.amount_excl)} excl. btw${factuur.description ? ` · ${factuur.description}` : ''}`}
+          clientId={factuur.client_id}
+          onClose={() => setKosten(false)}
+          onChanged={() => { onSaved?.(invoiceId!); laad() }}
+        />
+      )}
       {vraagVerwijder && factuur && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/30">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 space-y-3">

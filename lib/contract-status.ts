@@ -114,7 +114,13 @@ export function averageSignDays(contracts: Array<{ status: string | null; sent_a
   return Math.round((spans.reduce((a, b) => a + b, 0) / spans.length) * 10) / 10
 }
 
-/** Contracttypes (verplicht bij aanmaken). */
+/**
+ * Historische contracttypes. Sinds 23 sep 2026 zijn contracttypes DATA
+ * (tabel `contract_types`, zie `lib/contracten/types.ts` + `lib/contracten/db.ts`):
+ * de UI leest de tabel. Deze lijst blijft bestaan als terugval/startlijst voor
+ * de migratie en voor code die er nog naar verwijst — voeg hier NIETS meer aan
+ * toe, nieuwe types komen via de combobox in de tabel terecht.
+ */
 export const CONTRACT_TYPES = [
   'Klantcontract',
   'Websitecontract',

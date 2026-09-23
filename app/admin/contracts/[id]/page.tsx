@@ -16,6 +16,8 @@ import { ContractTimeline } from './contract-timeline'
 import { ContractFacturatie } from './contract-facturatie'
 import { ContractNavigatie } from './contract-navigatie'
 import { statusInfo, canonicalStatus } from '@/lib/contract-status'
+import { ContracttypeBewerker } from './contracttype-bewerker'
+import { typeVanContract, isNietToegewezen } from '@/lib/contracten/types'
 import { baseUrl } from '@/lib/email'
 
 async function getContract(id: string) {
@@ -87,6 +89,9 @@ export default async function ContractDetailPage({ params }: { params: { id: str
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <h1 className="text-xl sm:text-2xl font-bold truncate">{c.title}</h1>
             <span className={`status-badge ${style.cls}`}>{style.label}</span>
+            <span className={`status-badge ${isNietToegewezen(c.contract_type) ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
+              {typeVanContract(c.contract_type)}
+            </span>
           </div>
           {clientId && clientName && (
             <Link href={`/admin/clients/${clientId}`} className="text-sm text-gray-500 hover:text-black">
@@ -152,10 +157,23 @@ export default async function ContractDetailPage({ params }: { params: { id: str
           <div className="card-base space-y-3">
             <h2 className="font-semibold text-sm">Details</h2>
             <div className="space-y-2 text-sm">
+              <ContracttypeBewerker contractId={c.id} initieel={c.contract_type ?? null} />
               <div className="flex justify-between">
                 <span className="text-gray-500">Aangemaakt:</span>
                 <span>{formatDate(c.created_at)}</span>
               </div>
+              {c.start_date && (
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Startdatum:</span>
+                  <span>{formatDate(c.start_date)}</span>
+                </div>
+              )}
+              {c.end_date && (
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Einddatum:</span>
+                  <span>{formatDate(c.end_date)}</span>
+                </div>
+              )}
               {c.sent_at && (
                 <div className="flex justify-between">
                   <span className="text-gray-500">Verstuurd:</span>

@@ -4,6 +4,7 @@ import { createClient, createAdminSupabaseClient, insertResilient , isActiveStaf
 import { randomUUID } from 'crypto'
 import { revalidatePath } from 'next/cache'
 import { logContractEvent } from '@/lib/contract-audit'
+import { typeVanContract } from '@/lib/contracten/types'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
@@ -29,6 +30,8 @@ export async function POST(req: NextRequest) {
     const signer_email = (b.signer_email as string)?.trim() || null
     const expires_at = (b.expires_at as string) || null
     const title = (b.title as string)?.trim()
+    // Elk contract heeft een type; niets meegegeven → 'Niet toegewezen'.
+    const contract_type = typeVanContract(b.contract_type)
 
     if (!templateId) return NextResponse.json({ error: 'Template is verplicht' }, { status: 400 })
 
@@ -45,6 +48,7 @@ export async function POST(req: NextRequest) {
       {
         client_id,
         title: finalTitle,
+        contract_type,
         created_by: user.id,
         template_id: templateId,
         service_slug,

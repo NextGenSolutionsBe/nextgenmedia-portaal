@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { ChevronLeft, Loader2, Upload } from 'lucide-react'
 import { readJson, fileTooBig, MAX_UPLOAD_MB } from '@/lib/upload'
-import { CONTRACT_TYPES, DURATION_TYPES } from '@/lib/contract-status'
+import { DURATION_TYPES } from '@/lib/contract-status'
+import { ContracttypeKiezer } from '../contracttype-kiezer'
 
 export default function NewContractPage() {
   const [loading, setLoading] = useState(false)
@@ -33,6 +34,17 @@ export default function NewContractPage() {
       .then((r) => r.json())
       .then((j) => setClients(j.clients ?? []))
       .catch(() => setClients([]))
+  }, [])
+
+  // Deep-link vanuit een klantmap: /admin/contracts/new?client=<id> (of ?client_id=).
+  // Bewust via window.location i.p.v. useSearchParams — dat laatste vraagt een
+  // Suspense-grens in een clientpagina.
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search)
+      const vooraf = sp.get('client') || sp.get('client_id') || ''
+      if (/^[0-9a-f-]{36}$/i.test(vooraf)) setForm((p) => (p.client_id ? p : { ...p, client_id: vooraf }))
+    } catch { /* geen querystring */ }
   }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -98,11 +110,14 @@ export default function NewContractPage() {
           <input required className={inp} value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} placeholder="Social Media Contract 2025" />
         </div>
         <div>
-          <label className={lbl}>Contracttype *</label>
-          <select required className={inp} value={form.contract_type} onChange={(e) => setForm((p) => ({ ...p, contract_type: e.target.value }))}>
-            <option value="">— Selecteer type —</option>
-            {CONTRACT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
+          <label className={lbl} htmlFor="contract-type">Contracttype *</label>
+          <ContracttypeKiezer
+            id="contract-type"
+            verplicht
+            waarde={form.contract_type}
+            onWijzig={(v) => setForm((p) => ({ ...p, contract_type: v }))}
+          />
+          <p className="text-xs text-gray-400 mt-1">Kies een bestaand type of tik een nieuw type in.</p>
         </div>
         <div>
           <label className={lbl}>Dienst (voor portaaltoegang)</label>

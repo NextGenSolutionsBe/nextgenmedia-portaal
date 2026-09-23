@@ -39,7 +39,9 @@ const inp = 'w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg'
 const knop = 'inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors disabled:opacity-50'
 const pct = (v: number | null) => (v === null ? '—' : `${(v * 100).toLocaleString('nl-BE', { maximumFractionDigits: 1 })} %`)
 
-export function KostenEnWinstDialoog({ ref, titel, clientId, onClose, onChanged }: { ref: FactuurRefProps; titel: string; clientId: string | null; onClose: () => void; onChanged?: () => void }) {
+// LET OP: de prop heet bewust NIET `ref` — React 18 geeft `ref` niet door aan
+// een functiecomponent, waardoor dit venster leeg bleef.
+export function KostenEnWinstDialoog({ factuur: ref, titel, clientId, onClose, onChanged }: { factuur: FactuurRefProps; titel: string; clientId: string | null; onClose: () => void; onChanged?: () => void }) {
   const [data, setData] = useState<Antwoord | null>(null)
   const [laden, setLaden] = useState(true)
   const [bezig, setBezig] = useState(false)

@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { randomUUID } from 'crypto'
 import { logContractEvent } from '@/lib/contract-audit'
 import { logAudit, requestMeta } from '@/lib/audit'
+import { typeVanContract } from '@/lib/contracten/types'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
@@ -81,6 +82,27 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       } catch { /* kolommen bestaan pas na migratie */ }
       try { revalidatePath(`/admin/contracts/${id}`) } catch { }
       return NextResponse.json({ ok: true })
+    } else if (action === 'contract_type') {
+      // Contracttype aanpassen vanaf het detailscherm. Leeg → 'Niet toegewezen',
+      // zodat een contract nooit zonder type staat.
+      const nieuw = typeVanContract(body.contract_type)
+      const { data: oud } = await admin.from('contracts').select('contract_type, title').eq('id', id).maybeSingle()
+      const { error } = await admin.from('contracts').update({ contract_type: nieuw }).eq('id', id)
+      if (error) {
+        if (/Could not find the 'contract_type' column/i.test(error.message)) {
+          return NextResponse.json({ error: 'Contracttype vereist een database-migratie (contract_type).' }, { status: 400 })
+        }
+        throw new Error(error.message)
+      }
+      const m = requestMeta(req)
+      await logAudit({
+        action: 'contract.type_changed', entityType: 'contract', entityId: id,
+        summary: `Contracttype van "${oud?.title ?? id}" gewijzigd naar "${nieuw}"`,
+        actorUserId: user.id, actorEmail: user.email ?? null, actorRole: 'admin',
+        metadata: { van: oud?.contract_type ?? null, naar: nieuw }, ip: m.ip, userAgent: m.userAgent,
+      })
+      try { revalidatePath('/admin/contracts'); revalidatePath(`/admin/contracts/${id}`) } catch { }
+      return NextResponse.json({ ok: true, contract_type: nieuw })
     } else if (action === 'send') {
       const { error } = await admin
         .from('contracts')
