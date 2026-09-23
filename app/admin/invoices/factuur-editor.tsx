@@ -68,7 +68,7 @@ export function RegelsEditor({ regels, onChange, btw, alleenLezen }: { regels: F
             <tr className="text-[10px] uppercase tracking-wide text-gray-500">
               <th className="px-1 py-1 text-left w-8">#</th><th className="px-1 py-1 text-left">Artikel</th><th className="px-1 py-1 text-left">Omschrijving</th>
               <th className="px-1 py-1 text-right w-16">Aantal</th><th className="px-1 py-1 text-left w-20">Eenheid</th><th className="px-1 py-1 text-right w-24">Prijs excl.</th>
-              <th className="px-1 py-1 text-right w-14">Btw %</th><th className="px-1 py-1 text-right w-16">Korting %</th><th className="px-1 py-1 text-center w-14" title="Extra kost bovenop het contract">Extra</th>
+              <th className="px-1 py-1 text-right w-14">Btw %</th><th className="px-1 py-1 text-right w-16">Korting %</th>
               <th className="px-1 py-1 text-right w-24">Excl.</th><th className="px-1 py-1 text-right w-20">Btw</th><th className="px-1 py-1 text-right w-24">Incl.</th><th className="px-1 py-1 w-28" />
             </tr>
           </thead>
@@ -76,7 +76,7 @@ export function RegelsEditor({ regels, onChange, btw, alleenLezen }: { regels: F
             {regels.map((r, i) => {
               const b = berekenRegel(r)
               return (
-                <tr key={`${r.id ?? 'n'}-${i}`} className={`border-t border-gray-100 ${r.is_extra ? 'bg-amber-50/40' : ''}`}>
+                <tr key={`${r.id ?? 'n'}-${i}`} className="border-t border-gray-100">
                   <td className="px-1 py-1 text-gray-400">{r.volgnr}</td>
                   <td className="px-1 py-1"><input className={cel} value={r.artikel} disabled={alleenLezen} onChange={(e) => zet(i, { artikel: e.target.value })} placeholder="Bv. Social media beheer" /></td>
                   <td className="px-1 py-1"><input className={cel} value={r.omschrijving} disabled={alleenLezen} onChange={(e) => zet(i, { omschrijving: e.target.value })} placeholder="Omschrijving op de factuur" /></td>
@@ -85,7 +85,6 @@ export function RegelsEditor({ regels, onChange, btw, alleenLezen }: { regels: F
                   <td className="px-1 py-1"><input className={`${cel} text-right`} inputMode="decimal" value={String(r.prijs_excl)} disabled={alleenLezen} onChange={(e) => zet(i, { prijs_excl: getal(e.target.value, 0) })} /></td>
                   <td className="px-1 py-1"><input className={`${cel} text-right`} inputMode="decimal" value={String(r.btw_pct)} disabled={alleenLezen} onChange={(e) => zet(i, { btw_pct: Math.min(100, Math.max(0, getal(e.target.value, btw))) })} /></td>
                   <td className="px-1 py-1"><input className={`${cel} text-right`} inputMode="decimal" value={String(r.korting_pct)} disabled={alleenLezen} onChange={(e) => zet(i, { korting_pct: Math.min(100, Math.max(0, getal(e.target.value, 0))) })} /></td>
-                  <td className="px-1 py-1 text-center"><input type="checkbox" checked={r.is_extra} disabled={alleenLezen} onChange={(e) => zet(i, { is_extra: e.target.checked })} title="Extra kost (telt niet mee in het contractuele bedrag)" /></td>
                   <td className="px-1 py-1 text-right tabular-nums">{formatEuro(b.excl)}</td>
                   <td className="px-1 py-1 text-right tabular-nums text-gray-500">{formatEuro(b.btw)}</td>
                   <td className="px-1 py-1 text-right tabular-nums font-medium">{formatEuro(b.incl)}</td>
@@ -102,7 +101,7 @@ export function RegelsEditor({ regels, onChange, btw, alleenLezen }: { regels: F
                 </tr>
               )
             })}
-            {regels.length === 0 && <tr><td colSpan={13} className="px-2 py-4 text-center text-gray-400">Nog geen factuurregels.</td></tr>}
+            {regels.length === 0 && <tr><td colSpan={12} className="px-2 py-4 text-center text-gray-400">Nog geen factuurregels.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -110,12 +109,10 @@ export function RegelsEditor({ regels, onChange, btw, alleenLezen }: { regels: F
         {!alleenLezen && (
           <div className="flex gap-2 flex-wrap">
             <button type="button" onClick={() => onChange(hernummer([...regels, nieuweRegel({}, btw)]))} className="btn-secondary text-xs"><Plus className="h-3.5 w-3.5" />Factuurregel toevoegen</button>
-            <button type="button" onClick={() => onChange(hernummer([...regels, nieuweRegel({ is_extra: true, eenheid: 'stuk' }, btw)]))} className="btn-secondary text-xs" title="Kilometervergoeding, lenshuur, extra draaidag, advertentiebudget, drukwerk, …"><Plus className="h-3.5 w-3.5" />Extra kost toevoegen</button>
+            <span className="text-[11px] text-gray-400 self-center">Ook wat je doorrekent (kilometers, huur, drukwerk) is gewoon een regel.</span>
           </div>
         )}
         <div className="ml-auto text-xs text-right space-y-0.5 tabular-nums">
-          <div className="text-gray-500">Contractueel bedrag: <b className="text-gray-800">{formatEuro(t.contractueel.excl)}</b> excl.</div>
-          <div className="text-gray-500">Extra factuurregels: <b className="text-gray-800">{formatEuro(t.extra.excl)}</b> excl.</div>
           {t.perBtw.map((p) => <div key={p.pct} className="text-gray-500">Btw {p.pct.toLocaleString('nl-BE')} %: {formatEuro(p.btw)}</div>)}
           <div className="text-sm">Totaal te factureren: <b>{formatEuro(t.excl)}</b> excl. · <b>{formatEuro(t.incl)}</b> incl.</div>
         </div>
