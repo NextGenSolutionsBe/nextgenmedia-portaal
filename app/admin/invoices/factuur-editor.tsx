@@ -122,7 +122,14 @@ export function RegelsEditor({ regels, onChange, btw, alleenLezen }: { regels: F
 }
 
 export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: EditorProps) {
-  const nieuw = !invoiceId
+  /**
+   * Zodra een nieuwe factuur bewaard is, werkt dit venster verder met haar id:
+   * zo kun je meteen interne kosten loggen (onderaanneming, freelancers,
+   * materiaal) zonder de factuur opnieuw te moeten opzoeken.
+   */
+  const [id, setId] = useState<string | null>(invoiceId ?? null)
+  useEffect(() => { setId(invoiceId ?? null) }, [invoiceId])
+  const nieuw = !id
   const [klanten, setKlanten] = useState<Klant[]>([])
   const [contracten, setContracten] = useState<ContractOptie[]>([])
   const [factuur, setFactuur] = useState<Factuur | null>(null)
@@ -151,7 +158,7 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
     try {
       const [k, f] = await Promise.all([
         fetch('/api/admin/invoices/keuzes', { cache: 'no-store' }).then((r) => r.json()),
-        invoiceId ? fetch(`/api/admin/invoices/${invoiceId}`, { cache: 'no-store' }).then((r) => r.json()) : Promise.resolve(null),
+        id ? fetch(`/api/admin/invoices/${id}`, { cache: 'no-store' }).then((r) => r.json()) : Promise.resolve(null),
       ])
       setKlanten(k.klanten ?? []); setContracten(k.contracten ?? [])
       if (f) {
@@ -162,7 +169,7 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
         setKop(k2); setRegels(f.regels ?? []); setOrigineel(JSON.stringify({ k: k2, r: f.regels ?? [], v: dag(inv.sent_at) })); setVerzendDatum(dag(inv.sent_at))
       }
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Laden mislukt') } finally { setLaden(false) }
-  }, [invoiceId])
+  }, [id])
   useEffect(() => { laad() }, [laad])
 
   const btw = getal(kop.vat_pct, DEFAULT_VAT)
@@ -187,47 +194,60 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
         ? (herhaling === 'maandelijks'
           ? await fetch('/api/admin/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'recurring', client_id: body.client_id, contract_id: body.contract_id, start_month: kop.invoice_date.slice(0, 7), end_month: null, description: kop.description, amount_excl: totalen.excl, vat_pct: btw, invoice_day: factuurdagVan(kop.invoice_date), verantwoordelijke: kop.verantwoordelijke, payment_term_days: body.payment_term_days, lines: regels.map((x) => ({ omschrijving: x.omschrijving || x.artikel, aantal: x.aantal, prijs_excl: x.prijs_excl, classificatie: x.classificatie })) }) })
           : await fetch('/api/admin/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'aanmaken', ...body }) }))
-        : await fetch(`/api/admin/invoices/${invoiceId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, ...(status === 'verstuurd' && verzendDatum ? { sent_at: verzendDatum } : {}) }) })
+        : await fetch(`/api/admin/invoices/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, ...(status === 'verstuurd' && verzendDatum ? { sent_at: verzendDatum } : {}) }) })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
       toast.success(nieuw ? (herhaling === 'maandelijks' ? 'Maandelijkse facturatie aangemaakt — elke maand verschijnt ze in de lijst en de planner.' : 'Factuur aangemaakt — staat in Facturen, in de planner en op het contract.') : 'Factuur opgeslagen.')
-      onSaved?.(nieuw ? j.id : invoiceId!)
-      if (nieuw) onClose(); else await laad()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt') } finally { setBezig(null) }
+      onSaved?.(nieuw ? j.id : id!)
+      if (nieuw) {
+        // Maandelijkse facturatie heeft geen enkele factuur om kosten op te hangen.
+        if (herhaling === 'maandelijks' || !j.id) { onClose(); return null }
+        setId(String(j.id))
+        return String(j.id)
+      }
+      await laad()
+      return id
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt'); return null } finally { setBezig(null) }
+  }
+
+  /** "Kosten loggen" op een nieuwe factuur: eerst bewaren, dan het kostenvenster. */
+  const bewaarEnKosten = async () => {
+    const nieuwId = await bewaar()
+    if (nieuwId) setKosten(true)
   }
 
   const zetStatus = async (naar: Verzendstatus, redenTekst?: string) => {
-    if (!invoiceId) return
+    if (!id) return
     setBezig(naar)
     try {
-      const r = await fetch(`/api/admin/invoices/${invoiceId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'status', status: naar, reden: redenTekst }) })
+      const r = await fetch(`/api/admin/invoices/${id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'status', status: naar, reden: redenTekst }) })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
       toast.success({ verstuurd: 'Gemarkeerd als verstuurd.', te_versturen: 'Terug op te factureren.', geannuleerd: 'Factuur geannuleerd.', gecrediteerd: 'Factuur gecrediteerd.' }[naar])
       setVraag(null); setReden('')
-      onSaved?.(invoiceId); await laad()
+      onSaved?.(id); await laad()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(null) }
   }
 
   const verwijder = async () => {
-    if (!invoiceId) return
+    if (!id) return
     setBezig('verwijderen')
     try {
-      const r = await fetch(`/api/admin/invoices/${invoiceId}`, { method: 'DELETE' })
+      const r = await fetch(`/api/admin/invoices/${id}`, { method: 'DELETE' })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
       toast.success('Factuur verwijderd.')
       setVraagVerwijder(false)
-      onSaved?.(invoiceId)
+      onSaved?.(id)
       onClose()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt') } finally { setBezig(null) }
   }
 
   const bewaarBetaling = async (betaalstatus?: Betaalstatus) => {
-    if (!invoiceId) return
+    if (!id) return
     setBezig('betaling')
     try {
-      const r = await fetch(`/api/admin/invoices/${invoiceId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'betaling', betaalstatus, betaald_bedrag: betaling?.bedrag, betaald_op: betaling?.op || null }) })
+      const r = await fetch(`/api/admin/invoices/${id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'betaling', betaalstatus, betaald_bedrag: betaling?.bedrag, betaald_op: betaling?.op || null }) })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
       toast.success('Betaalstatus bijgewerkt.'); setBetaling(null)
-      onSaved?.(invoiceId); await laad()
+      onSaved?.(id); await laad()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(null) }
   }
 
@@ -239,7 +259,7 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl max-h-[94dvh] flex flex-col overflow-hidden">
         <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-100">
           <div className="min-w-0">
-            <div className="text-[11px] uppercase tracking-wide text-gray-400">{nieuw ? 'Nieuwe factuur' : `Factuur F-${invoiceId!.slice(0, 8).toUpperCase()}`}</div>
+            <div className="text-[11px] uppercase tracking-wide text-gray-400">{nieuw ? 'Nieuwe factuur' : `Factuur F-${id!.slice(0, 8).toUpperCase()}`}</div>
             <h3 className="font-semibold text-gray-900 truncate">{klantNaam}{contractTitel ? ` · ${contractTitel}` : ''}</h3>
             {!nieuw && factuur && (
               <div className="flex items-center gap-2 mt-1 flex-wrap text-xs text-gray-500">
@@ -385,17 +405,22 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
             </button>
           )}
           <button type="button" onClick={onClose} className="btn-secondary text-sm">Sluiten</button>
+          {nieuw && herhaling !== 'maandelijks' && (
+            <button type="button" onClick={bewaarEnKosten} disabled={!!bezig} className="btn-secondary text-sm" title="Bewaart de factuur en opent meteen de interne kosten (onderaanneming, materiaal…)">
+              <Wallet className="h-4 w-4" />Aanmaken en kosten loggen
+            </button>
+          )}
           <button type="button" onClick={bewaar} disabled={!!bezig || (!nieuw && !vuil)} className="btn-primary text-sm">{bezig === 'opslaan' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}{nieuw ? (herhaling === 'maandelijks' ? 'Maandelijkse facturatie aanmaken' : 'Factuur aanmaken (te factureren)') : 'Opslaan'}</button>
         </div>
       </div>
 
-      {kosten && !nieuw && factuur && (
+      {kosten && id && (
         <KostenEnWinstDialoog
-          factuur={{ invoice_id: invoiceId! }}
-          titel={`${klantNaam} · ${dag(factuur.invoice_date).split('-').reverse().join('/')} · ${formatEuro(factuur.amount_excl)} excl. btw${factuur.description ? ` · ${factuur.description}` : ''}`}
-          clientId={factuur.client_id}
+          factuur={{ invoice_id: id }}
+          titel={`${klantNaam} · ${dag(factuur?.invoice_date ?? kop.invoice_date).split('-').reverse().join('/')} · ${formatEuro(factuur?.amount_excl ?? totalen.excl)} excl. btw${(factuur?.description ?? kop.description) ? ` · ${factuur?.description ?? kop.description}` : ''}`}
+          clientId={factuur?.client_id ?? (kop.client_id || null)}
           onClose={() => setKosten(false)}
-          onChanged={() => { onSaved?.(invoiceId!); laad() }}
+          onChanged={() => { onSaved?.(id!); laad() }}
         />
       )}
       {vraagVerwijder && factuur && (
