@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   Plus, FileText, Filter as FilterIcon, X, Search, Bell, Folder, FolderOpen, ChevronRight,
-  Download, Trash2, Loader2,
+  Download, Trash2, Loader2, Mail,
 } from 'lucide-react'
 import { formatDate, SERVICE_LABELS } from '@/lib/utils'
 import { statusInfo, canonicalStatus, STATUS_FILTER_OPTIONS, followUp, averageSignDays, DURATION_TYPES } from '@/lib/contract-status'
@@ -246,6 +246,10 @@ export function ContractsClient({
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <Link href="/admin/contracts/legal-verzending" className="btn-secondary shrink-0" title="Elk contract apart naar het archiefadres mailen, met pdf en certificaat">
+            <Mail className="h-4 w-4" />
+            Naar archiefadres
+          </Link>
           <ArchiefKnop />
           <Link href="/admin/contracts/new" className="btn-primary shrink-0">
             <Plus className="h-4 w-4" />

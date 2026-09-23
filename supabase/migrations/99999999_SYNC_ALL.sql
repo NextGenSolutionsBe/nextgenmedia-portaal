@@ -4879,3 +4879,44 @@ SELECT DISTINCT ON (lower(btrim(c.contract_type))) btrim(c.contract_type), true,
 --   SELECT naam, actief, volgorde FROM public.contract_types ORDER BY volgorde, naam;
 --   SELECT contract_type, count(*) FROM public.contracts GROUP BY 1 ORDER BY 2 DESC;
 --   SELECT count(*) FROM public.contracts WHERE contract_type IS NULL OR btrim(contract_type) = '';  -- verwacht 0
+
+
+-- ── Eenmalige archiefverzending van alle contracten (23 sep 2026) ────────────
+-- Eenmalige archiefverzending van alle contracten naar één adres.
+-- Houdt per contract + ontvanger bij of de mail écht vertrokken is, zodat er
+-- nooit een dubbele mail kan vertrekken en een mislukte verzending apart
+-- opnieuw geprobeerd kan worden.
+create table if not exists contract_legal_verzending (
+  id uuid primary key default gen_random_uuid(),
+  contract_id uuid not null references contracts(id) on delete cascade,
+  ontvanger text not null,
+  onderwerp text,
+  status text not null default 'verstuurd',
+  certificaat boolean not null default false,
+  fout text,
+  message_id text,
+  pogingen integer not null default 1,
+  door text,
+  verstuurd_op timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+do $$
+begin
+  if not exists (select 1 from pg_indexes where indexname = 'contract_legal_verzending_uniek') then
+    create unique index contract_legal_verzending_uniek on contract_legal_verzending (contract_id, ontvanger);
+  end if;
+  if not exists (select 1 from pg_indexes where indexname = 'contract_legal_verzending_status_idx') then
+    create index contract_legal_verzending_status_idx on contract_legal_verzending (status);
+  end if;
+end $$;
+
+alter table contract_legal_verzending enable row level security;
+
+do $$
+begin
+  if not exists (select 1 from pg_policies where tablename = 'contract_legal_verzending' and policyname = 'legal_verzending_service_role') then
+    create policy legal_verzending_service_role on contract_legal_verzending for all to service_role using (true) with check (true);
+  end if;
+end $$;
