@@ -57,8 +57,12 @@ async function getContract(id: string) {
       clientBtw: (clientRowResult.data as { btw_nummer?: string | null } | null)?.btw_nummer ?? null,
       signatures: signatures ?? [],
       events: events ?? [],
-      pdfUrl,
-      signedPdfUrl: signedPdfStored ?? signedPdfFallback,
+      // Nooit de tijdelijke Supabase-link zelf doorgeven: die verloopt na een uur
+      // en dan toont het voorbeeld "InvalidJWT / exp claim". Onze eigen route
+      // streamt het bestand met de sessie van de gebruiker en verloopt niet.
+      // De tijdelijke links dienen enkel om te weten óf het bestand bestaat.
+      pdfUrl: pdfUrl ? `/api/admin/contracts/${contract.id}/download?type=original&weergave=inline&voorbeeld=1` : null,
+      signedPdfUrl: (signedPdfStored ?? signedPdfFallback) ? `/api/admin/contracts/${contract.id}/download?type=signed&weergave=inline&voorbeeld=1` : null,
       archief,
     }
   } catch {

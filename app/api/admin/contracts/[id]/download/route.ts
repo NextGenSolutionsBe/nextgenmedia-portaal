@@ -38,10 +38,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       : null
     const bestandsnaam = documentBestandsnaam(type === 'signed' ? 'getekend_contract' : 'origineel', klantNaam, contract.title, type === 'signed' ? contract.signed_at : contract.created_at)
 
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? req.headers.get('x-real-ip') ?? null
-    await logContractEvent(admin, id, type === 'signed' ? 'downloaded_signed' : 'downloaded_original', {
-      actor: user.email ?? user.id, ip, ua: req.headers.get('user-agent'),
-    })
+    // Het voorbeeld op de contractpagina laadt het bestand ook via deze route;
+    // dat is geen download en hoort dus niet in de tijdlijn.
+    if (req.nextUrl.searchParams.get('voorbeeld') !== '1') {
+      const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? req.headers.get('x-real-ip') ?? null
+      await logContractEvent(admin, id, type === 'signed' ? 'downloaded_signed' : 'downloaded_original', {
+        actor: user.email ?? user.id, ip, ua: req.headers.get('user-agent'),
+      })
+    }
 
     return new NextResponse(await bestand.arrayBuffer(), {
       headers: {
