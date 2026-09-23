@@ -82,6 +82,30 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       } catch { /* kolommen bestaan pas na migratie */ }
       try { revalidatePath(`/admin/contracts/${id}`) } catch { }
       return NextResponse.json({ ok: true })
+    } else if (action === 'looptijd_datums') {
+      // Start- en einddatum aanpassen vanaf het detailscherm. Leeg = niet ingevuld
+      // (einddatum leeg = onbepaalde duur). De einddatum mag niet vóór de start liggen.
+      const dag = (v: unknown) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null)
+      if ((body.start_date && !dag(body.start_date)) || (body.end_date && !dag(body.end_date))) {
+        return NextResponse.json({ error: 'Ongeldige datum.' }, { status: 400 })
+      }
+      const start_date = dag(body.start_date), end_date = dag(body.end_date)
+      if (start_date && end_date && end_date < start_date) {
+        return NextResponse.json({ error: 'De einddatum ligt vóór de startdatum.' }, { status: 400 })
+      }
+      const { data: oud } = await admin.from('contracts').select('start_date, end_date, title').eq('id', id).maybeSingle()
+      const { error } = await admin.from('contracts').update({ start_date, end_date }).eq('id', id)
+      if (error) throw new Error(error.message)
+      await logContractEvent(admin, id, 'fields_edited', { actor: user.email ?? user.id, meta: { veld: 'looptijd', oud: { start_date: oud?.start_date ?? null, end_date: oud?.end_date ?? null }, nieuw: { start_date, end_date } } })
+      const m = requestMeta(req)
+      await logAudit({
+        action: 'contract.looptijd_datums', entityType: 'contract', entityId: id,
+        summary: `Looptijd van "${oud?.title ?? id}": ${oud?.start_date ?? '—'} → ${oud?.end_date ?? '—'} gewijzigd naar ${start_date ?? '—'} → ${end_date ?? 'onbepaald'}`,
+        actorUserId: user.id, actorEmail: user.email ?? null, actorRole: 'admin',
+        metadata: { oud: { start_date: oud?.start_date ?? null, end_date: oud?.end_date ?? null }, nieuw: { start_date, end_date } }, ip: m.ip, userAgent: m.userAgent,
+      })
+      try { revalidatePath('/admin/contracts'); revalidatePath(`/admin/contracts/${id}`) } catch { }
+      return NextResponse.json({ ok: true, start_date, end_date })
     } else if (action === 'contract_type') {
       // Contracttype aanpassen vanaf het detailscherm. Leeg → 'Niet toegewezen',
       // zodat een contract nooit zonder type staat.

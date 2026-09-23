@@ -17,6 +17,7 @@ import { ContractFacturatie } from './contract-facturatie'
 import { ContractNavigatie } from './contract-navigatie'
 import { statusInfo, canonicalStatus } from '@/lib/contract-status'
 import { ContracttypeBewerker } from './contracttype-bewerker'
+import { LooptijdDatums } from './looptijd-datums'
 import { LooptijdDetail } from '../looptijd'
 import { typeVanContract, isNietToegewezen } from '@/lib/contracten/types'
 import { baseUrl } from '@/lib/email'
@@ -168,18 +169,7 @@ export default async function ContractDetailPage({ params }: { params: { id: str
                 <span className="text-gray-500">Aangemaakt:</span>
                 <span>{formatDate(c.created_at)}</span>
               </div>
-              {c.start_date && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Startdatum:</span>
-                  <span>{formatDate(c.start_date)}</span>
-                </div>
-              )}
-              {c.end_date && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Einddatum:</span>
-                  <span>{formatDate(c.end_date)}</span>
-                </div>
-              )}
+              <LooptijdDatums contractId={c.id} start={c.start_date ?? null} eind={c.end_date ?? null} />
               {c.sent_at && (
                 <div className="flex justify-between">
                   <span className="text-gray-500">Verstuurd:</span>
