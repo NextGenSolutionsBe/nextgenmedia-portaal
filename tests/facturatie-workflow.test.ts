@@ -127,6 +127,13 @@ test('verstuurd wordt geteld in de maand van de werkelijke verzenddatum, niet va
   const m = moment({ status: 'verstuurd', datum: '2026-08-30', maand: '2026-08', verzonden_op: '2026-09-02', verwacht_op: '2026-10-02' })
   assert.equal(maandKpi([m], '2026-08').verstuurd, 0); assert.equal(maandKpi([m], '2026-09').verstuurd, 100)
 })
+test('een betaalde factuur telt bij verstuurd, maar niet meer bij verwacht binnen', () => {
+  const m = moment({ status: 'betaald', bedrag_excl: 400, datum: '2026-09-01', verzonden_op: '2026-09-01', verwacht_op: '2026-10-01' })
+  assert.equal(maandKpi([m], '2026-09').verstuurd, 400)
+  assert.equal(maandKpi([m], '2026-10').verwachtBinnen, 0)
+  const open = moment({ id: 'o', status: 'verstuurd', bedrag_excl: 400, datum: '2026-09-01', verzonden_op: '2026-09-01', verwacht_op: '2026-10-01' })
+  assert.equal(maandKpi([open], '2026-10').verwachtBinnen, 400)
+})
 test('lege maand → alles nul, geen NaN', () => {
   const k = maandKpi([], '2026-09'); assert.equal(k.gepland, 0); assert.equal(k.verwachtBinnen, 0)
 })

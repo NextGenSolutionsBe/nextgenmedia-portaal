@@ -79,7 +79,11 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
     const ontbrekend: string[] = []
     if (!i.client_id) ontbrekend.push('klant ontbreekt')
     if (bedrag <= 0) ontbrekend.push('bedrag ontbreekt')
-    const ruwe = normalizeInvoiceStatus(i.status as string)
+    let ruwe: string = normalizeInvoiceStatus(i.status as string)
+    // Volledig betaald? Dan toont de planner dat ook (groen, "Verstuurd · betaald").
+    const betaaldBedrag = Number(i.betaald_bedrag) || 0
+    const inclTotaal = Number(i.amount_incl) || 0
+    if (ruwe === 'verstuurd' && (i.betaalstatus === 'betaald' || (inclTotaal > 0 && betaaldBedrag >= inclTotaal - 0.005))) ruwe = 'betaald'
     const status = bepaalStatus({ ruweStatus: ruwe, datum, ontbrekend, vandaag })
     const herkomst: Herkomst = i.contract_id ? 'contract' : kind === 'wam' ? 'wam' : 'eenmalig'
     const actief = status !== 'verstuurd' && status !== 'betaald' && status !== 'geannuleerd' && status !== 'gecrediteerd'
@@ -96,7 +100,7 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
       contract_id: (i.contract_id as string | null) ?? null, contract_titel: i.contract_id ? (contractTitel.get(String(i.contract_id)) ?? null) : null,
       recurring_id: null, invoice_id: String(i.id), wam_id: (i.wam_id as string | null) ?? null, schema: null, opmerking: (i.note as string | null) ?? null,
       dienst: svc((i.service_slug as string | null) ?? null), betaaltermijn: termijnVan(i.payment_term_days), verzonden_op: dagVan(i.sent_at), verzonden_door: (i.sent_by_email as string | null) ?? null,
-      verwacht_op: verwachtOp(dagVan(i.sent_at), datum, termijnVan(i.payment_term_days)),
+      verwacht_op: dagVan(i.due_date) ?? verwachtOp(dagVan(i.sent_at), datum, termijnVan(i.payment_term_days)),
       acties: {
         bekijkenUrl: `/admin/invoices?maand=${maand}`, aanpassenUrl: `/admin/invoices?maand=${maand}`, voorbereidenUrl: null,
         kanVerstuurd: actief, kanVerplaatsen: magVerplaatsen(status), kanAnnuleren: actief, 

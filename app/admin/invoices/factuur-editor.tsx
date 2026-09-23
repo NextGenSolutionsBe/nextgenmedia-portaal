@@ -41,9 +41,12 @@ const plusDagen = (d: string, n: number) => { const x = new Date(d + 'T12:00:00Z
 const ACTIE_LABEL: Record<string, string> = { aangemaakt: 'Aangemaakt', bevestigd: 'Bevestigd uit voorstel', aangepast: 'Aangepast', verplaatst: 'Datum verplaatst', verstuurd: 'Verstuurd', geannuleerd: 'Geannuleerd', gecrediteerd: 'Gecrediteerd', betaalstatus: 'Betaling' }
 const VELD_LABEL: Record<string, string> = { invoice_date: 'factuurdatum', due_date: 'vervaldatum', periode: 'periode', reference: 'referentie', note: 'interne notitie', payment_term_days: 'betaaltermijn', client_id: 'klant', contract_id: 'contract', description: 'omschrijving', currency: 'valuta', vat_pct: 'btw-tarief', amount_excl: 'bedrag excl.', amount_incl: 'bedrag incl.', contract_bedrag_excl: 'contractueel bedrag', regels: 'factuurregels', status: 'status', betaald_bedrag: 'betaald bedrag' }
 
-export function StatusChip({ status, klein }: { status: Verzendstatus | string; klein?: boolean }) {
+export function StatusChip({ status, klein, betaald }: { status: Verzendstatus | string; klein?: boolean; betaald?: boolean }) {
   const s = VERZENDSTATUS[status as Verzendstatus] ?? VERZENDSTATUS.te_versturen
-  return <span className={`inline-flex items-center gap-1 rounded-full border px-2 ${klein ? 'py-0 text-[10px]' : 'py-0.5 text-[11px]'} font-medium whitespace-nowrap ${s.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${s.stip}`} />{s.label}</span>
+  // Een betaalde factuur mag nergens nog als "enkel verstuurd" ogen.
+  const label = betaald && s.key === 'verstuurd' ? 'Verstuurd & betaald' : s.label
+  const cls = betaald && s.key === 'verstuurd' ? 'bg-green-100 text-green-900 border-green-300' : s.cls
+  return <span className={`inline-flex items-center gap-1 rounded-full border px-2 ${klein ? 'py-0 text-[10px]' : 'py-0.5 text-[11px]'} font-medium whitespace-nowrap ${cls}`}><span className={`h-1.5 w-1.5 rounded-full ${betaald && s.key === 'verstuurd' ? 'bg-green-600' : s.stip}`} />{label}</span>
 }
 export function BetaalChip({ status, klein }: { status: Betaalstatus | null; klein?: boolean }) {
   if (!status) return <span className="text-[11px] text-gray-400">—</span>
@@ -226,7 +229,7 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
             <h3 className="font-semibold text-gray-900 truncate">{klantNaam}{contractTitel ? ` · ${contractTitel}` : ''}</h3>
             {!nieuw && factuur && (
               <div className="flex items-center gap-2 mt-1 flex-wrap text-xs text-gray-500">
-                <StatusChip status={status} /><BetaalChip status={factuur.betaalstatus_afgeleid} />
+                <StatusChip status={status} betaald={factuur.betaalstatus_afgeleid === 'betaald'} /><BetaalChip status={factuur.betaalstatus_afgeleid} />
                 {factuur.sent_at && <span>verstuurd op {dag(factuur.sent_at).split('-').reverse().join('/')}{factuur.sent_by_email ? ` door ${factuur.sent_by_email.split('@')[0]}` : ''}</span>}
                 {factuur.status_reden && <span className="text-red-700">reden: {factuur.status_reden}</span>}
               </div>

@@ -120,7 +120,7 @@ export function ContractFacturatie({ contractId, clientId, contractTitle, isSign
                   <td className="px-2 py-1.5 whitespace-nowrap">{f.sent_at ? d(f.sent_at) : '—'}</td>
                   <td className="px-2 py-1.5 text-right tabular-nums font-medium">{formatEuro(f.amount_excl)}</td>
                   <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">{formatEuro(f.amount_incl)}</td>
-                  <td className="px-2 py-1.5">{f.bron === 'recurring' ? <span className="text-[10px] rounded-full border border-purple-200 bg-purple-50 text-purple-700 px-2 py-0.5">{f.recurring?.actief ? 'Loopt' : 'Stopgezet'}</span> : <StatusChip status={f.status} klein />}</td>
+                  <td className="px-2 py-1.5">{f.bron === 'recurring' ? <span className="text-[10px] rounded-full border border-purple-200 bg-purple-50 text-purple-700 px-2 py-0.5">{f.recurring?.actief ? 'Loopt' : 'Stopgezet'}</span> : <StatusChip status={f.status} klein betaald={f.betaalstatus === 'betaald'} />}</td>
                   <td className="px-2 py-1.5"><BetaalChip status={f.betaalstatus} klein /></td>
                   <td className="px-2 py-1.5 text-gray-600 truncate max-w-[120px]">{f.verantwoordelijke ?? '—'}</td>
                   <td className="px-2 py-1.5 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>

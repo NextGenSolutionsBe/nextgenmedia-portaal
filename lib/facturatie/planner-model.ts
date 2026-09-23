@@ -196,7 +196,8 @@ export function samenvatting(momenten: Moment[], vandaag: string): Samenvatting 
  *  · reeds verstuurd: facturen die in die maand effectief verstuurd zijn;
  *  · totaal gepland: de som van beide;
  *  · verwacht binnen: verstuurde facturen waarvan de verwachte ontvangstdatum
- *    (verzenddatum + betaaltermijn) in de maand valt — bewust "verwacht", niet
+ *    (verzenddatum + betaaltermijn) in de maand valt en die nog niet betaald
+ *    zijn — bewust "verwacht", niet
  *    "ontvangen": de app heeft geen betaal- of boekhoudkoppeling.
  * Geannuleerd telt nergens mee.
  */
@@ -208,7 +209,8 @@ export function maandKpi(momenten: Moment[], ym: string): MaandKpi {
     const isVerstuurd = m.status === 'verstuurd' || m.status === 'betaald'
     if (!isVerstuurd && ymVan(m.datum) === ym) { teFactureren += m.bedrag_excl; nTe++ }
     if (isVerstuurd && ymVan(m.verzonden_op ?? m.datum) === ym) { verstuurd += m.bedrag_excl; nV++ }
-    if (isVerstuurd && ymVan(m.verwacht_op) === ym) { verwacht += m.bedrag_excl; nW++ }
+    // Al betaald? Dan staat het geld er; het hoort niet meer bij "verwacht binnen".
+    if (isVerstuurd && m.status !== 'betaald' && ymVan(m.verwacht_op) === ym) { verwacht += m.bedrag_excl; nW++ }
   }
   const r = (n: number) => Math.round(n * 100) / 100
   return { teFactureren: r(teFactureren), teFacturerenAantal: nTe, verstuurd: r(verstuurd), verstuurdAantal: nV, gepland: r(teFactureren + verstuurd), verwachtBinnen: r(verwacht), verwachtBinnenAantal: nW }

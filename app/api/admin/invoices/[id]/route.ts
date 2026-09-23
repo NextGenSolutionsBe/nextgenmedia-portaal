@@ -161,6 +161,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (le) throw new Error(le.message)
     }
 
+    // Vervaldatum = geplande datum + betaaltermijn (standaard 30 dagen), tenzij
+    // ze uitdrukkelijk meegegeven wordt. Zo klopt "verwacht binnen" altijd.
+    if (!('due_date' in b) && ('invoice_date' in b || 'payment_term_days' in b)) {
+      const basis = (patch.invoice_date as string | undefined) ?? String(inv.invoice_date).slice(0, 10)
+      const termijn = patch.payment_term_days !== undefined ? Number(patch.payment_term_days) : Number(inv.payment_term_days)
+      const dagen = Number.isFinite(termijn) && termijn !== null ? Math.max(0, Math.round(termijn)) : 30
+      const d = new Date(basis + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + dagen)
+      patch.due_date = d.toISOString().slice(0, 10)
+      if (patch.payment_term_days === undefined && (inv.payment_term_days === null || inv.payment_term_days === undefined)) patch.payment_term_days = dagen
+    }
+
     const velden = ['invoice_date', 'due_date', 'periode', 'reference', 'note', 'payment_term_days', 'client_id', 'contract_id', 'description', 'currency', 'vat_pct', 'amount_excl', 'amount_incl', 'contract_bedrag_excl', 'verantwoordelijke', 'sent_at']
     const diff = verschillen(inv as Record<string, unknown>, { ...inv, ...patch } as Record<string, unknown>, velden)
     const rijen: { actie: string; veld: string; oud: string | null; nieuw: string | null }[] = diff.map((d) => ({ actie: d.veld === 'invoice_date' ? 'verplaatst' : 'aangepast', veld: d.veld, oud: d.oud, nieuw: d.nieuw }))

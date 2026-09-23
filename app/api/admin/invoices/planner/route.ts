@@ -75,7 +75,10 @@ export async function POST(req: NextRequest) {
         if (!isDatum(b.datum ?? '')) return NextResponse.json({ error: 'Geef een geldige datum.' }, { status: 400 })
         // Ook een verstuurde of betaalde factuur mag van datum veranderen (een
         // verkeerde datum moet je kunnen rechtzetten); contract en Facturen volgen mee.
-        const { error } = await admin.from('invoices').update({ invoice_date: b.datum, invoice_month: ymVan(b.datum!), updated_at: new Date().toISOString() }).eq('id', inv.id)
+        // De vervaldatum schuift mee: geplande datum + betaaltermijn (standaard 30 dagen).
+        const termijn = Number(inv.payment_term_days); const dagen = Number.isFinite(termijn) && termijn > 0 ? Math.round(termijn) : 30
+        const verval = new Date(`${b.datum}T12:00:00Z`); verval.setUTCDate(verval.getUTCDate() + dagen)
+        const { error } = await admin.from('invoices').update({ invoice_date: b.datum, invoice_month: ymVan(b.datum!), due_date: verval.toISOString().slice(0, 10), payment_term_days: dagen, updated_at: new Date().toISOString() }).eq('id', inv.id)
         if (error) throw new Error(error.message)
         try { await admin.from('invoice_wijzigingen').insert({ invoice_id: inv.id, actie: 'verplaatst', veld: 'invoice_date', oud: String(inv.invoice_date).slice(0, 10), nieuw: b.datum, reden: 'Verplaatst in de facturatieplanner', actor_email: actor.email ?? null }) } catch { /* */ }
         await audit(`Factuurdatum verplaatst ${inv.invoice_date} → ${b.datum}`, { van: inv.invoice_date, naar: b.datum })
