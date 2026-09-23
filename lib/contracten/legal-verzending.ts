@@ -12,7 +12,7 @@
 import { statusInfo } from '@/lib/contract-status'
 
 /** Waar het archief naartoe gaat als er niets anders is ingesteld. */
-export const LEGAL_VERZENDING_STANDAARD = 'info@nextgenmedia.be'
+export const LEGAL_VERZENDING_STANDAARD = 'legal@nextgenmedia.be'
 
 /** Exact de zin die in de mail moet staan als er geen certificaat is. */
 export const GEEN_CERTIFICAAT_ZIN = 'Geen ondertekeningscertificaat beschikbaar.'

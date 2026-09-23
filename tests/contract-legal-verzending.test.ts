@@ -79,9 +79,9 @@ test('7. Overzicht: verstuurd, mislukt, nog te doen en zonder certificaat', () =
   assert.deepEqual(s.mislukteContracten, [{ id: 'c', naam: 'Garage Vantilt — Samenwerkingsovereenkomst', fout: 'Geen pdf' }])
 })
 
-test('8. Ontvanger: standaard info@nextgenmedia.be, onzin valt terug', () => {
+test('8. Ontvanger: standaard legal@nextgenmedia.be, onzin valt terug', () => {
   assert.equal(ontvangerVan(null), LEGAL_VERZENDING_STANDAARD)
-  assert.equal(LEGAL_VERZENDING_STANDAARD, 'info@nextgenmedia.be')
+  assert.equal(LEGAL_VERZENDING_STANDAARD, 'legal@nextgenmedia.be')
   assert.equal(ontvangerVan('  Legal@Voorbeeld.BE '), 'legal@voorbeeld.be')
   assert.equal(ontvangerVan('geen adres'), LEGAL_VERZENDING_STANDAARD)
 })
