@@ -15,7 +15,7 @@ type Mw = {
   volgende: { datum: string; start_tijd: string; eind_tijd: string; taak: string | null; project: string | null } | null
   openUren: number; openBeschikbaar: number; actiefIngeklokt: boolean
 }
-type Antwoord = { medewerkers: Mw[]; van: string; tot: string; magFinancieel: boolean }
+type Antwoord = { medewerkers: Mw[]; zonderDossier?: { id: string; naam: string | null; email: string | null; actief: boolean }[]; van: string; tot: string; magFinancieel: boolean }
 
 const vandaag = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Brussels' }).format(new Date())
 const maandBereik = (ym: string) => { const [j, m] = ym.split('-').map(Number); return { van: `${ym}-01`, tot: `${ym}-${String(new Date(Date.UTC(j, m, 0)).getUTCDate()).padStart(2, '0')}` } }
@@ -70,6 +70,23 @@ export function OverzichtTab() {
         <label className="text-xs text-gray-500">Periode<input type="month" className={`${sel} block`} value={periode.van.slice(0, 7)} onChange={(e) => e.target.value && setPeriode(maandBereik(e.target.value))} /></label>
         <button type="button" onClick={() => setNieuw(true)} className="btn-primary text-sm"><Plus className="h-4 w-4" />Medewerker toevoegen</button>
       </div>
+
+      {(data?.zonderDossier ?? []).length > 0 && (
+        <div className="card-base p-3 border-blue-200 bg-blue-50/50 text-sm space-y-2">
+          <div className="font-medium text-blue-900">Werknemers met een login maar nog zonder personeelsdossier</div>
+          <div className="flex flex-wrap gap-2">
+            {data!.zonderDossier!.map((z) => (
+              <button key={z.id} type="button" onClick={async () => {
+                try { const r = await api<{ id: string }>('/api/admin/personeel', { body: { staff_id: z.id } }); toast.success('Dossier aangemaakt op dezelfde login.'); router.push(`/admin/personeel/${r.id}`) }
+                catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') }
+              }} className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs hover:border-blue-400">
+                <Plus className="h-3 w-3 inline -mt-0.5 mr-1" />{z.naam ?? z.email}{!z.actief ? ' (inactief)' : ''}
+              </button>
+            ))}
+          </div>
+          <div className="text-[11px] text-blue-900/70">Eén klik maakt het dossier aan op hun bestaande login — geen tweede account.</div>
+        </div>
+      )}
 
       {!data ? <div className="py-12 text-center text-gray-400"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div> : lijst.length === 0 ? (
         <div className="card-base text-center py-12 text-sm text-gray-400">Geen medewerkers voor deze filters.</div>

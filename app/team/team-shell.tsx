@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { Timer, CalendarDays, CalendarPlus, ListChecks, Bell, LogOut } from 'lucide-react'
+import { Timer, CalendarDays, CalendarPlus, ListChecks, Bell, LogOut, LayoutDashboard } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Logo } from '@/components/logo'
 
@@ -16,7 +16,7 @@ const NAV = [
 ]
 
 /** Mobiele shell: kop bovenaan, navigatie onderaan (duim-vriendelijk), op desktop gecentreerd. */
-export function TeamShell({ voornaam, children }: { voornaam: string; children: React.ReactNode }) {
+export function TeamShell({ voornaam, portaal = false, children }: { voornaam: string; portaal?: boolean; children: React.ReactNode }) {
   const pad = usePathname()
   const router = useRouter()
   const [ongelezen, setOngelezen] = useState(0)
@@ -38,7 +38,10 @@ export function TeamShell({ voornaam, children }: { voornaam: string; children: 
       <header className="sticky top-0 z-30 bg-white border-b border-gray-100">
         <div className="max-w-2xl mx-auto flex items-center justify-between px-4 h-14">
           <div className="flex items-center gap-2"><Logo className="h-8 w-8" /><span className="font-semibold text-sm">Hoi {voornaam}</span></div>
-          <button type="button" onClick={uitloggen} className="text-xs text-gray-500 hover:text-black inline-flex items-center gap-1"><LogOut className="h-4 w-4" />Uitloggen</button>
+          <div className="flex items-center gap-3">
+            {portaal && <Link href="/admin" prefetch={false} className="text-xs text-gray-600 hover:text-black inline-flex items-center gap-1"><LayoutDashboard className="h-4 w-4" />Portaal</Link>}
+            <button type="button" onClick={uitloggen} className="text-xs text-gray-500 hover:text-black inline-flex items-center gap-1"><LogOut className="h-4 w-4" />Uitloggen</button>
+          </div>
         </div>
       </header>
       <main className="flex-1 w-full max-w-2xl mx-auto px-4 py-4 pb-28">{children}</main>

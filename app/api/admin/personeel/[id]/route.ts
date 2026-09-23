@@ -6,6 +6,7 @@ import { isMedewerkerType } from '@/lib/personeel/model'
 import { kostPer, uurOpbouw } from '@/lib/personeel/kost'
 import { dagBrussel, plusDagen } from '@/lib/personeel/tijd'
 import { tekst, dagOf, getal, isUuid, verschillen } from '@/lib/personeel/invoer'
+import { internAccount } from '@/lib/personeel/koppeling'
 
 export const dynamic = 'force-dynamic'
 
@@ -61,6 +62,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       verborgenDocumenten: ((docs.data ?? []) as unknown[]).length - zichtbareDocs.length,
       sessies: sessies.data ?? [], planning: planning.data ?? [], beschikbaarheid: beschikbaar.data ?? [],
       logboek: log, tarieven, kostenposten: posten.data ?? [],
+      intern: await internAccount(admin, { auth_user_id: p.auth_user_id ?? null, email: p.email ?? null }),
       magFinancieel: financieel, magGevoelig: gevoelig,
     })
   } catch (err) {

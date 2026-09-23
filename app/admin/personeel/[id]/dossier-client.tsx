@@ -24,7 +24,9 @@ type Log = { id: number; entiteit: string; actie: string; oud: unknown; nieuw: u
 type Dossier = {
   medewerker: Medewerker; gevoelig: { adres: string | null; geboortedatum: string | null; noodcontact: string | null; rijksregisternummer: string | null; iban: string | null } | null
   documenten: Doc[]; verborgenDocumenten: number; tarieven: TariefMet[] | null; logboek: Log[]; magFinancieel: boolean; magGevoelig: boolean
+  intern: { gekoppeld: Intern | null; kandidaat: Intern | null }
 }
+type Intern = { id: string; email: string | null; name: string | null; rol?: string | null; permissions?: string[]; active?: boolean | null }
 
 const TABS = [['gegevens', 'Gegevens'], ['documenten', 'Documenten'], ['kosten', 'Kosten'], ['uren', 'Uren'], ['planning', 'Planning'], ['account', 'Account'], ['logboek', 'Logboek']] as const
 type Tab = (typeof TABS)[number][0]
@@ -70,7 +72,7 @@ export function DossierClient({ id }: { id: string }) {
       {tab === 'kosten' && d.magFinancieel && <><Tarieven id={id} tarieven={d.tarieven ?? []} type={m.type} onKlaar={laad} /><KostenTab personeelId={id} /></>}
       {tab === 'uren' && <UrenTab personeelId={id} />}
       {tab === 'planning' && <PlanningTab personeelId={id} />}
-      {tab === 'account' && <Account id={id} m={m} onKlaar={laad} />}
+      {tab === 'account' && <Account id={id} m={m} intern={d.intern} onKlaar={laad} />}
       {tab === 'logboek' && <Logboek log={d.logboek} />}
     </div>
   )
@@ -287,7 +289,7 @@ function Tarieven({ id, tarieven, type, onKlaar }: { id: string; tarieven: Tarie
   )
 }
 
-function Account({ id, m, onKlaar }: { id: string; m: Medewerker; onKlaar: () => void }) {
+function Account({ id, m, intern, onKlaar }: { id: string; m: Medewerker; intern: Dossier['intern']; onKlaar: () => void }) {
   const [email, setEmail] = useState(m.email ?? '')
   const [bezig, setBezig] = useState<string | null>(null)
   const doe = async (actie: string, bevestig?: string) => {
@@ -295,7 +297,7 @@ function Account({ id, m, onKlaar }: { id: string; m: Medewerker; onKlaar: () =>
     setBezig(actie)
     try {
       await api(`/api/admin/personeel/${id}/account`, { body: { actie, email } })
-      toast.success({ aanmaken: 'Login aangemaakt. Verstuur nu de uitnodiging.', uitnodigen: 'Uitnodiging verstuurd.', reset: 'Link om het wachtwoord te herstellen verstuurd.', blokkeren: 'Login geblokkeerd.', deblokkeren: 'Login weer actief.' }[actie] ?? 'Klaar.')
+      toast.success({ koppelen: 'Bestaande login gekoppeld — één account voor portaal en inklokken.', aanmaken: 'Login aangemaakt. Verstuur nu de uitnodiging.', uitnodigen: 'Uitnodiging verstuurd.', reset: 'Link om het wachtwoord te herstellen verstuurd.', blokkeren: 'Login geblokkeerd.', deblokkeren: 'Login weer actief.' }[actie] ?? 'Klaar.')
       onKlaar()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(null) }
   }
@@ -304,6 +306,19 @@ function Account({ id, m, onKlaar }: { id: string; m: Medewerker; onKlaar: () =>
     <div className="card-base p-4 space-y-4 max-w-2xl">
       <div><h2 className="text-sm font-semibold">Werknemersaccount</h2><p className="text-xs text-gray-500">Met deze login komt de medewerker in de eigen werkomgeving (app.nextgenmedia.be/team): inklokken, beschikbaarheid, planning en briefings. Nooit in het beheer en nooit financiële gegevens.</p></div>
       <div className="flex items-center gap-2 text-sm"><span className="text-gray-500">Status:</span><Chip cls="bg-white border-gray-200 text-gray-700">{ACCOUNT_LABEL[m.account_status]}</Chip>{m.uitnodiging_verzonden_at && <span className="text-xs text-gray-500">laatste mail {datumNl(m.uitnodiging_verzonden_at.slice(0, 10))}</span>}</div>
+      {intern.gekoppeld && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 space-y-1">
+          <div className="font-medium">Ook een interne login (werknemer)</div>
+          <div className="text-xs">Rol: {intern.gekoppeld.rol ?? 'medewerker'} · modules: {(intern.gekoppeld.permissions ?? []).join(', ') || 'geen'}{intern.gekoppeld.active === false ? ' · inactief' : ''}</div>
+          <div className="text-xs">Met dezelfde login werkt {m.voornaam} in het portaal én klokt ze in via “Mijn werk”. Rol, modules, (in)actief zetten en wachtwoord beheer je in <Link href="/admin/personeel?tab=accounts" className="underline">Accounts en rechten</Link>.</div>
+        </div>
+      )}
+      {!m.auth_user_id && intern.kandidaat && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 space-y-2">
+          <div><b>{intern.kandidaat.email}</b> bestaat al als werknemerslogin. Koppel die in plaats van een tweede account aan te maken.</div>
+          <button type="button" disabled={!!bezig} onClick={() => doe('koppelen')} className="btn-primary text-sm">{spin('koppelen') || <KeyRound className="h-4 w-4" />}Bestaande login koppelen</button>
+        </div>
+      )}
       {!m.auth_user_id ? (
         <div className="space-y-2">
           <div><label className={LBL}>E-mailadres voor de login</label><input type="email" className={INP} value={email} onChange={(e) => setEmail(e.target.value)} /></div>
@@ -315,7 +330,7 @@ function Account({ id, m, onKlaar }: { id: string; m: Medewerker; onKlaar: () =>
           <div className="w-full text-sm">Login: <b>{m.email}</b></div>
           {m.account_status !== 'geblokkeerd' && <button type="button" disabled={!!bezig} onClick={() => doe('uitnodigen', `Uitnodiging sturen naar ${m.email}?`)} className="btn-primary">{spin('uitnodigen') || <Mail className="h-4 w-4" />}Uitnodiging versturen</button>}
           {m.account_status !== 'geblokkeerd' && <button type="button" disabled={!!bezig} onClick={() => doe('reset', `Een link om het wachtwoord opnieuw in te stellen sturen naar ${m.email}?`)} className="btn-secondary">{spin('reset') || <RefreshCw className="h-4 w-4" />}Wachtwoord opnieuw instellen</button>}
-          {m.account_status === 'geblokkeerd'
+          {intern.gekoppeld ? null : m.account_status === 'geblokkeerd'
             ? <button type="button" disabled={!!bezig} onClick={() => doe('deblokkeren')} className="btn-secondary">{spin('deblokkeren') || <CheckCircle2 className="h-4 w-4" />}Deblokkeren</button>
             : <button type="button" disabled={!!bezig} onClick={() => doe('blokkeren', 'De login onmiddellijk blokkeren? Het dossier en alle uren blijven bewaard.')} className="btn-secondary text-red-600">{spin('blokkeren') || <Ban className="h-4 w-4" />}Blokkeren</button>}
         </div>

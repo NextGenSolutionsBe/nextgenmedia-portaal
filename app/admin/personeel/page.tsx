@@ -7,6 +7,8 @@ export const dynamic = 'force-dynamic'
 
 /** Personeel: dossiers, dashboard, urencontrole, planning, kosten en meldingen. */
 export default async function PersoneelPage() {
-  if (!(await magIk('personeel', 'bekijken'))) redirect('/admin')
-  return <Suspense><PersoneelClient /></Suspense>
+  const persoon = await magIk('personeel', 'bekijken')
+  if (!persoon) redirect('/admin')
+  // Accounts en rechten (de vroegere pagina Werknemers) blijven voor hoofdbeheerders.
+  return <Suspense><PersoneelClient isAdmin={persoon.isAdmin} /></Suspense>
 }

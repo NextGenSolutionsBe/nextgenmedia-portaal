@@ -4,6 +4,7 @@ import { safeMessage } from '@/lib/api-error'
 import { sendEmail, baseUrl } from '@/lib/email'
 import { eisPersoneel, audit } from '@/lib/personeel/server'
 import { isUuid, tekst } from '@/lib/personeel/invoer'
+import { internAccount } from '@/lib/personeel/koppeling'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,6 +30,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { data: p } = await admin.from('personeel').select('*').eq('id', id).maybeSingle()
     if (!p) return NextResponse.json({ error: 'Medewerker niet gevonden' }, { status: 404 })
     const log = (actie: string, nieuw?: unknown) => audit(admin, { personeel_id: id, entiteit: 'account', entiteit_id: id, actie, nieuw: nieuw ?? null, actor_email: persoon.email, actor_id: persoon.userId })
+
+    if (b.actie === 'koppelen') {
+      if (p.auth_user_id) return NextResponse.json({ error: 'Er is al een login gekoppeld.' }, { status: 409 })
+      const { kandidaat } = await internAccount(admin, { auth_user_id: null, email: (tekst(b.email, 200) ?? p.email ?? '').toLowerCase() || null })
+      if (!kandidaat?.auth_user_id) return NextResponse.json({ error: 'Geen bestaande werknemerslogin gevonden met dit e-mailadres.' }, { status: 404 })
+      const { data: bezet } = await admin.from('personeel').select('id').eq('auth_user_id', kandidaat.auth_user_id).maybeSingle()
+      if (bezet) return NextResponse.json({ error: 'Deze login hoort al bij een ander personeelsdossier.' }, { status: 409 })
+      await admin.from('personeel').update({ auth_user_id: kandidaat.auth_user_id, email: kandidaat.email, account_status: 'actief', updated_at: new Date().toISOString() }).eq('id', id)
+      await log('login_gekoppeld', { werknemer: kandidaat.email })
+      return NextResponse.json({ ok: true })
+    }
 
     if (b.actie === 'aanmaken') {
       if (p.auth_user_id) return NextResponse.json({ error: 'Deze medewerker heeft al een login.' }, { status: 409 })
@@ -78,6 +90,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     if (b.actie === 'blokkeren' || b.actie === 'deblokkeren') {
       if (!p.auth_user_id) return NextResponse.json({ error: 'Er is nog geen login.' }, { status: 400 })
+      const { gekoppeld } = await internAccount(admin, { auth_user_id: p.auth_user_id, email: null })
+      if (gekoppeld) return NextResponse.json({ error: 'Dit is ook een interne werknemerslogin. Zet die (in)actief via Personeel → Accounts en rechten.' }, { status: 409 })
       const blok = b.actie === 'blokkeren'
       const { error } = await admin.auth.admin.updateUserById(p.auth_user_id, { ban_duration: blok ? BAN_DUUR : 'none' })
       if (error) throw new Error(error.message)

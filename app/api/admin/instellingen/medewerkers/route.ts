@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { dossierVoorWerknemer } from '@/lib/personeel/koppeling'
 import { randomBytes } from 'crypto'
 import { revalidatePath } from 'next/cache'
 import { safeMessage } from '@/lib/api-error'
@@ -69,7 +70,10 @@ export async function POST(req: NextRequest) {
       actorUserId: g.persoon.userId, actorEmail: g.persoon.email, actorRole: 'admin',
       metadata: { rol, functie, modules: permissions, wachtwoordGezet: !!wachtwoord }, ip: meta.ip, userAgent: meta.userAgent,
     })
-    try { revalidatePath('/admin/werknemers'); revalidatePath('/admin/instellingen') } catch { /* */ }
+    // Werknemers en Personeel zijn één geheel: elke interne login krijgt een
+    // personeelsdossier (uren, planning, documenten) op dezelfde login.
+    try { await dossierVoorWerknemer(admin, { id: row.id, auth_user_id: uid, email, name: naam, voornaam, achternaam: achternaam || null, functie, active: true }, g.persoon.email) } catch { /* dossier is best-effort */ }
+    try { revalidatePath('/admin/werknemers'); revalidatePath('/admin/instellingen'); revalidatePath('/admin/personeel') } catch { /* */ }
     return NextResponse.json({ ok: true, id: row.id, uitnodigingNodig: !wachtwoord })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })

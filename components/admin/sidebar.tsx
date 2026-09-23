@@ -7,8 +7,8 @@ import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
-  Info, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, UserCog, CalendarClock, BarChart3, KanbanSquare,
-  MailCheck, PhoneCall, FolderUp, Handshake, Plug, Settings, ClipboardPen, Contact,
+  Info, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
+  MailCheck, PhoneCall, FolderUp, Handshake, Plug, Settings, ClipboardPen, Contact, Timer,
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
@@ -128,9 +128,10 @@ const SECTIONS: NavSection[] = [
   {
     title: 'Beheer',
     items: [
-      // Personeel = medewerkers die per uur werken (planning, inklokken, kosten).
+      // Personeel = iedereen die voor ons werkt: dossiers, planning, uren, kosten
+      // én (voor hoofdbeheerders) de logins met rollen en modules — de vroegere
+      // pagina Werknemers zit hier als tabblad in.
       { label: 'Personeel', href: '/admin/personeel', icon: Contact, module: 'personeel' },
-      { label: 'Werknemers', href: '/admin/werknemers', icon: UserCog, adminOnly: true },
     ],
   },
 ]
@@ -213,7 +214,7 @@ function NavItem({
   )
 }
 
-export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, instellingen, rol = 'hoofdbeheerder', verborgenPersoonlijk = [], toonInstellingen = false }: {
+export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, instellingen, rol = 'hoofdbeheerder', verborgenPersoonlijk = [], toonInstellingen = false, mijnWerk = false }: {
   allowedModules?: string[]
   isEmployee?: boolean
   /** Voornaam van wie er ingelogd is — voor de begroeting bovenaan. */
@@ -227,6 +228,8 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
   verborgenPersoonlijk?: string[]
   /** Knop "Instellingen" onderaan tonen (hoofdbeheerder, of beheerder met dat recht). */
   toonInstellingen?: boolean
+  /** Heeft deze login een personeelsdossier? Dan staat "Mijn werk" (inklokken, planning) bovenaan. */
+  mijnWerk?: boolean
 } = {}) {
   const router = useRouter()
   const { refresh, spinning } = useRefresh()
@@ -359,6 +362,14 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
 
         {/* Navigation */}
         <nav className="flex-1 px-3 py-4 overflow-y-auto">
+          {/* Wie ook een personeelsdossier heeft: inklokken, planning en
+              beschikbaarheid, met dezelfde login als het portaal. */}
+          {mijnWerk && (
+            <Link href="/team" prefetch={false} onClick={closeMobile} className="sidebar-item mb-3 bg-[#fff848]/40 hover:bg-[#fff848]/60 font-medium">
+              <Timer className="h-4 w-4 shrink-0" />
+              Mijn werk · inklokken
+            </Link>
+          )}
           {visibleSections.map((section, si) => (
             <div key={section.title ?? `sec-${si}`} className={si > 0 ? 'mt-4' : ''}>
               {section.title && (
