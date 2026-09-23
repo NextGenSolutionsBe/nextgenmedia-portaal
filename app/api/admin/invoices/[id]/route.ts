@@ -194,6 +194,57 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
  *  · 'status' { status, reden? }: te_versturen ↔ verstuurd, geannuleerd, gecrediteerd (reden verplicht bij annuleren/crediteren)
  *  · 'betaling' { betaalstatus?, betaald_bedrag?, betaald_op? }
  */
+/**
+ * DELETE — de factuur definitief verwijderen.
+ *
+ * Annuleren is meestal beter (de factuur blijft dan in de historiek staan),
+ * maar een factuur die er per vergissing staat moet echt weg kunnen. Regels,
+ * wijzigingshistoriek en kostenlijnen gaan mee (cascade); een opdracht, een
+ * WAM-termijn of een recurring-maand die naar deze factuur wees, wordt enkel
+ * losgekoppeld. Het logboek houdt bij wie wat wanneer wiste.
+ */
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { id } = await params
+    if (!UUID.test(id)) return NextResponse.json({ error: 'Ongeldig id' }, { status: 400 })
+    const actor = await magIk('invoices', 'verwijderen')
+    if (!actor) return NextResponse.json({ error: 'Je hebt geen recht om facturen te verwijderen.' }, { status: 403 })
+    const admin = createAdminSupabaseClient()
+    const { data: inv } = await admin.from('invoices').select('*').eq('id', id).maybeSingle()
+    if (!inv) return NextResponse.json({ error: 'Factuur niet gevonden' }, { status: 404 })
+
+    let klant: string | null = null
+    if (inv.client_id) {
+      const { data: c } = await admin.from('clients').select('company_name').eq('id', inv.client_id).maybeSingle()
+      klant = (c?.company_name as string | null) ?? null
+    }
+    // Verwijzingen losmaken — die records blijven bestaan.
+    const losgemaakt: Record<string, number> = {}
+    for (const [tabel, kolom] of [['contract_facturatie_opdrachten', 'invoice_id'], ['opdrachten', 'invoice_id'], ['vesting_wam_termijnen', 'invoice_id'], ['recurring_invoice_months', 'invoice_id']] as const) {
+      try {
+        const { data } = await admin.from(tabel).update({ [kolom]: null }).eq(kolom, id).select('id')
+        if ((data ?? []).length) losgemaakt[tabel] = (data ?? []).length
+      } catch { /* tabel of kolom kan ontbreken */ }
+    }
+
+    const { error } = await admin.from('invoices').delete().eq('id', id)
+    if (error) throw new Error(error.message)
+
+    const meta = requestMeta(req)
+    await logAudit({
+      action: 'invoice.deleted', entityType: 'invoice', entityId: id,
+      summary: `Factuur verwijderd: ${inv.reference ? `${inv.reference} · ` : ''}${klant ?? 'zonder klant'} · € ${Number(inv.amount_incl ?? 0).toFixed(2)} incl. (${String(inv.invoice_date).slice(0, 10)})`,
+      actorUserId: actor.userId, actorEmail: actor.email ?? null, actorRole: 'staff',
+      metadata: { reference: inv.reference ?? null, klant, bedrag_incl: inv.amount_incl, status: inv.status, contract_id: inv.contract_id ?? null, losgemaakt },
+      ip: meta.ip, userAgent: meta.userAgent,
+    })
+    ververs(inv)
+    return NextResponse.json({ ok: true, losgemaakt })
+  } catch (err) {
+    return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
+  }
+}
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params

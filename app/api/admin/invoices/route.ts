@@ -451,10 +451,8 @@ export async function DELETE(req: NextRequest) {
       try { revalidatePath('/admin/invoices'); revalidatePath('/admin/invoices/planner'); revalidatePath('/admin/revenue/omzet') } catch { }
       return NextResponse.json(r)
     }
-    const { error } = await admin.from('invoices').delete().eq('id', id)
-    if (error) throw new Error(error.message)
-    try { revalidatePath('/admin/invoices'); revalidatePath('/admin/invoices/planner') } catch { }
-    return NextResponse.json({ ok: true })
+    // Eenmalige factuur wissen loopt via /api/admin/invoices/[id] (rechten + logboek).
+    return NextResponse.json({ error: 'Verwijder een factuur via de factuur zelf (DELETE /api/admin/invoices/<id>).' }, { status: 400 })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }

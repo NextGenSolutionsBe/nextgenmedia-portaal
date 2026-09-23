@@ -134,6 +134,7 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
   const [vraag, setVraag] = useState<{ naar: Verzendstatus } | null>(null)
   const [reden, setReden] = useState('')
   const [betaling, setBetaling] = useState<{ bedrag: string; op: string } | null>(null)
+  const [vraagVerwijder, setVraagVerwijder] = useState(false)
   const [toonHistoriek, setToonHistoriek] = useState(false)
   const [verzendDatum, setVerzendDatum] = useState('')
 
@@ -204,6 +205,19 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
       setVraag(null); setReden('')
       onSaved?.(invoiceId); await laad()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(null) }
+  }
+
+  const verwijder = async () => {
+    if (!invoiceId) return
+    setBezig('verwijderen')
+    try {
+      const r = await fetch(`/api/admin/invoices/${invoiceId}`, { method: 'DELETE' })
+      const j = await r.json(); if (!r.ok) throw new Error(j.error)
+      toast.success('Factuur verwijderd.')
+      setVraagVerwijder(false)
+      onSaved?.(invoiceId)
+      onClose()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt') } finally { setBezig(null) }
   }
 
   const bewaarBetaling = async (betaalstatus?: Betaalstatus) => {
@@ -355,11 +369,34 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
 
         <div className="px-5 py-3 border-t border-gray-100 flex items-center gap-2 flex-wrap bg-gray-50/60">
           <div className="text-xs text-gray-600 mr-auto tabular-nums">Totaal: <b>{formatEuro(totalen.excl)}</b> excl. · <b>{formatEuro(totalen.incl)}</b> incl. btw{totalen.extra.excl > 0 && <> · waarvan {formatEuro(totalen.extra.excl)} extra kosten</>}</div>
+          {!nieuw && (
+            <button type="button" onClick={() => setVraagVerwijder(true)} disabled={!!bezig} className="btn-secondary text-sm text-red-600 hover:border-red-300" title="De factuur definitief verwijderen">
+              <Trash2 className="h-4 w-4" />Verwijderen
+            </button>
+          )}
           <button type="button" onClick={onClose} className="btn-secondary text-sm">Sluiten</button>
           <button type="button" onClick={bewaar} disabled={!!bezig || (!nieuw && !vuil)} className="btn-primary text-sm">{bezig === 'opslaan' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}{nieuw ? (herhaling === 'maandelijks' ? 'Maandelijkse facturatie aanmaken' : 'Factuur aanmaken (te factureren)') : 'Opslaan'}</button>
         </div>
       </div>
 
+      {vraagVerwijder && factuur && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/30">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 space-y-3">
+            <h4 className="font-semibold">Factuur definitief verwijderen</h4>
+            <p className="text-sm text-gray-600">
+              Je verwijdert <b>{factuur.reference ? `${factuur.reference} · ` : ''}{klantNaam}</b> van {dag(factuur.invoice_date).split('-').reverse().join('/')} ({formatEuro(factuur.amount_incl)} incl. btw).
+              De factuurregels en de wijzigingshistoriek gaan mee. Dit kan niet ongedaan gemaakt worden.
+            </p>
+            <p className="text-xs text-gray-500">Wil je ze enkel uit de planning halen? Zet de status dan op <b>Geannuleerd</b>; de factuur blijft dan bestaan.</p>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setVraagVerwijder(false)} className="btn-secondary text-sm" disabled={!!bezig}>Annuleren</button>
+              <button type="button" onClick={verwijder} disabled={!!bezig} className="btn-primary text-sm bg-red-600 hover:bg-red-700 text-white border-red-600">
+                {bezig === 'verwijderen' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}Definitief verwijderen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {vraag && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/30">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 space-y-3">
