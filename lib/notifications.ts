@@ -143,6 +143,22 @@ export async function buildNotifications(): Promise<Notif[]> {
     out.push({ id: `client:${c.id}`, kind: 'client', priority: 'low', title: `Nieuwe klant toegevoegd — ${c.company_name}`, date: c.created_at ?? null, href: `/admin/clients/${c.id}` })
   }
 
+  // Personeel: uren en beschikbaarheden die op een beslissing wachten, vergeten
+  // uit te klokken, en documenten die vervallen. Eén signaal per soort.
+  try {
+    const [uren, beschikbaar, actief, docs] = await Promise.all([
+      safe(admin.from('personeel_sessies').select('id, created_at').in('status', ['ingediend']).limit(500)),
+      safe(admin.from('personeel_beschikbaarheid').select('id, created_at').eq('status', 'ingediend').limit(500)),
+      safe(admin.from('personeel_sessies').select('id, personeel_id, start_at').eq('status', 'actief').limit(100)),
+      safe(admin.from('personeel_documenten').select('id, naam, vervalt_op, personeel_id').not('vervalt_op', 'is', null).lte('vervalt_op', new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)).limit(100)),
+    ]) as [{ id: string; created_at: string }[], { id: string; created_at: string }[], { id: string; personeel_id: string; start_at: string }[], { id: string; naam: string; vervalt_op: string; personeel_id: string }[]]
+    if (uren.length) out.push({ id: `personeel:uren:${uren.length}:${uren[0].created_at}`, kind: 'personeel', priority: 'med', title: `${uren.length} urenregistratie${uren.length === 1 ? '' : 's'} klaar voor controle`, date: uren[0].created_at, href: '/admin/personeel?tab=uren' })
+    if (beschikbaar.length) out.push({ id: `personeel:beschikbaar:${beschikbaar.length}:${beschikbaar[0].created_at}`, kind: 'personeel', priority: 'med', title: `${beschikbaar.length} beschikbaarhe${beschikbaar.length === 1 ? 'id' : 'den'} te behandelen`, date: beschikbaar[0].created_at, href: '/admin/personeel?tab=planning' })
+    const vergeten = actief.filter((x) => Date.now() - new Date(x.start_at).getTime() > 10 * 3600000)
+    for (const v of vergeten) out.push({ id: `personeel:vergeten:${v.id}`, kind: 'personeel', priority: 'high', title: 'Een medewerker is vergeten uit te klokken', date: v.start_at, href: `/admin/personeel/${v.personeel_id}?tab=uren` })
+    for (const d of docs) out.push({ id: `personeel:doc:${d.id}:${d.vervalt_op}`, kind: 'personeel', priority: d.vervalt_op < todayISO() ? 'high' : 'low', title: `Personeelsdocument ${d.vervalt_op < todayISO() ? 'vervallen' : 'vervalt binnenkort'} — ${d.naam}`, date: d.vervalt_op, href: `/admin/personeel/${d.personeel_id}?tab=documenten` })
+  } catch { /* tabellen bestaan pas na de migratie */ }
+
   const rank: Record<NotifPriority, number> = { high: 0, med: 1, low: 2 }
   return out.sort((a, b) => rank[a.priority] - rank[b.priority] || (b.date ?? '').localeCompare(a.date ?? ''))
 }

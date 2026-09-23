@@ -32,6 +32,9 @@ export const ADMIN_MODULES: AdminModule[] = [
   { key: 'uploads',     label: 'Klantuploads',         prefixes: ['/admin/uploads', '/api/admin/uploads'] },
   { key: 'opdrachten',  label: 'Opdrachten (klanten)', prefixes: ['/admin/opdrachten', '/api/admin/opdrachten'] },
   { key: 'formulieren', label: 'Formulieren',          prefixes: ['/admin/formulieren', '/api/admin/formulieren'] },
+  // Personeel: dossiers, planning, uren en personeelskosten. De medewerker zelf
+  // werkt in /team (eigen omgeving, eigen API /api/team), nooit in /admin.
+  { key: 'personeel',   label: 'Personeel',            prefixes: ['/admin/personeel', '/api/admin/personeel'] },
   { key: 'kantoor',     label: 'Kantoor',              prefixes: ['/admin/kantoor', '/api/kantoor'] },
   { key: 'email',       label: 'E-mailcenter',         prefixes: ['/admin/email', '/api/admin/email'] },
   { key: 'info',        label: 'Informatief',          prefixes: ['/admin/informatief', '/admin/onboarding', '/admin/maandplanning', '/api/admin/month-planning', '/api/admin/month-planning-clients'] },

@@ -265,7 +265,7 @@ export async function updateSession(request: NextRequest) {
   // Allebei mislukt: eerlijk zeggen dat het even niet lukt. Publieke paden
   // mogen gewoon door — die hebben geen identiteit nodig.
   if (user === 'onbekend' && (path.startsWith('/admin') || path.startsWith('/api/admin')
-    || path.startsWith('/portal') || path.startsWith('/partner'))) {
+    || path.startsWith('/portal') || path.startsWith('/partner') || path.startsWith('/team'))) {
     return databankOnbereikbaar(path)
   }
   if (user === 'onbekend') user = null
@@ -463,6 +463,29 @@ export async function updateSession(request: NextRequest) {
     if (!opEmail.ok) return databankOnbereikbaar(path)
     if (opEmail.data) return doorgeven()
     return NextResponse.redirect(new URL('/login', request.url))
+  }
+
+  /**
+   * De werknemersomgeving (/team): enkel voor medewerkers uit Personeel met
+   * een actieve, niet-geblokkeerde login. Zij hebben geen rol in user_roles en
+   * komen nooit in /admin. De koppeling kan bij een verse uitnodiging nog op
+   * e-mailadres staan; de pagina legt die dan zelf (lib/personeel/server.ts).
+   */
+  if (path.startsWith('/team')) {
+    const lidLezing = await lees<{ actief?: boolean; account_status?: string }>(
+      db.from('personeel').select('actief, account_status').eq('auth_user_id', user.id).limit(1).maybeSingle(),
+    )
+    if (!lidLezing.ok) return databankOnbereikbaar(path)
+    let lid = lidLezing.data
+    if (!lid && user.email) {
+      const opEmail = await lees<{ actief?: boolean; account_status?: string }>(
+        db.from('personeel').select('actief, account_status').ilike('email', user.email).is('auth_user_id', null).limit(1).maybeSingle(),
+      )
+      if (!opEmail.ok) return databankOnbereikbaar(path)
+      lid = opEmail.data
+    }
+    if (lid && lid.actief !== false && lid.account_status !== 'geblokkeerd') return doorgeven()
+    return NextResponse.redirect(new URL('/login?reden=geen_toegang', request.url))
   }
 
   // Role-based routing

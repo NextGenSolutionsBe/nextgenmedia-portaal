@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
   Info, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, UserCog, CalendarClock, BarChart3, KanbanSquare,
-  MailCheck, PhoneCall, FolderUp, Handshake, Plug, Settings, ClipboardPen,
+  MailCheck, PhoneCall, FolderUp, Handshake, Plug, Settings, ClipboardPen, Contact,
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
@@ -128,6 +128,8 @@ const SECTIONS: NavSection[] = [
   {
     title: 'Beheer',
     items: [
+      // Personeel = medewerkers die per uur werken (planning, inklokken, kosten).
+      { label: 'Personeel', href: '/admin/personeel', icon: Contact, module: 'personeel' },
       { label: 'Werknemers', href: '/admin/werknemers', icon: UserCog, adminOnly: true },
     ],
   },

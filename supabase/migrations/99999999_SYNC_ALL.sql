@@ -4948,3 +4948,256 @@ end $$;
 -- betaalde toestand, net als betaalstatus/betaald_op bij een gewone factuur.
 alter table recurring_invoice_months add column if not exists betaald_op date;
 alter table recurring_invoice_months add column if not exists betaald_door text;
+
+
+-- ── Personeel: dossiers, planning, inklokken, kosten (23 sep 2026) ──────────
+-- Volledig additief. Toegang loopt via de service-role in de API's
+-- (/api/admin/personeel voor beheer, /api/team voor de medewerker zelf);
+-- RLS staat aan zonder policies voor anon/authenticated = dicht als tweede laag.
+
+create table if not exists personeel (
+  id uuid primary key default gen_random_uuid(),
+  voornaam text not null,
+  achternaam text,
+  email text,
+  telefoon text,
+  type text not null default 'werknemer',
+  functie text,
+  afdeling text,
+  contracttype text,
+  startdatum date,
+  einddatum date,
+  actief boolean not null default true,
+  verantwoordelijke text,
+  standaard_werkdagen int[] not null default '{}',
+  max_uren_dag numeric,
+  max_uren_week numeric,
+  max_uren_maand numeric,
+  interne_notities text,
+  profielfoto_pad text,
+  auth_user_id uuid unique,
+  account_status text not null default 'geen',
+  uitnodiging_verzonden_at timestamptz,
+  created_by text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'personeel_type_check') then
+    alter table personeel add constraint personeel_type_check check (type in ('werknemer','student','freelancer','onderaannemer','andere'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'personeel_account_check') then
+    alter table personeel add constraint personeel_account_check check (account_status in ('geen','uitgenodigd','actief','geblokkeerd'));
+  end if;
+end $$;
+
+-- Gevoelige persoonsgegevens apart: enkel bevoegde admins lezen deze tabel.
+-- Rijksregisternummer en IBAN worden versleuteld opgeslagen (lib/crypto.ts).
+create table if not exists personeel_gevoelig (
+  personeel_id uuid primary key references personeel(id) on delete cascade,
+  adres text,
+  geboortedatum date,
+  rijksregisternummer_enc text,
+  noodcontact text,
+  iban_enc text,
+  updated_by text,
+  updated_at timestamptz not null default now()
+);
+
+-- Tariefversies: nooit herschreven, enkel afgesloten (geldig_tot).
+create table if not exists personeel_tarieven (
+  id uuid primary key default gen_random_uuid(),
+  personeel_id uuid not null references personeel(id) on delete cascade,
+  geldig_vanaf date not null,
+  geldig_tot date,
+  basis_label text not null default 'Brutouurloon',
+  basis_uur numeric not null default 0,
+  lijnen jsonb not null default '[]',
+  btw_pct numeric not null default 0,
+  uren_per_dag numeric not null default 8,
+  uren_per_maand numeric not null default 160,
+  opmerking text,
+  created_by text,
+  created_at timestamptz not null default now()
+);
+create index if not exists personeel_tarieven_pid on personeel_tarieven (personeel_id, geldig_vanaf);
+
+create table if not exists personeel_documenten (
+  id uuid primary key default gen_random_uuid(),
+  personeel_id uuid not null references personeel(id) on delete cascade,
+  map text not null default 'overig',
+  naam text not null,
+  pad text not null,
+  mime text,
+  grootte bigint,
+  vervalt_op date,
+  verplicht boolean not null default false,
+  toegevoegd_door text,
+  gewijzigd_door text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists personeel_documenten_pid on personeel_documenten (personeel_id);
+
+create table if not exists personeel_planning (
+  id uuid primary key default gen_random_uuid(),
+  personeel_id uuid not null references personeel(id) on delete cascade,
+  datum date not null,
+  start_tijd time not null,
+  eind_tijd time not null,
+  beschikbaarheid_id uuid,
+  client_id uuid,
+  opdracht_id uuid,
+  project text,
+  taak text,
+  verwachte_duur_min int,
+  deadline date,
+  prioriteit text default 'normaal',
+  briefing text,
+  links jsonb not null default '[]',
+  deliverables text,
+  locatie text,
+  thuiswerk boolean not null default false,
+  status text not null default 'gepland',
+  werkstatus text not null default 'nog_te_starten',
+  voortgang text,
+  created_by text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists personeel_planning_pid_datum on personeel_planning (personeel_id, datum);
+create index if not exists personeel_planning_datum on personeel_planning (datum);
+
+create table if not exists personeel_beschikbaarheid (
+  id uuid primary key default gen_random_uuid(),
+  personeel_id uuid not null references personeel(id) on delete cascade,
+  datum date not null,
+  start_tijd time not null,
+  eind_tijd time not null,
+  opmerking text,
+  status text not null default 'ingediend',
+  goedgekeurd_start time,
+  goedgekeurd_eind time,
+  voorstel_start time,
+  voorstel_eind time,
+  reactie text,
+  planning_id uuid,
+  beslist_door text,
+  beslist_op timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists personeel_beschikbaarheid_pid_datum on personeel_beschikbaarheid (personeel_id, datum);
+
+create table if not exists personeel_sessies (
+  id uuid primary key default gen_random_uuid(),
+  personeel_id uuid not null references personeel(id) on delete cascade,
+  start_at timestamptz not null,
+  eind_at timestamptz,
+  pauzes jsonb not null default '[]',
+  pauze_actief_sinds timestamptz,
+  status text not null default 'actief',
+  client_id uuid,
+  opdracht_id uuid,
+  project text,
+  taak text,
+  planning_id uuid,
+  verslag jsonb not null default '{}',
+  links jsonb not null default '[]',
+  admin_opmerking text,
+  correctie_vraag text,
+  beoordeeld_door text,
+  beoordeeld_op timestamptz,
+  tarief_id uuid,
+  kost_per_uur numeric,
+  kost_bedrag numeric,
+  kost_snapshot jsonb,
+  bron text not null default 'inklok',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists personeel_sessies_pid_start on personeel_sessies (personeel_id, start_at);
+create index if not exists personeel_sessies_status on personeel_sessies (status);
+-- Nooit twee actieve sessies tegelijk voor dezelfde medewerker.
+create unique index if not exists personeel_sessies_een_actief on personeel_sessies (personeel_id) where status = 'actief';
+
+-- Definitieve kostenposten per medewerker en maand, met versies (correcties traceerbaar).
+create table if not exists personeel_kostenposten (
+  id uuid primary key default gen_random_uuid(),
+  personeel_id uuid not null references personeel(id) on delete cascade,
+  periode text not null,
+  soort text not null default 'definitief',
+  bedrag numeric not null default 0,
+  uren numeric not null default 0,
+  berekening jsonb not null default '{}',
+  sessie_ids uuid[] not null default '{}',
+  versie int not null default 1,
+  actueel boolean not null default true,
+  vervangen_door uuid,
+  vorige_id uuid,
+  verschil numeric,
+  cost_entry_id uuid,
+  reden text,
+  created_by text,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists personeel_kostenposten_actueel on personeel_kostenposten (personeel_id, periode, soort) where actueel;
+
+-- Volledige auditlog: oude en nieuwe waarden, reden, wie en wanneer.
+create table if not exists personeel_audit (
+  id bigserial primary key,
+  personeel_id uuid,
+  entiteit text not null,
+  entiteit_id text,
+  actie text not null,
+  oud jsonb,
+  nieuw jsonb,
+  reden text,
+  actor_email text,
+  actor_id uuid,
+  created_at timestamptz not null default now()
+);
+create index if not exists personeel_audit_pid on personeel_audit (personeel_id, created_at desc);
+
+-- In-app meldingen (personeel_id null = voor de admins).
+create table if not exists personeel_meldingen (
+  id uuid primary key default gen_random_uuid(),
+  personeel_id uuid references personeel(id) on delete cascade,
+  event text not null,
+  titel text not null,
+  tekst text,
+  link text,
+  sleutel text,
+  gelezen_op timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists personeel_meldingen_pid on personeel_meldingen (personeel_id, created_at desc);
+create unique index if not exists personeel_meldingen_sleutel on personeel_meldingen (sleutel) where sleutel is not null;
+
+alter table personeel enable row level security;
+alter table personeel_gevoelig enable row level security;
+alter table personeel_tarieven enable row level security;
+alter table personeel_documenten enable row level security;
+alter table personeel_planning enable row level security;
+alter table personeel_beschikbaarheid enable row level security;
+alter table personeel_sessies enable row level security;
+alter table personeel_kostenposten enable row level security;
+alter table personeel_audit enable row level security;
+alter table personeel_meldingen enable row level security;
+
+-- Koppeling met Financiën: een geboekte personeelskost is herkenbaar en uniek.
+alter table cost_entries add column if not exists bron text;
+alter table cost_entries add column if not exists bron_sleutel text;
+do $$ begin
+  if not exists (select 1 from pg_indexes where indexname = 'cost_entries_bron_sleutel') then
+    create unique index cost_entries_bron_sleutel on cost_entries (bron_sleutel) where bron_sleutel is not null;
+  end if;
+end $$;
+
+-- Privé-opslag voor profielfoto's en personeelsdocumenten.
+insert into storage.buckets (id, name, public) values ('personeel', 'personeel', false) on conflict (id) do nothing;
+
+-- Alida: enkel naam, type en status — alle andere gegevens vult een admin later in.
+insert into personeel (voornaam, type, actief, created_by)
+select 'Alida', 'student', true, 'systeem'
+where not exists (select 1 from personeel where lower(voornaam) = 'alida');

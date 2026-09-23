@@ -50,6 +50,19 @@ export default async function Home() {
    * account bestaat, dus auth_user_id is dan nog leeg (resolveKantoorSessie
    * legt die koppeling bij het eerste bezoek).
    */
+  /**
+   * Medewerkers uit Personeel (bv. studenten die per uur werken) hebben hun
+   * eigen omgeving: inklokken, planning, beschikbaarheid. Geen rol in
+   * user_roles; toegang volgt uit een actieve rij in `personeel`.
+   */
+  const { data: teamLid } = await admin
+    .from('personeel')
+    .select('id, actief, account_status')
+    .or(user.email ? `auth_user_id.eq.${user.id},email.ilike.${user.email}` : `auth_user_id.eq.${user.id}`)
+    .limit(1)
+    .maybeSingle()
+  if (teamLid && teamLid.actief !== false && teamLid.account_status !== 'geblokkeerd' && teamLid.account_status !== 'geen') redirect('/team')
+
   const lidFilter = user.email
     ? `auth_user_id.eq.${user.id},email.eq.${user.email}`
     : `auth_user_id.eq.${user.id}`
