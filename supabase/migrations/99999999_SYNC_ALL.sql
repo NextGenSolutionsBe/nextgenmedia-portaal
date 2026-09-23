@@ -4940,3 +4940,11 @@ begin
     create index contracts_looptijd_status_idx on contracts (looptijd_status);
   end if;
 end $$;
+
+
+-- ── Betaald markeren vanuit de facturenlijst (23 sep 2026) ──────────────────
+-- Een maand van een terugkerende facturatie kan nu ook "betaald" zijn. De
+-- status blijft 'verstuurd'; betaald_op (datum) + betaald_door bepalen de
+-- betaalde toestand, net als betaalstatus/betaald_op bij een gewone factuur.
+alter table recurring_invoice_months add column if not exists betaald_op date;
+alter table recurring_invoice_months add column if not exists betaald_door text;

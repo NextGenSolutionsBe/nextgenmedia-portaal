@@ -37,7 +37,10 @@ export async function GET(req: NextRequest) {
 const NIET_TE_ANNULEREN = 'Een verstuurde of betaalde factuur kan niet geannuleerd worden. Crediteer ze via de factuur zelf.'
 
 /**
- * POST { actie, id, datum? } — annuleer | verplaats | verstuurd | heropen (terug naar te factureren).
+ * POST { actie, id, datum? } — annuleer | verplaats | verstuurd | betaald |
+ * onbetaald (betaling terugdraaien) | heropen (terug naar te factureren).
+ * "Verstuurd" en "betaald" registreren enkel de status en de datum: er
+ * vertrekt nooit een factuurmail.
  * Werkt op de bron achter het moment; een mislukte nevenstap blokkeert
  * de actie niet maar wordt wél teruggemeld en gelogd.
  */
@@ -92,9 +95,29 @@ export async function POST(req: NextRequest) {
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
       }
       if (b.actie === 'verstuurd') {
-        const { error } = await admin.from('invoices').update({ status: 'verstuurd', sent_at: new Date().toISOString(), sent_by_email: actor.email ?? null }).eq('id', inv.id)
+        if (definitief) return NextResponse.json({ ok: true, waarschuwingen, melding: 'Deze factuur staat al op verstuurd.' })
+        if (String(inv.status) === 'geannuleerd' || String(inv.status) === 'gecrediteerd') return NextResponse.json({ error: 'Een geannuleerde factuur zet je eerst terug naar te factureren.' }, { status: 400 })
+        const { error } = await admin.from('invoices').update({ status: 'verstuurd', sent_at: new Date().toISOString(), sent_by_email: actor.email ?? null, updated_at: new Date().toISOString() }).eq('id', inv.id)
         if (error) throw new Error(error.message)
+        try { await admin.from('invoice_wijzigingen').insert({ invoice_id: inv.id, actie: 'verstuurd', veld: 'status', oud: String(inv.status), nieuw: 'verstuurd', reden: 'Gemarkeerd als verstuurd in de facturenlijst', actor_email: actor.email ?? null }) } catch { /* */ }
         await audit('Factuur gemarkeerd als verstuurd')
+        klaar(); return NextResponse.json({ ok: true, waarschuwingen })
+      }
+      if (b.actie === 'betaald') {
+        if (!definitief) return NextResponse.json({ error: 'Markeer de factuur eerst als verstuurd.' }, { status: 400 })
+        const incl = Number(inv.amount_incl) || 0
+        const vandaag = vandaagBrussel()
+        const { error } = await admin.from('invoices').update({ betaalstatus: 'betaald', betaald_bedrag: Math.round(incl * 100) / 100, betaald_op: vandaag, updated_at: new Date().toISOString() }).eq('id', inv.id)
+        if (error) throw new Error(error.message)
+        try { await admin.from('invoice_wijzigingen').insert({ invoice_id: inv.id, actie: 'betaalstatus', veld: 'betaald_bedrag', oud: String(Number(inv.betaald_bedrag) || 0), nieuw: String(incl), reden: `Gemarkeerd als betaald op ${vandaag} in de facturenlijst`, actor_email: actor.email ?? null }) } catch { /* */ }
+        await audit(`Factuur gemarkeerd als betaald (€ ${incl.toFixed(2)} incl.)`, { betaald_op: vandaag })
+        klaar(); return NextResponse.json({ ok: true, waarschuwingen })
+      }
+      if (b.actie === 'onbetaald') {
+        const { error } = await admin.from('invoices').update({ betaalstatus: 'niet_betaald', betaald_bedrag: 0, betaald_op: null, updated_at: new Date().toISOString() }).eq('id', inv.id)
+        if (error) throw new Error(error.message)
+        try { await admin.from('invoice_wijzigingen').insert({ invoice_id: inv.id, actie: 'betaalstatus', veld: 'betaald_bedrag', oud: String(Number(inv.betaald_bedrag) || 0), nieuw: '0', reden: 'Betaling teruggedraaid in de facturenlijst', actor_email: actor.email ?? null }) } catch { /* */ }
+        await audit('Betaling teruggedraaid (terug naar verstuurd – openstaand)')
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
       }
     }
@@ -135,6 +158,27 @@ export async function POST(req: NextRequest) {
         if (r.warning) waarschuwingen.push(r.warning)
         try { await admin.from('recurring_invoice_months').update({ sent_at: new Date().toISOString(), sent_by_email: actor.email ?? null }).eq('recurring_id', rec.id).eq('month', sleutel.maand) } catch { /* kolommen bestaan pas na migratie */ }
         await audit(`Maand ${sleutel.maand} gemarkeerd als verstuurd`)
+        klaar(); return NextResponse.json({ ok: true, waarschuwingen })
+      }
+      if (b.actie === 'betaald') {
+        const verstuurd = rij && (rij.status === 'verstuurd' || rij.status === 'betaald' || rij.status === 'gefactureerd')
+        if (!verstuurd) return NextResponse.json({ error: 'Markeer deze maand eerst als verstuurd.' }, { status: 400 })
+        const vandaag = vandaagBrussel()
+        const { error } = await admin.from('recurring_invoice_months').update({ betaald_op: vandaag, betaald_door: actor.email ?? null }).eq('recurring_id', rec.id).eq('month', sleutel.maand)
+        if (error) {
+          if (/betaald_/.test(error.message)) return NextResponse.json({ error: 'De databank is nog niet bijgewerkt (betaald_op ontbreekt). Draai de migratie.' }, { status: 409 })
+          throw new Error(error.message)
+        }
+        await audit(`Maand ${sleutel.maand} gemarkeerd als betaald`, { betaald_op: vandaag })
+        klaar(); return NextResponse.json({ ok: true, waarschuwingen })
+      }
+      if (b.actie === 'onbetaald') {
+        const patch: Record<string, unknown> = { betaald_op: null, betaald_door: null }
+        // Een oude rij met status 'betaald' wordt weer gewoon 'verstuurd'.
+        if (rij?.status === 'betaald') patch.status = 'verstuurd'
+        const { error } = await admin.from('recurring_invoice_months').update(patch).eq('recurring_id', rec.id).eq('month', sleutel.maand)
+        if (error) throw new Error(error.message)
+        await audit(`Betaling van maand ${sleutel.maand} teruggedraaid`)
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
       }
     }

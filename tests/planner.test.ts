@@ -16,7 +16,7 @@ const maak = (p: Partial<Moment> & { datum: string; status?: Moment['status'] })
   bedrag_excl: p.bedrag_excl ?? 680, btw_pct: 21, bedrag_incl: Math.round((p.bedrag_excl ?? 680) * 1.21 * 100) / 100,
   status: p.status ?? 'gepland', ruweStatus: 'te_versturen', herkomst: p.herkomst ?? 'recurring', terugkerend: p.terugkerend ?? true, verantwoordelijke: 'Bram Reinquin',
   volledig: p.volledig ?? true, ontbrekend: p.ontbrekend ?? [],
-  contract_id: null, contract_titel: null, recurring_id: null, invoice_id: null, wam_id: null, schema: null, opmerking: null, dienst: null, betaaltermijn: 30, verzonden_op: null, verzonden_door: null, verwacht_op: '2026-10-15',
+  contract_id: null, contract_titel: null, recurring_id: null, invoice_id: null, wam_id: null, schema: null, opmerking: null, dienst: null, betaaltermijn: 30, verzonden_op: null, verzonden_door: null, betaald_op: null, verwacht_op: '2026-10-15',
   acties: { bekijkenUrl: null, aanpassenUrl: null, voorbereidenUrl: null, kanVerstuurd: true, kanVerplaatsen: true, kanAnnuleren: true},
 })
 

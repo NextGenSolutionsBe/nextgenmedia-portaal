@@ -46,8 +46,9 @@ export function StatusChip({ status, klein, betaald }: { status: Verzendstatus |
   const s = VERZENDSTATUS[status as Verzendstatus] ?? VERZENDSTATUS.te_versturen
   // Een betaalde factuur mag nergens nog als "enkel verstuurd" ogen.
   const label = betaald && s.key === 'verstuurd' ? 'Verstuurd & betaald' : s.label
-  const cls = betaald && s.key === 'verstuurd' ? 'bg-green-100 text-green-900 border-green-300' : s.cls
-  return <span className={`inline-flex items-center gap-1 rounded-full border px-2 ${klein ? 'py-0 text-[10px]' : 'py-0.5 text-[11px]'} font-medium whitespace-nowrap ${cls}`}><span className={`h-1.5 w-1.5 rounded-full ${betaald && s.key === 'verstuurd' ? 'bg-green-600' : s.stip}`} />{label}</span>
+  // Zelfde kleuren als de facturenlijst: betaald = donkergroen.
+  const cls = betaald && s.key === 'verstuurd' ? 'bg-emerald-700 text-white border-emerald-800' : s.cls
+  return <span className={`inline-flex items-center gap-1 rounded-full border px-2 ${klein ? 'py-0 text-[10px]' : 'py-0.5 text-[11px]'} font-medium whitespace-nowrap ${cls}`}><span className={`h-1.5 w-1.5 rounded-full ${betaald && s.key === 'verstuurd' ? 'bg-white' : s.stip}`} />{label}</span>
 }
 export function BetaalChip({ status, klein }: { status: Betaalstatus | null; klein?: boolean }) {
   if (!status) return <span className="text-[11px] text-gray-400">—</span>

@@ -104,7 +104,7 @@ console.log('Maandoverzicht: nog te factureren / reeds verstuurd / totaal geplan
 const moment = (deel: Partial<Moment>): Moment => ({
   id: 'inv:x', bron: 'invoice', bronId: 'x', maand: '2026-09', datum: '2026-09-05', client_id: 'k', klant: 'Klant', project: 'Social', omschrijving: null, type: 'Eenmalig',
   bedrag_excl: 100, btw_pct: 21, bedrag_incl: 121, status: 'gepland', ruweStatus: 'te_versturen', herkomst: 'eenmalig', terugkerend: false, verantwoordelijke: null, volledig: true, ontbrekend: [],
-  contract_id: null, contract_titel: null, recurring_id: null, invoice_id: 'x', wam_id: null, schema: null, opmerking: null, dienst: 'Social', betaaltermijn: 30, verzonden_op: null, verzonden_door: null,
+  contract_id: null, contract_titel: null, recurring_id: null, invoice_id: 'x', wam_id: null, schema: null, opmerking: null, dienst: 'Social', betaaltermijn: 30, verzonden_op: null, verzonden_door: null, betaald_op: null,
   verwacht_op: verwachtOp(null, '2026-09-05', 30), acties: { bekijkenUrl: null, aanpassenUrl: null, voorbereidenUrl: null, kanVerstuurd: true, kanVerplaatsen: true, kanAnnuleren: true }, ...deel,
 })
 test('factuur verstuurd op 5 september met 30 dagen termijn → verwacht binnen in oktober, niet september', () => {

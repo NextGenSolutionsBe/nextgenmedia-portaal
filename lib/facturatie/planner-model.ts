@@ -16,7 +16,8 @@ export const PLANNER_STATUSSEN: { key: PlannerStatus; label: string; cls: string
   { key: 'te_versturen', label: 'Te factureren · vandaag', cls: 'bg-gray-100 text-gray-900 border-gray-300', stip: 'bg-gray-600' },
   { key: 'controle_vereist', label: 'Te factureren · gegevens ontbreken', cls: 'bg-gray-100 text-amber-800 border-amber-200', stip: 'bg-amber-500' },
   { key: 'verstuurd', label: 'Verstuurd', cls: 'bg-green-100 text-green-800 border-green-200', stip: 'bg-green-500' },
-  { key: 'betaald', label: 'Verstuurd · betaald', cls: 'bg-green-100 text-green-900 border-green-300', stip: 'bg-green-600' },
+  // Betaald = verstuurd én betaald: donkergroen, zodat het nooit als "enkel verstuurd" oogt.
+  { key: 'betaald', label: 'Verstuurd & betaald', cls: 'bg-emerald-700 text-white border-emerald-800', stip: 'bg-emerald-700' },
   { key: 'achterstallig', label: 'Te factureren · datum voorbij', cls: 'bg-gray-100 text-gray-900 border-orange-300', stip: 'bg-orange-500' },
   { key: 'geannuleerd', label: 'Geannuleerd', cls: 'bg-red-50 text-red-700 border-red-200', stip: 'bg-red-500' },
   { key: 'gecrediteerd', label: 'Geannuleerd (gecrediteerd)', cls: 'bg-red-50 text-red-700 border-red-200', stip: 'bg-red-600' },
@@ -81,6 +82,8 @@ export type Moment = {
   verzonden_op: string | null
   /** Door wie de factuur als verstuurd gemarkeerd werd. */
   verzonden_door: string | null
+  /** Datum waarop de factuur als betaald gemarkeerd werd ('YYYY-MM-DD'). */
+  betaald_op: string | null
   /** Verwachte ontvangstdatum = (verzenddatum of geplande datum) + betaaltermijn. */
   verwacht_op: string
   acties: {
@@ -216,8 +219,75 @@ export function maandKpi(momenten: Moment[], ym: string): MaandKpi {
   return { teFactureren: r(teFactureren), teFacturerenAantal: nTe, verstuurd: r(verstuurd), verstuurdAantal: nV, gepland: r(teFactureren + verstuurd), verwachtBinnen: r(verwacht), verwachtBinnenAantal: nW }
 }
 
+// ── Facturatiefase: de drie stappen van de facturenlijst ────────────────────
+//
+// Te factureren → Verstuurd → Betaald. Elke factuur zit in precies één fase
+// (geannuleerd in geen enkele), zodat de drie overzichtskaarten nooit dubbel
+// tellen: een betaalde factuur hoort enkel bij "Betaald".
+export type Fase = 'te_factureren' | 'open' | 'betaald'
+export const FASEN: Fase[] = ['te_factureren', 'open', 'betaald']
+export const FASE_INFO: Record<Fase, { label: string; kort: string; rij: string; rand: string; tekst: string; kaart: string; stip: string }> = {
+  te_factureren: { label: 'Te factureren', kort: 'Te factureren', rij: 'bg-gray-50', rand: 'border-l-gray-300', tekst: 'text-gray-900', kaart: 'border-gray-300 bg-gray-50', stip: 'bg-gray-400' },
+  open: { label: 'Verstuurd – openstaand', kort: 'Verstuurd', rij: 'bg-green-50', rand: 'border-l-green-400', tekst: 'text-green-700', kaart: 'border-green-300 bg-green-50', stip: 'bg-green-400' },
+  betaald: { label: 'Betaald', kort: 'Verstuurd & betaald', rij: 'bg-emerald-100', rand: 'border-l-emerald-700', tekst: 'text-emerald-800', kaart: 'border-emerald-400 bg-emerald-100', stip: 'bg-emerald-700' },
+}
+
+export function faseVan(m: Pick<Moment, 'status'>): Fase | null {
+  if (OPEN_STATUSSEN.includes(m.status)) return 'te_factureren'
+  if (m.status === 'verstuurd') return 'open'
+  if (m.status === 'betaald') return 'betaald'
+  return null
+}
+
+export type FaseKpi = Record<Fase, { bedrag: number; aantal: number }>
+/** Bedrag (excl. btw) en aantal per fase. Geannuleerd telt nergens mee. */
+export function faseKpi(momenten: Moment[]): FaseKpi {
+  const uit: FaseKpi = { te_factureren: { bedrag: 0, aantal: 0 }, open: { bedrag: 0, aantal: 0 }, betaald: { bedrag: 0, aantal: 0 } }
+  for (const m of momenten) {
+    const f = faseVan(m)
+    if (!f) continue
+    uit[f].bedrag += m.bedrag_excl
+    uit[f].aantal++
+  }
+  for (const f of FASEN) uit[f].bedrag = Math.round(uit[f].bedrag * 100) / 100
+  return uit
+}
+
+export type StapActie = 'verstuurd' | 'betaald' | 'heropen' | 'onbetaald'
+/** Bronnen waarvan de lijst zelf de status mag bijwerken (WAM beheer je in Vesting). */
+const LIJST_BRONNEN: Bron[] = ['invoice', 'recurring']
+
+/** De knop voor de volgende stap: "Markeren als verstuurd" of "Markeren als betaald". */
+export function volgendeStap(m: Pick<Moment, 'status' | 'bron'>): { actie: StapActie; label: string } | null {
+  if (!LIJST_BRONNEN.includes(m.bron)) return null
+  const f = faseVan(m)
+  if (f === 'te_factureren') return { actie: 'verstuurd', label: 'Markeren als verstuurd' }
+  if (f === 'open') return { actie: 'betaald', label: 'Markeren als betaald' }
+  return null
+}
+
+/** Een foutieve stap terugdraaien: betaald → verstuurd, verstuurd → te factureren. */
+export function vorigeStap(m: Pick<Moment, 'status' | 'bron'>): { actie: StapActie; label: string; naar: string } | null {
+  if (!LIJST_BRONNEN.includes(m.bron)) return null
+  const f = faseVan(m)
+  if (f === 'betaald') return { actie: 'onbetaald', label: 'Betaling terugdraaien', naar: 'Verstuurd – openstaand' }
+  if (f === 'open') return { actie: 'heropen', label: 'Verzending terugdraaien', naar: 'Te factureren' }
+  return null
+}
+
+/** Een status meteen lokaal bijwerken (zonder herladen), tot de server de nieuwe lijst stuurt. */
+export function naStap(m: Moment, actie: StapActie, vandaag: string): Moment {
+  if (actie === 'verstuurd') return { ...m, status: 'verstuurd', ruweStatus: 'verstuurd', verzonden_op: vandaag }
+  if (actie === 'betaald') return { ...m, status: 'betaald', ruweStatus: 'betaald', betaald_op: vandaag }
+  if (actie === 'onbetaald') return { ...m, status: 'verstuurd', ruweStatus: 'verstuurd', betaald_op: null }
+  const status = bepaalStatus({ ruweStatus: 'te_versturen', datum: m.datum, ontbrekend: m.ontbrekend, vandaag })
+  return { ...m, status, ruweStatus: 'te_versturen', verzonden_op: null, verzonden_door: null, betaald_op: null }
+}
+
 // ── Filters ─────────────────────────────────────────────────────────────────
 export type Filters = {
+  /** Klik op een overzichtskaart: enkel die fase tonen. '' = alle facturen. */
+  fase: '' | Fase
   categorie: Categorie | null
   van: string; tot: string
   klant: string; project: string; status: PlannerStatus | ''; type: string
@@ -226,13 +296,14 @@ export type Filters = {
   volledig: '' | 'volledig' | 'ontbrekend'
   toonGeannuleerd: boolean
 }
-export const LEEG_FILTERS: Filters = { categorie: null, van: '', tot: '', klant: '', project: '', status: '', type: '', terugkerend: '', verantwoordelijke: '', volledig: '', toonGeannuleerd: false }
+export const LEEG_FILTERS: Filters = { fase: '', categorie: null, van: '', tot: '', klant: '', project: '', status: '', type: '', terugkerend: '', verantwoordelijke: '', volledig: '', toonGeannuleerd: false }
 export const filtersActief = (f: Filters): boolean => JSON.stringify({ ...f, van: '', tot: '' }) !== JSON.stringify(LEEG_FILTERS) || !!f.van || !!f.tot
 
 export function pasFiltersToe(momenten: Moment[], f: Filters, vandaag: string): Moment[] {
   return momenten.filter((m) => {
     if ((m.status === 'geannuleerd' || m.status === 'gecrediteerd') && !f.toonGeannuleerd && f.status !== m.status) return false
     if (f.categorie && !inCategorie(m, f.categorie, vandaag)) return false
+    if (f.fase && faseVan(m) !== f.fase) return false
     if (f.van && m.datum < f.van) return false
     if (f.tot && m.datum > f.tot) return false
     if (f.klant && m.client_id !== f.klant) return false

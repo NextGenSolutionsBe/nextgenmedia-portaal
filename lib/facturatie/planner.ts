@@ -100,6 +100,7 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
       contract_id: (i.contract_id as string | null) ?? null, contract_titel: i.contract_id ? (contractTitel.get(String(i.contract_id)) ?? null) : null,
       recurring_id: null, invoice_id: String(i.id), wam_id: (i.wam_id as string | null) ?? null, schema: null, opmerking: (i.note as string | null) ?? null,
       dienst: svc((i.service_slug as string | null) ?? null), betaaltermijn: termijnVan(i.payment_term_days), verzonden_op: dagVan(i.sent_at), verzonden_door: (i.sent_by_email as string | null) ?? null,
+      betaald_op: ruwe === 'betaald' ? (dagVan(i.betaald_op) ?? null) : null,
       verwacht_op: dagVan(i.due_date) ?? verwachtOp(dagVan(i.sent_at), datum, termijnVan(i.payment_term_days)),
       acties: {
         bekijkenUrl: `/admin/invoices?maand=${maand}`, aanpassenUrl: `/admin/invoices?maand=${maand}`, voorbereidenUrl: null,
@@ -109,7 +110,7 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
   }
 
   // ── Terugkerende facturaties × maanden ──
-  type MaandRij = { recurring_id: string; month: string; status: string | null; billing_date: string | null; amount_excl: number | null; vat_pct: number | null; amount_incl: number | null; invoice_id: string | null; note: string | null; sent_at?: string | null; sent_by_email?: string | null }
+  type MaandRij = { recurring_id: string; month: string; status: string | null; billing_date: string | null; amount_excl: number | null; vat_pct: number | null; amount_incl: number | null; invoice_id: string | null; note: string | null; sent_at?: string | null; sent_by_email?: string | null; betaald_op?: string | null }
   const perMaand = new Map<string, MaandRij>(((maandRijen ?? []) as MaandRij[]).map((r) => [`${r.recurring_id}:${r.month}`, r]))
   for (const r of (recurring ?? []) as (RecurringInvoice & { deleted_at?: string | null; contract_id?: string | null; verantwoordelijke?: string | null; payment_term_days?: number | null })[]) {
     for (const m of maanden) {
@@ -123,7 +124,9 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
       const ontbrekend: string[] = []
       if (!r.client_id) ontbrekend.push('klant ontbreekt')
       if (excl <= 0) ontbrekend.push('bedrag ontbreekt')
-      const ruwe = rij?.status ? normalizeInvoiceStatus(rij.status) : 'te_versturen'
+      let ruwe: string = rij?.status ? normalizeInvoiceStatus(rij.status) : 'te_versturen'
+      // Betaald: verstuurd + betaaldatum (of een oude rij met status 'betaald').
+      if (ruwe === 'verstuurd' && (rij?.betaald_op || rij?.status === 'betaald')) ruwe = 'betaald'
       const status = bepaalStatus({ ruweStatus: ruwe, datum, ontbrekend, vandaag })
       const actief = status !== 'verstuurd' && status !== 'betaald' && status !== 'geannuleerd'
       const start = (r.start_month ?? '').slice(0, 7), eind = r.end_month ? r.end_month.slice(0, 7) : null
@@ -138,6 +141,7 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
         schema: `Maandelijks (${dagLabel}) · ${start} → ${eind ?? 'doorlopend'}${r.deleted_at ? ' · stopgezet' : ''}`,
         opmerking: rij?.note ?? null,
         dienst: svc(r.service_slug), betaaltermijn: termijnVan(r.payment_term_days), verzonden_op: dagVan(rij?.sent_at), verzonden_door: rij?.sent_by_email ?? null,
+        betaald_op: ruwe === 'betaald' ? dagVan(rij?.betaald_op) : null,
         verwacht_op: verwachtOp(dagVan(rij?.sent_at), datum, termijnVan(r.payment_term_days)),
         acties: {
           bekijkenUrl: `/admin/invoices?maand=${m}`, aanpassenUrl: `/admin/invoices?maand=${m}`, voorbereidenUrl: null,
@@ -163,7 +167,7 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
       volledig: true, ontbrekend: [],
       contract_id: null, contract_titel: null, recurring_id: null, invoice_id: null, wam_id: t.wam_id,
       schema: 'WAM-schema (Vesting)', opmerking: t.notitie,
-      dienst: 'WAM', betaaltermijn: 30, verzonden_op: null, verzonden_door: null, verwacht_op: verwachtOp(null, datum, 30),
+      dienst: 'WAM', betaaltermijn: 30, verzonden_op: null, verzonden_door: null, betaald_op: dagVan(t.betaald_op), verwacht_op: verwachtOp(null, datum, 30),
       acties: { bekijkenUrl: '/admin/vesting', aanpassenUrl: '/admin/vesting', voorbereidenUrl: '/admin/vesting', kanVerstuurd: false, kanVerplaatsen: false, kanAnnuleren: false },
     })
   }
