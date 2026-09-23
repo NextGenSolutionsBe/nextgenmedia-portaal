@@ -56,6 +56,11 @@ async function getContracts() {
       duration_type: c.duration_type ?? null,
       signer_name: c.signer_name ?? null,
       signer_email: c.signer_email ?? null,
+      // Looptijdstatus staat los van de ondertekening; vóór de migratie = 'lopend'.
+      looptijd_status: c.looptijd_status ?? 'lopend',
+      stop_datum: c.stop_datum ?? null,
+      stop_reden: c.stop_reden ?? null,
+      heeftPdf: !!(c.pdf_path || c.signed_pdf_path),
       invoice_count: inv.count,
       invoice_sent: inv.sent,
       expected_invoice_count: expected,

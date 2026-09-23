@@ -17,6 +17,7 @@ import { ContractFacturatie } from './contract-facturatie'
 import { ContractNavigatie } from './contract-navigatie'
 import { statusInfo, canonicalStatus } from '@/lib/contract-status'
 import { ContracttypeBewerker } from './contracttype-bewerker'
+import { LooptijdDetail } from '../looptijd'
 import { typeVanContract, isNietToegewezen } from '@/lib/contracten/types'
 import { baseUrl } from '@/lib/email'
 
@@ -88,7 +89,8 @@ export default async function ContractDetailPage({ params }: { params: { id: str
         <div className="flex-1 min-w-0 basis-full sm:basis-auto">
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <h1 className="text-xl sm:text-2xl font-bold truncate">{c.title}</h1>
-            <span className={`status-badge ${style.cls}`}>{style.label}</span>
+            <LooptijdDetail contractId={c.id} waarde={{ looptijd_status: c.looptijd_status ?? 'lopend', stop_datum: c.stop_datum ?? null, stop_reden: c.stop_reden ?? null }} />
+            <span className={`status-badge ${style.cls}`} title="Ondertekeningsstatus">{style.label}</span>
             <span className={`status-badge ${isNietToegewezen(c.contract_type) ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
               {typeVanContract(c.contract_type)}
             </span>

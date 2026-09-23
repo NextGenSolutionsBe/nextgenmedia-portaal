@@ -4920,3 +4920,23 @@ begin
     create policy legal_verzending_service_role on contract_legal_verzending for all to service_role using (true) with check (true);
   end if;
 end $$;
+
+
+-- ── Looptijdstatus van contracten (23 sep 2026) ─────────────────────────────
+-- Los van de ondertekeningsstatus (contracts.status). Bestaande contracten
+-- krijgen via de default 'lopend'. Elke wijziging komt in contract_events
+-- (event_type 'looptijd_gewijzigd', meta {oud, nieuw, stop_datum, stop_reden}).
+alter table contracts add column if not exists looptijd_status text not null default 'lopend';
+alter table contracts add column if not exists stop_datum date;
+alter table contracts add column if not exists stop_reden text;
+alter table contracts add column if not exists looptijd_gewijzigd_op timestamptz;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'contracts_looptijd_status_check') then
+    alter table contracts add constraint contracts_looptijd_status_check
+      check (looptijd_status in ('lopend','afgerond','stopgezet','verlopen'));
+  end if;
+  if not exists (select 1 from pg_indexes where indexname = 'contracts_looptijd_status_idx') then
+    create index contracts_looptijd_status_idx on contracts (looptijd_status);
+  end if;
+end $$;

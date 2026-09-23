@@ -17,6 +17,8 @@ export type ContractEvent =
   | 'gearchiveerd' | 'melding_verstuurd' | 'melding_mislukt'
   // Factuurplanning bevestigd (voorstellen → facturen) en contract vroegtijdig gestopt.
   | 'facturatie_bevestigd' | 'facturatie_gestopt'
+  // Looptijdstatus (lopend/afgerond/stopgezet/verlopen) handmatig aangepast.
+  | 'looptijd_gewijzigd'
 
 export async function logContractEvent(
   admin: Admin,

@@ -2,7 +2,19 @@ import {
   FileUp, Sparkles, PencilLine, Send, Eye, CheckSquare, PenTool, FileCheck2, Download, RefreshCw, XCircle, Clock, Circle,
 } from 'lucide-react'
 
-type Event = { id: string; event_type: string; created_at: string; actor?: string | null; actor_email?: string | null }
+type Event = { id: string; event_type: string; created_at: string; actor?: string | null; actor_email?: string | null; meta?: Record<string, unknown> | null }
+
+const LOOPTIJD_LABEL: Record<string, string> = { lopend: 'Lopend', afgerond: 'Afgerond', stopgezet: 'Stopgezet', verlopen: 'Verlopen' }
+
+/** Extra regel onder een tijdlijnitem (bv. "Lopend → Stopgezet · reden"). */
+function detail(e: Event): string | null {
+  if (e.event_type !== 'looptijd_gewijzigd' || !e.meta) return null
+  const m = e.meta as { oud?: string; nieuw?: string; stop_datum?: string | null; stop_reden?: string | null }
+  const delen = [`${LOOPTIJD_LABEL[m.oud ?? ''] ?? m.oud ?? '?'} → ${LOOPTIJD_LABEL[m.nieuw ?? ''] ?? m.nieuw ?? '?'}`]
+  if (m.stop_datum) delen.push(`stopdatum ${String(m.stop_datum).split('-').reverse().join('/')}`)
+  if (m.stop_reden) delen.push(String(m.stop_reden))
+  return delen.join(' · ')
+}
 
 const META: Record<string, { label: string; icon: React.ComponentType<{ className?: string }>; cls: string }> = {
   uploaded:              { label: 'Aangemaakt / geüpload', icon: FileUp,      cls: 'bg-gray-100 text-gray-600' },
@@ -25,6 +37,7 @@ const META: Record<string, { label: string; icon: React.ComponentType<{ classNam
   gearchiveerd:          { label: 'Gearchiveerd (certificaat aangemaakt)', icon: FileCheck2, cls: 'bg-green-100 text-green-600' },
   melding_verstuurd:     { label: 'Melding naar Legal verstuurd', icon: Send, cls: 'bg-blue-100 text-blue-600' },
   melding_mislukt:       { label: 'Melding naar Legal mislukt',   icon: XCircle, cls: 'bg-red-100 text-red-600' },
+  looptijd_gewijzigd:    { label: 'Status aangepast',      icon: RefreshCw,   cls: 'bg-blue-100 text-blue-600' },
 }
 
 export function ContractTimeline({ events }: { events: Event[] }) {
@@ -48,6 +61,7 @@ export function ContractTimeline({ events }: { events: Event[] }) {
               <Icon className="h-3.5 w-3.5" />
             </span>
             <div className="text-sm font-medium text-gray-900 leading-6">{m.label}</div>
+            {detail(e) && <div className="text-xs text-gray-600">{detail(e)}</div>}
             <div className="text-xs text-gray-400">
               {new Date(e.created_at).toLocaleString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
               {who ? ` · ${who}` : ''}
