@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Loader2, X, Plus, Pencil, Ban, Undo2, CheckCircle2, AlertTriangle, ExternalLink, Info } from 'lucide-react'
+import { Loader2, X, Plus, Pencil, Ban, Undo2, CheckCircle2, AlertTriangle, ExternalLink, Info, Wallet } from 'lucide-react'
 import { formatEuro, formatDate } from '@/lib/utils'
 import {
   CLASSIFICATIE_LABEL, KOSTEN_STATUS_LABEL, KOSTEN_CATEGORIEEN, stelClassificatieVoor,
@@ -89,6 +89,8 @@ export function KostenEnWinstDialoog({ factuur: ref, titel, clientId, onClose, o
   const b = data?.berekend
   const st = b ? KOSTEN_STATUS_LABEL[b.status] : ''
   const lijnNaam = (id: string | null) => (id ? (data?.lijnen.find((l) => l.id === id)?.omschrijving ?? '—') : 'Hele factuur')
+  // Actieve kosten met een bekende kostprijs die aan geen enkele lijn hangen.
+  const losseKosten = (data?.kosten ?? []).filter((k) => k.status === 'actief' && !k.line_id && k.kostprijs_excl !== null).reduce((sm, k) => sm + Number(k.kostprijs_excl), 0)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
@@ -156,6 +158,11 @@ export function KostenEnWinstDialoog({ factuur: ref, titel, clientId, onClose, o
                       {b.lijnenTotaal !== null && (
                         <tr className="bg-gray-50 font-semibold"><td className="table-td" colSpan={3}>Som van de lijnen</td><td className="table-td text-right tabular">{formatEuro(b.lijnenTotaal)}</td><td className="table-td text-right tabular">{formatEuro(b.perLijn.reduce((s, l) => s + l.kosten, 0))}</td><td className="table-td text-right tabular">{formatEuro(b.perLijn.reduce((s, l) => s + l.winst, 0))}</td><td></td></tr>
                       )}
+                      {/* Kosten die aan de hele factuur hangen staan bij geen enkele lijn; zonder deze rij lijkt de winst hoger dan ze is. */}
+                      {losseKosten > 0 && (
+                        <tr className="text-gray-600"><td className="table-td" colSpan={3}>Kosten op de hele factuur <span className="text-[10px] text-gray-400">— niet aan een lijn gekoppeld</span></td><td className="table-td text-right tabular">—</td><td className="table-td text-right tabular">{formatEuro(losseKosten)}</td><td className="table-td text-right tabular">−{formatEuro(losseKosten)}</td><td></td></tr>
+                      )}
+                      <tr className="bg-gray-100 font-semibold"><td className="table-td" colSpan={3}>Deze factuur</td><td className="table-td text-right tabular">{formatEuro(b.omzetExcl)}</td><td className="table-td text-right tabular">{formatEuro(b.directeKosten)}</td><td className={`table-td text-right tabular ${b.winst < 0 ? 'text-red-600' : 'text-green-700'}`}>{formatEuro(b.winst)}</td><td></td></tr>
                     </tbody>
                   </table></div>
                 )}
@@ -277,6 +284,84 @@ function Vak({ label, waarde, sub, kleur }: { label: string; waarde: string; sub
       <div className="text-[10px] text-gray-500">{label}</div>
       <div className={`text-sm font-bold ${kleur ?? ''}`}>{waarde}</div>
       {sub && <div className="text-[10px] text-gray-400">{sub}</div>}
+    </div>
+  )
+}
+
+/**
+ * Compacte, interne samenvatting van kosten en winst — bedoeld voor ín de
+ * factuureditor, zodat je zonder een tweede venster ziet wat de factuur ons
+ * kost en wat er onderaan overblijft. De klant ziet hier nooit iets van.
+ */
+export function KostenSamenvatting({ invoiceId, versie, onOpen }: { invoiceId: string; versie?: number; onOpen: () => void }) {
+  const [data, setData] = useState<Antwoord | null>(null)
+  const [laden, setLaden] = useState(true)
+
+  useEffect(() => {
+    let weg = false
+    setLaden(true)
+    fetch(`/api/admin/invoices/kosten?invoice_id=${invoiceId}`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((j) => { if (!weg && !j?.error) setData(j) })
+      .catch(() => { /* stil: de knop blijft werken */ })
+      .finally(() => { if (!weg) setLaden(false) })
+    return () => { weg = true }
+  }, [invoiceId, versie])
+
+  const b = data?.berekend
+  const actief = (data?.kosten ?? []).filter((k) => k.status === 'actief')
+  const geannuleerd = (data?.kosten ?? []).length - actief.length
+
+  return (
+    <div className="rounded-xl border border-gray-200 p-3 space-y-2.5">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">Interne kosten en winst</div>
+          <p className="text-xs text-gray-600 mt-0.5">Wat deze factuur ons kost: onderaanneming, freelancers, materiaal, advertentiebudget, drukwerk… <b>De klant ziet dit nooit</b>; het staat niet op de factuur.</p>
+        </div>
+        <button type="button" onClick={onOpen} className="btn-secondary text-xs whitespace-nowrap"><Wallet className="h-3.5 w-3.5" />Kosten beheren</button>
+      </div>
+
+      {laden || !b ? (
+        <div className="py-3 text-center text-gray-300"><Loader2 className="h-4 w-4 animate-spin mx-auto" /></div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <Vak label="Verkoop excl. btw" waarde={formatEuro(b.omzetExcl)} sub={`btw ${formatEuro(b.btw)} · incl. ${formatEuro(b.omzetIncl)}`} />
+            <Vak label="Directe kosten" waarde={formatEuro(b.directeKosten)} kleur={b.directeKosten > 0 ? 'text-red-600' : undefined} sub={b.kostenOnbekend > 0 ? `${b.kostenOnbekend} zonder kostprijs` : `${b.aantalKosten} kost${b.aantalKosten === 1 ? '' : 'en'}`} />
+            <Vak label="Winst" waarde={formatEuro(b.winst)} kleur={b.winst < 0 ? 'text-red-600' : 'text-green-700'} sub={b.status === 'voorlopig' || b.status === 'ongecontroleerd' ? 'voorlopig' : undefined} />
+            <Vak label="Marge" waarde={pct(b.margePct)} sub={data?.raaktVesting ? 'telt mee voor vesting' : undefined} />
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`status-badge ${STATUS_STIJL[b.status]}`}>{KOSTEN_STATUS_LABEL[b.status]}</span>
+            <span className="text-[11px] text-gray-400">Winst = verkoop excl. btw − directe kosten excl. btw.</span>
+          </div>
+
+          {actief.length === 0 ? (
+            <p className="text-xs text-gray-500">Nog geen kosten gelogd{geannuleerd > 0 ? ` (${geannuleerd} geannuleerd)` : ''}. Klik op <b>Kosten beheren</b> om er een toe te voegen.</p>
+          ) : (
+            <ul className="divide-y divide-gray-50 rounded-lg border border-gray-100 text-xs">
+              {actief.map((k) => (
+                <li key={k.id} className="flex items-center justify-between gap-3 px-2.5 py-1.5">
+                  <span className="min-w-0">
+                    <span className="font-medium">{k.omschrijving}</span>
+                    <span className="text-gray-400"> · {[k.categorie, k.leverancier, k.line_id ? 'aan een lijn' : 'hele factuur', k.datum ? formatDate(k.datum) : null].filter(Boolean).join(' · ')}</span>
+                  </span>
+                  <span className={`tabular whitespace-nowrap ${k.kostprijs_excl === null ? 'text-amber-700' : 'text-red-600'}`}>{k.kostprijs_excl === null ? 'nog aan te vullen' : `− ${formatEuro(k.kostprijs_excl)}`}</span>
+                </li>
+              ))}
+              {geannuleerd > 0 && <li className="px-2.5 py-1.5 text-[11px] text-gray-400">{geannuleerd} geannuleerde kost{geannuleerd === 1 ? '' : 'en'} — tellen niet mee.</li>}
+            </ul>
+          )}
+
+          {b.waarschuwingen.length > 0 && (
+            <ul className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-900 space-y-1">
+              {b.waarschuwingen.map((w) => <li key={w} className="flex gap-1.5"><AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />{w}</li>)}
+            </ul>
+          )}
+        </>
+      )}
     </div>
   )
 }
