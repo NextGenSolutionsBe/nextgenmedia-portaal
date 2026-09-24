@@ -606,7 +606,7 @@ function Kaart({
 
       <div className="mt-1 space-y-0.5 text-xs">
         {tel && (
-          <a href={`tel:${tel}`} onClick={(e) => { stop(e); onDialoog('gesprek') }} className="block text-gray-800 hover:underline truncate" draggable={false}>
+          <a href={`tel:${tel.replace(/[^\d+]/g, '')}`} onClick={(e) => { stop(e); onDialoog('gesprek') }} className="block text-gray-800 hover:underline truncate" draggable={false}>
             {tel}
           </a>
         )}

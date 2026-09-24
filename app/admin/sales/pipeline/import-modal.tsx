@@ -29,7 +29,7 @@ export function ImportModal({ pipelineId, onClose, onDone }: {
   const [busy, setBusy] = useState(false)
   const [a, setA] = useState<Analysis | null>(null)
   const [mapping, setMapping] = useState<Record<string, string>>({})
-  const [result, setResult] = useState<{ created: number; duplicate: number; skipped: number; alKlant?: number; problems: string[] } | null>(null)
+  const [result, setResult] = useState<{ created: number; duplicate: number; skipped: number; alKlant?: number; geenTelefoon?: number; dubbelTelefoon?: number; websiteWeg?: number; problems: string[] } | null>(null)
 
   const analyse = async (file: File) => {
     setBusy(true)
@@ -90,11 +90,23 @@ export function ImportModal({ pipelineId, onClose, onDone }: {
               )}
               {result.duplicate > 0 && (
                 <p className="text-sm text-gray-600">
-                  {result.duplicate} rij(en) overgeslagen — dat bedrijf stond al in deze pipeline.
+                  {result.duplicate} rij(en) overgeslagen — dat bedrijf stond al in de pipeline
+                  {(result.dubbelTelefoon ?? 0) > 0 && <> ({result.dubbelTelefoon} herkend aan hetzelfde telefoonnummer)</>}.
                 </p>
               )}
-              {result.skipped > 0 && (
-                <p className="text-sm text-gray-600">{result.skipped} rij(en) niet bruikbaar (geen bedrijfsnaam of een fout).</p>
+              {(result.geenTelefoon ?? 0) > 0 && (
+                <p className="text-sm text-gray-600">
+                  {result.geenTelefoon} rij(en) overgeslagen — <b>geen geldig telefoonnummer</b>. Een outbound lead zonder bruikbaar nummer komt er niet in.
+                </p>
+              )}
+              {result.skipped - (result.geenTelefoon ?? 0) > 0 && (
+                <p className="text-sm text-gray-600">{result.skipped - (result.geenTelefoon ?? 0)} rij(en) niet bruikbaar (geen bedrijfsnaam of een fout).</p>
+              )}
+              {(result.websiteWeg ?? 0) > 0 && (
+                <p className="text-sm text-gray-600">{result.websiteWeg} website(s) niet overgenomen — geen eigen site (sociale media, gids of e-mailadres).</p>
+              )}
+              {result.created > 0 && (
+                <p className="text-xs text-gray-500">Telefoonnummers en websites staan in één notatie. De nieuwe leads zijn nog niet op hun eigen website nagekeken.</p>
               )}
               {result.problems?.length > 0 && (
                 <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 space-y-0.5">

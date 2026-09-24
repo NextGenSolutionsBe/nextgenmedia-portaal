@@ -10,6 +10,8 @@ import {
 } from '@/lib/sales/import'
 import { parseXlsxMetVerborgen } from '@/lib/sales/xlsx'
 import { schoonRijen } from '@/lib/sales/lead-schoon'
+import { poortNieuweLead, telefoonBE } from '@/lib/sales/lead-kwaliteit'
+import { createAdminSupabaseClient } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -165,22 +167,36 @@ export async function PUT(req: NextRequest) {
     // Eén keer ophalen: onze bestaande klanten. Zonder dit belandt een klant
     // uit een gekochte lijst gewoon in de belijst.
     const klantIndex = await laadKlantIndex(salesClientId)
-    let created = 0, duplicate = 0, skipped = 0, alKlant = 0
+    let created = 0, duplicate = 0, skipped = 0, alKlant = 0, geenTelefoon = 0, dubbelTelefoon = 0, websiteWeg = 0
     const problems: string[] = []
+    // Telefoonnummers die al bij een actieve lead horen: een bedrijf met
+    // hetzelfde nummer onder een andere naam is geen nieuwe lead.
+    const bekendeNummers = await laadActieveNummers(salesClientId)
+    const admin = createAdminSupabaseClient()
 
     for (const [i, r] of geschoond.rijen.entries()) {
       const companyName = (r.company.name ?? '').trim()
       if (!companyName) { skipped++; continue }   // rij zonder bedrijf is onbruikbaar
+      // Kwaliteitspoort: zonder geldig telefoonnummer geen outbound lead.
+      const poort = poortNieuweLead({ bedrijfTelefoon: r.company.phone, contactTelefoon: r.contact.phone, contactGsm: r.contact.mobile, website: r.company.website })
+      if (!poort.ok) {
+        geenTelefoon++
+        if (problems.length < 10) problems.push(`Rij ${i + 2} (${companyName}): ${poort.reden}`)
+        continue
+      }
+      if (bekendeNummers.has(poort.telefoon.nsn)) { dubbelTelefoon++; continue }
+      if (poort.websiteWeg) websiteWeg++
+      const nr = (v: string | undefined) => { const t = telefoonBE(v); return t.geldig ? t.weergave : v }
       const res = await createLead({
         salesClientId,
         pipelineId,
         klantIndex,
         company: {
           name: companyName,
-          website: r.company.website, sector: r.company.sector,
+          website: poort.website ?? undefined, sector: r.company.sector,
           employees: r.company.employees ? Number(String(r.company.employees).replace(/\D/g, '')) || undefined : undefined,
           city: r.company.city, region: r.company.region, country: r.company.country,
-          phone: r.company.phone, linkedin: r.company.linkedin,
+          phone: nr(r.company.phone), linkedin: r.company.linkedin,
           email: r.company.email, werkklasse: r.company.werkklasse,
           activiteit: r.company.activiteit,
           ondernemingsnummer: r.company.ondernemingsnummer,
@@ -188,20 +204,49 @@ export async function PUT(req: NextRequest) {
         },
         contact: {
           name: r.contact.name, role: r.contact.role, email: r.contact.email,
-          phone: r.contact.phone, mobile: r.contact.mobile, linkedin: r.contact.linkedin,
+          phone: nr(r.contact.phone), mobile: nr(r.contact.mobile), linkedin: r.contact.linkedin,
         },
       })
-      if (res.ok) created++
+      if (res.ok) {
+        created++
+        bekendeNummers.add(poort.telefoon.nsn)
+        // Genormaliseerd, maar nog niet op de eigen website nagekeken.
+        await admin.from('sales_lead_controle').upsert({
+          lead_id: res.leadId, status: 'niet_gecontroleerd', reden: 'nieuw geïmporteerd, nog niet op de website nagekeken',
+          telefoon_norm: poort.telefoon.weergave, website_norm: poort.website, bron: 'import',
+        }, { onConflict: 'lead_id' }).then(() => {}, () => {})
+      }
       else if (res.alKlant) alKlant++
       else if (res.existingLeadId) duplicate++
       else { skipped++; if (problems.length < 10) problems.push(`Rij ${i + 2}: ${res.error}`) }
     }
 
     return NextResponse.json({
-      ok: true, created, duplicate, skipped, alKlant, problems,
+      ok: true, created, duplicate: duplicate + dubbelTelefoon, skipped: skipped + geenTelefoon, alKlant, problems,
+      geenTelefoon, dubbelTelefoon, websiteWeg,
       opgeschoond: geschoond.verslag.opgeschoond,
     })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
+  }
+}
+
+/** Alle telefoonnummers (nationaal formaat) van actieve leads: bedrijf, contact, gsm. */
+async function laadActieveNummers(salesClientId: string): Promise<Set<string>> {
+  const admin = createAdminSupabaseClient()
+  const uit = new Set<string>()
+  for (let van = 0; ; van += 1000) {
+    const { data, error } = await admin.from('sales_leads')
+      .select('sales_companies(phone), sales_contacts(phone, mobile)')
+      .eq('sales_client_id', salesClientId).is('archived_at', null)
+      .order('id').range(van, van + 999)
+    if (error) return uit
+    for (const l of (data ?? []) as unknown as { sales_companies: { phone: string | null } | null; sales_contacts: { phone: string | null; mobile: string | null } | null }[]) {
+      for (const v of [l.sales_companies?.phone, l.sales_contacts?.phone, l.sales_contacts?.mobile]) {
+        const t = telefoonBE(v)
+        if (t.geldig) uit.add(t.nsn)
+      }
+    }
+    if (!data || data.length < 1000) return uit
   }
 }

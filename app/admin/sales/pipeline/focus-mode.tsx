@@ -691,7 +691,7 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
               <p className="text-sm text-gray-400 flex items-center gap-2"><Phone className="h-4 w-4" />Geen telefoonnummer</p>
             )}
             {telefoons.map((t) => (
-              <a key={t.label} href={`tel:${t.nummer}`} className="block group">
+              <a key={t.label} href={`tel:${(t.nummer ?? '').replace(/[^\d+]/g, '')}`} className="block group">
                 <span className="text-[10px] uppercase tracking-wide text-gray-400">{t.label}</span>
                 <span className="flex items-center gap-2 text-lg font-semibold group-hover:underline">
                   <Phone className="h-4 w-4 text-gray-400" />{t.nummer}

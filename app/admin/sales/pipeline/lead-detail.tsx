@@ -14,6 +14,7 @@ import { LeadGegevens } from './lead-gegevens'
 import { LeadTijdlijn } from './lead-tijdlijn'
 import { DienstenLijst } from './lead-dialogen'
 import { LeadOpdrachten } from './lead-opdrachten'
+import { LeadControle } from './lead-controle'
 import {
   type Lead, type Medewerker, type Pipeline, emailVan, euro, korteDatum, merkenVan, telefoonVan,
 } from './types'
@@ -172,7 +173,7 @@ export function LeadDetail({
           ) : (
             <div className="space-y-1.5 text-sm">
               {tel && (
-                <a href={`tel:${tel}`} onClick={() => onDialoog('gesprek')} className="flex items-center gap-2 font-medium hover:underline">
+                <a href={`tel:${tel.replace(/[^\d+]/g, '')}`} onClick={() => onDialoog('gesprek')} className="flex items-center gap-2 font-medium hover:underline">
                   <Phone className="h-4 w-4 text-gray-400" />{tel}
                 </a>
               )}
@@ -188,13 +189,14 @@ export function LeadDetail({
                 </a>
               )}
               {lead.sales_companies?.phone && lead.sales_companies.phone !== tel && (
-                <a href={`tel:${lead.sales_companies.phone}`} className="flex items-center gap-2 text-gray-500 hover:underline">
+                <a href={`tel:${lead.sales_companies.phone.replace(/[^\d+]/g, '')}`} className="flex items-center gap-2 text-gray-500 hover:underline">
                   <Phone className="h-4 w-4 text-gray-300" />{lead.sales_companies.phone} <span className="text-xs">(algemeen)</span>
                 </a>
               )}
               {!tel && !mail && !website && <p className="text-xs text-gray-400">Nog geen contactgegevens — klik op het potlood.</p>}
             </div>
           )}
+          <LeadControle leadId={lead.id} />
 
           {/* Snelle acties */}
           <div className="grid grid-cols-3 gap-1.5">

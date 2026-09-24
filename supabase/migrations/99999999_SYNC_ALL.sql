@@ -5201,3 +5201,36 @@ insert into storage.buckets (id, name, public) values ('personeel', 'personeel',
 insert into personeel (voornaam, type, actief, created_by)
 select 'Alida', 'student', true, 'systeem'
 where not exists (select 1 from personeel where lower(voornaam) = 'alida');
+
+-- ── Outbound-leads: kwaliteitscontrole en opschoning ─────────────────────────
+-- Per lead het laatste controleresultaat (telefoon, website, bewijs op de site).
+CREATE TABLE IF NOT EXISTS public.sales_lead_controle (
+  lead_id          uuid PRIMARY KEY REFERENCES public.sales_leads(id) ON DELETE CASCADE,
+  status           text NOT NULL,        -- geverifieerd | vertrouwd | niet_gecontroleerd | geen_telefoon | ongeldig_telefoon | dubbel | geen_website | website_ongeldig | website_onbereikbaar | niet_verifieerbaar
+  reden            text,
+  telefoon_norm    text,
+  website_norm     text,
+  site_bereikbaar  boolean,
+  telefoon_op_site boolean,
+  naam_op_site     boolean,
+  bron             text,
+  gecontroleerd_op timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS sales_lead_controle_status ON public.sales_lead_controle (status);
+ALTER TABLE public.sales_lead_controle ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "sales_lead_controle admin all" ON public.sales_lead_controle;
+CREATE POLICY "sales_lead_controle admin all" ON public.sales_lead_controle FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'admin'));
+
+-- Back-up van elke rij die een opschoning aanraakt (oude waarden), om te kunnen herstellen.
+CREATE TABLE IF NOT EXISTS public.sales_opschoning_backup (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  run        text NOT NULL,
+  tabel      text NOT NULL,
+  rij_id     uuid NOT NULL,
+  oud        jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS sales_opschoning_backup_run ON public.sales_opschoning_backup (run, tabel);
+ALTER TABLE public.sales_opschoning_backup ENABLE ROW LEVEL SECURITY;
