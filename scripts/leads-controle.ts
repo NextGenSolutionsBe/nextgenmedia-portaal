@@ -60,7 +60,10 @@ async function main() {
   console.log('MODUS: proefronde (er wordt niets gewijzigd)')
   const leads = await alles<Lead>((a, b) => db.from('sales_leads')
     .select('id,pipeline_id,stage_key,labels,created_at,company_id,contact_id,sales_companies(id,name,website,phone),sales_contacts(id,phone,mobile)')
-    .is('archived_at', null).order('created_at').range(a, b) as never)
+    .is('archived_at', null).order('created_at').order('id').range(a, b) as never)
+  // Stabiele paginering (created_at + id); toch nog eens ontdubbelen op id als vangnet.
+  const gezien = new Set<string>()
+  for (let i = leads.length - 1; i >= 0; i--) { if (gezien.has(leads[i].id)) leads.splice(i, 1); else gezien.add(leads[i].id) }
   console.log(`${leads.length} actieve leads geladen`)
 
   // Historiek: leads waarop al gebeld of genoteerd werd.
@@ -175,6 +178,7 @@ async function toepassen(rapport: RapportRij[]) {
     const t = telefoonBE(r.telefoon_oud)
     if (t.geldig) Object.assign(r, { telefoon_bron: 'bedrijf', telefoon_norm: t.weergave, status: 'niet_verifieerbaar', reden: 'buitenlands nummer — nog niet op de website nagekeken' })
   }
+  if (new Set(rapport.map((r) => r.lead_id)).size !== rapport.length) throw new Error('Rapport bevat dezelfde lead meer dan eens — draai eerst een nieuwe proefronde.')
   const weg = (r: RapportRij) => !r.behouden && (uitsluitSet ? uitsluitSet.has(r.status) : true) && (ookVertrouwd || !r.vertrouwd)
   const uit = rapport.filter(weg)
   const blijft = rapport.filter((r) => !weg(r))
