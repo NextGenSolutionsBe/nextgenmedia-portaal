@@ -1,3 +1,4 @@
+import { leesGetal } from '@/lib/getal'
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireAdmin } from '@/lib/supabase/server'
@@ -20,11 +21,7 @@ const TABEL: Record<Resource, string> = {
 }
 
 const tekst = (v: unknown): string | null => { const s = String(v ?? '').trim(); return s || null }
-const getal = (v: unknown): number | null => {
-  if (v === null || v === undefined || v === '') return null
-  const x = Number(String(v).replace(',', '.'))
-  return Number.isFinite(x) ? x : null
-}
+const getal = (v: unknown): number | null => leesGetal(v)
 const datum = (v: unknown): string | null => {
   const s = tekst(v); if (!s) return null
   const d = new Date(s.slice(0, 10) + 'T00:00:00')

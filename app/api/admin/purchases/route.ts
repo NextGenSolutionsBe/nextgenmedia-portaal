@@ -1,3 +1,4 @@
+import { leesGetal } from '@/lib/getal'
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
@@ -36,8 +37,8 @@ export async function POST(req: NextRequest) {
     if (!actor) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
     const fd = await req.formData()
     const title = (fd.get('title') as string)?.trim()
-    const amountExcl = Number(fd.get('amount_excl'))
-    const vatPct = Number(fd.get('vat_pct') ?? 21)
+    const amountExcl = (leesGetal(fd.get('amount_excl')) ?? NaN)
+    const vatPct = (leesGetal(fd.get('vat_pct')) ?? 21)
     if (!title) return NextResponse.json({ error: 'Titel is verplicht' }, { status: 400 })
     if (!amountExcl || amountExcl <= 0) return NextResponse.json({ error: 'Bedrag is verplicht' }, { status: 400 })
 

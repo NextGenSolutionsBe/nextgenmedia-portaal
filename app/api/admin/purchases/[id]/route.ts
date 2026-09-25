@@ -1,3 +1,4 @@
+import { leesGetal } from '@/lib/getal'
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
@@ -23,7 +24,7 @@ const LABEL: Record<Veld, string> = { title: 'Titel', description: 'Omschrijving
 const MATERIEEL: Veld[] = ['title', 'amount_excl', 'vat_pct', 'supplier']
 
 const tekst = (v: unknown): string | null => { const s = String(v ?? '').trim(); return s || null }
-const getal = (v: unknown): number | null => { if (v === null || v === undefined || v === '') return null; const x = Number(String(v).replace(',', '.')); return Number.isFinite(x) ? x : null }
+const getal = (v: unknown): number | null => leesGetal(v)
 
 async function laad(admin: ReturnType<typeof createAdminSupabaseClient>, id: string) {
   const { data } = await admin.from('purchases').select('*').eq('id', id).maybeSingle()

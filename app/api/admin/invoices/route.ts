@@ -1,3 +1,4 @@
+import { leesGetal } from '@/lib/getal'
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
@@ -73,7 +74,7 @@ async function linkOrCreateForecast(admin: Admin, p: {
 type LijnInvoer = { omschrijving?: unknown; aantal?: unknown; prijs_excl?: unknown; btw_pct?: unknown; classificatie?: unknown; opmerking?: unknown; kostprijs_excl?: unknown; leverancier?: unknown; categorie?: unknown }
 async function slaLijnenOp(admin: Admin, ref: FactuurRef, lijnen: unknown, actor: { id: string; email?: string | null }): Promise<void> {
   if (!Array.isArray(lijnen) || lijnen.length === 0) return
-  const num = (v: unknown): number | null => { if (v === null || v === undefined || v === '') return null; const x = Number(String(v).replace(',', '.')); return Number.isFinite(x) ? x : null }
+  const num = (v: unknown): number | null => leesGetal(v)
   const txt = (v: unknown): string | null => { const t = String(v ?? '').trim(); return t || null }
   let volgnr = 0
   for (const raw of lijnen as LijnInvoer[]) {

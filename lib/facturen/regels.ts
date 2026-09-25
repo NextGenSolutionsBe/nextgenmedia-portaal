@@ -4,6 +4,8 @@
 // 21 % btw nooit een zwevendekommafout oplevert. Naar buiten toe zijn de
 // bedragen gewone euro's met twee decimalen.
 
+import { leesGetal } from '@/lib/getal'
+
 export type Classificatie = 'dienst' | 'doorgerekende_kost' | 'gemengd'
 
 export type FactuurRegel = {
@@ -42,9 +44,7 @@ const euro = (c: number): number => c / 100
 
 /** Getal uit invoer: accepteert komma of punt; onzin wordt 0. */
 export function getal(v: unknown, standaard = 0): number {
-  if (v === null || v === undefined || v === '') return standaard
-  const n = Number(String(v).trim().replace(/\s|€/g, '').replace(',', '.'))
-  return Number.isFinite(n) ? n : standaard
+  return leesGetal(v) ?? standaard
 }
 
 /** De centen van één regel: aantal × prijs, min korting, dan btw op het afgeronde exclusieve bedrag. */

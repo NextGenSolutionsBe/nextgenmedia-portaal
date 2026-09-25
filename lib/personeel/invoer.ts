@@ -1,10 +1,11 @@
+import { leesGetal } from '../getal'
 // Personeel — invoer uit verzoeken netjes maken. Puur.
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export const isUuid = (v: unknown): v is string => typeof v === 'string' && UUID.test(v)
 export const uuidOf = (v: unknown): string | null => (isUuid(v) ? v : null)
 export const tekst = (v: unknown, max = 500): string | null => { const t = String(v ?? '').trim(); return t ? t.slice(0, max) : null }
-export const getal = (v: unknown): number | null => { if (v === null || v === undefined || v === '') return null; const n = Number(String(v).replace(',', '.')); return Number.isFinite(n) ? n : null }
+export const getal = (v: unknown): number | null => leesGetal(v)
 export const dagOf = (v: unknown): string | null => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null)
 export const uurOf = (v: unknown): string | null => { const t = String(v ?? '').slice(0, 5); return /^([01]\d|2[0-3]):[0-5]\d$/.test(t) ? t : null }
 export const isoOf = (v: unknown): string | null => { if (typeof v !== 'string' || !v) return null; const d = new Date(v); return Number.isFinite(d.getTime()) ? d.toISOString() : null }

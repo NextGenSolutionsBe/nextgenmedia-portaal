@@ -1,3 +1,4 @@
+import { leesGetal } from '@/lib/getal'
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { safeMessage } from '@/lib/api-error'
@@ -27,7 +28,7 @@ export const dynamic = 'force-dynamic'
 const UUID = /^[0-9a-f-]{36}$/i
 const datum = (v: unknown): string | null | undefined => { if (v === null || v === '') return null; if (v === undefined) return undefined; const s = String(v).slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : undefined }
 const tekst = (v: unknown, max: number): string | null => { const t = String(v ?? '').trim(); return t ? t.slice(0, max) : null }
-const num = (v: unknown): number | null => { if (v === null || v === undefined || v === '') return null; const n = Number(String(v).replace(',', '.')); return Number.isFinite(n) ? n : null }
+const num = (v: unknown): number | null => leesGetal(v)
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Admin = { from: (t: string) => any }

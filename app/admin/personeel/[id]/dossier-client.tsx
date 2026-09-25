@@ -259,9 +259,9 @@ function Tarieven({ id, tarieven, type, onKlaar }: { id: string; tarieven: Tarie
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <div><label className={LBL}>Geldig vanaf *</label><input type="date" className={INP} value={f.geldig_vanaf} onChange={(e) => setF({ ...f, geldig_vanaf: e.target.value })} /></div>
             <div><label className={LBL}>Omschrijving basis</label><input className={INP} value={f.basis_label} onChange={(e) => setF({ ...f, basis_label: e.target.value })} /></div>
-            <div><label className={LBL}>Bedrag per uur (€, excl. btw)</label><input type="number" step="0.01" min={0} className={INP} value={f.basis_uur} onChange={(e) => setF({ ...f, basis_uur: e.target.value })} /></div>
-            <div><label className={LBL}>Btw % (freelance/onderaanneming)</label><input type="number" step="0.01" min={0} className={INP} value={f.btw_pct} onChange={(e) => setF({ ...f, btw_pct: e.target.value })} /></div>
-            <div><label className={LBL}>Referentie uren per dag</label><input type="number" step="0.5" min={1} className={INP} value={f.uren_per_dag} onChange={(e) => setF({ ...f, uren_per_dag: e.target.value })} /></div>
+            <div><label className={LBL}>Bedrag per uur (€, excl. btw)</label><input type="text" inputMode="decimal" className={INP} value={f.basis_uur} onChange={(e) => setF({ ...f, basis_uur: e.target.value })} /></div>
+            <div><label className={LBL}>Btw % (freelance/onderaanneming)</label><input type="text" inputMode="decimal" className={INP} value={f.btw_pct} onChange={(e) => setF({ ...f, btw_pct: e.target.value })} /></div>
+            <div><label className={LBL}>Referentie uren per dag</label><input type="text" inputMode="decimal" className={INP} value={f.uren_per_dag} onChange={(e) => setF({ ...f, uren_per_dag: e.target.value })} /></div>
             <div><label className={LBL}>Referentie uren per maand</label><input type="number" step="1" min={1} className={INP} value={f.uren_per_maand} onChange={(e) => setF({ ...f, uren_per_maand: e.target.value })} /></div>
           </div>
           <div className="space-y-2">
@@ -270,7 +270,7 @@ function Tarieven({ id, tarieven, type, onKlaar }: { id: string; tarieven: Tarie
               <div key={l.id} className="grid grid-cols-12 gap-2 items-center">
                 <input className={`${INP} col-span-4`} value={l.label} onChange={(e) => zetLijn(i, 'label', e.target.value)} />
                 <select className={`${INP} col-span-3`} value={l.soort} onChange={(e) => zetLijn(i, 'soort', e.target.value as KostSoort)}>{KOST_SOORTEN.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}</select>
-                <input type="number" step="0.01" min={0} className={`${INP} col-span-2`} value={String(l.waarde)} onChange={(e) => zetLijn(i, 'waarde', e.target.value)} placeholder={l.soort === 'pct' ? '%' : '€'} />
+                <input type="text" inputMode="decimal" className={`${INP} col-span-2`} value={String(l.waarde)} onChange={(e) => zetLijn(i, 'waarde', e.target.value)} placeholder={l.soort === 'pct' ? '%' : '€'} />
                 {l.soort === 'eenmalig' ? <input type="date" className={`${INP} col-span-2`} value={l.datum ?? ''} onChange={(e) => zetLijn(i, 'datum', e.target.value)} /> : <span className="col-span-2 text-[11px] text-gray-400">{KOST_SOORTEN.find((k) => k.key === l.soort)?.eenheid}</span>}
                 <button type="button" onClick={() => setF((x) => ({ ...x, lijnen: x.lijnen.filter((_, j) => j !== i) }))} className="col-span-1 h-9 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 flex items-center justify-center"><X className="h-4 w-4" /></button>
               </div>

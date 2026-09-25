@@ -1,5 +1,6 @@
 'use client'
 
+import { leesGetal } from '@/lib/getal'
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Trash2, Loader2, Repeat2, ArrowUpRight, Pencil, X, Search, Filter as FilterIcon } from 'lucide-react'
@@ -73,8 +74,8 @@ export function RevenueTable({ entries }: { entries: EntryRow[] }) {
 
   const shown = useMemo(() => {
     const q = dq.trim().toLowerCase()
-    const min = minAmount ? Number(minAmount) : null
-    const max = maxAmount ? Number(maxAmount) : null
+    const min = minAmount ? leesGetal(minAmount) : null
+    const max = maxAmount ? leesGetal(maxAmount) : null
     return entries.filter((e) => {
       if (fType !== 'all' && e.type !== fType) return false
       if (fService !== 'all' && (e.service_slug ?? '') !== fService) return false
@@ -141,8 +142,8 @@ export function RevenueTable({ entries }: { entries: EntryRow[] }) {
             <option value="all">Alle jaren</option>
             {years.map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
-          <input type="number" min="0" placeholder="€ min" className={`${fsel} w-24`} value={minAmount} onChange={(e) => setMinAmount(e.target.value)} />
-          <input type="number" min="0" placeholder="€ max" className={`${fsel} w-24`} value={maxAmount} onChange={(e) => setMaxAmount(e.target.value)} />
+          <input type="text" inputMode="decimal" placeholder="€ min" className={`${fsel} w-24`} value={minAmount} onChange={(e) => setMinAmount(e.target.value)} />
+          <input type="text" inputMode="decimal" placeholder="€ max" className={`${fsel} w-24`} value={maxAmount} onChange={(e) => setMaxAmount(e.target.value)} />
         </div>
       </div>
 
@@ -257,11 +258,11 @@ function EditDialog({ entry, onClose, onSaved }: { entry: EntryRow; onClose: () 
         id: entry.id, client_id: form.client_id, title: form.title || null, service_slug: form.service_slug || null, notes: form.notes || null,
       }
       if (entry.type === 'recurring') {
-        body.amount_per_month = form.amount_per_month ? Number(form.amount_per_month) : null
+        body.amount_per_month = form.amount_per_month ? (leesGetal(form.amount_per_month) ?? null) : null
         body.start_month = form.start_month ? `${form.start_month}-01` : null
         body.end_month = form.end_month ? `${form.end_month}-01` : null
       } else {
-        body.amount = form.amount ? Number(form.amount) : null
+        body.amount = form.amount ? (leesGetal(form.amount) ?? null) : null
         body.transaction_month = form.transaction_month ? `${form.transaction_month}-01` : null
       }
       const res = await fetch('/api/admin/revenue', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -295,13 +296,13 @@ function EditDialog({ entry, onClose, onSaved }: { entry: EntryRow; onClose: () 
           </div>
           {entry.type === 'recurring' ? (
             <div className="grid grid-cols-2 gap-3">
-              <div><label className={lbl}>Bedrag / maand (€)</label><input type="number" min="0" step="0.01" className={inp} value={form.amount_per_month} onChange={(e) => setForm((f) => ({ ...f, amount_per_month: e.target.value }))} /></div>
+              <div><label className={lbl}>Bedrag / maand (€)</label><input type="text" inputMode="decimal" className={inp} value={form.amount_per_month} onChange={(e) => setForm((f) => ({ ...f, amount_per_month: e.target.value }))} /></div>
               <div><label className={lbl}>Startmaand</label><input type="month" className={inp} value={form.start_month} onChange={(e) => setForm((f) => ({ ...f, start_month: e.target.value }))} /></div>
               <div><label className={lbl}>Eindmaand (optioneel)</label><input type="month" className={inp} value={form.end_month} onChange={(e) => setForm((f) => ({ ...f, end_month: e.target.value }))} /></div>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3">
-              <div><label className={lbl}>Bedrag (€)</label><input type="number" min="0" step="0.01" className={inp} value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} /></div>
+              <div><label className={lbl}>Bedrag (€)</label><input type="text" inputMode="decimal" className={inp} value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} /></div>
               <div><label className={lbl}>Transactiemaand</label><input type="month" className={inp} value={form.transaction_month} onChange={(e) => setForm((f) => ({ ...f, transaction_month: e.target.value }))} /></div>
             </div>
           )}

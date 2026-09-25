@@ -1,3 +1,4 @@
+import { leesGetal } from '@/lib/getal'
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient , isActiveStaff } from '@/lib/supabase/server'
@@ -34,7 +35,7 @@ export async function POST(req: NextRequest) {
     const { name, category, type, cost_date, start_date, end_date, billing_frequency, amount_excl, vat_pct, notes } = body
 
     if (!name?.trim()) return NextResponse.json({ error: 'Naam is verplicht' }, { status: 400 })
-    if (!amount_excl || Number(amount_excl) <= 0) return NextResponse.json({ error: 'Bedrag is verplicht' }, { status: 400 })
+    if (!amount_excl || (leesGetal(amount_excl) ?? NaN) <= 0) return NextResponse.json({ error: 'Bedrag is verplicht' }, { status: 400 })
     if (type === 'one_time' && !cost_date) return NextResponse.json({ error: 'Datum is verplicht' }, { status: 400 })
     if (type === 'recurring' && !start_date) return NextResponse.json({ error: 'Startdatum is verplicht' }, { status: 400 })
 
@@ -51,8 +52,8 @@ export async function POST(req: NextRequest) {
         start_date: type === 'recurring' ? start_date : null,
         end_date: type === 'recurring' ? (end_date || null) : null,
         billing_frequency: type === 'recurring' ? freq : 'monthly',
-        amount_excl: Number(amount_excl),
-        vat_pct: vat_pct != null ? Number(vat_pct) : 21,
+        amount_excl: (leesGetal(amount_excl) ?? NaN),
+        vat_pct: vat_pct != null && vat_pct !== '' ? (leesGetal(vat_pct) ?? 21) : 21,
         notes: notes?.trim() || null,
       })
       .select('*')
@@ -115,14 +116,14 @@ export async function PATCH(req: NextRequest) {
     if (heeft('notes')) patch.notes = String(body.notes ?? '').trim() || null
 
     if (heeft('amount_excl')) {
-      const bedrag = Number(body.amount_excl)
+      const bedrag = (leesGetal(body.amount_excl) ?? NaN)
       if (!Number.isFinite(bedrag) || bedrag <= 0) {
         return NextResponse.json({ error: 'Bedrag moet groter zijn dan nul' }, { status: 400 })
       }
       patch.amount_excl = bedrag
     }
     if (heeft('vat_pct')) {
-      const btw = Number(body.vat_pct)
+      const btw = (leesGetal(body.vat_pct) ?? NaN)
       if (!Number.isFinite(btw) || btw < 0 || btw > 100) {
         return NextResponse.json({ error: 'BTW moet tussen 0 en 100 liggen' }, { status: 400 })
       }

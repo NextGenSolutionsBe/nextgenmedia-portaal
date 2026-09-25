@@ -1,5 +1,6 @@
 'use client'
 
+import { GetalInvoer } from '@/components/ui/getal-invoer'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -81,11 +82,11 @@ export function RegelsEditor({ regels, onChange, btw, alleenLezen }: { regels: F
                   <td className="px-1 py-1 text-gray-400">{r.volgnr}</td>
                   <td className="px-1 py-1"><input className={cel} value={r.artikel} disabled={alleenLezen} onChange={(e) => zet(i, { artikel: e.target.value })} placeholder="Bv. Social media beheer" /></td>
                   <td className="px-1 py-1"><input className={cel} value={r.omschrijving} disabled={alleenLezen} onChange={(e) => zet(i, { omschrijving: e.target.value })} placeholder="Omschrijving op de factuur" /></td>
-                  <td className="px-1 py-1"><input className={`${cel} text-right`} inputMode="decimal" value={String(r.aantal)} disabled={alleenLezen} onChange={(e) => zet(i, { aantal: Math.max(0, getal(e.target.value, 0)) })} /></td>
+                  <td className="px-1 py-1"><GetalInvoer className={`${cel} text-right`} waarde={r.aantal} min={0} disabled={alleenLezen} onWaarde={(n) => zet(i, { aantal: n })} /></td>
                   <td className="px-1 py-1"><select className={cel} value={r.eenheid} disabled={alleenLezen} onChange={(e) => zet(i, { eenheid: e.target.value })}>{[...EENHEDEN, ...(EENHEDEN.includes(r.eenheid as typeof EENHEDEN[number]) ? [] : [r.eenheid])].map((u) => <option key={u} value={u}>{u}</option>)}</select></td>
-                  <td className="px-1 py-1"><input className={`${cel} text-right`} inputMode="decimal" value={String(r.prijs_excl)} disabled={alleenLezen} onChange={(e) => zet(i, { prijs_excl: getal(e.target.value, 0) })} /></td>
-                  <td className="px-1 py-1"><input className={`${cel} text-right`} inputMode="decimal" value={String(r.btw_pct)} disabled={alleenLezen} onChange={(e) => zet(i, { btw_pct: Math.min(100, Math.max(0, getal(e.target.value, btw))) })} /></td>
-                  <td className="px-1 py-1"><input className={`${cel} text-right`} inputMode="decimal" value={String(r.korting_pct)} disabled={alleenLezen} onChange={(e) => zet(i, { korting_pct: Math.min(100, Math.max(0, getal(e.target.value, 0))) })} /></td>
+                  <td className="px-1 py-1"><GetalInvoer className={`${cel} text-right`} waarde={r.prijs_excl} disabled={alleenLezen} onWaarde={(n) => zet(i, { prijs_excl: n })} /></td>
+                  <td className="px-1 py-1"><GetalInvoer className={`${cel} text-right`} waarde={r.btw_pct} leeg={btw} min={0} max={100} disabled={alleenLezen} onWaarde={(n) => zet(i, { btw_pct: n })} /></td>
+                  <td className="px-1 py-1"><GetalInvoer className={`${cel} text-right`} waarde={r.korting_pct} min={0} max={100} disabled={alleenLezen} onWaarde={(n) => zet(i, { korting_pct: n })} /></td>
                   <td className="px-1 py-1 text-right tabular-nums">{formatEuro(b.excl)}</td>
                   <td className="px-1 py-1 text-right tabular-nums text-gray-500">{formatEuro(b.btw)}</td>
                   <td className="px-1 py-1 text-right tabular-nums font-medium">{formatEuro(b.incl)}</td>

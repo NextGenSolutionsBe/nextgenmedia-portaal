@@ -1,3 +1,4 @@
+import { leesGetal } from '@/lib/getal'
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient , isActiveStaff } from '@/lib/supabase/server'
@@ -102,13 +103,15 @@ export async function POST(req: NextRequest) {
       service_slug: service_slug || null,
       type,
       billing_frequency: freq,
-      amount_per_month: type === 'recurring' ? Number(amount_per_month) : null,
+      amount_per_month: type === 'recurring' ? (leesGetal(amount_per_month) ?? NaN) : null,
       start_month: type === 'recurring' ? start_month : null,
       end_month: resolvedEndMonth,
-      amount: type === 'one_time' ? Number(amount) : null,
+      amount: type === 'one_time' ? (leesGetal(amount) ?? NaN) : null,
       transaction_month: type === 'one_time' ? transaction_month : null,
       notes: notes || null,
     }
+    const bedragVeld = type === 'recurring' ? row.amount_per_month : row.amount
+    if (!Number.isFinite(bedragVeld as number)) return NextResponse.json({ error: 'Geen geldig bedrag (gebruik bv. 1250,50)' }, { status: 400 })
 
     // Insert met kolom-fallback (oudere schema's zonder title/billing_frequency).
     const p: Record<string, unknown> = { ...row }
@@ -146,10 +149,10 @@ export async function PATCH(req: NextRequest) {
     if (b.service_slug !== undefined) patch.service_slug = b.service_slug || null
     if (b.notes !== undefined) patch.notes = b.notes || null
     if (b.billing_frequency !== undefined) patch.billing_frequency = VALID_FREQ.includes(b.billing_frequency) ? b.billing_frequency : 'monthly'
-    if (b.amount_per_month !== undefined) patch.amount_per_month = b.amount_per_month === null ? null : Number(b.amount_per_month)
+    if (b.amount_per_month !== undefined) patch.amount_per_month = b.amount_per_month === null ? null : (leesGetal(b.amount_per_month) ?? NaN)
     if (b.start_month !== undefined) patch.start_month = b.start_month || null
     if (b.end_month !== undefined) patch.end_month = b.end_month || null
-    if (b.amount !== undefined) patch.amount = b.amount === null ? null : Number(b.amount)
+    if (b.amount !== undefined) patch.amount = b.amount === null ? null : (leesGetal(b.amount) ?? NaN)
     if (b.transaction_month !== undefined) patch.transaction_month = b.transaction_month || null
 
     if (Object.keys(patch).length === 0) return NextResponse.json({ error: 'Geen wijzigingen' }, { status: 400 })

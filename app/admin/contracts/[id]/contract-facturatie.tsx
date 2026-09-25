@@ -1,5 +1,6 @@
 'use client'
 
+import { leesGetal } from '@/lib/getal'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -179,7 +180,7 @@ function ReeksDialoog({ contractTitle, bezig, onSluit, onBevestig }: { contractT
   const [notitie, setNotitie] = useState('')
   const inv: ReeksInvoer = {
     type, aantal: type === 'eenmalig' ? 1 : type === 'maandelijks' && doorlopend ? null : Number(aantal) || 0,
-    bedrag_excl: Number(String(bedrag).replace(',', '.')) || 0, btw_pct: Number(btw) || 0, start_datum: start, interval_maanden: Number(interval) || 1,
+    bedrag_excl: leesGetal(bedrag) ?? 0, btw_pct: leesGetal(btw) ?? 0, start_datum: start, interval_maanden: Number(interval) || 1,
     omschrijving, betalingstermijn_dagen: Number(termijn) || 0,
   }
   const fouten = valideerReeks(inv)

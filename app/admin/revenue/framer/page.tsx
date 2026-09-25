@@ -1,5 +1,6 @@
 'use client'
 
+import { leesGetal } from '@/lib/getal'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Plus, Loader2, Trash2, Pencil, X, ExternalLink, CalendarClock, AlertTriangle, Globe,
@@ -98,8 +99,8 @@ export default function FramerPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...form,
-          bedrag_excl: Number(String(form.bedrag_excl).replace(',', '.')) || 0,
-          vat_pct: Number(String(form.vat_pct).replace(',', '.')) || 0,
+          bedrag_excl: leesGetal(form.bedrag_excl) ?? 0,
+          vat_pct: leesGetal(form.vat_pct) ?? 0,
         }),
       })
       const j = await r.json()

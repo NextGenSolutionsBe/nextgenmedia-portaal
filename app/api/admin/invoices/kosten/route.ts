@@ -1,3 +1,4 @@
+import { leesGetal } from '@/lib/getal'
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
@@ -17,7 +18,7 @@ export const dynamic = 'force-dynamic'
 
 const UUID = /^[0-9a-f-]{36}$/i
 const tekst = (v: unknown): string | null => { const s = String(v ?? '').trim(); return s || null }
-const getal = (v: unknown): number | null => { if (v === null || v === undefined || v === '') return null; const x = Number(String(v).replace(',', '.')); return Number.isFinite(x) ? x : null }
+const getal = (v: unknown): number | null => leesGetal(v)
 const datum = (v: unknown): string | null => { const s = tekst(v); return s && /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null }
 const CLASSIFICATIES: Classificatie[] = ['dienst', 'doorgerekende_kost', 'gemengd']
 

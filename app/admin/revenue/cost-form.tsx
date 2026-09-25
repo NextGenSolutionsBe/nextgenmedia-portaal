@@ -1,5 +1,6 @@
 'use client'
 
+import { leesGetal } from '@/lib/getal'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, X, Loader2, Repeat2, ArrowDownRight } from 'lucide-react'
@@ -51,8 +52,8 @@ export function CostDialog({ cost, onClose }: { cost?: Cost | null; onClose: () 
   const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]'
   const lbl = 'block text-xs font-medium text-gray-600 mb-1'
 
-  const excl = parseFloat(form.amount_excl) || 0
-  const vat = parseFloat(form.vat_pct) || 0
+  const excl = leesGetal(form.amount_excl) ?? 0
+  const vat = leesGetal(form.vat_pct) ?? 0
   const incl = excl * (1 + vat / 100)
   const fmt = (n: number) => new Intl.NumberFormat('nl-BE', { style: 'currency', currency: 'EUR' }).format(n)
 
@@ -157,11 +158,11 @@ export function CostDialog({ cost, onClose }: { cost?: Cost | null; onClose: () 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={lbl}>Bedrag excl. btw (€) *</label>
-              <input required type="number" min="0" step="0.01" className={inp} value={form.amount_excl} onChange={e => setForm(p => ({ ...p, amount_excl: e.target.value }))} placeholder="100" />
+              <input required type="text" inputMode="decimal" className={inp} value={form.amount_excl} onChange={e => setForm(p => ({ ...p, amount_excl: e.target.value }))} placeholder="100" />
             </div>
             <div>
               <label className={lbl}>BTW %</label>
-              <input type="number" min="0" step="1" className={inp} value={form.vat_pct} onChange={e => setForm(p => ({ ...p, vat_pct: e.target.value }))} />
+              <input type="text" inputMode="decimal" className={inp} value={form.vat_pct} onChange={e => setForm(p => ({ ...p, vat_pct: e.target.value }))} />
             </div>
           </div>
 

@@ -1,5 +1,6 @@
 'use client'
 
+import { leesGetal } from '@/lib/getal'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, X, Loader2, Pencil, AlertTriangle, ArrowLeft } from 'lucide-react'
@@ -45,8 +46,8 @@ export function PurchaseForm({ purchase, onClose }: { purchase?: BewerkbareAanvr
 
   const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]'
   const lbl = 'block text-xs font-medium text-gray-600 mb-1'
-  const excl = parseFloat(form.amount_excl) || 0
-  const incl = excl * (1 + (parseFloat(form.vat_pct) || 0) / 100)
+  const excl = leesGetal(form.amount_excl) ?? 0
+  const incl = excl * (1 + (leesGetal(form.vat_pct) ?? 0) / 100)
   const needsApproval = incl > THRESHOLD
   const wasBevestigd = !!purchase && BEVESTIGD.includes(purchase.status)
 
@@ -83,7 +84,7 @@ export function PurchaseForm({ purchase, onClose }: { purchase?: BewerkbareAanvr
     e.preventDefault()
     if (!form.title.trim()) { setError('Titel is verplicht'); return }
     if (excl <= 0) { setError('Bedrag is verplicht'); return }
-    const btw = parseFloat(form.vat_pct)
+    const btw = leesGetal(form.vat_pct) ?? NaN
     if (!Number.isFinite(btw) || btw < 0 || btw > 100) { setError('Btw % moet tussen 0 en 100 liggen'); return }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(form.entry_date)) { setError('Datum is verplicht'); return }
     if (wijzigingen.length === 0) { setError('Er is niets gewijzigd.'); return }
@@ -155,8 +156,8 @@ export function PurchaseForm({ purchase, onClose }: { purchase?: BewerkbareAanvr
             <div><label className={lbl}>Titel *</label><input required className={inp} value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} placeholder="bv. MacBook Pro" /></div>
             <div><label className={lbl}>Omschrijving</label><textarea rows={2} className={inp} value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} /></div>
             <div className="grid grid-cols-2 gap-3">
-              <div><label className={lbl}>Bedrag excl. btw (€) *</label><input required type="number" min="0" step="0.01" className={inp} value={form.amount_excl} onChange={e => setForm(p => ({ ...p, amount_excl: e.target.value }))} placeholder="2300" /></div>
-              <div><label className={lbl}>BTW %</label><input type="number" step="1" className={inp} value={form.vat_pct} onChange={e => setForm(p => ({ ...p, vat_pct: e.target.value }))} /></div>
+              <div><label className={lbl}>Bedrag excl. btw (€) *</label><input required type="text" inputMode="decimal" className={inp} value={form.amount_excl} onChange={e => setForm(p => ({ ...p, amount_excl: e.target.value }))} placeholder="2300" /></div>
+              <div><label className={lbl}>BTW %</label><input type="text" inputMode="decimal" className={inp} value={form.vat_pct} onChange={e => setForm(p => ({ ...p, vat_pct: e.target.value }))} /></div>
               <div><label className={lbl}>Leverancier</label><input className={inp} value={form.supplier} onChange={e => setForm(p => ({ ...p, supplier: e.target.value }))} /></div>
               <div><label className={lbl}>Categorie</label><select className={inp} value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value }))}>{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
               <div><label className={lbl}>Datum</label><input type="date" className={inp} value={form.entry_date} onChange={e => setForm(p => ({ ...p, entry_date: e.target.value }))} /></div>

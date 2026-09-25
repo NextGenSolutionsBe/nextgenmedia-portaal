@@ -1,3 +1,4 @@
+import { leesGetal } from '@/lib/getal'
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
@@ -38,11 +39,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const tekst = (v: unknown): string | null => { const s = String(v ?? '').trim(); return s || null }
 const uuid = (v: unknown): string | null => { const s = tekst(v); return s && UUID.test(s) ? s : null }
-const getal = (v: unknown): number | null => {
-  if (v === null || v === undefined || v === '') return null
-  const x = Number(String(v).replace(',', '.'))
-  return Number.isFinite(x) ? x : null
-}
+const getal = (v: unknown): number | null => leesGetal(v)
 const datum = (v: unknown): string | null => {
   const s = tekst(v); if (!s) return null
   const d = new Date(s.slice(0, 10) + 'T00:00:00')

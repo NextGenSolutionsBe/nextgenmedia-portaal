@@ -209,9 +209,8 @@ export function RevenueForm() {
                 <label className={lbl}>Bedrag {freqSuffix} (€) *</label>
                 <input
                   required
-                  type="number"
-                  min="0"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   className={inp}
                   value={form.amount_per_month}
                   onChange={e => setForm(p => ({ ...p, amount_per_month: e.target.value }))}
@@ -281,9 +280,8 @@ export function RevenueForm() {
                 <label className={lbl}>Bedrag (€) *</label>
                 <input
                   required
-                  type="number"
-                  min="0"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   className={inp}
                   value={form.amount}
                   onChange={e => setForm(p => ({ ...p, amount: e.target.value }))}
