@@ -5,8 +5,8 @@ import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { canTransition, normaliseerStage, transitionError, vereistVerantwoordelijke, isGesloten } from '@/lib/sales/stages'
 import { isRedenCode, redenTekst } from '@/lib/sales/redenen'
 import { isLeadbron, normaliseerLeadbron } from '@/lib/sales/leadbron'
-import { laadOpdrachtenPerLead } from '@/lib/sales/lead-opdrachten'
-import { leadWaardeCents } from '@/lib/sales/opdrachten-model'
+import { verwachteOmzet } from '@/lib/sales/opdrachten-model'
+import { leesGetal } from '@/lib/getal'
 import { logLeadEvent, moveLeadToPipeline } from '@/lib/sales/service'
 import { registreerActiviteit } from '@/lib/sales/activiteiten'
 import { listPipelines } from '@/lib/sales/pipelines'
@@ -31,12 +31,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       r.leadbron = normaliseerLeadbron(r.leadbron)
       if (r.leadbron === 'outbound' && (r.labels ?? []).includes('Harrie')) r.leadbron = 'harrie'
       if (!r.verlies_reden && r.lost_reason && r.stage_key === 'verloren') r.verlies_reden = r.lost_reason
-      try {
-        const perLead = await laadOpdrachtenPerLead(admin, new Set([id]))
-        const lijst = perLead?.get(id)
-        if (lijst?.length) r.opdrachten = lijst
-        r.waarde_cents = leadWaardeCents({ opdrachten: lijst, deal_waarde_cents: r.deal_waarde_cents ?? null })
-      } catch { r.waarde_cents = leadWaardeCents({ deal_waarde_cents: r.deal_waarde_cents ?? null }) }
+      r.waarde_cents = verwachteOmzet(r.verwachte_omzet_cents as number | null | undefined)
       return NextResponse.json({ lead: r })
     }
     const [{ data: lead }, { data: events }, { data: afspraken }] = await Promise.all([
@@ -62,7 +57,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
 const DATUM = /^\d{4}-\d{2}-\d{2}/
 /** Nieuwe kanban-kolommen: mogen vóór de migratie nog ontbreken. */
-const KANBAN_KOLOMMEN = ['leadbron', 'positie', 'dienst', 'opvolgdatum', 'deal_waarde_cents', 'gesloten_op', 'verlies_reden'] as const
+const KANBAN_KOLOMMEN = ['leadbron', 'positie', 'dienst', 'opvolgdatum', 'deal_waarde_cents', 'gesloten_op', 'verlies_reden', 'verwachte_omzet_cents'] as const
 
 /**
  * PATCH — fase (+ positie), leadbron, dienst, verantwoordelijke, opvolgdatum,
@@ -167,6 +162,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       patch.deal_waarde_cents = cents
     }
     if (b.verlies_reden !== undefined) patch.verlies_reden = String(b.verlies_reden ?? '').trim().slice(0, 500) || null
+    // Verwachte omzet (€): indicatief en handmatig — maakt of wijzigt geen opdracht, contract of factuur.
+    let verwachtGewijzigd = false
+    if (b.verwachte_omzet !== undefined) {
+      const leeg = b.verwachte_omzet === null || String(b.verwachte_omzet).trim() === ''
+      const euro = leeg ? null : leesGetal(b.verwachte_omzet)
+      if (!leeg && (euro === null || euro < 0)) return NextResponse.json({ error: 'De verwachte omzet klopt niet (bv. 3.250 of 3250,50).' }, { status: 400 })
+      const cents = euro === null ? null : Math.round(euro * 100)
+      if (cents !== ((current as { verwachte_omzet_cents?: number | null }).verwachte_omzet_cents ?? null)) { patch.verwachte_omzet_cents = cents; verwachtGewijzigd = true }
+    }
 
     // ── Losse velden ────────────────────────────────────────────────────────
     if (b.leadbron !== undefined) {
@@ -366,6 +370,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           if (laatste) await admin.from('sales_activiteiten').update({ medewerker_id: patch.assigned_to, medewerker_email: null }).eq('id', laatste.id)
         } catch { /* statistiek is extra — nooit de wijziging laten falen */ }
       }
+    }
+    if (verwachtGewijzigd) {
+      const c = patch.verwachte_omzet_cents as number | null
+      await logLeadEvent(id, { kind: 'system', body: c === null ? 'Verwachte omzet gewist' : `Verwachte omzet: € ${(c / 100).toLocaleString('nl-BE', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`, actorId: ik.id, actorEmail: ik.email })
     }
     if (labelsGewijzigd) {
       const delen = [

@@ -168,3 +168,9 @@ export const MAX_TITEL = 200
 export const MAX_NOTITIE = 2000
 /** Een typfout van boven de tien miljoen euro wil je niet stil bewaren. */
 export const MAX_BEDRAG_CENTS = 1_000_000_000
+
+/** Verwachte omzet op het bord: enkel een handmatig ingevuld, positief bedrag telt mee. */
+export function verwachteOmzet(cents: number | null | undefined): number {
+  const n = Number(cents)
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 0
+}

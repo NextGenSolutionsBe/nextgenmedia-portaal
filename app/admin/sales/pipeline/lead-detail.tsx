@@ -12,7 +12,7 @@ import { merkStijl } from '@/lib/sales/merk'
 import { LeadGegevens } from './lead-gegevens'
 import { LeadTijdlijn } from './lead-tijdlijn'
 import { DienstenLijst } from './lead-dialogen'
-import { LeadOpdrachten } from './lead-opdrachten'
+import { leesGetal } from '@/lib/getal'
 import { LeadControle } from './lead-controle'
 import { LeadLabels } from './lead-labels'
 import { LeadActiviteiten, BEHEERBARE_TYPES } from './lead-activiteiten'
@@ -57,6 +57,9 @@ export function LeadDetail({
   const [bewerkTekst, setBewerkTekst] = useState('')
   const [nieuweNotitie, setNieuweNotitie] = useState('')
   const [dienst, setDienst] = useState(lead.dienst ?? '')
+  // Verwachte omzet als tekst (Belgische notatie), bewaard bij verlaten van het veld.
+  const [verwacht, setVerwacht] = useState(verwachtAlsTekst(lead.verwachte_omzet_cents))
+  useEffect(() => { setVerwacht(verwachtAlsTekst(lead.verwachte_omzet_cents)) }, [lead.verwachte_omzet_cents])
   useEffect(() => { setDienst(lead.dienst ?? '') }, [lead.dienst])
 
   useEffect(() => {
@@ -307,8 +310,21 @@ De lead, de tijdlijn, notities en activiteiten verdwijnen definitief. Afspraken 
             </div>
           </div>
 
-          {/* Opdrachten: titel + bedrag; hun som is de waarde van de lead */}
-          <LeadOpdrachten leadId={lead.id} onChanged={onChanged} />
+          {/* Verwachte omzet: indicatief en handmatig — maakt of wijzigt geen opdracht, contract of factuur. */}
+          <Label tekst="Verwachte omzet (€)">
+            <input className="input-base text-sm" inputMode="decimal" placeholder="bv. 3.250 — indicatief" disabled={bezig}
+              value={verwacht} onChange={(e) => setVerwacht(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+              onBlur={() => {
+                const tekst = verwacht.trim()
+                const nieuw = tekst === '' ? null : leesGetal(tekst)
+                if (tekst !== '' && (nieuw === null || nieuw < 0)) { toast.error('De verwachte omzet klopt niet (bv. 3.250 of 3250,50).'); setVerwacht(verwachtAlsTekst(lead.verwachte_omzet_cents)); return }
+                const nuCent = lead.verwachte_omzet_cents ?? null
+                const nieuwCent = nieuw === null ? null : Math.round(nieuw * 100)
+                if (nieuwCent !== nuCent) patch({ verwachte_omzet: nieuw }, nieuw === null ? 'Verwachte omzet gewist.' : 'Verwachte omzet bewaard.')
+                setVerwacht(verwachtAlsTekst(nieuwCent))
+              }} />
+          </Label>
 
           <LeadLabels labels={lead.labels ?? []} suggesties={labelSuggesties} bezig={bezig}
             onOpslaan={(labels, melding) => patch({ labels }, melding)} />
@@ -318,9 +334,7 @@ De lead, de tijdlijn, notities en activiteiten verdwijnen definitief. Afspraken 
             <div className="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-sm">
               <b className="text-green-800">Gewonnen</b>
               {lead.gesloten_op && <> op {new Date(lead.gesloten_op).toLocaleDateString('nl-BE')}</>}
-              {(lead.waarde_cents ?? 0) > 0
-                ? <> · {euro(lead.waarde_cents)}</>
-                : typeof lead.deal_waarde_cents === 'number' && <> · {euro(lead.deal_waarde_cents)}</>}
+              {(lead.verwachte_omzet_cents ?? 0) > 0 && <> · verwacht {euro(lead.verwachte_omzet_cents)}</>}
               {lead.dienst && <> · {lead.dienst}</>}
             </div>
           )}
@@ -460,4 +474,9 @@ function Label({ tekst, children }: { tekst: string; children: React.ReactNode }
       {children}
     </label>
   )
+}
+
+/** Verwachte omzet in centen → invoertekst ("3.250" / "3.250,5"), leeg als niet ingevuld. */
+function verwachtAlsTekst(cents: number | null | undefined): string {
+  return cents == null ? '' : (cents / 100).toLocaleString('nl-BE', { maximumFractionDigits: 2 })
 }

@@ -5,14 +5,14 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import {
   Loader2, Plus, Search, Upload, MailCheck, Headphones, PhoneCall, MailPlus, StickyNote,
-  CalendarClock, CalendarPlus, MoreHorizontal, FileText, Trophy, XCircle, ExternalLink, User, Flame, PhoneOff, Briefcase,
+  CalendarClock, CalendarPlus, MoreHorizontal, FileText, Trophy, XCircle, ExternalLink, User, Flame, PhoneOff,
   X,
   SlidersHorizontal,
 } from 'lucide-react'
 import { mistVerantwoordelijke, STAGES, STAGE_KEYS, STAGE_STYLE, stageLabel, type StageKey } from '@/lib/sales/stages'
 import { DIENSTEN, LEADBRONNEN, LEADBRON_STYLE, leadbronLabel, normaliseerLeadbron } from '@/lib/sales/leadbron'
 import { merkStijl } from '@/lib/sales/merk'
-import { kolomSamenvatting, opdrachtSamenvatting, pipelineTotalen } from '@/lib/sales/opdrachten-model'
+import { kolomSamenvatting, pipelineTotalen } from '@/lib/sales/opdrachten-model'
 import { BeltijdKnop } from '@/components/admin/sales-beltijd'
 import { ImportModal } from './import-modal'
 import { ReminderSettings } from './reminder-settings'
@@ -468,10 +468,10 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
 
       {/* ── Waarde in de pijplijn ── */}
       <div className="grid grid-cols-3 gap-2">
-        <Totaal label="Open pijplijn" waarde={euro(totalen.openCents)}
+        <Totaal label="Verwachte omzet · open" waarde={euro(totalen.openCents)}
           onder={`${totalen.openAantal} ${totalen.openAantal === 1 ? 'lead' : 'leads'} buiten gewonnen/verloren`} />
-        <Totaal label="Gewonnen" waarde={euro(totalen.gewonnenCents)} kleur="text-green-700" onder={`${kolommen.get('gewonnen')?.length ?? 0} leads`} />
-        <Totaal label="Verloren" waarde={euro(totalen.verlorenCents)} kleur="text-red-600" onder={`${kolommen.get('verloren')?.length ?? 0} leads`} />
+        <Totaal label="Verwachte omzet · gewonnen" waarde={euro(totalen.gewonnenCents)} kleur="text-green-700" onder={`${kolommen.get('gewonnen')?.length ?? 0} leads`} />
+        <Totaal label="Verwachte omzet · verloren" waarde={euro(totalen.verlorenCents)} kleur="text-red-600" onder={`${kolommen.get('verloren')?.length ?? 0} leads`} />
       </div>
       {filtersActief && <p className="text-[11px] text-gray-400 -mt-1">Bedragen volgen de actieve filters.</p>}
 
@@ -532,7 +532,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
                   <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${STAGE_STYLE[s.key]}`}>{s.label}</span>
                   <span className="text-xs text-gray-500 tabular-nums">{aantal}</span>
                 </div>
-                <span title={`Totale waarde van de ${aantal} leads in ${s.label}`}
+                <span title={`Verwachte omzet van de ${aantal} leads in ${s.label} (enkel ingevulde bedragen)`}
                   className={`text-xs font-semibold tabular-nums ${waardeCents === 0 ? 'text-gray-300' : s.key === 'gewonnen' ? 'text-green-700' : s.key === 'verloren' ? 'text-red-600' : 'text-gray-800'}`}>
                   {euro(waardeCents)}
                 </span>
@@ -684,7 +684,6 @@ function Kaart({
   const vandaagIso = vandaag()
   const stop = (e: React.SyntheticEvent) => e.stopPropagation()
   const waarde = lead.waarde_cents ?? 0
-  const opdrachtTekst = opdrachtSamenvatting(lead.opdrachten)
 
   return (
     <article
@@ -731,11 +730,9 @@ function Kaart({
         )}
       </div>
 
-      {(opdrachtTekst || waarde > 0) && (
+      {waarde > 0 && (
         <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px]">
-          <span className="flex items-center gap-1 text-gray-600 min-w-0">
-            {opdrachtTekst && <><Briefcase className="h-3 w-3 shrink-0 text-gray-400" /><span className="truncate" title={(lead.opdrachten ?? []).map((o) => o.titel).join(', ')}>{opdrachtTekst}</span></>}
-          </span>
+          <span className="text-gray-500">Verwachte omzet</span>
           {waarde > 0 && (
             <span className={`font-semibold tabular-nums shrink-0 ${lead.stage_key === 'gewonnen' ? 'text-green-700' : lead.stage_key === 'verloren' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
               {euro(waarde)}

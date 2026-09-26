@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   parseBedragCents, somOpdrachten, leadWaardeCents, kolomSamenvatting, pipelineTotalen,
-  opdrachtSamenvatting, opdrachtRegel, leesOpdrachtInvoer, OUDE_STATUS_NAAR_FASE,
+  opdrachtSamenvatting, opdrachtRegel, leesOpdrachtInvoer, OUDE_STATUS_NAAR_FASE, verwachteOmzet,
 } from '../lib/sales/opdrachten-model'
 import { STAGE_KEYS } from '../lib/sales/stages'
 import { ADMIN_MODULES, sanitizeModules, pathToModule } from '../lib/staff'
@@ -100,6 +100,21 @@ test('6. Opdrachten-pagina is de bron; de pipeline leest dezelfde tabel', () => 
   assert.equal(pathToModule('/api/admin/sales/leads/x/opdrachten'), 'sales')
   assert.deepEqual(sanitizeModules(['sales', 'opdrachten', 'onbekend']), ['sales', 'opdrachten'])
   assert.ok(ADMIN_MODULES.some((m) => m.key === 'assignments'))
+})
+
+test('Verwachte omzet: enkel een ingevuld positief bedrag telt; geen interesse telt niet als open', () => {
+  assert.equal(verwachteOmzet(null), 0)
+  assert.equal(verwachteOmzet(undefined), 0)
+  assert.equal(verwachteOmzet(0), 0)
+  assert.equal(verwachteOmzet(325000), 325000)
+  const t = pipelineTotalen([
+    { stage_key: 'afspraak', waarde_cents: verwachteOmzet(100000) },
+    { stage_key: 'outbound', waarde_cents: verwachteOmzet(null) },
+    { stage_key: 'geen_interesse', waarde_cents: verwachteOmzet(50000) },
+    { stage_key: 'gewonnen', waarde_cents: verwachteOmzet(200000) },
+  ])
+  assert.equal(t.openCents, 100000)
+  assert.equal(t.gewonnenCents, 200000)
 })
 
 console.log(`\n${n} tests geslaagd.`)

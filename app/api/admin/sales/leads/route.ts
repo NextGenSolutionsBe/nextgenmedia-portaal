@@ -8,8 +8,8 @@ import { normalizePhone, looksLikePhone } from '@/lib/sales/dedupe'
 import { isStageKey, normaliseerStage, stageKeysVoor } from '@/lib/sales/stages'
 import { isInboundBron, normaliseerLeadbron } from '@/lib/sales/leadbron'
 import { registreerActiviteit } from '@/lib/sales/activiteiten'
-import { laadOpdrachtenPerLead, voegOpdrachtToe } from '@/lib/sales/lead-opdrachten'
-import { leadWaardeCents, leesOpdrachtInvoer, type OpdrachtKort } from '@/lib/sales/opdrachten-model'
+import { verwachteOmzet, type OpdrachtKort } from '@/lib/sales/opdrachten-model'
+import { leesGetal } from '@/lib/getal'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,6 +33,8 @@ export type LeadRow = {
   website_aanvraag?: Record<string, unknown> | null
   /** Opdrachten (titel + bedrag) en de afgeleide waarde van de lead. */
   opdrachten?: OpdrachtKort[]
+  /** Handmatig ingevulde verwachte omzet (indicatief). */
+  verwachte_omzet_cents?: number | null
   waarde_cents?: number
   sales_companies: {
     id: string; name: string; website: string | null; sector: string | null
@@ -49,7 +51,7 @@ export type LeadRow = {
 // varianten als terugval zolang een migratie nog niet gedraaid is — anders
 // blijft het hele bord leeg met een stille kolomfout.
 const SELECT_KANBAN = `id, stage_key, labels, callback_at, callback_note, archived_at, do_not_call, assigned_to, updated_at, created_at, lost_reason, reden_code, warm, warm_op, harrie, email_brief, pipeline_id, merken, laatste_notitie, laatste_notitie_op, geen_gehoor_count,
-  leadbron, positie, dienst, opvolgdatum, deal_waarde_cents, gesloten_op, verlies_reden, website_aanvraag,
+  leadbron, positie, dienst, opvolgdatum, deal_waarde_cents, gesloten_op, verlies_reden, website_aanvraag, verwachte_omzet_cents,
   sales_companies ( id, name, website, sector, city, region, country, phone, email, werkklasse, activiteit, ondernemingsnummer, prioriteit, linkedin, employees, gatekeeper_naam, dmu_naam, dmu_functie ),
   sales_contacts  ( id, name, email, phone, mobile, phone_digits, role, linkedin )`
 const SELECT_BREED = `id, stage_key, labels, callback_at, callback_note, archived_at, do_not_call, assigned_to, updated_at, created_at, lost_reason, reden_code, warm, warm_op, harrie, email_brief, pipeline_id, merken, laatste_notitie, laatste_notitie_op, geen_gehoor_count,
@@ -124,7 +126,7 @@ export async function GET(req: NextRequest) {
     // Eén pagina ophalen, met terugval naar een smallere selectie vóór de migraties.
     const haalPagina = async (van: number, tel: boolean) => {
       let { data, error, count } = await bouw(selectie, van, van + PAGINA - 1, tel)
-      if (error && selectie === SELECT_KANBAN && /leadbron|positie|dienst|opvolgdatum|deal_waarde|gesloten_op|verlies_reden|website_aanvraag|column/i.test(error.message)) {
+      if (error && selectie === SELECT_KANBAN && /leadbron|positie|dienst|opvolgdatum|deal_waarde|gesloten_op|verlies_reden|website_aanvraag|verwachte_omzet|column/i.test(error.message)) {
         selectie = SELECT_BREED
         metPositie = false
         ;({ data, error, count } = await bouw(selectie, van, van + PAGINA - 1, tel))
@@ -255,19 +257,10 @@ export async function GET(req: NextRequest) {
 
     // Opdrachten (titel + bedrag) per lead en de waarde van elke lead. Vóór de
     // migratie bestaat de tabel niet: dan is de waarde de dealwaarde.
-    let opdrachtenBeschikbaar = true
-    try {
-      const perLead = await laadOpdrachtenPerLead(admin, new Set(rows.map((r) => r.id)))
-      if (perLead === null) opdrachtenBeschikbaar = false
-      for (const r of rows) {
-        const lijst = perLead?.get(r.id)
-        if (lijst?.length) r.opdrachten = lijst
-        r.waarde_cents = leadWaardeCents({ opdrachten: lijst, deal_waarde_cents: r.deal_waarde_cents })
-      }
-    } catch (e) {
-      console.error('[sales] opdrachten laden mislukt:', e instanceof Error ? e.message : e)
-      for (const r of rows) r.waarde_cents = leadWaardeCents({ deal_waarde_cents: r.deal_waarde_cents })
-    }
+    // De waarde op het bord is enkel de handmatig ingevulde VERWACHTE omzet —
+    // niet uit opdrachten, contracten of facturen. Leeg telt niet mee.
+    const opdrachtenBeschikbaar = false
+    for (const r of rows) r.waarde_cents = verwachteOmzet(r.verwachte_omzet_cents)
 
     // Leads die een collega NU in Focus Mode belt (slot uit sales_lead_claims).
     let bezet: Record<string, string> = {}
@@ -303,12 +296,10 @@ export async function POST(req: NextRequest) {
     const opvolgdatum = typeof b.opvolgdatum === 'string' && /^\d{4}-\d{2}-\d{2}/.test(b.opvolgdatum)
       ? b.opvolgdatum.slice(0, 10) : null
 
-    // Optioneel: de eerste opdracht (titel + bedrag). Eerst controleren, zodat
-    // een fout bedrag geen lead zonder opdracht achterlaat.
-    const opdrachtRuw = b.opdracht && typeof b.opdracht === 'object' ? (b.opdracht as Record<string, unknown>) : null
-    const metOpdracht = !!opdrachtRuw && (String(opdrachtRuw.titel ?? '').trim() !== '' || String(opdrachtRuw.bedrag ?? '').trim() !== '')
-    const opdracht = metOpdracht ? leesOpdrachtInvoer(opdrachtRuw as Record<string, unknown>, true) : null
-    if (opdracht && !opdracht.ok) return NextResponse.json({ error: opdracht.error }, { status: 400 })
+    // Optioneel: de verwachte omzet (indicatief, maakt niets aan).
+    const verwachtRuw = b.verwachte_omzet
+    const verwachtEuro = verwachtRuw === undefined || verwachtRuw === null || String(verwachtRuw).trim() === '' ? null : leesGetal(verwachtRuw)
+    if (verwachtEuro !== null && (!Number.isFinite(verwachtEuro) || verwachtEuro < 0)) return NextResponse.json({ error: 'De verwachte omzet klopt niet (bv. 3.250 of 3250,50).' }, { status: 400 })
 
     const res = await createLead({
       salesClientId,
@@ -349,13 +340,9 @@ export async function POST(req: NextRequest) {
       })
     }
     let waarschuwing: string | undefined
-    if (opdracht?.ok) {
-      const o = await voegOpdrachtToe(admin, {
-        leadId: res.leadId,
-        invoer: { ...opdracht.invoer, titel: opdracht.invoer.titel as string, bedrag_cents: opdracht.invoer.bedrag_cents ?? 0 },
-        actor: { id: actor.id, email: actor.email ?? null },
-      })
-      if (!o.ok) waarschuwing = `Lead toegevoegd, maar de opdracht niet: ${o.error}`
+    if (verwachtEuro !== null) {
+      const { error: vErr } = await admin.from('sales_leads').update({ verwachte_omzet_cents: Math.round(verwachtEuro * 100) }).eq('id', res.leadId)
+      if (vErr) waarschuwing = 'Lead toegevoegd, maar de verwachte omzet kon niet bewaard worden.'
     }
     return NextResponse.json({ ok: true, id: res.leadId, waarschuwing })
   } catch (err) {

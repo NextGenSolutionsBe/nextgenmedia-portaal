@@ -5249,3 +5249,7 @@ alter table personeel_planning add column if not exists clickup_fout text;
 -- ── Wie maakte het aan? (per admin-account zichtbaar) ────────────────────────
 alter table clients add column if not exists created_by uuid;
 alter table framer_sites add column if not exists created_by uuid;
+
+-- ── Pipeline: verwachte omzet per lead (indicatief, handmatig) ───────────────
+-- Staat los van opdrachten, contracten en facturen; leeg = telt niet mee.
+alter table sales_leads add column if not exists verwachte_omzet_cents bigint;

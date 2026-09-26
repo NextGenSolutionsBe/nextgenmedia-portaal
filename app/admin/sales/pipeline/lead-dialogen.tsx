@@ -6,7 +6,7 @@ import { Loader2, X, Play, Square } from 'lucide-react'
 import { STAGES, stageLabel } from '@/lib/sales/stages'
 import { UITKOMSTEN, formatDuur, parseDuur } from '@/lib/sales/activiteiten-model'
 import { DIENSTEN, LEADBRONNEN } from '@/lib/sales/leadbron'
-import { parseBedragCents } from '@/lib/sales/opdrachten-model'
+import { leesGetal } from '@/lib/getal'
 import { type Lead, type Medewerker, vandaag } from './types'
 
 /**
@@ -307,10 +307,10 @@ export function SluitDialoog({ lead, soort, onClose, onBevestig }: {
   onBevestig: (g: SluitGegevens) => Promise<boolean> | boolean
 }) {
   const [datum, setDatum] = useState(vandaag())
-  // Heeft de lead opdrachten, dan is hun som het logische vertrekpunt.
+  // Vertrekpunt: de verwachte omzet van de lead (indien ingevuld).
   const [waarde, setWaarde] = useState(() =>
-    (lead.opdrachten?.length && (lead.waarde_cents ?? 0) > 0)
-      ? String(((lead.waarde_cents ?? 0) / 100).toLocaleString('nl-BE', { maximumFractionDigits: 2 }))
+    (lead.verwachte_omzet_cents ?? 0) > 0
+      ? String(((lead.verwachte_omzet_cents ?? 0) / 100).toLocaleString('nl-BE', { maximumFractionDigits: 2 }))
       : '')
   const [dienst, setDienst] = useState(lead.dienst ?? '')
   const [reden, setReden] = useState('')
@@ -331,8 +331,7 @@ export function SluitDialoog({ lead, soort, onClose, onBevestig }: {
       </Veld>
       {soort === 'gewonnen' ? (
         <>
-          <Veld label="Dealwaarde in euro (optioneel)"
-            hint={lead.opdrachten?.length ? 'De waarde op het bord blijft de som van de opdrachten; pas die aan in het detailpaneel.' : undefined}>
+          <Veld label="Dealwaarde in euro (optioneel)" hint="Vooraf ingevuld met de verwachte omzet; los van opdrachten, contracten en facturen.">
             <input className="input-base" inputMode="decimal" placeholder="bv. 4.950" value={waarde} onChange={(e) => setWaarde(e.target.value)} />
           </Veld>
           <Veld label="Verkochte dienst (optioneel)">
@@ -361,15 +360,14 @@ export function NieuweLeadDialoog({ pipelineId, medewerkers, meId, onClose, onAa
   const [f, setF] = useState({
     bedrijf: '', contact: '', telefoon: '', email: '', website: '', leadbron: 'outbound',
     dienst: '', verantwoordelijke: meId ?? '', notitie: '', opvolgdatum: '', fase: 'outbound',
-    opdrachtTitel: '', opdrachtBedrag: '',
+    verwachteOmzet: '',
   })
   const [bezig, setBezig] = useState(false)
   const zet = (k: keyof typeof f, v: string) => setF((p) => ({ ...p, [k]: v }))
 
   const opslaan = async () => {
     if (!f.bedrijf.trim()) { toast.error('Bedrijfsnaam is verplicht.'); return }
-    if (f.opdrachtBedrag.trim() && !f.opdrachtTitel.trim()) { toast.error('Geef de opdracht ook een titel.'); return }
-    if (f.opdrachtBedrag.trim() && parseBedragCents(f.opdrachtBedrag) === null) { toast.error('Het bedrag klopt niet (bv. 3.250 of 3250,50).'); return }
+    if (f.verwachteOmzet.trim() && leesGetal(f.verwachteOmzet) === null) { toast.error('De verwachte omzet klopt niet (bv. 3.250 of 3250,50).'); return }
     setBezig(true)
     try {
       const r = await fetch('/api/admin/sales/leads', {
@@ -380,7 +378,7 @@ export function NieuweLeadDialoog({ pipelineId, medewerkers, meId, onClose, onAa
           contact: { name: f.contact.trim() || undefined, email: f.email.trim() || undefined, phone: f.telefoon.trim() || undefined },
           leadbron: f.leadbron, dienst: f.dienst.trim() || null, assigned_to: f.verantwoordelijke || null,
           note: f.notitie.trim() || undefined, opvolgdatum: f.opvolgdatum || null, stage: f.fase,
-          opdracht: f.opdrachtTitel.trim() ? { titel: f.opdrachtTitel.trim(), bedrag: f.opdrachtBedrag.trim() } : undefined,
+          verwachte_omzet: f.verwachteOmzet.trim() || undefined,
         }),
       })
       const j = await r.json().catch(() => ({}))
@@ -424,14 +422,9 @@ export function NieuweLeadDialoog({ pipelineId, medewerkers, meId, onClose, onAa
           </select>
         </Veld>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-[1fr_9rem] gap-2 rounded-xl border border-gray-100 bg-gray-50/60 p-2">
-        <Veld label="Opdracht (titel)" hint="Optioneel — meer opdrachten voeg je toe in het detailpaneel.">
-          <input className="input-base" placeholder="bv. Nieuwe website" value={f.opdrachtTitel} onChange={(e) => zet('opdrachtTitel', e.target.value)} />
-        </Veld>
-        <Veld label="Bedrag excl. btw">
-          <input className="input-base" inputMode="decimal" placeholder="bv. 3.250" value={f.opdrachtBedrag} onChange={(e) => zet('opdrachtBedrag', e.target.value)} />
-        </Veld>
-      </div>
+      <Veld label="Verwachte omzet (€)" hint="Optioneel — een indicatieve inschatting, geen opdracht of factuur.">
+        <input className="input-base" inputMode="decimal" placeholder="bv. 3.250" value={f.verwachteOmzet} onChange={(e) => zet('verwachteOmzet', e.target.value)} />
+      </Veld>
       <Veld label="Notitie">
         <textarea rows={2} className="input-base" value={f.notitie} onChange={(e) => zet('notitie', e.target.value)} />
       </Veld>

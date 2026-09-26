@@ -40,6 +40,8 @@ export type Lead = {
   dienst?: string | null
   opvolgdatum?: string | null
   deal_waarde_cents?: number | null
+  /** Handmatig ingevulde verwachte omzet (indicatief; los van opdrachten/contracten/facturen). */
+  verwachte_omzet_cents?: number | null
   gesloten_op?: string | null
   verlies_reden?: string | null
   /** Opdrachten (titel + bedrag excl. btw); leeg = geen. */
