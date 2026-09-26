@@ -120,8 +120,8 @@ export async function POST(req: NextRequest) {
     const leadId = (appt as { lead_id?: string | null }).lead_id ?? null
     if (leadId && outcome !== 'open') {
       try {
-        const { data: leadRij } = await admin.from('sales_leads').select('id, stage_key, dienst').eq('id', leadId).maybeSingle()
-        const lead = leadRij as { id: string; stage_key: string; dienst?: string | null } | null
+        const { data: leadRij } = await admin.from('sales_leads').select('id, stage_key, dienst, assigned_to').eq('id', leadId).maybeSingle()
+        const lead = leadRij as { id: string; stage_key: string; dienst?: string | null; assigned_to?: string | null } | null
         const doel = outcome === 'won' ? WON_STAGE : LOST_STAGE
         if (lead && normaliseerStage(lead.stage_key) !== doel) {
           const van = normaliseerStage(lead.stage_key)
@@ -133,8 +133,10 @@ export async function POST(req: NextRequest) {
             ;({ error: lErr } = await admin.from('sales_leads').update({ stage_key: doel }).eq('id', leadId))
           }
           if (!lErr) {
+            // De deal telt voor de verantwoordelijke van de lead (de closer).
+            const closer = lead.assigned_to ?? actor.id
             await registreerActiviteit(admin, {
-              leadId, medewerkerId: actor.id, medewerkerEmail: actor.email ?? null,
+              leadId, medewerkerId: closer, medewerkerEmail: closer === actor.id ? actor.email ?? null : null,
               type: outcome === 'won' ? 'deal_gewonnen' : 'deal_verloren', vanFase: van, naarFase: doel,
               extra: outcome === 'won'
                 ? `€ ${(Number(patch.deal_value_cents) / 100).toLocaleString('nl-BE')}${lead.dienst ? ` · ${lead.dienst}` : ''}`

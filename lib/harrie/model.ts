@@ -242,7 +242,7 @@ export function gevolgVan(
 
     case 'declined':
       return {
-        fase: 'verloren', reden: tekst || 'Afgewezen na koude benadering (Harrie)',
+        fase: 'geen_interesse', reden: tekst || 'Afgewezen na koude benadering (Harrie)',
         omschrijving: `Harrie: prospect zei nee${tekst ? ` · ${tekst}` : ''}`,
       }
     case 'lost':

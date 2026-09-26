@@ -1,7 +1,7 @@
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
-import { canTransition, normaliseerStage, transitionError } from '@/lib/sales/stages'
+import { canTransition, normaliseerStage, transitionError, vereistVerantwoordelijke, isGesloten } from '@/lib/sales/stages'
 import { isRedenCode, redenTekst } from '@/lib/sales/redenen'
 import { isLeadbron } from '@/lib/sales/leadbron'
 import { logLeadEvent, moveLeadToPipeline } from '@/lib/sales/service'
@@ -293,6 +293,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
 
     // ── Tijdlijn en activiteiten ────────────────────────────────────────────
+    // Een gewonnen/verloren deal telt voor de VERANTWOORDELIJKE (de closer), niet
+    // voor wie de kaart versleept — anders klopt de closing rate per medewerker niet.
+    const verantwoordelijke = (patch.assigned_to !== undefined ? patch.assigned_to : current.assigned_to ?? null) as string | null
+    const dealDoor = verantwoordelijke ?? ik.id
+    const dealDoorEmail = verantwoordelijke && verantwoordelijke !== ik.id ? null : ik.email
     if (nieuweFase) {
       if (naarGewonnen || naarVerloren) {
         const cents = patch.deal_waarde_cents as number | null | undefined
@@ -300,7 +305,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           ? [typeof cents === 'number' ? `€ ${(cents / 100).toLocaleString('nl-BE', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}` : null, (patch.dienst as string | null) ?? current.dienst ?? null].filter(Boolean).join(' · ') || null
           : ((patch.verlies_reden as string | null) ?? null)
         await registreerActiviteit(admin, {
-          leadId: id, medewerkerId: ik.id, medewerkerEmail: ik.email,
+          leadId: id, medewerkerId: dealDoor, medewerkerEmail: dealDoorEmail,
           type: naarGewonnen ? 'deal_gewonnen' : 'deal_verloren',
           vanFase: huidigeFase, naarFase: nieuweFase, extra,
           notitie: typeof b.note === 'string' ? b.note : null,
@@ -328,6 +333,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         kind: 'system', body: patch.assigned_to ? 'Verantwoordelijke gewijzigd' : 'Verantwoordelijke weggehaald',
         actorId: ik.id, actorEmail: ik.email,
       })
+      // Staat de lead al op gewonnen/verloren (zonder fasewissel nu), dan verhuist
+      // de laatste sluiting mee naar de nieuwe verantwoordelijke — zo telt de deal
+      // in de statistieken bij wie hem effectief sloot.
+      const faseNu = normaliseerStage((patch.stage_key as string | undefined) ?? current.stage_key)
+      if (!nieuweFase && isGesloten(faseNu) && patch.assigned_to) {
+        try {
+          const { data: laatste } = await admin.from('sales_activiteiten').select('id')
+            .eq('lead_id', id).in('type', ['deal_gewonnen', 'deal_verloren']).is('verwijderd_op', null)
+            .order('created_at', { ascending: false }).limit(1).maybeSingle()
+          if (laatste) await admin.from('sales_activiteiten').update({ medewerker_id: patch.assigned_to, medewerker_email: null }).eq('id', laatste.id)
+        } catch { /* statistiek is extra — nooit de wijziging laten falen */ }
+      }
     }
     if (labelsGewijzigd) {
       const delen = [
@@ -353,7 +370,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       })
     }
 
-    return NextResponse.json({ ok: true })
+    const faseNa = normaliseerStage((patch.stage_key as string | undefined) ?? current.stage_key)
+    return NextResponse.json({ ok: true, mistVerantwoordelijke: vereistVerantwoordelijke(faseNa) && !verantwoordelijke })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }

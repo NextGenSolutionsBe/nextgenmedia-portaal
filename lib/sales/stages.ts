@@ -19,11 +19,13 @@ export const STAGES = [
   { key: 'inbound',         label: 'Inbound leads',      position: 2 },
   { key: 'gebeld',          label: 'Gebeld',             position: 3 },
   { key: 'email_verstuurd', label: 'E-mail verstuurd',   position: 4 },
-  { key: 'opvolgen',        label: 'Opvolgen',           position: 5 },
-  { key: 'afspraak',        label: 'Afspraak gepland',   position: 6 },
-  { key: 'voorstel',        label: 'Voorstel verstuurd', position: 7 },
-  { key: 'gewonnen',        label: 'Gewonnen',           position: 8, isWon: true },
-  { key: 'verloren',        label: 'Verloren',           position: 9, isLost: true },
+  // Geen interesse: wil geen afspraak. Verloren = wél een meeting gehad, niet getekend.
+  { key: 'geen_interesse',  label: 'Geen interesse',     position: 5 },
+  { key: 'opvolgen',        label: 'Opvolgen',           position: 6 },
+  { key: 'afspraak',        label: 'Afspraak gepland',   position: 7 },
+  { key: 'voorstel',        label: 'Voorstel verstuurd', position: 8 },
+  { key: 'gewonnen',        label: 'Gewonnen',           position: 9, isWon: true },
+  { key: 'verloren',        label: 'Verloren',           position: 10, isLost: true },
 ] as const
 
 export type StageKey = (typeof STAGES)[number]['key']
@@ -43,7 +45,7 @@ export const LEGACY_STAGE_MAP: Record<string, StageKey> = {
   contacted_mail: 'email_verstuurd',
   email_after_call: 'opvolgen',
   email_sent: 'email_verstuurd',
-  not_interested: 'verloren',
+  not_interested: 'geen_interesse',
   appointment: 'afspraak',
   max_pogingen: 'opvolgen',
   won: 'gewonnen',
@@ -91,6 +93,8 @@ const RANG: Record<StageKey, number> = {
   outbound: 10, inbound: 10,
   gebeld: 20, email_verstuurd: 20,
   opvolgen: 30,
+  // Na een 'nee' zonder afspraak: een late mailmelding zet de lead niet terug.
+  geen_interesse: 40,
   afspraak: 50,
   voorstel: 60,
   verloren: 90,
@@ -131,7 +135,8 @@ export function transitionError(from: string, to: string): string | null {
  * — nooit terug: een lead in "Opvolgen" die je opnieuw belt, blijft daar.
  *
  * "Interesse" is geen fase maar een warme markering bovenop "contact gehad".
- * "Geen interesse" vraagt een reden en zet de lead op Verloren.
+ * "Geen interesse" vraagt een reden en zet de lead op Geen interesse (Verloren
+ * is voor leads waarmee we een meeting hadden en die niet tekenden).
  */
 export const FOCUS_ACTIONS: {
   key: string; label: string
@@ -152,7 +157,7 @@ export const FOCUS_ACTIONS: {
   { key: '3', label: 'Interesse',        activiteit: 'telefoongesprek', uitkomst: 'contact_gehad', stage: 'gebeld', markeerWarm: true },
   { key: '4', label: 'Afspraak boeken',  activiteit: 'telefoongesprek', uitkomst: 'afspraak_gepland', stage: null, opensBooking: true },
   { key: '5', label: 'E-mail versturen', activiteit: 'email_verstuurd', stage: 'email_verstuurd' },
-  { key: '6', label: 'Geen interesse',   activiteit: 'telefoongesprek', uitkomst: 'geen_interesse', stage: 'verloren', vraagtReden: true },
+  { key: '6', label: 'Geen interesse',   activiteit: 'telefoongesprek', uitkomst: 'geen_interesse', stage: 'geen_interesse', vraagtReden: true },
 ]
 
 /** De doelkolom van een Focus-actie, maar enkel als dat VOORUIT is. */
@@ -167,9 +172,22 @@ export const STAGE_STYLE: Record<StageKey, string> = {
   inbound: 'bg-sky-100 text-sky-800',
   gebeld: 'bg-blue-100 text-blue-700',
   email_verstuurd: 'bg-amber-100 text-amber-800',
+  geen_interesse: 'bg-stone-200 text-stone-700',
   opvolgen: 'bg-orange-100 text-orange-800',
   afspraak: 'bg-[#fff848] text-black',
   voorstel: 'bg-violet-100 text-violet-800',
   gewonnen: 'bg-green-200 text-green-900',
   verloren: 'bg-red-100 text-red-700',
 }
+
+/**
+ * Vanaf deze fases hoort er altijd een verantwoordelijke medewerker bij de
+ * lead (de closer): zo kloppen de statistieken per medewerker, waaronder de
+ * closing rate. Ontbreekt die, dan blokkeren we niets maar tonen we een rode
+ * melding in de lead en op de kaart.
+ */
+export const VERANTWOORDELIJKE_VANAF: readonly StageKey[] = ['afspraak', 'voorstel', 'gewonnen', 'verloren']
+export const vereistVerantwoordelijke = (stage: string | null | undefined): boolean =>
+  (VERANTWOORDELIJKE_VANAF as readonly string[]).includes(normaliseerStage(stage ?? ''))
+export const mistVerantwoordelijke = (lead: { stage_key: string; assigned_to?: string | null }): boolean =>
+  vereistVerantwoordelijke(lead.stage_key) && !lead.assigned_to

@@ -36,7 +36,7 @@ export type QueueLead = {
 
 /** Fases waarvoor bellen geen zin (meer) heeft. "Afspraak gepland" hoort
  *  daarbij: die mensen bel je via de bevestigingslijst, niet via prospectie. */
-const KLAAR = new Set(['afspraak', 'voorstel', 'gewonnen', 'verloren'])
+const KLAAR = new Set(['geen_interesse', 'afspraak', 'voorstel', 'gewonnen', 'verloren'])
 /** De kolommen die de belronde voedt, in deze volgorde. */
 const BELKOLOMMEN = ['outbound', 'inbound', 'opvolgen']
 

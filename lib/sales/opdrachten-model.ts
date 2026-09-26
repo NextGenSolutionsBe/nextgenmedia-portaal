@@ -94,6 +94,7 @@ export function pipelineTotalen(leads: { stage_key: string; waarde_cents?: numbe
     const w = typeof l.waarde_cents === 'number' && Number.isFinite(l.waarde_cents) && l.waarde_cents > 0 ? l.waarde_cents : 0
     if (l.stage_key === 'gewonnen') gewonnenCents += w
     else if (l.stage_key === 'verloren') verlorenCents += w
+    else if (l.stage_key === 'geen_interesse') continue // geen open pijplijn meer
     else { openCents += w; openAantal++ }
   }
   return { openCents, gewonnenCents, verlorenCents, openAantal }

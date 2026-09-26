@@ -1,3 +1,4 @@
+import { gebruikerVoorAgenda } from '@/lib/sales/verantwoordelijke'
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireAdmin, requireStaff } from '@/lib/supabase/server'
@@ -338,6 +339,15 @@ export async function POST(req: NextRequest) {
     //    op "Afspraak ingepland".
     if (leadId) {
       await admin.from('sales_leads').update({ stage_key: APPOINTMENT_STAGE }).eq('id', leadId)
+      // Vanaf "Afspraak gepland" hoort er een verantwoordelijke bij: nog niemand
+      // gekoppeld → de eigenaar van de agenda (de closer).
+      try {
+        const { data: l } = await admin.from('sales_leads').select('assigned_to').eq('id', leadId).maybeSingle()
+        if (!(l as { assigned_to?: string | null } | null)?.assigned_to) {
+          const closer = await gebruikerVoorAgenda(admin, ownerId)
+          if (closer) await admin.from('sales_leads').update({ assigned_to: closer }).eq('id', leadId)
+        }
+      } catch { /* toewijzen is extra — de boeking staat vast */ }
       // Eén activiteit "afspraak gepland" mét afspraak-id (verplaatsen maakt
       // er nooit een tweede), plus de fasewissel als aparte regel.
       await registreerActiviteit(admin, {

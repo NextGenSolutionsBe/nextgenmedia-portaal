@@ -516,9 +516,10 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
     const geregistreerd = await registreerGesprek('geen_interesse', { kop: `Geen interesse — ${lostReason}` })
     setBusy(false)
     if (!geregistreerd) return
-    // 2) De lead naar Verloren, met de reden (registreert "deal verloren").
+    // 2) De lead naar Geen interesse, met de reden. (Verloren is enkel voor leads
+    //    waarmee we een meeting hadden — dat is geen deal die hier sneuvelt.)
     const okGelukt = await stuur({
-      ...(lead && lead.stage_key !== 'verloren' ? { stage: 'verloren' } : {}),
+      ...(lead && lead.stage_key !== 'geen_interesse' && lead.stage_key !== 'verloren' ? { stage: 'geen_interesse' } : {}),
       reden_code: reden,
       reden_toelichting: toelichting || undefined,
       lost_reason: lostReason,

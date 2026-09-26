@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   STAGES, STAGE_KEYS, LEGACY_STAGE_MAP, LEGACY_STAGE_KEYS, normaliseerStage, stageLabel, stageKeysVoor,
   isWonStage, isLostStage, isGesloten, canTransition, stageRang, focusDoelFase, FOCUS_ACTIONS,
+  vereistVerantwoordelijke, mistVerantwoordelijke,
 } from '../lib/sales/stages'
 import { bouwWachtrij, MAX_GEEN_GEHOOR } from '../lib/sales/focus-queue'
 
@@ -12,8 +13,9 @@ const test = (naam: string, f: () => void) => { f(); n++; console.log(`  ok ${na
 
 console.log('Sales — fases')
 
-test('1. Negen kolommen, Outbound en Inbound links, Gewonnen en Verloren rechts', () => {
-  assert.equal(STAGES.length, 9)
+test('1. Tien kolommen, Outbound en Inbound links, Geen interesse na E-mail verstuurd, Gewonnen en Verloren rechts', () => {
+  assert.equal(STAGES.length, 10)
+  assert.equal(STAGE_KEYS[STAGE_KEYS.indexOf('email_verstuurd') + 1], 'geen_interesse')
   assert.deepEqual(STAGE_KEYS.slice(0, 2), ['outbound', 'inbound'])
   assert.deepEqual(STAGE_KEYS.slice(-2), ['gewonnen', 'verloren'])
 })
@@ -28,7 +30,7 @@ test('2. Elke oude sleutel landt op een bestaande nieuwe kolom', () => {
   assert.equal(normaliseerStage('email_after_call'), 'opvolgen')
   assert.equal(normaliseerStage('max_pogingen'), 'opvolgen')
   assert.equal(normaliseerStage('appointment'), 'afspraak')
-  assert.equal(normaliseerStage('not_interested'), 'verloren')
+  assert.equal(normaliseerStage('not_interested'), 'geen_interesse')
   assert.equal(normaliseerStage('lost'), 'verloren')
   assert.equal(normaliseerStage('won'), 'gewonnen')
 })
@@ -45,13 +47,14 @@ test('4. Labels en gesloten-status werken ook op oude sleutels', () => {
   assert.equal(stageLabel('appointment'), 'Afspraak gepland')
   assert.equal(stageLabel('outbound'), 'Outbound leads')
   assert.ok(isWonStage('won') && isWonStage('gewonnen'))
-  assert.ok(isLostStage('not_interested') && isLostStage('verloren'))
+  assert.ok(!isLostStage('not_interested') && isLostStage('verloren') && !isLostStage('geen_interesse'))
   assert.ok(isGesloten('lost') && !isGesloten('opvolgen'))
 })
 
 test('5. stageKeysVoor geeft de nieuwe plus alle oude sleutels van een kolom', () => {
   assert.deepEqual(stageKeysVoor('gewonnen').sort(), ['gewonnen', 'won'])
-  assert.deepEqual(stageKeysVoor('verloren').sort(), ['lost', 'not_interested', 'verloren'])
+  assert.deepEqual(stageKeysVoor('verloren').sort(), ['lost', 'verloren'])
+  assert.deepEqual(stageKeysVoor('geen_interesse').sort(), ['geen_interesse', 'not_interested'])
   assert.deepEqual(stageKeysVoor('voorstel'), ['voorstel'])
 })
 
@@ -93,6 +96,14 @@ test('8. Belrij: vervallen terugbelmoment, dan opvolgdatum, dan Outbound → Inb
   ], nu)
   assert.deepEqual(rij.nu.map((x) => x.id), ['cb', 'gebeld-due', 'out', 'in', 'opv'])
   assert.deepEqual(rij.later.map((x) => x.id), ['later'])
+})
+
+test('Verantwoordelijke vereist vanaf Afspraak gepland', () => {
+  for (const k of ['afspraak', 'voorstel', 'gewonnen', 'verloren']) assert.equal(vereistVerantwoordelijke(k), true, k)
+  for (const k of ['outbound', 'inbound', 'gebeld', 'email_verstuurd', 'opvolgen']) assert.equal(vereistVerantwoordelijke(k), false, k)
+  assert.equal(mistVerantwoordelijke({ stage_key: 'afspraak', assigned_to: null }), true)
+  assert.equal(mistVerantwoordelijke({ stage_key: 'afspraak', assigned_to: 'x' }), false)
+  assert.equal(mistVerantwoordelijke({ stage_key: 'gebeld', assigned_to: null }), false)
 })
 
 console.log(`\n${n} tests geslaagd.`)
