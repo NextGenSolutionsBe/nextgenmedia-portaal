@@ -83,6 +83,19 @@ export async function POST(req: NextRequest) {
       duur = Math.round(n)
     }
 
+    // Gemeten gesprek (timer in Focus Mode): start en einde zijn de enige bron voor
+    // de gespreksduur in de statistieken. Onmogelijke tijden worden geweigerd.
+    let gesprekStart: string | null = null, gesprekEind: string | null = null
+    if (type === 'telefoongesprek' && b.gesprekStart && b.gesprekEind) {
+      const s = Date.parse(String(b.gesprekStart)), e = Date.parse(String(b.gesprekEind))
+      if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s || e - s > 6 * 3600_000 || e > Date.now() + 60_000) {
+        return NextResponse.json({ error: 'De gemeten gesprekstijd klopt niet.' }, { status: 400 })
+      }
+      gesprekStart = new Date(s).toISOString(); gesprekEind = new Date(e).toISOString()
+      duur = Math.round((e - s) / 1000)
+    }
+    const bron: 'focus' | 'pipeline' = b.bron === 'focus' ? 'focus' : 'pipeline'
+
     let uitkomst: string | null = null
     if (type === 'telefoongesprek') {
       if (b.uitkomst && !isUitkomst(b.uitkomst)) return NextResponse.json({ error: 'Onbekende uitkomst' }, { status: 400 })
@@ -119,7 +132,7 @@ export async function POST(req: NextRequest) {
     const { id } = await registreerActiviteit(admin, {
       leadId, medewerkerId: actor.id, medewerkerEmail: actor.email ?? null,
       type, duurSeconden: duur, uitkomst, notitie, opvolgdatum,
-      naarFase, vanFase: huidigeFase,
+      naarFase, vanFase: huidigeFase, bron, gesprekStart, gesprekEind,
     })
 
     // 2) De lead bijwerken: opvolgdatum en/of fase. Vóór de migratie kan
@@ -140,7 +153,7 @@ export async function POST(req: NextRequest) {
     if (naarFase) {
       await registreerActiviteit(admin, {
         leadId, medewerkerId: actor.id, medewerkerEmail: actor.email ?? null,
-        type: 'fase_gewijzigd', vanFase: huidigeFase, naarFase,
+        type: 'fase_gewijzigd', vanFase: huidigeFase, naarFase, bron,
       })
     }
     // Een opvolgdatum die meekwam met een gesprek of mail telt als opvolging.

@@ -5253,3 +5253,31 @@ alter table framer_sites add column if not exists created_by uuid;
 -- ── Pipeline: verwachte omzet per lead (indicatief, handmatig) ───────────────
 -- Staat los van opdrachten, contracten en facturen; leeg = telt niet mee.
 alter table sales_leads add column if not exists verwachte_omzet_cents bigint;
+
+-- ── Salesstatistieken: betrouwbare registratie ───────────────────────────────
+-- Gesprekken: bron (focus|pipeline) en gemeten start/einde (duur enkel daaruit).
+alter table sales_activiteiten add column if not exists bron text;
+alter table sales_activiteiten add column if not exists van_fase text;
+alter table sales_activiteiten add column if not exists gesprek_start timestamptz;
+alter table sales_activiteiten add column if not exists gesprek_eind timestamptz;
+-- Afspraken: wie was verantwoordelijk (closer, los van wie boekte) en is ze gehouden?
+alter table sales_appointments add column if not exists verantwoordelijke_id uuid;
+alter table sales_appointments add column if not exists aanwezigheid text;       -- gehouden | niet_gehouden | NULL = nog niet bevestigd
+alter table sales_appointments add column if not exists aanwezigheid_op timestamptz;
+alter table sales_appointments add column if not exists aanwezigheid_door uuid;
+-- Correcties op registraties: oude en nieuwe waarde, reden, wie en wanneer.
+create table if not exists sales_stat_correcties (
+  id uuid primary key default gen_random_uuid(),
+  soort text not null,
+  entiteit text not null,
+  entiteit_id uuid not null,
+  lead_id uuid,
+  oud jsonb,
+  nieuw jsonb,
+  reden text not null,
+  door uuid,
+  door_email text,
+  created_at timestamptz not null default now()
+);
+create index if not exists sales_stat_correcties_entiteit on sales_stat_correcties (entiteit, entiteit_id);
+alter table sales_stat_correcties enable row level security;

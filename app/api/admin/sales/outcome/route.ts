@@ -101,6 +101,13 @@ export async function POST(req: NextRequest) {
       patch.tijdsbelasting = Number.isInteger(tb) && tb >= 1 && tb <= 5 ? tb : null
     }
 
+    // Een uitkomst gewonnen/verloren betekent dat de afspraak gehouden werd.
+    if (outcome !== 'open') {
+      const { data: huidig } = await admin.from('sales_appointments').select('aanwezigheid').eq('id', id).maybeSingle()
+      if (!(huidig as { aanwezigheid?: string | null } | null)?.aanwezigheid) {
+        patch.aanwezigheid = 'gehouden'; patch.aanwezigheid_op = new Date().toISOString(); patch.aanwezigheid_door = actor.id
+      }
+    }
     const { error } = await admin.from('sales_appointments').update(patch).eq('id', id)
     if (error) {
       if (/outcome|deal_value|commission|setter_profile|PGRST204|schema cache/i.test(error.message)) {

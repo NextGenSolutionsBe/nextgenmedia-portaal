@@ -11,7 +11,7 @@ import {
 import { cn } from '@/lib/utils'
 import { merkStijl } from '@/lib/sales/merk'
 import { FOCUS_ACTIONS, focusDoelFase, stageLabel } from '@/lib/sales/stages'
-import { formatDuur, parseDuur } from '@/lib/sales/activiteiten-model'
+import { formatDuur } from '@/lib/sales/activiteiten-model'
 import {
   bouwWachtrij, aftelLabel, terugbelMoment, leesTijdstip, isKlaarFase, TERUGBEL_KEUZES,
   MAX_GEEN_GEHOOR, GEEN_GEHOOR_UREN,
@@ -131,6 +131,8 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
   // Gespreksduur van DEZE belpoging: mm:ss of de timer. Leeg = geen duur.
   const [duur, setDuur] = useState('')
   const [timerStart, setTimerStart] = useState<number | null>(null)
+  // Gemeten gesprek (start + einde van de timer): de enige bron voor gespreksduur.
+  const [gemeten, setGemeten] = useState<{ start: number; eind: number } | null>(null)
   const [timerNu, setTimerNu] = useState(() => Date.now())
   useEffect(() => {
     if (timerStart === null) return
@@ -289,20 +291,19 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
     setDatumTijd('')
     setDuur('')
     setTimerStart(null)
+    setGemeten(null)
     doorlopen.current += 1
     setGedaan((s) => new Set(s).add(id))
   }, [])
 
   /**
-   * De gespreksduur in seconden. Loopt de timer, dan telt die (tot nu); anders
-   * het ingetypte mm:ss. Leeg → null (geen duur). 'fout' bij onleesbare invoer.
+   * Het gemeten gesprek: loopt de timer nog, dan van start tot nu; anders de
+   * laatst gestopte meting. Geen timer gebruikt = geen duur (nooit geschat).
    */
-  const leesDuur = useCallback((): number | null | 'fout' => {
-    if (timerStart !== null) return Math.max(0, Math.round((Date.now() - timerStart) / 1000))
-    if (!duur.trim()) return null
-    const s = parseDuur(duur)
-    return s === null ? 'fout' : s
-  }, [timerStart, duur])
+  const leesGemeten = useCallback((): { start: number; eind: number } | null => {
+    if (timerStart !== null) return { start: timerStart, eind: Date.now() }
+    return gemeten
+  }, [timerStart, gemeten])
 
   /** Eén salesactiviteit registreren voor de huidige lead. */
   const registreer = useCallback(async (body: Record<string, unknown>): Promise<boolean> => {
@@ -310,7 +311,7 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
     try {
       const r = await fetch('/api/admin/sales/activiteiten', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ leadId: lead.id, ...body }),
+        body: JSON.stringify({ leadId: lead.id, bron: 'focus', ...body }),
       })
       const j = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(j.error ?? 'Registreren mislukt')
@@ -323,14 +324,14 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
 
   /** Een telefoongesprek registreren met de duur en de notitie van dit scherm. */
   const registreerGesprek = useCallback(async (uitkomst: string, opts?: { kop?: string; naarFase?: string | null }) => {
-    const s = leesDuur()
-    if (s === 'fout') { toast.error('Gespreksduur als mm:ss, bv. 3:20 — of laat leeg.'); return false }
+    const m = leesGemeten()
     const tekst = note.trim()
     const notitie = opts?.kop ? (tekst ? `${opts.kop} — ${tekst}` : opts.kop) : (tekst || null)
     return registreer({
-      type: 'telefoongesprek', uitkomst, duurSeconden: s, notitie, naarFase: opts?.naarFase ?? null,
+      type: 'telefoongesprek', uitkomst, notitie, naarFase: opts?.naarFase ?? null,
+      ...(m && m.eind > m.start ? { gesprekStart: new Date(m.start).toISOString(), gesprekEind: new Date(m.eind).toISOString() } : {}),
     })
-  }, [leesDuur, note, registreer])
+  }, [leesGemeten, note, registreer])
 
   /** PATCH op de huidige lead; bij succes door naar de volgende. */
   const stuur = useCallback(async (body: Record<string, unknown>, blijf = false) => {
@@ -485,6 +486,7 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
       setOpenBezwaar(null)
       setDuur('')
       setTimerStart(null)
+      setGemeten(null)
       doorlopen.current += 1
       setEigenTijd('')
       setDatumTijd('')
@@ -905,25 +907,23 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
             </div>
           )}
 
-          {/* Gespreksduur — optioneel. Timer die je zelf start/stopt, of mm:ss.
-              Nooit geschat: leeg laten = geen duur in de statistiek. */}
+          {/* Gespreksduur — optioneel, enkel gemeten met de timer (start en einde
+              worden bewaard). Geen timer = geen duur in de statistiek. */}
           <div>
             <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-bold mb-1 flex items-center gap-1">
-              <Timer className="h-3 w-3" />Gespreksduur (optioneel)
+              <Timer className="h-3 w-3" />Gespreksduur (timer, optioneel)
             </label>
             <div className="flex gap-1.5 items-center">
-              <input className="input-base text-sm w-24" inputMode="numeric" placeholder="mm:ss"
-                disabled={timerStart !== null}
-                value={timerStart !== null ? formatDuur(Math.max(0, Math.round((timerNu - timerStart) / 1000))) : duur}
-                onChange={(e) => setDuur(e.target.value)} />
+              <input className="input-base text-sm w-24 bg-gray-50" readOnly placeholder="—" aria-label="Gemeten gespreksduur"
+                value={timerStart !== null ? formatDuur(Math.max(0, Math.round((timerNu - timerStart) / 1000))) : duur} />
               {timerStart !== null ? (
                 <button type="button" className="btn-secondary text-xs"
-                  onClick={() => { setDuur(formatDuur(Math.max(0, Math.round((Date.now() - timerStart) / 1000)))); setTimerStart(null) }}>
+                  onClick={() => { const eind = Date.now(); setGemeten({ start: timerStart, eind }); setDuur(formatDuur(Math.max(0, Math.round((eind - timerStart) / 1000)))); setTimerStart(null) }}>
                   <Square className="h-3 w-3 text-red-600" />Stop
                 </button>
               ) : (
                 <button type="button" className="btn-secondary text-xs"
-                  onClick={() => { setTimerNu(Date.now()); setTimerStart(Date.now()) }}>
+                  onClick={() => { setTimerNu(Date.now()); setGemeten(null); setDuur(''); setTimerStart(Date.now()) }}>
                   <Play className="h-3 w-3" />Start
                 </button>
               )}

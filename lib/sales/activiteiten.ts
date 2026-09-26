@@ -31,6 +31,11 @@ export type NieuweActiviteit = {
   afspraakId?: string | null
   /** Extra tekst voor de tijdlijn (bv. bedrag bij een gewonnen deal). */
   extra?: string | null
+  /** Waar de activiteit gebeurde: 'focus' (Focus Mode) of 'pipeline'. */
+  bron?: 'focus' | 'pipeline' | null
+  /** Gemeten start en einde van een gesprek (timer) — de enige bron voor gespreksduur. */
+  gesprekStart?: string | null
+  gesprekEind?: string | null
 }
 
 const KIND: Record<ActiviteitType, 'call' | 'note' | 'stage' | 'system'> = {
@@ -99,7 +104,11 @@ export async function registreerActiviteit(
       notitie: (a.notitie ?? '').trim() || null,
       opvolgdatum: a.opvolgdatum ?? null,
       naar_fase: a.naarFase ?? null,
+      van_fase: a.vanFase ?? null,
       afspraak_id: a.afspraakId ?? null,
+      bron: a.bron ?? null,
+      gesprek_start: a.gesprekStart ?? null,
+      gesprek_eind: a.gesprekEind ?? null,
     }, { required: ['lead_id', 'type'] })
     if (error) {
       if (!/sales_activiteiten|does not exist|schema cache|relation/i.test(error.message)) {

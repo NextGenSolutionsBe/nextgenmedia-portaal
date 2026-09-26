@@ -10,8 +10,11 @@ import { commissionCents, euro, TIJDSBELASTING, gewogenWaardeCents } from '@/lib
  * de commissie van de setter aan vast, dus dat is niets wat iemand over zijn
  * eigen afspraken beslist.
  */
-export function OutcomePanel({ appointmentId, outcome, dealValueCents, commissionPct, tijdsbelasting, onDone }: {
+export function OutcomePanel({ appointmentId, aanwezigheid = null, voorbij = false, outcome, dealValueCents, commissionPct, tijdsbelasting, onDone }: {
   appointmentId: string
+  /** Is de afspraak gehouden? (gehouden | niet_gehouden | null) — telt voor de closing rate. */
+  aanwezigheid?: string | null
+  voorbij?: boolean
   outcome: 'won' | 'lost' | null
   dealValueCents?: number | null
   commissionPct?: number | null
@@ -47,8 +50,37 @@ export function OutcomePanel({ appointmentId, outcome, dealValueCents, commissio
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt') } finally { setBusy(false) }
   }
 
+  // Gehouden of niet? Een eerste bevestiging mag zonder reden; een wijziging vraagt er een.
+  const zetAanwezigheid = async (waarde: 'gehouden' | 'niet_gehouden') => {
+    if (waarde === aanwezigheid) return
+    let reden = ''
+    if (aanwezigheid) {
+      reden = (prompt('Reden van deze correctie:') ?? '').trim()
+      if (!reden) { toast.error('Zonder reden geen correctie.'); return }
+    }
+    setBusy(true)
+    try {
+      const r = await fetch('/api/admin/sales/prestaties', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ soort: 'aanwezigheid', id: appointmentId, waarde, reden }) })
+      const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error ?? 'Opslaan mislukt')
+      toast.success(waarde === 'gehouden' ? 'Afspraak bevestigd als gehouden.' : 'Afspraak gemarkeerd als niet gehouden.')
+      onDone()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt') } finally { setBusy(false) }
+  }
+
   return (
     <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-2">
+      {voorbij && (
+        <div className="space-y-1">
+          <div className="text-xs font-medium text-gray-700">Is deze afspraak gehouden?</div>
+          <div className="flex gap-1.5">
+            {([['gehouden', 'Ja, gehouden'], ['niet_gehouden', 'Nee, niet gehouden']] as const).map(([k, l]) => (
+              <button key={k} type="button" disabled={busy} onClick={() => zetAanwezigheid(k)}
+                className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-medium border ${aanwezigheid === k ? (k === 'gehouden' ? 'bg-green-100 text-green-800 border-green-300' : 'bg-red-100 text-red-800 border-red-300') : 'bg-white border-gray-200 hover:bg-gray-50'}`}>{l}</button>
+            ))}
+          </div>
+          {!aanwezigheid && <p className="text-[11px] text-amber-700">Nog niet bevestigd — telt pas mee in de closing rate als ze gehouden is.</p>}
+        </div>
+      )}
       <div className="text-xs font-medium text-gray-700">Afloop van deze afspraak</div>
 
       <div className="flex gap-1.5">

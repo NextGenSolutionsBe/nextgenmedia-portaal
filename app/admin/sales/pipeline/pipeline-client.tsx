@@ -233,19 +233,19 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
 
     try {
       const faseWissel = vanFase !== stage || !!extra
-      // Fase en volgorde tegelijk bewaren (was: na elkaar, gevolgd door een volledige herlading).
-      const [j, j2] = await Promise.all([
-        faseWissel
-          ? fetch(`/api/admin/sales/leads/${id}`, {
-              method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ ...(vanFase !== stage ? { stage } : {}), positie: index, ...(extra ?? {}) }),
-            }).then(async (r) => { const b = await r.json().catch(() => ({})); if (!r.ok) throw new Error(b.error ?? 'Verplaatsen mislukt'); return b as { mistVerantwoordelijke?: boolean } })
-          : Promise.resolve(null),
-        fetch('/api/admin/sales/leads/herorden', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ stage, ids: doelLijst.map((l) => l.id) }),
-        }).then(async (r) => { const b = await r.json().catch(() => ({})); if (!r.ok) throw new Error(b.error ?? 'Volgorde bewaren mislukt'); return b as { zonderPositie?: boolean } }),
-      ])
+      // EERST de fase (die registreert de verplaatsing, wie en wanneer, en de
+      // sluitdatum), DAN pas de volgorde: de volgorde-route zet de kolom mee,
+      // en liep ze eerst, dan zag de fase-route geen wissel meer.
+      const j = faseWissel
+        ? await fetch(`/api/admin/sales/leads/${id}`, {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...(vanFase !== stage ? { stage } : {}), positie: index, ...(extra ?? {}) }),
+          }).then(async (r) => { const b = await r.json().catch(() => ({})); if (!r.ok) throw new Error(b.error ?? 'Verplaatsen mislukt'); return b as { mistVerantwoordelijke?: boolean } })
+        : null
+      const j2 = await fetch('/api/admin/sales/leads/herorden', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage, ids: doelLijst.map((l) => l.id) }),
+      }).then(async (r) => { const b = await r.json().catch(() => ({})); if (!r.ok) throw new Error(b.error ?? 'Volgorde bewaren mislukt'); return b as { zonderPositie?: boolean } })
       if (j2.zonderPositie && !volgordeMelding.current) {
         volgordeMelding.current = true
         toast.info('De volgorde binnen een kolom wordt bewaard zodra de databankmigratie gedraaid is.')

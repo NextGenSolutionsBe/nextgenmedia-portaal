@@ -184,8 +184,12 @@ export async function POST(req: NextRequest) {
 
     // 2) Afspraak vastleggen. De exclusion-constraint in de database is de
     //    laatste rem tegen dubbel boeken bij gelijktijdige verzoeken.
+    // Wie is verantwoordelijk voor deze afspraak (de closer)? De eigenaar van de
+    // agenda — los van wie boekte (setter_id). Nodig voor de closing rate.
+    const verantwoordelijkeId = await gebruikerVoorAgenda(admin, ownerId)
     const { data: appt, error: apptErr } = await admin.from('sales_appointments').insert({
       sales_client_id: salesClientId,
+      verantwoordelijke_id: verantwoordelijkeId,
       pipeline_id: pipelineId,
       lead_id: leadId,
       contact_id: contactId,
@@ -456,7 +460,12 @@ export async function PATCH(req: NextRequest) {
       starts_at: new Date(start).toISOString(),
       ends_at: new Date(end).toISOString(),
     }
-    if (nieuweAgenda) patch.calendar_id = nieuweAgenda.id
+    if (nieuweAgenda) {
+      patch.calendar_id = nieuweAgenda.id
+      // Andere agenda = andere closer (tenzij die al bevestigd/gecorrigeerd werd).
+      const nieuweVerantwoordelijke = await gebruikerVoorAgenda(admin, nieuweAgenda.id)
+      if (nieuweVerantwoordelijke && !(appt as { aanwezigheid?: string | null }).aanwezigheid) patch.verantwoordelijke_id = nieuweVerantwoordelijke
+    }
     if (b.notes !== undefined) patch.notes = tekst(b.notes, 4000)
     if (b.clientNote !== undefined) patch.client_note = tekst(b.clientNote, 2000)
     if (b.adres !== undefined) patch.adres = tekst(b.adres, 300)

@@ -12,6 +12,8 @@ type Appt = {
   pipeline_id?: string | null
   calendar_id?: string | null
   outcome?: 'won' | 'lost' | null
+  /** gehouden | niet_gehouden | null (nog niet bevestigd) */
+  aanwezigheid?: string | null
   deal_value_cents?: number | null
   commission_pct?: number | null
   tijdsbelasting?: number | null
@@ -269,6 +271,8 @@ export function EditAppointment({ appt, pipelines, owners = [], isAdmin, onClose
           {isAdmin && (
             <OutcomePanel
               appointmentId={appt.id}
+              aanwezigheid={appt.aanwezigheid ?? null}
+              voorbij={new Date(appt.starts_at).getTime() < Date.now()}
               outcome={appt.outcome ?? null}
               dealValueCents={appt.deal_value_cents}
               commissionPct={appt.commission_pct}
