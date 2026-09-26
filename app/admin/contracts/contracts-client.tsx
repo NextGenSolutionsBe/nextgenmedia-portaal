@@ -259,7 +259,7 @@ export function ContractsClient({
             {cijfers.mappen} klantmap{cijfers.mappen === 1 ? '' : 'pen'} · {cijfers.contracten} van {contracten.length} contracten
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 flex-wrap">
           <Link href="/admin/contracts/legal-verzending" className="btn-secondary shrink-0" title="Elk contract apart naar het archiefadres mailen, met pdf en certificaat">
             <Mail className="h-4 w-4" />
             Naar archiefadres

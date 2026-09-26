@@ -40,7 +40,7 @@ export function MeldingenTab() {
       <div className="card-base p-4 space-y-3 h-fit">
         <div><h2 className="text-sm font-semibold">Notificaties instellen</h2><p className="text-xs text-gray-500 mt-0.5">Per soort apart: in de app en/of per e-mail. Meldingen voor de admins gaan per mail naar het e-mailadres uit Instellingen → Bedrijf.</p></div>
         {!inst ? <Loader2 className="h-4 w-4 animate-spin text-gray-400" /> : (
-          <table className="w-full text-sm">
+          <div className="table-wrap"><table className="w-full text-sm">
             <thead><tr className="text-[11px] text-gray-500"><th className="text-left font-medium py-1">Soort</th><th className="font-medium"><Bell className="h-3.5 w-3.5 inline" /> App</th><th className="font-medium"><Mail className="h-3.5 w-3.5 inline" /> Mail</th></tr></thead>
             <tbody className="divide-y divide-gray-50">
               {MELDING_EVENTS.map((e) => (
@@ -51,7 +51,7 @@ export function MeldingenTab() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
         <button type="button" disabled={bezig || !inst} onClick={bewaar} className="btn-primary w-full justify-center">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Bewaren</button>
       </div>

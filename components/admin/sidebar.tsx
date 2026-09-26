@@ -288,7 +288,7 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
     <>
       {/* ── Mobile hamburger button ── */}
       <button
-        className="md:hidden fixed top-3 left-3 z-50 h-10 w-10 flex items-center justify-center rounded-xl bg-white border border-gray-200 shadow-sm"
+        className="md:hidden fixed top-2.5 left-3 z-50 h-10 w-10 flex items-center justify-center rounded-xl bg-white border border-gray-200 shadow-sm"
         onClick={() => setMobileOpen(true)}
         aria-label="Menu openen"
       >

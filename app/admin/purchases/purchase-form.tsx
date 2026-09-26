@@ -126,14 +126,14 @@ export function PurchaseForm({ purchase, onClose }: { purchase?: BewerkbareAanvr
             {!wasBevestigd && purchase?.status === 'pending' && wijzigingen.some((w) => ['title', 'amount_excl', 'vat_pct', 'supplier'].includes(w.veld)) && (
               <div className="text-sm rounded-lg px-3 py-2.5 border bg-amber-50 border-amber-200 text-amber-900">Eerder gegeven goedkeuringen vervallen door deze wijziging; de zaakvoerders moeten opnieuw goedkeuren.</div>
             )}
-            <table className="w-full text-sm">
+            <div className="table-wrap"><table className="w-full text-sm">
               <thead><tr className="border-b border-gray-100 text-left text-[11px] uppercase tracking-wide text-gray-500"><th className="py-1.5">Veld</th><th className="py-1.5">Was</th><th className="py-1.5">Wordt</th></tr></thead>
               <tbody className="divide-y divide-gray-50">
                 {wijzigingen.map((w) => (
                   <tr key={w.veld}><td className="py-1.5 font-medium">{LABEL[w.veld]}</td><td className="py-1.5 text-gray-500 line-through">{toon(w.veld, w.was)}</td><td className="py-1.5 font-semibold">{toon(w.veld, w.wordt)}</td></tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
             <div className={`text-sm rounded-lg px-3 py-2.5 border ${needsApproval ? 'bg-amber-50 border-amber-200' : 'bg-green-50 border-green-200'}`}>
               Nieuw totaal incl. btw: <span className="font-semibold">{euro2(incl)}</span> · {needsApproval ? <span className="text-amber-700">boven €{THRESHOLD} → goedkeuring nodig</span> : <span className="text-green-700">onder €{THRESHOLD} → geen goedkeuring vereist</span>}
             </div>

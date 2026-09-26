@@ -4,6 +4,11 @@
 
 
 @layer base {
+  /* Rasteritems krimpen mee met hun kolom. Zonder dit duwt één brede tabel of
+     lange URL een kolom breder dan het scherm (min-width: auto). */
+  .grid > * {
+    min-width: 0;
+  }
   :root {
     --background: 0 0% 100%;
     --foreground: 0 0% 4%;
@@ -161,6 +166,19 @@ img, svg, video, canvas {
 }
 .page-header-actions {
   @apply flex items-center gap-2 flex-wrap;
+}
+
+/* Telefoon: invoervelden op 16px, anders zoomt iOS bij elke tik in een veld in
+   en blijft de pagina uitvergroot staan. */
+@media (max-width: 767px) {
+  input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+html {
+  -webkit-text-size-adjust: 100%;
 }
 
 /* ── Scrollbar ────────────────────────────────────────────────────────────── */

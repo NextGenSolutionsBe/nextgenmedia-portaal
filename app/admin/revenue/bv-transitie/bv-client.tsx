@@ -396,7 +396,7 @@ function EzRaming({ jaar, invoer, berekend }: { jaar: number; invoer: EzInvoer[]
         Vul per persoon de boekhoudkundige winst en het statuut in. De rest volgt uit de aannames voor {jaar}. Dit is een reserve-inschatting, geen aangifte.
       </p>
       <div className="card-base p-0 overflow-hidden">
-        <table className="w-full text-sm">
+        <div className="table-wrap"><table className="w-full text-sm">
           <thead><tr className="border-b border-gray-100">
             <th className="table-th w-1/3">Persoon</th>
             {PERSONEN.map((p) => <th key={p} className="table-th text-right">{PERSOON_LABEL[p]}</th>)}
@@ -423,7 +423,7 @@ function EzRaming({ jaar, invoer, berekend }: { jaar: number; invoer: EzInvoer[]
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       </div>
       <button onClick={bewaar} disabled={bezig} className="btn-primary text-sm">
         {bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : null}Invoer opslaan
@@ -488,7 +488,7 @@ function AannamesForm({ aannames }: { aannames: Aannames }) {
     <div className="space-y-4">
       <p className="text-sm text-gray-500 max-w-2xl">Aannames {aannames.jaar} — aanpasbare fiscale raming. Percentages als fractie (0,25 = 25%).</p>
       <div className="card-base p-0 overflow-hidden">
-        <table className="w-full text-sm">
+        <div className="table-wrap"><table className="w-full text-sm">
           <thead><tr className="border-b border-gray-100"><th className="table-th">Parameter</th><th className="table-th text-right">Waarde</th><th className="table-th">Eenheid</th><th className="table-th">Toelichting</th></tr></thead>
           <tbody className="divide-y divide-gray-50">
             {RIJEN.map((r) => (
@@ -500,7 +500,7 @@ function AannamesForm({ aannames }: { aannames: Aannames }) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       </div>
       <button onClick={bewaar} disabled={bezig} className="btn-primary text-sm">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : null}Aannames opslaan</button>
       <p className="text-[11px] text-gray-500">Bronnen: FOD Financiën (personenbelasting) en RSVZ / sociaal fonds. Controleer de definitieve fiscale situatie steeds met de boekhouder.</p>

@@ -107,7 +107,7 @@ export function InstellingenClient({ tab, verborgen, isAdmin }: { tab: string; v
   const verborgenLabel = verborgen ? data.modules.find((m) => m.key === verborgen)?.label ?? verborgen : null
 
   return (
-    <div className="grid md:grid-cols-[250px_1fr] gap-5 items-start">
+    <div className="grid grid-cols-[minmax(0,1fr)] md:grid-cols-[250px_minmax(0,1fr)] gap-5 items-start">
       <nav className="card-base p-2 md:sticky md:top-6">
         <div className="flex md:flex-col gap-0.5 overflow-x-auto">
           {TABS.map((t) => {

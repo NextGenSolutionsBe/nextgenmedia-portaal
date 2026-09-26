@@ -49,8 +49,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         toonInstellingen={toonInstellingen}
         mijnWerk={mijnWerk}
       />
-      <main className="flex-1 min-w-0 md:ml-[var(--sidebar-width)] min-h-screen">
-        <div className="max-w-[1400px] mx-auto px-4 pt-16 pb-8 md:pt-6 md:px-6 lg:px-8">
+      <main className="flex-1 min-w-0 md:ml-[var(--sidebar-width)] min-h-screen overflow-x-clip">
+        <div className={`max-w-[1400px] mx-auto px-4 pb-24 md:pb-8 md:pt-6 md:px-6 lg:px-8 ${role === 'admin' ? 'pt-0' : 'pt-16'}`}>
           {/* Topbar (zoek/notificaties/AI) is admin-only: de onderliggende
               API's zijn dat ook — voor werknemers verbergen i.p.v. 403-ruis. */}
           {role === 'admin' && <AdminTopBar />}

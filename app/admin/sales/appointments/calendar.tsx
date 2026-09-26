@@ -282,7 +282,7 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId, initi
             {days[0].toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' })} – {days[6].toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' })}
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {ownerId && (
             <button onClick={() => setAgendaDialog(ownerId)} className="btn-secondary text-sm"
               title="Naam, merk, ClickUp-persoon en e-mailhandtekening van deze agenda">

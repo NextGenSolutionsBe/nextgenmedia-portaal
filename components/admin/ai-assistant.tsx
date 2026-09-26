@@ -82,13 +82,13 @@ export function AiAssistant() {
   return (
     <>
       {!open && (
-        <button onClick={() => setOpen(true)} className="fixed bottom-5 right-5 z-50 flex items-center gap-2 rounded-full bg-gray-900 text-white pl-3.5 pr-4 py-2.5 shadow-md hover:bg-black transition-colors">
-          <Sparkles className="h-4 w-4" /><span className="text-sm font-medium">NextGen AI</span>
+        <button onClick={() => setOpen(true)} aria-label="NextGen AI" className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] right-4 md:bottom-5 md:right-5 z-50 flex items-center gap-2 rounded-full bg-gray-900 text-white p-3 md:pl-3.5 md:pr-4 md:py-2.5 shadow-md hover:bg-black transition-colors">
+          <Sparkles className="h-4 w-4" /><span className="hidden md:inline text-sm font-medium">NextGen AI</span>
         </button>
       )}
 
       {open && (
-        <div className="fixed bottom-5 right-5 z-50 w-[min(440px,calc(100vw-2.5rem))] h-[min(640px,calc(100vh-2.5rem))] bg-white border border-gray-200 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+        <div className="fixed inset-0 md:inset-auto md:bottom-5 md:right-5 z-50 md:w-[min(440px,calc(100vw-2.5rem))] md:h-[min(640px,calc(100vh-2.5rem))] h-dvh bg-white md:border border-gray-200 md:rounded-2xl shadow-2xl flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-900 text-white">
             <div className="flex items-center gap-2"><Sparkles className="h-4 w-4" /><span className="font-medium text-sm">NextGen AI</span></div>
             <button onClick={() => setOpen(false)} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-white/10"><X className="h-4 w-4" /></button>

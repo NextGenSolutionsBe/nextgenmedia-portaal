@@ -216,7 +216,7 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum, start
       {/* ── Werkbalk ── */}
       <div className="card-base p-3 space-y-3">
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button type="button" onClick={() => ga(-1)} className="rounded-lg border border-gray-200 p-2 hover:bg-gray-50" aria-label="Vorige periode"><ChevronLeft className="h-4 w-4" /></button>
             <button type="button" onClick={() => setAnker(vandaag)} className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50">Vandaag</button>
             <button type="button" onClick={() => ga(1)} className="rounded-lg border border-gray-200 p-2 hover:bg-gray-50" aria-label="Volgende periode"><ChevronRight className="h-4 w-4" /></button>
@@ -225,7 +225,7 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum, start
             {laden && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <div className="relative"><Search className="h-3.5 w-3.5 text-gray-400 absolute left-2 top-1/2 -translate-y-1/2" /><input className={`${sel} pl-7 w-52`} placeholder="Zoeken: klant, project, omschrijving…" value={filters.project} onChange={(e) => zet('project', e.target.value)} aria-label="Zoeken" /></div>
+            <div className="relative w-full sm:w-auto"><Search className="h-3.5 w-3.5 text-gray-400 absolute left-2 top-1/2 -translate-y-1/2" /><input className={`${sel} pl-7 w-full sm:w-52`} placeholder="Zoeken: klant, project, omschrijving…" value={filters.project} onChange={(e) => zet('project', e.target.value)} aria-label="Zoeken" /></div>
             <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50">
               {([['maand', CalendarDays, 'Maand'], ['week', CalendarRange, 'Week'], ['lijst', List, 'Lijst']] as const).map(([w, Icon, label]) => (
                 <button key={w} type="button" onClick={() => setWeergave(w)} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${weergave === w ? 'bg-black text-white' : 'text-gray-600 hover:bg-white'}`}><Icon className="h-3.5 w-3.5" />{label}</button>
