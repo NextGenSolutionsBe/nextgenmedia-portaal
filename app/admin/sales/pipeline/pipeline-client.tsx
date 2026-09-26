@@ -9,7 +9,7 @@ import {
   X,
   SlidersHorizontal,
 } from 'lucide-react'
-import { STAGES, STAGE_KEYS, STAGE_STYLE, stageLabel, type StageKey } from '@/lib/sales/stages'
+import { mistVerantwoordelijke, STAGES, STAGE_KEYS, STAGE_STYLE, stageLabel, type StageKey } from '@/lib/sales/stages'
 import { DIENSTEN, LEADBRONNEN, LEADBRON_STYLE, leadbronLabel, normaliseerLeadbron } from '@/lib/sales/leadbron'
 import { merkStijl } from '@/lib/sales/merk'
 import { kolomSamenvatting, opdrachtSamenvatting, pipelineTotalen } from '@/lib/sales/opdrachten-model'
@@ -134,6 +134,23 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
 
   useEffect(() => { laad() }, [laad])
 
+  /**
+   * Eén kaart verversen na een wijziging (i.p.v. alle ± 3.000 leads opnieuw te
+   * laden — dat maakte opslaan en verplaatsen traag). Gearchiveerde leads
+   * verdwijnen van het bord.
+   */
+  const verversLead = useCallback(async (id: string | null | undefined) => {
+    if (!id) return
+    try {
+      const r = await fetch(`/api/admin/sales/leads/${id}?kort=1`, { cache: 'no-store' })
+      if (r.status === 404) { setLeads((l) => l.filter((x) => x.id !== id)); return }
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok || !j.lead) return
+      const vers = j.lead as Lead
+      setLeads((l) => (vers as Lead & { archived_at?: string | null }).archived_at ? l.filter((x) => x.id !== id) : l.map((x) => (x.id === id ? { ...x, ...vers } : x)))
+    } catch { /* de volgende volledige lading zet het recht */ }
+  }, [])
+
   // Deep-link vanuit de globale zoek: /admin/sales/pipeline?lead=<id> opent die lead.
   useEffect(() => {
     try {
@@ -188,26 +205,33 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
     setLeads(nieuw)
 
     try {
-      if (vanFase !== stage || extra) {
-        const r = await fetch(`/api/admin/sales/leads/${id}`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...(vanFase !== stage ? { stage } : {}), positie: index, ...(extra ?? {}) }),
-        })
-        const j = await r.json().catch(() => ({}))
-        if (!r.ok) throw new Error(j.error ?? 'Verplaatsen mislukt')
-      }
-      const r2 = await fetch('/api/admin/sales/leads/herorden', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stage, ids: doelLijst.map((l) => l.id) }),
-      })
-      const j2 = await r2.json().catch(() => ({}))
-      if (!r2.ok) throw new Error(j2.error ?? 'Volgorde bewaren mislukt')
+      const faseWissel = vanFase !== stage || !!extra
+      // Fase en volgorde tegelijk bewaren (was: na elkaar, gevolgd door een volledige herlading).
+      const [j, j2] = await Promise.all([
+        faseWissel
+          ? fetch(`/api/admin/sales/leads/${id}`, {
+              method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ...(vanFase !== stage ? { stage } : {}), positie: index, ...(extra ?? {}) }),
+            }).then(async (r) => { const b = await r.json().catch(() => ({})); if (!r.ok) throw new Error(b.error ?? 'Verplaatsen mislukt'); return b as { mistVerantwoordelijke?: boolean } })
+          : Promise.resolve(null),
+        fetch('/api/admin/sales/leads/herorden', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stage, ids: doelLijst.map((l) => l.id) }),
+        }).then(async (r) => { const b = await r.json().catch(() => ({})); if (!r.ok) throw new Error(b.error ?? 'Volgorde bewaren mislukt'); return b as { zonderPositie?: boolean } }),
+      ])
       if (j2.zonderPositie && !volgordeMelding.current) {
         volgordeMelding.current = true
         toast.info('De volgorde binnen een kolom wordt bewaard zodra de databankmigratie gedraaid is.')
       }
-      toast.success(vanFase !== stage ? `Naar ${stageLabel(stage)}` : 'Volgorde bewaard', { duration: 1200 })
-      if (vanFase !== stage || extra) laad({ stil: true })
+      if (j?.mistVerantwoordelijke) {
+        toast.warning(`Naar ${stageLabel(stage)} — geen medewerker verantwoordelijk`, {
+          description: 'Vanaf Afspraak gepland hoort er een verantwoordelijke bij (voor de statistieken per medewerker).',
+          action: { label: 'Kiezen', onClick: () => setSelectedId(id) }, duration: 6000,
+        })
+      } else {
+        toast.success(vanFase !== stage ? `Naar ${stageLabel(stage)}` : 'Volgorde bewaard', { duration: 1200 })
+      }
+      if (faseWissel) void verversLead(id)
       return true
     } catch (e) {
       setLeads(vorige)
@@ -215,7 +239,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
       laad({ stil: true })
       return false
     }
-  }, [leads, laad])
+  }, [leads, laad, verversLead])
 
   /** Naar een kolom — gewonnen/verloren eerst via het dialoogje. */
   const naarKolom = useCallback((lead: Lead, stage: string, index = 0) => {
@@ -292,7 +316,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
     }
   }
 
-  const klaar = () => { setDialoog(null); laad({ stil: true }) }
+  const klaar = () => { const id = dialoog?.leadId; setDialoog(null); void verversLead(id) }
 
   return (
     <div className="space-y-3">
@@ -508,7 +532,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
           meId={meId}
           isAdmin={isAdmin}
           labelSuggesties={opties.labels}
-          onChanged={() => laad({ stil: true })}
+          onChanged={() => void verversLead(selected.id)}
           onClose={() => setSelectedId(null)}
           onDialoog={(soort) => setDialoog({ soort, leadId: selected.id })}
           onFase={(stage) => { if (stage !== selected.stage_key) naarKolom(selected, stage, 0) }}
@@ -629,6 +653,9 @@ function Kaart({
         <span className={`text-[10px] px-1.5 py-0.5 rounded border ${LEADBRON_STYLE[bron]}`}>{leadbronLabel(bron)}</span>
         {verantwoordelijke && (
           <span className="text-[10px] text-gray-600 flex items-center gap-0.5"><User className="h-2.5 w-2.5" />{verantwoordelijke}</span>
+        )}
+        {mistVerantwoordelijke(lead) && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 font-medium">Geen medewerker verantwoordelijk</span>
         )}
         {opvolg && (
           <span className={`text-[10px] px-1.5 py-0.5 rounded flex items-center gap-0.5 ${opvolg < vandaagIso ? 'bg-red-100 text-red-700' : opvolg === vandaagIso ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-600'}`}>

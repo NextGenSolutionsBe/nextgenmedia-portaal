@@ -1,13 +1,12 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import Link from 'next/link'
 import { toast } from 'sonner'
 import {
-  X, Phone, Mail, Globe, CalendarClock, Pencil, PhoneCall, MailPlus, StickyNote, FileText,
-  Trophy, XCircle, PhoneOff, Archive, History, Bot, Flame, Loader2, Check, Linkedin, MapPin, Users,
+  X, Phone, Mail, Globe, Pencil, StickyNote,
+  PhoneOff, Archive, History, Bot, Flame, Loader2, Check, Linkedin, MapPin, Users,
 } from 'lucide-react'
-import { STAGES } from '@/lib/sales/stages'
+import { STAGES, stageLabel, mistVerantwoordelijke } from '@/lib/sales/stages'
 import { LEADBRONNEN, leadbronLabel } from '@/lib/sales/leadbron'
 import { merkStijl } from '@/lib/sales/merk'
 import { LeadGegevens } from './lead-gegevens'
@@ -240,20 +239,19 @@ export function LeadDetail({
           )}
           <LeadControle leadId={lead.id} />
 
-          {/* Snelle acties */}
-          <div className="grid grid-cols-3 gap-1.5">
-            <Actie icon={PhoneCall} label="Gesprek" onClick={() => onDialoog('gesprek')} />
-            <Actie icon={MailPlus} label="E-mail" onClick={() => onDialoog('email')} />
-            <Actie icon={StickyNote} label="Notitie" onClick={() => onDialoog('notitie')} />
-            <Link href={`/admin/sales/appointments?lead=${lead.id}`}
-              className="text-xs font-medium px-2 py-2 rounded-lg border border-[#fff848] bg-[#fff848]/30 hover:bg-[#fff848]/60 flex flex-col items-center gap-1">
-              <CalendarClock className="h-4 w-4" />Afspraak
-            </Link>
-            <Actie icon={FileText} label="Voorstel" onClick={() => onDialoog('voorstel')} />
-            <Actie icon={CalendarClock} label="Opvolgdatum" onClick={() => onDialoog('opvolg')} />
-            <Actie icon={Trophy} label="Gewonnen" onClick={() => onFase('gewonnen')} className="text-green-700" />
-            <Actie icon={XCircle} label="Verloren" onClick={() => onFase('verloren')} className="text-red-600" />
-          </div>
+          {/* Vanaf Afspraak gepland hoort er een verantwoordelijke bij (statistieken per medewerker). */}
+          {mistVerantwoordelijke(lead) && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 space-y-1.5">
+              <div className="text-sm font-semibold text-red-700">Geen medewerker verantwoordelijk</div>
+              <p className="text-xs text-red-700/90">Vanaf {stageLabel('afspraak')} hoort er een medewerker bij deze lead, zodat de statistieken en closing rate per medewerker kloppen.</p>
+              <select className="input-base text-sm" value="" disabled={bezig}
+                onChange={(e) => { if (e.target.value) patch({ assigned_to: e.target.value }, 'Verantwoordelijke gekoppeld.') }}>
+                <option value="">Kies de verantwoordelijke…</option>
+                {meId && <option value={meId}>Ik</option>}
+                {medewerkers.filter((m) => m.id !== meId).map((m) => <option key={m.id} value={m.id}>{m.naam}</option>)}
+              </select>
+            </div>
+          )}
 
           {/* Fase, bron, verantwoordelijke, dienst, opvolgdatum */}
           <div className="grid grid-cols-2 gap-2">
@@ -444,16 +442,5 @@ function Label({ tekst, children }: { tekst: string; children: React.ReactNode }
       <span className="block text-[11px] font-medium text-gray-500 mb-0.5">{tekst}</span>
       {children}
     </label>
-  )
-}
-
-function Actie({ icon: Icon, label, onClick, className = '' }: {
-  icon: typeof Phone; label: string; onClick: () => void; className?: string
-}) {
-  return (
-    <button type="button" onClick={onClick}
-      className={`text-xs font-medium px-2 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 flex flex-col items-center gap-1 ${className}`}>
-      <Icon className="h-4 w-4" />{label}
-    </button>
   )
 }

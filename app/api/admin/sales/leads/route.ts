@@ -121,11 +121,9 @@ export async function GET(req: NextRequest) {
     let totaal = 0
     let selectie = SELECT_KANBAN
 
-    for (let van = 0; van < MAX_LEADS; van += PAGINA) {
-      const tel = van === 0
+    // Eén pagina ophalen, met terugval naar een smallere selectie vóór de migraties.
+    const haalPagina = async (van: number, tel: boolean) => {
       let { data, error, count } = await bouw(selectie, van, van + PAGINA - 1, tel)
-      // Kanban-kolommen ontbreken nog? Terugvallen op de bredere selectie
-      // zonder positie; dan nog een keer op de smalle.
       if (error && selectie === SELECT_KANBAN && /leadbron|positie|dienst|opvolgdatum|deal_waarde|gesloten_op|verlies_reden|website_aanvraag|column/i.test(error.message)) {
         selectie = SELECT_BREED
         metPositie = false
@@ -138,10 +136,22 @@ export async function GET(req: NextRequest) {
         ;({ data, error, count } = await bouw(selectie, van, van + PAGINA - 1, tel))
       }
       if (error) throw new Error(error.message)
-      const stuk = (data ?? []) as unknown as LeadRow[]
-      if (count !== null && count !== undefined) totaal = count
-      rows.push(...stuk)
-      if (stuk.length < PAGINA) break
+      return { stuk: (data ?? []) as unknown as LeadRow[], count }
+    }
+
+    // Eerste pagina + totaal; de rest in één keer parallel (was: pagina na
+    // pagina, ± 4 rondreizen na elkaar bij 3.000 leads).
+    {
+      const eerste = await haalPagina(0, true)
+      rows.push(...eerste.stuk)
+      totaal = eerste.count ?? eerste.stuk.length
+      if (eerste.stuk.length === PAGINA) {
+        const doel = Math.min(totaal || MAX_LEADS, MAX_LEADS)
+        const starts: number[] = []
+        for (let van = PAGINA; van < doel; van += PAGINA) starts.push(van)
+        const rest = await Promise.all(starts.map((van) => haalPagina(van, false)))
+        for (const r of rest) rows.push(...r.stuk)
+      }
     }
 
     if (totaal === 0) totaal = rows.length

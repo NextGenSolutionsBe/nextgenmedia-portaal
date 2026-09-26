@@ -3,7 +3,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { canTransition, normaliseerStage, transitionError, vereistVerantwoordelijke, isGesloten } from '@/lib/sales/stages'
 import { isRedenCode, redenTekst } from '@/lib/sales/redenen'
-import { isLeadbron } from '@/lib/sales/leadbron'
+import { isLeadbron, normaliseerLeadbron } from '@/lib/sales/leadbron'
+import { laadOpdrachtenPerLead } from '@/lib/sales/lead-opdrachten'
+import { leadWaardeCents } from '@/lib/sales/opdrachten-model'
 import { logLeadEvent, moveLeadToPipeline } from '@/lib/sales/service'
 import { registreerActiviteit } from '@/lib/sales/activiteiten'
 import { listPipelines } from '@/lib/sales/pipelines'
@@ -13,11 +15,29 @@ import { normalizePhone, companyDedupeKey } from '@/lib/sales/dedupe'
 export const dynamic = 'force-dynamic'
 
 // GET — één lead met historiek (voor het detailpaneel).
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+// GET ?kort=1 — enkel de lead zoals het bord ze toont (met opdrachten en waarde),
+// zodat het bord na een wijziging één kaart ververst i.p.v. alle leads te herladen.
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     if (!(await requireStaff())) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
     const { id } = await params
     const admin = createAdminSupabaseClient()
+    if (req.nextUrl.searchParams.get('kort') === '1') {
+      const { data: rij } = await admin.from('sales_leads').select(`*, sales_companies ( * ), sales_contacts ( * )`).eq('id', id).maybeSingle()
+      if (!rij) return NextResponse.json({ error: 'Lead niet gevonden' }, { status: 404 })
+      const r = rij as Record<string, unknown> & { stage_key: string; leadbron?: string | null; labels?: string[] | null; lost_reason?: string | null; verlies_reden?: string | null; deal_waarde_cents?: number | null }
+      r.stage_key = normaliseerStage(r.stage_key)
+      r.leadbron = normaliseerLeadbron(r.leadbron)
+      if (r.leadbron === 'outbound' && (r.labels ?? []).includes('Harrie')) r.leadbron = 'harrie'
+      if (!r.verlies_reden && r.lost_reason && r.stage_key === 'verloren') r.verlies_reden = r.lost_reason
+      try {
+        const perLead = await laadOpdrachtenPerLead(admin, new Set([id]))
+        const lijst = perLead?.get(id)
+        if (lijst?.length) r.opdrachten = lijst
+        r.waarde_cents = leadWaardeCents({ opdrachten: lijst, deal_waarde_cents: r.deal_waarde_cents ?? null })
+      } catch { r.waarde_cents = leadWaardeCents({ deal_waarde_cents: r.deal_waarde_cents ?? null }) }
+      return NextResponse.json({ lead: r })
+    }
     const [{ data: lead }, { data: events }, { data: afspraken }] = await Promise.all([
       admin.from('sales_leads')
         .select(`*, sales_companies ( * ), sales_contacts ( * )`)
