@@ -1,0 +1,518 @@
+'use client'
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
+import { toast } from 'sonner'
+import { ChevronLeft, ChevronRight, CalendarDays, CalendarRange, List, Loader2, X, ArrowUpDown, Send, Eye, AlertTriangle, Wallet, Filter, Search, StickyNote, Pencil, RotateCcw, CheckCircle2 } from 'lucide-react'
+import {
+  vandaagBrussel, isDatum, ymVan, plusDagen, maandStart, maandEind, maandRooster, roosterBereik, weekBereik, shiftYM,
+  maandNaam, datumKort, datumLang, DAGEN_KORT, euro, euro2, kort, samenvatting, maandKpi, pasFiltersToe, dagTotalen, sorteer, filtersActief,
+  LEEG_FILTERS, PLANNER_STATUSSEN, STATUS_INFO, HERKOMST_LABEL,
+  FASEN, FASE_INFO, faseVan, faseKpi, volgendeStap, vorigeStap, naStap, winstVan, margeVan, resultaat,
+  type Moment, type Filters, type Categorie, type Sortering, type Fase, type StapActie,
+} from '@/lib/facturatie/planner-model'
+import { Bevestig } from '@/app/admin/instellingen/ui'
+import { KostenEnWinstDialoog } from '../kosten-en-winst'
+import { PlannerDetail, DagPaneel, StatusBadge, type Actie } from './planner-detail'
+import { FactuurEditor } from '../factuur-editor'
+import { ExportKnop } from '@/components/admin/export-knop'
+import { facturenWerkmap, type FactuurExportRij } from '@/lib/excel/rapporten/facturen'
+import { Plus } from 'lucide-react'
+
+type Data = { momenten: Moment[]; klanten: { id: string; company_name: string }[]; vandaag: string; verantwoordelijke: string }
+type Weergave = 'maand' | 'week' | 'lijst'
+const WEERGAVEN: Weergave[] = ['maand', 'week', 'lijst']
+const CATEGORIEEN: Categorie[] = ['vandaag', 'week', 'maand', 'achterstallig', 'ontbrekend']
+const MAX_DAGEN = 400
+const sel = 'rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs'
+
+export function PlannerClient({ startCategorie, startWeergave, startDatum, startFactuur = null }: { startCategorie: string | null; startWeergave: string | null; startDatum: string | null; startFactuur?: string | null }) {
+  const [vandaag] = useState(() => vandaagBrussel())
+  const [weergave, setWeergave] = useState<Weergave>(WEERGAVEN.includes(startWeergave as Weergave) ? (startWeergave as Weergave) : 'maand')
+  const [anker, setAnker] = useState<string>(isDatum(startDatum) ? startDatum : vandaag)
+  const [filters, setFilters] = useState<Filters>({ ...LEEG_FILTERS, categorie: CATEGORIEEN.includes(startCategorie as Categorie) ? (startCategorie as Categorie) : null })
+  const [sortering, setSortering] = useState<Sortering>({ veld: 'datum', richting: 'asc' })
+  const [data, setData] = useState<Data | null>(null)
+  const [laden, setLaden] = useState(false)
+  const [fout, setFout] = useState<string | null>(null)
+  const [geselecteerd, setGeselecteerd] = useState<string | null>(null)
+  const [dag, setDag] = useState<string | null>(null)
+  const [bezig, setBezig] = useState(false)
+  const [toonFilters, setToonFilters] = useState(false)
+  // Factuureditor: bestaande factuur openen, of een nieuwe op een gekozen dag.
+  const [editor, setEditor] = useState<{ invoiceId: string } | { datum: string } | null>(startFactuur ? { invoiceId: startFactuur } : null)
+  // Kosten en winst van één factuur (of recurring maand) rechtstreeks vanuit de lijst.
+  const [kostenVan, setKostenVan] = useState<Moment | null>(null)
+  // Statusknop aangeklikt: eerst bevestigen, dan pas uitvoeren.
+  const [vraagStap, setVraagStap] = useState<{ actie: StapActie; m: Moment } | null>(null)
+  const cache = useRef(new Map<string, Data>())
+  const onderweg = useRef(new Map<string, Promise<Data>>())
+  const [versie, setVersie] = useState(0)
+
+  // ── Welke periode laden? Zichtbare kalender ∪ dashboardvenster ∪ periodefilter ──
+  const ym = ymVan(anker)
+  const zicht = weergave === 'week' ? weekBereik(anker) : roosterBereik(ym)
+  const bereik = useMemo(() => {
+    const kandidatenVan = [zicht.van, plusDagen(vandaag, -120), filters.van || zicht.van]
+    const kandidatenTot = [zicht.tot, maandEind(shiftYM(ymVan(vandaag), 1)), filters.tot || zicht.tot]
+    let van = kandidatenVan.sort()[0], tot = kandidatenTot.sort().slice(-1)[0]
+    if ((Date.parse(tot) - Date.parse(van)) / 86_400_000 > MAX_DAGEN) van = plusDagen(tot, -MAX_DAGEN)
+    return { van, tot }
+  }, [zicht.van, zicht.tot, vandaag, filters.van, filters.tot])
+  const sleutel = `${bereik.van}|${bereik.tot}`
+
+  const laad = useCallback(async (key: string, van: string, tot: string) => {
+    const bekend = cache.current.get(key)
+    if (bekend) { setData(bekend); return }
+    setLaden(true); setFout(null)
+    try {
+      let p = onderweg.current.get(key)
+      if (!p) {
+        p = fetch(`/api/admin/invoices/planner?van=${van}&tot=${tot}`, { cache: 'no-store' }).then(async (r) => { const j = await r.json(); if (!r.ok) throw new Error(j.error || 'Laden mislukt'); return j as Data })
+        onderweg.current.set(key, p)
+      }
+      const d = await p
+      cache.current.set(key, d); setData(d)
+    } catch (e) { setFout(e instanceof Error ? e.message : 'Laden mislukt') }
+    finally { onderweg.current.delete(key); setLaden(false) }
+  }, [])
+  useEffect(() => { laad(sleutel, bereik.van, bereik.tot) }, [sleutel, bereik.van, bereik.tot, laad, versie])
+  const ververs = () => { cache.current.clear(); setVersie((v) => v + 1) }
+
+  // ── Afgeleide gegevens: één bron voor dashboard, kalender en lijst ──
+  const alle = useMemo(() => data?.momenten ?? [], [data])
+  const basis = useMemo(() => pasFiltersToe(alle, { ...filters, categorie: null, fase: '' }, vandaag), [alle, filters, vandaag])
+  const sam = useMemo(() => samenvatting(basis, vandaag), [basis, vandaag])
+  const kpi = useMemo(() => maandKpi(basis, ym), [basis, ym])
+  // Alles wat zichtbaar is, over alle fasen heen (hierop tellen de drie kaarten)…
+  const zichtbaarAlle = useMemo(() => pasFiltersToe(basis, { ...LEEG_FILTERS, categorie: filters.categorie, toonGeannuleerd: filters.toonGeannuleerd, status: filters.status }, vandaag), [basis, filters.categorie, filters.toonGeannuleerd, filters.status, vandaag])
+  // …en wat na een klik op een kaart overblijft (lijst én kalender).
+  const zichtbaar = useMemo(() => (filters.fase ? zichtbaarAlle.filter((m) => faseVan(m) === filters.fase) : zichtbaarAlle), [zichtbaarAlle, filters.fase])
+  const perDag = useMemo(() => { const m = new Map<string, Moment[]>(); for (const x of zichtbaar) { const l = m.get(x.datum) ?? []; l.push(x); m.set(x.datum, l) } return m }, [zichtbaar])
+  const totalen = useMemo(() => dagTotalen(zichtbaar), [zichtbaar])
+  const lijstBereik = filters.categorie || filters.van || filters.tot ? { van: filters.van || bereik.van, tot: filters.tot || bereik.tot } : weergave === 'week' ? zicht : { van: maandStart(ym), tot: maandEind(ym) }
+  const lijst = useMemo(() => sorteer(zichtbaar.filter((m) => m.datum >= lijstBereik.van && m.datum <= lijstBereik.tot), sortering), [zichtbaar, lijstBereik.van, lijstBereik.tot, sortering])
+  // De drie overzichtskaarten: alle facturen in de gekozen periode, met de actieve filters.
+  const fk = useMemo(() => faseKpi(zichtbaarAlle.filter((m) => m.datum >= lijstBereik.van && m.datum <= lijstBereik.tot)), [zichtbaarAlle, lijstBereik.van, lijstBereik.tot])
+  // Omzet, kosten en winst van wat er in de lijst staat (na alle filters).
+  const res = useMemo(() => resultaat(lijst), [lijst])
+  const periodeLabel = !filters.categorie && !filters.van && !filters.tot && weergave !== 'week' ? maandNaam(ym) : `${datumNlKort(lijstBereik.van)} – ${datumNlKort(lijstBereik.tot)}`
+  const lijstTotaal = lijst.filter((m) => m.status !== 'geannuleerd').reduce((s, m) => s + m.bedrag_excl, 0)
+  const geselecteerdMoment = geselecteerd ? alle.find((m) => m.id === geselecteerd) ?? null : null
+  const typen = useMemo(() => [...new Set(alle.map((m) => m.type))].sort(), [alle])
+  const verantwoordelijken = useMemo(() => [...new Set(alle.map((m) => m.verantwoordelijke).filter((v): v is string => !!v))].sort(), [alle])
+
+  // ── Acties ──
+  const voerUit = useCallback(async (actie: Actie, m: Moment, extra?: { datum?: string }): Promise<boolean> => {
+    setBezig(true)
+    // Statusstap: meteen zichtbaar in lijst, kaarten en kalender (zonder herladen).
+    if (actie === 'verstuurd' || actie === 'betaald' || actie === 'heropen' || actie === 'onbetaald') {
+      setData((d) => (d ? { ...d, momenten: d.momenten.map((x) => (x.id === m.id ? naStap(x, actie, vandaag) : x)) } : d))
+    }
+    try {
+      const r = await fetch('/api/admin/invoices/planner', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actie, id: m.id, datum: extra?.datum }) })
+      const j = await r.json(); if (!r.ok) throw new Error(j.error || 'Actie mislukt')
+      for (const w of (j.waarschuwingen ?? []) as string[]) toast.warning(w)
+      toast.success({ verstuurd: 'Gemarkeerd als verstuurd.', betaald: 'Gemarkeerd als betaald.', onbetaald: 'Betaling teruggedraaid — weer openstaand.', verplaats: `Facturatiedatum verplaatst naar ${extra?.datum ? datumLang(extra.datum) : ''}.`, annuleer: 'Factuur geannuleerd.', heropen: 'Teruggezet naar te factureren.' }[actie])
+      ververs()
+      return true
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Actie mislukt'); ververs(); return false }
+    finally { setBezig(false) }
+  }, [vandaag])
+
+  /** Statusknoppen gaan altijd via een bevestiging; de rest meteen. */
+  const vraagOfVoerUit = useCallback(async (actie: Actie, m: Moment, extra?: { datum?: string }): Promise<boolean> => {
+    if (actie === 'verstuurd' || actie === 'betaald' || actie === 'heropen' || actie === 'onbetaald') { setVraagStap({ actie, m }); return false }
+    return voerUit(actie, m, extra)
+  }, [voerUit])
+
+  // ── Slepen: een te versturen factuur naar een andere dag ──
+  const [sleepDoel, setSleepDoel] = useState<string | null>(null)
+  const sleepStart = (e: React.DragEvent, m: Moment) => {
+    if (!m.acties.kanVerplaatsen) { e.preventDefault(); return }
+    e.dataTransfer.setData('text/plain', m.id); e.dataTransfer.effectAllowed = 'move'
+  }
+  const sleepOver = (e: React.DragEvent, d: string) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (sleepDoel !== d) setSleepDoel(d) }
+  const laatVallen = async (e: React.DragEvent, d: string) => {
+    e.preventDefault(); setSleepDoel(null)
+    const id = e.dataTransfer.getData('text/plain')
+    const m = alle.find((x) => x.id === id)
+    if (!m || !m.acties.kanVerplaatsen || m.datum === d) return
+    await voerUit('verplaats', m, { datum: d })
+  }
+  const sleepbaar = (m: Moment) => m.acties.kanVerplaatsen && m.status !== 'geannuleerd'
+
+  const ga = (richting: -1 | 1) => setAnker((a) => (weergave === 'week' ? plusDagen(a, 7 * richting) : `${shiftYM(ymVan(a), richting)}-01`))
+  const zetCategorie = (c: Categorie) => { setFilters((f) => ({ ...f, categorie: f.categorie === c ? null : c })); if (filters.categorie !== c) setWeergave('lijst') }
+  const zet = <K extends keyof Filters>(k: K, v: Filters[K]) => setFilters((f) => ({ ...f, [k]: v }))
+  const zetFase = (f: '' | Fase) => { setFilters((x) => ({ ...x, fase: x.fase === f ? '' : f })); if (f) setWeergave('lijst') }
+  const sorteerOp = (veld: Sortering['veld']) => setSortering((s) => ({ veld, richting: s.veld === veld && s.richting === 'asc' ? 'desc' : 'asc' }))
+
+  // Excel-export van wat er nu in de lijst staat (zelfde bron als lijst en kalender).
+  const naarExport = (m: Moment): FactuurExportRij => ({
+    kind: m.bron === 'recurring' ? 'recurring' : 'eenmalig', sourceId: m.bronId, client_id: m.client_id, service_slug: null,
+    description: [m.project ?? m.dienst, m.omschrijving].filter(Boolean).join(' — ') || null,
+    amount_excl: m.bedrag_excl, vat_pct: m.btw_pct, amount_incl: m.bedrag_incl,
+    status: m.status === 'verstuurd' || m.status === 'betaald' ? 'verstuurd' : m.status === 'geannuleerd' || m.status === 'gecrediteerd' ? 'geannuleerd' : 'te_versturen',
+    billing_date: m.datum, contract_title: m.contract_titel,
+  })
+  const exportWerkmap = () => {
+    const klantNamen = new Map((data?.klanten ?? []).map((k) => [k.id, k.company_name]))
+    const alle = zichtbaar.filter((m) => ymVan(m.datum) === ym).map(naarExport)
+    return facturenWerkmap({
+      month: ym, rijen: lijst.map(naarExport), alleRijen: alle,
+      klantNaam: (id) => (id ? klantNamen.get(id) ?? '—' : '—'),
+      filters: filtersActief(filters) ? [{ label: 'Filters', waarde: 'actief' }] : [],
+      summary: { omzetExcl: kpi.gepland, openExcl: kpi.teFactureren, doneExcl: kpi.verstuurd, pct: kpi.gepland > 0 ? Math.round((kpi.verstuurd / kpi.gepland) * 100) : 0 },
+    })
+  }
+
+  const titel = weergave === 'week' ? `Week van ${datumLang(zicht.van)} t/m ${datumKort(zicht.tot)}` : maandNaam(ym)
+
+  return (
+    <div className="space-y-4">
+      {/* ── Financieel overzicht: drie fasen, klikbaar; geen factuur telt dubbel ── */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="text-xs text-gray-500">Overzicht · <span className="capitalize font-medium text-gray-700">{periodeLabel}</span> · bedragen excl. btw{filtersActief({ ...filters, fase: '' }) ? ' · met je filters' : ''}</div>
+        <button type="button" onClick={() => zetFase('')} aria-pressed={!filters.fase}
+          className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${!filters.fase ? 'bg-black text-white border-black' : 'bg-white border-gray-200 text-gray-700 hover:border-gray-400'}`}>
+          Alle facturen · {fk.te_factureren.aantal + fk.open.aantal + fk.betaald.aantal} · {euro(fk.te_factureren.bedrag + fk.open.bedrag + fk.betaald.bedrag)}
+        </button>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {FASEN.map((f) => {
+          const k = fk[f]
+          const actief = filters.fase === f
+          return (
+            <button key={f} type="button" onClick={() => zetFase(f)} aria-pressed={actief}
+              className={`text-left rounded-xl border border-l-4 p-3 transition-shadow hover:shadow-md ${FASE_INFO[f].kaart} ${FASE_INFO[f].rand} ${actief ? 'ring-2 ring-black' : ''}`}>
+              <div className="flex items-center justify-between gap-2 text-[11px] font-medium text-gray-600">
+                <span className="inline-flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${FASE_INFO[f].stip}`} />{FASE_INFO[f].label}</span>
+                {f === 'te_factureren' ? <Wallet className="h-3.5 w-3.5" /> : f === 'open' ? <Send className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+              </div>
+              <div className={`text-2xl font-bold mt-1 tabular-nums ${FASE_INFO[f].tekst}`}>{euro2(k.bedrag)}</div>
+              <div className="text-[11px] text-gray-500 mt-0.5">
+                {k.aantal} factu{k.aantal === 1 ? 'ur' : 'ren'}
+                {f === 'open' && kpi.verwachtBinnenAantal > 0 && <> · verwacht binnen deze maand: {euro(kpi.verwachtBinnen)}</>}
+              </div>
+            </button>
+          )
+        })}
+      </div>
+      <div className="card-base p-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+        <span className="text-xs text-gray-500">Resultaat van de lijst · excl. btw</span>
+        <span>Omzet <b className="tabular-nums">{euro2(res.omzet)}</b></span>
+        <span>Kosten bij facturen <b className="tabular-nums text-red-600">{euro2(res.kosten)}</b></span>
+        <span>Winst <b className={`tabular-nums ${res.winst < 0 ? 'text-red-600' : 'text-green-700'}`}>{euro2(res.winst)}</b>{res.marge !== null && <span className="text-xs text-gray-500"> · marge {res.marge}%</span>}</span>
+        <span className="text-xs text-gray-400 ml-auto">Kosten log je per factuur via “Kosten” in de lijst; ze staan ook in Financiën → Kosten, per maand.</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-600 -mt-1">
+        <span className="text-gray-400">Geannuleerd telt nergens mee · Snel:</span>
+        {([['vandaag', 'Te factureren vandaag', sam.vandaag], ['week', 'Deze week', sam.week], ['achterstallig', 'Datum voorbij', sam.achterstallig], ['ontbrekend', 'Gegevens ontbreken', sam.ontbrekend]] as const).map(([c, label, n]) => (
+          <button key={c} type="button" onClick={() => zetCategorie(c)} className={`rounded-full border px-2 py-0.5 ${filters.categorie === c ? 'bg-black text-white border-black' : n > 0 ? (c === 'achterstallig' || c === 'ontbrekend' ? 'border-orange-300 text-orange-800 bg-orange-50' : 'border-gray-200 bg-white') : 'border-gray-100 text-gray-400 bg-white'}`}>{label} · {n}</button>
+        ))}
+      </div>
+
+      {/* ── Werkbalk ── */}
+      <div className="card-base p-3 space-y-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button type="button" onClick={() => ga(-1)} className="rounded-lg border border-gray-200 p-2 hover:bg-gray-50" aria-label="Vorige periode"><ChevronLeft className="h-4 w-4" /></button>
+            <button type="button" onClick={() => setAnker(vandaag)} className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50">Vandaag</button>
+            <button type="button" onClick={() => ga(1)} className="rounded-lg border border-gray-200 p-2 hover:bg-gray-50" aria-label="Volgende periode"><ChevronRight className="h-4 w-4" /></button>
+            <span className="text-sm font-semibold capitalize ml-1">{titel}</span>
+            <input type="month" value={ym} onChange={(e) => { if (/^\d{4}-\d{2}$/.test(e.target.value)) setAnker(`${e.target.value}-01`) }} className={`${sel} ml-1`} aria-label="Maand kiezen" />
+            {laden && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="relative w-full sm:w-auto"><Search className="h-3.5 w-3.5 text-gray-400 absolute left-2 top-1/2 -translate-y-1/2" /><input className={`${sel} pl-7 w-full sm:w-52`} placeholder="Zoeken: klant, project, omschrijving…" value={filters.project} onChange={(e) => zet('project', e.target.value)} aria-label="Zoeken" /></div>
+            <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50">
+              {([['maand', CalendarDays, 'Maand'], ['week', CalendarRange, 'Week'], ['lijst', List, 'Lijst']] as const).map(([w, Icon, label]) => (
+                <button key={w} type="button" onClick={() => setWeergave(w)} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${weergave === w ? 'bg-black text-white' : 'text-gray-600 hover:bg-white'}`}><Icon className="h-3.5 w-3.5" />{label}</button>
+              ))}
+            </div>
+            <button type="button" onClick={() => setToonFilters((v) => !v)} className={`btn-secondary text-xs ${toonFilters || filtersActief(filters) ? 'ring-1 ring-black' : ''}`}><Filter className="h-3.5 w-3.5" />Filters{filtersActief(filters) ? ' •' : ''}</button>
+            {filtersActief(filters) && <button type="button" onClick={() => setFilters(LEEG_FILTERS)} className="btn-secondary text-xs"><X className="h-3.5 w-3.5" />Filters wissen</button>}
+            <ExportKnop werkmap={exportWerkmap} label="Excel" className="btn-secondary text-xs" title="Exporteer de facturen in de lijst naar Excel" />
+            <button type="button" onClick={() => setEditor({ datum: ymVan(vandaag) === ym ? vandaag : `${ym}-01` })} className="btn-primary text-xs"><Plus className="h-3.5 w-3.5" />Nieuwe factuur toevoegen</button>
+          </div>
+        </div>
+
+        {filters.fase && (
+          <div className="flex items-center gap-2 text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 w-fit">
+            Enkel: <b>{FASE_INFO[filters.fase].label}</b>
+            <button type="button" onClick={() => zet('fase', '')} className="ml-1 rounded p-0.5 hover:bg-gray-200" aria-label="Fasefilter wissen"><X className="h-3 w-3" /></button>
+          </div>
+        )}
+        {filters.categorie && (
+          <div className="flex items-center gap-2 text-xs text-gray-700 bg-[#fff848]/30 border border-yellow-200 rounded-lg px-3 py-1.5 w-fit">
+            Gefilterd op: <b>{{ vandaag: 'te factureren vandaag', week: 'te factureren deze week', maand: 'deze maand', achterstallig: 'datum voorbij', ontbrekend: 'ontbrekende gegevens' }[filters.categorie]}</b>
+            <button type="button" onClick={() => zet('categorie', null)} className="ml-1 rounded p-0.5 hover:bg-yellow-200" aria-label="Categoriefilter wissen"><X className="h-3 w-3" /></button>
+          </div>
+        )}
+
+        {toonFilters && (
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-2 pt-2 border-t border-gray-100">
+            <div className="flex items-center gap-1 col-span-2"><input type="date" className={`${sel} flex-1`} value={filters.van} onChange={(e) => zet('van', e.target.value)} aria-label="Periode van" /><span className="text-xs text-gray-400">–</span><input type="date" className={`${sel} flex-1`} value={filters.tot} onChange={(e) => zet('tot', e.target.value)} aria-label="Periode tot" /></div>
+            <select className={sel} value={filters.klant} onChange={(e) => zet('klant', e.target.value)}><option value="">Alle klanten</option>{(data?.klanten ?? []).map((k) => <option key={k.id} value={k.id}>{k.company_name}</option>)}</select>
+            <select className={sel} value={filters.status} onChange={(e) => zet('status', e.target.value as Filters['status'])}><option value="">Alle statussen</option>{PLANNER_STATUSSEN.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
+            <select className={sel} value={filters.type} onChange={(e) => zet('type', e.target.value)}><option value="">Alle factuurtypes</option>{typen.map((t) => <option key={t} value={t}>{t}</option>)}</select>
+            <select className={sel} value={filters.terugkerend} onChange={(e) => zet('terugkerend', e.target.value as Filters['terugkerend'])}><option value="">Eenmalig en terugkerend</option><option value="eenmalig">Eenmalig</option><option value="terugkerend">Terugkerend</option></select>
+            <select className={sel} value={filters.verantwoordelijke} onChange={(e) => zet('verantwoordelijke', e.target.value)}><option value="">Alle verantwoordelijken</option>{verantwoordelijken.map((v) => <option key={v} value={v}>{v}</option>)}</select>
+            <select className={sel} value={filters.volledig} onChange={(e) => zet('volledig', e.target.value as Filters['volledig'])}><option value="">Volledig en onvolledig</option><option value="volledig">Volledige gegevens</option><option value="ontbrekend">Ontbrekende gegevens</option></select>
+            <label className="flex items-center gap-1.5 text-xs text-gray-600"><input type="checkbox" checked={filters.toonGeannuleerd} onChange={(e) => zet('toonGeannuleerd', e.target.checked)} />Toon geannuleerd (geschiedenis)</label>
+          </div>
+        )}
+      </div>
+
+      {fout && <div className="card-base text-sm text-red-700 bg-red-50 border-red-100">Planner laden mislukt: {fout}</div>}
+
+      {/* ── Kalender / lijst ── */}
+      {weergave === 'maand' && (
+        <div className="card-base p-0 overflow-hidden">
+          <div className="grid grid-cols-7 border-b border-gray-100 bg-gray-50 text-[11px] font-medium text-gray-500 uppercase tracking-wide">{DAGEN_KORT.map((d) => <div key={d} className="px-2 py-1.5 text-center">{d}</div>)}</div>
+          <div className="grid grid-cols-7 grid-rows-6">
+            {maandRooster(ym).flat().map((d) => {
+              const items = perDag.get(d) ?? []
+              const t = totalen.get(d)
+              const inMaand = ymVan(d) === ym
+              const isVandaag = d === vandaag
+              const toon = items.slice(0, 3), meer = items.length - toon.length
+              return (
+                <div key={d} onDragOver={(e) => sleepOver(e, d)} onDragLeave={() => setSleepDoel((x) => (x === d ? null : x))} onDrop={(e) => laatVallen(e, d)}
+                  className={`min-h-[64px] sm:min-h-[112px] border-b border-r border-gray-100 p-1 sm:p-1.5 flex flex-col transition-colors ${inMaand ? 'bg-white' : 'bg-gray-50/60'} ${isVandaag ? 'ring-2 ring-inset ring-[#fff848]' : ''} ${sleepDoel === d ? 'bg-[#fff848]/30 ring-2 ring-inset ring-black' : ''}`}>
+                  <button type="button" onClick={() => setDag(d)} className="flex items-start justify-between gap-1 text-left w-full">
+                    <span className={`text-xs font-medium h-5 min-w-5 px-1 inline-flex items-center justify-center rounded-full ${isVandaag ? 'bg-[#fff848] text-black' : inMaand ? 'text-gray-800' : 'text-gray-400'}`}>{Number(d.slice(8, 10))}</span>
+                    {t && <span className="text-[10px] text-gray-500 text-right leading-tight"><b className="text-gray-800">{t.aantal}</b><span className="hidden sm:inline"> · {euro(t.bedrag)}</span></span>}
+                  </button>
+                  <div className="hidden sm:flex flex-col gap-0.5 mt-1">
+                    {toon.map((m) => (
+                      <button key={m.id} type="button" onClick={() => setGeselecteerd(m.id)} title={`${kort(m)} · ${STATUS_INFO[m.status].label}${sleepbaar(m) ? ' · sleep naar een andere dag om te verplaatsen' : ''}`}
+                        draggable={sleepbaar(m)} onDragStart={(e) => sleepStart(e, m)}
+                        className={`text-left text-[10.5px] leading-tight px-1.5 py-0.5 rounded border-l-2 truncate ${STATUS_INFO[m.status].cls} ${m.status === 'geannuleerd' ? 'line-through' : ''} ${sleepbaar(m) ? 'cursor-grab active:cursor-grabbing' : ''}`}>
+                        {kort(m)}
+                      </button>
+                    ))}
+                    {meer > 0 && <button type="button" onClick={() => setDag(d)} className="text-[10.5px] text-gray-500 hover:text-black text-left px-1.5">+{meer} meer</button>}
+                  </div>
+                  {items.length > 0 && <button type="button" onClick={() => setDag(d)} className="sm:hidden mt-auto flex gap-0.5 flex-wrap">{items.slice(0, 6).map((m) => <span key={m.id} className={`h-1.5 w-1.5 rounded-full ${STATUS_INFO[m.status].stip}`} />)}</button>}
+                </div>
+              )
+            })}
+          </div>
+          <p className="px-3 pt-2 text-[11px] text-gray-500 hidden sm:block">Sleep een factuur naar een andere dag om de facturatiedatum te verplaatsen; de datum wijzigt meteen in Facturen en op het contract. Geannuleerde of gecrediteerde facturen verplaats je niet.</p>
+          <Legenda />
+        </div>
+      )}
+
+      {weergave === 'week' && (
+        <div className="card-base p-0 overflow-hidden">
+          <div className="grid grid-cols-1 sm:grid-cols-7 divide-y sm:divide-y-0 sm:divide-x divide-gray-100">
+            {Array.from({ length: 7 }, (_, i) => plusDagen(zicht.van, i)).map((d) => {
+              const items = perDag.get(d) ?? []
+              const t = totalen.get(d)
+              const isVandaag = d === vandaag
+              return (
+                <div key={d} onDragOver={(e) => sleepOver(e, d)} onDragLeave={() => setSleepDoel((x) => (x === d ? null : x))} onDrop={(e) => laatVallen(e, d)}
+                  className={`min-h-[120px] sm:min-h-[260px] p-2 transition-colors ${isVandaag ? 'bg-[#fff848]/10' : ''} ${sleepDoel === d ? 'bg-[#fff848]/30 ring-2 ring-inset ring-black' : ''}`}>
+                  <button type="button" onClick={() => setDag(d)} className="w-full text-left flex items-center justify-between gap-2 mb-2">
+                    <span className={`text-xs font-semibold capitalize ${isVandaag ? 'bg-[#fff848] rounded-full px-2 py-0.5' : 'text-gray-700'}`}>{DAGEN_KORT[i(d)]} {Number(d.slice(8, 10))}</span>
+                    {t && <span className="text-[10px] text-gray-500">{t.aantal} · {euro(t.bedrag)}</span>}
+                  </button>
+                  <div className="space-y-1">
+                    {items.map((m) => (
+                      <button key={m.id} type="button" onClick={() => setGeselecteerd(m.id)} draggable={sleepbaar(m)} onDragStart={(e) => sleepStart(e, m)} title={sleepbaar(m) ? 'Sleep naar een andere dag om de facturatiedatum te verplaatsen' : undefined}
+                        className={`w-full text-left rounded-lg border px-2 py-1.5 ${STATUS_INFO[m.status].cls} ${m.status === 'geannuleerd' ? 'line-through opacity-70' : ''} ${sleepbaar(m) ? 'cursor-grab active:cursor-grabbing' : ''}`}>
+                        <div className="text-xs font-medium truncate">{m.klant}</div>
+                        <div className="text-[10.5px] truncate">{euro(m.bedrag_excl)} · {m.project ?? m.dienst ?? m.type}</div>
+                      </button>
+                    ))}
+                    {items.length === 0 && <div className="text-[11px] text-gray-300">—</div>}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <p className="px-3 pt-2 text-[11px] text-gray-500 hidden sm:block">Sleep een factuur naar een andere dag om de facturatiedatum te verplaatsen; de datum wijzigt meteen in Facturen en op het contract. Geannuleerde of gecrediteerde facturen verplaats je niet.</p>
+          <Legenda />
+        </div>
+      )}
+
+      {weergave === 'lijst' && (
+        <div className="card-base p-0 overflow-hidden">
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-gray-100 text-xs text-gray-500 flex-wrap">
+            <span>{lijst.length} facturatiemoment{lijst.length === 1 ? '' : 'en'} · {datumNlKort(lijstBereik.van)} – {datumNlKort(lijstBereik.tot)}</span>
+            <span>Totaal excl. btw: <b className="text-gray-900">{euro2(lijstTotaal)}</b> · kosten <b className="text-red-600">{euro2(res.kosten)}</b> · winst <b className={res.winst < 0 ? 'text-red-600' : 'text-green-700'}>{euro2(res.winst)}</b></span>
+          </div>
+          {/* Mobiel en tablet (smal): kaarten met dezelfde kleuren en knoppen */}
+          <div className="md:hidden divide-y divide-gray-100">
+            {lijst.length === 0 && <div className="px-4 py-8 text-center text-sm text-gray-400">Geen facturen voor deze selectie.</div>}
+            {lijst.map((m) => {
+              const f = faseVan(m)
+              const stap = volgendeStap(m)
+              const terug = vorigeStap(m)
+              return (
+                <div key={m.id} className={`border-l-4 px-3 py-3 space-y-2 ${f ? `${FASE_INFO[f].rij} ${FASE_INFO[f].rand}` : 'bg-white border-l-red-200 opacity-60'}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <button type="button" onClick={() => (m.bron === 'invoice' && m.invoice_id ? setEditor({ invoiceId: m.invoice_id }) : setGeselecteerd(m.id))} className="text-left min-w-0">
+                      <div className="font-semibold text-sm truncate">{m.klant}</div>
+                      <div className="text-xs text-gray-600 truncate">{m.project ?? m.dienst ?? m.omschrijving ?? '—'}</div>
+                    </button>
+                    <div className="text-right shrink-0">
+                      <div className="font-bold tabular-nums text-sm">{euro2(m.bedrag_excl)}</div>
+                      <div className="text-[10px] text-gray-500 tabular-nums">{euro2(m.bedrag_incl)} incl.</div>
+                    </div>
+                  </div>
+                  {(m.bron === 'invoice' || m.bron === 'recurring') && (
+                    <div className="flex items-center gap-3 text-[11px]">
+                      <button type="button" onClick={() => setKostenVan(m)} className={(m.kosten ?? 0) > 0 ? 'text-red-600 font-medium' : 'text-gray-500 underline'}>{(m.kostenAantal ?? 0) > 0 ? `Kosten ${euro2(m.kosten ?? 0)}` : '+ kost loggen'}</button>
+                      <span className={winstVan(m) < 0 ? 'text-red-600 font-medium' : 'text-green-700 font-medium'}>Winst {euro2(winstVan(m))}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2 flex-wrap text-[11px] text-gray-600">
+                    <StatusBadge status={m.status} />
+                    <span>gepland {datumNlKort(m.datum)}</span>
+                    {m.door && <span className="text-gray-400">door {m.door}</span>}
+                    {m.verzonden_op && <span className="text-green-800">verstuurd {datumNlKort(m.verzonden_op)}</span>}
+                    {m.betaald_op && <span className="text-emerald-800 font-medium">betaald {datumNlKort(m.betaald_op)}</span>}
+                  </div>
+                  {(stap || terug) && (
+                    <div className="flex gap-2">
+                      {stap && <StapKnop stap={stap} bezig={bezig} onClick={() => setVraagStap({ actie: stap.actie, m })} vol />}
+                      {terug && <button type="button" disabled={bezig} onClick={() => setVraagStap({ actie: terug.actie, m })} className="btn-secondary text-xs h-9 px-3" title={terug.label}><RotateCcw className="h-3.5 w-3.5" /><span className="sr-only">{terug.label}</span></button>}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full text-sm min-w-[1320px]">
+              <thead>
+                <tr className="text-left text-[11px] text-gray-500 uppercase tracking-wide bg-gray-50">
+                  <Kop veld="datum" sortering={sortering} onClick={sorteerOp}>Geplande datum</Kop>
+                  <Kop veld="klant" sortering={sortering} onClick={sorteerOp}>Klant</Kop>
+                  <th className="px-3 py-2 font-medium">Dienst / project</th>
+                  <th className="px-3 py-2 font-medium">Omschrijving</th>
+                  <Kop veld="bedrag" sortering={sortering} onClick={sorteerOp} rechts>Excl. btw</Kop>
+                  <th className="px-3 py-2 font-medium text-right">Kosten</th>
+                  <th className="px-3 py-2 font-medium text-right">Winst</th>
+                  <th className="px-3 py-2 font-medium text-right">Incl. btw</th>
+                  <th className="px-3 py-2 font-medium text-right">Termijn</th>
+                  <th className="px-3 py-2 font-medium">Verwacht binnen</th>
+                  <Kop veld="status" sortering={sortering} onClick={sorteerOp}>Status</Kop>
+                  <th className="px-3 py-2 font-medium">Verantw.</th>
+                  <th className="px-3 py-2 font-medium text-right">Acties</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {lijst.length === 0 && <tr><td colSpan={13} className="px-3 py-8 text-center text-gray-400">Geen facturen voor deze selectie. Klik op “Nieuwe factuur” om er een toe te voegen.</td></tr>}
+                {lijst.map((m) => { const f = faseVan(m); const stap = volgendeStap(m); const terug = vorigeStap(m); return (
+                  <tr key={m.id} onClick={() => (m.bron === 'invoice' && m.invoice_id ? setEditor({ invoiceId: m.invoice_id }) : setGeselecteerd(m.id))} className={`border-l-4 cursor-pointer transition-[filter] hover:brightness-[0.97] ${f ? `${FASE_INFO[f].rij} ${FASE_INFO[f].rand}` : 'bg-white border-l-red-200 opacity-60'}`} title={m.bron === 'invoice' ? 'Klik om de factuur te openen en aan te passen' : 'Klik voor details'}>
+                    <td className="px-3 py-2 whitespace-nowrap">{datumNlKort(m.datum)}</td>
+                    <td className="px-3 py-2 font-medium">{m.klant}{!m.volledig && <AlertTriangle className="h-3 w-3 text-orange-500 inline ml-1 -mt-0.5" />}</td>
+                    <td className="px-3 py-2 text-gray-600 max-w-[200px] truncate">{m.project ?? m.dienst ?? '—'}{m.terugkerend && <span className="text-[10px] text-purple-700 ml-1">· maandelijks</span>}</td>
+                    <td className="px-3 py-2 text-gray-600 max-w-[220px] truncate">{m.omschrijving ?? '—'}{m.opmerking && <StickyNote className="h-3 w-3 text-amber-500 inline ml-1 -mt-0.5" aria-label="Heeft een interne notitie" />}</td>
+                    <td className="px-3 py-2 text-right font-medium tabular-nums">{euro2(m.bedrag_excl)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums" onClick={(e) => e.stopPropagation()}>
+                      {m.bron === 'invoice' || m.bron === 'recurring'
+                        ? <button type="button" onClick={() => setKostenVan(m)} className={`hover:underline ${(m.kosten ?? 0) > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}`} title="Interne kosten van deze factuur bekijken of loggen">{(m.kostenAantal ?? 0) > 0 ? euro2(m.kosten ?? 0) : '+ kost'}{(m.kostenOnbekend ?? 0) > 0 && <span className="text-amber-600"> ?</span>}</button>
+                        : <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className={`px-3 py-2 text-right tabular-nums font-medium ${winstVan(m) < 0 ? 'text-red-600' : 'text-green-700'}`}>{euro2(winstVan(m))}{margeVan(m) !== null && (m.kosten ?? 0) > 0 && <span className="block text-[10px] text-gray-500 font-normal">{margeVan(m)}%</span>}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-gray-500">{euro2(m.bedrag_incl)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-gray-500">{m.betaaltermijn} d</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-gray-600">{m.status === 'geannuleerd' || m.status === 'gecrediteerd' ? '—' : datumNlKort(m.verwacht_op)}{m.verzonden_op && <span className="block text-[10px] text-green-700">verstuurd {datumNlKort(m.verzonden_op)}</span>}</td>
+                    <td className="px-3 py-2"><StatusBadge status={m.status} />{m.betaald_op && <span className="block text-[10px] text-emerald-800 font-medium mt-0.5">betaald {datumNlKort(m.betaald_op)}</span>}</td>
+                    <td className="px-3 py-2 text-gray-600 text-xs">{m.verantwoordelijke ?? '—'}{m.door && <div className="text-[10px] text-gray-400">aangemaakt door {m.door}</div>}</td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                      {stap && <StapKnop stap={stap} bezig={bezig} onClick={() => setVraagStap({ actie: stap.actie, m })} />}
+                      {terug && <button type="button" disabled={bezig} onClick={() => setVraagStap({ actie: terug.actie, m })} className="btn-secondary text-xs h-7 px-2 ml-1" title={`${terug.label} (terug naar ${terug.naar})`}><RotateCcw className="h-3 w-3" /></button>}
+                      {m.invoice_id && m.bron === 'invoice' ? <button type="button" onClick={() => setEditor({ invoiceId: m.invoice_id! })} className="btn-secondary text-xs h-7 px-2 ml-1" title="Factuur openen en aanpassen"><Pencil className="h-3 w-3" /></button>
+                        : m.bron === 'recurring' ? <button type="button" onClick={() => setGeselecteerd(m.id)} className="btn-secondary text-xs h-7 px-2 ml-1" title="Details"><Eye className="h-3 w-3" /></button>
+                        : m.acties.bekijkenUrl && <Link href={m.acties.bekijkenUrl} prefetch={false} className="btn-secondary text-xs h-7 px-2 ml-1" title="Bekijken"><Eye className="h-3 w-3" /></Link>}
+                    </td>
+                  </tr>
+                ) })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {dag && <DagPaneel datum={dag} momenten={perDag.get(dag) ?? []} onSluit={() => setDag(null)} onKies={(m) => { setDag(null); setGeselecteerd(m.id) }} onNieuw={(d) => { setDag(null); setEditor({ datum: d }) }} />}
+      {geselecteerdMoment && <PlannerDetail moment={geselecteerdMoment} onSluit={() => setGeselecteerd(null)} onActie={vraagOfVoerUit} bezig={bezig} onOpenFactuur={(id) => setEditor({ invoiceId: id })} onGewijzigd={ververs} />}
+      {kostenVan && (
+        <KostenEnWinstDialoog
+          factuur={kostenVan.bron === 'invoice' ? { invoice_id: kostenVan.bronId } : { recurring_id: kostenVan.bronId, maand: kostenVan.maand }}
+          titel={`${kostenVan.klant} · ${datumNlKort(kostenVan.datum)} · ${euro2(kostenVan.bedrag_excl)} excl. btw${kostenVan.omschrijving ? ` · ${kostenVan.omschrijving}` : ''}`}
+          clientId={kostenVan.client_id}
+          onClose={() => setKostenVan(null)}
+          onChanged={() => ververs()}
+        />
+      )}
+      {vraagStap && (
+        <Bevestig
+          titel={{ verstuurd: 'Markeren als verstuurd?', betaald: 'Markeren als betaald?', heropen: 'Verzending terugdraaien?', onbetaald: 'Betaling terugdraaien?' }[vraagStap.actie]}
+          tekst={<>
+            <b>{vraagStap.m.klant}</b> · {euro2(vraagStap.m.bedrag_excl)} excl. btw ({datumNlKort(vraagStap.m.datum)}).<br />
+            {{
+              verstuurd: <>De status wordt <b>Verstuurd</b> en de verzenddatum wordt vandaag ({datumNlKort(vandaag)}).</>,
+              betaald: <>De status wordt <b>Verstuurd &amp; betaald</b> en de betaaldatum wordt vandaag ({datumNlKort(vandaag)}).</>,
+              heropen: <>De factuur gaat terug naar <b>Te factureren</b>; de verzenddatum wordt gewist.</>,
+              onbetaald: <>De factuur gaat terug naar <b>Verstuurd – openstaand</b>; de betaaldatum wordt gewist.</>,
+            }[vraagStap.actie]}
+            <span className="block text-xs text-gray-500 mt-2">Dit past enkel de status aan. Er wordt geen mail verstuurd.</span>
+          </>}
+          bevestigLabel={{ verstuurd: 'Markeren als verstuurd', betaald: 'Markeren als betaald', heropen: 'Terugdraaien', onbetaald: 'Terugdraaien' }[vraagStap.actie]}
+          bezig={bezig}
+          onAnnuleer={() => setVraagStap(null)}
+          onBevestig={async () => { const v = vraagStap; setVraagStap(null); await voerUit(v.actie, v.m) }}
+        />
+      )}
+      {editor && <FactuurEditor invoiceId={'invoiceId' in editor ? editor.invoiceId : null} standaard={'datum' in editor ? { invoice_date: editor.datum } : undefined} onClose={() => setEditor(null)} onSaved={() => ververs()} />}
+    </div>
+  )
+}
+
+const i = (d: string) => (new Date(Date.UTC(Number(d.slice(0, 4)), Number(d.slice(5, 7)) - 1, Number(d.slice(8, 10)))).getUTCDay() + 6) % 7
+const datumNlKort = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`
+
+function Kaart({ icon: Icon, label, waarde, sub, kleur, actief, onClick }: { icon: typeof CalendarDays; label: string; waarde: string; sub?: string; kleur?: string; actief: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className={`card-base text-left p-3 transition-shadow hover:shadow-md ${actief ? 'ring-2 ring-[#fff848]' : ''}`}>
+      <div className="flex items-center justify-between gap-2 text-[11px] text-gray-500"><span className="truncate">{label}</span><Icon className="h-3.5 w-3.5 shrink-0" /></div>
+      <div className={`text-xl font-bold mt-1 ${kleur ?? 'text-gray-900'}`}>{waarde}</div>
+      {sub && <div className="text-[10px] text-gray-400 mt-0.5 truncate">{sub}</div>}
+    </button>
+  )
+}
+
+/** De knop voor de volgende stap: verstuurd (zwart) of betaald (donkergroen). */
+function StapKnop({ stap, bezig, onClick, vol }: { stap: { actie: StapActie; label: string }; bezig: boolean; onClick: () => void; vol?: boolean }) {
+  const betaald = stap.actie === 'betaald'
+  return (
+    <button type="button" disabled={bezig} onClick={onClick}
+      className={`btn-primary text-xs ${vol ? 'h-9 flex-1 justify-center' : 'h-7 px-2'} ${betaald ? 'bg-emerald-700 hover:bg-emerald-800 text-white border-emerald-700' : ''}`}>
+      {betaald ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}{stap.label}
+    </button>
+  )
+}
+
+function Kop({ veld, sortering, onClick, children, rechts }: { veld: Sortering['veld']; sortering: Sortering; onClick: (v: Sortering['veld']) => void; children: React.ReactNode; rechts?: boolean }) {
+  const actief = sortering.veld === veld
+  return (
+    <th className={`px-3 py-2 font-medium ${rechts ? 'text-right' : ''}`}>
+      <button type="button" onClick={() => onClick(veld)} className={`inline-flex items-center gap-1 uppercase tracking-wide ${actief ? 'text-black' : ''}`}>{children}<ArrowUpDown className={`h-3 w-3 ${actief ? '' : 'opacity-40'}`} />{actief && <span className="text-[9px]">{sortering.richting === 'asc' ? '▲' : '▼'}</span>}</button>
+    </th>
+  )
+}
+
+function Legenda() {
+  return (
+    <div className="flex flex-wrap gap-x-3 gap-y-1 px-3 py-2 border-t border-gray-100 text-[10.5px] text-gray-500">
+      {PLANNER_STATUSSEN.filter((s) => s.key !== 'geannuleerd').map((s) => <span key={s.key} className="inline-flex items-center gap-1"><span className={`h-2 w-2 rounded-full ${s.stip}`} />{s.label}</span>)}
+      <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-gray-400" />Geannuleerd (enkel met filter)</span>
+    </div>
+  )
+}

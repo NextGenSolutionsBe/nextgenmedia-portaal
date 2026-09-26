@@ -1,0 +1,31 @@
+export const dynamic = 'force-dynamic'
+
+import { StatsClient } from './stats-client'
+import { WieDeedWat } from './wie-deed-wat'
+
+/**
+ * Statistieken van het appointment setten.
+ *
+ * NIET hetzelfde als "Resultaten". Dat scherm gaat over geld — gewerkte uren,
+ * commissie en wat er uitbetaald moet worden. Dit gaat over prestaties: waar
+ * lekt de trechter, wie zet om, welke sector levert op. Twee vragen die je niet
+ * in één tabel beantwoordt zonder allebei onleesbaar te maken.
+ *
+ * De identiteits- en modulecontrole gebeurt centraal in de middleware; de route
+ * beperkt daarnaast wat een setter over anderen mag zien.
+ */
+export default function SalesStatistiekenPage() {
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <div>
+        <h1 className="text-2xl font-bold">Statistieken</h1>
+        <p className="text-sm text-gray-500 mt-0.5">
+          Wat het team deed: gebeld, gemaild, opgevolgd, afspraken gezet en deals gesloten — per
+          medewerker en voor het team. Een activiteit telt in de periode waarin ze geregistreerd werd.
+        </p>
+      </div>
+      <WieDeedWat />
+      <StatsClient />
+    </div>
+  )
+}

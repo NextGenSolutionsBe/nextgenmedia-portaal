@@ -1,6 +1,10 @@
+import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
+import { createClient, createAdminSupabaseClient , isActiveStaff } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+
+// Gebruikt cookies/sessie: nooit statisch renderen.
+export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
   try {
@@ -8,7 +12,7 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Niet ingelogd' }, { status: 401 })
     const { data } = await supabase.from('user_roles').select('role').eq('user_id', user.id).maybeSingle()
-    if (data?.role !== 'admin') return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
+    if (data?.role !== 'admin' && !(await isActiveStaff(user.id))) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
 
     const admin = createAdminSupabaseClient()
     const { id, status } = await req.json()
@@ -25,6 +29,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Fout' }, { status: 400 })
+    return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
 }

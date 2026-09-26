@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, Edit2, Save, X } from 'lucide-react'
+import { GetalInvoer } from '@/components/ui/getal-invoer'
 
 const ALL_SERVICES = [
   { slug: 'social-media', label: 'Social Media Management' },
@@ -21,23 +22,34 @@ const PLATFORMS = [
   { slug: 'twitter', label: 'Twitter/X' },
 ]
 
+const DURATION_PRESETS = [1, 3, 6, 12, 18, 24, 36]
+
+type ServiceCfg = { start_month: string; contract_months: number }
+
+const nu = new Date()
+const thisMonth = `${nu.getFullYear()}-${String(nu.getMonth() + 1).padStart(2, '0')}`
+
 type Client = {
   id: string
   company_name: string
   contact_name: string | null
   niche: string | null
   website_url: string | null
+  customer_since?: string | null
+  btw_nummer?: string | null
 }
 
 export function ClientEditForm({
   client,
   services: initialServices,
+  serviceContracts = {},
   socialConfig,
   adsConfig,
   webdesignConfig,
 }: {
   client: Client
   services: string[]
+  serviceContracts?: Record<string, ServiceCfg>
   socialConfig: { posts?: number; reels?: number; stories?: number; channels?: string[] }
   adsConfig: { budget?: number }
   webdesignConfig: { maintenance_included?: boolean }
@@ -52,6 +64,8 @@ export function ClientEditForm({
     contact_name: client.contact_name ?? '',
     niche: client.niche ?? '',
     website_url: client.website_url ?? '',
+    customer_since: client.customer_since ? client.customer_since.slice(0, 10) : '',
+    btw_nummer: client.btw_nummer ?? '',
   })
 
   const [services, setServices] = useState<string[]>(initialServices)
@@ -59,15 +73,31 @@ export function ClientEditForm({
   const [reels, setReels] = useState(String(socialConfig.reels ?? 0))
   const [stories, setStories] = useState(String(socialConfig.stories ?? 0))
   const [platforms, setPlatforms] = useState<string[]>(socialConfig.channels ?? [])
-  const [maintenanceIncluded, setMaintenanceIncluded] = useState(webdesignConfig.maintenance_included ?? false)
+  // Onderhoud beheer je in de Website-kaart; hier geven we de bestaande waarde ongewijzigd door.
+  const maintenanceIncluded = webdesignConfig.maintenance_included ?? false
   const [adsBudget, setAdsBudget] = useState(String(adsConfig.budget ?? ''))
 
+  const [serviceConfig, setServiceConfig] = useState<Record<string, ServiceCfg>>(serviceContracts)
+
   const hasSocial = services.includes('social-media')
-  const hasWebdesign = services.includes('webdesign')
   const hasAds = services.includes('ads')
 
-  const toggleService = (slug: string) =>
-    setServices(prev => prev.includes(slug) ? prev.filter(s => s !== slug) : [...prev, slug])
+  const getServiceCfg = (slug: string): ServiceCfg =>
+    serviceConfig[slug] ?? { start_month: thisMonth, contract_months: 12 }
+
+  const updateServiceCfg = (slug: string, patch: Partial<ServiceCfg>) =>
+    setServiceConfig(prev => ({ ...prev, [slug]: { ...(prev[slug] ?? { start_month: thisMonth, contract_months: 12 }), ...patch } }))
+
+  const toggleService = (slug: string) => {
+    const isSelected = services.includes(slug)
+    setServices(prev => isSelected ? prev.filter(s => s !== slug) : [...prev, slug])
+    if (!isSelected) {
+      setServiceConfig(prev => ({ ...prev, [slug]: prev[slug] ?? { start_month: thisMonth, contract_months: 12 } }))
+    }
+  }
+
+  // Contractduur zoals bij "Klant toevoegen": niet bij een website zonder onderhoud (eenmalig project).
+  const toontDuur = (slug: string) => slug !== 'webdesign' || maintenanceIncluded
 
   const togglePlatform = (slug: string) =>
     setPlatforms(prev => prev.includes(slug) ? prev.filter(s => s !== slug) : [...prev, slug])
@@ -76,11 +106,21 @@ export function ClientEditForm({
     setLoading(true)
     setError(null)
     try {
+      const service_configs: Record<string, Partial<ServiceCfg>> = {}
+      for (const slug of services) {
+        const cfg = getServiceCfg(slug)
+        const orig = serviceContracts[slug]
+        // Enkel doorsturen wat gewijzigd is (of nieuw): zo blijft een exacte
+        // startdatum uit een getekend contract ongemoeid als je er niet aan komt.
+        if (orig && orig.start_month === cfg.start_month && (!toontDuur(slug) || orig.contract_months === cfg.contract_months)) continue
+        service_configs[slug] = toontDuur(slug) ? cfg : { start_month: cfg.start_month }
+      }
       const res = await fetch(`/api/admin/clients/${client.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...form,
+          btw_nummer: form.btw_nummer,
           services,
           posts_per_month: parseInt(posts) || 0,
           reels_per_month: parseInt(reels) || 0,
@@ -88,9 +128,10 @@ export function ClientEditForm({
           platforms,
           webdesign_maintenance_included: maintenanceIncluded,
           ads_budget: adsBudget ? parseFloat(adsBudget) : null,
+          service_configs,
         }),
       })
-      const json = await res.json()
+      const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(json.error ?? 'Mislukt')
       setEditing(false)
       router.refresh()
@@ -125,7 +166,7 @@ export function ClientEditForm({
       {/* Basic info */}
       <div className="space-y-3">
         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Bedrijfsgegevens</h3>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className={lbl}>Bedrijfsnaam</label>
             <input className={inp} value={form.company_name} onChange={e => setForm(p => ({ ...p, company_name: e.target.value }))} />
@@ -142,12 +183,22 @@ export function ClientEditForm({
             <label className={lbl}>Website</label>
             <input type="url" className={inp} value={form.website_url} onChange={e => setForm(p => ({ ...p, website_url: e.target.value }))} />
           </div>
+          <div>
+            <label className={lbl}>BTW-nummer</label>
+            <input className={inp} value={form.btw_nummer} onChange={e => setForm(p => ({ ...p, btw_nummer: e.target.value }))} placeholder="BE0123456789" />
+            <p className="text-[11px] text-gray-400 mt-1">Optioneel. Belgisch formaat wordt gevalideerd; hergebruikt in contracten/facturen.</p>
+          </div>
+          <div>
+            <label className={lbl}>Klant sinds</label>
+            <input type="date" className={inp} value={form.customer_since} onChange={e => setForm(p => ({ ...p, customer_since: e.target.value }))} />
+            <p className="text-[11px] text-gray-400 mt-1">Bepaalt het commissiejaar (10/8/5%) voor partners.</p>
+          </div>
         </div>
       </div>
 
       {/* Services */}
       <div className="space-y-3">
-        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Actieve diensten</h3>
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Diensten</h3>
         <div className="grid grid-cols-2 gap-2">
           {ALL_SERVICES.map(s => (
             <button
@@ -164,13 +215,54 @@ export function ClientEditForm({
             </button>
           ))}
         </div>
+        <p className="text-[11px] text-gray-400">Uitvinken zet de dienst stop (portaaltoegang vervalt); de historiek blijft bewaard. Portaaltoegang zelf beheer je in de kaart Portaaltoegang.</p>
+
+        {/* Start maand + contractduur per dienst */}
+        {services.length > 0 && (
+          <div className="space-y-2 pt-1">
+            {services.map(slug => {
+              const label = ALL_SERVICES.find(s => s.slug === slug)?.label ?? slug
+              const cfg = getServiceCfg(slug)
+              return (
+                <div key={slug} className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50/60">
+                  <div className="text-sm font-semibold text-gray-800">{label}</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className={lbl}>Startmaand</label>
+                      <input type="month" className={inp} value={cfg.start_month}
+                        onChange={e => updateServiceCfg(slug, { start_month: e.target.value || thisMonth })} />
+                    </div>
+                    {toontDuur(slug) && (
+                      <div>
+                        <label className={lbl}>Contractduur (maanden)</label>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {DURATION_PRESETS.map(m => (
+                            <button key={m} type="button" onClick={() => updateServiceCfg(slug, { contract_months: m })}
+                              className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                                cfg.contract_months === m ? 'bg-black text-white border-black' : 'border-gray-200 text-gray-600 bg-white hover:border-gray-400'
+                              }`}>
+                              {m}m
+                            </button>
+                          ))}
+                          <GetalInvoer className={`${inp} !w-20`} waarde={cfg.contract_months} leeg={12} min={1} max={120}
+                            onWaarde={n => updateServiceCfg(slug, { contract_months: Math.max(1, Math.round(n)) })}
+                            aria-label="Contractduur in maanden" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* Social media settings */}
       {hasSocial && (
         <div className="space-y-3 border-t border-gray-100 pt-3">
           <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Social Media instellingen</h3>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <div>
               <label className={lbl}>Posts/maand</label>
               <input type="number" min="0" max="60" className={inp} value={posts} onChange={e => setPosts(e.target.value)} />
@@ -206,21 +298,8 @@ export function ClientEditForm({
         </div>
       )}
 
-      {/* Webdesign settings */}
-      {hasWebdesign && (
-        <div className="border-t border-gray-100 pt-3">
-          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Website instellingen</h3>
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={maintenanceIncluded}
-              onChange={e => setMaintenanceIncluded(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 accent-[#fff848]"
-            />
-            <span className="text-sm text-gray-700">Onderhoud inbegrepen</span>
-          </label>
-        </div>
-      )}
+      {/* Website-instellingen (type site, CMS, beheerlink én onderhoud) staan
+          bewust in de Website-kaart op deze pagina — één plek, geen dubbele bron. */}
 
       {/* Ads settings */}
       {hasAds && (

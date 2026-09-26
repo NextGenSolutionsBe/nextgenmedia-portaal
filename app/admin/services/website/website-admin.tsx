@@ -1,8 +1,9 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Globe, Clock, CheckCircle2, X, Loader2, XCircle, Archive, Trash2, AlertTriangle, Inbox } from 'lucide-react'
+import { toast } from 'sonner'
+import { Globe, Clock, CheckCircle2, X, Loader2, XCircle, Archive, Trash2, AlertTriangle, Inbox, Save } from 'lucide-react'
 import {
   formatDate,
   WEBDESIGN_STATUS_STYLE as STATUS_STYLE,
@@ -76,6 +77,33 @@ export function WebsiteAdmin({
     }
   }
 
+  const [notes, setNotes] = useState('')
+  const [notesBusy, setNotesBusy] = useState(false)
+  const selectedId = selected?.id
+  useEffect(() => { setNotes(selected?.admin_notes ?? '') }, [selectedId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const saveNotes = async () => {
+    if (!selected) return
+    setNotesBusy(true)
+    try {
+      const res = await fetch('/api/admin/webdesign', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: selected.id, admin_notes: notes }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error || 'Opslaan mislukt')
+      const val = notes.trim() || null
+      setRequests(prev => prev.map(r => r.id === selected.id ? { ...r, admin_notes: val } : r))
+      setSelected(s => s ? { ...s, admin_notes: val } : s)
+      toast.success('Notitie opgeslagen')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Opslaan mislukt')
+    } finally {
+      setNotesBusy(false)
+    }
+  }
+
   const doDelete = async () => {
     if (!deleteOpen) return
     setDeleting(true)
@@ -118,7 +146,7 @@ export function WebsiteAdmin({
                   <Globe className="h-4 w-4 text-gray-400 shrink-0" />
                   <div className="font-medium text-sm truncate">{c.company_name}</div>
                 </div>
-                <span className={`status-badge text-xs shrink-0 ${c.active ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500'}`}>
+                <span className={`status-badge text-xs shrink-0 ${c.active ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-700'}`}>
                   {c.active ? 'Actief' : 'Wacht op toegang'}
                 </span>
               </div>
@@ -135,7 +163,7 @@ export function WebsiteAdmin({
         <FilterBtn value="archived" label="Gearchiveerd" count={counts.archived} />
       </div>
 
-      <div className="flex gap-4">
+      <div className="flex flex-col lg:flex-row gap-4">
         {/* List */}
         <div className="flex-1 bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
           {filtered.length === 0 ? (
@@ -160,7 +188,7 @@ export function WebsiteAdmin({
                           {r.clients?.company_name ?? '—'} · {KIND_LABEL[friendlyKind] ?? friendlyKind} · {formatDate(r.created_at)}
                         </div>
                       </div>
-                      <span className={`status-badge shrink-0 ${STATUS_STYLE[r.status] ?? 'bg-gray-100 text-gray-500'}`}>
+                      <span className={`status-badge shrink-0 ${STATUS_STYLE[r.status] ?? 'bg-gray-100 text-gray-600'}`}>
                         {STATUS_LABEL[r.status] ?? r.status}
                       </span>
                     </div>
@@ -171,12 +199,12 @@ export function WebsiteAdmin({
           )}
         </div>
 
-        {/* Detail panel */}
+        {/* Detail panel — mobile: full-screen overlay; desktop: sidebar */}
         {selected && (() => {
           const selectedKind = resolveFriendlyKind(selected)
           const selectedDescription = cleanDescription(selected.description)
           return (
-          <div className="w-80 bg-white border border-gray-200 rounded-xl shadow-sm h-fit sticky top-6">
+          <div className="lg:w-80 w-full bg-white border border-gray-200 rounded-xl shadow-sm h-fit lg:sticky lg:top-6">
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
               <h3 className="font-semibold text-sm">Detail</h3>
               <button onClick={() => setSelected(null)} className="h-6 w-6 flex items-center justify-center rounded hover:bg-gray-100">
@@ -215,6 +243,26 @@ export function WebsiteAdmin({
                   </div>
                 </div>
               )}
+
+              <div className="border-t border-gray-100 pt-3 space-y-2">
+                <label className="block text-xs text-gray-500">Interne notitie (klant ziet dit niet)</label>
+                <textarea
+                  rows={3}
+                  value={notes}
+                  maxLength={4000}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg"
+                  placeholder="Bv. afspraken, wat er aangepast is…"
+                />
+                <button
+                  disabled={notesBusy || notes.trim() === (selected.admin_notes ?? '').trim()}
+                  onClick={saveNotes}
+                  className="btn-secondary w-full text-xs"
+                >
+                  {notesBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                  Notitie opslaan
+                </button>
+              </div>
 
               <div className="border-t border-gray-100 pt-3 space-y-2">
                 {/* Status actions — depending on current status */}
@@ -297,7 +345,7 @@ export function WebsiteAdmin({
       {/* Delete confirmation modal */}
       {deleteOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center gap-2 p-5 border-b border-gray-100">
               <AlertTriangle className="h-5 w-5 text-red-500 shrink-0" />
               <h3 className="font-semibold text-gray-900">Aanvraag verwijderen</h3>

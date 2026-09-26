@@ -6,6 +6,7 @@ import {
   Send, Pencil, Save, Image, Video, FileText, Plus,
 } from 'lucide-react'
 import { ymd } from '@/lib/utils'
+import { KANAAL_SLUGS, kanaalLabel, normaliseerKanalen } from '@/lib/social-platforms'
 
 export type SocialContentStatus =
   | 'draft' | 'ready_for_review' | 'approved'
@@ -123,11 +124,19 @@ export function ContentCalendar({
     if (mode !== 'admin') return
     e.preventDefault()
     const id = e.dataTransfer.getData('text/plain')
-    if (id && actions.onMove) await actions.onMove(id, dayStr)
+    if (id && actions.onMove) { try { await actions.onMove(id, dayStr) } catch { /* melding komt van de handler */ } }
   }
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4">
+    <div className="flex flex-col gap-4">
+      {/* Script panel — on mobile appears ABOVE calendar when an item is selected */}
+      {selected && (
+        <div className="lg:hidden">
+          <ScriptPanel item={selected} mode={mode} actions={actions} onClose={() => setSelectedId(null)} />
+        </div>
+      )}
+
+      <div className="flex flex-col lg:flex-row gap-4">
       {/* Calendar grid */}
       <div className="flex-1 bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
         {/* Toolbar */}
@@ -265,13 +274,16 @@ export function ContentCalendar({
         </div>
       </div>
 
-      {/* Script panel */}
-      <ScriptPanel
-        item={selected}
-        mode={mode}
-        actions={actions}
-        onClose={() => setSelectedId(null)}
-      />
+      {/* Script panel — desktop only (mobile version shown above) */}
+      <div className="hidden lg:block lg:w-[360px]">
+        <ScriptPanel
+          item={selected}
+          mode={mode}
+          actions={actions}
+          onClose={() => setSelectedId(null)}
+        />
+      </div>
+    </div>
     </div>
   )
 }
@@ -297,7 +309,7 @@ function ScriptPanel({
 
   if (!item) {
     return (
-      <aside className="lg:w-[340px] bg-white border border-gray-200 rounded-xl p-5 h-fit sticky top-6 shadow-sm">
+      <aside className="w-full bg-white border border-gray-200 rounded-xl p-5 h-fit shadow-sm">
         <div className="text-center py-8">
           <FileText className="h-8 w-8 text-gray-200 mx-auto mb-3" />
           <p className="text-sm text-gray-400">Klik op een item om details te bekijken</p>
@@ -315,7 +327,9 @@ function ScriptPanel({
     if (!isAdmin || !actions.onUpdate || !form) return
     setBusy(true)
     try {
-      const resolvedPlatforms = form.platforms?.length > 0 ? form.platforms : [form.platform]
+      const resolvedPlatforms = normaliseerKanalen(
+        form.platforms?.length > 0 ? form.platforms : [form.platform],
+      )
       await actions.onUpdate(item.id, {
         title: form.title,
         platforms: resolvedPlatforms,
@@ -324,19 +338,22 @@ function ScriptPanel({
         caption: form.caption, script: form.script, media_notes: form.media_notes,
       })
       setEditing(false)
+    } catch {
+      /* melding komt van de handler; bewerkmodus blijft open */
     } finally { setBusy(false) }
   }
 
-  const ALL_PLATFORMS = ['instagram', 'facebook', 'tiktok', 'linkedin', 'pinterest', 'twitter']
+  // Eén bron (lib/social-platforms.ts); Instagram + Facebook = Meta.
+  const ALL_PLATFORMS = KANAAL_SLUGS
   const togglePlatform = (p: string) => {
     if (!form) return
-    const current = form.platforms?.length > 0 ? form.platforms : [form.platform]
+    const current = normaliseerKanalen(form.platforms?.length > 0 ? form.platforms : [form.platform])
     const next = current.includes(p) ? current.filter((x) => x !== p) : [...current, p]
     setForm({ ...form, platforms: next.length > 0 ? next : [p], platform: next[0] ?? p })
   }
 
   return (
-    <aside className="lg:w-[360px] bg-white border border-gray-200 rounded-xl shadow-sm h-fit sticky top-6 max-h-[calc(100vh-5rem)] flex flex-col overflow-hidden">
+    <aside className="w-full bg-white border border-gray-200 rounded-xl shadow-sm h-fit lg:sticky lg:top-6 max-h-[80vh] flex flex-col overflow-hidden">
       {/* Header */}
       <div className="p-4 border-b border-gray-100 flex items-start gap-3">
         <div className="flex-1 min-w-0">
@@ -354,8 +371,10 @@ function ScriptPanel({
             <h3 className="font-semibold text-gray-900 leading-snug">{f.title}</h3>
           )}
           <div className="text-xs text-gray-400 mt-1 flex items-center gap-1 flex-wrap">
-            {(f.platforms?.length > 0 ? f.platforms : [f.platform]).map((p) => (
-              <span key={p} className="capitalize bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-[10px]">{p}</span>
+            {/* Oude items staan nog op 'instagram'/'facebook'; normaliseren
+                toont die als één Meta-badge in plaats van twee. */}
+            {normaliseerKanalen(f.platforms?.length > 0 ? f.platforms : [f.platform]).map((p) => (
+              <span key={p} className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-[10px]">{kanaalLabel(p)}</span>
             ))}
             <span>· {f.content_type}</span>
           </div>
@@ -389,19 +408,21 @@ function ScriptPanel({
               </span>
               <div className="flex flex-wrap gap-1.5">
                 {ALL_PLATFORMS.map((p) => {
-                  const active = (f.platforms?.length > 0 ? f.platforms : [f.platform]).includes(p)
+                  const active = normaliseerKanalen(
+                    f.platforms?.length > 0 ? f.platforms : [f.platform],
+                  ).includes(p)
                   return (
                     <button
                       key={p}
                       type="button"
                       onClick={() => togglePlatform(p)}
-                      className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors capitalize ${
+                      className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
                         active
                           ? 'border-[#fff848] bg-[#fff848]/10 text-black'
                           : 'border-gray-200 text-gray-500 hover:border-gray-300'
                       }`}
                     >
-                      {p}
+                      {kanaalLabel(p)}
                     </button>
                   )
                 })}
@@ -477,7 +498,7 @@ function ScriptPanel({
               {(item.status === 'draft' || item.status === 'changes_requested') && (
                 <button
                   disabled={busy}
-                  onClick={async () => { setBusy(true); try { await actions.onSetStatus?.(item.id, 'ready_for_review') } finally { setBusy(false) } }}
+                  onClick={async () => { setBusy(true); try { await actions.onSetStatus?.(item.id, 'ready_for_review') } catch { /* melding komt van de handler */ } finally { setBusy(false) } }}
                   className="btn-secondary text-xs flex-1"
                 >
                   <Send className="h-3 w-3" />
@@ -487,7 +508,7 @@ function ScriptPanel({
               {item.status === 'approved' && (
                 <button
                   disabled={busy}
-                  onClick={async () => { setBusy(true); try { await actions.onSetStatus?.(item.id, 'scheduled') } finally { setBusy(false) } }}
+                  onClick={async () => { setBusy(true); try { await actions.onSetStatus?.(item.id, 'scheduled') } catch { /* melding komt van de handler */ } finally { setBusy(false) } }}
                   className="btn-secondary text-xs"
                 >
                   Inplannen
@@ -496,7 +517,7 @@ function ScriptPanel({
               {item.status === 'scheduled' && (
                 <button
                   disabled={busy}
-                  onClick={async () => { setBusy(true); try { await actions.onSetStatus?.(item.id, 'published') } finally { setBusy(false) } }}
+                  onClick={async () => { setBusy(true); try { await actions.onSetStatus?.(item.id, 'published') } catch { /* melding komt van de handler */ } finally { setBusy(false) } }}
                   className="btn-secondary text-xs"
                 >
                   Gepubliceerd
@@ -508,7 +529,7 @@ function ScriptPanel({
                   onClick={async () => {
                     if (!confirm('Item verwijderen?')) return
                     setBusy(true)
-                    try { await actions.onDelete!(item.id); onClose() } finally { setBusy(false) }
+                    try { await actions.onDelete!(item.id); onClose() } catch { /* melding komt van de handler */ } finally { setBusy(false) }
                   }}
                   className="btn-danger text-xs ml-auto"
                 >

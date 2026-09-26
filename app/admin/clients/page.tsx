@@ -41,7 +41,7 @@ export default async function ClientsPage({
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold">Klanten</h1>
           <p className="text-sm text-gray-500 mt-0.5">{clients.length} klanten</p>
@@ -71,7 +71,31 @@ export default async function ClientsPage({
             )}
           </div>
         ) : (
-          <table className="w-full">
+          <>
+          {/* Telefoon: kaarten i.p.v. een tabel om zijwaarts door te scrollen */}
+          <ul className="md:hidden divide-y divide-gray-100">
+            {filtered.map((client) => {
+              const services = (client.client_services as Array<{ service_slug: string; active: boolean }> ?? []).filter((s) => s.active)
+              return (
+                <li key={client.id}>
+                  <Link href={`/admin/clients/${client.id}`} className="flex items-start justify-between gap-3 px-4 py-3 active:bg-gray-50">
+                    <div className="min-w-0">
+                      <div className="font-medium text-gray-900 truncate">{client.company_name}</div>
+                      {client.niche && <div className="text-xs text-gray-400 mt-0.5 truncate">{client.niche}</div>}
+                      {services.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {services.map((sv) => <span key={sv.service_slug} className="inline-block px-2 py-0.5 bg-gray-100 text-gray-600 text-[11px] rounded-md">{SERVICE_LABELS[sv.service_slug] ?? sv.service_slug}</span>)}
+                        </div>
+                      )}
+                    </div>
+                    <span className="status-badge bg-green-100 text-green-700 shrink-0">Actief</span>
+                  </Link>
+                </li>
+              )
+            })}
+          </ul>
+          <div className="hidden md:block overflow-x-auto">
+          <table className="w-full min-w-[500px]">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="table-th">Bedrijf</th>
@@ -129,6 +153,8 @@ export default async function ClientsPage({
               })}
             </tbody>
           </table>
+          </div>
+          </>
         )}
       </div>
     </div>

@@ -3,12 +3,19 @@
 import { useState, useCallback, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { ContentCalendar, type SocialContentItem, type SocialContentStatus } from '@/components/calendar/content-calendar'
-import { Plus, X, Loader2, Sparkles, CheckSquare, Trash2, AlertTriangle } from 'lucide-react'
+import { Plus, X, Loader2, Sparkles, CheckSquare, Trash2, AlertTriangle, CalendarRange, ArrowRight, History } from 'lucide-react'
 import { GenerateDialog } from './generate-dialog'
+import { ClickUpSyncControl } from '@/components/admin/clickup-sync-control'
+import { ShootBriefings } from '@/components/admin/shoot-briefings'
+import { SendMailButton } from '@/components/admin/send-mail-button'
+import { ShootDocumentKnop } from '@/components/shoot-document-knop'
+import { KANAAL_SLUGS, kanaalLabel } from '@/lib/social-platforms'
+import { toast } from 'sonner'
 
 type Client = { id: string; company_name: string }
 
-const PLATFORMS = ['instagram', 'facebook', 'tiktok', 'linkedin', 'pinterest', 'twitter']
+// Eén bron voor de kanalen; Meta vervangt Instagram + Facebook.
+const PLATFORMS = KANAAL_SLUGS
 const TYPES = ['post', 'reel', 'story', 'carousel']
 
 function CreateDialog({
@@ -25,7 +32,7 @@ function CreateDialog({
   const [loading, setLoading] = useState(false)
   const [form, setForm] = useState({
     title: '',
-    platforms: ['instagram'] as string[],
+    platforms: ['meta'] as string[],
     content_type: 'post',
     planned_date: defaultDate || new Date().toISOString().slice(0, 10),
     caption: '',
@@ -82,7 +89,7 @@ function CreateDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-y-auto">
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
           <h3 className="font-semibold text-gray-900">Nieuw content-item</h3>
           <button onClick={onClose} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100">
@@ -94,7 +101,7 @@ function CreateDialog({
             <label className={lbl}>Titel *</label>
             <input required className={inp} value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} placeholder="Bijv. Zomercampagne reel" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className={lbl}>Datum</label>
               <input type="date" className={inp} value={form.planned_date} onChange={(e) => setForm((p) => ({ ...p, planned_date: e.target.value }))} />
@@ -116,13 +123,13 @@ function CreateDialog({
                   key={p}
                   type="button"
                   onClick={() => togglePlatform(p)}
-                  className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors capitalize ${
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
                     form.platforms.includes(p)
                       ? 'border-[#fff848] bg-[#fff848]/10 text-black'
                       : 'border-gray-200 text-gray-500 hover:border-gray-300'
                   }`}
                 >
-                  {p}
+                  {kanaalLabel(p)}
                 </button>
               ))}
             </div>
@@ -183,6 +190,14 @@ export function SocialMediaAdmin({
   const [bulkDeleteInput, setBulkDeleteInput] = useState('')
   const [bulkDeleting, setBulkDeleting] = useState(false)
 
+  // Maand verzetten (hele maand content van X → Y)
+  const thisMonth = () => new Date().toISOString().slice(0, 7)
+  const nextMonthStr = () => { const d = new Date(); d.setMonth(d.getMonth() + 1); return d.toISOString().slice(0, 7) }
+  const [shiftOpen, setShiftOpen] = useState(false)
+  const [shiftFrom, setShiftFrom] = useState(thisMonth)
+  const [shiftTo, setShiftTo] = useState(nextMonthStr)
+  const [shifting, setShifting] = useState(false)
+
   const toggleSelected = (id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev)
@@ -222,12 +237,43 @@ export function SocialMediaAdmin({
     }
   }
 
+  const monthLabel = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number)
+    if (!y || !m) return ym
+    return new Date(y, m - 1, 1).toLocaleDateString('nl-BE', { month: 'long', year: 'numeric' })
+  }
+
+  const doShift = async () => {
+    if (shiftFrom === shiftTo) return
+    setShifting(true)
+    try {
+      const res = await fetch('/api/admin/social-content/shift-month', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId: selectedClient, from: shiftFrom, to: shiftTo }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error)
+      await loadItems(selectedClient)
+      setShiftOpen(false)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Fout bij verzetten')
+    } finally {
+      setShifting(false)
+    }
+  }
+
   const loadItems = useCallback(async (clientId: string) => {
     setLoading(true)
     try {
       const res = await fetch(`/api/admin/social-content?clientId=${clientId}`)
       const json = await res.json()
-      setItems(json.items ?? [])
+      // Bij een fout de lijst NIET leegmaken (voorkomt schijnbaar "verdwenen"
+      // content); enkel vervangen als de server echt items teruggeeft.
+      if (res.ok && Array.isArray(json.items)) setItems(json.items)
+      else if (!res.ok) alert(json.error || 'Kon content niet laden — probeer opnieuw.')
+    } catch {
+      alert('Kon content niet laden — controleer je verbinding en probeer opnieuw.')
     } finally {
       setLoading(false)
     }
@@ -241,13 +287,28 @@ export function SocialMediaAdmin({
     })
   }
 
+  // Optimistisch bijwerken, maar bij een fout terugdraaien + melden. De fout
+  // wordt opnieuw gegooid zodat de kalender (bv. bewerkmodus) open blijft.
+  const mislukt = async (res: Response, standaard: string): Promise<never> => {
+    const j = await res.json().catch(() => ({}))
+    throw new Error((j as { error?: string }).error || standaard)
+  }
+
   const handleUpdate = async (id: string, patch: Partial<SocialContentItem>) => {
-    await fetch('/api/admin/social-content', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, ...patch }),
-    })
+    const vorige = items.find((it) => it.id === id)
     setItems((prev) => prev.map((it) => it.id === id ? { ...it, ...patch } : it))
+    try {
+      const res = await fetch('/api/admin/social-content', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, ...patch }),
+      })
+      if (!res.ok) await mislukt(res, 'Opslaan mislukt')
+    } catch (err) {
+      if (vorige) setItems((prev) => prev.map((it) => it.id === id ? vorige : it))
+      toast.error(err instanceof Error ? err.message : 'Opslaan mislukt')
+      throw err
+    }
   }
 
   const handleMove = async (id: string, planned_date: string) => {
@@ -255,17 +316,32 @@ export function SocialMediaAdmin({
   }
 
   const handleSetStatus = async (id: string, status: SocialContentStatus) => {
-    await fetch('/api/admin/social-content/status', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, status }),
-    })
+    const vorige = items.find((it) => it.id === id)
     setItems((prev) => prev.map((it) => it.id === id ? { ...it, status } : it))
+    try {
+      const res = await fetch('/api/admin/social-content/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, status }),
+      })
+      if (!res.ok) await mislukt(res, 'Status wijzigen mislukt')
+    } catch (err) {
+      if (vorige) setItems((prev) => prev.map((it) => it.id === id ? vorige : it))
+      toast.error(err instanceof Error ? err.message : 'Status wijzigen mislukt')
+      throw err
+    }
   }
 
   const handleDelete = async (id: string) => {
-    await fetch(`/api/admin/social-content?id=${id}`, { method: 'DELETE' })
-    setItems((prev) => prev.filter((it) => it.id !== id))
+    try {
+      const res = await fetch(`/api/admin/social-content?id=${id}`, { method: 'DELETE' })
+      if (!res.ok) await mislukt(res, 'Verwijderen mislukt')
+      setItems((prev) => prev.filter((it) => it.id !== id))
+      toast.success('Item verwijderd')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Verwijderen mislukt')
+      throw err
+    }
   }
 
   const clientItems = items.filter((it) => it.client_id === selectedClient)
@@ -275,7 +351,7 @@ export function SocialMediaAdmin({
     <div className="space-y-4">
       {/* Client selector */}
       <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-[12rem]">
           <select
             value={selectedClient}
             onChange={(e) => handleClientChange(e.target.value)}
@@ -288,7 +364,7 @@ export function SocialMediaAdmin({
           </select>
         </div>
         {selectedClient && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {selectedClientData && (
               <div className="flex gap-3 text-xs text-gray-500">
                 <span className="px-2 py-1 bg-gray-100 rounded-lg">{selectedClientData.company_name}</span>
@@ -296,6 +372,25 @@ export function SocialMediaAdmin({
             )}
             {!selectMode ? (
               <>
+                <SendMailButton clientId={selectedClient} kind="scripts" label="Verstuur mail" />
+                <SendMailButton clientId={selectedClient} kind="shoot" label="Verstuur uitnodiging" />
+                <ShootDocumentKnop
+                  href={`/api/admin/clients/${selectedClient}/shoot-document`}
+                  label="Shootdocument"
+                  title="Print-klare checklist voor de eerstvolgende shoot (scripts + medianotities)"
+                />
+                <button
+                  onClick={() => { setShiftFrom(thisMonth()); setShiftTo(nextMonthStr()); setShiftOpen(true) }}
+                  className="btn-secondary"
+                  title="Een hele maand content verzetten naar een andere maand"
+                >
+                  <CalendarRange className="h-4 w-4" />
+                  Verzetten
+                </button>
+                <a href="/admin/services/social-media/recover" className="btn-secondary" title="Verdwenen content terugvinden en herstellen">
+                  <History className="h-4 w-4" />
+                  Herstellen
+                </a>
                 <button
                   onClick={() => setSelectMode(true)}
                   className="btn-secondary"
@@ -342,9 +437,16 @@ export function SocialMediaAdmin({
         )}
       </div>
 
+      {/* ClickUp-sync (per klant) */}
+      {selectedClient && (
+        <div className="card-base">
+          <ClickUpSyncControl clientId={selectedClient} />
+        </div>
+      )}
+
       {/* Stats */}
       {selectedClient && (
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {(['draft', 'ready_for_review', 'changes_requested', 'approved'] as SocialContentStatus[]).map((s) => {
             const count = clientItems.filter((it) => it.status === s).length
             const labels: Record<string, string> = {
@@ -400,6 +502,9 @@ export function SocialMediaAdmin({
         </div>
       )}
 
+      {/* Shoot Briefing (per klant) */}
+      {selectedClient && <ShootBriefings clientId={selectedClient} />}
+
       {/* Generate planning dialog */}
       {showGenerate && selectedClient && (
         <GenerateDialog
@@ -418,6 +523,9 @@ export function SocialMediaAdmin({
           onCreated={(item) => {
             setItems((prev) => [...prev, item])
             setCreateDialog({ open: false })
+            // Herlaad vanuit de server zodat de weergave exact de database volgt
+            // (bevestigt dat het item écht bewaard is).
+            loadItems(selectedClient)
           }}
         />
       )}
@@ -425,7 +533,7 @@ export function SocialMediaAdmin({
       {/* Bulk delete confirmation modal */}
       {bulkDeleteOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center gap-2 p-5 border-b border-gray-100">
               <AlertTriangle className="h-5 w-5 text-red-500 shrink-0" />
               <h3 className="font-semibold text-gray-900">{selectedIds.size} items verwijderen</h3>
@@ -470,6 +578,83 @@ export function SocialMediaAdmin({
                   Annuleer
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Maand verzetten modal */}
+      {shiftOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-y-auto">
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                <CalendarRange className="h-5 w-5 text-gray-700" />
+                Content verzetten
+              </h3>
+              <button onClick={() => setShiftOpen(false)} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-sm text-gray-500">
+                Verzet alle content van één maand naar een andere maand. De dag van de maand blijft behouden.
+              </p>
+              <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Van</label>
+                  <input
+                    type="month"
+                    value={shiftFrom}
+                    onChange={(e) => setShiftFrom(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]"
+                  />
+                </div>
+                <ArrowRight className="h-4 w-4 text-gray-400 mb-2.5" />
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Naar</label>
+                  <input
+                    type="month"
+                    value={shiftTo}
+                    onChange={(e) => setShiftTo(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]"
+                  />
+                </div>
+              </div>
+
+              {(() => {
+                const count = clientItems.filter((it) => (it.planned_date ?? '').slice(0, 7) === shiftFrom).length
+                const sameMonth = shiftFrom === shiftTo
+                return (
+                  <>
+                    <div className={`rounded-xl p-4 border text-sm ${
+                      sameMonth ? 'bg-amber-50 border-amber-200 text-amber-800'
+                      : count === 0 ? 'bg-gray-50 border-gray-200 text-gray-500'
+                      : 'bg-[#fff848]/10 border-[#fff848] text-gray-800'
+                    }`}>
+                      {sameMonth ? (
+                        'Kies een verschillende bron- en doelmaand.'
+                      ) : count === 0 ? (
+                        <>Geen content gevonden in <b className="capitalize">{monthLabel(shiftFrom)}</b>.</>
+                      ) : (
+                        <><b>{count}</b> {count === 1 ? 'item' : 'items'} van <b className="capitalize">{monthLabel(shiftFrom)}</b> worden verzet naar <b className="capitalize">{monthLabel(shiftTo)}</b>.</>
+                      )}
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={doShift}
+                        disabled={shifting || sameMonth || count === 0}
+                        className="btn-primary flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {shifting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarRange className="h-4 w-4" />}
+                        Verzetten
+                      </button>
+                      <button onClick={() => setShiftOpen(false)} className="btn-secondary">Annuleer</button>
+                    </div>
+                  </>
+                )
+              })()}
             </div>
           </div>
         </div>
