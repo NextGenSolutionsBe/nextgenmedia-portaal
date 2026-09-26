@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import {
   X, Phone, Mail, Globe, Pencil, StickyNote,
-  PhoneOff, Archive, History, Bot, Flame, Loader2, Check, Linkedin, MapPin, Users,
+  PhoneOff, Trash2, History, Bot, Flame, Loader2, Check, Linkedin, MapPin, Users,
 } from 'lucide-react'
 import { STAGES, stageLabel, mistVerantwoordelijke } from '@/lib/sales/stages'
 import { LEADBRONNEN, leadbronLabel } from '@/lib/sales/leadbron'
@@ -97,6 +97,23 @@ export function LeadDetail({
       toast.error(e instanceof Error ? e.message : 'Opslaan mislukt')
       return false
     } finally { setBezig(false) }
+  }
+
+  /** De lead volledig verwijderen (niet archiveren) — na bevestiging. */
+  const verwijderLead = async () => {
+    const naam = lead.sales_companies?.name ?? 'deze lead'
+    if (!confirm(`"${naam}" volledig verwijderen?
+
+De lead, de tijdlijn, notities en activiteiten verdwijnen definitief. Afspraken en opdrachten blijven bestaan, maar zonder koppeling. Dit kan niet ongedaan gemaakt worden.`)) return
+    setBezig(true)
+    try {
+      const r = await fetch(`/api/admin/sales/leads/${lead.id}`, { method: 'DELETE' })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j.error ?? 'Verwijderen mislukt')
+      toast.success(`${naam} verwijderd.`)
+      onChanged()
+      onClose()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt') } finally { setBezig(false) }
   }
 
   const voegNotitieToe = async () => {
@@ -427,8 +444,8 @@ export function LeadDetail({
             disabled={bezig} className="btn-secondary text-xs flex-1">
             <PhoneOff className="h-3.5 w-3.5" />{lead.do_not_call ? 'Weer bellen' : 'Niet bellen'}
           </button>
-          <button onClick={async () => { if (await patch({ archived: true }, 'Gearchiveerd.')) onClose() }} disabled={bezig} className="btn-secondary text-xs flex-1">
-            <Archive className="h-3.5 w-3.5" />Archiveer
+          <button onClick={verwijderLead} disabled={bezig} className="btn-secondary text-xs flex-1 text-red-600 hover:bg-red-50">
+            <Trash2 className="h-3.5 w-3.5" />Verwijderen
           </button>
         </div>
       </aside>

@@ -1,3 +1,4 @@
+import { logAudit, requestMeta } from '@/lib/audit'
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
@@ -398,14 +399,40 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 // DELETE — archiveren (zacht verwijderen; nooit hard).
-export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+/**
+ * DELETE — de lead VOLLEDIG verwijderen (niet archiveren). Mee weg: tijdlijn,
+ * activiteiten, controles en opdrachtkoppelingen (cascade). Afspraken,
+ * opdrachten en Harrie-gebeurtenissen blijven bestaan zonder lead. Het bedrijf
+ * (en zijn contacten) gaat mee als geen andere lead het nog gebruikt, zodat een
+ * latere import het bedrijf opnieuw kan toevoegen. Een momentopname gaat naar de auditlog.
+ */
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    if (!(await requireStaff())) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
+    const actor = await requireStaff()
+    if (!actor) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
     const { id } = await params
     const admin = createAdminSupabaseClient()
-    const { error } = await admin.from('sales_leads').update({ archived_at: new Date().toISOString() }).eq('id', id)
+    const { data: lead } = await admin.from('sales_leads').select('*, sales_companies ( name, phone, website ), sales_contacts ( name, phone, email )').eq('id', id).maybeSingle()
+    if (!lead) return NextResponse.json({ error: 'Lead niet gevonden' }, { status: 404 })
+    const l = lead as Record<string, unknown> & { company_id: string | null; stage_key: string; sales_companies?: { name?: string | null } | null }
+    const { error } = await admin.from('sales_leads').delete().eq('id', id)
     if (error) throw new Error(error.message)
-    return NextResponse.json({ ok: true })
+    let bedrijfVerwijderd = false
+    if (l.company_id) {
+      const { count } = await admin.from('sales_leads').select('id', { count: 'exact', head: true }).eq('company_id', l.company_id)
+      if (!count) {
+        const { error: e } = await admin.from('sales_companies').delete().eq('id', l.company_id)
+        bedrijfVerwijderd = !e
+      }
+    }
+    const m = requestMeta(req)
+    await logAudit({
+      action: 'lead.verwijderd', entityType: 'sales_lead', entityId: id,
+      summary: `Lead "${l.sales_companies?.name ?? id}" volledig verwijderd (fase ${normaliseerStage(l.stage_key)})`,
+      actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'staff',
+      metadata: { lead, bedrijfVerwijderd }, ip: m.ip, userAgent: m.userAgent,
+    }).catch(() => {})
+    return NextResponse.json({ ok: true, bedrijfVerwijderd })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
