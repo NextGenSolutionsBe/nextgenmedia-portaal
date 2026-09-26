@@ -82,7 +82,7 @@ export function AiAssistant() {
   return (
     <>
       {!open && (
-        <button onClick={() => setOpen(true)} aria-label="NextGen AI" className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] right-4 md:bottom-5 md:right-5 z-50 flex items-center gap-2 rounded-full bg-gray-900 text-white p-3 md:pl-3.5 md:pr-4 md:py-2.5 shadow-md hover:bg-black transition-colors">
+        <button onClick={() => setOpen(true)} aria-label="NextGen AI" className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] right-4 md:bottom-5 md:right-5 z-30 flex items-center gap-2 rounded-full bg-gray-900 text-white p-3 md:pl-3.5 md:pr-4 md:py-2.5 shadow-md hover:bg-black transition-colors">
           <Sparkles className="h-4 w-4" /><span className="hidden md:inline text-sm font-medium">NextGen AI</span>
         </button>
       )}

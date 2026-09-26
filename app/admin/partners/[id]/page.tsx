@@ -146,7 +146,7 @@ export default async function PartnerDetailPage({ params }: { params: Promise<{ 
         <Link href="/admin/partners" className="p-2 rounded-lg hover:bg-gray-100 shrink-0">
           <ArrowLeft className="h-4 w-4" />
         </Link>
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-[12rem]">
           <h1 className="text-2xl font-bold truncate">{partner.name}</h1>
           <p className="text-sm text-gray-500">{partner.company ?? partner.email}</p>
         </div>

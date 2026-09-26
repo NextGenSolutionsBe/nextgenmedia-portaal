@@ -259,8 +259,8 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
   const contractTitel = contracten.find((c) => c.id === kop.contract_id)?.titel ?? factuur?.contract_titel ?? null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/40 backdrop-blur-sm" role="dialog" aria-modal="true">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl max-h-[94dvh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-6 bg-black/40 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="bg-white sm:rounded-2xl shadow-xl w-full max-w-5xl h-dvh sm:h-auto max-h-dvh sm:max-h-[94dvh] flex flex-col overflow-hidden">
         <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-100">
           <div className="min-w-0">
             <div className="text-[11px] uppercase tracking-wide text-gray-400">{nieuw ? 'Nieuwe factuur' : `Factuur F-${id!.slice(0, 8).toUpperCase()}`}</div>

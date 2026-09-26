@@ -106,15 +106,15 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <Link href="/admin/clients" className="btn-secondary px-2">
           <ChevronLeft className="h-4 w-4" />
         </Link>
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-[12rem]">
           <h1 className="text-2xl font-bold truncate">{client.company_name}</h1>
           {client.niche && <p className="text-sm text-gray-500">{client.niche}</p>}
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
           {hasSocial && (
             <Link href={`/admin/services/social-media?client=${id}`} className="btn-secondary">
               <Calendar className="h-4 w-4" />

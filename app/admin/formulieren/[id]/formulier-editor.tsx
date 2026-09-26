@@ -96,7 +96,7 @@ export function FormulierEditor({ id, startTab, klantId }: { id: string; startTa
     <div className="space-y-5 animate-fade-in">
       <div className="flex items-start gap-3 flex-wrap">
         <Link href="/admin/formulieren" className="btn-secondary px-2" aria-label="Terug naar formulieren"><ChevronLeft className="h-4 w-4" /></Link>
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-[12rem]">
           <h1 className="text-2xl font-bold truncate">{formulier.titel}</h1>
           <div className="flex items-center gap-2 mt-1 flex-wrap text-xs">
             <span className={cn('status-badge', statusInfo.kleur)}>{statusInfo.label}</span>

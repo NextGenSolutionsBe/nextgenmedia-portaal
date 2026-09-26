@@ -320,7 +320,7 @@ export function SocialMediaAdmin({
     <div className="space-y-4">
       {/* Client selector */}
       <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-[12rem]">
           <select
             value={selectedClient}
             onChange={(e) => handleClientChange(e.target.value)}

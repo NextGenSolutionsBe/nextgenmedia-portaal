@@ -7,6 +7,7 @@ import {
   Loader2, Plus, Search, Upload, MailCheck, Headphones, PhoneCall, MailPlus, StickyNote,
   CalendarClock, CalendarPlus, MoreHorizontal, FileText, Trophy, XCircle, ExternalLink, User, Flame, PhoneOff, Briefcase,
   X,
+  SlidersHorizontal,
 } from 'lucide-react'
 import { STAGES, STAGE_KEYS, STAGE_STYLE, stageLabel, type StageKey } from '@/lib/sales/stages'
 import { DIENSTEN, LEADBRONNEN, LEADBRON_STYLE, leadbronLabel, normaliseerLeadbron } from '@/lib/sales/leadbron'
@@ -73,6 +74,8 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
   const [grootte, setGrootte] = useState('')
   const [alleenWarm, setAlleenWarm] = useState(false)
   const [toonMeer, setToonMeer] = useState(false)
+  // Telefoon: filters ingeklapt, zodat het bord meteen in beeld komt.
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const [opties, setOpties] = useState<{ sectoren: string[]; regios: string[]; steden: string[]; werkklassen: string[]; activiteiten: string[]; prioriteiten: string[]; labels: string[] }>({ sectoren: [], regios: [], steden: [], werkklassen: [], activiteiten: [], prioriteiten: [], labels: [] })
   const [toonDnc, setToonDnc] = useState(false)
   useEffect(() => { const t = setTimeout(() => setZoek(q.trim()), 250); return () => clearTimeout(t) }, [q])
@@ -301,7 +304,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
 
       {/* ── Bovenbalk ── */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-[14rem] max-w-md">
+        <div className="relative flex-1 min-w-0 sm:min-w-[14rem] max-w-md">
           <Search className="h-4 w-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input className="input-base pl-8 w-full" value={q} onChange={(e) => setQ(e.target.value)}
             placeholder="Zoek bedrijf, contact, telefoon, e-mail of website…" />
@@ -313,19 +316,25 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
             <Headphones className="h-4 w-4" />Focus Mode
           </button>
           <button onClick={() => setImporteren(true)} className="btn-secondary text-sm" title="Lijst met prospects in bulk toevoegen">
-            <Upload className="h-4 w-4" />Importeren
+            <Upload className="h-4 w-4" /><span className="hidden sm:inline">Importeren</span>
           </button>
           <button onClick={() => setHerinneringen(true)} className="btn-secondary text-sm" title="De herinneringsmail die de dag voor een afspraak vertrekt">
-            <MailCheck className="h-4 w-4" />Herinneringsmail
+            <MailCheck className="h-4 w-4" /><span className="hidden sm:inline">Herinneringsmail</span>
           </button>
           <button onClick={() => setNieuweLead(true)} className="btn-primary text-sm">
-            <Plus className="h-4 w-4" />Nieuwe lead toevoegen
+            <Plus className="h-4 w-4" /><span className="sm:hidden">Lead</span><span className="hidden sm:inline">Nieuwe lead toevoegen</span>
           </button>
         </div>
       </div>
 
       {/* ── Filters ── */}
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="md:hidden flex items-center justify-between gap-2">
+        <button type="button" onClick={() => setFiltersOpen((v) => !v)} className={`btn-secondary text-xs ${filtersActief ? 'ring-1 ring-black' : ''}`}>
+          <SlidersHorizontal className="h-3.5 w-3.5" />{filtersOpen ? 'Filters verbergen' : `Filters${filtersActief ? ' •' : ''}`}
+        </button>
+        <span className="text-xs text-gray-500">{leads.length} lead{leads.length === 1 ? '' : 's'}</span>
+      </div>
+      <div className={`${filtersOpen ? 'flex' : 'hidden'} md:flex items-center gap-2 flex-wrap`}>
         <select className="input-base !w-auto max-w-[220px] text-xs" value={leadbron} onChange={(e) => setLeadbron(e.target.value)} aria-label="Leadbron">
           <option value="">Alle leadbronnen</option>
           <option value="inbound">Alle inbound</option>
@@ -369,10 +378,10 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
         </label>
         {filtersActief && <button onClick={wisFilters} className="text-xs text-gray-500 hover:text-black underline">Filters wissen</button>}
         {laden && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
-        <span className="text-xs text-gray-500 ml-auto">{leads.length} lead{leads.length === 1 ? '' : 's'}{filtersActief ? ' in deze selectie' : ''} · Focus Mode belt deze selectie</span>
+        <span className="hidden md:inline text-xs text-gray-500 ml-auto">{leads.length} lead{leads.length === 1 ? '' : 's'}{filtersActief ? ' in deze selectie' : ''} · Focus Mode belt deze selectie</span>
       </div>
       {toonMeer && (
-        <div className="flex items-center gap-2 flex-wrap -mt-1">
+        <div className={`${filtersOpen ? 'flex' : 'hidden'} md:flex items-center gap-2 flex-wrap -mt-1`}>
           {opties.werkklassen.length > 0 && (
             <select className="input-base !w-auto max-w-[220px] text-xs" value={werkklasse} onChange={(e) => setWerkklasse(e.target.value)} aria-label="Werkklasse">
               <option value="">Alle werkklassen</option>
@@ -412,7 +421,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
       )}
 
       {/* ── Waarde in de pijplijn ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         <Totaal label="Open pijplijn" waarde={euro(totalen.openCents)}
           onder={`${totalen.openAantal} ${totalen.openAantal === 1 ? 'lead' : 'leads'} buiten gewonnen/verloren`} />
         <Totaal label="Gewonnen" waarde={euro(totalen.gewonnenCents)} kleur="text-green-700" onder={`${kolommen.get('gewonnen')?.length ?? 0} leads`} />
@@ -675,10 +684,10 @@ function Kaart({
 
 function Totaal({ label, waarde, onder, kleur = 'text-gray-900' }: { label: string; waarde: string; onder?: string; kleur?: string }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white px-3 py-2">
-      <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{label}</div>
-      <div className={`text-lg font-bold tabular-nums leading-tight ${kleur}`}>{waarde}</div>
-      {onder && <div className="text-[10px] text-gray-400">{onder}</div>}
+    <div className="rounded-xl border border-gray-200 bg-white px-2.5 sm:px-3 py-2 min-w-0">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 truncate">{label}</div>
+      <div className={`text-base sm:text-lg font-bold tabular-nums leading-tight truncate ${kleur}`}>{waarde}</div>
+      {onder && <div className="hidden sm:block text-[10px] text-gray-400">{onder}</div>}
     </div>
   )
 }

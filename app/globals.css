@@ -59,10 +59,17 @@
   }
 
   /* Hard guard tegen horizontale scroll op mobiel: niets mag breder zijn dan
-     het scherm. Vangt sub-pixel-overflow en losse brede elementen af. */
+     het scherm. 'clip' i.p.v. 'hidden': hidden op html én body maakt van body
+     een eigen scrollcontainer, en dan werkt position: sticky nergens meer
+     (de bovenbalk scrolde weg). Oudere browsers vallen terug op hidden. */
   html, body {
     max-width: 100%;
     overflow-x: hidden;
+  }
+  @supports (overflow-x: clip) {
+    html, body {
+      overflow-x: clip;
+    }
   }
 
   h1, h2, h3, h4, h5, h6 {

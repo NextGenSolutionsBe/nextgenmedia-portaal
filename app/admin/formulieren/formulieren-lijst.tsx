@@ -75,7 +75,7 @@ export function FormulierenLijst({ klantId }: { klantId: string | null }) {
       {klantId && (
         <div className="rounded-xl border border-[#fff848] bg-[#fff848]/15 px-4 py-3 text-sm flex items-center gap-2 flex-wrap">
           <Send className="h-4 w-4 shrink-0" />
-          <span className="flex-1 min-w-0">Kies een formulier om naar <strong>{klantNaam ?? 'deze klant'}</strong> te sturen — je komt meteen bij <em>Delen</em> met de klant ingevuld.</span>
+          <span className="flex-1 min-w-[12rem]">Kies een formulier om naar <strong>{klantNaam ?? 'deze klant'}</strong> te sturen — je komt meteen bij <em>Delen</em> met de klant ingevuld.</span>
           <Link href="/admin/formulieren" className="text-xs text-gray-600 underline">Annuleren</Link>
         </div>
       )}
