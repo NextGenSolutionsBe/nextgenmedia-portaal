@@ -57,7 +57,6 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
 
   // Filters
   const [q, setQ] = useState('')
-  const [zoek, setZoek] = useState('')
   const [leadbron, setLeadbron] = useState('')
   const [verantwoordelijke, setVerantwoordelijke] = useState('')
   const [dienst, setDienst] = useState('')
@@ -78,7 +77,6 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [opties, setOpties] = useState<{ sectoren: string[]; regios: string[]; steden: string[]; werkklassen: string[]; activiteiten: string[]; prioriteiten: string[]; labels: string[] }>({ sectoren: [], regios: [], steden: [], werkklassen: [], activiteiten: [], prioriteiten: [], labels: [] })
   const [toonDnc, setToonDnc] = useState(false)
-  useEffect(() => { const t = setTimeout(() => setZoek(q.trim()), 250); return () => clearTimeout(t) }, [q])
 
   // Paneel, dialogen, menu's
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -100,7 +98,6 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
     if (!opts?.stil) setLaden(true)
     try {
       const p = new URLSearchParams({ pipeline: pipelineId || 'all' })
-      if (zoek) p.set('q', zoek)
       if (leadbron) p.set('leadbron', leadbron)
       if (verantwoordelijke) p.set('verantwoordelijke', verantwoordelijke)
       if (dienst) p.set('dienst', dienst)
@@ -130,7 +127,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Laden mislukt')
     } finally { if (!opts?.stil) setLaden(false) }
-  }, [pipelineId, zoek, leadbron, verantwoordelijke, dienst, opvolg, toonDnc, sector, regio, stad, werkklasse, activiteit, prioriteit, label, merk, grootte, alleenWarm])
+  }, [pipelineId, leadbron, verantwoordelijke, dienst, opvolg, toonDnc, sector, regio, stad, werkklasse, activiteit, prioriteit, label, merk, grootte, alleenWarm])
 
   useEffect(() => { laad() }, [laad])
 
@@ -167,11 +164,41 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
     return () => window.removeEventListener('click', weg)
   }, [menuId])
 
+  // Zoeken op bedrijfsnaam (ook een deel ervan), meteen tijdens het typen. Ook
+  // contactnaam, telefoon, e-mail en website vinden de lead, zoals voorheen.
+  const zoekTerm = normaliseerZoek(q)
+  const zoekCijfers = q.replace(/\D/g, '')
+  const treffers = useMemo(() => {
+    if (!zoekTerm) return null
+    return leads.filter((l) => {
+      if (normaliseerZoek(l.sales_companies?.name ?? '').includes(zoekTerm)) return true
+      if ([l.sales_contacts?.name, l.sales_contacts?.email, l.sales_companies?.website, l.sales_companies?.email].some((v) => normaliseerZoek(v ?? '').includes(zoekTerm))) return true
+      if (zoekCijfers.length >= 4) {
+        const nrs = [l.sales_contacts?.phone, l.sales_contacts?.mobile, l.sales_companies?.phone].map((v) => (v ?? '').replace(/\D/g, '').replace(/^(00)?32/, '').replace(/^0/, ''))
+        const z = zoekCijfers.replace(/^(00)?32/, '').replace(/^0/, '')
+        if (z && nrs.some((n) => n.includes(z))) return true
+      }
+      return false
+    })
+  }, [leads, zoekTerm, zoekCijfers])
+  // Eerst de treffers op naam: die zoek je.
+  const trefferLijst = useMemo(() => {
+    if (!treffers) return []
+    const opNaam = (l: Lead) => normaliseerZoek(l.sales_companies?.name ?? '').includes(zoekTerm)
+    return [...treffers].sort((a, b) => Number(opNaam(b)) - Number(opNaam(a)))
+  }, [treffers, zoekTerm])
   const kolommen = useMemo(() => {
     const m = new Map<StageKey, Lead[]>(STAGE_KEYS.map((k) => [k, []]))
-    for (const l of leads) (m.get(l.stage_key as StageKey) ?? m.get('outbound')!).push(l)
+    for (const l of treffers ?? leads) (m.get(l.stage_key as StageKey) ?? m.get('outbound')!).push(l)
     return m
-  }, [leads])
+  }, [leads, treffers])
+  // Bij een zoekopdracht naar de eerste kolom met een treffer schuiven.
+  const kolomRefs = useRef(new Map<StageKey, HTMLElement>())
+  useEffect(() => {
+    if (!treffers?.length) return
+    const eerste = STAGES.find((st) => (kolommen.get(st.key) ?? []).length > 0)
+    if (eerste) kolomRefs.current.get(eerste.key)?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' })
+  }, [treffers, kolommen])
 
   // Waarde per kolom en de totalen bovenaan — altijd op de GEFILTERDE leads.
   const totalen = useMemo(() => pipelineTotalen(leads), [leads])
@@ -182,7 +209,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
   const naamVan = (id: string | null) => (id ? medewerkers.find((m) => m.id === id)?.naam ?? null : null)
 
   const firmoActief = [sector, regio, stad, werkklasse, activiteit, prioriteit, label, merk, grootte].filter(Boolean).length + (alleenWarm ? 1 : 0)
-  const filtersActief = !!(q || leadbron || verantwoordelijke || dienst || opvolg || toonDnc || firmoActief)
+  const filtersActief = !!(leadbron || verantwoordelijke || dienst || opvolg || toonDnc || firmoActief)
   const wisFilters = () => {
     setQ(''); setLeadbron(''); setVerantwoordelijke(''); setDienst(''); setOpvolg(''); setToonDnc(false)
     setSector(''); setRegio(''); setStad(''); setWerkklasse(''); setActiviteit(''); setPrioriteit(''); setLabel(''); setMerk(''); setGrootte(''); setAlleenWarm(false)
@@ -328,11 +355,6 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
 
       {/* ── Bovenbalk ── */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-0 sm:min-w-[14rem] max-w-md">
-          <Search className="h-4 w-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-          <input className="input-base pl-8 w-full" value={q} onChange={(e) => setQ(e.target.value)}
-            placeholder="Zoek bedrijf, contact, telefoon, e-mail of website…" />
-        </div>
         <div className="flex items-center gap-2 flex-wrap">
           <BeltijdKnop />
           <button onClick={() => setFocus(true)} disabled={leads.length === 0} className="btn-secondary text-sm"
@@ -453,6 +475,39 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
       </div>
       {filtersActief && <p className="text-[11px] text-gray-400 -mt-1">Bedragen volgen de actieve filters.</p>}
 
+      {/* ── Zoeken op bedrijfsnaam ── */}
+      <div className="space-y-2">
+        <div className="relative">
+          <Search className="h-5 w-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input className="input-base !py-2.5 pl-10 pr-10 w-full text-base" value={q} onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') setQ('') }}
+            placeholder="Zoek op bedrijfsnaam…" aria-label="Zoek een lead op bedrijfsnaam" autoComplete="off" />
+          {q && (
+            <button type="button" onClick={() => setQ('')} className="absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:text-black hover:bg-gray-100" aria-label="Zoekopdracht wissen">
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+        {treffers && treffers.length > 0 && (
+          <div className="flex items-center gap-1.5 flex-wrap text-xs">
+            <span className="text-gray-500">{treffers.length} {treffers.length === 1 ? 'lead' : 'leads'} gevonden:</span>
+            {trefferLijst.slice(0, 8).map((l) => (
+              <button key={l.id} type="button" onClick={() => setSelectedId(l.id)} className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white pl-2.5 pr-1 py-0.5 hover:border-gray-400">
+                <span className="font-semibold text-gray-900 max-w-[14rem] truncate">{l.sales_companies?.name ?? '—'}</span>
+                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${STAGE_STYLE[l.stage_key as StageKey] ?? ''}`}>{stageLabel(l.stage_key)}</span>
+              </button>
+            ))}
+            {treffers.length > 8 && <span className="text-gray-400">+{treffers.length - 8} meer op het bord</span>}
+          </div>
+        )}
+        {treffers && treffers.length === 0 && !laden && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 flex items-center justify-between gap-2">
+            <span>Geen lead gevonden voor “{q.trim()}”{filtersActief ? ' binnen de actieve filters' : ''}.</span>
+            <button type="button" onClick={() => setQ('')} className="text-xs underline shrink-0">Zoekopdracht wissen</button>
+          </div>
+        )}
+      </div>
+
       {/* ── Het bord ── */}
       <div className="flex gap-3 overflow-x-auto pb-3 -mx-1 px-1 snap-x">
         {STAGES.map((s) => {
@@ -460,8 +515,17 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
           const max = zichtbaar[s.key] ?? PER_KOLOM
           const { aantal, waardeCents } = kolomSamenvatting(lijst)
           const isDoel = doel?.stage === s.key
+          if (treffers && lijst.length === 0) {
+            return (
+              <section key={s.key} title={`${s.label}: geen treffers`}
+                className="shrink-0 w-10 rounded-2xl border border-dashed border-gray-200 bg-gray-50/60 flex flex-col items-center py-3 gap-2 min-h-[12rem]">
+                <span className="text-[11px] text-gray-400 tabular-nums">0</span>
+                <span className="text-[11px] font-medium text-gray-400 [writing-mode:vertical-rl] rotate-180 whitespace-nowrap">{s.label}</span>
+              </section>
+            )
+          }
           return (
-            <section key={s.key}
+            <section key={s.key} ref={(el) => { if (el) kolomRefs.current.set(s.key, el); else kolomRefs.current.delete(s.key) }}
               className={`shrink-0 w-[85vw] max-w-[18rem] sm:w-72 snap-start rounded-2xl border flex flex-col max-h-[calc(100dvh-14rem)] min-h-[12rem] transition-colors ${isDoel ? 'border-black/30 bg-gray-100' : 'border-gray-200 bg-gray-50'}`}>
               <header className="px-3 py-2 flex items-center justify-between gap-2 border-b border-gray-200">
                 <div className="flex items-center gap-1.5 min-w-0">
@@ -494,6 +558,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
                     {isDoel && doel!.index === i && sleepId !== l.id && <div className="h-1 rounded bg-black/40 mb-2" />}
                     <Kaart
                       lead={l}
+                      zoekTerm={zoekTerm}
                       pipelines={pipelines}
                       verantwoordelijke={naamVan(l.assigned_to)}
                       bezetDoor={bezet[l.id]}
@@ -594,10 +659,12 @@ function ZoekFilter({ waarde, onKies, opties, placeholder, lijstId }: { waarde: 
 
 // ── Kaart ────────────────────────────────────────────────────────────────────
 function Kaart({
-  lead, pipelines, verantwoordelijke, bezetDoor, sleept, menuOpen,
+  lead, zoekTerm = '', pipelines, verantwoordelijke, bezetDoor, sleept, menuOpen,
   onOpen, onMenu, onDialoog, onKolom, onDragStart, onDragEnd,
 }: {
   lead: Lead
+  /** Genormaliseerde zoekterm: het overeenkomende deel van de naam wordt gemarkeerd. */
+  zoekTerm?: string
   pipelines: Pipeline[]
   verantwoordelijke: string | null
   bezetDoor?: string
@@ -632,7 +699,7 @@ function Kaart({
         {merkenVan(lead, pipelines).map((p) => (
           <span key={p.id} title={p.name} className={`mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full ${merkStijl(p.key).stip}`} />
         ))}
-        <h4 className="font-semibold text-[13px] leading-snug text-gray-900 truncate flex-1">{lead.sales_companies?.name ?? '—'}</h4>
+        <h4 className="font-semibold text-[13px] leading-snug text-gray-900 truncate flex-1">{zoekTerm ? <Markeer tekst={lead.sales_companies?.name ?? '—'} term={zoekTerm} /> : (lead.sales_companies?.name ?? '—')}</h4>
         {lead.warm && <Flame className="h-3.5 w-3.5 text-orange-500 shrink-0" aria-label="Warm" />}
         {lead.do_not_call && <PhoneOff className="h-3.5 w-3.5 text-red-500 shrink-0" aria-label="Niet bellen" />}
       </div>
@@ -735,4 +802,24 @@ function MenuItem({ onClick, children }: { onClick: () => void; children: React.
       {children}
     </button>
   )
+}
+
+/** Zoektekst vergelijkbaar maken: kleine letters, zonder accenten en leestekens. */
+function normaliseerZoek(v: string): string {
+  return v.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '')
+}
+
+/** Het gezochte deel van de bedrijfsnaam gemarkeerd tonen. */
+function Markeer({ tekst, term }: { tekst: string; term: string }) {
+  // Positie zoeken op de genormaliseerde tekst en terugvertalen naar de echte letters.
+  const kaart: number[] = []
+  let plat = ''
+  for (let i = 0; i < tekst.length; i++) {
+    const c = normaliseerZoek(tekst[i])
+    for (const ch of c) { plat += ch; kaart.push(i) }
+  }
+  const at = plat.indexOf(term)
+  if (at < 0 || !term) return <>{tekst}</>
+  const van = kaart[at], tot = kaart[at + term.length - 1] + 1
+  return <>{tekst.slice(0, van)}<mark className="bg-[#fff848] rounded px-0.5">{tekst.slice(van, tot)}</mark>{tekst.slice(tot)}</>
 }
