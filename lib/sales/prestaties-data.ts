@@ -3,12 +3,12 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { getOrCreateSalesOrg } from '@/lib/sales/service'
 import { listSalesMedewerkers } from '@/lib/sales/medewerkers'
 import { leesActorNamen } from '@/lib/actor-namen'
-import { berekenPrestaties, ONBEKEND, type PActiviteit, type PAfspraak, type PLead, type PUitkomst } from '@/lib/sales/prestaties'
+import { berekenPrestaties, INGEPLAND_FASES, ONBEKEND, uitkomstUitOudeTekst, type PActiviteit, type PAfspraak, type PLead, type PUitkomst } from '@/lib/sales/prestaties'
 
 /**
  * Ophaalwerk voor de salesprestaties (rekenen: lib/sales/prestaties.ts).
- * Enkel wat betrouwbaar geregistreerd is; ontbrekende historiek wordt apart
- * gemeld (bv. gesprekken zonder bron, afspraken nog niet bevestigd), nooit als 0.
+ * Pipelinecijfers komen rechtstreeks uit de actuele leads (fase +
+ * verantwoordelijke); gesprekken en faseverplaatsingen uit de registraties.
  */
 
 const PAGINA = 1000
@@ -27,8 +27,6 @@ async function allePaginas<T>(bouw: (van: number, tot: number) => PromiseLike<{ 
 
 export type PrestatieData = PUitkomst & {
   namen: Record<string, string>
-  /** Sinds wanneer gesprekken hun bron (Focus Mode) krijgen — daarvoor: "zonder bron". */
-  bronSinds: string | null
 }
 
 export async function laadPrestaties(admin: SupabaseClient, van: Date, tot: Date): Promise<PrestatieData> {
@@ -46,23 +44,34 @@ export async function laadPrestaties(admin: SupabaseClient, van: Date, tot: Date
   const { data: eerste } = await admin.from('sales_activiteiten').select('created_at').order('created_at').limit(1).maybeSingle()
   const legacyTot = (eerste as { created_at?: string } | null)?.created_at ?? totIso
   if (legacyTot > vanIso) {
-    const oud = await allePaginas<{ id: string; lead_id: string; actor_id: string | null; created_at: string }>((a, b) => admin.from('sales_lead_events')
-      .select('id, lead_id, actor_id, created_at').eq('kind', 'call')
+    const oud = await allePaginas<{ id: string; lead_id: string; actor_id: string | null; body: string | null; created_at: string }>((a, b) => admin.from('sales_lead_events')
+      .select('id, lead_id, actor_id, body, created_at').eq('kind', 'call')
       .gte('created_at', vanIso).lt('created_at', legacyTot < totIso ? legacyTot : totIso)
       .order('created_at').order('id').range(a, b))
-    for (const e of oud) activiteiten.push({ id: `oud-${e.id}`, lead_id: e.lead_id, medewerker_id: e.actor_id, type: 'telefoongesprek', bron: null, uitkomst: null, created_at: e.created_at })
+    for (const e of oud) activiteiten.push({ id: `oud-${e.id}`, lead_id: e.lead_id, medewerker_id: e.actor_id, type: 'telefoongesprek', bron: null, uitkomst: uitkomstUitOudeTekst(e.body), created_at: e.created_at })
   }
 
-  // 2) Afspraken van deze organisatie (alle: gehouden afspraken bepalen de closer).
+  // 2) Afspraken van deze organisatie (alle: een afspraak in de agenda of een
+  //    bevestigde meeting telt mee voor de lead, los van de periode).
   const afspraken = await allePaginas<PAfspraak>((a, b) => admin.from('sales_appointments')
     .select('id, lead_id, setter_id, verantwoordelijke_id, starts_at, status, aanwezigheid, outcome, created_at')
     .eq('sales_client_id', org.id).order('created_at').order('id').range(a, b))
 
-  // 3) Gesloten leads (gewonnen/verloren), ook gearchiveerde: de uitkomst blijft gebeurd.
+  // 3) De actuele pipeline: niet-gearchiveerde leads in een fase die telt, plus
+  //    leads met een afspraak in de agenda (welke fase ook).
   const leads = await allePaginas<PLead>((a, b) => admin.from('sales_leads')
-    .select('id, stage_key, assigned_to, gesloten_op')
-    .eq('sales_client_id', org.id).in('stage_key', ['gewonnen', 'verloren'])
+    .select('id, stage_key, assigned_to')
+    .eq('sales_client_id', org.id).is('archived_at', null)
+    .in('stage_key', [...INGEPLAND_FASES, 'geen_interesse'])
     .order('id').range(a, b))
+  const bekend = new Set(leads.map((l) => l.id))
+  const metAfspraak = [...new Set(afspraken.filter((x) => x.lead_id && x.status !== 'cancelled').map((x) => x.lead_id as string))].filter((x) => !bekend.has(x))
+  for (let i = 0; i < metAfspraak.length; i += 300) {
+    const { data, error } = await admin.from('sales_leads').select('id, stage_key, assigned_to')
+      .eq('sales_client_id', org.id).is('archived_at', null).in('id', metAfspraak.slice(i, i + 300))
+    if (error) throw new Error(error.message)
+    leads.push(...((data ?? []) as PLead[]))
+  }
 
   const uitkomst = berekenPrestaties({ activiteiten, afspraken, leads, van: vanIso, tot: totIso, nu: new Date().toISOString() })
 
@@ -76,8 +85,7 @@ export async function laadPrestaties(admin: SupabaseClient, van: Date, tot: Date
   }
   namen[ONBEKEND] = 'Niet toegewezen'
 
-  const { data: bron } = await admin.from('sales_activiteiten').select('created_at').not('bron', 'is', null).order('created_at').limit(1).maybeSingle()
-  return { ...uitkomst, namen, bronSinds: (bron as { created_at?: string } | null)?.created_at ?? null }
+  return { ...uitkomst, namen }
 }
 
 /** Voor het correctiescherm: afspraken en registraties in de periode, met leesbare namen. */

@@ -2,31 +2,27 @@
  * Salesprestaties per medewerker — pure module (geen database), getest in
  * tests/sales-prestaties.test.ts.
  *
- * TELREGELS
- *  · Cold calls = telefoongesprekken geregistreerd in Focus Mode (bron 'focus'),
- *    toegeschreven aan wie belde. Gesprekken van vóór de bronregistratie tellen
- *    apart ("zonder bron") — nooit stil bij de cold calls en nooit als 0.
- *  · Bereikte leads = unieke leads met een gesprek waarin iemand bereikt werd
- *    (contact gehad, geen interesse of afspraak gepland).
- *  · Gespreksduur = enkel uit een GEMETEN start en einde (timer). Een gesprek
- *    zonder die twee heeft geen duur; er wordt niets geschat.
- *  · Afspraken ingepland = unieke leads met een (niet geannuleerde) afspraak die
- *    in de periode geboekt werd, toegeschreven aan wie boekte.
- *  · Afspraken gehouden = expliciet als gehouden bevestigd (of met een uitkomst
- *    gewonnen/verloren), toegeschreven aan de VERANTWOORDELIJKE van de afspraak,
- *    geteld op de datum van de afspraak. Voorbij en nog niet bevestigd = apart.
- *  · Gewonnen / verloren = leads die in de periode op die fase gesloten werden,
- *    toegeschreven aan de verantwoordelijke van hun laatste gehouden afspraak
- *    (anders de verantwoordelijke van de lead). Wie de kaart versleept, speelt
- *    hier geen rol.
- *  · Closing rate = gewonnen ÷ (gewonnen + verloren) × 100, ENKEL over leads met
- *    een gehouden afspraak. Geen afgeronde uitkomsten → null (geen percentage).
- *  · Geen interesse = unieke leads naar die fase gezet, toegeschreven aan wie het
- *    deed (de laatste keer per lead).
+ * TWEE SOORTEN CIJFERS
+ *
+ * 1) PIPELINECIJFERS — de actuele pipeline is de enige bron. Elke lead telt voor
+ *    de VERANTWOORDELIJKE die nu op de lead staat (sales_leads.assigned_to),
+ *    ongeacht wie de kaart versleepte of aanpaste, en ongeacht de gekozen
+ *    periode (het is de stand van de pipeline op dit moment).
+ *  · Ingepland  = lead in Afspraak gepland, Voorstel, Gewonnen of Verloren, of
+ *                 met een (niet geannuleerde) afspraak in de agenda.
+ *  · Gehouden   = lead in Voorstel, Gewonnen of Verloren (daar ga je pas heen na
+ *                 de meeting), of met een afspraak die als gehouden bevestigd is.
+ *  · Gewonnen / Verloren / Geen interesse = lead staat nu in die fase.
+ *  · Closing rate = gewonnen ÷ (gewonnen + verloren) × 100; geen afgeronde
+ *                 leads → null (geen percentage).
+ *
+ * 2) ACTIVITEITEN — per periode, voor wie de actie UITVOERDE.
+ *  · Cold calls   = alle geregistreerde belpogingen (één totaal).
+ *  · Bereikt      = unieke leads met een gesprek waarin iemand bereikt werd.
+ *  · Gespreksduur = enkel uit een GEMETEN start en einde (timer); nooit geschat.
  *  · Faseverplaatsingen = elke verplaatsing naar een ANDERE fase, door wie ze
- *    uitvoerde. Heen en terug = 2; zonder faseverschil = 0.
+ *                 uitvoerde. Heen en terug = 2; zonder faseverschil = 0.
  */
-
 export type PActiviteit = {
   id: string
   lead_id: string
@@ -53,7 +49,8 @@ export type PAfspraak = {
   created_at: string
 }
 
-export type PLead = { id: string; stage_key: string; assigned_to: string | null; gesloten_op: string | null }
+/** Een lead zoals hij NU in de pipeline staat (niet gearchiveerd). */
+export type PLead = { id: string; stage_key: string; assigned_to: string | null }
 
 export type PInvoer = {
   activiteiten: PActiviteit[]
@@ -69,7 +66,6 @@ export type PInvoer = {
 export type PRij = {
   sleutel: string
   coldCalls: number
-  gesprekkenZonderBron: number
   bereikteLeads: number
   gesprekkenMetDuur: number
   gesprekkenZonderDuur: number
@@ -84,7 +80,7 @@ export type PRij = {
   faseverplaatsingen: number
   closingGewonnen: number
   closingAfgerond: number
-  /** gewonnen ÷ afgerond × 100 (leads met gehouden afspraak); null zonder afgeronde uitkomsten. */
+  /** gewonnen ÷ (gewonnen + verloren) × 100; null zonder afgeronde leads. */
   closingRate: number | null
 }
 
@@ -94,15 +90,13 @@ export type PUitkomst = {
   perMedewerker: PRij[]
   team: PRij
   podium: { coldCaller: PodiumPlek[]; closer: PodiumPlek[] }
-  /** Gesloten leads zonder sluitdatum: niet in een periode te plaatsen. */
-  geslotenZonderDatum: number
 }
 
 export const ONBEKEND = 'onbekend'
 const BEREIKT = new Set(['contact_gehad', 'geen_interesse', 'afspraak_gepland'])
 
 const leeg = (sleutel: string): PRij => ({
-  sleutel, coldCalls: 0, gesprekkenZonderBron: 0, bereikteLeads: 0, gesprekkenMetDuur: 0, gesprekkenZonderDuur: 0, gespreksduurSec: 0,
+  sleutel, coldCalls: 0, bereikteLeads: 0, gesprekkenMetDuur: 0, gesprekkenZonderDuur: 0, gespreksduurSec: 0,
   afsprakenIngepland: 0, afsprakenGehouden: 0, afsprakenNietGehouden: 0, afsprakenOnbevestigd: 0,
   gewonnen: 0, verloren: 0, geenInteresse: 0, faseverplaatsingen: 0, closingGewonnen: 0, closingAfgerond: 0, closingRate: null,
 })
@@ -132,6 +126,10 @@ function rangschik<T>(lijst: T[], waarde: (x: T) => number, tweede?: (x: T) => n
   })
 }
 
+/** Fases die betekenen dat er een afspraak ingepland werd / de meeting plaatsvond. */
+export const INGEPLAND_FASES = new Set(['afspraak', 'voorstel', 'gewonnen', 'verloren'])
+export const GEHOUDEN_FASES = new Set(['voorstel', 'gewonnen', 'verloren'])
+
 export function berekenPrestaties(inv: PInvoer): PUitkomst {
   const inPeriode = (iso: string | null | undefined) => !!iso && iso >= inv.van && iso < inv.tot
   const rijen = new Map<string, PRij>()
@@ -140,113 +138,98 @@ export function berekenPrestaties(inv: PInvoer): PUitkomst {
     if (!rijen.has(k)) rijen.set(k, leeg(k))
     return rijen.get(k)!
   }
-  // Unieke tellingen per medewerker (en voor het team).
-  const uniek = new Map<string, Set<string>>()
-  const voegUniek = (soort: string, wie: string, lead: string) => {
-    for (const k of [`${soort}|${wie}`, `${soort}|__team__`]) {
-      if (!uniek.has(k)) uniek.set(k, new Set())
-      uniek.get(k)!.add(lead)
+  const bereikt = new Map<string, Set<string>>()
+  const voegBereikt = (wie: string, lead: string) => {
+    for (const k of [wie, '__team__']) {
+      if (!bereikt.has(k)) bereikt.set(k, new Set())
+      bereikt.get(k)!.add(lead)
     }
   }
-  const aantalUniek = (soort: string, wie: string) => uniek.get(`${soort}|${wie}`)?.size ?? 0
 
-  // ── Activiteiten ──
-  const laatsteGeenInteresse = new Map<string, { wie: string; op: string }>()
+  // ── Activiteiten (periode, uitvoerder) ──
   for (const a of inv.activiteiten) {
     if (!inPeriode(a.created_at)) continue
     const wie = a.medewerker_id || ONBEKEND
     if (a.type === 'telefoongesprek') {
       const r = rij(wie)
-      if (a.bron === 'focus') {
-        r.coldCalls++
-        const d = gemetenDuur(a)
-        if (d === null) r.gesprekkenZonderDuur++
-        else { r.gesprekkenMetDuur++; r.gespreksduurSec += d }
-      } else if (!a.bron) {
-        r.gesprekkenZonderBron++
-      } else {
-        // Gesprek vanuit de pipeline (geen cold call): enkel de gemeten duur telt mee.
-        const d = gemetenDuur(a)
-        if (d !== null) { r.gesprekkenMetDuur++; r.gespreksduurSec += d }
-      }
-      if (a.uitkomst && BEREIKT.has(a.uitkomst)) voegUniek('bereikt', wie, a.lead_id)
+      r.coldCalls++
+      const d = gemetenDuur(a)
+      if (d === null) r.gesprekkenZonderDuur++
+      else { r.gesprekkenMetDuur++; r.gespreksduurSec += d }
+      if (a.uitkomst && BEREIKT.has(a.uitkomst)) voegBereikt(wie, a.lead_id)
     } else if (a.type === 'fase_gewijzigd') {
       if (a.naar_fase && a.van_fase && a.van_fase === a.naar_fase) continue // geen faseverschil
       rij(wie).faseverplaatsingen++
-      if (a.naar_fase === 'geen_interesse') {
-        const vorig = laatsteGeenInteresse.get(a.lead_id)
-        if (!vorig || a.created_at >= vorig.op) laatsteGeenInteresse.set(a.lead_id, { wie, op: a.created_at })
-      }
     }
   }
-  for (const [lead, { wie }] of laatsteGeenInteresse) voegUniek('geen_interesse', wie, lead)
 
-  // ── Afspraken ──
+  // ── Pipeline (actuele stand, verantwoordelijke van de lead) ──
+  const afsprakenPerLead = new Map<string, PAfspraak[]>()
   for (const a of inv.afspraken) {
-    if (a.lead_id && a.status !== 'cancelled' && inPeriode(a.created_at)) {
-      rij(a.setter_id)
-      voegUniek('ingepland', a.setter_id || ONBEKEND, a.lead_id)
-    }
-    if (a.status === 'cancelled' || !inPeriode(a.starts_at)) continue
-    const r = rij(a.verantwoordelijke_id)
-    if (isGehouden(a)) r.afsprakenGehouden++
-    else if (a.aanwezigheid === 'niet_gehouden') r.afsprakenNietGehouden++
-    else if (a.starts_at < inv.nu) r.afsprakenOnbevestigd++
+    if (!a.lead_id || a.status === 'cancelled') continue
+    const l = afsprakenPerLead.get(a.lead_id) ?? []
+    l.push(a); afsprakenPerLead.set(a.lead_id, l)
   }
-
-  // ── Gewonnen / verloren (op sluitdatum) ──
-  const gehoudenPerLead = new Map<string, PAfspraak>()
-  for (const a of inv.afspraken) {
-    if (!a.lead_id || a.status === 'cancelled' || !isGehouden(a)) continue
-    const vorig = gehoudenPerLead.get(a.lead_id)
-    if (!vorig || a.starts_at > vorig.starts_at) gehoudenPerLead.set(a.lead_id, a)
-  }
-  let geslotenZonderDatum = 0
-  let teamGewonnenGehouden = 0, teamAfgerondGehouden = 0
   for (const l of inv.leads) {
-    if (l.stage_key !== 'gewonnen' && l.stage_key !== 'verloren') continue
-    if (!l.gesloten_op) { geslotenZonderDatum++; continue }
-    if (!inPeriode(l.gesloten_op)) continue
-    const afspraak = gehoudenPerLead.get(l.id)
-    const r = rij(afspraak?.verantwoordelijke_id || l.assigned_to)
-    const won = l.stage_key === 'gewonnen'
-    if (won) r.gewonnen++; else r.verloren++
-    if (afspraak) {
-      r.closingAfgerond++; teamAfgerondGehouden++
-      if (won) { r.closingGewonnen++; teamGewonnenGehouden++ }
+    const afs = afsprakenPerLead.get(l.id) ?? []
+    const ingepland = INGEPLAND_FASES.has(l.stage_key) || afs.length > 0
+    const gehouden = GEHOUDEN_FASES.has(l.stage_key) || afs.some(isGehouden)
+    const telt = ingepland || l.stage_key === 'geen_interesse'
+    if (!telt) continue
+    const r = rij(l.assigned_to)
+    if (ingepland) r.afsprakenIngepland++
+    if (gehouden) r.afsprakenGehouden++
+    else if (ingepland) {
+      if (afs.some((a) => a.aanwezigheid === 'niet_gehouden')) r.afsprakenNietGehouden++
+      else if (afs.some((a) => a.aanwezigheid == null && a.starts_at < inv.nu)) r.afsprakenOnbevestigd++
     }
+    if (l.stage_key === 'gewonnen') r.gewonnen++
+    else if (l.stage_key === 'verloren') r.verloren++
+    else if (l.stage_key === 'geen_interesse') r.geenInteresse++
   }
 
   // ── Samenstellen ──
   for (const r of rijen.values()) {
-    r.bereikteLeads = aantalUniek('bereikt', r.sleutel)
-    r.afsprakenIngepland = aantalUniek('ingepland', r.sleutel)
-    r.geenInteresse = aantalUniek('geen_interesse', r.sleutel)
+    r.bereikteLeads = bereikt.get(r.sleutel)?.size ?? 0
+    r.closingGewonnen = r.gewonnen
+    r.closingAfgerond = r.gewonnen + r.verloren
     r.closingRate = percentage(r.closingGewonnen, r.closingAfgerond)
   }
   const perMedewerker = [...rijen.values()].sort((a, b) => (a.sleutel === ONBEKEND ? 1 : 0) - (b.sleutel === ONBEKEND ? 1 : 0))
 
   const team = leeg('team')
   for (const r of perMedewerker) {
-    for (const k of ['coldCalls', 'gesprekkenZonderBron', 'gesprekkenMetDuur', 'gesprekkenZonderDuur', 'gespreksduurSec', 'afsprakenGehouden', 'afsprakenNietGehouden', 'afsprakenOnbevestigd', 'gewonnen', 'verloren', 'faseverplaatsingen'] as const) team[k] += r[k]
+    for (const k of ['coldCalls', 'gesprekkenMetDuur', 'gesprekkenZonderDuur', 'gespreksduurSec', 'afsprakenIngepland', 'afsprakenGehouden', 'afsprakenNietGehouden', 'afsprakenOnbevestigd', 'gewonnen', 'verloren', 'geenInteresse', 'faseverplaatsingen'] as const) team[k] += r[k]
   }
-  team.bereikteLeads = aantalUniek('bereikt', '__team__')
-  team.afsprakenIngepland = aantalUniek('ingepland', '__team__')
-  team.geenInteresse = aantalUniek('geen_interesse', '__team__')
-  team.closingGewonnen = teamGewonnenGehouden
-  team.closingAfgerond = teamAfgerondGehouden
-  team.closingRate = percentage(teamGewonnenGehouden, teamAfgerondGehouden)
+  team.bereikteLeads = bereikt.get('__team__')?.size ?? 0
+  team.closingGewonnen = team.gewonnen
+  team.closingAfgerond = team.gewonnen + team.verloren
+  team.closingRate = percentage(team.closingGewonnen, team.closingAfgerond)
 
   // ── Podium ──
   const personen = perMedewerker.filter((r) => r.sleutel !== ONBEKEND)
-  const coldCaller = rangschik(personen.filter((r) => r.afsprakenIngepland > 0), (r) => r.afsprakenIngepland)
+  const coldCaller = rangschik(personen.filter((r) => r.coldCalls > 0), (r) => r.coldCalls)
     .filter((r) => r.plaats <= 3)
-    .map((r) => ({ plaats: r.plaats, sleutel: r.sleutel, waarde: r.afsprakenIngepland }))
-  const closer = rangschik(personen.filter((r) => r.closingRate !== null), (r) => r.closingRate ?? -1)
+    .map((r) => ({ plaats: r.plaats, sleutel: r.sleutel, waarde: r.coldCalls }))
+  const closer = rangschik(personen.filter((r) => r.closingRate !== null), (r) => r.closingRate ?? -1, (r) => r.closingAfgerond)
     .filter((r) => r.plaats <= 3)
     .map((r) => ({ plaats: r.plaats, sleutel: r.sleutel, waarde: r.closingRate ?? 0, detail: `${r.closingGewonnen} / ${r.closingAfgerond}` }))
 
-  return { perMedewerker, team, podium: { coldCaller, closer }, geslotenZonderDatum }
+  return { perMedewerker, team, podium: { coldCaller, closer } }
+}
+
+/**
+ * Uitkomst van een oude belregistratie (tijdlijntekst van vóór de
+ * activiteitentabel), zodat 'bereikt' ook voor die gesprekken klopt.
+ */
+export function uitkomstUitOudeTekst(body: string | null): string | null {
+  const t = (body ?? '').trim().toLowerCase()
+  if (!t) return null
+  if (t.startsWith('geen antwoord') || t.includes('niet opgenomen')) return 'niet_opgenomen'
+  if (t.includes('geen interesse')) return 'geen_interesse'
+  if (t.includes('afspraak gepland') || t.startsWith('afspraak')) return 'afspraak_gepland'
+  if (t.startsWith('terugbelafspraak') || t.startsWith('interesse') || t.startsWith('gesproken') || t.startsWith('e-mail versturen') || t.includes('contact gehad')) return 'contact_gehad'
+  return null
 }
 
 /** Duur als "1 u 05 min" of "12 min 30 s". */

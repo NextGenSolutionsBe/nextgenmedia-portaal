@@ -11,7 +11,7 @@ type Activiteit = { id: string; lead_id: string; medewerker_id: string | null; t
 type Correctie = { id: string; soort: string; oud: unknown; nieuw: unknown; reden: string; door_email: string | null; created_at: string }
 type Data = {
   perMedewerker: PRij[]; team: PRij | null; podium: { coldCaller: PodiumPlek[]; closer: PodiumPlek[] } | null
-  geslotenZonderDatum: number; namen: Record<string, string>; bronSinds: string | null; isAdmin: boolean; meId: string
+  namen: Record<string, string>; isAdmin: boolean; meId: string
   medewerkers?: { id: string; naam: string }[]
   registraties?: { afspraken: Afspraak[]; activiteiten: Activiteit[]; correcties: Correctie[]; leadNaam: Record<string, string> } | null
 }
@@ -73,10 +73,10 @@ export function PrestatiesClient() {
           {/* Podium */}
           {data.podium && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <Podium titel="Beste cold caller" sub="Meeste unieke leads met een ingeplande afspraak" icoon={<PhoneCall className="h-4 w-4" />}
-                plekken={data.podium.coldCaller} naam={naam} waarde={(p) => `${p.waarde} ${p.waarde === 1 ? 'afspraak' : 'afspraken'}`} leeg="Nog geen ingeplande afspraken in deze periode." />
-              <Podium titel="Beste closer" sub="Hoogste closing rate op gehouden afspraken waarvoor die medewerker verantwoordelijk was" icoon={<Target className="h-4 w-4" />}
-                plekken={data.podium.closer} naam={naam} waarde={(p) => `${pct(p.waarde)} · ${p.detail} gewonnen/afgerond`} leeg="Nog geen afgeronde uitkomsten na een gehouden afspraak — dus nog geen closing rate." />
+              <Podium titel="Beste cold caller" sub="Meeste cold calls in deze periode" icoon={<PhoneCall className="h-4 w-4" />}
+                plekken={data.podium.coldCaller} naam={naam} waarde={(p) => `${p.waarde} ${p.waarde === 1 ? 'call' : 'calls'}`} leeg="Nog geen cold calls in deze periode." />
+              <Podium titel="Beste closer" sub="Hoogste closing rate op de leads waarvan die medewerker verantwoordelijke is" icoon={<Target className="h-4 w-4" />}
+                plekken={data.podium.closer} naam={naam} waarde={(p) => `${pct(p.waarde)} · ${p.detail} gewonnen/afgerond`} leeg="Nog geen gewonnen of verloren leads met een verantwoordelijke — dus nog geen closing rate." />
             </div>
           )}
 
@@ -86,17 +86,18 @@ export function PrestatiesClient() {
             if (!r) return <div className="card-base text-sm text-gray-500">Nog geen salesactiviteit in deze periode.</div>
             return (
               <div className="card-base">
-                <h2 className="font-semibold mb-3">{data.team ? 'Team' : 'Mijn cijfers'}</h2>
+                <h2 className="font-semibold">{data.team ? 'Team' : 'Mijn cijfers'}</h2>
+                <p className="text-xs text-gray-500 mb-3">Cold calls, bereikt, gespreksduur en faseverplaatsingen: gekozen periode. Afspraken, gewonnen, verloren, geen interesse en closing rate: de pipeline zoals ze nu staat, per verantwoordelijke.</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-                  <Tegel label="Cold calls (Focus Mode)" waarde={r.coldCalls} onder={r.gesprekkenZonderBron ? `+ ${r.gesprekkenZonderBron} oudere zonder bron` : undefined} />
+                  <Tegel label="Cold calls" waarde={r.coldCalls} />
                   <Tegel label="Bereikte leads" waarde={r.bereikteLeads} />
                   <Tegel label="Gespreksduur (gemeten)" waarde={r.gesprekkenMetDuur ? duurTekst(r.gespreksduurSec) : '—'} onder={r.gesprekkenZonderDuur ? `${r.gesprekkenZonderDuur} gesprek(ken) zonder meting` : undefined} />
-                  <Tegel label="Afspraken ingepland" waarde={r.afsprakenIngepland} onder="unieke leads" />
+                  <Tegel label="Afspraken ingepland" waarde={r.afsprakenIngepland} onder="leads in de pipeline" />
                   <Tegel label="Afspraken gehouden" waarde={r.afsprakenGehouden} onder={[r.afsprakenNietGehouden ? `${r.afsprakenNietGehouden} niet gehouden` : '', r.afsprakenOnbevestigd ? `${r.afsprakenOnbevestigd} nog te bevestigen` : ''].filter(Boolean).join(' · ') || undefined} />
-                  <Tegel label="Closing rate" waarde={pct(r.closingRate)} onder={r.closingAfgerond ? `${r.closingGewonnen} / ${r.closingAfgerond} gewonnen/afgerond` : 'geen afgeronde uitkomsten'} nadruk />
+                  <Tegel label="Closing rate" waarde={pct(r.closingRate)} onder={r.closingAfgerond ? `${r.closingGewonnen} / ${r.closingAfgerond} gewonnen/afgerond` : 'nog geen gewonnen of verloren leads'} nadruk />
                   <Tegel label="Gewonnen" waarde={r.gewonnen} kleur="text-green-700" />
                   <Tegel label="Verloren" waarde={r.verloren} kleur="text-red-600" />
-                  <Tegel label="Geen interesse" waarde={r.geenInteresse} onder="unieke leads" />
+                  <Tegel label="Geen interesse" waarde={r.geenInteresse} onder="leads in de pipeline" />
                   <Tegel label="Faseverplaatsingen" waarde={r.faseverplaatsingen} />
                 </div>
               </div>
@@ -121,7 +122,7 @@ export function PrestatiesClient() {
                       {data.perMedewerker.map((r) => (
                         <tr key={r.sleutel} className={r.sleutel === 'onbekend' ? 'text-gray-500' : ''}>
                           <td className="table-td font-medium">{naam(r.sleutel === 'onbekend' ? null : r.sleutel)}</td>
-                          <td className="table-td text-right tabular-nums">{r.coldCalls}{r.gesprekkenZonderBron ? <span className="text-gray-400"> +{r.gesprekkenZonderBron}</span> : null}</td>
+                          <td className="table-td text-right tabular-nums">{r.coldCalls}</td>
                           <td className="table-td text-right tabular-nums">{r.bereikteLeads}</td>
                           <td className="table-td text-right tabular-nums">{r.gesprekkenMetDuur ? duurTekst(r.gespreksduurSec) : '—'}</td>
                           <td className="table-td text-right tabular-nums">{r.afsprakenIngepland}</td>
@@ -186,14 +187,13 @@ function Tegel({ label, waarde, onder, kleur = 'text-gray-900', nadruk }: { labe
 function Toelichting({ data }: { data: Data }) {
   const r = data.team ?? data.perMedewerker[0]
   const punten: string[] = []
-  punten.push(data.bronSinds
-    ? `Cold calls worden als Focus Mode-gesprek herkend sinds ${new Date(data.bronSinds).toLocaleDateString('nl-BE')}; oudere gesprekken staan apart als "zonder bron".`
-    : 'Cold calls worden vanaf nu als Focus Mode-gesprek herkend; oudere gesprekken staan apart als "zonder bron".')
+  punten.push('Afspraken ingepland/gehouden, gewonnen, verloren en geen interesse komen rechtstreeks uit de pipeline: elke lead telt voor de verantwoordelijke die er nu op staat, ongeacht wie de kaart versleepte. Dit is de stand van nu, los van de gekozen periode.')
+  punten.push('Ingepland = lead in Afspraak gepland, Voorstel, Gewonnen of Verloren (of met een afspraak in de agenda). Gehouden = lead in Voorstel, Gewonnen of Verloren (of afspraak bevestigd als gehouden).')
+  punten.push('Closing rate = gewonnen ÷ (gewonnen + verloren).')
+  punten.push('Cold calls = alle geregistreerde belpogingen van die medewerker in de periode. Faseverplaatsingen tellen voor wie de kaart zelf verplaatste.')
   punten.push('Gespreksduur telt enkel gesprekken waarbij de timer liep (start én einde bewaard). Er wordt nooit een duur geschat.')
-  punten.push('Een afspraak telt als gehouden wanneer ze zo bevestigd werd of een uitkomst gewonnen/verloren kreeg. Voorbij en niet bevestigd = "nog te bevestigen", niet als niet gehouden.')
-  punten.push('Gewonnen/verloren tellen voor de verantwoordelijke van de laatste gehouden afspraak (anders de verantwoordelijke van de lead) — niet voor wie de kaart versleepte.')
-  if (r && r.afsprakenOnbevestigd) punten.push(`${r.afsprakenOnbevestigd} voorbije afspraak/afspraken wachten nog op bevestiging (gehouden of niet) — bevestig ze hieronder.`)
-  if (data.geslotenZonderDatum) punten.push(`${data.geslotenZonderDatum} gesloten lead(s) hebben geen sluitdatum en kunnen in geen periode geteld worden.`)
+  if (r && r.afsprakenOnbevestigd) punten.push(`${r.afsprakenOnbevestigd} lead(s) in Afspraak gepland hebben een voorbije afspraak die nog niet als gehouden bevestigd is.`)
+  if (data.perMedewerker.some((x) => x.sleutel === 'onbekend')) punten.push('"Niet toegewezen" = leads zonder verantwoordelijke in de pipeline. Kies er een verantwoordelijke op en ze tellen meteen mee voor die persoon.')
   return (
     <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600 space-y-1">
       <div className="font-semibold text-gray-700 flex items-center gap-1.5"><Info className="h-3.5 w-3.5" />Hoe de cijfers tot stand komen</div>
@@ -244,7 +244,7 @@ function Correcties({ data, naam, onGewijzigd }: { data: Data; naam: (id: string
         <KaartTabel>
           <div className="table-wrap">
             <table className="w-full text-sm">
-              <thead><tr className="border-b border-gray-100"><th className="table-th">Lead</th><th className="table-th">Datum</th><th className="table-th">Ingepland door</th><th className="table-th">Verantwoordelijke</th><th className="table-th">Gehouden?</th></tr></thead>
+              <thead><tr className="border-b border-gray-100"><th className="table-th">Lead</th><th className="table-th">Datum</th><th className="table-th">Ingepland door</th><th className="table-th">Agenda van</th><th className="table-th">Gehouden?</th></tr></thead>
               <tbody className="divide-y divide-gray-50">
                 {reg.afspraken.map((a) => {
                   const gehouden = a.aanwezigheid === 'gehouden' || (!a.aanwezigheid && (a.outcome === 'won' || a.outcome === 'lost'))
@@ -254,13 +254,7 @@ function Correcties({ data, naam, onGewijzigd }: { data: Data; naam: (id: string
                       <td className="table-td font-medium">{a.lead_id ? reg.leadNaam[a.lead_id] ?? '—' : '—'}</td>
                       <td className="table-td whitespace-nowrap">{datumTijd(a.starts_at)}</td>
                       <td className="table-td">{naam(a.setter_id)}</td>
-                      <td className="table-td">
-                        <select className="input-base !w-auto text-xs" value={a.verantwoordelijke_id ?? ''} disabled={bezig === a.id}
-                          onChange={(e) => stuur(a.id, { soort: 'verantwoordelijke', id: a.id, waarde: e.target.value || null }, true)}>
-                          <option value="">— niemand —</option>
-                          {medewerkers.map(([id, n]) => <option key={id} value={id}>{n}</option>)}
-                        </select>
-                      </td>
+                      <td className="table-td">{naam(a.verantwoordelijke_id)}</td>
                       <td className="table-td">
                         <div className="flex items-center gap-1 flex-wrap">
                           {gehouden ? <span className="inline-flex items-center gap-1 text-green-700 text-xs font-medium"><CheckCircle2 className="h-3.5 w-3.5" />Gehouden</span>
