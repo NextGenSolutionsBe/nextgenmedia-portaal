@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Loader2, X, Link2, Save, UserRound } from 'lucide-react'
+import { Loader2, X, Link2, Save, UserRound, Unlink } from 'lucide-react'
 import { SIGNATURES, matchSignature } from '@/lib/sales/signatures'
 import { merkStijl } from '@/lib/sales/merk'
 
@@ -29,8 +29,10 @@ type GoogleAgenda = { id: string; summary: string; primary: boolean; accessRole:
  * Bij een nieuwe koppeling reizen naam en handtekening mee naar Google en komen
  * ze terug in de callback, zodat alles meteen goed staat na één keer inloggen.
  */
-export function AgendaDialog({ existing, pipelines = [], owners = [], onClose, onSaved }: {
+export function AgendaDialog({ existing, pipelines = [], owners = [], isAdmin = false, onClose, onSaved }: {
   existing?: Existing | null
+  /** Enkel een admin kan een agenda loskoppelen. */
+  isAdmin?: boolean
   pipelines?: Pipeline[]
   /** Bestaande koppelingen: bron voor "agenda uit een gekoppeld account". */
   owners?: Bron[]
@@ -163,6 +165,19 @@ export function AgendaDialog({ existing, pipelines = [], owners = [], onClose, o
       else toast.success('Opgeslagen.')
       onSaved?.()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt') } finally { setSaving(false) }
+  }
+
+  const loskoppelen = async () => {
+    if (!existing) return
+    if (!confirm(`Agenda "${existing.name ?? 'deze agenda'}" loskoppelen?\n\nZe verdwijnt uit de agendakiezer; er kan niet meer in geboekt worden. Oude afspraken blijven bewaard. Opnieuw koppelen kan altijd.`)) return
+    setSaving(true)
+    try {
+      const r = await fetch(`/api/admin/sales/calendar/agenda?id=${encodeURIComponent(existing.id)}`, { method: 'DELETE' })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j.error ?? 'Loskoppelen mislukt')
+      toast.success('Agenda losgekoppeld.')
+      onSaved?.()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Loskoppelen mislukt', { duration: 10000 }) } finally { setSaving(false) }
   }
 
   return (
@@ -332,6 +347,11 @@ export function AgendaDialog({ existing, pipelines = [], owners = [], onClose, o
             </button>
           )}
           <button onClick={onClose} className="btn-secondary">Annuleer</button>
+          {existing && isAdmin && (
+            <button onClick={loskoppelen} disabled={saving} className="btn-danger" title="Agenda loskoppelen">
+              <Unlink className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
     </div>

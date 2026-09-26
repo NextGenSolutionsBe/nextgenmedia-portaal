@@ -7,13 +7,14 @@ import { normaliseerVelden, isInzendingStatus, INZENDING_STATUS_INFO, type Besta
 
 export const dynamic = 'force-dynamic'
 
-type Ctx = { params: { id: string; inzendingId: string } }
+type Ctx = { params: Promise<{ id: string; inzendingId: string }> }
 
 /**
  * Eén inzending openen: met tijdelijke downloadlinks (1 uur) voor bestanden.
  * Een nieuwe inzending wordt bij het openen automatisch "gezien".
  */
-export async function GET(_req: NextRequest, { params }: Ctx) {
+export async function GET(_req: NextRequest, ctx: Ctx) {
+  const params = await ctx.params
   try {
     const g = await formulierGuard('bekijken')
     if (!g.ok) return g.response
@@ -58,7 +59,8 @@ export async function GET(_req: NextRequest, { params }: Ctx) {
 }
 
 /** Status en/of interne notitie aanpassen. */
-export async function PATCH(req: NextRequest, { params }: Ctx) {
+export async function PATCH(req: NextRequest, ctx: Ctx) {
+  const params = await ctx.params
   try {
     const g = await formulierGuard('aanpassen')
     if (!g.ok) return g.response
@@ -87,6 +89,47 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
         metadata: { formulier_id: params.id }, ip: meta.ip, userAgent: meta.userAgent,
       })
     }
+    return NextResponse.json({ ok: true })
+  } catch (err) {
+    return NextResponse.json({ error: safeMessage(err, 'formulier-inzending') }, { status: 400 })
+  }
+}
+
+/** Een inzending definitief verwijderen, samen met de geüploade bestanden. */
+export async function DELETE(req: NextRequest, ctx: Ctx) {
+  const params = await ctx.params
+  try {
+    const g = await formulierGuard('verwijderen')
+    if (!g.ok) return g.response
+    if (!isUuid(params.id) || !isUuid(params.inzendingId)) return NextResponse.json({ error: 'Inzending niet gevonden' }, { status: 404 })
+    const admin = createAdminSupabaseClient()
+    const { data: oud, error: oudFout } = await admin.from('formulier_inzendingen')
+      .select('id, naam, email, client_id, link_id, antwoorden, velden_snapshot, created_at')
+      .eq('id', params.inzendingId).eq('formulier_id', params.id).maybeSingle()
+    if (oudFout) return NextResponse.json({ error: safeMessage(oudFout, 'formulier-inzending') }, { status: 500 })
+    if (!oud) return NextResponse.json({ error: 'Inzending niet gevonden' }, { status: 404 })
+
+    // Bestandspaden verzamelen vóór het wissen (enkel binnen de map van dit formulier).
+    const velden = normaliseerVelden(oud.velden_snapshot ?? [])
+    const antwoorden = (oud.antwoorden ?? {}) as Record<string, unknown>
+    const paden: string[] = []
+    for (const v of velden.filter((x) => x.type === 'bestand')) {
+      const lijst = Array.isArray(antwoorden[v.id]) ? (antwoorden[v.id] as BestandAntwoord[]) : []
+      for (const b of lijst) if (b?.pad && b.pad.startsWith(`${params.id}/`)) paden.push(b.pad)
+    }
+
+    const { error } = await admin.from('formulier_inzendingen').delete().eq('id', oud.id)
+    if (error) return NextResponse.json({ error: safeMessage(error, 'formulier-inzending') }, { status: 500 })
+    if (paden.length) { try { await admin.storage.from(BUCKET).remove(paden) } catch { /* wees-bestanden zijn onschadelijk */ } }
+
+    const meta = requestMeta(req)
+    await logAudit({
+      action: 'formulier.inzending.delete', entityType: 'formulier_inzending', entityId: oud.id,
+      summary: `Inzending${oud.naam ? ` van ${oud.naam}` : ''} verwijderd`,
+      actorUserId: g.actor.userId, actorEmail: g.actor.email, actorRole: 'staff',
+      metadata: { formulier_id: params.id, client_id: oud.client_id, link_id: oud.link_id, email: oud.email, ingestuurd_op: oud.created_at, bestanden: paden.length },
+      ip: meta.ip, userAgent: meta.userAgent,
+    })
     return NextResponse.json({ ok: true })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err, 'formulier-inzending') }, { status: 400 })

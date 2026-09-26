@@ -8,7 +8,7 @@ import { logAudit, requestMeta } from '@/lib/audit'
 export const dynamic = 'force-dynamic'
 
 /**
- * De gewerkte periodes van een setter: bekijken en verwijderen.
+ * De gewerkte periodes van een setter: bekijken, bijboeken, aanpassen en verwijderen.
  *
  * Een admin ziet en beheert die van iedereen. Een setter enkel de zijne — ook
  * bij het verwijderen, en dat wordt hier gecontroleerd en niet in het scherm.
@@ -141,6 +141,85 @@ export async function POST(req: NextRequest) {
     await logAudit({
       action: 'sales.time.manual', entityType: 'sales_setter', entityId: setterId,
       summary: `Verkoop: ${uren} u handmatig geboekt op ${new Date(check.startMs).toLocaleString('nl-BE')}`,
+      actorUserId: s.actor.id, actorEmail: s.actor.email ?? null, actorRole: s.isAdmin ? 'admin' : 'employee',
+      ip: meta.ip, userAgent: meta.userAgent,
+    })
+
+    return NextResponse.json({ ok: true })
+  } catch (err) {
+    return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
+  }
+}
+
+/**
+ * PATCH { id, startIso?, eindIso?, note? } — een periode rechtzetten.
+ *
+ * Zelfde regels als bijboeken (valideerPeriode): geen toekomst, geen blok
+ * boven MAX_UREN en vooral GEEN OVERLAP met een ander blok van dezelfde setter
+ * — het blok zelf telt daarbij uiteraard niet mee. Een lopende timer heeft nog
+ * geen eindtijd: daarvan kan je enkel de notitie aanpassen.
+ */
+export async function PATCH(req: NextRequest) {
+  try {
+    const s = await scope()
+    if (!s) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
+    const b = await req.json().catch(() => ({}))
+    const id = String(b.id ?? '')
+    if (!id) return NextResponse.json({ error: 'id vereist' }, { status: 400 })
+
+    const admin = createAdminSupabaseClient()
+    const { data: row } = await admin.from('sales_time_entries')
+      .select('id, setter_id, started_at, ended_at, note').eq('id', id).maybeSingle()
+    if (!row) return NextResponse.json({ error: 'Periode niet gevonden' }, { status: 404 })
+    const entry = row as { id: string; setter_id: string; started_at: string; ended_at: string | null; note: string | null }
+    if (!s.isAdmin && entry.setter_id !== s.meId) {
+      return NextResponse.json({ error: 'Dit is niet jouw tijdregistratie' }, { status: 403 })
+    }
+
+    const patch: Record<string, unknown> = {}
+    if (b.note !== undefined) patch.note = String(b.note ?? '').trim().slice(0, 200) || null
+
+    const wiltTijd = b.startIso !== undefined || b.eindIso !== undefined
+    let check: { startMs: number; eindMs: number } | null = null
+    if (wiltTijd) {
+      if (entry.ended_at === null) {
+        return NextResponse.json({ error: 'Deze timer loopt nog. Stop hem eerst; daarna kan je begin en einde aanpassen.' }, { status: 409 })
+      }
+      const startIso = String(b.startIso ?? entry.started_at)
+      const eindIso = String(b.eindIso ?? entry.ended_at)
+      const ruwStart = new Date(startIso).getTime()
+      const basis = Number.isFinite(ruwStart) ? ruwStart : Date.now()
+      const [{ data: rond }, { data: lopend }] = await Promise.all([
+        admin.from('sales_time_entries').select('id, started_at, ended_at')
+          .eq('setter_id', entry.setter_id)
+          .gte('started_at', new Date(basis - 36 * 3600_000).toISOString())
+          .lt('started_at', new Date(basis + 36 * 3600_000).toISOString()).limit(200),
+        admin.from('sales_time_entries').select('id, started_at, ended_at')
+          .eq('setter_id', entry.setter_id).is('ended_at', null).limit(5),
+      ])
+      const bestaande = [...((rond ?? []) as (Blok & { id: string })[]), ...((lopend ?? []) as (Blok & { id: string })[])]
+        .filter((x) => x.id !== id)
+      const uit = valideerPeriode(startIso, eindIso, bestaande)
+      if (!uit.ok) return NextResponse.json({ error: uit.fout }, { status: 400 })
+      check = uit
+      patch.started_at = new Date(uit.startMs).toISOString()
+      patch.ended_at = new Date(uit.eindMs).toISOString()
+    }
+    if (!Object.keys(patch).length) return NextResponse.json({ ok: true })
+
+    const { error } = await admin.from('sales_time_entries').update(patch).eq('id', id)
+    if (error) throw new Error(error.message)
+
+    // Uren aanpassen verandert wat er uitbetaald wordt → in het logboek, met
+    // het oude en het nieuwe blok, zodat achteraf te zien is wat er wijzigde.
+    const meta = requestMeta(req)
+    const blok = (van: string | number, tot: string | number | null) =>
+      `${new Date(van).toLocaleString('nl-BE')}–${tot === null ? 'lopend' : new Date(tot).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })}`
+    await logAudit({
+      action: 'sales.time.edit', entityType: 'sales_setter', entityId: entry.setter_id,
+      summary: check
+        ? `Verkoop: gewerkte periode ${blok(entry.started_at, entry.ended_at)} aangepast naar ${blok(check.startMs, check.eindMs)}`
+        : `Verkoop: notitie van gewerkte periode ${blok(entry.started_at, entry.ended_at)} aangepast`,
       actorUserId: s.actor.id, actorEmail: s.actor.email ?? null, actorRole: s.isAdmin ? 'admin' : 'employee',
       ip: meta.ip, userAgent: meta.userAgent,
     })

@@ -20,7 +20,7 @@ export function LeadOpdrachten({ leadId, verversSleutel, onChanged }: {
   const [beschikbaar, setBeschikbaar] = useState(true)
   const [bezig, setBezig] = useState(false)
   const [nieuw, setNieuw] = useState({ titel: '', bedrag: '' })
-  const [bewerk, setBewerk] = useState<{ id: string; titel: string; bedrag: string } | null>(null)
+  const [bewerk, setBewerk] = useState<{ id: string; titel: string; bedrag: string; notitie: string } | null>(null)
 
   const laad = useCallback(async () => {
     try {
@@ -67,7 +67,7 @@ export function LeadOpdrachten({ leadId, verversSleutel, onChanged }: {
 
   const bewaar = async () => {
     if (!bewerk || !controleer(bewerk.titel, bewerk.bedrag)) return
-    if (await stuur(`/api/admin/sales/leads/${leadId}/opdrachten/${bewerk.id}`, 'PATCH', { titel: bewerk.titel.trim(), bedrag: bewerk.bedrag.trim() }, 'Opdracht aangepast.')) {
+    if (await stuur(`/api/admin/sales/leads/${leadId}/opdrachten/${bewerk.id}`, 'PATCH', { titel: bewerk.titel.trim(), bedrag: bewerk.bedrag.trim(), notitie: bewerk.notitie.trim() }, 'Opdracht aangepast.')) {
       setBewerk(null)
     }
   }
@@ -100,22 +100,29 @@ export function LeadOpdrachten({ leadId, verversSleutel, onChanged }: {
           {lijst.map((o) => (
             <div key={o.id} className="rounded-lg border border-gray-100 bg-gray-50 px-2.5 py-1.5">
               {bewerk?.id === o.id ? (
-                <form className="flex flex-wrap gap-1.5 items-center" onSubmit={(e) => { e.preventDefault(); void bewaar() }}>
-                  <input autoFocus className="input-base text-sm flex-1 min-w-[8rem]" value={bewerk.titel}
-                    onChange={(e) => setBewerk({ ...bewerk, titel: e.target.value })} aria-label="Titel" />
-                  <input className="input-base text-sm w-28" inputMode="decimal" value={bewerk.bedrag}
-                    onChange={(e) => setBewerk({ ...bewerk, bedrag: e.target.value })} aria-label="Bedrag excl. btw" />
-                  <button type="submit" disabled={bezig} className="h-8 w-8 flex items-center justify-center rounded-lg bg-black text-white" title="Bewaren"><Check className="h-4 w-4" /></button>
-                  <button type="button" onClick={() => setBewerk(null)} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-gray-200" title="Annuleren"><X className="h-4 w-4" /></button>
+                <form className="space-y-1.5" onSubmit={(e) => { e.preventDefault(); void bewaar() }}>
+                  <div className="flex flex-wrap gap-1.5 items-center">
+                    <input autoFocus className="input-base text-sm flex-1 min-w-[8rem]" value={bewerk.titel}
+                      onChange={(e) => setBewerk({ ...bewerk, titel: e.target.value })} aria-label="Titel" />
+                    <input className="input-base text-sm w-28" inputMode="decimal" value={bewerk.bedrag}
+                      onChange={(e) => setBewerk({ ...bewerk, bedrag: e.target.value })} aria-label="Bedrag excl. btw" />
+                  </div>
+                  <textarea rows={2} className="input-base text-sm" value={bewerk.notitie} maxLength={2000}
+                    placeholder="Omschrijving (optioneel)" aria-label="Omschrijving"
+                    onChange={(e) => setBewerk({ ...bewerk, notitie: e.target.value })} />
+                  <div className="flex gap-1.5">
+                    <button type="submit" disabled={bezig} className="btn-primary text-xs"><Check className="h-3.5 w-3.5" />Bewaren</button>
+                    <button type="button" onClick={() => setBewerk(null)} className="btn-secondary text-xs"><X className="h-3.5 w-3.5" />Annuleer</button>
+                  </div>
                 </form>
               ) : (
                 <div className="flex items-center gap-2">
                   <span className="text-[13px] text-gray-900 flex-1 min-w-0 truncate" title={o.notitie ?? undefined}>{o.titel}</span>
                   <span className="text-[13px] font-semibold tabular-nums">{euro(o.bedrag_cents)}</span>
-                  <button onClick={() => setBewerk({ id: o.id, titel: o.titel, bedrag: bedragTekst(o.bedrag_cents) })} disabled={bezig}
+                  <button onClick={() => setBewerk({ id: o.id, titel: o.titel, bedrag: bedragTekst(o.bedrag_cents), notitie: o.notitie ?? '' })} disabled={bezig}
                     className="h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-gray-200 hover:text-black" title="Aanpassen"><Pencil className="h-3.5 w-3.5" /></button>
                   <button onClick={() => verwijder(o)} disabled={bezig}
-                    className="h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-600" title="Loskoppelen van deze lead"><Trash2 className="h-3.5 w-3.5" /></button>
+                    className="h-7 w-7 flex items-center justify-center rounded-md text-red-500 hover:bg-red-50 hover:text-red-700" title="Loskoppelen van deze lead"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
               )}
               {o.notitie && bewerk?.id !== o.id && <p className="text-[11px] text-gray-500 mt-0.5 line-clamp-2">{o.notitie}</p>}

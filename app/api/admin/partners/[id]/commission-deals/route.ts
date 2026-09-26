@@ -148,6 +148,80 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ ok: true, year, pct, amount })
     }
 
+    // ── Edit a sale → recompute commission → update its (pending) ledger row ─
+    // Kan alleen zolang de commissiepost nog niet afgerekend is: een afgerekende
+    // post hoort bij een afrekening en mag niet stilletjes van bedrag wisselen.
+    if (action === 'edit_sale') {
+      const saleId = String(body.sale_id ?? '')
+      if (!saleId) return NextResponse.json({ error: 'sale_id vereist' }, { status: 400 })
+      const { data: sale } = await admin
+        .from('partner_commission_sales')
+        .select('*')
+        .eq('id', saleId)
+        .eq('deal_id', deal_id)
+        .eq('freelancer_id', freelancerId)
+        .maybeSingle()
+      if (!sale) return NextResponse.json({ error: 'Verkoop niet gevonden' }, { status: 404 })
+
+      const saleAmount = body.sale_amount !== undefined ? Number(body.sale_amount) : Number(sale.sale_amount)
+      const saleDate = (body.sale_date as string) || (sale.sale_date as string)
+      if (!Number.isFinite(saleAmount) || saleAmount <= 0) {
+        return NextResponse.json({ error: 'Verkoopbedrag is verplicht' }, { status: 400 })
+      }
+      if (!/^\d{4}-\d{2}-\d{2}/.test(saleDate)) return NextResponse.json({ error: 'Ongeldige datum' }, { status: 400 })
+      const saleDesc = body.description !== undefined ? (String(body.description ?? '').trim() || null) : (sale.description as string | null)
+      const serviceSlug = body.service_slug !== undefined ? (body.service_slug || null) : (sale.service_slug ?? null)
+
+      // Ledgerpost moet nog open staan.
+      let ledgerRow: { id: string; status: string } | null = null
+      if (sale.ledger_id) {
+        const { data: l } = await admin.from('partner_ledger_entries')
+          .select('id, status').eq('id', sale.ledger_id).eq('freelancer_id', freelancerId).maybeSingle()
+        ledgerRow = (l ?? null) as { id: string; status: string } | null
+        if (ledgerRow && ledgerRow.status !== 'pending') {
+          return NextResponse.json({
+            error: 'De commissie van deze verkoop is al afgerekend. Aanpassen kan niet meer — voeg een correctie toe als nieuwe verkoop of handmatige post.',
+          }, { status: 409 })
+        }
+      }
+
+      const { year, pct, amount } = commissionForSale(
+        { referred_at: deal.start_date, pct_year_1: deal.pct_year_1, pct_year_2: deal.pct_year_2, pct_year_3: deal.pct_year_3 },
+        saleAmount,
+        saleDate,
+      )
+      if (amount <= 0) return NextResponse.json({ error: 'Commissie is 0' }, { status: 400 })
+
+      const direction = deal.direction === 'partner_pays_us' ? 'partner_pays_us' : 'we_pay_partner'
+      const wePay = direction === 'we_pay_partner'
+      const dealName = deal.label || 'doorverwezen klant'
+
+      if (ledgerRow) {
+        const { error: lErr } = await admin.from('partner_ledger_entries').update({
+          amount: wePay ? amount : -amount,
+          direction,
+          commission_year: year,
+          occurred_on: saleDate,
+          description: `Commissie ${pct}% (jaar ${year})${wePay ? '' : ' — partner betaalt ons'} — ${saleDesc ? saleDesc + ' · ' : ''}${dealName}`,
+        }).eq('id', ledgerRow.id).eq('status', 'pending')
+        if (lErr) throw new Error(lErr.message)
+      }
+
+      const { error: sErr } = await admin.from('partner_commission_sales').update({
+        sale_amount: saleAmount,
+        sale_date: saleDate,
+        description: saleDesc,
+        service_slug: serviceSlug,
+        commission_year: year,
+        commission_pct: pct,
+        commission_amount: amount,
+      }).eq('id', saleId)
+      if (sErr) throw new Error(sErr.message)
+
+      try { revalidatePath(`/admin/partners/${freelancerId}`) } catch { }
+      return NextResponse.json({ ok: true, year, pct, amount })
+    }
+
     // ── Edit referral fields ────────────────────────────────────────────────
     const patch: Record<string, unknown> = {}
     for (const k of ['label', 'service_slug', 'start_date', 'pct_year_1', 'pct_year_2', 'pct_year_3', 'status', 'notes', 'client_id', 'direction'] as const) {

@@ -72,15 +72,35 @@ function ContractStatusBadge({ status }: { status: string }) {
 
 export default async function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const { client, services, contracts, scontracts } = await getClient(id)
+  const { client, services: allServices, contracts, scontracts } = await getClient(id)
 
   if (!client) notFound()
+
+  // Diensten die in het bewerkformulier werden uitgevinkt blijven bewaard
+  // (inactief, config.removed) voor de historiek, maar tellen niet meer mee.
+  const services = allServices.filter((s: any) => !s?.config?.removed)
+  const serviceSlugs: string[] = services.map((s: any) => s.service_slug)
+
+  // Start maand + contractduur per dienst (hoofdcontract uit service_contracts).
+  const serviceContractCfg: Record<string, { start_month: string; contract_months: number }> = {}
+  for (const slug of serviceSlugs) {
+    const rows = scontracts.filter((r: any) => r.service_slug === slug)
+    const main: any = slug === 'webdesign'
+      ? rows.find((r: any) => r.model === 'webdesign_project') ?? rows.find((r: any) => r.model !== 'webdesign_maintenance')
+      : rows[0]
+    if (!main?.start_date) continue
+    let months = Number(main.config?.contract_months) || 0
+    if (!months && main.end_date) {
+      const a = new Date(String(main.start_date).slice(0, 10)), b = new Date(String(main.end_date).slice(0, 10))
+      months = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth())
+    }
+    serviceContractCfg[slug] = { start_month: String(main.start_date).slice(0, 7), contract_months: months >= 1 ? months : 12 }
+  }
 
   const activeServices = services.filter((s: { active: boolean }) => s.active)
   const hasSocial = activeServices.some((s: { service_slug: string }) => s.service_slug === 'social-media')
   const hasWebdesign = activeServices.some((s: { service_slug: string }) => s.service_slug === 'webdesign')
 
-  const activeServiceSlugs = activeServices.map((s: any) => s.service_slug)
 
   // Build portal access data — all services that have a client_services record
   const portalAccessServices = services.map((svc: any) => {
@@ -378,7 +398,8 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           {/* Edit form */}
           <ClientEditForm
             client={client}
-            services={activeServiceSlugs}
+            services={serviceSlugs}
+            serviceContracts={serviceContractCfg}
             socialConfig={socialConfig}
             adsConfig={adsConfig}
             webdesignConfig={webdesignConfig}

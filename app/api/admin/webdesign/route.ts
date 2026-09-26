@@ -28,7 +28,7 @@ export async function PATCH(req: NextRequest) {
 
     const patch: Record<string, unknown> = {}
     if (status !== undefined) patch.status = status
-    if (admin_notes !== undefined) patch.admin_notes = admin_notes
+    if (admin_notes !== undefined) patch.admin_notes = String(admin_notes ?? '').trim().slice(0, 4000) || null
     if (Object.keys(patch).length === 0) {
       return NextResponse.json({ error: 'Geen wijzigingen' }, { status: 400 })
     }

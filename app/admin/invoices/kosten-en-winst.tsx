@@ -4,7 +4,7 @@ import { KaartTabel } from '@/components/ui/kaart-tabel'
 
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Loader2, X, Plus, Pencil, Ban, Undo2, CheckCircle2, AlertTriangle, ExternalLink, Info, Wallet } from 'lucide-react'
+import { Loader2, X, Plus, Pencil, Ban, Undo2, CheckCircle2, AlertTriangle, ExternalLink, Info, Wallet, Trash2 } from 'lucide-react'
 import { formatEuro, formatDate } from '@/lib/utils'
 import {
   CLASSIFICATIE_LABEL, KOSTEN_STATUS_LABEL, KOSTEN_CATEGORIEEN, stelClassificatieVoor,
@@ -35,7 +35,7 @@ type Antwoord = {
 
 const ACTIE_LABEL: Record<string, string> = {
   lijn_toevoegen: 'Lijn toegevoegd', lijn_wijzigen: 'Lijn gewijzigd', lijn_verwijderen: 'Lijn verwijderd',
-  kost_toevoegen: 'Kost toegevoegd', kost_wijzigen: 'Kost gewijzigd', kost_annuleren: 'Kost geannuleerd', kost_herstellen: 'Kost hersteld', geen_directe_kosten: 'Bevestiging geen directe kosten',
+  kost_toevoegen: 'Kost toegevoegd', kost_wijzigen: 'Kost gewijzigd', kost_annuleren: 'Kost geannuleerd', kost_herstellen: 'Kost hersteld', kost_verwijderen: 'Kost definitief verwijderd', geen_directe_kosten: 'Bevestiging geen directe kosten',
 }
 const inp = 'w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg'
 const knop = 'inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors disabled:opacity-50'
@@ -194,7 +194,10 @@ export function KostenEnWinstDialoog({ factuur: ref, titel, clientId, onClose, o
                             <button onClick={() => setKostForm({ id: k.id, line_id: k.line_id ?? '', omschrijving: k.omschrijving, categorie: k.categorie ?? '', leverancier: k.leverancier ?? '', kostprijs_excl: k.kostprijs_excl === null ? '' : String(k.kostprijs_excl), datum: k.datum ?? '', bewijs_url: k.bewijs_url ?? '', opmerking: k.opmerking ?? '', reden: '' })} className="h-6 w-6 flex items-center justify-center rounded hover:bg-gray-100 text-gray-400" title="Bewerken"><Pencil className="h-3 w-3" /></button>
                             {k.status === 'actief'
                               ? <button disabled={bezig} onClick={() => { const reden = prompt('Reden voor annulering (optioneel):') ?? ''; post({ action: 'kost_annuleren', cost_id: k.id, reden }, 'Kost geannuleerd.') }} className="h-6 w-6 flex items-center justify-center rounded hover:bg-red-50 text-gray-400 hover:text-red-600" title="Annuleren (blijft in de geschiedenis)"><Ban className="h-3 w-3" /></button>
-                              : <button disabled={bezig} onClick={() => post({ action: 'kost_herstellen', cost_id: k.id }, 'Kost hersteld.')} className="h-6 w-6 flex items-center justify-center rounded hover:bg-gray-100 text-gray-400" title="Herstellen"><Undo2 className="h-3 w-3" /></button>}
+                              : <>
+                                  <button disabled={bezig} onClick={() => post({ action: 'kost_herstellen', cost_id: k.id }, 'Kost hersteld.')} className="h-6 w-6 flex items-center justify-center rounded hover:bg-gray-100 text-gray-400" title="Herstellen"><Undo2 className="h-3 w-3" /></button>
+                                  <button disabled={bezig} onClick={() => { if (confirm(`"${k.omschrijving}" definitief verwijderen? Het logboek bewaart de oude waarden.`)) post({ action: 'kost_verwijderen', cost_id: k.id }, 'Kost definitief verwijderd.') }} className="h-6 w-6 flex items-center justify-center rounded hover:bg-red-50 text-gray-400 hover:text-red-600" title="Definitief verwijderen"><Trash2 className="h-3 w-3" /></button>
+                                </>}
                           </div></td>
                         </tr>
                       ))}

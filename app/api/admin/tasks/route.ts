@@ -72,14 +72,32 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// PATCH { id, ... } — taak aanpassen
+// PATCH { id, ... } — taak aanpassen. JSON, of multipart wanneer de bijlage
+// vervangen wordt (veld `attachment`). `remove_attachment` = bijlage wissen.
 export async function PATCH(req: NextRequest) {
   try {
-    if (!(await requireStaff())) return NextResponse.json({ error: 'Geen toegang' }, { status: 400 })
-    const b = await req.json()
+    if (!(await requireStaff())) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
+    let b: Record<string, any>
+    let file: File | null = null
+    if ((req.headers.get('content-type') ?? '').includes('multipart/form-data')) {
+      const fd = await req.formData()
+      b = {}
+      for (const k of ['id', 'title', 'description', 'deadline', 'priority', 'status', 'client_id', 'remove_attachment']) {
+        const v = fd.get(k)
+        if (typeof v === 'string') b[k] = v
+      }
+      const f = fd.get('attachment')
+      if (f && typeof f !== 'string' && f.size > 0) file = f
+    } else {
+      b = await req.json()
+    }
     if (!b.id) return NextResponse.json({ error: 'id vereist' }, { status: 400 })
     const patch: Record<string, unknown> = {}
-    if (b.title !== undefined) patch.title = String(b.title).slice(0, 200)
+    if (b.title !== undefined) {
+      const t = String(b.title).trim()
+      if (!t) return NextResponse.json({ error: 'Titel is verplicht' }, { status: 400 })
+      patch.title = t.slice(0, 200)
+    }
     if (b.description !== undefined) patch.description = b.description || null
     if (b.deadline !== undefined) patch.deadline = b.deadline || null
     if (b.priority !== undefined && PRIORITIES.includes(b.priority)) patch.priority = b.priority
@@ -87,10 +105,36 @@ export async function PATCH(req: NextRequest) {
       patch.status = b.status
       if (b.status === 'done') patch.completed_at = new Date().toISOString()
     }
-    if (Object.keys(patch).length === 0) return NextResponse.json({ error: 'Geen wijzigingen' }, { status: 400 })
+    const removeAttachment = b.remove_attachment === true || b.remove_attachment === 'true' || b.remove_attachment === '1'
+    if (Object.keys(patch).length === 0 && !file && !removeAttachment) return NextResponse.json({ error: 'Geen wijzigingen' }, { status: 400 })
     const admin = createAdminSupabaseClient()
+
+    // Bijlage vervangen of wissen: oude file pas opruimen na een geslaagde update.
+    let oudPad: string | null = null
+    if (file || removeAttachment) {
+      const { data: cur, error: curErr } = await admin.from('client_tasks').select('client_id, attachment_path').eq('id', b.id).maybeSingle()
+      if (curErr) throw new Error(curErr.message)
+      if (!cur) return NextResponse.json({ error: 'Taak niet gevonden' }, { status: 404 })
+      oudPad = cur.attachment_path ?? null
+      if (file) {
+        const ext = (file.name.split('.').pop() ?? 'pdf').replace(/[^a-z0-9]/gi, '').toLowerCase() || 'pdf'
+        const path = `client-tasks/${cur.client_id}/${randomUUID()}.${ext}`
+        const { error: upErr } = await admin.storage.from(BUCKET).upload(path, Buffer.from(await file.arrayBuffer()), { contentType: file.type || 'application/octet-stream', upsert: false })
+        if (upErr) throw new Error(`Bijlage uploaden mislukt: ${upErr.message}`)
+        patch.attachment_path = path
+        patch.attachment_name = file.name.slice(0, 200)
+      } else {
+        patch.attachment_path = null
+        patch.attachment_name = null
+      }
+    }
+
     const { error } = await admin.from('client_tasks').update(patch).eq('id', b.id)
-    if (error) throw new Error(error.message)
+    if (error) {
+      if (file && typeof patch.attachment_path === 'string') { try { await admin.storage.from(BUCKET).remove([patch.attachment_path]) } catch { } }
+      throw new Error(error.message)
+    }
+    if (oudPad && oudPad !== patch.attachment_path) { try { await admin.storage.from(BUCKET).remove([oudPad]) } catch { } }
     try { revalidatePath('/admin'); if (b.client_id) revalidatePath(`/admin/clients/${b.client_id}`) } catch { }
     return NextResponse.json({ ok: true })
   } catch (err) {

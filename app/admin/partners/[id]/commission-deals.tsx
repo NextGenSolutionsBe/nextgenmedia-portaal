@@ -3,6 +3,9 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, X, Loader2, HandCoins, Pencil, Trash2, Receipt, ArrowRight, ArrowLeft } from 'lucide-react'
+import { toast } from 'sonner'
+import { Bevestig } from '@/app/admin/instellingen/ui'
+import { GetalInvoer } from '@/components/ui/getal-invoer'
 import { formatEuro, formatDate, SERVICE_LABELS, commissionYearForDate, commissionPctForYear, commissionForSale, referralPartnerPaysUs } from '@/lib/utils'
 
 type Client = { id: string; company_name: string; customer_since: string | null }
@@ -60,36 +63,40 @@ export function CommissionDeals({
   const [showCreate, setShowCreate] = useState(false)
   const [editing, setEditing] = useState<Referral | null>(null)
   const [addSaleFor, setAddSaleFor] = useState<Referral | null>(null)
+  const [editSale, setEditSale] = useState<{ deal: Referral; sale: Sale } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [vraag, setVraag] = useState<{ soort: 'deal'; deal: Referral } | { soort: 'sale'; sale: Sale } | null>(null)
 
   const clientName = (d: Referral) =>
     d.client_id ? (clients.find((c) => c.id === d.client_id)?.company_name ?? d.label ?? 'Klant') : (d.label ?? 'Lead')
 
   const removeReferral = async (d: Referral) => {
-    if (!confirm(`Doorverwijzing voor "${clientName(d)}" verwijderen? Alle bijbehorende commissies verdwijnen ook.`)) return
     setBusy(d.id)
     try {
       const res = await fetch(`/api/admin/partners/${partnerId}/commission-deals?deal_id=${d.id}`, { method: 'DELETE' })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error)
+      toast.success('Doorverwijzing verwijderd.')
+      setVraag(null)
       router.refresh()
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Fout')
+      toast.error(err instanceof Error ? err.message : 'Verwijderen mislukt')
     } finally {
       setBusy(null)
     }
   }
 
   const removeSale = async (s: Sale) => {
-    if (!confirm('Deze verkoop + bijbehorende commissie verwijderen?')) return
     setBusy(s.id)
     try {
       const res = await fetch(`/api/admin/partners/${partnerId}/commission-deals?sale_id=${s.id}`, { method: 'DELETE' })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error)
+      toast.success('Verkoop verwijderd.')
+      setVraag(null)
       router.refresh()
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Fout')
+      toast.error(err instanceof Error ? err.message : 'Verwijderen mislukt')
     } finally {
       setBusy(null)
     }
@@ -126,7 +133,7 @@ export function CommissionDeals({
             const partnerPaysUs = referralPartnerPaysUs(deal.direction)
             return (
               <div key={deal.id} className="border border-gray-200 rounded-xl p-4">
-                <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
                   <div className="min-w-0">
                     <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
                       {clientName(deal)}
@@ -148,7 +155,7 @@ export function CommissionDeals({
                     <button onClick={() => setEditing(deal)} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400" title="Bewerken">
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
-                    <button onClick={() => removeReferral(deal)} disabled={busy === deal.id} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-red-50 text-red-400" title="Verwijderen">
+                    <button onClick={() => setVraag({ soort: 'deal', deal })} disabled={busy === deal.id} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-red-50 text-red-500" title="Verwijderen" aria-label="Doorverwijzing verwijderen">
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
@@ -181,7 +188,10 @@ export function CommissionDeals({
                           <span className={`font-semibold ${partnerPaysUs ? 'text-red-600' : 'text-green-600'}`}>
                             {partnerPaysUs ? '−' : '+'}{formatEuro(s.commission_amount)}
                           </span>
-                          <button onClick={() => removeSale(s)} disabled={busy === s.id} className="text-red-400 hover:text-red-600" title="Verkoop verwijderen">
+                          <button onClick={() => setEditSale({ deal, sale: s })} disabled={busy === s.id} className="h-6 w-6 inline-flex items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700" title="Verkoop bewerken" aria-label="Verkoop bewerken">
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                          <button onClick={() => setVraag({ soort: 'sale', sale: s })} disabled={busy === s.id} className="h-6 w-6 inline-flex items-center justify-center rounded text-red-500 hover:bg-red-50" title="Verkoop verwijderen" aria-label="Verkoop verwijderen">
                             <Trash2 className="h-3 w-3" />
                           </button>
                         </div>
@@ -221,6 +231,39 @@ export function CommissionDeals({
           referral={addSaleFor}
           onClose={() => setAddSaleFor(null)}
           onSaved={() => { setAddSaleFor(null); router.refresh() }}
+        />
+      )}
+
+      {editSale && (
+        <AddSaleDialog
+          partnerId={partnerId}
+          referral={editSale.deal}
+          sale={editSale.sale}
+          onClose={() => setEditSale(null)}
+          onSaved={() => { setEditSale(null); toast.success('Verkoop bijgewerkt.'); router.refresh() }}
+        />
+      )}
+
+      {vraag?.soort === 'deal' && (
+        <Bevestig
+          titel="Doorverwijzing verwijderen?"
+          tekst={<>De doorverwijzing voor <b>{clientName(vraag.deal)}</b> en al haar verkopen verdwijnen. Openstaande commissieposten worden mee verwijderd; al afgerekende posten blijven in de ledger staan.</>}
+          bevestigLabel="Verwijderen"
+          gevaarlijk
+          bezig={busy === vraag.deal.id}
+          onBevestig={() => removeReferral(vraag.deal)}
+          onAnnuleer={() => setVraag(null)}
+        />
+      )}
+      {vraag?.soort === 'sale' && (
+        <Bevestig
+          titel="Verkoop verwijderen?"
+          tekst={<>De verkoop van <b>{formatEuro(vraag.sale.sale_amount)}</b> op {formatDate(vraag.sale.sale_date)} en de bijbehorende openstaande commissie ({formatEuro(vraag.sale.commission_amount)}) verdwijnen.</>}
+          bevestigLabel="Verwijderen"
+          gevaarlijk
+          bezig={busy === vraag.sale.id}
+          onBevestig={() => removeSale(vraag.sale)}
+          onAnnuleer={() => setVraag(null)}
         />
       )}
     </div>
@@ -364,27 +407,30 @@ function ReferralDialog({
 }
 
 function AddSaleDialog({
-  partnerId, referral, onClose, onSaved,
+  partnerId, referral, sale, onClose, onSaved,
 }: {
   partnerId: string
   referral: Referral
+  /** Meegegeven = bestaande verkoop bewerken. */
+  sale?: Sale
   onClose: () => void
   onSaved: () => void
 }) {
+  const isEdit = !!sale
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [form, setForm] = useState({
-    description: '',
-    service_slug: referral.service_slug ?? '',
-    sale_amount: '',
-    sale_date: new Date().toISOString().slice(0, 10),
+    description: sale?.description ?? '',
+    service_slug: sale ? (sale.service_slug ?? '') : (referral.service_slug ?? ''),
+    sale_amount: (sale ? Number(sale.sale_amount) : null) as number | null,
+    sale_date: sale?.sale_date?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
   })
 
   // Live preview of the commission for the entered amount/date
-  const preview = form.sale_amount && parseFloat(form.sale_amount) > 0
+  const preview = form.sale_amount && form.sale_amount > 0
     ? commissionForSale(
         { referred_at: referral.start_date, pct_year_1: referral.pct_year_1, pct_year_2: referral.pct_year_2, pct_year_3: referral.pct_year_3 },
-        parseFloat(form.sale_amount),
+        form.sale_amount,
         form.sale_date,
       )
     : null
@@ -392,7 +438,7 @@ function AddSaleDialog({
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
-    if (!form.sale_amount || parseFloat(form.sale_amount) <= 0) { setError('Verkoopbedrag is verplicht'); return }
+    if (!form.sale_amount || form.sale_amount <= 0) { setError('Verkoopbedrag is verplicht'); return }
     setLoading(true)
     try {
       const res = await fetch(`/api/admin/partners/${partnerId}/commission-deals`, {
@@ -400,8 +446,9 @@ function AddSaleDialog({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           deal_id: referral.id,
-          action: 'add_sale',
-          sale_amount: parseFloat(form.sale_amount),
+          action: isEdit ? 'edit_sale' : 'add_sale',
+          ...(isEdit ? { sale_id: sale!.id } : {}),
+          sale_amount: form.sale_amount,
           sale_date: form.sale_date,
           service_slug: form.service_slug || null,
           description: form.description || null,
@@ -425,7 +472,7 @@ function AddSaleDialog({
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-y-auto">
         <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white">
           <div>
-            <h3 className="font-semibold">Verkoop toevoegen</h3>
+            <h3 className="font-semibold">{isEdit ? 'Verkoop bewerken' : 'Verkoop toevoegen'}</h3>
             <p className="text-xs text-gray-500 mt-0.5">{referral.label ?? 'doorverwezen klant'}</p>
           </div>
           <button onClick={onClose} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100">
@@ -443,10 +490,10 @@ function AddSaleDialog({
               {SERVICES.map((s) => <option key={s.slug || 'none'} value={s.slug}>{s.label}</option>)}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className={lbl}>Verkoopbedrag (€)</label>
-              <input type="number" min="0" step="0.01" className={inp} value={form.sale_amount} onChange={(e) => setForm((p) => ({ ...p, sale_amount: e.target.value }))} placeholder="5000" />
+              <GetalInvoer className={inp} waarde={form.sale_amount} min={0} placeholder="5000" onWaarde={(n) => setForm((p) => ({ ...p, sale_amount: n }))} />
             </div>
             <div>
               <label className={lbl}>Verkoopdatum</label>
@@ -473,7 +520,7 @@ function AddSaleDialog({
           <div className="flex gap-2 pt-1">
             <button type="submit" disabled={loading} className="btn-primary flex-1 justify-center">
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4" />}
-              Verkoop + commissie toevoegen
+              {isEdit ? 'Opslaan en commissie herberekenen' : 'Verkoop + commissie toevoegen'}
             </button>
             <button type="button" onClick={onClose} className="btn-secondary">Annuleer</button>
           </div>

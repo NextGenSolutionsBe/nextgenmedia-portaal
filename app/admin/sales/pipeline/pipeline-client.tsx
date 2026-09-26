@@ -507,6 +507,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
           medewerkers={medewerkers}
           meId={meId}
           isAdmin={isAdmin}
+          labelSuggesties={opties.labels}
           onChanged={() => laad({ stil: true })}
           onClose={() => setSelectedId(null)}
           onDialoog={(soort) => setDialoog({ soort, leadId: selected.id })}

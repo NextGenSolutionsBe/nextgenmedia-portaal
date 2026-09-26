@@ -18,7 +18,7 @@ export const dynamic = 'force-dynamic'
 const MIST_TABEL = /framer_sites|does not exist|schema cache/i
 const HINT = 'De tabel voor Framer-sites bestaat nog niet. Draai supabase/migrations/99999999_SYNC_ALL.sql.'
 
-function velden(b: Record<string, unknown>) {
+function velden(b: Record<string, unknown>, bijAanmaak: boolean) {
   const naam = String(b.naam ?? '').trim()
   if (!naam) return { fout: 'Geef een naam op.' } as const
 
@@ -44,7 +44,9 @@ function velden(b: Record<string, unknown>) {
       vat_pct: btw,
       facturatie: b.facturatie === 'monthly' ? 'monthly' : 'annual',
       renew_op: datum(b.renew_op),
-      opgezegd_op: datum(b.opgezegd_op),
+      // Enkel aanraken als het veld meekomt: een wijziging zonder opgezegd_op
+      // mag een opgezegde site niet stil weer actief maken.
+      ...(bijAanmaak || Object.prototype.hasOwnProperty.call(b, 'opgezegd_op') ? { opgezegd_op: datum(b.opgezegd_op) } : {}),
       notitie: String(b.notitie ?? '').trim().slice(0, 1000) || null,
     },
   } as const
@@ -97,7 +99,7 @@ export async function POST(req: NextRequest) {
     const actor = await requireStaff()
     if (!actor) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
 
-    const v = velden(await req.json().catch(() => ({})))
+    const v = velden(await req.json().catch(() => ({})), true)
     if ('fout' in v) return NextResponse.json({ error: v.fout }, { status: 400 })
 
     const admin = createAdminSupabaseClient()
@@ -136,10 +138,17 @@ export async function PATCH(req: NextRequest) {
       const stop = b.opgezegd_op ? String(b.opgezegd_op).slice(0, 10) : null
       const { error } = await admin.from('framer_sites').update({ opgezegd_op: stop }).eq('id', id)
       if (error) throw new Error(error.message)
+      const meta = requestMeta(req)
+      await logAudit({
+        action: stop ? 'framer.site.opgezegd' : 'framer.site.hervat', entityType: 'framer_site', entityId: id,
+        summary: stop ? `Framer: site opgezegd op ${stop}` : 'Framer: site weer lopend',
+        actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'admin',
+        ip: meta.ip, userAgent: meta.userAgent,
+      })
       return NextResponse.json({ ok: true })
     }
 
-    const v = velden(b)
+    const v = velden(b, false)
     if ('fout' in v) return NextResponse.json({ error: v.fout }, { status: 400 })
 
     const { error } = await admin.from('framer_sites').update(v.payload).eq('id', id)

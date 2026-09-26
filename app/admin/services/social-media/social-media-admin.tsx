@@ -10,6 +10,7 @@ import { ShootBriefings } from '@/components/admin/shoot-briefings'
 import { SendMailButton } from '@/components/admin/send-mail-button'
 import { ShootDocumentKnop } from '@/components/shoot-document-knop'
 import { KANAAL_SLUGS, kanaalLabel } from '@/lib/social-platforms'
+import { toast } from 'sonner'
 
 type Client = { id: string; company_name: string }
 
@@ -286,13 +287,28 @@ export function SocialMediaAdmin({
     })
   }
 
+  // Optimistisch bijwerken, maar bij een fout terugdraaien + melden. De fout
+  // wordt opnieuw gegooid zodat de kalender (bv. bewerkmodus) open blijft.
+  const mislukt = async (res: Response, standaard: string): Promise<never> => {
+    const j = await res.json().catch(() => ({}))
+    throw new Error((j as { error?: string }).error || standaard)
+  }
+
   const handleUpdate = async (id: string, patch: Partial<SocialContentItem>) => {
-    await fetch('/api/admin/social-content', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, ...patch }),
-    })
+    const vorige = items.find((it) => it.id === id)
     setItems((prev) => prev.map((it) => it.id === id ? { ...it, ...patch } : it))
+    try {
+      const res = await fetch('/api/admin/social-content', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, ...patch }),
+      })
+      if (!res.ok) await mislukt(res, 'Opslaan mislukt')
+    } catch (err) {
+      if (vorige) setItems((prev) => prev.map((it) => it.id === id ? vorige : it))
+      toast.error(err instanceof Error ? err.message : 'Opslaan mislukt')
+      throw err
+    }
   }
 
   const handleMove = async (id: string, planned_date: string) => {
@@ -300,17 +316,32 @@ export function SocialMediaAdmin({
   }
 
   const handleSetStatus = async (id: string, status: SocialContentStatus) => {
-    await fetch('/api/admin/social-content/status', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, status }),
-    })
+    const vorige = items.find((it) => it.id === id)
     setItems((prev) => prev.map((it) => it.id === id ? { ...it, status } : it))
+    try {
+      const res = await fetch('/api/admin/social-content/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, status }),
+      })
+      if (!res.ok) await mislukt(res, 'Status wijzigen mislukt')
+    } catch (err) {
+      if (vorige) setItems((prev) => prev.map((it) => it.id === id ? vorige : it))
+      toast.error(err instanceof Error ? err.message : 'Status wijzigen mislukt')
+      throw err
+    }
   }
 
   const handleDelete = async (id: string) => {
-    await fetch(`/api/admin/social-content?id=${id}`, { method: 'DELETE' })
-    setItems((prev) => prev.filter((it) => it.id !== id))
+    try {
+      const res = await fetch(`/api/admin/social-content?id=${id}`, { method: 'DELETE' })
+      if (!res.ok) await mislukt(res, 'Verwijderen mislukt')
+      setItems((prev) => prev.filter((it) => it.id !== id))
+      toast.success('Item verwijderd')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Verwijderen mislukt')
+      throw err
+    }
   }
 
   const clientItems = items.filter((it) => it.client_id === selectedClient)

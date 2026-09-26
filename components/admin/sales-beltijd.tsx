@@ -24,6 +24,9 @@ type Antwoord = {
 
 const vandaagBrussel = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Brussels', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 const nuTijd = () => new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Brussels', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date())
+/** Datum (JJJJ-MM-DD) en klokuur (UU:MM) van een moment, in Brussel — zoals de server ze terugrekent. */
+const datumVan = (iso: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Brussels', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso))
+const tijdVan = (iso: string) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Brussels', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso))
 
 function useBeltijd(medewerkerId?: string) {
   const [data, setData] = useState<Antwoord | null>(null)
@@ -104,7 +107,7 @@ export function BeltijdKaart({ medewerkerId, accountNaam, onGewijzigd }: {
   const { data, bezig, setBezig, laad, actie } = useBeltijd(medewerkerId)
   const nu = useNu(!!data?.lopend)
   const [form, setForm] = useState({ datum: vandaagBrussel(), tijd: nuTijd(), minuten: '', notitie: '' })
-  const [bewerk, setBewerk] = useState<{ id: string; minuten: string; notitie: string } | null>(null)
+  const [bewerk, setBewerk] = useState<{ id: string; datum: string; tijd: string; minuten: string; notitie: string } | null>(null)
 
   const klaar = async (ok: boolean) => { if (ok) onGewijzigd?.() }
 
@@ -208,15 +211,32 @@ export function BeltijdKaart({ medewerkerId, accountNaam, onGewijzigd }: {
             {lijst.map((s) => (
               <li key={s.id} className="py-1.5 text-sm">
                 {bewerk?.id === s.id ? (
-                  <form className="flex flex-wrap items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); void stuur(s.id, 'PATCH', { duurMinuten: bewerk.minuten, notitie: bewerk.notitie }, 'Sessie aangepast.') }}>
-                    <input autoFocus className="input-base text-sm w-24" inputMode="numeric" value={bewerk.minuten} onChange={(e) => setBewerk({ ...bewerk, minuten: e.target.value })} aria-label="Minuten" />
-                    <span className="text-xs text-gray-400">min</span>
-                    <input className="input-base text-sm flex-1 min-w-[8rem]" value={bewerk.notitie} placeholder="Notitie" onChange={(e) => setBewerk({ ...bewerk, notitie: e.target.value })} aria-label="Notitie" />
-                    <button type="submit" disabled={bezig} className="h-8 w-8 flex items-center justify-center rounded-lg bg-black text-white" title="Bewaren"><Check className="h-4 w-4" /></button>
-                    <button type="button" onClick={() => setBewerk(null)} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-gray-100" title="Annuleren"><X className="h-4 w-4" /></button>
+                  <form className="grid grid-cols-2 sm:grid-cols-[9rem_6rem_5.5rem_1fr_auto] gap-1.5 items-end"
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      if (!bewerk.datum || !bewerk.tijd) { toast.error('Kies een datum en een startuur.'); return }
+                      if (!bewerk.minuten.trim()) { toast.error('Geef de duur in minuten.'); return }
+                      void stuur(s.id, 'PATCH', { datum: bewerk.datum, tijd: bewerk.tijd, duurMinuten: bewerk.minuten, notitie: bewerk.notitie }, 'Sessie aangepast.')
+                    }}>
+                    <label className="text-[11px] text-gray-500">Datum
+                      <input type="date" autoFocus className="input-base text-sm mt-0.5" value={bewerk.datum} max={vandaagBrussel()} onChange={(e) => setBewerk({ ...bewerk, datum: e.target.value })} />
+                    </label>
+                    <label className="text-[11px] text-gray-500">Start
+                      <input type="time" className="input-base text-sm mt-0.5" value={bewerk.tijd} onChange={(e) => setBewerk({ ...bewerk, tijd: e.target.value })} />
+                    </label>
+                    <label className="text-[11px] text-gray-500">Minuten
+                      <input className="input-base text-sm mt-0.5" inputMode="numeric" value={bewerk.minuten} onChange={(e) => setBewerk({ ...bewerk, minuten: e.target.value })} />
+                    </label>
+                    <label className="text-[11px] text-gray-500">Notitie
+                      <input className="input-base text-sm mt-0.5" value={bewerk.notitie} placeholder="optioneel" onChange={(e) => setBewerk({ ...bewerk, notitie: e.target.value })} />
+                    </label>
+                    <div className="flex gap-1.5 col-span-2 sm:col-span-1">
+                      <button type="submit" disabled={bezig} className="h-9 w-9 flex items-center justify-center rounded-lg bg-black text-white" title="Bewaren"><Check className="h-4 w-4" /></button>
+                      <button type="button" onClick={() => setBewerk(null)} className="h-9 w-9 flex items-center justify-center rounded-lg hover:bg-gray-100" title="Annuleren"><X className="h-4 w-4" /></button>
+                    </div>
                   </form>
                 ) : (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
                     <span className="text-gray-500 w-32 shrink-0 tabular-nums">
                       {new Date(s.start_op).toLocaleString('nl-BE', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                     </span>
@@ -225,11 +245,11 @@ export function BeltijdKaart({ medewerkerId, accountNaam, onGewijzigd }: {
                     </span>
                     <span className="text-gray-600 truncate flex-1 min-w-0">{s.notitie}</span>
                     {s.einde_op && (
-                      <button onClick={() => setBewerk({ id: s.id, minuten: String(Math.round(sessieSeconden(s, nu) / 60)), notitie: s.notitie ?? '' })} disabled={bezig}
+                      <button onClick={() => setBewerk({ id: s.id, datum: datumVan(s.start_op), tijd: tijdVan(s.start_op), minuten: String(Math.round(sessieSeconden(s, nu) / 60)), notitie: s.notitie ?? '' })} disabled={bezig}
                         className="h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-black" title="Aanpassen"><Pencil className="h-3.5 w-3.5" /></button>
                     )}
-                    <button onClick={() => { if (window.confirm('Deze sessie verwijderen?')) void stuur(s.id, 'DELETE', undefined, 'Sessie verwijderd.') }} disabled={bezig}
-                      className="h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-600" title="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></button>
+                    <button onClick={() => { if (window.confirm('Deze sessie verwijderen? Ze telt daarna niet meer mee.')) void stuur(s.id, 'DELETE', undefined, 'Sessie verwijderd.') }} disabled={bezig}
+                      className="h-7 w-7 flex items-center justify-center rounded-md text-red-500 hover:bg-red-50 hover:text-red-700" title="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></button>
                   </div>
                 )}
               </li>

@@ -2,6 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, CalendarDays, RotateCcw, X, Check, Pencil, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
+import { Bevestig } from '@/app/admin/instellingen/ui'
+
+async function fout(res: Response, standaard: string): Promise<never> {
+  const j = await res.json().catch(() => ({}))
+  throw new Error((j as { error?: string }).error || standaard)
+}
 
 // Interne visuele maandplanning voor NextGenMedia. Standaard automatisch op basis
 // van werkdagen (ma–vr), herberekend vanaf de eerste werkdag van de maand. Admin
@@ -77,6 +84,7 @@ export function MaandplanningCalendar() {
   const [editing, setEditing] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [dragFrom, setDragFrom] = useState<string | null>(null)
+  const [resetVraag, setResetVraag] = useState(false)
 
   const y = cursor.getFullYear(); const m = cursor.getMonth()
   const monthFrom = useMemo(() => ymd(new Date(y, m, 1)), [y, m])
@@ -134,34 +142,57 @@ export function MaandplanningCalendar() {
   const todayStr = ymd(new Date())
 
   const putOverride = async (dateStr: string, cats: CatKey[]) => {
-    await fetch('/api/admin/month-planning', {
+    const res = await fetch('/api/admin/month-planning', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ plan_date: dateStr, categories: cats }),
     })
+    if (!res.ok) await fout(res, 'Opslaan mislukt')
   }
 
   const onDrop = async (toDate: string, inMonth: boolean) => {
     const from = dragFrom; setDragFrom(null)
     if (!from || !inMonth || from === toDate) return
     const fromCats = effective(from, true, true)
+    const vorige = overrides
     setOverrides((o) => ({ ...o, [toDate]: fromCats, [from]: [] }))
     setBusy(true)
-    try { await putOverride(toDate, fromCats); await putOverride(from, []) } finally { setBusy(false) }
+    try { await putOverride(toDate, fromCats); await putOverride(from, []) }
+    catch (e) { setOverrides(vorige); toast.error(e instanceof Error ? e.message : 'Verplaatsen mislukt'); loadOverrides() }
+    finally { setBusy(false) }
   }
 
   const saveEdit = async (dateStr: string, cats: CatKey[]) => {
+    const vorige = overrides
     setOverrides((o) => ({ ...o, [dateStr]: cats }))
     setEditing(null); setBusy(true)
-    try { await putOverride(dateStr, cats) } finally { setBusy(false) }
+    try { await putOverride(dateStr, cats) }
+    catch (e) { setOverrides(vorige); toast.error(e instanceof Error ? e.message : 'Opslaan mislukt') }
+    finally { setBusy(false) }
+  }
+
+  // Eén dag terug naar de automatische standaardplanning.
+  const resetDay = async (dateStr: string) => {
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/admin/month-planning?datum=${dateStr}`, { method: 'DELETE' })
+      if (!res.ok) await fout(res, 'Terugzetten mislukt')
+      setOverrides((o) => { const n = { ...o }; delete n[dateStr]; return n })
+      setEditing(null)
+      toast.success('Dag teruggezet naar standaard')
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Terugzetten mislukt') }
+    finally { setBusy(false) }
   }
 
   const resetMonth = async () => {
-    if (!confirm('Alle handmatige aanpassingen van deze maand terugzetten naar de standaardplanning?')) return
     setBusy(true)
     try {
-      await fetch(`/api/admin/month-planning?from=${monthFrom}&to=${monthTo}`, { method: 'DELETE' })
+      const res = await fetch(`/api/admin/month-planning?from=${monthFrom}&to=${monthTo}`, { method: 'DELETE' })
+      if (!res.ok) await fout(res, 'Reset mislukt')
       setOverrides({})
-    } finally { setBusy(false) }
+      setResetVraag(false)
+      toast.success('Maand teruggezet naar standaard')
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Reset mislukt') }
+    finally { setBusy(false) }
   }
 
   return (
@@ -173,7 +204,7 @@ export function MaandplanningCalendar() {
             Automatisch per werkdag — sleep een dag of klik om handmatig aan te passen
           </p>
         </div>
-        <button onClick={resetMonth} disabled={busy} className="btn-secondary text-sm">
+        <button onClick={() => setResetVraag(true)} disabled={busy || Object.keys(overrides).length === 0} className="btn-secondary text-sm">
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
           Reset maand
         </button>
@@ -221,13 +252,14 @@ export function MaandplanningCalendar() {
                 onDragOver={(e) => { if (inMonth) e.preventDefault() }}
                 onDrop={() => onDrop(dateStr, inMonth)}
                 onClick={() => { if (inMonth) setEditing(dateStr) }}
-                className={`group relative border-r border-b border-gray-100 p-1.5 min-h-[88px] flex flex-col gap-1
+                className={`group relative border-r border-b border-gray-100 p-1 sm:p-1.5 min-h-[64px] sm:min-h-[88px] min-w-0 flex flex-col gap-1
                   ${!inMonth ? 'bg-gray-50/40' : !weekday ? 'bg-gray-50/70' : 'cursor-pointer hover:bg-yellow-50/30'}
                   ${dragFrom === dateStr ? 'opacity-50' : ''}`}
               >
                 <div className="flex items-center justify-between">
                   <span className={`text-[11px] font-medium px-1 py-0.5 rounded-full ${isToday ? 'bg-[#fff848] text-black font-bold' : inMonth ? 'text-gray-700' : 'text-gray-300'}`}>{d.getDate()}</span>
-                  {inMonth && <Pencil className="h-3 w-3 text-gray-300 opacity-0 group-hover:opacity-100" />}
+                  {inMonth && dateStr in overrides && <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" title="Handmatig aangepast" />}
+                  {inMonth && <Pencil className="h-3 w-3 text-gray-300 opacity-0 group-hover:opacity-100 hidden sm:block" />}
                 </div>
                 <div className="flex flex-col gap-0.5 overflow-hidden">
                   {cats.map((c) => (
@@ -259,16 +291,25 @@ export function MaandplanningCalendar() {
         <DayEditor
           dateStr={editing}
           initial={effective(editing, true, isWeekday(new Date(editing + 'T00:00:00')))}
+          aangepast={editing in overrides}
+          bezig={busy}
+          onReset={() => resetDay(editing)}
           onClose={() => setEditing(null)}
           onSave={(cats) => saveEdit(editing, cats)}
         />
+      )}
+
+      {resetVraag && (
+        <Bevestig titel="Maand resetten" gevaarlijk bevestigLabel="Reset maand" bezig={busy}
+          tekst={<>Alle handmatige aanpassingen van <strong>{title}</strong> terugzetten naar de standaardplanning?</>}
+          onBevestig={resetMonth} onAnnuleer={() => setResetVraag(false)} />
       )}
     </div>
   )
 }
 
-function DayEditor({ dateStr, initial, onClose, onSave }: {
-  dateStr: string; initial: CatKey[]; onClose: () => void; onSave: (cats: CatKey[]) => void
+function DayEditor({ dateStr, initial, aangepast, bezig, onReset, onClose, onSave }: {
+  dateStr: string; initial: CatKey[]; aangepast: boolean; bezig: boolean; onReset: () => void; onClose: () => void; onSave: (cats: CatKey[]) => void
 }) {
   const [sel, setSel] = useState<Set<CatKey>>(new Set(initial))
   const toggle = (k: CatKey) => setSel((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n })
@@ -295,8 +336,13 @@ function DayEditor({ dateStr, initial, onClose, onSave }: {
             )
           })}
         </div>
-        <div className="flex gap-2 p-5 border-t border-gray-100">
+        <div className="flex gap-2 p-5 border-t border-gray-100 flex-wrap">
           <button onClick={() => onSave([...sel])} className="btn-primary flex-1 justify-center"><Check className="h-4 w-4" />Opslaan</button>
+          {aangepast && (
+            <button onClick={onReset} disabled={bezig} className="btn-secondary" title="Deze dag terugzetten naar de automatische planning">
+              {bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}Standaard
+            </button>
+          )}
           <button onClick={onClose} className="btn-secondary">Annuleer</button>
         </div>
       </div>

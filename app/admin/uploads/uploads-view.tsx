@@ -4,9 +4,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { STATUSSEN, STATUS_LABELS, isVideo, leesbareGrootte, type Status } from '@/lib/client-uploads'
+import { LOSSE_BESTANDEN, STATUSSEN, STATUS_LABELS, isVideo, leesbareGrootte, type Status } from '@/lib/client-uploads'
 import { maakZipSchrijver, verdeelInDelen, uniekeNaam, zipBestandsnaam, zipSegment } from '@/lib/zip-browser'
-import { Archive, CheckSquare, Download, Film, FolderInput, ImageIcon, Loader2, Square, Trash2, ExternalLink, X } from 'lucide-react'
+import { Archive, CheckSquare, Download, Film, FolderInput, ImageIcon, Loader2, Pencil, Square, Trash2, ExternalLink, X } from 'lucide-react'
+import { toast } from 'sonner'
 import { AdminUploader } from './admin-uploader'
 
 export type AdminUpload = {
@@ -502,6 +503,23 @@ export function UploadsView({
                 </div>
               </div>
 
+              {open.admin_notitie && (
+                <div className="rounded-xl bg-amber-50 border border-amber-100 px-3 py-2">
+                  <p className="text-[11px] font-semibold text-amber-700 uppercase tracking-wide mb-0.5">Interne notitie</p>
+                  <p className="text-sm whitespace-pre-wrap">{open.admin_notitie}</p>
+                </div>
+              )}
+
+              <BewerkPaneel
+                key={open.id}
+                upload={open}
+                mappen={clientId ? submappen : []}
+                onOpgeslagen={(wijz) => {
+                  setLijst((l) => l.map((u) => (u.id === open.id ? { ...u, ...wijz } : u)))
+                  setOpen((o) => (o ? { ...o, ...wijz } : o))
+                }}
+              />
+
               {klantKeuze && klantKeuze.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100">
                   <FolderInput className="h-4 w-4 text-gray-400 shrink-0" />
@@ -537,7 +555,7 @@ export function UploadsView({
                   </button>
                 ))}
 
-                <div className="ml-auto flex items-center gap-2">
+                <div className="ml-auto flex flex-wrap items-center gap-2">
                   {open.url && (
                     <>
                       <a
@@ -566,6 +584,90 @@ export function UploadsView({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/** Titel, beschrijving, map en interne notitie van één upload aanpassen. */
+function BewerkPaneel({ upload, mappen, onOpgeslagen }: {
+  upload: AdminUpload
+  mappen: { id: string; naam: string }[]
+  onOpgeslagen: (w: Partial<AdminUpload>) => void
+}) {
+  const [aan, setAan] = useState(false)
+  const [titel, setTitel] = useState(upload.titel)
+  const [beschrijving, setBeschrijving] = useState(upload.beschrijving ?? '')
+  const [notitie, setNotitie] = useState(upload.admin_notitie ?? '')
+  const [mapId, setMapId] = useState(upload.map_id ?? '')
+  const [bezig, setBezig] = useState(false)
+  const [fout, setFout] = useState<string | null>(null)
+
+  if (!aan) {
+    return (
+      <button type="button" onClick={() => setAan(true)}
+        className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center gap-1.5">
+        <Pencil className="h-3.5 w-3.5" />Gegevens bewerken
+      </button>
+    )
+  }
+
+  const opslaan = async () => {
+    if (!titel.trim()) { setFout('Titel mag niet leeg zijn.'); return }
+    setBezig(true); setFout(null)
+    try {
+      const body: Record<string, unknown> = { id: upload.id, titel: titel.trim(), beschrijving, admin_notitie: notitie }
+      if (mappen.length > 0) body.map_id = mapId || null
+      const r = await fetch('/api/admin/uploads', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j.error ?? 'Opslaan mislukt.')
+      const wijz: Partial<AdminUpload> = {
+        titel: titel.trim(), beschrijving: beschrijving.trim() || null, admin_notitie: notitie.trim() || null,
+      }
+      if (mappen.length > 0) {
+        wijz.map_id = mapId || null
+        wijz.map_naam = mappen.find((m) => m.id === mapId)?.naam ?? LOSSE_BESTANDEN
+      }
+      onOpgeslagen(wijz)
+      toast.success('Opgeslagen')
+      setAan(false)
+    } catch (e) {
+      setFout(e instanceof Error ? e.message : 'Opslaan mislukt.')
+    } finally { setBezig(false) }
+  }
+
+  const veld = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white'
+  return (
+    <div className="space-y-3 rounded-xl border border-gray-200 p-3">
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">Titel</label>
+        <input className={veld} value={titel} maxLength={200} onChange={(e) => setTitel(e.target.value)} />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">Beschrijving</label>
+        <textarea rows={2} className={veld} value={beschrijving} onChange={(e) => setBeschrijving(e.target.value)} />
+      </div>
+      {mappen.length > 0 && (
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Map</label>
+          <select className={veld} value={mapId} onChange={(e) => setMapId(e.target.value)}>
+            <option value="">{LOSSE_BESTANDEN}</option>
+            {mappen.map((m) => <option key={m.id} value={m.id}>{m.naam}</option>)}
+          </select>
+        </div>
+      )}
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">Interne notitie (klant ziet dit niet)</label>
+        <textarea rows={2} className={veld} value={notitie} maxLength={2000} onChange={(e) => setNotitie(e.target.value)} />
+      </div>
+      {fout && <p className="text-sm text-red-600">{fout}</p>}
+      <div className="flex gap-2">
+        <button type="button" onClick={opslaan} disabled={bezig} className="btn-primary text-sm">
+          {bezig && <Loader2 className="h-4 w-4 animate-spin" />}Opslaan
+        </button>
+        <button type="button" onClick={() => setAan(false)} className="btn-secondary text-sm">Annuleer</button>
+      </div>
     </div>
   )
 }

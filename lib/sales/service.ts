@@ -398,6 +398,7 @@ export async function loadCalendar(
     pipeline_id: string | null
     outcome?: string | null; deal_value_cents?: number | null; commission_pct?: number | null
     notes?: string | null; client_note?: string | null
+    titel?: string | null; adres?: string | null; meet_url?: string | null; attendee_email?: string | null
   }[]
   /**
    * Welke afspraken blokkeren déze agenda? Die van de persoon zelf — en dat is
@@ -463,6 +464,8 @@ export async function loadCalendar(
       deal_value_cents: a.deal_value_cents ?? null,
       commission_pct: a.commission_pct ?? null,
       notes: a.notes ?? null, client_note: a.client_note ?? null,
+      titel: a.titel ?? null, adres: a.adres ?? null, meet_url: a.meet_url ?? null,
+      attendee_email: a.attendee_email ?? null,
       company: a.lead_id ? nameByLead.get(a.lead_id)?.company ?? null : null,
       contact: a.lead_id ? nameByLead.get(a.lead_id)?.contact ?? null : null,
     })),

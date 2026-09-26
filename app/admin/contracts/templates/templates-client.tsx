@@ -3,10 +3,12 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Plus, LayoutTemplate, Loader2, Upload, Trash2, Sliders, Send, X, FileText } from 'lucide-react'
+import { Plus, LayoutTemplate, Loader2, Upload, Trash2, Sliders, Send, X, FileText, Pencil, Tags } from 'lucide-react'
 import { toast } from 'sonner'
 import { TEMPLATE_CATEGORIES } from '@/lib/contract-status'
 import { fileTooBig, MAX_UPLOAD_MB, readJson } from '@/lib/upload'
+import { Dialoog, Bevestig, INP } from '@/app/admin/instellingen/ui'
+import { ContracttypesBeheer } from '../contracttypes-beheer'
 
 type Template = {
   id: string; name: string; category: string | null; active: boolean
@@ -30,6 +32,10 @@ export function TemplatesClient({
   const router = useRouter()
   const [createOpen, setCreateOpen] = useState(false)
   const [useTpl, setUseTpl] = useState<Template | null>(null)
+  const [editTpl, setEditTpl] = useState<Template | null>(null)
+  const [delTpl, setDelTpl] = useState<Template | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [typesOpen, setTypesOpen] = useState(false)
 
   const toggleActive = async (t: Template) => {
     try {
@@ -37,19 +43,21 @@ export function TemplatesClient({
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ active: !t.active }),
       })
-      if (!res.ok) throw new Error((await res.json()).error)
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Bijwerken mislukt')
       router.refresh()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') }
   }
 
-  const del = async (t: Template) => {
-    if (!confirm(`Template "${t.name}" verwijderen? Bestaande contracten blijven ongewijzigd.`)) return
+  const del = async () => {
+    if (!delTpl) return
+    setDeleting(true)
     try {
-      const res = await fetch(`/api/admin/contract-templates/${t.id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error((await res.json()).error)
+      const res = await fetch(`/api/admin/contract-templates/${delTpl.id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Verwijderen mislukt')
       toast.success('Template verwijderd')
+      setDelTpl(null)
       router.refresh()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') }
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setDeleting(false) }
   }
 
   return (
@@ -69,9 +77,14 @@ export function TemplatesClient({
           <h1 className="text-2xl font-bold">Contracttemplates</h1>
           <p className="text-sm text-gray-500 mt-0.5">{initialTemplates.length} template(s) — herbruikbare basiscontracten</p>
         </div>
-        <button onClick={() => setCreateOpen(true)} className="btn-primary shrink-0">
-          <Plus className="h-4 w-4" />Nieuwe template
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={() => setTypesOpen(true)} className="btn-secondary shrink-0">
+            <Tags className="h-4 w-4" />Contracttypes beheren
+          </button>
+          <button onClick={() => setCreateOpen(true)} className="btn-primary shrink-0">
+            <Plus className="h-4 w-4" />Nieuwe template
+          </button>
+        </div>
       </div>
 
       {initialTemplates.length === 0 ? (
@@ -106,13 +119,16 @@ export function TemplatesClient({
                 <Link href={`/admin/contracts/templates/${t.id}`} className="btn-secondary text-xs">
                   <Sliders className="h-3.5 w-3.5" />Velden
                 </Link>
+                <button onClick={() => setEditTpl(t)} className="btn-secondary text-xs">
+                  <Pencil className="h-3.5 w-3.5" />Bewerken
+                </button>
               </div>
               <div className="flex items-center justify-between pt-1 border-t border-gray-100">
                 <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
                   <input type="checkbox" checked={t.active} onChange={() => toggleActive(t)} />
                   Actief
                 </label>
-                <button onClick={() => del(t)} className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1">
+                <button onClick={() => setDelTpl(t)} className="btn-secondary text-xs px-2.5 py-1.5 text-red-600">
                   <Trash2 className="h-3.5 w-3.5" />Verwijderen
                 </button>
               </div>
@@ -123,6 +139,16 @@ export function TemplatesClient({
 
       {createOpen && <CreateDialog onClose={() => setCreateOpen(false)} onDone={() => { setCreateOpen(false); router.refresh() }} />}
       {useTpl && <FromTemplateDialog template={useTpl} clients={clients} onClose={() => setUseTpl(null)} />}
+      {editTpl && <EditDialog template={editTpl} onClose={() => setEditTpl(null)} onDone={() => { setEditTpl(null); router.refresh() }} />}
+      {delTpl && (
+        <Bevestig
+          titel="Template verwijderen"
+          tekst={<>Template <strong>{delTpl.name}</strong> verwijderen, samen met de PDF en de veldinstellingen? Bestaande contracten die uit deze template gemaakt zijn blijven ongewijzigd. Dit kan niet ongedaan gemaakt worden.</>}
+          bevestigLabel="Verwijderen" gevaarlijk bezig={deleting}
+          onBevestig={() => void del()} onAnnuleer={() => setDelTpl(null)}
+        />
+      )}
+      {typesOpen && <ContracttypesBeheer onSluit={() => setTypesOpen(false)} />}
     </div>
   )
 }
@@ -184,6 +210,55 @@ function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
         </div>
       </div>
     </Modal>
+  )
+}
+
+function EditDialog({ template, onClose, onDone }: { template: Template; onClose: () => void; onDone: () => void }) {
+  const [name, setName] = useState(template.name)
+  const [category, setCategory] = useState<string>(template.category ?? '')
+  const [loading, setLoading] = useState(false)
+  const categories: string[] = [...TEMPLATE_CATEGORIES]
+  if (template.category && !categories.includes(template.category)) categories.unshift(template.category)
+
+  const submit = async () => {
+    if (!name.trim()) { toast.error('Naam is verplicht'); return }
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/admin/contract-templates/${template.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), category: category || null }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j.error || 'Opslaan mislukt')
+      toast.success('Template bijgewerkt')
+      onDone()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt'); setLoading(false) }
+  }
+
+  return (
+    <Dialoog titel="Template bewerken" onSluit={onClose}>
+      <div className="space-y-3">
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Naam *</label>
+          <input className={INP} value={name} maxLength={200} onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void submit() } }} />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Categorie</label>
+          <select className={INP} value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="">— Geen categorie —</option>
+            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <p className="text-[11px] text-gray-400">PDF, velden en handtekeningzone pas je aan via &quot;Velden&quot;. Bestaande contracten blijven ongewijzigd.</p>
+        <div className="flex gap-2 justify-end pt-1">
+          <button onClick={onClose} disabled={loading} className="btn-secondary">Annuleren</button>
+          <button onClick={() => void submit()} disabled={loading || !name.trim()} className="btn-primary disabled:opacity-40">
+            {loading && <Loader2 className="h-4 w-4 animate-spin" />}Opslaan
+          </button>
+        </div>
+      </div>
+    </Dialoog>
   )
 }
 

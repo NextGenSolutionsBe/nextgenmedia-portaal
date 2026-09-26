@@ -1,6 +1,7 @@
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient , isActiveStaff } from '@/lib/supabase/server'
+import { leesGetal } from '@/lib/getal'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
@@ -43,7 +44,15 @@ export async function PUT(req: NextRequest) {
     if (!year) return NextResponse.json({ error: 'year vereist' }, { status: 400 })
 
     const row: Record<string, unknown> = { year, updated_by: actor.id, updated_at: new Date().toISOString() }
-    for (const f of NUM_FIELDS) if (body[f] !== undefined && body[f] !== '') row[f] = Number(body[f])
+    // Een leeg gemaakt veld wordt 0 (alle kolommen zijn NOT NULL) i.p.v. stil
+    // overgeslagen — anders kon je een getal nooit wissen. Onzin = fout.
+    for (const f of NUM_FIELDS) {
+      if (body[f] === undefined) continue
+      const leeg = body[f] === null || String(body[f]).trim() === ''
+      const g = leeg ? 0 : leesGetal(body[f])
+      if (g === null) return NextResponse.json({ error: `Ongeldig getal voor ${f}.` }, { status: 400 })
+      row[f] = f === 'salary_months' ? Math.max(0, Math.round(g)) : g
+    }
     if (body.statuut !== undefined) row.statuut = String(body.statuut)
     if (body.include_social_as_cost !== undefined) row.include_social_as_cost = Boolean(body.include_social_as_cost)
 

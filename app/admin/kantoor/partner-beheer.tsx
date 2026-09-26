@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Loader2, Plus, Trash2, Building2, Mail, ShieldCheck, Clock, Archive, RotateCcw, KeyRound, Copy, Check } from 'lucide-react'
+import { Loader2, Plus, Trash2, Building2, Mail, ShieldCheck, Clock, Archive, RotateCcw, KeyRound, Copy, Check, Pencil } from 'lucide-react'
+import { Dialoog, INP } from '@/app/admin/instellingen/ui'
 
 type Bedrijf = { id: string; naam: string; is_eigen: boolean; email: string | null; actief: boolean }
 type Lid = {
@@ -54,6 +55,29 @@ export function PartnerBeheer() {
   // we bewaren het nergens, dus dit is je enige kans om het door te geven.
   const [gezet, setGezet] = useState<{ email: string; wachtwoord: string } | null>(null)
   const [gekopieerd, setGekopieerd] = useState(false)
+  // Bedrijf bewerken (naam + e-mail). is_eigen blijft bewust vast.
+  const [bewerk, setBewerk] = useState<Bedrijf | null>(null)
+  const [bewerkNaam, setBewerkNaam] = useState('')
+  const [bewerkEmail, setBewerkEmail] = useState('')
+  const [bewerkBezig, setBewerkBezig] = useState(false)
+
+  const openBewerk = (b: Bedrijf) => { setBewerk(b); setBewerkNaam(b.naam); setBewerkEmail(b.email ?? '') }
+  const bewaarBedrijf = async () => {
+    if (!bewerk) return
+    if (!bewerkNaam.trim()) { toast.error('Geef het bedrijf een naam'); return }
+    setBewerkBezig(true)
+    try {
+      const res = await fetch('/api/kantoor/bedrijven', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bedrijf_id: bewerk.id, naam: bewerkNaam.trim(), email: bewerkEmail.trim() }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j.error ?? 'Opslaan mislukt')
+      toast.success('Bedrijf bijgewerkt.')
+      setBewerk(null)
+      laad()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt') } finally { setBewerkBezig(false) }
+  }
 
   const laad = useCallback(async () => {
     setLaden(true)
@@ -295,8 +319,9 @@ Wil je "${b.naam}" nu op non-actief zetten? Dan verdwijnt het uit alle keuzelijs
           const eigen = leden.filter((l) => l.bedrijf_id === b.id)
           return (
             <div key={b.id} className="card-base p-3">
-              <div className="flex items-center gap-2 mb-2">
-                <span className={`font-medium text-sm ${b.actief ? '' : 'text-gray-400'}`}>{b.naam}</span>
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <span className={`font-medium text-sm break-words ${b.actief ? '' : 'text-gray-400'}`}>{b.naam}</span>
+                {b.email && <span className="text-xs text-gray-400 inline-flex items-center gap-1 break-all"><Mail className="h-3 w-3" />{b.email}</span>}
                 {b.is_eigen && (
                   <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-[#fff848] border border-yellow-400 text-gray-900">
                     eigen bedrijf
@@ -310,6 +335,11 @@ Wil je "${b.naam}" nu op non-actief zetten? Dan verdwijnt het uit alle keuzelijs
                 <span className="text-xs text-gray-400 ml-auto">
                   {eigen.length} {eigen.length === 1 ? 'persoon' : 'personen'}
                 </span>
+                <button onClick={() => openBewerk(b)}
+                  className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700"
+                  title="Naam en e-mail bewerken" aria-label="Bedrijf bewerken">
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
                 {b.actief ? (
                   <button onClick={() => zetActief(b, false)}
                     className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700"
@@ -334,14 +364,14 @@ Wil je "${b.naam}" nu op non-actief zetten? Dan verdwijnt het uit alle keuzelijs
               ) : (
                 <div className="space-y-1">
                   {eigen.map((l) => (
-                    <div key={l.id} className="flex items-center gap-2 text-xs">
+                    <div key={l.id} className="flex items-center gap-2 text-xs flex-wrap">
                       {/* De toestand komt van het ECHTE account, niet van het
                           bestaan van een rij: een uitnodiging maakte vroeger al
                           een account aan waar niemand mee kon inloggen. */}
                       {l.toestand === 'klaar'
                         ? <ShieldCheck className="h-3.5 w-3.5 text-green-600" aria-label="Kan inloggen" />
                         : <Clock className="h-3.5 w-3.5 text-amber-500" aria-label="Kan nog niet inloggen" />}
-                      <span className="text-gray-700">{l.email}</span>
+                      <span className="text-gray-700 break-all">{l.email}</span>
                       {l.toestand === 'klaar' && (
                         <span className="text-gray-400">
                           {l.laatste_login
@@ -369,6 +399,31 @@ Wil je "${b.naam}" nu op non-actief zetten? Dan verdwijnt het uit alle keuzelijs
           )
         })}
       </div>
+
+      {bewerk && (
+        <Dialoog titel="Bedrijf bewerken" onSluit={() => !bewerkBezig && setBewerk(null)}>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Naam *</label>
+              <input className={INP} value={bewerkNaam} maxLength={120} onChange={(e) => setBewerkNaam(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Algemeen e-mailadres</label>
+              <input className={INP} type="email" value={bewerkEmail} maxLength={160}
+                onChange={(e) => setBewerkEmail(e.target.value)} placeholder="info@bedrijf.be (optioneel)" />
+            </div>
+            <p className="text-[11px] text-gray-500">
+              {bewerk.is_eigen ? 'Eigen bedrijf' : 'Partnerbedrijf'} — dat blijft vast. Logins beheer je per persoon hieronder.
+            </p>
+            <div className="flex gap-2 justify-end pt-1">
+              <button type="button" onClick={() => setBewerk(null)} disabled={bewerkBezig} className="btn-secondary">Annuleren</button>
+              <button type="button" onClick={bewaarBedrijf} disabled={bewerkBezig} className="btn-primary">
+                {bewerkBezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Opslaan
+              </button>
+            </div>
+          </div>
+        </Dialoog>
+      )}
     </div>
   )
 }

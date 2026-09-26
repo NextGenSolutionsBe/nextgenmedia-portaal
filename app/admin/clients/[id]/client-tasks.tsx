@@ -5,6 +5,8 @@ import { Plus, X, Loader2, Pencil, Trash2, Paperclip, ListChecks, CheckCircle2 }
 import { formatDate } from '@/lib/utils'
 import { SendMailButton } from '@/components/admin/send-mail-button'
 import { readJson, fileTooBig, MAX_UPLOAD_MB } from '@/lib/upload'
+import { toast } from 'sonner'
+import { Bevestig } from '@/app/admin/instellingen/ui'
 
 type Task = {
   id: string; title: string; description: string | null; deadline: string | null
@@ -30,6 +32,7 @@ export function ClientTasks({ clientId }: { clientId: string }) {
   const [loading, setLoading] = useState(true)
   const [dialog, setDialog] = useState<{ task: Task | null } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [teVerwijderen, setTeVerwijderen] = useState<Task | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -43,15 +46,27 @@ export function ClientTasks({ clientId }: { clientId: string }) {
   useEffect(() => { load() }, [load])
 
   const setStatus = async (id: string, status: string) => {
+    const vorige = tasks
     setBusy(id); setTasks((t) => t.map((x) => x.id === id ? { ...x, status } : x))
     try {
-      await fetch('/api/admin/tasks', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, status, client_id: clientId }) })
+      const res = await fetch('/api/admin/tasks', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, status, client_id: clientId }) })
+      await readJson(res)
+    } catch (e) {
+      setTasks(vorige)
+      toast.error(e instanceof Error ? e.message : 'Status wijzigen mislukt')
     } finally { setBusy(null) }
   }
   const remove = async (id: string) => {
-    if (!confirm('Taak verwijderen?')) return
     setBusy(id)
-    try { await fetch(`/api/admin/tasks?id=${id}`, { method: 'DELETE' }); setTasks((t) => t.filter((x) => x.id !== id)) } finally { setBusy(null) }
+    try {
+      const res = await fetch(`/api/admin/tasks?id=${id}`, { method: 'DELETE' })
+      await readJson(res)
+      setTasks((t) => t.filter((x) => x.id !== id))
+      setTeVerwijderen(null)
+      toast.success('Taak verwijderd')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt')
+    } finally { setBusy(null) }
   }
 
   return (
@@ -88,7 +103,7 @@ export function ClientTasks({ clientId }: { clientId: string }) {
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     <button onClick={() => setDialog({ task: t })} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400" title="Bewerken"><Pencil className="h-3.5 w-3.5" /></button>
-                    <button onClick={() => remove(t.id)} disabled={busy === t.id} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-red-50 text-red-400" title="Verwijderen">{busy === t.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}</button>
+                    <button onClick={() => setTeVerwijderen(t)} disabled={busy === t.id} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-red-50 text-red-400" title="Verwijderen">{busy === t.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}</button>
                   </div>
                 </div>
                 <div className="mt-2 flex items-center gap-2 flex-wrap">
@@ -102,6 +117,12 @@ export function ClientTasks({ clientId }: { clientId: string }) {
             )
           })}
         </div>
+      )}
+
+      {teVerwijderen && (
+        <Bevestig titel="Taak verwijderen" gevaarlijk bevestigLabel="Verwijderen" bezig={busy === teVerwijderen.id}
+          tekst={<>Taak <strong>{teVerwijderen.title}</strong> definitief verwijderen{teVerwijderen.attachment_name ? ' (incl. bijlage)' : ''}?</>}
+          onBevestig={() => remove(teVerwijderen.id)} onAnnuleer={() => setTeVerwijderen(null)} />
       )}
 
       {dialog && (
@@ -119,6 +140,8 @@ function TaskDialog({ clientId, task, onClose, onSaved }: { clientId: string; ta
   const [priority, setPriority] = useState(task?.priority ?? 'normaal')
   const [status, setStatus] = useState(task?.status ?? 'open')
   const [file, setFile] = useState<File | null>(null)
+  const [removeAttachment, setRemoveAttachment] = useState(false)
+  const heeftBijlage = !!task?.attachment_name || !!task?.attachmentUrl
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -128,7 +151,14 @@ function TaskDialog({ clientId, task, onClose, onSaved }: { clientId: string; ta
     setLoading(true); setError(null)
     try {
       let res: Response
-      if (isEdit) {
+      if (isEdit && (file || removeAttachment)) {
+        const fd = new FormData()
+        fd.append('id', task!.id); fd.append('client_id', clientId); fd.append('title', title); fd.append('description', description)
+        fd.append('deadline', deadline); fd.append('priority', priority); fd.append('status', status)
+        if (file) fd.append('attachment', file)
+        else fd.append('remove_attachment', 'true')
+        res = await fetch('/api/admin/tasks', { method: 'PATCH', body: fd })
+      } else if (isEdit) {
         res = await fetch('/api/admin/tasks', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: task!.id, title, description, deadline: deadline || null, priority, status, client_id: clientId }) })
       } else {
         const fd = new FormData()
@@ -159,7 +189,7 @@ function TaskDialog({ clientId, task, onClose, onSaved }: { clientId: string; ta
             <label className="block text-xs font-medium text-gray-600 mb-1">Beschrijving</label>
             <textarea rows={3} className={inp} value={description} onChange={(e) => setDescription(e.target.value)} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Deadline</label>
               <input type="date" className={inp} value={deadline} onChange={(e) => setDeadline(e.target.value)} />
@@ -177,12 +207,23 @@ function TaskDialog({ clientId, task, onClose, onSaved }: { clientId: string; ta
               {STATUS_OPTS.map((s) => <option key={s} value={s}>{STATUS[s].label}</option>)}
             </select>
           </div>
-          {!isEdit && (
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Bijlage (optioneel)</label>
-              <input type="file" className="text-xs" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-            </div>
-          )}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">{isEdit && heeftBijlage ? 'Bijlage' : 'Bijlage (optioneel)'}</label>
+            {isEdit && heeftBijlage && !removeAttachment && !file && (
+              <div className="flex items-center gap-2 flex-wrap text-xs mb-2">
+                <span className="inline-flex items-center gap-1 text-gray-700 min-w-0"><Paperclip className="h-3 w-3 shrink-0" /><span className="truncate">{task?.attachment_name || 'Bijlage'}</span></span>
+                <button type="button" onClick={() => setRemoveAttachment(true)} className="text-red-600 hover:underline">Verwijderen</button>
+              </div>
+            )}
+            {isEdit && removeAttachment && !file && (
+              <div className="flex items-center gap-2 flex-wrap text-xs mb-2 text-red-600">
+                Bijlage wordt verwijderd bij opslaan.
+                <button type="button" onClick={() => setRemoveAttachment(false)} className="text-gray-600 hover:underline">Ongedaan maken</button>
+              </div>
+            )}
+            <input type="file" className="text-xs max-w-full" onChange={(e) => { setFile(e.target.files?.[0] ?? null); setRemoveAttachment(false) }} />
+            {isEdit && heeftBijlage && <p className="text-[11px] text-gray-400 mt-1">Kies een bestand om de huidige bijlage te vervangen.</p>}
+          </div>
           {error && <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</div>}
           <div className="flex gap-2 pt-1">
             <button onClick={submit} disabled={loading} className="btn-primary flex-1 justify-center">{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{isEdit ? 'Opslaan' : 'Aanmaken'}</button>

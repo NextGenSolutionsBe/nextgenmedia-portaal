@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
 // PATCH — update assignment (status, roles, budget, assignment to partner, etc.)
 const ALLOWED_PATCH_FIELDS = new Set([
   'status', 'title', 'description', 'budget', 'payout',
-  'deadline', 'freelancer_id', 'client_id', 'service_slug',
+  'deadline', 'freelancer_id', 'client_id', 'service_slug', 'roles',
 ])
 const ALLOWED_STATUSES = new Set(['open', 'in_progress', 'completed', 'cancelled'])
 
@@ -93,6 +93,19 @@ export async function PATCH(req: NextRequest) {
     const patch: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(rest)) {
       if (ALLOWED_PATCH_FIELDS.has(k) && v !== undefined) patch[k] = v
+    }
+    if ('roles' in patch) {
+      const rolesArr = Array.isArray(patch.roles)
+        ? (patch.roles as unknown[]).filter((r): r is string => typeof r === 'string' && r.trim() !== '')
+        : []
+      if (rolesArr.length === 0) return NextResponse.json({ error: 'Minstens één rol is verplicht' }, { status: 400 })
+      patch.roles = rolesArr
+      patch.role = rolesArr[0] // legacy enkelvoudige kolom; valt weg als ze ontbreekt
+    }
+    if ('title' in patch) {
+      const t = String(patch.title ?? '').trim()
+      if (!t) return NextResponse.json({ error: 'Titel is verplicht' }, { status: 400 })
+      patch.title = t
     }
     if (patch.status !== undefined && !ALLOWED_STATUSES.has(patch.status as string)) {
       return NextResponse.json({ error: `Ongeldige status: ${patch.status}` }, { status: 400 })
@@ -152,20 +165,17 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    // Update resiliently: drop a patch key the schema lacks (e.g. payout) and retry.
+    // Update resiliently: drop patch keys the schema lacks (e.g. payout, role) and retry.
     let updateErr = (await admin.from('freelancer_assignments').update(patch).eq('id', id)).error
-    if (updateErr) {
+    for (let i = 0; updateErr && i < 5; i++) {
       const msg = updateErr.message ?? ''
       const match = msg.match(/'([^']+)' column/i) || msg.match(/column "?([a-z0-9_]+)"?/i)
       const badCol = match?.[1]
-      if (badCol && badCol in patch) {
-        delete patch[badCol]
-        if (Object.keys(patch).length > 0) {
-          updateErr = (await admin.from('freelancer_assignments').update(patch).eq('id', id)).error
-        } else {
-          updateErr = null
-        }
-      }
+      if (!badCol || !(badCol in patch)) break
+      delete patch[badCol]
+      updateErr = Object.keys(patch).length > 0
+        ? (await admin.from('freelancer_assignments').update(patch).eq('id', id)).error
+        : null
     }
     if (updateErr) throw new Error(updateErr.message)
 

@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback } from 'react'
 import { Camera, Plus, Pencil, Trash2, Loader2, Check, X, Calendar, Clock, MapPin, MessageSquare, Lightbulb, Paperclip } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 import { ShootDocumentKnop } from '@/components/shoot-document-knop'
+import { toast } from 'sonner'
+import { Bevestig } from '@/app/admin/instellingen/ui'
 
 type Feedback = { id: string; author_role: string; message: string; resolved: boolean; created_at: string }
 type Idea = { id: string; title: string | null; description: string | null; attachment_url: string | null; status: string; admin_note: string | null; created_at: string }
@@ -125,8 +127,15 @@ function ShootCard({ shoot, base, clientId, onEdit, onDeleted }: {
   useEffect(() => { loadIdeas() }, [loadIdeas])
 
   const patchIdea = async (id: string, patch: { status?: string; admin_note?: string }) => {
+    const vorige = ideas
     setIdeas(list => list.map(i => i.id === id ? { ...i, ...patch } : i))
-    try { await fetch('/api/admin/shoot-ideas', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idea_id: id, ...patch }) }) } catch { /* stil */ }
+    try {
+      const res = await fetch('/api/admin/shoot-ideas', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idea_id: id, ...patch }) })
+      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || 'Opslaan mislukt') }
+    } catch (e) {
+      setIdeas(vorige)
+      toast.error(e instanceof Error ? e.message : 'Opslaan mislukt')
+    }
   }
 
   const toggleResolved = async (f: Feedback) => {
@@ -140,12 +149,17 @@ function ShootCard({ shoot, base, clientId, onEdit, onDeleted }: {
     } catch { /* stil */ }
   }
 
+  const [vraagVerwijder, setVraagVerwijder] = useState(false)
   const remove = async () => {
-    if (!confirm('Deze shoot verwijderen?')) return
     setBusy(true)
     try {
       const res = await fetch(`${base}?shoot_id=${shoot.id}`, { method: 'DELETE' })
-      if (res.ok) onDeleted()
+      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || 'Verwijderen mislukt') }
+      setVraagVerwijder(false)
+      toast.success('Shoot verwijderd')
+      onDeleted()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt')
     } finally { setBusy(false) }
   }
 
@@ -162,11 +176,16 @@ function ShootCard({ shoot, base, clientId, onEdit, onDeleted }: {
         <div className="flex items-center gap-1 shrink-0">
           <ShootDocumentKnop href={`/api/admin/clients/${clientId}/shoot-document?shoot=${shoot.id}`} label="Shootdocument" className="text-xs !py-1.5 !px-2.5 mr-1" />
           <button onClick={onEdit} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400" title="Bewerken"><Pencil className="h-3.5 w-3.5" /></button>
-          <button onClick={remove} disabled={busy} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-red-50 text-red-400" title="Verwijderen">
+          <button onClick={() => setVraagVerwijder(true)} disabled={busy} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-red-50 text-red-400" title="Verwijderen">
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
           </button>
         </div>
       </div>
+      {vraagVerwijder && (
+        <Bevestig titel="Shoot verwijderen" gevaarlijk bevestigLabel="Verwijderen" bezig={busy}
+          tekst={<>De shoot van <strong>{shoot.shoot_date ? formatDate(shoot.shoot_date) : 'datum n.t.b.'}</strong> verwijderen, inclusief feedback en ideeën?</>}
+          onBevestig={remove} onAnnuleer={() => setVraagVerwijder(false)} />
+      )}
       {shoot.briefing && (
         <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed bg-gray-50 rounded-lg p-3 mt-2">{shoot.briefing}</p>
       )}

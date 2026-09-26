@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import {
   X, Phone, Mail, Globe, CalendarClock, Pencil, PhoneCall, MailPlus, StickyNote, FileText,
-  Trophy, XCircle, PhoneOff, Archive, History, Bot, Flame, Tag, Loader2, Check,
+  Trophy, XCircle, PhoneOff, Archive, History, Bot, Flame, Loader2, Check, Linkedin, MapPin, Users,
 } from 'lucide-react'
 import { STAGES } from '@/lib/sales/stages'
 import { LEADBRONNEN, leadbronLabel } from '@/lib/sales/leadbron'
@@ -15,16 +15,15 @@ import { LeadTijdlijn } from './lead-tijdlijn'
 import { DienstenLijst } from './lead-dialogen'
 import { LeadOpdrachten } from './lead-opdrachten'
 import { LeadControle } from './lead-controle'
+import { LeadLabels } from './lead-labels'
+import { LeadActiviteiten, BEHEERBARE_TYPES } from './lead-activiteiten'
+import type { Activiteit } from '@/lib/sales/activiteiten-model'
 import {
   type Lead, type Medewerker, type Pipeline, emailVan, euro, korteDatum, merkenVan, telefoonVan,
 } from './types'
 
 export type DialoogSoort = 'gesprek' | 'email' | 'notitie' | 'voorstel' | 'opvolg'
 
-type Notitie = {
-  id: string; medewerker_id: string | null; medewerker_email: string | null
-  notitie: string | null; created_at: string
-}
 
 /** Vanaf deze fases ligt het merk vast (er is een afspraak geweest). */
 const MERK_VAST = ['afspraak', 'voorstel', 'gewonnen', 'verloren']
@@ -34,9 +33,11 @@ const MERK_VAST = ['afspraak', 'voorstel', 'gewonnen', 'verloren']
  * lead wil weten en aanpassen, zonder het bord te verlaten.
  */
 export function LeadDetail({
-  lead, pipelines, medewerkers, meId, isAdmin, onChanged, onClose, onDialoog, onFase,
+  lead, pipelines, medewerkers, meId, isAdmin, labelSuggesties = [], onChanged, onClose, onDialoog, onFase,
 }: {
   lead: Lead
+  /** Labels die al ergens op het bord voorkomen (suggesties bij toevoegen). */
+  labelSuggesties?: string[]
   pipelines: Pipeline[]
   medewerkers: Medewerker[]
   meId: string | null
@@ -50,7 +51,9 @@ export function LeadDetail({
   const [bezig, setBezig] = useState(false)
   const [bewerken, setBewerken] = useState(false)
   const [ververs, setVerversen] = useState(0)
-  const [notities, setNotities] = useState<Notitie[] | null>(null)
+  const [activiteiten, setActiviteiten] = useState<Activiteit[] | null>(null)
+  const notities = activiteiten ? activiteiten.filter((a) => a.type === 'interne_notitie') : null
+  const andereActiviteiten = (activiteiten ?? []).filter((a) => (BEHEERBARE_TYPES as string[]).includes(a.type))
   const [bewerkId, setBewerkId] = useState<string | null>(null)
   const [bewerkTekst, setBewerkTekst] = useState('')
   const [nieuweNotitie, setNieuweNotitie] = useState('')
@@ -71,8 +74,8 @@ export function LeadDetail({
       const r = await fetch(`/api/admin/sales/activiteiten?lead=${lead.id}`, { cache: 'no-store' })
       const j = await r.json()
       if (!r.ok) throw new Error(j.error)
-      setNotities(((j.activiteiten ?? []) as (Notitie & { type: string })[]).filter((a) => a.type === 'interne_notitie'))
-    } catch { setNotities([]) }
+      setActiviteiten((j.activiteiten ?? []) as Activiteit[])
+    } catch { setActiviteiten([]) }
   }, [lead.id])
   useEffect(() => { laadNotities() }, [laadNotities, ververs])
 
@@ -127,8 +130,23 @@ export function LeadDetail({
       if (!r.ok) throw new Error(j.error ?? 'Opslaan mislukt')
       setBewerkId(null)
       toast.success('Notitie aangepast.', { duration: 1500 })
-      laadNotities()
+      setVerversen((n) => n + 1)
+      onChanged()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt') } finally { setBezig(false) }
+  }
+
+  const verwijderNotitie = async (id: string) => {
+    if (!window.confirm('Deze notitie verwijderen?\n\nZe verdwijnt uit de lijst en uit de tijdlijn.')) return
+    setBezig(true)
+    try {
+      const r = await fetch(`/api/admin/sales/activiteiten/${id}`, { method: 'DELETE' })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j.error ?? 'Verwijderen mislukt')
+      if (bewerkId === id) setBewerkId(null)
+      toast.success('Notitie verwijderd.', { duration: 1500 })
+      setVerversen((n) => n + 1)
+      onChanged()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt') } finally { setBezig(false) }
   }
 
   const tel = telefoonVan(lead)
@@ -193,6 +211,30 @@ export function LeadDetail({
                   <Phone className="h-4 w-4 text-gray-300" />{lead.sales_companies.phone} <span className="text-xs">(algemeen)</span>
                 </a>
               )}
+              {lead.sales_contacts?.linkedin && (
+                <a href={lead.sales_contacts.linkedin.startsWith('http') ? lead.sales_contacts.linkedin : `https://${lead.sales_contacts.linkedin}`} target="_blank" rel="noreferrer"
+                  className="flex items-center gap-2 text-gray-700 hover:underline truncate">
+                  <Linkedin className="h-4 w-4 text-gray-400" />LinkedIn {lead.sales_contacts.name ?? 'contactpersoon'}
+                </a>
+              )}
+              {lead.sales_companies?.linkedin && (
+                <a href={lead.sales_companies.linkedin.startsWith('http') ? lead.sales_companies.linkedin : `https://${lead.sales_companies.linkedin}`} target="_blank" rel="noreferrer"
+                  className="flex items-center gap-2 text-gray-700 hover:underline truncate">
+                  <Linkedin className="h-4 w-4 text-gray-400" />LinkedIn bedrijf
+                </a>
+              )}
+              {(lead.sales_companies?.city || lead.sales_companies?.country) && (
+                <p className="flex items-center gap-2 text-gray-500">
+                  <MapPin className="h-4 w-4 text-gray-300" />
+                  {[lead.sales_companies?.city, lead.sales_companies?.region, lead.sales_companies?.country].filter(Boolean).join(', ')}
+                </p>
+              )}
+              {(lead.sales_companies?.employees || lead.sales_companies?.werkklasse) && (
+                <p className="flex items-center gap-2 text-gray-500">
+                  <Users className="h-4 w-4 text-gray-300" />
+                  {lead.sales_companies?.employees || lead.sales_companies?.werkklasse} werknemers
+                </p>
+              )}
               {!tel && !mail && !website && <p className="text-xs text-gray-400">Nog geen contactgegevens — klik op het potlood.</p>}
             </div>
           )}
@@ -252,6 +294,9 @@ export function LeadDetail({
 
           {/* Opdrachten: titel + bedrag; hun som is de waarde van de lead */}
           <LeadOpdrachten leadId={lead.id} onChanged={onChanged} />
+
+          <LeadLabels labels={lead.labels ?? []} suggesties={labelSuggesties} bezig={bezig}
+            onOpslaan={(labels, melding) => patch({ labels }, melding)} />
 
           {/* Gewonnen / verloren */}
           {lead.stage_key === 'gewonnen' && (
@@ -347,6 +392,9 @@ export function LeadDetail({
                             {magBewerken && (
                               <button onClick={() => { setBewerkId(n.id); setBewerkTekst(n.notitie ?? '') }} className="underline hover:text-black">bewerken</button>
                             )}
+                            {magBewerken && (
+                              <button onClick={() => verwijderNotitie(n.id)} disabled={bezig} className="underline text-red-500 hover:text-red-700">verwijderen</button>
+                            )}
                           </p>
                         </>
                       )}
@@ -357,6 +405,9 @@ export function LeadDetail({
             )}
           </section>
 
+          <LeadActiviteiten activiteiten={andereActiviteiten} meId={meId} isAdmin={isAdmin} naamVan={naamVan}
+            onGewijzigd={() => { setVerversen((n) => n + 1); onChanged() }} />
+
           {/* Tijdlijn (met afspraakgegevens bovenaan) */}
           <section>
             <h3 className="text-[11px] uppercase tracking-wide text-gray-400 font-bold mb-2 flex items-center gap-1">
@@ -365,13 +416,6 @@ export function LeadDetail({
             <LeadTijdlijn leadId={lead.id} verversSleutel={ververs} max={40} />
           </section>
 
-          {lead.labels?.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {lead.labels.map((l) => (
-                <span key={l} className="text-[10px] bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded flex items-center gap-1"><Tag className="h-2.5 w-2.5" />{l}</span>
-              ))}
-            </div>
-          )}
           <p className="text-[11px] text-gray-400">
             Bron: {leadbronLabel(lead.leadbron)}
             {lead.created_at && <> · aangemaakt {new Date(lead.created_at).toLocaleDateString('nl-BE')}</>}

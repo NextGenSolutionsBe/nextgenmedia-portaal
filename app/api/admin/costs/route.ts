@@ -188,15 +188,33 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
+/**
+ * DELETE — een kost verwijderen.
+ *
+ * Een kost die uit een aankoop kwam ("Toevoegen als kost" bij Aankopen) laat
+ * anders een verwijzing achter in purchases.cost_entry_id: de aankoop blijft
+ * dan "In kosten" tonen en kan niet opnieuw als kost toegevoegd worden. Die
+ * koppeling maken we eerst los; de aankoop zelf blijft bestaan.
+ */
 export async function DELETE(req: NextRequest) {
   try {
     if (!(await requireAdmin())) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
-    const { id } = await req.json()
+    const { id } = await req.json().catch(() => ({}))
     if (!id) return NextResponse.json({ error: 'id vereist' }, { status: 400 })
     const admin = createAdminSupabaseClient()
+    let aankopenLosgemaakt = 0
+    try {
+      const { data, error: le } = await admin.from('purchases').update({ cost_entry_id: null }).eq('cost_entry_id', id).select('id')
+      if (le) throw le
+      aankopenLosgemaakt = (data ?? []).length
+    } catch (e) {
+      // Tabel of kolom ontbreekt (oude databank) → niets los te maken. Een echte fout: niet verwijderen.
+      const msg = String((e as { message?: string })?.message ?? e)
+      if (!/does not exist|schema cache|Could not find/i.test(msg)) throw e
+    }
     const { error } = await admin.from('cost_entries').delete().eq('id', id)
     if (error) throw error
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({ ok: true, aankopenLosgemaakt })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }

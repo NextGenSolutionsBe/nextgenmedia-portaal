@@ -86,6 +86,9 @@ export async function PATCH(req: NextRequest) {
     const van = normaliseerType(body.van)
     const naar = normaliseerType(body.naar)
     if (!van) return NextResponse.json({ error: 'Geef op welk contracttype hernoemd moet worden.' }, { status: 400 })
+    if (gelijkType(van, NIET_TOEGEWEZEN) && naar && !gelijkType(naar, NIET_TOEGEWEZEN)) {
+      return NextResponse.json({ error: `"${NIET_TOEGEWEZEN}" is de terugval voor contracten zonder type en kan niet hernoemd worden.` }, { status: 400 })
+    }
 
     const { types, tabelAanwezig } = await lijstTypes(admin)
     const huidig = types.find((t) => gelijkType(t.naam, van))

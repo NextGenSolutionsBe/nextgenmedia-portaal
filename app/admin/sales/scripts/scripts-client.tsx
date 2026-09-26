@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  Loader2, Upload, FileText, Trash2, RefreshCw, ChevronDown, User, Users, Sparkles,
+  Loader2, Upload, FileText, Trash2, RefreshCw, ChevronDown, User, Users, Sparkles, Pencil, X, Save,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { sectieKleur, type ScriptAnalyse } from '@/lib/sales/script-analyse'
@@ -15,11 +15,15 @@ type Script = {
   geanalyseerd_op: string | null; actief: boolean; created_at: string
 }
 type Pipeline = { id: string; name: string }
+type Eigenaar = 'huidig' | 'mij' | 'algemeen'
+type Bewerk = { script: Script; naam: string; eigenaar: Eigenaar; startEigenaar: Eigenaar; merk: string; tekst: string }
 
 export function ScriptsClient() {
   const [scripts, setScripts] = useState<Script[]>([])
   const [pipelines, setPipelines] = useState<Pipeline[]>([])
   const [mijnId, setMijnId] = useState('')
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [bewerk, setBewerk] = useState<Bewerk | null>(null)
   const [hint, setHint] = useState<string | null>(null)
   const [laden, setLaden] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -42,6 +46,7 @@ export function ScriptsClient() {
       setScripts(j.scripts ?? [])
       setPipelines(j.pipelines ?? [])
       setMijnId(String(j.mijnAuthId ?? ''))
+      setIsAdmin(!!j.isAdmin)
       setHint(j.hint ?? null)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Laden mislukt')
@@ -111,13 +116,70 @@ export function ScriptsClient() {
     } finally { setBusy(false) }
   }
 
+  const openBewerk = (s: Script) => {
+    const start: Eigenaar = s.eigenaar_auth_id === null ? 'algemeen' : s.eigenaar_auth_id === mijnId ? 'mij' : 'huidig'
+    setBewerk({ script: s, naam: s.naam, eigenaar: start, startEigenaar: start, merk: s.pipeline_id ?? '', tekst: s.ruwe_tekst })
+  }
+
+  /**
+   * Bewerken bewaart enkel wat je wijzigde. Een nieuwe tekst volgt dezelfde
+   * twee stappen als uploaden: eerst veilig opslaan, dan apart analyseren —
+   * zodat een mislukte analyse je bewerking niet kost.
+   */
+  const bewaarBewerking = async () => {
+    if (!bewerk) return
+    const s = bewerk.script
+    const naamNieuw = bewerk.naam.trim()
+    if (!naamNieuw) { toast.error('De naam mag niet leeg zijn.'); return }
+    if (!bewerk.tekst.trim()) { toast.error('De scripttekst mag niet leeg zijn.'); return }
+    const body: Record<string, unknown> = { id: s.id }
+    if (naamNieuw !== s.naam) body.naam = naamNieuw
+    if (bewerk.eigenaar !== bewerk.startEigenaar && bewerk.eigenaar !== 'huidig') body.eigenaar = bewerk.eigenaar
+    if (bewerk.merk !== (s.pipeline_id ?? '')) body.pipelineId = bewerk.merk || null
+    const tekstGewijzigd = bewerk.tekst.trim() !== s.ruwe_tekst.trim()
+    if (tekstGewijzigd) { body.tekst = bewerk.tekst.trim(); body.zonderAnalyse = true }
+    if (Object.keys(body).length === 1) { setBewerk(null); return }
+
+    setBusy(true)
+    try {
+      const r = await fetch('/api/admin/sales/scripts', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      })
+      await readJson(r)
+      setBewerk(null)
+      await laad()
+      if (tekstGewijzigd) {
+        setStap('analyseren')
+        try {
+          const r2 = await fetch('/api/admin/sales/scripts', {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: s.id, heranalyse: true }),
+          })
+          await readJson(r2)
+          toast.success('Script bewaard en opnieuw geanalyseerd.')
+        } catch (e) {
+          toast.warning(
+            `De nieuwe tekst is bewaard, maar de analyse lukte niet: ${e instanceof Error ? e.message : 'onbekende fout'}. `
+            + 'Klik op het vernieuwicoon om het opnieuw te proberen.',
+          )
+        }
+        await laad()
+      } else {
+        toast.success('Script bijgewerkt.')
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Bijwerken mislukt')
+    } finally { setBusy(false); setStap(null) }
+  }
+
   const verwijder = async (id: string, naamScript: string) => {
-    if (!confirm(`Script "${naamScript}" verwijderen?`)) return
+    if (!confirm(`Script "${naamScript}" verwijderen?\n\nHet verdwijnt ook uit Focus Mode. Dit kan niet ongedaan gemaakt worden.`)) return
     setBusy(true)
     try {
       const r = await fetch(`/api/admin/sales/scripts?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
       const j = await r.json()
       if (!r.ok) throw new Error(j.error)
+      toast.success('Script verwijderd.')
       await laad()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt')
@@ -186,7 +248,7 @@ export function ScriptsClient() {
         <div className="space-y-3">
           {scripts.map((s) => (
             <div key={s.id} className="card-base">
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start justify-between gap-3 flex-wrap sm:flex-nowrap">
                 <button onClick={() => setOpen(open === s.id ? null : s.id)} className="text-left min-w-0 flex-1">
                   <div className="font-semibold flex items-center gap-2">
                     {s.naam}
@@ -212,11 +274,15 @@ export function ScriptsClient() {
                   >
                     {s.actief ? 'Actief' : 'Uit'}
                   </button>
+                  <button onClick={() => openBewerk(s)} disabled={busy}
+                    title="Bewerken" className="h-7 w-7 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center justify-center">
+                    <Pencil className="h-3.5 w-3.5 text-gray-500" />
+                  </button>
                   <button onClick={() => wijzig(s.id, { heranalyse: true }, 'Opnieuw geanalyseerd.')} disabled={busy}
                     title="Opnieuw analyseren" className="h-7 w-7 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center justify-center">
                     <RefreshCw className="h-3.5 w-3.5 text-gray-500" />
                   </button>
-                  <button onClick={() => verwijder(s.id, s.naam)} disabled={busy}
+                  <button onClick={() => verwijder(s.id, s.naam)} disabled={busy} title="Verwijderen"
                     className="h-7 w-7 rounded-lg border border-red-200 hover:bg-red-50 flex items-center justify-center">
                     <Trash2 className="h-3.5 w-3.5 text-red-500" />
                   </button>
@@ -260,6 +326,55 @@ export function ScriptsClient() {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {bewerk && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/30 backdrop-blur-sm"
+          onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) setBewerk(null) }}>
+          <form className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full sm:max-w-2xl max-h-[92dvh] flex flex-col overflow-hidden"
+            onSubmit={(e) => { e.preventDefault(); if (!busy) void bewaarBewerking() }}>
+            <div className="flex items-center justify-between gap-2 px-5 pt-4 pb-3 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-900 flex items-center gap-2"><Pencil className="h-4 w-4 text-gray-400" />Script bewerken</h3>
+              <button type="button" onClick={() => setBewerk(null)} aria-label="Sluiten"
+                className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="px-5 py-4 space-y-3 overflow-y-auto">
+              <label className="block text-xs text-gray-500">Naam
+                <input value={bewerk.naam} maxLength={120} onChange={(e) => setBewerk({ ...bewerk, naam: e.target.value })} className="input-base text-sm mt-1" />
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="text-xs text-gray-500">Van wie
+                  <select value={bewerk.eigenaar} onChange={(e) => setBewerk({ ...bewerk, eigenaar: e.target.value as Eigenaar })} className="input-base text-sm mt-1">
+                    {bewerk.startEigenaar === 'huidig' && <option value="huidig">Van een collega (ongewijzigd)</option>}
+                    <option value="mij">{bewerk.startEigenaar === 'huidig' ? 'Overnemen als mijn script' : 'Mijn script'}</option>
+                    {(isAdmin || bewerk.startEigenaar === 'algemeen') && <option value="algemeen">Voor iedereen</option>}
+                  </select>
+                </label>
+                <label className="text-xs text-gray-500">Merk
+                  <select value={bewerk.merk} onChange={(e) => setBewerk({ ...bewerk, merk: e.target.value })} className="input-base text-sm mt-1">
+                    <option value="">Alle merken</option>
+                    {pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </label>
+              </div>
+              <label className="block text-xs text-gray-500">Scripttekst
+                <textarea rows={12} value={bewerk.tekst} onChange={(e) => setBewerk({ ...bewerk, tekst: e.target.value })}
+                  className="input-base text-sm mt-1 leading-relaxed" />
+              </label>
+              {bewerk.tekst.trim() !== bewerk.script.ruwe_tekst.trim() && (
+                <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  De tekst is gewijzigd: na het opslaan analyseert de AI het script opnieuw (20 tot 60 seconden).
+                </p>
+              )}
+            </div>
+            <div className="px-5 py-3 border-t border-gray-100 flex gap-2">
+              <button type="submit" disabled={busy} className="btn-primary flex-1">
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Opslaan
+              </button>
+              <button type="button" onClick={() => setBewerk(null)} className="btn-secondary">Annuleer</button>
+            </div>
+          </form>
         </div>
       )}
     </div>

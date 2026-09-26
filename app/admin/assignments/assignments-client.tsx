@@ -596,6 +596,7 @@ export function AssignmentsClient({
           assignment={editing}
           partners={partners}
           clients={clients}
+          roleLabels={roleLabels}
           onClose={() => setEditing(null)}
           onSaved={(updated) => {
             setAssignments((prev) => prev.map((x) => x.id === updated.id ? { ...x, ...updated } : x))
@@ -609,11 +610,12 @@ export function AssignmentsClient({
 }
 
 function EditDialog({
-  assignment, partners, clients, onClose, onSaved,
+  assignment, partners, clients, roleLabels, onClose, onSaved,
 }: {
   assignment: Assignment
   partners: Partner[]
   clients: Client[]
+  roleLabels: Record<string, string>
   onClose: () => void
   onSaved: (a: Assignment) => void
 }) {
@@ -628,12 +630,15 @@ function EditDialog({
     budget: (assignment.payout ?? assignment.budget) != null ? String(assignment.payout ?? assignment.budget) : '',
     deadline: assignment.deadline ?? '',
     status: assignment.status,
+    roles: (assignment.roles ?? []) as string[],
   })
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
     if (!form.title.trim()) { setError('Titel is verplicht'); return }
+    // Partnervoorstellen hebben (nog) geen rollen; enkel eigen opdrachten vereisen er één.
+    if (assignment.origin !== 'partner' && form.roles.length === 0) { setError('Selecteer minstens één rol'); return }
     setLoading(true)
     try {
       const amount = form.budget ? parseFloat(form.budget) : null
@@ -651,6 +656,7 @@ function EditDialog({
           payout: amount,
           deadline: form.deadline || null,
           status: form.status,
+          ...(form.roles.length > 0 ? { roles: form.roles } : {}),
         }),
       })
       const json = await res.json()
@@ -666,6 +672,7 @@ function EditDialog({
         payout: amount,
         deadline: form.deadline || null,
         status: form.status,
+        roles: form.roles,
         clients: form.client_id ? clients.find((c) => c.id === form.client_id) ?? null : null,
         freelancers: form.freelancer_id ? partners.find((p) => p.id === form.freelancer_id) ?? null : null,
       })
@@ -696,6 +703,28 @@ function EditDialog({
           <div>
             <label className={lbl}>Omschrijving</label>
             <textarea rows={3} className={inp} value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} />
+          </div>
+          <div>
+            <label className={lbl}>Rollen{assignment.origin !== 'partner' ? ' *' : ''}</label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mt-1">
+              {ALL_ROLES.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setForm((p) => ({
+                    ...p,
+                    roles: p.roles.includes(r) ? p.roles.filter((x) => x !== r) : [...p.roles, r],
+                  }))}
+                  className={`px-2 py-1.5 rounded-lg border text-xs transition-colors ${
+                    form.roles.includes(r)
+                      ? 'border-[#fff848] bg-[#fff848]/10 text-black'
+                      : 'border-gray-200 text-gray-500'
+                  }`}
+                >
+                  {roleLabels[r] ?? r}
+                </button>
+              ))}
+            </div>
           </div>
           <div>
             <label className={lbl}>Dienst</label>

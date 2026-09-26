@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2, Save } from 'lucide-react'
+import { GetalInvoer } from '@/components/ui/getal-invoer'
 
 /**
  * Gegevens van een lead rechtzetten: bedrijf én contactpersoon.
@@ -20,6 +21,9 @@ import { Loader2, Save } from 'lucide-react'
 export type Bedrijfsvelden = {
   name?: string | null; website?: string | null; sector?: string | null
   city?: string | null; region?: string | null; phone?: string | null
+  country?: string | null; linkedin?: string | null
+  /** Aantal werknemers (getal) en de ruwe werkklasse uit de import ("10–19"). */
+  employees?: number | null; werkklasse?: string | null
   /** De balie of secretaresse die je eerst aan de lijn krijgt. */
   gatekeeper_naam?: string | null
   /** De beslissingnemer: wie er uiteindelijk ja of nee zegt. */
@@ -27,7 +31,7 @@ export type Bedrijfsvelden = {
 }
 export type Contactvelden = {
   name?: string | null; role?: string | null; email?: string | null
-  phone?: string | null; mobile?: string | null
+  phone?: string | null; mobile?: string | null; linkedin?: string | null
 }
 
 const tekst = (v: string | null | undefined) => v ?? ''
@@ -62,9 +66,12 @@ export function LeadGegevens({ leadId, bedrijf, contact, compact = false, onOpge
   const start = useMemo(() => ({
     naam: tekst(bedrijf?.name), website: tekst(bedrijf?.website), sector: tekst(bedrijf?.sector),
     stad: tekst(bedrijf?.city), regio: tekst(bedrijf?.region), bedrijfTel: tekst(bedrijf?.phone),
+    land: tekst(bedrijf?.country), bLinkedin: tekst(bedrijf?.linkedin),
+    werknemers: bedrijf?.employees && bedrijf.employees > 0 ? String(bedrijf.employees) : '',
+    werkklasse: tekst(bedrijf?.werkklasse),
     gate: tekst(bedrijf?.gatekeeper_naam), dmu: tekst(bedrijf?.dmu_naam), dmuFunctie: tekst(bedrijf?.dmu_functie),
     cNaam: tekst(contact?.name), cFunctie: tekst(contact?.role), cMail: tekst(contact?.email),
-    cTel: tekst(contact?.phone), cGsm: tekst(contact?.mobile),
+    cTel: tekst(contact?.phone), cGsm: tekst(contact?.mobile), cLinkedin: tekst(contact?.linkedin),
   }), [bedrijf, contact])
 
   const [f, setF] = useState(start)
@@ -89,8 +96,10 @@ export function LeadGegevens({ leadId, bedrijf, contact, compact = false, onOpge
     wijzig(company, 'region', 'regio'); wijzig(company, 'phone', 'bedrijfTel')
     wijzig(company, 'gatekeeper_naam', 'gate'); wijzig(company, 'dmu_naam', 'dmu')
     wijzig(company, 'dmu_functie', 'dmuFunctie')
+    wijzig(company, 'country', 'land'); wijzig(company, 'linkedin', 'bLinkedin')
+    wijzig(company, 'werkklasse', 'werkklasse'); wijzig(company, 'employees', 'werknemers')
     wijzig(c, 'name', 'cNaam'); wijzig(c, 'role', 'cFunctie'); wijzig(c, 'email', 'cMail')
-    wijzig(c, 'phone', 'cTel'); wijzig(c, 'mobile', 'cGsm')
+    wijzig(c, 'phone', 'cTel'); wijzig(c, 'mobile', 'cGsm'); wijzig(c, 'linkedin', 'cLinkedin')
 
     if (!Object.keys(company).length && !Object.keys(c).length) { onKlaar?.(); return }
 
@@ -113,31 +122,41 @@ export function LeadGegevens({ leadId, bedrijf, contact, compact = false, onOpge
 
   return (
     <div className={compact ? 'space-y-2' : 'space-y-3'}>
-      <div className={`grid gap-2 ${compact ? 'grid-cols-1' : 'grid-cols-2'}`}>
-        <div className={compact ? '' : 'col-span-2'}><Veld label="Bedrijfsnaam" value={f.naam} onChange={(v) => set('naam', v)} /></div>
-        <div className={compact ? '' : 'col-span-2'}><Veld label="Website" placeholder="bedrijf.be" value={f.website} onChange={(v) => set('website', v)} /></div>
+      <div className={`grid gap-2 ${compact ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'}`}>
+        <div className={compact ? '' : 'sm:col-span-2'}><Veld label="Bedrijfsnaam" value={f.naam} onChange={(v) => set('naam', v)} /></div>
+        <div className={compact ? '' : 'sm:col-span-2'}><Veld label="Website" placeholder="bedrijf.be" value={f.website} onChange={(v) => set('website', v)} /></div>
         <Veld label="Sector" value={f.sector} onChange={(v) => set('sector', v)} />
         <Veld label="Telefoon bedrijf" value={f.bedrijfTel} onChange={(v) => set('bedrijfTel', v)} />
         <Veld label="Stad" value={f.stad} onChange={(v) => set('stad', v)} />
         <Veld label="Regio" value={f.regio} onChange={(v) => set('regio', v)} />
+        <Veld label="Land" placeholder="bv. België" value={f.land} onChange={(v) => set('land', v)} />
+        <label className="block text-[11px] font-medium text-gray-500">
+          Werknemers
+          <GetalInvoer className="input-base mt-0.5 text-sm" placeholder="aantal" min={0}
+            waarde={f.werknemers ? Number(f.werknemers) : null}
+            onWaarde={(n) => set('werknemers', n > 0 ? String(Math.round(n)) : '')} />
+        </label>
+        <Veld label="Werkklasse" placeholder="bv. 10–19" value={f.werkklasse} onChange={(v) => set('werkklasse', v)} />
+        <Veld label="LinkedIn bedrijf" type="url" placeholder="linkedin.com/company/…" value={f.bLinkedin} onChange={(v) => set('bLinkedin', v)} />
       </div>
 
       {/* Wie je moet passeren, en wie je moet hebben. Twee namen die je aan de
           telefoon leert en die anders in een losse notitie verdwijnen. */}
-      <div className={`grid gap-2 border-t border-gray-100 pt-2 ${compact ? 'grid-cols-1' : 'grid-cols-2'}`}>
-        <div className={compact ? '' : 'col-span-2'}>
+      <div className={`grid gap-2 border-t border-gray-100 pt-2 ${compact ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'}`}>
+        <div className={compact ? '' : 'sm:col-span-2'}>
           <Veld label="Gatekeeper" placeholder="balie of secretariaat" value={f.gate} onChange={(v) => set('gate', v)} />
         </div>
         <Veld label="Beslissingnemer" placeholder="wie beslist" value={f.dmu} onChange={(v) => set('dmu', v)} />
         <Veld label="Functie beslissingnemer" placeholder="bv. zaakvoerder" value={f.dmuFunctie} onChange={(v) => set('dmuFunctie', v)} />
       </div>
 
-      <div className={`grid gap-2 border-t border-gray-100 pt-2 ${compact ? 'grid-cols-1' : 'grid-cols-2'}`}>
+      <div className={`grid gap-2 border-t border-gray-100 pt-2 ${compact ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'}`}>
         <Veld label="Contactpersoon" value={f.cNaam} onChange={(v) => set('cNaam', v)} />
         <Veld label="Functie" value={f.cFunctie} onChange={(v) => set('cFunctie', v)} />
-        <div className={compact ? '' : 'col-span-2'}><Veld label="E-mail" type="email" value={f.cMail} onChange={(v) => set('cMail', v)} /></div>
+        <div className={compact ? '' : 'sm:col-span-2'}><Veld label="E-mail" type="email" value={f.cMail} onChange={(v) => set('cMail', v)} /></div>
         <Veld label="Telefoon" value={f.cTel} onChange={(v) => set('cTel', v)} />
         <Veld label="Gsm" value={f.cGsm} onChange={(v) => set('cGsm', v)} />
+        <div className={compact ? '' : 'sm:col-span-2'}><Veld label="LinkedIn contactpersoon" type="url" placeholder="linkedin.com/in/…" value={f.cLinkedin} onChange={(v) => set('cLinkedin', v)} /></div>
       </div>
 
       <p className="text-[10px] text-gray-400 leading-snug">

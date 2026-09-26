@@ -4,10 +4,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
-import { ChevronLeft, Loader2, Save, Upload, Trash2, RefreshCw, FileText, Lock, KeyRound, Mail, Ban, CheckCircle2, Plus, X, Camera, ShieldAlert } from 'lucide-react'
+import { ChevronLeft, Loader2, Save, Upload, Trash2, RefreshCw, FileText, Lock, KeyRound, Mail, Ban, CheckCircle2, Plus, X, Camera, ShieldAlert, Pencil } from 'lucide-react'
 import { api, Avatar, Chip, datumNl, euro, INP, LBL } from '@/components/personeel/ui'
 import { MEDEWERKER_TYPES, DOCUMENT_MAPPEN, ACCOUNT_LABEL, typeLabel, typeKleur, mapLabel, type AccountStatus } from '@/lib/personeel/model'
 import { KOST_SOORTEN, LIJN_SUGGESTIES, type KostLijn, type KostSoort, type Tarief } from '@/lib/personeel/kost'
+import { Bevestig, Dialoog } from '@/app/admin/instellingen/ui'
 import { UrenTab } from '../uren-tab'
 import { PlanningTab } from '../planning-tab'
 import { KostenTab } from '../kosten-tab'
@@ -24,6 +25,7 @@ type Log = { id: number; entiteit: string; actie: string; oud: unknown; nieuw: u
 type Dossier = {
   medewerker: Medewerker; gevoelig: { adres: string | null; geboortedatum: string | null; noodcontact: string | null; rijksregisternummer: string | null; iban: string | null } | null
   documenten: Doc[]; verborgenDocumenten: number; tarieven: TariefMet[] | null; logboek: Log[]; magFinancieel: boolean; magGevoelig: boolean
+  historiek?: { sessies: number; kostenposten: number; planning: number }
   intern: { gekoppeld: Intern | null; kandidaat: Intern | null }
 }
 type Intern = { id: string; email: string | null; name: string | null; rol?: string | null; permissions?: string[]; active?: boolean | null }
@@ -81,17 +83,34 @@ export function DossierClient({ id }: { id: string }) {
 function Foto({ id, naam, url, onKlaar }: { id: string; naam: string; url: string | null; onKlaar: () => void }) {
   const ref = useRef<HTMLInputElement>(null)
   const [bezig, setBezig] = useState(false)
+  const [vraagWis, setVraagWis] = useState(false)
   const kies = async (f: File | null) => {
     if (!f) return
     setBezig(true)
     try { const fd = new FormData(); fd.append('file', f); await api(`/api/admin/personeel/${id}/foto`, { form: fd }); toast.success('Profielfoto bijgewerkt.'); onKlaar() } catch (e) { toast.error(e instanceof Error ? e.message : 'Uploaden mislukt') } finally { setBezig(false) }
   }
+  const wis = async () => {
+    setBezig(true)
+    try { await api(`/api/admin/personeel/${id}/foto`, { method: 'DELETE' }); toast.success('Profielfoto verwijderd.'); setVraagWis(false); onKlaar() } catch (e) { toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt') } finally { setBezig(false) }
+  }
   return (
-    <button type="button" onClick={() => ref.current?.click()} className="relative group" title="Profielfoto wijzigen">
-      <Avatar naam={naam} url={url} groot />
-      <span className="absolute inset-0 rounded-full bg-black/40 text-white opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">{bezig ? <Loader2 className="h-5 w-5 animate-spin" /> : <Camera className="h-5 w-5" />}</span>
-      <input ref={ref} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={(e) => kies(e.target.files?.[0] ?? null)} />
-    </button>
+    <div className="relative">
+      <button type="button" onClick={() => ref.current?.click()} className="relative group block" title="Profielfoto wijzigen">
+        <Avatar naam={naam} url={url} groot />
+        <span className="absolute inset-0 rounded-full bg-black/40 text-white opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">{bezig ? <Loader2 className="h-5 w-5 animate-spin" /> : <Camera className="h-5 w-5" />}</span>
+        <input ref={ref} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={(e) => { kies(e.target.files?.[0] ?? null); e.target.value = '' }} />
+      </button>
+      {url && (
+        <button type="button" onClick={() => setVraagWis(true)} disabled={bezig} className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-white border border-red-200 text-red-600 shadow-sm flex items-center justify-center hover:bg-red-50" title="Profielfoto verwijderen" aria-label="Profielfoto verwijderen">
+          <Trash2 className="h-3 w-3" />
+        </button>
+      )}
+      {vraagWis && (
+        <Bevestig titel="Profielfoto verwijderen" gevaarlijk bevestigLabel="Verwijderen" bezig={bezig}
+          tekst={<>De profielfoto van <strong>{naam}</strong> verwijderen?</>}
+          onBevestig={wis} onAnnuleer={() => setVraagWis(false)} />
+      )}
+    </div>
   )
 }
 
@@ -117,7 +136,7 @@ function Gegevens({ d, onKlaar }: { d: Dossier; onKlaar: () => void }) {
     <div className="grid lg:grid-cols-2 gap-4">
       <div className="card-base p-4 space-y-3">
         <h2 className="text-sm font-semibold">Contact en werk</h2>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {veld('voornaam', 'Voornaam *')}{veld('achternaam', 'Achternaam')}
           {veld('email', m.auth_user_id ? 'E-mailadres (login — wijzigen via Account)' : 'E-mailadres', 'email')}{veld('telefoon', 'Telefoon')}
           <div><label className={LBL}>Type medewerker</label><select className={INP} value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}>{MEDEWERKER_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}</select></div>
@@ -126,8 +145,8 @@ function Gegevens({ d, onKlaar }: { d: Dossier; onKlaar: () => void }) {
           {veld('verantwoordelijke', 'Interne verantwoordelijke')}
           <div><label className={LBL}>Status</label><select className={INP} value={f.actief ? '1' : '0'} onChange={(e) => setF({ ...f, actief: e.target.value === '1' })}><option value="1">Actief</option><option value="0">Inactief</option></select></div>
         </div>
-        <div><div className={LBL}>Standaardwerkdagen</div><div className="flex gap-1">{DAGEN.map((dg, i) => { const n = i + 1; const aan = f.standaard_werkdagen.includes(n); return <button key={dg} type="button" onClick={() => setF({ ...f, standaard_werkdagen: aan ? f.standaard_werkdagen.filter((x) => x !== n) : [...f.standaard_werkdagen, n].sort() })} className={`h-8 w-9 rounded-lg text-xs font-medium border ${aan ? 'bg-black text-white border-black' : 'bg-white border-gray-200 text-gray-600'}`}>{dg}</button> })}</div></div>
-        <div className="grid grid-cols-3 gap-3">{veld('max_uren_dag', 'Max. u/dag', 'number')}{veld('max_uren_week', 'Max. u/week', 'number')}{veld('max_uren_maand', 'Max. u/maand', 'number')}</div>
+        <div><div className={LBL}>Standaardwerkdagen</div><div className="flex flex-wrap gap-1">{DAGEN.map((dg, i) => { const n = i + 1; const aan = f.standaard_werkdagen.includes(n); return <button key={dg} type="button" onClick={() => setF({ ...f, standaard_werkdagen: aan ? f.standaard_werkdagen.filter((x) => x !== n) : [...f.standaard_werkdagen, n].sort() })} className={`h-8 w-9 rounded-lg text-xs font-medium border ${aan ? 'bg-black text-white border-black' : 'bg-white border-gray-200 text-gray-600'}`}>{dg}</button> })}</div></div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">{veld('max_uren_dag', 'Max. u/dag', 'number')}{veld('max_uren_week', 'Max. u/week', 'number')}{veld('max_uren_maand', 'Max. u/maand', 'number')}</div>
         <div><label className={LBL}>Interne notities (nooit zichtbaar voor de medewerker)</label><textarea rows={3} className={INP} value={f.interne_notities} onChange={(e) => setF({ ...f, interne_notities: e.target.value })} /></div>
         <button type="button" disabled={bezig === 'w'} onClick={bewaar} className="btn-primary">{bezig === 'w' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Bewaren</button>
       </div>
@@ -135,18 +154,82 @@ function Gegevens({ d, onKlaar }: { d: Dossier; onKlaar: () => void }) {
         <h2 className="text-sm font-semibold flex items-center gap-1.5"><Lock className="h-4 w-4" />Persoonlijke gegevens</h2>
         {!d.magGevoelig ? <p className="text-sm text-gray-500">Enkel zichtbaar voor bevoegde admins (instellingenrecht op Personeel).</p> : (
           <>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2"><label className={LBL}>Adres</label><textarea rows={2} className={INP} value={g.adres} onChange={(e) => setG({ ...g, adres: e.target.value })} /></div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="sm:col-span-2"><label className={LBL}>Adres</label><textarea rows={2} className={INP} value={g.adres} onChange={(e) => setG({ ...g, adres: e.target.value })} /></div>
               <div><label className={LBL}>Geboortedatum</label><input type="date" className={INP} value={g.geboortedatum} onChange={(e) => setG({ ...g, geboortedatum: e.target.value })} /></div>
               <div><label className={LBL}>Rijksregisternummer</label><input className={INP} value={g.rijksregisternummer} onChange={(e) => setG({ ...g, rijksregisternummer: e.target.value })} placeholder="enkel indien nodig" /></div>
-              <div className="col-span-2"><label className={LBL}>Bankrekeningnummer (IBAN)</label><input className={INP} value={g.iban} onChange={(e) => setG({ ...g, iban: e.target.value })} /></div>
-              <div className="col-span-2"><label className={LBL}>Noodcontact</label><input className={INP} value={g.noodcontact} onChange={(e) => setG({ ...g, noodcontact: e.target.value })} placeholder="naam, relatie, telefoon" /></div>
+              <div className="sm:col-span-2"><label className={LBL}>Bankrekeningnummer (IBAN)</label><input className={INP} value={g.iban} onChange={(e) => setG({ ...g, iban: e.target.value })} /></div>
+              <div className="sm:col-span-2"><label className={LBL}>Noodcontact</label><input className={INP} value={g.noodcontact} onChange={(e) => setG({ ...g, noodcontact: e.target.value })} placeholder="naam, relatie, telefoon" /></div>
             </div>
             <p className="text-[11px] text-gray-500">Rijksregisternummer en IBAN worden versleuteld bewaard. In het logboek staat enkel wélk veld wijzigde, nooit de waarde.</p>
             <button type="button" disabled={bezig === 'g'} onClick={bewaarGevoelig} className="btn-primary">{bezig === 'g' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Bewaren</button>
           </>
         )}
       </div>
+      <Verwijderzone d={d} onKlaar={onKlaar} />
+    </div>
+  )
+}
+
+/**
+ * Definitief verwijderen kan enkel zolang er geen historiek is (uren,
+ * kostenposten, planning). Anders enkel op inactief zetten.
+ */
+function Verwijderzone({ d, onKlaar }: { d: Dossier; onKlaar: () => void }) {
+  const router = useRouter()
+  const m = d.medewerker
+  const naam = [m.voornaam, m.achternaam].filter(Boolean).join(' ')
+  const h = d.historiek ?? { sessies: 1, kostenposten: 0, planning: 0 }
+  const heeftHistoriek = h.sessies > 0 || h.kostenposten > 0 || h.planning > 0
+  const [open, setOpen] = useState(false)
+  const [invoer, setInvoer] = useState('')
+  const [bezig, setBezig] = useState(false)
+  const klopt = invoer.trim().toLowerCase() === naam.trim().toLowerCase()
+
+  const deactiveer = async () => {
+    setBezig(true)
+    try { await api(`/api/admin/personeel/${m.id}`, { method: 'PATCH', body: { actief: false } }); toast.success('Medewerker op inactief gezet.'); onKlaar() }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(false) }
+  }
+  const verwijder = async () => {
+    if (!klopt) return
+    setBezig(true)
+    try {
+      await api(`/api/admin/personeel/${m.id}`, { method: 'DELETE', body: { bevestig_naam: invoer } })
+      toast.success('Dossier definitief verwijderd.')
+      router.push('/admin/personeel')
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt'); setBezig(false) }
+  }
+
+  const delen = [h.sessies && `${h.sessies} urenregistratie${h.sessies === 1 ? '' : 's'}`, h.kostenposten && `${h.kostenposten} kostenpost${h.kostenposten === 1 ? '' : 'en'}`, h.planning && `${h.planning} planningsblok${h.planning === 1 ? '' : 'ken'}`].filter(Boolean)
+  return (
+    <div className="card-base p-4 space-y-2 lg:col-span-2 border-red-100">
+      <h2 className="text-sm font-semibold text-red-700 flex items-center gap-1.5"><ShieldAlert className="h-4 w-4" />Dossier verwijderen</h2>
+      {heeftHistoriek ? (
+        <>
+          <p className="text-sm text-gray-600">
+            {naam} heeft al {delen.length ? delen.join(', ') : 'historiek'}. Die historiek moet bewaard blijven, dus dit dossier kan enkel op <b>inactief</b> gezet worden.
+          </p>
+          {m.actief && <button type="button" disabled={bezig} onClick={deactiveer} className="btn-secondary text-sm">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}Op inactief zetten</button>}
+        </>
+      ) : (
+        <>
+          <p className="text-sm text-gray-600">Er zijn nog geen uren, kostenposten of planning. Je kan dit dossier definitief verwijderen, inclusief documenten{m.auth_user_id ? ' en de login die enkel voor dit dossier bestaat' : ''}.</p>
+          <button type="button" onClick={() => { setInvoer(''); setOpen(true) }} className="btn-danger text-sm"><Trash2 className="h-4 w-4" />Definitief verwijderen</button>
+        </>
+      )}
+      {open && (
+        <Dialoog titel="Dossier definitief verwijderen" onSluit={() => !bezig && setOpen(false)}>
+          <div className="space-y-3">
+            <p className="text-sm text-gray-700">Dit kan niet ongedaan gemaakt worden. Typ <b>{naam}</b> om te bevestigen.</p>
+            <input className={INP} value={invoer} onChange={(e) => setInvoer(e.target.value)} placeholder={naam} autoFocus />
+            <div className="flex gap-2 justify-end">
+              <button type="button" onClick={() => setOpen(false)} disabled={bezig} className="btn-secondary">Annuleren</button>
+              <button type="button" onClick={verwijder} disabled={!klopt || bezig} className="btn-danger">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Definitief verwijderen</button>
+            </div>
+          </div>
+        </Dialoog>
+      )}
     </div>
   )
 }
@@ -163,9 +246,11 @@ function Documenten({ id, d, onKlaar }: { id: string; d: Dossier; onKlaar: () =>
       await api(`/api/admin/personeel/${id}/documenten`, { form: fd }); toast.success(vervang ? 'Document vervangen.' : 'Document toegevoegd.'); onKlaar()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Uploaden mislukt') } finally { setBezig(null) }
   }
+  const [bewerk, setBewerk] = useState<Doc | null>(null)
+  const [wis, setWis] = useState<Doc | null>(null)
   const verwijder = async (doc: Doc) => {
-    if (!confirm(`"${doc.naam}" definitief verwijderen?`)) return
-    try { await api(`/api/admin/personeel/${id}/documenten?doc=${doc.id}`, { method: 'DELETE' }); toast.success('Verwijderd.'); onKlaar() } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') }
+    setBezig(`wis-${doc.id}`)
+    try { await api(`/api/admin/personeel/${id}/documenten?doc=${doc.id}`, { method: 'DELETE' }); toast.success('Verwijderd.'); setWis(null); onKlaar() } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(null) }
   }
   const zetVervalt = async (doc: Doc, v: string) => {
     try { await api(`/api/admin/personeel/${id}/documenten`, { method: 'PATCH', body: { doc: doc.id, vervalt_op: v || null } }); onKlaar() } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') }
@@ -194,10 +279,12 @@ function Documenten({ id, d, onKlaar }: { id: string; d: Dossier; onKlaar: () =>
                       <a href={doc.url ?? '#'} target="_blank" rel="noreferrer" className="font-medium text-blue-700 hover:underline truncate inline-flex items-center gap-1"><FileText className="h-3.5 w-3.5 shrink-0" />{doc.naam}</a>
                       <span className="flex gap-1 shrink-0">
                         <label className="h-7 w-7 rounded hover:bg-gray-100 flex items-center justify-center cursor-pointer text-gray-500" title="Vervangen">{bezig === doc.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}<input type="file" className="hidden" onChange={(e) => { upload(e.target.files?.[0] ?? null, doc.id, doc.map); e.target.value = '' }} /></label>
-                        <button type="button" onClick={() => verwijder(doc)} className="h-7 w-7 rounded hover:bg-red-50 flex items-center justify-center text-gray-400 hover:text-red-600" title="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></button>
+                        <button type="button" onClick={() => setBewerk(doc)} className="h-7 w-7 rounded hover:bg-gray-100 flex items-center justify-center text-gray-500" title="Naam, map of verplicht aanpassen"><Pencil className="h-3.5 w-3.5" /></button>
+                        <button type="button" onClick={() => setWis(doc)} className="h-7 w-7 rounded hover:bg-red-50 flex items-center justify-center text-red-400 hover:text-red-600" title="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></button>
                       </span>
                     </div>
                     <div className="text-gray-500 mt-1 flex flex-wrap items-center gap-x-2">
+                      {doc.verplicht && <span className="text-amber-700 font-medium">Verplicht ·</span>}
                       <span>Toegevoegd door {doc.toegevoegd_door ?? '—'} op {datumNl(doc.created_at.slice(0, 10))}</span>
                       {doc.gewijzigd_door && doc.updated_at !== doc.created_at && <span>· aangepast door {doc.gewijzigd_door}</span>}
                       <label className="inline-flex items-center gap-1">· vervalt <input type="date" className={`border rounded px-1 py-0.5 ${doc.vervalt_op && doc.vervalt_op < vandaag ? 'border-red-300 text-red-700' : 'border-gray-200'}`} defaultValue={doc.vervalt_op ?? ''} onBlur={(e) => e.target.value !== (doc.vervalt_op ?? '') && zetVervalt(doc, e.target.value)} /></label>
@@ -210,7 +297,44 @@ function Documenten({ id, d, onKlaar }: { id: string; d: Dossier; onKlaar: () =>
         })}
       </div>
       <p className="text-[11px] text-gray-500">Documenten staan in een afgeschermde opslag; links zijn telkens maar één uur geldig. {mapLabel('overeenkomst')} is verplicht: ontbreekt ze, dan verschijnt een melding.</p>
+      {bewerk && <DocBewerk id={id} doc={bewerk} mappen={zichtbareMappen} onSluit={() => setBewerk(null)} onKlaar={() => { setBewerk(null); onKlaar() }} />}
+      {wis && (
+        <Bevestig titel="Document verwijderen" gevaarlijk bevestigLabel="Verwijderen" bezig={bezig === `wis-${wis.id}`}
+          tekst={<><strong>{wis.naam}</strong> definitief verwijderen, ook uit de opslag?</>}
+          onBevestig={() => verwijder(wis)} onAnnuleer={() => setWis(null)} />
+      )}
     </div>
+  )
+}
+
+function DocBewerk({ id, doc, mappen, onSluit, onKlaar }: { id: string; doc: Doc; mappen: { key: string; label: string }[]; onSluit: () => void; onKlaar: () => void }) {
+  const [naam, setNaam] = useState(doc.naam)
+  const [map, setMap] = useState(doc.map)
+  const [verplicht, setVerplicht] = useState(doc.verplicht)
+  const [vervalt, setVervalt] = useState(doc.vervalt_op ?? '')
+  const [bezig, setBezig] = useState(false)
+  const bewaar = async () => {
+    if (!naam.trim()) { toast.error('De naam mag niet leeg zijn.'); return }
+    setBezig(true)
+    try {
+      await api(`/api/admin/personeel/${id}/documenten`, { method: 'PATCH', body: { doc: doc.id, naam: naam.trim(), map, verplicht, vervalt_op: vervalt || null } })
+      toast.success('Document bijgewerkt.')
+      onKlaar()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt') } finally { setBezig(false) }
+  }
+  return (
+    <Dialoog titel="Document bewerken" onSluit={onSluit}>
+      <div className="space-y-3">
+        <div><label className={LBL}>Naam</label><input className={INP} value={naam} maxLength={200} onChange={(e) => setNaam(e.target.value)} /></div>
+        <div><label className={LBL}>Map</label><select className={INP} value={map} onChange={(e) => setMap(e.target.value)}>{mappen.map((mp) => <option key={mp.key} value={mp.key}>{mp.label}</option>)}</select></div>
+        <div><label className={LBL}>Vervalt op</label><input type="date" className={INP} value={vervalt} onChange={(e) => setVervalt(e.target.value)} /></div>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={verplicht} onChange={(e) => setVerplicht(e.target.checked)} className="h-4 w-4 accent-black" />Verplicht document</label>
+        <div className="flex gap-2 justify-end pt-1">
+          <button type="button" onClick={onSluit} className="btn-secondary">Annuleren</button>
+          <button type="button" onClick={bewaar} disabled={bezig} className="btn-primary">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Bewaren</button>
+        </div>
+      </div>
+    </Dialoog>
   )
 }
 

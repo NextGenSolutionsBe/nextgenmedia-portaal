@@ -162,6 +162,16 @@ export async function POST(req: NextRequest) {
       oud = { status: bestaand.status }; nieuw = { status: actie === 'kost_annuleren' ? 'geannuleerd' : 'actief' }; lineId = bestaand.line_id
       const { error } = await admin.from('invoice_costs').update({ status: actie === 'kost_annuleren' ? 'geannuleerd' : 'actief', updated_at: nu }).eq('id', costId)
       if (error) throw new Error(error.message)
+    } else if (actie === 'kost_verwijderen') {
+      // Definitief verwijderen kan enkel na annuleren: zo is het een bewuste tweede
+      // stap. Het logboek (invoice_cost_log) houdt de oude waarden bij.
+      costId = tekst(b.cost_id)
+      const bestaand = voor.kosten.find((k) => k.id === costId)
+      if (!costId || !bestaand) return NextResponse.json({ error: 'Kost niet gevonden bij deze factuur.' }, { status: 404 })
+      if (bestaand.status !== 'geannuleerd') return NextResponse.json({ error: 'Annuleer de kost eerst; daarna kun je ze definitief verwijderen.' }, { status: 409 })
+      oud = bestaand; nieuw = null; lineId = bestaand.line_id
+      const { error } = await admin.from('invoice_costs').delete().eq('id', costId)
+      if (error) throw new Error(error.message)
     } else if (actie === 'geen_directe_kosten') {
       // Expliciete bevestiging — nooit aangenomen. Voor recurring geldt ze voor de hele definitie.
       const bevestigd = b.bevestigd === true || b.bevestigd === 'true'

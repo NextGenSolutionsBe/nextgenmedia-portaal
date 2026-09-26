@@ -152,14 +152,47 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     const { error } = await admin.from('invoices').update(patch).eq('id', id)
     if (error) throw new Error(error.message)
+    let kostenLosgekoppeld = 0
     if (regels) {
-      // Regels volledig vervangen: eenvoudig en atomisch genoeg voor één factuur.
-      await admin.from('invoice_lines').delete().eq('invoice_id', id)
-      const { error: le } = await admin.from('invoice_lines').insert(regels.map((r) => ({
-        invoice_id: id, volgnr: r.volgnr, omschrijving: r.omschrijving, artikel: r.artikel, aantal: r.aantal, eenheid: r.eenheid,
+      // Regels bijwerken OP HUN ID, niet alles wissen en opnieuw invoegen: aan
+      // een regel kunnen kosten hangen (invoice_costs.line_id, ON DELETE SET
+      // NULL). Wissen + opnieuw invoegen maakte van elke kost stil een kost op
+      // "de hele factuur". Bestaande regels → update, nieuwe → insert, enkel
+      // regels die uit de editor verdwenen → delete.
+      const { data: bestaandeLijnen, error: be } = await admin.from('invoice_lines').select('id').eq('invoice_id', id)
+      if (be) throw new Error(be.message)
+      const bestaandeIds = new Set(((bestaandeLijnen ?? []) as { id: string }[]).map((l) => l.id))
+      const behouden = new Set<string>()
+      const lijnVelden = (r: FactuurRegel) => ({
+        volgnr: r.volgnr, omschrijving: r.omschrijving, artikel: r.artikel, aantal: r.aantal, eenheid: r.eenheid,
         prijs_excl: r.prijs_excl, btw_pct: r.btw_pct, korting_pct: r.korting_pct, is_extra: r.is_extra, classificatie: r.classificatie, opmerking: r.opmerking ?? null,
-      })))
-      if (le) throw new Error(le.message)
+      })
+      const nieuw: ReturnType<typeof lijnVelden>[] = []
+      const nu = new Date().toISOString()
+      for (const r of regels) {
+        // Enkel een id van DEZE factuur telt, en elk id maar één keer (een gedupliceerde regel is nieuw).
+        if (r.id && bestaandeIds.has(r.id) && !behouden.has(r.id)) {
+          behouden.add(r.id)
+          const { error: ue } = await admin.from('invoice_lines').update({ ...lijnVelden(r), updated_at: nu }).eq('id', r.id).eq('invoice_id', id)
+          if (ue) throw new Error(ue.message)
+        } else {
+          nieuw.push(lijnVelden(r))
+        }
+      }
+      const weg = [...bestaandeIds].filter((lid) => !behouden.has(lid))
+      if (weg.length) {
+        // Kosten aan een verwijderde regel blijven bestaan maar hangen daarna aan de hele factuur; dat komt in de historiek.
+        try {
+          const { count } = await admin.from('invoice_costs').select('id', { count: 'exact', head: true }).in('line_id', weg).eq('status', 'actief')
+          kostenLosgekoppeld = count ?? 0
+        } catch { /* kostenlaag kan ontbreken */ }
+        const { error: de } = await admin.from('invoice_lines').delete().in('id', weg).eq('invoice_id', id)
+        if (de) throw new Error(de.message)
+      }
+      if (nieuw.length) {
+        const { error: le } = await admin.from('invoice_lines').insert(nieuw.map((r) => ({ invoice_id: id, ...r })))
+        if (le) throw new Error(le.message)
+      }
     }
 
     // Vervaldatum = geplande datum + betaaltermijn (standaard 30 dagen), tenzij
@@ -176,7 +209,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const velden = ['invoice_date', 'due_date', 'periode', 'reference', 'note', 'payment_term_days', 'client_id', 'contract_id', 'description', 'currency', 'vat_pct', 'amount_excl', 'amount_incl', 'contract_bedrag_excl', 'verantwoordelijke', 'sent_at']
     const diff = verschillen(inv as Record<string, unknown>, { ...inv, ...patch } as Record<string, unknown>, velden)
     const rijen: { actie: string; veld: string; oud: string | null; nieuw: string | null }[] = diff.map((d) => ({ actie: d.veld === 'invoice_date' ? 'verplaatst' : 'aangepast', veld: d.veld, oud: d.oud, nieuw: d.nieuw }))
-    if (regels) rijen.push({ actie: 'aangepast', veld: 'regels', oud: null, nieuw: `${regels.length} regel(s), ${berekenTotalen(regels).excl.toFixed(2)} excl. btw` })
+    if (regels) rijen.push({ actie: 'aangepast', veld: 'regels', oud: null, nieuw: `${regels.length} regel(s), ${berekenTotalen(regels).excl.toFixed(2)} excl. btw${kostenLosgekoppeld ? ` · ${kostenLosgekoppeld} kost(en) van verwijderde regels hangen nu aan de hele factuur` : ''}` })
     await historiek(admin, id, rijen, actor.email ?? null)
     if (diff.some((d) => d.veld === 'invoice_date')) {
       const meta = requestMeta(req)

@@ -216,6 +216,26 @@ export async function PATCH(req: NextRequest) {
     if (b.admin_notitie !== undefined) {
       wijziging.admin_notitie = String(b.admin_notitie).trim().slice(0, 2000) || null
     }
+    if (b.titel !== undefined) {
+      const t = String(b.titel ?? '').trim()
+      if (!t) return NextResponse.json({ error: 'Titel mag niet leeg zijn.' }, { status: 400 })
+      wijziging.titel = t.slice(0, 200)
+    }
+    if (b.beschrijving !== undefined) {
+      wijziging.beschrijving = String(b.beschrijving ?? '').trim().slice(0, 4000) || null
+    }
+    // Andere map (binnen dezelfde klant). Leeg = losse bestanden.
+    if (b.map_id !== undefined && b.client_id === undefined) {
+      const mapId = String(b.map_id ?? '').trim()
+      if (mapId) {
+        const { data: huidig } = await admin.from('client_uploads').select('client_id').eq('id', id).maybeSingle()
+        if (!huidig) return NextResponse.json({ error: 'Upload niet gevonden' }, { status: 404 })
+        const { data: mapRij } = await admin
+          .from('client_upload_folders').select('id').eq('id', mapId).eq('client_id', huidig.client_id).maybeSingle()
+        if (!mapRij) return NextResponse.json({ error: 'Die map bestaat niet bij deze klant.' }, { status: 400 })
+      }
+      wijziging.map_id = mapId || null
+    }
     if (b.client_id !== undefined) {
       const clientId = String(b.client_id ?? '').trim()
       if (!/^[0-9a-f-]{36}$/i.test(clientId)) {

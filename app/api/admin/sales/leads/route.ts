@@ -36,7 +36,7 @@ export type LeadRow = {
   waarde_cents?: number
   sales_companies: {
     id: string; name: string; website: string | null; sector: string | null
-    city: string | null; region: string | null; phone: string | null
+    city: string | null; region: string | null; country?: string | null; phone: string | null
     email?: string | null; werkklasse?: string | null; activiteit?: string | null
     ondernemingsnummer?: string | null; prioriteit?: string | null
     linkedin?: string | null; employees?: number | null
@@ -50,14 +50,14 @@ export type LeadRow = {
 // blijft het hele bord leeg met een stille kolomfout.
 const SELECT_KANBAN = `id, stage_key, labels, callback_at, callback_note, archived_at, do_not_call, assigned_to, updated_at, created_at, lost_reason, reden_code, warm, warm_op, harrie, email_brief, pipeline_id, merken, laatste_notitie, laatste_notitie_op, geen_gehoor_count,
   leadbron, positie, dienst, opvolgdatum, deal_waarde_cents, gesloten_op, verlies_reden, website_aanvraag,
-  sales_companies ( id, name, website, sector, city, region, phone, email, werkklasse, activiteit, ondernemingsnummer, prioriteit, linkedin, employees, gatekeeper_naam, dmu_naam, dmu_functie ),
+  sales_companies ( id, name, website, sector, city, region, country, phone, email, werkklasse, activiteit, ondernemingsnummer, prioriteit, linkedin, employees, gatekeeper_naam, dmu_naam, dmu_functie ),
   sales_contacts  ( id, name, email, phone, mobile, phone_digits, role, linkedin )`
 const SELECT_BREED = `id, stage_key, labels, callback_at, callback_note, archived_at, do_not_call, assigned_to, updated_at, created_at, lost_reason, reden_code, warm, warm_op, harrie, email_brief, pipeline_id, merken, laatste_notitie, laatste_notitie_op, geen_gehoor_count,
-  sales_companies ( id, name, website, sector, city, region, phone, email, werkklasse, activiteit, ondernemingsnummer, prioriteit, linkedin, employees, gatekeeper_naam, dmu_naam, dmu_functie ),
+  sales_companies ( id, name, website, sector, city, region, country, phone, email, werkklasse, activiteit, ondernemingsnummer, prioriteit, linkedin, employees, gatekeeper_naam, dmu_naam, dmu_functie ),
   sales_contacts  ( id, name, email, phone, mobile, phone_digits, role, linkedin )`
 const SELECT_SMAL = `id, stage_key, labels, callback_at, archived_at, do_not_call, assigned_to, updated_at, created_at, lost_reason, email_brief, pipeline_id,
-  sales_companies ( id, name, website, sector, city, region, phone ),
-  sales_contacts  ( id, name, email, phone, mobile, phone_digits, role )`
+  sales_companies ( id, name, website, sector, city, region, country, phone, linkedin, employees ),
+  sales_contacts  ( id, name, email, phone, mobile, phone_digits, role, linkedin )`
 
 /** Vandaag als JJJJ-MM-DD in Brussel. */
 function vandaagBrussel(): string {

@@ -45,11 +45,13 @@ type Formulier = {
   naam: string; client_id: string; site_url: string; plan: string
   bedrag_excl: string; vat_pct: string
   facturatie: 'monthly' | 'annual'; renew_op: string; notitie: string
+  /** Leeg = lopend; een datum = opgezegd op die dag. */
+  opgezegd_op: string
 }
 
 const LEEG: Formulier = {
   naam: '', client_id: '', site_url: '', plan: '',
-  bedrag_excl: '', vat_pct: '21', facturatie: 'annual', renew_op: '', notitie: '',
+  bedrag_excl: '', vat_pct: '21', facturatie: 'annual', renew_op: '', notitie: '', opgezegd_op: '',
 }
 
 const datum = (s: string | null) =>
@@ -90,6 +92,7 @@ export default function FramerPage() {
     id: s.id, naam: s.naam, client_id: s.client_id ?? '', site_url: s.site_url ?? '',
     plan: s.plan ?? '', bedrag_excl: String(s.bedrag_excl ?? ''), vat_pct: String(s.vat_pct ?? '21'),
     facturatie: s.facturatie, renew_op: s.renew_op ?? '', notitie: s.notitie ?? '',
+    opgezegd_op: s.opgezegd_op ?? '',
   })
 
   const bewaar = async () => {
@@ -103,6 +106,9 @@ export default function FramerPage() {
           ...form,
           bedrag_excl: leesGetal(form.bedrag_excl) ?? 0,
           vat_pct: leesGetal(form.vat_pct) ?? 0,
+          // Altijd meesturen: leeg = lopend. Zonder dit veld zou opslaan een
+          // opgezegde site stil weer actief maken.
+          opgezegd_op: form.opgezegd_op || null,
         }),
       })
       const j = await r.json()
@@ -120,17 +126,17 @@ export default function FramerPage() {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: s.id, opgezegd_op: stoppen ? new Date().toISOString().slice(0, 10) : null }),
       })
-      if (!r.ok) throw new Error((await r.json()).error)
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? 'Mislukt')
       toast.success(stoppen ? 'Opgezegd' : 'Weer lopend')
       load()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') }
   }
 
   const verwijder = async (s: Site) => {
-    if (!confirm(`${s.naam} verwijderen? Wil je de historiek bewaren, gebruik dan Opzeggen.`)) return
+    if (!confirm(`${s.naam} definitief verwijderen?\n\nDe site verdwijnt uit de lijst en uit de maand- en jaartotalen. Wil je de historiek bewaren, gebruik dan Opzeggen.`)) return
     try {
       const r = await fetch(`/api/admin/framer-sites?id=${encodeURIComponent(s.id)}`, { method: 'DELETE' })
-      if (!r.ok) throw new Error((await r.json()).error)
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? 'Verwijderen mislukt')
       toast.success('Verwijderd'); load()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') }
   }
@@ -188,7 +194,7 @@ export default function FramerPage() {
               {s.opgezegd_op ? 'Hervatten' : 'Opzeggen'}
             </button>
             <button onClick={() => verwijder(s)} title="Verwijderen"
-              className="text-red-400 hover:text-red-600 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
+              className="text-red-500 hover:text-red-700 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
           </div>
         </td>
       </tr>
@@ -313,7 +319,7 @@ export default function FramerPage() {
                 <p className="text-[11px] text-gray-400 mt-1">Optioneel. De naam hierboven blijft leidend.</p>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className={lbl}>Website</label>
                   <input className={inp} value={form.site_url} placeholder="bakkerijpeeters.be"
@@ -360,6 +366,20 @@ export default function FramerPage() {
                   eerstvolgende keer uit, dus je hoeft dit nooit bij te werken.
                 </p>
               </div>
+
+              {form.id && (
+                <div>
+                  <label className={lbl}>Opgezegd op</label>
+                  <div className="flex gap-2">
+                    <input type="date" className={inp} value={form.opgezegd_op}
+                      onChange={(e) => setForm({ ...form, opgezegd_op: e.target.value })} />
+                    {form.opgezegd_op && (
+                      <button type="button" onClick={() => setForm({ ...form, opgezegd_op: '' })} className="btn-secondary text-xs whitespace-nowrap">Weer lopend</button>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1">Leeg = de site loopt. Met een datum telt ze niet meer mee in de totalen en staat ze onder Opgezegd.</p>
+                </div>
+              )}
 
               <div>
                 <label className={lbl}>Notitie</label>

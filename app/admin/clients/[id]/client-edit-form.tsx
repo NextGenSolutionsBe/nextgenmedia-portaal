@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, Edit2, Save, X } from 'lucide-react'
+import { GetalInvoer } from '@/components/ui/getal-invoer'
 
 const ALL_SERVICES = [
   { slug: 'social-media', label: 'Social Media Management' },
@@ -21,6 +22,13 @@ const PLATFORMS = [
   { slug: 'twitter', label: 'Twitter/X' },
 ]
 
+const DURATION_PRESETS = [1, 3, 6, 12, 18, 24, 36]
+
+type ServiceCfg = { start_month: string; contract_months: number }
+
+const nu = new Date()
+const thisMonth = `${nu.getFullYear()}-${String(nu.getMonth() + 1).padStart(2, '0')}`
+
 type Client = {
   id: string
   company_name: string
@@ -34,12 +42,14 @@ type Client = {
 export function ClientEditForm({
   client,
   services: initialServices,
+  serviceContracts = {},
   socialConfig,
   adsConfig,
   webdesignConfig,
 }: {
   client: Client
   services: string[]
+  serviceContracts?: Record<string, ServiceCfg>
   socialConfig: { posts?: number; reels?: number; stories?: number; channels?: string[] }
   adsConfig: { budget?: number }
   webdesignConfig: { maintenance_included?: boolean }
@@ -67,11 +77,27 @@ export function ClientEditForm({
   const maintenanceIncluded = webdesignConfig.maintenance_included ?? false
   const [adsBudget, setAdsBudget] = useState(String(adsConfig.budget ?? ''))
 
+  const [serviceConfig, setServiceConfig] = useState<Record<string, ServiceCfg>>(serviceContracts)
+
   const hasSocial = services.includes('social-media')
   const hasAds = services.includes('ads')
 
-  const toggleService = (slug: string) =>
-    setServices(prev => prev.includes(slug) ? prev.filter(s => s !== slug) : [...prev, slug])
+  const getServiceCfg = (slug: string): ServiceCfg =>
+    serviceConfig[slug] ?? { start_month: thisMonth, contract_months: 12 }
+
+  const updateServiceCfg = (slug: string, patch: Partial<ServiceCfg>) =>
+    setServiceConfig(prev => ({ ...prev, [slug]: { ...(prev[slug] ?? { start_month: thisMonth, contract_months: 12 }), ...patch } }))
+
+  const toggleService = (slug: string) => {
+    const isSelected = services.includes(slug)
+    setServices(prev => isSelected ? prev.filter(s => s !== slug) : [...prev, slug])
+    if (!isSelected) {
+      setServiceConfig(prev => ({ ...prev, [slug]: prev[slug] ?? { start_month: thisMonth, contract_months: 12 } }))
+    }
+  }
+
+  // Contractduur zoals bij "Klant toevoegen": niet bij een website zonder onderhoud (eenmalig project).
+  const toontDuur = (slug: string) => slug !== 'webdesign' || maintenanceIncluded
 
   const togglePlatform = (slug: string) =>
     setPlatforms(prev => prev.includes(slug) ? prev.filter(s => s !== slug) : [...prev, slug])
@@ -80,6 +106,15 @@ export function ClientEditForm({
     setLoading(true)
     setError(null)
     try {
+      const service_configs: Record<string, Partial<ServiceCfg>> = {}
+      for (const slug of services) {
+        const cfg = getServiceCfg(slug)
+        const orig = serviceContracts[slug]
+        // Enkel doorsturen wat gewijzigd is (of nieuw): zo blijft een exacte
+        // startdatum uit een getekend contract ongemoeid als je er niet aan komt.
+        if (orig && orig.start_month === cfg.start_month && (!toontDuur(slug) || orig.contract_months === cfg.contract_months)) continue
+        service_configs[slug] = toontDuur(slug) ? cfg : { start_month: cfg.start_month }
+      }
       const res = await fetch(`/api/admin/clients/${client.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -93,9 +128,10 @@ export function ClientEditForm({
           platforms,
           webdesign_maintenance_included: maintenanceIncluded,
           ads_budget: adsBudget ? parseFloat(adsBudget) : null,
+          service_configs,
         }),
       })
-      const json = await res.json()
+      const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(json.error ?? 'Mislukt')
       setEditing(false)
       router.refresh()
@@ -162,7 +198,7 @@ export function ClientEditForm({
 
       {/* Services */}
       <div className="space-y-3">
-        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Actieve diensten</h3>
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Diensten</h3>
         <div className="grid grid-cols-2 gap-2">
           {ALL_SERVICES.map(s => (
             <button
@@ -179,6 +215,47 @@ export function ClientEditForm({
             </button>
           ))}
         </div>
+        <p className="text-[11px] text-gray-400">Uitvinken zet de dienst stop (portaaltoegang vervalt); de historiek blijft bewaard. Portaaltoegang zelf beheer je in de kaart Portaaltoegang.</p>
+
+        {/* Start maand + contractduur per dienst */}
+        {services.length > 0 && (
+          <div className="space-y-2 pt-1">
+            {services.map(slug => {
+              const label = ALL_SERVICES.find(s => s.slug === slug)?.label ?? slug
+              const cfg = getServiceCfg(slug)
+              return (
+                <div key={slug} className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50/60">
+                  <div className="text-sm font-semibold text-gray-800">{label}</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className={lbl}>Startmaand</label>
+                      <input type="month" className={inp} value={cfg.start_month}
+                        onChange={e => updateServiceCfg(slug, { start_month: e.target.value || thisMonth })} />
+                    </div>
+                    {toontDuur(slug) && (
+                      <div>
+                        <label className={lbl}>Contractduur (maanden)</label>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {DURATION_PRESETS.map(m => (
+                            <button key={m} type="button" onClick={() => updateServiceCfg(slug, { contract_months: m })}
+                              className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                                cfg.contract_months === m ? 'bg-black text-white border-black' : 'border-gray-200 text-gray-600 bg-white hover:border-gray-400'
+                              }`}>
+                              {m}m
+                            </button>
+                          ))}
+                          <GetalInvoer className={`${inp} !w-20`} waarde={cfg.contract_months} leeg={12} min={1} max={120}
+                            onWaarde={n => updateServiceCfg(slug, { contract_months: Math.max(1, Math.round(n)) })}
+                            aria-label="Contractduur in maanden" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* Social media settings */}

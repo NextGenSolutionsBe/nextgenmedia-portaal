@@ -49,12 +49,13 @@ export type Lead = {
   sales_companies: {
     id: string; name: string; website: string | null; sector: string | null
     city: string | null; region: string | null; phone: string | null
-    email?: string | null
+    email?: string | null; country?: string | null; linkedin?: string | null
+    employees?: number | null; werkklasse?: string | null
     gatekeeper_naam?: string | null; dmu_naam?: string | null; dmu_functie?: string | null
   } | null
   sales_contacts: {
     id: string; name: string | null; email: string | null; phone: string | null
-    mobile: string | null; role: string | null
+    mobile: string | null; role: string | null; linkedin?: string | null
   } | null
 }
 

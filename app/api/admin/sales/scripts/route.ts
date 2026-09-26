@@ -33,6 +33,9 @@ export async function GET() {
       pipelines: pipelines.map((p) => ({ id: p.id, name: p.name })),
       // Zodat Focus Mode met kiesScript hetzelfde script kiest als de server.
       mijnAuthId: actor.id,
+      // Enkel om het scherm te sturen ("voor iedereen" tonen); de controle
+      // zelf gebeurt in POST/PATCH.
+      isAdmin: !!(await requireAdmin()),
     })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
@@ -193,7 +196,15 @@ export async function PATCH(req: NextRequest) {
     if (nieuweTekst !== null && !nieuweTekst) {
       return NextResponse.json({ error: 'De scripttekst mag niet leeg zijn.' }, { status: 400 })
     }
-    if (nieuweTekst !== null || b.heranalyse === true) {
+    if (nieuweTekst !== null && b.zonderAnalyse === true) {
+      // Zelfde twee stappen als bij uploaden: eerst de tekst veilig bewaren,
+      // daarna (apart verzoek) analyseren. De oude analyse hoort niet meer bij
+      // deze tekst, dus die gaat weg tot de nieuwe klaar is.
+      patch.ruwe_tekst = nieuweTekst
+      patch.analyse = null
+      patch.analyse_model = null
+      patch.geanalyseerd_op = null
+    } else if (nieuweTekst !== null || b.heranalyse === true) {
       const tekst = nieuweTekst ?? String((bestaand as { ruwe_tekst: string }).ruwe_tekst)
       const { analyse, model } = await analyseerScript(tekst)
       if (nieuweTekst !== null) patch.ruwe_tekst = tekst

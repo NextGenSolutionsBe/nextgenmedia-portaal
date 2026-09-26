@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { createAdminSupabaseClient, requireAdmin } from '@/lib/supabase/server'
 import { logAudit, requestMeta } from '@/lib/audit'
-import { volgendNr, wamSchema, DIENSTEN, FREQUENTIES, type Frequentie } from '@/lib/vesting'
+import { volgendNr, wamSchema, planTermijnSync, DIENSTEN, FREQUENTIES, type Frequentie, type BestaandeTermijn } from '@/lib/vesting'
 import { inclFromExcl } from '@/lib/invoices'
 
 export const dynamic = 'force-dynamic'
@@ -165,45 +165,56 @@ async function veiligInsertId(admin: Admin, tabel: string, rij: Record<string, u
   throw new Error('Insert mislukt')
 }
 
-type TermijnRij = {
-  id: string; wam_id: string; volgnr: number; periode: string; factuurdatum: string
-  bedrag_excl: number | string; btw_pct: number | string; status: string; invoice_id: string | null; clickup_task_id: string | null
-}
-
-/**
- * De termijnen van een WAM-klant gelijktrekken met het schema.
- *
- * Geplande termijnen volgen het schema (bedrag, datum, aantal). Termijnen met
- * een factuur (gefactureerd/betaald) of die bewust geannuleerd zijn, blijven
- * exact zoals ze zijn — anders zou een tikfout in de looptijd een verstuurde
- * factuur uit de boeken laten verdwijnen.
- */
-async function synchroniseerTermijnen(admin: Admin, wamId: string): Promise<void> {
-  const { data: wam } = await admin.from('vesting_wam').select('*').eq('id', wamId).maybeSingle()
-  if (!wam) return
-  const schema = wamSchema({
+/** Het schema zoals het uit een vesting_wam-rij volgt. */
+function schemaVan(wam: Record<string, unknown> | null | undefined) {
+  if (!wam) return []
+  return wamSchema({
     start_datum: (wam.start_datum as string | null) ?? null,
     contract_maanden: getal(wam.contract_maanden),
     bedrag_per_factuur: getal(wam.bedrag_per_factuur),
     frequentie: (wam.frequentie as Frequentie | null) ?? null,
     btw_pct: getal(wam.btw_pct) ?? 21,
   })
+}
+
+/**
+ * De termijnen van een WAM-klant gelijktrekken met het schema.
+ *
+ * Geplande termijnen die nog exact het (oude) schema volgen, volgen het nieuwe
+ * schema. Termijnen met een factuur, geannuleerde, met de hand aangepaste en
+ * losse extra termijnen (Extra termijn) blijven bestaan — anders zou een tikfout
+ * in de looptijd een verstuurde factuur of een extra prestatie laten verdwijnen.
+ * Het plan zelf staat in lib/vesting.ts (planTermijnSync) en is getest.
+ *
+ * `oudeWam` = de rij van VÓÓR de wijziging; daaruit volgt welke termijnen bij
+ * het schema hoorden. Bij een nieuwe WAM-klant is er nog niets (null).
+ */
+async function synchroniseerTermijnen(admin: Admin, wamId: string, oudeWam: Record<string, unknown> | null): Promise<void> {
+  const { data: wam } = await admin.from('vesting_wam').select('*').eq('id', wamId).maybeSingle()
+  if (!wam) return
   const { data: bestaand } = await admin.from('vesting_wam_termijnen').select('*').eq('wam_id', wamId)
-  const huidig = (bestaand ?? []) as TermijnRij[]
-  const perVolgnr = new Map(huidig.map((t) => [t.volgnr, t]))
+  const plan = planTermijnSync(schemaVan(oudeWam), schemaVan(wam), (bestaand ?? []) as BestaandeTermijn[])
   const nu = new Date().toISOString()
 
-  for (const s of schema) {
-    const t = perVolgnr.get(s.volgnr)
-    if (!t) {
-      await admin.from('vesting_wam_termijnen').insert({ wam_id: wamId, ...s, status: 'gepland' })
-    } else if (t.status === 'gepland') {
-      await admin.from('vesting_wam_termijnen').update({ periode: s.periode, factuurdatum: s.factuurdatum, bedrag_excl: s.bedrag_excl, btw_pct: s.btw_pct, updated_at: nu }).eq('id', t.id)
-    }
+  // Volgorde telt: (wam_id, volgnr) is uniek. Eerst extra termijnen wegschuiven
+  // en schematermijnen buiten het schema wissen, dan pas invoegen.
+  for (const h of plan.hernummeren) {
+    const { error } = await admin.from('vesting_wam_termijnen').update({ volgnr: h.volgnr, updated_at: nu }).eq('id', h.id)
+    if (error) throw new Error(error.message)
   }
-  // Geplande termijnen die buiten het (ingekorte of gewiste) schema vallen.
-  const teVer = huidig.filter((t) => t.status === 'gepland' && !t.invoice_id && t.volgnr > schema.length).map((t) => t.id)
-  if (teVer.length) await admin.from('vesting_wam_termijnen').delete().in('id', teVer)
+  if (plan.verwijderen.length) {
+    const { error } = await admin.from('vesting_wam_termijnen').delete().in('id', plan.verwijderen).eq('status', 'gepland').is('invoice_id', null)
+    if (error) throw new Error(error.message)
+  }
+  for (const b of plan.bijwerken) {
+    const { id, ...waarden } = b
+    const { error } = await admin.from('vesting_wam_termijnen').update({ ...waarden, updated_at: nu }).eq('id', id)
+    if (error) throw new Error(error.message)
+  }
+  for (const s of plan.invoegen) {
+    const { error } = await admin.from('vesting_wam_termijnen').insert({ wam_id: wamId, ...s, status: 'gepland' })
+    if (error) throw new Error(error.message)
+  }
 }
 
 /** Een echte factuur voor één termijn: rij in Facturen (en dus in de planner). */
@@ -337,7 +348,7 @@ export async function POST(req: NextRequest) {
     }
     const rijTerug = data as unknown as { id?: string; nr?: string } | null
     const nieuwId = rijTerug?.id ?? null
-    if (resource === 'wam' && nieuwId) await synchroniseerTermijnen(admin, nieuwId)
+    if (resource === 'wam' && nieuwId) await synchroniseerTermijnen(admin, nieuwId, null)
 
     await logAudit({
       action: `vesting.${resource}.create`, entityType: TABEL[resource], entityId: nieuwId,
@@ -377,9 +388,19 @@ export async function PATCH(req: NextRequest) {
       if (resource === 'termijn') {
         const { data: oud } = await admin.from(TABEL.termijn).select('*').eq('id', id).maybeSingle()
         if (!oud) return NextResponse.json({ error: 'Termijn niet gevonden.' }, { status: 404 })
+        // Met een factuur volgt de termijn de factuur: bedrag, btw en datum pas
+        // je dan aan in Facturen, niet hier (anders lopen ze uit elkaar).
+        const factuurVelden = ['factuurdatum', 'periode', 'bedrag_excl', 'btw_pct'].filter((k) => rij[k] !== undefined)
+        if (oud.invoice_id && factuurVelden.length) {
+          return NextResponse.json({ error: 'Voor deze termijn bestaat al een factuur. Bedrag, btw en datum pas je aan in Facturen; hier kan enkel de notitie (en de betaaldatum).' }, { status: 409 })
+        }
+        if (rij.factuurdatum === null) return NextResponse.json({ error: 'De factuurdatum is verplicht.' }, { status: 400 })
+        if (rij.bedrag_excl !== undefined && (rij.bedrag_excl === null || Number(rij.bedrag_excl) <= 0)) return NextResponse.json({ error: 'Het bedrag moet groter zijn dan nul.' }, { status: 400 })
+        if (rij.factuurdatum && rij.periode === undefined) rij.periode = String(rij.factuurdatum).slice(0, 7)
+        if (rij.periode === null) delete rij.periode
         const nieuweStatus = (rij.status as string | undefined) ?? String(oud.status)
         // Betaald zonder datum = vandaag; niet meer betaald = datum weg.
-        if (nieuweStatus === 'betaald' && !rij.betaald_op && !oud.betaald_op) rij.betaald_op = vandaag()
+        if (nieuweStatus === 'betaald' && !rij.betaald_op && (rij.betaald_op === null || !oud.betaald_op)) rij.betaald_op = vandaag()
         if (nieuweStatus !== 'betaald' && rij.status !== undefined) rij.betaald_op = null
         // Terug naar 'gepland' kan enkel zonder factuur; met factuur is het minstens 'gefactureerd'.
         if (nieuweStatus === 'gepland' && oud.invoice_id) rij.status = 'gefactureerd'
@@ -389,8 +410,12 @@ export async function PATCH(req: NextRequest) {
           try { revalidatePath('/admin/invoices') } catch { }
         }
       }
+      // De WAM-rij van vóór de wijziging: daaruit volgt welke termijnen bij het schema hoorden.
+      const oudeWam = resource === 'wam'
+        ? ((await admin.from(TABEL.wam).select('*').eq('id', id).maybeSingle()).data as Record<string, unknown> | null)
+        : null
       ;({ error } = await admin.from(TABEL[resource]).update(rij).eq('id', id))
-      if (!error && resource === 'wam') await synchroniseerTermijnen(admin, id)
+      if (!error && resource === 'wam') await synchroniseerTermijnen(admin, id, oudeWam)
     }
     if (error) {
       if (/duplicate key|unique/i.test(error.message)) return NextResponse.json({ error: 'Dat nummer bestaat al.' }, { status: 409 })

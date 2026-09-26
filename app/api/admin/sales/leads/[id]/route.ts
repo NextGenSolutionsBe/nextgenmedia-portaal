@@ -180,7 +180,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
     if (b.warm === true && !current.warm) { patch.warm = true; patch.warm_op = new Date().toISOString() }
     if (b.warm === false) { patch.warm = false; patch.warm_op = null }
-    if (Array.isArray(b.labels)) patch.labels = b.labels.map(String)
+    // Labels: getrimd, zonder lege en zonder dubbels (hoofdletterongevoelig).
+    let labelsGewijzigd: { bij: string[]; weg: string[] } | null = null
+    if (Array.isArray(b.labels)) {
+      const gezien = new Set<string>()
+      const labels: string[] = []
+      for (const v of b.labels as unknown[]) {
+        const l = String(v ?? '').trim().replace(/\s+/g, ' ').slice(0, 60)
+        if (!l || gezien.has(l.toLowerCase())) continue
+        gezien.add(l.toLowerCase()); labels.push(l)
+      }
+      if (labels.length > 30) return NextResponse.json({ error: 'Maximaal 30 labels per lead.' }, { status: 400 })
+      const vorige = ((currentRow as { labels?: string[] | null }).labels ?? []).map(String)
+      const bij = labels.filter((l) => !vorige.includes(l))
+      const weg = vorige.filter((l) => !labels.includes(l))
+      if (bij.length || weg.length) labelsGewijzigd = { bij, weg }
+      patch.labels = labels
+    }
     if (b.callback_at !== undefined) {
       patch.callback_at = b.callback_at ? new Date(b.callback_at).toISOString() : null
       if (!b.callback_at) patch.callback_note = null
@@ -225,7 +241,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         .select('id, name, website').eq('id', current.company_id).maybeSingle()
       const huidig = (bedrijf ?? { name: '', website: null }) as { name: string; website: string | null }
       const c: Record<string, unknown> = {}
-      for (const k of ['website', 'sector', 'city', 'region', 'country', 'phone', 'linkedin', 'gatekeeper_naam', 'dmu_naam', 'dmu_functie', 'email'] as const) {
+      for (const k of ['website', 'sector', 'city', 'region', 'country', 'phone', 'linkedin', 'gatekeeper_naam', 'dmu_naam', 'dmu_functie', 'email', 'werkklasse'] as const) {
         if (b.company[k] !== undefined) c[k] = String(b.company[k] ?? '').trim() || null
       }
       if (b.company.name !== undefined) {
@@ -242,8 +258,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           c.dedupe_key = companyDedupeKey(String(c.name ?? huidig.name), (c.website as string | null | undefined) ?? huidig.website)
         }
         let { error: cErr } = await admin.from('sales_companies').update(c).eq('id', current.company_id)
-        if (cErr && /gatekeeper_naam|dmu_naam|dmu_functie|email|schema cache|PGRST204/i.test(cErr.message)) {
-          delete c.gatekeeper_naam; delete c.dmu_naam; delete c.dmu_functie; delete c.email
+        if (cErr && /gatekeeper_naam|dmu_naam|dmu_functie|email|werkklasse|schema cache|PGRST204/i.test(cErr.message)) {
+          delete c.gatekeeper_naam; delete c.dmu_naam; delete c.dmu_functie; delete c.email; delete c.werkklasse
           if (Object.keys(c).length) { ({ error: cErr } = await admin.from('sales_companies').update(c).eq('id', current.company_id)) }
           else cErr = null
         }
@@ -312,6 +328,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         kind: 'system', body: patch.assigned_to ? 'Verantwoordelijke gewijzigd' : 'Verantwoordelijke weggehaald',
         actorId: ik.id, actorEmail: ik.email,
       })
+    }
+    if (labelsGewijzigd) {
+      const delen = [
+        labelsGewijzigd.bij.length ? `+ ${labelsGewijzigd.bij.join(', ')}` : '',
+        labelsGewijzigd.weg.length ? `− ${labelsGewijzigd.weg.join(', ')}` : '',
+      ].filter(Boolean)
+      await logLeadEvent(id, { kind: 'system', body: `Labels: ${delen.join(' · ')}`, actorId: ik.id, actorEmail: ik.email })
     }
     if (b.company || b.contact) {
       const velden = [

@@ -4,19 +4,23 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, Check, Settings2, Wallet } from 'lucide-react'
 import { estimateSocialContribution, type FiscalSettings } from '@/lib/finance'
+import { GetalInvoer } from '@/components/ui/getal-invoer'
 
 const euro = (n: number) => new Intl.NumberFormat('nl-BE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
 const inpCls = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]'
 const lblCls = 'block text-xs font-medium text-gray-600 mb-1'
 
-function NumField({ label, value, onChange, step = '0.01', suffix }: {
+/**
+ * Getalveld met Belgische komma. Leeg maken mag: alle fiscale kolommen zijn
+ * verplicht (NOT NULL), dus een leeg veld betekent 0 — ook op de server.
+ */
+function NumField({ label, value, onChange, suffix }: {
   label: string; value: number; onChange: (v: number) => void; step?: string; suffix?: string
 }) {
   return (
     <div>
       <label className={lblCls}>{label}{suffix ? ` (${suffix})` : ''}</label>
-      <input type="number" step={step} className={inpCls} value={String(value ?? '')}
-        onChange={(e) => onChange(e.target.value === '' ? 0 : Number(e.target.value))} />
+      <GetalInvoer className={inpCls} waarde={value ?? 0} onWaarde={onChange} leeg={0} placeholder="0" />
     </div>
   )
 }
@@ -49,8 +53,8 @@ export function FiscalSettingsForm({ settings, ebitdaFY }: { settings: FiscalSet
       const res = await fetch('/api/admin/fiscal-settings', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(f),
       })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error)
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error ?? 'Opslaan mislukt')
       setSaved(true); router.refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Fout')
@@ -63,14 +67,14 @@ export function FiscalSettingsForm({ settings, ebitdaFY }: { settings: FiscalSet
       <div className="card-base">
         <h2 className="font-semibold text-gray-900 flex items-center gap-2 mb-1"><Wallet className="h-4 w-4 text-gray-400" />Loon &amp; sociale bijdragen · boekjaar {f.year}</h2>
         <p className="text-xs text-gray-500 mb-4">Simuleer de bezoldiging; de sociale bijdragen worden indicatief berekend met de parameters hieronder.</p>
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div>
             <label className={lblCls}>Bruto / maand (€)</label>
-            <input type="number" step="50" className={inpCls} value={String(f.salary_gross_monthly ?? '')} onChange={e => set('salary_gross_monthly', (e.target.value === '' ? 0 : Number(e.target.value)) as never)} />
+            <GetalInvoer className={inpCls} waarde={Number(f.salary_gross_monthly) || 0} onWaarde={(v) => set('salary_gross_monthly', v)} leeg={0} min={0} placeholder="0" />
           </div>
           <div>
             <label className={lblCls}>Aantal maanden</label>
-            <input type="number" step="1" min="0" max="13" className={inpCls} value={String(f.salary_months ?? '')} onChange={e => set('salary_months', (e.target.value === '' ? 0 : Number(e.target.value)) as never)} />
+            <GetalInvoer className={inpCls} waarde={Number(f.salary_months) || 0} onWaarde={(v) => set('salary_months', Math.round(v))} leeg={0} min={0} max={13} placeholder="0" />
           </div>
           <div>
             <label className={lblCls}>Statuut</label>

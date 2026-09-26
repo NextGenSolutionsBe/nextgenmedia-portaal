@@ -1,8 +1,11 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { ChevronLeft, ChevronRight, Plus, X, Loader2, Trash2, Users, UserPlus, Repeat } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, X, Loader2, Trash2, Users, UserPlus, Repeat, Pencil } from 'lucide-react'
+import { toast } from 'sonner'
 import { MONTH_CLIENT_TYPES, MONTH_FLOW_STEPS, type MonthClientType } from '@/lib/month-phases'
+import { Bevestig } from '@/app/admin/instellingen/ui'
+import { EntryEditDialog } from './entry-edit-dialog'
 
 type ClientOpt = { id: string; name: string }
 type Entry = { id: string; client_id: string; planning_type: string | null; note: string | null }
@@ -23,6 +26,9 @@ export function MonthClients({ clients }: { clients: ClientOpt[] }) {
   const [entries, setEntries] = useState<Entry[]>([])
   const [loading, setLoading] = useState(false)
   const [adding, setAdding] = useState(false)
+  const [bewerk, setBewerk] = useState<Entry | null>(null)
+  const [teVerwijderen, setTeVerwijderen] = useState<Entry | null>(null)
+  const [bezig, setBezig] = useState(false)
   const clientById = new Map(clients.map((c) => [c.id, c]))
 
   const load = useCallback(async () => {
@@ -37,8 +43,17 @@ export function MonthClients({ clients }: { clients: ClientOpt[] }) {
   useEffect(() => { load() }, [load])
 
   const remove = async (id: string) => {
-    setEntries((e) => e.filter((x) => x.id !== id))
-    await fetch(`/api/admin/month-planning-clients?id=${id}`, { method: 'DELETE' })
+    setBezig(true)
+    try {
+      const res = await fetch(`/api/admin/month-planning-clients?id=${id}`, { method: 'DELETE' })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j.error || 'Verwijderen mislukt')
+      setEntries((e) => e.filter((x) => x.id !== id))
+      setTeVerwijderen(null)
+      toast.success('Klant uit deze maand verwijderd')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt')
+    } finally { setBezig(false) }
   }
 
   const groups: { type: MonthClientType; title: string; Icon: typeof UserPlus }[] = [
@@ -53,9 +68,9 @@ export function MonthClients({ clients }: { clients: ClientOpt[] }) {
           <h2 className="font-semibold flex items-center gap-2"><Users className="h-4 w-4 text-gray-400" />Klanten deze maand</h2>
           <p className="text-xs text-gray-400 mt-0.5">Een klant in een maand = de volledige contentcyclus voor die klant.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button onClick={() => setMonth((m) => shiftMonth(m, -1))} className="rounded-lg border border-gray-200 p-2 hover:bg-gray-50"><ChevronLeft className="h-4 w-4" /></button>
-          <span className="min-w-[150px] text-center text-sm font-semibold capitalize">{monthLabel(month)}</span>
+          <span className="min-w-[120px] sm:min-w-[150px] text-center text-sm font-semibold capitalize">{monthLabel(month)}</span>
           <button onClick={() => setMonth((m) => shiftMonth(m, 1))} className="rounded-lg border border-gray-200 p-2 hover:bg-gray-50"><ChevronRight className="h-4 w-4" /></button>
           {month !== thisMonth() && <button onClick={() => setMonth(thisMonth())} className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50">Deze maand</button>}
           <button onClick={() => setAdding(true)} className="btn-primary text-sm"><Plus className="h-4 w-4" />Klant toevoegen</button>
@@ -83,7 +98,10 @@ export function MonthClients({ clients }: { clients: ClientOpt[] }) {
                           <div className="text-sm font-medium truncate">{c?.name ?? 'Klant'}</div>
                           {e.note && <div className="text-xs text-gray-400 whitespace-pre-wrap">{e.note}</div>}
                         </div>
-                        <button onClick={() => remove(e.id)} className="text-gray-300 hover:text-red-500 shrink-0" title="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></button>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button onClick={() => setBewerk(e)} className="h-7 w-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700" title="Bewerken"><Pencil className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => setTeVerwijderen(e)} className="h-7 w-7 flex items-center justify-center rounded-lg text-red-400 hover:bg-red-50 hover:text-red-600" title="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></button>
+                        </div>
                       </div>
                     )
                   })}
@@ -96,6 +114,21 @@ export function MonthClients({ clients }: { clients: ClientOpt[] }) {
 
       <p className="text-[11px] text-gray-400">Volledige cyclus per klant: {MONTH_FLOW_STEPS.join(' → ')}.</p>
       {loading && <p className="text-xs text-gray-400">Laden…</p>}
+
+      {bewerk && (
+        <EntryEditDialog
+          entry={bewerk}
+          titel={`${clientById.get(bewerk.client_id)?.name ?? 'Klant'} — ${monthLabel(month)}`}
+          onClose={() => setBewerk(null)}
+          onSaved={(p) => { setEntries((es) => es.map((x) => x.id === bewerk.id ? { ...x, ...p } : x)); setBewerk(null) }}
+        />
+      )}
+
+      {teVerwijderen && (
+        <Bevestig titel="Uit maand verwijderen" gevaarlijk bevestigLabel="Verwijderen" bezig={bezig}
+          tekst={<><strong>{clientById.get(teVerwijderen.client_id)?.name ?? 'Deze klant'}</strong> uit de planning van {monthLabel(month)} verwijderen?</>}
+          onBevestig={() => remove(teVerwijderen.id)} onAnnuleer={() => setTeVerwijderen(null)} />
+      )}
 
       {adding && (
         <AddDialog

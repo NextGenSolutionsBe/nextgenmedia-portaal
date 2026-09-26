@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { Trash2, Loader2, Repeat2, ArrowDownRight, CircleStop, RotateCcw, Pencil, X } from 'lucide-react'
 import { CostDialog } from './cost-form'
 import { formatEuro, formatDate } from '@/lib/utils'
+import { toast } from 'sonner'
 
 export type Cost = {
   id: string
@@ -102,16 +103,28 @@ export function CostTable({ costs, setterCostFY = 0, year, door = {} }: {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: c.id, end_date: null }),
       })
-      if (res.ok) router.refresh()
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error ?? 'Hervatten mislukt')
+      router.refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Hervatten mislukt')
     } finally { setBusy(null) }
   }
 
-  const remove = async (id: string) => {
-    if (!confirm('Deze kost verwijderen?')) return
-    setBusy(id)
+  const remove = async (c: Cost) => {
+    const abonnement = c.type === 'recurring'
+      ? '\n\nDit is een abonnement: verwijderen haalt ook alle maanden die al geteld hebben uit je cijfers. Wil je dat het vanaf nu stopt, gebruik dan Stopzetten.'
+      : ''
+    if (!confirm(`"${c.name ?? 'Deze kost'}" definitief verwijderen?${abonnement}\n\nKwam deze kost uit een aankoop, dan wordt die aankoop losgekoppeld en kan ze opnieuw als kost toegevoegd worden.`)) return
+    setBusy(c.id)
     try {
-      const res = await fetch('/api/admin/costs', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) })
-      if (res.ok) router.refresh()
+      const res = await fetch('/api/admin/costs', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: c.id }) })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error ?? 'Verwijderen mislukt')
+      toast.success(json.aankopenLosgemaakt ? 'Kost verwijderd — de aankoop is losgekoppeld.' : 'Kost verwijderd.')
+      router.refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt')
     } finally { setBusy(null) }
   }
 
@@ -203,7 +216,7 @@ export function CostTable({ costs, setterCostFY = 0, year, door = {} }: {
                       <button onClick={() => setBewerken(c)} className="text-gray-400 hover:text-gray-700 p-1" title="Wijzigen">
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
-                      <button onClick={() => remove(c.id)} disabled={busy === c.id} className="text-red-400 hover:text-red-600 p-1" title="Verwijderen">
+                      <button onClick={() => remove(c)} disabled={busy === c.id} className="text-red-500 hover:text-red-700 p-1" title="Verwijderen">
                         {busy === c.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                       </button>
                     </div>

@@ -1,8 +1,9 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Globe, Clock, CheckCircle2, X, Loader2, XCircle, Archive, Trash2, AlertTriangle, Inbox } from 'lucide-react'
+import { toast } from 'sonner'
+import { Globe, Clock, CheckCircle2, X, Loader2, XCircle, Archive, Trash2, AlertTriangle, Inbox, Save } from 'lucide-react'
 import {
   formatDate,
   WEBDESIGN_STATUS_STYLE as STATUS_STYLE,
@@ -73,6 +74,33 @@ export function WebsiteAdmin({
       alert(err instanceof Error ? err.message : 'Fout')
     } finally {
       setBusy(false)
+    }
+  }
+
+  const [notes, setNotes] = useState('')
+  const [notesBusy, setNotesBusy] = useState(false)
+  const selectedId = selected?.id
+  useEffect(() => { setNotes(selected?.admin_notes ?? '') }, [selectedId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const saveNotes = async () => {
+    if (!selected) return
+    setNotesBusy(true)
+    try {
+      const res = await fetch('/api/admin/webdesign', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: selected.id, admin_notes: notes }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error || 'Opslaan mislukt')
+      const val = notes.trim() || null
+      setRequests(prev => prev.map(r => r.id === selected.id ? { ...r, admin_notes: val } : r))
+      setSelected(s => s ? { ...s, admin_notes: val } : s)
+      toast.success('Notitie opgeslagen')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Opslaan mislukt')
+    } finally {
+      setNotesBusy(false)
     }
   }
 
@@ -215,6 +243,26 @@ export function WebsiteAdmin({
                   </div>
                 </div>
               )}
+
+              <div className="border-t border-gray-100 pt-3 space-y-2">
+                <label className="block text-xs text-gray-500">Interne notitie (klant ziet dit niet)</label>
+                <textarea
+                  rows={3}
+                  value={notes}
+                  maxLength={4000}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg"
+                  placeholder="Bv. afspraken, wat er aangepast is…"
+                />
+                <button
+                  disabled={notesBusy || notes.trim() === (selected.admin_notes ?? '').trim()}
+                  onClick={saveNotes}
+                  className="btn-secondary w-full text-xs"
+                >
+                  {notesBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                  Notitie opslaan
+                </button>
+              </div>
 
               <div className="border-t border-gray-100 pt-3 space-y-2">
                 {/* Status actions — depending on current status */}

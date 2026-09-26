@@ -131,7 +131,7 @@ async function bulk(admin: any, b: { op?: string; ids?: string[] }, actor: strin
 export async function PATCH(req: NextRequest) {
   try {
     const actor = await requireStaff()
-    if (!actor) return NextResponse.json({ error: 'Geen toegang' }, { status: 400 })
+    if (!actor) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
     const b = await req.json()
     if (!b.id) return NextResponse.json({ error: 'id vereist' }, { status: 400 })
     const admin = createAdminSupabaseClient()
@@ -201,6 +201,11 @@ export async function PATCH(req: NextRequest) {
     if (b.meta_description !== undefined) patch.meta_description = b.meta_description
     if (b.thumbnail_url !== undefined) patch.thumbnail_url = b.thumbnail_url || null
     if (b.publish_mode !== undefined) patch.publish_mode = b.publish_mode
+    if (b.tags !== undefined) {
+      const lijst = (Array.isArray(b.tags) ? b.tags : String(b.tags ?? '').split(','))
+        .map((t: unknown) => String(t ?? '').trim().slice(0, 40)).filter(Boolean)
+      patch.tags = [...new Set(lijst)].slice(0, 12)
+    }
     if (Object.keys(patch).length === 0) return NextResponse.json({ error: 'Geen wijzigingen' }, { status: 400 })
 
     await snapshotBlogVersion(admin, blog.id, blog, actor.email ?? actor.id, describeChanges(blog, patch))

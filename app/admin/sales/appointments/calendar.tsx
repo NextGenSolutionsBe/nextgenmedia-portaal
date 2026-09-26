@@ -25,6 +25,11 @@ type Appt = {
   tijdsbelasting?: number | null
   notes?: string | null
   client_note?: string | null
+  calendar_id?: string | null
+  titel?: string | null
+  adres?: string | null
+  meet_url?: string | null
+  attendee_email?: string | null
 }
 type Pipeline = { id: string; key: string; name: string; defaultCalendarId?: string | null }
 
@@ -452,6 +457,7 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId, initi
         <EditAppointment
           appt={editing}
           pipelines={pipelines}
+          owners={owners}
           isAdmin={isAdmin}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); load() }}
@@ -462,6 +468,7 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId, initi
         <AgendaDialog
           pipelines={pipelines}
           owners={owners}
+          isAdmin={isAdmin}
           existing={agendaDialog === 'new' ? null : owners.find((o) => o.id === agendaDialog) ?? null}
           onClose={() => setAgendaDialog(null)}
           onSaved={() => { setAgendaDialog(null); load() }}

@@ -14,7 +14,22 @@ const MIST = /kantoor_|does not exist|schema cache/i
 const HINT = 'De tabellen voor het Kantoor bestaan nog niet. Draai supabase/migrations/99999999_SYNC_ALL.sql.'
 
 const KOLOMMEN = `id, soort, factureert_id, ontvangt_id, titel, omschrijving, klant_naam,
-  totaal_cents, vergoeding_cents, vergoeding_pct, bedragen_zichtbaar, status, afgerond_op, created_at`
+  totaal_cents, vergoeding_cents, vergoeding_pct, bedragen_zichtbaar, status, afgerond_op, created_at, aangemaakt_door`
+
+/**
+ * Wie mag een opdracht VERWIJDEREN? Ons eigen team (admin), het bedrijf dat
+ * factureert (dat stuurt de factuur en draagt de afspraak), of wie de opdracht
+ * zelf vastlegde — en die moet dan nog steeds partij zijn.
+ */
+function magVerwijderen(
+  sessie: NonNullable<Awaited<ReturnType<typeof resolveKantoorSessie>>>,
+  rij: { factureert_id: string; ontvangt_id: string; aangemaakt_door?: string | null },
+): boolean {
+  if (sessie.isAdmin) return true
+  const partij = magHandelenAls(sessie, rij.factureert_id) || magHandelenAls(sessie, rij.ontvangt_id)
+  if (!partij) return false
+  return magHandelenAls(sessie, rij.factureert_id) || (!!rij.aangemaakt_door && rij.aangemaakt_door === sessie.userId)
+}
 
 const tekst = (v: unknown, max: number): string | null => {
   const s = String(v ?? '').trim()
@@ -56,16 +71,23 @@ export async function GET(req: NextRequest) {
     }
 
     const naamVan = new Map(((bedrijven ?? []) as { id: string; naam: string }[]).map((b) => [b.id, b.naam]))
-    const compleet = ((rijen ?? []) as unknown as KantoorOpdracht[]).map((o) => ({
-      ...o,
-      factureert_naam: naamVan.get(o.factureert_id) ?? 'Onbekend',
-      ontvangt_naam: naamVan.get(o.ontvangt_id) ?? 'Onbekend',
-    }))
+    // aangemaakt_door (een user-id) gaat NIET naar de browser; enkel het
+    // afgeleide recht "mag verwijderen".
+    const verwijderbaar = new Set<string>()
+    const compleet = ((rijen ?? []) as unknown as (KantoorOpdracht & { aangemaakt_door?: string | null })[]).map(({ aangemaakt_door, ...o }) => {
+      if (magVerwijderen(sessie, { ...o, aangemaakt_door })) verwijderbaar.add(o.id)
+      return {
+        ...o,
+        factureert_naam: naamVan.get(o.factureert_id) ?? 'Onbekend',
+        ontvangt_naam: naamVan.get(o.ontvangt_id) ?? 'Onbekend',
+      }
+    })
 
     // Ons eigen team ziet alle bedragen; een partner alleen wat afgesproken is.
     const zichtbaar = compleet
       .map((o) => voorBedrijf(o, bedrijf.id, sessie.isAdmin))
       .filter((o): o is NonNullable<typeof o> => o !== null)
+      .map((o) => ({ ...o, mag_verwijderen: verwijderbaar.has(o.id) }))
 
     return NextResponse.json({
       opdrachten: zichtbaar,
@@ -174,10 +196,13 @@ export async function PATCH(req: NextRequest) {
 
     const admin = createAdminSupabaseClient()
     const { data: bestaand } = await admin.from('kantoor_opdrachten')
-      .select('id, factureert_id, ontvangt_id, totaal_cents, status').eq('id', id).maybeSingle()
+      .select('id, factureert_id, ontvangt_id, totaal_cents, vergoeding_cents, vergoeding_pct, status, titel').eq('id', id).maybeSingle()
     if (!bestaand) return NextResponse.json({ error: 'Opdracht niet gevonden' }, { status: 404 })
 
-    const rij = bestaand as { factureert_id: string; ontvangt_id: string; totaal_cents: number; status: string }
+    const rij = bestaand as {
+      factureert_id: string; ontvangt_id: string; totaal_cents: number; status: string
+      vergoeding_cents: number; vergoeding_pct: number | null; titel: string
+    }
     const magErbij = magHandelenAls(sessie, rij.factureert_id) || magHandelenAls(sessie, rij.ontvangt_id)
     if (!magErbij) return NextResponse.json({ error: 'Geen toegang tot deze opdracht' }, { status: 403 })
 
@@ -222,6 +247,14 @@ export async function PATCH(req: NextRequest) {
       if (v > totaal) return NextResponse.json({ error: 'De vergoeding kan niet hoger zijn dan het totaalbedrag.' }, { status: 400 })
       patch.vergoeding_cents = v
       patch.vergoeding_pct = null
+    } else if ('totaal' in b) {
+      // Enkel het totaal gewijzigd: een percentage rekent mee, een vast bedrag
+      // mag niet boven het nieuwe totaal uitkomen.
+      if (rij.vergoeding_pct !== null && rij.vergoeding_pct !== undefined) {
+        patch.vergoeding_cents = pctNaarCents(totaal, Number(rij.vergoeding_pct))
+      } else if (rij.vergoeding_cents > totaal) {
+        return NextResponse.json({ error: 'De vergoeding kan niet hoger zijn dan het totaalbedrag.' }, { status: 400 })
+      }
     }
 
     if ('titel' in b) {
@@ -239,6 +272,73 @@ export async function PATCH(req: NextRequest) {
 
     const { error } = await admin.from('kantoor_opdrachten').update(patch).eq('id', id)
     if (error) throw new Error(error.message)
+
+    const velden = Object.keys(patch).filter((k) => k !== 'updated_at')
+    const alleenStatus = velden.every((k) => k === 'status' || k === 'afgerond_op')
+    const meta = requestMeta(req)
+    await logAudit({
+      action: alleenStatus ? 'kantoor.opdracht.status' : 'kantoor.opdracht.update',
+      entityType: 'kantoor_opdracht', entityId: id,
+      summary: alleenStatus
+        ? `Kantoor: "${rij.titel}" → ${String(patch.status ?? rij.status)}`
+        : `Kantoor: opdracht "${rij.titel}" bijgewerkt`,
+      actorUserId: sessie.userId, actorEmail: sessie.email, actorRole: sessie.isAdmin ? 'admin' : 'partner',
+      // Bewust geen bedragen in de log: die zijn per partij afgeschermd.
+      metadata: { velden },
+      ip: meta.ip, userAgent: meta.userAgent,
+    })
+    return NextResponse.json({ ok: true })
+  } catch (err) {
+    return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
+  }
+}
+
+/**
+ * DELETE ?id= — een samenwerking verwijderen.
+ *
+ * Een AFGERONDE opdracht niet: die boekt omzet en kosten in de maand van
+ * afronding (lib/kantoor/finance.ts leidt dat af). Verwijderen zou die cijfers
+ * stilletjes veranderen. Eerst op "geannuleerd" zetten is dan de bewuste stap.
+ */
+export async function DELETE(req: NextRequest) {
+  try {
+    const sessie = await resolveKantoorSessie()
+    if (!sessie) return NextResponse.json({ error: 'Geen toegang tot het Kantoor' }, { status: 403 })
+    const id = req.nextUrl.searchParams.get('id') ?? ''
+    if (!id) return NextResponse.json({ error: 'id ontbreekt' }, { status: 400 })
+
+    const admin = createAdminSupabaseClient()
+    const { data: bestaand, error: fout } = await admin.from('kantoor_opdrachten')
+      .select('id, factureert_id, ontvangt_id, status, titel, aangemaakt_door').eq('id', id).maybeSingle()
+    if (fout) {
+      if (MIST.test(fout.message)) return NextResponse.json({ error: HINT }, { status: 503 })
+      throw new Error(fout.message)
+    }
+    if (!bestaand) return NextResponse.json({ error: 'Opdracht niet gevonden' }, { status: 404 })
+    const rij = bestaand as { factureert_id: string; ontvangt_id: string; status: string; titel: string; aangemaakt_door: string | null }
+
+    const partij = magHandelenAls(sessie, rij.factureert_id) || magHandelenAls(sessie, rij.ontvangt_id)
+    if (!partij && !sessie.isAdmin) return NextResponse.json({ error: 'Geen toegang tot deze opdracht' }, { status: 403 })
+    if (!magVerwijderen(sessie, rij)) {
+      return NextResponse.json({ error: 'Alleen het bedrijf dat factureert of wie de opdracht vastlegde, kan ze verwijderen.' }, { status: 403 })
+    }
+    if (rij.status === 'afgerond') {
+      return NextResponse.json({
+        error: 'Deze opdracht is afgerond en telt mee in de omzet- en kostencijfers. Zet ze eerst op "Geannuleerd" als ze niet doorging; daarna kun je ze verwijderen.',
+      }, { status: 409 })
+    }
+
+    const { error } = await admin.from('kantoor_opdrachten').delete().eq('id', id)
+    if (error) throw new Error(error.message)
+
+    const meta = requestMeta(req)
+    await logAudit({
+      action: 'kantoor.opdracht.delete', entityType: 'kantoor_opdracht', entityId: id,
+      summary: `Kantoor: opdracht "${rij.titel}" verwijderd`,
+      actorUserId: sessie.userId, actorEmail: sessie.email, actorRole: sessie.isAdmin ? 'admin' : 'partner',
+      metadata: { status: rij.status },
+      ip: meta.ip, userAgent: meta.userAgent,
+    })
     return NextResponse.json({ ok: true })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })

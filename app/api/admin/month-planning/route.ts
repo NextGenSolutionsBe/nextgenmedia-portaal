@@ -46,13 +46,21 @@ export async function PUT(req: NextRequest) {
 }
 
 // DELETE ?from=&to=  — overrides in periode wissen (reset naar standaard)
+// DELETE ?datum=YYYY-MM-DD — één dag terugzetten naar de standaardplanning
 export async function DELETE(req: NextRequest) {
   try {
     if (!(await requireStaff())) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
+    const datum = req.nextUrl.searchParams.get('datum')
+    const admin = createAdminSupabaseClient()
+    if (datum) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(datum)) return NextResponse.json({ error: 'Ongeldige datum' }, { status: 400 })
+      const { error } = await admin.from('month_planning_overrides').delete().eq('plan_date', datum)
+      if (error) throw new Error(error.message)
+      return NextResponse.json({ ok: true })
+    }
     const from = req.nextUrl.searchParams.get('from')
     const to = req.nextUrl.searchParams.get('to')
     if (!from || !to) return NextResponse.json({ error: 'from en to vereist' }, { status: 400 })
-    const admin = createAdminSupabaseClient()
     const { error } = await admin
       .from('month_planning_overrides')
       .delete()

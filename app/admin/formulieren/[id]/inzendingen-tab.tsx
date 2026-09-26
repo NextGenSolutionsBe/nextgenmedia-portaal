@@ -4,7 +4,8 @@ import { KaartTabel } from '@/components/ui/kaart-tabel'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Loader2, X, Copy, Inbox, Save, Printer, Users } from 'lucide-react'
+import { Loader2, X, Copy, Inbox, Save, Printer, Users, Trash2 } from 'lucide-react'
+import { Bevestig } from '@/app/admin/instellingen/ui'
 import { cn } from '@/lib/utils'
 import { ExportKnop } from '@/components/admin/export-knop'
 import { AntwoordWeergave } from '@/components/formulieren/antwoord-weergave'
@@ -34,6 +35,8 @@ export function InzendingenTab({ formulier, onTellingGewijzigd }: { formulier: F
   const [laden, setLaden] = useState(true)
   const [filter, setFilter] = useState<InzendingStatus | ''>('')
   const [open, setOpen] = useState<string | null>(null)
+  const [weg, setWeg] = useState<Inzending | null>(null)
+  const [wissen, setWissen] = useState(false)
 
   const laad = useCallback(async () => {
     setLaden(true)
@@ -49,6 +52,21 @@ export function InzendingenTab({ formulier, onTellingGewijzigd }: { formulier: F
   const tel = (s: InzendingStatus) => rijen.filter((r) => r.status === s).length
 
   const werkRijBij = (id: string, p: Partial<Inzending>) => setRijen((l) => l.map((r) => (r.id === id ? { ...r, ...p } : r)))
+
+  const verwijder = async () => {
+    if (!weg) return
+    setWissen(true)
+    try {
+      const r = await fetch(`/api/admin/formulieren/${formulier.id}/inzendingen/${weg.id}`, { method: 'DELETE' })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j.error || 'Verwijderen mislukt')
+      setRijen((l) => l.filter((x) => x.id !== weg.id))
+      if (open === weg.id) setOpen(null)
+      setWeg(null)
+      toast.success('Inzending verwijderd')
+      onTellingGewijzigd()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt') } finally { setWissen(false) }
+  }
 
   return (
     <div className="space-y-4">
@@ -85,6 +103,7 @@ export function InzendingenTab({ formulier, onTellingGewijzigd }: { formulier: F
                   <th className="table-th hidden md:table-cell">E-mail</th>
                   <th className="table-th">Status</th>
                   <th className="table-th hidden lg:table-cell">Preview</th>
+                  <th className="table-th w-10"><span className="sr-only">Acties</span></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -98,6 +117,15 @@ export function InzendingenTab({ formulier, onTellingGewijzigd }: { formulier: F
                     <td className="table-td hidden md:table-cell text-gray-600 truncate max-w-[220px]">{r.email ?? '—'}</td>
                     <td className="table-td"><span className={cn('status-badge', INZENDING_STATUS_INFO[r.status]?.kleur)}>{INZENDING_STATUS_INFO[r.status]?.label ?? r.status}</span></td>
                     <td className="table-td hidden lg:table-cell text-gray-500 text-xs font-normal truncate max-w-[320px]">{preview(r, formulier.velden)}</td>
+                    <td className="table-td text-right" data-label="">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setWeg(r) }}
+                        className="btn-secondary text-xs px-2 py-1.5 text-red-600"
+                        aria-label="Inzending verwijderen" title="Inzending verwijderen"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" /><span className="md:hidden">Verwijderen</span>
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -111,6 +139,16 @@ export function InzendingenTab({ formulier, onTellingGewijzigd }: { formulier: F
           formulierId={formulier.id} formulierTitel={formulier.titel} id={open}
           onClose={() => setOpen(null)}
           onGewijzigd={(p) => { werkRijBij(open, p); onTellingGewijzigd() }}
+          onVerwijder={() => { const r = rijen.find((x) => x.id === open); if (r) setWeg(r) }}
+        />
+      )}
+
+      {weg && (
+        <Bevestig
+          titel="Inzending verwijderen"
+          tekst={<>De inzending{weg.naam ? <> van <strong>{weg.naam}</strong></> : ''} van {datumTijd(weg.created_at)} definitief verwijderen, samen met de geüploade bestanden? Dit kan niet ongedaan gemaakt worden.</>}
+          bevestigLabel="Verwijderen" gevaarlijk bezig={wissen}
+          onBevestig={() => void verwijder()} onAnnuleer={() => setWeg(null)}
         />
       )}
     </div>
@@ -119,8 +157,8 @@ export function InzendingenTab({ formulier, onTellingGewijzigd }: { formulier: F
 
 type Detail = Inzending & { velden_snapshot: Veld[] }
 
-function InzendingDetail({ formulierId, formulierTitel, id, onClose, onGewijzigd }: {
-  formulierId: string; formulierTitel: string; id: string; onClose: () => void; onGewijzigd: (p: Partial<Inzending>) => void
+function InzendingDetail({ formulierId, formulierTitel, id, onClose, onGewijzigd, onVerwijder }: {
+  formulierId: string; formulierTitel: string; id: string; onClose: () => void; onGewijzigd: (p: Partial<Inzending>) => void; onVerwijder: () => void
 }) {
   const [d, setD] = useState<Detail | null>(null)
   const [bestanden, setBestanden] = useState<Record<string, string>>({})
@@ -195,9 +233,10 @@ function InzendingDetail({ formulierId, formulierTitel, id, onClose, onGewijzigd
                   <button key={s} disabled={bewaren} onClick={() => d.status !== s && patch({ status: s })} className={cn('px-2.5 py-1 text-xs rounded-md font-medium', d.status === s ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-800')}>{INZENDING_STATUS_INFO[s].label}</button>
                 ))}
               </div>
-              <div className="ml-auto flex gap-2">
+              <div className="ml-auto flex gap-2 flex-wrap">
                 <button onClick={kopieer} className="btn-secondary text-xs px-3 py-1.5"><Copy className="h-3.5 w-3.5" />Kopieer als tekst</button>
                 <button onClick={print} className="btn-secondary text-xs px-3 py-1.5"><Printer className="h-3.5 w-3.5" />Afdrukken</button>
+                <button onClick={onVerwijder} className="btn-secondary text-xs px-3 py-1.5 text-red-600"><Trash2 className="h-3.5 w-3.5" />Verwijderen</button>
               </div>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">

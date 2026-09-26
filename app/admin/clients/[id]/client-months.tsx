@@ -1,8 +1,11 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { CalendarRange, Plus, Trash2, Loader2, X } from 'lucide-react'
+import { CalendarRange, Plus, Trash2, Loader2, X, Pencil } from 'lucide-react'
+import { toast } from 'sonner'
 import { MONTH_CLIENT_TYPES, MONTH_CLIENT_TYPE_LABEL, type MonthClientType } from '@/lib/month-phases'
+import { Bevestig } from '@/app/admin/instellingen/ui'
+import { EntryEditDialog } from '@/app/admin/maandplanning/entry-edit-dialog'
 
 type Entry = { id: string; plan_month: string; planning_type: string | null; note: string | null }
 
@@ -16,6 +19,8 @@ export function ClientMonths({ clientId }: { clientId: string }) {
   const [entries, setEntries] = useState<Entry[]>([])
   const [adding, setAdding] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
+  const [bewerk, setBewerk] = useState<Entry | null>(null)
+  const [teVerwijderen, setTeVerwijderen] = useState<Entry | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -30,8 +35,14 @@ export function ClientMonths({ clientId }: { clientId: string }) {
   const remove = async (id: string) => {
     setBusy(id)
     try {
-      await fetch(`/api/admin/month-planning-clients?id=${id}`, { method: 'DELETE' })
+      const res = await fetch(`/api/admin/month-planning-clients?id=${id}`, { method: 'DELETE' })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j.error || 'Verwijderen mislukt')
       setEntries((e) => e.filter((x) => x.id !== id))
+      setTeVerwijderen(null)
+      toast.success('Maandplanning verwijderd')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt')
     } finally { setBusy(null) }
   }
 
@@ -53,12 +64,30 @@ export function ClientMonths({ clientId }: { clientId: string }) {
                 <div className="text-xs text-gray-500">{MONTH_CLIENT_TYPE_LABEL[e.planning_type ?? 'new'] ?? 'Nieuwe klant'}</div>
                 {e.note && <div className="text-xs text-gray-400 whitespace-pre-wrap mt-0.5">{e.note}</div>}
               </div>
-              <button onClick={() => remove(e.id)} disabled={busy === e.id} className="text-gray-300 hover:text-red-500 shrink-0" title="Verwijderen">
-                {busy === e.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-              </button>
+              <div className="flex items-center gap-1 shrink-0">
+                <button onClick={() => setBewerk(e)} className="h-7 w-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700" title="Bewerken"><Pencil className="h-3.5 w-3.5" /></button>
+                <button onClick={() => setTeVerwijderen(e)} disabled={busy === e.id} className="h-7 w-7 flex items-center justify-center rounded-lg text-red-400 hover:bg-red-50 hover:text-red-600" title="Verwijderen">
+                  {busy === e.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                </button>
+              </div>
             </div>
           ))}
         </div>
+      )}
+
+      {bewerk && (
+        <EntryEditDialog
+          entry={bewerk}
+          titel={`Maandplanning — ${monthLabel(bewerk.plan_month)}`}
+          onClose={() => setBewerk(null)}
+          onSaved={(p) => { setEntries((es) => es.map((x) => x.id === bewerk.id ? { ...x, ...p } : x)); setBewerk(null) }}
+        />
+      )}
+
+      {teVerwijderen && (
+        <Bevestig titel="Maandplanning verwijderen" gevaarlijk bevestigLabel="Verwijderen" bezig={busy === teVerwijderen.id}
+          tekst={<>Deze klant uit de planning van <strong>{monthLabel(teVerwijderen.plan_month)}</strong> verwijderen?</>}
+          onBevestig={() => remove(teVerwijderen.id)} onAnnuleer={() => setTeVerwijderen(null)} />
       )}
 
       {adding && (

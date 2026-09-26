@@ -78,7 +78,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if ('vervalt_op' in b) patch.vervalt_op = dagOf(b.vervalt_op)
     if ('verplicht' in b) patch.verplicht = b.verplicht === true
     for (const m of [String(oud.map), String(patch.map ?? oud.map)]) if (!(await magMap(m, g.persoon))) return NextResponse.json({ error: 'Deze map is enkel voor bevoegde admins.' }, { status: 403 })
-    await g.admin.from('personeel_documenten').update(patch).eq('id', oud.id)
+    const { error: updErr } = await g.admin.from('personeel_documenten').update(patch).eq('id', oud.id)
+    if (updErr) throw new Error(updErr.message)
     await audit(g.admin, { personeel_id: id, entiteit: 'document', entiteit_id: oud.id, actie: 'document_gewijzigd', oud: { naam: oud.naam, map: oud.map, vervalt_op: oud.vervalt_op, verplicht: oud.verplicht }, nieuw: patch, actor_email: g.persoon.email, actor_id: g.persoon.userId })
     return NextResponse.json({ ok: true })
   } catch (err) {

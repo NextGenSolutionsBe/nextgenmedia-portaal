@@ -3,6 +3,18 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Plus, X, Loader2, Pencil, Trash2, Sparkles, FileText } from 'lucide-react'
 import { PLACEHOLDERS } from '@/lib/email-render'
+import { toast } from 'sonner'
+import { Bevestig } from '@/app/admin/instellingen/ui'
+
+// Soorten zoals gebruikt door MailComposer/SendMailButton (context.kind) en de standaardtemplates.
+const KINDS: { value: string; label: string }[] = [
+  { value: 'generic', label: 'Algemeen' },
+  { value: 'scripts', label: 'Scripts' },
+  { value: 'contract', label: 'Contract' },
+  { value: 'shoot', label: 'Shoot' },
+  { value: 'task', label: 'Taak' },
+]
+const KIND_LABEL: Record<string, string> = Object.fromEntries(KINDS.map((k) => [k.value, k.label]))
 
 type Template = { id: string; name: string; subject: string; body: string; kind: string | null; cta_text: string | null; cta_link: string | null }
 
@@ -12,6 +24,7 @@ export function TemplatesManager() {
   const [editing, setEditing] = useState<Template | null>(null)
   const [creating, setCreating] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
+  const [teVerwijderen, setTeVerwijderen] = useState<Template | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -27,17 +40,27 @@ export function TemplatesManager() {
   const seedDefaults = async () => {
     setBusy('seed')
     try {
-      await fetch('/api/admin/email/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'seed_defaults' }) })
+      const res = await fetch('/api/admin/email/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'seed_defaults' }) })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j.error || 'Toevoegen mislukt')
+      toast.success(j.added ? `${j.added} template(s) toegevoegd` : 'Alle standaardtemplates bestaan al')
       await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Toevoegen mislukt')
     } finally { setBusy(null) }
   }
 
   const remove = async (id: string) => {
-    if (!confirm('Template verwijderen?')) return
     setBusy(id)
     try {
-      await fetch(`/api/admin/email/templates?id=${id}`, { method: 'DELETE' })
+      const res = await fetch(`/api/admin/email/templates?id=${id}`, { method: 'DELETE' })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j.error || 'Verwijderen mislukt')
       setTemplates((t) => t.filter((x) => x.id !== id))
+      setTeVerwijderen(null)
+      toast.success('Template verwijderd')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt')
     } finally { setBusy(null) }
   }
 
@@ -45,7 +68,7 @@ export function TemplatesManager() {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <p className="text-sm text-gray-500">Maak eenvoudige templates met placeholders. Geen technische kennis nodig.</p>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button onClick={seedDefaults} disabled={busy === 'seed'} className="btn-secondary text-sm">{busy === 'seed' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}Standaardtemplates</button>
           <button onClick={() => setCreating(true)} className="btn-primary text-sm"><Plus className="h-4 w-4" />Nieuwe template</button>
         </div>
@@ -73,16 +96,23 @@ export function TemplatesManager() {
                 <div className="min-w-0">
                   <div className="font-medium text-sm truncate">{t.name}</div>
                   <div className="text-xs text-gray-500 truncate">{t.subject}</div>
+                  <span className="status-badge bg-gray-100 text-gray-600 text-[10px] mt-1">{KIND_LABEL[t.kind ?? 'generic'] ?? t.kind}</span>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <button onClick={() => setEditing(t)} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400" title="Bewerken"><Pencil className="h-3.5 w-3.5" /></button>
-                  <button onClick={() => remove(t.id)} disabled={busy === t.id} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-red-50 text-red-400" title="Verwijderen">{busy === t.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}</button>
+                  <button onClick={() => setTeVerwijderen(t)} disabled={busy === t.id} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-red-50 text-red-400" title="Verwijderen">{busy === t.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}</button>
                 </div>
               </div>
               <p className="text-xs text-gray-400 whitespace-pre-wrap line-clamp-4">{t.body}</p>
             </div>
           ))}
         </div>
+      )}
+
+      {teVerwijderen && (
+        <Bevestig titel="Template verwijderen" gevaarlijk bevestigLabel="Verwijderen" bezig={busy === teVerwijderen.id}
+          tekst={<>Template <strong>{teVerwijderen.name}</strong> definitief verwijderen?</>}
+          onBevestig={() => remove(teVerwijderen.id)} onAnnuleer={() => setTeVerwijderen(null)} />
       )}
 
       {(creating || editing) && (
@@ -101,6 +131,7 @@ function TemplateDialog({ template, onClose, onSaved }: { template: Template | n
   const [name, setName] = useState(template?.name ?? '')
   const [subject, setSubject] = useState(template?.subject ?? '')
   const [body, setBody] = useState(template?.body ?? '')
+  const [kind, setKind] = useState(template?.kind ?? 'generic')
   const [ctaText, setCtaText] = useState(template?.cta_text ?? '')
   const [ctaLink, setCtaLink] = useState(template?.cta_link ?? '')
   const [loading, setLoading] = useState(false)
@@ -110,12 +141,13 @@ function TemplateDialog({ template, onClose, onSaved }: { template: Template | n
     if (!name.trim()) { setError('Naam is verplicht'); return }
     setLoading(true); setError(null)
     try {
-      const payload = { name, subject, body, cta_text: ctaText || null, cta_link: ctaLink || null }
+      const payload = { name, subject, body, kind, cta_text: ctaText || null, cta_link: ctaLink || null }
       const res = await fetch('/api/admin/email/templates', {
         method: isEdit ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(isEdit ? { id: template!.id, ...payload } : payload),
       })
-      const j = await res.json(); if (!res.ok) throw new Error(j.error)
+      const j = await res.json().catch(() => ({})); if (!res.ok) throw new Error(j.error || 'Opslaan mislukt')
+      toast.success(isEdit ? 'Template opgeslagen' : 'Template aangemaakt')
       onSaved()
     } catch (e) { setError(e instanceof Error ? e.message : 'Fout') } finally { setLoading(false) }
   }
@@ -134,6 +166,14 @@ function TemplateDialog({ template, onClose, onSaved }: { template: Template | n
             <input className={inp} value={name} onChange={(e) => setName(e.target.value)} placeholder="Bv. Nieuwe scripts klaar" />
           </div>
           <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Soort</label>
+            <select className={inp} value={kind} onChange={(e) => setKind(e.target.value)}>
+              {KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
+              {!KIND_LABEL[kind] && <option value={kind}>{kind}</option>}
+            </select>
+            <p className="text-[11px] text-gray-400 mt-1">Bepaalt welke template standaard voorgesteld wordt bij het mailen (bv. vanuit een taak of shoot).</p>
+          </div>
+          <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Onderwerp</label>
             <input className={inp} value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Nieuwe scripts klaar om te bekijken" />
           </div>
@@ -146,7 +186,7 @@ function TemplateDialog({ template, onClose, onSaved }: { template: Template | n
               <button key={p} type="button" onClick={() => setBody((b) => b + p)} className="text-[11px] bg-gray-50 border border-gray-200 rounded px-1.5 py-0.5 hover:bg-gray-100">{p}</button>
             ))}
           </div>
-          <div className="grid grid-cols-2 gap-3 border-t border-gray-100 pt-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-gray-100 pt-3">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">CTA-knop tekst</label>
               <input className={inp} value={ctaText} onChange={(e) => setCtaText(e.target.value)} placeholder="Bv. Contract bekijken" />

@@ -102,6 +102,8 @@ export type Contract = {
   notitie: string | null
   /** Het contract in de Contractenmodule waar dit op slaat, als het er is. */
   contract_id: string | null
+  /** Gekoppelde klant uit het klantenbestand (optioneel; `klant` blijft de naam). */
+  client_id?: string | null
   /**
    * Directe (doorgerekende) kosten op de facturen van het gekoppelde contract,
    * excl. btw — afgeleid, niet ingevoerd. null = geen koppeling of geen facturen.
@@ -180,8 +182,75 @@ export function wamSchema(r: Pick<WamRij, 'start_datum' | 'contract_maanden' | '
   return uit
 }
 
+export type SchemaTermijn = ReturnType<typeof wamSchema>[number]
+export type BestaandeTermijn = {
+  id: string; volgnr: number; periode: string; factuurdatum: string
+  bedrag_excl: number | string; btw_pct: number | string; status: string
+  invoice_id: string | null; notitie?: string | null
+}
+export type TermijnSyncPlan = {
+  /** Eerst: losse (extra) termijnen die een nieuwe schemaplaats bezetten, naar achteren schuiven. */
+  hernummeren: { id: string; volgnr: number }[]
+  /** Geplande schematermijnen die buiten het nieuwe schema vallen. */
+  verwijderen: string[]
+  /** Geplande schematermijnen die het nieuwe schema volgen. */
+  bijwerken: { id: string; periode: string; factuurdatum: string; bedrag_excl: number; btw_pct: number }[]
+  /** Nieuwe schemaplaatsen zonder termijn. */
+  invoegen: SchemaTermijn[]
+}
+
+/** Staat deze termijn nog exact zoals het schema hem maakte (gepland, geen factuur, niets aangepast)? */
+function volgtSchema(t: BestaandeTermijn, s: SchemaTermijn | undefined): boolean {
+  return !!s && t.status === 'gepland' && !t.invoice_id
+    && String(t.periode).slice(0, 7) === s.periode
+    && String(t.factuurdatum).slice(0, 10) === s.factuurdatum
+    && Math.abs(n(t.bedrag_excl) - s.bedrag_excl) < 0.005
+    && Math.abs(n(t.btw_pct) - s.btw_pct) < 0.005
+}
+
+/**
+ * Wat moet er met de termijnen gebeuren als het facturatieschema van een
+ * WAM-klant wijzigt? PURE functie — de route voert het plan enkel uit.
+ *
+ * Er is geen kolom die een losse (extra) termijn onderscheidt van een
+ * schematermijn, dus dat leiden we af uit het OUDE schema (vóór de wijziging):
+ *  · een termijn op een plaats van het oude schema die er nog exact zo bij
+ *    staat als het schema hem maakte, volgt het schema (bijwerken of, als het
+ *    schema korter wordt, verwijderen — tenzij er een notitie op staat);
+ *  · een termijn op een schemaplaats die met de hand is aangepast, een factuur
+ *    heeft of geannuleerd is, blijft ongemoeid;
+ *  · een termijn voorbij het oude schema is een losse extra termijn: die blijft
+ *    altijd bestaan. Bezet hij een plaats die het nieuwe (langere) schema nodig
+ *    heeft, dan schuift hij naar achteren in plaats van overschreven te worden.
+ */
+export function planTermijnSync(oudSchema: SchemaTermijn[], nieuwSchema: SchemaTermijn[], bestaand: BestaandeTermijn[]): TermijnSyncPlan {
+  const oudPer = new Map(oudSchema.map((s) => [s.volgnr, s]))
+  const opSchemaplaats = (t: BestaandeTermijn) => t.volgnr >= 1 && t.volgnr <= oudSchema.length
+  const conform = (t: BestaandeTermijn) => opSchemaplaats(t) && volgtSchema(t, oudPer.get(t.volgnr))
+  const plan: TermijnSyncPlan = { hernummeren: [], verwijderen: [], bijwerken: [], invoegen: [] }
+
+  const perVolgnr = new Map(bestaand.map((t) => [t.volgnr, t]))
+  let vrij = Math.max(nieuwSchema.length, 0, ...bestaand.map((t) => Number(t.volgnr) || 0)) + 1
+  for (const t of [...bestaand].sort((a, b) => a.volgnr - b.volgnr)) {
+    if (!opSchemaplaats(t) && t.volgnr >= 1 && t.volgnr <= nieuwSchema.length) {
+      plan.hernummeren.push({ id: t.id, volgnr: vrij++ })
+      perVolgnr.delete(t.volgnr)
+    }
+  }
+  for (const t of bestaand) {
+    if (conform(t) && t.volgnr > nieuwSchema.length && !(t.notitie ?? '').trim()) plan.verwijderen.push(t.id)
+  }
+  for (const s of nieuwSchema) {
+    const t = perVolgnr.get(s.volgnr)
+    if (!t) { plan.invoegen.push(s); continue }
+    if (!conform(t)) continue
+    if (!volgtSchema(t, s)) plan.bijwerken.push({ id: t.id, periode: s.periode, factuurdatum: s.factuurdatum, bedrag_excl: s.bedrag_excl, btw_pct: s.btw_pct })
+  }
+  return plan
+}
+
 const n = (v: unknown): number => { const x = Number(v); return Number.isFinite(x) ? x : 0 }
-const dag = (s: string | null | undefined): Date | null => {
+const dag =(s: string | null | undefined): Date | null => {
   if (!s) return null
   const d = new Date(String(s).slice(0, 10) + 'T00:00:00')
   return Number.isFinite(d.getTime()) ? d : null

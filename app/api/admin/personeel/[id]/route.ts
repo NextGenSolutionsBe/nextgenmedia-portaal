@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { safeMessage } from '@/lib/api-error'
 import { decryptSecret } from '@/lib/crypto'
-import { eisPersoneel, magFinancieel, magGevoelig, laadTarieven, audit, BUCKET } from '@/lib/personeel/server'
+import { eisPersoneel, magFinancieel, magGevoelig, laadTarieven, audit, BUCKET, type Admin } from '@/lib/personeel/server'
 import { isMedewerkerType } from '@/lib/personeel/model'
 import { kostPer, uurOpbouw } from '@/lib/personeel/kost'
 import { dagBrussel, plusDagen } from '@/lib/personeel/tijd'
@@ -11,6 +11,22 @@ import { internAccount } from '@/lib/personeel/koppeling'
 export const dynamic = 'force-dynamic'
 
 const GEVOELIGE_MAPPEN = ['identiteit', 'payroll']
+
+
+/**
+ * Historiek die een definitieve verwijdering blokkeert: gewerkte uren,
+ * geboekte kosten en planning. Zolang daar iets van bestaat, kan een
+ * medewerker enkel op inactief — de geschiedenis moet blijven kloppen.
+ */
+async function telHistoriek(admin: Admin, id: string): Promise<{ sessies: number; kostenposten: number; planning: number }> {
+  const tel = async (tabel: string) => {
+    const { count, error } = await admin.from(tabel).select('id', { count: 'exact', head: true }).eq('personeel_id', id)
+    // Bij een fout (tabel ontbreekt, …) liever blokkeren dan per ongeluk verwijderen.
+    return error ? 1 : (count ?? 0)
+  }
+  const [sessies, kostenposten, planning] = await Promise.all([tel('personeel_sessies'), tel('personeel_kostenposten'), tel('personeel_planning')])
+  return { sessies, kostenposten, planning }
+}
 
 /**
  * GET — het volledige dossier. Wat je krijgt hangt af van je rechten:
@@ -52,6 +68,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
     const g2 = gev.data as Record<string, unknown> | null
     return NextResponse.json({
+      historiek: await telHistoriek(admin, id),
       medewerker: { ...p, interne_notities: p.interne_notities, foto_url: p.profielfoto_pad ? url.get(String(p.profielfoto_pad)) ?? null : null },
       gevoelig: gevoelig ? {
         adres: g2?.adres ?? null, geboortedatum: g2?.geboortedatum ?? null, noodcontact: g2?.noodcontact ?? null,
@@ -105,6 +122,70 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       await audit(g.admin, { personeel_id: id, entiteit: 'medewerker', entiteit_id: id, actie: 'gewijzigd', oud: v.oud, nieuw: v.nieuw, actor_email: g.persoon.email, actor_id: g.persoon.userId })
     }
     return NextResponse.json({ ok: true })
+  } catch (err) {
+    return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
+  }
+}
+
+/**
+ * DELETE { bevestig_naam } — dossier definitief verwijderen. Enkel wanneer er
+ * nog geen uren, kostenposten of planning bestaan; anders 409 (op inactief
+ * zetten via PATCH blijft dan de enige weg). Documenten en profielfoto gaan
+ * mee uit de opslag. Een login die enkel voor dit dossier werd aangemaakt,
+ * wordt mee verwijderd; een interne (werknemers)login blijft altijd bestaan.
+ */
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { id } = await params
+    if (!isUuid(id)) return NextResponse.json({ error: 'Ongeldig id' }, { status: 400 })
+    const g = await eisPersoneel('verwijderen'); if (!g.ok) return g.response
+    const { admin } = g
+    const { data: p } = await admin.from('personeel').select('*').eq('id', id).maybeSingle()
+    if (!p) return NextResponse.json({ error: 'Medewerker niet gevonden' }, { status: 404 })
+
+    const b = (await req.json().catch(() => ({}))) as Record<string, unknown>
+    const naam = [p.voornaam, p.achternaam].filter(Boolean).join(' ').trim().toLowerCase()
+    if (String(b.bevestig_naam ?? '').trim().toLowerCase() !== naam) {
+      return NextResponse.json({ error: 'De ingetypte naam komt niet overeen.' }, { status: 400 })
+    }
+
+    const h = await telHistoriek(admin, id)
+    if (h.sessies || h.kostenposten || h.planning) {
+      return NextResponse.json({ error: 'Deze medewerker heeft al uren, kostenposten of planning. Zet het dossier op inactief; de historiek moet bewaard blijven.', historiek: h }, { status: 409 })
+    }
+
+    // Bestanden verzamelen vóór de rij (en via cascade de documenten) verdwijnt.
+    const { data: docs } = await admin.from('personeel_documenten').select('pad').eq('personeel_id', id)
+    const paden = [...((docs ?? []) as { pad: string | null }[]).map((d) => d.pad).filter((x): x is string => !!x), ...(p.profielfoto_pad ? [String(p.profielfoto_pad)] : [])]
+
+    // Login: enkel verwijderen als ze uitsluitend voor dit dossier bestaat.
+    let loginVerwijderd = false
+    if (p.auth_user_id) {
+      const uid = String(p.auth_user_id)
+      const [{ gekoppeld }, { data: rol }, { data: u }] = await Promise.all([
+        internAccount(admin, { auth_user_id: uid, email: p.email ?? null }),
+        admin.from('user_roles').select('role').eq('user_id', uid).maybeSingle(),
+        admin.auth.admin.getUserById(uid),
+      ])
+      const enkelDitDossier = !gekoppeld && !rol && String(u?.user?.user_metadata?.personeel_id ?? '') === id
+      if (enkelDitDossier) {
+        const { error: delErr } = await admin.auth.admin.deleteUser(uid)
+        if (delErr) throw new Error(`Login verwijderen mislukt: ${delErr.message}`)
+        loginVerwijderd = true
+      }
+    }
+
+    const { error } = await admin.from('personeel').delete().eq('id', id)
+    if (error) throw new Error(error.message)
+    if (paden.length) { try { await admin.storage.from(BUCKET).remove(paden) } catch { /* best effort */ } }
+
+    await audit(admin, {
+      personeel_id: id, entiteit: 'medewerker', entiteit_id: id, actie: 'dossier_verwijderd',
+      oud: { naam: [p.voornaam, p.achternaam].filter(Boolean).join(' '), type: p.type, email: p.email ?? null },
+      nieuw: { documenten: (docs ?? []).length, login_verwijderd: loginVerwijderd },
+      actor_email: g.persoon.email, actor_id: g.persoon.userId,
+    })
+    return NextResponse.json({ ok: true, loginVerwijderd })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }

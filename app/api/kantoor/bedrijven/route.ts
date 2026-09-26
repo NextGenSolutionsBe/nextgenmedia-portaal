@@ -330,17 +330,44 @@ export async function PATCH(req: NextRequest) {
     const id = String(b.bedrijf_id ?? '')
     if (!id) return NextResponse.json({ error: 'bedrijf_id ontbreekt' }, { status: 400 })
 
-    const admin = createAdminSupabaseClient()
-    const { error } = await admin.from('kantoor_bedrijven')
-      .update({ actief: !!b.actief }).eq('id', id)
-    if (error) throw new Error(error.message)
+    // Enkel meegestuurde velden wijzigen. `is_eigen` bewust NIET: dat bepaalt
+    // wie marges ziet en wie namens welk bedrijf handelt.
+    const patch: Record<string, unknown> = {}
+    if ('actief' in b) patch.actief = !!b.actief
+    if ('naam' in b) {
+      const naam = tekst(b.naam, 120)
+      if (!naam) return NextResponse.json({ error: 'Geef het bedrijf een naam.' }, { status: 400 })
+      patch.naam = naam
+    }
+    if ('email' in b) {
+      const email = tekst(b.email, 160)
+      if (email && !isEmail(email)) return NextResponse.json({ error: 'Dat e-mailadres klopt niet.' }, { status: 400 })
+      patch.email = email
+    }
+    if (Object.keys(patch).length === 0) return NextResponse.json({ error: 'Geen wijzigingen' }, { status: 400 })
 
+    const admin = createAdminSupabaseClient()
+    const { data: bestaand } = await admin.from('kantoor_bedrijven').select('id, naam').eq('id', id).maybeSingle()
+    if (!bestaand) return NextResponse.json({ error: 'Bedrijf niet gevonden' }, { status: 404 })
+
+    const { error } = await admin.from('kantoor_bedrijven').update(patch).eq('id', id)
+    if (error) {
+      if (/duplicate|unique|23505/i.test(error.message)) {
+        return NextResponse.json({ error: 'Er bestaat al een bedrijf met die naam.' }, { status: 409 })
+      }
+      throw new Error(error.message)
+    }
+
+    const alleenActief = Object.keys(patch).length === 1 && 'actief' in patch
     const meta = requestMeta(req)
     await logAudit({
-      action: b.actief ? 'kantoor.bedrijf.activate' : 'kantoor.bedrijf.archive',
+      action: alleenActief ? (b.actief ? 'kantoor.bedrijf.activate' : 'kantoor.bedrijf.archive') : 'kantoor.bedrijf.update',
       entityType: 'kantoor_bedrijf', entityId: id,
-      summary: `Kantoor: bedrijf ${b.actief ? 'weer actief' : 'op non-actief'} gezet`,
+      summary: alleenActief
+        ? `Kantoor: bedrijf ${b.actief ? 'weer actief' : 'op non-actief'} gezet`
+        : `Kantoor: bedrijf "${(bestaand as { naam: string }).naam}" bijgewerkt`,
       actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'admin',
+      metadata: { velden: Object.keys(patch), oude_naam: (bestaand as { naam: string }).naam },
       ip: meta.ip, userAgent: meta.userAgent,
     })
     return NextResponse.json({ ok: true })

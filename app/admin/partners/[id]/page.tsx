@@ -13,6 +13,8 @@ import { CredentialsCard } from '@/components/credentials-card'
 import { CommissionDeals } from './commission-deals'
 import { SettlementHistory } from './settlement-history'
 import { PartnerPayments, type Payment } from './partner-payments'
+import { PartnerEdit } from './partner-edit'
+import { LedgerRowActions } from './ledger-row-actions'
 
 
 const STATUS_STYLE: Record<string, string> = {
@@ -111,6 +113,7 @@ export default async function PartnerDetailPage({ params }: { params: Promise<{ 
     id: string; kind: string; status: string; amount: number; description: string | null;
     client_id: string | null; occurred_on: string; created_at: string; settlement_id: string | null;
     direction?: string | null; commission_deal_id?: string | null; commission_year?: number | null;
+    assignment_id?: string | null;
   }>
   const commissionDeals = (commissionRows ?? []) as Array<{
     id: string; client_id: string | null; label: string | null; service_slug: string | null;
@@ -161,7 +164,26 @@ export default async function PartnerDetailPage({ params }: { params: Promise<{ 
         {/* Info column */}
         <div className="space-y-4">
         <div className="card-base space-y-3">
-          <h2 className="font-semibold text-gray-900">Gegevens</h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="font-semibold text-gray-900">Gegevens</h2>
+            <PartnerEdit
+              partnerId={partner.id}
+              partner={{
+                name: partner.name ?? partner.full_name ?? '',
+                company: partner.company ?? partner.company_name ?? null,
+                phone: partner.phone ?? null,
+                vat_number: partner.vat_number ?? null,
+                iban: partner.iban ?? null,
+                region: partner.region ?? null,
+                roles: Array.isArray(partner.roles) ? (partner.roles as string[]) : [],
+                hourly_rate: partner.hourly_rate != null ? Number(partner.hourly_rate) : null,
+                commission_pct: partner.commission_pct != null ? Number(partner.commission_pct)
+                  : partner.default_commission_pct != null ? Number(partner.default_commission_pct) : null,
+                bio: partner.bio ?? null,
+                notes: partner.notes ?? null,
+              }}
+            />
+          </div>
           <div className="space-y-2 text-sm">
             {[
               ['E-mail', partner.email],
@@ -170,6 +192,7 @@ export default async function PartnerDetailPage({ params }: { params: Promise<{ 
               partner.vat_number && ['BTW', partner.vat_number],
               partner.iban && ['IBAN', partner.iban],
               partner.region && ['Regio', partner.region],
+              partner.hourly_rate != null && ['Uurtarief', formatEuro(Number(partner.hourly_rate))],
               ['Partner sinds', formatDate(partner.created_at)],
             ].filter(Boolean).map(([k, v]) => (
               <div key={k as string} className="flex justify-between gap-4">
@@ -198,6 +221,23 @@ export default async function PartnerDetailPage({ params }: { params: Promise<{ 
               Percentages tellen per actief jaar van de klant en zijn per deal aanpasbaar.
             </p>
           </div>
+
+          {(partner.bio || partner.notes) && (
+            <div className="pt-2 border-t border-gray-100 space-y-2">
+              {partner.bio && (
+                <div>
+                  <p className="text-xs text-gray-500 mb-0.5">Bio</p>
+                  <p className="text-sm text-gray-700 whitespace-pre-line break-words">{partner.bio}</p>
+                </div>
+              )}
+              {partner.notes && (
+                <div>
+                  <p className="text-xs text-gray-500 mb-0.5">Interne notities</p>
+                  <p className="text-sm text-gray-700 whitespace-pre-line break-words">{partner.notes}</p>
+                </div>
+              )}
+            </div>
+          )}
 
           {Array.isArray(partner.roles) && partner.roles.length > 0 && (
             <div className="pt-2 border-t border-gray-100">
@@ -322,6 +362,7 @@ export default async function PartnerDetailPage({ params }: { params: Promise<{ 
                   <th className="text-left py-2 text-xs text-gray-500 font-medium">Klant</th>
                   <th className="text-right py-2 text-xs text-gray-500 font-medium">Bedrag</th>
                   <th className="text-left py-2 text-xs text-gray-500 font-medium">Status</th>
+                  <th className="text-right py-2 text-xs text-gray-500 font-medium">Acties</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -354,6 +395,18 @@ export default async function PartnerDetailPage({ params }: { params: Promise<{ 
                       }`}>
                         {l.status === 'settled' ? 'Afgerekend' : l.status === 'cancelled' ? 'Geannuleerd' : 'Openstaand'}
                       </span>
+                    </td>
+                    <td className="py-2.5 text-right">
+                      <LedgerRowActions
+                        partnerId={id}
+                        entry={{
+                          id: l.id, kind: l.kind, status: l.status, amount: Number(l.amount),
+                          description: l.description, client_id: l.client_id, occurred_on: l.occurred_on,
+                          direction: dir, settlement_id: l.settlement_id ?? null,
+                          commission_deal_id: l.commission_deal_id ?? null, assignment_id: l.assignment_id ?? null,
+                        }}
+                        clients={(clientRows ?? []).map(c => ({ id: c.id, company_name: c.company_name }))}
+                      />
                     </td>
                   </tr>
                   )

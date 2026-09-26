@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
       name: String(b.name).slice(0, 120),
       subject: b.subject || '',
       body: b.body || '',
-      kind: b.kind || 'generic',
+      kind: String(b.kind || 'generic').trim().slice(0, 40) || 'generic',
       cta_text: b.cta_text || null,
       cta_link: b.cta_link || null,
       created_by: actor.id,
@@ -63,7 +63,7 @@ export async function PATCH(req: NextRequest) {
     if (b.name !== undefined) patch.name = String(b.name).slice(0, 120)
     if (b.subject !== undefined) patch.subject = b.subject
     if (b.body !== undefined) patch.body = b.body
-    if (b.kind !== undefined) patch.kind = b.kind
+    if (b.kind !== undefined) patch.kind = String(b.kind || 'generic').trim().slice(0, 40) || 'generic'
     if (b.cta_text !== undefined) patch.cta_text = b.cta_text || null
     if (b.cta_link !== undefined) patch.cta_link = b.cta_link || null
     if (Object.keys(patch).length === 0) return NextResponse.json({ error: 'Geen wijzigingen' }, { status: 400 })

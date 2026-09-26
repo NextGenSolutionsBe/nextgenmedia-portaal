@@ -142,10 +142,10 @@ function NieuweMedewerker({ onSluit, onKlaar }: { onSluit: () => void; onKlaar: 
   }
   return (
     <Dialoog titel="Medewerker toevoegen" onSluit={onSluit}>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div><label className={LBL}>Voornaam *</label><input className={INP} value={f.voornaam} onChange={(e) => setF({ ...f, voornaam: e.target.value })} /></div>
         <div><label className={LBL}>Achternaam</label><input className={INP} value={f.achternaam} onChange={(e) => setF({ ...f, achternaam: e.target.value })} /></div>
-        <div className="col-span-2"><label className={LBL}>E-mailadres</label><input type="email" className={INP} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} placeholder="nodig voor een login" /></div>
+        <div className="sm:col-span-2"><label className={LBL}>E-mailadres</label><input type="email" className={INP} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} placeholder="nodig voor een login" /></div>
         <div><label className={LBL}>Type</label><select className={INP} value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}>{MEDEWERKER_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}</select></div>
         <div><label className={LBL}>Functie</label><input className={INP} value={f.functie} onChange={(e) => setF({ ...f, functie: e.target.value })} /></div>
         <div><label className={LBL}>Telefoon</label><input className={INP} value={f.telefoon} onChange={(e) => setF({ ...f, telefoon: e.target.value })} /></div>

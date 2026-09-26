@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, X, ArrowRightLeft, Briefcase } from 'lucide-react'
+import { toast } from 'sonner'
+import { GetalInvoer } from '@/components/ui/getal-invoer'
 
 type Client = { id: string; company_name: string }
 
@@ -22,9 +24,9 @@ export function PartnerLedger({ partnerId, clients }: Props) {
   const today = new Date().toISOString().slice(0, 10)
 
   // "outbound" = we pay the partner (we subcontract work to them)
-  const [outboundForm, setOutboundForm] = useState({ title: '', amount: '', clientId: '', occurredOn: today })
+  const [outboundForm, setOutboundForm] = useState({ title: '', amount: null as number | null, clientId: '', occurredOn: today })
   // "inbound" = the partner pays us (they gave us a paid job)
-  const [inboundForm, setInboundForm] = useState({ title: '', amount: '', clientId: '', occurredOn: today })
+  const [inboundForm, setInboundForm] = useState({ title: '', amount: null as number | null, clientId: '', occurredOn: today })
 
   const close = () => { setModal(null); setError(null) }
 
@@ -40,6 +42,7 @@ export function PartnerLedger({ partnerId, clients }: Props) {
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? 'Mislukt')
       close()
+      toast.success('Post toegevoegd.')
       router.refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Onbekende fout')
@@ -50,11 +53,11 @@ export function PartnerLedger({ partnerId, clients }: Props) {
 
   const submitOutbound = () => {
     if (!outboundForm.title.trim()) { setError('Voer een omschrijving in'); return }
-    if (!outboundForm.amount || parseFloat(outboundForm.amount) <= 0) { setError('Voer een geldig bedrag in'); return }
+    if (!outboundForm.amount || outboundForm.amount <= 0) { setError('Voer een geldig bedrag in'); return }
     post(`/api/admin/partners/${partnerId}/ledger`, {
       kind: 'payout_owed',
       direction: 'we_pay_partner',
-      amount: parseFloat(outboundForm.amount),       // positive → we owe partner
+      amount: outboundForm.amount,       // positive → we owe partner
       client_id: outboundForm.clientId || null,
       description: outboundForm.title,
       occurred_on: outboundForm.occurredOn,
@@ -63,11 +66,11 @@ export function PartnerLedger({ partnerId, clients }: Props) {
 
   const submitInbound = () => {
     if (!inboundForm.title.trim()) { setError('Voer een omschrijving in'); return }
-    if (!inboundForm.amount || parseFloat(inboundForm.amount) <= 0) { setError('Voer een geldig bedrag in'); return }
+    if (!inboundForm.amount || inboundForm.amount <= 0) { setError('Voer een geldig bedrag in'); return }
     post(`/api/admin/partners/${partnerId}/ledger`, {
       kind: 'service_billed',
       direction: 'partner_pays_us',
-      amount: -parseFloat(inboundForm.amount),       // negative → partner owes us
+      amount: -inboundForm.amount,       // negative → partner owes us
       client_id: inboundForm.clientId || null,
       description: inboundForm.title,
       occurred_on: inboundForm.occurredOn,
@@ -96,7 +99,8 @@ export function PartnerLedger({ partnerId, clients }: Props) {
         <h2 className="font-semibold mb-1">Onderaanneming (vast bedrag)</h2>
         <p className="text-xs text-gray-500 mb-4">
           Voor onderaanneming en losse posten — altijd een vast bedrag, nooit commissie. Commissie op aangeleverde klanten
-          beheer je via de doorverwijzingen hierboven. Betalingen registreer je hieronder.
+          beheer je via de doorverwijzingen hierboven. Betalingen registreer je hieronder. Handmatige posten bewerk of
+          verwijder je in de ledger-historie; posten uit een opdracht, doorverwijzing of afrekening blijven aan hun bron gekoppeld.
         </p>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => { setError(null); setModal('outbound') }} className="btn-secondary flex items-center gap-1.5 text-sm">
@@ -139,10 +143,10 @@ export function PartnerLedger({ partnerId, clients }: Props) {
                 </div>
                 <div>
                   <label className={lbl}>Bedrag (€) *</label>
-                  <input
-                    type="number" min="0" step="0.01" className={inp} placeholder="500"
-                    value={form.amount}
-                    onChange={(e) => setForm((p) => ({ ...p, amount: e.target.value }))}
+                  <GetalInvoer
+                    className={inp} placeholder="500" min={0}
+                    waarde={form.amount}
+                    onWaarde={(n) => setForm((p) => ({ ...p, amount: n }))}
                   />
                 </div>
                 <div>

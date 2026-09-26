@@ -61,12 +61,17 @@ export async function POST(req: NextRequest) {
     const clickupAssigneeId = Number.isFinite(clickupRaw) && clickupRaw > 0 ? Math.round(clickupRaw) : null
 
     // Al gekoppeld voor dit merk? Dan is dít de rij die je zoekt — geen dubbel.
+    // Een eerder losgekoppelde (inactieve) rij wordt opnieuw geactiveerd in
+    // plaats van de unieke index te laten botsen.
+    let heractiveer: string | null = null
     {
-      let q = admin.from('sales_calendar_connections').select('id, name')
+      let q = admin.from('sales_calendar_connections').select('id, name, active')
         .eq('sales_client_id', org.id).eq('provider', 'google').eq('calendar_id', googleCalendarId)
       q = pipelineId ? q.eq('pipeline_id', pipelineId) : q.is('pipeline_id', null)
       const { data: dubbel } = await q.maybeSingle()
-      if (dubbel) {
+      if (dubbel && (dubbel as { active?: boolean | null }).active === false) {
+        heractiveer = (dubbel as { id: string }).id
+      } else if (dubbel) {
         return NextResponse.json({
           error: `Deze Google-agenda is al gekoppeld als “${(dubbel as { name: string | null }).name ?? 'agenda'}” voor dat merk.`,
         }, { status: 409 })
@@ -110,8 +115,9 @@ export async function POST(req: NextRequest) {
       // velden laten we bewust leeg tot iemand ze via "Handtekening" instelt.
     }
 
-    const { data: nieuw, error } = await admin.from('sales_calendar_connections')
-      .insert(insert).select('id').single()
+    const { data: nieuw, error } = heractiveer
+      ? await admin.from('sales_calendar_connections').update(insert).eq('id', heractiveer).select('id').single()
+      : await admin.from('sales_calendar_connections').insert(insert).select('id').single()
     if (error) {
       if (/duplicate|unique|23505/i.test(error.message)) {
         return NextResponse.json({ error: 'Deze agenda is net al gekoppeld voor dat merk.' }, { status: 409 })

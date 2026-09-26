@@ -447,6 +447,41 @@ export async function moveEvent(connectionId: string, eventId: string, startsAt:
   }
 }
 
+/**
+ * Titel, omschrijving, adres of genodigde van een bestaand event bijwerken.
+ * Enkel de meegegeven velden gaan mee (PATCH). Staat er een genodigde op, dan
+ * krijgt die de wijziging (sendUpdates=all); anders blijft het intern.
+ */
+export async function werkEventBij(connectionId: string, eventId: string, velden: {
+  summary?: string
+  description?: string
+  location?: string | null
+  /** undefined = ongemoeid; null of '' = genodigde weghalen. */
+  attendeeEmail?: string | null
+  /** Voor sendUpdates: staat er (na de wijziging) een genodigde op het event? */
+  metGenodigde: boolean
+}): Promise<void> {
+  const auth = await accessToken(connectionId)
+  if (!auth) throw new Error('Deze agenda is niet (meer) gekoppeld')
+  const body: Record<string, unknown> = {}
+  if (velden.summary !== undefined) body.summary = velden.summary
+  if (velden.description !== undefined) body.description = velden.description
+  if (velden.location !== undefined) body.location = velden.location?.trim() || ''
+  if (velden.attendeeEmail !== undefined) body.attendees = velden.attendeeEmail ? [{ email: velden.attendeeEmail }] : []
+  if (!Object.keys(body).length) return
+  // Ook wie net als genodigde weggehaald werd, hoort een annulering te krijgen.
+  const sendUpdates = velden.metGenodigde || velden.attendeeEmail !== undefined ? 'all' : 'none'
+  const res = await fetchMetLimiet(`${API}/calendars/${encodeURIComponent(auth.calendarId)}/events/${encodeURIComponent(eventId)}?sendUpdates=${sendUpdates}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({})) as { error?: { message?: string } }
+    throw new Error(j.error?.message ?? 'Google kon de afspraak niet bijwerken')
+  }
+}
+
 /** Annuleren — geen wees-events laten staan (§7). */
 export async function deleteEvent(connectionId: string, eventId: string): Promise<void> {
   const auth = await accessToken(connectionId)

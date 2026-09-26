@@ -1,11 +1,18 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, Loader2, Plus } from 'lucide-react'
+import { Check, ChevronDown, Loader2, Plus, Settings2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   isOverig, maakOverigType, splitsOverig, normaliseerType, gelijkType, MAX_TYPE_LENGTE,
 } from '@/lib/contracten/types'
+import { ContracttypesBeheer } from './contracttypes-beheer'
+
+/** Namen van de contracttypes uit de API; null bij een fout (dan blijft het veld gewoon vrij). */
+const haalLijst = (): Promise<string[] | null> => fetch('/api/admin/contracts/types', { cache: 'no-store' })
+  .then((r) => r.json())
+  .then((j) => (Array.isArray(j.types) ? (j.types as Array<{ naam: string }>).map((t) => t.naam) : null))
+  .catch(() => null)
 
 /**
  * Contracttype-combobox: kies een bestaand type óf tik een nieuw type in.
@@ -37,6 +44,7 @@ export function ContracttypeKiezer({
   const [open, setOpen] = useState(false)
   const [bezig, setBezig] = useState(false)
   const [lijst, setLijst] = useState<string[]>(types ?? [])
+  const [beheer, setBeheer] = useState(false)
   const doos = useRef<HTMLDivElement>(null)
   // Wat wij zelf naar buiten stuurden — zo overschrijft de prop het tikken niet
   // (normaliseren haalt anders de spatie weg die je net typte).
@@ -46,10 +54,7 @@ export function ContracttypeKiezer({
   useEffect(() => {
     if (types) { setLijst(types); return }
     let levend = true
-    fetch('/api/admin/contracts/types', { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((j) => { if (levend && Array.isArray(j.types)) setLijst((j.types as Array<{ naam: string }>).map((t) => t.naam)) })
-      .catch(() => { /* de combobox blijft gewoon een vrij tekstveld */ })
+    void haalLijst().then((l) => { if (levend && l) setLijst(l) })
     return () => { levend = false }
   }, [types])
 
@@ -177,9 +182,25 @@ export function ContracttypeKiezer({
                 <span className="truncate">Nieuw type: <strong>{normaliseerType(tekst)}</strong></span>
               </button>
             )}
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { setOpen(false); setBeheer(true) }}
+              className="w-full text-left px-3 py-2 text-xs border-t border-gray-100 text-gray-500 hover:bg-gray-50 hover:text-gray-900 flex items-center gap-2"
+            >
+              <Settings2 className="h-3.5 w-3.5" />Types beheren (hernoemen / verwijderen)…
+            </button>
           </div>
         )}
       </div>
+
+      {beheer && (
+        <ContracttypesBeheer
+          onSluit={() => setBeheer(false)}
+          onGewijzigd={() => { void haalLijst().then((l) => { if (l) setLijst(l) }) }}
+          onHernoemd={(van, naar) => { if (gelijkType(tekst, van)) kies(naar) }}
+        />
+      )}
 
       {isOverig(tekst) && (
         <div>

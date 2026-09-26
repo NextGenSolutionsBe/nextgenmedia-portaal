@@ -61,7 +61,7 @@ export function BlogCalendar({ events, blogs, accounts, initialAccount }: { even
           <button onClick={() => move(1)} className="h-8 w-8 flex items-center justify-center rounded-lg border border-gray-200 hover:bg-gray-50"><ChevronRight className="h-4 w-4" /></button>
           <span className="ml-2 font-semibold text-sm">{view === 'week' ? `Week van ${startOfWeek(cursor).getDate()} ${MONTHS[startOfWeek(cursor).getMonth()]}` : `${MONTHS[cursor.getMonth()]} ${cursor.getFullYear()}`}</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <select value={fAccount} onChange={(e) => setFAccount(e.target.value)} className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs"><option value="">Alle projecten</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
           <div className="flex items-center gap-1 rounded-lg border border-gray-200 p-0.5">
             {(['maand', 'week', 'lijst'] as const).map((v) => (
@@ -110,7 +110,7 @@ function MonthView({ cursor, byDate, onOpen }: { cursor: Date; byDate: Map<strin
           const inMonth = d.getMonth() === cursor.getMonth()
           const evs = byDate.get(di) ?? []
           return (
-            <div key={i} className={`min-h-[92px] border-t border-l border-gray-100 p-1.5 ${inMonth ? '' : 'bg-gray-50/50'}`}>
+            <div key={i} className={`min-h-[64px] sm:min-h-[92px] min-w-0 border-t border-l border-gray-100 p-1 sm:p-1.5 ${inMonth ? '' : 'bg-gray-50/50'}`}>
               <div className={`text-[11px] mb-1 ${di === todayIso ? 'font-bold text-black' : inMonth ? 'text-gray-500' : 'text-gray-300'}`}>{di === todayIso ? <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-black text-white">{d.getDate()}</span> : d.getDate()}</div>
               <div className="space-y-0.5">
                 {evs.slice(0, 4).map((e, j) => <EventChip key={j} e={e} onOpen={onOpen} />)}
@@ -179,6 +179,7 @@ const STATUS_CLS: Record<string, string> = { klaar_voor_review: 'bg-amber-100 te
 function BlogEditorModal({ blog, onClose }: { blog: CalBlog; onClose: () => void }) {
   const router = useRouter()
   const [f, setF] = useState({ titel: blog.titel, content: blog.content ?? '', meta_title: blog.meta_title ?? '', meta_description: blog.meta_description ?? '', thumbnail_url: blog.thumbnail_url ?? '' })
+  const [tags, setTags] = useState((blog.tags ?? []).join(', '))
   const [date, setDate] = useState(blog.publish_at ? blog.publish_at.slice(0, 10) : '')
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -203,7 +204,7 @@ function BlogEditorModal({ blog, onClose }: { blog: CalBlog; onClose: () => void
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Fout') } finally { setBusy(null) }
   }
 
-  const save = () => call('save', { ...f }, 'Opgeslagen.')
+  const save = () => call('save', { ...f, tags: tags.split(',').map((t) => t.trim()).filter(Boolean) }, 'Opgeslagen.')
   const otherImage = async () => {
     setBusy('image')
     try {
@@ -249,6 +250,10 @@ function BlogEditorModal({ blog, onClose }: { blog: CalBlog; onClose: () => void
             <div><label className="block text-xs text-gray-600 mb-1">Meta beschrijving</label><input className={inp} value={f.meta_description} onChange={(e) => setF((x) => ({ ...x, meta_description: e.target.value }))} /></div>
           </div>
           <div>
+            <label className="block text-xs text-gray-600 mb-1">Tags (komma-gescheiden)</label>
+            <input className={inp} value={tags} onChange={(e) => setTags(e.target.value)} placeholder="Bv. SEO, Branding" />
+          </div>
+          <div>
             <div className="flex items-center justify-between mb-1">
               <label className="block text-xs text-gray-600">Afbeelding (URL)</label>
               <button onClick={otherImage} disabled={!!busy} className="btn-secondary text-[11px]">{busy === 'image' ? <Loader2 className="h-3 w-3 animate-spin" /> : <ImageIcon className="h-3 w-3" />}Andere foto</button>
@@ -260,7 +265,7 @@ function BlogEditorModal({ blog, onClose }: { blog: CalBlog; onClose: () => void
             )}
           </div>
 
-          <div className="flex items-center gap-2 pt-1">
+          <div className="flex flex-wrap items-center gap-2 pt-1">
             <button onClick={save} disabled={!!busy} className="btn-secondary text-sm">{busy === 'save' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Opslaan</button>
             <button onClick={regenerate} disabled={!!busy} className="btn-secondary text-sm">{busy === 'regenerate' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}Opnieuw genereren</button>
             <button onClick={del} disabled={!!busy} className="btn-secondary text-sm text-red-600 ml-auto">{busy === 'del' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}Verwijderen</button>

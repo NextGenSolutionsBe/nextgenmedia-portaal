@@ -124,7 +124,7 @@ export function ContentCalendar({
     if (mode !== 'admin') return
     e.preventDefault()
     const id = e.dataTransfer.getData('text/plain')
-    if (id && actions.onMove) await actions.onMove(id, dayStr)
+    if (id && actions.onMove) { try { await actions.onMove(id, dayStr) } catch { /* melding komt van de handler */ } }
   }
 
   return (
@@ -338,6 +338,8 @@ function ScriptPanel({
         caption: form.caption, script: form.script, media_notes: form.media_notes,
       })
       setEditing(false)
+    } catch {
+      /* melding komt van de handler; bewerkmodus blijft open */
     } finally { setBusy(false) }
   }
 
@@ -496,7 +498,7 @@ function ScriptPanel({
               {(item.status === 'draft' || item.status === 'changes_requested') && (
                 <button
                   disabled={busy}
-                  onClick={async () => { setBusy(true); try { await actions.onSetStatus?.(item.id, 'ready_for_review') } finally { setBusy(false) } }}
+                  onClick={async () => { setBusy(true); try { await actions.onSetStatus?.(item.id, 'ready_for_review') } catch { /* melding komt van de handler */ } finally { setBusy(false) } }}
                   className="btn-secondary text-xs flex-1"
                 >
                   <Send className="h-3 w-3" />
@@ -506,7 +508,7 @@ function ScriptPanel({
               {item.status === 'approved' && (
                 <button
                   disabled={busy}
-                  onClick={async () => { setBusy(true); try { await actions.onSetStatus?.(item.id, 'scheduled') } finally { setBusy(false) } }}
+                  onClick={async () => { setBusy(true); try { await actions.onSetStatus?.(item.id, 'scheduled') } catch { /* melding komt van de handler */ } finally { setBusy(false) } }}
                   className="btn-secondary text-xs"
                 >
                   Inplannen
@@ -515,7 +517,7 @@ function ScriptPanel({
               {item.status === 'scheduled' && (
                 <button
                   disabled={busy}
-                  onClick={async () => { setBusy(true); try { await actions.onSetStatus?.(item.id, 'published') } finally { setBusy(false) } }}
+                  onClick={async () => { setBusy(true); try { await actions.onSetStatus?.(item.id, 'published') } catch { /* melding komt van de handler */ } finally { setBusy(false) } }}
                   className="btn-secondary text-xs"
                 >
                   Gepubliceerd
@@ -527,7 +529,7 @@ function ScriptPanel({
                   onClick={async () => {
                     if (!confirm('Item verwijderen?')) return
                     setBusy(true)
-                    try { await actions.onDelete!(item.id); onClose() } finally { setBusy(false) }
+                    try { await actions.onDelete!(item.id); onClose() } catch { /* melding komt van de handler */ } finally { setBusy(false) }
                   }}
                   className="btn-danger text-xs ml-auto"
                 >

@@ -3,14 +3,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  Loader2, Plus, X, Check, Building2, ArrowRight, Handshake, Search, Eye, EyeOff,
+  Loader2, Plus, X, Check, Building2, ArrowRight, Handshake, Search, Eye, EyeOff, Pencil, Trash2,
 } from 'lucide-react'
+import { Dialoog, Bevestig, INP } from '@/app/admin/instellingen/ui'
+import { GetalInvoer } from '@/components/ui/getal-invoer'
 import {
   SOORTEN, STATUSSEN, euro, standaardZichtbaar,
   type Bedrijf, type Soort, type ZichtbareOpdracht, type Samenvatting,
 } from '@/lib/kantoor/model'
 import { ExportKnop } from '@/components/admin/export-knop'
 import { kantoorWerkmap } from '@/lib/excel/rapporten/kantoor'
+
+/** Zoals de server ze stuurt: gefilterd per bedrijf, plus het afgeleide verwijderrecht. */
+type Opdracht = ZichtbareOpdracht & { mag_verwijderen?: boolean }
 
 /**
  * Het Kantoor: waar onze bedrijven en partners elkaar werk doorgeven.
@@ -19,7 +24,7 @@ import { kantoorWerkmap } from '@/lib/excel/rapporten/kantoor'
  * bedrijf mag zien — een bedrag dat hier niet staat, is ook nooit verstuurd.
  */
 export function KantoorClient() {
-  const [rijen, setRijen] = useState<ZichtbareOpdracht[]>([])
+  const [rijen, setRijen] = useState<Opdracht[]>([])
   const [cijfers, setCijfers] = useState<Samenvatting | null>(null)
   const [bedrijven, setBedrijven] = useState<Bedrijf[]>([])
   const [mijnBedrijven, setMijnBedrijven] = useState<Bedrijf[]>([])
@@ -29,6 +34,9 @@ export function KantoorClient() {
   const [laden, setLaden] = useState(true)
   const [q, setQ] = useState('')
   const [nieuw, setNieuw] = useState(false)
+  const [bewerk, setBewerk] = useState<Opdracht | null>(null)
+  const [weg, setWeg] = useState<Opdracht | null>(null)
+  const [wegBezig, setWegBezig] = useState(false)
 
   const laad = useCallback(async (bedrijfId?: string) => {
     setLaden(true)
@@ -54,7 +62,7 @@ export function KantoorClient() {
       .some((v) => (v ?? '').toLowerCase().includes(naald)))
   }, [rijen, q])
 
-  const zetStatus = async (o: ZichtbareOpdracht, status: string) => {
+  const zetStatus = async (o: Opdracht, status: string) => {
     const vorige = rijen
     setRijen((p) => p.map((x) => (x.id === o.id ? { ...x, status: status as ZichtbareOpdracht['status'] } : x)))
     try {
@@ -69,6 +77,18 @@ export function KantoorClient() {
       setRijen(vorige)
       toast.error(e instanceof Error ? e.message : 'Bijwerken mislukt')
     }
+  }
+
+  const verwijder = async (o: Opdracht) => {
+    setWegBezig(true)
+    try {
+      const res = await fetch(`/api/kantoor/opdrachten?id=${o.id}`, { method: 'DELETE' })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j.error ?? 'Verwijderen mislukt')
+      toast.success('Samenwerking verwijderd.')
+      setWeg(null)
+      laad(actiefId)
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt') } finally { setWegBezig(false) }
   }
 
   const actief = mijnBedrijven.find((b) => b.id === actiefId)
@@ -97,7 +117,7 @@ export function KantoorClient() {
       {/* Bedrijfswissel: info@nextgenmedia.be hoort bij zowel NextGenMedia als
           NextGenSolutions en wisselt hier, zonder tweede account. */}
       {mijnBedrijven.length > 1 && (
-        <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50">
+        <div className="inline-flex flex-wrap rounded-lg border border-gray-200 p-0.5 bg-gray-50 max-w-full">
           {mijnBedrijven.map((b) => (
             <button key={b.id} onClick={() => { setActiefId(b.id); laad(b.id) }}
               className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center gap-1.5 ${
@@ -144,7 +164,7 @@ export function KantoorClient() {
 
       <div className="relative">
         <Search className="h-4 w-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-        <input className="input-base pl-8 w-72" value={q} onChange={(e) => setQ(e.target.value)}
+        <input className="input-base pl-8 w-full sm:w-72" value={q} onChange={(e) => setQ(e.target.value)}
           placeholder="Titel, klant of partner…" />
       </div>
 
@@ -159,7 +179,9 @@ export function KantoorClient() {
         </div>
       ) : (
         <div className="space-y-2">
-          {zichtbaar.map((o) => <Rij key={o.id} o={o} onStatus={zetStatus} />)}
+          {zichtbaar.map((o) => <Rij key={o.id} o={o} onStatus={zetStatus} onBewerk={setBewerk} onVerwijder={(o) => o.status === 'afgerond'
+            ? toast.info('Deze opdracht is afgerond en telt mee in de cijfers. Zet ze eerst op Geannuleerd als ze niet doorging; daarna kun je ze verwijderen.', { duration: 9000 })
+            : setWeg(o)} />)}
         </div>
       )}
 
@@ -168,6 +190,26 @@ export function KantoorClient() {
           bedrijven={bedrijven} mijnBedrijf={actief} isAdmin={isAdmin}
           onClose={() => setNieuw(false)}
           onOpgeslagen={() => { setNieuw(false); laad(actiefId) }}
+        />
+      )}
+
+      {bewerk && (
+        <BewerkDialoog
+          o={bewerk}
+          onClose={() => setBewerk(null)}
+          onOpgeslagen={() => { setBewerk(null); laad(actiefId) }}
+        />
+      )}
+
+      {weg && (
+        <Bevestig
+          titel="Samenwerking verwijderen?"
+          tekst={<>&ldquo;{weg.titel}&rdquo; met <b>{weg.tegenpartij_naam}</b> verdwijnt definitief, ook voor {weg.tegenpartij_naam}.</>}
+          bevestigLabel="Verwijderen"
+          gevaarlijk
+          bezig={wegBezig}
+          onBevestig={() => verwijder(weg)}
+          onAnnuleer={() => setWeg(null)}
         />
       )}
     </div>
@@ -184,16 +226,21 @@ function Kaart({ label, waarde, hint, accent }: { label: string; waarde: string;
   )
 }
 
-function Rij({ o, onStatus }: { o: ZichtbareOpdracht; onStatus: (o: ZichtbareOpdracht, s: string) => void }) {
+function Rij({ o, onStatus, onBewerk, onVerwijder }: {
+  o: Opdracht
+  onStatus: (o: Opdracht, s: string) => void
+  onBewerk: (o: Opdracht) => void
+  onVerwijder: (o: Opdracht) => void
+}) {
   const status = STATUSSEN.find((s) => s.key === o.status) ?? STATUSSEN[0]
   const soort = SOORTEN.find((s) => s.key === o.soort)
 
   return (
     <div className="card-base p-3">
-      <div className="flex items-start gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-start gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium text-sm text-gray-900">{o.titel}</span>
+            <span className="font-medium text-sm text-gray-900 break-words">{o.titel}</span>
             <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${status.badge}`}>
               {status.label}
             </span>
@@ -207,32 +254,164 @@ function Rij({ o, onStatus }: { o: ZichtbareOpdracht; onStatus: (o: ZichtbareOpd
               {o.ik_ontvang ? 'van' : 'naar'} <b className="text-gray-700">{o.tegenpartij_naam}</b>
             </span>
           </div>
-          {o.omschrijving && <p className="text-xs text-gray-500 mt-1">{o.omschrijving}</p>}
+          {o.omschrijving && <p className="text-xs text-gray-500 mt-1 break-words whitespace-pre-line">{o.omschrijving}</p>}
         </div>
 
-        <div className="text-right shrink-0">
-          <div className="text-[11px] text-gray-500">{o.ik_ontvang ? 'Jij ontvangt' : 'Jij houdt over'}</div>
-          <div className="text-lg font-bold tabular-nums text-gray-900">{euro(o.mijn_bedrag_cents)}</div>
+        <div className="flex items-end justify-between gap-3 sm:block sm:text-right shrink-0">
+          <div>
+            <div className="text-[11px] text-gray-500">{o.ik_ontvang ? 'Jij ontvangt' : 'Jij houdt over'}</div>
+            <div className="text-lg font-bold tabular-nums text-gray-900">{euro(o.mijn_bedrag_cents)}</div>
+          </div>
           {/* Het totaal alleen tonen wanneer de server het meestuurde. Is het
               afgeschermd, dan zeggen we dát — geen leeg vakje dat vragen oproept. */}
           {o.totaal_cents !== null ? (
-            <div className="text-[11px] text-gray-500 flex items-center justify-end gap-1">
+            <div className="text-[11px] text-gray-500 flex items-center sm:justify-end gap-1">
               <Eye className="h-3 w-3" />totaal {euro(o.totaal_cents)}
               {o.vergoeding_pct !== null && <span>· {o.vergoeding_pct}%</span>}
             </div>
           ) : (
-            <div className="text-[11px] text-gray-400 flex items-center justify-end gap-1" title="Het totaalbedrag is niet gedeeld bij deze opdracht">
+            <div className="text-[11px] text-gray-400 flex items-center sm:justify-end gap-1" title="Het totaalbedrag is niet gedeeld bij deze opdracht">
               <EyeOff className="h-3 w-3" />totaal niet gedeeld
             </div>
           )}
         </div>
 
-        <select className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white shrink-0 self-start"
-          value={o.status} onChange={(e) => onStatus(o, e.target.value)}>
-          {STATUSSEN.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-        </select>
+        <div className="flex items-center gap-1 shrink-0 self-start">
+          <select className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white"
+            value={o.status} onChange={(e) => onStatus(o, e.target.value)} aria-label="Status">
+            {STATUSSEN.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+          </select>
+          <button onClick={() => onBewerk(o)} title="Bewerken" aria-label="Bewerken"
+            className="h-7 w-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700">
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          {o.mag_verwijderen && (
+            <button onClick={() => onVerwijder(o)} title="Verwijderen" aria-label="Verwijderen"
+              className="h-7 w-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50">
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * Een bestaande samenwerking bewerken. Titel, klant en notities mag elke
+ * partij aanpassen; bedragen en zichtbaarheid enkel wie factureert (de server
+ * dwingt dat af — hier tonen we die velden gewoon niet voor de tegenpartij).
+ */
+function BewerkDialoog({ o, onClose, onOpgeslagen }: {
+  o: Opdracht; onClose: () => void; onOpgeslagen: () => void
+}) {
+  const ikFactureer = !o.ik_ontvang
+  const [titel, setTitel] = useState(o.titel)
+  const [klant, setKlant] = useState(o.klant_naam ?? '')
+  const [omschrijving, setOmschrijving] = useState(o.omschrijving ?? '')
+  const [totaal, setTotaal] = useState<number | null>(o.totaal_cents !== null ? o.totaal_cents / 100 : null)
+  const [gebruikPct, setGebruikPct] = useState(o.vergoeding_pct !== null)
+  const [pct, setPct] = useState<number | null>(o.vergoeding_pct)
+  const [vergoeding, setVergoeding] = useState<number | null>(o.vergoeding_cents / 100)
+  const [zichtbaar, setZichtbaar] = useState(o.bedragen_zichtbaar)
+  const [bezig, setBezig] = useState(false)
+
+  const bewaar = async () => {
+    if (!titel.trim()) { toast.error('De titel mag niet leeg zijn'); return }
+    const body: Record<string, unknown> = {
+      id: o.id, titel: titel.trim(), klant_naam: klant, omschrijving,
+    }
+    if (ikFactureer) {
+      const t = totaal ?? 0
+      if (gebruikPct) {
+        if (pct === null || pct < 0 || pct > 100) { toast.error('Het percentage moet tussen 0 en 100 liggen'); return }
+        body.vergoeding_pct = pct
+      } else {
+        if ((vergoeding ?? 0) > t) { toast.error('De vergoeding kan niet hoger zijn dan het totaalbedrag'); return }
+        body.vergoeding = vergoeding ?? 0
+      }
+      body.totaal = t
+      body.bedragen_zichtbaar = zichtbaar
+    }
+    setBezig(true)
+    try {
+      const res = await fetch('/api/kantoor/opdrachten', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j.error ?? 'Opslaan mislukt')
+      toast.success('Opgeslagen.')
+      onOpgeslagen()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt') } finally { setBezig(false) }
+  }
+
+  const lbl = 'block text-xs font-medium text-gray-600 mb-1'
+
+  return (
+    <Dialoog titel="Samenwerking bewerken" onSluit={() => !bezig && onClose()}>
+      <div className="space-y-3">
+        <p className="text-xs text-gray-500">
+          {SOORTEN.find((s) => s.key === o.soort)?.label} {o.ik_ontvang ? 'van' : 'met'} <b>{o.tegenpartij_naam}</b>
+        </p>
+        <div>
+          <label className={lbl}>Titel *</label>
+          <input className={INP} value={titel} onChange={(e) => setTitel(e.target.value)} maxLength={200} />
+        </div>
+        <div>
+          <label className={lbl}>Eindklant</label>
+          <input className={INP} value={klant} onChange={(e) => setKlant(e.target.value)} maxLength={160} placeholder="Optioneel" />
+        </div>
+
+        {ikFactureer ? (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className={lbl}>Totaalbedrag (excl. btw)</label>
+                <GetalInvoer className={INP} waarde={totaal} min={0} onWaarde={setTotaal} />
+              </div>
+              <div>
+                <label className={lbl}>Vergoeding {gebruikPct ? '(%)' : '(€)'}</label>
+                {gebruikPct
+                  ? <GetalInvoer className={INP} waarde={pct} min={0} max={100} onWaarde={setPct} />
+                  : <GetalInvoer className={INP} waarde={vergoeding} min={0} onWaarde={setVergoeding} />}
+                <button type="button" onClick={() => setGebruikPct((v) => !v)}
+                  className="text-[11px] text-blue-600 hover:underline mt-1">
+                  {gebruikPct ? 'Liever een vast bedrag' : 'Liever een percentage'}
+                </button>
+              </div>
+            </div>
+            <label className="flex items-start gap-2.5 cursor-pointer rounded-lg border border-gray-200 p-3">
+              <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-[#fff848]"
+                checked={zichtbaar} onChange={(e) => setZichtbaar(e.target.checked)} />
+              <span>
+                <span className="block text-sm font-medium text-gray-900">Totaalbedrag tonen aan {o.tegenpartij_naam}</span>
+                <span className="block text-[11px] text-gray-500">
+                  {zichtbaar
+                    ? 'Zij zien het totaalbedrag en dus ook wat er voor de ander overblijft.'
+                    : 'Zij zien alleen hun eigen vergoeding, niet het totaal of de marge.'}
+                </span>
+              </span>
+            </label>
+          </>
+        ) : (
+          <p className="text-[11px] text-gray-500 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2">
+            Bedragen en zichtbaarheid past enkel {o.tegenpartij_naam} aan — dat bedrijf factureert de klant.
+          </p>
+        )}
+
+        <div>
+          <label className={lbl}>Notities</label>
+          <textarea rows={3} className={INP} value={omschrijving} onChange={(e) => setOmschrijving(e.target.value)} maxLength={4000} />
+        </div>
+
+        <div className="flex gap-2 justify-end pt-1">
+          <button type="button" onClick={onClose} disabled={bezig} className="btn-secondary">Annuleren</button>
+          <button type="button" onClick={bewaar} disabled={bezig} className="btn-primary">
+            {bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Opslaan
+          </button>
+        </div>
+      </div>
+    </Dialoog>
   )
 }
 
@@ -344,7 +523,7 @@ function NieuwDialoog({ bedrijven, mijnBedrijf, isAdmin, onClose, onOpgeslagen }
               placeholder="Naam van de eindklant — optioneel" maxLength={160} />
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Totaalbedrag (excl. btw)</label>
               <input className="input-base" value={totaal} onChange={(e) => setTotaal(e.target.value)}
