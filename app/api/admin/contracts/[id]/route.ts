@@ -106,6 +106,49 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       })
       try { revalidatePath('/admin/contracts'); revalidatePath(`/admin/contracts/${id}`) } catch { }
       return NextResponse.json({ ok: true, start_date, end_date })
+    } else if (action === 'gegevens') {
+      // Titel, klant, dienst, ondertekenaar en contractduur aanpassen. Bij een
+      // getekend contract blijven de ondertekening en het archief ongewijzigd;
+      // enkel de gegevens in de app veranderen (met logboek).
+      const { data: oud } = await admin.from('contracts').select('title, client_id, service_slug, signer_name, signer_email, duration_type, status').eq('id', id).maybeSingle()
+      if (!oud) return NextResponse.json({ error: 'Contract niet gevonden' }, { status: 404 })
+      const heeft = (k: string) => Object.prototype.hasOwnProperty.call(body, k)
+      const txt = (v: unknown, max: number) => { const t = String(v ?? '').trim(); return t ? t.slice(0, max) : null }
+      const patch: Record<string, unknown> = {}
+      if (heeft('title')) { const t = txt(body.title, 300); if (!t) return NextResponse.json({ error: 'Een contract heeft een titel nodig.' }, { status: 400 }); patch.title = t }
+      if (heeft('client_id')) patch.client_id = /^[0-9a-f-]{36}$/i.test(String(body.client_id ?? '')) ? body.client_id : null
+      if (heeft('service_slug')) patch.service_slug = txt(body.service_slug, 100)
+      if (heeft('signer_name')) patch.signer_name = txt(body.signer_name, 200)
+      if (heeft('signer_email')) {
+        const e = txt(body.signer_email, 200)
+        if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return NextResponse.json({ error: 'Ongeldig e-mailadres van de ondertekenaar.' }, { status: 400 })
+        patch.signer_email = e
+      }
+      if (heeft('duration_type')) patch.duration_type = txt(body.duration_type, 50)
+      const gewijzigd = Object.keys(patch).filter((k) => (oud as Record<string, unknown>)[k] !== patch[k])
+      if (!gewijzigd.length) return NextResponse.json({ ok: true })
+      const p = Object.fromEntries(gewijzigd.map((k) => [k, patch[k]]))
+      for (let i = 0; i < 4; i++) {
+        const { error } = await admin.from('contracts').update(p).eq('id', id)
+        if (!error) break
+        const col = String(error.message || '').match(/Could not find the '([^']+)' column/)?.[1]
+        if (col && col in p) { delete p[col]; continue }
+        throw new Error(error.message)
+      }
+      const oudW = Object.fromEntries(gewijzigd.map((k) => [k, (oud as Record<string, unknown>)[k] ?? null]))
+      await logContractEvent(admin, id, 'fields_edited', { actor: user.email ?? user.id, meta: { veld: 'gegevens', oud: oudW, nieuw: p } })
+      const m = requestMeta(req)
+      await logAudit({
+        action: 'contract.gegevens', entityType: 'contract', entityId: id,
+        summary: `Gegevens van "${oud.title}" aangepast (${gewijzigd.join(', ')})`,
+        actorUserId: user.id, actorEmail: user.email ?? null, actorRole: 'admin',
+        metadata: { oud: oudW, nieuw: p }, ip: m.ip, userAgent: m.userAgent,
+      })
+      try {
+        revalidatePath('/admin/contracts'); revalidatePath(`/admin/contracts/${id}`)
+        for (const c of new Set([oud.client_id, p.client_id as string | null | undefined])) if (c) revalidatePath(`/admin/clients/${c}`)
+      } catch { }
+      return NextResponse.json({ ok: true })
     } else if (action === 'contract_type') {
       // Contracttype aanpassen vanaf het detailscherm. Leeg → 'Niet toegewezen',
       // zodat een contract nooit zonder type staat.

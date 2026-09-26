@@ -143,3 +143,31 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
 }
+
+/**
+ * DELETE ?reden — gelogde uren definitief verwijderen (bv. dubbel of per
+ * vergissing geregistreerd). Reden verplicht; de volledige oude sessie gaat
+ * naar de auditlog. Waren de uren goedgekeurd, dan wordt de personeelskost van
+ * die maand in Financiën meteen herberekend.
+ */
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { id } = await params
+    if (!isUuid(id)) return NextResponse.json({ error: 'Ongeldig id' }, { status: 400 })
+    const g = await eisPersoneel('aanpassen'); if (!g.ok) return g.response
+    const { admin, persoon } = g
+    const reden = tekst(req.nextUrl.searchParams.get('reden'), 1000)
+    if (!reden) return NextResponse.json({ error: 'Geef een reden om deze uren te verwijderen.' }, { status: 400 })
+    const { data: s } = await admin.from('personeel_sessies').select('*').eq('id', id).maybeSingle()
+    if (!s) return NextResponse.json({ error: 'Sessie niet gevonden' }, { status: 404 })
+    const { error } = await admin.from('personeel_sessies').delete().eq('id', id)
+    if (error) throw new Error(error.message)
+    await audit(admin, { personeel_id: s.personeel_id, entiteit: 'sessie', entiteit_id: id, actie: 'sessie_verwijderd', oud: { ...s, minuten: gewerkteMinuten(s) }, nieuw: null, reden, actor_email: persoon.email, actor_id: persoon.userId })
+    let boeking: string | null = null
+    if (s.status === 'goedgekeurd') boeking = (await herboekMaand(admin, s.personeel_id, dagBrussel(s.start_at).slice(0, 7), persoon.email, `Goedgekeurde uren verwijderd: ${reden}`)).actie
+    await meld(admin, { personeel_id: s.personeel_id, event: 'uren_afgekeurd', titel: 'Een urenregistratie werd verwijderd', tekst: `Je sessie van ${dagBrussel(s.start_at).split('-').reverse().join('/')} ${uurBrussel(s.start_at)} werd verwijderd. Reden: ${reden}`, link: '/team/uren' })
+    return NextResponse.json({ ok: true, boeking })
+  } catch (err) {
+    return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
+  }
+}

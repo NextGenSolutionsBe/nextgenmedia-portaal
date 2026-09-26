@@ -22,6 +22,7 @@ import { LooptijdDetail } from '../looptijd'
 import { typeVanContract, isNietToegewezen } from '@/lib/contracten/types'
 import { baseUrl } from '@/lib/email'
 import { leesActorNamen } from '@/lib/actor-namen'
+import { ContractGegevens } from './contract-gegevens'
 
 async function getContract(id: string) {
   try {
@@ -51,11 +52,13 @@ async function getContract(id: string) {
       // Nieuwste archiefversie (certificaatnummer, datum) — enkel relevant als getekend.
       isSigned ? laatsteArchief(admin, contract.id).catch(() => null) : Promise.resolve(null),
     ])
+    const { data: klantenLijst } = await admin.from('clients').select('id, company_name').order('company_name').limit(2000)
     const aangemaaktDoor = contract.created_by ? (await leesActorNamen(admin, [contract.created_by]))[contract.created_by]?.naam ?? null : null
 
     return {
       contract,
       aangemaaktDoor,
+      klantenLijst: (klantenLijst ?? []) as { id: string; company_name: string }[],
       clientName: clientRowResult.data?.company_name ?? null,
       clientId: clientRowResult.data?.id ?? null,
       clientBtw: (clientRowResult.data as { btw_nummer?: string | null } | null)?.btw_nummer ?? null,
@@ -110,6 +113,8 @@ export default async function ContractDetailPage({ params }: { params: { id: str
           )}
         </div>
         <div className="flex items-center gap-2 flex-wrap shrink-0">
+          <ContractGegevens contractId={c.id} isSigned={!!isSigned} klanten={data.klantenLijst}
+            begin={{ title: c.title, client_id: c.client_id ?? null, service_slug: c.service_slug ?? null, signer_name: c.signer_name ?? null, signer_email: c.signer_email ?? null, duration_type: c.duration_type ?? null }} />
           {!isSigned && statusKey !== 'geannuleerd' && (
             <ContractMailButton
               contractId={c.id}

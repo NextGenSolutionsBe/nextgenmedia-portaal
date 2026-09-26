@@ -441,7 +441,7 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum, start
       )}
 
       {dag && <DagPaneel datum={dag} momenten={perDag.get(dag) ?? []} onSluit={() => setDag(null)} onKies={(m) => { setDag(null); setGeselecteerd(m.id) }} onNieuw={(d) => { setDag(null); setEditor({ datum: d }) }} />}
-      {geselecteerdMoment && <PlannerDetail moment={geselecteerdMoment} onSluit={() => setGeselecteerd(null)} onActie={vraagOfVoerUit} bezig={bezig} onOpenFactuur={(id) => setEditor({ invoiceId: id })} />}
+      {geselecteerdMoment && <PlannerDetail moment={geselecteerdMoment} onSluit={() => setGeselecteerd(null)} onActie={vraagOfVoerUit} bezig={bezig} onOpenFactuur={(id) => setEditor({ invoiceId: id })} onGewijzigd={ververs} />}
       {kostenVan && (
         <KostenEnWinstDialoog
           factuur={kostenVan.bron === 'invoice' ? { invoice_id: kostenVan.bronId } : { recurring_id: kostenVan.bronId, maand: kostenVan.maand }}

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { X, RotateCcw, Send, CalendarClock, Ban, Eye, Pencil, FilePlus2, Loader2, AlertTriangle, Repeat, Plus, Wallet } from 'lucide-react'
 import { Bevestig, INP } from '@/app/admin/instellingen/ui'
 import { STATUS_INFO, HERKOMST_LABEL, datumLang, datumNl, euro2, isDatum, type Moment } from '@/lib/facturatie/planner-model'
+import { ReeksBewerken, MaandBedrag } from './reeks-bewerken'
 
 export type Actie = 'verstuurd' | 'verplaats' | 'annuleer' | 'heropen' | 'betaald' | 'onbetaald'
 export type ActieUitvoerder = (actie: Actie, moment: Moment, extra?: { datum?: string }) => Promise<boolean>
@@ -39,11 +40,15 @@ function Lade({ titel, onSluit, children, breed }: { titel: ReactNode; onSluit: 
 }
 
 /** Detailpaneel van één facturatiemoment, met enkel de acties die van toepassing zijn. */
-export function PlannerDetail({ moment: m, onSluit, onActie, bezig, onOpenFactuur }: { moment: Moment; onSluit: () => void; onActie: ActieUitvoerder; bezig: boolean; onOpenFactuur?: (invoiceId: string) => void }) {
+export function PlannerDetail({ moment: m, onSluit, onActie, bezig, onOpenFactuur, onGewijzigd }: { moment: Moment; onSluit: () => void; onActie: ActieUitvoerder; bezig: boolean; onOpenFactuur?: (invoiceId: string) => void; onGewijzigd?: () => void }) {
   const isFactuur = m.bron === 'invoice' && !!m.invoice_id && !!onOpenFactuur
   const [verplaatsen, setVerplaatsen] = useState(false)
   const [nieuweDatum, setNieuweDatum] = useState(m.datum)
   const [vraagAnnuleer, setVraagAnnuleer] = useState(false)
+  const [reeks, setReeks] = useState(false)
+  const [maandBedrag, setMaandBedrag] = useState(false)
+  const isReeks = m.bron === 'recurring' && !!m.recurring_id
+  const maandOpen = isReeks && !['verstuurd', 'betaald', 'geannuleerd', 'gecrediteerd'].includes(m.status) && !m.invoice_id
   const a = m.acties
 
   return (
@@ -86,7 +91,9 @@ export function PlannerDetail({ moment: m, onSluit, onActie, bezig, onOpenFactuu
         <div className="flex flex-wrap gap-2">
           {isFactuur && <button type="button" onClick={() => onOpenFactuur!(m.invoice_id!)} className="btn-primary text-xs"><Pencil className="h-3.5 w-3.5" />{m.status === 'te_versturen' || m.status === 'gepland' ? 'Factuur openen en bewerken' : 'Factuur openen'}</button>}
           {!isFactuur && a.bekijkenUrl && <Link href={a.bekijkenUrl} prefetch={false} className="btn-secondary text-xs"><Eye className="h-3.5 w-3.5" />Bekijken</Link>}
-          {!isFactuur && a.aanpassenUrl && <Link href={a.aanpassenUrl} prefetch={false} className="btn-secondary text-xs"><Pencil className="h-3.5 w-3.5" />Aanpassen</Link>}
+          {isReeks && <button type="button" onClick={() => setReeks(true)} className="btn-primary text-xs"><Repeat className="h-3.5 w-3.5" />Reeks bewerken</button>}
+          {maandOpen && <button type="button" onClick={() => setMaandBedrag((x) => !x)} className="btn-secondary text-xs"><Pencil className="h-3.5 w-3.5" />Bedrag deze maand</button>}
+          {!isFactuur && !isReeks && a.aanpassenUrl && <Link href={a.aanpassenUrl} prefetch={false} className="btn-secondary text-xs"><Pencil className="h-3.5 w-3.5" />Aanpassen</Link>}
           {a.voorbereidenUrl && <Link href={a.voorbereidenUrl} prefetch={false} className="btn-secondary text-xs"><FilePlus2 className="h-3.5 w-3.5" />Factuur voorbereiden</Link>}
           {a.kanVerstuurd && <button type="button" disabled={bezig} onClick={() => onActie('verstuurd', m)} className="btn-primary text-xs">{bezig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}Markeren als verstuurd</button>}
           {(m.bron === 'invoice' || m.bron === 'recurring') && m.status === 'verstuurd' && <button type="button" disabled={bezig} onClick={() => onActie('betaald', m)} className="btn-primary text-xs bg-emerald-700 hover:bg-emerald-800 text-white border-emerald-700"><Wallet className="h-3.5 w-3.5" />Markeren als betaald</button>}
@@ -95,6 +102,7 @@ export function PlannerDetail({ moment: m, onSluit, onActie, bezig, onOpenFactuu
           {(m.bron === 'invoice' || m.bron === 'recurring') && ['verstuurd', 'betaald', 'geannuleerd', 'gecrediteerd'].includes(m.status) && <button type="button" disabled={bezig} onClick={() => onActie('heropen', m)} className="btn-secondary text-xs"><RotateCcw className="h-3.5 w-3.5" />Terug naar te factureren</button>}
           {a.kanAnnuleren && <button type="button" disabled={bezig} onClick={() => setVraagAnnuleer(true)} className="btn-secondary text-xs text-red-600"><Ban className="h-3.5 w-3.5" />Annuleren</button>}
         </div>
+        {maandBedrag && maandOpen && <MaandBedrag m={m} onKlaar={() => { setMaandBedrag(false); onGewijzigd?.(); onSluit() }} />}
         {verplaatsen && (
           <div className="rounded-xl border border-gray-200 p-3 flex items-end gap-2 flex-wrap">
             <div className="flex-1 min-w-[160px]">
@@ -109,6 +117,7 @@ export function PlannerDetail({ moment: m, onSluit, onActie, bezig, onOpenFactuu
         {!a.kanVerstuurd && !a.kanVerplaatsen && !a.kanAnnuleren && m.bron === 'wam' && <p className="text-[11px] text-gray-500">WAM-termijnen beheer je in Vesting → WAM-portefeuille.</p>}
       </div>
 
+      {reeks && m.recurring_id && <ReeksBewerken recurringId={m.recurring_id} onSluit={() => setReeks(false)} onKlaar={() => { setReeks(false); onGewijzigd?.(); onSluit() }} />}
       {vraagAnnuleer && (
         <Bevestig titel="Facturatieopdracht annuleren" gevaarlijk bezig={bezig} bevestigLabel="Ja, annuleren"
           tekst={<>Je annuleert de facturatie van <b>{m.klant}</b> op {datumNl(m.datum)} ({euro2(m.bedrag_excl)} excl. btw). Het item verdwijnt uit de standaardplanner maar blijft in de geschiedenis.</>}

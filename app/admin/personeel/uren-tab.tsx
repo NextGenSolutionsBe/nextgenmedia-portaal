@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Loader2, Check, X, MessageSquareWarning, Pencil, Plus, RotateCcw, Square, ChevronDown, StickyNote } from 'lucide-react'
+import { Loader2, Check, X, MessageSquareWarning, Pencil, Plus, RotateCcw, Square, ChevronDown, StickyNote, Trash2 } from 'lucide-react'
 import { Dialoog } from '@/app/admin/instellingen/ui'
 import { api, Chip, datumNl, uurNl, duur, dagVanIso, euro, naarLokaal, vanLokaal, INP, LBL, LinksLijst, type LinkItem } from '@/components/personeel/ui'
 import { SESSIE_STATUS, type SessieStatus } from '@/lib/personeel/model'
@@ -12,9 +12,9 @@ type Sessie = {
   id: string; personeel_id: string; medewerker: string; start_at: string; eind_at: string | null; pauzes: Pauze[]; status: SessieStatus
   project: string | null; taak: string | null; klant: string | null; client_id: string | null; verslag: Record<string, string | null>; links: LinkItem[]
   admin_opmerking: string | null; correctie_vraag: string | null; beoordeeld_door: string | null; beoordeeld_op: string | null; minuten: number
-  kost_bedrag?: number | null; kost_per_uur?: number | null; bron?: string
+  kost_bedrag?: number | null; kost_per_uur?: number | null; bron?: string; opdracht_id?: string | null
 }
-type Actie = 'goedkeuren' | 'afkeuren' | 'correctie' | 'corrigeren' | 'heropenen' | 'stoppen' | 'opmerking'
+type Actie = 'goedkeuren' | 'afkeuren' | 'correctie' | 'corrigeren' | 'heropenen' | 'stoppen' | 'opmerking' | 'verwijderen'
 
 const VERSLAG: [string, string][] = [['project', 'Project'], ['taak', 'Taak'], ['content', "Video's/content"], ['goed', 'Wat ging goed'], ['mis', 'Wat liep mis'], ['todo', 'Nog te doen'], ['blokkades', 'Blokkades/vragen']]
 
@@ -93,6 +93,7 @@ export function UrenTab({ personeelId }: { personeelId?: string }) {
                           {!['afgekeurd', 'actief'].includes(s.status) && <button type="button" onClick={() => setDialoog({ actie: 'afkeuren', s })} className="btn-secondary text-xs text-red-600"><X className="h-3 w-3" />Afkeuren</button>}
                           {s.status === 'goedgekeurd' && <button type="button" onClick={() => setDialoog({ actie: 'heropenen', s })} className="btn-secondary text-xs"><RotateCcw className="h-3 w-3" />Goedkeuring terugdraaien</button>}
                           <button type="button" onClick={() => setDialoog({ actie: 'opmerking', s })} className="btn-secondary text-xs"><StickyNote className="h-3 w-3" />Interne opmerking</button>
+                          <button type="button" onClick={() => setDialoog({ actie: 'verwijderen', s })} className="btn-secondary text-xs text-red-600"><Trash2 className="h-3 w-3" />Verwijderen</button>
                         </div>
                       </div>
                     </div>
@@ -115,16 +116,33 @@ function ActieDialoog({ actie, s, onSluit, onKlaar }: { actie: Actie; s: Sessie;
   const [pauzes, setPauzes] = useState((s.pauzes ?? []).map((p) => ({ start: naarLokaal(p.start), eind: naarLokaal(p.eind ?? s.eind_at ?? new Date().toISOString()) })))
   const [project, setProject] = useState(s.project ?? '')
   const [taak, setTaak] = useState(s.taak ?? '')
+  const [klant, setKlant] = useState(s.client_id ?? '')
+  const [opdracht, setOpdracht] = useState(s.opdracht_id ?? '')
+  const [keuzes, setKeuzes] = useState<{ klanten: { id: string; company_name: string }[]; opdrachten: { id: string; titel: string; client_id: string | null }[] } | null>(null)
+  useEffect(() => {
+    if (actie !== 'corrigeren') return
+    const d = dagVanIso(s.start_at)
+    api<{ klanten: { id: string; company_name: string }[]; opdrachten: { id: string; titel: string; client_id: string | null }[] }>(`/api/admin/personeel/planning?van=${d}&tot=${d}&personeel_id=${s.personeel_id}`)
+      .then((r) => setKeuzes({ klanten: r.klanten, opdrachten: r.opdrachten })).catch(() => setKeuzes({ klanten: [], opdrachten: [] }))
+  }, [actie, s.start_at, s.personeel_id])
   const [bezig, setBezig] = useState(false)
-  const titel = { goedkeuren: 'Goedkeuren', afkeuren: 'Uren afkeuren', correctie: 'Correctie vragen aan de medewerker', corrigeren: 'Sessie corrigeren', heropenen: 'Goedkeuring terugdraaien', stoppen: 'Vergeten sessie afsluiten', opmerking: 'Interne opmerking' }[actie]
+  const titel = { goedkeuren: 'Goedkeuren', afkeuren: 'Uren afkeuren', correctie: 'Correctie vragen aan de medewerker', corrigeren: 'Sessie corrigeren', heropenen: 'Goedkeuring terugdraaien', stoppen: 'Vergeten sessie afsluiten', opmerking: 'Interne opmerking', verwijderen: 'Uren verwijderen' }[actie]
   const verplicht = actie !== 'opmerking'
   const verstuur = async () => {
     if (verplicht && !reden.trim()) { toast.error(actie === 'correctie' ? 'Schrijf wat er aangepast moet worden.' : 'Geef een reden.'); return }
     setBezig(true)
+    if (actie === 'verwijderen') {
+      try {
+        await api(`/api/admin/personeel/sessies/${s.id}?reden=${encodeURIComponent(reden)}`, { method: 'DELETE' })
+        toast.success(s.status === 'goedgekeurd' ? 'Uren verwijderd — de kost in Financiën is herberekend.' : 'Uren verwijderd.'); onKlaar()
+      } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(false) }
+      return
+    }
     try {
       const body: Record<string, unknown> = { actie, reden, vraag: reden, opmerking: reden }
       if (actie === 'corrigeren') {
         body.start_at = vanLokaal(start); body.eind_at = vanLokaal(eind); body.project = project; body.taak = taak
+        if (keuzes) { body.client_id = klant || null; body.opdracht_id = opdracht || null }
         body.pauzes = pauzes.map((p) => ({ start: vanLokaal(p.start), eind: vanLokaal(p.eind) }))
       }
       if (actie === 'stoppen') body.eind_at = vanLokaal(eind)
@@ -143,6 +161,8 @@ function ActieDialoog({ actie, s, onSluit, onKlaar }: { actie: Actie; s: Sessie;
               <div><label className={LBL}>Einde</label><input type="datetime-local" className={INP} value={eind} onChange={(e) => setEind(e.target.value)} /></div>
               <div><label className={LBL}>Project</label><input className={INP} value={project} onChange={(e) => setProject(e.target.value)} /></div>
               <div><label className={LBL}>Taak</label><input className={INP} value={taak} onChange={(e) => setTaak(e.target.value)} /></div>
+              <div><label className={LBL}>Klant</label><select className={INP} value={klant} disabled={!keuzes} onChange={(e) => { setKlant(e.target.value); setOpdracht('') }}><option value="">Geen klant</option>{(keuzes?.klanten ?? []).map((k) => <option key={k.id} value={k.id}>{k.company_name}</option>)}</select></div>
+              <div><label className={LBL}>Opdracht</label><select className={INP} value={opdracht} disabled={!keuzes} onChange={(e) => setOpdracht(e.target.value)}><option value="">—</option>{(keuzes?.opdrachten ?? []).filter((o) => !klant || o.client_id === klant).map((o) => <option key={o.id} value={o.id}>{o.titel}</option>)}</select></div>
             </div>
             <div className="space-y-1.5">
               <div className={LBL}>Pauzes</div>
@@ -159,8 +179,9 @@ function ActieDialoog({ actie, s, onSluit, onKlaar }: { actie: Actie; s: Sessie;
         )}
         {actie === 'stoppen' && <div><label className={LBL}>Einduur</label><input type="datetime-local" className={INP} value={eind} onChange={(e) => setEind(e.target.value)} /></div>}
         <div><label className={LBL}>{actie === 'correctie' ? 'Wat moet de medewerker aanpassen? *' : actie === 'opmerking' ? 'Opmerking (nooit zichtbaar voor de medewerker)' : 'Reden *'}</label><textarea rows={3} className={INP} value={reden} onChange={(e) => setReden(e.target.value)} /></div>
-        {actie !== 'opmerking' && <p className="text-[11px] text-gray-500">De oorspronkelijke en nieuwe waarden, de reden, het tijdstip en jouw naam komen in het logboek.{actie === 'corrigeren' || actie === 'heropenen' || actie === 'afkeuren' ? ' Was de sessie goedgekeurd, dan wordt de kost in Financiën automatisch gecorrigeerd (met een nieuwe versie).' : ''}</p>}
-        <div className="flex justify-end gap-2"><button type="button" onClick={onSluit} className="btn-secondary">Annuleren</button><button type="button" disabled={bezig} onClick={verstuur} className={actie === 'afkeuren' ? 'btn-danger' : 'btn-primary'}>{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Bevestigen</button></div>
+        {actie === 'verwijderen' && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-2.5">Deze registratie ({duur(s.minuten)}) wordt definitief verwijderd. {s.status === 'goedgekeurd' ? 'Ze was goedgekeurd: de personeelskost van die maand in Financiën wordt meteen herberekend.' : 'Ze telde nog niet mee in de kosten.'} De medewerker krijgt een melding; alles blijft in het logboek.</p>}
+        {actie !== 'opmerking' && actie !== 'verwijderen' && <p className="text-[11px] text-gray-500">De oorspronkelijke en nieuwe waarden, de reden, het tijdstip en jouw naam komen in het logboek.{actie === 'corrigeren' || actie === 'heropenen' || actie === 'afkeuren' ? ' Was de sessie goedgekeurd, dan wordt de kost in Financiën automatisch gecorrigeerd (met een nieuwe versie).' : ''}</p>}
+        <div className="flex justify-end gap-2"><button type="button" onClick={onSluit} className="btn-secondary">Annuleren</button><button type="button" disabled={bezig} onClick={verstuur} className={actie === 'afkeuren' || actie === 'verwijderen' ? 'btn-danger' : 'btn-primary'}>{bezig && <Loader2 className="h-4 w-4 animate-spin" />}{actie === 'verwijderen' ? 'Definitief verwijderen' : 'Bevestigen'}</button></div>
       </div>
     </Dialoog>
   )

@@ -8,6 +8,7 @@ import { vandaagBrussel, isDatum, ontleedSleutel, ymVan } from '@/lib/facturatie
 import { zetMaandStatus, ANNULERING_OPMERKING } from '@/lib/facturatie/recurring'
 import { billingDateFor, inclFromExcl } from '@/lib/invoices'
 import { kostenPerFactuur, rijSleutel } from '@/lib/facturen/kosten-data'
+import { leesGetal } from '@/lib/getal'
 import { leesActorNamen } from '@/lib/actor-namen'
 
 export const dynamic = 'force-dynamic'
@@ -76,7 +77,7 @@ export async function POST(req: NextRequest) {
   try {
     const actor = await requireStaff()
     if (!actor) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
-    const b = (await req.json().catch(() => null)) as { actie?: string; id?: string; datum?: string; reden?: string } | null
+    const b = (await req.json().catch(() => null)) as { actie?: string; id?: string; datum?: string; reden?: string; bedrag_excl?: unknown; btw_pct?: unknown; opmerking?: unknown } | null
     const sleutel = b?.id ? ontleedSleutel(b.id) : null
     if (!b || !sleutel) return NextResponse.json({ error: 'Onbekend planneritem.' }, { status: 400 })
     const admin = createAdminSupabaseClient()
@@ -157,6 +158,24 @@ export async function POST(req: NextRequest) {
       const { data: rij } = await admin.from('recurring_invoice_months').select('*').eq('recurring_id', rec.id).eq('month', sleutel.maand).maybeSingle()
       const definitief = rij && (rij.status === 'verstuurd' || rij.status === 'betaald' || rij.invoice_id)
       const huidigeDatum: string = rij?.billing_date ?? billingDateFor(sleutel.maand, rec.invoice_day)
+      if (b.actie === 'bedrag') {
+        // Eigen bedrag voor één maand (bv. extra werk of korting); null = terug naar het reeksbedrag.
+        if (definitief) return NextResponse.json({ error: 'Deze maand is al verstuurd of gefactureerd; pas het bedrag aan via de factuur zelf.' }, { status: 400 })
+        const terug = b.bedrag_excl === null || b.bedrag_excl === ''
+        const excl = terug ? null : leesGetal(b.bedrag_excl)
+        const vat = terug ? null : (b.btw_pct === undefined || b.btw_pct === '' ? Number(rec.vat_pct ?? 21) : leesGetal(b.btw_pct))
+        if (!terug && (excl === null || excl < 0)) return NextResponse.json({ error: 'Geef een geldig bedrag (bv. 1250,50).' }, { status: 400 })
+        if (!terug && (vat === null || vat < 0 || vat > 100)) return NextResponse.json({ error: 'Btw moet tussen 0 en 100 % liggen.' }, { status: 400 })
+        const r: Record<string, unknown> = {
+          recurring_id: rec.id, month: sleutel.maand, status: rij?.status ?? 'te_versturen', billing_date: huidigeDatum,
+          amount_excl: excl, vat_pct: vat, amount_incl: excl === null || vat === null ? null : inclFromExcl(excl, vat),
+        }
+        if (b.opmerking !== undefined) r.note = String(b.opmerking ?? '').trim().slice(0, 1000) || null
+        const { error } = await admin.from('recurring_invoice_months').upsert(r, { onConflict: 'recurring_id,month' })
+        if (error) throw new Error(error.message)
+        await audit(terug ? `Bedrag maand ${sleutel.maand} terug naar reeksbedrag` : `Bedrag maand ${sleutel.maand} aangepast naar € ${excl}`, { oud: rij?.amount_excl ?? rec.amount_excl, nieuw: excl })
+        klaar(); return NextResponse.json({ ok: true, waarschuwingen })
+      }
       if (b.actie === 'annuleer') {
         if (definitief) return NextResponse.json({ error: NIET_TE_ANNULEREN }, { status: 400 })
         await zetMaandStatus(admin, rec.id, sleutel.maand, 'geannuleerd', { id: actor.id, email: actor.email ?? null })
