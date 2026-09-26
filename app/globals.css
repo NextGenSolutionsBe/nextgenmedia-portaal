@@ -188,6 +188,77 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+/* Tabellen als kaarten op telefoon — zie components/ui/kaart-tabel.tsx */
+@media (max-width: 767px) {
+  .kaart-tabel table,
+  .kaart-tabel tbody,
+  .kaart-tabel tfoot,
+  .kaart-tabel tr,
+  .kaart-tabel td {
+    display: block;
+    width: 100%;
+  }
+  .kaart-tabel table {
+    min-width: 0 !important;
+  }
+  .kaart-tabel thead {
+    display: none;
+  }
+  .kaart-tabel tbody tr,
+  .kaart-tabel tfoot tr {
+    background: #fff;
+    border: 1px solid rgb(229 231 235);
+    border-radius: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+  .kaart-tabel tfoot tr {
+    background: rgb(249 250 251);
+  }
+  .kaart-tabel td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.2rem 0 !important;
+    border: 0 !important;
+    text-align: right !important;
+    white-space: normal !important;
+    min-width: 0;
+  }
+  .kaart-tabel td::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    max-width: 50%;
+    font-size: 11px;
+    font-weight: 500;
+    color: rgb(107 114 128);
+    text-align: left;
+  }
+  .kaart-tabel td[data-label='']::before {
+    display: none;
+  }
+  /* De eerste cel is de titel van de kaart */
+  .kaart-tabel td:first-child {
+    justify-content: flex-start;
+    text-align: left !important;
+    font-weight: 600;
+    padding-bottom: 0.35rem !important;
+  }
+  .kaart-tabel td:first-child::before {
+    display: none;
+  }
+  /* Lege cellen niet tonen */
+  .kaart-tabel td:empty {
+    display: none;
+  }
+  /* Tabel-wrappers hoeven niet meer zijwaarts te scrollen en geen kader te hebben */
+  .kaart-tabel .table-wrap,
+  .kaart-tabel .overflow-x-auto {
+    overflow: visible;
+  }
+}
+
 /* ── Scrollbar ────────────────────────────────────────────────────────────── */
 /* Scrollbar */
 ::-webkit-scrollbar {

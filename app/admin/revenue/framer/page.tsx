@@ -1,5 +1,7 @@
 'use client'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
+
 import { leesGetal } from '@/lib/getal'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
@@ -195,7 +197,7 @@ export default function FramerPage() {
 
   const Tabel = ({ rijen }: { rijen: Site[] }) => (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm min-w-[680px]">
+      <KaartTabel><table className="w-full text-sm min-w-[680px]">
         <thead>
           <tr className="border-b border-gray-100">
             <th className="text-left py-2 text-xs text-gray-500 font-medium">Site</th>
@@ -209,7 +211,7 @@ export default function FramerPage() {
         <tbody className="divide-y divide-gray-50">
           {rijen.map((s) => <Rij key={s.id} s={s} />)}
         </tbody>
-      </table>
+      </table></KaartTabel>
     </div>
   )
 

@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { formatEuro, formatDate, SERVICE_LABELS } from '@/lib/utils'
 import { FileText, Hourglass, Repeat2, CalendarClock } from 'lucide-react'
@@ -62,7 +63,7 @@ export default async function ContractwaardePage({ searchParams }: { searchParam
           <p className="text-sm text-gray-400 text-center py-8">Geen contracten die binnenkort aflopen</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[480px]">
+            <KaartTabel><table className="w-full text-sm min-w-[480px]">
               <thead><tr className="border-b border-gray-100">
                 <th className="text-left py-2 text-xs text-gray-500 font-medium">Klant</th>
                 <th className="text-left py-2 text-xs text-gray-500 font-medium">Dienst</th>
@@ -87,7 +88,7 @@ export default async function ContractwaardePage({ searchParams }: { searchParam
                   )
                 })}
               </tbody>
-            </table>
+            </table></KaartTabel>
           </div>
         )}
       </div>

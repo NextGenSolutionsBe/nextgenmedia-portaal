@@ -3,15 +3,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
-import { X, Loader2, Save, MapPin, Home, Flag, Clock } from 'lucide-react'
+import { X, Loader2, Save, MapPin, Home, Flag, Clock, Check, Ban } from 'lucide-react'
 import { Kalender, kalenderBereik, sessieSoort, beschikbaarheidSoort, type KalItem, type Weergave } from '@/components/personeel/kalender'
 import { api, Chip, datumNl, kortUur, uurNl, dagVanIso, vandaagBE, INP, LBL, LinksLijst, type LinkItem } from '@/components/personeel/ui'
 import { WERKSTATUS, type Werkstatus } from '@/lib/personeel/model'
+import { bevestigingVan, BEVESTIGING_INFO } from '@/lib/personeel/planning'
 
 type Blok = {
   id: string; datum: string; start_tijd: string; eind_tijd: string; project: string | null; taak: string | null; klant: string | null; opdracht: string | null
   briefing: string | null; deliverables: string | null; links: LinkItem[]; deadline: string | null; prioriteit: string | null; verwachte_duur_min: number | null
   locatie: string | null; thuiswerk: boolean; status: string; werkstatus: Werkstatus; voortgang: string | null
+  bevestiging: string | null; bevestiging_reden: string | null
 }
 type Data = {
   planning: Blok[]
@@ -36,16 +38,28 @@ export function TeamPlanning() {
   const items = useMemo<KalItem[]>(() => {
     if (!data) return []
     const uit: KalItem[] = []
-    for (const p of data.planning) uit.push({ id: `p${p.id}`, datum: p.datum, start: kortUur(p.start_tijd), eind: kortUur(p.eind_tijd), titel: p.taak ?? p.project ?? 'Werkblok', sub: [p.klant, p.thuiswerk ? 'Thuiswerk' : p.locatie].filter(Boolean).join(' · '), soort: p.status === 'geannuleerd' ? 'planning_afgewezen' : 'planning', onClick: () => setOpen(p.id) })
+    for (const p of data.planning) uit.push({ id: `p${p.id}`, datum: p.datum, start: kortUur(p.start_tijd), eind: kortUur(p.eind_tijd), titel: p.taak ?? p.project ?? 'Werkblok', sub: [p.klant, p.thuiswerk ? 'Thuiswerk' : p.locatie].filter(Boolean).join(' · '), soort: p.status === 'geannuleerd' || bevestigingVan(p) === 'geweigerd' ? 'planning_afgewezen' : bevestigingVan(p) === 'te_bevestigen' ? 'planning_te_bevestigen' : 'planning', onClick: () => setOpen(p.id) })
     for (const b of data.beschikbaarheid) { const s = beschikbaarheidSoort(b.status); if (s) uit.push({ id: `b${b.id}`, datum: b.datum, start: kortUur(b.start_tijd), eind: kortUur(b.eind_tijd), titel: b.status === 'afgewezen' ? 'Niet ingepland' : 'Beschikbaar', soort: s }) }
     for (const s of data.sessies) uit.push({ id: `s${s.id}`, datum: dagVanIso(s.start_at), start: uurNl(s.start_at), eind: s.eind_at ? uurNl(s.eind_at) : '…', titel: s.taak ?? s.project ?? 'Werksessie', soort: sessieSoort(s.status) })
     return uit
   }, [data])
 
   const blok = data?.planning.find((p) => p.id === open) ?? null
+  const teBevestigen = (data?.planning ?? []).filter((p) => p.status !== 'geannuleerd' && bevestigingVan(p) === 'te_bevestigen')
   return (
     <div className="space-y-3">
       <h1 className="text-lg font-bold">Mijn planning</h1>
+      {teBevestigen.length > 0 && (
+        <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 space-y-2">
+          <div className="text-sm font-semibold text-violet-900">Te bevestigen ({teBevestigen.length})</div>
+          {teBevestigen.map((p) => (
+            <button key={p.id} type="button" onClick={() => setOpen(p.id)} className="w-full text-left rounded-lg bg-white border border-violet-100 px-3 py-2 text-sm">
+              <div className="font-medium">{p.taak ?? p.project ?? 'Werkblok'}{p.klant ? ` · ${p.klant}` : ''}</div>
+              <div className="text-xs text-gray-500">{datumNl(p.datum)} · {kortUur(p.start_tijd)}–{kortUur(p.eind_tijd)} — tik om te bevestigen</div>
+            </button>
+          ))}
+        </div>
+      )}
       {!data ? <div className="py-10 text-center text-gray-400"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div>
         : <Kalender items={items} weergave={weergave} anker={anker} onWeergave={setWeergave} onAnker={setAnker} />}
       {blok && <BlokDetail blok={blok} onSluit={() => setOpen(null)} onOpgeslagen={laad} />}
@@ -57,6 +71,17 @@ function BlokDetail({ blok, onSluit, onOpgeslagen }: { blok: Blok; onSluit: () =
   const [werkstatus, setWerkstatus] = useState<Werkstatus>(blok.werkstatus)
   const [voortgang, setVoortgang] = useState(blok.voortgang ?? '')
   const [bezig, setBezig] = useState(false)
+  const [weigeren, setWeigeren] = useState(false)
+  const [reden, setReden] = useState('')
+  const bevestiging = bevestigingVan(blok)
+  const antwoord = async (actie: 'bevestigen' | 'weigeren') => {
+    setBezig(true)
+    try {
+      await api(`/api/team/planning/${blok.id}`, { body: { actie, reden } })
+      toast.success(actie === 'bevestigen' ? 'Bevestigd — tot dan!' : 'Doorgegeven dat het niet lukt.')
+      setWeigeren(false); onOpgeslagen()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(false) }
+  }
   const bewaar = async () => {
     setBezig(true)
     try { await api(`/api/team/planning/${blok.id}`, { method: 'PATCH', body: { werkstatus, voortgang } }); toast.success('Voortgang bewaard.'); onOpgeslagen() }
@@ -73,6 +98,26 @@ function BlokDetail({ blok, onSluit, onOpgeslagen }: { blok: Blok; onSluit: () =
           <button type="button" onClick={onSluit} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-gray-100" aria-label="Sluiten"><X className="h-4 w-4" /></button>
         </div>
         <div className="p-4 space-y-3 text-sm">
+          {blok.status !== 'geannuleerd' && (
+            <div className={`rounded-xl border p-3 space-y-2 ${BEVESTIGING_INFO[bevestiging].kleur}`}>
+              <div className="font-semibold">{bevestiging === 'te_bevestigen' ? 'Kun je op dit moment werken?' : BEVESTIGING_INFO[bevestiging].label}</div>
+              {bevestiging === 'geweigerd' && blok.bevestiging_reden && <div className="text-xs">“{blok.bevestiging_reden}”</div>}
+              {weigeren ? (
+                <div className="space-y-2">
+                  <input className={INP} value={reden} onChange={(e) => setReden(e.target.value)} placeholder="Waarom lukt het niet?" autoFocus />
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setWeigeren(false)} className="btn-secondary flex-1 justify-center">Terug</button>
+                    <button type="button" disabled={bezig || !reden.trim()} onClick={() => antwoord('weigeren')} className="btn-danger flex-1 justify-center">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}Doorgeven</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  {bevestiging !== 'bevestigd' && <button type="button" disabled={bezig} onClick={() => antwoord('bevestigen')} className="btn-primary flex-1 justify-center">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Bevestigen</button>}
+                  {bevestiging !== 'geweigerd' && <button type="button" disabled={bezig} onClick={() => setWeigeren(true)} className="btn-secondary flex-1 justify-center"><Ban className="h-4 w-4" />Kan niet</button>}
+                </div>
+              )}
+            </div>
+          )}
           <div className="flex flex-wrap gap-2 text-xs text-gray-600">
             {blok.klant && <Chip cls="bg-gray-100 text-gray-700 border-gray-200">{blok.klant}</Chip>}
             {blok.project && <Chip cls="bg-gray-100 text-gray-700 border-gray-200">{blok.project}</Chip>}

@@ -1,5 +1,7 @@
 'use client'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
+
 import { leesGetal } from '@/lib/getal'
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -148,7 +150,7 @@ export function RevenueTable({ entries }: { entries: EntryRow[] }) {
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <KaartTabel><table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-100">
               <th className="text-left py-2 text-xs text-gray-500 font-medium">Type</th>
@@ -225,7 +227,7 @@ export function RevenueTable({ entries }: { entries: EntryRow[] }) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></KaartTabel>
       </div>
       {editing && <EditDialog entry={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); router.refresh() }} />}
     </div>

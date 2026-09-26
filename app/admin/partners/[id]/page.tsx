@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import { formatEuro, formatDate } from '@/lib/utils'
@@ -311,7 +312,7 @@ export default async function PartnerDetailPage({ params }: { params: Promise<{ 
         <div className="card-base">
           <h2 className="font-semibold mb-4">Ledger historie</h2>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <KaartTabel><table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
                   <th className="text-left py-2 text-xs text-gray-500 font-medium">Datum</th>
@@ -358,7 +359,7 @@ export default async function PartnerDetailPage({ params }: { params: Promise<{ 
                   )
                 })}
               </tbody>
-            </table>
+            </table></KaartTabel>
           </div>
         </div>
       )}
@@ -379,7 +380,7 @@ export default async function PartnerDetailPage({ params }: { params: Promise<{ 
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <KaartTabel><table className="w-full text-sm">
               <thead>
                 <tr>
                   <th className="table-th">Opdracht</th>
@@ -404,7 +405,7 @@ export default async function PartnerDetailPage({ params }: { params: Promise<{ 
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></KaartTabel>
           </div>
         )}
       </div>

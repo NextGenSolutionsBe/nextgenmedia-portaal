@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
     if ('fout' in v) return NextResponse.json({ error: v.fout }, { status: 400 })
 
     const admin = createAdminSupabaseClient()
-    const { data, error } = await admin.from('framer_sites').insert(v.payload).select('id').single()
+    const { data, error } = await admin.from('framer_sites').insert({ ...v.payload, created_by: actor.id }).select('id').single()
     if (error) {
       if (MIST_TABEL.test(error.message)) return NextResponse.json({ error: HINT }, { status: 503 })
       throw new Error(error.message)

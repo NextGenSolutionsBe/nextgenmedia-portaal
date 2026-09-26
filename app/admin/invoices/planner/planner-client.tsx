@@ -372,6 +372,7 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum, start
                   <div className="flex items-center gap-2 flex-wrap text-[11px] text-gray-600">
                     <StatusBadge status={m.status} />
                     <span>gepland {datumNlKort(m.datum)}</span>
+                    {m.door && <span className="text-gray-400">door {m.door}</span>}
                     {m.verzonden_op && <span className="text-green-800">verstuurd {datumNlKort(m.verzonden_op)}</span>}
                     {m.betaald_op && <span className="text-emerald-800 font-medium">betaald {datumNlKort(m.betaald_op)}</span>}
                   </div>
@@ -423,7 +424,7 @@ export function PlannerClient({ startCategorie, startWeergave, startDatum, start
                     <td className="px-3 py-2 text-right tabular-nums text-gray-500">{m.betaaltermijn} d</td>
                     <td className="px-3 py-2 whitespace-nowrap text-gray-600">{m.status === 'geannuleerd' || m.status === 'gecrediteerd' ? '—' : datumNlKort(m.verwacht_op)}{m.verzonden_op && <span className="block text-[10px] text-green-700">verstuurd {datumNlKort(m.verzonden_op)}</span>}</td>
                     <td className="px-3 py-2"><StatusBadge status={m.status} />{m.betaald_op && <span className="block text-[10px] text-emerald-800 font-medium mt-0.5">betaald {datumNlKort(m.betaald_op)}</span>}</td>
-                    <td className="px-3 py-2 text-gray-600 text-xs">{m.verantwoordelijke ?? '—'}</td>
+                    <td className="px-3 py-2 text-gray-600 text-xs">{m.verantwoordelijke ?? '—'}{m.door && <div className="text-[10px] text-gray-400">aangemaakt door {m.door}</div>}</td>
                     <td className="px-3 py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                       {stap && <StapKnop stap={stap} bezig={bezig} onClick={() => setVraagStap({ actie: stap.actie, m })} />}
                       {terug && <button type="button" disabled={bezig} onClick={() => setVraagStap({ actie: terug.actie, m })} className="btn-secondary text-xs h-7 px-2 ml-1" title={`${terug.label} (terug naar ${terug.naar})`}><RotateCcw className="h-3 w-3" /></button>}

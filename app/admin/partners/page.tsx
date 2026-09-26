@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { formatDate } from '@/lib/utils'
 import Link from 'next/link'
@@ -59,7 +60,7 @@ export default async function PartnersPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px]">
+          <KaartTabel><table className="w-full min-w-[560px]">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="table-th">Partner</th>
@@ -114,7 +115,7 @@ export default async function PartnersPage() {
                 )
               })}
             </tbody>
-          </table>
+          </table></KaartTabel>
           </div>
         )}
       </div>

@@ -1,6 +1,6 @@
 import 'server-only'
 import { NextResponse } from 'next/server'
-import { planningOverlapt, controleerWerkblok, blokMinuten, maxUrenWaarschuwing } from './planning'
+import { planningOverlapt, controleerWerkblok, blokMinuten, maxUrenWaarschuwing, binnenBeschikbaarheid, beschikbaarheidTekst } from './planning'
 import { periodeBereik } from './tijd'
 import { isWerkstatus, PRIORITEITEN } from './model'
 import { tekst, dagOf, uurOf, uuidOf, linksOf, getal } from './invoer'
@@ -22,22 +22,39 @@ export function werkblokDetails(b: Record<string, unknown>, personeelId: string)
   return uit
 }
 
+export type Aanbod = { id: string; datum: string; start_tijd: string; eind_tijd: string; status: string }
+
 /**
  * Controleert tijd en overlap van een werkblok, en geeft een waarschuwing
  * (geen blokkade) als de maximumuren van de medewerker overschreden worden.
+ * Een medewerker wordt ENKEL ingepland binnen een beschikbaarheid die hij of
+ * zij zelf opgaf (aangeboden of al deels ingepland) — anders een duidelijke fout.
  */
 export async function controleerInplanning(admin: Admin, w: { id?: string; personeel_id: string; datum: unknown; start_tijd: unknown; eind_tijd: unknown }):
-  Promise<{ ok: true; datum: string; start: string; eind: string; waarschuwing: string | null } | { ok: false; response: NextResponse }> {
+  Promise<{ ok: true; datum: string; start: string; eind: string; waarschuwing: string | null; aanbod: Aanbod | null } | { ok: false; response: NextResponse }> {
   const fout = controleerWerkblok(w)
   if (fout) return { ok: false, response: NextResponse.json({ error: fout }, { status: 400 }) }
   const datum = dagOf(w.datum)!, start = uurOf(w.start_tijd)!, eind = uurOf(w.eind_tijd)!
   const maand = periodeBereik('maand', datum), week = periodeBereik('week', datum)
   const van = week.van < maand.van ? week.van : maand.van, tot = week.tot > maand.tot ? week.tot : maand.tot
-  const [{ data: bestaand }, { data: p }] = await Promise.all([
+  const [{ data: bestaand }, { data: p }, { data: beschikbaar }] = await Promise.all([
     admin.from('personeel_planning').select('id, datum, start_tijd, eind_tijd, status').eq('personeel_id', w.personeel_id).gte('datum', van).lte('datum', tot),
-    admin.from('personeel').select('max_uren_dag, max_uren_week, max_uren_maand, actief').eq('id', w.personeel_id).maybeSingle(),
+    admin.from('personeel').select('voornaam, max_uren_dag, max_uren_week, max_uren_maand, actief').eq('id', w.personeel_id).maybeSingle(),
+    admin.from('personeel_beschikbaarheid').select('id, datum, start_tijd, eind_tijd, status').eq('personeel_id', w.personeel_id).eq('datum', datum),
   ])
   if (!p) return { ok: false, response: NextResponse.json({ error: 'Medewerker niet gevonden' }, { status: 404 }) }
+  const aanbodLijst = (beschikbaar ?? []) as Aanbod[]
+  const aanbod = binnenBeschikbaarheid({ datum, start_tijd: start, eind_tijd: eind }, aanbodLijst)
+  if (!aanbod) {
+    const vrij = beschikbaarheidTekst(datum, aanbodLijst)
+    const wie = p.voornaam || 'Deze medewerker'
+    return { ok: false, response: NextResponse.json({
+      error: vrij
+        ? `${wie} is op dat moment niet beschikbaar. Op ${datum.split('-').reverse().join('/')} is ${wie} vrij van ${vrij} — plan binnen die uren.`
+        : `${wie} heeft voor ${datum.split('-').reverse().join('/')} geen beschikbaarheid opgegeven. Je kunt enkel inplannen wanneer ${wie} heeft aangegeven vrij te zijn.`,
+      code: 'niet_beschikbaar',
+    }, { status: 409 }) }
+  }
   const rijen = (bestaand ?? []) as { id: string; datum: string; start_tijd: string; eind_tijd: string; status: string }[]
   if (planningOverlapt({ id: w.id, datum, start_tijd: start, eind_tijd: eind }, rijen)) return { ok: false, response: NextResponse.json({ error: 'Dit werkblok overlapt met een ander werkblok van deze medewerker.' }, { status: 409 }) }
   const actief = rijen.filter((r) => r.id !== w.id && r.status !== 'geannuleerd')
@@ -47,5 +64,5 @@ export async function controleerInplanning(admin: Admin, w: { id?: string; perso
     { max_uren_dag: p.max_uren_dag, max_uren_week: p.max_uren_week, max_uren_maand: p.max_uren_maand },
     { dag: som((r) => r.datum === datum), week: som((r) => r.datum >= week.van && r.datum <= week.tot), maand: som((r) => r.datum >= maand.van && r.datum <= maand.tot) },
   )
-  return { ok: true, datum, start, eind, waarschuwing }
+  return { ok: true, datum, start, eind, waarschuwing, aanbod }
 }

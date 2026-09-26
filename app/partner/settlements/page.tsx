@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
 import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { formatEuro, formatDate, normalizeDirection } from '@/lib/utils'
@@ -76,7 +77,7 @@ export default async function PartnerSettlementsPage() {
           <div className="text-center py-10 text-gray-400"><ArrowLeftRight className="h-8 w-8 mx-auto mb-3 opacity-30" /><p className="text-sm">Geen openstaande posten</p></div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[560px]">
+            <KaartTabel><table className="w-full text-sm min-w-[560px]">
               <thead><tr className="border-b border-gray-100">
                 <th className="text-left py-2 text-xs text-gray-500 font-medium">Datum</th>
                 <th className="text-left py-2 text-xs text-gray-500 font-medium">Richting</th>
@@ -98,7 +99,7 @@ export default async function PartnerSettlementsPage() {
                   )
                 })}
               </tbody>
-            </table>
+            </table></KaartTabel>
           </div>
         )}
       </div>

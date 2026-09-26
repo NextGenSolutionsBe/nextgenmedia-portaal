@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { StatsClient } from './stats-client'
+import { WieDeedWat } from './wie-deed-wat'
 
 /**
  * Statistieken van het appointment setten.
@@ -23,6 +24,7 @@ export default function SalesStatistiekenPage() {
           medewerker en voor het team. Een activiteit telt in de periode waarin ze geregistreerd werd.
         </p>
       </div>
+      <WieDeedWat />
       <StatsClient />
     </div>
   )

@@ -57,10 +57,11 @@ export const PRIORITEITEN = ['laag', 'normaal', 'hoog', 'dringend'] as const
 export type Prioriteit = (typeof PRIORITEITEN)[number]
 
 // ── Kalenderkleuren (admin én werknemer, overal dezelfde) ───────────────────
-export type KalenderSoort = 'beschikbaar_ingediend' | 'planning' | 'planning_afgewezen' | 'sessie_actief' | 'uren_ingediend' | 'uren_goedgekeurd' | 'afwezig'
+export type KalenderSoort = 'beschikbaar_ingediend' | 'planning_te_bevestigen' | 'planning' | 'planning_afgewezen' | 'sessie_actief' | 'uren_ingediend' | 'uren_goedgekeurd' | 'afwezig'
 export const KALENDER_KLEUR: Record<KalenderSoort, { label: string; blok: string; stip: string }> = {
   beschikbaar_ingediend: { label: 'Beschikbaarheid ingediend', blok: 'bg-amber-50 border-amber-300 text-amber-900 border-dashed', stip: 'bg-amber-400' },
-  planning: { label: 'Planning goedgekeurd', blok: 'bg-blue-50 border-blue-400 text-blue-900', stip: 'bg-blue-500' },
+  planning_te_bevestigen: { label: 'Ingepland — wacht op bevestiging', blok: 'bg-violet-50 border-violet-400 text-violet-900 border-dashed', stip: 'bg-violet-500' },
+  planning: { label: 'Ingepland en bevestigd', blok: 'bg-blue-50 border-blue-400 text-blue-900', stip: 'bg-blue-500' },
   planning_afgewezen: { label: 'Afgewezen', blok: 'bg-red-50 border-red-300 text-red-800 line-through', stip: 'bg-red-400' },
   sessie_actief: { label: 'Werksessie actief', blok: 'bg-sky-100 border-sky-500 text-sky-900', stip: 'bg-sky-500' },
   uren_ingediend: { label: 'Uren ingediend', blok: 'bg-orange-50 border-orange-300 text-orange-900', stip: 'bg-orange-400' },
@@ -83,7 +84,7 @@ export const isDocumentMap = (k: unknown): k is string => DOCUMENT_MAPPEN.some((
 
 // ── Notificaties ─────────────────────────────────────────────────────────────
 export type MeldingEvent =
-  | 'beschikbaarheid_ingediend' | 'planning_goedgekeurd' | 'planning_gewijzigd' | 'planning_afgewezen'
+  | 'beschikbaarheid_ingediend' | 'planning_goedgekeurd' | 'planning_gewijzigd' | 'planning_afgewezen' | 'planning_bevestigd'
   | 'werkblok_binnenkort' | 'vergeten_uitklokken' | 'uren_te_controleren' | 'correctie_gevraagd'
   | 'uren_goedgekeurd' | 'uren_afgekeurd' | 'documenten'
 export const MELDING_EVENTS: { key: MeldingEvent; label: string; voor: 'admin' | 'medewerker' | 'beide' }[] = [
@@ -91,6 +92,7 @@ export const MELDING_EVENTS: { key: MeldingEvent; label: string; voor: 'admin' |
   { key: 'planning_goedgekeurd', label: 'Planning goedgekeurd', voor: 'medewerker' },
   { key: 'planning_gewijzigd', label: 'Planning gewijzigd', voor: 'medewerker' },
   { key: 'planning_afgewezen', label: 'Planning/beschikbaarheid afgewezen', voor: 'medewerker' },
+  { key: 'planning_bevestigd', label: 'Medewerker bevestigt of weigert een inplanning', voor: 'admin' },
   { key: 'werkblok_binnenkort', label: 'Werkblok begint binnenkort', voor: 'medewerker' },
   { key: 'vergeten_uitklokken', label: 'Vergeten uit te klokken', voor: 'beide' },
   { key: 'uren_te_controleren', label: 'Urenregistratie klaar voor controle', voor: 'admin' },

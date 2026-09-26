@@ -10,6 +10,8 @@ import { CostForm } from '../cost-form'
 import { CostTable } from '../cost-table'
 import { ExportKnop } from '@/components/admin/export-knop'
 import { KostenPerMaand, type MaandRij, type KostRegel } from '../kosten-per-maand'
+import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { leesActorNamen } from '@/lib/actor-namen'
 
 function costYearValue(c: CostEntry, year: number): number {
   if (c.type === 'recurring') {
@@ -24,6 +26,9 @@ function costYearValue(c: CostEntry, year: number): number {
 export default async function KostenPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const { year, period, quarter, month } = readPeriodParams(await searchParams)
   const c = await loadCore(year)
+  const makers = c.costs.map((x) => ({ id: x.id, u: (x as { created_by?: string | null }).created_by ?? null }))
+  const namen = await leesActorNamen(createAdminSupabaseClient(), makers.map((m) => m.u))
+  const door = Object.fromEntries(makers.filter((m) => m.u && namen[m.u]).map((m) => [m.id, namen[m.u!].kort]))
 
   const recurringCostFY = c.costs.filter(x => x.type === 'recurring').reduce((s, x) => s + costYearValue(x, year), 0)
   // Hoeveel abonnementen lopen er nu echt? Een bedrag zonder aantal zegt weinig,
@@ -134,7 +139,7 @@ export default async function KostenPage({ searchParams }: { searchParams: Promi
         )}
       </div>
 
-      <CostTable costs={c.costs} setterCostFY={c.setterCostFY} year={year} />
+      <CostTable costs={c.costs} setterCostFY={c.setterCostFY} year={year} door={door} />
     </div>
   )
 }

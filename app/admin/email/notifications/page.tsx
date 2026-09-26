@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { formatDate } from '@/lib/utils'
 import { Bell, Clock } from 'lucide-react'
@@ -55,7 +56,7 @@ export default async function NotificationsPage() {
           <p className="empty-state text-sm">Nog geen rapporten verstuurd.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[640px]">
+            <KaartTabel><table className="w-full text-sm min-w-[640px]">
               <thead>
                 <tr className="border-b border-gray-100">
                   <th className="table-th">Datum</th>
@@ -83,7 +84,7 @@ export default async function NotificationsPage() {
                   )
                 })}
               </tbody>
-            </table>
+            </table></KaartTabel>
           </div>
         )}
       </div>

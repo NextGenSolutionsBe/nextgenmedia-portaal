@@ -1,5 +1,7 @@
 'use client'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
+
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -59,7 +61,7 @@ export function KostenTab({ personeelId }: { personeelId?: string }) {
       {rijen === null ? <div className="py-10 text-center text-gray-400"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div>
         : rijen.length === 0 ? <div className="card-base text-center py-10 text-sm text-gray-400">Nog geen uren of planning in deze periode.</div> : (
           <div className="card-base p-0 overflow-x-auto">
-            <table className="w-full text-sm min-w-[860px]">
+            <KaartTabel><table className="w-full text-sm min-w-[860px]">
               <thead><tr className="text-left text-[11px] text-gray-500 uppercase tracking-wide bg-gray-50">
                 <th className="px-3 py-2 font-medium">Medewerker</th><th className="px-3 py-2 font-medium">Maand</th>
                 <th className="px-3 py-2 font-medium text-right">Verwacht</th><th className="px-3 py-2 font-medium text-right">Voorlopig</th><th className="px-3 py-2 font-medium text-right">Definitief</th>
@@ -114,7 +116,7 @@ export function KostenTab({ personeelId }: { personeelId?: string }) {
                   )
                 })}
               </tbody>
-            </table>
+            </table></KaartTabel>
           </div>
         )}
     </div>

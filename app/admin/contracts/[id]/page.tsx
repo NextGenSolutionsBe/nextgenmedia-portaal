@@ -21,6 +21,7 @@ import { LooptijdDatums } from './looptijd-datums'
 import { LooptijdDetail } from '../looptijd'
 import { typeVanContract, isNietToegewezen } from '@/lib/contracten/types'
 import { baseUrl } from '@/lib/email'
+import { leesActorNamen } from '@/lib/actor-namen'
 
 async function getContract(id: string) {
   try {
@@ -50,9 +51,11 @@ async function getContract(id: string) {
       // Nieuwste archiefversie (certificaatnummer, datum) — enkel relevant als getekend.
       isSigned ? laatsteArchief(admin, contract.id).catch(() => null) : Promise.resolve(null),
     ])
+    const aangemaaktDoor = contract.created_by ? (await leesActorNamen(admin, [contract.created_by]))[contract.created_by]?.naam ?? null : null
 
     return {
       contract,
+      aangemaaktDoor,
       clientName: clientRowResult.data?.company_name ?? null,
       clientId: clientRowResult.data?.id ?? null,
       clientBtw: (clientRowResult.data as { btw_nummer?: string | null } | null)?.btw_nummer ?? null,
@@ -167,7 +170,7 @@ export default async function ContractDetailPage({ params }: { params: { id: str
               <ContracttypeBewerker contractId={c.id} initieel={c.contract_type ?? null} />
               <div className="flex justify-between">
                 <span className="text-gray-500">Aangemaakt:</span>
-                <span>{formatDate(c.created_at)}</span>
+                <span className="text-right">{formatDate(c.created_at)}{data.aangemaaktDoor ? <span className="block text-xs text-gray-500">door {data.aangemaaktDoor}</span> : null}</span>
               </div>
               <LooptijdDatums contractId={c.id} start={c.start_date ?? null} eind={c.end_date ?? null} />
               {c.sent_at && (

@@ -1,5 +1,7 @@
 'use client'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
+
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import {
@@ -251,7 +253,7 @@ function Section({ title, icon: Icon, empty, rows, showDue, past, picked, onTogg
         </div>
       ) : (
         <div className="table-wrap">
-          <table className="w-full text-sm">
+          <KaartTabel><table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
                 <th className="table-th w-8">
@@ -312,7 +314,7 @@ function Section({ title, icon: Icon, empty, rows, showDue, past, picked, onTogg
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></KaartTabel>
         </div>
       )}
     </div>

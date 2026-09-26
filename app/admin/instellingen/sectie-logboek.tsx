@@ -1,5 +1,7 @@
 'use client'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
+
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Search, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
@@ -52,7 +54,7 @@ export function SectieLogboek() {
         : data.rijen.length === 0 ? <p className="text-sm text-gray-400 py-6 text-center">Geen activiteit gevonden voor deze filters.</p>
         : (
           <div className="overflow-x-auto -mx-1">
-            <table className="w-full text-sm min-w-[720px]">
+            <KaartTabel><table className="w-full text-sm min-w-[720px]">
               <thead><tr className="text-left text-[11px] text-gray-500 uppercase tracking-wide"><th className="px-2 py-2 font-medium">Wanneer</th><th className="px-2 py-2 font-medium">Wie</th><th className="px-2 py-2 font-medium">Actie</th><th className="px-2 py-2 font-medium">Omschrijving</th></tr></thead>
               <tbody className="divide-y divide-gray-50">
                 {data.rijen.map((r) => (
@@ -78,7 +80,7 @@ export function SectieLogboek() {
                   </Fragment>
                 ))}
               </tbody>
-            </table>
+            </table></KaartTabel>
           </div>
         )}
 

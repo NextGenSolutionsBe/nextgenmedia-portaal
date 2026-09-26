@@ -51,7 +51,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       waarschuwing = c.waarschuwing
       const { data: pl, error } = await admin.from('personeel_planning').insert({
         personeel_id: a.personeel_id, datum: c.datum, start_tijd: c.start, eind_tijd: c.eind, beschikbaarheid_id: id,
-        ...werkblokDetails(b, a.personeel_id), created_by: persoon.email,
+        ...werkblokDetails(b, a.personeel_id), bevestiging: 'te_bevestigen', created_by: persoon.email,
       }).select('id').single()
       if (error) throw new Error(error.message)
       planningId = pl.id
@@ -62,7 +62,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }).eq('id', id)
     await audit(admin, { personeel_id: a.personeel_id, entiteit: 'beschikbaarheid', entiteit_id: id, actie: `beschikbaarheid_${r.status}`, oud: { status: a.status, start: a.start_tijd, eind: a.eind_tijd }, nieuw: { status: r.status, werkblok: r.werkblok, planning_id: planningId }, reden, actor_email: persoon.email, actor_id: persoon.userId })
     if (r.werkblok) {
-      await meld(admin, { personeel_id: a.personeel_id, event: 'planning_goedgekeurd', titel: r.status === 'gedeeltelijk' ? 'Je beschikbaarheid is gedeeltelijk ingepland' : 'Je bent ingepland', tekst: `${dag} van ${r.werkblok.start} tot ${r.werkblok.eind}.${reden ? ` ${reden}` : ''}`, link: '/team/planning' })
+      await meld(admin, { personeel_id: a.personeel_id, event: 'planning_goedgekeurd', titel: r.status === 'gedeeltelijk' ? 'Je bent gedeeltelijk ingepland — graag bevestigen' : 'Je bent ingepland — graag bevestigen', tekst: `${dag} van ${r.werkblok.start} tot ${r.werkblok.eind}.${reden ? ` ${reden}` : ''} Bevestig in de app of je kunt.`, link: `/team/planning?blok=${planningId}` })
     } else {
       await meld(admin, { personeel_id: a.personeel_id, event: 'planning_afgewezen', titel: 'Je beschikbaarheid werd niet ingepland', tekst: `${dag} ${String(a.start_tijd).slice(0, 5)}–${String(a.eind_tijd).slice(0, 5)}.${reden ? ` Reden: ${reden}` : ''}`, link: '/team/beschikbaarheid' })
     }

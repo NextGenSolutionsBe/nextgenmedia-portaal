@@ -1,5 +1,7 @@
 'use client'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
+
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2, Clock, CheckCircle2, CalendarDays, Wallet, TrendingUp, AlertTriangle, ArrowLeftRight, FileDown } from 'lucide-react'
@@ -111,7 +113,7 @@ export function DashboardTab() {
               {GROEPEN.map(([g, label]) => <button key={g} type="button" onClick={() => setGroep(g)} className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap ${groep === g ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>{label}</button>)}
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[640px]">
+              <KaartTabel><table className="w-full text-sm min-w-[640px]">
                 <thead><tr className="text-left text-[11px] text-gray-500 uppercase tracking-wide bg-gray-50">
                   <th className="px-3 py-2 font-medium">{GROEPEN.find(([g]) => g === groep)![1].replace('Per ', '')}</th><th className="px-3 py-2 font-medium text-right">Gewerkt</th><th className="px-3 py-2 font-medium text-right">Goedgekeurd</th><th className="px-3 py-2 font-medium text-right">Gepland</th>
                   {fin && <><th className="px-3 py-2 font-medium text-right">Werkelijke kost</th><th className="px-3 py-2 font-medium text-right">Voorlopig</th><th className="px-3 py-2 font-medium text-right">Verwacht</th></>}
@@ -125,7 +127,7 @@ export function DashboardTab() {
                   ))}
                   {!(d[groep] ?? []).some((r) => r.uren || r.gepland || r.kostWerkelijk || r.kostVerwacht) && <tr><td colSpan={7} className="px-3 py-8 text-center text-gray-400">Geen gegevens in deze periode.</td></tr>}
                 </tbody>
-              </table>
+              </table></KaartTabel>
             </div>
             {groep === 'perProject' && fin && <p className="px-3 py-2 text-[11px] text-gray-500 border-t border-gray-100">Kosten per dag, per maand en eenmalige kosten horen bij de medewerker, niet bij één project; ze staan apart als "Vaste kosten", zodat de som klopt met de werkelijke kost.</p>}
           </div>

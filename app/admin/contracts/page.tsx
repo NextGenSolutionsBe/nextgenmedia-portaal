@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { ContractsClient, type Contract } from './contracts-client'
 import { typeNamen } from '@/lib/contracten/db'
+import { leesActorNamen } from '@/lib/actor-namen'
 
 async function getContracts() {
   const admin = createAdminSupabaseClient()
@@ -21,6 +22,7 @@ async function getContracts() {
   } catch { invoiceRows = [] }
 
   const clientMap = new Map((clients ?? []).map((c) => [c.id, c]))
+  const namen = await leesActorNamen(admin, (contracts ?? []).map((c) => c.created_by as string | null))
   // Per contract: aantal gekoppelde + verstuurde facturen.
   const invByContract = new Map<string, { count: number; sent: number }>()
   for (const r of invoiceRows) {
@@ -66,6 +68,7 @@ async function getContracts() {
       expected_invoice_count: expected,
       invoice_state: invoiceState as 'none' | 'partial' | 'full',
       client: clientMap.get(c.client_id) ?? null,
+      door: c.created_by ? namen[c.created_by]?.kort ?? null : null,
     }
   })
 

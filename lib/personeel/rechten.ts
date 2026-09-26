@@ -6,7 +6,7 @@
 // geen blacklist — een nieuwe kolom lekt dus nooit ongemerkt uit.
 
 const SESSIE_VELDEN = ['id', 'start_at', 'eind_at', 'pauzes', 'pauze_actief_sinds', 'status', 'client_id', 'opdracht_id', 'project', 'taak', 'planning_id', 'verslag', 'links', 'correctie_vraag', 'beoordeeld_op', 'created_at'] as const
-const PLANNING_VELDEN = ['id', 'datum', 'start_tijd', 'eind_tijd', 'client_id', 'opdracht_id', 'project', 'taak', 'verwachte_duur_min', 'deadline', 'prioriteit', 'briefing', 'links', 'deliverables', 'locatie', 'thuiswerk', 'status', 'werkstatus', 'voortgang'] as const
+const PLANNING_VELDEN = ['id', 'datum', 'start_tijd', 'eind_tijd', 'client_id', 'opdracht_id', 'project', 'taak', 'verwachte_duur_min', 'deadline', 'prioriteit', 'briefing', 'links', 'deliverables', 'locatie', 'thuiswerk', 'status', 'werkstatus', 'voortgang', 'bevestiging', 'bevestigd_op', 'bevestiging_reden'] as const
 const BESCHIKBAARHEID_VELDEN = ['id', 'datum', 'start_tijd', 'eind_tijd', 'opmerking', 'status', 'goedgekeurd_start', 'goedgekeurd_eind', 'voorstel_start', 'voorstel_eind', 'reactie', 'created_at'] as const
 const PROFIEL_VELDEN = ['id', 'voornaam', 'achternaam', 'type', 'functie', 'email', 'profielfoto_pad'] as const
 

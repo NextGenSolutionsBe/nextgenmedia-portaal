@@ -1,5 +1,7 @@
 'use client'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
+
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -113,7 +115,7 @@ export function FormulierenLijst({ klantId }: { klantId: string | null }) {
       ) : (
         <div className="card-base !p-0 overflow-hidden">
           <div className="table-wrap">
-            <table className="w-full">
+            <KaartTabel><table className="w-full">
               <thead className="bg-gray-50/80 border-b border-gray-100">
                 <tr>
                   <th className="table-th">Formulier</th>
@@ -140,7 +142,7 @@ export function FormulierenLijst({ klantId }: { klantId: string | null }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></KaartTabel>
           </div>
         </div>
       )}

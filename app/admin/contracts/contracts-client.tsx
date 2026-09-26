@@ -1,5 +1,7 @@
 'use client'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
+
 import { useMemo, useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -32,6 +34,8 @@ export type Contract = OverzichtContract & {
   duration_type: string | null
   signer_name: string | null
   signer_email: string | null
+  /** Wie het contract aanmaakte (Bram, Marco, Chiara…). */
+  door?: string | null
   invoice_count: number
   invoice_sent: number
   expected_invoice_count: number | null
@@ -166,7 +170,7 @@ export function ContractsClient({
       return true
     }).map((c) => ({
       ...c,
-      zoekExtra: [c.signer_name, c.signer_email, c.service_slug ? SERVICE_LABELS[c.service_slug] ?? c.service_slug : '', c.template_id ? templateName.get(c.template_id) : '']
+      zoekExtra: [c.signer_name, c.signer_email, (c as Contract).door ?? '', c.service_slug ? SERVICE_LABELS[c.service_slug] ?? c.service_slug : '', c.template_id ? templateName.get(c.template_id) : '']
         .filter(Boolean).join(' '),
     }))
   }, [contracten, filterClient, filterService, filterTemplate, filterDuration, filterLinked, filterInvoice, dateFrom, dateTo, templateName])
@@ -481,7 +485,7 @@ export function ContractsClient({
                 {geopend && (
                   <div className="border-t border-gray-100">
                     <div className="overflow-x-auto">
-                      <table className="w-full min-w-[960px]">
+                      <KaartTabel><table className="w-full min-w-[960px]">
                         <thead className="bg-gray-50 border-b border-gray-200">
                           <tr>
                             <th className="table-th">Contract</th>
@@ -507,9 +511,9 @@ export function ContractsClient({
                                   <Link href={`/admin/contracts/${c.id}`} className="font-medium hover:text-black">
                                     {c.title}
                                   </Link>
-                                  {c.service_slug && (
-                                    <div className="text-xs text-gray-400 mt-0.5">{SERVICE_LABELS[c.service_slug] ?? c.service_slug}</div>
-                                  )}
+                                  <div className="text-xs text-gray-400 mt-0.5">
+                                    {[c.service_slug ? SERVICE_LABELS[c.service_slug] ?? c.service_slug : null, c.door ? `door ${c.door}` : null].filter(Boolean).join(' · ')}
+                                  </div>
                                   {categorie === 'opvolging' && (
                                     <div className="text-[11px] text-orange-700 mt-0.5">{opvolgRedenen(c).join(' · ')}</div>
                                   )}
@@ -570,7 +574,7 @@ export function ContractsClient({
                             )
                           })}
                         </tbody>
-                      </table>
+                      </table></KaartTabel>
                     </div>
                     <div className="px-4 py-3 border-t border-gray-100 bg-gray-50/60">
                       <Link

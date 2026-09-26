@@ -5234,3 +5234,18 @@ CREATE TABLE IF NOT EXISTS public.sales_opschoning_backup (
 );
 CREATE INDEX IF NOT EXISTS sales_opschoning_backup_run ON public.sales_opschoning_backup (run, tabel);
 ALTER TABLE public.sales_opschoning_backup ENABLE ROW LEVEL SECURITY;
+
+-- ── Personeel: bevestiging van werkblokken + ClickUp-taak ───────────────────
+-- bevestiging: te_bevestigen | bevestigd | geweigerd; NULL = werkblok van vóór deze
+-- flow (geldt als bevestigd). Na bevestiging komt er een ClickUp-taak.
+alter table personeel_planning add column if not exists bevestiging text;
+alter table personeel_planning add column if not exists bevestigd_op timestamptz;
+alter table personeel_planning add column if not exists bevestiging_reden text;
+alter table personeel_planning add column if not exists clickup_task_id text;
+alter table personeel_planning add column if not exists clickup_status text;   -- toegewezen | zonder_toegewezene | fout | geannuleerd
+alter table personeel_planning add column if not exists clickup_toegewezen text;
+alter table personeel_planning add column if not exists clickup_fout text;
+
+-- ── Wie maakte het aan? (per admin-account zichtbaar) ────────────────────────
+alter table clients add column if not exists created_by uuid;
+alter table framer_sites add column if not exists created_by uuid;

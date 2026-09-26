@@ -1,3 +1,4 @@
+import { KaartTabel } from '@/components/ui/kaart-tabel'
 import Link from 'next/link'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { maintenanceStatus, formatNL, type MaintenanceClient } from '@/lib/maintenance'
@@ -41,7 +42,7 @@ export async function MaintenanceOverview() {
       </div>
 
       <div className="table-wrap">
-        <table className="w-full text-sm">
+        <KaartTabel><table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-100">
               <th className="table-th">Klant</th>
@@ -85,7 +86,7 @@ export async function MaintenanceOverview() {
               )
             })}
           </tbody>
-        </table>
+        </table></KaartTabel>
       </div>
       <p className="text-[11px] text-gray-400 mt-2">We krijgen automatisch een interne mail zodra een pakket binnen een maand afloopt.</p>
     </div>

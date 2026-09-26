@@ -710,3 +710,42 @@ export async function haalSyncTaken(
   }
   return uit
 }
+
+// ── Personeelsplanning → ClickUp ─────────────────────────────────────────────
+// Een BEVESTIGD werkblok van een medewerker (bv. een jobstudent) wordt een taak
+// in de lijst "Planning medewerkers", met start- en einduur, toegewezen aan het
+// ClickUp-lid met dezelfde naam of hetzelfde e-mailadres — of aan niemand.
+
+const PLANNING_LIST_NAME = 'Planning medewerkers'
+
+async function findOrCreatePlanningList(): Promise<string> {
+  const { lists } = await clickupJson<{ lists: CuList[] }>(`/space/${CLICKUP_SPACE_ID}/list`)
+  const existing = (lists ?? []).find((l) => l.name.trim().toLowerCase() === PLANNING_LIST_NAME.toLowerCase())
+  if (existing) return existing.id
+  const created = await clickupJson<CuList>(`/space/${CLICKUP_SPACE_ID}/list`, { method: 'POST', body: JSON.stringify({ name: PLANNING_LIST_NAME }) })
+  return created.id
+}
+
+export type PlanningTaak = { naam: string; omschrijving: string; startMs: number; eindMs: number; assigneeId: number | null }
+
+/** Maakt de planningstaak aan, of werkt een bestaande bij (tijd, tekst, toewijzing). Gooit bij fouten. */
+export async function upsertPlanningTaak(bestaandId: string | null, t: PlanningTaak): Promise<string> {
+  const body: Record<string, unknown> = {
+    name: t.naam, description: t.omschrijving,
+    start_date: t.startMs, start_date_time: true, due_date: t.eindMs, due_date_time: true,
+  }
+  if (bestaandId) {
+    if (t.assigneeId) body.assignees = { add: [t.assigneeId] }
+    try {
+      await clickupJson(`/task/${bestaandId}`, { method: 'PUT', body: JSON.stringify(body) })
+      return bestaandId
+    } catch (e) {
+      if (!isTaskGone(e)) throw e
+      // Taak in ClickUp verwijderd → opnieuw aanmaken.
+    }
+  }
+  const listId = await findOrCreatePlanningList()
+  if (t.assigneeId) body.assignees = [t.assigneeId]
+  const task = await clickupJson<{ id: string }>(`/list/${listId}/task`, { method: 'POST', body: JSON.stringify(body) })
+  return task.id
+}

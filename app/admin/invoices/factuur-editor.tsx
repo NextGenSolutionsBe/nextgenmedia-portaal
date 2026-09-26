@@ -1,5 +1,7 @@
 'use client'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
+
 import { GetalInvoer } from '@/components/ui/getal-invoer'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
@@ -65,7 +67,7 @@ export function RegelsEditor({ regels, onChange, btw, alleenLezen }: { regels: F
   return (
     <div className="space-y-2">
       <div className="overflow-x-auto -mx-1">
-        <table className="w-full text-xs min-w-[860px]">
+        <KaartTabel><table className="w-full text-xs min-w-[860px]">
           <thead>
             <tr className="text-[10px] uppercase tracking-wide text-gray-500">
               <th className="px-1 py-1 text-left w-8">#</th><th className="px-1 py-1 text-left">Artikel</th><th className="px-1 py-1 text-left">Omschrijving</th>
@@ -105,7 +107,7 @@ export function RegelsEditor({ regels, onChange, btw, alleenLezen }: { regels: F
             })}
             {regels.length === 0 && <tr><td colSpan={12} className="px-2 py-4 text-center text-gray-400">Nog geen factuurregels.</td></tr>}
           </tbody>
-        </table>
+        </table></KaartTabel>
       </div>
       <div className="flex items-start justify-between gap-3 flex-wrap">
         {!alleenLezen && (

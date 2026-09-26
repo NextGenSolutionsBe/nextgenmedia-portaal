@@ -1,5 +1,7 @@
 'use client'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
+
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { Plus, Loader2, Power, Archive, RotateCcw, Mail, Pencil, KeyRound, ShieldCheck, ShieldOff, Trash2 } from 'lucide-react'
@@ -72,7 +74,7 @@ export function SectieMedewerkers({ isAdmin }: { isAdmin: boolean }) {
           {archief > 0 && <label className="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" checked={toonArchief} onChange={(e) => setToonArchief(e.target.checked)} />Toon gearchiveerde ({archief})</label>}
         </div>
         <div className="overflow-x-auto -mx-1">
-          <table className="w-full text-sm min-w-[760px]">
+          <KaartTabel><table className="w-full text-sm min-w-[760px]">
             <thead><tr className="text-left text-[11px] text-gray-500 uppercase tracking-wide">
               <th className="px-2 py-2 font-medium">Naam</th><th className="px-2 py-2 font-medium">Functie</th><th className="px-2 py-2 font-medium">Rol</th><th className="px-2 py-2 font-medium">Modules</th><th className="px-2 py-2 font-medium">Status</th><th className="px-2 py-2 font-medium">Laatste login</th><th className="px-2 py-2" />
             </tr></thead>
@@ -112,7 +114,7 @@ export function SectieMedewerkers({ isAdmin }: { isAdmin: boolean }) {
                 )
               })}
             </tbody>
-          </table>
+          </table></KaartTabel>
         </div>
         <p className="text-[11px] text-gray-500 mt-3">Rollen: {ROLLEN.map((r) => `${r.label} — ${r.uitleg}`).join(' · ')}</p>
       </div>

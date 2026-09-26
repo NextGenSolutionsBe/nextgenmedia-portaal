@@ -1,5 +1,7 @@
 'use client'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
+
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -366,7 +368,7 @@ function Tabel({ titel, uitleg, rijen, eersteKop, team }: {
       <h2 className="font-semibold mb-1">{titel}</h2>
       <div className="text-xs text-gray-400 mb-3">{uitleg}</div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <KaartTabel><table className="w-full text-sm">
           <thead>
             <tr className="text-[11px] uppercase tracking-wide text-gray-400 border-b border-gray-100">
               <th className="text-left font-semibold py-2 pr-3">{eersteKop}</th>
@@ -391,7 +393,7 @@ function Tabel({ titel, uitleg, rijen, eersteKop, team }: {
               {KOLOMMEN.map((k) => <td key={k.kop} className="text-right py-2 px-2 tabular-nums whitespace-nowrap">{k.toon(team)}</td>)}
             </tr>
           </tbody>
-        </table>
+        </table></KaartTabel>
       </div>
     </div>
   )

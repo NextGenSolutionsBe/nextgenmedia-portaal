@@ -1,5 +1,7 @@
 'use client'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
+
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -157,7 +159,7 @@ export function VerzendingClient() {
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-        <div className="table-wrap"><table className="w-full text-sm">
+        <div className="table-wrap"><KaartTabel><table className="w-full text-sm">
           <thead><tr className="border-b border-gray-100 bg-gray-50/60">
             <th className="table-th">Klant</th><th className="table-th">Contract</th><th className="table-th">Type</th><th className="table-th">Status</th>
             <th className="table-th">Getekend</th><th className="table-th">Certificaat</th><th className="table-th">Verzending</th><th className="table-th"></th>
@@ -194,7 +196,7 @@ export function VerzendingClient() {
               )
             })}
           </tbody>
-        </table></div>
+        </table></KaartTabel></div>
       </div>
 
       {vraag && s && (

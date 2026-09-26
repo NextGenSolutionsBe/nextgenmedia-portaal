@@ -78,3 +78,50 @@ export function maxUrenWaarschuwing(
   if (grenzen.max_uren_maand && u(gepland.maand) > grenzen.max_uren_maand) return `Boven het maximum van ${grenzen.max_uren_maand} u per maand (${u(gepland.maand)} u gepland).`
   return null
 }
+
+// ── Inplannen enkel binnen opgegeven beschikbaarheid ─────────────────────────
+
+/** Beschikbaarheden die meetellen: aangeboden of (deels) ingepland, niet ingetrokken of afgewezen. */
+export const TELT_ALS_BESCHIKBAAR = ['ingediend', 'goedgekeurd', 'gedeeltelijk'] as const
+
+type Aanbod = { id: string; datum: string; start_tijd: string; eind_tijd: string; status: string }
+
+/**
+ * Het aanbod waarbinnen een werkblok valt (zelfde dag, volledig binnen het
+ * tijdsblok), of null. Aaneensluitende blokken (13:00–15:00 + 15:00–17:00)
+ * tellen samen, zodat 13:00–17:00 ook kan.
+ */
+export function binnenBeschikbaarheid(blok: { datum: string; start_tijd: string; eind_tijd: string }, aanbod: Aanbod[]): Aanbod | null {
+  const s = minutenVanUur(blok.start_tijd), e = minutenVanUur(blok.eind_tijd)
+  const dag = aanbod
+    .filter((a) => a.datum === blok.datum && (TELT_ALS_BESCHIKBAAR as readonly string[]).includes(a.status))
+    .map((a) => ({ a, s: minutenVanUur(a.start_tijd), e: minutenVanUur(a.eind_tijd) }))
+    .sort((x, y) => x.s - y.s)
+  // Aaneensluitende blokken samenvoegen tot vensters; het eerste blok van het venster is "het" aanbod.
+  const vensters: { a: Aanbod; s: number; e: number }[] = []
+  for (const d of dag) {
+    const laatste = vensters[vensters.length - 1]
+    if (laatste && d.s <= laatste.e) laatste.e = Math.max(laatste.e, d.e)
+    else vensters.push({ ...d })
+  }
+  return vensters.find((v) => v.s <= s && v.e >= e)?.a ?? null
+}
+
+/** Mensentaal voor de beschikbaarheid van een dag, voor foutmeldingen. */
+export function beschikbaarheidTekst(datum: string, aanbod: Aanbod[]): string {
+  const dag = aanbod.filter((a) => a.datum === datum && (TELT_ALS_BESCHIKBAAR as readonly string[]).includes(a.status))
+    .sort((x, y) => x.start_tijd.localeCompare(y.start_tijd))
+  return dag.length ? dag.map((a) => `${a.start_tijd.slice(0, 5)}–${a.eind_tijd.slice(0, 5)}`).join(', ') : ''
+}
+
+// ── Bevestiging door de medewerker ───────────────────────────────────────────
+
+export type Bevestiging = 'te_bevestigen' | 'bevestigd' | 'geweigerd'
+/** NULL = werkblok van vóór de bevestigingsflow: geldt als bevestigd. */
+export const bevestigingVan = (w: { bevestiging?: string | null }): Bevestiging =>
+  w.bevestiging === 'te_bevestigen' || w.bevestiging === 'geweigerd' ? w.bevestiging : 'bevestigd'
+export const BEVESTIGING_INFO: Record<Bevestiging, { label: string; kleur: string }> = {
+  te_bevestigen: { label: 'Wacht op bevestiging', kleur: 'bg-amber-50 text-amber-800 border-amber-200' },
+  bevestigd: { label: 'Bevestigd', kleur: 'bg-green-50 text-green-800 border-green-200' },
+  geweigerd: { label: 'Kan niet', kleur: 'bg-red-50 text-red-700 border-red-200' },
+}

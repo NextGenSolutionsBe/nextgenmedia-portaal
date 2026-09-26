@@ -1,5 +1,7 @@
 'use client'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
+
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Trash2, Loader2, Repeat2, ArrowDownRight, CircleStop, RotateCcw, Pencil, X } from 'lucide-react'
@@ -55,8 +57,10 @@ function eindeVanMaand(jaarMaand: string): string {
  * anders tel je de tabel op en kom je niet aan het totaal dat er bovenaan staat.
  * Zonder knoppen, want er valt niets te wijzigen of te verwijderen.
  */
-export function CostTable({ costs, setterCostFY = 0, year }: {
+export function CostTable({ costs, setterCostFY = 0, year, door = {} }: {
   costs: Cost[]; setterCostFY?: number; year?: number
+  /** Per kost-id: wie de kost logde (Bram, Marco, Chiara…). */
+  door?: Record<string, string>
 }) {
   const router = useRouter()
   const [busy, setBusy] = useState<string | null>(null)
@@ -141,7 +145,7 @@ export function CostTable({ costs, setterCostFY = 0, year }: {
     <div className="card-base">
       <h2 className="font-semibold mb-4">Alle kosten</h2>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[640px]">
+        <KaartTabel><table className="w-full text-sm min-w-[640px]">
           <thead>
             <tr className="border-b border-gray-100">
               <th className="text-left py-2 text-xs text-gray-500 font-medium">Naam</th>
@@ -163,7 +167,7 @@ export function CostTable({ costs, setterCostFY = 0, year }: {
                 : formatDate(c.cost_date)
               return (
                 <tr key={c.id} className="hover:bg-gray-50/50">
-                  <td className="py-2.5 font-medium">{c.name ?? '—'}</td>
+                  <td className="py-2.5 font-medium">{c.name ?? '—'}{door[c.id] && <div className="text-[11px] font-normal text-gray-400">door {door[c.id]}</div>}</td>
                   <td className="py-2.5 text-gray-500">{c.category ?? '—'}</td>
                   <td className="py-2.5 text-gray-500 text-xs">
                     <span className="inline-flex items-center gap-1 flex-wrap">
@@ -208,7 +212,7 @@ export function CostTable({ costs, setterCostFY = 0, year }: {
               )
             })}
           </tbody>
-        </table>
+        </table></KaartTabel>
       </div>
 
       {bewerken && <CostDialog cost={bewerken} onClose={() => setBewerken(null)} />}

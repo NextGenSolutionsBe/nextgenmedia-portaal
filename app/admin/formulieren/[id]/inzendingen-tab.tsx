@@ -1,5 +1,7 @@
 'use client'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
+
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2, X, Copy, Inbox, Save, Printer, Users } from 'lucide-react'
@@ -75,7 +77,7 @@ export function InzendingenTab({ formulier, onTellingGewijzigd }: { formulier: F
       ) : (
         <div className="card-base !p-0 overflow-hidden">
           <div className="table-wrap">
-            <table className="w-full">
+            <KaartTabel><table className="w-full">
               <thead className="bg-gray-50/80 border-b border-gray-100">
                 <tr>
                   <th className="table-th">Datum</th>
@@ -99,7 +101,7 @@ export function InzendingenTab({ formulier, onTellingGewijzigd }: { formulier: F
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></KaartTabel>
           </div>
         </div>
       )}

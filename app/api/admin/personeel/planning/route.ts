@@ -38,7 +38,11 @@ export async function GET(req: NextRequest) {
   }
 }
 
-/** POST — een medewerker rechtstreeks inplannen (zonder beschikbaarheid vooraf). */
+/**
+ * POST — een medewerker inplannen. Kan enkel binnen een beschikbaarheid die de
+ * medewerker zelf opgaf (controleerInplanning). Het werkblok wacht daarna op
+ * bevestiging door de medewerker; pas dan gaat het naar ClickUp.
+ */
 export async function POST(req: NextRequest) {
   try {
     const g = await eisPersoneel('toevoegen'); if (!g.ok) return g.response
@@ -48,11 +52,20 @@ export async function POST(req: NextRequest) {
     const c = await controleerInplanning(g.admin, { personeel_id: pid, datum: b.datum, start_tijd: b.start_tijd, eind_tijd: b.eind_tijd })
     if (!c.ok) return c.response
     const details = werkblokDetails(b, pid)
-    const rij: Record<string, unknown> = { personeel_id: pid, datum: c.datum, start_tijd: c.start, eind_tijd: c.eind, ...details, created_by: g.persoon.email }
+    const rij: Record<string, unknown> = { personeel_id: pid, datum: c.datum, start_tijd: c.start, eind_tijd: c.eind, ...details, bevestiging: 'te_bevestigen', created_by: g.persoon.email }
+    if (c.aanbod) rij.beschikbaarheid_id = c.aanbod.id
     const { data, error } = await g.admin.from('personeel_planning').insert(rij).select('id').single()
     if (error) throw new Error(error.message)
+    // De beschikbaarheid waarbinnen ingepland werd, staat niet langer "te behandelen".
+    if (c.aanbod?.status === 'ingediend') {
+      const volledig = c.aanbod.start_tijd.slice(0, 5) === c.start && c.aanbod.eind_tijd.slice(0, 5) === c.eind
+      await g.admin.from('personeel_beschikbaarheid').update({
+        status: volledig ? 'goedgekeurd' : 'gedeeltelijk', goedgekeurd_start: c.start, goedgekeurd_eind: c.eind,
+        planning_id: data.id, beslist_door: g.persoon.email, beslist_op: new Date().toISOString(), updated_at: new Date().toISOString(),
+      }).eq('id', c.aanbod.id).eq('status', 'ingediend')
+    }
     await audit(g.admin, { personeel_id: pid, entiteit: 'planning', entiteit_id: data.id, actie: 'ingepland', nieuw: rij, reden: tekst(b.reden, 500), actor_email: g.persoon.email, actor_id: g.persoon.userId })
-    await meld(g.admin, { personeel_id: pid, event: 'planning_goedgekeurd', titel: 'Je bent ingepland', tekst: `${c.datum.split('-').reverse().join('/')} van ${c.start} tot ${c.eind}${details.taak ? ` — ${details.taak}` : ''}.`, link: '/team/planning' })
+    await meld(g.admin, { personeel_id: pid, event: 'planning_goedgekeurd', titel: 'Je bent ingepland — graag bevestigen', tekst: `${c.datum.split('-').reverse().join('/')} van ${c.start} tot ${c.eind}${details.taak ? ` — ${details.taak}` : ''}. Bevestig in de app of je kunt.`, link: `/team/planning?blok=${data.id}` })
     return NextResponse.json({ ok: true, id: data.id, waarschuwing: c.waarschuwing })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })

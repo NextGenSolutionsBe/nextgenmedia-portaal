@@ -1,5 +1,7 @@
 'use client'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
+
 import { leesGetal } from '@/lib/getal'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -106,7 +108,7 @@ export function ContractFacturatie({ contractId, clientId, contractTitle, isSign
       )}
       {zichtbaar.length > 0 && (
         <div className="overflow-x-auto -mx-2">
-          <table className="w-full text-xs min-w-[760px]">
+          <KaartTabel><table className="w-full text-xs min-w-[760px]">
             <thead>
               <tr className="text-[10px] uppercase tracking-wide text-gray-500 bg-gray-50">
                 <th className="px-2 py-1.5 text-left">Omschrijving</th><th className="px-2 py-1.5 text-left">Geplande datum</th><th className="px-2 py-1.5 text-left">Verstuurd op</th>
@@ -135,7 +137,7 @@ export function ContractFacturatie({ contractId, clientId, contractTitle, isSign
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></KaartTabel>
         </div>
       )}
 

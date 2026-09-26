@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { formatDate } from '@/lib/utils'
 import { Send } from 'lucide-react'
@@ -30,7 +31,7 @@ export default async function SentMailsPage() {
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[720px]">
+          <KaartTabel><table className="w-full text-sm min-w-[720px]">
             <thead>
               <tr className="border-b border-gray-100">
                 <th className="text-left py-2 text-xs text-gray-500 font-medium">Datum</th>
@@ -58,7 +59,7 @@ export default async function SentMailsPage() {
                 )
               })}
             </tbody>
-          </table>
+          </table></KaartTabel>
         </div>
       )}
     </div>

@@ -100,6 +100,7 @@ export async function POST(req: NextRequest) {
       'clients',
       {
         owner_user_id: newUserId,
+        created_by: user.id,
         company_name: data.company_name,
         contact_name: data.contact_name || null,
         email: data.email,

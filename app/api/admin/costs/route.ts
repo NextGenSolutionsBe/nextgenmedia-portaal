@@ -30,7 +30,8 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
+    const actor = await requireAdmin()
+    if (!actor) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
     const body = await req.json()
     const { name, category, type, cost_date, start_date, end_date, billing_frequency, amount_excl, vat_pct, notes } = body
 
@@ -55,6 +56,7 @@ export async function POST(req: NextRequest) {
         amount_excl: (leesGetal(amount_excl) ?? NaN),
         vat_pct: vat_pct != null && vat_pct !== '' ? (leesGetal(vat_pct) ?? 21) : 21,
         notes: notes?.trim() || null,
+        created_by: actor.id,
       })
       .select('*')
       .single()

@@ -1,5 +1,7 @@
 'use client'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
+
 import { useEffect, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -226,7 +228,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="card-base">
               <h2 className="font-semibold mb-3">Samenvatting per contractjaar</h2>
-              <div className="table-wrap"><table className="w-full text-sm">
+              <div className="table-wrap"><KaartTabel><table className="w-full text-sm">
                 <thead><tr className="border-b border-gray-100">
                   <th className="table-th">Jaar</th><th className="table-th text-right">Meetellend</th><th className="table-th text-right">Tarief &gt;{pct(inst.einde_goedkope_schijf)}</th><th className="table-th text-right">Ruwe vesting</th><th className="table-th text-right">#</th>
                 </tr></thead>
@@ -241,7 +243,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                     </tr>
                   ))}
                 </tbody>
-              </table></div>
+              </table></KaartTabel></div>
             </div>
             <div className="card-base">
               <h2 className="font-semibold mb-3">WAM-portefeuille</h2>
@@ -268,7 +270,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
               <p className="text-xs text-amber-800 mb-3">
                 Uit de vorige versie van dit scherm. Ze tellen <b>niet</b> mee. Hoort er een thuis in het register, voeg hem dan toe als contract met de juiste ondertekeningsdatum en status.
               </p>
-              <div className="table-wrap"><table className="w-full text-sm">
+              <div className="table-wrap"><KaartTabel><table className="w-full text-sm">
                 <thead><tr className="border-b border-amber-200/60">
                   <th className="table-th">Datum</th><th className="table-th">Klant</th><th className="table-th">Dienst</th><th className="table-th text-right">Omzet</th><th className="table-th text-right">Toerekening</th>
                 </tr></thead>
@@ -283,7 +285,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                     </tr>
                   ))}
                 </tbody>
-              </table></div>
+              </table></KaartTabel></div>
             </div>
           )}
 
@@ -305,7 +307,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
               <div className="empty-state text-sm">Nog geen contracten.</div>
             ) : (
               <div className="table-wrap">
-                <table className="w-full text-sm">
+                <KaartTabel><table className="w-full text-sm">
                   <thead><tr className="border-b border-gray-100">
                     <th className="table-th">Contract</th>
                     <th className="table-th">Ondertekend</th>
@@ -373,7 +375,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table></KaartTabel>
               </div>
             )}
           </div>
@@ -415,7 +417,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                 <span className="text-[11px] font-normal text-gray-400">Klik een klant open voor de termijnen en facturen.</span>
               </div>
               {v.wam.rijen.length === 0 ? <div className="empty-state text-sm">Nog geen WAM-klanten.</div> : (
-                <div className="table-wrap"><table className="w-full text-sm">
+                <div className="table-wrap"><KaartTabel><table className="w-full text-sm">
                   <thead><tr className="border-b border-gray-100">
                     <th className="table-th w-6"></th><th className="table-th">Klant</th><th className="table-th text-right">Prognose</th><th className="table-th text-right">Gefactureerd</th><th className="table-th text-right">Ontvangen</th><th className="table-th text-right">Meetellend</th><th className="table-th">Status</th><th className="table-th w-16"></th>
                   </tr></thead>
@@ -450,13 +452,13 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                       )
                     })}
                   </tbody>
-                </table></div>
+                </table></KaartTabel></div>
               )}
             </div>
             <div className="card-base p-0 overflow-hidden">
               <div className="px-4 py-3 border-b border-gray-100 text-sm font-semibold">Kosten bij WAM</div>
               {kosten.length === 0 ? <div className="empty-state text-sm">Geen kosten.</div> : (
-                <div className="table-wrap"><table className="w-full text-sm">
+                <div className="table-wrap"><KaartTabel><table className="w-full text-sm">
                   <tbody className="divide-y divide-gray-50">
                     {kosten.map((k) => (
                       <tr key={k.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setKostDialoog(k)}>
@@ -468,7 +470,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                       </tr>
                     ))}
                   </tbody>
-                </table></div>
+                </table></KaartTabel></div>
               )}
             </div>
           </div>
@@ -491,7 +493,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
             De ondertekeningsdatum bepaalt definitief onder welk jaar een opdracht valt. De uitvoerings- of facturatiedatum verandert het tarief niet.
           </p>
           <div className="card-base p-0 overflow-hidden">
-            <div className="table-wrap"><table className="w-full text-sm">
+            <div className="table-wrap"><KaartTabel><table className="w-full text-sm">
               <thead><tr className="border-b border-gray-100">
                 <th className="table-th">Contractjaar</th><th className="table-th">Periode ondertekening</th><th className="table-th text-right">Tarief boven {pct(inst.einde_goedkope_schijf)}</th><th className="table-th text-right">Meetellende omzet</th><th className="table-th text-right">Ruwe vesting</th><th className="table-th text-right">Contracten</th>
               </tr></thead>
@@ -507,10 +509,10 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                   </tr>
                 ))}
               </tbody>
-            </table></div>
+            </table></KaartTabel></div>
           </div>
           <div className="card-base p-0 overflow-hidden">
-            <div className="table-wrap"><table className="w-full text-sm">
+            <div className="table-wrap"><KaartTabel><table className="w-full text-sm">
               <thead><tr className="border-b border-gray-100">
                 <th className="table-th">Nr.</th><th className="table-th">Klant</th><th className="table-th">Ondertekend</th><th className="table-th">Jaar</th><th className="table-th">Dienst</th><th className="table-th">Model</th><th className="table-th text-right">Maandbedrag</th><th className="table-th text-right">Duur</th><th className="table-th text-right">Totaal</th><th className="table-th text-right">Factor</th><th className="table-th text-right">Meetellend</th><th className="table-th">Erkenning</th>
               </tr></thead>
@@ -529,7 +531,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                   </tr>
                 ))}
               </tbody>
-            </table></div>
+            </table></KaartTabel></div>
           </div>
         </div>
       )}
@@ -832,7 +834,7 @@ function Termijnen({ rij, onExtra }: { rij: WamRijBerekend; onExtra: () => void 
         <div className="text-xs text-gray-500 py-2">Nog geen termijnen. Vul het facturatieschema in bij <button onClick={onExtra} className="underline">een losse termijn</button> of via <b>Wijzigen</b>.</div>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-          <div className="table-wrap"><table className="w-full text-sm">
+          <div className="table-wrap"><KaartTabel><table className="w-full text-sm">
             <thead><tr className="border-b border-gray-100">
               <th className="table-th">#</th><th className="table-th whitespace-nowrap">Periode</th><th className="table-th whitespace-nowrap">Factuurdatum</th><th className="table-th text-right whitespace-nowrap">Excl. btw</th><th className="table-th text-right whitespace-nowrap">Incl. btw</th><th className="table-th">Status</th><th className="table-th">Factuur</th><th className="table-th text-right">Actie</th>
             </tr></thead>
@@ -887,7 +889,7 @@ function Termijnen({ rij, onExtra }: { rij: WamRijBerekend; onExtra: () => void 
                 )
               })}
             </tbody>
-          </table></div>
+          </table></KaartTabel></div>
         </div>
       )}
     </div>

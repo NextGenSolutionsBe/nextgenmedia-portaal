@@ -1,5 +1,7 @@
 'use client'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
+
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -114,7 +116,7 @@ export function BvClient({ jaar, rechtenRijen, kostenRijen, verdelingRijen, ezRi
         <div className="space-y-6">
           <div className="card-base p-0 overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-100 text-sm font-semibold">Per persoon</div>
-            <div className="table-wrap"><table className="w-full text-sm min-w-[900px]">
+            <div className="table-wrap"><KaartTabel><table className="w-full text-sm min-w-[900px]">
               <thead><tr className="border-b border-gray-100">
                 <th className="table-th">Persoon</th>
                 <th className="table-th text-right">Bruto rechten</th>
@@ -139,7 +141,7 @@ export function BvClient({ jaar, rechtenRijen, kostenRijen, verdelingRijen, ezRi
                   </tr>
                 ))}
               </tbody>
-            </table></div>
+            </table></KaartTabel></div>
           </div>
 
           <div>
@@ -172,7 +174,7 @@ export function BvClient({ jaar, rechtenRijen, kostenRijen, verdelingRijen, ezRi
           </div>
           <div className="card-base p-0 overflow-hidden">
             {rechten.length === 0 ? <div className="empty-state text-sm">Nog geen regels.</div> : (
-              <div className="table-wrap"><table className="w-full text-sm min-w-[900px]">
+              <div className="table-wrap"><KaartTabel><table className="w-full text-sm min-w-[900px]">
                 <thead><tr className="border-b border-gray-100">
                   <th className="table-th">Datum</th><th className="table-th">Persoon</th><th className="table-th">Type</th><th className="table-th">Omschrijving</th>
                   <th className="table-th text-right">Bedrag excl.</th><th className="table-th text-right">Richting</th><th className="table-th text-right">Effect</th><th className="table-th">Bewijs</th><th className="table-th"></th>
@@ -197,7 +199,7 @@ export function BvClient({ jaar, rechtenRijen, kostenRijen, verdelingRijen, ezRi
                     </tr>
                   ))}
                 </tbody>
-              </table></div>
+              </table></KaartTabel></div>
             )}
           </div>
           <div className="card-base text-xs text-gray-600 space-y-1">
@@ -215,7 +217,7 @@ export function BvClient({ jaar, rechtenRijen, kostenRijen, verdelingRijen, ezRi
           </div>
           <div className="card-base p-0 overflow-hidden">
             {kosten.length === 0 ? <div className="empty-state text-sm">Nog geen kosten.</div> : (
-              <div className="table-wrap"><table className="w-full text-sm min-w-[1000px]">
+              <div className="table-wrap"><KaartTabel><table className="w-full text-sm min-w-[1000px]">
                 <thead><tr className="border-b border-gray-100">
                   <th className="table-th">Datum</th><th className="table-th">Leverancier</th><th className="table-th">Categorie</th><th className="table-th">Omschrijving</th>
                   <th className="table-th text-right">Excl. btw</th><th className="table-th text-right">Btw</th><th className="table-th text-right">Incl. btw</th>
@@ -243,7 +245,7 @@ export function BvClient({ jaar, rechtenRijen, kostenRijen, verdelingRijen, ezRi
                     </tr>
                   ))}
                 </tbody>
-              </table></div>
+              </table></KaartTabel></div>
             )}
           </div>
         </div>
@@ -308,7 +310,7 @@ function Verdeling({ rijen, berekend }: { rijen: Winstverdeling[]; berekend: Ret
         “al ontvangen” is wat ieder al uit zijn aandeel kreeg.
       </p>
       <div className="card-base p-0 overflow-hidden">
-        <div className="table-wrap"><table className="w-full text-sm min-w-[1000px]">
+        <div className="table-wrap"><KaartTabel><table className="w-full text-sm min-w-[1000px]">
           <thead><tr className="border-b border-gray-100">
             <th className="table-th">Persoon</th>
             {KOL.map((c) => <th key={c.k} className="table-th text-right">{c.label}</th>)}
@@ -337,7 +339,7 @@ function Verdeling({ rijen, berekend }: { rijen: Winstverdeling[]; berekend: Ret
               <td className="table-td text-right tabular">{geld(live.personen.reduce((s, p) => s + p.saldo, 0))}</td>
             </tr>
           </tbody>
-        </table></div>
+        </table></KaartTabel></div>
       </div>
       <div className="flex items-center gap-3">
         <button onClick={bewaar} disabled={bezig || !gewijzigd} className="btn-primary text-sm">
@@ -396,7 +398,7 @@ function EzRaming({ jaar, invoer, berekend }: { jaar: number; invoer: EzInvoer[]
         Vul per persoon de boekhoudkundige winst en het statuut in. De rest volgt uit de aannames voor {jaar}. Dit is een reserve-inschatting, geen aangifte.
       </p>
       <div className="card-base p-0 overflow-hidden">
-        <div className="table-wrap"><table className="w-full text-sm">
+        <div className="table-wrap"><KaartTabel><table className="w-full text-sm">
           <thead><tr className="border-b border-gray-100">
             <th className="table-th w-1/3">Persoon</th>
             {PERSONEN.map((p) => <th key={p} className="table-th text-right">{PERSOON_LABEL[p]}</th>)}
@@ -423,7 +425,7 @@ function EzRaming({ jaar, invoer, berekend }: { jaar: number; invoer: EzInvoer[]
               </tr>
             ))}
           </tbody>
-        </table></div>
+        </table></KaartTabel></div>
       </div>
       <button onClick={bewaar} disabled={bezig} className="btn-primary text-sm">
         {bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : null}Invoer opslaan
@@ -488,7 +490,7 @@ function AannamesForm({ aannames }: { aannames: Aannames }) {
     <div className="space-y-4">
       <p className="text-sm text-gray-500 max-w-2xl">Aannames {aannames.jaar} — aanpasbare fiscale raming. Percentages als fractie (0,25 = 25%).</p>
       <div className="card-base p-0 overflow-hidden">
-        <div className="table-wrap"><table className="w-full text-sm">
+        <div className="table-wrap"><KaartTabel><table className="w-full text-sm">
           <thead><tr className="border-b border-gray-100"><th className="table-th">Parameter</th><th className="table-th text-right">Waarde</th><th className="table-th">Eenheid</th><th className="table-th">Toelichting</th></tr></thead>
           <tbody className="divide-y divide-gray-50">
             {RIJEN.map((r) => (
@@ -500,7 +502,7 @@ function AannamesForm({ aannames }: { aannames: Aannames }) {
               </tr>
             ))}
           </tbody>
-        </table></div>
+        </table></KaartTabel></div>
       </div>
       <button onClick={bewaar} disabled={bezig} className="btn-primary text-sm">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : null}Aannames opslaan</button>
       <p className="text-[11px] text-gray-500">Bronnen: FOD Financiën (personenbelasting) en RSVZ / sociaal fonds. Controleer de definitieve fiscale situatie steeds met de boekhouder.</p>

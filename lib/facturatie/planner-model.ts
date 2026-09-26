@@ -65,6 +65,8 @@ export type Moment = {
   herkomst: Herkomst
   terugkerend: boolean
   verantwoordelijke: string | null
+  /** Wie de factuur (of reeks) aanmaakte — Bram, Marco, Chiara… */
+  door?: string | null
   volledig: boolean
   ontbrekend: string[]
   contract_id: string | null

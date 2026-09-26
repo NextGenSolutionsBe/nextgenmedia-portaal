@@ -8,6 +8,7 @@ import { vandaagBrussel, isDatum, ontleedSleutel, ymVan } from '@/lib/facturatie
 import { zetMaandStatus, ANNULERING_OPMERKING } from '@/lib/facturatie/recurring'
 import { billingDateFor, inclFromExcl } from '@/lib/invoices'
 import { kostenPerFactuur, rijSleutel } from '@/lib/facturen/kosten-data'
+import { leesActorNamen } from '@/lib/actor-namen'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -43,6 +44,18 @@ export async function GET(req: NextRequest) {
         m.kostenOnbekend = f.berekend.kostenOnbekend
       }
     } catch { /* lijst werkt ook zonder kosten */ }
+    // Wie maakte de factuur aan? Best-effort.
+    try {
+      const invIds = [...new Set(r.momenten.filter((m) => m.bron === 'invoice').map((m) => m.bronId))]
+      const recIds = [...new Set(r.momenten.filter((m) => m.bron === 'recurring').map((m) => m.bronId))]
+      const [inv, rec] = await Promise.all([
+        invIds.length ? admin.from('invoices').select('id, created_by').in('id', invIds) : Promise.resolve({ data: [] as { id: string; created_by: string | null }[] }),
+        recIds.length ? admin.from('recurring_invoices').select('id, created_by').in('id', recIds) : Promise.resolve({ data: [] as { id: string; created_by: string | null }[] }),
+      ])
+      const door = new Map<string, string | null>([...(inv.data ?? []), ...(rec.data ?? [])].map((x) => [x.id, x.created_by]))
+      const namen = await leesActorNamen(admin, [...door.values()])
+      for (const m of r.momenten) { const u = door.get(m.bronId); if (u) m.door = namen[u]?.kort ?? null }
+    } catch { /* lijst werkt ook zonder namen */ }
     return NextResponse.json({ ...r, vandaag, van, tot })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })

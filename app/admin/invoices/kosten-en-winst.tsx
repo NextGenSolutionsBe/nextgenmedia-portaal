@@ -1,5 +1,7 @@
 'use client'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
+
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2, X, Plus, Pencil, Ban, Undo2, CheckCircle2, AlertTriangle, ExternalLink, Info, Wallet } from 'lucide-react'
@@ -138,7 +140,7 @@ export function KostenEnWinstDialoog({ factuur: ref, titel, clientId, onClose, o
                 {data.lijnen.length === 0 ? (
                   <p className="text-xs text-gray-500">Geen lijnen ingevoerd; de factuur telt als één geheel ({formatEuro(b.omzetExcl)}). Voeg lijnen toe om per onderdeel te classificeren.</p>
                 ) : (
-                  <div className="table-wrap rounded-lg border border-gray-100"><table className="w-full text-xs">
+                  <div className="table-wrap rounded-lg border border-gray-100"><KaartTabel><table className="w-full text-xs">
                     <thead><tr className="border-b border-gray-100"><th className="table-th">Omschrijving</th><th className="table-th">Classificatie</th><th className="table-th text-right">Aantal</th><th className="table-th text-right">Verkoop excl.</th><th className="table-th text-right">Kosten</th><th className="table-th text-right">Winst</th><th className="table-th"></th></tr></thead>
                     <tbody className="divide-y divide-gray-50">
                       {b.perLijn.map((l) => (
@@ -164,7 +166,7 @@ export function KostenEnWinstDialoog({ factuur: ref, titel, clientId, onClose, o
                       )}
                       <tr className="bg-gray-100 font-semibold"><td className="table-td" colSpan={3}>Deze factuur</td><td className="table-td text-right tabular">{formatEuro(b.omzetExcl)}</td><td className="table-td text-right tabular">{formatEuro(b.directeKosten)}</td><td className={`table-td text-right tabular ${b.winst < 0 ? 'text-red-600' : 'text-green-700'}`}>{formatEuro(b.winst)}</td><td></td></tr>
                     </tbody>
-                  </table></div>
+                  </table></KaartTabel></div>
                 )}
               </div>
 
@@ -175,7 +177,7 @@ export function KostenEnWinstDialoog({ factuur: ref, titel, clientId, onClose, o
                   <button disabled={bezig} onClick={() => setKostForm({ line_id: '', omschrijving: '', categorie: '', leverancier: '', kostprijs_excl: '', datum: new Date().toISOString().slice(0, 10), bewijs_url: '', opmerking: '', reden: '' })} className={`${knop} bg-black text-white border-black hover:bg-gray-800`}><Plus className="h-3 w-3" />Kost toevoegen</button>
                 </div>
                 {data.kosten.length === 0 ? <p className="text-xs text-gray-500">Nog geen kosten gekoppeld.</p> : (
-                  <div className="table-wrap rounded-lg border border-gray-100"><table className="w-full text-xs">
+                  <div className="table-wrap rounded-lg border border-gray-100"><KaartTabel><table className="w-full text-xs">
                     <thead><tr className="border-b border-gray-100"><th className="table-th">Omschrijving</th><th className="table-th">Categorie</th><th className="table-th">Leverancier</th><th className="table-th text-right">Kostprijs excl.</th><th className="table-th">Gekoppeld aan</th><th className="table-th">Datum</th><th className="table-th">Status</th><th className="table-th">Bewijs</th><th className="table-th"></th></tr></thead>
                     <tbody className="divide-y divide-gray-50">
                       {data.kosten.map((k) => (
@@ -197,7 +199,7 @@ export function KostenEnWinstDialoog({ factuur: ref, titel, clientId, onClose, o
                         </tr>
                       ))}
                     </tbody>
-                  </table></div>
+                  </table></KaartTabel></div>
                 )}
               </div>
 

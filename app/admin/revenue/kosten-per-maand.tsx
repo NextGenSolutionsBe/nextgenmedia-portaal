@@ -1,5 +1,7 @@
 'use client'
 
+import { KaartTabel } from '@/components/ui/kaart-tabel'
+
 import { Fragment, useState } from 'react'
 import Link from 'next/link'
 import { ChevronRight, ExternalLink } from 'lucide-react'
@@ -37,7 +39,7 @@ export function KostenPerMaand({ rijen, year, actieveMaand }: { rijen: MaandRij[
         <div className="text-xs text-gray-400">Boekjaar {year} · excl. btw · klik een maand open voor elke kost apart. Kosten bij facturen tellen in de maand van de factuur.</div>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[720px]">
+        <KaartTabel><table className="w-full text-sm min-w-[720px]">
           <thead><tr className="text-left text-[11px] text-gray-500 uppercase tracking-wide bg-gray-50">
             <th className="px-4 py-2 font-medium">Maand</th>
             {kolommen.map((s) => <th key={s} className="px-3 py-2 font-medium text-right">{SOORT_LABEL[s]}</th>)}
@@ -79,7 +81,7 @@ export function KostenPerMaand({ rijen, year, actieveMaand }: { rijen: MaandRij[
               <td className="px-4 py-2 text-right tabular-nums text-red-600">{formatEuro(totaal)}</td>
             </tr>
           </tbody>
-        </table>
+        </table></KaartTabel>
       </div>
     </div>
   )
