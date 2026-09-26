@@ -70,7 +70,7 @@
   }
 }
 
-@layer utilities {
+@layer components {
   .brand-yellow { color: #fff848; }
   .bg-brand { background-color: #fff848; }
   .border-brand { border-color: #fff848; }
