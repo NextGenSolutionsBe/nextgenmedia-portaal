@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
   Info, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
-  MailCheck, PhoneCall, FolderUp, Handshake, Plug, Settings, ClipboardPen, Contact, Timer,
+  MailCheck, PhoneCall, FolderUp, Handshake, Plug, Settings, ClipboardPen, Contact, Timer, UserCircle,
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
@@ -387,8 +387,13 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
           ))}
         </nav>
 
-        {/* Instellingen (centraal beheer) + uitloggen */}
+        {/* Instellingen (centraal beheer) + eigen account + uitloggen */}
         <div className="px-3 py-4 border-t border-gray-100 space-y-0.5">
+          <Link href="/admin/account" prefetch={false} onClick={closeMobile}
+            className={cn('sidebar-item', padNu.startsWith('/admin/account') && 'active')}>
+            <UserCircle className="h-4 w-4 shrink-0" />
+            Mijn account
+          </Link>
           {toonInstellingen && (
             <Link href="/admin/instellingen" prefetch={false} onClick={closeMobile}
               className={cn('sidebar-item', padNu.startsWith('/admin/instellingen') && 'active')}>

@@ -1,45 +1,25 @@
 // Tweestapsverificatie voor INTERNE accounts (admin + werknemers).
 // Klanten en partners loggen gewoon met e-mail + wachtwoord in.
 //
+// Tweede factor: een code per mail (dit bestand) of een authenticator-app
+// (lib/twofa/). Wie de stap doorliep, staat in twofa_sessies — per Supabase-
+// sessie, zodat uitloggen of een securitywijziging het meteen intrekt.
+//
 // Edge-veilig: gebruikt uitsluitend Web Crypto (crypto.subtle), zodat dit zowel
 // in de middleware (Edge runtime) als in API-routes (Node) werkt. Geen imports
 // uit node:crypto.
 
+/** Oud verificatiecookie (vóór twofa_sessies) — enkel nog om het te wissen. */
 export const TWO_FA_COOKIE = 'ngm_2fa'
 export const CODE_TTL_MS = 10 * 60 * 1000          // code 10 minuten geldig
-export const SESSION_TTL_MS = 12 * 60 * 60 * 1000  // verificatie 12 uur geldig
 export const MAX_ATTEMPTS = 5                       // pogingen per code
 export const RESEND_COOLDOWN_MS = 60 * 1000         // minimaal 60s tussen codes
 
 const encoder = new TextEncoder()
 
-/** Geheim voor de handtekening. Valt terug op de service-role key (server-only,
- *  al beschikbaar in middleware) zodat dit werkt zonder extra env-variabele. */
+/** Peper voor de hash van mailcodes. Valt terug op de service-role key (server-only). */
 function secret(): string {
   return process.env.AUTH_2FA_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-}
-
-function toB64Url(bytes: Uint8Array): string {
-  let s = ''
-  for (const b of bytes) s += String.fromCharCode(b)
-  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-}
-
-function fromB64Url(s: string): Uint8Array {
-  const pad = s.replace(/-/g, '+').replace(/_/g, '/')
-  const padded = pad + '='.repeat((4 - (pad.length % 4)) % 4)
-  const bin = atob(padded)
-  const out = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
-  return out
-}
-
-async function hmac(data: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    'raw', encoder.encode(secret()), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
-  )
-  const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(data))
-  return toB64Url(new Uint8Array(sig))
 }
 
 /** SHA-256 hex — codes worden NOOIT in leesbare vorm bewaard. */
@@ -63,33 +43,12 @@ export function generateCode(): string {
   return String(buf[0] % 1_000_000).padStart(6, '0')
 }
 
-/** Ondertekend bewijs dat DEZE gebruiker de code heeft ingevoerd. */
-export async function createToken(userId: string, now = Date.now()): Promise<string> {
-  const payload = toB64Url(encoder.encode(JSON.stringify({ u: userId, e: now + SESSION_TTL_MS })))
-  return `${payload}.${await hmac(payload)}`
-}
-
-/** Geldig, niet vervallen én van deze gebruiker? */
-export async function verifyToken(token: string | undefined, userId: string, now = Date.now()): Promise<boolean> {
-  if (!token || !secret()) return false
-  const [payload, sig] = token.split('.')
-  if (!payload || !sig) return false
-  if (!safeEqual(sig, await hmac(payload))) return false
-  try {
-    const data = JSON.parse(new TextDecoder().decode(fromB64Url(payload))) as { u?: string; e?: number }
-    if (!data.u || typeof data.e !== 'number') return false
-    if (data.e < now) return false
-    return safeEqual(data.u, userId)
-  } catch {
-    return false
-  }
-}
-
 /**
  * Moet dit account de toegestuurde code invullen?
  *
  * Standaard JA. Enkel een uitdrukkelijke rij in login_settings met
- * two_factor_required = false zet dat uit. Elke andere uitkomst — geen rij,
+ * two_factor_required = false zet dat uit — en nooit voor een account met een
+ * actieve authenticator-app. Elke andere uitkomst — geen rij,
  * tabel bestaat nog niet, database onbereikbaar — houdt de code verplicht.
  * De veilige kant is hier de standaard, niet de uitzondering.
  *
@@ -102,9 +61,16 @@ export async function twoFactorRequired(
   userId: string,
 ): Promise<boolean> {
   try {
-    const { data, error } = await db
-      .from('login_settings').select('two_factor_required').eq('auth_user_id', userId).maybeSingle()
+    const [{ data, error }, app] = await Promise.all([
+      db.from('login_settings').select('two_factor_required').eq('auth_user_id', userId).maybeSingle(),
+      db.from('user_totp').select('actief').eq('user_id', userId).maybeSingle(),
+    ])
     if (error) return true
+    // Een actieve authenticator-app kan NIET met één klik uitgezet worden via
+    // deze vrijstelling — dat zou de app-2FA zonder extra controle opheffen.
+    // Uitzetten kan enkel via "2FA uitschakelen" (wachtwoord + code) of de
+    // admin-reset (eigen wachtwoord + eigen app-code). Lezing mislukt → verplicht.
+    if (app?.error || (app?.data as { actief?: boolean } | null)?.actief) return true
     return (data as { two_factor_required?: boolean } | null)?.two_factor_required !== false
   } catch {
     return true

@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Loader2, ShieldCheck, ShieldOff, KeyRound } from 'lucide-react'
+import { Loader2, ShieldCheck, ShieldOff, KeyRound, Smartphone, RotateCcw } from 'lucide-react'
+import { CodeInvoer } from '@/components/ui/code-invoer'
+import { Dialoog, INP } from '@/app/admin/instellingen/ui'
 
 type Account = {
   authUserId: string
@@ -11,6 +13,7 @@ type Account = {
   role: 'admin' | 'employee'
   active: boolean
   twoFactorRequired: boolean
+  totpActief: boolean
 }
 
 /**
@@ -27,6 +30,7 @@ export function LoginSettingsCard() {
   // Staat de tabel er nog niet, dan zeggen we dat meteen — anders lijkt het
   // alsof alles goed staat tot je op de knop drukt.
   const [hint, setHint] = useState<string | null>(null)
+  const [reset, setReset] = useState<Account | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -68,7 +72,7 @@ export function LoginSettingsCard() {
             <KeyRound className="h-4 w-4 text-gray-400" />Inloggen met code
           </h2>
           <p className="text-sm text-gray-500 mt-0.5">
-            Wie moet er naast e-mail en wachtwoord ook de toegestuurde code invullen? Standaard iedereen.
+            Interne accounts met hun rol en 2FA-status. Wie moet er naast e-mail en wachtwoord ook een code invullen? Standaard iedereen: per e-mail, of via een authenticator-app als die persoon dat instelde.
           </p>
         </div>
         {without > 0 && (
@@ -93,19 +97,28 @@ export function LoginSettingsCard() {
           {rows.map((a) => (
             <div key={a.authUserId} className="flex items-center gap-3 py-2.5">
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium truncate flex items-center gap-2">
+                <div className="text-sm font-medium flex items-center gap-x-2 gap-y-1 flex-wrap">
                   {a.name || a.email || 'Onbekend account'}
                   <span className="status-badge bg-gray-100 text-gray-600">
                     {a.role === 'admin' ? 'Admin' : 'Werknemer'}
                   </span>
                   {!a.active && <span className="status-badge bg-red-100 text-red-600">Inactief</span>}
+                  <span className={`status-badge ${a.totpActief ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`} title={a.totpActief ? 'Authenticator-app actief' : 'Code per e-mail'}>
+                    <Smartphone className="h-3 w-3 inline -mt-0.5 mr-0.5" />2FA: {a.totpActief ? 'Actief' : 'Niet actief'}
+                  </span>
                 </div>
                 {a.name && a.email && <div className="text-[11px] text-gray-400 truncate">{a.email}</div>}
               </div>
 
+              {a.totpActief && (
+                <button onClick={() => setReset(a)} title="App-2FA resetten (telefoon en herstelcodes kwijt)"
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50">
+                  <RotateCcw className="h-3.5 w-3.5" /><span className="hidden sm:inline">2FA resetten</span>
+                </button>
+              )}
               <button
                 onClick={() => toggle(a)}
-                disabled={busy === a.authUserId || !!hint}
+                disabled={busy === a.authUserId || !!hint || a.totpActief}
                 title={a.twoFactorRequired ? 'Code uitzetten voor dit account' : 'Code weer verplicht maken'}
                 className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
                   a.twoFactorRequired
@@ -125,7 +138,54 @@ export function LoginSettingsCard() {
       <p className="text-[11px] text-gray-500 mt-3">
         Zet je de code uit, dan volstaat een wachtwoord om bij alles te raken waar dat account bij mag.
         Elke wijziging hier komt in het logboek. Klanten en partners loggen sowieso in zonder code.
+        Een actieve authenticator-app kun je hier niet uitzetten; enkel resetten, met je eigen wachtwoord en app-code.
       </p>
+      {reset && <ResetDialoog account={reset} onSluit={() => setReset(null)} onKlaar={() => { setReset(null); load() }} />}
     </div>
+  )
+}
+
+/**
+ * Herstelpad als iemand telefoon én herstelcodes kwijt is. De admin bevestigt
+ * met het EIGEN wachtwoord en de EIGEN app-code; de server controleert alles.
+ */
+function ResetDialoog({ account, onSluit, onKlaar }: { account: Account; onSluit: () => void; onKlaar: () => void }) {
+  const [wachtwoord, setWachtwoord] = useState('')
+  const [code, setCode] = useState('')
+  const [bezig, setBezig] = useState(false)
+  const [fout, setFout] = useState<string | null>(null)
+  const verstuur = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setBezig(true); setFout(null)
+    try {
+      const r = await fetch('/api/admin/login-settings/reset-2fa', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ authUserId: account.authUserId, wachtwoord, code }) })
+      const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error ?? 'Resetten mislukt')
+      toast.success('2FA gereset. Die persoon logt nu in met een code per e-mail en stelt een nieuwe app in.')
+      onKlaar()
+    } catch (e) { setFout(e instanceof Error ? e.message : 'Resetten mislukt'); setCode('') } finally { setBezig(false) }
+  }
+  return (
+    <Dialoog titel="2FA resetten" onSluit={onSluit}>
+      <form onSubmit={verstuur} className="space-y-4">
+        <p className="text-sm text-gray-600">
+          De authenticator-app en herstelcodes van <b>{account.name || account.email}</b> worden verwijderd en die persoon wordt overal afgemeld. Doe dit enkel als je zeker weet dat het om die persoon gaat (bv. telefonisch of persoonlijk bevestigd).
+        </p>
+        <div>
+          <label htmlFor="rw" className="block text-xs font-medium text-gray-600 mb-1">Jouw wachtwoord</label>
+          <input id="rw" type="password" autoComplete="current-password" autoFocus className={INP} value={wachtwoord} onChange={(e) => setWachtwoord(e.target.value)} />
+        </div>
+        <div>
+          <label htmlFor="rc" className="block text-xs font-medium text-gray-600 mb-1">Code uit jouw authenticator-app</label>
+          <CodeInvoer id="rc" waarde={code} onWijzig={setCode} disabled={bezig} />
+        </div>
+        {fout && <div role="alert" className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{fout}</div>}
+        <div className="flex gap-2 justify-end">
+          <button type="button" onClick={onSluit} disabled={bezig} className="btn-secondary">Annuleren</button>
+          <button type="submit" disabled={bezig || !wachtwoord || code.length !== 6} className="btn-danger">
+            {bezig && <Loader2 className="h-4 w-4 animate-spin" />}2FA resetten
+          </button>
+        </div>
+      </form>
+    </Dialoog>
   )
 }

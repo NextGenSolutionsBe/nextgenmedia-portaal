@@ -12,6 +12,10 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
  * database traag), dan laten we het verzoek DOOR. Reden: dit is een extra
  * beschermlaag bovenop de echte guards; een storing in de teller mag nooit de
  * hele app op slot zetten. De authenticatie zelf blijft altijd verplicht.
+ *
+ * UITZONDERING — `failClosed: true`: voor het raden van korte codes (TOTP,
+ * herstelcodes) is de teller zelf de bescherming. Kan die niet gelezen worden,
+ * dan weigeren we liever even dan onbeperkt te laten raden.
  */
 
 export type RateVerdict = { allowed: boolean; retryAfterSec: number; remaining: number }
@@ -26,9 +30,11 @@ export function clientIp(req: Request): string {
 
 export async function rateLimit(
   key: string,
-  opts: { limit: number; windowSec: number },
+  opts: { limit: number; windowSec: number; failClosed?: boolean },
 ): Promise<RateVerdict> {
-  const ok: RateVerdict = { allowed: true, retryAfterSec: 0, remaining: opts.limit }
+  const ok: RateVerdict = opts.failClosed
+    ? { allowed: false, retryAfterSec: 60, remaining: 0 }
+    : { allowed: true, retryAfterSec: 0, remaining: opts.limit }
   try {
     const admin = createAdminSupabaseClient()
     const since = new Date(Date.now() - opts.windowSec * 1000).toISOString()
@@ -38,14 +44,15 @@ export async function rateLimit(
       .select('id', { count: 'exact', head: true })
       .eq('key', key)
       .gte('created_at', since)
-    if (error) return ok   // fail-open, zie toelichting hierboven
+    if (error) return ok   // fail-open (of dicht bij failClosed), zie toelichting hierboven
 
     const used = count ?? 0
     if (used >= opts.limit) {
       return { allowed: false, retryAfterSec: opts.windowSec, remaining: 0 }
     }
 
-    await admin.from('rate_limit_hits').insert({ key, created_at: new Date().toISOString() })
+    const { error: insErr } = await admin.from('rate_limit_hits').insert({ key, created_at: new Date().toISOString() })
+    if (insErr && opts.failClosed) return ok
     return { allowed: true, retryAfterSec: 0, remaining: Math.max(0, opts.limit - used - 1) }
   } catch {
     return ok

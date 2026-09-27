@@ -5281,3 +5281,75 @@ create table if not exists sales_stat_correcties (
 );
 create index if not exists sales_stat_correcties_entiteit on sales_stat_correcties (entiteit, entiteit_id);
 alter table sales_stat_correcties enable row level security;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Tweestapsverificatie met een authenticator-app (TOTP) + 2FA-sessies (27 sep 2026)
+-- Bouwt verder op de bestaande tweede stap (login_codes / login_settings).
+--
+--  · user_totp          het TOTP-geheim per gebruiker, VERSLEUTELD (AES-256-GCM met
+--                       TOTP_ENC_KEY uit de omgeving — de sleutel staat nooit hier).
+--  · user_herstelcodes  herstelcodes, enkel als HMAC-hash, elk één keer bruikbaar.
+--  · twofa_sessies      welke Supabase-sessie (session_id uit de JWT) de tweede stap
+--                       doorliep. Enige bron voor middleware, route-guards én RLS.
+--  · sessie_2fa_ok()    voor RLS: heeft de huidige sessie de tweede stap gedaan?
+--  · user_roles         restrictieve policy: de admin-rol is via de gebruikerssessie
+--                       pas zichtbaar na de tweede stap. Alle admin-policies (die
+--                       user_roles opvragen) vallen daardoor mee dicht.
+-- Enkel de service-role leest/schrijft deze tabellen (RLS aan, geen policies).
+-- ═══════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS public.user_totp (
+  user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  secret_enc text,
+  actief boolean NOT NULL DEFAULT false,
+  geactiveerd_op timestamptz,
+  laatste_stap bigint,
+  setup_secret_enc text,
+  setup_gestart_op timestamptz,
+  gewijzigd_op timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.user_totp ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.user_totp FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.user_herstelcodes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  code_hash text NOT NULL,
+  gebruikt_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS user_herstelcodes_user_idx ON public.user_herstelcodes (user_id) WHERE gebruikt_op IS NULL;
+ALTER TABLE public.user_herstelcodes ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.user_herstelcodes FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.twofa_sessies (
+  session_id uuid PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  methode text NOT NULL,
+  totp_instellen boolean NOT NULL DEFAULT false,
+  geverifieerd_op timestamptz NOT NULL DEFAULT now(),
+  verloopt_op timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS twofa_sessies_user_idx ON public.twofa_sessies (user_id);
+ALTER TABLE public.twofa_sessies ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.twofa_sessies FROM anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.sessie_2fa_ok() RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.twofa_sessies s
+     WHERE s.user_id = auth.uid()
+       AND s.session_id = NULLIF(auth.jwt() ->> 'session_id', '')::uuid
+       AND s.verloopt_op > now()
+  ) OR EXISTS (
+    SELECT 1 FROM public.login_settings l
+     WHERE l.auth_user_id = auth.uid() AND l.two_factor_required = false
+       AND NOT EXISTS (SELECT 1 FROM public.user_totp t WHERE t.user_id = auth.uid() AND t.actief)
+  )
+$$;
+REVOKE ALL ON FUNCTION public.sessie_2fa_ok() FROM public, anon;
+GRANT EXECUTE ON FUNCTION public.sessie_2fa_ok() TO authenticated;
+
+DROP POLICY IF EXISTS user_roles_admin_na_tweede_stap ON public.user_roles;
+CREATE POLICY user_roles_admin_na_tweede_stap ON public.user_roles
+  AS RESTRICTIVE FOR SELECT
+  USING (role <> 'admin' OR (SELECT public.sessie_2fa_ok()));

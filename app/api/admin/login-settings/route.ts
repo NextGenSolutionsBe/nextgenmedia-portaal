@@ -30,6 +30,8 @@ type Account = {
   role: 'admin' | 'employee'
   active: boolean
   twoFactorRequired: boolean
+  /** Authenticator-app (TOTP) actief — enkel de status, nooit het geheim. */
+  totpActief: boolean
 }
 
 // GET — alle interne accounts met hun huidige instelling.
@@ -38,11 +40,13 @@ export async function GET() {
     if (!(await requireAdmin())) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
     const admin = createAdminSupabaseClient()
 
-    const [{ data: roles }, { data: staff }, { data: settings, error: settingsErr }] = await Promise.all([
+    const [{ data: roles }, { data: staff }, { data: settings, error: settingsErr }, { data: totp }] = await Promise.all([
       admin.from('user_roles').select('user_id, role').eq('role', 'admin'),
       admin.from('staff_members').select('auth_user_id, name, email, active'),
       admin.from('login_settings').select('auth_user_id, two_factor_required'),
+      admin.from('user_totp').select('user_id').eq('actief', true),
     ])
+    const metApp = new Set(((totp ?? []) as { user_id: string }[]).map((r) => r.user_id))
 
     // Ontbreekt de tabel, dan tonen we dat meteen in het scherm i.p.v. de
     // gebruiker te laten ontdekken dat opslaan niet werkt.
@@ -67,7 +71,8 @@ export async function GET() {
         name: null,
         role: 'admin',
         active: true,
-        twoFactorRequired: isRequired(r.user_id),
+        twoFactorRequired: isRequired(r.user_id) || metApp.has(r.user_id),
+        totpActief: metApp.has(r.user_id),
       })
     }
     for (const s of (staff ?? []) as { auth_user_id: string | null; name: string | null; email: string | null; active: boolean }[]) {
@@ -79,7 +84,8 @@ export async function GET() {
         name: s.name,
         role: 'employee',
         active: s.active !== false,
-        twoFactorRequired: isRequired(s.auth_user_id),
+        twoFactorRequired: isRequired(s.auth_user_id) || metApp.has(s.auth_user_id),
+        totpActief: metApp.has(s.auth_user_id),
       })
     }
 
@@ -109,6 +115,12 @@ export async function PATCH(req: NextRequest) {
     const isAdmin = role?.role === 'admin'
     const { data: staff } = await admin.from('staff_members').select('id').eq('auth_user_id', authUserId).maybeSingle()
     if (!isAdmin && !staff) return NextResponse.json({ error: 'Dit is geen intern account' }, { status: 400 })
+    if (!wanted) {
+      const { data: app } = await admin.from('user_totp').select('actief').eq('user_id', authUserId).maybeSingle()
+      if ((app as { actief?: boolean } | null)?.actief) {
+        return NextResponse.json({ error: 'Dit account gebruikt een authenticator-app. Die kan enkel de persoon zelf uitschakelen, of een admin via "2FA resetten" (met eigen wachtwoord en app-code).' }, { status: 400 })
+      }
+    }
 
     const { error } = await admin.from('login_settings').upsert({
       auth_user_id: authUserId,

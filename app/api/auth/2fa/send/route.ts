@@ -32,6 +32,13 @@ export async function POST(req: NextRequest) {
     if (!(await needsTwoFactor(user.id))) {
       return NextResponse.json({ error: 'Niet van toepassing' }, { status: 403 })
     }
+
+    // Authenticator-app actief? Dan geen mailcode: de app (of een herstelcode)
+    // is dan de enige tweede factor. Het scherm schakelt om op dit antwoord.
+    {
+      const { data: totp } = await createAdminSupabaseClient().from('user_totp').select('actief').eq('user_id', user.id).maybeSingle()
+      if ((totp as { actief?: boolean } | null)?.actief) return NextResponse.json({ ok: true, methode: 'totp' })
+    }
     if (!user.email) return NextResponse.json({ error: 'Geen e-mailadres bekend' }, { status: 400 })
 
     // Rem per IP: voorkomt dat iemand met een gestolen wachtwoord (of een script)
@@ -98,7 +105,7 @@ export async function POST(req: NextRequest) {
     // code heen ging zonder het volledige adres te tonen.
     const [name, domain] = user.email.split('@')
     const masked = `${name.slice(0, 2)}${'•'.repeat(Math.max(1, name.length - 2))}@${domain}`
-    return NextResponse.json({ ok: true, sentTo: masked })
+    return NextResponse.json({ ok: true, methode: 'mail', sentTo: masked })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }

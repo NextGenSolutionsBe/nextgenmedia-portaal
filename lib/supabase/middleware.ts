@@ -4,7 +4,8 @@ import { pathToModule, canSeeModule, STAFF_API_WHITELIST, isStaffApiDenied, modu
 import { isDisabledPath } from '@/lib/features'
 import { leesInstellingenEdge } from '@/lib/instellingen/edge'
 import { moduleBeschikbaar, magActie, actieVoorMethode, rolVanStaff, MODULE_INSTELLINGEN_KEY, MODULE_WERKNEMERS_KEY, type Persoon } from '@/lib/instellingen/model'
-import { verifyToken, TWO_FA_COOKIE, twoFactorRequired } from '@/lib/two-factor'
+import { twoFactorRequired } from '@/lib/two-factor'
+import { sessieStatus, sessieIdUitToken, tweedeStapActie, type SessieRij } from '@/lib/twofa/sessie'
 // Bewust uit admin-client.ts en NIET uit server.ts: die laatste gebruikt
 // React's cache(), en dat bestaat niet in de edge-runtime waar deze middleware
 // draait. Zie de toelichting in lib/supabase/admin-client.ts.
@@ -47,7 +48,10 @@ const HDR_USER = 'x-ngm-user'
 const HDR_ROLE = 'x-ngm-role'
 const HDR_MODULES = 'x-ngm-modules'
 const HDR_NAAM = 'x-ngm-naam'
-const ONZE_HEADERS = [HDR_USER, HDR_ROLE, HDR_MODULES, HDR_NAAM]
+// "De tweede stap is voor deze gebruiker in orde" — gelezen door de route-guards
+// (lib/twofa/server.ts), zodat die het niet nog eens in de databank opzoeken.
+const HDR_TWEEDE_STAP = 'x-ngm-2fa'
+const ONZE_HEADERS = [HDR_USER, HDR_ROLE, HDR_MODULES, HDR_NAAM, HDR_TWEEDE_STAP]
 
 // ── Nooit onbeperkt wachten ──────────────────────────────────────────────────
 //
@@ -150,6 +154,8 @@ export async function updateSession(request: NextRequest) {
   }
 
   let supabaseResponse = NextResponse.next({ request })
+  /** Gebruiker wiens tweede stap hier vastgesteld werd (→ header voor de guards). */
+  let tweedeStapVoor: string | null = null
 
   /**
    * De enige manier waarop een verzoek deze middleware levend verlaat.
@@ -163,6 +169,7 @@ export async function updateSession(request: NextRequest) {
   const doorgeven = (identiteit?: { userId: string; role: string; modules?: string[]; naam?: string | null }) => {
     const headers = new Headers(request.headers)
     for (const h of ONZE_HEADERS) headers.delete(h)
+    if (tweedeStapVoor) headers.set(HDR_TWEEDE_STAP, tweedeStapVoor)
     if (identiteit) {
       headers.set(HDR_USER, identiteit.userId)
       headers.set(HDR_ROLE, identiteit.role)
@@ -230,6 +237,8 @@ export async function updateSession(request: NextRequest) {
    * uitgelogd: iemand met een prima sessie mag daar niet om buitengezet worden.
    */
   let user: Wie | null | 'onbekend' = 'onbekend'
+  /** De Supabase-sessie (session_id in de JWT) — daaraan hangt de tweede stap. */
+  let sessionId: string | null = null
   try {
     // getClaims kan gooien (bv. als de publieke sleutel niet opgehaald raakt).
     // Ongevangen zou dat de hele middleware laten klappen — een 500 op élke
@@ -242,6 +251,8 @@ export async function updateSession(request: NextRequest) {
     if (res) {
       const sub = res.data?.claims?.sub
       user = sub ? { id: sub as string, email: res.data?.claims?.email as string | undefined } : null
+      const sid = (res.data?.claims as { session_id?: unknown } | undefined)?.session_id
+      sessionId = typeof sid === 'string' ? sid : null
     }
   } catch {
     user = 'onbekend'
@@ -257,6 +268,8 @@ export async function updateSession(request: NextRequest) {
         null as Awaited<ReturnType<typeof supabase.auth.getUser>> | null,
       )
       if (res) user = res.data.user ? { id: res.data.user.id, email: res.data.user.email } : null
+      // getUser heeft de token net gecontroleerd; het session_id eruit lezen is veilig.
+      if (user) sessionId = sessieIdUitToken((await supabase.auth.getSession()).data.session?.access_token)
     } catch {
       user = 'onbekend'
     }
@@ -269,6 +282,12 @@ export async function updateSession(request: NextRequest) {
     return databankOnbereikbaar(path)
   }
   if (user === 'onbekend') user = null
+
+  /** De 2FA-rij van deze sessie (twofa_sessies) — één opzoeking op de primaire sleutel. */
+  const leesTweedeStap = (db: { from: (t: string) => any }): Promise<Lezing<SessieRij>> => // eslint-disable-line @typescript-eslint/no-explicit-any
+    sessionId
+      ? lees<SessieRij>(db.from('twofa_sessies').select('user_id, verloopt_op, totp_instellen').eq('session_id', sessionId).maybeSingle())
+      : Promise.resolve({ ok: true as const, data: null })
 
   // Uitgeschakelde features (lib/features.ts) centraal dichtzetten — voor
   // IEDEREEN, ook admin, zodat een verborgen module ook niet via een directe URL
@@ -285,19 +304,26 @@ export async function updateSession(request: NextRequest) {
   if (path.startsWith('/api/admin')) {
     if (!user) return NextResponse.json({ error: 'Niet ingelogd' }, { status: 401 })
     const db = roleReader(supabase)
-    const rol = await lees<{ role?: string }>(
-      db.from('user_roles').select('role').eq('user_id', user.id).limit(1).maybeSingle(),
-    )
-    if (!rol.ok) return databankOnbereikbaar(path)
+    // Rol en 2FA-sessie tegelijk opvragen (geen extra wachttijd).
+    const [rol, stap] = await Promise.all([
+      lees<{ role?: string }>(db.from('user_roles').select('role').eq('user_id', user.id).limit(1).maybeSingle()),
+      leesTweedeStap(db),
+    ])
+    if (!rol.ok || !stap.ok) return databankOnbereikbaar(path)
     const roleData = rol.data
 
     // Interne accounts moeten óók de tweestapsverificatie hebben doorlopen —
-    // anders zou een geldig wachtwoord alleen al volstaan voor de API's.
-    // verifyToken rekent enkel lokaal; geen tijdslimiet nodig.
-    const twoFaOk = await verifyToken(request.cookies.get(TWO_FA_COOKIE)?.value, user.id)
+    // anders zou een geldig wachtwoord alleen al volstaan voor de API's. De
+    // bron is twofa_sessies (per Supabase-sessie, server-side intrekbaar).
+    const twoFaOk = sessieStatus(stap.data, user.id, Date.now()) !== 'nodig'
+    if (twoFaOk) tweedeStapVoor = user.id
     // Bij twijfel de code vragen: een tijdsoverschrijding mag nooit een
     // vrijstelling opleveren.
-    const codeVerplicht = () => metTijdslimiet(twoFactorRequired(db, user.id), DB_TIJDSLIMIET_MS, true)
+    const codeVerplicht = async () => {
+      const verplicht = await metTijdslimiet(twoFactorRequired(db, user.id), DB_TIJDSLIMIET_MS, true)
+      if (!verplicht) tweedeStapVoor = user.id
+      return verplicht
+    }
 
     if (roleData?.role === 'admin') {
       // Een account kan van de code vrijgesteld zijn (login_settings). We vragen
@@ -419,13 +445,24 @@ export async function updateSession(request: NextRequest) {
     if (staff && staff.active !== false) role = 'employee'
   }
 
-  // Interne accounts (admin + werknemer): tweestapsverificatie verplicht.
-  // Klanten en partners loggen gewoon met wachtwoord in.
-  if ((role === 'admin' || role === 'employee') && path.startsWith('/admin')) {
-    const twoFaOk = await verifyToken(request.cookies.get(TWO_FA_COOKIE)?.value, user.id)
+  // Interne accounts (admin + werknemer): tweestapsverificatie verplicht, ook
+  // in het Kantoor. Klanten en partners loggen gewoon met wachtwoord in.
+  if ((role === 'admin' || role === 'employee') && (path.startsWith('/admin') || path.startsWith('/kantoor'))) {
+    const stap = await leesTweedeStap(db)
+    if (!stap.ok) return databankOnbereikbaar(path)
+    const status = sessieStatus(stap.data, user.id, Date.now())
     // Vrijgesteld? Dan volstaat e-mail + wachtwoord. Staat er niets ingesteld,
-    // dan blijft de code verplicht — zie twoFactorRequired().
-    if (!twoFaOk && await metTijdslimiet(twoFactorRequired(db, user.id), DB_TIJDSLIMIET_MS, true)) {
+    // dan blijft de code verplicht — zie twoFactorRequired(). Enkel opvragen
+    // als de sessie de stap nog niet deed.
+    const verplicht = status === 'nodig' ? await metTijdslimiet(twoFactorRequired(db, user.id), DB_TIJDSLIMIET_MS, true) : false
+    const actie = tweedeStapActie(status, verplicht, path)
+    if (actie === 'door') tweedeStapVoor = user.id
+    // De rol vereist een authenticator-app die nog niet ingesteld is: eerst dat.
+    if (actie === 'instellen') {
+      tweedeStapVoor = user.id
+      return copyAuthCookies(supabaseResponse, NextResponse.redirect(new URL('/admin/account?instellen=1', request.url)))
+    }
+    if (actie === 'verificatie') {
       const url = request.nextUrl.clone()
       url.pathname = '/login/verify'
       url.search = ''

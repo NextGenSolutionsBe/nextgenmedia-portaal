@@ -99,7 +99,19 @@ export const getStaffRow = cache(async (
 export async function requireAdmin(): Promise<User | null> {
   const user = await getSessionUser()
   if (!user) return null
-  return (await getUserRole(user.id)) === 'admin' ? user : null
+  if ((await getUserRole(user.id)) !== 'admin') return null
+  return (await tweedeStapOk(user.id)) ? user : null
+}
+
+/**
+ * Interne rechten gelden pas na de tweede stap (mailcode of authenticator-app),
+ * op ELK pad — ook buiten /api/admin (bv. /api/kantoor). Zo volstaat een
+ * wachtwoord alleen nooit voor een beheerroute. Dynamisch geïmporteerd om een
+ * kringverwijzing tussen de modules te vermijden.
+ */
+async function tweedeStapOk(userId: string): Promise<boolean> {
+  const { tweedeStapVoltooid } = await import('@/lib/twofa/server')
+  return tweedeStapVoltooid(userId)
 }
 
 /**
@@ -120,8 +132,9 @@ export async function isActiveStaff(userId: string): Promise<boolean> {
 export async function requireStaff(): Promise<User | null> {
   const user = await getSessionUser()
   if (!user) return null
-  if ((await getUserRole(user.id)) === 'admin') return user
-  return (await isActiveStaff(user.id)) ? user : null
+  const intern = (await getUserRole(user.id)) === 'admin' || (await isActiveStaff(user.id))
+  if (!intern) return null
+  return (await tweedeStapOk(user.id)) ? user : null
 }
 
 /**
