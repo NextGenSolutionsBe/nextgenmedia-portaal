@@ -7,10 +7,10 @@ import { eigenAccount, logSecurity } from '@/lib/twofa/route'
 export const dynamic = 'force-dynamic'
 
 /**
- * POST { wachtwoord, code | herstelcode } — app-2FA uitschakelen. Vereist het
- * huidige wachtwoord ÉN een geldige app-code of herstelcode. Daarna zijn het
- * geheim en alle herstelcodes weg, worden andere sessies ingetrokken en valt
- * het account terug op de mailcode.
+ * POST { wachtwoord, code | herstelcode } — de eigen app loskoppelen (nieuwe
+ * telefoon). Vereist het huidige wachtwoord ÉN een geldige app-code of
+ * herstelcode. Daarna zijn het geheim en alle herstelcodes weg en worden andere
+ * sessies ingetrokken; bij de volgende login koppelt het account een nieuwe app.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: r.fout }, { status: r.status })
     }
     await trekAndereSessiesIn(g.sessie)
-    logSecurity(req, g.sessie, g.rol, 'auth.2fa.totp_uitgeschakeld', 'Tweestapsverificatie met een authenticator-app uitgeschakeld (terug naar mailcode)')
+    logSecurity(req, g.sessie, g.rol, 'auth.2fa.totp_uitgeschakeld', 'Tweestapsverificatie met een authenticator-app losgekoppeld (koppelt bij de volgende login een nieuwe app)')
     return NextResponse.json({ ok: true })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })

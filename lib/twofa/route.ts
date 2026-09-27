@@ -2,15 +2,15 @@ import 'server-only'
 import { NextResponse, type NextRequest } from 'next/server'
 import { logAudit, requestMeta } from '@/lib/audit'
 import type { Kern } from './kern'
-import { huidigeSessie, interneRol, maakKern, tweedeStapVoltooid, type Sessie } from './server'
+import { appActief, huidigeSessie, interneRol, maakKern, tweedeStapVoltooid, type Sessie } from './server'
 
 /**
  * Gemeenschappelijke ingang voor de 2FA-beheerroutes (instellen, uitschakelen,
  * herstelcodes, status): enkel een INTERN account, in een sessie die de tweede
- * stap al voltooide. Alles gebeurt voor de eigen gebruiker — er is geen enkele
+ * stap al voltooide (of, bij het koppelen tijdens het inloggen, nog geen app heeft). Alles gebeurt voor de eigen gebruiker — er is geen enkele
  * parameter waarmee je een ander account kunt aanspreken.
  */
-export async function eigenAccount(opts: { kernNodig?: boolean } = {}): Promise<
+export async function eigenAccount(opts: { kernNodig?: boolean; koppelenBijInloggen?: boolean } = {}): Promise<
   | { ok: true; sessie: Sessie; rol: 'admin' | 'employee'; kern: Kern | null }
   | { ok: false; res: NextResponse }
 > {
@@ -19,7 +19,10 @@ export async function eigenAccount(opts: { kernNodig?: boolean } = {}): Promise<
   const rol = await interneRol(sessie.user.id)
   if (!rol) return { ok: false, res: NextResponse.json({ error: 'Niet van toepassing' }, { status: 403 }) }
   if (!(await tweedeStapVoltooid(sessie.user.id))) {
-    return { ok: false, res: NextResponse.json({ error: 'Verificatie vereist', code: '2fa_required' }, { status: 401 }) }
+    // Enige uitzondering: wie nog GEEN app heeft, moet er bij het inloggen een
+    // koppelen (setup + bevestigen). Wie al een app heeft, moet eerst een code geven.
+    const magKoppelen = opts.koppelenBijInloggen && !(await appActief(sessie.user.id))
+    if (!magKoppelen) return { ok: false, res: NextResponse.json({ error: 'Verificatie vereist', code: '2fa_required' }, { status: 401 }) }
   }
   const kern = maakKern()
   if (opts.kernNodig && !kern) {

@@ -19,7 +19,8 @@ export type Medewerker = {
   laatsteLogin: string | null
   aangemaakt: string | null
   uitnodigingOp: string | null
-  tweeFactor: boolean
+  /** 2FA: app gekoppeld, nog geen app (koppelt bij volgende login), of door een admin uitgezet. */
+  tweeFactor: 'app' | 'nog_niet' | 'uit'
 }
 
 export const ADMIN_ID_PREFIX = 'admin:'

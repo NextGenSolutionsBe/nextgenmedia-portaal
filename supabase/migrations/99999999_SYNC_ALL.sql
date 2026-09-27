@@ -5353,3 +5353,30 @@ DROP POLICY IF EXISTS user_roles_admin_na_tweede_stap ON public.user_roles;
 CREATE POLICY user_roles_admin_na_tweede_stap ON public.user_roles
   AS RESTRICTIVE FOR SELECT
   USING (role <> 'admin' OR (SELECT public.sessie_2fa_ok()));
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 2FA enkel nog met een authenticator-app (27 sep 2026)
+--  · login_settings.vrijgesteld_tot: een admin kan de 2FA van iemand TIJDELIJK
+--    uitschakelen (24 u / 7 d) of tot hij weer aangezet wordt (NULL).
+--  · Een geldige vrijstelling geldt nu ook als die persoon een app heeft (de
+--    admin bevestigt dat met eigen wachtwoord + app-code).
+-- ═══════════════════════════════════════════════════════════════════════════
+ALTER TABLE public.login_settings ADD COLUMN IF NOT EXISTS vrijgesteld_tot timestamptz;
+
+CREATE OR REPLACE FUNCTION public.sessie_2fa_ok() RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.twofa_sessies s
+     WHERE s.user_id = auth.uid()
+       AND s.session_id = NULLIF(auth.jwt() ->> 'session_id', '')::uuid
+       AND s.verloopt_op > now()
+  ) OR EXISTS (
+    SELECT 1 FROM public.login_settings l
+     WHERE l.auth_user_id = auth.uid() AND l.two_factor_required = false
+       AND (l.vrijgesteld_tot IS NULL OR l.vrijgesteld_tot > now())
+  )
+$$;
+REVOKE ALL ON FUNCTION public.sessie_2fa_ok() FROM public, anon;
+GRANT EXECUTE ON FUNCTION public.sessie_2fa_ok() TO authenticated;
+-- Wie startte een lopende app-koppeling? (een admin die voor iemand koppelt)
+ALTER TABLE public.user_totp ADD COLUMN IF NOT EXISTS setup_door uuid;

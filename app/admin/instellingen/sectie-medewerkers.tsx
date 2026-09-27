@@ -4,7 +4,7 @@ import { KaartTabel } from '@/components/ui/kaart-tabel'
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
-import { Plus, Loader2, Power, Archive, RotateCcw, Mail, Pencil, KeyRound, ShieldCheck, ShieldOff, Trash2 } from 'lucide-react'
+import { Plus, Loader2, Power, Archive, RotateCcw, Mail, Pencil, KeyRound, ShieldCheck, ShieldOff, Trash2, Smartphone } from 'lucide-react'
 import { VISIBLE_ADMIN_MODULES, STAFF_PRESETS, ADMIN_MODULES } from '@/lib/staff'
 import { STAFF_ROLLEN, ROL_LABEL, ROLLEN, type Rol } from '@/lib/instellingen/model'
 import { volledigeNaam, type Medewerker } from '@/lib/instellingen/medewerkers'
@@ -66,11 +66,10 @@ export function SectieMedewerkers({ isAdmin }: { isAdmin: boolean }) {
   return (
     <div className="space-y-4">
       <div className="card-base">
-        <Kop titel="Medewerkers" tekst="Interne accounts: hoofdbeheerders en werknemers, hun rol, functie en modules. Verwijderen archiveert eerst; vanuit het archief kun je een account definitief verwijderen. Een uitnodigingsmail vertrekt enkel als je dat uitdrukkelijk bevestigt."
+        <Kop titel="Medewerkers" tekst="Interne accounts: hoofdbeheerders en werknemers, hun rol, functie en modules. Bij verwijderen kies je: archiveren (herstelbaar) of definitief verwijderen. Een uitnodigingsmail vertrekt enkel als je dat uitdrukkelijk bevestigt."
           rechts={isAdmin ? <button type="button" onClick={() => setNieuw(true)} className="btn-primary"><Plus className="h-4 w-4" />Nieuwe medewerker</button> : undefined} />
         <div className="flex items-center gap-3 mb-3 text-xs text-gray-500 flex-wrap">
           <span>{rijen.filter((m) => !m.gearchiveerd).length} accounts · {actieveHoofd} actieve hoofdbeheerder{actieveHoofd === 1 ? '' : 's'}</span>
-          {archief > 0 && !toonArchief && <span className="text-gray-400">Definitief verwijderen doe je vanuit de gearchiveerde accounts.</span>}
           {archief > 0 && <label className="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" checked={toonArchief} onChange={(e) => setToonArchief(e.target.checked)} />Toon gearchiveerde ({archief})</label>}
         </div>
         <div className="overflow-x-auto -mx-1">
@@ -93,7 +92,9 @@ export function SectieMedewerkers({ isAdmin }: { isAdmin: boolean }) {
                     <td className="px-2 py-2.5">
                       <div className="flex items-center gap-1 flex-wrap">
                         {m.gearchiveerd ? <Badge kleur="grijs">Gearchiveerd</Badge> : m.actief ? <Badge kleur="groen">Actief</Badge> : <Badge kleur="rood">Inactief</Badge>}
-                        <span title={m.tweeFactor ? 'Inloggen met code' : 'Inloggen zonder code'}>{m.tweeFactor ? <ShieldCheck className="h-3.5 w-3.5 text-green-600" /> : <ShieldOff className="h-3.5 w-3.5 text-amber-600" />}</span>
+                        <span title={m.tweeFactor === 'app' ? '2FA: app gekoppeld' : m.tweeFactor === 'uit' ? '2FA uitgeschakeld door een admin' : 'Nog geen app — koppelt bij de volgende login'}>
+                          {m.tweeFactor === 'app' ? <ShieldCheck className="h-3.5 w-3.5 text-green-600" /> : m.tweeFactor === 'uit' ? <ShieldOff className="h-3.5 w-3.5 text-amber-600" /> : <Smartphone className="h-3.5 w-3.5 text-blue-600" />}
+                        </span>
                       </div>
                       {m.uitnodigingOp && <div className="text-[10px] text-gray-400 mt-0.5">uitgenodigd {datumTijd(m.uitnodigingOp)}</div>}
                     </td>
@@ -104,9 +105,8 @@ export function SectieMedewerkers({ isAdmin }: { isAdmin: boolean }) {
                           <Knop titel="Bewerken" onClick={() => setBewerk(m)}><Pencil className="h-3.5 w-3.5" /></Knop>
                           {!m.gearchiveerd && !zelf && <Knop titel={m.actief ? 'Deactiveren' : 'Activeren'} onClick={() => setVraag({ soort: m.actief ? 'deactiveer' : 'activeer', m })}><Power className={`h-3.5 w-3.5 ${m.actief ? '' : 'text-green-600'}`} /></Knop>}
                           {!m.isAdmin && !m.gearchiveerd && m.email && <Knop titel="Uitnodiging versturen" onClick={() => setVraag({ soort: 'uitnodiging', m })}><Mail className="h-3.5 w-3.5" /></Knop>}
-                          {!m.isAdmin && !m.gearchiveerd && !zelf && <Knop titel="Verwijderen (archiveren)" rood onClick={() => setVraag({ soort: 'archiveer', m })}><Archive className="h-3.5 w-3.5" /></Knop>}
                           {m.gearchiveerd && <Knop titel="Herstellen" onClick={() => setVraag({ soort: 'herstel', m })}><RotateCcw className="h-3.5 w-3.5" /></Knop>}
-                          {m.gearchiveerd && !m.isAdmin && !zelf && <Knop titel="Definitief verwijderen" rood onClick={() => { setBevestigTekst(''); setVraag({ soort: 'definitief', m }) }}><Trash2 className="h-3.5 w-3.5" /></Knop>}
+                          {!m.isAdmin && !zelf && <Knop titel="Verwijderen" rood onClick={() => { setBevestigTekst(''); setVraag({ soort: 'definitief', m }) }}><Trash2 className="h-3.5 w-3.5" /></Knop>}
                         </div>
                       )}
                     </td>
@@ -119,14 +119,21 @@ export function SectieMedewerkers({ isAdmin }: { isAdmin: boolean }) {
         <p className="text-[11px] text-gray-500 mt-3">Rollen: {ROLLEN.map((r) => `${r.label} — ${r.uitleg}`).join(' · ')}</p>
       </div>
 
-      {/* Inlogcode per account (bestaand onderdeel, hier op zijn plaats). */}
+      {/* Tweestapsverificatie per account (authenticator-app). */}
       {isAdmin && <LoginSettingsCard />}
 
       {(nieuw || bewerk) && <Formulier m={bewerk} onSluit={() => { setNieuw(false); setBewerk(null) }} onKlaar={() => { setNieuw(false); setBewerk(null); laad() }} />}
 
       {vraag && vraag.soort === 'definitief' && (
-        <Dialoog titel="Medewerker definitief verwijderen" onSluit={() => setVraag(null)}>
+        <Dialoog titel="Medewerker verwijderen" onSluit={() => setVraag(null)}>
           <div className="space-y-3 text-sm">
+            {!vraag.m.gearchiveerd && (
+              <div className="rounded-xl border border-gray-200 p-3 space-y-2">
+                <p><b>Archiveren</b> — {volledigeNaam(vraag.m)} kan niet meer inloggen en verdwijnt uit de lijst. Herstellen kan later via &quot;Toon gearchiveerde&quot;.</p>
+                <button type="button" className="btn-secondary" disabled={bezig} onClick={() => setVraag({ soort: 'archiveer', m: vraag.m })}><Archive className="h-4 w-4" />Archiveren</button>
+              </div>
+            )}
+            <p className="font-medium text-red-700">Definitief verwijderen</p>
             <p><b>{volledigeNaam(vraag.m)}</b> wordt definitief verwijderd, samen met het login-account. Dit kan niet ongedaan gemaakt worden. De historiek en het logboek blijven bewaard.</p>
             <p className="text-xs text-gray-500">Wordt dezelfde login ook gebruikt als klant of freelancer, dan blijft die login bestaan en verdwijnt enkel de werknemerstoegang.</p>
             <Veld label={<span>Typ <b>{vraag.m.email}</b> om te bevestigen</span>}><input className={INP} value={bevestigTekst} onChange={(e) => setBevestigTekst(e.target.value)} autoFocus /></Veld>

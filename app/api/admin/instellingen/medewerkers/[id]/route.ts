@@ -172,7 +172,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     if (staff.auth_user_id === g.persoon.userId) return NextResponse.json({ error: 'Je kunt je eigen account niet verwijderen.' }, { status: 400 })
 
     if (new URL(req.url).searchParams.get('definitief') === '1') {
-      if (!staff.verwijderd_at) return NextResponse.json({ error: 'Archiveer de medewerker eerst; definitief verwijderen kan enkel vanuit het archief.' }, { status: 400 })
       const uid = staff.auth_user_id as string | null
       // Hangt aan dezelfde login nog iets anders dan de werknemerstoegang?
       let ookAnders: string[] = []

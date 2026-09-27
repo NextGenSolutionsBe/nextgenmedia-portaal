@@ -20,12 +20,14 @@ export type TotpRij = {
   laatste_stap: number | null
   setup_secret_enc: string | null
   setup_gestart_op: string | null
+  /** Wie de lopende setup startte (een admin die voor iemand koppelt), anders null. */
+  setup_door?: string | null
 }
 
 export interface TwofaOpslag {
   lees(userId: string): Promise<TotpRij | null>
   /** Nieuwe (onbevestigde) setup bewaren — nooit over een actieve TOTP heen. */
-  bewaarSetup(userId: string, setupEnc: string, op: string): Promise<boolean>
+  bewaarSetup(userId: string, setupEnc: string, op: string, door?: string | null): Promise<boolean>
   /** Activeren, enkel als de setup nog exact deze waarde heeft en TOTP niet actief is. */
   activeer(userId: string, setupEnc: string, stap: number, op: string): Promise<boolean>
   /** Tijdstap claimen: enkel als die groter is dan de laatst gebruikte (replay). */
@@ -64,12 +66,12 @@ async function binnenLimieten(k: Kern, basis: string, vensters: [number, number]
 }
 
 /** 1. Setup starten: nieuw geheim, versleuteld bewaard; nog NIET actief. */
-export async function startSetup(k: Kern, userId: string, account: string): Promise<Uitkomst<{ geheim: string; geheimLeesbaar: string; uri: string }>> {
+export async function startSetup(k: Kern, userId: string, account: string, door: string | null = null): Promise<Uitkomst<{ geheim: string; geheimLeesbaar: string; uri: string }>> {
   const rij = await k.opslag.lees(userId)
   if (rij?.actief) return fout('Tweestapsverificatie met een app is al actief.', 409)
   if (!(await binnenLimieten(k, `2fa-setup:${userId}`, [[10, 3600]]))) return fout(FOUT_TE_VEEL, 429)
   const geheim = nieuwGeheim()
-  const ok = await k.opslag.bewaarSetup(userId, versleutel(k.sleutel, geheim), new Date(k.nu()).toISOString())
+  const ok = await k.opslag.bewaarSetup(userId, versleutel(k.sleutel, geheim), new Date(k.nu()).toISOString(), door)
   if (!ok) return fout('Tweestapsverificatie met een app is al actief.', 409)
   return { ok: true, geheim, geheimLeesbaar: formatteerGeheim(geheim), uri: otpauthUri(geheim, account) }
 }
@@ -146,26 +148,7 @@ export async function nieuweHerstelcodes(k: Kern, userId: string, p: { wachtwoor
 }
 
 /**
- * 6. Een admin reset de app-2FA van IEMAND ANDERS (telefoon én herstelcodes kwijt).
- * Enkel met het eigen wachtwoord én de eigen app-code van die admin; nooit voor
- * zichzelf (daarvoor is uitschakelen). Daarna logt de persoon in met de mailcode
- * en stelt die een nieuwe app in.
- */
-export async function resetVoorAnder(k: Kern, adminId: string, doelId: string, p: { wachtwoordOk: boolean; code?: string | null }): Promise<Uitkomst> {
-  if (adminId === doelId) return fout('Gebruik "2FA uitschakelen" voor je eigen account.')
-  if (!(await binnenLimieten(k, `2fa-reset:${adminId}`, [[5, 900]]))) return fout(FOUT_TE_VEEL, 429)
-  const eigen = await k.opslag.lees(adminId)
-  if (!eigen?.actief) return fout('Activeer eerst zelf tweestapsverificatie met een app.', 403)
-  if (!p.wachtwoordOk || !p.code) return fout(FOUT_HERBEVESTIGING)
-  const f = await controleerFactor(k, adminId, { code: p.code })
-  if (!f.ok) return f.status === 429 ? f : fout(FOUT_HERBEVESTIGING)
-  await k.opslag.verwijder(doelId)
-  await k.opslag.vervangHerstelcodes(doelId, [])
-  return { ok: true }
-}
-
-/**
- * 7. Een admin bevestigt zijn eigen identiteit vóór een gevoelige actie op een
+ * 6. Een admin bevestigt zijn eigen identiteit vóór een gevoelige actie op een
  * ANDER account (bv. de 2FA van een werknemer uitzetten): altijd het eigen
  * wachtwoord, en — heeft de admin zelf een authenticator-app — ook een code
  * daaruit. Zo vraagt de actie minstens wat de admin zelf bij het inloggen toont.

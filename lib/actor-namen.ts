@@ -10,6 +10,17 @@ export type ActorNaam = { id: string; naam: string; kort: string; email: string 
 
 const GEDEELD = new Set(['info@nextgenmedia.be'])
 
+/**
+ * Verwijderde login-accounts die nog in de historiek voorkomen (activiteiten,
+ * afspraken, logboek). Hun auth-gebruiker bestaat niet meer, dus zonder deze
+ * lijst zouden ze als "onbekend" verschijnen. Nooit aan iemand anders
+ * toeschrijven: de historiek blijft van wie ze was.
+ */
+const VERWIJDERD: Record<string, { naam: string; email: string }> = {
+  // info@nextgenmedia.be — gedeeld account, verwijderd op 27 sep 2026.
+  'd174a614-8371-48ca-93a5-f85423cc13ac': { naam: 'Gedeeld account (info@, verwijderd)', email: 'info@nextgenmedia.be' },
+}
+
 function naamVan(email: string | null, meta: Record<string, unknown> | null | undefined): { naam: string; gedeeld: boolean } {
   const e = (email ?? '').toLowerCase()
   if (GEDEELD.has(e)) return { naam: 'Gedeeld account (info@)', gedeeld: true }
@@ -33,6 +44,10 @@ export async function leesActorNamen(admin: SupabaseClient, ids: (string | null 
       uit[u.id] = { id: u.id, naam, kort: gedeeld ? 'info@ (gedeeld)' : naam.split(' ')[0], email: u.email ?? null, gedeeld }
     }
   } catch { /* namen zijn extra — nooit een scherm laten falen */ }
+  for (const id of uniek) {
+    const v = VERWIJDERD[id]
+    if (v && !uit[id]) uit[id] = { id, naam: v.naam, kort: 'info@ (verwijderd)', email: v.email, gedeeld: true }
+  }
   return uit
 }
 

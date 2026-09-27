@@ -45,7 +45,7 @@ async function overzicht(): Promise<Integratie[]> {
   })
   const resend = process.env.RESEND_API_KEY
   uit.push({
-    key: 'resend', naam: 'Resend (e-mail)', omschrijving: 'Verzending van portaalmails en inlogcodes.',
+    key: 'resend', naam: 'Resend (e-mail)', omschrijving: 'Verzending van portaalmails.',
     status: resend ? 'actief' : 'niet_ingesteld', sleutel: maskeer(resend), laatsteSync: mailLaatste,
     details: [
       `Afzender: ${process.env.EMAIL_FROM || 'NextGenMedia <info@nextgenmedia.be>'}`,

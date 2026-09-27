@@ -26,28 +26,28 @@ export function supabaseOpslag(): TwofaOpslag {
   return {
     async lees(userId) {
       const { data, error } = await db.from('user_totp')
-        .select('user_id, secret_enc, actief, geactiveerd_op, laatste_stap, setup_secret_enc, setup_gestart_op')
+        .select('user_id, secret_enc, actief, geactiveerd_op, laatste_stap, setup_secret_enc, setup_gestart_op, setup_door')
         .eq('user_id', userId).maybeSingle()
       if (error) throw new Error(error.message)
       return (data as TotpRij | null) ?? null
     },
-    async bewaarSetup(userId, setupEnc, op) {
+    async bewaarSetup(userId, setupEnc, op, door = null) {
       const bestaand = await this.lees(userId)
       if (bestaand?.actief) return false
       if (bestaand) {
         const { data, error } = await db.from('user_totp')
-          .update({ setup_secret_enc: setupEnc, setup_gestart_op: op, gewijzigd_op: op })
+          .update({ setup_secret_enc: setupEnc, setup_gestart_op: op, setup_door: door, gewijzigd_op: op })
           .eq('user_id', userId).eq('actief', false).select('user_id')
         if (error) throw new Error(error.message)
         return (data ?? []).length === 1
       }
-      const { error } = await db.from('user_totp').insert({ user_id: userId, actief: false, setup_secret_enc: setupEnc, setup_gestart_op: op, gewijzigd_op: op })
+      const { error } = await db.from('user_totp').insert({ user_id: userId, actief: false, setup_secret_enc: setupEnc, setup_gestart_op: op, setup_door: door, gewijzigd_op: op })
       if (error) throw new Error(error.message)
       return true
     },
     async activeer(userId, setupEnc, stap, op) {
       const { data, error } = await db.from('user_totp')
-        .update({ secret_enc: setupEnc, actief: true, geactiveerd_op: op, laatste_stap: stap, setup_secret_enc: null, setup_gestart_op: null, gewijzigd_op: op })
+        .update({ secret_enc: setupEnc, actief: true, geactiveerd_op: op, laatste_stap: stap, setup_secret_enc: null, setup_gestart_op: null, setup_door: null, gewijzigd_op: op })
         .eq('user_id', userId).eq('actief', false).eq('setup_secret_enc', setupEnc).select('user_id')
       if (error) throw new Error(error.message)
       return (data ?? []).length === 1
@@ -119,7 +119,7 @@ export const huidigeSessie = cache(async (): Promise<Sessie | null> => {
 export async function leesSessieRij(sessionId: string | null): Promise<SessieRij | null> {
   if (!sessionId) return null
   const { data } = await createAdminSupabaseClient().from('twofa_sessies')
-    .select('user_id, verloopt_op, totp_instellen').eq('session_id', sessionId).maybeSingle()
+    .select('user_id, verloopt_op').eq('session_id', sessionId).maybeSingle()
   return (data as SessieRij | null) ?? null
 }
 
@@ -136,15 +136,15 @@ export const tweedeStapVoltooid = cache(async (userId: string): Promise<boolean>
   const sessie = await huidigeSessie()
   if (!sessie || sessie.user.id !== userId) return false
   const rij = await leesSessieRij(sessie.sessionId)
-  if (sessieStatus(rij, userId, Date.now()) !== 'nodig') return true
+  if (sessieStatus(rij, userId, Date.now()) === 'ok') return true
   return !(await twoFactorRequired(createAdminSupabaseClient(), userId))
 })
 
-/** De sessie markeren als "tweede stap voltooid" (na mailcode, app-code of herstelcode). */
-export async function markeerSessie(userId: string, sessionId: string, methode: string, totpInstellen: boolean): Promise<void> {
+/** De sessie markeren als "tweede stap voltooid" (na app-code, herstelcode of het koppelen van een app). */
+export async function markeerSessie(userId: string, sessionId: string, methode: string): Promise<void> {
   const nu = Date.now()
   const { error } = await createAdminSupabaseClient().from('twofa_sessies').upsert({
-    session_id: sessionId, user_id: userId, methode, totp_instellen: totpInstellen,
+    session_id: sessionId, user_id: userId, methode, totp_instellen: false,
     geverifieerd_op: new Date(nu).toISOString(), verloopt_op: new Date(nu + SESSIE_TTL_MS).toISOString(),
   }, { onConflict: 'session_id' })
   if (error) throw new Error(error.message)
@@ -196,8 +196,8 @@ export async function interneRol(userId: string): Promise<'admin' | 'employee' |
   return s && (s as { active?: boolean }).active !== false ? 'employee' : null
 }
 
-/** Het 2FA-beleid (app_settings 'twofa_beleid'); standaard leeg. */
-export async function leesBeleid(): Promise<unknown> {
-  const { data } = await createAdminSupabaseClient().from('app_settings').select('value').eq('key', 'twofa_beleid').maybeSingle()
-  return (data as { value?: unknown } | null)?.value ?? null
+/** Heeft deze gebruiker een actieve authenticator-app? */
+export async function appActief(userId: string): Promise<boolean> {
+  const { data } = await createAdminSupabaseClient().from('user_totp').select('actief').eq('user_id', userId).maybeSingle()
+  return !!(data as { actief?: boolean } | null)?.actief
 }

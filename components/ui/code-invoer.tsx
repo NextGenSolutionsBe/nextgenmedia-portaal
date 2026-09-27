@@ -3,7 +3,7 @@
 import { forwardRef } from 'react'
 
 /**
- * Invoer voor een 6-cijferige code (mailcode of authenticator-app).
+ * Invoer voor een 6-cijferige code (authenticator-app).
  * Eén veld: numeriek toetsenbord op telefoon, automatisch invullen vanuit sms/
  * mail (one-time-code), en plakken van een volledige code ("123 456", "123-456")
  * werkt — alles behalve cijfers valt weg. Enter verstuurt het formulier.

@@ -86,7 +86,7 @@ export function BeveiligingClient({ verplichtMelding }: { verplichtMelding: bool
       {(verplichtMelding || status.verplicht) && !status.actief && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex gap-2">
           <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
-          <span>Voor jouw rol is tweestapsverificatie met een authenticator-app verplicht. Stel ze hieronder in om verder te werken.</span>
+          <span>Tweestapsverificatie met een authenticator-app is verplicht. Koppel hieronder je app; anders vraagt de app het bij je volgende login.</span>
         </div>
       )}
 
@@ -96,11 +96,11 @@ export function BeveiligingClient({ verplichtMelding }: { verplichtMelding: bool
           <div className="min-w-0">
             <h2 className="font-semibold text-gray-900 flex items-center gap-2"><Smartphone className="h-4 w-4 text-gray-400" />Tweestapsverificatie (2FA)</h2>
             <p className="text-sm text-gray-500 mt-0.5 max-w-xl">
-              Met een authenticator-app zoals Google Authenticator, Microsoft Authenticator of 1Password. Bij het inloggen vul je dan de code uit de app in, in plaats van een code per e-mail.
+              Met een authenticator-app zoals Google Authenticator, Microsoft Authenticator of 1Password. Bij het inloggen vul je naast je wachtwoord de code uit de app in.
             </p>
           </div>
           <span className={`status-badge ${status.actief ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-            Status: {status.actief ? 'Actief' : 'Niet actief'}
+            Status: {status.actief ? 'Actief' : 'Nog geen app'}
           </span>
         </div>
 
@@ -112,9 +112,8 @@ export function BeveiligingClient({ verplichtMelding }: { verplichtMelding: bool
                 Dit is nog niet geconfigureerd op de server. Vraag een beheerder om de sleutel TOTP_ENC_KEY in te stellen.
               </p>
             )}
-            <p className="text-xs text-gray-500">Nu gebruik je bij het inloggen een code per e-mail.</p>
             <button type="button" onClick={start} disabled={bezig || !status.beschikbaar} className="btn-primary">
-              {bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}2FA inschakelen
+              {bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}App koppelen
             </button>
           </div>
         )}
@@ -174,7 +173,7 @@ export function BeveiligingClient({ verplichtMelding }: { verplichtMelding: bool
             </div>
             <div className="flex gap-2 flex-wrap">
               <button type="button" className="btn-secondary" onClick={() => setDialoog('herstel')}><KeyRound className="h-4 w-4" />Nieuwe herstelcodes</button>
-              <button type="button" className="btn-secondary text-red-600" onClick={() => setDialoog('uit')}>2FA uitschakelen</button>
+              <button type="button" className="btn-secondary text-red-600" onClick={() => setDialoog('uit')}>App loskoppelen</button>
             </div>
           </div>
         )}
@@ -182,10 +181,10 @@ export function BeveiligingClient({ verplichtMelding }: { verplichtMelding: bool
 
       <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600 space-y-1">
         <div className="font-semibold text-gray-700">Telefoon kwijt of nieuwe telefoon?</div>
-        <p>Log in met een herstelcode en stel daarna je app opnieuw in (eerst uitschakelen, dan opnieuw inschakelen). Ben je ook je herstelcodes kwijt, vraag dan een beheerder om je 2FA te resetten; daarna log je in met een code per e-mail en stel je een nieuwe app in.</p>
+        <p>Log in met een herstelcode, kies hier <b>App loskoppelen</b> en koppel daarna je nieuwe telefoon. Ben je ook je herstelcodes kwijt, vraag dan een beheerder om je 2FA te resetten; bij je volgende login koppel je dan een nieuwe app.</p>
       </div>
 
-      {dialoog === 'uit' && <Herbevestig soort="uit" onSluit={() => setDialoog(null)} onKlaar={() => { setDialoog(null); toast.success('2FA met een app is uitgeschakeld. Je logt weer in met een code per e-mail.'); laad() }} />}
+      {dialoog === 'uit' && <Herbevestig soort="uit" onSluit={() => setDialoog(null)} onKlaar={() => { setDialoog(null); toast.success('App losgekoppeld. Koppel nu een nieuwe app; anders vraagt de app het bij je volgende login.'); laad() }} />}
       {dialoog === 'herstel' && <Herbevestig soort="herstel" onSluit={() => setDialoog(null)} onKlaar={(c) => { setDialoog(null); if (c) setCodes(c); laad() }} />}
     </div>
   )
@@ -245,11 +244,11 @@ function Herbevestig({ soort, onSluit, onKlaar }: { soort: 'uit' | 'herstel'; on
 
   const klaar = wachtwoord.length > 0 && (herstel ? herstelcode.replace(/[\s-]/g, '').length >= 12 : code.length === 6)
   return (
-    <Dialoog titel={soort === 'uit' ? '2FA uitschakelen' : 'Nieuwe herstelcodes'} onSluit={onSluit}>
+    <Dialoog titel={soort === 'uit' ? 'App loskoppelen' : 'Nieuwe herstelcodes'} onSluit={onSluit}>
       <form onSubmit={verstuur} className="space-y-4">
         <p className="text-sm text-gray-600">
           {soort === 'uit'
-            ? 'Bevestig met je huidige wachtwoord en een code uit je app (of een herstelcode). Daarna log je weer in met een code per e-mail. Andere ingelogde toestellen worden afgemeld.'
+            ? 'Bevestig met je huidige wachtwoord en een code uit je app (of een herstelcode). Je app en herstelcodes worden verwijderd; koppel daarna meteen je nieuwe app. Andere ingelogde toestellen worden afgemeld.'
             : 'Bevestig met je huidige wachtwoord en een code uit je app. Al je vorige herstelcodes werken daarna niet meer. Andere ingelogde toestellen worden afgemeld.'}
         </p>
         <div>
@@ -277,7 +276,7 @@ function Herbevestig({ soort, onSluit, onKlaar }: { soort: 'uit' | 'herstel'; on
         <div className="flex gap-2 justify-end">
           <button type="button" onClick={onSluit} disabled={bezig} className="btn-secondary">Annuleren</button>
           <button type="submit" disabled={bezig || !klaar} className={soort === 'uit' ? 'btn-danger' : 'btn-primary'}>
-            {bezig && <Loader2 className="h-4 w-4 animate-spin" />}{soort === 'uit' ? '2FA uitschakelen' : 'Nieuwe codes maken'}
+            {bezig && <Loader2 className="h-4 w-4 animate-spin" />}{soort === 'uit' ? 'App loskoppelen' : 'Nieuwe codes maken'}
           </button>
         </div>
       </form>

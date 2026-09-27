@@ -14,14 +14,14 @@ export const dynamic = 'force-dynamic'
  */
 export async function POST(req: NextRequest) {
   try {
-    const g = await eigenAccount({ kernNodig: true })
+    const g = await eigenAccount({ kernNodig: true, koppelenBijInloggen: true })
     if (!g.ok) return g.res
     const { code } = (await req.json().catch(() => ({}))) as { code?: unknown }
     const r = await bevestigSetup(g.kern!, g.sessie.user.id, typeof code === 'string' ? code : '')
     if (!r.ok) return NextResponse.json({ error: r.fout }, { status: r.status })
-    // Deze sessie heeft net een geldige app-code getoond; een eventuele
-    // "stel eerst een app in"-verplichting vervalt.
-    if (g.sessie.sessionId) await markeerSessie(g.sessie.user.id, g.sessie.sessionId, 'totp', false)
+    // Deze sessie heeft net een geldige app-code getoond: de tweede stap is voltooid
+    // (ook als dit het koppelen tijdens het inloggen was).
+    if (g.sessie.sessionId) await markeerSessie(g.sessie.user.id, g.sessie.sessionId, 'totp')
     await trekAndereSessiesIn(g.sessie)
     logSecurity(req, g.sessie, g.rol, 'auth.2fa.totp_geactiveerd', 'Tweestapsverificatie met een authenticator-app ingeschakeld')
     return NextResponse.json({ ok: true, herstelcodes: r.herstelcodes }, { headers: { 'Cache-Control': 'no-store' } })

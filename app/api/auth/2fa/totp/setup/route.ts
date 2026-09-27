@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic'
  */
 export async function POST() {
   try {
-    const g = await eigenAccount({ kernNodig: true })
+    const g = await eigenAccount({ kernNodig: true, koppelenBijInloggen: true })
     if (!g.ok) return g.res
     const account = g.sessie.user.email ?? g.sessie.user.id
     const r = await startSetup(g.kern!, g.sessie.user.id, account)

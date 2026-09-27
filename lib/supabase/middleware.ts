@@ -286,7 +286,7 @@ export async function updateSession(request: NextRequest) {
   /** De 2FA-rij van deze sessie (twofa_sessies) — één opzoeking op de primaire sleutel. */
   const leesTweedeStap = (db: { from: (t: string) => any }): Promise<Lezing<SessieRij>> => // eslint-disable-line @typescript-eslint/no-explicit-any
     sessionId
-      ? lees<SessieRij>(db.from('twofa_sessies').select('user_id, verloopt_op, totp_instellen').eq('session_id', sessionId).maybeSingle())
+      ? lees<SessieRij>(db.from('twofa_sessies').select('user_id, verloopt_op').eq('session_id', sessionId).maybeSingle())
       : Promise.resolve({ ok: true as const, data: null })
 
   // Uitgeschakelde features (lib/features.ts) centraal dichtzetten — voor
@@ -451,17 +451,12 @@ export async function updateSession(request: NextRequest) {
     const stap = await leesTweedeStap(db)
     if (!stap.ok) return databankOnbereikbaar(path)
     const status = sessieStatus(stap.data, user.id, Date.now())
-    // Vrijgesteld? Dan volstaat e-mail + wachtwoord. Staat er niets ingesteld,
-    // dan blijft de code verplicht — zie twoFactorRequired(). Enkel opvragen
-    // als de sessie de stap nog niet deed.
+    // Door een admin (tijdelijk) vrijgesteld? Dan volstaat e-mail + wachtwoord.
+    // Anders is de app-code verplicht (of eerst een app koppelen) — zie
+    // twoFactorRequired(). Enkel opvragen als de sessie de stap nog niet deed.
     const verplicht = status === 'nodig' ? await metTijdslimiet(twoFactorRequired(db, user.id), DB_TIJDSLIMIET_MS, true) : false
-    const actie = tweedeStapActie(status, verplicht, path)
+    const actie = tweedeStapActie(status, verplicht)
     if (actie === 'door') tweedeStapVoor = user.id
-    // De rol vereist een authenticator-app die nog niet ingesteld is: eerst dat.
-    if (actie === 'instellen') {
-      tweedeStapVoor = user.id
-      return copyAuthCookies(supabaseResponse, NextResponse.redirect(new URL('/admin/account?instellen=1', request.url)))
-    }
     if (actie === 'verificatie') {
       const url = request.nextUrl.clone()
       url.pathname = '/login/verify'

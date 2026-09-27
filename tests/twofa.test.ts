@@ -10,12 +10,12 @@ import assert from 'node:assert/strict'
 import { randomBytes } from 'node:crypto'
 import {
   bevestigSetup, controleerFactor, FOUT_CODE, FOUT_HERBEVESTIGING, FOUT_TE_VEEL, nieuweHerstelcodes,
-  resetVoorAnder, schakelUit, startSetup, herbevestigAdmin, type Kern, type TotpRij, type TwofaOpslag,
+  schakelUit, startSetup, herbevestigAdmin, type Kern, type TotpRij, type TwofaOpslag,
 } from '../lib/twofa/kern'
 import { codeVoor, controleerTotp, otpauthUri, TOTP_PERIODE } from '../lib/twofa/totp'
 import { genereerHerstelcodes, hashHerstelcode, leesSleutel, normaliseerHerstelcode, ontsleutel, versleutel } from '../lib/twofa/geheimen'
-import { sessieIdUitToken, sessieStatus, tweedeStapActie, appVerplichtVoor, SESSIE_TTL_MS, type SessieRij } from '../lib/twofa/sessie'
-import { twoFactorRequired } from '../lib/two-factor'
+import { sessieIdUitToken, sessieStatus, tweedeStapActie, SESSIE_TTL_MS, type SessieRij } from '../lib/twofa/sessie'
+import { twoFactorRequired, vrijstellingGeldig } from '../lib/two-factor'
 
 let n = 0
 const test = async (naam: string, fn: () => Promise<void> | void) => { await fn(); n++; console.log(`  ✓ ${naam}`) }
@@ -26,10 +26,10 @@ function geheugenOpslag() {
   const codes: { user_id: string; code_hash: string; gebruikt_op: string | null }[] = []
   const opslag: TwofaOpslag = {
     async lees(u) { const r = totp.get(u); return r ? { ...r } : null },
-    async bewaarSetup(u, enc, op) {
+    async bewaarSetup(u, enc, op, door = null) {
       const r = totp.get(u)
       if (r?.actief) return false
-      totp.set(u, { user_id: u, secret_enc: r?.secret_enc ?? null, actief: false, geactiveerd_op: null, laatste_stap: null, setup_secret_enc: enc, setup_gestart_op: op })
+      totp.set(u, { user_id: u, secret_enc: r?.secret_enc ?? null, actief: false, geactiveerd_op: null, laatste_stap: null, setup_secret_enc: enc, setup_gestart_op: op, setup_door: door })
       return true
     },
     async activeer(u, enc, stap, op) {
@@ -101,12 +101,17 @@ async function activeer(o: ReturnType<typeof maakOmgeving>, user = A) {
 async function main() {
   console.log('\nTweestapsverificatie (TOTP)\n')
 
-  await test('1. Normale login zonder app-2FA: geen app-factor, mailcode-pad; vrijgesteld account = door', async () => {
+  await test('1. Login zonder app: geen code mogelijk → eerst koppelen; door een admin vrijgesteld = door', async () => {
     const o = maakOmgeving()
     const r = await controleerFactor(o.kern, A, { code: '123456' })
-    assert.equal(r.ok, false) // zonder actieve app bestaat er geen app-factor → route gebruikt de mailcode
-    assert.equal(tweedeStapActie('nodig', false, '/admin'), 'door')      // login_settings: vrijgesteld
-    assert.equal(tweedeStapActie('nodig', true, '/admin'), 'verificatie') // standaard: code verplicht
+    assert.equal(r.ok, false) // zonder gekoppelde app bestaat er geen code (geen mailcode meer)
+    assert.equal(tweedeStapActie('nodig', false), 'door')      // login_settings: (tijdelijk) vrijgesteld
+    assert.equal(tweedeStapActie('nodig', true), 'verificatie') // standaard: app verplicht
+    // Koppelen bij het inloggen: setup + geldige code → actief.
+    const s = await startSetup(o.kern, A, 'nieuw@nextgen.be')
+    assert.ok(s.ok)
+    assert.equal((await bevestigSetup(o.kern, A, codeVoor(s.geheim, o.nu()))).ok, true)
+    assert.equal(o.totp.get(A)!.actief, true)
   })
 
   await test('2. Correcte 2FA-login met de app (standaard otpauth-URI, 6 cijfers, 30 s)', async () => {
@@ -251,16 +256,8 @@ async function main() {
     assert.equal(sessieStatus({ ...geldig, user_id: B }, A, nu), 'nodig')                     // rij van iemand anders
     assert.equal(sessieStatus({ ...geldig, verloopt_op: new Date(nu - 1).toISOString() }, A, nu), 'nodig') // verlopen
     assert.equal(sessieStatus(geldig, A, nu), 'ok')
-    for (const pad of ['/admin', '/admin/facturen', '/api/admin/invoices', '/kantoor']) {
-      assert.equal(tweedeStapActie(sessieStatus(null, A, nu), true, pad), 'verificatie')
-    }
-    // Rol vereist een app die nog niet ingesteld is → enkel het instelscherm.
-    const inst: SessieRij = { ...geldig, totp_instellen: true }
-    assert.equal(tweedeStapActie(sessieStatus(inst, A, nu), true, '/admin/facturen'), 'instellen')
-    assert.equal(tweedeStapActie(sessieStatus(inst, A, nu), true, '/admin/account'), 'door')
-    assert.equal(appVerplichtVoor('admin', { app_verplicht: ['admin'] }), true)
-    assert.equal(appVerplichtVoor('employee', { app_verplicht: ['admin'] }), false)
-    assert.equal(appVerplichtVoor('admin', null), false)
+    assert.equal(tweedeStapActie(sessieStatus(null, A, nu), true), 'verificatie')
+    assert.equal(tweedeStapActie(sessieStatus(geldig, A, nu), true), 'door')
     assert.equal(SESSIE_TTL_MS, 12 * 3600 * 1000)
   })
 
@@ -271,15 +268,22 @@ async function main() {
     assert.equal((await controleerFactor(o.kern, B, { code: codeVoor(a.geheim, o.nu()) })).ok, false)
     assert.equal((await controleerFactor(o.kern, B, { herstelcode: a.herstelcodes[0] })).ok, false)
     assert.equal(await o.opslag.aantalHerstelcodes(A), 8) // niets van A verbruikt
-    // Admin-reset: nooit voor jezelf, en enkel met eigen wachtwoord + eigen app-code.
-    assert.equal((await resetVoorAnder(o.kern, A, A, { wachtwoordOk: true, code: codeVoor(a.geheim, o.nu()) })).ok, false)
-    assert.equal((await resetVoorAnder(o.kern, A, B, { wachtwoordOk: false, code: codeVoor(a.geheim, o.nu()) })).ok, false)
+  })
+
+  await test('   Admin koppelt een app voor iemand: de lopende setup onthoudt wie ze startte', async () => {
+    const o = maakOmgeving()
+    const s = await startSetup(o.kern, B, 'b@nextgen.be', A) // admin A start voor B
+    assert.ok(s.ok)
+    assert.equal(o.totp.get(B)!.setup_door, A)
+    const eigen = await startSetup(o.kern, B, 'b@nextgen.be') // B start zelf opnieuw → niet meer van A
+    assert.ok(eigen.ok)
+    assert.equal(o.totp.get(B)!.setup_door, null)
+    const r = await bevestigSetup(o.kern, B, codeVoor(eigen.geheim, o.nu()))
+    assert.ok(r.ok)
+    assert.equal(r.herstelcodes.length, 8)
     assert.equal(o.totp.get(B)!.actief, true)
-    assert.equal((await resetVoorAnder(o.kern, A, B, { wachtwoordOk: true, code: codeVoor(a.geheim, o.nu()) })).ok, true)
-    assert.equal(o.totp.has(B), false)
-    const o3 = maakOmgeving() // admin zonder eigen app kan niemand resetten
-    await activeer(o3, B)
-    assert.equal(status(await resetVoorAnder(o3.kern, A, B, { wachtwoordOk: true, code: '123456' })), 403)
+    const nogEens = await startSetup(o.kern, B, 'b@nextgen.be', A) // al gekoppeld → eerst resetten
+    assert.equal(status(nogEens), 409)
   })
 
   await test('13. Nieuwe herstelcodes: vereist wachtwoord + app-code (herstelcode volstaat niet)', async () => {
@@ -320,16 +324,20 @@ async function main() {
     assert.equal(sessieIdUitToken('kapot'), null)
   })
 
-  await test('   Vrijstelling (login_settings) kan een actieve app NIET omzeilen; leesfout = verplicht', async () => {
-    const db = (settings: unknown, app: unknown, fout = false) => ({
-      from: (t: string) => ({ select: () => ({ eq: () => ({ maybeSingle: async () => (
-        t === 'login_settings' ? { data: settings, error: null } : { data: app, error: fout ? { message: 'x' } : null }
-      ) }) }) }),
+  await test('   Tijdelijk uitschakelen door een admin: geldt tot de einddatum; leesfout = verplicht', async () => {
+    const nu = Date.parse('2026-09-27T10:00:00Z')
+    assert.equal(vrijstellingGeldig(null, nu), false)
+    assert.equal(vrijstellingGeldig({ two_factor_required: true }, nu), false)
+    assert.equal(vrijstellingGeldig({ two_factor_required: false, vrijgesteld_tot: null }, nu), true)                       // tot weer aangezet
+    assert.equal(vrijstellingGeldig({ two_factor_required: false, vrijgesteld_tot: '2026-09-28T10:00:00Z' }, nu), true)    // 24 u
+    assert.equal(vrijstellingGeldig({ two_factor_required: false, vrijgesteld_tot: '2026-09-27T09:59:59Z' }, nu), false)   // vervallen
+    const db = (settings: unknown, fout = false) => ({
+      from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: settings, error: fout ? { message: 'x' } : null }) }) }) }),
     })
-    assert.equal(await twoFactorRequired(db({ two_factor_required: false }, null), A), false)
-    assert.equal(await twoFactorRequired(db({ two_factor_required: false }, { actief: true }), A), true)
-    assert.equal(await twoFactorRequired(db({ two_factor_required: false }, null, true), A), true)
-    assert.equal(await twoFactorRequired(db(null, null), A), true)
+    assert.equal(await twoFactorRequired(db({ two_factor_required: false, vrijgesteld_tot: null }), A), false)
+    assert.equal(await twoFactorRequired(db({ two_factor_required: false, vrijgesteld_tot: '2000-01-01T00:00:00Z' }), A), true)
+    assert.equal(await twoFactorRequired(db(null, true), A), true)
+    assert.equal(await twoFactorRequired(db(null), A), true)
   })
 
   await test('   Corrupt TOTP-geheim: app-code faalt veilig, herstelcode blijft werken (geen lockout)', async () => {

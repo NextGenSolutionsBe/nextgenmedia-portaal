@@ -104,7 +104,7 @@ export async function requireAdmin(): Promise<User | null> {
 }
 
 /**
- * Interne rechten gelden pas na de tweede stap (mailcode of authenticator-app),
+ * Interne rechten gelden pas na de tweede stap (authenticator-app),
  * op ELK pad — ook buiten /api/admin (bv. /api/kantoor). Zo volstaat een
  * wachtwoord alleen nooit voor een beheerroute. Dynamisch geïmporteerd om een
  * kringverwijzing tussen de modules te vermijden.
