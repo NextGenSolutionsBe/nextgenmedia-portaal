@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { randomBytes } from 'node:crypto'
 import {
   bevestigSetup, controleerFactor, FOUT_CODE, FOUT_HERBEVESTIGING, FOUT_TE_VEEL, nieuweHerstelcodes,
-  resetVoorAnder, schakelUit, startSetup, type Kern, type TotpRij, type TwofaOpslag,
+  resetVoorAnder, schakelUit, startSetup, herbevestigAdmin, type Kern, type TotpRij, type TwofaOpslag,
 } from '../lib/twofa/kern'
 import { codeVoor, controleerTotp, otpauthUri, TOTP_PERIODE } from '../lib/twofa/totp'
 import { genereerHerstelcodes, hashHerstelcode, leesSleutel, normaliseerHerstelcode, ontsleutel, versleutel } from '../lib/twofa/geheimen'
@@ -81,6 +81,9 @@ function maakOmgeving() {
     nu: () => klok,
   }
 }
+
+/** Status van een mislukte uitkomst (undefined bij succes). */
+const status = (r: { ok: boolean }) => (r as { status?: number }).status
 
 const A = '11111111-1111-4111-8111-111111111111'
 const B = '22222222-2222-4222-8222-222222222222'
@@ -238,7 +241,7 @@ async function main() {
     const o2 = maakOmgeving()
     await startSetup(o2.kern, B, 'b@x.be')
     for (let i = 0; i < 5; i++) await bevestigSetup(o2.kern, B, '000000')
-    assert.equal((await bevestigSetup(o2.kern, B, '111111')).status, 429)
+    assert.equal(status(await bevestigSetup(o2.kern, B, '111111')), 429)
   })
 
   await test('11. Beschermd pad vóór de tweede stap: geen/andere/verlopen sessierij → verificatie', async () => {
@@ -276,7 +279,7 @@ async function main() {
     assert.equal(o.totp.has(B), false)
     const o3 = maakOmgeving() // admin zonder eigen app kan niemand resetten
     await activeer(o3, B)
-    assert.equal((await resetVoorAnder(o3.kern, A, B, { wachtwoordOk: true, code: '123456' })).status, 403)
+    assert.equal(status(await resetVoorAnder(o3.kern, A, B, { wachtwoordOk: true, code: '123456' })), 403)
   })
 
   await test('13. Nieuwe herstelcodes: vereist wachtwoord + app-code (herstelcode volstaat niet)', async () => {
@@ -347,6 +350,22 @@ async function main() {
     assert.notEqual(hashHerstelcode(k1, 'ABCDEFGHJKMN'), hashHerstelcode(k2, 'ABCDEFGHJKMN'))
     const enc = versleutel(k1, 'GEHEIM')
     assert.notEqual(versleutel(k1, 'GEHEIM'), enc) // willekeurige IV
+  })
+
+  await test('   Admin zet 2FA van een werknemer uit: eigen wachtwoord, plus eigen app-code als de admin een app heeft', async () => {
+    const zonderApp = maakOmgeving() // admin zonder app (bv. Bram, Chiara)
+    assert.equal((await herbevestigAdmin(zonderApp.kern, A, { wachtwoordOk: false })).ok, false)
+    assert.equal((await herbevestigAdmin(zonderApp.kern, A, { wachtwoordOk: true })).ok, true)
+    const metApp = maakOmgeving() // admin met app (bv. Marco)
+    const { geheim } = await activeer(metApp, A)
+    assert.equal((await herbevestigAdmin(metApp.kern, A, { wachtwoordOk: true })).ok, false)            // code ontbreekt
+    assert.equal((await herbevestigAdmin(metApp.kern, A, { wachtwoordOk: true, code: '000000' })).ok || codeVoor(geheim, metApp.nu()) === '000000', false)
+    assert.equal((await herbevestigAdmin(metApp.kern, A, { wachtwoordOk: false, code: codeVoor(geheim, metApp.nu()) })).ok, false)
+    assert.equal((await herbevestigAdmin(metApp.kern, A, { wachtwoordOk: true, code: codeVoor(geheim, metApp.nu()) })).ok, true)
+    // Pogingslimiet: 5 per kwartier.
+    const rem = maakOmgeving()
+    for (let i = 0; i < 5; i++) await herbevestigAdmin(rem.kern, A, { wachtwoordOk: false })
+    assert.equal(status(await herbevestigAdmin(rem.kern, A, { wachtwoordOk: true })), 429)
   })
 
   console.log(`\n${n} tests geslaagd\n`)

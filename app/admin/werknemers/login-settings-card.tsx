@@ -31,6 +31,8 @@ export function LoginSettingsCard() {
   // alsof alles goed staat tot je op de knop drukt.
   const [hint, setHint] = useState<string | null>(null)
   const [reset, setReset] = useState<Account | null>(null)
+  const [uitzetten, setUitzetten] = useState<Account | null>(null)
+  const [ikHebApp, setIkHebApp] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -38,6 +40,7 @@ export function LoginSettingsCard() {
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
       setRows(j.accounts ?? [])
       setHint(j.hint ?? null)
+      setIkHebApp(!!j.ikHebApp)
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Laden mislukt') } finally { setLoading(false) }
   }, [])
   useEffect(() => { load() }, [load])
@@ -103,13 +106,27 @@ export function LoginSettingsCard() {
                     {a.role === 'admin' ? 'Admin' : 'Werknemer'}
                   </span>
                   {!a.active && <span className="status-badge bg-red-100 text-red-600">Inactief</span>}
-                  <span className={`status-badge ${a.totpActief ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`} title={a.totpActief ? 'Authenticator-app actief' : 'Code per e-mail'}>
-                    <Smartphone className="h-3 w-3 inline -mt-0.5 mr-0.5" />2FA: {a.totpActief ? 'Actief' : 'Niet actief'}
+                  <span className={`status-badge ${a.totpActief ? 'bg-green-100 text-green-700' : a.twoFactorRequired ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-800'}`}
+                    title={a.totpActief ? 'Authenticator-app actief' : a.twoFactorRequired ? 'Code per e-mail bij het inloggen' : 'Geen tweede stap: wachtwoord volstaat'}>
+                    <Smartphone className="h-3 w-3 inline -mt-0.5 mr-0.5" />2FA: {a.totpActief ? 'app' : a.twoFactorRequired ? 'mailcode' : 'uit'}
                   </span>
                 </div>
                 {a.name && a.email && <div className="text-[11px] text-gray-400 truncate">{a.email}</div>}
               </div>
 
+              {a.role === 'employee' ? (
+                a.twoFactorRequired || a.totpActief ? (
+                  <button onClick={() => setUitzetten(a)} disabled={!!hint}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border bg-white text-red-600 border-red-200 hover:bg-red-50 disabled:opacity-50">
+                    <ShieldOff className="h-3.5 w-3.5" />2FA uitzetten
+                  </button>
+                ) : (
+                  <button onClick={() => toggle(a)} disabled={busy === a.authUserId || !!hint}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border bg-green-50 text-green-700 border-green-200 hover:bg-green-100 disabled:opacity-50">
+                    {busy === a.authUserId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}2FA aanzetten
+                  </button>
+                )
+              ) : (<>
               {a.totpActief && (
                 <button onClick={() => setReset(a)} title="App-2FA resetten (telefoon en herstelcodes kwijt)"
                   className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50">
@@ -130,6 +147,7 @@ export function LoginSettingsCard() {
                   : a.twoFactorRequired ? <ShieldCheck className="h-3.5 w-3.5" /> : <ShieldOff className="h-3.5 w-3.5" />}
                 {a.twoFactorRequired ? 'Met code' : 'Zonder code'}
               </button>
+              </>)}
             </div>
           ))}
         </div>
@@ -138,9 +156,11 @@ export function LoginSettingsCard() {
       <p className="text-[11px] text-gray-500 mt-3">
         Zet je de code uit, dan volstaat een wachtwoord om bij alles te raken waar dat account bij mag.
         Elke wijziging hier komt in het logboek. Klanten en partners loggen sowieso in zonder code.
-        Een actieve authenticator-app kun je hier niet uitzetten; enkel resetten, met je eigen wachtwoord en app-code.
+        De 2FA van een werknemer zet je uit met je eigen wachtwoord{ikHebApp ? ' en een code uit je eigen app' : ''}; een eventuele authenticator-app van die werknemer wordt dan verwijderd.
+        Bij een admin kun je een app enkel resetten, met je eigen wachtwoord en app-code.
       </p>
       {reset && <ResetDialoog account={reset} onSluit={() => setReset(null)} onKlaar={() => { setReset(null); load() }} />}
+      {uitzetten && <UitzetDialoog account={uitzetten} metCode={ikHebApp} onSluit={() => setUitzetten(null)} onKlaar={() => { setUitzetten(null); load() }} />}
     </div>
   )
 }
@@ -183,6 +203,56 @@ function ResetDialoog({ account, onSluit, onKlaar }: { account: Account; onSluit
           <button type="button" onClick={onSluit} disabled={bezig} className="btn-secondary">Annuleren</button>
           <button type="submit" disabled={bezig || !wachtwoord || code.length !== 6} className="btn-danger">
             {bezig && <Loader2 className="h-4 w-4 animate-spin" />}2FA resetten
+          </button>
+        </div>
+      </form>
+    </Dialoog>
+  )
+}
+
+/**
+ * 2FA van een werknemer volledig uitzetten (app + code bij het inloggen).
+ * De admin bevestigt met het eigen wachtwoord, en met de eigen app-code als
+ * die admin zelf een authenticator-app heeft. De server controleert alles.
+ */
+function UitzetDialoog({ account, metCode, onSluit, onKlaar }: { account: Account; metCode: boolean; onSluit: () => void; onKlaar: () => void }) {
+  const [wachtwoord, setWachtwoord] = useState('')
+  const [code, setCode] = useState('')
+  const [bezig, setBezig] = useState(false)
+  const [fout, setFout] = useState<string | null>(null)
+  const verstuur = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setBezig(true); setFout(null)
+    try {
+      const r = await fetch('/api/admin/login-settings/2fa-uitzetten', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ authUserId: account.authUserId, wachtwoord, code: metCode ? code : undefined }) })
+      const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error ?? 'Uitzetten mislukt')
+      toast.success(`2FA uitgezet voor ${account.name || account.email}.`)
+      onKlaar()
+    } catch (e) { setFout(e instanceof Error ? e.message : 'Uitzetten mislukt'); setCode('') } finally { setBezig(false) }
+  }
+  return (
+    <Dialoog titel="2FA uitzetten" onSluit={onSluit}>
+      <form onSubmit={verstuur} className="space-y-4">
+        <p className="text-sm text-gray-600">
+          <b>{account.name || account.email}</b> logt daarna in met enkel e-mail en wachtwoord.
+          {account.totpActief ? ' De authenticator-app en herstelcodes van die persoon worden verwijderd.' : ''}
+          {' '}Weer aanzetten kan met één klik; de werknemer kan zelf opnieuw een app instellen via Mijn account.
+        </p>
+        <div>
+          <label htmlFor="uw" className="block text-xs font-medium text-gray-600 mb-1">Jouw wachtwoord</label>
+          <input id="uw" type="password" autoComplete="current-password" autoFocus className={INP} value={wachtwoord} onChange={(e) => setWachtwoord(e.target.value)} />
+        </div>
+        {metCode && (
+          <div>
+            <label htmlFor="uc" className="block text-xs font-medium text-gray-600 mb-1">Code uit jouw authenticator-app</label>
+            <CodeInvoer id="uc" waarde={code} onWijzig={setCode} disabled={bezig} />
+          </div>
+        )}
+        {fout && <div role="alert" className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{fout}</div>}
+        <div className="flex gap-2 justify-end">
+          <button type="button" onClick={onSluit} disabled={bezig} className="btn-secondary">Annuleren</button>
+          <button type="submit" disabled={bezig || !wachtwoord || (metCode && code.length !== 6)} className="btn-danger">
+            {bezig && <Loader2 className="h-4 w-4 animate-spin" />}2FA uitzetten
           </button>
         </div>
       </form>

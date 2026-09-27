@@ -163,3 +163,20 @@ export async function resetVoorAnder(k: Kern, adminId: string, doelId: string, p
   await k.opslag.vervangHerstelcodes(doelId, [])
   return { ok: true }
 }
+
+/**
+ * 7. Een admin bevestigt zijn eigen identiteit vóór een gevoelige actie op een
+ * ANDER account (bv. de 2FA van een werknemer uitzetten): altijd het eigen
+ * wachtwoord, en — heeft de admin zelf een authenticator-app — ook een code
+ * daaruit. Zo vraagt de actie minstens wat de admin zelf bij het inloggen toont.
+ */
+export async function herbevestigAdmin(k: Kern, adminId: string, p: { wachtwoordOk: boolean; code?: string | null }): Promise<Uitkomst> {
+  if (!(await binnenLimieten(k, `2fa-admin:${adminId}`, [[5, 900]]))) return fout(FOUT_TE_VEEL, 429)
+  if (!p.wachtwoordOk) return fout(FOUT_HERBEVESTIGING)
+  const eigen = await k.opslag.lees(adminId)
+  if (!eigen?.actief) return { ok: true }
+  if (!p.code) return fout(FOUT_HERBEVESTIGING)
+  const f = await controleerFactor(k, adminId, { code: p.code })
+  if (!f.ok) return f.status === 429 ? f : fout(FOUT_HERBEVESTIGING)
+  return { ok: true }
+}

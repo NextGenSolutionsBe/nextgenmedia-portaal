@@ -37,7 +37,8 @@ type Account = {
 // GET — alle interne accounts met hun huidige instelling.
 export async function GET() {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
+    const actor = await requireAdmin()
+    if (!actor) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
     const admin = createAdminSupabaseClient()
 
     const [{ data: roles }, { data: staff }, { data: settings, error: settingsErr }, { data: totp }] = await Promise.all([
@@ -90,7 +91,8 @@ export async function GET() {
     }
 
     out.sort((a, b) => (a.role === b.role ? (a.email ?? '').localeCompare(b.email ?? '') : a.role === 'admin' ? -1 : 1))
-    return NextResponse.json({ accounts: out, ready, hint: ready ? null : MIGRATION_HINT })
+    // Heeft de admin zelf een app? Dan vraagt "2FA uitzetten" ook een code daaruit.
+    return NextResponse.json({ accounts: out, ready, hint: ready ? null : MIGRATION_HINT, ikHebApp: metApp.has(actor.id) })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
