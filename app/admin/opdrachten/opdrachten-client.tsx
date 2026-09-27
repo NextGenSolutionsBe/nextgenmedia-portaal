@@ -4,11 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import {
-  Loader2, Plus, X, Trash2, Check, AlertTriangle, CalendarClock, Search, ClipboardList,
+  Loader2, Plus, X, Trash2, Check, Search, ClipboardList,
   FileSignature, Receipt, ArrowRight, Link2, Euro,
 } from 'lucide-react'
 import {
-  STATUSSEN, FASEN, statusInfo, faseInfo, statussenPerFase, sorteer, isTeLaat, isVandaag, deadlineTekst,
+  STATUSSEN, FASEN, statusInfo, faseInfo, statussenPerFase, sorteer,
   OPEN_STATUSSEN, volgendeStatus, pastInFilter, verslag, waardeVan,
   type Opdracht, type OpdrachtStatus, type Fase, type VerslagRegel,
 } from '@/lib/opdrachten'
@@ -58,13 +58,11 @@ export function OpdrachtenClient() {
     const naald = q.trim().toLowerCase()
     return rijen
       .filter((o) => pastInFilter(o, { fase, status, toonAfgesloten }))
-      .filter((o) => !naald || [o.titel, o.omschrijving, o.klant_naam, o.wie, o.contract?.title]
+      .filter((o) => !naald || [o.titel, o.omschrijving, o.klant_naam, o.contract?.title]
         .some((v) => (v ?? '').toLowerCase().includes(naald)))
       .sort(sorteer)
   }, [rijen, q, fase, status, toonAfgesloten])
 
-  const teLaat = rijen.filter((o) => isTeLaat(o)).length
-  const vandaag = rijen.filter((o) => isVandaag(o)).length
   const open = rijen.filter((o) => OPEN_STATUSSEN.includes(o.status)).length
   const perFase = useMemo(() => {
     const m = new Map<Fase, number>()
@@ -125,23 +123,6 @@ export function OpdrachtenClient() {
         <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">{hint}</p>
       )}
 
-      {/* Wat vraagt aandacht? Eén regel, geen dashboard. */}
-      {(teLaat > 0 || vandaag > 0) && (
-        <div className="flex gap-2 flex-wrap">
-          {teLaat > 0 && (
-            <span className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700">
-              <AlertTriangle className="h-4 w-4" />
-              {teLaat} {teLaat === 1 ? 'opdracht is' : 'opdrachten zijn'} te laat
-            </span>
-          )}
-          {vandaag > 0 && (
-            <span className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-800">
-              <CalendarClock className="h-4 w-4" />{vandaag} vandaag af te ronden
-            </span>
-          )}
-        </div>
-      )}
-
       {/* Het verslag: hoeveel werk staat er open en wat is het waard. Elke
           kaart is meteen een filter. */}
       <div className="grid gap-2 grid-cols-2 md:grid-cols-4 xl:grid-cols-7">
@@ -153,10 +134,9 @@ export function OpdrachtenClient() {
         <VerslagKaart titel="Betaald" regel={cijfers.betaald} accent="border-green-400" actief={status === 'betaald'} onClick={() => { setStatus('betaald') }} hint="Betaalde opdrachten." />
         <VerslagKaart titel="Verloren" regel={cijfers.verloren} accent="border-gray-300" actief={status === 'geen_interesse' || status === 'geannuleerd'} onClick={() => { setStatus('geen_interesse') }} hint="Geen interesse na het voorstel, of geannuleerd." gedempt />
       </div>
-      {(cijfers.open.zonderWaarde > 0 || cijfers.teLaat.aantal > 0) && (
+      {cijfers.open.zonderWaarde > 0 && (
         <p className="text-[11px] text-gray-500 -mt-3">
-          {cijfers.open.zonderWaarde > 0 && <>{cijfers.open.zonderWaarde} open {cijfers.open.zonderWaarde === 1 ? 'opdracht heeft' : 'opdrachten hebben'} nog geen waarde — vul ze in via de opdracht, dan klopt het verslag. </>}
-          {cijfers.teLaat.aantal > 0 && <>Te laat: {cijfers.teLaat.aantal} ({formatEuro(cijfers.teLaat.waarde)}).</>}
+          {cijfers.open.zonderWaarde} open {cijfers.open.zonderWaarde === 1 ? 'opdracht heeft' : 'opdrachten hebben'} nog geen waarde — vul ze in via de opdracht, dan klopt het verslag.
         </p>
       )}
 
@@ -252,9 +232,6 @@ function OpdrachtRij({ o, onStatus, onOpen, onVerwijder }: {
   onVerwijder: () => void
 }) {
   const info = statusInfo(o.status)
-  const laat = isTeLaat(o)
-  const nu = isVandaag(o)
-  const tekst = deadlineTekst(o.deadline)
   const volgende = volgendeStatus(o.status)
   const facturen = o.facturen ?? []
   const verstuurd = facturen.filter((f) => f.status === 'verstuurd' || f.status === 'gefactureerd' || f.status === 'betaald').length
@@ -262,7 +239,7 @@ function OpdrachtRij({ o, onStatus, onOpen, onVerwijder }: {
   const klaar = info.eind && o.status !== 'geannuleerd' && o.status !== 'geen_interesse'
 
   return (
-    <div className={`card-base p-3 flex items-start gap-3 ${laat ? 'border-red-200 bg-red-50/40' : ''}`}>
+    <div className="card-base p-3 flex items-start gap-3">
       {/* Afvinken zonder de dialoog te openen: dat is de handeling die het
           vaakst gebeurt. */}
       <button
@@ -284,16 +261,6 @@ function OpdrachtRij({ o, onStatus, onOpen, onVerwijder }: {
           {o.status_bron === 'automatisch' && (
             <span className="text-[10px] text-gray-400" title="Deze status volgde automatisch uit het contract of de factuur">· automatisch</span>
           )}
-          {laat && (
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200">
-              {tekst}
-            </span>
-          )}
-          {nu && (
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
-              vandaag
-            </span>
-          )}
         </div>
         <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-2 flex-wrap">
           {o.klant_naam && <span>{o.klant_naam}</span>}
@@ -302,8 +269,6 @@ function OpdrachtRij({ o, onStatus, onOpen, onVerwijder }: {
               · {formatEuro(o.waarde as number)}{o.waarde_bron === 'facturen' ? ' (facturen)' : ''}
             </span>
           )}
-          {o.wie && <span>· {o.wie}</span>}
-          {o.deadline && !laat && !nu && <span>· {o.deadline} ({tekst})</span>}
           {o.omschrijving && <span className="truncate max-w-md">· {o.omschrijving}</span>}
         </div>
         {/* De koppelingen: waar het contract en de facturen staan. */}
@@ -376,8 +341,6 @@ function OpdrachtDialoog({ bestaand, klanten, contracten, facturen, onClose, onO
   const [clientId, setClientId] = useState(bestaand?.client_id ?? '')
   const [klantVrij, setKlantVrij] = useState(bestaand?.klant_vrij ?? '')
   const [status, setStatus] = useState<OpdrachtStatus>(bestaand?.status ?? 'open')
-  const [deadline, setDeadline] = useState(bestaand?.deadline ?? '')
-  const [wie, setWie] = useState(bestaand?.wie ?? '')
   const [bedragExcl, setBedragExcl] = useState(bestaand?.bedrag_excl !== null && bestaand?.bedrag_excl !== undefined ? String(bestaand.bedrag_excl) : '')
   const [contractId, setContractId] = useState(bestaand?.contract_id ?? '')
   const [invoiceId, setInvoiceId] = useState(bestaand?.invoice_id ?? '')
@@ -402,7 +365,7 @@ function OpdrachtDialoog({ bestaand, klanten, contracten, facturen, onClose, onO
     try {
       const body = {
         ...(bestaand ? { id: bestaand.id } : {}),
-        titel: titel.trim(), omschrijving, status, deadline, wie,
+        titel: titel.trim(), omschrijving, status,
         client_id: clientId || null,
         klant_vrij: clientId ? null : klantVrij,
         contract_id: contractId || null,
@@ -519,22 +482,6 @@ function OpdrachtDialoog({ bestaand, klanten, contracten, facturen, onClose, onO
             <p className="text-[11px] text-gray-500 mt-1">
               Telt mee in het verslag bovenaan. Leeg maar wel facturen gekoppeld? Dan telt de som van die facturen.
             </p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Deadline</label>
-              <input type="date" className="input-base" value={deadline}
-                onChange={(e) => setDeadline(e.target.value)} min="2020-01-01" max="2099-12-31" />
-              <p className="text-[11px] text-gray-500 mt-1">
-                Leeg = geen datum. Verleden én nog open = rood bolletje in het menu.
-              </p>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Wie pakt dit op?</label>
-              <input className="input-base" value={wie} onChange={(e) => setWie(e.target.value)}
-                placeholder="Bram" maxLength={60} />
-            </div>
           </div>
 
           <div>

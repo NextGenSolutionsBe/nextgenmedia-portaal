@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import {
   STATUSSEN, FASEN, OPEN_STATUSSEN, statusInfo, volgorde, volgendeStatus, afgeleideStatus, magAutomatischNaar,
-  pastInFilter, isTeLaat, sorteer, waardeVan, verslag, type Opdracht, type Koppelingen,
+  pastInFilter, sorteer, waardeVan, verslag, type Opdracht, type Koppelingen,
 } from '../lib/opdrachten'
 
 let n = 0
@@ -84,12 +84,13 @@ test('8. Filter: status wint, dan fase, anders open (+ afgesloten op verzoek)', 
   assert.equal(pastInFilter(o('geannuleerd'), { fase: 'alle' }), true)
 })
 
-test('9. Te laat en sortering werken met de nieuwe statussen', () => {
-  const nu = new Date('2026-09-18T10:00:00Z')
-  assert.equal(isTeLaat({ status: 'voorstel_voorgelegd', deadline: '2026-09-17' }, nu), true)
-  assert.equal(isTeLaat({ status: 'betaald', deadline: '2026-09-17' }, nu), false)
-  const basis = { id: '', client_id: null, klant_vrij: null, titel: '', omschrijving: null, deadline: null, wie: null, afgerond_op: null, created_at: '2026-09-01' }
-  const lijst: Opdracht[] = [{ ...basis, id: 'a', status: 'betaald' }, { ...basis, id: 'b', status: 'te_factureren' }, { ...basis, id: 'c', status: 'voorstel_gevraagd', deadline: '2026-09-20' }]
+test('9. Sortering: open werk eerst, daarbinnen de nieuwste (geen deadline meer)', () => {
+  const basis = { id: '', client_id: null, klant_vrij: null, titel: '', omschrijving: null, afgerond_op: null, created_at: '2026-09-01' }
+  const lijst: Opdracht[] = [
+    { ...basis, id: 'a', status: 'betaald', created_at: '2026-09-20' },
+    { ...basis, id: 'b', status: 'te_factureren', created_at: '2026-09-02' },
+    { ...basis, id: 'c', status: 'voorstel_gevraagd', created_at: '2026-09-10' },
+  ]
   assert.deepEqual(lijst.sort(sorteer).map((x) => x.id), ['c', 'b', 'a'])
 })
 
@@ -112,12 +113,11 @@ test('11. Waarde: ingevuld bedrag wint, anders de som van de gekoppelde facturen
 })
 
 test('12. Verslag: aantallen en waarde per stuk van de flow', () => {
-  const nu = new Date('2026-09-18T10:00:00Z')
-  const r = (status: Opdracht['status'], bedrag_excl: number | null, deadline: string | null = null) => ({ status, bedrag_excl, deadline, facturen: [] })
+  const r = (status: Opdracht['status'], bedrag_excl: number | null) => ({ status, bedrag_excl, facturen: [] })
   const v = verslag([
     r('voorstel_gevraagd', 4950), r('interesse', 7950), r('geen_interesse', 3000),
-    r('getekend', 14950, '2026-09-10'), r('bezig', null), r('factuur_verstuurd', 1250), r('betaald', 2450), r('geannuleerd', 100), r('afgerond', 800),
-  ], nu)
+    r('getekend', 14950), r('bezig', null), r('factuur_verstuurd', 1250), r('betaald', 2450), r('geannuleerd', 100), r('afgerond', 800),
+  ])
   assert.deepEqual(v.open, { aantal: 5, waarde: 29100, zonderWaarde: 1 })
   assert.deepEqual(v.voorstel, { aantal: 2, waarde: 12900, zonderWaarde: 0 })
   assert.deepEqual(v.contract, { aantal: 1, waarde: 14950, zonderWaarde: 0 })
@@ -125,7 +125,6 @@ test('12. Verslag: aantallen en waarde per stuk van de flow', () => {
   assert.deepEqual(v.facturatie, { aantal: 1, waarde: 1250, zonderWaarde: 0 })
   assert.deepEqual(v.betaald, { aantal: 1, waarde: 2450, zonderWaarde: 0 })
   assert.deepEqual(v.verloren, { aantal: 2, waarde: 3100, zonderWaarde: 0 })
-  assert.deepEqual(v.teLaat, { aantal: 1, waarde: 14950, zonderWaarde: 0 })
 })
 
 console.log(`\n${n} tests geslaagd`)

@@ -67,7 +67,7 @@ const SECTIONS: NavSection[] = [
       // Werk dat binnenkomt en opgevolgd moet worden. Bewust hier en niet bij
       // Partners: dat zijn freelance-opdrachten, dit gaat over onze eigen
       // klantklussen. De badge telt wat te laat is.
-      { label: 'Opdrachten', href: '/admin/opdrachten', icon: ClipboardList, module: 'opdrachten', badge: 'opdrachten' },
+      { label: 'Opdrachten', href: '/admin/opdrachten', icon: ClipboardList, module: 'opdrachten' },
       // Intake- en algemene formulieren die klanten via een link invullen.
       { label: 'Formulieren', href: '/admin/formulieren', icon: ClipboardPen, module: 'formulieren' },
     ],

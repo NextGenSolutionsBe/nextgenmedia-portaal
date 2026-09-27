@@ -211,8 +211,6 @@ export type Opdracht = {
   titel: string
   omschrijving: string | null
   status: OpdrachtStatus
-  deadline: string | null
-  wie: string | null
   afgerond_op: string | null
   created_at: string
   contract_id?: string | null
@@ -262,15 +260,14 @@ export type Verslag = {
   betaald: VerslagRegel
   /** Geen interesse + geannuleerd. */
   verloren: VerslagRegel
-  teLaat: VerslagRegel
 }
 
 const leeg = (): VerslagRegel => ({ aantal: 0, waarde: 0, zonderWaarde: 0 })
 const tel = (r: VerslagRegel, w: number | null) => { r.aantal++; if (w === null) r.zonderWaarde++; else r.waarde = Math.round((r.waarde + w) * 100) / 100 }
 
 /** Het verslag bovenaan de pagina: aantallen en waarde per stuk van de flow. */
-export function verslag(rijen: Pick<Opdracht, 'status' | 'deadline' | 'bedrag_excl' | 'facturen' | 'waarde'>[], nu: Date = new Date()): Verslag {
-  const v: Verslag = { open: leeg(), voorstel: leeg(), contract: leeg(), uitvoering: leeg(), facturatie: leeg(), betaald: leeg(), verloren: leeg(), teLaat: leeg() }
+export function verslag(rijen: Pick<Opdracht, 'status' | 'bedrag_excl' | 'facturen' | 'waarde'>[]): Verslag {
+  const v: Verslag = { open: leeg(), voorstel: leeg(), contract: leeg(), uitvoering: leeg(), facturatie: leeg(), betaald: leeg(), verloren: leeg() }
   for (const o of rijen) {
     const info = statusInfo(o.status)
     const w = o.waarde !== undefined ? o.waarde : waardeVan(o).waarde
@@ -282,12 +279,11 @@ export function verslag(rijen: Pick<Opdracht, 'status' | 'deadline' | 'bedrag_ex
     if (o.status === 'te_factureren' || o.status === 'factuur_verstuurd') tel(v.facturatie, w)
     if (o.status === 'betaald') tel(v.betaald, w)
     if (o.status === 'geen_interesse' || o.status === 'geannuleerd') tel(v.verloren, w)
-    if (isTeLaat(o, nu)) tel(v.teLaat, w)
   }
   return v
 }
 
-/** Vandaag in Brussel als YYYY-MM-DD — een deadline is een DAG, geen moment. */
+/** Vandaag in Brussel als YYYY-MM-DD. */
 export function vandaagISO(nu: Date = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/Brussels', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -295,51 +291,14 @@ export function vandaagISO(nu: Date = new Date()): string {
 }
 
 /**
- * Te laat? Alleen open werk met een deadline die vóór vandaag ligt.
- *
- * Vandaag zelf telt bewust NIET als te laat: je hebt de hele dag nog. Wie
- * "vandaag" apart wil zien, gebruikt isVandaag().
- */
-export function isTeLaat(o: Pick<Opdracht, 'status' | 'deadline'>, nu: Date = new Date()): boolean {
-  if (!o.deadline) return false
-  if (!OPEN_STATUSSEN.includes(o.status)) return false
-  return o.deadline < vandaagISO(nu)
-}
-
-export function isVandaag(o: Pick<Opdracht, 'status' | 'deadline'>, nu: Date = new Date()): boolean {
-  if (!o.deadline) return false
-  if (!OPEN_STATUSSEN.includes(o.status)) return false
-  return o.deadline === vandaagISO(nu)
-}
-
-/** "3 dagen te laat", "vandaag", "over 5 dagen" — in gewone taal. */
-export function deadlineTekst(deadline: string | null, nu: Date = new Date()): string | null {
-  if (!deadline) return null
-  const vandaag = vandaagISO(nu)
-  if (deadline === vandaag) return 'vandaag'
-  // Dagen tellen via UTC-middag: zo kan zomertijd de uitkomst niet verschuiven.
-  const d = (s: string) => Date.parse(`${s}T12:00:00Z`)
-  const dagen = Math.round((d(deadline) - d(vandaag)) / 86400000)
-  if (dagen === 1) return 'morgen'
-  if (dagen === -1) return '1 dag te laat'
-  if (dagen < 0) return `${Math.abs(dagen)} dagen te laat`
-  return `over ${dagen} dagen`
-}
-
-/**
- * Sorteervolgorde van de lijst: eerst wat aandacht vraagt.
- * Open werk boven afgerond, daarbinnen op deadline (zonder deadline achteraan),
- * en gelijke gevallen op aanmaakdatum zodat de volgorde niet zomaar wisselt.
+ * Sorteervolgorde van de lijst: open werk boven afgerond, daarbinnen de
+ * nieuwste eerst. (Deadline en "wie pakt dit op" zijn weg: een opdracht bestaat
+ * pas vanaf een getekend contract; opvolging daarvoor gebeurt in de pipeline.)
  */
 export function sorteer(a: Opdracht, b: Opdracht): number {
   const openA = OPEN_STATUSSEN.includes(a.status) ? 0 : 1
   const openB = OPEN_STATUSSEN.includes(b.status) ? 0 : 1
   if (openA !== openB) return openA - openB
-  if (a.deadline !== b.deadline) {
-    if (!a.deadline) return 1
-    if (!b.deadline) return -1
-    return a.deadline < b.deadline ? -1 : 1
-  }
   return (b.created_at ?? '').localeCompare(a.created_at ?? '')
 }
 

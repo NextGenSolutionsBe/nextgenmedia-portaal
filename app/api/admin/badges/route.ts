@@ -1,7 +1,6 @@
 import { safeMessage } from '@/lib/api-error'
 import { NextResponse } from 'next/server'
-import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
-import { OPEN_STATUSSEN, vandaagISO } from '@/lib/opdrachten'
+import { requireStaff } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,18 +15,9 @@ export const dynamic = 'force-dynamic'
 export async function GET() {
   try {
     if (!(await requireStaff())) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
-    const admin = createAdminSupabaseClient()
-
-    let opdrachten = 0
-    try {
-      const { count } = await admin.from('opdrachten')
-        .select('id', { count: 'exact', head: true })
-        .in('status', OPEN_STATUSSEN)
-        .lt('deadline', vandaagISO())
-      opdrachten = count ?? 0
-    } catch { /* tabel nog niet gemigreerd → geen bolletje */ }
-
-    return NextResponse.json({ opdrachten })
+    // Het bolletje bij Opdrachten ("te laat") is weg: opdrachten hebben geen
+    // deadline meer. Het endpoint blijft voor toekomstige tellers.
+    return NextResponse.json({})
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }

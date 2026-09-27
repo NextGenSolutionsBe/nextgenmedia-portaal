@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic'
 const MIST = /relation .*opdrachten|does not exist|schema cache/i
 const HINT = 'De tabel voor opdrachten bestaat nog niet. Draai supabase/migrations/99999999_SYNC_ALL.sql.'
 
-const KOLOMMEN_BASIS = 'id, client_id, klant_vrij, titel, omschrijving, status, deadline, wie, afgerond_op, created_at'
+const KOLOMMEN_BASIS = 'id, client_id, klant_vrij, titel, omschrijving, status, afgerond_op, created_at'
 const KOLOMMEN = `${KOLOMMEN_BASIS}, contract_id, invoice_id, lead_id, status_bron, auto_status, status_gewijzigd_op, bedrag_excl`
 /** Kolommen die pas na de statusflow-migratie bestaan. */
 const NIEUWE_KOLOMMEN = /contract_id|invoice_id|lead_id|status_bron|auto_status|status_gewijzigd_op|bedrag_excl/i
@@ -24,13 +24,6 @@ const geldigeStatus = (v: unknown): OpdrachtStatus | null => (isStatus(v) ? v : 
 const tekst = (v: unknown, max: number): string | null => {
   const s = String(v ?? '').trim()
   return s ? s.slice(0, max) : null
-}
-
-/** Datum als YYYY-MM-DD, of null. Onzin wordt geweigerd, niet stil bewaard. */
-const datum = (v: unknown): string | null | undefined => {
-  const s = String(v ?? '').trim()
-  if (!s) return null
-  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : undefined
 }
 
 /** Bedrag in euro (komma of punt), >= 0. Leeg = null; onzin = undefined (weigeren). */
@@ -233,9 +226,6 @@ export async function POST(req: NextRequest) {
     const titel = tekst(b.titel, 200)
     if (!titel) return NextResponse.json({ error: 'Geef de opdracht een titel.' }, { status: 400 })
 
-    const deadline = datum(b.deadline)
-    if (deadline === undefined) return NextResponse.json({ error: 'Die deadline begrijpen we niet.' }, { status: 400 })
-
     // Klant: ofwel een bestaand dossier, ofwel een vrije naam. Een client_id
     // van buiten controleren we — anders hangt de opdracht aan niets.
     const admin = createAdminSupabaseClient()
@@ -256,8 +246,6 @@ export async function POST(req: NextRequest) {
       titel,
       omschrijving: tekst(b.omschrijving, 4000),
       status,
-      deadline,
-      wie: tekst(b.wie, 60),
       aangemaakt_door_email: actor.email ?? null,
       status_bron: 'handmatig',
       status_gewijzigd_op: new Date().toISOString(),
@@ -304,12 +292,6 @@ export async function PATCH(req: NextRequest) {
       patch.titel = t
     }
     if ('omschrijving' in b) patch.omschrijving = tekst(b.omschrijving, 4000)
-    if ('wie' in b) patch.wie = tekst(b.wie, 60)
-    if ('deadline' in b) {
-      const d = datum(b.deadline)
-      if (d === undefined) return NextResponse.json({ error: 'Die deadline begrijpen we niet.' }, { status: 400 })
-      patch.deadline = d
-    }
     if ('client_id' in b) {
       if (b.client_id) {
         const { data: k } = await admin.from('clients').select('id').eq('id', String(b.client_id)).maybeSingle()
