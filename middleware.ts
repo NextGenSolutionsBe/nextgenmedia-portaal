@@ -12,6 +12,6 @@ export async function middleware(request: NextRequest) {
 // wat bij de ontvanger aankomt als een "beschadigde pdf". Vandaar ook .pdf.
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|pdf|ico|webmanifest|txt|xml)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|pdf|ico|webmanifest|txt|xml|mjs)$).*)',
   ],
 }
