@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { GripVertical, Loader2, ChevronLeft, ChevronRight } from 'lucide-react'
 import { FIELD_FONT_PT } from '@/lib/contract-render'
 
@@ -45,6 +46,9 @@ export function FieldOverlayEditor({
   const [numPages, setNumPages] = useState(1)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const router = useRouter()
+  // Eén automatische poging om een verlopen downloadlink te vernieuwen.
+  const vernieuwd = useRef(false)
   // Echte paginamaten (punten) + weergaveschaal (px per punt).
   const [pageDims, setPageDims] = useState<{ wPt: number; hPt: number; wPx: number; hPx: number }>({ wPt: 595, hPt: 842, wPx: 1, hPx: 1 })
 
@@ -52,6 +56,9 @@ export function FieldOverlayEditor({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pdfDocRef = useRef<any>(null)
+  // Nieuwe link (na vernieuwen) = document opnieuw ophalen. Staat vóór het
+  // teken-effect, zodat de oude kopie eerst weg is.
+  useEffect(() => { pdfDocRef.current = null }, [pdfUrl])
   const drag = useRef<null | { kind: 'field' | 'zone'; index: number; mode: 'move' | 'resize'; startX: number; startY: number; orig: { x: number; y: number; w: number; h: number } }>(null)
 
   const maxPage = Math.max(1, zone.sig_page, ...fields.map((f) => f.page_number || 1))
@@ -66,7 +73,22 @@ export function FieldOverlayEditor({
     try {
       const pdfjs = await loadPdfjs()
       if (!pdfDocRef.current) {
-        pdfDocRef.current = await pdfjs.getDocument({ url: pdfUrl }).promise
+        // De hele PDF één keer ophalen en uit het geheugen tekenen. Laat je
+        // pdf.js zelf per stuk laden, dan haalt het bij elke nieuwe pagina opnieuw
+        // bij de downloadlink — en die verloopt na een uur (fout 400).
+        const res = await fetch(pdfUrl, { cache: 'no-store' })
+        if (!res.ok) {
+          if ([400, 401, 403].includes(res.status) && !vernieuwd.current) {
+            // Link verlopen: de pagina maakt een verse aan; niet-opgeslagen velden blijven staan.
+            vernieuwd.current = true
+            router.refresh()
+            return
+          }
+          throw new Error(res.status === 404 ? 'De PDF van dit contract werd niet gevonden.' : 'De downloadlink van de PDF is verlopen. Herlaad de pagina.')
+        }
+        const data = new Uint8Array(await res.arrayBuffer())
+        pdfDocRef.current = await pdfjs.getDocument({ data }).promise
+        vernieuwd.current = false
       }
       const doc = pdfDocRef.current
       setNumPages(doc.numPages)
@@ -87,11 +109,11 @@ export function FieldOverlayEditor({
       await pdfPage.render({ canvasContext: ctx, viewport: vp }).promise
       setPageDims({ wPt: vp1.width, hPt: vp1.height, wPx: vp.width, hPx: vp.height })
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'PDF kon niet geladen worden')
+      setError(e instanceof Error && !/getOrInsert|is not a function/i.test(e.message) ? e.message : 'De PDF kon niet geladen worden. Herlaad de pagina.')
     } finally {
       setLoading(false)
     }
-  }, [pdfUrl, page])
+  }, [pdfUrl, page, router])
 
   useEffect(() => { renderPage() }, [renderPage])
   // Herteken bij venstergrootte-wijziging (schaal blijft exact).
