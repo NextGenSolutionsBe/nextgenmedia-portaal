@@ -3,15 +3,14 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { Timer, CalendarDays, CalendarPlus, ListChecks, Bell, LogOut, LayoutDashboard } from 'lucide-react'
+import { CalendarDays, CalendarPlus, Bell, LogOut, LayoutDashboard } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Logo } from '@/components/logo'
 
-const NAV = [
-  { href: '/team', label: 'Klok', icon: Timer, exact: true },
+// Inklokken en uren zijn weg: planning (inboekingen bevestigen), beschikbaarheid en meldingen.
+const NAV: { href: string; label: string; icon: typeof CalendarDays; exact?: boolean }[] = [
   { href: '/team/planning', label: 'Planning', icon: CalendarDays },
   { href: '/team/beschikbaarheid', label: 'Beschikbaar', icon: CalendarPlus },
-  { href: '/team/uren', label: 'Uren', icon: ListChecks },
   { href: '/team/meldingen', label: 'Meldingen', icon: Bell },
 ]
 
@@ -46,7 +45,7 @@ export function TeamShell({ voornaam, portaal = false, children }: { voornaam: s
       </header>
       <main className="flex-1 w-full max-w-2xl mx-auto px-4 py-4 pb-28">{children}</main>
       <nav className="fixed bottom-0 inset-x-0 z-30 bg-white border-t border-gray-200 pb-[env(safe-area-inset-bottom)]">
-        <div className="max-w-2xl mx-auto grid grid-cols-5">
+        <div className="max-w-2xl mx-auto grid grid-cols-3">
           {NAV.map((n) => {
             const actief = n.exact ? pad === n.href : pad.startsWith(n.href)
             const Icon = n.icon

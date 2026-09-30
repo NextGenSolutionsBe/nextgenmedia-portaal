@@ -110,6 +110,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if ('standaard_werkdagen' in b) patch.standaard_werkdagen = Array.isArray(b.standaard_werkdagen) ? [...new Set((b.standaard_werkdagen as unknown[]).map(Number).filter((n) => n >= 1 && n <= 7))].sort() : []
     zet('max_uren_dag', getal(b.max_uren_dag)); zet('max_uren_week', getal(b.max_uren_week)); zet('max_uren_maand', getal(b.max_uren_maand))
     zet('interne_notities', tekst(b.interne_notities, 5000))
+    // Kleur in de algemene planningskalender (#rrggbb).
+    if ('kleur' in b) patch.kleur = typeof b.kleur === 'string' && /^#[0-9a-f]{6}$/i.test(b.kleur) ? b.kleur.toLowerCase() : null
     if (!Object.keys(patch).length) return NextResponse.json({ ok: true })
     // Het e-mailadres van een bestaande login wijzigen we niet stilletjes: dat moet via het account.
     if ('email' in patch && oud.auth_user_id && patch.email !== oud.email) return NextResponse.json({ error: 'Deze medewerker heeft al een login. Wijzig het e-mailadres via het tabblad Account.' }, { status: 409 })

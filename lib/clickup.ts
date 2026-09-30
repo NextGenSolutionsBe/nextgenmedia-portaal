@@ -726,6 +726,32 @@ async function findOrCreatePlanningList(): Promise<string> {
   return created.id
 }
 
+/**
+ * Een ClickUp-taak-id uit wat iemand plakt: een link (https://app.clickup.com/t/86c1abcde,
+ * ook met werkruimte-id ervoor) of een los id. null = niet herkend.
+ */
+export function clickupTaakIdUit(invoer: unknown): string | null {
+  const s = String(invoer ?? '').trim()
+  if (!s) return null
+  const m = s.match(/clickup\.com\/t\/(?:\d+\/)?([A-Za-z0-9_-]{5,40})/) ?? s.match(/^#?([A-Za-z0-9_-]{5,40})$/)
+  return m ? m[1] : null
+}
+
+/** Iemand (extra) toewijzen aan een bestaande taak — naam, tekst en tijden blijven ongemoeid. Gooit bij fouten. */
+export async function wijsTaakToe(taskId: string, assigneeId: number): Promise<void> {
+  await clickupJson(`/task/${taskId}`, { method: 'PUT', body: JSON.stringify({ assignees: { add: [assigneeId] } }) })
+}
+
+/** Iemand van een taak afhalen (de taak zelf blijft bestaan). Gooit bij fouten. */
+export async function haalVanTaak(taskId: string, assigneeId: number): Promise<void> {
+  await clickupJson(`/task/${taskId}`, { method: 'PUT', body: JSON.stringify({ assignees: { rem: [assigneeId] } }) })
+}
+
+/** Een opmerking bij een taak (bv. "Alida ingeboekt 10:00–14:00"). Best-effort. */
+export async function reageerOpTaak(taskId: string, tekst: string): Promise<void> {
+  try { await clickupJson(`/task/${taskId}/comment`, { method: 'POST', body: JSON.stringify({ comment_text: tekst, notify_all: false }) }) } catch { /* bijzaak */ }
+}
+
 export type PlanningTaak = { naam: string; omschrijving: string; startMs: number; eindMs: number; assigneeId: number | null }
 
 /** Maakt de planningstaak aan, of werkt een bestaande bij (tijd, tekst, toewijzing). Gooit bij fouten. */

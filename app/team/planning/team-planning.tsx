@@ -18,10 +18,9 @@ type Blok = {
 type Data = {
   planning: Blok[]
   beschikbaarheid: { id: string; datum: string; start_tijd: string; eind_tijd: string; status: string }[]
-  sessies: { id: string; start_at: string; eind_at: string | null; status: string; taak: string | null; project: string | null }[]
 }
 
-/** De eigen kalender: werkblokken met briefing, eigen beschikbaarheden en eigen sessies. */
+/** De eigen kalender: werkblokken met briefing (bevestigen of niet) en eigen beschikbaarheden. */
 export function TeamPlanning() {
   const zoek = useSearchParams()
   const [weergave, setWeergave] = useState<Weergave>('week')
@@ -40,7 +39,6 @@ export function TeamPlanning() {
     const uit: KalItem[] = []
     for (const p of data.planning) uit.push({ id: `p${p.id}`, datum: p.datum, start: kortUur(p.start_tijd), eind: kortUur(p.eind_tijd), titel: p.taak ?? p.project ?? 'Werkblok', sub: [p.klant, p.thuiswerk ? 'Thuiswerk' : p.locatie].filter(Boolean).join(' · '), soort: p.status === 'geannuleerd' || bevestigingVan(p) === 'geweigerd' ? 'planning_afgewezen' : bevestigingVan(p) === 'te_bevestigen' ? 'planning_te_bevestigen' : 'planning', onClick: () => setOpen(p.id) })
     for (const b of data.beschikbaarheid) { const s = beschikbaarheidSoort(b.status); if (s) uit.push({ id: `b${b.id}`, datum: b.datum, start: kortUur(b.start_tijd), eind: kortUur(b.eind_tijd), titel: b.status === 'afgewezen' ? 'Niet ingepland' : 'Beschikbaar', soort: s }) }
-    for (const s of data.sessies) uit.push({ id: `s${s.id}`, datum: dagVanIso(s.start_at), start: uurNl(s.start_at), eind: s.eind_at ? uurNl(s.eind_at) : '…', titel: s.taak ?? s.project ?? 'Werksessie', soort: sessieSoort(s.status) })
     return uit
   }, [data])
 

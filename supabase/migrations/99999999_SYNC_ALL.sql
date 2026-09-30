@@ -5391,3 +5391,16 @@ ALTER TABLE public.user_totp ADD COLUMN IF NOT EXISTS setup_door uuid;
 ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS sales_verantwoordelijke text;
 ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS appointment_setter text;
 ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS verantwoordelijke text;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Planning jobstudenten: algemene kalender (30 sep 2026)
+--  · personeel.kleur                         kleur per persoon in de algemene kalender
+--  · personeel_planning.groep_id             één inboeking voor meerdere mensen (zelfde shoot)
+--  · personeel_planning.clickup_bestaande_taak  optioneel: een bestaande ClickUp-taak om aan
+--                                            toe te wijzen i.p.v. een nieuwe te maken
+-- Beschikbaarheid is voortaan gewoon "beschikbaar" (geen goedkeuring meer nodig).
+-- ═══════════════════════════════════════════════════════════════════════════
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS kleur text;
+ALTER TABLE public.personeel_planning ADD COLUMN IF NOT EXISTS groep_id uuid;
+ALTER TABLE public.personeel_planning ADD COLUMN IF NOT EXISTS clickup_bestaande_taak text;
+CREATE INDEX IF NOT EXISTS personeel_planning_groep_idx ON public.personeel_planning (groep_id) WHERE groep_id IS NOT NULL;

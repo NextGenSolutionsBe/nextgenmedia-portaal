@@ -2,21 +2,15 @@
 
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { Contact, LayoutDashboard, ListChecks, CalendarDays, Wallet, Bell, UserCog, Settings } from 'lucide-react'
+import { Contact, CalendarDays, Bell, UserCog, Settings } from 'lucide-react'
 import { SectieMedewerkers } from '@/app/admin/instellingen/sectie-medewerkers'
 import { OverzichtTab } from './overzicht-tab'
-import { DashboardTab } from './dashboard-tab'
-import { UrenTab } from './uren-tab'
 import { PlanningTab } from './planning-tab'
-import { KostenTab } from './kosten-tab'
 import { MeldingenTab } from './meldingen-tab'
 
 const TABS = [
   { key: 'overzicht', label: 'Personeel', icon: Contact },
-  { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { key: 'uren', label: 'Urencontrole', icon: ListChecks },
   { key: 'planning', label: 'Planning', icon: CalendarDays },
-  { key: 'kosten', label: 'Kosten', icon: Wallet },
   { key: 'meldingen', label: 'Meldingen', icon: Bell },
   { key: 'accounts', label: 'Accounts en rechten', icon: UserCog },
 ] as const
@@ -32,7 +26,7 @@ export function PersoneelClient({ isAdmin = false }: { isAdmin?: boolean }) {
     <div className="space-y-5 animate-fade-in">
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-2"><Contact className="h-6 w-6" />Personeel</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Iedereen die voor ons werkt, op één plek: dossiers, planning, inklokken, urencontrole, personeelskosten én de logins met hun rollen en modules.</p>
+        <p className="text-sm text-gray-500 mt-0.5">Iedereen die voor ons werkt, op één plek: dossiers, beschikbaarheid en planning, meldingen én de logins met hun rollen en modules.</p>
       </div>
       <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
         {tabs.map((t) => {
@@ -41,10 +35,7 @@ export function PersoneelClient({ isAdmin = false }: { isAdmin?: boolean }) {
         })}
       </div>
       {tab === 'overzicht' && <OverzichtTab />}
-      {tab === 'dashboard' && <DashboardTab />}
-      {tab === 'uren' && <UrenTab />}
       {tab === 'planning' && <PlanningTab />}
-      {tab === 'kosten' && <KostenTab />}
       {tab === 'meldingen' && <MeldingenTab />}
       {tab === 'accounts' && isAdmin && (
         <div className="space-y-3">

@@ -18,10 +18,9 @@ export async function GET(req: NextRequest) {
     const vandaag = dagBrussel(new Date())
     const van = dagOf(sp.get('van')) ?? plusDagen(vandaag, -31), tot = dagOf(sp.get('tot')) ?? plusDagen(vandaag, 62)
     const id = g.lid.id
-    const [planning, beschikbaar, sessies, klanten, opdrachten] = await Promise.all([
+    const [planning, beschikbaar, klanten, opdrachten] = await Promise.all([
       g.admin.from('personeel_planning').select(PLANNING_KOLOMMEN).eq('personeel_id', id).gte('datum', van).lte('datum', tot).order('datum').order('start_tijd'),
       g.admin.from('personeel_beschikbaarheid').select(BESCHIKBAARHEID_KOLOMMEN).eq('personeel_id', id).gte('datum', van).lte('datum', tot).neq('status', 'ingetrokken'),
-      g.admin.from('personeel_sessies').select(SESSIE_KOLOMMEN).eq('personeel_id', id).gte('start_at', `${plusDagen(van, -1)}T00:00:00Z`).lte('start_at', `${plusDagen(tot, 1)}T23:59:59Z`),
       g.admin.from('clients').select('id, company_name').limit(2000),
       g.admin.from('opdrachten').select('id, titel').limit(2000),
     ])
@@ -31,7 +30,6 @@ export async function GET(req: NextRequest) {
       van, tot,
       planning: ((planning.data ?? []) as unknown as Record<string, unknown>[]).map((p) => ({ ...planningVoorMedewerker(p), klant: p.client_id ? klant.get(String(p.client_id)) ?? null : null, opdracht: p.opdracht_id ? opdracht.get(String(p.opdracht_id)) ?? null : null })),
       beschikbaarheid: ((beschikbaar.data ?? []) as unknown as Record<string, unknown>[]).map(beschikbaarheidVoorMedewerker),
-      sessies: ((sessies.data ?? []) as unknown as Record<string, unknown>[]).map(sessieVoorMedewerker),
     }
     if (bevatFinancieel(antwoord)) return NextResponse.json({ error: 'Interne fout: onverwachte gegevens.' }, { status: 500 })
     return NextResponse.json(antwoord)

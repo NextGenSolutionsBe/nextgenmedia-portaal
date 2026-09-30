@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { createAdminSupabaseClient, getSessionUser } from '@/lib/supabase/server'
 import { magIk, leesPersoon, type IngelogdePersoon } from '@/lib/instellingen/laden'
 import { sendEmail, baseUrl } from '@/lib/email'
+import { buildEmailHtml, buildEmailText } from '@/lib/email-html'
 import type { Actie } from '@/lib/instellingen/model'
 import { normaliseerTarief, periodeKost, type Tarief, type Werkstuk } from './kost'
 import { besluitBoeking, bronSleutel, boekdatum, kostNaam, type ActuelePost } from './kostenposten'
@@ -207,7 +208,7 @@ export async function leesMeldingInstellingen(admin: Admin): Promise<MeldingInst
  * voorkomt dat dezelfde herinnering twee keer vertrekt. Best-effort: een
  * mislukte melding breekt nooit de actie zelf.
  */
-export async function meld(admin: Admin, m: { personeel_id: string | null; event: MeldingEvent; titel: string; tekst?: string; link?: string; sleutel?: string }): Promise<void> {
+export async function meld(admin: Admin, m: { personeel_id: string | null; event: MeldingEvent; titel: string; tekst?: string; link?: string; sleutel?: string; mail?: { tekst: string; knop?: string } }): Promise<void> {
   try {
     const inst = (await leesMeldingInstellingen(admin))[m.event]
     if (inst.inapp) {
@@ -225,6 +226,12 @@ export async function meld(admin: Admin, m: { personeel_id: string | null; event
     }
     if (!naar) return
     const link = m.link ? `${baseUrl()}${m.link}` : null
+    // Uitgebreide mail (bv. een inboeking met alle details en een knop), of de korte tekst.
+    if (m.mail) {
+      const opts = { bodyText: m.mail.tekst, ctaText: link ? m.mail.knop ?? 'Openen in de app' : undefined, ctaLink: link ?? undefined }
+      await sendEmail({ to: naar, subject: m.titel, text: buildEmailText(opts), html: buildEmailHtml(opts) })
+      return
+    }
     await sendEmail({ to: naar, subject: m.titel, text: [m.tekst ?? m.titel, link ? `\n${link}` : ''].join('\n') })
   } catch (e) { console.error('[personeel-melding]', e instanceof Error ? e.message : e) }
 }

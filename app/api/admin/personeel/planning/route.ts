@@ -4,13 +4,14 @@ import { eisPersoneel, audit, meld } from '@/lib/personeel/server'
 import { controleerInplanning, werkblokDetails } from '@/lib/personeel/werkblok'
 import { dagOf, uuidOf, tekst } from '@/lib/personeel/invoer'
 import { dagBrussel, plusDagen } from '@/lib/personeel/tijd'
+import { clickupTaakIdUit } from '@/lib/clickup'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * GET ?van&tot&personeel_id — alles voor de kalender van de admins: werkblokken,
- * beschikbaarheden en werksessies van alle (of één) medewerker(s), plus de
- * keuzelijsten (medewerkers, klanten, opdrachten).
+ * GET ?van&tot&personeel_id — alles voor de algemene kalender van de admins:
+ * werkblokken en beschikbaarheden van alle (of één) medewerker(s), plus de
+ * keuzelijsten (medewerkers met hun kleur, klanten, opdrachten).
  */
 export async function GET(req: NextRequest) {
   try {
@@ -21,16 +22,15 @@ export async function GET(req: NextRequest) {
     const pid = uuidOf(sp.get('personeel_id'))
     let qp = g.admin.from('personeel_planning').select('*').gte('datum', van).lte('datum', tot).order('datum').order('start_tijd')
     let qb = g.admin.from('personeel_beschikbaarheid').select('*').gte('datum', van).lte('datum', tot).order('datum').order('start_tijd')
-    let qs = g.admin.from('personeel_sessies').select('id, personeel_id, start_at, eind_at, pauzes, status, project, taak, client_id').gte('start_at', `${plusDagen(van, -1)}T00:00:00Z`).lte('start_at', `${plusDagen(tot, 1)}T23:59:59Z`)
-    if (pid) { qp = qp.eq('personeel_id', pid); qb = qb.eq('personeel_id', pid); qs = qs.eq('personeel_id', pid) }
-    const [planning, beschikbaar, sessies, mensen, klanten, opdrachten] = await Promise.all([
-      qp, qb, qs,
-      g.admin.from('personeel').select('id, voornaam, achternaam, type, actief, max_uren_dag, max_uren_week, max_uren_maand').order('voornaam'),
+    if (pid) { qp = qp.eq('personeel_id', pid); qb = qb.eq('personeel_id', pid) }
+    const [planning, beschikbaar, mensen, klanten, opdrachten] = await Promise.all([
+      qp, qb.in('status', ['ingediend', 'goedgekeurd', 'gedeeltelijk']),
+      g.admin.from('personeel').select('id, voornaam, achternaam, type, actief, kleur, max_uren_dag, max_uren_week, max_uren_maand').order('voornaam'),
       g.admin.from('clients').select('id, company_name').order('company_name').limit(2000),
       g.admin.from('opdrachten').select('id, titel, client_id, status').order('created_at', { ascending: false }).limit(1000),
     ])
     return NextResponse.json({
-      van, tot, planning: planning.data ?? [], beschikbaarheid: beschikbaar.data ?? [], sessies: sessies.data ?? [],
+      van, tot, planning: planning.data ?? [], beschikbaarheid: beschikbaar.data ?? [],
       medewerkers: mensen.data ?? [], klanten: klanten.data ?? [], opdrachten: opdrachten.data ?? [],
     })
   } catch (err) {
@@ -39,9 +39,11 @@ export async function GET(req: NextRequest) {
 }
 
 /**
- * POST — een medewerker inplannen. Kan enkel binnen een beschikbaarheid die de
- * medewerker zelf opgaf (controleerInplanning). Het werkblok wacht daarna op
- * bevestiging door de medewerker; pas dan gaat het naar ClickUp.
+ * POST — een medewerker inboeken. Kan enkel binnen een beschikbaarheid die de
+ * medewerker zelf opgaf (controleerInplanning). De medewerker krijgt een mail
+ * met alle details en bevestigt in de app; pas dan gaat het naar ClickUp.
+ *  · groep_id               meerdere mensen op dezelfde opdracht/shoot (één ClickUp-taak)
+ *  · clickup_bestaande_taak een bestaande ClickUp-taak (link of id) om aan toe te wijzen
  */
 export async function POST(req: NextRequest) {
   try {
@@ -54,18 +56,45 @@ export async function POST(req: NextRequest) {
     const details = werkblokDetails(b, pid)
     const rij: Record<string, unknown> = { personeel_id: pid, datum: c.datum, start_tijd: c.start, eind_tijd: c.eind, ...details, bevestiging: 'te_bevestigen', created_by: g.persoon.email }
     if (c.aanbod) rij.beschikbaarheid_id = c.aanbod.id
+    const groep = uuidOf(b.groep_id); if (groep) rij.groep_id = groep
+    if (b.clickup_bestaande_taak) {
+      const taak = clickupTaakIdUit(b.clickup_bestaande_taak)
+      if (!taak) return NextResponse.json({ error: 'Die ClickUp-taak herkennen we niet. Plak de link van de taak (app.clickup.com/t/…).' }, { status: 400 })
+      rij.clickup_bestaande_taak = taak
+    }
     const { data, error } = await g.admin.from('personeel_planning').insert(rij).select('id').single()
     if (error) throw new Error(error.message)
-    // De beschikbaarheid waarbinnen ingepland werd, staat niet langer "te behandelen".
-    if (c.aanbod?.status === 'ingediend') {
-      const volledig = c.aanbod.start_tijd.slice(0, 5) === c.start && c.aanbod.eind_tijd.slice(0, 5) === c.eind
-      await g.admin.from('personeel_beschikbaarheid').update({
-        status: volledig ? 'goedgekeurd' : 'gedeeltelijk', goedgekeurd_start: c.start, goedgekeurd_eind: c.eind,
-        planning_id: data.id, beslist_door: g.persoon.email, beslist_op: new Date().toISOString(), updated_at: new Date().toISOString(),
-      }).eq('id', c.aanbod.id).eq('status', 'ingediend')
-    }
     await audit(g.admin, { personeel_id: pid, entiteit: 'planning', entiteit_id: data.id, actie: 'ingepland', nieuw: rij, reden: tekst(b.reden, 500), actor_email: g.persoon.email, actor_id: g.persoon.userId })
-    await meld(g.admin, { personeel_id: pid, event: 'planning_goedgekeurd', titel: 'Je bent ingepland — graag bevestigen', tekst: `${c.datum.split('-').reverse().join('/')} van ${c.start} tot ${c.eind}${details.taak ? ` — ${details.taak}` : ''}. Bevestig in de app of je kunt.`, link: `/team/planning?blok=${data.id}` })
+
+    // De mail: alles wat de medewerker moet weten om te kunnen zeggen "ik ben er".
+    const [{ data: p }, klant, opdracht] = await Promise.all([
+      g.admin.from('personeel').select('voornaam').eq('id', pid).maybeSingle(),
+      details.client_id ? g.admin.from('clients').select('company_name').eq('id', String(details.client_id)).maybeSingle().then((r) => r.data?.company_name as string | undefined) : Promise.resolve(undefined),
+      details.opdracht_id ? g.admin.from('opdrachten').select('titel').eq('id', String(details.opdracht_id)).maybeSingle().then((r) => r.data?.titel as string | undefined) : Promise.resolve(undefined),
+    ])
+    const wanneer = new Date(`${c.datum}T12:00:00Z`).toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Brussels' })
+    const links = Array.isArray(details.links) ? (details.links as { url?: string | null }[]).map((l) => l.url).filter(Boolean) : []
+    const mailTekst = [
+      p?.voornaam ? `Hoi ${p.voornaam},` : 'Hoi,',
+      '',
+      'NextGenMedia wil je graag inboeken:',
+      '',
+      `Wanneer: ${wanneer}, ${c.start}–${c.eind}`,
+      `Wat: ${details.taak || details.project || 'Werkblok'}`,
+      klant ? `Klant: ${klant}` : null,
+      opdracht ? `Opdracht: ${opdracht}` : null,
+      details.thuiswerk ? 'Waar: thuiswerk' : details.locatie ? `Waar: ${details.locatie}` : null,
+      details.briefing ? `\nBriefing:\n${details.briefing}` : null,
+      details.deliverables ? `\nWat we verwachten:\n${details.deliverables}` : null,
+      links.length ? `\nLinks:\n${links.join('\n')}` : null,
+      '',
+      'Ga je akkoord met dit moment? Bevestig of laat weten dat je niet kunt via de knop hieronder.',
+    ].filter((x) => x !== null).join('\n')
+    await meld(g.admin, {
+      personeel_id: pid, event: 'planning_goedgekeurd', titel: `NextGenMedia wil je inboeken — ${c.datum.split('-').reverse().join('/')} ${c.start}–${c.eind}`,
+      tekst: `${c.datum.split('-').reverse().join('/')} van ${c.start} tot ${c.eind}${details.taak ? ` — ${details.taak}` : ''}. Bevestig in de app of je kunt.`,
+      link: `/team/planning?blok=${data.id}`, mail: { tekst: mailTekst, knop: 'Bekijken en bevestigen' },
+    })
     return NextResponse.json({ ok: true, id: data.id, waarschuwing: c.waarschuwing })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
