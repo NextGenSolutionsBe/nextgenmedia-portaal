@@ -1,4 +1,5 @@
 import { safeMessage } from '@/lib/api-error'
+import { leesVerantwoordelijken, naamOfNull } from '@/lib/verkoop/verantwoordelijken'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import {
@@ -15,9 +16,9 @@ const MIST = /relation .*opdrachten|does not exist|schema cache/i
 const HINT = 'De tabel voor opdrachten bestaat nog niet. Draai supabase/migrations/99999999_SYNC_ALL.sql.'
 
 const KOLOMMEN_BASIS = 'id, client_id, klant_vrij, titel, omschrijving, status, afgerond_op, created_at'
-const KOLOMMEN = `${KOLOMMEN_BASIS}, contract_id, invoice_id, lead_id, status_bron, auto_status, status_gewijzigd_op, bedrag_excl`
-/** Kolommen die pas na de statusflow-migratie bestaan. */
-const NIEUWE_KOLOMMEN = /contract_id|invoice_id|lead_id|status_bron|auto_status|status_gewijzigd_op|bedrag_excl/i
+const KOLOMMEN = `${KOLOMMEN_BASIS}, contract_id, invoice_id, lead_id, status_bron, auto_status, status_gewijzigd_op, bedrag_excl, verantwoordelijke`
+/** Kolommen die pas na latere migraties bestaan. */
+const NIEUWE_KOLOMMEN = /contract_id|invoice_id|lead_id|status_bron|auto_status|status_gewijzigd_op|bedrag_excl|verantwoordelijke/i
 
 const geldigeStatus = (v: unknown): OpdrachtStatus | null => (isStatus(v) ? v : null)
 
@@ -127,15 +128,15 @@ export async function GET() {
     const rijen = (data ?? []) as Rij[]
 
     const [{ data: klantRijen }, { data: contractRijen }, { data: factuurRijen }, koppelingen] = await Promise.all([
-      admin.from('clients').select('id, company_name').is('archived_at', null).order('company_name'),
+      admin.from('clients').select('id, company_name, sales_verantwoordelijke').is('archived_at', null).order('company_name'),
       // Keuzelijsten voor het koppelen: recente contracten en facturen.
       admin.from('contracts').select('id, title, status, client_id, created_at').neq('status', 'template').order('created_at', { ascending: false }).limit(400),
       admin.from('invoices').select('id, description, status, invoice_date, client_id, contract_id, amount_incl').order('invoice_date', { ascending: false }).limit(400),
       nieuweKolommen ? laadKoppelingen(admin, rijen) : Promise.resolve(new Map<string, Koppelingen>()),
     ])
 
-    const klanten = ((klantRijen ?? []) as { id: string; company_name: string | null }[])
-      .map((c) => ({ id: c.id, naam: c.company_name ?? '(zonder naam)' }))
+    const klanten = ((klantRijen ?? []) as { id: string; company_name: string | null; sales_verantwoordelijke?: string | null }[])
+      .map((c) => ({ id: c.id, naam: c.company_name ?? '(zonder naam)', verantwoordelijke: c.sales_verantwoordelijke ?? null }))
     const naamVan = new Map(klanten.map((c) => [c.id, c.naam]))
 
     // Status automatisch vooruit zetten wanneer contract of factuur verder
@@ -171,7 +172,7 @@ export async function GET() {
     const facturen = ((factuurRijen ?? []) as { id: string; description: string | null; status: string; invoice_date: string | null; client_id: string | null; contract_id: string | null; amount_incl: number | null }[])
       .map((f) => ({ ...f, klant_naam: f.client_id ? naamVan.get(f.client_id) ?? null : null }))
 
-    return NextResponse.json({ opdrachten, klanten, contracten, facturen })
+    return NextResponse.json({ opdrachten, klanten, contracten, facturen, verantwoordelijken: await leesVerantwoordelijken() })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
@@ -210,7 +211,7 @@ async function schrijf(doe: (patch: Record<string, unknown>) => PromiseLike<{ da
   let r = await doe(patch)
   if (r.error && NIEUWE_KOLOMMEN.test(r.error.message)) {
     const kaal = { ...patch }
-    for (const k of ['contract_id', 'invoice_id', 'lead_id', 'status_bron', 'auto_status', 'status_gewijzigd_op', 'bedrag_excl']) delete kaal[k]
+    for (const k of ['contract_id', 'invoice_id', 'lead_id', 'status_bron', 'auto_status', 'status_gewijzigd_op', 'bedrag_excl', 'verantwoordelijke']) delete kaal[k]
     r = await doe(kaal)
   }
   return r
@@ -246,12 +247,18 @@ export async function POST(req: NextRequest) {
       titel,
       omschrijving: tekst(b.omschrijving, 4000),
       status,
+      verantwoordelijke: naamOfNull(b.verantwoordelijke),
       aangemaakt_door_email: actor.email ?? null,
       status_bron: 'handmatig',
       status_gewijzigd_op: new Date().toISOString(),
     }
     const fout = await leesKoppelingen(admin, b, rij)
     if (fout) return NextResponse.json({ error: fout }, { status: 400 })
+    // Geen verantwoordelijke gekozen? Dan die van de klant ("klant van").
+    if (!rij.verantwoordelijke && clientId) {
+      const { data: k } = await admin.from('clients').select('sales_verantwoordelijke').eq('id', clientId).maybeSingle()
+      rij.verantwoordelijke = (k as { sales_verantwoordelijke?: string | null } | null)?.sales_verantwoordelijke ?? null
+    }
 
     const { data, error } = await schrijf((p) => admin.from('opdrachten').insert(p).select('id').single(), rij)
     if (error) {
@@ -292,6 +299,7 @@ export async function PATCH(req: NextRequest) {
       patch.titel = t
     }
     if ('omschrijving' in b) patch.omschrijving = tekst(b.omschrijving, 4000)
+    if ('verantwoordelijke' in b) patch.verantwoordelijke = naamOfNull(b.verantwoordelijke)
     if ('client_id' in b) {
       if (b.client_id) {
         const { data: k } = await admin.from('clients').select('id').eq('id', String(b.client_id)).maybeSingle()

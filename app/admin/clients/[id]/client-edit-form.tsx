@@ -36,11 +36,14 @@ type Client = {
   niche: string | null
   website_url: string | null
   customer_since?: string | null
+  sales_verantwoordelijke?: string | null
+  appointment_setter?: string | null
   btw_nummer?: string | null
 }
 
 export function ClientEditForm({
   client,
+  verantwoordelijken = [],
   services: initialServices,
   serviceContracts = {},
   socialConfig,
@@ -48,6 +51,7 @@ export function ClientEditForm({
   webdesignConfig,
 }: {
   client: Client
+  verantwoordelijken?: string[]
   services: string[]
   serviceContracts?: Record<string, ServiceCfg>
   socialConfig: { posts?: number; reels?: number; stories?: number; channels?: string[] }
@@ -66,6 +70,8 @@ export function ClientEditForm({
     website_url: client.website_url ?? '',
     customer_since: client.customer_since ? client.customer_since.slice(0, 10) : '',
     btw_nummer: client.btw_nummer ?? '',
+    sales_verantwoordelijke: client.sales_verantwoordelijke ?? '',
+    appointment_setter: client.appointment_setter ?? '',
   })
 
   const [services, setServices] = useState<string[]>(initialServices)
@@ -192,6 +198,29 @@ export function ClientEditForm({
             <label className={lbl}>Klant sinds</label>
             <input type="date" className={inp} value={form.customer_since} onChange={e => setForm(p => ({ ...p, customer_since: e.target.value }))} />
             <p className="text-[11px] text-gray-400 mt-1">Bepaalt het commissiejaar (10/8/5%) voor partners.</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Verkoop: wiens klant is dit, en wie zette de appointment (vesting 50/50) */}
+      <div className="space-y-3">
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Verkoop</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className={lbl}>Klant van (closer)</label>
+            <select className={inp} value={form.sales_verantwoordelijke} onChange={e => setForm(p => ({ ...p, sales_verantwoordelijke: e.target.value }))}>
+              <option value="">— nog niet gekozen —</option>
+              {[...verantwoordelijken, ...(form.sales_verantwoordelijke && !verantwoordelijken.includes(form.sales_verantwoordelijke) ? [form.sales_verantwoordelijke] : [])].map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <p className="text-[11px] text-gray-400 mt-1">Het vaste aanspreekpunt. Media sluit Bram, Solutions sluit Marco.</p>
+          </div>
+          <div>
+            <label className={lbl}>Appointment gezet door</label>
+            <select className={inp} value={form.appointment_setter} onChange={e => setForm(p => ({ ...p, appointment_setter: e.target.value }))}>
+              <option value="">— nog niet gekozen —</option>
+              {[...verantwoordelijken, ...(form.appointment_setter && !verantwoordelijken.includes(form.appointment_setter) ? [form.appointment_setter] : [])].map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <p className="text-[11px] text-gray-400 mt-1">Voor de vesting: appointment en close tellen elk voor 50%.</p>
           </div>
         </div>
       </div>

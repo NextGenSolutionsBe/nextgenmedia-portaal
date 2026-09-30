@@ -5,6 +5,7 @@ import { SERVICE_LABELS } from '@/lib/utils'
 import Link from 'next/link'
 import { Plus, Building2, Globe } from 'lucide-react'
 import { ClientsSearch } from './clients-search'
+import { leesVerantwoordelijken } from '@/lib/verkoop/verantwoordelijken'
 
 async function getClients() {
   const admin = createAdminSupabaseClient()
@@ -25,12 +26,15 @@ async function getClients() {
 export default async function ClientsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>
+  searchParams: Promise<{ q?: string; van?: string }>
 }) {
-  const { q } = await searchParams
-  const clients = await getClients()
+  const { q, van } = await searchParams
+  const [clients, namen] = await Promise.all([getClients(), leesVerantwoordelijken()])
 
   const filtered = clients.filter((c) => {
+    // "Klant van": een naam, of '-' voor klanten zonder verantwoordelijke.
+    if (van === '-' && c.sales_verantwoordelijke) return false
+    if (van && van !== '-' && c.sales_verantwoordelijke !== van) return false
     if (!q) return true
     const search = q.toLowerCase()
     return (
@@ -38,6 +42,15 @@ export default async function ClientsPage({
       c.niche?.toLowerCase().includes(search)
     )
   })
+  const aantalVan = (n: string | null) => clients.filter((c) => (n === null ? !c.sales_verantwoordelijke : c.sales_verantwoordelijke === n)).length
+  const filterHref = (v: string | null) => {
+    const p = new URLSearchParams()
+    if (q) p.set('q', q)
+    if (v) p.set('van', v)
+    const qs = p.toString()
+    return `/admin/clients${qs ? `?${qs}` : ''}`
+  }
+  const chip = (aan: boolean) => `text-xs font-semibold px-3 py-1.5 rounded-xl border transition-colors ${aan ? 'bg-black text-white border-black' : 'border-gray-200 bg-white hover:bg-gray-50'}`
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -54,6 +67,14 @@ export default async function ClientsPage({
 
       {/* Search */}
       <ClientsSearch defaultValue={q} />
+
+      {/* Klant van: wie is het aanspreekpunt / wiens klant is het */}
+      <div className="flex items-center gap-1.5 flex-wrap -mt-2">
+        <span className="text-xs text-gray-500 mr-1">Klant van:</span>
+        <Link href={filterHref(null)} className={chip(!van)}>Iedereen ({clients.length})</Link>
+        {namen.map((n) => <Link key={n} href={filterHref(n)} className={chip(van === n)}>{n} ({aantalVan(n)})</Link>)}
+        <Link href={filterHref('-')} className={chip(van === '-')}>Nog niet gekozen ({aantalVan(null)})</Link>
+      </div>
 
       {/* Table */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
@@ -82,6 +103,13 @@ export default async function ClientsPage({
                     <div className="min-w-0">
                       <div className="font-medium text-gray-900 truncate">{client.company_name}</div>
                       {client.niche && <div className="text-xs text-gray-400 mt-0.5 truncate">{client.niche}</div>}
+                      {(client.sales_verantwoordelijke || client.appointment_setter) && (
+                        <div className="text-[11px] text-gray-500 mt-0.5">
+                          {client.sales_verantwoordelijke ? `Klant van ${client.sales_verantwoordelijke}` : ''}
+                          {client.sales_verantwoordelijke && client.appointment_setter ? ' · ' : ''}
+                          {client.appointment_setter ? `appointment: ${client.appointment_setter}` : ''}
+                        </div>
+                      )}
                       {services.length > 0 && (
                         <div className="flex flex-wrap gap-1 mt-1.5">
                           {services.map((sv) => <span key={sv.service_slug} className="inline-block px-2 py-0.5 bg-gray-100 text-gray-600 text-[11px] rounded-md">{SERVICE_LABELS[sv.service_slug] ?? sv.service_slug}</span>)}
@@ -100,7 +128,7 @@ export default async function ClientsPage({
               <tr>
                 <th className="table-th">Bedrijf</th>
                 <th className="table-th">Diensten</th>
-                <th className="table-th">Contract</th>
+                <th className="table-th">Klant van</th>
                 <th className="table-th">Status</th>
               </tr>
             </thead>
@@ -143,7 +171,10 @@ export default async function ClientsPage({
                       </div>
                     </td>
                     <td className="table-td">
-                      <span className="text-gray-400">—</span>
+                      {client.sales_verantwoordelijke
+                        ? <div className="text-sm font-medium text-gray-900">{client.sales_verantwoordelijke}</div>
+                        : <span className="text-gray-400">—</span>}
+                      {client.appointment_setter && <div className="text-[11px] text-gray-500">appointment: {client.appointment_setter}</div>}
                     </td>
                     <td className="table-td">
                       <span className="status-badge bg-green-100 text-green-700">Actief</span>

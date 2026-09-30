@@ -6,6 +6,7 @@ import { formatDate, formatEuro, SERVICE_LABELS, daysUntil } from '@/lib/utils'
 import Link from 'next/link'
 import { ChevronLeft, Globe, Calendar, FileText } from 'lucide-react'
 import { ClientEditForm } from './client-edit-form'
+import { leesVerantwoordelijken } from '@/lib/verkoop/verantwoordelijken'
 import { DeleteClientButton } from './delete-client-button'
 import { PortalAccessCard } from './portal-access-card'
 import { CredentialsCard } from '@/components/credentials-card'
@@ -133,6 +134,12 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         <div className="flex-1 min-w-[12rem]">
           <h1 className="text-2xl font-bold truncate">{client.company_name}</h1>
           {client.niche && <p className="text-sm text-gray-500">{client.niche}</p>}
+          {(client.sales_verantwoordelijke || client.appointment_setter) && (
+            <div className="flex items-center gap-1.5 flex-wrap mt-1 text-xs">
+              {client.sales_verantwoordelijke && <span className="status-badge bg-[#fff848]/40 text-gray-900">Klant van {client.sales_verantwoordelijke}</span>}
+              {client.appointment_setter && <span className="status-badge bg-gray-100 text-gray-700">Appointment: {client.appointment_setter}</span>}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
           {hasSocial && (
@@ -398,6 +405,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           {/* Edit form */}
           <ClientEditForm
             client={client}
+            verantwoordelijken={await leesVerantwoordelijken()}
             services={serviceSlugs}
             serviceContracts={serviceContractCfg}
             socialConfig={socialConfig}

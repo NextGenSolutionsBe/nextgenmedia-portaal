@@ -24,7 +24,8 @@ import {
 
 /** Een contract uit de Contractenmodule, zoals de picker het toont. */
 type ModuleContract = { id: string; titel: string; status: string; client_id: string | null; klant: string | null; start_date: string | null; end_date: string | null; signed_at: string | null; service_slug: string | null }
-type Klant = { id: string; naam: string }
+/** closer/setter = 'Klant van' en 'Appointment gezet door' uit het klantenbestand. */
+type Klant = { id: string; naam: string; closer?: string | null; setter?: string | null }
 
 const TERMIJN_STIJL: Record<TermijnStatus, string> = {
   gepland: 'bg-gray-100 text-gray-700', gefactureerd: 'bg-blue-100 text-blue-800', betaald: 'bg-green-100 text-green-800', geannuleerd: 'bg-red-100 text-red-700',
@@ -614,10 +615,22 @@ function ContractDialoog({ contract, inst, module, klanten, onClose }: { contrac
 
   // Koppelen aan een contract uit de Contractenmodule: wat daar al ingevuld is,
   // nemen we over — maar nooit over iets heen dat hier al is ingetypt.
+  // Nieuw contract: appointment/closed door Marco volgen uit de klantfiche
+  // ("appointment gezet door" / "klant van"), als die ingevuld is. Een bestaand
+  // contract passen we nooit stil aan.
+  const uitKlant = (clientId: string) => {
+    const k = contract ? null : klanten.find((x) => x.id === clientId)
+    if (!k) return {}
+    return {
+      ...(k.setter ? { appointment_door_marco: k.setter.toLowerCase().startsWith('marco') } : {}),
+      ...(k.closer ? { closed_door_marco: k.closer.toLowerCase().startsWith('marco') } : {}),
+    }
+  }
   const koppel = (id: string) => {
     const m = module.find((x) => x.id === id)
     setF((p) => ({
       ...p, contract_id: id,
+      ...(!p.client_id && m?.client_id ? uitKlant(m.client_id) : {}),
       klant: p.klant || m?.klant || '',
       client_id: p.client_id || m?.client_id || '',
       ondertekend_op: m?.signed_at && (!contract || !p.ondertekend_op || p.ondertekend_op === vandaag) ? m.signed_at : p.ondertekend_op,
@@ -658,7 +671,7 @@ function ContractDialoog({ contract, inst, module, klanten, onClose }: { contrac
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Keuze label="Klant uit het klantenbestand" value={f.client_id}
-          onChange={(id) => { const k = klanten.find((x) => x.id === id); setF((p) => ({ ...p, client_id: id, klant: k ? k.naam : p.klant })) }}
+          onChange={(id) => { const k = klanten.find((x) => x.id === id); setF((p) => ({ ...p, ...uitKlant(id), client_id: id, klant: k ? k.naam : p.klant })) }}
           opties={[{ v: '', l: '— Niet gekoppeld —' }, ...klanten.map((k) => ({ v: k.id, l: k.naam }))]} />
         <Veld label="Klant (naam) *" value={f.klant} onChange={(v) => set('klant', v)} hint="Wordt ingevuld vanuit het klantenbestand; vrij aanpasbaar." />
       </div>

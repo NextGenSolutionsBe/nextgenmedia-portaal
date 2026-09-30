@@ -14,7 +14,7 @@ import {
 } from '@/lib/opdrachten'
 import { formatEuro } from '@/lib/utils'
 
-type Klant = { id: string; naam: string }
+type Klant = { id: string; naam: string; verantwoordelijke?: string | null }
 type ContractOptie = { id: string; titel: string; status: string; label: string; client_id: string | null }
 type FactuurOptie = { id: string; description: string | null; status: string; invoice_date: string | null; client_id: string | null; contract_id: string | null; amount_incl: number | null; klant_naam: string | null }
 
@@ -29,6 +29,8 @@ const datumKort = (s: string | null | undefined) => (s ? new Date(s + (s.length 
 export function OpdrachtenClient() {
   const [rijen, setRijen] = useState<Opdracht[]>([])
   const [klanten, setKlanten] = useState<Klant[]>([])
+  const [namen, setNamen] = useState<string[]>([])
+  const [wie, setWie] = useState<string>('')   // filter: verantwoordelijke ('' = iedereen, '-' = niemand)
   const [contracten, setContracten] = useState<ContractOptie[]>([])
   const [facturen, setFacturen] = useState<FactuurOptie[]>([])
   const [hint, setHint] = useState<string | null>(null)
@@ -47,6 +49,7 @@ export function OpdrachtenClient() {
       const j = await res.json(); if (!res.ok) throw new Error(j.error)
       setRijen(j.opdrachten ?? [])
       setKlanten(j.klanten ?? [])
+      setNamen(j.verantwoordelijken ?? [])
       setContracten(j.contracten ?? [])
       setFacturen(j.facturen ?? [])
       setHint(j.hint ?? null)
@@ -58,10 +61,11 @@ export function OpdrachtenClient() {
     const naald = q.trim().toLowerCase()
     return rijen
       .filter((o) => pastInFilter(o, { fase, status, toonAfgesloten }))
-      .filter((o) => !naald || [o.titel, o.omschrijving, o.klant_naam, o.contract?.title]
+      .filter((o) => !wie || (wie === '-' ? !o.verantwoordelijke : o.verantwoordelijke === wie))
+      .filter((o) => !naald || [o.titel, o.omschrijving, o.klant_naam, o.contract?.title, o.verantwoordelijke]
         .some((v) => (v ?? '').toLowerCase().includes(naald)))
       .sort(sorteer)
-  }, [rijen, q, fase, status, toonAfgesloten])
+  }, [rijen, q, fase, status, toonAfgesloten, wie])
 
   const open = rijen.filter((o) => OPEN_STATUSSEN.includes(o.status)).length
   const perFase = useMemo(() => {
@@ -155,8 +159,14 @@ export function OpdrachtenClient() {
           <div className="relative">
             <Search className="h-4 w-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
             <input className="input-base pl-8 w-64" value={q} onChange={(e) => setQ(e.target.value)}
-              placeholder="Titel, klant, contract of wie…" />
+              placeholder="Titel, klant, contract of verantwoordelijke…" />
           </div>
+          <select className="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white" value={wie}
+            onChange={(e) => setWie(e.target.value)} title="Filter op verantwoordelijke">
+            <option value="">Alle verantwoordelijken</option>
+            {namen.map((n) => <option key={n} value={n}>{n}</option>)}
+            <option value="-">Zonder verantwoordelijke</option>
+          </select>
           <select className="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white" value={status}
             onChange={(e) => setStatus(e.target.value as OpdrachtStatus | '')} title="Filter op één status">
             <option value="">Alle statussen</option>
@@ -200,7 +210,7 @@ export function OpdrachtenClient() {
       {(nieuw || bewerken) && (
         <OpdrachtDialoog
           bestaand={bewerken}
-          klanten={klanten} contracten={contracten} facturen={facturen}
+          klanten={klanten} contracten={contracten} facturen={facturen} namen={namen}
           onClose={() => { setNieuw(false); setBewerken(null) }}
           onOpgeslagen={() => { setNieuw(false); setBewerken(null); laad() }}
         />
@@ -264,6 +274,7 @@ function OpdrachtRij({ o, onStatus, onOpen, onVerwijder }: {
         </div>
         <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-2 flex-wrap">
           {o.klant_naam && <span>{o.klant_naam}</span>}
+          {o.verantwoordelijke && <span className="font-medium text-gray-700">· {o.verantwoordelijke}</span>}
           {(o.waarde ?? null) !== null && (
             <span className="font-medium text-gray-700" title={o.waarde_bron === 'facturen' ? 'Som van de gekoppelde facturen (excl. btw)' : 'Waarde van de opdracht (excl. btw)'}>
               · {formatEuro(o.waarde as number)}{o.waarde_bron === 'facturen' ? ' (facturen)' : ''}
@@ -328,9 +339,10 @@ function OpdrachtRij({ o, onStatus, onOpen, onVerwijder }: {
   )
 }
 
-function OpdrachtDialoog({ bestaand, klanten, contracten, facturen, onClose, onOpgeslagen }: {
+function OpdrachtDialoog({ bestaand, klanten, contracten, facturen, namen, onClose, onOpgeslagen }: {
   bestaand: Opdracht | null
   klanten: Klant[]
+  namen: string[]
   contracten: ContractOptie[]
   facturen: FactuurOptie[]
   onClose: () => void
@@ -339,6 +351,7 @@ function OpdrachtDialoog({ bestaand, klanten, contracten, facturen, onClose, onO
   const [titel, setTitel] = useState(bestaand?.titel ?? '')
   const [omschrijving, setOmschrijving] = useState(bestaand?.omschrijving ?? '')
   const [clientId, setClientId] = useState(bestaand?.client_id ?? '')
+  const [verantwoordelijke, setVerantwoordelijke] = useState(bestaand?.verantwoordelijke ?? '')
   const [klantVrij, setKlantVrij] = useState(bestaand?.klant_vrij ?? '')
   const [status, setStatus] = useState<OpdrachtStatus>(bestaand?.status ?? 'open')
   const [bedragExcl, setBedragExcl] = useState(bestaand?.bedrag_excl !== null && bestaand?.bedrag_excl !== undefined ? String(bestaand.bedrag_excl) : '')
@@ -365,7 +378,7 @@ function OpdrachtDialoog({ bestaand, klanten, contracten, facturen, onClose, onO
     try {
       const body = {
         ...(bestaand ? { id: bestaand.id } : {}),
-        titel: titel.trim(), omschrijving, status,
+        titel: titel.trim(), omschrijving, status, verantwoordelijke: verantwoordelijke || null,
         client_id: clientId || null,
         klant_vrij: clientId ? null : klantVrij,
         contract_id: contractId || null,
@@ -405,7 +418,12 @@ function OpdrachtDialoog({ bestaand, klanten, contracten, facturen, onClose, onO
 
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Voor welke klant?</label>
-            <select className="input-base" value={clientId} onChange={(e) => setClientId(e.target.value)}>
+            <select className="input-base" value={clientId} onChange={(e) => {
+              setClientId(e.target.value)
+              // Nog geen verantwoordelijke? Neem die van de klant ("klant van").
+              const k = klanten.find((x) => x.id === e.target.value)
+              if (!verantwoordelijke && k?.verantwoordelijke) setVerantwoordelijke(k.verantwoordelijke)
+            }}>
               <option value="">— geen klant uit de lijst —</option>
               {klanten.map((k) => <option key={k.id} value={k.id}>{k.naam}</option>)}
             </select>
@@ -413,6 +431,15 @@ function OpdrachtDialoog({ bestaand, klanten, contracten, facturen, onClose, onO
               <input className="input-base mt-1.5" value={klantVrij} onChange={(e) => setKlantVrij(e.target.value)}
                 placeholder="Of tik een naam — bv. een prospect die nog geen klant is" maxLength={120} />
             )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Verantwoordelijke</label>
+            <select className="input-base" value={verantwoordelijke} onChange={(e) => setVerantwoordelijke(e.target.value)}>
+              <option value="">— nog niet gekozen —</option>
+              {[...namen, ...(verantwoordelijke && !namen.includes(verantwoordelijke) ? [verantwoordelijke] : [])].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <p className="text-[11px] text-gray-500 mt-1">Wie deze opdracht in handen heeft en ze closet. Namen beheer je in Instellingen → Verkoop.</p>
           </div>
 
           <div>

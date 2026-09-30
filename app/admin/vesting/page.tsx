@@ -25,7 +25,7 @@ export default async function VestingPage() {
     admin.from('vesting_wam_termijnen').select('*').order('factuurdatum').order('volgnr'),
     // De Contractenmodule: waar een vestingcontract aan gekoppeld kan worden.
     admin.from('contracts').select('id, title, status, client_id, start_date, end_date, signed_at, service_slug, clients ( company_name )').order('created_at', { ascending: false }).limit(500),
-    admin.from('clients').select('id, company_name').order('company_name'),
+    admin.from('clients').select('id, company_name, sales_verantwoordelijke, appointment_setter').order('company_name'),
   ])
 
   // Directe kosten op de facturen van gekoppelde contracten → aftrek in de
@@ -49,7 +49,7 @@ export default async function VestingPage() {
       oudeRegistraties={(oud.data ?? []) as Record<string, unknown>[]}
       termijnRijen={(termijnen.data ?? []) as Record<string, unknown>[]}
       moduleContracten={(moduleContracten.data ?? []) as unknown as Record<string, unknown>[]}
-      klanten={((klanten.data ?? []) as { id: string; company_name: string | null }[]).map((k) => ({ id: k.id, naam: k.company_name ?? '—' }))}
+      klanten={((klanten.data ?? []) as { id: string; company_name: string | null; sales_verantwoordelijke?: string | null; appointment_setter?: string | null }[]).map((k) => ({ id: k.id, naam: k.company_name ?? '—', closer: k.sales_verantwoordelijke ?? null, setter: k.appointment_setter ?? null }))}
     />
   )
 }

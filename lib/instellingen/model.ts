@@ -119,6 +119,9 @@ export type FacturatieInstellingen = {
 export type DocumentenInstellingen = {
   logo_path: string; primaire_kleur: string; secundaire_kleur: string; voettekst: string; contactregel: string; bestandsnaam_patroon: string
 }
+/** Verkoop: de namen die als verantwoordelijke (closer / appointment setter) gekozen kunnen worden. */
+export type VerkoopInstellingen = { verantwoordelijken: string[] }
+export const STANDAARD_VERKOOP: VerkoopInstellingen = { verantwoordelijken: ['Bram', 'Marco'] }
 
 export const STANDAARD_ORGANISATIE: Organisatie = {
   vennootschapsnaam: 'NextGenMedia', handelsnaam: 'NextGenMedia', ondernemingsnummer: '', btw_nummer: '',
@@ -173,12 +176,13 @@ export type AlleInstellingen = {
   rechten: RechtenInstellingen
   facturatie: FacturatieInstellingen
   documenten: DocumentenInstellingen
+  verkoop: VerkoopInstellingen
 }
-export const INSTELLINGEN_SLEUTELS = ['organisatie', 'modules', 'rechten', 'facturatie', 'documenten'] as const
+export const INSTELLINGEN_SLEUTELS = ['organisatie', 'modules', 'rechten', 'facturatie', 'documenten', 'verkoop'] as const
 export type InstellingenSleutel = (typeof INSTELLINGEN_SLEUTELS)[number]
 
 export function standaardInstellingen(): AlleInstellingen {
-  return { organisatie: { ...STANDAARD_ORGANISATIE }, modules: standaardModules(), rechten: standaardRechten(), facturatie: { ...STANDAARD_FACTURATIE }, documenten: { ...STANDAARD_DOCUMENTEN } }
+  return { organisatie: { ...STANDAARD_ORGANISATIE }, modules: standaardModules(), rechten: standaardRechten(), facturatie: { ...STANDAARD_FACTURATIE }, documenten: { ...STANDAARD_DOCUMENTEN }, verkoop: { verantwoordelijken: [...STANDAARD_VERKOOP.verantwoordelijken] } }
 }
 
 /** Opgeslagen waarden over de standaard heen leggen; onbekende/stukke waarden vallen terug. */
@@ -189,6 +193,11 @@ export function samenvoegen(ruw: Partial<Record<InstellingenSleutel, unknown>> |
   const org = obj(ruw.organisatie); if (org) std.organisatie = { ...std.organisatie, ...(org as Partial<Organisatie>) }
   const fac = obj(ruw.facturatie); if (fac) std.facturatie = { ...std.facturatie, ...(fac as Partial<FacturatieInstellingen>) }
   const doc = obj(ruw.documenten); if (doc) std.documenten = { ...std.documenten, ...(doc as Partial<DocumentenInstellingen>) }
+  const vk = obj(ruw.verkoop)
+  if (vk && Array.isArray(vk.verantwoordelijken)) {
+    const namen = vk.verantwoordelijken.filter((x): x is string => typeof x === 'string').map((x) => x.trim()).filter(Boolean)
+    if (namen.length) std.verkoop = { verantwoordelijken: namen }
+  }
   const mods = obj(ruw.modules)
   if (mods) for (const k of Object.keys(std.modules)) {
     const m = obj(mods[k]); if (!m) continue

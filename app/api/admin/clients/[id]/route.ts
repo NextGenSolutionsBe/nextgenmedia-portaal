@@ -1,4 +1,5 @@
 import { safeMessage } from '@/lib/api-error'
+import { naamOfNull } from '@/lib/verkoop/verantwoordelijken'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient , isActiveStaff } from '@/lib/supabase/server'
 import { logAudit, requestMeta } from '@/lib/audit'
@@ -58,6 +59,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (body.niche !== undefined) patch.niche = body.niche || null
     if (body.website_url !== undefined) patch.website_url = body.website_url || null
     if (body.customer_since !== undefined) patch.customer_since = body.customer_since || null
+    if (body.sales_verantwoordelijke !== undefined) patch.sales_verantwoordelijke = naamOfNull(body.sales_verantwoordelijke)
+    if (body.appointment_setter !== undefined) patch.appointment_setter = naamOfNull(body.appointment_setter)
     if (body.btw_nummer !== undefined) {
       const v = validateBtw(body.btw_nummer)
       if (!v.ok) return NextResponse.json({ error: v.error }, { status: 400 })

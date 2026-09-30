@@ -7,12 +7,12 @@ import { leesInstellingen, bewaarInstelling } from '@/lib/instellingen/laden'
 import { eisBeheer } from '@/lib/instellingen/api'
 import { vergeetInstellingenCache } from '@/lib/instellingen/edge'
 import { INSTELLINGEN_SLEUTELS, MODULES, type InstellingenSleutel, type AlleInstellingen } from '@/lib/instellingen/model'
-import { valideerOrganisatie, valideerFacturatie, valideerDocumenten, valideerModules, valideerRechten, verschillen, uittreksel } from '@/lib/instellingen/valideer'
+import { valideerOrganisatie, valideerFacturatie, valideerDocumenten, valideerModules, valideerRechten, valideerVerkoop, verschillen, uittreksel } from '@/lib/instellingen/valideer'
 
 export const dynamic = 'force-dynamic'
 
 const LABEL: Record<InstellingenSleutel, string> = {
-  organisatie: 'Bedrijfsgegevens', modules: 'Tabbladen en modules', rechten: 'Gebruikersrechten', facturatie: 'Facturatie-instellingen', documenten: 'Documenten en branding',
+  organisatie: 'Bedrijfsgegevens', modules: 'Tabbladen en modules', rechten: 'Gebruikersrechten', facturatie: 'Facturatie-instellingen', documenten: 'Documenten en branding', verkoop: 'Verkoop',
 }
 
 // GET — alle instellingen + context voor de pagina.
@@ -50,6 +50,7 @@ export async function PUT(req: NextRequest) {
       case 'organisatie': { const v = valideerOrganisatie(b.waarde); if (!v.ok) return NextResponse.json({ error: v.fout }, { status: 400 }); nieuw = v.waarde; break }
       case 'modules': { const v = valideerModules(b.waarde, huidig.modules, bevestigingen); if (!v.ok) return NextResponse.json({ error: v.fout }, { status: 400 }); nieuw = v.waarde; break }
       case 'rechten': { const v = valideerRechten(b.waarde); if (!v.ok) return NextResponse.json({ error: v.fout }, { status: 400 }); nieuw = v.waarde; break }
+      case 'verkoop': { const v = valideerVerkoop(b.waarde); if (!v.ok) return NextResponse.json({ error: v.fout }, { status: 400 }); nieuw = v.waarde; break }
       case 'documenten': { const v = valideerDocumenten(b.waarde, huidig.documenten); if (!v.ok) return NextResponse.json({ error: v.fout }, { status: 400 }); nieuw = v.waarde; break }
       case 'facturatie': {
         const v = valideerFacturatie(b.waarde); if (!v.ok) return NextResponse.json({ error: v.fout }, { status: 400 })

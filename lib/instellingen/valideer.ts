@@ -4,8 +4,7 @@
 
 import {
   ACTIES, ROLLEN, MODULES, moduleInfo, samenvoegen, MODULE_INSTELLINGEN_KEY,
-  type Organisatie, type FacturatieInstellingen, type DocumentenInstellingen, type ModulesInstellingen, type RechtenInstellingen, type Actie, type Rol,
-} from './model'
+  type Organisatie, type FacturatieInstellingen, type DocumentenInstellingen, type ModulesInstellingen, type RechtenInstellingen, type Actie, type Rol, type VerkoopInstellingen } from './model'
 
 export type Validatie<T> = { ok: true; waarde: T } | { ok: false; fout: string }
 
@@ -64,6 +63,22 @@ export function valideerOrganisatie(ruw: unknown): Validatie<Organisatie> {
   if (w.betalingstermijn_dagen < 0 || w.betalingstermijn_dagen > 365) return { ok: false, fout: 'De betalingstermijn moet tussen 0 en 365 dagen liggen.' }
   if (!/^[A-Z]{3}$/.test(w.valuta)) return { ok: false, fout: 'De valuta is een code van drie letters (bv. EUR).' }
   return { ok: true, waarde: w }
+}
+
+/** Namen van de verkoopverantwoordelijken: ingekort, zonder dubbels (hoofdletterongevoelig), 1 tot 20. */
+export function valideerVerkoop(ruw: unknown): Validatie<VerkoopInstellingen> {
+  const r = obj(ruw); if (!r) return { ok: false, fout: 'Ongeldige gegevens.' }
+  const lijst = Array.isArray(r.verantwoordelijken) ? r.verantwoordelijken : []
+  const gezien = new Set<string>()
+  const namen: string[] = []
+  for (const x of lijst) {
+    const n = typeof x === 'string' ? x.trim().replace(/\s+/g, ' ').slice(0, 60) : ''
+    if (!n || gezien.has(n.toLowerCase())) continue
+    gezien.add(n.toLowerCase()); namen.push(n)
+  }
+  if (namen.length === 0) return { ok: false, fout: 'Geef minstens één naam op.' }
+  if (namen.length > 20) return { ok: false, fout: 'Maximaal 20 namen.' }
+  return { ok: true, waarde: { verantwoordelijken: namen } }
 }
 
 export function valideerFacturatie(ruw: unknown): Validatie<FacturatieInstellingen> {

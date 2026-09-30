@@ -5380,3 +5380,14 @@ REVOKE ALL ON FUNCTION public.sessie_2fa_ok() FROM public, anon;
 GRANT EXECUTE ON FUNCTION public.sessie_2fa_ok() TO authenticated;
 -- Wie startte een lopende app-koppeling? (een admin die voor iemand koppelt)
 ALTER TABLE public.user_totp ADD COLUMN IF NOT EXISTS setup_door uuid;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Verkoopverantwoordelijken (30 sep 2026) — namen uit Instellingen → Verkoop
+--  · clients.sales_verantwoordelijke  "klant van": wie de klant closet / wiens klant het is
+--  · clients.appointment_setter       wie de appointment zette (voor de vesting: 50/50)
+--  · opdrachten.verantwoordelijke     wie de opdracht in handen heeft / closet
+-- Tekst (geen login nodig): ook een toekomstige salescollega kan gekozen worden.
+-- ═══════════════════════════════════════════════════════════════════════════
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS sales_verantwoordelijke text;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS appointment_setter text;
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS verantwoordelijke text;

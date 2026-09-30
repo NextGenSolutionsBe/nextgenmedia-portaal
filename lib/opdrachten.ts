@@ -220,6 +220,8 @@ export type Opdracht = {
   status_gewijzigd_op?: string | null
   /** Waarde van de opdracht, excl. btw (handmatig ingevuld). */
   bedrag_excl?: number | null
+  /** Wie de opdracht in handen heeft / closet (naam uit Instellingen → Verkoop). */
+  verantwoordelijke?: string | null
   /** Meegeleverd door de API, niet in de tabel. */
   klant_naam?: string | null
   contract?: ContractKoppeling | null
