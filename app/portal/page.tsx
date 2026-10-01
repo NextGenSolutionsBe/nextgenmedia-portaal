@@ -8,6 +8,8 @@ import { Calendar, FileText, Globe, Clock, ArrowRight } from 'lucide-react'
 import { resolvePortalSession, sessionCan } from '@/lib/portal-auth'
 import { getLang } from '@/lib/i18n-server'
 import { t } from '@/lib/i18n'
+import { aftelItemsVoorKlant } from '@/lib/content/goedkeuring-deadlines'
+import { GoedkeuringAftelklok } from '@/components/portal/goedkeuring-aftelklok'
 
 export default async function PortalDashboard() {
   const session = await resolvePortalSession()
@@ -68,6 +70,8 @@ export default async function PortalDashboard() {
 
   const hasSocial = services.some((s) => s.service_slug === 'social-media')
   const hasWebdesign = services.some((s) => s.service_slug === 'webdesign')
+  // Goedkeuringsdeadline(s) van de contentkalender — aftelklok bovenaan.
+  const aftel = hasSocial && sessionCan(session, 'social_media', 'view') ? await aftelItemsVoorKlant(admin, clientId, lang) : []
   const pendingContracts = canContracts ? contracts.filter((c) => ['sent', 'viewed'].includes(c.status)) : []
 
   // Social media contract config (posts/reels/stories come from service_contracts.config)
@@ -81,6 +85,8 @@ export default async function PortalDashboard() {
         <h1 className="text-2xl font-bold">{t(lang, 'dash.welcome', { name: client.company_name })}</h1>
         <p className="text-sm text-gray-500 mt-0.5">{t(lang, 'dash.subtitle')}</p>
       </div>
+
+      <GoedkeuringAftelklok items={aftel} lang={lang} link />
 
       {/* Alerts */}
       {(pendingContracts.length > 0 || pendingScripts > 0) && (

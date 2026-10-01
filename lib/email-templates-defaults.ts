@@ -2,6 +2,20 @@
 
 export const DEFAULT_TEMPLATES: { name: string; subject: string; body: string; kind: string; cta_text: string; cta_link: string }[] = [
   {
+    name: 'Goedkeuring contentkalender — deadline',
+    kind: 'goedkeuring',
+    subject: 'Je contentkalender van {{goedkeuring_maanden}}: {{dagen_resterend}} om goed te keuren',
+    body: `Hallo {{klantnaam}},
+
+De content van {{goedkeuring_maanden}} staat klaar in je dashboard. Er wachten nog {{open_items}} item(s) op je goedkeuring.
+
+Je hebt {{dagen_resterend}} om alles na te kijken: tot en met {{goedkeuring_deadline}}. Wil je iets anders? Geef dan feedback bij het item.
+
+Wat op dat moment nog niet is goedgekeurd of van feedback voorzien, wordt automatisch goedgekeurd zodat we alles op tijd kunnen inplannen.`,
+    cta_text: 'Content bekijken en goedkeuren',
+    cta_link: '{{scripts_link}}',
+  },
+  {
     name: 'Nieuwe scripts klaar',
     kind: 'scripts',
     subject: 'Nieuwe scripts klaar om te bekijken',

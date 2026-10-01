@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { runMaintenanceReminders } from '@/lib/maintenance-report'
 import { pruneRateLimits } from '@/lib/rate-limit'
+import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { verwerkVerstreken } from '@/lib/content/goedkeuring-deadlines'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -20,5 +22,10 @@ export async function GET(req: NextRequest) {
   const res = await runMaintenanceReminders()
   // Meteen de oude rate-limit-tellers opruimen (>24u) zodat die tabel klein blijft.
   const pruned = await pruneRateLimits()
-  return NextResponse.json({ ok: true, ...res, rateLimitsPruned: pruned })
+  // Verstreken goedkeuringsdeadlines van de contentkalender verwerken (wat nog
+  // "bij klant" staat → goedgekeurd). Gebeurt ook zodra iemand het portaal of het
+  // overzicht opent; dit is het dagelijkse vangnet.
+  let contentAutoGoedgekeurd = 0
+  try { contentAutoGoedgekeurd = await verwerkVerstreken(createAdminSupabaseClient()) } catch { /* volgende run */ }
+  return NextResponse.json({ ok: true, ...res, rateLimitsPruned: pruned, contentAutoGoedgekeurd })
 }

@@ -5404,3 +5404,28 @@ ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS kleur text;
 ALTER TABLE public.personeel_planning ADD COLUMN IF NOT EXISTS groep_id uuid;
 ALTER TABLE public.personeel_planning ADD COLUMN IF NOT EXISTS clickup_bestaande_taak text;
 CREATE INDEX IF NOT EXISTS personeel_planning_groep_idx ON public.personeel_planning (groep_id) WHERE groep_id IS NOT NULL;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Goedkeuringsdeadlines contentkalender (1 okt 2026)
+-- Per klant: één of meerdere maanden (YYYY-MM) die tegen een datum goedgekeurd
+-- moeten zijn. Na die dag wordt wat nog "bij klant" staat (ready_for_review)
+-- automatisch goedgekeurd; feedback en concepten blijven ongemoeid.
+-- Herinneringsmails gaan enkel manueel (MailComposer, kind 'goedkeuring').
+-- ═══════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS public.content_goedkeuring_deadlines (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  maanden text[] NOT NULL,
+  deadline date NOT NULL,
+  status text NOT NULL DEFAULT 'open',   -- open | afgerond (verstreken, automatisch verwerkt)
+  notitie text,
+  auto_goedgekeurd int NOT NULL DEFAULT 0,
+  afgerond_op timestamptz,
+  created_by text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS content_goedkeuring_deadlines_klant_idx ON public.content_goedkeuring_deadlines (client_id, deadline);
+CREATE INDEX IF NOT EXISTS content_goedkeuring_deadlines_open_idx ON public.content_goedkeuring_deadlines (deadline) WHERE status = 'open';
+ALTER TABLE public.content_goedkeuring_deadlines ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.content_goedkeuring_deadlines FROM anon, authenticated;

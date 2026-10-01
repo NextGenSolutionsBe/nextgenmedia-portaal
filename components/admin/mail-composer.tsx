@@ -11,7 +11,7 @@ import { renderTemplate, type MailVars } from '@/lib/email-render'
 type Template = { id: string; name: string; subject: string; body: string; kind: string | null; cta_text: string | null; cta_link: string | null }
 
 export type MailContext =
-  | { type: 'client'; clientId: string; kind?: string; contractId?: string; shootId?: string; taskId?: string }
+  | { type: 'client'; clientId: string; kind?: string; contractId?: string; shootId?: string; taskId?: string; deadlineId?: string }
   | { type: 'contract'; contractId: string; contractTitle: string; signLink: string; defaultEmail?: string | null; signerName?: string | null; clientName?: string | null; expiresAt?: string | null }
   | { type: 'access'; clientId: string; clientName: string; toEmail: string; tempPassword?: string }
   | { type: 'generic'; toEmail?: string }
@@ -59,6 +59,7 @@ function Dialog({ context, onClose }: { context: MailContext; onClose: () => voi
           if (context.contractId) qs.set('contract_id', context.contractId)
           if (context.shootId) qs.set('shoot_id', context.shootId)
           if (context.taskId) qs.set('task_id', context.taskId)
+          if (context.deadlineId) qs.set('deadline_id', context.deadlineId)
           const ctxRes = await fetch(`/api/admin/email/context?${qs.toString()}`)
           const ctx = await ctxRes.json()
           const vars: MailVars = ctx.vars ?? {}

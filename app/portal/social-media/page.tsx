@@ -6,6 +6,9 @@ import { type Feedback } from '@/components/portal/shoot-feedback'
 import { type Idea } from '@/components/portal/shoot-ideas'
 import { requirePortalView, sessionCan } from '@/lib/portal-auth'
 import { ShootDocumentKnop } from '@/components/shoot-document-knop'
+import { getLang } from '@/lib/i18n-server'
+import { aftelItemsVoorKlant } from '@/lib/content/goedkeuring-deadlines'
+import { GoedkeuringAftelklok } from '@/components/portal/goedkeuring-aftelklok'
 
 type FeedbackRow = Feedback & { shoot_id: string }
 type IdeaRow = Idea & { shoot_id: string; attachment_path: string | null }
@@ -28,6 +31,10 @@ export default async function PortalSocialMediaPage() {
     .eq('service_slug', 'social-media')
     .maybeSingle()
   if (!svcRow?.active) redirect('/portal')
+
+  // Eerst een verstreken deadline verwerken, zodat de kalender meteen klopt.
+  const lang = await getLang()
+  const aftel = await aftelItemsVoorKlant(admin, clientId, lang)
 
   const { data: items } = await admin
     .from('social_content_items')
@@ -92,6 +99,8 @@ export default async function PortalSocialMediaPage() {
           />
         </div>
       </div>
+
+      <GoedkeuringAftelklok items={aftel} lang={lang} />
 
       <PortalCalendar
         initialItems={(items ?? []).map((it) => ({

@@ -1,4 +1,5 @@
 import 'server-only'
+import { dagenTot, maandenTekst, vandaagBrussel } from '@/lib/content/deadline-model'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { followUp } from '@/lib/contract-status'
 import { FEATURES } from '@/lib/features'
@@ -68,6 +69,23 @@ export async function buildNotifications(): Promise<Notif[]> {
           date: laatste.slice(0, 10), href: `/admin/formulieren/${id}?tab=inzendingen`,
         })
       }
+    }
+  } catch { /* tabel nog niet gemigreerd → geen signaal */ }
+
+  // Goedkeuringsdeadlines van de contentkalender die binnen 3 dagen vallen
+  // (of vandaag). De id bevat de datum: een verschoven deadline is opnieuw ongelezen.
+  try {
+    const vandaag = vandaagBrussel()
+    const binnen3 = new Date(Date.parse(`${vandaag}T12:00:00Z`) + 3 * 86400000).toISOString().slice(0, 10)
+    const dl = await safe(admin.from('content_goedkeuring_deadlines').select('id, client_id, maanden, deadline')
+      .eq('status', 'open').gte('deadline', vandaag).lte('deadline', binnen3).order('deadline').limit(50)) as { id: string; client_id: string; maanden: string[]; deadline: string }[]
+    for (const d of dl) {
+      const n = dagenTot(d.deadline, vandaag)
+      out.push({
+        id: `goedkeuring:${d.id}:${d.deadline}`, kind: 'content', priority: n <= 1 ? 'high' : 'med',
+        title: `Goedkeuringsdeadline ${n === 0 ? 'vandaag' : n === 1 ? 'morgen' : `over ${n} dagen`} — ${names.get(d.client_id) ?? 'klant'} (${maandenTekst(d.maanden)})`,
+        date: d.deadline, href: `/admin/services/social-media?client=${d.client_id}`,
+      })
     }
   } catch { /* tabel nog niet gemigreerd → geen signaal */ }
 

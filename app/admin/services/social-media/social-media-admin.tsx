@@ -8,6 +8,7 @@ import { GenerateDialog } from './generate-dialog'
 import { ClickUpSyncControl } from '@/components/admin/clickup-sync-control'
 import { ShootBriefings } from '@/components/admin/shoot-briefings'
 import { SendMailButton } from '@/components/admin/send-mail-button'
+import { GoedkeuringDeadlines } from '@/components/admin/goedkeuring-deadlines'
 import { ShootDocumentKnop } from '@/components/shoot-document-knop'
 import { KANAAL_SLUGS, kanaalLabel } from '@/lib/social-platforms'
 import { toast } from 'sonner'
@@ -436,6 +437,9 @@ export function SocialMediaAdmin({
           </div>
         )}
       </div>
+
+      {/* Goedkeuringsdeadlines: overzicht van alle klanten + beheer voor deze klant */}
+      <GoedkeuringDeadlines clientId={selectedClient || undefined} onKiesKlant={handleClientChange} />
 
       {/* ClickUp-sync (per klant) */}
       {selectedClient && (
