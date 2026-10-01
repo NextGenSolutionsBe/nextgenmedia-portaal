@@ -86,10 +86,13 @@ export function ContractsClient({
 
   const templateName = useMemo(() => new Map(templates.map((t) => [t.id, t.name])), [templates])
 
-  // Laatst gebruikte filters bewaren/herstellen (localStorage).
+  // Laatst gebruikte filters bewaren/herstellen — enkel binnen dit tabblad
+  // (sessionStorage). Vroeger bleven ze voorgoed bewaard (localStorage), waardoor
+  // een vergeten filter nieuwe contracten "liet verdwijnen" bij een volgend bezoek.
   useEffect(() => {
     try {
-      const raw = localStorage.getItem('ngm.contractFilters')
+      localStorage.removeItem('ngm.contractFilters')
+      const raw = sessionStorage.getItem('ngm.contractFilters')
       if (raw) {
         const s = JSON.parse(raw)
         if (s.filterClient) setFilterClient(s.filterClient)
@@ -110,7 +113,7 @@ export function ContractsClient({
   }, [])
   useEffect(() => {
     try {
-      localStorage.setItem('ngm.contractFilters', JSON.stringify({ filterClient, filterService, filterStatus, filterTemplate, filterType, filterDuration, filterLinked, filterInvoice, dateFrom, dateTo, sorteer, categorie }))
+      sessionStorage.setItem('ngm.contractFilters', JSON.stringify({ filterClient, filterService, filterStatus, filterTemplate, filterType, filterDuration, filterLinked, filterInvoice, dateFrom, dateTo, sorteer, categorie }))
     } catch { /* negeer */ }
   }, [filterClient, filterService, filterStatus, filterTemplate, filterType, filterDuration, filterLinked, filterInvoice, dateFrom, dateTo, sorteer, categorie])
   // Debounce de zoekterm (vlot bij grote lijsten).
@@ -188,6 +191,12 @@ export function ContractsClient({
   )
   const cijfers = useMemo(() => totalen(mappen), [mappen])
   const zichtbareContracten = useMemo(() => mappen.flatMap((m) => m.contracten), [mappen])
+  // Hoeveel contracten heeft elke klant in totaal (zonder filters)?
+  const totaalPerKlant = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const c of contracten) if (c.client_id) m.set(c.client_id, (m.get(c.client_id) ?? 0) + 1)
+    return m
+  }, [contracten])
 
   const typeKeuzes = useMemo(() => typeOpties(contracten, contracttypes), [contracten, contracttypes])
 
@@ -428,6 +437,16 @@ export function ContractsClient({
         </div>
       </div>
 
+      {/* Filters actief? Dan altijd zeggen hoeveel er verborgen is — anders lijkt een
+          contract "verdwenen" terwijl het enkel weggefilterd is. */}
+      {hasActiveFilters && zichtbareContracten.length < contracten.length && (
+        <div className="flex items-center gap-2 flex-wrap rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
+          <FilterIcon className="h-4 w-4 shrink-0" />
+          <span>Filters actief: je ziet <b>{zichtbareContracten.length}</b> van de <b>{contracten.length}</b> contracten.</span>
+          <button type="button" onClick={clearFilters} className="ml-auto btn-secondary text-xs"><X className="h-3.5 w-3.5" />Alles tonen</button>
+        </div>
+      )}
+
       {/* Klantmappen */}
       {mappen.length === 0 ? (
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm text-center py-16 text-gray-400">
@@ -477,6 +496,11 @@ export function ContractsClient({
                       <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 font-medium">{map.aantal} contract{map.aantal === 1 ? '' : 'en'}</span>
                       <MapVerdeling verdeling={verdeling(map.contracten as Contract[])} />
                       <span>Laatste: {map.laatsteDatum ? formatDate(map.laatsteDatum) : '—'}</span>
+                      {map.klantId && (totaalPerKlant.get(map.klantId) ?? 0) > map.aantal && (
+                        <button type="button" onClick={(e) => { e.stopPropagation(); clearFilters() }} className="text-amber-700 underline hover:text-black" title="Er zijn contracten van deze klant verborgen door de filters">
+                          +{(totaalPerKlant.get(map.klantId) ?? 0) - map.aantal} verborgen door filters
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
