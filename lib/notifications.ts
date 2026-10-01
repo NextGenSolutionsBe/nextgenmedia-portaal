@@ -74,13 +74,22 @@ export async function buildNotifications(): Promise<Notif[]> {
 
   // Goedkeuringsdeadlines van de contentkalender die binnen 3 dagen vallen
   // (of vandaag). De id bevat de datum: een verschoven deadline is opnieuw ongelezen.
+  // Verstreken maar nog open = wij moeten manueel "Alles goedkeuren" (nooit automatisch).
   try {
     const vandaag = vandaagBrussel()
     const binnen3 = new Date(Date.parse(`${vandaag}T12:00:00Z`) + 3 * 86400000).toISOString().slice(0, 10)
     const dl = await safe(admin.from('content_goedkeuring_deadlines').select('id, client_id, maanden, deadline')
-      .eq('status', 'open').gte('deadline', vandaag).lte('deadline', binnen3).order('deadline').limit(50)) as { id: string; client_id: string; maanden: string[]; deadline: string }[]
+      .eq('status', 'open').lte('deadline', binnen3).order('deadline').limit(50)) as { id: string; client_id: string; maanden: string[]; deadline: string }[]
     for (const d of dl) {
       const n = dagenTot(d.deadline, vandaag)
+      if (n < 0) {
+        out.push({
+          id: `goedkeuring:${d.id}:verstreken`, kind: 'content', priority: 'high',
+          title: `Goedkeuringsdeadline verstreken — ${names.get(d.client_id) ?? 'klant'} (${maandenTekst(d.maanden)}): keur goed met “Alles goedkeuren”`,
+          date: d.deadline, href: `/admin/services/social-media?client=${d.client_id}`,
+        })
+        continue
+      }
       out.push({
         id: `goedkeuring:${d.id}:${d.deadline}`, kind: 'content', priority: n <= 1 ? 'high' : 'med',
         title: `Goedkeuringsdeadline ${n === 0 ? 'vandaag' : n === 1 ? 'morgen' : `over ${n} dagen`} — ${names.get(d.client_id) ?? 'klant'} (${maandenTekst(d.maanden)})`,

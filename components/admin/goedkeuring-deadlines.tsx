@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Hourglass, Plus, Loader2, Pencil, Trash2, X, Check } from 'lucide-react'
+import { Hourglass, Plus, Loader2, Pencil, Trash2, X, Check, CheckCheck } from 'lucide-react'
 import { MailComposer } from '@/components/admin/mail-composer'
 import { dagenTot, maandLabel, maandenTekst, vandaagBrussel, type Tellingen } from '@/lib/content/deadline-model'
 
@@ -31,13 +31,15 @@ function maandKeuzes(extra: string[] = []): string[] {
  *    nog bij de klant staat, wanneer laatst gemaild).
  *  · Deze klant: deadline(s) zetten voor één of meerdere maanden, aanpassen,
  *    verwijderen, en manueel een herinnering mailen (met voorbeeld).
- * Na de deadline wordt wat nog "bij klant" staat automatisch goedgekeurd.
+ * Er wordt nooit automatisch goedgekeurd: na de deadline drukken wij zelf op
+ * "Alles goedkeuren" (wat nog bij de klant staat → goedgekeurd).
  */
 export function GoedkeuringDeadlines({ clientId, onKiesKlant }: { clientId?: string; onKiesKlant?: (id: string) => void }) {
   const [tab, setTab] = useState<'alle' | 'klant'>('alle')
   const [rijen, setRijen] = useState<Rij[] | null>(null)
   const [nieuw, setNieuw] = useState(false)
   const [bewerk, setBewerk] = useState<Rij | null>(null)
+  const [keurt, setKeurt] = useState<string | null>(null)
   const vandaag = vandaagBrussel()
 
   const laad = useCallback(async () => {
@@ -69,6 +71,21 @@ export function GoedkeuringDeadlines({ clientId, onKiesKlant }: { clientId?: str
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt') }
   }
 
+  const allesGoedkeuren = async (r: Rij) => {
+    const n = r.tellingen.bij_klant
+    const vroeg = dagenTot(r.deadline, vandaag) >= 0
+    const vraag = `${n} item(s) van ${r.klant ?? 'deze klant'} (${maandenTekst(r.maanden)}) goedkeuren en de deadline afronden?`
+      + (r.tellingen.feedback ? `\n\n${r.tellingen.feedback} item(s) met feedback blijven staan.` : '')
+      + (vroeg ? '\n\nLet op: de deadline is nog niet verstreken.' : '')
+    if (!confirm(vraag)) return
+    setKeurt(r.id)
+    try {
+      const res = await fetch('/api/admin/social-content/deadlines', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: r.id, actie: 'alles_goedkeuren' }) })
+      const j = await res.json(); if (!res.ok) throw new Error(j.error)
+      toast.success(`${j.aantal} item(s) goedgekeurd — deadline afgerond.`); laad()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Goedkeuren mislukt') } finally { setKeurt(null) }
+  }
+
   return (
     <div className="card-base">
       <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
@@ -81,7 +98,7 @@ export function GoedkeuringDeadlines({ clientId, onKiesKlant }: { clientId?: str
           {clientId && <button type="button" onClick={() => { setTab('klant'); setNieuw(true) }} className="btn-primary text-sm"><Plus className="h-4 w-4" />Deadline zetten</button>}
         </div>
       </div>
-      <p className="text-xs text-gray-500 mb-3">Tegen welke datum moet de klant welke maand(en) goedkeuren? De klant ziet een aftelklok in het portaal. Na de deadline wordt wat nog bij de klant staat automatisch goedgekeurd; feedback en concepten blijven ongemoeid. Een herinnering mail je zelf, met voorbeeld.</p>
+      <p className="text-xs text-gray-500 mb-3">Tegen welke datum moet de klant welke maand(en) goedkeuren? De klant ziet een aftelklok in het portaal. Er gebeurt niets automatisch: een herinnering mail je zelf (met voorbeeld), en na de deadline keur je met “Alles goedkeuren” goed wat nog bij de klant staat — feedback en concepten blijven staan.</p>
 
       {(nieuw || bewerk) && clientId && (
         <DeadlineFormulier clientId={bewerk?.client_id ?? clientId} rij={bewerk} onSluit={() => { setNieuw(false); setBewerk(null) }} onKlaar={() => { setNieuw(false); setBewerk(null); laad() }} />
@@ -94,8 +111,8 @@ export function GoedkeuringDeadlines({ clientId, onKiesKlant }: { clientId?: str
             {zichtbaar.map((r) => {
               const n = dagenTot(r.deadline, vandaag)
               const open = r.status === 'open'
-              const kleur = !open ? 'bg-gray-100 text-gray-600' : n < 0 ? 'bg-gray-100 text-gray-600' : n <= 1 ? 'bg-red-100 text-red-700' : n <= 3 ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-700'
-              const label = !open ? `Verstreken · ${r.auto_goedgekeurd} automatisch goedgekeurd` : n > 1 ? `nog ${n} dagen` : n === 1 ? 'nog 1 dag' : n === 0 ? 'vandaag laatste dag' : 'verstreken'
+              const kleur = !open ? 'bg-gray-100 text-gray-600' : n < 0 ? 'bg-purple-100 text-purple-700' : n <= 1 ? 'bg-red-100 text-red-700' : n <= 3 ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-700'
+              const label = !open ? `Afgerond · ${r.auto_goedgekeurd} goedgekeurd` : n > 1 ? `nog ${n} dagen` : n === 1 ? 'nog 1 dag' : n === 0 ? 'vandaag laatste dag' : 'verstreken — klaar om goed te keuren'
               return (
                 <li key={r.id} className="py-2.5 flex items-start gap-3 flex-wrap sm:flex-nowrap">
                   <div className="min-w-0 flex-1">
@@ -116,7 +133,12 @@ export function GoedkeuringDeadlines({ clientId, onKiesKlant }: { clientId?: str
                       {r.notitie && <span className="italic">“{r.notitie}”</span>}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                    {open && (
+                      <button type="button" disabled={keurt === r.id} onClick={() => allesGoedkeuren(r)} className={`${n < 0 ? 'btn-primary' : 'btn-secondary'} text-xs`} title="Wat nog bij de klant staat goedkeuren en de deadline afronden">
+                        {keurt === r.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCheck className="h-3.5 w-3.5" />}Alles goedkeuren{r.tellingen.bij_klant ? ` (${r.tellingen.bij_klant})` : ''}
+                      </button>
+                    )}
                     {open && <MailComposer context={{ type: 'client', clientId: r.client_id, kind: 'goedkeuring', deadlineId: r.id }} label="Herinnering" className="btn-secondary text-xs" />}
                     {open && <button type="button" onClick={() => setBewerk(r)} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-600" title="Aanpassen" aria-label="Aanpassen"><Pencil className="h-3.5 w-3.5" /></button>}
                     <button type="button" onClick={() => verwijder(r)} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-red-50 text-red-500" title="Verwijderen" aria-label="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></button>

@@ -3,8 +3,9 @@
 //
 // Een deadline geldt voor één of meerdere maanden (YYYY-MM) van één klant:
 // "alles van oktober en november moet goedgekeurd zijn tegen 25 september".
-// De deadline-DAG telt nog volledig mee (tot 23:59 Brussel). Daarna wordt wat
-// nog "bij klant" staat automatisch goedgekeurd; feedback en concepten niet.
+// De deadline-DAG telt nog volledig mee (tot 23:59 Brussel). Daarna keuren wij
+// manueel goed ("Alles goedkeuren"): wat nog "bij klant" staat; feedback en
+// concepten niet. Er wordt nooit automatisch goedgekeurd.
 
 export type Deadline = {
   id: string

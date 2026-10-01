@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { safeMessage } from '@/lib/api-error'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { logAudit, requestMeta } from '@/lib/audit'
-import { leesDeadlines, verwerkVerstreken } from '@/lib/content/goedkeuring-deadlines'
+import { keurAllesGoed, leesDeadlines } from '@/lib/content/goedkeuring-deadlines'
 import { maandenTekst, valideerDeadline, isMaand } from '@/lib/content/deadline-model'
 
 export const dynamic = 'force-dynamic'
@@ -12,7 +12,7 @@ const notitieVan = (v: unknown) => (typeof v === 'string' ? v.trim().slice(0, 10
 
 /**
  * Goedkeuringsdeadlines van de contentkalender.
- * GET ?client_id&open=1 — het overzicht (verstreken deadlines worden eerst verwerkt).
+ * GET ?client_id&open=1 — het overzicht. Er wordt nooit automatisch goedgekeurd.
  */
 export async function GET(req: NextRequest) {
   try {
@@ -21,7 +21,6 @@ export async function GET(req: NextRequest) {
     const sp = req.nextUrl.searchParams
     const clientId = sp.get('client_id')
     if (clientId && !UUID.test(clientId)) return NextResponse.json({ error: 'Ongeldige klant' }, { status: 400 })
-    await verwerkVerstreken(admin, clientId ?? undefined)
     const deadlines = await leesDeadlines(admin, { clientId: clientId ?? undefined, alleenOpen: sp.get('open') === '1' })
     return NextResponse.json({ deadlines })
   } catch (err) {
@@ -52,7 +51,10 @@ export async function POST(req: NextRequest) {
   }
 }
 
-/** PATCH { id, maanden?, deadline?, notitie? } — enkel een open deadline wijzigt van datum of maanden. */
+/**
+ * PATCH { id, maanden?, deadline?, notitie? } — enkel een open deadline wijzigt van datum of maanden.
+ * PATCH { id, actie: 'alles_goedkeuren' } — de manuele knop: wat nog bij de klant staat → goedgekeurd.
+ */
 export async function PATCH(req: NextRequest) {
   try {
     const actor = await requireStaff()
@@ -61,12 +63,17 @@ export async function PATCH(req: NextRequest) {
     const id = String(b.id ?? '')
     if (!UUID.test(id)) return NextResponse.json({ error: 'Ongeldig id' }, { status: 400 })
     const admin = createAdminSupabaseClient()
+    if (b.actie === 'alles_goedkeuren') {
+      const r = await keurAllesGoed(admin, id, { id: actor.id, email: actor.email ?? null })
+      if (!r.ok) return NextResponse.json({ error: r.fout }, { status: 409 })
+      return NextResponse.json({ ok: true, aantal: r.aantal })
+    }
     const { data: oud } = await admin.from('content_goedkeuring_deadlines').select('*').eq('id', id).maybeSingle()
     if (!oud) return NextResponse.json({ error: 'Niet gevonden' }, { status: 404 })
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
     if ('notitie' in b) patch.notitie = notitieVan(b.notitie)
     if ('maanden' in b || 'deadline' in b) {
-      if (oud.status !== 'open') return NextResponse.json({ error: 'Deze deadline is al verstreken en verwerkt; maak een nieuwe aan.' }, { status: 409 })
+      if (oud.status !== 'open') return NextResponse.json({ error: 'Deze deadline is al afgerond; maak een nieuwe aan.' }, { status: 409 })
       const v = valideerDeadline({ maanden: 'maanden' in b ? b.maanden : oud.maanden, deadline: 'deadline' in b ? b.deadline : oud.deadline })
       if (!v.ok) return NextResponse.json({ error: v.fout }, { status: 400 })
       patch.maanden = v.maanden; patch.deadline = v.deadline

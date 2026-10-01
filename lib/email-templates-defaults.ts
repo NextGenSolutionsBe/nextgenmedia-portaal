@@ -11,7 +11,7 @@ De content van {{goedkeuring_maanden}} staat klaar in je dashboard. Er wachten n
 
 Je hebt {{dagen_resterend}} om alles na te kijken: tot en met {{goedkeuring_deadline}}. Wil je iets anders? Geef dan feedback bij het item.
 
-Wat op dat moment nog niet is goedgekeurd of van feedback voorzien, wordt automatisch goedgekeurd zodat we alles op tijd kunnen inplannen.`,
+Wat op dat moment nog niet is goedgekeurd of van feedback voorzien, keuren wij daarna goed zodat we alles op tijd kunnen inplannen.`,
     cta_text: 'Content bekijken en goedkeuren',
     cta_link: '{{scripts_link}}',
   },

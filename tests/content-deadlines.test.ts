@@ -44,7 +44,7 @@ test('Invoer: minstens één geldige maand en een geldige datum; dubbels weg', (
   assert.equal(valideerDeadline({ maanden: ['2026-10'], deadline: 'morgen' }).ok, false)
 })
 
-test('Tellingen: enkel "bij klant" is wat na de deadline automatisch goedgekeurd wordt', () => {
+test('Tellingen: enkel "bij klant" valt onder de knop Alles goedkeuren', () => {
   assert.deepEqual(tel(['ready_for_review', 'ready_for_review', 'changes_requested', 'approved', 'scheduled', 'published', 'draft']),
     { bij_klant: 2, feedback: 1, goedgekeurd: 3, concept: 1, totaal: 7 })
 })
