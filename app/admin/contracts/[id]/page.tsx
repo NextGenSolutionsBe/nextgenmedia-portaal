@@ -4,9 +4,25 @@ import { notFound } from 'next/navigation'
 import { createAdminSupabaseClient, trySignedUrl } from '@/lib/supabase/server'
 import { formatDate } from '@/lib/utils'
 import Link from 'next/link'
-import { ChevronLeft, FileText, CheckCircle2, ExternalLink, Settings2, Download } from 'lucide-react'
+import { ChevronLeft, CheckCircle2, ExternalLink, Settings2 } from 'lucide-react'
 import { ContractActions } from './contract-actions'
-import { ContractPrintButton } from './contract-print-button'
+import { GetekendeDocumenten } from './getekende-documenten'
+import { laatsteArchief } from '@/lib/contract-archief'
+import { laatsteMeldingStatus, meldingOpnieuwNodig } from '@/lib/contract-archief-model'
+import { ContractMailButton } from '@/components/admin/contract-mail-button'
+import { ContractLinkManager } from './contract-link-manager'
+import { ContractPdfPreview } from './contract-pdf-preview'
+import { ContractTimeline } from './contract-timeline'
+import { ContractFacturatie } from './contract-facturatie'
+import { ContractNavigatie } from './contract-navigatie'
+import { statusInfo, canonicalStatus } from '@/lib/contract-status'
+import { ContracttypeBewerker } from './contracttype-bewerker'
+import { LooptijdDatums } from './looptijd-datums'
+import { LooptijdDetail } from '../looptijd'
+import { typeVanContract, isNietToegewezen } from '@/lib/contracten/types'
+import { baseUrl } from '@/lib/email'
+import { leesActorNamen } from '@/lib/actor-namen'
+import { ContractGegevens } from './contract-gegevens'
 
 async function getContract(id: string) {
   try {
@@ -25,70 +41,70 @@ async function getContract(id: string) {
     // Parallelize the remaining I/O: client lookup + both signed URLs.
     // For signed PDFs we speculatively request both the stored path AND the
     // conventional `signed/{id}.pdf` fallback — whichever resolves wins.
-    const isSigned = contract.status === 'signed'
-    const [clientRowResult, pdfUrl, signedPdfStored, signedPdfFallback] = await Promise.all([
+    const isSigned = canonicalStatus(contract.status) === 'getekend'
+    const [clientRowResult, pdfUrl, signedPdfStored, signedPdfFallback, archief] = await Promise.all([
       contract.client_id
-        ? admin.from('clients').select('id, company_name').eq('id', contract.client_id).maybeSingle()
+        ? admin.from('clients').select('id, company_name, btw_nummer').eq('id', contract.client_id).maybeSingle()
         : Promise.resolve({ data: null }),
       trySignedUrl(admin, 'contracts', contract.pdf_path),
       isSigned ? trySignedUrl(admin, 'contracts', contract.signed_pdf_path) : Promise.resolve(null),
       isSigned ? trySignedUrl(admin, 'contracts', `signed/${contract.id}.pdf`) : Promise.resolve(null),
+      // Nieuwste archiefversie (certificaatnummer, datum) — enkel relevant als getekend.
+      isSigned ? laatsteArchief(admin, contract.id).catch(() => null) : Promise.resolve(null),
     ])
+    const { data: klantenLijst } = await admin.from('clients').select('id, company_name').order('company_name').limit(2000)
+    const aangemaaktDoor = contract.created_by ? (await leesActorNamen(admin, [contract.created_by]))[contract.created_by]?.naam ?? null : null
 
     return {
       contract,
+      aangemaaktDoor,
+      klantenLijst: (klantenLijst ?? []) as { id: string; company_name: string }[],
       clientName: clientRowResult.data?.company_name ?? null,
       clientId: clientRowResult.data?.id ?? null,
+      clientBtw: (clientRowResult.data as { btw_nummer?: string | null } | null)?.btw_nummer ?? null,
       signatures: signatures ?? [],
       events: events ?? [],
-      pdfUrl,
-      signedPdfUrl: signedPdfStored ?? signedPdfFallback,
+      // Nooit de tijdelijke Supabase-link zelf doorgeven: die verloopt na een uur
+      // en dan toont het voorbeeld "InvalidJWT / exp claim". Onze eigen route
+      // streamt het bestand met de sessie van de gebruiker en verloopt niet.
+      // De tijdelijke links dienen enkel om te weten óf het bestand bestaat.
+      pdfUrl: pdfUrl ? `/api/admin/contracts/${contract.id}/download?type=original&weergave=inline&voorbeeld=1` : null,
+      signedPdfUrl: (signedPdfStored ?? signedPdfFallback) ? `/api/admin/contracts/${contract.id}/download?type=signed&weergave=inline&voorbeeld=1` : null,
+      archief,
     }
   } catch {
     return null
   }
 }
 
-const STATUS_MAP: Record<string, { cls: string; label: string }> = {
-  draft:            { cls: 'bg-gray-100 text-gray-600',   label: 'Concept' },
-  sent:             { cls: 'bg-blue-100 text-blue-700',   label: 'Verstuurd' },
-  viewed:           { cls: 'bg-amber-100 text-amber-700', label: 'Bekeken' },
-  signed:           { cls: 'bg-green-100 text-green-700', label: 'Getekend' },
-  expired:          { cls: 'bg-red-100 text-red-700',     label: 'Verlopen' },
-  cancelled:        { cls: 'bg-gray-100 text-gray-500',   label: 'Geannuleerd' },
-  vervangen:        { cls: 'bg-orange-100 text-orange-700', label: 'Vervangen' },
-}
-
-const EVENT_LABELS: Record<string, string> = {
-  created:   'Aangemaakt',
-  sent:      'Verstuurd',
-  viewed:    'Bekeken',
-  signed:    'Ondertekend',
-  cancelled: 'Geannuleerd',
-  expired:   'Verlopen',
-  replaced:  'Vervangen',
-}
-
 export default async function ContractDetailPage({ params }: { params: { id: string } }) {
   const data = await getContract(params.id)
   if (!data) notFound()
 
-  const { contract: c, clientName, clientId, signatures, events, pdfUrl, signedPdfUrl } = data
-  const style = STATUS_MAP[c.status] ?? STATUS_MAP.draft
-  const isSigned = c.status === 'signed'
-  // Prefer the signed PDF for preview when available, fall back to the original.
-  const displayPdfUrl = signedPdfUrl ?? pdfUrl
+  const { contract: c, clientName, clientId, clientBtw, signatures, events, pdfUrl, signedPdfUrl, archief } = data
+  const style = statusInfo(c.status)
+  const statusKey = canonicalStatus(c.status)
+  const isSigned = statusKey === 'getekend'
+  const signLink = `${baseUrl()}/sign/${c.access_token}`
+  const meldingEvents = (events as { event_type: string; created_at: string; meta?: Record<string, unknown> | null }[])
+  const laatsteMelding = laatsteMeldingStatus(meldingEvents)
+  const meldingOpnieuw = isSigned && meldingOpnieuwNodig(meldingEvents, !!archief)
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center gap-3">
-        <Link href="/admin/contracts" className="btn-secondary px-2">
+      <div className="flex items-start gap-3 flex-wrap">
+        <Link href="/admin/contracts" className="btn-secondary px-2 shrink-0" title="Terug naar het overzicht">
           <ChevronLeft className="h-4 w-4" />
         </Link>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-3 mb-1">
-            <h1 className="text-2xl font-bold truncate">{c.title}</h1>
-            <span className={`status-badge ${style.cls}`}>{style.label}</span>
+        <ContractNavigatie contractId={c.id} />
+        <div className="flex-1 min-w-0 basis-full sm:basis-auto">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <h1 className="text-xl sm:text-2xl font-bold truncate">{c.title}</h1>
+            <LooptijdDetail contractId={c.id} waarde={{ looptijd_status: c.looptijd_status ?? 'lopend', stop_datum: c.stop_datum ?? null, stop_reden: c.stop_reden ?? null }} />
+            <span className={`status-badge ${style.cls}`} title="Ondertekeningsstatus">{style.label}</span>
+            <span className={`status-badge ${isNietToegewezen(c.contract_type) ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
+              {typeVanContract(c.contract_type)}
+            </span>
           </div>
           {clientId && clientName && (
             <Link href={`/admin/clients/${clientId}`} className="text-sm text-gray-500 hover:text-black">
@@ -96,69 +112,58 @@ export default async function ContractDetailPage({ params }: { params: { id: str
             </Link>
           )}
         </div>
-        {/* Setup signature zone — only for unsigned contracts */}
-        {!isSigned && (
-          <Link
-            href={`/admin/contracts/${c.id}/setup`}
-            className="btn-secondary flex items-center gap-2"
-          >
-            <Settings2 className="h-4 w-4" />
-            Handtekeningzone
-          </Link>
-        )}
-        {/* Download signed PDF — only when signed */}
-        {isSigned && signedPdfUrl && (
-          <a
-            href={signedPdfUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="btn-primary flex items-center gap-2"
-          >
-            <Download className="h-4 w-4" />
-            Getekend contract
-          </a>
-        )}
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
+          <ContractGegevens contractId={c.id} isSigned={!!isSigned} klanten={data.klantenLijst}
+            begin={{ title: c.title, client_id: c.client_id ?? null, service_slug: c.service_slug ?? null, signer_name: c.signer_name ?? null, signer_email: c.signer_email ?? null, duration_type: c.duration_type ?? null }} />
+          {!isSigned && statusKey !== 'geannuleerd' && (
+            <ContractMailButton
+              contractId={c.id}
+              contractTitle={c.title}
+              signLink={signLink}
+              defaultEmail={c.signer_email ?? null}
+              signerName={c.signer_name ?? null}
+              clientName={clientName}
+              expiresAt={c.expires_at ?? null}
+              label="Verstuur contractmail"
+            />
+          )}
+          {!isSigned && (
+            <Link
+              href={`/admin/contracts/${c.id}/setup`}
+              className="btn-secondary flex items-center gap-2 text-sm"
+            >
+              <Settings2 className="h-4 w-4" />
+              <span className="hidden sm:inline">AI-velden & zone</span>
+              <span className="sm:hidden">Velden</span>
+            </Link>
+          )}
+        </div>
       </div>
 
       <div className="grid lg:grid-cols-3 gap-6">
-        {/* PDF Preview — show signed version when available */}
-        <div className="lg:col-span-2 bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <FileText className="h-4 w-4 text-gray-400" />
-              {isSigned && signedPdfUrl ? (
-                <span className="flex items-center gap-1.5">
-                  Contract PDF
-                  <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium">Getekend</span>
-                </span>
-              ) : 'Contract PDF'}
-            </div>
-            <div className="flex items-center gap-3">
-              {isSigned && signedPdfUrl && (
-                <ContractPrintButton pdfUrl={signedPdfUrl} />
-              )}
-              {displayPdfUrl && (
-                <a href={displayPdfUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
-                  <ExternalLink className="h-3 w-3" />
-                  Nieuw tabblad
-                </a>
-              )}
-            </div>
-          </div>
-          {displayPdfUrl ? (
-            <iframe
-              src={displayPdfUrl}
-              title="Contract"
-              className="w-full h-[70vh] bg-gray-50"
+        {/* PDF Preview — schakel tussen origineel en getekend/ingevuld */}
+        <div className="lg:col-span-2 space-y-6">
+          <ContractPdfPreview originalUrl={pdfUrl} signedUrl={signedPdfUrl} />
+          {/* Getekende documenten: contract + certificaat uit het archief, met downloads/afdrukken en de Legal-melding. */}
+          {isSigned && (
+            <GetekendeDocumenten
+              contractId={c.id}
+              accessToken={c.access_token}
+              heeftGetekendePdf={!!signedPdfUrl}
+              heeftOrigineel={!!pdfUrl}
+              certificaatNr={archief?.certificaat_nr ?? null}
+              gearchiveerdOp={archief?.gearchiveerd_op ?? null}
+              archiefVersie={archief?.versie ?? null}
+              signedAt={c.signed_at ?? null}
+              meldingOpnieuw={meldingOpnieuw}
+              laatsteMelding={laatsteMelding}
             />
-          ) : (
-            <div className="flex items-center justify-center h-[400px] text-gray-400">
-              <div className="text-center">
-                <FileText className="h-10 w-10 mx-auto mb-3 opacity-30" />
-                <p className="text-sm">Geen PDF beschikbaar</p>
-              </div>
-            </div>
           )}
+          {/* Facturatie: voorstel controleren en bevestigen, facturen van dit contract, voortgang. */}
+          <ContractFacturatie
+            contractId={c.id} clientId={clientId} serviceSlug={c.service_slug ?? null} contractTitle={c.title} isSigned={!!isSigned}
+            expectedCount={c.expected_invoice_count ?? null} invoiceFrequency={c.invoice_frequency ?? null} expectedAmountExcl={c.expected_invoice_amount_excl ?? null}
+          />
         </div>
 
         {/* Sidebar */}
@@ -167,10 +172,12 @@ export default async function ContractDetailPage({ params }: { params: { id: str
           <div className="card-base space-y-3">
             <h2 className="font-semibold text-sm">Details</h2>
             <div className="space-y-2 text-sm">
+              <ContracttypeBewerker contractId={c.id} initieel={c.contract_type ?? null} />
               <div className="flex justify-between">
                 <span className="text-gray-500">Aangemaakt:</span>
-                <span>{formatDate(c.created_at)}</span>
+                <span className="text-right">{formatDate(c.created_at)}{data.aangemaaktDoor ? <span className="block text-xs text-gray-500">door {data.aangemaaktDoor}</span> : null}</span>
               </div>
+              <LooptijdDatums contractId={c.id} start={c.start_date ?? null} eind={c.end_date ?? null} />
               {c.sent_at && (
                 <div className="flex justify-between">
                   <span className="text-gray-500">Verstuurd:</span>
@@ -195,6 +202,12 @@ export default async function ContractDetailPage({ params }: { params: { id: str
                   <span className="capitalize">{c.service_slug.replace(/-/g, ' ')}</span>
                 </div>
               )}
+              {clientBtw && (
+                <div className="flex justify-between">
+                  <span className="text-gray-500">BTW:</span>
+                  <span className="font-mono">{clientBtw}</span>
+                </div>
+              )}
               {c.signer_email && (
                 <div className="flex justify-between">
                   <span className="text-gray-500">E-mail:</span>
@@ -204,71 +217,28 @@ export default async function ContractDetailPage({ params }: { params: { id: str
             </div>
           </div>
 
-          {/* Sign link — only for unsigned contracts */}
-          {['draft', 'sent', 'viewed'].includes(c.status) && (
-            <div className="card-base space-y-3">
-              <h2 className="font-semibold text-sm">Ondertekeningslink</h2>
-              <div className="flex gap-2">
-                <code className="flex-1 text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1.5 truncate">
-                  /sign/{c.access_token?.slice(0, 16)}...
-                </code>
-                <a href={`/sign/${c.access_token}`} target="_blank" rel="noreferrer" className="btn-secondary text-xs px-2">
-                  <ExternalLink className="h-3.5 w-3.5" />
-                </a>
-              </div>
-            </div>
-          )}
 
-          {/* Signed PDF — only when signed */}
-          {isSigned && (
-            <div className="card-base space-y-3">
-              <h2 className="font-semibold text-sm flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-green-500" />
-                Getekend contract
-              </h2>
-              {signedPdfUrl ? (
-                <div className="space-y-2">
-                  <a
-                    href={signedPdfUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn-primary w-full justify-center text-sm"
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    Download getekende PDF
-                  </a>
-                  <p className="text-xs text-gray-400 text-center">
-                    Handtekening is rechtstreeks op het contract geplaatst
+          {/* Sign link — only for unsigned contracts */}
+          {!isSigned && statusKey !== 'geannuleerd' && (
+            <>
+              <div className="card-base space-y-3">
+                <h2 className="font-semibold text-sm">Ondertekeningslink</h2>
+                {c.expires_at && (
+                  <p className="text-xs text-gray-500">
+                    Verloopt op {formatDate(c.expires_at)}{statusKey === 'verlopen' ? ' — verlopen' : ''}
                   </p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {pdfUrl && (
-                    <a
-                      href={pdfUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="btn-secondary w-full justify-center text-sm"
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      Download origineel contract
-                    </a>
-                  )}
-                  <a
-                    href={`/sign/${c.access_token}/receipt`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn-secondary w-full justify-center text-sm"
-                  >
-                    <FileText className="h-3.5 w-3.5" />
-                    Ondertekeningsbewijs
+                )}
+                <div className="flex gap-2">
+                  <code className="flex-1 text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1.5 truncate">
+                    /sign/{c.access_token?.slice(0, 16)}...
+                  </code>
+                  <a href={`/sign/${c.access_token}`} target="_blank" rel="noreferrer" className="btn-secondary text-xs px-2">
+                    <ExternalLink className="h-3.5 w-3.5" />
                   </a>
-                  <p className="text-xs text-gray-400 text-center">
-                    De ingebedde getekende PDF is niet beschikbaar — gebruik het origineel + bewijs als juridisch bewijs.
-                  </p>
                 </div>
-              )}
-            </div>
+              </div>
+              <ContractLinkManager contractId={c.id} initialExpiresAt={c.expires_at ?? null} />
+            </>
           )}
 
           {/* Setup link — only for unsigned contracts */}
@@ -286,7 +256,7 @@ export default async function ContractDetailPage({ params }: { params: { id: str
           )}
 
           {/* Actions */}
-          <ContractActions contract={{ id: c.id, status: c.status, access_token: c.access_token }} />
+          <ContractActions contract={{ id: c.id, status: c.status, access_token: c.access_token, title: c.title, clientName }} />
 
           {/* Signatures */}
           {signatures.length > 0 && (
@@ -314,24 +284,11 @@ export default async function ContractDetailPage({ params }: { params: { id: str
             </div>
           )}
 
-          {/* Events */}
-          {events.length > 0 && (
-            <div className="card-base space-y-2">
-              <h2 className="font-semibold text-sm">Activiteiten</h2>
-              <div className="space-y-2">
-                {events.slice(0, 8).map((e: { id: string; event_type: string; created_at: string; actor_email?: string }) => (
-                  <div key={e.id} className="flex items-start gap-2 text-xs">
-                    <span className="h-1.5 w-1.5 rounded-full bg-gray-300 mt-1.5 shrink-0" />
-                    <div>
-                      <span className="font-medium">{EVENT_LABELS[e.event_type] ?? e.event_type}</span>
-                      {e.actor_email && <span className="text-gray-400"> · {e.actor_email}</span>}
-                      <div className="text-gray-400">{formatDate(e.created_at)}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* Tijdlijn */}
+          <div className="card-base space-y-3">
+            <h2 className="font-semibold text-sm">Tijdlijn</h2>
+            <ContractTimeline events={events} />
+          </div>
         </div>
       </div>
     </div>

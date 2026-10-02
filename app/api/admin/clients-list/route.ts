@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server'
-import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
+import { createClient, createAdminSupabaseClient , isActiveStaff } from '@/lib/supabase/server'
+
+// Gebruikt cookies/sessie: nooit statisch renderen.
+export const dynamic = 'force-dynamic'
 
 // Returns the full clients list for admin dropdowns / pickers.
 // SECURITY: admin-only. Returns empty list (not 403) when called by non-admin
@@ -16,7 +19,7 @@ export async function GET() {
       .select('role')
       .eq('user_id', user.id)
       .maybeSingle()
-    if (roleData?.role !== 'admin') {
+    if (roleData?.role !== 'admin' && !(await isActiveStaff(user.id))) {
       return NextResponse.json({ clients: [] })
     }
 

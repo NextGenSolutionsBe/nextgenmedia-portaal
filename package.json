@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/kopieer-pdf-worker.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/kopieer-pdf-worker.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
@@ -32,9 +34,13 @@
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
+    "framer-api": "^0.1.17",
     "lucide-react": "^0.454.0",
-    "next": "^14.2.16",
+    "next": "^14.2.35",
+    "otpauth": "^9.5.2",
     "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.2.108",
+    "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.53.0",
@@ -46,6 +52,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.1",
     "autoprefixer": "^10.4.20",
