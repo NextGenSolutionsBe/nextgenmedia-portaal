@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { Loader2, Plus, Ban, Trash2, RefreshCw, CalendarCheck, CalendarPlus, Users, Link2, Send } from 'lucide-react'
 import { Dialoog } from '@/app/admin/instellingen/ui'
 import { WeekKalender, WeekNavigatie, maandagVan, plusDagen, tint, type WkItem, type WkSelectie } from '@/components/personeel/week-kalender'
-import { api, Chip, datumNl, dagLang, kortUur, vandaagBE, INP, LBL, type LinkItem } from '@/components/personeel/ui'
+import { api, Chip, datumNl, dagLang, kortUur, vandaagBE, verwijderBeschikbaarheid, INP, LBL, type LinkItem } from '@/components/personeel/ui'
 import { WERKSTATUS, PRIORITEITEN, type BeschikbaarheidStatus, type Werkstatus } from '@/lib/personeel/model'
 import { bevestigingVan, binnenBeschikbaarheid, BEVESTIGING_INFO, TELT_ALS_BESCHIKBAAR } from '@/lib/personeel/planning'
 
@@ -74,7 +74,7 @@ export function PlanningTab({ personeelId }: { personeelId?: string }) {
       uit.push({
         id: `b${b.id}`, datum: b.datum, start: kortUur(b.start_tijd), eind: kortUur(b.eind_tijd), laan: b.personeel_id, kleur: kleurVan.get(b.personeel_id) ?? '#9ca3af',
         soort: 'beschikbaar', titel: m?.voornaam ?? 'Beschikbaar', sub: b.opmerking,
-        onClick: () => modus === 'beschikbaarheid' ? setBewerk(b) : setInboeken({ datum: b.datum, start: kortUur(b.start_tijd), eind: kortUur(b.eind_tijd), personen: [b.personeel_id] }),
+        onClick: () => setBewerk(b),
       })
     }
     for (const p of data.planning) {
@@ -143,7 +143,7 @@ export function PlanningTab({ personeelId }: { personeelId?: string }) {
 
       <p className="text-xs text-gray-500">
         {modus === 'inboeken'
-          ? 'Sleep over een dag om een tijdvak te kiezen (of klik op iemands beschikbaarheid) en boek in wie dan vrij is. Gestreept = wacht op bevestiging.'
+          ? 'Sleep over een dag om een tijdvak te kiezen en boek in wie dan vrij is. Klik op iemands beschikbaarheid om in te boeken, aan te passen of te verwijderen. Gestreept = wacht op bevestiging.'
           : `Sleep over een dag om beschikbaarheid in te vullen voor ${mw.get(voorWie)?.voornaam ?? '…'}. Klik op een blok om het aan te passen of te verwijderen.`}
       </p>
 
@@ -179,7 +179,7 @@ export function PlanningTab({ personeelId }: { personeelId?: string }) {
       )}
 
       {inboeken && data && <InboekDialoog start={inboeken} data={data} actief={actief} kleurVan={kleurVan} onSluit={() => setInboeken(null)} onKlaar={async () => { setInboeken(null); await laad() }} />}
-      {bewerk && <BeschikbaarheidDialoog b={bewerk} naam={naamVan(mw.get(bewerk.personeel_id))} onSluit={() => setBewerk(null)} onKlaar={async () => { setBewerk(null); await laad() }} />}
+      {bewerk && <BeschikbaarheidDialoog b={bewerk} naam={naamVan(mw.get(bewerk.personeel_id))} onSluit={() => setBewerk(null)} onKlaar={async () => { setBewerk(null); await laad() }} onInboeken={() => { setBewerk(null); setInboeken({ datum: bewerk.datum, start: kortUur(bewerk.start_tijd), eind: kortUur(bewerk.eind_tijd), personen: [bewerk.personeel_id] }) }} />}
       {blok && data && <WerkblokDialoog w={blok} data={data} onSluit={() => setBlok(null)} onKlaar={async () => { setBlok(null); await laad() }} />}
     </div>
   )
@@ -287,15 +287,16 @@ function InboekDialoog({ start, data, actief, kleurVan, onSluit, onKlaar }: { st
   )
 }
 
-/** Beschikbaarheid van een medewerker aanpassen of verwijderen (admin). */
-function BeschikbaarheidDialoog({ b, naam, onSluit, onKlaar }: { b: Beschikbaar; naam: string; onSluit: () => void; onKlaar: () => void }) {
+/** Beschikbaarheid van een medewerker: inboeken, aanpassen of verwijderen (admin). */
+function BeschikbaarheidDialoog({ b, naam, onSluit, onKlaar, onInboeken }: { b: Beschikbaar; naam: string; onSluit: () => void; onKlaar: () => void; onInboeken: () => void }) {
   const [start, setStart] = useState(kortUur(b.start_tijd))
   const [eind, setEind] = useState(kortUur(b.eind_tijd))
   const [bezig, setBezig] = useState(false)
   const doe = async (methode: 'PATCH' | 'DELETE') => {
     setBezig(true)
     try {
-      await api(`/api/admin/personeel/beschikbaarheid/${b.id}`, methode === 'PATCH' ? { method: 'PATCH', body: { start, eind } } : { method: 'DELETE' })
+      if (methode === 'PATCH') await api(`/api/admin/personeel/beschikbaarheid/${b.id}`, { method: 'PATCH', body: { start, eind } })
+      else if (!(await verwijderBeschikbaarheid(`/api/admin/personeel/beschikbaarheid/${b.id}`))) return
       toast.success(methode === 'PATCH' ? 'Aangepast.' : 'Verwijderd.'); onKlaar()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(false) }
   }
@@ -307,9 +308,12 @@ function BeschikbaarheidDialoog({ b, naam, onSluit, onKlaar }: { b: Beschikbaar;
           <div><label className={LBL}>Van</label><select className={INP} value={start} onChange={(e) => setStart(e.target.value)}>{tijdOpties(start).map((u) => <option key={u}>{u}</option>)}</select></div>
           <div><label className={LBL}>Tot</label><select className={INP} value={eind} onChange={(e) => setEind(e.target.value)}>{tijdOpties(eind).map((u) => <option key={u}>{u}</option>)}</select></div>
         </div>
-        <div className="flex justify-between gap-2">
+        <div className="flex justify-between gap-2 flex-wrap">
           <button type="button" disabled={bezig} onClick={() => doe('DELETE')} className="btn-secondary text-red-600"><Trash2 className="h-4 w-4" />Verwijderen</button>
-          <button type="button" disabled={bezig} onClick={() => doe('PATCH')} className="btn-primary">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Opslaan</button>
+          <div className="flex gap-2">
+            <button type="button" disabled={bezig} onClick={() => doe('PATCH')} className="btn-secondary">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Uren opslaan</button>
+            <button type="button" disabled={bezig} onClick={onInboeken} className="btn-primary"><Users className="h-4 w-4" />Inboeken</button>
+          </div>
         </div>
       </div>
     </Dialoog>

@@ -12,7 +12,7 @@ import { normaliseerMeldingInstellingen, type MeldingEvent, type MeldingInstelli
 
 /**
  * Serverlaag van Personeel. Twee ingangen, strikt gescheiden:
- *  · beheer  (/api/admin/personeel) — via de rechtenmatrix (module 'personeel');
+ *  · beheer  (/api/admin/personeel) — enkel hoofdbeheerders (module 'personeel', adminOnly);
  *    financiële gegevens enkel met rechten op Financiën, gevoelige
  *    persoonsgegevens enkel met instellingenrecht op Personeel.
  *  · team    (/api/team) — de ingelogde medewerker, uitsluitend eigen data.
@@ -27,7 +27,8 @@ type Guard = { ok: true; persoon: IngelogdePersoon; admin: Admin } | { ok: false
 
 export async function eisPersoneel(actie: Actie): Promise<Guard> {
   const persoon = await magIk('personeel', actie)
-  if (!persoon) return { ok: false, response: NextResponse.json({ error: actie === 'bekijken' ? 'Geen toegang tot Personeel.' : 'Je hebt hiervoor geen recht in Personeel.' }, { status: 403 }) }
+  // Dubbel slot: Personeel is enkel voor hoofdbeheerders, wat de rechten ook zeggen.
+  if (!persoon || !persoon.isAdmin) return { ok: false, response: NextResponse.json({ error: actie === 'bekijken' ? 'Geen toegang tot Personeel.' : 'Je hebt hiervoor geen recht in Personeel.' }, { status: 403 }) }
   return { ok: true, persoon, admin: createAdminSupabaseClient() }
 }
 

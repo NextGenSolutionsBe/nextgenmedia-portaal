@@ -17,6 +17,28 @@ export async function api<T = Record<string, unknown>>(url: string, opts?: { met
   return j as T
 }
 
+/**
+ * Beschikbaarheid verwijderen. Valt er al een werkblok in, dan vraagt de server
+ * eerst bevestiging (409 + ingeboekt); na "OK" gaat het toch (werkblok blijft).
+ * Geeft false terug als de gebruiker annuleert.
+ */
+export async function verwijderBeschikbaarheid(url: string): Promise<boolean> {
+  const doe = async (forceer: boolean) => {
+    const r = await fetch(`${url}${forceer ? '?forceer=1' : ''}`, { method: 'DELETE', cache: 'no-store' })
+    const j = (await r.json().catch(() => ({}))) as { error?: string; ingeboekt?: boolean }
+    return { ok: r.ok, status: r.status, ...j }
+  }
+  const eerst = await doe(false)
+  if (eerst.ok) return true
+  if (eerst.status === 409 && eerst.ingeboekt) {
+    if (!confirm(eerst.error || 'Hier is al ingeboekt. Toch verwijderen?')) return false
+    const tweede = await doe(true)
+    if (tweede.ok) return true
+    throw new Error(tweede.error || `Mislukt (${tweede.status})`)
+  }
+  throw new Error(eerst.error || `Mislukt (${eerst.status})`)
+}
+
 const TZ = 'Europe/Brussels'
 export const euro = (n: number | null | undefined) => (n === null || n === undefined ? '—' : new Intl.NumberFormat('nl-BE', { style: 'currency', currency: 'EUR' }).format(n))
 export const uren = (n: number | null | undefined) => (n === null || n === undefined ? '—' : `${n.toLocaleString('nl-BE', { maximumFractionDigits: 2 })} u`)

@@ -78,6 +78,12 @@ const HREF_VAN: Record<string, string> = {
   personeel: '/admin/personeel',
 }
 const ESSENTIEEL = new Set(['invoices', 'contracts', 'purchases', 'werknemers', 'instellingen'])
+/**
+ * Enkel hoofdbeheerders, nooit via rechten of rollen open te zetten. Personeel
+ * bevat dossiers, planning en beschikbaarheid van collega's: studenten en
+ * werknemers werken in hun eigen omgeving (/team) en zien dit nooit.
+ */
+const ENKEL_HOOFDBEHEERDERS = new Set(['personeel'])
 
 export const MODULE_INSTELLINGEN_KEY = 'instellingen'
 export const MODULE_WERKNEMERS_KEY = 'werknemers'
@@ -87,7 +93,7 @@ export const MODULES: ModuleInfo[] = [
   { key: MODULE_DASHBOARD_KEY, label: 'Command Center', sectie: 'Start', href: '/admin', vergrendeld: true },
   ...ADMIN_MODULES.filter((m) => m.key !== 'harrie_api').map((m) => ({
     key: m.key, label: m.label, sectie: SECTIE_VAN[m.key] ?? 'Overig', href: HREF_VAN[m.key] ?? m.prefixes[0],
-    essentieel: ESSENTIEEL.has(m.key), uitgeschakeld: DISABLED_MODULE_KEYS.includes(m.key),
+    essentieel: ESSENTIEEL.has(m.key), uitgeschakeld: DISABLED_MODULE_KEYS.includes(m.key), adminOnly: ENKEL_HOOFDBEHEERDERS.has(m.key) || undefined,
   })),
   { key: MODULE_WERKNEMERS_KEY, label: 'Werknemers', sectie: 'Beheer', href: '/admin/werknemers', essentieel: true, adminOnly: true },
   { key: MODULE_INSTELLINGEN_KEY, label: 'Instellingen', sectie: 'Beheer', href: '/admin/instellingen', essentieel: true, vergrendeld: true },

@@ -29,15 +29,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 }
 
-/** DELETE — verwijderen (niet waar de medewerker al ingeboekt is). */
-export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+/** DELETE [?forceer=1] — verwijderen; waar al ingeboekt is eerst 409 { ingeboekt: true }, met forceer toch (werkblok blijft). */
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
     if (!isUuid(id)) return NextResponse.json({ error: 'Ongeldig id' }, { status: 400 })
     const g = await eisPersoneel('aanpassen'); if (!g.ok) return g.response
     const { data: a } = await g.admin.from('personeel_beschikbaarheid').select('personeel_id').eq('id', id).maybeSingle()
-    const r = await verwijderBeschikbaarheid(g.admin, { id })
-    if (!r.ok) return NextResponse.json({ error: r.fout }, { status: r.status })
+    const r = await verwijderBeschikbaarheid(g.admin, { id, forceer: req.nextUrl.searchParams.get('forceer') === '1' })
+    if (!r.ok) return NextResponse.json({ error: r.fout, ingeboekt: r.ingeboekt ?? false }, { status: r.status })
     await audit(g.admin, { personeel_id: (a as { personeel_id?: string } | null)?.personeel_id ?? null, entiteit: 'beschikbaarheid', entiteit_id: id, actie: 'beschikbaarheid_ingetrokken', actor_email: g.persoon.email, actor_id: g.persoon.userId })
     return NextResponse.json({ ok: true })
   } catch (err) {

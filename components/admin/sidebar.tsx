@@ -131,7 +131,7 @@ const SECTIONS: NavSection[] = [
       // Personeel = iedereen die voor ons werkt: dossiers, planning, uren, kosten
       // én (voor hoofdbeheerders) de logins met rollen en modules — de vroegere
       // pagina Werknemers zit hier als tabblad in.
-      { label: 'Personeel', href: '/admin/personeel', icon: Contact, module: 'personeel' },
+      { label: 'Personeel', href: '/admin/personeel', icon: Contact, module: 'personeel', adminOnly: true },
     ],
   },
 ]

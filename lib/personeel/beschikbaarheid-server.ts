@@ -9,12 +9,13 @@ import type { Admin } from './server'
  *
  * Beschikbaarheid is gewoon "ik ben vrij": geen goedkeuring meer nodig. Een
  * admin boekt iemand in binnen die uren; de medewerker bevestigt het werkblok.
- * Wijzigen of wissen kan altijd, behalve waar al een (niet geannuleerd,
- * niet geweigerd) werkblok in valt — anders zou een inboeking buiten iemands
- * beschikbaarheid komen te liggen.
+ * Wijzigen kan altijd, behalve waar een werkblok dan buiten de beschikbaarheid
+ * zou vallen. Verwijderen kan ALTIJD: valt er al een (niet geannuleerd, niet
+ * geweigerd) werkblok in, dan vraagt de app eerst "toch verwijderen?" (forceer)
+ * en blijft dat werkblok gewoon staan.
  */
 
-export type Uitkomst = { ok: true; id?: string } | { ok: false; fout: string; status: number }
+export type Uitkomst = { ok: true; id?: string; ingeboekt?: string | null } | { ok: false; fout: string; status: number; ingeboekt?: boolean }
 
 const ACTIEF = ['ingediend', 'goedgekeurd', 'gedeeltelijk']
 const fout = (f: string, status = 400): Uitkomst => ({ ok: false, fout: f, status })
@@ -68,7 +69,7 @@ export async function wijzigBeschikbaarheid(admin: Admin, p: { id: string; perso
   return { ok: true, id: rij.id }
 }
 
-export async function verwijderBeschikbaarheid(admin: Admin, p: { id: string; personeelId?: string }): Promise<Uitkomst> {
+export async function verwijderBeschikbaarheid(admin: Admin, p: { id: string; personeelId?: string; forceer?: boolean }): Promise<Uitkomst> {
   let q = admin.from('personeel_beschikbaarheid').select('id, personeel_id, datum, start_tijd, eind_tijd, status').eq('id', p.id)
   if (p.personeelId) q = q.eq('personeel_id', p.personeelId)
   const { data: a } = await q.maybeSingle()
@@ -76,8 +77,9 @@ export async function verwijderBeschikbaarheid(admin: Admin, p: { id: string; pe
   if (!rij || !ACTIEF.includes(rij.status)) return fout('Niet gevonden', 404)
   const oud = { s: minutenVanUur(rij.start_tijd), e: minutenVanUur(rij.eind_tijd) }
   const ingeboekt = (await werkblokken(admin, rij.personeel_id, rij.datum)).find((w) => overlapt(oud, w))
-  if (ingeboekt) return fout(`Hier is al ingeboekt (${ingeboekt.start_tijd.slice(0, 5)}–${ingeboekt.eind_tijd.slice(0, 5)}${ingeboekt.taak ? `, ${ingeboekt.taak}` : ''}). Laat dat werkblok eerst annuleren.`, 409)
+  const tekst = ingeboekt ? `${ingeboekt.start_tijd.slice(0, 5)}–${ingeboekt.eind_tijd.slice(0, 5)}${ingeboekt.taak ? ` (${ingeboekt.taak})` : ''}` : null
+  if (ingeboekt && !p.forceer) return { ok: false, status: 409, ingeboekt: true, fout: `Hier is al ingeboekt: ${tekst}. Toch verwijderen? Het werkblok blijft staan.` }
   const { error } = await admin.from('personeel_beschikbaarheid').update({ status: 'ingetrokken', updated_at: new Date().toISOString() }).eq('id', rij.id)
   if (error) throw new Error(error.message)
-  return { ok: true, id: rij.id }
+  return { ok: true, id: rij.id, ingeboekt: tekst }
 }

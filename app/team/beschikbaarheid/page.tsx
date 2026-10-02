@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Plus, Trash2, Loader2, Save, X } from 'lucide-react'
 import { WeekKalender, WeekNavigatie, maandagVan, plusDagen, type WkItem, type WkSelectie } from '@/components/personeel/week-kalender'
-import { api, dagLang, kortUur, vandaagBE, INP, LBL } from '@/components/personeel/ui'
+import { api, dagLang, kortUur, vandaagBE, verwijderBeschikbaarheid, INP, LBL } from '@/components/personeel/ui'
 
 type Beschikbaar = { id: string; datum: string; start_tijd: string; eind_tijd: string; status: string }
 type Blok = { id: string; datum: string; start_tijd: string; eind_tijd: string; taak: string | null; project: string | null; klant: string | null; status: string; bevestiging: string | null }
@@ -61,7 +61,7 @@ export default function BeschikbaarheidPagina() {
     <div className="space-y-3">
       <div>
         <h1 className="text-lg font-semibold">Wanneer ben je beschikbaar?</h1>
-        <p className="text-sm text-gray-500">Sleep over de uren waarop je kunt werken — het wordt meteen bewaard. Op je telefoon: tik op een uur, of gebruik snel toevoegen. Klik op een groen blok om het aan te passen.</p>
+        <p className="text-sm text-gray-500">Sleep over de uren waarop je kunt werken — het wordt meteen bewaard. Op je telefoon: tik op een uur, of gebruik snel toevoegen. Klik op een groen blok om het aan te passen of te verwijderen.</p>
       </div>
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -104,7 +104,8 @@ function BewerkBlok({ b, onSluit, onKlaar }: { b: Beschikbaar; onSluit: () => vo
   const doe = async (methode: 'PATCH' | 'DELETE') => {
     setBezig(true)
     try {
-      await api(`/api/team/beschikbaarheid/${b.id}`, methode === 'PATCH' ? { method: 'PATCH', body: { start, eind } } : { method: 'DELETE' })
+      if (methode === 'PATCH') await api(`/api/team/beschikbaarheid/${b.id}`, { method: 'PATCH', body: { start, eind } })
+      else if (!(await verwijderBeschikbaarheid(`/api/team/beschikbaarheid/${b.id}`))) return
       toast.success(methode === 'PATCH' ? 'Aangepast.' : 'Verwijderd.')
       onKlaar()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(false) }
