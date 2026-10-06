@@ -5,7 +5,10 @@
 import 'server-only'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { metricoolConfigured, listScheduledPosts, type MetricoolPost } from '@/lib/metricool'
-import { sendEmail, getAdminEmails, baseUrl } from '@/lib/email'
+import { sendEmail, baseUrl } from '@/lib/email'
+
+/** Wie de dagmail krijgt (op vraag: Chiara, Marco en de bedrijfsinbox — niet Bram). */
+const DAGMAIL_ONTVANGERS = ['chiara@nextgenmedia.be', 'marco@nextgenmedia.be', 'info@nextgenmedia.be'] as const
 
 /** Huidige datum (YYYY-MM-DD) + uur in Europe/Brussels — DST-correct. */
 export function brusselsDateHour(): { date: string; hour: number } {
@@ -85,8 +88,7 @@ export async function sendMetricoolDailyDigest(): Promise<DigestResult> {
     <p style="font-size:12px;margin-top:14px"><a href="${url}" style="color:#111">Open het Metricool-overzicht →</a></p>
   </div>`
 
-  const to = await getAdminEmails()
-  const r = await sendEmail({ to, subject: `📣 Metricool vandaag: ${rows.length} klant(en) posten`, text, html })
+  const r = await sendEmail({ to: [...DAGMAIL_ONTVANGERS], subject: `📣 Metricool vandaag: ${rows.length} klant(en) posten`, text, html })
   return { ok: r.ok, sent: r.ok, clients: rows.length, posts: total, date, error: r.ok ? undefined : r.error }
 }
 
