@@ -10,9 +10,16 @@
  *     contractjaar en daarmee het tarief boven de eerste 10%: jaar 1 €10.000
  *     per procent, jaar 2 €12.000, jaar 3 €15.000. Tot een totaal van 10%
  *     geldt een goedkoper regulier tarief van €5.000 per procent.
+ *     De vestigingstermijn loopt van 1 augustus 2026 t.e.m. 31 juli 2029.
+ *     Contracten getekend vóór de start tellen mee als jaar 1; wat na het
+ *     einde getekend wordt, telt niet meer.
  *
- * Wat meetelt hangt af van de status. Actief = voorlopig, voltooid =
- * definitief, vroegtijdig stopgezet of niet-betaler = €0. Een contract telt
+ * De VOLLEDIGE contractwaarde op het moment van ondertekening telt mee — ook
+ * een contract van €50.000 dat op 25 juli 2029 getekend wordt — maar enkel
+ * als het ook effectief betaald wordt. Daarom heeft elk contract termijnen
+ * (facturen): zolang niet alles uit het contract betaald is, is de waarde
+ * voorlopig; is alles betaald (of staat het contract op voltooid), dan is ze
+ * definitief. Vroegtijdig stopgezet of niet-betaler = €0. Een contract telt
  * naar rato van Marco's aandeel in het binnenhalen: 50% voor de afspraak, 50%
  * voor het closen.
  *
@@ -62,9 +69,9 @@ export type VestingInstellingen = {
 export const STANDAARD_INSTELLINGEN: VestingInstellingen = {
   max_aandeel_marco: 0.33, vast_aandeel_chiara: 0.33, startaandeel_marco: 0, startaandeel_bram: 0.67,
   wam_bedrag_per_pct: 5000, wam_max_aandeel: 0.05, regulier_tarief: 5000, einde_goedkope_schijf: 0.10,
-  jaar1_start: '2026-04-01', jaar1_eind: '2027-06-01', jaar1_tarief: 10000,
-  jaar2_start: '2027-06-01', jaar2_eind: '2028-06-01', jaar2_tarief: 12000,
-  jaar3_start: '2028-06-01', jaar3_eind: '2029-06-01', jaar3_tarief: 15000,
+  jaar1_start: '2026-08-01', jaar1_eind: '2027-07-31', jaar1_tarief: 10000,
+  jaar2_start: '2027-08-01', jaar2_eind: '2028-07-31', jaar2_tarief: 12000,
+  jaar3_start: '2028-08-01', jaar3_eind: '2029-07-31', jaar3_tarief: 15000,
 }
 
 /** Database-rijen komen als tekst of null binnen; hier worden het getallen. */
@@ -249,6 +256,101 @@ export function planTermijnSync(oudSchema: SchemaTermijn[], nieuwSchema: SchemaT
   return plan
 }
 
+/**
+ * De facturen (termijnen) van een vestingcontract. Elke termijn is één factuur:
+ * gepland → gefactureerd → betaald. `in_contract` = hoort bij de contractwaarde;
+ * een extra factuur buiten het contract (meerwerk) wordt gelogd maar telt niet
+ * mee voor de vesting — die telt op de getekende waarde.
+ * Is een factuur uit Facturen gekoppeld (`invoice_id`), dan volgt de status
+ * die factuur (betaald in Facturen = betaald hier).
+ */
+export type ContractTermijn = {
+  id: string; contract_id: string; volgnr: number; periode: string; factuurdatum: string
+  bedrag_excl: number; btw_pct: number; status: TermijnStatus; betaald_op: string | null
+  invoice_id: string | null; in_contract: boolean; notitie: string | null
+}
+/** Een factuur uit Facturen, zoals de vesting ze nodig heeft. */
+export type GekoppeldeFactuur = {
+  id: string; referentie: string | null; datum: string | null; maand: string | null
+  bedrag_excl: number; betaald: boolean; betaald_op: string | null; geannuleerd: boolean
+  /** Het contract in de Contractenmodule waar de factuur aan hangt. */
+  contract_id: string | null
+}
+export type ContractTermijnBerekend = ContractTermijn & {
+  /** De status die telt: van de gekoppelde factuur als die er is, anders de eigen. */
+  effectief: TermijnStatus
+  factuur: GekoppeldeFactuur | null
+}
+
+/** Een rij uit `invoices` naar wat de vesting nodig heeft (betaald / geannuleerd afgeleid). */
+export function factuurUitRij(r: Record<string, unknown>): GekoppeldeFactuur {
+  const incl = Number(r.amount_incl) || 0
+  return {
+    id: String(r.id), referentie: (r.reference as string | null) ?? null,
+    datum: r.invoice_date ? String(r.invoice_date).slice(0, 10) : null,
+    maand: r.invoice_month ? String(r.invoice_month).slice(0, 7) : (r.invoice_date ? String(r.invoice_date).slice(0, 7) : null),
+    bedrag_excl: Number(r.amount_excl) || 0,
+    betaald: r.betaalstatus === 'betaald' || (incl > 0 && (Number(r.betaald_bedrag) || 0) >= incl - 0.005),
+    betaald_op: r.betaald_op ? String(r.betaald_op).slice(0, 10) : null,
+    geannuleerd: r.status === 'geannuleerd' || !!r.cancelled_at || !!r.credited_at,
+    contract_id: (r.contract_id as string | null) ?? null,
+  }
+}
+
+/** Welke status telt voor een termijn? Een gekoppelde factuur gaat voor. */
+export function effectieveStatus(t: Pick<ContractTermijn, 'status' | 'invoice_id'>, f: GekoppeldeFactuur | null | undefined): TermijnStatus {
+  if (t.status === 'geannuleerd') return 'geannuleerd'
+  if (t.invoice_id && f) {
+    if (f.geannuleerd) return 'gepland'      // factuur geannuleerd → termijn is weer te factureren
+    return f.betaald ? 'betaald' : 'gefactureerd'
+  }
+  return t.status
+}
+
+/**
+ * Het facturatieschema van een vestingcontract: maandcontract = één factuur
+ * per maand over de duur (vanaf de start van de dienst, anders de
+ * ondertekening); eenmalig = één factuur voor de totaalwaarde.
+ */
+export function contractSchema(c: Pick<Contract, 'facturatiemodel' | 'maandbedrag' | 'duur_maanden' | 'handmatige_totaalwaarde' | 'start_dienst' | 'einde_dienst' | 'ondertekend_op'>): SchemaTermijn[] {
+  const start = c.start_dienst || c.ondertekend_op || null
+  if (c.facturatiemodel === 'eenmalig') {
+    return wamSchema({ start_datum: start, contract_maanden: null, bedrag_per_factuur: c.handmatige_totaalwaarde, frequentie: 'eenmalig', btw_pct: 21 })
+  }
+  const duur = c.duur_maanden ?? duurUitData(c.start_dienst, c.einde_dienst)
+  return wamSchema({ start_datum: start, contract_maanden: duur === null ? null : Math.round(duur), bedrag_per_factuur: c.maandbedrag, frequentie: 'maandelijks', btw_pct: 21 })
+}
+
+/**
+ * Welke factuur uit Facturen hoort bij welke termijn? Automatisch koppelen op
+ * dezelfde maand (en hetzelfde bedrag als er meerdere zijn), enkel voor
+ * termijnen zonder factuur en facturen die nog nergens hangen.
+ */
+export function stelKoppelingenVoor(
+  termijnen: Pick<ContractTermijn, 'id' | 'periode' | 'bedrag_excl' | 'invoice_id' | 'status'>[],
+  facturen: GekoppeldeFactuur[],
+): { termijn_id: string; invoice_id: string }[] {
+  const bezet = new Set(termijnen.map((t) => t.invoice_id).filter(Boolean) as string[])
+  const uit: { termijn_id: string; invoice_id: string }[] = []
+  for (const t of [...termijnen].sort((a, b) => a.periode.localeCompare(b.periode))) {
+    if (t.invoice_id || t.status === 'geannuleerd') continue
+    const kandidaten = facturen.filter((f) => !f.geannuleerd && !bezet.has(f.id) && (f.maand ?? f.datum?.slice(0, 7)) === t.periode)
+    const keuze = kandidaten.find((f) => Math.abs(f.bedrag_excl - n(t.bedrag_excl)) < 0.005) ?? (kandidaten.length === 1 ? kandidaten[0] : undefined)
+    if (keuze) { bezet.add(keuze.id); uit.push({ termijn_id: t.id, invoice_id: keuze.id }) }
+  }
+  // Tweede ronde: wat nog overblijft, op exact hetzelfde bedrag (bv. een
+  // eenmalig project dat in een andere maand gefactureerd werd dan getekend).
+  const gekoppeld = new Set(uit.map((u) => u.termijn_id))
+  for (const t of [...termijnen].sort((a, b) => a.periode.localeCompare(b.periode))) {
+    if (t.invoice_id || t.status === 'geannuleerd' || gekoppeld.has(t.id)) continue
+    const keuze = facturen
+      .filter((f) => !f.geannuleerd && !bezet.has(f.id) && Math.abs(f.bedrag_excl - n(t.bedrag_excl)) < 0.005)
+      .sort((a, b) => (a.datum ?? '').localeCompare(b.datum ?? ''))[0]
+    if (keuze) { bezet.add(keuze.id); uit.push({ termijn_id: t.id, invoice_id: keuze.id }) }
+  }
+  return uit
+}
+
 const n = (v: unknown): number => { const x = Number(v); return Number.isFinite(x) ? x : 0 }
 const dag =(s: string | null | undefined): Date | null => {
   if (!s) return null
@@ -258,12 +360,19 @@ const dag =(s: string | null | undefined): Date | null => {
 
 // ── Contractjaar en tarief ───────────────────────────────────────────────────
 
-/** In welk contractjaar valt een ondertekening? Grenzen zijn inclusief, zoals in het Excel. */
+/**
+ * In welk contractjaar valt een ondertekening? Grenzen zijn inclusief.
+ * Getekend vóór de start van jaar 1 telt mee als jaar 1 (afspraak: de eerste
+ * contracten van vóór de officiële start horen erbij). Na het einde van jaar 3
+ * = buiten de periode.
+ */
 export function contractjaar(ondertekendOp: string, i: VestingInstellingen): Contractjaar {
   const d = dag(ondertekendOp)
   if (!d) return 'buiten'
   const t = d.getTime()
   const in_ = (a: string, b: string) => { const x = dag(a), y = dag(b); return !!x && !!y && t >= x.getTime() && t <= y.getTime() }
+  const start1 = dag(i.jaar1_start)
+  if (start1 && t < start1.getTime()) return 'jaar1'
   if (in_(i.jaar1_start, i.jaar1_eind)) return 'jaar1'
   if (in_(i.jaar2_start, i.jaar2_eind)) return 'jaar2'
   if (in_(i.jaar3_start, i.jaar3_eind)) return 'jaar3'
@@ -312,6 +421,24 @@ export type ContractBerekend = Contract & {
   ontvangenVoorStop: number | null
   /** Bij stop of niet-betaler: wat er van de contractwaarde wegvalt. */
   uitgevallen: number
+  /** De facturen (termijnen) van dit contract, met de status die telt. */
+  termijnen: ContractTermijnBerekend[]
+  /** Som van de termijnen die in het contract staan (niet geannuleerd). */
+  inContract: number
+  /** In-contract termijnen met een factuur (gefactureerd of betaald). */
+  gefactureerd: number
+  /** In-contract termijnen die betaald zijn. */
+  betaald: number
+  /** Gefactureerd maar nog niet betaald. */
+  openstaand: number
+  /** Contractwaarde die nog gefactureerd moet worden. */
+  nogTeFactureren: number
+  /** Extra facturen buiten het contract (gelogd, tellen niet mee). */
+  extraGefactureerd: number
+  /** Is alles uit het contract betaald? */
+  volledigBetaald: boolean
+  /** Termijnen in contract ≠ contractwaarde (bv. na splitsen of een tikfout). */
+  termijnVerschil: number | null
 }
 
 /** Maanden tussen twee data, afgerond op één cijfer — 30,4375 dagen per maand zoals in het Excel. */
@@ -339,9 +466,10 @@ export function isUitgesloten(c: Pick<Contract, 'status' | 'betalingen_op_schema
   return c.status === 'stopgezet' || c.status === 'niet_betaler' || !c.betalingen_op_schema || jaar === 'buiten'
 }
 
-export function erkenningVan(c: Pick<Contract, 'status' | 'betalingen_op_schema'>, jaar: Contractjaar): Erkenning {
+export function erkenningVan(c: Pick<Contract, 'status' | 'betalingen_op_schema'>, jaar: Contractjaar, volledigBetaald = false): Erkenning {
   if (isUitgesloten(c, jaar)) return 'uitgesloten'
-  if (c.status === 'voltooid') return 'definitief'
+  // Definitief zodra het contract voltooid is óf alles uit het contract betaald is.
+  if (c.status === 'voltooid' || volledigBetaald) return 'definitief'
   if (c.status === 'actief') return 'voorlopig'
   return 'onvolledig'
 }
@@ -456,6 +584,18 @@ export type VestingOverzicht = {
   perJaar: JaarOverzicht[]
   /** Hoeveel € meetellende waarde nog tot de volgende hele procent. */
   volgendeProcent: { nodig: number; tarief: number } | null
+  /** Contracten samen: getekend vs effectief gefactureerd en betaald. */
+  contractTotalen: {
+    /** Getekende contractwaarde (100%) van de contracten die meetellen. */
+    getekend: number
+    /** Waar Marco recht op heeft: netto × toerekening (= meetellend). */
+    marcoRecht: number
+    gefactureerd: number
+    betaald: number
+    openstaand: number
+    nogTeFactureren: number
+    extraGefactureerd: number
+  }
 }
 
 /**
@@ -469,9 +609,10 @@ export type VestingOverzicht = {
  */
 export function berekenVesting(
   contractRijen: Contract[], wamRijen: WamRij[], wamKosten: WamKost[], i: VestingInstellingen,
-  wamTermijnen: WamTermijn[] = [],
+  wamTermijnen: WamTermijn[] = [], contractTermijnen: ContractTermijn[] = [], facturen: GekoppeldeFactuur[] = [],
 ): VestingOverzicht {
   const wam = berekenWam(wamRijen, wamKosten, i, wamTermijnen)
+  const factuurPerId = new Map(facturen.map((f) => [f.id, f]))
 
   /**
    * De goedkope schijf loopt tot een TOTAAL aandeel van 10%, WAM inbegrepen.
@@ -504,7 +645,24 @@ export function berekenVesting(
     }
     const kostenWaarschuwing = waarschuwingen.length ? waarschuwingen.join(' · ') : null
     const factor = toerekeningsfactor(c)
-    const erkenning = erkenningVan(c, jaar)
+
+    // De facturen van dit contract en wat er al gefactureerd/betaald is.
+    const termijnen: ContractTermijnBerekend[] = contractTermijnen
+      .filter((t) => t.contract_id === c.id)
+      .sort((a, b) => a.volgnr - b.volgnr)
+      .map((t) => { const f = t.invoice_id ? factuurPerId.get(t.invoice_id) ?? null : null; return { ...t, factuur: f, effectief: effectieveStatus(t, f) } })
+    const somT = (f: (t: ContractTermijnBerekend) => boolean) => termijnen.filter(f).reduce((s, t) => s + n(t.bedrag_excl), 0)
+    const inC = (t: ContractTermijnBerekend) => t.in_contract && t.effectief !== 'geannuleerd'
+    const inContract = somT(inC)
+    const gefactureerd = somT((t) => inC(t) && (t.effectief === 'gefactureerd' || t.effectief === 'betaald'))
+    const betaald = somT((t) => inC(t) && t.effectief === 'betaald')
+    const extraGefactureerd = somT((t) => !t.in_contract && t.effectief !== 'geannuleerd' && t.effectief !== 'gepland')
+    const inContractTermijnen = termijnen.filter(inC)
+    const volledigBetaald = inContractTermijnen.length > 0 && inContractTermijnen.every((t) => t.effectief === 'betaald')
+      && (totaal === null || betaald >= totaal - 0.01)
+    const termijnVerschil = totaal !== null && inContractTermijnen.length > 0 && Math.abs(inContract - totaal) >= 0.01 ? inContract - totaal : null
+
+    const erkenning = erkenningVan(c, jaar, volledigBetaald)
     const meetellend = erkenning === 'uitgesloten' || netto === null ? 0 : netto * factor
 
     const goedkopeSchijf = Math.min(meetellend, Math.max(0, goedkoopBudget - cumulatief))
@@ -524,6 +682,8 @@ export function berekenVesting(
       ...c, jaar, tarief, duur, totaal, netto, kostenAftrek, kostenWaarschuwing, factor, meetellend, erkenning,
       cumulatiefVoor: cumulatief, goedkopeSchijf, jaarschijf, ruweVesting,
       betaaldeMaanden: maanden, ontvangenVoorStop, uitgevallen,
+      termijnen, inContract, gefactureerd, betaald, openstaand: Math.max(0, gefactureerd - betaald),
+      nogTeFactureren: Math.max(0, (totaal ?? inContract) - gefactureerd), extraGefactureerd, volledigBetaald, termijnVerschil,
     }
     cumulatief += meetellend
     return uit
@@ -569,10 +729,22 @@ export function berekenVesting(
 
   const bram = i.startaandeel_bram - (marcoVoorlopig - i.startaandeel_marco)
 
+  const tellen = contracten.filter((c) => c.erkenning !== 'uitgesloten')
+  const som = (f: (c: ContractBerekend) => number, lijst = contracten) => lijst.reduce((s, c) => s + f(c), 0)
+  const contractTotalen = {
+    getekend: som((c) => c.totaal ?? 0, tellen),
+    marcoRecht: som((c) => c.meetellend),
+    gefactureerd: som((c) => c.gefactureerd),
+    betaald: som((c) => c.betaald),
+    openstaand: som((c) => c.openstaand),
+    nogTeFactureren: som((c) => c.nogTeFactureren, tellen),
+    extraGefactureerd: som((c) => c.extraGefactureerd),
+  }
+
   return {
     instellingen: i, contracten, wam, meetellendeWaarde,
     marcoVoorlopig, marcoDefinitief, bram, chiara: i.vast_aandeel_chiara,
-    uitgevallenWaarde, perJaar, volgendeProcent,
+    uitgevallenWaarde, perJaar, volgendeProcent, contractTotalen,
   }
 }
 

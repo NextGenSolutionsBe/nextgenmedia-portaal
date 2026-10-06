@@ -5429,3 +5429,31 @@ CREATE INDEX IF NOT EXISTS content_goedkeuring_deadlines_klant_idx ON public.con
 CREATE INDEX IF NOT EXISTS content_goedkeuring_deadlines_open_idx ON public.content_goedkeuring_deadlines (deadline) WHERE status = 'open';
 ALTER TABLE public.content_goedkeuring_deadlines ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.content_goedkeuring_deadlines FROM anon, authenticated;
+
+-- ── Vesting: facturen (termijnen) per vestingcontract (6 okt 2026) ─────────────
+-- Eén rij = één factuur van het contract. in_contract = hoort bij de getekende
+-- contractwaarde; invoice_id = gekoppelde factuur uit Facturen (status volgt die).
+CREATE TABLE IF NOT EXISTS public.vesting_contract_termijnen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id uuid NOT NULL REFERENCES public.vesting_contracten(id) ON DELETE CASCADE,
+  volgnr integer NOT NULL,
+  periode text NOT NULL,
+  factuurdatum date NOT NULL,
+  bedrag_excl numeric NOT NULL DEFAULT 0,
+  btw_pct numeric NOT NULL DEFAULT 21,
+  status text NOT NULL DEFAULT 'gepland',
+  betaald_op date,
+  invoice_id uuid REFERENCES public.invoices(id) ON DELETE SET NULL,
+  in_contract boolean NOT NULL DEFAULT true,
+  notitie text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'vesting_contract_termijnen_volgnr_uniek') THEN
+    ALTER TABLE public.vesting_contract_termijnen ADD CONSTRAINT vesting_contract_termijnen_volgnr_uniek UNIQUE (contract_id, volgnr);
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS vesting_contract_termijnen_contract_idx ON public.vesting_contract_termijnen (contract_id);
+ALTER TABLE public.vesting_contract_termijnen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.vesting_contract_termijnen FROM anon, authenticated;

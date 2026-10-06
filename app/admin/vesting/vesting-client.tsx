@@ -8,7 +8,7 @@ import { toast } from 'sonner'
 import Link from 'next/link'
 import {
   Loader2, Plus, X, Trash2, Pencil, Rocket, Users, Layers, Briefcase, Settings2, CalendarRange, AlertTriangle, Archive,
-  Link2, Receipt, CheckCircle2, ExternalLink, Ban, Undo2, ChevronDown, ChevronRight,
+  Link2, Receipt, CheckCircle2, ExternalLink, Ban, Undo2, ChevronDown, ChevronRight, Scissors, Unlink,
 } from 'lucide-react'
 import { formatEuro, formatDate } from '@/lib/utils'
 import { ExportKnop } from '@/components/admin/export-knop'
@@ -20,6 +20,7 @@ import {
   STATUS_LABEL, ERKENNING_LABEL, JAAR_LABEL, DIENSTEN, FREQUENTIES, TERMIJN_LABEL,
   type Contract, type WamRij, type WamKost, type WamTermijn, type WamRijBerekend, type TermijnStatus, type Frequentie,
   type ContractBerekend, type ContractStatus, type Erkenning, type VestingInstellingen,
+  type ContractTermijn, type ContractTermijnBerekend, type GekoppeldeFactuur,
 } from '@/lib/vesting'
 
 /** Een contract uit de Contractenmodule, zoals de picker het toont. */
@@ -80,6 +81,15 @@ function naarTermijn(r: Record<string, unknown>): WamTermijn {
     clickup_task_id: (r.clickup_task_id as string | null) ?? null, notitie: (r.notitie as string | null) ?? null,
   }
 }
+function naarContractTermijn(r: Record<string, unknown>): ContractTermijn {
+  return {
+    id: String(r.id), contract_id: String(r.contract_id), volgnr: n(r.volgnr) ?? 0, periode: String(r.periode ?? '').slice(0, 7),
+    factuurdatum: d(r.factuurdatum) ?? '', bedrag_excl: n(r.bedrag_excl) ?? 0, btw_pct: n(r.btw_pct) ?? 21,
+    status: (['gepland', 'gefactureerd', 'betaald', 'geannuleerd'].includes(String(r.status)) ? r.status : 'gepland') as TermijnStatus,
+    betaald_op: d(r.betaald_op), invoice_id: (r.invoice_id as string | null) ?? null,
+    in_contract: r.in_contract !== false, notitie: (r.notitie as string | null) ?? null,
+  }
+}
 function naarModuleContract(r: Record<string, unknown>): ModuleContract {
   const c = r.clients as { company_name?: string | null } | { company_name?: string | null }[] | null | undefined
   const klant = Array.isArray(c) ? (c[0]?.company_name ?? null) : (c?.company_name ?? null)
@@ -98,7 +108,9 @@ const ERKENNING_STIJL: Record<Erkenning, string> = {
   uitgesloten: 'bg-red-100 text-red-700', onvolledig: 'bg-gray-100 text-gray-600',
 }
 
-export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRijen, oudeRegistraties, termijnRijen = [], moduleContracten = [], klanten = [] }: {
+export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRijen, oudeRegistraties, termijnRijen = [], moduleContracten = [], klanten = [], contractTermijnRijen = [], facturen = [] }: {
+  contractTermijnRijen?: Record<string, unknown>[]
+  facturen?: GekoppeldeFactuur[]
   instellingenRij: Record<string, unknown> | null
   contractRijen: Record<string, unknown>[]
   wamRijen: Record<string, unknown>[]
@@ -114,6 +126,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
   const [wamDialoog, setWamDialoog] = useState<WamRij | 'nieuw' | null>(null)
   const [kostDialoog, setKostDialoog] = useState<WamKost | 'nieuw' | null>(null)
   const [openWam, setOpenWam] = useState<string | null>(null)
+  const [openContract, setOpenContract] = useState<string | null>(null)
   const [extraTermijn, setExtraTermijn] = useState<WamRij | null>(null)
   const [teVerwijderen, setTeVerwijderen] = useState<{ resource: 'contract' | 'wam' | 'kost'; id: string; naam: string; gevolgen: string } | null>(null)
   const [verwijderBezig, setVerwijderBezig] = useState(false)
@@ -126,7 +139,8 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
   const termijnen = useMemo(() => termijnRijen.map(naarTermijn), [termijnRijen])
   const module = useMemo(() => moduleContracten.map(naarModuleContract), [moduleContracten])
   const modulePerId = useMemo(() => new Map(module.map((m) => [m.id, m])), [module])
-  const v = useMemo(() => berekenVesting(contracten, wam, kosten, inst, termijnen), [contracten, wam, kosten, inst, termijnen])
+  const contractTermijnen = useMemo(() => contractTermijnRijen.map(naarContractTermijn), [contractTermijnRijen])
+  const v = useMemo(() => berekenVesting(contracten, wam, kosten, inst, termijnen, contractTermijnen, facturen), [contracten, wam, kosten, inst, termijnen, contractTermijnen, facturen])
 
   // Verwijderen gaat altijd via een bevestiging die zegt wat er gebeurt.
   const GEVOLGEN: Record<'contract' | 'wam' | 'kost', string> = {
@@ -205,8 +219,22 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <Kpi label="Meetellende contractwaarde" value={formatEuro(v.meetellendeWaarde)} sub="WAM netto + contracten" />
             <Kpi label="Marco voorlopig" value={pct(v.marcoVoorlopig)} sub={`van maximaal ${pct(inst.max_aandeel_marco)}`} color="text-amber-700" />
-            <Kpi label="Marco definitief" value={pct(v.marcoDefinitief)} sub="enkel voltooide contracten" color="text-green-700" />
+            <Kpi label="Marco definitief" value={pct(v.marcoDefinitief)} sub="volledig betaalde of voltooide contracten" color="text-green-700" />
             <Kpi label="Uitgevallen waarde" value={formatEuro(v.uitgevallenWaarde)} sub="stopgezet, niet betaald, WAM-kosten" color="text-red-600" />
+          </div>
+
+          {/* Contracten: getekend vs effectief gefactureerd */}
+          <div className="card-base">
+            <h2 className="font-semibold mb-1 flex items-center gap-2"><Receipt className="h-4 w-4" />Contracten — getekend vs. gefactureerd</h2>
+            <p className="text-xs text-gray-400 mb-3">De getekende waarde telt voor de vesting (aan het tarief van het jaar van ondertekening); ze wordt definitief zodra alles uit het contract betaald is.</p>
+            <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+              <Box label="Getekende contractwaarde" value={formatEuro(v.contractTotalen.getekend)} sub="100%, contracten die meetellen" />
+              <Box label="Waar Marco recht op heeft" value={formatEuro(v.contractTotalen.marcoRecht)} sub="netto × appointment/closing" color="text-amber-700" />
+              <Box label="Gefactureerd" value={formatEuro(v.contractTotalen.gefactureerd)} color="text-blue-700" />
+              <Box label="Betaald" value={formatEuro(v.contractTotalen.betaald)} color="text-green-700" />
+              <Box label="Openstaand" value={formatEuro(v.contractTotalen.openstaand)} sub="gefactureerd, niet betaald" color={v.contractTotalen.openstaand > 0 ? 'text-amber-700' : undefined} />
+              <Box label="Nog te factureren" value={formatEuro(v.contractTotalen.nogTeFactureren)} sub={v.contractTotalen.extraGefactureerd > 0 ? `+ ${formatEuro(v.contractTotalen.extraGefactureerd)} extra buiten contract` : undefined} />
+            </div>
           </div>
 
           {/* Aandeelhouders */}
@@ -239,7 +267,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                 sub={v.volgendeProcent ? `aan ${formatEuro(v.volgendeProcent.tarief)} per %` : undefined} color="text-amber-700" />
             </div>
             <p className="text-[11px] text-gray-500 mt-3">
-              Legenda: groen = definitief (voltooide contracten), geel = voorlopig (actieve contracten erbij).
+              Legenda: groen = definitief (volledig betaald of voltooid), geel = voorlopig (getekend, nog niet alles betaald).
             </p>
           </div>
 
@@ -318,8 +346,9 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
       {tab === 'contracten' && (
         <div className="space-y-3">
           <p className="text-sm text-gray-500">
-            De ondertekeningsdatum bepaalt het contractjaar en vergrendelt het tarief. Actief = voorlopig; voltooid = definitief;
-            vroegtijdig stopgezet of niet-betaler = €0. De goedkope schijf wordt chronologisch opgebruikt.
+            De ondertekeningsdatum bepaalt het contractjaar en vergrendelt het tarief (vóór {formatDate(inst.jaar1_start)} = jaar 1, na {formatDate(inst.jaar3_eind)} telt niet meer).
+            De volledige getekende waarde telt mee: voorlopig tot alles uit het contract betaald is, dan definitief. Stopgezet of niet-betaler = €0.
+            Klik een contract open voor de facturen per maand.
           </p>
           <div className="card-base p-0 overflow-hidden">
             {v.contracten.length === 0 ? (
@@ -328,6 +357,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
               <div className="table-wrap">
                 <KaartTabel><table className="w-full text-sm">
                   <thead><tr className="border-b border-gray-100">
+                    <th className="table-th w-6"></th>
                     <th className="table-th">Contract</th>
                     <th className="table-th">Ondertekend</th>
                     <th className="table-th">Dienst</th>
@@ -335,12 +365,14 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                     <th className="table-th text-right">Factor</th>
                     <th className="table-th text-right">Meetellend</th>
                     <th className="table-th text-right">Vesting</th>
+                    <th className="table-th text-right">Gefactureerd</th>
                     <th className="table-th">Status</th>
                     <th className="table-th w-16"></th>
                   </tr></thead>
                   <tbody className="divide-y divide-gray-50">
                     {v.contracten.map((c) => (
-                      <tr key={c.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setContractDialoog(c)}>
+                      <tr key={c.id} className={`cursor-pointer ${openContract === c.id ? 'bg-[#fff848]/20' : 'hover:bg-gray-50'}`} onClick={() => setOpenContract(openContract === c.id ? null : c.id)}>
+                        <td className="table-td text-gray-400">{openContract === c.id ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</td>
                         <td className="table-td">
                           <div className="font-medium">{c.klant}</div>
                           <div className="text-[11px] text-gray-500 font-mono">{c.nr}</div>
@@ -378,6 +410,11 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                           {c.jaarschijf > 0 && <div className="text-[11px] text-gray-400 font-normal">{formatEuro(c.jaarschijf)} aan jaartarief</div>}
                         </td>
                         <td className="table-td text-right tabular">{pct(c.ruweVesting, 2)}</td>
+                        <td className="table-td text-right tabular whitespace-nowrap">
+                          <div className="text-blue-800">{formatEuro(c.gefactureerd)}</div>
+                          <div className="text-[11px] text-green-700">{formatEuro(c.betaald)} betaald</div>
+                          {c.termijnen.length === 0 && <div className="text-[11px] text-gray-400">nog geen facturen</div>}
+                        </td>
                         <td className="table-td">
                           <span className={`status-badge ${ERKENNING_STIJL[c.erkenning]}`}>{ERKENNING_LABEL[c.erkenning]}</span>
                           <div className="text-[11px] text-gray-500 mt-0.5">{STATUS_LABEL[c.status]}{!c.betalingen_op_schema && ' · betalingen achter'}</div>
@@ -398,6 +435,14 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
               </div>
             )}
           </div>
+          {openContract && (() => {
+            const c = v.contracten.find((x) => x.id === openContract)
+            return c ? (
+              <div className="card-base">
+                <ContractTermijnen c={c} facturen={facturen.filter((f) => !!c.contract_id && f.contract_id === c.contract_id)} />
+              </div>
+            ) : null
+          })()}
         </div>
       )}
 
@@ -1035,6 +1080,238 @@ function ExtraTermijnDialoog({ rij, onClose }: { rij: WamRij; onClose: () => voi
   )
 }
 
+/**
+ * De facturen (termijnen) van één vestingcontract: per maand zien of er al een
+ * factuur is en of die betaald is; extra facturen buiten het contract loggen;
+ * een factuur splitsen (bv. voorschot + saldo); een factuur uit Facturen
+ * koppelen — dan volgt de status die factuur.
+ */
+function ContractTermijnen({ c, facturen }: { c: ContractBerekend; facturen: GekoppeldeFactuur[] }) {
+  const router = useRouter()
+  const [bezig, setBezig] = useState<string | null>(null)
+  const [bewerk, setBewerk] = useState<ContractTermijnBerekend | 'nieuw' | null>(null)
+  const [splits, setSplits] = useState<ContractTermijnBerekend | null>(null)
+  const [weg, setWeg] = useState<ContractTermijnBerekend | null>(null)
+  const [ververst, startVerversen] = useTransition()
+  useEffect(() => { if (!ververst) setBezig(null) }, [ververst])
+  const klaar = () => startVerversen(() => router.refresh())
+
+  const verzend = async (sleutel: string, method: string, body: Record<string, unknown> | null, melding: string, url = '/api/admin/vesting') => {
+    setBezig(sleutel)
+    try {
+      const r = await fetch(url, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined })
+      const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error ?? 'Mislukt')
+      toast.success(typeof j.gekoppeld === 'number' ? (j.gekoppeld ? `${j.gekoppeld} factuur/facturen gekoppeld.` : 'Geen nieuwe facturen om te koppelen.') : melding); klaar()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt'); setBezig(null) }
+  }
+  const patch = (t: ContractTermijnBerekend, body: Record<string, unknown>, melding: string) =>
+    verzend(t.id, 'PATCH', { resource: 'contracttermijn', id: t.id, ...body }, melding)
+
+  const gebruikt = new Set(c.termijnen.map((t) => t.invoice_id).filter(Boolean) as string[])
+  const losseFacturen = facturen.filter((f) => !gebruikt.has(f.id) && !f.geannuleerd)
+  const knop = 'inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors disabled:opacity-50'
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="font-semibold text-gray-900">Facturen — {c.nr} {c.klant}</div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {c.contract_id && (
+            <button disabled={bezig === 'koppel'} onClick={() => verzend('koppel', 'POST', { resource: 'contracttermijn', action: 'koppel', contract_id: c.id }, '')} className={`${knop} bg-white border-gray-200 text-gray-700 hover:border-gray-400`} title="Facturen uit Facturen van dit contract automatisch koppelen op maand">
+              {bezig === 'koppel' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Link2 className="h-3 w-3" />}Facturen koppelen
+            </button>
+          )}
+          <button onClick={() => setBewerk('nieuw')} className={`${knop} bg-black text-white border-black hover:bg-gray-800`}><Plus className="h-3 w-3" />Factuur toevoegen</button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+        <Box label="Getekende waarde" value={c.totaal === null ? '—' : formatEuro(c.totaal)} sub={`Marco: ${formatEuro(c.meetellend)}`} />
+        <Box label="Gefactureerd" value={formatEuro(c.gefactureerd)} color="text-blue-700" />
+        <Box label="Betaald" value={formatEuro(c.betaald)} color="text-green-700" />
+        <Box label="Openstaand" value={formatEuro(c.openstaand)} color={c.openstaand > 0 ? 'text-amber-700' : undefined} />
+        <Box label="Nog te factureren" value={formatEuro(c.nogTeFactureren)} sub={c.extraGefactureerd > 0 ? `+ ${formatEuro(c.extraGefactureerd)} extra` : undefined} />
+      </div>
+      {c.volledigBetaald && <div className="text-xs text-green-800 bg-green-50 border border-green-200 rounded-lg px-3 py-2">Alles uit het contract is betaald — de waarde telt <b>definitief</b>.</div>}
+      {c.termijnVerschil !== null && (
+        <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          ⚠ De facturen in het contract ({formatEuro(c.inContract)}) wijken {c.termijnVerschil > 0 ? 'naar boven' : 'naar onder'} af van de getekende waarde ({formatEuro(c.totaal ?? 0)}). Voor de vesting telt de getekende waarde.
+        </div>
+      )}
+      {!c.contract_id && <p className="text-[11px] text-gray-500">Koppel dit vestingcontract aan het contract in de Contractenmodule (via Wijzigen) om facturen uit Facturen automatisch te laten meelopen. Zonder koppeling duid je gefactureerd/betaald hier zelf aan.</p>}
+
+      {c.termijnen.length === 0 ? (
+        <div className="text-xs text-gray-500 py-2">Nog geen facturen. Vul maandbedrag en duur (of de totaalwaarde) in via <b>Wijzigen</b>, dan maakt de app ze per maand aan — of voeg er zelf één toe.</div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+          <div className="table-wrap"><KaartTabel><table className="w-full text-sm">
+            <thead><tr className="border-b border-gray-100">
+              <th className="table-th">#</th><th className="table-th whitespace-nowrap">Maand</th><th className="table-th whitespace-nowrap">Factuurdatum</th><th className="table-th text-right whitespace-nowrap">Excl. btw</th><th className="table-th">In contract</th><th className="table-th">Status</th><th className="table-th">Factuur</th><th className="table-th text-right">Actie</th>
+            </tr></thead>
+            <tbody className="divide-y divide-gray-50">
+              {c.termijnen.map((t) => {
+                const b = bezig === t.id
+                const viaFactuur = !!t.factuur
+                return (
+                  <tr key={t.id} className={t.effectief === 'geannuleerd' ? 'opacity-60' : ''}>
+                    <td className="table-td font-mono">{t.volgnr}</td>
+                    <td className="table-td whitespace-nowrap">{t.periode}{t.notitie && <div className="text-[10px] text-gray-400 whitespace-normal max-w-[220px]">{t.notitie}</div>}</td>
+                    <td className="table-td whitespace-nowrap">{formatDate(t.factuurdatum)}</td>
+                    <td className="table-td text-right tabular">{formatEuro(t.bedrag_excl)}</td>
+                    <td className="table-td">
+                      <button disabled={b} onClick={() => patch(t, { in_contract: !t.in_contract }, t.in_contract ? 'Gemarkeerd als extra (buiten contract).' : 'Gemarkeerd als deel van het contract.')}
+                        className={`status-badge ${t.in_contract ? 'bg-gray-100 text-gray-700' : 'bg-purple-100 text-purple-800'}`} title="Klik om te wisselen">
+                        {t.in_contract ? 'In contract' : 'Extra'}
+                      </button>
+                    </td>
+                    <td className="table-td">
+                      <span className={`status-badge ${TERMIJN_STIJL[t.effectief]}`}>{TERMIJN_LABEL[t.effectief]}</span>
+                      {t.effectief === 'betaald' && (t.factuur?.betaald_op ?? t.betaald_op) && <div className="text-[10px] text-gray-400 mt-0.5">op {formatDate((t.factuur?.betaald_op ?? t.betaald_op)!)}</div>}
+                      {viaFactuur && <div className="text-[10px] text-gray-400 mt-0.5">volgt Facturen</div>}
+                    </td>
+                    <td className="table-td">
+                      {t.factuur ? (
+                        <Link href={`/admin/invoices?maand=${t.factuur.maand ?? t.periode}`} className="text-blue-700 hover:underline inline-flex items-center gap-0.5 whitespace-nowrap"><Receipt className="h-3 w-3" />{t.factuur.referentie ?? 'Factuur'}</Link>
+                      ) : t.invoice_id ? <span className="text-[11px] text-gray-400">factuur niet gevonden</span> : <span className="text-gray-400">—</span>}
+                    </td>
+                    <td className="table-td whitespace-nowrap">
+                      <div className="flex gap-1 justify-end items-center">
+                        {b && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />}
+                        {!viaFactuur && t.effectief === 'gepland' && (
+                          <button disabled={b} onClick={() => patch(t, { status: 'gefactureerd' }, 'Gemarkeerd als gefactureerd.')} className={`${knop} bg-white border-gray-200 text-gray-600 hover:border-blue-500 hover:text-blue-700`}><Receipt className="h-3 w-3" />Gefactureerd</button>
+                        )}
+                        {!viaFactuur && (t.effectief === 'gepland' || t.effectief === 'gefactureerd') && (
+                          <button disabled={b} onClick={() => patch(t, { status: 'betaald' }, 'Gemarkeerd als betaald.')} className={`${knop} ${t.effectief === 'gefactureerd' ? 'bg-green-600 text-white border-green-600 hover:bg-green-700' : 'bg-white border-gray-200 text-gray-600 hover:border-green-500 hover:text-green-700'}`}><CheckCircle2 className="h-3 w-3" />Betaald</button>
+                        )}
+                        {!viaFactuur && t.effectief === 'betaald' && (
+                          <button disabled={b} onClick={() => patch(t, { status: 'gefactureerd' }, 'Betaling teruggedraaid.')} className={`${knop} bg-white border-gray-200 text-gray-500 hover:border-gray-400`}><Undo2 className="h-3 w-3" />Toch niet betaald</button>
+                        )}
+                        {viaFactuur && (
+                          <button disabled={b} onClick={() => patch(t, { invoice_id: null, status: 'gepland' }, 'Factuur ontkoppeld.')} className={`${knop} bg-white border-gray-200 text-gray-500 hover:border-gray-400`} title="Factuur ontkoppelen"><Unlink className="h-3 w-3" /></button>
+                        )}
+                        {!t.invoice_id && t.effectief !== 'geannuleerd' && (
+                          <button disabled={b} onClick={() => setSplits(t)} className={`${knop} bg-white border-gray-200 text-gray-600 hover:border-gray-400`} title="Factuur splitsen (bv. voorschot + saldo)"><Scissors className="h-3 w-3" /></button>
+                        )}
+                        {t.effectief !== 'geannuleerd' && !viaFactuur && t.effectief !== 'betaald' && (
+                          <button disabled={b} onClick={() => patch(t, { status: 'geannuleerd' }, 'Factuur geannuleerd.')} className={`${knop} bg-white border-gray-200 text-gray-500 hover:text-red-600 hover:border-red-300`} title="Annuleren"><Ban className="h-3 w-3" /></button>
+                        )}
+                        {t.status === 'geannuleerd' && (
+                          <button disabled={b} onClick={() => patch(t, { status: 'gepland' }, 'Hersteld.')} className={`${knop} bg-white border-gray-200 text-gray-500 hover:border-gray-400`}><Undo2 className="h-3 w-3" />Herstel</button>
+                        )}
+                        <button disabled={b} onClick={() => setBewerk(t)} className={`${knop} bg-white border-gray-200 text-gray-600 hover:border-gray-400`} title="Wijzigen"><Pencil className="h-3 w-3" /></button>
+                        <button disabled={b} onClick={() => setWeg(t)} className={`${knop} bg-white border-red-200 text-red-600 hover:bg-red-50 hover:border-red-400`} title="Verwijderen"><Trash2 className="h-3 w-3" /></button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table></KaartTabel></div>
+        </div>
+      )}
+      {losseFacturen.length > 0 && (
+        <p className="text-[11px] text-gray-500">
+          Nog niet gekoppeld uit Facturen: {losseFacturen.map((f) => `${f.referentie ?? 'factuur'} (${f.maand ?? '?'}, ${formatEuro(f.bedrag_excl)})`).join(' · ')} — koppel via ✎ bij de juiste maand of met “Facturen koppelen”.
+        </p>
+      )}
+      {bewerk && <ContractTermijnDialoog c={c} termijn={bewerk === 'nieuw' ? null : bewerk} facturen={facturen} gebruikt={gebruikt} onClose={() => setBewerk(null)} />}
+      {splits && <SplitsDialoog termijn={splits} onClose={() => setSplits(null)} />}
+      {weg && (
+        <Bevestig titel={`Factuur ${weg.volgnr} (${weg.periode}) verwijderen?`} gevaarlijk bezig={bezig === weg.id} bevestigLabel="Verwijderen"
+          tekst={<>
+            <p>De termijn van {formatEuro(weg.bedrag_excl)} verdwijnt uit het overzicht van {c.klant}. Een gekoppelde factuur in Facturen blijft bestaan.</p>
+            <p className="mt-2 text-gray-500">Hoort de termijn bij het maandschema, dan maakt de volgende wijziging van het contract hem opnieuw aan. Wil je het contract korter, pas dan de duur aan.</p>
+          </>}
+          onBevestig={async () => { await verzend(weg.id, 'DELETE', null, 'Verwijderd.', `/api/admin/vesting?resource=contracttermijn&id=${weg.id}`); setWeg(null) }} onAnnuleer={() => setWeg(null)} />
+      )}
+    </div>
+  )
+}
+
+/** Eén factuur van een contract toevoegen of wijzigen. */
+function ContractTermijnDialoog({ c, termijn: t, facturen, gebruikt, onClose }: { c: ContractBerekend; termijn: ContractTermijnBerekend | null; facturen: GekoppeldeFactuur[]; gebruikt: Set<string>; onClose: () => void }) {
+  const sluit = useSluitNaVerversen(onClose)
+  const vandaag = new Date().toISOString().slice(0, 10)
+  const [f, setF] = useState({
+    factuurdatum: t?.factuurdatum ?? vandaag, bedrag_excl: (t?.bedrag_excl ?? c.maandbedrag ?? null) as number | null,
+    in_contract: t?.in_contract ?? false, status: (t?.status ?? 'gefactureerd') as TermijnStatus,
+    betaald_op: t?.betaald_op ?? '', invoice_id: t?.invoice_id ?? '', notitie: t?.notitie ?? '',
+  })
+  const [bezig, setBezig] = useState(false)
+  const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((p) => ({ ...p, [k]: v }))
+  const keuzes = facturen.filter((x) => !x.geannuleerd && (!gebruikt.has(x.id) || x.id === t?.invoice_id))
+  const bewaar = async () => {
+    if (!f.factuurdatum) { toast.error('De factuurdatum is verplicht.'); return }
+    if (!f.bedrag_excl || f.bedrag_excl <= 0) { toast.error('Het bedrag moet groter zijn dan nul.'); return }
+    const body: Record<string, unknown> = {
+      resource: 'contracttermijn', factuurdatum: f.factuurdatum, periode: f.factuurdatum.slice(0, 7), bedrag_excl: f.bedrag_excl,
+      in_contract: f.in_contract, invoice_id: f.invoice_id || null, notitie: f.notitie,
+    }
+    if (!f.invoice_id) { body.status = f.status; if (f.status === 'betaald') body.betaald_op = f.betaald_op || null }
+    if (t) body.id = t.id; else body.contract_id = c.id
+    setBezig(true)
+    try {
+      const r = await fetch('/api/admin/vesting', { method: t ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error ?? 'Opslaan mislukt')
+      toast.success(t ? 'Factuur bijgewerkt.' : 'Factuur toegevoegd.'); sluit()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt'); setBezig(false) }
+  }
+  return (
+    <Dialoog titel={t ? `Factuur ${t.volgnr} — ${c.klant}` : `Factuur toevoegen — ${c.klant}`} onClose={onClose} onSave={bewaar} bezig={bezig}>
+      <div className="grid grid-cols-2 gap-3">
+        <Veld label="Factuurdatum *" type="date" value={f.factuurdatum} onChange={(v) => set('factuurdatum', v)} />
+        <label className="block text-xs font-medium text-gray-600">
+          Bedrag (€ excl. btw) *
+          <GetalInvoer className="input-base mt-1" waarde={f.bedrag_excl} onWaarde={(v) => set('bedrag_excl', v)} min={0} />
+        </label>
+      </div>
+      <JaNee label="Staat deze factuur in het contract?" value={f.in_contract} onChange={(v) => set('in_contract', v)} />
+      <p className="text-[11px] text-gray-500 -mt-1">Ja = deel van de getekende contractwaarde. Nee = extra (meerwerk): wordt gelogd, telt niet mee voor de vesting.</p>
+      {c.contract_id && (
+        <Keuze label="Factuur uit Facturen koppelen" value={f.invoice_id} onChange={(v) => set('invoice_id', v)}
+          opties={[{ v: '', l: '— Geen (status hier zelf aanduiden) —' }, ...keuzes.map((x) => ({ v: x.id, l: `${x.referentie ?? 'zonder nr.'} · ${x.maand ?? '?'} · ${formatEuro(x.bedrag_excl)}${x.betaald ? ' · betaald' : ''}` }))]} />
+      )}
+      {!f.invoice_id && (
+        <div className="grid grid-cols-2 gap-3">
+          <Keuze label="Status" value={f.status} onChange={(v) => set('status', v as TermijnStatus)}
+            opties={(['gepland', 'gefactureerd', 'betaald', 'geannuleerd'] as TermijnStatus[]).map((k) => ({ v: k, l: TERMIJN_LABEL[k] }))} />
+          {f.status === 'betaald' && <Veld label="Betaald op" type="date" value={f.betaald_op} onChange={(v) => set('betaald_op', v)} hint="Leeg = vandaag." />}
+        </div>
+      )}
+      {f.invoice_id && <p className="text-[11px] text-blue-800 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">Gekoppeld: gefactureerd en betaald volgen de factuur in Facturen.</p>}
+      <Veld label="Notitie" value={f.notitie} onChange={(v) => set('notitie', v)} placeholder="bv. voorschot 50%" />
+    </Dialoog>
+  )
+}
+
+/** Een factuur in twee delen splitsen (bv. 50% voorschot + 50% bij oplevering). */
+function SplitsDialoog({ termijn: t, onClose }: { termijn: ContractTermijnBerekend; onClose: () => void }) {
+  const sluit = useSluitNaVerversen(onClose)
+  const [deel, setDeel] = useState<number | null>(Math.round(t.bedrag_excl * 50) / 100)
+  const [datumRest, setDatumRest] = useState(t.factuurdatum)
+  const [bezig, setBezig] = useState(false)
+  const rest = deel === null ? null : Math.round((t.bedrag_excl - deel) * 100) / 100
+  const bewaar = async () => {
+    if (deel === null || deel <= 0 || deel >= t.bedrag_excl) { toast.error(`Kies een bedrag tussen €0 en ${formatEuro(t.bedrag_excl)}.`); return }
+    setBezig(true)
+    try {
+      const r = await fetch('/api/admin/vesting', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resource: 'contracttermijn', action: 'splits', id: t.id, bedrag_excl: deel, factuurdatum_rest: datumRest }) })
+      const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error ?? 'Splitsen mislukt')
+      toast.success('Factuur gesplitst.'); sluit()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Splitsen mislukt'); setBezig(false) }
+  }
+  return (
+    <Dialoog titel={`Factuur ${t.volgnr} splitsen (${formatEuro(t.bedrag_excl)})`} onClose={onClose} onSave={bewaar} bezig={bezig}>
+      <label className="block text-xs font-medium text-gray-600">
+        Deel 1 (€ excl. btw) — blijft op {formatDate(t.factuurdatum)}
+        <GetalInvoer className="input-base mt-1" waarde={deel} onWaarde={setDeel} min={0} />
+      </label>
+      <Veld label={`Deel 2: ${rest === null ? '—' : formatEuro(rest)} — factuurdatum`} type="date" value={datumRest} onChange={setDatumRest} />
+      <p className="text-[11px] text-gray-500">Beide delen houden dezelfde “in contract”-aanduiding. Samen blijven ze {formatEuro(t.bedrag_excl)}.</p>
+    </Dialoog>
+  )
+}
+
 /** Fragment-wrapper zodat een klant twee tabelrijen mag zijn (rij + termijnen). */
 function WamRijen({ children }: { children: React.ReactNode }) { return <>{children}</> }
 
@@ -1118,9 +1395,12 @@ function Instellingen({ inst }: { inst: VestingInstellingen }) {
         <ol className="list-decimal pl-4 space-y-1.5">
           <li>Het contractjaar wordt bepaald door de datum waarop het contract wordt ondertekend.</li>
           <li>Een contract uit Jaar 1 behoudt het tarief van Jaar 1, ook als de dienst in Jaar 2 wordt uitgevoerd.</li>
-          <li>De volledige netto contractwaarde telt voorlopig mee zolang het contract actief is en betalingen op schema zijn.</li>
+          <li>Getekend vóór de start van Jaar 1 telt mee als Jaar 1; getekend na het einde van Jaar 3 telt niet meer.</li>
+          <li>De volledige netto contractwaarde op het moment van ondertekening telt mee — voorlopig zolang niet alles uit het contract betaald is.</li>
+          <li>Zijn alle facturen uit het contract betaald (of staat het op ‘Voltooid’), dan is de waarde definitief.</li>
           <li>Bij status ‘Vroegtijdig stopgezet’ of ‘Niet-betaler’ wordt de volledige waarde automatisch €0.</li>
-          <li>Bij ‘Voltooid’ wordt de meetellende waarde definitief. ‘Actief’ blijft zichtbaar als voorlopig.</li>
+          <li>Toerekening: 50% voor de appointment, 50% voor het closen (samen 100%).</li>
+          <li>Extra facturen buiten het contract worden gelogd maar tellen niet mee.</li>
           <li>De goedkope schijf wordt chronologisch op ondertekeningsdatum toegewezen — de app sorteert dat zelf.</li>
         </ol>
       </div>

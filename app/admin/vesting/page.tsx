@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { createAdminSupabaseClient, requireAdmin } from '@/lib/supabase/server'
 import { VestingClient } from './vesting-client'
 import { directeKostenVoorContracten } from '@/lib/facturen/kosten-data'
+import { factuurUitRij } from '@/lib/vesting'
 
 /**
  * Vestigingsprincipe — het contractmodel van de samenwerkingsovereenkomst.
@@ -16,7 +17,7 @@ export default async function VestingPage() {
   if (!(await requireAdmin())) redirect('/admin')
 
   const admin = createAdminSupabaseClient()
-  const [inst, contracten, wam, kosten, oud, termijnen, moduleContracten, klanten] = await Promise.all([
+  const [inst, contracten, wam, kosten, oud, termijnen, moduleContracten, klanten, contractTermijnen] = await Promise.all([
     admin.from('vesting_instellingen').select('*').eq('id', 1).maybeSingle(),
     admin.from('vesting_contracten').select('*').order('ondertekend_op').order('nr'),
     admin.from('vesting_wam').select('*').order('nr'),
@@ -26,6 +27,8 @@ export default async function VestingPage() {
     // De Contractenmodule: waar een vestingcontract aan gekoppeld kan worden.
     admin.from('contracts').select('id, title, status, client_id, start_date, end_date, signed_at, service_slug, clients ( company_name )').order('created_at', { ascending: false }).limit(500),
     admin.from('clients').select('id, company_name, sales_verantwoordelijke, appointment_setter').order('company_name'),
+    // De facturen (termijnen) per vestingcontract.
+    admin.from('vesting_contract_termijnen').select('*').order('factuurdatum').order('volgnr'),
   ])
 
   // Directe kosten op de facturen van gekoppelde contracten → aftrek in de
@@ -40,6 +43,19 @@ export default async function VestingPage() {
     })
   } catch { /* kostenlaag nog niet beschikbaar */ }
 
+  // Facturen uit Facturen die aan de gekoppelde contracten hangen: die bepalen
+  // of een termijn gefactureerd en betaald is.
+  let facturen: ReturnType<typeof factuurUitRij>[] = []
+  try {
+    const ids = Array.from(new Set(contractRijen.map((r) => r.contract_id).filter(Boolean))) as string[]
+    if (ids.length) {
+      const { data } = await admin.from('invoices')
+        .select('id, reference, invoice_date, invoice_month, amount_excl, amount_incl, status, betaalstatus, betaald_bedrag, betaald_op, cancelled_at, credited_at, contract_id')
+        .in('contract_id', ids)
+      facturen = ((data ?? []) as Record<string, unknown>[]).map(factuurUitRij)
+    }
+  } catch { /* facturen niet beschikbaar → enkel handmatige status */ }
+
   return (
     <VestingClient
       instellingenRij={(inst.data ?? null) as Record<string, unknown> | null}
@@ -48,6 +64,8 @@ export default async function VestingPage() {
       kostRijen={(kosten.data ?? []) as Record<string, unknown>[]}
       oudeRegistraties={(oud.data ?? []) as Record<string, unknown>[]}
       termijnRijen={(termijnen.data ?? []) as Record<string, unknown>[]}
+      contractTermijnRijen={(contractTermijnen.data ?? []) as Record<string, unknown>[]}
+      facturen={facturen}
       moduleContracten={(moduleContracten.data ?? []) as unknown as Record<string, unknown>[]}
       klanten={((klanten.data ?? []) as { id: string; company_name: string | null; sales_verantwoordelijke?: string | null; appointment_setter?: string | null }[]).map((k) => ({ id: k.id, naam: k.company_name ?? '—', closer: k.sales_verantwoordelijke ?? null, setter: k.appointment_setter ?? null }))}
     />

@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { createAdminSupabaseClient, requireAdmin } from '@/lib/supabase/server'
 import { logAudit, requestMeta } from '@/lib/audit'
-import { volgendNr, wamSchema, planTermijnSync, DIENSTEN, FREQUENTIES, type Frequentie, type BestaandeTermijn } from '@/lib/vesting'
+import { volgendNr, wamSchema, planTermijnSync, contractSchema, stelKoppelingenVoor, factuurUitRij, DIENSTEN, FREQUENTIES, type Frequentie, type BestaandeTermijn, type Contract, type GekoppeldeFactuur } from '@/lib/vesting'
 import { inclFromExcl } from '@/lib/invoices'
 
 export const dynamic = 'force-dynamic'
@@ -26,10 +26,11 @@ export const dynamic = 'force-dynamic'
  * bestaat (gefactureerd/betaald) raakt het schema er nooit meer aan.
  */
 
-type Resource = 'contract' | 'wam' | 'kost' | 'instellingen' | 'termijn'
+type Resource = 'contract' | 'wam' | 'kost' | 'instellingen' | 'termijn' | 'contracttermijn'
 const TABEL: Record<Resource, string> = {
   contract: 'vesting_contracten', wam: 'vesting_wam', kost: 'vesting_wam_kosten',
   instellingen: 'vesting_instellingen', termijn: 'vesting_wam_termijnen',
+  contracttermijn: 'vesting_contract_termijnen',
 }
 
 const STATUSSEN = ['actief', 'voltooid', 'stopgezet', 'niet_betaler']
@@ -135,6 +136,27 @@ function velden(resource: Resource, b: Record<string, unknown>, bijAanmaak: bool
     return { rij }
   }
 
+  if (resource === 'contracttermijn') {
+    if (bijAanmaak && heeft('contract_id')) rij.contract_id = uuid(b.contract_id)
+    if (heeft('periode')) { const p = tekst(b.periode)?.slice(0, 7) ?? null; rij.periode = p && /^\d{4}-\d{2}$/.test(p) ? p : null }
+    if (heeft('factuurdatum')) rij.factuurdatum = datum(b.factuurdatum)
+    if (heeft('bedrag_excl')) rij.bedrag_excl = getal(b.bedrag_excl)
+    if (heeft('btw_pct')) rij.btw_pct = getal(b.btw_pct) ?? 21
+    if (heeft('status')) rij.status = TERMIJN_STATUSSEN.includes(String(b.status)) ? b.status : 'gepland'
+    if (heeft('betaald_op')) rij.betaald_op = datum(b.betaald_op)
+    if (heeft('in_contract')) rij.in_contract = ja(b.in_contract)
+    if (heeft('invoice_id')) rij.invoice_id = uuid(b.invoice_id)
+    if (heeft('notitie')) rij.notitie = tekst(b.notitie)
+    if (bijAanmaak) {
+      if (!rij.contract_id) return { rij, fout: 'contract_id ontbreekt.' }
+      if (!rij.factuurdatum) return { rij, fout: 'De factuurdatum is verplicht.' }
+      if (!rij.bedrag_excl || Number(rij.bedrag_excl) <= 0) return { rij, fout: 'Het bedrag is verplicht.' }
+      if (!rij.periode) rij.periode = String(rij.factuurdatum).slice(0, 7)
+    }
+    if (rij.bedrag_excl !== undefined && rij.bedrag_excl !== null && Number(rij.bedrag_excl) < 0) return { rij, fout: 'Het bedrag kan niet negatief zijn.' }
+    return { rij }
+  }
+
   // instellingen
   for (const k of ['max_aandeel_marco', 'vast_aandeel_chiara', 'startaandeel_marco', 'startaandeel_bram',
     'wam_bedrag_per_pct', 'wam_max_aandeel', 'regulier_tarief', 'einde_goedkope_schijf',
@@ -148,7 +170,7 @@ function velden(resource: Resource, b: Record<string, unknown>, bijAanmaak: bool
 }
 
 function resourceVan(v: unknown): Resource | null {
-  return v === 'contract' || v === 'wam' || v === 'kost' || v === 'instellingen' || v === 'termijn' ? v : null
+  return v === 'contract' || v === 'wam' || v === 'kost' || v === 'instellingen' || v === 'termijn' || v === 'contracttermijn' ? v : null
 }
 
 // Veerkrachtig insert: een (nog niet gemigreerde) kolom die ontbreekt wordt
@@ -217,6 +239,80 @@ async function synchroniseerTermijnen(admin: Admin, wamId: string, oudeWam: Reco
   }
 }
 
+/** Het facturatieschema zoals het uit een vesting_contracten-rij volgt. */
+function contractSchemaVan(c: Record<string, unknown> | null | undefined) {
+  if (!c) return []
+  const d = (v: unknown) => (v ? String(v).slice(0, 10) : null)
+  return contractSchema({
+    facturatiemodel: c.facturatiemodel === 'eenmalig' ? 'eenmalig' : 'maandcontract',
+    maandbedrag: getal(c.maandbedrag), duur_maanden: getal(c.duur_maanden), handmatige_totaalwaarde: getal(c.handmatige_totaalwaarde),
+    start_dienst: d(c.start_dienst), einde_dienst: d(c.einde_dienst), ondertekend_op: d(c.ondertekend_op) ?? '',
+  } as Pick<Contract, 'facturatiemodel' | 'maandbedrag' | 'duur_maanden' | 'handmatige_totaalwaarde' | 'start_dienst' | 'einde_dienst' | 'ondertekend_op'>)
+}
+
+/** Facturen uit Facturen voor de gegeven contracten in de Contractenmodule. */
+async function facturenVoorContracten(admin: Admin, moduleIds: string[]): Promise<GekoppeldeFactuur[]> {
+  if (!moduleIds.length) return []
+  const { data } = await admin.from('invoices')
+    .select('id, reference, invoice_date, invoice_month, amount_excl, amount_incl, status, betaalstatus, betaald_bedrag, betaald_op, cancelled_at, credited_at, contract_id')
+    .in('contract_id', moduleIds)
+  return ((data ?? []) as Record<string, unknown>[]).map(factuurUitRij)
+}
+
+/**
+ * De facturen (termijnen) van een vestingcontract gelijktrekken met het schema
+ * — dezelfde regels als bij WAM (planTermijnSync): geplande termijnen die het
+ * schema nog exact volgen bewegen mee; gekoppelde, betaalde, aangepaste of
+ * extra termijnen blijven staan. Daarna worden facturen uit Facturen van het
+ * gekoppelde contract automatisch op de juiste maand gekoppeld.
+ */
+async function synchroniseerContractTermijnen(admin: Admin, contractId: string, oudContract: Record<string, unknown> | null): Promise<void> {
+  const { data: c } = await admin.from('vesting_contracten').select('*').eq('id', contractId).maybeSingle()
+  if (!c) return
+  const { data: bestaand } = await admin.from('vesting_contract_termijnen').select('*').eq('contract_id', contractId)
+  const plan = planTermijnSync(contractSchemaVan(oudContract), contractSchemaVan(c), (bestaand ?? []) as BestaandeTermijn[])
+  const nu = new Date().toISOString()
+  for (const h of plan.hernummeren) {
+    const { error } = await admin.from('vesting_contract_termijnen').update({ volgnr: h.volgnr, updated_at: nu }).eq('id', h.id)
+    if (error) throw new Error(error.message)
+  }
+  if (plan.verwijderen.length) {
+    const { error } = await admin.from('vesting_contract_termijnen').delete().in('id', plan.verwijderen).eq('status', 'gepland').is('invoice_id', null)
+    if (error) throw new Error(error.message)
+  }
+  for (const b of plan.bijwerken) {
+    const { id, ...waarden } = b
+    const { error } = await admin.from('vesting_contract_termijnen').update({ ...waarden, updated_at: nu }).eq('id', id)
+    if (error) throw new Error(error.message)
+  }
+  for (const s of plan.invoegen) {
+    const { error } = await admin.from('vesting_contract_termijnen').insert({ contract_id: contractId, ...s, status: 'gepland', in_contract: true })
+    if (error) throw new Error(error.message)
+  }
+  await koppelFacturen(admin, contractId, c.contract_id ? String(c.contract_id) : null)
+}
+
+/** Facturen uit Facturen automatisch aan de termijnen van dit contract koppelen (op maand). */
+async function koppelFacturen(admin: Admin, contractId: string, moduleContractId: string | null): Promise<number> {
+  if (!moduleContractId) return 0
+  const [{ data: termijnen }, facturen] = await Promise.all([
+    admin.from('vesting_contract_termijnen').select('id, periode, bedrag_excl, invoice_id, status').eq('contract_id', contractId),
+    facturenVoorContracten(admin, [moduleContractId]),
+  ])
+  // Facturen die al aan een ándere termijn (van eender welk contract) hangen, niet nog eens.
+  const { data: elders } = await admin.from('vesting_contract_termijnen').select('invoice_id').in('invoice_id', facturen.map((f) => f.id).concat(['00000000-0000-0000-0000-000000000000'])).neq('contract_id', contractId)
+  const bezet = new Set(((elders ?? []) as { invoice_id: string }[]).map((r) => r.invoice_id))
+  const voorstel = stelKoppelingenVoor(
+    ((termijnen ?? []) as { id: string; periode: string; bedrag_excl: number; invoice_id: string | null; status: string }[])
+      .map((t) => ({ ...t, periode: String(t.periode).slice(0, 7), bedrag_excl: Number(t.bedrag_excl) || 0, status: t.status as 'gepland' })),
+    facturen.filter((f) => !bezet.has(f.id)),
+  )
+  for (const k of voorstel) {
+    await admin.from('vesting_contract_termijnen').update({ invoice_id: k.invoice_id, updated_at: new Date().toISOString() }).eq('id', k.termijn_id).is('invoice_id', null)
+  }
+  return voorstel.length
+}
+
 /** Een echte factuur voor één termijn: rij in Facturen (en dus in de planner). */
 async function factureerTermijn(admin: Admin, termijnId: string, actorId: string): Promise<{ invoiceId: string; waarschuwing: string | null }> {
   const { data: t } = await admin.from('vesting_wam_termijnen').select('*').eq('id', termijnId).maybeSingle()
@@ -258,11 +354,14 @@ async function factureerTermijn(admin: Admin, termijnId: string, actorId: string
 
 /** Alles wat het scherm over de WAM-termijnen en de Contractenmodule nodig heeft. */
 async function extraLezen(admin: Admin) {
-  const [termijnen, moduleContracten] = await Promise.all([
+  const [termijnen, moduleContracten, contractTermijnen, gekoppeld] = await Promise.all([
     admin.from('vesting_wam_termijnen').select('*').order('factuurdatum').order('volgnr'),
     admin.from('contracts').select('id, title, status, client_id, start_date, end_date, signed_at, service_slug, clients ( company_name )').order('created_at', { ascending: false }).limit(500),
+    admin.from('vesting_contract_termijnen').select('*').order('factuurdatum').order('volgnr'),
+    admin.from('vesting_contracten').select('contract_id'),
   ])
-  return { termijnen: termijnen.data ?? [], moduleContracten: moduleContracten.data ?? [] }
+  const ids = Array.from(new Set(((gekoppeld.data ?? []) as { contract_id: string | null }[]).map((r) => r.contract_id).filter(Boolean))) as string[]
+  return { termijnen: termijnen.data ?? [], moduleContracten: moduleContracten.data ?? [], contractTermijnen: contractTermijnen.data ?? [], facturen: await facturenVoorContracten(admin, ids) }
 }
 
 // GET — alles wat het scherm nodig heeft, in één keer.
@@ -288,6 +387,8 @@ export async function GET() {
       oudeRegistraties: oud.data ?? [],
       termijnen: extra.termijnen,
       moduleContracten: extra.moduleContracten,
+      contractTermijnen: extra.contractTermijnen,
+      facturen: extra.facturen,
     })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
@@ -319,6 +420,48 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, invoice_id: invoiceId, warning: waarschuwing })
     }
 
+    // Een factuur(termijn) van een contract opsplitsen in twee: bv. voorschot + saldo.
+    if (resource === 'contracttermijn' && b.action === 'splits') {
+      const id = uuid(b.id)
+      const deel = getal(b.bedrag_excl)
+      if (!id) return NextResponse.json({ error: 'id ontbreekt' }, { status: 400 })
+      const { data: t } = await admin.from(TABEL.contracttermijn).select('*').eq('id', id).maybeSingle()
+      if (!t) return NextResponse.json({ error: 'Termijn niet gevonden.' }, { status: 404 })
+      if (t.invoice_id) return NextResponse.json({ error: 'Aan deze termijn hangt al een factuur. Ontkoppel ze eerst om te splitsen.' }, { status: 409 })
+      const totaal = Number(t.bedrag_excl) || 0
+      if (deel === null || deel <= 0 || deel >= totaal) return NextResponse.json({ error: `Kies een bedrag tussen €0 en ${totaal.toFixed(2)}.` }, { status: 400 })
+      const { data: nrs } = await admin.from(TABEL.contracttermijn).select('volgnr').eq('contract_id', t.contract_id)
+      const volgnr = Math.max(0, ...((nrs ?? []) as { volgnr: number }[]).map((x) => Number(x.volgnr) || 0)) + 1
+      const nu = new Date().toISOString()
+      const rest = Math.round((totaal - deel) * 100) / 100
+      const { error: e1 } = await admin.from(TABEL.contracttermijn).update({ bedrag_excl: deel, notitie: t.notitie ? `${t.notitie} · deel 1` : 'deel 1', updated_at: nu }).eq('id', id)
+      if (e1) throw new Error(e1.message)
+      const datumRest = datum(b.factuurdatum_rest) ?? String(t.factuurdatum).slice(0, 10)
+      const { error: e2 } = await admin.from(TABEL.contracttermijn).insert({
+        contract_id: t.contract_id, volgnr, periode: datumRest.slice(0, 7), factuurdatum: datumRest, bedrag_excl: rest, btw_pct: t.btw_pct,
+        status: 'gepland', in_contract: t.in_contract, notitie: `deel 2 (gesplitst uit termijn ${t.volgnr})`,
+      })
+      if (e2) throw new Error(e2.message)
+      await logAudit({
+        action: 'vesting.contracttermijn.splits', entityType: TABEL.contracttermijn, entityId: id,
+        summary: `Vesting: termijn ${t.volgnr} gesplitst in ${deel} + ${rest}`,
+        actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'admin', ip: meta.ip, userAgent: meta.userAgent,
+      })
+      return NextResponse.json({ ok: true })
+    }
+    // Facturen uit Facturen opnieuw automatisch koppelen voor één contract.
+    if (resource === 'contracttermijn' && b.action === 'koppel') {
+      const cid = uuid(b.contract_id)
+      if (!cid) return NextResponse.json({ error: 'contract_id ontbreekt' }, { status: 400 })
+      const { data: c } = await admin.from('vesting_contracten').select('*').eq('id', cid).maybeSingle()
+      if (!c) return NextResponse.json({ error: 'Contract niet gevonden.' }, { status: 404 })
+      // Ontbreken de termijnen nog (contract van vóór deze functie), dan eerst het schema aanmaken.
+      const { count } = await admin.from(TABEL.contracttermijn).select('id', { count: 'exact', head: true }).eq('contract_id', cid)
+      if (!count) await synchroniseerContractTermijnen(admin, cid, null)
+      const aantal = await koppelFacturen(admin, cid, c.contract_id ? String(c.contract_id) : null)
+      return NextResponse.json({ ok: true, gekoppeld: aantal })
+    }
+
     const { rij, fout } = velden(resource, b, true)
     if (fout) return NextResponse.json({ error: fout }, { status: 400 })
 
@@ -332,6 +475,12 @@ export async function POST(req: NextRequest) {
       const { data } = await admin.from(TABEL.termijn).select('volgnr').eq('wam_id', String(rij.wam_id))
       rij.volgnr = Math.max(0, ...((data ?? []) as { volgnr: number }[]).map((t) => Number(t.volgnr) || 0)) + 1
       rij.status = 'gepland'
+    }
+    if (resource === 'contracttermijn') {
+      const { data } = await admin.from(TABEL.contracttermijn).select('volgnr').eq('contract_id', String(rij.contract_id))
+      rij.volgnr = Math.max(0, ...((data ?? []) as { volgnr: number }[]).map((t) => Number(t.volgnr) || 0)) + 1
+      if (!rij.status) rij.status = 'gepland'
+      if (rij.status === 'betaald' && !rij.betaald_op) rij.betaald_op = vandaag()
     }
 
     // Enkel contracten en WAM-klanten hebben een nummer. Kosten en termijnen
@@ -349,6 +498,7 @@ export async function POST(req: NextRequest) {
     const rijTerug = data as unknown as { id?: string; nr?: string } | null
     const nieuwId = rijTerug?.id ?? null
     if (resource === 'wam' && nieuwId) await synchroniseerTermijnen(admin, nieuwId, null)
+    if (resource === 'contract' && nieuwId) await synchroniseerContractTermijnen(admin, nieuwId, null)
 
     await logAudit({
       action: `vesting.${resource}.create`, entityType: TABEL[resource], entityId: nieuwId,
@@ -410,12 +560,34 @@ export async function PATCH(req: NextRequest) {
           try { revalidatePath('/admin/invoices') } catch { }
         }
       }
-      // De WAM-rij van vóór de wijziging: daaruit volgt welke termijnen bij het schema hoorden.
+      if (resource === 'contracttermijn') {
+        const { data: oud } = await admin.from(TABEL.contracttermijn).select('*').eq('id', id).maybeSingle()
+        if (!oud) return NextResponse.json({ error: 'Termijn niet gevonden.' }, { status: 404 })
+        if (rij.factuurdatum === null) return NextResponse.json({ error: 'De factuurdatum is verplicht.' }, { status: 400 })
+        if (rij.bedrag_excl !== undefined && (rij.bedrag_excl === null || Number(rij.bedrag_excl) <= 0)) return NextResponse.json({ error: 'Het bedrag moet groter zijn dan nul.' }, { status: 400 })
+        if (rij.factuurdatum && rij.periode === undefined) rij.periode = String(rij.factuurdatum).slice(0, 7)
+        if (rij.periode === null) delete rij.periode
+        // Een factuur kan maar aan één termijn hangen.
+        if (rij.invoice_id) {
+          const { data: al } = await admin.from(TABEL.contracttermijn).select('id').eq('invoice_id', String(rij.invoice_id)).neq('id', id).limit(1)
+          if (al?.length) return NextResponse.json({ error: 'Die factuur hangt al aan een andere termijn.' }, { status: 409 })
+          const { data: inv } = await admin.from('invoices').select('id').eq('id', String(rij.invoice_id)).maybeSingle()
+          if (!inv) return NextResponse.json({ error: 'Factuur niet gevonden.' }, { status: 404 })
+        }
+        const nieuweStatus = (rij.status as string | undefined) ?? String(oud.status)
+        if (nieuweStatus === 'betaald' && !rij.betaald_op && (rij.betaald_op === null || !oud.betaald_op)) rij.betaald_op = vandaag()
+        if (nieuweStatus !== 'betaald' && rij.status !== undefined) rij.betaald_op = null
+      }
+      // De WAM-rij / het contract van vóór de wijziging: daaruit volgt welke termijnen bij het schema hoorden.
       const oudeWam = resource === 'wam'
         ? ((await admin.from(TABEL.wam).select('*').eq('id', id).maybeSingle()).data as Record<string, unknown> | null)
         : null
+      const oudContract = resource === 'contract'
+        ? ((await admin.from(TABEL.contract).select('*').eq('id', id).maybeSingle()).data as Record<string, unknown> | null)
+        : null
       ;({ error } = await admin.from(TABEL[resource]).update(rij).eq('id', id))
       if (!error && resource === 'wam') await synchroniseerTermijnen(admin, id, oudeWam)
+      if (!error && resource === 'contract') await synchroniseerContractTermijnen(admin, id, oudContract)
     }
     if (error) {
       if (/duplicate key|unique/i.test(error.message)) return NextResponse.json({ error: 'Dat nummer bestaat al.' }, { status: 409 })
