@@ -22,6 +22,7 @@ import {
   isTaskGone,
   isNotFound,
   lijstToegang,
+  contentToewijzing,
   type CuTask,
 } from '@/lib/clickup'
 
@@ -198,6 +199,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // overgeslagen → de sync is hervatbaar en volledig veilig.
     const startedAt = Date.now()
     const TIME_BUDGET_MS = 8000
+    // Contentkalender-taken: altijd Chiara toegewezen, Marco en Bram eraf.
+    const toewijzing = await contentToewijzing()
     let done = true
 
     // Eén ClickUp-taak mag nooit door twee items gedeeld worden. We houden bij
@@ -219,8 +222,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         const channelOpt = channelOptionId(platforms)
         const dateMs = plannedDateMs(item.planned_date)
         const status = statusFor(item.status)
-        const hash = syncHash({ name, captionOpt, channelOpt, dateMs, status })
-        const fields = { name, status, dateMs, captionOpt, channelOpt }
+        const hash = syncHash({ name, captionOpt, channelOpt, dateMs, status, toegewezen: toewijzing.sleutel })
+        const fields = { name, status, dateMs, captionOpt, channelOpt, toewijzen: toewijzing.toewijzen, weghalen: toewijzing.weghalen }
 
         // (Her)adopteren op naam + datum, nooit een al door een ander item
         // geclaimde taak.

@@ -142,9 +142,11 @@ export function plannedDateMs(plannedDate: string): number {
 
 /** Stabiele, lichte hash van de gesyncte velden (skip onnodige API-calls). */
 export function syncHash(parts: {
-  name: string; captionOpt: string; channelOpt: string; dateMs: number; status: string
+  name: string; captionOpt: string; channelOpt: string; dateMs: number; status: string; toegewezen?: string
 }): string {
-  const s = `${parts.name}|${parts.captionOpt}|${parts.channelOpt}|${parts.dateMs}|${parts.status}`
+  // `toegewezen` hoort in de hash: verandert wie er op content staat, dan worden
+  // alle bestaande taken één keer bijgewerkt bij de volgende sync.
+  const s = `${parts.name}|${parts.captionOpt}|${parts.channelOpt}|${parts.dateMs}|${parts.status}${parts.toegewezen ? `|${parts.toegewezen}` : ''}`
   let h = 5381
   for (let i = 0; i < s.length; i++) h = (((h << 5) + h) + s.charCodeAt(i)) >>> 0
   return h.toString(36)
@@ -354,6 +356,27 @@ export type TaskFields = {
   dateMs: number
   captionOpt: string
   channelOpt: string
+  /** Wie op de taak moet staan (contentkalender: altijd Chiara). */
+  toewijzen?: number | null
+  /** Wie er NIET op mag staan (contentkalender: Marco en Bram) — wordt eraf gehaald. */
+  weghalen?: number[]
+}
+
+/**
+ * Toewijzing van contentkalender-taken: ALTIJD Chiara Walmagh, nooit Marco of
+ * Bram (vaste afspraak). Taken worden aangemaakt met Marco's ClickUp-sleutel,
+ * dus hij staat er wel als maker op — maar nooit als verantwoordelijke.
+ * Opzoeken op naam; lukt dat niet, dan de gekende id's uit de workspace.
+ */
+const CONTENT_VERANTWOORDELIJKE = { naam: 'Chiara Walmagh', id: 200511716 }
+const NIET_OP_CONTENT = [{ naam: 'Marco Castermans', id: 106693123 }, { naam: 'Bram Reinquin', id: 200511713 }]
+
+export async function contentToewijzing(): Promise<{ toewijzen: number; weghalen: number[]; sleutel: string }> {
+  const leden = await listClickupMembers().catch(() => [] as ClickupMember[])
+  const opNaam = (naam: string, terug: number) => leden.find((m) => (m.username ?? '').trim().toLowerCase() === naam.toLowerCase())?.id ?? terug
+  const toewijzen = opNaam(CONTENT_VERANTWOORDELIJKE.naam, CONTENT_VERANTWOORDELIJKE.id)
+  const weghalen = NIET_OP_CONTENT.map((p) => opNaam(p.naam, p.id)).filter((id) => id !== toewijzen)
+  return { toewijzen, weghalen, sleutel: `a${toewijzen}` }
 }
 
 export type TaskResult = { id: string; fieldsBlocked: number }
@@ -398,15 +421,18 @@ export function isNotFound(err: unknown): boolean {
 export async function createTask(listId: string, f: TaskFields): Promise<TaskResult> {
   const task = await clickupJson<{ id: string }>(`/list/${listId}/task`, {
     method: 'POST',
-    body: JSON.stringify({ name: f.name, status: f.status, due_date: f.dateMs }),
+    body: JSON.stringify({ name: f.name, status: f.status, due_date: f.dateMs, ...(f.toewijzen ? { assignees: [f.toewijzen] } : {}) }),
   })
   return { id: task.id, fieldsBlocked: 0 }
 }
 
 export async function updateTask(taskId: string, f: TaskFields): Promise<TaskResult> {
+  const assignees = f.toewijzen || f.weghalen?.length
+    ? { assignees: { add: f.toewijzen ? [f.toewijzen] : [], rem: f.weghalen ?? [] } }
+    : {}
   await clickupJson(`/task/${taskId}`, {
     method: 'PUT',
-    body: JSON.stringify({ name: f.name, status: f.status, due_date: f.dateMs }),
+    body: JSON.stringify({ name: f.name, status: f.status, due_date: f.dateMs, ...assignees }),
   })
   return { id: taskId, fieldsBlocked: 0 }
 }
