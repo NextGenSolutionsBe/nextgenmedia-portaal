@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from 'react'
 import Link from 'next/link'
-import { X, RotateCcw, Send, CalendarClock, Ban, Eye, Pencil, FilePlus2, Loader2, AlertTriangle, Repeat, Plus, Wallet } from 'lucide-react'
+import { X, RotateCcw, Send, CalendarClock, Ban, Eye, Pencil, FilePlus2, Loader2, AlertTriangle, Repeat, Plus, Wallet, CheckCircle2, Clock } from 'lucide-react'
 import { Bevestig, INP } from '@/app/admin/instellingen/ui'
 import { STATUS_INFO, HERKOMST_LABEL, datumLang, datumNl, euro2, isDatum, type Moment } from '@/lib/facturatie/planner-model'
 import { ReeksBewerken, MaandBedrag } from './reeks-bewerken'
@@ -19,12 +19,14 @@ function Rij({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
+/** Status altijd herkenbaar aan tekst + icoon, niet enkel aan de kleur. */
 export function StatusBadge({ status, klein }: { status: Moment['status']; klein?: boolean }) {
   const s = STATUS_INFO[status]
-  return <span className={`inline-flex items-center gap-1 rounded-full border px-2 ${klein ? 'py-0 text-[10px]' : 'py-0.5 text-[11px]'} font-medium whitespace-nowrap ${s.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${status === 'betaald' ? 'bg-white' : s.stip}`} />{s.label}</span>
+  const Icon = status === 'verstuurd' || status === 'betaald' ? CheckCircle2 : status === 'achterstallig' || status === 'controle_vereist' ? AlertTriangle : status === 'geannuleerd' || status === 'gecrediteerd' ? Ban : Clock
+  return <span className={`inline-flex items-center gap-1 rounded-full border px-2 ${klein ? 'py-0 text-[10px]' : 'py-0.5 text-[11px]'} font-medium whitespace-nowrap ${s.cls}`}><Icon className={klein ? 'h-2.5 w-2.5' : 'h-3 w-3'} aria-hidden />{s.label}</span>
 }
 
-function Lade({ titel, onSluit, children, breed }: { titel: ReactNode; onSluit: () => void; children: ReactNode; breed?: boolean }) {
+export function Lade({ titel, onSluit, children, breed }: { titel: ReactNode; onSluit: () => void; children: ReactNode; breed?: boolean }) {
   return (
     <div className="fixed inset-0 z-40" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/30" onClick={onSluit} />

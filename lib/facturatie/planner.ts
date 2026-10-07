@@ -70,6 +70,14 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
 
   const uit: Moment[] = []
 
+  // Terugkerende maanden met een eigen item (eigen artikelen/status): de maand
+  // wordt dan door dát item voorgesteld — nooit twee keer in de lijst.
+  type MaandLink = { recurring_id: string; month: string; invoice_id: string | null }
+  const itemVanMaand = new Map<string, MaandLink>()
+  for (const r of (maandRijen ?? []) as MaandLink[]) if (r.invoice_id) itemVanMaand.set(r.invoice_id, r)
+  const recPerId = new Map(((recurring ?? []) as (RecurringInvoice & { deleted_at?: string | null })[]).map((r) => [r.id, r]))
+  const TYPE_LABEL: Record<string, string> = { eenmalig: 'Eenmalig', voorschot: 'Voorschot', saldo: 'Saldo', terugkerend: 'Terugkerend' }
+
   // ── Eenmalige facturen ──
   for (const i of (facturen ?? []) as Record<string, unknown>[]) {
     const kind = (i.kind as string | null) ?? 'client'
@@ -85,7 +93,9 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
     const inclTotaal = Number(i.amount_incl) || 0
     if (ruwe === 'verstuurd' && (i.betaalstatus === 'betaald' || (inclTotaal > 0 && betaaldBedrag >= inclTotaal - 0.005))) ruwe = 'betaald'
     const status = bepaalStatus({ ruweStatus: ruwe, datum, ontbrekend, vandaag })
-    const herkomst: Herkomst = i.contract_id ? 'contract' : kind === 'wam' ? 'wam' : 'eenmalig'
+    const maandLink = itemVanMaand.get(String(i.id))
+    const reeks = maandLink ? recPerId.get(maandLink.recurring_id) : undefined
+    const herkomst: Herkomst = i.contract_id ? 'contract' : kind === 'wam' ? 'wam' : maandLink ? 'recurring' : 'eenmalig'
     const actief = status !== 'verstuurd' && status !== 'betaald' && status !== 'geannuleerd' && status !== 'gecrediteerd'
     const maand = ymVan(datum)
     uit.push({
@@ -93,12 +103,16 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
       client_id: (i.client_id as string | null) ?? null, klant: naam((i.client_id as string | null) ?? null),
       project: i.contract_id ? (contractTitel.get(String(i.contract_id)) || null) : svc((i.service_slug as string | null) ?? null),
       omschrijving: (i.description as string | null) ?? null,
-      type: kind === 'wam' ? 'WAM-factuur' : 'Eenmalig',
+      type: kind === 'wam' ? 'WAM-factuur' : maandLink ? 'Maandfactuur' : (TYPE_LABEL[String(i.factuur_type ?? '')] ?? 'Eenmalig'),
       bedrag_excl: bedrag, btw_pct: Number(i.vat_pct) || 0, bedrag_incl: Number(i.amount_incl) || inclFromExcl(bedrag, Number(i.vat_pct) || 0),
-      status, ruweStatus: ruwe, herkomst, terugkerend: false, verantwoordelijke: (i.verantwoordelijke as string | null) || verantwoordelijke,
+      status, ruweStatus: ruwe, herkomst, terugkerend: !!maandLink, verantwoordelijke: (i.verantwoordelijke as string | null) || verantwoordelijke,
       volledig: ontbrekend.length === 0, ontbrekend,
       contract_id: (i.contract_id as string | null) ?? null, contract_titel: i.contract_id ? (contractTitel.get(String(i.contract_id)) ?? null) : null,
-      recurring_id: null, invoice_id: String(i.id), wam_id: (i.wam_id as string | null) ?? null, schema: null, opmerking: (i.note as string | null) ?? null,
+      recurring_id: maandLink?.recurring_id ?? null, invoice_id: String(i.id), wam_id: (i.wam_id as string | null) ?? null,
+      schema: maandLink ? `Maand ${maandLink.month} van een terugkerende facturatie${reeks?.deleted_at ? ' · reeks stopgezet' : ''} · eigen artikelen` : null,
+      opmerking: (i.note as string | null) ?? null,
+      extern_nr: (i.extern_factuurnummer as string | null) ?? null, klant_referentie: (i.klant_referentie as string | null) ?? null,
+      heeft_mededeling: !!(i.mededeling as string | null),
       dienst: svc((i.service_slug as string | null) ?? null), betaaltermijn: termijnVan(i.payment_term_days), verzonden_op: dagVan(i.sent_at), verzonden_door: (i.sent_by_email as string | null) ?? null,
       betaald_op: ruwe === 'betaald' ? (dagVan(i.betaald_op) ?? null) : null,
       verwacht_op: dagVan(i.due_date) ?? verwachtOp(dagVan(i.sent_at), datum, termijnVan(i.payment_term_days)),
@@ -116,6 +130,8 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
     for (const m of maanden) {
       if (!recurringActiveInMonth(r, m)) continue
       const rij = perMaand.get(`${r.id}:${m}`)
+      // Deze maand heeft een eigen item → dat item staat al in de lijst.
+      if (rij?.invoice_id && itemVanMaand.has(rij.invoice_id) && ((facturen ?? []) as { id: string }[]).some((f) => f.id === rij.invoice_id)) continue
       const datum = (rij?.billing_date ?? billingDateFor(m, r.invoice_day)).slice(0, 10)
       if (datum < van || datum > tot) continue
       const excl = rij?.amount_excl != null ? Number(rij.amount_excl) : Number(r.amount_excl) || 0
@@ -143,6 +159,7 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
         dienst: svc(r.service_slug), betaaltermijn: termijnVan(r.payment_term_days), verzonden_op: dagVan(rij?.sent_at), verzonden_door: rij?.sent_by_email ?? null,
         betaald_op: ruwe === 'betaald' ? dagVan(rij?.betaald_op) : null,
         verwacht_op: verwachtOp(dagVan(rij?.sent_at), datum, termijnVan(r.payment_term_days)),
+        extern_nr: (rij as { extern_factuurnummer?: string | null } | undefined)?.extern_factuurnummer ?? null,
         acties: {
           bekijkenUrl: `/admin/invoices?maand=${m}`, aanpassenUrl: `/admin/invoices?maand=${m}`, voorbereidenUrl: null,
           kanVerstuurd: actief, kanVerplaatsen: magVerplaatsen(status), kanAnnuleren: actief, 

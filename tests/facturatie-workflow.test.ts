@@ -84,7 +84,10 @@ console.log('Statussen: te factureren grijs, verstuurd groen, geannuleerd rood')
 test('labels en kleuren', () => {
   assert.equal(VERZENDSTATUS.te_versturen.label, 'Te factureren'); assert.match(VERZENDSTATUS.te_versturen.cls, /gray/)
   assert.match(VERZENDSTATUS.verstuurd.cls, /green/); assert.match(VERZENDSTATUS.geannuleerd.cls, /red/)
-  assert.match(STATUS_INFO.gepland.cls, /gray/); assert.equal(STATUS_INFO.gepland.label, 'Te factureren'); assert.match(STATUS_INFO.verstuurd.cls, /green/); assert.match(STATUS_INFO.geannuleerd.cls, /red/)
+  // Facturenlijst (okt 2026): te factureren = wit, gefactureerd = donkergroen #166534, geannuleerd = neutraal grijs.
+  assert.match(STATUS_INFO.gepland.cls, /bg-white/); assert.equal(STATUS_INFO.gepland.label, 'Te factureren')
+  assert.match(STATUS_INFO.verstuurd.cls, /#166534/); assert.equal(STATUS_INFO.verstuurd.label, 'Gefactureerd'); assert.match(STATUS_INFO.geannuleerd.cls, /gray/)
+  assert.equal(STATUS_INFO.achterstallig.label, 'Achterstallig'); assert.match(STATUS_INFO.achterstallig.cls, /orange/)
 })
 test('oude statuswaarden worden genormaliseerd; inhoud enkel bewerkbaar vóór versturen; reden verplicht bij annuleren', () => {
   assert.equal(normaliseerVerzendstatus('gefactureerd'), 'verstuurd'); assert.equal(normaliseerVerzendstatus(null), 'te_versturen')

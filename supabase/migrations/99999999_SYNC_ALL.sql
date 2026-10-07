@@ -5457,3 +5457,69 @@ END $$;
 CREATE INDEX IF NOT EXISTS vesting_contract_termijnen_contract_idx ON public.vesting_contract_termijnen (contract_id);
 ALTER TABLE public.vesting_contract_termijnen ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.vesting_contract_termijnen FROM anon, authenticated;
+
+-- ── Facturen als interne facturatieplanner (7 okt 2026) ────────────────────────
+-- Type, mededeling op de factuur, extern factuurnummer (Bram registreert het
+-- achteraf), klantreferentie/PO, prestatieperiode, korting in euro per regel,
+-- facturatiegegevens op de klant, herbruikbare artikelen en bijlagen.
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS factuur_type text;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS mededeling text;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS extern_factuurnummer text;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS klant_referentie text;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS prestatie_van date;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS prestatie_tot date;
+ALTER TABLE public.invoice_lines ADD COLUMN IF NOT EXISTS korting_eur numeric NOT NULL DEFAULT 0;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS extern_factuurnummer text;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS adres_straat text;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS adres_postcode text;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS adres_gemeente text;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS adres_land text;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS facturatie_email text;
+
+-- Bestaande `reference`: de echte factuurnummers (2026-50 …) worden het externe
+-- factuurnummer, iets anders (bv. "Bestelbon nr: …") de klantreferentie.
+-- `reference` zelf blijft ongewijzigd staan.
+UPDATE public.invoices SET extern_factuurnummer = reference
+  WHERE extern_factuurnummer IS NULL AND reference ~ '^\d{4}-\d+$';
+UPDATE public.invoices SET klant_referentie = reference
+  WHERE klant_referentie IS NULL AND reference IS NOT NULL AND reference !~ '^\d{4}-\d+$';
+
+CREATE TABLE IF NOT EXISTS public.factuur_artikelen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam text NOT NULL,
+  beschrijving text,
+  eenheid text NOT NULL DEFAULT 'stuk',
+  prijs_excl numeric,
+  btw_pct numeric NOT NULL DEFAULT 21,
+  soort text NOT NULL DEFAULT 'dienst',
+  volgorde integer NOT NULL DEFAULT 0,
+  actief boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.factuur_artikelen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.factuur_artikelen FROM anon, authenticated;
+-- Startset zonder prijzen: de afgesproken prijs vult het team zelf in.
+INSERT INTO public.factuur_artikelen (naam, eenheid, soort, volgorde)
+SELECT v.naam, v.eenheid, v.soort, v.volgorde FROM (VALUES
+  ('Shoot', 'stuk', 'dienst', 1), ('Montage', 'uur', 'dienst', 2), ('Extra werkuren', 'uur', 'dienst', 3),
+  ('Kilometervergoeding', 'km', 'doorgerekende_kost', 4), ('Parking', 'stuk', 'doorgerekende_kost', 5),
+  ('Materiaalhuur', 'dag', 'doorgerekende_kost', 6)
+) AS v(naam, eenheid, soort, volgorde)
+WHERE NOT EXISTS (SELECT 1 FROM public.factuur_artikelen);
+
+CREATE TABLE IF NOT EXISTS public.invoice_bijlagen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  invoice_id uuid NOT NULL REFERENCES public.invoices(id) ON DELETE CASCADE,
+  naam text NOT NULL,
+  pad text NOT NULL,
+  grootte integer,
+  mime text,
+  created_by text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS invoice_bijlagen_invoice_idx ON public.invoice_bijlagen (invoice_id);
+ALTER TABLE public.invoice_bijlagen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.invoice_bijlagen FROM anon, authenticated;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS telefoon text;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS mededeling text;

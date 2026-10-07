@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
   try {
     const actor = await requireStaff()
     if (!actor) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
-    const b = (await req.json().catch(() => null)) as { actie?: string; id?: string; datum?: string; reden?: string; bedrag_excl?: unknown; btw_pct?: unknown; opmerking?: unknown } | null
+    const b = (await req.json().catch(() => null)) as { actie?: string; id?: string; datum?: string; reden?: string; bedrag_excl?: unknown; btw_pct?: unknown; opmerking?: unknown; extern_nummer?: unknown } | null
     const sleutel = b?.id ? ontleedSleutel(b.id) : null
     if (!b || !sleutel) return NextResponse.json({ error: 'Onbekend planneritem.' }, { status: 400 })
     const admin = createAdminSupabaseClient()
@@ -88,6 +88,8 @@ export async function POST(req: NextRequest) {
       actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'staff', metadata: { moment: b.id, ...extra, waarschuwingen }, ip: meta.ip, userAgent: meta.userAgent,
     })
     const klaar = () => { try { revalidatePath('/admin/invoices'); revalidatePath('/admin/invoices/planner') } catch { /* */ } }
+    // Extern factuurnummer (optioneel): Bram registreert het bij het afwerken of later.
+    const externNr = b.extern_nummer === undefined ? undefined : (String(b.extern_nummer ?? '').trim().slice(0, 60) || null)
     // ── Eenmalige factuur ──
     if (sleutel.bron === 'invoice') {
       const { data: inv } = await admin.from('invoices').select('*').eq('id', sleutel.bronId).maybeSingle()
@@ -123,13 +125,24 @@ export async function POST(req: NextRequest) {
         await audit('Factuur teruggezet naar te factureren')
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
       }
-      if (b.actie === 'verstuurd') {
-        if (definitief) return NextResponse.json({ ok: true, waarschuwingen, melding: 'Deze factuur staat al op verstuurd.' })
-        if (String(inv.status) === 'geannuleerd' || String(inv.status) === 'gecrediteerd') return NextResponse.json({ error: 'Een geannuleerde factuur zet je eerst terug naar te factureren.' }, { status: 400 })
-        const { error } = await admin.from('invoices').update({ status: 'verstuurd', sent_at: new Date().toISOString(), sent_by_email: actor.email ?? null, updated_at: new Date().toISOString() }).eq('id', inv.id)
+      if (b.actie === 'extern_nummer') {
+        const { error } = await admin.from('invoices').update({ extern_factuurnummer: externNr ?? null, updated_at: new Date().toISOString() }).eq('id', inv.id)
         if (error) throw new Error(error.message)
-        try { await admin.from('invoice_wijzigingen').insert({ invoice_id: inv.id, actie: 'verstuurd', veld: 'status', oud: String(inv.status), nieuw: 'verstuurd', reden: 'Gemarkeerd als verstuurd in de facturenlijst', actor_email: actor.email ?? null }) } catch { /* */ }
-        await audit('Factuur gemarkeerd als verstuurd')
+        try { await admin.from('invoice_wijzigingen').insert({ invoice_id: inv.id, actie: 'aangepast', veld: 'extern_factuurnummer', oud: inv.extern_factuurnummer ?? null, nieuw: externNr ?? null, actor_email: actor.email ?? null }) } catch { /* */ }
+        klaar(); return NextResponse.json({ ok: true, waarschuwingen })
+      }
+      if (b.actie === 'verstuurd') {
+        // Dubbele klik of twee mensen tegelijk: niets doen, niets dubbel loggen.
+        if (definitief) return NextResponse.json({ ok: true, waarschuwingen, melding: 'Dit item staat al op gefactureerd.' })
+        if (String(inv.status) === 'geannuleerd' || String(inv.status) === 'gecrediteerd') return NextResponse.json({ error: 'Een geannuleerd item zet je eerst terug naar te factureren.' }, { status: 400 })
+        const patch: Record<string, unknown> = { status: 'verstuurd', sent_at: new Date().toISOString(), sent_by_email: actor.email ?? null, updated_at: new Date().toISOString() }
+        if (externNr !== undefined) patch.extern_factuurnummer = externNr
+        // Voorwaardelijk: enkel als het nog niet gefactureerd is (geen dubbele statusactie).
+        const { data: gezet, error } = await admin.from('invoices').update(patch).eq('id', inv.id).not('status', 'in', '(verstuurd,gefactureerd,betaald)').select('id')
+        if (error) throw new Error(error.message)
+        if (!gezet?.length) return NextResponse.json({ ok: true, waarschuwingen, melding: 'Dit item staat al op gefactureerd.' })
+        try { await admin.from('invoice_wijzigingen').insert({ invoice_id: inv.id, actie: 'verstuurd', veld: 'status', oud: String(inv.status), nieuw: 'verstuurd', reden: `Gemarkeerd als gefactureerd${externNr ? ` (extern nr. ${externNr})` : ''}`, actor_email: actor.email ?? null }) } catch { /* */ }
+        await audit('Item gemarkeerd als gefactureerd', { extern_nummer: externNr ?? null })
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
       }
       if (b.actie === 'betaald') {
@@ -200,11 +213,17 @@ export async function POST(req: NextRequest) {
         await audit(`Maand ${sleutel.maand} teruggezet naar te factureren`)
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
       }
+      if (b.actie === 'extern_nummer') {
+        const { error } = await admin.from('recurring_invoice_months').upsert({ recurring_id: rec.id, month: sleutel.maand, status: rij?.status ?? 'te_versturen', billing_date: huidigeDatum, extern_factuurnummer: externNr ?? null }, { onConflict: 'recurring_id,month' })
+        if (error) throw new Error(error.message)
+        klaar(); return NextResponse.json({ ok: true, waarschuwingen })
+      }
       if (b.actie === 'verstuurd') {
+        if (rij && (rij.status === 'verstuurd' || rij.status === 'betaald')) return NextResponse.json({ ok: true, waarschuwingen, melding: 'Deze maand staat al op gefactureerd.' })
         const r = await zetMaandStatus(admin, rec.id, sleutel.maand, 'verstuurd', { id: actor.id, email: actor.email ?? null })
         if (r.warning) waarschuwingen.push(r.warning)
-        try { await admin.from('recurring_invoice_months').update({ sent_at: new Date().toISOString(), sent_by_email: actor.email ?? null }).eq('recurring_id', rec.id).eq('month', sleutel.maand) } catch { /* kolommen bestaan pas na migratie */ }
-        await audit(`Maand ${sleutel.maand} gemarkeerd als verstuurd`)
+        try { await admin.from('recurring_invoice_months').update({ sent_at: new Date().toISOString(), sent_by_email: actor.email ?? null, ...(externNr !== undefined ? { extern_factuurnummer: externNr } : {}) }).eq('recurring_id', rec.id).eq('month', sleutel.maand) } catch { /* kolommen bestaan pas na migratie */ }
+        await audit(`Maand ${sleutel.maand} gemarkeerd als gefactureerd`, { extern_nummer: externNr ?? null })
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
       }
       if (b.actie === 'betaald') {

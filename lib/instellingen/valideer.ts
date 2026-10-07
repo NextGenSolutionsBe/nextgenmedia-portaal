@@ -93,7 +93,11 @@ export function valideerFacturatie(ruw: unknown): Validatie<FacturatieInstelling
     clickup_lijst_id: tekst(r.clickup_lijst_id, 40), clickup_lijst_pad: tekst(r.clickup_lijst_pad, 300),
     clickup_assignee_id: tekst(r.clickup_assignee_id, 40), clickup_assignee_naam: tekst(r.clickup_assignee_naam, 120),
     verantwoordelijke_naam: tekst(r.verantwoordelijke_naam, 120) || 'Bram Reinquin',
+    km_tarief_excl: Math.round(getal(r.km_tarief_excl, 0) * 10000) / 10000,
+    km_btw_pct: getal(r.km_btw_pct, 21),
   }
+  if (w.km_tarief_excl < 0 || w.km_tarief_excl > 100) return { ok: false, fout: 'Het kilometertarief moet tussen €0 en €100 per km liggen.' }
+  if (w.km_btw_pct < 0 || w.km_btw_pct > 100) return { ok: false, fout: 'De btw op kilometers moet tussen 0 en 100 % liggen.' }
   if (w.standaard_btw_pct < 0 || w.standaard_btw_pct > 100) return { ok: false, fout: 'Het btw-percentage moet tussen 0 en 100 liggen.' }
   if (w.betalingstermijn_dagen < 0 || w.betalingstermijn_dagen > 365) return { ok: false, fout: 'De betalingstermijn moet tussen 0 en 365 dagen liggen.' }
   if (w.factuurnummer_volgend < 1 || w.creditnota_volgend < 1) return { ok: false, fout: 'Het volgende nummer moet minstens 1 zijn.' }

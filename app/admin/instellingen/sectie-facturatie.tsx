@@ -38,6 +38,13 @@ export function SectieFacturatie({ ctx }: { ctx: Ctx }) {
             <Veld label="Betaalgegevens op documenten"><textarea className={INP} rows={2} value={v.betaalgegevens} onChange={(e) => zet('betaalgegevens', e.target.value)} placeholder="IBAN, mededeling, …" /></Veld>
           </div>
         </Groep>
+        <Groep titel="Kilometervergoeding">
+          <div className="grid sm:grid-cols-3 gap-3">
+            <Getal label="Afgesproken tarief per km (excl. btw)" value={v.km_tarief_excl} onChange={(w) => zet('km_tarief_excl', w)} min={0} max={100} stap={0.01} eenheid="€/km" />
+            <Getal label="Btw op kilometers" value={v.km_btw_pct} onChange={(w) => zet('km_btw_pct', w)} min={0} max={100} stap={0.5} eenheid="%" />
+          </div>
+          <p className="text-[11px] text-gray-500 mt-1">Voorgesteld bij “Kilometers toevoegen” in Facturen; per item aanpasbaar. Dit is jullie commerciële tarief, geen wettelijk vergoedingstarief. 0 = elke keer zelf invullen.</p>
+        </Groep>
         <Groep titel="Nummering">
           <div className="grid sm:grid-cols-4 gap-3">
             <Tekst label="Factuurnummer — voorvoegsel" value={v.factuurnummer_prefix} onChange={(w) => zet('factuurnummer_prefix', w)} />

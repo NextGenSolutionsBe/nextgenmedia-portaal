@@ -8,19 +8,20 @@ import { lastDayOfMonth, shiftYM } from '@/lib/invoices'
 export type PlannerStatus = 'gepland' | 'te_versturen' | 'controle_vereist' | 'verstuurd' | 'betaald' | 'achterstallig' | 'geannuleerd' | 'gecrediteerd'
 
 export const PLANNER_STATUSSEN: { key: PlannerStatus; label: string; cls: string; stip: string }[] = [
-  // Drie kleuren, zoals afgesproken: grijs = te factureren, groen = verstuurd,
-  // rood = geannuleerd. De fijnere sleutels (vandaag, datum voorbij, gegevens
-  // ontbreken, betaald bij WAM) blijven bestaan voor filters en volgorde, maar
-  // vallen visueel binnen die drie kleuren.
-  { key: 'gepland', label: 'Te factureren', cls: 'bg-gray-50 text-gray-700 border-gray-200', stip: 'bg-gray-400' },
-  { key: 'te_versturen', label: 'Te factureren · vandaag', cls: 'bg-gray-100 text-gray-900 border-gray-300', stip: 'bg-gray-600' },
-  { key: 'controle_vereist', label: 'Te factureren · gegevens ontbreken', cls: 'bg-gray-100 text-amber-800 border-amber-200', stip: 'bg-amber-500' },
-  { key: 'verstuurd', label: 'Verstuurd', cls: 'bg-green-100 text-green-800 border-green-200', stip: 'bg-green-500' },
-  // Betaald = verstuurd én betaald: donkergroen, zodat het nooit als "enkel verstuurd" oogt.
-  { key: 'betaald', label: 'Verstuurd & betaald', cls: 'bg-emerald-700 text-white border-emerald-800', stip: 'bg-emerald-700' },
-  { key: 'achterstallig', label: 'Te factureren · datum voorbij', cls: 'bg-gray-100 text-gray-900 border-orange-300', stip: 'bg-orange-500' },
-  { key: 'geannuleerd', label: 'Geannuleerd', cls: 'bg-red-50 text-red-700 border-red-200', stip: 'bg-red-500' },
-  { key: 'gecrediteerd', label: 'Geannuleerd (gecrediteerd)', cls: 'bg-red-50 text-red-700 border-red-200', stip: 'bg-red-600' },
+  // Sterk verschillende kleuren, altijd samen met tekst (en een icoon in de badge):
+  //  · te factureren  = wit met donkere tekst
+  //  · achterstallig  = opvallend oranje badge
+  //  · gegevens ontbreken = amber rand
+  //  · gefactureerd   = donkergroen (#166534) met witte tekst — betaald blijft een apart gegeven
+  //  · geannuleerd    = neutraal grijs, telt nergens mee
+  { key: 'gepland', label: 'Te factureren', cls: 'bg-white text-gray-900 border-gray-300', stip: 'bg-gray-400' },
+  { key: 'te_versturen', label: 'Te factureren · vandaag', cls: 'bg-white text-gray-900 border-gray-900', stip: 'bg-gray-900' },
+  { key: 'controle_vereist', label: 'Gegevens ontbreken', cls: 'bg-white text-amber-800 border-amber-500', stip: 'bg-amber-500' },
+  { key: 'verstuurd', label: 'Gefactureerd', cls: 'bg-[#166534] text-white border-[#166534]', stip: 'bg-[#166534]' },
+  { key: 'betaald', label: 'Gefactureerd · betaald', cls: 'bg-[#166534] text-white border-[#166534]', stip: 'bg-[#166534]' },
+  { key: 'achterstallig', label: 'Achterstallig', cls: 'bg-orange-500 text-white border-orange-600', stip: 'bg-orange-500' },
+  { key: 'geannuleerd', label: 'Geannuleerd', cls: 'bg-gray-100 text-gray-500 border-gray-200', stip: 'bg-gray-300' },
+  { key: 'gecrediteerd', label: 'Geannuleerd (gecrediteerd)', cls: 'bg-gray-100 text-gray-500 border-gray-200', stip: 'bg-gray-300' },
 ]
 export const STATUS_INFO = Object.fromEntries(PLANNER_STATUSSEN.map((s) => [s.key, s])) as Record<PlannerStatus, (typeof PLANNER_STATUSSEN)[number]>
 
@@ -93,6 +94,12 @@ export type Moment = {
   kostenOnbekend?: number
   /** Verwachte ontvangstdatum = (verzenddatum of geplande datum) + betaaltermijn. */
   verwacht_op: string
+  /** Factuurnummer in het externe facturatiesysteem (Bram, optioneel, achteraf). */
+  extern_nr?: string | null
+  /** Klantreferentie of bestelbonnummer. */
+  klant_referentie?: string | null
+  /** Er staat een mededeling voor op de factuur. */
+  heeft_mededeling?: boolean
   acties: {
     bekijkenUrl: string | null
     aanpassenUrl: string | null
@@ -234,9 +241,9 @@ export function maandKpi(momenten: Moment[], ym: string): MaandKpi {
 export type Fase = 'te_factureren' | 'open' | 'betaald'
 export const FASEN: Fase[] = ['te_factureren', 'open', 'betaald']
 export const FASE_INFO: Record<Fase, { label: string; kort: string; rij: string; rand: string; tekst: string; kaart: string; stip: string }> = {
-  te_factureren: { label: 'Te factureren', kort: 'Te factureren', rij: 'bg-gray-50', rand: 'border-l-gray-300', tekst: 'text-gray-900', kaart: 'border-gray-300 bg-gray-50', stip: 'bg-gray-400' },
-  open: { label: 'Verstuurd – openstaand', kort: 'Verstuurd', rij: 'bg-green-50', rand: 'border-l-green-400', tekst: 'text-green-700', kaart: 'border-green-300 bg-green-50', stip: 'bg-green-400' },
-  betaald: { label: 'Betaald', kort: 'Verstuurd & betaald', rij: 'bg-emerald-100', rand: 'border-l-emerald-700', tekst: 'text-emerald-800', kaart: 'border-emerald-400 bg-emerald-100', stip: 'bg-emerald-700' },
+  te_factureren: { label: 'Te factureren', kort: 'Te factureren', rij: 'bg-white', rand: 'border-l-gray-300', tekst: 'text-gray-900', kaart: 'border-gray-300 bg-white', stip: 'bg-gray-400' },
+  open: { label: 'Gefactureerd – nog niet betaald', kort: 'Gefactureerd', rij: 'bg-[#166534] text-white', rand: 'border-l-[#14532d]', tekst: 'text-[#166534]', kaart: 'border-green-700 bg-green-50', stip: 'bg-[#166534]' },
+  betaald: { label: 'Gefactureerd & betaald', kort: 'Gefactureerd · betaald', rij: 'bg-[#166534] text-white', rand: 'border-l-[#14532d]', tekst: 'text-[#166534]', kaart: 'border-green-800 bg-green-100', stip: 'bg-[#14532d]' },
 }
 
 export function faseVan(m: Pick<Moment, 'status'>): Fase | null {
@@ -268,7 +275,7 @@ const LIJST_BRONNEN: Bron[] = ['invoice', 'recurring']
 export function volgendeStap(m: Pick<Moment, 'status' | 'bron'>): { actie: StapActie; label: string } | null {
   if (!LIJST_BRONNEN.includes(m.bron)) return null
   const f = faseVan(m)
-  if (f === 'te_factureren') return { actie: 'verstuurd', label: 'Markeren als verstuurd' }
+  if (f === 'te_factureren') return { actie: 'verstuurd', label: 'Markeren als gefactureerd' }
   if (f === 'open') return { actie: 'betaald', label: 'Markeren als betaald' }
   return null
 }
@@ -277,8 +284,8 @@ export function volgendeStap(m: Pick<Moment, 'status' | 'bron'>): { actie: StapA
 export function vorigeStap(m: Pick<Moment, 'status' | 'bron'>): { actie: StapActie; label: string; naar: string } | null {
   if (!LIJST_BRONNEN.includes(m.bron)) return null
   const f = faseVan(m)
-  if (f === 'betaald') return { actie: 'onbetaald', label: 'Betaling terugdraaien', naar: 'Verstuurd – openstaand' }
-  if (f === 'open') return { actie: 'heropen', label: 'Verzending terugdraaien', naar: 'Te factureren' }
+  if (f === 'betaald') return { actie: 'onbetaald', label: 'Betaling terugdraaien', naar: 'Gefactureerd – nog niet betaald' }
+  if (f === 'open') return { actie: 'heropen', label: 'Terugzetten naar te factureren', naar: 'Te factureren' }
   return null
 }
 
@@ -380,4 +387,51 @@ export function ontleedSleutel(id: string): { bron: Bron; bronId: string; maand:
   if (p === 'opd' && a) return { bron: 'opdracht', bronId: a, maand: null }
   if (p === 'wam' && a) return { bron: 'wam', bronId: a, maand: null }
   return null
+}
+
+// ── Tabbladen van de facturenlijst (dagelijks gebruik) ──────────────────────
+//
+// Te factureren → Bram werkt af → Gefactureerd. "Gefactureerd" = de factuur is
+// extern aangemaakt en verstuurd (status 'verstuurd'). Betaald is een APART
+// gegeven en valt ook onder Gefactureerd. Geannuleerd hoort in geen van beide
+// actieve tabs (enkel in Alles, grijs).
+export type Tab = 'te_factureren' | 'gefactureerd' | 'alles'
+export const TABS: { key: Tab; label: string }[] = [
+  { key: 'te_factureren', label: 'Te factureren' }, { key: 'gefactureerd', label: 'Gefactureerd' }, { key: 'alles', label: 'Alles' },
+]
+export function tabVan(m: Pick<Moment, 'status'>): 'te_factureren' | 'gefactureerd' | null {
+  if (OPEN_STATUSSEN.includes(m.status)) return 'te_factureren'
+  if (m.status === 'verstuurd' || m.status === 'betaald') return 'gefactureerd'
+  return null
+}
+export const inTab = (m: Pick<Moment, 'status'>, t: Tab): boolean => t === 'alles' || tabVan(m) === t
+
+/** Snelfilter binnen Te factureren. Achterstallig blijft altijd zichtbaar (ook uit een vorige maand). */
+export type Termijn = 'alles' | 'tot_vandaag' | 'week' | 'later'
+export const TERMIJNEN: { key: Termijn; label: string }[] = [
+  { key: 'alles', label: 'Alles' }, { key: 'tot_vandaag', label: 'Tot en met vandaag' }, { key: 'week', label: 'Deze week' }, { key: 'later', label: 'Later gepland' },
+]
+export function inTermijn(m: Pick<Moment, 'datum' | 'status'>, t: Termijn, vandaag: string): boolean {
+  if (t === 'alles') return true
+  if (t === 'tot_vandaag') return m.datum <= vandaag
+  if (t === 'week') return m.status === 'achterstallig' || (m.datum >= weekStart(vandaag) && m.datum <= weekEind(vandaag))
+  return m.datum > weekEind(vandaag)
+}
+
+/** Volgorde in Te factureren: achterstallig bovenaan (oudste eerst), dan op geplande datum. */
+export function sorteerWerklijst(momenten: Moment[]): Moment[] {
+  const rang = (m: Moment) => (m.status === 'achterstallig' ? 0 : 1)
+  return [...momenten].sort((a, b) => rang(a) - rang(b) || a.datum.localeCompare(b.datum) || a.klant.localeCompare(b.klant, 'nl'))
+}
+
+/** Aantal per tab (geannuleerd telt niet mee in de actieve tabs). */
+export function tabTellingen(momenten: Moment[]): Record<Tab, number> {
+  let te = 0, gef = 0
+  for (const m of momenten) { const t = tabVan(m); if (t === 'te_factureren') te++; else if (t === 'gefactureerd') gef++ }
+  return { te_factureren: te, gefactureerd: gef, alles: momenten.length }
+}
+
+/** Wat Bram vandaag afwerkt: alles te factureren t.e.m. vandaag, achterstallig inbegrepen. */
+export function rondeItems(momenten: Moment[], vandaag: string): Moment[] {
+  return sorteerWerklijst(momenten.filter((m) => tabVan(m) === 'te_factureren' && m.datum <= vandaag && (m.bron === 'invoice' || m.bron === 'recurring')))
 }

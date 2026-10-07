@@ -1,4 +1,5 @@
 import { leesGetal } from '@/lib/getal'
+import { isFactuurType } from '@/lib/facturatie/item-model'
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
@@ -71,7 +72,7 @@ async function linkOrCreateForecast(admin: Admin, p: {
  * kostprijs, leverancier). Raakt het factuurbedrag niet — dat staat al vast.
  * Best-effort: een fout hier laat de factuur zelf staan.
  */
-type LijnInvoer = { omschrijving?: unknown; aantal?: unknown; prijs_excl?: unknown; btw_pct?: unknown; classificatie?: unknown; opmerking?: unknown; kostprijs_excl?: unknown; leverancier?: unknown; categorie?: unknown }
+type LijnInvoer = { omschrijving?: unknown; aantal?: unknown; prijs_excl?: unknown; btw_pct?: unknown; classificatie?: unknown; opmerking?: unknown; kostprijs_excl?: unknown; leverancier?: unknown; categorie?: unknown; artikel?: unknown; eenheid?: unknown; korting_pct?: unknown; korting_eur?: unknown; is_extra?: unknown }
 async function slaLijnenOp(admin: Admin, ref: FactuurRef, lijnen: unknown, actor: { id: string; email?: string | null }): Promise<void> {
   if (!Array.isArray(lijnen) || lijnen.length === 0) return
   const num = (v: unknown): number | null => leesGetal(v)
@@ -85,6 +86,8 @@ async function slaLijnenOp(admin: Admin, ref: FactuurRef, lijnen: unknown, actor
       const { data: l, error } = await admin.from('invoice_lines').insert({
         invoice_id: ref.invoice_id ?? null, recurring_id: ref.recurring_id ?? null, volgnr, omschrijving,
         aantal: num(raw.aantal) ?? 1, prijs_excl: num(raw.prijs_excl) ?? 0, btw_pct: num(raw.btw_pct) ?? DEFAULT_VAT, classificatie, opmerking: txt(raw.opmerking),
+        artikel: txt(raw.artikel) ?? omschrijving.slice(0, 120), eenheid: txt(raw.eenheid) ?? 'stuk',
+        korting_pct: Math.min(100, Math.max(0, num(raw.korting_pct) ?? 0)), korting_eur: Math.max(0, num(raw.korting_eur) ?? 0), is_extra: raw.is_extra === true,
       }).select('id').single()
       if (error || !l) continue
       const kostprijs = num(raw.kostprijs_excl)
@@ -305,9 +308,20 @@ export async function POST(req: NextRequest) {
       const btw = b.vat_pct != null ? Number(b.vat_pct) : DEFAULT_VAT
       let regels = normaliseerRegels(b.regels, btw)
       if (regels.length === 0 && excl > 0) regels = [regelUitBedrag(String(b.description || 'Factuur'), excl, btw)]
-      if (regels.length === 0) return NextResponse.json({ error: 'Voeg minstens één factuurregel toe.' }, { status: 400 })
+      if (regels.length === 0) return NextResponse.json({ error: 'Voeg minstens één artikel toe.' }, { status: 400 })
       const t = berekenTotalen(regels)
-      if (t.excl <= 0) return NextResponse.json({ error: 'Het factuurbedrag moet groter zijn dan nul.' }, { status: 400 })
+      // Een item met ontbrekende prijs mag bewaard worden (het staat dan op
+      // "gegevens ontbreken" en wordt niet ongemerkt afgewerkt); negatief niet.
+      if (t.excl < 0) return NextResponse.json({ error: 'Het totaal kan niet negatief zijn.' }, { status: 400 })
+      // Eén moment van een terugkerende facturatie met eigen artikelen: wordt
+      // een eigen item, gekoppeld aan die maand. Nooit twee keer.
+      const recMaand = b.recurring_maand && typeof b.recurring_maand === 'object' ? b.recurring_maand as { recurring_id?: string; maand?: string } : null
+      if (recMaand) {
+        if (!recMaand.recurring_id || !/^\d{4}-\d{2}$/.test(String(recMaand.maand ?? ''))) return NextResponse.json({ error: 'Onbekende maand van de terugkerende facturatie.' }, { status: 400 })
+        const { data: bestaand } = await admin.from('recurring_invoice_months').select('invoice_id, status').eq('recurring_id', recMaand.recurring_id).eq('month', recMaand.maand).maybeSingle()
+        if (bestaand?.invoice_id) return NextResponse.json({ error: 'Voor deze maand bestaat al een eigen item. Open dat item om het aan te passen.' }, { status: 409 })
+        if (bestaand && ['verstuurd', 'betaald'].includes(String(bestaand.status))) return NextResponse.json({ error: 'Deze maand is al gefactureerd.' }, { status: 409 })
+      }
       if (b.contract_id) { const { data: c } = await admin.from('contracts').select('id').eq('id', String(b.contract_id)).maybeSingle(); if (!c) return NextResponse.json({ error: 'Contract niet gevonden.' }, { status: 400 }) }
       const month = invoiceDate.slice(0, 7)
       const termijn = b.payment_term_days != null && Number.isFinite(Number(b.payment_term_days)) ? Math.max(0, Math.round(Number(b.payment_term_days))) : 30
@@ -318,13 +332,25 @@ export async function POST(req: NextRequest) {
         description: b.description || regels[0].omschrijving, amount_excl: t.excl, vat_pct: t.perBtw.length === 1 ? t.perBtw[0].pct : btw, amount_incl: t.incl,
         status: 'te_versturen', revenue_id: revenueId, created_by: actor.id, contract_id: b.contract_id || null,
         contract_bedrag_excl: t.contractueel.excl, currency: 'EUR', due_date: vervaldatum, payment_term_days: termijn, reference: b.reference || null, note: b.note || null,
-        kind: 'client', source: b.contract_id ? 'contract' : 'handmatig', betaalstatus: 'niet_betaald', betaald_bedrag: 0,
+        kind: 'client', source: recMaand ? 'recurring' : b.contract_id ? 'contract' : 'handmatig', betaalstatus: 'niet_betaald', betaald_bedrag: 0,
+        factuur_type: isFactuurType(b.factuur_type) ? b.factuur_type : (recMaand ? 'terugkerend' : 'eenmalig'),
+        mededeling: b.mededeling ? String(b.mededeling).slice(0, 4000) : null,
+        klant_referentie: b.klant_referentie ? String(b.klant_referentie).slice(0, 200) : null,
+        prestatie_van: /^\d{4}-\d{2}-\d{2}$/.test(String(b.prestatie_van ?? '')) ? b.prestatie_van : null,
+        prestatie_tot: /^\d{4}-\d{2}-\d{2}$/.test(String(b.prestatie_tot ?? '')) ? b.prestatie_tot : null,
       })
       const { error: le } = await admin.from('invoice_lines').insert(regels.map((r) => ({
         invoice_id: id, volgnr: r.volgnr, omschrijving: r.omschrijving, artikel: r.artikel, aantal: r.aantal, eenheid: r.eenheid,
-        prijs_excl: r.prijs_excl, btw_pct: r.btw_pct, korting_pct: r.korting_pct, is_extra: r.is_extra, classificatie: r.classificatie, opmerking: r.opmerking ?? null,
+        prijs_excl: r.prijs_excl, btw_pct: r.btw_pct, korting_pct: r.korting_pct, korting_eur: r.korting_eur ?? 0, is_extra: r.is_extra, classificatie: r.classificatie, opmerking: r.opmerking ?? null,
       })))
       if (le) throw new Error(le.message)
+      if (recMaand) {
+        // De maand wijst voortaan naar dit item (de planner toont dan enkel het item);
+        // kosten die al op die maand gelogd waren, verhuizen mee.
+        const { error: me } = await admin.from('recurring_invoice_months').upsert({ recurring_id: recMaand.recurring_id, month: recMaand.maand, status: 'te_versturen', invoice_id: id, billing_date: invoiceDate }, { onConflict: 'recurring_id,month' })
+        if (me) { await admin.from('invoices').delete().eq('id', id); throw new Error(me.message) }
+        try { await admin.from('invoice_costs').update({ invoice_id: id }).eq('recurring_id', recMaand.recurring_id).eq('maand', recMaand.maand).is('invoice_id', null) } catch { /* kostenlaag optioneel */ }
+      }
       try { await admin.from('invoice_wijzigingen').insert({ invoice_id: id, actie: 'aangemaakt', veld: null, oud: null, nieuw: `${regels.length} regel(s), € ${t.excl.toFixed(2)} excl. btw`, actor_email: actor.email ?? null }) } catch { /* */ }
       try {
         revalidatePath('/admin/invoices'); revalidatePath('/admin/invoices/planner'); revalidatePath('/admin/revenue/omzet')
@@ -348,6 +374,7 @@ export async function POST(req: NextRequest) {
         active: b.active !== false, revenue_id: revenueId, invoice_day: invoiceDay, created_by: actor.id,
         contract_id: b.contract_id || null, verantwoordelijke: b.verantwoordelijke ? String(b.verantwoordelijke).slice(0, 120) : null,
         payment_term_days: b.payment_term_days === undefined || b.payment_term_days === null || b.payment_term_days === '' ? null : Math.max(0, Math.round(Number(b.payment_term_days) || 30)),
+        mededeling: b.mededeling ? String(b.mededeling).slice(0, 4000) : null,
       })
       await slaLijnenOp(admin, { recurring_id: id, maand: start }, b.lines, actor)
       try {

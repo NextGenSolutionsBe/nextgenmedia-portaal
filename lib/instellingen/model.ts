@@ -121,6 +121,10 @@ export type FacturatieInstellingen = {
   clickup_lijst_id: string; clickup_lijst_pad: string; clickup_assignee_id: string; clickup_assignee_naam: string
   /** Wie de facturen opmaakt en verstuurt (planner, voorstellen). */
   verantwoordelijke_naam: string
+  /** Afgesproken commercieel kilometertarief (€ excl. btw per km); 0 = niet ingesteld. Geen wettelijk tarief. */
+  km_tarief_excl: number
+  /** Btw op de kilometervergoeding (afzonderlijk instelbaar). */
+  km_btw_pct: number
 }
 export type DocumentenInstellingen = {
   logo_path: string; primaire_kleur: string; secundaire_kleur: string; voettekst: string; contactregel: string; bestandsnaam_patroon: string
@@ -140,6 +144,7 @@ export const STANDAARD_FACTURATIE: FacturatieInstellingen = {
   betaalgegevens: '', standaard_status: 'te_versturen',
   clickup_sync_aan: false, clickup_lijst_id: '', clickup_lijst_pad: '', clickup_assignee_id: '', clickup_assignee_naam: '',
   verantwoordelijke_naam: 'Bram Reinquin',
+  km_tarief_excl: 0, km_btw_pct: 21,
 }
 export const STANDAARD_DOCUMENTEN: DocumentenInstellingen = {
   logo_path: '', primaire_kleur: '#fff848', secundaire_kleur: '#111111',

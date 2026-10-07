@@ -9,6 +9,7 @@ import { DEFAULT_VAT } from '@/lib/invoices'
 import { normaliseerRegels, berekenTotalen, regelUitBedrag, verschillen, type FactuurRegel } from '@/lib/facturen/regels'
 import { normaliseerVerzendstatus, afgeleideBetaalstatus, magInhoudBewerken, magNaar, redenVerplicht, type Verzendstatus, type Betaalstatus } from '@/lib/facturen/status'
 import { vandaagBrussel } from '@/lib/facturatie/planner-model'
+import { isFactuurType } from '@/lib/facturatie/item-model'
 
 export const dynamic = 'force-dynamic'
 
@@ -116,6 +117,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if ('reference' in b) patch.reference = tekst(b.reference, 120)
     if ('note' in b) patch.note = tekst(b.note, 4000)
     if ('verantwoordelijke' in b) patch.verantwoordelijke = tekst(b.verantwoordelijke, 120)
+    // Facturatieplanner: type, mededeling voor op de factuur, klantreferentie,
+    // prestatieperiode en het externe factuurnummer (Bram, achteraf) — altijd aanpasbaar.
+    if ('factuur_type' in b) patch.factuur_type = isFactuurType(b.factuur_type) ? b.factuur_type : null
+    if ('mededeling' in b) patch.mededeling = tekst(b.mededeling, 4000)
+    if ('klant_referentie' in b) patch.klant_referentie = tekst(b.klant_referentie, 200)
+    if ('extern_factuurnummer' in b) patch.extern_factuurnummer = tekst(b.extern_factuurnummer, 60)
+    if ('prestatie_van' in b) { const d = datum(b.prestatie_van); if (d === undefined) return NextResponse.json({ error: 'Ongeldige startdatum van de prestatieperiode.' }, { status: 400 }); patch.prestatie_van = d }
+    if ('prestatie_tot' in b) { const d = datum(b.prestatie_tot); if (d === undefined) return NextResponse.json({ error: 'Ongeldige einddatum van de prestatieperiode.' }, { status: 400 }); patch.prestatie_tot = d }
     // Werkelijke verzenddatum: bij een verstuurde factuur aanpasbaar (verwacht binnen rekent daarmee).
     if ('sent_at' in b && status === 'verstuurd') { const d = datum(b.sent_at); if (d === undefined || d === null) return NextResponse.json({ error: 'Ongeldige verzenddatum.' }, { status: 400 }); patch.sent_at = `${d}T12:00:00Z` }
     // Koppeling aan een contract mag altijd (ook achteraf, ook na versturen): het verandert de factuur zelf niet.
@@ -165,7 +174,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const behouden = new Set<string>()
       const lijnVelden = (r: FactuurRegel) => ({
         volgnr: r.volgnr, omschrijving: r.omschrijving, artikel: r.artikel, aantal: r.aantal, eenheid: r.eenheid,
-        prijs_excl: r.prijs_excl, btw_pct: r.btw_pct, korting_pct: r.korting_pct, is_extra: r.is_extra, classificatie: r.classificatie, opmerking: r.opmerking ?? null,
+        prijs_excl: r.prijs_excl, btw_pct: r.btw_pct, korting_pct: r.korting_pct, korting_eur: r.korting_eur ?? 0, is_extra: r.is_extra, classificatie: r.classificatie, opmerking: r.opmerking ?? null,
       })
       const nieuw: ReturnType<typeof lijnVelden>[] = []
       const nu = new Date().toISOString()
@@ -206,7 +215,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (patch.payment_term_days === undefined && (inv.payment_term_days === null || inv.payment_term_days === undefined)) patch.payment_term_days = dagen
     }
 
-    const velden = ['invoice_date', 'due_date', 'periode', 'reference', 'note', 'payment_term_days', 'client_id', 'contract_id', 'description', 'currency', 'vat_pct', 'amount_excl', 'amount_incl', 'contract_bedrag_excl', 'verantwoordelijke', 'sent_at']
+    const velden = ['invoice_date', 'due_date', 'periode', 'reference', 'note', 'payment_term_days', 'client_id', 'contract_id', 'description', 'currency', 'vat_pct', 'amount_excl', 'amount_incl', 'contract_bedrag_excl', 'verantwoordelijke', 'sent_at', 'factuur_type', 'mededeling', 'klant_referentie', 'extern_factuurnummer', 'prestatie_van', 'prestatie_tot']
     const diff = verschillen(inv as Record<string, unknown>, { ...inv, ...patch } as Record<string, unknown>, velden)
     const rijen: { actie: string; veld: string; oud: string | null; nieuw: string | null }[] = diff.map((d) => ({ actie: d.veld === 'invoice_date' ? 'verplaatst' : 'aangepast', veld: d.veld, oud: d.oud, nieuw: d.nieuw }))
     if (regels) rijen.push({ actie: 'aangepast', veld: 'regels', oud: null, nieuw: `${regels.length} regel(s), ${berekenTotalen(regels).excl.toFixed(2)} excl. btw${kostenLosgekoppeld ? ` · ${kostenLosgekoppeld} kost(en) van verwijderde regels hangen nu aan de hele factuur` : ''}` })

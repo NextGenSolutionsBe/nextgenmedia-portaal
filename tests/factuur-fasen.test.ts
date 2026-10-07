@@ -33,7 +33,7 @@ test('1. Elke status valt in precies één fase; geannuleerd in geen', () => {
 })
 
 test('2. Knoppen volgen de volgorde: verstuurd → betaald → niets', () => {
-  assert.equal(volgendeStap(m('a', 'gepland', 1))?.label, 'Markeren als verstuurd')
+  assert.equal(volgendeStap(m('a', 'gepland', 1))?.label, 'Markeren als gefactureerd')
   assert.equal(volgendeStap(m('a', 'verstuurd', 1))?.label, 'Markeren als betaald')
   assert.equal(volgendeStap(m('a', 'betaald', 1)), null)
   assert.equal(volgendeStap(m('a', 'geannuleerd', 1)), null)
@@ -78,8 +78,8 @@ test('7. Filter per fase ("klik op de kaart")', () => {
   assert.equal(pasFiltersToe(set, LEEG_FILTERS, VANDAAG).length, 3)
 })
 
-test('8. Betaald toont uitdrukkelijk "Verstuurd & betaald"', () => {
-  assert.equal(STATUS_INFO.betaald.label, 'Verstuurd & betaald')
+test('8. Betaald valt onder gefactureerd, maar blijft een apart gegeven', () => {
+  assert.equal(STATUS_INFO.betaald.label, 'Gefactureerd · betaald')
 })
 
 test('9. Omzet, kosten en winst per factuur; geannuleerd telt niet mee', () => {

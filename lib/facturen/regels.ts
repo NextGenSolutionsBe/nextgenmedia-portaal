@@ -21,6 +21,8 @@ export type FactuurRegel = {
   btw_pct: number
   /** Regelkorting in procent (0–100). */
   korting_pct: number
+  /** Regelkorting in euro (excl. btw), na de procentkorting. */
+  korting_eur?: number
   /** Extra kost bovenop het contractuele bedrag (kilometers, huur, freelancers, …). */
   is_extra: boolean
   classificatie: Classificatie
@@ -37,6 +39,15 @@ export type Totalen = Bedragen & {
 }
 
 export const EENHEDEN = ['stuk', 'uur', 'dag', 'maand', 'km', 'forfait'] as const
+/** Leesbare namen van de eenheden; een vrije eenheid toont zichzelf. */
+export const EENHEID_LABEL: Record<string, { een: string; meer: string }> = {
+  stuk: { een: 'stuk', meer: 'stuks' }, uur: { een: 'uur', meer: 'uren' }, dag: { een: 'dag', meer: 'dagen' },
+  maand: { een: 'maand', meer: 'maanden' }, km: { een: 'km', meer: 'km' }, forfait: { een: 'forfait', meer: 'forfait' },
+}
+export const eenheidTekst = (eenheid: string, aantal: number): string => {
+  const l = EENHEID_LABEL[eenheid]
+  return l ? (aantal === 1 ? l.een : l.meer) : eenheid
+}
 
 const NUL: Bedragen = { excl: 0, btw: 0, incl: 0 }
 const centen = (euro: number): number => Math.round(euro * 100)
@@ -48,15 +59,16 @@ export function getal(v: unknown, standaard = 0): number {
 }
 
 /** De centen van één regel: aantal × prijs, min korting, dan btw op het afgeronde exclusieve bedrag. */
-function regelCenten(r: Pick<FactuurRegel, 'aantal' | 'prijs_excl' | 'btw_pct' | 'korting_pct'>): { excl: number; btw: number } {
+function regelCenten(r: Pick<FactuurRegel, 'aantal' | 'prijs_excl' | 'btw_pct' | 'korting_pct' | 'korting_eur'>): { excl: number; btw: number } {
   const bruto = r.aantal * r.prijs_excl
-  const netto = bruto * (1 - Math.min(100, Math.max(0, r.korting_pct || 0)) / 100)
-  const excl = centen(netto)
+  const netto = bruto * (1 - Math.min(100, Math.max(0, r.korting_pct || 0)) / 100) - Math.max(0, r.korting_eur || 0)
+  // Een korting maakt een regel nooit negatief.
+  const excl = Math.max(0, centen(netto))
   const btw = Math.round(excl * (r.btw_pct || 0) / 100)
   return { excl, btw }
 }
 
-export function berekenRegel(r: Pick<FactuurRegel, 'aantal' | 'prijs_excl' | 'btw_pct' | 'korting_pct'>): Bedragen {
+export function berekenRegel(r: Pick<FactuurRegel, 'aantal' | 'prijs_excl' | 'btw_pct' | 'korting_pct' | 'korting_eur'>): Bedragen {
   const c = regelCenten(r)
   return { excl: euro(c.excl), btw: euro(c.btw), incl: euro(c.excl + c.btw) }
 }
@@ -86,7 +98,7 @@ export function berekenTotalen(regels: FactuurRegel[]): Totalen {
 export function nieuweRegel(deel: Partial<FactuurRegel> = {}, btw = 21): FactuurRegel {
   return {
     id: null, volgnr: deel.volgnr ?? 1, artikel: '', omschrijving: '', aantal: 1, eenheid: 'stuk', prijs_excl: 0, btw_pct: btw,
-    korting_pct: 0, is_extra: false, classificatie: 'dienst', opmerking: null, ...deel,
+    korting_pct: 0, korting_eur: 0, is_extra: false, classificatie: 'dienst', opmerking: null, ...deel,
   }
 }
 
@@ -142,12 +154,31 @@ export function normaliseerRegels(input: unknown, btwStandaard = 21): FactuurReg
       prijs_excl: Math.round(getal(raw.prijs_excl, 0) * 100) / 100,
       btw_pct: Math.min(100, Math.max(0, getal(raw.btw_pct, btwStandaard))),
       korting_pct: Math.min(100, Math.max(0, getal(raw.korting_pct, 0))),
+      korting_eur: Math.max(0, Math.round(getal(raw.korting_eur, 0) * 100) / 100),
       is_extra: raw.is_extra === true || raw.is_extra === 'true',
       classificatie: klass,
       opmerking: raw.opmerking ? String(raw.opmerking).slice(0, 500) : null,
     })
   }
   return uit
+}
+
+/**
+ * Kilometervergoeding als gewone factuurregel: kilometers × afgesproken tarief.
+ * `km` is het TOTAAL aantal gereden kilometers — een retourrit wordt nooit
+ * automatisch verdubbeld. De omschrijving is meteen kopieerbaar voor de factuur.
+ */
+export function kmRegel(p: { datum?: string | null; traject: string; km: number; tarief: number; btw: number }): FactuurRegel {
+  const km = Math.max(0, Math.round(p.km * 100) / 100)
+  const tarief = Math.max(0, Math.round(p.tarief * 10000) / 10000)
+  const datum = p.datum && /^\d{4}-\d{2}-\d{2}$/.test(p.datum) ? ` — ${p.datum.slice(8, 10)}/${p.datum.slice(5, 7)}/${p.datum.slice(0, 4)}` : ''
+  const traject = p.traject.trim()
+  const tariefTekst = `€${tarief.toLocaleString('nl-BE', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}/km`
+  return nieuweRegel({
+    artikel: 'Kilometervergoeding',
+    omschrijving: `Kilometervergoeding${traject ? ` — ${traject}` : ''}${datum} — ${km.toLocaleString('nl-BE')} km × ${tariefTekst}`,
+    aantal: km, eenheid: 'km', prijs_excl: tarief, is_extra: true, classificatie: 'doorgerekende_kost',
+  }, p.btw)
 }
 
 /** Een leesbaar verschil tussen twee waarden voor de wijzigingshistoriek. */
