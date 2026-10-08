@@ -37,7 +37,7 @@ export const ADMIN_MODULES: AdminModule[] = [
   { key: 'personeel',   label: 'Personeel',            prefixes: ['/admin/personeel', '/api/admin/personeel'] },
   { key: 'kantoor',     label: 'Kantoor',              prefixes: ['/admin/kantoor', '/api/kantoor'] },
   { key: 'email',       label: 'E-mailcenter',         prefixes: ['/admin/email', '/api/admin/email'] },
-  { key: 'info',        label: 'Informatief',          prefixes: ['/admin/informatief', '/admin/onboarding', '/admin/maandplanning', '/api/admin/month-planning', '/api/admin/month-planning-clients'] },
+  { key: 'info',        label: 'Informatief',          prefixes: ['/admin/informatief', '/admin/onboarding', '/admin/maandplanning', '/admin/contentplanning', '/api/admin/month-planning', '/api/admin/month-planning-clients', '/api/admin/contentplanning'] },
 ]
 
 /** Modules die ZICHTBAAR/toewijsbaar zijn in de UI. ADMIN_MODULES blijft bewust

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, CalendarDays, RotateCcw, X, Check, Pencil, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Bevestig } from '@/app/admin/instellingen/ui'
+import { standaardFases } from '@/lib/contentplanning/model'
 
 async function fout(res: Response, standaard: string): Promise<never> {
   const j = await res.json().catch(() => ({}))
@@ -56,19 +57,8 @@ const CATS: Record<CatKey, { label: string; short: string; desc: string; dot: st
 const ORDER: CatKey[] = ['ideeen', 'intakes', 'scripts', 'shoots', 'edit', 'feedback', 'aanpassingen', 'stats']
 const WEEKDAYS = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo']
 
-/** Standaard-categorieën voor werkdag-index i (1-based) van `total` werkdagen. */
-function defaultForWorkday(i: number, total: number): CatKey[] {
-  const c: CatKey[] = []
-  if (i >= 1 && i <= 2) c.push('ideeen')          // contentideeën + kalender invullen
-  if (i >= 3 && i <= 5) c.push('intakes')
-  if (i >= 6 && i <= 8) c.push('scripts')         // scripts maken / aanpassen
-  if (i >= 6 && i <= 13) c.push('shoots')
-  if (i >= 11 && i <= 18) c.push('edit')
-  if (i >= 19 && i <= 21) c.push('feedback')
-  if (i >= 19 && i <= 22) c.push('aanpassingen')
-  if (i === total) c.push('stats')
-  return c
-}
+/** Standaard-categorieën per werkdag: één regel, gedeeld met de Contentplanning (reeksen). */
+const defaultForWorkday = (i: number, total: number): CatKey[] => standaardFases(i, total)
 
 const isWeekday = (d: Date) => d.getDay() !== 0 && d.getDay() !== 6
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`

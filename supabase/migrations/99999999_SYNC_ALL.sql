@@ -5523,3 +5523,90 @@ ALTER TABLE public.invoice_bijlagen ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.invoice_bijlagen FROM anon, authenticated;
 ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS telefoon text;
 ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS mededeling text;
+
+-- ── Contentplanning (8 okt 2026) ────────────────────────────────────────────────
+-- Uitbreiding van de Maandplanning tot één werkruimte voor de contentworkflow.
+-- Klanten = de bestaande clients (geen tweede klantenadministratie); batch =
+-- clients.batch_id + de bestaande tabel batches. Alles hieronder is
+-- contentplanning-specifiek.
+CREATE TABLE IF NOT EXISTS public.cp_klanten (
+  client_id uuid PRIMARY KEY REFERENCES public.clients(id) ON DELETE CASCADE,
+  actief boolean NOT NULL DEFAULT true,
+  ritme text,                         -- 'maandelijks' | 'driemaandelijks' | NULL = nog in te vullen
+  verantwoordelijke text,
+  goedkeuring_werkdagen integer,
+  activiteiten jsonb NOT NULL DEFAULT '{}'::jsonb,  -- per onderdeel: 'elke_cyclus' | 'per_kwartaal' | 'nvt'
+  contactpersonen jsonb NOT NULL DEFAULT '[]'::jsonb,
+  links jsonb NOT NULL DEFAULT '[]'::jsonb,
+  afspraken text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.cp_cycli (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  maand text NOT NULL,                -- 'YYYY-MM'
+  status text NOT NULL DEFAULT 'actief',  -- actief | gepauzeerd | gearchiveerd
+  instellingen jsonb NOT NULL DEFAULT '{}'::jsonb,  -- momentopname: ritme, batch, activiteiten
+  created_by text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (client_id, maand)
+);
+CREATE TABLE IF NOT EXISTS public.cp_taken (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  cyclus_id uuid REFERENCES public.cp_cycli(id) ON DELETE CASCADE,
+  client_id uuid REFERENCES public.clients(id) ON DELETE CASCADE,
+  onderdeel text NOT NULL DEFAULT 'los',
+  titel text NOT NULL,
+  reeks smallint,
+  werkdatum date,
+  deadline date,
+  startmoment date,                   -- bv. verstuurd voor goedkeuring / feedback ontvangen
+  verantwoordelijke text,
+  status text NOT NULL DEFAULT 'nog_in_te_plannen',
+  sjabloon_sleutel text,              -- uit welk sjabloon; samen met cyclus uniek → nooit dubbel
+  volgorde integer NOT NULL DEFAULT 0,
+  verwijderd_op timestamptz,          -- zacht verwijderd: herstelbaar én wordt niet opnieuw aangemaakt
+  created_by text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+-- Volledige unieke index (NULL-sleutels van losse taken botsen niet); nodig voor ON CONFLICT.
+DROP INDEX IF EXISTS public.cp_taken_sjabloon_uniek;
+CREATE UNIQUE INDEX IF NOT EXISTS cp_taken_sjabloon_uniek ON public.cp_taken (cyclus_id, sjabloon_sleutel);
+CREATE INDEX IF NOT EXISTS cp_taken_werkdatum_idx ON public.cp_taken (werkdatum);
+CREATE INDEX IF NOT EXISTS cp_taken_cyclus_idx ON public.cp_taken (cyclus_id);
+CREATE TABLE IF NOT EXISTS public.cp_notities (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  soort text NOT NULL DEFAULT 'cyclus',   -- afspraak (blijvend) | cyclus | herinnering
+  client_id uuid REFERENCES public.clients(id) ON DELETE CASCADE,
+  taak_id uuid REFERENCES public.cp_taken(id) ON DELETE CASCADE,
+  cyclus_id uuid REFERENCES public.cp_cycli(id) ON DELETE CASCADE,
+  batch_id uuid REFERENCES public.batches(id) ON DELETE CASCADE,
+  reeks smallint,
+  maand text,
+  tekst text NOT NULL,
+  herinner_op date,
+  afgevinkt_op timestamptz,
+  vastgepind boolean NOT NULL DEFAULT false,
+  auteur text,
+  verwijderd_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS cp_notities_herinner_idx ON public.cp_notities (herinner_op) WHERE herinner_op IS NOT NULL;
+CREATE TABLE IF NOT EXISTS public.cp_routine_checks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  routine_key text NOT NULL,
+  datum date NOT NULL,
+  door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (routine_key, datum)
+);
+ALTER TABLE public.cp_klanten ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cp_cycli ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cp_taken ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cp_notities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cp_routine_checks ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.cp_klanten, public.cp_cycli, public.cp_taken, public.cp_notities, public.cp_routine_checks FROM anon, authenticated;

@@ -120,7 +120,7 @@ const SECTIONS: NavSection[] = [
         label: 'Informatief', href: '/admin/informatief', icon: Info, module: 'info',
         children: [
           { label: 'Onboarding Info', href: '/admin/onboarding',   icon: ClipboardList },
-          { label: 'Maandplanning',   href: '/admin/maandplanning', icon: CalendarDays },
+          { label: 'Contentplanning', href: '/admin/contentplanning', icon: CalendarDays },
         ],
       },
     ],
