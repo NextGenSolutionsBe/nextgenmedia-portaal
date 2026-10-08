@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { MaandKiezer } from '@/components/ui/maand-kiezer'
 import { toast } from 'sonner'
 import { Loader2, Save, Square, Trash2, Undo2 } from 'lucide-react'
 import { Dialoog, INP } from '@/app/admin/instellingen/ui'
@@ -81,7 +82,7 @@ export function ReeksBewerken({ recurringId, onSluit, onKlaar }: { recurringId: 
             <div><label className={LBL}>Bedrag per maand excl. btw (€)</label><GetalInvoer className={INP} waarde={v.amount_excl ?? 0} min={0} onWaarde={(n) => zet('amount_excl', n)} /></div>
             <div><label className={LBL}>Btw %</label><GetalInvoer className={INP} waarde={v.vat_pct ?? 21} min={0} max={100} onWaarde={(n) => zet('vat_pct', n)} /></div>
             <div><label className={LBL}>Startmaand</label><input type="month" className={INP} value={v.start_month ?? ''} onChange={(e) => zet('start_month', e.target.value)} /></div>
-            <div><label className={LBL}>Eindmaand <span className="text-gray-400">(leeg = doorlopend)</span></label><input type="month" className={INP} value={v.end_month ?? ''} min={v.start_month ?? undefined} onChange={(e) => zet('end_month', e.target.value || null)} /></div>
+            <div><label className={LBL}>Eindmaand <span className="text-gray-400">(leeg = doorlopend)</span></label><MaandKiezer className={INP} waarde={v.end_month ?? null} vanaf={v.start_month ?? new Date().toISOString().slice(0, 7)} leeg="— Doorlopend —" onWaarde={(ym) => zet('end_month', ym)} /></div>
             <div><label className={LBL}>Factuurdag</label>
               <select className={INP} value={v.invoice_day ?? 'last'} onChange={(e) => zet('invoice_day', e.target.value)}>
                 {Object.entries(INVOICE_DAY_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}

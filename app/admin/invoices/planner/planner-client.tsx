@@ -2,19 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, CalendarDays, CalendarRange, List, Loader2, X, ArrowUpDown, Eye, AlertTriangle, Filter, Search, StickyNote, Plus, Play, ChevronDown, Wallet, Send, CheckCircle2, Repeat } from 'lucide-react'
+import { ChevronLeft, ChevronRight, CalendarDays, CalendarRange, List, Loader2, X, ArrowUpDown, Eye, AlertTriangle, Filter, Search, StickyNote, Plus, Play, ChevronDown, Wallet, Send, CheckCircle2, Repeat, Trash2, Target } from 'lucide-react'
 import {
   vandaagBrussel, isDatum, ymVan, plusDagen, maandStart, maandEind, maandRooster, roosterBereik, weekBereik, shiftYM,
   maandNaam, datumKort, DAGEN_KORT, euro, euro2, kort, pasFiltersToe, dagTotalen, sorteer, filtersActief,
   LEEG_FILTERS, PLANNER_STATUSSEN, STATUS_INFO, FASEN, FASE_INFO, faseKpi, resultaat, maandKpi,
-  TABS, TERMIJNEN, tabVan, inTab, inTermijn, sorteerWerklijst, tabTellingen, rondeItems,
-  type Moment, type Filters, type Sortering, type Tab, type Termijn,
+  TABS, tabVan, inTab, sorteerWerklijst, tabTellingen, rondeItems, maandOverzicht, recurringMeter, RECURRING_DOEL,
+  type Moment, type Filters, type Sortering, type Tab,
 } from '@/lib/facturatie/planner-model'
 import { PlannerDetail, DagPaneel, StatusBadge, type Actie } from './planner-detail'
 import { FactuurEditor } from '../factuur-editor'
 import { FacturatieItemWizard } from '../item-wizard'
 import { ItemDetail } from '../item-detail'
 import { Facturatieronde } from '../facturatieronde'
+import { VerwijderDialoog, type VerwijderBereik } from '../verwijder-dialoog'
 import { ExportKnop } from '@/components/admin/export-knop'
 import { facturenWerkmap, type FactuurExportRij } from '@/lib/excel/rapporten/facturen'
 
@@ -38,7 +39,6 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
   const [vandaag] = useState(() => vandaagBrussel())
   const [weergave, setWeergave] = useState<Weergave>(startWeergave === 'maand' || startWeergave === 'week' ? startWeergave : 'lijst')
   const [tab, setTab] = useState<Tab>(isDatum(startDatum) || startFactuur ? 'alles' : 'te_factureren')
-  const [termijn, setTermijn] = useState<Termijn>('alles')
   const [anker, setAnker] = useState<string>(isDatum(startDatum) ? startDatum : vandaag)
   const [filters, setFilters] = useState<Filters>(LEEG_FILTERS)
   const [sortering, setSortering] = useState<Sortering | null>(null)
@@ -53,6 +53,7 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
   const [wizard, setWizard] = useState<WizardStaat>(null)
   const [geavanceerd, setGeavanceerd] = useState<string | null>(null)
   const [ronde, setRonde] = useState<Moment[] | null>(null)
+  const [teVerwijderen, setTeVerwijderen] = useState<Moment | null>(null)
   const cache = useRef(new Map<string, Data>())
   const [versie, setVersie] = useState(0)
   const startGeopend = useRef(false)
@@ -86,22 +87,24 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
   const alle = useMemo(() => data?.momenten ?? [], [data])
   const gefilterd = useMemo(() => pasFiltersToe(alle, { ...filters, toonGeannuleerd: true, fase: '', categorie: null }, vandaag), [alle, filters, vandaag])
   const open = useMemo(() => gefilterd.filter((m) => tabVan(m) === 'te_factureren'), [gefilterd])
-  const teFacturerenTotaal = open.reduce((s, m) => s + m.bedrag_excl, 0)
-  const achterstallig = open.filter((m) => m.status === 'achterstallig').length
+  // Achterstallig blijft in zijn eigen geplande maand; hier enkel een wegwijzer naar eerdere maanden.
+  const eerderAchterstallig = open.filter((m) => m.status === 'achterstallig' && ymVan(m.datum) < ym).sort((a, b) => a.datum.localeCompare(b.datum))
   const vandaagTe = rondeItems(gefilterd, vandaag)
-  // Gefactureerd en Alles: per maand (geplande datum); Te factureren: alles wat openstaat.
+  // Alle tabbladen tonen de geselecteerde maand, op geplande facturatiedatum.
   const maandBereik = weergave === 'week' ? zicht : { van: maandStart(ym), tot: maandEind(ym) }
-  const tabBasis = useMemo(() => gefilterd.filter((m) => tab === 'te_factureren' || (m.datum >= maandBereik.van && m.datum <= maandBereik.tot)), [gefilterd, tab, maandBereik.van, maandBereik.tot])
-  const tellingen = useMemo(() => {
-    const t = tabTellingen(gefilterd.filter((m) => m.datum >= maandBereik.van && m.datum <= maandBereik.tot))
-    return { ...t, te_factureren: open.length }
-  }, [gefilterd, open.length, maandBereik.van, maandBereik.tot])
+  const tabBasis = useMemo(() => gefilterd.filter((m) => m.datum >= maandBereik.van && m.datum <= maandBereik.tot), [gefilterd, maandBereik.van, maandBereik.tot])
+  const tellingen = useMemo(() => tabTellingen(tabBasis), [tabBasis])
   const lijst = useMemo(() => {
     let l = tabBasis.filter((m) => inTab(m, tab))
-    if (tab === 'te_factureren') l = l.filter((m) => inTermijn(m, termijn, vandaag))
     if (!filters.toonGeannuleerd && tab !== 'alles') l = l.filter((m) => m.status !== 'geannuleerd' && m.status !== 'gecrediteerd')
     return sortering ? sorteer(l, sortering) : tab === 'te_factureren' ? sorteerWerklijst(l) : sorteer(l, { veld: 'datum', richting: 'asc' })
-  }, [tabBasis, tab, termijn, vandaag, sortering, filters.toonGeannuleerd])
+  }, [tabBasis, tab, sortering, filters.toonGeannuleerd])
+  // Totaalbalk: exact de zichtbare lijst (met zoeken en filters).
+  const zichtbaarOpen = lijst.filter((m) => tabVan(m) === 'te_factureren')
+  const zichtbaarOpenTotaal = Math.round(zichtbaarOpen.reduce((s, m) => s + m.bedrag_excl, 0) * 100) / 100
+  // Maandoverzicht en recurring-meter: altijd de VOLLEDIGE maand, los van zoeken/filters/tab.
+  const overzicht = useMemo(() => maandOverzicht(alle, ym), [alle, ym])
+  const meter = useMemo(() => recurringMeter(alle, ym), [alle, ym])
   const lijstTotaal = lijst.filter((m) => m.status !== 'geannuleerd' && m.status !== 'gecrediteerd').reduce((s, m) => s + m.bedrag_excl, 0)
   const perDag = useMemo(() => { const m = new Map<string, Moment[]>(); for (const x of gefilterd.filter((y) => filters.toonGeannuleerd || (y.status !== 'geannuleerd' && y.status !== 'gecrediteerd'))) { const l = m.get(x.datum) ?? []; l.push(x); m.set(x.datum, l) } return m }, [gefilterd, filters.toonGeannuleerd])
   const totalen = useMemo(() => dagTotalen(gefilterd), [gefilterd])
@@ -131,6 +134,19 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
       toast.success(j.melding ?? 'Bijgewerkt.'); ververs(); return true
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Actie mislukt'); return false } finally { setBezig(false) }
   }, [ververs])
+
+  // ── Verwijderen: meteen weg uit lijst, totalen en meter; daarna bewaard ──
+  const verwijder = useCallback(async (m: Moment, bereik: VerwijderBereik) => {
+    const weg = (x: Moment) => x.id === m.id || (bereik === 'toekomst' && !!m.recurring_id && x.recurring_id === m.recurring_id && x.maand > m.maand && tabVan(x) !== 'gefactureerd')
+    setData((d) => (d ? { ...d, momenten: d.momenten.filter((x) => !weg(x)) } : d))
+    setTeVerwijderen(null)
+    try {
+      const r = await fetch('/api/admin/invoices/planner', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actie: 'verwijder', id: m.id, bereik }) })
+      const j = await r.json(); if (!r.ok) throw new Error(j.error || 'Verwijderen mislukt')
+      toast.success(bereik === 'toekomst' ? 'Item en toekomstige herhalingen verwijderd.' : 'Facturatie-item verwijderd.')
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt') }
+    finally { cache.current.clear(); setVersie((v) => v + 1) }
+  }, [])
 
   // ── Slepen in de kalender ──
   const [sleepDoel, setSleepDoel] = useState<string | null>(null)
@@ -170,27 +186,44 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
       <button type="button" onClick={() => ga(-1)} className="rounded-lg border border-gray-200 p-1.5 hover:bg-gray-50" aria-label="Vorige periode"><ChevronLeft className="h-4 w-4" /></button>
       <span className="text-sm font-semibold capitalize min-w-[120px] text-center">{weergave === 'week' ? `week van ${datumKort(zicht.van)}` : maandNaam(ym)}</span>
       <button type="button" onClick={() => ga(1)} className="rounded-lg border border-gray-200 p-1.5 hover:bg-gray-50" aria-label="Volgende periode"><ChevronRight className="h-4 w-4" /></button>
-      {ym !== ymVan(vandaag) && <button type="button" onClick={() => setAnker(vandaag)} className="text-xs px-2 py-1 rounded-lg border border-gray-200 hover:bg-gray-50">Nu</button>}
+      <button type="button" onClick={() => setAnker(vandaag)} disabled={ym === ymVan(vandaag) && weergave !== 'week'} className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-40">Nu</button>
     </div>
   )
 
   return (
     <div className="space-y-4">
-      {/* ── Bovenaan: enkel wat telt ── */}
+      {/* ── Bovenaan: het recurring-doel van de geselecteerde maand + acties ── */}
       <div className="flex items-stretch gap-3 flex-wrap">
-        <div className="card-base p-4 flex-1 min-w-[240px]">
-          <div className="text-xs text-gray-500">Nog te factureren</div>
-          <div className="flex items-baseline gap-3 flex-wrap mt-0.5">
-            <span className="text-3xl font-bold tabular-nums">{open.length}</span>
-            <span className="text-sm text-gray-600">item{open.length === 1 ? '' : 's'} · <b className="text-gray-900 tabular-nums">{euro2(teFacturerenTotaal)}</b> excl. btw</span>
+        <section className="card-base p-4 flex-1 min-w-[280px]" aria-label="Recurring omzet tegenover het maanddoel">
+          <div className="flex items-start justify-between gap-2 flex-wrap">
+            <div className="text-xs text-gray-500 inline-flex items-center gap-1.5"><Target className="h-3.5 w-3.5" />Terugkerende omzet · <span className="capitalize">{maandNaam(ym)}</span> · <span>Volledige maand · excl. btw</span></div>
+            {meter.bereikt && <span className="inline-flex items-center gap-1 rounded-full bg-[#166534] text-white px-2.5 py-0.5 text-[11px] font-semibold"><CheckCircle2 className="h-3 w-3" />Maanddoel bereikt</span>}
           </div>
-          {achterstallig > 0 && <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-orange-500 text-white px-2 py-0.5 text-[11px] font-medium"><AlertTriangle className="h-3 w-3" />{achterstallig} achterstallig</div>}
-        </div>
+          <div className="flex items-baseline gap-2 flex-wrap mt-1">
+            <span className="text-2xl font-bold tabular-nums">{euro(meter.verwacht)}</span>
+            <span className="text-sm text-gray-500 tabular-nums">/ {euro(RECURRING_DOEL)}</span>
+            <span className="text-sm font-semibold tabular-nums">· {meter.pct.toLocaleString('nl-BE')}%</span>
+            {!meter.bereikt && <span className="text-sm text-gray-600 tabular-nums">· Nog {euro(meter.nodig)} tot het doel</span>}
+          </div>
+          <div className="mt-2 h-3 rounded-full bg-gray-100 overflow-hidden flex" role="img" aria-label={`${euro(meter.gefactureerd)} gefactureerd en ${euro(meter.open)} nog te factureren van ${euro(RECURRING_DOEL)}`}>
+            <div className="h-full bg-[#166534]" style={{ width: `${meter.vulGefactureerd}%` }} />
+            <div className="h-full bg-[repeating-linear-gradient(135deg,#fde047,#fde047_6px,#facc15_6px,#facc15_12px)]" style={{ width: `${meter.vulOpen}%` }} />
+          </div>
+          <div className="mt-1.5 flex gap-x-4 gap-y-1 flex-wrap text-xs text-gray-700">
+            <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-[#166534]" /><b className="tabular-nums">{euro(meter.gefactureerd)}</b> gefactureerd</span>
+            <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-yellow-300 border border-yellow-500" /><b className="tabular-nums">{euro(meter.open)}</b> nog te factureren</span>
+          </div>
+          {eerderAchterstallig.length > 0 && (
+            <button type="button" onClick={() => { setAnker(eerderAchterstallig[0].datum); setTab('te_factureren') }} className="mt-2 inline-flex items-center gap-1 rounded-full bg-orange-500 text-white px-2.5 py-0.5 text-[11px] font-medium hover:bg-orange-600">
+              <AlertTriangle className="h-3 w-3" />{eerderAchterstallig.length} achterstallig in eerdere maanden — bekijken
+            </button>
+          )}
+        </section>
         <div className="flex flex-col sm:flex-row gap-2 items-stretch">
           <button type="button" onClick={() => setRonde(vandaagTe)} className="btn-secondary text-sm border-black justify-center" title="Alle items t.e.m. vandaag, achterstallige inbegrepen, één voor één afwerken">
             <Play className="h-4 w-4" />Facturatieronde starten{vandaagTe.length ? ` (${vandaagTe.length})` : ''}
           </button>
-          <button type="button" onClick={() => setWizard({ datum: vandaag })} className="btn-primary text-sm justify-center"><Plus className="h-4 w-4" />Nieuw facturatie-item</button>
+          <button type="button" onClick={() => setWizard({ datum: ym === ymVan(vandaag) ? vandaag : `${ym}-01` })} className="btn-primary text-sm justify-center"><Plus className="h-4 w-4" />Nieuw facturatie-item</button>
         </div>
       </div>
 
@@ -220,17 +253,8 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
         </div>
         {weergave === 'lijst' && (
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            {tab === 'te_factureren' ? (
-              <div className="flex gap-1.5 flex-wrap">
-                {TERMIJNEN.map((t) => (
-                  <button key={t.key} type="button" onClick={() => setTermijn(t.key)} aria-pressed={termijn === t.key}
-                    className={`rounded-full border px-3 py-1 text-xs font-medium ${termijn === t.key ? 'bg-black text-white border-black' : 'bg-white border-gray-200 text-gray-700 hover:border-gray-400'}`}>
-                    {t.label}{t.key !== 'alles' && <span className="ml-1 opacity-70">{open.filter((m) => inTermijn(m, t.key, vandaag)).length}</span>}
-                  </button>
-                ))}
-              </div>
-            ) : maandNav}
-            <span className="text-xs text-gray-500">{lijst.length} item{lijst.length === 1 ? '' : 's'} · <b className="text-gray-800 tabular-nums">{euro2(lijstTotaal)}</b> excl. btw</span>
+            {maandNav}
+            <span className="text-xs text-gray-500">Op geplande facturatiedatum{filtersActief(filters) ? ' · met je zoekopdracht/filters' : ''}</span>
           </div>
         )}
         {weergave !== 'lijst' && <div className="flex items-center gap-2 flex-wrap">{maandNav}<input type="month" value={ym} onChange={(e) => { if (/^\d{4}-\d{2}$/.test(e.target.value)) setAnker(`${e.target.value}-01`) }} className={sel} aria-label="Maand kiezen" /></div>}
@@ -257,18 +281,21 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
           <div className="md:hidden divide-y divide-gray-100">
             {lijst.length === 0 && <LeegLijst tab={tab} onNieuw={() => setWizard({ datum: vandaag })} />}
             {lijst.map((m) => { const gef = tabVan(m) === 'gefactureerd'; const grijs = !tabVan(m); return (
-              <button key={m.id} type="button" onClick={() => bekijk(m)} className={`w-full text-left px-3 py-3 space-y-1.5 ${gef ? 'bg-[#166534] text-white' : grijs ? 'bg-gray-50 text-gray-500' : 'bg-white'}`}>
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0"><div className="font-semibold text-sm truncate">{m.klant}</div><div className={`text-xs truncate ${gef ? 'text-green-100' : 'text-gray-600'}`}>{m.project ?? m.dienst ?? m.omschrijving ?? '—'}</div></div>
-                  <div className="font-bold tabular-nums text-sm shrink-0">{euro2(m.bedrag_excl)}</div>
-                </div>
-                <div className="flex items-center gap-2 flex-wrap text-[11px]"><StatusBadge status={m.status} klein /><span>{datumNlKort(m.datum)}</span>{m.terugkerend && <Repeat className="h-3 w-3" aria-label="terugkerend" />}{!m.volledig && !gef && <span className="text-amber-700">gegevens ontbreken</span>}</div>
-              </button>
+              <div key={m.id} className={`flex items-stretch ${gef ? 'bg-[#166534] text-white' : grijs ? 'bg-gray-50 text-gray-500' : 'bg-white'}`}>
+                <button type="button" onClick={() => bekijk(m)} className="flex-1 min-w-0 text-left px-3 py-3 space-y-1.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0"><div className="font-semibold text-sm truncate">{m.klant}</div><div className={`text-xs truncate ${gef ? 'text-green-100' : 'text-gray-600'}`}>{m.project ?? m.dienst ?? m.omschrijving ?? '—'}</div></div>
+                    <div className="font-bold tabular-nums text-sm shrink-0">{euro2(m.bedrag_excl)}</div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap text-[11px]"><StatusBadge status={m.status} klein /><span>{datumNlKort(m.datum)}</span>{m.terugkerend && <Repeat className="h-3 w-3" aria-label="terugkerend" />}{!m.volledig && !gef && <span className="text-amber-700">gegevens ontbreken</span>}</div>
+                </button>
+                {(m.bron === 'invoice' || m.bron === 'recurring') && <button type="button" onClick={() => setTeVerwijderen(m)} className={`px-3 ${gef ? 'text-white/80 hover:text-white' : 'text-red-600 hover:bg-red-50'}`} aria-label={`${m.klant} verwijderen`}><Trash2 className="h-4 w-4" /></button>}
+              </div>
             ) })}
           </div>
           {/* Desktop: compacte tabel, geen horizontaal scrollen */}
           <table className="hidden md:table w-full text-sm table-fixed">
-            <colgroup><col className="w-[118px]" /><col className="w-[20%]" /><col className="w-[18%]" /><col /><col className="w-[118px]" /><col className="w-[178px]" /><col className="w-[100px]" /></colgroup>
+            <colgroup><col className="w-[118px]" /><col className="w-[20%]" /><col className="w-[18%]" /><col /><col className="w-[118px]" /><col className="w-[178px]" /><col className="w-[140px]" /></colgroup>
             <thead>
               <tr className="text-left text-[11px] text-gray-500 uppercase tracking-wide bg-gray-50 border-b border-gray-100">
                 <Kop veld="datum" sortering={sortering} onClick={sorteerOp}>Gepland</Kop>
@@ -290,11 +317,31 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
                   <td className="px-3 py-2.5 truncate" title={m.omschrijving ?? ''}><span className={gef ? 'text-green-50' : 'text-gray-600'}>{m.omschrijving ?? '—'}</span>{m.opmerking && <StickyNote className={`h-3 w-3 inline ml-1 -mt-0.5 ${gef ? 'text-amber-200' : 'text-amber-500'}`} aria-label="interne notitie" />}{m.extern_nr && <span className={`ml-1 text-[11px] ${gef ? 'text-green-100' : 'text-gray-400'}`}>· nr {m.extern_nr}</span>}</td>
                   <td className="px-3 py-2.5 text-right font-semibold tabular-nums">{euro2(m.bedrag_excl)}</td>
                   <td className="px-3 py-2.5"><StatusBadge status={m.status} /></td>
-                  <td className="px-3 py-2.5 text-right"><span className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium ${gef ? 'border-white/40 text-white' : 'border-gray-200 text-gray-700 bg-white'}`}><Eye className="h-3.5 w-3.5" />Bekijken</span></td>
+                  <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                    <span className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium ${gef ? 'border-white/40 text-white' : 'border-gray-200 text-gray-700 bg-white'}`}><Eye className="h-3.5 w-3.5" />Bekijken</span>
+                    {(m.bron === 'invoice' || m.bron === 'recurring') && (
+                      <button type="button" onClick={(e) => { e.stopPropagation(); setTeVerwijderen(m) }} title="Verwijderen" aria-label={`${m.klant} verwijderen`}
+                        className={`ml-1 inline-flex items-center justify-center h-7 w-7 rounded-lg border align-middle ${gef ? 'border-white/40 text-white hover:bg-white/10' : 'border-gray-200 bg-white text-red-600 hover:bg-red-50 hover:border-red-300'}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                    )}
+                  </td>
                 </tr>
               ) })}
             </tbody>
           </table>
+          {/* Totaalbalk: de zichtbare lijst + het volledige maandoverzicht */}
+          <div className="border-t-2 border-gray-900 bg-gray-50 px-4 py-3 flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-6">
+            <div className="flex items-baseline gap-4 flex-wrap">
+              <div><div className="text-[11px] uppercase tracking-wide text-gray-500">Te factureren items</div><div className="text-xl font-bold tabular-nums">{zichtbaarOpen.length}</div></div>
+              <div><div className="text-[11px] uppercase tracking-wide text-gray-500">Totaal nog te factureren — excl. btw</div><div className="text-xl font-bold tabular-nums">{euro2(zichtbaarOpenTotaal)}</div></div>
+              {filtersActief(filters) && <span className="text-[11px] text-gray-500">volgens je zoekopdracht/filters</span>}
+            </div>
+            <div className="lg:ml-auto grid grid-cols-3 gap-2 text-xs rounded-xl border border-gray-200 bg-white p-2.5 min-w-0" aria-label="Volledige maand">
+              <div><div className="text-gray-500">Al gefactureerd</div><div className="font-semibold tabular-nums text-[#166534]">{euro2(overzicht.gefactureerd)}</div></div>
+              <div><div className="text-gray-500">Nog te factureren</div><div className="font-semibold tabular-nums">{euro2(overzicht.open)}</div></div>
+              <div><div className="text-gray-500">Verwacht maandtotaal</div><div className="font-bold tabular-nums">{euro2(overzicht.totaal)}</div></div>
+              <div className="col-span-3 text-[10px] text-gray-400 capitalize">{maandNaam(ym)} · volledige maand · excl. btw</div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -391,7 +438,8 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
         ? <ItemDetail key={geselecteerdMoment.id} moment={geselecteerdMoment} onSluit={() => setGeselecteerd(null)} onGewijzigd={ververs}
             onBewerk={(id) => { setGeselecteerd(null); setWizard({ invoiceId: id }) }}
             onEigenArtikelen={(m) => { setGeselecteerd(null); setWizard({ recurringMaand: { recurring_id: m.bronId, maand: m.maand, momentId: m.id } }) }}
-            onGeavanceerd={(id) => { setGeselecteerd(null); setGeavanceerd(id) }} />
+            onGeavanceerd={(id) => { setGeselecteerd(null); setGeavanceerd(id) }}
+            onVerwijder={(m) => { setGeselecteerd(null); setTeVerwijderen(m) }} />
         : <PlannerDetail moment={geselecteerdMoment} onSluit={() => setGeselecteerd(null)} onActie={voerUit} bezig={bezig} onGewijzigd={ververs} />)}
       {wizard && (
         <FacturatieItemWizard
@@ -401,6 +449,7 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
           onClose={() => setWizard(null)} onSaved={() => ververs()} />
       )}
       {geavanceerd && <FactuurEditor invoiceId={geavanceerd} onClose={() => setGeavanceerd(null)} onSaved={() => ververs()} />}
+      {teVerwijderen && <VerwijderDialoog m={teVerwijderen} onAnnuleer={() => setTeVerwijderen(null)} onBevestig={(bereik) => verwijder(teVerwijderen, bereik)} />}
       {ronde && <Facturatieronde items={ronde} onSluit={() => { setRonde(null); ververs() }} onGewijzigd={ververs} />}
     </div>
   )
@@ -411,7 +460,7 @@ const datumNlKort = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice
 function LeegLijst({ tab, onNieuw }: { tab: Tab; onNieuw: () => void }) {
   return (
     <div className="px-4 py-10 text-center text-sm text-gray-500 space-y-2">
-      <div>{tab === 'te_factureren' ? 'Niets meer te factureren voor deze selectie.' : tab === 'gefactureerd' ? 'Nog niets gefactureerd in deze periode.' : 'Geen items in deze periode.'}</div>
+      <div>{tab === 'te_factureren' ? 'Geen items te factureren deze maand.' : tab === 'gefactureerd' ? 'Nog niets gefactureerd deze maand.' : 'Geen items deze maand.'}</div>
       <button type="button" onClick={onNieuw} className="btn-primary text-sm"><Plus className="h-4 w-4" />Nieuw facturatie-item</button>
     </div>
   )

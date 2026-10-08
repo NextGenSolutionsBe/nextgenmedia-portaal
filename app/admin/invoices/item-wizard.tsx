@@ -12,6 +12,7 @@ import { formatEuro } from '@/lib/utils'
 import { berekenRegel, berekenTotalen, hernummer, kmRegel, nieuweRegel, verplaatsRegel, dupliceerRegel, verwijderRegel, EENHEDEN, EENHEID_LABEL, type FactuurRegel } from '@/lib/facturen/regels'
 import { FACTUUR_TYPES, adresRegels, ontbrekendeGegevens, type FactuurType, type KlantInfo } from '@/lib/facturatie/item-model'
 import { factuurdagVan } from '@/lib/facturatie/reeks'
+import { MaandKiezer } from '@/components/ui/maand-kiezer'
 
 /**
  * Een facturatie-item toevoegen of aanpassen, in vier duidelijke stappen:
@@ -60,6 +61,8 @@ export function FacturatieItemWizard({ invoiceId = null, recurringMaand = null, 
   const [basis, setBasis] = useState({
     datum: standaardDatum ?? vandaagIso(), contract_id: '', titel: '', type: 'eenmalig' as FactuurType,
     prestatie_van: '', prestatie_tot: '', termijn: '30', klant_referentie: '', eind_maand: '',
+    /** null = volgt het type (terugkerend = ja); true/false = uitdrukkelijk gekozen. */
+    terugkerende_omzet: null as boolean | null,
   })
   const [regels, setRegels] = useState<FactuurRegel[]>([])
   const [kosten, setKosten] = useState<InterneKost[]>([])
@@ -90,6 +93,7 @@ export function FacturatieItemWizard({ invoiceId = null, recurringMaand = null, 
             prestatie_van: f.prestatie_van ? String(f.prestatie_van).slice(0, 10) : '', prestatie_tot: f.prestatie_tot ? String(f.prestatie_tot).slice(0, 10) : '',
             termijn: f.payment_term_days === null || f.payment_term_days === undefined ? String(i.betalingstermijn_dagen) : String(f.payment_term_days),
             klant_referentie: f.klant_referentie ?? '', eind_maand: '',
+            terugkerende_omzet: typeof f.terugkerende_omzet === 'boolean' ? f.terugkerende_omzet : null,
           })
           setRegels(j.regels ?? []); setMededeling(f.mededeling ?? ''); setNotitie(f.note ?? '')
         } else if (recurringMaand) {
@@ -141,6 +145,7 @@ export function FacturatieItemWizard({ invoiceId = null, recurringMaand = null, 
         prestatie_van: basis.prestatie_van || null, prestatie_tot: basis.prestatie_tot || null,
         periode: basis.prestatie_van ? basis.prestatie_van.slice(0, 7) : basis.datum.slice(0, 7),
         mededeling: mededeling || null, note: notitie || null, regels,
+        terugkerende_omzet: basis.terugkerende_omzet ?? (basis.type === 'terugkerend' || !!recurringMaand),
       }
       let id: string | null = null
       if (bewerken) {
@@ -397,7 +402,7 @@ function KlantAanpassen({ klant, onKlaar, onAnnuleer }: { klant: KlantInfo; onKl
 }
 
 // ── Stap 2: basis ───────────────────────────────────────────────────────────
-type Basis = { datum: string; contract_id: string; titel: string; type: FactuurType; prestatie_van: string; prestatie_tot: string; termijn: string; klant_referentie: string; eind_maand: string }
+type Basis = { datum: string; contract_id: string; titel: string; type: FactuurType; prestatie_van: string; prestatie_tot: string; termijn: string; klant_referentie: string; eind_maand: string; terugkerende_omzet: boolean | null }
 function StapBasis({ basis, setBasis, contracten, nieuw }: { basis: Basis; setBasis: React.Dispatch<React.SetStateAction<Basis>>; contracten: ContractOptie[]; nieuw: boolean }) {
   const zet = <K extends keyof Basis>(k: K, w: Basis[K]) => setBasis((b) => ({ ...b, [k]: w }))
   return (
@@ -425,7 +430,15 @@ function StapBasis({ basis, setBasis, contracten, nieuw }: { basis: Basis; setBa
         {basis.type === 'terugkerend' && nieuw && (
           <div>
             <label className={lbl}>Laatste maand <span className="text-gray-400 font-normal">— leeg = doorlopend</span></label>
-            <input type="month" className={INP} value={basis.eind_maand} onChange={(e) => zet('eind_maand', e.target.value)} />
+            <MaandKiezer className={INP} waarde={basis.eind_maand || null} vanaf={(basis.datum || new Date().toISOString()).slice(0, 7)} leeg="— Doorlopend —" onWaarde={(ym) => zet('eind_maand', ym ?? '')} />
+          </div>
+        )}
+        {!(basis.type === 'terugkerend' && nieuw) && (
+          <div className="sm:col-span-2">
+            <label className="flex items-start gap-2 text-sm cursor-pointer">
+              <input type="checkbox" className="mt-0.5" checked={basis.terugkerende_omzet ?? basis.type === 'terugkerend'} onChange={(e) => zet('terugkerende_omzet', e.target.checked)} />
+              <span><b className="font-medium">Terugkerende omzet</b> <span className="text-gray-500">— telt mee voor het maanddoel recurring omzet (bv. maandelijks beheer). Laat uit voor eenmalige shoots, websites en losse opdrachten.</span></span>
+            </label>
           </div>
         )}
         <div className="sm:col-span-2">

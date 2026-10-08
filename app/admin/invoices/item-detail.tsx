@@ -16,13 +16,14 @@ import { KostenEnWinstDialoog } from './kosten-en-winst'
  * dagelijks nodig hebt (kopiëren, aanpassen, markeren als gefactureerd);
  * betaling, kosten en historiek staan eronder als secundaire details.
  */
-export function ItemDetail({ moment, onSluit, onGewijzigd, onBewerk, onEigenArtikelen, onGeavanceerd }: {
+export function ItemDetail({ moment, onSluit, onGewijzigd, onBewerk, onEigenArtikelen, onGeavanceerd, onVerwijder }: {
   moment: Moment
   onSluit: () => void
   onGewijzigd: () => void
   onBewerk: (invoiceId: string) => void
   onEigenArtikelen: (m: Moment) => void
   onGeavanceerd: (invoiceId: string) => void
+  onVerwijder: (m: Moment) => void
 }) {
   const [data, setData] = useState<ItemData | null>(null)
   const [fout, setFout] = useState<string | null>(null)
@@ -86,6 +87,7 @@ export function ItemDetail({ moment, onSluit, onGewijzigd, onBewerk, onEigenArti
             <KopieerKnop tekst={factuurTekst(data)} label="Kopieer factuurgegevens" melding="Factuurgegevens gekopieerd (zonder interne notities)." />
             {isFactuur && <button type="button" onClick={() => onBewerk(data.invoice_id!)} className="btn-secondary text-sm"><Pencil className="h-4 w-4" />Aanpassen</button>}
             {isReeksMaand && tab === 'te_factureren' && <button type="button" onClick={() => onEigenArtikelen(moment)} className="btn-secondary text-sm" title="Extra kilometers of kosten enkel voor deze maand"><Pencil className="h-4 w-4" />Artikelen voor deze maand aanpassen</button>}
+            <button type="button" onClick={() => onVerwijder(moment)} className="btn-secondary text-sm text-red-600 hover:border-red-300"><Trash2 className="h-4 w-4" />Verwijderen</button>
           </div>
 
           {tab === 'te_factureren' && (

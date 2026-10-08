@@ -188,14 +188,14 @@ export async function loadCore(year: number): Promise<FinanceCore> {
     admin.from('invoices').select('invoice_month, amount_excl, status, client_id, service_slug, kind').like('invoice_month', `${year}-%`),
     // …plus terugkerende facturen (met hun per-maand status).
     admin.from('recurring_invoices').select('*'),
-    admin.from('recurring_invoice_months').select('recurring_id, month, status, invoice_id').like('month', `${year}-%`),
+    admin.from('recurring_invoice_months').select('recurring_id, month, status, invoice_id, verwijderd_op').like('month', `${year}-%`),
   ])
   const settings = mergeFiscalSettings(year, fiscalRow)
   const clientMap = new Map((clients ?? []).map((c) => [c.id, c.company_name]))
   const recStatus = new Map(
-    ((recMonths ?? []) as { recurring_id: string; month: string; status: string; invoice_id?: string | null }[])
-      // Eigen item voor die maand → telt als factuur; de reeks slaat de maand over.
-      .map((m) => [`${m.recurring_id}|${m.month}`, m.invoice_id ? 'eigen_item' : m.status] as const),
+    ((recMonths ?? []) as { recurring_id: string; month: string; status: string; invoice_id?: string | null; verwijderd_op?: string | null }[])
+      // Eigen item voor die maand → telt als factuur; verwijderde maand → telt niet.
+      .map((m) => [`${m.recurring_id}|${m.month}`, m.verwijderd_op ? 'geannuleerd' : m.invoice_id ? 'eigen_item' : m.status] as const),
   )
   // Kost van de appointment setters. Faalt dit (bv. tabellen nog niet
   // aangemaakt), dan tonen we de financiën gewoon zonder die post in plaats van

@@ -144,3 +144,72 @@ export async function stopRecurring(admin: Admin, recurringId: string, actor: Ac
 
 /** Is een maand van een (eventueel gestopte) terugkerende facturatie nog actief? */
 export const maandActief = (r: RecurringInvoice, month: string): boolean => recurringActiveInMonth(r, month)
+
+/**
+ * Eén maand van een reeks verwijderen ("Alleen dit item verwijderen"): de maand
+ * krijgt verwijderd_op en duikt nooit meer op (ook niet na verversen). De reeks
+ * zelf en de andere maanden blijven ongemoeid.
+ */
+export async function verwijderMaand(admin: Admin, recurringId: string, maand: string, actor: Actor): Promise<void> {
+  const { data: rec } = await admin.from('recurring_invoices').select('*').eq('id', recurringId).maybeSingle()
+  const r = rec as RecurringInvoice | null
+  if (!r) throw new Error('Terugkerende facturatie niet gevonden.')
+  const { data: rij } = await admin.from('recurring_invoice_months').select('status, invoice_id, billing_date').eq('recurring_id', recurringId).eq('month', maand).maybeSingle()
+  await upsertMaand(admin, {
+    recurring_id: recurringId, month: maand, status: 'geannuleerd', verwijderd_op: new Date().toISOString(), verwijderd_door: actor.email ?? null,
+    billing_date: rij?.billing_date ?? billingDateFor(maand, r.invoice_day),
+  })
+  await logAudit({
+    action: 'invoice.recurring.maand_verwijderd', entityType: 'recurring_invoice', entityId: recurringId,
+    summary: `Maand ${maand} van terugkerende facturatie verwijderd (${await klantNaam(admin, r.client_id)})`,
+    actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'staff', metadata: { maand, vorige_status: rij?.status ?? null },
+  })
+}
+
+/**
+ * "Dit item en toekomstige herhalingen verwijderen": de reeks stopt vóór
+ * `maand`. Eerdere maanden blijven altijd staan. Een latere maand die al
+ * gefactureerd is, blijft ook staan (de reeks loopt dan tot die maand, en de
+ * niet-gefactureerde maanden daartussen worden als verwijderd gemarkeerd).
+ * Verwijderde maanden komen nooit automatisch terug.
+ */
+export async function stopVanaf(admin: Admin, recurringId: string, maand: string, actor: Actor): Promise<{ eindmaand: string; verwijderd: string[] }> {
+  const { data: rec } = await admin.from('recurring_invoices').select('*').eq('id', recurringId).maybeSingle()
+  const r = rec as (RecurringInvoice & { revenue_id?: string | null }) | null
+  if (!r) throw new Error('Terugkerende facturatie niet gevonden.')
+  const { data: rijen } = await admin.from('recurring_invoice_months').select('month, status, invoice_id, billing_date').eq('recurring_id', recurringId)
+  type Rij = { month: string; status: string | null; invoice_id: string | null; billing_date: string | null }
+  const maanden = (rijen ?? []) as Rij[]
+  const uitgevoerdNa = maanden.filter((m) => m.month >= maand && (m.status === 'verstuurd' || m.status === 'betaald')).map((m) => m.month).sort()
+  const vorige = shiftYM(maand, -1)
+  const eindmaand = uitgevoerdNa.length ? uitgevoerdNa[uitgevoerdNa.length - 1] : vorige
+  // Niet-gefactureerde maanden vanaf `maand` t.e.m. de nieuwe einde: als verwijderd markeren.
+  const verwijderd: string[] = []
+  for (let m = maand; m <= eindmaand; m = shiftYM(m, 1)) {
+    if (uitgevoerdNa.includes(m)) continue
+    if (!recurringActiveInMonth(r, m)) continue
+    const rij = maanden.find((x) => x.month === m)
+    await upsertMaand(admin, { recurring_id: recurringId, month: m, status: 'geannuleerd', verwijderd_op: new Date().toISOString(), verwijderd_door: actor.email ?? null, billing_date: rij?.billing_date ?? billingDateFor(m, r.invoice_day) })
+    verwijderd.push(m)
+  }
+  const start = (r.start_month ?? '').slice(0, 7)
+  const patch: Record<string, unknown> = { end_month: eindmaand }
+  if (start && eindmaand < start) { patch.active = false; patch.deleted_at = new Date().toISOString(); patch.deleted_by_email = actor.email ?? null }
+  const { error } = await admin.from('recurring_invoices').update(patch).eq('id', recurringId)
+  if (error) throw new Error(error.message)
+  // De automatisch aangemaakte prognose stopt op dezelfde maand (zoals bij stopzetten).
+  if (r.revenue_id) {
+    try {
+      const { data: prog } = await admin.from('revenue_entries').select('id, type, notes, title, end_month').eq('id', r.revenue_id).maybeSingle()
+      if (prog && prog.type === 'recurring' && (/automatisch/i.test(String(prog.notes ?? '')) || /automatische prognose/i.test(String(prog.title ?? ''))) && (!prog.end_month || String(prog.end_month).slice(0, 7) > eindmaand)) {
+        await admin.from('revenue_entries').update({ end_month: `${eindmaand}-01` }).eq('id', prog.id)
+      }
+    } catch { /* best-effort */ }
+  }
+  await logAudit({
+    action: 'invoice.recurring.gestopt_vanaf', entityType: 'recurring_invoice', entityId: recurringId,
+    summary: `Terugkerende facturatie (${await klantNaam(admin, r.client_id)}) verwijderd vanaf ${maand}: einde ${eindmaand}${verwijderd.length ? `, ${verwijderd.length} maand(en) verwijderd` : ''}`,
+    actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'staff', metadata: { vanaf: maand, eindmaand, verwijderd, behouden_gefactureerd: uitgevoerdNa },
+  })
+  return { eindmaand, verwijderd }
+}

@@ -5,7 +5,9 @@ import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { laadMomenten } from '@/lib/facturatie/planner'
 import { vandaagBrussel, isDatum, ontleedSleutel, ymVan } from '@/lib/facturatie/planner-model'
-import { zetMaandStatus, ANNULERING_OPMERKING } from '@/lib/facturatie/recurring'
+import { zetMaandStatus, ANNULERING_OPMERKING, verwijderMaand, stopVanaf } from '@/lib/facturatie/recurring'
+import { verwijderFactuur } from '@/lib/facturen/verwijder'
+import { magIk } from '@/lib/instellingen/laden'
 import { billingDateFor, inclFromExcl } from '@/lib/invoices'
 import { kostenPerFactuur, rijSleutel } from '@/lib/facturen/kosten-data'
 import { leesGetal } from '@/lib/getal'
@@ -77,7 +79,7 @@ export async function POST(req: NextRequest) {
   try {
     const actor = await requireStaff()
     if (!actor) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
-    const b = (await req.json().catch(() => null)) as { actie?: string; id?: string; datum?: string; reden?: string; bedrag_excl?: unknown; btw_pct?: unknown; opmerking?: unknown; extern_nummer?: unknown } | null
+    const b = (await req.json().catch(() => null)) as { actie?: string; id?: string; datum?: string; reden?: string; bedrag_excl?: unknown; btw_pct?: unknown; opmerking?: unknown; extern_nummer?: unknown; bereik?: unknown } | null
     const sleutel = b?.id ? ontleedSleutel(b.id) : null
     if (!b || !sleutel) return NextResponse.json({ error: 'Onbekend planneritem.' }, { status: 400 })
     const admin = createAdminSupabaseClient()
@@ -90,6 +92,37 @@ export async function POST(req: NextRequest) {
     const klaar = () => { try { revalidatePath('/admin/invoices'); revalidatePath('/admin/invoices/planner') } catch { /* */ } }
     // Extern factuurnummer (optioneel): Bram registreert het bij het afwerken of later.
     const externNr = b.extern_nummer === undefined ? undefined : (String(b.extern_nummer ?? '').trim().slice(0, 60) || null)
+    // ── Verwijderen (interne planner; nooit iets in de externe boekhouding) ──
+    //   bereik 'dit'      → enkel dit item (bij een reeks: enkel deze maand)
+    //   bereik 'toekomst' → dit item + toekomstige herhalingen; eerdere blijven
+    if (b.actie === 'verwijder') {
+      const recht = await magIk('invoices', 'verwijderen')
+      if (!recht) return NextResponse.json({ error: 'Je hebt geen recht om facturatie-items te verwijderen.' }, { status: 403 })
+      const toekomst = b.bereik === 'toekomst'
+      const wieAct = { id: actor.id, email: actor.email ?? null }
+      let reeks: { recurring_id: string; maand: string } | null = null
+      if (sleutel.bron === 'invoice') {
+        const r = await verwijderFactuur(admin, sleutel.bronId, { userId: actor.id, email: actor.email ?? null }, meta)
+        if (r.maand) reeks = { recurring_id: r.maand.recurring_id, maand: r.maand.month }
+      } else if (sleutel.bron === 'recurring' && sleutel.maand) {
+        reeks = { recurring_id: sleutel.bronId, maand: sleutel.maand }
+        if (!toekomst) await verwijderMaand(admin, sleutel.bronId, sleutel.maand, wieAct)
+      } else {
+        return NextResponse.json({ error: 'Dit item beheer je in Vesting.' }, { status: 400 })
+      }
+      let verwijderdeItems = 0
+      if (toekomst && reeks) {
+        await stopVanaf(admin, reeks.recurring_id, reeks.maand, wieAct)
+        // Latere maanden met een eigen, nog niet gefactureerd item: die items gaan mee.
+        const { data: later } = await admin.from('recurring_invoice_months').select('invoice_id, month').eq('recurring_id', reeks.recurring_id).gt('month', reeks.maand).not('invoice_id', 'is', null)
+        for (const l of (later ?? []) as { invoice_id: string; month: string }[]) {
+          const { data: inv } = await admin.from('invoices').select('status').eq('id', l.invoice_id).maybeSingle()
+          if (inv && !['verstuurd', 'gefactureerd', 'betaald'].includes(String(inv.status))) { await verwijderFactuur(admin, l.invoice_id, { userId: actor.id, email: actor.email ?? null }, meta); verwijderdeItems++ }
+        }
+      }
+      klaar(); return NextResponse.json({ ok: true, waarschuwingen, verwijderdeItems })
+    }
+
     // ── Eenmalige factuur ──
     if (sleutel.bron === 'invoice') {
       const { data: inv } = await admin.from('invoices').select('*').eq('id', sleutel.bronId).maybeSingle()

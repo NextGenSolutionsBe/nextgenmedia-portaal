@@ -113,6 +113,9 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
       opmerking: (i.note as string | null) ?? null,
       extern_nr: (i.extern_factuurnummer as string | null) ?? null, klant_referentie: (i.klant_referentie as string | null) ?? null,
       heeft_mededeling: !!(i.mededeling as string | null),
+      // Terugkerende omzet: uitdrukkelijke keuze gaat voor; anders enkel als het item
+      // echt uit een reeks komt of als type "terugkerend" aangemaakt is. Nooit geraden.
+      recurring_omzet: kind === 'wam' ? false : typeof i.terugkerende_omzet === 'boolean' ? (i.terugkerende_omzet as boolean) : (!!maandLink || i.factuur_type === 'terugkerend'),
       dienst: svc((i.service_slug as string | null) ?? null), betaaltermijn: termijnVan(i.payment_term_days), verzonden_op: dagVan(i.sent_at), verzonden_door: (i.sent_by_email as string | null) ?? null,
       betaald_op: ruwe === 'betaald' ? (dagVan(i.betaald_op) ?? null) : null,
       verwacht_op: dagVan(i.due_date) ?? verwachtOp(dagVan(i.sent_at), datum, termijnVan(i.payment_term_days)),
@@ -130,6 +133,8 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
     for (const m of maanden) {
       if (!recurringActiveInMonth(r, m)) continue
       const rij = perMaand.get(`${r.id}:${m}`)
+      // Bewust verwijderde maand: komt niet terug.
+      if ((rij as { verwijderd_op?: string | null } | undefined)?.verwijderd_op) continue
       // Deze maand heeft een eigen item → dat item staat al in de lijst.
       if (rij?.invoice_id && itemVanMaand.has(rij.invoice_id) && ((facturen ?? []) as { id: string }[]).some((f) => f.id === rij.invoice_id)) continue
       const datum = (rij?.billing_date ?? billingDateFor(m, r.invoice_day)).slice(0, 10)
@@ -160,6 +165,7 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
         betaald_op: ruwe === 'betaald' ? dagVan(rij?.betaald_op) : null,
         verwacht_op: verwachtOp(dagVan(rij?.sent_at), datum, termijnVan(r.payment_term_days)),
         extern_nr: (rij as { extern_factuurnummer?: string | null } | undefined)?.extern_factuurnummer ?? null,
+        recurring_omzet: true,
         acties: {
           bekijkenUrl: `/admin/invoices?maand=${m}`, aanpassenUrl: `/admin/invoices?maand=${m}`, voorbereidenUrl: null,
           kanVerstuurd: actief, kanVerplaatsen: magVerplaatsen(status), kanAnnuleren: actief, 

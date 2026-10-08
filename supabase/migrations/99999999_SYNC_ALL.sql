@@ -5610,3 +5610,10 @@ ALTER TABLE public.cp_taken ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cp_notities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cp_routine_checks ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.cp_klanten, public.cp_cycli, public.cp_taken, public.cp_notities, public.cp_routine_checks FROM anon, authenticated;
+
+-- ── Facturen: recurring-meter en verwijderen (8 okt 2026) ─────────────────────
+-- terugkerende_omzet: NULL = afgeleid (reeks/type), true/false = uitdrukkelijk gekozen.
+-- verwijderd_op: een maand van een reeks die bewust verwijderd is → komt niet terug.
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS terugkerende_omzet boolean;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS verwijderd_op timestamptz;
+ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS verwijderd_door text;

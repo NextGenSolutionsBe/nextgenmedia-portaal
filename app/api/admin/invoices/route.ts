@@ -334,6 +334,7 @@ export async function POST(req: NextRequest) {
         contract_bedrag_excl: t.contractueel.excl, currency: 'EUR', due_date: vervaldatum, payment_term_days: termijn, reference: b.reference || null, note: b.note || null,
         kind: 'client', source: recMaand ? 'recurring' : b.contract_id ? 'contract' : 'handmatig', betaalstatus: 'niet_betaald', betaald_bedrag: 0,
         factuur_type: isFactuurType(b.factuur_type) ? b.factuur_type : (recMaand ? 'terugkerend' : 'eenmalig'),
+        terugkerende_omzet: typeof b.terugkerende_omzet === 'boolean' ? b.terugkerende_omzet : null,
         mededeling: b.mededeling ? String(b.mededeling).slice(0, 4000) : null,
         klant_referentie: b.klant_referentie ? String(b.klant_referentie).slice(0, 200) : null,
         prestatie_van: /^\d{4}-\d{2}-\d{2}$/.test(String(b.prestatie_van ?? '')) ? b.prestatie_van : null,
@@ -365,6 +366,8 @@ export async function POST(req: NextRequest) {
       const start = String(b.start_month || '').slice(0, 7)
       if (!/^\d{4}-\d{2}$/.test(start)) return NextResponse.json({ error: 'Startmaand vereist' }, { status: 400 })
       const end = b.end_month ? String(b.end_month).slice(0, 7) : null
+      if (end !== null && !/^\d{4}-\d{2}$/.test(end)) return NextResponse.json({ error: 'Kies de laatste maand uit de lijst (formaat JJJJ-MM).' }, { status: 400 })
+      if (end !== null && end < start) return NextResponse.json({ error: 'De laatste maand ligt vóór de eerste maand.' }, { status: 400 })
       const invoiceDay = INVOICE_DAYS.includes(b.invoice_day) ? b.invoice_day : 'last'
       const revenueId = b.revenue_id || await linkOrCreateForecast(admin, { client_id: b.client_id || null, service_slug: b.service_slug || null, month: start, amount_excl: excl, description: b.description || null, recurring: true, start_month: start, end_month: end })
       const id = await safeInsertId(admin, 'recurring_invoices', {
@@ -430,7 +433,11 @@ export async function PATCH(req: NextRequest) {
     if (b.revenue_id !== undefined) patch.revenue_id = b.revenue_id || null
     if (b.kind === 'recurring') {
       if (b.start_month !== undefined) patch.start_month = String(b.start_month).slice(0, 7)
-      if (b.end_month !== undefined) patch.end_month = b.end_month ? String(b.end_month).slice(0, 7) : null
+      if (b.end_month !== undefined) {
+        const e = b.end_month ? String(b.end_month).slice(0, 7) : null
+        if (e !== null && !/^\d{4}-\d{2}$/.test(e)) return NextResponse.json({ error: 'Kies de laatste maand uit de lijst (formaat JJJJ-MM).' }, { status: 400 })
+        patch.end_month = e
+      }
       if (b.active !== undefined) patch.active = !!b.active
       if (b.invoice_day !== undefined) patch.invoice_day = INVOICE_DAYS.includes(b.invoice_day) ? b.invoice_day : 'last'
     } else {
