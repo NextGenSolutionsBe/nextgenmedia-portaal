@@ -438,13 +438,15 @@ export function rondeItems(momenten: Moment[], vandaag: string): Moment[] {
   return sorteerWerklijst(momenten.filter((m) => tabVan(m) === 'te_factureren' && m.datum <= vandaag && (m.bron === 'invoice' || m.bron === 'recurring')))
 }
 
-// ── Maandoverzicht en recurring-doel (altijd de VOLLEDIGE maand) ────────────
+// ── Maandoverzicht en maanddoel (altijd de VOLLEDIGE maand) ─────────────────
 //
-// Op geplande facturatiedatum. Geannuleerd/gecrediteerd telt niet; WAM-termijnen
-// (Vesting, Marco’s eigen portefeuille) zijn geen NGM-omzet en tellen niet mee.
-// Betaald zit al in “gefactureerd” en wordt nooit nog eens opgeteld.
-export const RECURRING_DOEL = 30000
-const telt = (m: Pick<Moment, 'status' | 'bron' | 'herkomst'>) => m.status !== 'geannuleerd' && m.status !== 'gecrediteerd' && m.bron !== 'wam' && m.herkomst !== 'wam'
+// Op geplande facturatiedatum. ALLE facturatie-items van de maand tellen mee —
+// eenmalig én terugkerend, ook WAM-termijnen — zodat de meter en het
+// maandoverzicht onder de lijst altijd hetzelfde totaal tonen. Geannuleerd en
+// gecrediteerd tellen niet; verwijderde items bestaan niet meer. Betaald zit al
+// in “gefactureerd” en wordt nooit nog eens opgeteld.
+export const MAAND_DOEL = 30000
+const telt = (m: Pick<Moment, 'status'>) => m.status !== 'geannuleerd' && m.status !== 'gecrediteerd'
 const r2 = (n: number) => Math.round(n * 100) / 100
 
 export type MaandOverzicht = { gefactureerd: number; open: number; totaal: number; aantalGefactureerd: number; aantalOpen: number }
@@ -458,10 +460,10 @@ export function maandOverzicht(momenten: Moment[], ym: string): MaandOverzicht {
   return { gefactureerd: r2(gef), open: r2(open), totaal: r2(gef + open), aantalGefactureerd: nG, aantalOpen: nO }
 }
 
-export type RecurringMeter = { gefactureerd: number; open: number; verwacht: number; doel: number; pct: number; nodig: number; bereikt: boolean; vulGefactureerd: number; vulOpen: number }
-/** Recurring omzet van één maand t.o.v. het doel; eenmalige omzet telt nooit mee. */
-export function recurringMeter(momenten: Moment[], ym: string, doel = RECURRING_DOEL): RecurringMeter {
-  const o = maandOverzicht(momenten.filter((m) => m.recurring_omzet === true), ym)
+export type OmzetMeter = { gefactureerd: number; open: number; verwacht: number; doel: number; pct: number; nodig: number; bereikt: boolean; vulGefactureerd: number; vulOpen: number }
+/** Verwachte maandomzet (alle items) tegenover het maanddoel. */
+export function omzetMeter(momenten: Moment[], ym: string, doel = MAAND_DOEL): OmzetMeter {
+  const o = maandOverzicht(momenten, ym)
   const verwacht = o.totaal
   const pct = doel > 0 ? Math.round((verwacht / doel) * 1000) / 10 : 0
   const vulGef = doel > 0 ? Math.min(100, (o.gefactureerd / doel) * 100) : 0

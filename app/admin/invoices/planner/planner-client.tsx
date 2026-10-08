@@ -7,7 +7,7 @@ import {
   vandaagBrussel, isDatum, ymVan, plusDagen, maandStart, maandEind, maandRooster, roosterBereik, weekBereik, shiftYM,
   maandNaam, datumKort, DAGEN_KORT, euro, euro2, kort, pasFiltersToe, dagTotalen, sorteer, filtersActief,
   LEEG_FILTERS, PLANNER_STATUSSEN, STATUS_INFO, FASEN, FASE_INFO, faseKpi, resultaat, maandKpi,
-  TABS, tabVan, inTab, sorteerWerklijst, tabTellingen, rondeItems, maandOverzicht, recurringMeter, RECURRING_DOEL,
+  TABS, tabVan, inTab, sorteerWerklijst, tabTellingen, rondeItems, maandOverzicht, omzetMeter, MAAND_DOEL,
   type Moment, type Filters, type Sortering, type Tab,
 } from '@/lib/facturatie/planner-model'
 import { PlannerDetail, DagPaneel, StatusBadge, type Actie } from './planner-detail'
@@ -102,9 +102,9 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
   // Totaalbalk: exact de zichtbare lijst (met zoeken en filters).
   const zichtbaarOpen = lijst.filter((m) => tabVan(m) === 'te_factureren')
   const zichtbaarOpenTotaal = Math.round(zichtbaarOpen.reduce((s, m) => s + m.bedrag_excl, 0) * 100) / 100
-  // Maandoverzicht en recurring-meter: altijd de VOLLEDIGE maand, los van zoeken/filters/tab.
+  // Maandoverzicht en omzetmeter: altijd de VOLLEDIGE maand, los van zoeken/filters/tab.
   const overzicht = useMemo(() => maandOverzicht(alle, ym), [alle, ym])
-  const meter = useMemo(() => recurringMeter(alle, ym), [alle, ym])
+  const meter = useMemo(() => omzetMeter(alle, ym), [alle, ym])
   const lijstTotaal = lijst.filter((m) => m.status !== 'geannuleerd' && m.status !== 'gecrediteerd').reduce((s, m) => s + m.bedrag_excl, 0)
   const perDag = useMemo(() => { const m = new Map<string, Moment[]>(); for (const x of gefilterd.filter((y) => filters.toonGeannuleerd || (y.status !== 'geannuleerd' && y.status !== 'gecrediteerd'))) { const l = m.get(x.datum) ?? []; l.push(x); m.set(x.datum, l) } return m }, [gefilterd, filters.toonGeannuleerd])
   const totalen = useMemo(() => dagTotalen(gefilterd), [gefilterd])
@@ -192,26 +192,31 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
 
   return (
     <div className="space-y-4">
-      {/* ── Bovenaan: het recurring-doel van de geselecteerde maand + acties ── */}
+      {/* ── Bovenaan: het maandelijkse omzetdoel van de geselecteerde maand + acties ── */}
       <div className="flex items-stretch gap-3 flex-wrap">
-        <section className="card-base p-4 flex-1 min-w-[280px]" aria-label="Recurring omzet tegenover het maanddoel">
+        <section className="card-base p-4 flex-1 min-w-[280px]" aria-label="Maandelijks omzetdoel">
           <div className="flex items-start justify-between gap-2 flex-wrap">
-            <div className="text-xs text-gray-500 inline-flex items-center gap-1.5"><Target className="h-3.5 w-3.5" />Terugkerende omzet · <span className="capitalize">{maandNaam(ym)}</span> · <span>Volledige maand · excl. btw</span></div>
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900 inline-flex items-center gap-1.5"><Target className="h-4 w-4" />Maandelijks omzetdoel</h2>
+              <div className="text-xs text-gray-500"><span className="capitalize">{maandNaam(ym)}</span> · Volledige maand · Excl. btw</div>
+            </div>
             {meter.bereikt && <span className="inline-flex items-center gap-1 rounded-full bg-[#166534] text-white px-2.5 py-0.5 text-[11px] font-semibold"><CheckCircle2 className="h-3 w-3" />Maanddoel bereikt</span>}
           </div>
           <div className="flex items-baseline gap-2 flex-wrap mt-1">
-            <span className="text-2xl font-bold tabular-nums">{euro(meter.verwacht)}</span>
-            <span className="text-sm text-gray-500 tabular-nums">/ {euro(RECURRING_DOEL)}</span>
-            <span className="text-sm font-semibold tabular-nums">· {meter.pct.toLocaleString('nl-BE')}%</span>
-            {!meter.bereikt && <span className="text-sm text-gray-600 tabular-nums">· Nog {euro(meter.nodig)} tot het doel</span>}
+            <span className="text-2xl font-bold tabular-nums">{euro2(meter.verwacht)}</span>
+            <span className="text-sm text-gray-500 tabular-nums">/ {euro(MAAND_DOEL)}</span>
+            <span className="text-sm font-semibold tabular-nums">· {meter.pct.toLocaleString('nl-BE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</span>
+            {!meter.bereikt && <span className="text-sm text-gray-600 tabular-nums">· Nog {euro2(meter.nodig)} tot het maanddoel</span>}
           </div>
-          <div className="mt-2 h-3 rounded-full bg-gray-100 overflow-hidden flex" role="img" aria-label={`${euro(meter.gefactureerd)} gefactureerd en ${euro(meter.open)} nog te factureren van ${euro(RECURRING_DOEL)}`}>
+          <div className="mt-2 h-3 rounded-full bg-gray-200 overflow-hidden flex" role="img" aria-label={`${euro2(meter.gefactureerd)} gefactureerd en ${euro2(meter.open)} nog te factureren van ${euro(MAAND_DOEL)}`}>
             <div className="h-full bg-[#166534]" style={{ width: `${meter.vulGefactureerd}%` }} />
-            <div className="h-full bg-[repeating-linear-gradient(135deg,#fde047,#fde047_6px,#facc15_6px,#facc15_12px)]" style={{ width: `${meter.vulOpen}%` }} />
+            <div className="h-full bg-[#facc15]" style={{ width: `${meter.vulOpen}%` }} />
           </div>
           <div className="mt-1.5 flex gap-x-4 gap-y-1 flex-wrap text-xs text-gray-700">
-            <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-[#166534]" /><b className="tabular-nums">{euro(meter.gefactureerd)}</b> gefactureerd</span>
-            <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-yellow-300 border border-yellow-500" /><b className="tabular-nums">{euro(meter.open)}</b> nog te factureren</span>
+            <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-[#166534]" /><b className="tabular-nums">{euro2(meter.gefactureerd)}</b> gefactureerd</span>
+            <span className="text-gray-400">+</span>
+            <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-[#facc15]" /><b className="tabular-nums">{euro2(meter.open)}</b> nog te factureren</span>
+            {!meter.bereikt && <span className="inline-flex items-center gap-1.5 text-gray-500"><span className="h-2.5 w-2.5 rounded-sm bg-gray-200 border border-gray-300" />{euro2(meter.nodig)} resterend tot het doel</span>}
           </div>
           {eerderAchterstallig.length > 0 && (
             <button type="button" onClick={() => { setAnker(eerderAchterstallig[0].datum); setTab('te_factureren') }} className="mt-2 inline-flex items-center gap-1 rounded-full bg-orange-500 text-white px-2.5 py-0.5 text-[11px] font-medium hover:bg-orange-600">

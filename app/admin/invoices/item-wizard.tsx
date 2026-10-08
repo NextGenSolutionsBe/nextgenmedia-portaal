@@ -437,7 +437,7 @@ function StapBasis({ basis, setBasis, contracten, nieuw }: { basis: Basis; setBa
           <div className="sm:col-span-2">
             <label className="flex items-start gap-2 text-sm cursor-pointer">
               <input type="checkbox" className="mt-0.5" checked={basis.terugkerende_omzet ?? basis.type === 'terugkerend'} onChange={(e) => zet('terugkerende_omzet', e.target.checked)} />
-              <span><b className="font-medium">Terugkerende omzet</b> <span className="text-gray-500">— telt mee voor het maanddoel recurring omzet (bv. maandelijks beheer). Laat uit voor eenmalige shoots, websites en losse opdrachten.</span></span>
+              <span><b className="font-medium">Terugkerende omzet</b> <span className="text-gray-500">— kenmerk voor terugkerende opdrachten (bv. maandelijks beheer). Het maanddoel telt altijd alle omzet mee.</span></span>
             </label>
           </div>
         )}
