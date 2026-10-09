@@ -42,7 +42,7 @@ export default async function ContractSetupPage({ params }: { params: Promise<{ 
           <ChevronLeft className="h-4 w-4" />
         </Link>
         <div>
-          <h1 className="text-xl font-bold">Handtekeningzone instellen</h1>
+          <h1 className="text-xl font-bold">AI-velden & handtekeningzone</h1>
           <p className="text-sm text-gray-500 mt-0.5">{contract.title}</p>
         </div>
       </div>
@@ -50,6 +50,7 @@ export default async function ContractSetupPage({ params }: { params: Promise<{ 
       <SignatureZoneEditor
         contractId={id}
         pdfUrl={pdfUrl}
+        initialFields={Array.isArray(contractRaw.detected_fields) ? contractRaw.detected_fields : []}
         initialZone={{
           sig_page:   contract.sig_page,
           sig_x_pct:  contract.sig_x_pct,

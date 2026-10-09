@@ -4,34 +4,34 @@ import { useRef, useState, useEffect } from 'react'
 import { Loader2, PenLine, RotateCcw, CheckCircle2, Download } from 'lucide-react'
 import Link from 'next/link'
 
+type SignField = { label: string; type: string; required?: boolean; placeholder?: string }
+
+const HTML_TYPE: Record<string, string> = { email: 'email', phone: 'tel', date: 'date', number: 'number' }
+
 export function SignatureForm({
   contractId,
   token,
-  defaultName,
-  defaultEmail,
+  signerName,
+  signerEmail,
+  fields = [],
 }: {
   contractId: string
   token: string
-  defaultName: string
-  defaultEmail: string
+  signerName: string
+  signerEmail: string
+  fields?: SignField[]
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [isDrawing, setIsDrawing] = useState(false)
   const [hasSig, setHasSig] = useState(false)
+  const [agreed, setAgreed] = useState(false)
   const [loading, setLoading] = useState(false)
   const [done, setDone] = useState(false)
   const [signedPdfUrl, setSignedPdfUrl] = useState<string | null>(null)
-  const [form, setForm] = useState({
-    name: defaultName,
-    email: defaultEmail,
-    phone: '',
-    address: '',
-    vat: '',
-    agreed: false,
-  })
-
-  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]'
-  const lbl = 'block text-sm font-medium text-gray-700 mb-1'
+  // In te vullen velden (alles behalve de handtekening, die via het canvas gaat).
+  const fillFields = fields.filter((f) => f.type !== 'signature')
+  const [values, setValues] = useState<Record<string, string | boolean>>({})
+  const missingRequired = fillFields.some((f) => f.required && (f.type === 'checkbox' ? values[f.label] !== true : !String(values[f.label] ?? '').trim()))
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -39,7 +39,7 @@ export function SignatureForm({
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     ctx.strokeStyle = '#111'
-    ctx.lineWidth = 2
+    ctx.lineWidth = 2.5
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
   }, [])
@@ -88,11 +88,9 @@ export function SignatureForm({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!hasSig) { alert('Teken eerst uw handtekening'); return }
-    if (!form.agreed) { alert('Accepteer de voorwaarden om verder te gaan'); return }
-
-    const canvas = canvasRef.current!
-    const signatureDataUrl = canvas.toDataURL('image/png')
+    if (!hasSig) return
+    if (!agreed) return
+    if (missingRequired) { alert('Vul alle verplichte velden in.'); return }
 
     setLoading(true)
     try {
@@ -102,12 +100,10 @@ export function SignatureForm({
         body: JSON.stringify({
           token,
           contract_id: contractId,
-          signer_name: form.name,
-          signer_email: form.email,
-          signer_phone: form.phone || null,
-          signer_address: form.address || null,
-          signer_vat: form.vat || null,
-          signature_data_url: signatureDataUrl,
+          signer_name: signerName,
+          signer_email: signerEmail,
+          signature_data_url: canvasRef.current!.toDataURL('image/png'),
+          field_values: values,
         }),
       })
       const json = await res.json()
@@ -121,7 +117,7 @@ export function SignatureForm({
     }
   }
 
-  // ── Success state ──────────────────────────────────────────────────────────
+  // ── Success state ────────────────────────────────────────────────────────
   if (done) {
     return (
       <div className="card-base text-center py-12 space-y-4">
@@ -131,7 +127,7 @@ export function SignatureForm({
         <div>
           <h2 className="text-xl font-bold mb-2">Contract ondertekend</h2>
           <p className="text-sm text-gray-500">
-            Bedankt. Uw handtekening is rechtstreeks op het contract geplaatst.
+            Bedankt{signerName ? `, ${signerName}` : ''}. Uw handtekening is rechtstreeks op het contract geplaatst.
           </p>
         </div>
         {signedPdfUrl ? (
@@ -145,62 +141,89 @@ export function SignatureForm({
             Getekend contract downloaden
           </a>
         ) : (
-          <p className="text-sm text-gray-500">Het getekende contract wordt zo snel mogelijk beschikbaar gesteld.</p>
+          <p className="text-sm text-gray-500">Het getekende contract is beschikbaar in uw portaal.</p>
         )}
         <Link href="/portal/contracts" className="btn-secondary inline-flex mx-auto">
           Terug naar portaal
         </Link>
-        <p className="text-xs text-gray-400">
-          U ontvangt ook een bevestiging per e-mail.
-        </p>
       </div>
     )
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="card-base space-y-4">
-        <h2 className="font-semibold text-gray-900">Uw gegevens</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className={lbl}>Naam *</label>
-            <input required className={inp} value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} placeholder="Volledige naam" />
+    <form onSubmit={handleSubmit} className="space-y-5">
+      {/* Who is signing */}
+      {(signerName || signerEmail) && (
+        <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 flex items-center gap-3">
+          <div className="h-9 w-9 rounded-full bg-[#fff848] flex items-center justify-center shrink-0">
+            <span className="text-sm font-bold text-black">
+              {signerName ? signerName.charAt(0).toUpperCase() : '?'}
+            </span>
           </div>
-          <div>
-            <label className={lbl}>E-mail *</label>
-            <input required type="email" className={inp} value={form.email} onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))} placeholder="naam@bedrijf.be" />
-          </div>
-          <div>
-            <label className={lbl}>Telefoon</label>
-            <input className={inp} value={form.phone} onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))} placeholder="+32 ..." />
-          </div>
-          <div>
-            <label className={lbl}>BTW-nummer</label>
-            <input className={inp} value={form.vat} onChange={(e) => setForm((p) => ({ ...p, vat: e.target.value }))} placeholder="BE 0123.456.789" />
-          </div>
-          <div className="sm:col-span-2">
-            <label className={lbl}>Adres</label>
-            <input className={inp} value={form.address} onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))} placeholder="Straat nr, Postcode Stad" />
+          <div className="min-w-0">
+            {signerName && <div className="text-sm font-semibold text-gray-900 truncate">{signerName}</div>}
+            {signerEmail && <div className="text-xs text-gray-500 truncate">{signerEmail}</div>}
           </div>
         </div>
-      </div>
+      )}
 
+      {/* In te vullen velden */}
+      {fillFields.length > 0 && (
+        <div className="card-base space-y-3">
+          <h2 className="font-semibold text-gray-900">Gegevens invullen</h2>
+          <div className="grid sm:grid-cols-2 gap-3">
+            {fillFields.map((f) => (
+              <div key={f.label} className={f.type === 'checkbox' ? 'sm:col-span-2' : ''}>
+                {f.type === 'checkbox' ? (
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input type="checkbox" checked={values[f.label] === true} onChange={(e) => setValues((v) => ({ ...v, [f.label]: e.target.checked }))} />
+                    {f.label}{f.required ? ' *' : ''}
+                  </label>
+                ) : (
+                  <>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{f.label}{f.required ? ' *' : ''}</label>
+                    <input
+                      type={HTML_TYPE[f.type] ?? 'text'}
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50"
+                      value={String(values[f.label] ?? '')}
+                      placeholder={f.placeholder}
+                      onChange={(e) => setValues((v) => ({ ...v, [f.label]: e.target.value }))}
+                    />
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Signature canvas */}
       <div className="card-base space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <PenLine className="h-4 w-4 text-gray-400" />
-            <h2 className="font-semibold text-gray-900">Handtekening *</h2>
+            <h2 className="font-semibold text-gray-900">Uw handtekening</h2>
           </div>
-          <button type="button" onClick={clearSig} className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-700">
-            <RotateCcw className="h-3.5 w-3.5" />
-            Wissen
-          </button>
+          {hasSig && (
+            <button
+              type="button"
+              onClick={clearSig}
+              className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-700 transition-colors"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Opnieuw
+            </button>
+          )}
         </div>
-        <div className="border-2 border-dashed border-gray-200 rounded-xl overflow-hidden bg-gray-50 touch-none">
+        <div
+          className={`border-2 rounded-xl overflow-hidden bg-white touch-none transition-colors ${
+            hasSig ? 'border-[#fff848]' : 'border-dashed border-gray-300'
+          }`}
+        >
           <canvas
             ref={canvasRef}
             width={800}
-            height={200}
+            height={220}
             className="w-full cursor-crosshair"
             style={{ touchAction: 'none' }}
             onMouseDown={startDraw}
@@ -213,33 +236,41 @@ export function SignatureForm({
           />
         </div>
         {!hasSig && (
-          <p className="text-xs text-gray-400 text-center">Teken hierboven met uw muis of vinger</p>
+          <p className="text-xs text-gray-400 text-center">
+            Teken hier uw handtekening — met muis of vinger
+          </p>
         )}
       </div>
 
+      {/* Agreement */}
       <div className="card-base">
         <label className="flex items-start gap-3 cursor-pointer">
           <input
             type="checkbox"
-            checked={form.agreed}
-            onChange={(e) => setForm((p) => ({ ...p, agreed: e.target.checked }))}
-            className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-gray-900"
+            checked={agreed}
+            onChange={(e) => setAgreed(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-gray-900 shrink-0"
           />
-          <span className="text-sm text-gray-600">
-            Ik bevestig dat ik het contract heb gelezen en ga akkoord met de vermelde voorwaarden. Ik begrijp dat mijn digitale handtekening rechtstreeks op het contract geplaatst wordt en juridisch bindend is.
+          <span className="text-sm text-gray-600 leading-relaxed">
+            Ik bevestig dat ik het contract heb gelezen en ga akkoord met de vermelde voorwaarden.
+            Mijn digitale handtekening is juridisch bindend.
           </span>
         </label>
       </div>
 
-      <button type="submit" disabled={loading || !hasSig || !form.agreed} className="btn-primary w-full justify-center py-3">
+      <button
+        type="submit"
+        disabled={loading || !hasSig || !agreed || missingRequired}
+        className="btn-primary w-full justify-center py-3 text-base disabled:opacity-40 disabled:cursor-not-allowed"
+      >
         {loading ? (
           <>
             <Loader2 className="h-4 w-4 animate-spin" />
-            Contract ondertekenen en verwerken...
+            Verwerken...
           </>
         ) : (
           <>
-            <CheckCircle2 className="h-4 w-4" />
+            <CheckCircle2 className="h-5 w-5" />
             Contract ondertekenen
           </>
         )}

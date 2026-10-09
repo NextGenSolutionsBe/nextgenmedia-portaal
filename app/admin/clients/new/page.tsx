@@ -39,12 +39,20 @@ export default function NewClientPage() {
     password: '',
     niche: '',
     website_url: '',
+    btw_nummer: '',
     services: [] as string[],
     platforms: [] as string[],
     posts_per_month: '0',
     reels_per_month: '0',
     stories_per_month: '0',
     webdesign_maintenance_included: false,
+    maintenance_start_date: '',
+    maintenance_months: '12',
+    website_platform: '',
+    website_admin_url: '',
+    framer_project_url: '',
+    framer_api_key: '',
+    cms_enabled: false,
     ads_budget: '',
   })
 
@@ -102,12 +110,20 @@ export default function NewClientPage() {
           password: form.password,
           niche: form.niche,
           website_url: form.website_url,
+          btw_nummer: form.btw_nummer,
           services: form.services,
           platforms: form.platforms,
           posts_per_month: parseInt(form.posts_per_month) || 0,
           reels_per_month: parseInt(form.reels_per_month) || 0,
           stories_per_month: parseInt(form.stories_per_month) || 0,
           webdesign_maintenance_included: form.webdesign_maintenance_included,
+          maintenance_start_date: form.maintenance_start_date,
+          maintenance_months: parseInt(form.maintenance_months) || 12,
+          website_platform: form.website_platform === '' ? null : form.website_platform,
+          website_admin_url: form.website_admin_url,
+          framer_project_url: form.framer_project_url,
+          framer_api_key: form.framer_api_key,
+          cms_enabled: form.cms_enabled,
           ads_budget: form.ads_budget ? parseFloat(form.ads_budget) : null,
           service_configs,
         }),
@@ -142,7 +158,7 @@ export default function NewClientPage() {
         {/* Bedrijfsgegevens */}
         <div className="card-base space-y-4">
           <h2 className="font-semibold text-gray-900">Bedrijfsgegevens</h2>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className={lbl}>Bedrijfsnaam *</label>
               <input required className={inp} value={form.company_name}
@@ -154,7 +170,7 @@ export default function NewClientPage() {
                 onChange={e => setForm(p => ({ ...p, contact_name: e.target.value }))} placeholder="Jan Janssen" />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className={lbl}>Niche</label>
               <input className={inp} value={form.niche}
@@ -165,13 +181,18 @@ export default function NewClientPage() {
               <input className={inp} type="url" value={form.website_url}
                 onChange={e => setForm(p => ({ ...p, website_url: e.target.value }))} placeholder="https://bedrijf.be" />
             </div>
+            <div>
+              <label className={lbl}>BTW-nummer</label>
+              <input className={inp} value={form.btw_nummer}
+                onChange={e => setForm(p => ({ ...p, btw_nummer: e.target.value }))} placeholder="BE0123456789" />
+            </div>
           </div>
         </div>
 
         {/* Accounttoegang */}
         <div className="card-base space-y-4">
           <h2 className="font-semibold text-gray-900">Accounttoegang</h2>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className={lbl}>E-mailadres *</label>
               <input required type="email" className={inp} value={form.email}
@@ -228,7 +249,7 @@ export default function NewClientPage() {
                     </div>
 
                     {/* Startmaand + Duur */}
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <label className={lbl}>Startmaand</label>
                         <input
@@ -264,7 +285,7 @@ export default function NewClientPage() {
                     {/* Social Media settings */}
                     {slug === 'social-media' && (
                       <div className="space-y-3 border-t border-gray-100 pt-3">
-                        <div className="grid grid-cols-3 gap-3">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                           <div>
                             <label className={lbl}>Posts/maand</label>
                             <input type="number" min="0" max="60" className={inp} value={form.posts_per_month}
@@ -305,16 +326,84 @@ export default function NewClientPage() {
 
                     {/* Website settings */}
                     {slug === 'webdesign' && (
-                      <div className="border-t border-gray-100 pt-3">
-                        <label className="flex items-center gap-3 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={form.webdesign_maintenance_included}
-                            onChange={e => setForm(p => ({ ...p, webdesign_maintenance_included: e.target.checked }))}
-                            className="h-4 w-4 rounded border-gray-300 accent-[#fff848]"
-                          />
-                          <span className="text-sm text-gray-700">Onderhoud inbegrepen (1 jaar)</span>
-                        </label>
+                      <div className="border-t border-gray-100 pt-3 space-y-3">
+                        {/* Hoe is de site gebouwd? Interne administratie — de klant ziet dit nooit. */}
+                        <div>
+                          <label className={lbl}>Type website</label>
+                          <div className="flex gap-1.5 flex-wrap">
+                            {[{ v: 'framer', l: 'Framer' }, { v: 'custom', l: 'Custom code' }].map(o => (
+                              <button key={o.v} type="button"
+                                onClick={() => setForm(p => ({ ...p, website_platform: p.website_platform === o.v ? '' : o.v }))}
+                                className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${form.website_platform === o.v ? 'bg-black text-white border-black' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}>
+                                {o.l}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {form.website_platform === 'framer' && (
+                          <div className="space-y-2">
+                            <label className="flex items-center gap-3 cursor-pointer">
+                              <input type="checkbox" checked={form.cms_enabled}
+                                onChange={e => setForm(p => ({ ...p, cms_enabled: e.target.checked }))}
+                                className="h-4 w-4 rounded border-gray-300 accent-[#fff848]" />
+                              <span className="text-sm text-gray-700">CMS inbegrepen — klant beheert de inhoud in het portaal</span>
+                            </label>
+                            {form.cms_enabled && (
+                              <>
+                                <div>
+                                  <label className={lbl}>Projectlink of project-ID</label>
+                                  <input className={inp} value={form.framer_project_url}
+                                    onChange={e => setForm(p => ({ ...p, framer_project_url: e.target.value }))}
+                                    placeholder="https://framer.com/projects/…" />
+                                </div>
+                                <div>
+                                  <label className={lbl}>API-sleutel</label>
+                                  <input className={inp} type="password" autoComplete="off" value={form.framer_api_key}
+                                    onChange={e => setForm(p => ({ ...p, framer_api_key: e.target.value }))}
+                                    placeholder="Site Settings → General → API key" />
+                                  <p className="text-[11px] text-gray-400 mt-1">Blijft op de server; de inhoud wordt meteen opgehaald na het aanmaken.</p>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
+
+                        {form.website_platform === 'custom' && (
+                          <div>
+                            <label className={lbl}>Link naar het beheerplatform</label>
+                            <input className={inp} type="url" value={form.website_admin_url}
+                              onChange={e => setForm(p => ({ ...p, website_admin_url: e.target.value }))}
+                              placeholder="https://beheer.klant.be" />
+                            <p className="text-[11px] text-gray-400 mt-1">De klant krijgt hier een knop naar toe in zijn portaal.</p>
+                          </div>
+                        )}
+
+                        <div className="space-y-2">
+                          <label className="flex items-center gap-3 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={form.webdesign_maintenance_included}
+                              onChange={e => setForm(p => ({ ...p, webdesign_maintenance_included: e.target.checked }))}
+                              className="h-4 w-4 rounded border-gray-300 accent-[#fff848]"
+                            />
+                            <span className="text-sm text-gray-700">Onderhoud inbegrepen</span>
+                          </label>
+                          {form.webdesign_maintenance_included && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className={lbl}>Startdatum onderhoud</label>
+                                <input className={inp} type="date" value={form.maintenance_start_date}
+                                  onChange={e => setForm(p => ({ ...p, maintenance_start_date: e.target.value }))} />
+                              </div>
+                              <div>
+                                <label className={lbl}>Looptijd (maanden)</label>
+                                <input className={inp} type="number" min={1} value={form.maintenance_months}
+                                  onChange={e => setForm(p => ({ ...p, maintenance_months: e.target.value }))} />
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
 
