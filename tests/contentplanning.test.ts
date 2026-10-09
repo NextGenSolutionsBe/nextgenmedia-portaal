@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict'
 import {
-  STANDAARD_CP as S, beurtenMetBord, standaardFases, fasesVanMaand, reeksenVanDag, plusWerkdagen, isKwartaalmaand, ritmeVan, beurten, teMakenTaken,
+  STANDAARD_CP as S, beurtenMetBord, faseplanVanMaand, pasFaseAan, wisselDag, planNaarDagen, reeksPeriodes, segmenten, eersteWerkdag, standaardFases, fasesVanMaand, reeksenVanDag, plusWerkdagen, isKwartaalmaand, ritmeVan, beurten, teMakenTaken,
   verwachteDatum, isAchterstallig, deadlineVerstreken, routineVoorDag, werkdagenVanMaand, leesCp,
 } from '../lib/contentplanning/model'
 
@@ -106,6 +106,30 @@ test('Klantenbatches-bord gaat voor: ✓/✗ per reeks, kwartaalmeeting volgt no
   // Ritme onbekend, maar bord ingevuld → het bord volstaat.
   const zonder = beurtenMetBord('2026-10', S.onderdelen, { ritme: null, activiteiten: {}, batch_start_maand: null }, { 2: true })
   assert.equal(zonder.find((x) => x.onderdeel === 'shoot')!.aanDeBeurt, true)
+})
+
+test('Reeksen aanpassen: editen één dag langer → feedback en aanpassingen schuiven mee; shoots niet', () => {
+  const plan = faseplanVanMaand('2026-10', {})
+  assert.deepEqual(segmenten(plan.edit), [[11, 18]])
+  const na = pasFaseAan(plan, 'edit', [11, 18], [11, 19], true, 22)
+  assert.deepEqual(segmenten(na.edit), [[11, 19]])
+  assert.deepEqual(segmenten(na.feedback), [[20, 22]])      // was 19–21
+  assert.deepEqual(segmenten(na.aanpassingen), [[20, 22]])  // was 19–22, klemt op de laatste werkdag
+  assert.deepEqual(segmenten(na.shoots), [[6, 13]])         // begon vóór het einde van editen → blijft
+  assert.deepEqual(segmenten(na.stats), [[22, 22]])          // laatste werkdag blijft de laatste
+  // Zonder meeschuiven verandert enkel editen.
+  const zonder = pasFaseAan(plan, 'edit', [11, 18], [11, 19], false, 22)
+  assert.deepEqual(segmenten(zonder.feedback), [[19, 21]])
+})
+
+test('Reeksen: dag aan/uit, terug naar per-dag-opslag, periodes per reeks, eerste werkdag', () => {
+  const plan = wisselDag(faseplanVanMaand('2026-10', {}), 'ideeen', 3)
+  assert.deepEqual(segmenten(plan.ideeen), [[1, 3]])
+  const dagen = planNaarDagen('2026-10', plan)
+  assert.deepEqual(dagen['2026-10-05'], ['ideeen', 'intakes']) // 3e werkdag = maandag 5 oktober
+  const p = reeksPeriodes('2026-10', faseplanVanMaand('2026-10', {}), S.fase_reeks)
+  assert.deepEqual(p[1], { van: '2026-10-01', tot: '2026-10-12', dagen: 8 })
+  assert.equal(eersteWerkdag('2026-11'), '2026-11-02') // 1 november is een zondag
 })
 
 console.log(`\n${n} tests geslaagd\n`)

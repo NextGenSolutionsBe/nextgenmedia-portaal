@@ -1,11 +1,11 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { AlertTriangle, Bell, CalendarPlus, ChevronDown, ExternalLink, Plus, StickyNote, Check, Inbox, Layers } from 'lucide-react'
+import { AlertTriangle, Bell, CalendarPlus, ChevronDown, ExternalLink, Plus, StickyNote, Check, Inbox, Layers, Route, Flag } from 'lucide-react'
 import { INP } from '@/app/admin/instellingen/ui'
-import { REEKSEN, isAchterstallig, isKlaar, isKwartaalmaand, maandag, plusDagen, routineVoorDag, maandVan, statusVan, DAG_KORT, type Reeks } from '@/lib/contentplanning/model'
+import { REEKSEN, isAchterstallig, isKlaar, isKwartaalmaand, maandag, plusDagen, routineVoorDag, maandVan, statusVan, eersteWerkdag, MAANDSTART, DAG_KORT, type Reeks } from '@/lib/contentplanning/model'
 import { Leeg, StatusBadge, TaakKaart, focusRing } from './bouwstenen'
-import type { CpData, Doe, Notitie, Taak } from './types'
+import type { CpData, Doe, Notitie, Taak, Weergave } from './types'
 import { MAANDEN, datumNl } from './types'
 
 export type WeergaveProps = {
@@ -20,6 +20,12 @@ export type WeergaveProps = {
   vink: (t: Taak) => void
   verplaats: (t: Taak, datum: string | null) => void
   kanSchrijven: boolean
+}
+
+/** Eerste werkdag van de maand = maandstart (Klantenbatches + Reeksen). */
+const isMaandstart = (d: string) => d === eersteWerkdag(maandVan(d))
+function MaandstartLabel() {
+  return <span className="inline-flex items-center gap-0.5 rounded bg-black text-white px-1 text-[9px] font-semibold uppercase leading-4" title="Eerste werkdag: Klantenbatches invullen en reeksen bekijken"><Flag className="h-2.5 w-2.5" />Maandstart</span>
 }
 
 function ReeksStippen({ r }: { r: Reeks[] }) {
@@ -41,7 +47,7 @@ function useDrop(taken: Taak[], verplaats: WeergaveProps['verplaats']) {
 }
 
 // ── Dag ─────────────────────────────────────────────────────────────────────
-export function DagWeergave(p: WeergaveProps & { aanDeBeurt: { zonderCyclus: number; ontbrekend: number }; onKlaarzetten: () => void; onNaarBatches: () => void }) {
+export function DagWeergave(p: WeergaveProps & { aanDeBeurt: { zonderCyclus: number; ontbrekend: number }; onKlaarzetten: () => void; onWeergave: (w: Weergave) => void }) {
   const { data, taken, vandaag, anker } = p
   const st = data.instellingen.statussen
   const maand = maandVan(anker)
@@ -58,7 +64,17 @@ export function DagWeergave(p: WeergaveProps & { aanDeBeurt: { zonderCyclus: num
   const [planDatum, setPlanDatum] = useState<Record<string, string>>({})
   // Stap 2: wie zit deze maand in welke reeks (volgens Klantenbatches)?
   const bordMaand = data.bord.filter((c) => c.maand === maand)
-  const klantenInReeks = (r: Reeks) => bordMaand.filter((c) => c.reeks === r && c.actief).map((c) => p.klantNaam(c.client_id)).filter((x): x is string => !!x).sort((a, b) => a.localeCompare(b, 'nl'))
+  const klantenInReeks = (r: Reeks) => bordMaand.filter((c) => c.reeks === r && c.actief).map((c) => ({ id: c.client_id, naam: p.klantNaam(c.client_id) })).filter((x): x is { id: string; naam: string } => !!x.naam).sort((a, b) => a.naam.localeCompare(b.naam, 'nl'))
+  // Stap 1 + 2 samen: per klant de open taken van die reeks in de cyclus van deze maand.
+  const cycliMaand = new Set(data.cycli.filter((c) => c.maand === maand).map((c) => c.id))
+  const takenVan = (cid: string, r: Reeks) => {
+    const alle = taken.filter((t) => t.client_id === cid && t.reeks === r && (t.cyclus_id ? cycliMaand.has(t.cyclus_id) : (t.werkdatum ?? '').startsWith(maand)))
+    return { alle, open: alle.filter((t) => !isKlaar(t.status, st)).sort((a, b) => (a.werkdatum ?? '9999').localeCompare(b.werkdatum ?? '9999') || a.volgorde - b.volgorde) }
+  }
+  // Maandstart: op de eerste werkdag (en daarna zolang het niet afgevinkt is).
+  const eerste = eersteWerkdag(maand)
+  const startKlaar = (key: string) => data.checks.some((c) => c.routine_key === key && c.datum === eerste)
+  const toonMaandstart = anker >= eerste && (anker === eerste || MAANDSTART.some((m) => !startKlaar(m.key)))
 
   return (
     <div className="grid lg:grid-cols-[1fr_340px] gap-4">
@@ -78,22 +94,65 @@ export function DagWeergave(p: WeergaveProps & { aanDeBeurt: { zonderCyclus: num
           ))}
         </div>
 
-        {/* Klanten in de reeks(en) van vandaag, volgens Klantenbatches */}
+        {/* Maandstart: elke maand op de eerste werkdag */}
+        {toonMaandstart && (
+          <section className={`rounded-xl border p-3 space-y-2 ${anker === eerste ? 'border-black bg-[#fff848]/30' : 'border-amber-300 bg-amber-50'}`}>
+            <h2 className="font-semibold text-sm flex items-center gap-1.5"><Flag className="h-4 w-4" />{anker === eerste ? `Maandstart ${MAANDEN[Number(maand.slice(5)) - 1]} — eerste werkdag` : `Maandstart ${MAANDEN[Number(maand.slice(5)) - 1]} nog niet afgerond (was ${datumNl(eerste)})`}</h2>
+            {MAANDSTART.map((m, i) => {
+              const aan = startKlaar(m.key)
+              const door = data.checks.find((c) => c.routine_key === m.key && c.datum === eerste)?.door
+              return (
+                <div key={m.key} className="flex items-center gap-2 flex-wrap text-sm">
+                  <input type="checkbox" className="h-4 w-4" checked={aan} disabled={!p.kanSchrijven} aria-label={`${m.titel} afvinken`}
+                    onChange={(e) => p.doe('routine.check', { routine_key: m.key, datum: eerste, aan: e.target.checked }, { stil: true })} />
+                  <span className={aan ? 'line-through text-gray-500' : ''}>Stap {i + 1} · {m.titel}{aan && door && <span className="text-[11px] text-gray-400"> · {door}</span>}</span>
+                  {m.key === 'maandstart_batches' && <span className="text-[11px] text-gray-500">({new Set(bordMaand.map((c) => c.client_id)).size} klant(en) ingevuld)</span>}
+                  <button type="button" onClick={() => p.onWeergave(m.weergave)} className={`btn-secondary text-xs ml-auto ${focusRing}`}>{m.weergave === 'batches' ? <Layers className="h-3.5 w-3.5" /> : <Route className="h-3.5 w-3.5" />}Openen</button>
+                </div>
+              )
+            })}
+            {data.kan.beheren && <p className="text-[11px] text-gray-600">Daarna: “Taken klaarzetten” maakt de taken van de reeksen met een ✓.</p>}
+          </section>
+        )}
+
+        {/* Stap 1 + 2: wat moet je vandaag per klant doen in de reeks(en) van vandaag */}
         {bordMaand.length === 0 ? (
           <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-center gap-2 flex-wrap">
             <Layers className="h-4 w-4" />Klantenbatches voor {MAANDEN[Number(maand.slice(5)) - 1]} is nog niet ingevuld — dan weet de planning niet welke klant in welke reeks zit.
-            <button type="button" onClick={p.onNaarBatches} className="btn-primary text-xs ml-auto">Klantenbatches invullen</button>
+            <button type="button" onClick={() => p.onWeergave('batches')} className="btn-primary text-xs ml-auto">Klantenbatches invullen</button>
           </div>
         ) : reeksen.length > 0 && (
-          <div className="card-base p-3 space-y-1.5">
+          <section className="card-base p-3 sm:p-4 space-y-3">
             {reeksen.map((r) => { const l = klantenInReeks(r); return (
-              <div key={r} className="text-sm flex items-start gap-2">
-                <span className={`mt-1.5 h-2 w-2 rounded-full shrink-0 ${REEKSEN[r - 1].kleur}`} />
-                <span><b className="font-medium">{REEKSEN[r - 1].label}</b> · {l.length ? <span className="text-gray-700">{l.join(', ')}</span> : <span className="text-gray-500">geen klanten deze maand</span>}</span>
+              <div key={r} className="space-y-1.5">
+                <h2 className="text-sm font-semibold flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${REEKSEN[r - 1].kleur}`} />Vandaag in {REEKSEN[r - 1].label} <span className="font-normal text-gray-500">· {l.length} klant{l.length === 1 ? '' : 'en'}</span></h2>
+                {l.length === 0 ? <p className="text-xs text-gray-500 pl-4">Geen klanten met een ✓ voor deze reeks deze maand.</p> : (
+                  <div className="divide-y divide-gray-100 rounded-lg border border-gray-100">
+                    {l.map((k) => { const { alle, open } = takenVan(k.id, r); return (
+                      <div key={k.id} className="px-2.5 py-2 flex items-start gap-2 flex-wrap">
+                        <button type="button" onClick={() => p.onKlant(k.id)} className={`text-sm font-medium text-gray-900 hover:underline min-w-[130px] text-left ${focusRing} rounded`}>{k.naam}</button>
+                        <div className="flex-1 min-w-0 flex flex-wrap gap-1">
+                          {alle.length === 0 ? <span className="text-xs text-amber-800">nog geen taken klaargezet</span>
+                            : open.length === 0 ? <span className="text-xs text-green-700 inline-flex items-center gap-1"><Check className="h-3.5 w-3.5" />alles van deze reeks is klaar</span>
+                            : open.map((t) => { const s = statusVan(t.status, st); return (
+                              <button key={t.id} type="button" onClick={() => p.onTaak(t)} title={`${t.titel} · ${s.label}${t.werkdatum ? ` · ${datumNl(t.werkdatum)}` : ' · nog in te plannen'}`}
+                                className={`rounded border px-1.5 py-0.5 text-[11px] leading-tight max-w-full truncate ${s.kleur} ${t.werkdatum === anker ? 'ring-1 ring-black' : ''} ${focusRing}`}>
+                                {t.titel}<span className="opacity-70"> · {t.werkdatum ? datumNl(t.werkdatum) : 'in te plannen'}</span>
+                              </button>
+                            ) })}
+                        </div>
+                      </div>
+                    ) })}
+                  </div>
+                )}
               </div>
             ) })}
-            <button type="button" onClick={p.onNaarBatches} className={`text-xs underline text-gray-600 ${focusRing}`}>Klantenbatches bekijken</button>
-          </div>
+            <div className="flex gap-3 flex-wrap items-center">
+              <button type="button" onClick={() => p.onWeergave('batches')} className={`text-xs underline text-gray-600 ${focusRing}`}>Klantenbatches bekijken</button>
+              <button type="button" onClick={() => p.onWeergave('reeksen')} className={`text-xs underline text-gray-600 ${focusRing}`}>Reeksen van de maand</button>
+              {data.kan.beheren && reeksen.some((r) => klantenInReeks(r).some((k) => takenVan(k.id, r).alle.length === 0)) && <button type="button" onClick={p.onKlaarzetten} className="btn-primary text-xs ml-auto">Taken klaarzetten</button>}
+            </div>
+          </section>
         )}
 
         {(p.aanDeBeurt.zonderCyclus > 0 || p.aanDeBeurt.ontbrekend > 0) && data.kan.beheren && (
@@ -216,7 +275,7 @@ export function WeekWeergave(p: WeergaveProps) {
             <section key={dag} {...d.props(dag)} className={`card-base p-2 min-h-[120px] md:min-h-[320px] flex flex-col ${dag === vandaag ? 'ring-2 ring-[#fff848]' : ''} ${d.doel === dag ? 'ring-2 ring-black bg-[#fff848]/10' : ''}`}>
               <div className="flex items-center justify-between gap-1 mb-1.5">
                 <button type="button" onClick={() => p.onDag(dag)} className={`text-xs font-semibold capitalize ${focusRing} rounded`}>{DAG_KORT[(new Date(`${dag}T12:00:00Z`).getUTCDay() + 6) % 7]} {Number(dag.slice(8))}/{Number(dag.slice(5, 7))}</button>
-                <ReeksStippen r={p.reeksenOp(dag)} />
+                <span className="inline-flex items-center gap-1">{isMaandstart(dag) && <MaandstartLabel />}<ReeksStippen r={p.reeksenOp(dag)} /></span>
               </div>
               <div className="text-[10px] text-gray-500 mb-1">{lijst.length ? `${open} open · ${lijst.length} totaal` : ''}</div>
               <div className="space-y-1 flex-1">
@@ -239,7 +298,7 @@ export function MaandWeergave(p: WeergaveProps) {
   const start = maandag(`${ym}-01`)
   const cellen = Array.from({ length: 42 }, (_, i) => plusDagen(start, i))
   const d = useDrop(taken, p.verplaats)
-  const metTaken = cellen.filter((c) => maandVan(c) === ym && taken.some((t) => t.werkdatum === c))
+  const metTaken = cellen.filter((c) => maandVan(c) === ym && (isMaandstart(c) || taken.some((t) => t.werkdatum === c)))
   return (
     <div className="space-y-2">
       <div className="hidden md:block card-base p-0 overflow-hidden">
@@ -254,7 +313,7 @@ export function MaandWeergave(p: WeergaveProps) {
               <div key={c} {...d.props(c)} className={`min-h-[110px] border-b border-r border-gray-100 p-1 flex flex-col ${inMaand ? 'bg-white' : 'bg-gray-50/70'} ${c === vandaag ? 'ring-2 ring-inset ring-[#fff848]' : ''} ${d.doel === c ? 'ring-2 ring-inset ring-black' : ''}`}>
                 <div className="flex gap-0.5 mb-0.5">{r.map((n) => <span key={n} className={`h-1 flex-1 rounded-full ${REEKSEN[n - 1].kleur} opacity-60`} title={REEKSEN[n - 1].label} />)}</div>
                 <div className="flex items-center justify-between">
-                  <button type="button" onClick={() => p.onDag(c)} className={`text-xs font-medium ${inMaand ? 'text-gray-800' : 'text-gray-400'} ${focusRing} rounded px-0.5`}>{Number(c.slice(8))}</button>
+                  <span className="inline-flex items-center gap-1"><button type="button" onClick={() => p.onDag(c)} className={`text-xs font-medium ${inMaand ? 'text-gray-800' : 'text-gray-400'} ${focusRing} rounded px-0.5`}>{Number(c.slice(8))}</button>{inMaand && isMaandstart(c) && <MaandstartLabel />}</span>
                   {p.kanSchrijven && inMaand && <button type="button" onClick={() => p.onTaak(null, { werkdatum: c })} className={`text-gray-300 hover:text-black ${focusRing} rounded`} aria-label={`Taak toevoegen op ${c}`}><Plus className="h-3 w-3" /></button>}
                 </div>
                 <div className="space-y-0.5 mt-0.5">
@@ -280,7 +339,7 @@ export function MaandWeergave(p: WeergaveProps) {
         {metTaken.length === 0 && <Leeg>Geen taken met een werkdatum in deze maand.</Leeg>}
         {metTaken.map((c) => (
           <section key={c} className="card-base p-2.5">
-            <button type="button" onClick={() => p.onDag(c)} className={`w-full flex items-center justify-between text-sm font-semibold mb-1.5 ${focusRing}`}><span className="capitalize">{DAG_KORT[(new Date(`${c}T12:00:00Z`).getUTCDay() + 6) % 7]} {Number(c.slice(8))} {MAANDEN[Number(c.slice(5, 7)) - 1]}</span><ReeksStippen r={p.reeksenOp(c)} /></button>
+            <button type="button" onClick={() => p.onDag(c)} className={`w-full flex items-center justify-between text-sm font-semibold mb-1.5 ${focusRing}`}><span className="capitalize">{DAG_KORT[(new Date(`${c}T12:00:00Z`).getUTCDay() + 6) % 7]} {Number(c.slice(8))} {MAANDEN[Number(c.slice(5, 7)) - 1]}</span><span className="inline-flex items-center gap-1">{isMaandstart(c) && <MaandstartLabel />}<ReeksStippen r={p.reeksenOp(c)} /></span></button>
             <div className="space-y-1">{taken.filter((t) => t.werkdatum === c).map((t) => <TaakKaart key={t.id} t={t} klant={p.klantNaam(t.client_id)} statussen={st} vandaag={vandaag} aantalNotities={p.notitiesVan(t.id)} onOpen={() => p.onTaak(t)} onVink={p.kanSchrijven ? () => p.vink(t) : undefined} />)}</div>
           </section>
         ))}

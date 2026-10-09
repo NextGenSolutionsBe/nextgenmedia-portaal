@@ -4,7 +4,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { magIk } from '@/lib/instellingen/laden'
 import { leesActorNamen } from '@/lib/actor-namen'
 import {
-  leesCp, beurtenMetBord, teMakenTaken, isReeks, plusDagen, maandVan, plusMaanden, STANDAARD_CP,
+  leesCp, beurtenMetBord, teMakenTaken, isReeks, plusDagen, maandVan, plusMaanden, maandEind, werkdagenVanMaand, FASE_KEYS, STANDAARD_CP,
   type ActiviteitRitme, type CpInstellingen, type Ritme, type Bord, type Reeks,
 } from '@/lib/contentplanning/model'
 
@@ -261,6 +261,29 @@ export async function POST(req: NextRequest) {
       const { count } = await admin.from('clients').select('id', { count: 'exact', head: true }).eq('batch_id', id)
       if ((count ?? 0) > 0) return NextResponse.json({ error: 'Er staan nog klanten in deze batch. Verplaats ze eerst.' }, { status: 409 })
       const { error } = await admin.from('batches').delete().eq('id', id)
+      if (error) throw new Error(error.message)
+      return NextResponse.json({ ok: true })
+    }
+
+    // ── Reeksen per maand (stap 2): bewaard als Maandplanning-aanpassingen ──
+    if (actie === 'reeksen.opslaan') {
+      const maand = typeof b.maand === 'string' && YM.test(b.maand) ? b.maand : null
+      const dagen = b.dagen && typeof b.dagen === 'object' ? b.dagen as Record<string, unknown> : null
+      if (!maand || !dagen) return NextResponse.json({ error: 'Kies de maand.' }, { status: 400 })
+      const geldig = new Set(werkdagenVanMaand(maand))
+      const rijen = Object.entries(dagen).filter(([d]) => geldig.has(d)).map(([d, cats]) => ({
+        plan_date: d, categories: (Array.isArray(cats) ? cats : []).filter((c): c is string => typeof c === 'string' && (FASE_KEYS as string[]).includes(c)),
+        updated_by: r.persoon?.userId ?? null, updated_at: nu,
+      }))
+      if (!rijen.length) return NextResponse.json({ error: 'Geen werkdagen om te bewaren.' }, { status: 400 })
+      const { error } = await admin.from('month_planning_overrides').upsert(rijen, { onConflict: 'plan_date' })
+      if (error) throw new Error(error.message)
+      return NextResponse.json({ ok: true })
+    }
+    if (actie === 'reeksen.herstel') {
+      const maand = typeof b.maand === 'string' && YM.test(b.maand) ? b.maand : null
+      if (!maand) return NextResponse.json({ error: 'Kies de maand.' }, { status: 400 })
+      const { error } = await admin.from('month_planning_overrides').delete().gte('plan_date', `${maand}-01`).lte('plan_date', maandEind(maand))
       if (error) throw new Error(error.message)
       return NextResponse.json({ ok: true })
     }

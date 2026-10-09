@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Plus, Search, Filter, Settings2, Loader2, X, CalendarDays, CalendarRange, Calendar, LayoutGrid, Layers } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Search, Filter, Settings2, Loader2, X, CalendarDays, CalendarRange, Calendar, LayoutGrid, Layers, Route } from 'lucide-react'
 import { INP } from '@/app/admin/instellingen/ui'
 import { fasesVanMaand, reeksenVanDag, isKlaar, maandVan, maandag, plusDagen, plusMaanden, maandStart, maandEind, REEKSEN, type Reeks } from '@/lib/contentplanning/model'
 import { DagWeergave, WeekWeergave, MaandWeergave, Klantenbord } from './weergaven'
 import { Klantenbatches } from './klantenbatches'
+import { Reeksen } from './reeksen'
 import { TaakPaneel, KlantFiche, InstellingenPaneel } from './panelen'
 import { Notities, Paneel, focusRing } from './bouwstenen'
 import type { CpData, Doe, Filters, Notitie, Taak, Weergave } from './types'
@@ -14,7 +15,7 @@ import { LEGE_FILTERS, datumLang, maandNaam, vandaagBE } from './types'
 
 /**
  * Contentplanning — Chiara’s centrale werkplanning. Eén set taken en gegevens,
- * vier weergaven (Dag · Week · Maand · Klantenbord). Een wijziging is meteen
+ * weergaven Dag · Klantenbatches · Reeksen · Week · Maand · Klantenbord. Een wijziging is meteen
  * overal zichtbaar. Laatst gekozen weergave en filters worden onthouden.
  */
 
@@ -27,7 +28,8 @@ type PaneelStaat =
 
 const VOORKEUR = 'ngm-contentplanning-v1'
 const WEERGAVEN: { key: Weergave; label: string; icon: typeof Calendar }[] = [
-  { key: 'dag', label: 'Dag', icon: Calendar }, { key: 'batches', label: 'Klantenbatches', icon: Layers }, { key: 'week', label: 'Week', icon: CalendarRange },
+  { key: 'dag', label: 'Dag', icon: Calendar }, { key: 'batches', label: 'Klantenbatches', icon: Layers }, { key: 'reeksen', label: 'Reeksen', icon: Route },
+  { key: 'week', label: 'Week', icon: CalendarRange },
   { key: 'maand', label: 'Maand', icon: CalendarDays }, { key: 'bord', label: 'Klantenbord', icon: LayoutGrid },
 ]
 
@@ -208,8 +210,9 @@ export function ContentplanningClient() {
       {fout && <div className="card-base text-sm text-red-700 bg-red-50 border-red-100 flex items-center gap-2">Laden mislukt: {fout}<button type="button" onClick={ververs} className="btn-secondary text-xs ml-auto">Opnieuw</button></div>}
       {!data && !fout && <div className="card-base py-16 text-center text-gray-400"><Loader2 className="h-5 w-5 animate-spin mx-auto" /><div className="text-sm mt-2">Planning laden…</div></div>}
 
-      {props && weergave === 'dag' && <DagWeergave {...props} aanDeBeurt={aanDeBeurt} onKlaarzetten={klaarzetten} onNaarBatches={() => setWeergave('batches')} />}
+      {props && weergave === 'dag' && <DagWeergave {...props} aanDeBeurt={aanDeBeurt} onKlaarzetten={klaarzetten} onWeergave={setWeergave} />}
       {props && weergave === 'batches' && <Klantenbatches data={props.data} maand={ym} doe={doe} onKlant={props.onKlant} onKlaarzetten={klaarzetten} />}
+      {props && weergave === 'reeksen' && <Reeksen data={props.data} maand={ym} doe={doe} vandaag={vandaag} />}
       {props && weergave === 'week' && <WeekWeergave {...props} />}
       {props && weergave === 'maand' && <MaandWeergave {...props} />}
       {props && weergave === 'bord' && <Klantenbord {...props} klantFilter={(id) => klantFilter(id)} onKlaarzetten={klaarzetten} />}

@@ -241,3 +241,83 @@ export const deadlineVerstreken = (t: TaakLicht, vandaag: string, statussen: Sta
 // ── Inner Stance-routine ────────────────────────────────────────────────────
 export const routineVoorDag = (routine: Routine[], datum: string) => routine.filter((r) => r.dagen.includes(weekdagNr(datum)))
 export const DAG_KORT = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo']
+
+// ── Reeksen per maand aanpassen (stap 2) ────────────────────────────────────
+//
+// Een fase loopt over werkdagen van de maand (1 = eerste werkdag). Verleng,
+// verkort of verschuif je een fase, dan schuiven de fases die NA haar oude
+// einde beginnen evenveel werkdagen mee (instelbaar). Alles wordt bewaard als
+// de bestaande Maandplanning-aanpassingen, zodat elke weergave meeloopt.
+export type FasePlan = Record<FaseKey, number[]>
+
+export const eersteWerkdag = (ym: string): string => werkdagenVanMaand(ym)[0]
+
+/** Per fase de werkdag-indexen (1-based) van de maand. */
+export function faseplanVanMaand(ym: string, aanpassingen: Record<string, string[]>): FasePlan {
+  const wd = werkdagenVanMaand(ym)
+  const f = fasesVanMaand(ym, aanpassingen)
+  const plan = Object.fromEntries(FASE_KEYS.map((k) => [k, [] as number[]])) as FasePlan
+  wd.forEach((d, i) => { for (const k of f.get(d) ?? []) plan[k].push(i + 1) })
+  return plan
+}
+
+/** Aaneensluitende stukken: [3,4,5,9] → [[3,5],[9,9]]. */
+export function segmenten(idx: number[]): [number, number][] {
+  const s = [...new Set(idx)].sort((a, b) => a - b)
+  const uit: [number, number][] = []
+  for (const i of s) { const l = uit[uit.length - 1]; if (l && i === l[1] + 1) l[1] = i; else uit.push([i, i]) }
+  return uit
+}
+
+/**
+ * Eén stuk van een fase aanpassen: van [oudVan, oudTot] naar [nieuwVan, nieuwTot].
+ * Met meeschuiven verplaatsen fases die pas na het oude einde beginnen mee met
+ * het verschil van het einde. Alles blijft binnen de werkdagen van de maand.
+ */
+export function pasFaseAan(plan: FasePlan, fase: FaseKey, oud: [number, number], nieuw: [number, number], meeschuiven: boolean, totaal: number): FasePlan {
+  const klem = (i: number) => Math.max(1, Math.min(totaal, i))
+  const [nv, nt] = [klem(Math.min(nieuw[0], nieuw[1])), klem(Math.max(nieuw[0], nieuw[1]))]
+  const uit = Object.fromEntries(FASE_KEYS.map((k) => [k, [...plan[k]]])) as FasePlan
+  const rest = uit[fase].filter((i) => i < oud[0] || i > oud[1])
+  uit[fase] = [...new Set([...rest, ...Array.from({ length: nt - nv + 1 }, (_, j) => nv + j)])].sort((a, b) => a - b)
+  const delta = nt - oud[1]
+  if (meeschuiven && delta !== 0) {
+    for (const k of FASE_KEYS) {
+      if (k === fase || !uit[k].length) continue
+      if (Math.min(...plan[k]) > oud[1]) uit[k] = [...new Set(plan[k].map((i) => klem(i + delta)))].sort((a, b) => a - b)
+    }
+  }
+  return uit
+}
+
+/** Eén dag van een fase aan/uit zetten (fijnregelen). */
+export function wisselDag(plan: FasePlan, fase: FaseKey, dag: number): FasePlan {
+  const uit = Object.fromEntries(FASE_KEYS.map((k) => [k, [...plan[k]]])) as FasePlan
+  uit[fase] = uit[fase].includes(dag) ? uit[fase].filter((i) => i !== dag) : [...uit[fase], dag].sort((a, b) => a - b)
+  return uit
+}
+
+/** Plan → per werkdag de fases (zoals de Maandplanning ze bewaart). */
+export function planNaarDagen(ym: string, plan: FasePlan): Record<string, FaseKey[]> {
+  const wd = werkdagenVanMaand(ym)
+  const uit: Record<string, FaseKey[]> = Object.fromEntries(wd.map((d) => [d, [] as FaseKey[]]))
+  for (const k of FASE_KEYS) for (const i of plan[k]) { const d = wd[i - 1]; if (d) uit[d].push(k) }
+  return uit
+}
+
+/** Van wanneer tot wanneer loopt elke reeks deze maand (eerste en laatste werkdag)? */
+export function reeksPeriodes(ym: string, plan: FasePlan, koppeling: Record<string, Reeks>): Record<Reeks, { van: string; tot: string; dagen: number } | null> {
+  const wd = werkdagenVanMaand(ym)
+  const uit = { 1: null, 2: null, 3: null } as Record<Reeks, { van: string; tot: string; dagen: number } | null>
+  for (const r of [1, 2, 3] as Reeks[]) {
+    const idx = [...new Set(FASE_KEYS.filter((k) => koppeling[k] === r).flatMap((k) => plan[k]))].sort((a, b) => a - b)
+    if (idx.length) uit[r] = { van: wd[idx[0] - 1], tot: wd[idx[idx.length - 1] - 1], dagen: idx.length }
+  }
+  return uit
+}
+
+/** Maandstart: op de eerste werkdag van ELKE maand vult Chiara Klantenbatches in en bekijkt ze de reeksen. */
+export const MAANDSTART = [
+  { key: 'maandstart_batches', titel: 'Klantenbatches invullen', weergave: 'batches' as const },
+  { key: 'maandstart_reeksen', titel: 'Reeksen van de maand bekijken en aanpassen', weergave: 'reeksen' as const },
+]

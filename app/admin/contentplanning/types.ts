@@ -28,7 +28,7 @@ export type CpData = {
   socialKlanten: string[]
 }
 export type BordCel = { client_id: string; maand: string; reeks: Reeks; actief: boolean; door: string | null; updated_at: string }
-export type Weergave = 'dag' | 'batches' | 'week' | 'maand' | 'bord'
+export type Weergave = 'dag' | 'batches' | 'reeksen' | 'week' | 'maand' | 'bord'
 export type Filters = { klant: string; verantwoordelijke: string; reeks: string; batch: string; nogOpen: boolean; zoek: string }
 export const LEGE_FILTERS: Filters = { klant: '', verantwoordelijke: '', reeks: '', batch: '', nogOpen: false, zoek: '' }
 
