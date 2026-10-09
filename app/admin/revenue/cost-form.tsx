@@ -3,8 +3,9 @@
 import { leesGetal } from '@/lib/getal'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, X, Loader2, Repeat2, ArrowDownRight } from 'lucide-react'
+import { Plus, X, Loader2, Repeat2, ArrowDownRight, Clapperboard } from 'lucide-react'
 import type { Cost } from './cost-table'
+import { VideoEditingDialog } from './video-editing-dialog'
 
 type CostType = 'one_time' | 'recurring'
 type Freq = 'monthly' | 'quarterly' | 'annual'
@@ -34,6 +35,8 @@ export function CostDialog({ cost, onClose }: { cost?: Cost | null; onClose: () 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [type, setType] = useState<CostType>(cost?.type ?? 'one_time')
+  // Video editing door een student: eigen venster met berekening uit Personeel.
+  const [video, setVideo] = useState(cost?.bron === 'video_editing')
 
   const today = new Date().toISOString().slice(0, 10)
   const dag = (v: string | null | undefined) => (v ? String(v).slice(0, 10) : '')
@@ -85,6 +88,8 @@ export function CostDialog({ cost, onClose }: { cost?: Cost | null; onClose: () 
     } finally { setLoading(false) }
   }
 
+  if (video) return <VideoEditingDialog bestaand={cost ? { id: cost.id, cost_date: cost.cost_date, client_id: cost.client_id ?? null, personeel_id: cost.personeel_id ?? null, berekening: (cost.berekening ?? null) as never } : null} onClose={onClose} />
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90dvh] overflow-y-auto">
@@ -103,6 +108,11 @@ export function CostDialog({ cost, onClose }: { cost?: Cost | null; onClose: () 
               </button>
             ))}
           </div>
+          {!isEdit && (
+            <button type="button" onClick={() => setVideo(true)} className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-gray-300 text-sm font-medium text-gray-700 hover:border-gray-500 -mt-2">
+              <Clapperboard className="h-4 w-4" />Video editing student — uren × tarief uit Personeel
+            </button>
+          )}
 
           {/* Zeggen wat er gebeurt na het opslaan. "Recurring" alleen laat je
               raden of het één keer of elke maand telt. */}

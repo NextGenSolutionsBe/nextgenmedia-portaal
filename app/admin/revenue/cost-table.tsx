@@ -21,6 +21,11 @@ export type Cost = {
   amount_excl: number
   vat_pct: number
   notes?: string | null
+  /** Herkomst (bv. 'video_editing', 'personeel') en koppelingen. */
+  bron?: string | null
+  personeel_id?: string | null
+  client_id?: string | null
+  berekening?: Record<string, unknown> | null
 }
 
 const FREQ_LABEL: Record<string, string> = { monthly: 'maandelijks', quarterly: 'per kwartaal', annual: 'jaarlijks' }

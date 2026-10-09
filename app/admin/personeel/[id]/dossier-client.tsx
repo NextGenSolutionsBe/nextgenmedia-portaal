@@ -29,7 +29,7 @@ type Dossier = {
 type Intern = { id: string; email: string | null; name: string | null; rol?: string | null; permissions?: string[]; active?: boolean | null }
 
 // Inklokken, uren en kosten zijn weg: dossier, planning (beschikbaarheid + inboekingen), account en logboek.
-const TABS = [['gegevens', 'Gegevens'], ['documenten', 'Documenten'], ['planning', 'Planning'], ['account', 'Account'], ['logboek', 'Logboek']] as const
+const TABS = [['gegevens', 'Gegevens'], ['documenten', 'Documenten'], ['planning', 'Planning'], ['tarief', 'Tarief'], ['account', 'Account'], ['logboek', 'Logboek']] as const
 type Tab = (typeof TABS)[number][0]
 const DAGEN = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo']
 
@@ -48,7 +48,8 @@ export function DossierClient({ id }: { id: string }) {
   if (!d) return <div className="py-16 text-center text-gray-400"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></div>
   const m = d.medewerker
   const naam = [m.voornaam, m.achternaam].filter(Boolean).join(' ')
-  const tabs = TABS
+  // Tarieven zijn financieel: het tabblad enkel voor wie Financiën mag zien.
+  const tabs = TABS.filter(([k]) => k !== 'tarief' || d.magFinancieel)
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -71,6 +72,7 @@ export function DossierClient({ id }: { id: string }) {
       {tab === 'gegevens' && <Gegevens d={d} onKlaar={laad} />}
       {tab === 'documenten' && <Documenten id={id} d={d} onKlaar={laad} />}
       {tab === 'planning' && <PlanningTab personeelId={id} />}
+      {tab === 'tarief' && d.magFinancieel && <TariefTab id={id} tarieven={d.tarieven ?? []} onKlaar={laad} />}
       {tab === 'account' && <Account id={id} m={m} intern={d.intern} onKlaar={laad} />}
       {tab === 'logboek' && <Logboek log={d.logboek} />}
     </div>
@@ -395,6 +397,91 @@ const ACTIE_LABEL: Record<string, string> = {
   beschikbaarheid_ingediend: 'Beschikbaarheid ingediend', beschikbaarheid_ingetrokken: 'Beschikbaarheid ingetrokken', beschikbaarheid_goedgekeurd: 'Beschikbaarheid goedgekeurd', beschikbaarheid_gedeeltelijk: 'Beschikbaarheid deels goedgekeurd', beschikbaarheid_afgewezen: 'Beschikbaarheid afgewezen', uren_voorgesteld: 'Andere uren voorgesteld', voorstel_aanvaard: 'Voorstel aanvaard',
   ingepland: 'Ingepland', werkblok_gewijzigd: 'Werkblok gewijzigd', werkblok_geannuleerd: 'Werkblok geannuleerd', voortgang_bijgewerkt: 'Voortgang bijgewerkt',
   kost_geboekt: 'Kost geboekt in Financiën', kost_gecorrigeerd: 'Kost gecorrigeerd in Financiën', kost_ingetrokken: 'Kost ingetrokken in Financiën',
+}
+
+/**
+ * Uurtarief — versies, nooit herschreven. Een wijziging = een nieuwe versie met
+ * een startdatum; de vorige wordt afgesloten. Zo blijven eerder geboekte kosten
+ * (bv. video editing) exact wat ze waren.
+ */
+function TariefTab({ id, tarieven, onKlaar }: { id: string; tarieven: TariefMet[]; onKlaar: () => void }) {
+  const vandaag = new Date().toISOString().slice(0, 10)
+  const [open, setOpen] = useState(tarieven.length === 0)
+  const [v, setV] = useState({ geldig_vanaf: vandaag, basis_label: 'Brutouurloon', basis_uur: '', btw_pct: '0', opmerking: '' })
+  const [lijnen, setLijnen] = useState<KostLijn[]>([])
+  const [bezig, setBezig] = useState(false)
+  const getal = (x: string) => { const n = Number(String(x).replace(',', '.')); return Number.isFinite(n) ? n : 0 }
+  const basis = getal(v.basis_uur)
+  const extraUur = lijnen.reduce((t, l) => t + (l.soort === 'pct' ? (basis * l.waarde) / 100 : l.soort === 'per_uur' ? l.waarde : 0), 0)
+  const bewaar = async () => {
+    if (!(basis > 0)) { toast.error('Vul het uurloon of de uurvergoeding in.'); return }
+    setBezig(true)
+    try {
+      await api(`/api/admin/personeel/${id}/tarieven`, { body: { ...v, basis_uur: basis, btw_pct: getal(v.btw_pct), lijnen } })
+      toast.success('Tarief bewaard. Eerdere kosten blijven ongewijzigd.'); setOpen(false); setLijnen([]); onKlaar()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt') } finally { setBezig(false) }
+  }
+  const verwijder = async (tid: string) => {
+    if (!confirm('Deze (meest recente) tariefversie verwijderen? De vorige versie loopt dan weer door.')) return
+    try { await api(`/api/admin/personeel/${id}/tarieven?tarief=${tid}`, { method: 'DELETE' }); toast.success('Tariefversie verwijderd.'); onKlaar() } catch (e) { toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt') }
+  }
+  const nieuwsteEerst = [...tarieven].sort((a, b) => b.geldig_vanaf.localeCompare(a.geldig_vanaf))
+  return (
+    <div className="space-y-4">
+      <div className="card-base space-y-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <h2 className="font-semibold text-sm">Uurtarief</h2>
+          {!open && <button type="button" onClick={() => setOpen(true)} className="btn-primary text-xs"><Plus className="h-3.5 w-3.5" />Nieuwe tariefversie</button>}
+        </div>
+        <p className="text-[11px] text-gray-500">Gebruikt voor kosten zoals video editing. Een wijziging maakt een nieuwe versie vanaf een datum; eerder geboekte kosten veranderen niet.</p>
+        {nieuwsteEerst.length === 0 ? <p className="text-sm text-amber-800">Nog geen tarief ingevuld.</p> : (
+          <ul className="divide-y divide-gray-100 rounded-lg border border-gray-100">
+            {nieuwsteEerst.map((t, i) => (
+              <li key={t.id} className="px-3 py-2 text-sm flex items-start gap-3 flex-wrap">
+                <div className="min-w-[150px]"><div className="font-medium">Vanaf {datumNl(t.geldig_vanaf)}</div><div className="text-[11px] text-gray-500">{t.geldig_tot ? `tot ${datumNl(t.geldig_tot)}` : 'loopt'}</div></div>
+                <div className="flex-1 text-xs text-gray-700 space-y-0.5">
+                  <div>{t.basis_label}: <b>{euro(t.basis_uur)}</b> / u</div>
+                  {t.opbouw.lasten > 0.004 ? <div>Totale kost voor het bedrijf: <b>{euro(t.opbouw.totaal)}</b> / u <span className="text-gray-500">(+ {euro(t.opbouw.lasten)} werkgevers-/andere kosten)</span></div> : <div className="text-gray-500">Geen werkgevers- of payrollkosten ingevuld → kost = loonkost op basis van uurloon.</div>}
+                  {t.lijnen.length > 0 && <div className="text-gray-500">{t.lijnen.map((l) => `${l.label}: ${l.waarde}${KOST_SOORTEN.find((k) => k.key === l.soort)?.eenheid ?? ''}`).join(' · ')}</div>}
+                </div>
+                {i === 0 && <button type="button" onClick={() => verwijder(t.id)} className="text-gray-400 hover:text-red-600" aria-label="Meest recente tariefversie verwijderen"><Trash2 className="h-4 w-4" /></button>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      {open && (
+        <div className="card-base space-y-3">
+          <h3 className="font-semibold text-sm">Nieuwe tariefversie</h3>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <div><label className={LBL}>Geldig vanaf</label><input type="date" className={INP} value={v.geldig_vanaf} onChange={(e) => setV({ ...v, geldig_vanaf: e.target.value })} /></div>
+            <div><label className={LBL}>Soort</label><select className={INP} value={v.basis_label} onChange={(e) => setV({ ...v, basis_label: e.target.value })}><option>Brutouurloon</option><option>Uurvergoeding student</option><option>Afgesproken uurprijs</option></select></div>
+            <div><label className={LBL}>Bedrag per uur (€)</label><input className={INP} inputMode="decimal" value={v.basis_uur} onChange={(e) => setV({ ...v, basis_uur: e.target.value })} placeholder="bv. 14" /></div>
+          </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between"><label className={LBL}>Bijkomende kosten voor het bedrijf <span className="text-gray-400 font-normal">— enkel als ze betrouwbaar gekend zijn</span></label></div>
+            {lijnen.map((l, i) => (
+              <div key={l.id} className="grid grid-cols-[1fr_150px_90px_auto] gap-1.5 items-center">
+                <input className={INP} value={l.label} onChange={(e) => setLijnen(lijnen.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} aria-label="Omschrijving" />
+                <select className={INP} value={l.soort} onChange={(e) => setLijnen(lijnen.map((x, j) => (j === i ? { ...x, soort: e.target.value as KostSoort } : x)))} aria-label="Soort">{KOST_SOORTEN.filter((k) => k.key !== 'eenmalig').map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}</select>
+                <input className={INP} inputMode="decimal" value={String(l.waarde)} onChange={(e) => setLijnen(lijnen.map((x, j) => (j === i ? { ...x, waarde: getal(e.target.value) } : x)))} aria-label="Waarde" />
+                <button type="button" onClick={() => setLijnen(lijnen.filter((_, j) => j !== i))} className="text-gray-400 hover:text-red-600" aria-label="Verwijderen"><X className="h-4 w-4" /></button>
+              </div>
+            ))}
+            <div className="flex gap-1 flex-wrap">{LIJN_SUGGESTIES.filter((s) => s.soort !== 'eenmalig').slice(0, 5).map((s) => <button key={s.label} type="button" onClick={() => setLijnen([...lijnen, { id: `l${Date.now()}${lijnen.length}`, label: s.label, soort: s.soort, waarde: 0 }])} className="rounded-full border border-gray-200 px-2 py-0.5 text-[11px] hover:border-gray-400">+ {s.label}</button>)}</div>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div><label className={LBL}>Btw die de medewerker aanrekent (%)</label><input className={INP} inputMode="decimal" value={v.btw_pct} onChange={(e) => setV({ ...v, btw_pct: e.target.value })} /><p className="text-[11px] text-gray-500 mt-0.5">Student of werknemer: 0.</p></div>
+            <div><label className={LBL}>Opmerking</label><input className={INP} value={v.opmerking} onChange={(e) => setV({ ...v, opmerking: e.target.value })} /></div>
+          </div>
+          <div className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 text-xs text-gray-700">
+            Per uur: loon {euro(basis)}{extraUur > 0 ? <> · totale kost {euro(basis + extraUur)} (zonder dag-/maandkosten)</> : <> · zonder bijkomende kosten = loonkost op basis van uurloon</>}
+          </div>
+          <div className="flex gap-2"><button type="button" onClick={bewaar} disabled={bezig} className="btn-primary text-sm">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Tarief bewaren</button>{tarieven.length > 0 && <button type="button" onClick={() => setOpen(false)} className="btn-secondary text-sm">Annuleren</button>}</div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function Logboek({ log }: { log: Log[] }) {
