@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
-  Info, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
+  Info, Camera, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
   MailCheck, PhoneCall, FolderUp, Handshake, Plug, Settings, ClipboardPen, Contact, Timer, UserCircle,
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
@@ -115,6 +115,7 @@ const SECTIONS: NavSection[] = [
   {
     title: 'Overig',
     items: [
+      { label: 'Materiaalbeheer', href: '/admin/materiaal', icon: Camera, module: 'materiaal' },
       { label: 'E-mailcenter', href: '/admin/email', icon: Mail, module: 'email' },
       {
         label: 'Informatief', href: '/admin/informatief', icon: Info, module: 'info',

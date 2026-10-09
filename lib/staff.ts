@@ -36,6 +36,8 @@ export const ADMIN_MODULES: AdminModule[] = [
   // werkt in /team (eigen omgeving, eigen API /api/team), nooit in /admin.
   { key: 'personeel',   label: 'Personeel',            prefixes: ['/admin/personeel', '/api/admin/personeel'] },
   { key: 'kantoor',     label: 'Kantoor',              prefixes: ['/admin/kantoor', '/api/kantoor'] },
+  // Materiaalbeheer: camera's, lenzen, audio… wie heeft wat sinds wanneer.
+  { key: 'materiaal',   label: 'Materiaalbeheer',      prefixes: ['/admin/materiaal', '/api/admin/materiaal'] },
   { key: 'email',       label: 'E-mailcenter',         prefixes: ['/admin/email', '/api/admin/email'] },
   { key: 'info',        label: 'Informatief',          prefixes: ['/admin/informatief', '/admin/onboarding', '/admin/maandplanning', '/admin/contentplanning', '/api/admin/month-planning', '/api/admin/month-planning-clients', '/api/admin/contentplanning'] },
 ]

@@ -66,7 +66,7 @@ const SECTIE_VAN: Record<string, string> = {
   kantoor: 'Kantoor', partners: 'Partners', assignments: 'Partners', settlements: 'Partners',
   sales: 'Verkoop', harrie_api: 'Verkoop',
   finance: 'Financieel', invoices: 'Financieel', vesting: 'Financieel', purchases: 'Financieel',
-  email: 'Overig', info: 'Overig',
+  email: 'Overig', info: 'Overig', materiaal: 'Overig',
   personeel: 'Beheer',
 }
 const HREF_VAN: Record<string, string> = {
@@ -74,7 +74,7 @@ const HREF_VAN: Record<string, string> = {
   kantoor: '/admin/kantoor', partners: '/admin/partners', assignments: '/admin/assignments', settlements: '/admin/settlements',
   sales: '/admin/sales/appointments', harrie_api: '/admin/sales/koppeling',
   finance: '/admin/revenue/omzet', invoices: '/admin/invoices', vesting: '/admin/vesting', purchases: '/admin/purchases',
-  email: '/admin/email', info: '/admin/informatief',
+  email: '/admin/email', info: '/admin/informatief', materiaal: '/admin/materiaal',
   personeel: '/admin/personeel',
 }
 const ESSENTIEEL = new Set(['invoices', 'contracts', 'purchases', 'werknemers', 'instellingen'])

@@ -5683,3 +5683,84 @@ CREATE INDEX IF NOT EXISTS email_messages_contract_idx ON public.email_messages 
 ALTER TABLE public.cost_entries ADD COLUMN IF NOT EXISTS personeel_id uuid REFERENCES public.personeel(id) ON DELETE SET NULL;
 ALTER TABLE public.cost_entries ADD COLUMN IF NOT EXISTS client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL;
 ALTER TABLE public.cost_entries ADD COLUMN IF NOT EXISTS berekening jsonb;
+
+-- ── Materiaalbeheer & uitleenregistratie (9 okt 2026) ───────────────────────
+CREATE TABLE IF NOT EXISTS public.materiaal_categorieen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam text NOT NULL UNIQUE,
+  volgorde integer NOT NULL DEFAULT 100,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO public.materiaal_categorieen (naam, volgorde) VALUES
+  ('Camera''s', 10), ('Lenzen', 20), ('Audio', 30), ('Verlichting', 40), ('Gimbals', 50),
+  ('Statieven', 60), ('Accessoires', 70), ('Computers', 80), ('Overige', 90)
+ON CONFLICT (naam) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS public.materiaal_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam text NOT NULL,
+  categorie_id uuid REFERENCES public.materiaal_categorieen(id) ON DELETE SET NULL,
+  merk text, model text, serienummer text, foto_pad text,
+  aankoopdatum date, aankoopwaarde numeric, opmerkingen text,
+  gearchiveerd_op timestamptz, gearchiveerd_door text,
+  created_by text, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Ontleners: personeel (centrale bron, gekoppeld via personeel_id) + externen zonder account.
+CREATE TABLE IF NOT EXISTS public.materiaal_ontleners (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  personeel_id uuid UNIQUE REFERENCES public.personeel(id) ON DELETE SET NULL,
+  voornaam text NOT NULL, achternaam text, email text, telefoon text,
+  type text CHECK (type IS NULL OR type IN ('werknemer', 'stagiair', 'freelancer', 'jobstudent', 'bestuurder', 'extern')),
+  gearchiveerd_op timestamptz,
+  created_by text, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Eén uitleentransactie = precies één fysiek item.
+CREATE TABLE IF NOT EXISTS public.materiaal_uitleningen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  item_id uuid NOT NULL REFERENCES public.materiaal_items(id),
+  ontlener_id uuid NOT NULL REFERENCES public.materiaal_ontleners(id),
+  uitgeleend_op timestamptz NOT NULL,
+  verwacht_terug date,
+  opmerking text,
+  uitgeleend_door text,
+  teruggebracht_op timestamptz,
+  terug_opmerking text,
+  teruggenomen_door text,
+  -- Foutieve registratie administratief ongedaan gemaakt (blijft zichtbaar in de historie).
+  geannuleerd_op timestamptz, geannuleerd_door text, annuleer_reden text,
+  -- Idempotentie: dezelfde handeling (dubbelklik, netwerk) wordt nooit twee keer verwerkt.
+  actie_sleutel text UNIQUE,
+  mail_uit_status text, mail_uit_fout text, mail_uit_id text, mail_uit_op timestamptz,
+  mail_terug_status text, mail_terug_fout text, mail_terug_id text, mail_terug_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+-- Nooit twee actieve uitleningen voor hetzelfde item (ook niet bij twee admins tegelijk).
+CREATE UNIQUE INDEX IF NOT EXISTS materiaal_uitleningen_een_actief ON public.materiaal_uitleningen (item_id) WHERE teruggebracht_op IS NULL AND geannuleerd_op IS NULL;
+CREATE INDEX IF NOT EXISTS materiaal_uitleningen_ontlener_idx ON public.materiaal_uitleningen (ontlener_id, uitgeleend_op DESC);
+
+-- Activiteitenlog: enkel toevoegen, nooit wijzigen of wissen.
+CREATE TABLE IF NOT EXISTS public.materiaal_activiteiten (
+  id bigserial PRIMARY KEY,
+  op timestamptz NOT NULL DEFAULT now(),
+  soort text NOT NULL,
+  item_id uuid REFERENCES public.materiaal_items(id),
+  ontlener_id uuid REFERENCES public.materiaal_ontleners(id),
+  uitlening_id uuid REFERENCES public.materiaal_uitleningen(id),
+  door text,
+  opmerking text,
+  meta jsonb
+);
+CREATE INDEX IF NOT EXISTS materiaal_activiteiten_op_idx ON public.materiaal_activiteiten (op DESC);
+CREATE OR REPLACE FUNCTION public.materiaal_activiteiten_alleen_toevoegen() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'De activiteitenlog van Materiaalbeheer is alleen-lezen.'; END $$;
+DROP TRIGGER IF EXISTS materiaal_activiteiten_geen_wijziging ON public.materiaal_activiteiten;
+CREATE TRIGGER materiaal_activiteiten_geen_wijziging BEFORE UPDATE OR DELETE ON public.materiaal_activiteiten FOR EACH ROW EXECUTE FUNCTION public.materiaal_activiteiten_alleen_toevoegen();
+
+ALTER TABLE public.materiaal_categorieen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.materiaal_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.materiaal_ontleners ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.materiaal_uitleningen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.materiaal_activiteiten ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.materiaal_categorieen, public.materiaal_items, public.materiaal_ontleners, public.materiaal_uitleningen, public.materiaal_activiteiten FROM anon, authenticated;
