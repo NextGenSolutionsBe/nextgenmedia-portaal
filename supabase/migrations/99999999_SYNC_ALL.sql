@@ -5617,3 +5617,19 @@ REVOKE ALL ON public.cp_klanten, public.cp_cycli, public.cp_taken, public.cp_not
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS terugkerende_omzet boolean;
 ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS verwijderd_op timestamptz;
 ALTER TABLE public.recurring_invoice_months ADD COLUMN IF NOT EXISTS verwijderd_door text;
+
+-- ── Contentplanning: Klantenbatches (9 okt 2026) ─────────────────────────────
+-- Per maand per klant: doet deze klant reeks 1/2/3 deze maand (✓ / ✗)?
+-- Geen rij = nog niet beslist. Dit bord bepaalt welke taken klaargezet worden.
+CREATE TABLE IF NOT EXISTS public.cp_maand_reeksen (
+  client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  maand text NOT NULL,
+  reeks smallint NOT NULL CHECK (reeks IN (1, 2, 3)),
+  actief boolean NOT NULL,
+  door text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (client_id, maand, reeks)
+);
+CREATE INDEX IF NOT EXISTS cp_maand_reeksen_maand_idx ON public.cp_maand_reeksen (maand);
+ALTER TABLE public.cp_maand_reeksen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.cp_maand_reeksen FROM anon, authenticated;

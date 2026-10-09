@@ -57,9 +57,9 @@ export function plusWerkdagen(d: string, n: number): string {
 // ── Reeksen ─────────────────────────────────────────────────────────────────
 export type Reeks = 1 | 2 | 3
 export const REEKSEN: { nr: Reeks; label: string; kort: string; kleur: string; zacht: string }[] = [
-  { nr: 1, label: 'Reeks 1 · Scripts en kwartaalmeetings', kort: 'R1', kleur: 'bg-yellow-400', zacht: 'bg-yellow-50' },
-  { nr: 2, label: 'Reeks 2 · Content maken en shoots', kort: 'R2', kleur: 'bg-purple-500', zacht: 'bg-purple-50' },
-  { nr: 3, label: 'Reeks 3 · Aanpassingen, inplannen en statistieken', kort: 'R3', kleur: 'bg-green-600', zacht: 'bg-green-50' },
+  { nr: 1, label: 'Reeks 1 · Contentkalender en meeting', kort: 'R1', kleur: 'bg-yellow-400', zacht: 'bg-yellow-50' },
+  { nr: 2, label: 'Reeks 2 · Shoot', kort: 'R2', kleur: 'bg-purple-500', zacht: 'bg-purple-50' },
+  { nr: 3, label: 'Reeks 3 · Editen, inplannen en feedback', kort: 'R3', kleur: 'bg-green-600', zacht: 'bg-green-50' },
 ]
 export const isReeks = (v: unknown): v is Reeks => v === 1 || v === 2 || v === 3
 
@@ -109,10 +109,10 @@ export const STANDAARD_STATUSSEN: Status[] = [
 
 export const STANDAARD_CP: CpInstellingen = {
   onderdelen: [
-    { key: 'script', label: 'Script', reeks: 1, standaard: 'elke_cyclus', actief: true },
+    { key: 'script', label: 'Contentkalender en scripts', reeks: 1, standaard: 'elke_cyclus', actief: true },
     { key: 'meeting', label: 'Kwartaalmeeting', reeks: 1, standaard: 'per_kwartaal', actief: true },
     { key: 'shoot', label: 'Shoot', reeks: 2, standaard: 'elke_cyclus', actief: true },
-    { key: 'edit', label: 'Content / edit', reeks: 2, standaard: 'elke_cyclus', actief: true },
+    { key: 'edit', label: 'Editen', reeks: 3, standaard: 'elke_cyclus', actief: true },
     { key: 'feedback', label: 'Feedback en goedkeuring', reeks: 3, standaard: 'elke_cyclus', actief: true },
     { key: 'aanpassingen', label: 'Aanpassingen', reeks: 3, standaard: 'elke_cyclus', actief: true },
     { key: 'inplannen', label: 'Definitief inplannen', reeks: 3, standaard: 'elke_cyclus', actief: true },
@@ -121,7 +121,7 @@ export const STANDAARD_CP: CpInstellingen = {
   statussen: STANDAARD_STATUSSEN,
   aanpassing_werkdagen: 3,
   goedkeuring_werkdagen: null,
-  fase_reeks: { ideeen: 1, intakes: 1, scripts: 1, shoots: 2, edit: 2, feedback: 3, aanpassingen: 3, stats: 3 },
+  fase_reeks: { ideeen: 1, intakes: 1, scripts: 1, shoots: 2, edit: 3, feedback: 3, aanpassingen: 3, stats: 3 },
   routine_naam: 'Inner Stance',
   routine: [
     { key: 'is_copy_volgende_week', titel: 'Controleren of copy voor volgende week klaarstaat', dagen: [1, 2, 3, 4, 5] },
@@ -185,6 +185,30 @@ export function beurten(ym: string, onderdelen: Onderdeel[], k: KlantInstelling)
     if (r === 'nvt') return { onderdeel: o.key, aanDeBeurt: false, reden: null }
     if (r === 'elke_cyclus') return { onderdeel: o.key, aanDeBeurt: true, reden: null }
     if (k.batch_start_maand === null || k.batch_start_maand === undefined) return { onderdeel: o.key, aanDeBeurt: null, reden: 'Batch (met startmaand) ontbreekt; nodig voor wat per kwartaal gebeurt.' }
+    return { onderdeel: o.key, aanDeBeurt: isKwartaalmaand(ym, k.batch_start_maand), reden: null }
+  })
+}
+
+/**
+ * Klantenbatches: per maand duidt Chiara per klant aan welke reeksen die maand
+ * van toepassing zijn (✓ / ✗). Dat bord gaat VOOR op ritme en batch:
+ *  · reeks ✗ → geen taken van die reeks
+ *  · reeks ✓ → de onderdelen van die reeks (behalve wat voor de klant "niet van
+ *    toepassing" is); iets dat per kwartaal gebeurt (bv. kwartaalmeeting) volgt
+ *    nog altijd de batch
+ *  · niets aangeduid → de gewone regel (ritme + batch)
+ */
+export type Bord = Partial<Record<Reeks, boolean>>
+export function beurtenMetBord(ym: string, onderdelen: Onderdeel[], k: KlantInstelling, bord: Bord): Beurt[] {
+  const gewoon = new Map(beurten(ym, onderdelen, k).map((b) => [b.onderdeel, b]))
+  return onderdelen.filter((o) => o.actief).map((o) => {
+    const keuze = o.reeks ? bord[o.reeks] : undefined
+    if (keuze === undefined) return gewoon.get(o.key)!
+    if (keuze === false) return { onderdeel: o.key, aanDeBeurt: false, reden: null }
+    const eigen = k.activiteiten?.[o.key] ?? o.standaard
+    if (eigen === 'nvt') return { onderdeel: o.key, aanDeBeurt: false, reden: null }
+    if (eigen === 'elke_cyclus') return { onderdeel: o.key, aanDeBeurt: true, reden: null }
+    if (k.batch_start_maand === null || k.batch_start_maand === undefined) return { onderdeel: o.key, aanDeBeurt: null, reden: `Batch ontbreekt; nodig voor ${o.label.toLowerCase()} (per kwartaal).` }
     return { onderdeel: o.key, aanDeBeurt: isKwartaalmaand(ym, k.batch_start_maand), reden: null }
   })
 }

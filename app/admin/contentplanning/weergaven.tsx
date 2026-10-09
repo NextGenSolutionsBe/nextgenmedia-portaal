@@ -41,7 +41,7 @@ function useDrop(taken: Taak[], verplaats: WeergaveProps['verplaats']) {
 }
 
 // ── Dag ─────────────────────────────────────────────────────────────────────
-export function DagWeergave(p: WeergaveProps & { aanDeBeurt: { zonderCyclus: number; ontbrekend: number }; onKlaarzetten: () => void }) {
+export function DagWeergave(p: WeergaveProps & { aanDeBeurt: { zonderCyclus: number; ontbrekend: number }; onKlaarzetten: () => void; onNaarBatches: () => void }) {
   const { data, taken, vandaag, anker } = p
   const st = data.instellingen.statussen
   const maand = maandVan(anker)
@@ -56,6 +56,9 @@ export function DagWeergave(p: WeergaveProps & { aanDeBeurt: { zonderCyclus: num
   const checks = new Set(data.checks.filter((c) => c.datum === anker).map((c) => c.routine_key))
   const actieveBatches = data.batches.filter((b) => isKwartaalmaand(maand, b.start_month))
   const [planDatum, setPlanDatum] = useState<Record<string, string>>({})
+  // Stap 2: wie zit deze maand in welke reeks (volgens Klantenbatches)?
+  const bordMaand = data.bord.filter((c) => c.maand === maand)
+  const klantenInReeks = (r: Reeks) => bordMaand.filter((c) => c.reeks === r && c.actief).map((c) => p.klantNaam(c.client_id)).filter((x): x is string => !!x).sort((a, b) => a.localeCompare(b, 'nl'))
 
   return (
     <div className="grid lg:grid-cols-[1fr_340px] gap-4">
@@ -74,6 +77,24 @@ export function DagWeergave(p: WeergaveProps & { aanDeBeurt: { zonderCyclus: num
             </button>
           ))}
         </div>
+
+        {/* Klanten in de reeks(en) van vandaag, volgens Klantenbatches */}
+        {bordMaand.length === 0 ? (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-center gap-2 flex-wrap">
+            <Layers className="h-4 w-4" />Klantenbatches voor {MAANDEN[Number(maand.slice(5)) - 1]} is nog niet ingevuld — dan weet de planning niet welke klant in welke reeks zit.
+            <button type="button" onClick={p.onNaarBatches} className="btn-primary text-xs ml-auto">Klantenbatches invullen</button>
+          </div>
+        ) : reeksen.length > 0 && (
+          <div className="card-base p-3 space-y-1.5">
+            {reeksen.map((r) => { const l = klantenInReeks(r); return (
+              <div key={r} className="text-sm flex items-start gap-2">
+                <span className={`mt-1.5 h-2 w-2 rounded-full shrink-0 ${REEKSEN[r - 1].kleur}`} />
+                <span><b className="font-medium">{REEKSEN[r - 1].label}</b> · {l.length ? <span className="text-gray-700">{l.join(', ')}</span> : <span className="text-gray-500">geen klanten deze maand</span>}</span>
+              </div>
+            ) })}
+            <button type="button" onClick={p.onNaarBatches} className={`text-xs underline text-gray-600 ${focusRing}`}>Klantenbatches bekijken</button>
+          </div>
+        )}
 
         {(p.aanDeBeurt.zonderCyclus > 0 || p.aanDeBeurt.ontbrekend > 0) && data.kan.beheren && (
           <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm flex items-center gap-2 flex-wrap">

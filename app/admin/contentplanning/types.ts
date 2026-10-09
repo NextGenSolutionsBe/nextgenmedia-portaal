@@ -22,8 +22,13 @@ export type CpData = {
   instellingen: CpInstellingen; batches: Batch[]; klanten: Klant[]; cpKlanten: CpKlant[]; cycli: Cyclus[]; taken: Taak[]
   notities: Notitie[]; checks: Check[]; faseAanpassingen: Record<string, string[]>; mensen: string[]
   kan: { aanpassen: boolean; beheren: boolean }; ik: string | null
+  /** Klantenbatches: ✓ (actief) / ✗ per klant, maand en reeks; geen rij = nog niet beslist. */
+  bord: BordCel[]
+  /** Klanten met de dienst social media (de rijen van het bord). */
+  socialKlanten: string[]
 }
-export type Weergave = 'dag' | 'week' | 'maand' | 'bord'
+export type BordCel = { client_id: string; maand: string; reeks: Reeks; actief: boolean; door: string | null; updated_at: string }
+export type Weergave = 'dag' | 'batches' | 'week' | 'maand' | 'bord'
 export type Filters = { klant: string; verantwoordelijke: string; reeks: string; batch: string; nogOpen: boolean; zoek: string }
 export const LEGE_FILTERS: Filters = { klant: '', verantwoordelijke: '', reeks: '', batch: '', nogOpen: false, zoek: '' }
 

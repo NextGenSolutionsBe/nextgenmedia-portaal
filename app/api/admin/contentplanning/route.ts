@@ -4,8 +4,8 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { magIk } from '@/lib/instellingen/laden'
 import { leesActorNamen } from '@/lib/actor-namen'
 import {
-  leesCp, beurten, teMakenTaken, isReeks, plusDagen, maandVan, plusMaanden, STANDAARD_CP,
-  type ActiviteitRitme, type CpInstellingen, type Ritme,
+  leesCp, beurtenMetBord, teMakenTaken, isReeks, plusDagen, maandVan, plusMaanden, STANDAARD_CP,
+  type ActiviteitRitme, type CpInstellingen, type Ritme, type Bord, type Reeks,
 } from '@/lib/contentplanning/model'
 
 export const dynamic = 'force-dynamic'
@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
     const admin = createAdminSupabaseClient()
     const ruimVan = plusDagen(van, -200)
     const maandVanaf = plusMaanden(maandVan(van), -6), maandTot = plusMaanden(maandVan(tot), 3)
-    const [inst, { data: batches }, { data: klanten }, { data: cpKlanten }, { data: cycli }, { data: taken }, { data: notities }, { data: checks }, { data: fases }, { data: staff }, { data: admins }] = await Promise.all([
+    const [inst, { data: batches }, { data: klanten }, { data: cpKlanten }, { data: cycli }, { data: taken }, { data: notities }, { data: checks }, { data: fases }, { data: staff }, { data: admins }, { data: bord }, { data: social }] = await Promise.all([
       leesInstellingenCp(admin),
       admin.from('batches').select('*').order('sort_order').order('name'),
       admin.from('clients').select('id, company_name, batch_id, contact_name, email').is('archived_at', null).order('company_name'),
@@ -67,6 +67,10 @@ export async function GET(req: NextRequest) {
       admin.from('month_planning_overrides').select('plan_date, categories').gte('plan_date', `${maandVan(van)}-01`).lte('plan_date', plusDagen(tot, 31)),
       admin.from('staff_members').select('name, auth_user_id, active, verwijderd_at').eq('active', true).is('verwijderd_at', null),
       admin.from('user_roles').select('user_id').eq('role', 'admin'),
+      // Klantenbatches: welke reeks doet welke klant in welke maand.
+      admin.from('cp_maand_reeksen').select('client_id, maand, reeks, actief, door, updated_at').gte('maand', maandVanaf).lte('maand', maandTot),
+      // Alle klanten met de dienst social media (de rijen van het bord).
+      admin.from('client_services').select('client_id, active').eq('service_slug', 'social-media'),
     ])
     // Mensen om taken aan toe te wijzen: de hoofdbeheerders + actieve werknemers.
     let mensen: string[] = []
@@ -79,6 +83,7 @@ export async function GET(req: NextRequest) {
       notities: notities ?? [], checks: checks ?? [],
       faseAanpassingen: Object.fromEntries(((fases ?? []) as { plan_date: string; categories: string[] }[]).map((f) => [String(f.plan_date).slice(0, 10), f.categories])),
       mensen, kan: { aanpassen: r.aanpassen, beheren: r.beheren }, ik: wie(r.persoon),
+      bord: bord ?? [], socialKlanten: [...new Set(((social ?? []) as { client_id: string; active: boolean | null }[]).filter((x) => x.active !== false).map((x) => x.client_id))],
     })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
@@ -260,6 +265,37 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true })
     }
 
+    // ── Klantenbatches: ✓ / ✗ / leeg per klant, maand en reeks ──
+    if (actie === 'batchbord.zet') {
+      const cid = uuid(b.client_id); const maand = typeof b.maand === 'string' && YM.test(b.maand) ? b.maand : null
+      const cellen = Array.isArray(b.reeksen) ? (b.reeksen as unknown[]).map(Number).filter(isReeks) : isReeks(Number(b.reeks)) ? [Number(b.reeks)] : []
+      if (!cid || !maand || !cellen.length) return NextResponse.json({ error: 'Kies klant, maand en reeks.' }, { status: 400 })
+      if (b.actief === null) {
+        const { error } = await admin.from('cp_maand_reeksen').delete().eq('client_id', cid).eq('maand', maand).in('reeks', cellen)
+        if (error) throw new Error(error.message)
+      } else {
+        const { error } = await admin.from('cp_maand_reeksen').upsert(cellen.map((rk) => ({ client_id: cid, maand, reeks: rk, actief: b.actief === true, door: ik, updated_at: nu })), { onConflict: 'client_id,maand,reeks' })
+        if (error) throw new Error(error.message)
+        // Wie op het bord staat, hoort bij de contentplanning (de klant zelf blijft ongewijzigd).
+        await admin.from('cp_klanten').upsert({ client_id: cid, actief: true, updated_at: nu }, { onConflict: 'client_id' })
+      }
+      return NextResponse.json({ ok: true })
+    }
+    if (actie === 'batchbord.kopieer') {
+      // Vorige maand overnemen als vertrekpunt: enkel lege vakjes worden ingevuld.
+      const van = typeof b.van === 'string' && YM.test(b.van) ? b.van : null
+      const naar = typeof b.naar === 'string' && YM.test(b.naar) ? b.naar : null
+      if (!van || !naar) return NextResponse.json({ error: 'Kies de maanden.' }, { status: 400 })
+      const [{ data: bron }, { data: doel }] = await Promise.all([
+        admin.from('cp_maand_reeksen').select('client_id, reeks, actief').eq('maand', van),
+        admin.from('cp_maand_reeksen').select('client_id, reeks').eq('maand', naar),
+      ])
+      const bestaat = new Set(((doel ?? []) as { client_id: string; reeks: number }[]).map((x) => `${x.client_id}:${x.reeks}`))
+      const nieuw = ((bron ?? []) as { client_id: string; reeks: number; actief: boolean }[]).filter((x) => !bestaat.has(`${x.client_id}:${x.reeks}`)).map((x) => ({ ...x, maand: naar, door: ik, updated_at: nu }))
+      if (nieuw.length) { const { error } = await admin.from('cp_maand_reeksen').insert(nieuw); if (error) throw new Error(error.message) }
+      return NextResponse.json({ ok: true, overgenomen: nieuw.length })
+    }
+
     // Taken voor een maand klaarzetten: enkel wat aan de beurt is en nog niet bestaat.
     if (actie === 'cyclus.klaarzetten') {
       const maand = typeof b.maand === 'string' && YM.test(b.maand) ? b.maand : null
@@ -268,7 +304,10 @@ export async function POST(req: NextRequest) {
       const inst = await leesInstellingenCp(admin)
       let q = admin.from('cp_klanten').select('*').eq('actief', true)
       if (enkel) q = q.eq('client_id', enkel)
-      const [{ data: kl }, { data: clients }, { data: batches }] = await Promise.all([q, admin.from('clients').select('id, batch_id, company_name'), admin.from('batches').select('id, start_month')])
+      const [{ data: kl }, { data: clients }, { data: batches }, { data: bordRijen }] = await Promise.all([q, admin.from('clients').select('id, batch_id, company_name'), admin.from('batches').select('id, start_month'), admin.from('cp_maand_reeksen').select('client_id, reeks, actief').eq('maand', maand)])
+      // Klantenbatches-bord van deze maand: gaat voor op ritme en batch.
+      const bordVan = new Map<string, Bord>()
+      for (const x of (bordRijen ?? []) as { client_id: string; reeks: Reeks; actief: boolean }[]) { const b = bordVan.get(x.client_id) ?? {}; b[x.reeks] = x.actief; bordVan.set(x.client_id, b) }
       const batchStart = new Map(((batches ?? []) as { id: string; start_month: number | null }[]).map((x) => [x.id, x.start_month]))
       const batchVan = new Map(((clients ?? []) as { id: string; batch_id: string | null }[]).map((c) => [c.id, c.batch_id]))
       let nieuw = 0, cycliNieuw = 0
@@ -280,7 +319,7 @@ export async function POST(req: NextRequest) {
         let { data: cyc } = await admin.from('cp_cycli').select('*').eq('client_id', k.client_id).eq('maand', maand).maybeSingle()
         if (cyc && cyc.status !== 'actief') continue   // gepauzeerd of gearchiveerd: niets bijmaken
         const eff = cyc ? { ...ki, ...(cyc.instellingen as Record<string, unknown>) } as typeof ki : ki
-        const bt = beurten(maand, inst.onderdelen, eff)
+        const bt = beurtenMetBord(maand, inst.onderdelen, eff, bordVan.get(k.client_id) ?? {})
         const onbekend = bt.find((x) => x.aanDeBeurt === null)
         if (onbekend) ontbrekend.push({ client_id: k.client_id, reden: onbekend.reden ?? 'Instelling ontbreekt.' })
         if (!bt.some((x) => x.aanDeBeurt === true)) continue

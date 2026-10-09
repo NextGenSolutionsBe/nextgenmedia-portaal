@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict'
 import {
-  STANDAARD_CP as S, standaardFases, fasesVanMaand, reeksenVanDag, plusWerkdagen, isKwartaalmaand, ritmeVan, beurten, teMakenTaken,
+  STANDAARD_CP as S, beurtenMetBord, standaardFases, fasesVanMaand, reeksenVanDag, plusWerkdagen, isKwartaalmaand, ritmeVan, beurten, teMakenTaken,
   verwachteDatum, isAchterstallig, deadlineVerstreken, routineVoorDag, werkdagenVanMaand, leesCp,
 } from '../lib/contentplanning/model'
 
@@ -16,7 +16,7 @@ test('Reeksen per dag komen uit de Maandplanning (standaard + handmatige aanpass
   assert.deepEqual(standaardFases(1, 22), ['ideeen'])
   const f = fasesVanMaand('2026-10', { '2026-10-07': ['scripts'], '2026-10-08': ['shoots', 'edit'] })
   assert.deepEqual(reeksenVanDag(f.get('2026-10-01')!, S.fase_reeks), [1])
-  assert.deepEqual(reeksenVanDag(f.get('2026-10-08')!, S.fase_reeks), [2])
+  assert.deepEqual(reeksenVanDag(f.get('2026-10-08')!, S.fase_reeks), [2, 3]) // shoots (R2) + editen (R3)
   assert.equal(f.has('2026-10-03'), false) // zaterdag: geen werkdag
   assert.equal(werkdagenVanMaand('2026-10').length, 22)
 })
@@ -90,6 +90,22 @@ test('Inner Stance: dagelijks + donderdag/vrijdag', () => {
 test('Instellingen: leeg of half → aangevuld met de standaard', () => {
   const l = leesCp({ aanpassing_werkdagen: 4 })
   assert.equal(l.aanpassing_werkdagen, 4); assert.equal(l.onderdelen.length, 8); assert.equal(l.goedkeuring_werkdagen, null)
+})
+
+test('Klantenbatches-bord gaat voor: ✓/✗ per reeks, kwartaalmeeting volgt nog de batch', () => {
+  const k = { ritme: 'driemaandelijks' as const, activiteiten: {}, batch_start_maand: 5 }
+  // Oktober is geen kwartaalmaand, maar het bord zegt: deze maand enkel editen (R3).
+  const b = beurtenMetBord('2026-10', S.onderdelen, k, { 1: false, 2: false, 3: true })
+  assert.deepEqual(b.filter((x) => x.aanDeBeurt).map((x) => x.onderdeel), ['edit', 'feedback', 'aanpassingen', 'inplannen', 'statistieken'])
+  // R1 ✓ in een niet-kwartaalmaand: contentkalender ja, kwartaalmeeting nee.
+  const r1 = beurtenMetBord('2026-10', S.onderdelen, k, { 1: true })
+  assert.equal(r1.find((x) => x.onderdeel === 'script')!.aanDeBeurt, true)
+  assert.equal(r1.find((x) => x.onderdeel === 'meeting')!.aanDeBeurt, false)
+  // Niets aangeduid voor R2 → gewone regel (driemaandelijks, geen kwartaalmaand → nee).
+  assert.equal(r1.find((x) => x.onderdeel === 'shoot')!.aanDeBeurt, false)
+  // Ritme onbekend, maar bord ingevuld → het bord volstaat.
+  const zonder = beurtenMetBord('2026-10', S.onderdelen, { ritme: null, activiteiten: {}, batch_start_maand: null }, { 2: true })
+  assert.equal(zonder.find((x) => x.onderdeel === 'shoot')!.aanDeBeurt, true)
 })
 
 console.log(`\n${n} tests geslaagd\n`)
