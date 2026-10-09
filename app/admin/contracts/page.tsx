@@ -4,6 +4,8 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { ContractsClient, type Contract } from './contracts-client'
 import { typeNamen } from '@/lib/contracten/db'
 import { leesActorNamen } from '@/lib/actor-namen'
+import { laadAflettering } from '@/lib/contracten/aflettering-server'
+import { mailStatusVan } from '@/lib/contracten/mailstatus'
 
 async function getContracts() {
   const admin = createAdminSupabaseClient()
@@ -20,6 +22,18 @@ async function getContracts() {
     const { data } = await admin.from('invoices').select('contract_id, status').not('contract_id', 'is', null).limit(5000)
     invoiceRows = (data ?? []) as typeof invoiceRows
   } catch { invoiceRows = [] }
+
+  // Aflettering (contractwaarde ↔ facturen) en mailstatus: berekend uit de actuele gegevens, nooit opgeslagen.
+  const echte = (contracts ?? []).filter((c) => c.status !== 'template').map((c) => c.id as string)
+  let afl: Awaited<ReturnType<typeof laadAflettering>> = new Map()
+  try { afl = await laadAflettering(admin, echte) } catch { /* lijst blijft werken zonder aflettering */ }
+  const mailsPer = new Map<string, { status: string | null; created_at: string; provider_status: string | null }[]>()
+  try {
+    const { data: mails } = await admin.from('email_messages').select('contract_id, status, created_at, provider_status').not('contract_id', 'is', null).order('created_at', { ascending: false }).limit(5000)
+    for (const m of (mails ?? []) as { contract_id: string; status: string | null; created_at: string; provider_status: string | null }[]) {
+      const l = mailsPer.get(m.contract_id) ?? []; l.push(m); mailsPer.set(m.contract_id, l)
+    }
+  } catch { /* kolom contract_id bestaat nog niet */ }
 
   const clientMap = new Map((clients ?? []).map((c) => [c.id, c]))
   const namen = await leesActorNamen(admin, (contracts ?? []).map((c) => c.created_by as string | null))
@@ -67,6 +81,11 @@ async function getContracts() {
       invoice_sent: inv.sent,
       expected_invoice_count: expected,
       invoice_state: invoiceState as 'none' | 'partial' | 'full',
+      afl: afl.get(c.id) ? {
+        hoofd: afl.get(c.id)!.aflettering.hoofd, afwijking: afl.get(c.id)!.aflettering.afwijking, waarde: afl.get(c.id)!.waarde,
+        gefactureerd: afl.get(c.id)!.aflettering.gefactureerdCent / 100, ingepland: afl.get(c.id)!.aflettering.ingeplandCent / 100,
+      } : null,
+      mail_status: mailStatusVan(mailsPer.get(c.id) ?? [], c.sent_at ?? null),
       client: clientMap.get(c.client_id) ?? null,
       door: c.created_by ? namen[c.created_by]?.kort ?? null : null,
     }

@@ -75,7 +75,7 @@ test('Tabbladen: verstuurd = Gefactureerd (ook betaald); geannuleerd hoort in ge
   assert.equal(tabVan({ status: 'betaald' }), 'gefactureerd')
   assert.equal(tabVan({ status: 'geannuleerd' }), null)
   assert.equal(STATUS_INFO.verstuurd.label, 'Gefactureerd')
-  assert.deepEqual(tabTellingen([mom('a', 'gepland', VANDAAG), mom('b', 'verstuurd', VANDAAG), mom('c', 'betaald', VANDAAG), mom('d', 'geannuleerd', VANDAAG)]), { te_factureren: 1, gefactureerd: 2, alles: 4 })
+  assert.deepEqual(tabTellingen([mom('a', 'gepland', VANDAAG), mom('b', 'verstuurd', VANDAAG), mom('c', 'betaald', VANDAAG), mom('d', 'geannuleerd', VANDAAG)]), { te_factureren: 1, open_alle: 1, gefactureerd: 2, alles: 4 })
 })
 
 test('Snelfilters: tot en met vandaag, deze week (achterstallig blijft zichtbaar), later', () => {

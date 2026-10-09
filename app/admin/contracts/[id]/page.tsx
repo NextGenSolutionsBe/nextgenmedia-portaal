@@ -13,6 +13,7 @@ import { ContractMailButton } from '@/components/admin/contract-mail-button'
 import { ContractLinkManager } from './contract-link-manager'
 import { ContractPdfPreview } from './contract-pdf-preview'
 import { ContractTimeline } from './contract-timeline'
+import { VerzondenMails } from '@/components/contracten/verzonden-mails'
 import { ContractFacturatie } from './contract-facturatie'
 import { ContractNavigatie } from './contract-navigatie'
 import { statusInfo, canonicalStatus } from '@/lib/contract-status'
@@ -164,6 +165,8 @@ export default async function ContractDetailPage({ params }: { params: { id: str
             contractId={c.id} clientId={clientId} serviceSlug={c.service_slug ?? null} contractTitle={c.title} isSigned={!!isSigned}
             expectedCount={c.expected_invoice_count ?? null} invoiceFrequency={c.invoice_frequency ?? null} expectedAmountExcl={c.expected_invoice_amount_excl ?? null}
           />
+          {/* Verzonden mails: elke verzendpoging met de werkelijk verstuurde inhoud. */}
+          <VerzondenMails contractId={c.id} compact />
         </div>
 
         {/* Sidebar */}

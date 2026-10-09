@@ -16,7 +16,7 @@ import { leesActorNamen } from '@/lib/actor-namen'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-const MAX_DAGEN = 400
+const MAX_DAGEN = 1200
 
 /**
  * GET ?van=YYYY-MM-DD&tot=YYYY-MM-DD — alle facturatiemomenten in die periode,

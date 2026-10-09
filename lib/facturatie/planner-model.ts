@@ -397,16 +397,18 @@ export function ontleedSleutel(id: string): { bron: Bron; bronId: string; maand:
 // extern aangemaakt en verstuurd (status 'verstuurd'). Betaald is een APART
 // gegeven en valt ook onder Gefactureerd. Geannuleerd hoort in geen van beide
 // actieve tabs (enkel in Alles, grijs).
-export type Tab = 'te_factureren' | 'gefactureerd' | 'alles'
+export type Tab = 'te_factureren' | 'open_alle' | 'gefactureerd' | 'alles'
 export const TABS: { key: Tab; label: string }[] = [
-  { key: 'te_factureren', label: 'Te factureren' }, { key: 'gefactureerd', label: 'Gefactureerd' }, { key: 'alles', label: 'Alles' },
+  { key: 'te_factureren', label: 'Te factureren' }, { key: 'open_alle', label: 'Alle nog te versturen' }, { key: 'gefactureerd', label: 'Gefactureerd' }, { key: 'alles', label: 'Alles' },
 ]
+/** Tabbladen die niet per maand werken maar alle maanden tonen. */
+export const isMaandloos = (t: Tab): boolean => t === 'open_alle'
 export function tabVan(m: Pick<Moment, 'status'>): 'te_factureren' | 'gefactureerd' | null {
   if (OPEN_STATUSSEN.includes(m.status)) return 'te_factureren'
   if (m.status === 'verstuurd' || m.status === 'betaald') return 'gefactureerd'
   return null
 }
-export const inTab = (m: Pick<Moment, 'status'>, t: Tab): boolean => t === 'alles' || tabVan(m) === t
+export const inTab = (m: Pick<Moment, 'status'>, t: Tab): boolean => t === 'alles' || (t === 'open_alle' ? tabVan(m) === 'te_factureren' : tabVan(m) === t)
 
 /** Snelfilter binnen Te factureren. Achterstallig blijft altijd zichtbaar (ook uit een vorige maand). */
 export type Termijn = 'alles' | 'tot_vandaag' | 'week' | 'later'
@@ -430,7 +432,7 @@ export function sorteerWerklijst(momenten: Moment[]): Moment[] {
 export function tabTellingen(momenten: Moment[]): Record<Tab, number> {
   let te = 0, gef = 0
   for (const m of momenten) { const t = tabVan(m); if (t === 'te_factureren') te++; else if (t === 'gefactureerd') gef++ }
-  return { te_factureren: te, gefactureerd: gef, alles: momenten.length }
+  return { te_factureren: te, open_alle: te, gefactureerd: gef, alles: momenten.length }
 }
 
 /** Wat Bram vandaag afwerkt: alles te factureren t.e.m. vandaag, achterstallig inbegrepen. */

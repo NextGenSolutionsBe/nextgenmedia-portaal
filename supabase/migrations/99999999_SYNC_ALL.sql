@@ -5651,3 +5651,35 @@ CREATE TABLE IF NOT EXISTS public.cp_meeting_planning (
 );
 ALTER TABLE public.cp_meeting_planning ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.cp_meeting_planning FROM anon, authenticated;
+
+-- ── Contracten ↔ facturen: aflettering (9 okt 2026) ─────────────────────────
+-- Contractwaarde excl. btw: NULL = ontbreekt (≠ een bewust ingevulde € 0).
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS contract_waarde_excl numeric;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS contract_waarde_gewijzigd_op timestamptz;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS contract_waarde_gewijzigd_door text;
+-- Eén factuur over meerdere contracten: per regel expliciet het contract
+-- (NULL = het contract van de factuur zelf). Zo telt een bedrag nooit dubbel.
+ALTER TABLE public.invoice_lines ADD COLUMN IF NOT EXISTS contract_id uuid REFERENCES public.contracts(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS invoice_lines_contract_idx ON public.invoice_lines (contract_id) WHERE contract_id IS NOT NULL;
+-- Factuurvoorstellen vanuit een contract: pas na bevestiging een factuur.
+-- voorstel_sleutel = '<contract_id>:<periode>' → dezelfde periode kan nooit
+-- twee keer actief aangemaakt worden (herhaald klikken / opnieuw genereren).
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS voorstel_sleutel text;
+CREATE UNIQUE INDEX IF NOT EXISTS invoices_voorstel_sleutel_uniek ON public.invoices (voorstel_sleutel)
+  WHERE voorstel_sleutel IS NOT NULL AND status NOT IN ('geannuleerd', 'gecrediteerd');
+-- Verzonden contractmails terugvinden: per verzendpoging de volledige mail.
+ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS contract_id uuid REFERENCES public.contracts(id) ON DELETE SET NULL;
+ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS cc text;
+ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS bcc text;
+ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS html text;
+ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS from_email text;
+ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS bijlage text;
+ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS provider_status text;
+ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS provider_status_op timestamptz;
+ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+CREATE INDEX IF NOT EXISTS email_messages_contract_idx ON public.email_messages (contract_id, created_at DESC) WHERE contract_id IS NOT NULL;
+-- Kosten "Video editing student": koppeling met Personeel en een momentopname
+-- van uren, tarieven en berekening (latere tariefwijzigingen veranderen niets).
+ALTER TABLE public.cost_entries ADD COLUMN IF NOT EXISTS personeel_id uuid REFERENCES public.personeel(id) ON DELETE SET NULL;
+ALTER TABLE public.cost_entries ADD COLUMN IF NOT EXISTS client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL;
+ALTER TABLE public.cost_entries ADD COLUMN IF NOT EXISTS berekening jsonb;

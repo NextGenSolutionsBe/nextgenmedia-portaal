@@ -37,6 +37,8 @@ function Dialog({ context, onClose }: { context: MailContext; onClose: () => voi
   const [body, setBody] = useState('')
   const [ctaText, setCtaText] = useState('')
   const [ctaLink, setCtaLink] = useState('')
+  const [cc, setCc] = useState('')
+  const [kopieNaarMij, setKopieNaarMij] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
@@ -125,7 +127,7 @@ function Dialog({ context, onClose }: { context: MailContext; onClose: () => voi
       if (context.type === 'contract') {
         res = await fetch(`/api/admin/contracts/${context.contractId}/send-mail`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ to_email: toEmail, subject, body, cta_text: ctaText || null, cta_link: ctaLink || null, template_id: templateId || null, template_name: tpl?.name ?? null }),
+          body: JSON.stringify({ to_email: toEmail, cc: cc.trim() || null, kopie_naar_mij: kopieNaarMij, subject, body, cta_text: ctaText || null, cta_link: ctaLink || null, template_id: templateId || null, template_name: tpl?.name ?? null }),
         })
       } else {
         res = await fetch('/api/admin/email/send', {
@@ -170,6 +172,14 @@ function Dialog({ context, onClose }: { context: MailContext; onClose: () => voi
                 ? <input className={inp} value={toEmail} onChange={(e) => setToEmail(e.target.value)} placeholder="ontvanger@bedrijf.be" />
                 : <div className="text-sm text-gray-800">{toEmail || '— geen e-mailadres —'}</div>}
             </div>
+            {context.type === 'contract' && (
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Cc <span className="text-gray-400">— optioneel, meerdere adressen met een komma</span></label>
+                <input className={inp} value={cc} onChange={(e) => setCc(e.target.value)} placeholder="collega@bedrijf.be" />
+                <label className="mt-1.5 flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer"><input type="checkbox" checked={kopieNaarMij} onChange={(e) => setKopieNaarMij(e.target.checked)} />Stuur mij een verborgen kopie (bcc)</label>
+                <p className="text-[11px] text-gray-400 mt-0.5">De volledige mail wordt bij het contract bewaard onder “Verzonden mails”.</p>
+              </div>
+            )}
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Template</label>
               <select className={inp} value={templateId} onChange={(e) => onPick(e.target.value)}>

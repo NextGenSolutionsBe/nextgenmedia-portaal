@@ -36,6 +36,9 @@ export async function sendEmail(opts: {
   scheduledAt?: string | null
   /** Sleutel van een ander merk; leeg = de standaardsleutel. */
   apiKey?: string | null
+  /** Zichtbare kopie (cc) en verborgen kopie (bcc), bv. een kopie naar het eigen adres. */
+  cc?: string[] | null
+  bcc?: string[] | null
 }): Promise<SendResult> {
   const apiKey = opts.apiKey || process.env.RESEND_API_KEY
   if (!apiKey) return { ok: false, error: 'Geen mailprovider geconfigureerd (RESEND_API_KEY ontbreekt).' }
@@ -53,6 +56,8 @@ export async function sendEmail(opts: {
         text: opts.text,
         html,
         ...(opts.replyTo ? { reply_to: opts.replyTo } : {}),
+        ...(opts.cc?.length ? { cc: opts.cc } : {}),
+        ...(opts.bcc?.length ? { bcc: opts.bcc } : {}),
         ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
         ...(opts.scheduledAt ? { scheduled_at: opts.scheduledAt } : {}),
       }),

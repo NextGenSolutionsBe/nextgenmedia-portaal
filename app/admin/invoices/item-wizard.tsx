@@ -38,7 +38,7 @@ export type WizardProps = {
   recurringMaand?: { recurring_id: string; maand: string; momentId: string } | null
   standaardDatum?: string
   onClose: () => void
-  onSaved?: (id: string | null) => void
+  onSaved?: (id: string | null, datum?: string | null) => void
 }
 
 const STAPPEN = ['Klantinformatie', 'Basisinformatie', 'Artikelen', 'Mededeling & controle'] as const
@@ -51,6 +51,9 @@ export function FacturatieItemWizard({ invoiceId = null, recurringMaand = null, 
   const [stap, setStap] = useState(0)
   const [laden, setLaden] = useState(true)
   const [bezig, setBezig] = useState(false)
+  // Eén sleutel per wizard: dezelfde opslagactie wordt op de server nooit twee keer verwerkt.
+  const aanmaakSleutel = useRef(typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`)
+  const opslaanBezig = useRef(false)
   const [klanten, setKlanten] = useState<KlantOptie[]>([])
   const [contracten, setContracten] = useState<ContractOptie[]>([])
   const [inst, setInst] = useState<Instellingen>({ standaard_btw_pct: 21, betalingstermijn_dagen: 30, km_tarief_excl: 0, km_btw_pct: 21 })
@@ -136,6 +139,8 @@ export function FacturatieItemWizard({ invoiceId = null, recurringMaand = null, 
   // ── Opslaan ──
   const opslaan = async () => {
     for (let i = 0; i < 3; i++) { const f = stapFout(i); if (f) { setStap(i); toast.error(f); return } }
+    if (opslaanBezig.current) return
+    opslaanBezig.current = true
     setBezig(true)
     try {
       const termijn = basis.termijn === '' ? inst.betalingstermijn_dagen : Math.max(0, Math.round(Number(basis.termijn) || 0))
@@ -164,7 +169,7 @@ export function FacturatieItemWizard({ invoiceId = null, recurringMaand = null, 
         toast.success('Terugkerende facturatie opgeslagen — elke maand verschijnt apart in “Te factureren”.')
         onSaved?.(null); onClose(); return
       } else {
-        const r = await fetch('/api/admin/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'aanmaken', ...kop, ...(recurringMaand ? { recurring_maand: { recurring_id: recurringMaand.recurring_id, maand: recurringMaand.maand } } : {}) }) })
+        const r = await fetch('/api/admin/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'aanmaken', aanmaak_sleutel: aanmaakSleutel.current, ...kop, ...(recurringMaand ? { recurring_maand: { recurring_id: recurringMaand.recurring_id, maand: recurringMaand.maand } } : {}) }) })
         const j = await r.json(); if (!r.ok) throw new Error(j.error)
         id = String(j.id)
       }
@@ -181,8 +186,8 @@ export function FacturatieItemWizard({ invoiceId = null, recurringMaand = null, 
       }
       if (fouten.length) toast.warning(`Item opgeslagen, maar niet gelukt: ${fouten.join(', ')}.`)
       else toast.success(bewerken ? 'Item opgeslagen.' : 'Opgeslagen als te factureren.')
-      onSaved?.(id); onClose()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt') } finally { setBezig(false) }
+      onSaved?.(id, basis.datum); onClose()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt. Er is niets bewaard; je invoer staat er nog.') } finally { setBezig(false); opslaanBezig.current = false }
   }
 
   const titel = bewerken ? 'Facturatie-item aanpassen' : recurringMaand ? `Eigen artikelen voor ${recurringMaand.maand}` : 'Nieuw facturatie-item'
@@ -530,7 +535,15 @@ function StapArtikelen({ regels, setRegels, btw, inst, artikelen, setArtikelen, 
           return (
             <div key={`${r.id ?? 'n'}-${i}`} className="rounded-xl border border-gray-200 p-3 sm:p-4 space-y-3">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-gray-500">Artikel {i + 1}{r.is_extra && <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-700">doorgerekende kost</span>}</span>
+                <span className="text-xs font-semibold text-gray-500 flex items-center gap-2 flex-wrap">Artikel {i + 1}
+                  {/* Voor de contractaflettering: telt dit artikel binnen de contractwaarde of is het extra (km, meerwerk)? */}
+                  <span className="inline-flex rounded-lg border border-gray-200 overflow-hidden font-medium" role="group" aria-label={`Soort van artikel ${i + 1}`}>
+                    {[false, true].map((x) => (
+                      <button key={String(x)} type="button" aria-pressed={r.is_extra === x} onClick={() => zet(i, { is_extra: x, classificatie: x ? 'doorgerekende_kost' : 'dienst' })}
+                        className={`px-2 py-0.5 text-[10px] border-l first:border-l-0 border-gray-200 ${r.is_extra === x ? 'bg-black text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>{x ? 'Extra kosten / meerwerk' : 'Binnen contractwaarde'}</button>
+                    ))}
+                  </span>
+                </span>
                 <div className="flex items-center gap-0.5">
                   <IconKnop titel="Omhoog" disabled={i === 0} onClick={() => setRegels(verplaatsRegel(regels, i, i - 1))}><ArrowUp className="h-3.5 w-3.5" /></IconKnop>
                   <IconKnop titel="Omlaag" disabled={i === regels.length - 1} onClick={() => setRegels(verplaatsRegel(regels, i, i + 1))}><ArrowDown className="h-3.5 w-3.5" /></IconKnop>
@@ -571,6 +584,7 @@ function StapArtikelen({ regels, setRegels, btw, inst, artikelen, setArtikelen, 
 
       <div className="rounded-xl bg-gray-50 border border-gray-200 p-4 text-sm tabular-nums space-y-1 ml-auto max-w-sm">
         <div className="flex justify-between"><span>Subtotaal excl. btw</span><b>{formatEuro(t.excl)}</b></div>
+        {t.extra.excl > 0 && <div className="flex justify-between text-[12px] text-gray-500"><span>waarvan binnen contractwaarde · extra kosten</span><span>{formatEuro(t.contractueel.excl)} · {formatEuro(t.extra.excl)}</span></div>}
         {t.perBtw.map((p) => <div key={p.pct} className="flex justify-between text-gray-600"><span>Btw {p.pct.toLocaleString('nl-BE')} %</span><span>{formatEuro(p.btw)}</span></div>)}
         <div className="flex justify-between border-t border-gray-200 pt-1 text-base"><span>Totaal incl. btw</span><b>{formatEuro(t.incl)}</b></div>
       </div>

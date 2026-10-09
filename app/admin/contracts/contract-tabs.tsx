@@ -2,12 +2,13 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { FileText, LayoutTemplate } from 'lucide-react'
+import { FileText, LayoutTemplate, Mail } from 'lucide-react'
 
-// Eenvoudige tabnavigatie: Contracten ↔ Templates. Geen extra losse pagina's.
+// Eenvoudige tabnavigatie: Contracten · Templates · Verzonden mails.
 export function ContractTabs() {
   const pathname = usePathname()
   const isTemplates = pathname?.startsWith('/admin/contracts/templates')
+  const isMails = pathname?.startsWith('/admin/contracts/mails')
 
   const tab = (active: boolean) =>
     `inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border transition-colors ${
@@ -15,14 +16,18 @@ export function ContractTabs() {
     }`
 
   return (
-    <div className="flex items-center gap-2">
-      <Link href="/admin/contracts" className={tab(!isTemplates)}>
+    <div className="flex items-center gap-2 flex-wrap">
+      <Link href="/admin/contracts" className={tab(!isTemplates && !isMails)}>
         <FileText className="h-4 w-4" />
         Contracten
       </Link>
       <Link href="/admin/contracts/templates" className={tab(!!isTemplates)}>
         <LayoutTemplate className="h-4 w-4" />
         Templates
+      </Link>
+      <Link href="/admin/contracts/mails" className={tab(!!isMails)}>
+        <Mail className="h-4 w-4" />
+        Verzonden mails
       </Link>
     </div>
   )

@@ -19,6 +19,8 @@ export type ContractEvent =
   | 'facturatie_bevestigd' | 'facturatie_gestopt'
   // Looptijdstatus (lopend/afgerond/stopgezet/verlopen) handmatig aangepast.
   | 'looptijd_gewijzigd'
+  // Aflettering: contractwaarde ingevuld of gewijzigd (meta oud/nieuw).
+  | 'contractwaarde_gewijzigd'
 
 export async function logContractEvent(
   admin: Admin,

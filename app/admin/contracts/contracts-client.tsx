@@ -10,7 +10,7 @@ import {
   Plus, FileText, Filter as FilterIcon, X, Search, Bell, Folder, FolderOpen, ChevronRight,
   Download, Trash2, Loader2, Mail,
 } from 'lucide-react'
-import { formatDate, SERVICE_LABELS } from '@/lib/utils'
+import { formatDate, formatEuro, SERVICE_LABELS } from '@/lib/utils'
 import { statusInfo, canonicalStatus, STATUS_FILTER_OPTIONS, DURATION_TYPES } from '@/lib/contract-status'
 import { typeVanContract, isNietToegewezen } from '@/lib/contracten/types'
 import {
@@ -18,6 +18,9 @@ import {
   type OverzichtContract, type Sortering,
 } from '@/lib/contracten/overzicht'
 import { ContractTabs } from './contract-tabs'
+import { AflBadgeChip } from '@/components/contracten/afl-badge'
+import { type AflBadge } from '@/lib/contracten/aflettering'
+import { MAIL_STATUS, type MailStatus } from '@/lib/contracten/mailstatus'
 import { ArchiefKnop } from './archief-knop'
 import { LooptijdKiezer, MapVerdeling, type LooptijdWaarde } from './looptijd'
 import {
@@ -40,6 +43,10 @@ export type Contract = OverzichtContract & {
   invoice_sent: number
   expected_invoice_count: number | null
   invoice_state: 'none' | 'partial' | 'full'
+  /** Aflettering contractwaarde ↔ facturen (actueel berekend op de server). */
+  afl?: { hoofd: AflBadge; afwijking: boolean; waarde: number | null; gefactureerd: number; ingepland: number } | null
+  /** Mailstatus — los van de ondertekenstatus. */
+  mail_status?: MailStatus
   /** Looptijd: lopend / afgerond / stopgezet / verlopen — los van de ondertekening. */
   looptijd_status: string
   stop_datum: string | null
@@ -75,7 +82,8 @@ export function ContractsClient({
   const [filterType, setFilterType] = useState<string>('all')        // contracttype
   const [filterDuration, setFilterDuration] = useState<string>('all') // contractduur-type
   const [filterLinked, setFilterLinked] = useState<string>('all') // all | yes | no
-  const [filterInvoice, setFilterInvoice] = useState<string>('all') // all | none | partial | full
+  const [filterInvoice, setFilterInvoice] = useState<string>('all') // all | aandacht | <AflBadge>
+  const [filterMail, setFilterMail] = useState<string>('all') // all | <MailStatus>
   const [dateFrom, setDateFrom] = useState<string>('')
   const [dateTo, setDateTo] = useState<string>('')
   const [sorteer, setSorteer] = useState<Sortering>('klant')
@@ -102,7 +110,8 @@ export function ContractsClient({
         if (s.filterType) setFilterType(s.filterType)
         if (s.filterDuration) setFilterDuration(s.filterDuration)
         if (s.filterLinked) setFilterLinked(s.filterLinked)
-        if (s.filterInvoice) setFilterInvoice(s.filterInvoice)
+        if (s.filterInvoice && !['none', 'partial', 'full'].includes(s.filterInvoice)) setFilterInvoice(s.filterInvoice)
+        if (s.filterMail) setFilterMail(s.filterMail)
         if (s.dateFrom) setDateFrom(s.dateFrom)
         if (s.dateTo) setDateTo(s.dateTo)
         if (s.sorteer) setSorteer(s.sorteer)
@@ -113,9 +122,9 @@ export function ContractsClient({
   }, [])
   useEffect(() => {
     try {
-      sessionStorage.setItem('ngm.contractFilters', JSON.stringify({ filterClient, filterService, filterStatus, filterTemplate, filterType, filterDuration, filterLinked, filterInvoice, dateFrom, dateTo, sorteer, categorie }))
+      sessionStorage.setItem('ngm.contractFilters', JSON.stringify({ filterClient, filterService, filterStatus, filterTemplate, filterType, filterDuration, filterLinked, filterInvoice, filterMail, dateFrom, dateTo, sorteer, categorie }))
     } catch { /* negeer */ }
-  }, [filterClient, filterService, filterStatus, filterTemplate, filterType, filterDuration, filterLinked, filterInvoice, dateFrom, dateTo, sorteer, categorie])
+  }, [filterClient, filterService, filterStatus, filterTemplate, filterType, filterDuration, filterLinked, filterInvoice, filterMail, dateFrom, dateTo, sorteer, categorie])
   // Debounce de zoekterm (vlot bij grote lijsten).
   useEffect(() => { const t = setTimeout(() => setDq(query), 200); return () => clearTimeout(t) }, [query])
 
@@ -167,7 +176,14 @@ export function ContractsClient({
       if (filterDuration !== 'all' && (c.duration_type ?? '') !== filterDuration) return false
       if (filterLinked === 'yes' && !c.client_id) return false
       if (filterLinked === 'no' && !!c.client_id) return false
-      if (filterInvoice !== 'all' && c.invoice_state !== filterInvoice) return false
+      if (filterInvoice !== 'all') {
+        const a = (c as Contract).afl
+        // "Aandacht": getekende contracten met ontbrekende gegevens of resterende acties.
+        if (filterInvoice === 'aandacht') { if (!c.signed_at || !a || (a.hoofd === 'volledig_gefactureerd' && !a.afwijking)) return false }
+        else if (filterInvoice === 'afwijking') { if (!a?.afwijking) return false }
+        else if (a?.hoofd !== filterInvoice) return false
+      }
+      if (filterMail !== 'all' && (c as Contract).mail_status !== filterMail) return false
       if (dateFrom && (c.created_at ?? '').slice(0, 10) < dateFrom) return false
       if (dateTo && (c.created_at ?? '').slice(0, 10) > dateTo) return false
       return true
@@ -176,7 +192,7 @@ export function ContractsClient({
       zoekExtra: [c.signer_name, c.signer_email, (c as Contract).door ?? '', c.service_slug ? SERVICE_LABELS[c.service_slug] ?? c.service_slug : '', c.template_id ? templateName.get(c.template_id) : '']
         .filter(Boolean).join(' '),
     }))
-  }, [contracten, filterClient, filterService, filterTemplate, filterDuration, filterLinked, filterInvoice, dateFrom, dateTo, templateName])
+  }, [contracten, filterClient, filterService, filterTemplate, filterDuration, filterLinked, filterInvoice, filterMail, dateFrom, dateTo, templateName])
 
   // Alles behalve de categorie: daarop tellen we de aantallen per categorie,
   // zodat elke kaart toont hoeveel contracten je krijgt als je erop klikt.
@@ -218,7 +234,7 @@ export function ContractsClient({
     setContracten((lijst) => lijst.map((c) => (c.id === id ? { ...c, ...w } : c)))
   }, [])
 
-  const hasActiveFilters = categorie !== 'alle' || filterClient !== 'all' || filterService !== 'all' || filterStatus !== 'all' || filterTemplate !== 'all' || filterType !== 'all' || filterDuration !== 'all' || filterLinked !== 'all' || filterInvoice !== 'all' || dateFrom !== '' || dateTo !== '' || query.trim() !== ''
+  const hasActiveFilters = categorie !== 'alle' || filterClient !== 'all' || filterService !== 'all' || filterStatus !== 'all' || filterTemplate !== 'all' || filterType !== 'all' || filterDuration !== 'all' || filterLinked !== 'all' || filterInvoice !== 'all' || filterMail !== 'all' || dateFrom !== '' || dateTo !== '' || query.trim() !== ''
 
   const clearFilters = () => {
     setCategorie('alle')
@@ -418,12 +434,23 @@ export function ContractsClient({
             </select>
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Facturatie</label>
+            <label className="block text-xs text-gray-500 mb-1">Facturatie &amp; aflettering</label>
             <select className={`${sel} w-full`} value={filterInvoice} onChange={(e) => setFilterInvoice(e.target.value)}>
               <option value="all">Alle</option>
-              <option value="none">Zonder facturen</option>
-              <option value="partial">Deels gefactureerd</option>
-              <option value="full">Volledig gefactureerd</option>
+              <option value="aandacht">Getekend — nog actie nodig</option>
+              <option value="waarde_ontbreekt">Contractwaarde ontbreekt</option>
+              <option value="geen_facturen">Geen facturen gekoppeld</option>
+              <option value="onvolledig">Facturatie onvolledig ingepland</option>
+              <option value="volledig_ingepland">Volledig ingepland</option>
+              <option value="volledig_gefactureerd">Volledig gefactureerd</option>
+              <option value="afwijking">Afwijking controleren</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Contractmail</label>
+            <select className={`${sel} w-full`} value={filterMail} onChange={(e) => setFilterMail(e.target.value)}>
+              <option value="all">Alle</option>
+              {(Object.keys(MAIL_STATUS) as MailStatus[]).map((k) => <option key={k} value={k}>{MAIL_STATUS[k].label}</option>)}
             </select>
           </div>
           <div>
@@ -550,16 +577,15 @@ export function ContractsClient({
                                 </td>
                                 <td className="table-td">
                                   <span className={`status-badge ${style.cls}`}>{style.label}</span>
+                                  {c.mail_status && c.mail_status !== 'niet' && <div className="mt-1"><span title={MAIL_STATUS[c.mail_status].uitleg} className={`inline-flex rounded-full border px-1.5 text-[10px] font-medium ${MAIL_STATUS[c.mail_status].cls}`}>{MAIL_STATUS[c.mail_status].label}</span></div>}
                                 </td>
                                 <td className="table-td">
-                                  {c.invoice_count === 0 ? (
-                                    <span className="text-xs text-gray-300">—</span>
-                                  ) : (
-                                    <span className={`inline-flex items-center gap-1.5 text-xs ${c.invoice_state === 'full' ? 'text-green-600' : 'text-amber-600'}`}>
-                                      <span className={`h-1.5 w-1.5 rounded-full ${c.invoice_state === 'full' ? 'bg-green-500' : 'bg-amber-500'}`} />
-                                      {c.invoice_sent}{c.expected_invoice_count ? `/${c.expected_invoice_count}` : `/${c.invoice_count}`}
-                                    </span>
-                                  )}
+                                  {c.afl ? (
+                                    <div className="space-y-0.5">
+                                      <div className="flex flex-wrap gap-1"><AflBadgeChip badge={c.afl.hoofd} klein />{c.afl.afwijking && <AflBadgeChip badge="afwijking" klein />}</div>
+                                      {c.afl.waarde !== null && <div className="text-[10px] text-gray-500 tabular-nums" title="Al gefactureerd / contractwaarde (excl. btw)">{formatEuro(c.afl.gefactureerd)} / {formatEuro(c.afl.waarde)}</div>}
+                                    </div>
+                                  ) : <span className="text-xs text-gray-300">—</span>}
                                 </td>
                                 <td className="table-td text-gray-500">{c.start_date ? formatDate(c.start_date) : '—'}</td>
                                 <td className="table-td text-gray-500">{c.end_date ? formatDate(c.end_date) : '—'}</td>

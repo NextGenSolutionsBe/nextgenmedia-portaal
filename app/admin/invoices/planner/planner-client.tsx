@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight, CalendarDays, CalendarRange, List, Loader2, 
 import {
   vandaagBrussel, isDatum, ymVan, plusDagen, maandStart, maandEind, maandRooster, roosterBereik, weekBereik, shiftYM,
   maandNaam, datumKort, DAGEN_KORT, euro, euro2, kort, pasFiltersToe, dagTotalen, sorteer, filtersActief,
-  LEEG_FILTERS, PLANNER_STATUSSEN, STATUS_INFO, FASEN, FASE_INFO, faseKpi, resultaat, maandKpi,
+  LEEG_FILTERS, PLANNER_STATUSSEN, STATUS_INFO, isMaandloos, FASEN, FASE_INFO, faseKpi, resultaat, maandKpi,
   TABS, tabVan, inTab, sorteerWerklijst, tabTellingen, rondeItems, maandOverzicht, omzetMeter, MAAND_DOEL,
   type Moment, type Filters, type Sortering, type Tab,
 } from '@/lib/facturatie/planner-model'
@@ -31,7 +31,7 @@ import { facturenWerkmap, type FactuurExportRij } from '@/lib/excel/rapporten/fa
 
 type Data = { momenten: Moment[]; klanten: { id: string; company_name: string }[]; vandaag: string; verantwoordelijke: string }
 type Weergave = 'maand' | 'week' | 'lijst'
-const MAX_DAGEN = 400
+const MAX_DAGEN = 1200
 const sel = 'rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs'
 type WizardStaat = { invoiceId: string } | { recurringMaand: { recurring_id: string; maand: string; momentId: string } } | { datum: string } | null
 
@@ -63,8 +63,9 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
   const ym = ymVan(anker)
   const zicht = weergave === 'week' ? weekBereik(anker) : roosterBereik(ym)
   const bereik = useMemo(() => {
-    const van = [zicht.van, plusDagen(vandaag, -300), filters.van || zicht.van].sort()[0]
-    let tot = [zicht.tot, plusDagen(vandaag, 95), filters.tot || zicht.tot].sort().slice(-1)[0]
+    // Ruim: een jaar terug en twee jaar vooruit, zodat een factuur die ver vooruit gepland is nooit "verdwijnt".
+    const van = [zicht.van, plusDagen(vandaag, -400), filters.van || zicht.van].sort()[0]
+    let tot = [zicht.tot, plusDagen(vandaag, 760), filters.tot || zicht.tot].sort().slice(-1)[0]
     if ((Date.parse(tot) - Date.parse(van)) / 86_400_000 > MAX_DAGEN) tot = plusDagen(van, MAX_DAGEN)
     return { van, tot }
   }, [zicht.van, zicht.tot, vandaag, filters.van, filters.tot])
@@ -92,8 +93,10 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
   const vandaagTe = rondeItems(gefilterd, vandaag)
   // Alle tabbladen tonen de geselecteerde maand, op geplande facturatiedatum.
   const maandBereik = weergave === 'week' ? zicht : { van: maandStart(ym), tot: maandEind(ym) }
-  const tabBasis = useMemo(() => gefilterd.filter((m) => m.datum >= maandBereik.van && m.datum <= maandBereik.tot), [gefilterd, maandBereik.van, maandBereik.tot])
-  const tellingen = useMemo(() => tabTellingen(tabBasis), [tabBasis])
+  const maandBasis = useMemo(() => gefilterd.filter((m) => m.datum >= maandBereik.van && m.datum <= maandBereik.tot), [gefilterd, maandBereik.van, maandBereik.tot])
+  // "Alle nog te versturen" kijkt over alle maanden heen.
+  const tabBasis = isMaandloos(tab) ? gefilterd : maandBasis
+  const tellingen = useMemo(() => ({ ...tabTellingen(maandBasis), open_alle: gefilterd.filter((m) => tabVan(m) === 'te_factureren').length }), [maandBasis, gefilterd])
   const lijst = useMemo(() => {
     let l = tabBasis.filter((m) => inTab(m, tab))
     if (!filters.toonGeannuleerd && tab !== 'alles') l = l.filter((m) => m.status !== 'geannuleerd' && m.status !== 'gecrediteerd')
@@ -116,6 +119,33 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
   const fk = useMemo(() => faseKpi(maandMomenten), [maandMomenten])
   const res = useMemo(() => resultaat(maandMomenten), [maandMomenten])
   const kpi = useMemo(() => maandKpi(maandMomenten, ym), [maandMomenten, ym])
+
+  // Na het opslaan: het nieuwe item opzoeken. Valt het buiten de gekozen maand of
+  // het tabblad, dan een melding met "Factuur bekijken" (maand + status erbij).
+  const naOpslaan = useRef<{ id: string; datum: string | null } | null>(null)
+  const opgeslagen = useCallback((id: string | null, datum?: string | null) => {
+    if (id) naOpslaan.current = { id, datum: datum ?? null }
+    ververs()
+  }, [ververs])
+  useEffect(() => {
+    const p = naOpslaan.current
+    if (!p || !data || laden) return
+    const m = data.momenten.find((x) => x.invoice_id === p.id)
+    if (!m) {
+      // Buiten het geladen venster: naar de maand van de factuur springen (laadt die maand).
+      if (p.datum && ymVan(p.datum) !== ym) { setAnker(p.datum); return }
+      naOpslaan.current = null
+      return
+    }
+    naOpslaan.current = null
+    const zichtbaar = (isMaandloos(tab) || ymVan(m.datum) === ym) && inTab(m, tab)
+    const label = STATUS_INFO[m.status]?.label ?? m.status
+    if (zichtbaar) { setGeselecteerd(null); return }
+    toast.success(`Opgeslagen: ${m.klant ?? 'factuur'} staat in ${maandNaam(ymVan(m.datum))} · ${label}.`, {
+      duration: 10000,
+      action: { label: 'Factuur bekijken', onClick: () => { setAnker(m.datum); setTab(tabVan(m) === 'te_factureren' ? 'te_factureren' : 'alles'); setWeergave('lijst'); setGeselecteerd(m.id) } },
+    })
+  }, [data, laden, tab, ym])
 
   // Link vanuit elders (?factuur=…): dat item meteen openen.
   useEffect(() => {
@@ -451,7 +481,7 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
           invoiceId={'invoiceId' in wizard ? wizard.invoiceId : null}
           recurringMaand={'recurringMaand' in wizard ? wizard.recurringMaand : null}
           standaardDatum={'datum' in wizard ? wizard.datum : undefined}
-          onClose={() => setWizard(null)} onSaved={() => ververs()} />
+          onClose={() => setWizard(null)} onSaved={(id, datum) => opgeslagen(id, datum)} />
       )}
       {geavanceerd && <FactuurEditor invoiceId={geavanceerd} onClose={() => setGeavanceerd(null)} onSaved={() => ververs()} />}
       {teVerwijderen && <VerwijderDialoog m={teVerwijderen} onAnnuleer={() => setTeVerwijderen(null)} onBevestig={(bereik) => verwijder(teVerwijderen, bereik)} />}
@@ -465,7 +495,7 @@ const datumNlKort = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice
 function LeegLijst({ tab, onNieuw }: { tab: Tab; onNieuw: () => void }) {
   return (
     <div className="px-4 py-10 text-center text-sm text-gray-500 space-y-2">
-      <div>{tab === 'te_factureren' ? 'Geen items te factureren deze maand.' : tab === 'gefactureerd' ? 'Nog niets gefactureerd deze maand.' : 'Geen items deze maand.'}</div>
+      <div>{tab === 'open_alle' ? 'Niets meer te versturen.' : tab === 'te_factureren' ? 'Geen items te factureren deze maand.' : tab === 'gefactureerd' ? 'Nog niets gefactureerd deze maand.' : 'Geen items deze maand.'}</div>
       <button type="button" onClick={onNieuw} className="btn-primary text-sm"><Plus className="h-4 w-4" />Nieuw facturatie-item</button>
     </div>
   )

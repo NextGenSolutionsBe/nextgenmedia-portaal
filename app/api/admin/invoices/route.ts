@@ -323,6 +323,12 @@ export async function POST(req: NextRequest) {
         if (bestaand && ['verstuurd', 'betaald'].includes(String(bestaand.status))) return NextResponse.json({ error: 'Deze maand is al gefactureerd.' }, { status: 409 })
       }
       if (b.contract_id) { const { data: c } = await admin.from('contracts').select('id').eq('id', String(b.contract_id)).maybeSingle(); if (!c) return NextResponse.json({ error: 'Contract niet gevonden.' }, { status: 400 }) }
+      // Dezelfde opslagactie (dubbelklik, netwerk dat opnieuw probeert) wordt nooit twee keer verwerkt.
+      const aanmaakSleutel = typeof b.aanmaak_sleutel === 'string' && /^[0-9a-zA-Z-]{8,64}$/.test(b.aanmaak_sleutel) ? `aanmaak:${b.aanmaak_sleutel}` : null
+      if (aanmaakSleutel) {
+        const { data: al } = await admin.from('invoices').select('id, invoice_date, status').eq('voorstel_sleutel', aanmaakSleutel).maybeSingle()
+        if (al) return NextResponse.json({ id: al.id, invoice_date: al.invoice_date, status: al.status, al_opgeslagen: true })
+      }
       const month = invoiceDate.slice(0, 7)
       const termijn = b.payment_term_days != null && Number.isFinite(Number(b.payment_term_days)) ? Math.max(0, Math.round(Number(b.payment_term_days))) : 30
       const vervaldatum = typeof b.due_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b.due_date) ? b.due_date : (() => { const d = new Date(invoiceDate + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + termijn); return d.toISOString().slice(0, 10) })()
@@ -339,12 +345,21 @@ export async function POST(req: NextRequest) {
         klant_referentie: b.klant_referentie ? String(b.klant_referentie).slice(0, 200) : null,
         prestatie_van: /^\d{4}-\d{2}-\d{2}$/.test(String(b.prestatie_van ?? '')) ? b.prestatie_van : null,
         prestatie_tot: /^\d{4}-\d{2}-\d{2}$/.test(String(b.prestatie_tot ?? '')) ? b.prestatie_tot : null,
+        voorstel_sleutel: aanmaakSleutel,
+      }).catch(async (e: unknown) => {
+        // Unieke sleutel al gebruikt = dezelfde opslagactie liep al: geef dat item terug.
+        if (aanmaakSleutel && /duplicate key|unique/i.test(e instanceof Error ? e.message : '')) {
+          const { data: al } = await admin.from('invoices').select('id').eq('voorstel_sleutel', aanmaakSleutel).maybeSingle()
+          if (al) return String(al.id)
+        }
+        throw e
       })
       const { error: le } = await admin.from('invoice_lines').insert(regels.map((r) => ({
         invoice_id: id, volgnr: r.volgnr, omschrijving: r.omschrijving, artikel: r.artikel, aantal: r.aantal, eenheid: r.eenheid,
         prijs_excl: r.prijs_excl, btw_pct: r.btw_pct, korting_pct: r.korting_pct, korting_eur: r.korting_eur ?? 0, is_extra: r.is_extra, classificatie: r.classificatie, opmerking: r.opmerking ?? null,
       })))
-      if (le) throw new Error(le.message)
+      // Geen half opgeslagen factuur achterlaten: zonder regels → terugdraaien en een duidelijke fout.
+      if (le) { await admin.from('invoices').delete().eq('id', id); throw new Error(`De factuurregels konden niet bewaard worden (${le.message}). Er is niets opgeslagen.`) }
       if (recMaand) {
         // De maand wijst voortaan naar dit item (de planner toont dan enkel het item);
         // kosten die al op die maand gelogd waren, verhuizen mee.
@@ -358,7 +373,7 @@ export async function POST(req: NextRequest) {
         if (b.client_id) revalidatePath(`/admin/clients/${b.client_id}`)
         if (b.contract_id) revalidatePath(`/admin/contracts/${b.contract_id}`)
       } catch { }
-      return NextResponse.json({ id, revenue_id: revenueId })
+      return NextResponse.json({ id, revenue_id: revenueId, invoice_date: invoiceDate, status: 'te_versturen' })
     }
 
     // Recurring factuur-definitie
