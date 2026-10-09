@@ -16,7 +16,7 @@ test('Reeksen per dag komen uit de Maandplanning (standaard + handmatige aanpass
   assert.deepEqual(standaardFases(1, 22), ['ideeen'])
   const f = fasesVanMaand('2026-10', { '2026-10-07': ['scripts'], '2026-10-08': ['shoots', 'edit'] })
   assert.deepEqual(reeksenVanDag(f.get('2026-10-01')!, S.fase_reeks), [1])
-  assert.deepEqual(reeksenVanDag(f.get('2026-10-08')!, S.fase_reeks), [2, 3]) // shoots (R2) + editen (R3)
+  assert.deepEqual(reeksenVanDag(f.get('2026-10-08')!, S.fase_reeks), [2]) // shoots + editen = allebei reeks 2
   assert.equal(f.has('2026-10-03'), false) // zaterdag: geen werkdag
   assert.equal(werkdagenVanMaand('2026-10').length, 22)
 })
@@ -95,9 +95,9 @@ test('Instellingen: leeg of half → aangevuld met de standaard', () => {
 
 test('Klantenbatches-bord gaat voor: ✓/✗ per reeks, kwartaalmeeting volgt nog de batch', () => {
   const k = { ritme: 'driemaandelijks' as const, activiteiten: {}, batch_start_maand: 5 }
-  // Oktober is geen kwartaalmaand, maar het bord zegt: deze maand enkel editen (R3).
+  // Oktober is geen kwartaalmaand, maar het bord zegt: deze maand enkel reeks 3 (feedback, verwerken, statistieken).
   const b = beurtenMetBord('2026-10', S.onderdelen, k, { 1: false, 2: false, 3: true })
-  assert.deepEqual(b.filter((x) => x.aanDeBeurt).map((x) => x.onderdeel), ['edit', 'feedback', 'aanpassingen', 'inplannen', 'statistieken'])
+  assert.deepEqual(b.filter((x) => x.aanDeBeurt).map((x) => x.onderdeel), ['feedback', 'aanpassingen', 'inplannen', 'statistieken'])
   // R1 ✓ in een niet-kwartaalmaand: contentkalender ja, kwartaalmeeting nee.
   const r1 = beurtenMetBord('2026-10', S.onderdelen, k, { 1: true })
   assert.equal(r1.find((x) => x.onderdeel === 'script')!.aanDeBeurt, true)

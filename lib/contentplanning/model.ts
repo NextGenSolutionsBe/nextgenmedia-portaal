@@ -58,8 +58,8 @@ export function plusWerkdagen(d: string, n: number): string {
 export type Reeks = 1 | 2 | 3
 export const REEKSEN: { nr: Reeks; label: string; kort: string; kleur: string; zacht: string }[] = [
   { nr: 1, label: 'Reeks 1 · Contentkalender en meeting', kort: 'R1', kleur: 'bg-yellow-400', zacht: 'bg-yellow-50' },
-  { nr: 2, label: 'Reeks 2 · Shoot', kort: 'R2', kleur: 'bg-purple-500', zacht: 'bg-purple-50' },
-  { nr: 3, label: 'Reeks 3 · Editen, inplannen en feedback', kort: 'R3', kleur: 'bg-green-600', zacht: 'bg-green-50' },
+  { nr: 2, label: 'Reeks 2 · Shoot en editen', kort: 'R2', kleur: 'bg-purple-500', zacht: 'bg-purple-50' },
+  { nr: 3, label: 'Reeks 3 · Feedback, verwerken en statistieken', kort: 'R3', kleur: 'bg-green-600', zacht: 'bg-green-50' },
 ]
 export const isReeks = (v: unknown): v is Reeks => v === 1 || v === 2 || v === 3
 
@@ -121,7 +121,7 @@ export const STANDAARD_CP: CpInstellingen = {
     { key: 'script', label: 'Contentkalender en scripts', reeks: 1, standaard: 'elke_cyclus', actief: true },
     { key: 'meeting', label: 'Kwartaalmeeting', reeks: 1, standaard: 'per_kwartaal', actief: true },
     { key: 'shoot', label: 'Shoot', reeks: 2, standaard: 'elke_cyclus', actief: true },
-    { key: 'edit', label: 'Editen', reeks: 3, standaard: 'elke_cyclus', actief: true },
+    { key: 'edit', label: 'Editen', reeks: 2, standaard: 'elke_cyclus', actief: true },
     { key: 'feedback', label: 'Feedback en goedkeuring', reeks: 3, standaard: 'elke_cyclus', actief: true },
     { key: 'aanpassingen', label: 'Aanpassingen', reeks: 3, standaard: 'elke_cyclus', actief: true },
     { key: 'inplannen', label: 'Definitief inplannen', reeks: 3, standaard: 'elke_cyclus', actief: true },
@@ -130,7 +130,7 @@ export const STANDAARD_CP: CpInstellingen = {
   statussen: STANDAARD_STATUSSEN,
   aanpassing_werkdagen: 3,
   goedkeuring_werkdagen: null,
-  fase_reeks: { ideeen: 1, intakes: 1, scripts: 1, shoots: 2, edit: 3, feedback: 3, aanpassingen: 3, stats: 3 },
+  fase_reeks: { ideeen: 1, intakes: 1, scripts: 1, shoots: 2, edit: 2, feedback: 3, aanpassingen: 3, stats: 3 },
   routine_naam: 'Inner Stance',
   // De dagelijkse Inner Stance-checks zijn vervangen door de weektaken van INN · SLL · K · J (vaste_taken).
   routine: [],

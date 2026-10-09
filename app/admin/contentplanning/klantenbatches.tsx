@@ -20,8 +20,8 @@ import { maandNaam } from './types'
 type Waarde = boolean | undefined
 const KOLOMMEN: { nr: Reeks; titel: string; sub: string }[] = [
   { nr: 1, titel: 'Reeks 1', sub: 'Contentkalender en meeting' },
-  { nr: 2, titel: 'Reeks 2', sub: 'Shoot' },
-  { nr: 3, titel: 'Reeks 3', sub: 'Editen, inplannen en feedback' },
+  { nr: 2, titel: 'Reeks 2', sub: 'Shoot en editen' },
+  { nr: 3, titel: 'Reeks 3', sub: 'Feedback, verwerken en statistieken' },
 ]
 const volgende = (w: Waarde): Waarde => (w === true ? undefined : true)
 const sleutel = (cid: string, r: Reeks) => `${cid}:${r}`
