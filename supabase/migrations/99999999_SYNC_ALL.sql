@@ -5633,3 +5633,21 @@ CREATE TABLE IF NOT EXISTS public.cp_maand_reeksen (
 CREATE INDEX IF NOT EXISTS cp_maand_reeksen_maand_idx ON public.cp_maand_reeksen (maand);
 ALTER TABLE public.cp_maand_reeksen ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.cp_maand_reeksen FROM anon, authenticated;
+
+-- ── Contentplanning stap 3: dagelijkse werking ──────────────────────────────
+-- Afvinken per klant, maand en reeks (op de rij van het Klantenbatches-bord).
+ALTER TABLE public.cp_maand_reeksen ADD COLUMN IF NOT EXISTS afgewerkt_op date;
+ALTER TABLE public.cp_maand_reeksen ADD COLUMN IF NOT EXISTS afgewerkt_door text;
+-- Waar staat het materiaal (foto's/video's) van deze klant?
+ALTER TABLE public.cp_klanten ADD COLUMN IF NOT EXISTS materiaal text;
+-- Eerste dag van reeks 3: per socialmediaklant beslissen of er volgende maand een meeting komt.
+CREATE TABLE IF NOT EXISTS public.cp_meeting_planning (
+  client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  maand text NOT NULL,
+  status text NOT NULL CHECK (status IN ('nodig', 'niet_nodig', 'ingepland')),
+  door text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (client_id, maand)
+);
+ALTER TABLE public.cp_meeting_planning ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.cp_meeting_planning FROM anon, authenticated;

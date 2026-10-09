@@ -10,6 +10,8 @@ export type Contactpersoon = { naam: string; rol: string | null; email: string |
 export type CpKlant = {
   client_id: string; actief: boolean; ritme: Ritme | null; verantwoordelijke: string | null; goedkeuring_werkdagen: number | null
   activiteiten: Record<string, ActiviteitRitme>; contactpersonen: Contactpersoon[]; links: Link[]; afspraken: string | null
+  /** Waar staan de foto’s en video’s van deze klant? */
+  materiaal: string | null
 }
 export type Cyclus = { id: string; client_id: string; maand: string; status: 'actief' | 'gepauzeerd' | 'gearchiveerd'; instellingen: { ritme?: Ritme | null; activiteiten?: Record<string, ActiviteitRitme>; batch_id?: string | null } }
 export type Notitie = {
@@ -24,11 +26,14 @@ export type CpData = {
   kan: { aanpassen: boolean; beheren: boolean }; ik: string | null
   /** Klantenbatches: ✓ (actief) / ✗ per klant, maand en reeks; geen rij = nog niet beslist. */
   bord: BordCel[]
+  /** Reeks 3: per klant en (volgende) maand of er een meeting komt. */
+  meetings: MeetingPlan[]
   /** Klanten met de dienst social media (de rijen van het bord). */
   socialKlanten: string[]
 }
-export type BordCel = { client_id: string; maand: string; reeks: Reeks; actief: boolean; door: string | null; updated_at: string }
-export type Weergave = 'dag' | 'batches' | 'reeksen' | 'week' | 'maand' | 'bord'
+export type BordCel = { client_id: string; maand: string; reeks: Reeks; actief: boolean; door: string | null; updated_at: string; afgewerkt_op?: string | null; afgewerkt_door?: string | null }
+export type MeetingPlan = { client_id: string; maand: string; status: 'nodig' | 'niet_nodig' | 'ingepland'; door: string | null; updated_at: string }
+export type Weergave = 'werking' | 'dag' | 'batches' | 'reeksen' | 'week' | 'maand' | 'bord'
 export type Filters = { klant: string; verantwoordelijke: string; reeks: string; batch: string; nogOpen: boolean; zoek: string }
 export const LEGE_FILTERS: Filters = { klant: '', verantwoordelijke: '', reeks: '', batch: '', nogOpen: false, zoek: '' }
 

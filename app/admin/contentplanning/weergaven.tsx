@@ -1,10 +1,11 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { AlertTriangle, Bell, CalendarPlus, ChevronDown, ExternalLink, Plus, StickyNote, Check, Inbox, Layers, Route, Flag } from 'lucide-react'
+import { AlertTriangle, Bell, CalendarPlus, ChevronDown, Plus, StickyNote, Check, Inbox, Layers, Flag } from 'lucide-react'
 import { INP } from '@/app/admin/instellingen/ui'
-import { REEKSEN, isAchterstallig, isKlaar, isKwartaalmaand, maandag, plusDagen, routineVoorDag, maandVan, statusVan, eersteWerkdag, MAANDSTART, DAG_KORT, type Reeks } from '@/lib/contentplanning/model'
+import { REEKSEN, isAchterstallig, isKlaar, isKwartaalmaand, maandag, plusDagen, maandVan, statusVan, eersteWerkdag, DAG_KORT, type Reeks } from '@/lib/contentplanning/model'
 import { Leeg, StatusBadge, TaakKaart, focusRing } from './bouwstenen'
+import { MaandstartBlok, VasteKlant } from './werking'
 import type { CpData, Doe, Notitie, Taak, Weergave } from './types'
 import { MAANDEN, datumNl } from './types'
 
@@ -58,8 +59,6 @@ export function DagWeergave(p: WeergaveProps & { aanDeBeurt: { zonderCyclus: num
   const herinneringen = data.notities.filter((n) => n.soort === 'herinnering' && n.herinner_op && n.herinner_op <= anker && !n.afgevinkt_op)
   const klantenVandaag = new Set(vanDag.map((t) => t.client_id).filter(Boolean))
   const aandacht = data.notities.filter((n) => n.client_id && klantenVandaag.has(n.client_id) && !n.taak_id && (n.vastgepind || (n.soort === 'cyclus' && n.maand === maand)))
-  const routine = routineVoorDag(data.instellingen.routine, anker)
-  const checks = new Set(data.checks.filter((c) => c.datum === anker).map((c) => c.routine_key))
   const actieveBatches = data.batches.filter((b) => isKwartaalmaand(maand, b.start_month))
   const [planDatum, setPlanDatum] = useState<Record<string, string>>({})
   // Stap 2: wie zit deze maand in welke reeks (volgens Klantenbatches)?
@@ -71,10 +70,6 @@ export function DagWeergave(p: WeergaveProps & { aanDeBeurt: { zonderCyclus: num
     const alle = taken.filter((t) => t.client_id === cid && t.reeks === r && (t.cyclus_id ? cycliMaand.has(t.cyclus_id) : (t.werkdatum ?? '').startsWith(maand)))
     return { alle, open: alle.filter((t) => !isKlaar(t.status, st)).sort((a, b) => (a.werkdatum ?? '9999').localeCompare(b.werkdatum ?? '9999') || a.volgorde - b.volgorde) }
   }
-  // Maandstart: op de eerste werkdag (en daarna zolang het niet afgevinkt is).
-  const eerste = eersteWerkdag(maand)
-  const startKlaar = (key: string) => data.checks.some((c) => c.routine_key === key && c.datum === eerste)
-  const toonMaandstart = anker >= eerste && (anker === eerste || MAANDSTART.some((m) => !startKlaar(m.key)))
 
   return (
     <div className="grid lg:grid-cols-[1fr_340px] gap-4">
@@ -94,26 +89,7 @@ export function DagWeergave(p: WeergaveProps & { aanDeBeurt: { zonderCyclus: num
           ))}
         </div>
 
-        {/* Maandstart: elke maand op de eerste werkdag */}
-        {toonMaandstart && (
-          <section className={`rounded-xl border p-3 space-y-2 ${anker === eerste ? 'border-black bg-[#fff848]/30' : 'border-amber-300 bg-amber-50'}`}>
-            <h2 className="font-semibold text-sm flex items-center gap-1.5"><Flag className="h-4 w-4" />{anker === eerste ? `Maandstart ${MAANDEN[Number(maand.slice(5)) - 1]} — eerste werkdag` : `Maandstart ${MAANDEN[Number(maand.slice(5)) - 1]} nog niet afgerond (was ${datumNl(eerste)})`}</h2>
-            {MAANDSTART.map((m, i) => {
-              const aan = startKlaar(m.key)
-              const door = data.checks.find((c) => c.routine_key === m.key && c.datum === eerste)?.door
-              return (
-                <div key={m.key} className="flex items-center gap-2 flex-wrap text-sm">
-                  <input type="checkbox" className="h-4 w-4" checked={aan} disabled={!p.kanSchrijven} aria-label={`${m.titel} afvinken`}
-                    onChange={(e) => p.doe('routine.check', { routine_key: m.key, datum: eerste, aan: e.target.checked }, { stil: true })} />
-                  <span className={aan ? 'line-through text-gray-500' : ''}>Stap {i + 1} · {m.titel}{aan && door && <span className="text-[11px] text-gray-400"> · {door}</span>}</span>
-                  {m.key === 'maandstart_batches' && <span className="text-[11px] text-gray-500">({new Set(bordMaand.map((c) => c.client_id)).size} klant(en) ingevuld)</span>}
-                  <button type="button" onClick={() => p.onWeergave(m.weergave)} className={`btn-secondary text-xs ml-auto ${focusRing}`}>{m.weergave === 'batches' ? <Layers className="h-3.5 w-3.5" /> : <Route className="h-3.5 w-3.5" />}Openen</button>
-                </div>
-              )
-            })}
-            {data.kan.beheren && <p className="text-[11px] text-gray-600">Daarna: “Taken klaarzetten” maakt de taken van de reeksen met een ✓.</p>}
-          </section>
-        )}
+        <MaandstartBlok data={data} doe={p.doe} anker={anker} kanSchrijven={p.kanSchrijven} onWeergave={p.onWeergave} />
 
         {/* Stap 1 + 2: wat moet je vandaag per klant doen in de reeks(en) van vandaag */}
         {bordMaand.length === 0 ? (
@@ -222,22 +198,7 @@ export function DagWeergave(p: WeergaveProps & { aanDeBeurt: { zonderCyclus: num
           {inTePlannen.length > 20 && <p className="text-[11px] text-gray-500">+ {inTePlannen.length - 20} meer (Weekweergave)</p>}
         </section>
 
-        {/* Inner Stance-routine */}
-        <section className="card-base p-3 space-y-2">
-          <h3 className="font-semibold text-sm">{data.instellingen.routine_naam} · {DAG_KORT[(new Date(`${anker}T12:00:00Z`).getUTCDay() + 6) % 7]}</h3>
-          {routine.length === 0 ? <p className="text-xs text-gray-500">Geen checks op deze dag.</p> : routine.map((r) => {
-            const aan = checks.has(r.key)
-            const door = data.checks.find((c) => c.routine_key === r.key && c.datum === anker)?.door
-            return (
-              <label key={r.key} className="flex items-start gap-2 text-sm cursor-pointer">
-                <input type="checkbox" className="mt-0.5" checked={aan} disabled={!p.kanSchrijven} onChange={(e) => p.doe('routine.check', { routine_key: r.key, datum: anker, aan: e.target.checked }, { stil: true })} />
-                <span className={aan ? 'line-through text-gray-500' : ''}>{r.titel}{aan && door && <span className="text-[11px] text-gray-400 no-underline"> · {door}</span>}</span>
-              </label>
-            )
-          })}
-          <div className="flex gap-1.5 flex-wrap pt-1">{data.instellingen.routine_links.filter((l) => /^https?:\/\//.test(l.url)).map((l) => <a key={l.label + l.url} href={l.url} target="_blank" rel="noreferrer" className={`inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2 py-1 text-xs hover:border-gray-400 ${focusRing}`}><ExternalLink className="h-3 w-3" />{l.label}</a>)}</div>
-          <p className="text-[10px] text-gray-400">Je registreert de controle zelf; de app leest Notion, Frame.io of Metricool niet uit.</p>
-        </section>
+        <VasteKlant data={data} doe={p.doe} anker={anker} kanSchrijven={p.kanSchrijven} />
       </div>
     </div>
   )

@@ -4,8 +4,8 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { magIk } from '@/lib/instellingen/laden'
 import { leesActorNamen } from '@/lib/actor-namen'
 import {
-  leesCp, beurtenMetBord, teMakenTaken, isReeks, plusDagen, maandVan, plusMaanden, maandEind, werkdagenVanMaand, FASE_KEYS, STANDAARD_CP,
-  type ActiviteitRitme, type CpInstellingen, type Ritme, type Bord, type Reeks,
+  leesCp, beurtenMetBord, bordVanKlant, teMakenTaken, isReeks, plusDagen, maandVan, plusMaanden, maandEind, werkdagenVanMaand, FASE_KEYS, STANDAARD_CP,
+  type ActiviteitRitme, type CpInstellingen, type Ritme, type Reeks,
 } from '@/lib/contentplanning/model'
 
 export const dynamic = 'force-dynamic'
@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
     const admin = createAdminSupabaseClient()
     const ruimVan = plusDagen(van, -200)
     const maandVanaf = plusMaanden(maandVan(van), -6), maandTot = plusMaanden(maandVan(tot), 3)
-    const [inst, { data: batches }, { data: klanten }, { data: cpKlanten }, { data: cycli }, { data: taken }, { data: notities }, { data: checks }, { data: fases }, { data: staff }, { data: admins }, { data: bord }, { data: social }] = await Promise.all([
+    const [inst, { data: batches }, { data: klanten }, { data: cpKlanten }, { data: cycli }, { data: taken }, { data: notities }, { data: checks }, { data: fases }, { data: staff }, { data: admins }, { data: bord }, { data: social }, { data: meetings }] = await Promise.all([
       leesInstellingenCp(admin),
       admin.from('batches').select('*').order('sort_order').order('name'),
       admin.from('clients').select('id, company_name, batch_id, contact_name, email').is('archived_at', null).order('company_name'),
@@ -68,9 +68,11 @@ export async function GET(req: NextRequest) {
       admin.from('staff_members').select('name, auth_user_id, active, verwijderd_at').eq('active', true).is('verwijderd_at', null),
       admin.from('user_roles').select('user_id').eq('role', 'admin'),
       // Klantenbatches: welke reeks doet welke klant in welke maand.
-      admin.from('cp_maand_reeksen').select('client_id, maand, reeks, actief, door, updated_at').gte('maand', maandVanaf).lte('maand', maandTot),
+      admin.from('cp_maand_reeksen').select('*').gte('maand', maandVanaf).lte('maand', maandTot),
       // Alle klanten met de dienst social media (de rijen van het bord).
       admin.from('client_services').select('client_id, active').eq('service_slug', 'social-media'),
+      // Reeks 3: meetings voor de volgende maand (per klant: nodig / niet nodig / ingepland).
+      admin.from('cp_meeting_planning').select('*').gte('maand', maandVanaf).lte('maand', maandTot),
     ])
     // Mensen om taken aan toe te wijzen: de hoofdbeheerders + actieve werknemers.
     let mensen: string[] = []
@@ -83,7 +85,7 @@ export async function GET(req: NextRequest) {
       notities: notities ?? [], checks: checks ?? [],
       faseAanpassingen: Object.fromEntries(((fases ?? []) as { plan_date: string; categories: string[] }[]).map((f) => [String(f.plan_date).slice(0, 10), f.categories])),
       mensen, kan: { aanpassen: r.aanpassen, beheren: r.beheren }, ik: wie(r.persoon),
-      bord: bord ?? [], socialKlanten: [...new Set(((social ?? []) as { client_id: string; active: boolean | null }[]).filter((x) => x.active !== false).map((x) => x.client_id))],
+      bord: bord ?? [], meetings: meetings ?? [], socialKlanten: [...new Set(((social ?? []) as { client_id: string; active: boolean | null }[]).filter((x) => x.active !== false).map((x) => x.client_id))],
     })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
@@ -184,8 +186,55 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true })
     }
 
+    // ── Dagelijkse werking: klant afvinken binnen een reeks (✓ op het bord) ──
+    if (actie === 'reeksvink.zet') {
+      const cid = uuid(b.client_id); const maand = typeof b.maand === 'string' && YM.test(b.maand) ? b.maand : null; const rk = Number(b.reeks)
+      if (!cid || !maand || !isReeks(rk)) return NextResponse.json({ error: 'Kies klant, maand en reeks.' }, { status: 400 })
+      const d = b.gedaan === false ? null : (dag(b.datum) ?? nu.slice(0, 10))
+      const { data, error } = await admin.from('cp_maand_reeksen').update({ afgewerkt_op: d, afgewerkt_door: d ? ik : null }).eq('client_id', cid).eq('maand', maand).eq('reeks', rk).eq('actief', true).select('client_id')
+      if (error) throw new Error(error.message)
+      if (!data?.length) return NextResponse.json({ error: 'Deze klant staat deze maand niet aangevinkt in Klantenbatches voor die reeks.' }, { status: 400 })
+      return NextResponse.json({ ok: true })
+    }
+    // ── Reeks 3: meetings voor de volgende maand inplannen ──
+    if (actie === 'meetingplan.zet') {
+      const cid = uuid(b.client_id); const maand = typeof b.maand === 'string' && YM.test(b.maand) ? b.maand : null
+      const status = b.status === 'nodig' || b.status === 'niet_nodig' || b.status === 'ingepland' ? b.status : null
+      if (!cid || !maand) return NextResponse.json({ error: 'Kies klant en maand.' }, { status: 400 })
+      const { error } = status
+        ? await admin.from('cp_meeting_planning').upsert({ client_id: cid, maand, status, door: ik, updated_at: nu }, { onConflict: 'client_id,maand' })
+        : await admin.from('cp_meeting_planning').delete().eq('client_id', cid).eq('maand', maand)
+      if (error) throw new Error(error.message)
+      return NextResponse.json({ ok: true })
+    }
+
     // ── Vanaf hier: de planning beheren ──
     const nee = beheer(); if (nee) return nee
+
+    // Klant (on)zichtbaar op het Klantenbatches-bord — de klant en zijn diensten blijven ongewijzigd.
+    if (actie === 'bord.verberg') {
+      const cid = uuid(b.client_id)
+      if (!cid) return NextResponse.json({ error: 'Kies een klant.' }, { status: 400 })
+      const inst = await leesInstellingenCp(admin)
+      const set = new Set(inst.bord_verborgen)
+      if (b.verborgen === false) set.delete(cid); else set.add(cid)
+      const nieuw = { ...inst, bord_verborgen: [...set] }
+      const { error } = await admin.from('app_settings').upsert({ key: SLEUTEL, value: nieuw, updated_at: nu }, { onConflict: 'key' })
+      if (error) throw new Error(error.message)
+      return NextResponse.json({ instellingen: nieuw })
+    }
+    // Werkwijze (stappenplan) van één reeks of één vaste taak bewaren, zonder de rest te overschrijven.
+    if (actie === 'werkwijze.opslaan') {
+      const inst = await leesInstellingenCp(admin)
+      const t = typeof b.tekst === 'string' ? b.tekst.slice(0, 20000) : ''
+      let nieuw: CpInstellingen
+      if (isReeks(Number(b.reeks))) nieuw = { ...inst, reeks_detail: { ...inst.reeks_detail, [String(b.reeks)]: t } }
+      else if (typeof b.taak === 'string' && inst.vaste_taken.some((x) => x.key === b.taak)) nieuw = { ...inst, vaste_taken: inst.vaste_taken.map((x) => (x.key === b.taak ? { ...x, detail: t } : x)) }
+      else return NextResponse.json({ error: 'Kies een reeks of taak.' }, { status: 400 })
+      const { error } = await admin.from('app_settings').upsert({ key: SLEUTEL, value: nieuw, updated_at: nu }, { onConflict: 'key' })
+      if (error) throw new Error(error.message)
+      return NextResponse.json({ instellingen: nieuw })
+    }
 
     if (actie === 'klant.voegtoe' || actie === 'klant.herstel') {
       const id = uuid(b.client_id); if (!id) return NextResponse.json({ error: 'Kies een klant.' }, { status: 400 })
@@ -213,6 +262,7 @@ export async function POST(req: NextRequest) {
       if ('verantwoordelijke' in b) v.verantwoordelijke = tekst(b.verantwoordelijke, 120)
       if ('goedkeuring_werkdagen' in b) v.goedkeuring_werkdagen = b.goedkeuring_werkdagen === null || b.goedkeuring_werkdagen === '' ? null : Math.max(0, Math.min(60, Math.round(Number(b.goedkeuring_werkdagen) || 0)))
       if ('afspraken' in b) v.afspraken = tekst(b.afspraken, 4000)
+      if ('materiaal' in b) v.materiaal = tekst(b.materiaal, 4000)
       if ('contactpersonen' in b && Array.isArray(b.contactpersonen)) v.contactpersonen = (b.contactpersonen as Record<string, unknown>[]).slice(0, 20).map((c) => ({ naam: tekst(c.naam, 120) ?? '', rol: tekst(c.rol, 120), email: tekst(c.email, 200), telefoon: tekst(c.telefoon, 40) })).filter((c) => c.naam)
       if ('links' in b && Array.isArray(b.links)) v.links = (b.links as Record<string, unknown>[]).slice(0, 30).map((l) => ({ label: tekst(l.label, 120) ?? '', url: tekst(l.url, 800) ?? '' })).filter((l) => /^https?:\/\//i.test(l.url))
       // Ritme en activiteiten zijn terugkerende instellingen: "alleen deze cyclus" of "ook toekomstige".
@@ -329,8 +379,8 @@ export async function POST(req: NextRequest) {
       if (enkel) q = q.eq('client_id', enkel)
       const [{ data: kl }, { data: clients }, { data: batches }, { data: bordRijen }] = await Promise.all([q, admin.from('clients').select('id, batch_id, company_name'), admin.from('batches').select('id, start_month'), admin.from('cp_maand_reeksen').select('client_id, reeks, actief').eq('maand', maand)])
       // Klantenbatches-bord van deze maand: gaat voor op ritme en batch.
-      const bordVan = new Map<string, Bord>()
-      for (const x of (bordRijen ?? []) as { client_id: string; reeks: Reeks; actief: boolean }[]) { const b = bordVan.get(x.client_id) ?? {}; b[x.reeks] = x.actief; bordVan.set(x.client_id, b) }
+      // Eén ✓ op het bord = het bord is in gebruik → niet aangevinkt betekent "deze maand niet".
+      const bordAlle = (bordRijen ?? []) as { client_id: string; reeks: Reeks; actief: boolean }[]
       const batchStart = new Map(((batches ?? []) as { id: string; start_month: number | null }[]).map((x) => [x.id, x.start_month]))
       const batchVan = new Map(((clients ?? []) as { id: string; batch_id: string | null }[]).map((c) => [c.id, c.batch_id]))
       let nieuw = 0, cycliNieuw = 0
@@ -342,7 +392,7 @@ export async function POST(req: NextRequest) {
         let { data: cyc } = await admin.from('cp_cycli').select('*').eq('client_id', k.client_id).eq('maand', maand).maybeSingle()
         if (cyc && cyc.status !== 'actief') continue   // gepauzeerd of gearchiveerd: niets bijmaken
         const eff = cyc ? { ...ki, ...(cyc.instellingen as Record<string, unknown>) } as typeof ki : ki
-        const bt = beurtenMetBord(maand, inst.onderdelen, eff, bordVan.get(k.client_id) ?? {})
+        const bt = beurtenMetBord(maand, inst.onderdelen, eff, bordVanKlant(bordAlle, k.client_id))
         const onbekend = bt.find((x) => x.aanDeBeurt === null)
         if (onbekend) ontbrekend.push({ client_id: k.client_id, reden: onbekend.reden ?? 'Instelling ontbreekt.' })
         if (!bt.some((x) => x.aanDeBeurt === true)) continue

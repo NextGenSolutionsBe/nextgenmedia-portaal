@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Plus, Search, Filter, Settings2, Loader2, X, CalendarDays, CalendarRange, Calendar, LayoutGrid, Layers, Route } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Search, Filter, Settings2, Loader2, X, CalendarDays, CalendarRange, Calendar, LayoutGrid, Layers, Route, ListChecks } from 'lucide-react'
 import { INP } from '@/app/admin/instellingen/ui'
 import { fasesVanMaand, reeksenVanDag, isKlaar, maandVan, maandag, plusDagen, plusMaanden, maandStart, maandEind, REEKSEN, type Reeks } from '@/lib/contentplanning/model'
 import { DagWeergave, WeekWeergave, MaandWeergave, Klantenbord } from './weergaven'
 import { Klantenbatches } from './klantenbatches'
 import { Reeksen } from './reeksen'
+import { DagelijkseWerking, type WerkModus } from './werking'
 import { TaakPaneel, KlantFiche, InstellingenPaneel } from './panelen'
 import { Notities, Paneel, focusRing } from './bouwstenen'
 import type { CpData, Doe, Filters, Notitie, Taak, Weergave } from './types'
@@ -15,7 +16,7 @@ import { LEGE_FILTERS, datumLang, maandNaam, vandaagBE } from './types'
 
 /**
  * Contentplanning — Chiara’s centrale werkplanning. Eén set taken en gegevens,
- * weergaven Dag · Klantenbatches · Reeksen · Week · Maand · Klantenbord. Een wijziging is meteen
+ * weergaven Dagelijkse werking · Dag · Reeksen · Klantenbatches · Week · Maand · Klantenbord. Een wijziging is meteen
  * overal zichtbaar. Laatst gekozen weergave en filters worden onthouden.
  */
 
@@ -28,14 +29,16 @@ type PaneelStaat =
 
 const VOORKEUR = 'ngm-contentplanning-v1'
 const WEERGAVEN: { key: Weergave; label: string; icon: typeof Calendar }[] = [
-  { key: 'dag', label: 'Dag', icon: Calendar }, { key: 'batches', label: 'Klantenbatches', icon: Layers }, { key: 'reeksen', label: 'Reeksen', icon: Route },
+  { key: 'werking', label: 'Dagelijkse werking', icon: ListChecks },
+  { key: 'dag', label: 'Dag', icon: Calendar }, { key: 'reeksen', label: 'Reeksen', icon: Route }, { key: 'batches', label: 'Klantenbatches', icon: Layers },
   { key: 'week', label: 'Week', icon: CalendarRange },
   { key: 'maand', label: 'Maand', icon: CalendarDays }, { key: 'bord', label: 'Klantenbord', icon: LayoutGrid },
 ]
 
 export function ContentplanningClient() {
   const vandaag = useMemo(() => vandaagBE(), [])
-  const [weergave, setWeergave] = useState<Weergave>('dag')
+  const [weergave, setWeergave] = useState<Weergave>('werking')
+  const [werkModus, setWerkModus] = useState<WerkModus>('dag')
   const [filters, setFilters] = useState<Filters>(LEGE_FILTERS)
   const [anker, setAnker] = useState(vandaag)
   const [data, setData] = useState<CpData | null>(null)
@@ -48,10 +51,10 @@ export function ContentplanningClient() {
 
   // Voorkeuren onthouden (weergave + filters), per browser van de gebruiker.
   useEffect(() => {
-    try { const v = JSON.parse(localStorage.getItem(VOORKEUR) ?? 'null'); if (v?.weergave) setWeergave(v.weergave); if (v?.filters) setFilters({ ...LEGE_FILTERS, ...v.filters }) } catch { /* geen opslag */ }
+    try { const v = JSON.parse(localStorage.getItem(VOORKEUR) ?? 'null'); if (v?.weergave) setWeergave(v.weergave); if (v?.werkModus) setWerkModus(v.werkModus); if (v?.filters) setFilters({ ...LEGE_FILTERS, ...v.filters }) } catch { /* geen opslag */ }
     geladen.current = true
   }, [])
-  useEffect(() => { if (!geladen.current) return; try { localStorage.setItem(VOORKEUR, JSON.stringify({ weergave, filters })) } catch { /* geen opslag */ } }, [weergave, filters])
+  useEffect(() => { if (!geladen.current) return; try { localStorage.setItem(VOORKEUR, JSON.stringify({ weergave, werkModus, filters })) } catch { /* geen opslag */ } }, [weergave, werkModus, filters])
 
   // Periode laden: de maand (6 weken rooster) én de week rond het anker.
   const ym = maandVan(anker)
@@ -148,8 +151,9 @@ export function ContentplanningClient() {
   }
 
   // ── Navigatie ──
-  const stap = (r: -1 | 1) => setAnker((a) => (weergave === 'dag' ? plusDagen(a, r) : weergave === 'week' ? plusDagen(a, 7 * r) : `${plusMaanden(maandVan(a), r)}-01`))
-  const periode = weergave === 'dag' ? datumLang(anker) : weergave === 'week' ? `Week van ${datumLang(maandag(anker))}` : maandNaam(ym)
+  const periodeSoort = weergave === 'werking' ? werkModus : weergave
+  const stap = (r: -1 | 1) => setAnker((a) => (periodeSoort === 'dag' ? plusDagen(a, r) : periodeSoort === 'week' ? plusDagen(a, 7 * r) : `${plusMaanden(maandVan(a), r)}-01`))
+  const periode = periodeSoort === 'dag' ? datumLang(anker) : periodeSoort === 'week' ? `Week van ${datumLang(maandag(anker))}` : maandNaam(ym)
   const zet = <K extends keyof Filters>(k: K, v: Filters[K]) => setFilters((f) => ({ ...f, [k]: v }))
   const filtersAan = JSON.stringify(filters) !== JSON.stringify(LEGE_FILTERS)
 
@@ -210,6 +214,7 @@ export function ContentplanningClient() {
       {fout && <div className="card-base text-sm text-red-700 bg-red-50 border-red-100 flex items-center gap-2">Laden mislukt: {fout}<button type="button" onClick={ververs} className="btn-secondary text-xs ml-auto">Opnieuw</button></div>}
       {!data && !fout && <div className="card-base py-16 text-center text-gray-400"><Loader2 className="h-5 w-5 animate-spin mx-auto" /><div className="text-sm mt-2">Planning laden…</div></div>}
 
+      {props && weergave === 'werking' && <DagelijkseWerking data={props.data} anker={anker} vandaag={vandaag} doe={doe} modus={werkModus} setModus={setWerkModus} onDag={(d) => { setAnker(d); setWerkModus('dag') }} onKlant={props.onKlant} onWeergave={setWeergave} reeksenOp={reeksenOp} klantNaam={klantNaam} />}
       {props && weergave === 'dag' && <DagWeergave {...props} aanDeBeurt={aanDeBeurt} onKlaarzetten={klaarzetten} onWeergave={setWeergave} />}
       {props && weergave === 'batches' && <Klantenbatches data={props.data} maand={ym} doe={doe} onKlant={props.onKlant} onKlaarzetten={klaarzetten} />}
       {props && weergave === 'reeksen' && <Reeksen data={props.data} maand={ym} doe={doe} vandaag={vandaag} />}

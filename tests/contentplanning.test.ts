@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict'
 import {
   STANDAARD_CP as S, beurtenMetBord, faseplanVanMaand, pasFaseAan, wisselDag, planNaarDagen, reeksPeriodes, segmenten, eersteWerkdag, standaardFases, fasesVanMaand, reeksenVanDag, plusWerkdagen, isKwartaalmaand, ritmeVan, beurten, teMakenTaken,
-  verwachteDatum, isAchterstallig, deadlineVerstreken, routineVoorDag, werkdagenVanMaand, leesCp,
+  verwachteDatum, isAchterstallig, deadlineVerstreken, routineVoorDag, werkdagenVanMaand, leesCp, bordVanKlant, leesWerkwijze, MAANDSTART,
 } from '../lib/contentplanning/model'
 
 let n = 0
@@ -81,10 +81,11 @@ test('Achterstallig: open taak met verstreken werkdatum of deadline; afgerond no
 })
 
 test('Inner Stance: dagelijks + donderdag/vrijdag', () => {
-  assert.equal(routineVoorDag(S.routine, '2026-10-07').length, 2) // woensdag
-  assert.equal(routineVoorDag(S.routine, '2026-10-08').length, 3) // donderdag
-  assert.equal(routineVoorDag(S.routine, '2026-10-09').length, 3) // vrijdag
-  assert.equal(routineVoorDag(S.routine, '2026-10-10').length, 0) // zaterdag
+  const ROUTINE = [{ key: 'a', titel: 'a', dagen: [1, 2, 3, 4, 5] }, { key: 'b', titel: 'b', dagen: [1, 2, 3, 4, 5] }, { key: 'c', titel: 'c', dagen: [4] }, { key: 'd', titel: 'd', dagen: [5] }]
+  assert.equal(routineVoorDag(ROUTINE, '2026-10-07').length, 2) // woensdag
+  assert.equal(routineVoorDag(ROUTINE, '2026-10-08').length, 3) // donderdag
+  assert.equal(routineVoorDag(ROUTINE, '2026-10-09').length, 3) // vrijdag
+  assert.equal(routineVoorDag(ROUTINE, '2026-10-10').length, 0) // zaterdag
 })
 
 test('Instellingen: leeg of half → aangevuld met de standaard', () => {
@@ -130,6 +131,29 @@ test('Reeksen: dag aan/uit, terug naar per-dag-opslag, periodes per reeks, eerst
   const p = reeksPeriodes('2026-10', faseplanVanMaand('2026-10', {}), S.fase_reeks)
   assert.deepEqual(p[1], { van: '2026-10-01', tot: '2026-10-12', dagen: 8 })
   assert.equal(eersteWerkdag('2026-11'), '2026-11-02') // 1 november is een zondag
+})
+
+test('Klantenbatches: zodra er één ✓ in de maand staat, is niet aangevinkt = deze maand niet', () => {
+  assert.deepEqual(bordVanKlant([], 'a'), {}) // nog niets aangevinkt → ritme/batch beslist
+  const rijen = [{ client_id: 'a', reeks: 1 as const, actief: true }, { client_id: 'b', reeks: 2 as const, actief: false }]
+  assert.deepEqual(bordVanKlant(rijen, 'a'), { 1: true, 2: false, 3: false })
+  assert.deepEqual(bordVanKlant(rijen, 'c'), { 1: false, 2: false, 3: false })
+  assert.equal(MAANDSTART[0].weergave, 'reeksen') // eerst de reeksen, dan de klantenbatches
+})
+
+test('Werkwijze per reeks: stappen, badges, deelblokken en let-op uit het tekstformaat', () => {
+  const w = leesWerkwijze('! Pitch Please als eerste editen.\n# Posts & stories [Claude Design]\n- Bijsturen\n# Meetings\n## Onboarding\n- Verloop volgen uit het portaal\n## Kwartaalmeeting\n- Statistieken\n- Content shoot vastleggen')
+  assert.deepEqual(w.letOp, ['Pitch Please als eerste editen.'])
+  assert.equal(w.stappen.length, 2)
+  assert.deepEqual([w.stappen[0].titel, w.stappen[0].badge, w.stappen[0].punten], ['Posts & stories', 'Claude Design', ['Bijsturen']])
+  assert.deepEqual(w.stappen[1].blokken.map((b) => [b.titel, b.punten.length]), [['Onboarding', 1], ['Kwartaalmeeting', 2]])
+  // Standaard: drie reeksen met een stappenplan, INN met twee weektaken, geen dagelijkse Inner Stance-checks meer.
+  const c = leesCp({})
+  assert.equal(leesWerkwijze(c.reeks_detail['1']).stappen.length, 7)
+  assert.equal(leesWerkwijze(c.reeks_detail['2']).letOp[0], 'Pitch Please als eerste editen.')
+  assert.deepEqual(c.vaste_taken.map((t) => t.key), ['inn_copy', 'inn_inplannen'])
+  assert.deepEqual(c.routine, [])
+  assert.deepEqual(leesCp({ bord_verborgen: ['x', 3] }).bord_verborgen, ['x'])
 })
 
 console.log(`\n${n} tests geslaagd\n`)

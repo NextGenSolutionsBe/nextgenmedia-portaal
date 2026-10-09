@@ -5,8 +5,8 @@ import Link from 'next/link'
 import { Loader2, Trash2, Plus, ExternalLink, Pause, Play, Archive, X } from 'lucide-react'
 import { INP } from '@/app/admin/instellingen/ui'
 import {
-  REEKSEN, ACTIVITEIT_RITME_LABEL, verwachteDatum, ritmeVan, beurten, isKlaar, FASE_KEYS, FASE_LABEL, DAG_KORT,
-  type ActiviteitRitme, type CpInstellingen, type Onderdeel, type Status, type Routine, type Link as CpLink, type Reeks, type Ritme,
+  REEKSEN, ACTIVITEIT_RITME_LABEL, verwachteDatum, ritmeVan, beurten, isKlaar, FASE_KEYS, FASE_LABEL,
+  type ActiviteitRitme, type CpInstellingen, type Onderdeel, type Status, type VasteTaak, type Link as CpLink, type Reeks, type Ritme,
 } from '@/lib/contentplanning/model'
 import { Paneel, Notities, StatusBadge, TaakKaart, focusRing } from './bouwstenen'
 import type { Batch, Contactpersoon, CpData, Doe, Taak } from './types'
@@ -112,7 +112,7 @@ export function KlantFiche({ clientId, maand, data, doe, vandaag, onSluit, onTaa
   const [scopeVraag, setScopeVraag] = useState<Record<string, unknown> | null>(null)
   const [v, setV] = useState({
     verantwoordelijke: cp?.verantwoordelijke ?? '', goedkeuring_werkdagen: cp?.goedkeuring_werkdagen === null || cp?.goedkeuring_werkdagen === undefined ? '' : String(cp.goedkeuring_werkdagen),
-    afspraken: cp?.afspraken ?? '',
+    afspraken: cp?.afspraken ?? '', materiaal: cp?.materiaal ?? '',
   })
   const [contacten, setContacten] = useState<Contactpersoon[]>(cp?.contactpersonen ?? [])
   const [links, setLinks] = useState<CpLink[]>(cp?.links ?? [])
@@ -128,7 +128,7 @@ export function KlantFiche({ clientId, maand, data, doe, vandaag, onSluit, onTaa
     if (cyclus) setScopeVraag(wijziging)
     else doe('klant.wijzig', { client_id: clientId, scope: 'toekomst', ...wijziging }, { melding: 'Ingesteld voor toekomstige cyclussen.' })
   }
-  const bewaarFiche = () => doe('klant.wijzig', { client_id: clientId, verantwoordelijke: v.verantwoordelijke || null, goedkeuring_werkdagen: v.goedkeuring_werkdagen === '' ? null : Number(v.goedkeuring_werkdagen), afspraken: v.afspraken || null, contactpersonen: contacten, links }, { melding: 'Klantfiche bewaard.' })
+  const bewaarFiche = () => doe('klant.wijzig', { client_id: clientId, verantwoordelijke: v.verantwoordelijke || null, goedkeuring_werkdagen: v.goedkeuring_werkdagen === '' ? null : Number(v.goedkeuring_werkdagen), afspraken: v.afspraken || null, materiaal: v.materiaal || null, contactpersonen: contacten, links }, { melding: 'Klantfiche bewaard.' })
 
   if (!klant) return null
   return (
@@ -198,6 +198,7 @@ export function KlantFiche({ clientId, maand, data, doe, vandaag, onSluit, onTaa
           <div><label className={lbl}>Verantwoordelijke</label><input className={INP} list="cp-mensen-k" disabled={!kanBeheren} value={v.verantwoordelijke} onChange={(e) => setV({ ...v, verantwoordelijke: e.target.value })} /><datalist id="cp-mensen-k">{data.mensen.map((m) => <option key={m} value={m} />)}</datalist></div>
           <div><label className={lbl}>Goedkeuringstermijn (werkdagen)</label><input className={INP} inputMode="numeric" disabled={!kanBeheren} value={v.goedkeuring_werkdagen} onChange={(e) => setV({ ...v, goedkeuring_werkdagen: e.target.value.replace(/[^0-9]/g, '') })} placeholder={inst.goedkeuring_werkdagen !== null ? `standaard ${inst.goedkeuring_werkdagen}` : 'in te vullen'} /></div>
           <div className="col-span-2"><label className={lbl}>Klantspecifieke afspraken</label><textarea rows={3} className={INP} disabled={!kanBeheren} value={v.afspraken} onChange={(e) => setV({ ...v, afspraken: e.target.value })} placeholder="bv. Shoots altijd op dinsdag; content via WhatsApp." /></div>
+          <div className="col-span-2"><label className={lbl}>Materiaal — waar staan de foto’s en video’s?</label><textarea rows={3} className={INP} disabled={!kanBeheren} value={v.materiaal} onChange={(e) => setV({ ...v, materiaal: e.target.value })} placeholder={'Foto’s: drive (link)\nVideo’s camera: harddrive'} /><p className="text-[11px] text-gray-500 mt-1">Verschijnt bij de werkwijze van reeks 2.</p></div>
         </div>
         <div>
           <div className="flex items-center justify-between"><label className={lbl}>Contactpersonen</label>{kanBeheren && <button type="button" onClick={() => setContacten([...contacten, { naam: '', rol: null, email: null, telefoon: null }])} className="text-xs underline">+ contact</button>}</div>
@@ -267,15 +268,15 @@ const KLEUREN: { label: string; cls: string }[] = [
 const VASTE_STATUSSEN = ['nog_in_te_plannen', 'ingepland', 'in_uitvoering', 'wacht_op_klant', 'afgerond', 'nvt']
 
 export function InstellingenPaneel({ data, doe, onSluit }: { data: CpData; doe: Doe; onSluit: () => void }) {
-  const [tab, setTab] = useState<'onderdelen' | 'statussen' | 'termijnen' | 'reeksen' | 'batches' | 'routine'>('onderdelen')
+  const [tab, setTab] = useState<'onderdelen' | 'statussen' | 'termijnen' | 'reeksen' | 'werkwijze' | 'batches' | 'routine'>('onderdelen')
   const [v, setV] = useState<CpInstellingen>(data.instellingen)
   const [bezig, setBezig] = useState(false)
   const vuil = useMemo(() => JSON.stringify(v) !== JSON.stringify(data.instellingen), [v, data.instellingen])
   const zetO = (i: number, d: Partial<Onderdeel>) => setV({ ...v, onderdelen: v.onderdelen.map((o, j) => (j === i ? { ...o, ...d } : o)) })
   const zetS = (i: number, d: Partial<Status>) => setV({ ...v, statussen: v.statussen.map((s, j) => (j === i ? { ...s, ...d } : s)) })
-  const zetR = (i: number, d: Partial<Routine>) => setV({ ...v, routine: v.routine.map((r, j) => (j === i ? { ...r, ...d } : r)) })
+  const zetV = (i: number, d: Partial<VasteTaak>) => setV({ ...v, vaste_taken: v.vaste_taken.map((t, j) => (j === i ? { ...t, ...d } : t)) })
   const bewaar = async () => { setBezig(true); await doe('instellingen.opslaan', { instellingen: v }, { melding: 'Instellingen bewaard.' }); setBezig(false) }
-  const TABS = [['onderdelen', 'Onderdelen'], ['statussen', 'Statussen'], ['termijnen', 'Termijnen'], ['reeksen', 'Reeksen'], ['batches', 'Batches'], ['routine', v.routine_naam || 'Routine']] as const
+  const TABS = [['onderdelen', 'Onderdelen'], ['statussen', 'Statussen'], ['termijnen', 'Termijnen'], ['reeksen', 'Reeksen'], ['werkwijze', 'Werkwijze per reeks'], ['batches', 'Batches'], ['routine', v.vaste_naam || 'Vaste klant']] as const
   return (
     <Paneel breed titel="Instellingen contentplanning" sub="Een aanpasbaar vertrekpunt — enkel voor wie de planning beheert." onSluit={onSluit}>
       <div className="flex gap-1 flex-wrap">{TABS.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={`rounded-lg px-2.5 py-1.5 text-xs font-medium ${tab === k ? 'bg-black text-white' : 'bg-gray-100 text-gray-700'} ${focusRing}`}>{l}</button>)}</div>
@@ -329,16 +330,31 @@ export function InstellingenPaneel({ data, doe, onSluit }: { data: CpData; doe: 
         </section>
       )}
       {tab === 'batches' && <BatchBeheer batches={data.batches} doe={doe} />}
-      {tab === 'routine' && (
+      {tab === 'werkwijze' && (
         <section className="space-y-3">
-          <div><label className={lbl}>Naam van de routine</label><input className={INP} value={v.routine_naam} onChange={(e) => setV({ ...v, routine_naam: e.target.value })} /></div>
-          {v.routine.map((r, i) => (
-            <div key={r.key} className="rounded-xl border border-gray-200 p-2.5 space-y-1.5">
-              <div className="flex gap-1.5"><input className={INP} value={r.titel} onChange={(e) => zetR(i, { titel: e.target.value })} /><button type="button" onClick={() => setV({ ...v, routine: v.routine.filter((_, j) => j !== i) })} className={`h-9 w-9 shrink-0 rounded-lg hover:bg-red-50 text-red-600 flex items-center justify-center ${focusRing}`} aria-label="Check verwijderen"><Trash2 className="h-4 w-4" /></button></div>
-              <div className="flex gap-1 flex-wrap">{DAG_KORT.map((d, j) => { const nr = j + 1; const aan = r.dagen.includes(nr); return <button key={d} type="button" aria-pressed={aan} onClick={() => zetR(i, { dagen: aan ? r.dagen.filter((x) => x !== nr) : [...r.dagen, nr].sort() })} className={`h-7 w-9 rounded-md text-xs font-medium border ${aan ? 'bg-black text-white border-black' : 'bg-white border-gray-200'} ${focusRing}`}>{d}</button> })}</div>
+          <p className="text-[11px] text-gray-500">Het stappenplan achter de knop “Werkwijze” in de dagelijkse werking. Opmaak per regel: <code># Stap [badge]</code> · <code>## Deelblok</code> · <code>- punt</code> · <code>! let op</code>.</p>
+          {REEKSEN.map((r) => (
+            <div key={r.nr}>
+              <label className={`${lbl} flex items-center gap-1.5`}><span className={`h-2 w-2 rounded-full ${r.kleur}`} />{r.label}</label>
+              <textarea rows={10} className={`${INP} font-mono text-xs`} value={v.reeks_detail[String(r.nr)] ?? ''} onChange={(e) => setV({ ...v, reeks_detail: { ...v.reeks_detail, [String(r.nr)]: e.target.value } })} />
             </div>
           ))}
-          <button type="button" onClick={() => setV({ ...v, routine: [...v.routine, { key: `r_${Date.now().toString(36)}`, titel: 'Nieuwe check', dagen: [1, 2, 3, 4, 5] }] })} className="btn-secondary text-xs"><Plus className="h-3.5 w-3.5" />Check toevoegen</button>
+        </section>
+      )}
+      {tab === 'routine' && (
+        <section className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div><label className={lbl}>Naam</label><input className={INP} value={v.vaste_naam} onChange={(e) => setV({ ...v, vaste_naam: e.target.value })} /></div>
+            <div><label className={lbl}>Omschrijving</label><input className={INP} value={v.vaste_sub} onChange={(e) => setV({ ...v, vaste_sub: e.target.value })} /></div>
+          </div>
+          <p className="text-[11px] text-gray-500">Korte taken die je per week afvinkt; de volledige werkwijze staat achter “details”.</p>
+          {v.vaste_taken.map((t, i) => (
+            <div key={t.key} className="rounded-xl border border-gray-200 p-2.5 space-y-1.5">
+              <div className="flex gap-1.5"><input className={INP} value={t.titel} onChange={(e) => zetV(i, { titel: e.target.value })} aria-label="Taak" /><button type="button" onClick={() => setV({ ...v, vaste_taken: v.vaste_taken.filter((_, j) => j !== i) })} className={`h-9 w-9 shrink-0 rounded-lg hover:bg-red-50 text-red-600 flex items-center justify-center ${focusRing}`} aria-label="Taak verwijderen"><Trash2 className="h-4 w-4" /></button></div>
+              <textarea rows={6} className={`${INP} font-mono text-xs`} value={t.detail} onChange={(e) => zetV(i, { detail: e.target.value })} aria-label={`Details ${t.titel}`} />
+            </div>
+          ))}
+          <button type="button" onClick={() => setV({ ...v, vaste_taken: [...v.vaste_taken, { key: `vt_${Date.now().toString(36)}`, titel: 'Nieuwe weektaak', detail: '' }] })} className="btn-secondary text-xs"><Plus className="h-3.5 w-3.5" />Weektaak toevoegen</button>
           <div>
             <div className="flex items-center justify-between"><label className={lbl}>Links</label><button type="button" onClick={() => setV({ ...v, routine_links: [...v.routine_links, { label: '', url: '' }] })} className="text-xs underline">+ link</button></div>
             <div className="space-y-1.5">{v.routine_links.map((l, i) => (

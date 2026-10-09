@@ -96,7 +96,16 @@ export type CpInstellingen = {
   routine_naam: string
   routine: Routine[]
   routine_links: Link[]
+  /** Werkwijze (stappenplan) per reeks, sleutel '1' | '2' | '3', in het tekstformaat van `leesWerkwijze`. */
+  reeks_detail: Record<string, string>
+  /** Vaste klant met een eigen weekworkflow (INN · SLL · K · J): korte taken, per week afvinken. */
+  vaste_naam: string
+  vaste_sub: string
+  vaste_taken: VasteTaak[]
+  /** Klanten die niet op het Klantenbatches-bord horen (bv. geen social media). */
+  bord_verborgen: string[]
 }
+export type VasteTaak = { key: string; titel: string; detail: string }
 
 export const STANDAARD_STATUSSEN: Status[] = [
   { key: 'nog_in_te_plannen', label: 'Nog in te plannen', kleur: 'bg-white text-gray-800 border-gray-300', klaar: false },
@@ -123,17 +132,107 @@ export const STANDAARD_CP: CpInstellingen = {
   goedkeuring_werkdagen: null,
   fase_reeks: { ideeen: 1, intakes: 1, scripts: 1, shoots: 2, edit: 3, feedback: 3, aanpassingen: 3, stats: 3 },
   routine_naam: 'Inner Stance',
-  routine: [
-    { key: 'is_copy_volgende_week', titel: 'Controleren of copy voor volgende week klaarstaat', dagen: [1, 2, 3, 4, 5] },
-    { key: 'is_posts_ready', titel: 'Controleren of posts op ‘Ready’ staan', dagen: [1, 2, 3, 4, 5] },
-    { key: 'is_copy_aanpassen', titel: 'Copy aanpassen', dagen: [4] },
-    { key: 'is_content_inplannen', titel: 'Content inplannen', dagen: [5] },
-  ],
+  // De dagelijkse Inner Stance-checks zijn vervangen door de weektaken van INN · SLL · K · J (vaste_taken).
+  routine: [],
   routine_links: [
     { label: 'Notion', url: 'https://www.notion.so' },
     { label: 'Frame.io', url: 'https://app.frame.io' },
     { label: 'Metricool', url: 'https://app.metricool.com' },
   ],
+  reeks_detail: {
+    1: `! Eerste werkdag van de maand: reeksen verschuiven en de klantenbatches (badges) van de klanten aanpassen.
+# Notities bekijken
+- Welke klanten zitten in de batch
+- Per klant: 1 of 3 maanden
+- Werk inplannen 1 à 2 dagen vóór elke meeting
+# Contentkalender genereren [portaal]
+- Per klant genereren voor 1 of 3 maanden
+# Content invullen [Claude]
+- Bestaande klant: eerst evalueren wat beter kan dan vorige periode
+- Richting meegeven
+- Claude levert: concept per post, concept per story, scripts bij reels
+# Reelscripts doornemen met Bram
+# Contentkalender naar ClickUp [portaal]
+- Op de knop in de app drukken
+- Wordt automatisch weggeschreven naar ClickUp
+# Meetings
+## Onboarding
+- Verloop volgen uit het portaal
+## Kwartaalmeeting
+- Statistieken
+- Ontbrekende content opvragen
+- Content shoot vastleggen
+# Aanpassingen doorgeven aan Claude
+- Alles uit de meetings terugkoppelen
+- Posts en scripts worden aangepast in het portaal`,
+    2: `! Pitch Please als eerste editen.
+# Volgorde bepalen
+- Per klant vastleggen wanneer je edit, op basis van de shootdata
+# Posts & stories [Claude Design]
+- Foto's en video's staan per klant in je notities
+- Input geven: welke foto's, aantal slides
+- Bijsturen
+- Inplannen als draft
+# Reels
+- Foto's en video's staan per klant in je notities
+- Zelf editen
+- Captions door AI, met input over de inhoud
+- Als draft in Metricool
+# Afronden per klant
+- Alles compleet: posts, stories, reels, captions
+- Metricool nakijken
+- Doorsturen ter goedkeuring
+# Opvolgtaak zetten [ClickUp]
+- Werkdagen tellen vanaf het versturen
+- Op die datum: "Aanpassingen + definitief inplannen"
+## Termijn
+- 3 werkdagen · alle klanten
+- 7 werkdagen · Pitch Please
+# Goedkeuringstermijn aanduiden [portaal]
+- Aanduiden dat de termijn loopt vanaf vandaag
+- Klant krijgt zo te zien hoeveel dagen er nog zijn
+- Mail sturen naar de klant
+# Materiaal zoeken
+- Altijd eerst de app checken voor nieuwe foto's van projecten
+- Contentshoots van Bram: in de map met naam 'video's RAW F maand x V maand x - maand y'
+- Per klant: zie "Materiaal per klant" hieronder`,
+    3: `# Meetings voor volgende maand inplannen (eerste dag van reeks 3)
+- Per socialmediaklant bekijken of er een meeting nodig is
+- Link en mail sturen
+# Aanpassingen + definitief inplannen
+- Feedback verwerken
+- Definitief inplannen in Metricool
+- Daarna afvinken in ClickUp
+# Statistieken [Metricool]
+## Nieuwe klant
+- Automatische stats aanvinken
+- Doorsturing instellen
+## Bestaande klant
+- Doorsturing checken`,
+  },
+  vaste_naam: 'INN · SLL · K · J',
+  vaste_sub: 'Inner Stance, Straight Line Leadership en de persoonlijke kanalen van Kristof en Johan',
+  vaste_taken: [
+    { key: 'inn_copy', titel: 'Copy controleren en aanpassen', detail: `# Dagelijks in Notion controleren
+- Staat er voor de week erna ‘Copy changes needed’?
+- De status kan dagelijks veranderen: controleer op verschillende dagen en vink per week af
+# Indien nodig [Claude]
+- Claude inschakelen om de copy aan te passen
+- De wijzigingen controleren
+- Status op ‘Copy ready for review’ zetten` },
+    { key: 'inn_inplannen', titel: 'Content inplannen en schedulen', detail: `# In Notion controleren
+- Staat alle content op ‘Ready’?
+# Captions inplannen [Claude]
+- Claude plant de captions in Metricool in op de juiste data, accounts en kanalen
+- Specifieke instructies voor LinkedIn en YouTube volgen
+- LinkedIn en Facebook samen inplannen
+- Waar nodig een first comment toevoegen
+# Zelf afronden
+- Content downloaden
+- Aan de juiste captions koppelen
+- Alles officieel schedulen` },
+  ],
+  bord_verborgen: [],
 }
 
 /** Instellingen uit de databank, aangevuld met de standaard (nooit een leeg scherm). */
@@ -147,6 +246,11 @@ export function leesCp(ruw: unknown): CpInstellingen {
     routine: Array.isArray(r.routine) ? r.routine : STANDAARD_CP.routine,
     routine_links: Array.isArray(r.routine_links) ? r.routine_links : STANDAARD_CP.routine_links,
     fase_reeks: { ...STANDAARD_CP.fase_reeks, ...(r.fase_reeks ?? {}) },
+    reeks_detail: { ...STANDAARD_CP.reeks_detail, ...(r.reeks_detail && typeof r.reeks_detail === 'object' ? r.reeks_detail : {}) },
+    vaste_naam: typeof r.vaste_naam === 'string' && r.vaste_naam.trim() ? r.vaste_naam : STANDAARD_CP.vaste_naam,
+    vaste_sub: typeof r.vaste_sub === 'string' ? r.vaste_sub : STANDAARD_CP.vaste_sub,
+    vaste_taken: Array.isArray(r.vaste_taken) ? r.vaste_taken.filter((t) => t && typeof t.key === 'string').map((t) => ({ key: t.key, titel: String(t.titel ?? ''), detail: String(t.detail ?? '') })) : STANDAARD_CP.vaste_taken,
+    bord_verborgen: Array.isArray(r.bord_verborgen) ? r.bord_verborgen.filter((x): x is string => typeof x === 'string') : [],
     aanpassing_werkdagen: Number.isFinite(Number(r.aanpassing_werkdagen)) ? Math.max(0, Math.round(Number(r.aanpassing_werkdagen))) : 3,
     goedkeuring_werkdagen: r.goedkeuring_werkdagen === null || r.goedkeuring_werkdagen === undefined ? null : Math.max(0, Math.round(Number(r.goedkeuring_werkdagen))),
   }
@@ -318,6 +422,45 @@ export function reeksPeriodes(ym: string, plan: FasePlan, koppeling: Record<stri
 
 /** Maandstart: op de eerste werkdag van ELKE maand vult Chiara Klantenbatches in en bekijkt ze de reeksen. */
 export const MAANDSTART = [
-  { key: 'maandstart_batches', titel: 'Klantenbatches invullen', weergave: 'batches' as const },
-  { key: 'maandstart_reeksen', titel: 'Reeksen van de maand bekijken en aanpassen', weergave: 'reeksen' as const },
+  { key: 'maandstart_reeksen', titel: 'Reeksen van de maand bekijken en verschuiven', weergave: 'reeksen' as const },
+  { key: 'maandstart_batches', titel: 'Klantenbatches (badges) van de klanten aanpassen', weergave: 'batches' as const },
 ]
+
+/**
+ * Klantenbatches → bord van één klant. Zodra het bord van de maand in gebruik is
+ * (minstens één ✓), betekent "niet aangevinkt" = deze maand niet. Is er nog
+ * niets aangevinkt, dan volgt de app het ritme en de batch van de klant.
+ */
+export function bordVanKlant(rijen: { client_id: string; reeks: Reeks; actief: boolean }[], cid: string): Bord {
+  const b: Bord = {}
+  if (rijen.some((x) => x.actief)) for (const r of [1, 2, 3] as Reeks[]) b[r] = false
+  for (const x of rijen) if (x.client_id === cid) b[x.reeks] = x.actief
+  return b
+}
+
+// ── Werkwijze per reeks: eenvoudig tekstformaat ─────────────────────────────
+//   ! tekst          → let-op-melding
+//   # Stap [badge]   → nieuwe stap (badge optioneel, bv. [portaal])
+//   ## Blok          → deelblok binnen de stap (bv. Onboarding / Kwartaalmeeting)
+//   - punt           → opsommingspunt (in het blok of in de stap)
+//   andere tekst     → gewone uitleg
+export type WerkStap = { titel: string; badge: string | null; punten: string[]; blokken: { titel: string; punten: string[] }[] }
+export type Werkwijze = { letOp: string[]; intro: string[]; stappen: WerkStap[] }
+export function leesWerkwijze(tekst: string): Werkwijze {
+  const w: Werkwijze = { letOp: [], intro: [], stappen: [] }
+  let stap: WerkStap | null = null
+  let blok: { titel: string; punten: string[] } | null = null
+  for (const ruw of (tekst ?? '').split(/\r?\n/)) {
+    const l = ruw.trim(); if (!l) continue
+    if (l.startsWith('!')) { w.letOp.push(l.slice(1).trim()); continue }
+    if (l.startsWith('## ')) { if (!stap) { stap = { titel: '', badge: null, punten: [], blokken: [] }; w.stappen.push(stap) } blok = { titel: l.slice(3).trim(), punten: [] }; stap.blokken.push(blok); continue }
+    if (l.startsWith('# ')) {
+      const m = l.slice(2).trim().match(/^(.*?)\s*\[([^\]]+)\]\s*$/)
+      stap = { titel: (m ? m[1] : l.slice(2)).trim(), badge: m ? m[2].trim() : null, punten: [], blokken: [] }; blok = null
+      w.stappen.push(stap); continue
+    }
+    const punt = l.startsWith('- ') ? l.slice(2).trim() : l
+    if (blok) blok.punten.push(punt); else if (stap) stap.punten.push(punt); else w.intro.push(punt)
+  }
+  return w
+}
