@@ -9,7 +9,7 @@ export type PortalModule = (typeof PORTAL_MODULES)[number]
 
 // Acties per module (de "actie-rechten").
 export const MODULE_ACTIONS: Record<PortalModule, string[]> = {
-  social_media: ['view', 'feedback', 'approve_scripts'],
+  social_media: ['view', 'edit', 'feedback', 'approve_scripts'],
   metricool:    ['view'],
   cms:          ['view', 'edit', 'publish'],
   website:      ['view', 'request_maintenance'],

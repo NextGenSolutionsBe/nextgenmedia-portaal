@@ -29,7 +29,17 @@ export async function GET(req: NextRequest) {
     if (clientId) query = query.eq('client_id', clientId)
     const { data, error } = await query
     if (error) throw new Error(error.message)
-    return NextResponse.json({ items: data ?? [] })
+    // Interne notities staan in een aparte tabel (nooit zichtbaar voor de klant).
+    const items = (data ?? []) as Record<string, unknown>[]
+    const notities = new Map<string, string | null>()
+    try {
+      const ids = items.map((i) => String(i.id))
+      for (let i = 0; i < ids.length; i += 200) {
+        const { data: n } = await admin.from('social_content_interne_notities').select('item_id, notitie').in('item_id', ids.slice(i, i + 200))
+        for (const r of (n ?? []) as { item_id: string; notitie: string | null }[]) notities.set(r.item_id, r.notitie)
+      }
+    } catch { /* tabel nog niet gemigreerd */ }
+    return NextResponse.json({ items: items.map((i) => ({ ...i, interne_notitie: notities.get(String(i.id)) ?? null })) })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
@@ -79,10 +89,17 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    await assertAdmin()
+    const user = await assertAdmin()
     const admin = createAdminSupabaseClient()
     const body = await req.json()
-    const { id, platforms: rawPlatforms, platform: rawPlatform, ...rest } = body
+    const { id, platforms: rawPlatforms, platform: rawPlatform, interne_notitie, klant_gewijzigd_op: _a, klant_gewijzigd_door: _b, ...rest } = body
+    void _a; void _b
+    // Interne notitie → aparte tabel, nooit op het item zelf (de klant kan zijn items lezen).
+    if (interne_notitie !== undefined) {
+      const tekst = typeof interne_notitie === 'string' && interne_notitie.trim() ? interne_notitie.slice(0, 20000) : null
+      const { error: ne } = await admin.from('social_content_interne_notities').upsert({ item_id: id, notitie: tekst, gewijzigd_door: user.email ?? null, updated_at: new Date().toISOString() }, { onConflict: 'item_id' })
+      if (ne) throw new Error(ne.message)
+    }
     const clean: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(rest)) {
       if (v !== undefined) clean[k] = v === '' ? null : v
@@ -95,8 +112,10 @@ export async function PATCH(req: NextRequest) {
       clean.platforms = resolvedPlatforms
       clean.platform = resolvedPlatforms[0] ?? null
     }
-    const { error } = await admin.from('social_content_items').update(clean).eq('id', id)
-    if (error) throw new Error(error.message)
+    if (Object.keys(clean).length) {
+      const { error } = await admin.from('social_content_items').update(clean).eq('id', id)
+      if (error) throw new Error(error.message)
+    }
     return NextResponse.json({ ok: true })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })

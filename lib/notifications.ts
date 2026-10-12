@@ -72,6 +72,22 @@ export async function buildNotifications(): Promise<Notif[]> {
     }
   } catch { /* tabel nog niet gemigreerd → geen signaal */ }
 
+  // Klant paste zelf content aan in de contentplanner (laatste 7 dagen): één signaal
+  // per klant; de id bevat de laatste wijziging zodat een nieuwe wijziging opnieuw ongelezen is.
+  try {
+    const gewijzigd = await safe(admin.from('social_content_items').select('client_id, klant_gewijzigd_op')
+      .gte('klant_gewijzigd_op', since).order('klant_gewijzigd_op', { ascending: false }).limit(500)) as { client_id: string; klant_gewijzigd_op: string }[]
+    const perKlant = new Map<string, { n: number; laatste: string }>()
+    for (const r of gewijzigd) { const x = perKlant.get(r.client_id); if (x) x.n++; else perKlant.set(r.client_id, { n: 1, laatste: r.klant_gewijzigd_op }) }
+    for (const [cid, { n, laatste }] of perKlant) {
+      out.push({
+        id: `content-klant:${cid}:${laatste}`, kind: 'content', priority: 'med',
+        title: `${names.get(cid) ?? 'Klant'} paste ${n} contentitem${n === 1 ? '' : 's'} zelf aan`,
+        date: laatste.slice(0, 10), href: `/admin/services/social-media?client=${cid}`,
+      })
+    }
+  } catch { /* kolom nog niet gemigreerd → geen signaal */ }
+
   // Goedkeuringsdeadlines van de contentkalender die binnen 3 dagen vallen
   // (of vandaag). De id bevat de datum: een verschoven deadline is opnieuw ongelezen.
   // Verstreken maar nog open = wij moeten manueel "Alles goedkeuren" (nooit automatisch).

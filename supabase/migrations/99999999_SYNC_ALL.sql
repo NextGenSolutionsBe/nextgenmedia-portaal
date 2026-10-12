@@ -5764,3 +5764,18 @@ ALTER TABLE public.materiaal_ontleners ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.materiaal_uitleningen ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.materiaal_activiteiten ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.materiaal_categorieen, public.materiaal_items, public.materiaal_ontleners, public.materiaal_uitleningen, public.materiaal_activiteiten FROM anon, authenticated;
+
+-- ── Klant past zelf de contentplanner aan (12 okt 2026) ─────────────────────
+-- Wie/wanneer de klant een item aanpaste (zichtbaar voor ons in de admin).
+ALTER TABLE public.social_content_items ADD COLUMN IF NOT EXISTS klant_gewijzigd_op timestamptz;
+ALTER TABLE public.social_content_items ADD COLUMN IF NOT EXISTS klant_gewijzigd_door text;
+-- Interne notities: APARTE tabel, want klanten mogen hun eigen items via RLS
+-- lezen — een kolom op social_content_items zou voor hen zichtbaar zijn.
+CREATE TABLE IF NOT EXISTS public.social_content_interne_notities (
+  item_id uuid PRIMARY KEY REFERENCES public.social_content_items(id) ON DELETE CASCADE,
+  notitie text,
+  gewijzigd_door text,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.social_content_interne_notities ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.social_content_interne_notities FROM anon, authenticated;

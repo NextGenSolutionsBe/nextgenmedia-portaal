@@ -15,6 +15,7 @@ export async function POST(req: NextRequest) {
     const { session } = g
 
     const { id, decision, feedback } = await req.json()
+    if (decision !== 'approved' && decision !== 'changes_requested') return NextResponse.json({ error: 'Onbekende beslissing.' }, { status: 400 })
 
     // Goedkeuren vereist approve_scripts; wijziging vragen vereist feedback-recht.
     if (decision === 'approved' && !sessionCan(session, 'social_media', 'approve_scripts')) {

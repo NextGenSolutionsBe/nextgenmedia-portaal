@@ -18,6 +18,7 @@ export default async function PortalSocialMediaPage() {
   const clientId = session.clientId
   const canApprove = sessionCan(session, 'social_media', 'approve_scripts')
   const canFeedback = sessionCan(session, 'social_media', 'feedback')
+  const canEdit = sessionCan(session, 'social_media', 'edit')
   const admin = createAdminSupabaseClient()
 
   const { data: client } = await admin
@@ -38,7 +39,8 @@ export default async function PortalSocialMediaPage() {
 
   const { data: items } = await admin
     .from('social_content_items')
-    .select('*')
+    // Expliciete kolommen: geen interne velden (ClickUp, aanmaker, contract) naar de klant.
+    .select('id, client_id, planned_date, platform, platforms, content_type, title, caption, script, media_notes, status, client_feedback, reviewed_at, created_at')
     .eq('client_id', clientId)
     .order('planned_date', { ascending: true })
 
@@ -110,6 +112,7 @@ export default async function PortalSocialMediaPage() {
         clientId={clientId}
         canApprove={canApprove}
         canFeedback={canFeedback}
+        canEdit={canEdit}
       />
 
       <ShootBriefingView shoots={shoots} feedbackByShoot={feedbackByShoot} ideasByShoot={ideasByShoot} />

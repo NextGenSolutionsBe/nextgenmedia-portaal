@@ -27,6 +27,11 @@ export type SocialContentItem = {
   client_feedback: string | null
   reviewed_at: string | null
   created_at: string
+  /** Enkel in de admin geladen (aparte tabel); nooit in het portaal. */
+  interne_notitie?: string | null
+  /** De klant paste dit item zelf aan in het portaal. */
+  klant_gewijzigd_op?: string | null
+  klant_gewijzigd_door?: string | null
 }
 
 export type CalendarMode = 'admin' | 'client'
@@ -194,7 +199,7 @@ export function ContentCalendar({
             return (
               <div
                 key={idx}
-                onDragOver={(e) => mode === 'admin' && e.preventDefault()}
+                onDragOver={(e) => { if (actions.onMove) e.preventDefault() }}
                 onDrop={(e) => onDrop(e, dayStr)}
                 className={`group relative border-r border-b border-gray-100 p-1.5 flex flex-col gap-1
                   ${view === 'month' ? 'min-h-[100px]' : 'min-h-[200px]'}
@@ -225,7 +230,7 @@ export function ContentCalendar({
                     return (
                       <button
                         key={it.id}
-                        draggable={mode === 'admin' && !selectMode}
+                        draggable={!!actions.onMove && !selectMode}
                         onDragStart={(e) => e.dataTransfer.setData('text/plain', it.id)}
                         onClick={() => {
                           if (selectMode) {
@@ -324,7 +329,7 @@ function ScriptPanel({
   const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]'
 
   const save = async () => {
-    if (!isAdmin || !actions.onUpdate || !form) return
+    if (!actions.onUpdate || !form) return
     setBusy(true)
     try {
       const resolvedPlatforms = normaliseerKanalen(
@@ -336,6 +341,8 @@ function ScriptPanel({
         platform: resolvedPlatforms[0],
         content_type: form.content_type, planned_date: form.planned_date,
         caption: form.caption, script: form.script, media_notes: form.media_notes,
+        // De interne notitie bestaat enkel in de admin; de klant ziet of verstuurt ze nooit.
+        ...(isAdmin ? { interne_notitie: form.interne_notitie ?? null } : {}),
       })
       setEditing(false)
     } catch {
@@ -464,6 +471,21 @@ function ScriptPanel({
           </div>
         )}
 
+        {isAdmin && (editing || f.interne_notitie) && (
+          <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-2.5">
+            <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Interne notitie <span className="normal-case">— enkel zichtbaar voor NextGenMedia</span></div>
+            {editing ? (
+              <textarea rows={2} value={f.interne_notitie ?? ''} onChange={(e) => setForm({ ...f, interne_notitie: e.target.value })} className={inp} />
+            ) : (
+              <p className="text-sm whitespace-pre-wrap text-gray-700">{f.interne_notitie}</p>
+            )}
+          </div>
+        )}
+
+        {isAdmin && item.klant_gewijzigd_op && (
+          <p className="text-[11px] text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1.5">Aangepast door de klant{item.klant_gewijzigd_door ? ` (${item.klant_gewijzigd_door})` : ''} op {new Date(item.klant_gewijzigd_op).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+        )}
+
         {item.status === 'changes_requested' && item.client_feedback && (
           <div className="text-sm rounded-lg border border-red-200 bg-red-50 p-3 text-red-700">
             <strong className="block mb-1 text-xs uppercase tracking-wide">Feedback klant</strong>
@@ -540,7 +562,23 @@ function ScriptPanel({
           </>
         ) : (
           <>
-            {(item.status === 'ready_for_review' || item.status === 'changes_requested') ? (
+            {actions.onUpdate && (
+              editing ? (
+                <div className="flex gap-2">
+                  <button disabled={busy} onClick={save} className="btn-primary flex-1">
+                    {busy ? <span className="h-4 w-4 border-2 border-black/20 border-t-black rounded-full animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                    Opslaan
+                  </button>
+                  <button onClick={() => { setForm(item); setEditing(false) }} className="btn-secondary">Annuleer</button>
+                </div>
+              ) : (
+                <button onClick={() => setEditing(true)} className="btn-secondary w-full">
+                  <Pencil className="h-3.5 w-3.5" />
+                  Zelf aanpassen
+                </button>
+              )
+            )}
+            {editing ? null : (item.status === 'ready_for_review' || item.status === 'changes_requested') ? (
               <div className="space-y-3">
                 <div>
                   <label className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">
@@ -573,9 +611,9 @@ function ScriptPanel({
                   </button>
                 </div>
               </div>
-            ) : (
+            ) : !actions.onUpdate ? (
               <p className="text-xs text-gray-400 text-center">Geen actie vereist op dit moment.</p>
-            )}
+            ) : null}
           </>
         )}
       </div>
