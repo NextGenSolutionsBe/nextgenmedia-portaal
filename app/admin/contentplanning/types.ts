@@ -33,7 +33,7 @@ export type CpData = {
 }
 export type BordCel = { client_id: string; maand: string; reeks: Reeks; actief: boolean; door: string | null; updated_at: string; afgewerkt_op?: string | null; afgewerkt_door?: string | null }
 export type MeetingPlan = { client_id: string; maand: string; status: 'nodig' | 'niet_nodig' | 'ingepland'; door: string | null; updated_at: string }
-export type Weergave = 'werking' | 'dag' | 'batches' | 'reeksen' | 'week' | 'maand' | 'bord'
+export type Weergave = 'werking' | 'reeksen' | 'batches' | 'bord'
 export type Filters = { klant: string; verantwoordelijke: string; reeks: string; batch: string; nogOpen: boolean; zoek: string }
 export const LEGE_FILTERS: Filters = { klant: '', verantwoordelijke: '', reeks: '', batch: '', nogOpen: false, zoek: '' }
 

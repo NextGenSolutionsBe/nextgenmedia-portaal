@@ -5,6 +5,7 @@ import { magIk } from '@/lib/instellingen/laden'
 import { leesActorNamen } from '@/lib/actor-namen'
 import {
   leesCp, beurtenMetBord, bordVanKlant, teMakenTaken, isReeks, plusDagen, maandVan, plusMaanden, maandEind, werkdagenVanMaand, FASE_KEYS, STANDAARD_CP,
+  batchNr, startmaandVoorBatch, BORD_BATCHES,
   type ActiviteitRitme, type CpInstellingen, type Ritme, type Reeks,
 } from '@/lib/contentplanning/model'
 
@@ -31,6 +32,23 @@ const SLEUTEL = 'contentplanning'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Admin = { from: (t: string) => any }
+
+/**
+ * Klantenbord: id van "Batch n" (1, 2 of 3). Bestaat die nog niet, dan wordt ze
+ * aangemaakt; de startmaand volgt de bestaande batches (telkens een maand later).
+ */
+async function batchVoorNr(admin: Admin, n: number): Promise<string> {
+  const { data } = await admin.from('batches').select('id, name, start_month')
+  const lijst = ((data ?? []) as { id: string; name: string; start_month: number }[])
+  const bestaand = lijst.find((b) => batchNr(b.name) === n)
+  if (bestaand) return bestaand.id
+  const { data: nieuw, error } = await admin.from('batches')
+    .insert({ name: `Batch ${n}`, start_month: startmaandVoorBatch(n, lijst.map((b) => ({ naam: b.name, start_month: b.start_month }))), sort_order: n - 1 })
+    .select('id').single()
+  if (error) throw new Error(error.message)
+  return (nieuw as { id: string }).id
+}
+const bordBatch = (v: unknown): number | null | undefined => (v === null ? null : (BORD_BATCHES as readonly number[]).includes(Number(v)) ? Number(v) : undefined)
 
 async function leesInstellingenCp(admin: Admin): Promise<CpInstellingen> {
   const { data } = await admin.from('app_settings').select('value').eq('key', SLEUTEL).maybeSingle()
@@ -210,6 +228,36 @@ export async function POST(req: NextRequest) {
 
     // ── Vanaf hier: de planning beheren ──
     const nee = beheer(); if (nee) return nee
+
+    // Klantenbord: klant naar Batch 1/2/3 slepen (of uit de batch halen).
+    if (actie === 'bord.batch') {
+      const id = uuid(b.client_id); if (!id) return NextResponse.json({ error: 'Kies een klant.' }, { status: 400 })
+      const nr = bordBatch(b.batch_nr); if (nr === undefined) return NextResponse.json({ error: 'Kies batch 1, 2 of 3.' }, { status: 400 })
+      const bid = nr === null ? null : await batchVoorNr(admin, nr)
+      const { error } = await admin.from('clients').update({ batch_id: bid }).eq('id', id)
+      if (error) throw new Error(error.message)
+      await admin.from('cp_klanten').upsert({ client_id: id, actief: true, updated_at: nu }, { onConflict: 'client_id' })
+      return NextResponse.json({ ok: true })
+    }
+    // Klantenbord: nieuwe klant = naam + batch. Bestaat de naam al, dan gebruiken we die klant (nooit een dubbel).
+    if (actie === 'klant.nieuw') {
+      const naam = tekst(b.naam, 200); if (!naam) return NextResponse.json({ error: 'Vul de naam van de klant in.' }, { status: 400 })
+      const nr = bordBatch(b.batch_nr); if (nr === undefined || nr === null) return NextResponse.json({ error: 'Kies batch 1, 2 of 3.' }, { status: 400 })
+      const { data: zelfde } = await admin.from('clients').select('id, company_name').ilike('company_name', naam.replace(/[%_\\]/g, (c) => `\\${c}`))
+      const gevonden = ((zelfde ?? []) as { id: string; company_name: string }[]).find((k) => k.company_name.trim().toLowerCase() === naam.toLowerCase())
+      let id = gevonden?.id ?? null
+      if (!id) {
+        const { data: nieuw, error } = await admin.from('clients').insert({ company_name: naam, created_by: r.persoon?.userId ?? null }).select('id').single()
+        if (error) throw new Error(error.message)
+        id = (nieuw as { id: string }).id
+      }
+      const bid = await batchVoorNr(admin, nr)
+      const { error: e2 } = await admin.from('clients').update({ batch_id: bid }).eq('id', id)
+      if (e2) throw new Error(e2.message)
+      const { error: e3 } = await admin.from('cp_klanten').upsert({ client_id: id, actief: true, updated_at: nu }, { onConflict: 'client_id' })
+      if (e3) throw new Error(e3.message)
+      return NextResponse.json({ ok: true, client_id: id, bestond: !!gevonden })
+    }
 
     // Klant (on)zichtbaar op het Klantenbatches-bord — de klant en zijn diensten blijven ongewijzigd.
     if (actie === 'bord.verberg') {

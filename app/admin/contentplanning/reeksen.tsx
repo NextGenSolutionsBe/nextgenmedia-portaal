@@ -2,25 +2,27 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Minus, Plus, RotateCcw, Info, Route } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Minus, Plus, RotateCcw } from 'lucide-react'
 import {
   FASE_KEYS, FASE_LABEL, REEKSEN, DAG_KORT, werkdagenVanMaand, weekdagNr, faseplanVanMaand, segmenten, pasFaseAan, wisselDag, planNaarDagen, reeksPeriodes,
+  reeksenVanDag, maandag, plusDagen, maandVan, eersteWerkdag,
   type FaseKey, type FasePlan, type Reeks,
 } from '@/lib/contentplanning/model'
 import { focusRing } from './bouwstenen'
+import { KAART } from './werking'
 import type { CpData, Doe } from './types'
 import { MAANDEN, maandNaam } from './types'
 
 /**
- * Reeksen — stap 2 op de eerste werkdag van de maand. De maand met de fases
- * (en dus de kleuren van de drie reeksen) zoals de Maandplanning ze heeft.
- * Aanpassen kan door te slepen:
+ * Reeksen — de maand met de fases (en dus de kleuren van de drie reeksen).
+ * Aanpassen door te slepen:
  *   · einde of begin van een blok verslepen = langer/korter
  *   · midden van een blok verslepen = het hele blok verschuiven
  *   · klikken = één dag aan/uit
- * Met "Volgende fases schuiven mee" schuift alles wat ná het blok begint mee
- * (editen een dag langer → feedback en aanpassingen een dag later).
+ * Met "Volgende fases schuiven mee" schuift alles wat ná het blok begint mee.
  * Bewaard als Maandplanning-aanpassingen; "Standaard herstellen" zet de maand terug.
+ * Onder de tijdlijn: het maandoverzicht met per dag de kleur van de reeks — het
+ * volgt het plan live, ook tijdens het slepen.
  */
 
 type Sleep = { fase: FaseKey; modus: 'begin' | 'einde' | 'blok'; oud: [number, number]; startDag: number; basis: FasePlan; dag: number; bewogen: boolean }
@@ -28,7 +30,7 @@ const kleurVan = (k: FaseKey, koppeling: Record<string, Reeks>) => (koppeling[k]
 const dagKort = (d: string) => `${DAG_KORT[weekdagNr(d) - 1]} ${Number(d.slice(8))}`
 const periodeTekst = (van: string, tot: string) => (van === tot ? dagKort(van) : `${dagKort(van)} – ${dagKort(tot)}`)
 
-export function Reeksen({ data, maand, doe, vandaag }: { data: CpData; maand: string; doe: Doe; vandaag: string }) {
+export function Reeksen({ data, maand, doe, vandaag, onDag }: { data: CpData; maand: string; doe: Doe; vandaag: string; onDag: (d: string) => void }) {
   const kan = data.kan.beheren
   const koppeling = data.instellingen.fase_reeks
   const wd = useMemo(() => werkdagenVanMaand(maand), [maand])
@@ -112,53 +114,54 @@ export function Reeksen({ data, maand, doe, vandaag }: { data: CpData; maand: st
   }, [meeschuiven, totaal, maand, wd])
 
   const herstel = async () => {
-    if (!window.confirm(`De reeksen van ${maandNaam(maand)} terugzetten naar de standaardindeling? Ook aanpassingen die in de Maandplanning voor deze maand gemaakt zijn, vervallen.`)) return
+    if (!window.confirm(`De reeksen van ${maandNaam(maand)} terugzetten naar de standaardindeling?`)) return
     const vorig = plan
     const r = await doe('reeksen.herstel', { maand }, { stil: true })
     if (r) toast.success('Standaardindeling hersteld.', { action: { label: 'Ongedaan maken', onClick: () => { bewaar(vorig, basis, 'Teruggezet.') } } })
   }
 
+  const kolommen = `220px repeat(${totaal}, minmax(32px, 1fr))`
   return (
-    <div className="space-y-3">
-      <div className="card-base p-3 space-y-3">
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="min-w-0">
-            <h2 className="font-semibold flex items-center gap-2"><Route className="h-4 w-4" />Reeksen · <span className="capitalize">{maandNaam(maand)}</span></h2>
-            <p className="text-xs text-gray-500">{totaal} werkdagen · {aangepast ? 'aangepast voor deze maand' : 'standaardindeling'}</p>
-          </div>
-          <div className="flex-1" />
-          {kan && (
-            <label className="inline-flex items-center gap-2 text-sm cursor-pointer select-none">
-              <input type="checkbox" checked={meeschuiven} onChange={(e) => setMeeschuiven(e.target.checked)} className="h-4 w-4" />
-              Volgende fases schuiven mee
-            </label>
-          )}
-          {kan && aangepast && <button type="button" onClick={herstel} className={`btn-secondary text-sm ${focusRing}`}><RotateCcw className="h-4 w-4" />Standaard herstellen</button>}
-        </div>
-        {/* Wanneer loopt elke reeks? */}
-        <div className="grid sm:grid-cols-3 gap-2">
-          {REEKSEN.map((r) => {
-            const p = periodes[r.nr]
-            return (
-              <div key={r.nr} className={`rounded-lg border border-gray-200 ${r.zacht} px-3 py-2`}>
-                <div className="text-xs font-semibold flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${r.kleur}`} />{r.label}</div>
-                <div className="text-sm mt-0.5">{p ? <>{periodeTekst(p.van, p.tot)} {MAANDEN[Number(p.tot.slice(5, 7)) - 1]} <span className="text-gray-500">· {p.dagen} werkdag{p.dagen === 1 ? '' : 'en'}</span></> : <span className="text-gray-500">deze maand niet gepland</span>}</div>
+    <div className="space-y-5">
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="text-cp-klein text-cp-zacht">{totaal} werkdagen{aangepast ? ' · aangepast' : ''}</span>
+        <div className="flex-1" />
+        {kan && (
+          <label className="inline-flex items-center gap-2 text-cp-basis font-medium cursor-pointer select-none">
+            <input type="checkbox" checked={meeschuiven} onChange={(e) => setMeeschuiven(e.target.checked)} className="h-5 w-5 accent-[var(--cp-klaar)]" />
+            Volgende fases schuiven mee
+          </label>
+        )}
+        {kan && aangepast && <button type="button" onClick={herstel} className={`inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-cp-rand bg-cp-vlak text-cp-klein font-semibold hover:border-cp-ink ${focusRing}`}><RotateCcw className="h-4 w-4" />Standaard herstellen</button>}
+      </div>
+
+      {/* Wanneer loopt elke reeks? */}
+      <div className="grid sm:grid-cols-3 gap-3">
+        {REEKSEN.map((r) => {
+          const p = periodes[r.nr]
+          return (
+            <div key={r.nr} className={`${KAART} overflow-hidden`}>
+              <div className={`h-2 ${r.kleur}`} />
+              <div className={`px-4 py-3 ${r.zacht}`}>
+                <div className="text-cp-klein font-semibold">{r.label}</div>
+                <div className="text-cp-kop mt-0.5">{p ? <>{periodeTekst(p.van, p.tot)} {MAANDEN[Number(p.tot.slice(5, 7)) - 1]}</> : <span className="text-cp-zacht">—</span>}</div>
+                {p && <div className="text-cp-klein text-cp-zacht">{p.dagen} werkdag{p.dagen === 1 ? '' : 'en'}</div>}
               </div>
-            )
-          })}
-        </div>
+            </div>
+          )
+        })}
       </div>
 
       {/* Tijdlijn (vanaf tablet) */}
-      <div className="hidden md:block card-base p-0 overflow-hidden">
+      <div className={`hidden md:block ${KAART} overflow-hidden`}>
         <div className="overflow-x-auto">
-          <div className="min-w-[760px] select-none">
-            <div className="grid border-b border-gray-200 bg-gray-50" style={{ gridTemplateColumns: `190px repeat(${totaal}, minmax(26px, 1fr))` }}>
-              <div className="px-3 py-1.5 text-[11px] font-medium text-gray-500 uppercase">Fase</div>
+          <div className="min-w-[860px] select-none">
+            <div className="grid border-b border-cp-rand bg-cp-achtergrond" style={{ gridTemplateColumns: kolommen }}>
+              <div className="px-4 py-2 text-cp-klein font-semibold text-cp-zacht self-center">Fase</div>
               {wd.map((d, i) => (
-                <div key={d} className={`py-1 text-center leading-tight ${d === vandaag ? 'bg-[#fff848]' : ''} ${i > 0 && weekdagNr(d) === 1 ? 'border-l border-gray-300' : ''}`}>
-                  <div className="text-[9px] uppercase text-gray-400">{DAG_KORT[weekdagNr(d) - 1]}</div>
-                  <div className="text-[11px] font-semibold text-gray-700">{Number(d.slice(8))}</div>
+                <div key={d} className={`py-2 text-center leading-tight ${d === vandaag ? 'bg-cp-ink text-cp-op-ink' : ''} ${i > 0 && weekdagNr(d) === 1 ? 'border-l border-cp-rand' : ''}`}>
+                  <div className="text-[10px] uppercase opacity-60">{DAG_KORT[weekdagNr(d) - 1]}</div>
+                  <div className="text-cp-klein font-bold">{Number(d.slice(8))}</div>
                 </div>
               ))}
             </div>
@@ -166,10 +169,10 @@ export function Reeksen({ data, maand, doe, vandaag }: { data: CpData; maand: st
               const segs = segmenten(plan[k])
               const kleur = kleurVan(k, koppeling)
               return (
-                <div key={k} className={`grid border-b border-gray-100 last:border-b-0 ${gekozen === k ? 'bg-gray-50' : ''}`} style={{ gridTemplateColumns: `190px repeat(${totaal}, minmax(26px, 1fr))` }}>
+                <div key={k} className={`grid border-b border-cp-rand last:border-b-0 ${gekozen === k ? 'bg-cp-achtergrond' : ''}`} style={{ gridTemplateColumns: kolommen }}>
                   <button type="button" onClick={() => setGekozen(gekozen === k ? null : k)} aria-pressed={gekozen === k}
-                    className={`px-3 py-2 text-left text-sm flex items-center gap-2 ${focusRing}`}>
-                    <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${kleur}`} /><span className="truncate">{FASE_LABEL[k]}</span>
+                    className={`px-4 py-3 text-left text-cp-basis font-medium flex items-center gap-2.5 ${focusRing}`}>
+                    <span className={`h-3 w-3 rounded-full shrink-0 ${kleur}`} /><span className="truncate">{FASE_LABEL[k]}</span>
                   </button>
                   {wd.map((d, i) => {
                     const nr = i + 1
@@ -178,12 +181,12 @@ export function Reeksen({ data, maand, doe, vandaag }: { data: CpData; maand: st
                     const eerste = seg && seg[0] === nr, laatste = seg && seg[1] === nr
                     return (
                       <div key={d} data-dag={nr} onPointerDown={(e) => begin(e, k, nr)} style={kan ? { touchAction: 'none' } : undefined}
-                        title={`${FASE_LABEL[k]} · ${dagKort(d)}${kan ? (aan ? (laatste ? ' · sleep om langer/korter te maken' : eerste ? ' · sleep om vroeger/later te beginnen' : ' · sleep om het blok te verschuiven, klik om deze dag weg te halen') : ' · klik om toe te voegen') : ''}`}
-                        className={`relative py-2 ${i > 0 && weekdagNr(d) === 1 ? 'border-l border-gray-200' : ''} ${kan ? (aan ? (laatste || eerste ? 'cursor-ew-resize' : 'cursor-grab') : 'cursor-pointer hover:bg-gray-100') : ''}`}>
+                        title={`${FASE_LABEL[k]} · ${dagKort(d)}`}
+                        className={`relative py-3 ${i > 0 && weekdagNr(d) === 1 ? 'border-l border-cp-rand' : ''} ${kan ? (aan ? (laatste || eerste ? 'cursor-ew-resize' : 'cursor-grab') : 'cursor-pointer hover:bg-cp-achtergrond') : ''}`}>
                         {aan && (
-                          <div className={`h-5 ${kleur} ${eerste ? 'rounded-l-md ml-0.5' : ''} ${laatste ? 'rounded-r-md mr-0.5' : ''} relative`}>
-                            {kan && laatste && <span className="absolute right-0.5 top-1 bottom-1 w-1 rounded bg-white/70" aria-hidden />}
-                            {kan && eerste && !laatste && <span className="absolute left-0.5 top-1 bottom-1 w-1 rounded bg-white/70" aria-hidden />}
+                          <div className={`h-7 ${kleur} ${eerste ? 'rounded-l-lg ml-0.5' : ''} ${laatste ? 'rounded-r-lg mr-0.5' : ''} relative`}>
+                            {kan && laatste && <span className="absolute right-1 top-1.5 bottom-1.5 w-1 rounded bg-white/80" aria-hidden />}
+                            {kan && eerste && !laatste && <span className="absolute left-1 top-1.5 bottom-1.5 w-1 rounded bg-white/80" aria-hidden />}
                           </div>
                         )}
                       </div>
@@ -194,18 +197,62 @@ export function Reeksen({ data, maand, doe, vandaag }: { data: CpData; maand: st
             })}
           </div>
         </div>
-        {gekozen && <div className="border-t border-gray-200 p-3"><FaseRegel fase={gekozen} plan={plan} wd={wd} kan={kan} koppeling={koppeling} pas={pas} /></div>}
+        {gekozen && <div className="border-t border-cp-rand p-4"><FaseRegel fase={gekozen} plan={plan} wd={wd} kan={kan} koppeling={koppeling} pas={pas} /></div>}
       </div>
 
       {/* Telefoon: per fase een kaart met knoppen */}
-      <div className="md:hidden space-y-2">
-        {rijen.map((k) => <div key={k} className="card-base p-3"><FaseRegel fase={k} plan={plan} wd={wd} kan={kan} koppeling={koppeling} pas={pas} /></div>)}
+      <div className="md:hidden space-y-3">
+        {rijen.map((k) => <div key={k} className={`${KAART} p-4`}><FaseRegel fase={k} plan={plan} wd={wd} kan={kan} koppeling={koppeling} pas={pas} /></div>)}
       </div>
 
-      <p className="text-[11px] text-gray-500 flex items-start gap-1.5"><Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-        <span>Sleep het <b>einde</b> van een blok om het langer of korter te maken, het <b>begin</b> om vroeger of later te starten, of het <b>midden</b> om het hele blok te verschuiven. Klik op een dag om die aan of uit te zetten. Klik op een fasenaam voor knoppen (ook met het toetsenbord). Met “Volgende fases schuiven mee” verschuift alles wat ná het aangepaste blok begint even veel. De kleuren volgen de reeksen; de klanten per reeks staan in Klantenbatches.</span>
-      </p>
+      <MaandOverzicht maand={maand} plan={plan} koppeling={koppeling} vandaag={vandaag} onDag={onDag} />
     </div>
+  )
+}
+
+/** De hele maand met per dag de kleur van de reeks(en). Volgt het plan live. */
+function MaandOverzicht({ maand, plan, koppeling, vandaag, onDag }: { maand: string; plan: FasePlan; koppeling: Record<string, Reeks>; vandaag: string; onDag: (d: string) => void }) {
+  const perDag = useMemo(() => {
+    const dagen = planNaarDagen(maand, plan)
+    return new Map(Object.entries(dagen).map(([d, f]) => [d, reeksenVanDag(f, koppeling)]))
+  }, [maand, plan, koppeling])
+  const periodes = reeksPeriodes(maand, plan, koppeling)
+  const start = maandag(`${maand}-01`)
+  const cellen = Array.from({ length: 42 }, (_, i) => plusDagen(start, i))
+  // Weken die volledig buiten de maand vallen, weglaten.
+  const zichtbaar = cellen.filter((_, i) => cellen.slice(Math.floor(i / 7) * 7, Math.floor(i / 7) * 7 + 7).some((c) => maandVan(c) === maand))
+  const label = (d: string) => {
+    const uit: string[] = []
+    if (d === eersteWerkdag(maand)) uit.push('Maandstart')
+    if (periodes[2]?.van === d) uit.push('Start R2')
+    if (periodes[3]?.van === d) uit.push('Meetings')
+    return uit
+  }
+  return (
+    <section className={`${KAART} p-4 sm:p-5 space-y-4`}>
+      <div className="flex items-center gap-x-5 gap-y-2 flex-wrap">
+        <h2 className="text-cp-kop capitalize flex-1 min-w-[160px]">{maandNaam(maand)}</h2>
+        {REEKSEN.map((r) => <span key={r.nr} className="inline-flex items-center gap-2 text-cp-klein font-medium"><span className={`h-4 w-4 rounded ${r.kleur}`} />{r.kort}</span>)}
+      </div>
+      <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+        {DAG_KORT.map((x) => <div key={x} className="text-center text-cp-klein font-semibold uppercase text-cp-zacht">{x}</div>)}
+        {zichtbaar.map((d) => {
+          const inMaand = maandVan(d) === maand
+          const r = perDag.get(d) ?? []
+          const werkdag = weekdagNr(d) <= 5
+          const mk = inMaand ? label(d) : []
+          return (
+            <button key={d} type="button" disabled={!inMaand} onClick={() => onDag(d)}
+              title={inMaand ? `${dagKort(d)}${r.length ? ` · ${r.map((n) => REEKSEN[n - 1].label).join(' + ')}` : ''}${mk.length ? ` · ${mk.join(', ')}` : ''}` : undefined}
+              className={`relative h-16 sm:h-20 rounded-xl overflow-hidden border-2 text-left transition-transform ${inMaand ? 'hover:scale-[1.03] active:scale-100' : 'opacity-30'} ${d === vandaag ? 'border-cp-vandaag' : 'border-transparent'} ${!werkdag || !r.length ? 'bg-cp-achtergrond' : ''} ${focusRing}`}>
+              {r.length > 0 && <div className="absolute inset-0 flex flex-col">{r.map((n) => <div key={n} className={`flex-1 ${REEKSEN[n - 1].kleur}`} />)}</div>}
+              <span className={`absolute left-2 top-1.5 text-cp-basis font-bold ${r.length ? 'text-white drop-shadow' : ''}`}>{Number(d.slice(8))}</span>
+              {mk.length > 0 && <span className="absolute left-1.5 bottom-1.5 right-1.5 truncate rounded-md bg-cp-ink text-cp-op-ink px-1.5 py-0.5 text-[10px] sm:text-[11px] font-semibold">{mk[0]}</span>}
+            </button>
+          )
+        })}
+      </div>
+    </section>
   )
 }
 
@@ -213,28 +260,26 @@ export function Reeksen({ data, maand, doe, vandaag }: { data: CpData; maand: st
 function FaseRegel({ fase, plan, wd, kan, koppeling, pas }: { fase: FaseKey; plan: FasePlan; wd: string[]; kan: boolean; koppeling: Record<string, Reeks>; pas: (f: FaseKey, oud: [number, number], nieuw: [number, number], wat: string) => void }) {
   const segs = segmenten(plan[fase])
   const totaal = wd.length
-  const knop = `inline-flex items-center gap-0.5 rounded-lg border border-gray-200 px-2 py-1 text-xs hover:border-gray-500 disabled:opacity-40 ${focusRing}`
+  const knop = `inline-flex items-center justify-center h-9 w-9 rounded-lg border border-cp-rand hover:border-cp-ink disabled:opacity-40 ${focusRing}`
   return (
     <div className="space-y-2">
-      <div className="text-sm font-semibold flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${kleurVan(fase, koppeling)}`} />{FASE_LABEL[fase]}
-        {koppeling[fase] && <span className="text-[11px] font-normal text-gray-500">· {REEKSEN[koppeling[fase] - 1].kort}</span>}</div>
-      {segs.length === 0 && (
-        <div className="text-xs text-gray-500">Deze maand niet gepland.{kan && ' Klik in de tijdlijn (computer of tablet) op een dag om deze fase toe te voegen.'}</div>
-      )}
+      <div className="text-cp-basis font-semibold flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${kleurVan(fase, koppeling)}`} />{FASE_LABEL[fase]}
+        {koppeling[fase] && <span className="text-cp-klein font-normal text-cp-zacht">· {REEKSEN[koppeling[fase] - 1].kort}</span>}</div>
+      {segs.length === 0 && <div className="text-cp-klein text-cp-zacht">—</div>}
       {segs.map(([v, t]) => (
         <div key={`${v}-${t}`} className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-sm min-w-[150px]">{periodeTekst(wd[v - 1], wd[t - 1])} <span className="text-gray-500 text-xs">· {t - v + 1} dag{t - v ? 'en' : ''}</span></span>
+          <span className="text-cp-basis min-w-[160px]">{periodeTekst(wd[v - 1], wd[t - 1])} <span className="text-cp-zacht text-cp-klein">· {t - v + 1} dag{t - v ? 'en' : ''}</span></span>
           {kan && (
             <>
-              <span className="text-[11px] text-gray-500 ml-1">Begin</span>
-              <button type="button" className={knop} disabled={v <= 1} onClick={() => pas(fase, [v, t], [v - 1, t], 'begint een dag vroeger')} aria-label={`${FASE_LABEL[fase]}: begin een dag vroeger`}><Minus className="h-3 w-3" /></button>
-              <button type="button" className={knop} disabled={v >= t} onClick={() => pas(fase, [v, t], [v + 1, t], 'begint een dag later')} aria-label={`${FASE_LABEL[fase]}: begin een dag later`}><Plus className="h-3 w-3" /></button>
-              <span className="text-[11px] text-gray-500 ml-1">Einde</span>
-              <button type="button" className={knop} disabled={t <= v} onClick={() => pas(fase, [v, t], [v, t - 1], 'een dag korter')} aria-label={`${FASE_LABEL[fase]}: een dag korter`}><Minus className="h-3 w-3" /></button>
-              <button type="button" className={knop} disabled={t >= totaal} onClick={() => pas(fase, [v, t], [v, t + 1], 'een dag langer')} aria-label={`${FASE_LABEL[fase]}: een dag langer`}><Plus className="h-3 w-3" /></button>
-              <span className="text-[11px] text-gray-500 ml-1">Blok</span>
-              <button type="button" className={knop} disabled={v <= 1} onClick={() => pas(fase, [v, t], [v - 1, t - 1], 'een dag vroeger')} aria-label={`${FASE_LABEL[fase]}: hele blok een dag vroeger`}><ChevronLeft className="h-3 w-3" /></button>
-              <button type="button" className={knop} disabled={t >= totaal} onClick={() => pas(fase, [v, t], [v + 1, t + 1], 'een dag later')} aria-label={`${FASE_LABEL[fase]}: hele blok een dag later`}><ChevronRight className="h-3 w-3" /></button>
+              <span className="text-cp-klein text-cp-zacht ml-1">Begin</span>
+              <button type="button" className={knop} disabled={v <= 1} onClick={() => pas(fase, [v, t], [v - 1, t], 'begint een dag vroeger')} aria-label={`${FASE_LABEL[fase]}: begin een dag vroeger`}><Minus className="h-4 w-4" /></button>
+              <button type="button" className={knop} disabled={v >= t} onClick={() => pas(fase, [v, t], [v + 1, t], 'begint een dag later')} aria-label={`${FASE_LABEL[fase]}: begin een dag later`}><Plus className="h-4 w-4" /></button>
+              <span className="text-cp-klein text-cp-zacht ml-1">Einde</span>
+              <button type="button" className={knop} disabled={t <= v} onClick={() => pas(fase, [v, t], [v, t - 1], 'een dag korter')} aria-label={`${FASE_LABEL[fase]}: een dag korter`}><Minus className="h-4 w-4" /></button>
+              <button type="button" className={knop} disabled={t >= totaal} onClick={() => pas(fase, [v, t], [v, t + 1], 'een dag langer')} aria-label={`${FASE_LABEL[fase]}: een dag langer`}><Plus className="h-4 w-4" /></button>
+              <span className="text-cp-klein text-cp-zacht ml-1">Blok</span>
+              <button type="button" className={knop} disabled={v <= 1} onClick={() => pas(fase, [v, t], [v - 1, t - 1], 'een dag vroeger')} aria-label={`${FASE_LABEL[fase]}: hele blok een dag vroeger`}><ChevronLeft className="h-4 w-4" /></button>
+              <button type="button" className={knop} disabled={t >= totaal} onClick={() => pas(fase, [v, t], [v + 1, t + 1], 'een dag later')} aria-label={`${FASE_LABEL[fase]}: hele blok een dag later`}><ChevronRight className="h-4 w-4" /></button>
             </>
           )}
         </div>

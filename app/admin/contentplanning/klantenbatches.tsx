@@ -2,14 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Check, Copy, Layers, Info, EyeOff, Eye } from 'lucide-react'
+import { Check, Copy, EyeOff, Eye } from 'lucide-react'
 import { REEKSEN, plusMaanden, type Reeks } from '@/lib/contentplanning/model'
 import { focusRing } from './bouwstenen'
+import { KAART } from './werking'
 import type { CpData, Doe } from './types'
 import { maandNaam } from './types'
 
 /**
- * Klantenbatches — Chiara’s eerste werkdag van de maand (na de reeksen): per
+ * Batches — Chiara’s eerste werkdag van de maand (na de reeksen): per
  * klant aanduiden welke reeksen die maand van toepassing zijn.
  *   ✓ = deze maand wel   leeg = deze maand niet
  * Klikken zet aan/uit; met ingedrukte muis over meerdere vakjes slepen zet ze
@@ -95,52 +96,50 @@ export function Klantenbatches({ data, maand, doe, onKlant, onKlaarzetten }: { d
 
   return (
     <div className="space-y-3">
-      <div className="card-base p-3 flex items-center gap-2 flex-wrap">
-        <div className="min-w-0">
-          <h2 className="font-semibold flex items-center gap-2"><Layers className="h-4 w-4" />Klantenbatches · <span className="capitalize">{maandNaam(maand)}</span></h2>
-          <p className="text-xs text-gray-500">Waar zit elke klant deze maand? {ingevuld} van {rijen.length} klanten met minstens één ✓.</p>
-        </div>
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="text-cp-basis"><b className="text-cp-kop">{ingevuld}</b><span className="text-cp-zacht"> / {rijen.length} klanten ingevuld</span></span>
         <div className="flex-1" />
-        {kan && <button type="button" onClick={async () => { const r = await doe('batchbord.kopieer', { van: vorige, naar: maand }, { stil: true }); if (r) toast.success(Number(r.overgenomen) ? `${r.overgenomen} vakjes overgenomen uit ${maandNaam(vorige)} — pas aan waar nodig.` : `Niets over te nemen uit ${maandNaam(vorige)}.`) }} disabled={!vorigeHeeftIets} className={`btn-secondary text-sm ${focusRing}`} title="Vult enkel lege vakjes in"><Copy className="h-4 w-4" />Vorige maand overnemen</button>}
-        {kan && <button type="button" onClick={onKlaarzetten} className={`btn-primary text-sm ${focusRing}`}>Taken klaarzetten voor {maandNaam(maand).split(' ')[0]}</button>}
+        {kan && <button type="button" onClick={async () => { const r = await doe('batchbord.kopieer', { van: vorige, naar: maand }, { stil: true }); if (r) toast.success(Number(r.overgenomen) ? `${r.overgenomen} vakjes overgenomen uit ${maandNaam(vorige)}.` : `Niets over te nemen uit ${maandNaam(vorige)}.`) }} disabled={!vorigeHeeftIets} className={`inline-flex items-center gap-2 h-11 px-4 rounded-xl border border-cp-rand bg-cp-vlak text-cp-basis font-semibold hover:border-cp-ink disabled:opacity-40 ${focusRing}`}><Copy className="h-4 w-4" />Vorige maand overnemen</button>}
+        {kan && <button type="button" onClick={onKlaarzetten} className={`inline-flex items-center gap-2 h-11 px-4 rounded-xl bg-cp-ink text-cp-op-ink text-cp-basis font-semibold hover:opacity-90 active:scale-[0.98] transition-all ${focusRing}`}>Taken klaarzetten</button>}
       </div>
 
-      <div className="card-base p-0 overflow-hidden">
+      <div className={`${KAART} overflow-hidden`}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm select-none" style={{ touchAction: 'none' }}>
             <thead>
-              <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="text-left px-3 py-2.5 font-medium text-gray-600 min-w-[150px]">Klant <span className="font-normal text-gray-400">(social media)</span></th>
+              <tr className="bg-cp-achtergrond border-b border-cp-rand">
+                <th className="text-left px-5 py-3 text-cp-klein font-semibold text-cp-zacht min-w-[170px]">Klant</th>
                 {KOLOMMEN.map((c) => (
-                  <th key={c.nr} className="px-2 py-2.5 text-center w-[26%] min-w-[92px]">
-                    <div className="inline-flex items-center gap-1.5 font-semibold text-gray-900"><span className={`h-2 w-2 rounded-full ${REEKSEN[c.nr - 1].kleur}`} />{c.titel}</div>
-                    <div className="text-[11px] font-normal text-gray-500 leading-tight">{c.sub}</div>
+                  <th key={c.nr} className="px-2 py-3 text-center w-[26%] min-w-[100px]">
+                    <div className={`mx-auto mb-1.5 h-1.5 w-16 rounded-full ${REEKSEN[c.nr - 1].kleur}`} />
+                    <div className="text-cp-basis font-bold">{c.titel}</div>
+                    <div className="text-cp-klein font-normal text-cp-zacht leading-tight">{c.sub}</div>
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {rijen.length === 0 && <tr><td colSpan={4} className="px-3 py-8 text-center text-gray-500">Geen klanten met social media gevonden.</td></tr>}
+              {rijen.length === 0 && <tr><td colSpan={4} className="px-5 py-10 text-center text-cp-basis text-cp-zacht">Geen klanten</td></tr>}
               {rijen.map((k) => {
                 const batch = k.batch_id ? batchNaam.get(k.batch_id) : null
                 return (
-                  <tr key={k.id} className="border-b border-gray-100 last:border-b-0">
-                    <td className="px-3 py-1.5">
+                  <tr key={k.id} className="border-b border-cp-rand last:border-b-0 hover:bg-cp-achtergrond transition-colors">
+                    <td className="px-5 py-2.5">
                       <div className="flex items-center gap-1">
-                        <button type="button" onClick={() => onKlant(k.id)} className={`text-left font-medium text-gray-900 hover:underline ${focusRing} rounded`}>{k.company_name}</button>
-                        {kan && <button type="button" onClick={() => doe('bord.verberg', { client_id: k.id, verborgen: true }, { melding: `${k.company_name} staat niet meer op het bord (terug te zetten onderaan).` })} className={`ml-auto text-gray-300 hover:text-gray-700 p-1 rounded ${focusRing}`} aria-label={`${k.company_name} van het bord halen`} title="Van het bord halen (geen social media)"><EyeOff className="h-3.5 w-3.5" /></button>}
+                        <button type="button" onClick={() => onKlant(k.id)} className={`text-left text-cp-basis font-semibold hover:underline ${focusRing} rounded`}>{k.company_name}</button>
+                        {kan && <button type="button" onClick={() => doe('bord.verberg', { client_id: k.id, verborgen: true }, { melding: `${k.company_name} staat niet meer op het bord.` })} className={`ml-auto text-cp-zacht hover:text-cp-ink p-1.5 rounded-lg ${focusRing}`} aria-label={`${k.company_name} van het bord halen`} title="Van het bord halen"><EyeOff className="h-4 w-4" /></button>}
                       </div>
-                      {batch && <div className="text-[10px] text-gray-500 inline-flex items-center gap-1 ml-2"><span className="h-1.5 w-1.5 rounded-full" style={{ background: batch.color }} />{batch.name}</div>}
+                      {batch && <div className="text-cp-klein text-cp-zacht">{batch.name}</div>}
                     </td>
                     {KOLOMMEN.map((c) => {
                       const w = cellen.get(sleutel(k.id, c.nr))
                       return (
-                        <td key={c.nr} className="px-2 py-1.5 text-center">
+                        <td key={c.nr} className="px-2 py-2.5 text-center">
                           <button type="button" disabled={!kan}
                             onPointerDown={(e) => { e.preventDefault(); start(k.id, c.nr) }} onPointerEnter={() => over(k.id, c.nr)} onKeyDown={(e) => toets(e, k.id, c.nr)}
                             aria-pressed={w === true} aria-label={`${k.company_name}, ${c.titel} (${c.sub}): ${w === true ? 'deze maand wel' : 'deze maand niet'}`}
-                            className={`h-10 w-full max-w-[120px] rounded-lg border-2 inline-flex items-center justify-center transition-colors ${w === true ? 'bg-[#166534] border-[#166534] text-white' : 'bg-white border-gray-200 text-gray-300 hover:border-gray-500'} ${kan ? 'cursor-pointer' : 'cursor-default'} ${focusRing}`}>
-                            {w === true ? <Check className="h-5 w-5" strokeWidth={3} /> : null}
+                            className={`h-12 w-full max-w-[140px] rounded-xl border-2 inline-flex items-center justify-center transition-all ${w === true ? `${REEKSEN[c.nr - 1].kleur} border-transparent text-white shadow-sm` : 'bg-cp-vlak border-cp-rand hover:border-cp-ink'} ${kan ? 'cursor-pointer active:scale-95' : 'cursor-default'} ${focusRing}`}>
+                            {w === true ? <Check className="h-6 w-6 drop-shadow" strokeWidth={3} /> : null}
                           </button>
                         </td>
                       )
@@ -151,21 +150,18 @@ export function Klantenbatches({ data, maand, doe, onKlant, onKlaarzetten }: { d
             </tbody>
             {rijen.length > 0 && (
               <tfoot>
-                <tr className="bg-gray-50 border-t border-gray-200 text-xs text-gray-600">
-                  <td className="px-3 py-2 font-medium">Deze maand ✓</td>
-                  {KOLOMMEN.map((c) => <td key={c.nr} className="px-2 py-2 text-center font-semibold tabular-nums">{telling(c.nr)}</td>)}
+                <tr className="bg-cp-achtergrond border-t border-cp-rand text-cp-basis">
+                  <td className="px-5 py-3 font-semibold">Totaal</td>
+                  {KOLOMMEN.map((c) => <td key={c.nr} className="px-2 py-3 text-center font-bold tabular-nums">{telling(c.nr)}</td>)}
                 </tr>
               </tfoot>
             )}
           </table>
         </div>
       </div>
-      <p className="text-[11px] text-gray-500 flex items-start gap-1.5"><Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-        <span><b>✓</b> = deze maand wel · leeg = deze maand niet. Klik om aan of uit te zetten, of sleep met ingedrukte muis over meerdere vakjes. “Taken klaarzetten” maakt enkel de taken van de reeksen met een ✓ (een kwartaalmeeting blijft per kwartaal); de klanten met een ✓ verschijnen per reeks in de dagelijkse werking. Zolang er voor een maand nog niets aangevinkt is, volgt de app het ritme en de batch van de klant.</span>
-      </p>
       {verborgen.length > 0 && (
-        <div className="text-xs text-gray-600">
-          <button type="button" onClick={() => setToonVerborgen((x) => !x)} aria-expanded={toonVerborgen} className={`underline ${focusRing} rounded`}>{verborgen.length} klant(en) niet op het bord{toonVerborgen ? ' — verbergen' : ' — tonen'}</button>
+        <div className="text-cp-klein text-cp-zacht">
+          <button type="button" onClick={() => setToonVerborgen((x) => !x)} aria-expanded={toonVerborgen} className={`underline ${focusRing} rounded`}>{verborgen.length} verborgen klant(en)</button>
           {toonVerborgen && (
             <ul className="mt-1.5 flex flex-wrap gap-1.5">
               {verborgen.map((k) => (

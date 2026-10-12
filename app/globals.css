@@ -31,6 +31,27 @@
     --ring: 56 100% 64%;
     --radius: 0.625rem;
     --sidebar-width: 240px;
+
+    /* ── Contentplanning: kleuren en typografie op één plek ──────────────────
+       Voorlopig zwart-wit; de branding komt later — enkel deze waarden
+       aanpassen. De drie reekskleuren zijn functioneel (welke dag in welke reeks). */
+    --cp-ink: #0a0a0a;            /* tekst, actieve tab, primaire knop */
+    --cp-ink-zacht: #6b7280;      /* labels, datums */
+    --cp-op-ink: #ffffff;         /* tekst op een donkere knop */
+    --cp-vlak: #ffffff;           /* kaarten */
+    --cp-achtergrond: #f4f4f5;    /* zachte vlakken, kolommen */
+    --cp-rand: #e4e4e7;
+    --cp-klaar: #0a0a0a;          /* afgevinkt */
+    --cp-vandaag: #0a0a0a;        /* rand rond vandaag */
+    --cp-r1: #facc15;  --cp-r1-zacht: #fefce8;   /* reeks 1 · geel */
+    --cp-r2: #a855f7;  --cp-r2-zacht: #faf5ff;   /* reeks 2 · paars */
+    --cp-r3: #16a34a;  --cp-r3-zacht: #f0fdf4;   /* reeks 3 · groen */
+    --cp-font: var(--font-sans, ui-sans-serif);
+    --cp-tekst-titel: 2rem;
+    --cp-tekst-kop: 1.25rem;
+    --cp-tekst-basis: 1rem;
+    --cp-tekst-klein: 0.8125rem;
+    --cp-radius: 1rem;
   }
 
   * {

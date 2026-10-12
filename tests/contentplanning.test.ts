@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import {
   STANDAARD_CP as S, beurtenMetBord, faseplanVanMaand, pasFaseAan, wisselDag, planNaarDagen, reeksPeriodes, segmenten, eersteWerkdag, standaardFases, fasesVanMaand, reeksenVanDag, plusWerkdagen, isKwartaalmaand, ritmeVan, beurten, teMakenTaken,
   verwachteDatum, isAchterstallig, deadlineVerstreken, routineVoorDag, werkdagenVanMaand, leesCp, bordVanKlant, leesWerkwijze, MAANDSTART,
+  batchNr, startmaandVoorBatch, BORD_BATCHES,
 } from '../lib/contentplanning/model'
 
 let n = 0
@@ -154,6 +155,41 @@ test('Werkwijze per reeks: stappen, badges, deelblokken en let-op uit het tekstf
   assert.deepEqual(c.vaste_taken.map((t) => t.key), ['inn_copy', 'inn_inplannen'])
   assert.deepEqual(c.routine, [])
   assert.deepEqual(leesCp({ bord_verborgen: ['x', 3] }).bord_verborgen, ['x'])
+})
+
+test('Editen hoort in reeks 2: in oktober 2026 (echte aanpassingen) start reeks 3 pas op 26/10', () => {
+  // De Maandplanning-aanpassingen van oktober 2026 zoals ze in de databank staan.
+  const okt: Record<string, string[]> = {
+    '2026-10-01': ['ideeen'], '2026-10-02': ['ideeen', 'intakes'], '2026-10-05': ['ideeen', 'intakes'], '2026-10-06': ['ideeen', 'intakes'], '2026-10-07': ['scripts'],
+    ...Object.fromEntries(['08', '09', '12', '13', '14', '15', '16', '19', '20', '21', '22', '23'].map((d) => [`2026-10-${d}`, ['shoots', 'edit']])),
+    '2026-10-26': ['shoots', 'edit', 'feedback'], '2026-10-27': ['shoots', 'edit', 'feedback', 'aanpassingen'],
+    '2026-10-28': ['feedback', 'aanpassingen'], '2026-10-29': ['feedback', 'aanpassingen'], '2026-10-30': ['feedback', 'aanpassingen', 'stats'],
+  }
+  const kop = leesCp({ fase_reeks: { edit: 2 } }).fase_reeks
+  assert.equal(kop.edit, 2)
+  const per = reeksPeriodes('2026-10', faseplanVanMaand('2026-10', okt), kop)
+  assert.equal(per[2]!.van, '2026-10-08')
+  assert.equal(per[3]!.van, '2026-10-26') // eerste dag reeks 3 = meetings plannen
+  assert.deepEqual(reeksenVanDag(fasesVanMaand('2026-10', okt).get('2026-10-12')!, kop), [2]) // vandaag (12/10) geen reeks 3
+  assert.equal(S.onderdelen.find((o) => o.key === 'edit')!.reeks, 2)
+})
+
+test('Maandstart: eerst de reeksen bepalen, dan batches + klantenbord', () => {
+  assert.deepEqual(MAANDSTART.map((m) => m.key), ['maandstart_reeksen', 'maandstart_batches'])
+  assert.equal(MAANDSTART[0].titel, 'De reeksen van deze maand bepalen')
+  assert.match(MAANDSTART[1].titel, /batches.*klantenbord/i)
+  assert.equal(eersteWerkdag('2026-11'), '2026-11-02')
+})
+
+test('Klantenbord: altijd Batch 1, 2 en 3; nieuwe batch volgt de bestaande een maand later', () => {
+  assert.deepEqual([...BORD_BATCHES], [1, 2, 3])
+  assert.equal(batchNr('Batch 2'), 2)
+  assert.equal(batchNr(' batch3 '), 3)
+  assert.equal(batchNr('Najaar'), null)
+  assert.equal(startmaandVoorBatch(2, [{ naam: 'Batch 1', start_month: 5 }]), 6) // juni → juli
+  assert.equal(startmaandVoorBatch(3, [{ naam: 'Batch 1', start_month: 5 }]), 7)
+  assert.equal(startmaandVoorBatch(1, [{ naam: 'Batch 3', start_month: 0 }]), 10) // jan − 2 = november
+  assert.equal(startmaandVoorBatch(2, []), 1)
 })
 
 console.log(`\n${n} tests geslaagd\n`)

@@ -57,9 +57,10 @@ export function plusWerkdagen(d: string, n: number): string {
 // ── Reeksen ─────────────────────────────────────────────────────────────────
 export type Reeks = 1 | 2 | 3
 export const REEKSEN: { nr: Reeks; label: string; kort: string; kleur: string; zacht: string }[] = [
-  { nr: 1, label: 'Reeks 1 · Contentkalender en meeting', kort: 'R1', kleur: 'bg-yellow-400', zacht: 'bg-yellow-50' },
-  { nr: 2, label: 'Reeks 2 · Shoot en editen', kort: 'R2', kleur: 'bg-purple-500', zacht: 'bg-purple-50' },
-  { nr: 3, label: 'Reeks 3 · Feedback, verwerken en statistieken', kort: 'R3', kleur: 'bg-green-600', zacht: 'bg-green-50' },
+  // Kleuren komen uit de --cp-r*-variabelen (app/globals.css).
+  { nr: 1, label: 'Reeks 1 · Contentkalender en meeting', kort: 'R1', kleur: 'bg-cp-r1', zacht: 'bg-cp-r1-zacht' },
+  { nr: 2, label: 'Reeks 2 · Shoot en editen', kort: 'R2', kleur: 'bg-cp-r2', zacht: 'bg-cp-r2-zacht' },
+  { nr: 3, label: 'Reeks 3 · Feedback, verwerken en statistieken', kort: 'R3', kleur: 'bg-cp-r3', zacht: 'bg-cp-r3-zacht' },
 ]
 export const isReeks = (v: unknown): v is Reeks => v === 1 || v === 2 || v === 3
 
@@ -422,8 +423,8 @@ export function reeksPeriodes(ym: string, plan: FasePlan, koppeling: Record<stri
 
 /** Maandstart: op de eerste werkdag van ELKE maand vult Chiara Klantenbatches in en bekijkt ze de reeksen. */
 export const MAANDSTART = [
-  { key: 'maandstart_reeksen', titel: 'Reeksen van de maand bekijken en verschuiven', weergave: 'reeksen' as const },
-  { key: 'maandstart_batches', titel: 'Klantenbatches (badges) van de klanten aanpassen', weergave: 'batches' as const },
+  { key: 'maandstart_reeksen', titel: 'De reeksen van deze maand bepalen', weergave: 'reeksen' as const },
+  { key: 'maandstart_batches', titel: 'De batches aanpassen en het klantenbord bijwerken bij een nieuwe klant', weergave: 'batches' as const },
 ]
 
 /**
@@ -463,4 +464,22 @@ export function leesWerkwijze(tekst: string): Werkwijze {
     if (blok) blok.punten.push(punt); else if (stap) stap.punten.push(punt); else w.intro.push(punt)
   }
   return w
+}
+
+// ── Klantenbord: altijd Batch 1, 2 en 3 ─────────────────────────────────────
+export const BORD_BATCHES = [1, 2, 3] as const
+export type BordBatch = (typeof BORD_BATCHES)[number]
+/** "Batch 2" → 2; een andere naam → null. */
+export function batchNr(naam: string | null | undefined): number | null {
+  const m = (naam ?? '').trim().match(/^batch\s*(\d+)$/i)
+  return m ? Number(m[1]) : null
+}
+/**
+ * Startmaand (0 = januari) voor een nog niet bestaande batch n: de batches
+ * volgen elkaar telkens een maand op, gerekend vanaf een bestaande batch.
+ * Zonder bestaande batch: maand n − 1.
+ */
+export function startmaandVoorBatch(n: number, bestaand: { naam: string; start_month: number }[]): number {
+  const ref = bestaand.map((b) => ({ nr: batchNr(b.naam), m: b.start_month })).find((b) => b.nr !== null)
+  return ref ? (((ref.m + (n - (ref.nr as number))) % 12) + 12) % 12 : (n - 1) % 12
 }

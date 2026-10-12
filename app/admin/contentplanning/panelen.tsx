@@ -81,10 +81,9 @@ export function TaakPaneel({ taak, standaard, data, doe, onSluit }: {
               <div className="text-sm">
                 {termijn === null ? <span className="text-amber-700">{v.onderdeel === 'feedback' ? 'Goedkeuringstermijn van deze klant is nog niet ingesteld (klantfiche).' : ''}</span>
                   : verwacht ? <>Verwacht: <b>{datumNl(verwacht)}</b> <span className="text-gray-500">({termijn} werkdagen)</span>{!v.deadline && <button type="button" onClick={() => set('deadline', verwacht)} className="block text-xs underline mt-0.5">als deadline overnemen</button>}</>
-                  : <span className="text-gray-500">Vul het moment in; de termijn ({termijn} werkdagen) telt pas vanaf dan.</span>}
+                  : <span className="text-gray-500">{termijn} werkdagen</span>}
               </div>
             </div>
-            {v.onderdeel === 'feedback' && <p className="text-[11px] text-gray-500">Een verstreken termijn betekent niet dat de content goedgekeurd is.</p>}
           </div>
         )}
         <div className="flex items-center gap-2 justify-between">
@@ -153,7 +152,6 @@ export function KlantFiche({ clientId, maand, data, doe, vandaag, onSluit, onTaa
         </div>
         <details className="rounded-xl border border-gray-200 p-3">
           <summary className={`text-sm font-medium cursor-pointer ${focusRing}`}>Afspraken per activiteit</summary>
-          <p className="text-[11px] text-gray-500 mt-1 mb-2">Bv. een kwartaalshoot, terwijl statistieken elke maand gebeuren. Leeg = volgt het ritme van de klant.</p>
           <div className="space-y-1.5">
             {inst.onderdelen.filter((o) => o.actief).map((o) => {
               const r = ritmeVan(o, { ritme: effRitme, activiteiten: effAct, batch_start_maand: null })
@@ -198,7 +196,7 @@ export function KlantFiche({ clientId, maand, data, doe, vandaag, onSluit, onTaa
           <div><label className={lbl}>Verantwoordelijke</label><input className={INP} list="cp-mensen-k" disabled={!kanBeheren} value={v.verantwoordelijke} onChange={(e) => setV({ ...v, verantwoordelijke: e.target.value })} /><datalist id="cp-mensen-k">{data.mensen.map((m) => <option key={m} value={m} />)}</datalist></div>
           <div><label className={lbl}>Goedkeuringstermijn (werkdagen)</label><input className={INP} inputMode="numeric" disabled={!kanBeheren} value={v.goedkeuring_werkdagen} onChange={(e) => setV({ ...v, goedkeuring_werkdagen: e.target.value.replace(/[^0-9]/g, '') })} placeholder={inst.goedkeuring_werkdagen !== null ? `standaard ${inst.goedkeuring_werkdagen}` : 'in te vullen'} /></div>
           <div className="col-span-2"><label className={lbl}>Klantspecifieke afspraken</label><textarea rows={3} className={INP} disabled={!kanBeheren} value={v.afspraken} onChange={(e) => setV({ ...v, afspraken: e.target.value })} placeholder="bv. Shoots altijd op dinsdag; content via WhatsApp." /></div>
-          <div className="col-span-2"><label className={lbl}>Materiaal — waar staan de foto’s en video’s?</label><textarea rows={3} className={INP} disabled={!kanBeheren} value={v.materiaal} onChange={(e) => setV({ ...v, materiaal: e.target.value })} placeholder={'Foto’s: drive (link)\nVideo’s camera: harddrive'} /><p className="text-[11px] text-gray-500 mt-1">Verschijnt bij de werkwijze van reeks 2.</p></div>
+          <div className="col-span-2"><label className={lbl}>Materiaal — waar staan de foto’s en video’s?</label><textarea rows={3} className={INP} disabled={!kanBeheren} value={v.materiaal} onChange={(e) => setV({ ...v, materiaal: e.target.value })} placeholder={'Foto’s: drive (link)\nVideo’s camera: harddrive'} /></div>
         </div>
         <div>
           <div className="flex items-center justify-between"><label className={lbl}>Contactpersonen</label>{kanBeheren && <button type="button" onClick={() => setContacten([...contacten, { naam: '', rol: null, email: null, telefoon: null }])} className="text-xs underline">+ contact</button>}</div>
@@ -246,7 +244,6 @@ export function KlantFiche({ clientId, maand, data, doe, vandaag, onSluit, onTaa
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/30" role="dialog" aria-modal="true">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-3">
             <h4 className="font-semibold">Voor welke cyclussen?</h4>
-            <p className="text-sm text-gray-600">Dit is een terugkerende instelling. Eerdere cyclussen veranderen nooit.</p>
             <div className="grid gap-2">
               <button type="button" className="btn-secondary text-sm justify-center" onClick={async () => { await doe('klant.wijzig', { client_id: clientId, scope: 'cyclus', cyclus_id: cyclus!.id, ...scopeVraag }, { melding: `Enkel voor ${maandNaam(maand)} aangepast.` }); setScopeVraag(null) }}>Alleen deze cyclus ({maandNaam(maand)})</button>
               <button type="button" className="btn-primary text-sm justify-center" onClick={async () => { await doe('klant.wijzig', { client_id: clientId, scope: 'toekomst', ...scopeVraag }, { melding: 'Aangepast, ook voor toekomstige cyclussen.' }); setScopeVraag(null) }}>Ook toekomstige cyclussen</button>
@@ -278,12 +275,11 @@ export function InstellingenPaneel({ data, doe, onSluit }: { data: CpData; doe: 
   const bewaar = async () => { setBezig(true); await doe('instellingen.opslaan', { instellingen: v }, { melding: 'Instellingen bewaard.' }); setBezig(false) }
   const TABS = [['onderdelen', 'Onderdelen'], ['statussen', 'Statussen'], ['termijnen', 'Termijnen'], ['reeksen', 'Reeksen'], ['werkwijze', 'Werkwijze per reeks'], ['batches', 'Batches'], ['routine', v.vaste_naam || 'Vaste klant']] as const
   return (
-    <Paneel breed titel="Instellingen contentplanning" sub="Een aanpasbaar vertrekpunt — enkel voor wie de planning beheert." onSluit={onSluit}>
+    <Paneel breed titel="Instellingen contentplanning" onSluit={onSluit}>
       <div className="flex gap-1 flex-wrap">{TABS.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={`rounded-lg px-2.5 py-1.5 text-xs font-medium ${tab === k ? 'bg-black text-white' : 'bg-gray-100 text-gray-700'} ${focusRing}`}>{l}</button>)}</div>
 
       {tab === 'onderdelen' && (
         <section className="space-y-2">
-          <p className="text-[11px] text-gray-500">Onderdelen worden per cyclus als taken klaargezet. Wijzigingen gelden voor cyclussen die nog klaargezet worden; bestaande taken blijven zoals ze zijn.</p>
           {v.onderdelen.map((o, i) => (
             <div key={o.key} className="grid grid-cols-[auto_1fr_110px_130px_auto] gap-1.5 items-center">
               <input type="checkbox" checked={o.actief} onChange={(e) => zetO(i, { actief: e.target.checked })} aria-label={`${o.label} actief`} />
@@ -298,7 +294,6 @@ export function InstellingenPaneel({ data, doe, onSluit }: { data: CpData; doe: 
       )}
       {tab === 'statussen' && (
         <section className="space-y-2">
-          <p className="text-[11px] text-gray-500">Labels en kleuren zijn vrij. De zes standaardstatussen blijven bestaan (je kunt ze hernoemen); eigen statussen kun je toevoegen en verwijderen. “Telt als klaar” = afgevinkt.</p>
           {v.statussen.map((s, i) => (
             <div key={s.key} className="grid grid-cols-[1fr_130px_auto_auto] gap-1.5 items-center">
               <input className={INP} value={s.label} onChange={(e) => zetS(i, { label: e.target.value })} />
@@ -313,13 +308,12 @@ export function InstellingenPaneel({ data, doe, onSluit }: { data: CpData; doe: 
       )}
       {tab === 'termijnen' && (
         <section className="grid grid-cols-2 gap-3">
-          <div><label className={lbl}>Termijn voor aanpassingen (werkdagen)</label><input className={INP} inputMode="numeric" value={String(v.aanpassing_werkdagen)} onChange={(e) => setV({ ...v, aanpassing_werkdagen: Number(e.target.value.replace(/[^0-9]/g, '') || 0) })} /><p className="text-[11px] text-gray-500 mt-1">Telt vanaf het moment dat je bij de taak “feedback ontvangen op” invult.</p></div>
-          <div><label className={lbl}>Standaard goedkeuringstermijn (werkdagen)</label><input className={INP} inputMode="numeric" value={v.goedkeuring_werkdagen === null ? '' : String(v.goedkeuring_werkdagen)} onChange={(e) => setV({ ...v, goedkeuring_werkdagen: e.target.value === '' ? null : Number(e.target.value.replace(/[^0-9]/g, '') || 0) })} placeholder="per klant" /><p className="text-[11px] text-gray-500 mt-1">Leeg = per klant in te vullen (klantfiche). Telt vanaf “verstuurd voor goedkeuring”.</p></div>
+          <div><label className={lbl}>Termijn voor aanpassingen (werkdagen)</label><input className={INP} inputMode="numeric" value={String(v.aanpassing_werkdagen)} onChange={(e) => setV({ ...v, aanpassing_werkdagen: Number(e.target.value.replace(/[^0-9]/g, '') || 0) })} /></div>
+          <div><label className={lbl}>Standaard goedkeuringstermijn (werkdagen)</label><input className={INP} inputMode="numeric" value={v.goedkeuring_werkdagen === null ? '' : String(v.goedkeuring_werkdagen)} onChange={(e) => setV({ ...v, goedkeuring_werkdagen: e.target.value === '' ? null : Number(e.target.value.replace(/[^0-9]/g, '') || 0) })} placeholder="per klant" /></div>
         </section>
       )}
       {tab === 'reeksen' && (
         <section className="space-y-2">
-          <p className="text-[11px] text-gray-500">De reeksen per dag komen uit de Maandplanning (welke fase op welke werkdag). Hier kies je welke fase bij welke reeks hoort.</p>
           {FASE_KEYS.map((f) => (
             <div key={f} className="grid grid-cols-[1fr_140px] gap-2 items-center text-sm">
               <span>{FASE_LABEL[f]}</span>
@@ -332,7 +326,6 @@ export function InstellingenPaneel({ data, doe, onSluit }: { data: CpData; doe: 
       {tab === 'batches' && <BatchBeheer batches={data.batches} doe={doe} />}
       {tab === 'werkwijze' && (
         <section className="space-y-3">
-          <p className="text-[11px] text-gray-500">Het stappenplan achter de knop “Werkwijze” in de dagelijkse werking. Opmaak per regel: <code># Stap [badge]</code> · <code>## Deelblok</code> · <code>- punt</code> · <code>! let op</code>.</p>
           {REEKSEN.map((r) => (
             <div key={r.nr}>
               <label className={`${lbl} flex items-center gap-1.5`}><span className={`h-2 w-2 rounded-full ${r.kleur}`} />{r.label}</label>
@@ -347,7 +340,6 @@ export function InstellingenPaneel({ data, doe, onSluit }: { data: CpData; doe: 
             <div><label className={lbl}>Naam</label><input className={INP} value={v.vaste_naam} onChange={(e) => setV({ ...v, vaste_naam: e.target.value })} /></div>
             <div><label className={lbl}>Omschrijving</label><input className={INP} value={v.vaste_sub} onChange={(e) => setV({ ...v, vaste_sub: e.target.value })} /></div>
           </div>
-          <p className="text-[11px] text-gray-500">Korte taken die je per week afvinkt; de volledige werkwijze staat achter “details”.</p>
           {v.vaste_taken.map((t, i) => (
             <div key={t.key} className="rounded-xl border border-gray-200 p-2.5 space-y-1.5">
               <div className="flex gap-1.5"><input className={INP} value={t.titel} onChange={(e) => zetV(i, { titel: e.target.value })} aria-label="Taak" /><button type="button" onClick={() => setV({ ...v, vaste_taken: v.vaste_taken.filter((_, j) => j !== i) })} className={`h-9 w-9 shrink-0 rounded-lg hover:bg-red-50 text-red-600 flex items-center justify-center ${focusRing}`} aria-label="Taak verwijderen"><Trash2 className="h-4 w-4" /></button></div>
@@ -360,7 +352,6 @@ export function InstellingenPaneel({ data, doe, onSluit }: { data: CpData; doe: 
             <div className="space-y-1.5">{v.routine_links.map((l, i) => (
               <div key={i} className="grid grid-cols-[1fr_2fr_auto] gap-1.5"><input className={INP} value={l.label} onChange={(e) => setV({ ...v, routine_links: v.routine_links.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)) })} /><input className={INP} value={l.url} onChange={(e) => setV({ ...v, routine_links: v.routine_links.map((x, j) => (j === i ? { ...x, url: e.target.value } : x)) })} /><button type="button" onClick={() => setV({ ...v, routine_links: v.routine_links.filter((_, j) => j !== i) })} className={`h-9 w-9 rounded-lg hover:bg-red-50 text-red-600 flex items-center justify-center ${focusRing}`} aria-label="Link verwijderen"><X className="h-4 w-4" /></button></div>
             ))}</div>
-            <p className="text-[11px] text-gray-500 mt-1">Vervang de algemene links door jullie eigen werkruimte (bv. de Notion-pagina). De app kent de inhoud of ‘Ready’-status daar niet; je registreert je controle zelf.</p>
           </div>
         </section>
       )}
@@ -373,7 +364,6 @@ function BatchBeheer({ batches, doe }: { batches: Batch[]; doe: Doe }) {
   const [nieuw, setNieuw] = useState({ name: '', color: '#112546', start_month: '' })
   return (
     <section className="space-y-2">
-      <p className="text-[11px] text-gray-500">Batches groeperen klanten per kwartaal. De startmaand bepaalt welke maanden kwartaalmaanden zijn (start + 3, + 6, + 9).</p>
       {batches.map((b) => (
         <div key={b.id} className="grid grid-cols-[40px_1fr_140px_auto] gap-1.5 items-center">
           <input type="color" defaultValue={b.color} onBlur={(e) => e.target.value !== b.color && doe('batch.wijzig', { id: b.id, color: e.target.value }, { stil: true })} className="h-9 w-10 rounded" aria-label="Kleur" />
