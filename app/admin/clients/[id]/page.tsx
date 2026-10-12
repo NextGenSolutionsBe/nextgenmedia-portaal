@@ -11,6 +11,7 @@ import { DeleteClientButton } from './delete-client-button'
 import { PortalAccessCard } from './portal-access-card'
 import { CredentialsCard } from '@/components/credentials-card'
 import { ClientUsers } from './client-users'
+import { KalenderBeheer } from './kalender-beheer'
 import { ClientHub } from './client-hub'
 import { ClientLifecycleBlock } from './client-lifecycle'
 import { ClientMonths } from './client-months'
@@ -195,6 +196,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           {/* Subaccounts & rechten */}
           <div id="gebruikers" className="scroll-mt-20">
             <ClientUsers clientId={id} clientName={client.company_name} ownerEmail={client.email ?? null} />
+            <KalenderBeheer clientId={id} />
           </div>
 
           {/* Klant Lifecycle (batch, contract, reviews) */}

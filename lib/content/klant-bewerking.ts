@@ -8,11 +8,11 @@
 
 import { KANAAL_SLUGS, normaliseerKanalen } from '@/lib/social-platforms'
 
-export const KLANT_VELDEN = ['title', 'caption', 'script', 'media_notes', 'planned_date', 'content_type', 'platforms'] as const
+export const KLANT_VELDEN = ['title', 'caption', 'script', 'media_notes', 'planned_date', 'planned_time', 'content_type', 'platforms'] as const
 export const CONTENT_TYPES = ['post', 'reel', 'story', 'carousel'] as const
 const ISO = /^\d{4}-\d{2}-\d{2}$/
 
-export type KlantPatch = Partial<{ title: string; caption: string | null; script: string | null; media_notes: string | null; planned_date: string; content_type: string; platforms: string[]; platform: string }>
+export type KlantPatch = Partial<{ title: string; caption: string | null; script: string | null; media_notes: string | null; planned_date: string; planned_time: string | null; content_type: string; platforms: string[]; platform: string }>
 
 /** Saneert de invoer van een klant tot toegestane velden. Gooit een leesbare fout bij ongeldige waarden. */
 export function klantPatch(invoer: Record<string, unknown>): KlantPatch {
@@ -30,6 +30,11 @@ export function klantPatch(invoer: Record<string, unknown>): KlantPatch {
     if (!ISO.test(d) || Number.isNaN(Date.parse(d))) throw new Error('Kies een geldige datum.')
     p.planned_date = d
   }
+  if ('planned_time' in invoer) {
+    const t = String(invoer.planned_time ?? '').trim()
+    if (t && !/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(t)) throw new Error('Geef een geldig tijdstip (uu:mm).')
+    p.planned_time = t ? t.slice(0, 5) : null
+  }
   if ('content_type' in invoer) {
     const t = String(invoer.content_type ?? '')
     if (!(CONTENT_TYPES as readonly string[]).includes(t)) throw new Error('Onbekend type.')
@@ -46,7 +51,8 @@ export function klantPatch(invoer: Record<string, unknown>): KlantPatch {
 
 /** Welke velden echt veranderen (voor de audit en de melding aan ons). */
 export function gewijzigdeVelden(oud: Record<string, unknown>, patch: KlantPatch): string[] {
-  return Object.entries(patch).filter(([k, v]) => k !== 'platform' && JSON.stringify(oud[k] ?? null) !== JSON.stringify(v ?? null)).map(([k]) => k)
+  const norm = (k: string, v: unknown) => (k === 'planned_time' && typeof v === 'string' ? v.slice(0, 5) : v ?? null)
+  return Object.entries(patch).filter(([k, v]) => k !== 'platform' && JSON.stringify(norm(k, oud[k])) !== JSON.stringify(norm(k, v))).map(([k]) => k)
 }
 
 /** Nieuw item dat de klant zelf inplant: titel, datum en minstens één kanaal zijn verplicht. */

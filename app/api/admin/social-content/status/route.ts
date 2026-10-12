@@ -1,5 +1,6 @@
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
+import { logContentActiviteit } from '@/lib/content/kalender-beheer-server'
 import { createClient, createAdminSupabaseClient , isActiveStaff } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 
@@ -18,8 +19,10 @@ export async function POST(req: NextRequest) {
     const { id, status } = await req.json()
     const patch: Record<string, unknown> = { status }
     if (status === 'published') patch.published_at = new Date().toISOString()
-    const { error } = await admin.from('social_content_items').update(patch).eq('id', id)
+    const { data: rij, error } = await admin.from('social_content_items').update(patch).eq('id', id).select('id, client_id').maybeSingle()
     if (error) throw new Error(error.message)
+    const LABEL: Record<string, string> = { draft: 'Concept', ready_for_review: 'naar de klant gestuurd', approved: 'Goedgekeurd', changes_requested: 'Feedback', scheduled: 'ingepland', published: 'als gepubliceerd gemarkeerd' }
+    if (rij) await logContentActiviteit(admin, { item_id: rij.id, client_id: rij.client_id, door: user.email ?? null, rol: 'nextgenmedia', actie: status === 'published' || status === 'scheduled' || status === 'ready_for_review' ? String(LABEL[status]) : `status: ${LABEL[status] ?? status}`, details: { naar: status } })
 
     try {
       revalidatePath('/admin/services/social-media')

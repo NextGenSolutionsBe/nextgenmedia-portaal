@@ -1,12 +1,13 @@
 'use client'
 
-import { useMemo, useState, useCallback } from 'react'
+import { useMemo, useState, useCallback, useEffect } from 'react'
 import {
   ChevronLeft, ChevronRight, X, Check, RefreshCw,
   Send, Pencil, Save, Image, Video, FileText, Plus,
 } from 'lucide-react'
 import { ymd } from '@/lib/utils'
 import { KANAAL_SLUGS, kanaalLabel, normaliseerKanalen } from '@/lib/social-platforms'
+import { klantOvergangen } from '@/lib/content/kalender-beheer'
 
 export type SocialContentStatus =
   | 'draft' | 'ready_for_review' | 'approved'
@@ -34,7 +35,14 @@ export type SocialContentItem = {
   klant_gewijzigd_door?: string | null
   /** De klant plande dit item zelf in. */
   klant_aangemaakt_op?: string | null
+  /** Tijdstip 'HH:MM' (optioneel). */
+  planned_time?: string | null
+  published_at?: string | null
+  published_url?: string | null
+  published_platform?: string | null
 }
+
+export type ContentActiviteit = { op: string; door: string | null; rol: 'klant' | 'nextgenmedia'; actie: string; details: Record<string, unknown> | null }
 
 export type CalendarMode = 'admin' | 'client'
 
@@ -65,7 +73,9 @@ function startOfMonthGrid(d: Date): Date {
 export type CalendarActions = {
   onUpdate?: (id: string, patch: Partial<SocialContentItem>) => Promise<void>
   onMove?: (id: string, planned_date: string) => Promise<void>
-  onSetStatus?: (id: string, status: SocialContentStatus) => Promise<void>
+  onSetStatus?: (id: string, status: SocialContentStatus, extra?: Record<string, unknown>) => Promise<void>
+  /** Activiteit van een item (wie, wanneer, wat) voor het detailpaneel. */
+  onLaadActiviteit?: (id: string) => Promise<ContentActiviteit[]>
   onDelete?: (id: string) => Promise<void>
   onCreateOnDay?: (planned_date: string) => void
   onApprove?: (id: string) => Promise<void>
@@ -255,7 +265,7 @@ export function ContentCalendar({
                         )}
                         <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${style.dot}`} />
                         <Icon className="h-2.5 w-2.5 shrink-0 opacity-70" />
-                        <span className="truncate">{it.title}</span>
+                        <span className="truncate">{it.planned_time ? <span className="tabular-nums opacity-70">{it.planned_time.slice(0, 5)} </span> : null}{it.title}</span>
                       </button>
                     )
                   })}
@@ -307,6 +317,16 @@ function ScriptPanel({
   const [form, setForm] = useState<SocialContentItem | null>(null)
   const [feedback, setFeedback] = useState('')
   const [busy, setBusy] = useState(false)
+  const [publiceer, setPubliceer] = useState<{ datum: string; kanaal: string; link: string } | null>(null)
+  const [activiteit, setActiviteit] = useState<ContentActiviteit[] | null>(null)
+  const laadActiviteit = actions.onLaadActiviteit
+  useEffect(() => {
+    setActiviteit(null); setPubliceer(null)
+    if (!item || !laadActiviteit) return
+    let weg = false
+    laadActiviteit(item.id).then((a) => { if (!weg) setActiviteit(a) }).catch(() => { if (!weg) setActiviteit([]) })
+    return () => { weg = true }
+  }, [item?.id, item?.status, item?.klant_gewijzigd_op, laadActiviteit]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (item && form?.id !== item.id) {
     setForm(item)
@@ -341,7 +361,7 @@ function ScriptPanel({
         title: form.title,
         platforms: resolvedPlatforms,
         platform: resolvedPlatforms[0],
-        content_type: form.content_type, planned_date: form.planned_date,
+        content_type: form.content_type, planned_date: form.planned_date, planned_time: form.planned_time ? form.planned_time.slice(0, 5) : null,
         caption: form.caption, script: form.script, media_notes: form.media_notes,
         // De interne notitie bestaat enkel in de admin; de klant ziet of verstuurt ze nooit.
         ...(isAdmin ? { interne_notitie: form.interne_notitie ?? null } : {}),
@@ -368,7 +388,7 @@ function ScriptPanel({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-2">
             <span className={`status-badge border ${style.badge}`}>{style.label}</span>
-            <span className="text-xs text-gray-400">{f.planned_date}</span>
+            <span className="text-xs text-gray-400">{f.planned_date}{f.planned_time ? ` · ${f.planned_time.slice(0, 5)}` : ''}</span>
           </div>
           {editing ? (
             <input
@@ -401,6 +421,10 @@ function ScriptPanel({
               <label>
                 <span className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">Datum</span>
                 <input type="date" className={inp} value={f.planned_date} onChange={(e) => setForm({ ...f, planned_date: e.target.value })} />
+              </label>
+              <label>
+                <span className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">Tijdstip <span className="normal-case text-gray-400">(optioneel)</span></span>
+                <input type="time" className={inp} value={(f.planned_time ?? '').slice(0, 5)} onChange={(e) => setForm({ ...f, planned_time: e.target.value || null })} />
               </label>
               <label>
                 <span className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">Type</span>
@@ -473,6 +497,14 @@ function ScriptPanel({
           </div>
         )}
 
+        {item.status === 'published' && (item.published_at || item.published_url || item.published_platform) && (
+          <div className="rounded-lg border border-purple-200 bg-purple-50 p-2.5 text-sm text-purple-900">
+            <div className="text-[10px] uppercase tracking-wide mb-0.5">Gepubliceerd</div>
+            {item.published_at && <div>{new Date(item.published_at).toLocaleDateString('nl-BE', { timeZone: 'Europe/Brussels' })}{item.published_platform ? ` · ${kanaalLabel(item.published_platform)}` : ''}</div>}
+            {item.published_url && <a href={item.published_url} target="_blank" rel="noopener noreferrer" className="underline break-all">{item.published_url}</a>}
+          </div>
+        )}
+
         {isAdmin && (editing || f.interne_notitie) && (
           <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-2.5">
             <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Interne notitie <span className="normal-case">— enkel zichtbaar voor NextGenMedia</span></div>
@@ -486,6 +518,22 @@ function ScriptPanel({
 
         {isAdmin && item.klant_gewijzigd_op && (
           <p className="text-[11px] text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1.5">Aangepast door de klant{item.klant_gewijzigd_door ? ` (${item.klant_gewijzigd_door})` : ''} op {new Date(item.klant_gewijzigd_op).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+        )}
+
+        {laadActiviteit && (
+          <div>
+            <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Activiteit</div>
+            {activiteit === null ? <p className="text-xs text-gray-400">Laden…</p> : activiteit.length === 0 ? <p className="text-xs text-gray-400">Nog geen activiteit geregistreerd.</p> : (
+              <ul className="space-y-1">
+                {activiteit.slice(0, 12).map((a, i) => (
+                  <li key={i} className="text-xs text-gray-600 flex gap-2">
+                    <span className="tabular-nums text-gray-400 shrink-0">{new Date(a.op).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                    <span><b className="font-medium text-gray-800">{a.door ?? (a.rol === 'klant' ? 'Klant' : 'NextGenMedia')}</b>{a.rol === 'klant' ? ' (klant)' : ''} {a.actie}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
 
         {item.status === 'changes_requested' && item.client_feedback && (
@@ -616,11 +664,41 @@ function ScriptPanel({
             ) : !actions.onUpdate ? (
               <p className="text-xs text-gray-400 text-center">Geen actie vereist op dit moment.</p>
             ) : null}
-            {!editing && actions.onDelete && item.klant_aangemaakt_op && item.status === 'draft' && (
+            {!editing && actions.onSetStatus && klantOvergangen(item.status).length > 0 && (
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-1.5">
+                  {klantOvergangen(item.status).map((naar) => (
+                    <button key={naar} type="button" disabled={busy}
+                      onClick={async () => {
+                        if (naar === 'published') { setPubliceer({ datum: new Date().toISOString().slice(0, 10), kanaal: normaliseerKanalen(item.platforms?.length ? item.platforms : [item.platform])[0] ?? '', link: '' }); return }
+                        setBusy(true); try { await actions.onSetStatus!(item.id, naar) } catch { /* melding komt van de handler */ } finally { setBusy(false) }
+                      }}
+                      className={naar === 'published' ? 'btn-primary text-xs flex-1' : 'btn-secondary text-xs flex-1'}>
+                      {naar === 'published' ? 'Gepubliceerd markeren' : naar === 'scheduled' ? 'Inplannen' : naar === 'approved' ? (item.status === 'draft' ? 'Goedkeuren' : 'Uit planning halen') : naar === 'draft' ? 'Terug naar concept' : naar}
+                    </button>
+                  ))}
+                </div>
+                {publiceer && (
+                  <div className="rounded-lg border border-gray-200 p-2.5 space-y-2">
+                    <p className="text-[11px] text-gray-500">Enkel de status in de kalender — er wordt niets op sociale media geplaatst.</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label><span className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">Publicatiedatum</span><input type="date" className={inp} max={new Date().toISOString().slice(0, 10)} value={publiceer.datum} onChange={(e) => setPubliceer({ ...publiceer, datum: e.target.value })} /></label>
+                      <label><span className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">Kanaal</span><select className={inp} value={publiceer.kanaal} onChange={(e) => setPubliceer({ ...publiceer, kanaal: e.target.value })}>{normaliseerKanalen(item.platforms?.length ? item.platforms : [item.platform]).map((k) => <option key={k} value={k}>{kanaalLabel(k)}</option>)}</select></label>
+                    </div>
+                    <label className="block"><span className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">Link naar de post <span className="normal-case text-gray-400">(optioneel)</span></span><input type="url" className={inp} value={publiceer.link} onChange={(e) => setPubliceer({ ...publiceer, link: e.target.value })} placeholder="https://" /></label>
+                    <div className="flex gap-2">
+                      <button type="button" disabled={busy} onClick={async () => { setBusy(true); try { await actions.onSetStatus!(item.id, 'published', { published_at: publiceer.datum, published_platform: publiceer.kanaal || null, published_url: publiceer.link || null }); setPubliceer(null) } catch { /* melding komt van de handler */ } finally { setBusy(false) } }} className="btn-primary text-xs flex-1">Bevestigen</button>
+                      <button type="button" onClick={() => setPubliceer(null)} className="btn-secondary text-xs">Annuleer</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {!editing && actions.onDelete && (
               <button
                 disabled={busy}
                 onClick={async () => {
-                  if (!confirm('Dit item dat je zelf inplande verwijderen?')) return
+                  if (!confirm(`“${item.title}” definitief verwijderen? Dit kan niet ongedaan gemaakt worden.`)) return
                   setBusy(true)
                   try { await actions.onDelete!(item.id); onClose() } catch { /* melding komt van de handler */ } finally { setBusy(false) }
                 }}

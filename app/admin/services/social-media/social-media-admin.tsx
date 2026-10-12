@@ -492,6 +492,7 @@ export function SocialMediaAdmin({
               onSetStatus: handleSetStatus,
               onDelete: handleDelete,
               onCreateOnDay: (date) => setCreateDialog({ open: true, date }),
+              onLaadActiviteit: async (id) => { const r = await fetch(`/api/admin/social-content/activiteit?item=${id}`, { cache: 'no-store' }); const j = await r.json().catch(() => ({})); return r.ok ? j.activiteit ?? [] : [] },
             }}
             selection={{
               enabled: selectMode,

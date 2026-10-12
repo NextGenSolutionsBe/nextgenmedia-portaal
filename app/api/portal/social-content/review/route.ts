@@ -1,5 +1,6 @@
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
+import { logContentActiviteit } from '@/lib/content/kalender-beheer-server'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { notifyClientScriptActivity } from '@/lib/admin-alerts'
@@ -47,6 +48,7 @@ export async function POST(req: NextRequest) {
       revalidatePath('/admin/services/social-media')
     } catch { }
 
+    await logContentActiviteit(admin, { item_id: id, client_id: session.clientId, door: session.name || session.email || 'Klant', rol: 'klant', actie: decision === 'approved' ? 'goedgekeurd' : 'feedback gegeven' })
     await logPortalAction(
       session,
       decision === 'approved' ? 'portal.script.approved' : 'portal.script.changes_requested',

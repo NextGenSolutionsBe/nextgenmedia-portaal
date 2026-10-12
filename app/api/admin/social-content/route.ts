@@ -1,6 +1,7 @@
 import { safeMessage } from '@/lib/api-error'
 import { normaliseerKanalen } from '@/lib/social-platforms'
 import { NextRequest, NextResponse } from 'next/server'
+import { logContentActiviteit } from '@/lib/content/kalender-beheer-server'
 import { createClient, createAdminSupabaseClient , isActiveStaff } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { clickupConfigured, deleteTask } from '@/lib/clickup'
@@ -10,6 +11,10 @@ export const dynamic = 'force-dynamic'
 
 // Bulk-verwijderen kan meerdere (gethrottelde) ClickUp-calls vergen.
 export const maxDuration = 60
+
+async function currentEmail(): Promise<string | null> {
+  try { const supabase = await createClient(); const { data: { user } } = await supabase.auth.getUser(); return user?.email ?? null } catch { return null }
+}
 
 async function assertAdmin() {
   const supabase = await createClient()
@@ -81,6 +86,7 @@ export async function POST(req: NextRequest) {
       .select('id')
       .single()
     if (error) throw new Error(error.message)
+    await logContentActiviteit(admin, { item_id: row.id, client_id: clientId, door: (await currentEmail()) ?? null, rol: 'nextgenmedia', actie: 'aangemaakt', details: { titel: title, datum: planned_date } })
     return NextResponse.json({ id: row.id })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
@@ -113,8 +119,12 @@ export async function PATCH(req: NextRequest) {
       clean.platform = resolvedPlatforms[0] ?? null
     }
     if (Object.keys(clean).length) {
-      const { error } = await admin.from('social_content_items').update(clean).eq('id', id)
+      const { data: rij, error } = await admin.from('social_content_items').update(clean).eq('id', id).select('id, client_id').maybeSingle()
       if (error) throw new Error(error.message)
+      const velden = Object.keys(clean).filter((k) => k !== 'platform')
+      if (rij) await logContentActiviteit(admin, { item_id: rij.id, client_id: rij.client_id, door: user.email ?? null, rol: 'nextgenmedia', actie: velden.every((v) => v === 'planned_date' || v === 'planned_time') ? 'verplaatst' : 'aangepast', details: { velden } })
+    } else if (interne_notitie !== undefined) {
+      // Enkel de interne notitie: geen klantzichtbare activiteit.
     }
     return NextResponse.json({ ok: true })
   } catch (err) {

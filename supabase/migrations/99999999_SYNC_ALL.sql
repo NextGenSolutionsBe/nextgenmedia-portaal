@@ -5789,3 +5789,36 @@ ALTER TABLE public.invoice_lines ADD COLUMN IF NOT EXISTS service_slug text;
 CREATE INDEX IF NOT EXISTS invoices_invoice_date_idx ON public.invoices (invoice_date);
 CREATE INDEX IF NOT EXISTS invoice_lines_invoice_idx ON public.invoice_lines (invoice_id);
 CREATE INDEX IF NOT EXISTS invoice_lines_recurring_idx ON public.invoice_lines (recurring_id) WHERE recurring_id IS NOT NULL;
+
+-- ── Contentkalender beheren door klant — per klant instelbaar (12 okt 2026) ──
+-- Standaard UIT: bestaande klanten krijgen niet ongemerkt beheerrechten.
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS kalender_beheer boolean NOT NULL DEFAULT false;
+-- 'alle' = alle gebruikers van de klant; 'geselecteerd' = eigenaar (vinkje) + subaccounts met social_media.edit.
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS kalender_beheer_wie text NOT NULL DEFAULT 'alle';
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS kalender_beheer_eigenaar boolean NOT NULL DEFAULT true;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'clients_kalender_beheer_wie_check') THEN
+    ALTER TABLE public.clients ADD CONSTRAINT clients_kalender_beheer_wie_check CHECK (kalender_beheer_wie IN ('alle', 'geselecteerd'));
+  END IF;
+END $$;
+-- Tijdstip en publicatiegegevens van een contentitem.
+ALTER TABLE public.social_content_items ADD COLUMN IF NOT EXISTS planned_time time;
+ALTER TABLE public.social_content_items ADD COLUMN IF NOT EXISTS published_url text;
+ALTER TABLE public.social_content_items ADD COLUMN IF NOT EXISTS published_platform text;
+-- Activiteit per item (wie, wanneer, wat) — blijft bewaard, ook na verwijderen van het item.
+CREATE TABLE IF NOT EXISTS public.social_content_activiteit (
+  id bigserial PRIMARY KEY,
+  item_id uuid NOT NULL,
+  client_id uuid,
+  op timestamptz NOT NULL DEFAULT now(),
+  door text,
+  rol text NOT NULL DEFAULT 'nextgenmedia',
+  actie text NOT NULL,
+  details jsonb
+);
+CREATE INDEX IF NOT EXISTS social_content_activiteit_item_idx ON public.social_content_activiteit (item_id, op DESC);
+ALTER TABLE public.social_content_activiteit ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.social_content_activiteit FROM anon, authenticated;
+-- Klanten wijzigen content ENKEL via de app (rechten op de server); de oude
+-- policy liet eigenaars elke kolom rechtstreeks aanpassen.
+DROP POLICY IF EXISTS clients_review_content ON public.social_content_items;

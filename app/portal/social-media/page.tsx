@@ -5,6 +5,7 @@ import { ShootBriefingView, type Shoot } from '@/components/portal/shoot-briefin
 import { type Feedback } from '@/components/portal/shoot-feedback'
 import { type Idea } from '@/components/portal/shoot-ideas'
 import { requirePortalView, sessionCan } from '@/lib/portal-auth'
+import { magSessieBeheren } from '@/lib/content/kalender-beheer-server'
 import { ShootDocumentKnop } from '@/components/shoot-document-knop'
 import { getLang } from '@/lib/i18n-server'
 import { aftelItemsVoorKlant } from '@/lib/content/goedkeuring-deadlines'
@@ -18,7 +19,6 @@ export default async function PortalSocialMediaPage() {
   const clientId = session.clientId
   const canApprove = sessionCan(session, 'social_media', 'approve_scripts')
   const canFeedback = sessionCan(session, 'social_media', 'feedback')
-  const canEdit = sessionCan(session, 'social_media', 'edit')
   const admin = createAdminSupabaseClient()
 
   const { data: client } = await admin
@@ -32,6 +32,8 @@ export default async function PortalSocialMediaPage() {
     .eq('service_slug', 'social-media')
     .maybeSingle()
   if (!svcRow?.active) redirect('/portal')
+  // Zelf beheren: enkel als NextGenMedia het voor deze klant (en deze gebruiker) aanzette.
+  const canEdit = await magSessieBeheren(admin, session, sessionCan(session, 'social_media', 'edit'))
 
   // Eerst een verstreken deadline verwerken, zodat de kalender meteen klopt.
   const lang = await getLang()
@@ -40,7 +42,7 @@ export default async function PortalSocialMediaPage() {
   const { data: items } = await admin
     .from('social_content_items')
     // Expliciete kolommen: geen interne velden (ClickUp, aanmaker, contract) naar de klant.
-    .select('id, client_id, planned_date, platform, platforms, content_type, title, caption, script, media_notes, status, client_feedback, reviewed_at, created_at, klant_aangemaakt_op')
+    .select('id, client_id, planned_date, planned_time, platform, platforms, content_type, title, caption, script, media_notes, status, client_feedback, reviewed_at, created_at, klant_aangemaakt_op, published_at, published_url, published_platform')
     .eq('client_id', clientId)
     .order('planned_date', { ascending: true })
 
