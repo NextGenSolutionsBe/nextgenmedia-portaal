@@ -5782,3 +5782,10 @@ REVOKE ALL ON public.social_content_interne_notities FROM anon, authenticated;
 -- Klant plant zelf nieuwe content in (12 okt 2026).
 ALTER TABLE public.social_content_items ADD COLUMN IF NOT EXISTS klant_aangemaakt_op timestamptz;
 ALTER TABLE public.social_content_items ADD COLUMN IF NOT EXISTS klant_aangemaakt_door text;
+
+-- ── Omzetrapportage (12 okt 2026) ───────────────────────────────────────────
+-- Dienst per factuurregel (NULL = dienst van de factuur, anders "Niet gecategoriseerd").
+ALTER TABLE public.invoice_lines ADD COLUMN IF NOT EXISTS service_slug text;
+CREATE INDEX IF NOT EXISTS invoices_invoice_date_idx ON public.invoices (invoice_date);
+CREATE INDEX IF NOT EXISTS invoice_lines_invoice_idx ON public.invoice_lines (invoice_id);
+CREATE INDEX IF NOT EXISTS invoice_lines_recurring_idx ON public.invoice_lines (recurring_id) WHERE recurring_id IS NOT NULL;

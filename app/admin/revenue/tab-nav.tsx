@@ -8,6 +8,7 @@ import { usePathname, useSearchParams } from 'next/navigation'
 // bestaan maar zijn niet meer gelinkt.
 const TABS = [
   { href: '/admin/revenue/omzet', label: 'Overzicht' },
+  { href: '/admin/revenue/rapportage', label: 'Omzetrapportage' },
   { href: '/admin/revenue/kosten', label: 'Kosten' },
   { href: '/admin/revenue/framer', label: 'Framer' },
   // BV-transitie (rechtenbalans, winstverdeling, EZ-raming) staat bewust niet

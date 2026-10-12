@@ -107,6 +107,7 @@ const SECTIONS: NavSection[] = [
     title: 'Financieel',
     items: [
       { label: 'Financiën', href: '/admin/revenue/omzet', icon: TrendingUp, module: 'finance' },
+      { label: 'Omzetrapportage', href: '/admin/revenue/rapportage', icon: BarChart3, module: 'finance' },
       { label: 'Facturen', href: '/admin/invoices',      icon: Receipt, module: 'invoices' },
       { label: 'Vesting',  href: '/admin/vesting',       icon: Rocket, module: 'vesting' },
       { label: 'Aankopen', href: '/admin/purchases',     icon: ShoppingCart, module: 'purchases' },

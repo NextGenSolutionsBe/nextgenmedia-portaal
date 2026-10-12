@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { DIENST_LABELS } from '@/lib/omzet/diensten'
 import { toast } from 'sonner'
 import {
   X, Plus, Trash2, Copy, ArrowUp, ArrowDown, Loader2, Check, ChevronLeft, ChevronRight, Search, UserPlus, Pencil, Car,
@@ -163,7 +164,7 @@ export function FacturatieItemWizard({ invoiceId = null, recurringMaand = null, 
           action: 'recurring', client_id: klant!.id, contract_id: kop.contract_id, start_month: basis.datum.slice(0, 7), end_month: basis.eind_maand || null,
           description: kop.description, amount_excl: totalen.excl, vat_pct: totalen.perBtw.length === 1 ? totalen.perBtw[0].pct : btw,
           invoice_day: factuurdagVan(basis.datum), payment_term_days: termijn, mededeling: kop.mededeling,
-          lines: regels.map((x) => ({ artikel: x.artikel, omschrijving: x.omschrijving || x.artikel, aantal: x.aantal, eenheid: x.eenheid, prijs_excl: x.prijs_excl, btw_pct: x.btw_pct, korting_pct: x.korting_pct, korting_eur: x.korting_eur, is_extra: x.is_extra, classificatie: x.classificatie })),
+          lines: regels.map((x) => ({ artikel: x.artikel, omschrijving: x.omschrijving || x.artikel, aantal: x.aantal, eenheid: x.eenheid, prijs_excl: x.prijs_excl, btw_pct: x.btw_pct, korting_pct: x.korting_pct, korting_eur: x.korting_eur, is_extra: x.is_extra, classificatie: x.classificatie, dienst: x.dienst ?? null })),
         }) })
         const j = await r.json(); if (!r.ok) throw new Error(j.error)
         toast.success('Terugkerende facturatie opgeslagen — elke maand verschijnt apart in “Te factureren”.')
@@ -553,7 +554,16 @@ function StapArtikelen({ regels, setRegels, btw, inst, artikelen, setArtikelen, 
                 </div>
               </div>
               <div className="grid sm:grid-cols-2 gap-3">
-                <div><label className={lbl}>Naam</label><input className={INP} value={r.artikel} onChange={(e) => zet(i, { artikel: e.target.value })} placeholder="bv. Shoot" /></div>
+                <div><label className={lbl}>Naam</label><input className={INP} value={r.artikel} onChange={(e) => zet(i, { artikel: e.target.value })} placeholder="bv. Shoot" />
+                  {!r.is_extra && (
+                    <div className="mt-2"><label className={lbl}>Dienst <span className="text-gray-400 font-normal">— voor de omzetrapportage</span></label>
+                      <select className={INP} value={r.dienst ?? ''} onChange={(e) => zet(i, { dienst: e.target.value || null })}>
+                        <option value="">— Niet gekozen —</option>
+                        {Object.entries(DIENST_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                      </select>
+                    </div>
+                  )}
+                </div>
                 <div className="sm:row-span-2"><label className={lbl}>Beschrijving <span className="text-gray-400 font-normal">— zo neemt Bram ze over op de factuur</span></label><textarea rows={3} className={INP} value={r.omschrijving} onChange={(e) => zet(i, { omschrijving: e.target.value })} placeholder="bv. Productshoot op locatie, 4 uur, inclusief nabewerking" /></div>
                 <div className="grid grid-cols-2 gap-3">
                   <div><label className={lbl}>Aantal</label><GetalInvoer className={INP} waarde={r.aantal} min={0} onWaarde={(n) => zet(i, { aantal: n ?? 0 })} /></div>

@@ -177,6 +177,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const lijnVelden = (r: FactuurRegel) => ({
         volgnr: r.volgnr, omschrijving: r.omschrijving, artikel: r.artikel, aantal: r.aantal, eenheid: r.eenheid,
         prijs_excl: r.prijs_excl, btw_pct: r.btw_pct, korting_pct: r.korting_pct, korting_eur: r.korting_eur ?? 0, is_extra: r.is_extra, classificatie: r.classificatie, opmerking: r.opmerking ?? null,
+        ...(r.dienst !== undefined ? { service_slug: r.dienst } : {}),
       })
       const nieuw: ReturnType<typeof lijnVelden>[] = []
       const nu = new Date().toISOString()

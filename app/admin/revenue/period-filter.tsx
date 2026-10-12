@@ -16,6 +16,9 @@ export function PeriodFilter() {
   const quarter = Math.min(4, Math.max(1, Number(sp.get('q')) || (Math.floor(now.getMonth() / 3) + 1)))
   const month = Math.min(12, Math.max(1, Number(sp.get('mo')) || (now.getMonth() + 1)))
 
+  // De omzetrapportage heeft haar eigen, uitgebreidere filterbalk.
+  const eigenFilter = pathname?.startsWith('/admin/revenue/rapportage')
+
   const update = (next: Record<string, string | number>) => {
     const params = new URLSearchParams(sp.toString())
     for (const [k, v] of Object.entries(next)) params.set(k, String(v))
@@ -27,6 +30,7 @@ export function PeriodFilter() {
     { v: 'month', l: 'Maand' }, { v: 'quarter', l: 'Kwartaal' }, { v: 'fy', l: 'Boekjaar' },
   ]
 
+  if (eigenFilter) return null
   return (
     <div className="card-base flex flex-wrap items-center gap-3">
       <div className="flex items-center gap-1">

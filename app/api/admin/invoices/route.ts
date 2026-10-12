@@ -1,6 +1,7 @@
 import { leesGetal } from '@/lib/getal'
 import { isFactuurType } from '@/lib/facturatie/item-model'
 import { safeMessage } from '@/lib/api-error'
+import { isDienst } from '@/lib/omzet/diensten'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
@@ -72,7 +73,7 @@ async function linkOrCreateForecast(admin: Admin, p: {
  * kostprijs, leverancier). Raakt het factuurbedrag niet — dat staat al vast.
  * Best-effort: een fout hier laat de factuur zelf staan.
  */
-type LijnInvoer = { omschrijving?: unknown; aantal?: unknown; prijs_excl?: unknown; btw_pct?: unknown; classificatie?: unknown; opmerking?: unknown; kostprijs_excl?: unknown; leverancier?: unknown; categorie?: unknown; artikel?: unknown; eenheid?: unknown; korting_pct?: unknown; korting_eur?: unknown; is_extra?: unknown }
+type LijnInvoer = { omschrijving?: unknown; aantal?: unknown; prijs_excl?: unknown; btw_pct?: unknown; classificatie?: unknown; opmerking?: unknown; kostprijs_excl?: unknown; leverancier?: unknown; categorie?: unknown; artikel?: unknown; eenheid?: unknown; korting_pct?: unknown; korting_eur?: unknown; is_extra?: unknown; dienst?: unknown; service_slug?: unknown }
 async function slaLijnenOp(admin: Admin, ref: FactuurRef, lijnen: unknown, actor: { id: string; email?: string | null }): Promise<void> {
   if (!Array.isArray(lijnen) || lijnen.length === 0) return
   const num = (v: unknown): number | null => leesGetal(v)
@@ -88,6 +89,7 @@ async function slaLijnenOp(admin: Admin, ref: FactuurRef, lijnen: unknown, actor
         aantal: num(raw.aantal) ?? 1, prijs_excl: num(raw.prijs_excl) ?? 0, btw_pct: num(raw.btw_pct) ?? DEFAULT_VAT, classificatie, opmerking: txt(raw.opmerking),
         artikel: txt(raw.artikel) ?? omschrijving.slice(0, 120), eenheid: txt(raw.eenheid) ?? 'stuk',
         korting_pct: Math.min(100, Math.max(0, num(raw.korting_pct) ?? 0)), korting_eur: Math.max(0, num(raw.korting_eur) ?? 0), is_extra: raw.is_extra === true,
+        service_slug: isDienst(raw.dienst ?? raw.service_slug) ? String(raw.dienst ?? raw.service_slug) : null,
       }).select('id').single()
       if (error || !l) continue
       const kostprijs = num(raw.kostprijs_excl)
@@ -357,6 +359,7 @@ export async function POST(req: NextRequest) {
       const { error: le } = await admin.from('invoice_lines').insert(regels.map((r) => ({
         invoice_id: id, volgnr: r.volgnr, omschrijving: r.omschrijving, artikel: r.artikel, aantal: r.aantal, eenheid: r.eenheid,
         prijs_excl: r.prijs_excl, btw_pct: r.btw_pct, korting_pct: r.korting_pct, korting_eur: r.korting_eur ?? 0, is_extra: r.is_extra, classificatie: r.classificatie, opmerking: r.opmerking ?? null,
+        service_slug: r.dienst ?? null,
       })))
       // Geen half opgeslagen factuur achterlaten: zonder regels → terugdraaien en een duidelijke fout.
       if (le) { await admin.from('invoices').delete().eq('id', id); throw new Error(`De factuurregels konden niet bewaard worden (${le.message}). Er is niets opgeslagen.`) }

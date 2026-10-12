@@ -5,6 +5,7 @@
 // bedragen gewone euro's met twee decimalen.
 
 import { leesGetal } from '@/lib/getal'
+import { isDienst } from '@/lib/omzet/diensten'
 
 export type Classificatie = 'dienst' | 'doorgerekende_kost' | 'gemengd'
 
@@ -27,6 +28,8 @@ export type FactuurRegel = {
   is_extra: boolean
   classificatie: Classificatie
   opmerking?: string | null
+  /** Dienst van deze regel voor de omzetrapportage (undefined = niet meegestuurd → ongewijzigd laten). */
+  dienst?: string | null
 }
 
 export type Bedragen = { excl: number; btw: number; incl: number }
@@ -158,6 +161,7 @@ export function normaliseerRegels(input: unknown, btwStandaard = 21): FactuurReg
       is_extra: raw.is_extra === true || raw.is_extra === 'true',
       classificatie: klass,
       opmerking: raw.opmerking ? String(raw.opmerking).slice(0, 500) : null,
+      ...('dienst' in raw || 'service_slug' in raw ? { dienst: isDienst(raw.dienst ?? raw.service_slug) ? String(raw.dienst ?? raw.service_slug) : null } : {}),
     })
   }
   return uit
