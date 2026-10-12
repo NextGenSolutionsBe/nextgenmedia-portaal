@@ -10,6 +10,7 @@ import { normaliseerRegels, berekenTotalen, nieuweRegel } from '@/lib/facturen/r
 import { maakReeks, valideerReeks, isDoorlopend, factuurdagVan, type ReeksInvoer } from '@/lib/facturatie/reeks'
 import { berekenRegel } from '@/lib/facturen/regels'
 import { laadAflettering } from '@/lib/contracten/aflettering-server'
+import { isWijzigingSoort, WIJZIGING_LABEL } from '@/lib/contracten/aflettering'
 import { logContractEvent } from '@/lib/contract-audit'
 
 export const dynamic = 'force-dynamic'
@@ -77,14 +78,18 @@ async function laad(admin: Admin, contractId: string) {
     terugkerend: rijen.filter((r) => r.bron === 'recurring' && r.recurring?.actief).length,
   }
   // Losse facturen van dezelfde klant die achteraf aan dit contract gekoppeld kunnen worden.
-  let kandidaten: { id: string; invoice_date: string | null; description: string | null; amount_excl: number; status: string }[] = []
-  if (c.client_id) {
-    const { data: los } = await admin.from('invoices').select('id, invoice_date, description, amount_excl, status').eq('client_id', c.client_id).is('contract_id', null).neq('kind', 'wam').order('invoice_date', { ascending: false }).limit(40)
-    kandidaten = ((los ?? []) as Record<string, unknown>[]).map((i) => ({ id: String(i.id), invoice_date: dag(i.invoice_date), description: (i.description as string | null) ?? null, amount_excl: Number(i.amount_excl) || 0, status: normaliseerVerzendstatus(i.status as string) }))
-  }
   // Aflettering: contractwaarde ↔ gekoppelde facturen (zelfde bron als de lijst).
   const afl = (await laadAflettering(admin, [contractId])).get(contractId) ?? null
   const factuurIds = [...new Set((afl?.items ?? []).map((i) => i.invoice_id).filter((x): x is string => !!x))]
+  let kandidaten: { id: string; invoice_date: string | null; description: string | null; amount_excl: number; status: string; factuurnummer: string | null }[] = []
+  if (c.client_id) {
+    const { data: los } = await admin.from('invoices').select('id, invoice_date, description, amount_excl, status, extern_factuurnummer, reference').eq('client_id', c.client_id).is('contract_id', null).neq('kind', 'wam').order('invoice_date', { ascending: false }).limit(60)
+    // Een maandfactuur van een contractreeks telt al bij dit contract: niet nog eens als "losse factuur" tonen.
+    kandidaten = ((los ?? []) as Record<string, unknown>[]).filter((i) => !factuurIds.includes(String(i.id))).map((i) => ({
+      id: String(i.id), invoice_date: dag(i.invoice_date), description: (i.description as string | null) ?? null, amount_excl: Number(i.amount_excl) || 0,
+      status: normaliseerVerzendstatus(i.status as string), factuurnummer: (i.extern_factuurnummer as string | null) || (i.reference as string | null) || null,
+    }))
+  }
   const { data: alleRegels } = factuurIds.length ? await admin.from('invoice_lines').select('*').in('invoice_id', factuurIds).order('volgnr') : { data: [] }
   const regels = ((alleRegels ?? []) as Record<string, unknown>[]).map((r) => ({
     id: String(r.id), invoice_id: String(r.invoice_id), artikel: (r.artikel as string | null) ?? null, omschrijving: (r.omschrijving as string | null) ?? null,
@@ -280,6 +285,57 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         }
         try { await admin.from('invoice_wijzigingen').insert({ invoice_id: inv.id, actie: 'aangepast', veld: 'regels', oud: JSON.stringify({ is_extra: l.is_extra, contract_id: l.contract_id }), nieuw: JSON.stringify({ is_extra: patch.is_extra ?? l.is_extra, contract_id: 'contract_id' in patch ? patch.contract_id : l.contract_id }), reden: 'Aflettering contract', actor_email: actor.email ?? null }) } catch { /* */ }
         await audit('Factuurregel aangepast voor de aflettering', { line_id: lineId, ...patch })
+        return klaar()
+      }
+      case 'wijziging.maak':
+      case 'wijziging.wijzig': {
+        // Vermindering of creditering registreren. De oorspronkelijke contractwaarde en de facturen blijven ongewijzigd.
+        const soort = b.soort
+        if (!isWijzigingSoort(soort)) return NextResponse.json({ error: 'Kies wat er gebeurt (geannuleerd, gaat niet door, …).' }, { status: 400 })
+        const bedrag = Math.round(Number(String(b.bedrag_excl ?? '').replace(/\s/g, '').replace(',', '.')) * 100) / 100
+        if (!Number.isFinite(bedrag) || bedrag <= 0 || bedrag > 100_000_000) return NextResponse.json({ error: 'Geef het bedrag excl. btw (groter dan € 0).' }, { status: 400 })
+        const datum = b.datum ? String(b.datum).slice(0, 10) : null
+        if (datum && !/^\d{4}-\d{2}-\d{2}$/.test(datum)) return NextResponse.json({ error: 'Geef een geldige datum.' }, { status: 400 })
+        const invoiceId = b.invoice_id ? String(b.invoice_id) : null
+        if (invoiceId) {
+          if (!UUID.test(invoiceId)) return NextResponse.json({ error: 'Ongeldige factuur.' }, { status: 400 })
+          const { data: f } = await admin.from('invoices').select('id, client_id').eq('id', invoiceId).maybeSingle()
+          if (!f || (f.client_id && c.client_id && f.client_id !== c.client_id)) return NextResponse.json({ error: 'Kies een factuur van deze klant.' }, { status: 400 })
+        }
+        const tekst = (v: unknown, max: number) => { const t = String(v ?? '').trim(); return t ? t.slice(0, max) : null }
+        const wie = actor.naam ?? actor.email ?? null
+        const velden = { soort, bedrag_excl: bedrag, datum, onderdeel: tekst(b.onderdeel, 200), reden: tekst(b.reden, 500), notitie: tekst(b.notitie, 2000), invoice_id: invoiceId }
+        if (b.action === 'wijziging.maak') {
+          // Dubbelklik: zelfde soort + bedrag + onderdeel binnen 30 seconden = niet nog eens.
+          const sinds = new Date(Date.now() - 30_000).toISOString()
+          const { data: recent } = await admin.from('contract_waarde_wijzigingen').select('id').eq('contract_id', id).eq('soort', soort).eq('bedrag_excl', bedrag).is('verwijderd_op', null).gte('aangemaakt_op', sinds).limit(1)
+          if (recent?.length) return klaar({ melding: 'Al geregistreerd.' })
+          const { data: nieuw, error } = await admin.from('contract_waarde_wijzigingen').insert({ contract_id: id, ...velden, aangemaakt_door: wie }).select('id').single()
+          if (error) throw new Error(/contract_waarde_wijzigingen/.test(error.message) ? 'De databank is nog niet bijgewerkt voor verminderingen.' : error.message)
+          await logContractEvent(admin, id, 'contractwaarde_vermindering', { actor: actor.email ?? actor.userId, ip: meta.ip, ua: meta.userAgent, meta: { wijziging_id: nieuw.id, ...velden, label: WIJZIGING_LABEL[soort] } })
+          await audit(`${WIJZIGING_LABEL[soort]}: € ${bedrag} excl.${velden.onderdeel ? ` (${velden.onderdeel})` : ''}`, { wijziging_id: nieuw.id, ...velden })
+          return klaar()
+        }
+        const wid = String(b.wijziging_id ?? '')
+        if (!UUID.test(wid)) return NextResponse.json({ error: 'Onbekende registratie.' }, { status: 400 })
+        const { data: oud } = await admin.from('contract_waarde_wijzigingen').select('*').eq('id', wid).eq('contract_id', id).is('verwijderd_op', null).maybeSingle()
+        if (!oud) return NextResponse.json({ error: 'Deze registratie bestaat niet (meer).' }, { status: 404 })
+        const { error } = await admin.from('contract_waarde_wijzigingen').update({ ...velden, gewijzigd_door: wie, gewijzigd_op: new Date().toISOString() }).eq('id', wid).eq('contract_id', id)
+        if (error) throw new Error(error.message)
+        await logContractEvent(admin, id, 'contractwaarde_vermindering_gewijzigd', { actor: actor.email ?? actor.userId, ip: meta.ip, ua: meta.userAgent, meta: { wijziging_id: wid, oud: { soort: oud.soort, bedrag_excl: oud.bedrag_excl, onderdeel: oud.onderdeel }, nieuw: velden } })
+        await audit(`Vermindering aangepast: € ${oud.bedrag_excl} → € ${bedrag} excl.`, { wijziging_id: wid })
+        return klaar()
+      }
+      case 'wijziging.verwijder': {
+        // Zacht: blijft in de geschiedenis zichtbaar, telt niet meer mee.
+        const wid = String(b.wijziging_id ?? '')
+        if (!UUID.test(wid)) return NextResponse.json({ error: 'Onbekende registratie.' }, { status: 400 })
+        const { data: oud } = await admin.from('contract_waarde_wijzigingen').select('id, soort, bedrag_excl, onderdeel').eq('id', wid).eq('contract_id', id).is('verwijderd_op', null).maybeSingle()
+        if (!oud) return klaar({ melding: 'Al verwijderd.' })
+        const { error } = await admin.from('contract_waarde_wijzigingen').update({ verwijderd_op: new Date().toISOString(), verwijderd_door: actor.naam ?? actor.email ?? null }).eq('id', wid).eq('contract_id', id)
+        if (error) throw new Error(error.message)
+        await logContractEvent(admin, id, 'contractwaarde_vermindering_verwijderd', { actor: actor.email ?? actor.userId, ip: meta.ip, ua: meta.userAgent, meta: { wijziging_id: wid, soort: oud.soort, bedrag_excl: oud.bedrag_excl, onderdeel: oud.onderdeel } })
+        await audit(`Vermindering verwijderd (€ ${oud.bedrag_excl} excl.)`, { wijziging_id: wid })
         return klaar()
       }
       case 'ontkoppel': {

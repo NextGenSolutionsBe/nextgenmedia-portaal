@@ -1,14 +1,28 @@
 import {
-  FileUp, Sparkles, PencilLine, Send, Eye, CheckSquare, PenTool, FileCheck2, Download, RefreshCw, XCircle, Clock, Circle,
+  FileUp, Sparkles, PencilLine, Send, Eye, CheckSquare, PenTool, FileCheck2, Download, RefreshCw, XCircle, Clock, Circle, Euro, MinusCircle,
 } from 'lucide-react'
+import { WIJZIGING_LABEL, type WijzigingSoort } from '@/lib/contracten/aflettering'
 
 type Event = { id: string; event_type: string; created_at: string; actor?: string | null; actor_email?: string | null; meta?: Record<string, unknown> | null }
 
 const LOOPTIJD_LABEL: Record<string, string> = { lopend: 'Lopend', afgerond: 'Afgerond', stopgezet: 'Stopgezet', verlopen: 'Verlopen' }
 
 /** Extra regel onder een tijdlijnitem (bv. "Lopend → Stopgezet · reden"). */
+const euroTekst = (v: unknown) => (v === null || v === undefined || v === '' ? 'leeg' : `€ ${Number(v).toLocaleString('nl-BE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+
 function detail(e: Event): string | null {
-  if (e.event_type !== 'looptijd_gewijzigd' || !e.meta) return null
+  if (!e.meta) return null
+  const mm = e.meta as Record<string, unknown>
+  if (e.event_type === 'contractwaarde_gewijzigd') return `${euroTekst(mm.oud)} → ${euroTekst(mm.nieuw)} excl. btw`
+  if (e.event_type === 'contractwaarde_vermindering' || e.event_type === 'contractwaarde_vermindering_verwijderd') {
+    const soort = WIJZIGING_LABEL[mm.soort as WijzigingSoort] ?? String(mm.soort ?? '')
+    return [`${soort}: ${euroTekst(mm.bedrag_excl)}`, mm.onderdeel, mm.reden].filter(Boolean).join(' · ')
+  }
+  if (e.event_type === 'contractwaarde_vermindering_gewijzigd') {
+    const o = (mm.oud ?? {}) as Record<string, unknown>, n = (mm.nieuw ?? {}) as Record<string, unknown>
+    return `${euroTekst(o.bedrag_excl)} → ${euroTekst(n.bedrag_excl)}${n.onderdeel ? ` · ${n.onderdeel}` : ''}`
+  }
+  if (e.event_type !== 'looptijd_gewijzigd') return null
   const m = e.meta as { oud?: string; nieuw?: string; stop_datum?: string | null; stop_reden?: string | null }
   const delen = [`${LOOPTIJD_LABEL[m.oud ?? ''] ?? m.oud ?? '?'} → ${LOOPTIJD_LABEL[m.nieuw ?? ''] ?? m.nieuw ?? '?'}`]
   if (m.stop_datum) delen.push(`stopdatum ${String(m.stop_datum).split('-').reverse().join('/')}`)
@@ -38,6 +52,10 @@ const META: Record<string, { label: string; icon: React.ComponentType<{ classNam
   melding_verstuurd:     { label: 'Melding naar Legal verstuurd', icon: Send, cls: 'bg-blue-100 text-blue-600' },
   melding_mislukt:       { label: 'Melding naar Legal mislukt',   icon: XCircle, cls: 'bg-red-100 text-red-600' },
   looptijd_gewijzigd:    { label: 'Status aangepast',      icon: RefreshCw,   cls: 'bg-blue-100 text-blue-600' },
+  contractwaarde_gewijzigd: { label: 'Contractwaarde aangepast', icon: Euro, cls: 'bg-gray-100 text-gray-700' },
+  contractwaarde_vermindering: { label: 'Vermindering geregistreerd', icon: MinusCircle, cls: 'bg-amber-100 text-amber-700' },
+  contractwaarde_vermindering_gewijzigd: { label: 'Vermindering aangepast', icon: MinusCircle, cls: 'bg-amber-100 text-amber-700' },
+  contractwaarde_vermindering_verwijderd: { label: 'Vermindering verwijderd', icon: MinusCircle, cls: 'bg-gray-100 text-gray-600' },
 }
 
 export function ContractTimeline({ events }: { events: Event[] }) {

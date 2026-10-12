@@ -44,7 +44,7 @@ export type Contract = OverzichtContract & {
   expected_invoice_count: number | null
   invoice_state: 'none' | 'partial' | 'full'
   /** Aflettering contractwaarde ↔ facturen (actueel berekend op de server). */
-  afl?: { hoofd: AflBadge; afwijking: boolean; waarde: number | null; gefactureerd: number; ingepland: number } | null
+  afl?: { hoofd: AflBadge; afwijking: boolean; waarde: number | null; gefactureerd: number; ingepland: number; effectief?: number | null } | null
   /** Mailstatus — los van de ondertekenstatus. */
   mail_status?: MailStatus
   /** Looptijd: lopend / afgerond / stopgezet / verlopen — los van de ondertekening. */
@@ -583,7 +583,7 @@ export function ContractsClient({
                                   {c.afl ? (
                                     <div className="space-y-0.5">
                                       <div className="flex flex-wrap gap-1"><AflBadgeChip badge={c.afl.hoofd} klein />{c.afl.afwijking && <AflBadgeChip badge="afwijking" klein />}</div>
-                                      {c.afl.waarde !== null && <div className="text-[10px] text-gray-500 tabular-nums" title="Al gefactureerd / contractwaarde (excl. btw)">{formatEuro(c.afl.gefactureerd)} / {formatEuro(c.afl.waarde)}</div>}
+                                      {c.afl.waarde !== null && <div className="text-[10px] text-gray-500 tabular-nums" title={c.afl.effectief !== undefined && c.afl.effectief !== null && c.afl.effectief !== c.afl.waarde ? `Al gefactureerd / effectief uit te voeren (contractwaarde ${formatEuro(c.afl.waarde)}, excl. btw)` : 'Al gefactureerd / contractwaarde (excl. btw)'}>{formatEuro(c.afl.gefactureerd)} / {formatEuro(c.afl.effectief ?? c.afl.waarde)}{c.afl.effectief !== undefined && c.afl.effectief !== null && c.afl.effectief !== c.afl.waarde ? ' *' : ''}</div>}
                                     </div>
                                   ) : <span className="text-xs text-gray-300">—</span>}
                                 </td>

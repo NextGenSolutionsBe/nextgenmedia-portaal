@@ -5853,3 +5853,30 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.trek_auth_sessies_in(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.trek_auth_sessies_in(uuid) TO service_role;
+
+-- ── Contract: verminderingen en creditering (12 okt 2026) ──────────────────
+-- Registreert wanneer niet de volledige contractwaarde benut wordt (onderdeel
+-- geannuleerd, prestatie gaat niet door, niet afgenomen, verminderd, of
+-- gecrediteerd). De oorspronkelijke contractwaarde (contracts.contract_waarde_excl)
+-- blijft ongewijzigd; effectief uit te voeren = contractwaarde − som van deze rijen.
+-- Facturen worden nooit automatisch aangepast; invoice_id koppelt optioneel de
+-- betrokken (credit)factuur. Zacht verwijderen = geschiedenis blijft zichtbaar.
+CREATE TABLE IF NOT EXISTS public.contract_waarde_wijzigingen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id uuid NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
+  soort text NOT NULL CHECK (soort IN ('geannuleerd', 'gaat_niet_door', 'niet_afgenomen', 'verminderd', 'gecrediteerd')),
+  onderdeel text,
+  bedrag_excl numeric(12,2) NOT NULL CHECK (bedrag_excl > 0),
+  datum date,
+  reden text,
+  notitie text,
+  invoice_id uuid REFERENCES public.invoices(id) ON DELETE SET NULL,
+  aangemaakt_door text,
+  aangemaakt_op timestamptz NOT NULL DEFAULT now(),
+  gewijzigd_door text,
+  gewijzigd_op timestamptz,
+  verwijderd_op timestamptz,
+  verwijderd_door text
+);
+CREATE INDEX IF NOT EXISTS contract_waarde_wijzigingen_contract_idx ON public.contract_waarde_wijzigingen (contract_id);
+ALTER TABLE public.contract_waarde_wijzigingen ENABLE ROW LEVEL SECURITY;

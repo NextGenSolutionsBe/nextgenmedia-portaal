@@ -21,6 +21,7 @@ export type ContractEvent =
   | 'looptijd_gewijzigd'
   // Aflettering: contractwaarde ingevuld of gewijzigd (meta oud/nieuw).
   | 'contractwaarde_gewijzigd'
+  | 'contractwaarde_vermindering' | 'contractwaarde_vermindering_gewijzigd' | 'contractwaarde_vermindering_verwijderd'
 
 export async function logContractEvent(
   admin: Admin,

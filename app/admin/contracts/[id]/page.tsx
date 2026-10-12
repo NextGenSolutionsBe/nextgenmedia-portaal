@@ -141,6 +141,12 @@ export default async function ContractDetailPage({ params }: { params: { id: str
         </div>
       </div>
 
+      {/* Financieel overzicht bovenaan: contractwaarde, facturen, kosten en winst in één oogopslag. */}
+      <ContractFacturatie
+        contractId={c.id} clientId={clientId} serviceSlug={c.service_slug ?? null} contractTitle={c.title} isSigned={!!isSigned}
+        expectedCount={c.expected_invoice_count ?? null} invoiceFrequency={c.invoice_frequency ?? null} expectedAmountExcl={c.expected_invoice_amount_excl ?? null}
+      />
+
       <div className="grid lg:grid-cols-3 gap-6">
         {/* PDF Preview — schakel tussen origineel en getekend/ingevuld */}
         <div className="lg:col-span-2 space-y-6">
@@ -160,11 +166,6 @@ export default async function ContractDetailPage({ params }: { params: { id: str
               laatsteMelding={laatsteMelding}
             />
           )}
-          {/* Facturatie: voorstel controleren en bevestigen, facturen van dit contract, voortgang. */}
-          <ContractFacturatie
-            contractId={c.id} clientId={clientId} serviceSlug={c.service_slug ?? null} contractTitle={c.title} isSigned={!!isSigned}
-            expectedCount={c.expected_invoice_count ?? null} invoiceFrequency={c.invoice_frequency ?? null} expectedAmountExcl={c.expected_invoice_amount_excl ?? null}
-          />
           {/* Verzonden mails: elke verzendpoging met de werkelijk verstuurde inhoud. */}
           <VerzondenMails contractId={c.id} compact />
         </div>
@@ -244,19 +245,7 @@ export default async function ContractDetailPage({ params }: { params: { id: str
             </>
           )}
 
-          {/* Setup link — only for unsigned contracts */}
-          {!isSigned && c.pdf_path && (
-            <div className="card-base space-y-2">
-              <h2 className="font-semibold text-sm">Handtekeningzone</h2>
-              <Link
-                href={`/admin/contracts/${c.id}/setup`}
-                className="btn-secondary w-full justify-center text-sm"
-              >
-                <Settings2 className="h-3.5 w-3.5" />
-                Zone instellen
-              </Link>
-            </div>
-          )}
+          {/* Handtekeningzone: via de knop 'AI-velden & zone' bovenaan (zelfde pagina). */}
 
           {/* Actions */}
           <ContractActions contract={{ id: c.id, status: c.status, access_token: c.access_token, title: c.title, clientName }} />

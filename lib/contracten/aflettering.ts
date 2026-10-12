@@ -21,8 +21,9 @@ import { berekenRegel } from '@/lib/facturen/regels'
 import { normaliseerVerzendstatus } from '@/lib/facturen/status'
 
 export type AflStatus = 'te_factureren' | 'verstuurd' | 'betaald' | 'geannuleerd' | 'gecrediteerd'
+// Zelfde benamingen als in Facturen: verstuurd = "Gefactureerd"; betaald valt daaronder.
 export const AFL_STATUS_LABEL: Record<AflStatus, string> = {
-  te_factureren: 'Te factureren', verstuurd: 'Verstuurd', betaald: 'Betaald', geannuleerd: 'Geannuleerd', gecrediteerd: 'Gecrediteerd',
+  te_factureren: 'Te factureren', verstuurd: 'Gefactureerd', betaald: 'Gefactureerd · betaald', geannuleerd: 'Geannuleerd', gecrediteerd: 'Gecrediteerd',
 }
 export const isActiefItem = (s: AflStatus) => s === 'te_factureren' || s === 'verstuurd' || s === 'betaald'
 export const isGefactureerd = (s: AflStatus) => s === 'verstuurd' || s === 'betaald'
@@ -45,6 +46,8 @@ export type AflItem = {
   verdelingOnbekend: boolean
   /** De factuur hoort deels bij een ander contract (verdeling per regel). */
   gedeeld: boolean
+  /** Negatief bedrag = creditnota: vermindert het gefactureerde, telt nooit als gewone factuur. */
+  creditnota?: boolean
 }
 
 export type AflBadge = 'waarde_ontbreekt' | 'geen_facturen' | 'onvolledig' | 'volledig_ingepland' | 'volledig_gefactureerd' | 'afwijking'
@@ -58,7 +61,12 @@ export const AFL_BADGE: Record<AflBadge, { label: string; cls: string; uitleg: s
 }
 
 export type Aflettering = {
+  /** Oorspronkelijke contractwaarde (ongewijzigd). */
   waardeCent: number | null
+  /** Geregistreerde verminderingen en crediteringen (contract_waarde_wijzigingen). */
+  verminderingCent: number
+  /** Effectief uit te voeren = contractwaarde − verminderingen; hierop wordt afgeletterd. */
+  effectiefCent: number | null
   ingeplandCent: number
   gefactureerdCent: number
   /** Contractwaarde − al gefactureerd (negatief = overschreden; NIET op nul gezet). */
@@ -81,8 +89,10 @@ export type Aflettering = {
 export const cent = (euro: number | null | undefined): number => Math.round((Number(euro) || 0) * 100)
 export const euro = (c: number): number => c / 100
 
-export function berekenAflettering(waarde: number | null | undefined, items: AflItem[]): Aflettering {
-  const waardeCent = waarde === null || waarde === undefined || Number.isNaN(Number(waarde)) ? null : cent(waarde)
+export function berekenAflettering(waarde: number | null | undefined, items: AflItem[], verminderingCent = 0): Aflettering {
+  const oorspronkelijkCent = waarde === null || waarde === undefined || Number.isNaN(Number(waarde)) ? null : cent(waarde)
+  // Zonder verminderingen is dit exact de contractwaarde (bestaande werking).
+  const waardeCent = oorspronkelijkCent === null ? null : oorspronkelijkCent - verminderingCent
   const actief = items.filter((i) => isActiefItem(i.status))
   const ingeplandCent = actief.reduce((t, i) => t + i.contractCent, 0)
   const gefactureerdCent = actief.filter((i) => isGefactureerd(i.status)).reduce((t, i) => t + i.contractCent, 0)
@@ -111,7 +121,7 @@ export function berekenAflettering(waarde: number | null | undefined, items: Afl
   const afwijking = teControleren > 0 || (waardeCent !== null && (ingeplandCent > waardeCent || gefactureerdCent > waardeCent))
   if (afwijking) badges.push('afwijking')
   return {
-    waardeCent, ingeplandCent, gefactureerdCent, nogTeFacturerenCent, nogInTePlannenCent, overschotIngeplandCent,
+    waardeCent: oorspronkelijkCent, verminderingCent, effectiefCent: waardeCent, ingeplandCent, gefactureerdCent, nogTeFacturerenCent, nogInTePlannenCent, overschotIngeplandCent,
     extraCent, totaalGekoppeldCent: ingeplandCent + extraCent, gecrediteerdCent, aantalActief: actief.length, teControleren, badges, hoofd, afwijking,
   }
 }
@@ -155,13 +165,14 @@ export function itemUitFactuur(f: RuweFactuur, regels: RuweRegel[], contractId: 
       extraCent: vanMij.filter((r) => r.is_extra).reduce((t, r) => t + regelCent(r), 0),
       verdelingOnbekend: false,
       gedeeld: vanMij.length < eigen.length,
+      creditnota: vanMij.reduce((t, r) => t + regelCent(r), 0) < 0,
     }
   }
   if (f.contract_id !== contractId) return null
   const totaal = cent(Number(f.amount_excl))
   const bekend = f.contract_bedrag_excl !== null && f.contract_bedrag_excl !== undefined && f.contract_bedrag_excl !== ''
   const contractCent = bekend ? Math.min(totaal, cent(Number(f.contract_bedrag_excl))) : totaal
-  return { ...basis, contractCent, extraCent: totaal - contractCent, verdelingOnbekend: !bekend, gedeeld: false }
+  return { ...basis, contractCent, extraCent: totaal - contractCent, verdelingOnbekend: !bekend, gedeeld: false, creditnota: totaal < 0 }
 }
 
 export type RuweReeks = { id: string; contract_id: string | null; description: string | null; start_month: string; end_month: string | null; amount_excl: number | string | null; deleted_at?: string | null }
@@ -175,7 +186,7 @@ const maandPlus = (ym: string, n: number) => { const [y, m] = ym.split('-').map(
  * einde tellen enkel de maanden t.e.m. `totMaand` (doorlopend).
  * Een maand met een eigen factuur telt via die factuur (niet dubbel).
  */
-export function itemsUitReeks(r: RuweReeks, maanden: RuweMaand[], regels: RuweRegel[], contractEindMaand: string | null, totMaand: string): { items: AflItem[]; doorlopend: boolean } {
+export function itemsUitReeks(r: RuweReeks, maanden: RuweMaand[], regels: RuweRegel[], contractEindMaand: string | null, totMaand: string, bestaandeFacturen?: Set<string>): { items: AflItem[]; doorlopend: boolean } {
   const start = String(r.start_month).slice(0, 7)
   const eind = r.end_month ? String(r.end_month).slice(0, 7) : contractEindMaand
   const tot = eind ?? totMaand
@@ -189,14 +200,97 @@ export function itemsUitReeks(r: RuweReeks, maanden: RuweMaand[], regels: RuweRe
   const items: AflItem[] = []
   for (let m = start, i = 0; m <= tot && i < 120; m = maandPlus(m, 1), i++) {
     const rij = maanden.find((x) => x.recurring_id === r.id && x.month.slice(0, 7) === m)
-    if (rij?.invoice_id) continue   // eigen factuur voor deze maand → telt via de factuur
-    const status: AflStatus = rij?.verwijderd_op || rij?.cancelled_at || rij?.status === 'geannuleerd' || (r.deleted_at && !rij) ? 'geannuleerd'
-      : rij?.status === 'verstuurd' ? (rij.betaald_op ? 'betaald' : 'verstuurd') : 'te_factureren'
+    // Eigen factuur voor deze maand → telt via de factuur. Bestaat die factuur niet
+    // (meer), dan telt de maand gewoon zelf — zoals in Facturen (anders verdwijnt ze).
+    if (rij?.invoice_id && (!bestaandeFacturen || bestaandeFacturen.has(rij.invoice_id))) continue
+    // Dezelfde statusregel als de facturenplanner: ook oude rijen 'gefactureerd'/'betaald' zijn gefactureerd.
+    const ruw = normaliseerVerzendstatus(rij?.status)
+    const status: AflStatus = rij?.verwijderd_op || rij?.cancelled_at || ruw === 'geannuleerd' || (r.deleted_at && !rij) ? 'geannuleerd'
+      : ruw === 'gecrediteerd' ? 'gecrediteerd'
+      : ruw === 'verstuurd' ? (rij?.betaald_op || rij?.status === 'betaald' ? 'betaald' : 'verstuurd') : 'te_factureren'
     const bedrag = rij?.amount_excl !== null && rij?.amount_excl !== undefined ? Number(rij.amount_excl) : Number(r.amount_excl) || 0
     items.push({
       sleutel: `rec:${r.id}:${m}`, bron: 'recurring_maand', invoice_id: null, recurring_id: r.id, maand: m, datum: rij?.billing_date ? String(rij.billing_date).slice(0, 10) : `${m}-01`,
-      referentie: rij?.extern_factuurnummer ?? null, omschrijving: r.description, status, ...perMaand(bedrag), verdelingOnbekend: false, gedeeld: false,
+      referentie: rij?.extern_factuurnummer ?? null, omschrijving: r.description, status, ...perMaand(bedrag), verdelingOnbekend: false, gedeeld: false, creditnota: bedrag < 0,
     })
   }
   return { items, doorlopend: !eind }
 }
+
+// ── Kosten en winst van een contract ────────────────────────────────────────
+//
+// Dezelfde regel als "Kosten en winst" per factuur (lib/facturen/kosten-winst.ts):
+// winst = verkoop excl. btw − directe kosten excl. btw, met de interne kosten
+// (invoice_costs) die al aan de gekoppelde facturen en maanden hangen. Enkel
+// actieve factuuritems en actieve kosten tellen; een kost zonder kostprijs telt
+// niet als € 0 maar maakt de winst "voorlopig".
+
+export type RuweKost = {
+  invoice_id: string | null; recurring_id: string | null; maand: string | null; line_id: string | null
+  kostprijs_excl: number | string | null; status: string | null
+}
+export type ItemKosten = { kostenCent: number; aantal: number; zonderPrijs: number }
+export type ContractWinst = {
+  /** Verkoop excl. btw van alle actieve gekoppelde items (contractdeel + extra kosten). */
+  omzetCent: number
+  /** Waarvan al gefactureerd (verstuurd + betaald). */
+  omzetGefactureerdCent: number
+  kostenCent: number
+  kostenGefactureerdCent: number
+  aantalKosten: number
+  /** Kosten zonder kostprijs: winst is dan voorlopig. */
+  zonderPrijs: number
+  winstCent: number
+  /** Winst op wat al gefactureerd is. */
+  winstGefactureerdCent: number
+  perItem: Record<string, ItemKosten>
+}
+
+/**
+ * Kosten per item van dit contract. Een kost aan een factuurregel volgt het
+ * contract van die regel (verdeling per regel); een kost zonder regel volgt de
+ * factuur. Een maandkost (recurring) hoort bij die maand van de reeks.
+ */
+export function berekenContractWinst(items: AflItem[], kosten: RuweKost[], regelContract: Map<string, string | null>, factuurContract: Map<string, string | null>, contractId: string): ContractWinst {
+  const actief = items.filter((i) => isActiefItem(i.status))
+  const perItem: Record<string, ItemKosten> = {}
+  let omzetCent = 0, omzetGefactureerdCent = 0, kostenCent = 0, kostenGefactureerdCent = 0, aantalKosten = 0, zonderPrijs = 0
+  for (const i of actief) {
+    const omzet = i.contractCent + i.extraCent
+    omzetCent += omzet
+    if (isGefactureerd(i.status)) omzetGefactureerdCent += omzet
+    const eigen = kosten.filter((k) => {
+      if (k.status !== 'actief') return false
+      if (i.bron === 'invoice') {
+        if (k.invoice_id !== i.invoice_id) return false
+        if (k.line_id && regelContract.has(k.line_id)) return (regelContract.get(k.line_id) ?? factuurContract.get(i.invoice_id!) ?? null) === contractId
+        return (factuurContract.get(i.invoice_id!) ?? null) === contractId || !i.gedeeld
+      }
+      return !k.invoice_id && k.recurring_id === i.recurring_id && String(k.maand ?? '').slice(0, 7) === i.maand
+    })
+    const bekend = eigen.filter((k) => k.kostprijs_excl !== null && k.kostprijs_excl !== undefined && k.kostprijs_excl !== '')
+    const c = bekend.reduce((t, k) => t + cent(Number(k.kostprijs_excl)), 0)
+    perItem[i.sleutel] = { kostenCent: c, aantal: eigen.length, zonderPrijs: eigen.length - bekend.length }
+    kostenCent += c; aantalKosten += eigen.length; zonderPrijs += eigen.length - bekend.length
+    if (isGefactureerd(i.status)) kostenGefactureerdCent += c
+  }
+  return {
+    omzetCent, omzetGefactureerdCent, kostenCent, kostenGefactureerdCent, aantalKosten, zonderPrijs,
+    winstCent: omzetCent - kostenCent, winstGefactureerdCent: omzetGefactureerdCent - kostenGefactureerdCent, perItem,
+  }
+}
+
+// ── Verminderingen en creditering ───────────────────────────────────────────
+export type WijzigingSoort = 'geannuleerd' | 'gaat_niet_door' | 'niet_afgenomen' | 'verminderd' | 'gecrediteerd'
+export const WIJZIGING_LABEL: Record<WijzigingSoort, string> = {
+  geannuleerd: 'Onderdeel geannuleerd', gaat_niet_door: 'Prestatie gaat niet door', niet_afgenomen: 'Niet afgenomen door klant',
+  verminderd: 'Werk geschrapt of verminderd', gecrediteerd: 'Gecrediteerd',
+}
+export const isWijzigingSoort = (v: unknown): v is WijzigingSoort => typeof v === 'string' && v in WIJZIGING_LABEL
+export type Wijziging = {
+  id: string; soort: WijzigingSoort; onderdeel: string | null; bedrag_excl: number; datum: string | null; reden: string | null; notitie: string | null
+  invoice_id: string | null; aangemaakt_door: string | null; aangemaakt_op: string; gewijzigd_door: string | null; gewijzigd_op: string | null
+  verwijderd_op: string | null; verwijderd_door: string | null
+}
+/** Som van de actieve (niet verwijderde) verminderingen, in centen. */
+export const verminderingVan = (w: Pick<Wijziging, 'bedrag_excl' | 'verwijderd_op'>[]): number => w.filter((x) => !x.verwijderd_op).reduce((t, x) => t + cent(x.bedrag_excl), 0)

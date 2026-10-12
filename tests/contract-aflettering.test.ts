@@ -3,7 +3,7 @@
 //   npx tsx tests/contract-aflettering.test.ts
 
 import assert from 'node:assert/strict'
-import { berekenAflettering, itemUitFactuur, itemsUitReeks, factuurStatus, type AflItem, type RuweFactuur, type RuweRegel } from '../lib/contracten/aflettering'
+import { berekenAflettering, berekenContractWinst, verminderingVan, itemUitFactuur, itemsUitReeks, factuurStatus, type AflItem, type RuweFactuur, type RuweRegel } from '../lib/contracten/aflettering'
 
 let n = 0
 const test = (naam: string, fn: () => void) => { fn(); n++; console.log(`  ✓ ${naam}`) }
@@ -95,6 +95,82 @@ test('Maandelijkse reeks: maanden tot eind; eigen maandfactuur telt niet dubbel;
   const d = itemsUitReeks({ ...r, end_month: null }, [], [], null, '2027-01')
   assert.equal(d.items.length, 3); assert.equal(d.doorlopend, true)
   assert.equal(itemsUitReeks({ ...r, end_month: null }, [], [], '2026-12', '2027-06').items.length, 2) // contracteinde begrenst
+})
+
+console.log('\nVerminderingen, creditnota’s, kosten en winst\n')
+
+test('V1. Onderdeel gaat niet door: oorspronkelijke waarde blijft, effectief daalt, nog te factureren volgt', () => {
+  const items = [it('verstuurd', 3000), it('te_factureren', 1500)]
+  const zonder = berekenAflettering(6000, items)
+  assert.equal(zonder.effectiefCent, 600000); assert.equal(zonder.verminderingCent, 0); assert.equal(zonder.nogTeFacturerenCent, 300000)
+  const v = verminderingVan([{ bedrag_excl: 1500, verwijderd_op: null }, { bedrag_excl: 999, verwijderd_op: '2026-10-01' }]) // verwijderd telt niet
+  assert.equal(v, 150000)
+  const a = berekenAflettering(6000, items, v)
+  assert.equal(a.waardeCent, 600000)        // oorspronkelijk ongewijzigd
+  assert.equal(a.effectiefCent, 450000)
+  assert.equal(a.nogTeFacturerenCent, 150000)
+  assert.equal(a.hoofd, 'volledig_ingepland') // 3000 + 1500 dekt de effectieve 4500
+})
+
+test('V2. Gecrediteerd zonder creditnota → afwijking zichtbaar; mét creditnota (negatieve factuur) klopt het', () => {
+  const v = verminderingVan([{ bedrag_excl: 500, verwijderd_op: null }])
+  const zonderCn = berekenAflettering(1000, [it('verstuurd', 1000)], v)
+  assert.equal(zonderCn.nogTeFacturerenCent, -50000); assert.equal(zonderCn.afwijking, true) // nooit stil gecorrigeerd
+  const cn = itemUitFactuur({ id: 'cn', contract_id: C, invoice_date: '2026-10-10', description: 'Creditnota', status: 'verstuurd', amount_excl: -500, contract_bedrag_excl: null }, [], C)!
+  assert.equal(cn.creditnota, true)
+  const met = berekenAflettering(1000, [it('verstuurd', 1000), cn], v)
+  assert.equal(met.gefactureerdCent, 50000); assert.equal(met.nogTeFacturerenCent, 0); assert.equal(met.hoofd, 'volledig_gefactureerd')
+})
+
+test('V3. Statussen gelijk aan Facturen: oude maandrij "gefactureerd"/"betaald" telt als gefactureerd', () => {
+  const r = { id: 'r', contract_id: C, description: 'Beheer', start_month: '2026-08', end_month: '2026-10', amount_excl: 100 }
+  const m = [
+    { recurring_id: 'r', month: '2026-08-01', status: 'gefactureerd' },
+    { recurring_id: 'r', month: '2026-09-01', status: 'betaald' },
+    { recurring_id: 'r', month: '2026-10-01', status: 'verstuurd', betaald_op: '2026-10-05' },
+  ]
+  const { items } = itemsUitReeks(r, m, [], null, '2026-12')
+  assert.deepEqual(items.map((i) => i.status), ['verstuurd', 'betaald', 'betaald'])
+})
+
+test('V4. Maand met een verdwenen eigen factuur verdwijnt niet uit het overzicht', () => {
+  const r = { id: 'r', contract_id: C, description: 'Beheer', start_month: '2026-09', end_month: '2026-10', amount_excl: 100 }
+  const m = [{ recurring_id: 'r', month: '2026-09-01', status: 'te_versturen', invoice_id: 'weg' }, { recurring_id: 'r', month: '2026-10-01', status: 'te_versturen', invoice_id: 'er' }]
+  const { items } = itemsUitReeks(r, m, [], null, '2026-12', new Set(['er']))
+  assert.deepEqual(items.map((i) => i.maand), ['2026-09']) // oktober telt via zijn bestaande factuur, september zelf
+})
+
+test('V5. Winst = gekoppelde facturen − kosten (zoals Kosten en winst); kost zonder prijs = voorlopig', () => {
+  const a = { ...it('verstuurd', 1000, 100), invoice_id: 'f1', sleutel: 'inv:f1' }
+  const b = { ...it('te_factureren', 500), invoice_id: 'f2', sleutel: 'inv:f2' }
+  const g = { ...it('geannuleerd', 800), invoice_id: 'f3', sleutel: 'inv:f3' }
+  const maand = { ...it('verstuurd', 200), bron: 'recurring_maand' as const, recurring_id: 'r', maand: '2026-10', sleutel: 'rec:r:2026-10' }
+  const kosten = [
+    { invoice_id: 'f1', recurring_id: null, maand: null, line_id: null, kostprijs_excl: 300, status: 'actief' },
+    { invoice_id: 'f1', recurring_id: null, maand: null, line_id: null, kostprijs_excl: 50, status: 'geannuleerd' },   // telt niet
+    { invoice_id: 'f2', recurring_id: null, maand: null, line_id: null, kostprijs_excl: null, status: 'actief' },      // prijs ontbreekt
+    { invoice_id: 'f3', recurring_id: null, maand: null, line_id: null, kostprijs_excl: 400, status: 'actief' },      // geannuleerde factuur
+    { invoice_id: null, recurring_id: 'r', maand: '2026-10-01', line_id: null, kostprijs_excl: 20, status: 'actief' },
+  ]
+  const fc = new Map([['f1', C], ['f2', C], ['f3', C]])
+  const w = berekenContractWinst([a, b, g, maand], kosten, new Map(), fc, C)
+  assert.equal(w.omzetCent, 180000)       // 1100 + 500 + 200
+  assert.equal(w.kostenCent, 32000)       // 300 + 20
+  assert.equal(w.winstCent, 148000)
+  assert.equal(w.zonderPrijs, 1)
+  assert.equal(w.omzetGefactureerdCent, 130000); assert.equal(w.winstGefactureerdCent, 98000)
+  assert.equal(w.perItem['inv:f1'].kostenCent, 30000)
+})
+
+test('V6. Factuur over twee contracten: een kost aan een regel volgt het contract van die regel', () => {
+  const deel = { ...it('verstuurd', 600), invoice_id: 'f', sleutel: 'inv:f', gedeeld: true }
+  const kosten = [
+    { invoice_id: 'f', recurring_id: null, maand: null, line_id: 'l1', kostprijs_excl: 100, status: 'actief' },
+    { invoice_id: 'f', recurring_id: null, maand: null, line_id: 'l2', kostprijs_excl: 70, status: 'actief' },
+  ]
+  const regelContract = new Map<string, string | null>([['l1', null], ['l2', 'contract-b']]) // l1 erft het factuurcontract
+  const w = berekenContractWinst([deel], kosten, regelContract, new Map([['f', C]]), C)
+  assert.equal(w.kostenCent, 10000)
 })
 
 console.log(`\n${n} tests geslaagd\n`)

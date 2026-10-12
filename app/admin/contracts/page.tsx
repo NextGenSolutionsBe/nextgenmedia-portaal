@@ -84,6 +84,7 @@ async function getContracts() {
       afl: afl.get(c.id) ? {
         hoofd: afl.get(c.id)!.aflettering.hoofd, afwijking: afl.get(c.id)!.aflettering.afwijking, waarde: afl.get(c.id)!.waarde,
         gefactureerd: afl.get(c.id)!.aflettering.gefactureerdCent / 100, ingepland: afl.get(c.id)!.aflettering.ingeplandCent / 100,
+        effectief: afl.get(c.id)!.aflettering.effectiefCent === null ? null : afl.get(c.id)!.aflettering.effectiefCent! / 100,
       } : null,
       mail_status: mailStatusVan(mailsPer.get(c.id) ?? [], c.sent_at ?? null),
       client: clientMap.get(c.client_id) ?? null,
