@@ -48,3 +48,14 @@ export function klantPatch(invoer: Record<string, unknown>): KlantPatch {
 export function gewijzigdeVelden(oud: Record<string, unknown>, patch: KlantPatch): string[] {
   return Object.entries(patch).filter(([k, v]) => k !== 'platform' && JSON.stringify(oud[k] ?? null) !== JSON.stringify(v ?? null)).map(([k]) => k)
 }
+
+/** Nieuw item dat de klant zelf inplant: titel, datum en minstens één kanaal zijn verplicht. */
+export function klantNieuw(invoer: Record<string, unknown>): KlantPatch & { title: string; planned_date: string; content_type: string; platforms: string[]; platform: string } {
+  if (!String(invoer.title ?? '').trim()) throw new Error('Geef het item een titel.')
+  if (!invoer.planned_date) throw new Error('Kies een datum.')
+  const p = klantPatch({ content_type: 'post', ...invoer, ...(invoer.platforms || invoer.platform ? {} : { platforms: [] }) })
+  return p as ReturnType<typeof klantNieuw>
+}
+
+/** Een klant mag enkel een item verwijderen dat hij zelf inplande en dat wij nog niet oppakten (concept). */
+export const magKlantVerwijderen = (item: { klant_aangemaakt_op?: string | null; status: string }) => !!item.klant_aangemaakt_op && item.status === 'draft'

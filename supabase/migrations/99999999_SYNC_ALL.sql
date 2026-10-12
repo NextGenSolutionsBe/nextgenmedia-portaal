@@ -5779,3 +5779,6 @@ CREATE TABLE IF NOT EXISTS public.social_content_interne_notities (
 );
 ALTER TABLE public.social_content_interne_notities ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.social_content_interne_notities FROM anon, authenticated;
+-- Klant plant zelf nieuwe content in (12 okt 2026).
+ALTER TABLE public.social_content_items ADD COLUMN IF NOT EXISTS klant_aangemaakt_op timestamptz;
+ALTER TABLE public.social_content_items ADD COLUMN IF NOT EXISTS klant_aangemaakt_door text;

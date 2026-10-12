@@ -82,7 +82,7 @@ export async function buildNotifications(): Promise<Notif[]> {
     for (const [cid, { n, laatste }] of perKlant) {
       out.push({
         id: `content-klant:${cid}:${laatste}`, kind: 'content', priority: 'med',
-        title: `${names.get(cid) ?? 'Klant'} paste ${n} contentitem${n === 1 ? '' : 's'} zelf aan`,
+        title: `${names.get(cid) ?? 'Klant'} plande of paste ${n} contentitem${n === 1 ? '' : 's'} zelf aan`,
         date: laatste.slice(0, 10), href: `/admin/services/social-media?client=${cid}`,
       })
     }

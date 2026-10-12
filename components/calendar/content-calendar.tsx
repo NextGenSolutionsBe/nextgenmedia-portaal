@@ -32,6 +32,8 @@ export type SocialContentItem = {
   /** De klant paste dit item zelf aan in het portaal. */
   klant_gewijzigd_op?: string | null
   klant_gewijzigd_door?: string | null
+  /** De klant plande dit item zelf in. */
+  klant_aangemaakt_op?: string | null
 }
 
 export type CalendarMode = 'admin' | 'client'
@@ -194,7 +196,7 @@ export function ContentCalendar({
             const isToday = dayStr === today
             const dayItems = byDay.get(dayStr) ?? []
             const maxShow = view === 'week' ? 10 : 3
-            const canAdd = mode === 'admin' && !!actions.onCreateOnDay
+            const canAdd = !!actions.onCreateOnDay
 
             return (
               <div
@@ -614,6 +616,19 @@ function ScriptPanel({
             ) : !actions.onUpdate ? (
               <p className="text-xs text-gray-400 text-center">Geen actie vereist op dit moment.</p>
             ) : null}
+            {!editing && actions.onDelete && item.klant_aangemaakt_op && item.status === 'draft' && (
+              <button
+                disabled={busy}
+                onClick={async () => {
+                  if (!confirm('Dit item dat je zelf inplande verwijderen?')) return
+                  setBusy(true)
+                  try { await actions.onDelete!(item.id); onClose() } catch { /* melding komt van de handler */ } finally { setBusy(false) }
+                }}
+                className="btn-secondary text-xs w-full text-red-700"
+              >
+                Verwijderen
+              </button>
+            )}
           </>
         )}
       </div>

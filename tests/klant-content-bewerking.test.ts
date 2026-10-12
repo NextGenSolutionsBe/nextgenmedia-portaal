@@ -3,7 +3,7 @@
 //   npx tsx tests/klant-content-bewerking.test.ts
 
 import assert from 'node:assert/strict'
-import { klantPatch, gewijzigdeVelden } from '../lib/content/klant-bewerking'
+import { klantPatch, gewijzigdeVelden, klantNieuw, magKlantVerwijderen } from '../lib/content/klant-bewerking'
 import { MODULE_ACTIONS, PRESETS, fullPermissions, can } from '../lib/portal-permissions'
 
 let n = 0
@@ -38,6 +38,17 @@ test('Rechten: "bewerken" bestaat voor social media; eigenaar en marketing hebbe
   assert.equal(can(fullPermissions(), 'social_media', 'edit'), true)
   assert.equal(can(PRESETS.find((p) => p.key === 'marketing')!.permissions(), 'social_media', 'edit'), true)
   assert.equal(can(PRESETS.find((p) => p.key === 'readonly')!.permissions(), 'social_media', 'edit'), false)
+})
+
+test('Zelf inplannen: titel, datum en kanaal verplicht; type standaard post; verwijderen enkel eigen concept', () => {
+  const n = klantNieuw({ title: 'Teaser', planned_date: '2026-11-05', platforms: ['tiktok'] })
+  assert.equal(n.content_type, 'post'); assert.deepEqual(n.platforms, ['tiktok'])
+  assert.throws(() => klantNieuw({ planned_date: '2026-11-05', platforms: ['tiktok'] }), /titel/)
+  assert.throws(() => klantNieuw({ title: 'x', platforms: ['tiktok'] }), /datum/)
+  assert.throws(() => klantNieuw({ title: 'x', planned_date: '2026-11-05' }), /kanaal/)
+  assert.equal(magKlantVerwijderen({ klant_aangemaakt_op: '2026-10-12', status: 'draft' }), true)
+  assert.equal(magKlantVerwijderen({ klant_aangemaakt_op: '2026-10-12', status: 'approved' }), false)
+  assert.equal(magKlantVerwijderen({ klant_aangemaakt_op: null, status: 'draft' }), false)
 })
 
 console.log(`\n${n} tests geslaagd\n`)

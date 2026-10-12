@@ -40,7 +40,7 @@ export default async function PortalSocialMediaPage() {
   const { data: items } = await admin
     .from('social_content_items')
     // Expliciete kolommen: geen interne velden (ClickUp, aanmaker, contract) naar de klant.
-    .select('id, client_id, planned_date, platform, platforms, content_type, title, caption, script, media_notes, status, client_feedback, reviewed_at, created_at')
+    .select('id, client_id, planned_date, platform, platforms, content_type, title, caption, script, media_notes, status, client_feedback, reviewed_at, created_at, klant_aangemaakt_op')
     .eq('client_id', clientId)
     .order('planned_date', { ascending: true })
 
