@@ -79,11 +79,13 @@ function VerifyForm() {
         if (r.status === 403) { setStap('fout'); setError('Voor dit account is de extra verificatie niet van toepassing. Neem contact op met NextGenMedia.'); return }
         if (!r.ok) throw new Error(j.error ?? 'Laden mislukt')
         setEmail(j.email ?? null)
+        // Klant zonder app: geen tweede stap (vrijwillig) → meteen verder.
+        if (j.stap === 'geen') { window.location.replace(safeRedirect(redirect)); return }
         setStap(j.stap === 'koppelen' ? 'koppelen' : 'code')
         if (j.stap === 'koppelen') startKoppelen()
       } catch (e) { setStap('fout'); setError(e instanceof Error ? e.message : 'Laden mislukt') }
     })()
-  }, [router, startKoppelen])
+  }, [router, startKoppelen, redirect])
 
   const verify = async (e?: React.FormEvent) => {
     e?.preventDefault()
@@ -137,7 +139,7 @@ function VerifyForm() {
       <div className="space-y-4">
         <div className="flex items-start gap-2 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
           <KeyRound className="h-4 w-4 mt-0.5 shrink-0" />
-          <span>Je bent ingelogd met een herstelcode. Die code werkt niet meer; je hebt er nog <b>{nogOver}</b> over. Maak nieuwe herstelcodes of koppel je app opnieuw via <b>Mijn account → Beveiliging</b>.</span>
+          <span>Je bent ingelogd met een herstelcode. Die code werkt niet meer; je hebt er nog <b>{nogOver}</b> over. Maak nieuwe herstelcodes of stel je app opnieuw in via <b>Beveiliging</b> in je account.</span>
         </div>
         <button type="button" onClick={verder} className="w-full py-2.5 bg-[#fff848] text-black font-semibold rounded-lg hover:bg-[#f5ee30] text-sm">Verder</button>
       </div>
@@ -236,7 +238,7 @@ function VerifyForm() {
         </button>
         {annuleren}
       </div>
-      {!herstel && <p className="text-[11px] text-gray-400">Telefoon én herstelcodes kwijt? Vraag een beheerder om je 2FA te resetten.</p>}
+      {!herstel && <p className="text-[11px] text-gray-400">Telefoon én herstelcodes kwijt? Vraag NextGenMedia om je tweestapsverificatie te resetten.</p>}
     </form>
   )
 }

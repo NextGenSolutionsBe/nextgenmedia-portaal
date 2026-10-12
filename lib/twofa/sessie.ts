@@ -37,3 +37,26 @@ export function sessieIdUitToken(accessToken: string | null | undefined): string
 export function tweedeStapActie(status: 'ok' | 'nodig', verplicht: boolean): 'door' | 'verificatie' {
   return status === 'nodig' && verplicht ? 'verificatie' : 'door'
 }
+
+/**
+ * Klantportaal: tweestapsverificatie is VRIJWILLIG. Enkel wie zelf een app
+ * activeerde, moet in elke sessie een code (of herstelcode) geven; anders
+ * blijft het inloggen exact zoals voorheen (e-mail + wachtwoord).
+ */
+export function klantStapActie(appActief: boolean, status: 'ok' | 'nodig'): 'door' | 'verificatie' {
+  return appActief && status === 'nodig' ? 'verificatie' : 'door'
+}
+
+/**
+ * CSRF-rem voor de 2FA-routes: enkel verzoeken vanaf onze eigen pagina's.
+ * Browsers sturen bij een POST altijd Sec-Fetch-Site en/of Origin mee; ontbreken
+ * beide, dan weigeren we ook (zo'n verzoek komt niet uit onze interface).
+ */
+export function zelfdeOorsprong(h: { get(n: string): string | null }): boolean {
+  const site = h.get('sec-fetch-site')
+  if (site) return site === 'same-origin'
+  const origin = h.get('origin')
+  const host = h.get('x-forwarded-host') ?? h.get('host')
+  if (!origin || !host) return false
+  try { return new URL(origin).host === host } catch { return false }
+}

@@ -2,7 +2,15 @@ import 'server-only'
 import { NextResponse, type NextRequest } from 'next/server'
 import { logAudit, requestMeta } from '@/lib/audit'
 import type { Kern } from './kern'
-import { appActief, huidigeSessie, interneRol, maakKern, tweedeStapVoltooid, type Sessie } from './server'
+import { accountRol, appActief, huidigeSessie, klantTweedeStapOk, maakKern, tweedeStapVoltooid, type Sessie } from './server'
+import { zelfdeOorsprong } from './sessie'
+
+export type AccountRol = 'admin' | 'employee' | 'klant'
+
+/** CSRF: wijzigende 2FA-verzoeken enkel vanaf onze eigen pagina's. null = in orde. */
+export function csrfFout(req: NextRequest): NextResponse | null {
+  return zelfdeOorsprong(req.headers) ? null : NextResponse.json({ error: 'Ongeldig verzoek.' }, { status: 403 })
+}
 
 /**
  * Gemeenschappelijke ingang voor de 2FA-beheerroutes (instellen, uitschakelen,
@@ -11,17 +19,19 @@ import { appActief, huidigeSessie, interneRol, maakKern, tweedeStapVoltooid, typ
  * parameter waarmee je een ander account kunt aanspreken.
  */
 export async function eigenAccount(opts: { kernNodig?: boolean; koppelenBijInloggen?: boolean } = {}): Promise<
-  | { ok: true; sessie: Sessie; rol: 'admin' | 'employee'; kern: Kern | null }
+  | { ok: true; sessie: Sessie; rol: AccountRol; kern: Kern | null }
   | { ok: false; res: NextResponse }
 > {
   const sessie = await huidigeSessie()
   if (!sessie) return { ok: false, res: NextResponse.json({ error: 'Niet ingelogd' }, { status: 401 }) }
-  const rol = await interneRol(sessie.user.id)
+  const rol = await accountRol(sessie.user.id)
   if (!rol) return { ok: false, res: NextResponse.json({ error: 'Niet van toepassing' }, { status: 403 }) }
-  if (!(await tweedeStapVoltooid(sessie.user.id))) {
-    // Enige uitzondering: wie nog GEEN app heeft, moet er bij het inloggen een
-    // koppelen (setup + bevestigen). Wie al een app heeft, moet eerst een code geven.
-    const magKoppelen = opts.koppelenBijInloggen && !(await appActief(sessie.user.id))
+  // Klanten: vrijwillige 2FA (zonder app is de sessie altijd in orde). Intern: verplicht.
+  const stapOk = rol === 'klant' ? await klantTweedeStapOk(sessie.user.id) : await tweedeStapVoltooid(sessie.user.id)
+  if (!stapOk) {
+    // Enige uitzondering (enkel intern): wie nog GEEN app heeft, moet er bij het
+    // inloggen een koppelen (setup + bevestigen). Wie al een app heeft, moet eerst een code geven.
+    const magKoppelen = rol !== 'klant' && opts.koppelenBijInloggen && !(await appActief(sessie.user.id))
     if (!magKoppelen) return { ok: false, res: NextResponse.json({ error: 'Verificatie vereist', code: '2fa_required' }, { status: 401 }) }
   }
   const kern = maakKern()

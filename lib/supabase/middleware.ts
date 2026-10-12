@@ -5,7 +5,7 @@ import { isDisabledPath } from '@/lib/features'
 import { leesInstellingenEdge } from '@/lib/instellingen/edge'
 import { moduleBeschikbaar, magActie, actieVoorMethode, rolVanStaff, MODULE_INSTELLINGEN_KEY, MODULE_WERKNEMERS_KEY, type Persoon } from '@/lib/instellingen/model'
 import { twoFactorRequired } from '@/lib/two-factor'
-import { sessieStatus, sessieIdUitToken, tweedeStapActie, type SessieRij } from '@/lib/twofa/sessie'
+import { sessieStatus, sessieIdUitToken, tweedeStapActie, klantStapActie, type SessieRij } from '@/lib/twofa/sessie'
 // Bewust uit admin-client.ts en NIET uit server.ts: die laatste gebruikt
 // React's cache(), en dat bestaat niet in de edge-runtime waar deze middleware
 // draait. Zie de toelichting in lib/supabase/admin-client.ts.
@@ -566,6 +566,27 @@ export async function updateSession(request: NextRequest) {
   }
   if (path.startsWith('/portal') && role !== 'client') {
     return NextResponse.redirect(new URL('/login', request.url))
+  }
+
+  // Klantportaal: tweestapsverificatie is vrijwillig. Wie zelf een app activeerde,
+  // moet in elke sessie eerst de code (of een herstelcode) geven. Zonder app blijft
+  // het inloggen ongewijzigd. Dezelfde controle zit ook in resolvePortalSession
+  // (portaal-API's) en in de RLS (policy clients_na_tweede_stap).
+  if (path.startsWith('/portal')) {
+    const [app, stap] = await Promise.all([
+      lees<{ actief?: boolean }>(db.from('user_totp').select('actief').eq('user_id', user.id).maybeSingle()),
+      leesTweedeStap(db),
+    ])
+    if (!app.ok || !stap.ok) return databankOnbereikbaar(path)
+    const actie = klantStapActie(!!app.data?.actief, sessieStatus(stap.data, user.id, Date.now()))
+    if (actie === 'verificatie') {
+      const url = request.nextUrl.clone()
+      url.pathname = '/login/verify'
+      url.search = ''
+      url.searchParams.set('redirect', path)
+      return copyAuthCookies(supabaseResponse, NextResponse.redirect(url))
+    }
+    tweedeStapVoor = user.id
   }
   if (path.startsWith('/partner') && role !== 'freelancer') {
     return NextResponse.redirect(new URL('/login', request.url))

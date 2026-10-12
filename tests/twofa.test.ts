@@ -10,11 +10,11 @@ import assert from 'node:assert/strict'
 import { randomBytes } from 'node:crypto'
 import {
   bevestigSetup, controleerFactor, FOUT_CODE, FOUT_HERBEVESTIGING, FOUT_TE_VEEL, nieuweHerstelcodes,
-  schakelUit, startSetup, herbevestigAdmin, type Kern, type TotpRij, type TwofaOpslag,
+  schakelUit, startSetup, herbevestigAdmin, startHerSetup, bevestigHerSetup, type Kern, type TotpRij, type TwofaOpslag,
 } from '../lib/twofa/kern'
 import { codeVoor, controleerTotp, otpauthUri, TOTP_PERIODE } from '../lib/twofa/totp'
 import { genereerHerstelcodes, hashHerstelcode, leesSleutel, normaliseerHerstelcode, ontsleutel, versleutel } from '../lib/twofa/geheimen'
-import { sessieIdUitToken, sessieStatus, tweedeStapActie, SESSIE_TTL_MS, type SessieRij } from '../lib/twofa/sessie'
+import { sessieIdUitToken, sessieStatus, tweedeStapActie, klantStapActie, zelfdeOorsprong, SESSIE_TTL_MS, type SessieRij } from '../lib/twofa/sessie'
 import { twoFactorRequired, vrijstellingGeldig } from '../lib/two-factor'
 
 let n = 0
@@ -26,9 +26,13 @@ function geheugenOpslag() {
   const codes: { user_id: string; code_hash: string; gebruikt_op: string | null }[] = []
   const opslag: TwofaOpslag = {
     async lees(u) { const r = totp.get(u); return r ? { ...r } : null },
-    async bewaarSetup(u, enc, op, door = null) {
+    async bewaarSetup(u, enc, op, door = null, overActief = false) {
       const r = totp.get(u)
-      if (r?.actief) return false
+      if (r?.actief) {
+        if (!overActief) return false
+        totp.set(u, { ...r, setup_secret_enc: enc, setup_gestart_op: op, setup_door: door })
+        return true
+      }
       totp.set(u, { user_id: u, secret_enc: r?.secret_enc ?? null, actief: false, geactiveerd_op: null, laatste_stap: null, setup_secret_enc: enc, setup_gestart_op: op, setup_door: door })
       return true
     },
@@ -36,6 +40,12 @@ function geheugenOpslag() {
       const r = totp.get(u)
       if (!r || r.actief || r.setup_secret_enc !== enc) return false
       totp.set(u, { ...r, secret_enc: enc, actief: true, geactiveerd_op: op, laatste_stap: stap, setup_secret_enc: null, setup_gestart_op: null })
+      return true
+    },
+    async vervangGeheim(u, enc, stap, op) {
+      const r = totp.get(u)
+      if (!r?.actief || r.setup_secret_enc !== enc) return false
+      totp.set(u, { ...r, secret_enc: enc, geactiveerd_op: op, laatste_stap: stap, setup_secret_enc: null, setup_gestart_op: null, setup_door: null })
       return true
     },
     async claimStap(u, stap) {
@@ -374,6 +384,51 @@ async function main() {
     const rem = maakOmgeving()
     for (let i = 0; i < 5; i++) await herbevestigAdmin(rem.kern, A, { wachtwoordOk: false })
     assert.equal(status(await herbevestigAdmin(rem.kern, A, { wachtwoordOk: true })), 429)
+  })
+
+  console.log('\nKlantportaal (vrijwillige 2FA)\n')
+
+  await test('K1. Klant zonder app: login ongewijzigd; met app: code verplicht tot de sessie gemarkeerd is', () => {
+    assert.equal(klantStapActie(false, 'nodig'), 'door')
+    assert.equal(klantStapActie(true, 'nodig'), 'verificatie')
+    assert.equal(klantStapActie(true, 'ok'), 'door')
+  })
+
+  await test('K2. Opnieuw instellen: wachtwoord + factor; oude app blijft geldig tot de nieuwe bevestigd is', async () => {
+    const o = maakOmgeving()
+    const { geheim: oud, herstelcodes } = await activeer(o)
+    assert.equal((await startHerSetup(o.kern, A, 'klant@x.be', { wachtwoordOk: false, code: codeVoor(oud, o.nu()) })).ok, false)
+    assert.equal((await startHerSetup(o.kern, A, 'klant@x.be', { wachtwoordOk: true })).ok, false)
+    const s = await startHerSetup(o.kern, A, 'klant@x.be', { wachtwoordOk: true, herstelcode: herstelcodes[0] })
+    assert.ok(s.ok)
+    o.tik(TOTP_PERIODE)
+    assert.equal((await controleerFactor(o.kern, A, { code: codeVoor(oud, o.nu()) })).ok, true) // oude app werkt nog
+    o.tik(TOTP_PERIODE)
+    assert.equal((await bevestigHerSetup(o.kern, A, codeVoor(oud, o.nu()))).ok, false) // code van de OUDE app bevestigt niet
+    const r = await bevestigHerSetup(o.kern, A, codeVoor(s.geheim, o.nu()))
+    assert.ok(r.ok)
+    assert.equal(r.herstelcodes.length, 8)
+    o.tik(TOTP_PERIODE)
+    assert.equal((await controleerFactor(o.kern, A, { code: codeVoor(oud, o.nu()) })).ok, false)  // oude app weg
+    assert.equal((await controleerFactor(o.kern, A, { herstelcode: herstelcodes[1] })).ok, false) // oude herstelcodes weg
+    assert.equal((await controleerFactor(o.kern, A, { code: codeVoor(s.geheim, o.nu()) })).ok, true)
+  })
+
+  await test('K3. Nieuwe herstelcodes ook met een herstelcode (die meteen verbruikt is)', async () => {
+    const o = maakOmgeving()
+    const { herstelcodes } = await activeer(o)
+    assert.ok((await nieuweHerstelcodes(o.kern, A, { wachtwoordOk: true, herstelcode: herstelcodes[0] })).ok)
+    assert.equal((await nieuweHerstelcodes(o.kern, A, { wachtwoordOk: true, herstelcode: herstelcodes[0] })).ok, false)
+    assert.equal(await o.opslag.aantalHerstelcodes(A), 8)
+  })
+
+  await test('K4. CSRF: enkel verzoeken van de eigen oorsprong', () => {
+    const h = (o: Record<string, string>) => ({ get: (n: string) => o[n] ?? null })
+    assert.equal(zelfdeOorsprong(h({ 'sec-fetch-site': 'same-origin' })), true)
+    assert.equal(zelfdeOorsprong(h({ 'sec-fetch-site': 'cross-site', origin: 'https://app.nextgenmedia.be', host: 'app.nextgenmedia.be' })), false)
+    assert.equal(zelfdeOorsprong(h({ origin: 'https://app.nextgenmedia.be', host: 'app.nextgenmedia.be' })), true)
+    assert.equal(zelfdeOorsprong(h({ origin: 'https://kwaad.example', host: 'app.nextgenmedia.be' })), false)
+    assert.equal(zelfdeOorsprong(h({ host: 'app.nextgenmedia.be' })), false)
   })
 
   console.log(`\n${n} tests geslaagd\n`)

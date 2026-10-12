@@ -7,6 +7,7 @@ import {
   fullPermissions, can, MODULE_IMPLEMENTED, type Permissions, type PortalModule,
 } from '@/lib/portal-permissions'
 import { logAudit } from '@/lib/audit'
+import { klantTweedeStapOk } from '@/lib/twofa/server'
 
 // Centrale portaal-resolver. Bepaalt voor de ingelogde gebruiker:
 //  - bij welke klant hij hoort (owner of subaccount)
@@ -38,6 +39,9 @@ export const resolvePortalSession = cache(async (): Promise<PortalSession | null
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
+  // Vrijwillige tweestapsverificatie: heeft dit account een app, dan telt de
+  // sessie pas na de code (of een herstelcode). Zonder app: ongewijzigd.
+  if (!(await klantTweedeStapOk(user.id))) return null
 
   const admin = createAdminSupabaseClient()
 
@@ -80,6 +84,13 @@ export const resolvePortalSession = cache(async (): Promise<PortalSession | null
   return null
 })
 
+/** Ingelogd, maar de (vrijwillige) tweede stap ontbreekt nog in deze sessie? */
+async function tweedeStapOntbreekt(): Promise<boolean> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  return !!user && !(await klantTweedeStapOk(user.id))
+}
+
 /** Heeft de sessie een bepaald recht? Owner mag altijd alles. */
 export function sessionCan(session: PortalSession | null, module: PortalModule, action = 'view'): boolean {
   if (!session || !session.active) return false
@@ -102,7 +113,10 @@ export async function requirePortalPermission(module?: PortalModule, action = 'v
     return { ok: false, response: NextResponse.json({ error: 'Deze module is nog niet beschikbaar' }, { status: 404 }) }
   }
   const session = await resolvePortalSession()
-  if (!session) return { ok: false, response: NextResponse.json({ error: 'Niet ingelogd' }, { status: 401 }) }
+  if (!session) {
+    if (await tweedeStapOntbreekt()) return { ok: false, response: NextResponse.json({ error: 'Verificatie vereist', code: '2fa_required' }, { status: 401 }) }
+    return { ok: false, response: NextResponse.json({ error: 'Niet ingelogd' }, { status: 401 }) }
+  }
   if (!session.active) return { ok: false, response: NextResponse.json({ error: 'Account is gedeactiveerd' }, { status: 403 }) }
   if (module && !sessionCan(session, module, action)) {
     return { ok: false, response: NextResponse.json({ error: 'Geen toestemming voor deze actie' }, { status: 403 }) }
@@ -118,6 +132,7 @@ export async function requirePortalPermission(module?: PortalModule, action = 'v
 export async function requirePortalView(module: PortalModule): Promise<PortalSession> {
   if (!MODULE_IMPLEMENTED[module]) redirect('/portal')
   const session = await resolvePortalSession()
+  if (!session && await tweedeStapOntbreekt()) redirect('/login/verify?redirect=/portal')
   if (!session || !session.active) redirect('/login')
   if (!sessionCan(session, module, 'view')) redirect('/portal')
   return session

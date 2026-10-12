@@ -25,7 +25,7 @@ export async function GET() {
       geactiveerdOp: t?.actief ? t.geactiveerd_op ?? null : null,
       herstelcodesOver: t?.actief ? count ?? 0 : 0,
       beschikbaar: !!g.kern,
-      verplicht: true,
+      verplicht: g.rol !== 'klant',
       email: g.sessie.user.email ?? null,
     })
   } catch (err) {

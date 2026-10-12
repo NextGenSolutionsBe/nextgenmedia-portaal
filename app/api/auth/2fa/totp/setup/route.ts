@@ -1,8 +1,9 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import QRCode from 'qrcode'
 import { safeMessage } from '@/lib/api-error'
 import { startSetup } from '@/lib/twofa/kern'
-import { eigenAccount } from '@/lib/twofa/route'
+import { wachtwoordMetLimiet } from '@/lib/twofa/server'
+import { csrfFout, eigenAccount } from '@/lib/twofa/route'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,11 +13,23 @@ export const dynamic = 'force-dynamic'
  * QR-code + het geheim terug — de enige keer dat het geheim de server verlaat.
  * Elke nieuwe start vervangt de vorige setup; na activeren wordt het nooit meer
  * teruggegeven.
+ * Klanten (vrijwillig, vanuit Beveiliging) bevestigen eerst hun wachtwoord: { wachtwoord }.
  */
-export async function POST() {
+export async function POST(req: NextRequest) {
   try {
+    const csrf = csrfFout(req); if (csrf) return csrf
     const g = await eigenAccount({ kernNodig: true, koppelenBijInloggen: true })
     if (!g.ok) return g.res
+    if (g.rol === 'klant') {
+      const b = (await req.json().catch(() => ({}))) as { wachtwoord?: unknown }
+      const ww = await wachtwoordMetLimiet(g.sessie.user.id, g.sessie.user.email, b.wachtwoord)
+      if (ww !== 'ok') {
+        return NextResponse.json(
+          { error: ww === 'te_veel' ? 'Te veel pogingen. Probeer het later opnieuw.' : 'Het wachtwoord is ongeldig.' },
+          { status: ww === 'te_veel' ? 429 : 400 },
+        )
+      }
+    }
     const account = g.sessie.user.email ?? g.sessie.user.id
     const r = await startSetup(g.kern!, g.sessie.user.id, account)
     if (!r.ok) return NextResponse.json({ error: r.fout }, { status: r.status })

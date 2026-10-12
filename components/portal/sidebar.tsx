@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { useRefresh } from '@/lib/use-refresh'
 import { Logo } from '@/components/logo'
-import { LayoutDashboard, FileText, Calendar, Globe, LogOut, RefreshCcw, Menu, X, ListChecks, Newspaper, CalendarClock, Database, FolderUp } from 'lucide-react'
+import { LayoutDashboard, FileText, Calendar, Globe, LogOut, RefreshCcw, Menu, X, ListChecks, Newspaper, CalendarClock, Database, FolderUp, ShieldCheck } from 'lucide-react'
 import { MODULE_IMPLEMENTED, type PortalModule } from '@/lib/portal-permissions'
 import { t, type Lang } from '@/lib/i18n'
 import { LangToggle } from '@/components/lang-toggle'
@@ -66,6 +66,8 @@ export function PortalSidebar({
   const [mobileOpen, setMobileOpen] = useState(false)
 
   const handleLogout = async () => {
+    // Eerst de 2FA-markering van deze sessie server-side wissen, dan afmelden.
+    try { await fetch('/api/auth/2fa/logout', { method: 'POST' }) } catch { /* uitloggen mag nooit blokkeren */ }
     const supabase = createClient()
     await supabase.auth.signOut()
     router.replace('/login')
@@ -162,6 +164,10 @@ export function PortalSidebar({
             <span className="text-[11px] text-gray-400">{t(lang, 'common.language')}</span>
             <LangToggle current={lang} />
           </div>
+          <Link href="/portal/beveiliging" onClick={closeMobile} className={cn('sidebar-item', pathname.startsWith('/portal/beveiliging') && 'active')}>
+            <ShieldCheck className="h-4 w-4" />
+            {t(lang, 'nav.security')}
+          </Link>
           <button
             onClick={handleLogout}
             className="sidebar-item w-full text-red-500 hover:text-red-600 hover:bg-red-50"

@@ -5822,3 +5822,34 @@ REVOKE ALL ON public.social_content_activiteit FROM anon, authenticated;
 -- Klanten wijzigen content ENKEL via de app (rechten op de server); de oude
 -- policy liet eigenaars elke kolom rechtstreeks aanpassen.
 DROP POLICY IF EXISTS clients_review_content ON public.social_content_items;
+
+-- ── Klantportaal: tweestapsverificatie met een authenticator-app (12 okt 2026) ──
+-- Zelfde opslag als intern (user_totp, user_herstelcodes, twofa_sessies), maar
+-- vrijwillig: enkel wie zelf een app activeert, moet bij het inloggen een code geven.
+-- Tweede laag naast de servercontrole: een klant met een actieve app wiens sessie
+-- de tweede stap niet deed, ziet via de gewone databank-API niets van zijn klant.
+-- Alle klantpolicies lopen via clients.owner_user_id, dus één restrictieve
+-- policy op clients sluit ze allemaal.
+CREATE OR REPLACE FUNCTION public.klant_sessie_ok()
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public' AS $$
+  SELECT NOT EXISTS (SELECT 1 FROM public.user_totp t WHERE t.user_id = auth.uid() AND t.actief)
+      OR public.sessie_2fa_ok()
+$$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'clients' AND policyname = 'clients_na_tweede_stap') THEN
+    CREATE POLICY clients_na_tweede_stap ON public.clients AS RESTRICTIVE FOR SELECT USING ((SELECT public.klant_sessie_ok()));
+  END IF;
+END $$;
+
+-- Alle aanmeldsessies van één gebruiker intrekken (admin-reset van de 2FA).
+-- Enkel voor de service-role; nooit voor anon/authenticated.
+CREATE OR REPLACE FUNCTION public.trek_auth_sessies_in(p_user uuid)
+RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public', 'auth' AS $$
+DECLARE n integer;
+BEGIN
+  DELETE FROM auth.sessions WHERE user_id = p_user;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n;
+END $$;
+REVOKE ALL ON FUNCTION public.trek_auth_sessies_in(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.trek_auth_sessies_in(uuid) TO service_role;

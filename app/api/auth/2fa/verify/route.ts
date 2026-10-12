@@ -5,7 +5,9 @@ import { logAudit, requestMeta } from '@/lib/audit'
 import { rateLimit, clientIp } from '@/lib/rate-limit'
 import { TWO_FA_COOKIE } from '@/lib/two-factor'
 import { controleerFactor } from '@/lib/twofa/kern'
-import { huidigeSessie, interneRol, maakKern, markeerSessie } from '@/lib/twofa/server'
+import { accountRol, huidigeSessie, maakKern, markeerSessie } from '@/lib/twofa/server'
+import { csrfFout } from '@/lib/twofa/route'
+import { stuurBeveiligingsmelding } from '@/lib/twofa/meldingen'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,12 +22,13 @@ export const dynamic = 'force-dynamic'
  */
 export async function POST(req: NextRequest) {
   try {
+    const csrf = csrfFout(req); if (csrf) return csrf
     const sessie = await huidigeSessie()
     if (!sessie) return NextResponse.json({ error: 'Niet ingelogd' }, { status: 401 })
     if (!sessie.sessionId) return NextResponse.json({ error: 'Je sessie is ongeldig. Log opnieuw in.' }, { status: 401 })
     const user = sessie.user
 
-    const role = await interneRol(user.id)
+    const role = await accountRol(user.id)
     if (!role) return NextResponse.json({ error: 'Niet van toepassing' }, { status: 403 })
 
     // Rem per IP bovenop de rem per account: zonder deze rem zou iemand steeds
@@ -49,6 +52,7 @@ export async function POST(req: NextRequest) {
     if (!(totp as { actief?: boolean } | null)?.actief) {
       // Nog geen app: die wordt op het verificatiescherm eerst gekoppeld
       // (setup + bevestigen). Een mailcode bestaat niet meer.
+      if (role === 'klant') return NextResponse.json({ error: 'Voor dit account staat geen tweestapsverificatie aan.', code: 'geen' }, { status: 409 })
       return NextResponse.json({ error: 'Koppel eerst een authenticator-app.', code: 'koppelen' }, { status: 409 })
     }
     const kern = maakKern()
@@ -69,6 +73,8 @@ export async function POST(req: NextRequest) {
       actorUserId: user.id, actorEmail: user.email ?? null, actorRole: role,
       metadata: { methode }, ip: meta.ip, userAgent: meta.userAgent,
     }).catch(() => { /* audit is bijzaak */ })
+
+    if (role === 'klant' && methode === 'herstelcode') void stuurBeveiligingsmelding(user.email, 'herstelcode_gebruikt')
 
     const res = NextResponse.json({ ok: true, methode, herstelcodesOver })
     // Het oude verificatiecookie heeft geen betekenis meer; opruimen.

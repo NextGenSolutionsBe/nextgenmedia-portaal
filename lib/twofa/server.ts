@@ -31,9 +31,16 @@ export function supabaseOpslag(): TwofaOpslag {
       if (error) throw new Error(error.message)
       return (data as TotpRij | null) ?? null
     },
-    async bewaarSetup(userId, setupEnc, op, door = null) {
+    async bewaarSetup(userId, setupEnc, op, door = null, overActief = false) {
       const bestaand = await this.lees(userId)
-      if (bestaand?.actief) return false
+      if (bestaand?.actief) {
+        if (!overActief) return false
+        const { data, error } = await db.from('user_totp')
+          .update({ setup_secret_enc: setupEnc, setup_gestart_op: op, setup_door: door, gewijzigd_op: op })
+          .eq('user_id', userId).eq('actief', true).select('user_id')
+        if (error) throw new Error(error.message)
+        return (data ?? []).length === 1
+      }
       if (bestaand) {
         const { data, error } = await db.from('user_totp')
           .update({ setup_secret_enc: setupEnc, setup_gestart_op: op, setup_door: door, gewijzigd_op: op })
@@ -49,6 +56,13 @@ export function supabaseOpslag(): TwofaOpslag {
       const { data, error } = await db.from('user_totp')
         .update({ secret_enc: setupEnc, actief: true, geactiveerd_op: op, laatste_stap: stap, setup_secret_enc: null, setup_gestart_op: null, setup_door: null, gewijzigd_op: op })
         .eq('user_id', userId).eq('actief', false).eq('setup_secret_enc', setupEnc).select('user_id')
+      if (error) throw new Error(error.message)
+      return (data ?? []).length === 1
+    },
+    async vervangGeheim(userId, setupEnc, stap, op) {
+      const { data, error } = await db.from('user_totp')
+        .update({ secret_enc: setupEnc, geactiveerd_op: op, laatste_stap: stap, setup_secret_enc: null, setup_gestart_op: null, setup_door: null, gewijzigd_op: op })
+        .eq('user_id', userId).eq('actief', true).eq('setup_secret_enc', setupEnc).select('user_id')
       if (error) throw new Error(error.message)
       return (data ?? []).length === 1
     },
@@ -200,4 +214,58 @@ export async function interneRol(userId: string): Promise<'admin' | 'employee' |
 export async function appActief(userId: string): Promise<boolean> {
   const { data } = await createAdminSupabaseClient().from('user_totp').select('actief').eq('user_id', userId).maybeSingle()
   return !!(data as { actief?: boolean } | null)?.actief
+}
+
+// ── Klantportaal (vrijwillige 2FA) ──────────────────────────────────────────
+
+export type KlantAccount = { clientId: string; isOwner: boolean; email: string | null; naam: string | null }
+
+/** Klantaccount (eigenaar of actief subaccount) van deze gebruiker, of null. */
+export async function klantAccount(userId: string): Promise<KlantAccount | null> {
+  const db = createAdminSupabaseClient()
+  const { data: eigen } = await db.from('clients').select('id, email, contact_name').eq('owner_user_id', userId).maybeSingle()
+  if (eigen) {
+    const e = eigen as { id: string; email?: string | null; contact_name?: string | null }
+    return { clientId: e.id, isOwner: true, email: e.email ?? null, naam: e.contact_name ?? null }
+  }
+  const { data: sub } = await db.from('client_users').select('client_id, email, name, active').eq('auth_user_id', userId).maybeSingle()
+  const s = sub as { client_id: string; email?: string | null; name?: string | null; active?: boolean } | null
+  return s && s.active !== false ? { clientId: s.client_id, isOwner: false, email: s.email ?? null, naam: s.name ?? null } : null
+}
+
+/** Intern account gaat voor: wie intern is, valt onder de verplichte interne 2FA. */
+export async function accountRol(userId: string): Promise<'admin' | 'employee' | 'klant' | null> {
+  const intern = await interneRol(userId)
+  if (intern) return intern
+  return (await klantAccount(userId)) ? 'klant' : null
+}
+
+/**
+ * Mag deze klantsessie verder? Zonder actieve app: altijd (vrijwillig).
+ * Met app: enkel als DEZE Supabase-sessie de tweede stap deed (twofa_sessies).
+ */
+export const klantTweedeStapOk = cache(async (userId: string): Promise<boolean> => {
+  try {
+    if ((await headers()).get(HDR_TWEEDE_STAP) === userId) return true
+  } catch { /* buiten een verzoek */ }
+  // Fail-closed: kan de app-status niet gelezen worden, dan NIET doorlaten.
+  const { data, error } = await createAdminSupabaseClient().from('user_totp').select('actief').eq('user_id', userId).maybeSingle()
+  if (error) return false
+  if (!(data as { actief?: boolean } | null)?.actief) return true
+  const sessie = await huidigeSessie()
+  if (!sessie || sessie.user.id !== userId) return false
+  return sessieStatus(await leesSessieRij(sessie.sessionId), userId, Date.now()) === 'ok'
+})
+
+/** Wachtwoordcontrole met een eigen rem (5 per kwartier per account), zodat ze niet als raadmachine dient. */
+export async function wachtwoordMetLimiet(userId: string, email: string | null | undefined, wachtwoord: unknown): Promise<'ok' | 'fout' | 'te_veel'> {
+  const rl = await rateLimit(`2fa-wachtwoord:${userId}`, { limit: 5, windowSec: 900, failClosed: true })
+  if (!rl.allowed) return 'te_veel'
+  return (await wachtwoordKlopt(email, wachtwoord)) ? 'ok' : 'fout'
+}
+
+/** Alle sessies van een gebruiker intrekken: 2FA-markeringen én aanmeldsessies (refresh-tokens). */
+export async function trekAlleSessiesIn(userId: string): Promise<void> {
+  await wisAlleSessies(userId)
+  await createAdminSupabaseClient().rpc('trek_auth_sessies_in', { p_user: userId })
 }

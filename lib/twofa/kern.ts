@@ -26,10 +26,12 @@ export type TotpRij = {
 
 export interface TwofaOpslag {
   lees(userId: string): Promise<TotpRij | null>
-  /** Nieuwe (onbevestigde) setup bewaren — nooit over een actieve TOTP heen. */
-  bewaarSetup(userId: string, setupEnc: string, op: string, door?: string | null): Promise<boolean>
+  /** Nieuwe (onbevestigde) setup bewaren — nooit over een actieve TOTP heen, tenzij `overActief` (opnieuw instellen). */
+  bewaarSetup(userId: string, setupEnc: string, op: string, door?: string | null, overActief?: boolean): Promise<boolean>
   /** Activeren, enkel als de setup nog exact deze waarde heeft en TOTP niet actief is. */
   activeer(userId: string, setupEnc: string, stap: number, op: string): Promise<boolean>
+  /** Opnieuw instellen: het actieve geheim vervangen door de lopende setup (enkel als die nog exact deze waarde heeft). */
+  vervangGeheim(userId: string, setupEnc: string, stap: number, op: string): Promise<boolean>
   /** Tijdstap claimen: enkel als die groter is dan de laatst gebruikte (replay). */
   claimStap(userId: string, stap: number): Promise<boolean>
   verwijder(userId: string): Promise<void>
@@ -137,11 +139,44 @@ export async function schakelUit(k: Kern, userId: string, p: { wachtwoordOk: boo
 }
 
 /** 5. Nieuwe herstelcodes: wachtwoord én een code uit de app; oude codes vervallen. */
-export async function nieuweHerstelcodes(k: Kern, userId: string, p: { wachtwoordOk: boolean; code?: string | null }): Promise<Uitkomst<{ herstelcodes: string[] }>> {
+export async function nieuweHerstelcodes(k: Kern, userId: string, p: { wachtwoordOk: boolean; code?: string | null; herstelcode?: string | null }): Promise<Uitkomst<{ herstelcodes: string[] }>> {
   if (!(await binnenLimieten(k, `2fa-herstel:${userId}`, [[5, 900]]))) return fout(FOUT_TE_VEEL, 429)
-  if (!p.wachtwoordOk || !p.code) return fout(FOUT_HERBEVESTIGING)
-  const f = await controleerFactor(k, userId, { code: p.code })
+  if (!p.wachtwoordOk || (!p.code && !p.herstelcode)) return fout(FOUT_HERBEVESTIGING)
+  const f = await controleerFactor(k, userId, p.herstelcode ? { herstelcode: p.herstelcode } : { code: p.code })
   if (!f.ok) return f.status === 429 ? f : fout(FOUT_HERBEVESTIGING)
+  const herstelcodes = genereerHerstelcodes()
+  await k.opslag.vervangHerstelcodes(userId, herstelcodes.map((c) => hashHerstelcode(k.sleutel, normaliseerHerstelcode(c)!)))
+  return { ok: true, herstelcodes }
+}
+
+/**
+ * 5b. Opnieuw instellen (nieuwe telefoon) ZONDER de bescherming tussendoor te
+ * verliezen: wachtwoord + (app-code of herstelcode) → een nieuw geheim als
+ * lopende setup; het oude blijft actief tot de nieuwe code bevestigd is.
+ */
+export async function startHerSetup(k: Kern, userId: string, account: string, p: { wachtwoordOk: boolean } & FactorInvoer): Promise<Uitkomst<{ geheim: string; geheimLeesbaar: string; uri: string }>> {
+  if (!(await binnenLimieten(k, `2fa-opnieuw:${userId}`, [[5, 900]]))) return fout(FOUT_TE_VEEL, 429)
+  if (!p.wachtwoordOk || (!p.code && !p.herstelcode)) return fout(FOUT_HERBEVESTIGING)
+  const rij = await k.opslag.lees(userId)
+  if (!rij?.actief) return fout('Tweestapsverificatie staat niet aan.', 409)
+  const f = await controleerFactor(k, userId, p)
+  if (!f.ok) return f.status === 429 ? f : fout(FOUT_HERBEVESTIGING)
+  const geheim = nieuwGeheim()
+  if (!(await k.opslag.bewaarSetup(userId, versleutel(k.sleutel, geheim), new Date(k.nu()).toISOString(), null, true))) return fout('Opnieuw instellen lukte niet. Probeer het opnieuw.', 409)
+  return { ok: true, geheim, geheimLeesbaar: formatteerGeheim(geheim), uri: otpauthUri(geheim, account) }
+}
+
+/** 5c. Opnieuw instellen bevestigen met een code uit de NIEUWE app → nieuw geheim actief + nieuwe herstelcodes. */
+export async function bevestigHerSetup(k: Kern, userId: string, code: string): Promise<Uitkomst<{ herstelcodes: string[] }>> {
+  if (!(await binnenLimieten(k, `2fa-bevestig:${userId}`, [[5, 600], [20, 86400]]))) return fout(FOUT_TE_VEEL, 429)
+  const rij = await k.opslag.lees(userId)
+  if (!rij?.actief || !rij.setup_secret_enc || !rij.setup_gestart_op) return fout(FOUT_CODE)
+  if (k.nu() - Date.parse(rij.setup_gestart_op) > SETUP_GELDIG_MS) return fout('Deze QR-code is verlopen. Start opnieuw.')
+  let geheim: string
+  try { geheim = ontsleutel(k.sleutel, rij.setup_secret_enc) } catch { return fout('Start opnieuw.') }
+  const stap = controleerTotp(geheim, code.trim(), k.nu())
+  if (stap === null) return fout(FOUT_CODE)
+  if (!(await k.opslag.vervangGeheim(userId, rij.setup_secret_enc, stap, new Date(k.nu()).toISOString()))) return fout(FOUT_CODE)
   const herstelcodes = genereerHerstelcodes()
   await k.opslag.vervangHerstelcodes(userId, herstelcodes.map((c) => hashHerstelcode(k.sleutel, normaliseerHerstelcode(c)!)))
   return { ok: true, herstelcodes }
