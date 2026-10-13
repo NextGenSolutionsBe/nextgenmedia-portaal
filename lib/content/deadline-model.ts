@@ -16,6 +16,13 @@ export type Deadline = {
   notitie: string | null
   auto_goedgekeurd: number
   afgerond_op: string | null
+  /** Gekozen termijn in dagen bij "Goedkeuring aanvragen" (leeg = datum zelf gekozen). */
+  termijn_dagen?: number | null
+  /** Wanneer de goedkeuring gevraagd werd (opnieuw aanvragen zet dit opnieuw). */
+  aangevraagd_op?: string | null
+  /** Laatste goedkeuringsmail voor DEZE deadline, en de deadline die erin stond. */
+  mail_verstuurd_op?: string | null
+  mail_deadline?: string | null
 }
 
 export type Tellingen = { bij_klant: number; feedback: number; goedgekeurd: number; concept: number; totaal: number }
@@ -92,4 +99,54 @@ export function tel(statussen: string[]): Tellingen {
     else t.concept++
   }
   return t
+}
+
+// ── Goedkeuring aanvragen: termijn in dagen ─────────────────────────────────
+
+/** Snelle keuzes in "Goedkeuring aanvragen". */
+export const TERMIJN_KEUZES = [3, 5, 7] as const
+
+/** Een termijn van 1 tot 60 dagen, anders null. */
+export function geldigeTermijn(v: unknown): number | null {
+  const n = typeof v === 'string' && v.trim() === '' ? NaN : Number(v)
+  return Number.isInteger(n) && n >= 1 && n <= 60 ? n : null
+}
+
+/** Vandaag + N kalenderdagen (YYYY-MM-DD). Die laatste dag telt nog volledig mee. */
+export function deadlineNaDagen(vandaag: string, dagen: number): string {
+  const d = new Date(`${vandaag}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + dagen)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * Stand van de aftelling voor de klant, altijd berekend uit de datum van
+ * vandaag (nooit een opgeslagen tekst): nog X dagen, vandaag de laatste dag,
+ * of verstreken.
+ */
+export type AftelStand = { soort: 'dagen'; dagen: number } | { soort: 'vandaag' } | { soort: 'verstreken' }
+export function aftelStand(deadline: string, vandaag: string): AftelStand {
+  const n = dagenTot(deadline, vandaag)
+  if (n > 0) return { soort: 'dagen', dagen: n }
+  return n === 0 ? { soort: 'vandaag' } : { soort: 'verstreken' }
+}
+
+/** "Nog 5 dagen om goed te keuren" · "Deadline vandaag" · "Goedkeuringstermijn verstreken". */
+export function aftelTekst(stand: AftelStand, taal: Taal = 'nl'): string {
+  if (stand.soort === 'verstreken') return taal === 'en' ? 'Approval period has ended' : 'Goedkeuringstermijn verstreken'
+  if (stand.soort === 'vandaag') return taal === 'en' ? 'Deadline today' : 'Deadline vandaag'
+  if (taal === 'en') return stand.dagen === 1 ? '1 day left to approve' : `${stand.dagen} days left to approve`
+  return stand.dagen === 1 ? 'Nog 1 dag om goed te keuren' : `Nog ${stand.dagen} dagen om goed te keuren`
+}
+
+/** Voor in de mail: "Je hebt nog {aantal_dagen} om alles te bekijken" → "5 dagen" · "1 dag" · "tot vanavond". */
+export function aantalDagenTekst(deadline: string, vandaag: string): string {
+  const n = dagenTot(deadline, vandaag)
+  return n > 1 ? `${n} dagen` : n === 1 ? '1 dag' : n === 0 ? 'tot vanavond' : 'geen dagen meer'
+}
+
+/** Voornaam: het eerste woord van de eerste ingevulde naam ("Odger Thewissen " → "Odger"). */
+export function voornaam(...namen: (string | null | undefined)[]): string {
+  for (const n of namen) { const w = String(n ?? '').trim().split(/\s+/)[0]; if (w) return w }
+  return ''
 }
