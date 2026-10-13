@@ -29,6 +29,11 @@ import {
 // Sync kan even duren (gethrottelde ClickUp-calls) — ruimere limiet.
 export const maxDuration = 60
 
+/** Vandaag in Brussel (JJJJ-MM-DD). */
+const vandaagBE = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Brussels', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+/** Is de geplande datum van dit item al voorbij? Dan wordt het niet meer naar ClickUp gesynct. */
+const isVerstreken = (plannedDate: string | null | undefined, vandaag: string) => !!plannedDate && String(plannedDate).slice(0, 10) < vandaag
+
 type ContentItem = {
   id: string
   title: string
@@ -189,7 +194,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       .order('planned_date', { ascending: true })
     const items = (itemsRaw ?? []) as ContentItem[]
 
-    const summary = { total: items.length, created: 0, updated: 0, skipped: 0, failed: 0, fieldLimited: 0, deleted: 0, lijstHersteld }
+    const summary = { total: items.length, created: 0, updated: 0, skipped: 0, failed: 0, fieldLimited: 0, deleted: 0, verstreken: 0, lijstHersteld }
+    const vandaag = vandaagBE()
     const errors: Array<{ id: string; title: string; error: string }> = []
 
     // Tijdsbudget per call zodat de serverless-functie nooit time-out: items die
@@ -212,6 +218,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // Per item: veilig falen, de rest stopt niet.
     for (const item of items) {
       if (Date.now() - startedAt > TIME_BUDGET_MS) { done = false; break }
+      // Datum al voorbij: niets meer aanmaken of bijwerken in ClickUp. Een bestaande
+      // taak blijft wel "geclaimd", zodat de opkuis hieronder ze nooit als wees verwijdert.
+      if (isVerstreken(item.planned_date, vandaag)) {
+        if (item.clickup_task_id) claimed.add(item.clickup_task_id)
+        summary.verstreken++
+        continue
+      }
       try {
         const platforms = Array.isArray(item.platforms) && item.platforms.length > 0
           ? item.platforms
@@ -312,7 +325,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // Enkel taken die de app zelf kent (register) én waar geen item meer bij hoort.
     // Onbekende taken — handmatig aangemaakt in ClickUp — worden nooit geraakt.
     if (done && items.length > 0) {
-      const orphans = existingTasks.filter((t) => !claimed.has(t.id) && register.has(t.id))
+      // Een taak met de naam en datum van een verstreken item blijft ook altijd staan.
+      const beschermd = new Set<string>()
+      for (const i of items) {
+        if (!isVerstreken(i.planned_date, vandaag)) continue
+        const pl = Array.isArray(i.platforms) && i.platforms.length > 0 ? i.platforms : i.platform ? [i.platform] : []
+        const t = findTaskByNameAndDate(existingTasks, buildTaskTitle({ content_type: i.content_type, title: i.title, platforms: pl }), plannedDateMs(i.planned_date))
+        if (t) beschermd.add(t.id)
+      }
+      const orphans = existingTasks.filter((t) => !claimed.has(t.id) && register.has(t.id) && !beschermd.has(t.id))
       const CLEANUP_BUDGET_MS = 14000
       for (const t of orphans) {
         if (Date.now() - startedAt > CLEANUP_BUDGET_MS) { done = false; break }
@@ -331,7 +352,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       action: 'client.clickup_sync.run',
       entityType: 'client',
       entityId: id,
-      summary: `ClickUp-sync ${client.company_name}: ${summary.created} nieuw, ${summary.updated} bijgewerkt, ${summary.skipped} ongewijzigd, ${summary.deleted} verwijderd, ${summary.failed} mislukt${lijstHersteld ? ` (lijst opnieuw gekoppeld: ${listId})` : ''}`,
+      summary: `ClickUp-sync ${client.company_name}: ${summary.created} nieuw, ${summary.updated} bijgewerkt, ${summary.skipped} ongewijzigd, ${summary.verstreken} verstreken (niet gesynct), ${summary.deleted} verwijderd, ${summary.failed} mislukt${lijstHersteld ? ` (lijst opnieuw gekoppeld: ${listId})` : ''}`,
       actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'admin',
       metadata: { ...summary }, ip: meta.ip, userAgent: meta.userAgent,
     })
