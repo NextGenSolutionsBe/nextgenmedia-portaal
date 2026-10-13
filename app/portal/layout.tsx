@@ -5,6 +5,7 @@ import { PortalSidebar } from '@/components/portal/sidebar'
 import { resolvePortalSession, sessionCan, touchLastLogin } from '@/lib/portal-auth'
 import { PORTAL_MODULES } from '@/lib/portal-permissions'
 import { getLang } from '@/lib/i18n-server'
+import { leesKalenderRol } from '@/lib/content/kalender-beheer-server'
 
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   // Resolveert owner óf subaccount → clientId + rechten + actief.
@@ -60,8 +61,10 @@ export default async function PortalLayout({ children }: { children: React.React
     .from('blog_accounts').select('id', { count: 'exact', head: true }).eq('client_id', session.clientId)
   hasBlogs = (blogAccCount ?? 0) > 0
 
-  // Modules waarvoor deze gebruiker view-recht heeft (owner = alles).
-  const allowedModules = PORTAL_MODULES.filter((m) => sessionCan(session, m, 'view'))
+  // Modules waarvoor deze gebruiker view-recht heeft (owner = alles). Een klant met
+  // rol "Geen toegang" in de contentplanning ziet de kalender ook niet in het menu.
+  const kalenderDicht = (await leesKalenderRol(admin, session.clientId)) === 'geen'
+  const allowedModules = PORTAL_MODULES.filter((m) => sessionCan(session, m, 'view') && !(m === 'social_media' && kalenderDicht))
   const lang = await getLang()
 
   return (

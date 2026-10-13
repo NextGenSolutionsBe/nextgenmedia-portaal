@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     if (status === 'published') patch.published_at = new Date().toISOString()
     const { data: rij, error } = await admin.from('social_content_items').update(patch).eq('id', id).select('id, client_id').maybeSingle()
     if (error) throw new Error(error.message)
-    const LABEL: Record<string, string> = { draft: 'Concept', ready_for_review: 'naar de klant gestuurd', approved: 'Goedgekeurd', changes_requested: 'Feedback', scheduled: 'ingepland', published: 'als gepubliceerd gemarkeerd' }
+    const LABEL: Record<string, string> = { draft: 'Concept', ready_for_review: 'naar de klant gestuurd', approved: 'Goedgekeurd', changes_requested: 'Aanpassing gevraagd', scheduled: 'ingepland', published: 'als gepubliceerd gemarkeerd' }
     if (rij) await logContentActiviteit(admin, { item_id: rij.id, client_id: rij.client_id, door: user.email ?? null, rol: 'nextgenmedia', actie: status === 'published' || status === 'scheduled' || status === 'ready_for_review' ? String(LABEL[status]) : `status: ${LABEL[status] ?? status}`, details: { naar: status } })
 
     try {

@@ -9,6 +9,8 @@ import { resolvePortalSession, sessionCan } from '@/lib/portal-auth'
 import { getLang } from '@/lib/i18n-server'
 import { t } from '@/lib/i18n'
 import { aftelItemsVoorKlant } from '@/lib/content/goedkeuring-deadlines'
+import { kalenderRechtenVoorSessie } from '@/lib/content/kalender-beheer-server'
+import { kanGoedkeuren } from '@/lib/content/kalender-rol'
 import { GoedkeuringAftelklok } from '@/components/portal/goedkeuring-aftelklok'
 
 export default async function PortalDashboard() {
@@ -53,7 +55,6 @@ export default async function PortalDashboard() {
       .eq('status', 'ready_for_review'),
   ])
 
-  const pendingScripts = pendingScriptsCount ?? 0
 
   const services = (clientServicesRaw ?? []).filter((s: { active: boolean }) => s.active) as Array<{
     id: string
@@ -68,10 +69,15 @@ export default async function PortalDashboard() {
   }>
   const contracts = contractsRaw ?? []
 
-  const hasSocial = services.some((s) => s.service_slug === 'social-media')
+  // Contentkalender: enkel tonen als de rol van de klant hem opent ("Geen toegang" = nergens),
+  // en de vraag om goed te keuren enkel aan wie mag goedkeuren.
+  const kalender = services.some((s) => s.service_slug === 'social-media') ? await kalenderRechtenVoorSessie(admin, session) : null
+  const hasSocial = !!kalender?.bekijken
+  const magGoedkeuren = !!kalender && kanGoedkeuren(kalender)
+  const pendingScripts = magGoedkeuren ? (pendingScriptsCount ?? 0) : 0
   const hasWebdesign = services.some((s) => s.service_slug === 'webdesign')
   // Goedkeuringsdeadline(s) van de contentkalender — aftelklok bovenaan.
-  const aftel = hasSocial && sessionCan(session, 'social_media', 'view') ? await aftelItemsVoorKlant(admin, clientId, lang) : []
+  const aftel = magGoedkeuren ? await aftelItemsVoorKlant(admin, clientId, lang) : []
   const pendingContracts = canContracts ? contracts.filter((c) => ['sent', 'viewed'].includes(c.status)) : []
 
   // Social media contract config (posts/reels/stories come from service_contracts.config)

@@ -1,51 +1,37 @@
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
-import { createAdminSupabaseClient } from '@/lib/supabase/server'
-import { requirePortalPermission, logPortalAction, sessionCan } from '@/lib/portal-auth'
+import { logPortalAction } from '@/lib/portal-auth'
 import { klantPatch, gewijzigdeVelden, klantNieuw } from '@/lib/content/klant-bewerking'
-import { magNaarStatus, publicatie, STATUS_LABEL, type Status } from '@/lib/content/kalender-beheer'
-import { magSessieBeheren, logContentActiviteit, leesContentActiviteit } from '@/lib/content/kalender-beheer-server'
+import { publicatie, STATUS_LABEL, type Status } from '@/lib/content/kalender-beheer'
+import { magBewerken, magOvergang, magVerwijderen } from '@/lib/content/kalender-rol'
+import { kalenderPoort, geenRecht, logContentActiviteit, leesContentActiviteit } from '@/lib/content/kalender-beheer-server'
 import { clickupConfigured, deleteTask } from '@/lib/clickup'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
 
 /**
- * De klant beheert zelf zijn contentkalender — ENKEL als NextGenMedia dat voor
- * deze klant aanzette (clients.kalender_beheer) en, bij "geselecteerde
- * gebruikers", voor deze gebruiker. Alles wordt hier op de server gecontroleerd
- * en is beperkt tot de eigen klant (geresolveerde clientId):
- *  · GET ?activiteit=<id>  → activiteit van een eigen item (iedereen met kijkrecht)
- *  · POST                  → item aanmaken en inplannen
- *  · PATCH {id, …velden}   → bewerken; PATCH {id, actie:'status', status, …publicatie} → status
- *  · DELETE ?id=           → verwijderen (met bevestiging in de interface)
+ * De klant werkt in zijn eigen contentkalender — enkel wat zijn rol toelaat
+ * (clients.kalender_rol × eigen portaalrechten, zie lib/content/kalender-rol.ts).
+ * Alles wordt hier op de server gecontroleerd en is beperkt tot de eigen klant
+ * (geresolveerde clientId); verborgen knoppen alleen volstaan nooit:
+ *  · GET ?activiteit=<id>  → activiteit en opmerkingen van een eigen item (wie de kalender mag openen)
+ *  · POST                  → item aanmaken (Meewerken, Beheren)
+ *  · PATCH {id, …velden}   → inhoud aanpassen; PATCH {id, actie:'status', status, …publicatie} → status
+ *  · DELETE ?id=           → verwijderen (Beheren; Meewerken enkel een eigen concept)
  * Publiceren = enkel de status in de kalender; er wordt niets op sociale media gezet.
  */
 
 const VELDEN = 'id, client_id, planned_date, planned_time, platform, platforms, content_type, title, caption, script, media_notes, status, client_feedback, reviewed_at, created_at, published_at, published_url, published_platform, klant_gewijzigd_op, klant_gewijzigd_door, klant_aangemaakt_op'
 const vandaagBE = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Brussels', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 
-/** Gedeelde poort voor wijzigingen: kijkrecht + actieve dienst + kalenderbeheer voor deze klant/gebruiker. */
-async function poort() {
-  const g = await requirePortalPermission('social_media', 'view')
-  if (!g.ok) return { fout: g.response }
-  const admin = createAdminSupabaseClient()
-  const { data: svc } = await admin.from('client_services').select('active').eq('client_id', g.session.clientId).eq('service_slug', 'social-media').maybeSingle()
-  if (!svc?.active) return { fout: NextResponse.json({ error: 'Social media staat niet actief voor jouw account.' }, { status: 403 }) }
-  if (!(await magSessieBeheren(admin, g.session, sessionCan(g.session, 'social_media', 'edit')))) {
-    return { fout: NextResponse.json({ error: 'Je hebt geen recht om de contentkalender zelf te beheren. Vraag het aan NextGenMedia.' }, { status: 403 }) }
-  }
-  return { session: g.session, admin, door: g.session.name || g.session.email || 'Klant' }
-}
-
 export async function GET(req: NextRequest) {
   try {
-    const g = await requirePortalPermission('social_media', 'view')
-    if (!g.ok) return g.response
+    const p = await kalenderPoort(); if (p.fout) return p.fout
+    const { session, admin } = p
     const id = req.nextUrl.searchParams.get('activiteit') ?? ''
-    const admin = createAdminSupabaseClient()
-    const { data: item } = await admin.from('social_content_items').select('id').eq('id', id).eq('client_id', g.session.clientId).maybeSingle()
+    const { data: item } = await admin.from('social_content_items').select('id').eq('id', id).eq('client_id', session.clientId).maybeSingle()
     if (!item) return NextResponse.json({ error: 'Item niet gevonden.' }, { status: 404 })
     return NextResponse.json({ activiteit: await leesContentActiviteit(admin, id) })
   } catch (err) {
@@ -55,18 +41,20 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const p = await poort(); if (p.fout) return p.fout
-    const { session, admin, door } = p
+    const p = await kalenderPoort(); if (p.fout) return p.fout
+    const { session, admin, door, rechten } = p
+    if (!rechten.aanmaken) return geenRecht('Je kan geen content aanmaken in de kalender. Vraag het aan NextGenMedia.')
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
     let nieuw
     try { nieuw = klantNieuw(body) } catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : 'Ongeldige invoer.' }, { status: 400 }) }
-    const status: Status = body.status === 'scheduled' ? 'scheduled' : 'draft'
+    // Enkel een startstatus die de rol toelaat; al de rest wordt een concept.
+    const status: Status = rechten.startStatussen.includes(body.status as Status) ? (body.status as Status) : 'draft'
     const nu = new Date().toISOString()
     const { data: rij, error } = await admin.from('social_content_items')
       .insert({ ...nieuw, client_id: session.clientId, status, klant_aangemaakt_op: nu, klant_aangemaakt_door: door, klant_gewijzigd_op: nu, klant_gewijzigd_door: door })
       .select(VELDEN).single()
     if (error) throw new Error(/planned_time/.test(error.message) ? 'De databank is nog niet bijgewerkt.' : error.message)
-    await logContentActiviteit(admin, { item_id: rij.id, client_id: session.clientId, door, rol: 'klant', actie: status === 'scheduled' ? 'aangemaakt en ingepland' : 'aangemaakt', details: { titel: nieuw.title, datum: nieuw.planned_date, tijd: nieuw.planned_time ?? null } })
+    await logContentActiviteit(admin, { item_id: rij.id, client_id: session.clientId, door, rol: 'klant', actie: status === 'scheduled' ? 'aangemaakt en ingepland' : status === 'ready_for_review' ? 'aangemaakt en ter goedkeuring voorgelegd' : 'aangemaakt', details: { titel: nieuw.title, datum: nieuw.planned_date, tijd: nieuw.planned_time ?? null } })
     await logPortalAction(session, 'portal.content.ingepland', { type: 'social_content_item', id: rij.id }, { req, meta: { titel: nieuw.title, datum: nieuw.planned_date, status } })
     try { revalidatePath('/portal/social-media'); revalidatePath('/admin/services/social-media') } catch { }
     return NextResponse.json({ ok: true, item: rij })
@@ -77,8 +65,8 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    const p = await poort(); if (p.fout) return p.fout
-    const { session, admin, door } = p
+    const p = await kalenderPoort(); if (p.fout) return p.fout
+    const { session, admin, door, rechten } = p
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
     const id = String(body.id ?? '')
     if (!/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: 'Onbekend item.' }, { status: 400 })
@@ -89,7 +77,8 @@ export async function PATCH(req: NextRequest) {
     // ── Status ──
     if (body.actie === 'status') {
       const naar = String(body.status ?? '')
-      if (!magNaarStatus(oud.status, naar)) return NextResponse.json({ error: `Van “${STATUS_LABEL[oud.status as Status] ?? oud.status}” kan dit item niet naar “${STATUS_LABEL[naar as Status] ?? naar}”. Goedkeuring en feedback lopen via de gewone knoppen.` }, { status: 400 })
+      // Goedkeuren en een aanpassing vragen vanuit "Feedback gevraagd" lopen via de review (met reden).
+      if (!magOvergang(rechten, oud.status, naar)) return geenRecht(`Van “${STATUS_LABEL[oud.status as Status] ?? oud.status}” kan je dit item niet naar “${STATUS_LABEL[naar as Status] ?? naar}” zetten.`)
       let extra: Record<string, unknown> = {}
       if (naar === 'published') {
         try { extra = publicatie(body, vandaagBE(), Array.isArray(oud.platforms) && oud.platforms.length ? oud.platforms : [oud.platform].filter(Boolean)) } catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : 'Ongeldige publicatiegegevens.' }, { status: 400 }) }
@@ -99,13 +88,16 @@ export async function PATCH(req: NextRequest) {
         .eq('id', id).eq('client_id', session.clientId).eq('status', oud.status).select(VELDEN).maybeSingle()
       if (error) throw new Error(error.message)
       if (!rij) return NextResponse.json({ error: 'Dit item werd intussen gewijzigd. Vernieuw de pagina.' }, { status: 409 })
-      await logContentActiviteit(admin, { item_id: id, client_id: session.clientId, door, rol: 'klant', actie: naar === 'published' ? 'als gepubliceerd gemarkeerd' : `status: ${STATUS_LABEL[naar as Status]}`, details: { van: oud.status, naar, ...(naar === 'published' ? { datum: String(extra.published_at).slice(0, 10), kanaal: extra.published_platform, link: extra.published_url } : {}) } })
+      await logContentActiviteit(admin, { item_id: id, client_id: session.clientId, door, rol: 'klant', actie: naar === 'published' ? 'als gepubliceerd gemarkeerd' : naar === 'ready_for_review' ? 'ter goedkeuring voorgelegd' : `status: ${STATUS_LABEL[naar as Status]}`, details: { van: oud.status, naar, ...(naar === 'published' ? { datum: String(extra.published_at).slice(0, 10), kanaal: extra.published_platform, link: extra.published_url } : {}) } })
       await logPortalAction(session, 'portal.content.status', { type: 'social_content_item', id }, { req, meta: { van: oud.status, naar } })
       try { revalidatePath('/portal/social-media'); revalidatePath('/admin/services/social-media') } catch { }
       return NextResponse.json({ ok: true, item: rij })
     }
 
     // ── Velden ──
+    if (!magBewerken(rechten, oud)) {
+      return geenRecht(rechten.bewerkbaar.length ? `Een item met status “${STATUS_LABEL[oud.status as Status] ?? oud.status}” kan je niet meer aanpassen. Plaats een opmerking als er iets moet veranderen.` : 'Je kan de inhoud van de kalender niet aanpassen.')
+    }
     let patch
     try { patch = klantPatch(body) } catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : 'Ongeldige invoer.' }, { status: 400 }) }
     const velden = gewijzigdeVelden(oud as Record<string, unknown>, patch)
@@ -128,11 +120,12 @@ export async function PATCH(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const p = await poort(); if (p.fout) return p.fout
-    const { session, admin, door } = p
+    const p = await kalenderPoort(); if (p.fout) return p.fout
+    const { session, admin, door, rechten } = p
     const id = req.nextUrl.searchParams.get('id') ?? ''
-    const { data: item } = await admin.from('social_content_items').select('id, title, status, planned_date, clickup_task_id').eq('id', id).eq('client_id', session.clientId).maybeSingle()
+    const { data: item } = await admin.from('social_content_items').select('id, title, status, planned_date, clickup_task_id, klant_aangemaakt_op').eq('id', id).eq('client_id', session.clientId).maybeSingle()
     if (!item) return NextResponse.json({ error: 'Item niet gevonden.' }, { status: 404 })
+    if (!magVerwijderen(rechten, item)) return geenRecht(rechten.verwijderen === 'eigen_concepten' ? 'Je kan enkel een concept verwijderen dat je zelf aanmaakte.' : 'Je kan geen items verwijderen.')
     const { error } = await admin.from('social_content_items').delete().eq('id', id).eq('client_id', session.clientId)
     if (error) throw new Error(error.message)
     // Zelfde opruiming als bij NextGenMedia: de gekoppelde ClickUp-taak verdwijnt mee.
