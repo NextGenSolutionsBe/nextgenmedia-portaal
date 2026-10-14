@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import {
   STANDAARD_CP as S, beurtenMetBord, faseplanVanMaand, pasFaseAan, wisselDag, planNaarDagen, reeksPeriodes, segmenten, eersteWerkdag, standaardFases, fasesVanMaand, reeksenVanDag, plusWerkdagen, isKwartaalmaand, ritmeVan, beurten, teMakenTaken,
   verwachteDatum, isAchterstallig, deadlineVerstreken, routineVoorDag, werkdagenVanMaand, leesCp, bordVanKlant, leesWerkwijze, MAANDSTART,
-  batchNr, startmaandVoorBatch, BORD_BATCHES,
+  batchNr, startmaandVoorBatch, BORD_BATCHES, werkwijze1Beurten, inReeks1,
 } from '../lib/contentplanning/model'
 
 let n = 0
@@ -150,7 +150,10 @@ test('Werkwijze per reeks: stappen, badges, deelblokken en let-op uit het tekstf
   assert.deepEqual(w.stappen[1].blokken.map((b) => [b.titel, b.punten.length]), [['Onboarding', 1], ['Kwartaalmeeting', 2]])
   // Standaard: drie reeksen met een stappenplan, INN met twee weektaken, geen dagelijkse Inner Stance-checks meer.
   const c = leesCp({})
-  assert.equal(leesWerkwijze(c.reeks_detail['1']).stappen.length, 7)
+  // Werkwijze 1: zes stappen, zonder "Notities bekijken" (de app toont zelf wie aan de beurt is).
+  const w1 = leesWerkwijze(c.reeks_detail['1'])
+  assert.deepEqual(w1.stappen.map((x) => x.titel), ['Contentkalender genereren', 'Content invullen', 'Reelscripts doornemen met Bram', 'Contentkalender naar ClickUp', 'Meetings', 'Aanpassingen doorgeven aan Claude'])
+  assert.ok(w1.stappen[4].punten.includes('Werk inplannen 1 à 2 dagen vóór elke meeting'))
   assert.equal(leesWerkwijze(c.reeks_detail['2']).letOp[0], 'Pitch Please als eerste editen.')
   assert.deepEqual(c.vaste_taken.map((t) => t.key), ['inn_copy', 'inn_inplannen'])
   assert.deepEqual(c.routine, [])
@@ -190,6 +193,35 @@ test('Klantenbord: altijd Batch 1, 2 en 3; nieuwe batch volgt de bestaande een m
   assert.equal(startmaandVoorBatch(3, [{ naam: 'Batch 1', start_month: 5 }]), 7)
   assert.equal(startmaandVoorBatch(1, [{ naam: 'Batch 3', start_month: 0 }]), 10) // jan − 2 = november
   assert.equal(startmaandVoorBatch(2, []), 1)
+})
+
+test('Werkwijze 1: wie is aan de beurt? (maandelijks, driemaandelijks, al gepland, meeting, ontbrekende instellingen)', () => {
+  // Werkwijze 1 in oktober 2026 = kalender voor november + meetings in oktober. Batch met startmaand juli (6): kwartaalmaanden jul/okt/jan/apr.
+  const k = (client_id: string, ritme: 'maandelijks' | 'driemaandelijks' | null, contentMaanden: string[] = [], extra: Record<string, unknown> = {}) =>
+    ({ client_id, instelling: { ritme, activiteiten: {}, batch_start_maand: 6 }, contentMaanden, ...extra })
+  const r = Object.fromEntries(werkwijze1Beurten('2026-10', S.onderdelen, [
+    k('maand', 'maandelijks'),
+    k('maand_klaar', 'maandelijks', ['2026-10', '2026-11']),
+    k('drie_kwartaal', 'driemaandelijks', ['2026-08', '2026-09', '2026-10']),
+    { ...k('drie_loopt', 'driemaandelijks', ['2026-10', '2026-11', '2026-12']), instelling: { ritme: 'driemaandelijks', activiteiten: {}, batch_start_maand: 7 } },
+    { ...k('drie_gat', 'driemaandelijks'), instelling: { ritme: 'driemaandelijks', activiteiten: {}, batch_start_maand: 7 } },
+    k('geen_ritme', null),
+    k('meeting_gekozen', 'maandelijks', [], { meetingStatus: 'niet_nodig' }),
+  ]).map((b) => [b.client_id, b]))
+  // Maandelijks zonder planning voor november: nieuwe kalender; oktober is een kwartaalmaand → meeting.
+  assert.equal(r.maand.kalender, 'nodig'); assert.equal(r.maand.meeting, 'nodig'); assert.equal(inReeks1(r.maand), true)
+  // Al gepland voor november: geen nieuwe kalender, maar de meeting blijft.
+  assert.equal(r.maand_klaar.kalender, 'al_gepland'); assert.equal(r.maand_klaar.geplandTot, '2026-11')
+  // Driemaandelijks in de kwartaalmaand: kalender voor drie maanden.
+  assert.equal(r.drie_kwartaal.kalender, 'nodig'); assert.match(r.drie_kwartaal.reden ?? '', /twee maanden erna/)
+  // Driemaandelijks met een lopende kalender (tot december): niet opnieuw in de maandelijkse workflow.
+  assert.equal(r.drie_loopt.kalender, 'al_gepland'); assert.equal(r.drie_loopt.meeting, 'niet_aan_de_beurt'); assert.equal(inReeks1(r.drie_loopt), false)
+  // Niet aan de beurt volgens het ritme, maar er staat ook niets gepland: niet stil laten vallen.
+  assert.equal(r.drie_gat.kalender, 'controleren'); assert.equal(r.drie_gat.volgendeKwartaal, '2026-11'); assert.equal(inReeks1(r.drie_gat), true)
+  // Zonder ritme gokken we niet.
+  assert.equal(r.geen_ritme.kalender, 'onbekend'); assert.equal(inReeks1(r.geen_ritme), false)
+  // De keuze uit de meetingplanning (reeks 3 van vorige maand) gaat voor op het ritme.
+  assert.equal(r.meeting_gekozen.meeting, 'niet_nodig')
 })
 
 console.log(`\n${n} tests geslaagd\n`)

@@ -30,6 +30,8 @@ export type CpData = {
   meetings: MeetingPlan[]
   /** Klanten met de dienst social media (de rijen van het bord). */
   socialKlanten: string[]
+  /** Werkwijze 1: per klant de maanden (YYYY-MM) waarvoor al content gepland staat. */
+  contentMaanden?: Record<string, string[]>
 }
 export type BordCel = { client_id: string; maand: string; reeks: Reeks; actief: boolean; door: string | null; updated_at: string; afgewerkt_op?: string | null; afgewerkt_door?: string | null }
 export type MeetingPlan = { client_id: string; maand: string; status: 'nodig' | 'niet_nodig' | 'ingepland'; door: string | null; updated_at: string }

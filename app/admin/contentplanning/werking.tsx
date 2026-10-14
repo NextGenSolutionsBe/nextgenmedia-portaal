@@ -5,7 +5,7 @@ import { BookOpen, Check, ChevronDown, ExternalLink, Flag, Layers, LayoutGrid, P
 import { INP } from '@/app/admin/instellingen/ui'
 import {
   REEKSEN, MAANDSTART, DAG_KORT, eersteWerkdag, faseplanVanMaand, reeksPeriodes, leesWerkwijze, maandag, maandVan, plusDagen, plusMaanden, weekdagNr, werkdagenVanMaand,
-  type Reeks,
+  werkwijze1Beurten, inReeks1, type Reeks, type Werk1Beurt,
 } from '@/lib/contentplanning/model'
 import { Paneel, focusRing } from './bouwstenen'
 import type { BordCel, CpData, Doe, Weergave } from './types'
@@ -49,7 +49,98 @@ function useWerk(data: CpData) {
     .filter((c) => c.maand === ym && c.actief && !verborgen.has(c.client_id) && (r === undefined || c.reeks === r) && naam.has(c.client_id))
     .sort((a, b) => (naam.get(a.client_id) ?? '').localeCompare(naam.get(b.client_id) ?? '', 'nl'))
   const socialKlanten = data.klanten.filter((k) => data.socialKlanten.includes(k.id) && !verborgen.has(k.id))
-  return { verborgen, naam, periodes, cellen, socialKlanten }
+  /** Werkwijze 1: wie is in deze maand aan de beurt (kalender voor volgende maand, meeting deze maand)? */
+  const beurtenReeks1 = (ym: string): Werk1Beurt[] => {
+    const cp = new Map(data.cpKlanten.map((k) => [k.client_id, k]))
+    const start = new Map(data.batches.map((b) => [b.id, b.start_month]))
+    const meeting = new Map(data.meetings.filter((m) => m.maand === ym).map((m) => [m.client_id, m.status]))
+    return werkwijze1Beurten(ym, data.instellingen.onderdelen, socialKlanten
+      .filter((k) => cp.get(k.id)?.actief !== false)
+      .map((k) => ({
+        client_id: k.id,
+        instelling: { ritme: cp.get(k.id)?.ritme ?? null, activiteiten: cp.get(k.id)?.activiteiten ?? {}, batch_start_maand: k.batch_id ? (start.get(k.batch_id) ?? null) : null },
+        contentMaanden: data.contentMaanden?.[k.id] ?? [],
+        meetingStatus: meeting.get(k.id) ?? null,
+      })))
+      .sort((a, b) => (naam.get(a.client_id) ?? '').localeCompare(naam.get(b.client_id) ?? '', 'nl'))
+  }
+  return { verborgen, naam, periodes, cellen, socialKlanten, beurtenReeks1 }
+}
+
+// ── Werkwijze 1: klanten aan de beurt (automatisch bepaald) ─────────────────
+const KALENDER_BADGE: Partial<Record<Werk1Beurt['kalender'], { label: string; kleur: string }>> = {
+  nodig: { label: 'Nieuwe kalender', kleur: 'bg-cp-r1-zacht border-cp-rand' },
+  controleren: { label: 'Kalender? controleren', kleur: 'bg-amber-50 border-amber-300 text-amber-900' },
+}
+const MEETING_BADGE: Partial<Record<Werk1Beurt['meeting'], { label: string; kleur: string }>> = {
+  nodig: { label: 'Meeting', kleur: 'bg-cp-r3-zacht border-cp-rand' },
+  ingepland: { label: 'Meeting ingepland', kleur: 'bg-cp-r3-zacht border-cp-rand' },
+}
+function Badges({ b }: { b: Werk1Beurt }) {
+  const k = KALENDER_BADGE[b.kalender], m = MEETING_BADGE[b.meeting]
+  return <>{k && <span className={`rounded-md border px-1.5 py-0.5 text-[11px] font-semibold ${k.kleur}`}>{k.label}</span>}{m && <span className={`rounded-md border px-1.5 py-0.5 text-[11px] font-semibold ${m.kleur}`}>{m.label}</span>}</>
+}
+
+/**
+ * Wie moet deze maand in reeks 1? De app bepaalt het uit het ritme, de batch,
+ * de meetingplanning en wat er al gepland staat (zie werkwijze1Beurten). Met één
+ * klik komen ze op het Klantenbord (enkel lege vakjes), zodat je ze kan afvinken.
+ */
+function Reeks1Voorstel({ data, doe, maand, kanSchrijven, onKlant }: { data: CpData; doe: Doe; maand: string; kanSchrijven: boolean; onKlant: (id: string) => void }) {
+  const w = useWerk(data)
+  const [toon, setToon] = useState<'niet' | 'onbekend' | null>(null)
+  const [bezig, setBezig] = useState(false)
+  const lijst = w.beurtenReeks1(maand)
+  const aan = lijst.filter(inReeks1)
+  const niet = lijst.filter((b) => !inReeks1(b) && b.kalender !== 'onbekend' && b.meeting !== 'onbekend')
+  const onbekend = lijst.filter((b) => !inReeks1(b) && (b.kalender === 'onbekend' || b.meeting === 'onbekend'))
+  const opBord = new Set(data.bord.filter((c) => c.maand === maand && c.reeks === 1).map((c) => c.client_id))
+  const toeTeVoegen = aan.filter((b) => !opBord.has(b.client_id))
+  const volgende = plusMaanden(maand, 1)
+  const zet = async () => {
+    setBezig(true)
+    await doe('reeks1.voorstel', { maand, client_ids: toeTeVoegen.map((b) => b.client_id) }, { melding: `${toeTeVoegen.length} klant${toeTeVoegen.length === 1 ? '' : 'en'} in reeks 1 gezet.` })
+    setBezig(false)
+  }
+  const rij = (b: Werk1Beurt) => (
+    <li key={b.client_id} className="px-4 py-2.5 flex items-start gap-2 flex-wrap">
+      <button type="button" onClick={() => onKlant(b.client_id)} className={`text-left text-cp-basis font-semibold min-w-0 ${focusRing} rounded`}>{w.naam.get(b.client_id)}</button>
+      <span className="flex gap-1 flex-wrap"><Badges b={b} /></span>
+      {b.reden && <span className="basis-full text-cp-klein text-cp-zacht">{b.reden}</span>}
+    </li>
+  )
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start gap-3 flex-wrap">
+        <div className="min-w-0 flex-1">
+          <h3 className="text-cp-basis font-semibold">Aan de beurt: kalender voor {MAAND_KORT(volgende)}, meetings in {MAAND_KORT(maand)}</h3>
+          <p className="text-cp-klein text-cp-zacht">Automatisch bepaald uit het ritme per klant, de batch, de meetingplanning en wat er al gepland staat.</p>
+        </div>
+        {kanSchrijven && toeTeVoegen.length > 0 && (
+          <button type="button" disabled={bezig} onClick={zet} className={`${KNOP} bg-cp-ink text-cp-op-ink border-cp-ink`}>{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}In reeks 1 zetten ({toeTeVoegen.length})</button>
+        )}
+      </div>
+      {aan.length === 0 ? <p className="text-cp-basis text-cp-zacht">Niemand aan de beurt deze maand.</p> : (
+        <ul className="divide-y divide-cp-rand rounded-xl border border-cp-rand">{aan.map(rij)}</ul>
+      )}
+      <div className="flex gap-2 flex-wrap">
+        {niet.length > 0 && <button type="button" onClick={() => setToon(toon === 'niet' ? null : 'niet')} aria-expanded={toon === 'niet'} className={`${KNOP} h-9`}>Niet aan de beurt ({niet.length})<ChevronDown className={`h-4 w-4 transition-transform ${toon === 'niet' ? '' : '-rotate-90'}`} /></button>}
+        {onbekend.length > 0 && <button type="button" onClick={() => setToon(toon === 'onbekend' ? null : 'onbekend')} aria-expanded={toon === 'onbekend'} className={`${KNOP} h-9 border-amber-300 bg-amber-50`}><AlertTriangle className="h-4 w-4" />Instellingen ontbreken ({onbekend.length})<ChevronDown className={`h-4 w-4 transition-transform ${toon === 'onbekend' ? '' : '-rotate-90'}`} /></button>}
+      </div>
+      {toon === 'niet' && <ul className="divide-y divide-cp-rand rounded-xl border border-cp-rand">{niet.map(rij)}</ul>}
+      {toon === 'onbekend' && (
+        <ul className="divide-y divide-cp-rand rounded-xl border border-amber-300">
+          {onbekend.map((b) => (
+            <li key={b.client_id} className="px-4 py-2.5 flex items-start gap-2 flex-wrap">
+              <span className="text-cp-basis font-semibold">{w.naam.get(b.client_id)}</span>
+              <span className="basis-full text-cp-klein text-cp-zacht">{b.reden ?? 'Ritme of batch ontbreekt.'}</span>
+              <button type="button" onClick={() => onKlant(b.client_id)} className={`text-cp-klein underline ${focusRing}`}>{data.kan.beheren ? 'ritme en batch instellen' : 'klantfiche'}</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 // ── Werkwijze (stappenplan) tonen ───────────────────────────────────────────
@@ -105,6 +196,11 @@ function WerkwijzePaneel({ r, data, doe, maand, onKlant, onSluit }: { r: Reeks; 
   const info = REEKSEN[r - 1]
   return (
     <Paneel breed titel={<span className="inline-flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${info.kleur}`} />{info.label}</span>} onSluit={onSluit}>
+      {r === 1 && !bewerk && (
+        <section className="rounded-xl border border-cp-rand bg-cp-achtergrond p-4">
+          <Reeks1Voorstel data={data} doe={doe} maand={maand} kanSchrijven={data.kan.aanpassen || data.kan.beheren} onKlant={onKlant} />
+        </section>
+      )}
       {bewerk ? (
         <div className="space-y-2">
           <textarea className={`${INP} font-mono text-xs`} rows={22} value={concept} onChange={(e) => setConcept(e.target.value)} aria-label="Werkwijze bewerken" />
@@ -208,6 +304,8 @@ function ReeksKaart({ r, maand, data, doe, datum, kanSchrijven, onWerkwijze, onK
   const w = useWerk(data)
   const lijst = w.cellen(maand, r)
   const open = lijst.filter((c) => !c.afgewerkt_op), klaar = lijst.filter((c) => c.afgewerkt_op)
+  // Reeks 1: waarom staat een klant erin (kalender, meeting) — uit dezelfde berekening als het voorstel.
+  const beurt = r === 1 ? new Map(w.beurtenReeks1(maand).map((b) => [b.client_id, b])) : null
   const p = w.periodes(maand)[r]
   const info = REEKSEN[r - 1]
   const vink = (c: BordCel, gedaan: boolean) => doe('reeksvink.zet', { client_id: c.client_id, maand, reeks: r, gedaan, datum }, { stil: true })
@@ -222,6 +320,7 @@ function ReeksKaart({ r, maand, data, doe, datum, kanSchrijven, onWerkwijze, onK
         <button type="button" onClick={onWerkwijze} className={KNOP}><BookOpen className="h-4 w-4" />Werkwijze</button>
       </div>
       {lijst.length > 0 && <div className="h-1.5 bg-cp-achtergrond"><div className={`h-1.5 ${info.kleur} transition-all duration-500`} style={{ width: `${Math.round((klaar.length / lijst.length) * 100)}%` }} /></div>}
+      {r === 1 && !klein && <div className="px-5 py-4 border-b border-cp-rand"><Reeks1Voorstel data={data} doe={doe} maand={maand} kanSchrijven={kanSchrijven} onKlant={onKlant} /></div>}
       {lijst.length === 0 ? <p className="px-5 py-4 text-cp-basis text-cp-zacht">Geen klanten</p> : (
         <ul className={`divide-y divide-cp-rand ${klein ? 'max-h-80 overflow-y-auto' : ''}`}>
           {[...open, ...klaar].map((c) => (
@@ -229,6 +328,7 @@ function ReeksKaart({ r, maand, data, doe, datum, kanSchrijven, onWerkwijze, onK
               <input type="checkbox" className={VINK} checked={!!c.afgewerkt_op} disabled={!kanSchrijven}
                 aria-label={`${w.naam.get(c.client_id)}: ${info.label} ${c.afgewerkt_op ? 'weer open zetten' : 'afvinken'}`} onChange={(e) => vink(c, e.target.checked)} />
               <button type="button" onClick={() => onKlant(c.client_id)} className={`text-left min-w-0 flex-1 truncate ${klein ? 'text-cp-basis' : 'text-lg'} ${c.afgewerkt_op ? 'line-through text-cp-zacht' : 'font-semibold'} ${focusRing} rounded`}>{w.naam.get(c.client_id)}</button>
+              {beurt?.get(c.client_id) && !klein && <span className="hidden sm:flex gap-1 shrink-0"><Badges b={beurt.get(c.client_id)!} /></span>}
               {c.afgewerkt_op && <span className="text-cp-klein text-cp-zacht shrink-0">{datumNl(c.afgewerkt_op)}{c.afgewerkt_door ? ` · ${c.afgewerkt_door}` : ''}</span>}
             </li>
           ))}

@@ -141,11 +141,9 @@ export const STANDAARD_CP: CpInstellingen = {
     { label: 'Metricool', url: 'https://app.metricool.com' },
   ],
   reeks_detail: {
+    // Welke klanten aan de beurt zijn (1 of 3 maanden, meeting of niet), toont de app zelf
+    // bovenaan reeks 1 (werkwijze1Beurten); daar is geen aparte stap meer voor nodig.
     1: `! Eerste werkdag van de maand: reeksen verschuiven en de klantenbatches (badges) van de klanten aanpassen.
-# Notities bekijken
-- Welke klanten zitten in de batch
-- Per klant: 1 of 3 maanden
-- Werk inplannen 1 à 2 dagen vóór elke meeting
 # Contentkalender genereren [portaal]
 - Per klant genereren voor 1 of 3 maanden
 # Content invullen [Claude]
@@ -157,6 +155,7 @@ export const STANDAARD_CP: CpInstellingen = {
 - Op de knop in de app drukken
 - Wordt automatisch weggeschreven naar ClickUp
 # Meetings
+- Werk inplannen 1 à 2 dagen vóór elke meeting
 ## Onboarding
 - Verloop volgen uit het portaal
 ## Kwartaalmeeting
@@ -317,6 +316,77 @@ export function beurtenMetBord(ym: string, onderdelen: Onderdeel[], k: KlantInst
     return { onderdeel: o.key, aanDeBeurt: isKwartaalmaand(ym, k.batch_start_maand), reden: null }
   })
 }
+
+// ── Werkwijze 1: wie is deze maand aan de beurt? ────────────────────────────
+// Reeks 1 van maand M = de contentkalender voor M+1 maken en de meetings van M.
+// Bepaald uit wat al bestaat: het ritme per klant (+ eigen afspraak per
+// activiteit), de kwartaalmaand van de batch, de meetingplanning (reeks 3 van
+// vorige maand) en of er voor M+1 al content gepland staat. Een klant met een
+// kalender voor drie maanden staat dus niet opnieuw op de lijst zolang die loopt.
+export type Werk1Kalender = 'nodig' | 'al_gepland' | 'controleren' | 'niet_aan_de_beurt' | 'onbekend'
+export type Werk1Meeting = 'nodig' | 'ingepland' | 'niet_nodig' | 'niet_aan_de_beurt' | 'onbekend'
+export type Werk1Beurt = {
+  client_id: string
+  /** Moet er een (nieuwe) contentkalender komen voor de volgende maand? */
+  kalender: Werk1Kalender
+  meeting: Werk1Meeting
+  /** Laatste maand (YYYY-MM) waarvoor al content gepland staat, vanaf volgende maand. */
+  geplandTot: string | null
+  /** Eerstvolgende kwartaalmaand vanaf volgende maand (voor wat per kwartaal gebeurt). */
+  volgendeKwartaal: string | null
+  reden: string | null
+}
+export type Werk1Klant = { client_id: string; instelling: KlantInstelling; contentMaanden: string[]; meetingStatus?: 'nodig' | 'ingepland' | 'niet_nodig' | null }
+
+const MAAND_NL = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus', 'september', 'oktober', 'november', 'december']
+const maandNl = (ym: string) => MAAND_NL[Number(ym.slice(5, 7)) - 1]
+
+/** Het onderdeel "contentkalender" en "meeting" van reeks 1 (op sleutel, anders op ritme). */
+function onderdelenReeks1(onderdelen: Onderdeel[]): { kalender: Onderdeel | null; meeting: Onderdeel | null } {
+  const r1 = onderdelen.filter((o) => o.actief && o.reeks === 1)
+  return {
+    kalender: r1.find((o) => o.key === 'script') ?? r1.find((o) => o.standaard !== 'per_kwartaal') ?? null,
+    meeting: r1.find((o) => o.key === 'meeting') ?? r1.find((o) => o.standaard === 'per_kwartaal') ?? null,
+  }
+}
+
+export function werkwijze1Beurten(maand: string, onderdelen: Onderdeel[], klanten: Werk1Klant[]): Werk1Beurt[] {
+  const voor = plusMaanden(maand, 1)
+  const { kalender: oK, meeting: oM } = onderdelenReeks1(onderdelen)
+  return klanten.map((k) => {
+    const inst = k.instelling
+    const b = new Map(beurten(maand, [oK, oM].filter((o): o is Onderdeel => !!o), inst).map((x) => [x.onderdeel, x]))
+    const later = [...new Set(k.contentMaanden)].filter((m) => m >= voor).sort()
+    const geplandTot = later.length ? later[later.length - 1] : null
+    const start = inst.batch_start_maand
+    let volgendeKwartaal: string | null = null
+    if (start !== null && start !== undefined) for (let i = 0; i < 3; i++) { const m = plusMaanden(voor, i); if (isKwartaalmaand(m, start)) { volgendeKwartaal = m; break } }
+
+    // Contentkalender voor volgende maand.
+    let kalender: Werk1Kalender, reden: string | null = null
+    const bk = oK ? b.get(oK.key) : undefined
+    if (later.includes(voor)) { kalender = 'al_gepland'; reden = `Content staat al gepland tot ${maandNl(geplandTot!)}.` }
+    else if (!oK) { kalender = 'onbekend'; reden = 'Geen onderdeel voor de contentkalender in reeks 1.' }
+    else if (!bk || bk.aanDeBeurt === null) { kalender = 'onbekend'; reden = bk?.reden ?? 'Ritme van de klant is nog niet ingesteld.' }
+    else if (bk.aanDeBeurt) { kalender = 'nodig'; reden = ritmeVan(oK, inst) === 'per_kwartaal' ? `Kwartaalmaand: kalender voor ${maandNl(voor)} en de twee maanden erna.` : `Kalender voor ${maandNl(voor)}.` }
+    else if (ritmeVan(oK, inst) === 'nvt') { kalender = 'niet_aan_de_beurt'; reden = 'Contentkalender is voor deze klant niet van toepassing.' }
+    // Volgens het ritme niet aan de beurt, maar er loopt ook geen kalender meer: niet stil laten vallen.
+    else { kalender = 'controleren'; reden = `Volgens het ritme pas weer aan de beurt${volgendeKwartaal ? ` in ${maandNl(volgendeKwartaal)}` : ''}, maar voor ${maandNl(voor)} staat nog niets gepland.` }
+
+    // Meeting deze maand: de keuze uit de meetingplanning gaat voor, anders het ritme.
+    let meeting: Werk1Meeting
+    const bm = oM ? b.get(oM.key) : undefined
+    if (k.meetingStatus) meeting = k.meetingStatus
+    else if (!oM) meeting = 'niet_aan_de_beurt'
+    else if (!bm || bm.aanDeBeurt === null) meeting = 'onbekend'
+    else meeting = bm.aanDeBeurt ? 'nodig' : 'niet_aan_de_beurt'
+
+    return { client_id: k.client_id, kalender, meeting, geplandTot, volgendeKwartaal, reden }
+  })
+}
+
+/** Moet deze klant in reeks 1 van deze maand? (kalender of meeting) */
+export const inReeks1 = (b: Werk1Beurt) => b.kalender === 'nodig' || b.kalender === 'controleren' || b.meeting === 'nodig' || b.meeting === 'ingepland'
 
 /**
  * Welke taken moeten er voor een cyclus nog klaargezet worden? Enkel wat aan

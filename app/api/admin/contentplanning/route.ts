@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
     const admin = createAdminSupabaseClient()
     const ruimVan = plusDagen(van, -200)
     const maandVanaf = plusMaanden(maandVan(van), -6), maandTot = plusMaanden(maandVan(tot), 3)
-    const [inst, { data: batches }, { data: klanten }, { data: cpKlanten }, { data: cycli }, { data: taken }, { data: notities }, { data: checks }, { data: fases }, { data: staff }, { data: admins }, { data: bord }, { data: social }, { data: meetings }] = await Promise.all([
+    const [inst, { data: batches }, { data: klanten }, { data: cpKlanten }, { data: cycli }, { data: taken }, { data: notities }, { data: checks }, { data: fases }, { data: staff }, { data: admins }, { data: bord }, { data: social }, { data: meetings }, { data: content }] = await Promise.all([
       leesInstellingenCp(admin),
       admin.from('batches').select('*').order('sort_order').order('name'),
       admin.from('clients').select('id, company_name, batch_id, contact_name, email').is('archived_at', null).order('company_name'),
@@ -91,7 +91,16 @@ export async function GET(req: NextRequest) {
       admin.from('client_services').select('client_id, active').eq('service_slug', 'social-media'),
       // Reeks 3: meetings voor de volgende maand (per klant: nodig / niet nodig / ingepland).
       admin.from('cp_meeting_planning').select('*').gte('maand', maandVanaf).lte('maand', maandTot),
+      // Werkwijze 1: hoe ver staat de contentkalender per klant al gepland? (enkel klant + datum)
+      admin.from('social_content_items').select('client_id, planned_date').gte('planned_date', `${maandVan(van)}-01`).limit(20000),
     ])
+    const contentMaanden: Record<string, string[]> = {}
+    for (const r of (content ?? []) as { client_id: string | null; planned_date: string }[]) {
+      if (!r.client_id) continue
+      const m = String(r.planned_date).slice(0, 7)
+      const lijst = (contentMaanden[r.client_id] ??= [])
+      if (!lijst.includes(m)) lijst.push(m)
+    }
     // Mensen om taken aan toe te wijzen: de hoofdbeheerders + actieve werknemers.
     let mensen: string[] = []
     try {
@@ -103,7 +112,7 @@ export async function GET(req: NextRequest) {
       notities: notities ?? [], checks: checks ?? [],
       faseAanpassingen: Object.fromEntries(((fases ?? []) as { plan_date: string; categories: string[] }[]).map((f) => [String(f.plan_date).slice(0, 10), f.categories])),
       mensen, kan: { aanpassen: r.aanpassen, beheren: r.beheren }, ik: wie(r.persoon),
-      bord: bord ?? [], meetings: meetings ?? [], socialKlanten: [...new Set(((social ?? []) as { client_id: string; active: boolean | null }[]).filter((x) => x.active !== false).map((x) => x.client_id))],
+      bord: bord ?? [], meetings: meetings ?? [], contentMaanden, socialKlanten: [...new Set(((social ?? []) as { client_id: string; active: boolean | null }[]).filter((x) => x.active !== false).map((x) => x.client_id))],
     })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
@@ -213,6 +222,22 @@ export async function POST(req: NextRequest) {
       if (error) throw new Error(error.message)
       if (!data?.length) return NextResponse.json({ error: 'Deze klant staat deze maand niet aangevinkt in Klantenbatches voor die reeks.' }, { status: 400 })
       return NextResponse.json({ ok: true })
+    }
+    // ── Werkwijze 1: de klanten die aan de beurt zijn in reeks 1 zetten ──
+    // Vult enkel LEGE vakjes van reeks 1 voor deze maand (✓); een bewuste ✓ of ✗ blijft staan.
+    if (actie === 'reeks1.voorstel') {
+      const maand = typeof b.maand === 'string' && YM.test(b.maand) ? b.maand : null
+      const ids = Array.isArray(b.client_ids) ? [...new Set((b.client_ids as unknown[]).map(uuid).filter((x): x is string => !!x))] : []
+      if (!maand || !ids.length) return NextResponse.json({ error: 'Geen klanten om in reeks 1 te zetten.' }, { status: 400 })
+      const [{ data: social }, { data: bestaand }] = await Promise.all([
+        admin.from('client_services').select('client_id').eq('service_slug', 'social-media').eq('active', true).in('client_id', ids),
+        admin.from('cp_maand_reeksen').select('client_id').eq('maand', maand).eq('reeks', 1).in('client_id', ids),
+      ])
+      const mag = new Set(((social ?? []) as { client_id: string }[]).map((x) => x.client_id))
+      const al = new Set(((bestaand ?? []) as { client_id: string }[]).map((x) => x.client_id))
+      const nieuw = ids.filter((id) => mag.has(id) && !al.has(id)).map((client_id) => ({ client_id, maand, reeks: 1, actief: true, door: ik, updated_at: nu }))
+      if (nieuw.length) { const { error } = await admin.from('cp_maand_reeksen').insert(nieuw); if (error) throw new Error(error.message) }
+      return NextResponse.json({ ok: true, toegevoegd: nieuw.length })
     }
     // ── Reeks 3: meetings voor de volgende maand inplannen ──
     if (actie === 'meetingplan.zet') {
