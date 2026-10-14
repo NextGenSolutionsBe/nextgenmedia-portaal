@@ -65,4 +65,11 @@ test('Samen: WAM en contracten tellen op in nog binnen te komen', () => {
   assert.equal(v.uitgevallenWaarde, 9 * 180)
 })
 
+test('Kostenmelding: "nog niet gecontroleerd" verschijnt niet meer, "voorlopig" en "onder controle" wel', () => {
+  const met = (ks: Contract['kostenstatus_facturen']) => berekenVesting([contract({ kostenstatus_facturen: ks })], [], [], I).contracten[0].kostenWaarschuwing
+  assert.equal(met('ongecontroleerd'), null)
+  assert.equal(met('voorlopig'), 'kosten op facturen voorlopig')
+  assert.equal(met('controle_vereist'), 'kosten op facturen onder controle')
+})
+
 console.log(`\n${n} tests geslaagd\n`)

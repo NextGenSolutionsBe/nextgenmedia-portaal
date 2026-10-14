@@ -657,8 +657,9 @@ export function berekenVesting(
     const waarschuwingen: string[] = []
     if (uitFacturen !== null && handmatig > 0 && Math.abs(uitFacturen - handmatig) > 0.005) waarschuwingen.push(`handmatig ${Math.round(handmatig)} ≠ uit facturen ${Math.round(uitFacturen)}; het hoogste telt`)
     const ks = c.kostenstatus_facturen ?? null
-    if (ks === 'voorlopig' || ks === 'controle_vereist' || ks === 'ongecontroleerd') {
-      waarschuwingen.push(c.status === 'voltooid' ? `definitief met onvolledige kosten (${ks === 'voorlopig' ? 'voorlopig' : ks === 'controle_vereist' ? 'controle vereist' : 'nog niet gecontroleerd'})` : `kosten op facturen ${ks === 'voorlopig' ? 'voorlopig' : ks === 'controle_vereist' ? 'onder controle' : 'nog niet gecontroleerd'}`)
+    // "Nog niet gecontroleerd" tonen we hier niet: dat stond bij bijna elk contract en zei niets.
+    if (ks === 'voorlopig' || ks === 'controle_vereist') {
+      waarschuwingen.push(c.status === 'voltooid' ? `definitief met onvolledige kosten (${ks === 'voorlopig' ? 'voorlopig' : 'controle vereist'})` : `kosten op facturen ${ks === 'voorlopig' ? 'voorlopig' : 'onder controle'}`)
     }
     const kostenWaarschuwing = waarschuwingen.length ? waarschuwingen.join(' · ') : null
     const factor = toerekeningsfactor(c)
