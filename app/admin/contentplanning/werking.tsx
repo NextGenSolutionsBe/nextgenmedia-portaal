@@ -33,6 +33,8 @@ const MAAND_KORT = (ym: string) => MAANDEN[Number(ym.slice(5, 7)) - 1]
 /** Gedeelde stijl: grote, stevige kaarten. */
 export const KAART = 'rounded-cp border border-cp-rand bg-cp-vlak'
 const KNOP = `inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl border border-cp-rand bg-cp-vlak text-cp-klein font-semibold hover:border-cp-ink active:scale-[0.98] transition-all ${focusRing}`
+/** Donkere hoofdknop. Niet KNOP + bg-cp-ink: dan wint de witte achtergrond van KNOP en wordt de tekst onzichtbaar. */
+const KNOP_DONKER = `inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl border border-cp-ink bg-cp-ink text-cp-op-ink text-cp-klein font-semibold hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-60 ${focusRing}`
 const VINK = 'h-6 w-6 shrink-0 cursor-pointer accent-[var(--cp-klaar)]'
 
 // ── Afgeleide gegevens, gedeeld door de drie modi ───────────────────────────
@@ -86,14 +88,15 @@ function Badges({ b }: { b: Werk1Beurt }) {
  * de meetingplanning en wat er al gepland staat (zie werkwijze1Beurten). Met één
  * klik komen ze op het Klantenbord (enkel lege vakjes), zodat je ze kan afvinken.
  */
-function Reeks1Voorstel({ data, doe, maand, kanSchrijven, onKlant }: { data: CpData; doe: Doe; maand: string; kanSchrijven: boolean; onKlant: (id: string) => void }) {
+export function Reeks1Voorstel({ data, doe, maand, kanSchrijven, onKlant }: { data: CpData; doe: Doe; maand: string; kanSchrijven: boolean; onKlant: (id: string) => void }) {
   const w = useWerk(data)
   const [toon, setToon] = useState<'niet' | 'onbekend' | null>(null)
   const [bezig, setBezig] = useState(false)
   const lijst = w.beurtenReeks1(maand)
   const aan = lijst.filter(inReeks1)
-  const niet = lijst.filter((b) => !inReeks1(b) && b.kalender !== 'onbekend' && b.meeting !== 'onbekend')
-  const onbekend = lijst.filter((b) => !inReeks1(b) && (b.kalender === 'onbekend' || b.meeting === 'onbekend'))
+  const niet = lijst.filter((b) => !inReeks1(b))
+  // Los daarvan: bij wie ontbreekt het ritme of de batch (bv. om de kwartaalmeeting te bepalen)?
+  const onbekend = lijst.filter((b) => b.instellingOntbreekt)
   const opBord = new Set(data.bord.filter((c) => c.maand === maand && c.reeks === 1).map((c) => c.client_id))
   const toeTeVoegen = aan.filter((b) => !opBord.has(b.client_id))
   const volgende = plusMaanden(maand, 1)
@@ -105,7 +108,7 @@ function Reeks1Voorstel({ data, doe, maand, kanSchrijven, onKlant }: { data: CpD
   const rij = (b: Werk1Beurt) => (
     <li key={b.client_id} className="px-4 py-2.5 flex items-start gap-2 flex-wrap">
       <button type="button" onClick={() => onKlant(b.client_id)} className={`text-left text-cp-basis font-semibold min-w-0 ${focusRing} rounded`}>{w.naam.get(b.client_id)}</button>
-      <span className="flex gap-1 flex-wrap"><Badges b={b} /></span>
+      <span className="flex gap-1 flex-wrap"><Badges b={b} />{b.instellingOntbreekt && <span className="rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-900" title={b.instellingOntbreekt}>ritme/batch?</span>}</span>
       {b.reden && <span className="basis-full text-cp-klein text-cp-zacht">{b.reden}</span>}
     </li>
   )
@@ -117,7 +120,7 @@ function Reeks1Voorstel({ data, doe, maand, kanSchrijven, onKlant }: { data: CpD
           <p className="text-cp-klein text-cp-zacht">Automatisch bepaald uit het ritme per klant, de batch, de meetingplanning en wat er al gepland staat.</p>
         </div>
         {kanSchrijven && toeTeVoegen.length > 0 && (
-          <button type="button" disabled={bezig} onClick={zet} className={`${KNOP} bg-cp-ink text-cp-op-ink border-cp-ink`}>{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}In reeks 1 zetten ({toeTeVoegen.length})</button>
+          <button type="button" disabled={bezig} onClick={zet} className={KNOP_DONKER}>{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}In reeks 1 zetten ({toeTeVoegen.length})</button>
         )}
       </div>
       {aan.length === 0 ? <p className="text-cp-basis text-cp-zacht">Niemand aan de beurt deze maand.</p> : (
@@ -133,7 +136,7 @@ function Reeks1Voorstel({ data, doe, maand, kanSchrijven, onKlant }: { data: CpD
           {onbekend.map((b) => (
             <li key={b.client_id} className="px-4 py-2.5 flex items-start gap-2 flex-wrap">
               <span className="text-cp-basis font-semibold">{w.naam.get(b.client_id)}</span>
-              <span className="basis-full text-cp-klein text-cp-zacht">{b.reden ?? 'Ritme of batch ontbreekt.'}</span>
+              <span className="basis-full text-cp-klein text-cp-zacht">{b.instellingOntbreekt}{b.meeting === 'onbekend' ? ' Daardoor weet de app niet of er een kwartaalmeeting nodig is.' : ''}</span>
               <button type="button" onClick={() => onKlant(b.client_id)} className={`text-cp-klein underline ${focusRing}`}>{data.kan.beheren ? 'ritme en batch instellen' : 'klantfiche'}</button>
             </li>
           ))}
@@ -400,7 +403,7 @@ export function DagelijkseWerking(p: Props) {
   const bordMelding = bordLeeg && (
     <div className={`${KAART} border-2 border-amber-300 bg-amber-50 p-5 text-cp-basis font-semibold flex items-center gap-3 flex-wrap`}>
       <Layers className="h-5 w-5" />Batches {MAAND_KORT(maand)} nog niet ingevuld
-      <button type="button" onClick={() => p.onWeergave('batches')} className={`${KNOP} ml-auto bg-cp-ink text-cp-op-ink border-cp-ink`}>Batches invullen</button>
+      <button type="button" onClick={() => p.onWeergave('batches')} className={`${KNOP_DONKER} ml-auto`}>Batches invullen</button>
     </div>
   )
 

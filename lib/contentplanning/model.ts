@@ -335,6 +335,8 @@ export type Werk1Beurt = {
   /** Eerstvolgende kwartaalmaand vanaf volgende maand (voor wat per kwartaal gebeurt). */
   volgendeKwartaal: string | null
   reden: string | null
+  /** Welke instelling ontbreekt om alles te bepalen (ritme of batch); de klant valt daardoor niet weg. */
+  instellingOntbreekt: string | null
 }
 export type Werk1Klant = { client_id: string; instelling: KlantInstelling; contentMaanden: string[]; meetingStatus?: 'nodig' | 'ingepland' | 'niet_nodig' | null }
 
@@ -367,7 +369,9 @@ export function werkwijze1Beurten(maand: string, onderdelen: Onderdeel[], klante
     const bk = oK ? b.get(oK.key) : undefined
     if (later.includes(voor)) { kalender = 'al_gepland'; reden = `Content staat al gepland tot ${maandNl(geplandTot!)}.` }
     else if (!oK) { kalender = 'onbekend'; reden = 'Geen onderdeel voor de contentkalender in reeks 1.' }
-    else if (!bk || bk.aanDeBeurt === null) { kalender = 'onbekend'; reden = bk?.reden ?? 'Ritme van de klant is nog niet ingesteld.' }
+    // Ritme of batch onbekend, maar voor volgende maand staat niets gepland: dat is hoe dan ook werk.
+    // Het ritme bepaalt enkel of de kalender voor 1 of 3 maanden is.
+    else if (!bk || bk.aanDeBeurt === null) { kalender = 'nodig'; reden = `Voor ${maandNl(voor)} staat nog niets gepland.` }
     else if (bk.aanDeBeurt) { kalender = 'nodig'; reden = ritmeVan(oK, inst) === 'per_kwartaal' ? `Kwartaalmaand: kalender voor ${maandNl(voor)} en de twee maanden erna.` : `Kalender voor ${maandNl(voor)}.` }
     else if (ritmeVan(oK, inst) === 'nvt') { kalender = 'niet_aan_de_beurt'; reden = 'Contentkalender is voor deze klant niet van toepassing.' }
     // Volgens het ritme niet aan de beurt, maar er loopt ook geen kalender meer: niet stil laten vallen.
@@ -381,7 +385,11 @@ export function werkwijze1Beurten(maand: string, onderdelen: Onderdeel[], klante
     else if (!bm || bm.aanDeBeurt === null) meeting = 'onbekend'
     else meeting = bm.aanDeBeurt ? 'nodig' : 'niet_aan_de_beurt'
 
-    return { client_id: k.client_id, kalender, meeting, geplandTot, volgendeKwartaal, reden }
+    const perKwartaal = (oK && ritmeVan(oK, inst) === 'per_kwartaal') || (oM && ritmeVan(oM, inst) === 'per_kwartaal')
+    const instellingOntbreekt = !inst.ritme && !Object.keys(inst.activiteiten ?? {}).length
+      ? 'Ritme (1 of 3 maanden) is nog niet ingesteld.'
+      : perKwartaal && (start === null || start === undefined) ? 'Batch ontbreekt; nodig voor wat per kwartaal gebeurt.' : null
+    return { client_id: k.client_id, kalender, meeting, geplandTot, volgendeKwartaal, reden, instellingOntbreekt }
   })
 }
 

@@ -236,7 +236,11 @@ export async function POST(req: NextRequest) {
       const mag = new Set(((social ?? []) as { client_id: string }[]).map((x) => x.client_id))
       const al = new Set(((bestaand ?? []) as { client_id: string }[]).map((x) => x.client_id))
       const nieuw = ids.filter((id) => mag.has(id) && !al.has(id)).map((client_id) => ({ client_id, maand, reeks: 1, actief: true, door: ik, updated_at: nu }))
-      if (nieuw.length) { const { error } = await admin.from('cp_maand_reeksen').insert(nieuw); if (error) throw new Error(error.message) }
+      if (nieuw.length) {
+        const { error } = await admin.from('cp_maand_reeksen').insert(nieuw); if (error) throw new Error(error.message)
+        // Zoals bij het bord: wie erop staat, hoort bij de contentplanning. Een bestaande (ook uitgezette) klantrij blijft ongemoeid.
+        await admin.from('cp_klanten').upsert(nieuw.map((x) => ({ client_id: x.client_id, actief: true, updated_at: nu })), { onConflict: 'client_id', ignoreDuplicates: true })
+      }
       return NextResponse.json({ ok: true, toegevoegd: nieuw.length })
     }
     // ── Reeks 3: meetings voor de volgende maand inplannen ──

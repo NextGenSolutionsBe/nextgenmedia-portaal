@@ -206,6 +206,7 @@ test('Werkwijze 1: wie is aan de beurt? (maandelijks, driemaandelijks, al geplan
     { ...k('drie_loopt', 'driemaandelijks', ['2026-10', '2026-11', '2026-12']), instelling: { ritme: 'driemaandelijks', activiteiten: {}, batch_start_maand: 7 } },
     { ...k('drie_gat', 'driemaandelijks'), instelling: { ritme: 'driemaandelijks', activiteiten: {}, batch_start_maand: 7 } },
     k('geen_ritme', null),
+    k('geen_ritme_gepland', null, ['2026-11', '2026-12']),
     k('meeting_gekozen', 'maandelijks', [], { meetingStatus: 'niet_nodig' }),
   ]).map((b) => [b.client_id, b]))
   // Maandelijks zonder planning voor november: nieuwe kalender; oktober is een kwartaalmaand → meeting.
@@ -218,8 +219,11 @@ test('Werkwijze 1: wie is aan de beurt? (maandelijks, driemaandelijks, al geplan
   assert.equal(r.drie_loopt.kalender, 'al_gepland'); assert.equal(r.drie_loopt.meeting, 'niet_aan_de_beurt'); assert.equal(inReeks1(r.drie_loopt), false)
   // Niet aan de beurt volgens het ritme, maar er staat ook niets gepland: niet stil laten vallen.
   assert.equal(r.drie_gat.kalender, 'controleren'); assert.equal(r.drie_gat.volgendeKwartaal, '2026-11'); assert.equal(inReeks1(r.drie_gat), true)
-  // Zonder ritme gokken we niet.
-  assert.equal(r.geen_ritme.kalender, 'onbekend'); assert.equal(inReeks1(r.geen_ritme), false)
+  // Zonder ritme: niets gepland voor november is hoe dan ook werk; het ontbrekende ritme wordt apart gemeld, de meeting gokken we niet.
+  assert.equal(r.geen_ritme.kalender, 'nodig'); assert.equal(inReeks1(r.geen_ritme), true)
+  assert.match(r.geen_ritme.instellingOntbreekt ?? '', /Ritme/); assert.equal(r.geen_ritme.meeting, 'onbekend')
+  assert.equal(r.geen_ritme_gepland.kalender, 'al_gepland'); assert.equal(inReeks1(r.geen_ritme_gepland), false); assert.ok(r.geen_ritme_gepland.instellingOntbreekt)
+  assert.equal(r.maand.instellingOntbreekt, null)
   // De keuze uit de meetingplanning (reeks 3 van vorige maand) gaat voor op het ritme.
   assert.equal(r.meeting_gekozen.meeting, 'niet_nodig')
 })
