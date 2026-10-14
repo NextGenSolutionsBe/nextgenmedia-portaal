@@ -8,8 +8,10 @@ import { Calendar, FileText, Globe, Clock, ArrowRight } from 'lucide-react'
 import { resolvePortalSession, sessionCan } from '@/lib/portal-auth'
 import { getLang } from '@/lib/i18n-server'
 import { t } from '@/lib/i18n'
-import { aftelItemsVoorKlant } from '@/lib/content/goedkeuring-deadlines'
-import { GoedkeuringAftelklok } from '@/components/portal/goedkeuring-aftelklok'
+import { goedkeuringenVoorKlant } from '@/lib/content/goedkeuring-deadlines'
+import { kalenderRechtenVoorSessie } from '@/lib/content/kalender-beheer-server'
+import { kanGoedkeuren } from '@/lib/content/kalender-rol'
+import { GoedkeuringOverzicht } from '@/components/portal/goedkeuring-overzicht'
 
 export default async function PortalDashboard() {
   const session = await resolvePortalSession()
@@ -53,7 +55,6 @@ export default async function PortalDashboard() {
       .eq('status', 'ready_for_review'),
   ])
 
-  const pendingScripts = pendingScriptsCount ?? 0
 
   const services = (clientServicesRaw ?? []).filter((s: { active: boolean }) => s.active) as Array<{
     id: string
@@ -68,10 +69,15 @@ export default async function PortalDashboard() {
   }>
   const contracts = contractsRaw ?? []
 
-  const hasSocial = services.some((s) => s.service_slug === 'social-media')
+  // Contentkalender: enkel tonen als de rol van de klant hem opent ("Geen toegang" = nergens),
+  // en de vraag om goed te keuren enkel aan wie mag goedkeuren.
+  const kalender = services.some((s) => s.service_slug === 'social-media') ? await kalenderRechtenVoorSessie(admin, session) : null
+  const hasSocial = !!kalender?.bekijken
+  const magGoedkeuren = !!kalender && kanGoedkeuren(kalender)
+  const pendingScripts = magGoedkeuren ? (pendingScriptsCount ?? 0) : 0
   const hasWebdesign = services.some((s) => s.service_slug === 'webdesign')
-  // Goedkeuringsdeadline(s) van de contentkalender — aftelklok bovenaan.
-  const aftel = hasSocial && sessionCan(session, 'social_media', 'view') ? await aftelItemsVoorKlant(admin, clientId, lang) : []
+  // Wat op goedkeuring wacht, per aangevraagde termijn, met de aftelling — bovenaan.
+  const goedkeuringen = magGoedkeuren ? await goedkeuringenVoorKlant(admin, clientId) : []
   const pendingContracts = canContracts ? contracts.filter((c) => ['sent', 'viewed'].includes(c.status)) : []
 
   // Social media contract config (posts/reels/stories come from service_contracts.config)
@@ -86,7 +92,7 @@ export default async function PortalDashboard() {
         <p className="text-sm text-gray-500 mt-0.5">{t(lang, 'dash.subtitle')}</p>
       </div>
 
-      <GoedkeuringAftelklok items={aftel} lang={lang} link />
+      <GoedkeuringOverzicht goedkeuringen={goedkeuringen} lang={lang} />
 
       {/* Alerts */}
       {(pendingContracts.length > 0 || pendingScripts > 0) && (

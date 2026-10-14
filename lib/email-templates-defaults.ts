@@ -2,6 +2,26 @@
 
 export const DEFAULT_TEMPLATES: { name: string; subject: string; body: string; kind: string; cta_text: string; cta_link: string }[] = [
   {
+    // "Goedkeuring aanvragen" in de editworkflow. {{voornaam}} en {{aantal_dagen}}
+    // komen uit de klantgegevens en de gekozen termijn; nooit letterlijk verstuurd.
+    name: 'Content klaar voor goedkeuring',
+    kind: 'goedkeuring_aanvraag',
+    subject: 'Content klaar voor goedkeuring',
+    body: `Hey {{voornaam}},
+
+We hebben de content zonet ingepland in Metricool. Je hebt nog {{aantal_dagen}} om alles te bekijken en goed te keuren.
+
+Mocht het niet lukken om alles binnen die termijn na te kijken, laat het gerust even weten. Dan bekijken we samen hoe we dit eventueel kunnen aanpassen.
+
+Alvast bedankt!
+
+Vriendelijke groeten,
+Kiara
+NextGenMedia`,
+    cta_text: 'Content bekijken en goedkeuren',
+    cta_link: '{{scripts_link}}',
+  },
+  {
     name: 'Goedkeuring contentkalender — deadline',
     kind: 'goedkeuring',
     subject: 'Je contentkalender van {{goedkeuring_maanden}}: {{dagen_resterend}} om goed te keuren',

@@ -5880,3 +5880,48 @@ CREATE TABLE IF NOT EXISTS public.contract_waarde_wijzigingen (
 );
 CREATE INDEX IF NOT EXISTS contract_waarde_wijzigingen_contract_idx ON public.contract_waarde_wijzigingen (contract_id);
 ALTER TABLE public.contract_waarde_wijzigingen ENABLE ROW LEVEL SECURITY;
+
+-- ── Contentkalender: rol per klant (13 okt 2026) ────────────────────────────
+-- Eén rol per klant, voor alle gebruikers van die klant: geen / bekijken /
+-- feedback / meewerken / beheren. Leeg (NULL) = Standaard: de werking van vóór
+-- de rollen (bekijken + goedkeuren of een aanpassing vragen), dus bestaande
+-- klanten behouden hun toegang tot NextGenMedia een rol kiest. Er wordt geen
+-- bestaande data gewijzigd. Subaccounts houden binnen de rol hun eigen rechten.
+-- Opmerkingen bij items gebruiken het bestaande social_content_activiteit
+-- (actie 'opmerking'); daar is geen nieuwe tabel voor nodig.
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS kalender_rol text;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'clients_kalender_rol_check') THEN
+    ALTER TABLE public.clients ADD CONSTRAINT clients_kalender_rol_check
+      CHECK (kalender_rol IS NULL OR kalender_rol IN ('geen', 'bekijken', 'feedback', 'meewerken', 'beheren'));
+  END IF;
+END $$;
+-- Tweede laag naast de servercontrole: een eigenaar met rol "Geen toegang" leest
+-- ook via de gewone databank-API geen contentitems meer. Het interne team (geen
+-- eigenaar van die klant) en de service-role merken hier niets van.
+CREATE OR REPLACE FUNCTION public.kalender_dicht_voor_mij(p_client uuid)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public' AS $$
+  SELECT EXISTS (SELECT 1 FROM public.clients c WHERE c.id = p_client AND c.owner_user_id = auth.uid() AND c.kalender_rol = 'geen')
+$$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'social_content_items' AND policyname = 'social_content_kalender_rol') THEN
+    CREATE POLICY social_content_kalender_rol ON public.social_content_items AS RESTRICTIVE FOR SELECT
+      USING (NOT public.kalender_dicht_voor_mij(client_id));
+  END IF;
+END $$;
+
+-- ── Goedkeuring aanvragen: termijn in dagen + gekoppelde mail (13 okt 2026) ──
+-- "Goedkeuring aanvragen" in de editworkflow: een termijn in dagen (3/5/7…)
+-- waaruit de deadline berekend wordt, wanneer de goedkeuring gevraagd werd, en
+-- welke mail voor DEZE deadline vertrok (met de deadline die erin stond). Een
+-- latere wijziging van de deadline verstuurt niets opnieuw; de app toont dan
+-- dat de mail nog de oude datum vermeldde. Geen bestaande data gewijzigd.
+ALTER TABLE public.content_goedkeuring_deadlines ADD COLUMN IF NOT EXISTS termijn_dagen int;
+ALTER TABLE public.content_goedkeuring_deadlines ADD COLUMN IF NOT EXISTS aangevraagd_op timestamptz;
+ALTER TABLE public.content_goedkeuring_deadlines ADD COLUMN IF NOT EXISTS mail_verstuurd_op timestamptz;
+ALTER TABLE public.content_goedkeuring_deadlines ADD COLUMN IF NOT EXISTS mail_deadline date;
+ALTER TABLE public.content_goedkeuring_deadlines ADD COLUMN IF NOT EXISTS mail_message_id uuid;
+-- Eén verzendpoging = één sleutel: dezelfde klik (dubbelklik, netwerk dat
+-- opnieuw probeert) verstuurt nooit twee keer dezelfde mail.
+ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS verzend_sleutel text;
+CREATE UNIQUE INDEX IF NOT EXISTS email_messages_verzend_sleutel_uniek ON public.email_messages (verzend_sleutel) WHERE verzend_sleutel IS NOT NULL;

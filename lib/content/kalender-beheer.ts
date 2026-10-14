@@ -4,6 +4,8 @@
 // gebruikers van de klant, of enkel geselecteerde: de eigenaar (vinkje) en
 // subaccounts met het bestaande portaalrecht social_media.edit.
 // Zonder beheer behoudt de klant de gewone werking: bekijken, goedkeuren, feedback.
+// Sinds de rollen per klant (lib/content/kalender-rol.ts) geldt dit oude beheer
+// enkel nog voor klanten die op "Standaard" staan.
 
 export type BeheerConfig = { kalender_beheer: boolean; kalender_beheer_wie: string; kalender_beheer_eigenaar: boolean }
 
@@ -18,8 +20,8 @@ export type Status = 'draft' | 'ready_for_review' | 'approved' | 'changes_reques
 /**
  * Statusovergangen voor een beherende klant. De bestaande goedkeuring wordt
  * niet overgeslagen: een item dat bij de klant ter goedkeuring ligt
- * ("Bij klant") gaat enkel verder via Goedkeuren of Feedback, en een item met
- * feedback ligt bij NextGenMedia. Eigen concepten mag de klant zelf
+ * ("Feedback gevraagd") gaat enkel verder via Goedkeuren of Aanpassing vragen,
+ * en een item met een gevraagde aanpassing ligt bij NextGenMedia. Eigen concepten mag de klant zelf
  * goedkeuren en inplannen.
  */
 const OVERGANGEN: Record<Status, Status[]> = {
@@ -34,7 +36,7 @@ export const klantOvergangen = (van: string): Status[] => OVERGANGEN[van as Stat
 export const magNaarStatus = (van: string, naar: string) => klantOvergangen(van).includes(naar as Status)
 
 export const STATUS_LABEL: Record<Status, string> = {
-  draft: 'Concept', ready_for_review: 'Bij klant', approved: 'Goedgekeurd', changes_requested: 'Feedback', scheduled: 'Ingepland', published: 'Gepubliceerd',
+  draft: 'Concept', ready_for_review: 'Feedback gevraagd', approved: 'Goedgekeurd', changes_requested: 'Aanpassing gevraagd', scheduled: 'Ingepland', published: 'Gepubliceerd',
 }
 
 /** Publicatiegegevens bij "Gepubliceerd": datum (standaard vandaag), platform, link (optioneel, http/https). */

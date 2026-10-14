@@ -14,6 +14,7 @@ const KINDS: { value: string; label: string }[] = [
   { value: 'shoot', label: 'Shoot' },
   { value: 'task', label: 'Taak' },
   { value: 'goedkeuring', label: 'Goedkeuringsdeadline' },
+  { value: 'goedkeuring_aanvraag', label: 'Goedkeuring aanvragen' },
 ]
 const KIND_LABEL: Record<string, string> = Object.fromEntries(KINDS.map((k) => [k.value, k.label]))
 

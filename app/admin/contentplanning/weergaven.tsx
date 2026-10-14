@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Plus, StickyNote, Check, Loader2, GripVertical } from 'lucide-react'
 import { toast } from 'sonner'
-import { isAchterstallig, isKlaar, maandVan, batchNr, BORD_BATCHES, type Reeks } from '@/lib/contentplanning/model'
+import { isAchterstallig, isKlaar, maandVan, batchNr, BORD_BATCHES, BORD_MAANDELIJKS, opBordMaandelijks, type Reeks } from '@/lib/contentplanning/model'
 import { StatusBadge, focusRing } from './bouwstenen'
 import { KAART } from './werking'
 import type { CpData, Doe, Notitie, Taak } from './types'
@@ -24,10 +24,14 @@ export type WeergaveProps = {
 }
 
 // ── Klantenbord ─────────────────────────────────────────────────────────────
-// Altijd drie kolommen: Batch 1, Batch 2, Batch 3 (ook leeg). Klanten slepen
-// tussen de kolommen; nieuwe klant = naam + batch. Klanten zonder batch (of in
-// een andere batch) staan in een extra kolom, zodat er niemand verdwijnt.
-type Kolom = { key: string; titel: string; nr: number | null; batchId: string | null; klanten: string[] }
+// Altijd vier kolommen: Batch 1, Batch 2, Batch 3 (cycli van drie maanden) en
+// Maandelijks (ook leeg). Maandelijks is het ritme van de klant, hetzelfde veld
+// als op de klantfiche. Klanten slepen tussen de kolommen; nieuwe klant = naam +
+// kolom. Klanten zonder batch (of in een andere batch) staan in een extra kolom,
+// zodat er niemand verdwijnt.
+type Kolom = { key: string; titel: string; nr: number | null; batchId: string | null; maandelijks?: boolean; klanten: string[] }
+const MAANDELIJKS = '__maandelijks'
+type NieuwKolom = number | typeof BORD_MAANDELIJKS
 
 export function Klantenbord(p: WeergaveProps) {
   const { data, vandaag, anker } = p
@@ -37,7 +41,7 @@ export function Klantenbord(p: WeergaveProps) {
   const [sleepKlant, setSleepKlant] = useState<string | null>(null)
   const [doel, setDoel] = useState<string | null>(null)
   const [naam, setNaam] = useState('')
-  const [nieuwNr, setNieuwNr] = useState<number>(1)
+  const [nieuwNr, setNieuwNr] = useState<NieuwKolom>(1)
   const [bezig, setBezig] = useState(false)
   // Meteen tonen waar een klant naartoe gesleept is (bewaren volgt).
   const [lokaal, setLokaal] = useState<Record<string, string | null>>({})
@@ -45,7 +49,10 @@ export function Klantenbord(p: WeergaveProps) {
 
   const actief = data.cpKlanten.filter((k) => k.actief)
   const klanten = new Map(data.klanten.map((k) => [k.id, k]))
-  const batchVan = (cid: string) => (cid in lokaal ? lokaal[cid] : klanten.get(cid)?.batch_id ?? null)
+  const ritmes = new Map(data.cpKlanten.map((k) => [k.client_id, k.ritme]))
+  const isMaandelijks = (cid: string) => (cid in lokaal ? lokaal[cid] === MAANDELIJKS : opBordMaandelijks(ritmes.get(cid)))
+  const batchVan = (cid: string) => (cid in lokaal && lokaal[cid] !== MAANDELIJKS ? lokaal[cid] : klanten.get(cid)?.batch_id ?? null)
+  const inBatch = actief.filter((k) => !isMaandelijks(k.client_id))
   const takenVan = useMemo(() => {
     const m = new Map<string, Taak[]>()
     for (const t of data.taken) { if (!t.cyclus_id) continue; const c = data.cycli.find((x) => x.id === t.cyclus_id); if (!c || c.maand !== maand) continue; const l = m.get(c.client_id) ?? []; l.push(t); m.set(c.client_id, l) }
@@ -56,20 +63,30 @@ export function Klantenbord(p: WeergaveProps) {
   const vast: Kolom[] = BORD_BATCHES.map((n) => {
     const b = data.batches.find((x) => batchNr(x.name) === n)
     const hier = (cid: string) => (b ? batchVan(cid) === b.id : batchVan(cid) === `nieuw-${n}`)
-    return { key: `nr-${n}`, titel: `Batch ${n}`, nr: n, batchId: b?.id ?? null, klanten: actief.filter((k) => hier(k.client_id)).map((k) => k.client_id).sort(opNaam) }
+    return { key: `nr-${n}`, titel: `Batch ${n}`, nr: n, batchId: b?.id ?? null, klanten: inBatch.filter((k) => hier(k.client_id)).map((k) => k.client_id).sort(opNaam) }
   })
+  const maandelijks: Kolom = { key: 'maandelijks', titel: 'Maandelijks', nr: null, batchId: null, maandelijks: true, klanten: actief.filter((k) => isMaandelijks(k.client_id)).map((k) => k.client_id).sort(opNaam) }
   const vasteIds = new Set(vast.map((k) => k.batchId).filter(Boolean))
   const overigeBatches: Kolom[] = data.batches.filter((b) => !vasteIds.has(b.id))
-    .map((b) => ({ key: b.id, titel: b.name, nr: null, batchId: b.id, klanten: actief.filter((k) => batchVan(k.client_id) === b.id).map((k) => k.client_id).sort(opNaam) }))
+    .map((b) => ({ key: b.id, titel: b.name, nr: null, batchId: b.id, klanten: inBatch.filter((k) => batchVan(k.client_id) === b.id).map((k) => k.client_id).sort(opNaam) }))
     .filter((k) => k.klanten.length > 0)
-  const zonder = actief.filter((k) => { const b = batchVan(k.client_id); return !b || (!b.startsWith('nieuw-') && !data.batches.some((x) => x.id === b)) }).map((k) => k.client_id).sort(opNaam)
-  const kolommen: Kolom[] = [...vast, ...overigeBatches, ...(zonder.length ? [{ key: '__geen', titel: 'Nog geen batch', nr: null, batchId: null, klanten: zonder }] : [])]
+  const zonder = inBatch.filter((k) => { const b = batchVan(k.client_id); return !b || (!b.startsWith('nieuw-') && !data.batches.some((x) => x.id === b)) }).map((k) => k.client_id).sort(opNaam)
+  const kolommen: Kolom[] = [...vast, maandelijks, ...overigeBatches, ...(zonder.length ? [{ key: '__geen', titel: 'Nog geen batch', nr: null, batchId: null, klanten: zonder }] : [])]
 
   const naarKolom = async (cid: string, k: Kolom) => {
-    if (!kan || batchVan(cid) === k.batchId && k.batchId !== null) return
-    if (k.key === '__geen' && !batchVan(cid)) return
-    setLokaal((l) => ({ ...l, [cid]: k.batchId ?? (k.nr ? `nieuw-${k.nr}` : null) }))
+    if (!kan) return
     const naamK = klanten.get(cid)?.company_name ?? 'Klant'
+    if (k.maandelijks) {
+      if (isMaandelijks(cid)) return
+      setLokaal((l) => ({ ...l, [cid]: MAANDELIJKS }))
+      const r = await p.doe('bord.batch', { client_id: cid, batch_nr: BORD_MAANDELIJKS }, { melding: `${naamK} → Maandelijks` })
+      if (!r) setLokaal((l) => { const n = { ...l }; delete n[cid]; return n })
+      return
+    }
+    // Een maandelijkse klant naar zijn eigen batch (of naar "Nog geen batch") slepen verandert wel het ritme.
+    if (!isMaandelijks(cid) && batchVan(cid) === k.batchId && k.batchId !== null) return
+    if (k.key === '__geen' && !batchVan(cid) && !isMaandelijks(cid)) return
+    setLokaal((l) => ({ ...l, [cid]: k.batchId ?? (k.nr ? `nieuw-${k.nr}` : null) }))
     const r = k.nr
       ? await p.doe('bord.batch', { client_id: cid, batch_nr: k.nr }, { melding: `${naamK} → ${k.titel}` })
       : k.key === '__geen'
@@ -85,7 +102,8 @@ export function Klantenbord(p: WeergaveProps) {
     setBezig(true)
     const r = await p.doe('klant.nieuw', { naam: naam.trim(), batch_nr: nieuwNr }, { stil: true })
     setBezig(false)
-    if (r) { toast.success(r.bestond ? `${naam.trim()} bestond al en staat nu in Batch ${nieuwNr}.` : `${naam.trim()} toegevoegd aan Batch ${nieuwNr}.`); setNaam('') }
+    const waar = nieuwNr === BORD_MAANDELIJKS ? 'Maandelijks' : `Batch ${nieuwNr}`
+    if (r) { toast.success(r.bestond ? `${naam.trim()} bestond al en staat nu in ${waar}.` : `${naam.trim()} toegevoegd aan ${waar}.`); setNaam('') }
   }
 
   const kaart = (cid: string) => {
@@ -107,6 +125,8 @@ export function Klantenbord(p: WeergaveProps) {
           ? <div className="text-cp-klein"><b className="font-semibold">{volgende.titel}</b> <span className="text-cp-zacht">{volgende.werkdatum ? datumNl(volgende.werkdatum) : ''}</span> <StatusBadge status={volgende.status} statussen={st} klein /></div>
           : tk.length > 0 && <div className="text-cp-klein font-semibold inline-flex items-center gap-1"><Check className="h-4 w-4" />Alles klaar</div>}
         {laat && <div className="text-cp-klein text-orange-700 font-semibold inline-flex items-center gap-1"><AlertTriangle className="h-4 w-4" />Over tijd</div>}
+        {/* Maandelijks: de batch blijft bepalen wanneer de kwartaalmeeting valt. */}
+        {isMaandelijks(cid) && (() => { const b = data.batches.find((x) => x.id === batchVan(cid)); return <div className="text-cp-klein text-cp-zacht">{b ? `Kwartaal volgt ${b.name}` : 'Geen batch voor wat per kwartaal gebeurt'}</div> })()}
         {/* Telefoon/tablet: verplaatsen zonder slepen */}
         {kan && (
           <select className="md:hidden w-full h-10 rounded-lg border border-cp-rand bg-cp-vlak px-2 text-cp-klein" aria-label={`Batch van ${k?.company_name}`}
@@ -124,10 +144,10 @@ export function Klantenbord(p: WeergaveProps) {
         <form onSubmit={maakNieuw} className={`${KAART} p-4 flex items-center gap-3 flex-wrap`}>
           <input value={naam} onChange={(e) => setNaam(e.target.value)} placeholder="Naam nieuwe klant" aria-label="Naam nieuwe klant" maxLength={200}
             className="flex-1 min-w-[200px] h-12 rounded-xl border-2 border-cp-rand bg-cp-vlak px-4 text-cp-basis focus:outline-none focus:border-cp-ink" />
-          <div role="radiogroup" aria-label="Batch" className="inline-flex rounded-xl border-2 border-cp-rand overflow-hidden">
-            {BORD_BATCHES.map((n) => (
+          <div role="radiogroup" aria-label="Batch of maandelijks" className="inline-flex flex-wrap rounded-xl border-2 border-cp-rand overflow-hidden">
+            {[...BORD_BATCHES, BORD_MAANDELIJKS].map((n) => (
               <button key={n} type="button" role="radio" aria-checked={nieuwNr === n} onClick={() => setNieuwNr(n)}
-                className={`h-11 px-4 text-cp-basis font-semibold border-l-2 first:border-l-0 border-cp-rand transition-colors ${nieuwNr === n ? 'bg-cp-ink text-cp-op-ink' : 'bg-cp-vlak hover:bg-cp-achtergrond'} ${focusRing}`}>Batch {n}</button>
+                className={`h-11 px-4 text-cp-basis font-semibold border-l-2 first:border-l-0 border-cp-rand transition-colors ${nieuwNr === n ? 'bg-cp-ink text-cp-op-ink' : 'bg-cp-vlak hover:bg-cp-achtergrond'} ${focusRing}`}>{n === BORD_MAANDELIJKS ? 'Maandelijks' : `Batch ${n}`}</button>
             ))}
           </div>
           <button type="submit" disabled={!naam.trim() || bezig} className={`inline-flex items-center gap-2 h-12 px-5 rounded-xl bg-cp-ink text-cp-op-ink text-cp-basis font-semibold disabled:opacity-40 hover:opacity-90 active:scale-[0.98] transition-all ${focusRing}`}>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useTransition } from 'react'
+import { useState, useCallback, useTransition, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { ContentCalendar, type SocialContentItem, type SocialContentStatus } from '@/components/calendar/content-calendar'
 import { Plus, X, Loader2, Sparkles, CheckSquare, Trash2, AlertTriangle, CalendarRange, ArrowRight, History } from 'lucide-react'
@@ -9,9 +9,11 @@ import { ClickUpSyncControl } from '@/components/admin/clickup-sync-control'
 import { ShootBriefings } from '@/components/admin/shoot-briefings'
 import { SendMailButton } from '@/components/admin/send-mail-button'
 import { GoedkeuringDeadlines } from '@/components/admin/goedkeuring-deadlines'
+import { GoedkeuringAanvragen } from '@/components/admin/goedkeuring-aanvragen'
 import { ShootDocumentKnop } from '@/components/shoot-document-knop'
 import { KANAAL_SLUGS, kanaalLabel } from '@/lib/social-platforms'
 import { toast } from 'sonner'
+import { ROL_INFO, type KalenderRol } from '@/lib/content/kalender-rol'
 
 type Client = { id: string; company_name: string }
 
@@ -147,7 +149,7 @@ function CreateDialog({
             <label className={lbl}>Status</label>
             <select className={inp} value={form.status} onChange={(e) => setForm((p) => ({ ...p, status: e.target.value as SocialContentStatus }))}>
               <option value="draft">Concept</option>
-              <option value="ready_for_review">Bij klant</option>
+              <option value="ready_for_review">Feedback gevraagd (naar klant)</option>
             </select>
           </div>
           <div className="flex gap-2 pt-1">
@@ -198,6 +200,19 @@ export function SocialMediaAdmin({
   const [shiftFrom, setShiftFrom] = useState(thisMonth)
   const [shiftTo, setShiftTo] = useState(nextMonthStr)
   const [shifting, setShifting] = useState(false)
+
+  // Rol van de geselecteerde klant in de contentplanning: zo weet het team wat de klant zelf kan.
+  const [klantRol, setKlantRol] = useState<{ clientId: string; rol: KalenderRol | null } | null>(null)
+  // Na "Goedkeuring aanvragen": termijnen en statussen opnieuw laden.
+  const [deadlineVersie, setDeadlineVersie] = useState(0)
+  useEffect(() => {
+    if (!selectedClient) return
+    let weg = false
+    fetch(`/api/admin/clients/${selectedClient}/kalender-rol`, { cache: 'no-store' })
+      .then(async (r) => { const j = await r.json().catch(() => ({})); if (!weg && r.ok) setKlantRol({ clientId: selectedClient, rol: j.rol ?? null }) })
+      .catch(() => { /* enkel informatief */ })
+    return () => { weg = true }
+  }, [selectedClient])
 
   const toggleSelected = (id: string) => {
     setSelectedIds(prev => {
@@ -369,10 +384,16 @@ export function SocialMediaAdmin({
             {selectedClientData && (
               <div className="flex gap-3 text-xs text-gray-500">
                 <span className="px-2 py-1 bg-gray-100 rounded-lg">{selectedClientData.company_name}</span>
+                {klantRol?.clientId === selectedClient && (
+                  <a href={`/admin/clients/${selectedClient}#kalender-rol`} className="px-2 py-1 border border-gray-200 rounded-lg hover:bg-gray-50" title={ROL_INFO[klantRol.rol ?? 'standaard'].uitleg}>
+                    Klant: {ROL_INFO[klantRol.rol ?? 'standaard'].label}
+                  </a>
+                )}
               </div>
             )}
             {!selectMode ? (
               <>
+                <GoedkeuringAanvragen clientId={selectedClient} clients={clients} onKlaar={() => { setDeadlineVersie((v) => v + 1); loadItems(selectedClient) }} />
                 <SendMailButton clientId={selectedClient} kind="scripts" label="Verstuur mail" />
                 <SendMailButton clientId={selectedClient} kind="shoot" label="Verstuur uitnodiging" />
                 <ShootDocumentKnop
@@ -439,7 +460,7 @@ export function SocialMediaAdmin({
       </div>
 
       {/* Goedkeuringsdeadlines: overzicht van alle klanten + beheer voor deze klant */}
-      <GoedkeuringDeadlines clientId={selectedClient || undefined} onKiesKlant={handleClientChange} />
+      <GoedkeuringDeadlines clientId={selectedClient || undefined} onKiesKlant={handleClientChange} vernieuw={deadlineVersie} clients={clients} onAangevraagd={() => { setDeadlineVersie((v) => v + 1); if (selectedClient) loadItems(selectedClient) }} />
 
       {/* ClickUp-sync (per klant) */}
       {selectedClient && (
@@ -455,8 +476,8 @@ export function SocialMediaAdmin({
             const count = clientItems.filter((it) => it.status === s).length
             const labels: Record<string, string> = {
               draft: 'Concept',
-              ready_for_review: 'Bij klant',
-              changes_requested: 'Feedback',
+              ready_for_review: 'Feedback gevraagd',
+              changes_requested: 'Aanpassing gevraagd',
               approved: 'Goedgekeurd',
             }
             const colors: Record<string, string> = {
@@ -493,6 +514,13 @@ export function SocialMediaAdmin({
               onDelete: handleDelete,
               onCreateOnDay: (date) => setCreateDialog({ open: true, date }),
               onLaadActiviteit: async (id) => { const r = await fetch(`/api/admin/social-content/activiteit?item=${id}`, { cache: 'no-store' }); const j = await r.json().catch(() => ({})); return r.ok ? j.activiteit ?? [] : [] },
+              onOpmerking: async (id, tekst) => {
+                const r = await fetch('/api/admin/social-content/activiteit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ item: id, tekst }) })
+                const j = await r.json().catch(() => ({}))
+                if (!r.ok) { toast.error(j.error || 'Opmerking plaatsen mislukt'); throw new Error(j.error) }
+                toast.success('Opmerking geplaatst. De klant ziet ze in het portaal.')
+                return j.activiteit ?? []
+              },
             }}
             selection={{
               enabled: selectMode,

@@ -4,21 +4,19 @@ import { PortalCalendar } from './portal-calendar'
 import { ShootBriefingView, type Shoot } from '@/components/portal/shoot-briefing-view'
 import { type Feedback } from '@/components/portal/shoot-feedback'
 import { type Idea } from '@/components/portal/shoot-ideas'
-import { requirePortalView, sessionCan } from '@/lib/portal-auth'
-import { magSessieBeheren } from '@/lib/content/kalender-beheer-server'
+import { requirePortalView } from '@/lib/portal-auth'
+import { kalenderRechtenVoorSessie } from '@/lib/content/kalender-beheer-server'
+import { ROL_INFO, kanGoedkeuren } from '@/lib/content/kalender-rol'
 import { ShootDocumentKnop } from '@/components/shoot-document-knop'
 import { getLang } from '@/lib/i18n-server'
-import { aftelItemsVoorKlant } from '@/lib/content/goedkeuring-deadlines'
-import { GoedkeuringAftelklok } from '@/components/portal/goedkeuring-aftelklok'
+import { goedkeuringenVoorKlant } from '@/lib/content/goedkeuring-deadlines'
 
 type FeedbackRow = Feedback & { shoot_id: string }
 type IdeaRow = Idea & { shoot_id: string; attachment_path: string | null }
 
-export default async function PortalSocialMediaPage() {
+export default async function PortalSocialMediaPage({ searchParams }: { searchParams?: { item?: string } }) {
   const session = await requirePortalView('social_media')
   const clientId = session.clientId
-  const canApprove = sessionCan(session, 'social_media', 'approve_scripts')
-  const canFeedback = sessionCan(session, 'social_media', 'feedback')
   const admin = createAdminSupabaseClient()
 
   const { data: client } = await admin
@@ -32,12 +30,17 @@ export default async function PortalSocialMediaPage() {
     .eq('service_slug', 'social-media')
     .maybeSingle()
   if (!svcRow?.active) redirect('/portal')
-  // Zelf beheren: enkel als NextGenMedia het voor deze klant (en deze gebruiker) aanzette.
-  const canEdit = await magSessieBeheren(admin, session, sessionCan(session, 'social_media', 'edit'))
+  // Wat deze gebruiker mag: de rol van de klant in de contentplanning × eigen portaalrechten.
+  // "Geen toegang" opent de kalender niet (ook de API's weigeren).
+  const rechten = await kalenderRechtenVoorSessie(admin, session)
+  if (!rechten.bekijken) redirect('/portal')
+  const magGoedkeuren = kanGoedkeuren(rechten)
 
-  // Eerst een verstreken deadline verwerken, zodat de kalender meteen klopt.
+  // Wat op goedkeuring wacht (met aftelling): enkel tonen aan wie ook kan goedkeuren.
   const lang = await getLang()
-  const aftel = await aftelItemsVoorKlant(admin, clientId, lang)
+  const goedkeuringen = magGoedkeuren ? await goedkeuringenVoorKlant(admin, clientId) : []
+  // ?item=<id> (vanuit het dashboard of de mail): dat item meteen openen, als het van deze klant is.
+  const openItem = /^[0-9a-f-]{36}$/i.test(searchParams?.item ?? '') ? searchParams!.item! : null
 
   const { data: items } = await admin
     .from('social_content_items')
@@ -88,9 +91,10 @@ export default async function PortalSocialMediaPage() {
         <div>
           <h1 className="text-2xl font-bold">Social Media Kalender</h1>
           <p className="text-sm text-gray-500 mt-0.5">{client?.company_name}</p>
+          {ROL_INFO[rechten.rol].klant && <p className="text-xs text-gray-500 mt-1">{ROL_INFO[rechten.rol].klant}</p>}
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-          {pendingCount > 0 && (
+          {pendingCount > 0 && magGoedkeuren && (
             <div className="status-badge bg-amber-100 text-amber-700 text-sm px-3 py-1.5 self-start sm:self-auto">
               {pendingCount} wachten op goedkeuring
             </div>
@@ -104,7 +108,6 @@ export default async function PortalSocialMediaPage() {
         </div>
       </div>
 
-      <GoedkeuringAftelklok items={aftel} lang={lang} />
 
       <PortalCalendar
         initialItems={(items ?? []).map((it) => ({
@@ -112,9 +115,10 @@ export default async function PortalSocialMediaPage() {
           platforms: Array.isArray(it.platforms) ? it.platforms : it.platform ? [it.platform] : [],
         }))}
         clientId={clientId}
-        canApprove={canApprove}
-        canFeedback={canFeedback}
-        canEdit={canEdit}
+        rechten={rechten}
+        goedkeuringen={goedkeuringen}
+        lang={lang}
+        openItem={openItem}
       />
 
       <ShootBriefingView shoots={shoots} feedbackByShoot={feedbackByShoot} ideasByShoot={ideasByShoot} />

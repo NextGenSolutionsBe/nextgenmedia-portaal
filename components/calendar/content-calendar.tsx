@@ -1,13 +1,15 @@
 'use client'
 
-import { useMemo, useState, useCallback, useEffect } from 'react'
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react'
 import {
   ChevronLeft, ChevronRight, X, Check, RefreshCw,
-  Send, Pencil, Save, Image, Video, FileText, Plus,
+  Send, Pencil, Save, Image, Video, FileText, Plus, MessageSquare,
 } from 'lucide-react'
 import { ymd } from '@/lib/utils'
 import { KANAAL_SLUGS, kanaalLabel, normaliseerKanalen } from '@/lib/social-platforms'
-import { klantOvergangen } from '@/lib/content/kalender-beheer'
+import {
+  magBewerken, magVerwijderen, statusOvergangen, magBeoordelen, overgangLabel, type KalenderRechten,
+} from '@/lib/content/kalender-rol'
 
 export type SocialContentStatus =
   | 'draft' | 'ready_for_review' | 'approved'
@@ -48,9 +50,9 @@ export type CalendarMode = 'admin' | 'client'
 
 const STATUS_STYLE: Record<SocialContentStatus, { dot: string; badge: string; label: string }> = {
   draft: { dot: 'bg-gray-400', badge: 'bg-gray-100 text-gray-600 border-gray-200', label: 'Concept' },
-  ready_for_review: { dot: 'bg-amber-400', badge: 'bg-amber-50 text-amber-700 border-amber-200', label: 'Bij klant' },
+  ready_for_review: { dot: 'bg-amber-400', badge: 'bg-amber-50 text-amber-700 border-amber-200', label: 'Feedback gevraagd' },
   approved: { dot: 'bg-green-500', badge: 'bg-green-50 text-green-700 border-green-200', label: 'Goedgekeurd' },
-  changes_requested: { dot: 'bg-red-500', badge: 'bg-red-50 text-red-700 border-red-200', label: 'Feedback' },
+  changes_requested: { dot: 'bg-red-500', badge: 'bg-red-50 text-red-700 border-red-200', label: 'Aanpassing gevraagd' },
   scheduled: { dot: 'bg-blue-500', badge: 'bg-blue-50 text-blue-700 border-blue-200', label: 'Ingepland' },
   published: { dot: 'bg-purple-500', badge: 'bg-purple-50 text-purple-700 border-purple-200', label: 'Gepubliceerd' },
 }
@@ -80,14 +82,25 @@ export type CalendarActions = {
   onCreateOnDay?: (planned_date: string) => void
   onApprove?: (id: string) => Promise<void>
   onRequestChanges?: (id: string, feedback: string) => Promise<void>
+  /** Opmerking bij een item (verandert niets aan inhoud of status); geeft de bijgewerkte activiteit terug. */
+  onOpmerking?: (id: string, tekst: string) => Promise<ContentActiviteit[]>
 }
 
+/** Zonder rechten (zou niet mogen gebeuren in het portaal): enkel kijken. */
+const ALLEEN_KIJKEN: KalenderRechten = { rol: 'bekijken', bekijken: true, opmerkingen: false, aanmaken: false, bewerkbaar: [], verwijderen: 'nooit', goedkeuren: [], afkeuren: [], overgangen: {}, startStatussen: [] }
+const tijdstip = (iso: string) => new Date(iso).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+const wie = (a: ContentActiviteit) => a.door ?? (a.rol === 'klant' ? 'Klant' : 'NextGenMedia')
+
 export function ContentCalendar({
-  items: itemsProp, mode, actions, selection,
+  items: itemsProp, mode, actions, selection, rechten, focus,
 }: {
   items: SocialContentItem[] | null
   mode: CalendarMode
   actions: CalendarActions
+  /** Portaal: wat deze klantgebruiker mag (lib/content/kalender-rol.ts). De server controleert hetzelfde. */
+  rechten?: KalenderRechten
+  /** Een item van buitenaf openen (overzicht "wacht op goedkeuring", link ?item=). `n` verhogen = opnieuw openen. */
+  focus?: { id: string; n: number } | null
   selection?: {
     enabled: boolean
     selectedIds: Set<string>
@@ -102,6 +115,18 @@ export function ContentCalendar({
 
   const selected = items.find((i) => i.id === selectedId) ?? null
   const today = ymd(new Date())
+  const wortel = useRef<HTMLDivElement>(null)
+
+  // Van buitenaf geopend: naar de maand van het item, het item selecteren en in beeld brengen.
+  useEffect(() => {
+    if (!focus) return
+    const it = items.find((i) => i.id === focus.id)
+    if (!it) return
+    setView('month')
+    setCursor(new Date(`${it.planned_date}T12:00:00`))
+    setSelectedId(it.id)
+    wortel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [focus?.id, focus?.n]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const days = useMemo(() => {
     const start = view === 'month'
@@ -145,11 +170,11 @@ export function ContentCalendar({
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div ref={wortel} className="flex flex-col gap-4 scroll-mt-20">
       {/* Script panel — on mobile appears ABOVE calendar when an item is selected */}
       {selected && (
         <div className="lg:hidden">
-          <ScriptPanel item={selected} mode={mode} actions={actions} onClose={() => setSelectedId(null)} />
+          <ScriptPanel item={selected} mode={mode} actions={actions} rechten={rechten} onClose={() => setSelectedId(null)} />
         </div>
       )}
 
@@ -297,6 +322,7 @@ export function ContentCalendar({
           item={selected}
           mode={mode}
           actions={actions}
+          rechten={rechten}
           onClose={() => setSelectedId(null)}
         />
       </div>
@@ -306,16 +332,18 @@ export function ContentCalendar({
 }
 
 function ScriptPanel({
-  item, mode, actions, onClose,
+  item, mode, actions, rechten, onClose,
 }: {
   item: SocialContentItem | null
   mode: CalendarMode
   actions: CalendarActions
+  rechten?: KalenderRechten
   onClose: () => void
 }) {
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<SocialContentItem | null>(null)
   const [feedback, setFeedback] = useState('')
+  const [opmerking, setOpmerking] = useState('')
   const [busy, setBusy] = useState(false)
   const [publiceer, setPubliceer] = useState<{ datum: string; kanaal: string; link: string } | null>(null)
   const [activiteit, setActiviteit] = useState<ContentActiviteit[] | null>(null)
@@ -332,6 +360,7 @@ function ScriptPanel({
     setForm(item)
     setEditing(false)
     setFeedback(item.client_feedback ?? '')
+    setOpmerking('')
   }
 
   if (!item) {
@@ -372,6 +401,33 @@ function ScriptPanel({
     } finally { setBusy(false) }
   }
 
+  // Opmerkingen en activiteit komen uit hetzelfde logboek; opmerkingen staan apart, oudste eerst.
+  const opmerkingen = (activiteit ?? []).filter((a) => a.actie === 'opmerking').reverse()
+  const overigeActiviteit = (activiteit ?? []).filter((a) => a.actie !== 'opmerking')
+  // Wie zette dit item op zijn huidige status, en wanneer?
+  const laatsteStatus = overigeActiviteit.find((a) => a.details && typeof a.details.naar === 'string')
+  const statusDoor = laatsteStatus && laatsteStatus.details?.naar === item.status ? laatsteStatus : null
+  const plaatsOpmerking = async () => {
+    if (!actions.onOpmerking || !opmerking.trim()) return
+    setBusy(true)
+    try { setActiviteit(await actions.onOpmerking(item.id, opmerking)); setOpmerking('') } catch { /* melding komt van de handler */ } finally { setBusy(false) }
+  }
+  const zetStatus = async (naar: SocialContentStatus) => {
+    setBusy(true)
+    try { await actions.onSetStatus?.(item.id, naar) } catch { /* melding komt van de handler */ } finally { setBusy(false) }
+  }
+
+  // Portaal: wat mag deze gebruiker bij DIT item (zelfde regels als de server).
+  const r = rechten ?? ALLEEN_KIJKEN
+  const klantMagBewerken = !isAdmin && !!actions.onUpdate && magBewerken(r, item)
+  const klantVergrendeld = !isAdmin && !!actions.onUpdate && !klantMagBewerken
+  const klantGoedkeuren = !isAdmin && !!actions.onApprove && magBeoordelen(r, item.status, 'approved')
+  const klantAfkeuren = !isAdmin && !!actions.onRequestChanges && magBeoordelen(r, item.status, 'changes_requested')
+  const klantPlanning = !isAdmin && actions.onSetStatus ? statusOvergangen(r, item.status) : []
+  const klantVerwijderen = !isAdmin && !!actions.onDelete && magVerwijderen(r, item)
+  const klantNiets = !klantMagBewerken && !klantGoedkeuren && !klantAfkeuren && klantPlanning.length === 0 && !klantVerwijderen
+  const toonActies = isAdmin || editing || !klantNiets || klantVergrendeld || !actions.onOpmerking
+
   // Eén bron (lib/social-platforms.ts); Instagram + Facebook = Meta.
   const ALL_PLATFORMS = KANAAL_SLUGS
   const togglePlatform = (p: string) => {
@@ -390,6 +446,9 @@ function ScriptPanel({
             <span className={`status-badge border ${style.badge}`}>{style.label}</span>
             <span className="text-xs text-gray-400">{f.planned_date}{f.planned_time ? ` · ${f.planned_time.slice(0, 5)}` : ''}</span>
           </div>
+          {statusDoor && (
+            <p className="text-[11px] text-gray-400 -mt-1 mb-2">Op “{style.label}” gezet door {wie(statusDoor)}{statusDoor.rol === 'klant' ? ' (klant)' : ''} · {tijdstip(statusDoor.op)}</p>
+          )}
           {editing ? (
             <input
               className={inp}
@@ -520,15 +579,40 @@ function ScriptPanel({
           <p className="text-[11px] text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1.5">Aangepast door de klant{item.klant_gewijzigd_door ? ` (${item.klant_gewijzigd_door})` : ''} op {new Date(item.klant_gewijzigd_op).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
         )}
 
+        {laadActiviteit && (opmerkingen.length > 0 || actions.onOpmerking) && (
+          <div>
+            <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Opmerkingen</div>
+            {activiteit === null ? <p className="text-xs text-gray-400">Laden…</p> : opmerkingen.length === 0 ? <p className="text-xs text-gray-400">Nog geen opmerkingen.</p> : (
+              <ul className="space-y-1.5">
+                {opmerkingen.map((o, i) => (
+                  <li key={i} className={`rounded-lg border px-2.5 py-1.5 ${o.rol === 'klant' ? 'border-amber-100 bg-amber-50/60' : 'border-gray-100 bg-gray-50'}`}>
+                    <div className="text-[11px] text-gray-500"><b className="font-medium text-gray-800">{wie(o)}</b>{o.rol === 'klant' ? ' (klant)' : ' (NextGenMedia)'} · <span className="tabular-nums">{tijdstip(o.op)}</span></div>
+                    <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{String(o.details?.tekst ?? '')}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {actions.onOpmerking && (
+              <div className="mt-2 space-y-1.5">
+                <textarea rows={2} maxLength={2000} value={opmerking} onChange={(e) => setOpmerking(e.target.value)} className={inp} placeholder="Schrijf een opmerking…" aria-label="Opmerking" />
+                <button type="button" disabled={busy || !opmerking.trim()} onClick={plaatsOpmerking} className="btn-secondary text-xs w-full">
+                  <MessageSquare className="h-3 w-3" />
+                  Opmerking plaatsen
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {laadActiviteit && (
           <div>
             <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Activiteit</div>
-            {activiteit === null ? <p className="text-xs text-gray-400">Laden…</p> : activiteit.length === 0 ? <p className="text-xs text-gray-400">Nog geen activiteit geregistreerd.</p> : (
+            {activiteit === null ? <p className="text-xs text-gray-400">Laden…</p> : overigeActiviteit.length === 0 ? <p className="text-xs text-gray-400">Nog geen activiteit geregistreerd.</p> : (
               <ul className="space-y-1">
-                {activiteit.slice(0, 12).map((a, i) => (
+                {overigeActiviteit.slice(0, 12).map((a, i) => (
                   <li key={i} className="text-xs text-gray-600 flex gap-2">
-                    <span className="tabular-nums text-gray-400 shrink-0">{new Date(a.op).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
-                    <span><b className="font-medium text-gray-800">{a.door ?? (a.rol === 'klant' ? 'Klant' : 'NextGenMedia')}</b>{a.rol === 'klant' ? ' (klant)' : ''} {a.actie}</span>
+                    <span className="tabular-nums text-gray-400 shrink-0">{tijdstip(a.op)}</span>
+                    <span><b className="font-medium text-gray-800">{wie(a)}</b>{a.rol === 'klant' ? ' (klant)' : ''} {a.actie}</span>
                   </li>
                 ))}
               </ul>
@@ -538,13 +622,14 @@ function ScriptPanel({
 
         {item.status === 'changes_requested' && item.client_feedback && (
           <div className="text-sm rounded-lg border border-red-200 bg-red-50 p-3 text-red-700">
-            <strong className="block mb-1 text-xs uppercase tracking-wide">Feedback klant</strong>
+            <strong className="block mb-1 text-xs uppercase tracking-wide">Gevraagde aanpassing</strong>
             {item.client_feedback}
           </div>
         )}
       </div>
 
       {/* Actions */}
+      {toonActies && (
       <div className="p-4 border-t border-gray-100 space-y-3">
         {isAdmin ? (
           <>
@@ -567,6 +652,17 @@ function ScriptPanel({
               )}
             </div>
             <div className="flex flex-wrap gap-1.5">
+              {item.status === 'ready_for_review' && (
+                <>
+                  <button disabled={busy} onClick={() => zetStatus('approved')} className="btn-secondary text-xs flex-1">
+                    <Check className="h-3 w-3" />
+                    Goedkeuren
+                  </button>
+                  <button disabled={busy} onClick={() => zetStatus('draft')} className="btn-secondary text-xs">
+                    Terug naar concept
+                  </button>
+                </>
+              )}
               {(item.status === 'draft' || item.status === 'changes_requested') && (
                 <button
                   disabled={busy}
@@ -612,7 +708,7 @@ function ScriptPanel({
           </>
         ) : (
           <>
-            {actions.onUpdate && (
+            {klantMagBewerken && (
               editing ? (
                 <div className="flex gap-2">
                   <button disabled={busy} onClick={save} className="btn-primary flex-1">
@@ -628,53 +724,61 @@ function ScriptPanel({
                 </button>
               )
             )}
-            {editing ? null : (item.status === 'ready_for_review' || item.status === 'changes_requested') ? (
+            {!editing && klantVergrendeld && (
+              <p className="text-[11px] text-gray-500">Een item met status “{style.label}” kan je niet meer aanpassen.{actions.onOpmerking ? ' Plaats een opmerking als er iets moet veranderen.' : ''}</p>
+            )}
+            {!editing && (klantGoedkeuren || klantAfkeuren) && (
               <div className="space-y-3">
-                <div>
-                  <label className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">
-                    Feedback / opmerkingen
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={feedback}
-                    onChange={(e) => setFeedback(e.target.value)}
-                    className={inp}
-                    placeholder="Wat zou je aanpassen?"
-                  />
-                </div>
+                {klantAfkeuren && (
+                  <div>
+                    <label className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">
+                      Wat moet er anders?
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={feedback}
+                      onChange={(e) => setFeedback(e.target.value)}
+                      className={inp}
+                      placeholder="Beschrijf de aanpassing die je wil"
+                    />
+                  </div>
+                )}
                 <div className="flex gap-2">
-                  <button
-                    disabled={busy || !feedback.trim()}
-                    onClick={async () => { setBusy(true); try { await actions.onRequestChanges?.(item.id, feedback) } finally { setBusy(false) } }}
-                    className="btn-secondary flex-1 text-xs"
-                  >
-                    <RefreshCw className="h-3 w-3" />
-                    Feedback
-                  </button>
-                  <button
-                    disabled={busy}
-                    onClick={async () => { setBusy(true); try { await actions.onApprove?.(item.id) } finally { setBusy(false) } }}
-                    className="btn-primary flex-1 text-xs"
-                  >
-                    <Check className="h-3 w-3" />
-                    Goedkeuren
-                  </button>
+                  {klantAfkeuren && (
+                    <button
+                      disabled={busy || !feedback.trim()}
+                      onClick={async () => { setBusy(true); try { await actions.onRequestChanges!(item.id, feedback) } catch { /* melding komt van de handler */ } finally { setBusy(false) } }}
+                      className="btn-secondary flex-1 text-xs"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      Aanpassing vragen
+                    </button>
+                  )}
+                  {klantGoedkeuren && (
+                    <button
+                      disabled={busy}
+                      onClick={async () => { setBusy(true); try { await actions.onApprove!(item.id) } catch { /* melding komt van de handler */ } finally { setBusy(false) } }}
+                      className="btn-primary flex-1 text-xs"
+                    >
+                      <Check className="h-3 w-3" />
+                      Goedkeuren
+                    </button>
+                  )}
                 </div>
               </div>
-            ) : !actions.onUpdate ? (
-              <p className="text-xs text-gray-400 text-center">Geen actie vereist op dit moment.</p>
-            ) : null}
-            {!editing && actions.onSetStatus && klantOvergangen(item.status).length > 0 && (
+            )}
+            {!editing && klantPlanning.length > 0 && (
               <div className="space-y-2">
                 <div className="flex flex-wrap gap-1.5">
-                  {klantOvergangen(item.status).map((naar) => (
+                  {klantPlanning.map((naar) => (
                     <button key={naar} type="button" disabled={busy}
                       onClick={async () => {
                         if (naar === 'published') { setPubliceer({ datum: new Date().toISOString().slice(0, 10), kanaal: normaliseerKanalen(item.platforms?.length ? item.platforms : [item.platform])[0] ?? '', link: '' }); return }
-                        setBusy(true); try { await actions.onSetStatus!(item.id, naar) } catch { /* melding komt van de handler */ } finally { setBusy(false) }
+                        await zetStatus(naar)
                       }}
-                      className={naar === 'published' ? 'btn-primary text-xs flex-1' : 'btn-secondary text-xs flex-1'}>
-                      {naar === 'published' ? 'Gepubliceerd markeren' : naar === 'scheduled' ? 'Inplannen' : naar === 'approved' ? (item.status === 'draft' ? 'Goedkeuren' : 'Uit planning halen') : naar === 'draft' ? 'Terug naar concept' : naar}
+                      className={naar === 'published' || naar === 'ready_for_review' ? 'btn-primary text-xs flex-1' : 'btn-secondary text-xs flex-1'}>
+                      {naar === 'ready_for_review' && <Send className="h-3 w-3" />}
+                      {overgangLabel(item.status, naar)}
                     </button>
                   ))}
                 </div>
@@ -694,7 +798,7 @@ function ScriptPanel({
                 )}
               </div>
             )}
-            {!editing && actions.onDelete && (
+            {!editing && klantVerwijderen && (
               <button
                 disabled={busy}
                 onClick={async () => {
@@ -707,9 +811,13 @@ function ScriptPanel({
                 Verwijderen
               </button>
             )}
+            {!editing && klantNiets && !klantVergrendeld && !actions.onOpmerking && (
+              <p className="text-xs text-gray-400 text-center">Geen actie vereist op dit moment.</p>
+            )}
           </>
         )}
       </div>
+      )}
     </aside>
   )
 }

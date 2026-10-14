@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Mail, X, Loader2, Send, CheckCircle2 } from 'lucide-react'
 import { renderTemplate, type MailVars } from '@/lib/email-render'
+import { DEFAULT_TEMPLATES } from '@/lib/email-templates-defaults'
 
 // Eén gedeelde mailcomponent voor ALLE handmatige mails (klant/contract/taak/
 // toegang/algemeen). Altijd preview + handmatige bevestiging; nooit automatisch.
@@ -18,17 +19,27 @@ export type MailContext =
   // Formulierlink (Formulieren → Delen): onderwerp/tekst/knop voorgevuld, ontvanger aanpasbaar.
   | { type: 'formulier'; link: string; formulierTitel: string; clientId?: string | null; clientName?: string | null; verlooptOp?: string | null }
 
-export function MailComposer({ context, label = 'Verstuur mail', className = 'btn-secondary text-sm' }: { context: MailContext; label?: string; className?: string }) {
+/** Resultaat van een gelukte verzending (of van een eerder gelukte, bij dezelfde verzendpoging). */
+export type MailVerstuurd = { id: string | null; verstuurd_op: string | null; al_verstuurd?: boolean }
+
+export function MailComposer({ context, label = 'Verstuur mail', className = 'btn-secondary text-sm', onSent }: { context: MailContext; label?: string; className?: string; onSent?: (r: MailVerstuurd) => void }) {
   const [open, setOpen] = useState(false)
   return (
     <>
       <button type="button" onClick={() => setOpen(true)} className={className}><Mail className="h-4 w-4" />{label}</button>
-      {open && <Dialog context={context} onClose={() => setOpen(false)} />}
+      {open && <MailDialog context={context} onClose={() => setOpen(false)} onSent={onSent} />}
     </>
   )
 }
 
-function Dialog({ context, onClose }: { context: MailContext; onClose: () => void }) {
+/** Ingebouwde template van een soort, als er (nog) geen eigen versie in E-mail Center staat. */
+const ingebouwd = (kind?: string): Template | null => {
+  const d = kind ? DEFAULT_TEMPLATES.find((t) => t.kind === kind) : undefined
+  return d ? { id: `standaard:${d.kind}`, name: `${d.name} (standaard)`, subject: d.subject, body: d.body, kind: d.kind, cta_text: d.cta_text, cta_link: d.cta_link } : null
+}
+
+/** Dezelfde dialoog, rechtstreeks te openen vanuit een andere flow (bv. "Goedkeuring aanvragen"). */
+export function MailDialog({ context, onClose, onSent }: { context: MailContext; onClose: () => void; onSent?: (r: MailVerstuurd) => void }) {
   const [loadingCtx, setLoadingCtx] = useState(true)
   const [toEmail, setToEmail] = useState('')
   const [templates, setTemplates] = useState<Template[]>([])
@@ -42,6 +53,10 @@ function Dialog({ context, onClose }: { context: MailContext; onClose: () => voi
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
+  const [vars, setVars] = useState<MailVars>({})
+  const [eerder, setEerder] = useState<{ verstuurd_op: string; deadline: string | null } | null>(null)
+  // Eén sleutel per verzendpoging: een dubbelklik of herhaald verzoek verstuurt nooit twee keer.
+  const [sleutel] = useState(() => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`))
 
   // Ontvanger kan voor contract/access/generic vrij ingevuld worden; voor 'client'
   // komt die uit de context-API.
@@ -52,7 +67,10 @@ function Dialog({ context, onClose }: { context: MailContext; onClose: () => voi
       try {
         const tplRes = await fetch('/api/admin/email/templates')
         const tpl = await tplRes.json()
-        const list = (tpl.templates ?? []) as Template[]
+        const eigen = (tpl.templates ?? []) as Template[]
+        // De ingebouwde template van deze soort tonen zolang er geen eigen versie van bestaat.
+        const extra = context.type === 'client' && !eigen.some((t) => t.kind === context.kind) ? ingebouwd(context.kind) : null
+        const list = extra ? [extra, ...eigen] : eigen
         setTemplates(list)
 
         if (context.type === 'client') {
@@ -65,8 +83,11 @@ function Dialog({ context, onClose }: { context: MailContext; onClose: () => voi
           const ctxRes = await fetch(`/api/admin/email/context?${qs.toString()}`)
           const ctx = await ctxRes.json()
           const vars: MailVars = ctx.vars ?? {}
+          setVars(vars)
           if (ctxRes.ok) setToEmail(ctx.toEmail ?? '')
-          const suggested = list.find((t) => t.kind === context.kind) ?? list[0]
+          if (ctx.deadline?.mail_verstuurd_op) setEerder({ verstuurd_op: ctx.deadline.mail_verstuurd_op, deadline: ctx.deadline.mail_deadline ?? null })
+          // Een soort zonder template kiest niet langer zomaar de eerste template uit de lijst.
+          const suggested = list.find((t) => t.kind === context.kind) ?? (context.kind ? null : list[0])
           if (suggested) applyTemplate(suggested, vars)
         } else if (context.type === 'contract') {
           setToEmail(context.defaultEmail ?? '')
@@ -113,7 +134,8 @@ function Dialog({ context, onClose }: { context: MailContext; onClose: () => voi
   }
   const onPick = (id: string) => {
     const t = templates.find((x) => x.id === id)
-    if (t) applyTemplate(t, {})
+    // De gegevens van de klant blijven gelden bij het wisselen van template.
+    if (t) applyTemplate(t, vars)
     else { setTemplateId(''); }
   }
 
@@ -136,13 +158,16 @@ function Dialog({ context, onClose }: { context: MailContext; onClose: () => voi
             to_email: toEmail,
             to_client_id: (context.type === 'client' || context.type === 'access') ? context.clientId : context.type === 'formulier' ? (context.clientId ?? null) : null,
             subject, body, cta_text: ctaText || null, cta_link: ctaLink || null,
-            template_id: templateId || null, template_name: tpl?.name ?? null,
+            template_id: templateId && !templateId.startsWith('standaard:') ? templateId : null, template_name: tpl?.name ?? null,
             kind: context.type === 'client' ? (context.kind ?? 'generic') : 'generic',
+            deadline_id: context.type === 'client' ? (context.deadlineId ?? null) : null,
+            verzend_sleutel: sleutel,
           }),
         })
       }
-      const j = await res.json(); if (!res.ok) throw new Error(j.error)
+      const j = await res.json(); if (!res.ok) throw new Error(j.error || 'Verzenden mislukt')
       setDone(true)
+      onSent?.({ id: j.id ?? null, verstuurd_op: j.verstuurd_op ?? null, al_verstuurd: j.al_verstuurd === true })
       if (context.type === 'contract') setTimeout(() => window.location.reload(), 1000)
     } catch (e) { setError(e instanceof Error ? e.message : 'Fout') } finally { setSending(false) }
   }
@@ -172,6 +197,11 @@ function Dialog({ context, onClose }: { context: MailContext; onClose: () => voi
                 ? <input className={inp} value={toEmail} onChange={(e) => setToEmail(e.target.value)} placeholder="ontvanger@bedrijf.be" />
                 : <div className="text-sm text-gray-800">{toEmail || '— geen e-mailadres —'}</div>}
             </div>
+            {eerder && (
+              <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                Voor deze goedkeuringstermijn ging al een mail op {new Date(eerder.verstuurd_op).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}{eerder.deadline ? ` (met deadline ${eerder.deadline.split('-').reverse().join('/')})` : ''}. Verstuur enkel opnieuw als dat de bedoeling is.
+              </div>
+            )}
             {context.type === 'contract' && (
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Cc <span className="text-gray-400">— optioneel, meerdere adressen met een komma</span></label>
