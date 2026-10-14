@@ -162,19 +162,23 @@ export const STANDAARD_CP: CpInstellingen = {
 - Statistieken
 - Ontbrekende content opvragen
 - Content shoot vastleggen
-# Aanpassingen doorgeven aan Claude
-- Alles uit de meetings terugkoppelen
+# Laatste dag: alle aanpassingen doorvoeren [Claude]
+- Aparte taak: van alle klanten, in alle kalenders tegelijk
+- Alles uit de meetings meenemen
 - Posts en scripts worden aangepast in het portaal`,
+    // Materiaal zoeken staat eerst: je moet weten waar het materiaal staat voor je kan plannen of editen.
     2: `! Pitch Please als eerste editen.
+# Materiaal zoeken
+- Altijd eerst de app checken voor nieuwe foto's van projecten
+- Contentshoots van Bram: in de map met naam 'video's RAW F maand x V maand x - maand y'
+- Per klant: zie "Materiaal per klant" bovenaan
 # Volgorde bepalen
 - Per klant vastleggen wanneer je edit, op basis van de shootdata
 # Posts & stories [Claude Design]
-- Foto's en video's staan per klant in je notities
 - Input geven: welke foto's, aantal slides
 - Bijsturen
 - Inplannen als draft
 # Reels
-- Foto's en video's staan per klant in je notities
 - Zelf editen
 - Captions door AI, met input over de inhoud
 - Als draft in Metricool
@@ -191,11 +195,7 @@ export const STANDAARD_CP: CpInstellingen = {
 # Goedkeuringstermijn aanduiden [portaal]
 - Aanduiden dat de termijn loopt vanaf vandaag
 - Klant krijgt zo te zien hoeveel dagen er nog zijn
-- Mail sturen naar de klant
-# Materiaal zoeken
-- Altijd eerst de app checken voor nieuwe foto's van projecten
-- Contentshoots van Bram: in de map met naam 'video's RAW F maand x V maand x - maand y'
-- Per klant: zie "Materiaal per klant" hieronder`,
+- Mail sturen naar de klant`,
     3: `# Meetings voor volgende maand inplannen (eerste dag van reeks 3)
 - Per socialmediaklant bekijken of er een meeting nodig is
 - Link en mail sturen
@@ -506,6 +506,15 @@ export const MAANDSTART = [
 ]
 
 /**
+ * Laatste werkdag van reeks 1: één aparte taak voor alle klanten samen, namelijk
+ * alle aanpassingen (uit de meetings) doorvoeren in alle kalenders. Afgevinkt per
+ * maand: de check bewaart de eerste dag van de maand, zodat ze blijft staan als de
+ * Maandplanning de reeks later verschuift.
+ */
+export const REEKS1_AANPASSINGEN = { key: 'reeks1_aanpassingen', titel: 'Alle aanpassingen van alle klanten doorvoeren in alle kalenders' } as const
+export const reeks1AanpassingenCheckDatum = (ym: string) => maandStart(ym)
+
+/**
  * Klantenbatches → bord van één klant. Zodra het bord van de maand in gebruik is
  * (minstens één ✓), betekent "niet aangevinkt" = deze maand niet. Is er nog
  * niets aangevinkt, dan volgt de app het ritme en de batch van de klant.
@@ -547,6 +556,27 @@ export function leesWerkwijze(tekst: string): Werkwijze {
 // ── Klantenbord: altijd Batch 1, 2 en 3 ─────────────────────────────────────
 export const BORD_BATCHES = [1, 2, 3] as const
 export type BordBatch = (typeof BORD_BATCHES)[number]
+/**
+ * Naast Batch 1, 2 en 3 heeft het bord een kolom "Maandelijks". Die kolom IS het
+ * ritme van de klant (cp_klanten.ritme): het bord en de klantfiche beheren
+ * hetzelfde veld, geen tweede systeem.
+ */
+export const BORD_MAANDELIJKS = 'maandelijks' as const
+export type BordKolom = BordBatch | typeof BORD_MAANDELIJKS | null
+/**
+ * Ritme na het verslepen op het bord:
+ *  · naar Maandelijks → maandelijks (de batch blijft: die bepaalt nog wat per kwartaal gebeurt)
+ *  · naar Batch 1/2/3 → driemaandelijks (de batches zijn de cycli van drie maanden)
+ *  · naar "Nog geen batch" → een maandelijkse klant verliest dat ook; anders blijft het ritme
+ */
+export function ritmeNaVerplaatsen(naar: BordKolom, huidig: Ritme | null): Ritme | null {
+  if (naar === BORD_MAANDELIJKS) return 'maandelijks'
+  if (naar === null) return huidig === 'maandelijks' ? null : huidig
+  return 'driemaandelijks'
+}
+/** Staat een klant in de kolom Maandelijks? */
+export const opBordMaandelijks = (ritme: Ritme | null | undefined) => ritme === 'maandelijks'
+
 /** "Batch 2" → 2; een andere naam → null. */
 export function batchNr(naam: string | null | undefined): number | null {
   const m = (naam ?? '').trim().match(/^batch\s*(\d+)$/i)

@@ -5,7 +5,7 @@ import { magIk } from '@/lib/instellingen/laden'
 import { leesActorNamen } from '@/lib/actor-namen'
 import {
   leesCp, beurtenMetBord, bordVanKlant, teMakenTaken, isReeks, plusDagen, maandVan, plusMaanden, maandEind, werkdagenVanMaand, FASE_KEYS, STANDAARD_CP,
-  batchNr, startmaandVoorBatch, BORD_BATCHES,
+  batchNr, startmaandVoorBatch, BORD_BATCHES, BORD_MAANDELIJKS, ritmeNaVerplaatsen, type BordKolom,
   type ActiviteitRitme, type CpInstellingen, type Ritme, type Reeks,
 } from '@/lib/contentplanning/model'
 
@@ -258,20 +258,29 @@ export async function POST(req: NextRequest) {
     // ── Vanaf hier: de planning beheren ──
     const nee = beheer(); if (nee) return nee
 
-    // Klantenbord: klant naar Batch 1/2/3 slepen (of uit de batch halen).
+    // Klantenbord: klant naar Batch 1/2/3 of Maandelijks slepen (of uit de batch halen).
+    // Maandelijks = het ritme van de klant; een batch = een cyclus van drie maanden (zie ritmeNaVerplaatsen).
     if (actie === 'bord.batch') {
       const id = uuid(b.client_id); if (!id) return NextResponse.json({ error: 'Kies een klant.' }, { status: 400 })
-      const nr = bordBatch(b.batch_nr); if (nr === undefined) return NextResponse.json({ error: 'Kies batch 1, 2 of 3.' }, { status: 400 })
-      const bid = nr === null ? null : await batchVoorNr(admin, nr)
-      const { error } = await admin.from('clients').update({ batch_id: bid }).eq('id', id)
-      if (error) throw new Error(error.message)
-      await admin.from('cp_klanten').upsert({ client_id: id, actief: true, updated_at: nu }, { onConflict: 'client_id' })
-      return NextResponse.json({ ok: true })
+      const maandelijks = b.batch_nr === BORD_MAANDELIJKS
+      const nr = maandelijks ? null : bordBatch(b.batch_nr); if (nr === undefined) return NextResponse.json({ error: 'Kies batch 1, 2, 3 of maandelijks.' }, { status: 400 })
+      // De batch blijft staan bij Maandelijks: die bepaalt nog wat per kwartaal gebeurt (bv. de kwartaalmeeting).
+      if (!maandelijks) {
+        const bid = nr === null ? null : await batchVoorNr(admin, nr)
+        const { error } = await admin.from('clients').update({ batch_id: bid }).eq('id', id)
+        if (error) throw new Error(error.message)
+      }
+      const { data: cp } = await admin.from('cp_klanten').select('ritme').eq('client_id', id).maybeSingle()
+      const ritme = ritmeNaVerplaatsen(maandelijks ? BORD_MAANDELIJKS : (nr as BordKolom), ((cp as { ritme?: Ritme | null } | null)?.ritme ?? null))
+      const { error: e2 } = await admin.from('cp_klanten').upsert({ client_id: id, actief: true, ritme, updated_at: nu }, { onConflict: 'client_id' })
+      if (e2) throw new Error(e2.message)
+      return NextResponse.json({ ok: true, ritme })
     }
     // Klantenbord: nieuwe klant = naam + batch. Bestaat de naam al, dan gebruiken we die klant (nooit een dubbel).
     if (actie === 'klant.nieuw') {
       const naam = tekst(b.naam, 200); if (!naam) return NextResponse.json({ error: 'Vul de naam van de klant in.' }, { status: 400 })
-      const nr = bordBatch(b.batch_nr); if (nr === undefined || nr === null) return NextResponse.json({ error: 'Kies batch 1, 2 of 3.' }, { status: 400 })
+      const maandelijks = b.batch_nr === BORD_MAANDELIJKS
+      const nr = maandelijks ? null : bordBatch(b.batch_nr); if (!maandelijks && (nr === undefined || nr === null)) return NextResponse.json({ error: 'Kies batch 1, 2, 3 of maandelijks.' }, { status: 400 })
       const { data: zelfde } = await admin.from('clients').select('id, company_name').ilike('company_name', naam.replace(/[%_\\]/g, (c) => `\\${c}`))
       const gevonden = ((zelfde ?? []) as { id: string; company_name: string }[]).find((k) => k.company_name.trim().toLowerCase() === naam.toLowerCase())
       let id = gevonden?.id ?? null
@@ -280,10 +289,12 @@ export async function POST(req: NextRequest) {
         if (error) throw new Error(error.message)
         id = (nieuw as { id: string }).id
       }
-      const bid = await batchVoorNr(admin, nr)
-      const { error: e2 } = await admin.from('clients').update({ batch_id: bid }).eq('id', id)
-      if (e2) throw new Error(e2.message)
-      const { error: e3 } = await admin.from('cp_klanten').upsert({ client_id: id, actief: true, updated_at: nu }, { onConflict: 'client_id' })
+      if (!maandelijks) {
+        const bid = await batchVoorNr(admin, nr as number)
+        const { error: e2 } = await admin.from('clients').update({ batch_id: bid }).eq('id', id)
+        if (e2) throw new Error(e2.message)
+      }
+      const { error: e3 } = await admin.from('cp_klanten').upsert({ client_id: id, actief: true, ritme: maandelijks ? 'maandelijks' : 'driemaandelijks', updated_at: nu }, { onConflict: 'client_id' })
       if (e3) throw new Error(e3.message)
       return NextResponse.json({ ok: true, client_id: id, bestond: !!gevonden })
     }

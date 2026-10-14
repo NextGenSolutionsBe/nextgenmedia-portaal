@@ -6,7 +6,8 @@ import assert from 'node:assert/strict'
 import {
   STANDAARD_CP as S, beurtenMetBord, faseplanVanMaand, pasFaseAan, wisselDag, planNaarDagen, reeksPeriodes, segmenten, eersteWerkdag, standaardFases, fasesVanMaand, reeksenVanDag, plusWerkdagen, isKwartaalmaand, ritmeVan, beurten, teMakenTaken,
   verwachteDatum, isAchterstallig, deadlineVerstreken, routineVoorDag, werkdagenVanMaand, leesCp, bordVanKlant, leesWerkwijze, MAANDSTART,
-  batchNr, startmaandVoorBatch, BORD_BATCHES, werkwijze1Beurten, inReeks1,
+  batchNr, startmaandVoorBatch, BORD_BATCHES, werkwijze1Beurten, inReeks1, BORD_MAANDELIJKS, ritmeNaVerplaatsen, opBordMaandelijks,
+  REEKS1_AANPASSINGEN, reeks1AanpassingenCheckDatum,
 } from '../lib/contentplanning/model'
 
 let n = 0
@@ -152,9 +153,14 @@ test('Werkwijze per reeks: stappen, badges, deelblokken en let-op uit het tekstf
   const c = leesCp({})
   // Werkwijze 1: zes stappen, zonder "Notities bekijken" (de app toont zelf wie aan de beurt is).
   const w1 = leesWerkwijze(c.reeks_detail['1'])
-  assert.deepEqual(w1.stappen.map((x) => x.titel), ['Contentkalender genereren', 'Content invullen', 'Reelscripts doornemen met Bram', 'Contentkalender naar ClickUp', 'Meetings', 'Aanpassingen doorgeven aan Claude'])
+  assert.deepEqual(w1.stappen.map((x) => x.titel), ['Contentkalender genereren', 'Content invullen', 'Reelscripts doornemen met Bram', 'Contentkalender naar ClickUp', 'Meetings', 'Laatste dag: alle aanpassingen doorvoeren'])
   assert.ok(w1.stappen[4].punten.includes('Werk inplannen 1 à 2 dagen vóór elke meeting'))
-  assert.equal(leesWerkwijze(c.reeks_detail['2']).letOp[0], 'Pitch Please als eerste editen.')
+  assert.match(w1.stappen[5].punten[0], /^Aparte taak/)
+  // Werkwijze 2: eerst weten waar het materiaal staat, pas dan plannen en editen.
+  const w2 = leesWerkwijze(c.reeks_detail['2'])
+  assert.equal(w2.letOp[0], 'Pitch Please als eerste editen.')
+  assert.deepEqual(w2.stappen.map((x) => x.titel), ['Materiaal zoeken', 'Volgorde bepalen', 'Posts & stories', 'Reels', 'Afronden per klant', 'Opvolgtaak zetten', 'Goedkeuringstermijn aanduiden'])
+  assert.ok(!c.reeks_detail['2'].includes('in je notities'))
   assert.deepEqual(c.vaste_taken.map((t) => t.key), ['inn_copy', 'inn_inplannen'])
   assert.deepEqual(c.routine, [])
   assert.deepEqual(leesCp({ bord_verborgen: ['x', 3] }).bord_verborgen, ['x'])
@@ -175,6 +181,21 @@ test('Editen hoort in reeks 2: in oktober 2026 (echte aanpassingen) start reeks 
   assert.equal(per[3]!.van, '2026-10-26') // eerste dag reeks 3 = meetings plannen
   assert.deepEqual(reeksenVanDag(fasesVanMaand('2026-10', okt).get('2026-10-12')!, kop), [2]) // vandaag (12/10) geen reeks 3
   assert.equal(S.onderdelen.find((o) => o.key === 'edit')!.reeks, 2)
+})
+
+test('Laatste dag reeks 1: één aparte taak, alle aanpassingen van alle klanten doorvoeren', () => {
+  const okt: Record<string, string[]> = {
+    '2026-10-01': ['ideeen'], '2026-10-02': ['ideeen', 'intakes'], '2026-10-05': ['ideeen', 'intakes'], '2026-10-06': ['ideeen', 'intakes'], '2026-10-07': ['scripts'],
+    ...Object.fromEntries(['08', '09', '12', '13', '14', '15', '16', '19', '20', '21', '22', '23'].map((d) => [`2026-10-${d}`, ['shoots', 'edit']])),
+  }
+  // De taak valt op de laatste werkdag van reeks 1 volgens de Maandplanning (oktober 2026: 7/10).
+  assert.equal(reeksPeriodes('2026-10', faseplanVanMaand('2026-10', okt), S.fase_reeks)[1]!.tot, '2026-10-07')
+  // Zonder aanpassingen: werkdag 8 (12/10).
+  assert.equal(reeksPeriodes('2026-10', faseplanVanMaand('2026-10', {}), S.fase_reeks)[1]!.tot, '2026-10-12')
+  assert.match(REEKS1_AANPASSINGEN.titel, /alle klanten.*alle kalenders/)
+  // Afgevinkt per maand, los van de dag: schuift de reeks later, dan blijft het vinkje staan.
+  assert.equal(reeks1AanpassingenCheckDatum('2026-10'), '2026-10-01')
+  assert.ok(!MAANDSTART.some((m) => m.key === REEKS1_AANPASSINGEN.key))
 })
 
 test('Maandstart: eerst de reeksen bepalen, dan batches + klantenbord', () => {
@@ -226,6 +247,23 @@ test('Werkwijze 1: wie is aan de beurt? (maandelijks, driemaandelijks, al geplan
   assert.equal(r.maand.instellingOntbreekt, null)
   // De keuze uit de meetingplanning (reeks 3 van vorige maand) gaat voor op het ritme.
   assert.equal(r.meeting_gekozen.meeting, 'niet_nodig')
+})
+
+test('Klantenbord: kolom Maandelijks naast Batch 1, 2 en 3 = het ritme van de klant (geen tweede systeem)', () => {
+  assert.equal(BORD_MAANDELIJKS, 'maandelijks')
+  // Naar Maandelijks: ritme maandelijks, ongeacht wat het was.
+  assert.equal(ritmeNaVerplaatsen(BORD_MAANDELIJKS, null), 'maandelijks')
+  assert.equal(ritmeNaVerplaatsen(BORD_MAANDELIJKS, 'driemaandelijks'), 'maandelijks')
+  // Naar een batch: cyclus van drie maanden.
+  for (const n of BORD_BATCHES) { assert.equal(ritmeNaVerplaatsen(n, 'maandelijks'), 'driemaandelijks'); assert.equal(ritmeNaVerplaatsen(n, null), 'driemaandelijks') }
+  // Naar "Nog geen batch": een maandelijkse klant verliest dat ook (anders stond hij nog in Maandelijks); de rest blijft.
+  assert.equal(ritmeNaVerplaatsen(null, 'maandelijks'), null)
+  assert.equal(ritmeNaVerplaatsen(null, 'driemaandelijks'), 'driemaandelijks')
+  assert.equal(ritmeNaVerplaatsen(null, null), null)
+  assert.equal(opBordMaandelijks('maandelijks'), true); assert.equal(opBordMaandelijks('driemaandelijks'), false); assert.equal(opBordMaandelijks(null), false)
+  // En werkwijze 1 leest hetzelfde ritme: een maandelijkse klant zonder planning voor volgende maand heeft een kalender nodig.
+  const [b] = werkwijze1Beurten('2026-10', S.onderdelen, [{ client_id: 'x', instelling: { ritme: ritmeNaVerplaatsen(BORD_MAANDELIJKS, null), activiteiten: {}, batch_start_maand: 6 }, contentMaanden: [] }])
+  assert.equal(b.kalender, 'nodig'); assert.equal(b.instellingOntbreekt, null)
 })
 
 console.log(`\n${n} tests geslaagd\n`)

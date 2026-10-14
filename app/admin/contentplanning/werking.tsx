@@ -5,7 +5,7 @@ import { BookOpen, Check, ChevronDown, ExternalLink, Flag, Layers, LayoutGrid, P
 import { INP } from '@/app/admin/instellingen/ui'
 import {
   REEKSEN, MAANDSTART, DAG_KORT, eersteWerkdag, faseplanVanMaand, reeksPeriodes, leesWerkwijze, maandag, maandVan, plusDagen, plusMaanden, weekdagNr, werkdagenVanMaand,
-  werkwijze1Beurten, inReeks1, type Reeks, type Werk1Beurt,
+  werkwijze1Beurten, inReeks1, REEKS1_AANPASSINGEN, reeks1AanpassingenCheckDatum, type Reeks, type Werk1Beurt,
 } from '@/lib/contentplanning/model'
 import { Paneel, focusRing } from './bouwstenen'
 import type { BordCel, CpData, Doe, Weergave } from './types'
@@ -15,7 +15,8 @@ import { MAANDEN, datumLang, datumNl } from './types'
  * Dagelijkse werking — Chiara’s werkscherm (dag · week · maand). Per dag de
  * reeks(en) en ALLE klanten die deze maand in die reeks zitten (uit Batches),
  * om zelf te kiezen wie je vandaag doet en af te vinken. Vaste momenten
- * (maandstart, start reeks 2, meetings plannen bij reeks 3) verschijnen vanzelf.
+ * (maandstart, aanpassingen doorvoeren op de laatste dag van reeks 1, start
+ * reeks 2, meetings plannen bij reeks 3) verschijnen vanzelf.
  * Het afvinken geldt per klant, maand en reeks; de dag van afvinken wordt bewaard.
  */
 
@@ -185,7 +186,7 @@ function Linkjes({ tekst }: { tekst: string }) {
   return <span className="min-w-0 break-words">{delen.map((d, i) => (/^https?:\/\//.test(d) ? <a key={i} href={d} target="_blank" rel="noreferrer" className="underline break-all">{d}</a> : <span key={i}>{d}</span>))}</span>
 }
 
-/** Zijpaneel met de werkwijze van een reeks; beheerders kunnen de tekst aanpassen. Reeks 2 toont ook waar het materiaal per klant staat. */
+/** Zijpaneel met de werkwijze van een reeks; beheerders kunnen de tekst aanpassen. Reeks 2 toont bovenaan waar het materiaal per klant staat. */
 function WerkwijzePaneel({ r, data, doe, maand, onKlant, onSluit }: { r: Reeks; data: CpData; doe: Doe; maand: string; onKlant: (id: string) => void; onSluit: () => void }) {
   const tekst = data.instellingen.reeks_detail[String(r)] ?? ''
   const [bewerk, setBewerk] = useState(false)
@@ -204,6 +205,23 @@ function WerkwijzePaneel({ r, data, doe, maand, onKlant, onSluit }: { r: Reeks; 
           <Reeks1Voorstel data={data} doe={doe} maand={maand} kanSchrijven={data.kan.aanpassen || data.kan.beheren} onKlant={onKlant} />
         </section>
       )}
+      {/* Reeks 2: eerst weten waar het materiaal staat (stap 1 van de werkwijze). */}
+      {r === 2 && (
+        <section className="space-y-2 border-b border-cp-rand pb-4">
+          <h4 className="text-cp-kop">Materiaal per klant</h4>
+          <div className="divide-y divide-cp-rand rounded-xl border border-cp-rand">
+            {materiaal.map((k) => (
+              <div key={k.client_id} className="px-4 py-3 flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="text-cp-basis font-semibold flex items-center gap-1.5">{w.naam.get(k.client_id)}{inReeks.has(k.client_id) && <span className={`h-2.5 w-2.5 rounded-full ${info.kleur}`} title="Deze maand in reeks 2" />}</div>
+                  {k.materiaal ? <div className="text-cp-klein text-cp-zacht whitespace-pre-line"><Linkjes tekst={k.materiaal} /></div> : <div className="text-cp-klein text-cp-zacht">—</div>}
+                </div>
+                <button type="button" onClick={() => onKlant(k.client_id)} className={`text-cp-klein underline shrink-0 ${focusRing}`}>{data.kan.beheren ? 'aanpassen' : 'klantfiche'}</button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
       {bewerk ? (
         <div className="space-y-2">
           <textarea className={`${INP} font-mono text-xs`} rows={22} value={concept} onChange={(e) => setConcept(e.target.value)} aria-label="Werkwijze bewerken" />
@@ -218,22 +236,6 @@ function WerkwijzePaneel({ r, data, doe, maand, onKlant, onSluit }: { r: Reeks; 
           <WerkwijzeTekst tekst={tekst} />
           {data.kan.beheren && <button type="button" onClick={() => { setConcept(tekst); setBewerk(true) }} className={KNOP}><Pencil className="h-4 w-4" />Aanpassen</button>}
         </>
-      )}
-      {r === 2 && (
-        <section className="space-y-2 border-t border-cp-rand pt-4">
-          <h4 className="text-cp-kop">Materiaal per klant</h4>
-          <div className="divide-y divide-cp-rand rounded-xl border border-cp-rand">
-            {materiaal.map((k) => (
-              <div key={k.client_id} className="px-4 py-3 flex items-start gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="text-cp-basis font-semibold flex items-center gap-1.5">{w.naam.get(k.client_id)}{inReeks.has(k.client_id) && <span className={`h-2.5 w-2.5 rounded-full ${info.kleur}`} title="Deze maand in reeks 2" />}</div>
-                  {k.materiaal ? <div className="text-cp-klein text-cp-zacht whitespace-pre-line"><Linkjes tekst={k.materiaal} /></div> : <div className="text-cp-klein text-cp-zacht">—</div>}
-                </div>
-                <button type="button" onClick={() => onKlant(k.client_id)} className={`text-cp-klein underline shrink-0 ${focusRing}`}>{data.kan.beheren ? 'aanpassen' : 'klantfiche'}</button>
-              </div>
-            ))}
-          </div>
-        </section>
       )}
     </Paneel>
   )
@@ -265,6 +267,28 @@ export function MaandstartBlok({ data, doe, anker, kanSchrijven, onWeergave }: {
           )
         })}
       </ul>
+    </section>
+  )
+}
+
+// ── Laatste dag reeks 1: alle aanpassingen doorvoeren (één taak voor alle klanten) ──
+function AanpassingenTaak({ data, doe, anker, tot, kanSchrijven, onWerkwijze }: { data: CpData; doe: Doe; anker: string; tot: string; kanSchrijven: boolean; onWerkwijze: () => void }) {
+  const datum = reeks1AanpassingenCheckDatum(maandVan(anker))
+  const check = data.checks.find((c) => c.routine_key === REEKS1_AANPASSINGEN.key && c.datum === datum)
+  // Op de laatste dag van reeks 1, en daarna tot het afgevinkt is.
+  if (anker < tot || (anker !== tot && check)) return null
+  return (
+    <section className={`${KAART} border-2 border-cp-ink overflow-hidden`}>
+      <div className="h-2 bg-cp-r1" />
+      <div className="px-5 py-4 flex items-center gap-4 flex-wrap">
+        <input type="checkbox" className={VINK} checked={!!check} disabled={!kanSchrijven} aria-label={`${REEKS1_AANPASSINGEN.titel} afvinken`}
+          onChange={(e) => doe('routine.check', { routine_key: REEKS1_AANPASSINGEN.key, datum, aan: e.target.checked }, { stil: true })} />
+        <div className="flex-1 min-w-[200px]">
+          <div className={`text-cp-basis font-semibold ${check ? 'line-through text-cp-zacht' : ''}`}>{REEKS1_AANPASSINGEN.titel}{check?.door && <span className="text-cp-klein font-normal text-cp-zacht"> · {check.door}</span>}</div>
+          <div className="text-cp-klein text-cp-zacht">{anker === tot ? 'Laatste dag van reeks 1' : `Laatste dag van reeks 1 was ${datumNl(tot)}`}</div>
+        </div>
+        <button type="button" onClick={onWerkwijze} className={KNOP}><BookOpen className="h-4 w-4" />Werkwijze reeks 1</button>
+      </div>
     </section>
   )
 }
@@ -388,10 +412,11 @@ export function DagelijkseWerking(p: Props) {
   const kaart = (r: Reeks, m: string, datum: string, klein?: boolean) => (
     <ReeksKaart key={`${m}-${r}`} r={r} maand={m} data={data} doe={doe} datum={datum} kanSchrijven={kanSchrijven} onWerkwijze={() => open(r, m)} onKlant={p.onKlant} klein={klein} />
   )
-  /** Markeringen van een dag: maandstart, start reeks 2, meetings plannen (eerste dag reeks 3). */
+  /** Markeringen van een dag: maandstart, aanpassingen doorvoeren (laatste dag reeks 1), start reeks 2, meetings plannen (eerste dag reeks 3). */
   const markers = (d: string) => {
     const m = maandVan(d), per = w.periodes(m), uit: { label: string; kleur: string }[] = []
     if (d === eersteWerkdag(m)) uit.push({ label: 'Maandstart', kleur: 'bg-cp-ink text-cp-op-ink' })
+    if (per[1]?.tot === d) uit.push({ label: 'Aanpassingen doorvoeren', kleur: 'bg-cp-r1 text-cp-ink' })
     if (per[2]?.van === d) uit.push({ label: 'Start reeks 2', kleur: 'bg-cp-r2 text-white' })
     if (per[3]?.van === d) uit.push({ label: 'Meetings plannen', kleur: 'bg-cp-r3 text-white' })
     return uit
@@ -430,6 +455,7 @@ export function DagelijkseWerking(p: Props) {
         <div className="grid lg:grid-cols-[1fr_360px] gap-5 items-start">
           <div className="space-y-4 min-w-0">
             <MaandstartBlok data={data} doe={doe} anker={anker} kanSchrijven={kanSchrijven} onWeergave={p.onWeergave} />
+            {per[1] && <AanpassingenTaak data={data} doe={doe} anker={anker} tot={per[1].tot} kanSchrijven={kanSchrijven} onWerkwijze={() => open(1)} />}
             {per[2]?.van === anker && (
               <div className={`${KAART} overflow-hidden`}>
                 <div className="h-2 bg-cp-r2" />

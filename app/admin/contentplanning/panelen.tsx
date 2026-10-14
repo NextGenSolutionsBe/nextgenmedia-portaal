@@ -6,10 +6,10 @@ import { Loader2, Trash2, Plus, ExternalLink, Pause, Play, Archive, X } from 'lu
 import { INP } from '@/app/admin/instellingen/ui'
 import {
   REEKSEN, ACTIVITEIT_RITME_LABEL, verwachteDatum, ritmeVan, beurten, isKlaar, FASE_KEYS, FASE_LABEL,
-  type ActiviteitRitme, type CpInstellingen, type Onderdeel, type Status, type VasteTaak, type Link as CpLink, type Reeks, type Ritme,
+  type ActiviteitRitme, type CpInstellingen, type Onderdeel, type Status, type VasteTaak, type Reeks, type Ritme,
 } from '@/lib/contentplanning/model'
 import { Paneel, Notities, StatusBadge, TaakKaart, focusRing } from './bouwstenen'
-import type { Batch, Contactpersoon, CpData, Doe, Taak } from './types'
+import type { Batch, CpData, Doe, Taak } from './types'
 import { MAANDEN, datumNl, maandNaam } from './types'
 
 const lbl = 'block text-xs font-medium text-gray-700 mb-1'
@@ -109,12 +109,13 @@ export function KlantFiche({ clientId, maand, data, doe, vandaag, onSluit, onTaa
   const batch = data.batches.find((b) => b.id === klant?.batch_id) ?? null
   const kanBeheren = data.kan.beheren
   const [scopeVraag, setScopeVraag] = useState<Record<string, unknown> | null>(null)
+  // De fiche toont enkel wat je tijdens het werk nodig hebt: goedkeuringstermijn en materiaal.
+  // Verantwoordelijke, afspraken, contactpersonen en links blijven in de databank, maar worden
+  // hier niet meer getoond of meegestuurd (klant.wijzig raakt enkel velden die meekomen).
   const [v, setV] = useState({
-    verantwoordelijke: cp?.verantwoordelijke ?? '', goedkeuring_werkdagen: cp?.goedkeuring_werkdagen === null || cp?.goedkeuring_werkdagen === undefined ? '' : String(cp.goedkeuring_werkdagen),
-    afspraken: cp?.afspraken ?? '', materiaal: cp?.materiaal ?? '',
+    goedkeuring_werkdagen: cp?.goedkeuring_werkdagen === null || cp?.goedkeuring_werkdagen === undefined ? '' : String(cp.goedkeuring_werkdagen),
+    materiaal: cp?.materiaal ?? '',
   })
-  const [contacten, setContacten] = useState<Contactpersoon[]>(cp?.contactpersonen ?? [])
-  const [links, setLinks] = useState<CpLink[]>(cp?.links ?? [])
   const effRitme = (cyclus?.instellingen.ritme ?? cp?.ritme ?? null) as Ritme | null
   const effAct = { ...(cp?.activiteiten ?? {}), ...(cyclus?.instellingen.activiteiten ?? {}) }
   const taken = data.taken.filter((t) => t.cyclus_id && t.cyclus_id === cyclus?.id)
@@ -127,7 +128,8 @@ export function KlantFiche({ clientId, maand, data, doe, vandaag, onSluit, onTaa
     if (cyclus) setScopeVraag(wijziging)
     else doe('klant.wijzig', { client_id: clientId, scope: 'toekomst', ...wijziging }, { melding: 'Ingesteld voor toekomstige cyclussen.' })
   }
-  const bewaarFiche = () => doe('klant.wijzig', { client_id: clientId, verantwoordelijke: v.verantwoordelijke || null, goedkeuring_werkdagen: v.goedkeuring_werkdagen === '' ? null : Number(v.goedkeuring_werkdagen), afspraken: v.afspraken || null, materiaal: v.materiaal || null, contactpersonen: contacten, links }, { melding: 'Klantfiche bewaard.' })
+  const bewaarFiche = () => doe('klant.wijzig', { client_id: clientId, goedkeuring_werkdagen: v.goedkeuring_werkdagen === '' ? null : Number(v.goedkeuring_werkdagen), materiaal: v.materiaal || null }, { melding: 'Bewaard.' })
+  const ficheGewijzigd = v.goedkeuring_werkdagen !== (cp?.goedkeuring_werkdagen === null || cp?.goedkeuring_werkdagen === undefined ? '' : String(cp.goedkeuring_werkdagen)) || v.materiaal !== (cp?.materiaal ?? '')
 
   if (!klant) return null
   return (
@@ -168,6 +170,19 @@ export function KlantFiche({ clientId, maand, data, doe, vandaag, onSluit, onTaa
         </details>
       </section>
 
+      {/* Afspraken: enkel goedkeuringstermijn en materiaal */}
+      <section className="space-y-3">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Afspraken</h4>
+        <div><label className={lbl} htmlFor="cp-termijn">Goedkeuringstermijn</label>
+          <div className="flex items-center gap-2">
+            <div className="w-24 shrink-0"><input id="cp-termijn" className={INP} inputMode="numeric" disabled={!kanBeheren} value={v.goedkeuring_werkdagen} onChange={(e) => setV({ ...v, goedkeuring_werkdagen: e.target.value.replace(/[^0-9]/g, '') })} placeholder={inst.goedkeuring_werkdagen !== null ? String(inst.goedkeuring_werkdagen) : '?'} /></div>
+            <span className="text-sm text-gray-500">werkdagen{v.goedkeuring_werkdagen === '' && inst.goedkeuring_werkdagen !== null ? ' (standaard)' : ''}</span>
+          </div>
+        </div>
+        <div><label className={lbl} htmlFor="cp-materiaal">Materiaal</label><textarea id="cp-materiaal" rows={2} className={INP} disabled={!kanBeheren} value={v.materiaal} onChange={(e) => setV({ ...v, materiaal: e.target.value })} placeholder="Waar staan de foto’s en video’s?" /></div>
+        {kanBeheren && ficheGewijzigd && <div className="flex justify-end"><button type="button" onClick={bewaarFiche} className="btn-primary text-sm">Bewaren</button></div>}
+      </section>
+
       {/* Cyclus van deze maand */}
       <section className="space-y-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -187,42 +202,6 @@ export function KlantFiche({ clientId, maand, data, doe, vandaag, onSluit, onTaa
               onOpen={() => onTaak(t)} onVink={data.kan.aanpassen || kanBeheren ? () => doe('taak.wijzig', { id: t.id, status: isKlaar(t.status, inst.statussen) ? (t.werkdatum ? 'ingepland' : 'nog_in_te_plannen') : 'afgerond' }, { stil: true }) : undefined} />
           ))}
         </div>
-      </section>
-
-      {/* Fiche */}
-      <section className="space-y-3">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Afspraken en gegevens</h4>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={lbl}>Verantwoordelijke</label><input className={INP} list="cp-mensen-k" disabled={!kanBeheren} value={v.verantwoordelijke} onChange={(e) => setV({ ...v, verantwoordelijke: e.target.value })} /><datalist id="cp-mensen-k">{data.mensen.map((m) => <option key={m} value={m} />)}</datalist></div>
-          <div><label className={lbl}>Goedkeuringstermijn (werkdagen)</label><input className={INP} inputMode="numeric" disabled={!kanBeheren} value={v.goedkeuring_werkdagen} onChange={(e) => setV({ ...v, goedkeuring_werkdagen: e.target.value.replace(/[^0-9]/g, '') })} placeholder={inst.goedkeuring_werkdagen !== null ? `standaard ${inst.goedkeuring_werkdagen}` : 'in te vullen'} /></div>
-          <div className="col-span-2"><label className={lbl}>Klantspecifieke afspraken</label><textarea rows={3} className={INP} disabled={!kanBeheren} value={v.afspraken} onChange={(e) => setV({ ...v, afspraken: e.target.value })} placeholder="bv. Shoots altijd op dinsdag; content via WhatsApp." /></div>
-          <div className="col-span-2"><label className={lbl}>Materiaal — waar staan de foto’s en video’s?</label><textarea rows={3} className={INP} disabled={!kanBeheren} value={v.materiaal} onChange={(e) => setV({ ...v, materiaal: e.target.value })} placeholder={'Foto’s: drive (link)\nVideo’s camera: harddrive'} /></div>
-        </div>
-        <div>
-          <div className="flex items-center justify-between"><label className={lbl}>Contactpersonen</label>{kanBeheren && <button type="button" onClick={() => setContacten([...contacten, { naam: '', rol: null, email: null, telefoon: null }])} className="text-xs underline">+ contact</button>}</div>
-          {klant.contact_name && <p className="text-[11px] text-gray-500 mb-1">Uit de klantenlijst: {klant.contact_name}{klant.email ? ` · ${klant.email}` : ''}</p>}
-          <div className="space-y-1.5">{contacten.map((c, i) => (
-            <div key={i} className="grid grid-cols-2 sm:grid-cols-[1fr_1fr_1fr_1fr_auto] gap-1.5">
-              <input className={INP} placeholder="Naam" value={c.naam} disabled={!kanBeheren} onChange={(e) => setContacten(contacten.map((x, j) => (j === i ? { ...x, naam: e.target.value } : x)))} />
-              <input className={INP} placeholder="Rol" value={c.rol ?? ''} disabled={!kanBeheren} onChange={(e) => setContacten(contacten.map((x, j) => (j === i ? { ...x, rol: e.target.value } : x)))} />
-              <input className={INP} placeholder="E-mail" value={c.email ?? ''} disabled={!kanBeheren} onChange={(e) => setContacten(contacten.map((x, j) => (j === i ? { ...x, email: e.target.value } : x)))} />
-              <input className={INP} placeholder="Telefoon" value={c.telefoon ?? ''} disabled={!kanBeheren} onChange={(e) => setContacten(contacten.map((x, j) => (j === i ? { ...x, telefoon: e.target.value } : x)))} />
-              {kanBeheren && <button type="button" onClick={() => setContacten(contacten.filter((_, j) => j !== i))} className={`h-9 w-9 rounded-lg hover:bg-red-50 text-red-600 flex items-center justify-center ${focusRing}`} aria-label="Contact verwijderen"><X className="h-4 w-4" /></button>}
-            </div>
-          ))}</div>
-        </div>
-        <div>
-          <div className="flex items-center justify-between"><label className={lbl}>Links naar content, mappen en tools</label>{kanBeheren && <button type="button" onClick={() => setLinks([...links, { label: '', url: '' }])} className="text-xs underline">+ link</button>}</div>
-          <div className="space-y-1.5">{links.map((l, i) => (
-            <div key={i} className="grid grid-cols-[1fr_2fr_auto_auto] gap-1.5 items-center">
-              <input className={INP} placeholder="bv. Drive-map" value={l.label} disabled={!kanBeheren} onChange={(e) => setLinks(links.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} />
-              <input className={INP} placeholder="https://…" value={l.url} disabled={!kanBeheren} onChange={(e) => setLinks(links.map((x, j) => (j === i ? { ...x, url: e.target.value } : x)))} />
-              {/^https?:\/\//.test(l.url) ? <a href={l.url} target="_blank" rel="noreferrer" className={`h-9 w-9 rounded-lg hover:bg-gray-100 flex items-center justify-center ${focusRing}`} aria-label="Openen"><ExternalLink className="h-4 w-4" /></a> : <span />}
-              {kanBeheren && <button type="button" onClick={() => setLinks(links.filter((_, j) => j !== i))} className={`h-9 w-9 rounded-lg hover:bg-red-50 text-red-600 flex items-center justify-center ${focusRing}`} aria-label="Link verwijderen"><X className="h-4 w-4" /></button>}
-            </div>
-          ))}</div>
-        </div>
-        {kanBeheren && <div className="flex justify-end"><button type="button" onClick={bewaarFiche} className="btn-primary text-sm">Klantfiche bewaren</button></div>}
       </section>
 
       <Notities titel="Notities en herinneringen" notities={data.notities.filter((n) => n.client_id === clientId && !n.taak_id && (n.soort !== 'cyclus' || !n.maand || n.maand === maand))}
