@@ -220,17 +220,13 @@ export const STANDAARD_CP: CpInstellingen = {
 - Claude inschakelen om de copy aan te passen
 - De wijzigingen controleren
 - Status op ‘Copy ready for review’ zetten` },
-    // Claude plant de content zelf in (geen downloaden of apart schedulen meer); enkel artikels blijven handwerk.
-    { key: 'inn_inplannen', titel: 'Content inplannen', detail: `# In Notion controleren
-- Staat alle content op ‘Ready’?
-# Laten inplannen [Claude]
-- Zeg: "Plan van [datum] tot [datum] alle posts die op Ready staan in"
-- Claude plant alles zelf in. Je hoeft niets te downloaden.
-## LinkedIn
-- Facebook hoort er altijd bij
-- Images en carrousels altijd als ‘image carrousel’, met een gepaste titel
-# Zelf doen
-- Moet er een artikel gepost worden? Dat doe je nog handmatig.` },
+    // Claude plant in via de gepinde chat; Chiara controleert en geeft groen licht voor Scheduled. Artikels blijven handwerk.
+    { key: 'inn_inplannen', titel: 'Content inplannen', detail: `# Zeg tegen Claude in de gepinde chat
+- "Plan van [datum x] tot [datum y] alle posts in die op Ready staan"
+# Controleer of alles klopt
+# Zeg tegen Claude dat alles op Scheduled mag
+# Artikels post je zelf
+- Claude geeft aan wanneer er een artikel bij zit` },
   ],
   bord_verborgen: [],
 }
