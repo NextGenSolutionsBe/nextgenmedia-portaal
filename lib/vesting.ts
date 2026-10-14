@@ -33,6 +33,8 @@
  * Wijzigt geen echte aandelen. Dit is de berekening, niet de notaris.
  */
 
+import { normaliseerVerzendstatus } from './facturen/status'
+
 export type ContractStatus = 'actief' | 'voltooid' | 'stopgezet' | 'niet_betaler'
 export type Facturatiemodel = 'maandcontract' | 'eenmalig'
 export type Contractjaar = 'jaar1' | 'jaar2' | 'jaar3' | 'buiten'
@@ -153,7 +155,8 @@ export type WamKost = { id: string; datum: string | null; omschrijving: string; 
 
 export type TermijnStatus = 'gepland' | 'gefactureerd' | 'betaald' | 'geannuleerd'
 export const TERMIJN_LABEL: Record<TermijnStatus, string> = {
-  gepland: 'Gepland', gefactureerd: 'Gefactureerd', betaald: 'Betaald', geannuleerd: 'Geannuleerd',
+  // 'gepland' heet 'Te factureren', zoals in de Facturen-module.
+  gepland: 'Te factureren', gefactureerd: 'Gefactureerd', betaald: 'Betaald', geannuleerd: 'Geannuleerd',
 }
 export type WamTermijn = {
   id: string; wam_id: string; volgnr: number; periode: string; factuurdatum: string
@@ -273,6 +276,8 @@ export type ContractTermijn = {
 export type GekoppeldeFactuur = {
   id: string; referentie: string | null; datum: string | null; maand: string | null
   bedrag_excl: number; betaald: boolean; betaald_op: string | null; geannuleerd: boolean
+  /** Al naar de klant verstuurd? Nee = in Facturen nog "Te factureren". Ontbreekt = verstuurd (oude gegevens). */
+  verstuurd?: boolean
   /** Het contract in de Contractenmodule waar de factuur aan hangt. */
   contract_id: string | null
 }
@@ -293,6 +298,7 @@ export function factuurUitRij(r: Record<string, unknown>): GekoppeldeFactuur {
     betaald: r.betaalstatus === 'betaald' || (incl > 0 && (Number(r.betaald_bedrag) || 0) >= incl - 0.005),
     betaald_op: r.betaald_op ? String(r.betaald_op).slice(0, 10) : null,
     geannuleerd: r.status === 'geannuleerd' || !!r.cancelled_at || !!r.credited_at,
+    verstuurd: normaliseerVerzendstatus(r.status as string | null) === 'verstuurd',
     contract_id: (r.contract_id as string | null) ?? null,
   }
 }
@@ -302,7 +308,9 @@ export function effectieveStatus(t: Pick<ContractTermijn, 'status' | 'invoice_id
   if (t.status === 'geannuleerd') return 'geannuleerd'
   if (t.invoice_id && f) {
     if (f.geannuleerd) return 'gepland'      // factuur geannuleerd → termijn is weer te factureren
-    return f.betaald ? 'betaald' : 'gefactureerd'
+    if (f.betaald) return 'betaald'
+    // In Facturen nog "Te factureren" (niet verstuurd) → hier ook te factureren, niet gefactureerd.
+    return f.verstuurd === false ? 'gepland' : 'gefactureerd'
   }
   return t.status
 }
