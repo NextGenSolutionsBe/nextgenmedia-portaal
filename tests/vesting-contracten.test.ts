@@ -118,4 +118,12 @@ test('Stopgezet of niet-betaler = €0, ook al is er al iets betaald', () => {
   assert.equal(v.contracten[0].erkenning, 'uitgesloten')
 })
 
+test('Eigen toerekeningspercentage per contract gaat voor 50% + 50%; leeg = automatisch', () => {
+  assert.equal(toerekeningsfactor({ appointment_door_marco: true, closed_door_marco: false, toerekening_pct: null }), 0.5)
+  assert.equal(toerekeningsfactor({ appointment_door_marco: true, closed_door_marco: false, toerekening_pct: 30 }), 0.3)
+  assert.equal(toerekeningsfactor({ appointment_door_marco: false, closed_door_marco: false, toerekening_pct: 100 }), 1)
+  assert.equal(toerekeningsfactor({ appointment_door_marco: true, closed_door_marco: true, toerekening_pct: 0 }), 0) // 0% is bewust geen toerekening
+  assert.equal(toerekeningsfactor({ appointment_door_marco: false, closed_door_marco: false, toerekening_pct: 150 }), 1)
+})
+
 console.log(`\n${n} tests geslaagd\n`)

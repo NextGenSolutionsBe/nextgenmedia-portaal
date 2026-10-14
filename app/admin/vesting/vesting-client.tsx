@@ -78,6 +78,7 @@ function naarContract(r: Record<string, unknown>): Contract {
     laatste_betaalde_maand: d(r.laatste_betaalde_maand), reden_stop: (r.reden_stop as string | null) ?? null,
     notitie: (r.notitie as string | null) ?? null,
     contract_id: (r.contract_id as string | null) ?? null,
+    toerekening_pct: n(r.toerekening_pct),
     client_id: (r.client_id as string | null) ?? null,
     directe_kosten_facturen: n(r.directe_kosten_facturen),
     kostenstatus_facturen: (r.kostenstatus_facturen as Contract['kostenstatus_facturen']) ?? null,
@@ -89,6 +90,7 @@ function naarWam(r: Record<string, unknown>): WamRij {
   return {
     id: String(r.id), nr: String(r.nr ?? ''), klant: String(r.klant ?? ''),
     client_id: (r.client_id as string | null) ?? null,
+    contract_id: (r.contract_id as string | null) ?? null,
     contractwaarde: n(r.contractwaarde) ?? 0, netto_ontvangen: n(r.netto_ontvangen) ?? 0,
     status: (['actief', 'voltooid', 'stopgezet', 'niet_betaler'].includes(String(r.status)) ? r.status : 'actief') as ContractStatus,
     betalingen_op_schema: r.betalingen_op_schema !== false, notitie: (r.notitie as string | null) ?? null,
@@ -152,6 +154,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
   const [openWam, setOpenWam] = useState<string | null>(null)
   const [openContract, setOpenContract] = useState<string | null>(null)
   const [extraTermijn, setExtraTermijn] = useState<WamRij | null>(null)
+  const [koppelVoor, setKoppelVoor] = useState<{ resource: 'contract' | 'wam'; id: string; titel: string; huidig: string | null; client_id: string | null } | null>(null)
   const [teVerwijderen, setTeVerwijderen] = useState<{ resource: 'contract' | 'wam' | 'kost'; id: string; naam: string; gevolgen: string } | null>(null)
   const [verwijderBezig, setVerwijderBezig] = useState(false)
   const [, startVerversen] = useTransition()
@@ -409,6 +412,10 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                               {modulePerId.get(c.contract_id)?.status && <span className="text-gray-400">· {CONTRACT_STATUS_LABEL[modulePerId.get(c.contract_id)!.status] ?? modulePerId.get(c.contract_id)!.status}</span>}
                             </Link>
                           )}
+                          {!c.contract_id && (
+                            <button type="button" onClick={(e) => { e.stopPropagation(); setKoppelVoor({ resource: 'contract', id: c.id, titel: `${c.nr} — ${c.klant}`, huidig: null, client_id: c.client_id ?? null }) }}
+                              className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-amber-700 hover:text-black underline"><Link2 className="h-3 w-3" />Contract koppelen</button>
+                          )}
                         </td>
                         <td className="table-td">
                           <div className="text-gray-700 whitespace-nowrap">{formatDate(c.ondertekend_op)}</div>
@@ -429,7 +436,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                             <div className="text-[11px] text-amber-700 whitespace-normal max-w-[180px]" title={c.kostenWaarschuwing}>⚠ {c.kostenWaarschuwing}</div>
                           )}
                         </td>
-                        <td className="table-td text-right tabular">{Math.round(c.factor * 100)}%</td>
+                        <td className="table-td text-right tabular">{Math.round(c.factor * 100)}%{c.toerekening_pct !== null && c.toerekening_pct !== undefined && <div className="text-[10px] text-gray-400">eigen %</div>}</td>
                         <td className="table-td text-right tabular font-semibold whitespace-nowrap"
                           title={`Goedkope schijf ${formatEuro(c.goedkopeSchijf)} · jaarschijf ${formatEuro(c.jaarschijf)} · cumulatief vóór dit contract ${formatEuro(c.cumulatiefVoor)}`}>
                           {formatEuro(c.meetellend)}
@@ -464,7 +471,9 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
           {openContract && (() => {
             const c = v.contracten.find((x) => x.id === openContract)
             return c ? (
-              <div className="card-base">
+              <div className="card-base space-y-4">
+                <SnelBewerken c={c} module={modulePerId.get(c.contract_id ?? '') ?? null} onAlles={() => setContractDialoog(c)}
+                  onKoppel={() => setKoppelVoor({ resource: 'contract', id: c.id, titel: `${c.nr} — ${c.klant}`, huidig: c.contract_id, client_id: c.client_id ?? null })} />
                 <ContractTermijnen c={c} facturen={facturen.filter((f) => !!c.contract_id && f.contract_id === c.contract_id)} />
               </div>
             ) : null
@@ -526,6 +535,12 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                                 <span className="font-mono">{r.nr}</span>
                                 {freq && r.bedrag_per_factuur ? <> · {formatEuro(r.bedrag_per_factuur)} {freq.label.toLowerCase()}{r.contract_maanden ? ` · ${r.contract_maanden} mnd` : ''}</> : <> · geen facturatieschema</>}
                               </div>
+                              {r.contract_id ? (
+                                <Link href={`/admin/contracts/${r.contract_id}`} onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 text-[11px] text-blue-700 hover:underline mt-0.5"><Link2 className="h-3 w-3" />{modulePerId.get(r.contract_id)?.titel ?? 'Contract'}</Link>
+                              ) : (
+                                <button type="button" onClick={(e) => { e.stopPropagation(); setKoppelVoor({ resource: 'wam', id: r.id, titel: `${r.nr} — ${r.klant}`, huidig: null, client_id: r.client_id }) }}
+                                  className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-gray-500 hover:text-black underline"><Link2 className="h-3 w-3" />Contract koppelen</button>
+                              )}
                             </td>
                             <td className="table-td text-right tabular">{formatEuro(r.prognose > 0 ? r.prognose : r.contractwaarde)}</td>
                             <td className="table-td text-right tabular text-blue-800">{formatEuro(r.gefactureerd)}{r.openstaand > 0 && <div className="text-[11px] text-amber-700">{formatEuro(r.openstaand)} open</div>}</td>
@@ -572,7 +587,15 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
           {openWam && (() => {
             const r = v.wam.rijen.find((x) => x.id === openWam)
             return r ? (
-              <div className="card-base">
+              <div className="card-base space-y-3">
+                <div className="flex items-center gap-2 flex-wrap text-sm">
+                  <Link2 className="h-4 w-4 text-gray-400" />
+                  {r.contract_id
+                    ? <>Gekoppeld aan <Link href={`/admin/contracts/${r.contract_id}`} className="text-blue-700 hover:underline">{modulePerId.get(r.contract_id)?.titel ?? 'contract'}</Link></>
+                    : <span className="text-gray-500">Geen contract gekoppeld</span>}
+                  <button type="button" onClick={() => setKoppelVoor({ resource: 'wam', id: r.id, titel: `${r.nr} — ${r.klant}`, huidig: r.contract_id ?? null, client_id: r.client_id })} className="btn-secondary text-xs">{r.contract_id ? 'Ander contract' : 'Contract koppelen'}</button>
+                  <button type="button" onClick={() => setWamDialoog(r)} className="btn-secondary text-xs ml-auto"><Pencil className="h-3.5 w-3.5" />Alles wijzigen</button>
+                </div>
                 <Termijnen rij={r} onExtra={() => setExtraTermijn(r)} />
               </div>
             ) : null
@@ -637,7 +660,8 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
         <ContractDialoog contract={contractDialoog === 'nieuw' ? null : contractDialoog} inst={inst} module={module} klanten={klanten}
           onClose={() => setContractDialoog(null)} />
       )}
-      {wamDialoog && <WamDialoog rij={wamDialoog === 'nieuw' ? null : wamDialoog} klanten={klanten} onClose={() => setWamDialoog(null)} />}
+      {wamDialoog && <WamDialoog rij={wamDialoog === 'nieuw' ? null : wamDialoog} klanten={klanten} module={module} onClose={() => setWamDialoog(null)} />}
+      {koppelVoor && <KoppelContract doel={koppelVoor} module={module} onClose={() => setKoppelVoor(null)} />}
       {extraTermijn && <ExtraTermijnDialoog rij={extraTermijn} onClose={() => setExtraTermijn(null)} />}
       {kostDialoog && <KostDialoog rij={kostDialoog === 'nieuw' ? null : kostDialoog} onClose={() => setKostDialoog(null)} />}
       {teVerwijderen && (
@@ -667,6 +691,7 @@ function ContractDialoog({ contract, inst, module, klanten, onClose }: { contrac
     betalingen_op_schema: contract?.betalingen_op_schema ?? true,
     appointment_door_marco: contract?.appointment_door_marco ?? true,
     closed_door_marco: contract?.closed_door_marco ?? false,
+    toerekening_pct: contract?.toerekening_pct !== null && contract?.toerekening_pct !== undefined ? String(contract.toerekening_pct).replace('.', ',') : '',
     laatste_betaalde_maand: contract?.laatste_betaalde_maand ?? '',
     reden_stop: contract?.reden_stop ?? '', notitie: contract?.notitie ?? '',
   })
@@ -679,7 +704,7 @@ function ContractDialoog({ contract, inst, module, klanten, onClose }: { contrac
     maandbedrag: n(f.maandbedrag), duur_maanden: n(f.duur_maanden), handmatige_totaalwaarde: n(f.handmatige_totaalwaarde),
     start_dienst: f.start_dienst || null, einde_dienst: f.einde_dienst || null,
   })
-  const factor = toerekeningsfactor({ appointment_door_marco: f.appointment_door_marco, closed_door_marco: f.closed_door_marco })
+  const factor = toerekeningsfactor({ appointment_door_marco: f.appointment_door_marco, closed_door_marco: f.closed_door_marco, toerekening_pct: f.toerekening_pct.trim() === '' ? null : n(f.toerekening_pct.replace(',', '.')) })
   const netto = totaal === null ? null : Math.max(0, totaal - Math.max(n(f.uitgesloten_kosten) ?? 0, contract?.directe_kosten_facturen ?? 0))
   const afgeleideDuur = duurUitData(f.start_dienst || null, f.einde_dienst || null)
   const gestopt = f.status === 'stopgezet' || f.status === 'niet_betaler'
@@ -721,6 +746,7 @@ function ContractDialoog({ contract, inst, module, klanten, onClose }: { contrac
       if (!body.nr) delete body.nr
       if (!body.client_id) body.client_id = null
       if (!body.contract_id) body.contract_id = null
+      body.toerekening_pct = f.toerekening_pct.trim() === '' ? null : f.toerekening_pct.replace(',', '.')
       if (contract) body.id = contract.id
       const r = await fetch('/api/admin/vesting', { method: contract ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
@@ -781,7 +807,10 @@ function ContractDialoog({ contract, inst, module, klanten, onClose }: { contrac
           <JaNee label="Appointment door Marco?" value={f.appointment_door_marco} onChange={(v) => set('appointment_door_marco', v)} />
           <JaNee label="Closed door Marco?" value={f.closed_door_marco} onChange={(v) => set('closed_door_marco', v)} />
         </div>
-        <p className="text-[11px] text-gray-500">Toerekeningsfactor: <b>{Math.round(factor * 100)}%</b> — 50% voor de afspraak, 50% voor het closen.</p>
+        <div className="grid grid-cols-2 gap-3 items-end">
+          <Veld label="Eigen percentage (%)" value={f.toerekening_pct} onChange={(v) => set('toerekening_pct', v)} inputMode="decimal" placeholder="automatisch" hint="Leeg = 50% afspraak + 50% closen." />
+          <p className="text-[11px] text-gray-500 pb-2">Toerekening: <b>{Math.round(factor * 100)}%</b>{f.toerekening_pct.trim() !== '' ? ' (eigen percentage)' : ''}</p>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -811,10 +840,10 @@ function ContractDialoog({ contract, inst, module, klanten, onClose }: { contrac
   )
 }
 
-function WamDialoog({ rij, klanten, onClose }: { rij: WamRij | null; klanten: Klant[]; onClose: () => void }) {
+function WamDialoog({ rij, klanten, module, onClose }: { rij: WamRij | null; klanten: Klant[]; module: ModuleContract[]; onClose: () => void }) {
   const sluit = useSluitNaVerversen(onClose)
   const [f, setF] = useState({
-    nr: rij?.nr ?? '', klant: rij?.klant ?? '', client_id: rij?.client_id ?? '',
+    nr: rij?.nr ?? '', klant: rij?.klant ?? '', client_id: rij?.client_id ?? '', contract_id: rij?.contract_id ?? '',
     contractwaarde: rij?.contractwaarde?.toString() ?? '',
     netto_ontvangen: rij?.netto_ontvangen?.toString() ?? '', status: rij?.status ?? 'actief',
     betalingen_op_schema: rij?.betalingen_op_schema ?? true, notitie: rij?.notitie ?? '',
@@ -846,6 +875,7 @@ function WamDialoog({ rij, klanten, onClose }: { rij: WamRij | null; klanten: Kl
       const body: Record<string, unknown> = { resource: 'wam', ...f }
       if (!body.nr) delete body.nr
       if (!body.client_id) body.client_id = null
+      if (!body.contract_id) body.contract_id = null
       // Zonder schema geen prognose: contractwaarde = wat het schema oplevert, tenzij bewust anders ingevuld.
       if (!body.contractwaarde && prognoseSchema > 0) body.contractwaarde = prognoseSchema + historiek
       if (rij) body.id = rij.id
@@ -861,6 +891,10 @@ function WamDialoog({ rij, klanten, onClose }: { rij: WamRij | null; klanten: Kl
         <Keuze label="Klant uit het klantenbestand" value={f.client_id} onChange={kiesKlant}
           opties={[{ v: '', l: '— Niet gekoppeld —' }, ...klanten.map((k) => ({ v: k.id, l: k.naam }))]} />
         <Veld label="Naam op de factuur *" value={f.klant} onChange={(v) => set('klant', v)} hint="Wordt ingevuld vanuit het klantenbestand; vrij aanpasbaar." />
+        <div className="col-span-2">
+          <Keuze label="Contract uit de Contractenmodule" value={f.contract_id} onChange={(v) => set('contract_id', v)}
+            opties={[{ v: '', l: '— Geen koppeling —' }, ...module.slice().sort((a, b) => (a.klant ?? '').localeCompare(b.klant ?? '') || a.titel.localeCompare(b.titel)).map((m) => ({ v: m.id, l: `${m.klant ? m.klant + ' · ' : ''}${m.titel} (${CONTRACT_STATUS_LABEL[m.status] ?? m.status})` }))]} />
+        </div>
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-3 space-y-3">
@@ -1355,6 +1389,158 @@ function SplitsDialoog({ termijn: t, onClose }: { termijn: ContractTermijnBereke
 }
 
 /** Fragment-wrapper zodat een klant twee tabelrijen mag zijn (rij + termijnen). */
+// ── Snel bewerken: alles wat aan een vestingcontract hangt, zonder dialoog ────
+
+function useBewaar() {
+  const router = useRouter()
+  const [, start] = useTransition()
+  const [bezig, setBezig] = useState<string | null>(null)
+  const bewaar = async (sleutel: string, body: Record<string, unknown>, melding: string) => {
+    if (bezig) return false
+    setBezig(sleutel)
+    try {
+      const r = await fetch('/api/admin/vesting', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j.error || 'Opslaan mislukt')
+      toast.success(melding)
+      start(() => router.refresh())
+      return true
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt'); return false } finally { setBezig(null) }
+  }
+  return { bezig, bewaar }
+}
+
+function SnelBewerken({ c, module, onAlles, onKoppel }: { c: ContractBerekend; module: ModuleContract | null; onAlles: () => void; onKoppel: () => void }) {
+  const { bezig, bewaar } = useBewaar()
+  const eigen = c.toerekening_pct !== null && c.toerekening_pct !== undefined
+  const [pctInvoer, setPctInvoer] = useState(eigen ? String(c.toerekening_pct).replace('.', ',') : '')
+  const [kosten, setKosten] = useState(String(c.uitgesloten_kosten ?? 0).replace('.', ','))
+  const [notitie, setNotitie] = useState(c.notitie ?? '')
+  useEffect(() => { setPctInvoer(eigen ? String(c.toerekening_pct).replace('.', ',') : ''); setKosten(String(c.uitgesloten_kosten ?? 0).replace('.', ',')); setNotitie(c.notitie ?? '') }, [c.toerekening_pct, c.uitgesloten_kosten, c.notitie, eigen])
+  const zet = (sleutel: string, velden: Record<string, unknown>, melding = 'Bewaard.') => bewaar(sleutel, { resource: 'contract', id: c.id, ...velden }, melding)
+  const standaard = Math.round(Math.min(1, (c.appointment_door_marco ? 0.5 : 0) + (c.closed_door_marco ? 0.5 : 0)) * 100)
+  const kn = (aan: boolean) => `px-2.5 py-1.5 text-xs font-medium border-l first:border-l-0 border-gray-200 transition-colors ${aan ? 'bg-black text-white' : 'bg-white hover:bg-gray-50'}`
+  const bewaarPct = () => {
+    const t = pctInvoer.trim()
+    if (t === '') { if (eigen) zet('pct', { toerekening_pct: null }, `Toerekening terug automatisch (${standaard}%).`); return }
+    const v = Number(t.replace(',', '.'))
+    if (!Number.isFinite(v) || v < 0 || v > 100) { toast.error('Geef een percentage tussen 0 en 100.'); return }
+    if (eigen && Number(c.toerekening_pct) === v) return
+    zet('pct', { toerekening_pct: v }, `Toerekening: ${v}%.`)
+  }
+  return (
+    <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-3 space-y-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <h3 className="text-sm font-semibold flex-1 min-w-[160px]">{c.nr} — {c.klant}</h3>
+        {bezig && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
+        <button type="button" onClick={onAlles} className="btn-secondary text-xs"><Pencil className="h-3.5 w-3.5" />Alle gegevens wijzigen</button>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        {/* Gekoppeld contract */}
+        <div className="rounded-lg border border-gray-200 bg-white p-2.5 space-y-1.5">
+          <div className="text-[11px] font-medium text-gray-500">Contract</div>
+          <div className="flex items-center gap-2 flex-wrap text-sm">
+            {c.contract_id
+              ? <Link href={`/admin/contracts/${c.contract_id}`} className="text-blue-700 hover:underline inline-flex items-center gap-1 min-w-0 truncate"><Link2 className="h-3.5 w-3.5 shrink-0" />{module?.titel ?? 'Contract'}{module?.status ? <span className="text-gray-400 text-xs"> · {CONTRACT_STATUS_LABEL[module.status] ?? module.status}</span> : null}</Link>
+              : <span className="text-gray-500">Niet gekoppeld</span>}
+            <button type="button" onClick={onKoppel} disabled={!!bezig} className="btn-secondary text-xs ml-auto">{c.contract_id ? 'Ander contract' : 'Koppelen'}</button>
+            {c.contract_id && <button type="button" disabled={!!bezig} onClick={() => { if (confirm('Dit vestingcontract loskoppelen van het contract? Facturen van dat contract worden ook losgemaakt van de termijnen.')) zet('koppel', { contract_id: null }, 'Contract losgekoppeld.') }} className="btn-secondary text-xs" title="Loskoppelen"><Unlink className="h-3.5 w-3.5" /></button>}
+          </div>
+        </div>
+        {/* Toerekening */}
+        <div className="rounded-lg border border-gray-200 bg-white p-2.5 space-y-1.5">
+          <div className="text-[11px] font-medium text-gray-500 flex items-center justify-between">Toerekening Marco <b className="text-gray-900 text-sm">{Math.round(c.factor * 100)}%</b></div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden">
+              {[0, 25, 50, 75, 100].map((v) => (
+                <button key={v} type="button" disabled={!!bezig} onClick={() => zet('pct', { toerekening_pct: v }, `Toerekening: ${v}%.`)} className={kn(eigen && Number(c.toerekening_pct) === v)}>{v}%</button>
+              ))}
+            </div>
+            <input className="w-20 rounded-lg border border-gray-200 px-2 py-1.5 text-xs" inputMode="decimal" placeholder="eigen %" value={pctInvoer}
+              onChange={(e) => setPctInvoer(e.target.value)} onBlur={bewaarPct} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} aria-label="Eigen percentage" />
+            <button type="button" disabled={!!bezig || !eigen} onClick={() => zet('pct', { toerekening_pct: null }, `Toerekening terug automatisch (${standaard}%).`)} className={`text-xs underline ${eigen ? 'text-gray-700' : 'text-gray-300'}`}>automatisch ({standaard}%)</button>
+          </div>
+          <div className="flex gap-3 flex-wrap text-xs">
+            <label className="inline-flex items-center gap-1.5 cursor-pointer"><input type="checkbox" checked={c.appointment_door_marco} disabled={!!bezig} onChange={(e) => zet('app', { appointment_door_marco: e.target.checked })} />Appointment door Marco</label>
+            <label className="inline-flex items-center gap-1.5 cursor-pointer"><input type="checkbox" checked={c.closed_door_marco} disabled={!!bezig} onChange={(e) => zet('closed', { closed_door_marco: e.target.checked })} />Closed door Marco</label>
+          </div>
+        </div>
+        {/* Status en betalingen */}
+        <div className="rounded-lg border border-gray-200 bg-white p-2.5 space-y-1.5">
+          <div className="text-[11px] font-medium text-gray-500">Status</div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <select className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs bg-white" value={c.status} disabled={!!bezig} onChange={(e) => zet('status', { status: e.target.value }, `Status: ${STATUS_LABEL[e.target.value as ContractStatus]}.`)} aria-label="Status">
+              {(Object.keys(STATUS_LABEL) as ContractStatus[]).map((k) => <option key={k} value={k}>{STATUS_LABEL[k]}</option>)}
+            </select>
+            <label className="inline-flex items-center gap-1.5 text-xs cursor-pointer"><input type="checkbox" checked={c.betalingen_op_schema} disabled={!!bezig} onChange={(e) => zet('schema', { betalingen_op_schema: e.target.checked })} />Betalingen op schema</label>
+          </div>
+        </div>
+        {/* Kosten */}
+        <div className="rounded-lg border border-gray-200 bg-white p-2.5 space-y-1.5">
+          <div className="text-[11px] font-medium text-gray-500">Uitgesloten kosten (€){(c.directe_kosten_facturen ?? 0) > 0 && <span className="font-normal"> · uit facturen {formatEuro(c.directe_kosten_facturen ?? 0)}</span>}</div>
+          <input className="w-32 rounded-lg border border-gray-200 px-2 py-1.5 text-xs" inputMode="decimal" value={kosten} onChange={(e) => setKosten(e.target.value)} aria-label="Uitgesloten kosten"
+            onBlur={() => { const v = Number(kosten.replace(/\s/g, '').replace(',', '.')); if (!Number.isFinite(v) || v < 0) { toast.error('Geef een geldig bedrag.'); return } if (v !== Number(c.uitgesloten_kosten ?? 0)) zet('kosten', { uitgesloten_kosten: v }) }}
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
+        </div>
+      </div>
+      <textarea className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs bg-white" rows={2} placeholder="Notitie" value={notitie} onChange={(e) => setNotitie(e.target.value)}
+        onBlur={() => { if ((notitie.trim() || null) !== (c.notitie ?? null)) zet('notitie', { notitie: notitie.trim() || null }, 'Notitie bewaard.') }} aria-label="Notitie" />
+    </div>
+  )
+}
+
+/** Een contract uit de Contractenmodule koppelen aan een vestingcontract of WAM-klant: zoeken, één klik. */
+function KoppelContract({ doel, module, onClose }: { doel: { resource: 'contract' | 'wam'; id: string; titel: string; huidig: string | null; client_id: string | null }; module: ModuleContract[]; onClose: () => void }) {
+  const router = useRouter()
+  const [, start] = useTransition()
+  const [zoek, setZoek] = useState('')
+  const [bezig, setBezig] = useState<string | null>(null)
+  const q = zoek.trim().toLowerCase()
+  const lijst = module
+    .filter((m) => !q || `${m.titel} ${m.klant ?? ''}`.toLowerCase().includes(q))
+    .sort((a, b) => Number(b.client_id === doel.client_id && !!doel.client_id) - Number(a.client_id === doel.client_id && !!doel.client_id) || (a.klant ?? '').localeCompare(b.klant ?? '') || a.titel.localeCompare(b.titel))
+    .slice(0, 80)
+  const koppel = async (contractId: string | null) => {
+    if (bezig) return
+    setBezig(contractId ?? 'los')
+    try {
+      const r = await fetch('/api/admin/vesting', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resource: doel.resource, id: doel.id, contract_id: contractId }) })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j.error || 'Koppelen mislukt')
+      toast.success(contractId ? (doel.resource === 'contract' ? 'Contract gekoppeld — facturen van dat contract worden automatisch aan de termijnen gekoppeld.' : 'Contract gekoppeld.') : 'Contract losgekoppeld.')
+      start(() => { router.refresh(); onClose() })
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Koppelen mislukt'); setBezig(null) }
+  }
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85dvh] flex flex-col overflow-hidden">
+        <div className="px-5 py-4 border-b border-gray-100 space-y-2">
+          <div className="flex items-center justify-between gap-2"><h3 className="font-semibold truncate">Contract koppelen · {doel.titel}</h3><button type="button" onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-gray-100" aria-label="Sluiten"><X className="h-4 w-4" /></button></div>
+          <input autoFocus className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" placeholder="Zoek op klant of contracttitel" value={zoek} onChange={(e) => setZoek(e.target.value)} />
+        </div>
+        <ul className="flex-1 overflow-y-auto divide-y divide-gray-100 text-sm">
+          {lijst.map((m) => (
+            <li key={m.id} className={`px-5 py-2.5 flex items-center gap-3 ${m.id === doel.huidig ? 'bg-[#fff848]/20' : ''}`}>
+              <div className="flex-1 min-w-0">
+                <div className="truncate font-medium">{m.titel}</div>
+                <div className="text-[11px] text-gray-500 truncate">{m.klant ?? 'geen klant'} · {CONTRACT_STATUS_LABEL[m.status] ?? m.status}{m.signed_at ? ` · getekend ${formatDate(m.signed_at)}` : ''}{m.client_id && m.client_id === doel.client_id ? ' · zelfde klant' : ''}</div>
+              </div>
+              {m.id === doel.huidig
+                ? <span className="text-xs text-gray-500">gekoppeld</span>
+                : <button type="button" disabled={!!bezig} onClick={() => koppel(m.id)} className="btn-primary text-xs">{bezig === m.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5" />}Koppelen</button>}
+            </li>
+          ))}
+          {lijst.length === 0 && <li className="px-5 py-4 text-xs text-gray-400">Geen contract gevonden.</li>}
+        </ul>
+        <div className="px-5 py-3 border-t border-gray-100 flex justify-between gap-2">
+          {doel.huidig ? <button type="button" disabled={!!bezig} onClick={() => koppel(null)} className="btn-secondary text-sm"><Unlink className="h-4 w-4" />Loskoppelen</button> : <span />}
+          <button type="button" onClick={onClose} className="btn-secondary text-sm">Sluiten</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function WamRijen({ children }: { children: React.ReactNode }) { return <>{children}</> }
 
 function KostDialoog({ rij, onClose }: { rij: WamKost | null; onClose: () => void }) {

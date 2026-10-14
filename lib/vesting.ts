@@ -111,6 +111,8 @@ export type Contract = {
   notitie: string | null
   /** Het contract in de Contractenmodule waar dit op slaat, als het er is. */
   contract_id: string | null
+  /** Eigen toerekening in procent (0–100). Leeg = 50% appointment + 50% closing. */
+  toerekening_pct?: number | null
   /** Gekoppelde klant uit het klantenbestand (optioneel; `klant` blijft de naam). */
   client_id?: string | null
   /**
@@ -139,6 +141,8 @@ export type WamRij = {
   id: string; nr: string; klant: string
   /** Gekoppelde klant uit het klantenbestand; nodig om een factuur op naam te zetten. */
   client_id: string | null
+  /** Het contract in de Contractenmodule waar deze WAM-klant op slaat (optioneel). */
+  contract_id?: string | null
   contractwaarde: number
   /** Wat er al binnen was VÓÓR de facturatie via de app liep (historiek). */
   netto_ontvangen: number
@@ -467,8 +471,15 @@ export function totaalwaarde(c: Pick<Contract, 'facturatiemodel' | 'maandbedrag'
   return c.handmatige_totaalwaarde === null || c.handmatige_totaalwaarde === undefined ? null : n(c.handmatige_totaalwaarde)
 }
 
-export function toerekeningsfactor(c: Pick<Contract, 'appointment_door_marco' | 'closed_door_marco'>): number {
+/** Afgeleid uit appointment/closing: 50% + 50%. */
+export function standaardToerekening(c: Pick<Contract, 'appointment_door_marco' | 'closed_door_marco'>): number {
   return Math.min(1, (c.appointment_door_marco ? 0.5 : 0) + (c.closed_door_marco ? 0.5 : 0))
+}
+/** De toerekening van één contract: het eigen percentage als dat ingevuld is, anders 50% + 50%. */
+export function toerekeningsfactor(c: Pick<Contract, 'appointment_door_marco' | 'closed_door_marco'> & { toerekening_pct?: number | null }): number {
+  const eigen = c.toerekening_pct
+  if (eigen !== null && eigen !== undefined && Number.isFinite(Number(eigen))) return Math.max(0, Math.min(1, Number(eigen) / 100))
+  return standaardToerekening(c)
 }
 
 /** Telt dit contract mee? Nee bij stop, niet-betaler, betalingen niet op schema of buiten de periode. */

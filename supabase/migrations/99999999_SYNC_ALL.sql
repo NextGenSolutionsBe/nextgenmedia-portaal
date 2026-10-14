@@ -5925,3 +5925,14 @@ ALTER TABLE public.content_goedkeuring_deadlines ADD COLUMN IF NOT EXISTS mail_m
 -- opnieuw probeert) verstuurt nooit twee keer dezelfde mail.
 ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS verzend_sleutel text;
 CREATE UNIQUE INDEX IF NOT EXISTS email_messages_verzend_sleutel_uniek ON public.email_messages (verzend_sleutel) WHERE verzend_sleutel IS NOT NULL;
+
+-- ── Vesting: eigen toerekeningspercentage + WAM ↔ contract (14 okt 2026) ────
+-- toerekening_pct: leeg = zoals altijd (50% appointment + 50% closing); ingevuld
+-- (0–100) = dat percentage geldt voor dit contract.
+ALTER TABLE public.vesting_contracten ADD COLUMN IF NOT EXISTS toerekening_pct numeric(5,2);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'vesting_contracten_toerekening_pct_check') THEN
+    ALTER TABLE public.vesting_contracten ADD CONSTRAINT vesting_contracten_toerekening_pct_check CHECK (toerekening_pct IS NULL OR (toerekening_pct >= 0 AND toerekening_pct <= 100));
+  END IF;
+END $$;
+ALTER TABLE public.vesting_wam ADD COLUMN IF NOT EXISTS contract_id uuid REFERENCES public.contracts(id) ON DELETE SET NULL;

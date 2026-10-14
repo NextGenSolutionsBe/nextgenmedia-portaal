@@ -73,6 +73,12 @@ function velden(resource: Resource, b: Record<string, unknown>, bijAanmaak: bool
     if (heeft('betalingen_op_schema')) rij.betalingen_op_schema = ja(b.betalingen_op_schema)
     if (heeft('appointment_door_marco')) rij.appointment_door_marco = ja(b.appointment_door_marco)
     if (heeft('closed_door_marco')) rij.closed_door_marco = ja(b.closed_door_marco)
+    if (heeft('toerekening_pct')) {
+      // Leeg = automatisch (50% appointment + 50% closing).
+      const p = b.toerekening_pct === null || b.toerekening_pct === '' ? null : getal(b.toerekening_pct)
+      if (p !== null && (p < 0 || p > 100)) return { rij, fout: 'Het percentage ligt tussen 0 en 100.' }
+      rij.toerekening_pct = p === null ? null : Math.round(p * 100) / 100
+    }
     if (heeft('laatste_betaalde_maand')) rij.laatste_betaalde_maand = datum(b.laatste_betaalde_maand)
     if (heeft('reden_stop')) rij.reden_stop = tekst(b.reden_stop)
     if (heeft('notitie')) rij.notitie = tekst(b.notitie)
@@ -91,6 +97,7 @@ function velden(resource: Resource, b: Record<string, unknown>, bijAanmaak: bool
   if (resource === 'wam') {
     if (heeft('klant')) rij.klant = tekst(b.klant)
     if (heeft('client_id')) rij.client_id = uuid(b.client_id)
+    if (heeft('contract_id')) rij.contract_id = uuid(b.contract_id)
     if (heeft('contractwaarde')) rij.contractwaarde = getal(b.contractwaarde) ?? 0
     if (heeft('netto_ontvangen')) rij.netto_ontvangen = getal(b.netto_ontvangen) ?? 0
     if (heeft('status')) rij.status = STATUSSEN.includes(String(b.status)) ? b.status : 'actief'
@@ -585,7 +592,15 @@ export async function PATCH(req: NextRequest) {
       const oudContract = resource === 'contract'
         ? ((await admin.from(TABEL.contract).select('*').eq('id', id).maybeSingle()).data as Record<string, unknown> | null)
         : null
+      if (resource === 'contract' && rij.contract_id !== undefined && oudContract && (oudContract.contract_id ?? null) !== (rij.contract_id ?? null) && oudContract.contract_id) {
+        // Ander (of geen) contract gekoppeld: facturen van het VORIGE contract horen niet meer bij
+        // deze termijnen. Enkel die koppeling vervalt; termijnen en facturen zelf blijven bestaan.
+        const { data: oudeFacturen } = await admin.from('invoices').select('id').eq('contract_id', String(oudContract.contract_id))
+        const ids = ((oudeFacturen ?? []) as { id: string }[]).map((x) => x.id)
+        if (ids.length) await admin.from(TABEL.contracttermijn).update({ invoice_id: null, updated_at: rij.updated_at }).eq('contract_id', id).in('invoice_id', ids)
+      }
       ;({ error } = await admin.from(TABEL[resource]).update(rij).eq('id', id))
+      if (error && /toerekening_pct|contract_id/.test(error.message)) throw new Error('De databank is nog niet bijgewerkt voor deze velden.')
       if (!error && resource === 'wam') await synchroniseerTermijnen(admin, id, oudeWam)
       if (!error && resource === 'contract') await synchroniseerContractTermijnen(admin, id, oudContract)
     }
