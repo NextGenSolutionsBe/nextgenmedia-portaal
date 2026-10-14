@@ -38,7 +38,7 @@ const SECTIONS: NavSection[] = [
     items: [
       { label: 'Command Center', href: '/admin', icon: LayoutDashboard, exact: true },
       // Eigen plek, bovenaan: de flow die het meest gebruikt wordt.
-      { label: 'Contentplanning', href: '/admin/contentplanning', icon: CalendarDays, module: 'info' },
+      { label: 'Dagelijkse planning Chiara', href: '/admin/contentplanning', icon: CalendarDays, module: 'info' },
     ],
   },
   {

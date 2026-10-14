@@ -66,7 +66,7 @@ const wie = (p: { naam?: string | null; email?: string | null } | null) => p?.na
 export async function GET(req: NextRequest) {
   try {
     const r = await rechten()
-    if (!r.bekijken) return NextResponse.json({ error: 'Geen toegang tot de contentplanning.' }, { status: 403 })
+    if (!r.bekijken) return NextResponse.json({ error: 'Geen toegang tot de dagelijkse planning.' }, { status: 403 })
     const sp = req.nextUrl.searchParams
     const van = sp.get('van') ?? '', tot = sp.get('tot') ?? ''
     if (!DAG.test(van) || !DAG.test(tot) || van > tot) return NextResponse.json({ error: 'Ongeldige periode.' }, { status: 400 })
@@ -136,7 +136,7 @@ function taakVelden(b: Record<string, unknown>): { velden: Record<string, unknow
 export async function POST(req: NextRequest) {
   try {
     const r = await rechten()
-    if (!r.aanpassen && !r.beheren) return NextResponse.json({ error: 'Je hebt geen recht om de contentplanning aan te passen.' }, { status: 403 })
+    if (!r.aanpassen && !r.beheren) return NextResponse.json({ error: 'Je hebt geen recht om de dagelijkse planning aan te passen.' }, { status: 403 })
     const b = (await req.json().catch(() => ({}))) as Record<string, unknown>
     const actie = String(b.actie ?? '')
     const admin = createAdminSupabaseClient()

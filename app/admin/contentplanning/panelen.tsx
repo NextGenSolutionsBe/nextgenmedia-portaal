@@ -133,8 +133,8 @@ export function KlantFiche({ clientId, maand, data, doe, vandaag, onSluit, onTaa
 
   if (!klant) return null
   return (
-    <Paneel breed titel={klant.company_name} sub={<>{cp?.actief === false ? 'Niet (meer) in de contentplanning' : `Contentplanning · ${maandNaam(maand)}`} · <Link href={`/admin/clients/${clientId}`} className="underline">klanthub</Link></>} onSluit={onSluit}>
-      {!cp?.actief && kanBeheren && <button type="button" onClick={() => doe('klant.voegtoe', { client_id: clientId }, { melding: 'Toegevoegd aan de contentplanning.' })} className="btn-primary text-sm"><Plus className="h-4 w-4" />Aan de contentplanning toevoegen</button>}
+    <Paneel breed titel={klant.company_name} sub={<>{cp?.actief === false ? 'Niet (meer) in de dagelijkse planning' : `Dagelijkse planning Chiara · ${maandNaam(maand)}`} · <Link href={`/admin/clients/${clientId}`} className="underline">klanthub</Link></>} onSluit={onSluit}>
+      {!cp?.actief && kanBeheren && <button type="button" onClick={() => doe('klant.voegtoe', { client_id: clientId }, { melding: 'Toegevoegd aan de dagelijkse planning.' })} className="btn-primary text-sm"><Plus className="h-4 w-4" />Aan de dagelijkse planning toevoegen</button>}
       {ontbreekt && <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">Nog in te vullen: {ontbreekt}</div>}
 
       {/* Ritme en batch */}
@@ -217,7 +217,7 @@ export function KlantFiche({ clientId, maand, data, doe, vandaag, onSluit, onTaa
         </section>
       )}
 
-      {kanBeheren && cp?.actief && <button type="button" onClick={async () => { if (await doe('klant.verwijder', { client_id: clientId }, { melding: `${klant.company_name} uit de contentplanning gehaald. De klant blijft in de rest van de app.` })) onSluit() }} className="text-xs text-red-600 underline">Uit de contentplanning halen</button>}
+      {kanBeheren && cp?.actief && <button type="button" onClick={async () => { if (await doe('klant.verwijder', { client_id: clientId }, { melding: `${klant.company_name} uit de dagelijkse planning gehaald. De klant blijft in de rest van de app.` })) onSluit() }} className="text-xs text-red-600 underline">Uit de dagelijkse planning halen</button>}
 
       {scopeVraag && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/30" role="dialog" aria-modal="true">
@@ -254,7 +254,7 @@ export function InstellingenPaneel({ data, doe, onSluit }: { data: CpData; doe: 
   const bewaar = async () => { setBezig(true); await doe('instellingen.opslaan', { instellingen: v }, { melding: 'Instellingen bewaard.' }); setBezig(false) }
   const TABS = [['onderdelen', 'Onderdelen'], ['statussen', 'Statussen'], ['termijnen', 'Termijnen'], ['reeksen', 'Reeksen'], ['werkwijze', 'Werkwijze per reeks'], ['batches', 'Batches'], ['routine', v.vaste_naam || 'Vaste klant']] as const
   return (
-    <Paneel breed titel="Instellingen contentplanning" onSluit={onSluit}>
+    <Paneel breed titel="Instellingen dagelijkse planning" onSluit={onSluit}>
       <div className="flex gap-1 flex-wrap">{TABS.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={`rounded-lg px-2.5 py-1.5 text-xs font-medium ${tab === k ? 'bg-black text-white' : 'bg-gray-100 text-gray-700'} ${focusRing}`}>{l}</button>)}</div>
 
       {tab === 'onderdelen' && (
