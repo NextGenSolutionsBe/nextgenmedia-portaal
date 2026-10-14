@@ -8,7 +8,7 @@ import { toast } from 'sonner'
 import Link from 'next/link'
 import {
   Loader2, Plus, X, Trash2, Pencil, Rocket, Users, Layers, Briefcase, Settings2, CalendarRange, AlertTriangle, Archive,
-  Link2, Receipt, CheckCircle2, ExternalLink, Ban, Undo2, ChevronDown, ChevronRight, Scissors, Unlink,
+  Link2, Receipt, ExternalLink, Ban, Undo2, ChevronDown, ChevronRight, Scissors, Unlink,
 } from 'lucide-react'
 import { formatEuro, formatDate } from '@/lib/utils'
 import { ExportKnop } from '@/components/admin/export-knop'
@@ -31,6 +31,30 @@ type Klant = { id: string; naam: string; closer?: string | null; setter?: string
 const TERMIJN_STIJL: Record<TermijnStatus, string> = {
   gepland: 'bg-gray-100 text-gray-700', gefactureerd: 'bg-blue-100 text-blue-800', betaald: 'bg-green-100 text-green-800', geannuleerd: 'bg-red-100 text-red-700',
 }
+type Keuze = 'gepland' | 'gefactureerd' | 'betaald'
+const KEUZES: { k: Keuze; aan: string }[] = [
+  { k: 'gepland', aan: 'bg-gray-700 text-white' },
+  { k: 'gefactureerd', aan: 'bg-blue-600 text-white' },
+  { k: 'betaald', aan: 'bg-green-600 text-white' },
+]
+/** Eén vaste keuze per factuur: Te factureren · Gefactureerd · Betaald. Eén klik, altijd op dezelfde plek. */
+function StatusKeuze({ huidig, bezig, onKies, uit }: { huidig: TermijnStatus; bezig: boolean; onKies: (s: Keuze) => void; uit?: Partial<Record<Keuze, string>> }) {
+  return (
+    <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden" role="group" aria-label="Status van de factuur">
+      {KEUZES.map(({ k, aan }) => {
+        const actief = huidig === k
+        const reden = uit?.[k]
+        return (
+          <button key={k} type="button" aria-pressed={actief} title={reden} disabled={bezig || actief || !!reden} onClick={() => onKies(k)}
+            className={`px-2 py-1 text-[11px] font-medium whitespace-nowrap border-l first:border-l-0 border-gray-200 transition-colors ${actief ? aan : 'bg-white text-gray-600 hover:bg-gray-50'} ${reden ? 'opacity-40 cursor-not-allowed' : actief ? 'cursor-default' : ''} ${bezig && !actief ? 'opacity-60' : ''}`}>
+            {TERMIJN_LABEL[k]}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 const CONTRACT_STATUS_LABEL: Record<string, string> = { draft: 'Concept', sent: 'Verstuurd', viewed: 'Bekeken', signed: 'Ondertekend' }
 
 type Tab = 'overzicht' | 'contracten' | 'wam' | 'jaren' | 'instellingen'
@@ -946,8 +970,11 @@ function Termijnen({ rij, onExtra }: { rij: WamRijBerekend; onExtra: () => void 
                     <td className="table-td text-right tabular">{formatEuro(t.bedrag_excl)}</td>
                     <td className="table-td text-right tabular text-gray-500">{formatEuro(incl)}</td>
                     <td className="table-td">
-                      <span className={`status-badge ${TERMIJN_STIJL[t.status]}`}>{TERMIJN_LABEL[t.status]}</span>
-                      {t.status === 'betaald' && t.betaald_op && <div className="text-[10px] text-gray-400 mt-0.5">op {formatDate(t.betaald_op)}</div>}
+                      {t.status === 'geannuleerd'
+                        ? <span className={`status-badge ${TERMIJN_STIJL[t.status]}`}>{TERMIJN_LABEL[t.status]}</span>
+                        : <StatusKeuze huidig={t.status} bezig={b} onKies={(s) => patch(t, { status: s }, `Op “${TERMIJN_LABEL[s]}” gezet.`)}
+                            uit={t.invoice_id ? { gepland: 'Er bestaat al een factuur. Annuleer de termijn of pas de factuur aan in Facturen.' } : undefined} />}
+                      {t.status === 'betaald' && t.betaald_op && <div className="text-[10px] text-gray-400 mt-0.5">betaald op {formatDate(t.betaald_op)}</div>}
                     </td>
                     <td className="table-td">
                       {t.invoice_id ? (
@@ -962,19 +989,12 @@ function Termijnen({ rij, onExtra }: { rij: WamRijBerekend; onExtra: () => void 
                         {b && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />}
                         {t.status === 'gepland' && (
                           <>
-                            <button disabled={b} onClick={() => factureer(t)} className={`${knop} bg-black text-white border-black hover:bg-gray-800`}><Receipt className="h-3 w-3" />Factuur</button>
-                            <button disabled={b} onClick={() => patch(t, { status: 'betaald' }, 'Termijn als betaald gemarkeerd.')} className={`${knop} bg-white border-gray-200 text-gray-600 hover:border-green-500 hover:text-green-700`} title="Betaald zonder factuur via de app (bv. al gefactureerd buiten de app)"><CheckCircle2 className="h-3 w-3" />Betaald</button>
+                            <button disabled={b} onClick={() => factureer(t)} className={`${knop} bg-black text-white border-black hover:bg-gray-800`} title="Factuur aanmaken in Facturen (+ ClickUp-taak)"><Receipt className="h-3 w-3" />Factuur maken</button>
                             <button disabled={b} onClick={() => setWeg(t)} className={`${knop} bg-white border-red-200 text-red-600 hover:bg-red-50 hover:border-red-400`} title="Verwijderen"><Trash2 className="h-3 w-3" /></button>
                           </>
                         )}
                         {t.status === 'gefactureerd' && (
-                          <>
-                            <button disabled={b} onClick={() => patch(t, { status: 'betaald' }, 'Termijn als betaald gemarkeerd.')} className={`${knop} bg-green-600 text-white border-green-600 hover:bg-green-700`}><CheckCircle2 className="h-3 w-3" />Betaald</button>
-                            <button disabled={b} onClick={() => { if (confirm('Termijn annuleren? De factuur wordt mee geannuleerd.')) patch(t, { status: 'geannuleerd' }, 'Termijn en factuur geannuleerd.') }} className={`${knop} bg-white border-gray-200 text-gray-500 hover:text-red-600 hover:border-red-300`}><Ban className="h-3 w-3" />Annuleer</button>
-                          </>
-                        )}
-                        {t.status === 'betaald' && (
-                          <button disabled={b} onClick={() => patch(t, { status: t.invoice_id ? 'gefactureerd' : 'gepland' }, 'Betaling teruggedraaid.')} className={`${knop} bg-white border-gray-200 text-gray-500 hover:border-gray-400`}><Undo2 className="h-3 w-3" />Toch niet betaald</button>
+                          <button disabled={b} onClick={() => { if (confirm('Termijn annuleren? De factuur wordt mee geannuleerd.')) patch(t, { status: 'geannuleerd' }, 'Termijn en factuur geannuleerd.') }} className={`${knop} bg-white border-gray-200 text-gray-500 hover:text-red-600 hover:border-red-300`}><Ban className="h-3 w-3" />Annuleer</button>
                         )}
                         {t.status === 'geannuleerd' && (
                           <button disabled={b} onClick={() => patch(t, { status: t.invoice_id ? 'gefactureerd' : 'gepland' }, 'Termijn hersteld.')} className={`${knop} bg-white border-gray-200 text-gray-500 hover:border-gray-400`}><Undo2 className="h-3 w-3" />Herstel</button>
@@ -1110,6 +1130,32 @@ function ContractTermijnen({ c, facturen }: { c: ContractBerekend; facturen: Gek
   const patch = (t: ContractTermijnBerekend, body: Record<string, unknown>, melding: string) =>
     verzend(t.id, 'PATCH', { resource: 'contracttermijn', id: t.id, ...body }, melding)
 
+  /**
+   * Gekoppelde factuur: de status staat in Facturen, dus daar passen we hem aan,
+   * via dezelfde acties als in de Facturen-module (met historiek en logboek).
+   * Te factureren = te versturen · Gefactureerd = verstuurd, niet betaald · Betaald = verstuurd én betaald.
+   */
+  const zetFactuur = async (t: ContractTermijnBerekend, doel: Keuze) => {
+    const f = t.factuur
+    if (!f) return
+    setBezig(t.id)
+    const post = async (body: Record<string, unknown>) => {
+      const r = await fetch(`/api/admin/invoices/${f.id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error ?? 'De factuur aanpassen in Facturen is mislukt.')
+    }
+    try {
+      let verstuurd = f.verstuurd !== false
+      const betaald = f.betaald
+      // Een betaling registreren of wissen kan enkel op een verstuurde factuur.
+      if ((doel !== 'gepland' || betaald) && !verstuurd) { await post({ action: 'status', status: 'verstuurd' }); verstuurd = true }
+      if (doel === 'betaald' && !betaald) await post({ action: 'betaling', betaalstatus: 'betaald' })
+      if (doel !== 'betaald' && betaald) await post({ action: 'betaling', betaalstatus: 'niet_betaald' })
+      if (doel === 'gepland' && verstuurd) await post({ action: 'status', status: 'te_versturen' })
+      toast.success(`Factuur ${f.referentie ?? ''} staat nu op “${TERMIJN_LABEL[doel]}”, ook in Facturen.`)
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') }
+    klaar()
+  }
+
   const gebruikt = new Set(c.termijnen.map((t) => t.invoice_id).filter(Boolean) as string[])
   const losseFacturen = facturen.filter((f) => !gebruikt.has(f.id) && !f.geannuleerd)
   const knop = 'inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors disabled:opacity-50'
@@ -1168,9 +1214,11 @@ function ContractTermijnen({ c, facturen }: { c: ContractBerekend; facturen: Gek
                       </button>
                     </td>
                     <td className="table-td">
-                      <span className={`status-badge ${TERMIJN_STIJL[t.effectief]}`}>{TERMIJN_LABEL[t.effectief]}</span>
-                      {t.effectief === 'betaald' && (t.factuur?.betaald_op ?? t.betaald_op) && <div className="text-[10px] text-gray-400 mt-0.5">op {formatDate((t.factuur?.betaald_op ?? t.betaald_op)!)}</div>}
-                      {viaFactuur && <div className="text-[10px] text-gray-400 mt-0.5">volgt Facturen</div>}
+                      {t.effectief === 'geannuleerd'
+                        ? <span className={`status-badge ${TERMIJN_STIJL[t.effectief]}`}>{TERMIJN_LABEL[t.effectief]}</span>
+                        : <StatusKeuze huidig={t.effectief} bezig={b} onKies={(s) => (viaFactuur ? zetFactuur(t, s) : patch(t, { status: s }, `Op “${TERMIJN_LABEL[s]}” gezet.`))} />}
+                      {t.effectief === 'betaald' && (t.factuur?.betaald_op ?? t.betaald_op) && <div className="text-[10px] text-gray-400 mt-0.5">betaald op {formatDate((t.factuur?.betaald_op ?? t.betaald_op)!)}</div>}
+                      {viaFactuur && <div className="text-[10px] text-gray-400 mt-0.5">past ook Facturen aan</div>}
                     </td>
                     <td className="table-td">
                       {t.factuur ? (
@@ -1180,15 +1228,6 @@ function ContractTermijnen({ c, facturen }: { c: ContractBerekend; facturen: Gek
                     <td className="table-td whitespace-nowrap">
                       <div className="flex gap-1 justify-end items-center">
                         {b && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />}
-                        {!viaFactuur && t.effectief === 'gepland' && (
-                          <button disabled={b} onClick={() => patch(t, { status: 'gefactureerd' }, 'Gemarkeerd als gefactureerd.')} className={`${knop} bg-white border-gray-200 text-gray-600 hover:border-blue-500 hover:text-blue-700`}><Receipt className="h-3 w-3" />Gefactureerd</button>
-                        )}
-                        {!viaFactuur && (t.effectief === 'gepland' || t.effectief === 'gefactureerd') && (
-                          <button disabled={b} onClick={() => patch(t, { status: 'betaald' }, 'Gemarkeerd als betaald.')} className={`${knop} ${t.effectief === 'gefactureerd' ? 'bg-green-600 text-white border-green-600 hover:bg-green-700' : 'bg-white border-gray-200 text-gray-600 hover:border-green-500 hover:text-green-700'}`}><CheckCircle2 className="h-3 w-3" />Betaald</button>
-                        )}
-                        {!viaFactuur && t.effectief === 'betaald' && (
-                          <button disabled={b} onClick={() => patch(t, { status: 'gefactureerd' }, 'Betaling teruggedraaid.')} className={`${knop} bg-white border-gray-200 text-gray-500 hover:border-gray-400`}><Undo2 className="h-3 w-3" />Toch niet betaald</button>
-                        )}
                         {viaFactuur && (
                           <button disabled={b} onClick={() => patch(t, { invoice_id: null, status: 'gepland' }, 'Factuur ontkoppeld.')} className={`${knop} bg-white border-gray-200 text-gray-500 hover:border-gray-400`} title="Factuur ontkoppelen"><Unlink className="h-3 w-3" /></button>
                         )}

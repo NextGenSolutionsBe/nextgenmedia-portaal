@@ -93,6 +93,9 @@ test('Gekoppelde factuur bepaalt de status (betaald / geannuleerd → weer te fa
   assert.equal(effectieveStatus({ status: 'gepland', invoice_id: 'f' }, f({ betaald: true })), 'betaald')
   assert.equal(effectieveStatus({ status: 'gefactureerd', invoice_id: 'f' }, f({ geannuleerd: true })), 'gepland')
   assert.equal(effectieveStatus({ status: 'betaald', invoice_id: null }, undefined), 'betaald')
+  // In Facturen nog "Te factureren" (niet verstuurd): hier ook te factureren, niet gefactureerd.
+  assert.equal(effectieveStatus({ status: 'gepland', invoice_id: 'f' }, f({ verstuurd: false })), 'gepland')
+  assert.equal(effectieveStatus({ status: 'gepland', invoice_id: 'f' }, f({ verstuurd: true })), 'gefactureerd')
 })
 
 test('Facturen automatisch koppelen op maand, nooit twee keer dezelfde', () => {
