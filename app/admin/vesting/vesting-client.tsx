@@ -216,11 +216,12 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
       {/* ══ OVERZICHT ══════════════════════════════════════════════════════ */}
       {tab === 'overzicht' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             <Kpi label="Meetellende contractwaarde" value={formatEuro(v.meetellendeWaarde)} sub="WAM netto + contracten" />
             <Kpi label="Marco voorlopig" value={pct(v.marcoVoorlopig)} sub={`van maximaal ${pct(inst.max_aandeel_marco)}`} color="text-amber-700" />
             <Kpi label="Marco definitief" value={pct(v.marcoDefinitief)} sub="volledig betaalde of voltooide contracten" color="text-green-700" />
-            <Kpi label="Uitgevallen waarde" value={formatEuro(v.uitgevallenWaarde)} sub="stopgezet, niet betaald, WAM-kosten" color="text-red-600" />
+            <Kpi label="Uitgevallen waarde" value={formatEuro(v.uitgevallenWaarde)} sub="enkel stopgezet, niet-betalers, WAM-kosten" color="text-red-600" />
+            <Kpi label="Nog binnen te komen" value={formatEuro(v.nogBinnen.totaal)} sub={`lopende klanten · WAM ${formatEuro(v.nogBinnen.wam)} · contracten ${formatEuro(v.nogBinnen.contracten)}`} color="text-blue-700" />
           </div>
 
           {/* Contracten: getekend vs effectief gefactureerd */}
@@ -297,6 +298,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
               <div className="grid grid-cols-2 gap-3">
                 <Box label="Prognose omzet" value={formatEuro(v.wam.prognose)} sub={v.wam.openstaand > 0 ? `${formatEuro(v.wam.openstaand)} openstaand` : undefined} />
                 <Box label="Effectief ontvangen" value={formatEuro(v.wam.nettoOntvangen)} color="text-green-700" />
+                <Box label="Nog binnen te komen" value={formatEuro(v.wam.nogBinnen)} sub="geplande en openstaande facturen" color="text-blue-700" />
                 <Box label="Kosten bij WAM" value={formatEuro(v.wam.kosten)} color="text-red-600" />
                 <Box label="Netto meetellend" value={formatEuro(v.wam.nettoMeetellend)} />
                 <Box label="Aandeel via WAM" value={`${pct(v.wam.voorlopig)} · def. ${pct(v.wam.definitief)}`} />
@@ -460,11 +462,12 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
             </div>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
             <Box label="Prognose omzet" value={formatEuro(v.wam.prognose)} sub="historiek + alle termijnen" />
             <Box label="Gefactureerd" value={formatEuro(v.wam.gefactureerd)} sub="termijnen met een factuur" color="text-blue-700" />
             <Box label="Effectief ontvangen" value={formatEuro(v.wam.nettoOntvangen)} sub="historiek + betaalde termijnen — dit telt" color="text-green-700" />
             <Box label="Openstaand" value={formatEuro(v.wam.openstaand)} sub="gefactureerd, nog niet betaald" color={v.wam.openstaand > 0 ? 'text-amber-700' : undefined} />
+            <Box label="Nog binnen te komen" value={formatEuro(v.wam.nogBinnen)} sub="lopende klanten: gepland + openstaand, niet uitgevallen" color="text-blue-700" />
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
             <Box label="Kosten bij WAM" value={formatEuro(v.wam.kosten)} color="text-red-600" />
