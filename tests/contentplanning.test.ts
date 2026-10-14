@@ -162,6 +162,12 @@ test('Werkwijze per reeks: stappen, badges, deelblokken en let-op uit het tekstf
   assert.deepEqual(w2.stappen.map((x) => x.titel), ['Materiaal zoeken', 'Volgorde bepalen', 'Posts & stories', 'Reels', 'Afronden per klant', 'Opvolgtaak zetten', 'Goedkeuringstermijn aanduiden'])
   assert.ok(!c.reeks_detail['2'].includes('in je notities'))
   assert.deepEqual(c.vaste_taken.map((t) => t.key), ['inn_copy', 'inn_inplannen'])
+  // INN · SLL · K · J: Claude plant zelf in; geen downloaden of apart schedulen, artikels blijven handwerk.
+  const inplannen = c.vaste_taken[1]
+  assert.equal(inplannen.titel, 'Content inplannen')
+  assert.ok(!/schedul/i.test(inplannen.detail)); assert.ok(!inplannen.detail.includes('Content downloaden'))
+  assert.deepEqual(leesWerkwijze(inplannen.detail).stappen.map((x) => x.titel), ['In Notion controleren', 'Laten inplannen', 'Zelf doen'])
+  assert.match(inplannen.detail, /image carrousel/)
   assert.deepEqual(c.routine, [])
   assert.deepEqual(leesCp({ bord_verborgen: ['x', 3] }).bord_verborgen, ['x'])
 })

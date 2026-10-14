@@ -220,17 +220,17 @@ export const STANDAARD_CP: CpInstellingen = {
 - Claude inschakelen om de copy aan te passen
 - De wijzigingen controleren
 - Status op ‘Copy ready for review’ zetten` },
-    { key: 'inn_inplannen', titel: 'Content inplannen en schedulen', detail: `# In Notion controleren
+    // Claude plant de content zelf in (geen downloaden of apart schedulen meer); enkel artikels blijven handwerk.
+    { key: 'inn_inplannen', titel: 'Content inplannen', detail: `# In Notion controleren
 - Staat alle content op ‘Ready’?
-# Captions inplannen [Claude]
-- Claude plant de captions in Metricool in op de juiste data, accounts en kanalen
-- Specifieke instructies voor LinkedIn en YouTube volgen
-- LinkedIn en Facebook samen inplannen
-- Waar nodig een first comment toevoegen
-# Zelf afronden
-- Content downloaden
-- Aan de juiste captions koppelen
-- Alles officieel schedulen` },
+# Laten inplannen [Claude]
+- Zeg: "Plan van [datum] tot [datum] alle posts die op Ready staan in"
+- Claude plant alles zelf in. Je hoeft niets te downloaden.
+## LinkedIn
+- Facebook hoort er altijd bij
+- Images en carrousels altijd als ‘image carrousel’, met een gepaste titel
+# Zelf doen
+- Moet er een artikel gepost worden? Dat doe je nog handmatig.` },
   ],
   bord_verborgen: [],
 }
