@@ -421,6 +421,8 @@ export type ContractBerekend = Contract & {
   ontvangenVoorStop: number | null
   /** Bij stop of niet-betaler: wat er van de contractwaarde wegvalt. */
   uitgevallen: number
+  /** Loopt nog (niet gestopt, geen niet-betaler): contractwaarde die nog moet binnenkomen. */
+  nogBinnen: number
   /** De facturen (termijnen) van dit contract, met de status die telt. */
   termijnen: ContractTermijnBerekend[]
   /** Som van de termijnen die in het contract staan (niet geannuleerd). */
@@ -497,6 +499,10 @@ export type WamRijBerekend = WamRij & {
   ontvangen: number
   /** Gefactureerd maar nog niet betaald. */
   openstaand: number
+  /** Stopgezet of niet-betaler: wat er van de klant nooit meer binnenkomt. */
+  uitgevallen: number
+  /** Loopt nog: geplande en openstaande termijnen die nog moeten binnenkomen. */
+  nogBinnen: number
 }
 
 export type WamBerekend = {
@@ -507,6 +513,8 @@ export type WamBerekend = {
   gefactureerd: number
   betaald: number
   openstaand: number
+  /** Som van `nogBinnen`: geld van lopende klanten dat nog moet binnenkomen. */
+  nogBinnen: number
   kosten: number
   /** Netto ontvangen min kosten, nooit negatief. */
   nettoMeetellend: number
@@ -531,9 +539,15 @@ export function berekenWam(rijen: WamRij[], kosten: WamKost[], i: VestingInstell
     const ontvangen = historiek + betaald
     // Stopgezet of niet-betaler: €0, hoeveel er ook binnenkwam.
     const uit = r.status === 'stopgezet' || r.status === 'niet_betaler' || !r.betalingen_op_schema
+    // Wat er nog niet binnen is, is enkel "uitgevallen" als de klant stopte of niet
+    // betaalt. Bij een lopende klant zijn het gewoon facturen die nog moeten komen.
+    const gestopt = r.status === 'stopgezet' || r.status === 'niet_betaler'
+    const nogNietBinnen = Math.max(0, (prognose > 0 ? prognose : n(r.contractwaarde)) - ontvangen)
     return {
       ...r, termijnen: eigen, prognose, gefactureerd, betaald, ontvangen,
       openstaand: Math.max(0, gefactureerd - betaald),
+      uitgevallen: gestopt ? nogNietBinnen : 0,
+      nogBinnen: gestopt ? 0 : nogNietBinnen,
       meetellend: uit ? 0 : ontvangen, erkenning: erkenningVan(r, 'jaar1'),
     }
   })
@@ -551,6 +565,7 @@ export function berekenWam(rijen: WamRij[], kosten: WamKost[], i: VestingInstell
     gefactureerd: uitgewerkt.reduce((s, r) => s + r.gefactureerd, 0),
     betaald: uitgewerkt.reduce((s, r) => s + r.betaald, 0),
     openstaand: uitgewerkt.reduce((s, r) => s + r.openstaand, 0),
+    nogBinnen: uitgewerkt.reduce((s, r) => s + r.nogBinnen, 0),
     kosten: kostenTotaal, nettoMeetellend, voorlopig, definitief, volgendeDrempel,
   }
 }
@@ -579,8 +594,10 @@ export type VestingOverzicht = {
   marcoDefinitief: number
   bram: number
   chiara: number
-  /** Contractwaarde die wegviel door stop, niet-betaling of WAM-kosten. */
+  /** Contractwaarde die wegviel door stop, niet-betaling of WAM-kosten. Nooit geld dat nog moet komen. */
   uitgevallenWaarde: number
+  /** Geld van lopende klanten dat nog moet binnenkomen (geplande en openstaande facturen). */
+  nogBinnen: { totaal: number; wam: number; contracten: number }
   perJaar: JaarOverzicht[]
   /** Hoeveel € meetellende waarde nog tot de volgende hele procent. */
   volgendeProcent: { nodig: number; tarief: number } | null
@@ -675,13 +692,16 @@ export function berekenVesting(
       : null
     // Uitgevallen = wat de klant nooit betaalde van een gestopt of niet-betaald
     // contract. Zonder stopinfo: de hele contractwaarde.
-    const uitgevallen = (c.status === 'stopgezet' || c.status === 'niet_betaler') && totaal !== null
+    const gestopt = c.status === 'stopgezet' || c.status === 'niet_betaler'
+    const uitgevallen = gestopt && totaal !== null
       ? Math.max(0, totaal - (ontvangenVoorStop ?? 0)) : 0
+    // Lopend contract: wat er van de contractwaarde nog niet betaald is, komt nog binnen.
+    const nogBinnen = gestopt ? 0 : Math.max(0, (totaal ?? inContract) - betaald)
 
     const uit: ContractBerekend = {
       ...c, jaar, tarief, duur, totaal, netto, kostenAftrek, kostenWaarschuwing, factor, meetellend, erkenning,
       cumulatiefVoor: cumulatief, goedkopeSchijf, jaarschijf, ruweVesting,
-      betaaldeMaanden: maanden, ontvangenVoorStop, uitgevallen,
+      betaaldeMaanden: maanden, ontvangenVoorStop, uitgevallen, nogBinnen,
       termijnen, inContract, gefactureerd, betaald, openstaand: Math.max(0, gefactureerd - betaald),
       nogTeFactureren: Math.max(0, (totaal ?? inContract) - gefactureerd), extraGefactureerd, volledigBetaald, termijnVerschil,
     }
@@ -697,9 +717,13 @@ export function berekenVesting(
   const marcoDefinitief = Math.min(i.max_aandeel_marco, wam.definitief + afkap(somDefinitief))
 
   const meetellendeWaarde = wam.nettoMeetellend + contracten.reduce((s, c) => s + c.meetellend, 0)
+  // Uitgevallen = enkel stopgezet, niet-betaler en WAM-kosten. Wat een lopende klant
+  // nog moet betalen, staat apart onder nogBinnen.
   const uitgevallenWaarde = contracten.reduce((s, c) => s + c.uitgevallen, 0)
     + wam.kosten
-    + wam.rijen.reduce((s, r) => s + Math.max(0, (r.prognose > 0 ? r.prognose : n(r.contractwaarde)) - r.ontvangen), 0)
+    + wam.rijen.reduce((s, r) => s + r.uitgevallen, 0)
+  const nogBinnenContracten = contracten.reduce((s, c) => s + c.nogBinnen, 0)
+  const nogBinnen = { totaal: wam.nogBinnen + nogBinnenContracten, wam: wam.nogBinnen, contracten: nogBinnenContracten }
 
   const perJaar: JaarOverzicht[] = (['jaar1', 'jaar2', 'jaar3'] as const).map((jaar) => {
     const van = contracten.filter((c) => c.jaar === jaar)
@@ -744,7 +768,7 @@ export function berekenVesting(
   return {
     instellingen: i, contracten, wam, meetellendeWaarde,
     marcoVoorlopig, marcoDefinitief, bram, chiara: i.vast_aandeel_chiara,
-    uitgevallenWaarde, perJaar, volgendeProcent, contractTotalen,
+    uitgevallenWaarde, nogBinnen, perJaar, volgendeProcent, contractTotalen,
   }
 }
 
