@@ -9,6 +9,7 @@ import { ClickUpSyncControl } from '@/components/admin/clickup-sync-control'
 import { ShootBriefings } from '@/components/admin/shoot-briefings'
 import { SendMailButton } from '@/components/admin/send-mail-button'
 import { GoedkeuringDeadlines } from '@/components/admin/goedkeuring-deadlines'
+import { GoedkeuringAanvragen } from '@/components/admin/goedkeuring-aanvragen'
 import { ShootDocumentKnop } from '@/components/shoot-document-knop'
 import { KANAAL_SLUGS, kanaalLabel } from '@/lib/social-platforms'
 import { toast } from 'sonner'
@@ -202,6 +203,8 @@ export function SocialMediaAdmin({
 
   // Rol van de geselecteerde klant in de contentplanning: zo weet het team wat de klant zelf kan.
   const [klantRol, setKlantRol] = useState<{ clientId: string; rol: KalenderRol | null } | null>(null)
+  // Na "Goedkeuring aanvragen": termijnen en statussen opnieuw laden.
+  const [deadlineVersie, setDeadlineVersie] = useState(0)
   useEffect(() => {
     if (!selectedClient) return
     let weg = false
@@ -390,6 +393,7 @@ export function SocialMediaAdmin({
             )}
             {!selectMode ? (
               <>
+                <GoedkeuringAanvragen clientId={selectedClient} clients={clients} onKlaar={() => { setDeadlineVersie((v) => v + 1); loadItems(selectedClient) }} />
                 <SendMailButton clientId={selectedClient} kind="scripts" label="Verstuur mail" />
                 <SendMailButton clientId={selectedClient} kind="shoot" label="Verstuur uitnodiging" />
                 <ShootDocumentKnop
@@ -456,7 +460,7 @@ export function SocialMediaAdmin({
       </div>
 
       {/* Goedkeuringsdeadlines: overzicht van alle klanten + beheer voor deze klant */}
-      <GoedkeuringDeadlines clientId={selectedClient || undefined} onKiesKlant={handleClientChange} />
+      <GoedkeuringDeadlines clientId={selectedClient || undefined} onKiesKlant={handleClientChange} vernieuw={deadlineVersie} clients={clients} onAangevraagd={() => { setDeadlineVersie((v) => v + 1); if (selectedClient) loadItems(selectedClient) }} />
 
       {/* ClickUp-sync (per klant) */}
       {selectedClient && (

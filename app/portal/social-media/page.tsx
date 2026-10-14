@@ -9,13 +9,12 @@ import { kalenderRechtenVoorSessie } from '@/lib/content/kalender-beheer-server'
 import { ROL_INFO, kanGoedkeuren } from '@/lib/content/kalender-rol'
 import { ShootDocumentKnop } from '@/components/shoot-document-knop'
 import { getLang } from '@/lib/i18n-server'
-import { aftelItemsVoorKlant } from '@/lib/content/goedkeuring-deadlines'
-import { GoedkeuringAftelklok } from '@/components/portal/goedkeuring-aftelklok'
+import { goedkeuringenVoorKlant } from '@/lib/content/goedkeuring-deadlines'
 
 type FeedbackRow = Feedback & { shoot_id: string }
 type IdeaRow = Idea & { shoot_id: string; attachment_path: string | null }
 
-export default async function PortalSocialMediaPage() {
+export default async function PortalSocialMediaPage({ searchParams }: { searchParams?: { item?: string } }) {
   const session = await requirePortalView('social_media')
   const clientId = session.clientId
   const admin = createAdminSupabaseClient()
@@ -37,9 +36,11 @@ export default async function PortalSocialMediaPage() {
   if (!rechten.bekijken) redirect('/portal')
   const magGoedkeuren = kanGoedkeuren(rechten)
 
-  // De aftelklok vraagt om goed te keuren: enkel tonen aan wie dat ook kan.
+  // Wat op goedkeuring wacht (met aftelling): enkel tonen aan wie ook kan goedkeuren.
   const lang = await getLang()
-  const aftel = magGoedkeuren ? await aftelItemsVoorKlant(admin, clientId, lang) : []
+  const goedkeuringen = magGoedkeuren ? await goedkeuringenVoorKlant(admin, clientId) : []
+  // ?item=<id> (vanuit het dashboard of de mail): dat item meteen openen, als het van deze klant is.
+  const openItem = /^[0-9a-f-]{36}$/i.test(searchParams?.item ?? '') ? searchParams!.item! : null
 
   const { data: items } = await admin
     .from('social_content_items')
@@ -107,7 +108,6 @@ export default async function PortalSocialMediaPage() {
         </div>
       </div>
 
-      <GoedkeuringAftelklok items={aftel} lang={lang} />
 
       <PortalCalendar
         initialItems={(items ?? []).map((it) => ({
@@ -116,6 +116,9 @@ export default async function PortalSocialMediaPage() {
         }))}
         clientId={clientId}
         rechten={rechten}
+        goedkeuringen={goedkeuringen}
+        lang={lang}
+        openItem={openItem}
       />
 
       <ShootBriefingView shoots={shoots} feedbackByShoot={feedbackByShoot} ideasByShoot={ideasByShoot} />

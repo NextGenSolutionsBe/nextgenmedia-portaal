@@ -3,9 +3,11 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { baseUrl } from '@/lib/email'
 import { SERVICE_LABELS } from '@/lib/utils'
 import type { MailVars } from '@/lib/email-render'
-import { dagenTot, maandBereik, maandenTekst, vandaagBrussel } from '@/lib/content/deadline-model'
+import { aantalDagenTekst, dagenTot, maandBereik, maandenTekst, vandaagBrussel, voornaam } from '@/lib/content/deadline-model'
 
-export type MailContext = { toEmail: string; clientName: string; vars: MailVars }
+/** Een goedkeuringstermijn waaraan deze mail gekoppeld is, en of er al voor gemaild werd. */
+export type DeadlineInfo = { id: string; deadline: string; status: string; mail_verstuurd_op: string | null; mail_deadline: string | null }
+export type MailContext = { toEmail: string; clientName: string; vars: MailVars; deadline?: DeadlineInfo | null }
 
 /** Bouwt de placeholder-waarden + ontvanger voor een klantmail. */
 export async function buildClientMailContext(opts: {
@@ -63,10 +65,13 @@ export async function buildClientMailContext(opts: {
   }
 
   // Goedkeuringsdeadline van de contentkalender (optioneel).
-  let gDeadline = '', gMaanden = '', gDagen = '', gOpen = ''
+  let gDeadline = '', gMaanden = '', gDagen = '', gOpen = '', gAantal = ''
+  let deadlineInfo: DeadlineInfo | null = null
   if (opts.deadlineId) {
-    const { data: d } = await admin.from('content_goedkeuring_deadlines').select('client_id, maanden, deadline').eq('id', opts.deadlineId).maybeSingle()
+    const { data: d } = await admin.from('content_goedkeuring_deadlines').select('*').eq('id', opts.deadlineId).maybeSingle()
     if (d && d.client_id === opts.clientId) {
+      deadlineInfo = { id: d.id, deadline: d.deadline, status: d.status, mail_verstuurd_op: d.mail_verstuurd_op ?? null, mail_deadline: d.mail_deadline ?? null }
+      gAantal = aantalDagenTekst(d.deadline as string, vandaagBrussel())
       gDeadline = new Date(`${d.deadline}T12:00:00Z`).toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Brussels' })
       gMaanden = maandenTekst(d.maanden as string[])
       const n = dagenTot(d.deadline as string, vandaagBrussel())
@@ -84,6 +89,9 @@ export async function buildClientMailContext(opts: {
 
   const vars: MailVars = {
     klantnaam: client.contact_name || client.company_name || 'klant',
+    // Voornaam: eerste woord van de contactpersoon; zonder contactpersoon de bedrijfsnaam.
+    voornaam: voornaam(client.contact_name, client.company_name) || 'klant',
+    aantal_dagen: gAantal,
     bedrijfsnaam: client.company_name || '',
     email: client.email || '',
     dienst,
@@ -106,5 +114,5 @@ export async function buildClientMailContext(opts: {
     open_items: gOpen,
   }
 
-  return { toEmail: client.email || '', clientName: client.company_name || '', vars }
+  return { toEmail: client.email || '', clientName: client.company_name || '', vars, deadline: deadlineInfo }
 }

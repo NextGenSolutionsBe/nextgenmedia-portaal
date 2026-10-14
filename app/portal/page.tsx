@@ -8,10 +8,10 @@ import { Calendar, FileText, Globe, Clock, ArrowRight } from 'lucide-react'
 import { resolvePortalSession, sessionCan } from '@/lib/portal-auth'
 import { getLang } from '@/lib/i18n-server'
 import { t } from '@/lib/i18n'
-import { aftelItemsVoorKlant } from '@/lib/content/goedkeuring-deadlines'
+import { goedkeuringenVoorKlant } from '@/lib/content/goedkeuring-deadlines'
 import { kalenderRechtenVoorSessie } from '@/lib/content/kalender-beheer-server'
 import { kanGoedkeuren } from '@/lib/content/kalender-rol'
-import { GoedkeuringAftelklok } from '@/components/portal/goedkeuring-aftelklok'
+import { GoedkeuringOverzicht } from '@/components/portal/goedkeuring-overzicht'
 
 export default async function PortalDashboard() {
   const session = await resolvePortalSession()
@@ -76,8 +76,8 @@ export default async function PortalDashboard() {
   const magGoedkeuren = !!kalender && kanGoedkeuren(kalender)
   const pendingScripts = magGoedkeuren ? (pendingScriptsCount ?? 0) : 0
   const hasWebdesign = services.some((s) => s.service_slug === 'webdesign')
-  // Goedkeuringsdeadline(s) van de contentkalender — aftelklok bovenaan.
-  const aftel = magGoedkeuren ? await aftelItemsVoorKlant(admin, clientId, lang) : []
+  // Wat op goedkeuring wacht, per aangevraagde termijn, met de aftelling — bovenaan.
+  const goedkeuringen = magGoedkeuren ? await goedkeuringenVoorKlant(admin, clientId) : []
   const pendingContracts = canContracts ? contracts.filter((c) => ['sent', 'viewed'].includes(c.status)) : []
 
   // Social media contract config (posts/reels/stories come from service_contracts.config)
@@ -92,7 +92,7 @@ export default async function PortalDashboard() {
         <p className="text-sm text-gray-500 mt-0.5">{t(lang, 'dash.subtitle')}</p>
       </div>
 
-      <GoedkeuringAftelklok items={aftel} lang={lang} link />
+      <GoedkeuringOverzicht goedkeuringen={goedkeuringen} lang={lang} />
 
       {/* Alerts */}
       {(pendingContracts.length > 0 || pendingScripts > 0) && (

@@ -1,15 +1,17 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Plus, X, Loader2 } from 'lucide-react'
 import { ContentCalendar, type SocialContentItem, type SocialContentStatus, type ContentActiviteit } from '@/components/calendar/content-calendar'
 import { KANAAL_SLUGS, kanaalLabel } from '@/lib/social-platforms'
 import type { KalenderRechten } from '@/lib/content/kalender-rol'
 import type { Status } from '@/lib/content/kalender-beheer'
+import { GoedkeuringOverzicht, type Goedkeuring } from '@/components/portal/goedkeuring-overzicht'
+import type { Lang } from '@/lib/i18n'
 
 export function PortalCalendar({
-  initialItems, clientId, rechten,
+  initialItems, clientId, rechten, goedkeuringen = [], lang = 'nl', openItem = null,
 }: {
   initialItems: Array<{
     id: string; client_id: string; planned_date: string; platform: string;
@@ -21,9 +23,23 @@ export function PortalCalendar({
   clientId: string
   /** Wat deze gebruiker mag (rol van de klant × eigen portaalrechten). De server controleert hetzelfde. */
   rechten: KalenderRechten
+  /** Aangevraagde goedkeuringstermijnen (de items wachten volgen live uit de kalender hieronder). */
+  goedkeuringen?: Goedkeuring[]
+  lang?: Lang
+  /** Item dat meteen open moet (link ?item=). */
+  openItem?: string | null
 }) {
   void clientId
   const [items, setItems] = useState<SocialContentItem[]>(initialItems as unknown as SocialContentItem[])
+  const [focus, setFocus] = useState<{ id: string; n: number } | null>(openItem ? { id: openItem, n: 1 } : null)
+  // Wat nog wacht, rechtstreeks uit de kalender: na "Goedkeuren" verdwijnt het meteen uit het overzicht.
+  const wachtend = useMemo<Goedkeuring[]>(() => goedkeuringen.map((g) => ({
+    ...g,
+    items: items
+      .filter((it) => it.status === 'ready_for_review' && g.maanden.some((m) => it.planned_date.startsWith(`${m}-`)))
+      .sort((a, b) => a.planned_date.localeCompare(b.planned_date))
+      .map((it) => ({ id: it.id, title: it.title, planned_date: it.planned_date, content_type: it.content_type })),
+  })), [goedkeuringen, items])
 
   const review = async (id: string, decision: 'approved' | 'changes_requested', feedback?: string) => {
     const r = await fetch('/api/portal/social-content/review', {
@@ -80,6 +96,7 @@ export function PortalCalendar({
 
   return (
     <div className="space-y-3">
+    <GoedkeuringOverzicht goedkeuringen={wachtend} lang={lang} onOpen={(id) => setFocus((f) => ({ id, n: (f?.n ?? 0) + 1 }))} />
     {rechten.aanmaken && (
       <div className="flex justify-end">
         <button type="button" onClick={() => setNieuwOp(new Date().toISOString().slice(0, 10))} className="btn-primary text-sm"><Plus className="h-4 w-4" />Nieuw item</button>
@@ -89,6 +106,7 @@ export function PortalCalendar({
       items={items}
       mode="client"
       rechten={rechten}
+      focus={focus}
       actions={{
         onApprove: rechten.goedkeuren.length ? handleApprove : undefined,
         onRequestChanges: rechten.afkeuren.length ? handleRequestChanges : undefined,

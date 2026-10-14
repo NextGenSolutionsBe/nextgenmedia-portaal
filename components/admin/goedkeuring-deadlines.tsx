@@ -4,11 +4,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Hourglass, Plus, Loader2, Pencil, Trash2, X, Check, CheckCheck } from 'lucide-react'
 import { MailComposer } from '@/components/admin/mail-composer'
+import { GoedkeuringAanvragen } from '@/components/admin/goedkeuring-aanvragen'
 import { dagenTot, maandLabel, maandenTekst, vandaagBrussel, type Tellingen } from '@/lib/content/deadline-model'
 
 type Rij = {
   id: string; client_id: string; maanden: string[]; deadline: string; status: 'open' | 'afgerond'; notitie: string | null
   auto_goedgekeurd: number; afgerond_op: string | null; klant: string | null; tellingen: Tellingen; laatsteMail: string | null
+  termijn_dagen?: number | null; mail_verstuurd_op?: string | null; mail_deadline?: string | null
 }
 
 const datum = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('nl-BE', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' })
@@ -34,7 +36,13 @@ function maandKeuzes(extra: string[] = []): string[] {
  * Er wordt nooit automatisch goedgekeurd: na de deadline drukken wij zelf op
  * "Alles goedkeuren" (wat nog bij de klant staat → goedgekeurd).
  */
-export function GoedkeuringDeadlines({ clientId, onKiesKlant }: { clientId?: string; onKiesKlant?: (id: string) => void }) {
+export function GoedkeuringDeadlines({ clientId, onKiesKlant, vernieuw = 0, clients, onAangevraagd }: {
+  clientId?: string; onKiesKlant?: (id: string) => void
+  /** Verhogen = opnieuw laden (bv. na "Goedkeuring aanvragen" in de werkbalk). */
+  vernieuw?: number
+  clients?: { id: string; company_name: string }[]
+  onAangevraagd?: () => void
+}) {
   const [tab, setTab] = useState<'alle' | 'klant'>('alle')
   const [rijen, setRijen] = useState<Rij[] | null>(null)
   const [nieuw, setNieuw] = useState(false)
@@ -50,7 +58,7 @@ export function GoedkeuringDeadlines({ clientId, onKiesKlant }: { clientId?: str
       setRijen(j.deadlines ?? [])
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Laden mislukt'); setRijen([]) }
   }, [tab, clientId])
-  useEffect(() => { laad() }, [laad])
+  useEffect(() => { laad() }, [laad, vernieuw])
   useEffect(() => { if (!clientId && tab === 'klant') setTab('alle') }, [clientId, tab])
 
   // Overzicht: open deadlines eerst (vroegste bovenaan), daarna de recent verwerkte.
@@ -95,10 +103,11 @@ export function GoedkeuringDeadlines({ clientId, onKiesKlant }: { clientId?: str
             <button type="button" onClick={() => setTab('alle')} className={`px-2.5 py-1 rounded-md font-medium ${tab === 'alle' ? 'bg-black text-white' : 'text-gray-600'}`}>Alle klanten{tab === 'alle' && openAantal ? ` (${openAantal} open)` : ''}</button>
             <button type="button" disabled={!clientId} onClick={() => setTab('klant')} className={`px-2.5 py-1 rounded-md font-medium disabled:opacity-40 ${tab === 'klant' ? 'bg-black text-white' : 'text-gray-600'}`}>Deze klant</button>
           </div>
-          {clientId && <button type="button" onClick={() => { setTab('klant'); setNieuw(true) }} className="btn-primary text-sm"><Plus className="h-4 w-4" />Deadline zetten</button>}
+          {clientId && <GoedkeuringAanvragen clientId={clientId} clients={clients} onKlaar={() => { setTab('klant'); laad(); onAangevraagd?.() }} />}
+          {clientId && <button type="button" onClick={() => { setTab('klant'); setNieuw(true) }} className="btn-secondary text-sm" title="Een deadline op een zelf gekozen datum, zonder mail"><Plus className="h-4 w-4" />Datum kiezen</button>}
         </div>
       </div>
-      <p className="text-xs text-gray-500 mb-3">Tegen welke datum moet de klant welke maand(en) goedkeuren? De klant ziet een aftelklok in het portaal. Er gebeurt niets automatisch: een herinnering mail je zelf (met voorbeeld), en na de deadline keur je met “Alles goedkeuren” goed wat nog bij de klant staat — feedback en concepten blijven staan.</p>
+      <p className="text-xs text-gray-500 mb-3">Tegen welke datum moet de klant welke maand(en) goedkeuren? Met “Goedkeuring aanvragen” kies je een termijn in dagen en meteen ook de mail. De klant ziet de aftelling in het portaal. Er gebeurt niets automatisch: mails verstuur je zelf (met voorbeeld), en na de deadline keur je met “Alles goedkeuren” goed wat nog bij de klant staat. Feedback en concepten blijven staan.</p>
 
       {(nieuw || bewerk) && clientId && (
         <DeadlineFormulier clientId={bewerk?.client_id ?? clientId} rij={bewerk} onSluit={() => { setNieuw(false); setBewerk(null) }} onKlaar={() => { setNieuw(false); setBewerk(null); laad() }} />
@@ -130,6 +139,8 @@ export function GoedkeuringDeadlines({ clientId, onKiesKlant }: { clientId?: str
                       <span>{r.tellingen.goedgekeurd} goedgekeurd</span>
                       {r.tellingen.concept > 0 && <span>{r.tellingen.concept} nog in concept</span>}
                       <span>{r.laatsteMail ? `laatst gemaild ${datumTijd(r.laatsteMail)}` : 'nog niet gemaild'}</span>
+                      {r.termijn_dagen ? <span>termijn {r.termijn_dagen} dagen</span> : null}
+                      {r.mail_deadline && r.mail_deadline !== r.deadline && <span className="text-amber-700 font-medium">mail vermeldde nog {datum(r.mail_deadline)}</span>}
                       {r.notitie && <span className="italic">“{r.notitie}”</span>}
                     </div>
                   </div>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useCallback, useEffect } from 'react'
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react'
 import {
   ChevronLeft, ChevronRight, X, Check, RefreshCw,
   Send, Pencil, Save, Image, Video, FileText, Plus, MessageSquare,
@@ -92,13 +92,15 @@ const tijdstip = (iso: string) => new Date(iso).toLocaleString('nl-BE', { timeZo
 const wie = (a: ContentActiviteit) => a.door ?? (a.rol === 'klant' ? 'Klant' : 'NextGenMedia')
 
 export function ContentCalendar({
-  items: itemsProp, mode, actions, selection, rechten,
+  items: itemsProp, mode, actions, selection, rechten, focus,
 }: {
   items: SocialContentItem[] | null
   mode: CalendarMode
   actions: CalendarActions
   /** Portaal: wat deze klantgebruiker mag (lib/content/kalender-rol.ts). De server controleert hetzelfde. */
   rechten?: KalenderRechten
+  /** Een item van buitenaf openen (overzicht "wacht op goedkeuring", link ?item=). `n` verhogen = opnieuw openen. */
+  focus?: { id: string; n: number } | null
   selection?: {
     enabled: boolean
     selectedIds: Set<string>
@@ -113,6 +115,18 @@ export function ContentCalendar({
 
   const selected = items.find((i) => i.id === selectedId) ?? null
   const today = ymd(new Date())
+  const wortel = useRef<HTMLDivElement>(null)
+
+  // Van buitenaf geopend: naar de maand van het item, het item selecteren en in beeld brengen.
+  useEffect(() => {
+    if (!focus) return
+    const it = items.find((i) => i.id === focus.id)
+    if (!it) return
+    setView('month')
+    setCursor(new Date(`${it.planned_date}T12:00:00`))
+    setSelectedId(it.id)
+    wortel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [focus?.id, focus?.n]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const days = useMemo(() => {
     const start = view === 'month'
@@ -156,7 +170,7 @@ export function ContentCalendar({
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div ref={wortel} className="flex flex-col gap-4 scroll-mt-20">
       {/* Script panel — on mobile appears ABOVE calendar when an item is selected */}
       {selected && (
         <div className="lg:hidden">
