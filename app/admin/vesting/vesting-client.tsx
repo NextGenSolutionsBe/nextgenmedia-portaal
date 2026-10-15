@@ -440,6 +440,9 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                         <td className="table-td text-right tabular font-semibold whitespace-nowrap"
                           title={`Goedkope schijf ${formatEuro(c.goedkopeSchijf)} · jaarschijf ${formatEuro(c.jaarschijf)} · cumulatief vóór dit contract ${formatEuro(c.cumulatiefVoor)}`}>
                           {formatEuro(c.meetellend)}
+                          {c.totaal !== null && c.meetellend > 0 && c.factor < 1 && (
+                            <div className="text-[11px] text-gray-500 font-normal">{Math.round(c.factor * 100)}% van {formatEuro(c.totaal)}{c.kostenAftrek > 0 ? <> − {Math.round(c.factor * 100)}% van {formatEuro(c.kostenAftrek)} kosten</> : null}</div>
+                          )}
                           {c.jaarschijf > 0 && <div className="text-[11px] text-gray-400 font-normal">{formatEuro(c.jaarschijf)} aan jaartarief</div>}
                         </td>
                         <td className="table-td text-right tabular">{pct(c.ruweVesting, 2)}</td>
@@ -834,6 +837,11 @@ function ContractDialoog({ contract, inst, module, klanten, onClose }: { contrac
         <div><div className="text-[11px] text-gray-500">Totaal</div><div className="font-semibold">{totaal === null ? '—' : formatEuro(totaal)}</div></div>
         <div><div className="text-[11px] text-gray-500">Netto kwalificerend</div><div className="font-semibold">{netto === null ? '—' : formatEuro(netto)}</div></div>
         <div><div className="text-[11px] text-gray-500">Meetellend</div><div className="font-semibold">{netto === null ? '—' : gestopt || !f.betalingen_op_schema ? formatEuro(0) : formatEuro(netto * factor)}</div></div>
+        {totaal !== null && netto !== null && factor < 1 && !gestopt && f.betalingen_op_schema && (
+          <div className="col-span-3 text-[11px] text-gray-600">
+            Marco {Math.round(factor * 100)}%: {formatEuro(totaal * factor)} omzet{totaal - netto > 0 ? <> − {formatEuro((totaal - netto) * factor)} kosten ({Math.round(factor * 100)}% van {formatEuro(totaal - netto)})</> : null} = {formatEuro(netto * factor)}
+          </div>
+        )}
       </div>
       <p className="text-[11px] text-gray-500">Jaartarieven: Jaar 1 {formatEuro(inst.jaar1_tarief)}, Jaar 2 {formatEuro(inst.jaar2_tarief)}, Jaar 3 {formatEuro(inst.jaar3_tarief)} per procent boven {pct(inst.einde_goedkope_schijf)}.</p>
     </Dialoog>
@@ -1460,6 +1468,12 @@ function SnelBewerken({ c, module, onAlles, onKoppel }: { c: ContractBerekend; m
               onChange={(e) => setPctInvoer(e.target.value)} onBlur={bewaarPct} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} aria-label="Eigen percentage" />
             <button type="button" disabled={!!bezig || !eigen} onClick={() => zet('pct', { toerekening_pct: null }, `Toerekening terug automatisch (${standaard}%).`)} className={`text-xs underline ${eigen ? 'text-gray-700' : 'text-gray-300'}`}>automatisch ({standaard}%)</button>
           </div>
+          {c.totaal !== null && (
+            <div className="text-[11px] text-gray-600">
+              {Math.round(c.factor * 100)}% van {formatEuro(c.totaal)} omzet{c.kostenAftrek > 0 ? <> − {Math.round(c.factor * 100)}% van {formatEuro(c.kostenAftrek)} kosten</> : null} = <b>{formatEuro(c.netto === null ? 0 : c.netto * c.factor)}</b>
+              {c.meetellend === 0 && c.netto !== null && c.netto > 0 ? <span className="text-gray-400"> (telt nu niet mee: {ERKENNING_LABEL[c.erkenning].toLowerCase()})</span> : null}
+            </div>
+          )}
           <div className="flex gap-3 flex-wrap text-xs">
             <label className="inline-flex items-center gap-1.5 cursor-pointer"><input type="checkbox" checked={c.appointment_door_marco} disabled={!!bezig} onChange={(e) => zet('app', { appointment_door_marco: e.target.checked })} />Appointment door Marco</label>
             <label className="inline-flex items-center gap-1.5 cursor-pointer"><input type="checkbox" checked={c.closed_door_marco} disabled={!!bezig} onChange={(e) => zet('closed', { closed_door_marco: e.target.checked })} />Closed door Marco</label>

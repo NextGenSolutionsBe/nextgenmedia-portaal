@@ -126,4 +126,13 @@ test('Eigen toerekeningspercentage per contract gaat voor 50% + 50%; leeg = auto
   assert.equal(toerekeningsfactor({ appointment_door_marco: false, closed_door_marco: false, toerekening_pct: 150 }), 1)
 })
 
+test('Kosten tellen mee voor hetzelfde percentage als Marco: 50% van de omzet − 50% van de kosten', () => {
+  // C-010 TM Technics: € 4.160, € 120 kosten, enkel appointment door Marco = 50%.
+  const v = berekenVesting([contract({ facturatiemodel: 'eenmalig', maandbedrag: null, duur_maanden: null, handmatige_totaalwaarde: 4160, uitgesloten_kosten: 120, closed_door_marco: false })], [], [], I)
+  bijna(v.contracten[0].meetellend, 0.5 * 4160 - 0.5 * 120) // 2.020, niet 2.080 − 120
+  // Met een eigen percentage van 30%: 30% van beide.
+  const w = berekenVesting([contract({ facturatiemodel: 'eenmalig', maandbedrag: null, duur_maanden: null, handmatige_totaalwaarde: 4160, uitgesloten_kosten: 120, toerekening_pct: 30 })], [], [], I)
+  bijna(w.contracten[0].meetellend, 0.3 * 4160 - 0.3 * 120)
+})
+
 console.log(`\n${n} tests geslaagd\n`)
