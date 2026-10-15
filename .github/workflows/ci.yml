@@ -1,0 +1,59 @@
+name: CI
+
+# Draait bij elke push en pull request naar main. Blokkeert de Vercel-deploy
+# NIET (die staat los), maar geeft wel meteen een rood kruisje in GitHub zodra
+# er iets stuk of onveilig is.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read          # minimale rechten (least privilege)
+
+jobs:
+  build:
+    name: Types, build en kwetsbaarheden
+    runs-on: ubuntu-latest
+    steps:
+      # Acties op commit-SHA gepind: een tag kan verplaatst worden naar andere
+      # code, een SHA niet. Beschermt tegen een gekaapte action (supply chain).
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Afhankelijkheden installeren (exact volgens lockfile)
+        run: npm ci
+
+      - name: Typecontrole
+        run: npx tsc --noEmit
+
+      - name: Productie-build
+        run: npx next build
+        env:
+          # Placeholders: de build mag geen echte secrets nodig hebben.
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder
+
+      - name: Bekende kwetsbaarheden in afhankelijkheden
+        # Faalt alleen bij CRITICAL, zodat bestaande high-meldingen de pijplijn
+        # niet blokkeren zolang die nog op de planning staan. Verlaag naar 'high'
+        # zodra de Next.js-upgrade gedaan is.
+        run: npm audit --omit=dev --audit-level=critical
+
+  secrets:
+    name: Secret-scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0        # volledige history meescannen
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@83373cf2f8c4db6e24b41c1a9b086bb9619e9cd3 # v2.3.7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

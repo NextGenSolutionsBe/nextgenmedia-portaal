@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "nextgenmedia": {
+      "command": "node",
+      "args": ["mcp/nextgenmedia-server.mjs"]
+    }
+  }
+}

@@ -1,6 +1,8 @@
 // lib/content-planner.ts
 // Smart content calendar planning algorithm
 
+import { normaliseerKanalen } from '@/lib/social-platforms'
+
 export type PlannedContentType = 'post' | 'reel' | 'story'
 
 export interface MonthInput {
@@ -60,7 +62,7 @@ function getPlatformPreference(platform: string): 'morning' | 'midday' | 'evenin
     case 'tiktok': return 'evening'
     case 'pinterest': return 'evening'
     case 'twitter': return 'morning'
-    default: return 'midday' // instagram, facebook
+    default: return 'midday' // meta
   }
 }
 
@@ -180,11 +182,14 @@ function generateMonthPlan(
   // Use weekdays if enough of them, otherwise include weekends
   const preferred = weekdays.length >= 10 ? weekdays : allDays
 
-  const normalized = channels.map(c => c.toLowerCase())
+  // Kanalen normaliseren: 'instagram' en 'facebook' uit een oude klantinstelling
+  // worden hier één keer 'meta', anders plant hij dezelfde reel twee keer in.
+  const normalized = normaliseerKanalen(channels)
   const videoChannels = normalized.filter(c =>
-    ['instagram', 'tiktok', 'facebook', 'youtube'].includes(c),
+    ['meta', 'tiktok', 'youtube'].includes(c),
   )
-  const storyChannels = normalized.filter(c => ['instagram', 'facebook'].includes(c))
+  // Stories bestaan enkel op Meta.
+  const storyChannels = normalized.filter(c => c === 'meta')
 
   // Build flat slot list
   const posts: { type: PlannedContentType; platform: string }[] = Array.from(

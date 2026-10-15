@@ -1,6 +1,11 @@
+import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
+import { logAudit, requestMeta } from '@/lib/audit'
 import { revalidatePath } from 'next/cache'
+
+// Gebruikt cookies/sessie: nooit statisch renderen.
+export const dynamic = 'force-dynamic'
 
 export async function POST(
   req: NextRequest,
@@ -50,6 +55,20 @@ export async function POST(
       if (error) throw new Error(error.message)
     }
 
+    const meta = requestMeta(req)
+    await logAudit({
+      action: 'client.access.grant',
+      entityType: 'client',
+      entityId: clientId,
+      summary: `Portaaltoegang verleend voor dienst "${service_slug}"`,
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      actorRole: 'admin',
+      metadata: { service_slug },
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    })
+
     // Invalidate caches so portal + admin pages reflect new access immediately
     try {
       revalidatePath(`/admin/clients/${clientId}`)
@@ -61,7 +80,7 @@ export async function POST(
     return NextResponse.json({ ok: true })
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Fout' },
+      { error: safeMessage(err) },
       { status: 400 },
     )
   }
@@ -98,6 +117,20 @@ export async function DELETE(
       .eq('service_slug', service_slug)
     if (error) throw new Error(error.message)
 
+    const meta = requestMeta(req)
+    await logAudit({
+      action: 'client.access.revoke',
+      entityType: 'client',
+      entityId: clientId,
+      summary: `Portaaltoegang ingetrokken voor dienst "${service_slug}"`,
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      actorRole: 'admin',
+      metadata: { service_slug },
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    })
+
     // Invalidate caches so portal access is revoked immediately
     try {
       revalidatePath(`/admin/clients/${clientId}`)
@@ -109,7 +142,7 @@ export async function DELETE(
     return NextResponse.json({ ok: true })
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Fout' },
+      { error: safeMessage(err) },
       { status: 400 },
     )
   }
