@@ -70,21 +70,21 @@ const dagen = (van: string | null | undefined, nu: number) => (van ? Math.floor(
 
 /**
  * Waarom dit contract opvolging nodig heeft — lege lijst = niets te doen.
- * Enkel lopende contracten; stopgezet/afgerond/verlopen verschijnen hier nooit.
+ * Enkel contracten die nog niet ondertekend zijn (en lopend). Een ondertekend
+ * contract vraagt nooit opvolging, en een ontbrekende startdatum is nooit een
+ * reden: die is niet verplicht.
  */
 export function opvolgRedenen(c: LooptijdContract, nu: Date = new Date()): string[] {
-  if (isAfgesloten(looptijdVan(c.looptijd_status))) return []
+  if (!nogTeOndertekenen(c)) return []
   const t = nu.getTime()
   const vandaag = nu.toISOString().slice(0, 10)
   const k = canonicalStatus(c.status)
   const uit: string[] = []
 
-  if (nogTeOndertekenen(c)) {
-    const leeftijd = k === 'klaar_voor_verzenden' ? null : (dagen(c.sent_at, t) ?? dagen(c.created_at, t))
-    if (leeftijd !== null && leeftijd >= 7) uit.push(`Handtekening blijft uit (${leeftijd} dagen)`)
-    else uit.push(k === 'klaar_voor_verzenden' ? 'Nog niet verstuurd om te tekenen' : 'Nog niet ondertekend')
-    if (c.expires_at && String(c.expires_at).slice(0, 10) < vandaag) uit.push('Tekenlink verlopen')
-  }
+  const leeftijd = k === 'klaar_voor_verzenden' ? null : (dagen(c.sent_at, t) ?? dagen(c.created_at, t))
+  if (leeftijd !== null && leeftijd >= 7) uit.push(`Handtekening blijft uit (${leeftijd} dagen)`)
+  else uit.push(k === 'klaar_voor_verzenden' ? 'Nog niet verstuurd om te tekenen' : 'Nog niet ondertekend')
+  if (c.expires_at && String(c.expires_at).slice(0, 10) < vandaag) uit.push('Tekenlink verlopen')
 
   const eind = c.end_date ? String(c.end_date).slice(0, 10) : null
   if (eind) {
@@ -95,7 +95,6 @@ export function opvolgRedenen(c: LooptijdContract, nu: Date = new Date()): strin
 
   const ontbreekt: string[] = []
   if (!c.client_id) ontbreekt.push('klant')
-  if (!c.start_date) ontbreekt.push('startdatum')
   if (c.heeftPdf === false) ontbreekt.push('document')
   if (ontbreekt.length) uit.push(`Ontbrekend: ${ontbreekt.join(', ')}`)
   return uit

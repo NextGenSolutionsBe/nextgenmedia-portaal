@@ -46,13 +46,18 @@ test('4. Stopgezette contracten verschijnen nooit bij opvolging', () => {
   assert.equal(opvolgingNodig(x, NU), false)
 })
 
-test('5. Opvolging: niet ondertekend, te lang uit, einddatum dichtbij, gegevens ontbreken', () => {
+test('5. Opvolging enkel bij een contract dat nog niet ondertekend is', () => {
   assert.ok(opvolgRedenen(c({ status: 'sent', sent_at: '2026-09-20T00:00:00Z' }), NU).includes('Nog niet ondertekend'))
   assert.ok(opvolgRedenen(c({ status: 'viewed', sent_at: '2026-09-01T00:00:00Z' }), NU).some((r) => r.startsWith('Handtekening blijft uit')))
-  assert.ok(opvolgRedenen(c({ end_date: '2026-10-10' }), NU).some((r) => r.startsWith('Einddatum over')))
-  assert.ok(opvolgRedenen(c({ end_date: '2026-09-01' }), NU).includes('Einddatum voorbij — status nakijken'))
-  assert.ok(opvolgRedenen(c({ start_date: null, client_id: null, heeftPdf: false }), NU).includes('Ontbrekend: klant, startdatum, document'))
+  assert.ok(opvolgRedenen(c({ status: 'sent', end_date: '2026-10-10' }), NU).some((r) => r.startsWith('Einddatum over')))
+  assert.ok(opvolgRedenen(c({ status: 'sent', client_id: null, heeftPdf: false }), NU).includes('Ontbrekend: klant, document'))
+  // Ondertekend: nooit opvolging, ook niet zonder startdatum of met een einddatum die (bijna) voorbij is.
   assert.deepEqual(opvolgRedenen(c(), NU), [])
+  assert.deepEqual(opvolgRedenen(c({ start_date: null }), NU), [])
+  assert.deepEqual(opvolgRedenen(c({ end_date: '2026-09-01' }), NU), [])
+  assert.deepEqual(opvolgRedenen(c({ end_date: '2026-10-10' }), NU), [])
+  // Een ontbrekende startdatum is nooit een reden, ook niet bij een niet-ondertekend contract.
+  assert.ok(!opvolgRedenen(c({ status: 'sent', start_date: null }), NU).some((r) => r.includes('startdatum')))
 })
 
 test('6. Aantallen per categorie kloppen en volgen een statuswijziging', () => {
