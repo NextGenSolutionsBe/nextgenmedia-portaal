@@ -92,6 +92,8 @@ export default async function ContractDetailPage({ params }: { params: { id: str
   const statusKey = canonicalStatus(c.status)
   const isSigned = statusKey === 'getekend'
   const manueel = isManueelGetekend(c)
+  const linkVerlopen = !!c.expires_at && String(c.expires_at).slice(0, 10) < new Date().toISOString().slice(0, 10)
+  const kanHerinneren = !!c.sent_at && ['verzonden', 'geopend', 'ingevuld'].includes(statusKey) && !linkVerlopen
   const signLink = `${baseUrl()}/sign/${c.access_token}`
   const meldingEvents = (events as { event_type: string; created_at: string; meta?: Record<string, unknown> | null }[])
   const laatsteMelding = laatsteMeldingStatus(meldingEvents)
@@ -132,6 +134,20 @@ export default async function ContractDetailPage({ params }: { params: { id: str
               clientName={clientName}
               expiresAt={c.expires_at ?? null}
               label="Verstuur contractmail"
+            />
+          )}
+          {/* Herinnering: enkel voor een verstuurd contract met een tekenlink die nog werkt. */}
+          {kanHerinneren && (
+            <ContractMailButton
+              contractId={c.id}
+              contractTitle={c.title}
+              signLink={signLink}
+              defaultEmail={c.signer_email ?? null}
+              signerName={c.signer_name ?? null}
+              clientName={clientName}
+              expiresAt={c.expires_at ?? null}
+              herinnering
+              label="Herinnering sturen"
             />
           )}
           {!isSigned && statusKey !== 'geannuleerd' && statusKey !== 'vervangen' && statusKey !== 'template' && (

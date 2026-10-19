@@ -11,6 +11,7 @@ const KINDS: { value: string; label: string }[] = [
   { value: 'generic', label: 'Algemeen' },
   { value: 'scripts', label: 'Scripts' },
   { value: 'contract', label: 'Contract' },
+  { value: 'contract_herinnering', label: 'Contract — herinnering' },
   { value: 'shoot', label: 'Shoot' },
   { value: 'task', label: 'Taak' },
   { value: 'goedkeuring', label: 'Goedkeuringsdeadline' },
