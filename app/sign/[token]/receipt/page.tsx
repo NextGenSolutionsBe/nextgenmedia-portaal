@@ -35,7 +35,8 @@ export default async function ReceiptPage({ params }: { params: { token: string 
     .eq('access_token', params.token)
     .maybeSingle()
 
-  if (!contract || contract.status !== 'signed') notFound()
+  // Buiten de app ondertekend: er is geen elektronische handtekening om te bewijzen.
+  if (!contract || contract.status !== 'signed' || contract.ondertekening_wijze === 'manueel') notFound()
 
   // Fetch client name
   let companyName: string | null = null

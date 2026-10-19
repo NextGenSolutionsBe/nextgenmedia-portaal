@@ -24,6 +24,8 @@ import { typeVanContract, isNietToegewezen } from '@/lib/contracten/types'
 import { baseUrl } from '@/lib/email'
 import { leesActorNamen } from '@/lib/actor-namen'
 import { ContractGegevens } from './contract-gegevens'
+import { OpGetekendZetten, GetekendBuitenApp, type ContractBijlage } from './manueel-getekend'
+import { isManueelGetekend } from '@/lib/contracten/manueel-getekend'
 
 async function getContract(id: string) {
   try {
@@ -31,10 +33,12 @@ async function getContract(id: string) {
 
     // All independent reads in one round-trip. Client lookup chains off the
     // contract result below; everything else parallelizes.
-    const [{ data: contract }, { data: signatures }, { data: events }] = await Promise.all([
+    const [{ data: contract }, { data: signatures }, { data: events }, { data: bijlagen }] = await Promise.all([
       admin.from('contracts').select('*').eq('id', id).maybeSingle(),
       admin.from('contract_signatures').select('*').eq('contract_id', id).order('signed_at', { ascending: false }),
       admin.from('contract_events').select('*').eq('contract_id', id).order('created_at', { ascending: false }),
+      // Bijlagen (bv. mailverkeer bij "op getekend zetten"); tabel ontbreekt vóór migratie → leeg.
+      admin.from('contract_bijlagen').select('id, naam, grootte, created_by, created_at').eq('contract_id', id).order('created_at'),
     ])
 
     if (!contract) return null
@@ -65,6 +69,7 @@ async function getContract(id: string) {
       clientBtw: (clientRowResult.data as { btw_nummer?: string | null } | null)?.btw_nummer ?? null,
       signatures: signatures ?? [],
       events: events ?? [],
+      bijlagen: (bijlagen ?? []) as ContractBijlage[],
       // Nooit de tijdelijke Supabase-link zelf doorgeven: die verloopt na een uur
       // en dan toont het voorbeeld "InvalidJWT / exp claim". Onze eigen route
       // streamt het bestand met de sessie van de gebruiker en verloopt niet.
@@ -86,6 +91,7 @@ export default async function ContractDetailPage({ params }: { params: { id: str
   const style = statusInfo(c.status)
   const statusKey = canonicalStatus(c.status)
   const isSigned = statusKey === 'getekend'
+  const manueel = isManueelGetekend(c)
   const signLink = `${baseUrl()}/sign/${c.access_token}`
   const meldingEvents = (events as { event_type: string; created_at: string; meta?: Record<string, unknown> | null }[])
   const laatsteMelding = laatsteMeldingStatus(meldingEvents)
@@ -128,6 +134,9 @@ export default async function ContractDetailPage({ params }: { params: { id: str
               label="Verstuur contractmail"
             />
           )}
+          {!isSigned && statusKey !== 'geannuleerd' && statusKey !== 'vervangen' && statusKey !== 'template' && (
+            <OpGetekendZetten contractId={c.id} />
+          )}
           {!isSigned && (
             <Link
               href={`/admin/contracts/${c.id}/setup`}
@@ -152,7 +161,19 @@ export default async function ContractDetailPage({ params }: { params: { id: str
         <div className="lg:col-span-2 space-y-6">
           <ContractPdfPreview originalUrl={pdfUrl} signedUrl={signedPdfUrl} />
           {/* Getekende documenten: contract + certificaat uit het archief, met downloads/afdrukken en de Legal-melding. */}
-          {isSigned && (
+          {/* Buiten de app getekend (bv. per mail): notitie + bijlagen i.p.v. archief/certificaat. */}
+          {(manueel || data.bijlagen.length > 0) && (
+            <GetekendBuitenApp
+              contractId={c.id}
+              getekend={manueel}
+              signedAt={c.signed_at ?? null}
+              door={c.ondertekening_door ?? null}
+              notitie={c.ondertekening_notitie ?? null}
+              bijlagen={data.bijlagen}
+              heeftOrigineel={!!pdfUrl}
+            />
+          )}
+          {isSigned && !manueel && (
             <GetekendeDocumenten
               contractId={c.id}
               accessToken={c.access_token}

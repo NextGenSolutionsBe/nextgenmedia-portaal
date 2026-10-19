@@ -1,5 +1,5 @@
 import {
-  FileUp, Sparkles, PencilLine, Send, Eye, CheckSquare, PenTool, FileCheck2, Download, RefreshCw, XCircle, Clock, Circle, Euro, MinusCircle,
+  FileUp, Sparkles, PencilLine, Send, Eye, CheckSquare, PenTool, FileCheck2, Download, RefreshCw, XCircle, Clock, Circle, Euro, MinusCircle, CheckCircle2, Paperclip, Undo2,
 } from 'lucide-react'
 import { WIJZIGING_LABEL, type WijzigingSoort } from '@/lib/contracten/aflettering'
 
@@ -22,6 +22,8 @@ function detail(e: Event): string | null {
     const o = (mm.oud ?? {}) as Record<string, unknown>, n = (mm.nieuw ?? {}) as Record<string, unknown>
     return `${euroTekst(o.bedrag_excl)} → ${euroTekst(n.bedrag_excl)}${n.onderdeel ? ` · ${n.onderdeel}` : ''}`
   }
+  if (e.event_type === 'signed' && mm.wijze === 'manueel') return typeof mm.notitie === 'string' && mm.notitie ? mm.notitie : null
+  if (e.event_type === 'bijlage_toegevoegd' || e.event_type === 'bijlage_verwijderd') return typeof mm.naam === 'string' ? mm.naam : null
   if (e.event_type !== 'looptijd_gewijzigd') return null
   const m = e.meta as { oud?: string; nieuw?: string; stop_datum?: string | null; stop_reden?: string | null }
   const delen = [`${LOOPTIJD_LABEL[m.oud ?? ''] ?? m.oud ?? '?'} → ${LOOPTIJD_LABEL[m.nieuw ?? ''] ?? m.nieuw ?? '?'}`]
@@ -56,7 +58,12 @@ const META: Record<string, { label: string; icon: React.ComponentType<{ classNam
   contractwaarde_vermindering: { label: 'Vermindering geregistreerd', icon: MinusCircle, cls: 'bg-amber-100 text-amber-700' },
   contractwaarde_vermindering_gewijzigd: { label: 'Vermindering aangepast', icon: MinusCircle, cls: 'bg-amber-100 text-amber-700' },
   contractwaarde_vermindering_verwijderd: { label: 'Vermindering verwijderd', icon: MinusCircle, cls: 'bg-gray-100 text-gray-600' },
+  manueel_getekend_ongedaan: { label: 'Niet langer op getekend', icon: Undo2, cls: 'bg-gray-100 text-gray-600' },
+  bijlage_toegevoegd:    { label: 'Bijlage toegevoegd',    icon: Paperclip,   cls: 'bg-gray-100 text-gray-600' },
+  bijlage_verwijderd:    { label: 'Bijlage verwijderd',    icon: Paperclip,   cls: 'bg-gray-100 text-gray-600' },
 }
+
+const MANUEEL_GETEKEND = { label: 'Op getekend gezet (buiten de app)', icon: CheckCircle2, cls: 'bg-green-100 text-green-600' }
 
 export function ContractTimeline({ events }: { events: Event[] }) {
   if (!events || events.length === 0) {
@@ -68,7 +75,7 @@ export function ContractTimeline({ events }: { events: Event[] }) {
   return (
     <ol className="relative ml-1">
       {sorted.map((e, i) => {
-        const m = META[e.event_type] ?? { label: e.event_type, icon: Circle, cls: 'bg-gray-100 text-gray-600' }
+        const m = (e.event_type === 'signed' && e.meta?.wijze === 'manueel' ? MANUEEL_GETEKEND : META[e.event_type]) ?? { label: e.event_type, icon: Circle, cls: 'bg-gray-100 text-gray-600' }
         const Icon = m.icon
         const who = e.actor ?? e.actor_email
         const last = i === sorted.length - 1

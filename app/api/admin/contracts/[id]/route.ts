@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto'
 import { logContractEvent } from '@/lib/contract-audit'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { typeVanContract } from '@/lib/contracten/types'
+import { MANUEEL, isManueelGetekend, redenNietOpGetekend, valideerOpGetekend, signedAtVoor, statusNaOngedaan, vandaagBrussel } from '@/lib/contracten/manueel-getekend'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
@@ -170,6 +171,58 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       })
       try { revalidatePath('/admin/contracts'); revalidatePath(`/admin/contracts/${id}`) } catch { }
       return NextResponse.json({ ok: true, contract_type: nieuw })
+    } else if (action === 'manueel_getekend') {
+      // Buiten de app ondertekend (bv. per mail bevestigd): op getekend zetten,
+      // met optionele notitie. Bewust GEEN archief/certificaat en GEEN
+      // Legal-melding: er is in de app niets ondertekend om te certificeren.
+      const { data: oud } = await admin.from('contracts').select('*').eq('id', id).maybeSingle()
+      if (!oud) return NextResponse.json({ error: 'Contract niet gevonden' }, { status: 404 })
+      const nee = redenNietOpGetekend(oud.status)
+      if (nee) return NextResponse.json({ error: nee }, { status: 409 })
+      const vandaag = vandaagBrussel()
+      const v = valideerOpGetekend(body, vandaag)
+      if (!v.ok) return NextResponse.json({ error: v.fout }, { status: 400 })
+      const p: Record<string, unknown> = {
+        status: 'signed', signed_at: signedAtVoor(v.datum, vandaag),
+        ondertekening_wijze: MANUEEL, ondertekening_notitie: v.notitie, ondertekening_door: user.email ?? user.id,
+      }
+      for (let i = 0; i < 4; i++) {
+        const { error } = await admin.from('contracts').update(p).eq('id', id)
+        if (!error) break
+        const col = String(error.message || '').match(/Could not find the '([^']+)' column/)?.[1]
+        // Zonder ondertekening_wijze zou het contract later een vals certificaat kunnen krijgen.
+        if (col === 'ondertekening_wijze') return NextResponse.json({ error: 'Op getekend zetten vereist een database-migratie (ondertekening_wijze).' }, { status: 400 })
+        if (col && col in p) { delete p[col]; continue }
+        throw new Error(error.message)
+      }
+      await logContractEvent(admin, id, 'signed', { actor: user.email ?? user.id, meta: { wijze: MANUEEL, datum: v.datum, notitie: v.notitie, vorige_status: oud.status ?? null } })
+      const m = requestMeta(req)
+      await logAudit({
+        action: 'contract.manueel_getekend', entityType: 'contract', entityId: id,
+        summary: `"${oud.title ?? id}" op getekend gezet (buiten de app, ${v.datum})${v.notitie ? `: ${v.notitie}` : ''}`,
+        actorUserId: user.id, actorEmail: user.email ?? null, actorRole: 'admin',
+        metadata: { datum: v.datum, notitie: v.notitie, vorige_status: oud.status ?? null }, ip: m.ip, userAgent: m.userAgent,
+      })
+      if (oud.client_id) try { revalidatePath(`/admin/clients/${oud.client_id}`) } catch { }
+    } else if (action === 'manueel_getekend_ongedaan') {
+      // Enkel voor een contract dat handmatig op getekend gezet werd. Bijlagen blijven staan.
+      const { data: oud } = await admin.from('contracts').select('*').eq('id', id).maybeSingle()
+      if (!oud) return NextResponse.json({ error: 'Contract niet gevonden' }, { status: 404 })
+      if (!isManueelGetekend(oud)) return NextResponse.json({ error: 'Enkel een contract dat handmatig op getekend gezet werd, kan zo teruggezet worden.' }, { status: 409 })
+      const { data: ev } = await admin.from('contract_events').select('meta').eq('contract_id', id).eq('event_type', 'signed').order('created_at', { ascending: false }).limit(1).maybeSingle()
+      const vorige = (ev?.meta as { wijze?: string; vorige_status?: string | null } | null)
+      const status = statusNaOngedaan(vorige?.wijze === MANUEEL ? vorige.vorige_status : null, oud.sent_at)
+      const { error } = await admin.from('contracts').update({ status, signed_at: null, ondertekening_wijze: null, ondertekening_notitie: null, ondertekening_door: null }).eq('id', id)
+      if (error) throw new Error(error.message)
+      await logContractEvent(admin, id, 'manueel_getekend_ongedaan', { actor: user.email ?? user.id, meta: { status, notitie: oud.ondertekening_notitie ?? null } })
+      const m = requestMeta(req)
+      await logAudit({
+        action: 'contract.manueel_getekend_ongedaan', entityType: 'contract', entityId: id,
+        summary: `"${oud.title ?? id}" niet langer op getekend (terug naar ${status})`,
+        actorUserId: user.id, actorEmail: user.email ?? null, actorRole: 'admin',
+        metadata: { status, notitie: oud.ondertekening_notitie ?? null, signed_at: oud.signed_at ?? null }, ip: m.ip, userAgent: m.userAgent,
+      })
+      if (oud.client_id) try { revalidatePath(`/admin/clients/${oud.client_id}`) } catch { }
     } else if (action === 'send') {
       const { error } = await admin
         .from('contracts')
@@ -270,12 +323,19 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     // 2. Facturatielog opruimen (geen FK, dus expliciet).
     try { await admin.from('contract_facturatie_log').delete().eq('contract_id', id) } catch { /* tabel kan ontbreken */ }
 
-    // 3. Het contract zelf (CASCADE: contract_events, contract_signatures, contract_facturatie_opdrachten).
+    // Bijlagen (bv. mailverkeer bij "op getekend zetten"): rijen gaan mee via CASCADE, de bestanden ruimen we hieronder op.
+    let bijlagePaden: string[] = []
+    try {
+      const { data } = await admin.from('contract_bijlagen').select('pad').eq('contract_id', id)
+      bijlagePaden = ((data ?? []) as { pad: string }[]).map((b) => b.pad)
+    } catch { /* tabel kan ontbreken vóór migratie */ }
+
+    // 3. Het contract zelf (CASCADE: contract_events, contract_signatures, contract_facturatie_opdrachten, contract_bijlagen).
     const { error } = await admin.from('contracts').delete().eq('id', id)
     if (error) return NextResponse.json({ error: verwijderFoutTekst(error.message) }, { status: 409 })
 
     // 4. Bestanden in de contracts-bucket — best-effort. Het archief blijft.
-    const paths = [contract.pdf_path, contract.signed_pdf_path, `signed/${id}.pdf`].filter((p, i, a): p is string => !!p && a.indexOf(p) === i)
+    const paths = [contract.pdf_path, contract.signed_pdf_path, `signed/${id}.pdf`, ...bijlagePaden].filter((p, i, a): p is string => !!p && a.indexOf(p) === i)
     if (paths.length > 0) {
       try { await admin.storage.from('contracts').remove(paths) } catch { }
     }

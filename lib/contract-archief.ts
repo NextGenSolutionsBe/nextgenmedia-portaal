@@ -7,6 +7,7 @@ import type { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { sendEmail, baseUrl } from '@/lib/email'
 import { leesInstellingen } from '@/lib/instellingen/laden'
 import { logContractEvent } from '@/lib/contract-audit'
+import { MANUEEL, GEEN_CERTIFICAAT } from '@/lib/contracten/manueel-getekend'
 import {
   referentie, contractnummer, archiefPaden, certificaatBlokken, documentBestandsnaam, meldingTekst, tijdstipBrussel,
   legalOntvangers, meldingAlVerstuurd, INTEGRITEITSZIN, STATUS_ONDERTEKEND, TIJDZONE_LABEL,
@@ -349,8 +350,11 @@ const naarResultaat = (contractId: string, r: ArchiefRij, bestaandAl: boolean): 
  * wanneer de bytes van het getekende PDF veranderen, volgt een nieuwe versie.
  */
 export async function archiveerContract(admin: Admin, contractId: string, bron: string, door?: string | null): Promise<ArchiefResultaat> {
-  const { data: c } = await admin.from('contracts').select('id, title, status, signed_pdf_path, pdf_path').eq('id', contractId).maybeSingle()
+  // select('*'): ondertekening_wijze bestaat pas na migratie.
+  const { data: c } = await admin.from('contracts').select('*').eq('id', contractId).maybeSingle()
   if (!c) throw new Error('Contract niet gevonden.')
+  // Buiten de app ondertekend ("op getekend zetten"): geen certificaat en dus ook geen melding.
+  if (c.ondertekening_wijze === MANUEEL) throw new Error(GEEN_CERTIFICAAT)
   const pad = (c.signed_pdf_path as string | null) ?? (c.pdf_path as string | null)
   if (!pad) throw new Error('Dit contract heeft geen PDF om te archiveren.')
 

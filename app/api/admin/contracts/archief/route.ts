@@ -8,6 +8,14 @@ import { logAudit, requestMeta } from '@/lib/audit'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
+type Admin = ReturnType<typeof createAdminSupabaseClient>
+
+/** Contracten die buiten de app ondertekend werden: die krijgen geen archief/certificaat. Kolom ontbreekt → leeg. */
+async function manueelGetekend(admin: Admin): Promise<Set<string>> {
+  const { data, error } = await admin.from('contracts').select('id').eq('ondertekening_wijze', 'manueel')
+  return new Set(error ? [] : ((data ?? []) as { id: string }[]).map((r) => r.id))
+}
+
 /**
  * GET — het contractarchief: per getekend contract de laatste archiefversie,
  * met tijdelijke downloadlinks (2 uur) zodat de browser alles als één ZIP kan
@@ -18,9 +26,10 @@ export async function GET() {
   try {
     if (!(await requireStaff())) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
     const admin = createAdminSupabaseClient()
-    const [{ data: rijen, error }, { data: getekend }] = await Promise.all([
+    const [{ data: rijen, error }, { data: getekend }, manueel] = await Promise.all([
       admin.from('contract_archief').select('contract_id, versie, titel, klant_naam, signer_name, signed_at, sha256_contract, pad_contract, pad_certificaat, pad_dossier, gearchiveerd_op').order('gearchiveerd_op', { ascending: false }).limit(2000),
       admin.from('contracts').select('id, title, signed_at').eq('status', 'signed'),
+      manueelGetekend(admin),
     ])
     if (error) throw new Error(error.message)
     type R = { contract_id: string; versie: number; titel: string | null; klant_naam: string | null; signer_name: string | null; signed_at: string | null; sha256_contract: string; pad_contract: string; pad_certificaat: string; pad_dossier: string; gearchiveerd_op: string }
@@ -44,7 +53,7 @@ export async function GET() {
         ],
       }
     })
-    const nogNiet = ((getekend ?? []) as { id: string; title: string | null; signed_at: string | null }[]).filter((c) => !laatste.has(c.id))
+    const nogNiet = ((getekend ?? []) as { id: string; title: string | null; signed_at: string | null }[]).filter((c) => !laatste.has(c.id) && !manueel.has(c.id))
     return NextResponse.json({ items, nogNietGearchiveerd: nogNiet.map((c) => ({ id: c.id, titel: c.title, signed_at: c.signed_at })) })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
@@ -70,12 +79,13 @@ export async function POST(req: NextRequest) {
     }
 
     if (b.action === 'inhalen') {
-      const [{ data: getekend }, { data: rijen }] = await Promise.all([
+      const [{ data: getekend }, { data: rijen }, manueel] = await Promise.all([
         admin.from('contracts').select('id, title').eq('status', 'signed').order('signed_at', { ascending: true }),
         admin.from('contract_archief').select('contract_id'),
+        manueelGetekend(admin),
       ])
       const al = new Set(((rijen ?? []) as { contract_id: string }[]).map((r) => r.contract_id))
-      const todo = ((getekend ?? []) as { id: string; title: string | null }[]).filter((c) => !al.has(c.id))
+      const todo = ((getekend ?? []) as { id: string; title: string | null }[]).filter((c) => !al.has(c.id) && !manueel.has(c.id))
       const gestart = Date.now()
       const uit: { id: string; titel: string | null; ok: boolean; fout?: string }[] = []
       for (const c of todo) {
