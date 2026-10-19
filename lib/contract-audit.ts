@@ -22,6 +22,8 @@ export type ContractEvent =
   // Aflettering: contractwaarde ingevuld of gewijzigd (meta oud/nieuw).
   | 'contractwaarde_gewijzigd'
   | 'contractwaarde_vermindering' | 'contractwaarde_vermindering_gewijzigd' | 'contractwaarde_vermindering_verwijderd'
+  // Buiten de app ondertekend: "op getekend zetten" teruggedraaid, bijlagen (bv. mailverkeer).
+  | 'manueel_getekend_ongedaan' | 'bijlage_toegevoegd' | 'bijlage_verwijderd'
 
 export async function logContractEvent(
   admin: Admin,

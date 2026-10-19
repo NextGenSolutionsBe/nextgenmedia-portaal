@@ -5925,3 +5925,26 @@ ALTER TABLE public.content_goedkeuring_deadlines ADD COLUMN IF NOT EXISTS mail_m
 -- opnieuw probeert) verstuurt nooit twee keer dezelfde mail.
 ALTER TABLE public.email_messages ADD COLUMN IF NOT EXISTS verzend_sleutel text;
 CREATE UNIQUE INDEX IF NOT EXISTS email_messages_verzend_sleutel_uniek ON public.email_messages (verzend_sleutel) WHERE verzend_sleutel IS NOT NULL;
+
+-- ── Contract "op getekend zetten" (19 okt 2026) ─────────────────────────────
+-- Een contract dat buiten de app ondertekend werd (bv. per mail bevestigd)
+-- handmatig op getekend zetten, met een optionele notitie en bijlagen (bv. het
+-- mailverkeer). ondertekening_wijze = 'manueel'; NULL = getekend via de
+-- tekenlink of geüpload als getekende PDF. Zo'n contract krijgt geen
+-- e-handtekeningcertificaat en geen Legal-melding. Geen bestaande data gewijzigd.
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS ondertekening_wijze text;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS ondertekening_notitie text;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS ondertekening_door text;
+CREATE TABLE IF NOT EXISTS public.contract_bijlagen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id uuid NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
+  naam text NOT NULL,
+  pad text NOT NULL,
+  grootte integer,
+  mime text,
+  created_by text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS contract_bijlagen_contract_idx ON public.contract_bijlagen (contract_id);
+ALTER TABLE public.contract_bijlagen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.contract_bijlagen FROM anon, authenticated;
