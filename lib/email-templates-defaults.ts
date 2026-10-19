@@ -60,6 +60,25 @@ Bekijk en onderteken het contract via onderstaande knop.`,
     cta_link: '{{contract_link}}',
   },
   {
+    // Handmatige herinnering voor een contract dat nog niet getekend is
+    // (contractpagina → "Herinnering sturen"). Nooit automatisch.
+    name: 'Herinnering: contract ondertekenen',
+    kind: 'contract_herinnering',
+    subject: 'Herinnering: {{contractnaam}} ondertekenen',
+    body: `Hallo {{klantnaam}},
+
+We stuurden je eerder het contract "{{contractnaam}}" door, maar het is nog niet ondertekend.
+
+Je kan het bekijken en digitaal ondertekenen via de knop hieronder.
+
+Vragen of iets onduidelijk? Antwoord gerust op deze mail.
+
+Groetjes
+NextGenMedia`,
+    cta_text: 'Bekijken',
+    cta_link: '{{contract_link}}',
+  },
+  {
     name: 'Contentshoot ingepland',
     kind: 'shoot',
     subject: 'Contentshoot ingepland',

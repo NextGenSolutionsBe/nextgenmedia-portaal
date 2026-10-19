@@ -13,7 +13,8 @@ type Template = { id: string; name: string; subject: string; body: string; kind:
 
 export type MailContext =
   | { type: 'client'; clientId: string; kind?: string; contractId?: string; shootId?: string; taskId?: string; deadlineId?: string }
-  | { type: 'contract'; contractId: string; contractTitle: string; signLink: string; defaultEmail?: string | null; signerName?: string | null; clientName?: string | null; expiresAt?: string | null }
+  // herinnering: opent met de herinneringsmail i.p.v. de eerste contractmail.
+  | { type: 'contract'; contractId: string; contractTitle: string; signLink: string; defaultEmail?: string | null; signerName?: string | null; clientName?: string | null; expiresAt?: string | null; herinnering?: boolean }
   | { type: 'access'; clientId: string; clientName: string; toEmail: string; tempPassword?: string }
   | { type: 'generic'; toEmail?: string }
   // Formulierlink (Formulieren → Delen): onderwerp/tekst/knop voorgevuld, ontvanger aanpasbaar.
@@ -70,7 +71,9 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
         const eigen = (tpl.templates ?? []) as Template[]
         // De ingebouwde template van deze soort tonen zolang er geen eigen versie van bestaat.
         const extra = context.type === 'client' && !eigen.some((t) => t.kind === context.kind) ? ingebouwd(context.kind) : null
-        const list = extra ? [extra, ...eigen] : eigen
+        // Bij een contract staat de herinneringsmail altijd in de lijst.
+        const herinnering = context.type === 'contract' && !eigen.some((t) => t.kind === 'contract_herinnering') ? ingebouwd('contract_herinnering') : null
+        const list = [extra, ...eigen, herinnering].filter((t): t is Template => !!t)
         setTemplates(list)
 
         if (context.type === 'client') {
@@ -93,11 +96,12 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
           setToEmail(context.defaultEmail ?? '')
           const vervaldatum = context.expiresAt ? new Date(context.expiresAt + 'T00:00:00').toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' }) : ''
           const vars: MailVars = { klantnaam: context.signerName || context.clientName || 'klant', bedrijfsnaam: context.clientName || '', contractnaam: context.contractTitle, contract_link: context.signLink, datum: vervaldatum }
-          const suggested = list.find((t) => t.kind === 'contract')
+          setVars(vars)
+          const suggested = list.find((t) => t.kind === (context.herinnering ? 'contract_herinnering' : 'contract'))
           if (suggested) applyTemplate(suggested, vars)
           else {
             setSubject(`Contract ter ondertekening — ${context.contractTitle}`)
-            setBody(defaultContractBody(context, vervaldatum)); setCtaText('Contract ondertekenen'); setCtaLink(context.signLink)
+            setBody(defaultContractBody(context, vervaldatum)); setCtaText(CONTRACT_KNOP); setCtaLink(context.signLink)
           }
         } else if (context.type === 'access') {
           setToEmail(context.toEmail)
@@ -129,8 +133,9 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
     setTemplateId(t.id)
     setSubject(renderTemplate(t.subject, vars))
     setBody(renderTemplate(t.body, vars))
-    setCtaText(renderTemplate(t.cta_text ?? '', vars))
-    setCtaLink(renderTemplate(t.cta_link ?? '', vars))
+    // Bij contracten is de knop altijd "Bekijken" met de tekenlink, wat de template ook zegt.
+    setCtaText(context.type === 'contract' ? CONTRACT_KNOP : renderTemplate(t.cta_text ?? '', vars))
+    setCtaLink(context.type === 'contract' ? context.signLink : renderTemplate(t.cta_link ?? '', vars))
   }
   const onPick = (id: string) => {
     const t = templates.find((x) => x.id === id)
@@ -149,7 +154,11 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
       if (context.type === 'contract') {
         res = await fetch(`/api/admin/contracts/${context.contractId}/send-mail`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ to_email: toEmail, cc: cc.trim() || null, kopie_naar_mij: kopieNaarMij, subject, body, cta_text: ctaText || null, cta_link: ctaLink || null, template_id: templateId || null, template_name: tpl?.name ?? null }),
+          body: JSON.stringify({
+            to_email: toEmail, cc: cc.trim() || null, kopie_naar_mij: kopieNaarMij, subject, body, cta_text: ctaText || null, cta_link: ctaLink || null,
+            template_id: templateId && !templateId.startsWith('standaard:') ? templateId : null, template_name: tpl?.name ?? null,
+            herinnering: tpl?.kind === 'contract_herinnering',
+          }),
         })
       } else {
         res = await fetch('/api/admin/email/send', {
@@ -248,6 +257,8 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
     </div>
   )
 }
+
+const CONTRACT_KNOP = 'Bekijken'
 
 function defaultContractBody(c: { contractTitle: string; signerName?: string | null; clientName?: string | null }, vervaldatum: string): string {
   return `Beste ${c.signerName || c.clientName || 'klant'},\n\n` +

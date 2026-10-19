@@ -163,7 +163,8 @@ export default async function PortalContractsPage() {
                             Downloaden
                           </a>
                         )}
-                        {canDownload && (
+                        {/* Buiten de app getekend (bv. per mail): geen certificaat. */}
+                        {canDownload && c.ondertekening_wijze !== 'manueel' && (
                           <a
                             href={`/api/portal/contracts/${c.id}/certificaat`}
                             className="btn-secondary text-xs"

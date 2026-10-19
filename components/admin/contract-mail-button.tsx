@@ -5,7 +5,7 @@
 import { MailComposer } from './mail-composer'
 
 export function ContractMailButton({
-  contractId, contractTitle, signLink, defaultEmail, signerName, clientName, expiresAt,
+  contractId, contractTitle, signLink, defaultEmail, signerName, clientName, expiresAt, herinnering,
   label = 'Verstuur contractmail', className = 'btn-secondary text-sm',
 }: {
   contractId: string
@@ -15,12 +15,14 @@ export function ContractMailButton({
   signerName?: string | null
   clientName?: string | null
   expiresAt?: string | null
+  /** Opent met de herinneringsmail om te ondertekenen. */
+  herinnering?: boolean
   label?: string
   className?: string
 }) {
   return (
     <MailComposer
-      context={{ type: 'contract', contractId, contractTitle, signLink, defaultEmail, signerName, clientName, expiresAt }}
+      context={{ type: 'contract', contractId, contractTitle, signLink, defaultEmail, signerName, clientName, expiresAt, herinnering }}
       label={label}
       className={className}
     />

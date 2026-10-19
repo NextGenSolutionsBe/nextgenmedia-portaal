@@ -89,13 +89,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     if (!result.ok) return NextResponse.json({ error: result.error, log_id: logId }, { status: 400 })
 
+    // Een herinnering bij een al verstuurd contract laat status en verzenddatum
+    // ongemoeid: "Geopend" blijft zichtbaar en de wachttijd telt verder.
+    const herinnering = b.herinnering === true && !!contract.sent_at
     // Status → verzonden (sent) + audit, tenzij al getekend/geannuleerd.
-    if (!['signed', 'getekend', 'cancelled', 'geannuleerd'].includes(String(contract.status))) {
+    if (!herinnering && !['signed', 'getekend', 'cancelled', 'geannuleerd'].includes(String(contract.status))) {
       try {
         await admin.from('contracts').update({ status: 'sent', sent_at: nu() }).eq('id', id)
       } catch { }
     }
-    await logContractEvent(admin, id, 'sent', {
+    await logContractEvent(admin, id, herinnering ? 'herinnering_verstuurd' : 'sent', {
       actor: user.email ?? user.id, meta: { to: toEmail, cc: cc.length ? cc : null, template: b.template_name || null, email_message_id: logId, provider_id: result.id ?? null },
     })
 

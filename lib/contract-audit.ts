@@ -24,6 +24,8 @@ export type ContractEvent =
   | 'contractwaarde_vermindering' | 'contractwaarde_vermindering_gewijzigd' | 'contractwaarde_vermindering_verwijderd'
   // Buiten de app ondertekend: "op getekend zetten" teruggedraaid, bijlagen (bv. mailverkeer).
   | 'manueel_getekend_ongedaan' | 'bijlage_toegevoegd' | 'bijlage_verwijderd'
+  // Handmatige herinnering om te ondertekenen (MailComposer, nooit automatisch).
+  | 'herinnering_verstuurd'
 
 export async function logContractEvent(
   admin: Admin,
