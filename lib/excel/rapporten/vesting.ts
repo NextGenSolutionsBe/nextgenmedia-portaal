@@ -68,14 +68,14 @@ export function vestingWerkmap({ v, inst, kosten, tab }: VestingExportInvoer): W
 
   const contracten: Blad = {
     naam: 'Contracten', titel: 'Contracten',
-    toelichting: ['Ondertekeningsdatum bepaalt het contractjaar en vergrendelt het tarief. Goedkope schijf en jaarschijf tonen hoe het meetellende bedrag verdeeld werd; cumulatief = meetellende waarde vóór dit contract (chronologisch).'],
+    toelichting: ['Ondertekeningsdatum bepaalt het contractjaar en vergrendelt het tarief. Goedkope schijf en jaarschijf tonen hoe het meetellende bedrag verdeeld werd; cumulatief = meetellende waarde vóór dit contract (chronologisch). Vroegtijdig stopgezet: meetellend = betaald bij stop × factor.'],
     blokken: [{
       soort: 'tabel', titel: 'Contractenregister',
       kolommen: [
         { kop: 'Nr.' }, { kop: 'Klant' }, { kop: 'Ondertekend', stijl: 'datum' }, { kop: 'Contractjaar' }, { kop: 'Dienst' }, { kop: 'Model' },
         { kop: 'Maandbedrag', stijl: 'euro' }, { kop: 'Duur (mnd)', stijl: 'aantal' }, { kop: 'Totaal', stijl: 'euro' }, { kop: 'Uitgesloten kosten', stijl: 'euro' }, { kop: 'Netto', stijl: 'euro' },
         { kop: 'Factor', stijl: 'pct' }, { kop: 'Meetellend', stijl: 'euro' }, { kop: 'Goedkope schijf', stijl: 'euro' }, { kop: 'Jaarschijf', stijl: 'euro' }, { kop: 'Cumulatief vóór', stijl: 'euro' },
-        { kop: 'Ruwe vesting', stijl: 'pct' }, { kop: 'Erkenning' }, { kop: 'Status' }, { kop: 'Betalingen op schema' }, { kop: 'Uitgevallen', stijl: 'euro' }, { kop: 'Gekoppeld contract' }, { kop: 'Notitie' },
+        { kop: 'Ruwe vesting', stijl: 'pct' }, { kop: 'Erkenning' }, { kop: 'Status' }, { kop: 'Betalingen op schema' }, { kop: 'Uitgevallen', stijl: 'euro' }, { kop: 'Gekoppeld contract' }, { kop: 'Notitie' }, { kop: 'Betaald bij stop', stijl: 'euro' },
       ],
       rijen: v.contracten.map((c) => [
         c.nr, c.klant, datum(c.ondertekend_op), JAAR_LABEL[c.jaar], c.dienst ?? '—', c.facturatiemodel === 'maandcontract' ? 'Maandcontract' : 'Eenmalig project',
@@ -85,11 +85,12 @@ export function vestingWerkmap({ v, inst, kosten, tab }: VestingExportInvoer): W
         pct(c.factor), euro(c.meetellend), euro(c.goedkopeSchijf), euro(c.jaarschijf), euro(c.cumulatiefVoor),
         pct(c.ruweVesting), ERKENNING_LABEL[c.erkenning], STATUS_LABEL[c.status], c.betalingen_op_schema ? 'Ja' : 'Nee', euro(c.uitgevallen),
         c.contract_id ? `/admin/contracts/${c.contract_id}` : '', c.notitie ?? '',
+        c.status === 'stopgezet' && c.betaald_bij_stop !== null && c.betaald_bij_stop !== undefined ? euro(c.betaald_bij_stop) : null,
       ] as Cel[]),
       totaal: ['Totaal', null, null, null, null, null, null, null,
         som('I', v.contracten.reduce((s, c) => s + (c.totaal ?? 0), 0)), som('J'), som('K', v.contracten.reduce((s, c) => s + (c.netto ?? 0), 0)),
         null, som('M', v.contracten.reduce((s, c) => s + c.meetellend, 0)), som('N'), som('O'), null,
-        som('Q', v.contracten.reduce((s, c) => s + c.ruweVesting, 0), 'totaal_pct'), null, null, null, som('U', v.contracten.reduce((s, c) => s + c.uitgevallen, 0)), null, null],
+        som('Q', v.contracten.reduce((s, c) => s + c.ruweVesting, 0), 'totaal_pct'), null, null, null, som('U', v.contracten.reduce((s, c) => s + c.uitgevallen, 0)), null, null, null],
       leeg: 'Nog geen contracten.',
     }],
   }

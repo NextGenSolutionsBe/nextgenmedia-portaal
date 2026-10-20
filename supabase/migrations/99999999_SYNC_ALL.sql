@@ -5959,3 +5959,14 @@ CREATE TABLE IF NOT EXISTS public.contract_bijlagen (
 CREATE INDEX IF NOT EXISTS contract_bijlagen_contract_idx ON public.contract_bijlagen (contract_id);
 ALTER TABLE public.contract_bijlagen ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.contract_bijlagen FROM anon, authenticated;
+
+-- ── Vesting: vroegtijdig stopgezet op het betaalde bedrag (20 okt 2026) ─────
+-- Bij status "Vroegtijdig stopgezet" telt Marco's vesting op wat de klant
+-- werkelijk betaalde (× zijn toerekening), niet op de volledige contractwaarde.
+-- Leeg = nog niet ingevuld; dan telt het contract voor €0 zoals voorheen.
+ALTER TABLE public.vesting_contracten ADD COLUMN IF NOT EXISTS betaald_bij_stop numeric(12,2);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'vesting_contracten_betaald_bij_stop_check') THEN
+    ALTER TABLE public.vesting_contracten ADD CONSTRAINT vesting_contracten_betaald_bij_stop_check CHECK (betaald_bij_stop IS NULL OR betaald_bij_stop >= 0);
+  END IF;
+END $$;

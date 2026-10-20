@@ -14,6 +14,7 @@ import { formatEuro, formatDate } from '@/lib/utils'
 import { ExportKnop } from '@/components/admin/export-knop'
 import { vestingWerkmap } from '@/lib/excel/rapporten/vesting'
 import { GetalInvoer } from '@/components/ui/getal-invoer'
+import { leesGetal, getalAlsInvoer } from '@/lib/getal'
 import { Bevestig } from '@/app/admin/instellingen/ui'
 import {
   berekenVesting, leesInstellingen, pct, totaalwaarde, duurUitData, toerekeningsfactor, wamSchema,
@@ -76,6 +77,7 @@ function naarContract(r: Record<string, unknown>): Contract {
     appointment_door_marco: r.appointment_door_marco === true,
     closed_door_marco: r.closed_door_marco === true,
     laatste_betaalde_maand: d(r.laatste_betaalde_maand), reden_stop: (r.reden_stop as string | null) ?? null,
+    betaald_bij_stop: n(r.betaald_bij_stop),
     notitie: (r.notitie as string | null) ?? null,
     contract_id: (r.contract_id as string | null) ?? null,
     toerekening_pct: n(r.toerekening_pct),
@@ -256,7 +258,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
             <h2 className="font-semibold mb-1 flex items-center gap-2"><Receipt className="h-4 w-4" />Contracten — getekend vs. gefactureerd</h2>
             <p className="text-xs text-gray-400 mb-3">De getekende waarde telt voor de vesting (aan het tarief van het jaar van ondertekening); ze wordt definitief zodra alles uit het contract betaald is.</p>
             <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
-              <Box label="Getekende contractwaarde" value={formatEuro(v.contractTotalen.getekend)} sub="100%, contracten die meetellen" />
+              <Box label="Getekende contractwaarde" value={formatEuro(v.contractTotalen.getekend)} sub="100%, contracten die meetellen; bij een stop het betaalde bedrag" />
               <Box label="Waar Marco recht op heeft" value={formatEuro(v.contractTotalen.marcoRecht)} sub="netto × appointment/closing" color="text-amber-700" />
               <Box label="Gefactureerd" value={formatEuro(v.contractTotalen.gefactureerd)} color="text-blue-700" />
               <Box label="Betaald" value={formatEuro(v.contractTotalen.betaald)} color="text-green-700" />
@@ -376,7 +378,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
         <div className="space-y-3">
           <p className="text-sm text-gray-500">
             De ondertekeningsdatum bepaalt het contractjaar en vergrendelt het tarief (vóór {formatDate(inst.jaar1_start)} = jaar 1, na {formatDate(inst.jaar3_eind)} telt niet meer).
-            De volledige getekende waarde telt mee: voorlopig tot alles uit het contract betaald is, dan definitief. Stopgezet of niet-betaler = €0.
+            De volledige getekende waarde telt mee: voorlopig tot alles uit het contract betaald is, dan definitief. Vroegtijdig stopgezet = werkelijk betaald × Marco's percentage. Niet-betaler = €0.
             Klik een contract open voor de facturen per maand.
           </p>
           <div className="card-base p-0 overflow-hidden">
@@ -440,7 +442,10 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                         <td className="table-td text-right tabular font-semibold whitespace-nowrap"
                           title={`Goedkope schijf ${formatEuro(c.goedkopeSchijf)} · jaarschijf ${formatEuro(c.jaarschijf)} · cumulatief vóór dit contract ${formatEuro(c.cumulatiefVoor)}`}>
                           {formatEuro(c.meetellend)}
-                          {c.totaal !== null && c.meetellend > 0 && c.factor < 1 && (
+                          {c.opBetaaldBedrag && (
+                            <div className="text-[11px] text-gray-500 font-normal">{Math.round(c.factor * 100)}% van {formatEuro(c.betaald_bij_stop ?? 0)} betaald</div>
+                          )}
+                          {!c.opBetaaldBedrag && c.totaal !== null && c.meetellend > 0 && c.factor < 1 && (
                             <div className="text-[11px] text-gray-500 font-normal">{Math.round(c.factor * 100)}% van {formatEuro(c.totaal)}{c.kostenAftrek > 0 ? <> − {Math.round(c.factor * 100)}% van {formatEuro(c.kostenAftrek)} kosten</> : null}</div>
                           )}
                           {c.jaarschijf > 0 && <div className="text-[11px] text-gray-400 font-normal">{formatEuro(c.jaarschijf)} aan jaartarief</div>}
@@ -455,7 +460,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                           <span className={`status-badge ${ERKENNING_STIJL[c.erkenning]}`}>{ERKENNING_LABEL[c.erkenning]}</span>
                           <div className="text-[11px] text-gray-500 mt-0.5">{STATUS_LABEL[c.status]}{!c.betalingen_op_schema && ' · betalingen achter'}</div>
                           {c.status !== 'actief' && c.status !== 'voltooid' && c.uitgevallen > 0 && (
-                            <div className="text-[11px] text-red-600">{formatEuro(c.uitgevallen)} uitgevallen{c.betaaldeMaanden !== null ? ` · ${c.betaaldeMaanden} mnd betaald` : ' · stopinfo ontbreekt'}</div>
+                            <div className="text-[11px] text-red-600">{formatEuro(c.uitgevallen)} uitgevallen{c.opBetaaldBedrag ? ` · ${formatEuro(c.betaald_bij_stop ?? 0)} betaald` : c.status === 'stopgezet' ? ' · betaald bedrag ontbreekt' : c.betaaldeMaanden !== null ? ` · ${c.betaaldeMaanden} mnd betaald` : ' · stopinfo ontbreekt'}</div>
                           )}
                         </td>
                         <td className="table-td" onClick={(e) => e.stopPropagation()}>
@@ -696,6 +701,7 @@ function ContractDialoog({ contract, inst, module, klanten, onClose }: { contrac
     closed_door_marco: contract?.closed_door_marco ?? false,
     toerekening_pct: contract?.toerekening_pct !== null && contract?.toerekening_pct !== undefined ? String(contract.toerekening_pct).replace('.', ',') : '',
     laatste_betaalde_maand: contract?.laatste_betaalde_maand ?? '',
+    betaald_bij_stop: getalAlsInvoer(contract?.betaald_bij_stop, 2),
     reden_stop: contract?.reden_stop ?? '', notitie: contract?.notitie ?? '',
   })
   const [bezig, setBezig] = useState(false)
@@ -711,6 +717,12 @@ function ContractDialoog({ contract, inst, module, klanten, onClose }: { contrac
   const netto = totaal === null ? null : Math.max(0, totaal - Math.max(n(f.uitgesloten_kosten) ?? 0, contract?.directe_kosten_facturen ?? 0))
   const afgeleideDuur = duurUitData(f.start_dienst || null, f.einde_dienst || null)
   const gestopt = f.status === 'stopgezet' || f.status === 'niet_betaler'
+  // Vroegtijdig stopgezet: Marco's deel = werkelijk betaald × toerekening.
+  const betaaldBijStop = f.status === 'stopgezet' ? leesGetal(f.betaald_bij_stop) : null
+  const meetellendLive = netto === null && betaaldBijStop === null ? null
+    : f.status === 'stopgezet' ? (betaaldBijStop === null ? 0 : Math.max(0, betaaldBijStop) * factor)
+    : gestopt || !f.betalingen_op_schema ? 0 : (netto ?? 0) * factor
+  const betaaldVolgensFacturen = contract && 'betaald' in contract ? (contract as ContractBerekend).betaald : 0
   const gekoppeld = module.find((m) => m.id === f.contract_id) ?? null
 
   // Koppelen aan een contract uit de Contractenmodule: wat daar al ingevuld is,
@@ -750,6 +762,7 @@ function ContractDialoog({ contract, inst, module, klanten, onClose }: { contrac
       if (!body.client_id) body.client_id = null
       if (!body.contract_id) body.contract_id = null
       body.toerekening_pct = f.toerekening_pct.trim() === '' ? null : f.toerekening_pct.replace(',', '.')
+      body.betaald_bij_stop = f.betaald_bij_stop.trim() === '' ? null : f.betaald_bij_stop
       if (contract) body.id = contract.id
       const r = await fetch('/api/admin/vesting', { method: contract ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
@@ -821,12 +834,23 @@ function ContractDialoog({ contract, inst, module, klanten, onClose }: { contrac
           opties={(Object.keys(STATUS_LABEL) as ContractStatus[]).map((k) => ({ v: k, l: STATUS_LABEL[k] }))} />
         <JaNee label="Betalingen op schema?" value={f.betalingen_op_schema} onChange={(v) => set('betalingen_op_schema', v)} />
       </div>
-      {gestopt && (
+      {f.status === 'stopgezet' && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 space-y-3">
+          <div className="text-xs font-semibold text-amber-900 flex items-center gap-1.5"><AlertTriangle className="h-3.5 w-3.5" />Vroegtijdig stopgezet — Marco's vesting telt op wat de klant werkelijk betaalde</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Veld label="Werkelijk betaald door de klant (€ excl. btw)" value={f.betaald_bij_stop} onChange={(v) => set('betaald_bij_stop', v)} inputMode="decimal" placeholder="bv. 3.000"
+              hint={betaaldVolgensFacturen > 0 ? `Volgens de gekoppelde facturen: ${formatEuro(betaaldVolgensFacturen)} betaald.` : 'Leeg = telt voor €0 tot het ingevuld is.'} />
+            <Veld label="Reden stop" value={f.reden_stop} onChange={(v) => set('reden_stop', v)} />
+          </div>
+          <StopBerekening totaal={totaal} betaald={betaaldBijStop} factor={factor} />
+        </div>
+      )}
+      {f.status === 'niet_betaler' && (
         <div className="rounded-xl border border-red-200 bg-red-50/60 p-3 space-y-3">
-          <div className="text-xs font-semibold text-red-800 flex items-center gap-1.5"><AlertTriangle className="h-3.5 w-3.5" />Stopinfo — de waarde wordt €0 in de aandelenpot</div>
+          <div className="text-xs font-semibold text-red-800 flex items-center gap-1.5"><AlertTriangle className="h-3.5 w-3.5" />Niet-betaler — de waarde wordt €0 in de aandelenpot</div>
           <div className="grid grid-cols-2 gap-3">
-            <Veld label="Laatste betaalde maand" type="date" value={f.laatste_betaalde_maand} onChange={(v) => set('laatste_betaalde_maand', v)} hint="Bepaalt wat er werkelijk ontvangen is vóór de stop." />
-            <Veld label="Reden stop / wanbetaling" value={f.reden_stop} onChange={(v) => set('reden_stop', v)} />
+            <Veld label="Laatste betaalde maand" type="date" value={f.laatste_betaalde_maand} onChange={(v) => set('laatste_betaalde_maand', v)} hint="Bepaalt wat er werkelijk ontvangen is." />
+            <Veld label="Reden wanbetaling" value={f.reden_stop} onChange={(v) => set('reden_stop', v)} />
           </div>
         </div>
       )}
@@ -836,7 +860,7 @@ function ContractDialoog({ contract, inst, module, klanten, onClose }: { contrac
       <div className="rounded-xl bg-[#fff848]/20 border border-yellow-300 p-3 text-sm grid grid-cols-3 gap-3">
         <div><div className="text-[11px] text-gray-500">Totaal</div><div className="font-semibold">{totaal === null ? '—' : formatEuro(totaal)}</div></div>
         <div><div className="text-[11px] text-gray-500">Netto kwalificerend</div><div className="font-semibold">{netto === null ? '—' : formatEuro(netto)}</div></div>
-        <div><div className="text-[11px] text-gray-500">Meetellend</div><div className="font-semibold">{netto === null ? '—' : gestopt || !f.betalingen_op_schema ? formatEuro(0) : formatEuro(netto * factor)}</div></div>
+        <div><div className="text-[11px] text-gray-500">Meetellend</div><div className="font-semibold">{meetellendLive === null ? '—' : formatEuro(meetellendLive)}</div></div>
         {totaal !== null && netto !== null && factor < 1 && !gestopt && f.betalingen_op_schema && (
           <div className="col-span-3 text-[11px] text-gray-600">
             Marco {Math.round(factor * 100)}%: {formatEuro(totaal * factor)} omzet{totaal - netto > 0 ? <> − {formatEuro((totaal - netto) * factor)} kosten ({Math.round(factor * 100)}% van {formatEuro(totaal - netto)})</> : null} = {formatEuro(netto * factor)}
@@ -1424,7 +1448,16 @@ function SnelBewerken({ c, module, onAlles, onKoppel }: { c: ContractBerekend; m
   const [pctInvoer, setPctInvoer] = useState(eigen ? String(c.toerekening_pct).replace('.', ',') : '')
   const [kosten, setKosten] = useState(String(c.uitgesloten_kosten ?? 0).replace('.', ','))
   const [notitie, setNotitie] = useState(c.notitie ?? '')
+  const [betaaldInvoer, setBetaaldInvoer] = useState(getalAlsInvoer(c.betaald_bij_stop, 2))
   useEffect(() => { setPctInvoer(eigen ? String(c.toerekening_pct).replace('.', ',') : ''); setKosten(String(c.uitgesloten_kosten ?? 0).replace('.', ',')); setNotitie(c.notitie ?? '') }, [c.toerekening_pct, c.uitgesloten_kosten, c.notitie, eigen])
+  useEffect(() => { setBetaaldInvoer(getalAlsInvoer(c.betaald_bij_stop, 2)) }, [c.betaald_bij_stop])
+  const bewaarBetaald = (tekst: string) => {
+    const t = tekst.trim()
+    const v = t === '' ? null : leesGetal(t)
+    if (t !== '' && (v === null || v < 0)) { toast.error('Geef een geldig bedrag.'); return }
+    if ((v ?? null) === (c.betaald_bij_stop ?? null)) return
+    zet('betaald', { betaald_bij_stop: v }, v === null ? 'Betaald bedrag gewist: telt voor €0.' : `Betaald bij stop: ${formatEuro(v)}.`)
+  }
   const zet = (sleutel: string, velden: Record<string, unknown>, melding = 'Bewaard.') => bewaar(sleutel, { resource: 'contract', id: c.id, ...velden }, melding)
   const standaard = Math.round(Math.min(1, (c.appointment_door_marco ? 0.5 : 0) + (c.closed_door_marco ? 0.5 : 0)) * 100)
   const kn = (aan: boolean) => `px-2.5 py-1.5 text-xs font-medium border-l first:border-l-0 border-gray-200 transition-colors ${aan ? 'bg-black text-white' : 'bg-white hover:bg-gray-50'}`
@@ -1443,6 +1476,24 @@ function SnelBewerken({ c, module, onAlles, onKoppel }: { c: ContractBerekend; m
         {bezig && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
         <button type="button" onClick={onAlles} className="btn-secondary text-xs"><Pencil className="h-3.5 w-3.5" />Alle gegevens wijzigen</button>
       </div>
+      {/* Vroegtijdig stopgezet: vesting op het werkelijk betaalde bedrag. */}
+      {c.status === 'stopgezet' && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-2.5 space-y-2">
+          <div className="text-[11px] font-medium text-amber-900">Vroegtijdig stopgezet: Marco's vesting telt op wat de klant werkelijk betaalde</div>
+          <div className="flex items-end gap-2 flex-wrap">
+            <label className="text-[11px] text-gray-600">Werkelijk betaald (€ excl. btw)
+              <input className="mt-0.5 block w-36 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm" inputMode="decimal" placeholder="bv. 3.000" value={betaaldInvoer}
+                onChange={(e) => setBetaaldInvoer(e.target.value)} onBlur={() => bewaarBetaald(betaaldInvoer)} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} aria-label="Werkelijk betaald bedrag" />
+            </label>
+            {c.betaald > 0 && Math.abs(c.betaald - (c.betaald_bij_stop ?? -1)) >= 0.01 && (
+              <button type="button" disabled={!!bezig} onClick={() => bewaarBetaald(String(c.betaald))} className="btn-secondary text-xs" title="Het bedrag dat volgens de gekoppelde facturen betaald is">
+                {formatEuro(c.betaald)} uit de facturen overnemen
+              </button>
+            )}
+          </div>
+          <StopBerekening totaal={c.totaal} betaald={c.opBetaaldBedrag ? c.betaald_bij_stop ?? 0 : null} factor={c.factor} />
+        </div>
+      )}
       <div className="grid gap-3 md:grid-cols-2">
         {/* Gekoppeld contract */}
         <div className="rounded-lg border border-gray-200 bg-white p-2.5 space-y-1.5">
@@ -1468,7 +1519,9 @@ function SnelBewerken({ c, module, onAlles, onKoppel }: { c: ContractBerekend; m
               onChange={(e) => setPctInvoer(e.target.value)} onBlur={bewaarPct} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} aria-label="Eigen percentage" />
             <button type="button" disabled={!!bezig || !eigen} onClick={() => zet('pct', { toerekening_pct: null }, `Toerekening terug automatisch (${standaard}%).`)} className={`text-xs underline ${eigen ? 'text-gray-700' : 'text-gray-300'}`}>automatisch ({standaard}%)</button>
           </div>
-          {c.totaal !== null && (
+          {c.opBetaaldBedrag ? (
+            <div className="text-[11px] text-gray-600">{Math.round(c.factor * 100)}% van {formatEuro(c.betaald_bij_stop ?? 0)} betaald = <b>{formatEuro(c.meetellend)}</b></div>
+          ) : c.totaal !== null && (
             <div className="text-[11px] text-gray-600">
               {Math.round(c.factor * 100)}% van {formatEuro(c.totaal)} omzet{c.kostenAftrek > 0 ? <> − {Math.round(c.factor * 100)}% van {formatEuro(c.kostenAftrek)} kosten</> : null} = <b>{formatEuro(c.netto === null ? 0 : c.netto * c.factor)}</b>
               {c.meetellend === 0 && c.netto !== null && c.netto > 0 ? <span className="text-gray-400"> (telt nu niet mee: {ERKENNING_LABEL[c.erkenning].toLowerCase()})</span> : null}
@@ -1640,7 +1693,8 @@ function Instellingen({ inst }: { inst: VestingInstellingen }) {
           <li>Getekend vóór de start van Jaar 1 telt mee als Jaar 1; getekend na het einde van Jaar 3 telt niet meer.</li>
           <li>De volledige netto contractwaarde op het moment van ondertekening telt mee — voorlopig zolang niet alles uit het contract betaald is.</li>
           <li>Zijn alle facturen uit het contract betaald (of staat het op ‘Voltooid’), dan is de waarde definitief.</li>
-          <li>Bij status ‘Vroegtijdig stopgezet’ of ‘Niet-betaler’ wordt de volledige waarde automatisch €0.</li>
+          <li>Bij ‘Vroegtijdig stopgezet’ telt enkel wat de klant werkelijk betaalde: betaald bedrag × Marco's percentage (bv. € 3.000 × 50% = € 1.500). Zolang dat bedrag niet ingevuld is, telt het contract voor €0.</li>
+          <li>Bij ‘Niet-betaler’ wordt de volledige waarde automatisch €0.</li>
           <li>Toerekening: 50% voor de appointment, 50% voor het closen (samen 100%).</li>
           <li>Extra facturen buiten het contract worden gelogd maar tellen niet mee.</li>
           <li>De goedkope schijf wordt chronologisch op ondertekeningsdatum toegewezen — de app sorteert dat zelf.</li>
@@ -1674,6 +1728,20 @@ function Kpi({ label, value, sub, color }: { label: string; value: string; sub?:
     </div>
   )
 }
+/** De vier cijfers bij een vroegtijdige stop: contractwaarde, betaald, percentage en wat in de vesting komt. */
+function StopBerekening({ totaal, betaald, factor }: { totaal: number | null; betaald: number | null; factor: number }) {
+  const pctTekst = `${Math.round(factor * 100)}%`
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+      <div className="rounded-lg bg-white border border-gray-200 px-2.5 py-2"><div className="text-[11px] text-gray-500">Volledige contractwaarde</div><div className="font-semibold tabular">{totaal === null ? '—' : formatEuro(totaal)}</div></div>
+      <div className="rounded-lg bg-white border border-gray-200 px-2.5 py-2"><div className="text-[11px] text-gray-500">Werkelijk betaald</div><div className="font-semibold tabular">{betaald === null ? <span className="text-amber-700 font-normal text-xs">nog in te vullen</span> : formatEuro(betaald)}</div></div>
+      <div className="rounded-lg bg-white border border-gray-200 px-2.5 py-2"><div className="text-[11px] text-gray-500">Vestingpercentage Marco</div><div className="font-semibold tabular">{pctTekst}</div></div>
+      <div className="rounded-lg bg-[#fff848]/40 border border-yellow-300 px-2.5 py-2"><div className="text-[11px] text-gray-600">In Marco's vesting</div><div className="font-bold tabular">{formatEuro(betaald === null ? 0 : Math.max(0, betaald) * factor)}</div>
+        <div className="text-[10px] text-gray-500">{betaald === null ? 'telt voor €0 tot ingevuld' : `${formatEuro(betaald)} × ${pctTekst}`}</div></div>
+    </div>
+  )
+}
+
 function Box({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
   return (
     <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3">

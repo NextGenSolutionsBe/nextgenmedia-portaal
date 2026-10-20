@@ -81,6 +81,13 @@ function velden(resource: Resource, b: Record<string, unknown>, bijAanmaak: bool
     }
     if (heeft('laatste_betaalde_maand')) rij.laatste_betaalde_maand = datum(b.laatste_betaalde_maand)
     if (heeft('reden_stop')) rij.reden_stop = tekst(b.reden_stop)
+    if (heeft('betaald_bij_stop')) {
+      // Vroegtijdig stopgezet: wat de klant werkelijk betaalde. Leeg = nog niet ingevuld (telt €0).
+      const v = b.betaald_bij_stop === null || b.betaald_bij_stop === '' ? null : getal(b.betaald_bij_stop)
+      if (v !== null && v < 0) return { rij, fout: 'Het betaalde bedrag kan niet negatief zijn.' }
+      if (b.betaald_bij_stop !== null && b.betaald_bij_stop !== '' && v === null) return { rij, fout: 'Geef een geldig bedrag.' }
+      rij.betaald_bij_stop = v === null ? null : Math.round(v * 100) / 100
+    }
     if (heeft('notitie')) rij.notitie = tekst(b.notitie)
     if (heeft('nr')) rij.nr = tekst(b.nr)
 
@@ -600,7 +607,7 @@ export async function PATCH(req: NextRequest) {
         if (ids.length) await admin.from(TABEL.contracttermijn).update({ invoice_id: null, updated_at: rij.updated_at }).eq('contract_id', id).in('invoice_id', ids)
       }
       ;({ error } = await admin.from(TABEL[resource]).update(rij).eq('id', id))
-      if (error && /toerekening_pct|contract_id/.test(error.message)) throw new Error('De databank is nog niet bijgewerkt voor deze velden.')
+      if (error && /toerekening_pct|contract_id|betaald_bij_stop/.test(error.message)) throw new Error('De databank is nog niet bijgewerkt voor deze velden.')
       if (!error && resource === 'wam') await synchroniseerTermijnen(admin, id, oudeWam)
       if (!error && resource === 'contract') await synchroniseerContractTermijnen(admin, id, oudContract)
     }
