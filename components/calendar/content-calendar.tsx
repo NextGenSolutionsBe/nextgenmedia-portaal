@@ -6,6 +6,7 @@ import {
   Send, Pencil, Save, Image, Video, FileText, Plus, MessageSquare,
 } from 'lucide-react'
 import { ymd } from '@/lib/utils'
+import { planningkleur, nuInBrussel, PLANNING_STIJL, type Planningkleur } from '@/lib/content/planning-kleur'
 import { KANAAL_SLUGS, kanaalLabel, normaliseerKanalen } from '@/lib/social-platforms'
 import {
   magBewerken, magVerwijderen, statusOvergangen, magBeoordelen, overgangLabel, type KalenderRechten,
@@ -111,6 +112,11 @@ export function ContentCalendar({
   const [cursor, setCursor] = useState(() => new Date())
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [view, setView] = useState<'month' | 'week'>('month')
+  // Kleuren op status (standaard) of op planning: oranje geplaatst · groen ingepland · wit nog niets. Onthouden per browser.
+  const [kleurOp, setKleurOp] = useState<'status' | 'planning'>('status')
+  useEffect(() => { try { const v = localStorage.getItem('ngm-kalender-kleur'); if (v === 'planning' || v === 'status') setKleurOp(v) } catch { /* geen opslag */ } }, [])
+  const kiesKleur = (v: 'status' | 'planning') => { setKleurOp(v); try { localStorage.setItem('ngm-kalender-kleur', v) } catch { /* geen opslag */ } }
+  const nu = useMemo(() => nuInBrussel(), [])
   const selectMode = !!selection?.enabled
 
   const selected = items.find((i) => i.id === selectedId) ?? null
@@ -198,7 +204,14 @@ export function ContentCalendar({
             </button>
             <span className="ml-2 font-semibold capitalize text-sm">{title}</span>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-wrap justify-end">
+            <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden mr-1" role="group" aria-label="Kleuren op">
+              <span className="text-[11px] text-gray-500 px-2 self-center hidden sm:inline">Kleur</span>
+              {(['status', 'planning'] as const).map((k) => (
+                <button key={k} type="button" onClick={() => kiesKleur(k)} aria-pressed={kleurOp === k}
+                  className={`text-xs px-2.5 py-1.5 border-l border-gray-200 ${kleurOp === k ? 'bg-black text-white' : 'hover:bg-gray-50'}`}>{k === 'status' ? 'Status' : 'Planning'}</button>
+              ))}
+            </div>
             <button
               onClick={() => setView('month')}
               className={`text-xs px-3 py-1.5 rounded-lg border ${view === 'month' ? 'bg-black text-white border-black' : 'border-gray-200 hover:bg-gray-50'}`}
@@ -263,6 +276,8 @@ export function ContentCalendar({
                   {dayItems.slice(0, maxShow).map((it) => {
                     const Icon = TYPE_ICONS[it.content_type] ?? FileText
                     const style = STATUS_STYLE[it.status]
+                    const plan: Planningkleur = planningkleur(it, nu)
+                    const badge = kleurOp === 'planning' ? PLANNING_STIJL[plan].badge : style.badge
                     const isChecked = selection?.selectedIds.has(it.id) ?? false
                     return (
                       <button
@@ -276,10 +291,10 @@ export function ContentCalendar({
                             setSelectedId(it.id === selectedId ? null : it.id)
                           }
                         }}
-                        className={`text-left text-[11px] px-1.5 py-1 rounded border ${style.badge}
+                        className={`text-left text-[11px] px-1.5 py-1 rounded border ${badge}
                           hover:opacity-80 transition truncate flex items-center gap-1 w-full
                           ${isChecked ? 'ring-2 ring-red-400 bg-red-50' : ''}`}
-                        title={it.title}
+                        title={kleurOp === 'planning' ? `${it.title} · ${PLANNING_STIJL[plan].label} · ${style.label}` : it.title}
                       >
                         {selectMode && (
                           <span className={`h-3 w-3 shrink-0 rounded border flex items-center justify-center ${
@@ -307,7 +322,17 @@ export function ContentCalendar({
 
         {/* Legend */}
         <div className="flex flex-wrap gap-4 px-4 py-3 border-t border-gray-100">
-          {(Object.entries(STATUS_STYLE) as [SocialContentStatus, typeof STATUS_STYLE[SocialContentStatus]][]).map(([s, v]) => (
+          {kleurOp === 'planning' ? (
+            <>
+              {(Object.keys(PLANNING_STIJL) as Planningkleur[]).map((k) => (
+                <span key={k} className="flex items-center gap-1.5 text-[11px] text-gray-600">
+                  <span className={`h-3 w-5 rounded border ${PLANNING_STIJL[k].badge}`} />
+                  {PLANNING_STIJL[k].label}
+                </span>
+              ))}
+              <span className="text-[11px] text-gray-400">· het bolletje blijft de status tonen</span>
+            </>
+          ) : (Object.entries(STATUS_STYLE) as [SocialContentStatus, typeof STATUS_STYLE[SocialContentStatus]][]).map(([s, v]) => (
             <span key={s} className="flex items-center gap-1.5 text-[11px] text-gray-500">
               <span className={`h-2 w-2 rounded-full ${v.dot}`} />
               {v.label}
