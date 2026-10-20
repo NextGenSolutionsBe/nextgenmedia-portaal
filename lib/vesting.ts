@@ -19,9 +19,10 @@
  * als het ook effectief betaald wordt. Daarom heeft elk contract termijnen
  * (facturen): zolang niet alles uit het contract betaald is, is de waarde
  * voorlopig; is alles betaald (of staat het contract op voltooid), dan is ze
- * definitief. Vroegtijdig stopgezet of niet-betaler = €0. Een contract telt
- * naar rato van Marco's aandeel in het binnenhalen: 50% voor de afspraak, 50%
- * voor het closen.
+ * definitief. Niet-betaler = €0. Vroegtijdig stopgezet: enkel wat de klant
+ * werkelijk betaalde telt (`betaald_bij_stop`); zolang dat niet ingevuld is,
+ * €0. Een contract telt naar rato van Marco's aandeel in het binnenhalen: 50%
+ * voor de afspraak, 50% voor het closen.
  *
  * Bram krijgt wat Marco niet verwerft; Chiara staat vast op 33%.
  *
@@ -108,6 +109,12 @@ export type Contract = {
   closed_door_marco: boolean
   laatste_betaalde_maand: string | null
   reden_stop: string | null
+  /**
+   * Vroegtijdig stopgezet: wat de klant werkelijk betaalde (€ excl. btw),
+   * handmatig ingevuld. Marco's deel = dit bedrag × toerekening, in plaats van
+   * de volledige contractwaarde. Leeg = telt voor €0.
+   */
+  betaald_bij_stop?: number | null
   notitie: string | null
   /** Het contract in de Contractenmodule waar dit op slaat, als het er is. */
   contract_id: string | null
@@ -433,6 +440,8 @@ export type ContractBerekend = Contract & {
   ontvangenVoorStop: number | null
   /** Bij stop of niet-betaler: wat er van de contractwaarde wegvalt. */
   uitgevallen: number
+  /** Vroegtijdig stopgezet mét betaald bedrag: Marco's deel telt op dat bedrag, niet op de contractwaarde. */
+  opBetaaldBedrag: boolean
   /** Loopt nog (niet gestopt, geen niet-betaler): contractwaarde die nog moet binnenkomen. */
   nogBinnen: number
   /** De facturen (termijnen) van dit contract, met de status die telt. */
@@ -482,13 +491,28 @@ export function toerekeningsfactor(c: Pick<Contract, 'appointment_door_marco' | 
   return standaardToerekening(c)
 }
 
-/** Telt dit contract mee? Nee bij stop, niet-betaler, betalingen niet op schema of buiten de periode. */
-export function isUitgesloten(c: Pick<Contract, 'status' | 'betalingen_op_schema'>, jaar: Contractjaar): boolean {
-  return c.status === 'stopgezet' || c.status === 'niet_betaler' || !c.betalingen_op_schema || jaar === 'buiten'
+type StatusVelden = Pick<Contract, 'status' | 'betalingen_op_schema'> & { betaald_bij_stop?: number | null }
+
+/** Vroegtijdig stopgezet en het werkelijk betaalde bedrag is ingevuld? Dan telt dat bedrag (× toerekening). */
+export function stopMetBetaling(c: { status: ContractStatus; betaald_bij_stop?: number | null }): boolean {
+  return c.status === 'stopgezet' && c.betaald_bij_stop !== null && c.betaald_bij_stop !== undefined && Number.isFinite(Number(c.betaald_bij_stop))
 }
 
-export function erkenningVan(c: Pick<Contract, 'status' | 'betalingen_op_schema'>, jaar: Contractjaar, volledigBetaald = false): Erkenning {
+/**
+ * Telt dit contract mee? Nee bij niet-betaler, betalingen niet op schema of
+ * buiten de periode. Vroegtijdig stopgezet telt enkel mee als het betaalde
+ * bedrag ingevuld is; "betalingen op schema" speelt dan geen rol meer.
+ */
+export function isUitgesloten(c: StatusVelden, jaar: Contractjaar): boolean {
+  if (jaar === 'buiten') return true
+  if (stopMetBetaling(c)) return false
+  return c.status === 'stopgezet' || c.status === 'niet_betaler' || !c.betalingen_op_schema
+}
+
+export function erkenningVan(c: StatusVelden, jaar: Contractjaar, volledigBetaald = false): Erkenning {
   if (isUitgesloten(c, jaar)) return 'uitgesloten'
+  // Gestopt met een vastgelegd betaald bedrag: er komt niets meer bij, dus definitief.
+  if (stopMetBetaling(c)) return 'definitief'
   // Definitief zodra het contract voltooid is óf alles uit het contract betaald is.
   if (c.status === 'voltooid' || volledigBetaald) return 'definitief'
   if (c.status === 'actief') return 'voorlopig'
@@ -622,7 +646,7 @@ export type VestingOverzicht = {
   volgendeProcent: { nodig: number; tarief: number } | null
   /** Contracten samen: getekend vs effectief gefactureerd en betaald. */
   contractTotalen: {
-    /** Getekende contractwaarde (100%) van de contracten die meetellen. */
+    /** Getekende contractwaarde (100%) van de contracten die meetellen; bij een stop het betaalde bedrag. */
     getekend: number
     /** Waar Marco recht op heeft: netto × toerekening (= meetellend). */
     marcoRecht: number
@@ -700,7 +724,12 @@ export function berekenVesting(
     const termijnVerschil = totaal !== null && inContractTermijnen.length > 0 && Math.abs(inContract - totaal) >= 0.01 ? inContract - totaal : null
 
     const erkenning = erkenningVan(c, jaar, volledigBetaald)
-    const meetellend = erkenning === 'uitgesloten' || netto === null ? 0 : netto * factor
+    // Vroegtijdig stopgezet: werkelijk betaald bedrag × toerekening (bv. €3.000 × 50% = €1.500).
+    const opBetaaldBedrag = stopMetBetaling(c)
+    const betaaldBijStop = opBetaaldBedrag ? Math.max(0, n(c.betaald_bij_stop)) : null
+    const meetellend = erkenning === 'uitgesloten' ? 0
+      : betaaldBijStop !== null ? betaaldBijStop * factor
+      : netto === null ? 0 : netto * factor
 
     const goedkopeSchijf = Math.min(meetellend, Math.max(0, goedkoopBudget - cumulatief))
     const jaarschijf = Math.max(0, meetellend - goedkopeSchijf)
@@ -714,16 +743,17 @@ export function berekenVesting(
     // contract. Zonder stopinfo: de hele contractwaarde.
     const gestopt = c.status === 'stopgezet' || c.status === 'niet_betaler'
     const uitgevallen = gestopt && totaal !== null
-      ? Math.max(0, totaal - (ontvangenVoorStop ?? 0)) : 0
+      ? Math.max(0, totaal - (betaaldBijStop ?? ontvangenVoorStop ?? 0)) : 0
     // Lopend contract: wat er van de contractwaarde nog niet betaald is, komt nog binnen.
     const nogBinnen = gestopt ? 0 : Math.max(0, (totaal ?? inContract) - betaald)
 
     const uit: ContractBerekend = {
       ...c, jaar, tarief, duur, totaal, netto, kostenAftrek, kostenWaarschuwing, factor, meetellend, erkenning,
       cumulatiefVoor: cumulatief, goedkopeSchijf, jaarschijf, ruweVesting,
-      betaaldeMaanden: maanden, ontvangenVoorStop, uitgevallen, nogBinnen,
+      betaaldeMaanden: maanden, ontvangenVoorStop, uitgevallen, opBetaaldBedrag, nogBinnen,
       termijnen, inContract, gefactureerd, betaald, openstaand: Math.max(0, gefactureerd - betaald),
-      nogTeFactureren: Math.max(0, (totaal ?? inContract) - gefactureerd), extraGefactureerd, volledigBetaald, termijnVerschil,
+      // Vroegtijdig stopgezet: er wordt niets meer gefactureerd.
+      nogTeFactureren: c.status === 'stopgezet' ? 0 : Math.max(0, (totaal ?? inContract) - gefactureerd), extraGefactureerd, volledigBetaald, termijnVerschil,
     }
     cumulatief += meetellend
     return uit
@@ -776,7 +806,7 @@ export function berekenVesting(
   const tellen = contracten.filter((c) => c.erkenning !== 'uitgesloten')
   const som = (f: (c: ContractBerekend) => number, lijst = contracten) => lijst.reduce((s, c) => s + f(c), 0)
   const contractTotalen = {
-    getekend: som((c) => c.totaal ?? 0, tellen),
+    getekend: som((c) => (c.opBetaaldBedrag ? n(c.betaald_bij_stop) : c.totaal ?? 0), tellen),
     marcoRecht: som((c) => c.meetellend),
     gefactureerd: som((c) => c.gefactureerd),
     betaald: som((c) => c.betaald),
