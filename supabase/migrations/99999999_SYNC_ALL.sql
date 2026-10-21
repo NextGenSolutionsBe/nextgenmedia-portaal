@@ -2579,10 +2579,10 @@ ALTER TABLE public.contracts ADD CONSTRAINT contracts_status_check CHECK (
   status IN (
     -- oude/Engelse waarden zoals ze vandaag in de database staan
     'draft', 'sent', 'viewed', 'opened', 'filled', 'signed',
-    'cancelled', 'canceled', 'expired', 'replaced', 'template',
+    'cancelled', 'canceled', 'expired', 'replaced', 'template', 'declined',
     -- canonieke Nederlandse waarden (lib/contract-status.ts)
     'klaar_voor_verzenden', 'verzonden', 'geopend', 'ingevuld',
-    'getekend', 'geannuleerd', 'verlopen', 'vervangen'
+    'getekend', 'geannuleerd', 'verlopen', 'vervangen', 'niet_geaccepteerd'
   )
 );
 
@@ -5970,3 +5970,17 @@ DO $$ BEGIN
     ALTER TABLE public.vesting_contracten ADD CONSTRAINT vesting_contracten_betaald_bij_stop_check CHECK (betaald_bij_stop IS NULL OR betaald_bij_stop >= 0);
   END IF;
 END $$;
+
+-- ── Contractstatus "niet geaccepteerd" (21 okt 2026) ───────────────────────
+-- Naast "geannuleerd": de klant heeft het contract niet aanvaard of niet
+-- ondertekend. Puur verruimend (de bestaande waarden blijven toegelaten), geen
+-- data gewijzigd. Houd deze lijst gelijk met ALIAS in lib/contract-status.ts.
+ALTER TABLE public.contracts DROP CONSTRAINT IF EXISTS contracts_status_check;
+ALTER TABLE public.contracts ADD CONSTRAINT contracts_status_check CHECK (
+  status IN (
+    'draft', 'sent', 'viewed', 'opened', 'filled', 'signed',
+    'cancelled', 'canceled', 'expired', 'replaced', 'template', 'declined',
+    'klaar_voor_verzenden', 'verzonden', 'geopend', 'ingevuld',
+    'getekend', 'geannuleerd', 'verlopen', 'vervangen', 'niet_geaccepteerd'
+  )
+);

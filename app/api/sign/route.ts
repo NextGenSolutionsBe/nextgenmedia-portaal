@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
 import { revalidatePath } from 'next/cache'
 import { logContractEvent } from '@/lib/contract-audit'
+import { isNietDoorgegaan } from '@/lib/contract-status'
 import { resolvePortalSession, canAccessContract } from '@/lib/portal-auth'
 import { FIELD_FONT_PT, baselineFromTopPct } from '@/lib/contract-render'
 import { naOndertekening } from '@/lib/contract-archief'
@@ -41,6 +42,7 @@ export async function POST(req: NextRequest) {
 
     if (!contract) return NextResponse.json({ error: 'Contract niet gevonden' }, { status: 404 })
     if (contract.status === 'signed' || contract.status === 'getekend') return NextResponse.json({ error: 'Contract is al ondertekend' }, { status: 400 })
+    if (isNietDoorgegaan(contract.status)) return NextResponse.json({ error: 'Dit contract is niet meer geldig. Neem contact op met NextGenMedia.' }, { status: 400 })
 
     // Subaccount-bescherming: een ingelogde portaalgebruiker van DEZELFDE klant
     // mag enkel tekenen met contracts.sign. Externe ontvangers (geen sessie of

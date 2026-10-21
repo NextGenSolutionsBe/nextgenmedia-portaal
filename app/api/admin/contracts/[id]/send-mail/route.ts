@@ -93,7 +93,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // ongemoeid: "Geopend" blijft zichtbaar en de wachttijd telt verder.
     const herinnering = b.herinnering === true && !!contract.sent_at
     // Status → verzonden (sent) + audit, tenzij al getekend/geannuleerd.
-    if (!herinnering && !['signed', 'getekend', 'cancelled', 'geannuleerd'].includes(String(contract.status))) {
+    if (!herinnering && !['signed', 'getekend', 'cancelled', 'geannuleerd', 'niet_geaccepteerd', 'declined'].includes(String(contract.status))) {
       try {
         await admin.from('contracts').update({ status: 'sent', sent_at: nu() }).eq('id', id)
       } catch { }

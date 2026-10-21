@@ -61,7 +61,7 @@ export type LooptijdContract = {
 export function nogTeOndertekenen(c: LooptijdContract): boolean {
   if (isAfgesloten(looptijdVan(c.looptijd_status))) return false
   const k = canonicalStatus(c.status)
-  if (k === 'getekend' || k === 'geannuleerd' || k === 'vervangen' || k === 'template') return false
+  if (k === 'getekend' || k === 'geannuleerd' || k === 'niet_geaccepteerd' || k === 'vervangen' || k === 'template') return false
   return true
 }
 

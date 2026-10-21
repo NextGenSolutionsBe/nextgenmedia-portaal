@@ -6,6 +6,7 @@ import { FileText, CheckCircle2, Clock } from 'lucide-react'
 import { SignatureForm } from './signature-form'
 import { Logo } from '@/components/logo'
 import { logContractEvent } from '@/lib/contract-audit'
+import { isNietDoorgegaan } from '@/lib/contract-status'
 
 export default async function SignContractPage({ params }: { params: { token: string } }) {
   const admin = createAdminSupabaseClient()
@@ -21,8 +22,10 @@ export default async function SignContractPage({ params }: { params: { token: st
 
   // ── Vervaldatum: verlopen tekenlink blokkeert toegang ──────────────────────
   const alreadySignedStatus = contract.status === 'signed' || contract.status === 'getekend'
+  // Geannuleerd, niet geaccepteerd of vervangen: niet meer te tekenen, en de status blijft zoals ze is.
+  const nietGeldig = !alreadySignedStatus && isNietDoorgegaan(contract.status)
   let isExpired = false
-  if (!alreadySignedStatus && contract.expires_at) {
+  if (!alreadySignedStatus && !nietGeldig && contract.expires_at) {
     const today = new Date().toISOString().slice(0, 10)
     if (String(contract.expires_at).slice(0, 10) < today) {
       isExpired = true
@@ -37,6 +40,26 @@ export default async function SignContractPage({ params }: { params: { token: st
         try { await logContractEvent(admin, contract.id, 'expired', { meta: { via: 'sign-page' } }) } catch { }
       }
     }
+  }
+
+  if (nietGeldig) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <header className="bg-white border-b border-gray-200 px-4 py-4 flex items-center gap-3">
+          <Logo className="h-8 w-8" />
+          <span className="font-bold text-sm">NextGenMedia</span>
+        </header>
+        <div className="flex-1 flex items-center justify-center p-4">
+          <div className="bg-white border border-gray-200 rounded-2xl p-8 text-center max-w-md">
+            <div className="h-12 w-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <FileText className="h-6 w-6 text-gray-500" />
+            </div>
+            <h1 className="font-semibold text-lg mb-1">Dit contract is niet meer geldig.</h1>
+            <p className="text-sm text-gray-500">Neem contact op met NextGenMedia als je vragen hebt.</p>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (isExpired) {

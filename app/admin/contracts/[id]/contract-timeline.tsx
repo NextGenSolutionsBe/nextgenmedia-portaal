@@ -25,6 +25,7 @@ function detail(e: Event): string | null {
   if (e.event_type === 'signed' && mm.wijze === 'manueel') return typeof mm.notitie === 'string' && mm.notitie ? mm.notitie : null
   if (e.event_type === 'bijlage_toegevoegd' || e.event_type === 'bijlage_verwijderd') return typeof mm.naam === 'string' ? mm.naam : null
   if (e.event_type === 'herinnering_verstuurd') return typeof mm.to === 'string' ? `naar ${mm.to}` : null
+  if (e.event_type === 'cancelled' || e.event_type === 'niet_geaccepteerd') return typeof mm.reden === 'string' && mm.reden ? mm.reden : null
   if (e.event_type !== 'looptijd_gewijzigd') return null
   const m = e.meta as { oud?: string; nieuw?: string; stop_datum?: string | null; stop_reden?: string | null }
   const delen = [`${LOOPTIJD_LABEL[m.oud ?? ''] ?? m.oud ?? '?'} → ${LOOPTIJD_LABEL[m.nieuw ?? ''] ?? m.nieuw ?? '?'}`]
@@ -63,6 +64,8 @@ const META: Record<string, { label: string; icon: React.ComponentType<{ classNam
   bijlage_toegevoegd:    { label: 'Bijlage toegevoegd',    icon: Paperclip,   cls: 'bg-gray-100 text-gray-600' },
   bijlage_verwijderd:    { label: 'Bijlage verwijderd',    icon: Paperclip,   cls: 'bg-gray-100 text-gray-600' },
   herinnering_verstuurd: { label: 'Herinnering verstuurd', icon: BellRing,    cls: 'bg-blue-100 text-blue-600' },
+  niet_geaccepteerd:     { label: 'Niet geaccepteerd door de klant', icon: XCircle, cls: 'bg-red-100 text-red-600' },
+  heropend:              { label: 'Terug opengezet',       icon: Undo2,       cls: 'bg-gray-100 text-gray-600' },
 }
 
 const MANUEEL_GETEKEND = { label: 'Op getekend gezet (buiten de app)', icon: CheckCircle2, cls: 'bg-green-100 text-green-600' }

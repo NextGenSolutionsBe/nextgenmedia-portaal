@@ -3,9 +3,12 @@
 // samenvatting bovenaan het dashboard. Eén bron voor kalender én lijst.
 
 import { lastDayOfMonth, shiftYM } from '@/lib/invoices'
+import { contractStand } from '@/lib/facturen/contract-stand'
 
 // ── Statussen ────────────────────────────────────────────────────────────────
 export type PlannerStatus = 'gepland' | 'te_versturen' | 'controle_vereist' | 'verstuurd' | 'betaald' | 'achterstallig' | 'geannuleerd' | 'gecrediteerd'
+  // Factuur van een contract dat nog niet getekend is, of dat niet doorging.
+  | 'wacht_op_contract' | 'contract_vervallen'
 
 export const PLANNER_STATUSSEN: { key: PlannerStatus; label: string; cls: string; stip: string }[] = [
   // Sterk verschillende kleuren, altijd samen met tekst (en een icoon in de badge):
@@ -22,11 +25,21 @@ export const PLANNER_STATUSSEN: { key: PlannerStatus; label: string; cls: string
   { key: 'achterstallig', label: 'Achterstallig', cls: 'bg-orange-500 text-white border-orange-600', stip: 'bg-orange-500' },
   { key: 'geannuleerd', label: 'Geannuleerd', cls: 'bg-gray-100 text-gray-500 border-gray-200', stip: 'bg-gray-300' },
   { key: 'gecrediteerd', label: 'Geannuleerd (gecrediteerd)', cls: 'bg-gray-100 text-gray-500 border-gray-200', stip: 'bg-gray-300' },
+  //  · wacht op handtekening = blauw gestreept, nog niet te factureren
+  //  · contract niet doorgegaan = grijs, telt nergens mee
+  { key: 'wacht_op_contract', label: 'Wacht op handtekening contract', cls: 'bg-white text-blue-800 border-blue-300 border-dashed', stip: 'bg-blue-300' },
+  { key: 'contract_vervallen', label: 'Contract niet doorgegaan', cls: 'bg-gray-100 text-gray-500 border-gray-200', stip: 'bg-gray-300' },
 ]
 export const STATUS_INFO = Object.fromEntries(PLANNER_STATUSSEN.map((s) => [s.key, s])) as Record<PlannerStatus, (typeof PLANNER_STATUSSEN)[number]>
 
 /** Statussen die nog werk vragen (tellen mee in "te versturen" en in het maandbedrag). */
 export const OPEN_STATUSSEN: PlannerStatus[] = ['gepland', 'te_versturen', 'controle_vereist', 'achterstallig']
+/**
+ * Telt nergens mee (niet als te factureren, niet als omzet): geannuleerd, en
+ * facturen van een contract dat nog niet getekend is of niet doorging.
+ */
+export const TELT_NIET: PlannerStatus[] = ['geannuleerd', 'gecrediteerd', 'wacht_op_contract', 'contract_vervallen']
+export const teltNiet = (s: PlannerStatus): boolean => TELT_NIET.includes(s)
 
 /**
  * De facturatiedatum mag ALTIJD aangepast worden — ook van een verstuurde of
@@ -38,7 +51,7 @@ export const magVerplaatsen = (status: PlannerStatus): boolean => status !== 'ge
 // ── Herkomst ─────────────────────────────────────────────────────────────────
 export type Herkomst = 'eenmalig' | 'recurring' | 'contract' | 'wam'
 export const HERKOMST_LABEL: Record<Herkomst, string> = {
-  eenmalig: 'Eenmalige facturatie', recurring: 'Recurring facturatie', contract: 'Ondertekend contract', wam: 'Vesting (WAM)',
+  eenmalig: 'Eenmalige facturatie', recurring: 'Recurring facturatie', contract: 'Contract', wam: 'Vesting (WAM)',
 }
 
 export type Bron = 'invoice' | 'recurring' | 'opdracht' | 'wam'
@@ -72,6 +85,8 @@ export type Moment = {
   ontbrekend: string[]
   contract_id: string | null
   contract_titel: string | null
+  /** Status van het gekoppelde contract (ruwe waarde), voor de regel "pas factureren na ondertekening". */
+  contract_status?: string | null
   recurring_id: string | null
   invoice_id: string | null
   wam_id: string | null
@@ -158,12 +173,16 @@ export const euro = (n: number): string => new Intl.NumberFormat('nl-BE', { styl
 export const euro2 = (n: number): string => new Intl.NumberFormat('nl-BE', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 
 // ── Status bepalen (één regel voor alle bronnen) ────────────────────────────
-export function bepaalStatus(p: { ruweStatus: string | null | undefined; datum: string; ontbrekend: string[]; vandaag: string }): PlannerStatus {
+export function bepaalStatus(p: { ruweStatus: string | null | undefined; datum: string; ontbrekend: string[]; vandaag: string; contractStatus?: string | null }): PlannerStatus {
   const r = (p.ruweStatus ?? '').toLowerCase()
   if (r === 'geannuleerd') return 'geannuleerd'
   if (r === 'gecrediteerd') return 'gecrediteerd'
   if (r === 'betaald') return 'betaald'
   if (r === 'verstuurd' || r === 'gefactureerd' || r === 'afgehandeld') return 'verstuurd'
+  // Hangt de factuur aan een contract? Pas te factureren zodra het getekend is.
+  const stand = contractStand(p.contractStatus)
+  if (stand === 'vervallen') return 'contract_vervallen'
+  if (stand === 'wacht') return 'wacht_op_contract'
   if (r === 'controle_vereist' || p.ontbrekend.length > 0) return 'controle_vereist'
   if (p.datum < p.vandaag) return 'achterstallig'
   if (p.datum === p.vandaag) return 'te_versturen'
@@ -197,7 +216,7 @@ export function inCategorie(m: Moment, cat: Categorie, vandaag: string): boolean
 
 export function samenvatting(momenten: Moment[], vandaag: string): Samenvatting {
   const ym = ymVan(vandaag)
-  const maandAlle = momenten.filter((m) => ymVan(m.datum) === ym && m.status !== 'geannuleerd' && m.status !== 'gecrediteerd')
+  const maandAlle = momenten.filter((m) => ymVan(m.datum) === ym && !teltNiet(m.status))
   return {
     vandaag: momenten.filter((m) => inCategorie(m, 'vandaag', vandaag)).length,
     week: momenten.filter((m) => inCategorie(m, 'week', vandaag)).length,
@@ -218,13 +237,13 @@ export function samenvatting(momenten: Moment[], vandaag: string): Samenvatting 
  *    (verzenddatum + betaaltermijn) in de maand valt en die nog niet betaald
  *    zijn — bewust "verwacht", niet
  *    "ontvangen": de app heeft geen betaal- of boekhoudkoppeling.
- * Geannuleerd telt nergens mee.
+ * Geannuleerd en facturen van een niet-getekend contract tellen nergens mee.
  */
 export type MaandKpi = { teFactureren: number; teFacturerenAantal: number; verstuurd: number; verstuurdAantal: number; gepland: number; verwachtBinnen: number; verwachtBinnenAantal: number }
 export function maandKpi(momenten: Moment[], ym: string): MaandKpi {
   let teFactureren = 0, nTe = 0, verstuurd = 0, nV = 0, verwacht = 0, nW = 0
   for (const m of momenten) {
-    if (m.status === 'geannuleerd' || m.status === 'gecrediteerd') continue
+    if (teltNiet(m.status)) continue
     const isVerstuurd = m.status === 'verstuurd' || m.status === 'betaald'
     if (!isVerstuurd && ymVan(m.datum) === ym) { teFactureren += m.bedrag_excl; nTe++ }
     if (isVerstuurd && ymVan(m.verzonden_op ?? m.datum) === ym) { verstuurd += m.bedrag_excl; nV++ }
@@ -296,7 +315,7 @@ export function naStap(m: Moment, actie: StapActie, vandaag: string): Moment {
   if (actie === 'verstuurd') return { ...m, status: 'verstuurd', ruweStatus: 'verstuurd', verzonden_op: vandaag }
   if (actie === 'betaald') return { ...m, status: 'betaald', ruweStatus: 'betaald', betaald_op: vandaag }
   if (actie === 'onbetaald') return { ...m, status: 'verstuurd', ruweStatus: 'verstuurd', betaald_op: null }
-  const status = bepaalStatus({ ruweStatus: 'te_versturen', datum: m.datum, ontbrekend: m.ontbrekend, vandaag })
+  const status = bepaalStatus({ ruweStatus: 'te_versturen', datum: m.datum, ontbrekend: m.ontbrekend, vandaag, contractStatus: m.contract_status })
   return { ...m, status, ruweStatus: 'te_versturen', verzonden_op: null, verzonden_door: null, betaald_op: null }
 }
 
@@ -305,11 +324,11 @@ export function naStap(m: Moment, actie: StapActie, vandaag: string): Moment {
 export const winstVan = (m: Pick<Moment, 'bedrag_excl' | 'kosten'>) => Math.round((m.bedrag_excl - (m.kosten ?? 0)) * 100) / 100
 /** Marge in % (null bij € 0 omzet). */
 export const margeVan = (m: Pick<Moment, 'bedrag_excl' | 'kosten'>) => (m.bedrag_excl > 0 ? Math.round((winstVan(m) / m.bedrag_excl) * 1000) / 10 : null)
-/** Omzet, kosten en winst van een lijst facturen; geannuleerd telt niet mee. */
+/** Omzet, kosten en winst van een lijst facturen; geannuleerd en niet-getekende contracten tellen niet mee. */
 export function resultaat(momenten: Moment[]): { omzet: number; kosten: number; winst: number; marge: number | null; metKosten: number } {
   let omzet = 0, kosten = 0, metKosten = 0
   for (const m of momenten) {
-    if (m.status === 'geannuleerd' || m.status === 'gecrediteerd') continue
+    if (teltNiet(m.status)) continue
     omzet += m.bedrag_excl; kosten += m.kosten ?? 0
     if ((m.kostenAantal ?? 0) > 0) metKosten++
   }
@@ -334,7 +353,7 @@ export const filtersActief = (f: Filters): boolean => JSON.stringify({ ...f, van
 
 export function pasFiltersToe(momenten: Moment[], f: Filters, vandaag: string): Moment[] {
   return momenten.filter((m) => {
-    if ((m.status === 'geannuleerd' || m.status === 'gecrediteerd') && !f.toonGeannuleerd && f.status !== m.status) return false
+    if ((m.status === 'geannuleerd' || m.status === 'gecrediteerd' || m.status === 'contract_vervallen') && !f.toonGeannuleerd && f.status !== m.status) return false
     if (f.categorie && !inCategorie(m, f.categorie, vandaag)) return false
     if (f.fase && faseVan(m) !== f.fase) return false
     if (f.van && m.datum < f.van) return false
@@ -352,11 +371,11 @@ export function pasFiltersToe(momenten: Moment[], f: Filters, vandaag: string): 
   })
 }
 
-/** Aantal en bedrag (excl.) per dag — voor de kalendercellen. Geannuleerd telt niet mee. */
+/** Aantal en bedrag (excl.) per dag — voor de kalendercellen. Geannuleerd en niet-getekende contracten tellen niet mee. */
 export function dagTotalen(momenten: Moment[]): Map<string, { aantal: number; bedrag: number }> {
   const uit = new Map<string, { aantal: number; bedrag: number }>()
   for (const m of momenten) {
-    if (m.status === 'geannuleerd' || m.status === 'gecrediteerd') continue
+    if (teltNiet(m.status)) continue
     const t = uit.get(m.datum) ?? { aantal: 0, bedrag: 0 }
     t.aantal++; t.bedrag += m.bedrag_excl
     uit.set(m.datum, t)
@@ -365,7 +384,7 @@ export function dagTotalen(momenten: Moment[]): Map<string, { aantal: number; be
 }
 
 export type Sortering = { veld: 'datum' | 'klant' | 'bedrag' | 'status'; richting: 'asc' | 'desc' }
-const STATUS_VOLGORDE: PlannerStatus[] = ['achterstallig', 'te_versturen', 'controle_vereist', 'gepland', 'verstuurd', 'betaald', 'geannuleerd', 'gecrediteerd']
+const STATUS_VOLGORDE: PlannerStatus[] = ['achterstallig', 'te_versturen', 'controle_vereist', 'gepland', 'verstuurd', 'betaald', 'wacht_op_contract', 'geannuleerd', 'gecrediteerd', 'contract_vervallen']
 export function sorteer(momenten: Moment[], s: Sortering): Moment[] {
   const r = s.richting === 'asc' ? 1 : -1
   return [...momenten].sort((a, b) => {
@@ -448,7 +467,7 @@ export function rondeItems(momenten: Moment[], vandaag: string): Moment[] {
 // gecrediteerd tellen niet; verwijderde items bestaan niet meer. Betaald zit al
 // in “gefactureerd” en wordt nooit nog eens opgeteld.
 export const MAAND_DOEL = 30000
-const telt = (m: Pick<Moment, 'status'>) => m.status !== 'geannuleerd' && m.status !== 'gecrediteerd'
+const telt = (m: Pick<Moment, 'status'>) => !teltNiet(m.status)
 const r2 = (n: number) => Math.round(n * 100) / 100
 
 export type MaandOverzicht = { gefactureerd: number; open: number; totaal: number; aantalGefactureerd: number; aantalOpen: number }

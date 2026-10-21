@@ -16,7 +16,7 @@ import { ContractTimeline } from './contract-timeline'
 import { VerzondenMails } from '@/components/contracten/verzonden-mails'
 import { ContractFacturatie } from './contract-facturatie'
 import { ContractNavigatie } from './contract-navigatie'
-import { statusInfo, canonicalStatus } from '@/lib/contract-status'
+import { statusInfo, canonicalStatus, isNietDoorgegaan } from '@/lib/contract-status'
 import { ContracttypeBewerker } from './contracttype-bewerker'
 import { LooptijdDatums } from './looptijd-datums'
 import { LooptijdDetail } from '../looptijd'
@@ -92,6 +92,12 @@ export default async function ContractDetailPage({ params }: { params: { id: str
   const statusKey = canonicalStatus(c.status)
   const isSigned = statusKey === 'getekend'
   const manueel = isManueelGetekend(c)
+  // Geannuleerd, niet geaccepteerd of vervangen: niet meer versturen of laten tekenen.
+  const nietDoorgegaan = isNietDoorgegaan(c.status)
+  const stopEvent = nietDoorgegaan
+    ? (events as { event_type: string; created_at: string; meta?: Record<string, unknown> | null }[]).find((e) => e.event_type === 'cancelled' || e.event_type === 'niet_geaccepteerd') ?? null
+    : null
+  const stopReden = stopEvent && typeof stopEvent.meta?.reden === 'string' ? stopEvent.meta.reden : null
   const linkVerlopen = !!c.expires_at && String(c.expires_at).slice(0, 10) < new Date().toISOString().slice(0, 10)
   const kanHerinneren = !!c.sent_at && ['verzonden', 'geopend', 'ingevuld'].includes(statusKey) && !linkVerlopen
   const signLink = `${baseUrl()}/sign/${c.access_token}`
@@ -124,7 +130,7 @@ export default async function ContractDetailPage({ params }: { params: { id: str
         <div className="flex items-center gap-2 flex-wrap shrink-0">
           <ContractGegevens contractId={c.id} isSigned={!!isSigned} klanten={data.klantenLijst}
             begin={{ title: c.title, client_id: c.client_id ?? null, service_slug: c.service_slug ?? null, signer_name: c.signer_name ?? null, signer_email: c.signer_email ?? null, duration_type: c.duration_type ?? null }} />
-          {!isSigned && statusKey !== 'geannuleerd' && (
+          {!isSigned && !nietDoorgegaan && (
             <ContractMailButton
               contractId={c.id}
               contractTitle={c.title}
@@ -150,7 +156,7 @@ export default async function ContractDetailPage({ params }: { params: { id: str
               label="Herinnering sturen"
             />
           )}
-          {!isSigned && statusKey !== 'geannuleerd' && statusKey !== 'vervangen' && statusKey !== 'template' && (
+          {!isSigned && !nietDoorgegaan && statusKey !== 'template' && (
             <OpGetekendZetten contractId={c.id} />
           )}
           {!isSigned && (
@@ -166,9 +172,17 @@ export default async function ContractDetailPage({ params }: { params: { id: str
         </div>
       </div>
 
+      {nietDoorgegaan && statusKey !== 'vervangen' && (
+        <div className={`rounded-xl border px-4 py-3 text-sm ${statusKey === 'niet_geaccepteerd' ? 'border-red-200 bg-red-50 text-red-900' : 'border-gray-200 bg-gray-50 text-gray-700'}`}>
+          <div className="font-semibold">{statusKey === 'niet_geaccepteerd' ? 'Niet geaccepteerd door de klant' : 'Contract geannuleerd'}{stopEvent ? <span className="font-normal"> · {formatDate(stopEvent.created_at)}</span> : null}</div>
+          {stopReden && <div className="mt-0.5">{stopReden}</div>}
+          <div className="text-xs mt-1 opacity-80">De gekoppelde facturen worden niet verstuurd. Tekent de klant toch? Zet het contract terug open bij Acties.</div>
+        </div>
+      )}
+
       {/* Financieel overzicht bovenaan: contractwaarde, facturen, kosten en winst in één oogopslag. */}
       <ContractFacturatie
-        contractId={c.id} clientId={clientId} serviceSlug={c.service_slug ?? null} contractTitle={c.title} isSigned={!!isSigned}
+        contractId={c.id} clientId={clientId} serviceSlug={c.service_slug ?? null} contractTitle={c.title} isSigned={!!isSigned} nietDoorgegaan={nietDoorgegaan}
         expectedCount={c.expected_invoice_count ?? null} invoiceFrequency={c.invoice_frequency ?? null} expectedAmountExcl={c.expected_invoice_amount_excl ?? null}
       />
 
@@ -260,7 +274,7 @@ export default async function ContractDetailPage({ params }: { params: { id: str
 
 
           {/* Sign link — only for unsigned contracts */}
-          {!isSigned && statusKey !== 'geannuleerd' && (
+          {!isSigned && !nietDoorgegaan && (
             <>
               <div className="card-base space-y-3">
                 <h2 className="font-semibold text-sm">Ondertekeningslink</h2>
