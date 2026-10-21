@@ -63,8 +63,10 @@ function Tegel({ titel, waarde, sub, toon, actie }: { titel: string; waarde: str
   )
 }
 
-export function ContractFacturatie({ contractId, clientId, contractTitle, isSigned, expectedCount, expectedAmountExcl }: {
+export function ContractFacturatie({ contractId, clientId, contractTitle, isSigned, nietDoorgegaan = false, expectedCount, expectedAmountExcl }: {
   contractId: string; clientId: string | null; serviceSlug?: string | null; contractTitle: string; isSigned: boolean
+  /** Geannuleerd, niet geaccepteerd of vervangen: de facturen worden niet verstuurd. */
+  nietDoorgegaan?: boolean
   expectedCount?: number | null; invoiceFrequency?: string | null; expectedAmountExcl?: number | null
 }) {
   const router = useRouter()
@@ -153,6 +155,15 @@ export function ContractFacturatie({ contractId, clientId, contractTitle, isSign
           <button type="button" onClick={() => setVermindering('nieuw')} disabled={!afl || afl.waarde === null} title={afl?.waarde === null ? 'Vul eerst de contractwaarde in' : undefined} className="btn-secondary text-xs"><MinusCircle className="h-3.5 w-3.5" />Vermindering</button>
         </div>
       </div>
+
+      {/* Facturen van een niet-getekend contract staan nog niet bij "te factureren" in Facturen. */}
+      {!isSigned && (
+        <div className={`rounded-xl border px-3 py-2 text-sm ${nietDoorgegaan ? 'border-gray-200 bg-gray-50 text-gray-700' : 'border-blue-200 bg-blue-50 text-blue-900'}`}>
+          {nietDoorgegaan
+            ? 'Dit contract ging niet door. De facturen hieronder worden niet verstuurd en tellen nergens mee.'
+            : 'Nog niet getekend: de facturen hieronder staan nog niet bij Te factureren. Ze verschijnen daar zodra het contract getekend is.'}
+        </div>
+      )}
 
       {fout && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 flex items-center gap-2 flex-wrap">Het overzicht kon niet geladen worden: {fout}<button type="button" onClick={() => { setLaden(true); laad() }} className="btn-secondary text-xs ml-auto">Opnieuw proberen</button></div>}
       {!data && !fout && <div className="h-24 rounded-xl bg-gray-50 animate-pulse" />}

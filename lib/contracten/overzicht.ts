@@ -57,10 +57,10 @@ export function contractDatum(c: OverzichtContract): string | null {
   return c.signed_at || c.sent_at || c.created_at || null
 }
 
-/** Is dit contract beëindigd (verlopen, geannuleerd, vervangen of einddatum voorbij)? */
+/** Is dit contract beëindigd (verlopen, geannuleerd, niet geaccepteerd, vervangen of einddatum voorbij)? */
 export function isBeeindigd(c: OverzichtContract, vandaag = new Date().toISOString().slice(0, 10)): boolean {
   const key = canonicalStatus(c.status)
-  if (key === 'verlopen' || key === 'geannuleerd' || key === 'vervangen') return true
+  if (key === 'verlopen' || key === 'geannuleerd' || key === 'niet_geaccepteerd' || key === 'vervangen') return true
   const eind = c.end_date ? String(c.end_date).slice(0, 10) : null
   return !!eind && eind < vandaag
 }

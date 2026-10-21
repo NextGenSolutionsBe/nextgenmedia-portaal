@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { notFound, redirect } from 'next/navigation'
+import { statusInfo } from '@/lib/contract-status'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { formatDate, formatEuro, SERVICE_LABELS, daysUntil } from '@/lib/utils'
 import Link from 'next/link'
@@ -54,23 +55,9 @@ async function getClient(id: string) {
 }
 
 function ContractStatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    draft: 'bg-gray-100 text-gray-600',
-    sent: 'bg-blue-100 text-blue-700',
-    viewed: 'bg-amber-100 text-amber-700',
-    signed: 'bg-green-100 text-green-700',
-    expired: 'bg-red-100 text-red-700',
-    cancelled: 'bg-gray-100 text-gray-600',
-  }
-  const labels: Record<string, string> = {
-    draft: 'Concept', sent: 'Verstuurd', viewed: 'Bekeken',
-    signed: 'Getekend', expired: 'Verlopen', cancelled: 'Geannuleerd',
-  }
-  return (
-    <span className={`status-badge ${map[status] ?? 'bg-gray-100 text-gray-600'}`}>
-      {labels[status] ?? status}
-    </span>
-  )
+  // Zelfde labels en kleuren als de Contractenmodule (ook voor "niet geaccepteerd").
+  const s = statusInfo(status)
+  return <span className={`status-badge ${s.cls}`}>{s.label}</span>
 }
 
 export default async function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -289,7 +276,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                         </div>
                         <div className="text-xs text-gray-500 mt-0.5">
                           {slugContract
-                            ? `Contract: ${slugContract.status === 'signed' ? 'Getekend' : slugContract.status === 'sent' ? 'Verstuurd' : slugContract.status === 'draft' ? 'Concept' : slugContract.status}`
+                            ? `Contract: ${statusInfo(slugContract.status).label}`
                             : 'Geen contract'}
                         </div>
                       </div>

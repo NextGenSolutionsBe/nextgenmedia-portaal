@@ -26,6 +26,8 @@ export type ContractEvent =
   | 'manueel_getekend_ongedaan' | 'bijlage_toegevoegd' | 'bijlage_verwijderd'
   // Handmatige herinnering om te ondertekenen (MailComposer, nooit automatisch).
   | 'herinnering_verstuurd'
+  // Geannuleerd, niet geaccepteerd door de klant, of terug opengezet.
+  | 'cancelled' | 'niet_geaccepteerd' | 'heropend'
 
 export async function logContractEvent(
   admin: Admin,

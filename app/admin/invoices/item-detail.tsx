@@ -90,6 +90,15 @@ export function ItemDetail({ moment, onSluit, onGewijzigd, onBewerk, onEigenArti
             <button type="button" onClick={() => onVerwijder(moment)} className="btn-secondary text-sm text-red-600 hover:border-red-300"><Trash2 className="h-4 w-4" />Verwijderen</button>
           </div>
 
+          {(status === 'wacht_op_contract' || status === 'contract_vervallen') && (
+            <div className={`rounded-xl border p-3 text-sm flex items-start justify-between gap-3 flex-wrap ${status === 'wacht_op_contract' ? 'border-blue-200 bg-blue-50 text-blue-900' : 'border-gray-200 bg-gray-50 text-gray-700'}`}>
+              <span>{status === 'wacht_op_contract'
+                ? 'Het contract is nog niet getekend. Deze factuur komt bij Te factureren zodra het contract getekend is.'
+                : 'Het contract is geannuleerd of niet geaccepteerd. Deze factuur wordt niet verstuurd.'}</span>
+              {data.contract_id && <Link href={`/admin/contracts/${data.contract_id}`} prefetch={false} className="btn-secondary text-xs"><ExternalLink className="h-3.5 w-3.5" />Naar het contract</Link>}
+            </div>
+          )}
+
           {tab === 'te_factureren' && (
             <div className="rounded-xl border-2 border-[#166534]/30 bg-green-50/40 p-3 space-y-2">
               <div className="grid sm:grid-cols-[1fr_auto] gap-2 items-end">

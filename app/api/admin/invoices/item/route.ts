@@ -41,16 +41,22 @@ export async function GET(req: NextRequest) {
         admin.from('recurring_invoice_months').select('recurring_id, month').eq('invoice_id', sleutel.bronId).maybeSingle(),
       ])
       if (!inv) return NextResponse.json({ error: 'Item niet gevonden' }, { status: 404 })
+      // Een maand van een contractreeks met eigen artikelen volgt het contract van die reeks.
+      const reeksContract = !inv.contract_id && maand?.recurring_id
+        ? ((await admin.from('recurring_invoices').select('contract_id').eq('id', maand.recurring_id).maybeSingle()).data as { contract_id?: string | null } | null)?.contract_id ?? null
+        : null
+      const contractId = (inv.contract_id as string | null) ?? reeksContract
       const [{ data: klant }, { data: contract }] = await Promise.all([
         inv.client_id ? admin.from('clients').select(KLANT).eq('id', inv.client_id).maybeSingle() : Promise.resolve({ data: null }),
-        inv.contract_id ? admin.from('contracts').select('title').eq('id', inv.contract_id).maybeSingle() : Promise.resolve({ data: null }),
+        contractId ? admin.from('contracts').select('title, status').eq('id', contractId).maybeSingle() : Promise.resolve({ data: null }),
       ])
+      const contractStatus = (contract as { status?: string | null } | null)?.status ?? null
       const btw = Number(inv.vat_pct) || DEFAULT_VAT
       let regels: FactuurRegel[] = normaliseerRegels((lijnen ?? []).map(lijnNaarRegel), btw)
       if (regels.length === 0 && Number(inv.amount_excl) > 0) regels = [regelUitBedrag(String(inv.description ?? 'Factuur'), Number(inv.amount_excl) || 0, btw)]
       const detail: ItemDetail = {
         klant: naarKlant(klant as KlantRij | null),
-        project: (contract as { title?: string } | null)?.title ?? svc(inv.service_slug),
+        project: (inv.contract_id ? (contract as { title?: string } | null)?.title : null) ?? svc(inv.service_slug),
         titel: inv.description ?? null, type: inv.factuur_type ?? null, datum: String(inv.invoice_date).slice(0, 10),
         prestatie_van: dag(inv.prestatie_van), prestatie_tot: dag(inv.prestatie_tot), periode: inv.periode ?? null,
         betaaltermijn: Number.isFinite(Number(inv.payment_term_days)) && inv.payment_term_days !== null ? Number(inv.payment_term_days) : 30,
@@ -64,9 +70,9 @@ export async function GET(req: NextRequest) {
       const ontbrekend = ontbrekendeGegevens(detail)
       return NextResponse.json({
         id: `inv:${inv.id}`, bron: 'invoice', invoice_id: inv.id, recurring_id: maand?.recurring_id ?? null, maand: maand?.month ?? null,
-        status: bepaalStatus({ ruweStatus: ruwe, datum: detail.datum, ontbrekend: inv.client_id ? [] : ['klant'], vandaag }),
+        status: bepaalStatus({ ruweStatus: ruwe, datum: detail.datum, ontbrekend: inv.client_id ? [] : ['klant'], vandaag, contractStatus }),
         detail, ontbrekend, aandacht: aandachtspunten(detail), bijlagen: bijlagen ?? [],
-        contract_id: inv.contract_id ?? null, client_id: inv.client_id ?? null,
+        contract_id: contractId, contract_status: contractStatus, client_id: inv.client_id ?? null,
         verzonden_op: dag(inv.sent_at), verzonden_door: inv.sent_by_email ?? null, betaald_op: betaald ? dag(inv.betaald_op) : null,
         betaald_bedrag: Number(inv.betaald_bedrag) || 0, bedrag_incl: incl,
       })
@@ -83,8 +89,9 @@ export async function GET(req: NextRequest) {
     if (rij?.invoice_id) return NextResponse.json({ doorverwijzen: `inv:${rij.invoice_id}` })
     const [{ data: klant }, { data: contract }] = await Promise.all([
       rec.client_id ? admin.from('clients').select(KLANT).eq('id', rec.client_id).maybeSingle() : Promise.resolve({ data: null }),
-      rec.contract_id ? admin.from('contracts').select('title').eq('id', rec.contract_id).maybeSingle() : Promise.resolve({ data: null }),
+      rec.contract_id ? admin.from('contracts').select('title, status').eq('id', rec.contract_id).maybeSingle() : Promise.resolve({ data: null }),
     ])
+    const contractStatus = (contract as { status?: string | null } | null)?.status ?? null
     const btw = rij?.vat_pct != null ? Number(rij.vat_pct) : Number(rec.vat_pct) || DEFAULT_VAT
     // Een eigen bedrag voor deze maand gaat voor de reeksregels.
     let regels: FactuurRegel[] = rij?.amount_excl != null
@@ -103,9 +110,9 @@ export async function GET(req: NextRequest) {
     if (ruwe === 'verstuurd' && (rij?.betaald_op || rij?.status === 'betaald')) ruwe = 'betaald'
     return NextResponse.json({
       id: `rec:${rec.id}:${maand}`, bron: 'recurring', invoice_id: null, recurring_id: rec.id, maand,
-      status: bepaalStatus({ ruweStatus: ruwe, datum, ontbrekend: rec.client_id ? [] : ['klant'], vandaag }),
+      status: bepaalStatus({ ruweStatus: ruwe, datum, ontbrekend: rec.client_id ? [] : ['klant'], vandaag, contractStatus }),
       detail, ontbrekend: ontbrekendeGegevens(detail), aandacht: aandachtspunten(detail), bijlagen: [],
-      contract_id: rec.contract_id ?? null, client_id: rec.client_id ?? null,
+      contract_id: rec.contract_id ?? null, contract_status: contractStatus, client_id: rec.client_id ?? null,
       verzonden_op: dag(rij?.sent_at), verzonden_door: rij?.sent_by_email ?? null, betaald_op: ruwe === 'betaald' ? dag(rij?.betaald_op) : null,
       betaald_bedrag: 0, bedrag_incl: 0,
     })

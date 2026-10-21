@@ -3,7 +3,8 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Send, X, Loader2, Trash2, AlertTriangle } from 'lucide-react'
+import { Send, X, Loader2, Trash2, AlertTriangle, Ban, RotateCcw } from 'lucide-react'
+import { canonicalStatus, isNietDoorgegaan } from '@/lib/contract-status'
 
 type VerwijderInfo = { titel: string; klant: string | null; facturen: number; recurring: number; opdrachten: number; vesting: number; archief: number }
 
@@ -20,17 +21,24 @@ export function ContractActions({
   const [info, setInfo] = useState<VerwijderInfo | null>(null)
   const [infoLaden, setInfoLaden] = useState(false)
   const isSigned = contract.status === 'signed' || contract.status === 'getekend'
+  const key = canonicalStatus(contract.status)
+  // Nog open: niet getekend en niet geannuleerd / niet geaccepteerd / vervangen.
+  const nogOpen = !isSigned && !isNietDoorgegaan(contract.status) && key !== 'template'
+  const [stopKeuze, setStopKeuze] = useState<'cancel' | 'niet_geaccepteerd' | null>(null)
+  const [reden, setReden] = useState('')
 
-  const doAction = async (action: string) => {
+  const doAction = async (action: string, extra: Record<string, unknown> = {}, melding?: string) => {
     setLoading(true)
     try {
       const res = await fetch(`/api/admin/contracts/${contract.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, ...extra }),
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error)
+      if (melding) toast.success(melding)
+      setStopKeuze(null); setReden('')
       router.refresh()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Fout')
@@ -95,18 +103,27 @@ export function ContractActions({
           </button>
         )}
 
-        {['draft', 'sent', 'viewed'].includes(contract.status) && (
-          <button
-            disabled={loading}
-            onClick={() => { if (confirm('Contract annuleren?')) doAction('cancel') }}
-            className="btn-secondary w-full"
-          >
-            <X className="h-4 w-4" />
-            Annuleren
+        {nogOpen && (
+          <div className="grid grid-cols-2 gap-2">
+            <button disabled={loading} onClick={() => setStopKeuze('cancel')} className="btn-secondary w-full justify-center text-sm">
+              <X className="h-4 w-4" />
+              Annuleren
+            </button>
+            <button disabled={loading} onClick={() => setStopKeuze('niet_geaccepteerd')} className="btn-secondary w-full justify-center text-sm" title="De klant heeft het contract niet aanvaard of niet ondertekend">
+              <Ban className="h-4 w-4" />
+              Niet geaccepteerd
+            </button>
+          </div>
+        )}
+
+        {(key === 'geannuleerd' || key === 'niet_geaccepteerd') && (
+          <button disabled={loading} onClick={() => { if (confirm('Dit contract terug openzetten? Het krijgt de status van vóór het annuleren, en de gekoppelde facturen komen weer in de planning zodra het getekend is.')) doAction('heropenen', {}, 'Contract terug opengezet.') }} className="btn-secondary w-full">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+            Terug openzetten
           </button>
         )}
 
-        {contract.status === 'sent' || contract.status === 'viewed' ? (
+        {key === 'verzonden' || key === 'geopend' || key === 'ingevuld' ? (
           <p className="text-xs text-gray-400 text-center">
             Wachten op handtekening van klant
           </p>
@@ -123,6 +140,38 @@ export function ContractActions({
           Contract verwijderen
         </button>
       </div>
+
+      {/* Annuleren of niet geaccepteerd */}
+      {stopKeuze && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="stop-titel">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-y-auto">
+            <div className="flex items-center justify-between gap-2 p-5 border-b border-gray-100">
+              <h3 id="stop-titel" className="font-semibold text-gray-900">{stopKeuze === 'cancel' ? 'Contract annuleren' : 'Niet geaccepteerd door de klant'}</h3>
+              <button type="button" onClick={() => !loading && setStopKeuze(null)} className="text-gray-400 hover:text-black" aria-label="Sluiten"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-sm text-gray-700">
+                {stopKeuze === 'cancel'
+                  ? 'Het contract wordt niet meer getekend. De tekenlink werkt niet meer.'
+                  : 'De klant heeft het contract niet aanvaard of niet ondertekend. De tekenlink werkt niet meer.'}
+              </p>
+              <div className="text-sm text-gray-700 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2">
+                Gekoppelde facturen blijven bewaard, maar komen niet bij Te factureren en worden niet verstuurd.
+              </div>
+              <label className="block text-xs text-gray-500">Reden <span className="text-gray-400">(optioneel)</span>
+                <textarea rows={2} maxLength={1000} className="mt-0.5 w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg" placeholder={stopKeuze === 'cancel' ? 'bv. project gaat niet door' : 'bv. klant koos voor een andere partij'} value={reden} onChange={(e) => setReden(e.target.value)} />
+              </label>
+              <div className="flex gap-2">
+                <button type="button" disabled={loading} onClick={() => doAction(stopKeuze, { reden }, stopKeuze === 'cancel' ? 'Contract geannuleerd.' : 'Contract staat op niet geaccepteerd.')} className="btn-primary flex-1 justify-center">
+                  {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {stopKeuze === 'cancel' ? 'Annuleren' : 'Op niet geaccepteerd zetten'}
+                </button>
+                <button type="button" disabled={loading} onClick={() => setStopKeuze(null)} className="btn-secondary">Terug</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Bevestigingsvenster */}
       {deleteOpen && (

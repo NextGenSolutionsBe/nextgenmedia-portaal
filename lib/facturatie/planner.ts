@@ -2,7 +2,7 @@ import 'server-only'
 import { recurringActiveInMonth, billingDateFor, inclFromExcl, normalizeInvoiceStatus, shiftYM, type RecurringInvoice } from '@/lib/invoices'
 import { SERVICE_LABELS } from '@/lib/utils'
 import { leesInstellingen } from '@/lib/instellingen/laden'
-import { bepaalStatus, ymVan, momentSleutel, magVerplaatsen, verwachtOp, type Moment, type Herkomst } from './planner-model'
+import { bepaalStatus, ymVan, momentSleutel, magVerplaatsen, verwachtOp, OPEN_STATUSSEN, type Moment, type Herkomst } from './planner-model'
 
 /**
  * De ENIGE plek die facturatiemomenten samenstelt. Kalender, lijst en de
@@ -48,17 +48,21 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
   const klanten = new Map<string, Klant>(((klantRijen ?? []) as Klant[]).map((k) => [k.id, k]))
   const naam = (id: string | null) => (id ? (klanten.get(id)?.company_name ?? 'Onbekende klant') : 'Geen klant')
 
-  // Contracttitels en WAM-namen voor de gekoppelde rijen (best-effort).
+  // Contracttitels en -statussen en WAM-namen voor de gekoppelde rijen (best-effort).
+  // De status bepaalt of een contractfactuur al te factureren is (pas na ondertekening).
   const contractIds = new Set<string>()
   for (const i of (facturen ?? []) as { contract_id?: string | null }[]) if (i.contract_id) contractIds.add(i.contract_id)
   for (const r of (recurring ?? []) as { contract_id?: string | null }[]) if (r.contract_id) contractIds.add(r.contract_id)
   const contractTitel = new Map<string, string>()
+  const contractStatus = new Map<string, string | null>()
   if (contractIds.size) {
     try {
-      const { data } = await admin.from('contracts').select('id, title').in('id', [...contractIds])
-      for (const c of (data ?? []) as { id: string; title: string | null }[]) contractTitel.set(c.id, c.title ?? '')
+      const { data } = await admin.from('contracts').select('id, title, status').in('id', [...contractIds])
+      for (const c of (data ?? []) as { id: string; title: string | null; status: string | null }[]) { contractTitel.set(c.id, c.title ?? ''); contractStatus.set(c.id, c.status ?? null) }
     } catch { /* geen titels */ }
   }
+  /** Status van het contract; onbekend (verwijderd contract, fout bij laden) = geen beperking. */
+  const statusVan = (id: string | null | undefined) => (id ? contractStatus.get(id) ?? null : null)
   const wamIds = [...new Set(((termijnen ?? []) as { wam_id: string }[]).map((t) => t.wam_id))]
   const wamInfo = new Map<string, { nr: string; klant: string }>()
   if (wamIds.length) {
@@ -92,11 +96,13 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
     const betaaldBedrag = Number(i.betaald_bedrag) || 0
     const inclTotaal = Number(i.amount_incl) || 0
     if (ruwe === 'verstuurd' && (i.betaalstatus === 'betaald' || (inclTotaal > 0 && betaaldBedrag >= inclTotaal - 0.005))) ruwe = 'betaald'
-    const status = bepaalStatus({ ruweStatus: ruwe, datum, ontbrekend, vandaag })
     const maandLink = itemVanMaand.get(String(i.id))
     const reeks = maandLink ? recPerId.get(maandLink.recurring_id) : undefined
+    // Een maand van een contractreeks met eigen artikelen volgt het contract van die reeks.
+    const cStatus = statusVan((i.contract_id as string | null) ?? (reeks as { contract_id?: string | null } | undefined)?.contract_id)
+    const status = bepaalStatus({ ruweStatus: ruwe, datum, ontbrekend, vandaag, contractStatus: cStatus })
     const herkomst: Herkomst = i.contract_id ? 'contract' : kind === 'wam' ? 'wam' : maandLink ? 'recurring' : 'eenmalig'
-    const actief = status !== 'verstuurd' && status !== 'betaald' && status !== 'geannuleerd' && status !== 'gecrediteerd'
+    const actief = OPEN_STATUSSEN.includes(status)
     const maand = ymVan(datum)
     uit.push({
       id: momentSleutel('invoice', String(i.id)), bron: 'invoice', bronId: String(i.id), maand, datum,
@@ -108,6 +114,7 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
       status, ruweStatus: ruwe, herkomst, terugkerend: !!maandLink, verantwoordelijke: (i.verantwoordelijke as string | null) || verantwoordelijke,
       volledig: ontbrekend.length === 0, ontbrekend,
       contract_id: (i.contract_id as string | null) ?? null, contract_titel: i.contract_id ? (contractTitel.get(String(i.contract_id)) ?? null) : null,
+      contract_status: cStatus,
       recurring_id: maandLink?.recurring_id ?? null, invoice_id: String(i.id), wam_id: (i.wam_id as string | null) ?? null,
       schema: maandLink ? `Maand ${maandLink.month} van een terugkerende facturatie${reeks?.deleted_at ? ' · reeks stopgezet' : ''} · eigen artikelen` : null,
       opmerking: (i.note as string | null) ?? null,
@@ -148,8 +155,8 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
       let ruwe: string = rij?.status ? normalizeInvoiceStatus(rij.status) : 'te_versturen'
       // Betaald: verstuurd + betaaldatum (of een oude rij met status 'betaald').
       if (ruwe === 'verstuurd' && (rij?.betaald_op || rij?.status === 'betaald')) ruwe = 'betaald'
-      const status = bepaalStatus({ ruweStatus: ruwe, datum, ontbrekend, vandaag })
-      const actief = status !== 'verstuurd' && status !== 'betaald' && status !== 'geannuleerd'
+      const status = bepaalStatus({ ruweStatus: ruwe, datum, ontbrekend, vandaag, contractStatus: statusVan(r.contract_id) })
+      const actief = OPEN_STATUSSEN.includes(status)
       const start = (r.start_month ?? '').slice(0, 7), eind = r.end_month ? r.end_month.slice(0, 7) : null
       const dagLabel = r.invoice_day === 'first' ? 'dag 1' : r.invoice_day === 'mid' ? 'dag 15' : 'laatste dag'
       uit.push({
@@ -158,7 +165,7 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
         type: 'Maandfactuur', bedrag_excl: excl, btw_pct: btw, bedrag_incl: incl,
         status, ruweStatus: ruwe, herkomst: r.contract_id ? 'contract' : 'recurring', terugkerend: true, verantwoordelijke: r.verantwoordelijke || verantwoordelijke,
         volledig: ontbrekend.length === 0, ontbrekend,
-        contract_id: r.contract_id ?? null, contract_titel: r.contract_id ? (contractTitel.get(r.contract_id) ?? null) : null, recurring_id: r.id, invoice_id: rij?.invoice_id ?? null, wam_id: null,
+        contract_id: r.contract_id ?? null, contract_titel: r.contract_id ? (contractTitel.get(r.contract_id) ?? null) : null, contract_status: statusVan(r.contract_id), recurring_id: r.id, invoice_id: rij?.invoice_id ?? null, wam_id: null,
         schema: `Maandelijks (${dagLabel}) · ${start} → ${eind ?? 'doorlopend'}${r.deleted_at ? ' · stopgezet' : ''}`,
         opmerking: rij?.note ?? null,
         dienst: svc(r.service_slug), betaaltermijn: termijnVan(r.payment_term_days), verzonden_op: dagVan(rij?.sent_at), verzonden_door: rij?.sent_by_email ?? null,

@@ -7,6 +7,7 @@ import { logContractEvent } from '@/lib/contract-audit'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { typeVanContract } from '@/lib/contracten/types'
 import { MANUEEL, isManueelGetekend, redenNietOpGetekend, valideerOpGetekend, signedAtVoor, statusNaOngedaan, vandaagBrussel } from '@/lib/contracten/manueel-getekend'
+import { canonicalStatus } from '@/lib/contract-status'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
@@ -230,13 +231,47 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         .eq('id', id)
       if (error) throw new Error(error.message)
       try { await admin.from('contract_events').insert({ contract_id: id, event_type: 'sent' }) } catch { }
-    } else if (action === 'cancel') {
-      const { error } = await admin
-        .from('contracts')
-        .update({ status: 'cancelled' })
-        .eq('id', id)
+    } else if (action === 'cancel' || action === 'niet_geaccepteerd') {
+      // Geannuleerd (wij) of niet geaccepteerd (de klant tekende niet). De
+      // gekoppelde facturen blijven bestaan maar komen nooit bij "te factureren":
+      // dat volgt uit de contractstatus (lib/facturen/contract-stand.ts).
+      const { data: oud } = await admin.from('contracts').select('id, title, status, client_id').eq('id', id).maybeSingle()
+      if (!oud) return NextResponse.json({ error: 'Contract niet gevonden' }, { status: 404 })
+      const k = canonicalStatus(oud.status)
+      if (k === 'getekend') return NextResponse.json({ error: 'Een getekend contract annuleer je niet. Zet de looptijd op stopgezet.' }, { status: 409 })
+      const nieuw = action === 'cancel' ? 'cancelled' : 'niet_geaccepteerd'
+      if (canonicalStatus(nieuw) === k) return NextResponse.json({ error: 'Het contract staat al op deze status.' }, { status: 409 })
+      const reden = typeof body.reden === 'string' && body.reden.trim() ? body.reden.trim().slice(0, 1000) : null
+      const { error } = await admin.from('contracts').update({ status: nieuw }).eq('id', id)
       if (error) throw new Error(error.message)
-      try { await admin.from('contract_events').insert({ contract_id: id, event_type: 'cancelled' }) } catch { }
+      await logContractEvent(admin, id, action === 'cancel' ? 'cancelled' : 'niet_geaccepteerd', { actor: user.email ?? user.id, meta: { reden, vorige_status: oud.status ?? null } })
+      const m = requestMeta(req)
+      await logAudit({
+        action: action === 'cancel' ? 'contract.geannuleerd' : 'contract.niet_geaccepteerd', entityType: 'contract', entityId: id,
+        summary: `"${oud.title ?? id}" ${action === 'cancel' ? 'geannuleerd' : 'niet geaccepteerd door de klant'}${reden ? `: ${reden}` : ''}`,
+        actorUserId: user.id, actorEmail: user.email ?? null, actorRole: 'admin',
+        metadata: { reden, vorige_status: oud.status ?? null }, ip: m.ip, userAgent: m.userAgent,
+      })
+      try { revalidatePath('/admin/invoices'); if (oud.client_id) revalidatePath(`/admin/clients/${oud.client_id}`) } catch { }
+    } else if (action === 'heropenen') {
+      // Per ongeluk geannuleerd of de klant tekent toch: terug naar de status van ervoor.
+      const { data: oud } = await admin.from('contracts').select('id, title, status, sent_at, client_id').eq('id', id).maybeSingle()
+      if (!oud) return NextResponse.json({ error: 'Contract niet gevonden' }, { status: 404 })
+      const k = canonicalStatus(oud.status)
+      if (k !== 'geannuleerd' && k !== 'niet_geaccepteerd') return NextResponse.json({ error: 'Enkel een geannuleerd of niet-geaccepteerd contract kan terug opengezet worden.' }, { status: 409 })
+      const { data: ev } = await admin.from('contract_events').select('meta').eq('contract_id', id).in('event_type', ['cancelled', 'niet_geaccepteerd']).order('created_at', { ascending: false }).limit(1).maybeSingle()
+      const status = statusNaOngedaan((ev?.meta as { vorige_status?: string | null } | null)?.vorige_status, oud.sent_at)
+      const { error } = await admin.from('contracts').update({ status }).eq('id', id)
+      if (error) throw new Error(error.message)
+      await logContractEvent(admin, id, 'heropend', { actor: user.email ?? user.id, meta: { van: oud.status ?? null, status } })
+      const m = requestMeta(req)
+      await logAudit({
+        action: 'contract.heropend', entityType: 'contract', entityId: id,
+        summary: `"${oud.title ?? id}" terug opengezet (${status})`,
+        actorUserId: user.id, actorEmail: user.email ?? null, actorRole: 'admin',
+        metadata: { van: oud.status ?? null, status }, ip: m.ip, userAgent: m.userAgent,
+      })
+      try { revalidatePath('/admin/invoices'); if (oud.client_id) revalidatePath(`/admin/clients/${oud.client_id}`) } catch { }
     } else {
       return NextResponse.json({ error: 'Onbekende actie' }, { status: 400 })
     }

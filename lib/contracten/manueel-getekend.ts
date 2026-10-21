@@ -28,6 +28,7 @@ export function redenNietOpGetekend(status: string | null | undefined): string |
   const k = canonicalStatus(status)
   if (k === 'getekend') return 'Dit contract staat al op getekend.'
   if (k === 'geannuleerd') return 'Een geannuleerd contract kan niet op getekend gezet worden.'
+  if (k === 'niet_geaccepteerd') return 'Dit contract staat op niet geaccepteerd. Zet het eerst terug open.'
   if (k === 'vervangen') return 'Een vervangen contract kan niet op getekend gezet worden.'
   if (k === 'template') return 'Een template kan niet getekend worden.'
   return null

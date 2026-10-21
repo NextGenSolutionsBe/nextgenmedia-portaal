@@ -10,6 +10,7 @@ export type ContractStatusKey =
   | 'ingevuld'
   | 'getekend'
   | 'geannuleerd'
+  | 'niet_geaccepteerd'
   | 'verlopen'
   | 'vervangen'
 
@@ -23,6 +24,7 @@ const INFO: Record<ContractStatusKey, { label: string; cls: string }> = {
   ingevuld:             { label: 'Ingevuld',             cls: 'bg-amber-100 text-amber-700' },
   getekend:             { label: 'Getekend',             cls: 'bg-green-100 text-green-700' },
   geannuleerd:          { label: 'Geannuleerd',          cls: 'bg-gray-100 text-gray-500' },
+  niet_geaccepteerd:    { label: 'Niet geaccepteerd',    cls: 'bg-red-50 text-red-700' },
   verlopen:             { label: 'Verlopen',             cls: 'bg-red-100 text-red-700' },
   vervangen:            { label: 'Vervangen',            cls: 'bg-orange-100 text-orange-700' },
 }
@@ -44,6 +46,11 @@ const ALIAS: Record<string, ContractStatusKey> = {
   cancelled: 'geannuleerd',
   canceled: 'geannuleerd',
   geannuleerd: 'geannuleerd',
+  // De klant heeft het contract niet aanvaard / niet ondertekend.
+  niet_geaccepteerd: 'niet_geaccepteerd',
+  declined: 'niet_geaccepteerd',
+  rejected: 'niet_geaccepteerd',
+  geweigerd: 'niet_geaccepteerd',
   expired: 'verlopen',
   verlopen: 'verlopen',
   vervangen: 'vervangen',
@@ -70,8 +77,19 @@ export const STATUS_FILTER_OPTIONS: { value: ContractStatusKey; label: string }[
   { value: 'getekend',             label: 'Getekend' },
   { value: 'verlopen',             label: 'Verlopen' },
   { value: 'geannuleerd',          label: 'Geannuleerd' },
+  { value: 'niet_geaccepteerd',    label: 'Niet geaccepteerd' },
   { value: 'vervangen',            label: 'Vervangen' },
 ]
+
+/**
+ * Niet doorgegaan: geannuleerd, niet geaccepteerd door de klant of vervangen
+ * door een nieuwe versie. Zo'n contract wordt niet meer getekend, en de
+ * facturen die eraan hangen worden niet verstuurd.
+ */
+export function isNietDoorgegaan(status: string | null | undefined): boolean {
+  const k = canonicalStatus(status)
+  return k === 'geannuleerd' || k === 'niet_geaccepteerd' || k === 'vervangen'
+}
 
 /** Opvolging/reminders: bepaalt of een contract aandacht vereist (geen automail). */
 export type FollowUp = { needs: boolean; level: 'none' | 'warn' | 'urgent'; reason: string }
@@ -88,7 +106,7 @@ export function followUp(c: {
 
   // Verlopen → urgent.
   if (key === 'verlopen') return { needs: true, level: 'urgent', reason: 'Tekenlink verlopen' }
-  if (c.expires_at && String(c.expires_at).slice(0, 10) < new Date().toISOString().slice(0, 10) && key !== 'getekend' && key !== 'geannuleerd') {
+  if (c.expires_at && String(c.expires_at).slice(0, 10) < new Date().toISOString().slice(0, 10) && key !== 'getekend' && !isNietDoorgegaan(c.status)) {
     return { needs: true, level: 'urgent', reason: 'Tekenlink verlopen' }
   }
 
