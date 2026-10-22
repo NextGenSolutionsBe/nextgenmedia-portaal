@@ -1,5 +1,9 @@
 import 'server-only'
 import { metricoolRequest } from '@/lib/metricool'
+import {
+  PROVIDER, COMMENT_NETWERKEN, DM_NETWERKEN, parseCommentThreads, merkIdsUitGesprekken, parseGesprekken, merkIdsUitThreads,
+  type InboxResultaat,
+} from '@/lib/metricool-inbox-parse'
 
 /**
  * Metricool-inbox: comments en DM's ophalen, en erop antwoorden.
@@ -42,143 +46,48 @@ import { metricoolRequest } from '@/lib/metricool'
  *   antwoorden: comment → objectId = de id van de comment waarop je reageert;
  *               dm → conversationId = conversation.id, recipient = participant-id van de klant.
  *
- * ── LIVE BEVESTIGD VIA /api/admin/metricool/diag?inbox=1 ─────────────────────
- *  (zie het blok DIAGNOSE hieronder; aangevuld na de eerste diagnose op het merk)
+ * ── LIVE BEVESTIGD (22 okt 2026, /api/cron/community-diag op Straight-Line Leadership,
+ *    Inner Stance en PB - Kristof Cuppens; Instagram, Facebook, LinkedIn) ────────
+ *  - Antwoord is { data: [...] } ZONDER page-veld: comments geven tot 50 threads,
+ *    gesprekken tot 25. Er is dus geen paginering; de sync om de 10 minuten vangt
+ *    nieuwe berichten op omdat de lijst recentste eerst geeft.
+ *  - Elke thread en elk gesprek heeft `self` = het account van het merk
+ *    (bv. IG "17841455442435509", LinkedIn "urn:li:organization:…"). Dat is de
+ *    merkherkenning; element.owner.id (de post-eigenaar) is gelijk en blijft reserve.
+ *  - root.owner en comment.owner zijn een id-string; de naam staat in participants[]
+ *    (IG: name = gebruikersnaam; FB: volledige naam; LinkedIn: naam).
+ *  - Datums met offset zonder dubbelpunt: "2026-10-22T06:41:31+0200" → isoVan().
+ *  - Comment-reacties hangen één niveau diep: comment.parentId = root.id.
+ *    Antwoord van het merk gezien als comment met owner = self en parentId = root.id.
+ *  - LinkedIn: root kan door het merk zelf geplaatst zijn (link in eerste comment);
+ *    die slaan we over. GET /conversations met LINKEDIN → 500 "provider invalid"
+ *    (DM's dus niet voor LinkedIn, zoals voorzien).
+ *  - INSTAGRAMBUSINESS geeft lege lijsten en missingScopes; INSTAGRAM is de juiste provider.
+ *  - FB-comment-id's zien eruit als "<post>_<comment>"; IG-id's zijn numeriek.
+ *  - DM-berichten kunnen text "" hebben (enkel een bijlage).
+ *  - Authorizations: post-comments → { data: { missingScopes: [] } };
+ *    conversations → { data: { missingScopes: [], allowAccessToMessages: true } }.
+ *
+ *  NIET LIVE BEVESTIGD: het POST-antwoord. Veldnamen komen uit de spec
+ *  (NewCommentRequest / NewMessageRequest), maar de spec zegt niet of objectId de
+ *  post of de comment is. Wij sturen objectId = de bovenste comment van de thread
+ *  (parent_extern_id, of de comment zelf als die bovenaan staat): zo antwoordt het
+ *  merk ook in de live data (parentId = root.id), en Instagram kent maar één niveau.
+ *  Het eerste echte antwoord moet dit bevestigen (zie docs/community-management.md).
  */
 
-// ── Netwerken ────────────────────────────────────────────────────────────────
-
-/** Onze netwerknamen → Metricool `provider`. */
-export const PROVIDER: Record<string, string> = {
-  instagram: 'INSTAGRAM', facebook: 'FACEBOOK', tiktok: 'TIKTOKBUSINESS', linkedin: 'LINKEDIN', youtube: 'YOUTUBE', x: 'TWITTER',
-}
-/** Comments: Instagram, Facebook, TikTok (business), LinkedIn (bedrijfspagina), YouTube. */
-export const COMMENT_NETWERKEN = ['instagram', 'facebook', 'tiktok', 'linkedin', 'youtube'] as const
-/** DM's: Instagram, Facebook, X. */
-export const DM_NETWERKEN = ['instagram', 'facebook', 'x'] as const
-export const ALLE_NETWERKEN = ['instagram', 'facebook', 'tiktok', 'linkedin', 'youtube', 'x'] as const
-export const NETWERK_LABEL: Record<string, string> = {
-  instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', linkedin: 'LinkedIn', youtube: 'YouTube', x: 'X',
-}
-
-export type InboxBericht = {
-  bron: 'comment' | 'dm'
-  netwerk: string
-  extern_id: string
-  parent_extern_id: string | null
-  post_extern_id: string | null
-  post_tekst: string | null
-  post_url: string | null
-  auteur_naam: string | null
-  auteur_handle: string | null
-  tekst: string
-  ontvangen_op: string | null
-  /** Voor een DM: de participant-id van de klant (recipient bij antwoorden). */
-  ontvanger_id: string | null
-  raw: unknown
-}
-export type InboxResultaat = {
-  berichten: InboxBericht[]
-  /** Berichten waarop het merk al antwoordde (bv. manueel in Metricool). */
-  alBeantwoord: string[]
-}
-
-// ── Parsen (puur; getest in tests/metricool-inbox.test.ts) ─────────────────────
-
-type Participant = { id?: string; name?: string; email?: string }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Ruw = any
-
-const tekstVan = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v))
-const idVan = (v: unknown) => (v == null || v === '' ? null : String(v))
-function naamVan(participants: Participant[] | undefined, id: string | null): { naam: string | null; handle: string | null } {
-  if (!id) return { naam: null, handle: null }
-  const p = (participants ?? []).find((x) => String(x?.id) === id)
-  return { naam: p?.name ?? null, handle: p?.email || id }
-}
-
-/** Comment-threads → berichten. Reacties van het merk worden niet opgeslagen, maar markeren hun parent als beantwoord. */
-export function parseCommentThreads(threads: Ruw[], netwerk: string): InboxResultaat {
-  const berichten: InboxBericht[] = []
-  const alBeantwoord = new Set<string>()
-  for (const t of Array.isArray(threads) ? threads : []) {
-    const root = t?.root ?? {}
-    const post = root?.element ?? {}
-    const merkId = idVan(post?.owner?.id)
-    const isMerk = (owner: unknown) => !!merkId && idVan(owner) === merkId
-    const postInfo = { post_extern_id: idVan(post?.id), post_tekst: tekstVan(post?.text) || null, post_url: idVan(post?.link) }
-    const rootId = idVan(root?.id)
-    if (rootId && !isMerk(root?.owner)) {
-      const a = naamVan(t?.participants, idVan(root?.owner))
-      berichten.push({
-        bron: 'comment', netwerk, extern_id: rootId, parent_extern_id: null, ...postInfo,
-        auteur_naam: a.naam, auteur_handle: a.handle, tekst: tekstVan(root?.text), ontvangen_op: idVan(root?.creationDate),
-        ontvanger_id: null, raw: { ...t, root: { ...root, comments: undefined } },
-      })
-    }
-    for (const c of Array.isArray(root?.comments) ? root.comments : []) {
-      const cid = idVan(c?.id)
-      if (!cid) continue
-      const parent = idVan(c?.parentId) ?? rootId
-      if (isMerk(c?.owner)) { if (parent) alBeantwoord.add(parent); continue }
-      const a = naamVan(t?.participants, idVan(c?.owner))
-      berichten.push({
-        bron: 'comment', netwerk, extern_id: cid, parent_extern_id: parent, ...postInfo,
-        auteur_naam: a.naam, auteur_handle: a.handle, tekst: tekstVan(c?.text), ontvangen_op: idVan(c?.creationDate),
-        ontvanger_id: null, raw: c,
-      })
-    }
-  }
-  return { berichten, alBeantwoord: [...alBeantwoord] }
-}
-
-/**
- * Wie is het merk in de gesprekken? Het merk zit in élk gesprek; een klant
- * (bijna) nooit in meer dan één. Met één gesprek kunnen we het niet zeker weten:
- * dan geven we de ids terug die we al kennen (uit de comments van hetzelfde merk).
- */
-export function merkIdsUitGesprekken(conversations: Ruw[], bekend: string[] = []): Set<string> {
-  const uit = new Set(bekend.filter(Boolean))
-  const lijst = Array.isArray(conversations) ? conversations : []
-  if (lijst.length >= 2) {
-    const telling = new Map<string, number>()
-    for (const c of lijst) for (const id of new Set((c?.participants ?? []).map((p: Participant) => idVan(p?.id)).filter(Boolean) as string[])) telling.set(id, (telling.get(id) ?? 0) + 1)
-    for (const [id, n] of telling) if (n === lijst.length) uit.add(id)
-  }
-  return uit
-}
-
-/** Gesprekken → berichten (enkel inkomende). Een bericht met een latere reactie van het merk is beantwoord. */
-export function parseGesprekken(conversations: Ruw[], netwerk: string, merkIds: Set<string>): InboxResultaat {
-  const berichten: InboxBericht[] = []
-  const alBeantwoord = new Set<string>()
-  for (const c of Array.isArray(conversations) ? conversations : []) {
-    const convId = idVan(c?.id)
-    if (!convId) continue
-    const msgs = (Array.isArray(c?.messages) ? c.messages : [])
-      .filter((m: Ruw) => idVan(m?.id) && m?.status !== 'DELETED')
-      .sort((a: Ruw, b: Ruw) => String(a?.publicationDateTime ?? '').localeCompare(String(b?.publicationDateTime ?? '')))
-    let laatsteMerk: string | null = null
-    for (const m of msgs) if (merkIds.has(String(m?.from))) laatsteMerk = String(m?.publicationDateTime ?? '')
-    for (const m of msgs) {
-      const van = idVan(m?.from)
-      if (van && merkIds.has(van)) continue
-      const id = String(m.id)
-      const a = naamVan(c?.participants, van)
-      berichten.push({
-        bron: 'dm', netwerk, extern_id: id, parent_extern_id: convId, post_extern_id: null, post_tekst: null, post_url: null,
-        auteur_naam: a.naam, auteur_handle: a.handle, tekst: tekstVan(m?.text), ontvangen_op: idVan(m?.publicationDateTime),
-        ontvanger_id: van, raw: m,
-      })
-      if (laatsteMerk && String(m?.publicationDateTime ?? '') <= laatsteMerk) alBeantwoord.add(id)
-    }
-  }
-  return { berichten, alBeantwoord: [...alBeantwoord] }
-}
+export {
+  PROVIDER, COMMENT_NETWERKEN, DM_NETWERKEN, ALLE_NETWERKEN, NETWERK_LABEL,
+  parseCommentThreads, merkIdsUitGesprekken, parseGesprekken, merkIdsUitThreads,
+} from '@/lib/metricool-inbox-parse'
+export type { InboxBericht, InboxResultaat } from '@/lib/metricool-inbox-parse'
 
 // ── Ophalen ──────────────────────────────────────────────────────────────────
 
 const MAX_PAGINAS = 5
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Ruw = any
 
 async function lijst(pad: string, blogId: string, provider: string): Promise<Ruw[]> {
   const uit: Ruw[] = []
@@ -210,11 +119,6 @@ export async function haalGesprekken(blogId: string, netwerk: string, bekendeMer
   const convs = await lijst('/v2/inbox/conversations', blogId, provider)
   const merk = merkIdsUitGesprekken(convs, bekendeMerkIds)
   return { ...parseGesprekken(convs, netwerk, merk), merkIds: [...merk] }
-}
-
-/** De merk-id(s) uit comment-threads (de eigenaar van de post). */
-export function merkIdsUitThreads(threads: Ruw[]): string[] {
-  return [...new Set((Array.isArray(threads) ? threads : []).map((t) => idVan(t?.root?.element?.owner?.id)).filter(Boolean) as string[])]
 }
 
 // ── Antwoorden (enkel na bevestiging door een mens) ─────────────────────────────

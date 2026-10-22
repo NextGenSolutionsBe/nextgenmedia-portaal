@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
   Info, Camera, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
-  MailCheck, PhoneCall, FolderUp, Handshake, Plug, Settings, ClipboardPen, Contact, Timer, UserCircle,
+  MailCheck, PhoneCall, FolderUp, Handshake, Plug, Settings, ClipboardPen, Contact, Timer, UserCircle, MessagesSquare,
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
@@ -72,6 +72,8 @@ const SECTIONS: NavSection[] = [
       { label: 'Opdrachten', href: '/admin/opdrachten', icon: ClipboardList, module: 'opdrachten' },
       // Intake- en algemene formulieren die klanten via een link invullen.
       { label: 'Formulieren', href: '/admin/formulieren', icon: ClipboardPen, module: 'formulieren' },
+      // Comments en DM's uit Metricool; de badge telt wat wij moeten beantwoorden.
+      { label: 'Community', href: '/admin/community', icon: MessagesSquare, module: 'community', badge: 'community' },
     ],
   },
   {
@@ -205,10 +207,10 @@ function NavItem({
     >
       <Icon className="h-4 w-4 shrink-0" />
       <span className="flex-1">{item.label}</span>
-      {/* Rood telbolletje: iets is te laat en vraagt aandacht. */}
+      {/* Rood telbolletje: iets vraagt aandacht. */}
       {badge > 0 && (
         <span
-          title={`${badge} ${badge === 1 ? 'opdracht is' : 'opdrachten zijn'} te laat`}
+          title={`${badge} ${badge === 1 ? 'item vraagt' : 'items vragen'} aandacht`}
           className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
           {badge > 99 ? '99+' : badge}
         </span>

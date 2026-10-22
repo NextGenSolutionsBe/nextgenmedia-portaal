@@ -22,6 +22,7 @@ import { ClientBlogs } from './client-blogs'
 import { FEATURES } from '@/lib/features'
 import { ClientCms } from './client-cms'
 import { ClientFormulieren } from './client-formulieren'
+import { ClientCommunity } from './client-community'
 
 async function getClient(id: string) {
   const admin = createAdminSupabaseClient()
@@ -392,6 +393,9 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
               </div>
             )
           })()}
+
+          {/* Community management: schakelaar, kanalen en afspraken (verborgen zonder recht) */}
+          <ClientCommunity clientId={id} />
 
           {/* Edit form */}
           <ClientEditForm

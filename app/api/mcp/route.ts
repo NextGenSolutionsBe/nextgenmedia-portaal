@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { behandelBericht } from '@/lib/mcp/content.mjs'
 import { RESOURCE_PAD, basisUrl, bearerUit, tokenNaarToegang } from '@/lib/mcp/oauth'
+import { verstuurBericht, type Actor } from '@/lib/community/versturen'
+import { STANDAARDREGELS } from '@/lib/community/standaardregels'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -101,10 +103,22 @@ export async function POST(req: Request) {
   }
 
   const binnen = Array.isArray(bericht) ? bericht : [bericht]
+  // Community management: wie de connector koppelde, zodat indelen en versturen
+  // op naam in audit_log komen (niet als "mcp-connector"). Enkel deze route
+  // geeft die context mee; zonder context bestaan de community-tools niet.
+  const actor = await actorVan(toegang.userId)
+  const ctx = {
+    community: {
+      actor,
+      standaardregels: STANDAARDREGELS,
+      verstuur: (a: { berichtId: string; tekst: string; bevestigdDoor: string }) =>
+        verstuurBericht({ ...a, actor, via: 'mcp' }),
+    },
+  }
   const uit = []
   for (const b of binnen) {
     // true = schrijven toegestaan. Zie de toelichting bovenaan dit bestand.
-    const antwoord = await behandelBericht(supabase, b, true)
+    const antwoord = await behandelBericht(supabase, b, true, ctx)
     if (antwoord) uit.push(antwoord)
   }
 
@@ -113,6 +127,17 @@ export async function POST(req: Request) {
   return NextResponse.json(Array.isArray(bericht) ? uit : uit[0], {
     headers: { ...CORS, 'Cache-Control': 'no-store' },
   })
+}
+
+/** Naam en e-mail van wie de connector koppelde (auth-gebruiker + personeelsfiche). */
+async function actorVan(userId: string): Promise<Actor> {
+  const db = supabase()
+  const [{ data: gebruiker }, { data: staff }] = await Promise.all([
+    db.auth.admin.getUserById(userId).catch(() => ({ data: null })),
+    db.from('staff_members').select('name').eq('auth_user_id', userId).maybeSingle(),
+  ])
+  const email = gebruiker?.user?.email ?? null
+  return { userId, email, naam: (staff as { name?: string | null } | null)?.name ?? email, rol: 'admin' }
 }
 
 /**

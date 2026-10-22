@@ -32,6 +32,8 @@ export const ADMIN_MODULES: AdminModule[] = [
   { key: 'uploads',     label: 'Klantuploads',         prefixes: ['/admin/uploads', '/api/admin/uploads'] },
   { key: 'opdrachten',  label: 'Opdrachten (klanten)', prefixes: ['/admin/opdrachten', '/api/admin/opdrachten'] },
   { key: 'formulieren', label: 'Formulieren',          prefixes: ['/admin/formulieren', '/api/admin/formulieren'] },
+  // Community management: comments en DM's uit Metricool, beantwoord door een mens.
+  { key: 'community',   label: 'Community management', prefixes: ['/admin/community', '/api/admin/community'] },
   // Personeel: dossiers, planning, uren en personeelskosten. De medewerker zelf
   // werkt in /team (eigen omgeving, eigen API /api/team), nooit in /admin.
   { key: 'personeel',   label: 'Personeel',            prefixes: ['/admin/personeel', '/api/admin/personeel'] },
@@ -127,7 +129,7 @@ export function canSeeModule(perms: string[] | null | undefined, key: string | n
 
 export type StaffPreset = { key: string; label: string; modules: string[] }
 export const STAFF_PRESETS: StaffPreset[] = [
-  { key: 'content', label: 'Content/Social', modules: ['clients', 'content', 'metricool', 'blogs', 'info'] },
+  { key: 'content', label: 'Content/Social', modules: ['clients', 'content', 'metricool', 'blogs', 'community', 'info'] },
   { key: 'sales', label: 'Sales/Klanten', modules: ['clients', 'contracts', 'invoices', 'info'] },
   { key: 'operations', label: 'Operations', modules: ['clients', 'content', 'blogs', 'assignments', 'partners', 'info'] },
   { key: 'no_finance', label: 'Alles behalve financieel', modules: ['clients', 'contracts', 'content', 'blogs', 'partners', 'assignments', 'email', 'info'] },
