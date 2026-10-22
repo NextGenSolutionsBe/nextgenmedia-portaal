@@ -91,7 +91,10 @@ async function syncKanaal(admin: Admin, k: Kanaal): Promise<{ nieuw: number; bea
     }
   }
 
-  const { nieuw, beantwoordExtern } = await bewaar(admin, k, berichten, alBeantwoord)
+  // Ook een fout bij het bewaren blijft bij dit kanaal; de andere kanalen gaan door.
+  let nieuw = 0, beantwoordExtern = 0
+  try { ({ nieuw, beantwoordExtern } = await bewaar(admin, k, berichten, alBeantwoord)) }
+  catch (e) { fouten.push(`bewaren: ${e instanceof Error ? e.message : 'fout'}`) }
   const fout = fouten.length ? fouten.join(' · ').slice(0, 1000) : null
   await admin.from('community_kanalen').update({ laatst_gesynct: new Date().toISOString(), laatste_fout: fout }).eq('id', k.id)
   return { nieuw, beantwoordExtern, fout }
@@ -127,7 +130,8 @@ async function bewaar(admin: Admin, k: Kanaal, berichten: InboxBericht[], alBean
         client_id: k.client_id, kanaal_id: k.id, bron: b.bron, netwerk: b.netwerk, extern_id: b.extern_id, parent_extern_id: b.parent_extern_id,
         post_extern_id: b.post_extern_id, post_tekst: b.post_tekst, post_url: b.post_url, auteur_naam: b.auteur_naam, auteur_handle: b.auteur_handle,
         tekst: b.tekst, ontvangen_op: b.ontvangen_op, antwoord_mogelijk_tot: antwoordMogelijkTot(b.bron, b.netwerk, b.ontvangen_op), raw: b.raw,
-        ...(extern ? { status: 'verstuurd', verstuurd_door: EXTERN_VERSTUURD, verstuurd_op: nu } : {}),
+        // Elke rij dezelfde kolommen: bij een bulk-insert vult PostgREST ontbrekende kolommen met NULL (geen default).
+        status: extern ? 'verstuurd' : 'nieuw', verstuurd_door: extern ? EXTERN_VERSTUURD : null, verstuurd_op: extern ? nu : null,
       })
       continue
     }
