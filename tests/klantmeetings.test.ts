@@ -7,6 +7,7 @@ import {
   valideerMeeting, kiesHerinnering, magNogVersturen, herinneringsMail, googleEventId, clickupMarker,
   clickupTaakNaam, clickupOmschrijving, genodigden, googleOmschrijving, stapAgenda, stapMeet, stapClickup,
   stapHerinnering, wijzigingen, normaliseerPersonen, isEmail, wanneer, uur, dag, duurMinuten,
+  naamZonderKlant, isTijdzone, tijdzoneLabel, zoneNaarIso, lijktOp, stapUitnodiging, maandagVan, plusDagen,
 } from '../lib/meetings/model'
 import { buildEmailHtml } from '../lib/email-html'
 
@@ -49,7 +50,7 @@ test('2. Zomer- en wintertijd: 25 okt 2026 schuift de klok een uur terug', () =>
 test('3. Geen of ongeldig klantadres blokkeert het inplannen', () => {
   const geen = valideerMeeting({ ...basis, klant_ontvangers: [] }, NU)
   assert.equal(geen.ok, false)
-  if (!geen.ok) assert.match(geen.fout, /geen e-mailadres voor de klant/)
+  if (!geen.ok) assert.match(geen.fout, /minstens één genodigde/)
   const slecht = valideerMeeting({ ...basis, klant_ontvangers: [{ naam: 'X', email: 'rob@voorbeeld' }] }, NU)
   assert.equal(slecht.ok, false)
   const slechtDeel = valideerMeeting({ ...basis, deelnemers: [{ naam: null, email: 'iemand at nergens' }] }, NU)
@@ -190,6 +191,72 @@ test('15. Wijzigingen: enkel bijwerken wat veranderd is', () => {
   const ander = valideerMeeting({ ...basis, klant_ontvangers: [{ naam: 'Lies', email: 'lies@x.be' }] }, NU)
   assert.ok(ander.ok)
   if (ander.ok) { const w = wijzigingen(oud, ander.waarde); assert.equal(w.ontvangers, true); assert.equal(w.genodigden, true); assert.equal(w.tijd, false) }
+})
+
+test('17. Zonder klant: een naam en een los e-mailadres volstaan', () => {
+  const r = valideerMeeting({ titel: 'Kennismaking', dag: '2026-10-22', uur: '09:00', duur_minuten: 30, klant_ontvangers: [{ naam: 'Jan Peeters', email: 'jan@gmail.com' }] }, NU)
+  assert.ok(r.ok)
+  if (r.ok) { assert.equal(r.waarde.tijdzone, 'Europe/Brussels'); assert.equal(naamZonderKlant(r.waarde.klant_ontvangers), 'Jan Peeters') }
+  assert.equal(naamZonderKlant([{ naam: null, email: 'x@y.be' }]), 'x@y.be')
+})
+
+test('18. Eindtijd in plaats van duur', () => {
+  const r = valideerMeeting({ ...basis, duur_minuten: undefined, eind_uur: '15:30' }, NU)
+  assert.ok(r.ok)
+  if (r.ok) { assert.equal(r.waarde.duur, 90); assert.equal(r.waarde.endsAt, '2026-10-22T13:30:00.000Z') }
+  const omgekeerd = valideerMeeting({ ...basis, eind_uur: '13:00' }, NU)
+  assert.equal(omgekeerd.ok, false)
+  if (!omgekeerd.ok) assert.match(omgekeerd.fout, /eindtijd/)
+})
+
+test('19. Andere tijdzone: omrekening en weergave in die zone', () => {
+  const r = valideerMeeting({ ...basis, tijdzone: 'America/New_York', dag: '2026-11-02', uur: '10:00' }, NU)
+  assert.ok(r.ok)
+  if (!r.ok) return
+  assert.equal(r.waarde.startsAt, '2026-11-02T15:00:00.000Z') // EST = UTC-5 (VS al op wintertijd)
+  assert.equal(uur(r.waarde.startsAt, 'America/New_York'), '10:00')
+  assert.equal(uur(r.waarde.startsAt), '16:00') // Brussel
+  const m = herinneringsMail({ klant_naam: 'X', titel: 'Call', starts_at: r.waarde.startsAt, meet_url: null, beschrijving: null, organisator_naam: null, ontvangers: [{ naam: 'Ann', email: 'a@b.com' }], tijdzone: 'America/New_York' })
+  assert.match(m.tekst, /om 10:00 \(tijd New York \(America\/New_York\)\)/)
+  assert.equal(valideerMeeting({ ...basis, tijdzone: 'Mars/Olympus' }, NU).ok, false)
+  assert.equal(isTijdzone('Europe/Brussels'), true)
+  assert.equal(tijdzoneLabel('Europe/Brussels'), 'Belgische tijd')
+})
+
+test('20. Een uur dat niet bestaat (lente, 2:30) wordt geweigerd', () => {
+  const r = valideerMeeting({ ...basis, dag: '2027-03-28', uur: '02:30' }, NU)
+  assert.equal(r.ok, false)
+  if (!r.ok) assert.match(r.fout, /bestaat niet/)
+  assert.equal(zoneNaarIso('2027-03-28', '03:30'), '2027-03-28T01:30:00.000Z')
+})
+
+test('21. Herhaalde aanvraag herkennen: zelfde start, titel en genodigde', () => {
+  const r = valideerMeeting(basis, NU)
+  assert.ok(r.ok)
+  if (!r.ok) return
+  const bestaand = { titel: 'contentplanning q1 ', starts_at: r.waarde.startsAt, klant_ontvangers: [{ naam: null, email: 'ROB@voorbeeld.be' }] }
+  assert.equal(lijktOp(bestaand, r.waarde), true)
+  assert.equal(lijktOp({ ...bestaand, titel: 'Iets anders' }, r.waarde), false)
+  assert.equal(lijktOp({ ...bestaand, klant_ontvangers: [{ naam: null, email: 'ander@x.be' }] }, r.waarde), false)
+})
+
+test('22. Uitnodiging en ClickUp-koppelingen', () => {
+  const m = { status: 'ingepland', google_status: 'ok', meet_url: 'x', clickup_status: 'wacht', herinnering_aan: true, uitnodiging_status: 'verzonden' }
+  assert.equal(stapUitnodiging(m).label, 'Uitnodiging verstuurd')
+  assert.equal(stapUitnodiging({ ...m, google_status: 'fout', uitnodiging_status: 'mislukt' }).toon, 'fout')
+  assert.equal(stapClickup(m).label, 'ClickUp wacht op agenda')
+  const o = clickupOmschrijving({ id: 'abc', klant_naam: 'Jan', titel: 'Call', starts_at: '2026-10-27T13:00:00.000Z', ends_at: '2026-10-27T13:30:00.000Z', meet_url: null, beschrijving: null, organisator_naam: null, klant_ontvangers: [{ naam: 'Jan', email: 'jan@x.be' }], deelnemers: [] },
+    'https://app.nextgenmedia.be', { project: 'Website ERA', clickupItemId: '86abc' })
+  assert.match(o, /Klant: geen klant gekoppeld/)
+  assert.match(o, /Project: Website ERA/)
+  assert.match(o, /Gekoppeld ClickUp-item: https:\/\/app\.clickup\.com\/t\/86abc/)
+})
+
+test('23. Weekberekening', () => {
+  assert.equal(maandagVan('2026-10-23'), '2026-10-19')
+  assert.equal(maandagVan('2026-10-19'), '2026-10-19')
+  assert.equal(maandagVan('2026-10-25'), '2026-10-19')
+  assert.equal(plusDagen('2026-10-19', 7), '2026-10-26')
 })
 
 test('16. Weergave: datum en duur', () => {

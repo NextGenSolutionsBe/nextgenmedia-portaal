@@ -4,20 +4,22 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { sendEmail, baseUrl, EMAIL_FROM } from '@/lib/email'
 import { buildEmailHtml } from '@/lib/email-html'
 import {
-  maakMeetingEvent, haalMeetingEvent, werkMeetingEventBij, annuleerMeetingEvent, type MeetingEvent,
+  maakMeetingEvent, haalMeetingEvent, werkMeetingEventBij, annuleerMeetingEvent, controleerAgenda, AgendaNietGekoppeld, type MeetingEvent,
 } from '@/lib/sales/google-calendar'
 import {
-  clickupConfigured, maakAfspraakTaak, werkAfspraakTaakBij, annuleerAfspraakTaak, isTaskGone, zoekTaakMetMarker,
+  clickupConfigured, maakAfspraakTaak, werkAfspraakTaakBij, annuleerAfspraakTaak, isTaskGone, zoekTaakMetMarker, lijstToegang,
 } from '@/lib/clickup'
 import {
   googleEventId, googleOmschrijving, genodigden, clickupMarker, clickupTaakNaam, clickupOmschrijving,
-  kiesHerinnering, magNogVersturen, herinneringsMail, MEETING_TIJDZONE, type Persoon,
+  kiesHerinnering, magNogVersturen, herinneringsMail, STANDAARD_TIJDZONE, type Persoon, type Koppelingen,
 } from '@/lib/meetings/model'
 
 /**
- * Klantmeetings — de stappen naast de databank.
+ * Meetingplanner — de stappen naast de databank. Hergebruikt de Google-koppeling
+ * (sales_calendar_connections) en de ClickUp-werkwijze van de afsprakentool.
  *
  *  1. Google Calendar: afspraak met Meet-link, vaste event-id (geen dubbels).
+ *     Google verstuurt zelf de uitnodiging naar de genodigden.
  *  2. ClickUp: taak in de lijst van het merk, toegewezen aan de eigenaar van de
  *     agenda — dezelfde werkwijze als de verkoopafspraken (lib/sales/afspraak-sync).
  *  3. Herinnering: één geplande mail per meeting; de scheduler (pg_cron →
@@ -39,6 +41,8 @@ export type MeetingRij = {
   clickup_task_id: string | null; clickup_list_id: string | null; clickup_status: string; clickup_fout: string | null; clickup_gestart_op: string | null
   created_by: string | null; created_by_email: string | null; created_at: string; updated_at: string
   geannuleerd_op: string | null; geannuleerd_door: string | null
+  project_id?: string | null; clickup_item_id?: string | null
+  uitnodiging_status?: string | null; uitnodiging_op?: string | null; uitnodiging_naar?: string[] | null
 }
 
 export type HerinneringRij = {
@@ -59,10 +63,17 @@ export function veiligeFout(e: unknown): string {
 
 const nu = () => new Date().toISOString()
 
+/** Veerkrachtig: een kolom die (nog) niet gemigreerd is, valt weg en we proberen opnieuw. */
 async function bewaar(admin: Admin, id: string, velden: Partial<MeetingRij>): Promise<MeetingRij> {
-  const { data, error } = await admin.from('klant_meetings').update({ ...velden, updated_at: nu() }).eq('id', id).select('*').single()
-  if (error) throw new Error(error.message)
-  return data as MeetingRij
+  const rij: Record<string, unknown> = { ...velden, updated_at: nu() }
+  for (let i = 0; i < 6; i++) {
+    const { data, error } = await admin.from('klant_meetings').update(rij).eq('id', id).select('*').single()
+    if (!error) return data as MeetingRij
+    const kol = String(error.message || '').match(/Could not find the '([^']+)' column/)?.[1]
+    if (kol && kol in rij) { delete rij[kol]; continue }
+    throw new Error(error.message)
+  }
+  throw new Error('Meeting niet bewaard')
 }
 
 export async function leesMeeting(admin: Admin, id: string): Promise<MeetingRij | null> {
@@ -77,7 +88,7 @@ const eventVelden = (m: MeetingRij) => ({
   description: googleOmschrijving(m),
   startsAt: new Date(m.starts_at).toISOString(),
   endsAt: new Date(m.ends_at).toISOString(),
-  timezone: m.tijdzone || MEETING_TIJDZONE,
+  timezone: m.tijdzone || STANDAARD_TIJDZONE,
   attendees: genodigden(m),
 })
 
@@ -122,12 +133,36 @@ export async function stapGoogle(admin: Admin, m: MeetingRij, opts: { bijwerken?
       })
     }
     ev = await zorgVoorMeet(m.agenda_id, ev, m.id, herhaling)
+    // Google stuurde de uitnodiging bij het aanmaken; na een wijziging een update.
+    const nieuweUitnodiging = m.uitnodiging_status !== 'verzonden' || !!opts.bijwerken
     return bewaar(admin, m.id, {
       google_event_id: ev.eventId, google_calendar_id: ev.calendarId, meet_url: ev.meetUrl ?? m.meet_url,
       google_status: 'ok', google_fout: null,
+      uitnodiging_status: 'verzonden',
+      ...(nieuweUitnodiging ? { uitnodiging_op: nu(), uitnodiging_naar: genodigden(m).map((g) => g.email) } : {}),
     })
   } catch (e) {
-    return bewaar(admin, m.id, { google_status: 'fout', google_fout: veiligeFout(e) })
+    return bewaar(admin, m.id, {
+      google_status: 'fout', google_fout: veiligeFout(e),
+      ...(m.uitnodiging_status === 'verzonden' ? {} : { uitnodiging_status: 'mislukt' }),
+    })
+  }
+}
+
+/**
+ * Na een mislukte eerste poging: staat de afspraak er toch (onduidelijke
+ * afloop)? 'ja' = alsnog gelukt, 'nee' = zeker niet aangemaakt, 'onbekend' =
+ * Google niet te bereiken. Zelfde vaste event-id, dus nooit een tweede afspraak.
+ */
+export async function bestaatGoogleAfspraak(admin: Admin, m: MeetingRij): Promise<'ja' | 'nee' | 'onbekend'> {
+  if (!m.agenda_id) return 'nee'
+  try {
+    const { data } = await admin.from('sales_calendar_connections').select('calendar_id').eq('id', m.agenda_id).maybeSingle()
+    const ev = await haalMeetingEvent(m.agenda_id, m.google_calendar_id || (data?.calendar_id as string | null) || 'primary', googleEventId(m.id))
+    return ev && !ev.geannuleerd ? 'ja' : 'nee'
+  } catch (e) {
+    // Zonder geldige koppeling kan er ook niets aangemaakt zijn.
+    return e instanceof AgendaNietGekoppeld ? 'nee' : 'onbekend'
   }
 }
 
@@ -148,9 +183,22 @@ async function clickupDoel(admin: Admin, agendaId: string | null): Promise<{ lis
   return { listId: pipe?.clickup_list_id ?? null, assigneeId }
 }
 
-const taakVelden = (m: MeetingRij) => ({
+/** Klant en project bij naam, voor de taakomschrijving. */
+async function koppelingenVoor(admin: Admin, m: MeetingRij): Promise<Koppelingen> {
+  const [klant, project] = await Promise.all([
+    m.client_id ? admin.from('clients').select('company_name, contact_name').eq('id', m.client_id).maybeSingle() : Promise.resolve({ data: null }),
+    m.project_id ? admin.from('opdrachten').select('titel').eq('id', m.project_id).maybeSingle() : Promise.resolve({ data: null }),
+  ]) as [{ data: { company_name?: string | null; contact_name?: string | null } | null }, { data: { titel?: string | null } | null }]
+  return {
+    klant: klant.data ? (klant.data.company_name || klant.data.contact_name || null) : null,
+    project: project.data?.titel ?? null,
+    clickupItemId: m.clickup_item_id ?? null,
+  }
+}
+
+const taakVelden = (m: MeetingRij, k: Koppelingen) => ({
   naam: clickupTaakNaam(m),
-  omschrijving: clickupOmschrijving(m, baseUrl()),
+  omschrijving: clickupOmschrijving(m, baseUrl(), k),
   startMs: new Date(m.starts_at).getTime(),
   eindMs: new Date(m.ends_at).getTime(),
 })
@@ -165,10 +213,11 @@ const CLICKUP_CLAIM_MS = 2 * 60_000
 export async function stapClickup(admin: Admin, m: MeetingRij): Promise<MeetingRij> {
   if (m.status === 'geannuleerd') return m
   if (!clickupConfigured()) return bewaar(admin, m.id, { clickup_status: 'fout', clickup_fout: 'ClickUp is niet ingesteld (CLICKUP_API_KEY ontbreekt).' })
+  const k = await koppelingenVoor(admin, m)
 
   if (m.clickup_task_id) {
     try {
-      await werkAfspraakTaakBij(m.clickup_task_id, taakVelden(m))
+      await werkAfspraakTaakBij(m.clickup_task_id, taakVelden(m, k))
       return bewaar(admin, m.id, { clickup_status: 'ok', clickup_fout: null })
     } catch (e) {
       if (!isTaskGone(e)) return bewaar(admin, m.id, { clickup_status: 'fout', clickup_fout: veiligeFout(e) })
@@ -194,8 +243,8 @@ export async function stapClickup(admin: Admin, m: MeetingRij): Promise<MeetingR
   try {
     let taskId: string | null = null
     if (vorigeStart) taskId = await zoekTaakMetMarker(doel.listId, clickupMarker(m.id), new Date(vorigeStart).getTime())
-    if (taskId) await werkAfspraakTaakBij(taskId, taakVelden(m))
-    else taskId = await maakAfspraakTaak(doel.listId, { ...taakVelden(m), assigneeId: doel.assigneeId })
+    if (taskId) await werkAfspraakTaakBij(taskId, taakVelden(m, k))
+    else taskId = await maakAfspraakTaak(doel.listId, { ...taakVelden(m, k), assigneeId: doel.assigneeId })
     return bewaar(admin, m.id, { clickup_task_id: taskId, clickup_status: 'ok', clickup_fout: null })
   } catch (e) {
     return bewaar(admin, m.id, { clickup_status: 'fout', clickup_fout: veiligeFout(e) })
@@ -242,7 +291,7 @@ export async function laatsteHerinnering(admin: Admin, meetingId: string): Promi
 export function bouwHerinnering(m: MeetingRij, ontvangers: Persoon[]) {
   const mail = herinneringsMail({
     klant_naam: m.klant_naam, titel: m.titel, starts_at: m.starts_at, meet_url: m.meet_url,
-    beschrijving: m.beschrijving, organisator_naam: m.organisator_naam, ontvangers,
+    beschrijving: m.beschrijving, organisator_naam: m.organisator_naam, ontvangers, tijdzone: m.tijdzone,
   })
   return { ...mail, html: buildEmailHtml({ bodyText: mail.tekst, ctaText: mail.ctaTekst, ctaLink: mail.ctaLink }) }
 }
@@ -397,3 +446,75 @@ export async function annuleerClickup(admin: Admin, m: MeetingRij): Promise<Meet
 }
 
 export { bewaar as bewaarMeeting }
+
+// ── Koppelingen controleren (zonder iets te versturen) ───────────────────────
+
+export type KoppelingCheck = { onderdeel: string; ok: boolean; melding: string }
+
+/**
+ * Werken de bestaande koppelingen echt? Google: token vernieuwen en de agenda
+ * lezen. ClickUp: de lijst van het merk bereiken. Resend: sleutel aanwezig en
+ * aanvaard. Er wordt niets aangemaakt of verstuurd, en er komt nooit een
+ * sleutel of token in de uitkomst.
+ */
+export async function controleerKoppelingen(admin: Admin, agendaId: string | null): Promise<KoppelingCheck[]> {
+  const uit: KoppelingCheck[] = []
+  if (agendaId) {
+    const r = await controleerAgenda(agendaId).catch((e) => ({ ok: false as const, fout: veiligeFout(e) }))
+    uit.push(r.ok ? { onderdeel: 'Google Agenda', ok: true, melding: `Bereikbaar: ${r.naam}${r.schrijven ? '' : ' (geen schrijfrechten!)'}` } : { onderdeel: 'Google Agenda', ok: false, melding: r.fout })
+    if (r.ok && !r.schrijven) uit[uit.length - 1].ok = false
+  } else uit.push({ onderdeel: 'Google Agenda', ok: false, melding: 'Geen agenda gekozen.' })
+
+  if (!clickupConfigured()) uit.push({ onderdeel: 'ClickUp', ok: false, melding: 'CLICKUP_API_KEY ontbreekt.' })
+  else {
+    const doel = await clickupDoel(admin, agendaId)
+    if (!doel.listId) uit.push({ onderdeel: 'ClickUp', ok: false, melding: 'Geen ClickUp-lijst ingesteld voor dit merk.' })
+    else {
+      const t = await lijstToegang(doel.listId)
+      uit.push({ onderdeel: 'ClickUp', ok: t === 'ok', melding: t === 'ok' ? `Lijst ${doel.listId} bereikbaar${doel.assigneeId ? ', toewijzing aan de eigenaar van de agenda' : ', zonder toewijzing'}` : t === 'weg' ? `Lijst ${doel.listId} niet (meer) bereikbaar met de sleutel.` : 'ClickUp tijdelijk niet bereikbaar.' })
+    }
+  }
+
+  const sleutel = process.env.RESEND_API_KEY
+  if (!sleutel) uit.push({ onderdeel: 'Herinneringsmail (Resend)', ok: false, melding: 'RESEND_API_KEY ontbreekt.' })
+  else {
+    try {
+      const res = await fetch('https://api.resend.com/domains', { headers: { Authorization: `Bearer ${sleutel}` } })
+      const j = await res.json().catch(() => ({})) as { data?: { name: string; status: string }[]; name?: string; message?: string }
+      if (res.ok) {
+        const domeinen = (j.data ?? []).map((d) => `${d.name} (${d.status})`).join(', ')
+        const geverifieerd = (j.data ?? []).some((d) => d.status === 'verified')
+        uit.push({ onderdeel: 'Herinneringsmail (Resend)', ok: geverifieerd, melding: domeinen ? `Domeinen: ${domeinen}` : 'Geen domeinen gevonden.' })
+      } else if (res.status === 401 && /restricted/i.test(`${j.name ?? ''} ${j.message ?? ''}`)) {
+        uit.push({ onderdeel: 'Herinneringsmail (Resend)', ok: true, melding: 'Sleutel aanvaard (mag enkel versturen; domeinen niet op te vragen).' })
+      } else {
+        uit.push({ onderdeel: 'Herinneringsmail (Resend)', ok: false, melding: veiligeFout(j.message ?? `Resend antwoordde ${res.status}`) })
+      }
+    } catch (e) {
+      uit.push({ onderdeel: 'Herinneringsmail (Resend)', ok: false, melding: veiligeFout(e) })
+    }
+  }
+  return uit
+}
+
+/**
+ * Echte schrijftest op de agenda: een afspraak zonder genodigden mét Meet-link
+ * aanmaken en meteen stil weer verwijderen. Niemand krijgt een uitnodiging.
+ * Enkel voor de beveiligde diagnose (scheduler-geheim).
+ */
+export async function testAfspraak(agendaId: string): Promise<{ ok: boolean; meet: boolean; melding: string }> {
+  const id = `ngmtest${randomUUID().replace(/-/g, '')}`
+  const start = new Date(Date.now() + 30 * 86400000)
+  try {
+    const ev = await maakMeetingEvent(agendaId, {
+      eventId: id, meetRequestId: id, summary: 'Test NextGenMedia-app (wordt meteen verwijderd)', description: 'Automatische controle van de koppeling.',
+      startsAt: start.toISOString(), endsAt: new Date(start.getTime() + 15 * 60000).toISOString(), timezone: STANDAARD_TIJDZONE, attendees: [],
+    })
+    let meet = ev
+    if (!meet.meetUrl) { await new Promise((r) => setTimeout(r, 2000)); meet = (await haalMeetingEvent(agendaId, ev.calendarId, ev.eventId)) ?? ev }
+    await annuleerMeetingEvent(agendaId, ev.calendarId, ev.eventId, false)
+    return { ok: true, meet: !!meet.meetUrl && /^https:\/\/meet\.google\.com\//.test(meet.meetUrl), melding: meet.meetUrl ? 'Afspraak met Meet-link aangemaakt en weer verwijderd.' : 'Afspraak aangemaakt en verwijderd, maar Google gaf geen Meet-link.' }
+  } catch (e) {
+    return { ok: false, meet: false, melding: veiligeFout(e) }
+  }
+}

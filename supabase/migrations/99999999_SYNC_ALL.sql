@@ -6099,3 +6099,19 @@ DO $$ BEGIN
     $cmd$);
   END IF;
 END $$;
+
+-- ── Meetingplanner (23 okt 2026) ────────────────────────────────────────────
+-- Meetings zonder klant (client_id was al optioneel), optionele koppeling aan
+-- een project (opdracht) of ClickUp-item, en de uitnodiging die Google
+-- verstuurt als aparte, zichtbare stap. Additief; geen bestaande data gewijzigd.
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS project_id uuid;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS clickup_item_id text;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS uitnodiging_status text NOT NULL DEFAULT 'wacht';
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS uitnodiging_op timestamptz;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS uitnodiging_naar jsonb NOT NULL DEFAULT '[]'::jsonb;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_meetings_project_fk')
+     AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'opdrachten') THEN
+    ALTER TABLE public.klant_meetings ADD CONSTRAINT klant_meetings_project_fk FOREIGN KEY (project_id) REFERENCES public.opdrachten(id) ON DELETE SET NULL;
+  END IF;
+END $$;

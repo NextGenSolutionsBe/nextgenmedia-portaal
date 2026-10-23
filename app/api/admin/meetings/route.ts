@@ -3,17 +3,21 @@ import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { magIk } from '@/lib/instellingen/laden'
 import { safeMessage } from '@/lib/api-error'
 import { logAudit, requestMeta } from '@/lib/audit'
-import { valideerMeeting } from '@/lib/meetings/model'
-import { stapGoogle, stapClickup, planHerinnering, type MeetingRij, type HerinneringRij } from '@/lib/meetings/server'
+import { clickupTaakIdUit } from '@/lib/clickup'
+import { valideerMeeting, naamZonderKlant, lijktOp } from '@/lib/meetings/model'
+import {
+  stapGoogle, stapClickup, planHerinnering, bestaatGoogleAfspraak, controleerKoppelingen, type MeetingRij, type HerinneringRij,
+} from '@/lib/meetings/server'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 /**
- * Klantmeetings.
- *  GET            → meetings met hun laatste herinnering
- *  GET ?opties=1  → klanten, contactpersonen en agenda's voor het planscherm
- *  POST           → meeting inplannen (Google + Meet, ClickUp, herinnering)
+ * Meetingplanner.
+ *  GET                       → meetings met hun laatste herinnering
+ *  GET ?opties=1             → klanten, contactpersonen, projecten en agenda's voor het planscherm
+ *  GET ?koppelingen=<agenda> → werken Google, ClickUp en Resend? (leest enkel)
+ *  POST                      → meeting inplannen (Google + Meet + uitnodiging, ClickUp, herinnering)
  * Toegang: module 'meetings' (middleware per HTTP-methode én hier nog eens).
  * Tokens en sleutels verlaten de server nooit.
  */
@@ -28,10 +32,16 @@ export async function GET(req: NextRequest) {
     if (!persoon) return NextResponse.json({ error: 'Geen toegang tot klantmeetings' }, { status: 403 })
     const admin = createAdminSupabaseClient()
 
+    const koppelAgenda = req.nextUrl.searchParams.get('koppelingen')
+    if (koppelAgenda !== null) {
+      return NextResponse.json({ checks: await controleerKoppelingen(admin, UUID.test(koppelAgenda) ? koppelAgenda : null) })
+    }
+
     if (req.nextUrl.searchParams.get('opties')) {
-      const [{ data: klanten }, { data: contacten }, { data: agendas }, { data: pipes }] = await Promise.all([
+      const [{ data: klanten }, { data: contacten }, { data: projecten }, { data: agendas }, { data: pipes }] = await Promise.all([
         admin.from('clients').select('id, company_name, contact_name, email').is('archived_at', null).order('company_name').limit(2000),
         admin.from('client_users').select('client_id, name, email').eq('active', true).limit(5000),
+        admin.from('opdrachten').select('id, titel, client_id, klant_vrij, status').order('created_at', { ascending: false }).limit(500),
         admin.from('sales_calendar_connections').select('id, name, status, active, provider').eq('active', true).order('name'),
         admin.from('sales_pipelines').select('key, default_calendar_id'),
       ])
@@ -39,6 +49,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({
         klanten: klanten ?? [],
         contacten: contacten ?? [],
+        projecten: ((projecten ?? []) as { id: string; titel: string; client_id: string | null; klant_vrij: string | null; status: string | null }[])
+          .filter((p) => p.status !== 'geannuleerd'),
         agendas: ((agendas ?? []) as { id: string; name: string; status: string; provider: string }[])
           .filter((a) => a.provider === 'google')
           .map((a) => ({ id: a.id, naam: a.name, gekoppeld: a.status === 'connected' })),
@@ -51,7 +63,7 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    const { data, error } = await admin.from('klant_meetings').select('*').order('starts_at', { ascending: true }).limit(500)
+    const { data, error } = await admin.from('klant_meetings').select('*').order('starts_at', { ascending: true }).limit(1000)
     if (error) throw new Error(error.message)
     const meetings = (data ?? []) as MeetingRij[]
     const herinneringen: Record<string, HerinneringRij> = {}
@@ -71,7 +83,7 @@ export async function POST(req: NextRequest) {
     const user = await requireStaff()
     if (!user) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
     const persoon = await magIk('meetings', 'toevoegen')
-    if (!persoon) return NextResponse.json({ error: 'Je mag geen klantmeetings inplannen' }, { status: 403 })
+    if (!persoon) return NextResponse.json({ error: 'Je mag geen meetings inplannen' }, { status: 403 })
     const b = await req.json().catch(() => ({})) as Record<string, unknown>
     const admin = createAdminSupabaseClient()
 
@@ -82,39 +94,87 @@ export async function POST(req: NextRequest) {
     const { data: bestaand } = await admin.from('klant_meetings').select('*').eq('aanvraag_sleutel', sleutel).maybeSingle()
     if (bestaand) return NextResponse.json({ meeting: bestaand, herhaald: true })
 
-    const clientId = String(b.client_id ?? '')
-    if (!UUID.test(clientId)) return NextResponse.json({ error: 'Kies een klant.' }, { status: 400 })
-    const { data: klant } = await admin.from('clients').select('id, company_name, contact_name').eq('id', clientId).maybeSingle()
-    if (!klant) return NextResponse.json({ error: 'Klant niet gevonden.' }, { status: 404 })
-
-    const agendaId = String(b.agenda_id ?? '')
-    if (!UUID.test(agendaId)) return NextResponse.json({ error: 'Kies de agenda waarin de meeting komt.' }, { status: 400 })
-    const { data: agenda } = await admin.from('sales_calendar_connections').select('id, name, status, active, signature_email').eq('id', agendaId).maybeSingle()
-    if (!agenda || agenda.active === false) return NextResponse.json({ error: 'Deze agenda bestaat niet (meer).' }, { status: 400 })
-    if (agenda.status !== 'connected') return NextResponse.json({ error: `De Google-koppeling van "${agenda.name}" is verlopen. Koppel ze opnieuw via Verkoop → Agenda.` }, { status: 400 })
-
     const v = valideerMeeting(b)
     if (!v.ok) return NextResponse.json({ error: v.fout }, { status: 400 })
     const w = v.waarde
-    const organisator = String(b.organisator_naam ?? '').trim().slice(0, 120) || String(agenda.name ?? '').split(/\s+[—-]\s+/)[0] || null
 
-    const { data: rij, error } = await admin.from('klant_meetings').insert({
-      aanvraag_sleutel: sleutel, client_id: klant.id, klant_naam: klant.company_name || klant.contact_name || 'Klant',
-      titel: w.titel, beschrijving: w.beschrijving, starts_at: w.startsAt, ends_at: w.endsAt, tijdzone: 'Europe/Brussels',
+    // Klant is optioneel; een los e-mailadres volstaat.
+    let klantNaam = naamZonderKlant(w.klant_ontvangers)
+    let clientId: string | null = null
+    if (b.client_id) {
+      if (!UUID.test(String(b.client_id))) return NextResponse.json({ error: 'Ongeldige klant.' }, { status: 400 })
+      const { data: klant } = await admin.from('clients').select('id, company_name, contact_name').eq('id', String(b.client_id)).maybeSingle()
+      if (!klant) return NextResponse.json({ error: 'Klant niet gevonden.' }, { status: 404 })
+      clientId = klant.id
+      klantNaam = klant.company_name || klant.contact_name || klantNaam
+    }
+    let projectId: string | null = null
+    if (b.project_id) {
+      if (!UUID.test(String(b.project_id))) return NextResponse.json({ error: 'Ongeldig project.' }, { status: 400 })
+      const { data: project } = await admin.from('opdrachten').select('id').eq('id', String(b.project_id)).maybeSingle()
+      if (!project) return NextResponse.json({ error: 'Project niet gevonden.' }, { status: 404 })
+      projectId = project.id
+    }
+    let clickupItemId: string | null = null
+    if (String(b.clickup_item ?? '').trim()) {
+      clickupItemId = clickupTaakIdUit(b.clickup_item)
+      if (!clickupItemId) return NextResponse.json({ error: 'Geen geldig ClickUp-item. Plak de link of het taak-ID.' }, { status: 400 })
+    }
+
+    const agendaId = String(b.agenda_id ?? '')
+    if (!UUID.test(agendaId)) return NextResponse.json({ error: 'Kies de Google-agenda waarin de meeting komt.' }, { status: 400 })
+    const { data: agenda } = await admin.from('sales_calendar_connections').select('id, name, status, active, signature_email').eq('id', agendaId).maybeSingle()
+    if (!agenda || agenda.active === false) return NextResponse.json({ error: 'Deze agenda bestaat niet (meer).' }, { status: 400 })
+    if (agenda.status !== 'connected') return NextResponse.json({ error: `De Google-koppeling van "${agenda.name}" is verlopen. Koppel ze opnieuw via Verkoop → Agenda. Er is niets ingepland.` }, { status: 400 })
+
+    // Herhaalde aanvraag na herladen (nieuwe sleutel)? Eerst kijken of ze al bestaat.
+    if (b.toch_inplannen !== true) {
+      const { data: zelfdeStart } = await admin.from('klant_meetings').select('*').eq('status', 'ingepland').eq('starts_at', w.startsAt)
+      const dubbel = ((zelfdeStart ?? []) as MeetingRij[]).find((m) => lijktOp(m, w))
+      if (dubbel) return NextResponse.json({ error: 'Deze meeting staat al ingepland (zelfde titel, tijd en genodigde).', bestaand: dubbel }, { status: 409 })
+    }
+
+    const organisator = String(b.organisator_naam ?? '').trim().slice(0, 120) || String(agenda.name ?? '').split(/\s+[—-]\s+/)[0] || null
+    const rij: Record<string, unknown> = {
+      aanvraag_sleutel: sleutel, client_id: clientId, klant_naam: klantNaam, project_id: projectId, clickup_item_id: clickupItemId,
+      titel: w.titel, beschrijving: w.beschrijving, starts_at: w.startsAt, ends_at: w.endsAt, tijdzone: w.tijdzone,
       agenda_id: agenda.id, organisator_naam: organisator, organisator_email: agenda.signature_email || null,
       klant_ontvangers: w.klant_ontvangers, deelnemers: w.deelnemers, herinnering_aan: w.herinnering_aan,
       created_by: user.id, created_by_email: persoon.email,
-    }).select('*').single()
-    if (error) {
-      if (/duplicate|unique|23505/i.test(error.message)) {
+    }
+    let ins: { data: unknown; error: { message: string } | null } = { data: null, error: null }
+    for (let i = 0; i < 6; i++) {
+      ins = await admin.from('klant_meetings').insert(rij).select('*').single()
+      const kol = ins.error?.message.match(/Could not find the '([^']+)' column/)?.[1]
+      if (kol && kol in rij) { delete rij[kol]; continue }
+      break
+    }
+    if (ins.error) {
+      if (/duplicate|unique|23505/i.test(ins.error.message)) {
         const { data: dubbel } = await admin.from('klant_meetings').select('*').eq('aanvraag_sleutel', sleutel).maybeSingle()
         if (dubbel) return NextResponse.json({ meeting: dubbel, herhaald: true })
       }
-      throw new Error(error.message)
+      throw new Error(ins.error.message)
     }
 
-    let m = rij as MeetingRij
+    let m = ins.data as MeetingRij
     m = await stapGoogle(admin, m)
+    if (m.google_status !== 'ok') {
+      // Zoals de afsprakentool: zonder Google-afspraak is de meeting niet ingepland.
+      const staat = await bestaatGoogleAfspraak(admin, m)
+      if (staat === 'ja') m = await stapGoogle(admin, m)
+      if (m.google_status !== 'ok') {
+        const reden = m.google_fout ?? 'onbekende fout'
+        if (staat === 'nee') {
+          await admin.from('klant_meetings').delete().eq('id', m.id)
+          return NextResponse.json({ error: `De meeting is niet ingepland: ${reden} Er is geen uitnodiging verstuurd.` }, { status: 502 })
+        }
+        return NextResponse.json({
+          error: `Onduidelijk of Google de afspraak aanmaakte (${reden}). De meeting staat bij Komend met "Agenda mislukt"; probeer daar opnieuw. Er komt nooit een tweede afspraak.`,
+          meeting: m,
+        }, { status: 502 })
+      }
+    }
     m = await stapClickup(admin, m)
     let herinnering: HerinneringRij | null = null
     let herinneringFout: string | null = null
@@ -124,7 +184,7 @@ export async function POST(req: NextRequest) {
     await logAudit({
       action: 'meeting.ingepland', entityType: 'klant_meeting', entityId: m.id, actorUserId: user.id, actorEmail: persoon.email,
       summary: `${m.klant_naam}: ${m.titel}`, ip, userAgent,
-      metadata: { starts_at: m.starts_at, google: m.google_status, clickup: m.clickup_status, herinnering: herinnering?.gepland_voor ?? null },
+      metadata: { starts_at: m.starts_at, tijdzone: m.tijdzone, klant: !!clientId, google: m.google_status, clickup: m.clickup_status, herinnering: herinnering?.gepland_voor ?? null },
     })
     return NextResponse.json({ meeting: { ...m, herinnering }, herinneringFout })
   } catch (err) {

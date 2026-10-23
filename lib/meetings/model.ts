@@ -1,19 +1,93 @@
-// Klantmeetings — pure logica (client-safe, testbaar). Server en scherm
-// gebruiken dezelfde regels: validatie, tijden in Europe/Brussels, het
-// herinneringsmoment, de inhoud van de herinneringsmail en van de ClickUp-taak.
+// Meetingplanner — pure logica (client-safe, testbaar). Server en scherm
+// gebruiken dezelfde regels: validatie, tijden in de tijdzone van de meeting
+// (standaard Europe/Brussels), het herinneringsmoment, de inhoud van de
+// herinneringsmail en van de ClickUp-taak.
+//
+// Een meeting hoeft niet aan een klant te hangen: wie je uitnodigt, is gewoon
+// een naam en een e-mailadres. "Genodigden" (klant_ontvangers) krijgen de
+// uitnodiging én de herinnering; "extra deelnemers" (deelnemers) enkel de
+// uitnodiging.
 
-import { brusselNaarIso, dagBrussel, uurBrussel, isDag, isUur, TIJDZONE } from '@/lib/personeel/tijd'
+import { isDag, isUur } from '@/lib/personeel/tijd'
 
-export const MEETING_TIJDZONE = TIJDZONE
+export const STANDAARD_TIJDZONE = 'Europe/Brussels'
+/** @deprecated gebruik STANDAARD_TIJDZONE */
+export const MEETING_TIJDZONE = STANDAARD_TIJDZONE
 export const TIJDZONE_LABEL = 'Belgische tijd (Europe/Brussels)'
 export const DUUR_OPTIES = [15, 30, 45, 60, 90, 120]
 export const MAX_DUUR_MIN = 8 * 60
 export const MAX_PERSONEN = 20
 
+/** Gangbare keuzes; elke geldige IANA-zone wordt aanvaard. */
+export const TIJDZONE_OPTIES: { key: string; label: string }[] = [
+  { key: 'Europe/Brussels', label: 'Brussel (België)' },
+  { key: 'Europe/Amsterdam', label: 'Amsterdam' },
+  { key: 'Europe/Paris', label: 'Parijs' },
+  { key: 'Europe/London', label: 'Londen' },
+  { key: 'Europe/Madrid', label: 'Madrid' },
+  { key: 'Europe/Lisbon', label: 'Lissabon' },
+  { key: 'Europe/Berlin', label: 'Berlijn' },
+  { key: 'Europe/Istanbul', label: 'Istanbul' },
+  { key: 'Asia/Dubai', label: 'Dubai' },
+  { key: 'America/New_York', label: 'New York' },
+  { key: 'America/Los_Angeles', label: 'Los Angeles' },
+  { key: 'UTC', label: 'UTC' },
+]
+
 export type Persoon = { naam: string | null; email: string }
 
 const EMAIL_RE = /^[^\s@,;<>()]+@[^\s@,;<>()]+\.[^\s@,;<>()]{2,}$/
 export const isEmail = (s: unknown): boolean => typeof s === 'string' && EMAIL_RE.test(s.trim())
+
+// ── Tijdzones ────────────────────────────────────────────────────────────────
+
+export function isTijdzone(tz: unknown): tz is string {
+  if (typeof tz !== 'string' || !tz.trim()) return false
+  try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return true } catch { return false }
+}
+const zone = (tz?: string | null) => (tz && isTijdzone(tz) ? tz : STANDAARD_TIJDZONE)
+
+/** "Belgische tijd" voor Brussel, anders de naam van de zone. */
+export function tijdzoneLabel(tz?: string | null): string {
+  const z = zone(tz)
+  if (z === STANDAARD_TIJDZONE) return 'Belgische tijd'
+  const optie = TIJDZONE_OPTIES.find((o) => o.key === z)
+  return optie ? `tijd ${optie.label} (${z})` : z
+}
+
+/** Verschil tussen de zone en UTC op dat moment, in minuten. */
+function offsetMinuten(utcMs: number, tz: string): number {
+  const delen = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date(utcMs))
+  const w = (t: string) => Number(delen.find((p) => p.type === t)?.value)
+  const lokaal = Date.UTC(w('year'), w('month') - 1, w('day'), w('hour') % 24, w('minute'))
+  return Math.round((lokaal - utcMs) / 60000)
+}
+
+/** Een muurkloktijd (dag + 'HH:MM') in een zone als ISO-tijdstip (UTC). Zomer- en wintertijd inbegrepen. */
+export function zoneNaarIso(d: string, u: string, tz: string = STANDAARD_TIJDZONE): string {
+  const [j, m, dd] = d.split('-').map(Number)
+  const [h, mi] = u.split(':').map(Number)
+  const gok = Date.UTC(j, m - 1, dd, h, mi)
+  let t = gok - offsetMinuten(gok, tz) * 60000
+  t = gok - offsetMinuten(t, tz) * 60000
+  return new Date(t).toISOString()
+}
+
+export const dag = (iso: string, tz?: string | null): string =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: zone(tz), year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso))
+export const uur = (iso: string, tz?: string | null): string =>
+  new Intl.DateTimeFormat('nl-BE', { timeZone: zone(tz), hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso))
+export function datumLang(iso: string, tz?: string | null): string {
+  return new Intl.DateTimeFormat('nl-BE', { timeZone: zone(tz), weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(iso))
+}
+export function datumKort(iso: string, tz?: string | null): string {
+  return new Intl.DateTimeFormat('nl-BE', { timeZone: zone(tz), weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(iso))
+}
+/** "dinsdag 27 oktober 2026 om 14:00" */
+export const wanneer = (iso: string, tz?: string | null): string => `${datumLang(iso, tz)} om ${uur(iso, tz)}`
+export const duurMinuten = (startsAt: string, endsAt: string): number => Math.round((new Date(endsAt).getTime() - new Date(startsAt).getTime()) / 60000)
+
+// ── Validatie ────────────────────────────────────────────────────────────────
 
 /** Lijst van personen opschonen: trimmen, e-mail in kleine letters, dubbels weg. Ongeldige blijven staan (de validatie meldt ze). */
 export function normaliseerPersonen(v: unknown): Persoon[] {
@@ -31,46 +105,61 @@ export function normaliseerPersonen(v: unknown): Persoon[] {
 }
 
 export type MeetingInvoer = {
-  titel?: unknown; beschrijving?: unknown; dag?: unknown; uur?: unknown; duur_minuten?: unknown
+  titel?: unknown; beschrijving?: unknown; dag?: unknown; uur?: unknown; duur_minuten?: unknown; eind_uur?: unknown; tijdzone?: unknown
   klant_ontvangers?: unknown; deelnemers?: unknown; herinnering_aan?: unknown
 }
 export type GeldigeMeeting = {
-  titel: string; beschrijving: string | null; startsAt: string; endsAt: string; duur: number
+  titel: string; beschrijving: string | null; startsAt: string; endsAt: string; duur: number; tijdzone: string
   klant_ontvangers: Persoon[]; deelnemers: Persoon[]; herinnering_aan: boolean
 }
 
 /**
- * Controle vóór er iets naar Google, ClickUp of de mailprovider gaat. Een
- * klantontvanger met een geldig e-mailadres is verplicht: die krijgt de
- * uitnodiging en de herinnering.
+ * Controle vóór er iets naar Google, ClickUp of de mailprovider gaat. Minstens
+ * één genodigde met een geldig e-mailadres is verplicht: die krijgt de
+ * uitnodiging en de herinnering. Duur of eindtijd, één van beide volstaat.
  */
 export function valideerMeeting(b: MeetingInvoer, nu: Date = new Date()): { ok: true; waarde: GeldigeMeeting } | { ok: false; fout: string } {
   const titel = String(b.titel ?? '').trim().slice(0, 200)
   if (!titel) return { ok: false, fout: 'Geef de meeting een titel.' }
+  const tijdzone = b.tijdzone === undefined || b.tijdzone === null || b.tijdzone === '' ? STANDAARD_TIJDZONE : String(b.tijdzone)
+  if (!isTijdzone(tijdzone)) return { ok: false, fout: 'Kies een geldige tijdzone.' }
   if (!isDag(b.dag)) return { ok: false, fout: 'Kies een geldige datum.' }
   if (!isUur(b.uur)) return { ok: false, fout: 'Kies een geldige starttijd (uu:mm).' }
-  const duur = Math.round(Number(b.duur_minuten))
-  if (!Number.isFinite(duur) || duur < 5 || duur > MAX_DUUR_MIN) return { ok: false, fout: `De duur ligt tussen 5 minuten en ${MAX_DUUR_MIN / 60} uur.` }
-  const startsAt = brusselNaarIso(b.dag, b.uur)
+  const startsAt = zoneNaarIso(b.dag, b.uur, tijdzone)
+  // Bestaat dit uur wel? Bij de overgang naar zomertijd valt er een uur weg.
+  if (uur(startsAt, tijdzone) !== b.uur) return { ok: false, fout: 'Dit tijdstip bestaat niet op die dag (overgang naar zomertijd). Kies een ander uur.' }
   if (new Date(startsAt).getTime() <= nu.getTime()) return { ok: false, fout: 'De starttijd ligt in het verleden.' }
+
+  let duur: number
+  if (b.eind_uur !== undefined && b.eind_uur !== null && b.eind_uur !== '') {
+    if (!isUur(b.eind_uur)) return { ok: false, fout: 'Kies een geldige eindtijd (uu:mm).' }
+    duur = Math.round((new Date(zoneNaarIso(b.dag, b.eind_uur, tijdzone)).getTime() - new Date(startsAt).getTime()) / 60000)
+    if (duur <= 0) return { ok: false, fout: 'De eindtijd ligt vóór of op de starttijd.' }
+  } else {
+    duur = Math.round(Number(b.duur_minuten))
+  }
+  if (!Number.isFinite(duur) || duur < 5 || duur > MAX_DUUR_MIN) return { ok: false, fout: `De duur ligt tussen 5 minuten en ${MAX_DUUR_MIN / 60} uur.` }
   const endsAt = new Date(new Date(startsAt).getTime() + duur * 60000).toISOString()
 
   const klant = normaliseerPersonen(b.klant_ontvangers)
-  if (!klant.length) return { ok: false, fout: 'Er is geen e-mailadres voor de klant. Vul het adres in dat de uitnodiging en de herinnering moet krijgen.' }
+  if (!klant.length) return { ok: false, fout: 'Vul minstens één genodigde met een e-mailadres in. Die krijgt de uitnodiging en de herinnering.' }
   const slechtKlant = klant.find((p) => !isEmail(p.email))
   if (slechtKlant) return { ok: false, fout: `"${slechtKlant.email}" is geen geldig e-mailadres.` }
   const klantSet = new Set(klant.map((p) => p.email))
   const deelnemers = normaliseerPersonen(b.deelnemers).filter((p) => !klantSet.has(p.email))
   const slechtDeel = deelnemers.find((p) => !isEmail(p.email))
-  if (slechtDeel) return { ok: false, fout: `"${slechtDeel.email}" (deelnemer) is geen geldig e-mailadres.` }
+  if (slechtDeel) return { ok: false, fout: `"${slechtDeel.email}" (extra deelnemer) is geen geldig e-mailadres.` }
   if (klant.length + deelnemers.length > MAX_PERSONEN) return { ok: false, fout: `Maximaal ${MAX_PERSONEN} genodigden per meeting.` }
 
   const beschrijving = String(b.beschrijving ?? '').trim().slice(0, 5000)
   return {
     ok: true,
-    waarde: { titel, beschrijving: beschrijving || null, startsAt, endsAt, duur, klant_ontvangers: klant, deelnemers, herinnering_aan: b.herinnering_aan !== false },
+    waarde: { titel, beschrijving: beschrijving || null, startsAt, endsAt, duur, tijdzone, klant_ontvangers: klant, deelnemers, herinnering_aan: b.herinnering_aan !== false },
   }
 }
+
+/** Weergavenaam van een meeting zonder klant: de eerste genodigde. */
+export const naamZonderKlant = (genodigden: Persoon[]): string => genodigden[0]?.naam || genodigden[0]?.email || 'Losse meeting'
 
 // ── Herinnering ──────────────────────────────────────────────────────────────
 
@@ -107,42 +196,29 @@ export function magNogVersturen(startsAt: string, nu: Date = new Date()): boolea
 
 export const momentLabel = (key: string | null | undefined): string => HERINNERING_MOMENTEN.find((m) => m.key === key)?.label ?? (key ?? '')
 
-// ── Weergave van datum en tijd ───────────────────────────────────────────────
-
-export function datumLang(iso: string): string {
-  return new Intl.DateTimeFormat('nl-BE', { timeZone: MEETING_TIJDZONE, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(iso))
-}
-export function datumKort(iso: string): string {
-  return new Intl.DateTimeFormat('nl-BE', { timeZone: MEETING_TIJDZONE, weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(iso))
-}
-export const uur = (iso: string): string => uurBrussel(iso)
-export const dag = (iso: string): string => dagBrussel(iso)
-/** "dinsdag 27 oktober 2026 om 14:00" */
-export const wanneer = (iso: string): string => `${datumLang(iso)} om ${uur(iso)}`
-export const duurMinuten = (startsAt: string, endsAt: string): number => Math.round((new Date(endsAt).getTime() - new Date(startsAt).getTime()) / 60000)
-
 // ── Herinneringsmail ─────────────────────────────────────────────────────────
 
 const naamLijst = (namen: string[]): string => (namen.length <= 1 ? namen.join('') : `${namen.slice(0, -1).join(', ')} en ${namen[namen.length - 1]}`)
 
 export type MailMeeting = {
   klant_naam: string; titel: string; starts_at: string; meet_url: string | null; beschrijving: string | null
-  organisator_naam: string | null; ontvangers: Persoon[]
+  organisator_naam: string | null; ontvangers: Persoon[]; tijdzone?: string | null
 }
 
 /** Onderwerp en tekst van de herinnering. Enkel gegevens die in de meeting staan, niets verzonnen. */
 export function herinneringsMail(m: MailMeeting): { onderwerp: string; tekst: string; ctaTekst: string | null; ctaLink: string | null } {
+  const tz = zone(m.tijdzone)
   const namen = m.ontvangers.map((p) => p.naam).filter((n): n is string => !!n)
   const aanhef = namen.length ? naamLijst(namen) : m.klant_naam
   const delen = [
     `Beste ${aanhef},`,
-    `Een korte herinnering aan onze meeting "${m.titel}" op ${wanneer(m.starts_at)} (Belgische tijd).`,
+    `Een korte herinnering aan onze meeting "${m.titel}" op ${wanneer(m.starts_at, tz)} (${tijdzoneLabel(tz)}).`,
   ]
   if (m.meet_url) delen.push(`Je neemt deel via Google Meet:\n${m.meet_url}`)
   if (m.beschrijving) delen.push(`Agenda:\n${m.beschrijving}`)
   delen.push(`Tot dan,\n${m.organisator_naam ? `${m.organisator_naam}\n` : ''}NextGenMedia`)
   return {
-    onderwerp: `Herinnering: ${m.titel} op ${datumKort(m.starts_at)} om ${uur(m.starts_at)}`,
+    onderwerp: `Herinnering: ${m.titel} op ${datumKort(m.starts_at, tz)} om ${uur(m.starts_at, tz)}`,
     tekst: delen.join('\n\n'),
     ctaTekst: m.meet_url ? 'Deelnemen via Google Meet' : null,
     ctaLink: m.meet_url,
@@ -167,6 +243,10 @@ export function genodigden(m: { klant_ontvangers: Persoon[]; deelnemers: Persoon
   return [...m.klant_ontvangers, ...m.deelnemers].map((p) => (p.naam ? { email: p.email, displayName: p.naam } : { email: p.email }))
 }
 
+export const ANTWOORD_LABEL: Record<string, string> = {
+  needsAction: 'nog niet geantwoord', accepted: 'aanvaard', declined: 'geweigerd', tentative: 'misschien',
+}
+
 // ── ClickUp (zelfde werkwijze als de verkoopafspraken) ───────────────────────
 
 /** Unieke referentie in de taakomschrijving: zo vinden we een taak terug na een onduidelijke fout. */
@@ -175,17 +255,22 @@ export const clickupMarker = (meetingId: string): string => `ngm-meeting:${meeti
 /** Zelfde opbouw als "Afspraak: {bedrijf} — {contact}" bij de verkoopafspraken. */
 export const clickupTaakNaam = (m: { klant_naam: string; titel: string }): string => `Meeting: ${m.klant_naam} — ${m.titel}`
 
+export type Koppelingen = { klant?: string | null; project?: string | null; clickupItemId?: string | null }
+
 export function clickupOmschrijving(m: {
   id: string; klant_naam: string; titel: string; starts_at: string; ends_at: string; meet_url: string | null; beschrijving: string | null
-  organisator_naam: string | null; klant_ontvangers: Persoon[]; deelnemers: Persoon[]
-}, appUrl: string): string {
+  organisator_naam: string | null; klant_ontvangers: Persoon[]; deelnemers: Persoon[]; tijdzone?: string | null
+}, appUrl: string, koppelingen: Koppelingen = {}): string {
+  const tz = zone(m.tijdzone)
   const persoon = (p: Persoon) => (p.naam ? `${p.naam} <${p.email}>` : p.email)
   return [
-    `Klantmeeting ingepland via de app.`,
-    `Wanneer: ${wanneer(m.starts_at)} – ${uur(m.ends_at)} (Belgische tijd)`,
-    `Klant: ${m.klant_naam}`,
-    `Klantontvanger(s): ${m.klant_ontvangers.map(persoon).join(', ') || '—'}`,
-    m.deelnemers.length ? `Deelnemers: ${m.deelnemers.map(persoon).join(', ')}` : null,
+    `Meeting ingepland via de app.`,
+    `Wanneer: ${wanneer(m.starts_at, tz)} – ${uur(m.ends_at, tz)} (${tijdzoneLabel(tz)})`,
+    `Klant: ${koppelingen.klant ?? 'geen klant gekoppeld'}`,
+    koppelingen.project ? `Project: ${koppelingen.project}` : null,
+    koppelingen.clickupItemId ? `Gekoppeld ClickUp-item: https://app.clickup.com/t/${koppelingen.clickupItemId}` : null,
+    `Genodigden: ${m.klant_ontvangers.map(persoon).join(', ') || '—'}`,
+    m.deelnemers.length ? `Extra deelnemers: ${m.deelnemers.map(persoon).join(', ')}` : null,
     m.organisator_naam ? `Organisator: ${m.organisator_naam}` : null,
     `Google Meet: ${m.meet_url ?? 'nog geen link'}`,
     m.beschrijving ? `\n${m.beschrijving}` : null,
@@ -202,6 +287,7 @@ export type StapWeergave = { label: string; toon: Toon }
 export type MeetingStatusVelden = {
   status: string; google_status: string; google_fout?: string | null; meet_url: string | null
   clickup_status: string; clickup_fout?: string | null; herinnering_aan: boolean
+  uitnodiging_status?: string | null
 }
 export type HerinneringStatusVelden = { status: string; gepland_voor: string; fout?: string | null; verzonden_op?: string | null } | null
 
@@ -217,15 +303,23 @@ export function stapMeet(m: MeetingStatusVelden): StapWeergave {
   if (m.google_status === 'ok') return { label: 'Meet-link ontbreekt', toon: 'fout' }
   return { label: 'Meet wacht op agenda', toon: 'neutraal' }
 }
+/** De uitnodiging verstuurt Google zelf, bij het aanmaken van de afspraak. */
+export function stapUitnodiging(m: MeetingStatusVelden): StapWeergave {
+  if (m.status === 'geannuleerd') return { label: 'Uitnodiging vervallen', toon: 'neutraal' }
+  if (m.uitnodiging_status === 'verzonden' || (!m.uitnodiging_status && m.google_status === 'ok')) return { label: 'Uitnodiging verstuurd', toon: 'ok' }
+  if (m.uitnodiging_status === 'mislukt' || m.google_status === 'fout') return { label: 'Uitnodiging niet verstuurd', toon: 'fout' }
+  return { label: 'Uitnodiging wacht', toon: 'bezig' }
+}
 export function stapClickup(m: MeetingStatusVelden): StapWeergave {
   if (m.clickup_status === 'ok') return { label: m.status === 'geannuleerd' ? 'ClickUp afgesloten' : 'In ClickUp', toon: m.status === 'geannuleerd' ? 'neutraal' : 'ok' }
   if (m.clickup_status === 'overgeslagen') return { label: 'ClickUp overgeslagen', toon: 'neutraal' }
   if (m.clickup_status === 'fout') return { label: 'ClickUp mislukt', toon: 'fout' }
+  if (m.clickup_status === 'wacht') return { label: 'ClickUp wacht op agenda', toon: 'neutraal' }
   return { label: 'ClickUp bezig', toon: 'bezig' }
 }
 export function stapHerinnering(m: MeetingStatusVelden, h: HerinneringStatusVelden): StapWeergave {
   if (!m.herinnering_aan) return { label: 'Geen herinnering', toon: 'neutraal' }
-  if (!h) return { label: m.status === 'geannuleerd' ? 'Herinnering geannuleerd' : 'Geen herinnering meer mogelijk', toon: 'neutraal' }
+  if (!h) return { label: m.status === 'geannuleerd' ? 'Herinnering geannuleerd' : m.google_status === 'ok' ? 'Geen herinnering meer mogelijk' : 'Herinnering wacht op agenda', toon: 'neutraal' }
   switch (h.status) {
     case 'gepland': return { label: `Herinnering ${datumKort(h.gepland_voor)} ${uur(h.gepland_voor)}`, toon: 'ok' }
     case 'bezig': return { label: 'Herinnering wordt verstuurd', toon: 'bezig' }
@@ -238,13 +332,36 @@ export function stapHerinnering(m: MeetingStatusVelden, h: HerinneringStatusVeld
 }
 
 /** Welke onderdelen veranderen bij een aanpassing? Zo werken we enkel bij wat nodig is. */
-export function wijzigingen(oud: { starts_at: string; ends_at: string; titel: string; beschrijving: string | null; klant_ontvangers: Persoon[]; deelnemers: Persoon[]; herinnering_aan: boolean },
+export function wijzigingen(oud: { starts_at: string; ends_at: string; titel: string; beschrijving: string | null; klant_ontvangers: Persoon[]; deelnemers: Persoon[]; herinnering_aan: boolean; tijdzone?: string | null },
   nieuw: GeldigeMeeting): { tijd: boolean; inhoud: boolean; genodigden: boolean; ontvangers: boolean; herinnering: boolean; iets: boolean } {
   const tijd = new Date(oud.starts_at).getTime() !== new Date(nieuw.startsAt).getTime() || new Date(oud.ends_at).getTime() !== new Date(nieuw.endsAt).getTime()
+    || zone(oud.tijdzone) !== nieuw.tijdzone
   const inhoud = oud.titel !== nieuw.titel || (oud.beschrijving ?? null) !== (nieuw.beschrijving ?? null)
   const sleutel = (l: Persoon[]) => l.map((p) => `${p.email}|${p.naam ?? ''}`).sort().join(';')
   const ontvangers = sleutel(oud.klant_ontvangers) !== sleutel(nieuw.klant_ontvangers)
   const genodigden = ontvangers || sleutel(oud.deelnemers) !== sleutel(nieuw.deelnemers)
   const herinnering = oud.herinnering_aan !== nieuw.herinnering_aan
   return { tijd, inhoud, genodigden, ontvangers, herinnering, iets: tijd || inhoud || genodigden || herinnering }
+}
+
+/** Dezelfde meeting al eens ingepland? Zelfde start, titel en minstens één zelfde genodigde. */
+export function lijktOp(a: { titel: string; starts_at: string; klant_ontvangers: Persoon[] }, b: { titel: string; startsAt: string; klant_ontvangers: Persoon[] }): boolean {
+  if (new Date(a.starts_at).getTime() !== new Date(b.startsAt).getTime()) return false
+  if (a.titel.trim().toLowerCase() !== b.titel.trim().toLowerCase()) return false
+  const mails = new Set(a.klant_ontvangers.map((p) => p.email.toLowerCase()))
+  return b.klant_ontvangers.some((p) => mails.has(p.email.toLowerCase()))
+}
+
+/** Maandag (YYYY-MM-DD) van de week waarin de dag `d` valt. */
+export function maandagVan(d: string): string {
+  const [j, m, dd] = d.split('-').map(Number)
+  const t = new Date(Date.UTC(j, m - 1, dd))
+  const wd = (t.getUTCDay() + 6) % 7
+  t.setUTCDate(t.getUTCDate() - wd)
+  return t.toISOString().slice(0, 10)
+}
+export function plusDagen(d: string, n: number): string {
+  const [j, m, dd] = d.split('-').map(Number)
+  const t = new Date(Date.UTC(j, m - 1, dd + n))
+  return t.toISOString().slice(0, 10)
 }

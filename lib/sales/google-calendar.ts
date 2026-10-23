@@ -514,10 +514,13 @@ export type MeetingEvent = {
   /** ok = link klaar; bezig = Google maakt hem nog aan; mislukt/geen = opnieuw aanvragen. */
   meetStatus: 'ok' | 'bezig' | 'mislukt' | 'geen'
   geannuleerd: boolean
+  /** Genodigden met hun antwoord op de uitnodiging (needsAction, accepted, declined, tentative). */
+  genodigden: { email: string; antwoord: string }[]
 }
 
 type GEvent = {
   id?: string; status?: string; hangoutLink?: string
+  attendees?: { email?: string; responseStatus?: string }[]
   conferenceData?: { createRequest?: { status?: { statusCode?: string } }; entryPoints?: { entryPointType?: string; uri?: string }[] }
   error?: { message?: string }
 }
@@ -530,7 +533,18 @@ function leesMeetingEvent(j: GEvent, calendarId: string): MeetingEvent {
     eventId: String(j.id), calendarId, meetUrl,
     meetStatus: meetUrl ? 'ok' : code === 'pending' ? 'bezig' : code === 'failure' ? 'mislukt' : 'geen',
     geannuleerd: j.status === 'cancelled',
+    genodigden: (j.attendees ?? []).filter((a) => a.email).map((a) => ({ email: String(a.email), antwoord: a.responseStatus ?? 'needsAction' })),
   }
+}
+
+/** Is de agenda van deze koppeling bereikbaar en beschrijfbaar? Leest enkel. */
+export async function controleerAgenda(connectionId: string): Promise<{ ok: true; naam: string; schrijven: boolean } | { ok: false; fout: string }> {
+  const auth = await accessToken(connectionId)
+  if (!auth) return { ok: false, fout: new AgendaNietGekoppeld().message }
+  const res = await fetchMetLimiet(`${API}/users/me/calendarList/${encodeURIComponent(auth.calendarId)}`, { headers: { Authorization: `Bearer ${auth.token}` } })
+  const j = await res.json().catch(() => ({})) as { summary?: string; accessRole?: string; error?: { message?: string } }
+  if (!res.ok) return { ok: false, fout: j.error?.message ?? `Google gaf de agenda niet terug (${res.status})` }
+  return { ok: true, naam: j.summary ?? auth.calendarId, schrijven: j.accessRole === 'owner' || j.accessRole === 'writer' }
 }
 
 const eventUrl = (calendarId: string, eventId?: string) =>

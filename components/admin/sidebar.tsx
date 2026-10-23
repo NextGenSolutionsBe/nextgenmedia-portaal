@@ -46,7 +46,7 @@ const SECTIONS: NavSection[] = [
     items: [
       { label: 'Klanten',    href: '/admin/clients',   icon: Users, module: 'clients' },
       { label: 'Contracten', href: '/admin/contracts', icon: FileText, module: 'contracts' },
-      { label: 'Klantmeetings', href: '/admin/meetings', icon: Video, module: 'meetings' },
+      { label: 'Meetings', href: '/admin/meetings', icon: Video, module: 'meetings' },
       {
         label: 'Diensten', href: '/admin/services', icon: Briefcase, module: 'content',
         children: [

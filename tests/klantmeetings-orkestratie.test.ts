@@ -9,7 +9,7 @@ import { tabellen, nepDb, google, clickup, resend } from './hulp-meetings-nep'
 import assert from 'node:assert/strict'
 import {
   stapGoogle, stapClickup, planHerinnering, verwerkHerinneringen, herinneringOpnieuw, annuleer, leesMeeting, bewaarMeeting,
-  laatsteHerinnering, veiligeFout, type MeetingRij,
+  laatsteHerinnering, veiligeFout, bestaatGoogleAfspraak, controleerKoppelingen, testAfspraak, type MeetingRij,
 } from '../lib/meetings/server'
 import { valideerMeeting, googleEventId, dag, uur } from '../lib/meetings/model'
 
@@ -257,6 +257,95 @@ async function main() {
     const m = await nieuweMeeting(72)
     await Promise.all([planHerinnering(db, m), planHerinnering(db, m), planHerinnering(db, m)])
     assert.equal(herinneringenVan(m.id).filter((x) => ['gepland', 'bezig', 'mislukt'].includes(x.status)).length, 1)
+  })
+
+  await test('18. Zonder klant: los e-mailadres krijgt uitnodiging via Google, taak zonder klantkoppeling', async () => {
+    const m0 = await nieuweMeeting(72, { client_id: null, klant_naam: 'Jan Peeters', klant_ontvangers: [{ naam: 'Jan Peeters', email: 'jan@gmail.com' }], deelnemers: [] })
+    const { m, h } = await plan(m0)
+    assert.equal(m.google_status, 'ok')
+    assert.equal(m.uitnodiging_status, 'verzonden')
+    assert.deepEqual(m.uitnodiging_naar, ['jan@gmail.com'])
+    assert.ok(m.uitnodiging_op)
+    assert.deepEqual(google.events.get(m.google_event_id!)!.attendees, [{ email: 'jan@gmail.com', displayName: 'Jan Peeters' }])
+    const taak = clickup.taken.get(m.clickup_task_id!)!
+    assert.equal(taak.list, 'L-NGM')
+    assert.equal(taak.name, 'Meeting: Jan Peeters — Contentplanning')
+    assert.match(String(taak.description), /Klant: geen klant gekoppeld/)
+    assert.deepEqual(h?.ontvangers.map((p) => p.email), ['jan@gmail.com'])
+  })
+
+  await test('19. Koppeling met klant, project en ClickUp-item komt in de taak', async () => {
+    tabellen.clients = [{ id: 'c-era', company_name: 'ERA NOBIS', contact_name: 'Rob' }]
+    tabellen.opdrachten = [{ id: 'p-web', titel: 'Website ERA NOBIS' }]
+    const { m } = await plan(await nieuweMeeting(72, { client_id: 'c-era', project_id: 'p-web', clickup_item_id: '86c0abc12' }))
+    const o = String(clickup.taken.get(m.clickup_task_id!)!.description)
+    assert.match(o, /Klant: ERA NOBIS/)
+    assert.match(o, /Project: Website ERA NOBIS/)
+    assert.match(o, /Gekoppeld ClickUp-item: https:\/\/app\.clickup\.com\/t\/86c0abc12/)
+  })
+
+  await test('20. Andere tijdzone: Google krijgt die zone, de mail toont de tijd in die zone', async () => {
+    const start = overUren(72)
+    const { m } = await plan(await nieuweMeeting(72, { tijdzone: 'America/New_York' }))
+    assert.equal(google.events.get(m.google_event_id!)!.start.timeZone, 'America/New_York')
+    maakDue(m.id)
+    await verwerkHerinneringen(db)
+    const mail = resend.verstuurd[resend.verstuurd.length - 1]
+    assert.match(String(mail.text), /\(tijd New York \(America\/New_York\)\)/)
+    assert.ok(start)
+  })
+
+  await test('21. Eerste poging mislukt: weten of de afspraak er toch staat (geen tweede afspraak)', async () => {
+    // Agenda zonder geldige koppeling: zeker niets aangemaakt.
+    const zonder = await stapGoogle(db, await nieuweMeeting(72, { agenda_id: AGENDA_ZONDER_TOKEN }))
+    assert.equal(zonder.uitnodiging_status, 'mislukt')
+    assert.equal(await bestaatGoogleAfspraak(db, zonder), 'nee')
+    // Antwoord verloren: de afspraak staat er wel.
+    google.verliesAntwoord = true
+    const verloren = await stapGoogle(db, await nieuweMeeting(72))
+    assert.equal(verloren.google_status, 'fout')
+    assert.equal(await bestaatGoogleAfspraak(db, verloren), 'ja')
+    const voor = google.aangemaakt
+    const herstel = await stapGoogle(db, verloren)
+    assert.equal(herstel.google_status, 'ok')
+    assert.equal(herstel.uitnodiging_status, 'verzonden')
+    assert.equal(google.aangemaakt, voor)
+  })
+
+  await test('22. Aanpassen stuurt de genodigden een update via dezelfde afspraak', async () => {
+    let { m } = await plan(await nieuweMeeting(72))
+    const eerste = m.uitnodiging_op
+    await new Promise((r) => setTimeout(r, 5))
+    m = await bewaarMeeting(db, m.id, { klant_ontvangers: [...m.klant_ontvangers, { naam: 'Lies', email: 'lies@klant.be' }] })
+    m = await stapGoogle(db, m, { bijwerken: true })
+    assert.ok(m.uitnodiging_naar!.includes('lies@klant.be'))
+    assert.notEqual(m.uitnodiging_op, eerste)
+    const patch = google.patches.filter((p) => p.id === m.google_event_id).pop()!
+    assert.equal(patch.sendUpdates, 'all')
+    assert.ok(patch.body.attendees.some((a: { email: string }) => a.email === 'lies@klant.be'))
+  })
+
+  await test('23. Koppelingen controleren: leest enkel, geeft per onderdeel een uitkomst zonder sleutels', async () => {
+    const voor = { g: google.aangemaakt, c: clickup.aangemaakt, r: resend.verstuurd.length }
+    const checks = await controleerKoppelingen(db, AGENDA)
+    assert.deepEqual(checks.map((c) => [c.onderdeel, c.ok]), [['Google Agenda', true], ['ClickUp', true], ['Herinneringsmail (Resend)', true]])
+    assert.ok(!JSON.stringify(checks).includes('test-resend') && !JSON.stringify(checks).includes('tok'))
+    const kapot = await controleerKoppelingen(db, AGENDA_ZONDER_TOKEN)
+    assert.equal(kapot[0].ok, false)
+    assert.match(kapot[0].melding, /niet \(meer\) gekoppeld/)
+    assert.deepEqual({ g: google.aangemaakt, c: clickup.aangemaakt, r: resend.verstuurd.length }, voor)
+  })
+
+  await test('24. Schrijftest: afspraak zonder genodigden met Meet-link, meteen stil verwijderd', async () => {
+    const r = await testAfspraak(AGENDA)
+    assert.equal(r.ok, true)
+    assert.equal(r.meet, true)
+    const laatste = google.verwijderd[google.verwijderd.length - 1]
+    assert.equal(laatste.sendUpdates, 'none')
+    assert.match(laatste.id, /^ngmtest[0-9a-f]{32}$/)
+    const ev = google.events.get(laatste.id)!
+    assert.deepEqual(ev.attendees, [])
+    assert.equal(ev.status, 'cancelled')
   })
 
   console.log(`\n${n} tests geslaagd\n`)
