@@ -1,9 +1,12 @@
 import { fetchMetLimiet } from '@/lib/fetch-met-limiet'
 
 // ── Metricool integratie (server-side only) ──────────────────────────────────
-// READ-ONLY. App → Metricool, nooit terug. Uitsluitend server-side; de sleutels
-// komen enkel uit process.env (METRICOOL_USER_TOKEN + METRICOOL_USER_ID) en mogen
-// nooit in clientcode lekken. Plannen/goedkeuren gebeurt volledig in Metricool zelf.
+// Dit bestand LEEST enkel. Uitsluitend server-side; de sleutels komen enkel uit
+// process.env (METRICOOL_USER_TOKEN + METRICOOL_USER_ID) en mogen nooit in
+// clientcode lekken. Plannen/goedkeuren gebeurt volledig in Metricool zelf.
+// De enige plek waar de app naar Metricool SCHRIJFT is lib/metricool-inbox.ts
+// (een antwoord op een comment of DM, enkel na bevestiging door een mens); die
+// gebruikt de gedeelde `metricoolRequest` hieronder voor auth en throttling.
 //
 // Auth: header 'X-Mc-Auth: <token>'. Elke call vereist userId (+ meestal blogId).
 // Rate limits publiceert Metricool niet → we throttlen (~1 req/s) en cachen.
@@ -26,28 +29,45 @@ let lastRequestAt = 0
 const MIN_INTERVAL_MS = 1100
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-/** Voegt userId + query toe, zet X-Mc-Auth, en geeft de ruwe Response terug. */
-async function mcFetch(path: string, query: Record<string, string | number | undefined> = {}, attempt = 0): Promise<Response> {
+export type MetricoolQuery = Record<string, string | number | undefined>
+
+/**
+ * Gedeelde aanroep: zet X-Mc-Auth en userId, throttlet (~1 req/s) en wacht bij
+ * een 429. `pad` is een pad onder de API ("/v2/…") of een volledige Metricool-URL
+ * (bv. de `page.next`-link van een lijst). Een body (POST) gaat als JSON mee.
+ */
+export async function metricoolRequest(
+  pad: string,
+  opts: { method?: 'GET' | 'POST'; query?: MetricoolQuery; body?: unknown } = {},
+  attempt = 0,
+): Promise<Response> {
   const { token, userId } = creds()
   const wait = lastRequestAt + MIN_INTERVAL_MS - Date.now()
   if (wait > 0) await sleep(wait)
   lastRequestAt = Date.now()
 
-  const url = new URL(`${API_BASE}${path}`)
-  url.searchParams.set('userId', userId)
-  for (const [k, v] of Object.entries(query)) {
+  const url = new URL(/^https:\/\/app\.metricool\.com\//.test(pad) ? pad : `${API_BASE}${pad}`)
+  if (!url.searchParams.has('userId')) url.searchParams.set('userId', userId)
+  for (const [k, v] of Object.entries(opts.query ?? {})) {
     if (v !== undefined && v !== '') url.searchParams.set(k, String(v))
   }
 
   const res = await fetchMetLimiet(url.toString(), {
+    method: opts.method ?? 'GET',
     headers: { 'X-Mc-Auth': token, 'Content-Type': 'application/json' },
+    body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
     cache: 'no-store',
   })
   if (res.status === 429 && attempt < 4) {
     await sleep(Math.min(2 ** attempt * 1000, 8000))
-    return mcFetch(path, query, attempt + 1)
+    return metricoolRequest(pad, opts, attempt + 1)
   }
   return res
+}
+
+/** Voegt userId + query toe, zet X-Mc-Auth, en geeft de ruwe Response terug (GET). */
+async function mcFetch(path: string, query: MetricoolQuery = {}): Promise<Response> {
+  return metricoolRequest(path, { query })
 }
 
 async function mcJson<T>(path: string, query?: Record<string, string | number | undefined>): Promise<T> {

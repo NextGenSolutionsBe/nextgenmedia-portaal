@@ -1,6 +1,7 @@
 import { safeMessage } from '@/lib/api-error'
 import { NextResponse } from 'next/server'
-import { requireStaff } from '@/lib/supabase/server'
+import { requireStaff, createAdminSupabaseClient } from '@/lib/supabase/server'
+import { magIk } from '@/lib/instellingen/laden'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,8 +17,23 @@ export async function GET() {
   try {
     if (!(await requireStaff())) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
     // Het bolletje bij Opdrachten ("te laat") is weg: opdrachten hebben geen
-    // deadline meer. Het endpoint blijft voor toekomstige tellers.
-    return NextResponse.json({})
+    // deadline meer.
+    const uit: Record<string, number> = {}
+    // Community: wat wij moeten beantwoorden (te beantwoorden + klant koos),
+    // enkel bij klanten waarvoor community management aan staat.
+    if (await magIk('community', 'bekijken')) {
+      try {
+        const admin = createAdminSupabaseClient()
+        const { data: inst } = await admin.from('community_instellingen').select('client_id').eq('actief', true)
+        const ids = (inst ?? []).map((i: { client_id: string }) => i.client_id)
+        if (ids.length) {
+          const { count } = await admin.from('community_berichten').select('id', { count: 'exact', head: true })
+            .in('client_id', ids).in('status', ['te_beantwoorden', 'klant_gekozen'])
+          if (count) uit.community = count
+        }
+      } catch { /* tabellen nog niet gemigreerd → geen bolletje */ }
+    }
+    return NextResponse.json(uit)
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }

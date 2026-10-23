@@ -5984,3 +5984,107 @@ ALTER TABLE public.contracts ADD CONSTRAINT contracts_status_check CHECK (
     'getekend', 'geannuleerd', 'verlopen', 'vervangen', 'niet_geaccepteerd'
   )
 );
+
+-- ── Community management (fase 1, 22 okt 2026) ─────────────────────────────
+-- Comments en DM's uit Metricool, ingedeeld door Claude (scheduled task via de
+-- MCP-connector), beantwoord door een mens. Per klant aan/uit. Toegang enkel
+-- server-side via de service role (RLS aan, geen policies). Geen nieuwe
+-- service_slug: die hangt aan contracten, portaaltoegang en omzet.
+CREATE TABLE IF NOT EXISTS public.community_instellingen (
+  client_id uuid PRIMARY KEY REFERENCES public.clients(id) ON DELETE CASCADE,
+  actief boolean NOT NULL DEFAULT false,
+  klant_keurt_goed boolean NOT NULL DEFAULT true,
+  tone_of_voice text,
+  regels text,
+  cheat_sheet jsonb NOT NULL DEFAULT '[]'::jsonb,
+  voorbeeldantwoorden jsonb NOT NULL DEFAULT '[]'::jsonb,
+  bijgewerkt_op timestamptz,
+  bijgewerkt_door text
+);
+ALTER TABLE public.community_instellingen ENABLE ROW LEVEL SECURITY;
+
+-- Meerdere Metricool-merken per klant (bv. Kristoff naast Straight Line).
+-- clients.metricool_blog_id blijft ongemoeid (geplande posts).
+CREATE TABLE IF NOT EXISTS public.community_kanalen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  naam text NOT NULL,
+  metricool_blog_id text NOT NULL,
+  netwerken text[] NOT NULL DEFAULT '{}',
+  actief boolean NOT NULL DEFAULT true,
+  laatst_gesynct timestamptz,
+  laatste_fout text,
+  UNIQUE (client_id, metricool_blog_id)
+);
+ALTER TABLE public.community_kanalen ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS public.community_berichten (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  kanaal_id uuid NOT NULL REFERENCES public.community_kanalen(id) ON DELETE CASCADE,
+  bron text NOT NULL CHECK (bron IN ('comment', 'dm')),
+  netwerk text,
+  extern_id text NOT NULL,
+  parent_extern_id text,
+  post_extern_id text,
+  post_tekst text,
+  post_url text,
+  auteur_naam text,
+  auteur_handle text,
+  tekst text,
+  ontvangen_op timestamptz,
+  antwoord_mogelijk_tot timestamptz,
+  categorie text CHECK (categorie IN ('luchtig', 'vraag', 'kritiek', 'negatief_zonder_inhoud', 'toxisch', 'trefwoord', 'overig')),
+  categorie_reden text,
+  status text NOT NULL DEFAULT 'nieuw' CHECK (status IN ('nieuw', 'te_beantwoorden', 'bij_klant', 'klant_gekozen', 'verstuurd', 'genegeerd', 'verlopen', 'fout')),
+  voorstellen jsonb NOT NULL DEFAULT '[]'::jsonb,
+  gekozen_tekst text,
+  klant_opmerking text,
+  klant_gekozen_op timestamptz,
+  klant_gekozen_door text,
+  verstuurd_op timestamptz,
+  verstuurd_door text,
+  verstuur_fout text,
+  ingedeeld_door text,
+  raw jsonb,
+  aangemaakt_op timestamptz NOT NULL DEFAULT now(),
+  bijgewerkt_op timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (kanaal_id, bron, extern_id)
+);
+CREATE INDEX IF NOT EXISTS community_berichten_klant_status ON public.community_berichten (client_id, status);
+CREATE INDEX IF NOT EXISTS community_berichten_status_deadline ON public.community_berichten (status, antwoord_mogelijk_tot);
+CREATE INDEX IF NOT EXISTS community_berichten_ontvangen ON public.community_berichten (ontvangen_op DESC);
+ALTER TABLE public.community_berichten ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS public.community_sync_runs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  gestart timestamptz NOT NULL DEFAULT now(),
+  klaar timestamptz,
+  nieuw int NOT NULL DEFAULT 0,
+  fouten jsonb NOT NULL DEFAULT '[]'::jsonb
+);
+-- Maar één open run tegelijk (zoals clickup_agenda_runs).
+CREATE UNIQUE INDEX IF NOT EXISTS community_sync_runs_een_open ON public.community_sync_runs ((true)) WHERE klaar IS NULL;
+CREATE INDEX IF NOT EXISTS community_sync_runs_gestart ON public.community_sync_runs (gestart DESC);
+ALTER TABLE public.community_sync_runs ENABLE ROW LEVEL SECURITY;
+
+INSERT INTO public.cron_geheimen (sleutel, waarde)
+VALUES ('community_sync', replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''))
+ON CONFLICT (sleutel) DO NOTHING;
+
+-- Elke 10 minuten, zoals de ClickUp-agenda (pas activeren nadat de route live staat).
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') AND NOT EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'community-sync') THEN
+    PERFORM cron.schedule('community-sync', '*/10 * * * *', $job$
+  SELECT net.http_post(
+    url := 'https://app.nextgenmedia.be/api/cron/community-sync',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'x-sync-secret', (SELECT waarde FROM public.cron_geheimen WHERE sleutel = 'community_sync')
+    ),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 55000
+  );
+  $job$);
+  END IF;
+END $$;
