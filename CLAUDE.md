@@ -24,10 +24,11 @@ Het klantportaal gebruikt een **resolver + service-role** model, niet RLS, als p
 - **Notificaties zijn de centrale signalenlaag** — nieuwe signalen toevoegen in `lib/notifications.ts`, niet als losse widgets verspreid.
 - **AI voert niets uit zonder bevestiging.** NextGen AI is read-only: het stelt voor met deep-links ("Voorstel — bevestiging vereist"); de mens bevestigt. Nooit auto-schrijfacties.
 - **Mails naar klanten zijn nooit automatisch.** Alle handmatige mail loopt via één component: `components/admin/mail-composer.tsx` (`<MailComposer context=...>`), altijd met preview + handmatige bevestiging; logging via E-mail Center.
+  - Enige uitzondering: de **herinneringsmail van een klantmeeting** (`lib/meetings/`). Die wordt per meeting bevestigd in het planvenster (met voorbeeld) en daarna door de scheduler verstuurd (pg_cron → `/api/cron/klantmeetings`), gelogd in het E-mail Center. Geen andere automatische klantmails toevoegen.
 - **One source of truth:** afgeleide dashboarddata via `lib/notifications.ts` / `lib/ai-context.ts` / `/api/admin/search`; rechten via `lib/portal-auth.ts` + `lib/portal-permissions.ts`.
 
 ## Conventies
 - Migraties: additief + idempotent in `supabase/migrations/99999999_SYNC_ALL.sql` (`ADD COLUMN IF NOT EXISTS`, `DO $$ ... $$` guards). Geen bestaande data wijzigen.
 - DB-writes die nieuwe kolommen raken: veerkrachtig maken (drop ontbrekende kolom + retry) zodat de app ook vóór migratie werkt.
 - Secrets (`SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`, `RESEND_API_KEY`, `CLICKUP_API_KEY`, `PEXELS_API_KEY`) enkel via env, nooit committen of in clientcode.
-- Klantmails zijn altijd handmatig (E-mail Center), nooit automatisch.
+- Klantmails zijn altijd handmatig (E-mail Center), nooit automatisch. Uitzondering: de bevestigde herinnering van een klantmeeting (zie hierboven).

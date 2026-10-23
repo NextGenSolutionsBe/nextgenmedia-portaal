@@ -156,6 +156,33 @@ export async function buildNotifications(): Promise<Notif[]> {
     }
   } catch { /* meldingen mogen nooit stuklopen op de waakhond */ }
 
+  // Klantmeetings: een stap die misliep, of een herinnering die niet vertrok
+  // (mislukt, of de scheduler loopt achter). Enkel voor meetings die nog komen.
+  try {
+    const nuIso = new Date().toISOString()
+    const meetings = await safe(admin.from('klant_meetings')
+      .select('id, titel, klant_naam, starts_at, google_status, meet_url, clickup_status')
+      .eq('status', 'ingepland').gte('starts_at', nuIso).limit(200)) as { id: string; titel: string; klant_naam: string; starts_at: string; google_status: string; meet_url: string | null; clickup_status: string }[]
+    if (meetings.length) {
+      const herinneringen = await safe(admin.from('klant_meeting_herinneringen')
+        .select('meeting_id, status, gepland_voor').in('meeting_id', meetings.map((m) => m.id)).in('status', ['mislukt', 'gepland'])) as { meeting_id: string; status: string; gepland_voor: string }[]
+      const achterstand = new Date(Date.now() - 20 * 60000).toISOString()
+      for (const m of meetings) {
+        const href = `/admin/meetings?meeting=${m.id}`
+        const naam = `${m.klant_naam} · ${m.titel}`
+        const stappen = [
+          m.google_status === 'fout' ? 'agenda' : null,
+          m.google_status === 'ok' && !m.meet_url ? 'Meet-link' : null,
+          m.clickup_status === 'fout' ? 'ClickUp' : null,
+        ].filter(Boolean)
+        if (stappen.length) out.push({ id: `meeting:${m.id}:${stappen.join('-')}`, kind: 'meeting', priority: 'high', title: `Klantmeeting niet volledig ingepland (${stappen.join(', ')}) — ${naam}`, date: m.starts_at.slice(0, 10), href })
+        const h = herinneringen.find((x) => x.meeting_id === m.id)
+        if (h?.status === 'mislukt') out.push({ id: `meeting-herinnering:${m.id}:mislukt`, kind: 'meeting', priority: 'high', title: `Herinneringsmail mislukt — ${naam}`, date: m.starts_at.slice(0, 10), href })
+        else if (h?.status === 'gepland' && h.gepland_voor < achterstand) out.push({ id: `meeting-herinnering:${m.id}:achter`, kind: 'meeting', priority: 'high', title: `Herinneringsmail had al moeten vertrekken (scheduler loopt achter) — ${naam}`, date: m.starts_at.slice(0, 10), href })
+      }
+    }
+  } catch { /* meldingen mogen nooit stuklopen */ }
+
   for (const i of invoices) {
     const due = (i.invoice_month ?? '') <= thisMonth()
     out.push({

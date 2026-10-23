@@ -492,6 +492,150 @@ export async function deleteEvent(connectionId: string, eventId: string): Promis
   }).catch(() => {})
 }
 
+// ── Klantmeetings (lib/meetings/server.ts) ───────────────────────────────────
+//
+// Anders dan createEvent: een VASTE event-id per meeting. Een tweede poging
+// (time-out, dubbele klik) krijgt van Google een 409 en we lezen het bestaande
+// event, in plaats van een tweede afspraak te maken. Fouten worden gegooid,
+// nooit stil geslikt: de meeting toont per stap wat er misliep.
+
+/** De agenda is niet (meer) gekoppeld of Google weigert de koppeling. */
+export class AgendaNietGekoppeld extends Error {
+  constructor() {
+    super('Deze agenda is niet (meer) gekoppeld met Google. Koppel ze opnieuw via Verkoop → Agenda.')
+    this.name = 'AgendaNietGekoppeld'
+  }
+}
+
+export type MeetingEvent = {
+  eventId: string
+  calendarId: string
+  meetUrl: string | null
+  /** ok = link klaar; bezig = Google maakt hem nog aan; mislukt/geen = opnieuw aanvragen. */
+  meetStatus: 'ok' | 'bezig' | 'mislukt' | 'geen'
+  geannuleerd: boolean
+}
+
+type GEvent = {
+  id?: string; status?: string; hangoutLink?: string
+  conferenceData?: { createRequest?: { status?: { statusCode?: string } }; entryPoints?: { entryPointType?: string; uri?: string }[] }
+  error?: { message?: string }
+}
+
+function leesMeetingEvent(j: GEvent, calendarId: string): MeetingEvent {
+  const video = j.conferenceData?.entryPoints?.find((e) => e.entryPointType === 'video')?.uri ?? null
+  const meetUrl = j.hangoutLink ?? video
+  const code = j.conferenceData?.createRequest?.status?.statusCode
+  return {
+    eventId: String(j.id), calendarId, meetUrl,
+    meetStatus: meetUrl ? 'ok' : code === 'pending' ? 'bezig' : code === 'failure' ? 'mislukt' : 'geen',
+    geannuleerd: j.status === 'cancelled',
+  }
+}
+
+const eventUrl = (calendarId: string, eventId?: string) =>
+  `${API}/calendars/${encodeURIComponent(calendarId)}/events${eventId ? `/${encodeURIComponent(eventId)}` : ''}`
+
+export type MeetingEventVelden = {
+  summary: string
+  description: string
+  startsAt: string
+  endsAt: string
+  timezone: string
+  attendees: { email: string; displayName?: string }[]
+}
+
+const meetAanvraag = (requestId: string) => ({ createRequest: { requestId, conferenceSolutionKey: { type: 'hangoutsMeet' } } })
+
+/** Event met Google Meet aanmaken onder een vaste id. Bestaat die al, dan het bestaande event. */
+export async function maakMeetingEvent(connectionId: string, opts: MeetingEventVelden & {
+  eventId: string; meetRequestId: string; calendarId?: string | null
+}): Promise<MeetingEvent> {
+  const auth = await accessToken(connectionId)
+  if (!auth) throw new AgendaNietGekoppeld()
+  const calendarId = opts.calendarId || auth.calendarId
+  const body = {
+    id: opts.eventId,
+    summary: opts.summary,
+    description: opts.description,
+    start: { dateTime: opts.startsAt, timeZone: opts.timezone },
+    end: { dateTime: opts.endsAt, timeZone: opts.timezone },
+    attendees: opts.attendees,
+    conferenceData: meetAanvraag(opts.meetRequestId),
+  }
+  const res = await fetchMetLimiet(`${eventUrl(calendarId)}?conferenceDataVersion=1&sendUpdates=all`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const json = await res.json().catch(() => ({})) as GEvent
+  if (res.status === 409) {
+    // Bestaat al: een eerdere poging is wel aangekomen.
+    const bestaand = await haalMeetingEvent(connectionId, calendarId, opts.eventId)
+    if (!bestaand) throw new Error('Google meldt dat de afspraak al bestaat, maar ze is niet op te halen.')
+    if (!bestaand.geannuleerd) return bestaand
+    // In Google verwijderd: dezelfde id terug actief zetten met de juiste gegevens.
+    return werkMeetingEventBij(connectionId, calendarId, opts.eventId, {
+      summary: opts.summary, description: opts.description, startsAt: opts.startsAt, endsAt: opts.endsAt,
+      timezone: opts.timezone, attendees: opts.attendees, nieuweMeetRequestId: `${opts.meetRequestId}-herstel`, status: 'confirmed',
+    })
+  }
+  if (!res.ok || !json.id) throw new Error(json.error?.message ?? `Google kon de afspraak niet aanmaken (${res.status})`)
+  return leesMeetingEvent(json, calendarId)
+}
+
+/** null = bestaat niet (meer). */
+export async function haalMeetingEvent(connectionId: string, calendarId: string, eventId: string): Promise<MeetingEvent | null> {
+  const auth = await accessToken(connectionId)
+  if (!auth) throw new AgendaNietGekoppeld()
+  const res = await fetchMetLimiet(eventUrl(calendarId, eventId), { headers: { Authorization: `Bearer ${auth.token}` } })
+  if (res.status === 404 || res.status === 410) return null
+  const json = await res.json().catch(() => ({})) as GEvent
+  if (!res.ok || !json.id) throw new Error(json.error?.message ?? `Google gaf de afspraak niet terug (${res.status})`)
+  return leesMeetingEvent(json, calendarId)
+}
+
+/**
+ * Hetzelfde event bijwerken (PATCH). Zonder conferenceData in de body blijft de
+ * bestaande Meet-link staan. Genodigden krijgen de wijziging van Google.
+ */
+export async function werkMeetingEventBij(connectionId: string, calendarId: string, eventId: string, velden: Partial<MeetingEventVelden> & {
+  /** Enkel wanneer de Meet-link ontbreekt of mislukte: een nieuwe aanvraag. */
+  nieuweMeetRequestId?: string
+  status?: 'confirmed'
+}): Promise<MeetingEvent> {
+  const auth = await accessToken(connectionId)
+  if (!auth) throw new AgendaNietGekoppeld()
+  const body: Record<string, unknown> = {}
+  if (velden.summary !== undefined) body.summary = velden.summary
+  if (velden.description !== undefined) body.description = velden.description
+  if (velden.startsAt !== undefined) body.start = { dateTime: velden.startsAt, timeZone: velden.timezone ?? 'Europe/Brussels' }
+  if (velden.endsAt !== undefined) body.end = { dateTime: velden.endsAt, timeZone: velden.timezone ?? 'Europe/Brussels' }
+  if (velden.attendees !== undefined) body.attendees = velden.attendees
+  if (velden.status) body.status = velden.status
+  if (velden.nieuweMeetRequestId) body.conferenceData = meetAanvraag(velden.nieuweMeetRequestId)
+  const res = await fetchMetLimiet(`${eventUrl(calendarId, eventId)}?conferenceDataVersion=1&sendUpdates=all`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const json = await res.json().catch(() => ({})) as GEvent
+  if (!res.ok || !json.id) throw new Error(json.error?.message ?? `Google kon de afspraak niet bijwerken (${res.status})`)
+  return leesMeetingEvent(json, calendarId)
+}
+
+/** Event annuleren. Al weg (404/410) is goed; elke andere fout wordt gemeld. */
+export async function annuleerMeetingEvent(connectionId: string, calendarId: string, eventId: string, genodigdenVerwittigen: boolean): Promise<void> {
+  const auth = await accessToken(connectionId)
+  if (!auth) throw new AgendaNietGekoppeld()
+  const res = await fetchMetLimiet(`${eventUrl(calendarId, eventId)}?sendUpdates=${genodigdenVerwittigen ? 'all' : 'none'}`, {
+    method: 'DELETE', headers: { Authorization: `Bearer ${auth.token}` },
+  })
+  if (res.ok || res.status === 404 || res.status === 410) return
+  const j = await res.json().catch(() => ({})) as GEvent
+  throw new Error(j.error?.message ?? `Google kon de afspraak niet annuleren (${res.status})`)
+}
+
 // ── ClickUp-taken als Google-events (de "assignee → agenda"-sync) ────────────
 //
 // Deze drie functies bedienen lib/sales/clickup-agenda-sync.ts. Ze schrijven

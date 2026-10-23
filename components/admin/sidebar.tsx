@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
   Info, Camera, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
-  MailCheck, PhoneCall, FolderUp, Handshake, Plug, Settings, ClipboardPen, Contact, Timer, UserCircle,
+  MailCheck, PhoneCall, FolderUp, Handshake, Plug, Settings, ClipboardPen, Contact, Timer, UserCircle, Video,
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
@@ -46,6 +46,7 @@ const SECTIONS: NavSection[] = [
     items: [
       { label: 'Klanten',    href: '/admin/clients',   icon: Users, module: 'clients' },
       { label: 'Contracten', href: '/admin/contracts', icon: FileText, module: 'contracts' },
+      { label: 'Klantmeetings', href: '/admin/meetings', icon: Video, module: 'meetings' },
       {
         label: 'Diensten', href: '/admin/services', icon: Briefcase, module: 'content',
         children: [
