@@ -151,7 +151,7 @@ export default async function PartnerDetailPage({ params }: { params: Promise<{ 
           <ArrowLeft className="h-4 w-4" />
         </Link>
         <div className="flex-1 min-w-[12rem]">
-          <h1 className="text-2xl font-bold truncate">{partner.name}</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold truncate">{partner.name}</h1>
           <p className="text-sm text-gray-500">{partner.company ?? partner.email}</p>
         </div>
         <span className={`status-badge shrink-0 ${partner.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>

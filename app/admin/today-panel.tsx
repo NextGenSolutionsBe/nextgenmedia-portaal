@@ -42,11 +42,11 @@ export async function TodayPanel({ modules = null }: { modules?: string[] | null
   return (
     <div className="card-base">
       <div className="flex items-center gap-2 mb-3">
-        <Sun className="h-4 w-4 text-[#caa800]" />
+        <Sun className="h-4 w-4 text-gray-500" />
         <h2 className="font-semibold text-gray-900">Vandaag</h2>
       </div>
       {rows.length === 0 ? (
-        <p className="text-sm text-gray-400 py-2">Niets dringends vandaag — alles is bij. 🎉</p>
+        <p className="text-sm text-gray-400 py-2">Niets dringends vandaag — alles is bij.</p>
       ) : (
         <div className="space-y-1">
           {rows.map((r, i) => (

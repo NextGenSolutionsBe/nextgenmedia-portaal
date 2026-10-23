@@ -63,7 +63,7 @@ function Tabel<T extends { sleutel: string }>({ rijen, kolommen, onKlik, standaa
     <>
       <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-sm">
-          <thead><tr className="text-[11px] uppercase tracking-wide text-gray-500 border-b border-gray-200">
+          <thead><tr className="text-[11px] text-gray-500 border-b border-gray-200">
             {kolommen.map((k, i) => <th key={k.kop} className={`px-2 py-2 font-medium ${k.rechts ? 'text-right' : 'text-left'}`}><button type="button" onClick={() => setSort({ i, asc: sort.i === i ? !sort.asc : false })} className="inline-flex items-center gap-0.5 hover:text-gray-900">{k.kop}{sort.i === i && (sort.asc ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}</button></th>)}
           </tr></thead>
           <tbody className="divide-y divide-gray-100">

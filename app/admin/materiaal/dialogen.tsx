@@ -16,7 +16,7 @@ const lokaalVan = (iso: string | null) => { if (!iso) return ''; const d = new D
 
 export function Modal({ titel, sub, onSluit, children, voet, breed }: { titel: ReactNode; sub?: ReactNode; onSluit: () => void; children: ReactNode; voet?: ReactNode; breed?: boolean }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/40 backdrop-blur-sm" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/40" role="dialog" aria-modal="true">
       <div className={`bg-white w-full ${breed ? 'sm:max-w-2xl' : 'sm:max-w-md'} rounded-t-2xl sm:rounded-2xl shadow-xl max-h-[92dvh] flex flex-col overflow-hidden`}>
         <div className="px-5 py-4 border-b border-gray-100 flex items-start gap-3">
           <div className="flex-1 min-w-0"><h3 className="font-semibold text-gray-900">{titel}</h3>{sub && <div className="text-xs text-gray-500 mt-0.5">{sub}</div>}</div>
@@ -37,7 +37,7 @@ function KiesOntlener({ ontleners, waarde, onKies, actiefPer }: { ontleners: Ont
   return (
     <div className="space-y-1.5">
       {gekozen ? (
-        <div className="flex items-center gap-2 rounded-lg border border-black bg-[#fff848]/20 px-3 py-2 text-sm">
+        <div className="flex items-center gap-2 rounded-lg border border-black bg-gray-100 px-3 py-2 text-sm">
           <span className="flex-1 font-medium">{naamVan(gekozen)}{!gekozen.email && <span className="ml-2 text-[11px] text-amber-700">geen e-mailadres</span>}</span>
           <button type="button" onClick={() => onKies('')} className="text-xs underline">wijzigen</button>
         </div>

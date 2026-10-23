@@ -74,7 +74,7 @@ export function SectieMedewerkers({ isAdmin }: { isAdmin: boolean }) {
         </div>
         <div className="overflow-x-auto -mx-1">
           <KaartTabel><table className="w-full text-sm min-w-[760px]">
-            <thead><tr className="text-left text-[11px] text-gray-500 uppercase tracking-wide">
+            <thead><tr className="text-left text-[11px] text-gray-500">
               <th className="px-2 py-2 font-medium">Naam</th><th className="px-2 py-2 font-medium">Functie</th><th className="px-2 py-2 font-medium">Rol</th><th className="px-2 py-2 font-medium">Modules</th><th className="px-2 py-2 font-medium">Status</th><th className="px-2 py-2 font-medium">Laatste login</th><th className="px-2 py-2" />
             </tr></thead>
             <tbody className="divide-y divide-gray-50">

@@ -272,7 +272,7 @@ function Section({ title, icon: Icon, empty, rows, showDue, past, picked, onTogg
             <tbody className="divide-y divide-gray-50">
               {rows.map((i) => (
                 <tr key={i.appointmentId}
-                  className={`hover:bg-gray-50 ${picked.has(i.appointmentId) ? 'bg-[#fff848]/10' : ''}`}>
+                  className={`hover:bg-gray-50 ${picked.has(i.appointmentId) ? 'bg-gray-100' : ''}`}>
                   <td className="table-td">
                     <input type="checkbox" aria-label="Selecteer deze regel"
                       checked={picked.has(i.appointmentId)} onChange={() => onToggle(i.appointmentId)} />

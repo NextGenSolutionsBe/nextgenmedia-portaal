@@ -52,7 +52,7 @@ export default async function AdminUploadsPage({
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
+        <h1 className="text-xl sm:text-2xl font-semibold flex items-center gap-2">
           <FolderUp className="h-6 w-6" />Klantuploads
         </h1>
         <p className="text-sm text-gray-500 mt-0.5">

@@ -63,7 +63,7 @@ export function InstellingenTab({ formulier, concept, wijzig, aantalInzendingen,
         <h2 className="font-semibold text-sm">Status</h2>
         <div className="grid sm:grid-cols-3 gap-2">
           {FORMULIER_STATUSSEN.map((s) => (
-            <button key={s} type="button" onClick={() => wijzig({ status: s })} className={cn('text-left rounded-xl border p-3 transition-colors', concept.status === s ? 'border-gray-900 bg-[#fff848]/15' : 'border-gray-200 hover:border-gray-300')}>
+            <button key={s} type="button" onClick={() => wijzig({ status: s })} className={cn('text-left rounded-xl border p-3 transition-colors', concept.status === s ? 'border-gray-900 bg-gray-100' : 'border-gray-200 hover:border-gray-300')}>
               <span className={cn('status-badge', FORMULIER_STATUS_INFO[s].kleur)}>{FORMULIER_STATUS_INFO[s].label}</span>
               <p className="text-xs text-gray-500 mt-1.5">{STATUS_UITLEG[s]}</p>
             </button>

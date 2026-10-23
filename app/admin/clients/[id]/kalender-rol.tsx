@@ -76,7 +76,7 @@ export function KalenderRolInstelling({ clientId }: { clientId: string }) {
         {ROL_VOLGORDE.map((r) => {
           const actief = keuze === r
           return (
-            <label key={r} className={`flex items-start gap-2.5 rounded-lg border px-3 py-2 cursor-pointer transition-colors ${actief ? 'border-[#fff848] bg-[#fff848]/10' : 'border-gray-100 hover:border-gray-200'}`}>
+            <label key={r} className={`flex items-start gap-2.5 rounded-lg border px-3 py-2 cursor-pointer transition-colors ${actief ? 'border-gray-900 bg-gray-100' : 'border-gray-100 hover:border-gray-200'}`}>
               <input type="radio" name={`kalender-rol-${clientId}`} className="mt-1" checked={actief} onChange={() => setKeuze(r)} />
               <span className="min-w-0">
                 <span className="block text-sm font-medium text-gray-900">{ROL_INFO[r].label}{r === huidig && <span className="ml-1.5 text-[10px] font-normal text-gray-500">(huidig)</span>}</span>

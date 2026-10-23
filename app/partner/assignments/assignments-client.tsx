@@ -114,11 +114,11 @@ function SubmitWorkDialog({
     }
   }
 
-  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]'
+  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900'
   const lbl = 'block text-sm font-medium text-gray-700 mb-1'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90dvh] overflow-y-auto">
         <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white">
           <div>
@@ -138,7 +138,7 @@ function SubmitWorkDialog({
                 type="button"
                 onClick={() => setDealType('commission')}
                 className={`rounded-xl border p-3 text-left transition-colors ${
-                  dealType === 'commission' ? 'border-[#fff848] bg-[#fff848]/10' : 'border-gray-200 hover:border-gray-300'
+                  dealType === 'commission' ? 'border-gray-900 bg-gray-100' : 'border-gray-200 hover:border-gray-300'
                 }`}
               >
                 <div className="text-sm font-semibold">Klant aanbrengen</div>
@@ -148,7 +148,7 @@ function SubmitWorkDialog({
                 type="button"
                 onClick={() => setDealType('fixed')}
                 className={`rounded-xl border p-3 text-left transition-colors ${
-                  dealType === 'fixed' ? 'border-[#fff848] bg-[#fff848]/10' : 'border-gray-200 hover:border-gray-300'
+                  dealType === 'fixed' ? 'border-gray-900 bg-gray-100' : 'border-gray-200 hover:border-gray-300'
                 }`}
               >
                 <div className="text-sm font-semibold">Wij doen werk voor jou</div>
@@ -205,7 +205,7 @@ function SubmitWorkDialog({
                       onClick={() => setForm((p) => ({ ...p, budget_type: t }))}
                       className={`flex-1 py-2 rounded-lg border text-sm font-medium transition-colors ${
                         form.budget_type === t
-                          ? 'border-[#fff848] bg-[#fff848]/10 text-black'
+                          ? 'border-gray-900 bg-gray-100 text-black'
                           : 'border-gray-200 text-gray-500 hover:border-gray-300'
                       }`}
                     >
@@ -340,7 +340,7 @@ export function PartnerAssignmentsClient({
       {label}
       <span className={`text-xs ${tab === value ? 'opacity-70' : 'text-gray-400'}`}>({count})</span>
       {badge ? (
-        <span className="absolute -top-1.5 -right-1.5 h-5 min-w-[20px] px-1 rounded-full bg-[#c5b800] text-black text-[10px] font-bold flex items-center justify-center">
+        <span className="absolute -top-1.5 -right-1.5 h-5 min-w-[20px] px-1 rounded-full bg-gray-900 text-white text-[10px] font-bold flex items-center justify-center">
           {badge}
         </span>
       ) : null}
@@ -362,7 +362,7 @@ export function PartnerAssignmentsClient({
       </div>
 
       {/* Context line */}
-      <div className="bg-[#fff848]/10 border border-[#fff848]/40 rounded-xl p-3 text-sm text-gray-700">
+      <div className="bg-gray-100 border border-gray-300 rounded-xl p-3 text-sm text-gray-700">
         {tab === 'received'
           ? <><strong>Opdrachten van NextGenMedia</strong> — werk dat aan jou is toegewezen. Accepteer en rond af.</>
           : <><strong>Mijn voorstellen</strong> — opdrachten die jij bij NextGenMedia hebt ingediend. Wij keuren ze goed. Je kan een openstaand voorstel intrekken.</>}

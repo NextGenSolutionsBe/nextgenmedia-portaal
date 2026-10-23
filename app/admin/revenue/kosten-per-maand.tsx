@@ -40,7 +40,7 @@ export function KostenPerMaand({ rijen, year, actieveMaand }: { rijen: MaandRij[
       </div>
       <div className="overflow-x-auto">
         <KaartTabel><table className="w-full text-sm min-w-[720px]">
-          <thead><tr className="text-left text-[11px] text-gray-500 uppercase tracking-wide bg-gray-50">
+          <thead><tr className="text-left text-[11px] text-gray-500 bg-gray-50">
             <th className="px-4 py-2 font-medium">Maand</th>
             {kolommen.map((s) => <th key={s} className="px-3 py-2 font-medium text-right">{SOORT_LABEL[s]}</th>)}
             <th className="px-4 py-2 font-medium text-right">Totaal</th>
@@ -48,7 +48,7 @@ export function KostenPerMaand({ rijen, year, actieveMaand }: { rijen: MaandRij[
           <tbody className="divide-y divide-gray-50">
             {rijen.map((r) => (
               <Fragment key={r.mi}>
-                <tr onClick={() => setOpen(open === r.mi ? null : r.mi)} className={`cursor-pointer hover:bg-gray-50 ${actieveMaand === r.mi ? 'bg-[#fff848]/10' : ''}`}>
+                <tr onClick={() => setOpen(open === r.mi ? null : r.mi)} className={`cursor-pointer hover:bg-gray-50 ${actieveMaand === r.mi ? 'bg-gray-100' : ''}`}>
                   <td className="px-4 py-2 font-medium capitalize"><ChevronRight className={`h-3.5 w-3.5 inline -mt-0.5 mr-1 text-gray-400 transition-transform ${open === r.mi ? 'rotate-90' : ''}`} />{r.label}</td>
                   {kolommen.map((s) => <td key={s} className="px-3 py-2 text-right tabular-nums text-gray-700">{r.per[s] > 0.004 ? formatEuro(r.per[s]) : <span className="text-gray-300">—</span>}</td>)}
                   <td className="px-4 py-2 text-right tabular-nums font-semibold text-red-600">{r.totaal > 0.004 ? formatEuro(r.totaal) : <span className="text-gray-300">—</span>}</td>

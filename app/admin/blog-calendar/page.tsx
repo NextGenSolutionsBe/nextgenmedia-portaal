@@ -31,7 +31,7 @@ export default async function BlogCalendarPage({ searchParams }: { searchParams:
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold">Blog Kalender</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold">Blog Kalender</h1>
         <p className="text-sm text-gray-500 mt-0.5">Je werkplek voor blogs: nalezen, aanpassen, goedkeuren, inplannen en publiceren. Klik op een blog om te openen.</p>
       </div>
       <BlogCalendar events={events} blogs={list} accounts={(accounts ?? []) as { id: string; name: string }[]} initialAccount={account ?? ''} />

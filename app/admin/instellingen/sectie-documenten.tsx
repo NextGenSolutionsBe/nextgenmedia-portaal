@@ -97,7 +97,7 @@ export function SectieDocumenten({ ctx }: { ctx: Ctx }) {
 
         {/* Voorbeeld — hoe een nieuw document eruit zal zien. */}
         <div>
-          <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-2">Voorbeeld</div>
+          <div className="text-[11px] font-medium text-gray-400 mb-2">Voorbeeld</div>
           <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 text-[11px] leading-relaxed" style={{ color: geldigeKleur(v.secundaire_kleur) ? v.secundaire_kleur : '#111' }}>
             <div className="flex items-start justify-between gap-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}

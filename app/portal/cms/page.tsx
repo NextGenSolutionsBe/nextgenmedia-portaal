@@ -20,7 +20,7 @@ export default async function PortalCmsPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold">Website-CMS</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold">Website-CMS</h1>
         <p className="text-sm text-gray-500 mt-0.5">Bewerk de inhoud van je website. Klik op “Opslaan & publiceren” om je wijzigingen live te zetten.</p>
       </div>
       <PortalCms />

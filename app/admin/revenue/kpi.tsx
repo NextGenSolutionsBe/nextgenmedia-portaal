@@ -4,7 +4,7 @@ export function Kpi({ label, value, sub, color, Icon }: {
   return (
     <div className="stat-card">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-xs text-gray-500 uppercase tracking-wide">{label}</span>
+        <span className="text-xs text-gray-500">{label}</span>
         {Icon && <Icon className={`h-4 w-4 ${color ?? 'text-gray-400'}`} />}
       </div>
       <div className={`text-2xl font-bold ${color ?? ''}`}>{value}</div>
@@ -14,5 +14,5 @@ export function Kpi({ label, value, sub, color, Icon }: {
 }
 
 export function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">{children}</div>
+  return <div className="text-xs font-medium text-gray-500 mb-2">{children}</div>
 }

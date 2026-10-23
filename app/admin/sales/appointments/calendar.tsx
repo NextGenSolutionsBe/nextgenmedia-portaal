@@ -412,7 +412,7 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId, initi
                     <button key={a.id} type="button"
                       onMouseDown={(ev) => ev.stopPropagation()}
                       onClick={(ev) => { ev.stopPropagation(); setEditing(a) }}
-                      className="absolute inset-x-0.5 rounded border px-1 py-0.5 overflow-hidden text-left bg-[#fff848] border-yellow-500 hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/30"
+                      className="absolute inset-x-0.5 rounded border px-1 py-0.5 overflow-hidden text-left bg-gray-100 border-gray-400 hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/30"
                       style={{ top: yOf(s, day), height: Math.max(16, yOf(e, day) - yOf(s, day)), zIndex: 10 }}
                       title={`${a.company ?? 'Afspraak'} — ${hhmm(s)}–${hhmm(e)} · klik om te bewerken`}>
                       <div className="text-[10px] font-semibold text-black truncate">{a.company ?? 'Afspraak'}</div>
@@ -435,7 +435,7 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId, initi
       <p className="text-[11px] text-gray-500">
         <span className="inline-block h-2.5 w-2.5 bg-white border border-gray-300 align-middle mr-1" /> vrij — sleep hierop om te boeken ·
         <span className="inline-block h-2.5 w-2.5 bg-gray-100 border border-gray-300 align-middle mx-1" /> niet beschikbaar (buiten werkuren, bezet of buffer) ·
-        <span className="inline-block h-2.5 w-2.5 bg-[#fff848] border border-yellow-500 align-middle mx-1" /> geboekt — klik erop om te bewerken
+        <span className="inline-block h-2.5 w-2.5 bg-gray-100 border border-gray-400 align-middle mx-1" /> geboekt — klik erop om te bewerken
       </p>
 
       {booking && (
@@ -564,7 +564,7 @@ function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
           <div>
@@ -651,7 +651,7 @@ function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId
           </div>
 
           <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-            <input type="checkbox" checked={withMeet} onChange={(e) => setWithMeet(e.target.checked)} className="h-4 w-4 rounded border-gray-300 accent-[#fff848]" />
+            <input type="checkbox" checked={withMeet} onChange={(e) => setWithMeet(e.target.checked)} className="h-4 w-4 rounded border-gray-300 accent-gray-900" />
             <span className="flex items-center gap-1.5"><Video className="h-3.5 w-3.5 text-gray-400" />Google Meet-link toevoegen</span>
           </label>
 

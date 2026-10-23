@@ -7,7 +7,7 @@ import { estimateSocialContribution, type FiscalSettings } from '@/lib/finance'
 import { GetalInvoer } from '@/components/ui/getal-invoer'
 
 const euro = (n: number) => new Intl.NumberFormat('nl-BE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
-const inpCls = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]'
+const inpCls = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900'
 const lblCls = 'block text-xs font-medium text-gray-600 mb-1'
 
 /**
@@ -81,7 +81,7 @@ export function FiscalSettingsForm({ settings, ebitdaFY }: { settings: FiscalSet
             <input className={inpCls} value={f.statuut} onChange={e => set('statuut', e.target.value)} placeholder="zaakvoerder" />
           </div>
           <label className="flex items-end gap-2 pb-2 text-sm">
-            <input type="checkbox" className="h-4 w-4 accent-[#fff848]" checked={f.include_social_as_cost} onChange={e => set('include_social_as_cost', e.target.checked)} />
+            <input type="checkbox" className="h-4 w-4 accent-gray-900" checked={f.include_social_as_cost} onChange={e => set('include_social_as_cost', e.target.checked)} />
             <span>Sociale bijdragen als kost meenemen</span>
           </label>
         </div>
@@ -99,14 +99,14 @@ export function FiscalSettingsForm({ settings, ebitdaFY }: { settings: FiscalSet
         <h2 className="font-semibold text-gray-900 flex items-center gap-2 mb-1"><Settings2 className="h-4 w-4 text-gray-400" />Fiscale instellingen · boekjaar {f.year}</h2>
         <p className="text-xs text-gray-500 mb-4">Aanpasbaar omdat tarieven jaarlijks wijzigen. Indicatief — controleer met de boekhouder.</p>
 
-        <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-2">Vennootschapsbelasting</div>
+        <div className="text-[11px] font-medium text-gray-400 mb-2">Vennootschapsbelasting</div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
           <NumField label="Standaardtarief" suffix="%" value={f.corporate_tax_pct} onChange={v => set('corporate_tax_pct', v)} />
           <NumField label="Verlaagd tarief" suffix="%" value={f.reduced_tax_pct} onChange={v => set('reduced_tax_pct', v)} />
           <NumField label="Grens verlaagd tarief" suffix="€" step="1000" value={f.reduced_tax_limit} onChange={v => set('reduced_tax_limit', v)} />
         </div>
 
-        <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-2">Sociale bijdragen</div>
+        <div className="text-[11px] font-medium text-gray-400 mb-2">Sociale bijdragen</div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <NumField label="% schijf 1" suffix="%" value={f.social_pct_band1} onChange={v => set('social_pct_band1', v)} />
           <NumField label="% schijf 2" suffix="%" value={f.social_pct_band2} onChange={v => set('social_pct_band2', v)} />
@@ -121,7 +121,7 @@ export function FiscalSettingsForm({ settings, ebitdaFY }: { settings: FiscalSet
           <NumField label="Aanvullend vast bedrag" suffix="€/jaar" step="10" value={f.extra_fixed} onChange={v => set('extra_fixed', v)} />
         </div>
 
-        <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-2 mt-4">Cash, BTW &amp; uitkering</div>
+        <div className="text-[11px] font-medium text-gray-400 mb-2 mt-4">Cash, BTW &amp; uitkering</div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <NumField label="BTW-percentage" suffix="%" value={f.vat_pct} onChange={v => set('vat_pct', v)} />
           <NumField label="Cash reserve" suffix="%" value={f.cash_reserve_pct} onChange={v => set('cash_reserve_pct', v)} />

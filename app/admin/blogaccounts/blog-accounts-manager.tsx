@@ -151,7 +151,7 @@ function GenerateDialog({ account, onClose, onDone }: { account: Account; onClos
 
   const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg'
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
           <h3 className="font-semibold">Blog genereren — {account.name}</h3>
@@ -225,7 +225,7 @@ function ProjectDialog({ account, clients, onClose, onSaved }: { account: Accoun
 
   const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg'
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90dvh] overflow-y-auto">
         <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white">
           <h3 className="font-semibold">{isEdit ? 'Blogproject bewerken' : 'Nieuw blogproject'}</h3>
@@ -246,14 +246,14 @@ function ProjectDialog({ account, clients, onClose, onSaved }: { account: Accoun
           </div>
 
           <div className="border-t border-gray-100 pt-3 space-y-3">
-            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">Framer</div>
+            <div className="text-xs font-medium text-gray-500">Framer</div>
             <div><label className="block text-xs text-gray-600 mb-1">Framer project</label><input className={inp} value={f.framer_project_url} onChange={(e) => setF((x) => ({ ...x, framer_project_url: e.target.value }))} placeholder="https://…framer…" /></div>
             <div><label className="block text-xs text-gray-600 mb-1">Toegangssleutel {account?.has_api_key && <span className="text-green-600">· ingesteld</span>}</label><input type="password" className={inp} value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={account?.has_api_key ? '•••••• (laat leeg om te behouden)' : 'Plak hier de sleutel'} /></div>
             <p className="text-[11px] text-gray-400">Bij opslaan koppelt de app automatisch de juiste blogcollectie en velden.</p>
           </div>
 
           <div className="border-t border-gray-100 pt-3 space-y-3">
-            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide flex items-center gap-1.5"><BookOpen className="h-3.5 w-3.5" />Kennisbank (optioneel — AI gebruikt dit met voorrang)</div>
+            <div className="text-xs font-medium text-gray-500 flex items-center gap-1.5"><BookOpen className="h-3.5 w-3.5" />Kennisbank (optioneel — AI gebruikt dit met voorrang)</div>
             <div><label className="block text-xs text-gray-600 mb-1">Bedrijfsinformatie</label><textarea rows={2} className={inp} value={kn.bedrijfsinformatie} onChange={(e) => setKn((x) => ({ ...x, bedrijfsinformatie: e.target.value }))} /></div>
             <div className="grid grid-cols-2 gap-3">
               <div><label className="block text-xs text-gray-600 mb-1">Doelgroep</label><input className={inp} value={kn.doelgroep} onChange={(e) => setKn((x) => ({ ...x, doelgroep: e.target.value }))} /></div>

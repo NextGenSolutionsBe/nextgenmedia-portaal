@@ -373,7 +373,7 @@ De lead, de tijdlijn, notities en activiteiten verdwijnen definitief. Afspraken 
           {/* Advies van Harrie */}
           {lead.harrie?.belAdvies && (
             <div className={`rounded-xl border px-3 py-2 ${lead.harrie.reageerde ? 'border-orange-300 bg-orange-50' : 'border-gray-200 bg-gray-50'}`}>
-              <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-0.5 flex items-center gap-1">
+              <div className="text-[10px] text-gray-500 mb-0.5 flex items-center gap-1">
                 {lead.harrie.reageerde ? <Flame className="h-3 w-3 text-orange-600" /> : <Bot className="h-3 w-3" />}Advies van Harrie
               </div>
               <p className="text-[13px] text-gray-900 font-medium leading-snug">{lead.harrie.belAdvies}</p>
@@ -382,7 +382,7 @@ De lead, de tijdlijn, notities en activiteiten verdwijnen definitief. Afspraken 
 
           {/* Interne notities */}
           <section>
-            <h3 className="text-[11px] uppercase tracking-wide text-gray-400 font-bold mb-2 flex items-center gap-1">
+            <h3 className="text-[11px] text-gray-400 font-bold mb-2 flex items-center gap-1">
               <StickyNote className="h-3 w-3" />Interne notities
             </h3>
             <div className="flex gap-2 mb-2">
@@ -439,7 +439,7 @@ De lead, de tijdlijn, notities en activiteiten verdwijnen definitief. Afspraken 
 
           {/* Tijdlijn (met afspraakgegevens bovenaan) */}
           <section>
-            <h3 className="text-[11px] uppercase tracking-wide text-gray-400 font-bold mb-2 flex items-center gap-1">
+            <h3 className="text-[11px] text-gray-400 font-bold mb-2 flex items-center gap-1">
               <History className="h-3 w-3" />Tijdlijn
             </h3>
             <LeadTijdlijn leadId={lead.id} verversSleutel={ververs} max={40} />

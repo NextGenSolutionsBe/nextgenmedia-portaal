@@ -217,7 +217,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold">Vesting</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold">Vesting</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             Het vestigingsprincipe uit de samenwerkingsovereenkomst — uitsluitend informatief, wijzigt geen aandelen.
           </p>
@@ -269,22 +269,22 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
 
           {/* Aandeelhouders */}
           <div>
-            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5"><Users className="h-3.5 w-3.5" />Actuele aandelenverdeling (voorlopig)</div>
+            <div className="text-xs font-medium text-gray-500 mb-2 flex items-center gap-1.5"><Users className="h-3.5 w-3.5" />Actuele aandelenverdeling (voorlopig)</div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="stat-card"><div className="font-semibold mb-1">Bram Reinquin</div><div className="text-2xl font-bold">{pct(v.bram)}</div><div className="text-xs text-gray-400 mt-1">start {pct(inst.startaandeel_bram)} · krijgt wat Marco niet verwerft</div></div>
               <div className="stat-card"><div className="font-semibold mb-1">Chiara Walmagh</div><div className="text-2xl font-bold">{pct(v.chiara)}</div><div className="text-xs text-gray-400 mt-1">vast — wijzigt nooit</div></div>
-              <div className="stat-card border-[#fff848]"><div className="font-semibold mb-1">Marco Castermans</div><div className="text-2xl font-bold">{pct(v.marcoVoorlopig)}</div><div className="text-xs text-gray-400 mt-1">definitief {pct(v.marcoDefinitief)} · maximum {pct(inst.max_aandeel_marco)}</div></div>
+              <div className="stat-card border-gray-900"><div className="font-semibold mb-1">Marco Castermans</div><div className="text-2xl font-bold">{pct(v.marcoVoorlopig)}</div><div className="text-xs text-gray-400 mt-1">definitief {pct(v.marcoDefinitief)} · maximum {pct(inst.max_aandeel_marco)}</div></div>
             </div>
           </div>
 
           {/* Voortgang */}
           <div className="card-base">
-            <h2 className="font-semibold mb-1 flex items-center gap-2"><Rocket className="h-4 w-4 text-[#c5b800]" />Vestigingsprogressie Marco</h2>
+            <h2 className="font-semibold mb-1 flex items-center gap-2"><Rocket className="h-4 w-4 text-gray-500" />Vestigingsprogressie Marco</h2>
             <p className="text-xs text-gray-400 mb-4">
               WAM {pct(v.wam.voorlopig)} + contracten {pct(Math.max(0, v.marcoVoorlopig - v.wam.voorlopig))}. Hele procenten, afgekapt — zo staat het in de overeenkomst.
             </p>
             <div className="h-3 bg-gray-100 rounded-full overflow-hidden relative">
-              <div className="h-full bg-[#fff848] rounded-full absolute left-0 top-0" style={{ width: `${balk}%` }} />
+              <div className="h-full bg-gray-900 rounded-full absolute left-0 top-0" style={{ width: `${balk}%` }} />
               <div className="h-full bg-green-500 rounded-full absolute left-0 top-0" style={{ width: `${balkDef}%` }} />
             </div>
             <div className="flex justify-between text-[11px] text-gray-400 mt-1"><span>0%</span><span>{pct(inst.max_aandeel_marco)}</span></div>
@@ -402,7 +402,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                   </tr></thead>
                   <tbody className="divide-y divide-gray-50">
                     {v.contracten.map((c) => (
-                      <tr key={c.id} className={`cursor-pointer ${openContract === c.id ? 'bg-[#fff848]/20' : 'hover:bg-gray-50'}`} onClick={() => setOpenContract(openContract === c.id ? null : c.id)}>
+                      <tr key={c.id} className={`cursor-pointer ${openContract === c.id ? 'bg-gray-100' : 'hover:bg-gray-50'}`} onClick={() => setOpenContract(openContract === c.id ? null : c.id)}>
                         <td className="table-td text-gray-400">{openContract === c.id ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</td>
                         <td className="table-td">
                           <div className="font-medium">{c.klant}</div>
@@ -535,7 +535,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                       const freq = FREQUENTIES.find((f) => f.key === r.frequentie)
                       return (
                         <WamRijen key={r.id}>
-                          <tr className={`cursor-pointer ${open ? 'bg-[#fff848]/20' : 'hover:bg-gray-50'}`} onClick={() => setOpenWam(open ? null : r.id)}>
+                          <tr className={`cursor-pointer ${open ? 'bg-gray-100' : 'hover:bg-gray-50'}`} onClick={() => setOpenWam(open ? null : r.id)}>
                             <td className="table-td text-gray-400">{open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</td>
                             <td className="table-td">
                               <div className="font-medium">{r.klant}</div>
@@ -857,7 +857,7 @@ function ContractDialoog({ contract, inst, module, klanten, onClose }: { contrac
       <Veld label="Notitie" value={f.notitie} onChange={(v) => set('notitie', v)} />
 
       {/* Wat dit contract oplevert, live. */}
-      <div className="rounded-xl bg-[#fff848]/20 border border-yellow-300 p-3 text-sm grid grid-cols-3 gap-3">
+      <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-sm grid grid-cols-3 gap-3">
         <div><div className="text-[11px] text-gray-500">Totaal</div><div className="font-semibold">{totaal === null ? '—' : formatEuro(totaal)}</div></div>
         <div><div className="text-[11px] text-gray-500">Netto kwalificerend</div><div className="font-semibold">{netto === null ? '—' : formatEuro(netto)}</div></div>
         <div><div className="text-[11px] text-gray-500">Meetellend</div><div className="font-semibold">{meetellendLive === null ? '—' : formatEuro(meetellendLive)}</div></div>
@@ -1579,7 +1579,7 @@ function KoppelContract({ doel, module, onClose }: { doel: { resource: 'contract
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Koppelen mislukt'); setBezig(null) }
   }
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" role="dialog" aria-modal="true">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85dvh] flex flex-col overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 space-y-2">
           <div className="flex items-center justify-between gap-2"><h3 className="font-semibold truncate">Contract koppelen · {doel.titel}</h3><button type="button" onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-gray-100" aria-label="Sluiten"><X className="h-4 w-4" /></button></div>
@@ -1587,7 +1587,7 @@ function KoppelContract({ doel, module, onClose }: { doel: { resource: 'contract
         </div>
         <ul className="flex-1 overflow-y-auto divide-y divide-gray-100 text-sm">
           {lijst.map((m) => (
-            <li key={m.id} className={`px-5 py-2.5 flex items-center gap-3 ${m.id === doel.huidig ? 'bg-[#fff848]/20' : ''}`}>
+            <li key={m.id} className={`px-5 py-2.5 flex items-center gap-3 ${m.id === doel.huidig ? 'bg-gray-100' : ''}`}>
               <div className="flex-1 min-w-0">
                 <div className="truncate font-medium">{m.titel}</div>
                 <div className="text-[11px] text-gray-500 truncate">{m.klant ?? 'geen klant'} · {CONTRACT_STATUS_LABEL[m.status] ?? m.status}{m.signed_at ? ` · getekend ${formatDate(m.signed_at)}` : ''}{m.client_id && m.client_id === doel.client_id ? ' · zelfde klant' : ''}</div>
@@ -1722,7 +1722,7 @@ function useSluitNaVerversen(onClose: () => void) {
 function Kpi({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
   return (
     <div className="stat-card">
-      <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">{label}</div>
+      <div className="text-xs text-gray-500 mb-2">{label}</div>
       <div className={`text-2xl font-bold ${color ?? ''}`}>{value}</div>
       {sub && <div className="text-xs text-gray-400 mt-1">{sub}</div>}
     </div>
@@ -1736,8 +1736,8 @@ function StopBerekening({ totaal, betaald, factor }: { totaal: number | null; be
       <div className="rounded-lg bg-white border border-gray-200 px-2.5 py-2"><div className="text-[11px] text-gray-500">Volledige contractwaarde</div><div className="font-semibold tabular">{totaal === null ? '—' : formatEuro(totaal)}</div></div>
       <div className="rounded-lg bg-white border border-gray-200 px-2.5 py-2"><div className="text-[11px] text-gray-500">Werkelijk betaald</div><div className="font-semibold tabular">{betaald === null ? <span className="text-amber-700 font-normal text-xs">nog in te vullen</span> : formatEuro(betaald)}</div></div>
       <div className="rounded-lg bg-white border border-gray-200 px-2.5 py-2"><div className="text-[11px] text-gray-500">Vestingpercentage Marco</div><div className="font-semibold tabular">{pctTekst}</div></div>
-      <div className="rounded-lg bg-[#fff848]/40 border border-yellow-300 px-2.5 py-2"><div className="text-[11px] text-gray-600">In Marco's vesting</div><div className="font-bold tabular">{formatEuro(betaald === null ? 0 : Math.max(0, betaald) * factor)}</div>
-        <div className="text-[10px] text-gray-500">{betaald === null ? 'telt voor €0 tot ingevuld' : `${formatEuro(betaald)} × ${pctTekst}`}</div></div>
+      <div className="rounded-lg bg-gray-900 text-white border border-gray-900 px-2.5 py-2"><div className="text-[11px] text-gray-300">In Marco's vesting</div><div className="font-semibold tabular">{formatEuro(betaald === null ? 0 : Math.max(0, betaald) * factor)}</div>
+        <div className="text-[10px] text-gray-400">{betaald === null ? 'telt voor €0 tot ingevuld' : `${formatEuro(betaald)} × ${pctTekst}`}</div></div>
     </div>
   )
 }
@@ -1804,7 +1804,7 @@ function Dialoog({ titel, children, onClose, onSave, bezig, breed }: {
   titel: string; children: React.ReactNode; onClose: () => void; onSave: () => void; bezig: boolean; breed?: boolean
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30">
       <div className={`bg-white rounded-2xl shadow-xl w-full ${breed ? 'max-w-2xl' : 'max-w-md'} max-h-[92dvh] flex flex-col overflow-hidden`}>
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
           <h3 className="font-semibold text-gray-900">{titel}</h3>

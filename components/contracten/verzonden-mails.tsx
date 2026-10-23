@@ -121,7 +121,7 @@ function MailDetail({ id, onSluit, onVernieuwd }: { id: string; onSluit: () => v
             </dl>
             {m.provider_id && <button type="button" onClick={vernieuw} disabled={bezig} className="btn-secondary text-xs">{bezig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}Afleverstatus opvragen</button>}
             <div>
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Verstuurde inhoud</div>
+              <div className="text-[11px] font-semibold text-gray-500 mb-1">Verstuurde inhoud</div>
               {m.html ? <iframe title="Verstuurde mail" sandbox="" srcDoc={m.html} className="w-full h-[420px] rounded-lg border border-gray-200 bg-white" />
                 : m.body ? <><pre className="whitespace-pre-wrap text-sm text-gray-800 rounded-lg border border-gray-200 bg-gray-50 p-3 font-sans">{m.body}</pre><p className="text-[11px] text-gray-500 mt-1">Van deze oudere mail is enkel de tekst bewaard, niet de opgemaakte versie.</p></>
                 : <p className="text-sm text-gray-400">Geen inhoud bewaard.</p>}

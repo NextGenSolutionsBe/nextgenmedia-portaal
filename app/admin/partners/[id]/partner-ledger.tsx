@@ -115,7 +115,7 @@ export function PartnerLedger({ partnerId, clients }: Props) {
       </div>
 
       {modal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4 max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-lg">{modalTitle[modal]}</h3>

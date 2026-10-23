@@ -276,14 +276,14 @@ export function ContractsClient({
     } finally { setVerwijderBezig(null) }
   }
 
-  const sel = 'px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]'
+  const sel = 'px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900'
 
   return (
     <div className="space-y-6 animate-fade-in">
       <ContractTabs />
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold">Contracten</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold">Contracten</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             {cijfers.mappen} klantmap{cijfers.mappen === 1 ? '' : 'pen'} · {cijfers.contracten} van {contracten.length} contracten
           </p>
@@ -372,7 +372,7 @@ export function ContractsClient({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Zoek op klantnaam, contractnaam of contracttype…"
-              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]"
+              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900"
             />
           </div>
           <select className={`${sel} w-full`} value={filterType} onChange={(e) => setFilterType(e.target.value)} aria-label="Contracttype">
@@ -511,7 +511,7 @@ export function ContractsClient({
                 >
                   <ChevronRight className={`h-4 w-4 text-gray-400 shrink-0 transition-transform ${geopend ? 'rotate-90' : ''}`} />
                   {geopend
-                    ? <FolderOpen className="h-5 w-5 text-[#d6cf00] shrink-0" />
+                    ? <FolderOpen className="h-5 w-5 text-gray-500 shrink-0" />
                     : <Folder className="h-5 w-5 text-gray-400 shrink-0" />}
                   <div className="min-w-0 flex-1">
                     <div className="font-semibold truncate">
@@ -557,7 +557,7 @@ export function ContractsClient({
                             const type = typeVanContract(c.contract_type)
                             const treffer = treffers.has(c.id)
                             return (
-                              <tr key={c.id} className={`transition-colors ${treffer ? 'bg-[#fff848]/20 hover:bg-[#fff848]/30' : 'hover:bg-gray-50'}`}>
+                              <tr key={c.id} className={`transition-colors ${treffer ? 'bg-gray-100 hover:bg-gray-200' : 'hover:bg-gray-50'}`}>
                                 <td className="table-td">
                                   <Link href={`/admin/contracts/${c.id}`} className="font-medium hover:text-black">
                                     {c.title}

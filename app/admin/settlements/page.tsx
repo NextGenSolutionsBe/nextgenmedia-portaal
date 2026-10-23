@@ -68,29 +68,29 @@ export default async function SettlementsPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold">Settlements</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold">Settlements</h1>
         <p className="text-sm text-gray-500 mt-0.5">Openstaande balansen tussen NextGenMedia en partners — commissie (beide richtingen) en onderaanneming, na aftrek van geregistreerde betalingen</p>
       </div>
 
       {/* KPI's */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="stat-card">
-          <div className="flex items-center justify-between mb-3"><span className="text-xs text-gray-500 uppercase tracking-wide">Wij moeten betalen</span><TrendingUp className="h-4 w-4 text-green-500" /></div>
+          <div className="flex items-center justify-between mb-3"><span className="text-xs text-gray-500">Wij moeten betalen</span><TrendingUp className="h-4 w-4 text-green-500" /></div>
           <div className="text-2xl font-bold text-green-600">{formatEuro(totalWePay)}</div>
           <div className="text-xs text-gray-400 mt-1">aan partners</div>
         </div>
         <div className="stat-card">
-          <div className="flex items-center justify-between mb-3"><span className="text-xs text-gray-500 uppercase tracking-wide">Partners moeten ons</span><TrendingDown className="h-4 w-4 text-red-500" /></div>
+          <div className="flex items-center justify-between mb-3"><span className="text-xs text-gray-500">Partners moeten ons</span><TrendingDown className="h-4 w-4 text-red-500" /></div>
           <div className="text-2xl font-bold text-red-600">{formatEuro(totalPartnerPays)}</div>
           <div className="text-xs text-gray-400 mt-1">te ontvangen</div>
         </div>
         <div className="stat-card">
-          <div className="flex items-center justify-between mb-3"><span className="text-xs text-gray-500 uppercase tracking-wide">Open saldo totaal</span><Wallet className="h-4 w-4 text-[#c5b800]" /></div>
+          <div className="flex items-center justify-between mb-3"><span className="text-xs text-gray-500">Open saldo totaal</span><Wallet className="h-4 w-4 text-gray-500" /></div>
           <div className="text-2xl font-bold">{formatEuro(openTotal)}</div>
           <div className="text-xs text-gray-400 mt-1">nog te vereffenen</div>
         </div>
         <div className="stat-card">
-          <div className="flex items-center justify-between mb-3"><span className="text-xs text-gray-500 uppercase tracking-wide">Open settlements</span><ArrowLeftRight className="h-4 w-4 text-gray-400" /></div>
+          <div className="flex items-center justify-between mb-3"><span className="text-xs text-gray-500">Open settlements</span><ArrowLeftRight className="h-4 w-4 text-gray-400" /></div>
           <div className="text-2xl font-bold">{rows.length}</div>
           <div className="text-xs text-gray-400 mt-1">{pendingApprovals > 0 ? <span className="text-amber-600 inline-flex items-center gap-1"><Clock className="h-3 w-3" />{pendingApprovals} betaling(en) te keuren</span> : 'partners met saldo'}</div>
         </div>

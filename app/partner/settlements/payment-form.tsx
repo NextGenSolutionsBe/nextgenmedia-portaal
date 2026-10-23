@@ -35,7 +35,7 @@ export function PartnerPaymentForm() {
     <>
       <button onClick={() => { setError(null); setOpen(true) }} className="btn-primary text-sm"><Plus className="h-4 w-4" />Betaling registreren</button>
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center justify-between p-5 border-b border-gray-100">
               <div>
@@ -48,7 +48,7 @@ export function PartnerPaymentForm() {
               <div className="grid grid-cols-1 gap-2">
                 {([['partner_pays_us', 'Ik heb NextGenMedia betaald'], ['we_pay_partner', 'NextGenMedia heeft mij betaald']] as const).map(([val, label]) => (
                   <button key={val} type="button" onClick={() => setForm((f) => ({ ...f, direction: val }))}
-                    className={`text-left rounded-lg border p-3 text-sm transition-colors ${form.direction === val ? 'border-[#fff848] bg-[#fff848]/10 ring-1 ring-[#fff848]' : 'border-gray-200 hover:border-gray-300'}`}>
+                    className={`text-left rounded-lg border p-3 text-sm transition-colors ${form.direction === val ? 'border-gray-900 bg-gray-100 ring-1 ring-gray-900' : 'border-gray-200 hover:border-gray-300'}`}>
                     {label}
                   </button>
                 ))}

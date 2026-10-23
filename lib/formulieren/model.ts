@@ -150,7 +150,7 @@ export const isFormulierStatus = (v: unknown): v is FormulierStatus => typeof v 
 export const INZENDING_STATUSSEN = ['nieuw', 'gezien', 'verwerkt'] as const
 export type InzendingStatus = (typeof INZENDING_STATUSSEN)[number]
 export const INZENDING_STATUS_INFO: Record<InzendingStatus, { label: string; kleur: string }> = {
-  nieuw: { label: 'Nieuw', kleur: 'bg-[#fff848]/40 text-gray-900' },
+  nieuw: { label: 'Nieuw', kleur: 'bg-gray-200 text-gray-900' },
   gezien: { label: 'Gezien', kleur: 'bg-blue-100 text-blue-700' },
   verwerkt: { label: 'Verwerkt', kleur: 'bg-green-100 text-green-700' },
 }

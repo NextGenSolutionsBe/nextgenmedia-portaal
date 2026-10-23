@@ -112,7 +112,7 @@ export default async function FinanceOverviewPage({ searchParams }: { searchPara
                     <span className="font-medium">{SERVICE_LABELS[slug] ?? 'Overig'}</span>
                     <span>{formatEuro(amount)} <span className="text-gray-400">({pct.toFixed(0)}%)</span></span>
                   </div>
-                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-[#fff848] rounded-full" style={{ width: `${pct}%` }} /></div>
+                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-gray-900 rounded-full" style={{ width: `${pct}%` }} /></div>
                 </div>
               )
             })}

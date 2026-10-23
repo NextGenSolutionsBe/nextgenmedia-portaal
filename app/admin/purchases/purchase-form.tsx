@@ -46,7 +46,7 @@ export function PurchaseForm({ purchase, onClose }: { purchase?: BewerkbareAanvr
   const [overzicht, setOverzicht] = useState(false)
   const [opmerking, setOpmerking] = useState('')
 
-  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]'
+  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900'
   const lbl = 'block text-xs font-medium text-gray-600 mb-1'
   const excl = leesGetal(form.amount_excl) ?? 0
   const incl = excl * (1 + (leesGetal(form.vat_pct) ?? 0) / 100)
@@ -109,7 +109,7 @@ export function PurchaseForm({ purchase, onClose }: { purchase?: BewerkbareAanvr
   if (!open) return <button onClick={() => setOpen(true)} className="btn-primary"><Plus className="h-4 w-4" />Aankoop aanvragen</button>
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90dvh] overflow-y-auto">
         <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl">
           <h3 className="font-semibold flex items-center gap-2">{bewerken ? <><Pencil className="h-4 w-4 text-gray-400" />Aanvraag aanpassen{purchase?.reference ? <span className="text-xs font-normal text-gray-400">{purchase.reference} · versie {purchase.version}</span> : null}</> : 'Aankoopaanvraag'}</h3>
@@ -129,7 +129,7 @@ export function PurchaseForm({ purchase, onClose }: { purchase?: BewerkbareAanvr
               <div className="text-sm rounded-lg px-3 py-2.5 border bg-amber-50 border-amber-200 text-amber-900">Eerder gegeven goedkeuringen vervallen door deze wijziging; de zaakvoerders moeten opnieuw goedkeuren.</div>
             )}
             <div className="table-wrap"><KaartTabel><table className="w-full text-sm">
-              <thead><tr className="border-b border-gray-100 text-left text-[11px] uppercase tracking-wide text-gray-500"><th className="py-1.5">Veld</th><th className="py-1.5">Was</th><th className="py-1.5">Wordt</th></tr></thead>
+              <thead><tr className="border-b border-gray-100 text-left text-[11px] text-gray-500"><th className="py-1.5">Veld</th><th className="py-1.5">Was</th><th className="py-1.5">Wordt</th></tr></thead>
               <tbody className="divide-y divide-gray-50">
                 {wijzigingen.map((w) => (
                   <tr key={w.veld}><td className="py-1.5 font-medium">{LABEL[w.veld]}</td><td className="py-1.5 text-gray-500 line-through">{toon(w.veld, w.was)}</td><td className="py-1.5 font-semibold">{toon(w.veld, w.wordt)}</td></tr>

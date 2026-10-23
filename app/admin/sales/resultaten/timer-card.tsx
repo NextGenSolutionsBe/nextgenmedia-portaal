@@ -98,12 +98,12 @@ export function TimerCard({ alreadyEarnedCents, onChanged }: {
 
       <div className="mt-4 grid sm:grid-cols-2 gap-3">
         <div className="rounded-xl border border-gray-200/80 bg-gray-50 p-4">
-          <div className="text-[11px] uppercase tracking-wider text-gray-500 mb-1">Deze sessie</div>
+          <div className="text-[11px] text-gray-500 mb-1">Deze sessie</div>
           <div className="text-3xl font-bold tabular tracking-tight">{clockText(seconds)}</div>
           <div className="text-sm text-gray-600 mt-1 tabular">{liveEuro(seconds, rate)}</div>
         </div>
-        <div className="rounded-xl border border-[#fff848] bg-[#fff848]/15 p-4">
-          <div className="text-[11px] uppercase tracking-wider text-gray-600 mb-1">Deze maand verdiend (uren)</div>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+          <div className="text-[11px] text-gray-600 mb-1">Deze maand verdiend (uren)</div>
           <div className="text-3xl font-bold tabular tracking-tight">
             {euro(alreadyEarnedCents + sessionCents)}
           </div>

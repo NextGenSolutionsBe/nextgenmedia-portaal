@@ -128,7 +128,7 @@ export function WeekKalender({ maandag, items, onSelectie, lanen, vanUur = 7, to
           <div />
           {dagen.map((d, i) => (
             <div key={d} className={`text-center text-xs py-1.5 font-medium ${d === vandaag ? 'text-black' : 'text-gray-500'}`}>
-              <span className={d === vandaag ? 'bg-[#fff848] rounded-md px-1.5 py-0.5' : ''}>{DAGEN[i]} {kort(d)}</span>
+              <span className={d === vandaag ? 'bg-gray-900 text-white rounded px-1.5 py-0.5' : ''}>{DAGEN[i]} {kort(d)}</span>
             </div>
           ))}
         </div>
@@ -144,7 +144,7 @@ export function WeekKalender({ maandag, items, onSelectie, lanen, vanUur = 7, to
             const dagItems = items.filter((i) => i.datum === datum)
             return (
               <div key={datum}
-                className={`relative border-r border-gray-100 last:border-r-0 select-none ${onSelectie ? 'cursor-crosshair' : ''} ${datum === vandaag ? 'bg-[#fff848]/5' : ''}`}
+                className={`relative border-r border-gray-100 last:border-r-0 select-none ${onSelectie ? 'cursor-crosshair' : ''} ${datum === vandaag ? 'bg-gray-50' : ''}`}
                 style={{ height: hoogte, backgroundImage: `repeating-linear-gradient(to bottom, #f3f4f6 0, #f3f4f6 1px, transparent 1px, transparent ${UUR_PX}px)`, touchAction: 'pan-y' }}
                 onPointerDown={(e) => start(e, datum)} onPointerMove={beweeg} onPointerUp={stop} onPointerCancel={() => { drag.current = null; setSel(null) }}>
                 {dagItems.sort((a, b) => (a.soort === b.soort ? 0 : a.soort === 'beschikbaar' ? -1 : 1)).map((it) => {
@@ -176,7 +176,7 @@ export function WeekKalender({ maandag, items, onSelectie, lanen, vanUur = 7, to
                   )
                 })}
                 {sel && sel.datum === datum && (
-                  <div className="absolute inset-x-0.5 rounded-md border-2 border-black/70 bg-[#fff848]/40 pointer-events-none z-10"
+                  <div className="absolute inset-x-0.5 rounded-md border-2 border-black/70 bg-gray-200 pointer-events-none z-10"
                     style={{ top: ((sel.a - vanUur * 60) / 60) * UUR_PX, height: Math.max(8, ((sel.b - sel.a) / 60) * UUR_PX) }}>
                     <div className="text-[10px] font-semibold px-1">{uur(sel.a)}–{uur(sel.b)}</div>
                   </div>

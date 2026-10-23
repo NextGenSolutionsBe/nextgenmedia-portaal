@@ -176,7 +176,7 @@ export function ContracttypeKiezer({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => void nieuwBewaren()}
                 disabled={bezig}
-                className="w-full text-left px-3 py-2 text-sm border-t border-gray-100 text-gray-900 hover:bg-[#fff848]/30 flex items-center gap-2"
+                className="w-full text-left px-3 py-2 text-sm border-t border-gray-100 text-gray-900 hover:bg-gray-200 flex items-center gap-2"
               >
                 {bezig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
                 <span className="truncate">Nieuw type: <strong>{normaliseerType(tekst)}</strong></span>

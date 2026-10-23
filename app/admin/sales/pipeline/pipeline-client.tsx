@@ -754,7 +754,7 @@ function Kaart({
           <IkoonKnop titel="Interne notitie toevoegen" onClick={() => onDialoog('notitie')}><StickyNote className="h-3.5 w-3.5" /></IkoonKnop>
           <IkoonKnop titel="Opvolgdatum instellen" onClick={() => onDialoog('opvolg')}><CalendarClock className="h-3.5 w-3.5" /></IkoonKnop>
           <Link href={`/admin/sales/appointments?lead=${lead.id}`} title="Afspraak plannen" draggable={false}
-            className="h-7 w-7 flex items-center justify-center rounded-md text-gray-500 hover:bg-[#fff848]/60 hover:text-black">
+            className="h-7 w-7 flex items-center justify-center rounded-md text-gray-500 hover:bg-gray-200 hover:text-black">
             <CalendarPlus className="h-3.5 w-3.5" />
           </Link>
         </div>
@@ -777,7 +777,7 @@ function Kaart({
 function Totaal({ label, waarde, onder, kleur = 'text-gray-900' }: { label: string; waarde: string; onder?: string; kleur?: string }) {
   return (
     <div className="rounded-xl border border-gray-200 bg-white px-2.5 sm:px-3 py-2 min-w-0">
-      <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 truncate">{label}</div>
+      <div className="text-[10px] font-semibold text-gray-400 truncate">{label}</div>
       <div className={`text-base sm:text-lg font-bold tabular-nums leading-tight truncate ${kleur}`}>{waarde}</div>
       {onder && <div className="hidden sm:block text-[10px] text-gray-400">{onder}</div>}
     </div>
@@ -818,5 +818,5 @@ function Markeer({ tekst, term }: { tekst: string; term: string }) {
   const at = plat.indexOf(term)
   if (at < 0 || !term) return <>{tekst}</>
   const van = kaart[at], tot = kaart[at + term.length - 1] + 1
-  return <>{tekst.slice(0, van)}<mark className="bg-[#fff848] rounded px-0.5">{tekst.slice(van, tot)}</mark>{tekst.slice(tot)}</>
+  return <>{tekst.slice(0, van)}<mark className="bg-gray-200 text-gray-900 rounded px-0.5">{tekst.slice(van, tot)}</mark>{tekst.slice(tot)}</>
 }

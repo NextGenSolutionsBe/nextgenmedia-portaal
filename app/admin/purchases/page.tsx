@@ -52,7 +52,7 @@ export default async function PurchasesPage() {
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold">Aankopen</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold">Aankopen</h1>
           <p className="text-sm text-gray-500 mt-0.5">Aankopen boven €1.000 (incl. btw) vereisen goedkeuring van de twee andere zaakvoerders</p>
         </div>
         <PurchaseForm />

@@ -109,7 +109,7 @@ export function ClickUpSyncControl({ clientId }: { clientId: string }) {
           title="ClickUp-sync aan/uit voor deze klant"
         >
           <span
-            className={`relative h-5 w-9 rounded-full transition-colors ${status.enabled ? 'bg-[#c5b800]' : 'bg-gray-300'}`}
+            className={`relative h-5 w-9 rounded-full transition-colors ${status.enabled ? 'bg-gray-900' : 'bg-gray-300'}`}
           >
             <span
               className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${status.enabled ? 'left-[18px]' : 'left-0.5'}`}

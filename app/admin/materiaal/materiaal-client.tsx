@@ -110,7 +110,7 @@ export function MateriaalClient({ startData = null, startTab }: { startData?: Da
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold">Materiaalbeheer</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold">Materiaalbeheer</h1>
           <p className="text-sm text-gray-500">Wat hebben we, wat is beschikbaar en wie heeft wat sinds wanneer.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
@@ -136,7 +136,7 @@ export function MateriaalClient({ startData = null, startTab }: { startData?: Da
 
       <div role="tablist" aria-label="Materiaalbeheer" className="inline-flex rounded-xl border border-gray-200 bg-gray-50 p-1 max-w-full overflow-x-auto">
         {TABS.map((t) => (
-          <button key={t.key} role="tab" aria-selected={tab === t.key} type="button" onClick={() => setTab(t.key)} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap ${tab === t.key ? 'bg-black text-white' : 'text-gray-700 hover:bg-white'} ${focusRing}`}><t.icon className="h-4 w-4" />{t.label}{t.key === 'uitgeleend' && uitgeleend.length > 0 && <span className={`text-xs ${tab === t.key ? 'text-[#fff848]' : 'text-gray-500'}`}>{uitgeleend.length}</span>}</button>
+          <button key={t.key} role="tab" aria-selected={tab === t.key} type="button" onClick={() => setTab(t.key)} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap ${tab === t.key ? 'bg-black text-white' : 'text-gray-700 hover:bg-white'} ${focusRing}`}><t.icon className="h-4 w-4" />{t.label}{t.key === 'uitgeleend' && uitgeleend.length > 0 && <span className={`text-xs ${tab === t.key ? 'text-gray-400' : 'text-gray-500'}`}>{uitgeleend.length}</span>}</button>
         ))}
       </div>
 

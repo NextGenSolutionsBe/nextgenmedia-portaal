@@ -41,7 +41,7 @@ export async function SalesToday() {
     <div className="card-base">
       <div className="flex items-center justify-between mb-3">
         <h2 className="font-semibold text-gray-900 flex items-center gap-2">
-          <PhoneCall className="h-4 w-4 text-[#caa800]" />Verkoop
+          <PhoneCall className="h-4 w-4 text-gray-500" />Verkoop
         </h2>
         <Link href="/admin/sales/pipeline" className="text-xs text-gray-500 hover:text-black">Naar de pipeline</Link>
       </div>

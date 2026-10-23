@@ -109,7 +109,7 @@ export function LeadTijdlijn({ leadId, verversSleutel = 0, max = 8, compact = fa
     {afspraken.length > 0 && (
       <ul className="mb-2 space-y-1.5">
         {afspraken.map((a) => (
-          <li key={a.id} className={`rounded-lg border px-2 py-1.5 ${a.status === 'cancelled' ? 'border-gray-200 bg-gray-50 opacity-70' : 'border-[#fff848] bg-[#fffde6]'}`}>
+          <li key={a.id} className={`rounded-lg border px-2 py-1.5 ${a.status === 'cancelled' ? 'border-gray-200 bg-gray-50 opacity-70' : 'border-gray-900 bg-gray-50'}`}>
             <p className="text-[11px] font-semibold text-gray-800 flex items-center gap-1">
               <CalendarDays className="h-3 w-3 shrink-0" />
               Afspraak {afspraakMoment(a.starts_at)}

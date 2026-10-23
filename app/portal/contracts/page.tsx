@@ -51,7 +51,7 @@ export default async function PortalContractsPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold">Contracten</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold">Contracten</h1>
         <p className="text-sm text-gray-500 mt-0.5">Overzicht van uw contracten</p>
       </div>
 
@@ -74,7 +74,7 @@ export default async function PortalContractsPage() {
                 {pendingContracts.map((c) => (
                   <div
                     key={c.id}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl border-2 border-[#fff848] bg-[#fff848]/5"
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl border-2 border-gray-900 bg-gray-50"
                   >
                     <div className="flex items-center gap-4 min-w-0">
                       <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0 bg-amber-100">

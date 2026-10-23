@@ -93,7 +93,7 @@ export function VerzendingClient() {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <Link href="/admin/contracts" className="text-xs text-gray-500 hover:text-black inline-flex items-center gap-1"><ArrowLeft className="h-3 w-3" />Contracten</Link>
-          <h1 className="text-xl font-bold mt-1">Contracten naar het archiefadres sturen</h1>
+          <h1 className="text-xl font-semibold mt-1">Contracten naar het archiefadres sturen</h1>
           <p className="text-sm text-gray-600 mt-1 max-w-3xl">
             Eén mail per contract, met het contract als pdf en — als die bestaat — het ondertekeningscertificaat als aparte pdf.
             Er wordt niets aan de contracten gewijzigd. Wat al met succes verstuurd is, gaat nooit een tweede keer weg; enkel een mislukte mail kun je opnieuw proberen.

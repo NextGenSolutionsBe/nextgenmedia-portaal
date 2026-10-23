@@ -55,7 +55,7 @@ export function SectieLogboek() {
         : (
           <div className="overflow-x-auto -mx-1">
             <KaartTabel><table className="w-full text-sm min-w-[720px]">
-              <thead><tr className="text-left text-[11px] text-gray-500 uppercase tracking-wide"><th className="px-2 py-2 font-medium">Wanneer</th><th className="px-2 py-2 font-medium">Wie</th><th className="px-2 py-2 font-medium">Actie</th><th className="px-2 py-2 font-medium">Omschrijving</th></tr></thead>
+              <thead><tr className="text-left text-[11px] text-gray-500"><th className="px-2 py-2 font-medium">Wanneer</th><th className="px-2 py-2 font-medium">Wie</th><th className="px-2 py-2 font-medium">Actie</th><th className="px-2 py-2 font-medium">Omschrijving</th></tr></thead>
               <tbody className="divide-y divide-gray-50">
                 {data.rijen.map((r) => (
                   <Fragment key={r.id}>

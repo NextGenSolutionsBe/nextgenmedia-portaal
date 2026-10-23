@@ -110,7 +110,7 @@ export function OpdrachtenClient() {
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
+          <h1 className="text-xl sm:text-2xl font-semibold flex items-center gap-2">
             <ClipboardList className="h-6 w-6" />Opdrachten
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">
@@ -178,7 +178,7 @@ export function OpdrachtenClient() {
           </select>
           {fase === 'open' && !status && (
             <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-              <input type="checkbox" className="h-4 w-4 rounded border-gray-300 accent-[#fff848]"
+              <input type="checkbox" className="h-4 w-4 rounded border-gray-300 accent-gray-900"
                 checked={toonAfgesloten} onChange={(e) => setToonAfgesloten(e.target.checked)} />
               Toon afgesloten
             </label>
@@ -225,7 +225,7 @@ function VerslagKaart({ titel, regel, accent, actief, onClick, hint, gedempt }: 
   return (
     <button type="button" onClick={onClick} title={hint}
       className={`card-base p-3 text-left border-t-4 ${accent} transition-shadow hover:shadow-md ${actief ? 'ring-2 ring-black' : ''} ${gedempt ? 'opacity-70' : ''}`}>
-      <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide truncate">{titel}</p>
+      <p className="text-[11px] font-semibold text-gray-500 truncate">{titel}</p>
       <p className="text-lg font-bold text-gray-900 leading-tight mt-1">{formatEuro(regel.waarde)}</p>
       <p className="text-[11px] text-gray-500 mt-0.5">
         {regel.aantal} {regel.aantal === 1 ? 'opdracht' : 'opdrachten'}
@@ -287,7 +287,7 @@ function OpdrachtRij({ o, onStatus, onOpen, onVerwijder }: {
           <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
             {o.lead_id && (
               <Link href={`/admin/sales/pipeline?lead=${o.lead_id}`} onClick={(e) => e.stopPropagation()}
-                className="inline-flex items-center gap-1 text-[11px] rounded-lg border border-yellow-300 bg-[#fff848]/30 text-gray-900 px-2 py-0.5 hover:border-yellow-500"
+                className="inline-flex items-center gap-1 text-[11px] rounded-lg border border-gray-300 bg-gray-100 text-gray-900 px-2 py-0.5 hover:border-gray-400"
                 title="Open deze klant in de pipeline">
                 Pipeline
               </Link>
@@ -399,7 +399,7 @@ function OpdrachtDialoog({ bestaand, klanten, contracten, facturen, namen, onClo
   const gekozenStatus = statusInfo(status)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90dvh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
           <h3 className="font-semibold text-gray-900 flex items-center gap-2">

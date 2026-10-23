@@ -6,7 +6,7 @@ import { LANGS, type Lang } from '@/lib/i18n'
 
 /** NL/EN-taalwissel. Zet de cookie `ngm_lang` en ververst zodat ook de
  *  servercomponenten meevertalen. */
-export function LangToggle({ current, className }: { current: Lang; className?: string }) {
+export function LangToggle({ current, className, donker = false }: { current: Lang; className?: string; /** Op een donkere achtergrond (navigatie). */ donker?: boolean }) {
   const router = useRouter()
   const set = (l: Lang) => {
     if (l === current) return
@@ -22,7 +22,7 @@ export function LangToggle({ current, className }: { current: Lang; className?: 
           onClick={() => set(l)}
           aria-pressed={current === l}
           className={`text-[11px] font-semibold px-2 py-0.5 rounded-md transition-colors ${
-            current === l ? 'bg-gray-900 text-white' : 'text-gray-500 hover:bg-gray-100'
+            current === l ? (donker ? 'bg-white text-gray-900' : 'bg-gray-900 text-white') : (donker ? 'text-gray-400 hover:bg-white/10 hover:text-white' : 'text-gray-500 hover:bg-gray-100')
           }`}
         >
           {l.toUpperCase()}

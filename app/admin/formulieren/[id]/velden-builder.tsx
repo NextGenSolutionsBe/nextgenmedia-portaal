@@ -108,7 +108,7 @@ export function VeldenBuilder({ concept, wijzig }: { concept: Concept; wijzig: (
               key={veld.id}
               onDragOver={(e) => { if (sleep !== null) { e.preventDefault(); setOver(i) } }}
               onDrop={(e) => { e.preventDefault(); if (sleep !== null) verplaats(sleep, i); setSleep(null); setOver(null) }}
-              className={cn('rounded-2xl transition-shadow', over === i && sleep !== null && sleep !== i && 'ring-2 ring-[#fff848]')}
+              className={cn('rounded-2xl transition-shadow', over === i && sleep !== null && sleep !== i && 'ring-2 ring-gray-900')}
             >
               <VeldKaart
                 veld={veld} index={i} velden={velden} open={open === veld.id}
@@ -137,7 +137,7 @@ export function VeldenBuilder({ concept, wijzig }: { concept: Concept; wijzig: (
                 {VELD_TYPES.map((t) => {
                   const Icoon = TYPE_ICOON[t]
                   return (
-                    <button key={t} type="button" onClick={() => voegToe(t)} title={VELD_TYPE_INFO[t].uitleg} className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-left hover:border-gray-900 hover:bg-[#fff848]/10">
+                    <button key={t} type="button" onClick={() => voegToe(t)} title={VELD_TYPE_INFO[t].uitleg} className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-left hover:border-gray-900 hover:bg-gray-100">
                       <Icoon className="h-4 w-4 text-gray-500 shrink-0" /><span className="truncate">{VELD_TYPE_INFO[t].label}</span>
                     </button>
                   )
@@ -156,12 +156,12 @@ export function VeldenBuilder({ concept, wijzig }: { concept: Concept; wijzig: (
       <div className={cn('lg:sticky lg:top-4 min-w-0', !voorbeeldMobiel && 'hidden lg:block')}>
         <div className="rounded-2xl border border-gray-200 bg-gray-50 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-white">
-            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 flex items-center gap-1.5"><Eye className="h-3.5 w-3.5" />Voorbeeld</span>
+            <span className="text-xs font-semibold text-gray-500 flex items-center gap-1.5"><Eye className="h-3.5 w-3.5" />Voorbeeld</span>
             <button type="button" onClick={() => setVoorbeeldWaarden({})} className="text-xs text-gray-500 hover:text-gray-900 underline">Leegmaken</button>
           </div>
           <div className="p-4 max-h-[calc(100dvh-10rem)] overflow-y-auto">
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-              <div className="h-1 bg-[#fff848]" />
+              <div className="h-1 bg-gray-900" />
               <div className="p-4">
                 <h2 className="text-lg font-bold text-gray-900">{concept.titel}</h2>
                 {concept.beschrijving && <p className="text-xs text-gray-600 mt-1 whitespace-pre-line">{concept.beschrijving}</p>}

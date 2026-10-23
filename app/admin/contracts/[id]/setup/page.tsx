@@ -42,7 +42,7 @@ export default async function ContractSetupPage({ params }: { params: Promise<{ 
           <ChevronLeft className="h-4 w-4" />
         </Link>
         <div>
-          <h1 className="text-xl font-bold">AI-velden & handtekeningzone</h1>
+          <h1 className="text-xl font-semibold">AI-velden & handtekeningzone</h1>
           <p className="text-sm text-gray-500 mt-0.5">{contract.title}</p>
         </div>
       </div>

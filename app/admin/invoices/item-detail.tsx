@@ -127,7 +127,7 @@ export function ItemDetail({ moment, onSluit, onGewijzigd, onBewerk, onEigenArti
           {isFactuur && (
             <section>
               <div className="flex items-center justify-between gap-2 mb-1">
-                <span className="text-[11px] uppercase tracking-wide text-gray-400">Bijlagen</span>
+                <span className="text-[11px] text-gray-400">Bijlagen</span>
                 <label className="text-xs underline cursor-pointer text-gray-700">+ bijlage<input type="file" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadBijlage(f); e.target.value = '' }} /></label>
               </div>
               {data.bijlagen.length === 0 ? <div className="text-sm text-gray-400">Geen bijlagen.</div> : (
@@ -163,7 +163,7 @@ export function ItemDetail({ moment, onSluit, onGewijzigd, onBewerk, onEigenArti
                 )}
                 {tab === 'gefactureerd' && (
                   <div className="rounded-xl border border-gray-200 p-3 text-sm space-y-2">
-                    <div className="text-[11px] uppercase tracking-wide text-gray-400">Betaling (apart van gefactureerd)</div>
+                    <div className="text-[11px] text-gray-400">Betaling (apart van gefactureerd)</div>
                     {status === 'betaald'
                       ? <div className="flex items-center gap-2 flex-wrap"><span className="text-[#166534] font-medium">Betaald{data.betaald_op ? ` op ${datumNl(data.betaald_op)}` : ''}</span><button type="button" disabled={bezig} onClick={() => actie('onbetaald', {}, 'Betaling teruggedraaid.')} className="btn-secondary text-xs ml-auto"><RotateCcw className="h-3.5 w-3.5" />Betaling terugdraaien</button></div>
                       : <div className="flex items-center gap-2 flex-wrap"><span className="text-gray-700">Nog niet betaald · verwacht rond {datumNl(moment.verwacht_op)}</span><button type="button" disabled={bezig} onClick={() => actie('betaald', {}, 'Gemarkeerd als betaald.')} className="btn-secondary text-xs ml-auto"><Wallet className="h-3.5 w-3.5" />Markeren als betaald</button></div>}

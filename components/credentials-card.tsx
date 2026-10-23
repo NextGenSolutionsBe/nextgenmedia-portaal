@@ -59,7 +59,7 @@ export function CredentialsCard({
     }
   }
 
-  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]'
+  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900'
   const lbl = 'block text-xs font-medium text-gray-600 mb-1'
 
   return (

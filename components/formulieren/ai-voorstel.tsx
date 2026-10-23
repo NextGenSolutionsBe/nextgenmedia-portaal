@@ -41,7 +41,7 @@ export function AiVoorstelPaneel({ standaardDienst = 'algemeen', standaardDoel =
       <div className="space-y-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-700 flex items-center gap-1"><Sparkles className="h-3.5 w-3.5" />Voorstel — bevestiging vereist</div>
+            <div className="text-[11px] font-semibold text-amber-700 flex items-center gap-1"><Sparkles className="h-3.5 w-3.5" />Voorstel — bevestiging vereist</div>
             <div className="font-semibold text-gray-900 mt-0.5">{voorstel.titel || 'Voorstel'}</div>
             {voorstel.beschrijving && <p className="text-xs text-gray-500 mt-0.5">{voorstel.beschrijving}</p>}
           </div>

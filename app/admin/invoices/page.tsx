@@ -13,7 +13,7 @@ export default function InvoicesPage({ searchParams }: { searchParams?: { maand?
   return (
     <div className="space-y-5 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold">Facturen</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold">Facturen</h1>
         <p className="text-sm text-gray-500 mt-0.5">Interne facturatieplanner: wat moet wanneer voor wie gefactureerd worden. De boekhouding zelf gebeurt buiten de app.</p>
       </div>
       <PlannerClient startCategorie={searchParams?.categorie ?? null} startWeergave={searchParams?.weergave ?? 'lijst'} startDatum={maand} startFactuur={/^[0-9a-f-]{36}$/i.test(searchParams?.factuur ?? '') ? searchParams!.factuur! : null} />

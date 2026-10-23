@@ -18,7 +18,7 @@ export default function KoppelingPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold">Koppeling met Harrie</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold">Koppeling met Harrie</h1>
         <p className="text-sm text-gray-500 mt-0.5">
           Harrie haalt hier op wie hij met rust moet laten, en meldt terug wat hij deed.
           Zo krijgt geen enkele klant een koude wervingsmail, en zie je een geboekte

@@ -145,7 +145,7 @@ export function BvClient({ jaar, rechtenRijen, kostenRijen, verdelingRijen, ezRi
           </div>
 
           <div>
-            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Kerncijfers BV</div>
+            <div className="text-xs font-medium text-gray-500 mb-2">Kerncijfers BV</div>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <Kpi label="Totaal persoonlijke rechten" value={geld(kern.totaalRechten)} color={kleur(kern.totaalRechten)} />
               <Kpi label="BV-opstartkosten excl. btw" value={geld(kern.opstartkosten)} sub="categorie Oprichtingskost" />
@@ -448,7 +448,7 @@ function InvoerRij({ label, k, f, setF }: {
       <td className="table-td text-gray-700">{label}</td>
       {PERSONEN.map((p) => (
         <td key={p} className="table-td text-right">
-          <input className="input-base text-right w-36 ml-auto bg-[#fff848]/15" inputMode="decimal" value={f[p][k]}
+          <input className="input-base text-right w-36 ml-auto bg-gray-100" inputMode="decimal" value={f[p][k]}
             onChange={(e) => setF((prev) => ({ ...prev, [p]: { ...prev[p], [k]: e.target.value } }))} />
         </td>
       ))}
@@ -603,7 +603,7 @@ function KostDialoog({ kost, onClose }: { kost: Kost | null; onClose: () => void
 function Kpi({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
   return (
     <div className="stat-card">
-      <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">{label}</div>
+      <div className="text-xs text-gray-500 mb-2">{label}</div>
       <div className={`text-2xl font-bold ${color ?? ''}`}>{value}</div>
       {sub && <div className="text-xs text-gray-400 mt-1">{sub}</div>}
     </div>
@@ -643,7 +643,7 @@ function Dialoog({ titel, children, onClose, onSave, bezig }: {
   titel: string; children: React.ReactNode; onClose: () => void; onSave: () => void; bezig: boolean
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[92dvh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
           <h3 className="font-semibold text-gray-900">{titel}</h3>

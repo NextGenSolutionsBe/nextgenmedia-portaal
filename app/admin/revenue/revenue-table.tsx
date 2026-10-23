@@ -95,7 +95,7 @@ export function RevenueTable({ entries }: { entries: EntryRow[] }) {
 
   const hasFilters = query.trim() !== '' || fType !== 'all' || fService !== 'all' || fYear !== 'all' || minAmount !== '' || maxAmount !== ''
   const clearFilters = () => { setQuery(''); setFType('all'); setFService('all'); setFYear('all'); setMinAmount(''); setMaxAmount('') }
-  const fsel = 'px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#fff848]/50'
+  const fsel = 'px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-gray-900/15'
 
   const handleDelete = async (id: string) => {
     if (!confirm('Deze omzet-entry verwijderen?')) return
@@ -127,7 +127,7 @@ export function RevenueTable({ entries }: { entries: EntryRow[] }) {
       <div className="space-y-2 mb-4">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Zoek op klant, titel, dienst, notitie…" className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50" />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Zoek op klant, titel, dienst, notitie…" className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15" />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <FilterIcon className="h-4 w-4 text-gray-400" />
@@ -276,7 +276,7 @@ function EditDialog({ entry, onClose, onSaved }: { entry: EntryRow; onClose: () 
   const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg'
   const lbl = 'block text-xs font-medium text-gray-600 mb-1'
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-y-auto">
         <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white">
           <h3 className="font-semibold">Prognose bewerken</h3>

@@ -149,7 +149,7 @@ export default function NewClientPage() {
           <ChevronLeft className="h-4 w-4" />
         </Link>
         <div>
-          <h1 className="text-2xl font-bold">Klant toevoegen</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold">Klant toevoegen</h1>
           <p className="text-sm text-gray-500">Maak een nieuw klantenaccount aan</p>
         </div>
       </div>
@@ -219,7 +219,7 @@ export default function NewClientPage() {
                 onClick={() => toggleService(s.slug)}
                 className={`px-3 py-2.5 rounded-lg border text-sm font-medium text-left transition-colors ${
                   form.services.includes(s.slug)
-                    ? 'border-[#fff848] bg-[#fff848]/10 text-black'
+                    ? 'border-gray-900 bg-gray-100 text-black'
                     : 'border-gray-200 text-gray-600 hover:border-gray-300'
                 }`}
               >
@@ -312,7 +312,7 @@ export default function NewClientPage() {
                                 onClick={() => togglePlatform(p.slug)}
                                 className={`px-3 py-1.5 rounded-full border text-xs font-medium transition-colors ${
                                   form.platforms.includes(p.slug)
-                                    ? 'border-[#fff848] bg-[#fff848]/10 text-black'
+                                    ? 'border-gray-900 bg-gray-100 text-black'
                                     : 'border-gray-200 text-gray-500 hover:border-gray-300'
                                 }`}
                               >
@@ -346,7 +346,7 @@ export default function NewClientPage() {
                             <label className="flex items-center gap-3 cursor-pointer">
                               <input type="checkbox" checked={form.cms_enabled}
                                 onChange={e => setForm(p => ({ ...p, cms_enabled: e.target.checked }))}
-                                className="h-4 w-4 rounded border-gray-300 accent-[#fff848]" />
+                                className="h-4 w-4 rounded border-gray-300 accent-gray-900" />
                               <span className="text-sm text-gray-700">CMS inbegrepen — klant beheert de inhoud in het portaal</span>
                             </label>
                             {form.cms_enabled && (
@@ -385,7 +385,7 @@ export default function NewClientPage() {
                               type="checkbox"
                               checked={form.webdesign_maintenance_included}
                               onChange={e => setForm(p => ({ ...p, webdesign_maintenance_included: e.target.checked }))}
-                              className="h-4 w-4 rounded border-gray-300 accent-[#fff848]"
+                              className="h-4 w-4 rounded border-gray-300 accent-gray-900"
                             />
                             <span className="text-sm text-gray-700">Onderhoud inbegrepen</span>
                           </label>

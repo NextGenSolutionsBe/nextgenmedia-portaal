@@ -49,7 +49,7 @@ export default async function PartnerAssignmentsPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold">Opdrachten</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold">Opdrachten</h1>
         <p className="text-sm text-gray-500 mt-0.5">Opdrachten van NextGenMedia en uw eigen voorstellen</p>
       </div>
       <PartnerAssignmentsClient

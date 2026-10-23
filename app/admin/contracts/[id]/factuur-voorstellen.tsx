@@ -114,7 +114,7 @@ export function FactuurVoorstellen({ contractId, waarde, onSluit, onBevestigd }:
   const velden = useMemo(() => Object.entries(data?.velden ?? {}).filter(([, v]) => v && String(v).trim()), [data])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6 bg-black/40 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Factuurvoorstellen maken">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6 bg-black/40" role="dialog" aria-modal="true" aria-label="Factuurvoorstellen maken">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl max-h-[94dvh] flex flex-col overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 flex items-start gap-3">
           <div className="flex-1 min-w-0">
@@ -128,7 +128,7 @@ export function FactuurVoorstellen({ contractId, waarde, onSluit, onBevestigd }:
             {/* Klantgegevens */}
             <section className="grid md:grid-cols-[1fr_1fr] gap-3">
               <div className="rounded-xl border border-gray-200 p-3 text-sm">
-                <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Klantgegevens controleren</h4>
+                <h4 className="text-xs font-semibold text-gray-500 mb-1.5">Klantgegevens controleren</h4>
                 {data.klant ? (
                   <dl className="grid grid-cols-[90px_1fr] gap-x-2 gap-y-0.5 text-xs">
                     <dt className="text-gray-500">Klant</dt><dd className="font-medium">{data.klant.naam}</dd>
@@ -139,7 +139,7 @@ export function FactuurVoorstellen({ contractId, waarde, onSluit, onBevestigd }:
                 ) : <p className="text-xs text-red-700">Geen klant gekoppeld aan dit contract.</p>}
               </div>
               <div className="rounded-xl border border-gray-200 p-3 text-xs space-y-1">
-                <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Contract</h4>
+                <h4 className="text-xs font-semibold text-gray-500">Contract</h4>
                 <div>Looptijd in de app: {d(data.contract.start_date)} – {d(data.contract.end_date)} · getekend {d(data.contract.signed_at)}</div>
                 <div>Contractwaarde: {waarde === null ? <span className="text-amber-700">ontbreekt</span> : <b>{formatEuro(waarde)} excl.</b>}</div>
                 {velden.length > 0 && <details><summary className="cursor-pointer text-gray-600">Ingevulde velden bij ondertekening ({velden.length})</summary><dl className="mt-1 grid grid-cols-[1fr_1fr] gap-x-2">{velden.map(([k, v]) => <Fragment key={k}><dt className="text-gray-500 truncate">{k}</dt><dd className="truncate">{String(v)}</dd></Fragment>)}</dl></details>}

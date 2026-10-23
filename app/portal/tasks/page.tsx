@@ -33,7 +33,7 @@ export default async function PortalTasksPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2"><ListChecks className="h-6 w-6" />Taken</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold flex items-center gap-2"><ListChecks className="h-6 w-6" />Taken</h1>
         <p className="text-sm text-gray-500 mt-0.5">Taken die NextGenMedia voor jou klaarzette.</p>
       </div>
       <PortalTasks initialTasks={tasks} canComplete={canComplete} />

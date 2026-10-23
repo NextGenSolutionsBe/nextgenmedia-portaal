@@ -117,7 +117,7 @@ export function AdminUploader({
 
       {open && (
         <div
-          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
           onClick={() => { if (!bezig) setOpen(false) }}
         >
           <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
@@ -138,7 +138,7 @@ export function AdminUploader({
 
             <div className="p-4 space-y-4">
               <label className="block text-sm">
-                <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Submap</span>
+                <span className="text-[11px] font-semibold text-gray-400">Submap</span>
                 <select
                   value={mapId}
                   onChange={(e) => setMapId(e.target.value)}
@@ -184,7 +184,7 @@ export function AdminUploader({
                     {geslaagd} van {onderweg.length} klaar{mislukt > 0 && ` · ${mislukt} mislukt`}
                   </p>
                   <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                    <div className="h-full bg-[#fff848] transition-all" style={{ width: `${Math.round(((geslaagd + mislukt) / onderweg.length) * 100)}%` }} />
+                    <div className="h-full bg-gray-900 transition-all" style={{ width: `${Math.round(((geslaagd + mislukt) / onderweg.length) * 100)}%` }} />
                   </div>
                   <ul className="max-h-48 overflow-auto divide-y divide-gray-100 border border-gray-100 rounded-xl">
                     {onderweg.map((r) => (
@@ -206,7 +206,7 @@ export function AdminUploader({
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
-                  className="w-full text-xs font-semibold px-3 py-2 rounded-xl bg-[#fff848] text-black hover:brightness-95"
+                  className="w-full text-xs font-semibold px-3 py-2 rounded-md bg-gray-900 text-white hover:bg-gray-800"
                 >
                   Sluiten
                 </button>

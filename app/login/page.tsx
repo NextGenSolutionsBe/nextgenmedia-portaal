@@ -100,7 +100,7 @@ function LoginForm() {
       <button
         type="submit"
         disabled={loading}
-        className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#fff848] text-black font-semibold rounded-lg hover:bg-[#f5ee30] transition-colors disabled:opacity-60 text-sm"
+        className="w-full flex items-center justify-center gap-2 py-2.5 bg-gray-900 text-white font-medium rounded-md hover:bg-gray-800 transition-colors disabled:opacity-60 text-sm"
       >
         {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
         Inloggen
@@ -115,12 +115,12 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="text-center mb-8">
-          <Logo className="inline-flex h-14 w-14 rounded-2xl mb-4" />
-          <h1 className="text-2xl font-bold text-gray-900">NextGenMedia</h1>
+          <Logo className="inline-flex h-11 w-11 rounded-lg mb-4" />
+          <h1 className="text-xl font-semibold text-gray-900">NextGenMedia</h1>
           <p className="text-sm text-gray-500 mt-1">Portaal toegang</p>
         </div>
 
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
           <Suspense fallback={<div className="h-48 animate-pulse bg-gray-100 rounded-lg" />}>
             <LoginForm />
           </Suspense>

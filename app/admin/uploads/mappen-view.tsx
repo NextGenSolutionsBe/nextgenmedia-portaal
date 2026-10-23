@@ -53,7 +53,7 @@ export function MappenView({ mappen, wees }: { mappen: KlantMap[]; wees: KlantMa
             value={zoek}
             onChange={(e) => setZoek(e.target.value)}
             placeholder="Zoek een klant…"
-            className="w-full text-sm border border-gray-200 rounded-xl pl-9 pr-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-[#fff848]"
+            className="w-full text-sm border border-gray-200 rounded-xl pl-9 pr-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-gray-900"
           />
         </label>
 
@@ -111,7 +111,7 @@ export function MappenView({ mappen, wees }: { mappen: KlantMap[]; wees: KlantMa
             >
               <span className={cn(
                 'h-11 w-11 rounded-xl flex items-center justify-center shrink-0',
-                m.aantal > 0 ? 'bg-[#fff848] text-black' : 'bg-gray-100 text-gray-400',
+                m.aantal > 0 ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-400',
               )}>
                 <Folder className="h-5 w-5" />
               </span>

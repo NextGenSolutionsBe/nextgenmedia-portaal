@@ -132,7 +132,7 @@ function AddDialog({
 
   const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg'
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-y-auto">
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
           <h3 className="font-semibold">Maandplanning toevoegen</h3>
@@ -148,7 +148,7 @@ function AddDialog({
             <div className="grid grid-cols-1 gap-2">
               {MONTH_CLIENT_TYPES.map((t) => (
                 <button key={t.key} type="button" onClick={() => setType(t.key)}
-                  className={`text-left rounded-lg border p-3 text-sm transition-colors ${type === t.key ? 'border-[#fff848] bg-[#fff848]/10 ring-1 ring-[#fff848]' : 'border-gray-200 hover:border-gray-300'}`}>
+                  className={`text-left rounded-lg border p-3 text-sm transition-colors ${type === t.key ? 'border-gray-900 bg-gray-100 ring-1 ring-gray-900' : 'border-gray-200 hover:border-gray-300'}`}>
                   {t.label}
                 </button>
               ))}

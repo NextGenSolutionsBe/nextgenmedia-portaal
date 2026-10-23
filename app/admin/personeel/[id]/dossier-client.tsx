@@ -57,7 +57,7 @@ export function DossierClient({ id }: { id: string }) {
         <Link href="/admin/personeel" className="btn-secondary px-2" title="Terug"><ChevronLeft className="h-4 w-4" /></Link>
         <Foto id={id} naam={naam} url={m.foto_url} onKlaar={laad} />
         <div className="flex-1 min-w-0">
-          <h1 className="text-2xl font-bold truncate">{naam}</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold truncate">{naam}</h1>
           <div className="flex flex-wrap gap-1.5 mt-1">
             <Chip cls={`${typeKleur(m.type)} border-transparent`}>{typeLabel(m.type)}</Chip>
             <Chip cls={m.actief ? 'bg-green-50 text-green-800 border-green-200' : 'bg-gray-100 text-gray-500 border-gray-200'}>{m.actief ? 'Actief' : 'Inactief'}</Chip>

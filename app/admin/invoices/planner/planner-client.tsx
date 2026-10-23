@@ -240,12 +240,12 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
           </div>
           <div className="mt-2 h-3 rounded-full bg-gray-200 overflow-hidden flex" role="img" aria-label={`${euro2(meter.gefactureerd)} gefactureerd en ${euro2(meter.open)} nog te factureren van ${euro(MAAND_DOEL)}`}>
             <div className="h-full bg-[#166534]" style={{ width: `${meter.vulGefactureerd}%` }} />
-            <div className="h-full bg-[#facc15]" style={{ width: `${meter.vulOpen}%` }} />
+            <div className="h-full bg-gray-300" style={{ width: `${meter.vulOpen}%` }} />
           </div>
           <div className="mt-1.5 flex gap-x-4 gap-y-1 flex-wrap text-xs text-gray-700">
             <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-[#166534]" /><b className="tabular-nums">{euro2(meter.gefactureerd)}</b> gefactureerd</span>
             <span className="text-gray-400">+</span>
-            <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-[#facc15]" /><b className="tabular-nums">{euro2(meter.open)}</b> nog te factureren</span>
+            <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-gray-300" /><b className="tabular-nums">{euro2(meter.open)}</b> nog te factureren</span>
             {!meter.bereikt && <span className="inline-flex items-center gap-1.5 text-gray-500"><span className="h-2.5 w-2.5 rounded-sm bg-gray-200 border border-gray-300" />{euro2(meter.nodig)} resterend tot het doel</span>}
           </div>
           {eerderAchterstallig.length > 0 && (
@@ -269,7 +269,7 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
             {TABS.map((t) => (
               <button key={t.key} role="tab" aria-selected={tab === t.key} type="button" onClick={() => { setTab(t.key); setSortering(null); if (weergave !== 'lijst') setWeergave('lijst') }}
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${tab === t.key && weergave === 'lijst' ? 'bg-black text-white' : 'text-gray-700 hover:bg-white'}`}>
-                {t.label} <span className={`ml-1 tabular-nums text-xs ${tab === t.key && weergave === 'lijst' ? 'text-[#fff848]' : 'text-gray-500'}`}>{tellingen[t.key]}</span>
+                {t.label} <span className={`ml-1 tabular-nums text-xs ${tab === t.key && weergave === 'lijst' ? 'text-gray-400' : 'text-gray-500'}`}>{tellingen[t.key]}</span>
               </button>
             ))}
           </div>
@@ -316,15 +316,15 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
           <div className="md:hidden divide-y divide-gray-100">
             {lijst.length === 0 && <LeegLijst tab={tab} onNieuw={() => setWizard({ datum: vandaag })} />}
             {lijst.map((m) => { const gef = tabVan(m) === 'gefactureerd'; const grijs = !tabVan(m); return (
-              <div key={m.id} className={`flex items-stretch ${gef ? 'bg-[#166534] text-white' : grijs ? 'bg-gray-50 text-gray-500' : 'bg-white'}`}>
+              <div key={m.id} className={`flex items-stretch ${gef ? 'bg-[#f1f7f3] text-gray-900 shadow-[inset_3px_0_0_#166534]' : grijs ? 'bg-gray-50 text-gray-500' : 'bg-white'}`}>
                 <button type="button" onClick={() => bekijk(m)} className="flex-1 min-w-0 text-left px-3 py-3 space-y-1.5">
                   <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0"><div className="font-semibold text-sm truncate">{m.klant}</div><div className={`text-xs truncate ${gef ? 'text-green-100' : 'text-gray-600'}`}>{m.project ?? m.dienst ?? m.omschrijving ?? '—'}</div></div>
+                    <div className="min-w-0"><div className="font-semibold text-sm truncate">{m.klant}</div><div className="text-xs truncate text-gray-600">{m.project ?? m.dienst ?? m.omschrijving ?? '—'}</div></div>
                     <div className="font-bold tabular-nums text-sm shrink-0">{euro2(m.bedrag_excl)}</div>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap text-[11px]"><StatusBadge status={m.status} klein /><span>{datumNlKort(m.datum)}</span>{m.terugkerend && <Repeat className="h-3 w-3" aria-label="terugkerend" />}{!m.volledig && !gef && <span className="text-amber-700">gegevens ontbreken</span>}</div>
                 </button>
-                {(m.bron === 'invoice' || m.bron === 'recurring') && <button type="button" onClick={() => setTeVerwijderen(m)} className={`px-3 ${gef ? 'text-white/80 hover:text-white' : 'text-red-600 hover:bg-red-50'}`} aria-label={`${m.klant} verwijderen`}><Trash2 className="h-4 w-4" /></button>}
+                {(m.bron === 'invoice' || m.bron === 'recurring') && <button type="button" onClick={() => setTeVerwijderen(m)} className="px-3 text-red-600 hover:bg-red-50" aria-label={`${m.klant} verwijderen`}><Trash2 className="h-4 w-4" /></button>}
               </div>
             ) })}
           </div>
@@ -332,7 +332,7 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
           <table className="hidden md:table w-full text-sm table-fixed">
             <colgroup><col className="w-[118px]" /><col className="w-[20%]" /><col className="w-[18%]" /><col /><col className="w-[118px]" /><col className="w-[178px]" /><col className="w-[140px]" /></colgroup>
             <thead>
-              <tr className="text-left text-[11px] text-gray-500 uppercase tracking-wide bg-gray-50 border-b border-gray-100">
+              <tr className="text-left text-[11px] text-gray-500 bg-gray-50 border-b border-gray-100">
                 <Kop veld="datum" sortering={sortering} onClick={sorteerOp}>Gepland</Kop>
                 <Kop veld="klant" sortering={sortering} onClick={sorteerOp}>Klant</Kop>
                 <th className="px-3 py-2 font-medium">Project / dienst</th>
@@ -345,18 +345,18 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
             <tbody>
               {lijst.length === 0 && <tr><td colSpan={7}><LeegLijst tab={tab} onNieuw={() => setWizard({ datum: vandaag })} /></td></tr>}
               {lijst.map((m) => { const gef = tabVan(m) === 'gefactureerd'; const grijs = !tabVan(m); return (
-                <tr key={m.id} onClick={() => bekijk(m)} className={`cursor-pointer border-b ${gef ? 'bg-[#166534] text-white border-[#14532d] hover:bg-[#14532d]' : grijs ? 'bg-gray-50 text-gray-500 border-gray-100 hover:bg-gray-100' : 'bg-white border-gray-100 hover:bg-[#fff848]/15'}`}>
+                <tr key={m.id} onClick={() => bekijk(m)} className={`cursor-pointer border-b ${gef ? 'bg-[#f1f7f3] text-gray-900 border-gray-100 shadow-[inset_3px_0_0_#166534] hover:bg-[#e7f1ea]' : grijs ? 'bg-gray-50 text-gray-500 border-gray-100 hover:bg-gray-100' : 'bg-white border-gray-100 hover:bg-gray-100'}`}>
                   <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">{datumNlKort(m.datum)}</td>
                   <td className="px-3 py-2.5 font-medium truncate" title={m.klant}>{m.klant}</td>
-                  <td className="px-3 py-2.5 truncate" title={m.project ?? m.dienst ?? ''}><span className={gef ? 'text-green-50' : 'text-gray-600'}>{m.project ?? m.dienst ?? '—'}</span>{m.terugkerend && <Repeat className={`h-3 w-3 inline ml-1 -mt-0.5 ${gef ? 'text-green-100' : 'text-purple-700'}`} aria-label="terugkerend" />}</td>
-                  <td className="px-3 py-2.5 truncate" title={m.omschrijving ?? ''}><span className={gef ? 'text-green-50' : 'text-gray-600'}>{m.omschrijving ?? '—'}</span>{m.opmerking && <StickyNote className={`h-3 w-3 inline ml-1 -mt-0.5 ${gef ? 'text-amber-200' : 'text-amber-500'}`} aria-label="interne notitie" />}{m.extern_nr && <span className={`ml-1 text-[11px] ${gef ? 'text-green-100' : 'text-gray-400'}`}>· nr {m.extern_nr}</span>}</td>
+                  <td className="px-3 py-2.5 truncate" title={m.project ?? m.dienst ?? ''}><span className="text-gray-600">{m.project ?? m.dienst ?? '—'}</span>{m.terugkerend && <Repeat className={`h-3 w-3 inline ml-1 -mt-0.5 ${gef ? 'text-gray-500' : 'text-purple-700'}`} aria-label="terugkerend" />}</td>
+                  <td className="px-3 py-2.5 truncate" title={m.omschrijving ?? ''}><span className="text-gray-600">{m.omschrijving ?? '—'}</span>{m.opmerking && <StickyNote className="h-3 w-3 inline ml-1 -mt-0.5 text-amber-500" aria-label="interne notitie" />}{m.extern_nr && <span className="ml-1 text-[11px] text-gray-500">· nr {m.extern_nr}</span>}</td>
                   <td className="px-3 py-2.5 text-right font-semibold tabular-nums">{euro2(m.bedrag_excl)}</td>
                   <td className="px-3 py-2.5"><StatusBadge status={m.status} /></td>
                   <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                    <span className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium ${gef ? 'border-white/40 text-white' : 'border-gray-200 text-gray-700 bg-white'}`}><Eye className="h-3.5 w-3.5" />Bekijken</span>
+                    <span className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium border-gray-200 text-gray-700 bg-white"><Eye className="h-3.5 w-3.5" />Bekijken</span>
                     {(m.bron === 'invoice' || m.bron === 'recurring') && (
                       <button type="button" onClick={(e) => { e.stopPropagation(); setTeVerwijderen(m) }} title="Verwijderen" aria-label={`${m.klant} verwijderen`}
-                        className={`ml-1 inline-flex items-center justify-center h-7 w-7 rounded-lg border align-middle ${gef ? 'border-white/40 text-white hover:bg-white/10' : 'border-gray-200 bg-white text-red-600 hover:bg-red-50 hover:border-red-300'}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                        className="ml-1 inline-flex items-center justify-center h-7 w-7 rounded-md border align-middle border-gray-200 bg-white text-red-600 hover:bg-red-50 hover:border-red-300"><Trash2 className="h-3.5 w-3.5" /></button>
                     )}
                   </td>
                 </tr>
@@ -366,8 +366,8 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
           {/* Totaalbalk: de zichtbare lijst + het volledige maandoverzicht */}
           <div className="border-t-2 border-gray-900 bg-gray-50 px-4 py-3 flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-6">
             <div className="flex items-baseline gap-4 flex-wrap">
-              <div><div className="text-[11px] uppercase tracking-wide text-gray-500">Te factureren items</div><div className="text-xl font-bold tabular-nums">{zichtbaarOpen.length}</div></div>
-              <div><div className="text-[11px] uppercase tracking-wide text-gray-500">Totaal nog te factureren — excl. btw</div><div className="text-xl font-bold tabular-nums">{euro2(zichtbaarOpenTotaal)}</div></div>
+              <div><div className="text-[11px] text-gray-500">Te factureren items</div><div className="text-xl font-bold tabular-nums">{zichtbaarOpen.length}</div></div>
+              <div><div className="text-[11px] text-gray-500">Totaal nog te factureren — excl. btw</div><div className="text-xl font-bold tabular-nums">{euro2(zichtbaarOpenTotaal)}</div></div>
               {filtersActief(filters) && <span className="text-[11px] text-gray-500">volgens je zoekopdracht/filters</span>}
             </div>
             <div className="lg:ml-auto grid grid-cols-3 gap-2 text-xs rounded-xl border border-gray-200 bg-white p-2.5 min-w-0" aria-label="Volledige maand">
@@ -383,7 +383,7 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
       {/* ── Kalender (tweede weergave) ── */}
       {weergave === 'maand' && (
         <div className="card-base p-0 overflow-hidden">
-          <div className="grid grid-cols-7 border-b border-gray-100 bg-gray-50 text-[11px] font-medium text-gray-500 uppercase tracking-wide">{DAGEN_KORT.map((d) => <div key={d} className="px-2 py-1.5 text-center">{d}</div>)}</div>
+          <div className="grid grid-cols-7 border-b border-gray-100 bg-gray-50 text-[11px] font-medium text-gray-500">{DAGEN_KORT.map((d) => <div key={d} className="px-2 py-1.5 text-center">{d}</div>)}</div>
           <div className="grid grid-cols-7 grid-rows-6">
             {maandRooster(ym).flat().map((d) => {
               const items = perDag.get(d) ?? []
@@ -393,9 +393,9 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
               const toon = items.slice(0, 3), meer = items.length - toon.length
               return (
                 <div key={d} onDragOver={(e) => sleepOver(e, d)} onDragLeave={() => setSleepDoel((x) => (x === d ? null : x))} onDrop={(e) => laatVallen(e, d)}
-                  className={`min-h-[64px] sm:min-h-[112px] border-b border-r border-gray-100 p-1 sm:p-1.5 flex flex-col ${inMaand ? 'bg-white' : 'bg-gray-50/60'} ${isVandaag ? 'ring-2 ring-inset ring-[#fff848]' : ''} ${sleepDoel === d ? 'bg-[#fff848]/30 ring-2 ring-inset ring-black' : ''}`}>
+                  className={`min-h-[64px] sm:min-h-[112px] border-b border-r border-gray-100 p-1 sm:p-1.5 flex flex-col ${inMaand ? 'bg-white' : 'bg-gray-50/60'} ${isVandaag ? 'ring-2 ring-inset ring-gray-900' : ''} ${sleepDoel === d ? 'bg-gray-200 ring-2 ring-inset ring-black' : ''}`}>
                   <button type="button" onClick={() => setDag(d)} className="flex items-start justify-between gap-1 text-left w-full">
-                    <span className={`text-xs font-medium h-5 min-w-5 px-1 inline-flex items-center justify-center rounded-full ${isVandaag ? 'bg-[#fff848] text-black' : inMaand ? 'text-gray-800' : 'text-gray-400'}`}>{Number(d.slice(8, 10))}</span>
+                    <span className={`text-xs font-medium h-5 min-w-5 px-1 inline-flex items-center justify-center rounded-full ${isVandaag ? 'bg-gray-900 text-white' : inMaand ? 'text-gray-800' : 'text-gray-400'}`}>{Number(d.slice(8, 10))}</span>
                     {t && <span className="text-[10px] text-gray-500 text-right leading-tight"><b className="text-gray-800">{t.aantal}</b><span className="hidden sm:inline"> · {euro(t.bedrag)}</span></span>}
                   </button>
                   <div className="hidden sm:flex flex-col gap-0.5 mt-1">
@@ -421,7 +421,7 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
               const t = totalen.get(d)
               return (
                 <div key={d} onDragOver={(e) => sleepOver(e, d)} onDragLeave={() => setSleepDoel((x) => (x === d ? null : x))} onDrop={(e) => laatVallen(e, d)}
-                  className={`min-h-[120px] sm:min-h-[260px] p-2 ${d === vandaag ? 'bg-[#fff848]/10' : ''} ${sleepDoel === d ? 'bg-[#fff848]/30 ring-2 ring-inset ring-black' : ''}`}>
+                  className={`min-h-[120px] sm:min-h-[260px] p-2 ${d === vandaag ? 'bg-gray-100' : ''} ${sleepDoel === d ? 'bg-gray-200 ring-2 ring-inset ring-black' : ''}`}>
                   <button type="button" onClick={() => setDag(d)} className="w-full text-left flex items-center justify-between gap-2 mb-2">
                     <span className="text-xs font-semibold text-gray-700">{DAGEN_KORT[i]} {Number(d.slice(8, 10))}</span>{t && <span className="text-[10px] text-gray-500">{t.aantal} · {euro(t.bedrag)}</span>}
                   </button>
@@ -505,7 +505,7 @@ function Kop({ veld, sortering, onClick, children, rechts }: { veld: Sortering['
   const actief = sortering?.veld === veld
   return (
     <th className={`px-3 py-2 font-medium ${rechts ? 'text-right' : ''}`}>
-      <button type="button" onClick={() => onClick(veld)} className={`inline-flex items-center gap-1 uppercase tracking-wide ${actief ? 'text-black' : ''}`}>{children}<ArrowUpDown className={`h-3 w-3 ${actief ? '' : 'opacity-40'}`} /></button>
+      <button type="button" onClick={() => onClick(veld)} className={`inline-flex items-center gap-1 ${actief ? 'text-black' : ''}`}>{children}<ArrowUpDown className={`h-3 w-3 ${actief ? '' : 'opacity-40'}`} /></button>
     </th>
   )
 }

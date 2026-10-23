@@ -44,7 +44,7 @@ export function SectieRechten({ ctx }: { ctx: Ctx }) {
       <div className="overflow-x-auto -mx-1">
         <KaartTabel><table className="w-full text-sm min-w-[820px]">
           <thead>
-            <tr className="text-left text-[11px] text-gray-500 uppercase tracking-wide">
+            <tr className="text-left text-[11px] text-gray-500">
               <th className="px-2 py-2 font-medium">Module</th>
               {ACTIES.map((a) => <th key={a.key} className="px-2 py-2 font-medium text-center">{a.label.replace('Mag ', '')}</th>)}
               <th className="px-2 py-2" />

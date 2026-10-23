@@ -66,7 +66,7 @@ export function FormulierenLijst({ klantId }: { klantId: string | null }) {
     <div className="space-y-5 animate-fade-in">
       <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><ClipboardPen className="h-6 w-6" />Formulieren</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold flex items-center gap-2"><ClipboardPen className="h-6 w-6" />Formulieren</h1>
           <p className="text-sm text-gray-500 mt-0.5">Intakeformulieren voor huisstijl, grafisch ontwerp en meer — deel een link, ontvang de antwoorden hier.</p>
         </div>
         <div className="page-header-actions">
@@ -75,7 +75,7 @@ export function FormulierenLijst({ klantId }: { klantId: string | null }) {
       </div>
 
       {klantId && (
-        <div className="rounded-xl border border-[#fff848] bg-[#fff848]/15 px-4 py-3 text-sm flex items-center gap-2 flex-wrap">
+        <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm flex items-center gap-2 flex-wrap">
           <Send className="h-4 w-4 shrink-0" />
           <span className="flex-1 min-w-[12rem]">Kies een formulier om naar <strong>{klantNaam ?? 'deze klant'}</strong> te sturen — je komt meteen bij <em>Delen</em> met de klant ingevuld.</span>
           <Link href="/admin/formulieren" className="text-xs text-gray-600 underline">Annuleren</Link>
@@ -136,7 +136,7 @@ export function FormulierenLijst({ klantId }: { klantId: string | null }) {
                     <td className="table-td"><span className={cn('status-badge', FORMULIER_STATUS_INFO[r.status]?.kleur)}>{FORMULIER_STATUS_INFO[r.status]?.label ?? r.status}</span></td>
                     <td className="table-td text-right tabular">
                       {r.inzendingen}
-                      {r.nieuw > 0 && <span className="ml-2 status-badge bg-[#fff848] text-black">{r.nieuw} nieuw</span>}
+                      {r.nieuw > 0 && <span className="ml-2 status-badge bg-gray-900 text-white">{r.nieuw} nieuw</span>}
                     </td>
                     <td className="table-td hidden md:table-cell text-gray-500">{datum(r.laatste_inzending)}</td>
                   </tr>
@@ -175,7 +175,7 @@ function NieuwDialoog({ onClose, onGemaakt }: { onClose: () => void; onGemaakt: 
   ]
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Nieuw formulier">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" role="dialog" aria-modal="true" aria-label="Nieuw formulier">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl modal-panel">
         <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white z-10">
           <h3 className="font-semibold flex items-center gap-2"><Plus className="h-4 w-4" />Nieuw formulier</h3>
@@ -193,7 +193,7 @@ function NieuwDialoog({ onClose, onGemaakt }: { onClose: () => void; onGemaakt: 
           {modus === 'sjabloon' && (
             <div className="grid sm:grid-cols-3 gap-3">
               {SJABLONEN.map((s) => (
-                <button key={s.key} disabled={bezig} onClick={() => maak({ sjabloon: s.key })} className="text-left rounded-xl border border-gray-200 p-4 hover:border-gray-900 hover:bg-[#fff848]/10 transition-colors disabled:opacity-50">
+                <button key={s.key} disabled={bezig} onClick={() => maak({ sjabloon: s.key })} className="text-left rounded-xl border border-gray-200 p-4 hover:border-gray-900 hover:bg-gray-100 transition-colors disabled:opacity-50">
                   <div className="font-semibold text-sm text-gray-900">{s.titel}</div>
                   <div className="text-xs text-gray-500 mt-1 line-clamp-3">{s.beschrijving}</div>
                   <div className="text-[11px] text-gray-400 mt-2">{dienstLabel(s.dienst)} · {s.velden.filter((v) => isAntwoordVeld(v.type)).length} vragen</div>

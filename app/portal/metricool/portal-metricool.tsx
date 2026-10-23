@@ -7,7 +7,7 @@ import { MetricoolCalendarView, type MetricoolCalPost } from '@/components/metri
 /** Knop naar Metricool om feedback te geven — enkel als er een (gevalideerde) link is. */
 function FeedbackKnop({ url }: { url: string }) {
   return (
-    <div className="card-base flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-[#fff848]/60 bg-[#fff848]/10">
+    <div className="card-base flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-gray-300 bg-gray-100">
       <div className="flex items-start gap-3 min-w-0">
         <MessageSquare className="h-5 w-5 shrink-0 mt-0.5 text-gray-700" />
         <div className="min-w-0">

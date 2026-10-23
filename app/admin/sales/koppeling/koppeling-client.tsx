@@ -145,8 +145,8 @@ export function KoppelingClient({ basisUrl }: { basisUrl: string }) {
 
         {/* Eén keer zichtbaar. Wij bewaren enkel de hash, dus dit is je enige kans. */}
         {nieuwToken && (
-          <div className="rounded-xl border border-[#fff848] bg-[#fff848]/15 p-3 space-y-1.5">
-            <div className="text-[11px] uppercase tracking-wide text-gray-600">Plak dit in Harrie</div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-1.5">
+            <div className="text-[11px] text-gray-600">Plak dit in Harrie</div>
             <div className="flex items-center gap-2">
               <code className="flex-1 font-mono text-xs bg-white border border-gray-200 rounded-lg px-2 py-1.5 select-all break-all">
                 {nieuwToken}

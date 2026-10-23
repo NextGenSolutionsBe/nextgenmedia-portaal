@@ -62,7 +62,7 @@ export function NotificationBell() {
             {loading ? (
               <div className="py-6 text-center text-gray-400"><Loader2 className="h-4 w-4 animate-spin mx-auto" /></div>
             ) : items.length === 0 ? (
-              <p className="py-6 text-center text-sm text-gray-400">Geen openstaande meldingen 🎉</p>
+              <p className="py-6 text-center text-sm text-gray-400">Geen openstaande meldingen</p>
             ) : (
               <ul className="divide-y divide-gray-50">
                 {items.map((n) => {
@@ -75,7 +75,7 @@ export function NotificationBell() {
                           <span className="block text-sm text-gray-800 leading-snug">{n.title}</span>
                           {n.date && <span className="block text-[11px] text-gray-400">{new Date(n.date + (n.date.length === 7 ? '-01' : '')).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' })}</span>}
                         </span>
-                        {!isRead && <span className="h-1.5 w-1.5 rounded-full bg-[#fff848] mt-1.5 shrink-0" />}
+                        {!isRead && <span className="h-1.5 w-1.5 rounded-full bg-gray-900 mt-1.5 shrink-0" />}
                       </button>
                     </li>
                   )

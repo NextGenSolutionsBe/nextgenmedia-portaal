@@ -25,7 +25,7 @@ export function PersoneelClient({ isAdmin = false }: { isAdmin?: boolean }) {
   return (
     <div className="space-y-5 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2"><Contact className="h-6 w-6" />Personeel</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold flex items-center gap-2"><Contact className="h-6 w-6" />Personeel</h1>
         <p className="text-sm text-gray-500 mt-0.5">Iedereen die voor ons werkt, op één plek: dossiers, beschikbaarheid en planning, meldingen én de logins met hun rollen en modules.</p>
       </div>
       <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">

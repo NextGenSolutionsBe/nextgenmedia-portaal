@@ -76,7 +76,7 @@ export function SectieModules({ ctx }: { ctx: Ctx }) {
       <div className="space-y-5">
         {secties.map(([sectie, lijst]) => (
           <div key={sectie}>
-            <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-1.5">{sectie}</div>
+            <div className="text-[11px] font-medium text-gray-400 mb-1.5">{sectie}</div>
             <div className="divide-y divide-gray-50 rounded-xl border border-gray-100">
               {lijst.map((m, i) => {
                 const inst = v[m.key]

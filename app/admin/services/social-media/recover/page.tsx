@@ -10,7 +10,7 @@ export default function RecoverPage() {
       <div className="flex items-center gap-3">
         <Link href="/admin/services/social-media" className="btn-secondary px-2"><ChevronLeft className="h-4 w-4" /></Link>
         <div>
-          <h1 className="text-xl font-bold">Content herstellen</h1>
+          <h1 className="text-xl font-semibold">Content herstellen</h1>
           <p className="text-sm text-gray-500 mt-0.5">Alle content-items (verbergt niets). Vind verdwenen content terug en koppel wees-items aan de juiste klant.</p>
         </div>
       </div>

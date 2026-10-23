@@ -110,7 +110,7 @@ export function PartnerPayments({ partnerId, payments }: { partnerId: string; pa
     <div className="card-base">
       <div className="mb-4 flex items-center justify-between gap-2 flex-wrap">
         <div>
-          <h2 className="font-semibold flex items-center gap-2"><Wallet className="h-4 w-4 text-[#c5b800]" />Betalingen</h2>
+          <h2 className="font-semibold flex items-center gap-2"><Wallet className="h-4 w-4 text-gray-500" />Betalingen</h2>
           <p className="text-xs text-gray-500 mt-0.5">Goedgekeurde betalingen vereffenen het saldo. Een goedgekeurde betaling annuleer je eerst voor je ze kunt verwijderen.</p>
         </div>
         <button onClick={() => { setError(null); setOpen(true) }} className="btn-primary text-sm"><Plus className="h-4 w-4" />Betaling registreren</button>
@@ -183,7 +183,7 @@ export function PartnerPayments({ partnerId, payments }: { partnerId: string; pa
             <div className="grid grid-cols-1 gap-2">
               {([['we_pay_partner', 'Wij betalen partner'], ['partner_pays_us', 'Partner betaalt ons']] as const).map(([val, label]) => (
                 <button key={val} type="button" onClick={() => setForm((f) => ({ ...f, direction: val }))}
-                  className={`text-left rounded-lg border p-3 text-sm transition-colors ${form.direction === val ? 'border-[#fff848] bg-[#fff848]/10 ring-1 ring-[#fff848]' : 'border-gray-200 hover:border-gray-300'}`}>
+                  className={`text-left rounded-lg border p-3 text-sm transition-colors ${form.direction === val ? 'border-gray-900 bg-gray-100 ring-1 ring-gray-900' : 'border-gray-200 hover:border-gray-300'}`}>
                   {label}
                 </button>
               ))}

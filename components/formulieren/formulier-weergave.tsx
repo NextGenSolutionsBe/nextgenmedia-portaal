@@ -74,7 +74,7 @@ function VeldWeergave({ veld, waarde, zet, fout, uploader, voorbeeld }: {
   if (veld.type === 'sectie') {
     return (
       <div className="pt-2">
-        <h2 className="text-base font-semibold text-gray-900 border-b-2 border-[#fff848] pb-1.5 inline-block">{veld.label}</h2>
+        <h2 className="text-base font-semibold text-gray-900 border-b-2 border-gray-900 pb-1.5 inline-block">{veld.label}</h2>
         {veld.hulptekst && <p className="text-sm text-gray-500 mt-2 whitespace-pre-line">{veld.hulptekst}</p>}
       </div>
     )
@@ -140,7 +140,7 @@ function VeldWeergave({ veld, waarde, zet, fout, uploader, voorbeeld }: {
             {(veld.opties ?? []).map((o) => {
               const aan = multi ? gekozen.includes(o) : tekst === o
               return (
-                <label key={o} className={cn('flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-sm cursor-pointer transition-colors', aan ? 'border-gray-900 bg-[#fff848]/25' : 'border-gray-200 bg-white hover:border-gray-300')}>
+                <label key={o} className={cn('flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-sm cursor-pointer transition-colors', aan ? 'border-gray-900 bg-gray-100' : 'border-gray-200 bg-white hover:border-gray-300')}>
                   <input
                     type={multi ? 'checkbox' : 'radio'} name={inputId} value={o} checked={aan} className="accent-black h-4 w-4 shrink-0"
                     onChange={() => zet(multi ? (aan ? gekozen.filter((x) => x !== o) : [...gekozen, o]) : o)}
@@ -161,7 +161,7 @@ function VeldWeergave({ veld, waarde, zet, fout, uploader, voorbeeld }: {
           <Hulp veld={veld} />
           <div className="flex gap-2">
             {(['ja', 'nee'] as const).map((o) => (
-              <label key={o} className={cn('flex-1 sm:flex-none sm:min-w-[110px] flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium cursor-pointer transition-colors', tekst === o ? 'border-gray-900 bg-[#fff848]/25' : 'border-gray-200 bg-white hover:border-gray-300')}>
+              <label key={o} className={cn('flex-1 sm:flex-none sm:min-w-[110px] flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium cursor-pointer transition-colors', tekst === o ? 'border-gray-900 bg-gray-100' : 'border-gray-200 bg-white hover:border-gray-300')}>
                 <input type="radio" name={inputId} value={o} checked={tekst === o} onChange={() => zet(o)} className="accent-black h-4 w-4" />
                 {o === 'ja' ? 'Ja' : 'Nee'}
               </label>
@@ -182,7 +182,7 @@ function VeldWeergave({ veld, waarde, zet, fout, uploader, voorbeeld }: {
             {punten.map((p) => {
               const aan = tekst === String(p)
               return (
-                <label key={p} className={cn('h-10 min-w-[2.5rem] px-2 flex items-center justify-center rounded-lg border text-sm font-semibold cursor-pointer transition-colors', aan ? 'border-gray-900 bg-[#fff848]' : 'border-gray-200 bg-white hover:border-gray-300')}>
+                <label key={p} className={cn('h-10 min-w-[2.5rem] px-2 flex items-center justify-center rounded-lg border text-sm font-semibold cursor-pointer transition-colors', aan ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white hover:border-gray-300')}>
                   <input type="radio" name={inputId} value={p} checked={aan} onChange={() => zet(p)} className="sr-only" />
                   {p}
                 </label>

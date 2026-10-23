@@ -111,13 +111,13 @@ function databankOnbereikbaar(path: string): NextResponse {
      <meta name="viewport" content="width=device-width,initial-scale=1">
      <title>Even geen verbinding</title>
      <style>
-       body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#f9fafb;color:#111;
+       body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#fafafa;color:#0f0f0f;
             display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:1.5rem}
-       .k{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:2rem;max-width:26rem;text-align:center}
+       .k{background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:2rem;max-width:26rem;text-align:center}
        h1{font-size:1.125rem;margin:0 0 .5rem}
-       p{color:#4b5563;font-size:.9rem;line-height:1.5;margin:0 0 1.25rem}
-       a{display:inline-block;background:#fff848;color:#111;text-decoration:none;font-weight:600;
-         font-size:.875rem;padding:.6rem 1.1rem;border-radius:10px}
+       p{color:#4b4b4b;font-size:.9rem;line-height:1.5;margin:0 0 1.25rem}
+       a{display:inline-block;background:#0f0f0f;color:#fff;text-decoration:none;font-weight:500;
+         font-size:.875rem;padding:.6rem 1.1rem;border-radius:6px}
      </style></head><body><div class="k">
        <h1>Even geen verbinding met de databank</h1>
        <p>Je bent nog gewoon ingelogd. Dit duurt meestal een paar seconden.</p>

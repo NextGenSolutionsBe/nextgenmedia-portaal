@@ -89,7 +89,7 @@ export function PubliekFormulier({ token, titel, beschrijving, velden, instellin
   if (klaar) {
     return (
       <div className="max-w-lg mx-auto bg-white border border-gray-200 rounded-2xl p-8 text-center">
-        <div className="h-14 w-14 rounded-full bg-[#fff848] flex items-center justify-center mx-auto mb-4"><CheckCircle2 className="h-7 w-7 text-black" /></div>
+        <div className="h-14 w-14 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4"><CheckCircle2 className="h-7 w-7 text-black" /></div>
         <h1 className="font-semibold text-xl mb-2">Verstuurd!</h1>
         <p className="text-sm text-gray-600 whitespace-pre-line">{instellingen.bedankt_tekst}</p>
       </div>
@@ -99,10 +99,10 @@ export function PubliekFormulier({ token, titel, beschrijving, velden, instellin
   return (
     <form onSubmit={verstuur} noValidate className="max-w-2xl mx-auto">
       <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
-        <div className="h-1.5 bg-[#fff848]" />
+        <div className="h-1.5 bg-gray-900" />
         <div className="p-5 sm:p-8">
-          {klantNaam && <p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-1">Voor {klantNaam}</p>}
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">{titel}</h1>
+          {klantNaam && <p className="text-xs font-medium text-gray-400 mb-1">Voor {klantNaam}</p>}
+          <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">{titel}</h1>
           {beschrijving && <p className="text-sm text-gray-600 mt-2 whitespace-pre-line">{beschrijving}</p>}
           <p className="text-xs text-gray-400 mt-3">Velden met <span className="text-red-500">*</span> zijn verplicht.</p>
 

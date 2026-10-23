@@ -99,7 +99,7 @@ export function ReminderSettings({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90dvh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
           <div>
@@ -129,7 +129,7 @@ export function ReminderSettings({ onClose }: { onClose: () => void }) {
             </div>
 
             <label className="flex items-start gap-2.5 cursor-pointer">
-              <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-[#fff848]"
+              <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-gray-900"
                 checked={p.reminder_enabled} onChange={(e) => set({ reminder_enabled: e.target.checked })} />
               <span>
                 <span className="block text-sm font-medium text-gray-900">Herinnering automatisch versturen</span>

@@ -194,7 +194,7 @@ export function FacturatieItemWizard({ invoiceId = null, recurringMaand = null, 
   const titel = bewerken ? 'Facturatie-item aanpassen' : recurringMaand ? `Eigen artikelen voor ${recurringMaand.maand}` : 'Nieuw facturatie-item'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center sm:p-6 bg-black/40 backdrop-blur-sm" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center sm:p-6 bg-black/40" role="dialog" aria-modal="true">
       <div className="bg-[#f7f7f5] sm:rounded-2xl shadow-xl w-full max-w-4xl h-dvh sm:h-auto sm:max-h-[94dvh] flex flex-col overflow-hidden">
         {/* Kop + stappen */}
         <div className="bg-white border-b border-gray-200 px-4 sm:px-6 pt-4 pb-3">
@@ -208,9 +208,9 @@ export function FacturatieItemWizard({ invoiceId = null, recurringMaand = null, 
               return (
                 <li key={s}>
                   <button type="button" onClick={() => setStap(i)} aria-current={stap === i ? 'step' : undefined}
-                    className={`w-full text-left rounded-lg px-2 py-1.5 border transition-colors ${stap === i ? 'border-black bg-[#fff848]' : 'border-gray-200 bg-white hover:border-gray-400'}`}>
+                    className={`w-full text-left rounded-lg px-2 py-1.5 border transition-colors ${stap === i ? 'border-gray-900 bg-gray-100' : 'border-gray-200 bg-white hover:border-gray-400'}`}>
                     <span className="flex items-center gap-1.5 text-[11px] text-gray-500">
-                      <span className={`h-4 w-4 rounded-full inline-flex items-center justify-center text-[10px] font-bold ${klaar ? 'bg-black text-white' : stap === i ? 'bg-black text-[#fff848]' : 'bg-gray-200 text-gray-700'}`}>{klaar ? <Check className="h-2.5 w-2.5" /> : i + 1}</span>
+                      <span className={`h-4 w-4 rounded-full inline-flex items-center justify-center text-[10px] font-bold ${klaar ? 'bg-black text-white' : stap === i ? 'bg-black text-white' : 'bg-gray-200 text-gray-700'}`}>{klaar ? <Check className="h-2.5 w-2.5" /> : i + 1}</span>
                       <span className="hidden sm:inline">Stap {i + 1}</span>
                     </span>
                     <span className="block text-xs font-semibold text-gray-900 truncate">{s}</span>
@@ -294,7 +294,7 @@ function StapKlant({ klant, klanten, onKies, onKlant, vastgezet }: { klant: Klan
               {lijst.length === 0 && <li className="px-3 py-3 text-sm text-gray-500">Geen klant gevonden. <button type="button" onClick={() => setNieuw(true)} className="underline">Nieuwe klant aanmaken</button></li>}
               {lijst.map((k) => (
                 <li key={k.id}>
-                  <button type="button" onClick={() => { onKies(k.id); setZoek('') }} className={`w-full text-left px-3 py-2 text-sm hover:bg-[#fff848]/30 flex items-center justify-between gap-2 ${klant?.id === k.id ? 'bg-[#fff848]/40' : ''}`}>
+                  <button type="button" onClick={() => { onKies(k.id); setZoek('') }} className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-200 flex items-center justify-between gap-2 ${klant?.id === k.id ? 'bg-gray-200' : ''}`}>
                     <span className="font-medium truncate">{k.naam}</span><span className="text-xs text-gray-500 shrink-0">{k.btw ?? ''}</span>
                   </button>
                 </li>
@@ -759,7 +759,7 @@ function StapControle({ klant, basis, regels, totalen, kosten, ontbrekend, meded
       </div>
 
       <div className="rounded-xl border border-gray-200 overflow-hidden">
-        <div className="bg-gray-50 px-4 py-2 text-xs font-semibold text-gray-600 uppercase tracking-wide">Overzicht</div>
+        <div className="bg-gray-50 px-4 py-2 text-xs font-semibold text-gray-600">Overzicht</div>
         <div className="p-4 space-y-3 text-sm">
           {ontbrekend.length > 0 && (
             <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-900">

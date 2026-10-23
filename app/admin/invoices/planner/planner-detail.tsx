@@ -56,7 +56,7 @@ export function PlannerDetail({ moment: m, onSluit, onActie, bezig, onOpenFactuu
   return (
     <Lade onSluit={onSluit} titel={
       <>
-        <div className="text-[11px] uppercase tracking-wide text-gray-400">{HERKOMST_LABEL[m.herkomst]}</div>
+        <div className="text-[11px] text-gray-400">{HERKOMST_LABEL[m.herkomst]}</div>
         <h3 className="font-semibold text-gray-900 truncate">{m.klant}</h3>
         <div className="flex items-center gap-2 mt-1 flex-wrap"><StatusBadge status={m.status} /><span className="text-xs text-gray-500">{m.type} · {datumLang(m.datum)}</span></div>
       </>
@@ -89,7 +89,7 @@ export function PlannerDetail({ moment: m, onSluit, onActie, bezig, onOpenFactuu
       </dl>
 
       <div className="mt-4 space-y-2">
-        <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">Acties</div>
+        <div className="text-[11px] font-medium text-gray-400">Acties</div>
         <div className="flex flex-wrap gap-2">
           {isFactuur && <button type="button" onClick={() => onOpenFactuur!(m.invoice_id!)} className="btn-primary text-xs"><Pencil className="h-3.5 w-3.5" />{m.status === 'te_versturen' || m.status === 'gepland' ? 'Factuur openen en bewerken' : 'Factuur openen'}</button>}
           {!isFactuur && a.bekijkenUrl && <Link href={a.bekijkenUrl} prefetch={false} className="btn-secondary text-xs"><Eye className="h-3.5 w-3.5" />Bekijken</Link>}

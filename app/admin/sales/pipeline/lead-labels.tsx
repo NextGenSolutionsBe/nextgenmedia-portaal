@@ -39,7 +39,7 @@ export function LeadLabels({ labels, suggesties = [], bezig, onOpslaan }: {
 
   return (
     <section>
-      <h3 className="text-[11px] uppercase tracking-wide text-gray-400 font-bold mb-2 flex items-center gap-1">
+      <h3 className="text-[11px] text-gray-400 font-bold mb-2 flex items-center gap-1">
         <Tag className="h-3 w-3" />Labels
       </h3>
       <div className="flex flex-wrap gap-1.5 mb-2">

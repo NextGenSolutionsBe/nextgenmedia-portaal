@@ -170,7 +170,7 @@ function NavItem({
           <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-180')} />
         </button>
         {open && (
-          <div className="ml-4 mt-1 space-y-0.5 border-l border-gray-100 pl-3">
+          <div className="ml-4 mt-1 space-y-0.5 border-l border-white/10 pl-3">
             {item.children.map((child) => (
               <Link
                 key={child.href}
@@ -291,7 +291,7 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
     <>
       {/* ── Mobile hamburger button ── */}
       <button
-        className="md:hidden fixed top-2.5 left-3 z-50 h-10 w-10 flex items-center justify-center rounded-xl bg-white border border-gray-200 shadow-sm"
+        className={cn('md:hidden fixed top-2.5 left-3 z-50 h-10 w-10 flex items-center justify-center rounded-md bg-white border border-gray-200 text-gray-900', mobileOpen && 'hidden')}
         onClick={() => setMobileOpen(true)}
         aria-label="Menu openen"
       >
@@ -301,7 +301,7 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
       {/* ── Backdrop ── */}
       {mobileOpen && (
         <div
-          className="md:hidden fixed inset-0 bg-black/40 backdrop-blur-sm z-40"
+          className="md:hidden fixed inset-0 bg-black/40 z-40"
           onClick={closeMobile}
         />
       )}
@@ -309,33 +309,33 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
       {/* ── Sidebar panel ── */}
       <aside
         className={cn(
-          'fixed left-0 top-0 h-screen w-[var(--sidebar-width)] bg-white border-r border-gray-200 flex flex-col z-40',
+          'fixed left-0 top-0 h-screen w-[var(--sidebar-width)] bg-gray-900 text-gray-300 flex flex-col z-40',
           'transition-transform duration-300 ease-in-out',
           'md:translate-x-0',
-          mobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full',
+          mobileOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full',
         )}
       >
         {/* Logo + close */}
-        <div className="px-4 py-5 border-b border-gray-100">
+        <div className="px-4 py-4 border-b border-white/10">
           <div className="flex items-center gap-3">
             <Logo className="h-8 w-8 shrink-0" />
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-bold text-black leading-tight">NextGenMedia</div>
-              <div className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">Admin</div>
+              <div className="text-sm font-semibold text-white leading-tight">NextGenMedia</div>
+              <div className="text-[11px] text-gray-400">Admin</div>
             </div>
             {/* Refresh */}
             <button
               onClick={refresh}
               disabled={spinning}
               title="Pagina vernieuwen"
-              className="h-7 w-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+              className="h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-white/10 hover:text-white transition-colors"
             >
               <RefreshCcw className={cn('h-3.5 w-3.5', spinning && 'animate-spin')} />
             </button>
             {/* Close (mobile) */}
             <button
               onClick={closeMobile}
-              className="md:hidden h-7 w-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100"
+              className="md:hidden h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-white/10 hover:text-white"
               aria-label="Menu sluiten"
             >
               <X className="h-4 w-4" />
@@ -350,12 +350,12 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
             misgokt. Daarom de voornaam groot en het e-mailadres eronder: de
             naam voor het gemak, het adres als het harde antwoord. */}
         {(naam || email) && (
-          <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2.5">
-            <div className="h-8 w-8 shrink-0 rounded-full bg-[#fff848] text-black flex items-center justify-center text-sm font-bold">
+          <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2.5">
+            <div className="h-8 w-8 shrink-0 rounded-full bg-white/10 text-white flex items-center justify-center text-sm font-semibold">
               {(naam || email || '?').charAt(0).toUpperCase()}
             </div>
             <div className="min-w-0">
-              <div className="text-sm font-semibold text-gray-900 leading-tight truncate">
+              <div className="text-sm font-medium text-white leading-tight truncate">
                 {naam ? `Welkom, ${naam}` : 'Welkom'}
               </div>
               {email && <div className="text-[10px] text-gray-400 truncate" title={email}>{email}</div>}
@@ -368,7 +368,7 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
           {/* Wie ook een personeelsdossier heeft: inklokken, planning en
               beschikbaarheid, met dezelfde login als het portaal. */}
           {mijnWerk && (
-            <Link href="/team" prefetch={false} onClick={closeMobile} className="sidebar-item mb-3 bg-[#fff848]/40 hover:bg-[#fff848]/60 font-medium">
+            <Link href="/team" prefetch={false} onClick={closeMobile} className="sidebar-item mb-3 text-white bg-white/[0.06] hover:bg-white/10">
               <Timer className="h-4 w-4 shrink-0" />
               Mijn werk · inklokken
             </Link>
@@ -376,7 +376,7 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
           {visibleSections.map((section, si) => (
             <div key={section.title ?? `sec-${si}`} className={si > 0 ? 'mt-4' : ''}>
               {section.title && (
-                <div className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                <div className="px-3 mb-1 text-[11px] font-medium text-gray-500">
                   {section.title}
                 </div>
               )}
@@ -391,7 +391,7 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
         </nav>
 
         {/* Instellingen (centraal beheer) + eigen account + uitloggen */}
-        <div className="px-3 py-4 border-t border-gray-100 space-y-0.5">
+        <div className="px-3 py-4 border-t border-white/10 space-y-0.5">
           <Link href="/admin/account" prefetch={false} onClick={closeMobile}
             className={cn('sidebar-item', padNu.startsWith('/admin/account') && 'active')}>
             <UserCircle className="h-4 w-4 shrink-0" />
@@ -406,7 +406,7 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
           )}
           <button
             onClick={handleLogout}
-            className="sidebar-item w-full text-red-500 hover:text-red-600 hover:bg-red-50"
+            className="sidebar-item w-full text-red-300 hover:text-red-200 hover:bg-red-500/10"
           >
             <LogOut className="h-4 w-4 shrink-0" />
             Uitloggen

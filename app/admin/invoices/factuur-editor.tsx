@@ -69,7 +69,7 @@ export function RegelsEditor({ regels, onChange, btw, alleenLezen }: { regels: F
       <div className="overflow-x-auto -mx-1">
         <KaartTabel><table className="w-full text-xs min-w-[860px]">
           <thead>
-            <tr className="text-[10px] uppercase tracking-wide text-gray-500">
+            <tr className="text-[10px] text-gray-500">
               <th className="px-1 py-1 text-left w-8">#</th><th className="px-1 py-1 text-left">Artikel</th><th className="px-1 py-1 text-left">Omschrijving</th>
               <th className="px-1 py-1 text-right w-16">Aantal</th><th className="px-1 py-1 text-left w-20">Eenheid</th><th className="px-1 py-1 text-right w-24">Prijs excl.</th>
               <th className="px-1 py-1 text-right w-14">Btw %</th><th className="px-1 py-1 text-right w-16">Korting %</th>
@@ -261,11 +261,11 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
   const contractTitel = contracten.find((c) => c.id === kop.contract_id)?.titel ?? factuur?.contract_titel ?? null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-6 bg-black/40 backdrop-blur-sm" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-6 bg-black/40" role="dialog" aria-modal="true">
       <div className="bg-white sm:rounded-2xl shadow-xl w-full max-w-5xl h-dvh sm:h-auto max-h-dvh sm:max-h-[94dvh] flex flex-col overflow-hidden">
         <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-100">
           <div className="min-w-0">
-            <div className="text-[11px] uppercase tracking-wide text-gray-400">{nieuw ? 'Nieuwe factuur' : `Factuur F-${id!.slice(0, 8).toUpperCase()}`}</div>
+            <div className="text-[11px] text-gray-400">{nieuw ? 'Nieuwe factuur' : `Factuur F-${id!.slice(0, 8).toUpperCase()}`}</div>
             <h3 className="font-semibold text-gray-900 truncate">{klantNaam}{contractTitel ? ` · ${contractTitel}` : ''}</h3>
             {!nieuw && factuur && (
               <div className="flex items-center gap-2 mt-1 flex-wrap text-xs text-gray-500">
@@ -319,7 +319,7 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
               </div>
 
               <div>
-                <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-2">Factuurregels</div>
+                <div className="text-[11px] font-medium text-gray-400 mb-2">Factuurregels</div>
                 <RegelsEditor regels={regels} onChange={setRegels} btw={btw} alleenLezen={false} />
               </div>
 
@@ -329,7 +329,7 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
 
               {!nieuw && factuur && (
                 <div className="rounded-xl border border-gray-200 p-3 space-y-2">
-                  <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">Status</div>
+                  <div className="text-[11px] font-medium text-gray-400">Status</div>
                   <div className="flex flex-wrap items-end gap-2">
                     <div>
                       <label className="block text-[11px] text-gray-500 mb-1">Status</label>

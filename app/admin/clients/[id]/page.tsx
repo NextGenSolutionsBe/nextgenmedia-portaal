@@ -121,11 +121,11 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           <ChevronLeft className="h-4 w-4" />
         </Link>
         <div className="flex-1 min-w-[12rem]">
-          <h1 className="text-2xl font-bold truncate">{client.company_name}</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold truncate">{client.company_name}</h1>
           {client.niche && <p className="text-sm text-gray-500">{client.niche}</p>}
           {(client.sales_verantwoordelijke || client.appointment_setter) && (
             <div className="flex items-center gap-1.5 flex-wrap mt-1 text-xs">
-              {client.sales_verantwoordelijke && <span className="status-badge bg-[#fff848]/40 text-gray-900">Klant van {client.sales_verantwoordelijke}</span>}
+              {client.sales_verantwoordelijke && <span className="status-badge bg-gray-200 text-gray-900">Klant van {client.sales_verantwoordelijke}</span>}
               {client.appointment_setter && <span className="status-badge bg-gray-100 text-gray-700">Appointment: {client.appointment_setter}</span>}
             </div>
           )}
@@ -338,7 +338,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                             : `Aangemaakt op ${formatDate(c.created_at)}`}
                         </span>
                         {c.service_slug && (
-                          <span className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px] uppercase tracking-wide">
+                          <span className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px]">
                             {SERVICE_LABELS[c.service_slug] ?? c.service_slug}
                           </span>
                         )}
