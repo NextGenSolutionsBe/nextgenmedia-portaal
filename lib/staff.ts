@@ -32,8 +32,8 @@ export const ADMIN_MODULES: AdminModule[] = [
   { key: 'uploads',     label: 'Klantuploads',         prefixes: ['/admin/uploads', '/api/admin/uploads'] },
   { key: 'opdrachten',  label: 'Opdrachten (klanten)', prefixes: ['/admin/opdrachten', '/api/admin/opdrachten'] },
   { key: 'formulieren', label: 'Formulieren',          prefixes: ['/admin/formulieren', '/api/admin/formulieren'] },
-  // Klantmeetings: Google Agenda + Meet, ClickUp-taak en herinneringsmail.
-  { key: 'meetings',    label: 'Klantmeetings',        prefixes: ['/admin/meetings', '/api/admin/meetings'] },
+  // Meetingplanner: Google Agenda + Meet en uitnodiging, ClickUp-taak en herinneringsmail.
+  { key: 'meetings',    label: 'Meetings',             prefixes: ['/admin/meetings', '/api/admin/meetings'] },
   // Personeel: dossiers, planning, uren en personeelskosten. De medewerker zelf
   // werkt in /team (eigen omgeving, eigen API /api/team), nooit in /admin.
   { key: 'personeel',   label: 'Personeel',            prefixes: ['/admin/personeel', '/api/admin/personeel'] },

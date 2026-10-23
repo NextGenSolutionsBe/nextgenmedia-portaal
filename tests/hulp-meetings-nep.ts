@@ -187,6 +187,8 @@ async function nepFetch(input: any, init: any = {}): Promise<Response> {
   const body = init.body ? JSON.parse(String(init.body)) : null
 
   if (url.host === 'www.googleapis.com') {
+    const lijst = url.pathname.match(/\/calendar\/v3\/users\/me\/calendarList\/([^/]+)$/)
+    if (lijst) return json({ id: decodeURIComponent(lijst[1]), summary: 'Agenda Bram', accessRole: 'owner' })
     const m = url.pathname.match(/\/calendar\/v3\/calendars\/([^/]+)\/events(?:\/([^/]+))?$/)
     if (!m) return json({ error: { message: 'onbekend pad' } }, 404)
     const id = m[2] ? decodeURIComponent(m[2]) : null
@@ -241,6 +243,9 @@ async function nepFetch(input: any, init: any = {}): Promise<Response> {
     return json({ err: 'onbekend' }, 404)
   }
 
+  if (url.host === 'api.resend.com' && url.pathname === '/domains') {
+    return json({ name: 'restricted_api_key', message: 'This API key is restricted to only send emails' }, 401)
+  }
   if (url.host === 'api.resend.com') {
     const sleutel = (init.headers?.['Idempotency-Key'] ?? null) as string | null
     if (sleutel && resend.sleutels.has(sleutel)) return json({ id: resend.sleutels.get(sleutel) })
