@@ -15,7 +15,12 @@ export function baseUrl(): string {
   return 'http://localhost:3000'
 }
 
-export type SendResult = { ok: boolean; id?: string; error?: string }
+export type SendResult = {
+  ok: boolean; id?: string; error?: string
+  /** Onduidelijk afgelopen (netwerk, tijdslimiet, 5xx): misschien toch verstuurd.
+   *  Opnieuw proberen enkel met dezelfde idempotencyKey. */
+  onzeker?: boolean
+}
 
 /** Verstuurt één mail. Geef `html` mee voor opgemaakte mails; anders wordt de
  *  tekst als simpele HTML verzonden. */
@@ -39,6 +44,9 @@ export async function sendEmail(opts: {
   /** Zichtbare kopie (cc) en verborgen kopie (bcc), bv. een kopie naar het eigen adres. */
   cc?: string[] | null
   bcc?: string[] | null
+  /** Zelfde sleutel = Resend verstuurt maar één keer (24 uur geldig). Voor
+   *  automatische verzendingen die opnieuw geprobeerd kunnen worden. */
+  idempotencyKey?: string | null
 }): Promise<SendResult> {
   const apiKey = opts.apiKey || process.env.RESEND_API_KEY
   if (!apiKey) return { ok: false, error: 'Geen mailprovider geconfigureerd (RESEND_API_KEY ontbreekt).' }
@@ -48,7 +56,10 @@ export async function sendEmail(opts: {
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      headers: {
+        Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json',
+        ...(opts.idempotencyKey ? { 'Idempotency-Key': opts.idempotencyKey } : {}),
+      },
       body: JSON.stringify({
         from: opts.from || EMAIL_FROM,
         to: Array.isArray(opts.to) ? opts.to : [opts.to],
@@ -63,10 +74,10 @@ export async function sendEmail(opts: {
       }),
     })
     const json = await res.json().catch(() => ({}))
-    if (!res.ok) return { ok: false, error: json?.message || `Resend-fout (${res.status})` }
+    if (!res.ok) return { ok: false, error: json?.message || `Resend-fout (${res.status})`, onzeker: res.status >= 500 }
     return { ok: true, id: json?.id }
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Verzenden mislukt' }
+    return { ok: false, error: err instanceof Error ? err.message : 'Verzenden mislukt', onzeker: true }
   }
 }
 

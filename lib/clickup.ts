@@ -640,6 +640,25 @@ export async function annuleerAfspraakTaak(taskId: string): Promise<void> {
   })
 }
 
+/**
+ * Een taak terugvinden aan een unieke referentie in de omschrijving, enkel
+ * tussen taken die sinds `sindsMs` aangemaakt zijn. Voor wanneer een POST
+ * onduidelijk afliep (tijdslimiet): stond de taak er toch, dan nemen we die
+ * over in plaats van een tweede aan te maken.
+ */
+export async function zoekTaakMetMarker(listId: string, marker: string, sindsMs: number): Promise<string | null> {
+  for (let page = 0; page < 10; page++) {
+    const data = await clickupJson<{ tasks?: { id: string; description?: string | null; text_content?: string | null }[]; last_page?: boolean }>(
+      `/list/${listId}/task?archived=false&include_closed=true&subtasks=false&date_created_gt=${Math.max(0, sindsMs - 60_000)}&page=${page}`,
+    )
+    const tasks = data.tasks ?? []
+    const hit = tasks.find((t) => `${t.description ?? ''}\n${t.text_content ?? ''}`.includes(marker))
+    if (hit) return hit.id
+    if (data.last_page || tasks.length === 0) break
+  }
+  return null
+}
+
 export type ClickupLijst = { id: string; naam: string; pad: string }
 
 /**

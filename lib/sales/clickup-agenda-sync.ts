@@ -206,6 +206,10 @@ export async function draaiClickupAgendaSync(): Promise<SyncResultaat> {
     const { data: eigenTaken } = await admin.from('sales_appointments')
       .select('clickup_task_id').not('clickup_task_id', 'is', null)
     const eigen = new Set(((eigenTaken ?? []) as { clickup_task_id: string }[]).map((x) => x.clickup_task_id))
+    // Klantmeetings staan al echt in Google (met Meet); hun taak geen tweede keer als blok.
+    const { data: meetingTaken } = await admin.from('klant_meetings')
+      .select('clickup_task_id').not('clickup_task_id', 'is', null)
+    for (const x of (meetingTaken ?? []) as { clickup_task_id: string }[]) eigen.add(x.clickup_task_id)
 
     const { data: itemData } = await admin.from('clickup_agenda_items').select('*')
     const items = (itemData ?? []) as Item[]

@@ -5984,3 +5984,118 @@ ALTER TABLE public.contracts ADD CONSTRAINT contracts_status_check CHECK (
     'getekend', 'geannuleerd', 'verlopen', 'vervangen', 'niet_geaccepteerd'
   )
 );
+
+-- ── Klantmeetings (23 okt 2026) ─────────────────────────────────────────────
+-- Een meeting met een klant plannen vanuit de app: echte Google Calendar-
+-- afspraak met Meet (bestaande koppeling sales_calendar_connections), ClickUp-
+-- taak volgens de bestaande afsprakenwerkwijze (lijst van het merk, eigenaar
+-- van de agenda, annuleren = [GEANNULEERD] + gesloten) en een herinneringsmail
+-- aan de bevestigde klantontvanger(s). Elke stap heeft een eigen status, zodat
+-- een fout in één stap zichtbaar blijft en veilig opnieuw geprobeerd kan worden.
+-- Geen bestaande data gewijzigd.
+CREATE TABLE IF NOT EXISTS public.klant_meetings (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- Eén plan-actie = één sleutel: een tweede klik of een herhaald verzoek na een
+  -- time-out maakt nooit een tweede meeting aan.
+  aanvraag_sleutel text,
+  client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  klant_naam text NOT NULL,
+  titel text NOT NULL,
+  beschrijving text,
+  starts_at timestamptz NOT NULL,
+  ends_at timestamptz NOT NULL,
+  tijdzone text NOT NULL DEFAULT 'Europe/Brussels',
+  status text NOT NULL DEFAULT 'ingepland',
+  agenda_id uuid REFERENCES public.sales_calendar_connections(id) ON DELETE SET NULL,
+  organisator_naam text,
+  organisator_email text,
+  -- [{naam, email}] — ontvangen de uitnodiging én de herinnering.
+  klant_ontvangers jsonb NOT NULL DEFAULT '[]'::jsonb,
+  -- [{naam, email}] — enkel genodigd op de agenda-afspraak.
+  deelnemers jsonb NOT NULL DEFAULT '[]'::jsonb,
+  herinnering_aan boolean NOT NULL DEFAULT true,
+  google_event_id text,
+  google_calendar_id text,
+  meet_url text,
+  google_status text NOT NULL DEFAULT 'wacht',
+  google_fout text,
+  clickup_task_id text,
+  clickup_list_id text,
+  clickup_status text NOT NULL DEFAULT 'wacht',
+  clickup_fout text,
+  clickup_gestart_op timestamptz,
+  created_by uuid,
+  created_by_email text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  geannuleerd_op timestamptz,
+  geannuleerd_door text
+);
+CREATE UNIQUE INDEX IF NOT EXISTS klant_meetings_aanvraag_uniek ON public.klant_meetings (aanvraag_sleutel) WHERE aanvraag_sleutel IS NOT NULL;
+CREATE INDEX IF NOT EXISTS klant_meetings_start ON public.klant_meetings (starts_at);
+CREATE INDEX IF NOT EXISTS klant_meetings_client ON public.klant_meetings (client_id);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_meetings_status_check') THEN
+    ALTER TABLE public.klant_meetings ADD CONSTRAINT klant_meetings_status_check CHECK (status IN ('ingepland', 'geannuleerd'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_meetings_tijd_check') THEN
+    ALTER TABLE public.klant_meetings ADD CONSTRAINT klant_meetings_tijd_check CHECK (ends_at > starts_at);
+  END IF;
+END $$;
+ALTER TABLE public.klant_meetings ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.klant_meetings FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.klant_meeting_herinneringen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  meeting_id uuid NOT NULL REFERENCES public.klant_meetings(id) ON DELETE CASCADE,
+  moment text NOT NULL,
+  gepland_voor timestamptz NOT NULL,
+  ontvangers jsonb NOT NULL DEFAULT '[]'::jsonb,
+  status text NOT NULL DEFAULT 'gepland',
+  -- Ook de idempotentiesleutel bij de mailprovider: opnieuw proberen verstuurt nooit twee keer.
+  verzend_sleutel text NOT NULL,
+  provider_id text,
+  email_message_id uuid,
+  fout text,
+  pogingen int NOT NULL DEFAULT 0,
+  bezig_sinds timestamptz,
+  verzonden_op timestamptz,
+  geannuleerd_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS klant_meeting_herinnering_sleutel ON public.klant_meeting_herinneringen (verzend_sleutel);
+-- Nooit twee lopende herinneringen voor dezelfde meeting.
+CREATE UNIQUE INDEX IF NOT EXISTS klant_meeting_herinnering_actief ON public.klant_meeting_herinneringen (meeting_id) WHERE status IN ('gepland', 'bezig', 'mislukt');
+CREATE INDEX IF NOT EXISTS klant_meeting_herinnering_te_doen ON public.klant_meeting_herinneringen (gepland_voor) WHERE status = 'gepland';
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_meeting_herinnering_status_check') THEN
+    ALTER TABLE public.klant_meeting_herinneringen ADD CONSTRAINT klant_meeting_herinnering_status_check
+      CHECK (status IN ('gepland', 'bezig', 'verzonden', 'mislukt', 'geannuleerd', 'overgeslagen'));
+  END IF;
+END $$;
+ALTER TABLE public.klant_meeting_herinneringen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.klant_meeting_herinneringen FROM anon, authenticated;
+
+-- Scheduler: pg_cron roept elke 5 minuten de herinneringsroute aan, met een eigen
+-- geheim (zelfde opzet als de ClickUp-agenda-sync). Zo hangt de herinnering
+-- nooit af van een open browser of van de dagelijkse Vercel-cron.
+INSERT INTO public.cron_geheimen (sleutel, waarde)
+SELECT 'klantmeetings', replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')
+WHERE NOT EXISTS (SELECT 1 FROM public.cron_geheimen WHERE sleutel = 'klantmeetings');
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron')
+     AND NOT EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'klantmeetings-herinneringen') THEN
+    PERFORM cron.schedule('klantmeetings-herinneringen', '*/5 * * * *', $cmd$
+      SELECT net.http_post(
+        url := 'https://app.nextgenmedia.be/api/cron/klantmeetings',
+        headers := jsonb_build_object(
+          'Content-Type', 'application/json',
+          'x-sync-secret', (SELECT waarde FROM public.cron_geheimen WHERE sleutel = 'klantmeetings')
+        ),
+        body := '{}'::jsonb,
+        timeout_milliseconds := 55000
+      );
+    $cmd$);
+  END IF;
+END $$;

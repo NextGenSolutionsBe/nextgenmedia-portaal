@@ -14,7 +14,7 @@ export async function GET() {
 
     const all = await buildNotifications()
     const KIND_MODULE: Record<string, string> = {
-      invoice: 'invoices', contract: 'contracts', blog: 'blogs', website: 'content', client: 'clients', formulier: 'formulieren', personeel: 'personeel', content: 'content',
+      invoice: 'invoices', contract: 'contracts', blog: 'blogs', website: 'content', client: 'clients', formulier: 'formulieren', personeel: 'personeel', content: 'content', meeting: 'meetings',
     }
     const notifications = all.filter((n) => {
       const mod = KIND_MODULE[n.kind]
