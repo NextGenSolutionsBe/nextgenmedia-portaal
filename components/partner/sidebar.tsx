@@ -33,7 +33,7 @@ export function PartnerSidebar({ partnerName }: { partnerName: string }) {
     <>
       {/* Mobile hamburger */}
       <button
-        className="md:hidden fixed top-3 left-3 z-50 h-10 w-10 flex items-center justify-center rounded-xl bg-white border border-gray-200 shadow-sm"
+        className={cn('md:hidden fixed top-3 left-3 z-50 h-10 w-10 flex items-center justify-center rounded-md bg-white border border-gray-200 text-gray-900', mobileOpen && 'hidden')}
         onClick={() => setMobileOpen(true)}
         aria-label="Menu openen"
       >
@@ -43,7 +43,7 @@ export function PartnerSidebar({ partnerName }: { partnerName: string }) {
       {/* Backdrop */}
       {mobileOpen && (
         <div
-          className="md:hidden fixed inset-0 bg-black/40 backdrop-blur-sm z-40"
+          className="md:hidden fixed inset-0 bg-black/40 z-40"
           onClick={closeMobile}
         />
       )}
@@ -51,32 +51,32 @@ export function PartnerSidebar({ partnerName }: { partnerName: string }) {
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed left-0 top-0 h-screen w-[var(--sidebar-width)] bg-white border-r border-gray-200 flex flex-col z-40',
+          'fixed left-0 top-0 h-screen w-[var(--sidebar-width)] bg-gray-900 text-gray-300 flex flex-col z-40',
           'transition-transform duration-300 ease-in-out',
           'md:translate-x-0',
-          mobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full',
+          mobileOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full',
         )}
       >
-        <div className="px-4 py-5 border-b border-gray-100">
+        <div className="px-4 py-4 border-b border-white/10">
           <div className="flex items-center gap-3">
             <Logo className="h-8 w-8 shrink-0" />
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-bold text-black leading-tight truncate">{partnerName}</div>
-              <div className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">Partnerportaal</div>
+              <div className="text-sm font-semibold text-white leading-tight truncate">{partnerName}</div>
+              <div className="text-[11px] text-gray-400">Partnerportaal</div>
             </div>
             {/* Refresh */}
             <button
               onClick={refresh}
               disabled={spinning}
               title="Pagina vernieuwen"
-              className="h-7 w-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+              className="h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-white/10 hover:text-white transition-colors"
             >
               <RefreshCcw className={cn('h-3.5 w-3.5', spinning && 'animate-spin')} />
             </button>
             {/* Close (mobile) */}
             <button
               onClick={closeMobile}
-              className="md:hidden h-7 w-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100"
+              className="md:hidden h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-white/10 hover:text-white"
               aria-label="Menu sluiten"
             >
               <X className="h-4 w-4" />
@@ -101,8 +101,8 @@ export function PartnerSidebar({ partnerName }: { partnerName: string }) {
           })}
         </nav>
 
-        <div className="px-3 py-4 border-t border-gray-100">
-          <button onClick={handleLogout} className="sidebar-item w-full text-red-500 hover:text-red-600 hover:bg-red-50">
+        <div className="px-3 py-4 border-t border-white/10">
+          <button onClick={handleLogout} className="sidebar-item w-full text-red-300 hover:text-red-200 hover:bg-red-500/10">
             <LogOut className="h-4 w-4" />
             Uitloggen
           </button>

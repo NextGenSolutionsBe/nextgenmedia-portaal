@@ -294,7 +294,7 @@ export function ScriptsClient() {
                   <div className="space-y-4">
                     {s.analyse.secties.map((sec, i) => (
                       <section key={`${i}-${sec.kop}`}>
-                        <h3 className={cn('text-xs font-bold uppercase tracking-wide mb-1', sectieKleur(sec.kop))}>{sec.kop}</h3>
+                        <h3 className={cn('text-xs font-bold mb-1', sectieKleur(sec.kop))}>{sec.kop}</h3>
                         <div className="text-sm leading-relaxed whitespace-pre-wrap">{sec.tekst}</div>
                       </section>
                     ))}
@@ -302,7 +302,7 @@ export function ScriptsClient() {
                   <div className="space-y-3">
                     {s.analyse.bezwaren.length > 0 && (
                       <div>
-                        <h3 className="text-xs font-bold uppercase tracking-wide text-red-600 mb-1.5">Bezwaren</h3>
+                        <h3 className="text-xs font-bold text-red-600 mb-1.5">Bezwaren</h3>
                         <div className="space-y-2">
                           {s.analyse.bezwaren.map((b, i) => (
                             <div key={i} className="text-xs border border-gray-200 rounded-lg p-2">
@@ -315,7 +315,7 @@ export function ScriptsClient() {
                     )}
                     {s.analyse.weetjes.length > 0 && (
                       <div>
-                        <h3 className="text-xs font-bold uppercase tracking-wide text-gray-400 mb-1.5">Snel opzoeken</h3>
+                        <h3 className="text-xs font-bold text-gray-400 mb-1.5">Snel opzoeken</h3>
                         <ul className="text-xs text-gray-600 list-disc pl-4 space-y-0.5">
                           {s.analyse.weetjes.map((w, i) => <li key={i}>{w}</li>)}
                         </ul>
@@ -330,7 +330,7 @@ export function ScriptsClient() {
       )}
 
       {bewerk && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/30 backdrop-blur-sm"
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/30"
           onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) setBewerk(null) }}>
           <form className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full sm:max-w-2xl max-h-[92dvh] flex flex-col overflow-hidden"
             onSubmit={(e) => { e.preventDefault(); if (!busy) void bewaarBewerking() }}>

@@ -189,7 +189,7 @@ export function MaandplanningCalendar() {
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold">Maandplanning</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold">Maandplanning</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             Automatisch per werkdag — sleep een dag of klik om handmatig aan te passen
           </p>
@@ -202,7 +202,7 @@ export function MaandplanningCalendar() {
 
       {/* Samenvatting */}
       <div className="card-base">
-        <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Deze maand</div>
+        <div className="text-xs font-medium text-gray-500 mb-3">Deze maand</div>
         <div className="flex flex-wrap gap-2">
           {ORDER.map((k) => (
             <span key={k} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium ${CATS[k].chip}`}>
@@ -224,7 +224,7 @@ export function MaandplanningCalendar() {
         </div>
 
         <div className="grid grid-cols-7 border-b border-gray-100">
-          {WEEKDAYS.map((w) => <div key={w} className="text-center text-[10px] font-semibold text-gray-400 uppercase tracking-wider py-2">{w}</div>)}
+          {WEEKDAYS.map((w) => <div key={w} className="text-center text-[10px] font-semibold text-gray-400 py-2">{w}</div>)}
         </div>
 
         <div className="grid grid-cols-7 grid-rows-6">
@@ -243,11 +243,11 @@ export function MaandplanningCalendar() {
                 onDrop={() => onDrop(dateStr, inMonth)}
                 onClick={() => { if (inMonth) setEditing(dateStr) }}
                 className={`group relative border-r border-b border-gray-100 p-1 sm:p-1.5 min-h-[64px] sm:min-h-[88px] min-w-0 flex flex-col gap-1
-                  ${!inMonth ? 'bg-gray-50/40' : !weekday ? 'bg-gray-50/70' : 'cursor-pointer hover:bg-yellow-50/30'}
+                  ${!inMonth ? 'bg-gray-50/40' : !weekday ? 'bg-gray-50/70' : 'cursor-pointer hover:bg-gray-50'}
                   ${dragFrom === dateStr ? 'opacity-50' : ''}`}
               >
                 <div className="flex items-center justify-between">
-                  <span className={`text-[11px] font-medium px-1 py-0.5 rounded-full ${isToday ? 'bg-[#fff848] text-black font-bold' : inMonth ? 'text-gray-700' : 'text-gray-300'}`}>{d.getDate()}</span>
+                  <span className={`text-[11px] font-medium px-1 py-0.5 rounded-full ${isToday ? 'bg-gray-900 text-white font-semibold' : inMonth ? 'text-gray-700' : 'text-gray-300'}`}>{d.getDate()}</span>
                   {inMonth && dateStr in overrides && <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" title="Handmatig aangepast" />}
                   {inMonth && <Pencil className="h-3 w-3 text-gray-300 opacity-0 group-hover:opacity-100 hidden sm:block" />}
                 </div>
@@ -306,7 +306,7 @@ function DayEditor({ dateStr, initial, aangepast, bezig, onReset, onClose, onSav
   const label = new Date(dateStr + 'T00:00:00').toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' })
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-y-auto">
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
           <h3 className="font-semibold capitalize">{label}</h3>

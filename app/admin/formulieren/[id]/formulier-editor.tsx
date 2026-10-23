@@ -97,7 +97,7 @@ export function FormulierEditor({ id, startTab, klantId }: { id: string; startTa
       <div className="flex items-start gap-3 flex-wrap">
         <Link href="/admin/formulieren" className="btn-secondary px-2" aria-label="Terug naar formulieren"><ChevronLeft className="h-4 w-4" /></Link>
         <div className="flex-1 min-w-[12rem]">
-          <h1 className="text-2xl font-bold truncate">{formulier.titel}</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold truncate">{formulier.titel}</h1>
           <div className="flex items-center gap-2 mt-1 flex-wrap text-xs">
             <span className={cn('status-badge', statusInfo.kleur)}>{statusInfo.label}</span>
             <span className="status-badge bg-gray-100 text-gray-700">{dienstLabel(formulier.dienst)}</span>
@@ -119,10 +119,10 @@ export function FormulierEditor({ id, startTab, klantId }: { id: string; startTa
         {tabs.map((t) => (
           <button
             key={t.key} role="tab" aria-selected={tab === t.key} onClick={() => wisselTab(t.key)}
-            className={cn('px-3 sm:px-4 py-2.5 text-sm font-medium flex items-center gap-1.5 border-b-2 -mb-px whitespace-nowrap transition-colors', tab === t.key ? 'border-[#fff848] text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800')}
+            className={cn('px-3 sm:px-4 py-2.5 text-sm font-medium flex items-center gap-1.5 border-b-2 -mb-px whitespace-nowrap transition-colors', tab === t.key ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800')}
           >
             <t.icon className="h-4 w-4" />{t.label}
-            {!!t.badge && <span className="ml-0.5 status-badge bg-[#fff848] text-black">{t.badge}</span>}
+            {!!t.badge && <span className="ml-0.5 status-badge bg-gray-900 text-white">{t.badge}</span>}
           </button>
         ))}
       </div>

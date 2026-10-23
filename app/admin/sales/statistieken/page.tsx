@@ -15,7 +15,7 @@ export default function SalesStatistiekenPage() {
   return (
     <div className="space-y-5 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold">Statistieken</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold">Statistieken</h1>
         <p className="text-sm text-gray-500 mt-0.5">
           Wat er in de pipeline gebeurde: cold calls, afspraken, uitkomsten en faseverplaatsingen — per medewerker.
         </p>

@@ -97,7 +97,7 @@ export function KantoorClient() {
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
+          <h1 className="text-xl sm:text-2xl font-semibold flex items-center gap-2">
             <Handshake className="h-6 w-6" />Kantoor
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">
@@ -218,7 +218,7 @@ export function KantoorClient() {
 
 function Kaart({ label, waarde, hint, accent }: { label: string; waarde: string; hint: string; accent?: boolean }) {
   return (
-    <div className={`card-base p-4 ${accent ? 'bg-[#fff848]/20 border-yellow-200' : ''}`}>
+    <div className={`card-base p-4 ${accent ? 'bg-gray-50 border-gray-300' : ''}`}>
       <div className="text-xs text-gray-500">{label}</div>
       <div className="text-2xl font-bold tabular-nums mt-0.5">{waarde}</div>
       <div className="text-[11px] text-gray-500 mt-0.5">{hint}</div>
@@ -381,7 +381,7 @@ function BewerkDialoog({ o, onClose, onOpgeslagen }: {
               </div>
             </div>
             <label className="flex items-start gap-2.5 cursor-pointer rounded-lg border border-gray-200 p-3">
-              <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-[#fff848]"
+              <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-gray-900"
                 checked={zichtbaar} onChange={(e) => setZichtbaar(e.target.checked)} />
               <span>
                 <span className="block text-sm font-medium text-gray-900">Totaalbedrag tonen aan {o.tegenpartij_naam}</span>
@@ -472,7 +472,7 @@ function NieuwDialoog({ bedrijven, mijnBedrijf, isAdmin, onClose, onOpgeslagen }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90dvh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
           <h3 className="font-semibold text-gray-900 flex items-center gap-2">
@@ -488,7 +488,7 @@ function NieuwDialoog({ bedrijven, mijnBedrijf, isAdmin, onClose, onOpgeslagen }
               {SOORTEN.map((s) => (
                 <button key={s.key} type="button" onClick={() => kiesSoort(s.key)}
                   className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all ${
-                    soort === s.key ? 'bg-[#fff848] border-yellow-400 text-gray-900' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                    soort === s.key ? 'bg-gray-900 border-gray-900 text-white' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>
                   {s.label}
                 </button>
               ))}
@@ -549,7 +549,7 @@ function NieuwDialoog({ bedrijven, mijnBedrijf, isAdmin, onClose, onOpgeslagen }
           </div>
 
           <label className="flex items-start gap-2.5 cursor-pointer rounded-lg border border-gray-200 p-3">
-            <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-[#fff848]"
+            <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-gray-900"
               checked={zichtbaar} onChange={(e) => setZichtbaar(e.target.checked)} />
             <span>
               <span className="block text-sm font-medium text-gray-900">

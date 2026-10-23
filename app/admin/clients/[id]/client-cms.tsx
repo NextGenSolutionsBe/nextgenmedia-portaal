@@ -99,7 +99,7 @@ export function ClientCms({ clientId }: { clientId: string }) {
 
   if (loading) return <div className="card-base"><div className="py-4 text-center text-gray-400"><Loader2 className="h-4 w-4 animate-spin mx-auto" /></div></div>
 
-  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50'
+  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15'
   const ms = status?.maintenance?.status
 
   return (
@@ -123,7 +123,7 @@ export function ClientCms({ clientId }: { clientId: string }) {
       {platform === 'framer' && (
         <div className="space-y-2 rounded-lg border border-gray-100 p-3">
           <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-            <input type="checkbox" checked={cmsIncluded} onChange={(e) => setCmsIncluded(e.target.checked)} className="h-4 w-4 rounded border-gray-300 accent-[#fff848]" />
+            <input type="checkbox" checked={cmsIncluded} onChange={(e) => setCmsIncluded(e.target.checked)} className="h-4 w-4 rounded border-gray-300 accent-gray-900" />
             CMS inbegrepen — klant beheert de inhoud in dit portaal
           </label>
           {cmsIncluded && (
@@ -154,7 +154,7 @@ export function ClientCms({ clientId }: { clientId: string }) {
       {/* Onderhoud */}
       <div className="space-y-2 rounded-lg border border-gray-100 p-3">
         <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-          <input type="checkbox" checked={maintIncluded} onChange={(e) => setMaintIncluded(e.target.checked)} className="h-4 w-4 rounded border-gray-300 accent-[#fff848]" />
+          <input type="checkbox" checked={maintIncluded} onChange={(e) => setMaintIncluded(e.target.checked)} className="h-4 w-4 rounded border-gray-300 accent-gray-900" />
           <span className="flex items-center gap-1.5"><Wrench className="h-3.5 w-3.5 text-gray-400" />Onderhoud inbegrepen</span>
         </label>
         {maintIncluded && (

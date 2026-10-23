@@ -32,7 +32,7 @@ export function MeldingenTab() {
         {lijst === null && <div className="py-8 text-center text-gray-400"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div>}
         {lijst && lijst.length === 0 && <div className="card-base text-sm text-gray-400 text-center py-8">Nog geen meldingen.</div>}
         {(lijst ?? []).map((m) => (
-          <div key={m.id} className={`card-base p-3 ${m.gelezen_op ? '' : 'border-yellow-300 bg-[#fff848]/10'}`}>
+          <div key={m.id} className={`card-base p-3 ${m.gelezen_op ? '' : 'border-gray-300 bg-gray-50'}`}>
             <div className="flex items-start justify-between gap-2"><div className={`text-sm ${m.gelezen_op ? '' : 'font-semibold'}`}>{m.titel}</div><span className="text-[10px] text-gray-400 whitespace-nowrap">{new Date(m.created_at).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span></div>
             {m.tekst && <div className="text-xs text-gray-600 mt-0.5">{m.tekst}</div>}
             <div className="flex gap-3 mt-1.5 text-xs">{m.link && <Link href={m.link} prefetch={false} onClick={() => gelezen(m.id)} className="text-blue-700 hover:underline">Openen</Link>}{!m.gelezen_op && <button type="button" onClick={() => gelezen(m.id)} className="text-gray-500 hover:text-black">Gelezen</button>}</div>

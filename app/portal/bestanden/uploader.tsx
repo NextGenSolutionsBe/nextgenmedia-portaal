@@ -189,7 +189,7 @@ export function Uploader({
             onClick={() => invoer.current?.click()}
             className={cn(
               'border-2 border-dashed rounded-2xl p-8 sm:p-12 text-center cursor-pointer transition-colors',
-              sleept ? 'border-black bg-[#fff848]/20' : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50',
+              sleept ? 'border-black bg-gray-100' : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50',
             )}
           >
             <Upload className="h-8 w-8 mx-auto text-gray-400" />
@@ -326,7 +326,7 @@ function Kaart({
             <div className="flex gap-1.5">
               <button
                 onClick={() => opBewaren(titel.trim() || u.titel, tekst)}
-                className="flex-1 text-xs font-semibold bg-[#fff848] text-black rounded-lg py-1.5 hover:brightness-95 flex items-center justify-center gap-1"
+                className="flex-1 text-xs font-medium bg-gray-900 text-white rounded-md py-1.5 hover:bg-gray-800 flex items-center justify-center gap-1"
               >
                 <Check className="h-3 w-3" />Bewaren
               </button>

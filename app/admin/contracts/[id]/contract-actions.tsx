@@ -143,7 +143,7 @@ export function ContractActions({
 
       {/* Annuleren of niet geaccepteerd */}
       {stopKeuze && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="stop-titel">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" role="dialog" aria-modal="true" aria-labelledby="stop-titel">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center justify-between gap-2 p-5 border-b border-gray-100">
               <h3 id="stop-titel" className="font-semibold text-gray-900">{stopKeuze === 'cancel' ? 'Contract annuleren' : 'Niet geaccepteerd door de klant'}</h3>
@@ -175,7 +175,7 @@ export function ContractActions({
 
       {/* Bevestigingsvenster */}
       {deleteOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="verwijder-titel">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" role="dialog" aria-modal="true" aria-labelledby="verwijder-titel">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center gap-2 p-5 border-b border-gray-100">
               <AlertTriangle className="h-5 w-5 text-red-500 shrink-0" />

@@ -139,7 +139,7 @@ export function KlantFiche({ clientId, maand, data, doe, vandaag, onSluit, onTaa
 
       {/* Ritme en batch */}
       <section className="space-y-3">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Ritme en batch</h4>
+        <h4 className="text-xs font-semibold text-gray-500">Ritme en batch</h4>
         <div className="grid grid-cols-2 gap-3">
           <div><label className={lbl}>Ritme</label>
             <select className={INP} disabled={!kanBeheren} value={effRitme ?? ''} onChange={(e) => terugkerend({ ritme: e.target.value || null })}>
@@ -172,7 +172,7 @@ export function KlantFiche({ clientId, maand, data, doe, vandaag, onSluit, onTaa
 
       {/* Afspraken: enkel goedkeuringstermijn en materiaal */}
       <section className="space-y-3">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Afspraken</h4>
+        <h4 className="text-xs font-semibold text-gray-500">Afspraken</h4>
         <div><label className={lbl} htmlFor="cp-termijn">Goedkeuringstermijn</label>
           <div className="flex items-center gap-2">
             <div className="w-24 shrink-0"><input id="cp-termijn" className={INP} inputMode="numeric" disabled={!kanBeheren} value={v.goedkeuring_werkdagen} onChange={(e) => setV({ ...v, goedkeuring_werkdagen: e.target.value.replace(/[^0-9]/g, '') })} placeholder={inst.goedkeuring_werkdagen !== null ? String(inst.goedkeuring_werkdagen) : '?'} /></div>
@@ -186,7 +186,7 @@ export function KlantFiche({ clientId, maand, data, doe, vandaag, onSluit, onTaa
       {/* Cyclus van deze maand */}
       <section className="space-y-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Cyclus {maandNaam(maand)}{cyclus && cyclus.status !== 'actief' ? ` · ${cyclus.status}` : ''}</h4>
+          <h4 className="text-xs font-semibold text-gray-500">Cyclus {maandNaam(maand)}{cyclus && cyclus.status !== 'actief' ? ` · ${cyclus.status}` : ''}</h4>
           <div className="flex gap-1.5">
             {kanBeheren && !cyclus && cp?.actief && <button type="button" onClick={() => doe('cyclus.klaarzetten', { maand, client_id: clientId }, { melding: 'Taken klaargezet.' })} className="btn-secondary text-xs">Taken klaarzetten</button>}
             {kanBeheren && cyclus && cyclus.status === 'actief' && <button type="button" onClick={() => doe('cyclus.status', { id: cyclus.id, status: 'gepauzeerd' }, { melding: 'Cyclus gepauzeerd.' })} className="btn-secondary text-xs"><Pause className="h-3.5 w-3.5" />Pauzeren</button>}
@@ -209,7 +209,7 @@ export function KlantFiche({ clientId, maand, data, doe, vandaag, onSluit, onTaa
 
       {eerder.length > 0 && (
         <section>
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Eerdere cyclussen</h4>
+          <h4 className="text-xs font-semibold text-gray-500 mb-1">Eerdere cyclussen</h4>
           <ul className="text-sm divide-y divide-gray-100 rounded-xl border border-gray-200">{eerder.map((c) => {
             const tk = data.taken.filter((t) => t.cyclus_id === c.id)
             return <li key={c.id} className="px-3 py-2 flex justify-between gap-2"><span className="capitalize">{maandNaam(c.maand)}{c.status !== 'actief' ? ` · ${c.status}` : ''}</span><span className="text-gray-500">{tk.filter((t) => isKlaar(t.status, inst.statussen)).length}/{tk.length} afgerond</span></li>

@@ -23,9 +23,9 @@ const NEUTRAAL: MerkStijl = {
 
 const STIJLEN: Record<string, MerkStijl> = {
   nextgenmedia: {
-    badge: 'bg-[#fff848] border-yellow-400 text-gray-900',
-    stip: 'bg-[#fff848] border border-yellow-500',
-    balk: 'bg-[#fff848]',
+    badge: 'bg-gray-900 border-gray-900 text-white',
+    stip: 'bg-gray-900 border border-gray-900',
+    balk: 'bg-gray-900',
   },
   nextgensolutions: {
     badge: 'bg-blue-500 border-blue-600 text-white',

@@ -71,7 +71,7 @@ export function ShootFeedback({ shootId, initialFeedback }: { shootId: string; i
           value={msg}
           onChange={(e) => setMsg(e.target.value)}
           placeholder="Een opmerking of feedback op deze briefing…"
-          className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]"
+          className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900"
         />
         <button
           onClick={submit}

@@ -39,7 +39,7 @@ export default async function PartnersPage() {
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold">Partners</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold">Partners</h1>
           <p className="text-sm text-gray-500 mt-0.5">{activeCount} actieve partners</p>
         </div>
         <Link href="/admin/partners/new" className="btn-primary">

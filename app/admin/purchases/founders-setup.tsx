@@ -28,8 +28,8 @@ export function FoundersSetup() {
   }
 
   return (
-    <div className="card-base bg-[#fff848]/5 border-[#fff848]/40">
-      <h2 className="font-semibold flex items-center gap-2 mb-1"><Users className="h-4 w-4 text-[#c5b800]" />Zaakvoerder-accounts</h2>
+    <div className="card-base bg-gray-50 border-gray-300">
+      <h2 className="font-semibold flex items-center gap-2 mb-1"><Users className="h-4 w-4 text-gray-500" />Zaakvoerder-accounts</h2>
       <p className="text-xs text-gray-500 mb-3">Maak de drie admin-accounts aan ({FOUNDERS.map(f => f.email).join(', ')}). Idempotent — bestaande accounts worden niet overschreven, alleen de adminrol gegarandeerd. Het wachtwoord kan elke zaakvoerder later zelf wijzigen.</p>
       <div className="flex flex-wrap items-end gap-3">
         <div>

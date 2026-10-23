@@ -51,7 +51,7 @@ export function TeamShell({ voornaam, portaal = false, children }: { voornaam: s
             const Icon = n.icon
             return (
               <Link key={n.href} href={n.href} prefetch={false} className={`relative flex flex-col items-center gap-0.5 py-2 text-[11px] ${actief ? 'text-black font-semibold' : 'text-gray-500'}`}>
-                <span className={`rounded-full px-3 py-1 ${actief ? 'bg-[#fff848]' : ''}`}><Icon className="h-5 w-5" /></span>
+                <span className={`rounded-full px-3 py-1 ${actief ? 'bg-gray-900 text-white' : ''}`}><Icon className="h-5 w-5" /></span>
                 {n.label}
                 {n.href === '/team/meldingen' && ongelezen > 0 && <span className="absolute top-1 right-[22%] min-w-4 h-4 px-1 rounded-full bg-red-600 text-white text-[10px] leading-4 text-center">{ongelezen}</span>}
               </Link>

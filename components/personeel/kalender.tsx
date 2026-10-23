@@ -81,7 +81,7 @@ export function Kalender({ items, weergave, anker, onWeergave, onAnker, onDag, l
               const l = perDag.get(d) ?? []
               const inMaand = d.slice(0, 7) === anker.slice(0, 7)
               return (
-                <div key={d} className={`min-h-[64px] sm:min-h-[100px] border-b border-r border-gray-100 p-1 flex flex-col gap-0.5 ${inMaand ? 'bg-white' : 'bg-gray-50/60'} ${d === vandaag ? 'ring-2 ring-inset ring-[#fff848]' : ''}`}>
+                <div key={d} className={`min-h-[64px] sm:min-h-[100px] border-b border-r border-gray-100 p-1 flex flex-col gap-0.5 ${inMaand ? 'bg-white' : 'bg-gray-50/60'} ${d === vandaag ? 'ring-2 ring-inset ring-gray-900' : ''}`}>
                   <button type="button" onClick={() => (onDag ? onDag(d) : (onAnker(d), onWeergave('dag')))} className={`text-[11px] font-medium text-left ${inMaand ? 'text-gray-800' : 'text-gray-400'}`}>{Number(d.slice(8, 10))}</button>
                   <div className="hidden sm:flex flex-col gap-0.5">{l.slice(0, 3).map((it) => <Blok key={it.id} it={it} compact />)}{l.length > 3 && <button type="button" onClick={() => { onAnker(d); onWeergave('dag') }} className="text-[10px] text-gray-500 text-left">+{l.length - 3} meer</button>}</div>
                   {l.length > 0 && <button type="button" onClick={() => { onAnker(d); onWeergave('dag') }} className="sm:hidden flex gap-0.5 flex-wrap mt-auto">{l.slice(0, 6).map((it) => <span key={it.id} className={`h-1.5 w-1.5 rounded-full ${KALENDER_KLEUR[it.soort].stip}`} />)}</button>}
@@ -95,7 +95,7 @@ export function Kalender({ items, weergave, anker, onWeergave, onAnker, onDag, l
       {weergave === 'week' && (
         <div className="grid grid-cols-1 sm:grid-cols-7 divide-y sm:divide-y-0 sm:divide-x divide-gray-100">
           {Array.from({ length: 7 }, (_, i) => plus(b.van, i)).map((d, i) => (
-            <div key={d} className={`p-2 min-h-[80px] sm:min-h-[240px] ${d === vandaag ? 'bg-[#fff848]/10' : ''}`}>
+            <div key={d} className={`p-2 min-h-[80px] sm:min-h-[240px] ${d === vandaag ? 'bg-gray-100' : ''}`}>
               <button type="button" onClick={() => (onDag ? onDag(d) : (onAnker(d), onWeergave('dag')))} className="text-xs font-semibold text-gray-700 mb-1.5">{DAGEN[i]} {Number(d.slice(8, 10))}</button>
               <div className="space-y-1">{(perDag.get(d) ?? []).map((it) => <Blok key={it.id} it={it} />)}{!(perDag.get(d) ?? []).length && <div className="text-[11px] text-gray-300">—</div>}</div>
             </div>

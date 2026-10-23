@@ -88,7 +88,7 @@ export default async function PortalDashboard() {
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold">{t(lang, 'dash.welcome', { name: client.company_name })}</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold">{t(lang, 'dash.welcome', { name: client.company_name })}</h1>
         <p className="text-sm text-gray-500 mt-0.5">{t(lang, 'dash.subtitle')}</p>
       </div>
 
@@ -101,7 +101,7 @@ export default async function PortalDashboard() {
             <Link
               key={c.id}
               href={canSign ? `/sign/${c.access_token}` : '/portal/contracts'}
-              className="flex items-center justify-between p-4 bg-[#fff848]/10 border border-[#fff848] rounded-xl"
+              className="flex items-center justify-between p-4 bg-gray-100 border border-gray-900 rounded-xl"
             >
               <div className="flex items-center gap-3">
                 <FileText className="h-5 w-5 text-gray-700" />
@@ -137,7 +137,7 @@ export default async function PortalDashboard() {
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
         {hasSocial && (
           <Link href="/portal/social-media" className="card-base hover:shadow-md transition-shadow group">
-            <Calendar className="h-8 w-8 text-[#fff848] mb-3" />
+            <Calendar className="h-6 w-6 text-gray-900 mb-3" />
             <h2 className="font-semibold mb-1">{t(lang, 'card.social.title')}</h2>
             <p className="text-sm text-gray-500">{t(lang, 'card.social.desc')}</p>
             {!!(socialCfg.posts || socialCfg.reels || socialCfg.stories) && (

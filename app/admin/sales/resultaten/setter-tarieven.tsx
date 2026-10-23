@@ -123,7 +123,7 @@ function Rij({ s, bezig, onBewaar }: {
       </div>
 
       <label className="flex items-start gap-2 mt-2 cursor-pointer">
-        <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-[#fff848]"
+        <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-gray-900"
           checked={!!s.onbezoldigd} disabled={bezig}
           onChange={(e) => onBewaar({ onbezoldigd: e.target.checked })} />
         <span className="text-[11px] text-gray-500 flex items-start gap-1">

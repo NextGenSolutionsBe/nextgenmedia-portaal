@@ -239,7 +239,7 @@ export function ResultsClient() {
               </div>
               {stats.some((s) => s.deals.length > 0) && (
                 <div className="border-t border-gray-100">
-                  <div className="px-4 py-2 text-[11px] font-medium text-gray-500 uppercase tracking-wide">Gewonnen deals deze maand</div>
+                  <div className="px-4 py-2 text-[11px] font-medium text-gray-500">Gewonnen deals deze maand</div>
                   <div className="table-wrap">
                     <KaartTabel><table className="w-full text-sm">
                       <thead>
@@ -316,7 +316,7 @@ export function ResultsClient() {
                           <td className="table-td text-right tabular">{euro(withVat(r.cents))}</td>
                         </tr>
                       ))}
-                      <tr className="bg-[#fff848]/15">
+                      <tr className="bg-gray-100">
                         <td className="table-td font-semibold">Totaal te factureren</td>
                         <td className="table-td text-right tabular font-semibold">{euro(totalExcl)}</td>
                         <td className="table-td text-right tabular font-semibold">{euro(withVat(totalExcl))}</td>
@@ -399,8 +399,8 @@ function Tile({ icon: Icon, label, value, sub, accent }: {
   icon: typeof Clock; label: string; value: string; sub?: string; accent?: boolean
 }) {
   return (
-    <div className={`stat-card ${accent ? 'border-[#fff848] bg-[#fff848]/10' : ''}`}>
-      <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-gray-500 mb-1">
+    <div className={`stat-card ${accent ? 'border-gray-900 bg-gray-100' : ''}`}>
+      <div className="flex items-center gap-1.5 text-[11px] text-gray-500 mb-1">
         <Icon className="h-3.5 w-3.5" />{label}
       </div>
       <div className="text-2xl font-bold tabular tracking-tight">{value}</div>

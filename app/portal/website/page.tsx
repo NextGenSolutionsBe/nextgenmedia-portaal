@@ -53,7 +53,7 @@ export default async function PortalWebsitePage() {
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold">{hasMaintenance ? 'Website aanpassingen' : 'Website'}</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold">{hasMaintenance ? 'Website aanpassingen' : 'Website'}</h1>
         <p className="text-sm text-gray-500 mt-0.5">
           {hasMaintenance ? 'Kleine aanpassingen aan uw website aanvragen' : 'Beheer de inhoud van uw website'}
         </p>

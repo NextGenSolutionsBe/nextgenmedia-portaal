@@ -16,9 +16,9 @@ export default async function PortaalBeveiligingPage() {
   return (
     <div className="space-y-4 max-w-3xl">
       <div className="flex items-center gap-3">
-        <div className="h-9 w-9 rounded-xl bg-[#fff848] flex items-center justify-center"><ShieldCheck className="h-4 w-4 text-black" /></div>
+        <div className="h-9 w-9 rounded-lg bg-gray-100 flex items-center justify-center"><ShieldCheck className="h-4 w-4 text-black" /></div>
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Beveiliging</h1>
+          <h1 className="text-xl font-semibold text-gray-900">Beveiliging</h1>
           <p className="text-sm text-gray-500">Bescherm je account extra met tweestapsverificatie.</p>
         </div>
       </div>

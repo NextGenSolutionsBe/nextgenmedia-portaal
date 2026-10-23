@@ -107,7 +107,7 @@ export function CommissionDeals({
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div>
           <h2 className="font-semibold text-gray-900 flex items-center gap-2">
-            <HandCoins className="h-4 w-4 text-[#c5b800]" />
+            <HandCoins className="h-4 w-4 text-gray-500" />
             Doorverwijzingen (commissie)
           </h2>
           <p className="text-xs text-gray-500 mt-0.5">Elke verkoop levert commissie op (10/8/5% per jaar). Richting bepaalt wie betaalt: partner verwees klant naar ons (wij betalen) of wij verwezen naar partner (partner betaalt ons). Onderaanneming met vast bedrag staat hieronder en geeft nooit commissie.</p>
@@ -164,7 +164,7 @@ export function CommissionDeals({
                 {/* Yearly rate reference */}
                 <div className="grid grid-cols-3 gap-2 mb-3">
                   {[1, 2, 3].map((y) => (
-                    <div key={y} className={`rounded-lg border p-2 text-center text-xs ${currentYear === y ? 'border-[#fff848] bg-[#fff848]/10' : 'border-gray-200'}`}>
+                    <div key={y} className={`rounded-lg border p-2 text-center text-xs ${currentYear === y ? 'border-gray-900 bg-gray-100' : 'border-gray-200'}`}>
                       <div className="text-[10px] text-gray-400 uppercase">Jaar {y}</div>
                       <div className="font-bold">{commissionPctForYear(deal, y)}%</div>
                     </div>
@@ -324,11 +324,11 @@ function ReferralDialog({
     }
   }
 
-  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]'
+  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900'
   const lbl = 'block text-xs font-medium text-gray-600 mb-1'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-y-auto">
         <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white">
           <h3 className="font-semibold">{isEdit ? 'Doorverwijzing bewerken' : 'Nieuwe doorverwijzing'}</h3>
@@ -348,7 +348,7 @@ function ReferralDialog({
                   type="button"
                   key={val}
                   onClick={() => setForm((p) => ({ ...p, direction: val }))}
-                  className={`text-left rounded-lg border p-3 transition-colors ${form.direction === val ? 'border-[#fff848] bg-[#fff848]/10 ring-1 ring-[#fff848]' : 'border-gray-200 hover:border-gray-300'}`}
+                  className={`text-left rounded-lg border p-3 transition-colors ${form.direction === val ? 'border-gray-900 bg-gray-100 ring-1 ring-gray-900' : 'border-gray-200 hover:border-gray-300'}`}
                 >
                   <div className="text-sm font-medium flex items-center gap-1.5">
                     {val === 'partner_pays_us' ? <ArrowLeft className="h-3.5 w-3.5" /> : <ArrowRight className="h-3.5 w-3.5" />}
@@ -464,11 +464,11 @@ function AddSaleDialog({
     }
   }
 
-  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]'
+  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900'
   const lbl = 'block text-xs font-medium text-gray-600 mb-1'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-y-auto">
         <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white">
           <div>

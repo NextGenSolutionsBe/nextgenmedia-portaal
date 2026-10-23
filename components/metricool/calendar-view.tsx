@@ -94,7 +94,7 @@ export function MetricoolCalendarView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cursor])
 
-  const dot = (p: MetricoolCalPost) => (colorMode === 'accent' ? '#c5b800' : colorFor(p.clientId))
+  const dot = (p: MetricoolCalPost) => (colorMode === 'accent' ? '#0f0f0f' : colorFor(p.clientId))
 
   const byDay = useMemo(() => {
     const m = new Map<string, MetricoolCalPost[]>()
@@ -151,7 +151,7 @@ export function MetricoolCalendarView({
           </div>
 
           <div className="grid grid-cols-7 border-b border-gray-100">
-            {WEEKDAYS.map((w) => <div key={w} className="text-center text-[10px] font-semibold text-gray-400 uppercase tracking-wider py-2">{w}</div>)}
+            {WEEKDAYS.map((w) => <div key={w} className="text-center text-[10px] font-semibold text-gray-400 py-2">{w}</div>)}
           </div>
 
           <div className="grid grid-cols-7 grid-rows-6">
@@ -166,7 +166,7 @@ export function MetricoolCalendarView({
                     type="button"
                     onClick={() => items.length > 0 && setDayModal({ key: dayStr, items })}
                     disabled={items.length === 0}
-                    className={`text-[11px] font-medium px-1 py-0.5 rounded-full self-start ${isToday ? 'bg-[#fff848] text-black font-bold' : inMonth ? 'text-gray-700' : 'text-gray-300'} ${items.length > 0 ? 'hover:ring-1 hover:ring-gray-300 cursor-pointer' : ''}`}
+                    className={`text-[11px] font-medium px-1 py-0.5 rounded-full self-start ${isToday ? 'bg-gray-900 text-white font-semibold' : inMonth ? 'text-gray-700' : 'text-gray-300'} ${items.length > 0 ? 'hover:ring-1 hover:ring-gray-300 cursor-pointer' : ''}`}
                     title={items.length > 0 ? `${items.length} post(s) — bekijk alles` : undefined}
                   >{d.getDate()}</button>
                   <div className="flex flex-col gap-0.5 overflow-hidden">
@@ -223,7 +223,7 @@ function DayModal({
   onClose: () => void
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85dvh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
           <h3 className="font-semibold text-gray-900 flex items-center gap-2">
@@ -313,7 +313,7 @@ function PreviewPanel({ post, showClientName, onClose }: { post: MetricoolCalPos
 
         {post.text && (
           <div>
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Tekst</div>
+            <div className="text-[10px] text-gray-500 mb-1">Tekst</div>
             <p className="text-sm whitespace-pre-wrap text-gray-700 leading-relaxed">{post.text}</p>
           </div>
         )}

@@ -95,7 +95,7 @@ export function KostenEnWinstDialoog({ factuur: ref, titel, clientId, onClose, o
   const losseKosten = (data?.kosten ?? []).filter((k) => k.status === 'actief' && !k.line_id && k.kostprijs_excl !== null).reduce((sm, k) => sm + Number(k.kostprijs_excl), 0)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[92dvh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
           <div className="min-w-0">
@@ -134,7 +134,7 @@ export function KostenEnWinstDialoog({ factuur: ref, titel, clientId, onClose, o
               {/* Lijnen */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <h4 className="font-semibold text-xs uppercase tracking-wide text-gray-500">Factuurlijnen (intern)</h4>
+                  <h4 className="font-semibold text-xs text-gray-500">Factuurlijnen (intern)</h4>
                   <button disabled={bezig} onClick={() => setLijnForm({ omschrijving: '', aantal: '1', prijs_excl: '', btw_pct: String(data.kop.btw_pct), classificatie: 'dienst', opmerking: '', kostprijs_excl: '', leverancier: '', voorstel: '' })} className={`${knop} bg-white border-gray-200 text-gray-700 hover:border-gray-400`}><Plus className="h-3 w-3" />Lijn</button>
                 </div>
                 {data.lijnen.length === 0 ? (
@@ -173,7 +173,7 @@ export function KostenEnWinstDialoog({ factuur: ref, titel, clientId, onClose, o
               {/* Kosten */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <h4 className="font-semibold text-xs uppercase tracking-wide text-gray-500">Gekoppelde kosten</h4>
+                  <h4 className="font-semibold text-xs text-gray-500">Gekoppelde kosten</h4>
                   <button disabled={bezig} onClick={() => setKostForm({ line_id: '', omschrijving: '', categorie: '', leverancier: '', kostprijs_excl: '', datum: new Date().toISOString().slice(0, 10), bewijs_url: '', opmerking: '', reden: '' })} className={`${knop} bg-black text-white border-black hover:bg-gray-800`}><Plus className="h-3 w-3" />Kost toevoegen</button>
                 </div>
                 {data.kosten.length === 0 ? <p className="text-xs text-gray-500">Nog geen kosten gekoppeld.</p> : (
@@ -321,7 +321,7 @@ export function KostenSamenvatting({ invoiceId, versie, onOpen }: { invoiceId: s
     <div className="rounded-xl border border-gray-200 p-3 space-y-2.5">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">Interne kosten en winst</div>
+          <div className="text-[11px] font-medium text-gray-400">Interne kosten en winst</div>
           <p className="text-xs text-gray-600 mt-0.5">Wat deze factuur ons kost: onderaanneming, freelancers, materiaal, advertentiebudget, drukwerk… <b>De klant ziet dit nooit</b>; het staat niet op de factuur.</p>
         </div>
         <button type="button" onClick={onOpen} className="btn-secondary text-xs whitespace-nowrap"><Wallet className="h-3.5 w-3.5" />Kosten beheren</button>

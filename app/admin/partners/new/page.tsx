@@ -108,7 +108,7 @@ export default function NewPartnerPage() {
           <ChevronLeft className="h-4 w-4" />
         </Link>
         <div>
-          <h1 className="text-2xl font-bold">Partner toevoegen</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold">Partner toevoegen</h1>
           <p className="text-sm text-gray-500">Maak een partneraccount aan</p>
         </div>
       </div>
@@ -164,7 +164,7 @@ export default function NewPartnerPage() {
                   onClick={() => toggleRole(r.slug)}
                   className={`px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${
                     form.roles.includes(r.slug)
-                      ? 'border-[#fff848] bg-[#fff848]/10 text-black'
+                      ? 'border-gray-900 bg-gray-100 text-black'
                       : 'border-gray-200 text-gray-500 hover:border-gray-300'
                   }`}
                 >

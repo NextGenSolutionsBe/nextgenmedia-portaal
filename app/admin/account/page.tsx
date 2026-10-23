@@ -13,7 +13,7 @@ export default function AccountPage({ searchParams }: { searchParams?: { instell
   return (
     <div className="space-y-6 animate-fade-in max-w-3xl">
       <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2"><UserCircle className="h-6 w-6" />Mijn account</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold flex items-center gap-2"><UserCircle className="h-6 w-6" />Mijn account</h1>
         <p className="text-sm text-gray-500 mt-0.5">Beveiliging van je eigen login.</p>
       </div>
       <BeveiligingClient verplichtMelding={searchParams?.instellen === '1'} />

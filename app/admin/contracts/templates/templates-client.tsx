@@ -74,7 +74,7 @@ export function TemplatesClient({
 
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold">Contracttemplates</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold">Contracttemplates</h1>
           <p className="text-sm text-gray-500 mt-0.5">{initialTemplates.length} template(s) — herbruikbare basiscontracten</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -194,7 +194,7 @@ function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">PDF</label>
-          <label className="flex flex-col items-center justify-center gap-2 p-5 border-2 border-dashed border-gray-200 rounded-xl cursor-pointer hover:border-[#fff848]">
+          <label className="flex flex-col items-center justify-center gap-2 p-5 border-2 border-dashed border-gray-200 rounded-xl cursor-pointer hover:border-gray-900">
             <Upload className="h-5 w-5 text-gray-400" />
             <span className="text-sm text-gray-500">{file ? file.name : 'Klik om PDF te selecteren'}</span>
             <input type="file" accept=".pdf" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
@@ -343,7 +343,7 @@ function FromTemplateDialog({ template, clients, onClose }: { template: Template
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90dvh] overflow-y-auto">
         <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white">
           <h3 className="font-semibold">{title}</h3>

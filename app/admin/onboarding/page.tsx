@@ -191,7 +191,7 @@ export default async function OnboardingInfoPage({
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold">Onboarding Info</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold">Onboarding Info</h1>
         <p className="text-sm text-gray-500 mt-0.5">
           Interne werkwijze voor klantgesprekken
         </p>
@@ -222,8 +222,8 @@ export default async function OnboardingInfoPage({
       </div>
 
       {/* Toelichting */}
-      <div className="card-base flex items-start gap-3 bg-[#fff848]/10 border-[#fff848]/40">
-        <Info className="h-5 w-5 text-[#c5b800] shrink-0 mt-0.5" />
+      <div className="card-base flex items-start gap-3 bg-gray-100 border-gray-300">
+        <Info className="h-5 w-5 text-gray-500 shrink-0 mt-0.5" />
         <p className="text-sm text-gray-600">
           {actief.uitleg} Dit is enkel ter informatie — er wordt niets bijgehouden of afgevinkt.
         </p>
@@ -236,7 +236,7 @@ export default async function OnboardingInfoPage({
           return (
             <div key={step.title} className="card-base">
               <div className="flex items-center gap-3 mb-3">
-                <div className="h-9 w-9 shrink-0 rounded-xl bg-[#fff848]/20 flex items-center justify-center font-bold text-sm text-black">
+                <div className="h-9 w-9 shrink-0 rounded-xl bg-gray-100 flex items-center justify-center font-bold text-sm text-black">
                   {i + 1}
                 </div>
                 <h2 className="font-semibold text-gray-900 flex items-center gap-2 min-w-0">

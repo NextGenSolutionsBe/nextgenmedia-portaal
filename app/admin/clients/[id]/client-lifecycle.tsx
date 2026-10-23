@@ -33,7 +33,7 @@ export async function ClientLifecycleBlock({ clientId, companyName }: { clientId
     <div className="card-base space-y-1 text-sm">
       <h2 className="font-semibold text-gray-900 flex items-center gap-2 mb-2">
         <CalendarRange className="h-4 w-4 text-gray-400" />Klant Lifecycle
-        {lc.batch && <span className="status-badge text-xs bg-[#fff848]/30 text-black">Batch {lc.batch}</span>}
+        {lc.batch && <span className="status-badge text-xs bg-gray-200 text-black">Batch {lc.batch}</span>}
       </h2>
       <Row Icon={Flag} label="Startdatum" value={lc.startDate ? formatDate(lc.startDate) : '—'} />
       <Row Icon={Repeat} label="Contractduur" value={lc.contractMonths ? `${lc.contractMonths} maanden` : '—'} />

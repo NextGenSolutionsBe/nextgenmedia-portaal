@@ -72,7 +72,7 @@ export default async function PortalMapPage({ params }: { params: Promise<{ map:
         >
           <ChevronLeft className="h-3.5 w-3.5" />Alle mappen
         </Link>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
+        <h1 className="text-xl sm:text-2xl font-semibold flex items-center gap-2">
           {isLos ? <Files className="h-6 w-6" /> : <Folder className="h-6 w-6" />}
           {naam}
         </h1>

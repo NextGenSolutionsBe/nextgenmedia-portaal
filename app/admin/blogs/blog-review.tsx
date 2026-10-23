@@ -116,7 +116,7 @@ export function BlogReview({ initialBlogs, accounts, initialAccount }: { initial
       </div>
 
       {selected.size > 0 && (
-        <div className="sticky top-2 z-10 flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-white/95 backdrop-blur px-3 py-2 shadow-sm">
+        <div className="sticky top-2 z-10 flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
           <span className="text-xs font-medium text-gray-600">{selected.size} geselecteerd</span>
           <button onClick={() => bulk('approve')} disabled={bulkBusy} className="btn-primary text-xs">{bulkBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}Goedkeuren & publiceren</button>
           <button onClick={() => bulk('publish')} disabled={bulkBusy} className="btn-secondary text-xs"><UploadCloud className="h-3.5 w-3.5" />Publiceren</button>

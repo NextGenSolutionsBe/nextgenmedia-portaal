@@ -255,7 +255,7 @@ export function ContractFacturatie({ contractId, clientId, contractTitle, isSign
             <div className="overflow-x-auto -mx-2">
               <KaartTabel><table className="w-full text-xs min-w-[760px]">
                 <thead>
-                  <tr className="text-[10px] uppercase tracking-wide text-gray-500 bg-gray-50">
+                  <tr className="text-[10px] text-gray-500 bg-gray-50">
                     <th className="px-2 py-1.5 text-left">Omschrijving</th><th className="px-2 py-1.5 text-left">Datum</th><th className="px-2 py-1.5 text-left">Factuurnr.</th>
                     <th className="px-2 py-1.5 text-right">Bedrag excl.</th><th className="px-2 py-1.5 text-right">Kosten</th><th className="px-2 py-1.5 text-left">Status</th><th className="px-2 py-1.5 text-right">Acties</th>
                   </tr>
@@ -366,14 +366,14 @@ function KoppelDialoog({ data, bezig, onKoppel, onVerdelen, onSluit }: { data: D
   const los = data.kandidaten.filter(past)
   const elders = data.gekoppeldElders.filter(past)
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" role="dialog" aria-modal="true">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85dvh] flex flex-col overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 space-y-2">
           <h3 className="font-semibold">Bestaande factuur koppelen · {data.contract.klant_naam ?? 'deze klant'}</h3>
           <div className="relative"><Search className="h-3.5 w-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" /><input autoFocus className={`${INP} pl-8`} placeholder="Zoek op omschrijving, nummer of bedrag" value={zoek} onChange={(e) => setZoek(e.target.value)} /></div>
         </div>
         <div className="flex-1 overflow-y-auto text-sm">
-          <div className="px-5 pt-3 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Losse facturen</div>
+          <div className="px-5 pt-3 text-[11px] font-semibold text-gray-500">Losse facturen</div>
           <ul className="divide-y divide-gray-100">
             {los.map((k) => (
               <li key={k.id} className="px-5 py-2 flex items-center gap-3">
@@ -386,7 +386,7 @@ function KoppelDialoog({ data, bezig, onKoppel, onVerdelen, onSluit }: { data: D
           </ul>
           {elders.length > 0 && (
             <>
-              <div className="px-5 pt-3 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Al aan een ander contract</div>
+              <div className="px-5 pt-3 text-[11px] font-semibold text-gray-500">Al aan een ander contract</div>
               <ul className="divide-y divide-gray-100">
                 {elders.map((k) => (
                   <li key={k.id} className="px-5 py-2 flex items-center gap-2 flex-wrap">
@@ -417,7 +417,7 @@ function VerminderingDialoog({ bestaand, facturen, bezig, onSluit, onBewaar }: {
   const n = leesGetal(bedrag)
   const ok = n !== null && n > 0
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" role="dialog" aria-modal="true">
       <form onSubmit={(e) => { e.preventDefault(); if (ok && !bezig) onBewaar({ soort, onderdeel, bedrag_excl: n, datum: datum || null, reden, notitie, invoice_id: factuur || null }) }}
         className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90dvh] flex flex-col overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100"><h3 className="font-semibold">{bestaand ? 'Vermindering aanpassen' : 'Vermindering registreren'}</h3></div>
@@ -528,10 +528,10 @@ function ReeksDialoog({ contractTitle, bezig, onSluit, onBevestig }: { contractT
   const voorbeeld = useMemo(() => maakReeks(inv), [inv.type, inv.aantal, inv.bedrag_excl, inv.btw_pct, inv.start_datum, inv.interval_maanden, inv.omschrijving, inv.betalingstermijn_dagen]) // eslint-disable-line react-hooks/exhaustive-deps
   const tot = reeksTotaal(voorbeeld)
   const keuze = (v: ReeksInvoer['type'], label: string, uitleg: string) => (
-    <button type="button" onClick={() => setType(v)} className={`rounded-xl border p-2.5 text-left text-sm transition-colors ${type === v ? 'border-[#fff848] bg-[#fff848]/10 ring-1 ring-[#fff848]' : 'border-gray-200 hover:border-gray-300'}`}><div className="font-medium">{label}</div><div className="text-[11px] text-gray-500">{uitleg}</div></button>
+    <button type="button" onClick={() => setType(v)} className={`rounded-xl border p-2.5 text-left text-sm transition-colors ${type === v ? 'border-gray-900 bg-gray-100 ring-1 ring-gray-900' : 'border-gray-200 hover:border-gray-300'}`}><div className="font-medium">{label}</div><div className="text-[11px] text-gray-500">{uitleg}</div></button>
   )
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/40 backdrop-blur-sm" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/40" role="dialog" aria-modal="true">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[92dvh] flex flex-col overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100"><h3 className="font-semibold">Meerdere facturen plannen</h3><p className="text-xs text-gray-500 mt-0.5">Jij bepaalt aantal, bedrag en datums; de app maakt exact die facturen aan met status Te factureren. Elke factuur blijft daarna volledig bewerkbaar.</p></div>
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
@@ -560,7 +560,7 @@ function ReeksDialoog({ contractTitle, bezig, onSluit, onBevestig }: { contractT
           {isDoorlopend(inv) && fouten.length === 0 && <div className="rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-xs text-purple-900">Er komt een <b>maandelijkse facturatie</b> vanaf {start.slice(0, 7)} van {formatEuro(inv.bedrag_excl)} excl. per maand, zonder einddatum. Elke maand verschijnt ze in Facturen en de planner; stopzetten kan daar.</div>}
           {voorbeeld.length > 0 && (
             <div>
-              <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-1">Voorbeeld — {voorbeeld.length} factu{voorbeeld.length === 1 ? 'ur' : 'ren'} · {formatEuro(tot.excl)} excl. · {formatEuro(tot.incl)} incl.</div>
+              <div className="text-[11px] font-medium text-gray-400 mb-1">Voorbeeld — {voorbeeld.length} factu{voorbeeld.length === 1 ? 'ur' : 'ren'} · {formatEuro(tot.excl)} excl. · {formatEuro(tot.incl)} incl.</div>
               <ul className="divide-y divide-gray-100 rounded-lg border border-gray-100 text-xs max-h-48 overflow-y-auto">{voorbeeld.map((m) => <li key={m.volgnr} className="px-3 py-1.5 flex justify-between gap-2"><span>{d(m.factuurdatum)} · {m.omschrijving}</span><span className="tabular-nums">{formatEuro(m.bedrag_excl)}</span></li>)}</ul>
             </div>
           )}

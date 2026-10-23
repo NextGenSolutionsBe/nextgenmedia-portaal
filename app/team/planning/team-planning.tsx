@@ -46,7 +46,7 @@ export function TeamPlanning() {
   const teBevestigen = (data?.planning ?? []).filter((p) => p.status !== 'geannuleerd' && bevestigingVan(p) === 'te_bevestigen')
   return (
     <div className="space-y-3">
-      <h1 className="text-lg font-bold">Mijn planning</h1>
+      <h1 className="text-lg font-semibold">Mijn planning</h1>
       {teBevestigen.length > 0 && (
         <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 space-y-2">
           <div className="text-sm font-semibold text-violet-900">Te bevestigen ({teBevestigen.length})</div>

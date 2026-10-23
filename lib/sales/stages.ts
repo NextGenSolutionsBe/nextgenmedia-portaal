@@ -174,7 +174,7 @@ export const STAGE_STYLE: Record<StageKey, string> = {
   email_verstuurd: 'bg-amber-100 text-amber-800',
   geen_interesse: 'bg-stone-200 text-stone-700',
   opvolgen: 'bg-orange-100 text-orange-800',
-  afspraak: 'bg-[#fff848] text-black',
+  afspraak: 'bg-gray-900 text-white',
   voorstel: 'bg-violet-100 text-violet-800',
   gewonnen: 'bg-green-200 text-green-900',
   verloren: 'bg-red-100 text-red-700',

@@ -95,7 +95,7 @@ export function Avatar({ naam, url, groot }: { naam: string; url?: string | null
   const s = groot ? 'h-16 w-16 text-lg' : 'h-9 w-9 text-xs'
   const init = naam.split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || '?'
   // eslint-disable-next-line @next/next/no-img-element
-  return url ? <img src={url} alt={naam} className={`${s} rounded-full object-cover border border-gray-200 shrink-0`} /> : <span className={`${s} rounded-full bg-[#fff848] text-black font-bold flex items-center justify-center shrink-0`}>{init}</span>
+  return url ? <img src={url} alt={naam} className={`${s} rounded-full object-cover border border-gray-200 shrink-0`} /> : <span className={`${s} rounded-full bg-gray-200 text-gray-800 font-semibold flex items-center justify-center shrink-0`}>{init}</span>
 }
 
 export type LinkItem = { naam: string; url?: string | null; pad?: string | null }
@@ -114,5 +114,5 @@ export function LinksLijst({ links, bestandUrl }: { links: LinkItem[] | null | u
   )
 }
 
-export const INP = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#fff848]/60 disabled:bg-gray-50 disabled:text-gray-400'
+export const INP = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-gray-900/15 disabled:bg-gray-50 disabled:text-gray-400'
 export const LBL = 'block text-xs font-medium text-gray-600 mb-1'

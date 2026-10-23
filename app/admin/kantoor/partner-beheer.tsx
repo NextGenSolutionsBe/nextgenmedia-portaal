@@ -238,7 +238,7 @@ Wil je "${b.naam}" nu op non-actief zetten? Dan verdwijnt het uit alle keuzelijs
           <input className="input-base" value={nieuwBedrijf} onChange={(e) => setNieuwBedrijf(e.target.value)}
             placeholder="Naam van het bedrijf" maxLength={120} />
           <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
-            <input type="checkbox" className="h-4 w-4 rounded border-gray-300 accent-[#fff848]"
+            <input type="checkbox" className="h-4 w-4 rounded border-gray-300 accent-gray-900"
               checked={eigenBedrijf} onChange={(e) => setEigenBedrijf(e.target.checked)} />
             Dit is een eigen bedrijf van ons
           </label>
@@ -276,7 +276,7 @@ Wil je "${b.naam}" nu op non-actief zetten? Dan verdwijnt het uit alle keuzelijs
           </div>
 
           <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
-            <input type="checkbox" className="h-4 w-4 rounded border-gray-300 accent-[#fff848]"
+            <input type="checkbox" className="h-4 w-4 rounded border-gray-300 accent-gray-900"
               checked={stuurMail} onChange={(e) => setStuurMail(e.target.checked)} />
             Stuur hem een mailtje met de link
           </label>
@@ -292,8 +292,8 @@ Wil je "${b.naam}" nu op non-actief zetten? Dan verdwijnt het uit alle keuzelijs
 
           {/* Een keer zichtbaar. Daarna staat dit nergens meer -- ook niet bij ons. */}
           {gezet && (
-            <div className="rounded-xl border border-[#fff848] bg-[#fff848]/15 p-3 space-y-1.5">
-              <div className="text-[11px] uppercase tracking-wide text-gray-600">Geef dit door aan {gezet.email}</div>
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-1.5">
+              <div className="text-[11px] text-gray-600">Geef dit door aan {gezet.email}</div>
               <div className="flex items-center gap-2">
                 <code className="flex-1 font-mono text-sm bg-white border border-gray-200 rounded-lg px-2 py-1.5 select-all break-all">
                   {gezet.wachtwoord}
@@ -323,7 +323,7 @@ Wil je "${b.naam}" nu op non-actief zetten? Dan verdwijnt het uit alle keuzelijs
                 <span className={`font-medium text-sm break-words ${b.actief ? '' : 'text-gray-400'}`}>{b.naam}</span>
                 {b.email && <span className="text-xs text-gray-400 inline-flex items-center gap-1 break-all"><Mail className="h-3 w-3" />{b.email}</span>}
                 {b.is_eigen && (
-                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-[#fff848] border border-yellow-400 text-gray-900">
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-900 border border-gray-900 text-white">
                     eigen bedrijf
                   </span>
                 )}

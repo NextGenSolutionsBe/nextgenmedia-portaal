@@ -62,7 +62,7 @@ export function OpGetekendZetten({ contractId }: { contractId: string }) {
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="op-getekend-titel">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" role="dialog" aria-modal="true" aria-labelledby="op-getekend-titel">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center justify-between gap-2 p-5 border-b border-gray-100">
               <h3 id="op-getekend-titel" className="font-semibold text-gray-900 flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-green-600" />Op getekend zetten</h3>

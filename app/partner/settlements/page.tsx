@@ -48,7 +48,7 @@ export default async function PartnerSettlementsPage() {
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold">Settlements</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold">Settlements</h1>
           <p className="text-sm text-gray-500 mt-0.5">Wat wij u betalen en wat u ons betaalt</p>
         </div>
         <PartnerPaymentForm />
@@ -64,7 +64,7 @@ export default async function PartnerSettlementsPage() {
           <div className="text-2xl font-bold text-red-600">{formatEuro(Math.max(0, toPay))}</div>
         </div>
         <div className="stat-card">
-          <div className="flex items-center gap-2 mb-1"><Wallet className="h-4 w-4 text-[#c5b800]" /><span className="text-xs text-gray-500 font-medium">Netto saldo</span></div>
+          <div className="flex items-center gap-2 mb-1"><Wallet className="h-4 w-4 text-gray-500" /><span className="text-xs text-gray-500 font-medium">Netto saldo</span></div>
           <div className={`text-2xl font-bold ${net >= 0 ? 'text-green-600' : 'text-red-600'}`}>{net >= 0 ? '+' : '−'}{formatEuro(Math.abs(net))}</div>
           <div className="text-xs text-gray-400 mt-1">{net >= 0 ? 'u ontvangt' : 'u betaalt ons'}</div>
         </div>

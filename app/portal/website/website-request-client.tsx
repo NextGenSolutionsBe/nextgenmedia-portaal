@@ -125,7 +125,7 @@ export function WebsiteRequestClient({
     }
   }
 
-  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]'
+  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900'
   const lbl = 'block text-sm font-medium text-gray-700 mb-1'
 
   return (
@@ -196,7 +196,7 @@ export function WebsiteRequestClient({
 
       {/* Create form modal */}
       {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center justify-between p-5 border-b border-gray-100">
               <h3 className="font-semibold">Nieuwe aanvraag</h3>
@@ -215,7 +215,7 @@ export function WebsiteRequestClient({
                       onClick={() => setForm((p) => ({ ...p, kind: k.value }))}
                       className={`px-3 py-2 rounded-lg border text-sm text-left transition-colors ${
                         form.kind === k.value
-                          ? 'border-[#fff848] bg-[#fff848]/10 font-medium'
+                          ? 'border-gray-900 bg-gray-100 font-medium'
                           : 'border-gray-200 text-gray-500 hover:border-gray-300'
                       }`}
                     >
@@ -240,7 +240,7 @@ export function WebsiteRequestClient({
                     accept="image/*"
                     multiple
                     onChange={(e) => setImages(Array.from(e.target.files ?? []))}
-                    className="block text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-[#fff848] file:text-black hover:file:bg-[#f5ee30]"
+                    className="block text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-gray-900 file:text-white hover:file:bg-gray-800"
                   />
                   {images.length > 0 && (
                     <p className="text-xs text-gray-400 mt-1">{images.length} bestand(en) geselecteerd</p>
@@ -261,7 +261,7 @@ export function WebsiteRequestClient({
 
       {/* Edit modal */}
       {editing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center justify-between p-5 border-b border-gray-100">
               <h3 className="font-semibold">Aanvraag bewerken</h3>
@@ -280,7 +280,7 @@ export function WebsiteRequestClient({
                       onClick={() => setEditForm((p) => ({ ...p, kind: k.value }))}
                       className={`px-3 py-2 rounded-lg border text-sm text-left transition-colors ${
                         editForm.kind === k.value
-                          ? 'border-[#fff848] bg-[#fff848]/10 font-medium'
+                          ? 'border-gray-900 bg-gray-100 font-medium'
                           : 'border-gray-200 text-gray-500 hover:border-gray-300'
                       }`}
                     >

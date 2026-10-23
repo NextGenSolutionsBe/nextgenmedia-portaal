@@ -145,7 +145,7 @@ export function PartnerEdit({ partnerId, partner }: { partnerId: string; partner
                   return (
                     <button key={r.slug} type="button"
                       onClick={() => zet('roles', aan ? form.roles.filter((x) => x !== r.slug) : [...form.roles, r.slug])}
-                      className={`px-2 py-1.5 rounded-lg border text-xs transition-colors ${aan ? 'border-[#fff848] bg-[#fff848]/10 text-black' : 'border-gray-200 text-gray-500'}`}>
+                      className={`px-2 py-1.5 rounded-lg border text-xs transition-colors ${aan ? 'border-gray-900 bg-gray-100 text-black' : 'border-gray-200 text-gray-500'}`}>
                       {r.label}
                     </button>
                   )

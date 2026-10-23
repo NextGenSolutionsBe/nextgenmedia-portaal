@@ -19,7 +19,7 @@ export function AntwoordWeergave({ velden, antwoorden, bestanden = {} }: {
   return (
     <div className="space-y-4">
       {velden.map((v) => {
-        if (v.type === 'sectie') return <h3 key={v.id} className="text-sm font-semibold text-gray-900 border-b-2 border-[#fff848] pb-1 pt-2 inline-block">{v.label}</h3>
+        if (v.type === 'sectie') return <h3 key={v.id} className="text-sm font-semibold text-gray-900 border-b-2 border-gray-900 pb-1 pt-2 inline-block">{v.label}</h3>
         if (!isAntwoordVeld(v.type)) return null
         const w = antwoorden[v.id]
         if (w === undefined) return null
@@ -32,7 +32,7 @@ export function AntwoordWeergave({ velden, antwoorden, bestanden = {} }: {
       })}
       {los.length > 0 && (
         <div className="pt-2 border-t border-gray-100 space-y-3">
-          <div className="text-[11px] uppercase tracking-wide text-gray-400">Overige antwoorden</div>
+          <div className="text-[11px] text-gray-400">Overige antwoorden</div>
           {los.map((k) => (
             <div key={k}><div className="text-xs font-medium text-gray-500 mb-0.5">{k}</div><div className="text-sm text-gray-900 whitespace-pre-wrap break-words">{antwoordTekst({ type: 'kort' }, antwoorden[k])}</div></div>
           ))}

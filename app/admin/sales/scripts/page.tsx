@@ -13,7 +13,7 @@ export default function SalesScriptsPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold">Belscripts</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold">Belscripts</h1>
         <p className="text-sm text-gray-500 mt-0.5">
           Upload je script — de AI deelt het in voor het belscherm: gespreksdelen in het midden,
           bezwaren met je eigen reacties ernaast. De tekst wordt letterlijk overgenomen, nooit herschreven.

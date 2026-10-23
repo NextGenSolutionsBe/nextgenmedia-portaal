@@ -54,7 +54,7 @@ export function BusyCalendarsPanel({ connectionId, ownerName, onClose, onSaved }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
           <div>
@@ -81,8 +81,8 @@ export function BusyCalendarsPanel({ connectionId, ownerName, onClose, onSaved }
               const isTarget = c.id === writeTarget
               return (
                 <label key={c.id}
-                  className={`flex items-start gap-2.5 px-2 py-2 rounded-lg cursor-pointer hover:bg-gray-50 ${isTarget ? 'bg-[#fff848]/10' : ''}`}>
-                  <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-[#fff848]"
+                  className={`flex items-start gap-2.5 px-2 py-2 rounded-lg cursor-pointer hover:bg-gray-50 ${isTarget ? 'bg-gray-100' : ''}`}>
+                  <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-gray-900"
                     checked={picked.has(c.id)} onChange={() => toggle(c.id)} />
                   <span className="min-w-0">
                     <span className="block text-sm text-gray-900 truncate">{c.summary}</span>

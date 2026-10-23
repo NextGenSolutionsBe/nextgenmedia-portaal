@@ -243,11 +243,11 @@ export function FieldOverlayEditor({
               {zone.sig_page === page && (
                 <div
                   onPointerDown={(e) => onPointerDown(e, 'zone', -1, 'move')}
-                  className="absolute rounded border-2 border-[#caa800] bg-[#fff848]/25 flex items-center justify-center cursor-move select-none"
+                  className="absolute rounded border-2 border-gray-900 bg-gray-100 flex items-center justify-center cursor-move select-none"
                   style={boxStyle(zone.sig_x_pct, zone.sig_y_pct, zone.sig_width, zone.sig_height)}
                 >
-                  <span className="text-[10px] text-[#8a7a00] font-semibold">✎ Handtekening</span>
-                  <span onPointerDown={(e) => onPointerDown(e, 'zone', -1, 'resize')} className="absolute -bottom-1 -right-1 h-3 w-3 bg-[#caa800] rounded-sm cursor-se-resize" />
+                  <span className="text-[10px] text-gray-900 font-semibold">✎ Handtekening</span>
+                  <span onPointerDown={(e) => onPointerDown(e, 'zone', -1, 'resize')} className="absolute -bottom-1 -right-1 h-3 w-3 bg-gray-900 rounded-sm cursor-se-resize" />
                 </div>
               )}
             </div>
@@ -256,7 +256,7 @@ export function FieldOverlayEditor({
       </div>
 
       {zone.sig_page !== page && (
-        <button onClick={() => setZone((z) => ({ ...z, sig_page: page }))} className="text-xs text-[#8a7a00] hover:underline">
+        <button onClick={() => setZone((z) => ({ ...z, sig_page: page }))} className="text-xs text-gray-900 hover:underline">
           ✎ Handtekeningzone naar pagina {page} verplaatsen
         </button>
       )}

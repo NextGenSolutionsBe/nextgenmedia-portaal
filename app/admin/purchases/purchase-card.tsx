@@ -207,7 +207,7 @@ export function PurchaseCard({ purchase: p, approvals, currentEmail, attachmentU
       )}
 
       {verwijderVenster && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm" role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" role="dialog" aria-modal="true">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 space-y-4">
             <h3 className="font-semibold flex items-center gap-2"><Trash2 className="h-4 w-4 text-red-500" />Aanvraag verwijderen</h3>
             <p className="text-sm text-gray-700">Weet je zeker dat je aanvraag <b>{nummer}</b> wilt verwijderen? Deze actie verwijdert de aanvraag uit het actieve overzicht.</p>

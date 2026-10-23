@@ -179,7 +179,7 @@ export function WebsiteAdmin({
                   <button
                     key={r.id}
                     onClick={() => setSelected(r)}
-                    className={`w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors ${selected?.id === r.id ? 'bg-yellow-50' : ''}`}
+                    className={`w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors ${selected?.id === r.id ? 'bg-gray-100' : ''}`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -344,7 +344,7 @@ export function WebsiteAdmin({
 
       {/* Delete confirmation modal */}
       {deleteOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center gap-2 p-5 border-b border-gray-100">
               <AlertTriangle className="h-5 w-5 text-red-500 shrink-0" />

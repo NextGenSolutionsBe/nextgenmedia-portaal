@@ -27,7 +27,7 @@ export default async function PortalMetricoolPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold">Metricool-planning</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold">Metricool-planning</h1>
         <p className="text-sm text-gray-500 mt-0.5">Bekijk wanneer je posts online komen — met preview. Plannen en goedkeuren gebeurt via Metricool.</p>
       </div>
       <PortalMetricool feedbackUrl={feedbackUrl} />

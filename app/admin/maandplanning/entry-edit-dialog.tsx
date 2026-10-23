@@ -41,7 +41,7 @@ export function EntryEditDialog({ entry, titel, onClose, onSaved }: {
           <div className="grid grid-cols-1 gap-2">
             {MONTH_CLIENT_TYPES.map((t) => (
               <button key={t.key} type="button" onClick={() => setType(t.key)}
-                className={`text-left rounded-lg border p-3 text-sm transition-colors ${type === t.key ? 'border-[#fff848] bg-[#fff848]/10 ring-1 ring-[#fff848]' : 'border-gray-200 hover:border-gray-300'}`}>
+                className={`text-left rounded-lg border p-3 text-sm transition-colors ${type === t.key ? 'border-gray-900 bg-gray-100 ring-1 ring-gray-900' : 'border-gray-200 hover:border-gray-300'}`}>
                 {t.label}
               </button>
             ))}

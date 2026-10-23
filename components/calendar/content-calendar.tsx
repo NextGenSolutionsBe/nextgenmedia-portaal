@@ -230,7 +230,7 @@ export function ContentCalendar({
         {/* Weekdays header */}
         <div className="grid grid-cols-7 border-b border-gray-100">
           {WEEKDAYS.map((w) => (
-            <div key={w} className="text-center text-[10px] font-semibold text-gray-400 uppercase tracking-wider py-2">
+            <div key={w} className="text-center text-[10px] font-semibold text-gray-400 py-2">
               {w}
             </div>
           ))}
@@ -254,18 +254,18 @@ export function ContentCalendar({
                 className={`group relative border-r border-b border-gray-100 p-1.5 flex flex-col gap-1
                   ${view === 'month' ? 'min-h-[100px]' : 'min-h-[200px]'}
                   ${!inMonth ? 'bg-gray-50/50' : ''}
-                  ${canAdd ? 'hover:bg-yellow-50/30 cursor-pointer' : ''}`}
+                  ${canAdd ? 'hover:bg-gray-50 cursor-pointer' : ''}`}
               >
                 <div className="flex items-center justify-between">
                   <span className={`text-[11px] font-medium px-1 py-0.5 rounded-full
-                    ${isToday ? 'bg-[#fff848] text-black font-bold' : inMonth ? 'text-gray-700' : 'text-gray-300'}`}>
+                    ${isToday ? 'bg-gray-900 text-white font-semibold' : inMonth ? 'text-gray-700' : 'text-gray-300'}`}>
                     {d.getDate()}
                   </span>
                   {canAdd && inMonth && (
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); actions.onCreateOnDay?.(dayStr) }}
-                      className="opacity-0 group-hover:opacity-100 h-5 w-5 flex items-center justify-center rounded text-gray-400 hover:bg-[#fff848] hover:text-black transition-all"
+                      className="opacity-0 group-hover:opacity-100 h-5 w-5 flex items-center justify-center rounded text-gray-400 hover:bg-gray-900 hover:text-white transition-all"
                     >
                       <Plus className="h-3 w-3" />
                     </button>
@@ -402,7 +402,7 @@ function ScriptPanel({
   const f = form ?? item
   const isAdmin = mode === 'admin'
   const style = STATUS_STYLE[item.status]
-  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]'
+  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900'
 
   const save = async () => {
     if (!actions.onUpdate || !form) return
@@ -503,15 +503,15 @@ function ScriptPanel({
           <div className="space-y-2">
             <div className="grid grid-cols-2 gap-2">
               <label>
-                <span className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">Datum</span>
+                <span className="block text-[10px] text-gray-500 mb-1">Datum</span>
                 <input type="date" className={inp} value={f.planned_date} onChange={(e) => setForm({ ...f, planned_date: e.target.value })} />
               </label>
               <label>
-                <span className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">Tijdstip <span className="normal-case text-gray-400">(optioneel)</span></span>
+                <span className="block text-[10px] text-gray-500 mb-1">Tijdstip <span className="normal-case text-gray-400">(optioneel)</span></span>
                 <input type="time" className={inp} value={(f.planned_time ?? '').slice(0, 5)} onChange={(e) => setForm({ ...f, planned_time: e.target.value || null })} />
               </label>
               <label>
-                <span className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">Type</span>
+                <span className="block text-[10px] text-gray-500 mb-1">Type</span>
                 <select className={inp} value={f.content_type} onChange={(e) => setForm({ ...f, content_type: e.target.value })}>
                   {['post', 'reel', 'story', 'carousel'].map((t) => (
                     <option key={t} value={t}>{t}</option>
@@ -520,7 +520,7 @@ function ScriptPanel({
               </label>
             </div>
             <div>
-              <span className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">
+              <span className="block text-[10px] text-gray-500 mb-1">
                 Kanalen <span className="normal-case text-gray-400">(meerdere mogelijk)</span>
               </span>
               <div className="flex flex-wrap gap-1.5">
@@ -535,7 +535,7 @@ function ScriptPanel({
                       onClick={() => togglePlatform(p)}
                       className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
                         active
-                          ? 'border-[#fff848] bg-[#fff848]/10 text-black'
+                          ? 'border-gray-900 bg-gray-100 text-black'
                           : 'border-gray-200 text-gray-500 hover:border-gray-300'
                       }`}
                     >
@@ -550,7 +550,7 @@ function ScriptPanel({
 
         {(editing || f.caption) && (
           <div>
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Caption</div>
+            <div className="text-[10px] text-gray-500 mb-1">Caption</div>
             {editing ? (
               <textarea rows={3} value={f.caption ?? ''} onChange={(e) => setForm({ ...f, caption: e.target.value })} className={inp} />
             ) : (
@@ -561,7 +561,7 @@ function ScriptPanel({
 
         {(editing || f.script) && (
           <div>
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Script / Hook / CTA</div>
+            <div className="text-[10px] text-gray-500 mb-1">Script / Hook / CTA</div>
             {editing ? (
               <textarea rows={6} value={f.script ?? ''} onChange={(e) => setForm({ ...f, script: e.target.value })} className={inp} />
             ) : (
@@ -572,7 +572,7 @@ function ScriptPanel({
 
         {(editing || f.media_notes) && (
           <div>
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Media-notities</div>
+            <div className="text-[10px] text-gray-500 mb-1">Media-notities</div>
             {editing ? (
               <textarea rows={3} value={f.media_notes ?? ''} onChange={(e) => setForm({ ...f, media_notes: e.target.value })} className={inp} />
             ) : (
@@ -583,7 +583,7 @@ function ScriptPanel({
 
         {item.status === 'published' && (item.published_at || item.published_url || item.published_platform) && (
           <div className="rounded-lg border border-purple-200 bg-purple-50 p-2.5 text-sm text-purple-900">
-            <div className="text-[10px] uppercase tracking-wide mb-0.5">Gepubliceerd</div>
+            <div className="text-[10px] mb-0.5">Gepubliceerd</div>
             {item.published_at && <div>{new Date(item.published_at).toLocaleDateString('nl-BE', { timeZone: 'Europe/Brussels' })}{item.published_platform ? ` · ${kanaalLabel(item.published_platform)}` : ''}</div>}
             {item.published_url && <a href={item.published_url} target="_blank" rel="noopener noreferrer" className="underline break-all">{item.published_url}</a>}
           </div>
@@ -591,7 +591,7 @@ function ScriptPanel({
 
         {isAdmin && (editing || f.interne_notitie) && (
           <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-2.5">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Interne notitie <span className="normal-case">— enkel zichtbaar voor NextGenMedia</span></div>
+            <div className="text-[10px] text-gray-500 mb-1">Interne notitie <span className="normal-case">— enkel zichtbaar voor NextGenMedia</span></div>
             {editing ? (
               <textarea rows={2} value={f.interne_notitie ?? ''} onChange={(e) => setForm({ ...f, interne_notitie: e.target.value })} className={inp} />
             ) : (
@@ -606,7 +606,7 @@ function ScriptPanel({
 
         {laadActiviteit && (opmerkingen.length > 0 || actions.onOpmerking) && (
           <div>
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Opmerkingen</div>
+            <div className="text-[10px] text-gray-500 mb-1">Opmerkingen</div>
             {activiteit === null ? <p className="text-xs text-gray-400">Laden…</p> : opmerkingen.length === 0 ? <p className="text-xs text-gray-400">Nog geen opmerkingen.</p> : (
               <ul className="space-y-1.5">
                 {opmerkingen.map((o, i) => (
@@ -631,7 +631,7 @@ function ScriptPanel({
 
         {laadActiviteit && (
           <div>
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Activiteit</div>
+            <div className="text-[10px] text-gray-500 mb-1">Activiteit</div>
             {activiteit === null ? <p className="text-xs text-gray-400">Laden…</p> : overigeActiviteit.length === 0 ? <p className="text-xs text-gray-400">Nog geen activiteit geregistreerd.</p> : (
               <ul className="space-y-1">
                 {overigeActiviteit.slice(0, 12).map((a, i) => (
@@ -647,7 +647,7 @@ function ScriptPanel({
 
         {item.status === 'changes_requested' && item.client_feedback && (
           <div className="text-sm rounded-lg border border-red-200 bg-red-50 p-3 text-red-700">
-            <strong className="block mb-1 text-xs uppercase tracking-wide">Gevraagde aanpassing</strong>
+            <strong className="block mb-1 text-xs">Gevraagde aanpassing</strong>
             {item.client_feedback}
           </div>
         )}
@@ -756,7 +756,7 @@ function ScriptPanel({
               <div className="space-y-3">
                 {klantAfkeuren && (
                   <div>
-                    <label className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">
+                    <label className="block text-[10px] text-gray-500 mb-1">
                       Wat moet er anders?
                     </label>
                     <textarea
@@ -811,10 +811,10 @@ function ScriptPanel({
                   <div className="rounded-lg border border-gray-200 p-2.5 space-y-2">
                     <p className="text-[11px] text-gray-500">Enkel de status in de kalender — er wordt niets op sociale media geplaatst.</p>
                     <div className="grid grid-cols-2 gap-2">
-                      <label><span className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">Publicatiedatum</span><input type="date" className={inp} max={new Date().toISOString().slice(0, 10)} value={publiceer.datum} onChange={(e) => setPubliceer({ ...publiceer, datum: e.target.value })} /></label>
-                      <label><span className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">Kanaal</span><select className={inp} value={publiceer.kanaal} onChange={(e) => setPubliceer({ ...publiceer, kanaal: e.target.value })}>{normaliseerKanalen(item.platforms?.length ? item.platforms : [item.platform]).map((k) => <option key={k} value={k}>{kanaalLabel(k)}</option>)}</select></label>
+                      <label><span className="block text-[10px] text-gray-500 mb-1">Publicatiedatum</span><input type="date" className={inp} max={new Date().toISOString().slice(0, 10)} value={publiceer.datum} onChange={(e) => setPubliceer({ ...publiceer, datum: e.target.value })} /></label>
+                      <label><span className="block text-[10px] text-gray-500 mb-1">Kanaal</span><select className={inp} value={publiceer.kanaal} onChange={(e) => setPubliceer({ ...publiceer, kanaal: e.target.value })}>{normaliseerKanalen(item.platforms?.length ? item.platforms : [item.platform]).map((k) => <option key={k} value={k}>{kanaalLabel(k)}</option>)}</select></label>
                     </div>
-                    <label className="block"><span className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">Link naar de post <span className="normal-case text-gray-400">(optioneel)</span></span><input type="url" className={inp} value={publiceer.link} onChange={(e) => setPubliceer({ ...publiceer, link: e.target.value })} placeholder="https://" /></label>
+                    <label className="block"><span className="block text-[10px] text-gray-500 mb-1">Link naar de post <span className="normal-case text-gray-400">(optioneel)</span></span><input type="url" className={inp} value={publiceer.link} onChange={(e) => setPubliceer({ ...publiceer, link: e.target.value })} placeholder="https://" /></label>
                     <div className="flex gap-2">
                       <button type="button" disabled={busy} onClick={async () => { setBusy(true); try { await actions.onSetStatus!(item.id, 'published', { published_at: publiceer.datum, published_platform: publiceer.kanaal || null, published_url: publiceer.link || null }); setPubliceer(null) } catch { /* melding komt van de handler */ } finally { setBusy(false) } }} className="btn-primary text-xs flex-1">Bevestigen</button>
                       <button type="button" onClick={() => setPubliceer(null)} className="btn-secondary text-xs">Annuleer</button>

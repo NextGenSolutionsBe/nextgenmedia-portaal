@@ -54,7 +54,7 @@ export function PeriodFilter() {
         <div className="flex gap-1">
           {[1, 2, 3, 4].map((q) => (
             <button key={q} onClick={() => update({ q })}
-              className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${quarter === q ? 'border-[#fff848] bg-[#fff848]/10 text-black font-medium' : 'border-gray-200 hover:bg-gray-50'}`}>
+              className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${quarter === q ? 'border-gray-900 bg-gray-100 text-black font-medium' : 'border-gray-200 hover:bg-gray-50'}`}>
               Q{q}
             </button>
           ))}
@@ -63,7 +63,7 @@ export function PeriodFilter() {
 
       {period === 'month' && (
         <select value={month} onChange={(e) => update({ mo: e.target.value })}
-          className="text-xs px-2 py-1.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#fff848]/50">
+          className="text-xs px-2 py-1.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-900/15">
           {MONTHS.map((mlabel, i) => <option key={i} value={i + 1}>{mlabel}</option>)}
         </select>
       )}

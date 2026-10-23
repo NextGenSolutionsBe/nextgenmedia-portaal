@@ -155,7 +155,7 @@ export function SignatureForm({
       {/* Who is signing */}
       {(signerName || signerEmail) && (
         <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 flex items-center gap-3">
-          <div className="h-9 w-9 rounded-full bg-[#fff848] flex items-center justify-center shrink-0">
+          <div className="h-9 w-9 rounded-full bg-gray-100 flex items-center justify-center shrink-0">
             <span className="text-sm font-bold text-black">
               {signerName ? signerName.charAt(0).toUpperCase() : '?'}
             </span>
@@ -184,7 +184,7 @@ export function SignatureForm({
                     <label className="block text-xs font-medium text-gray-600 mb-1">{f.label}{f.required ? ' *' : ''}</label>
                     <input
                       type={HTML_TYPE[f.type] ?? 'text'}
-                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50"
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15"
                       value={String(values[f.label] ?? '')}
                       placeholder={f.placeholder}
                       onChange={(e) => setValues((v) => ({ ...v, [f.label]: e.target.value }))}
@@ -217,7 +217,7 @@ export function SignatureForm({
         </div>
         <div
           className={`border-2 rounded-xl overflow-hidden bg-white touch-none transition-colors ${
-            hasSig ? 'border-[#fff848]' : 'border-dashed border-gray-300'
+            hasSig ? 'border-gray-900' : 'border-dashed border-gray-300'
           }`}
         >
           <canvas

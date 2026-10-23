@@ -52,7 +52,7 @@ export function CostDialog({ cost, onClose }: { cost?: Cost | null; onClose: () 
     notes: cost?.notes ?? '',
   })
 
-  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]'
+  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900'
   const lbl = 'block text-xs font-medium text-gray-600 mb-1'
 
   const excl = leesGetal(form.amount_excl) ?? 0
@@ -91,7 +91,7 @@ export function CostDialog({ cost, onClose }: { cost?: Cost | null; onClose: () 
   if (video) return <VideoEditingDialog bestaand={cost ? { id: cost.id, cost_date: cost.cost_date, client_id: cost.client_id ?? null, personeel_id: cost.personeel_id ?? null, berekening: (cost.berekening ?? null) as never } : null} onClose={onClose} />
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90dvh] overflow-y-auto">
         <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl">
           <h3 className="font-semibold text-gray-900">{isEdit ? (type === 'recurring' ? 'Abonnement wijzigen' : 'Kost wijzigen') : (type === 'recurring' ? 'Abonnement toevoegen' : 'Kost toevoegen')}</h3>
@@ -145,7 +145,7 @@ export function CostDialog({ cost, onClose }: { cost?: Cost | null; onClose: () 
                 <div className="grid grid-cols-3 gap-1.5">
                   {FREQ_OPTIONS.map(f => (
                     <button key={f.value} type="button" onClick={() => setForm(p => ({ ...p, billing_frequency: f.value }))}
-                      className={`py-2 rounded-lg border text-xs font-medium transition-colors ${form.billing_frequency === f.value ? 'border-[#fff848] bg-[#fff848]/10 text-black' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                      className={`py-2 rounded-lg border text-xs font-medium transition-colors ${form.billing_frequency === f.value ? 'border-gray-900 bg-gray-100 text-black' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}>
                       {f.label}
                     </button>
                   ))}

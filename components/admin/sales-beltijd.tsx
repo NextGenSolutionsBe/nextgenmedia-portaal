@@ -162,15 +162,15 @@ export function BeltijdKaart({ medewerkerId, accountNaam, onGewijzigd }: {
           <p className="text-xs text-gray-400">Hoe lang er gebeld werd (sessies). Los van de duur per gesprek.</p>
         </div>
         <div className="flex items-center gap-4 text-sm">
-          <div><div className="text-[10px] uppercase tracking-wide text-gray-400">Vandaag</div><div className="font-bold tabular-nums">{toonUren(vandaagSec)}</div></div>
-          <div><div className="text-[10px] uppercase tracking-wide text-gray-400">Deze week</div><div className="font-bold tabular-nums">{toonUren(weekSec)}</div></div>
+          <div><div className="text-[10px] text-gray-400">Vandaag</div><div className="font-bold tabular-nums">{toonUren(vandaagSec)}</div></div>
+          <div><div className="text-[10px] text-gray-400">Deze week</div><div className="font-bold tabular-nums">{toonUren(weekSec)}</div></div>
         </div>
       </div>
 
       {/* Timer */}
       <div className={`rounded-xl border px-3 py-2.5 flex items-center justify-between gap-3 ${data.lopend ? 'border-green-200 bg-green-50' : 'border-gray-200'}`}>
         <div>
-          <div className="text-[10px] uppercase tracking-wide text-gray-500">{data.lopend ? 'Belsessie loopt sinds ' + new Date(data.lopend.start_op).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' }) : 'Geen lopende sessie'}</div>
+          <div className="text-[10px] text-gray-500">{data.lopend ? 'Belsessie loopt sinds ' + new Date(data.lopend.start_op).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' }) : 'Geen lopende sessie'}</div>
           <div className="text-2xl font-bold tabular-nums">{toonTimer(lopendSec)}</div>
         </div>
         {data.lopend ? (
@@ -203,7 +203,7 @@ export function BeltijdKaart({ medewerkerId, accountNaam, onGewijzigd }: {
 
       {/* Sessies deze week */}
       <div>
-        <div className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold mb-1.5">Sessies deze week</div>
+        <div className="text-[11px] text-gray-400 font-semibold mb-1.5">Sessies deze week</div>
         {lijst.length === 0 ? (
           <p className="text-xs text-gray-400">Nog geen beltijd gelogd deze week.</p>
         ) : (

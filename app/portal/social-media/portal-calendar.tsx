@@ -139,7 +139,7 @@ const START_MELDING: Partial<Record<Status, string>> = {
 function NieuwItem({ datum, startStatussen, onSluit, onAangemaakt }: { datum: string; startStatussen: Status[]; onSluit: () => void; onAangemaakt: (it: SocialContentItem) => void }) {
   const [v, setV] = useState({ title: '', planned_date: datum, planned_time: '', content_type: 'post', platforms: ['meta'] as string[], caption: '', script: '', status: 'draft' as Status })
   const [bezig, setBezig] = useState(false)
-  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]'
+  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900'
   const lbl = 'block text-xs font-medium text-gray-600 mb-1'
   const bewaar = async () => {
     if (!v.title.trim()) { toast.error('Geef het item een titel.'); return }
@@ -165,7 +165,7 @@ function NieuwItem({ datum, startStatussen, onSluit, onAangemaakt }: { datum: st
             <div className="col-span-2"><label className={lbl}>Type</label><select className={inp} value={v.content_type} onChange={(e) => setV({ ...v, content_type: e.target.value })}>{['post', 'reel', 'story', 'carousel'].map((t) => <option key={t} value={t}>{t}</option>)}</select></div>
           </div>
           <div><label className={lbl}>Kanalen *</label>
-            <div className="flex flex-wrap gap-1.5">{KANAAL_SLUGS.map((k) => { const aan = v.platforms.includes(k); return <button key={k} type="button" aria-pressed={aan} onClick={() => setV({ ...v, platforms: aan ? v.platforms.filter((x) => x !== k) : [...v.platforms, k] })} className={`px-2.5 py-1 rounded-full text-xs font-medium border ${aan ? 'border-[#fff848] bg-[#fff848]/10 text-black' : 'border-gray-200 text-gray-500'}`}>{kanaalLabel(k)}</button> })}</div>
+            <div className="flex flex-wrap gap-1.5">{KANAAL_SLUGS.map((k) => { const aan = v.platforms.includes(k); return <button key={k} type="button" aria-pressed={aan} onClick={() => setV({ ...v, platforms: aan ? v.platforms.filter((x) => x !== k) : [...v.platforms, k] })} className={`px-2.5 py-1 rounded-full text-xs font-medium border ${aan ? 'border-gray-900 bg-gray-100 text-black' : 'border-gray-200 text-gray-500'}`}>{kanaalLabel(k)}</button> })}</div>
           </div>
           <div><label className={lbl}>Caption</label><textarea rows={3} className={inp} value={v.caption} onChange={(e) => setV({ ...v, caption: e.target.value })} /></div>
           <div><label className={lbl}>Script / hook / CTA</label><textarea rows={4} className={inp} value={v.script} onChange={(e) => setV({ ...v, script: e.target.value })} /></div>

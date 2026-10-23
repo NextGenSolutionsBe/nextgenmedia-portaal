@@ -213,7 +213,7 @@ function InzendingDetail({ formulierId, formulierTitel, id, onClose, onGewijzigd
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/30 backdrop-blur-[2px]" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/30-[2px]" onClick={onClose}>
       <aside className="h-full w-full max-w-xl bg-white shadow-2xl flex flex-col" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Inzending">
         <div className="flex items-center justify-between gap-2 px-5 py-4 border-b border-gray-100">
           <div className="min-w-0">

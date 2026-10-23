@@ -630,9 +630,9 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
         <div className="overflow-y-auto border-r border-gray-200 bg-white p-4 space-y-4">
           <div>
             <div className="flex items-start justify-between gap-2">
-              <h1 className="text-xl font-bold leading-tight">{bedrijf?.name ?? 'Onbekend bedrijf'}</h1>
+              <h1 className="text-xl font-semibold leading-tight">{bedrijf?.name ?? 'Onbekend bedrijf'}</h1>
               {bedrijf?.prioriteit && (
-                <span className="text-[10px] font-bold bg-[#fff848] text-black px-1.5 py-0.5 rounded shrink-0">
+                <span className="text-[10px] font-semibold bg-gray-900 text-white px-1.5 py-0.5 rounded shrink-0">
                   {bedrijf.prioriteit}
                 </span>
               )}
@@ -652,7 +652,7 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
               ook als we later vanuit het andere merk bellen. */}
           <div className="rounded-xl border border-gray-200 bg-gray-50/70 px-3 py-2 space-y-1.5">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] uppercase tracking-wide text-gray-400">Wie spreek je</span>
+              <span className="text-[10px] text-gray-400">Wie spreek je</span>
               <button onClick={() => setBewerken((v) => !v)} title="Gegevens aanpassen"
                 className={`h-6 w-6 flex items-center justify-center rounded-md hover:bg-white ${bewerken ? 'bg-white text-black' : 'text-gray-400'}`}>
                 <Pencil className="h-3 w-3" />
@@ -695,7 +695,7 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
             )}
             {telefoons.map((t) => (
               <a key={t.label} href={`tel:${(t.nummer ?? '').replace(/[^\d+]/g, '')}`} className="block group">
-                <span className="text-[10px] uppercase tracking-wide text-gray-400">{t.label}</span>
+                <span className="text-[10px] text-gray-400">{t.label}</span>
                 <span className="flex items-center gap-2 text-lg font-semibold group-hover:underline">
                   <Phone className="h-4 w-4 text-gray-400" />{t.nummer}
                 </span>
@@ -772,7 +772,7 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
               belt, in plaats van in de kolom rechts. */}
           {lead.laatste_notitie && (
             <div className="text-xs bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-2">
-              <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">Laatste notitie</div>
+              <div className="text-[10px] text-gray-400 mb-0.5">Laatste notitie</div>
               <p className="text-gray-800 whitespace-pre-wrap break-words">{lead.laatste_notitie}</p>
             </div>
           )}
@@ -780,7 +780,7 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
           {/* Wie komt er straks terug */}
           {wachtrij.later.length > 0 && (
             <div className="border-t border-gray-100 pt-3">
-              <h3 className="text-[10px] uppercase tracking-wide text-gray-400 mb-1.5 flex items-center gap-1">
+              <h3 className="text-[10px] text-gray-400 mb-1.5 flex items-center gap-1">
                 <Clock className="h-3 w-3" />Komt terug in de rij
               </h3>
               <ul className="space-y-1">
@@ -815,7 +815,7 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
                         className={cn(
                           'text-[11px] font-medium px-2 py-1 rounded-lg border transition-colors',
                           k.naam === script.naam
-                            ? 'bg-[#fff848] border-yellow-400 text-gray-900'
+                            ? 'bg-gray-900 border-gray-900 text-white'
                             : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300',
                         )}
                       >
@@ -827,7 +827,7 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
               )}
 
               <div className="flex items-center justify-between gap-2 sticky top-0 bg-gray-50 py-1 z-10">
-                <p className="text-[10px] uppercase tracking-wide text-gray-400 flex items-center gap-1">
+                <p className="text-[10px] text-gray-400 flex items-center gap-1">
                   <FileText className="h-3 w-3" />{script.naam}
                 </p>
                 {/* Springlinks: bij een lang script wil je tijdens een gesprek
@@ -853,7 +853,7 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
                   ref={(el) => { sectieRefs.current[i] = el }}
                   className="scroll-mt-10"
                 >
-                  <h2 className={cn('text-sm font-bold uppercase tracking-wide mb-1.5', sectieKleur(s.kop))}>
+                  <h2 className={cn('text-sm font-bold mb-1.5', sectieKleur(s.kop))}>
                     {s.kop}
                   </h2>
                   <div className="text-[15px] leading-relaxed whitespace-pre-wrap">{s.tekst}</div>
@@ -876,7 +876,7 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
         <div className="overflow-y-auto border-l border-gray-200 bg-white p-4 space-y-4">
           {script && script !== 'laden' && script.analyse.bezwaren.length > 0 && (
             <div>
-              <h3 className="text-[10px] uppercase tracking-wide text-red-600 font-bold mb-1.5">Bezwaren</h3>
+              <h3 className="text-[10px] text-red-600 font-bold mb-1.5">Bezwaren</h3>
               <div className="space-y-1">
                 {script.analyse.bezwaren.map((b, i) => (
                   <div key={i} className="border border-gray-200 rounded-lg overflow-hidden">
@@ -900,7 +900,7 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
 
           {script && script !== 'laden' && script.analyse.weetjes.length > 0 && (
             <div>
-              <h3 className="text-[10px] uppercase tracking-wide text-gray-400 font-bold mb-1.5">Snel opzoeken</h3>
+              <h3 className="text-[10px] text-gray-400 font-bold mb-1.5">Snel opzoeken</h3>
               <ul className="space-y-1 text-xs text-gray-600 list-disc pl-4">
                 {script.analyse.weetjes.map((w, i) => <li key={i}>{w}</li>)}
               </ul>
@@ -910,7 +910,7 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
           {/* Gespreksduur — optioneel, enkel gemeten met de timer (start en einde
               worden bewaard). Geen timer = geen duur in de statistiek. */}
           <div>
-            <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-bold mb-1 flex items-center gap-1">
+            <label className="block text-[10px] text-gray-400 font-bold mb-1 flex items-center gap-1">
               <Timer className="h-3 w-3" />Gespreksduur (timer, optioneel)
             </label>
             <div className="flex gap-1.5 items-center">
@@ -931,7 +931,7 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
           </div>
 
           <div>
-            <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-bold mb-1">
+            <label className="block text-[10px] text-gray-400 font-bold mb-1">
               Notitie bij deze belpoging
             </label>
             <textarea rows={3} className="input-base text-sm" value={note} onChange={(e) => setNote(e.target.value)}
@@ -951,14 +951,14 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
           {/* Wat er eerder genoteerd is — zodat je weet waar het vorige gesprek
               gebleven was vóór je opnieuw belt. */}
           <div className="border-t border-gray-100 pt-3">
-            <h3 className="text-[10px] uppercase tracking-wide text-gray-400 font-bold mb-1.5 flex items-center gap-1">
+            <h3 className="text-[10px] text-gray-400 font-bold mb-1.5 flex items-center gap-1">
               <History className="h-3 w-3" />Eerder genoteerd
             </h3>
             <LeadTijdlijn leadId={lead.id} verversSleutel={ververs} max={5} compact />
           </div>
 
           <div>
-            <h3 className="text-[10px] uppercase tracking-wide text-gray-400 font-bold mb-1.5 flex items-center gap-1">
+            <h3 className="text-[10px] text-gray-400 font-bold mb-1.5 flex items-center gap-1">
               <Clock className="h-3 w-3" />Terugbellen
             </h3>
             <div className="grid grid-cols-3 gap-1.5">
@@ -1053,7 +1053,7 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
               className={cn(
                 'text-[13px] px-2.5 py-2 rounded-lg border text-left transition-colors disabled:opacity-40',
                 a.opensBooking
-                  ? 'border-[#fff848] bg-[#fff848]/30 hover:bg-[#fff848]/60 font-semibold'
+                  ? 'border-gray-900 bg-gray-200 hover:bg-gray-200 font-semibold'
                   : 'border-gray-200 hover:bg-gray-50',
               )}>
               <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-gray-900 text-white text-[11px] font-bold mr-1.5">{a.key}</span>
@@ -1088,7 +1088,7 @@ function RedenKiezer({ busy, onKies, onSluit }: {
   const [toelichting, setToelichting] = useState('')
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black/30 backdrop-blur-sm flex items-center justify-center p-4" onClick={onSluit}>
+    <div className="fixed inset-0 z-[60] bg-black/30 flex items-center justify-center p-4" onClick={onSluit}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
         <h3 className="font-semibold">Waarom geen interesse?</h3>
         <p className="text-xs text-gray-500">

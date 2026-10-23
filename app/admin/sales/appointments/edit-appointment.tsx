@@ -152,7 +152,7 @@ export function EditAppointment({ appt, pipelines, owners = [], isAdmin, onClose
   const label = 'block text-xs font-medium text-gray-600 mb-1'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/30 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/30">
       <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full sm:max-w-lg max-h-[92dvh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between gap-2 p-5 border-b border-gray-100">
           <div className="min-w-0">

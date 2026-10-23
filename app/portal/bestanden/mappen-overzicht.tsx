@@ -94,7 +94,7 @@ export function MappenOverzicht({
                 <button
                   onClick={maak}
                   disabled={bezig || !naam.trim()}
-                  className="bg-[#fff848] text-black font-semibold text-sm px-4 py-2 rounded-xl hover:brightness-95 disabled:opacity-50"
+                  className="bg-gray-900 text-white font-medium text-sm px-4 py-2 rounded-md hover:bg-gray-800 disabled:opacity-50"
                 >
                   {bezig ? 'Bezig…' : 'Map maken'}
                 </button>
@@ -109,7 +109,7 @@ export function MappenOverzicht({
           ) : (
             <button
               onClick={() => setNieuwOpen(true)}
-              className="inline-flex items-center gap-2 bg-[#fff848] text-black font-semibold text-sm px-4 py-2.5 rounded-xl hover:brightness-95"
+              className="inline-flex items-center gap-2 bg-gray-900 text-white font-medium text-sm px-4 py-2.5 rounded-md hover:bg-gray-800"
             >
               <FolderPlus className="h-4 w-4" />Nieuwe map
             </button>
@@ -132,7 +132,7 @@ export function MappenOverzicht({
                   ? <Image src={m.voorbeeld} alt="" width={480} height={270} unoptimized className="h-full w-full object-cover" />
                   : <Folder className="h-8 w-8 text-gray-300" />}
                 {m.nieuw > 0 && (
-                  <span className="absolute top-2 right-2 bg-[#fff848] text-black text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  <span className="absolute top-2 right-2 bg-gray-900 text-white text-[10px] font-semibold px-2 py-0.5 rounded-full">
                     {m.nieuw} nieuw
                   </span>
                 )}

@@ -91,7 +91,7 @@ export function BeveiligingClient({ verplichtMelding }: { verplichtMelding: bool
       )}
 
       <div className="card-base">
-        <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-2">Beveiliging</div>
+        <div className="text-[11px] font-medium text-gray-400 mb-2">Beveiliging</div>
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="min-w-0">
             <h2 className="font-semibold text-gray-900 flex items-center gap-2"><Smartphone className="h-4 w-4 text-gray-400" />Tweestapsverificatie (2FA)</h2>

@@ -16,7 +16,7 @@ export default async function SalesPipelinePage({ searchParams }: { searchParams
   return (
     <div className="space-y-4 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold">Pipeline</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold">Pipeline</h1>
         <p className="text-sm text-gray-500 mt-0.5">
           Alle prospects van beide merken op één bord. Sleep kaarten tussen de kolommen; gesprekken
           en e-mails registreer je met de knoppen op de kaart.

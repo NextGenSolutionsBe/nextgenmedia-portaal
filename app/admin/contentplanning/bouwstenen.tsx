@@ -89,7 +89,7 @@ export function Notities({ notities, standaard, doe, kanSchrijven, titel = 'Noti
   return (
     <section>
       <div className="flex items-center justify-between gap-2 mb-2">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">{titel}</h4>
+        <h4 className="text-xs font-semibold text-gray-500">{titel}</h4>
         {kanSchrijven && !nieuw && <button type="button" onClick={() => setNieuw(true)} className={`text-xs underline text-gray-700 ${focusRing}`}>+ notitie</button>}
       </div>
       {nieuw && (

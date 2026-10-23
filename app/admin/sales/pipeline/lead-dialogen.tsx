@@ -29,7 +29,7 @@ export function Dialoog({ titel, sub, onClose, children, onOpslaan, bezig, opsla
     return () => window.removeEventListener('keydown', esc)
   }, [onClose])
   return (
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4 bg-black/30 backdrop-blur-sm"
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4 bg-black/30"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className={`bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full ${breed ? 'sm:max-w-lg' : 'sm:max-w-md'} max-h-[92dvh] flex flex-col overflow-hidden`}>
         <div className="flex items-start justify-between gap-2 px-5 pt-4 pb-3 border-b border-gray-100">

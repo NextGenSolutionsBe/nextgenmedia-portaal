@@ -38,7 +38,7 @@ const META: Record<string, { label: string; icon: React.ComponentType<{ classNam
   uploaded:              { label: 'Aangemaakt / geüpload', icon: FileUp,      cls: 'bg-gray-100 text-gray-600' },
   created:               { label: 'Aangemaakt',            icon: FileUp,      cls: 'bg-gray-100 text-gray-600' },
   created_from_template: { label: 'Aangemaakt uit template', icon: FileUp,    cls: 'bg-gray-100 text-gray-600' },
-  ai_analyzed:           { label: 'AI geanalyseerd',       icon: Sparkles,    cls: 'bg-purple-100 text-purple-600' },
+  ai_analyzed:           { label: 'AI geanalyseerd',       icon: Sparkles,    cls: 'bg-gray-100 text-gray-600' },
   fields_edited:         { label: 'Velden aangepast',      icon: PencilLine,  cls: 'bg-gray-100 text-gray-600' },
   sent:                  { label: 'Verzonden',             icon: Send,        cls: 'bg-blue-100 text-blue-600' },
   opened:                { label: 'Geopend',               icon: Eye,         cls: 'bg-amber-100 text-amber-600' },

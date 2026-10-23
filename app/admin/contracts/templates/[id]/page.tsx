@@ -26,7 +26,7 @@ export default async function TemplateSetupPage({ params }: { params: Promise<{ 
           <ChevronLeft className="h-4 w-4" />
         </Link>
         <div>
-          <h1 className="text-xl font-bold">Template: AI-velden & handtekeningzone</h1>
+          <h1 className="text-xl font-semibold">Template: AI-velden & handtekeningzone</h1>
           <p className="text-sm text-gray-500 mt-0.5">{tpl.name}</p>
         </div>
       </div>

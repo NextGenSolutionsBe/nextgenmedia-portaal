@@ -91,7 +91,7 @@ export default function NewContractPage() {
           <ChevronLeft className="h-4 w-4" />
         </Link>
         <div>
-          <h1 className="text-2xl font-bold">Nieuw contract</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold">Nieuw contract</h1>
           <p className="text-sm text-gray-500">Upload een PDF-contract en koppel aan klant</p>
         </div>
       </div>
@@ -192,7 +192,7 @@ export default function NewContractPage() {
         </div>
         <div>
           <label className={lbl}>PDF-contract *</label>
-          <label className="flex flex-col items-center justify-center gap-2 p-6 border-2 border-dashed border-gray-200 rounded-xl cursor-pointer hover:border-[#fff848] transition-colors">
+          <label className="flex flex-col items-center justify-center gap-2 p-6 border-2 border-dashed border-gray-200 rounded-xl cursor-pointer hover:border-gray-900 transition-colors">
             <Upload className="h-6 w-6 text-gray-400" />
             <span className="text-sm text-gray-500">
               {file ? file.name : 'Klik om PDF te selecteren'}

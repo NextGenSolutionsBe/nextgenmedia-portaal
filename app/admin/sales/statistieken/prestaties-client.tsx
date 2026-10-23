@@ -154,7 +154,7 @@ export function PrestatiesClient() {
 }
 
 function Podium({ titel, sub, icoon, plekken, naam, waarde, leeg }: { titel: string; sub: string; icoon: React.ReactNode; plekken: PodiumPlek[]; naam: (id: string) => string; waarde: (p: PodiumPlek) => string; leeg: string }) {
-  const kleur = (p: number) => (p === 1 ? 'bg-[#fff848] text-black' : p === 2 ? 'bg-gray-200 text-gray-800' : 'bg-orange-100 text-orange-800')
+  const kleur = (p: number) => (p === 1 ? 'bg-gray-900 text-white' : p === 2 ? 'bg-gray-200 text-gray-800' : 'bg-orange-100 text-orange-800')
   return (
     <div className="card-base">
       <div className="flex items-center gap-2 font-semibold"><Trophy className="h-4 w-4 text-amber-500" />{titel}<span className="text-gray-400">{icoon}</span></div>
@@ -176,7 +176,7 @@ function Podium({ titel, sub, icoon, plekken, naam, waarde, leeg }: { titel: str
 
 function Tegel({ label, waarde, onder, kleur = 'text-gray-900', nadruk }: { label: string; waarde: number | string; onder?: string; kleur?: string; nadruk?: boolean }) {
   return (
-    <div className={`rounded-xl border px-3 py-2.5 min-w-0 ${nadruk ? 'border-black/20 bg-[#fff848]/15' : 'border-gray-200 bg-white'}`}>
+    <div className={`rounded-xl border px-3 py-2.5 min-w-0 ${nadruk ? 'border-black/20 bg-gray-100' : 'border-gray-200 bg-white'}`}>
       <div className="text-[11px] font-medium text-gray-500 truncate">{label}</div>
       <div className={`text-xl font-bold tabular-nums leading-tight ${kleur}`}>{waarde}</div>
       {onder && <div className="text-[10px] text-gray-500 mt-0.5">{onder}</div>}

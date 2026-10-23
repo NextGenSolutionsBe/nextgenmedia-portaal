@@ -52,7 +52,7 @@ export default async function KlantMapPage({ params }: { params: { clientId: str
         <Link href="/admin/uploads" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-black mb-2">
           <ArrowLeft className="h-4 w-4" />Alle klantmappen
         </Link>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
+        <h1 className="text-xl sm:text-2xl font-semibold flex items-center gap-2">
           {isWees
             ? <AlertTriangle className="h-6 w-6 text-amber-600" />
             : <Folder className="h-6 w-6" />}

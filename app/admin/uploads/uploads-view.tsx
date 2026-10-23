@@ -71,7 +71,7 @@ async function openDoel(naam: string): Promise<Doel> {
 }
 
 const KLEUR: Record<Status, string> = {
-  nieuw: 'bg-[#fff848] text-black',
+  nieuw: 'bg-gray-900 text-white',
   gezien: 'bg-blue-100 text-blue-700',
   verwerkt: 'bg-green-100 text-green-700',
 }
@@ -338,7 +338,7 @@ export function UploadsView({
           onClick={downloadAlles}
           disabled={zichtbaar.length === 0 || !!bulk}
           title={klant || mapNaam || status ? 'Downloadt alles binnen de gekozen filters als één ZIP (Klant/Map/bestand).' : 'Downloadt alle klantuploads als één ZIP (Klant/Map/bestand).'}
-          className={cn('text-xs font-semibold px-3 py-2 rounded-xl bg-[#fff848] text-black hover:brightness-95 disabled:opacity-50 disabled:hover:brightness-100 flex items-center gap-1.5', !clientId && 'ml-auto')}
+          className={cn('text-xs font-semibold px-3 py-2 rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 flex items-center gap-1.5', !clientId && 'ml-auto')}
         >
           {bulk ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Archive className="h-3.5 w-3.5" />}
           Alles downloaden ({zichtbaar.length} · {leesbareGrootte(zichtbaar.reduce((s, u) => s + (Number(u.grootte) || 0), 0))})
@@ -375,7 +375,7 @@ export function UploadsView({
             <p className="font-medium">ZIP maken · {bulk.klaar} van {bulk.totaal} bestanden · {leesbareGrootte(bulk.bytes)}</p>
             <p className="text-xs text-gray-500 truncate">{bulk.fase}</p>
             <div className="mt-1.5 h-1.5 rounded-full bg-gray-100 overflow-hidden">
-              <div className="h-full bg-[#fff848] transition-all" style={{ width: `${bulk.totaal ? Math.round((bulk.klaar / bulk.totaal) * 100) : 0}%` }} />
+              <div className="h-full bg-gray-900 transition-all" style={{ width: `${bulk.totaal ? Math.round((bulk.klaar / bulk.totaal) * 100) : 0}%` }} />
             </div>
           </div>
           <button
@@ -400,7 +400,7 @@ export function UploadsView({
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {zichtbaar.map((u) => (
-            <div key={u.id} className={cn('border rounded-2xl overflow-hidden flex flex-col bg-white relative', selectie.has(u.id) ? 'border-black ring-2 ring-[#fff848]' : 'border-gray-200')}>
+            <div key={u.id} className={cn('border rounded-2xl overflow-hidden flex flex-col bg-white relative', selectie.has(u.id) ? 'border-black ring-2 ring-gray-900' : 'border-gray-200')}>
               <button
                 onClick={() => openFoto(u)}
                 className="aspect-[4/3] bg-gray-100 flex items-center justify-center overflow-hidden group relative"
@@ -424,7 +424,7 @@ export function UploadsView({
                 type="button"
                 onClick={(e) => { e.stopPropagation(); toggleSelectie(u.id) }}
                 className={cn('absolute top-2 right-2 h-7 w-7 rounded-lg flex items-center justify-center border shadow-sm',
-                  selectie.has(u.id) ? 'bg-[#fff848] border-black text-black' : 'bg-white/90 border-gray-200 text-gray-500 hover:text-black')}
+                  selectie.has(u.id) ? 'bg-gray-900 border-gray-900 text-white' : 'bg-white/90 border-gray-200 text-gray-500 hover:text-black')}
                 title={selectie.has(u.id) ? 'Uit selectie halen' : 'Selecteren'}
                 aria-pressed={selectie.has(u.id)}
               >
@@ -432,7 +432,7 @@ export function UploadsView({
               </button>
 
               <div className="p-3 flex-1 flex flex-col gap-1">
-                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide truncate">
+                <p className="text-[11px] font-semibold text-gray-400 truncate">
                   {clientId ? u.map_naam : `${u.client_naam} · ${u.map_naam}`}
                 </p>
                 <p className="font-semibold text-sm leading-tight">{u.titel}</p>
@@ -452,7 +452,7 @@ export function UploadsView({
       {/* ── Detail ── */}
       {open && (
         <div
-          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
           onClick={sluitFoto}
         >
           <div
@@ -461,7 +461,7 @@ export function UploadsView({
           >
             <div className="flex items-start justify-between p-4 border-b border-gray-100">
               <div className="min-w-0">
-                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">
+                <p className="text-[11px] font-semibold text-gray-400">
                   {clientId ? open.map_naam : `${open.client_naam} · ${open.map_naam}`}
                 </p>
                 <h2 className="font-bold text-lg leading-tight">{open.titel}</h2>
@@ -485,7 +485,7 @@ export function UploadsView({
             <div className="p-4 space-y-4">
               {open.beschrijving && (
                 <div>
-                  <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1">
+                  <p className="text-[11px] font-semibold text-gray-400 mb-1">
                     Wat de klant erbij zei
                   </p>
                   <p className="text-sm whitespace-pre-wrap">{open.beschrijving}</p>
@@ -505,7 +505,7 @@ export function UploadsView({
 
               {open.admin_notitie && (
                 <div className="rounded-xl bg-amber-50 border border-amber-100 px-3 py-2">
-                  <p className="text-[11px] font-semibold text-amber-700 uppercase tracking-wide mb-0.5">Interne notitie</p>
+                  <p className="text-[11px] font-semibold text-amber-700 mb-0.5">Interne notitie</p>
                   <p className="text-sm whitespace-pre-wrap">{open.admin_notitie}</p>
                 </div>
               )}
@@ -566,7 +566,7 @@ export function UploadsView({
                       </a>
                       <a
                         href={open.url} download={open.bestandsnaam}
-                        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#fff848] text-black hover:brightness-95 flex items-center gap-1.5"
+                        className="text-xs font-semibold px-3 py-1.5 rounded-md bg-gray-900 text-white hover:bg-gray-800 flex items-center gap-1.5"
                       >
                         <Download className="h-3.5 w-3.5" />Downloaden
                       </a>

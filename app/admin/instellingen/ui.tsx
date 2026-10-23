@@ -5,7 +5,7 @@ import { Loader2, X, AlertTriangle } from 'lucide-react'
 
 /** Gedeelde bouwstenen van de instellingenpagina — zelfde stijl als de rest van de admin. */
 
-export const INP = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#fff848]/60 disabled:bg-gray-50 disabled:text-gray-400'
+export const INP = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-gray-900/15 disabled:bg-gray-50 disabled:text-gray-400'
 
 export function Kop({ titel, tekst, rechts }: { titel: string; tekst?: string; rechts?: ReactNode }) {
   return (
@@ -22,7 +22,7 @@ export function Kop({ titel, tekst, rechts }: { titel: string; tekst?: string; r
 export function Groep({ titel, children }: { titel: string; children: ReactNode }) {
   return (
     <div>
-      <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-2">{titel}</div>
+      <div className="text-[11px] font-medium text-gray-400 mb-2">{titel}</div>
       {children}
     </div>
   )
@@ -100,7 +100,7 @@ export function Dialoog({ titel, children, onSluit, breed }: { titel: string; ch
     window.addEventListener('keydown', f); return () => window.removeEventListener('keydown', f)
   }, [onSluit])
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onSluit}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={onSluit}>
       <div className={`bg-white rounded-2xl shadow-xl w-full ${breed ? 'max-w-2xl' : 'max-w-lg'} max-h-[90dvh] overflow-y-auto`} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white z-10">
           <h3 className="font-semibold">{titel}</h3>

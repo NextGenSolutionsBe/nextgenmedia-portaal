@@ -130,7 +130,7 @@ export default async function SignContractPage({ params }: { params: { token: st
       <div className="flex-1 max-w-3xl mx-auto w-full px-4 py-6 space-y-5">
         {/* Title */}
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold">{contract.title}</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold">{contract.title}</h1>
           {companyName && (
             <p className="text-sm text-gray-500 mt-0.5">{companyName}</p>
           )}
@@ -145,7 +145,7 @@ export default async function SignContractPage({ params }: { params: { token: st
             <p className="text-sm text-green-700">Dit contract is al ondertekend. Bekijk het hieronder of ga terug naar uw portaal.</p>
           </div>
         ) : (
-          <div className="bg-[#fff848]/20 border border-[#fff848] rounded-xl p-4 text-sm text-gray-700">
+          <div className="bg-gray-100 border border-gray-900 rounded-xl p-4 text-sm text-gray-700">
             <strong className="font-semibold">Lees het contract</strong> aandachtig door en zet daarna uw handtekening onderaan.
           </div>
         )}

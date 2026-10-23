@@ -72,7 +72,7 @@ export function ItemInhoud({ data, metBijlagen = true }: { data: ItemData; metBi
 
       {/* Klant */}
       <section className="rounded-xl border border-gray-200 p-3">
-        <div className="text-[11px] uppercase tracking-wide text-gray-400 mb-1">Klant</div>
+        <div className="text-[11px] text-gray-400 mb-1">Klant</div>
         {k ? (
           <div className="text-sm space-y-0.5">
             <div className="flex items-center justify-between gap-2"><b className="text-gray-900">{k.naam}</b><KopieerKnop klein tekst={k.naam} label="Naam" melding="Klantnaam gekopieerd." /></div>
@@ -98,7 +98,7 @@ export function ItemInhoud({ data, metBijlagen = true }: { data: ItemData; metBi
 
       {/* Regels */}
       <section>
-        <div className="text-[11px] uppercase tracking-wide text-gray-400 mb-1">Factuurregels</div>
+        <div className="text-[11px] text-gray-400 mb-1">Factuurregels</div>
         <ul className="space-y-2">
           {d.regels.length === 0 && <li className="text-sm text-gray-500">Geen regels.</li>}
           {d.regels.map((r, i) => {
@@ -132,18 +132,18 @@ export function ItemInhoud({ data, metBijlagen = true }: { data: ItemData; metBi
 
       {/* Mededeling (op de factuur) en interne notitie (NIET) */}
       <section className="rounded-xl border border-gray-200 p-3">
-        <div className="flex items-center justify-between gap-2"><span className="text-[11px] uppercase tracking-wide text-gray-400">Mededeling voor op de factuur</span>{d.mededeling && <KopieerKnop klein tekst={d.mededeling} label="Mededeling" melding="Mededeling gekopieerd." />}</div>
+        <div className="flex items-center justify-between gap-2"><span className="text-[11px] text-gray-400">Mededeling voor op de factuur</span>{d.mededeling && <KopieerKnop klein tekst={d.mededeling} label="Mededeling" melding="Mededeling gekopieerd." />}</div>
         <div className="text-sm whitespace-pre-wrap mt-1">{d.mededeling || <span className="text-gray-400">—</span>}</div>
       </section>
       {d.notitie && (
         <section className="rounded-xl border border-amber-300 bg-amber-50 p-3">
-          <div className="text-[11px] uppercase tracking-wide text-amber-800 flex items-center gap-1"><StickyNote className="h-3.5 w-3.5" />Interne notitie — niet op de factuur</div>
+          <div className="text-[11px] text-amber-800 flex items-center gap-1"><StickyNote className="h-3.5 w-3.5" />Interne notitie — niet op de factuur</div>
           <div className="text-sm whitespace-pre-wrap mt-1 text-amber-950">{d.notitie}</div>
         </section>
       )}
       {metBijlagen && data.bijlagen.length > 0 && (
         <section>
-          <div className="text-[11px] uppercase tracking-wide text-gray-400 mb-1">Bijlagen</div>
+          <div className="text-[11px] text-gray-400 mb-1">Bijlagen</div>
           <ul className="space-y-1">{data.bijlagen.map((b) => <li key={b.id}><a href={`/api/admin/invoices/bijlagen?id=${b.id}`} target="_blank" rel="noreferrer" className="text-sm text-blue-700 hover:underline inline-flex items-center gap-1"><Paperclip className="h-3.5 w-3.5" />{b.naam}</a></li>)}</ul>
         </section>
       )}

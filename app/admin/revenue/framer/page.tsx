@@ -293,7 +293,7 @@ export default function FramerPage() {
       )}
 
       {form && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl">
               <h3 className="font-semibold">{form.id ? 'Site wijzigen' : 'Site toevoegen'}</h3>
@@ -338,7 +338,7 @@ export default function FramerPage() {
                   {([['annual', 'Jaarlijks'], ['monthly', 'Maandelijks']] as const).map(([v, l]) => (
                     <button key={v} type="button" onClick={() => setForm({ ...form, facturatie: v })}
                       className={`py-2 rounded-lg border text-xs font-medium ${
-                        form.facturatie === v ? 'border-[#fff848] bg-[#fff848]/10 text-black' : 'border-gray-200 text-gray-500'
+                        form.facturatie === v ? 'border-gray-900 bg-gray-100 text-black' : 'border-gray-200 text-gray-500'
                       }`}>{l}</button>
                   ))}
                 </div>

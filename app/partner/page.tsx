@@ -80,7 +80,7 @@ export default async function PartnerDashboard() {
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Dashboard</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold">Dashboard</h1>
           <p className="text-sm text-gray-500 mt-0.5">Welkom terug, {partner.name}</p>
         </div>
         <Link href="/partner/assignments" className="btn-primary">
@@ -125,7 +125,7 @@ export default async function PartnerDashboard() {
       <div className="card-base">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <h2 className="font-semibold text-gray-900 flex items-center gap-2">
-            <Wallet className="h-4 w-4 text-[#c5b800]" />
+            <Wallet className="h-4 w-4 text-gray-500" />
             Openstaand saldo
           </h2>
           <Link href="/partner/settlements" className="text-xs text-gray-500 hover:text-black">
@@ -161,7 +161,7 @@ export default async function PartnerDashboard() {
       {(fin.commissionPartnerEarned > 0 || fin.subToPartnerTotal > 0 || fin.subByPartnerTotal > 0) && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="card-base">
-            <h2 className="font-semibold text-gray-900 flex items-center gap-2 mb-3"><HandCoins className="h-4 w-4 text-[#c5b800]" />Commissie (doorverwijzingen)</h2>
+            <h2 className="font-semibold text-gray-900 flex items-center gap-2 mb-3"><HandCoins className="h-4 w-4 text-gray-500" />Commissie (doorverwijzingen)</h2>
             <div className="space-y-1.5 text-sm">
               <div className="flex justify-between"><span className="text-gray-500">Door u aangebrachte klanten</span><span className="font-medium">{fin.clientsPartnerReferred}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Omzet uit die klanten</span><span className="font-medium">{formatEuro(fin.revenuePartnerReferred)}</span></div>

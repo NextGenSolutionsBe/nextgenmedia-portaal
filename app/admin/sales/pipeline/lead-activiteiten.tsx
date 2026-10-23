@@ -84,7 +84,7 @@ export function LeadActiviteiten({ activiteiten, meId, isAdmin, naamVan, onGewij
 
   return (
     <section>
-      <h3 className="text-[11px] uppercase tracking-wide text-gray-400 font-bold mb-2 flex items-center gap-1">
+      <h3 className="text-[11px] text-gray-400 font-bold mb-2 flex items-center gap-1">
         <Activity className="h-3 w-3" />Geregistreerde activiteiten
       </h3>
       <ul className="space-y-1.5">

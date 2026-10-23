@@ -141,7 +141,7 @@ function VerifyForm() {
           <KeyRound className="h-4 w-4 mt-0.5 shrink-0" />
           <span>Je bent ingelogd met een herstelcode. Die code werkt niet meer; je hebt er nog <b>{nogOver}</b> over. Maak nieuwe herstelcodes of stel je app opnieuw in via <b>Beveiliging</b> in je account.</span>
         </div>
-        <button type="button" onClick={verder} className="w-full py-2.5 bg-[#fff848] text-black font-semibold rounded-lg hover:bg-[#f5ee30] text-sm">Verder</button>
+        <button type="button" onClick={verder} className="w-full py-2.5 bg-gray-900 text-white font-medium rounded-md hover:bg-gray-800 text-sm">Verder</button>
       </div>
     )
   }
@@ -164,7 +164,7 @@ function VerifyForm() {
           }}><Download className="h-4 w-4" />Downloaden</button>
         </div>
         <label className="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" className="h-4 w-4" checked={bewaard} onChange={(e) => setBewaard(e.target.checked)} />Ik heb mijn herstelcodes veilig bewaard</label>
-        <button type="button" disabled={!bewaard} onClick={verder} className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#fff848] text-black font-semibold rounded-lg hover:bg-[#f5ee30] disabled:opacity-60 text-sm"><Check className="h-4 w-4" />Verder</button>
+        <button type="button" disabled={!bewaard} onClick={verder} className="w-full flex items-center justify-center gap-2 py-2.5 bg-gray-900 text-white font-medium rounded-md hover:bg-gray-800 disabled:opacity-60 text-sm"><Check className="h-4 w-4" />Verder</button>
       </div>
     )
   }
@@ -195,7 +195,7 @@ function VerifyForm() {
         </div>
         {foutBlok}
         <button type="submit" disabled={bezig || code.length !== 6 || !qr}
-          className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#fff848] text-black font-semibold rounded-lg hover:bg-[#f5ee30] transition-colors disabled:opacity-60 text-sm">
+          className="w-full flex items-center justify-center gap-2 py-2.5 bg-gray-900 text-white font-medium rounded-md hover:bg-gray-800 transition-colors disabled:opacity-60 text-sm">
           {bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : null}Bevestigen
         </button>
         <div className="flex items-center justify-between text-xs">
@@ -228,7 +228,7 @@ function VerifyForm() {
       )}
       {foutBlok}
       <button type="submit" disabled={bezig || (herstel ? herstelcode.replace(/[\s-]/g, '').length < 12 : code.length !== 6)}
-        className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#fff848] text-black font-semibold rounded-lg hover:bg-[#f5ee30] transition-colors disabled:opacity-60 text-sm">
+        className="w-full flex items-center justify-center gap-2 py-2.5 bg-gray-900 text-white font-medium rounded-md hover:bg-gray-800 transition-colors disabled:opacity-60 text-sm">
         {bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : null}Bevestigen
       </button>
       <div className="flex items-center justify-between gap-2 text-xs">
@@ -249,7 +249,7 @@ export default function VerifyPage() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <Logo className="inline-flex h-14 w-14 rounded-2xl mb-4" />
-          <h1 className="text-2xl font-bold text-gray-900">Verificatie</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">Verificatie</h1>
           <p className="text-sm text-gray-500 mt-1">Tweestapsverificatie met je authenticator-app</p>
         </div>
 

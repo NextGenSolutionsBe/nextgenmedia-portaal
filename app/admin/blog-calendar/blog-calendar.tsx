@@ -227,7 +227,7 @@ function BlogEditorModal({ blog, onClose }: { blog: CalBlog; onClose: () => void
   const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg'
   const isPublished = blog.status === 'gepubliceerd'
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[92dvh] overflow-y-auto">
         <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white">
           <div className="min-w-0">
@@ -272,7 +272,7 @@ function BlogEditorModal({ blog, onClose }: { blog: CalBlog; onClose: () => void
           </div>
 
           <div className="border-t border-gray-100 pt-3 space-y-2">
-            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">Publiceren</div>
+            <div className="text-xs font-medium text-gray-500">Publiceren</div>
             <div className="flex flex-wrap items-center gap-2">
               <button onClick={publishNow} disabled={!!busy || isPublished} className="btn-primary text-sm">{busy === 'approve' ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}Direct publiceren</button>
               <span className="text-xs text-gray-400">of op datum:</span>
