@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { DATABANK_TIJDELIJK } from '@/lib/supabase/herkansing'
 import { controleerKoppelingen, testAfspraak, leesMeeting, veiligeFout, stapGoogle, stapClickup, planHerinnering, annuleer, bewaarMeeting, laatsteHerinnering, type MeetingRij } from '@/lib/meetings/server'
 import { kalenderData, controleerVrij, controleerConflicten } from '@/lib/meetings/kalender-server'
+import { isClickupMeeting } from '@/lib/meetings/kalender'
 import { cronToegang } from '@/lib/meetings/cron-toegang'
 import { haalMeetingEvent, bezetPerAgenda, meldingInfo } from '@/lib/sales/google-calendar'
 import { getOrCreateSalesOrg, listOwners, loadCalendar } from '@/lib/sales/service'
@@ -38,6 +39,8 @@ export const maxDuration = 60
  *    info@), met de klantregels, afscherming per klant, verplaatsen en annuleren.
  *  · ?zelftest=intern: een interne meeting morgenavond (buiten 11–17, binnen
  *    72 uur) met conflictwaarschuwing, echte Google/ClickUp, meteen geannuleerd.
+ *  · ?vrijcontrole=1: leest enkel. Legt de klantslots naast de echte ClickUp-
+ *    meetings, de Google-bezetting en taken zonder vast uur (enkel tellingen).
  *  · ?kalender=1: leest enkel. Per agenda de werkuren, bezette blokken (per
  *    Google-agenda, zonder titels) en vrije segmenten voor twee weken, plus
  *    hoe de ClickUp-taken binnenkomen (pagina's, tijdvelden).
@@ -66,6 +69,7 @@ export async function POST(req: NextRequest) {
     }
     if (req.nextUrl.searchParams.get('zelftest') === 'calendar') return NextResponse.json(await zelftestCalendar(admin))
     if (req.nextUrl.searchParams.get('zelftest') === 'intern') return NextResponse.json(await zelftestIntern(admin))
+    if (req.nextUrl.searchParams.get('vrijcontrole') === '1') return NextResponse.json(await vrijControle(admin))
     if (req.nextUrl.searchParams.get('zelftest') === 'klantapp') {
       const klant = req.nextUrl.searchParams.get('klant') ?? '', ander = req.nextUrl.searchParams.get('ander') ?? ''
       if (!UUID.test(klant) || !UUID.test(ander) || klant === ander) return NextResponse.json({ error: 'klant en ander (twee verschillende testklanten) zijn verplicht' }, { status: 400 })
@@ -464,5 +468,44 @@ async function zelftestIntern(admin: { from: (t: string) => any }) {
     log('Onverwachte fout', false, veiligeFout(e))
     if (m && m.status === 'ingepland') { try { await annuleer(admin, m, 'zelftest (opruimen)', true) } catch { /* zichtbaar in de app */ } }
     return { stappen, meetingId: m?.id ?? null }
+  }
+}
+
+
+/**
+ * Leest enkel. Komen de vrije momenten voor klanten ooit op een echte
+ * ClickUp-meeting of Google-bezetting terecht? En blokkeren taken zonder vast
+ * uur echt niets? Enkel tellingen en uren, geen titels.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function vrijControle(admin: { from: (t: string) => any }) {
+  const b = await berekenVrijeSlots(admin, { vers: true })
+  if (!b.slots.length) return { slots: 0 }
+  const { data: ag } = await admin.from('sales_calendar_connections').select('clickup_assignee_id').eq('id', b.agendaId).maybeSingle()
+  const van = Date.parse(b.slots[0]) - 3600_000, tot = Date.parse(b.slots[b.slots.length - 1]) + 2 * 3600_000
+  const [taken, g] = await Promise.all([
+    haalSyncTaken([Number(ag?.clickup_assignee_id)], van - 86400_000, tot + 86400_000),
+    bezetPerAgenda(b.agendaId, van, tot),
+  ])
+  const slot = (s: string) => ({ start: Date.parse(s), end: Date.parse(s) + 30 * MIN_MS })
+  const raakt = (a: Interval, x: Interval) => a.start < x.end && x.start < a.end
+  const meetings = taken.filter(isClickupMeeting).map((t) => ({ start: t.startMs as number, end: t.dueMs })).filter((i) => i.end > van && i.start < tot)
+  const google = Object.values(g.agendas).flatMap((a) => a.busy)
+  const geenMeeting = taken.filter((t) => !isClickupMeeting(t) && t.dueMs > van && t.dueMs < tot)
+  // Een taak zonder vast uur (of met enkel een deadline) mag een slot op dat moment niet wegnemen.
+  const opTaakMoment = b.slots.filter((s) => geenMeeting.some((t) => {
+    const i = slot(s)
+    return (t.dueMs >= i.start && t.dueMs < i.end) || (t.startMs !== null && t.startMs < i.end && t.dueMs > i.start)
+  }))
+  const opDagVanTaak = b.slots.filter((s) => geenMeeting.some((t) => dag(new Date(t.dueMs).toISOString()) === dag(s)))
+  return {
+    periode: { van: new Date(van).toISOString(), tot: new Date(tot).toISOString() },
+    klantslots: b.slots.length,
+    clickup: { taken: taken.length, meetings: meetings.length, zonderVastUurOfEnkelDeadline: geenMeeting.length },
+    google: { bezetteBlokken: google.length, fout: g.fout ?? Object.values(g.agendas).find((a) => a.fout)?.fout ?? null },
+    slotsOpClickupMeeting: b.slots.filter((s) => meetings.some((m) => raakt(slot(s), m))).length,
+    slotsOpGoogleBezet: b.slots.filter((s) => google.some((x) => raakt(slot(s), x))).length,
+    slotsOpMomentVanTaakZonderUur: opTaakMoment.length,
+    slotsOpDagVanTaakZonderUur: opDagVanTaak.length,
   }
 }
