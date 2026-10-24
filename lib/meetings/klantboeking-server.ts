@@ -13,10 +13,12 @@ import {
 import {
   stapGoogle, stapClickup, planHerinnering, bestaatGoogleAfspraak, annuleer, bewaarMeeting, leesMeeting, veiligeFout, type MeetingRij,
 } from '@/lib/meetings/server'
+import { isEmail, type Persoon } from '@/lib/meetings/model'
 
 /**
- * Klantboeking — server. Klanten boeken zelf een gratis meeting via de publieke
- * pagina /boeken. Hergebruikt alles wat er al is: de Google-koppeling en de
+ * Klantboeking — server. Klanten boeken zelf een gratis meeting: via de publieke
+ * pagina /boeken (beheren met een persoonlijke link) of vanuit hun klantapp
+ * (/portal/meetings, beheren met hun login). Eén motor voor beide. Hergebruikt alles wat er al is: de Google-koppeling en de
  * werkuren van de agenda (Appointment setting), de ClickUp-taken als bezet, en
  * dezelfde meetingstappen (Google + Meet, ClickUp, herinnering) als intern.
  *
@@ -174,19 +176,40 @@ export const hashToken = (t: string): string => createHash('sha256').update(t).d
 export const isTokenVorm = (t: unknown): t is string => typeof t === 'string' && /^[A-Za-z0-9_-]{40,60}$/.test(t)
 export const beheerUrl = (token: string): string => `${baseUrl()}/boeken/beheer#t=${token}`
 
-/** Bevestiging (na boeken, verplaatsen of op vraag van ons) — status op de meeting. */
-export async function stuurBevestiging(admin: Admin, m: MeetingRij, token: string, verplaatst = false): Promise<MeetingRij> {
-  const ontvanger = m.klant_ontvangers[0]
+/** Hoe beheert de klant deze boeking: met een persoonlijke link, of in de klantapp. */
+export type Beheer = { soort: 'link'; token: string } | { soort: 'klantapp' }
+export const klantappUrl = (): string => `${baseUrl()}/portal/meetings`
+/** Geboekt vanuit de klantapp? Dan hangt ze aan een klant en is er geen beheerlink. */
+export const viaKlantapp = (m: Pick<MeetingRij, 'client_id' | 'beheer_token_hash'>): boolean => !!m.client_id && !m.beheer_token_hash
+
+/**
+ * Bevestiging (na boeken, verplaatsen of op vraag van ons) — status op de
+ * meeting. Naar de hoofdcontactpersoon, extra deelnemers in kopie. De
+ * idempotentiesleutel hangt aan meeting + startuur: een herhaling (dubbele
+ * klik, time-out) verstuurt niets opnieuw. `opnieuw` = bewust nog eens.
+ */
+export async function stuurBevestiging(admin: Admin, m: MeetingRij, beheer: Beheer, verplaatst = false, opnieuw = false): Promise<MeetingRij> {
+  const [ontvanger, ...kopie] = m.klant_ontvangers
   if (!ontvanger) return bewaarMeeting(admin, m.id, { bevestiging_status: 'mislukt', bevestiging_fout: 'Geen e-mailadres.' })
-  const mail = bevestigingsMail({ naam: ontvanger.naam || m.klant_naam, startsAt: m.starts_at, meetUrl: m.meet_url, beheerUrl: beheerUrl(token), verplaatst })
+  const url = beheer.soort === 'link' ? beheerUrl(beheer.token) : klantappUrl()
+  const mail = bevestigingsMail({
+    naam: ontvanger.naam || m.klant_naam, startsAt: m.starts_at, meetUrl: m.meet_url, beheerUrl: url, verplaatst,
+    onderwerp: m.boeker_reden ?? null, organisator: { naam: m.organisator_naam, email: m.organisator_email },
+    viaKlantapp: beheer.soort === 'klantapp',
+  })
   const html = buildEmailHtml({ bodyText: mail.tekst, ctaText: mail.ctaTekst, ctaLink: mail.ctaLink })
-  const sleutel = `kb-${m.id}-${hashToken(token).slice(0, 12)}-${new Date(m.starts_at).getTime()}`
-  const res = await sendEmail({ to: ontvanger.email, subject: mail.onderwerp, text: mail.tekst, html, replyTo: m.organisator_email || null, idempotencyKey: sleutel })
+  const merk = beheer.soort === 'link' ? hashToken(beheer.token).slice(0, 12) : 'klantapp'
+  const sleutel = `kb-${m.id}-${merk}-${new Date(m.starts_at).getTime()}${opnieuw ? `-r${Date.now()}` : ''}`
+  const res = await sendEmail({
+    to: ontvanger.email, cc: kopie.map((p) => p.email).filter((e) => e && e !== ontvanger.email),
+    subject: mail.onderwerp, text: mail.tekst, html, replyTo: m.organisator_email || null, idempotencyKey: sleutel,
+  })
   try {
     await admin.from('email_messages').insert({
       to_email: ontvanger.email, subject: mail.onderwerp, body: mail.tekst.replace(/#t=[A-Za-z0-9_-]+/g, '#t=…'), from_email: EMAIL_FROM,
       kind: 'klantboeking_bevestiging', audience: 'client', trigger_type: 'auto', status: res.ok ? 'sent' : 'error',
       error: res.ok ? null : veiligeFout(res.error), provider_id: res.id ?? null, related_id: m.id,
+      ...(m.client_id ? { to_client_id: m.client_id } : {}),
     })
   } catch { /* logboek is een extra */ }
   return bewaarMeeting(admin, m.id, res.ok
@@ -194,11 +217,16 @@ export async function stuurBevestiging(admin: Admin, m: MeetingRij, token: strin
     : { bevestiging_status: 'mislukt', bevestiging_fout: veiligeFout(res.error) })
 }
 
-/** Intern: bevestiging opnieuw sturen. Nieuwe link (we bewaren enkel de hash); de oude werkt dan niet meer. */
+/**
+ * Intern: bevestiging opnieuw sturen. Via de link: een nieuwe link (we bewaren
+ * enkel de hash), de oude werkt dan niet meer. Via de klantapp: dezelfde
+ * verwijzing naar de klantapp.
+ */
 export async function bevestigingOpnieuw(admin: Admin, m: MeetingRij): Promise<MeetingRij> {
+  if (viaKlantapp(m)) return stuurBevestiging(admin, m, { soort: 'klantapp' }, false, true)
   const token = nieuwBeheerToken()
   const bij = await bewaarMeeting(admin, m.id, { beheer_token_hash: hashToken(token) })
-  return stuurBevestiging(admin, bij, token)
+  return stuurBevestiging(admin, bij, { soort: 'link', token })
 }
 
 // ── Boeken ───────────────────────────────────────────────────────────────────
@@ -215,7 +243,33 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
  * → nacontrole → Google + Meet (anders niet geboekt) → ClickUp → herinnering
  * → bevestiging. Een herhaling met dezelfde aanvraagsleutel boekt niets opnieuw.
  */
-export async function boekKlantmeeting(admin: Admin, invoer: BoekingInvoer & { aanvraag_sleutel?: unknown }, nu: Date = new Date()): Promise<BoekResultaat> {
+export type Klantapp = {
+  clientId: string
+  /** Bedrijfsnaam uit het klantdossier (niet wat de klant intikt). */
+  bedrijf: string
+  /** Wie boekte (voor het logboek). */
+  doorEmail: string | null
+  /** Collega's die mee uitgenodigd worden. */
+  extraDeelnemers?: unknown
+}
+
+/** Extra deelnemers uit de klantapp: geldige, unieke e-mailadressen, hoogstens vijf. */
+export function schoonDeelnemers(invoer: unknown, hoofd: string): Persoon[] {
+  if (!Array.isArray(invoer)) return []
+  const gezien = new Set([hoofd.toLowerCase()])
+  const uit: Persoon[] = []
+  for (const r of invoer.slice(0, 10)) {
+    const email = String((r as { email?: unknown })?.email ?? '').trim().toLowerCase()
+    const naam = String((r as { naam?: unknown })?.naam ?? '').trim().slice(0, 120)
+    if (!isEmail(email) || gezien.has(email)) continue
+    gezien.add(email)
+    uit.push({ naam: naam || null, email })
+    if (uit.length >= 5) break
+  }
+  return uit
+}
+
+export async function boekKlantmeeting(admin: Admin, invoer: BoekingInvoer & { aanvraag_sleutel?: unknown }, nu: Date = new Date(), klantapp?: Klantapp): Promise<BoekResultaat> {
   const sleutel = String(invoer.aanvraag_sleutel ?? '')
   if (!UUID.test(sleutel)) throw new BoekingFout('Ververs de pagina en probeer opnieuw.')
   const { data: al } = await admin.from('klant_meetings').select('*').eq('aanvraag_sleutel', sleutel).maybeSingle()
@@ -228,22 +282,33 @@ export async function boekKlantmeeting(admin: Admin, invoer: BoekingInvoer & { a
   if (!v.ok) throw new BoekingFout(v.fout)
   const w = v.waarde
 
-  // Geen spam: hoogstens drie komende boekingen per e-mailadres.
-  const { data: eigen } = await admin.from('klant_meetings').select('id, klant_ontvangers').eq('bron', 'klantboeking').eq('status', 'ingepland').gt('starts_at', nu.toISOString())
-  const vanDitAdres = ((eigen ?? []) as { klant_ontvangers: { email: string }[] }[]).filter((x) => x.klant_ontvangers?.some((p) => p.email === w.email)).length
-  if (vanDitAdres >= 3) throw new BoekingFout('Je hebt al drie meetings gepland. Verplaats of annuleer er eerst één via de link in je bevestigingsmail.', 429)
+  // Geen spam: hoogstens drie komende boekingen per e-mailadres (of per klant in de klantapp).
+  const { data: eigen } = await admin.from('klant_meetings').select('id, klant_ontvangers, client_id').eq('bron', 'klantboeking').eq('status', 'ingepland').gt('starts_at', nu.toISOString())
+  const lopend = (eigen ?? []) as { klant_ontvangers: { email: string }[]; client_id: string | null }[]
+  if (klantapp) {
+    if (lopend.filter((x) => x.client_id === klantapp.clientId).length >= 3) {
+      throw new BoekingFout('Jullie hebben al drie meetings gepland. Verplaats of annuleer er eerst één hieronder bij Mijn meetings.', 429)
+    }
+  } else if (lopend.filter((x) => x.klant_ontvangers?.some((p) => p.email === w.email)).length >= 3) {
+    throw new BoekingFout('Je hebt al drie meetings gepland. Verplaats of annuleer er eerst één via de link in je bevestigingsmail.', 429)
+  }
+  const extra = klantapp ? schoonDeelnemers(klantapp.extraDeelnemers, w.email) : []
+  const bedrijf = klantapp ? klantapp.bedrijf : w.bedrijf
 
   const agenda = await boekbareAgenda(admin)
   const vrij = await nogVrij(admin, w.startsAt)
   if (!vrij.vrij) throw new BoekingFout('Dit tijdstip is net niet meer beschikbaar. Kies een ander moment.', 409)
 
-  const token = nieuwBeheerToken()
+  // Via de link: een persoonlijke beheerlink. Via de klantapp: beheren met de login.
+  const beheer: Beheer = klantapp ? { soort: 'klantapp' } : { soort: 'link', token: nieuwBeheerToken() }
   const { data: rij, error } = await admin.from('klant_meetings').insert({
-    aanvraag_sleutel: sleutel, bron: 'klantboeking', client_id: null, klant_naam: w.bedrijf || w.naam,
-    titel: kbTitel(w), beschrijving: w.reden, starts_at: w.startsAt, ends_at: w.endsAt, tijdzone: 'Europe/Brussels',
+    aanvraag_sleutel: sleutel, bron: 'klantboeking', client_id: klantapp?.clientId ?? null, klant_naam: bedrijf || w.naam,
+    titel: kbTitel({ naam: w.naam, bedrijf }), beschrijving: w.reden, starts_at: w.startsAt, ends_at: w.endsAt, tijdzone: 'Europe/Brussels',
     agenda_id: agenda.id, organisator_naam: (agenda.name ?? '').split(/\s+[—-]\s+/)[0] || null, organisator_email: agenda.signature_email || null,
-    klant_ontvangers: [{ naam: w.naam, email: w.email }], deelnemers: [], herinnering_aan: true,
-    boeker_bedrijf: w.bedrijf, boeker_reden: w.reden, beheer_token_hash: hashToken(token), created_by_email: 'klantboeking',
+    // Extra collega's krijgen ook de uitnodiging en de herinnering.
+    klant_ontvangers: [{ naam: w.naam, email: w.email }, ...extra], deelnemers: [], herinnering_aan: true,
+    boeker_bedrijf: bedrijf, boeker_reden: w.reden, beheer_token_hash: beheer.soort === 'link' ? hashToken(beheer.token) : null,
+    created_by_email: klantapp ? `klantapp${klantapp.doorEmail ? `:${klantapp.doorEmail}` : ''}` : 'klantboeking',
   }).select('*').single()
   if (error) {
     if (/klant_meetings_klantslot|duplicate|unique|23505/i.test(error.message)) {
@@ -271,8 +336,8 @@ export async function boekKlantmeeting(admin: Admin, invoer: BoekingInvoer & { a
   }
   m = await stapClickup(admin, m)
   try { await planHerinnering(admin, m) } catch (e) { console.error('[klantboeking:herinnering]', e) }
-  m = await stuurBevestiging(admin, m, token)
-  return { id: m.id, startsAt: m.starts_at, endsAt: m.ends_at, meetUrl: m.meet_url, beheerUrl: beheerUrl(token), bevestigingVerstuurd: m.bevestiging_status === 'verzonden' }
+  m = await stuurBevestiging(admin, m, beheer)
+  return { id: m.id, startsAt: m.starts_at, endsAt: m.ends_at, meetUrl: m.meet_url, beheerUrl: beheer.soort === 'link' ? beheerUrl(beheer.token) : null, bevestigingVerstuurd: m.bevestiging_status === 'verzonden' }
 }
 
 // ── Beheren via de link ──────────────────────────────────────────────────────
@@ -293,13 +358,22 @@ export function publiekeWeergave(m: MeetingRij, nu: Date = new Date()) {
   }
 }
 
-export async function annuleerViaLink(admin: Admin, m: MeetingRij, nu: Date = new Date()): Promise<MeetingRij> {
+export async function annuleerViaLink(admin: Admin, m: MeetingRij, nu: Date = new Date(), door = 'klant (beheerlink)'): Promise<MeetingRij> {
   if (m.status !== 'ingepland') return m
   if (new Date(m.starts_at).getTime() <= nu.getTime()) throw new BoekingFout('Deze meeting is al begonnen of voorbij.')
-  return annuleer(admin, m, 'klant (beheerlink)', true)
+  return annuleer(admin, m, door, true)
 }
 
 export async function verplaatsViaLink(admin: Admin, m: MeetingRij, token: string, nieuweStart: unknown, nu: Date = new Date()): Promise<MeetingRij> {
+  return verplaatsKlantboeking(admin, m, { soort: 'link', token }, nieuweStart, nu)
+}
+
+/**
+ * Een klant verplaatst de eigen boeking (link of klantapp): dezelfde regels als
+ * bij het boeken (72 uur, 11:00–17:00, vrij in ClickUp en Google), dezelfde
+ * Google-afspraak en ClickUp-taak, herinnering mee, één "Verplaatst"-mail.
+ */
+export async function verplaatsKlantboeking(admin: Admin, m: MeetingRij, beheer: Beheer, nieuweStart: unknown, nu: Date = new Date()): Promise<MeetingRij> {
   if (m.status !== 'ingepland') throw new BoekingFout('Deze meeting is geannuleerd. Boek gerust een nieuwe.')
   if (new Date(m.starts_at).getTime() <= nu.getTime()) throw new BoekingFout('Deze meeting is al begonnen of voorbij.')
   const start = String(nieuweStart ?? '')
@@ -331,5 +405,35 @@ export async function verplaatsViaLink(admin: Admin, m: MeetingRij, token: strin
   }
   m = await stapClickup(admin, m)
   try { await planHerinnering(admin, m) } catch (e) { console.error('[klantboeking:herinnering]', e) }
-  return stuurBevestiging(admin, m, token, true)
+  return stuurBevestiging(admin, m, beheer, true)
+}
+
+// ── Klantapp ─────────────────────────────────────────────────────────────────
+
+/** De klantboekingen van één klant (enkel die uit de klantapp of aan deze klant gekoppeld). */
+export async function klantappMeetings(admin: Admin, clientId: string, nu: Date = new Date()): Promise<MeetingRij[]> {
+  const sinds = new Date(nu.getTime() - 30 * 86400000).toISOString()
+  const { data, error } = await admin.from('klant_meetings').select('*')
+    .eq('client_id', clientId).eq('bron', 'klantboeking').gt('starts_at', sinds)
+    .order('starts_at', { ascending: true }).limit(50)
+  if (error) throw new BoekingFout('Je meetings konden niet geladen worden. Probeer het zo meteen opnieuw.', 503, error.message)
+  return (data ?? []) as MeetingRij[]
+}
+
+/** Eén boeking van deze klant, of null — nooit die van een andere klant. */
+export async function klantappMeeting(admin: Admin, clientId: string, id: unknown): Promise<MeetingRij | null> {
+  if (!UUID.test(String(id ?? ''))) return null
+  const { data } = await admin.from('klant_meetings').select('*').eq('id', String(id)).eq('client_id', clientId).eq('bron', 'klantboeking').maybeSingle()
+  return (data as MeetingRij | null) ?? null
+}
+
+/** Wat de klant in de klantapp over de eigen boeking ziet. Geen interne statussen of agenda-info. */
+export function klantappWeergave(m: MeetingRij, nu: Date = new Date()) {
+  const p = publiekeWeergave(m, nu)
+  return {
+    id: m.id, ...p,
+    onderwerp: m.boeker_reden ?? null,
+    deelnemers: m.klant_ontvangers.map((x) => ({ naam: x.naam ?? null, email: x.email })),
+    organisator: m.organisator_naam ?? 'NextGenMedia',
+  }
 }

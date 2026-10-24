@@ -46,7 +46,7 @@ type Pipeline = { id: string; key: string; name: string; defaultCalendarId?: str
 type SalesClient = { id: string; name: string; timezone: string; slot_interval_min: number; default_duration_min: number }
 
 type Venster =
-  | { soort: 'kies'; start: number; eind: number; op: number }
+  | { soort: 'kies'; start: number; eind: number; op: number; vrij: boolean }
   | { soort: 'plan'; start: number; eind: number }
   | { soort: 'nieuw' }
   | { soort: 'lead'; start: number; eind: number }
@@ -212,13 +212,19 @@ export function Calendar({ client, pipelines, isAdmin, verkoop, initialLeadId, i
     else setVenster({ soort: 'info', item: i })
   }
 
-  /** Vrij moment gekozen (gesleept of getikt): wat plannen we? */
+  /**
+   * Moment gekozen (gesleept of getikt): wat plannen we? Een interne meeting mag
+   * op elk tijdstip (een overlap is een waarschuwing bij het opslaan). Een
+   * verkoopafspraak voor een lead volgt de setterregels: enkel op wit (vrij).
+   */
   const kiesMoment = (start: number, eind: number) => {
-    if (initialLeadId && verkoop) return setVenster({ soort: 'lead', start, eind })
+    const vrij = !!data?.beschikbaarheid.ok && isBookable(data.segmenten, start, eind)
+    const leadNietVrij = () => toast.error('Een afspraak voor een lead boek je op een wit (vrij) moment binnen de werkuren.')
+    if (initialLeadId && verkoop) return vrij ? setVenster({ soort: 'lead', start, eind }) : leadNietVrij()
     if (!opties && !verkoop) { toast('Even geduld, de planner laadt nog.'); return }
-    if (kanMeeting && verkoop) return setVenster({ soort: 'kies', start, eind, op: Date.now() })
+    if (kanMeeting && verkoop) return setVenster({ soort: 'kies', start, eind, op: Date.now(), vrij })
     if (kanMeeting) return setVenster({ soort: 'plan', start, eind })
-    if (verkoop) return setVenster({ soort: 'lead', start, eind })
+    if (verkoop) return vrij ? setVenster({ soort: 'lead', start, eind }) : leadNietVrij()
     toast.error('Je mag hier geen meetings plannen.')
   }
 
@@ -329,11 +335,12 @@ export function Calendar({ client, pipelines, isAdmin, verkoop, initialLeadId, i
               <div className="font-medium flex items-center gap-2"><Video className="h-4 w-4" />Meeting met Google Meet</div>
               <div className="text-xs text-gray-600 mt-0.5">Met of zonder klant: echte Meet-link, uitnodiging, ClickUp en herinneringen.</div>
             </button>
-            <button type="button" onClick={() => { if (!spookklik(venster.op)) setVenster({ soort: 'lead', start: venster.start, eind: venster.eind }) }} className={`card-base !p-3 text-left hover:border-gray-400 ${focusRing}`}>
+            <button type="button" disabled={!venster.vrij} onClick={() => { if (!spookklik(venster.op)) setVenster({ soort: 'lead', start: venster.start, eind: venster.eind }) }} className={`card-base !p-3 text-left hover:border-gray-400 disabled:opacity-50 disabled:hover:border-gray-200 ${focusRing}`}>
               <div className="font-medium flex items-center gap-2"><CalendarDays className="h-4 w-4" />Afspraak voor een lead</div>
-              <div className="text-xs text-gray-600 mt-0.5">Verkoopafspraak uit de pipeline, met setter, merk en uitkomst zoals altijd.</div>
+              <div className="text-xs text-gray-600 mt-0.5">{venster.vrij ? 'Verkoopafspraak uit de pipeline, met setter, merk en uitkomst zoals altijd.' : 'Kan enkel op een wit (vrij) moment binnen de werkuren.'}</div>
             </button>
           </div>
+          {!venster.vrij && <p className="text-xs text-amber-800">Dit moment valt buiten de werkuren of overlapt met iets anders. Een interne meeting kan toch: je krijgt bij het opslaan een waarschuwing als er iets overlapt.</p>}
         </Modal>
       )}
       {(venster?.soort === 'plan' || venster?.soort === 'nieuw') && opties && (
@@ -341,7 +348,7 @@ export function Calendar({ client, pipelines, isAdmin, verkoop, initialLeadId, i
           voorinvul={venster.soort === 'plan'
             ? { dag: dag(new Date(venster.start).toISOString()), uur: uur(new Date(venster.start).toISOString()), duur: Math.round((venster.eind - venster.start) / MIN), agendaId: agenda?.id ?? null }
             : { dag: datum < vandaag() ? vandaag() : datum, uur: '10:00', duur, agendaId: agenda?.id ?? null }}
-          controleerVrij={venster.soort === 'plan'}
+          controleerVrij
           onSluit={() => setVenster(null)} onOpen={(id) => setVenster({ soort: 'detail', id })}
           onKlaar={(m, melding) => { if (melding) toast.success(melding); laad(); setVenster({ soort: 'detail', id: m.id }) }} />
       )}
@@ -373,7 +380,7 @@ export function Calendar({ client, pipelines, isAdmin, verkoop, initialLeadId, i
       )}
       {venster?.soort === 'info' && <InfoVenster item={venster.item} onSluit={() => setVenster(null)} />}
       {venster?.soort === 'verplaats' && data && (
-        <VerplaatsVenster item={venster.item} start={venster.start} eind={venster.eind} segmenten={data.segmenten} beschikbaar={data.beschikbaarheid.ok}
+        <VerplaatsVenster item={venster.item} start={venster.start} eind={venster.eind} segmenten={data.segmenten} beschikbaar={data.beschikbaarheid.ok} items={data.items}
           onSluit={() => setVenster(null)} onKlaar={() => { setVenster(null); laad() }} />
       )}
       {venster?.soort === 'agenda' && (
@@ -421,7 +428,6 @@ function Week({ data, maandag, slot, duur, magVerplaatsen, onOpen, onMoment, onV
     if (!el) return topMs(d)
     return topMs(d) + ((clientY - el.getBoundingClientRect().top) / PX) * MIN
   }
-  const segmentVan = (ms: number): Interval | null => segmenten.find((s) => ms >= s.start && ms < s.end) ?? null
   const dagOnder = (x: number, y: number): string | null => {
     const el = document.elementFromPoint(x, y)?.closest('[data-dag]') as HTMLElement | null
     return el?.dataset.dag ?? null
@@ -479,29 +485,38 @@ function Week({ data, maandag, slot, duur, magVerplaatsen, onOpen, onMoment, onV
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slot, segmenten, onMoment, onOpen, onVerplaats])
 
+  /**
+   * Intern mag je overal plannen: op wit (vrij) én daarbuiten. Het venster om in
+   * te slepen is de zichtbare dag, nooit het verleden. Wat buiten wit valt,
+   * wordt oranje: bij het opslaan volgt dan een waarschuwing bij een overlap.
+   */
+  const dagGrens = (d: string): Interval => ({
+    start: Math.max(topMs(d), snapToSlot(Date.now(), slot, 'ceil')),
+    end: topMs(d) + (DAG_EIND - DAG_START) * 60 * MIN,
+  })
   const opKolomNeer = (ev: React.PointerEvent, d: string) => {
     if (ev.button !== 0) return
     const ms = msOp(d, ev.clientY)
-    const seg = segmentVan(ms)
+    const grens = dagGrens(d)
     if (ev.pointerType === 'touch') {
       // Touch: niet slepen (dan scroll je), maar tikken.
-      tik.current = seg ? { x: ev.clientX, y: ev.clientY, dag: d, ms } : null
+      tik.current = ms >= grens.start ? { x: ev.clientX, y: ev.clientY, dag: d, ms } : null
       return
     }
-    if (!seg) return
+    if (ms < grens.start || grens.end - grens.start < slot * MIN) return
     ev.preventDefault()
-    const anker = Math.min(Math.max(snapToSlot(ms, slot), seg.start), seg.end - slot * MIN)
-    sleep.current = { soort: 'nieuw', dag: d, anker, seg }
-    setSelectie({ dag: d, start: anker, eind: Math.min(anker + duur * MIN, seg.end) })
+    const anker = Math.min(Math.max(snapToSlot(ms, slot), grens.start), grens.end - slot * MIN)
+    sleep.current = { soort: 'nieuw', dag: d, anker, seg: grens }
+    setSelectie({ dag: d, start: anker, eind: Math.min(anker + duur * MIN, grens.end) })
   }
   const opKolomOp = (ev: React.PointerEvent) => {
     const t = tik.current
     tik.current = null
     if (!t || ev.pointerType !== 'touch' || Math.hypot(ev.clientX - t.x, ev.clientY - t.y) > 10) return
-    const seg = segmentVan(t.ms)
-    if (!seg) return
-    const start = Math.min(Math.max(snapToSlot(t.ms, slot), seg.start), seg.end - slot * MIN)
-    onMoment(start, Math.min(start + duur * MIN, seg.end))
+    const grens = dagGrens(t.dag)
+    if (grens.end - grens.start < slot * MIN) return
+    const start = Math.min(Math.max(snapToSlot(t.ms, slot), grens.start), grens.end - slot * MIN)
+    onMoment(start, Math.min(start + duur * MIN, grens.end))
   }
   const opItemNeer = (ev: React.PointerEvent, it: KalenderItem, d: string) => {
     ev.stopPropagation()
@@ -552,7 +567,7 @@ function Week({ data, maandag, slot, duur, magVerplaatsen, onOpen, onMoment, onV
                   {nu > dagTop && nu < dagBodem && <div className="absolute inset-x-0 border-t-2 border-red-500 pointer-events-none z-20" style={{ top: yVan(nu, d) }} />}
                   {/* selectie */}
                   {selectie?.dag === d && (
-                    <div className="absolute inset-x-0.5 rounded bg-emerald-300/70 border border-emerald-600 pointer-events-none flex items-center justify-center z-30"
+                    <div className={`absolute inset-x-0.5 rounded border pointer-events-none flex items-center justify-center z-30 ${isBookable(segmenten, selectie.start, selectie.eind) ? 'bg-emerald-300/70 border-emerald-600' : 'bg-amber-300/70 border-amber-600'}`}
                       style={{ top: yVan(selectie.start, d), height: Math.max(14, yVan(selectie.eind, d) - yVan(selectie.start, d)) }}>
                       <span className="text-[10px] font-semibold text-emerald-950">{uur(new Date(selectie.start).toISOString())}–{uur(new Date(selectie.eind).toISOString())}</span>
                     </div>
@@ -674,8 +689,8 @@ function Lijst({ items, onOpen }: { items: KalenderItem[]; onOpen: (i: KalenderI
 function Legenda({ week }: { week: boolean }) {
   return (
     <p className="text-[11px] text-gray-600 flex flex-wrap gap-x-3 gap-y-1 items-center">
-      {week && <><span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-3 bg-white border border-emerald-300" />vrij: sleep of tik om te plannen</span>
-        <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-3 bg-niet-vrij border border-gray-300" />niet beschikbaar</span></>}
+      {week && <><span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-3 bg-white border border-emerald-300" />vrij (werkuren): sleep of tik om te plannen</span>
+        <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-3 bg-niet-vrij border border-gray-300" />buiten werkuren of bezet: een interne meeting kan ook hier, met waarschuwing</span></>}
       {(Object.keys(BRON_LABEL) as KalenderBron[]).map((b) => <span key={b} className="inline-flex items-center gap-1"><span className={`inline-block h-2.5 w-3 rounded-sm border ${STIJL[b]}`} />{BRON_LABEL[b]}</span>)}
       <span className="inline-flex items-center gap-1"><Bell className="h-3 w-3" />gsm-melding {GSM_MELDING_MIN} min vooraf</span>
       <span>Tijden in Belgische tijd ({STANDAARD_TIJDZONE}).</span>
@@ -708,37 +723,50 @@ function InfoVenster({ item, onSluit }: { item: KalenderItem; onSluit: () => voi
 
 // ── Verplaatsen na slepen: bevestigen, dan dezelfde afspraak bijwerken ──────
 
-function VerplaatsVenster({ item, start, eind, segmenten, beschikbaar, onSluit, onKlaar }: {
-  item: KalenderItem; start: number; eind: number; segmenten: Interval[]; beschikbaar: boolean; onSluit: () => void; onKlaar: () => void
+function VerplaatsVenster({ item, start, eind, segmenten, beschikbaar, items, onSluit, onKlaar }: {
+  item: KalenderItem; start: number; eind: number; segmenten: Interval[]; beschikbaar: boolean; items: KalenderItem[]; onSluit: () => void; onKlaar: () => void
 }) {
   const [bezig, setBezig] = useState(false)
   const [fout, setFout] = useState<string | null>(null)
+  const [serverConflict, setServerConflict] = useState<{ titel: string; start: string; eind: string }[] | null>(null)
   const nieuw = new Date(start).toISOString(), nieuwEind = new Date(eind).toISOString()
-  // Het eigen oude blok telt niet als bezet.
-  const vrij = beschikbaar && isBookable(mergeIntervals([...segmenten, { start: Date.parse(item.start), end: Date.parse(item.eind) }]), start, eind) && start > Date.now()
+  const verkoop = item.bron === 'afspraak'
+  const toekomst = start > Date.now()
+  // Verkoopafspraken volgen de setterregels: enkel op wit (het eigen oude blok telt niet).
+  const vrij = beschikbaar && isBookable(mergeIntervals([...segmenten, { start: Date.parse(item.start), end: Date.parse(item.eind) }]), start, eind)
+  // Interne meetings: elk tijdstip mag; wat overlapt, tonen we als waarschuwing.
+  const overlap = items.filter((i) => i.key !== item.key && Date.parse(i.start) < eind && start < Date.parse(i.eind))
+  const conflicten = serverConflict ?? overlap.map((i) => ({ titel: i.titel, start: i.start, eind: i.eind }))
+  const kan = toekomst && (verkoop ? vrij : true)
   async function bevestig() {
     setBezig(true); setFout(null)
     try {
-      if (item.bron === 'afspraak') {
+      if (verkoop) {
         await api('/api/admin/sales/appointments', { method: 'PATCH', body: JSON.stringify({ id: item.id, startsAt: start, endsAt: eind }) })
       } else {
         const tz = item.tijdzone || STANDAARD_TIJDZONE
         await api(`/api/admin/meetings/${item.id}`, {
           method: 'PATCH',
-          body: JSON.stringify({ actie: 'wijzig', dag: dag(nieuw, tz), uur: uur(nieuw, tz), duur_minuten: Math.round((eind - start) / MIN), tijdzone: tz, controleer_vrij: true }),
+          body: JSON.stringify({
+            actie: 'wijzig', dag: dag(nieuw, tz), uur: uur(nieuw, tz), duur_minuten: Math.round((eind - start) / MIN), tijdzone: tz,
+            // Gezien en toch bevestigd = bewust; anders kijkt de server vlak voor het opslaan nog eens.
+            controleer_vrij: true, toch_conflict: conflicten.length > 0,
+          }),
         })
       }
       toast.success('Verplaatst. Google Agenda, ClickUp, de uitnodiging en de herinneringen zijn bijgewerkt.')
       onKlaar()
     } catch (e) {
-      setFout(e instanceof Error ? e.message : 'Verplaatsen mislukt')
+      const data = (e as { data?: { conflict?: boolean; conflicten?: { titel: string; start: string; eind: string }[] } }).data
+      if (data?.conflict) { setServerConflict(data.conflicten ?? []); setFout(`${e instanceof Error ? e.message : 'Er staat al iets op dit moment.'}`) }
+      else setFout(e instanceof Error ? e.message : 'Verplaatsen mislukt')
     } finally { setBezig(false) }
   }
   return (
     <Modal titel="Meeting verplaatsen?" sub={item.titel} onSluit={onSluit}
       voet={<>
         <button type="button" onClick={onSluit} className={`btn-secondary ${focusRing}`}><X className="h-4 w-4" />Niet verplaatsen</button>
-        <button type="button" onClick={bevestig} disabled={bezig || !vrij} className={`btn-primary ${focusRing}`}>{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Verplaatsen</button>
+        <button type="button" onClick={bevestig} disabled={bezig || !kan} className={`btn-primary ${focusRing}`}>{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}{!verkoop && conflicten.length ? 'Toch verplaatsen' : 'Verplaatsen'}</button>
       </>}>
       <div className="flex items-center gap-2 text-sm flex-wrap">
         <span className="line-through text-gray-500">{datumKort(item.start)} {uur(item.start)}–{uur(item.eind)}</span>
@@ -746,8 +774,16 @@ function VerplaatsVenster({ item, start, eind, segmenten, beschikbaar, onSluit, 
         <span className="font-semibold">{datumKort(nieuw)} {uur(nieuw)}–{uur(nieuwEind)}</span>
       </div>
       <p className="text-sm text-gray-700">Dezelfde afspraak wordt bijgewerkt: Google Agenda (de Meet-link blijft), de uitnodiging aan de deelnemers, ClickUp en de herinneringen. Er komt geen tweede afspraak bij.</p>
-      {!vrij && <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" role="alert">Dit moment is niet vrij (of ligt in het verleden). Sleep naar een wit vak.</p>}
-      {fout && <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">{fout} Er is niets gewijzigd.</p>}
+      {!toekomst && <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" role="alert">Dit moment ligt in het verleden.</p>}
+      {toekomst && verkoop && !vrij && <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" role="alert">Een verkoopafspraak verplaats je naar een wit (vrij) moment binnen de werkuren.</p>}
+      {toekomst && !verkoop && conflicten.length > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 space-y-1" role="alert">
+          <p className="font-medium">Er staat al iets op dit moment:</p>
+          <ul className="list-disc pl-5">{conflicten.map((c, i) => <li key={i}>{c.titel} · {uur(c.start)}–{uur(c.eind)}</li>)}</ul>
+          <p className="text-xs">Intern mag je op elk tijdstip plannen. Bevestig om toch te verplaatsen.</p>
+        </div>
+      )}
+      {fout && !serverConflict && <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">{fout} Er is niets gewijzigd.</p>}
     </Modal>
   )
 }

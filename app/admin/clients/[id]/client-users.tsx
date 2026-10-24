@@ -5,7 +5,7 @@ import { Users, Plus, Loader2, X, Trash2, KeyRound, Mail, Power, Crown, Eye } fr
 import { toast } from 'sonner'
 import {
   PORTAL_MODULES, MODULE_ACTIONS, MODULE_LABELS, MODULE_IMPLEMENTED, ACTION_LABELS, PRESETS,
-  presetPermissions, permissionSummary, type Permissions, type PresetKey, type PortalModule,
+  presetPermissions, permissionSummary, metStandaard, STANDAARD_AAN, type Permissions, type PresetKey, type PortalModule,
 } from '@/lib/portal-permissions'
 
 type CU = {
@@ -115,20 +115,21 @@ function UserDialog({
   const [phone, setPhone] = useState(user?.phone ?? '')
   const [password, setPassword] = useState('')
   const [roleLabel, setRoleLabel] = useState<string>(user?.role_label ?? 'Eigenaar')
-  const [perms, setPerms] = useState<Permissions>(user?.permissions ?? presetPermissions('eigenaar'))
+  const [perms, setPerms] = useState<Permissions>(metStandaard(user?.permissions ?? presetPermissions('eigenaar')))
   const [sendMail, setSendMail] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const applyPreset = (key: PresetKey) => {
     const p = PRESETS.find((x) => x.key === key)
-    setPerms(presetPermissions(key))
+    setPerms(metStandaard(presetPermissions(key)))
     if (p) setRoleLabel(p.label)
   }
 
   const toggle = (m: PortalModule, a: string) => setPerms((p) => {
     const mod = { ...(p[m] ?? {}) }
-    if (mod[a]) delete mod[a]; else mod[a] = true
+    // Standaard-aan-module (Meeting boeken): uit = uitdrukkelijk false bewaren.
+    if (mod[a]) { if (STANDAARD_AAN.includes(m)) mod[a] = false; else delete mod[a] } else mod[a] = true
     return { ...p, [m]: mod }
   })
 

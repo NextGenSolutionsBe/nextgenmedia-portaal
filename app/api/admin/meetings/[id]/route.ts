@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { controleerVrij } from '@/lib/meetings/kalender-server'
+import { controleerConflicten } from '@/lib/meetings/kalender-server'
 import { GSM_MELDING_MIN } from '@/lib/meetings/kalender'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { plannerRechten, magMeeting } from '@/lib/meetings/rechten'
@@ -141,11 +141,17 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
       const w = wijzigingen(m, v.waarde)
       if (!w.iets && !koppeling) return antwoord({ ongewijzigd: true })
-      // Verplaatst vanuit Calendar: het nieuwe moment moet nu nog vrij zijn
-      // (de meeting zelf telt niet mee). Zo niet: niets wijzigen.
-      if (w.tijd && b.controleer_vrij === true && m.agenda_id) {
-        const c = await controleerVrij(admin, { agendaId: m.agenda_id, start: Date.parse(v.waarde.startsAt), eind: Date.parse(v.waarde.endsAt), negeer: { meetingId: m.id } })
-        if (!c.vrij) return NextResponse.json({ error: c.reden, nietVrij: true }, { status: c.status })
+      // Verplaatst vanuit Calendar: overlapt het nieuwe moment met iets anders
+      // (de meeting zelf telt niet)? Intern mag elk tijdstip: een waarschuwing,
+      // die je bewust kan negeren met toch_conflict.
+      if (w.tijd && b.controleer_vrij === true && b.toch_conflict !== true && m.agenda_id) {
+        const c = await controleerConflicten(admin, { agendaId: m.agenda_id, start: Date.parse(v.waarde.startsAt), eind: Date.parse(v.waarde.endsAt), negeer: { meetingId: m.id } })
+        if (c.lijst.length || !c.betrouwbaar) {
+          return NextResponse.json({
+            error: c.lijst.length ? 'Er staat al iets in de agenda op dit moment.' : `Conflicten konden niet gecontroleerd worden: ${c.fout}`,
+            conflict: true, conflicten: c.lijst, betrouwbaar: c.betrouwbaar,
+          }, { status: 409 })
+        }
       }
       m = await bewaarMeeting(admin, m.id, {
         titel: v.waarde.titel, beschrijving: v.waarde.beschrijving, starts_at: v.waarde.startsAt, ends_at: v.waarde.endsAt, tijdzone: v.waarde.tijdzone,

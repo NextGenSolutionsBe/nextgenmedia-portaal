@@ -172,6 +172,8 @@ export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerV
   const [fout, setFout] = useState<string | null>(null)
   const [dubbel, setDubbel] = useState<Meeting | null>(null)
   const [onzeker, setOnzeker] = useState<string | null>(null)
+  // Overlap met iets anders in de agenda: intern mag het, maar je moet het weten.
+  const [conflict, setConflict] = useState<{ lijst: { titel: string; start: string; eind: string; bron: string }[]; betrouwbaar: boolean; melding: string } | null>(null)
 
   const klant = opties.klanten.find((k) => k.id === clientId) ?? null
   const klantNaam = klant ? (klant.company_name || klant.contact_name || 'Klant') : null
@@ -220,23 +222,27 @@ export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerV
 
   const probleem = !controle.ok ? controle.fout : clickupOngeldig ? 'Geen geldig ClickUp-item. Plak de link of het taak-ID.' : !bestaand && !agendaId ? 'Kies de Google-agenda waarin de meeting komt.' : !bestaand && agenda && !agenda.gekoppeld ? 'De Google-koppeling van deze agenda is verlopen. Koppel ze opnieuw via Verkoop → Agenda.' : null
 
-  async function bewaar(tochInplannen = false) {
+  async function bewaar(tochInplannen = false, tochConflict = false) {
     if (probleem) { toast.error(probleem); return }
-    setBezig(true); setFout(null); setDubbel(null)
+    setBezig(true); setFout(null); setDubbel(null); setConflict(null)
     const koppel = { client_id: clientId || null, project_id: projectId || null, clickup_item: clickupItem.trim() }
     try {
       if (bestaand) {
-        const j = await api<{ meeting: Meeting; ongewijzigd?: boolean; herinneringFout?: string | null; googleFout?: string | null }>(`/api/admin/meetings/${bestaand.id}`, { method: 'PATCH', body: JSON.stringify({ actie: 'wijzig', ...invoer, ...koppel, controleer_vrij: !!controleerVrij }) })
+        const j = await api<{ meeting: Meeting; ongewijzigd?: boolean; herinneringFout?: string | null; googleFout?: string | null }>(`/api/admin/meetings/${bestaand.id}`, { method: 'PATCH', body: JSON.stringify({ actie: 'wijzig', ...invoer, ...koppel, controleer_vrij: !!controleerVrij, toch_conflict: tochConflict }) })
         if (j.googleFout) { toast.error(j.googleFout); onKlaar(j.meeting, ''); return }
         onKlaar(j.meeting, j.ongewijzigd ? 'Er was niets gewijzigd.' : j.herinneringFout ? `Aangepast, maar de herinnering is niet opnieuw gepland: ${j.herinneringFout}` : 'Meeting aangepast. De genodigden krijgen de wijziging van Google.')
       } else {
         const j = await api<{ meeting: Meeting; herhaald?: boolean; herinneringFout?: string | null }>('/api/admin/meetings', {
-          method: 'POST', body: JSON.stringify({ aanvraag_sleutel: sleutel, agenda_id: agendaId, organisator_naam: organisator, toch_inplannen: tochInplannen, controleer_vrij: !!controleerVrij, ...invoer, ...koppel }),
+          method: 'POST', body: JSON.stringify({ aanvraag_sleutel: sleutel, agenda_id: agendaId, organisator_naam: organisator, toch_inplannen: tochInplannen, controleer_vrij: !!controleerVrij, toch_conflict: tochConflict, ...invoer, ...koppel }),
         })
         onKlaar(j.meeting, j.herhaald ? 'Deze meeting stond al ingepland.' : j.herinneringFout ? `Ingepland, maar de herinnering kon niet gepland worden: ${j.herinneringFout}` : 'Meeting ingepland. Google stuurt de uitnodiging.')
       }
     } catch (e) {
       if (e instanceof ApiFout && e.status === 409 && e.data.bestaand) { setDubbel(e.data.bestaand as Meeting); return }
+      if (e instanceof ApiFout && e.status === 409 && e.data.conflict) {
+        setConflict({ lijst: (e.data.conflicten ?? []) as { titel: string; start: string; eind: string; bron: string }[], betrouwbaar: e.data.betrouwbaar !== false, melding: e.message })
+        return
+      }
       if (e instanceof ApiFout && e.data.nietVrij) { setFout(`${e.message} Er is niets opgeslagen. Ga terug en kies een ander tijdstip.`); return }
       if (e instanceof ApiFout && e.data.meeting) { setFout(e.message); setOnzeker((e.data.meeting as Meeting).id); toast.error('Niet ingepland in Google Agenda.'); return }
       setFout(e instanceof Error ? e.message : 'Inplannen mislukt')
@@ -268,7 +274,7 @@ export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerV
           </Rijtje>
           <Rijtje label="Google-agenda">{bestaand ? 'Zelfde afspraak, wordt bijgewerkt (Meet-link blijft)' : `${agenda?.naam ?? '—'}, met Google Meet-link`}</Rijtje>
           <Rijtje label="Gsm-melding">15 minuten vooraf, via de Google Agenda-app</Rijtje>
-          {controleerVrij && <Rijtje label="Beschikbaarheid">Wordt vlak vóór het opslaan opnieuw gecontroleerd (Google Agenda, ClickUp en de app).</Rijtje>}
+          {controleerVrij && <Rijtje label="Conflicten">Vlak vóór het opslaan kijken we of er intussen iets anders op dit moment staat (Google Agenda, ClickUp en de app).</Rijtje>}
           <Rijtje label="ClickUp">{bestaand ? 'Bestaande taak wordt bijgewerkt' : 'Taak in de lijst van het merk, zoals bij de verkoopafspraken'}</Rijtje>
           <Rijtje label="Klant">{klantNaam ?? <span className="text-gray-500">Geen klant gekoppeld</span>}</Rijtje>
           {project && <Rijtje label="Project">{project.titel}</Rijtje>}
@@ -281,6 +287,19 @@ export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerV
             <div className="flex gap-2 flex-wrap">
               <button type="button" onClick={() => onOpen(dubbel.id)} className={`btn-secondary !py-1 text-xs ${focusRing}`}>Bestaande meeting openen</button>
               <button type="button" onClick={() => bewaar(true)} disabled={bezig} className={`btn-secondary !py-1 text-xs ${focusRing}`}>Toch nog eens inplannen</button>
+            </div>
+          </div>
+        )}
+        {conflict && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 space-y-2" role="alert">
+            <p className="font-medium">{conflict.melding}</p>
+            {conflict.lijst.length > 0 && (
+              <ul className="list-disc pl-5">{conflict.lijst.map((c, i) => <li key={i}>{c.titel} · {datumKort(c.start)} {uur(c.start)}–{uur(c.eind)}</li>)}</ul>
+            )}
+            <p className="text-xs">Intern mag je op elk tijdstip plannen. Ga terug om een ander uur te kiezen, of plan het bewust toch zo in.</p>
+            <div className="flex gap-2 flex-wrap">
+              <button type="button" onClick={() => { setStap('invullen'); setConflict(null) }} className={`btn-secondary !py-1 text-xs ${focusRing}`}>Ander tijdstip kiezen</button>
+              <button type="button" onClick={() => bewaar(false, true)} disabled={bezig} className={`btn-secondary !py-1 text-xs ${focusRing}`}>{bestaand ? 'Toch zo opslaan' : 'Toch inplannen'}</button>
             </div>
           </div>
         )}

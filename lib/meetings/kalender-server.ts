@@ -173,3 +173,22 @@ export async function controleerVrij(admin: Admin, opts: { agendaId: string; sta
   }
   return { vrij: true }
 }
+
+export type Conflict = { titel: string; start: string; eind: string; bron: string }
+
+/**
+ * Intern plannen mag op ELK tijdstip (ook buiten de werkuren, de klanturen of
+ * binnen 72 uur). Wat wél telt: overlapt het met iets anders in de agenda van
+ * die persoon? Dat is een waarschuwing, geen verbod. `betrouwbaar: false` als
+ * Google of ClickUp niet gelezen kon worden — ook dat melden we.
+ */
+export async function controleerConflicten(admin: Admin, opts: { agendaId: string; start: number; eind: number; negeer?: Negeer }): Promise<{ betrouwbaar: boolean; fout: string | null; lijst: Conflict[] }> {
+  const d = await kalenderData(admin, { agendaId: opts.agendaId, van: opts.start - 86400000, tot: opts.eind + 86400000, vrij: false, negeer: opts.negeer })
+  const lijst = d.items
+    .filter((i) => !(opts.negeer?.meetingId && i.id === opts.negeer.meetingId && (i.bron === 'meeting' || i.bron === 'klantboeking')))
+    .filter((i) => !(opts.negeer?.afspraakId && i.id === opts.negeer.afspraakId && i.bron === 'afspraak'))
+    .filter((i) => Date.parse(i.start) < opts.eind && opts.start < Date.parse(i.eind))
+    .map((i) => ({ titel: i.titel, start: i.start, eind: i.eind, bron: i.bron }))
+  const fouten = [d.bronnen.google.fout, d.bronnen.clickup.fout].filter(Boolean) as string[]
+  return { betrouwbaar: fouten.length === 0, fout: fouten.length ? fouten.join(' ') : null, lijst }
+}

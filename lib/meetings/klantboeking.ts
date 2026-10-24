@@ -122,21 +122,36 @@ export function valideerBoeking(b: BoekingInvoer, nu: Date): { ok: true; waarde:
 export const kbTitel = (b: { naam: string; bedrijf: string | null }) => `${KB_TITEL} (${b.bedrijf || b.naam})`
 
 /** Bevestigingsmail na boeken of verplaatsen. Enkel gegevens van deze boeking. */
-export function bevestigingsMail(b: { naam: string; startsAt: string; meetUrl: string | null; beheerUrl: string; verplaatst?: boolean }): { onderwerp: string; tekst: string; ctaTekst: string; ctaLink: string } {
+export function bevestigingsMail(b: {
+  naam: string; startsAt: string; meetUrl: string | null; beheerUrl: string; verplaatst?: boolean
+  /** Wat de klant als onderwerp opgaf (optioneel). */
+  onderwerp?: string | null
+  /** Met wie de klant spreekt. */
+  organisator?: { naam: string | null; email: string | null } | null
+  /** Geboekt in de klantapp: beheren gebeurt daar, niet via een losse link. */
+  viaKlantapp?: boolean
+}): { onderwerp: string; tekst: string; ctaTekst: string; ctaLink: string } {
+  const org = b.organisator?.naam
+    ? `Je spreekt met ${b.organisator.naam}${b.organisator.email ? ` (${b.organisator.email})` : ''} van NextGenMedia.`
+    : null
   const delen = [
     `Beste ${b.naam},`,
     b.verplaatst
       ? `Je meeting met NextGenMedia is verplaatst naar ${datumLang(b.startsAt)} om ${uur(b.startsAt)} (${tijdzoneLabel(STANDAARD_TIJDZONE)}). Ze duurt ${KB_DUUR_MIN} minuten.`
       : `Bedankt voor je boeking. Je gratis meeting met NextGenMedia staat vast op ${datumLang(b.startsAt)} om ${uur(b.startsAt)} (${tijdzoneLabel(STANDAARD_TIJDZONE)}). Ze duurt ${KB_DUUR_MIN} minuten.`,
+    b.onderwerp ? `Onderwerp: ${b.onderwerp}` : null,
     b.meetUrl ? `Je neemt deel via Google Meet:\n${b.meetUrl}` : 'De Google Meet-link volgt in de agenda-uitnodiging.',
+    org,
     'Je krijgt ook een uitnodiging van Google Agenda. De dag ervoor sturen we je nog een korte herinnering.',
-    `Past het toch niet? Verplaats of annuleer je meeting via deze persoonlijke link:\n${b.beheerUrl}`,
+    b.viaKlantapp
+      ? `Past het toch niet? Verplaats of annuleer je meeting in je klantapp, onder Meeting boeken:\n${b.beheerUrl}`
+      : `Past het toch niet? Verplaats of annuleer je meeting via deze persoonlijke link:\n${b.beheerUrl}`,
     'Tot dan,\nNextGenMedia',
-  ]
+  ].filter(Boolean) as string[]
   return {
     onderwerp: `${b.verplaatst ? 'Verplaatst' : 'Bevestigd'}: meeting met NextGenMedia op ${datumKort(b.startsAt)} om ${uur(b.startsAt)}`,
     tekst: delen.join('\n\n'),
-    ctaTekst: 'Verplaatsen of annuleren',
+    ctaTekst: b.viaKlantapp ? 'Open je klantapp' : 'Verplaatsen of annuleren',
     ctaLink: b.beheerUrl,
   }
 }
