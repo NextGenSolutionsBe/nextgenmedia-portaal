@@ -6,7 +6,7 @@ import { controleerKoppelingen, testAfspraak, leesMeeting, veiligeFout } from '@
 import { cronToegang } from '@/lib/meetings/cron-toegang'
 import { haalMeetingEvent, bezetPerAgenda } from '@/lib/sales/google-calendar'
 import { getOrCreateSalesOrg, listOwners, loadCalendar } from '@/lib/sales/service'
-import { haalSyncTaken, clickupTijdvelden, type SyncOphaalInfo } from '@/lib/clickup'
+import { haalSyncTaken, clickupTijdvelden, clickupZoekVarianten, type SyncOphaalInfo } from '@/lib/clickup'
 import { mergeIntervals, type Interval } from '@/lib/sales/availability'
 import { dag, uur, zoneNaarIso } from '@/lib/meetings/model'
 import {
@@ -39,6 +39,11 @@ export async function POST(req: NextRequest) {
   const admin = createAdminSupabaseClient()
   try {
     if (req.nextUrl.searchParams.get('zelftest') === 'klantboeking') return NextResponse.json(await zelftestKlantboeking(admin))
+    if (req.nextUrl.searchParams.get('clickupvarianten') === '1') {
+      const nu = Date.now()
+      const zoek = (req.nextUrl.searchParams.get('taken') ?? '').split(',').filter((x) => /^[A-Za-z0-9_-]{5,40}$/.test(x)).slice(0, 10)
+      return NextResponse.json({ varianten: await clickupZoekVarianten([200511713, 106693123], nu - 86400000, nu + 60 * 86400000, zoek) })
+    }
     if (req.nextUrl.searchParams.get('kalender') === '1') return NextResponse.json(await kalenderDiagnose(req.nextUrl.searchParams.get('taken')))
     let agenda = req.nextUrl.searchParams.get('agenda')
     if (!agenda || !UUID.test(agenda)) {
