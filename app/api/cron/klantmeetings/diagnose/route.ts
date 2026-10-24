@@ -53,9 +53,10 @@ export const maxDuration = 60
  *    Google-afspraak, mail aan de deelnemers via de meetingmail, teruggelezen
  *    bij Resend), wisselen tussen online en locatie, daarna geannuleerd.
  *    Genodigde en ontvanger: enkel info@nextgenmedia.be.
- *  · ?zelftest=leadtaak: één taak bij een testlead zoals de leadfiche ze maakt
- *    (echte ClickUp-taak in de NextGen Solutions-lijst), teruggelezen bij
- *    ClickUp, daarna gesloten als [GEANNULEERD] en de rij verwijderd.
+ *  · ?zelftest=leadtaak: één taak bij een tijdelijke testlead zoals de
+ *    leadfiche ze maakt (echte ClickUp-taak in een bereikbare merklijst),
+ *    teruggelezen bij ClickUp, daarna gesloten als [GEANNULEERD]; testlead weg.
+ *    Meldt ook per merk of de ClickUp-lijst bereikbaar is.
  *  · ?kalender=1: leest enkel. Per agenda de werkuren, bezette blokken (per
  *    Google-agenda, zonder titels) en vrije segmenten voor twee weken, plus
  *    hoe de ClickUp-taken binnenkomen (pagina's, tijdvelden).
@@ -710,21 +711,25 @@ async function zelftestLeadTaak(admin: { from: (t: string) => any }) {
 
     const opties = await leadTaakOpties(admin, null)
     const lid = opties.leden.find((m) => m.id === 106693123) ?? opties.leden[0]
-    log('ClickUp-leden en lijsten', opties.ingesteld && opties.leden.length > 0 && opties.lijsten.every((l) => l.ok), `${opties.leden.length} leden; ${opties.lijsten.map((l) => `${l.naam}: ${l.ok ? 'ok' : 'geen lijst'}`).join(', ')}`)
+    log('ClickUp-leden gelezen', opties.ingesteld && opties.leden.length > 0, `${opties.leden.length} leden`)
+    for (const l of opties.lijsten) log(`Lijst ${l.naam} ingesteld en bereikbaar`, l.ok, l.probleem ?? 'ok')
+    // De flow testen in een bereikbare lijst (bij voorkeur NextGen Media).
+    const merk = (opties.lijsten.find((l) => l.merk === 'nextgenmedia' && l.ok) ?? opties.lijsten.find((l) => l.ok))?.merk
+    if (!merk) { await opruimen(); log('Opgeruimd: testlead weg', true); return { stappen } }
     const deadline = new Date(Date.now() + 3 * 86400000).toLocaleDateString('sv-SE', { timeZone: 'Europe/Brussels' })
-    const { data: pipe } = await admin.from('sales_pipelines').select('clickup_list_id').eq('key', 'nextgensolutions').maybeSingle()
+    const { data: pipe } = await admin.from('sales_pipelines').select('clickup_list_id').eq('key', merk).maybeSingle()
 
     const { taak } = await maakLeadTaak(admin, lead.id, {
       aanvraag_sleutel: randomUUID(), omschrijving: 'Testtaak leadfiche (automatische controle)', deadline,
-      notitie: 'Automatische controle van "Taak toevoegen" in de leadfiche. Wordt meteen gesloten.', assignee_id: lid?.id, merk: 'nextgensolutions',
+      notitie: 'Automatische controle van "Taak toevoegen" in de leadfiche. Wordt meteen gesloten.', assignee_id: lid?.id, merk,
     }, { userId: null, email: 'zelftest' })
     rijId = taak.id; taakId = taak.clickup_task_id
-    log('Taak aangemaakt in ClickUp', taak.sync_status === 'ok' && !!taakId, taak.sync_fout ?? taak.clickup_url ?? undefined)
-    if (!taakId) return { stappen }
+    log(`Taak aangemaakt in ClickUp (${merk})`, taak.sync_status === 'ok' && !!taakId, taak.sync_fout ?? taak.clickup_url ?? undefined)
+    if (!taakId) { await opruimen(); log('Opgeruimd: testlead weg', true); return { stappen } }
 
     const ruw = await leesTaakRuw(taakId)
     const link = `/admin/sales/pipeline?lead=${lead.id}`
-    log('In de NextGen Solutions-lijst', ruw.lijst === pipe?.clickup_list_id, `lijst ${ruw.lijst}`)
+    log('In de gekozen lijst', ruw.lijst === pipe?.clickup_list_id, `lijst ${ruw.lijst}`)
     log('Toegewezen aan het gekozen lid', !!lid && ruw.toegewezen.includes(lid.id), `${lid?.naam ?? '—'}`)
     log('Gewone taak: deadline op de juiste dag, geen starttijd', !ruw.startDate && ruw.dueDate === String(deadlineMs(deadline)), `due ${ruw.dueDate}, start ${ruw.startDate ?? 'geen'}`)
     const volleLink = (ruw.tekst + ruw.markdown).match(/https?:\/\/[^\s)\]]+\/admin\/sales\/pipeline\?lead=[0-9a-f-]+/)?.[0] ?? null

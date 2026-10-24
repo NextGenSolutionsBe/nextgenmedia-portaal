@@ -1,6 +1,6 @@
 import 'server-only'
 import { baseUrl } from '@/lib/email'
-import { clickupConfigured, listClickupMembers, maakGewoneTaak, leesTaakStatus, zoekTaakMetMarker } from '@/lib/clickup'
+import { clickupConfigured, listClickupMembers, maakGewoneTaak, leesTaakStatus, zoekTaakMetMarker, lijstToegang } from '@/lib/clickup'
 import { veiligeFout } from '@/lib/meetings/server'
 import {
   valideerLeadTaak, leadLink, leadTaakMarker, leadTaakNaam, leadTaakOmschrijving, deadlineMs, merkNaam, type LeadTaakInvoer,
@@ -39,17 +39,32 @@ async function bewaar(admin: Admin, id: string, velden: Partial<LeadTaakRij>): P
   return data as LeadTaakRij
 }
 
-/** ClickUp-leden om uit te kiezen, en de twee lijsten (met of ze ingesteld zijn). */
-export async function leadTaakOpties(admin: Admin, mijnEmail: string | null = null): Promise<{ ingesteld: boolean; leden: { id: number; naam: string; email: string }[]; lijsten: { merk: string; naam: string; ok: boolean }[]; ik: number | null }> {
+const INSTELLING = (naam: string) => `Pipeline → Herinneringsmail → "ClickUp-lijst voor afspraken van ${naam}"`
+
+/** Uitleg als de lijst van een merk ontbreekt of niet bereikbaar is; null = in orde. */
+export function lijstProbleem(merk: string, listId: string | null, toegang: 'ok' | 'weg' | 'fout' | null): string | null {
+  const naam = merkNaam(merk)
+  if (!listId) return `Voor ${naam} is nog geen ClickUp-lijst ingesteld. Kies er een via ${INSTELLING(naam)}.`
+  if (toegang === 'weg') return `De ClickUp-lijst van ${naam} is niet bereikbaar voor de ClickUp-koppeling van de app: ze staat in een andere ClickUp-werkruimte of bestaat niet meer. Kies een bereikbare lijst via ${INSTELLING(naam)}, of geef de ClickUp-sleutel van de app toegang tot die werkruimte.`
+  return null
+}
+
+/** ClickUp-leden om uit te kiezen, en de twee lijsten (ingesteld én bereikbaar?). */
+export async function leadTaakOpties(admin: Admin, mijnEmail: string | null = null): Promise<{ ingesteld: boolean; leden: { id: number; naam: string; email: string }[]; lijsten: { merk: string; naam: string; ok: boolean; probleem: string | null }[]; ik: number | null }> {
   const [leden, { data: pipes }] = await Promise.all([
     listClickupMembers(),
     admin.from('sales_pipelines').select('key, clickup_list_id'),
   ])
   const p = (pipes ?? []) as { key: string; clickup_list_id: string | null }[]
+  const lijsten = await Promise.all(['nextgenmedia', 'nextgensolutions'].map(async (k) => {
+    const id = p.find((x) => x.key === k)?.clickup_list_id ?? null
+    const probleem = lijstProbleem(k, id, id ? await lijstToegang(id) : null)
+    return { merk: k, naam: merkNaam(k), ok: !probleem, probleem }
+  }))
   return {
     ingesteld: clickupConfigured(),
     leden: leden.map((m) => ({ id: m.id, naam: m.username || m.email, email: m.email })).sort((a, b) => a.naam.localeCompare(b.naam)),
-    lijsten: ['nextgenmedia', 'nextgensolutions'].map((k) => ({ merk: k, naam: merkNaam(k), ok: !!p.find((x) => x.key === k)?.clickup_list_id })),
+    lijsten,
     // Standaard: het ClickUp-lid met hetzelfde e-mailadres als wie de lead open heeft.
     ik: leden.find((m) => !!mijnEmail && m.email.toLowerCase() === mijnEmail.toLowerCase())?.id ?? null,
   }
@@ -57,7 +72,7 @@ export async function leadTaakOpties(admin: Admin, mijnEmail: string | null = nu
 
 /** De ClickUp-stap van één taak. Werpt nooit: de uitkomst staat op de rij. */
 async function stapClickup(admin: Admin, t: LeadTaakRij, lead: { bedrijf: string | null; contact: string | null }): Promise<LeadTaakRij> {
-  if (!t.clickup_list_id) return bewaar(admin, t.id, { sync_status: 'fout', sync_fout: `Voor ${merkNaam(t.merk)} is nog geen ClickUp-lijst ingesteld (Verkoop → Instellingen per merk).` })
+  if (!t.clickup_list_id) return bewaar(admin, t.id, { sync_status: 'fout', sync_fout: lijstProbleem(t.merk, null, null) })
   const marker = leadTaakMarker(t.id)
   try {
     // Al eens geprobeerd en onduidelijk afgelopen? Eerst terugzoeken, nooit een tweede taak.
@@ -80,7 +95,9 @@ async function stapClickup(admin: Admin, t: LeadTaakRij, lead: { bedrijf: string
       sync_status: 'ok', sync_fout: null,
     })
   } catch (e) {
-    return bewaar(admin, t.id, { sync_status: 'fout', sync_fout: veiligeFout(e) })
+    // Lijst in een andere werkruimte of verwijderd: zeg wat er moet gebeuren, niet enkel de ClickUp-code.
+    const weg = /→\s*404\b|SHARD_006|Team not authorized|OAUTH_027/.test(veiligeFout(e)) && (await lijstToegang(t.clickup_list_id)) === 'weg'
+    return bewaar(admin, t.id, { sync_status: 'fout', sync_fout: weg ? lijstProbleem(t.merk, t.clickup_list_id, 'weg') : veiligeFout(e) })
   }
 }
 
@@ -111,6 +128,10 @@ export async function maakLeadTaak(admin: Admin, leadId: string, b: LeadTaakInvo
   const lid = leden.find((m) => m.id === w.assigneeId)
   if (!lid) throw new LeadTaakFout('Dit ClickUp-lid bestaat niet (meer). Kies iemand anders.')
   const { data: pipe } = await admin.from('sales_pipelines').select('clickup_list_id').eq('key', w.merk).maybeSingle()
+  // Lijst niet ingesteld of niet bereikbaar: niets aanmaken, wel zeggen wat er moet gebeuren.
+  const listId = (pipe?.clickup_list_id as string | null) ?? null
+  const probleem = lijstProbleem(w.merk, listId, listId ? await lijstToegang(listId) : null)
+  if (probleem) throw new LeadTaakFout(probleem)
 
   const { data: rij, error } = await admin.from('sales_lead_taken').insert({
     lead_id: leadId, aanvraag_sleutel: sleutel, omschrijving: w.omschrijving, notitie: w.notitie, deadline: w.deadline, merk: w.merk,

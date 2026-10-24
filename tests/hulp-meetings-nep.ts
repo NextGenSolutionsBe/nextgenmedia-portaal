@@ -281,6 +281,8 @@ async function nepFetch(input: any, init: any = {}): Promise<Response> {
       clickup.paginasGevraagd++
       return json({ tasks: tasks.slice(pagina * grootte, (pagina + 1) * grootte), ...(clickup.zegtLaatstePagina ? { last_page: true } : {}) })
     }
+    // Een lijst in een andere werkruimte (of verwijderd): ClickUp geeft 404 SHARD_006.
+    if (/^\/list\/L-WEG/.test(p)) return json({ err: 'Not found', ECODE: 'SHARD_006' }, 404)
     let m = p.match(/^\/list\/([^/]+)\/task$/)
     if (m && methode === 'POST') {
       const id = `cu${++clickup.volgnr}`

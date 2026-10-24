@@ -108,17 +108,23 @@ async function main() {
     assert.equal(clickup.taken.get(x.clickup_task_id!)!.list, 'L-NGM')
   })
 
-  await test('8. Geen lijst ingesteld voor een merk: duidelijke fout, na instellen één keer aangemaakt', async () => {
+  await test('8. Geen lijst ingesteld of lijst onbereikbaar (andere werkruimte): niets aangemaakt, wel wat er moet gebeuren', async () => {
     const ngs = tabellen.sales_pipelines.find((p) => p.key === 'nextgensolutions')!
+    const voor = clickup.aangemaakt, rijen = tabellen.sales_lead_taken.length
     ngs.clickup_list_id = null
-    const voor = clickup.aangemaakt
-    const { taak } = await maakLeadTaak(db, LEAD, invoer({ omschrijving: 'Contract nalezen' }), door)
-    assert.equal(taak.sync_status, 'fout')
-    assert.match(taak.sync_fout ?? '', /nog geen ClickUp-lijst/)
+    await assert.rejects(maakLeadTaak(db, LEAD, invoer({ omschrijving: 'Contract nalezen' }), door),
+      (e: unknown) => e instanceof LeadTaakFout && /nog geen ClickUp-lijst ingesteld.*Herinneringsmail/.test(e.publiek))
+    ngs.clickup_list_id = 'L-WEG-NGS'
+    await assert.rejects(maakLeadTaak(db, LEAD, invoer({ omschrijving: 'Contract nalezen' }), door),
+      (e: unknown) => e instanceof LeadTaakFout && /niet bereikbaar.*andere ClickUp-werkruimte/.test(e.publiek))
+    const o = await leadTaakOpties(db)
+    assert.equal(o.lijsten.find((l) => l.merk === 'nextgensolutions')!.ok, false, 'het venster weet het al vooraf')
+    assert.equal(o.lijsten.find((l) => l.merk === 'nextgenmedia')!.ok, true)
     assert.equal(clickup.aangemaakt, voor)
+    assert.equal(tabellen.sales_lead_taken.length, rijen)
     ngs.clickup_list_id = 'L-NGS'
-    const x = await leadTaakOpnieuw(db, LEAD, taak.id)
-    assert.equal(x.sync_status, 'ok')
+    const { taak } = await maakLeadTaak(db, LEAD, invoer({ omschrijving: 'Contract nalezen' }), door)
+    assert.equal(taak.sync_status, 'ok')
     assert.equal(clickup.aangemaakt, voor + 1)
   })
 

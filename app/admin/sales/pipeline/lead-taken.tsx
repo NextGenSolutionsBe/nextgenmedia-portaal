@@ -18,7 +18,7 @@ type Taak = {
   clickup_status: string | null; clickup_status_kleur: string | null; clickup_status_type: string | null
   sync_status: 'wacht' | 'ok' | 'fout'; sync_fout: string | null; created_at: string; created_by_email: string | null
 }
-type Opties = { ingesteld: boolean; leden: { id: number; naam: string }[]; lijsten: { merk: string; naam: string; ok: boolean }[]; ik: number | null }
+type Opties = { ingesteld: boolean; leden: { id: number; naam: string }[]; lijsten: { merk: string; naam: string; ok: boolean; probleem: string | null }[]; ik: number | null }
 
 const nieuweSleutel = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : '')
 const datum = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' })
@@ -129,7 +129,7 @@ function NieuweTaak({ leadId, standaardMerk, onSluit, onKlaar }: { leadId: strin
 
   const lijst = opties?.lijsten.find((l) => l.merk === merk)
   const probleem = omschrijving.trim().length < 2 ? 'Geef de taak een omschrijving.' : !deadline ? 'Kies een deadline.' : deadline < vandaag() ? 'De deadline ligt in het verleden.'
-    : !lid ? 'Kies aan wie de taak wordt toegewezen.' : lijst && !lijst.ok ? `Voor ${lijst.naam} is nog geen ClickUp-lijst ingesteld.` : null
+    : !lid ? 'Kies aan wie de taak wordt toegewezen.' : lijst && !lijst.ok ? lijst.probleem : null
 
   async function bewaar() {
     if (probleem) { setFout(probleem); return }
@@ -174,6 +174,7 @@ function NieuweTaak({ leadId, standaardMerk, onSluit, onKlaar }: { leadId: strin
           ))}
         </div>
       </div>
+      {lijst && !lijst.ok && <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5" role="alert">{lijst.probleem}</p>}
       <label className="block"><span className={lbl}>Notitie <span className="font-normal text-gray-400">(extra uitleg, optioneel)</span></span>
         <textarea rows={3} className="input-base text-sm" value={notitie} maxLength={MAX_NOTITIE} onChange={(e) => setNotitie(e.target.value)} placeholder="Wat moet er gebeuren, wat weten we al?" />
       </label>
@@ -182,7 +183,7 @@ function NieuweTaak({ leadId, standaardMerk, onSluit, onKlaar }: { leadId: strin
       {opties && !opties.ingesteld && <p className="text-xs text-red-700">ClickUp is niet gekoppeld; een taak aanmaken lukt nu niet.</p>}
       {fout && <p className="text-xs text-red-700" role="alert">{fout}</p>}
       <div className="flex gap-2">
-        <button type="button" onClick={bewaar} disabled={bezig || !opties?.ingesteld} className="btn-primary text-xs">{bezig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}Taak aanmaken</button>
+        <button type="button" onClick={bewaar} disabled={bezig || !opties?.ingesteld || (!!lijst && !lijst.ok)} className="btn-primary text-xs">{bezig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}Taak aanmaken</button>
         <button type="button" onClick={onSluit} className="btn-secondary text-xs">Annuleer</button>
       </div>
     </div>
