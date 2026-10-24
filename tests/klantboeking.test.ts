@@ -7,7 +7,7 @@ import {
   startUren, kandidaatSlots, redenNietBoekbaar, vrijeSlots, perDag, clickupBezet, valideerBoeking, bevestigingsMail,
   KB_MIN_VOORAF_TEKST, vroegste, kbTitel,
 } from '../lib/meetings/klantboeking'
-import { uur, dag, zoneNaarIso } from '../lib/meetings/model'
+import { uur, dag, zoneNaarIso, clickupTaakNaam } from '../lib/meetings/model'
 
 let n = 0
 const test = (naam: string, fn: () => void) => { fn(); n++; console.log(`  ✓ ${naam}`) }
@@ -127,6 +127,12 @@ test('11. Bevestigingsmail: datum, tijd, tijdzone, duur, Meet en beheerlink', ()
   assert.match(m.tekst, /meet\.google\.com\/abc-defg-hij/)
   assert.match(m.tekst, /beheer#t=xyz/)
   assert.match(bevestigingsMail({ naam: 'Jan', startsAt: zoneNaarIso('2026-10-27', '11:00'), meetUrl: null, beheerUrl: 'x', verplaatst: true }).onderwerp, /^Verplaatst:/)
+})
+
+test('12. ClickUp-taaknaam herhaalt de bedrijfsnaam niet', () => {
+  const titel = kbTitel({ naam: 'Jan', bedrijf: 'Bakkerij Jan' })
+  assert.equal(clickupTaakNaam({ klant_naam: 'Bakkerij Jan', titel }), 'Meeting: Gratis kennismaking met NextGenMedia (Bakkerij Jan)')
+  assert.equal(clickupTaakNaam({ klant_naam: 'ERA NOBIS', titel: 'Kennismaking' }), 'Meeting: ERA NOBIS — Kennismaking')
 })
 
 console.log(`\n${n} tests geslaagd\n`)
