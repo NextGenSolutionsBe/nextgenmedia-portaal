@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { controleerVrij } from '@/lib/meetings/kalender-server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { plannerRechten } from '@/lib/meetings/rechten'
 import { safeMessage } from '@/lib/api-error'
@@ -140,6 +141,13 @@ export async function POST(req: NextRequest) {
       const { data: zelfdeStart } = await admin.from('klant_meetings').select('*').eq('status', 'ingepland').eq('starts_at', w.startsAt)
       const dubbel = ((zelfdeStart ?? []) as MeetingRij[]).find((m) => lijktOp(m, w))
       if (dubbel) return NextResponse.json({ error: 'Deze meeting staat al ingepland (zelfde titel, tijd en genodigde).', bestaand: dubbel }, { status: 409 })
+    }
+
+    // Gepland vanuit Calendar (vrij moment gesleept): vlak vóór het opslaan opnieuw
+    // nagaan of het nog vrij is. Zo niet, dan wordt er niets aangemaakt.
+    if (b.controleer_vrij === true) {
+      const c = await controleerVrij(admin, { agendaId: agenda.id, start: Date.parse(w.startsAt), eind: Date.parse(w.endsAt) })
+      if (!c.vrij) return NextResponse.json({ error: c.reden, nietVrij: true }, { status: c.status })
     }
 
     const organisator = String(b.organisator_naam ?? '').trim().slice(0, 120) || String(agenda.name ?? '').split(/\s+[—-]\s+/)[0] || null

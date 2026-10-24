@@ -5,6 +5,7 @@ import { baseUrl } from '@/lib/email'
 import type { Interval } from '@/lib/sales/availability'
 import { fetchMetLimiet, TijdslimietFout } from '@/lib/fetch-met-limiet'
 import { metHerkansing, DATABANK_TIJDELIJK } from '@/lib/supabase/herkansing'
+import { GSM_MELDING_MIN } from '@/lib/meetings/kalender'
 
 // Google Calendar per klant (§7). Bewust provider-agnostisch opgezet: de
 // koppeltabel heeft een `provider`-kolom, zodat ClickUp later als tweede
@@ -438,6 +439,64 @@ export async function bezetPerAgenda(connectionId: string, from: number, to: num
   return { schrijfAgenda: auth.calendarId, agendas }
 }
 
+export type AgendaEvent = {
+  id: string; agenda: string; titel: string; start: string; eind: string
+  heleDag: boolean; vrij: boolean; geannuleerd: boolean
+  meetUrl: string | null; link: string | null; clickupTaskId: string | null
+}
+
+/**
+ * Alle afspraken in de agenda's die voor deze persoon tellen (de schrijfagenda
+ * en de aangevinkte "bezet"-agenda's), voor de weergave in Calendar. Gooit
+ * als Google niet antwoordt: dan tonen we liever een fout dan een lege agenda.
+ */
+export async function lijstAgendaEvents(connectionId: string, from: number, to: number): Promise<AgendaEvent[]> {
+  const auth = await accessToken(connectionId)
+  if (!auth) throw new AgendaNietGekoppeld()
+  let ids = auth.busyCalendarIds ?? []
+  if (ids.length === 0) ids = defaultBusyIds(await listCalendars(connectionId))
+  if (!ids.includes(auth.calendarId)) ids = [auth.calendarId, ...ids]
+  const uit: AgendaEvent[] = []
+  for (const agenda of ids.slice(0, 10)) {
+    let pageToken: string | undefined
+    for (let pagina = 0; pagina < 10; pagina++) {
+      const p = new URLSearchParams({
+        timeMin: new Date(from).toISOString(), timeMax: new Date(to).toISOString(),
+        singleEvents: 'true', orderBy: 'startTime', maxResults: '250', showDeleted: 'false',
+      })
+      if (pageToken) p.set('pageToken', pageToken)
+      const res = await fetchMetLimiet(`${API}/calendars/${encodeURIComponent(agenda)}/events?${p}`, {
+        headers: { Authorization: `Bearer ${auth.token}` },
+      })
+      const j = await res.json().catch(() => ({})) as {
+        items?: Array<{
+          id: string; status?: string; summary?: string; transparency?: string; htmlLink?: string; hangoutLink?: string
+          start?: { dateTime?: string; date?: string }; end?: { dateTime?: string; date?: string }
+          extendedProperties?: { private?: Record<string, string> }
+          conferenceData?: { entryPoints?: { entryPointType?: string; uri?: string }[] }
+        }>
+        nextPageToken?: string; error?: { message?: string }
+      }
+      if (!res.ok) throw new Error(j.error?.message ?? `Google-agenda gaf ${res.status}`)
+      for (const e of j.items ?? []) {
+        const heleDag = !e.start?.dateTime
+        const start = e.start?.dateTime ?? (e.start?.date ? `${e.start.date}T00:00:00.000Z` : null)
+        const eind = e.end?.dateTime ?? (e.end?.date ? `${e.end.date}T00:00:00.000Z` : null)
+        if (!start || !eind) continue
+        uit.push({
+          id: e.id, agenda, titel: e.summary ?? '', start: new Date(start).toISOString(), eind: new Date(eind).toISOString(),
+          heleDag, vrij: e.transparency === 'transparent', geannuleerd: e.status === 'cancelled',
+          meetUrl: e.hangoutLink ?? e.conferenceData?.entryPoints?.find((x) => x.entryPointType === 'video')?.uri ?? null,
+          link: e.htmlLink ?? null, clickupTaskId: e.extendedProperties?.private?.clickupTaskId ?? null,
+        })
+      }
+      pageToken = j.nextPageToken
+      if (!pageToken) break
+    }
+  }
+  return uit
+}
+
 export type CreatedEvent = { eventId: string; meetUrl: string | null }
 
 /** Event aanmaken in de agenda van de klant, optioneel met Google Meet (§7). */
@@ -464,6 +523,8 @@ export async function createEvent(connectionId: string, opts: {
     ...(opts.location?.trim() ? { location: opts.location.trim() } : {}),
     start: { dateTime: new Date(opts.startsAt).toISOString(), timeZone: opts.timezone },
     end: { dateTime: new Date(opts.endsAt).toISOString(), timeZone: opts.timezone },
+    // Gsm-melding via de Google Agenda-app, 15 minuten vooraf.
+    reminders: popupMelding(GSM_MELDING_MIN),
   }
   if (opts.colorId) body.colorId = opts.colorId
   if (opts.attendeeEmail) body.attendees = [{ email: opts.attendeeEmail }]
@@ -492,6 +553,7 @@ export async function moveEvent(connectionId: string, eventId: string, startsAt:
     body: JSON.stringify({
       start: { dateTime: new Date(startsAt).toISOString(), timeZone: timezone },
       end: { dateTime: new Date(endsAt).toISOString(), timeZone: timezone },
+      reminders: popupMelding(GSM_MELDING_MIN),
     }),
   })
   if (!res.ok) {
@@ -569,11 +631,14 @@ export type MeetingEvent = {
   geannuleerd: boolean
   /** Genodigden met hun antwoord op de uitnodiging (needsAction, accepted, declined, tentative). */
   genodigden: { email: string; antwoord: string }[]
+  /** Minuten vooraf van de gsm-melding (Google-popup) op dit event; null = geen eigen melding. */
+  gsmMelding: number | null
 }
 
 type GEvent = {
   id?: string; status?: string; hangoutLink?: string
   attendees?: { email?: string; responseStatus?: string }[]
+  reminders?: { useDefault?: boolean; overrides?: { method?: string; minutes?: number }[] }
   conferenceData?: { createRequest?: { status?: { statusCode?: string } }; entryPoints?: { entryPointType?: string; uri?: string }[] }
   error?: { message?: string }
 }
@@ -587,6 +652,9 @@ function leesMeetingEvent(j: GEvent, calendarId: string): MeetingEvent {
     meetStatus: meetUrl ? 'ok' : code === 'pending' ? 'bezig' : code === 'failure' ? 'mislukt' : 'geen',
     geannuleerd: j.status === 'cancelled',
     genodigden: (j.attendees ?? []).filter((a) => a.email).map((a) => ({ email: String(a.email), antwoord: a.responseStatus ?? 'needsAction' })),
+    gsmMelding: j.reminders?.useDefault === false
+      ? (j.reminders.overrides ?? []).find((o) => o.method === 'popup')?.minutes ?? null
+      : null,
   }
 }
 
@@ -629,6 +697,7 @@ export async function maakMeetingEvent(connectionId: string, opts: MeetingEventV
     end: { dateTime: opts.endsAt, timeZone: opts.timezone },
     attendees: opts.attendees,
     conferenceData: meetAanvraag(opts.meetRequestId),
+    reminders: popupMelding(GSM_MELDING_MIN),
   }
   const res = await fetchMetLimiet(`${eventUrl(calendarId)}?conferenceDataVersion=1&sendUpdates=all`, {
     method: 'POST',
@@ -681,6 +750,8 @@ export async function werkMeetingEventBij(connectionId: string, calendarId: stri
   if (velden.attendees !== undefined) body.attendees = velden.attendees
   if (velden.status) body.status = velden.status
   if (velden.nieuweMeetRequestId) body.conferenceData = meetAanvraag(velden.nieuweMeetRequestId)
+  // Elke wijziging zet ook de gsm-melding goed (oudere events hadden er geen).
+  body.reminders = popupMelding(GSM_MELDING_MIN)
   const res = await fetchMetLimiet(`${eventUrl(calendarId, eventId)}?conferenceDataVersion=1&sendUpdates=all`, {
     method: 'PATCH',
     headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
@@ -703,6 +774,26 @@ export async function annuleerMeetingEvent(connectionId: string, calendarId: str
   throw new Error(j.error?.message ?? `Google kon de afspraak niet annuleren (${res.status})`)
 }
 
+/**
+ * Enkel de gsm-melding van een bestaand event goedzetten (15 minuten vooraf),
+ * zonder iets anders te wijzigen en zonder bericht aan genodigden. Voor
+ * afspraken die er al stonden vóór de melding bestond. Leest het event terug:
+ * de status is wat Google echt opslaat. Gooit bij een fout.
+ */
+export async function zetGsmMelding(connectionId: string, calendarId: string | null, eventId: string): Promise<number | null> {
+  const auth = await accessToken(connectionId)
+  if (!auth) throw new AgendaNietGekoppeld()
+  const agenda = calendarId || auth.calendarId
+  const res = await fetchMetLimiet(`${eventUrl(agenda, eventId)}?sendUpdates=none`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reminders: popupMelding(GSM_MELDING_MIN) }),
+  })
+  const json = await res.json().catch(() => ({})) as GEvent
+  if (!res.ok || !json.id) throw new Error(json.error?.message ?? `Google weigerde de melding (${res.status})`)
+  return leesMeetingEvent(json, agenda).gsmMelding
+}
+
 // ── ClickUp-taken als Google-events (de "assignee → agenda"-sync) ────────────
 //
 // Deze drie functies bedienen lib/sales/clickup-agenda-sync.ts. Ze schrijven
@@ -722,7 +813,14 @@ export type TaakEvent = {
   startMs?: number
   endMs?: number
   timezone: string
+  /** Bij een tijdvak: zet het de agenda dicht? Standaard ja. */
+  blokkeert?: boolean
+  /** Gsm-melding (Google-popup) zoveel minuten vooraf; leeg = de standaard van de agenda. */
+  meldingMin?: number | null
 }
+
+/** Eén Google-popup zoveel minuten vooraf, in plaats van de standaardmeldingen. */
+export const popupMelding = (min: number) => ({ useDefault: false, overrides: [{ method: 'popup', minutes: min }] })
 
 function taakEventBody(ev: TaakEvent, taskId: string): Record<string, unknown> {
   const tijd = ev.heleDag
@@ -736,12 +834,13 @@ function taakEventBody(ev: TaakEvent, taskId: string): Record<string, unknown> {
     : {
         start: { dateTime: new Date(ev.startMs ?? 0).toISOString(), timeZone: ev.timezone },
         end: { dateTime: new Date(ev.endMs ?? 0).toISOString(), timeZone: ev.timezone },
-        transparency: 'opaque',
+        transparency: ev.blokkeert === false ? 'transparent' : 'opaque',
       }
   return {
     summary: ev.summary,
     description: ev.description,
     ...tijd,
+    ...(ev.meldingMin ? { reminders: popupMelding(ev.meldingMin) } : {}),
     // Waarmerk: zo is een event altijd terug te herleiden tot zijn taak, ook
     // als onze administratie ooit zoekraakt.
     extendedProperties: { private: { clickupTaskId: taskId } },

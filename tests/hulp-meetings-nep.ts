@@ -171,6 +171,9 @@ export const google = {
   freebusyKalenderFout: false,
   /** Volgende POST wordt geweigerd (bv. geen schrijfrechten). */
   weigerAanmaak: false,
+  /** Extra events die niet via de app kwamen (bv. van de ClickUp-sync of handmatig in Google). */
+  losseEvents: [] as Rij[],
+  lijstFout: false,
 }
 export const clickup = {
   taken: new Map<string, Rij>(), aangemaakt: 0, volgnr: 0,
@@ -180,6 +183,8 @@ export const clickup = {
   teamFout: false,
   paginaGrootte: 100,
   paginasGevraagd: 0,
+  /** Zoals live gezien: ClickUp zegt altijd "laatste pagina", ook als er nog volgen. */
+  zegtLaatstePagina: false,
 }
 export const resend = {
   verstuurd: [] as Rij[], sleutels: new Map<string, string>(),
@@ -228,6 +233,15 @@ async function nepFetch(input: any, init: any = {}): Promise<Response> {
       if (google.verliesAntwoord) { google.verliesAntwoord = false; throw new TypeError('fetch failed') }
       return json(ev)
     }
+    if (!id && methode === 'GET') {
+      // events.list voor Calendar: alles in deze agenda dat het venster raakt.
+      if (google.lijstFout) return json({ error: { message: 'Backend Error' } }, 500)
+      const agenda = decodeURIComponent(m[1])
+      const van = url.searchParams.get('timeMin') ?? '', tot = url.searchParams.get('timeMax') ?? ''
+      const items = [...google.events.values(), ...google.losseEvents].filter((e) => (e.calendarId ?? agenda) === agenda
+        && (e.end?.dateTime ?? e.end?.date ?? '') > van && (e.start?.dateTime ?? e.start?.date ?? '') < tot)
+      return json({ items })
+    }
     const ev = id ? google.events.get(id) : null
     if (!ev) return json({ error: { message: 'Not Found' } }, 404)
     if (methode === 'GET') return json(ev)
@@ -255,7 +269,7 @@ async function nepFetch(input: any, init: any = {}): Promise<Response> {
       // Zoals ClickUp: per pagina; een pagina kan korter zijn dan 100 terwijl er nog volgen.
       const pagina = Number(url.searchParams.get('page') ?? 0), grootte = clickup.paginaGrootte
       clickup.paginasGevraagd++
-      return json({ tasks: tasks.slice(pagina * grootte, (pagina + 1) * grootte) })
+      return json({ tasks: tasks.slice(pagina * grootte, (pagina + 1) * grootte), ...(clickup.zegtLaatstePagina ? { last_page: true } : {}) })
     }
     let m = p.match(/^\/list\/([^/]+)\/task$/)
     if (m && methode === 'POST') {
@@ -267,7 +281,8 @@ async function nepFetch(input: any, init: any = {}): Promise<Response> {
     if (m && methode === 'GET') {
       const sinds = Number(url.searchParams.get('date_created_gt') ?? 0)
       const tasks = [...clickup.taken.values()].filter((t) => t.list === m![1] && Number(t.date_created) > sinds)
-      return json({ tasks: tasks.map((t) => ({ id: t.id, name: t.name, description: t.description, text_content: t.description })), last_page: true })
+      const pagina = Number(url.searchParams.get('page') ?? 0), grootte = clickup.paginaGrootte
+      return json({ tasks: tasks.slice(pagina * grootte, (pagina + 1) * grootte).map((t) => ({ id: t.id, name: t.name, description: t.description, text_content: t.description })), last_page: true })
     }
     m = p.match(/^\/task\/([^/]+)$/)
     if (m) {

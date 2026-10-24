@@ -1,4 +1,5 @@
 import 'server-only'
+import { GSM_MELDING_MIN } from '@/lib/meetings/kalender'
 import { randomUUID } from 'crypto'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { sendEmail, baseUrl, EMAIL_FROM, resendKeyFor } from '@/lib/email'
@@ -46,6 +47,7 @@ export type MeetingRij = {
   beheer_token_hash?: string | null; bevestiging_status?: string | null; bevestiging_op?: string | null; bevestiging_fout?: string | null
   project_id?: string | null; clickup_item_id?: string | null
   uitnodiging_status?: string | null; uitnodiging_op?: string | null; uitnodiging_naar?: string[] | null
+  gsm_melding_status?: string | null; gsm_melding_fout?: string | null
 }
 
 export type HerinneringRij = {
@@ -142,6 +144,8 @@ export async function stapGoogle(admin: Admin, m: MeetingRij, opts: { bijwerken?
       google_event_id: ev.eventId, google_calendar_id: ev.calendarId, meet_url: ev.meetUrl ?? m.meet_url,
       google_status: 'ok', google_fout: null,
       uitnodiging_status: 'verzonden',
+      // Gsm-melding: wat Google echt bewaart. Ontbreekt ze (ouder event), dan zet de scheduler ze.
+      gsm_melding_status: ev.gsmMelding === GSM_MELDING_MIN ? 'ingesteld' : null,
       ...(nieuweUitnodiging ? { uitnodiging_op: nu(), uitnodiging_naar: genodigden(m).map((g) => g.email) } : {}),
     })
   } catch (e) {

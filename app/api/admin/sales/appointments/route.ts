@@ -18,6 +18,7 @@ import {
 } from '@/lib/sales/afspraak-sync'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { afspraakHerinneringBijwerken } from '@/lib/meetings/server'
+import { controleerVrij } from '@/lib/meetings/kalender-server'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -50,6 +51,13 @@ async function assertBookable(
 
   if (!isBookable(segments, start, end)) {
     throw new Error('Dit moment is niet (meer) vrij. Ververs de agenda en kies een wit vak.')
+  }
+
+  // Dezelfde strikte controle als Calendar: ook ClickUp-meetings en meetings uit
+  // de app tellen, en lukt Google of ClickUp niet, dan wordt er niet geboekt.
+  if (data.ownerId) {
+    const v = await controleerVrij(createAdminSupabaseClient(), { agendaId: data.ownerId, start, eind: end, negeer: { afspraakId: ignoreApptId ?? null } })
+    if (!v.vrij) throw new Error(v.reden)
   }
 
   // Max. aantal afspraken per dag (§8).

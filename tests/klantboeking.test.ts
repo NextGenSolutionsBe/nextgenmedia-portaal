@@ -89,17 +89,19 @@ test('7. Werkuren korter dan het venster: niets buiten de werkuren', () => {
   assert.deepEqual(v, ['11:00', '11:30'])
 })
 
-test('8. ClickUp: taak met uur blokkeert, taak zonder uur (04:00) niet', () => {
-  const metUur = { startMs: ms(zoneNaarIso('2026-10-26', '14:00')), dueMs: ms(zoneNaarIso('2026-10-26', '15:00')) }
-  const enkelDeadline = { startMs: null, dueMs: ms(zoneNaarIso('2026-10-27', '12:00')) }
-  const zonderUur = { startMs: null, dueMs: ms(zoneNaarIso('2026-10-28', '04:00')) }
-  const b = clickupBezet([metUur, enkelDeadline, zonderUur])
-  assert.equal(b.length, 2)
-  assert.deepEqual(b[1], { start: ms(zoneNaarIso('2026-10-27', '11:30')), end: ms(zoneNaarIso('2026-10-27', '12:00')) })
+test('8. ClickUp: enkel een meeting (start én einde met uur) blokkeert; deadline of geen uur niet', () => {
+  const meeting = { id: 'm', naam: 'Meeting', startMs: ms(zoneNaarIso('2026-10-26', '14:00')), dueMs: ms(zoneNaarIso('2026-10-26', '15:00')) }
+  const enkelDeadline = { id: 'd', naam: 'Deadline', startMs: null, dueMs: ms(zoneNaarIso('2026-10-27', '12:00')) }
+  const zonderUur = { id: 'z', naam: 'Taak', startMs: null, dueMs: ms(zoneNaarIso('2026-10-28', '04:00')) }
+  const startZonderUur = { id: 's', naam: 'Project', startMs: ms(zoneNaarIso('2026-10-29', '04:00')), dueMs: ms(zoneNaarIso('2026-10-29', '15:00')) }
+  const b = clickupBezet([meeting, enkelDeadline, zonderUur, startZonderUur])
+  assert.equal(b.length, 1)
+  assert.deepEqual(b[0], { start: meeting.startMs, end: meeting.dueMs })
   const v = vrijeSlots(kandidaatSlots(NU, 10), { werkuren: werkuren('2026-10-20', 14), bezet: b })
   assert.ok(!v.includes(zoneNaarIso('2026-10-26', '14:30')))
-  assert.ok(!v.includes(zoneNaarIso('2026-10-27', '11:30')))
+  assert.ok(v.includes(zoneNaarIso('2026-10-27', '11:30')), 'een taak met enkel een deadline blokkeert niet meer')
   assert.ok(v.includes(zoneNaarIso('2026-10-28', '11:00')))
+  assert.ok(v.includes(zoneNaarIso('2026-10-29', '14:30')), 'een start zonder uur maakt er geen meeting van')
 })
 
 test('9. Validatie: naam, e-mail, tijdstip', () => {

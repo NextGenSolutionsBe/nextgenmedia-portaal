@@ -3,6 +3,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { haalSyncTaken, clickupConfigured, type SyncTaak } from '@/lib/clickup'
 import { maakSubAgenda, schrijfTaakEvent, verwijderTaakEvent, lijstTaakEvents, type TaakEvent } from '@/lib/sales/google-calendar'
 import { sendEmail } from '@/lib/email'
+import { isClickupMeeting, heeftUur, GSM_MELDING_MIN } from '@/lib/meetings/kalender'
 import { metHerkansing, DATABANK_TIJDELIJK } from '@/lib/supabase/herkansing'
 
 /**
@@ -18,8 +19,10 @@ import { metHerkansing, DATABANK_TIJDELIJK } from '@/lib/supabase/herkansing'
  *  · per persoon (target) één eigen Google-agenda, bv. "Bram — ClickUp",
  *    die de sync bij de eerste run zelf aanmaakt en meteen als BLOKKEREND
  *    aanvinkt op alle boekagenda's van die persoon;
- *  · taken mét een uur worden een blok dat de agenda dichtzet; taken zonder
- *    uur (ClickUp zet die op 04:00) worden een dagvak dat NIET blokkeert;
+ *  · enkel ClickUp-MEETINGS (start- én einddatum, allebei met een uur) zetten
+ *    de agenda dicht, met een gsm-melding 15 minuten vooraf; een taak met
+ *    enkel een deadline is zichtbaar maar blokkeert niet, en een taak zonder
+ *    uur (ClickUp zet die op 04:00) wordt een dagvak dat NIET blokkeert;
  *  · taken die de app zelf aanmaakte bij het boeken slaan we over — die
  *    afspraak stáát al in de agenda, anders blokkeert alles dubbel;
  *  · elke run wordt gelogd (clickup_agenda_runs): de meldingen in de app en
@@ -86,9 +89,6 @@ type Item = {
   vingerafdruk: string
 }
 
-const uurBrussel = new Intl.DateTimeFormat('nl-BE', {
-  timeZone: 'Europe/Brussels', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
-})
 const datumBrussel = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Europe/Brussels', year: 'numeric', month: '2-digit', day: '2-digit',
 })
@@ -99,10 +99,11 @@ const datumBrussel = new Intl.DateTimeFormat('en-CA', {
  * afspraken om 4 uur 's nachts, dus dit is een veilige herkenning.
  */
 function zonderUur(t: SyncTaak): boolean {
-  return t.startMs === null && uurBrussel.format(new Date(t.dueMs)) === '04:00:00'
+  // Deadline zonder uur = een dagtaak, ook als er een startdatum bij staat.
+  return !heeftUur(t.dueMs, t.dueHeeftUur)
 }
 
-function bouwEvent(t: SyncTaak, timezone: string): TaakEvent {
+export function bouwEvent(t: SyncTaak, timezone: string): TaakEvent {
   const basis = {
     summary: t.naam,
     description: `ClickUp-taak${t.lijstNaam ? ` (${t.lijstNaam})` : ''}\n${t.url}`,
@@ -111,15 +112,21 @@ function bouwEvent(t: SyncTaak, timezone: string): TaakEvent {
   if (zonderUur(t)) {
     return { ...basis, heleDag: true, datum: datumBrussel.format(new Date(t.dueMs)) }
   }
-  // Met uur: van start tot deadline. Geen starttijd = een half uur vóór de
-  // deadline, zodat het blok zichtbaar én kort is.
-  let start = t.startMs ?? t.dueMs - 30 * 60000
-  if (start >= t.dueMs) start = t.dueMs - 30 * 60000
-  return { ...basis, heleDag: false, startMs: start, endMs: t.dueMs }
+  // Een echte meeting: van start tot einde, blokkeert, met gsm-melding.
+  if (isClickupMeeting(t)) {
+    return { ...basis, heleDag: false, startMs: t.startMs as number, endMs: t.dueMs, blokkeert: true, meldingMin: GSM_MELDING_MIN }
+  }
+  // Enkel een deadline (of een start zonder uur): een kort blok een half uur
+  // vóór de deadline, zichtbaar maar NIET blokkerend — het is geen afspraak.
+  return { ...basis, heleDag: false, startMs: t.dueMs - 30 * 60000, endMs: t.dueMs, blokkeert: false }
 }
 
+/**
+ * Wanneer verandert een event? `v2` sinds de meetingregel: zo wordt elk
+ * bestaand event één keer herschreven (blokkeren of niet, gsm-melding).
+ */
 const vingerafdruk = (t: SyncTaak): string =>
-  `${t.naam}|${t.startMs ?? ''}|${t.dueMs}|${zonderUur(t)}`
+  `${t.naam}|${t.startMs ?? ''}|${t.dueMs}|${zonderUur(t)}|v2:${isClickupMeeting(t) ? 'm' : 't'}`
 
 export type SyncResultaat = {
   ok: boolean

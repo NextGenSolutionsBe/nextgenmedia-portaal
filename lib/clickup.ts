@@ -654,7 +654,8 @@ export async function zoekTaakMetMarker(listId: string, marker: string, sindsMs:
     const tasks = data.tasks ?? []
     const hit = tasks.find((t) => `${t.description ?? ''}\n${t.text_content ?? ''}`.includes(marker))
     if (hit) return hit.id
-    if (data.last_page || tasks.length === 0) break
+    // Tot een lege pagina: ClickUp's last_page bleek niet betrouwbaar (zie haalSyncTaken).
+    if (tasks.length === 0) break
   }
   return null
 }
@@ -713,20 +714,18 @@ async function teamId(): Promise<string> {
 }
 
 /** Hoe de laatste ophaalronde verliep: voor de diagnose en de syncstatus. */
-export type SyncOphaalInfo = { paginas: number; perPagina: number[]; laatstePaginaGemeld: boolean }
+export type SyncOphaalInfo = { paginas: number; perPagina: number[]; laatstePaginaGemeld: boolean; laatstePaginaKloptNiet?: boolean }
 
 /**
  * Alle OPEN taken met een deadline binnen het venster, toegewezen aan één van
  * de opgegeven leden. Gesloten taken blijven bewust buiten beeld: wat af is
  * hoeft niemands agenda meer te blokkeren — de sync ruimt het event dan op.
  *
- * Paginering: ClickUp geeft per pagina hoogstens 100 taken, maar een pagina
- * kan ook KORTER zijn terwijl er nog pagina's volgen (het filtert na het
- * pagineren). Vroeger stopten we bij de eerste pagina onder de 100, en dat
- * gebeurde: voor Bram en Marco samen kwam enkel de nieuwste ~100 taken mee,
- * waardoor oudere afspraken (bv. een contentshoot van een hele dag) niet in
- * de agenda blokkeerden. Nu lezen we door tot ClickUp `last_page` meldt of
- * een lege pagina geeft.
+ * Paginering: we lezen door tot een LEGE pagina. Niet stoppen op een korte
+ * pagina en niet vertrouwen op `last_page` — live vastgesteld (24 okt 2026):
+ * voor Bram en Marco samen gaf pagina 0 94 taken mét `last_page: true`, en
+ * pagina 1 nog 36 (o.a. een contentshoot van een hele dag, een hackathon en
+ * twee meetings). Daardoor blokkeerden die afspraken niet in de agenda.
  */
 export async function haalSyncTaken(
   assigneeIds: number[], vanMs: number, totMs: number, info?: SyncOphaalInfo,
@@ -771,8 +770,10 @@ export async function haalSyncTaken(
         dueHeeftUur: typeof t.due_date_time === 'boolean' ? t.due_date_time : null,
       })
     }
-    if (last_page === true) { stats.laatstePaginaGemeld = true; break }
     if (lijst.length === 0) break
+    // ClickUp zei "laatste pagina" en toch kwam er hierna nog iets: bijhouden voor de diagnose.
+    if (stats.laatstePaginaGemeld) stats.laatstePaginaKloptNiet = true
+    if (last_page === true) stats.laatstePaginaGemeld = true
   }
   return [...uit.values()]
 }
