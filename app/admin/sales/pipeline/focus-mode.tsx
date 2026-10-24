@@ -412,7 +412,7 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
           }
         } catch { toast.warning('Kon het merk niet omzetten — controleer het in het boekscherm.') }
       }
-      router.push(`/admin/sales/appointments?lead=${lead.id}`)
+      router.push(`/admin/meetings?tab=agenda&lead=${lead.id}`)
       return
     }
     // "Geen interesse" vraagt eerst een reden: daar draait de statistiek op.

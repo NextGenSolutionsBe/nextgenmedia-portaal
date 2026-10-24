@@ -1,6 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
-import { pathToModule, canSeeModule, STAFF_API_WHITELIST, isStaffApiDenied, modulesForApiPath } from '@/lib/staff'
+import { pathToModule, canSeeModule, STAFF_API_WHITELIST, isStaffApiDenied, modulesForApiPath, modulesForPagePath } from '@/lib/staff'
 import { isDisabledPath } from '@/lib/features'
 import { leesInstellingenEdge } from '@/lib/instellingen/edge'
 import { moduleBeschikbaar, magActie, actieVoorMethode, rolVanStaff, MODULE_INSTELLINGEN_KEY, MODULE_WERKNEMERS_KEY, type Persoon } from '@/lib/instellingen/model'
@@ -399,6 +399,7 @@ export async function updateSession(request: NextRequest) {
     path === '/' ||
     path.startsWith('/sign/') ||
     path.startsWith('/f/') ||     // publieke formulieren (token in de link, eigen controle in de pagina)
+    path === '/boeken' || path.startsWith('/boeken/') ||   // klanten boeken zelf een meeting (eigen controles in de API)
     path.startsWith('/_next') ||
     path.startsWith('/api') ||
     // Ontdekkingspaden moeten een EERLIJK antwoord geven, niet een omleiding.
@@ -552,11 +553,13 @@ export async function updateSession(request: NextRequest) {
           return NextResponse.redirect(new URL('/admin', request.url))
         }
       } else if (paginaModule) {
-        if (!canSeeModule(perms, paginaModule)) {
+        // Gedeelde pagina's (bv. de Meeting Inplanner voor Verkoop): één module volstaat.
+        const paginaModules = modulesForPagePath(path) ?? [paginaModule]
+        if (!paginaModules.some((m) => canSeeModule(perms, m))) {
           return NextResponse.redirect(new URL('/admin', request.url))
         }
         const inst = await leesInstellingenEdge(db)
-        if (!moduleBeschikbaar(inst, persoon, paginaModule)) {
+        if (!paginaModules.some((m) => canSeeModule(perms, m) && moduleBeschikbaar(inst, persoon, m))) {
           return NextResponse.redirect(new URL('/admin', request.url))
         }
       }

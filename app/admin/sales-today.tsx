@@ -34,7 +34,7 @@ export async function SalesToday() {
   const rows = [
     { icon: PhoneCall, n: callbacks ?? 0, label: 'terugbellen vandaag', href: '/admin/sales/pipeline', accent: 'text-amber-600' },
     { icon: Target, n: toCall ?? 0, label: 'leads nog te contacteren', href: '/admin/sales/pipeline', accent: 'text-gray-700' },
-    { icon: CalendarClock, n: appts ?? 0, label: 'afspraken komende 7 dagen', href: '/admin/sales/appointments', accent: 'text-green-600' },
+    { icon: CalendarClock, n: appts ?? 0, label: 'afspraken komende 7 dagen', href: '/admin/meetings', accent: 'text-green-600' },
   ].filter((r) => r.n > 0)
 
   return (

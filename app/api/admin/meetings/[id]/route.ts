@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
-import { magIk } from '@/lib/instellingen/laden'
+import { plannerRechten, magMeeting } from '@/lib/meetings/rechten'
+import { bevestigingOpnieuw } from '@/lib/meetings/klantboeking-server'
 import { safeMessage } from '@/lib/api-error'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { clickupTaakIdUit } from '@/lib/clickup'
@@ -32,11 +33,11 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   try {
     const user = await requireStaff()
     if (!user) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
-    if (!(await magIk('meetings', 'bekijken'))) return NextResponse.json({ error: 'Geen toegang tot klantmeetings' }, { status: 403 })
+    const r = await plannerRechten()
     if (!UUID.test(params.id)) return NextResponse.json({ error: 'Meeting niet gevonden' }, { status: 404 })
     const admin = createAdminSupabaseClient()
     const m = await leesMeeting(admin, params.id)
-    if (!m) return NextResponse.json({ error: 'Meeting niet gevonden' }, { status: 404 })
+    if (!m || !magMeeting(r, m, 'bekijken')) return NextResponse.json({ error: 'Meeting niet gevonden' }, { status: 404 })
     const lijst = await herinneringen(admin, m.id)
     const laatste = lijst[lijst.length - 1] ?? null
     const mail = bouwHerinnering(m, laatste?.ontvangers?.length ? laatste.ontvangers : m.klant_ontvangers)
@@ -65,12 +66,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   try {
     const user = await requireStaff()
     if (!user) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
-    const persoon = await magIk('meetings', 'aanpassen')
-    if (!persoon) return NextResponse.json({ error: 'Je mag meetings niet aanpassen' }, { status: 403 })
+    const rechten = await plannerRechten()
+    const persoon = rechten.persoon
     if (!UUID.test(params.id)) return NextResponse.json({ error: 'Meeting niet gevonden' }, { status: 404 })
     const admin = createAdminSupabaseClient()
     let m = await leesMeeting(admin, params.id)
-    if (!m) return NextResponse.json({ error: 'Meeting niet gevonden' }, { status: 404 })
+    if (!m || !persoon) return NextResponse.json({ error: 'Meeting niet gevonden' }, { status: 404 })
+    if (!magMeeting(rechten, m, 'aanpassen')) return NextResponse.json({ error: 'Je mag deze meeting niet aanpassen' }, { status: 403 })
     const b = await req.json().catch(() => ({})) as Record<string, unknown>
     const actie = String(b.actie ?? '')
     const { ip, userAgent } = requestMeta(req)
@@ -181,6 +183,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         await planHerinnering(admin, m)
       } else return NextResponse.json({ error: 'Onbekende stap' }, { status: 400 })
       await audit('meeting.stap_opnieuw', { stap, google: m.google_status, clickup: m.clickup_status })
+      return antwoord()
+    }
+
+    if (actie === 'bevestiging_opnieuw') {
+      if (m.bron !== 'klantboeking' || m.status !== 'ingepland') return NextResponse.json({ error: 'Enkel voor geplande klantboekingen.' }, { status: 400 })
+      m = await bevestigingOpnieuw(admin, m)
+      await audit('klantboeking.bevestiging_opnieuw', { status: m.bevestiging_status })
+      if (m.bevestiging_status !== 'verzonden') return NextResponse.json({ error: `Versturen mislukt: ${m.bevestiging_fout ?? 'onbekende fout'}` }, { status: 400 })
       return antwoord()
     }
 

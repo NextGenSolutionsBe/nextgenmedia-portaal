@@ -144,14 +144,14 @@ export async function buildNotifications(): Promise<Notif[]> {
           ? `ClickUp-agendasync draait niet meer (laatste keer gelukt: ${Math.round(sync.minutenSindsOk ?? 0)} min geleden — hoort elke 10 min)`
           : `ClickUp-agendasync is nog nooit gelukt (hoort elke ${SYNC_VEROUDERD_MIN / 3} min te draaien)`,
         date: sync.laatsteOkOp?.slice(0, 10) ?? null,
-        href: '/admin/sales/appointments',
+        href: '/admin/meetings?tab=agenda',
       })
     } else if (sync.actief && sync.laatsteFout) {
       out.push({
         id: 'clickupsync:fout',
         kind: 'sales', priority: 'high',
         title: `ClickUp-agendasync geeft een fout: ${sync.laatsteFout.slice(0, 120)}`,
-        date: todayISO(), href: '/admin/sales/appointments',
+        date: todayISO(), href: '/admin/meetings?tab=agenda',
       })
     }
   } catch { /* meldingen mogen nooit stuklopen op de waakhond */ }
@@ -161,8 +161,8 @@ export async function buildNotifications(): Promise<Notif[]> {
   try {
     const nuIso = new Date().toISOString()
     const meetings = await safe(admin.from('klant_meetings')
-      .select('id, titel, klant_naam, starts_at, google_status, meet_url, clickup_status')
-      .eq('status', 'ingepland').gte('starts_at', nuIso).limit(200)) as { id: string; titel: string; klant_naam: string; starts_at: string; google_status: string; meet_url: string | null; clickup_status: string }[]
+      .select('*')
+      .eq('status', 'ingepland').gte('starts_at', nuIso).limit(200)) as { id: string; titel: string; klant_naam: string; starts_at: string; google_status: string; meet_url: string | null; clickup_status: string; bron?: string; bevestiging_status?: string | null; created_at?: string }[]
     if (meetings.length) {
       const herinneringen = await safe(admin.from('klant_meeting_herinneringen')
         .select('meeting_id, status, gepland_voor').in('meeting_id', meetings.map((m) => m.id)).in('status', ['mislukt', 'gepland'])) as { meeting_id: string; status: string; gepland_voor: string }[]
@@ -176,6 +176,10 @@ export async function buildNotifications(): Promise<Notif[]> {
           m.clickup_status === 'fout' ? 'ClickUp' : null,
         ].filter(Boolean)
         if (stappen.length) out.push({ id: `meeting:${m.id}:${stappen.join('-')}`, kind: 'meeting', priority: 'high', title: `Klantmeeting niet volledig ingepland (${stappen.join(', ')}) — ${naam}`, date: m.starts_at.slice(0, 10), href })
+        if (m.bron === 'klantboeking') {
+          if (m.bevestiging_status === 'mislukt') out.push({ id: `klantboeking:${m.id}:bevestiging`, kind: 'meeting', priority: 'high', title: `Bevestigingsmail van een klantboeking mislukt — ${naam}`, date: m.starts_at.slice(0, 10), href })
+          else if (m.created_at && Date.now() - new Date(m.created_at).getTime() < 7 * 86400000) out.push({ id: `klantboeking:${m.id}`, kind: 'meeting', priority: 'med', title: `Nieuwe klantboeking — ${naam}`, date: m.created_at.slice(0, 10), href })
+        }
         const h = herinneringen.find((x) => x.meeting_id === m.id)
         if (h?.status === 'mislukt') out.push({ id: `meeting-herinnering:${m.id}:mislukt`, kind: 'meeting', priority: 'high', title: `Herinneringsmail mislukt — ${naam}`, date: m.starts_at.slice(0, 10), href })
         else if (h?.status === 'gepland' && h.gepland_voor < achterstand) out.push({ id: `meeting-herinnering:${m.id}:achter`, kind: 'meeting', priority: 'high', title: `Herinneringsmail had al moeten vertrekken (scheduler loopt achter) — ${naam}`, date: m.starts_at.slice(0, 10), href })

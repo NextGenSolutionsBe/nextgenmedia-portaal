@@ -753,7 +753,7 @@ function Kaart({
           <IkoonKnop titel="E-mail registreren" onClick={() => onDialoog('email')}><MailPlus className="h-3.5 w-3.5" /></IkoonKnop>
           <IkoonKnop titel="Interne notitie toevoegen" onClick={() => onDialoog('notitie')}><StickyNote className="h-3.5 w-3.5" /></IkoonKnop>
           <IkoonKnop titel="Opvolgdatum instellen" onClick={() => onDialoog('opvolg')}><CalendarClock className="h-3.5 w-3.5" /></IkoonKnop>
-          <Link href={`/admin/sales/appointments?lead=${lead.id}`} title="Afspraak plannen" draggable={false}
+          <Link href={`/admin/meetings?tab=agenda&lead=${lead.id}`} title="Meeting inplannen" draggable={false}
             className="h-7 w-7 flex items-center justify-center rounded-md text-gray-500 hover:bg-gray-200 hover:text-black">
             <CalendarPlus className="h-3.5 w-3.5" />
           </Link>

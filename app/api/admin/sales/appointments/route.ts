@@ -17,6 +17,7 @@ import {
   type AfspraakGegevens,
 } from '@/lib/sales/afspraak-sync'
 import { logAudit, requestMeta } from '@/lib/audit'
+import { afspraakHerinneringBijwerken } from '@/lib/meetings/server'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -395,6 +396,9 @@ export async function POST(req: NextRequest) {
       ip: meta.ip, userAgent: meta.userAgent,
     })
 
+    // Herinneringsmail 24 uur vooraf (Meeting Inplanner). Best-effort: werpt nooit.
+    await afspraakHerinneringBijwerken(admin, appt.id as string)
+
     return NextResponse.json({
       ok: true, id: appt.id, meetUrl,
       waarschuwing: waarschuwingen.length ? waarschuwingen.join('\n') : null,
@@ -730,6 +734,9 @@ export async function PATCH(req: NextRequest) {
       ip: meta2.ip, userAgent: meta2.userAgent,
     })
 
+    // Verplaatst of andere genodigde: de herinnering volgt (best-effort).
+    await afspraakHerinneringBijwerken(admin, id)
+
     return NextResponse.json({
       ok: true, reminderNote,
       waarschuwing: waarschuwingen.length ? waarschuwingen.join('\n') : null,
@@ -763,6 +770,8 @@ export async function DELETE(req: NextRequest) {
     }
     // ClickUp-taak dichtzetten met [GEANNULEERD] — best-effort.
     const waarschuwing = await sluitClickupTaak(appt.clickup_task_id ?? null)
+    // Nog niet verstuurde herinnering intrekken (best-effort).
+    await afspraakHerinneringBijwerken(admin, id)
     return NextResponse.json({ ok: true, waarschuwing })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })

@@ -24,11 +24,15 @@ Het klantportaal gebruikt een **resolver + service-role** model, niet RLS, als p
 - **Notificaties zijn de centrale signalenlaag** — nieuwe signalen toevoegen in `lib/notifications.ts`, niet als losse widgets verspreid.
 - **AI voert niets uit zonder bevestiging.** NextGen AI is read-only: het stelt voor met deep-links ("Voorstel — bevestiging vereist"); de mens bevestigt. Nooit auto-schrijfacties.
 - **Mails naar klanten zijn nooit automatisch.** Alle handmatige mail loopt via één component: `components/admin/mail-composer.tsx` (`<MailComposer context=...>`), altijd met preview + handmatige bevestiging; logging via E-mail Center.
-  - Enige uitzondering: de **herinneringsmail van een klantmeeting** (`lib/meetings/`). Die wordt per meeting bevestigd in het planvenster (met voorbeeld) en daarna door de scheduler verstuurd (pg_cron → `/api/cron/klantmeetings`), gelogd in het E-mail Center. Geen andere automatische klantmails toevoegen.
+  - Uitzonderingen, allemaal in de Meeting Inplanner (`lib/meetings/`) en gelogd in het E-mail Center:
+    - de **herinneringsmail** van een meeting (24 uur vooraf): bevestigd in het planvenster of bij het boeken, verstuurd door de scheduler (pg_cron → `/api/cron/klantmeetings`);
+    - de **bevestigingsmail van een klantboeking** (`/boeken`), met de persoonlijke beheerlink: de klant vraagt er zelf om door te boeken of te verplaatsen.
+    Geen andere automatische klantmails toevoegen.
 - **One source of truth:** afgeleide dashboarddata via `lib/notifications.ts` / `lib/ai-context.ts` / `/api/admin/search`; rechten via `lib/portal-auth.ts` + `lib/portal-permissions.ts`.
 
 ## Conventies
 - Migraties: additief + idempotent in `supabase/migrations/99999999_SYNC_ALL.sql` (`ADD COLUMN IF NOT EXISTS`, `DO $$ ... $$` guards). Geen bestaande data wijzigen.
 - DB-writes die nieuwe kolommen raken: veerkrachtig maken (drop ontbrekende kolom + retry) zodat de app ook vóór migratie werkt.
 - Secrets (`SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`, `RESEND_API_KEY`, `CLICKUP_API_KEY`, `PEXELS_API_KEY`) enkel via env, nooit committen of in clientcode.
-- Klantmails zijn altijd handmatig (E-mail Center), nooit automatisch. Uitzondering: de bevestigde herinnering van een klantmeeting (zie hierboven).
+- Klantmails zijn altijd handmatig (E-mail Center), nooit automatisch. Uitzonderingen: meetingherinnering en bevestiging van een klantboeking (zie hierboven).
+- **Meeting Inplanner** (`/admin/meetings`) is de centrale meetingmodule: interne meetings (`klant_meetings`), klantboekingen (`bron = 'klantboeking'`, publieke pagina `/boeken`) en de Verkoopagenda (het vroegere Appointment setting; `/admin/sales/appointments` stuurt door). Leadboekingen blijven via `/api/admin/sales/appointments` lopen (setter, merk, uitbetaling, pipeline).
