@@ -178,6 +178,8 @@ export const clickup = {
   /** Taken in de werkruimte (voor bezet): { id, name, start_date, due_date, assignees }. */
   werkruimte: [] as Rij[],
   teamFout: false,
+  paginaGrootte: 100,
+  paginasGevraagd: 0,
 }
 export const resend = {
   verstuurd: [] as Rij[], sleutels: new Map<string, string>(),
@@ -250,7 +252,10 @@ async function nepFetch(input: any, init: any = {}): Promise<Response> {
       const van = Number(url.searchParams.get('due_date_gt') ?? 0), tot = Number(url.searchParams.get('due_date_lt') ?? 0)
       const wie = url.searchParams.getAll('assignees[]').map(Number)
       const tasks = clickup.werkruimte.filter((t) => Number(t.due_date) > van && Number(t.due_date) < tot && (t.assignees as { id: number }[]).some((a) => wie.includes(a.id)))
-      return json({ tasks })
+      // Zoals ClickUp: per pagina; een pagina kan korter zijn dan 100 terwijl er nog volgen.
+      const pagina = Number(url.searchParams.get('page') ?? 0), grootte = clickup.paginaGrootte
+      clickup.paginasGevraagd++
+      return json({ tasks: tasks.slice(pagina * grootte, (pagina + 1) * grootte) })
     }
     let m = p.match(/^\/list\/([^/]+)\/task$/)
     if (m && methode === 'POST') {

@@ -411,6 +411,33 @@ export async function haalBezetStrikt(connectionId: string, from: number, to: nu
   return Object.values(kalenders).flatMap((c) => (c.busy ?? []).map((b) => ({ start: new Date(b.start).getTime(), end: new Date(b.end).getTime() })))
 }
 
+/**
+ * Diagnose: vrij/bezet per agenda apart (welke agenda zet wat dicht?), zonder
+ * titels. Gooit niet; een fout komt als tekst terug.
+ */
+export async function bezetPerAgenda(connectionId: string, from: number, to: number): Promise<{ schrijfAgenda: string | null; agendas: Record<string, { busy: Interval[]; fout?: string }>; fout?: string }> {
+  const auth = await accessToken(connectionId)
+  if (!auth) return { schrijfAgenda: null, agendas: {}, fout: 'geen geldige koppeling' }
+  let ids = auth.busyCalendarIds ?? []
+  if (ids.length === 0) ids = defaultBusyIds(await listCalendars(connectionId))
+  if (!ids.includes(auth.calendarId)) ids = [auth.calendarId, ...ids]
+  const res = await fetchMetLimiet(`${API}/freeBusy`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ timeMin: new Date(from).toISOString(), timeMax: new Date(to).toISOString(), items: ids.slice(0, 50).map((id) => ({ id })) }),
+  })
+  const json = await res.json().catch(() => ({})) as { calendars?: Record<string, { busy?: { start: string; end: string }[]; errors?: { reason?: string }[] }>; error?: { message?: string } }
+  if (!res.ok) return { schrijfAgenda: auth.calendarId, agendas: {}, fout: json.error?.message ?? `HTTP ${res.status}` }
+  const agendas: Record<string, { busy: Interval[]; fout?: string }> = {}
+  for (const [id, c] of Object.entries(json.calendars ?? {})) {
+    agendas[id] = {
+      busy: (c.busy ?? []).map((b) => ({ start: new Date(b.start).getTime(), end: new Date(b.end).getTime() })),
+      ...(c.errors?.length ? { fout: c.errors.map((e) => e.reason ?? '?').join(',') } : {}),
+    }
+  }
+  return { schrijfAgenda: auth.calendarId, agendas }
+}
+
 export type CreatedEvent = { eventId: string; meetUrl: string | null }
 
 /** Event aanmaken in de agenda van de klant, optioneel met Google Meet (§7). */
