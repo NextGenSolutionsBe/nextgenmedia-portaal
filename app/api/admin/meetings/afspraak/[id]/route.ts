@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 /**
- * Herinnering van een verkoopafspraak (Verkoopagenda) vanuit de Meeting Inplanner.
+ * Herinnering van een verkoopafspraak (Calendar) vanuit de Meeting Inplanner.
  * Bewerken, verplaatsen en annuleren van de afspraak zelf blijven bij de
  * bestaande afspraak-API (/api/admin/sales/appointments).
  *  PATCH { actie: 'herinnering_opnieuw' | 'herinnering_plannen' }

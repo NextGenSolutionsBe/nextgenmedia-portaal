@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { DATABANK_TIJDELIJK } from '@/lib/supabase/herkansing'
-import { controleerKoppelingen, testAfspraak, leesMeeting, veiligeFout } from '@/lib/meetings/server'
+import { controleerKoppelingen, testAfspraak, leesMeeting, veiligeFout, stapGoogle, stapClickup, planHerinnering, annuleer, bewaarMeeting, laatsteHerinnering, type MeetingRij } from '@/lib/meetings/server'
+import { kalenderData, controleerVrij } from '@/lib/meetings/kalender-server'
 import { cronToegang } from '@/lib/meetings/cron-toegang'
 import { haalMeetingEvent, bezetPerAgenda } from '@/lib/sales/google-calendar'
 import { getOrCreateSalesOrg, listOwners, loadCalendar } from '@/lib/sales/service'
@@ -24,6 +25,11 @@ export const maxDuration = 60
  *  · ?zelftest=klantboeking: één volledige testboeking zoals een klant ze doet
  *    (op het verste vrije moment, naar info@nextgenmedia.be), daarna verplaatst
  *    en geannuleerd via de beheerlink. Echte Google-, ClickUp- en mailstappen.
+ *  · ?kalenderdata=1[&agenda=]: leest enkel. Wat Calendar voor de komende
+ *    twee weken toont (items per bron, dubbels, vrije momenten per dag).
+ *  · ?zelftest=calendar: één meeting zoals Calendar ze plant (vrij moment,
+ *    controle vooraf), verplaatst en geannuleerd, met echte Google-, ClickUp-
+ *    en herinneringsstappen. Genodigde: info@nextgenmedia.be.
  *  · ?kalender=1: leest enkel. Per agenda de werkuren, bezette blokken (per
  *    Google-agenda, zonder titels) en vrije segmenten voor twee weken, plus
  *    hoe de ClickUp-taken binnenkomen (pagina's, tijdvelden).
@@ -44,6 +50,8 @@ export async function POST(req: NextRequest) {
       const zoek = (req.nextUrl.searchParams.get('taken') ?? '').split(',').filter((x) => /^[A-Za-z0-9_-]{5,40}$/.test(x)).slice(0, 10)
       return NextResponse.json({ varianten: await clickupZoekVarianten([200511713, 106693123], nu - 86400000, nu + 60 * 86400000, zoek) })
     }
+    if (req.nextUrl.searchParams.get('zelftest') === 'calendar') return NextResponse.json(await zelftestCalendar(admin))
+    if (req.nextUrl.searchParams.get('kalenderdata') === '1') return NextResponse.json(await kalenderOverzicht(admin, req.nextUrl.searchParams.get('agenda')))
     if (req.nextUrl.searchParams.get('kalender') === '1') return NextResponse.json(await kalenderDiagnose(req.nextUrl.searchParams.get('taken')))
     let agenda = req.nextUrl.searchParams.get('agenda')
     if (!agenda || !UUID.test(agenda)) {
@@ -176,4 +184,109 @@ async function kalenderDiagnose(takenParam: string | null) {
   const ids = (takenParam ?? '').split(',').map((x) => x.trim()).filter((x) => /^[A-Za-z0-9_-]{5,40}$/.test(x))
   const tijdvelden = ids.length ? await clickupTijdvelden(ids) : null
   return { van: new Date(van).toISOString(), tot: new Date(tot).toISOString(), regelsOrg: org.timezone, agendas, sync, tijdvelden }
+}
+
+
+const MIN_MS = 60000
+
+/** Wat Calendar toont voor de komende twee weken, voor de controle met echte data. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function kalenderOverzicht(admin: { from: (t: string) => any }, agendaParam: string | null) {
+  const nu = Date.now()
+  const van = new Date(zoneNaarIso(dag(new Date(nu).toISOString()), '00:00')).getTime()
+  const tot = van + 14 * 86400000
+  const d = await kalenderData(admin, { agendaId: agendaParam && UUID.test(agendaParam) ? agendaParam : null, van, tot })
+  const sleutels = d.items.map((i) => i.key)
+  const events = d.items.map((i) => i.googleEventId).filter(Boolean)
+  const taken = d.items.map((i) => i.clickupTaskId).filter(Boolean)
+  return {
+    agenda: d.agendaId, beschikbaarheid: d.beschikbaarheid, bronnen: d.bronnen, syncWaarschuwing: d.syncWaarschuwing,
+    perBron: d.items.reduce<Record<string, number>>((a, i) => { a[i.bron] = (a[i.bron] ?? 0) + 1; return a }, {}),
+    dubbels: {
+      sleutels: sleutels.length - new Set(sleutels).size,
+      googleEvents: events.length - new Set(events).size,
+      clickupTaken: taken.length - new Set(taken).size,
+    },
+    items: d.items.map((i) => ({ bron: i.bron, titel: i.titel, start: i.start, eind: i.eind, gsm: i.gsm, meet: !!i.meetUrl })),
+    vrijPerDag: perDagTekst(d.segmenten, van, tot),
+  }
+}
+
+/** Calendar van begin tot eind met echte koppelingen; ruimt zichzelf op. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function zelftestCalendar(admin: { from: (t: string) => any }) {
+  const stappen: { stap: string; ok: boolean; detail?: string }[] = []
+  const log = (stap: string, ok: boolean, detail?: string) => { stappen.push({ stap, ok, ...(detail ? { detail } : {}) }) }
+  let m: MeetingRij | null = null
+  try {
+    const nu = Date.now()
+    const van = nu + 48 * 3600_000, tot = van + 12 * 86400000
+    const d = await kalenderData(admin, { van, tot })
+    log('Beschikbaarheid betrouwbaar (Google + ClickUp + app)', d.beschikbaarheid.ok, d.beschikbaarheid.fout ?? `${d.segmenten.length} vrije stukken`)
+    if (!d.beschikbaarheid.ok || !d.agendaId) return { stappen }
+    const agendaId = d.agendaId
+    // Twee vrije halve uren: het laatste vrije stuk van minstens een uur (zo ver mogelijk weg).
+    const ruim = d.segmenten.filter((s) => s.end - s.start >= 60 * MIN_MS && s.start > van)
+    const seg = ruim[ruim.length - 1]
+    if (!seg) { log('Vrij moment gevonden', false, 'geen vrij stuk van een uur'); return { stappen } }
+    const a = { start: seg.end - 60 * MIN_MS, eind: seg.end - 30 * MIN_MS }
+    const b = { start: seg.end - 30 * MIN_MS, eind: seg.end }
+    log('Vrij moment gevonden', true, new Date(a.start).toISOString())
+    const v1 = await controleerVrij(admin, { agendaId, start: a.start, eind: a.eind })
+    log('Controle vóór opslaan: vrij', v1.vrij)
+
+    // Zoals POST /api/admin/meetings met controleer_vrij.
+    const { data: rij, error } = await admin.from('klant_meetings').insert({
+      aanvraag_sleutel: randomUUID(), client_id: null, klant_naam: 'Test Calendar', titel: 'Test Calendar (automatische controle)',
+      beschrijving: 'Automatische controle van Calendar. Wordt meteen verplaatst en geannuleerd.',
+      starts_at: new Date(a.start).toISOString(), ends_at: new Date(a.eind).toISOString(), tijdzone: 'Europe/Brussels',
+      agenda_id: agendaId, organisator_naam: 'Bram', klant_ontvangers: [{ naam: 'Test Calendar', email: TEST_ADRES }], deelnemers: [], herinnering_aan: true,
+      created_by_email: 'zelftest',
+    }).select('*').single()
+    if (error) throw new Error(error.message)
+    m = rij as MeetingRij
+    m = await stapGoogle(admin, m)
+    log('Google-afspraak', m.google_status === 'ok', m.google_fout ?? undefined)
+    log('Echte Meet-link', /^https:\/\/meet\.google\.com\//.test(m.meet_url ?? ''), m.meet_url ? 'meet.google.com/…' : undefined)
+    const ev1 = m.google_event_id && m.google_calendar_id ? await haalMeetingEvent(agendaId, m.google_calendar_id, m.google_event_id) : null
+    log('Uitnodiging: genodigde staat op de afspraak', !!ev1?.genodigden.some((g) => g.email === TEST_ADRES))
+    log('Gsm-melding 15 min op de afspraak (gelezen uit Google)', ev1?.gsmMelding === 15 && m.gsm_melding_status === 'ingesteld', `google=${ev1?.gsmMelding ?? 'geen'}, status=${m.gsm_melding_status ?? 'leeg'}`)
+    m = await stapClickup(admin, m)
+    log('ClickUp-taak (bestaande werkwijze)', m.clickup_status === 'ok' && !!m.clickup_task_id, m.clickup_fout ?? undefined)
+    const h1 = await planHerinnering(admin, m)
+    log('Herinneringsmail 24 uur vooraf gepland', !!h1 && Math.abs(Date.parse(h1.gepland_voor) - (a.start - 86400000)) < 60_000)
+
+    const d2 = await kalenderData(admin, { agendaId, van, tot })
+    const keer = d2.items.filter((i) => i.key === `meeting:${m!.id}` || i.googleEventId === m!.google_event_id || i.clickupTaskId === m!.clickup_task_id).length
+    log('In Calendar, precies één keer (niet dubbel via ClickUp of Google)', keer === 1, `${keer}x`)
+    const v2 = await controleerVrij(admin, { agendaId, start: a.start, eind: a.eind })
+    log('Zelfde moment nog eens boeken: geweigerd', !v2.vrij, !v2.vrij ? v2.reden : 'stond nog vrij')
+
+    // Verplaatsen zoals slepen in de week: PATCH wijzig met controleer_vrij.
+    const v3 = await controleerVrij(admin, { agendaId, start: b.start, eind: b.eind, negeer: { meetingId: m.id } })
+    log('Verplaatsen: nieuw moment vrij (de meeting zelf telt niet)', v3.vrij, !v3.vrij ? v3.reden : undefined)
+    const oudEvent = m.google_event_id, oudeTaak = m.clickup_task_id
+    m = await bewaarMeeting(admin, m.id, { starts_at: new Date(b.start).toISOString(), ends_at: new Date(b.eind).toISOString() })
+    m = await stapGoogle(admin, m, { bijwerken: true })
+    m = m.google_status === 'ok' ? await stapClickup(admin, m) : m
+    await planHerinnering(admin, m)
+    const ev2 = m.google_event_id && m.google_calendar_id ? await haalMeetingEvent(agendaId, m.google_calendar_id, m.google_event_id) : null
+    log('Verplaatst: zelfde Google-afspraak en ClickUp-taak', m.google_event_id === oudEvent && m.clickup_task_id === oudeTaak && m.google_status === 'ok' && m.clickup_status === 'ok')
+    log('Meet-link en gsm-melding blijven', !!ev2?.meetUrl && ev2.gsmMelding === 15)
+    const h2 = await laatsteHerinnering(admin, m.id)
+    log('Herinnering mee verplaatst', !!h2 && Math.abs(Date.parse(h2.gepland_voor) - (b.start - 86400000)) < 60_000 && h2.status === 'gepland')
+    const v4 = await controleerVrij(admin, { agendaId, start: b.start, eind: b.eind })
+    log('Dubbel boeken op het nieuwe moment: geweigerd', !v4.vrij)
+
+    m = await annuleer(admin, m, 'zelftest', true)
+    const h3 = await laatsteHerinnering(admin, m.id)
+    log('Annuleren: Google, ClickUp en herinnering', m.status === 'geannuleerd' && m.google_status === 'geannuleerd' && m.clickup_status === 'ok' && (!h3 || h3.status === 'geannuleerd'), `google=${m.google_status}, clickup=${m.clickup_status}`)
+    const d3 = await kalenderData(admin, { agendaId, van, tot })
+    log('Na annuleren weg uit Calendar en weer vrij', !d3.items.some((i) => i.key === `meeting:${m!.id}`) && (await controleerVrij(admin, { agendaId, start: b.start, eind: b.eind })).vrij)
+    return { stappen, meetingId: m.id }
+  } catch (e) {
+    log('Onverwachte fout', false, veiligeFout(e))
+    if (m && m.status === 'ingepland') { try { await annuleer(admin, m, 'zelftest (opruimen)', true) } catch { /* zichtbaar in de app */ } }
+    return { stappen, meetingId: m?.id ?? null }
+  }
 }

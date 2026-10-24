@@ -509,7 +509,7 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId, initi
 }
 
 // ── Boekingspaneel ───────────────────────────────────────────────────────────
-function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId, merkVoorkeur, merkVast, onClose, onBooked }: {
+export function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId, merkVoorkeur, merkVast, onClose, onBooked }: {
   ownerId: string; ownerName: string | null
   start: number; end: number
   pipelines: Pipeline[]; initialLeadId?: string

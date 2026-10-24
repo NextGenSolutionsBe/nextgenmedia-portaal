@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { CalendarDays, List, Globe } from 'lucide-react'
 import { focusRing } from '@/app/admin/materiaal/dialogen'
@@ -11,7 +11,7 @@ export type InplannerTab = 'overzicht' | 'agenda' | 'klantboekingen'
 
 const LABEL: Record<InplannerTab, { label: string; icoon: typeof List; uitleg: string }> = {
   overzicht: { label: 'Overzicht', icoon: List, uitleg: 'Alle meetings: intern gepland, door klanten geboekt en verkoopafspraken.' },
-  agenda: { label: 'Verkoopagenda', icoon: CalendarDays, uitleg: 'Boek op een vrij (wit) moment voor een lead uit de pipeline of Focusmode. Agenda’s koppelen en werkuren instellen doe je hier ook.' },
+  agenda: { label: 'Calendar', icoon: CalendarDays, uitleg: 'Alle meetings als lijst, week of maand. Sleep op een vrij (wit) moment om te plannen, of sleep een meeting om ze te verplaatsen. Agenda’s koppelen en werkuren instellen doe je hier ook.' },
   klantboekingen: { label: 'Klantboekingen', icoon: Globe, uitleg: 'De link waarmee klanten zelf een gratis meeting van 30 minuten boeken.' },
 }
 
@@ -19,6 +19,8 @@ const LABEL: Record<InplannerTab, { label: string; icoon: typeof List; uitleg: s
 export function MeetingInplanner({ tabs, startTab, agenda }: { tabs: InplannerTab[]; startTab: InplannerTab; agenda: ReactNode }) {
   const router = useRouter()
   const [tab, setTab] = useState<InplannerTab>(startTab)
+  // Een link naar een ander tabblad (bv. ?tab=agenda vanuit het overzicht) moet ook echt wisselen.
+  useEffect(() => { setTab(startTab) }, [startTab])
   const kies = (t: InplannerTab) => {
     setTab(t)
     router.replace(t === 'overzicht' ? '/admin/meetings' : `/admin/meetings?tab=${t}`, { scroll: false })

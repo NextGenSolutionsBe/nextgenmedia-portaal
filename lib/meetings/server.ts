@@ -386,9 +386,9 @@ export async function verstuurHerinnering(admin: Admin, h: HerinneringRij): Prom
   return 'mislukt'
 }
 
-// ── Herinnering voor verkoopafspraken (Verkoopagenda) ───────────────────────
+// ── Herinnering voor verkoopafspraken (Calendar) ───────────────────────
 //
-// Afspraken die via de Verkoopagenda geboekt worden (pipeline, Focusmode) staan
+// Afspraken die via Calendar geboekt worden (pipeline, Focusmode) staan
 // in sales_appointments. Ze krijgen dezelfde herinnering als elke meeting, via
 // dezelfde scheduler en tabel (kolom afspraak_id), met de afzender van het merk.
 
