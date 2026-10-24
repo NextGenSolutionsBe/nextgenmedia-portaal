@@ -6159,3 +6159,15 @@ END $$;
 -- (titel, notitie) nooit een tweede herinnering voor hetzelfde uur, ook niet na
 -- een handmatige herverzending.
 ALTER TABLE public.klant_meeting_herinneringen ADD COLUMN IF NOT EXISTS voor_start timestamptz;
+
+-- ── Calendar: gsm-melding 15 minuten vooraf ─────────────────────────────────
+-- Of de Google-popup (15 min) echt op het event staat. 'ingesteld' | 'mislukt'
+-- | NULL (nog niet gecontroleerd: de scheduler zet ze dan). Additief.
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS gsm_melding_status text;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS gsm_melding_fout text;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'sales_appointments') THEN
+    ALTER TABLE public.sales_appointments ADD COLUMN IF NOT EXISTS gsm_melding_status text;
+    ALTER TABLE public.sales_appointments ADD COLUMN IF NOT EXISTS gsm_melding_fout text;
+  END IF;
+END $$;

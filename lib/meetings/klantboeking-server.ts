@@ -4,6 +4,7 @@ import { sendEmail, baseUrl, EMAIL_FROM } from '@/lib/email'
 import { buildEmailHtml } from '@/lib/email-html'
 import { haalBezetStrikt } from '@/lib/sales/google-calendar'
 import { clickupConfigured, haalSyncTaken } from '@/lib/clickup'
+import { zelfdePersoon } from '@/lib/meetings/kalender'
 import { getOrCreateSalesOrg, loadCalendar } from '@/lib/sales/service'
 import {
   kandidaatSlots, vrijeSlots, clickupBezet, valideerBoeking, redenNietBoekbaar, bevestigingsMail, kbTitel,
@@ -71,11 +72,12 @@ async function boekbareAgenda(admin: Admin): Promise<Agenda> {
   return a
 }
 
-/** Agenda's die dezelfde persoon delen (zelfde Google-account), zoals in loadCalendar. */
+/** Agenda's van dezelfde persoon (zelfde account én persoon), zoals in loadCalendar. */
 async function zusterIds(admin: Admin, a: Agenda): Promise<string[]> {
   if (!a.account_email) return [a.id]
-  const { data } = await admin.from('sales_calendar_connections').select('id').eq('account_email', a.account_email)
-  const ids = ((data ?? []) as { id: string }[]).map((x) => x.id)
+  const { data } = await admin.from('sales_calendar_connections').select('id, name, account_email, clickup_assignee_id').eq('account_email', a.account_email)
+  const ids = ((data ?? []) as { id: string; name: string | null; account_email: string | null; clickup_assignee_id: number | null }[])
+    .filter((o) => zelfdePersoon(a, o)).map((x) => x.id)
   return ids.includes(a.id) ? ids : [a.id, ...ids]
 }
 

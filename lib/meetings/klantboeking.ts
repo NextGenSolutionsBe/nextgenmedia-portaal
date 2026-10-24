@@ -9,6 +9,7 @@
 // De server rekent de vrije momenten uit en controleert bij het boeken opnieuw.
 
 import { STANDAARD_TIJDZONE, zoneNaarIso, dag, uur, datumLang, datumKort, isEmail, tijdzoneLabel } from '@/lib/meetings/model'
+import { clickupMeetingBezet, type ClickupTaak } from '@/lib/meetings/kalender'
 
 export const KB_DUUR_MIN = 30
 export const KB_STAP_MIN = 30
@@ -92,20 +93,12 @@ export function perDag(slots: string[]): { dag: string; label: string; slots: { 
 }
 
 /**
- * ClickUp-taken als bezet, zoals de agendasync ze in Google zet: een taak met
- * uur loopt van start tot deadline (zonder start een half uur vóór de
- * deadline); een taak zonder uur (ClickUp zet die op 04:00) blokkeert niets.
+ * ClickUp-taken als bezet: ENKEL meetings (start- én einddatum, allebei met
+ * een uur). Een taak met enkel een deadline of zonder uur is geen afspraak en
+ * blokkeert niets — dezelfde regel als Calendar en de agendasync.
  */
-export function clickupBezet(taken: { startMs: number | null; dueMs: number }[]): Interval[] {
-  const uit: Interval[] = []
-  for (const t of taken) {
-    const zonderUur = t.startMs === null && uur(new Date(t.dueMs).toISOString()) === '04:00'
-    if (zonderUur) continue
-    let start = t.startMs ?? t.dueMs - 30 * 60000
-    if (start >= t.dueMs) start = t.dueMs - 30 * 60000
-    uit.push({ start, end: t.dueMs })
-  }
-  return uit
+export function clickupBezet(taken: ClickupTaak[]): Interval[] {
+  return clickupMeetingBezet(taken)
 }
 
 export type BoekingInvoer = { naam?: unknown; email?: unknown; bedrijf?: unknown; reden?: unknown; start?: unknown }

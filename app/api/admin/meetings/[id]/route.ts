@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { controleerVrij } from '@/lib/meetings/kalender-server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { plannerRechten, magMeeting } from '@/lib/meetings/rechten'
 import { bevestigingOpnieuw } from '@/lib/meetings/klantboeking-server'
@@ -133,6 +134,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
       const w = wijzigingen(m, v.waarde)
       if (!w.iets && !koppeling) return antwoord({ ongewijzigd: true })
+      // Verplaatst vanuit Calendar: het nieuwe moment moet nu nog vrij zijn
+      // (de meeting zelf telt niet mee). Zo niet: niets wijzigen.
+      if (w.tijd && b.controleer_vrij === true && m.agenda_id) {
+        const c = await controleerVrij(admin, { agendaId: m.agenda_id, start: Date.parse(v.waarde.startsAt), eind: Date.parse(v.waarde.endsAt), negeer: { meetingId: m.id } })
+        if (!c.vrij) return NextResponse.json({ error: c.reden, nietVrij: true }, { status: c.status })
+      }
       m = await bewaarMeeting(admin, m.id, {
         titel: v.waarde.titel, beschrijving: v.waarde.beschrijving, starts_at: v.waarde.startsAt, ends_at: v.waarde.endsAt, tijdzone: v.waarde.tijdzone,
         klant_ontvangers: v.waarde.klant_ontvangers, deelnemers: v.waarde.deelnemers, herinnering_aan: v.waarde.herinnering_aan,

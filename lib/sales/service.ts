@@ -8,7 +8,8 @@ import { werkklasseNaarAantal } from '@/lib/sales/lead-schoon'
 import {
   bookableSegments, type Interval, type WorkRule, type WorkException,
 } from '@/lib/sales/availability'
-import { fetchBusy } from '@/lib/sales/google-calendar'
+import { fetchBusy, haalBezetStrikt } from '@/lib/sales/google-calendar'
+import { zelfdePersoon } from '@/lib/meetings/kalender'
 
 export type SalesClient = {
   id: string; name: string; timezone: string; status: string
@@ -330,8 +331,27 @@ export type CalendarData = {
     aanwezigheid?: string | null; verantwoordelijke_id?: string | null
     /** Briefing van de setter en afspraak met de prospect, voor het detail. */
     notes: string | null; client_note: string | null
+    /** Koppelingen: zo verschijnt dezelfde afspraak in Calendar maar één keer. */
+    clickup_task_id?: string | null; external_event_id?: string | null
   }[]
   connected: boolean
+  /**
+   * Enkel bij `strikt`: waarom de vrije momenten niet betrouwbaar berekend
+   * konden worden. Dan zijn er ook geen witte segmenten.
+   */
+  beschikbaarheidFout?: string | null
+}
+
+export type CalendarOpties = {
+  /**
+   * Google vrij/bezet MOET lukken. Lukt het niet, dan geen witte segmenten
+   * maar een `beschikbaarheidFout` — liever niets aanbieden dan raden.
+   */
+  strikt?: boolean
+  /** Extra bezette blokken: ClickUp-meetings en meetings uit de app. */
+  extraBezet?: Interval[]
+  /** Bij verplaatsen: het eigen Google-blok telt niet als bezet. */
+  negeerBlok?: Interval | null
 }
 
 /** Alle gekoppelde agenda's (personen) van een klant. */
@@ -360,7 +380,7 @@ export async function listOwners(salesClientId: string): Promise<CalendarOwner[]
  * hervalideren gegarandeerd dezelfde bron gebruiken.
  */
 export async function loadCalendar(
-  salesClientId: string, from: number, to: number, ownerId?: string | null,
+  salesClientId: string, from: number, to: number, ownerId?: string | null, opties: CalendarOpties = {},
 ): Promise<CalendarData | null> {
   const admin = createAdminSupabaseClient()
   const client = await getSalesClient(salesClientId)
@@ -401,6 +421,7 @@ export async function loadCalendar(
     notes?: string | null; client_note?: string | null
     titel?: string | null; adres?: string | null; meet_url?: string | null; attendee_email?: string | null
     aanwezigheid?: string | null; verantwoordelijke_id?: string | null
+    clickup_task_id?: string | null; external_event_id?: string | null
   }[]
   /**
    * Welke afspraken blokkeren déze agenda? Die van de persoon zelf — en dat is
@@ -411,25 +432,34 @@ export async function loadCalendar(
    * met hetzelfde account-e-mailadres mee ("siblings"). Een afspraak van Bram
    * blijft Marco uiteraard niet in de weg zitten.
    */
-  const siblingIds = new Set(
-    active
-      ? owners
-        .filter((o) => o.id === active.id
-          || (!!active.account_email && o.account_email === active.account_email))
-        .map((o) => o.id)
-      : [],
-  )
+  // Sinds Bram en Marco hetzelfde Google-account delen, telt naast het account
+  // ook de persoon (ClickUp-lid of voornaam) — zie zelfdePersoon().
+  const siblingIds = new Set(active ? owners.filter((o) => zelfdePersoon(active, o)).map((o) => o.id) : [])
   const appointments = active
     ? allAppts.filter((a) => a.calendar_id === null || siblingIds.has(a.calendar_id))
     : allAppts
 
-  const busy = active ? await fetchBusy(active.id, from, to) : []
+  let busy: Interval[] = []
+  let beschikbaarheidFout: string | null = null
+  if (active && opties.strikt) {
+    try {
+      busy = await haalBezetStrikt(active.id, from, to)
+    } catch (e) {
+      beschikbaarheidFout = `Google Agenda kon niet gelezen worden (${e instanceof Error ? e.message.slice(0, 120) : 'onbekende fout'}).`
+    }
+  } else if (active) {
+    busy = await fetchBusy(active.id, from, to)
+  }
+  if (opties.strikt && !active) beschikbaarheidFout = 'Er is geen agenda gekozen.'
+  // Het eigen event van een te verplaatsen afspraak blokkeert zichzelf niet.
+  const negeer = opties.negeerBlok
+  if (negeer) busy = busy.filter((b) => !(b.start === negeer.start && b.end === negeer.end))
 
-  const segments = bookableSegments({
+  const segments = beschikbaarheidFout ? [] : bookableSegments({
     from, to, tz: client.timezone,
     rules: forOwner(rules as (WorkRule & Row)[] | null) as WorkRule[],
     exceptions: forOwner(exceptions as (WorkException & Row)[] | null) as WorkException[],
-    busy,
+    busy: [...busy, ...(opties.extraBezet ?? [])],
     appointments: appointments.map((a) => ({ start: new Date(a.starts_at).getTime(), end: new Date(a.ends_at).getTime() })),
     booking: {
       bufferBeforeMin: client.buffer_before_min,
@@ -459,6 +489,7 @@ export async function loadCalendar(
     ownerId: active?.id ?? null,
     segments,
     connected: active?.status === 'connected',
+    beschikbaarheidFout,
     appointments: appointments.map((a) => ({
       id: a.id, starts_at: a.starts_at, ends_at: a.ends_at, status: a.status, lead_id: a.lead_id,
       calendar_id: a.calendar_id, pipeline_id: a.pipeline_id,
@@ -470,6 +501,8 @@ export async function loadCalendar(
       attendee_email: a.attendee_email ?? null,
       aanwezigheid: a.aanwezigheid ?? null,
       verantwoordelijke_id: a.verantwoordelijke_id ?? null,
+      clickup_task_id: a.clickup_task_id ?? null,
+      external_event_id: a.external_event_id ?? null,
       company: a.lead_id ? nameByLead.get(a.lead_id)?.company ?? null : null,
       contact: a.lead_id ? nameByLead.get(a.lead_id)?.contact ?? null : null,
     })),
