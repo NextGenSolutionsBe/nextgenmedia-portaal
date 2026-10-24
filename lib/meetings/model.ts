@@ -258,7 +258,9 @@ export const ANTWOORD_LABEL: Record<string, string> = {
 export const clickupMarker = (meetingId: string): string => `ngm-meeting:${meetingId}`
 
 /** Zelfde opbouw als "Afspraak: {bedrijf} — {contact}" bij de verkoopafspraken. */
-export const clickupTaakNaam = (m: { klant_naam: string; titel: string }): string => `Meeting: ${m.klant_naam} — ${m.titel}`
+/** Taaknaam in ClickUp. Staat de naam al in de titel (klantboeking), dan niet nog eens ervoor. */
+export const clickupTaakNaam = (m: { klant_naam: string; titel: string }): string =>
+  m.klant_naam && m.titel.includes(m.klant_naam) ? `Meeting: ${m.titel}` : `Meeting: ${m.klant_naam} — ${m.titel}`
 
 export type Koppelingen = { klant?: string | null; project?: string | null; clickupItemId?: string | null }
 
