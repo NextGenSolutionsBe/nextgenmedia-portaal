@@ -5,7 +5,7 @@ import { DATABANK_TIJDELIJK } from '@/lib/supabase/herkansing'
 import { controleerKoppelingen, testAfspraak, leesMeeting, veiligeFout, stapGoogle, stapClickup, planHerinnering, annuleer, bewaarMeeting, laatsteHerinnering, type MeetingRij } from '@/lib/meetings/server'
 import { kalenderData, controleerVrij } from '@/lib/meetings/kalender-server'
 import { cronToegang } from '@/lib/meetings/cron-toegang'
-import { haalMeetingEvent, bezetPerAgenda } from '@/lib/sales/google-calendar'
+import { haalMeetingEvent, bezetPerAgenda, meldingInfo } from '@/lib/sales/google-calendar'
 import { getOrCreateSalesOrg, listOwners, loadCalendar } from '@/lib/sales/service'
 import { haalSyncTaken, clickupTijdvelden, clickupZoekVarianten, type SyncOphaalInfo } from '@/lib/clickup'
 import { mergeIntervals, type Interval } from '@/lib/sales/availability'
@@ -49,6 +49,12 @@ export async function POST(req: NextRequest) {
       const nu = Date.now()
       const zoek = (req.nextUrl.searchParams.get('taken') ?? '').split(',').filter((x) => /^[A-Za-z0-9_-]{5,40}$/.test(x)).slice(0, 10)
       return NextResponse.json({ varianten: await clickupZoekVarianten([200511713, 106693123], nu - 86400000, nu + 60 * 86400000, zoek) })
+    }
+    if (req.nextUrl.searchParams.get('meldingen') === '1') {
+      const ag = req.nextUrl.searchParams.get('agenda')
+      const { data } = await admin.from('sales_pipelines').select('default_calendar_id').eq('key', 'nextgenmedia').maybeSingle()
+      const id = ag && UUID.test(ag) ? ag : (data?.default_calendar_id as string | null)
+      return NextResponse.json(id ? await meldingInfo(id) : { fout: 'geen agenda' })
     }
     if (req.nextUrl.searchParams.get('zelftest') === 'calendar') return NextResponse.json(await zelftestCalendar(admin))
     if (req.nextUrl.searchParams.get('kalenderdata') === '1') return NextResponse.json(await kalenderOverzicht(admin, req.nextUrl.searchParams.get('agenda')))

@@ -497,6 +497,26 @@ export async function lijstAgendaEvents(connectionId: string, from: number, to: 
   return uit
 }
 
+/**
+ * Diagnose voor de gsm-melding: voor welk account geldt een melding op een
+ * event (de eigenaar van de koppeling), met wie de schrijfagenda gedeeld is,
+ * en welke standaardmeldingen dat account voor deze agenda heeft. Leest enkel.
+ */
+export async function meldingInfo(connectionId: string): Promise<Record<string, unknown>> {
+  const auth = await accessToken(connectionId)
+  if (!auth) return { fout: 'geen geldige koppeling' }
+  const kop = { Authorization: `Bearer ${auth.token}` }
+  const lijst = await fetchMetLimiet(`${API}/users/me/calendarList/${encodeURIComponent(auth.calendarId)}`, { headers: kop })
+  const l = await lijst.json().catch(() => ({})) as { summary?: string; accessRole?: string; defaultReminders?: unknown; notificationSettings?: unknown; error?: { message?: string } }
+  const acl = await fetchMetLimiet(`${API}/calendars/${encodeURIComponent(auth.calendarId)}/acl`, { headers: kop })
+  const a = await acl.json().catch(() => ({})) as { items?: { role?: string; scope?: { type?: string; value?: string } }[]; error?: { message?: string } }
+  return {
+    agenda: l.summary ?? null, rolVanKoppeling: l.accessRole ?? null,
+    standaardMeldingen: l.defaultReminders ?? null, meldingInstellingen: l.notificationSettings ?? null,
+    gedeeldMet: acl.ok ? (a.items ?? []).map((x) => ({ rol: x.role, type: x.scope?.type, wie: x.scope?.value })) : { fout: a.error?.message ?? `HTTP ${acl.status}` },
+  }
+}
+
 export type CreatedEvent = { eventId: string; meetUrl: string | null }
 
 /** Event aanmaken in de agenda van de klant, optioneel met Google Meet (§7). */
