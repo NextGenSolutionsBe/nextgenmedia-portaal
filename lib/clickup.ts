@@ -862,3 +862,34 @@ export async function clickupTijdvelden(ids: string[]): Promise<Record<string, R
   }
   return uit
 }
+
+/**
+ * Diagnose: hoe geeft ClickUp's team-zoekopdracht de taken terug bij
+ * verschillende instellingen? Enkel aantallen en of de gezochte taken erin
+ * zitten, geen inhoud.
+ */
+export async function clickupZoekVarianten(assigneeIds: number[], vanMs: number, totMs: number, zoek: string[]): Promise<Record<string, unknown>[]> {
+  const team = await teamId()
+  const varianten: { naam: string; params: Record<string, string>; wie: number[]; paginas: number }[] = [
+    { naam: 'samen, standaard', params: {}, wie: assigneeIds, paginas: 3 },
+    { naam: 'samen, order_by=due_date', params: { order_by: 'due_date' }, wie: assigneeIds, paginas: 3 },
+    { naam: 'samen, zonder subtasks', params: { subtasksWeg: '1' }, wie: assigneeIds, paginas: 2 },
+    ...assigneeIds.map((a) => ({ naam: `enkel ${a}`, params: {}, wie: [a], paginas: 2 })),
+  ]
+  const uit: Record<string, unknown>[] = []
+  for (const v of varianten) {
+    const perPagina: { n: number; last_page: unknown; gevonden: string[] }[] = []
+    for (let page = 0; page < v.paginas; page++) {
+      const p = new URLSearchParams({ page: String(page), due_date_gt: String(vanMs), due_date_lt: String(totMs), include_closed: 'false' })
+      if (!v.params.subtasksWeg) p.set('subtasks', 'true')
+      if (v.params.order_by) p.set('order_by', v.params.order_by)
+      for (const a of v.wie) p.append('assignees[]', String(a))
+      const r = await clickupJson<{ last_page?: boolean; tasks?: { id: string }[] }>(`/team/${team}/task?${p}`)
+      const ids = (r.tasks ?? []).map((t) => t.id)
+      perPagina.push({ n: ids.length, last_page: r.last_page ?? '(ontbreekt)', gevonden: zoek.filter((z) => ids.includes(z)) })
+      if (ids.length === 0) break
+    }
+    uit.push({ variant: v.naam, perPagina })
+  }
+  return uit
+}
