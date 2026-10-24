@@ -48,6 +48,7 @@ export type MeetingRij = {
   project_id?: string | null; clickup_item_id?: string | null
   uitnodiging_status?: string | null; uitnodiging_op?: string | null; uitnodiging_naar?: string[] | null
   gsm_melding_status?: string | null; gsm_melding_fout?: string | null
+  vorm?: 'online' | 'locatie' | null; locatie?: string | null; met_meet?: boolean | null
 }
 
 export type HerinneringRij = {
@@ -88,6 +89,11 @@ export async function leesMeeting(admin: Admin, id: string): Promise<MeetingRij 
 
 // ── 1. Google Calendar + Meet ────────────────────────────────────────────────
 
+/** Meeting op locatie: adres in het locatieveld van Google. Leeg wist een vroeger adres. */
+const locatieVan = (m: MeetingRij): string => (m.vorm === 'locatie' ? m.locatie ?? '' : '')
+/** Online altijd met Meet; op locatie enkel als die er bewust bij gevraagd is. */
+export const wilMeet = (m: Pick<MeetingRij, 'vorm' | 'met_meet'>): boolean => m.vorm !== 'locatie' || m.met_meet === true
+
 const eventVelden = (m: MeetingRij) => ({
   summary: m.titel,
   description: googleOmschrijving(m),
@@ -95,6 +101,7 @@ const eventVelden = (m: MeetingRij) => ({
   endsAt: new Date(m.ends_at).toISOString(),
   timezone: m.tijdzone || STANDAARD_TIJDZONE,
   attendees: genodigden(m),
+  location: locatieVan(m),
 })
 
 /**
@@ -134,14 +141,16 @@ export async function stapGoogle(admin: Admin, m: MeetingRij, opts: { bijwerken?
     }
     if (!ev) {
       ev = await maakMeetingEvent(m.agenda_id, {
-        ...eventVelden(m), eventId: googleEventId(m.id), meetRequestId: m.id, calendarId: m.google_calendar_id,
+        ...eventVelden(m), eventId: googleEventId(m.id), meetRequestId: m.id, calendarId: m.google_calendar_id, metMeet: wilMeet(m),
       })
     }
-    ev = await zorgVoorMeet(m.agenda_id, ev, m.id, herhaling)
+    if (wilMeet(m)) ev = await zorgVoorMeet(m.agenda_id, ev, m.id, herhaling)
+    // Werd een online meeting een meeting op locatie zonder link: de Meet-link eraf.
+    else if (ev.meetUrl) ev = await werkMeetingEventBij(m.agenda_id, ev.calendarId, ev.eventId, { geenMeet: true })
     // Google stuurde de uitnodiging bij het aanmaken; na een wijziging een update.
     const nieuweUitnodiging = m.uitnodiging_status !== 'verzonden' || !!opts.bijwerken
     return bewaar(admin, m.id, {
-      google_event_id: ev.eventId, google_calendar_id: ev.calendarId, meet_url: ev.meetUrl ?? m.meet_url,
+      google_event_id: ev.eventId, google_calendar_id: ev.calendarId, meet_url: wilMeet(m) ? ev.meetUrl ?? m.meet_url : null,
       google_status: 'ok', google_fout: null,
       uitnodiging_status: 'verzonden',
       // Gsm-melding: wat Google echt bewaart. Ontbreekt ze (ouder event), dan zet de scheduler ze.
@@ -308,8 +317,9 @@ export async function laatsteHerinnering(admin: Admin, meetingId: string): Promi
 /** Mail opbouwen uit de meeting zoals ze NU is: een gewijzigde titel of agenda gaat mee. */
 export function bouwHerinnering(m: MeetingRij, ontvangers: Persoon[]) {
   const mail = herinneringsMail({
-    klant_naam: m.klant_naam, titel: m.titel, starts_at: m.starts_at, meet_url: m.meet_url,
+    klant_naam: m.klant_naam, titel: m.titel, starts_at: m.starts_at, meet_url: wilMeet(m) ? m.meet_url : null,
     beschrijving: m.beschrijving, organisator_naam: m.organisator_naam, ontvangers, tijdzone: m.tijdzone,
+    locatie: m.vorm === 'locatie' ? m.locatie ?? null : null,
   })
   return { ...mail, html: buildEmailHtml({ bodyText: mail.tekst, ctaText: mail.ctaTekst, ctaLink: mail.ctaLink }) }
 }

@@ -107,10 +107,45 @@ export function normaliseerPersonen(v: unknown): Persoon[] {
 export type MeetingInvoer = {
   titel?: unknown; beschrijving?: unknown; dag?: unknown; uur?: unknown; duur_minuten?: unknown; eind_uur?: unknown; tijdzone?: unknown
   klant_ontvangers?: unknown; deelnemers?: unknown; herinnering_aan?: unknown
+  /** 'online' (standaard) of 'locatie'. */
+  vorm?: unknown; locatie?: unknown; met_meet?: unknown
 }
+export type MeetingVorm = 'online' | 'locatie'
 export type GeldigeMeeting = {
   titel: string; beschrijving: string | null; startsAt: string; endsAt: string; duur: number; tijdzone: string
   klant_ontvangers: Persoon[]; deelnemers: Persoon[]; herinnering_aan: boolean
+  vorm: MeetingVorm; locatie: string | null; metMeet: boolean
+}
+
+export const MAX_LOCATIE = 300
+
+/**
+ * Online = altijd een Meet-link, geen adres. Op locatie = een adres is
+ * verplicht; een Meet-link enkel als je die er bewust bij vraagt.
+ */
+export function valideerVorm(b: { vorm?: unknown; locatie?: unknown; met_meet?: unknown }): { ok: true; vorm: MeetingVorm; locatie: string | null; metMeet: boolean } | { ok: false; fout: string } {
+  const vorm = b.vorm === undefined || b.vorm === null || b.vorm === '' ? 'online' : String(b.vorm)
+  if (vorm === 'online') return { ok: true, vorm, locatie: null, metMeet: true }
+  if (vorm !== 'locatie') return { ok: false, fout: 'Kies online of op locatie.' }
+  const locatie = String(b.locatie ?? '').trim().replace(/\s*\n\s*/g, ', ')
+  if (locatie.length < 3) return { ok: false, fout: 'Vul het adres van de meeting in.' }
+  if (locatie.length > MAX_LOCATIE) return { ok: false, fout: `Het adres mag hoogstens ${MAX_LOCATIE} tekens hebben.` }
+  return { ok: true, vorm, locatie, metMeet: b.met_meet === true }
+}
+
+/** "Waar" in één zin, voor schermen en mails. */
+export function waarTekst(m: { vorm?: string | null; locatie?: string | null; met_meet?: boolean | null }): string {
+  if (m.vorm === 'locatie') return `Op locatie: ${m.locatie ?? '—'}${m.met_meet ? ' (met Google Meet-link)' : ''}`
+  return 'Online via Google Meet'
+}
+
+/** Volledig adres van een klant uit het dossier, of null. */
+export function klantAdres(k: { adres_straat?: string | null; adres_postcode?: string | null; adres_gemeente?: string | null; adres_land?: string | null } | null | undefined): string | null {
+  if (!k) return null
+  const plaats = [k.adres_postcode, k.adres_gemeente].map((x) => (x ?? '').trim()).filter(Boolean).join(' ')
+  const land = (k.adres_land ?? '').trim()
+  const delen = [(k.adres_straat ?? '').trim(), plaats, /^(be|belgi[eë]|belgium)$/i.test(land) ? '' : land].filter(Boolean)
+  return delen.length ? delen.join(', ') : null
 }
 
 /**
@@ -151,10 +186,16 @@ export function valideerMeeting(b: MeetingInvoer, nu: Date = new Date()): { ok: 
   if (slechtDeel) return { ok: false, fout: `"${slechtDeel.email}" (extra deelnemer) is geen geldig e-mailadres.` }
   if (klant.length + deelnemers.length > MAX_PERSONEN) return { ok: false, fout: `Maximaal ${MAX_PERSONEN} genodigden per meeting.` }
 
+  const plaats = valideerVorm(b)
+  if (!plaats.ok) return { ok: false, fout: plaats.fout }
+
   const beschrijving = String(b.beschrijving ?? '').trim().slice(0, 5000)
   return {
     ok: true,
-    waarde: { titel, beschrijving: beschrijving || null, startsAt, endsAt, duur, tijdzone, klant_ontvangers: klant, deelnemers, herinnering_aan: b.herinnering_aan !== false },
+    waarde: {
+      titel, beschrijving: beschrijving || null, startsAt, endsAt, duur, tijdzone, klant_ontvangers: klant, deelnemers, herinnering_aan: b.herinnering_aan !== false,
+      vorm: plaats.vorm, locatie: plaats.locatie, metMeet: plaats.metMeet,
+    },
   }
 }
 
@@ -267,6 +308,7 @@ export type Koppelingen = { klant?: string | null; project?: string | null; clic
 export function clickupOmschrijving(m: {
   id: string; klant_naam: string; titel: string; starts_at: string; ends_at: string; meet_url: string | null; beschrijving: string | null
   organisator_naam: string | null; klant_ontvangers: Persoon[]; deelnemers: Persoon[]; tijdzone?: string | null
+  vorm?: string | null; locatie?: string | null; met_meet?: boolean | null
 }, appUrl: string, koppelingen: Koppelingen = {}): string {
   const tz = zone(m.tijdzone)
   const persoon = (p: Persoon) => (p.naam ? `${p.naam} <${p.email}>` : p.email)
@@ -279,7 +321,8 @@ export function clickupOmschrijving(m: {
     `Genodigden: ${m.klant_ontvangers.map(persoon).join(', ') || '—'}`,
     m.deelnemers.length ? `Extra deelnemers: ${m.deelnemers.map(persoon).join(', ')}` : null,
     m.organisator_naam ? `Organisator: ${m.organisator_naam}` : null,
-    `Google Meet: ${m.meet_url ?? 'nog geen link'}`,
+    m.vorm === 'locatie' ? `Locatie: ${m.locatie ?? '—'}` : null,
+    m.met_meet === false ? null : `Google Meet: ${m.meet_url ?? 'nog geen link'}`,
     m.beschrijving ? `\n${m.beschrijving}` : null,
     `\nIn de app: ${appUrl}/admin/meetings?meeting=${m.id}`,
     `Ref: ${clickupMarker(m.id)}`,
@@ -295,6 +338,7 @@ export type MeetingStatusVelden = {
   status: string; google_status: string; google_fout?: string | null; meet_url: string | null
   clickup_status: string; clickup_fout?: string | null; herinnering_aan: boolean
   uitnodiging_status?: string | null
+  met_meet?: boolean | null
 }
 export type HerinneringStatusVelden = { status: string; gepland_voor: string; fout?: string | null; verzonden_op?: string | null } | null
 
@@ -306,6 +350,7 @@ export function stapAgenda(m: MeetingStatusVelden): StapWeergave {
 }
 export function stapMeet(m: MeetingStatusVelden): StapWeergave {
   if (m.status === 'geannuleerd') return { label: 'Meet vervallen', toon: 'neutraal' }
+  if (m.met_meet === false) return { label: 'Op locatie, geen Meet', toon: 'neutraal' }
   if (m.meet_url) return { label: 'Meet-link klaar', toon: 'ok' }
   if (m.google_status === 'ok') return { label: 'Meet-link ontbreekt', toon: 'fout' }
   return { label: 'Meet wacht op agenda', toon: 'neutraal' }
@@ -339,8 +384,9 @@ export function stapHerinnering(m: MeetingStatusVelden, h: HerinneringStatusVeld
 }
 
 /** Welke onderdelen veranderen bij een aanpassing? Zo werken we enkel bij wat nodig is. */
-export function wijzigingen(oud: { starts_at: string; ends_at: string; titel: string; beschrijving: string | null; klant_ontvangers: Persoon[]; deelnemers: Persoon[]; herinnering_aan: boolean; tijdzone?: string | null },
-  nieuw: GeldigeMeeting): { tijd: boolean; inhoud: boolean; genodigden: boolean; ontvangers: boolean; herinnering: boolean; iets: boolean } {
+export function wijzigingen(oud: { starts_at: string; ends_at: string; titel: string; beschrijving: string | null; klant_ontvangers: Persoon[]; deelnemers: Persoon[]; herinnering_aan: boolean; tijdzone?: string | null
+  vorm?: string | null; locatie?: string | null; met_meet?: boolean | null },
+  nieuw: GeldigeMeeting): { tijd: boolean; inhoud: boolean; genodigden: boolean; ontvangers: boolean; herinnering: boolean; plaats: boolean; iets: boolean } {
   const tijd = new Date(oud.starts_at).getTime() !== new Date(nieuw.startsAt).getTime() || new Date(oud.ends_at).getTime() !== new Date(nieuw.endsAt).getTime()
     || zone(oud.tijdzone) !== nieuw.tijdzone
   const inhoud = oud.titel !== nieuw.titel || (oud.beschrijving ?? null) !== (nieuw.beschrijving ?? null)
@@ -348,7 +394,9 @@ export function wijzigingen(oud: { starts_at: string; ends_at: string; titel: st
   const ontvangers = sleutel(oud.klant_ontvangers) !== sleutel(nieuw.klant_ontvangers)
   const genodigden = ontvangers || sleutel(oud.deelnemers) !== sleutel(nieuw.deelnemers)
   const herinnering = oud.herinnering_aan !== nieuw.herinnering_aan
-  return { tijd, inhoud, genodigden, ontvangers, herinnering, iets: tijd || inhoud || genodigden || herinnering }
+  // Online ↔ op locatie, een ander adres of de Meet-link erbij/eraf: Google, ClickUp en de herinnering volgen.
+  const plaats = (oud.vorm ?? 'online') !== nieuw.vorm || (oud.locatie ?? null) !== nieuw.locatie || (oud.met_meet ?? true) !== nieuw.metMeet
+  return { tijd, inhoud, genodigden, ontvangers, herinnering, plaats, iets: tijd || inhoud || genodigden || herinnering || plaats }
 }
 
 /** Dezelfde meeting al eens ingepland? Zelfde start, titel en minstens één zelfde genodigde. */

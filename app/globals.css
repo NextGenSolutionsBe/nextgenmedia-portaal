@@ -330,8 +330,3 @@ html {
   }
 }
 
-/* Calendar: niet beschikbaar (buiten werkuren of bezet) — duidelijk anders dan wit (vrij). */
-.bg-niet-vrij {
-  background-color: #efefef;
-  background-image: repeating-linear-gradient(135deg, transparent 0 7px, rgba(0, 0, 0, 0.045) 7px 8px);
-}

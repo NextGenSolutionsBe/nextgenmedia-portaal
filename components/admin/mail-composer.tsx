@@ -19,6 +19,8 @@ export type MailContext =
   | { type: 'generic'; toEmail?: string }
   // Formulierlink (Formulieren → Delen): onderwerp/tekst/knop voorgevuld, ontvanger aanpasbaar.
   | { type: 'formulier'; link: string; formulierTitel: string; clientId?: string | null; clientName?: string | null; verlooptOp?: string | null }
+  // Meeting Inplanner: mail aan de deelnemers, altijd vanuit info@nextgenmedia.be.
+  | { type: 'meeting'; meetingId: string }
 
 /** Resultaat van een gelukte verzending (of van een eerder gelukte, bij dezelfde verzendpoging). */
 export type MailVerstuurd = { id: string | null; verstuurd_op: string | null; al_verstuurd?: boolean }
@@ -56,6 +58,9 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
   const [done, setDone] = useState(false)
   const [vars, setVars] = useState<MailVars>({})
   const [eerder, setEerder] = useState<{ verstuurd_op: string; deadline: string | null } | null>(null)
+  // Meeting: van welk adres de mail vertrekt, of waarom dat nu niet kan. Kopie in de info@-mailbox.
+  const [afzender, setAfzender] = useState<{ ok: boolean; van: string; fout?: string } | null>(null)
+  const [kopieInfo, setKopieInfo] = useState(true)
   // Eén sleutel per verzendpoging: een dubbelklik of herhaald verzoek verstuurt nooit twee keer.
   const [sleutel] = useState(() => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`))
 
@@ -66,8 +71,8 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
   useEffect(() => {
     (async () => {
       try {
-        const tplRes = await fetch('/api/admin/email/templates')
-        const tpl = await tplRes.json()
+        // Een meetingmail vertrekt uit de meeting zelf, niet uit een template.
+        const tpl = context.type === 'meeting' ? { templates: [] } : await (await fetch('/api/admin/email/templates')).json()
         const eigen = (tpl.templates ?? []) as Template[]
         // De ingebouwde template van deze soort tonen zolang er geen eigen versie van bestaat.
         const extra = context.type === 'client' && !eigen.some((t) => t.kind === context.kind) ? ingebouwd(context.kind) : null
@@ -121,10 +126,18 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
           setSubject(context.formulierTitel)
           setBody(`Beste${context.clientName ? ` ${context.clientName}` : ''},\n\nMag ik je vragen om het formulier "${context.formulierTitel}" in te vullen? Zo hebben we alle informatie om voor jou aan de slag te gaan.\n\nKlik op de knop hieronder om het formulier te openen.${tot ? `\n\nDe link is geldig tot ${tot}.` : ''}\n\nMet vriendelijke groet,\nNextGenMedia`)
           setCtaText('Formulier invullen'); setCtaLink(context.link)
+        } else if (context.type === 'meeting') {
+          const r = await fetch(`/api/admin/meetings/${context.meetingId}/mail`)
+          const j = await r.json()
+          if (!r.ok) throw new Error(j.error || 'Laden mislukt')
+          setToEmail((j.voorstel.aan as string[]).join(', '))
+          setSubject(j.voorstel.onderwerp); setBody(j.voorstel.tekst)
+          setCtaText(j.voorstel.ctaTekst ?? ''); setCtaLink(j.voorstel.ctaLink ?? '')
+          setAfzender(j.afzender)
         } else {
           setToEmail(context.toEmail ?? '')
         }
-      } catch { setError('Laden mislukt') } finally { setLoadingCtx(false) }
+      } catch (e) { setError(e instanceof Error && context.type === 'meeting' ? e.message : 'Laden mislukt') } finally { setLoadingCtx(false) }
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -151,7 +164,12 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
     try {
       const tpl = templates.find((t) => t.id === templateId)
       let res: Response
-      if (context.type === 'contract') {
+      if (context.type === 'meeting') {
+        res = await fetch(`/api/admin/meetings/${context.meetingId}/mail`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ aan: toEmail, onderwerp: subject, tekst: body, cta_tekst: ctaText || null, cta_link: ctaLink || null, verzend_sleutel: sleutel, kopie_info: kopieInfo }),
+        })
+      } else if (context.type === 'contract') {
         res = await fetch(`/api/admin/contracts/${context.contractId}/send-mail`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -194,14 +212,20 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
           <div className="p-8 text-center space-y-3">
             <CheckCircle2 className="h-10 w-10 text-green-500 mx-auto" />
             <p className="text-sm font-medium">Mail verstuurd naar {toEmail}</p>
+            {context.type === 'meeting' && afzender && <p className="text-xs text-gray-600">Vanaf {afzender.van}{kopieInfo ? ', met een kopie in de mailbox van info@nextgenmedia.be' : ''}. Staat in het E-mail Center.</p>}
             <button onClick={onClose} className="btn-primary">Sluiten</button>
           </div>
         ) : loadingCtx ? (
           <div className="p-8 text-center text-gray-400"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div>
         ) : (
           <div className="p-5 space-y-3">
+            {context.type === 'meeting' && afzender && (
+              afzender.ok
+                ? <div className="text-xs text-gray-600"><span className="font-medium text-gray-700">Van:</span> {afzender.van}</div>
+                : <div className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2" role="alert">Versturen kan nu niet: {afzender.fout}</div>
+            )}
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Aan</label>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Aan{context.type === 'meeting' && <span className="text-gray-400"> — meerdere adressen met een komma</span>}</label>
               {recipientEditable
                 ? <input className={inp} value={toEmail} onChange={(e) => setToEmail(e.target.value)} placeholder="ontvanger@bedrijf.be" />
                 : <div className="text-sm text-gray-800">{toEmail || '— geen e-mailadres —'}</div>}
@@ -219,13 +243,17 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
                 <p className="text-[11px] text-gray-400 mt-0.5">De volledige mail wordt bij het contract bewaard onder “Verzonden mails”.</p>
               </div>
             )}
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Template</label>
-              <select className={inp} value={templateId} onChange={(e) => onPick(e.target.value)}>
-                <option value="">— Eigen mail —</option>
-                {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-            </div>
+            {context.type === 'meeting' ? (
+              <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer"><input type="checkbox" checked={kopieInfo} onChange={(e) => setKopieInfo(e.target.checked)} />Kopie in de mailbox van info@nextgenmedia.be (bcc)</label>
+            ) : (
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Template</label>
+                <select className={inp} value={templateId} onChange={(e) => onPick(e.target.value)}>
+                  <option value="">— Eigen mail —</option>
+                  {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </div>
+            )}
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Onderwerp</label>
               <input className={inp} value={subject} onChange={(e) => setSubject(e.target.value)} />
@@ -248,7 +276,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
             </div>
             {error && <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</div>}
             <div className="flex gap-2 pt-1">
-              <button onClick={send} disabled={sending || !toEmail} className="btn-primary flex-1 justify-center">{sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}Verstuur</button>
+              <button onClick={send} disabled={sending || !toEmail || (context.type === 'meeting' && !afzender?.ok)} className="btn-primary flex-1 justify-center">{sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}{context.type === 'meeting' ? 'Versturen' : 'Verstuur'}</button>
               <button onClick={onClose} className="btn-secondary">Annuleer</button>
             </div>
           </div>
