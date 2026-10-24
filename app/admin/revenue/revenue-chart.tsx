@@ -24,9 +24,9 @@ export function RevenueChart({ data, currentMonth }: { data: ChartPoint[]; curre
       <ResponsiveContainer width="100%" height={220}>
         <BarChart data={data} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-          <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
+          <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#8c8c8c' }} axisLine={false} tickLine={false} />
           <YAxis
-            tick={{ fontSize: 11, fill: '#9ca3af' }}
+            tick={{ fontSize: 11, fill: '#8c8c8c' }}
             axisLine={false}
             tickLine={false}
             tickFormatter={(v: number) => `€${(v / 1000).toFixed(0)}k`}
@@ -40,9 +40,9 @@ export function RevenueChart({ data, currentMonth }: { data: ChartPoint[]; curre
             iconSize={8}
             wrapperStyle={{ fontSize: 12 }}
           />
-          <ReferenceLine x={data[currentMonth]?.label} stroke="#fff848" strokeWidth={2} strokeDasharray="0" />
-          <Bar dataKey="recurring" name="Recurring" fill="#22c55e" radius={[3, 3, 0, 0]} />
-          <Bar dataKey="one_time" name="Eenmalig" fill="#3b82f6" radius={[3, 3, 0, 0]} />
+          <ReferenceLine x={data[currentMonth]?.label} stroke="#0f0f0f" strokeWidth={1.5} strokeDasharray="0" />
+          <Bar dataKey="recurring" name="Recurring" fill="#272727" radius={[3, 3, 0, 0]} />
+          <Bar dataKey="one_time" name="Eenmalig" fill="#a8a8a8" radius={[3, 3, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>

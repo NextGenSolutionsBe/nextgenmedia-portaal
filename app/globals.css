@@ -2,96 +2,297 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 @layer base {
+  /* Rasteritems krimpen mee met hun kolom. Zonder dit duwt één brede tabel of
+     lange URL een kolom breder dan het scherm (min-width: auto). */
+  .grid > * {
+    min-width: 0;
+  }
   :root {
+    /* NextGen-huisstijl, monochroom: #0f0f0f · #272727 · #4b4b4b · #e0e0e0 · #ffffff */
     --background: 0 0% 100%;
-    --foreground: 0 0% 4%;
+    --foreground: 0 0% 6%;
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 4%;
+    --card-foreground: 0 0% 6%;
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 4%;
-    --primary: 56 100% 64%;
-    --primary-foreground: 0 0% 0%;
+    --popover-foreground: 0 0% 6%;
+    --primary: 0 0% 6%;
+    --primary-foreground: 0 0% 100%;
     --secondary: 0 0% 96%;
-    --secondary-foreground: 0 0% 10%;
+    --secondary-foreground: 0 0% 15%;
     --muted: 0 0% 96%;
-    --muted-foreground: 0 0% 45%;
-    --accent: 56 100% 64%;
-    --accent-foreground: 0 0% 0%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 90%;
-    --input: 0 0% 90%;
-    --ring: 56 100% 64%;
-    --radius: 0.625rem;
-    --sidebar-width: 240px;
+    --muted-foreground: 0 0% 42%;
+    --accent: 0 0% 96%;
+    --accent-foreground: 0 0% 6%;
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 88%;
+    --input: 0 0% 88%;
+    --ring: 0 0% 6%;
+    --radius: 0.5rem;
+    --sidebar-width: 232px;
+
+    /* ── Contentplanning: kleuren en typografie op één plek ──────────────────
+       Voorlopig zwart-wit; de branding komt later — enkel deze waarden
+       aanpassen. De drie reekskleuren zijn functioneel (welke dag in welke reeks). */
+    --cp-ink: #0f0f0f;            /* tekst, actieve tab, primaire knop */
+    --cp-ink-zacht: #6b6b6b;      /* labels, datums */
+    --cp-op-ink: #ffffff;         /* tekst op een donkere knop */
+    --cp-vlak: #ffffff;           /* kaarten */
+    --cp-achtergrond: #f4f4f4;    /* zachte vlakken, kolommen */
+    --cp-rand: #e0e0e0;
+    --cp-klaar: #0f0f0f;          /* afgevinkt */
+    --cp-vandaag: #0f0f0f;        /* rand rond vandaag */
+    --cp-r1: #facc15;  --cp-r1-zacht: #fefce8;   /* reeks 1 · geel */
+    --cp-r2: #a855f7;  --cp-r2-zacht: #faf5ff;   /* reeks 2 · paars */
+    --cp-r3: #16a34a;  --cp-r3-zacht: #f0fdf4;   /* reeks 3 · groen */
+    --cp-font: var(--font-sans, ui-sans-serif);
+    --cp-tekst-titel: 1.5rem;
+    --cp-tekst-kop: 1.125rem;
+    --cp-tekst-basis: 1rem;
+    --cp-tekst-klein: 0.8125rem;
+    --cp-radius: 0.5rem;
   }
 
   * {
     border-color: hsl(var(--border));
   }
 
+  /* Vangnet: ook als Tailwind's font-sans om wat voor reden ook niet toegepast
+     wordt, staat hier al een sans-serif. Zo kan er nergens een serif opduiken. */
+  html {
+    font-family: var(--font-sans, ui-sans-serif), ui-sans-serif, system-ui,
+      -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  }
+
   body {
-    @apply bg-white text-[#0a0a0a] font-sans antialiased;
-    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    @apply bg-white text-gray-900 font-sans antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: #e0e0e0;
+    color: #0f0f0f;
+  }
+
+  /* Zichtbare, consistente toetsenbordfocus. :where() houdt de specificiteit op
+     nul, zodat elementen met een eigen focusstijl (ring-klassen) die behouden. */
+  :where(a, button, [role='button'], summary, [tabindex]):focus-visible {
+    outline: 2px solid #0f0f0f;
+    outline-offset: 2px;
+  }
+
+  /* Bedragen en tabellen: cijfers even breed, zodat kolommen netjes uitlijnen.
+     In een app vol facturen/bedragen is dit het verschil tussen "af" en slordig. */
+  table,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Hard guard tegen horizontale scroll op mobiel: niets mag breder zijn dan
+     het scherm. 'clip' i.p.v. 'hidden': hidden op html én body maakt van body
+     een eigen scrollcontainer, en dan werkt position: sticky nergens meer
+     (de bovenbalk scrolde weg). Oudere browsers vallen terug op hidden. */
+  html, body {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+  @supports (overflow-x: clip) {
+    html, body {
+      overflow-x: clip;
+    }
   }
 
   h1, h2, h3, h4, h5, h6 {
-    @apply font-semibold tracking-tight;
+    @apply font-semibold tracking-tight text-gray-900;
   }
 }
 
-@layer utilities {
-  .brand-yellow { color: #fff848; }
-  .bg-brand { background-color: #fff848; }
-  .border-brand { border-color: #fff848; }
+@layer components {
+  /* Oude merkhulpjes, nu monochroom. */
+  .brand-yellow { color: #0f0f0f; }
+  .bg-brand { background-color: #0f0f0f; }
+  .border-brand { border-color: #0f0f0f; }
 
+  /* Navigatie: donkere kolom, witte tekst, subtiele markering van de huidige pagina. */
   .sidebar-item {
-    @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:text-black hover:bg-gray-100 transition-colors duration-150;
+    @apply relative flex items-center gap-3 px-3 py-1.5 rounded-md text-sm font-medium text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors duration-150;
   }
   .sidebar-item.active {
-    @apply text-black bg-[#fff848]/20;
+    @apply text-white bg-white/[0.09];
+  }
+  .sidebar-item.active::before {
+    content: '';
+    @apply absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-white;
+  }
+  .sidebar-item:focus-visible {
+    outline-color: #ffffff;
   }
 
   .card-base {
-    @apply bg-white border border-gray-200 rounded-xl p-5 shadow-sm;
+    @apply bg-white border border-gray-200 rounded-lg p-4 md:p-5;
   }
 
   .stat-card {
-    @apply bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow;
+    @apply bg-white border border-gray-200 rounded-lg p-4;
   }
 
   .btn-primary {
-    @apply inline-flex items-center gap-2 px-4 py-2 bg-[#fff848] text-black font-semibold rounded-lg hover:bg-[#f5ee30] transition-colors text-sm;
+    @apply inline-flex items-center justify-center gap-2 px-3.5 py-2 bg-gray-900 text-white font-medium rounded-md border border-gray-900 hover:bg-gray-800 hover:border-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2 transition-colors duration-150 text-sm disabled:opacity-50 disabled:pointer-events-none;
   }
 
   .btn-secondary {
-    @apply inline-flex items-center gap-2 px-4 py-2 bg-white text-black font-medium rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors text-sm;
+    @apply inline-flex items-center justify-center gap-2 px-3.5 py-2 bg-white text-gray-900 font-medium rounded-md border border-gray-200 hover:bg-gray-50 hover:border-gray-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2 transition-colors duration-150 text-sm disabled:opacity-50 disabled:pointer-events-none;
   }
 
   .btn-danger {
-    @apply inline-flex items-center gap-2 px-4 py-2 bg-red-50 text-red-700 font-medium rounded-lg border border-red-200 hover:bg-red-100 transition-colors text-sm;
+    @apply inline-flex items-center justify-center gap-2 px-3.5 py-2 bg-white text-red-700 font-medium rounded-md border border-red-200 hover:bg-red-50 hover:border-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2 transition-colors duration-150 text-sm disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  /* Klikbare kaarten: enkel de rand reageert, niets beweegt. */
+  a.card-base:hover {
+    @apply border-gray-300;
   }
 
   .input-base {
-    @apply w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848] transition-colors;
+    @apply w-full px-3 py-2 text-sm text-gray-900 border border-gray-200 rounded-md bg-white placeholder:text-gray-400 focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition-colors;
   }
 
   .table-th {
-    @apply px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider;
+    @apply px-4 py-2.5 text-left text-xs font-medium text-gray-500 whitespace-nowrap;
   }
 
   .table-td {
-    @apply px-4 py-3 text-sm text-gray-900;
+    @apply px-4 py-2.5 text-sm text-gray-800;
   }
 
   .status-badge {
-    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+    @apply inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium whitespace-nowrap;
+  }
+
+  /* Nette lege staat — consistent over alle modules */
+  .empty-state {
+    @apply text-center py-10 text-sm text-gray-500;
   }
 }
 
+/* ── Mobile responsive helpers ─────────────────────────────────────────────── */
+
+/* Media can never exceed its container — prevents accidental horizontal overflow
+   from images/SVG/canvas/video on small screens. */
+img, svg, video, canvas {
+  max-width: 100%;
+}
+
+/* All modals: constrain height + scroll on small screens.
+   Apply to every modal's inner panel (the white rounded box). */
+.modal-panel {
+  @apply max-h-[90dvh] overflow-y-auto;
+}
+
+/* Tables: horizontal scroll wrapper */
+.table-wrap {
+  @apply overflow-x-auto;
+}
+
+/* Responsive header rows: stack on mobile when there are many action buttons */
+.page-header {
+  @apply flex items-start justify-between gap-3 flex-wrap;
+}
+.page-header-actions {
+  @apply flex items-center gap-2 flex-wrap;
+}
+
+/* Telefoon: invoervelden op 16px, anders zoomt iOS bij elke tik in een veld in
+   en blijft de pagina uitvergroot staan. */
+@media (max-width: 767px) {
+  input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Tabellen als kaarten op telefoon — zie components/ui/kaart-tabel.tsx */
+@media (max-width: 767px) {
+  .kaart-tabel table,
+  .kaart-tabel tbody,
+  .kaart-tabel tfoot,
+  .kaart-tabel tr,
+  .kaart-tabel td {
+    display: block;
+    width: 100%;
+  }
+  .kaart-tabel table {
+    min-width: 0 !important;
+  }
+  .kaart-tabel thead {
+    display: none;
+  }
+  .kaart-tabel tbody tr,
+  .kaart-tabel tfoot tr {
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+  .kaart-tabel tfoot tr {
+    background: #fafafa;
+  }
+  .kaart-tabel td {
+    display: block;
+    padding: 0.2rem 0 !important;
+    border: 0 !important;
+    text-align: right !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+  .kaart-tabel td::after {
+    content: '';
+    display: table;
+    clear: both;
+  }
+  .kaart-tabel td::before {
+    content: attr(data-label);
+    float: left;
+    max-width: 50%;
+    margin-right: 0.75rem;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.6;
+    color: #6b6b6b;
+    text-align: left;
+  }
+  .kaart-tabel td[data-label='']::before {
+    display: none;
+  }
+  /* De eerste cel is de titel van de kaart */
+  .kaart-tabel td:first-child {
+    text-align: left !important;
+    font-weight: 600;
+    padding-bottom: 0.35rem !important;
+  }
+  .kaart-tabel td:first-child::before {
+    display: none;
+  }
+  /* Lege cellen niet tonen */
+  .kaart-tabel td:empty {
+    display: none;
+  }
+  /* Tabel-wrappers hoeven niet meer zijwaarts te scrollen en geen kader te hebben */
+  .kaart-tabel .table-wrap,
+  .kaart-tabel .overflow-x-auto {
+    overflow: visible;
+  }
+}
+
+/* ── Scrollbar ────────────────────────────────────────────────────────────── */
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 5px;
@@ -101,11 +302,11 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #d1d5db;
+  background: #c8c8c8;
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
+  background: #8c8c8c;
 }
 
 /* Calendar drag ghost */
@@ -115,3 +316,17 @@
 [draggable=true]:active {
   cursor: grabbing;
 }
+
+/* Toegankelijkheid: wie in zijn systeem "minder beweging" heeft ingesteld,
+   krijgt geen animaties of transities. Verplicht bij micro-interacties. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+

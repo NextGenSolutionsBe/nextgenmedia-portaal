@@ -5,11 +5,18 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { Suspense } from 'react'
+import { Logo } from '@/components/logo'
 
 function LoginForm() {
   const router = useRouter()
   const params = useSearchParams()
-  const redirect = params.get('redirect') || '/'
+  // Alleen doorsturen bínnen deze app. Een ongevalideerde ?redirect= laat een
+  // phishinglink toe die op ons eigen domein start en na het inloggen naar een
+  // namaaksite stuurt (open redirect). '//host' is óók extern.
+  const rawRedirect = params.get('redirect') || '/'
+  const redirect = rawRedirect.startsWith('/') && !rawRedirect.startsWith('//') ? rawRedirect : '/'
+  // Aangemeld maar nergens toegang toe (geen rol, geen Kantoor-lidmaatschap): zeg dat eerlijk.
+  const geenToegang = params.get('reden') === 'geen_toegang'
   const supabase = createClient()
 
   const [email, setEmail] = useState('')
@@ -79,6 +86,11 @@ function LoginForm() {
         </div>
       </div>
 
+      {geenToegang && !error && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          Dit account is wel bekend, maar heeft nog geen toegang tot een portaal. Neem contact op met NextGenMedia om je toegang te laten activeren.
+        </div>
+      )}
       {error && (
         <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
           {error}
@@ -88,7 +100,7 @@ function LoginForm() {
       <button
         type="submit"
         disabled={loading}
-        className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#fff848] text-black font-semibold rounded-lg hover:bg-[#f5ee30] transition-colors disabled:opacity-60 text-sm"
+        className="w-full flex items-center justify-center gap-2 py-2.5 bg-gray-900 text-white font-medium rounded-md hover:bg-gray-800 transition-colors disabled:opacity-60 text-sm"
       >
         {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
         Inloggen
@@ -103,14 +115,12 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center h-10 w-10 rounded-xl bg-[#fff848] mb-4">
-            <span className="font-bold text-black text-sm">NG</span>
-          </div>
-          <h1 className="text-2xl font-bold text-gray-900">NextGenMedia</h1>
+          <Logo className="inline-flex h-11 w-11 rounded-lg mb-4" />
+          <h1 className="text-xl font-semibold text-gray-900">NextGenMedia</h1>
           <p className="text-sm text-gray-500 mt-1">Portaal toegang</p>
         </div>
 
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
           <Suspense fallback={<div className="h-48 animate-pulse bg-gray-100 rounded-lg" />}>
             <LoginForm />
           </Suspense>

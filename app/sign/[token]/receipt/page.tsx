@@ -35,7 +35,8 @@ export default async function ReceiptPage({ params }: { params: { token: string 
     .eq('access_token', params.token)
     .maybeSingle()
 
-  if (!contract || contract.status !== 'signed') notFound()
+  // Buiten de app ondertekend: er is geen elektronische handtekening om te bewijzen.
+  if (!contract || contract.status !== 'signed' || contract.ondertekening_wijze === 'manueel') notFound()
 
   // Fetch client name
   let companyName: string | null = null
@@ -103,7 +104,7 @@ export default async function ReceiptPage({ params }: { params: { token: string 
             <CheckCircle2 className="h-7 w-7 text-green-600" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-green-900">Contract ondertekend</h1>
+            <h1 className="text-xl font-semibold text-green-900">Contract ondertekend</h1>
             <p className="text-sm text-green-700 mt-0.5">
               Dit document bevestigt de digitale ondertekening van het contract hieronder.
             </p>
@@ -118,21 +119,21 @@ export default async function ReceiptPage({ params }: { params: { token: string 
           </div>
           <div className="px-6 py-4 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
             <div>
-              <div className="text-xs text-gray-400 uppercase tracking-wider mb-1">Contract</div>
+              <div className="text-xs text-gray-400 mb-1">Contract</div>
               <div className="font-medium text-gray-900">{contract.title}</div>
             </div>
             {companyName && (
               <div>
-                <div className="text-xs text-gray-400 uppercase tracking-wider mb-1">Klant</div>
+                <div className="text-xs text-gray-400 mb-1">Klant</div>
                 <div className="font-medium text-gray-900">{companyName}</div>
               </div>
             )}
             <div>
-              <div className="text-xs text-gray-400 uppercase tracking-wider mb-1">Referentienummer</div>
+              <div className="text-xs text-gray-400 mb-1">Referentienummer</div>
               <div className="font-mono text-gray-700">{referenceId}</div>
             </div>
             <div>
-              <div className="text-xs text-gray-400 uppercase tracking-wider mb-1">Status</div>
+              <div className="text-xs text-gray-400 mb-1">Status</div>
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
                 <CheckCircle2 className="h-3 w-3" />
                 Getekend
@@ -150,41 +151,41 @@ export default async function ReceiptPage({ params }: { params: { token: string 
           <div className="px-6 py-4 space-y-4 text-sm">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <div className="text-xs text-gray-400 uppercase tracking-wider mb-1">Naam ondertekenaar</div>
+                <div className="text-xs text-gray-400 mb-1">Naam ondertekenaar</div>
                 <div className="font-medium text-gray-900">{contract.signer_name ?? sig?.signer_name ?? '—'}</div>
               </div>
               <div>
-                <div className="text-xs text-gray-400 uppercase tracking-wider mb-1">E-mailadres</div>
+                <div className="text-xs text-gray-400 mb-1">E-mailadres</div>
                 <div className="text-gray-700">{contract.signer_email ?? sig?.signer_email ?? '—'}</div>
               </div>
               {sig?.signer_phone && (
                 <div>
-                  <div className="text-xs text-gray-400 uppercase tracking-wider mb-1">Telefoon</div>
+                  <div className="text-xs text-gray-400 mb-1">Telefoon</div>
                   <div className="text-gray-700">{sig.signer_phone}</div>
                 </div>
               )}
               {sig?.signer_vat && (
                 <div>
-                  <div className="text-xs text-gray-400 uppercase tracking-wider mb-1">BTW-nummer</div>
+                  <div className="text-xs text-gray-400 mb-1">BTW-nummer</div>
                   <div className="text-gray-700">{sig.signer_vat}</div>
                 </div>
               )}
               {sig?.signer_address && (
                 <div className="sm:col-span-2">
-                  <div className="text-xs text-gray-400 uppercase tracking-wider mb-1">Adres</div>
+                  <div className="text-xs text-gray-400 mb-1">Adres</div>
                   <div className="text-gray-700">{sig.signer_address}</div>
                 </div>
               )}
             </div>
 
             <div className="pt-2 border-t border-gray-100">
-              <div className="text-xs text-gray-400 uppercase tracking-wider mb-1">Tijdstip van ondertekening</div>
+              <div className="text-xs text-gray-400 mb-1">Tijdstip van ondertekening</div>
               <div className="font-medium text-gray-900">{formatDateTime(contract.signed_at ?? sig?.signed_at)}</div>
             </div>
 
             {sig?.ip_address && (
               <div>
-                <div className="text-xs text-gray-400 uppercase tracking-wider mb-1">IP-adres</div>
+                <div className="text-xs text-gray-400 mb-1">IP-adres</div>
                 <div className="font-mono text-xs text-gray-600">{sig.ip_address}</div>
               </div>
             )}
