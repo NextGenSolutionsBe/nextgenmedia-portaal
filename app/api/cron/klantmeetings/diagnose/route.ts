@@ -6,7 +6,8 @@ import { controleerKoppelingen, testAfspraak, leesMeeting, veiligeFout, stapGoog
 import { kalenderData, controleerVrij, controleerConflicten } from '@/lib/meetings/kalender-server'
 import { isClickupMeeting } from '@/lib/meetings/kalender'
 import { cronToegang } from '@/lib/meetings/cron-toegang'
-import { haalMeetingEvent, bezetPerAgenda, meldingInfo } from '@/lib/sales/google-calendar'
+import { haalMeetingEvent, bezetPerAgenda, meldingInfo, listCalendars, controleerAgenda, leesEventPersonen } from '@/lib/sales/google-calendar'
+import { EMAIL_FROM } from '@/lib/email'
 import { getOrCreateSalesOrg, listOwners, loadCalendar } from '@/lib/sales/service'
 import { haalSyncTaken, clickupTijdvelden, clickupZoekVarianten, type SyncOphaalInfo } from '@/lib/clickup'
 import { mergeIntervals, type Interval } from '@/lib/sales/availability'
@@ -41,6 +42,9 @@ export const maxDuration = 60
  *    72 uur) met conflictwaarschuwing, echte Google/ClickUp, meteen geannuleerd.
  *  · ?vrijcontrole=1: leest enkel. Legt de klantslots naast de echte ClickUp-
  *    meetings, de Google-bezetting en taken zonder vast uur (enkel tellingen).
+ *  · ?organisator=1: leest enkel. Welk account genodigden als organisator en
+ *    maker van een app-afspraak zien, of de agenda van info@nextgenmedia.be
+ *    bereikbaar is, en vanaf welk adres en domein de mails vertrekken.
  *  · ?kalender=1: leest enkel. Per agenda de werkuren, bezette blokken (per
  *    Google-agenda, zonder titels) en vrije segmenten voor twee weken, plus
  *    hoe de ClickUp-taken binnenkomen (pagina's, tijdvelden).
@@ -70,6 +74,7 @@ export async function POST(req: NextRequest) {
     if (req.nextUrl.searchParams.get('zelftest') === 'calendar') return NextResponse.json(await zelftestCalendar(admin))
     if (req.nextUrl.searchParams.get('zelftest') === 'intern') return NextResponse.json(await zelftestIntern(admin))
     if (req.nextUrl.searchParams.get('vrijcontrole') === '1') return NextResponse.json(await vrijControle(admin))
+    if (req.nextUrl.searchParams.get('organisator') === '1') return NextResponse.json(await organisatorControle(admin))
     if (req.nextUrl.searchParams.get('zelftest') === 'klantapp') {
       const klant = req.nextUrl.searchParams.get('klant') ?? '', ander = req.nextUrl.searchParams.get('ander') ?? ''
       if (!UUID.test(klant) || !UUID.test(ander) || klant === ander) return NextResponse.json({ error: 'klant en ander (twee verschillende testklanten) zijn verplicht' }, { status: 400 })
@@ -507,5 +512,71 @@ async function vrijControle(admin: { from: (t: string) => any }) {
     slotsOpGoogleBezet: b.slots.filter((s) => google.some((x) => raakt(slot(s), x))).length,
     slotsOpMomentVanTaakZonderUur: opTaakMoment.length,
     slotsOpDagVanTaakZonderUur: opDagVanTaak.length,
+  }
+}
+
+
+const INFO_ADRES = 'info@nextgenmedia.be'
+
+/** Leest enkel: organisator in Google, toegang tot de info@-agenda, afzender en domein bij Resend. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function organisatorControle(admin: { from: (t: string) => any }) {
+  const { data: conns } = await admin.from('sales_calendar_connections').select('id, name, account_email, calendar_id, active, status').eq('provider', 'google')
+  const lijst = (conns ?? []) as { id: string; name: string; account_email: string | null; calendar_id: string; active: boolean; status: string }[]
+  const { data: p } = await admin.from('sales_pipelines').select('default_calendar_id').eq('key', 'nextgenmedia').maybeSingle()
+  const standaard = (p?.default_calendar_id as string | null) ?? null
+  const accounts = Array.from(new Set(lijst.map((c) => c.account_email).filter(Boolean)))
+
+  // Per Google-account: welke agenda's, en kan het in die van info@ schrijven?
+  const perAccount = []
+  for (const acc of accounts) {
+    const c = lijst.find((x) => x.account_email === acc && x.status === 'connected')
+    if (!c) continue
+    const agendas = await listCalendars(c.id)
+    const info = agendas.find((a) => a.id.toLowerCase() === INFO_ADRES)
+    perAccount.push({
+      account: acc,
+      aantalAgendas: agendas.length,
+      hoofdagenda: agendas.find((a) => a.primary)?.id ?? null,
+      infoAgenda: info ? { rol: info.accessRole, schrijven: info.accessRole === 'owner' || info.accessRole === 'writer' } : null,
+      nextgenmediaAgendas: agendas.filter((a) => /@nextgenmedia\.be$/i.test(a.id)).map((a) => ({ id: a.id, rol: a.accessRole })),
+    })
+  }
+
+  // De standaardagenda (klantboekingen) en een echte afspraak van de app erop.
+  const st = lijst.find((c) => c.id === standaard)
+  const agenda = st ? await controleerAgenda(st.id) : null
+  const { data: mt } = await admin.from('klant_meetings').select('id, agenda_id, google_calendar_id, google_event_id, created_at')
+    .not('google_event_id', 'is', null).order('created_at', { ascending: false }).limit(5)
+  let voorbeeld: Record<string, unknown> | null = null
+  for (const m of (mt ?? []) as { id: string; agenda_id: string; google_calendar_id: string; google_event_id: string }[]) {
+    try {
+      const e = await leesEventPersonen(m.agenda_id, m.google_calendar_id, m.google_event_id)
+      if (e) { voorbeeld = { meetingId: m.id, ...e }; break }
+    } catch { /* volgende proberen */ }
+  }
+
+  // Mail: afzender in de app en wat Resend over het domein en een verstuurde mail zegt.
+  const resend: Record<string, unknown> = { afzenderInApp: EMAIL_FROM }
+  const sleutel = process.env.RESEND_API_KEY
+  if (sleutel) {
+    const d = await fetch('https://api.resend.com/domains', { headers: { Authorization: `Bearer ${sleutel}` } }).catch(() => null)
+    const dj = d ? await d.json().catch(() => ({})) as { data?: { name?: string; status?: string }[]; message?: string; name?: string } : null
+    resend.domeinen = d?.ok ? (dj?.data ?? []).map((x) => ({ naam: x.name, status: x.status })) : { fout: dj?.message ?? dj?.name ?? `status ${d?.status ?? 'geen antwoord'}` }
+    const { data: laatste } = await admin.from('email_messages').select('provider_id, kind, created_at').not('provider_id', 'is', null).order('created_at', { ascending: false }).limit(1)
+    const pid = ((laatste ?? []) as { provider_id: string; kind: string; created_at: string }[])[0]
+    if (pid) {
+      const e = await fetch(`https://api.resend.com/emails/${encodeURIComponent(pid.provider_id)}`, { headers: { Authorization: `Bearer ${sleutel}` } }).catch(() => null)
+      const ej = e ? await e.json().catch(() => ({})) as { from?: string; last_event?: string; message?: string; name?: string } : null
+      resend.laatsteMail = e?.ok ? { soort: pid.kind, op: pid.created_at, van: ej?.from, status: ej?.last_event } : { soort: pid.kind, fout: ej?.message ?? ej?.name ?? `status ${e?.status ?? 'geen antwoord'}` }
+    }
+  } else resend.fout = 'RESEND_API_KEY ontbreekt'
+
+  return {
+    koppelingen: lijst.map((c) => ({ id: c.id, naam: c.name, account: c.account_email, schrijfAgenda: c.calendar_id, actief: c.active, standaard: c.id === standaard })),
+    perAccount,
+    standaardAgenda: agenda,
+    voorbeeldAfspraak: voorbeeld,
+    mail: resend,
   }
 }
