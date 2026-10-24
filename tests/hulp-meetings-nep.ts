@@ -186,6 +186,11 @@ export const clickup = {
   paginasGevraagd: 0,
   /** Zoals live gezien: ClickUp zegt altijd "laatste pagina", ook als er nog volgen. */
   zegtLaatstePagina: false,
+  /** Leden van de werkruimte (GET /team). */
+  leden: [
+    { user: { id: 200511713, username: 'Bram', email: 'bram@nextgenmedia.be' } },
+    { user: { id: 106693123, username: 'Marco', email: 'marco@nextgenmedia.be' } },
+  ] as { user: { id: number; username: string; email: string } }[],
 }
 export const resend = {
   verstuurd: [] as Rij[], sleutels: new Map<string, string>(),
@@ -266,7 +271,7 @@ async function nepFetch(input: any, init: any = {}): Promise<Response> {
 
   if (url.host === 'api.clickup.com') {
     const p = url.pathname.replace('/api/v2', '')
-    if (p === '/team') return clickup.teamFout ? json({ err: 'Team not authorized', ECODE: 'OAUTH_027' }, 401) : json({ teams: [{ id: 'T1' }] })
+    if (p === '/team') return clickup.teamFout ? json({ err: 'Team not authorized', ECODE: 'OAUTH_027' }, 401) : json({ teams: [{ id: 'T1', members: clickup.leden }] })
     if (p === '/team/T1/task') {
       const van = Number(url.searchParams.get('due_date_gt') ?? 0), tot = Number(url.searchParams.get('due_date_lt') ?? 0)
       const wie = url.searchParams.getAll('assignees[]').map(Number)
@@ -281,7 +286,7 @@ async function nepFetch(input: any, init: any = {}): Promise<Response> {
       const id = `cu${++clickup.volgnr}`
       clickup.taken.set(id, { id, list: m[1], ...body, status: 'open', date_created: String(Date.now()) }); clickup.aangemaakt++
       if (clickup.verliesAntwoord) { clickup.verliesAntwoord = false; throw new TypeError('fetch failed') }
-      return json({ id })
+      return json({ id, url: `https://app.clickup.com/t/${id}` })
     }
     if (m && methode === 'GET') {
       const sinds = Number(url.searchParams.get('date_created_gt') ?? 0)
@@ -293,7 +298,8 @@ async function nepFetch(input: any, init: any = {}): Promise<Response> {
     if (m) {
       const t = clickup.taken.get(m[1])
       if (!t) return json({ err: 'Task not found, deleted', ECODE: 'ITEM_013' }, 404)
-      if (methode === 'GET') return json({ id: t.id, name: t.name, list: { id: t.list } })
+      if (methode === 'GET') return json({ id: t.id, name: t.name, list: { id: t.list }, url: `https://app.clickup.com/t/${t.id}`,
+        status: { status: t.status, color: t.status === 'complete' ? '#6bc950' : '#d3d3d3', type: t.status === 'complete' ? 'closed' : 'open' } })
       if (methode === 'PUT') { Object.assign(t, body); return json({ id: t.id }) }
     }
     m = p.match(/^\/list\/([^/]+)$/)

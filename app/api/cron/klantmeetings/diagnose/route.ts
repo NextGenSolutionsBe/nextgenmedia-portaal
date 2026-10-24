@@ -11,7 +11,9 @@ import { cronToegang } from '@/lib/meetings/cron-toegang'
 import { haalMeetingEvent, bezetPerAgenda, meldingInfo, listCalendars, controleerAgenda, leesEventPersonen } from '@/lib/sales/google-calendar'
 import { EMAIL_FROM } from '@/lib/email'
 import { getOrCreateSalesOrg, listOwners, loadCalendar } from '@/lib/sales/service'
-import { haalSyncTaken, clickupTijdvelden, clickupZoekVarianten, type SyncOphaalInfo } from '@/lib/clickup'
+import { haalSyncTaken, clickupTijdvelden, clickupZoekVarianten, leesTaakRuw, annuleerAfspraakTaak, type SyncOphaalInfo } from '@/lib/clickup'
+import { maakLeadTaak, leadTaken, leadTaakOpties } from '@/lib/sales/lead-taken-server'
+import { deadlineMs } from '@/lib/sales/lead-taken'
 import { mergeIntervals, type Interval } from '@/lib/sales/availability'
 import { dag, uur, zoneNaarIso } from '@/lib/meetings/model'
 import {
@@ -51,6 +53,9 @@ export const maxDuration = 60
  *    Google-afspraak, mail aan de deelnemers via de meetingmail, teruggelezen
  *    bij Resend), wisselen tussen online en locatie, daarna geannuleerd.
  *    Genodigde en ontvanger: enkel info@nextgenmedia.be.
+ *  · ?zelftest=leadtaak: één taak bij een testlead zoals de leadfiche ze maakt
+ *    (echte ClickUp-taak in de NextGen Solutions-lijst), teruggelezen bij
+ *    ClickUp, daarna gesloten als [GEANNULEERD] en de rij verwijderd.
  *  · ?kalender=1: leest enkel. Per agenda de werkuren, bezette blokken (per
  *    Google-agenda, zonder titels) en vrije segmenten voor twee weken, plus
  *    hoe de ClickUp-taken binnenkomen (pagina's, tijdvelden).
@@ -82,6 +87,7 @@ export async function POST(req: NextRequest) {
     if (req.nextUrl.searchParams.get('vrijcontrole') === '1') return NextResponse.json(await vrijControle(admin))
     if (req.nextUrl.searchParams.get('organisator') === '1') return NextResponse.json(await organisatorControle(admin))
     if (req.nextUrl.searchParams.get('zelftest') === 'vorm') return NextResponse.json(await zelftestVorm(admin))
+    if (req.nextUrl.searchParams.get('zelftest') === 'leadtaak') return NextResponse.json(await zelftestLeadTaak(admin))
     if (req.nextUrl.searchParams.get('zelftest') === 'klantapp') {
       const klant = req.nextUrl.searchParams.get('klant') ?? '', ander = req.nextUrl.searchParams.get('ander') ?? ''
       if (!UUID.test(klant) || !UUID.test(ander) || klant === ander) return NextResponse.json({ error: 'klant en ander (twee verschillende testklanten) zijn verplicht' }, { status: 400 })
@@ -676,5 +682,72 @@ async function zelftestVorm(admin: { from: (t: string) => any }) {
       try { const x = await leesMeeting(admin, m.id); if (x && x.status === 'ingepland') await annuleer(admin, x, 'zelftest (opruimen)', true) } catch { /* zichtbaar in de app */ }
     }
     return { stappen, meetings: gemaakt.map((m) => m.id) }
+  }
+}
+
+
+/** Taak bij een lead met echte ClickUp; ruimt zichzelf op (taak gesloten, rij weg). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function zelftestLeadTaak(admin: { from: (t: string) => any }) {
+  const stappen: { stap: string; ok: boolean; detail?: string }[] = []
+  const log = (stap: string, ok: boolean, detail?: string) => { stappen.push({ stap, ok, ...(detail ? { detail } : {}) }) }
+  let taakId: string | null = null, rijId: string | null = null, bedrijfId: string | null = null, leadId: string | null = null
+  const opruimen = async () => {
+    if (leadId) await admin.from('sales_leads').delete().eq('id', leadId)
+    if (bedrijfId) await admin.from('sales_companies').delete().eq('id', bedrijfId)
+  }
+  try {
+    // Een tijdelijke testlead: nooit een taak aan een echte lead hangen.
+    const org = await getOrCreateSalesOrg()
+    const { data: bedrijf, error: bFout } = await admin.from('sales_companies').insert({ sales_client_id: org.id, name: 'Testlead leadfiche (automatische controle)', dedupe_key: `zelftest-${randomUUID()}` }).select('id').single()
+    if (bFout) throw new Error(bFout.message)
+    bedrijfId = bedrijf.id as string
+    const { data: nieuwLead, error: lFout } = await admin.from('sales_leads').insert({ sales_client_id: org.id, company_id: bedrijfId }).select('id').single()
+    if (lFout) throw new Error(lFout.message)
+    leadId = nieuwLead.id as string
+    const lead = { id: leadId }
+    log('Tijdelijke testlead aangemaakt', true, leadId)
+
+    const opties = await leadTaakOpties(admin, null)
+    const lid = opties.leden.find((m) => m.id === 106693123) ?? opties.leden[0]
+    log('ClickUp-leden en lijsten', opties.ingesteld && opties.leden.length > 0 && opties.lijsten.every((l) => l.ok), `${opties.leden.length} leden; ${opties.lijsten.map((l) => `${l.naam}: ${l.ok ? 'ok' : 'geen lijst'}`).join(', ')}`)
+    const deadline = new Date(Date.now() + 3 * 86400000).toLocaleDateString('sv-SE', { timeZone: 'Europe/Brussels' })
+    const { data: pipe } = await admin.from('sales_pipelines').select('clickup_list_id').eq('key', 'nextgensolutions').maybeSingle()
+
+    const { taak } = await maakLeadTaak(admin, lead.id, {
+      aanvraag_sleutel: randomUUID(), omschrijving: 'Testtaak leadfiche (automatische controle)', deadline,
+      notitie: 'Automatische controle van "Taak toevoegen" in de leadfiche. Wordt meteen gesloten.', assignee_id: lid?.id, merk: 'nextgensolutions',
+    }, { userId: null, email: 'zelftest' })
+    rijId = taak.id; taakId = taak.clickup_task_id
+    log('Taak aangemaakt in ClickUp', taak.sync_status === 'ok' && !!taakId, taak.sync_fout ?? taak.clickup_url ?? undefined)
+    if (!taakId) return { stappen }
+
+    const ruw = await leesTaakRuw(taakId)
+    const link = `/admin/sales/pipeline?lead=${lead.id}`
+    log('In de NextGen Solutions-lijst', ruw.lijst === pipe?.clickup_list_id, `lijst ${ruw.lijst}`)
+    log('Toegewezen aan het gekozen lid', !!lid && ruw.toegewezen.includes(lid.id), `${lid?.naam ?? '—'}`)
+    log('Gewone taak: deadline op de juiste dag, geen starttijd', !ruw.startDate && ruw.dueDate === String(deadlineMs(deadline)), `due ${ruw.dueDate}, start ${ruw.startDate ?? 'geen'}`)
+    const volleLink = (ruw.tekst + ruw.markdown).match(/https?:\/\/[^\s)\]]+\/admin\/sales\/pipeline\?lead=[0-9a-f-]+/)?.[0] ?? null
+    log('Klikbare link naar de lead in de omschrijving', !!volleLink && volleLink.endsWith(link), volleLink ?? 'niet gevonden')
+    log('Link wijst naar app.nextgenmedia.be', /^https:\/\/app\.nextgenmedia\.be\//.test(volleLink ?? ''), volleLink ?? undefined)
+    log('Markdown-link (echte hyperlink) bewaard door ClickUp', ruw.markdown.includes(`](${volleLink}`), ruw.markdown ? 'markdown aanwezig' : 'geen markdown teruggekregen')
+    const lijst1 = await leadTaken(admin, lead.id)
+    const t1 = lijst1.taken.find((x) => x.id === taak.id)
+    log('Leadfiche toont de taak met haar ClickUp-status', !!t1?.clickup_status && !lijst1.statusFout, `status: ${t1?.clickup_status ?? '—'}`)
+
+    await annuleerAfspraakTaak(taakId)
+    const lijst2 = await leadTaken(admin, lead.id)
+    const t2 = lijst2.taken.find((x) => x.id === taak.id)
+    log('Status volgt ClickUp (gesloten)', t2?.clickup_status_type === 'closed' || t2?.clickup_status_type === 'done', `status: ${t2?.clickup_status ?? '—'} (${t2?.clickup_status_type ?? '—'})`)
+    await opruimen()
+    const { data: nog } = await admin.from('sales_leads').select('id').eq('id', leadId).maybeSingle()
+    log('Opgeruimd: taak gesloten als [GEANNULEERD], testlead en zijn taakrij weg', !nog)
+    return { stappen, taak: taakId }
+  } catch (e) {
+    log('Onverwachte fout', false, veiligeFout(e))
+    if (taakId) { try { await annuleerAfspraakTaak(taakId) } catch { /* zichtbaar in ClickUp */ } }
+    if (rijId) await admin.from('sales_lead_taken').delete().eq('id', rijId)
+    await opruimen().catch(() => undefined)
+    return { stappen, taak: taakId }
   }
 }
