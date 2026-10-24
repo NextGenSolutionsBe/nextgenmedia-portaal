@@ -740,6 +740,32 @@ export async function maakMeetingEvent(connectionId: string, opts: MeetingEventV
   return leesMeetingEvent(json, calendarId)
 }
 
+/**
+ * Wie staat er als organisator en maker op een event, zoals genodigden het
+ * zien. Leest enkel; voor de controle van het afzenderaccount.
+ */
+export async function leesEventPersonen(connectionId: string, calendarId: string, eventId: string): Promise<{
+  organisator: { email: string | null; naam: string | null }
+  maker: { email: string | null; naam: string | null }
+  locatie: string | null
+  meet: boolean
+} | null> {
+  const auth = await accessToken(connectionId)
+  if (!auth) throw new AgendaNietGekoppeld()
+  const res = await fetchMetLimiet(eventUrl(calendarId, eventId), { headers: { Authorization: `Bearer ${auth.token}` } })
+  if (res.status === 404 || res.status === 410) return null
+  const j = await res.json().catch(() => ({})) as GEvent & {
+    organizer?: { email?: string; displayName?: string }; creator?: { email?: string; displayName?: string }; location?: string
+  }
+  if (!res.ok) throw new Error(j.error?.message ?? `Google gaf de afspraak niet terug (${res.status})`)
+  return {
+    organisator: { email: j.organizer?.email ?? null, naam: j.organizer?.displayName ?? null },
+    maker: { email: j.creator?.email ?? null, naam: j.creator?.displayName ?? null },
+    locatie: j.location ?? null,
+    meet: !!(j.hangoutLink ?? j.conferenceData?.entryPoints?.length),
+  }
+}
+
 /** null = bestaat niet (meer). */
 export async function haalMeetingEvent(connectionId: string, calendarId: string, eventId: string): Promise<MeetingEvent | null> {
   const auth = await accessToken(connectionId)
