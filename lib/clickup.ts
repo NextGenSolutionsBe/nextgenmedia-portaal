@@ -699,6 +699,9 @@ export type SyncTaak = {
   dueMs: number
   url: string
   lijstNaam: string
+  /** ClickUp's eigen vlaggen "er staat een uur bij"; null als ClickUp ze niet meestuurt. */
+  startHeeftUur?: boolean | null
+  dueHeeftUur?: boolean | null
 }
 
 /** Het (enige) team-id van de werkruimte. */
@@ -709,21 +712,32 @@ async function teamId(): Promise<string> {
   return id
 }
 
+/** Hoe de laatste ophaalronde verliep: voor de diagnose en de syncstatus. */
+export type SyncOphaalInfo = { paginas: number; perPagina: number[]; laatstePaginaGemeld: boolean }
+
 /**
  * Alle OPEN taken met een deadline binnen het venster, toegewezen aan één van
  * de opgegeven leden. Gesloten taken blijven bewust buiten beeld: wat af is
  * hoeft niemands agenda meer te blokkeren — de sync ruimt het event dan op.
+ *
+ * Paginering: ClickUp geeft per pagina hoogstens 100 taken, maar een pagina
+ * kan ook KORTER zijn terwijl er nog pagina's volgen (het filtert na het
+ * pagineren). Vroeger stopten we bij de eerste pagina onder de 100, en dat
+ * gebeurde: voor Bram en Marco samen kwam enkel de nieuwste ~100 taken mee,
+ * waardoor oudere afspraken (bv. een contentshoot van een hele dag) niet in
+ * de agenda blokkeerden. Nu lezen we door tot ClickUp `last_page` meldt of
+ * een lege pagina geeft.
  */
 export async function haalSyncTaken(
-  assigneeIds: number[], vanMs: number, totMs: number,
+  assigneeIds: number[], vanMs: number, totMs: number, info?: SyncOphaalInfo,
 ): Promise<SyncTaak[]> {
   if (!clickupConfigured() || assigneeIds.length === 0) return []
   const team = await teamId()
-  const uit: SyncTaak[] = []
+  const uit = new Map<string, SyncTaak>()
+  const stats: SyncOphaalInfo = info ?? { paginas: 0, perPagina: [], laatstePaginaGemeld: false }
 
-  // ClickUp pagineert per 100; het vangnet van 10 pagina's is ver boven wat
-  // twee agenda's aan taken kunnen dragen.
-  for (let page = 0; page < 10; page++) {
+  // Vangnet van 30 pagina's (3000 taken): ver boven wat twee agenda's dragen.
+  for (let page = 0; page < 30; page++) {
     const p = new URLSearchParams({
       page: String(page),
       due_date_gt: String(vanMs),
@@ -733,15 +747,19 @@ export async function haalSyncTaken(
     })
     for (const a of assigneeIds) p.append('assignees[]', String(a))
 
-    const { tasks } = await clickupJson<{ tasks: Array<{
+    const { tasks, last_page } = await clickupJson<{ last_page?: boolean; tasks: Array<{
       id: string; name: string; due_date: string | null; start_date: string | null
+      start_date_time?: boolean | null; due_date_time?: boolean | null
       url: string; assignees?: Array<{ id: number }>; list?: { name?: string }
     }> }>(`/team/${team}/task?${p}`)
 
-    for (const t of tasks ?? []) {
+    const lijst = tasks ?? []
+    stats.paginas++
+    stats.perPagina.push(lijst.length)
+    for (const t of lijst) {
       const due = Number(t.due_date)
       if (!Number.isFinite(due) || due <= 0) continue
-      uit.push({
+      uit.set(t.id, {
         id: t.id,
         naam: t.name,
         assigneeIds: (t.assignees ?? []).map((x) => x.id),
@@ -749,11 +767,14 @@ export async function haalSyncTaken(
         dueMs: due,
         url: t.url,
         lijstNaam: t.list?.name ?? '',
+        startHeeftUur: typeof t.start_date_time === 'boolean' ? t.start_date_time : null,
+        dueHeeftUur: typeof t.due_date_time === 'boolean' ? t.due_date_time : null,
       })
     }
-    if ((tasks ?? []).length < 100) break
+    if (last_page === true) { stats.laatstePaginaGemeld = true; break }
+    if (lijst.length === 0) break
   }
-  return uit
+  return [...uit.values()]
 }
 
 // ── Personeelsplanning → ClickUp ─────────────────────────────────────────────
@@ -819,4 +840,25 @@ export async function upsertPlanningTaak(bestaandId: string | null, t: PlanningT
   if (t.assigneeId) body.assignees = [t.assigneeId]
   const task = await clickupJson<{ id: string }>(`/list/${listId}/task`, { method: 'POST', body: JSON.stringify(body) })
   return task.id
+}
+
+/**
+ * Diagnose: welke tijdvelden geeft ClickUp voor deze taken terug? Enkel
+ * datums en de vlaggen of er een uur bij staat, nooit de inhoud.
+ */
+export async function clickupTijdvelden(ids: string[]): Promise<Record<string, Record<string, unknown>>> {
+  const uit: Record<string, Record<string, unknown>> = {}
+  for (const id of ids.slice(0, 10)) {
+    try {
+      const t = await clickupJson<Record<string, unknown>>(`/task/${encodeURIComponent(id)}`)
+      uit[id] = {
+        start_date: t.start_date ?? null, due_date: t.due_date ?? null,
+        start_date_time: t.start_date_time ?? '(ontbreekt)', due_date_time: t.due_date_time ?? '(ontbreekt)',
+        velden: Object.keys(t).filter((k) => /date|time/i.test(k)),
+      }
+    } catch (e) {
+      uit[id] = { fout: e instanceof Error ? e.message.slice(0, 120) : 'fout' }
+    }
+  }
+  return uit
 }

@@ -4,7 +4,11 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { DATABANK_TIJDELIJK } from '@/lib/supabase/herkansing'
 import { controleerKoppelingen, testAfspraak, leesMeeting, veiligeFout } from '@/lib/meetings/server'
 import { cronToegang } from '@/lib/meetings/cron-toegang'
-import { haalMeetingEvent } from '@/lib/sales/google-calendar'
+import { haalMeetingEvent, bezetPerAgenda } from '@/lib/sales/google-calendar'
+import { getOrCreateSalesOrg, listOwners, loadCalendar } from '@/lib/sales/service'
+import { haalSyncTaken, clickupTijdvelden, type SyncOphaalInfo } from '@/lib/clickup'
+import { mergeIntervals, type Interval } from '@/lib/sales/availability'
+import { dag, uur, zoneNaarIso } from '@/lib/meetings/model'
 import {
   berekenVrijeSlots, boekKlantmeeting, meetingVoorToken, verplaatsViaLink, annuleerViaLink, BoekingFout,
 } from '@/lib/meetings/klantboeking-server'
@@ -20,6 +24,9 @@ export const maxDuration = 60
  *  · ?zelftest=klantboeking: één volledige testboeking zoals een klant ze doet
  *    (op het verste vrije moment, naar info@nextgenmedia.be), daarna verplaatst
  *    en geannuleerd via de beheerlink. Echte Google-, ClickUp- en mailstappen.
+ *  · ?kalender=1: leest enkel. Per agenda de werkuren, bezette blokken (per
+ *    Google-agenda, zonder titels) en vrije segmenten voor twee weken, plus
+ *    hoe de ClickUp-taken binnenkomen (pagina's, tijdvelden).
  * Er komt nooit een token of sleutel in het antwoord.
  */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -32,6 +39,7 @@ export async function POST(req: NextRequest) {
   const admin = createAdminSupabaseClient()
   try {
     if (req.nextUrl.searchParams.get('zelftest') === 'klantboeking') return NextResponse.json(await zelftestKlantboeking(admin))
+    if (req.nextUrl.searchParams.get('kalender') === '1') return NextResponse.json(await kalenderDiagnose(req.nextUrl.searchParams.get('taken')))
     let agenda = req.nextUrl.searchParams.get('agenda')
     if (!agenda || !UUID.test(agenda)) {
       const { data } = await admin.from('sales_pipelines').select('default_calendar_id').eq('key', 'nextgenmedia').maybeSingle()
@@ -99,4 +107,68 @@ async function zelftestKlantboeking(admin: { from: (t: string) => any }) {
     }
     return { stappen, meetingId: id }
   }
+}
+
+
+/** Per dag (Brussel) de stukken als "HH:MM–HH:MM", enkel tussen 7 en 21 uur. */
+function perDagTekst(lijst: Interval[], van: number, tot: number): Record<string, string[]> {
+  const uit: Record<string, string[]> = {}
+  for (const i of mergeIntervals(lijst)) {
+    const s = Math.max(i.start, van), e = Math.min(i.end, tot)
+    if (e <= s) continue
+    // Opknippen per dag.
+    let c = s
+    while (c < e) {
+      const d = dag(new Date(c).toISOString())
+      const volgende = new Date(zoneNaarIso(new Date(Date.parse(`${d}T12:00:00Z`) + 86400000).toISOString().slice(0, 10), '00:00')).getTime()
+      const eind = Math.min(e, volgende)
+      ;(uit[d] ??= []).push(`${uur(new Date(c).toISOString())}–${eind === volgende ? '24:00' : uur(new Date(eind).toISOString())}`)
+      c = eind
+    }
+  }
+  return uit
+}
+
+async function kalenderDiagnose(takenParam: string | null) {
+  const nu = Date.now()
+  const vandaag = dag(new Date(nu).toISOString())
+  const wd = (new Date(`${vandaag}T12:00:00Z`).getUTCDay() + 6) % 7
+  const maandag = new Date(Date.parse(`${vandaag}T12:00:00Z`) - wd * 86400000).toISOString().slice(0, 10)
+  const van = new Date(zoneNaarIso(maandag, '00:00')).getTime()
+  const tot = van + 14 * 86400000
+
+  const org = await getOrCreateSalesOrg()
+  const owners = await listOwners(org.id)
+  const agendas = []
+  for (const o of owners) {
+    const cal = await loadCalendar(org.id, van, tot, o.id).catch((e) => ({ fout: veiligeFout(e) }) as const)
+    const bezet = await bezetPerAgenda(o.id, van, tot).catch((e) => ({ schrijfAgenda: null, agendas: {}, fout: veiligeFout(e) }))
+    agendas.push({
+      id: o.id, naam: o.name, status: o.status,
+      clickup: (o as { clickup_assignee_id?: number | null }).clickup_assignee_id ?? null,
+      schrijfAgenda: bezet.schrijfAgenda ? bezet.schrijfAgenda.slice(0, 12) : null,
+      bezetFout: bezet.fout ?? null,
+      bezetPerAgenda: Object.fromEntries(Object.entries(bezet.agendas).map(([id, a]) => [id.slice(0, 12), { fout: a.fout ?? null, perDag: perDagTekst(a.busy, van, tot) }])),
+      vrij: !cal ? { fout: 'geen agenda' } : 'fout' in cal ? { fout: cal.fout } : { connected: cal.connected, perDag: perDagTekst(cal.segments, van, tot), afspraken: cal.appointments.length },
+    })
+  }
+
+  const info: SyncOphaalInfo = { paginas: 0, perPagina: [], laatstePaginaGemeld: false }
+  let sync: Record<string, unknown>
+  try {
+    const taken = await haalSyncTaken([200511713, 106693123], nu - 86400000, nu + 60 * 86400000, info)
+    const metStartEnUur = taken.filter((t) => t.startMs !== null)
+    sync = {
+      info, totaal: taken.length,
+      bram: taken.filter((t) => t.assigneeIds.includes(200511713)).length,
+      marco: taken.filter((t) => t.assigneeIds.includes(106693123)).length,
+      metStart: metStartEnUur.length,
+      vlaggenAanwezig: taken.some((t) => t.startHeeftUur !== null || t.dueHeeftUur !== null),
+    }
+  } catch (e) {
+    sync = { info, fout: veiligeFout(e) }
+  }
+  const ids = (takenParam ?? '').split(',').map((x) => x.trim()).filter((x) => /^[A-Za-z0-9_-]{5,40}$/.test(x))
+  const tijdvelden = ids.length ? await clickupTijdvelden(ids) : null
+  return { van: new Date(van).toISOString(), tot: new Date(tot).toISOString(), regelsOrg: org.timezone, agendas, sync, tijdvelden }
 }
