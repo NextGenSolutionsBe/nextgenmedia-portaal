@@ -6184,3 +6184,45 @@ DO $$ BEGIN
     ALTER TABLE public.klant_meetings ADD CONSTRAINT klant_meetings_vorm_check CHECK (vorm IN ('online', 'locatie'));
   END IF;
 END $$;
+
+-- ── Pipeline: taken bij een lead (ClickUp) ──────────────────────────────────
+-- Een gewone ClickUp-taak (deadline zonder uur, geen agenda-item) gekoppeld aan
+-- een lead, in de lijst van NextGenMedia of NextGenSolutions, met een link naar
+-- de lead in de omschrijving. clickup_status is de laatst gelezen status uit
+-- ClickUp. Additief.
+CREATE TABLE IF NOT EXISTS public.sales_lead_taken (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  lead_id uuid NOT NULL REFERENCES public.sales_leads(id) ON DELETE CASCADE,
+  aanvraag_sleutel text,
+  omschrijving text NOT NULL,
+  notitie text,
+  deadline date,
+  merk text NOT NULL,
+  clickup_list_id text,
+  clickup_assignee_id bigint,
+  clickup_assignee_naam text,
+  clickup_task_id text,
+  clickup_url text,
+  clickup_status text,
+  clickup_status_kleur text,
+  clickup_status_type text,
+  status_gelezen_op timestamptz,
+  sync_status text NOT NULL DEFAULT 'wacht',
+  sync_fout text,
+  created_by uuid,
+  created_by_email text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS sales_lead_taken_aanvraag ON public.sales_lead_taken (aanvraag_sleutel) WHERE aanvraag_sleutel IS NOT NULL;
+CREATE INDEX IF NOT EXISTS sales_lead_taken_lead ON public.sales_lead_taken (lead_id, created_at DESC);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'sales_lead_taken_merk_check') THEN
+    ALTER TABLE public.sales_lead_taken ADD CONSTRAINT sales_lead_taken_merk_check CHECK (merk IN ('nextgenmedia', 'nextgensolutions'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'sales_lead_taken_sync_check') THEN
+    ALTER TABLE public.sales_lead_taken ADD CONSTRAINT sales_lead_taken_sync_check CHECK (sync_status IN ('wacht', 'ok', 'fout'));
+  END IF;
+END $$;
+ALTER TABLE public.sales_lead_taken ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.sales_lead_taken FROM anon, authenticated;

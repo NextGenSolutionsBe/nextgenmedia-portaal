@@ -16,6 +16,7 @@ import { leesGetal } from '@/lib/getal'
 import { LeadControle } from './lead-controle'
 import { LeadLabels } from './lead-labels'
 import { LeadActiviteiten, BEHEERBARE_TYPES } from './lead-activiteiten'
+import { LeadTaken } from './lead-taken'
 import type { Activiteit } from '@/lib/sales/activiteiten-model'
 import {
   type Lead, type Medewerker, type Pipeline, emailVan, euro, korteDatum, merkenVan, telefoonVan,
@@ -379,6 +380,10 @@ De lead, de tijdlijn, notities en activiteiten verdwijnen definitief. Afspraken 
               <p className="text-[13px] text-gray-900 font-medium leading-snug">{lead.harrie.belAdvies}</p>
             </div>
           )}
+
+          {/* Taken in ClickUp, met een link terug naar deze lead */}
+          <LeadTaken leadId={lead.id} standaardMerk={merkenVan(lead, pipelines)[0]?.key ?? null}
+            onGewijzigd={() => { setVerversen((n) => n + 1); onChanged() }} />
 
           {/* Interne notities */}
           <section>

@@ -660,6 +660,59 @@ export async function zoekTaakMetMarker(listId: string, marker: string, sindsMs:
   return null
 }
 
+// ── Taken bij een lead (pipeline) ────────────────────────────────────────────
+// Een GEWONE taak: enkel een deadline zonder uur (due_date_time: false), geen
+// starttijd. Zo is het nooit een meeting of agenda-item (zie isClickupMeeting).
+
+export type GewoneTaak = {
+  naam: string
+  /** Platte tekst; ClickUp maakt van een losse URL zelf een klikbare link. */
+  omschrijving: string
+  /** Dezelfde omschrijving in Markdown, met een echte link. */
+  markdown: string
+  /** Dag van de deadline (ms op die dag); null = geen deadline. */
+  deadlineMs: number | null
+  assigneeId: number | null
+}
+
+export async function maakGewoneTaak(listId: string, t: GewoneTaak): Promise<{ id: string; url: string | null }> {
+  const body: Record<string, unknown> = {
+    name: t.naam,
+    description: t.omschrijving,
+    markdown_content: t.markdown,
+  }
+  if (t.deadlineMs !== null) { body.due_date = t.deadlineMs; body.due_date_time = false }
+  if (t.assigneeId) body.assignees = [t.assigneeId]
+  const task = await clickupJson<{ id: string; url?: string }>(`/list/${listId}/task`, { method: 'POST', body: JSON.stringify(body) })
+  return { id: task.id, url: task.url ?? null }
+}
+
+export type TaakStatus = { status: string; kleur: string | null; type: string | null; url: string | null; naam: string | null }
+
+/** De huidige status van een taak, zoals ClickUp ze nu toont. null = taak bestaat niet meer. */
+export async function leesTaakStatus(taskId: string): Promise<TaakStatus | null> {
+  try {
+    const t = await clickupJson<{ name?: string; url?: string; status?: { status?: string; color?: string; type?: string } }>(`/task/${taskId}`)
+    return { status: t.status?.status ?? 'onbekend', kleur: t.status?.color ?? null, type: t.status?.type ?? null, url: t.url ?? null, naam: t.name ?? null }
+  } catch (e) {
+    if (isTaskGone(e)) return null
+    throw e
+  }
+}
+
+/** Een taak zoals ClickUp ze bewaart, voor de controle met echte data. Leest enkel. */
+export async function leesTaakRuw(taskId: string): Promise<{ lijst: string | null; toegewezen: number[]; startDate: string | null; dueDate: string | null; tekst: string; markdown: string; naam: string | null }> {
+  const t = await clickupJson<{
+    name?: string; list?: { id?: string }; assignees?: { id?: number }[]; start_date?: string | null; due_date?: string | null
+    description?: string | null; text_content?: string | null; markdown_description?: string | null
+  }>(`/task/${taskId}?include_markdown_description=true`)
+  return {
+    naam: t.name ?? null, lijst: t.list?.id ?? null, toegewezen: (t.assignees ?? []).map((a) => Number(a.id)).filter(Boolean),
+    startDate: t.start_date ?? null, dueDate: t.due_date ?? null,
+    tekst: `${t.description ?? ''}\n${t.text_content ?? ''}`, markdown: t.markdown_description ?? '',
+  }
+}
+
 export type ClickupLijst = { id: string; naam: string; pad: string }
 
 /**
