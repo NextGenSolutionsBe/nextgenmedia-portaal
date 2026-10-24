@@ -203,6 +203,10 @@ const naamLijst = (namen: string[]): string => (namen.length <= 1 ? namen.join('
 export type MailMeeting = {
   klant_naam: string; titel: string; starts_at: string; meet_url: string | null; beschrijving: string | null
   organisator_naam: string | null; ontvangers: Persoon[]; tijdzone?: string | null
+  /** Merk onder de mail (NextGenMedia of NextGenSolutions). */
+  afzender?: string | null
+  /** Voor een afspraak ter plaatse in plaats van via Meet. */
+  locatie?: string | null
 }
 
 /** Onderwerp en tekst van de herinnering. Enkel gegevens die in de meeting staan, niets verzonnen. */
@@ -215,8 +219,9 @@ export function herinneringsMail(m: MailMeeting): { onderwerp: string; tekst: st
     `Een korte herinnering aan onze meeting "${m.titel}" op ${wanneer(m.starts_at, tz)} (${tijdzoneLabel(tz)}).`,
   ]
   if (m.meet_url) delen.push(`Je neemt deel via Google Meet:\n${m.meet_url}`)
+  if (m.locatie) delen.push(`Locatie:\n${m.locatie}`)
   if (m.beschrijving) delen.push(`Agenda:\n${m.beschrijving}`)
-  delen.push(`Tot dan,\n${m.organisator_naam ? `${m.organisator_naam}\n` : ''}NextGenMedia`)
+  delen.push(`Tot dan,\n${m.organisator_naam ? `${m.organisator_naam}\n` : ''}${m.afzender || 'NextGenMedia'}`)
   return {
     onderwerp: `Herinnering: ${m.titel} op ${datumKort(m.starts_at, tz)} om ${uur(m.starts_at, tz)}`,
     tekst: delen.join('\n\n'),

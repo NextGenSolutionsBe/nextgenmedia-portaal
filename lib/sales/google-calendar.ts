@@ -385,6 +385,32 @@ export async function fetchBusy(connectionId: string, from: number, to: number):
   }
 }
 
+/**
+ * Zoals fetchBusy, maar STRIKT: lukt het niet (geen koppeling, Google
+ * onbereikbaar, een agenda die een fout geeft), dan gooit deze functie in
+ * plaats van "niets bezet" terug te geven. Voor de klantboeking: daar boeken we
+ * liever niet dan op een moment dat misschien bezet is.
+ */
+export async function haalBezetStrikt(connectionId: string, from: number, to: number): Promise<Interval[]> {
+  const auth = await accessToken(connectionId)
+  if (!auth) throw new AgendaNietGekoppeld()
+  let ids = auth.busyCalendarIds ?? []
+  if (ids.length === 0) ids = defaultBusyIds(await listCalendars(connectionId))
+  if (!ids.includes(auth.calendarId)) ids = [auth.calendarId, ...ids]
+  ids = ids.slice(0, 50)
+  const res = await fetchMetLimiet(`${API}/freeBusy`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ timeMin: new Date(from).toISOString(), timeMax: new Date(to).toISOString(), items: ids.map((id) => ({ id })) }),
+  })
+  const json = await res.json().catch(() => ({})) as { calendars?: Record<string, { busy?: { start: string; end: string }[]; errors?: unknown[] }>; error?: { message?: string } }
+  if (!res.ok) throw new Error(json.error?.message ?? `Google vrij/bezet gaf ${res.status}`)
+  const kalenders = json.calendars ?? {}
+  const metFout = Object.entries(kalenders).filter(([, c]) => Array.isArray(c.errors) && c.errors.length).map(([id]) => id)
+  if (metFout.length) throw new Error(`Vrij/bezet niet leesbaar voor ${metFout.length} agenda('s)`)
+  return Object.values(kalenders).flatMap((c) => (c.busy ?? []).map((b) => ({ start: new Date(b.start).getTime(), end: new Date(b.end).getTime() })))
+}
+
 export type CreatedEvent = { eventId: string; meetUrl: string | null }
 
 /** Event aanmaken in de agenda van de klant, optioneel met Google Meet (§7). */

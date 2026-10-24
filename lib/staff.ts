@@ -25,6 +25,9 @@ export const ADMIN_MODULES: AdminModule[] = [
   { key: 'assignments', label: 'Opdrachten',           prefixes: ['/admin/assignments', '/api/admin/assignments'] },
   { key: 'settlements', label: 'Settlements',          prefixes: ['/admin/settlements'] },
   { key: 'finance',     label: 'Financiën'          , prefixes: ['/admin/revenue', '/api/admin/revenue', '/api/admin/costs', '/api/admin/fiscal-settings', '/api/admin/bv-transitie'] },
+  // Meeting Inplanner: Google Agenda + Meet en uitnodiging, ClickUp-taak, herinneringsmail en klantboekingen.
+  // Ook bereikbaar met de module Verkoop (zie SHARED_API / SHARED_PAGES).
+  { key: 'meetings',    label: 'Meeting Inplanner',    prefixes: ['/admin/meetings', '/api/admin/meetings'] },
   { key: 'sales',       label: 'Verkoop',              prefixes: ['/admin/sales', '/api/admin/sales'] },
   { key: 'invoices',    label: 'Facturen',             prefixes: ['/admin/invoices', '/api/admin/invoices'] },
   { key: 'vesting',     label: 'Vesting',              prefixes: ['/admin/vesting', '/api/admin/vesting'] },
@@ -32,8 +35,6 @@ export const ADMIN_MODULES: AdminModule[] = [
   { key: 'uploads',     label: 'Klantuploads',         prefixes: ['/admin/uploads', '/api/admin/uploads'] },
   { key: 'opdrachten',  label: 'Opdrachten (klanten)', prefixes: ['/admin/opdrachten', '/api/admin/opdrachten'] },
   { key: 'formulieren', label: 'Formulieren',          prefixes: ['/admin/formulieren', '/api/admin/formulieren'] },
-  // Meetingplanner: Google Agenda + Meet en uitnodiging, ClickUp-taak en herinneringsmail.
-  { key: 'meetings',    label: 'Meetings',             prefixes: ['/admin/meetings', '/api/admin/meetings'] },
   // Personeel: dossiers, planning, uren en personeelskosten. De medewerker zelf
   // werkt in /team (eigen omgeving, eigen API /api/team), nooit in /admin.
   { key: 'personeel',   label: 'Personeel',            prefixes: ['/admin/personeel', '/api/admin/personeel'] },
@@ -86,6 +87,9 @@ const SHARED_API: Array<{ test: (p: string) => boolean; modules: string[] }> = [
   // opduiken. Strikt op /api/admin/clients/<id>/(clickup-sync|shoot-briefings) —
   // opdracht-sync (/api/admin/assignments/.../clickup-sync) valt hier bewust buiten.
   { test: (p) => /^\/api\/admin\/clients\/[^/]+\/(clickup-sync|shoot-briefings|framer)(\/|\?|$)/.test(p), modules: ['content', 'clients'] },
+  // Meeting Inplanner: de centrale meetingmodule. Setters (Verkoop) boeken er
+  // hun afspraken in, dus wie Verkoop mag, mag ook hier binnen.
+  { test: (p) => p === '/api/admin/meetings' || p.startsWith('/api/admin/meetings/') || p.startsWith('/api/admin/meetings?'), modules: ['meetings', 'sales'] },
   // Mail-composer: content (scripts/shoot), klanten (hub), contracten, blogs, partners.
   {
     test: (p) => p.startsWith('/api/admin/email/send') || p.startsWith('/api/admin/email/context') || p.startsWith('/api/admin/email/templates'),
@@ -100,6 +104,18 @@ const SHARED_API: Array<{ test: (p: string) => boolean; modules: string[] }> = [
  */
 export function modulesForApiPath(path: string): string[] | null {
   for (const s of SHARED_API) if (s.test(path)) return s.modules
+  const single = pathToModule(path)
+  return single ? [single] : null
+}
+
+/** Pagina's die bij meer dan één module horen: één ervan volstaat (zie SHARED_API). */
+const SHARED_PAGES: Array<{ test: (p: string) => boolean; modules: string[] }> = [
+  { test: (p) => p === '/admin/meetings' || p.startsWith('/admin/meetings/') || p.startsWith('/admin/meetings?'), modules: ['meetings', 'sales'] },
+]
+
+/** Module(s) die toegang geven tot een /admin-pagina; null = niet gegate. */
+export function modulesForPagePath(path: string): string[] | null {
+  for (const s of SHARED_PAGES) if (s.test(path)) return s.modules
   const single = pathToModule(path)
   return single ? [single] : null
 }

@@ -17,11 +17,11 @@ export const tabellen: Record<string, Rij[]> = {
 
 const STANDAARD: Record<string, () => Rij> = {
   klant_meetings: () => ({
-    status: 'ingepland', tijdzone: 'Europe/Brussels', klant_ontvangers: [], deelnemers: [], herinnering_aan: true,
+    bron: 'intern', status: 'ingepland', tijdzone: 'Europe/Brussels', klant_ontvangers: [], deelnemers: [], herinnering_aan: true,
     google_status: 'wacht', clickup_status: 'wacht', google_event_id: null, google_calendar_id: null, meet_url: null, google_fout: null,
     clickup_task_id: null, clickup_list_id: null, clickup_fout: null, clickup_gestart_op: null, geannuleerd_op: null, geannuleerd_door: null,
   }),
-  klant_meeting_herinneringen: () => ({ status: 'gepland', pogingen: 0, provider_id: null, email_message_id: null, fout: null, bezig_sinds: null, verzonden_op: null, geannuleerd_op: null }),
+  klant_meeting_herinneringen: () => ({ meeting_id: null, afspraak_id: null, status: 'gepland', pogingen: 0, provider_id: null, email_message_id: null, fout: null, bezig_sinds: null, verzonden_op: null, geannuleerd_op: null }),
 }
 
 function botsing(tabel: string, rijen: Rij[]): string | null {
@@ -30,6 +30,12 @@ function botsing(tabel: string, rijen: Rij[]): string | null {
     return new Set(w).size !== w.length
   }
   if (tabel === 'klant_meetings' && uniek('aanvraag_sleutel')) return 'klant_meetings_aanvraag_uniek'
+  if (tabel === 'klant_meetings') {
+    const w = rijen.filter((r) => r.bron === 'klantboeking' && r.status === 'ingepland').map((r) => `${r.agenda_id}|${new Date(r.starts_at).toISOString()}`)
+    if (new Set(w).size !== w.length) return 'klant_meetings_klantslot'
+    const t = rijen.filter((r) => r.beheer_token_hash).map((r) => r.beheer_token_hash)
+    if (new Set(t).size !== t.length) return 'klant_meetings_beheer_token'
+  }
   if (tabel === 'klant_meeting_herinneringen') {
     if (uniek('verzend_sleutel')) return 'klant_meeting_herinnering_sleutel'
     if (uniek('meeting_id', (r) => ['gepland', 'bezig', 'mislukt'].includes(r.status))) return 'klant_meeting_herinnering_actief'
@@ -103,6 +109,8 @@ class Vraag {
   gte(k: string, v: any) { this.filters.push((r) => vergelijk(r[k], 'gte', v)); return this }
   lte(k: string, v: any) { this.filters.push((r) => vergelijk(r[k], 'lte', v)); return this }
   lt(k: string, v: any) { this.filters.push((r) => vergelijk(r[k], 'lt', v)); return this }
+  gt(k: string, v: any) { this.filters.push((r) => vergelijk(r[k], 'gt', v)); return this }
+  upsert(d: any) { this.soort = 'insert'; this.data = d; return this }
   or(f: string) { this.filters.push(parseOf(f)); return this }
   order(kol: string, o?: { ascending?: boolean }) { this.volgorde = { kol, op: o?.ascending !== false }; return this }
   limit(n: number) { this.max = n; return this }
@@ -157,10 +165,19 @@ export const google = {
   verliesAntwoord: false,
   /** Meet-link komt niet meteen (Google meldt 'pending'). */
   meetTraag: false,
+  /** Vrij/bezet: bezette blokken (ISO) en storingen. */
+  bezet: [] as { start: string; end: string }[],
+  freebusyFout: false,
+  freebusyKalenderFout: false,
+  /** Volgende POST wordt geweigerd (bv. geen schrijfrechten). */
+  weigerAanmaak: false,
 }
 export const clickup = {
   taken: new Map<string, Rij>(), aangemaakt: 0, volgnr: 0,
   verliesAntwoord: false,
+  /** Taken in de werkruimte (voor bezet): { id, name, start_date, due_date, assignees }. */
+  werkruimte: [] as Rij[],
+  teamFout: false,
 }
 export const resend = {
   verstuurd: [] as Rij[], sleutels: new Map<string, string>(),
@@ -189,10 +206,19 @@ async function nepFetch(input: any, init: any = {}): Promise<Response> {
   if (url.host === 'www.googleapis.com') {
     const lijst = url.pathname.match(/\/calendar\/v3\/users\/me\/calendarList\/([^/]+)$/)
     if (lijst) return json({ id: decodeURIComponent(lijst[1]), summary: 'Agenda Bram', accessRole: 'owner' })
+    if (url.pathname.endsWith('/calendar/v3/users/me/calendarList')) return json({ items: [{ id: 'bram@agenda', summary: 'Agenda Bram', accessRole: 'owner', primary: true }] })
+    if (url.pathname.endsWith('/calendar/v3/freeBusy')) {
+      if (google.freebusyFout) return json({ error: { message: 'Backend Error' } }, 500)
+      const ids = (body.items ?? []).map((x: { id: string }) => x.id)
+      const calendars: Record<string, unknown> = {}
+      for (const id of ids) calendars[id] = google.freebusyKalenderFout ? { errors: [{ reason: 'notFound' }], busy: [] } : { busy: id === ids[0] ? google.bezet : [] }
+      return json({ calendars })
+    }
     const m = url.pathname.match(/\/calendar\/v3\/calendars\/([^/]+)\/events(?:\/([^/]+))?$/)
     if (!m) return json({ error: { message: 'onbekend pad' } }, 404)
     const id = m[2] ? decodeURIComponent(m[2]) : null
     if (methode === 'POST') {
+      if (google.weigerAanmaak) { google.weigerAanmaak = false; return json({ error: { message: 'Forbidden' } }, 403) }
       if (google.events.has(body.id)) return json({ error: { message: 'The requested identifier already exists.' } }, 409)
       const ev = metMeet({ ...body, status: 'confirmed', calendarId: decodeURIComponent(m[1]) }, !!body.conferenceData?.createRequest)
       delete ev.conferenceData?.createRequest?.requestId
@@ -219,6 +245,13 @@ async function nepFetch(input: any, init: any = {}): Promise<Response> {
 
   if (url.host === 'api.clickup.com') {
     const p = url.pathname.replace('/api/v2', '')
+    if (p === '/team') return clickup.teamFout ? json({ err: 'Team not authorized', ECODE: 'OAUTH_027' }, 401) : json({ teams: [{ id: 'T1' }] })
+    if (p === '/team/T1/task') {
+      const van = Number(url.searchParams.get('due_date_gt') ?? 0), tot = Number(url.searchParams.get('due_date_lt') ?? 0)
+      const wie = url.searchParams.getAll('assignees[]').map(Number)
+      const tasks = clickup.werkruimte.filter((t) => Number(t.due_date) > van && Number(t.due_date) < tot && (t.assignees as { id: number }[]).some((a) => wie.includes(a.id)))
+      return json({ tasks })
+    }
     let m = p.match(/^\/list\/([^/]+)\/task$/)
     if (m && methode === 'POST') {
       const id = `cu${++clickup.volgnr}`

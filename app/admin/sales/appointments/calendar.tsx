@@ -50,16 +50,18 @@ const hhmm = (ms: number) =>
   new Date(ms).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })
 
 /** Eén algemene pipeline; de keuze die telt is WIENS agenda je bekijkt. */
-export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId, initialMerkId }: {
+export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId, initialMerkId, initialAppt }: {
   client: SalesClient
   pipelines: Pipeline[]
   isAdmin?: boolean
   initialLeadId?: string
   /** Merk waarmee het scherm opent (bv. van de lead uit de pipeline). */
   initialMerkId?: string
+  /** Vanuit het overzicht van de Meeting Inplanner: deze afspraak meteen openen. */
+  initialAppt?: { id: string; startsAt: string; calendarId: string | null } | null
 }) {
   const clientId = client.id
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()))
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(initialAppt ? new Date(initialAppt.startsAt) : new Date()))
   const [loading, setLoading] = useState(true)
   const [segments, setSegments] = useState<Interval[]>([])
   const [appointments, setAppointments] = useState<Appt[]>([])
@@ -72,7 +74,7 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId, initi
     pipeline_id?: string | null
     clickup_assignee_id?: number | null
   }[]>([])
-  const [ownerId, setOwnerId] = useState<string>('')
+  const [ownerId, setOwnerId] = useState<string>(initialAppt?.calendarId ?? '')
   // Merkfilter: toon enkel de agenda's van dit merk. '' = alle agenda's.
   const [merkFilter, setMerkFilter] = useState<string>(initialMerkId ?? '')
 
@@ -144,6 +146,7 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId, initi
   // gewijzigde uitnodiging en raakt de herinneringsmail. Zoiets hoort niet te
   // gebeuren omdat je de muis liet slippen — dus klikken, aanpassen, bevestigen.
   const [editing, setEditing] = useState<Appt | null>(null)
+  const geopendAppt = useRef(false)
 
   const from = weekStart.getTime()
   const to = from + 7 * 86400000
@@ -167,6 +170,12 @@ export function SalesCalendar({ client, pipelines, isAdmin, initialLeadId, initi
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Agenda laden mislukt') } finally { setLoading(false) }
   }, [from, to, ownerId])
   useEffect(() => { load() }, [load])
+  // Deeplink naar één afspraak: open ze één keer zodra ze in de geladen week staat.
+  useEffect(() => {
+    if (!initialAppt || geopendAppt.current) return
+    const a = appointments.find((x) => x.id === initialAppt.id)
+    if (a) { geopendAppt.current = true; setEditing(a) }
+  }, [appointments, initialAppt])
 
   // De leadkiezer haalt zijn eigen treffers op terwijl je typt — zie
   // LeadKiezer hieronder. Vroeger stond hier een fetch van álle leads
@@ -530,6 +539,9 @@ function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId
   const [clientNote, setClientNote] = useState('')
   const [withMeet, setWithMeet] = useState(true)
   const [saving, setSaving] = useState(false)
+  // Eerst nakijken, dan bevestigen (Meeting Inplanner): zo gaat er nooit een
+  // uitnodiging naar een verkeerd adres of op een verkeerd uur.
+  const [controle, setControle] = useState(false)
 
   const leadPipeline = lead ? pipelines.find((p) => p.id === lead.pipelineId) ?? null : null
 
@@ -590,6 +602,27 @@ function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId
         </div>
 
         <div className="p-5 space-y-3 overflow-y-auto">
+          {controle && (() => {
+            const naar = email.trim() || lead?.email || null
+            const merk = pipelines.find((p) => p.id === pipelineId)?.name ?? '—'
+            const rijen: [string, string][] = [
+              ['Wanneer', `${new Date(start).toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' })} · ${hhmm(start)}–${hhmm(end)} (Belgische tijd)`],
+              ['Agenda', ownerName ?? '—'],
+              ['Lead', lead?.label ?? 'Geen lead gekoppeld'],
+              ['Merk', merk],
+              ['Uitnodiging naar', naar ?? 'niemand: zonder e-mailadres gaat er geen uitnodiging of herinnering uit'],
+              ['Titel', titel.trim() || `${(lead?.label.split(' · ')[0] ?? 'Bedrijf')} — ${merk}`],
+              ['Google Meet', withMeet ? 'ja, link wordt aangemaakt' : 'nee'],
+              ...(adres.trim() ? [['Adres', adres.trim()] as [string, string]] : []),
+              ['Herinnering', naar ? '24 uur vooraf naar de prospect (of 2 uur vooraf als dat te laat is)' : 'geen'],
+            ]
+            return (
+              <div className="rounded-lg border border-gray-900 bg-gray-50 p-3 text-sm space-y-1" role="status">
+                <p className="font-medium">Klopt dit? Na bevestigen gaat de uitnodiging de deur uit.</p>
+                <dl className="text-xs space-y-0.5">{rijen.map(([k, v]) => <div key={k} className="flex gap-2"><dt className="w-28 shrink-0 text-gray-500">{k}</dt><dd className="min-w-0 break-words">{v}</dd></div>)}</dl>
+              </div>
+            )
+          })()}
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Lead koppelen <span className="text-gray-400">— optioneel</span></label>
             <LeadKiezer waarde={lead} initialId={initialLeadId} onKies={setLead} />
@@ -680,10 +713,24 @@ function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId
         </div>
 
         <div className="p-4 border-t border-gray-100 flex gap-2">
-          <button onClick={book} disabled={saving} className="btn-primary flex-1">
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}Boek &amp; sync met Google
-          </button>
-          <button onClick={onClose} className="btn-secondary">Annuleer</button>
+          {controle ? (
+            <>
+              <button onClick={book} disabled={saving} className="btn-primary flex-1">
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}Bevestigen en boeken
+              </button>
+              <button onClick={() => setControle(false)} disabled={saving} className="btn-secondary">Terug</button>
+            </>
+          ) : (
+            <>
+              <button onClick={() => {
+                if (email.trim() && !/^[^\s@,;<>()]+@[^\s@,;<>()]+\.[^\s@,;<>()]{2,}$/.test(email.trim())) { toast.error('Dat e-mailadres is niet geldig.'); return }
+                setControle(true)
+              }} className="btn-primary flex-1">
+                <CalendarClock className="h-4 w-4" />Nakijken
+              </button>
+              <button onClick={onClose} className="btn-secondary">Annuleer</button>
+            </>
+          )}
         </div>
       </div>
     </div>

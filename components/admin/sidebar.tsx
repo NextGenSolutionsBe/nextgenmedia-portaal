@@ -24,6 +24,8 @@ type NavEntry = {
   icon: React.ElementType
   exact?: boolean
   module?: string
+  /** Tweede module die het item ook zichtbaar maakt (gedeelde pagina, zie lib/staff.ts). */
+  ookModule?: string
   adminOnly?: boolean
   children?: NavChild[]
   /** Sleutel uit /api/admin/badges: toont een rood telbolletje. */
@@ -46,7 +48,6 @@ const SECTIONS: NavSection[] = [
     items: [
       { label: 'Klanten',    href: '/admin/clients',   icon: Users, module: 'clients' },
       { label: 'Contracten', href: '/admin/contracts', icon: FileText, module: 'contracts' },
-      { label: 'Meetings', href: '/admin/meetings', icon: Video, module: 'meetings' },
       {
         label: 'Diensten', href: '/admin/services', icon: Briefcase, module: 'content',
         children: [
@@ -93,11 +94,12 @@ const SECTIONS: NavSection[] = [
   {
     title: 'Verkoop',
     items: [
-      { label: 'Appointment setting', href: '/admin/sales/appointments', icon: CalendarClock, module: 'sales' },
+      // De Meeting Inplanner vervangt Appointment setting (die agenda zit er nu in;
+      // /admin/sales/appointments stuurt door). Bevestigingen en Resultaten zijn
+      // verborgen uit de navigatie; hun pagina's en gegevens blijven bestaan.
+      { label: 'Meeting Inplanner',   href: '/admin/meetings',           icon: Video,        module: 'meetings', ookModule: 'sales' },
       { label: 'Pipeline',            href: '/admin/sales/pipeline',     icon: KanbanSquare, module: 'sales' },
       { label: 'Belscripts',          href: '/admin/sales/scripts',      icon: FileText,     module: 'sales' },
-      { label: 'Bevestigingen',       href: '/admin/sales/herinneringen', icon: PhoneCall,   module: 'sales' },
-      { label: 'Resultaten',          href: '/admin/sales/resultaten',   icon: BarChart3,    module: 'sales' },
       // Apart van Resultaten: dat gaat over geld, dit over conversie.
       { label: 'Statistieken',        href: '/admin/sales/statistieken', icon: TrendingUp,   module: 'sales' },
       // Harrie praat rechtstreeks met Supabase; het sleutelscherm staat uit via
@@ -252,7 +254,8 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
 
   // Werknemer ziet enkel toegestane modules; admin (allowedModules undefined) ziet alles.
   const padNu = usePathname() ?? ''
-  const canSee = (item: NavEntry) => {
+  const canSee = (item: NavEntry): boolean => {
+    if (item.ookModule) return canSee({ ...item, ookModule: undefined }) || canSee({ ...item, module: item.ookModule, ookModule: undefined })
     // Uitgeschakelde features (lib/features.ts) tonen we voor niemand — ook niet
     // voor admin; de middleware blokkeert die paden sowieso.
     if (item.module && DISABLED_MODULE_KEYS.includes(item.module)) return false

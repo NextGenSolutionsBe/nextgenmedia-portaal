@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
-import { magIk } from '@/lib/instellingen/laden'
+import { plannerRechten } from '@/lib/meetings/rechten'
 import { safeMessage } from '@/lib/api-error'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { clickupTaakIdUit } from '@/lib/clickup'
@@ -28,8 +28,9 @@ export async function GET(req: NextRequest) {
   try {
     const user = await requireStaff()
     if (!user) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
-    const persoon = await magIk('meetings', 'bekijken')
-    if (!persoon) return NextResponse.json({ error: 'Geen toegang tot klantmeetings' }, { status: 403 })
+    const r = await plannerRechten()
+    const persoon = r.persoon
+    if (!persoon || !(r.meetings.bekijken || r.verkoop.bekijken)) return NextResponse.json({ error: 'Geen toegang tot de Meeting Inplanner' }, { status: 403 })
     const admin = createAdminSupabaseClient()
 
     const koppelAgenda = req.nextUrl.searchParams.get('koppelingen')
@@ -57,22 +58,28 @@ export async function GET(req: NextRequest) {
         standaardAgenda: ngm?.default_calendar_id ?? null,
         ik: { naam: persoon.naam, email: persoon.email },
         rechten: {
-          toevoegen: !!(await magIk('meetings', 'toevoegen')),
-          aanpassen: !!(await magIk('meetings', 'aanpassen')),
+          toevoegen: r.meetings.toevoegen,
+          aanpassen: r.meetings.aanpassen || r.verkoop.aanpassen,
+          meetings: r.meetings.bekijken,
+          verkoop: r.verkoop.bekijken,
         },
       })
     }
 
-    const { data, error } = await admin.from('klant_meetings').select('*').order('starts_at', { ascending: true }).limit(1000)
+    // Wie enkel Verkoop heeft, ziet de klantboekingen en de verkoopafspraken.
+    let q = admin.from('klant_meetings').select('*').order('starts_at', { ascending: true }).limit(1000)
+    if (!r.meetings.bekijken) q = q.eq('bron', 'klantboeking')
+    const { data, error } = await q
     if (error) throw new Error(error.message)
     const meetings = (data ?? []) as MeetingRij[]
     const herinneringen: Record<string, HerinneringRij> = {}
     if (meetings.length) {
       const { data: h } = await admin.from('klant_meeting_herinneringen').select('*')
         .in('meeting_id', meetings.map((m) => m.id)).order('created_at', { ascending: true })
-      for (const r of (h ?? []) as HerinneringRij[]) herinneringen[r.meeting_id] = r // laatste wint
+      for (const x of (h ?? []) as HerinneringRij[]) if (x.meeting_id) herinneringen[x.meeting_id] = x // laatste wint
     }
-    return NextResponse.json({ meetings: meetings.map((m) => ({ ...m, herinnering: herinneringen[m.id] ?? null })) })
+    const afspraken = r.verkoop.bekijken ? await verkoopAfspraken(admin) : []
+    return NextResponse.json({ meetings: meetings.map((m) => ({ ...m, herinnering: herinneringen[m.id] ?? null })), afspraken })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err, 'meetings.GET') }, { status: 500 })
   }
@@ -82,8 +89,9 @@ export async function POST(req: NextRequest) {
   try {
     const user = await requireStaff()
     if (!user) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
-    const persoon = await magIk('meetings', 'toevoegen')
-    if (!persoon) return NextResponse.json({ error: 'Je mag geen meetings inplannen' }, { status: 403 })
+    const rechten = await plannerRechten()
+    const persoon = rechten.persoon
+    if (!persoon || !rechten.meetings.toevoegen) return NextResponse.json({ error: 'Je mag geen meetings inplannen. Leads boek je via de Verkoopagenda.' }, { status: 403 })
     const b = await req.json().catch(() => ({})) as Record<string, unknown>
     const admin = createAdminSupabaseClient()
 
@@ -190,4 +198,34 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err, 'meetings.POST') }, { status: 500 })
   }
+}
+
+/**
+ * De verkoopafspraken (Appointment setting) voor het overzicht: alles wat nog
+ * komt en de laatste 60 dagen. Enkel lezen; bewerken gebeurt in de
+ * Verkoopagenda met de bestaande regels. Ook hun herinnering staat erbij.
+ */
+async function verkoopAfspraken(admin: ReturnType<typeof createAdminSupabaseClient>) {
+  const sinds = new Date(Date.now() - 60 * 86400000).toISOString()
+  const { data } = await admin.from('sales_appointments')
+    .select('id, starts_at, ends_at, status, titel, attendee_email, meet_url, external_event_id, clickup_task_id, calendar_id, pipeline_id, lead_id, outcome, adres, sales_leads ( sales_companies ( name ), sales_contacts ( name ) )')
+    .gte('ends_at', sinds).order('starts_at', { ascending: true }).limit(500)
+  const rijen = (data ?? []) as unknown as {
+    id: string; starts_at: string; ends_at: string; status: string; titel: string | null; attendee_email: string | null; meet_url: string | null
+    external_event_id: string | null; clickup_task_id: string | null; calendar_id: string | null; pipeline_id: string | null; lead_id: string | null
+    outcome: string | null; adres: string | null
+    sales_leads?: { sales_companies?: { name?: string } | null; sales_contacts?: { name?: string } | null } | null
+  }[]
+  const herinneringen: Record<string, HerinneringRij> = {}
+  if (rijen.length) {
+    const { data: h } = await admin.from('klant_meeting_herinneringen').select('*').in('afspraak_id', rijen.map((a) => a.id)).order('created_at', { ascending: true })
+    for (const x of (h ?? []) as (HerinneringRij & { afspraak_id: string })[]) herinneringen[x.afspraak_id] = x
+  }
+  return rijen.map((a) => ({
+    id: a.id, starts_at: a.starts_at, ends_at: a.ends_at, status: a.status, titel: a.titel, attendee_email: a.attendee_email,
+    meet_url: a.meet_url, in_google: !!a.external_event_id, clickup_task_id: a.clickup_task_id, calendar_id: a.calendar_id,
+    pipeline_id: a.pipeline_id, lead_id: a.lead_id, outcome: a.outcome, adres: a.adres,
+    bedrijf: a.sales_leads?.sales_companies?.name ?? null, contact: a.sales_leads?.sales_contacts?.name ?? null,
+    herinnering: herinneringen[a.id] ?? null,
+  }))
 }

@@ -34,6 +34,8 @@ type Meeting = {
   clickup_task_id: string | null; clickup_status: string; clickup_fout: string | null
   project_id?: string | null; clickup_item_id?: string | null
   uitnodiging_status?: string | null; uitnodiging_op?: string | null; uitnodiging_naar?: string[] | null
+  bron?: 'intern' | 'klantboeking'; boeker_bedrijf?: string | null; boeker_reden?: string | null
+  bevestiging_status?: string | null; bevestiging_op?: string | null; bevestiging_fout?: string | null
   created_by_email: string | null; created_at: string; geannuleerd_op: string | null; geannuleerd_door: string | null
   herinnering: Herinnering | null
 }
@@ -42,7 +44,7 @@ type Project = { id: string; titel: string; client_id: string | null; klant_vrij
 type Opties = {
   klanten: Klant[]; contacten: { client_id: string; name: string | null; email: string | null }[]; projecten: Project[]
   agendas: { id: string; naam: string; gekoppeld: boolean }[]; standaardAgenda: string | null
-  ik: { naam: string | null; email: string }; rechten: { toevoegen: boolean; aanpassen: boolean }
+  ik: { naam: string | null; email: string }; rechten: { toevoegen: boolean; aanpassen: boolean; meetings?: boolean; verkoop?: boolean }
 }
 type Detail = {
   meeting: Meeting; herinneringen: Herinnering[]; mail?: { onderwerp: string; tekst: string }
@@ -558,7 +560,10 @@ function DetailVenster({ id, opties, onSluit, onWijzig, onAnnuleer, onVeranderd 
           {m.clickup_item_id && <a className="underline underline-offset-2 text-xs inline-flex items-center gap-1" href={`https://app.clickup.com/t/${m.clickup_item_id}`} target="_blank" rel="noreferrer">ClickUp-item {m.clickup_item_id}<ExternalLink className="h-3 w-3" /></a>}
         </div>
         <div><div className={lbl}>Agenda</div>{agenda?.naam ?? '—'}{m.organisator_naam ? ` · organisator ${m.organisator_naam}` : ''}</div>
-        <div><div className={lbl}>Ingepland door</div>{m.created_by_email ?? '—'} · {datumKort(m.created_at)}</div>
+        <div><div className={lbl}>{m.bron === 'klantboeking' ? 'Geboekt' : 'Ingepland door'}</div>{m.bron === 'klantboeking' ? 'door de klant via de boekingslink' : (m.created_by_email ?? '—')} · {datumKort(m.created_at)}</div>
+        {m.bron === 'klantboeking' && (m.boeker_bedrijf || m.boeker_reden) && (
+          <div className="sm:col-span-2"><div className={lbl}>Van de klant</div>{m.boeker_bedrijf && <div>Bedrijf: {m.boeker_bedrijf}</div>}{m.boeker_reden && <div className="whitespace-pre-wrap text-gray-700">{m.boeker_reden}</div>}</div>
+        )}
       </div>
       {tz !== STANDAARD_TIJDZONE && <p className="text-xs text-gray-500">In België: {wanneer(m.starts_at)}.</p>}
       {m.beschrijving && <div><div className={lbl}>Beschrijving</div><p className="text-sm whitespace-pre-wrap">{m.beschrijving}</p></div>}
@@ -575,6 +580,13 @@ function DetailVenster({ id, opties, onSluit, onWijzig, onAnnuleer, onVeranderd 
             {m.uitnodiging_op && actief && <p className="text-xs text-gray-600">Door Google verstuurd op {datumKort(m.uitnodiging_op)} {uur(m.uitnodiging_op)} naar {(m.uitnodiging_naar ?? []).join(', ')}</p>}
             {d.antwoordenFout && <p className="text-xs text-gray-500">Antwoorden niet op te halen: {d.antwoordenFout}</p>}
           </>)}
+        {m.bron === 'klantboeking' && rij('Bevestiging',
+          m.status === 'geannuleerd' ? { label: 'Bevestiging vervallen', toon: 'neutraal' } : m.bevestiging_status === 'verzonden' ? { label: 'Bevestiging verstuurd', toon: 'ok' } : m.bevestiging_status === 'mislukt' ? { label: 'Bevestiging mislukt', toon: 'fout' } : { label: 'Geen bevestiging', toon: 'neutraal' },
+          <>
+            {m.bevestiging_op && <p className="text-xs text-gray-600">Verstuurd op {datumKort(m.bevestiging_op)} {uur(m.bevestiging_op)} naar {m.klant_ontvangers[0]?.email}</p>}
+            {m.bevestiging_fout && <p className="text-xs text-red-700">{m.bevestiging_fout}</p>}
+          </>,
+          actief && komend ? knop('bevestiging', m.bevestiging_status === 'verzonden' ? 'Opnieuw (nieuwe link)' : 'Opnieuw versturen', { actie: 'bevestiging_opnieuw' }, 'Bevestiging verstuurd. De vorige beheerlink werkt niet meer.') : null)}
         {rij('ClickUp', stapClickup(m),
           <>
             {m.clickup_task_id && <a href={`https://app.clickup.com/t/${m.clickup_task_id}`} target="_blank" rel="noreferrer" className="text-xs underline underline-offset-2 inline-flex items-center gap-1">Taak openen<ExternalLink className="h-3 w-3" /></a>}
@@ -613,15 +625,103 @@ function DetailVenster({ id, opties, onSluit, onWijzig, onAnnuleer, onVeranderd 
   )
 }
 
+// ── Verkoopafspraken (Verkoopagenda) ─────────────────────────────────────────
+
+type Afspraak = {
+  id: string; starts_at: string; ends_at: string; status: string; titel: string | null; attendee_email: string | null
+  meet_url: string | null; in_google: boolean; clickup_task_id: string | null; calendar_id: string | null; pipeline_id: string | null
+  lead_id: string | null; outcome: string | null; adres: string | null; bedrijf: string | null; contact: string | null
+  herinnering: Herinnering | null
+}
+const afspraakTitel = (a: Afspraak) => a.titel || [a.bedrijf, a.contact].filter(Boolean).join(' — ') || 'Verkoopafspraak'
+function afspraakStappen(a: Afspraak): StapWeergave[] {
+  const actief = a.status !== 'cancelled'
+  const v = { status: actief ? 'ingepland' : 'geannuleerd', google_status: a.in_google ? 'ok' : 'fout', meet_url: a.meet_url, clickup_status: a.clickup_task_id ? 'ok' : 'overgeslagen', herinnering_aan: !!a.attendee_email, uitnodiging_status: a.in_google && a.attendee_email ? 'verzonden' : null }
+  return [
+    actief ? (a.in_google ? { label: 'In Google Agenda', toon: 'ok' as Toon } : { label: 'Niet in Google', toon: 'fout' as Toon }) : { label: 'Geannuleerd', toon: 'neutraal' as Toon },
+    a.meet_url ? { label: 'Meet-link klaar', toon: 'ok' as Toon } : a.adres ? { label: 'Ter plaatse', toon: 'neutraal' as Toon } : { label: 'Geen Meet-link', toon: 'neutraal' as Toon },
+    actief ? (a.attendee_email ? (a.in_google ? { label: 'Uitnodiging verstuurd', toon: 'ok' as Toon } : { label: 'Uitnodiging niet verstuurd', toon: 'fout' as Toon }) : { label: 'Geen e-mail prospect', toon: 'neutraal' as Toon }) : { label: 'Uitnodiging vervallen', toon: 'neutraal' as Toon },
+    stapClickup(v),
+    stapHerinnering(v, a.herinnering),
+  ]
+}
+
+function AfspraakVenster({ a, opties, onSluit, onVeranderd }: { a: Afspraak; opties: Opties; onSluit: () => void; onVeranderd: () => void }) {
+  const router = useRouter()
+  const [bezig, setBezig] = useState<string | null>(null)
+  const agenda = opties.agendas.find((x) => x.id === a.calendar_id)
+  const actief = a.status !== 'cancelled'
+  const komend = new Date(a.starts_at).getTime() > Date.now()
+  const kan = opties.rechten.aanpassen && opties.rechten.verkoop
+  async function doe(sleutel: string, fn: () => Promise<unknown>, ok: string) {
+    setBezig(sleutel)
+    try { await fn(); toast.success(ok); onVeranderd(); onSluit() } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(null) }
+  }
+  const h = a.herinnering
+  return (
+    <Modal breed titel={<span className="flex items-center gap-2">{afspraakTitel(a)}<span className="status-badge bg-gray-100 text-gray-700">Verkoop</span>{!actief && <span className="status-badge bg-gray-100 text-gray-600">Geannuleerd</span>}</span>}
+      sub={`${wanneer(a.starts_at)} – ${uur(a.ends_at)} (Belgische tijd)`} onSluit={onSluit}
+      voet={kan && actief && komend ? <>
+        <button type="button" disabled={!!bezig} onClick={() => { if (confirm('Deze afspraak annuleren? Het agenda-item wordt geannuleerd, de ClickUp-taak gesloten en de herinnering ingetrokken.')) doe('annuleer', () => api(`/api/admin/sales/appointments?id=${a.id}`, { method: 'DELETE' }), 'Afspraak geannuleerd.') }} className={`btn-danger ${focusRing}`}>{bezig === 'annuleer' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}Annuleren</button>
+        <button type="button" onClick={() => router.push(`/admin/meetings?tab=agenda&afspraak=${a.id}`)} className={`btn-primary ${focusRing}`}><Pencil className="h-4 w-4" />Bewerken of verplaatsen</button>
+      </> : undefined}>
+      {a.meet_url && actief && (
+        <div className="flex items-center gap-2 rounded-lg border border-gray-200 p-3">
+          <Video className="h-4 w-4 shrink-0" aria-hidden />
+          <a href={a.meet_url} target="_blank" rel="noreferrer" className="text-sm font-medium underline underline-offset-2 truncate flex-1">{a.meet_url}</a>
+          <Kopieer tekst={a.meet_url} />
+        </div>
+      )}
+      <div className="grid sm:grid-cols-2 gap-3 text-sm">
+        <div><div className={lbl}>Prospect</div>{[a.bedrijf, a.contact].filter(Boolean).join(' · ') || '—'}{a.attendee_email && <div className="text-gray-600 break-words">{a.attendee_email}</div>}</div>
+        <div><div className={lbl}>Agenda</div>{agenda?.naam ?? '—'}</div>
+        {a.adres && <div><div className={lbl}>Adres</div>{a.adres}</div>}
+        {a.lead_id && <div><div className={lbl}>Pipeline</div><a className="underline underline-offset-2" href={`/admin/sales/pipeline?lead=${a.lead_id}`}>Lead openen</a></div>}
+      </div>
+      <div className="divide-y divide-gray-100 border-y border-gray-100">
+        {afspraakStappen(a).map((s, i) => (
+          <div key={i} className="py-2 flex items-start gap-3">
+            <div className="w-28 text-xs font-medium text-gray-500 pt-0.5">{['Google Agenda', 'Google Meet', 'Uitnodiging', 'ClickUp', 'Herinnering'][i]}</div>
+            <div className="flex-1 min-w-0 space-y-1">
+              <div><StapChip s={s} /></div>
+              {i === 3 && a.clickup_task_id && <a href={`https://app.clickup.com/t/${a.clickup_task_id}`} target="_blank" rel="noreferrer" className="text-xs underline underline-offset-2 inline-flex items-center gap-1">Taak openen<ExternalLink className="h-3 w-3" /></a>}
+              {i === 4 && h && <p className="text-xs text-gray-600">{momentLabel(h.moment)} · {h.status === 'verzonden' && h.verzonden_op ? `verstuurd ${datumKort(h.verzonden_op)} ${uur(h.verzonden_op)}` : `gepland ${datumKort(h.gepland_voor)} ${uur(h.gepland_voor)}`} · naar {h.ontvangers.map((p) => p.email).join(', ')}</p>}
+              {i === 4 && h?.fout && <p className={`text-xs ${h.status === 'mislukt' ? 'text-red-700' : 'text-gray-500'}`}>{h.fout}</p>}
+            </div>
+            {i === 4 && kan && actief && h?.status === 'mislukt' && (
+              <button type="button" disabled={!!bezig} onClick={() => doe('herinnering', () => api(`/api/admin/meetings/afspraak/${a.id}`, { method: 'PATCH', body: JSON.stringify({ actie: 'herinnering_opnieuw' }) }), 'Herinnering opnieuw verstuurd.')} className={`btn-secondary !px-2.5 !py-1 text-xs ${focusRing}`}>{bezig === 'herinnering' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}Opnieuw versturen</button>
+            )}
+            {i === 4 && kan && actief && komend && a.attendee_email && (!h || h.status === 'geannuleerd') && kiesHerinnering(a.starts_at) && (
+              <button type="button" disabled={!!bezig} onClick={() => doe('plan', () => api(`/api/admin/meetings/afspraak/${a.id}`, { method: 'PATCH', body: JSON.stringify({ actie: 'herinnering_plannen' }) }), 'Herinnering gepland.')} className={`btn-secondary !px-2.5 !py-1 text-xs ${focusRing}`}><RotateCcw className="h-3.5 w-3.5" />Herinnering plannen</button>
+            )}
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-gray-500">Geboekt via de Verkoopagenda. Bewerken, verplaatsen en de uitkomst registreren gebeuren daar, met dezelfde regels als voorheen (setter, merk, ClickUp, pipeline).</p>
+    </Modal>
+  )
+}
+
 // ── Weekweergave ─────────────────────────────────────────────────────────────
 
-function Week({ meetings, maandag, onKies, onDag }: { meetings: Meeting[]; maandag: string; onKies: (id: string) => void; onDag: (d: string) => void }) {
+type Item = { soort: 'meeting'; m: Meeting } | { soort: 'afspraak'; a: Afspraak }
+const itemStart = (x: Item) => (x.soort === 'meeting' ? x.m.starts_at : x.a.starts_at)
+const itemEind = (x: Item) => (x.soort === 'meeting' ? x.m.ends_at : x.a.ends_at)
+const itemActief = (x: Item) => (x.soort === 'meeting' ? x.m.status === 'ingepland' : x.a.status !== 'cancelled')
+const itemStappen = (x: Item) => (x.soort === 'meeting' ? stappen(x.m) : afspraakStappen(x.a))
+const itemId = (x: Item) => `${x.soort}:${x.soort === 'meeting' ? x.m.id : x.a.id}`
+function Bron({ x }: { x: Item }) {
+  const t = x.soort === 'afspraak' ? 'Verkoop' : x.m.bron === 'klantboeking' ? 'Klantboeking' : 'Intern'
+  return <span className="rounded border border-gray-200 px-1 py-px text-[10px] font-medium text-gray-600 whitespace-nowrap">{t}</span>
+}
+
+function Week({ items, maandag, onKies, onDag }: { items: Item[]; maandag: string; onKies: (x: Item) => void; onDag: (d: string) => void }) {
   const dagen = Array.from({ length: 7 }, (_, i) => plusDagen(maandag, i))
   const vandaag = dag(new Date().toISOString())
   return (
     <div className="grid grid-cols-1 md:grid-cols-7 gap-2">
       {dagen.map((d) => {
-        const lijst = meetings.filter((m) => dag(m.starts_at) === d).sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+        const lijst = items.filter((x) => dag(itemStart(x)) === d).sort((a, b) => itemStart(a).localeCompare(itemStart(b)))
         const iso = `${d}T12:00:00.000Z`
         return (
           <div key={d} className={`rounded-lg border ${d === vandaag ? 'border-gray-900' : 'border-gray-200'} bg-white p-2 min-h-[5rem] md:min-h-[12rem]`}>
@@ -630,12 +730,12 @@ function Week({ meetings, maandag, onKies, onDag }: { meetings: Meeting[]; maand
               <span className="text-sm font-semibold tabular-nums">{datumKort(iso).split(' ').slice(1).join(' ')}</span>
             </button>
             <div className="space-y-1">
-              {lijst.map((m) => {
-                const probleem = stappen(m).some((s) => s.toon === 'fout')
+              {lijst.map((x) => {
+                const probleem = itemActief(x) && itemStappen(x).some((s) => s.toon === 'fout')
                 return (
-                  <button key={m.id} type="button" onClick={() => onKies(m.id)} className={`w-full text-left rounded-md border px-1.5 py-1 text-[11px] leading-tight hover:bg-gray-50 ${m.status === 'geannuleerd' ? 'border-gray-100 text-gray-400 line-through' : probleem ? 'border-red-200 bg-red-50/50' : 'border-gray-200'} ${focusRing}`}>
-                    <span className="font-medium tabular-nums">{uur(m.starts_at)}</span> <span className="break-words">{m.titel}</span>
-                    <span className="block text-gray-500 truncate">{m.klant_naam}</span>
+                  <button key={itemId(x)} type="button" onClick={() => onKies(x)} className={`w-full text-left rounded-md border px-1.5 py-1 text-[11px] leading-tight hover:bg-gray-50 ${!itemActief(x) ? 'border-gray-100 text-gray-400 line-through' : probleem ? 'border-red-200 bg-red-50/50' : 'border-gray-200'} ${focusRing}`}>
+                    <span className="font-medium tabular-nums">{uur(itemStart(x))}</span> <span className="break-words">{x.soort === 'meeting' ? x.m.titel : afspraakTitel(x.a)}</span>
+                    <span className="block text-gray-500 truncate">{x.soort === 'meeting' ? x.m.klant_naam : (x.a.bedrijf ?? 'Verkoop')}</span>
                   </button>
                 )
               })}
@@ -650,12 +750,13 @@ function Week({ meetings, maandag, onKies, onDag }: { meetings: Meeting[]; maand
 // ── Pagina ───────────────────────────────────────────────────────────────────
 
 type Tab = 'komend' | 'voorbij' | 'geannuleerd'
-type Venster = { soort: 'plan'; meeting: Meeting | null; dag?: string } | { soort: 'detail'; id: string } | { soort: 'annuleer'; meeting: Meeting } | { soort: 'koppelingen' } | null
+type Venster = { soort: 'plan'; meeting: Meeting | null; dag?: string } | { soort: 'detail'; id: string } | { soort: 'annuleer'; meeting: Meeting } | { soort: 'koppelingen' } | { soort: 'afspraak'; a: Afspraak } | null
 
 export function MeetingsClient() {
   const router = useRouter()
   const params = useSearchParams()
   const [meetings, setMeetings] = useState<Meeting[] | null>(null)
+  const [afspraken, setAfspraken] = useState<Afspraak[]>([])
   const [opties, setOpties] = useState<Opties | null>(null)
   const [fout, setFout] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('komend')
@@ -664,7 +765,10 @@ export function MeetingsClient() {
   const [venster, setVenster] = useState<Venster>(null)
 
   const laad = useCallback(async () => {
-    try { const j = await api<{ meetings: Meeting[] }>('/api/admin/meetings'); setMeetings(j.meetings); setFout(null) } catch (e) { setFout(e instanceof Error ? e.message : 'Laden mislukt') }
+    try {
+      const j = await api<{ meetings: Meeting[]; afspraken?: Afspraak[] }>('/api/admin/meetings')
+      setMeetings(j.meetings); setAfspraken(j.afspraken ?? []); setFout(null)
+    } catch (e) { setFout(e instanceof Error ? e.message : 'Laden mislukt') }
   }, [])
   useEffect(() => {
     laad()
@@ -676,36 +780,35 @@ export function MeetingsClient() {
   useEffect(() => { const id = params.get('meeting'); if (id) setVenster({ soort: 'detail', id }) }, [params])
 
   const sluit = useCallback(() => { setVenster(null); if (params.get('meeting')) router.replace('/admin/meetings') }, [params, router])
+  const open = (x: Item) => setVenster(x.soort === 'meeting' ? { soort: 'detail', id: x.m.id } : { soort: 'afspraak', a: x.a })
 
   const nu = Date.now()
-  const lijsten = useMemo(() => {
-    const alle = meetings ?? []
-    return {
-      komend: alle.filter((m) => m.status === 'ingepland' && new Date(m.ends_at).getTime() >= nu),
-      voorbij: alle.filter((m) => m.status === 'ingepland' && new Date(m.ends_at).getTime() < nu).reverse(),
-      geannuleerd: alle.filter((m) => m.status === 'geannuleerd').reverse(),
-    }
-  }, [meetings, nu])
+  const items = useMemo<Item[]>(() => [
+    ...(meetings ?? []).map((m) => ({ soort: 'meeting' as const, m })),
+    ...afspraken.map((a) => ({ soort: 'afspraak' as const, a })),
+  ].sort((a, b) => itemStart(a).localeCompare(itemStart(b))), [meetings, afspraken])
+  const lijsten = useMemo(() => ({
+    komend: items.filter((x) => itemActief(x) && new Date(itemEind(x)).getTime() >= nu),
+    voorbij: items.filter((x) => itemActief(x) && new Date(itemEind(x)).getTime() < nu).reverse(),
+    geannuleerd: items.filter((x) => !itemActief(x)).reverse(),
+  }), [items, nu])
   const zichtbaar = lijsten[tab]
-  const problemen = lijsten.komend.filter((m) => stappen(m).some((s) => s.toon === 'fout')).length
+  const problemen = lijsten.komend.filter((x) => itemStappen(x).some((s) => s.toon === 'fout')).length
   const zondag = plusDagen(maandag, 6)
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-semibold">Meetings</h1>
-          <p className="text-sm text-gray-500">Plan een meeting met Google Meet-link en uitnodiging, met of zonder klant. Standaard in Belgische tijd.</p>
-        </div>
+      <div className="flex items-start justify-end gap-3 flex-wrap">
         <div className="flex gap-2 flex-wrap">
           {opties && <button type="button" onClick={() => setVenster({ soort: 'koppelingen' })} className={`btn-secondary ${focusRing}`}><ShieldCheck className="h-4 w-4" />Koppelingen</button>}
+          {opties?.rechten.verkoop && <button type="button" onClick={() => router.push('/admin/meetings?tab=agenda')} className={`btn-secondary ${focusRing}`}><CalendarDays className="h-4 w-4" />Afspraak voor een lead</button>}
           {opties?.rechten.toevoegen && <button type="button" onClick={() => setVenster({ soort: 'plan', meeting: null })} className={`btn-primary ${focusRing}`}><Plus className="h-4 w-4" />Meeting plannen</button>}
         </div>
       </div>
 
       {problemen > 0 && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 flex items-center gap-2" role="status">
-          <AlertTriangle className="h-4 w-4 shrink-0" />{problemen === 1 ? 'Eén komende meeting heeft' : `${problemen} komende meetings hebben`} een stap die misliep. Open de meeting om het opnieuw te proberen.
+          <AlertTriangle className="h-4 w-4 shrink-0" />{problemen === 1 ? 'Eén komende meeting heeft' : `${problemen} komende meetings hebben`} een stap die aandacht nodig heeft. Open de meeting om het opnieuw te proberen.
         </div>
       )}
 
@@ -736,7 +839,7 @@ export function MeetingsClient() {
       {!meetings && !fout && <div className="card-base flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>}
 
       {meetings && weergave === 'week' && (
-        <Week meetings={meetings} maandag={maandag} onKies={(id) => setVenster({ soort: 'detail', id })}
+        <Week items={items} maandag={maandag} onKies={open}
           onDag={(d) => { if (opties?.rechten.toevoegen && d >= dag(new Date().toISOString())) setVenster({ soort: 'plan', meeting: null, dag: d }) }} />
       )}
 
@@ -749,27 +852,34 @@ export function MeetingsClient() {
 
       {meetings && weergave === 'lijst' && zichtbaar.length > 0 && (
         <ul className="space-y-2">
-          {zichtbaar.map((m) => (
-            <li key={m.id}>
-              <button type="button" onClick={() => setVenster({ soort: 'detail', id: m.id })} className={`card-base !p-3 sm:!p-4 w-full text-left hover:border-gray-300 flex gap-3 sm:gap-4 ${focusRing}`}>
-                <div className="w-14 shrink-0 text-center border-r border-gray-100 pr-3">
-                  <div className="text-[11px] uppercase tracking-wide text-gray-500">{datumKort(m.starts_at).split(' ')[0]}</div>
-                  <div className="text-xl font-semibold tabular-nums leading-tight">{datumKort(m.starts_at).split(' ')[1]}</div>
-                  <div className="text-[11px] text-gray-500">{datumKort(m.starts_at).split(' ').slice(2).join(' ')}</div>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline gap-2 flex-wrap">
-                    <span className="font-medium text-gray-900 truncate">{m.titel}</span>
-                    <span className="text-xs text-gray-500 tabular-nums">{uur(m.starts_at)}–{uur(m.ends_at)}{m.tijdzone !== STANDAARD_TIJDZONE && ` (${uur(m.starts_at, m.tijdzone)} ${m.tijdzone})`}</span>
+          {zichtbaar.map((x) => {
+            const st = itemStart(x)
+            return (
+              <li key={itemId(x)}>
+                <button type="button" onClick={() => open(x)} className={`card-base !p-3 sm:!p-4 w-full text-left hover:border-gray-300 flex gap-3 sm:gap-4 ${focusRing}`}>
+                  <div className="w-14 shrink-0 text-center border-r border-gray-100 pr-3">
+                    <div className="text-[11px] uppercase tracking-wide text-gray-500">{datumKort(st).split(' ')[0]}</div>
+                    <div className="text-xl font-semibold tabular-nums leading-tight">{datumKort(st).split(' ')[1]}</div>
+                    <div className="text-[11px] text-gray-500">{datumKort(st).split(' ').slice(2).join(' ')}</div>
                   </div>
-                  <div className="text-xs text-gray-600 truncate">{m.client_id ? m.klant_naam : 'Geen klant'} · {m.klant_ontvangers.map((p) => p.naam || p.email).join(', ')}
-                    {m.deelnemers.length > 0 && <span className="text-gray-400"> <Users className="h-3 w-3 inline -mt-0.5" aria-hidden /> +{m.deelnemers.length}</span>}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-2 flex-wrap">
+                      <span className="font-medium text-gray-900 truncate">{x.soort === 'meeting' ? x.m.titel : afspraakTitel(x.a)}</span>
+                      <span className="text-xs text-gray-500 tabular-nums">{uur(st)}–{uur(itemEind(x))}{x.soort === 'meeting' && x.m.tijdzone !== STANDAARD_TIJDZONE && ` (${uur(st, x.m.tijdzone)} ${x.m.tijdzone})`}</span>
+                      <Bron x={x} />
+                    </div>
+                    <div className="text-xs text-gray-600 truncate">
+                      {x.soort === 'meeting'
+                        ? <>{x.m.client_id ? x.m.klant_naam : x.m.bron === 'klantboeking' ? (x.m.boeker_bedrijf || 'Geen klant') : 'Geen klant'} · {x.m.klant_ontvangers.map((p) => p.naam || p.email).join(', ')}
+                          {x.m.deelnemers.length > 0 && <span className="text-gray-400"> <Users className="h-3 w-3 inline -mt-0.5" aria-hidden /> +{x.m.deelnemers.length}</span>}</>
+                        : <>{[x.a.bedrijf, x.a.contact].filter(Boolean).join(' · ') || 'Prospect'}{x.a.attendee_email ? ` · ${x.a.attendee_email}` : ''}</>}
+                    </div>
+                    {itemActief(x) && <div className="flex flex-wrap gap-1 mt-1.5">{itemStappen(x).map((s, i) => <StapChip key={i} s={s} />)}</div>}
                   </div>
-                  {m.status === 'ingepland' && <div className="flex flex-wrap gap-1 mt-1.5">{stappen(m).map((s, i) => <StapChip key={i} s={s} />)}</div>}
-                </div>
-              </button>
-            </li>
-          ))}
+                </button>
+              </li>
+            )
+          })}
         </ul>
       )}
 
@@ -782,6 +892,7 @@ export function MeetingsClient() {
         <DetailVenster id={venster.id} opties={opties} onSluit={sluit} onVeranderd={laad}
           onWijzig={(m) => setVenster({ soort: 'plan', meeting: m })} onAnnuleer={(m) => setVenster({ soort: 'annuleer', meeting: m })} />
       )}
+      {venster?.soort === 'afspraak' && opties && <AfspraakVenster a={venster.a} opties={opties} onSluit={() => setVenster(null)} onVeranderd={laad} />}
       {venster?.soort === 'annuleer' && (
         <AnnuleerVenster m={venster.meeting} onSluit={() => setVenster({ soort: 'detail', id: venster.meeting.id })}
           onKlaar={(m) => { toast.success('Meeting geannuleerd.'); laad(); setVenster({ soort: 'detail', id: m.id }) }} />

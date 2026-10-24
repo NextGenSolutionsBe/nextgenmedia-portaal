@@ -1,7 +1,8 @@
 import 'server-only'
 import { randomUUID } from 'crypto'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
-import { sendEmail, baseUrl, EMAIL_FROM } from '@/lib/email'
+import { sendEmail, baseUrl, EMAIL_FROM, resendKeyFor } from '@/lib/email'
+import { defaultFromFor } from '@/lib/sales/pipelines'
 import { buildEmailHtml } from '@/lib/email-html'
 import {
   maakMeetingEvent, haalMeetingEvent, werkMeetingEventBij, annuleerMeetingEvent, controleerAgenda, AgendaNietGekoppeld, type MeetingEvent,
@@ -41,12 +42,14 @@ export type MeetingRij = {
   clickup_task_id: string | null; clickup_list_id: string | null; clickup_status: string; clickup_fout: string | null; clickup_gestart_op: string | null
   created_by: string | null; created_by_email: string | null; created_at: string; updated_at: string
   geannuleerd_op: string | null; geannuleerd_door: string | null
+  bron?: 'intern' | 'klantboeking'; lead_id?: string | null; boeker_bedrijf?: string | null; boeker_reden?: string | null
+  beheer_token_hash?: string | null; bevestiging_status?: string | null; bevestiging_op?: string | null; bevestiging_fout?: string | null
   project_id?: string | null; clickup_item_id?: string | null
   uitnodiging_status?: string | null; uitnodiging_op?: string | null; uitnodiging_naar?: string[] | null
 }
 
 export type HerinneringRij = {
-  id: string; meeting_id: string; moment: string; gepland_voor: string; ontvangers: Persoon[]; status: string
+  id: string; meeting_id: string | null; afspraak_id?: string | null; voor_start?: string | null; moment: string; gepland_voor: string; ontvangers: Persoon[]; status: string
   verzend_sleutel: string; provider_id: string | null; email_message_id: string | null; fout: string | null; pogingen: number
   bezig_sinds: string | null; verzonden_op: string | null; geannuleerd_op: string | null; created_at: string; updated_at: string
 }
@@ -253,6 +256,17 @@ export async function stapClickup(admin: Admin, m: MeetingRij): Promise<MeetingR
 
 // ── 3. Herinnering ───────────────────────────────────────────────────────────
 
+/** Herinnering invoegen; zonder de kolom voor_start (nog niet gemigreerd) opnieuw zonder. */
+async function voegHerinneringToe(admin: Admin, rij: Record<string, unknown>): Promise<{ data: unknown; error: { message: string } | null }> {
+  let r = await admin.from('klant_meeting_herinneringen').insert(rij).select('*').single()
+  if (r.error && /Could not find the 'voor_start' column/.test(r.error.message)) {
+    const { voor_start: _v, ...rest } = rij
+    void _v
+    r = await admin.from('klant_meeting_herinneringen').insert(rest).select('*').single()
+  }
+  return r
+}
+
 /** Lopende herinnering(en) intrekken: gepland of mislukt. Een verzending die net bezig is, laten we afwerken. */
 export async function trekHerinneringIn(admin: Admin, meetingId: string): Promise<void> {
   await admin.from('klant_meeting_herinneringen')
@@ -269,10 +283,10 @@ export async function planHerinnering(admin: Admin, m: MeetingRij): Promise<Heri
   if (m.status !== 'ingepland' || !m.herinnering_aan) return null
   const keuze = kiesHerinnering(m.starts_at)
   if (!keuze) return null
-  const { data, error } = await admin.from('klant_meeting_herinneringen').insert({
-    meeting_id: m.id, moment: keuze.moment, gepland_voor: keuze.geplandVoor,
+  const { data, error } = await voegHerinneringToe(admin, {
+    meeting_id: m.id, moment: keuze.moment, gepland_voor: keuze.geplandVoor, voor_start: new Date(m.starts_at).toISOString(),
     ontvangers: m.klant_ontvangers, status: 'gepland', verzend_sleutel: `km-${randomUUID()}`,
-  }).select('*').single()
+  })
   if (error) {
     // Een gelijktijdige aanvraag plande er al één (unieke index): die geldt.
     if (/duplicate|unique|23505/i.test(error.message)) return laatsteHerinnering(admin, m.id)
@@ -320,7 +334,8 @@ export async function verstuurHerinnering(admin: Admin, h: HerinneringRij): Prom
   const zet = (velden: Record<string, unknown>) =>
     admin.from('klant_meeting_herinneringen').update({ ...velden, updated_at: nu() }).eq('id', r.id)
 
-  const m = await leesMeeting(admin, r.meeting_id)
+  if (r.afspraak_id) return verstuurAfspraakHerinnering(admin, r, zet)
+  const m = r.meeting_id ? await leesMeeting(admin, r.meeting_id) : null
   if (!m || m.status !== 'ingepland') {
     await zet({ status: 'geannuleerd', geannuleerd_op: nu(), bezig_sinds: null })
     return 'overgeslagen'
@@ -365,6 +380,135 @@ export async function verstuurHerinnering(admin: Admin, h: HerinneringRij): Prom
   }
   await zet({ status: 'mislukt', fout: veiligeFout(res.error), bezig_sinds: null })
   return 'mislukt'
+}
+
+// ── Herinnering voor verkoopafspraken (Verkoopagenda) ───────────────────────
+//
+// Afspraken die via de Verkoopagenda geboekt worden (pipeline, Focusmode) staan
+// in sales_appointments. Ze krijgen dezelfde herinnering als elke meeting, via
+// dezelfde scheduler en tabel (kolom afspraak_id), met de afzender van het merk.
+
+type AfspraakRij = {
+  id: string; starts_at: string; status: string; titel: string | null; attendee_email: string | null; meet_url: string | null
+  adres: string | null; pipeline_id: string | null; calendar_id: string | null
+  sales_leads?: { sales_companies?: { name?: string } | null; sales_contacts?: { name?: string } | null } | null
+}
+
+async function leesAfspraak(admin: Admin, id: string): Promise<AfspraakRij | null> {
+  const { data } = await admin.from('sales_appointments')
+    .select('id, starts_at, status, titel, attendee_email, meet_url, adres, pipeline_id, calendar_id, sales_leads ( sales_companies ( name ), sales_contacts ( name ) )')
+    .eq('id', id).maybeSingle()
+  return (data as AfspraakRij | null) ?? null
+}
+
+const MOMENT_MIN: Record<string, number> = { '24u': 24 * 60, '2u': 2 * 60 }
+
+/**
+ * Herinnering van een verkoopafspraak (opnieuw) plannen na boeken, verplaatsen
+ * of annuleren. Best-effort: werpt nooit, zodat een boeking hier nooit op
+ * stukloopt. Al verstuurd voor dit startuur → niets opnieuw.
+ */
+export async function afspraakHerinneringBijwerken(admin: Admin, afspraakId: string): Promise<void> {
+  try {
+    const a = await leesAfspraak(admin, afspraakId)
+    const { data: lijst } = await admin.from('klant_meeting_herinneringen').select('*').eq('afspraak_id', afspraakId).order('created_at', { ascending: true })
+    const rijen = (lijst ?? []) as HerinneringRij[]
+    const actief = rijen.filter((x) => ['gepland', 'mislukt'].includes(x.status))
+    const intrekken = async () => {
+      if (!actief.length) return
+      await admin.from('klant_meeting_herinneringen').update({ status: 'geannuleerd', geannuleerd_op: nu(), updated_at: nu() })
+        .eq('afspraak_id', afspraakId).in('status', ['gepland', 'mislukt'])
+    }
+    if (!a || a.status === 'cancelled' || !a.attendee_email) { await intrekken(); return }
+    const start = new Date(a.starts_at).getTime()
+    const voorDitUur = (x: HerinneringRij) => x.voor_start
+      ? new Date(x.voor_start).getTime() === start
+      : new Date(x.gepland_voor).getTime() + (MOMENT_MIN[x.moment] ?? 0) * 60000 === start
+    if (rijen.some((x) => (x.status === 'verzonden' || x.status === 'bezig') && voorDitUur(x))) { await intrekken(); return }
+    const ontvanger: Persoon = { naam: a.sales_leads?.sales_contacts?.name ?? null, email: a.attendee_email.toLowerCase() }
+    const keuze = kiesHerinnering(a.starts_at)
+    // Staat er al precies deze herinnering? Dan laten we ze ongemoeid.
+    if (keuze && actief.length === 1 && actief[0].status === 'gepland' && new Date(actief[0].gepland_voor).getTime() === new Date(keuze.geplandVoor).getTime()
+      && actief[0].ontvangers?.[0]?.email === ontvanger.email) return
+    await intrekken()
+    if (!keuze) return
+    const { error } = await voegHerinneringToe(admin, {
+      afspraak_id: afspraakId, moment: keuze.moment, gepland_voor: keuze.geplandVoor, voor_start: new Date(a.starts_at).toISOString(),
+      ontvangers: [ontvanger], status: 'gepland', verzend_sleutel: `ka-${randomUUID()}`,
+    })
+    if (error && !/duplicate|unique|23505/i.test(error.message)) console.error('[meetings:afspraak-herinnering]', error.message)
+  } catch (e) {
+    console.error('[meetings:afspraak-herinnering]', e)
+  }
+}
+
+async function verstuurAfspraakHerinnering(admin: Admin, r: HerinneringRij, zet: (v: Record<string, unknown>) => unknown): Promise<VerzendUitkomst> {
+  const a = await leesAfspraak(admin, r.afspraak_id as string)
+  if (!a || a.status === 'cancelled') {
+    await zet({ status: 'geannuleerd', geannuleerd_op: nu(), bezig_sinds: null })
+    return 'overgeslagen'
+  }
+  if (!magNogVersturen(a.starts_at)) {
+    await zet({ status: 'overgeslagen', fout: 'Te kort voor de start van de afspraak; niet meer verstuurd.', bezig_sinds: null })
+    return 'overgeslagen'
+  }
+  if (!a.meet_url && !a.adres) {
+    await zet({ status: 'mislukt', fout: 'De afspraak heeft geen Meet-link en geen adres; de herinnering zou nergens naar verwijzen.', bezig_sinds: null })
+    return 'mislukt'
+  }
+  const ontvangers = (Array.isArray(r.ontvangers) && r.ontvangers.length ? r.ontvangers : a.attendee_email ? [{ naam: null, email: a.attendee_email }] : [])
+  if (!ontvangers.length) {
+    await zet({ status: 'mislukt', fout: 'Geen e-mailadres van de prospect.', bezig_sinds: null })
+    return 'mislukt'
+  }
+  const { data: pipe } = a.pipeline_id
+    ? await admin.from('sales_pipelines').select('key, name, reminder_from, reminder_reply_to').eq('id', a.pipeline_id).maybeSingle()
+    : { data: null }
+  const merk = pipe as { key?: string; name?: string; reminder_from?: string | null; reminder_reply_to?: string | null } | null
+  const { data: agenda } = a.calendar_id ? await admin.from('sales_calendar_connections').select('name').eq('id', a.calendar_id).maybeSingle() : { data: null }
+  const merkNaam = merk?.name ?? 'NextGenMedia'
+  const mail = herinneringsMail({
+    klant_naam: a.sales_leads?.sales_contacts?.name || a.sales_leads?.sales_companies?.name || 'klant',
+    titel: a.titel || `Afspraak met ${merkNaam}`, starts_at: a.starts_at, meet_url: a.meet_url, beschrijving: null,
+    organisator_naam: (agenda as { name?: string } | null)?.name?.split(/\s+[—-]\s+/)[0] ?? null,
+    ontvangers, afzender: merkNaam, locatie: a.meet_url ? null : a.adres,
+  })
+  const html = buildEmailHtml({ bodyText: mail.tekst, ctaText: mail.ctaTekst, ctaLink: mail.ctaLink })
+  const from = merk?.reminder_from || defaultFromFor(merk?.key) || EMAIL_FROM
+  const res = await sendEmail({
+    to: ontvangers.map((p) => p.email), subject: mail.onderwerp, text: mail.tekst, html,
+    from, replyTo: merk?.reminder_reply_to || null, apiKey: resendKeyFor(merk?.key), idempotencyKey: r.verzend_sleutel,
+  })
+  if (res.ok) {
+    let logId: string | null = null
+    try {
+      const { data: log } = await admin.from('email_messages').insert({
+        to_email: ontvangers.map((p) => p.email).join(', '), subject: mail.onderwerp, body: mail.tekst, html,
+        from_email: from, kind: 'afspraak_herinnering', audience: 'client', trigger_type: 'auto', status: 'sent',
+        provider_id: res.id ?? null, related_id: a.id, verzend_sleutel: r.verzend_sleutel,
+      }).select('id').single()
+      logId = (log as { id: string } | null)?.id ?? null
+    } catch { /* logboek is een extra */ }
+    await zet({ status: 'verzonden', verzonden_op: nu(), provider_id: res.id ?? null, email_message_id: logId, fout: null, bezig_sinds: null })
+    return 'verzonden'
+  }
+  if (res.onzeker) { await zet({ fout: `Onduidelijke afloop, wordt opnieuw geprobeerd: ${veiligeFout(res.error)}` }); return 'onzeker' }
+  await zet({ status: 'mislukt', fout: veiligeFout(res.error), bezig_sinds: null })
+  return 'mislukt'
+}
+
+/** Mislukte herinnering van een verkoopafspraak opnieuw versturen (nieuwe sleutel: de vorige vertrok zeker niet). */
+export async function afspraakHerinneringOpnieuw(admin: Admin, afspraakId: string): Promise<{ ok: boolean; fout?: string; uitkomst?: VerzendUitkomst }> {
+  const { data: h } = await admin.from('klant_meeting_herinneringen').select('*').eq('afspraak_id', afspraakId).eq('status', 'mislukt').maybeSingle()
+  if (!h) return { ok: false, fout: 'Er is geen mislukte herinnering om opnieuw te versturen.' }
+  const a = await leesAfspraak(admin, afspraakId)
+  if (!a || !magNogVersturen(a.starts_at)) return { ok: false, fout: 'De afspraak begint te snel; een herinnering heeft geen zin meer.' }
+  const { data } = await admin.from('klant_meeting_herinneringen')
+    .update({ status: 'gepland', gepland_voor: nu(), verzend_sleutel: `ka-${randomUUID()}`, fout: null, updated_at: nu() })
+    .eq('id', (h as HerinneringRij).id).eq('status', 'mislukt').select('*').maybeSingle()
+  if (!data) return { ok: false, fout: 'De herinnering werd intussen al aangepast. Ververs het scherm.' }
+  const uitkomst = await verstuurHerinnering(admin, data as HerinneringRij)
+  return { ok: uitkomst === 'verzonden', uitkomst }
 }
 
 /** Handmatig opnieuw: enkel een mislukte herinnering, met een nieuwe sleutel (de vorige vertrok zeker niet). */

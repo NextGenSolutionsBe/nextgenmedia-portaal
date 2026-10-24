@@ -6115,3 +6115,47 @@ DO $$ BEGIN
     ALTER TABLE public.klant_meetings ADD CONSTRAINT klant_meetings_project_fk FOREIGN KEY (project_id) REFERENCES public.opdrachten(id) ON DELETE SET NULL;
   END IF;
 END $$;
+
+-- ── Meeting Inplanner + klantboekingen (24 okt 2026) ────────────────────────
+-- Klanten boeken zelf een gratis meeting (bron 'klantboeking'); interne meetings
+-- kunnen aan een pipeline-lead hangen; herinneringen ook voor verkoopafspraken.
+-- Additief: geen bestaande data gewijzigd.
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS bron text NOT NULL DEFAULT 'intern';
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS lead_id uuid;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS boeker_bedrijf text;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS boeker_reden text;
+-- Enkel de hash van de beheerlink; de link zelf staat alleen in de mail aan de klant.
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS beheer_token_hash text;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS bevestiging_status text;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS bevestiging_op timestamptz;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS bevestiging_fout text;
+CREATE UNIQUE INDEX IF NOT EXISTS klant_meetings_beheer_token ON public.klant_meetings (beheer_token_hash) WHERE beheer_token_hash IS NOT NULL;
+-- Twee klanten kunnen nooit tegelijk hetzelfde moment in dezelfde agenda boeken.
+CREATE UNIQUE INDEX IF NOT EXISTS klant_meetings_klantslot ON public.klant_meetings (agenda_id, starts_at) WHERE bron = 'klantboeking' AND status = 'ingepland';
+CREATE INDEX IF NOT EXISTS klant_meetings_lead ON public.klant_meetings (lead_id) WHERE lead_id IS NOT NULL;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_meetings_bron_check') THEN
+    ALTER TABLE public.klant_meetings ADD CONSTRAINT klant_meetings_bron_check CHECK (bron IN ('intern', 'klantboeking'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_meetings_lead_fk')
+     AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'sales_leads') THEN
+    ALTER TABLE public.klant_meetings ADD CONSTRAINT klant_meetings_lead_fk FOREIGN KEY (lead_id) REFERENCES public.sales_leads(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
+ALTER TABLE public.klant_meeting_herinneringen ALTER COLUMN meeting_id DROP NOT NULL;
+ALTER TABLE public.klant_meeting_herinneringen ADD COLUMN IF NOT EXISTS afspraak_id uuid;
+CREATE UNIQUE INDEX IF NOT EXISTS klant_meeting_herinnering_afspraak_actief ON public.klant_meeting_herinneringen (afspraak_id) WHERE afspraak_id IS NOT NULL AND status IN ('gepland', 'bezig', 'mislukt');
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_meeting_herinnering_doel_check') THEN
+    ALTER TABLE public.klant_meeting_herinneringen ADD CONSTRAINT klant_meeting_herinnering_doel_check CHECK (meeting_id IS NOT NULL OR afspraak_id IS NOT NULL);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_meeting_herinnering_afspraak_fk')
+     AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'sales_appointments') THEN
+    ALTER TABLE public.klant_meeting_herinneringen ADD CONSTRAINT klant_meeting_herinnering_afspraak_fk FOREIGN KEY (afspraak_id) REFERENCES public.sales_appointments(id) ON DELETE CASCADE;
+  END IF;
+END $$;
+-- Voor welk startuur geldt een herinnering? Zo plant een latere kleine wijziging
+-- (titel, notitie) nooit een tweede herinnering voor hetzelfde uur, ook niet na
+-- een handmatige herverzending.
+ALTER TABLE public.klant_meeting_herinneringen ADD COLUMN IF NOT EXISTS voor_start timestamptz;
