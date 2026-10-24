@@ -78,7 +78,7 @@ export function KlantboekingenTab() {
           <select id="kb-agenda" className={INP} value={d.instellingen.agenda_id ?? ''} disabled={!d.magAanpassen || !!bezig} onChange={(e) => bewaar({ ...d.instellingen, agenda_id: e.target.value || null })}>
             {d.agendas.map((a) => <option key={a.id} value={a.id} disabled={!a.gekoppeld}>{a.naam}{a.gekoppeld ? '' : ' (koppeling verlopen)'}{a.clickup ? '' : ' (geen ClickUp-gebruiker)'}</option>)}
           </select>
-          <p className="text-[11px] text-gray-500 mt-1">De bezetting in ClickUp wordt gelezen voor de ClickUp-gebruiker van deze agenda{agenda && !agenda.clickup ? ' (die ontbreekt nu: zonder kan niemand boeken)' : ''}. Werkuren stel je in via de Verkoopagenda.</p>
+          <p className="text-[11px] text-gray-500 mt-1">De bezetting in ClickUp wordt gelezen voor de ClickUp-gebruiker van deze agenda{agenda && !agenda.clickup ? ' (die ontbreekt nu: zonder kan niemand boeken)' : ''}. Werkuren stel je in via Calendar.</p>
         </div>
       </section>
 

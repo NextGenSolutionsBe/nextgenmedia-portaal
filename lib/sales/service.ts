@@ -333,6 +333,7 @@ export type CalendarData = {
     notes: string | null; client_note: string | null
     /** Koppelingen: zo verschijnt dezelfde afspraak in Calendar maar één keer. */
     clickup_task_id?: string | null; external_event_id?: string | null
+    gsm_melding_status?: string | null
   }[]
   connected: boolean
   /**
@@ -503,6 +504,7 @@ export async function loadCalendar(
       verantwoordelijke_id: a.verantwoordelijke_id ?? null,
       clickup_task_id: a.clickup_task_id ?? null,
       external_event_id: a.external_event_id ?? null,
+      gsm_melding_status: (a as { gsm_melding_status?: string | null }).gsm_melding_status ?? null,
       company: a.lead_id ? nameByLead.get(a.lead_id)?.company ?? null : null,
       contact: a.lead_id ? nameByLead.get(a.lead_id)?.contact ?? null : null,
     })),

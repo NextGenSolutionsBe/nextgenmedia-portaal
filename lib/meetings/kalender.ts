@@ -68,16 +68,22 @@ export type KalenderItem = {
   googleEventId: string | null
   /** Extra regel onder de titel (lijstnaam, klant, ...). */
   sub: string | null
+  /** Tijdzone van een meeting uit de app (voor verplaatsen); anders Brussel. */
+  tijdzone?: string | null
+  /** Gsm-melding 15 min vooraf: ingesteld, wacht, mislukt; null = eigen instelling in Google. */
+  gsm: 'ingesteld' | 'wacht' | 'mislukt' | null
 }
 
 export type MeetingBron = {
   id: string; titel: string; klant_naam?: string | null; starts_at: string; ends_at: string; status: string
   bron?: string | null; meet_url?: string | null; clickup_task_id?: string | null; google_event_id?: string | null
+  tijdzone?: string | null; google_status?: string | null; gsm_melding_status?: string | null
 }
 export type AfspraakBron = {
   id: string; starts_at: string; ends_at: string; status: string
   titel?: string | null; company?: string | null; contact?: string | null
   meet_url?: string | null; clickup_task_id?: string | null; external_event_id?: string | null
+  gsm_melding_status?: string | null
   /** Mag de kijker de details van deze verkoopafspraak zien? */
   details?: boolean
 }
@@ -99,7 +105,14 @@ export type GoogleBron = {
  *    als de taak geen meeting is)
  *  · Google-events zonder uur (hele dag) of als "vrij" gemarkeerd → niet getoond
  */
-export function voegSamen(b: { meetings: MeetingBron[]; afspraken: AfspraakBron[]; clickup: ClickupTaak[]; google: GoogleBron[] }): KalenderItem[] {
+const gsmVan = (status?: string | null, opGoogle = true): KalenderItem['gsm'] =>
+  !opGoogle ? 'wacht' : status === 'ingesteld' ? 'ingesteld' : status === 'mislukt' ? 'mislukt' : 'wacht'
+
+export function voegSamen(b: {
+  meetings: MeetingBron[]; afspraken: AfspraakBron[]; clickup: ClickupTaak[]; google: GoogleBron[]
+  /** ClickUp-taken die de agendasync al als meeting (met gsm-melding) in Google zette. */
+  clickupMetMelding?: Set<string>
+}): KalenderItem[] {
   const uit: KalenderItem[] = []
   const gekoppeldeTaken = new Set<string>()
   const gekoppeldeEvents = new Set<string>()
@@ -113,6 +126,7 @@ export function voegSamen(b: { meetings: MeetingBron[]; afspraken: AfspraakBron[
       titel: m.titel, start: m.starts_at, eind: m.ends_at, meetUrl: m.meet_url ?? null, link: null,
       verplaatsbaar: true, clickupTaskId: m.clickup_task_id ?? null, googleEventId: m.google_event_id ?? null,
       sub: m.klant_naam && !m.titel.includes(m.klant_naam) ? m.klant_naam : null,
+      tijdzone: m.tijdzone ?? null, gsm: gsmVan(m.gsm_melding_status, (m.google_status ?? 'ok') === 'ok'),
     })
   }
   for (const a of b.afspraken) {
@@ -126,6 +140,7 @@ export function voegSamen(b: { meetings: MeetingBron[]; afspraken: AfspraakBron[
       start: a.starts_at, eind: a.ends_at, meetUrl: zien ? a.meet_url ?? null : null, link: null,
       verplaatsbaar: zien, clickupTaskId: a.clickup_task_id ?? null, googleEventId: a.external_event_id ?? null,
       sub: zien && a.titel && a.company ? a.company : null,
+      gsm: gsmVan(a.gsm_melding_status, !!a.external_event_id),
     })
   }
   const getoondeTaken = new Set<string>()
@@ -137,6 +152,7 @@ export function voegSamen(b: { meetings: MeetingBron[]; afspraken: AfspraakBron[
       start: new Date(t.startMs as number).toISOString(), eind: new Date(t.dueMs).toISOString(),
       meetUrl: meetLinkUit(t.naam), link: t.url ?? null, verplaatsbaar: false,
       clickupTaskId: t.id, googleEventId: null, sub: t.lijstNaam || null,
+      gsm: b.clickupMetMelding ? (b.clickupMetMelding.has(t.id) ? 'ingesteld' : 'wacht') : null,
     })
   }
   const getoondeEvents = new Set<string>()
@@ -148,7 +164,7 @@ export function voegSamen(b: { meetings: MeetingBron[]; afspraken: AfspraakBron[
     uit.push({
       key: `google:${g.id}`, bron: 'google', id: g.id, titel: g.titel || '(zonder titel)',
       start: g.start, eind: g.eind, meetUrl: g.meetUrl ?? null, link: g.link ?? null, verplaatsbaar: false,
-      clickupTaskId: null, googleEventId: g.id, sub: null,
+      clickupTaskId: null, googleEventId: g.id, sub: null, gsm: null,
     })
   }
   return uit.sort((x, y) => x.start.localeCompare(y.start) || x.eind.localeCompare(y.eind) || x.key.localeCompare(y.key))

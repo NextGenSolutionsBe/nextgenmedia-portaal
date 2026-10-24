@@ -13,7 +13,8 @@ import {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Admin = { from: (t: string) => any }
 
-export type KalenderAgenda = Pick<CalendarOwner, 'id' | 'name' | 'account_email' | 'status' | 'pipeline_id' | 'clickup_assignee_id'>
+/** Een agenda-koppeling zoals listOwners ze geeft: zonder tokens, met naam, merk, ClickUp-persoon en handtekening. */
+export type KalenderAgenda = CalendarOwner & { signature_phone?: string | null; signature_email?: string | null }
 
 export type KalenderData = {
   agendas: KalenderAgenda[]
@@ -54,7 +55,8 @@ export async function kalenderData(admin: Admin, opts: {
   const owners = await listOwners(org.id)
   const agenda = owners.find((o) => o.id === opts.agendaId) ?? await standaardAgenda(admin, owners)
   const regels = { slotMin: org.slot_interval_min || 30, duurMin: org.default_duration_min || 30, tijdzone: org.timezone || 'Europe/Brussels' }
-  const agendas = owners.map((o) => ({ id: o.id, name: o.name, account_email: o.account_email, status: o.status, pipeline_id: o.pipeline_id ?? null, clickup_assignee_id: o.clickup_assignee_id ?? null }))
+  // listOwners strip de Google-tokens al; de rest (naam, merk, handtekening) heeft agendabeheer nodig.
+  const agendas = owners as KalenderAgenda[]
   const leeg: KalenderData = {
     agendas, agendaId: null, items: [], segmenten: [],
     beschikbaarheid: { ok: false, fout: 'Er is nog geen agenda gekoppeld.' },
@@ -81,10 +83,21 @@ export async function kalenderData(admin: Admin, opts: {
     .then((events) => ({ events, fout: null }))
     .catch((e) => ({ events: [], fout: `Google Agenda antwoordde niet (${veiligeFout(e)}).` }))
   const meetingsP = admin.from('klant_meetings')
-    .select('id, titel, klant_naam, starts_at, ends_at, status, bron, meet_url, clickup_task_id, google_event_id, agenda_id')
+    .select('*')
     .in('agenda_id', persoon).eq('status', 'ingepland')
     .lt('starts_at', new Date(ruimTot).toISOString()).gt('ends_at', new Date(ruimVan).toISOString())
-  const [cu, gg, mtRes] = await Promise.all([clickupP, googleP, meetingsP])
+  // Welke ClickUp-meetings zette de agendasync al (met gsm-melding) in Google?
+  const syncP = assignee
+    ? admin.from('clickup_agenda_targets').select('id').eq('clickup_assignee_id', assignee)
+        .then(async (r: { data: { id: string }[] | null }) => {
+          const ids = (r.data ?? []).map((x) => x.id)
+          if (!ids.length) return new Set<string>()
+          const { data } = await admin.from('clickup_agenda_items').select('clickup_task_id, vingerafdruk').in('target_id', ids)
+          return new Set(((data ?? []) as { clickup_task_id: string; vingerafdruk: string }[]).filter((x) => /\|v2:m$/.test(x.vingerafdruk)).map((x) => x.clickup_task_id))
+        })
+        .catch(() => undefined)
+    : Promise.resolve(undefined)
+  const [cu, gg, mtRes, clickupMetMelding] = await Promise.all([clickupP, googleP, meetingsP, syncP])
   const meetings = ((mtRes as { data: (MeetingBron & { agenda_id: string })[] | null }).data ?? [])
   const meetingsFout = (mtRes as { error?: { message?: string } | null }).error?.message ?? null
 
@@ -123,6 +136,7 @@ export async function kalenderData(admin: Admin, opts: {
       titel: (a as { titel?: string | null }).titel ?? null, company: a.company, contact: a.contact,
       meet_url: (a as { meet_url?: string | null }).meet_url ?? null,
       clickup_task_id: a.clickup_task_id ?? null, external_event_id: a.external_event_id ?? null,
+      gsm_melding_status: (a as { gsm_melding_status?: string | null }).gsm_melding_status ?? null,
       details: opts.verkoopDetails !== false,
     }))
   const items = voegSamen({
@@ -130,6 +144,7 @@ export async function kalenderData(admin: Admin, opts: {
     afspraken: afspraken.filter((a) => Date.parse(a.ends_at) > opts.van && Date.parse(a.starts_at) < opts.tot),
     clickup: cu.taken.filter((t) => t.dueMs > opts.van && (t.startMs ?? t.dueMs) < opts.tot),
     google: gg.events.map((e) => ({ id: e.id, titel: e.titel, start: e.start, eind: e.eind, meetUrl: e.meetUrl, link: e.link, clickupTaskId: e.clickupTaskId, heleDag: e.heleDag, vrij: e.vrij, geannuleerd: e.geannuleerd })),
+    clickupMetMelding: clickupMetMelding ?? undefined,
   })
 
   return {

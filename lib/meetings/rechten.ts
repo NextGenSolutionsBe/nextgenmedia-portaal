@@ -4,7 +4,7 @@ import { magIk, type IngelogdePersoon } from '@/lib/instellingen/laden'
 /**
  * Rechten in de Meeting Inplanner. De module is gedeeld: wie "Meeting
  * Inplanner" heeft, beheert alle meetings; wie enkel "Verkoop" heeft (setters),
- * werkt met de verkoopagenda en de klantboekingen — net als vroeger in
+ * werkt met Calendar (verkoopafspraken) en de klantboekingen — net als vroeger in
  * Appointment setting. Zo verandert niemands toegang door de verhuis.
  */
 export type PlannerRechten = {

@@ -5,13 +5,13 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   Plus, Loader2, Video, Check, AlertTriangle, Clock, Minus, Copy, ExternalLink, RotateCcw, Pencil, Ban, X, Users,
-  ChevronLeft, ChevronRight, List, CalendarDays, ShieldCheck, ArrowLeft,
+  ChevronRight, CalendarDays, ShieldCheck, ArrowLeft,
 } from 'lucide-react'
 import { INP } from '@/app/admin/instellingen/ui'
 import { Modal, focusRing } from '@/app/admin/materiaal/dialogen'
 import {
   DUUR_OPTIES, STANDAARD_TIJDZONE, TIJDZONE_OPTIES, valideerMeeting, kiesHerinnering, herinneringsMail, datumKort, datumLang, uur, dag,
-  duurMinuten, wanneer, tijdzoneLabel, naamZonderKlant, maandagVan, plusDagen, ANTWOORD_LABEL,
+  duurMinuten, wanneer, tijdzoneLabel, naamZonderKlant, ANTWOORD_LABEL,
   stapAgenda, stapMeet, stapUitnodiging, stapClickup, stapHerinnering, momentLabel, isEmail, type Persoon, type StapWeergave, type Toon,
 } from '@/lib/meetings/model'
 
@@ -26,7 +26,7 @@ type Herinnering = {
   id: string; status: string; moment: string; gepland_voor: string; verzonden_op: string | null; fout: string | null
   ontvangers: Persoon[]; pogingen: number; created_at: string
 }
-type Meeting = {
+export type Meeting = {
   id: string; client_id: string | null; klant_naam: string; titel: string; beschrijving: string | null; starts_at: string; ends_at: string
   tijdzone: string; status: 'ingepland' | 'geannuleerd'; agenda_id: string | null; organisator_naam: string | null
   klant_ontvangers: Persoon[]; deelnemers: Persoon[]; herinnering_aan: boolean
@@ -36,12 +36,13 @@ type Meeting = {
   uitnodiging_status?: string | null; uitnodiging_op?: string | null; uitnodiging_naar?: string[] | null
   bron?: 'intern' | 'klantboeking'; boeker_bedrijf?: string | null; boeker_reden?: string | null
   bevestiging_status?: string | null; bevestiging_op?: string | null; bevestiging_fout?: string | null
+  gsm_melding_status?: string | null; gsm_melding_fout?: string | null; google_event_id?: string | null
   created_by_email: string | null; created_at: string; geannuleerd_op: string | null; geannuleerd_door: string | null
   herinnering: Herinnering | null
 }
 type Klant = { id: string; company_name: string | null; contact_name: string | null; email: string | null }
 type Project = { id: string; titel: string; client_id: string | null; klant_vrij: string | null }
-type Opties = {
+export type Opties = {
   klanten: Klant[]; contacten: { client_id: string; name: string | null; email: string | null }[]; projecten: Project[]
   agendas: { id: string; naam: string; gekoppeld: boolean }[]; standaardAgenda: string | null
   ik: { naam: string | null; email: string }; rechten: { toevoegen: boolean; aanpassen: boolean; meetings?: boolean; verkoop?: boolean }
@@ -50,6 +51,8 @@ type Detail = {
   meeting: Meeting; herinneringen: Herinnering[]; mail?: { onderwerp: string; tekst: string }
   antwoorden: { email: string; antwoord: string }[] | null; antwoordenFout: string | null
   klant: { id: string; company_name: string | null } | null; project: { id: string; titel: string } | null
+  /** Gsm-melding zoals Google ze nu op het event heeft (minuten vooraf), of null. */
+  gsmLive?: number | null
 }
 
 const lbl = 'block text-xs font-medium text-gray-700 mb-1'
@@ -60,8 +63,8 @@ const minVan = (u: string) => { const [h, m] = u.split(':').map(Number); return 
 const uurVan = (n: number) => `${String(Math.floor(((n % 1440) + 1440) % 1440 / 60)).padStart(2, '0')}:${String(((n % 60) + 60) % 60).padStart(2, '0')}`
 const agendaNaamKort = (naam?: string) => naam?.split(/\s+[—-]\s+/)[0] ?? ''
 
-class ApiFout extends Error { constructor(msg: string, public status: number, public data: Record<string, unknown>) { super(msg) } }
-async function api<T>(url: string, init?: RequestInit): Promise<T> {
+export class ApiFout extends Error { constructor(msg: string, public status: number, public data: Record<string, unknown>) { super(msg) } }
+export async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, { cache: 'no-store', ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) } })
   const j = await r.json().catch(() => ({}))
   if (!r.ok) throw new ApiFout(j.error || 'Er ging iets mis', r.status, j)
@@ -81,6 +84,14 @@ function StapChip({ s }: { s: StapWeergave }) {
   return <span className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap ${t.cls}`}><t.icoon className="h-3 w-3" aria-hidden />{s.label}</span>
 }
 const stappen = (m: Meeting) => [stapAgenda(m), stapMeet(m), stapUitnodiging(m), stapClickup(m), stapHerinnering(m, m.herinnering)]
+/** Gsm-melding: wat Google echt op het event heeft (live), anders de laatst bewaarde status. */
+function stapGsm(m: Meeting, live?: number | null): StapWeergave {
+  if (m.status === 'geannuleerd') return { label: 'Melding vervallen', toon: 'neutraal' }
+  if (m.google_status !== 'ok') return { label: 'Wacht op agenda', toon: 'neutraal' }
+  if (live === 15 || (live === undefined && m.gsm_melding_status === 'ingesteld')) return { label: 'Gsm-melding 15 min ingesteld', toon: 'ok' }
+  if (m.gsm_melding_status === 'mislukt') return { label: 'Gsm-melding mislukt', toon: 'fout' }
+  return { label: 'Gsm-melding wordt ingesteld', toon: 'bezig' }
+}
 const persoonTekst = (p: Persoon) => (p.naam ? `${p.naam} <${p.email}>` : p.email)
 
 function Kopieer({ tekst }: { tekst: string }) {
@@ -127,8 +138,13 @@ function Rijtje({ label, children }: { label: string; children: ReactNode }) {
 
 // ── Planvenster (nieuw of aanpassen) ─────────────────────────────────────────
 
-function PlanVenster({ opties, bestaand, startDag, onSluit, onKlaar, onOpen }: {
-  opties: Opties; bestaand: Meeting | null; startDag?: string; onSluit: () => void; onKlaar: (m: Meeting, melding: string) => void; onOpen: (id: string) => void
+export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerVrij, onSluit, onKlaar, onOpen }: {
+  opties: Opties; bestaand: Meeting | null; startDag?: string
+  /** Vanuit Calendar (gesleept of getikt): datum, uur, duur en agenda alvast ingevuld. */
+  voorinvul?: { dag: string; uur: string; duur: number; agendaId?: string | null }
+  /** Vlak vóór het opslaan opnieuw nagaan of het moment nog vrij is (Calendar). */
+  controleerVrij?: boolean
+  onSluit: () => void; onKlaar: (m: Meeting, melding: string) => void; onOpen: (id: string) => void
 }) {
   const [sleutel] = useState(nieuweSleutel)
   const [stap, setStap] = useState<'invullen' | 'controle'>('invullen')
@@ -141,10 +157,12 @@ function PlanVenster({ opties, bestaand, startDag, onSluit, onKlaar, onOpen }: {
   const [titel, setTitel] = useState(bestaand?.titel ?? '')
   const [beschrijving, setBeschrijving] = useState(bestaand?.beschrijving ?? '')
   const [tijdzone, setTijdzone] = useState(tzStart)
-  const [datum, setDatum] = useState(bestaand ? dag(bestaand.starts_at, tzStart) : startDag ?? morgen())
-  const [tijd, setTijd] = useState(bestaand ? uur(bestaand.starts_at, tzStart) : '10:00')
-  const [duur, setDuur] = useState(bestaand ? duurMinuten(bestaand.starts_at, bestaand.ends_at) : 30)
-  const [agendaId, setAgendaId] = useState(bestaand?.agenda_id ?? (opties.agendas.find((a) => a.id === opties.standaardAgenda && a.gekoppeld)?.id ?? opties.agendas.find((a) => a.gekoppeld)?.id ?? ''))
+  const [datum, setDatum] = useState(bestaand ? dag(bestaand.starts_at, tzStart) : voorinvul?.dag ?? startDag ?? morgen())
+  const [tijd, setTijd] = useState(bestaand ? uur(bestaand.starts_at, tzStart) : voorinvul?.uur ?? '10:00')
+  const [duur, setDuur] = useState(bestaand ? duurMinuten(bestaand.starts_at, bestaand.ends_at) : voorinvul?.duur ?? 30)
+  const [agendaId, setAgendaId] = useState(bestaand?.agenda_id
+    ?? opties.agendas.find((a) => a.id === voorinvul?.agendaId && a.gekoppeld)?.id
+    ?? opties.agendas.find((a) => a.id === opties.standaardAgenda && a.gekoppeld)?.id ?? opties.agendas.find((a) => a.gekoppeld)?.id ?? '')
   const [organisator, setOrganisator] = useState(bestaand?.organisator_naam ?? '')
   const [genodigden, setGenodigden] = useState<Rij[]>(bestaand ? bestaand.klant_ontvangers.map((p) => ({ naam: p.naam ?? '', email: p.email })) : [{ naam: '', email: '' }])
   const [extra, setExtra] = useState<Rij[]>((bestaand?.deelnemers ?? []).map((p) => ({ naam: p.naam ?? '', email: p.email })))
@@ -208,17 +226,18 @@ function PlanVenster({ opties, bestaand, startDag, onSluit, onKlaar, onOpen }: {
     const koppel = { client_id: clientId || null, project_id: projectId || null, clickup_item: clickupItem.trim() }
     try {
       if (bestaand) {
-        const j = await api<{ meeting: Meeting; ongewijzigd?: boolean; herinneringFout?: string | null; googleFout?: string | null }>(`/api/admin/meetings/${bestaand.id}`, { method: 'PATCH', body: JSON.stringify({ actie: 'wijzig', ...invoer, ...koppel }) })
+        const j = await api<{ meeting: Meeting; ongewijzigd?: boolean; herinneringFout?: string | null; googleFout?: string | null }>(`/api/admin/meetings/${bestaand.id}`, { method: 'PATCH', body: JSON.stringify({ actie: 'wijzig', ...invoer, ...koppel, controleer_vrij: !!controleerVrij }) })
         if (j.googleFout) { toast.error(j.googleFout); onKlaar(j.meeting, ''); return }
         onKlaar(j.meeting, j.ongewijzigd ? 'Er was niets gewijzigd.' : j.herinneringFout ? `Aangepast, maar de herinnering is niet opnieuw gepland: ${j.herinneringFout}` : 'Meeting aangepast. De genodigden krijgen de wijziging van Google.')
       } else {
         const j = await api<{ meeting: Meeting; herhaald?: boolean; herinneringFout?: string | null }>('/api/admin/meetings', {
-          method: 'POST', body: JSON.stringify({ aanvraag_sleutel: sleutel, agenda_id: agendaId, organisator_naam: organisator, toch_inplannen: tochInplannen, ...invoer, ...koppel }),
+          method: 'POST', body: JSON.stringify({ aanvraag_sleutel: sleutel, agenda_id: agendaId, organisator_naam: organisator, toch_inplannen: tochInplannen, controleer_vrij: !!controleerVrij, ...invoer, ...koppel }),
         })
         onKlaar(j.meeting, j.herhaald ? 'Deze meeting stond al ingepland.' : j.herinneringFout ? `Ingepland, maar de herinnering kon niet gepland worden: ${j.herinneringFout}` : 'Meeting ingepland. Google stuurt de uitnodiging.')
       }
     } catch (e) {
       if (e instanceof ApiFout && e.status === 409 && e.data.bestaand) { setDubbel(e.data.bestaand as Meeting); return }
+      if (e instanceof ApiFout && e.data.nietVrij) { setFout(`${e.message} Er is niets opgeslagen. Ga terug en kies een ander tijdstip.`); return }
       if (e instanceof ApiFout && e.data.meeting) { setFout(e.message); setOnzeker((e.data.meeting as Meeting).id); toast.error('Niet ingepland in Google Agenda.'); return }
       setFout(e instanceof Error ? e.message : 'Inplannen mislukt')
     } finally { setBezig(false) }
@@ -248,6 +267,8 @@ function PlanVenster({ opties, bestaand, startDag, onSluit, onKlaar, onOpen }: {
             {!w.herinnering_aan ? 'Geen' : keuze ? <>{datumLang(keuze.geplandVoor)} om {uur(keuze.geplandVoor)} ({keuze.label}) naar {w.klant_ontvangers.map((p) => p.email).join(', ')}</> : <span className="text-amber-700">Geen: de meeting begint te snel.</span>}
           </Rijtje>
           <Rijtje label="Google-agenda">{bestaand ? 'Zelfde afspraak, wordt bijgewerkt (Meet-link blijft)' : `${agenda?.naam ?? '—'}, met Google Meet-link`}</Rijtje>
+          <Rijtje label="Gsm-melding">15 minuten vooraf, via de Google Agenda-app</Rijtje>
+          {controleerVrij && <Rijtje label="Beschikbaarheid">Wordt vlak vóór het opslaan opnieuw gecontroleerd (Google Agenda, ClickUp en de app).</Rijtje>}
           <Rijtje label="ClickUp">{bestaand ? 'Bestaande taak wordt bijgewerkt' : 'Taak in de lijst van het merk, zoals bij de verkoopafspraken'}</Rijtje>
           <Rijtje label="Klant">{klantNaam ?? <span className="text-gray-500">Geen klant gekoppeld</span>}</Rijtje>
           {project && <Rijtje label="Project">{project.titel}</Rijtje>}
@@ -421,7 +442,7 @@ function PlanVenster({ opties, bestaand, startDag, onSluit, onKlaar, onOpen }: {
 
 // ── Annuleren ────────────────────────────────────────────────────────────────
 
-function AnnuleerVenster({ m, onSluit, onKlaar }: { m: Meeting; onSluit: () => void; onKlaar: (m: Meeting) => void }) {
+export function AnnuleerVenster({ m, onSluit, onKlaar }: { m: Meeting; onSluit: () => void; onKlaar: (m: Meeting) => void }) {
   const [verwittigen, setVerwittigen] = useState(true)
   const [bezig, setBezig] = useState(false)
   async function doe() {
@@ -490,7 +511,7 @@ function KoppelingenVenster({ opties, onSluit }: { opties: Opties; onSluit: () =
 
 const H_LABEL: Record<string, string> = { gepland: 'Gepland', bezig: 'Bezig', verzonden: 'Verzonden', mislukt: 'Mislukt', geannuleerd: 'Ingetrokken', overgeslagen: 'Te laat, niet verstuurd' }
 
-function DetailVenster({ id, opties, onSluit, onWijzig, onAnnuleer, onVeranderd }: {
+export function DetailVenster({ id, opties, onSluit, onWijzig, onAnnuleer, onVeranderd }: {
   id: string; opties: Opties; onSluit: () => void; onWijzig: (m: Meeting) => void; onAnnuleer: (m: Meeting) => void; onVeranderd: () => void
 }) {
   const [d, setD] = useState<Detail | null>(null)
@@ -601,6 +622,12 @@ function DetailVenster({ id, opties, onSluit, onWijzig, onAnnuleer, onVeranderd 
           </>,
           actief && h?.status === 'mislukt' ? knop('herinnering', 'Nu opnieuw versturen', { actie: 'herinnering_opnieuw' }, 'Herinnering opnieuw verstuurd.')
             : actief && komend && m.google_status === 'ok' && m.herinnering_aan && (!h || h.status === 'geannuleerd') && kiesHerinnering(m.starts_at) ? knop('plan', 'Herinnering plannen', { actie: 'opnieuw', stap: 'herinnering' }, 'Herinnering gepland.') : null)}
+        {rij('Gsm-melding', stapGsm(m, d.gsmLive),
+          <>
+            {actief && m.google_status === 'ok' && <p className="text-xs text-gray-600">15 minuten vooraf, als melding van de Google Agenda-app op elk toestel waar deze agenda met meldingen aan staat.</p>}
+            {m.gsm_melding_fout && m.gsm_melding_status === 'mislukt' && <p className="text-xs text-red-700">{m.gsm_melding_fout}</p>}
+          </>,
+          actief && komend && m.google_status === 'ok' && d.gsmLive !== 15 ? knop('gsm', m.gsm_melding_status === 'mislukt' ? 'Opnieuw proberen' : 'Nu instellen', { actie: 'gsm_opnieuw' }, 'Gsm-melding ingesteld in Google Agenda.') : null)}
       </div>
 
       {d.herinneringen.length > 1 && (
@@ -625,7 +652,7 @@ function DetailVenster({ id, opties, onSluit, onWijzig, onAnnuleer, onVeranderd 
   )
 }
 
-// ── Verkoopafspraken (Verkoopagenda) ─────────────────────────────────────────
+// ── Verkoopafspraken (Calendar) ─────────────────────────────────────────
 
 type Afspraak = {
   id: string; starts_at: string; ends_at: string; status: string; titel: string | null; attendee_email: string | null
@@ -697,12 +724,12 @@ function AfspraakVenster({ a, opties, onSluit, onVeranderd }: { a: Afspraak; opt
           </div>
         ))}
       </div>
-      <p className="text-xs text-gray-500">Geboekt via de Verkoopagenda. Bewerken, verplaatsen en de uitkomst registreren gebeuren daar, met dezelfde regels als voorheen (setter, merk, ClickUp, pipeline).</p>
+      <p className="text-xs text-gray-500">Geboekt via Calendar. Bewerken, verplaatsen en de uitkomst registreren gebeuren daar, met dezelfde regels als voorheen (setter, merk, ClickUp, pipeline).</p>
     </Modal>
   )
 }
 
-// ── Weekweergave ─────────────────────────────────────────────────────────────
+// ── Overzicht ────────────────────────────────────────────────────────────────
 
 type Item = { soort: 'meeting'; m: Meeting } | { soort: 'afspraak'; a: Afspraak }
 const itemStart = (x: Item) => (x.soort === 'meeting' ? x.m.starts_at : x.a.starts_at)
@@ -715,40 +742,6 @@ function Bron({ x }: { x: Item }) {
   return <span className="rounded border border-gray-200 px-1 py-px text-[10px] font-medium text-gray-600 whitespace-nowrap">{t}</span>
 }
 
-function Week({ items, maandag, onKies, onDag }: { items: Item[]; maandag: string; onKies: (x: Item) => void; onDag: (d: string) => void }) {
-  const dagen = Array.from({ length: 7 }, (_, i) => plusDagen(maandag, i))
-  const vandaag = dag(new Date().toISOString())
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-7 gap-2">
-      {dagen.map((d) => {
-        const lijst = items.filter((x) => dag(itemStart(x)) === d).sort((a, b) => itemStart(a).localeCompare(itemStart(b)))
-        const iso = `${d}T12:00:00.000Z`
-        return (
-          <div key={d} className={`rounded-lg border ${d === vandaag ? 'border-gray-900' : 'border-gray-200'} bg-white p-2 min-h-[5rem] md:min-h-[12rem]`}>
-            <button type="button" onClick={() => onDag(d)} className={`w-full flex md:flex-col items-baseline md:items-start gap-2 md:gap-0 text-left mb-1.5 ${focusRing}`} title="Meeting op deze dag plannen">
-              <span className="text-[11px] uppercase tracking-wide text-gray-500">{datumKort(iso).split(' ')[0]}</span>
-              <span className="text-sm font-semibold tabular-nums">{datumKort(iso).split(' ').slice(1).join(' ')}</span>
-            </button>
-            <div className="space-y-1">
-              {lijst.map((x) => {
-                const probleem = itemActief(x) && itemStappen(x).some((s) => s.toon === 'fout')
-                return (
-                  <button key={itemId(x)} type="button" onClick={() => onKies(x)} className={`w-full text-left rounded-md border px-1.5 py-1 text-[11px] leading-tight hover:bg-gray-50 ${!itemActief(x) ? 'border-gray-100 text-gray-400 line-through' : probleem ? 'border-red-200 bg-red-50/50' : 'border-gray-200'} ${focusRing}`}>
-                    <span className="font-medium tabular-nums">{uur(itemStart(x))}</span> <span className="break-words">{x.soort === 'meeting' ? x.m.titel : afspraakTitel(x.a)}</span>
-                    <span className="block text-gray-500 truncate">{x.soort === 'meeting' ? x.m.klant_naam : (x.a.bedrijf ?? 'Verkoop')}</span>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-// ── Pagina ───────────────────────────────────────────────────────────────────
-
 type Tab = 'komend' | 'voorbij' | 'geannuleerd'
 type Venster = { soort: 'plan'; meeting: Meeting | null; dag?: string } | { soort: 'detail'; id: string } | { soort: 'annuleer'; meeting: Meeting } | { soort: 'koppelingen' } | { soort: 'afspraak'; a: Afspraak } | null
 
@@ -760,8 +753,6 @@ export function MeetingsClient() {
   const [opties, setOpties] = useState<Opties | null>(null)
   const [fout, setFout] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('komend')
-  const [weergave, setWeergave] = useState<'lijst' | 'week'>('lijst')
-  const [maandag, setMaandag] = useState(() => maandagVan(dag(new Date().toISOString())))
   const [venster, setVenster] = useState<Venster>(null)
 
   const laad = useCallback(async () => {
@@ -774,8 +765,6 @@ export function MeetingsClient() {
     laad()
     api<Opties>('/api/admin/meetings?opties=1').then(setOpties).catch((e) => setFout(e instanceof Error ? e.message : 'Laden mislukt'))
   }, [laad])
-  useEffect(() => { try { const w = localStorage.getItem('ngm-meetings-weergave'); if (w === 'week' || w === 'lijst') setWeergave(w) } catch { /* */ } }, [])
-  useEffect(() => { try { localStorage.setItem('ngm-meetings-weergave', weergave) } catch { /* */ } }, [weergave])
   // Deep-link vanuit zoeken of een melding: ?meeting=<id>
   useEffect(() => { const id = params.get('meeting'); if (id) setVenster({ soort: 'detail', id }) }, [params])
 
@@ -794,14 +783,13 @@ export function MeetingsClient() {
   }), [items, nu])
   const zichtbaar = lijsten[tab]
   const problemen = lijsten.komend.filter((x) => itemStappen(x).some((s) => s.toon === 'fout')).length
-  const zondag = plusDagen(maandag, 6)
 
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-end gap-3 flex-wrap">
         <div className="flex gap-2 flex-wrap">
           {opties && <button type="button" onClick={() => setVenster({ soort: 'koppelingen' })} className={`btn-secondary ${focusRing}`}><ShieldCheck className="h-4 w-4" />Koppelingen</button>}
-          {opties?.rechten.verkoop && <button type="button" onClick={() => router.push('/admin/meetings?tab=agenda')} className={`btn-secondary ${focusRing}`}><CalendarDays className="h-4 w-4" />Afspraak voor een lead</button>}
+          <button type="button" onClick={() => router.push('/admin/meetings?tab=agenda')} className={`btn-secondary ${focusRing}`}><CalendarDays className="h-4 w-4" />Open Calendar</button>
           {opties?.rechten.toevoegen && <button type="button" onClick={() => setVenster({ soort: 'plan', meeting: null })} className={`btn-primary ${focusRing}`}><Plus className="h-4 w-4" />Meeting plannen</button>}
         </div>
       </div>
@@ -812,45 +800,25 @@ export function MeetingsClient() {
         </div>
       )}
 
-      <div className="flex items-center gap-2 flex-wrap justify-between">
-        {weergave === 'lijst' ? (
-          <div role="tablist" aria-label="Meetings" className="inline-flex rounded-xl border border-gray-200 bg-gray-50 p-1 max-w-full overflow-x-auto">
-            {([['komend', 'Komend'], ['voorbij', 'Voorbij'], ['geannuleerd', 'Geannuleerd']] as [Tab, string][]).map(([k, l]) => (
-              <button key={k} role="tab" aria-selected={tab === k} type="button" onClick={() => setTab(k)} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap ${tab === k ? 'bg-black text-white' : 'text-gray-700 hover:bg-white'} ${focusRing}`}>
-                {l}<span className={`text-xs ${tab === k ? 'text-gray-400' : 'text-gray-500'}`}>{lijsten[k].length}</span>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="flex items-center gap-1">
-            <button type="button" onClick={() => setMaandag(plusDagen(maandag, -7))} className={`btn-secondary !px-2 ${focusRing}`} aria-label="Vorige week"><ChevronLeft className="h-4 w-4" /></button>
-            <button type="button" onClick={() => setMaandag(maandagVan(dag(new Date().toISOString())))} className={`btn-secondary ${focusRing}`}>Deze week</button>
-            <button type="button" onClick={() => setMaandag(plusDagen(maandag, 7))} className={`btn-secondary !px-2 ${focusRing}`} aria-label="Volgende week"><ChevronRight className="h-4 w-4" /></button>
-            <span className="text-sm text-gray-700 ml-1">{datumKort(`${maandag}T12:00:00Z`)} – {datumKort(`${zondag}T12:00:00Z`)}</span>
-          </div>
-        )}
-        <div className="inline-flex rounded-xl border border-gray-200 bg-gray-50 p-1" role="group" aria-label="Weergave">
-          <button type="button" onClick={() => setWeergave('lijst')} aria-pressed={weergave === 'lijst'} className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm ${weergave === 'lijst' ? 'bg-black text-white' : 'text-gray-700 hover:bg-white'} ${focusRing}`}><List className="h-4 w-4" />Lijst</button>
-          <button type="button" onClick={() => setWeergave('week')} aria-pressed={weergave === 'week'} className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm ${weergave === 'week' ? 'bg-black text-white' : 'text-gray-700 hover:bg-white'} ${focusRing}`}><CalendarDays className="h-4 w-4" />Week</button>
-        </div>
+      <div role="tablist" aria-label="Meetings" className="inline-flex rounded-xl border border-gray-200 bg-gray-50 p-1 max-w-full overflow-x-auto">
+        {([['komend', 'Komend'], ['voorbij', 'Voorbij'], ['geannuleerd', 'Geannuleerd']] as [Tab, string][]).map(([k, l]) => (
+          <button key={k} role="tab" aria-selected={tab === k} type="button" onClick={() => setTab(k)} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap ${tab === k ? 'bg-black text-white' : 'text-gray-700 hover:bg-white'} ${focusRing}`}>
+            {l}<span className={`text-xs ${tab === k ? 'text-gray-400' : 'text-gray-500'}`}>{lijsten[k].length}</span>
+          </button>
+        ))}
       </div>
 
       {fout && <div className="card-base text-sm text-red-700">{fout}</div>}
       {!meetings && !fout && <div className="card-base flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>}
 
-      {meetings && weergave === 'week' && (
-        <Week items={items} maandag={maandag} onKies={open}
-          onDag={(d) => { if (opties?.rechten.toevoegen && d >= dag(new Date().toISOString())) setVenster({ soort: 'plan', meeting: null, dag: d }) }} />
-      )}
-
-      {meetings && weergave === 'lijst' && zichtbaar.length === 0 && (
+      {meetings && zichtbaar.length === 0 && (
         <div className="card-base empty-state">
           <Video className="h-6 w-6 mx-auto mb-2 text-gray-300" aria-hidden />
           {tab === 'komend' ? 'Geen komende meetings.' : tab === 'voorbij' ? 'Nog geen voorbije meetings.' : 'Geen geannuleerde meetings.'}
         </div>
       )}
 
-      {meetings && weergave === 'lijst' && zichtbaar.length > 0 && (
+      {meetings && zichtbaar.length > 0 && (
         <ul className="space-y-2">
           {zichtbaar.map((x) => {
             const st = itemStart(x)

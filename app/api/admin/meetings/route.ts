@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
     if (!user) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
     const rechten = await plannerRechten()
     const persoon = rechten.persoon
-    if (!persoon || !rechten.meetings.toevoegen) return NextResponse.json({ error: 'Je mag geen meetings inplannen. Leads boek je via de Verkoopagenda.' }, { status: 403 })
+    if (!persoon || !rechten.meetings.toevoegen) return NextResponse.json({ error: 'Je mag geen meetings inplannen. Leads boek je via Calendar.' }, { status: 403 })
     const b = await req.json().catch(() => ({})) as Record<string, unknown>
     const admin = createAdminSupabaseClient()
 
@@ -211,7 +211,7 @@ export async function POST(req: NextRequest) {
 /**
  * De verkoopafspraken (Appointment setting) voor het overzicht: alles wat nog
  * komt en de laatste 60 dagen. Enkel lezen; bewerken gebeurt in de
- * Verkoopagenda met de bestaande regels. Ook hun herinnering staat erbij.
+ * Calendar met de bestaande regels. Ook hun herinnering staat erbij.
  */
 async function verkoopAfspraken(admin: ReturnType<typeof createAdminSupabaseClient>) {
   const sinds = new Date(Date.now() - 60 * 86400000).toISOString()

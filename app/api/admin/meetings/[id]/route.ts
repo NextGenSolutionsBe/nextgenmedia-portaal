@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { controleerVrij } from '@/lib/meetings/kalender-server'
+import { GSM_MELDING_MIN } from '@/lib/meetings/kalender'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { plannerRechten, magMeeting } from '@/lib/meetings/rechten'
 import { bevestigingOpnieuw } from '@/lib/meetings/klantboeking-server'
 import { safeMessage } from '@/lib/api-error'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { clickupTaakIdUit } from '@/lib/clickup'
-import { haalMeetingEvent } from '@/lib/sales/google-calendar'
+import { haalMeetingEvent, zetGsmMelding } from '@/lib/sales/google-calendar'
 import { valideerMeeting, wijzigingen, dag, uur, duurMinuten, naamZonderKlant } from '@/lib/meetings/model'
 import {
   leesMeeting, bewaarMeeting, stapGoogle, stapClickup, planHerinnering, herinneringOpnieuw, annuleer, annuleerGoogle,
@@ -46,8 +47,14 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     // Wie heeft de uitnodiging al beantwoord? Best-effort: Google mag traag zijn.
     let antwoorden: { email: string; antwoord: string }[] | null = null
     let antwoordenFout: string | null = null
+    // Gsm-melding zoals Google ze nu echt op het event heeft (minuten vooraf).
+    let gsmLive: number | null | undefined
     if (m.status === 'ingepland' && m.agenda_id && m.google_event_id && m.google_calendar_id) {
-      try { antwoorden = (await haalMeetingEvent(m.agenda_id, m.google_calendar_id, m.google_event_id))?.genodigden ?? null } catch (e) { antwoordenFout = veiligeFout(e) }
+      try {
+        const ev = await haalMeetingEvent(m.agenda_id, m.google_calendar_id, m.google_event_id)
+        antwoorden = ev?.genodigden ?? null
+        gsmLive = ev ? ev.gsmMelding : undefined
+      } catch (e) { antwoordenFout = veiligeFout(e) }
     }
     const [{ data: klant }, { data: project }] = await Promise.all([
       m.client_id ? admin.from('clients').select('id, company_name').eq('id', m.client_id).maybeSingle() : Promise.resolve({ data: null }),
@@ -56,7 +63,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
     return NextResponse.json({
       meeting: { ...m, herinnering: laatste }, herinneringen: lijst, mail: { onderwerp: mail.onderwerp, tekst: mail.tekst },
-      antwoorden, antwoordenFout, klant, project,
+      antwoorden, antwoordenFout, klant, project, ...(gsmLive !== undefined ? { gsmLive } : {}),
     })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err, 'meetings.id.GET') }, { status: 500 })
@@ -198,6 +205,20 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       m = await bevestigingOpnieuw(admin, m)
       await audit('klantboeking.bevestiging_opnieuw', { status: m.bevestiging_status })
       if (m.bevestiging_status !== 'verzonden') return NextResponse.json({ error: `Versturen mislukt: ${m.bevestiging_fout ?? 'onbekende fout'}` }, { status: 400 })
+      return antwoord()
+    }
+
+    if (actie === 'gsm_opnieuw') {
+      if (m.status !== 'ingepland' || !m.agenda_id || !m.google_event_id) return NextResponse.json({ error: 'Deze meeting staat (nog) niet in Google Agenda.' }, { status: 400 })
+      try {
+        const min = await zetGsmMelding(m.agenda_id, m.google_calendar_id, m.google_event_id)
+        const ok = min === GSM_MELDING_MIN
+        m = await bewaarMeeting(admin, m.id, { gsm_melding_status: ok ? 'ingesteld' : 'mislukt', gsm_melding_fout: ok ? null : 'Google bewaarde de melding niet' })
+      } catch (e) {
+        m = await bewaarMeeting(admin, m.id, { gsm_melding_status: 'mislukt', gsm_melding_fout: veiligeFout(e) })
+      }
+      await audit('meeting.gsm_melding', { status: m.gsm_melding_status ?? null })
+      if (m.gsm_melding_status !== 'ingesteld') return NextResponse.json({ error: m.gsm_melding_fout ?? 'Melding niet ingesteld' }, { status: 502 })
       return antwoord()
     }
 

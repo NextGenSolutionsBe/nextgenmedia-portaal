@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 export const dynamic = 'force-dynamic'
 
 /**
- * Appointment setting is opgegaan in de Meeting Inplanner (tab Verkoopagenda).
+ * Appointment setting is opgegaan in de Meeting Inplanner (tab Calendar).
  * Oude links — bladwijzers, mails met "Open in de app", de Google-koppeling die
  * hierheen terugkeert — sturen we door met hun parameters (bv. ?lead=…).
  * De agenda zelf (calendar.tsx en de dialogen hiernaast) wordt daar hergebruikt.
