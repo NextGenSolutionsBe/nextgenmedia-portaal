@@ -5,13 +5,15 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   Plus, Loader2, Video, Check, AlertTriangle, Clock, Minus, Copy, ExternalLink, RotateCcw, Pencil, Ban, X, Users,
-  ChevronRight, CalendarDays, ShieldCheck, ArrowLeft,
+  ChevronRight, CalendarDays, ShieldCheck, ArrowLeft, MapPin,
 } from 'lucide-react'
 import { INP } from '@/app/admin/instellingen/ui'
 import { Modal, focusRing } from '@/app/admin/materiaal/dialogen'
+import { MailComposer } from '@/components/admin/mail-composer'
+import { routeLink } from '@/lib/meetings/meeting-mail'
 import {
   DUUR_OPTIES, STANDAARD_TIJDZONE, TIJDZONE_OPTIES, valideerMeeting, kiesHerinnering, herinneringsMail, datumKort, datumLang, uur, dag,
-  duurMinuten, wanneer, tijdzoneLabel, naamZonderKlant, ANTWOORD_LABEL,
+  duurMinuten, wanneer, tijdzoneLabel, naamZonderKlant, ANTWOORD_LABEL, waarTekst, MAX_LOCATIE,
   stapAgenda, stapMeet, stapUitnodiging, stapClickup, stapHerinnering, momentLabel, isEmail, type Persoon, type StapWeergave, type Toon,
 } from '@/lib/meetings/model'
 
@@ -37,10 +39,11 @@ export type Meeting = {
   bron?: 'intern' | 'klantboeking'; boeker_bedrijf?: string | null; boeker_reden?: string | null
   bevestiging_status?: string | null; bevestiging_op?: string | null; bevestiging_fout?: string | null
   gsm_melding_status?: string | null; gsm_melding_fout?: string | null; google_event_id?: string | null
+  vorm?: 'online' | 'locatie' | null; locatie?: string | null; met_meet?: boolean | null
   created_by_email: string | null; created_at: string; geannuleerd_op: string | null; geannuleerd_door: string | null
   herinnering: Herinnering | null
 }
-type Klant = { id: string; company_name: string | null; contact_name: string | null; email: string | null }
+type Klant = { id: string; company_name: string | null; contact_name: string | null; email: string | null; adres?: string | null }
 type Project = { id: string; titel: string; client_id: string | null; klant_vrij: string | null }
 export type Opties = {
   klanten: Klant[]; contacten: { client_id: string; name: string | null; email: string | null }[]; projecten: Project[]
@@ -53,6 +56,8 @@ type Detail = {
   klant: { id: string; company_name: string | null } | null; project: { id: string; titel: string } | null
   /** Gsm-melding zoals Google ze nu op het event heeft (minuten vooraf), of null. */
   gsmLive?: number | null
+  /** Mails aan de deelnemers (vanuit info@nextgenmedia.be). */
+  mails?: { id: string; created_at: string; to_email: string; subject: string; status: string; error: string | null; from_email: string | null; sent_by_email: string | null }[]
 }
 
 const lbl = 'block text-xs font-medium text-gray-700 mb-1'
@@ -167,6 +172,11 @@ export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerV
   const [genodigden, setGenodigden] = useState<Rij[]>(bestaand ? bestaand.klant_ontvangers.map((p) => ({ naam: p.naam ?? '', email: p.email })) : [{ naam: '', email: '' }])
   const [extra, setExtra] = useState<Rij[]>((bestaand?.deelnemers ?? []).map((p) => ({ naam: p.naam ?? '', email: p.email })))
   const [herinnering, setHerinnering] = useState(bestaand?.herinnering_aan ?? true)
+  const [vorm, setVorm] = useState<'online' | 'locatie'>(bestaand?.vorm === 'locatie' ? 'locatie' : 'online')
+  const [locatie, setLocatie] = useState(bestaand?.locatie ?? '')
+  const [metMeet, setMetMeet] = useState(bestaand?.vorm === 'locatie' ? !!bestaand.met_meet : false)
+  // Wie zien de genodigden als organisator van de Google-uitnodiging? (agenda en Google-account)
+  const [uitnodiger, setUitnodiger] = useState<{ agenda: string; account: string | null; viaInfo: boolean } | { fout: string } | null>(null)
   const [toonVoorbeeld, setToonVoorbeeld] = useState(false)
   const [bezig, setBezig] = useState(false)
   const [fout, setFout] = useState<string | null>(null)
@@ -199,8 +209,10 @@ export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerV
   const eindUur = uurVan(minVan(tijd || '00:00') + duur)
   const zetEind = (v: string) => { if (!v || !tijd) return; const d = minVan(v) - minVan(tijd); if (d > 0) setDuur(d) }
 
+  const meet = vorm === 'online' || metMeet
   const invoer = {
     titel, beschrijving, dag: datum, uur: tijd, duur_minuten: duur, tijdzone, herinnering_aan: herinnering,
+    vorm, locatie: vorm === 'locatie' ? locatie : null, met_meet: vorm === 'locatie' ? metMeet : true,
     klant_ontvangers: genodigden.filter((r) => r.email.trim()).map((r) => ({ naam: r.naam, email: r.email })),
     deelnemers: extra.filter((r) => r.email.trim()).map((r) => ({ naam: r.naam, email: r.email })),
   }
@@ -215,10 +227,21 @@ export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerV
   const clickupOngeldig = clickupItem.trim() !== '' && !/clickup\.com\/t\/(?:\d+\/)?[A-Za-z0-9_-]{5,40}|^#?[A-Za-z0-9_-]{5,40}$/.test(clickupItem.trim())
 
   const voorbeeld = controle.ok ? herinneringsMail({
-    klant_naam: weergaveNaam, titel: controle.waarde.titel, starts_at: controle.waarde.startsAt, meet_url: bestaand?.meet_url ?? MEET_PLAATSHOUDER,
+    klant_naam: weergaveNaam, titel: controle.waarde.titel, starts_at: controle.waarde.startsAt, meet_url: meet ? bestaand?.meet_url ?? MEET_PLAATSHOUDER : null,
     beschrijving: controle.waarde.beschrijving, organisator_naam: organisator.trim() || agendaNaamKort(agenda?.naam) || null,
-    ontvangers: controle.waarde.klant_ontvangers, tijdzone,
+    ontvangers: controle.waarde.klant_ontvangers, tijdzone, locatie: controle.waarde.locatie,
   }) : null
+
+  // In de controlestap: wie staat er als organisator op de Google-uitnodiging?
+  const uitnodigerAgenda = bestaand?.agenda_id ?? agendaId
+  useEffect(() => {
+    if (stap !== 'controle' || !uitnodigerAgenda) return
+    let weg = false
+    api<{ agenda: string; account: string | null; viaInfo: boolean }>(`/api/admin/meetings?organisator=${uitnodigerAgenda}`)
+      .then((j) => { if (!weg) setUitnodiger(j) })
+      .catch((e) => { if (!weg) setUitnodiger({ fout: e instanceof Error ? e.message : 'Niet na te gaan' }) })
+    return () => { weg = true }
+  }, [stap, uitnodigerAgenda])
 
   const probleem = !controle.ok ? controle.fout : clickupOngeldig ? 'Geen geldig ClickUp-item. Plak de link of het taak-ID.' : !bestaand && !agendaId ? 'Kies de Google-agenda waarin de meeting komt.' : !bestaand && agenda && !agenda.gekoppeld ? 'De Google-koppeling van deze agenda is verlopen. Koppel ze opnieuw via Verkoop → Agenda.' : null
 
@@ -272,7 +295,18 @@ export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerV
           <Rijtje label="Herinneringsmail">
             {!w.herinnering_aan ? 'Geen' : keuze ? <>{datumLang(keuze.geplandVoor)} om {uur(keuze.geplandVoor)} ({keuze.label}) naar {w.klant_ontvangers.map((p) => p.email).join(', ')}</> : <span className="text-amber-700">Geen: de meeting begint te snel.</span>}
           </Rijtje>
-          <Rijtje label="Google-agenda">{bestaand ? 'Zelfde afspraak, wordt bijgewerkt (Meet-link blijft)' : `${agenda?.naam ?? '—'}, met Google Meet-link`}</Rijtje>
+          <Rijtje label="Waar">{w.vorm === 'locatie'
+            ? <><span className="inline-flex items-start gap-1"><MapPin className="h-3.5 w-3.5 mt-0.5 shrink-0" aria-hidden />{w.locatie}</span><div className="text-xs text-gray-500">{w.metMeet ? 'Met een Google Meet-link erbij.' : 'Geen Google Meet-link.'} Het adres staat in de agenda-afspraak en de herinneringsmail.</div></>
+            : <span className="inline-flex items-center gap-1"><Video className="h-3.5 w-3.5" aria-hidden />Online via Google Meet</span>}</Rijtje>
+          <Rijtje label="Google-agenda">{bestaand
+            ? (w.metMeet ? (bestaand.meet_url ? 'Zelfde afspraak, wordt bijgewerkt (Meet-link blijft)' : 'Zelfde afspraak, wordt bijgewerkt en krijgt een Meet-link') : 'Zelfde afspraak, wordt bijgewerkt (zonder Meet-link)')
+            : `${agenda?.naam ?? '—'}, ${w.metMeet ? 'met Google Meet-link' : 'zonder Meet-link'}`}</Rijtje>
+          <Rijtje label="Uitnodiging van">{!uitnodiger ? <span className="text-gray-500">Even nagaan…</span>
+            : 'fout' in uitnodiger ? <span className="text-amber-700">Niet na te gaan: {uitnodiger.fout}</span>
+            : <>
+                Google stuurt de uitnodiging. Genodigden zien als organisator <b>{uitnodiger.agenda}</b>{uitnodiger.account ? <> (Google-account {uitnodiger.account})</> : null}.
+                {!uitnodiger.viaInfo && <div className="text-xs text-amber-800 mt-1">Niet info@nextgenmedia.be. Wil je dat wel: koppel via &quot;Agenda toevoegen&quot; een Google-agenda waarmee je inlogt als info@nextgenmedia.be, en kies die agenda hier.</div>}
+              </>}</Rijtje>
           <Rijtje label="Gsm-melding">15 minuten vooraf, via de Google Agenda-app</Rijtje>
           {controleerVrij && <Rijtje label="Conflicten">Vlak vóór het opslaan kijken we of er intussen iets anders op dit moment staat (Google Agenda, ClickUp en de app).</Rijtje>}
           <Rijtje label="ClickUp">{bestaand ? 'Bestaande taak wordt bijgewerkt' : 'Taak in de lijst van het merk, zoals bij de verkoopafspraken'}</Rijtje>
@@ -362,6 +396,32 @@ export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerV
           {browserTz !== tijdzone && <span className="block text-gray-500">Je toestel staat op {browserTz}; de tijd geldt in de gekozen tijdzone.</span>}
         </p>
       </div>
+
+      <fieldset className="space-y-2">
+        <legend className={lbl}>Waar</legend>
+        <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Online of op locatie">
+          {([['online', 'Online via Google Meet', Video], ['locatie', 'Op locatie', MapPin]] as const).map(([k, label, Icoon]) => (
+            <button key={k} type="button" role="radio" aria-checked={vorm === k} onClick={() => setVorm(k)}
+              className={`flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm ${vorm === k ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 hover:border-gray-400'} ${focusRing}`}>
+              <Icoon className="h-4 w-4" aria-hidden />{label}
+            </button>
+          ))}
+        </div>
+        {vorm === 'online'
+          ? <p className="text-[11px] text-gray-500">De Meet-link maakt Google aan bij het inplannen; hij staat in de afspraak en in de herinneringsmail.</p>
+          : (
+            <div className="space-y-2">
+              <div>
+                <label className={lbl} htmlFor="mt-locatie">Adres</label>
+                <textarea id="mt-locatie" rows={2} className={INP} value={locatie} maxLength={MAX_LOCATIE} onChange={(e) => setLocatie(e.target.value)} placeholder="Straat en nummer, postcode en gemeente" />
+                {klant?.adres && locatie.trim() !== klant.adres && (
+                  <button type="button" onClick={() => setLocatie(klant.adres ?? '')} className={`mt-1 text-xs underline underline-offset-2 ${focusRing}`}>Adres van {klantNaam} gebruiken: {klant.adres}</button>
+                )}
+              </div>
+              <label className="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" checked={metMeet} onChange={(e) => setMetMeet(e.target.checked)} />Ook een Google Meet-link toevoegen</label>
+            </div>
+          )}
+      </fieldset>
 
       {!bestaand && (
         <div className="grid sm:grid-cols-2 gap-2">
@@ -584,6 +644,14 @@ export function DetailVenster({ id, opties, onSluit, onWijzig, onAnnuleer, onVer
       {m.google_status !== 'ok' && actief && (
         <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">Niet ingepland in Google Agenda. Er is (nog) geen uitnodiging verstuurd. Probeer de agenda-stap opnieuw of annuleer de meeting.</p>
       )}
+      <div className="text-sm flex items-center gap-1.5 text-gray-700">{m.vorm === 'locatie' ? <MapPin className="h-4 w-4" aria-hidden /> : <Video className="h-4 w-4" aria-hidden />}{m.vorm === 'locatie' ? (m.met_meet ? 'Op locatie, met Google Meet-link' : 'Op locatie') : 'Online via Google Meet'}</div>
+      {m.vorm === 'locatie' && m.locatie && (
+        <div className="flex items-center gap-2 rounded-lg border border-gray-200 p-3">
+          <MapPin className="h-4 w-4 shrink-0" aria-hidden />
+          <a href={routeLink(m.locatie)} target="_blank" rel="noreferrer" className="text-sm font-medium underline underline-offset-2 break-words flex-1" title="Openen in Google Maps">{m.locatie}</a>
+          <Kopieer tekst={m.locatie} />
+        </div>
+      )}
       {m.meet_url && actief && (
         <div className="flex items-center gap-2 rounded-lg border border-gray-200 p-3">
           <Video className="h-4 w-4 shrink-0" aria-hidden />
@@ -614,7 +682,7 @@ export function DetailVenster({ id, opties, onSluit, onWijzig, onAnnuleer, onVer
           m.google_fout ? <p className="text-xs text-red-700">{m.google_fout}</p> : null,
           m.google_status === 'fout' ? knop('google', actief ? 'Opnieuw proberen' : 'Annulering opnieuw', { actie: 'opnieuw', stap: 'google' }, actief ? 'Agenda-stap opnieuw uitgevoerd.' : 'Annulering opnieuw geprobeerd.') : null)}
         {rij('Google Meet', stapMeet(m), null,
-          actief && m.google_status === 'ok' && !m.meet_url ? knop('meet', 'Meet-link aanvragen', { actie: 'opnieuw', stap: 'google' }, 'Meet-link opnieuw aangevraagd.') : null)}
+          actief && m.google_status === 'ok' && !m.meet_url && (m.vorm !== 'locatie' || m.met_meet) ? knop('meet', 'Meet-link aanvragen', { actie: 'opnieuw', stap: 'google' }, 'Meet-link opnieuw aangevraagd.') : null)}
         {rij('Uitnodiging', stapUitnodiging(m),
           <>
             {m.uitnodiging_op && actief && <p className="text-xs text-gray-600">Door Google verstuurd op {datumKort(m.uitnodiging_op)} {uur(m.uitnodiging_op)} naar {(m.uitnodiging_naar ?? []).join(', ')}</p>}
@@ -641,6 +709,17 @@ export function DetailVenster({ id, opties, onSluit, onWijzig, onAnnuleer, onVer
           </>,
           actief && h?.status === 'mislukt' ? knop('herinnering', 'Nu opnieuw versturen', { actie: 'herinnering_opnieuw' }, 'Herinnering opnieuw verstuurd.')
             : actief && komend && m.google_status === 'ok' && m.herinnering_aan && (!h || h.status === 'geannuleerd') && kiesHerinnering(m.starts_at) ? knop('plan', 'Herinnering plannen', { actie: 'opnieuw', stap: 'herinnering' }, 'Herinnering gepland.') : null)}
+        {rij('Mail deelnemers',
+          (d.mails ?? []).some((x) => x.status === 'sent') ? { label: 'Mail verstuurd', toon: 'ok' } : (d.mails ?? []).some((x) => x.status === 'error') ? { label: 'Mail mislukt', toon: 'fout' } : { label: 'Nog geen mail', toon: 'neutraal' },
+          <>
+            {(d.mails ?? []).map((x) => (
+              <p key={x.id} className={`text-xs ${x.status === 'error' ? 'text-red-700' : 'text-gray-600'}`}>
+                {datumKort(x.created_at)} {uur(x.created_at)} · {x.status === 'sent' ? 'verstuurd' : x.status === 'error' ? `mislukt${x.error ? `: ${x.error}` : ''}` : 'bezig'} · naar {x.to_email}{x.from_email ? ` · van ${x.from_email}` : ''}
+              </p>
+            ))}
+            {!(d.mails ?? []).length && <p className="text-xs text-gray-500">Stel een mail op met de datum, {m.vorm === 'locatie' ? 'het adres' : 'de Meet-link'} en een korte briefing. Vertrekt vanuit info@nextgenmedia.be, pas na je klik op Versturen.</p>}
+          </>,
+          kan && actief ? <MailComposer context={{ type: 'meeting', meetingId: m.id }} label="Mail opstellen" className={`btn-secondary !px-2.5 !py-1 text-xs ${focusRing}`} onSent={() => { laad() }} /> : null)}
         {rij('Gsm-melding', stapGsm(m, d.gsmLive),
           <>
             {actief && m.google_status === 'ok' && <p className="text-xs text-gray-600">15 minuten vooraf, als melding van de Google Agenda-app op elk toestel waar deze agenda met meldingen aan staat.</p>}

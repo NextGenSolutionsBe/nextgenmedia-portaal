@@ -6171,3 +6171,16 @@ DO $$ BEGIN
     ALTER TABLE public.sales_appointments ADD COLUMN IF NOT EXISTS gsm_melding_fout text;
   END IF;
 END $$;
+
+-- ── Meeting Inplanner: online of op locatie ─────────────────────────────────
+-- vorm: 'online' (Google Meet) | 'locatie' (adres in locatie). met_meet: ook bij
+-- een meeting op locatie kan je bewust een Meet-link vragen. Bestaande meetings
+-- en klantboekingen blijven online met Meet (de standaardwaarden). Additief.
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS vorm text NOT NULL DEFAULT 'online';
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS locatie text;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS met_meet boolean NOT NULL DEFAULT true;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_meetings_vorm_check') THEN
+    ALTER TABLE public.klant_meetings ADD CONSTRAINT klant_meetings_vorm_check CHECK (vorm IN ('online', 'locatie'));
+  END IF;
+END $$;

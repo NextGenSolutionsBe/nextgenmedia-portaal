@@ -72,12 +72,15 @@ export type KalenderItem = {
   tijdzone?: string | null
   /** Gsm-melding 15 min vooraf: ingesteld, wacht, mislukt; null = eigen instelling in Google. */
   gsm: 'ingesteld' | 'wacht' | 'mislukt' | null
+  /** Adres van een meeting op locatie; null = online (of niet gekend). */
+  locatie?: string | null
 }
 
 export type MeetingBron = {
   id: string; titel: string; klant_naam?: string | null; starts_at: string; ends_at: string; status: string
   bron?: string | null; meet_url?: string | null; clickup_task_id?: string | null; google_event_id?: string | null
   tijdzone?: string | null; google_status?: string | null; gsm_melding_status?: string | null
+  vorm?: string | null; locatie?: string | null
 }
 export type AfspraakBron = {
   id: string; starts_at: string; ends_at: string; status: string
@@ -127,6 +130,7 @@ export function voegSamen(b: {
       verplaatsbaar: true, clickupTaskId: m.clickup_task_id ?? null, googleEventId: m.google_event_id ?? null,
       sub: m.klant_naam && !m.titel.includes(m.klant_naam) ? m.klant_naam : null,
       tijdzone: m.tijdzone ?? null, gsm: gsmVan(m.gsm_melding_status, (m.google_status ?? 'ok') === 'ok'),
+      locatie: m.vorm === 'locatie' ? m.locatie ?? null : null,
     })
   }
   for (const a of b.afspraken) {

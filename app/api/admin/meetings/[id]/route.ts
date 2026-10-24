@@ -56,14 +56,17 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
         gsmLive = ev ? ev.gsmMelding : undefined
       } catch (e) { antwoordenFout = veiligeFout(e) }
     }
-    const [{ data: klant }, { data: project }] = await Promise.all([
+    const [{ data: klant }, { data: project }, { data: mails }] = await Promise.all([
       m.client_id ? admin.from('clients').select('id, company_name').eq('id', m.client_id).maybeSingle() : Promise.resolve({ data: null }),
       m.project_id ? admin.from('opdrachten').select('id, titel').eq('id', m.project_id).maybeSingle() : Promise.resolve({ data: null }),
-    ]) as [{ data: { id: string; company_name: string | null } | null }, { data: { id: string; titel: string } | null }]
+      // Mails aan de deelnemers (vanuit info@), zoals ze in het E-mail Center staan.
+      admin.from('email_messages').select('id, created_at, to_email, subject, status, error, from_email, sent_by_email')
+        .eq('related_id', m.id).eq('kind', 'meeting_mail').order('created_at', { ascending: false }).limit(20),
+    ]) as [{ data: { id: string; company_name: string | null } | null }, { data: { id: string; titel: string } | null }, { data: unknown[] | null }]
 
     return NextResponse.json({
       meeting: { ...m, herinnering: laatste }, herinneringen: lijst, mail: { onderwerp: mail.onderwerp, tekst: mail.tekst },
-      antwoorden, antwoordenFout, klant, project, ...(gsmLive !== undefined ? { gsmLive } : {}),
+      antwoorden, antwoordenFout, klant, project, mails: mails ?? [], ...(gsmLive !== undefined ? { gsmLive } : {}),
     })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err, 'meetings.id.GET') }, { status: 500 })
@@ -110,6 +113,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         duur_minuten: b.duur_minuten ?? duurMinuten(m.starts_at, m.ends_at), eind_uur: b.eind_uur,
         klant_ontvangers: b.klant_ontvangers ?? m.klant_ontvangers, deelnemers: b.deelnemers ?? m.deelnemers,
         herinnering_aan: b.herinnering_aan !== undefined ? b.herinnering_aan : m.herinnering_aan,
+        vorm: b.vorm !== undefined ? b.vorm : m.vorm ?? 'online',
+        locatie: b.locatie !== undefined ? b.locatie : m.locatie,
+        met_meet: b.met_meet !== undefined ? b.met_meet : m.met_meet,
       }
       const v = valideerMeeting(invoer)
       if (!v.ok) return NextResponse.json({ error: v.fout }, { status: 400 })
@@ -157,10 +163,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         titel: v.waarde.titel, beschrijving: v.waarde.beschrijving, starts_at: v.waarde.startsAt, ends_at: v.waarde.endsAt, tijdzone: v.waarde.tijdzone,
         klant_ontvangers: v.waarde.klant_ontvangers, deelnemers: v.waarde.deelnemers, herinnering_aan: v.waarde.herinnering_aan,
         client_id: clientId, klant_naam: klantNaam, project_id: projectId, clickup_item_id: clickupItemId,
+        vorm: v.waarde.vorm, locatie: v.waarde.locatie, met_meet: v.waarde.metMeet,
       })
-      // Zelfde Google-afspraak bijwerken (Meet-link blijft, genodigden krijgen de update); ClickUp volgt.
-      if (w.tijd || w.inhoud || w.genodigden) m = await stapGoogle(admin, m, { bijwerken: true })
-      if (w.tijd || w.inhoud || w.genodigden || koppeling) m = m.google_status === 'ok' ? await stapClickup(admin, m) : m
+      // Zelfde Google-afspraak bijwerken (Meet-link blijft, tenzij de meeting op
+      // locatie zonder link wordt; genodigden krijgen de update); ClickUp volgt.
+      const naarGoogle = w.tijd || w.inhoud || w.genodigden || w.plaats
+      if (naarGoogle) m = await stapGoogle(admin, m, { bijwerken: true })
+      if (naarGoogle || koppeling) m = m.google_status === 'ok' ? await stapClickup(admin, m) : m
       let herinneringFout: string | null = null
       // Al verstuurd en enkel ontvangers gewijzigd of terug aangezet: geen tweede herinnering.
       const vorige = await laatsteHerinnering(admin, m.id)
@@ -168,8 +177,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       if (w.tijd || ((w.ontvangers || w.herinnering) && (!alVerstuurd || !m.herinnering_aan))) {
         try { await planHerinnering(admin, m) } catch (e) { herinneringFout = safeMessage(e, 'meetings.herinnering') }
       }
-      await audit('meeting.gewijzigd', { tijd: w.tijd, inhoud: w.inhoud, genodigden: w.genodigden, herinnering: w.herinnering, koppeling, google: m.google_status, clickup: m.clickup_status })
-      const googleFout = (w.tijd || w.inhoud || w.genodigden) && m.google_status !== 'ok'
+      await audit('meeting.gewijzigd', { tijd: w.tijd, inhoud: w.inhoud, genodigden: w.genodigden, herinnering: w.herinnering, plaats: w.plaats, koppeling, google: m.google_status, clickup: m.clickup_status })
+      const googleFout = naarGoogle && m.google_status !== 'ok'
         ? `Bewaard in de app, maar Google Agenda is NIET bijgewerkt: ${m.google_fout ?? 'onbekende fout'}. Probeer de agenda-stap opnieuw.` : null
       return antwoord({ herinneringFout, googleFout })
     }

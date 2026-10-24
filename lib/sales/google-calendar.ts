@@ -698,13 +698,18 @@ export type MeetingEventVelden = {
   endsAt: string
   timezone: string
   attendees: { email: string; displayName?: string }[]
+  /** Adres van een meeting op locatie. Leeg = geen locatie (bij bijwerken: wissen). */
+  location?: string | null
 }
 
 const meetAanvraag = (requestId: string) => ({ createRequest: { requestId, conferenceSolutionKey: { type: 'hangoutsMeet' } } })
 
-/** Event met Google Meet aanmaken onder een vaste id. Bestaat die al, dan het bestaande event. */
+/**
+ * Event aanmaken onder een vaste id, standaard met Google Meet (metMeet: false
+ * voor een meeting op locatie zonder link). Bestaat die id al, dan het bestaande event.
+ */
 export async function maakMeetingEvent(connectionId: string, opts: MeetingEventVelden & {
-  eventId: string; meetRequestId: string; calendarId?: string | null
+  eventId: string; meetRequestId: string; calendarId?: string | null; metMeet?: boolean
 }): Promise<MeetingEvent> {
   const auth = await accessToken(connectionId)
   if (!auth) throw new AgendaNietGekoppeld()
@@ -716,7 +721,8 @@ export async function maakMeetingEvent(connectionId: string, opts: MeetingEventV
     start: { dateTime: opts.startsAt, timeZone: opts.timezone },
     end: { dateTime: opts.endsAt, timeZone: opts.timezone },
     attendees: opts.attendees,
-    conferenceData: meetAanvraag(opts.meetRequestId),
+    ...(opts.location?.trim() ? { location: opts.location.trim() } : {}),
+    ...(opts.metMeet === false ? {} : { conferenceData: meetAanvraag(opts.meetRequestId) }),
     reminders: popupMelding(GSM_MELDING_MIN),
   }
   const res = await fetchMetLimiet(`${eventUrl(calendarId)}?conferenceDataVersion=1&sendUpdates=all`, {
@@ -733,7 +739,8 @@ export async function maakMeetingEvent(connectionId: string, opts: MeetingEventV
     // In Google verwijderd: dezelfde id terug actief zetten met de juiste gegevens.
     return werkMeetingEventBij(connectionId, calendarId, opts.eventId, {
       summary: opts.summary, description: opts.description, startsAt: opts.startsAt, endsAt: opts.endsAt,
-      timezone: opts.timezone, attendees: opts.attendees, nieuweMeetRequestId: `${opts.meetRequestId}-herstel`, status: 'confirmed',
+      timezone: opts.timezone, attendees: opts.attendees, location: opts.location ?? '', status: 'confirmed',
+      ...(opts.metMeet === false ? { geenMeet: true } : { nieuweMeetRequestId: `${opts.meetRequestId}-herstel` }),
     })
   }
   if (!res.ok || !json.id) throw new Error(json.error?.message ?? `Google kon de afspraak niet aanmaken (${res.status})`)
@@ -784,6 +791,8 @@ export async function haalMeetingEvent(connectionId: string, calendarId: string,
 export async function werkMeetingEventBij(connectionId: string, calendarId: string, eventId: string, velden: Partial<MeetingEventVelden> & {
   /** Enkel wanneer de Meet-link ontbreekt of mislukte: een nieuwe aanvraag. */
   nieuweMeetRequestId?: string
+  /** De Meet-link van het event halen (meeting werd op locatie, zonder link). */
+  geenMeet?: boolean
   status?: 'confirmed'
 }): Promise<MeetingEvent> {
   const auth = await accessToken(connectionId)
@@ -794,8 +803,10 @@ export async function werkMeetingEventBij(connectionId: string, calendarId: stri
   if (velden.startsAt !== undefined) body.start = { dateTime: velden.startsAt, timeZone: velden.timezone ?? 'Europe/Brussels' }
   if (velden.endsAt !== undefined) body.end = { dateTime: velden.endsAt, timeZone: velden.timezone ?? 'Europe/Brussels' }
   if (velden.attendees !== undefined) body.attendees = velden.attendees
+  if (velden.location !== undefined) body.location = velden.location?.trim() || ''
   if (velden.status) body.status = velden.status
   if (velden.nieuweMeetRequestId) body.conferenceData = meetAanvraag(velden.nieuweMeetRequestId)
+  else if (velden.geenMeet) body.conferenceData = null
   // Elke wijziging zet ook de gsm-melding goed (oudere events hadden er geen).
   body.reminders = popupMelding(GSM_MELDING_MIN)
   const res = await fetchMetLimiet(`${eventUrl(calendarId, eventId)}?conferenceDataVersion=1&sendUpdates=all`, {

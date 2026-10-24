@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
   Loader2, ChevronLeft, ChevronRight, List, CalendarDays, CalendarRange, Plus, Video, ExternalLink, Bell, BellOff,
-  AlertTriangle, Settings2, UserRound, Link2, Check, X, MoveRight,
+  AlertTriangle, Settings2, UserRound, Link2, Check, X, MoveRight, MapPin,
 } from 'lucide-react'
 import { Modal, focusRing } from '@/app/admin/materiaal/dialogen'
 import { isBookable, mergeIntervals, snapToSlot, type Interval } from '@/lib/sales/availability'
@@ -23,9 +23,10 @@ import { AvailabilityPanel } from '@/app/admin/sales/appointments/availability-p
  * Eén persoon tegelijk ("Agenda van"), in drie weergaven: lijst, week en maand.
  * Toont alle meetings uit de app, verkoopafspraken, ClickUp-meetings (enkel
  * met start- én einduur) en losse Google-afspraken, elk één keer. In de week
- * is wit = echt vrij (werkuren min alles wat bezet is); sleep daarop om te
- * plannen, of sleep een bestaande meeting om ze te verplaatsen. Op een
- * touchscreen: tik op een vrij moment om te plannen, verplaatsen via de meeting.
+ * sleep je op eender welk moment om te plannen, of sleep je een bestaande
+ * meeting om ze te verplaatsen. Geen grijze "niet vrij"-vlakken: intern mag
+ * alles, een overlap geeft bij het opslaan een waarschuwing. Op een
+ * touchscreen: tik om te plannen, verplaatsen via de meeting.
  * Alle tijden in Europe/Brussels.
  */
 
@@ -310,7 +311,7 @@ export function Calendar({ client, pipelines, isAdmin, verkoop, initialLeadId, i
       {data && agenda && agenda.status !== 'connected' && (
         <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">De Google-koppeling van &quot;{agenda.name}&quot; werkt niet meer. Koppel ze opnieuw via &quot;Agenda toevoegen&quot;.</p>
       )}
-      {vrijDezeWeek === 0 && (
+      {vrijDezeWeek === 0 && initialLeadId && verkoop && (
         <p className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 flex items-center justify-between gap-2 flex-wrap">
           <span>Geen vrije momenten meer in deze week binnen de werkuren.</span>
           <button type="button" onClick={() => stap(1)} className={`btn-secondary !py-1 text-xs ${focusRing}`}>Volgende week<ChevronRight className="h-3.5 w-3.5" /></button>
@@ -318,14 +319,14 @@ export function Calendar({ client, pipelines, isAdmin, verkoop, initialLeadId, i
       )}
 
       {data && weergave === 'week' && (
-        <Week data={data} maandag={maandag} slot={slot} duur={duur} magVerplaatsen={mag} onOpen={open} onMoment={kiesMoment}
+        <Week data={data} maandag={maandag} slot={slot} duur={duur} toonVrij={!!initialLeadId && verkoop} magVerplaatsen={mag} onOpen={open} onMoment={kiesMoment}
           onVerplaats={(item, start, eind) => setVenster({ soort: 'verplaats', item, start, eind })} />
       )}
       {data && weergave === 'maand' && <Maand items={data.items} datum={datum} onOpen={open} onDag={(d) => { setDatum(d); kiesWeergave('week') }} />}
       {data && weergave === 'lijst' && <Lijst items={data.items.filter((i) => Date.parse(i.eind) > Date.now())} onOpen={open} />}
       {!data && !fout && <div className="card-base flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>}
 
-      <Legenda week={weergave === 'week'} />
+      <Legenda week={weergave === 'week'} toonVrij={!!initialLeadId && verkoop} />
 
       {/* ── Vensters ───────────────────────────────────────────────────────── */}
       {venster?.soort === 'kies' && (
@@ -400,8 +401,10 @@ export function Calendar({ client, pipelines, isAdmin, verkoop, initialLeadId, i
 
 // ── Week ─────────────────────────────────────────────────────────────────────
 
-function Week({ data, maandag, slot, duur, magVerplaatsen, onOpen, onMoment, onVerplaats }: {
+function Week({ data, maandag, slot, duur, toonVrij, magVerplaatsen, onOpen, onMoment, onVerplaats }: {
   data: Data; maandag: string; slot: number; duur: number
+  /** Enkel bij een leadafspraak (die moet op een vrij moment): vrije stukken licht groen. */
+  toonVrij: boolean
   magVerplaatsen: (i: KalenderItem) => boolean
   onOpen: (i: KalenderItem) => void
   onMoment: (start: number, eind: number) => void
@@ -551,17 +554,16 @@ function Week({ data, maandag, slot, duur, magVerplaatsen, onOpen, onMoment, onV
               const items = itemsPerDag.get(d) ?? []
               const b = banen(items)
               const dagTop = topMs(d), dagBodem = dagTop + (DAG_EIND - DAG_START) * 60 * MIN
-              const wit = mergeIntervals(segmenten.filter((s) => s.end > dagTop && s.start < dagBodem).map((s) => ({ start: Math.max(s.start, dagTop), end: Math.min(s.end, dagBodem) })))
+              const vrij = toonVrij ? mergeIntervals(segmenten.filter((s) => s.end > dagTop && s.start < dagBodem).map((s) => ({ start: Math.max(s.start, dagTop), end: Math.min(s.end, dagBodem) }))) : []
               return (
                 <div key={d} data-dag={d} ref={(el) => { if (el) kolommen.current.set(d, el); else kolommen.current.delete(d) }}
                   onPointerDown={(ev) => opKolomNeer(ev, d)} onPointerUp={opKolomOp}
-                  className="relative border-l border-gray-200 bg-niet-vrij">
+                  className="relative border-l border-gray-200 bg-white cursor-crosshair">
                   {/* uurlijnen */}
                   {Array.from({ length: DAG_EIND - DAG_START }, (_, i) => <div key={i} className="absolute inset-x-0 border-t border-gray-200/70 pointer-events-none" style={{ top: i * 60 * PX }} />)}
-                  {/* vrij = wit */}
-                  {wit.map((s, i) => (
-                    <div key={i} className="absolute inset-x-0 bg-white hover:bg-emerald-50/60 cursor-crosshair border-y border-emerald-200/60"
-                      style={{ top: yVan(s.start, d), height: yVan(s.end, d) - yVan(s.start, d) }} title="Vrij: sleep (of tik) om te plannen" />
+                  {vrij.map((s, i) => (
+                    <div key={i} className="absolute inset-x-0 bg-emerald-50 border-y border-emerald-200/70 pointer-events-none"
+                      style={{ top: yVan(s.start, d), height: yVan(s.end, d) - yVan(s.start, d) }} />
                   ))}
                   {/* nu-lijn */}
                   {nu > dagTop && nu < dagBodem && <div className="absolute inset-x-0 border-t-2 border-red-500 pointer-events-none z-20" style={{ top: yVan(nu, d) }} />}
@@ -586,7 +588,7 @@ function Week({ data, maandag, slot, duur, magVerplaatsen, onOpen, onMoment, onV
                         className={`absolute rounded border px-1 py-0.5 overflow-hidden text-left z-10 ${STIJL[it.bron]} ${geest?.key === it.key ? 'opacity-40' : ''} ${sleepbaar ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${focusRing}`}
                         style={{ top: yVan(s, d), height: Math.max(18, yVan(e, d) - yVan(s, d)), left: `calc(${plek.baan * breed}% + 1px)`, width: `calc(${breed}% - 2px)` }}
                         title={`${it.titel} · ${uur(it.start)}–${uur(it.eind)} · ${BRON_LABEL[it.bron]}${sleepbaar ? ' · sleep om te verplaatsen' : ''}`}>
-                        <div className="text-[10px] font-semibold leading-tight truncate flex items-center gap-0.5">{it.meetUrl && <Video className="h-2.5 w-2.5 shrink-0" aria-hidden />}<GsmIcoon gsm={it.gsm} /><span className="truncate">{it.titel}</span></div>
+                        <div className="text-[10px] font-semibold leading-tight truncate flex items-center gap-0.5">{it.meetUrl && <Video className="h-2.5 w-2.5 shrink-0" aria-label="Online via Google Meet" />}{it.locatie && <MapPin className="h-2.5 w-2.5 shrink-0" aria-label="Op locatie" />}<GsmIcoon gsm={it.gsm} /><span className="truncate">{it.titel}</span></div>
                         <div className="text-[9px] opacity-80 tabular-nums truncate">{uur(it.start)}–{uur(it.eind)}</div>
                       </button>
                     )
@@ -672,6 +674,7 @@ function Lijst({ items, onOpen }: { items: KalenderItem[]; onOpen: (i: KalenderI
                       <span className={`rounded border px-1 py-px text-[10px] font-medium ${STIJL[it.bron]}`}>{BRON_LABEL[it.bron]}</span>
                       {it.sub && <span className="truncate">{it.sub}</span>}
                       {it.meetUrl && <span className="inline-flex items-center gap-0.5"><Video className="h-3 w-3" aria-hidden />Meet</span>}
+                      {it.locatie && <span className="inline-flex items-center gap-0.5 min-w-0"><MapPin className="h-3 w-3 shrink-0" aria-hidden /><span className="truncate">{it.locatie}</span></span>}
                       {it.gsm === 'ingesteld' && <span className="inline-flex items-center gap-0.5"><Bell className="h-3 w-3" aria-hidden />{GSM_MELDING_MIN} min</span>}
                       {it.gsm === 'mislukt' && <span className="inline-flex items-center gap-0.5 text-red-700"><BellOff className="h-3 w-3" aria-hidden />melding mislukt</span>}
                     </div>
@@ -686,11 +689,11 @@ function Lijst({ items, onOpen }: { items: KalenderItem[]; onOpen: (i: KalenderI
   )
 }
 
-function Legenda({ week }: { week: boolean }) {
+function Legenda({ week, toonVrij }: { week: boolean; toonVrij: boolean }) {
   return (
     <p className="text-[11px] text-gray-600 flex flex-wrap gap-x-3 gap-y-1 items-center">
-      {week && <><span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-3 bg-white border border-emerald-300" />vrij (werkuren): sleep of tik om te plannen</span>
-        <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-3 bg-niet-vrij border border-gray-300" />buiten werkuren of bezet: een interne meeting kan ook hier, met waarschuwing</span></>}
+      {week && <span>Sleep of tik in de week om te plannen; bij een overlap krijg je een waarschuwing.</span>}
+      {week && toonVrij && <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-3 bg-emerald-50 border border-emerald-200" />vrij moment voor de leadafspraak</span>}
       {(Object.keys(BRON_LABEL) as KalenderBron[]).map((b) => <span key={b} className="inline-flex items-center gap-1"><span className={`inline-block h-2.5 w-3 rounded-sm border ${STIJL[b]}`} />{BRON_LABEL[b]}</span>)}
       <span className="inline-flex items-center gap-1"><Bell className="h-3 w-3" />gsm-melding {GSM_MELDING_MIN} min vooraf</span>
       <span>Tijden in Belgische tijd ({STANDAARD_TIJDZONE}).</span>
@@ -705,6 +708,7 @@ function InfoVenster({ item, onSluit }: { item: KalenderItem; onSluit: () => voi
     <Modal titel={item.titel} sub={`${datumLang(item.start)}, ${uur(item.start)}–${uur(item.eind)} (Belgische tijd)`} onSluit={onSluit}>
       <dl className="text-sm divide-y divide-gray-100">
         <div className="py-2 flex gap-3"><dt className="w-28 text-xs font-medium text-gray-500 pt-0.5">Bron</dt><dd>{BRON_LABEL[item.bron]}{item.sub ? ` · ${item.sub}` : ''}</dd></div>
+        {item.locatie && <div className="py-2 flex gap-3"><dt className="w-28 text-xs font-medium text-gray-500 pt-0.5">Locatie</dt><dd className="min-w-0 break-words">{item.locatie}</dd></div>}
         {item.meetUrl && <div className="py-2 flex gap-3"><dt className="w-28 text-xs font-medium text-gray-500 pt-0.5">Google Meet</dt><dd className="min-w-0"><a href={item.meetUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2 break-all">{item.meetUrl}</a></dd></div>}
         <div className="py-2 flex gap-3"><dt className="w-28 text-xs font-medium text-gray-500 pt-0.5">Gsm-melding</dt><dd>{gsmTekst(item)}</dd></div>
         {item.bron === 'afspraak' && <div className="py-2 text-gray-600">Deze verkoopafspraak bekijk en beheer je met het Verkoop-recht.</div>}

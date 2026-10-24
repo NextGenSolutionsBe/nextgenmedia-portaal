@@ -5,7 +5,8 @@ import { plannerRechten } from '@/lib/meetings/rechten'
 import { safeMessage } from '@/lib/api-error'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { clickupTaakIdUit } from '@/lib/clickup'
-import { valideerMeeting, naamZonderKlant, lijktOp } from '@/lib/meetings/model'
+import { controleerAgenda } from '@/lib/sales/google-calendar'
+import { valideerMeeting, naamZonderKlant, lijktOp, klantAdres } from '@/lib/meetings/model'
 import {
   stapGoogle, stapClickup, planHerinnering, bestaatGoogleAfspraak, controleerKoppelingen, type MeetingRij, type HerinneringRij,
 } from '@/lib/meetings/server'
@@ -18,6 +19,7 @@ export const maxDuration = 60
  *  GET                       → meetings met hun laatste herinnering
  *  GET ?opties=1             → klanten, contactpersonen, projecten en agenda's voor het planscherm
  *  GET ?koppelingen=<agenda> → werken Google, ClickUp en Resend? (leest enkel)
+ *  GET ?organisator=<agenda> → welke agenda en welk Google-account genodigden als organisator zien
  *  POST                      → meeting inplannen (Google + Meet + uitnodiging, ClickUp, herinnering)
  * Toegang: module 'meetings' (middleware per HTTP-methode én hier nog eens).
  * Tokens en sleutels verlaten de server nooit.
@@ -39,9 +41,24 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ checks: await controleerKoppelingen(admin, UUID.test(koppelAgenda) ? koppelAgenda : null) })
     }
 
+    const orgAgenda = req.nextUrl.searchParams.get('organisator')
+    if (orgAgenda !== null) {
+      if (!UUID.test(orgAgenda)) return NextResponse.json({ error: 'Ongeldige agenda' }, { status: 400 })
+      const { data: k } = await admin.from('sales_calendar_connections').select('name, account_email, calendar_id').eq('id', orgAgenda).maybeSingle()
+      if (!k) return NextResponse.json({ error: 'Agenda niet gevonden' }, { status: 404 })
+      const g = await controleerAgenda(orgAgenda)
+      const account = (k.account_email as string | null) ?? null
+      return NextResponse.json({
+        agenda: g.ok ? g.naam : (k.name as string),
+        account,
+        // Organisator is het Google-account van info@ zelf, of diens agenda.
+        viaInfo: [account, k.calendar_id].some((x) => String(x ?? '').toLowerCase() === 'info@nextgenmedia.be'),
+      })
+    }
+
     if (req.nextUrl.searchParams.get('opties')) {
       const [{ data: klanten }, { data: contacten }, { data: projecten }, { data: agendas }, { data: pipes }] = await Promise.all([
-        admin.from('clients').select('id, company_name, contact_name, email').is('archived_at', null).order('company_name').limit(2000),
+        admin.from('clients').select('id, company_name, contact_name, email, adres_straat, adres_postcode, adres_gemeente, adres_land').is('archived_at', null).order('company_name').limit(2000),
         admin.from('client_users').select('client_id, name, email').eq('active', true).limit(5000),
         admin.from('opdrachten').select('id, titel, client_id, klant_vrij, status').order('created_at', { ascending: false }).limit(500),
         admin.from('sales_calendar_connections').select('id, name, status, active, provider').eq('active', true).order('name'),
@@ -49,7 +66,9 @@ export async function GET(req: NextRequest) {
       ])
       const ngm = ((pipes ?? []) as { key: string; default_calendar_id: string | null }[]).find((p) => p.key === 'nextgenmedia')
       return NextResponse.json({
-        klanten: klanten ?? [],
+        // Adres uit het dossier, om een meeting op locatie snel in te vullen.
+        klanten: ((klanten ?? []) as ({ id: string; company_name: string | null; contact_name: string | null; email: string | null } & NonNullable<Parameters<typeof klantAdres>[0]>)[])
+          .map((k) => ({ id: k.id, company_name: k.company_name, contact_name: k.contact_name, email: k.email, adres: klantAdres(k) })),
         contacten: contacten ?? [],
         projecten: ((projecten ?? []) as { id: string; titel: string; client_id: string | null; klant_vrij: string | null; status: string | null }[])
           .filter((p) => p.status !== 'geannuleerd'),
@@ -162,6 +181,7 @@ export async function POST(req: NextRequest) {
       titel: w.titel, beschrijving: w.beschrijving, starts_at: w.startsAt, ends_at: w.endsAt, tijdzone: w.tijdzone,
       agenda_id: agenda.id, organisator_naam: organisator, organisator_email: agenda.signature_email || null,
       klant_ontvangers: w.klant_ontvangers, deelnemers: w.deelnemers, herinnering_aan: w.herinnering_aan,
+      vorm: w.vorm, locatie: w.locatie, met_meet: w.metMeet,
       created_by: user.id, created_by_email: persoon.email,
     }
     let ins: { data: unknown; error: { message: string } | null } = { data: null, error: null }

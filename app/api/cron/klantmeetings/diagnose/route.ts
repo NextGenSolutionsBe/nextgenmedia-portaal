@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { DATABANK_TIJDELIJK } from '@/lib/supabase/herkansing'
-import { controleerKoppelingen, testAfspraak, leesMeeting, veiligeFout, stapGoogle, stapClickup, planHerinnering, annuleer, bewaarMeeting, laatsteHerinnering, type MeetingRij } from '@/lib/meetings/server'
+import { controleerKoppelingen, testAfspraak, leesMeeting, veiligeFout, stapGoogle, stapClickup, planHerinnering, annuleer, bewaarMeeting, laatsteHerinnering, bouwHerinnering, type MeetingRij } from '@/lib/meetings/server'
+import { meetingMailVoorstel } from '@/lib/meetings/meeting-mail'
+import { verstuurMeetingMail } from '@/lib/meetings/meeting-mail-server'
 import { kalenderData, controleerVrij, controleerConflicten } from '@/lib/meetings/kalender-server'
 import { isClickupMeeting } from '@/lib/meetings/kalender'
 import { cronToegang } from '@/lib/meetings/cron-toegang'
@@ -45,6 +47,10 @@ export const maxDuration = 60
  *  · ?organisator=1: leest enkel. Welk account genodigden als organisator en
  *    maker van een app-afspraak zien, of de agenda van info@nextgenmedia.be
  *    bereikbaar is, en vanaf welk adres en domein de mails vertrekken.
+ *  · ?zelftest=vorm: een online meeting en een meeting op locatie (echte
+ *    Google-afspraak, mail aan de deelnemers via de meetingmail, teruggelezen
+ *    bij Resend), wisselen tussen online en locatie, daarna geannuleerd.
+ *    Genodigde en ontvanger: enkel info@nextgenmedia.be.
  *  · ?kalender=1: leest enkel. Per agenda de werkuren, bezette blokken (per
  *    Google-agenda, zonder titels) en vrije segmenten voor twee weken, plus
  *    hoe de ClickUp-taken binnenkomen (pagina's, tijdvelden).
@@ -75,6 +81,7 @@ export async function POST(req: NextRequest) {
     if (req.nextUrl.searchParams.get('zelftest') === 'intern') return NextResponse.json(await zelftestIntern(admin))
     if (req.nextUrl.searchParams.get('vrijcontrole') === '1') return NextResponse.json(await vrijControle(admin))
     if (req.nextUrl.searchParams.get('organisator') === '1') return NextResponse.json(await organisatorControle(admin))
+    if (req.nextUrl.searchParams.get('zelftest') === 'vorm') return NextResponse.json(await zelftestVorm(admin))
     if (req.nextUrl.searchParams.get('zelftest') === 'klantapp') {
       const klant = req.nextUrl.searchParams.get('klant') ?? '', ander = req.nextUrl.searchParams.get('ander') ?? ''
       if (!UUID.test(klant) || !UUID.test(ander) || klant === ander) return NextResponse.json({ error: 'klant en ander (twee verschillende testklanten) zijn verplicht' }, { status: 400 })
@@ -578,5 +585,96 @@ async function organisatorControle(admin: { from: (t: string) => any }) {
     standaardAgenda: agenda,
     voorbeeldAfspraak: voorbeeld,
     mail: resend,
+  }
+}
+
+
+/** Bij Resend nagaan wat er echt vertrok: afzender, ontvangers, status en tekst. */
+async function resendMail(id: string | null): Promise<{ van?: string; aan?: string[]; status?: string; tekst?: string; fout?: string }> {
+  const sleutel = process.env.RESEND_API_KEY
+  if (!id || !sleutel) return { fout: !id ? 'geen id' : 'geen sleutel' }
+  // Resend heeft even nodig voor de status er is.
+  await new Promise((r) => setTimeout(r, 2500))
+  const res = await fetch(`https://api.resend.com/emails/${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${sleutel}` } }).catch(() => null)
+  const j = res ? await res.json().catch(() => ({})) as { from?: string; to?: string[]; last_event?: string; text?: string; message?: string } : null
+  if (!res?.ok) return { fout: j?.message ?? `status ${res?.status ?? 'geen antwoord'}` }
+  return { van: j?.from, aan: j?.to, status: j?.last_event, tekst: j?.text }
+}
+
+/** Online en op locatie met echte Google-, ClickUp- en mailstappen; ruimt zichzelf op. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function zelftestVorm(admin: { from: (t: string) => any }) {
+  const stappen: { stap: string; ok: boolean; detail?: string }[] = []
+  const log = (stap: string, ok: boolean, detail?: string) => { stappen.push({ stap, ok, ...(detail ? { detail } : {}) }) }
+  const gemaakt: MeetingRij[] = []
+  try {
+    const { data: p } = await admin.from('sales_pipelines').select('default_calendar_id').eq('key', 'nextgenmedia').maybeSingle()
+    const agendaId = (p?.default_calendar_id as string | null) ?? null
+    if (!agendaId) { log('Standaardagenda', false); return { stappen } }
+    const { data: ag } = await admin.from('sales_calendar_connections').select('name, signature_email').eq('id', agendaId).maybeSingle()
+    const d = dag(new Date(Date.now() + 5 * 86400000).toISOString())
+    const nieuw = async (titel: string, u: string, extra: Record<string, unknown>) => {
+      const { data, error } = await admin.from('klant_meetings').insert({
+        aanvraag_sleutel: randomUUID(), client_id: null, klant_naam: 'Test vorm', titel,
+        beschrijving: 'Automatische controle van online/op locatie en de mail aan de deelnemers. Wordt meteen geannuleerd.',
+        starts_at: zoneNaarIso(d, u), ends_at: zoneNaarIso(d, u === '20:00' ? '20:30' : '21:30'), tijdzone: 'Europe/Brussels',
+        agenda_id: agendaId, organisator_naam: String(ag?.name ?? 'Bram').split(/\s+[—-]\s+/)[0], organisator_email: (ag?.signature_email as string | null) ?? null,
+        klant_ontvangers: [{ naam: 'Test vorm', email: TEST_ADRES }], deelnemers: [], herinnering_aan: true, created_by_email: 'zelftest', ...extra,
+      }).select('*').single()
+      if (error) throw new Error(error.message)
+      gemaakt.push(data as MeetingRij)
+      return data as MeetingRij
+    }
+
+    // 1. Online
+    let on = await nieuw('Test online (automatische controle)', '20:00', { vorm: 'online', met_meet: true })
+    on = await stapGoogle(admin, on)
+    on = on.google_status === 'ok' ? await stapClickup(admin, on) : on
+    const e1 = on.google_event_id && on.google_calendar_id ? await leesEventPersonen(agendaId, on.google_calendar_id, on.google_event_id) : null
+    log('Online: Google-afspraak met echte Meet-link, geen adres', on.google_status === 'ok' && /^https:\/\/meet\.google\.com\//.test(on.meet_url ?? '') && !!e1?.meet && !e1?.locatie, on.google_fout ?? undefined)
+    log('Online: ClickUp-taak', on.clickup_status === 'ok', on.clickup_fout ?? undefined)
+    log('Organisator die genodigden zien', !!e1, e1 ? `organisator: ${e1.organisator.naam ?? '—'} <${e1.organisator.email ?? '—'}>, gemaakt door ${e1.maker.email ?? '—'}` : 'niet gelezen')
+    const v1 = meetingMailVoorstel(on)
+    const m1 = await verstuurMeetingMail(admin, on, { aan: TEST_ADRES, onderwerp: v1.onderwerp, tekst: v1.tekst, cta_tekst: v1.ctaTekst, cta_link: v1.ctaLink, verzend_sleutel: randomUUID() }, { userId: null, email: 'zelftest' })
+    const r1 = m1.ok ? await resendMail(m1.provider_id) : null
+    log('Online: mail vertrokken vanuit info@nextgenmedia.be (gelezen bij Resend)', m1.ok && /<info@nextgenmedia\.be>$|^info@nextgenmedia\.be$/.test(r1?.van ?? ''), m1.ok ? `van ${r1?.van ?? '?'}, status ${r1?.status ?? r1?.fout ?? '?'}` : m1.fout)
+    log('Online: Meet-link, datum en tijdzone staan in de mail', m1.ok && !!on.meet_url && (r1?.tekst ?? v1.tekst).includes(on.meet_url) && /Belgische tijd/.test(r1?.tekst ?? v1.tekst))
+    log('Herinneringsmail bevat de Meet-link', bouwHerinnering(on, on.klant_ontvangers).tekst.includes(on.meet_url ?? '§'))
+
+    // 2. Op locatie, zonder Meet
+    const adres = 'Testadres 1, 3500 Hasselt'
+    let lo = await nieuw('Test op locatie (automatische controle)', '21:00', { vorm: 'locatie', locatie: adres, met_meet: false })
+    lo = await stapGoogle(admin, lo)
+    lo = lo.google_status === 'ok' ? await stapClickup(admin, lo) : lo
+    const e2 = lo.google_event_id && lo.google_calendar_id ? await leesEventPersonen(agendaId, lo.google_calendar_id, lo.google_event_id) : null
+    log('Op locatie: adres in de Google-afspraak, geen Meet-link', lo.google_status === 'ok' && e2?.locatie === adres && e2?.meet === false && !lo.meet_url, `locatie=${e2?.locatie ?? '—'}, meet=${e2?.meet}`)
+    log('Op locatie: ClickUp-taak', lo.clickup_status === 'ok', lo.clickup_fout ?? undefined)
+    const v2 = meetingMailVoorstel(lo)
+    const m2 = await verstuurMeetingMail(admin, lo, { aan: TEST_ADRES, onderwerp: v2.onderwerp, tekst: v2.tekst, cta_tekst: v2.ctaTekst, cta_link: v2.ctaLink, verzend_sleutel: randomUUID() }, { userId: null, email: 'zelftest' })
+    const r2 = m2.ok ? await resendMail(m2.provider_id) : null
+    log('Op locatie: mail vanuit info@ met het adres, zonder Meet-link', m2.ok && /info@nextgenmedia\.be/.test(r2?.van ?? '') && (r2?.tekst ?? v2.tekst).includes(adres) && !/meet\.google\.com/.test(r2?.tekst ?? v2.tekst), m2.ok ? `van ${r2?.van ?? '?'}, status ${r2?.status ?? r2?.fout ?? '?'}` : m2.fout)
+    log('Herinneringsmail bevat het adres, geen Meet', bouwHerinnering(lo, lo.klant_ontvangers).tekst.includes(adres) && !/Google Meet/.test(bouwHerinnering(lo, lo.klant_ontvangers).tekst))
+
+    // 3. Wisselen: online → locatie zonder Meet (Meet-link eraf) → terug online (nieuwe link)
+    const eventId = on.google_event_id
+    on = await bewaarMeeting(admin, on.id, { vorm: 'locatie', locatie: adres, met_meet: false })
+    on = await stapGoogle(admin, on, { bijwerken: true })
+    const e3 = on.google_event_id && on.google_calendar_id ? await leesEventPersonen(agendaId, on.google_calendar_id, on.google_event_id) : null
+    log('Online → op locatie: zelfde afspraak, adres erbij, Meet-link eraf', on.google_status === 'ok' && on.google_event_id === eventId && e3?.locatie === adres && e3?.meet === false && !on.meet_url, on.google_fout ?? `meet=${e3?.meet}`)
+    on = await bewaarMeeting(admin, on.id, { vorm: 'online', locatie: null, met_meet: true })
+    on = await stapGoogle(admin, on, { bijwerken: true })
+    const e4 = on.google_event_id && on.google_calendar_id ? await leesEventPersonen(agendaId, on.google_calendar_id, on.google_event_id) : null
+    log('Terug online: adres weg, nieuwe Meet-link', on.google_status === 'ok' && !e4?.locatie && !!e4?.meet && /^https:\/\/meet\.google\.com\//.test(on.meet_url ?? ''), on.google_fout ?? undefined)
+
+    for (const m of [on, lo]) await annuleer(admin, m, 'zelftest', true)
+    const na = await Promise.all([on, lo].map((m) => leesMeeting(admin, m.id)))
+    log('Opgeruimd: beide geannuleerd in Google en ClickUp', na.every((m) => m?.status === 'geannuleerd' && m.google_status === 'geannuleerd' && m.clickup_status === 'ok'))
+    return { stappen, meetings: gemaakt.map((m) => m.id) }
+  } catch (e) {
+    log('Onverwachte fout', false, veiligeFout(e))
+    for (const m of gemaakt) {
+      try { const x = await leesMeeting(admin, m.id); if (x && x.status === 'ingepland') await annuleer(admin, x, 'zelftest (opruimen)', true) } catch { /* zichtbaar in de app */ }
+    }
+    return { stappen, meetings: gemaakt.map((m) => m.id) }
   }
 }

@@ -20,6 +20,7 @@ const STANDAARD: Record<string, () => Rij> = {
     bron: 'intern', status: 'ingepland', tijdzone: 'Europe/Brussels', klant_ontvangers: [], deelnemers: [], herinnering_aan: true,
     google_status: 'wacht', clickup_status: 'wacht', google_event_id: null, google_calendar_id: null, meet_url: null, google_fout: null,
     clickup_task_id: null, clickup_list_id: null, clickup_fout: null, clickup_gestart_op: null, geannuleerd_op: null, geannuleerd_door: null,
+    vorm: 'online', locatie: null, met_meet: true,
   }),
   klant_meeting_herinneringen: () => ({ meeting_id: null, afspraak_id: null, status: 'gepland', pogingen: 0, provider_id: null, email_message_id: null, fout: null, bezig_sinds: null, verzonden_op: null, geannuleerd_op: null }),
 }
@@ -192,6 +193,8 @@ export const resend = {
   verliesAntwoord: false,
   /** Volgende verzending wordt geweigerd met deze melding. */
   weiger: null as string | null,
+  /** Domeinen zoals GET /domains ze geeft; null = een sleutel met enkel verzendrecht. */
+  domeinen: null as { name: string; status: string }[] | null,
 }
 
 let meetNr = 0
@@ -249,6 +252,8 @@ async function nepFetch(input: any, init: any = {}): Promise<Response> {
       google.patches.push({ id: id!, body, sendUpdates: url.searchParams.get('sendUpdates') })
       const { conferenceData, ...rest } = body
       Object.assign(ev, rest)
+      // conferenceData: null haalt de Meet-link eraf (meeting op locatie zonder link).
+      if ('conferenceData' in body && conferenceData === null) { delete ev.hangoutLink; delete ev.conferenceData }
       metMeet(ev, !!conferenceData?.createRequest)
       return json(ev)
     }
@@ -297,6 +302,7 @@ async function nepFetch(input: any, init: any = {}): Promise<Response> {
   }
 
   if (url.host === 'api.resend.com' && url.pathname === '/domains') {
+    if (resend.domeinen) return json({ data: resend.domeinen })
     return json({ name: 'restricted_api_key', message: 'This API key is restricted to only send emails' }, 401)
   }
   if (url.host === 'api.resend.com') {
