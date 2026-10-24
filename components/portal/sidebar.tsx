@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { useRefresh } from '@/lib/use-refresh'
 import { Logo } from '@/components/logo'
-import { LayoutDashboard, FileText, Calendar, Globe, LogOut, RefreshCcw, Menu, X, ListChecks, Newspaper, CalendarClock, Database, FolderUp, ShieldCheck } from 'lucide-react'
+import { LayoutDashboard, FileText, Calendar, Globe, LogOut, RefreshCcw, Menu, X, ListChecks, Newspaper, CalendarClock, Database, FolderUp, ShieldCheck, Video } from 'lucide-react'
 import { MODULE_IMPLEMENTED, type PortalModule } from '@/lib/portal-permissions'
 import { t, type Lang } from '@/lib/i18n'
 import { LangToggle } from '@/components/lang-toggle'
@@ -37,6 +37,8 @@ const NAV: NavItem[] = [
   // Aanleveren van beeldmateriaal. Bewust GEEN requiresService: ook een klant
   // zonder lopend socialmediapakket moet ons foto's kunnen doorsturen.
   { tKey: 'nav.files',      href: '/portal/bestanden',     icon: FolderUp, module: 'files' },
+  // Elke klant kan een gratis meeting met NextGenMedia boeken.
+  { tKey: 'nav.meetings',   href: '/portal/meetings',      icon: Video, module: 'meetings' },
 ]
 
 export function PortalSidebar({

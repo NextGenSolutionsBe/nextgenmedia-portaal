@@ -4,7 +4,7 @@
 
 import { FEATURES } from '@/lib/features'
 
-export const PORTAL_MODULES = ['social_media', 'metricool', 'cms', 'website', 'contracts', 'blogs', 'tasks', 'files'] as const
+export const PORTAL_MODULES = ['social_media', 'metricool', 'cms', 'website', 'contracts', 'blogs', 'tasks', 'files', 'meetings'] as const
 export type PortalModule = (typeof PORTAL_MODULES)[number]
 
 // Acties per module (de "actie-rechten").
@@ -17,6 +17,7 @@ export const MODULE_ACTIONS: Record<PortalModule, string[]> = {
   blogs:        ['view', 'edit'],
   tasks:        ['view', 'complete'],
   files:        ['view', 'upload'],
+  meetings:     ['view', 'book'],
 }
 
 export const MODULE_LABELS: Record<PortalModule, string> = {
@@ -28,6 +29,7 @@ export const MODULE_LABELS: Record<PortalModule, string> = {
   blogs:        'Blogs',
   tasks:        'Taken',
   files:        'Bestanden aanleveren',
+  meetings:     'Meeting boeken',
 }
 
 // Welke modules hebben een werkende pagina/route. Een module die hier op false
@@ -43,7 +45,16 @@ export const MODULE_IMPLEMENTED: Record<PortalModule, boolean> = {
   blogs:        FEATURES.blogs,   // tijdelijk uit — zie lib/features.ts
   tasks:        true,
   files:        true,             // /portal/bestanden — aanleveren van beeldmateriaal
+  meetings:     true,             // /portal/meetings — gratis meeting boeken + Mijn meetings
 }
+
+/**
+ * Modules die standaard AAN staan voor elk account met toegang tot de klantapp,
+ * ook voor subaccounts waarvan de rechten van vóór de module dateren. Zo'n
+ * module staat pas uit als iemand ze uitdrukkelijk uitvinkt (opgeslagen als
+ * false). Meeting boeken hoort bij elke klant.
+ */
+export const STANDAARD_AAN: readonly PortalModule[] = ['meetings']
 
 export const ACTION_LABELS: Record<string, string> = {
   view: 'Bekijken',
@@ -56,6 +67,7 @@ export const ACTION_LABELS: Record<string, string> = {
   publish: 'Publiceren',
   complete: 'Voltooien',
   upload: 'Uploaden',
+  book: 'Boeken, verplaatsen en annuleren',
 }
 
 export type Permissions = Partial<Record<PortalModule, Record<string, boolean>>>
@@ -98,6 +110,18 @@ export function presetPermissions(key: PresetKey): Permissions {
   return (PRESETS.find((p) => p.key === key) ?? PRESETS[0]).permissions()
 }
 
+/**
+ * Rechten zoals ze gelden: een standaard-aan-module die nergens vermeld staat,
+ * krijgt alle acties. Staat ze er (ook met false), dan geldt wat er staat.
+ */
+export function metStandaard(permissions: Permissions | null | undefined): Permissions {
+  const out: Permissions = { ...(permissions ?? {}) }
+  for (const m of STANDAARD_AAN) {
+    if (!out[m]) out[m] = Object.fromEntries(MODULE_ACTIONS[m].map((a) => [a, true]))
+  }
+  return out
+}
+
 /** Heeft deze permissions-set een bepaald recht? Lege/onbekende module → false. */
 export function can(permissions: Permissions | null | undefined, module: PortalModule, action = 'view'): boolean {
   if (!permissions) return false
@@ -114,7 +138,10 @@ export function sanitizePermissions(input: unknown): Permissions {
     if (mod && typeof mod === 'object') {
       const actions: Record<string, boolean> = {}
       for (const a of MODULE_ACTIONS[m]) {
-        if ((mod as Record<string, unknown>)[a] === true) actions[a] = true
+        const v = (mod as Record<string, unknown>)[a]
+        if (v === true) actions[a] = true
+        // Bij een standaard-aan-module is "uit" een bewuste keuze: bewaren.
+        else if (v === false && STANDAARD_AAN.includes(m)) actions[a] = false
       }
       if (Object.keys(actions).length > 0) out[m] = actions
     }
@@ -126,7 +153,7 @@ export function sanitizePermissions(input: unknown): Permissions {
 export function permissionSummary(permissions: Permissions | null | undefined): string {
   if (!permissions) return '—'
   const live = PORTAL_MODULES.filter((m) => MODULE_IMPLEMENTED[m])
-  const mods = live.filter((m) => can(permissions, m, 'view'))
+  const mods = live.filter((m) => can(metStandaard(permissions), m, 'view'))
   if (mods.length === 0) return 'Geen toegang'
   if (mods.length === live.length) return 'Alle modules'
   return mods.map((m) => MODULE_LABELS[m]).join(', ')

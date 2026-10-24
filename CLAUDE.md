@@ -26,7 +26,7 @@ Het klantportaal gebruikt een **resolver + service-role** model, niet RLS, als p
 - **Mails naar klanten zijn nooit automatisch.** Alle handmatige mail loopt via één component: `components/admin/mail-composer.tsx` (`<MailComposer context=...>`), altijd met preview + handmatige bevestiging; logging via E-mail Center.
   - Uitzonderingen, allemaal in de Meeting Inplanner (`lib/meetings/`) en gelogd in het E-mail Center:
     - de **herinneringsmail** van een meeting (24 uur vooraf): bevestigd in het planvenster of bij het boeken, verstuurd door de scheduler (pg_cron → `/api/cron/klantmeetings`);
-    - de **bevestigingsmail van een klantboeking** (`/boeken`), met de persoonlijke beheerlink: de klant vraagt er zelf om door te boeken of te verplaatsen.
+    - de **bevestigingsmail van een klantboeking** (`/boeken` met de persoonlijke beheerlink, of de klantapp-module **Meeting boeken** met een link naar `/portal/meetings`): de klant vraagt er zelf om door te boeken of te verplaatsen.
     Geen andere automatische klantmails toevoegen.
 - **One source of truth:** afgeleide dashboarddata via `lib/notifications.ts` / `lib/ai-context.ts` / `/api/admin/search`; rechten via `lib/portal-auth.ts` + `lib/portal-permissions.ts`.
 
@@ -40,4 +40,6 @@ Het klantportaal gebruikt een **resolver + service-role** model, niet RLS, als p
   - **Een ClickUp-item is enkel een meeting met start- én einddatum, allebei met een uur** (`isClickupMeeting`). Alleen die blokkeren tijd (Calendar, klantboeking, agendasync); losse taken niet.
   - Vrije momenten zijn **strikt**: lukt Google of ClickUp niet, dan geen tijdstippen maar een fout. Agenda's van dezelfde persoon blokkeren elkaar (`zelfdePersoon`), niet die van een collega op hetzelfde Google-account.
   - ClickUp's `last_page` is niet betrouwbaar: altijd doorlezen tot een lege pagina.
+  - **Klantregels (11:00–17:00, minstens 72 uur vooraf, 30 min) gelden enkel voor klantboekingen** (`/boeken` en klantapp). Intern (Calendar, Meeting Inplanner) mag elk tijdstip: een overlap geeft een waarschuwing (`controleerConflicten`, bevestigen met `toch_conflict`), geen verbod. Leadafspraken vragen wel een vrij moment binnen de werkuren.
+  - **Klantapp — Meeting boeken** (`/portal/meetings`, module `meetings`, staat standaard aan via `STANDAARD_AAN`/`metStandaard`): zelfde motor als `/boeken` (`boekKlantmeeting` met `klantapp`-optie). De meeting hangt aan `client_id`, heeft geen beheertoken; beheren gebeurt in de klantapp, altijd gescoped op de geresolveerde `clientId`.
   - Gsm-melding: Google-popup 15 minuten vooraf op elk event van de app en op ClickUp-meetings via de sync (`GSM_MELDING_MIN`). Geen app-pushkanaal; geen dubbele meldingen.

@@ -4,7 +4,7 @@ import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 import { redirect } from 'next/navigation'
 import {
-  fullPermissions, can, MODULE_IMPLEMENTED, type Permissions, type PortalModule,
+  fullPermissions, can, metStandaard, MODULE_IMPLEMENTED, type Permissions, type PortalModule,
 } from '@/lib/portal-permissions'
 import { logAudit } from '@/lib/audit'
 import { klantTweedeStapOk } from '@/lib/twofa/server'
@@ -71,8 +71,9 @@ export const resolvePortalSession = cache(async (): Promise<PortalSession | null
     cu = null
   }
   if (cu) {
+    // Standaard-aan-modules (Meeting boeken) gelden ook voor oudere rechten-sets.
     const perms = (cu.permissions && typeof cu.permissions === 'object' && Object.keys(cu.permissions as object).length > 0)
-      ? (cu.permissions as Permissions)
+      ? metStandaard(cu.permissions as Permissions)
       : fullPermissions()
     return {
       userId: user.id, clientId: cu.client_id, isOwner: false, active: !!cu.active,
