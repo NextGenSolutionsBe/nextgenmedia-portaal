@@ -126,7 +126,11 @@ function rangschik<T>(lijst: T[], waarde: (x: T) => number, tweede?: (x: T) => n
   })
 }
 
-/** Fases die betekenen dat er een afspraak ingepland werd / de meeting plaatsvond. */
+/**
+ * Fases die betekenen dat er een afspraak ingepland werd / de meeting plaatsvond.
+ * 'voorstel' is geen eigen kolom meer (valt onder Opvolgen), maar de sleutel
+ * blijft op leads met een verstuurd voorstel en telt dus nog mee.
+ */
 export const INGEPLAND_FASES = new Set(['afspraak', 'voorstel', 'gewonnen', 'verloren'])
 export const GEHOUDEN_FASES = new Set(['voorstel', 'gewonnen', 'verloren'])
 

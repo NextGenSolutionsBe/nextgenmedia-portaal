@@ -1,7 +1,7 @@
 // Pipeline-fases voor de Verkoop-module — de kolommen van het kanbanbord.
 // Pure module — geen server-only imports, bruikbaar in client- én servercode.
 //
-// ÉÉN BORD, ACHT KOLOMMEN + TWEE INSTROOMKOLOMMEN. De fase zegt waar de
+// ÉÉN BORD, ZEVEN KOLOMMEN + TWEE INSTROOMKOLOMMEN. De fase zegt waar de
 // volgende stap ligt, niet wat er allemaal gebeurd is; de volledige historiek
 // staat op de tijdlijn (sales_lead_events) en in de activiteiten
 // (sales_activiteiten).
@@ -23,7 +23,6 @@ export const STAGES = [
   { key: 'geen_interesse',  label: 'Geen interesse',     position: 5 },
   { key: 'opvolgen',        label: 'Opvolgen',           position: 6 },
   { key: 'afspraak',        label: 'Afspraak gepland',   position: 7 },
-  { key: 'voorstel',        label: 'Voorstel verstuurd', position: 8 },
   { key: 'gewonnen',        label: 'Gewonnen',           position: 9, isWon: true },
   { key: 'verloren',        label: 'Verloren',           position: 10, isLost: true },
 ] as const
@@ -50,6 +49,11 @@ export const LEGACY_STAGE_MAP: Record<string, StageKey> = {
   max_pogingen: 'opvolgen',
   won: 'gewonnen',
   lost: 'verloren',
+  // "Voorstel verstuurd" is samengevoegd met "Opvolgen" (30 okt 2026): voor ons
+  // is dat hetzelfde. De sleutel blijft in bestaande rijen staan en wordt nog
+  // gezet bij "Voorstel registreren", zodat zo'n lead in de prestaties als
+  // "afspraak gehouden" blijft tellen (INGEPLAND_FASES, GEHOUDEN_FASES).
+  voorstel: 'opvolgen',
 }
 
 export const LEGACY_STAGE_KEYS = Object.keys(LEGACY_STAGE_MAP)
@@ -96,7 +100,6 @@ const RANG: Record<StageKey, number> = {
   // Na een 'nee' zonder afspraak: een late mailmelding zet de lead niet terug.
   geen_interesse: 40,
   afspraak: 50,
-  voorstel: 60,
   verloren: 90,
   gewonnen: 99,
 }
@@ -175,7 +178,6 @@ export const STAGE_STYLE: Record<StageKey, string> = {
   geen_interesse: 'bg-stone-200 text-stone-700',
   opvolgen: 'bg-orange-100 text-orange-800',
   afspraak: 'bg-gray-900 text-white',
-  voorstel: 'bg-violet-100 text-violet-800',
   gewonnen: 'bg-green-200 text-green-900',
   verloren: 'bg-red-100 text-red-700',
 }
@@ -186,7 +188,7 @@ export const STAGE_STYLE: Record<StageKey, string> = {
  * closing rate. Ontbreekt die, dan blokkeren we niets maar tonen we een rode
  * melding in de lead en op de kaart.
  */
-export const VERANTWOORDELIJKE_VANAF: readonly StageKey[] = ['afspraak', 'voorstel', 'gewonnen', 'verloren']
+export const VERANTWOORDELIJKE_VANAF: readonly StageKey[] = ['afspraak', 'gewonnen', 'verloren']
 export const vereistVerantwoordelijke = (stage: string | null | undefined): boolean =>
   (VERANTWOORDELIJKE_VANAF as readonly string[]).includes(normaliseerStage(stage ?? ''))
 export const mistVerantwoordelijke = (lead: { stage_key: string; assigned_to?: string | null }): boolean =>

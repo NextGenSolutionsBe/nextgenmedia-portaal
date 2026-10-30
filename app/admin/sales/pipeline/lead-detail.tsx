@@ -26,7 +26,8 @@ export type DialoogSoort = 'gesprek' | 'email' | 'notitie' | 'voorstel' | 'opvol
 
 
 /** Vanaf deze fases ligt het merk vast (er is een afspraak geweest). */
-const MERK_VAST = ['afspraak', 'voorstel', 'gewonnen', 'verloren']
+// Opvolgen hoort erbij: daar staan ook de leads met een verstuurd voorstel.
+const MERK_VAST = ['opvolgen', 'afspraak', 'gewonnen', 'verloren']
 
 /**
  * Het detailpaneel van één lead: schuift van rechts in. Alles wat je over de

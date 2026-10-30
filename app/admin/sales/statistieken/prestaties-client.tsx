@@ -26,7 +26,7 @@ function bereikVoor(k: string): { van: string; tot: string } {
 }
 const pct = (v: number | null) => (v === null ? '—' : `${v.toLocaleString('nl-BE', { maximumFractionDigits: 1 })} %`)
 const datumTijd = (s: string) => new Date(s).toLocaleString('nl-BE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-const FASE: Record<string, string> = { outbound: 'Outbound', inbound: 'Inbound', gebeld: 'Gebeld', email_verstuurd: 'E-mail verstuurd', geen_interesse: 'Geen interesse', opvolgen: 'Opvolgen', afspraak: 'Afspraak gepland', voorstel: 'Voorstel', gewonnen: 'Gewonnen', verloren: 'Verloren' }
+const FASE: Record<string, string> = { outbound: 'Outbound', inbound: 'Inbound', gebeld: 'Gebeld', email_verstuurd: 'E-mail verstuurd', geen_interesse: 'Geen interesse', opvolgen: 'Opvolgen', afspraak: 'Afspraak gepland', voorstel: 'Opvolgen', gewonnen: 'Gewonnen', verloren: 'Verloren' }
 const UITKOMST: Record<string, string> = { niet_opgenomen: 'Niet opgenomen', contact_gehad: 'Contact gehad', geen_interesse: 'Geen interesse', afspraak_gepland: 'Afspraak gepland' }
 
 export function PrestatiesClient() {

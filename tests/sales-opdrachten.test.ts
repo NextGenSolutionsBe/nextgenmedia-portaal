@@ -7,7 +7,7 @@ import {
   parseBedragCents, somOpdrachten, leadWaardeCents, kolomSamenvatting, pipelineTotalen,
   opdrachtSamenvatting, opdrachtRegel, leesOpdrachtInvoer, OUDE_STATUS_NAAR_FASE, verwachteOmzet,
 } from '../lib/sales/opdrachten-model'
-import { STAGE_KEYS } from '../lib/sales/stages'
+import { STAGE_KEYS, normaliseerStage } from '../lib/sales/stages'
 import { ADMIN_MODULES, sanitizeModules, pathToModule } from '../lib/staff'
 
 let n = 0
@@ -74,7 +74,8 @@ test('5. Migratie-mapping: elke oude status naar een bestaande kolom, en gelijk 
     'contract_verstuurd', 'getekend', 'bezig', 'wacht', 'opgeleverd', 'te_factureren', 'factuur_verstuurd', 'betaald', 'afgerond', 'geannuleerd']
   for (const s of oude) {
     assert.ok(OUDE_STATUS_NAAR_FASE[s], `status ${s} heeft een fase`)
-    assert.ok((STAGE_KEYS as string[]).includes(OUDE_STATUS_NAAR_FASE[s]), `${s} → bestaande kolom`)
+    // Via dezelfde normalisatie als het bord ('voorstel' staat sinds 30 okt 2026 in Opvolgen).
+    assert.ok((STAGE_KEYS as string[]).includes(normaliseerStage(OUDE_STATUS_NAAR_FASE[s])), `${s} → bestaande kolom`)
   }
   const sql = readFileSync(join(root, 'supabase/migrations/99999999_SYNC_ALL.sql'), 'utf8')
   const blok = sql.slice(sql.indexOf('-- ── Pipeline-opdrachten + beltijd (22 sep 2026)'))

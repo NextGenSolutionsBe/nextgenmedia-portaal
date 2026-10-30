@@ -113,7 +113,9 @@ export async function POST(req: NextRequest) {
     }
 
     // Optionele verplaatsing naar een andere kolom. Voorstel verstuurd → altijd
-    // naar "Voorstel verstuurd", tenzij de lead al gesloten is.
+    // naar Opvolgen, tenzij de lead al gesloten is. We zetten daarvoor de sleutel
+    // 'voorstel' (toont als Opvolgen), zodat de prestaties blijven zien dat de
+    // afspraak plaatsvond.
     let naarFase: string | null = null
     if (typeof b.naarFase === 'string' && b.naarFase) {
       if (!isStageKey(b.naarFase)) return NextResponse.json({ error: 'Onbekende fase' }, { status: 400 })
@@ -124,7 +126,7 @@ export async function POST(req: NextRequest) {
         naarFase = b.naarFase
       }
     }
-    if (type === 'voorstel_verstuurd' && !naarFase && !['gewonnen', 'verloren', 'voorstel'].includes(huidigeFase)) {
+    if (type === 'voorstel_verstuurd' && !naarFase && !['gewonnen', 'verloren'].includes(huidigeFase) && (lead as { stage_key: string }).stage_key !== 'voorstel') {
       naarFase = 'voorstel'
     }
 
