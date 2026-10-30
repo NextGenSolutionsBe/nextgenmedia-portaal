@@ -798,6 +798,8 @@ async function zelftestAanvraag(admin: { from: (t: string) => any; storage: { fr
       log(`Experts voor ${type}`, e.length > 0, e.map((x) => `${x.naam} (${x.expertises.join(', ') || 'alles'})${x.foto_url ? ' + foto' : ''}`).join('; ') || 'geen')
     }
     const shootExperts = await expertsVoor(admin, 'dienst', 'content_shoot')
+    // ClickUp bewaart een datum zonder uur op 04:00 lokale tijd: vergelijk de kalenderdag in Brussel.
+    const dagVan = (ms: string | null | undefined) => (ms ? new Date(Number(ms)).toLocaleDateString('sv-SE', { timeZone: 'Europe/Brussels' }) : null)
     const cuVan = async (id: string | null | undefined) => {
       if (!id) return null
       const { data } = await admin.from('personeel').select('clickup_user_id').eq('id', id).maybeSingle()
@@ -833,8 +835,8 @@ async function zelftestAanvraag(admin: { from: (t: string) => any; storage: { fr
       const ruw = await leesTaakRuw(a1.clickup_task_id)
       log(`In de ClickUp-lijst "${CLICKUP_LIJST}"`, ruw.lijst === lijst, `lijst ${ruw.lijst}`)
       log('Taaknaam herkenbaar als aanvraag', ruw.naam === `Dienstenaanvraag – ${klantNaam} – Content shoot`, ruw.naam ?? '—')
-      log('Taak op de gewenste datum van de klant (enkel een dag, geen starttijd)', ruw.dueDate === String(deadlineMs(invoer.periode_van)) && !ruw.startDate,
-        `due ${ruw.dueDate ?? 'geen'} (verwacht ${deadlineMs(invoer.periode_van)}), start ${ruw.startDate ?? 'geen'}`)
+      log('Taak op de gewenste datum van de klant (enkel een dag, geen starttijd)', dagVan(ruw.dueDate) === invoer.periode_van && !ruw.startDate,
+        `vervaldag ${dagVan(ruw.dueDate) ?? 'geen'} (gewenst ${invoer.periode_van}), start ${ruw.startDate ?? 'geen'}`)
       const verwacht = await cuVan(invoer.expert_id)
       log('Toegewezen aan de gekozen expert', !!verwacht && ruw.toegewezen.length === 1 && ruw.toegewezen[0] === verwacht, `${a1.expert_naam ?? '—'}: verwacht ${verwacht ?? 'geen koppeling'}, staat op ${ruw.toegewezen.join(', ') || 'niemand'}`)
       log('Omschrijving zegt dat het nog geen bevestigde opdracht is', /AANVRAAG – nog geen bevestigde opdracht of boeking/.test(ruw.tekst + ruw.markdown))
@@ -886,7 +888,7 @@ async function zelftestAanvraag(admin: { from: (t: string) => any; storage: { fr
     if (c1.clickup_task_id) taken.push(c1.clickup_task_id)
     const ruwC = c1.clickup_task_id ? await leesTaakRuw(c1.clickup_task_id) : null
     log('Consultancy-taak met naam en tarief', ruwC?.naam === `Consultancy aanvraag – ${klantNaam} – SEO-scan` && /€125 per uur/.test(ruwC.tekst), ruwC?.naam ?? c1.clickup_fout ?? '—')
-    log('Vandaag gekozen: taak staat vandaag, zonder voorkeur niemand toegewezen', ruwC?.dueDate === String(deadlineMs(datum(0))) && ruwC.toegewezen.length === 0, `due ${ruwC?.dueDate ?? '—'}, toegewezen ${ruwC?.toegewezen.join(', ') || 'niemand'}`)
+    log('Vandaag gekozen: taak staat vandaag, zonder voorkeur niemand toegewezen', dagVan(ruwC?.dueDate) === datum(0) && ruwC?.toegewezen.length === 0, `vervaldag ${dagVan(ruwC?.dueDate) ?? '—'} (vandaag ${datum(0)}), toegewezen ${ruwC?.toegewezen.join(', ') || 'niemand'}`)
     const c2 = await klantTrektIn(admin, c1, 'Automatische controle')
     const st2 = c2.clickup_task_id ? await leesTaakStatus(c2.clickup_task_id) : null
     log('Intrekken door de klant sluit de ClickUp-taak', c2.status === 'ingetrokken' && (st2?.type === 'closed' || st2?.type === 'done'), `status: ${st2?.status ?? '—'}`)
