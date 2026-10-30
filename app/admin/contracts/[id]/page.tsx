@@ -57,13 +57,13 @@ async function getContract(id: string) {
       // Nieuwste archiefversie (certificaatnummer, datum) — enkel relevant als getekend.
       isSigned ? laatsteArchief(admin, contract.id).catch(() => null) : Promise.resolve(null),
     ])
-    const { data: klantenLijst } = await admin.from('clients').select('id, company_name').order('company_name').limit(2000)
+    const { data: klantenLijst } = await admin.from('clients').select('id, company_name, contact_name, email, archived_at').order('company_name').limit(2000)
     const aangemaaktDoor = contract.created_by ? (await leesActorNamen(admin, [contract.created_by]))[contract.created_by]?.naam ?? null : null
 
     return {
       contract,
       aangemaaktDoor,
-      klantenLijst: (klantenLijst ?? []) as { id: string; company_name: string }[],
+      klantenLijst: (klantenLijst ?? []) as { id: string; company_name: string; contact_name: string | null; email: string | null; archived_at: string | null }[],
       clientName: clientRowResult.data?.company_name ?? null,
       clientId: clientRowResult.data?.id ?? null,
       clientBtw: (clientRowResult.data as { btw_nummer?: string | null } | null)?.btw_nummer ?? null,

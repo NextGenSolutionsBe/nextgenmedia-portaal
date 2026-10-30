@@ -7,6 +7,7 @@ import { Loader2, Pencil, Save } from 'lucide-react'
 import { Dialoog, INP } from '@/app/admin/instellingen/ui'
 import { SERVICE_LABELS } from '@/lib/utils'
 import { DURATION_TYPES } from '@/lib/contract-status'
+import { KlantKiezer, vulOndertekenaar, type KlantOptie } from '@/components/admin/klant-kiezer'
 
 type Gegevens = { title: string; client_id: string | null; service_slug: string | null; signer_name: string | null; signer_email: string | null; duration_type: string | null }
 const LBL = 'block text-xs font-medium text-gray-600 mb-1'
@@ -16,7 +17,8 @@ const LBL = 'block text-xs font-medium text-gray-600 mb-1'
  * aanpassen. Bewaart via PATCH action 'gegevens' (met logboek). Start- en
  * einddatum, type en looptijdstatus hebben elk hun eigen bewerker op de pagina.
  */
-export function ContractGegevens({ contractId, begin, isSigned, klanten }: { contractId: string; begin: Gegevens; isSigned: boolean; klanten: { id: string; company_name: string }[] }) {
+export function ContractGegevens({ contractId, begin, isSigned, klanten: beginKlanten }: { contractId: string; begin: Gegevens; isSigned: boolean; klanten: KlantOptie[] }) {
+  const [klanten, setKlanten] = useState<KlantOptie[]>(beginKlanten)
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [v, setV] = useState<Gegevens>(begin)
@@ -39,12 +41,13 @@ export function ContractGegevens({ contractId, begin, isSigned, klanten }: { con
           <div className="space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="sm:col-span-2"><label className={LBL}>Titel *</label><input className={INP} value={v.title} onChange={(e) => zet('title', e.target.value)} /></div>
-              <div><label className={LBL}>Klant</label>
-                <select className={INP} value={v.client_id ?? ''} onChange={(e) => zet('client_id', e.target.value || null)}>
-                  <option value="">— Geen klant —</option>
-                  {klanten.map((k) => <option key={k.id} value={k.id}>{k.company_name}</option>)}
-                  {v.client_id && !klanten.some((k) => k.id === v.client_id) && <option value={v.client_id}>Huidige klant</option>}
-                </select></div>
+              <div className="sm:col-span-2"><label className={LBL} htmlFor="gegevens-klant">Klant</label>
+                <KlantKiezer id="gegevens-klant" klanten={klanten} waarde={v.client_id ?? ''} leegLabel="Geen klant" bron="contract-gegevens"
+                  onNieuw={(k) => setKlanten((l) => [...l, k])}
+                  onKies={(k) => setV((o) => {
+                    const s = vulOndertekenaar({ naam: o.signer_name, email: o.signer_email }, klanten.find((c) => c.id === o.client_id), k)
+                    return { ...o, client_id: k?.id ?? null, signer_name: s.naam || null, signer_email: s.email || null }
+                  })} /></div>
               <div><label className={LBL}>Dienst</label>
                 <select className={INP} value={v.service_slug ?? ''} onChange={(e) => zet('service_slug', e.target.value || null)}>
                   <option value="">— Geen dienst —</option>
