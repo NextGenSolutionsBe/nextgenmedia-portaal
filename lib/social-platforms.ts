@@ -70,3 +70,28 @@ export function kanaalLabel(slug: string): string {
   return KANALEN.find((x) => x.slug === k)?.label
     ?? (k ? k.charAt(0).toUpperCase() + k.slice(1) : '—')
 }
+
+/** Vaste volgorde voor labels, zodat je in de kalender altijd op dezelfde plek kijkt. */
+const LABEL_VOLGORDE = ['instagram', 'facebook', 'linkedin', 'tiktok', 'youtube', 'pinterest', 'twitter']
+
+/**
+ * Waar een item echt verschijnt, voor labels in de kalender. Meta is één
+ * kanaal om in te plannen, maar de post staat op Instagram én Facebook: dus
+ * twee labels, zodat je in één oogopslag ziet waar hij komt.
+ */
+export function publicatieKanalen(ruw: unknown): Kanaal[] {
+  const IG = { slug: 'instagram', label: 'Instagram' }, FB = { slug: 'facebook', label: 'Facebook' }
+  const lijst = Array.isArray(ruw) ? ruw : ruw ? [ruw] : []
+  const uit: Kanaal[] = []
+  for (const x of lijst) {
+    if (typeof x !== 'string' || !x.trim()) continue
+    const r = x.trim().toLowerCase()
+    // Een oud item met enkel Instagram of enkel Facebook toont ook enkel dat.
+    if (r === 'instagram' || r === 'ig') uit.push(IG)
+    else if (r === 'facebook' || r === 'fb') uit.push(FB)
+    else if (normaliseerKanaal(r) === 'meta') uit.push(IG, FB)
+    else uit.push({ slug: normaliseerKanaal(r), label: kanaalLabel(r) })
+  }
+  const plek = (s: string) => { const i = LABEL_VOLGORDE.indexOf(s); return i === -1 ? LABEL_VOLGORDE.length : i }
+  return uit.filter((k, i) => uit.findIndex((x) => x.slug === k.slug) === i).sort((a, b) => plek(a.slug) - plek(b.slug))
+}
