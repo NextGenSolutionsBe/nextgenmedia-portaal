@@ -7,7 +7,8 @@ import {
 } from 'lucide-react'
 import { ymd } from '@/lib/utils'
 import { planningkleur, nuInBrussel, PLANNING_STIJL, type Planningkleur } from '@/lib/content/planning-kleur'
-import { KANAAL_SLUGS, kanaalLabel, normaliseerKanalen } from '@/lib/social-platforms'
+import { KANAAL_SLUGS, kanaalLabel, normaliseerKanalen, publicatieKanalen } from '@/lib/social-platforms'
+import { KanaalLabels } from './kanaal-labels'
 import {
   magBewerken, magVerwijderen, statusOvergangen, magBeoordelen, overgangLabel, type KalenderRechten,
 } from '@/lib/content/kalender-rol'
@@ -279,6 +280,9 @@ export function ContentCalendar({
                     const plan: Planningkleur = planningkleur(it, nu)
                     const badge = kleurOp === 'planning' ? PLANNING_STIJL[plan].badge : style.badge
                     const isChecked = selection?.selectedIds.has(it.id) ?? false
+                    // Adminkalender: op welke platformen dit item verschijnt, als kleine labels.
+                    const kanalen = mode === 'admin' ? (it.platforms?.length ? it.platforms : [it.platform]) : null
+                    const kanaalTekst = kanalen ? publicatieKanalen(kanalen).map((k) => k.label).join(', ') : ''
                     return (
                       <button
                         key={it.id}
@@ -292,10 +296,11 @@ export function ContentCalendar({
                           }
                         }}
                         className={`text-left text-[11px] px-1.5 py-1 rounded border ${badge}
-                          hover:opacity-80 transition truncate flex items-center gap-1 w-full
+                          hover:opacity-80 transition flex flex-col gap-0.5 w-full min-w-0
                           ${isChecked ? 'ring-2 ring-red-400 bg-red-50' : ''}`}
-                        title={kleurOp === 'planning' ? `${it.title} · ${PLANNING_STIJL[plan].label} · ${style.label}` : it.title}
+                        title={[it.title, kleurOp === 'planning' ? `${PLANNING_STIJL[plan].label} · ${style.label}` : null, kanaalTekst || null].filter(Boolean).join(' · ')}
                       >
+                        <span className="flex items-center gap-1 w-full min-w-0">
                         {selectMode && (
                           <span className={`h-3 w-3 shrink-0 rounded border flex items-center justify-center ${
                             isChecked ? 'bg-red-500 border-red-500' : 'border-gray-300 bg-white'
@@ -306,6 +311,8 @@ export function ContentCalendar({
                         <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${style.dot}`} />
                         <Icon className="h-2.5 w-2.5 shrink-0 opacity-70" />
                         <span className="truncate">{it.planned_time ? <span className="tabular-nums opacity-70">{it.planned_time.slice(0, 5)} </span> : null}{it.title}</span>
+                        </span>
+                        {kanalen && <KanaalLabels platforms={kanalen} compact />}
                       </button>
                     )
                   })}
@@ -484,11 +491,13 @@ function ScriptPanel({
             <h3 className="font-semibold text-gray-900 leading-snug">{f.title}</h3>
           )}
           <div className="text-xs text-gray-400 mt-1 flex items-center gap-1 flex-wrap">
-            {/* Oude items staan nog op 'instagram'/'facebook'; normaliseren
-                toont die als één Meta-badge in plaats van twee. */}
-            {normaliseerKanalen(f.platforms?.length > 0 ? f.platforms : [f.platform]).map((p) => (
-              <span key={p} className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-[10px]">{kanaalLabel(p)}</span>
-            ))}
+            {/* Admin: dezelfde platformlabels als in de kalender (Meta = Instagram + Facebook).
+                Portaal: oude items op 'instagram'/'facebook' tonen als één Meta-badge. */}
+            {mode === 'admin'
+              ? <KanaalLabels platforms={f.platforms?.length > 0 ? f.platforms : [f.platform]} />
+              : normaliseerKanalen(f.platforms?.length > 0 ? f.platforms : [f.platform]).map((p) => (
+                <span key={p} className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-[10px]">{kanaalLabel(p)}</span>
+              ))}
             <span>· {f.content_type}</span>
           </div>
         </div>
