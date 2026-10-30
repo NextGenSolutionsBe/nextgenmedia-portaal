@@ -17,7 +17,7 @@ type Medewerker = Record<string, unknown> & {
   contracttype: string | null; startdatum: string | null; einddatum: string | null; actief: boolean; verantwoordelijke: string | null; standaard_werkdagen: number[]
   max_uren_dag: number | null; max_uren_week: number | null; max_uren_maand: number | null; interne_notities: string | null; foto_url: string | null
   auth_user_id: string | null; account_status: AccountStatus; uitnodiging_verzonden_at: string | null
-  expert_zichtbaar?: boolean | null; expert_rollen?: string[] | null; expertises?: string[] | null
+  expert_zichtbaar?: boolean | null; expert_rollen?: string[] | null; expertises?: string[] | null; clickup_user_id?: number | null
 }
 type Doc = { id: string; map: string; naam: string; url: string | null; grootte: number | null; vervalt_op: string | null; verplicht: boolean; toegevoegd_door: string | null; gewijzigd_door: string | null; created_at: string; updated_at: string }
 type TariefMet = Tarief & { opbouw: { basis: number; lasten: number; totaal: number }; per: { uur: number; dag: number; week: number; maand: number }; opmerking?: string | null }
@@ -182,11 +182,14 @@ function Expertprofiel({ m, onKlaar }: { m: Medewerker; onKlaar: () => void }) {
   const [zichtbaar, setZichtbaar] = useState(!!m.expert_zichtbaar)
   const [rollen, setRollen] = useState((m.expert_rollen ?? []).join(', '))
   const [expertises, setExpertises] = useState<string[]>(m.expertises ?? [])
+  const [clickup, setClickup] = useState(m.clickup_user_id ? String(m.clickup_user_id) : '')
+  const [leden, setLeden] = useState<{ id: number; naam: string; email: string }[] | null>(null)
   const [bezig, setBezig] = useState(false)
+  useEffect(() => { api<{ leden: { id: number; naam: string; email: string }[] }>('/api/admin/personeel/clickup-leden').then((j) => setLeden(j.leden)).catch(() => setLeden([])) }, [])
   const bewaar = async () => {
     setBezig(true)
     try {
-      await api(`/api/admin/personeel/${m.id}`, { method: 'PATCH', body: { expert_zichtbaar: zichtbaar, expert_rollen: rollen.split(',').map((r) => r.trim()).filter(Boolean), expertises } })
+      await api(`/api/admin/personeel/${m.id}`, { method: 'PATCH', body: { expert_zichtbaar: zichtbaar, expert_rollen: rollen.split(',').map((r) => r.trim()).filter(Boolean), expertises, clickup_user_id: clickup ? Number(clickup) : null } })
       toast.success(zichtbaar ? 'Expertprofiel bewaard. Klanten zien deze persoon bij passende aanvragen.' : 'Expertprofiel bewaard. Niet zichtbaar voor klanten.')
       onKlaar()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt') } finally { setBezig(false) }
@@ -214,6 +217,12 @@ function Expertprofiel({ m, onKlaar }: { m: Medewerker; onKlaar: () => void }) {
           })}
         </div>
       </div>
+      <div><label className={LBL} htmlFor="ep-clickup">ClickUp-gebruiker (krijgt de ClickUp-taak van een aanvraag)</label>
+        <select id="ep-clickup" className={INP} value={clickup} onChange={(e) => setClickup(e.target.value)} disabled={leden === null}>
+          <option value="">{leden === null ? 'Laden…' : 'Niet gekoppeld'}</option>
+          {clickup && leden && !leden.some((l) => String(l.id) === clickup) && <option value={clickup}>Gebruiker {clickup}</option>}
+          {(leden ?? []).map((l) => <option key={l.id} value={l.id}>{l.naam}{l.email ? ` (${l.email})` : ''}</option>)}
+        </select></div>
       <button type="button" disabled={bezig} onClick={bewaar} className="btn-primary">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Bewaren</button>
     </div>
   )

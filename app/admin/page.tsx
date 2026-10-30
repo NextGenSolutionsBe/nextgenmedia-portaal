@@ -6,8 +6,10 @@ import { TodayPanel } from './today-panel'
 import { ContractsWidget } from './contracts-widget'
 import { RecentActivity } from './recent-activity'
 import { SalesToday } from './sales-today'
+import { OpvolgingPanel } from './opvolging-panel'
 
-// Compact Command Center: Vandaag (acties) + kritieke contracten + recente
+// Compact Command Center: Op te volgen (aanvragen, contracten, meetings, leads,
+// contentfeedback, met namen) + Vandaag (acties) + kritieke contracten + recente
 // activiteit. Notificaties leven in het globale belletje. De zware module-
 // widgets (finance/lifecycle/blogs/framer/scripts) zijn verplaatst naar hun
 // eigen modules — niet verwijderd, enkel niet meer op het dashboard.
@@ -30,6 +32,11 @@ export default async function CommandCenter() {
           {today.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
         </p>
       </div>
+
+      {/* Op te volgen — bovenaan: concreet wie en wat, per module afgeschermd. */}
+      <Suspense fallback={<div className="card-base text-sm text-gray-400">Opvolging laden…</div>}>
+        <OpvolgingPanel modules={actor?.modules ?? null} />
+      </Suspense>
 
       {/* Vandaag — dagelijkse acties (de werkplek). Elke regel hangt aan een
           module, zodat een werknemer enkel ziet waar hij bij kan. */}

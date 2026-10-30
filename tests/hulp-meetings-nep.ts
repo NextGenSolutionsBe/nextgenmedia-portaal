@@ -200,6 +200,8 @@ export const clickup = {
   zegtLaatstePagina: false,
   /** Lijsten in de space (GET /space/:id/list). */
   lijsten: [] as { id: string; name: string }[],
+  /** Zoals live: een automatisering zet deze vervaldatum op elke nieuwe taak zonder deadline. */
+  automatischeVervaldatum: null as string | null,
   /** Reacties op taken (POST /task/:id/comment). */
   reacties: [] as { taak: string; tekst: string }[],
   /** Leden van de werkruimte (GET /team). */
@@ -307,7 +309,7 @@ async function nepFetch(input: any, init: any = {}): Promise<Response> {
     let m = p.match(/^\/list\/([^/]+)\/task$/)
     if (m && methode === 'POST') {
       const id = `cu${++clickup.volgnr}`
-      clickup.taken.set(id, { id, list: m[1], ...body, status: 'open', date_created: String(Date.now()) }); clickup.aangemaakt++
+      clickup.taken.set(id, { id, list: m[1], ...body, ...(body.due_date == null && clickup.automatischeVervaldatum ? { due_date: clickup.automatischeVervaldatum } : {}), status: 'open', date_created: String(Date.now()) }); clickup.aangemaakt++
       if (clickup.verliesAntwoord) { clickup.verliesAntwoord = false; throw new TypeError('fetch failed') }
       return json({ id, url: `https://app.clickup.com/t/${id}` })
     }
@@ -321,9 +323,18 @@ async function nepFetch(input: any, init: any = {}): Promise<Response> {
     if (m) {
       const t = clickup.taken.get(m[1])
       if (!t) return json({ err: 'Task not found, deleted', ECODE: 'ITEM_013' }, 404)
-      if (methode === 'GET') return json({ id: t.id, name: t.name, list: { id: t.list }, url: `https://app.clickup.com/t/${t.id}`,
+      if (methode === 'GET') return json({ id: t.id, name: t.name, list: { id: t.list }, url: `https://app.clickup.com/t/${t.id}`, due_date: t.due_date ?? null,
+        assignees: (Array.isArray(t.assignees) ? t.assignees : []).map((id: number) => ({ id })),
         status: { status: t.status, color: t.status === 'complete' ? '#6bc950' : '#d3d3d3', type: t.status === 'complete' ? 'closed' : 'open' } })
-      if (methode === 'PUT') { Object.assign(t, body); return json({ id: t.id }) }
+      if (methode === 'PUT') {
+        // Toegewezenen wijzigen zoals ClickUp: { add: [...], rem: [...] }.
+        if (body.assignees && !Array.isArray(body.assignees)) {
+          const { add = [], rem = [] } = body.assignees as { add?: number[]; rem?: number[] }
+          t.assignees = [...(Array.isArray(t.assignees) ? t.assignees : []).filter((id: number) => !rem.includes(id)), ...add]
+          delete body.assignees
+        }
+        Object.assign(t, body); return json({ id: t.id })
+      }
     }
     m = p.match(/^\/list\/([^/]+)$/)
     if (m) return json({ statuses: [{ status: 'open', type: 'open' }, { status: 'complete', type: 'closed' }] })
