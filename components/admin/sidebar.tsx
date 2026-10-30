@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
   Info, Camera, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
-  MailCheck, PhoneCall, FolderUp, Handshake, Plug, Settings, ClipboardPen, Contact, Timer, UserCircle, Video,
+  MailCheck, PhoneCall, FolderUp, Handshake, Plug, Settings, ClipboardPen, Contact, Timer, UserCircle, Video, Inbox,
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
@@ -55,6 +55,7 @@ const SECTIONS: NavSection[] = [
           { label: 'Website',      href: '/admin/services/website',      icon: Globe },
         ],
       },
+      { label: 'Aanvragen', href: '/admin/aanvragen', icon: Inbox, module: 'aanvragen' },
       // Enkel de kalender: de statistieken zijn eruit (Metricool zelf toont ze
       // beter en actueler dan wij ze konden nabouwen).
       { label: 'Metricool', href: '/admin/metricool', icon: CalendarClock, module: 'metricool', exact: true },

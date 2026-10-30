@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { formatEuro } from '@/lib/utils'
-import { FileText, Newspaper, TrendingUp, Receipt, Users, Globe, Calendar, ListChecks } from 'lucide-react'
+import { FileText, Newspaper, TrendingUp, Receipt, Users, Globe, Calendar, ListChecks, Inbox } from 'lucide-react'
 import { canonicalStatus } from '@/lib/contract-status'
 import { FEATURES } from '@/lib/features'
 
@@ -17,7 +17,7 @@ export async function ClientHub({ clientId, btw }: { clientId: string; btw?: str
   }
 
   const [
-    contractRows, blogAccounts, invoiceRows, subaccounts, services, openTasks,
+    contractRows, blogAccounts, invoiceRows, subaccounts, services, openTasks, openAanvragen,
   ] = await Promise.all([
     safe(admin.from('contracts').select('status').eq('client_id', clientId).then((r) => r.data ?? []), [] as { status: string }[]),
     safe(admin.from('blog_accounts').select('id').eq('client_id', clientId).then((r) => r.data ?? []), [] as { id: string }[]),
@@ -25,6 +25,7 @@ export async function ClientHub({ clientId, btw }: { clientId: string; btw?: str
     countOf('client_users', (q) => q.eq('client_id', clientId)),
     safe(admin.from('client_services').select('service_slug, active').eq('client_id', clientId).then((r) => r.data ?? []), [] as { service_slug: string; active: boolean }[]),
     countOf('client_tasks', (q) => q.eq('client_id', clientId).neq('status', 'done')),
+    countOf('klant_aanvragen', (q) => q.eq('client_id', clientId).in('status', ['ontvangen', 'in_behandeling', 'offerte', 'aanvaard', 'ingepland'])),
   ])
 
   const blogCount = blogAccounts.length === 0 ? 0
@@ -49,6 +50,7 @@ export async function ClientHub({ clientId, btw }: { clientId: string; btw?: str
     { icon: Globe, value: hasWebsite ? '1' : '0', label: 'website', href: '/admin/services/website' },
     { icon: Calendar, value: hasSocial ? '1' : '0', label: 'social media', href: '/admin/services/social-media' },
     { icon: ListChecks, value: String(openTasks), label: 'open taken', href: `/admin/clients/${clientId}#taken`, accent: openTasks > 0 ? 'text-amber-600' : undefined },
+    { icon: Inbox, value: String(openAanvragen), label: 'open aanvragen', href: `/admin/aanvragen?klant=${clientId}`, accent: openAanvragen > 0 ? 'text-amber-600' : undefined },
   ]
 
   return (
@@ -56,7 +58,7 @@ export async function ClientHub({ clientId, btw }: { clientId: string; btw?: str
       {btw && (
         <div className="text-xs text-gray-500">BTW: <span className="font-mono font-medium text-gray-700">{btw}</span></div>
       )}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-9 gap-2">
       {tiles.map((t, i) => (
         <Link key={i} href={t.href} className="card-base !p-3 hover:ring-2 hover:ring-gray-200 transition-shadow text-center">
           <t.icon className="h-4 w-4 mx-auto text-gray-400 mb-1" />

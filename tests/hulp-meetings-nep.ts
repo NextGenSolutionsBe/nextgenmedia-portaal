@@ -155,7 +155,19 @@ class Vraag {
   }
 }
 
-export const nepDb = { from: (t: string) => new Vraag(t) }
+/** Opslag: ondertekende links zonder echte bestanden (aanvragen, personeelsfoto's). */
+export const opslag = { verwijderd: [] as string[] }
+export const nepDb = {
+  from: (t: string) => new Vraag(t),
+  storage: {
+    from: (bucket: string) => ({
+      createSignedUrls: async (paden: string[]) => ({ data: paden.map((p) => ({ path: p, signedUrl: `https://opslag.test/${bucket}/${p}` })), error: null }),
+      createSignedUrl: async (pad: string) => ({ data: { signedUrl: `https://opslag.test/${bucket}/${pad}` }, error: null }),
+      createSignedUploadUrl: async () => ({ data: { token: 'upload-token' }, error: null }),
+      remove: async (paden: string[]) => { opslag.verwijderd.push(...paden); return { data: null, error: null } },
+    }),
+  },
+}
 
 // ── Nep-API's ────────────────────────────────────────────────────────────────
 
@@ -186,6 +198,10 @@ export const clickup = {
   paginasGevraagd: 0,
   /** Zoals live gezien: ClickUp zegt altijd "laatste pagina", ook als er nog volgen. */
   zegtLaatstePagina: false,
+  /** Lijsten in de space (GET /space/:id/list). */
+  lijsten: [] as { id: string; name: string }[],
+  /** Reacties op taken (POST /task/:id/comment). */
+  reacties: [] as { taak: string; tekst: string }[],
   /** Leden van de werkruimte (GET /team). */
   leden: [
     { user: { id: 200511713, username: 'Bram', email: 'bram@nextgenmedia.be' } },
@@ -281,6 +297,11 @@ async function nepFetch(input: any, init: any = {}): Promise<Response> {
       clickup.paginasGevraagd++
       return json({ tasks: tasks.slice(pagina * grootte, (pagina + 1) * grootte), ...(clickup.zegtLaatstePagina ? { last_page: true } : {}) })
     }
+    const sp = p.match(/^\/space\/([^/]+)\/list$/)
+    if (sp && methode === 'GET') return json({ lists: clickup.lijsten })
+    if (sp && methode === 'POST') { const l = { id: `L-${clickup.lijsten.length + 1}-${String(body.name).toUpperCase()}`, name: body.name }; clickup.lijsten.push(l); return json(l) }
+    const rc = p.match(/^\/task\/([^/]+)\/comment$/)
+    if (rc && methode === 'POST') { clickup.reacties.push({ taak: rc[1], tekst: body.comment_text }); return json({ id: `c${clickup.reacties.length}` }) }
     // Een lijst in een andere werkruimte (of verwijderd): ClickUp geeft 404 SHARD_006.
     if (/^\/list\/L-WEG/.test(p)) return json({ err: 'Not found', ECODE: 'SHARD_006' }, 404)
     let m = p.match(/^\/list\/([^/]+)\/task$/)

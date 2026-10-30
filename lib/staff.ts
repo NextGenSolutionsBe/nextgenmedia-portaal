@@ -18,6 +18,8 @@ export type AdminModule = {
 export const ADMIN_MODULES: AdminModule[] = [
   { key: 'clients',     label: 'Klanten',              prefixes: ['/admin/clients', '/api/admin/clients', '/api/admin/tasks'] },
   { key: 'contracts',   label: 'Contracten',           prefixes: ['/admin/contracts', '/api/admin/contracts', '/api/admin/contract-templates'] },
+  // Aanvragen van diensten en consultancy uit het klantportaal (geen opdrachten of boekingen).
+  { key: 'aanvragen',   label: 'Aanvragen',            prefixes: ['/admin/aanvragen', '/api/admin/aanvragen'] },
   { key: 'content',     label: 'Content / Diensten',   prefixes: ['/admin/services', '/api/admin/social-content', '/api/admin/shoot-feedback', '/api/admin/shoot-ideas', '/api/admin/webdesign'] },
   { key: 'metricool',   label: 'Metricool',            prefixes: ['/admin/metricool', '/api/admin/metricool'] },
   { key: 'blogs',       label: 'Blogs',                prefixes: ['/admin/blog-calendar', '/admin/blogaccounts', '/admin/blogs', '/api/admin/blogs', '/api/admin/blog-accounts', '/api/admin/blog-seo', '/api/admin/blog-settings', '/api/admin/framer'] },
