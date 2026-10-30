@@ -242,12 +242,13 @@ async function stapTeamMail(admin: Admin, a: AanvraagRij): Promise<AanvraagRij> 
   try { return await bewaar(admin, a.id, { team_mail_status: r.ok ? 'ok' : 'fout', team_mail_fout: r.ok ? null : (r.error ?? 'onbekend').slice(0, 300) }) } catch { return a }
 }
 
-/** Een statuswissel als reactie op de taak; afgewezen, ingetrokken of afgerond sluit de taak. */
+/** ClickUp-taak op wie de aanvraag opvolgt, of anders op de gekozen expert. */
 async function volgToegewezene(admin: Admin, a: AanvraagRij): Promise<void> {
   if (!a.clickup_task_id || !clickupConfigured()) return
   try { await zetToegewezene(a.clickup_task_id, await clickupLidVan(admin, a.toegewezen_id ?? a.expert_id)) } catch { /* bijzaak: de toewijzing staat in de app */ }
 }
 
+/** Een statuswissel als reactie op de taak; afgewezen, ingetrokken of afgerond sluit de taak. */
 async function meldInClickup(a: AanvraagRij, tekst: string, sluit = false): Promise<void> {
   if (!a.clickup_task_id || !clickupConfigured()) return
   await reageerOpTaak(a.clickup_task_id, tekst)
