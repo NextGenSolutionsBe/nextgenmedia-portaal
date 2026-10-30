@@ -9,12 +9,13 @@ import { TEMPLATE_CATEGORIES } from '@/lib/contract-status'
 import { fileTooBig, MAX_UPLOAD_MB, readJson } from '@/lib/upload'
 import { Dialoog, Bevestig, INP } from '@/app/admin/instellingen/ui'
 import { ContracttypesBeheer } from '../contracttypes-beheer'
+import { KlantKiezer, vulOndertekenaar, type KlantOptie } from '@/components/admin/klant-kiezer'
 
 type Template = {
   id: string; name: string; category: string | null; active: boolean
   pdf_path: string | null; field_count: number; created_at: string
 }
-type Client = { id: string; company_name: string }
+type Client = KlantOptie
 
 const SERVICES = [
   { slug: '', label: '— Geen koppeling —' },
@@ -263,6 +264,7 @@ function EditDialog({ template, onClose, onDone }: { template: Template; onClose
 }
 
 function FromTemplateDialog({ template, clients, onClose }: { template: Template; clients: Client[]; onClose: () => void }) {
+  const [klanten, setKlanten] = useState<Client[]>(clients)
   const [clientId, setClientId] = useState('')
   const [service, setService] = useState('')
   const [signerName, setSignerName] = useState('')
@@ -303,11 +305,13 @@ function FromTemplateDialog({ template, clients, onClose }: { template: Template
           <input className={inp} value={title} onChange={(e) => setTitle(e.target.value)} />
         </div>
         <div>
-          <label className={lbl}>Klant (optioneel)</label>
-          <select className={inp} value={clientId} onChange={(e) => setClientId(e.target.value)}>
-            <option value="">— Geen klant (los/intern) —</option>
-            {clients.map((c) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
-          </select>
+          <label className={lbl} htmlFor="tpl-klant">Klant (optioneel)</label>
+          <KlantKiezer id="tpl-klant" klanten={klanten} waarde={clientId} leegLabel="Geen klant (los/intern contract)" bron="contract-template"
+            onNieuw={(k) => setKlanten((l) => [...l, k])}
+            onKies={(k) => {
+              const o = vulOndertekenaar({ naam: signerName, email: signerEmail }, klanten.find((c) => c.id === clientId), k)
+              setClientId(k?.id ?? ''); setSignerName(o.naam); setSignerEmail(o.email)
+            }} />
         </div>
         <div>
           <label className={lbl}>Dienst (optioneel)</label>

@@ -6,11 +6,12 @@ import { ChevronLeft, Loader2, Upload } from 'lucide-react'
 import { readJson, fileTooBig, MAX_UPLOAD_MB } from '@/lib/upload'
 import { DURATION_TYPES } from '@/lib/contract-status'
 import { ContracttypeKiezer } from '../contracttype-kiezer'
+import { KlantKiezer, vulOndertekenaar, type KlantOptie } from '@/components/admin/klant-kiezer'
 
 export default function NewContractPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [clients, setClients] = useState<Array<{ id: string; company_name: string }>>([])
+  const [clients, setClients] = useState<KlantOptie[] | null>(null)
   const [file, setFile] = useState<File | null>(null)
   const now = new Date()
   const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
@@ -98,11 +99,13 @@ export default function NewContractPage() {
 
       <form onSubmit={handleSubmit} className="card-base space-y-4">
         <div>
-          <label className={lbl}>Klant (optioneel)</label>
-          <select className={inp} value={form.client_id} onChange={(e) => setForm((p) => ({ ...p, client_id: e.target.value }))}>
-            <option value="">— Geen klant (los/intern contract) —</option>
-            {clients.map((c) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
-          </select>
+          <label className={lbl} htmlFor="contract-klant">Klant (optioneel)</label>
+          <KlantKiezer id="contract-klant" klanten={clients} waarde={form.client_id} leegLabel="Geen klant (los/intern contract)" bron="contract"
+            onNieuw={(k) => setClients((l) => [...(l ?? []), k])}
+            onKies={(k) => setForm((p) => {
+              const o = vulOndertekenaar({ naam: p.signer_name, email: p.signer_email }, clients?.find((c) => c.id === p.client_id), k)
+              return { ...p, client_id: k?.id ?? '', signer_name: o.naam, signer_email: o.email }
+            })} />
           <p className="text-xs text-gray-400 mt-1">Zonder klant verschijnt het contract niet in een klantportaal — enkel intern + via de publieke tekenlink.</p>
         </div>
         <div>

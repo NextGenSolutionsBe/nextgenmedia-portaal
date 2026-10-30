@@ -7,7 +7,7 @@ async function getData() {
   const admin = createAdminSupabaseClient()
   const [{ data: templates }, { data: clients }] = await Promise.all([
     admin.from('contract_templates').select('*').order('created_at', { ascending: false }),
-    admin.from('clients').select('id, company_name').order('company_name'),
+    admin.from('clients').select('id, company_name, contact_name, email, archived_at').order('company_name'),
   ])
   const list = (templates ?? []).map((t) => ({
     id: t.id,
@@ -29,7 +29,7 @@ export default async function ContractTemplatesPage() {
         id: string; name: string; category: string | null; active: boolean
         pdf_path: string | null; field_count: number; created_at: string
       }>}
-      clients={clients as Array<{ id: string; company_name: string }>}
+      clients={clients as Array<{ id: string; company_name: string; contact_name: string | null; email: string | null; archived_at: string | null }>}
     />
   )
 }

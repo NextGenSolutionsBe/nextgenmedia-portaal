@@ -26,7 +26,7 @@ export async function GET() {
     const admin = createAdminSupabaseClient()
     const { data } = await admin
       .from('clients')
-      .select('id, company_name')
+      .select('id, company_name, contact_name, email, archived_at')
       .order('company_name')
 
     return NextResponse.json({ clients: data ?? [] })
