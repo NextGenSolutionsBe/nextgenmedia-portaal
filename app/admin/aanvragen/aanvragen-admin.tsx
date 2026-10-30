@@ -31,6 +31,7 @@ type Detail = {
     expert_id: string | null; toegewezen_id: string | null; planning_datum: string | null; planning_notitie: string | null; reden_klant: string | null; interne_notitie: string | null
     scope_notitie: string | null; offerte_titel: string | null; offerte_notitie: string | null; offerte_verstuurd_op: string | null; offerte_beslist_op: string | null
     offerte_beslist_door: string | null; offerte_reden: string | null; clickup_task_id: string | null; clickup_url: string | null; clickup_fout: string | null
+    team_mail_status?: 'ok' | 'fout' | null; team_mail_fout?: string | null
     ingediend_door_naam: string | null; ingediend_door_email: string | null; status_gewijzigd_op: string | null
   }
   bestanden: { id: string; bestandsnaam: string; grootte: number | null; url: string | null }[]
@@ -179,6 +180,8 @@ function DetailPaneel({ id, magAanpassen, onSluit, onVeranderd }: { id: string; 
                 {d.aanvraag.clickup_url ? <a href={d.aanvraag.clickup_url} target="_blank" rel="noreferrer" className="underline inline-flex items-center gap-1">Taak openen in de lijst “Aanvragen”<ExternalLink className="h-3 w-3" /></a>
                   : <p className={d.aanvraag.clickup_status === 'fout' ? 'text-red-700' : ''}>{d.aanvraag.clickup_status === 'fout' ? `Niet in ClickUp: ${d.aanvraag.clickup_fout ?? 'onbekende fout'}` : 'Nog niet in ClickUp.'}</p>}
                 {d.aanvraag.clickup_status === 'fout' && magAanpassen && <button type="button" disabled={!!bezig} onClick={() => actie('cu', { actie: 'clickup_opnieuw' }, 'ClickUp opnieuw geprobeerd.')} className="btn-secondary !py-1 text-xs"><RotateCcw className="h-3.5 w-3.5" />Opnieuw</button>}
+                {d.aanvraag.team_mail_status === 'ok' && <p>Melding verstuurd naar info@nextgenmedia.be.</p>}
+                {d.aanvraag.team_mail_status === 'fout' && <p className="text-red-700">Melding naar info@nextgenmedia.be niet verstuurd: {d.aanvraag.team_mail_fout ?? 'onbekende fout'}</p>}
               </section>
             </div>
           </>

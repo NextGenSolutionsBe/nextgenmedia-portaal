@@ -8,6 +8,7 @@ import { verstuurMeetingMail } from '@/lib/meetings/meeting-mail-server'
 import { kalenderData, controleerVrij, controleerConflicten } from '@/lib/meetings/kalender-server'
 import { isClickupMeeting } from '@/lib/meetings/kalender'
 import { cronToegang } from '@/lib/meetings/cron-toegang'
+import { buildOpvolging } from '@/lib/notifications'
 import { haalMeetingEvent, bezetPerAgenda, meldingInfo, listCalendars, controleerAgenda, leesEventPersonen } from '@/lib/sales/google-calendar'
 import { EMAIL_FROM } from '@/lib/email'
 import { getOrCreateSalesOrg, listOwners, loadCalendar } from '@/lib/sales/service'
@@ -65,6 +66,7 @@ export const maxDuration = 60
  *    echte ClickUp-taken in de lijst "Aanvragen" (teruggelezen), offerte,
  *    akkoord van de klant, interne planning, afwijzen en intrekken sluiten de
  *    taak. Daarna zijn de testaanvragen en het testbestand weg.
+ *  · ?opvolging=1: leest enkel. De blokken "Op te volgen" van het Command Center.
  *  · ?kalender=1: leest enkel. Per agenda de werkuren, bezette blokken (per
  *    Google-agenda, zonder titels) en vrije segmenten voor twee weken, plus
  *    hoe de ClickUp-taken binnenkomen (pagina's, tijdvelden).
@@ -97,6 +99,8 @@ export async function POST(req: NextRequest) {
     if (req.nextUrl.searchParams.get('organisator') === '1') return NextResponse.json(await organisatorControle(admin))
     if (req.nextUrl.searchParams.get('zelftest') === 'vorm') return NextResponse.json(await zelftestVorm(admin))
     if (req.nextUrl.searchParams.get('zelftest') === 'leadtaak') return NextResponse.json(await zelftestLeadTaak(admin))
+    // Leest enkel: wat het Command Center bovenaan toont (aantallen en de eerste namen).
+    if (req.nextUrl.searchParams.get('opvolging') === '1') return NextResponse.json({ groepen: await buildOpvolging(null) })
     if (req.nextUrl.searchParams.get('zelftest') === 'aanvraag') {
       const klant = req.nextUrl.searchParams.get('klant') ?? ''
       if (!UUID.test(klant)) return NextResponse.json({ error: 'klant (een testklant) is verplicht' }, { status: 400 })
@@ -794,6 +798,11 @@ async function zelftestAanvraag(admin: { from: (t: string) => any; storage: { fr
       log(`Experts voor ${type}`, e.length > 0, e.map((x) => `${x.naam} (${x.expertises.join(', ') || 'alles'})${x.foto_url ? ' + foto' : ''}`).join('; ') || 'geen')
     }
     const shootExperts = await expertsVoor(admin, 'dienst', 'content_shoot')
+    const cuVan = async (id: string | null | undefined) => {
+      if (!id) return null
+      const { data } = await admin.from('personeel').select('clickup_user_id').eq('id', id).maybeSingle()
+      return data?.clickup_user_id ? Number(data.clickup_user_id) : null
+    }
 
     // Bestand zoals de klant het oplaadt: in de privébucket, onder de map van de klant.
     const pad = bouwPad(klant, 'application/pdf', randomUUID())
@@ -814,6 +823,7 @@ async function zelftestAanvraag(admin: { from: (t: string) => any; storage: { fr
     ids.push(a1.id)
     if (a1.clickup_task_id) taken.push(a1.clickup_task_id)
     log('Dienstenaanvraag bewaard als "Aanvraag ontvangen"', a1.status === 'ontvangen', `expertvoorkeur: ${a1.expert_naam ?? 'geen voorkeur'}`)
+    log('Melding naar info@nextgenmedia.be verstuurd', a1.team_mail_status === 'ok', a1.team_mail_fout ?? undefined)
     log('ClickUp-taak aangemaakt', a1.clickup_status === 'ok' && !!a1.clickup_task_id, a1.clickup_fout ?? a1.clickup_task_id ?? undefined)
     const herhaald = await maakAanvraag(admin, klant, invoer, door)
     log('Dubbel indienen geeft dezelfde aanvraag (geen tweede taak)', herhaald.herhaald && herhaald.aanvraag.id === a1.id)
@@ -823,7 +833,10 @@ async function zelftestAanvraag(admin: { from: (t: string) => any; storage: { fr
       const ruw = await leesTaakRuw(a1.clickup_task_id)
       log(`In de ClickUp-lijst "${CLICKUP_LIJST}"`, ruw.lijst === lijst, `lijst ${ruw.lijst}`)
       log('Taaknaam herkenbaar als aanvraag', ruw.naam === `Dienstenaanvraag – ${klantNaam} – Content shoot`, ruw.naam ?? '—')
-      log('Geen deadline, starttijd of toegewezene (geen opdracht of boeking)', !ruw.dueDate && !ruw.startDate && ruw.toegewezen.length === 0)
+      log('Taak op de gewenste datum van de klant (enkel een dag, geen starttijd)', ruw.dueDate === String(deadlineMs(invoer.periode_van)) && !ruw.startDate,
+        `due ${ruw.dueDate ?? 'geen'} (verwacht ${deadlineMs(invoer.periode_van)}), start ${ruw.startDate ?? 'geen'}`)
+      const verwacht = await cuVan(invoer.expert_id)
+      log('Toegewezen aan de gekozen expert', !!verwacht && ruw.toegewezen.length === 1 && ruw.toegewezen[0] === verwacht, `${a1.expert_naam ?? '—'}: verwacht ${verwacht ?? 'geen koppeling'}, staat op ${ruw.toegewezen.join(', ') || 'niemand'}`)
       log('Omschrijving zegt dat het nog geen bevestigde opdracht is', /AANVRAAG – nog geen bevestigde opdracht of boeking/.test(ruw.tekst + ruw.markdown))
       log('Omschrijving bevat timing, locatie, bestand en link naar de app',
         /Teststraat 1/.test(ruw.tekst) && /test-moodboard\.pdf/.test(ruw.tekst) && ruw.tekst.includes(`/admin/aanvragen?aanvraag=${a1.id}`))
@@ -836,8 +849,21 @@ async function zelftestAanvraag(admin: { from: (t: string) => any; storage: { fr
     const zicht = (await aanvragenVanKlant(admin, klant, 'dienst')).find((x) => x.id === a1.id)
     log('Klant ziet de aanvraag zonder interne velden', !!zicht && !/interne_notitie|clickup|scope/.test(JSON.stringify(zicht)), zicht?.status_label)
 
+    // Het team duidt iemand anders aan: ClickUp volgt; zonder toewijzing terug op de expert.
+    let a = a1
+    const ander = shootExperts.find((e) => e.id !== invoer.expert_id)
+    const taak1 = a1.clickup_task_id
+    if (ander && taak1) {
+      a = await teamActie(admin, a, { actie: 'toewijzen', personeel_id: ander.id }, 'zelftest')
+      const na = (await leesTaakRuw(taak1)).toegewezen, cu = await cuVan(ander.id)
+      log('Toewijzen in de app zet de ClickUp-taak op die persoon', !!cu && na.length === 1 && na[0] === cu, `${ander.naam}: ${na.join(', ') || 'niemand'}`)
+      a = await teamActie(admin, a, { actie: 'toewijzen', personeel_id: null }, 'zelftest')
+      const terug = (await leesTaakRuw(taak1)).toegewezen
+      log('Toewijzing weghalen zet de taak terug op de gekozen expert', terug.length === 1 && terug[0] === (await cuVan(invoer.expert_id)), terug.join(', ') || 'niemand')
+    }
+
     // Offerte → akkoord van de klant → intern inplannen.
-    let a = await teamActie(admin, a1, { actie: 'status', status: 'in_behandeling' }, 'zelftest')
+    a = await teamActie(admin, a, { actie: 'status', status: 'in_behandeling' }, 'zelftest')
     const offerte = offertePad(a.id, randomUUID())
     const { error: oFout } = await admin.storage.from(AANVRAAG_BUCKET).upload(offerte, pdf, { contentType: 'application/pdf' })
     if (!oFout) paden.push(offerte)
@@ -854,12 +880,13 @@ async function zelftestAanvraag(admin: { from: (t: string) => any; storage: { fr
     // Consultancy: tarief in de taak, intrekken door de klant sluit ze.
     const { aanvraag: c1 } = await maakAanvraag(admin, klant, {
       aanvraag_sleutel: randomUUID(), soort: 'consultancy', type: 'seo_scan', wat: 'Automatische controle van het consultancyformulier.',
-      antwoorden: { onderwerp: 'Test', website: 'https://nextgenmedia.be', vorm: 'Online' }, expert_id: null,
+      periode_van: datum(0), antwoorden: { onderwerp: 'Test', website: 'https://nextgenmedia.be', vorm: 'Online' }, expert_id: null,
     }, door)
     ids.push(c1.id)
     if (c1.clickup_task_id) taken.push(c1.clickup_task_id)
     const ruwC = c1.clickup_task_id ? await leesTaakRuw(c1.clickup_task_id) : null
     log('Consultancy-taak met naam en tarief', ruwC?.naam === `Consultancy aanvraag – ${klantNaam} – SEO-scan` && /€125 per uur/.test(ruwC.tekst), ruwC?.naam ?? c1.clickup_fout ?? '—')
+    log('Vandaag gekozen: taak staat vandaag, zonder voorkeur niemand toegewezen', ruwC?.dueDate === String(deadlineMs(datum(0))) && ruwC.toegewezen.length === 0, `due ${ruwC?.dueDate ?? '—'}, toegewezen ${ruwC?.toegewezen.join(', ') || 'niemand'}`)
     const c2 = await klantTrektIn(admin, c1, 'Automatische controle')
     const st2 = c2.clickup_task_id ? await leesTaakStatus(c2.clickup_task_id) : null
     log('Intrekken door de klant sluit de ClickUp-taak', c2.status === 'ingetrokken' && (st2?.type === 'closed' || st2?.type === 'done'), `status: ${st2?.status ?? '—'}`)

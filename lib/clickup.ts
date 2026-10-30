@@ -724,6 +724,37 @@ export async function zoekOfMaakLijst(naam: string): Promise<string> {
   return nieuw.id
 }
 
+/** Hoe lang we na het aanmaken nakijken of ClickUp zelf een vervaldatum zette (tests zetten wachtMs op 0). */
+export const NAKIJKEN = { pogingen: 5, wachtMs: 600 }
+
+/**
+ * Haalt een vervaldatum weg die ClickUp zelf op een nieuwe taak zette. In de
+ * NextGenMedia-space zet een automatisering ongeveer een seconde na het
+ * aanmaken een vaste datum op taken zonder deadline (live gezien: 23 juli
+ * 2025). Wissen blijft staan. Geeft true als er iets te wissen viel.
+ */
+export async function wisOngevraagdeVervaldatum(taskId: string): Promise<boolean> {
+  for (let i = 0; i < NAKIJKEN.pogingen; i++) {
+    if (NAKIJKEN.wachtMs) await new Promise((r) => setTimeout(r, NAKIJKEN.wachtMs))
+    const t = await clickupJson<{ due_date?: string | null }>(`/task/${taskId}`)
+    if (t.due_date) {
+      await clickupJson(`/task/${taskId}`, { method: 'PUT', body: JSON.stringify({ due_date: null }) })
+      return true
+    }
+  }
+  return false
+}
+
+/** Zet de toegewezene van een taak op één persoon (of niemand); wie er anders op stond, gaat eraf. */
+export async function zetToegewezene(taskId: string, userId: number | null): Promise<void> {
+  const t = await clickupJson<{ assignees?: { id?: number }[] }>(`/task/${taskId}`)
+  const nu = (t.assignees ?? []).map((a) => Number(a.id)).filter(Boolean)
+  const rem = nu.filter((id) => id !== userId)
+  const add = userId && !nu.includes(userId) ? [userId] : []
+  if (!rem.length && !add.length) return
+  await clickupJson(`/task/${taskId}`, { method: 'PUT', body: JSON.stringify({ assignees: { add, rem } }) })
+}
+
 /** Taak sluiten (sluitstatus van de lijst), zonder ze te hernoemen. */
 export async function sluitTaak(taskId: string): Promise<void> {
   const task = await clickupJson<{ list?: { id?: string } }>(`/task/${taskId}`)

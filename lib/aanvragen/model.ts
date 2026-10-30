@@ -310,7 +310,10 @@ export function valideerAanvraag(b: AanvraagInvoer, vandaag: string): { ok: true
 
   const periode_van = isDag(b.periode_van) ? b.periode_van : null
   const periode_tot = isDag(b.periode_tot) ? b.periode_tot : null
-  if ((b.periode_van && !periode_van) || (b.periode_tot && !periode_tot)) return { ok: false, fout: 'Kies een geldige periode.' }
+  if ((b.periode_van && !periode_van) || (b.periode_tot && !periode_tot)) return { ok: false, fout: 'Kies een geldige datum.' }
+  // De gewenste datum is verplicht (vandaag mag): op die dag komt de ClickUp-taak.
+  if (!periode_van) return { ok: false, fout: 'Kies een gewenste datum.' }
+  if (periode_van < vandaag) return { ok: false, fout: 'De gewenste datum ligt in het verleden.' }
   if (periode_tot && periode_tot < vandaag) return { ok: false, fout: 'De gewenste periode ligt in het verleden.' }
   if (periode_van && periode_tot && periode_tot < periode_van) return { ok: false, fout: 'Het einde van de periode ligt vóór het begin.' }
   const deadline = isDag(b.deadline) ? b.deadline : null
@@ -362,7 +365,9 @@ const datum = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('nl-B
 
 export function timingTekst(a: { periode_van: string | null; periode_tot: string | null; voorkeursdagen: string[] | null; tijdstippen: string[] | null; deadline: string | null }): string[] {
   const r: string[] = []
-  if (a.periode_van || a.periode_tot) r.push(`Gewenste periode: ${a.periode_van ? datum(a.periode_van) : 'vanaf nu'} tot ${a.periode_tot ? datum(a.periode_tot) : 'open'}`)
+  if (a.periode_van && a.periode_tot) r.push(`Gewenste periode: ${datum(a.periode_van)} tot ${datum(a.periode_tot)}`)
+  else if (a.periode_van) r.push(`Gewenste datum: ${datum(a.periode_van)}`)
+  else if (a.periode_tot) r.push(`Gewenste periode: vanaf nu tot ${datum(a.periode_tot)}`)
   if (a.voorkeursdagen?.length) r.push(`Voorkeursdagen: ${a.voorkeursdagen.map((d) => DAGEN.find((x) => x.key === d)?.label ?? d).join(', ')}`)
   if (a.tijdstippen?.length) r.push(`Tijdstippen: ${a.tijdstippen.map((d) => TIJDSTIPPEN.find((x) => x.key === d)?.label ?? d).join(', ')}`)
   if (a.deadline) r.push(`Gewenste deadline: ${datum(a.deadline)}`)

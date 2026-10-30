@@ -1,6 +1,9 @@
 import 'server-only'
-import { baseUrl } from '@/lib/email'
-import { clickupConfigured, maakGewoneTaak, zoekOfMaakLijst, sluitTaak, reageerOpTaak, zoekTaakMetMarker } from '@/lib/clickup'
+import { baseUrl, sendEmail } from '@/lib/email'
+import { buildEmailHtml, buildEmailText } from '@/lib/email-html'
+import { INFO_ADRES } from '@/lib/meetings/meeting-mail'
+import { deadlineMs } from '@/lib/sales/lead-taken'
+import { clickupConfigured, maakGewoneTaak, zoekOfMaakLijst, sluitTaak, reageerOpTaak, zoekTaakMetMarker, wisOngevraagdeVervaldatum, zetToegewezene, listClickupMembers } from '@/lib/clickup'
 import { veiligeFout } from '@/lib/meetings/server'
 import {
   valideerAanvraag, vindType, relevanteExperts, volleNaam, expertiseLabel, clickupNaam, clickupOmschrijving, magIntrekken,
@@ -40,6 +43,7 @@ export type AanvraagRij = {
   offerte_titel: string | null; offerte_pad: string | null; offerte_url: string | null; offerte_bestandsnaam: string | null; offerte_notitie: string | null
   offerte_status: OfferteStatus | null; offerte_verstuurd_op: string | null; offerte_beslist_op: string | null; offerte_beslist_door: string | null; offerte_reden: string | null
   clickup_task_id: string | null; clickup_url: string | null; clickup_status: 'wacht' | 'ok' | 'fout'; clickup_fout: string | null
+  team_mail_status?: 'ok' | 'fout' | null; team_mail_fout?: string | null
   aanvraag_sleutel: string | null; ingediend_door_id: string | null; ingediend_door_email: string | null; ingediend_door_naam: string | null
   created_at: string; updated_at: string
 }
@@ -157,12 +161,33 @@ export async function maakAanvraag(
     const { error: bFout } = await admin.from('klant_aanvraag_bestanden').insert(bestanden.map((x) => ({ ...x, aanvraag_id: a.id, client_id: clientId })))
     if (bFout) throw new Error(bFout.message)
   }
-  return { aanvraag: await stapClickup(admin, a), herhaald: false }
+  const metTaak = await stapClickup(admin, a)
+  return { aanvraag: await stapTeamMail(admin, metTaak), herhaald: false }
 }
 
 // ── ClickUp ──────────────────────────────────────────────────────────────────
 
-/** Taak in de lijst "Aanvragen": geen deadline, geen toegewezene. Werpt nooit; de uitkomst staat op de aanvraag. */
+/**
+ * ClickUp-gebruiker van een teamlid: wat in Personeel gekoppeld is, anders op
+ * e-mailadres of volledige naam. null = niet te koppelen (dan geen toegewezene).
+ */
+async function clickupLidVan(admin: Admin, personeelId: string | null): Promise<number | null> {
+  if (!personeelId) return null
+  let { data, error } = await admin.from('personeel').select('voornaam, achternaam, email, clickup_user_id').eq('id', personeelId).maybeSingle()
+  if (error) ({ data } = await admin.from('personeel').select('voornaam, achternaam, email').eq('id', personeelId).maybeSingle())
+  if (!data) return null
+  if (data.clickup_user_id) return Number(data.clickup_user_id)
+  const leden = await listClickupMembers()
+  const mail = String(data.email ?? '').trim().toLowerCase()
+  const naam = volleNaam(data).toLowerCase()
+  return (mail ? leden.find((m) => m.email.toLowerCase() === mail)?.id : undefined) ?? leden.find((m) => m.username.toLowerCase() === naam)?.id ?? null
+}
+
+/**
+ * Taak in de lijst "Aanvragen" op de gewenste datum van de klant, toegewezen
+ * aan de gekozen expert (of wie het team aanduidde). Werpt nooit; de uitkomst
+ * staat op de aanvraag.
+ */
 export async function stapClickup(admin: Admin, a: AanvraagRij): Promise<AanvraagRij> {
   if (a.clickup_status === 'ok' && a.clickup_task_id) return a
   if (!clickupConfigured()) return bewaar(admin, a.id, { clickup_status: 'fout', clickup_fout: 'ClickUp is niet gekoppeld (CLICKUP_API_KEY ontbreekt).' })
@@ -176,21 +201,53 @@ export async function stapClickup(admin: Admin, a: AanvraagRij): Promise<Aanvraa
     }
     const klant = await klantNaam(admin, a.client_id)
     const { data: bs } = await admin.from('klant_aanvraag_bestanden').select('bestandsnaam').eq('aanvraag_id', a.id)
+    const lid = await clickupLidVan(admin, a.toegewezen_id ?? a.expert_id).catch(() => null)
     const taak = await maakGewoneTaak(lijst, {
       naam: clickupNaam(a.soort, klant, a.type_label),
       omschrijving: clickupOmschrijving({
         ...a, klant, ingediend_door: [a.ingediend_door_naam, a.ingediend_door_email].filter(Boolean).join(' – ') || null,
         bestanden: ((bs ?? []) as { bestandsnaam: string }[]).map((x) => x.bestandsnaam),
       }, adminLink(a.id)),
-      deadlineMs: null, assigneeId: null,
+      deadlineMs: a.periode_van ? deadlineMs(a.periode_van) : null, assigneeId: lid,
     })
-    return bewaar(admin, a.id, { clickup_task_id: taak.id, clickup_url: taak.url ?? `https://app.clickup.com/t/${taak.id}`, clickup_status: 'ok', clickup_fout: null })
+    const x = await bewaar(admin, a.id, { clickup_task_id: taak.id, clickup_url: taak.url ?? `https://app.clickup.com/t/${taak.id}`, clickup_status: 'ok', clickup_fout: null })
+    // Oudere aanvraag zonder datum: een ClickUp-automatisering zet er anders een vaste datum op.
+    if (!a.periode_van) { try { await wisOngevraagdeVervaldatum(taak.id) } catch { /* bijzaak: de taak bestaat */ } }
+    return x
   } catch (e) {
     return bewaar(admin, a.id, { clickup_status: 'fout', clickup_fout: veiligeFout(e) })
   }
 }
 
+/**
+ * Interne melding naar info@nextgenmedia.be bij een nieuwe aanvraag (nooit naar
+ * de klant). Eén keer per aanvraag (idempotentiesleutel). Werpt nooit.
+ */
+async function stapTeamMail(admin: Admin, a: AanvraagRij): Promise<AanvraagRij> {
+  let r: { ok: boolean; error?: string }
+  try {
+    const klant = await klantNaam(admin, a.client_id)
+    const { data: bs } = await admin.from('klant_aanvraag_bestanden').select('bestandsnaam').eq('aanvraag_id', a.id)
+    const inhoud = clickupOmschrijving({
+      ...a, klant, ingediend_door: [a.ingediend_door_naam, a.ingediend_door_email].filter(Boolean).join(' – ') || null,
+      bestanden: ((bs ?? []) as { bestandsnaam: string }[]).map((x) => x.bestandsnaam),
+    }, adminLink(a.id))
+    const clickup = a.clickup_url ? `ClickUp-taak: ${a.clickup_url}` : `Let op: de ClickUp-taak kon niet aangemaakt worden (${a.clickup_fout ?? 'onbekende fout'}). Probeer opnieuw vanuit de aanvraag in de app.`
+    const opts = { bodyText: `${inhoud}\n\n${clickup}`, ctaText: 'Aanvraag openen', ctaLink: adminLink(a.id) }
+    r = await sendEmail({
+      to: INFO_ADRES, subject: `${a.soort === 'consultancy' ? 'Nieuwe consultancy aanvraag' : 'Nieuwe dienstenaanvraag'} – ${klant} – ${a.type_label}`,
+      text: buildEmailText(opts), html: buildEmailHtml(opts), idempotencyKey: `aanvraag-team-${a.id}`,
+    })
+  } catch (e) { r = { ok: false, error: veiligeFout(e) } }
+  try { return await bewaar(admin, a.id, { team_mail_status: r.ok ? 'ok' : 'fout', team_mail_fout: r.ok ? null : (r.error ?? 'onbekend').slice(0, 300) }) } catch { return a }
+}
+
 /** Een statuswissel als reactie op de taak; afgewezen, ingetrokken of afgerond sluit de taak. */
+async function volgToegewezene(admin: Admin, a: AanvraagRij): Promise<void> {
+  if (!a.clickup_task_id || !clickupConfigured()) return
+  try { await zetToegewezene(a.clickup_task_id, await clickupLidVan(admin, a.toegewezen_id ?? a.expert_id)) } catch { /* bijzaak: de toewijzing staat in de app */ }
+}
+
 async function meldInClickup(a: AanvraagRij, tekst: string, sluit = false): Promise<void> {
   if (!a.clickup_task_id || !clickupConfigured()) return
   await reageerOpTaak(a.clickup_task_id, tekst)
@@ -305,11 +362,17 @@ export async function teamActie(admin: Admin, a: AanvraagRij, b: TeamActie, door
       return x
     }
     case 'toewijzen': {
-      if (b.personeel_id === null || b.personeel_id === '') return bewaar(admin, a.id, { toegewezen_id: null, toegewezen_naam: null })
+      // ClickUp volgt: de taak staat op wie opvolgt, en zonder toewijzing weer op de gekozen expert.
+      if (b.personeel_id === null || b.personeel_id === '') {
+        const x = await bewaar(admin, a.id, { toegewezen_id: null, toegewezen_naam: null })
+        await volgToegewezene(admin, x)
+        return x
+      }
       if (typeof b.personeel_id !== 'string' || !UUID.test(b.personeel_id)) throw new AanvraagFout('Ongeldig teamlid.')
       const { data: p } = await admin.from('personeel').select('id, voornaam, achternaam, actief').eq('id', b.personeel_id).maybeSingle()
       if (!p || !p.actief) throw new AanvraagFout('Dit teamlid bestaat niet of is niet actief.')
       const x = await bewaar(admin, a.id, { toegewezen_id: p.id, toegewezen_naam: volleNaam(p) })
+      await volgToegewezene(admin, x)
       await meldInClickup(x, `Opvolging bevestigd: ${volleNaam(p)} (door ${door}).`)
       return x
     }

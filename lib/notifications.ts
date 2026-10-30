@@ -4,6 +4,9 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { followUp } from '@/lib/contract-status'
 import { FEATURES } from '@/lib/features'
 import { syncGezondheid, SYNC_VEROUDERD_MIN } from '@/lib/sales/clickup-agenda-sync'
+import { getOrCreateSalesOrg } from '@/lib/sales/service'
+import { bouwWachtrij } from '@/lib/sales/focus-queue'
+import { STATUS as AANVRAAG_STATUS } from '@/lib/aanvragen/model'
 
 // Eén bron voor meldingen + "Vandaag": alles live afgeleid uit bestaande data
 // (geen nieuwe tabel). Gelezen/niet-gelezen wordt client-side in localStorage
@@ -243,4 +246,140 @@ export async function buildNotifications(): Promise<Notif[]> {
 
   const rank: Record<NotifPriority, number> = { high: 0, med: 1, low: 2 }
   return out.sort((a, b) => rank[a.priority] - rank[b.priority] || (b.date ?? '').localeCompare(a.date ?? ''))
+}
+
+// ── Opvolging bovenaan het Command Center ────────────────────────────────────
+// Wat er concreet op te volgen valt, per soort, met namen: aanvragen,
+// contracten, komende meetings, leads en feedback op de contentkalender.
+// Zelfde bron en regels als de rest van de app (followUp, de focuswachtrij van
+// de pipeline). `modules` = rechten van de medewerker (null = admin, alles).
+
+export type OpvolgItem = { id: string; titel: string; sub: string | null; href: string; dringend?: boolean }
+export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'meetings' | 'leads' | 'content'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
+
+const OPVOLG_MAX = 5
+const dagKort = (d: string) => new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' })
+const momentKort = (iso: string) => new Date(iso).toLocaleString('nl-BE', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Brussels' })
+
+export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGroep[]> {
+  let admin: ReturnType<typeof createAdminSupabaseClient>
+  try { admin = createAdminSupabaseClient() } catch { return [] }
+  const mag = (m: string) => modules === null || modules.includes(m)
+  const klantNamen = async (ids: string[]): Promise<Map<string, string>> => {
+    const uniek = [...new Set(ids.filter(Boolean))]
+    if (!uniek.length) return new Map()
+    const { data } = await admin.from('clients').select('id, company_name').in('id', uniek)
+    return new Map(((data ?? []) as { id: string; company_name: string }[]).map((c) => [c.id, c.company_name]))
+  }
+
+  const groepen = await Promise.all([
+    mag('aanvragen') ? opvolgAanvragen() : null,
+    mag('contracts') ? opvolgContracten() : null,
+    mag('meetings') ? opvolgMeetings() : null,
+    mag('sales') ? opvolgLeads() : null,
+    mag('content') ? opvolgContent() : null,
+  ])
+  return groepen.filter((g): g is OpvolgGroep => !!g)
+
+  async function opvolgAanvragen(): Promise<OpvolgGroep | null> {
+    try {
+      const { data, count } = await admin.from('klant_aanvragen')
+        .select('id, client_id, soort, type_label, status, periode_van, created_at', { count: 'exact' })
+        .in('status', ['ontvangen', 'in_behandeling', 'offerte', 'aanvaard']).order('created_at', { ascending: false }).limit(50)
+      const rijen = (data ?? []) as { id: string; client_id: string; soort: string; type_label: string; status: keyof typeof AANVRAAG_STATUS; periode_van: string | null; created_at: string }[]
+      // Nieuw binnengekomen eerst, dan wie de offerte aanvaardde (in te plannen).
+      const rang: Record<string, number> = { ontvangen: 0, aanvaard: 1, in_behandeling: 2, offerte: 3 }
+      rijen.sort((a, b) => (rang[a.status] ?? 9) - (rang[b.status] ?? 9) || b.created_at.localeCompare(a.created_at))
+      const namen = await klantNamen(rijen.map((r) => r.client_id))
+      return {
+        key: 'aanvragen', titel: 'Aanvragen', totaal: count ?? rijen.length, alles: '/admin/aanvragen', leeg: 'Geen open aanvragen.',
+        items: rijen.slice(0, OPVOLG_MAX).map((r) => ({
+          id: r.id, titel: `${namen.get(r.client_id) ?? 'Klant'} – ${r.type_label}`,
+          sub: [AANVRAAG_STATUS[r.status]?.team ?? r.status, r.soort === 'consultancy' ? 'consultancy' : null, r.periode_van ? `gewenst ${dagKort(r.periode_van)}` : null].filter(Boolean).join(' · '),
+          href: `/admin/aanvragen?aanvraag=${r.id}`, dringend: r.status === 'ontvangen',
+        })),
+      }
+    } catch { return null }
+  }
+
+  async function opvolgContracten(): Promise<OpvolgGroep | null> {
+    try {
+      const { data } = await admin.from('contracts').select('id, title, status, sent_at, created_at, expires_at, client_id').limit(500)
+      const rijen = ((data ?? []) as { id: string; title: string; status: string; sent_at?: string | null; created_at?: string | null; expires_at?: string | null; client_id?: string | null }[])
+        .map((c) => ({ c, fu: followUp(c) })).filter((x) => x.fu.needs)
+        .sort((a, b) => (a.fu.level === 'urgent' ? 0 : 1) - (b.fu.level === 'urgent' ? 0 : 1) || (a.c.sent_at ?? a.c.created_at ?? '').localeCompare(b.c.sent_at ?? b.c.created_at ?? ''))
+      const namen = await klantNamen(rijen.slice(0, OPVOLG_MAX).map((x) => x.c.client_id ?? ''))
+      return {
+        key: 'contracten', titel: 'Contracten opvolgen', totaal: rijen.length, alles: '/admin/contracts', leeg: 'Alle contracten zijn bij.',
+        items: rijen.slice(0, OPVOLG_MAX).map(({ c, fu }) => ({
+          id: c.id, titel: [c.client_id ? namen.get(c.client_id) : null, c.title].filter(Boolean).join(' – '), sub: fu.reason, href: `/admin/contracts/${c.id}`, dringend: fu.level === 'urgent',
+        })),
+      }
+    } catch { return null }
+  }
+
+  async function opvolgMeetings(): Promise<OpvolgGroep | null> {
+    try {
+      const nuIso = new Date().toISOString()
+      const [km, sa] = await Promise.all([
+        admin.from('klant_meetings').select('id, titel, klant_naam, starts_at', { count: 'exact' }).eq('status', 'ingepland').gte('starts_at', nuIso).order('starts_at').limit(OPVOLG_MAX),
+        admin.from('sales_appointments').select('id, titel, starts_at', { count: 'exact' }).eq('status', 'scheduled').gte('starts_at', nuIso).order('starts_at').limit(OPVOLG_MAX),
+      ])
+      const items = [
+        ...((km.data ?? []) as { id: string; titel: string; klant_naam: string | null; starts_at: string }[]).map((m) => ({ id: m.id, titel: [m.klant_naam, m.titel].filter(Boolean).join(' · '), starts: m.starts_at, href: `/admin/meetings?meeting=${m.id}` })),
+        ...((sa.data ?? []) as { id: string; titel: string | null; starts_at: string }[]).map((a) => ({ id: a.id, titel: a.titel || 'Leadafspraak', starts: a.starts_at, href: '/admin/meetings?tab=agenda' })),
+      ].sort((a, b) => a.starts.localeCompare(b.starts)).slice(0, OPVOLG_MAX)
+      const vandaag = vandaagBrussel()
+      return {
+        key: 'meetings', titel: 'Komende meetings', totaal: (km.count ?? 0) + (sa.count ?? 0), alles: '/admin/meetings', leeg: 'Geen meetings meer ingepland.',
+        items: items.map((m) => ({ id: m.id, titel: m.titel, sub: momentKort(m.starts), href: m.href, dringend: new Date(m.starts).toLocaleDateString('sv-SE', { timeZone: 'Europe/Brussels' }) === vandaag })),
+      }
+    } catch { return null }
+  }
+
+  async function opvolgLeads(): Promise<OpvolgGroep | null> {
+    try {
+      const org = await getOrCreateSalesOrg()
+      const nu = Date.now()
+      // Dezelfde regels als de belronde: vervallen terugbelafspraken en opvolgdatum vandaag of vroeger.
+      const { data } = await admin.from('sales_leads')
+        .select('id, company_id, stage_key, harrie, do_not_call, callback_at, callback_note, opvolgdatum, geen_gehoor_count')
+        .eq('sales_client_id', org.id).is('archived_at', null)
+        .or(`callback_at.lte."${new Date(nu).toISOString()}",opvolgdatum.lte.${vandaagBrussel()}`).limit(1000)
+      const leads = ((data ?? []) as { id: string; company_id: string | null; stage_key: string; harrie: { nogBezig?: boolean | null; reageerde?: boolean | null } | null; do_not_call: boolean; callback_at: string | null; callback_note: string | null; opvolgdatum: string | null; geen_gehoor_count: number | null }[])
+      const rij = bouwWachtrij(leads, nu).nu
+      const ids = rij.slice(0, OPVOLG_MAX).map((l) => l.company_id).filter((x): x is string => !!x)
+      const { data: bedrijven } = ids.length ? await admin.from('sales_companies').select('id, name').in('id', ids) : { data: [] }
+      const naam = new Map(((bedrijven ?? []) as { id: string; name: string }[]).map((b) => [b.id, b.name]))
+      return {
+        key: 'leads', titel: 'Leads opvolgen', totaal: rij.length, alles: '/admin/sales/pipeline', leeg: 'Geen leads die vandaag opvolging vragen.',
+        items: rij.slice(0, OPVOLG_MAX).map((l) => ({
+          id: l.id, titel: (l.company_id && naam.get(l.company_id)) || 'Lead',
+          sub: l.callback_at ? `terugbellen sinds ${momentKort(l.callback_at)}${l.callback_note ? ` · ${l.callback_note.slice(0, 40)}` : ''}` : `opvolgen sinds ${dagKort(l.opvolgdatum ?? '')}`,
+          href: `/admin/sales/pipeline?lead=${l.id}`, dringend: !!l.callback_at,
+        })),
+      }
+    } catch { return null }
+  }
+
+  async function opvolgContent(): Promise<OpvolgGroep | null> {
+    try {
+      const { data } = await admin.from('social_content_items').select('client_id, reviewed_at, updated_at').eq('status', 'changes_requested').limit(2000)
+      const perKlant = new Map<string, { n: number; laatste: string }>()
+      for (const r of (data ?? []) as { client_id: string | null; reviewed_at: string | null; updated_at: string | null }[]) {
+        if (!r.client_id) continue
+        const op = r.reviewed_at ?? r.updated_at ?? ''
+        const x = perKlant.get(r.client_id)
+        if (x) { x.n++; if (op > x.laatste) x.laatste = op } else perKlant.set(r.client_id, { n: 1, laatste: op })
+      }
+      const lijst = [...perKlant.entries()].sort((a, b) => b[1].n - a[1].n || b[1].laatste.localeCompare(a[1].laatste))
+      const namen = await klantNamen(lijst.slice(0, OPVOLG_MAX).map(([id]) => id))
+      return {
+        key: 'content', titel: 'Feedback op content', totaal: lijst.reduce((s, [, x]) => s + x.n, 0), alles: '/admin/services/social-media', leeg: 'Geen open feedback in de contentkalender.',
+        items: lijst.slice(0, OPVOLG_MAX).map(([id, x]) => ({
+          id, titel: namen.get(id) ?? 'Klant', sub: `${x.n} post${x.n === 1 ? '' : 's'} met feedback${x.laatste ? ` · laatste ${dagKort(x.laatste)}` : ''}`, href: `/admin/services/social-media?client=${id}`,
+        })),
+      }
+    } catch { return null }
+  }
 }

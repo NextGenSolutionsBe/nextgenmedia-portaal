@@ -6325,3 +6325,15 @@ ON CONFLICT (id) DO NOTHING;
 ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS expert_zichtbaar boolean NOT NULL DEFAULT false;
 ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS expert_rollen text[] NOT NULL DEFAULT '{}';
 ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS expertises text[] NOT NULL DEFAULT '{}';
+
+-- Aanvragen: de ClickUp-taak staat op de gekozen expert (of wie het team
+-- aanduidt). Koppeling teamlid → ClickUp-gebruiker, in te stellen in Personeel.
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS clickup_user_id bigint;
+-- Interne melding naar info@nextgenmedia.be bij een nieuwe aanvraag.
+ALTER TABLE public.klant_aanvragen ADD COLUMN IF NOT EXISTS team_mail_status text;
+ALTER TABLE public.klant_aanvragen ADD COLUMN IF NOT EXISTS team_mail_fout text;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_aanvragen_team_mail_status_check') THEN
+    ALTER TABLE public.klant_aanvragen ADD CONSTRAINT klant_aanvragen_team_mail_status_check CHECK (team_mail_status IS NULL OR team_mail_status IN ('ok', 'fout'));
+  END IF;
+END $$;

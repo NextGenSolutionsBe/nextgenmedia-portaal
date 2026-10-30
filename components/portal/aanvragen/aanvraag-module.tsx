@@ -135,6 +135,8 @@ function NieuweAanvraag({ soort, onVerstuurd }: { soort: AanvraagSoort; onVerstu
     }
     if (s >= 2 && velden.some((v) => v.key === 'vorm' && v.verplicht && leeg(v))) return 'Kies of het gesprek online of op locatie doorgaat.'
     if (s >= 2) {
+      if (!periodeVan) return 'Kies een gewenste datum.'
+      if (periodeVan < vandaag()) return 'De gewenste datum ligt in het verleden.'
       if (periodeVan && periodeTot && periodeTot < periodeVan) return 'Het einde van de periode ligt vóór het begin.'
       if (periodeTot && periodeTot < vandaag()) return 'De gewenste periode ligt in het verleden.'
       if (deadline && deadline < vandaag()) return 'De deadline ligt in het verleden.'
@@ -246,10 +248,10 @@ function NieuweAanvraag({ soort, onVerstuurd }: { soort: AanvraagSoort; onVerstu
 
       {stap === 2 && t && (
         <div className="space-y-4">
-          <p className="text-xs text-gray-600 flex gap-1.5"><Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />Je geeft een voorkeur door. Je reserveert geen tijdslot in onze agenda: wij plannen in en laten het je weten.</p>
+          <p className="text-xs text-gray-600 flex gap-1.5"><Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />Kies de dag waarop je het graag zou hebben. Je reserveert geen tijdslot in onze agenda: wij bekijken het en laten je weten wanneer het lukt.</p>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className={LBL} htmlFor="av-van">Gewenste periode vanaf</label><input id="av-van" type="date" min={vandaag()} className={INP} value={periodeVan} onChange={(e) => setPeriodeVan(e.target.value)} /></div>
-            <div><label className={LBL} htmlFor="av-tot">tot</label><input id="av-tot" type="date" min={periodeVan || vandaag()} className={INP} value={periodeTot} onChange={(e) => setPeriodeTot(e.target.value)} /></div>
+            <div><label className={LBL} htmlFor="av-van">Gewenste datum *</label><input id="av-van" type="date" min={vandaag()} required className={INP} value={periodeVan} onChange={(e) => setPeriodeVan(e.target.value)} /></div>
+            <div><label className={LBL} htmlFor="av-tot">Flexibel tot <span className="font-normal text-gray-500">(optioneel)</span></label><input id="av-tot" type="date" min={periodeVan || vandaag()} className={INP} value={periodeTot} onChange={(e) => setPeriodeTot(e.target.value)} /></div>
           </div>
           <Chips label="Voorkeursdagen" opties={DAGEN.map((d) => ({ key: d.key, label: d.label }))} gekozen={dagen} zet={setDagen} />
           <Chips label="Voorkeur tijdstip" opties={TIJDSTIPPEN.map((d) => ({ key: d.key, label: d.label }))} gekozen={tijden} zet={setTijden} />

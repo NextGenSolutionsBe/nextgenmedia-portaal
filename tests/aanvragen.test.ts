@@ -4,12 +4,14 @@
 //
 //   npx tsx tests/aanvragen.test.ts
 
-import { tabellen, nepDb, clickup } from './hulp-meetings-nep'
+import { tabellen, nepDb, clickup, resend } from './hulp-meetings-nep'
 import assert from 'node:assert/strict'
 import {
   DIENSTEN, CONSULTANCY, valideerAanvraag, relevanteExperts, vindType, clickupNaam, clickupOmschrijving, CONSULTANCY_TARIEF, VORM_MET_ADRES, STATUS, type ExpertBron,
 } from '../lib/aanvragen/model'
 import { padVanKlant, bouwPad } from '../lib/aanvragen/bestanden'
+import { NAKIJKEN, wisOngevraagdeVervaldatum } from '../lib/clickup'
+import { deadlineMs } from '../lib/sales/lead-taken'
 import {
   maakAanvraag, expertsVoor, aanvragenVanKlant, aanvraagVanKlant, klantBeslistOfferte, klantTrektIn, teamActie, teamDetail, AanvraagFout, CLICKUP_LIJST, type AanvraagRij,
 } from '../lib/aanvragen/server'
@@ -18,6 +20,7 @@ let n = 0
 const test = async (naam: string, fn: () => Promise<void> | void) => { await fn(); n++; console.log(`  ✓ ${naam}`) }
 const db = nepDb as never
 process.env.NEXT_PUBLIC_SITE_URL = 'https://app.nextgenmedia.be'
+NAKIJKEN.wachtMs = 0
 
 const KLANT = 'c0000000-0000-4000-8000-0000000000a1'
 const ANDER = 'c0000000-0000-4000-8000-0000000000b2'
@@ -27,11 +30,11 @@ const p = (id: string, voornaam: string, achternaam: string, expertises: string[
 const BRAM = 'e0000000-0000-4000-8000-000000000001', MARCO = 'e0000000-0000-4000-8000-000000000002', PJ = 'e0000000-0000-4000-8000-000000000003'
 const SENNE = 'e0000000-0000-4000-8000-000000000004', CHIARA = 'e0000000-0000-4000-8000-000000000005', STUDENT = 'e0000000-0000-4000-8000-000000000006'
 tabellen.personeel = [
-  p(BRAM, 'Bram', 'Reinquin', ['marketing', 'foto_video', 'sales', 'branding', 'seo', 'meta_ads'], { profielfoto_pad: 'fotos/bram.jpg', expert_rollen: ['Zaakvoerder'] }),
-  p(MARCO, 'Marco', 'Castermans', ['ai', 'websites', 'seo', 'google_ads']),
+  p(BRAM, 'Bram', 'Reinquin', ['marketing', 'foto_video', 'sales', 'branding', 'seo', 'meta_ads'], { profielfoto_pad: 'fotos/bram.jpg', expert_rollen: ['Zaakvoerder'], clickup_user_id: 200511713 }),
+  p(MARCO, 'Marco', 'Castermans', ['ai', 'websites', 'seo', 'google_ads'], { email: 'marco@nextgenmedia.be' }),
   p(PJ, 'Pieter-Jan', 'Vanstraelen', ['campagnes', 'performance']),
   p(SENNE, 'Senne', 'Wellens', ['grafisch']),
-  p(CHIARA, 'Chiara', 'Walmagh', ['social', 'branding']),
+  p(CHIARA, 'Chiara', 'Walmagh', ['social', 'branding'], { clickup_user_id: 200511716 }),
   p(STUDENT, 'Alida', 'Daans', ['foto_video'], { expert_zichtbaar: false }),
 ]
 tabellen.klant_aanvragen = []
@@ -55,8 +58,11 @@ async function main() {
   })
 
   await test('2. Validatie: wat-vraag, verplichte velden per dienst, opties en webadres', () => {
-    assert.equal(valideerAanvraag({ soort: 'dienst', type: 'seo', wat: 'Beter gevonden worden' }, vandaag).ok, false, 'SEO vraagt de website')
-    const ok = valideerAanvraag({ soort: 'dienst', type: 'seo', wat: 'Beter gevonden worden', antwoorden: { website: 'peeters.be', doelen: ['Meer leads', 'Iets anders'], regio: 'Limburg' } }, vandaag)
+    assert.equal(valideerAanvraag({ soort: 'dienst', type: 'seo', wat: 'Beter gevonden worden', periode_van: vandaag }, vandaag).ok, false, 'SEO vraagt de website')
+    const seo = { soort: 'dienst', type: 'seo', wat: 'Beter gevonden worden', antwoorden: { website: 'peeters.be', doelen: ['Meer leads', 'Iets anders'], regio: 'Limburg' } }
+    assert.match((valideerAanvraag(seo, vandaag) as { fout: string }).fout, /gewenste datum/, 'zonder datum geen aanvraag')
+    assert.match((valideerAanvraag({ ...seo, periode_van: overDagen(-1) }, vandaag) as { fout: string }).fout, /verleden/)
+    const ok = valideerAanvraag({ ...seo, periode_van: vandaag }, vandaag)
     assert.ok(ok.ok)
     if (ok.ok) { assert.equal(ok.waarde.antwoorden.website, 'https://peeters.be'); assert.deepEqual(ok.waarde.antwoorden.doelen, ['Meer leads']); assert.equal(ok.waarde.locatie, null) }
     assert.equal(valideerAanvraag({ soort: 'dienst', type: 'grafisch', wat: 'Een flyer graag', antwoorden: { huisstijl: 'Misschien' } }, vandaag).ok, false)
@@ -70,11 +76,11 @@ async function main() {
     assert.match((valideerAanvraag({ ...shoot(), locatie: '' }, vandaag) as { fout: string }).fout, /locatie/)
     const v = valideerAanvraag(shoot(), vandaag)
     assert.ok(v.ok && v.waarde.locatie === 'Kerkstraat 12, 3500 Hasselt' && v.waarde.voorkeursdagen.join() === 'di,do')
-    const basis = { soort: 'consultancy', type: 'seo_scan', wat: 'We staan nergens in Google.', antwoorden: { onderwerp: 'Vindbaarheid', website: 'https://peeters.be' } }
+    const basis = { soort: 'consultancy', type: 'seo_scan', wat: 'We staan nergens in Google.', periode_van: overDagen(3), antwoorden: { onderwerp: 'Vindbaarheid', website: 'https://peeters.be' } }
     assert.match((valideerAanvraag(basis, vandaag) as { fout: string }).fout, /Waar/)
     assert.equal(valideerAanvraag({ ...basis, antwoorden: { ...basis.antwoorden, vorm: 'Online' }, locatie: 'genegeerd' }, vandaag).ok, true)
     assert.match((valideerAanvraag({ ...basis, antwoorden: { ...basis.antwoorden, vorm: VORM_MET_ADRES } }, vandaag) as { fout: string }).fout, /adres/)
-    assert.match((valideerAanvraag({ soort: 'consultancy', type: 'ai_scan', wat: 'Veel handwerk', antwoorden: { vorm: 'Online' } }, vandaag) as { fout: string }).fout, /Onderwerp/)
+    assert.match((valideerAanvraag({ soort: 'consultancy', type: 'ai_scan', wat: 'Veel handwerk', periode_van: overDagen(3), antwoorden: { vorm: 'Online' } }, vandaag) as { fout: string }).fout, /Onderwerp/)
   })
 
   await test('4. Relevante experts: enkel zichtbare en actieve teamleden met een passende expertise', () => {
@@ -119,7 +125,7 @@ async function main() {
   })
 
   let eerste: AanvraagRij
-  await test('7. Indienen: aanvraag, bestanden en een ClickUp-taak in de lijst "Aanvragen" zonder deadline of toegewezene', async () => {
+  await test('7. Indienen: ClickUp-taak in "Aanvragen" op de gewenste datum, toegewezen aan de gekozen expert, en een mail naar info@', async () => {
     const pad = bouwPad(KLANT, 'application/pdf', crypto.randomUUID())
     const voor = clickup.aangemaakt
     const { aanvraag } = await maakAanvraag(db, KLANT, { ...shoot(), bestanden: [{ pad, bestandsnaam: 'moodboard.pdf', mimetype: 'application/pdf', grootte: 12000 }] }, door)
@@ -133,8 +139,16 @@ async function main() {
     const taak = clickup.taken.get(aanvraag.clickup_task_id!)!
     assert.equal(taak.list, lijst!.id)
     assert.equal(taak.name, 'Dienstenaanvraag – Bakkerij Peeters – Content shoot')
-    assert.equal(taak.due_date, undefined)
-    assert.equal(taak.assignees, undefined)
+    assert.equal(taak.due_date, deadlineMs(overDagen(7)), 'op de gewenste datum van de klant')
+    assert.equal(taak.due_date_time, false, 'enkel een dag, geen uur')
+    assert.deepEqual(taak.assignees, [200511716], 'toegewezen aan de gekozen expert (Chiara)')
+    assert.equal(aanvraag.team_mail_status, 'ok')
+    const mail = resend.verstuurd.at(-1)!
+    assert.deepEqual([mail.to].flat(), ['info@nextgenmedia.be'])
+    assert.equal(mail.subject, 'Nieuwe dienstenaanvraag – Bakkerij Peeters – Content shoot')
+    assert.match(String(mail.text), /Gewenste periode: .+ tot /)
+    assert.match(String(mail.text), /ClickUp-taak: https:\/\/app\.clickup\.com\/t\//)
+    assert.match(String(mail.html), /admin\/aanvragen\?aanvraag=/)
     assert.match(String(taak.description), /AANVRAAG – nog geen bevestigde opdracht/)
     assert.match(String(taak.description), /Locatie: Kerkstraat 12, 3500 Hasselt/)
     assert.match(String(taak.description), /moodboard\.pdf/)
@@ -142,11 +156,15 @@ async function main() {
   })
 
   await test('8. Dubbele klik: zelfde aanvraag, geen tweede taak; tweede aanvraag hergebruikt de lijst', async () => {
-    const voor = clickup.aangemaakt, lijsten = clickup.lijsten.length
+    const voor = clickup.aangemaakt, lijsten = clickup.lijsten.length, mails = resend.verstuurd.length
     const r = await maakAanvraag(db, KLANT, { ...shoot(), aanvraag_sleutel: eerste.aanvraag_sleutel }, door)
     assert.equal(r.herhaald, true)
     assert.equal(clickup.aangemaakt, voor)
-    await maakAanvraag(db, KLANT, { aanvraag_sleutel: crypto.randomUUID(), soort: 'consultancy', type: 'seo_scan', wat: 'We staan nergens in Google.', antwoorden: { onderwerp: 'Vindbaarheid', website: 'https://peeters.be', vorm: 'Online' }, expert_id: MARCO }, door)
+    assert.equal(resend.verstuurd.length, mails, 'geen tweede mail')
+    const c = await maakAanvraag(db, KLANT, { aanvraag_sleutel: crypto.randomUUID(), soort: 'consultancy', type: 'seo_scan', wat: 'We staan nergens in Google.', periode_van: vandaag, antwoorden: { onderwerp: 'Vindbaarheid', website: 'https://peeters.be', vorm: 'Online' }, expert_id: MARCO }, door)
+    assert.deepEqual(clickup.taken.get(c.aanvraag.clickup_task_id!)!.assignees, [106693123], 'Marco teruggevonden op e-mailadres')
+    assert.equal(clickup.taken.get(c.aanvraag.clickup_task_id!)!.due_date, deadlineMs(vandaag), 'vandaag gekozen = taak vandaag')
+    assert.equal(resend.verstuurd.at(-1)!.subject, 'Nieuwe consultancy aanvraag – Bakkerij Peeters – SEO-scan')
     assert.equal(clickup.lijsten.length, lijsten)
     assert.ok([...clickup.taken.values()].some((t) => t.name === 'Consultancy aanvraag – Bakkerij Peeters – SEO-scan'))
   })
@@ -175,6 +193,10 @@ async function main() {
     a = await teamActie(db, a, { actie: 'scope', scope: 'binnen', notitie: '1 ad-hoc shoot per maand in het contract' }, 'Bram')
     await assert.rejects(teamActie(db, a, { actie: 'planning', datum: overDagen(10) }, 'Bram'), (e: unknown) => e instanceof AanvraagFout && /pas in nadat ze aanvaard/.test(e.publiek))
     a = await teamActie(db, a, { actie: 'status', status: 'aanvaard' }, 'Bram')
+    a = await teamActie(db, a, { actie: 'toewijzen', personeel_id: BRAM }, 'Bram')
+    assert.deepEqual(clickup.taken.get(a.clickup_task_id!)!.assignees, [200511713], 'ClickUp volgt de toewijzing')
+    a = await teamActie(db, a, { actie: 'toewijzen', personeel_id: null }, 'Bram')
+    assert.deepEqual(clickup.taken.get(a.clickup_task_id!)!.assignees, [200511716], 'zonder toewijzing terug op de gekozen expert')
     a = await teamActie(db, a, { actie: 'toewijzen', personeel_id: CHIARA }, 'Bram')
     a = await teamActie(db, a, { actie: 'planning', datum: overDagen(10), notitie: 'Shoot met Arthur' }, 'Bram')
     assert.equal(a.status, 'ingepland')
@@ -208,6 +230,7 @@ async function main() {
 
   await test('13. Offerte geweigerd: terug bij ons; afwijzen sluit de ClickUp-taak met een reden voor de klant', async () => {
     const { aanvraag } = await maakAanvraag(db, KLANT, shoot({ type: 'grafisch', wat: 'Een flyer voor de opendeurdag', antwoorden: {}, locatie: null, expert_id: null }), door)
+    assert.equal(clickup.taken.get(aanvraag.clickup_task_id!)!.assignees, undefined, 'geen voorkeur = nog niemand toegewezen')
     let a = await teamActie(db, aanvraag, { actie: 'offerte', url: 'https://docs.example/offerte' }, 'Bram')
     a = await klantBeslistOfferte(db, a, 'geweigerd', 'Te duur', 'Ann')
     assert.equal(a.status, 'in_behandeling')
@@ -237,6 +260,25 @@ async function main() {
     const x = await teamActie(db, aanvraag, { actie: 'clickup_opnieuw' }, 'Bram')
     assert.equal(x.clickup_status, 'ok')
     assert.equal(clickup.aangemaakt, voor + 1)
+  })
+
+  await test('16. ClickUp-automatisering met een vaste datum: de gewenste datum blijft; zonder datum wist de app ze', async () => {
+    clickup.automatischeVervaldatum = '1753236000000'
+    const { aanvraag } = await maakAanvraag(db, KLANT, shoot({ type: 'branding', wat: 'Een nieuw logo en huisstijl', antwoorden: {}, locatie: null, expert_id: null }), door)
+    clickup.automatischeVervaldatum = null
+    assert.equal(clickup.taken.get(aanvraag.clickup_task_id!)!.due_date, deadlineMs(overDagen(7)))
+    clickup.taken.set('cu-oud', { id: 'cu-oud', list: 'L-1', name: 'oud', status: 'open', due_date: '1753236000000' })
+    assert.equal(await wisOngevraagdeVervaldatum('cu-oud'), true)
+    assert.equal(clickup.taken.get('cu-oud')!.due_date, null)
+  })
+
+  await test('17. Mail naar info@ lukt niet: de aanvraag staat er wel, met de fout erbij voor het team', async () => {
+    resend.weiger = 'The nextgenmedia.be domain is not verified'
+    const { aanvraag } = await maakAanvraag(db, KLANT, shoot({ type: 'ai', wat: 'Offertes automatisch opmaken', antwoorden: {}, locatie: null, expert_id: null }), door)
+    assert.equal(aanvraag.status, 'ontvangen')
+    assert.equal(aanvraag.clickup_status, 'ok')
+    assert.equal(aanvraag.team_mail_status, 'fout')
+    assert.match(String(aanvraag.team_mail_fout), /not verified/)
   })
 
   console.log(`\n${n} tests geslaagd\n`)
