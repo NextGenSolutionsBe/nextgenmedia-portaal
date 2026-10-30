@@ -26,6 +26,8 @@ const nl: Dict = {
   'nav.blogs': 'Blogs',
   'nav.files': 'Bestanden',
   'nav.meetings': 'Meeting boeken',
+  'nav.diensten': 'Diensten aanvragen',
+  'nav.consultancy': 'Consultancy aanvragen',
   'nav.security': 'Beveiliging',
   // Dashboard
   'dash.noProfile': 'Geen klantprofiel gevonden. Contacteer NextGenMedia.',
@@ -74,6 +76,8 @@ const en: Dict = {
   'nav.blogs': 'Blogs',
   'nav.files': 'Files',
   'nav.meetings': 'Book a meeting',
+  'nav.diensten': 'Request services',
+  'nav.consultancy': 'Request consultancy',
   'nav.security': 'Security',
   'dash.noProfile': 'No client profile found. Please contact NextGenMedia.',
   'dash.welcome': 'Welcome, {name}',

@@ -6,6 +6,7 @@ import { isMedewerkerType } from '@/lib/personeel/model'
 import { kostPer, uurOpbouw } from '@/lib/personeel/kost'
 import { dagBrussel, plusDagen } from '@/lib/personeel/tijd'
 import { tekst, dagOf, getal, isUuid, verschillen } from '@/lib/personeel/invoer'
+import { isExpertise } from '@/lib/aanvragen/model'
 import { internAccount } from '@/lib/personeel/koppeling'
 
 export const dynamic = 'force-dynamic'
@@ -112,6 +113,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     zet('interne_notities', tekst(b.interne_notities, 5000))
     // Kleur in de algemene planningskalender (#rrggbb).
     if ('kleur' in b) patch.kleur = typeof b.kleur === 'string' && /^#[0-9a-f]{6}$/i.test(b.kleur) ? b.kleur.toLowerCase() : null
+    // Expertprofiel: of klanten deze persoon als expert mogen kiezen, met rollen en expertises.
+    if ('expert_zichtbaar' in b) patch.expert_zichtbaar = b.expert_zichtbaar === true
+    if ('expert_rollen' in b) patch.expert_rollen = [...new Set((Array.isArray(b.expert_rollen) ? b.expert_rollen : []).map((r) => tekst(r, 40)).filter((r): r is string => !!r))].slice(0, 4)
+    if ('expertises' in b) patch.expertises = [...new Set((Array.isArray(b.expertises) ? b.expertises : []).filter(isExpertise))]
     if (!Object.keys(patch).length) return NextResponse.json({ ok: true })
     // Het e-mailadres van een bestaande login wijzigen we niet stilletjes: dat moet via het account.
     if ('email' in patch && oud.auth_user_id && patch.email !== oud.email) return NextResponse.json({ error: 'Deze medewerker heeft al een login. Wijzig het e-mailadres via het tabblad Account.' }, { status: 409 })

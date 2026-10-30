@@ -668,8 +668,8 @@ export type GewoneTaak = {
   naam: string
   /** Platte tekst; ClickUp maakt van een losse URL zelf een klikbare link. */
   omschrijving: string
-  /** Dezelfde omschrijving in Markdown, met een echte link. */
-  markdown: string
+  /** Dezelfde omschrijving in Markdown, met een echte link. Leeg = enkel de platte tekst. */
+  markdown?: string
   /** Dag van de deadline (ms op die dag); null = geen deadline. */
   deadlineMs: number | null
   assigneeId: number | null
@@ -679,7 +679,7 @@ export async function maakGewoneTaak(listId: string, t: GewoneTaak): Promise<{ i
   const body: Record<string, unknown> = {
     name: t.naam,
     description: t.omschrijving,
-    markdown_content: t.markdown,
+    ...(t.markdown ? { markdown_content: t.markdown } : {}),
   }
   if (t.deadlineMs !== null) { body.due_date = t.deadlineMs; body.due_date_time = false }
   if (t.assigneeId) body.assignees = [t.assigneeId]
@@ -711,6 +711,26 @@ export async function leesTaakRuw(taskId: string): Promise<{ lijst: string | nul
     startDate: t.start_date ?? null, dueDate: t.due_date ?? null,
     tekst: `${t.description ?? ''}\n${t.text_content ?? ''}`, markdown: t.markdown_description ?? '',
   }
+}
+
+// ── Aanvragen (klantportaal) ─────────────────────────────────────────────────
+
+/** Een lijst met deze naam in de NextGenMedia-space; bestaat ze niet, dan maken we ze aan. */
+export async function zoekOfMaakLijst(naam: string): Promise<string> {
+  const { lists } = await clickupJson<{ lists?: CuList[] }>(`/space/${CLICKUP_SPACE_ID}/list?archived=false`)
+  const bestaand = (lists ?? []).find((l) => l.name.trim().toLowerCase() === naam.trim().toLowerCase())
+  if (bestaand) return bestaand.id
+  const nieuw = await clickupJson<CuList>(`/space/${CLICKUP_SPACE_ID}/list`, { method: 'POST', body: JSON.stringify({ name: naam }) })
+  return nieuw.id
+}
+
+/** Taak sluiten (sluitstatus van de lijst), zonder ze te hernoemen. */
+export async function sluitTaak(taskId: string): Promise<void> {
+  const task = await clickupJson<{ list?: { id?: string } }>(`/task/${taskId}`)
+  if (!task.list?.id) return
+  const lijst = await clickupJson<{ statuses?: { status: string; type: string }[] }>(`/list/${task.list.id}`)
+  const dicht = (lijst.statuses ?? []).find((x) => x.type === 'closed')?.status
+  if (dicht) await clickupJson(`/task/${taskId}`, { method: 'PUT', body: JSON.stringify({ status: dicht }) })
 }
 
 export type ClickupLijst = { id: string; naam: string; pad: string }

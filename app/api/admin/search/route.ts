@@ -7,6 +7,7 @@ import { statusInfo } from '@/lib/opdrachten'
 import { dienstLabel } from '@/lib/formulieren/model'
 import { typeVanContract } from '@/lib/contracten/types'
 import { datumKort, uur } from '@/lib/meetings/model'
+import { STATUS } from '@/lib/aanvragen/model'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const safe = async <T,>(p: PromiseLike<{ data: T[] | null }>): Promise<T[]> => { try { return (await p).data ?? [] } catch { return [] } }
 
-    const [clients, contracts, blogs, invoices, forecast, tasks, partners, opdrachten, formulieren, meetings] = await Promise.all([
+    const [clients, contracts, blogs, invoices, forecast, tasks, partners, opdrachten, formulieren, meetings, aanvragen] = await Promise.all([
       safe(admin.from('clients').select('id, company_name, btw_nummer').ilike('company_name', like).limit(L)),
       safe(admin.from('contracts').select('id, title, signer_name, signer_email, contract_type').or(`title.ilike.${like},signer_name.ilike.${like},signer_email.ilike.${like},contract_type.ilike.${like}`).limit(L)),
       safe(admin.from('blogs').select('id, titel, status').ilike('titel', like).limit(L)),
@@ -45,6 +46,7 @@ export async function GET(req: NextRequest) {
       safe(admin.from('opdrachten').select('id, titel, status').ilike('titel', like).limit(L)),
       safe(admin.from('formulieren').select('id, titel, dienst, doel').is('gearchiveerd_op', null).or(`titel.ilike.${like},doel.ilike.${like}`).limit(L)),
       safe(admin.from('klant_meetings').select('id, titel, klant_naam, starts_at, status').or(`titel.ilike.${like},klant_naam.ilike.${like}`).order('starts_at', { ascending: false }).limit(L)),
+      safe(admin.from('klant_aanvragen').select('id, client_id, soort, type_label, status, created_at').or(`type_label.ilike.${like},wat.ilike.${like}`).order('created_at', { ascending: false }).limit(L)),
     ]) as [
       { id: string; company_name: string; btw_nummer?: string | null }[],
       { id: string; title: string; signer_name?: string | null; signer_email?: string | null; contract_type?: string | null }[],
@@ -56,6 +58,7 @@ export async function GET(req: NextRequest) {
       { id: string; titel: string; status?: string | null }[],
       { id: string; titel: string; dienst?: string | null; doel?: string | null }[],
       { id: string; titel: string; klant_naam: string; starts_at: string; status: string }[],
+      { id: string; client_id: string; soort: string; type_label: string; status: string; created_at: string }[],
     ]
 
     // Vaste prioriteitsvolgorde: klanten → contracten → facturen → taken → blogs → prognose → partners.
@@ -75,6 +78,14 @@ export async function GET(req: NextRequest) {
     if (may('opdrachten')) for (const o of opdrachten) results.push({ type: 'opdracht', label: 'Opdracht', title: o.titel, subtitle: statusInfo(o.status).label, href: '/admin/opdrachten' })
     if (may('meetings')) for (const m of meetings) results.push({ type: 'meeting', label: 'Meeting', title: `${m.klant_naam} · ${m.titel}`, subtitle: m.status === 'geannuleerd' ? 'Geannuleerd' : `${datumKort(m.starts_at)} ${uur(m.starts_at)}`, href: `/admin/meetings?meeting=${m.id}` })
     if (may('formulieren')) for (const f of formulieren) results.push({ type: 'formulier', label: 'Formulier', title: f.titel, subtitle: f.doel ?? dienstLabel(f.dienst), href: `/admin/formulieren/${f.id}` })
+    if (may('aanvragen')) {
+      // Ook aanvragen van een gevonden klant (op klantnaam), niet enkel op dienst of tekst.
+      const extra = clients.length ? await safe(admin.from('klant_aanvragen').select('id, client_id, soort, type_label, status, created_at').in('client_id', clients.map((c) => c.id)).order('created_at', { ascending: false }).limit(L)) as typeof aanvragen : []
+      const alle = [...aanvragen, ...extra.filter((x) => !aanvragen.some((y) => y.id === x.id))].slice(0, L)
+      const ids = [...new Set(alle.map((a) => a.client_id))]
+      const namen = new Map((ids.length ? await safe(admin.from('clients').select('id, company_name').in('id', ids)) as { id: string; company_name: string }[] : []).map((c) => [c.id, c.company_name]))
+      for (const a of alle) results.push({ type: 'aanvraag', label: a.soort === 'consultancy' ? 'Consultancy aanvraag' : 'Dienstenaanvraag', title: `${namen.get(a.client_id) ?? 'Klant'} · ${a.type_label}`, subtitle: `${STATUS[a.status as keyof typeof STATUS]?.team ?? a.status} · ${datumKort(a.created_at)}`, href: `/admin/aanvragen?aanvraag=${a.id}` })
+    }
 
     return NextResponse.json({ results })
   } catch (err) {

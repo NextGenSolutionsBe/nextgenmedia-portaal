@@ -6226,3 +6226,102 @@ DO $$ BEGIN
 END $$;
 ALTER TABLE public.sales_lead_taken ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.sales_lead_taken FROM anon, authenticated;
+
+-- ── Aanvragen: diensten en consultancy vanuit het klantportaal ──────────────
+-- Een aanvraag is GEEN opdracht en GEEN boeking: de klant geeft een wens en
+-- gewenste timing door, wij beoordelen scope, offerte en planning. Additief.
+CREATE TABLE IF NOT EXISTS public.klant_aanvragen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  soort text NOT NULL,
+  type text NOT NULL,
+  type_label text NOT NULL,
+  wat text NOT NULL,
+  briefing text,
+  aandachtspunten text,
+  antwoorden jsonb NOT NULL DEFAULT '{}'::jsonb,
+  periode_van date,
+  periode_tot date,
+  voorkeursdagen text[] NOT NULL DEFAULT '{}',
+  tijdstippen text[] NOT NULL DEFAULT '{}',
+  locatie text,
+  deadline date,
+  expert_id uuid REFERENCES public.personeel(id) ON DELETE SET NULL,
+  expert_naam text,
+  status text NOT NULL DEFAULT 'ontvangen',
+  status_gewijzigd_op timestamptz,
+  scope text,
+  scope_notitie text,
+  toegewezen_id uuid REFERENCES public.personeel(id) ON DELETE SET NULL,
+  toegewezen_naam text,
+  planning_datum date,
+  planning_notitie text,
+  reden_klant text,
+  interne_notitie text,
+  offerte_titel text,
+  offerte_pad text,
+  offerte_url text,
+  offerte_bestandsnaam text,
+  offerte_notitie text,
+  offerte_status text,
+  offerte_verstuurd_op timestamptz,
+  offerte_beslist_op timestamptz,
+  offerte_beslist_door text,
+  offerte_reden text,
+  clickup_task_id text,
+  clickup_url text,
+  clickup_status text NOT NULL DEFAULT 'wacht',
+  clickup_fout text,
+  aanvraag_sleutel text,
+  ingediend_door_id uuid,
+  ingediend_door_email text,
+  ingediend_door_naam text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS klant_aanvragen_sleutel ON public.klant_aanvragen (aanvraag_sleutel) WHERE aanvraag_sleutel IS NOT NULL;
+CREATE INDEX IF NOT EXISTS klant_aanvragen_klant ON public.klant_aanvragen (client_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS klant_aanvragen_soort ON public.klant_aanvragen (soort, status, created_at DESC);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_aanvragen_soort_check') THEN
+    ALTER TABLE public.klant_aanvragen ADD CONSTRAINT klant_aanvragen_soort_check CHECK (soort IN ('dienst', 'consultancy'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_aanvragen_status_check') THEN
+    ALTER TABLE public.klant_aanvragen ADD CONSTRAINT klant_aanvragen_status_check CHECK (status IN ('ontvangen', 'in_behandeling', 'offerte', 'aanvaard', 'ingepland', 'afgerond', 'afgewezen', 'ingetrokken'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_aanvragen_scope_check') THEN
+    ALTER TABLE public.klant_aanvragen ADD CONSTRAINT klant_aanvragen_scope_check CHECK (scope IS NULL OR scope IN ('binnen', 'buiten'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_aanvragen_offerte_check') THEN
+    ALTER TABLE public.klant_aanvragen ADD CONSTRAINT klant_aanvragen_offerte_check CHECK (offerte_status IS NULL OR offerte_status IN ('open', 'aanvaard', 'geweigerd'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_aanvragen_clickup_check') THEN
+    ALTER TABLE public.klant_aanvragen ADD CONSTRAINT klant_aanvragen_clickup_check CHECK (clickup_status IN ('wacht', 'ok', 'fout'));
+  END IF;
+END $$;
+ALTER TABLE public.klant_aanvragen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.klant_aanvragen FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.klant_aanvraag_bestanden (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  aanvraag_id uuid NOT NULL REFERENCES public.klant_aanvragen(id) ON DELETE CASCADE,
+  client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  pad text NOT NULL,
+  bestandsnaam text NOT NULL,
+  mimetype text,
+  grootte bigint,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS klant_aanvraag_bestanden_aanvraag ON public.klant_aanvraag_bestanden (aanvraag_id);
+ALTER TABLE public.klant_aanvraag_bestanden ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.klant_aanvraag_bestanden FROM anon, authenticated;
+
+INSERT INTO storage.buckets (id, name, public, file_size_limit)
+VALUES ('aanvragen', 'aanvragen', false, 104857600)
+ON CONFLICT (id) DO NOTHING;
+
+-- Expertprofiel in Personeel: wie klanten als expert mogen kiezen, met rollen
+-- en expertises (vaste lijst in lib/aanvragen/model.ts). Standaard NIET zichtbaar.
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS expert_zichtbaar boolean NOT NULL DEFAULT false;
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS expert_rollen text[] NOT NULL DEFAULT '{}';
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS expertises text[] NOT NULL DEFAULT '{}';

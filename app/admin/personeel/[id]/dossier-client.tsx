@@ -10,12 +10,14 @@ import { MEDEWERKER_TYPES, DOCUMENT_MAPPEN, ACCOUNT_LABEL, typeLabel, typeKleur,
 import { KOST_SOORTEN, LIJN_SUGGESTIES, type KostLijn, type KostSoort, type Tarief } from '@/lib/personeel/kost'
 import { Bevestig, Dialoog } from '@/app/admin/instellingen/ui'
 import { PlanningTab } from '../planning-tab'
+import { EXPERTISES } from '@/lib/aanvragen/model'
 
 type Medewerker = Record<string, unknown> & {
   id: string; voornaam: string; achternaam: string | null; email: string | null; telefoon: string | null; type: string; functie: string | null; afdeling: string | null
   contracttype: string | null; startdatum: string | null; einddatum: string | null; actief: boolean; verantwoordelijke: string | null; standaard_werkdagen: number[]
   max_uren_dag: number | null; max_uren_week: number | null; max_uren_maand: number | null; interne_notities: string | null; foto_url: string | null
   auth_user_id: string | null; account_status: AccountStatus; uitnodiging_verzonden_at: string | null
+  expert_zichtbaar?: boolean | null; expert_rollen?: string[] | null; expertises?: string[] | null
 }
 type Doc = { id: string; map: string; naam: string; url: string | null; grootte: number | null; vervalt_op: string | null; verplicht: boolean; toegevoegd_door: string | null; gewijzigd_door: string | null; created_at: string; updated_at: string }
 type TariefMet = Tarief & { opbouw: { basis: number; lasten: number; totaal: number }; per: { uur: number; dag: number; week: number; maand: number }; opmerking?: string | null }
@@ -165,7 +167,54 @@ function Gegevens({ d, onKlaar }: { d: Dossier; onKlaar: () => void }) {
           </>
         )}
       </div>
+      <Expertprofiel m={m} onKlaar={onKlaar} />
       <Verwijderzone d={d} onKlaar={onKlaar} />
+    </div>
+  )
+}
+
+/**
+ * Expertprofiel: of klanten deze persoon kunnen kiezen bij "Diensten aanvragen"
+ * en "Consultancy aanvragen", met rollen en expertises. Naam en foto komen uit
+ * het dossier zelf. Wijzigingen gelden meteen in het portaal (dezelfde gegevens).
+ */
+function Expertprofiel({ m, onKlaar }: { m: Medewerker; onKlaar: () => void }) {
+  const [zichtbaar, setZichtbaar] = useState(!!m.expert_zichtbaar)
+  const [rollen, setRollen] = useState((m.expert_rollen ?? []).join(', '))
+  const [expertises, setExpertises] = useState<string[]>(m.expertises ?? [])
+  const [bezig, setBezig] = useState(false)
+  const bewaar = async () => {
+    setBezig(true)
+    try {
+      await api(`/api/admin/personeel/${m.id}`, { method: 'PATCH', body: { expert_zichtbaar: zichtbaar, expert_rollen: rollen.split(',').map((r) => r.trim()).filter(Boolean), expertises } })
+      toast.success(zichtbaar ? 'Expertprofiel bewaard. Klanten zien deze persoon bij passende aanvragen.' : 'Expertprofiel bewaard. Niet zichtbaar voor klanten.')
+      onKlaar()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt') } finally { setBezig(false) }
+  }
+  return (
+    <div className="card-base p-4 space-y-3 h-fit">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">Expertprofiel voor klanten</h2>
+          <p className="text-[11px] text-gray-500 mt-0.5">Bij een aanvraag kiezen klanten een expert. Enkel wie hier aan staat, actief is en een passende expertise heeft, verschijnt. Naam en profielfoto komen uit dit dossier.</p>
+        </div>
+        <label className="flex items-center gap-2 text-sm cursor-pointer shrink-0">
+          <input type="checkbox" checked={zichtbaar} onChange={(e) => setZichtbaar(e.target.checked)} />Tonen als expert
+        </label>
+      </div>
+      {!m.actief && zichtbaar && <p className="text-xs text-amber-800">Dit dossier staat op inactief: klanten zien deze persoon niet, ook al staat de schakelaar aan.</p>}
+      <div><label className={LBL}>Rollen (zichtbaar voor klanten, met komma’s)</label><input className={INP} value={rollen} onChange={(e) => setRollen(e.target.value)} placeholder="Bv. Zaakvoerder, Marketingstrateeg" /></div>
+      <div>
+        <div className={LBL}>Expertises</div>
+        <div className="flex flex-wrap gap-1.5">
+          {EXPERTISES.map((e) => {
+            const aan = expertises.includes(e.key)
+            return <button key={e.key} type="button" aria-pressed={aan} onClick={() => setExpertises(aan ? expertises.filter((x) => x !== e.key) : [...expertises, e.key])}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium border ${aan ? 'bg-black text-white border-black' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'}`}>{e.label}</button>
+          })}
+        </div>
+      </div>
+      <button type="button" disabled={bezig} onClick={bewaar} className="btn-primary">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Bewaren</button>
     </div>
   )
 }

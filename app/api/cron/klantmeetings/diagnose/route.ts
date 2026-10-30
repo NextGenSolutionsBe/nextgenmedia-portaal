@@ -13,6 +13,9 @@ import { EMAIL_FROM } from '@/lib/email'
 import { getOrCreateSalesOrg, listOwners, loadCalendar } from '@/lib/sales/service'
 import { haalSyncTaken, clickupTijdvelden, clickupZoekVarianten, leesTaakRuw, annuleerAfspraakTaak, type SyncOphaalInfo } from '@/lib/clickup'
 import { maakLeadTaak, leadTaken, leadTaakOpties } from '@/lib/sales/lead-taken-server'
+import { maakAanvraag, expertsVoor, aanvragenVanKlant, klantBeslistOfferte, klantTrektIn, teamActie, teamDetail, CLICKUP_LIJST } from '@/lib/aanvragen/server'
+import { BUCKET as AANVRAAG_BUCKET, bouwPad, offertePad } from '@/lib/aanvragen/bestanden'
+import { zoekOfMaakLijst, leesTaakStatus, sluitTaak } from '@/lib/clickup'
 import { deadlineMs } from '@/lib/sales/lead-taken'
 import { mergeIntervals, type Interval } from '@/lib/sales/availability'
 import { dag, uur, zoneNaarIso } from '@/lib/meetings/model'
@@ -57,6 +60,11 @@ export const maxDuration = 60
  *    leadfiche ze maakt (echte ClickUp-taak in een bereikbare merklijst),
  *    teruggelezen bij ClickUp, daarna gesloten als [GEANNULEERD]; testlead weg.
  *    Meldt ook per merk of de ClickUp-lijst bereikbaar is.
+ *  · ?zelftest=aanvraag&klant=<uuid>: een dienstenaanvraag (met bestand) en
+ *    een consultancy-aanvraag zoals een klant ze indient: experts per dienst,
+ *    echte ClickUp-taken in de lijst "Aanvragen" (teruggelezen), offerte,
+ *    akkoord van de klant, interne planning, afwijzen en intrekken sluiten de
+ *    taak. Daarna zijn de testaanvragen en het testbestand weg.
  *  · ?kalender=1: leest enkel. Per agenda de werkuren, bezette blokken (per
  *    Google-agenda, zonder titels) en vrije segmenten voor twee weken, plus
  *    hoe de ClickUp-taken binnenkomen (pagina's, tijdvelden).
@@ -89,6 +97,11 @@ export async function POST(req: NextRequest) {
     if (req.nextUrl.searchParams.get('organisator') === '1') return NextResponse.json(await organisatorControle(admin))
     if (req.nextUrl.searchParams.get('zelftest') === 'vorm') return NextResponse.json(await zelftestVorm(admin))
     if (req.nextUrl.searchParams.get('zelftest') === 'leadtaak') return NextResponse.json(await zelftestLeadTaak(admin))
+    if (req.nextUrl.searchParams.get('zelftest') === 'aanvraag') {
+      const klant = req.nextUrl.searchParams.get('klant') ?? ''
+      if (!UUID.test(klant)) return NextResponse.json({ error: 'klant (een testklant) is verplicht' }, { status: 400 })
+      return NextResponse.json(await zelftestAanvraag(admin, klant))
+    }
     if (req.nextUrl.searchParams.get('zelftest') === 'klantapp') {
       const klant = req.nextUrl.searchParams.get('klant') ?? '', ander = req.nextUrl.searchParams.get('ander') ?? ''
       if (!UUID.test(klant) || !UUID.test(ander) || klant === ander) return NextResponse.json({ error: 'klant en ander (twee verschillende testklanten) zijn verplicht' }, { status: 400 })
@@ -754,5 +767,111 @@ async function zelftestLeadTaak(admin: { from: (t: string) => any }) {
     if (rijId) await admin.from('sales_lead_taken').delete().eq('id', rijId)
     await opruimen().catch(() => undefined)
     return { stappen, taak: taakId }
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function zelftestAanvraag(admin: { from: (t: string) => any; storage: { from: (b: string) => any } }, klant: string) {
+  const stappen: { stap: string; ok: boolean; detail?: string }[] = []
+  const log = (stap: string, ok: boolean, detail?: string) => { stappen.push({ stap, ok, ...(detail ? { detail } : {}) }) }
+  const ids: string[] = [], taken: string[] = [], paden: string[] = []
+  const door = { userId: null, email: 'zelftest', naam: 'Automatische controle' }
+  const opruimen = async () => {
+    if (paden.length) await admin.storage.from(AANVRAAG_BUCKET).remove(paden)
+    if (ids.length) {
+      await admin.from('klant_aanvraag_bestanden').delete().in('aanvraag_id', ids)
+      await admin.from('klant_aanvragen').delete().in('id', ids)
+    }
+  }
+  try {
+    const { data: c } = await admin.from('clients').select('company_name, contact_name').eq('id', klant).maybeSingle()
+    if (!c) return { stappen: [{ stap: 'Testklant bestaat', ok: false }] }
+    const klantNaam = (c.company_name || c.contact_name || 'Klant') as string
+
+    // Kies jouw expert: live uit Personeel.
+    for (const [soort, type] of [['dienst', 'content_shoot'], ['dienst', 'sea'], ['dienst', 'grafisch'], ['consultancy', 'ai_workshop'], ['dienst', 'overige']] as const) {
+      const e = await expertsVoor(admin, soort, type)
+      log(`Experts voor ${type}`, e.length > 0, e.map((x) => `${x.naam} (${x.expertises.join(', ') || 'alles'})${x.foto_url ? ' + foto' : ''}`).join('; ') || 'geen')
+    }
+    const shootExperts = await expertsVoor(admin, 'dienst', 'content_shoot')
+
+    // Bestand zoals de klant het oplaadt: in de privébucket, onder de map van de klant.
+    const pad = bouwPad(klant, 'application/pdf', randomUUID())
+    const pdf = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n')
+    const { error: upFout } = await admin.storage.from(AANVRAAG_BUCKET).upload(pad, pdf, { contentType: 'application/pdf' })
+    if (!upFout) paden.push(pad)
+    log('Bestand opgeladen in de privébucket "aanvragen"', !upFout, upFout?.message)
+
+    const datum = (d: number) => new Date(Date.now() + d * 86400000).toLocaleDateString('sv-SE', { timeZone: 'Europe/Brussels' })
+    const sleutel = randomUUID()
+    const invoer = {
+      aanvraag_sleutel: sleutel, soort: 'dienst', type: 'content_shoot', wat: 'Automatische controle van het aanvraagformulier. Geen echte aanvraag.',
+      briefing: 'Testbriefing', antwoorden: { soort: ['Reels'] }, periode_van: datum(10), periode_tot: datum(20), voorkeursdagen: ['di', 'do'], tijdstippen: ['voormiddag'],
+      locatie: 'Teststraat 1, 3500 Hasselt', deadline: datum(30), expert_id: shootExperts[0]?.id ?? null,
+      bestanden: upFout ? [] : [{ pad, bestandsnaam: 'test-moodboard.pdf', mimetype: 'application/pdf', grootte: pdf.length }],
+    }
+    const { aanvraag: a1 } = await maakAanvraag(admin, klant, invoer, door)
+    ids.push(a1.id)
+    if (a1.clickup_task_id) taken.push(a1.clickup_task_id)
+    log('Dienstenaanvraag bewaard als "Aanvraag ontvangen"', a1.status === 'ontvangen', `expertvoorkeur: ${a1.expert_naam ?? 'geen voorkeur'}`)
+    log('ClickUp-taak aangemaakt', a1.clickup_status === 'ok' && !!a1.clickup_task_id, a1.clickup_fout ?? a1.clickup_task_id ?? undefined)
+    const herhaald = await maakAanvraag(admin, klant, invoer, door)
+    log('Dubbel indienen geeft dezelfde aanvraag (geen tweede taak)', herhaald.herhaald && herhaald.aanvraag.id === a1.id)
+
+    if (a1.clickup_task_id) {
+      const lijst = await zoekOfMaakLijst(CLICKUP_LIJST)
+      const ruw = await leesTaakRuw(a1.clickup_task_id)
+      log(`In de ClickUp-lijst "${CLICKUP_LIJST}"`, ruw.lijst === lijst, `lijst ${ruw.lijst}`)
+      log('Taaknaam herkenbaar als aanvraag', ruw.naam === `Dienstenaanvraag – ${klantNaam} – Content shoot`, ruw.naam ?? '—')
+      log('Geen deadline, starttijd of toegewezene (geen opdracht of boeking)', !ruw.dueDate && !ruw.startDate && ruw.toegewezen.length === 0)
+      log('Omschrijving zegt dat het nog geen bevestigde opdracht is', /AANVRAAG – nog geen bevestigde opdracht of boeking/.test(ruw.tekst + ruw.markdown))
+      log('Omschrijving bevat timing, locatie, bestand en link naar de app',
+        /Teststraat 1/.test(ruw.tekst) && /test-moodboard\.pdf/.test(ruw.tekst) && ruw.tekst.includes(`/admin/aanvragen?aanvraag=${a1.id}`))
+    }
+
+    const d = await teamDetail(admin, a1.id)
+    const link = d?.bestanden[0]?.url ?? null
+    const opgehaald = link ? await fetch(link).then((r) => r.status).catch(() => 0) : 0
+    log('Team opent het bestand via een tijdelijke link', opgehaald === 200, `HTTP ${opgehaald}`)
+    const zicht = (await aanvragenVanKlant(admin, klant, 'dienst')).find((x) => x.id === a1.id)
+    log('Klant ziet de aanvraag zonder interne velden', !!zicht && !/interne_notitie|clickup|scope/.test(JSON.stringify(zicht)), zicht?.status_label)
+
+    // Offerte → akkoord van de klant → intern inplannen.
+    let a = await teamActie(admin, a1, { actie: 'status', status: 'in_behandeling' }, 'zelftest')
+    const offerte = offertePad(a.id, randomUUID())
+    const { error: oFout } = await admin.storage.from(AANVRAAG_BUCKET).upload(offerte, pdf, { contentType: 'application/pdf' })
+    if (!oFout) paden.push(offerte)
+    a = await teamActie(admin, a, oFout ? { actie: 'offerte', url: 'https://app.nextgenmedia.be/' } : { actie: 'offerte', pad: offerte, bestandsnaam: 'offerte-test.pdf', titel: 'Testofferte' }, 'zelftest')
+    log('Offerte gekoppeld: status "Offerte klaar", scope buiten contract', a.status === 'offerte' && a.offerte_status === 'open' && a.scope === 'buiten', oFout ? `PDF niet opgeladen (${oFout.message}), link gebruikt` : 'PDF')
+    a = await klantBeslistOfferte(admin, a, 'aanvaard', null, 'Automatische controle')
+    log('Klant aanvaardt de offerte', a.status === 'aanvaard' && a.offerte_status === 'aanvaard')
+    a = await teamActie(admin, a, { actie: 'planning', datum: datum(14), notitie: 'test' }, 'zelftest')
+    log('Intern ingepland', a.status === 'ingepland' && a.planning_datum === datum(14))
+    a = await teamActie(admin, a, { actie: 'status', status: 'afgewezen', reden_klant: 'Automatische controle' }, 'zelftest')
+    const st1 = a.clickup_task_id ? await leesTaakStatus(a.clickup_task_id) : null
+    log('Afwijzen sluit de ClickUp-taak', st1?.type === 'closed' || st1?.type === 'done', `status: ${st1?.status ?? '—'}`)
+
+    // Consultancy: tarief in de taak, intrekken door de klant sluit ze.
+    const { aanvraag: c1 } = await maakAanvraag(admin, klant, {
+      aanvraag_sleutel: randomUUID(), soort: 'consultancy', type: 'seo_scan', wat: 'Automatische controle van het consultancyformulier.',
+      antwoorden: { onderwerp: 'Test', website: 'https://nextgenmedia.be', vorm: 'Online' }, expert_id: null,
+    }, door)
+    ids.push(c1.id)
+    if (c1.clickup_task_id) taken.push(c1.clickup_task_id)
+    const ruwC = c1.clickup_task_id ? await leesTaakRuw(c1.clickup_task_id) : null
+    log('Consultancy-taak met naam en tarief', ruwC?.naam === `Consultancy aanvraag – ${klantNaam} – SEO-scan` && /€125 per uur/.test(ruwC.tekst), ruwC?.naam ?? c1.clickup_fout ?? '—')
+    const c2 = await klantTrektIn(admin, c1, 'Automatische controle')
+    const st2 = c2.clickup_task_id ? await leesTaakStatus(c2.clickup_task_id) : null
+    log('Intrekken door de klant sluit de ClickUp-taak', c2.status === 'ingetrokken' && (st2?.type === 'closed' || st2?.type === 'done'), `status: ${st2?.status ?? '—'}`)
+
+    await opruimen()
+    const { data: nog } = await admin.from('klant_aanvragen').select('id').in('id', ids)
+    log('Opgeruimd: testaanvragen en bestanden weg (ClickUp-taken gesloten)', (nog ?? []).length === 0)
+    return { stappen, taken }
+  } catch (e) {
+    log('Onverwachte fout', false, veiligeFout(e))
+    for (const t of taken) { try { await sluitTaak(t) } catch { /* zichtbaar in ClickUp */ } }
+    await opruimen().catch(() => undefined)
+    return { stappen, taken }
   }
 }
