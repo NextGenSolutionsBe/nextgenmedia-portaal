@@ -9,7 +9,8 @@
 //     maar in een zijlijst mét aftelling ("over 47 min"), zodat de setter ziet
 //     wat eraan komt.
 //   · "Niet bellen" komt nooit voorbij. Fases die geen belpoging meer vragen
-//     (afspraak staat al, voorstel loopt, gewonnen, verloren) evenmin.
+//     (afspraak staat al, gewonnen, verloren) evenmin. Een verstuurd voorstel
+//     staat sinds 30 okt 2026 in Opvolgen en wordt dus wel opgevolgd.
 //
 // WELKE LEADS, IN WELKE VOLGORDE (kanbanbord, 21 sep 2026):
 //   1. vervallen terugbelafspraken (oudste eerst);
@@ -36,7 +37,7 @@ export type QueueLead = {
 
 /** Fases waarvoor bellen geen zin (meer) heeft. "Afspraak gepland" hoort
  *  daarbij: die mensen bel je via de bevestigingslijst, niet via prospectie. */
-const KLAAR = new Set(['geen_interesse', 'afspraak', 'voorstel', 'gewonnen', 'verloren'])
+const KLAAR = new Set(['geen_interesse', 'afspraak', 'gewonnen', 'verloren'])
 /** De kolommen die de belronde voedt, in deze volgorde. */
 const BELKOLOMMEN = ['outbound', 'inbound', 'opvolgen']
 

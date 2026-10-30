@@ -13,8 +13,9 @@ const test = (naam: string, f: () => void) => { f(); n++; console.log(`  ok ${na
 
 console.log('Sales — fases')
 
-test('1. Tien kolommen, Outbound en Inbound links, Geen interesse na E-mail verstuurd, Gewonnen en Verloren rechts', () => {
-  assert.equal(STAGES.length, 10)
+test('1. Negen kolommen, Outbound en Inbound links, Geen interesse na E-mail verstuurd, Gewonnen en Verloren rechts', () => {
+  assert.equal(STAGES.length, 9)
+  assert.ok(!(STAGE_KEYS as string[]).includes('voorstel'), 'Voorstel verstuurd is geen eigen kolom meer')
   assert.equal(STAGE_KEYS[STAGE_KEYS.indexOf('email_verstuurd') + 1], 'geen_interesse')
   assert.deepEqual(STAGE_KEYS.slice(0, 2), ['outbound', 'inbound'])
   assert.deepEqual(STAGE_KEYS.slice(-2), ['gewonnen', 'verloren'])
@@ -55,7 +56,15 @@ test('5. stageKeysVoor geeft de nieuwe plus alle oude sleutels van een kolom', (
   assert.deepEqual(stageKeysVoor('gewonnen').sort(), ['gewonnen', 'won'])
   assert.deepEqual(stageKeysVoor('verloren').sort(), ['lost', 'verloren'])
   assert.deepEqual(stageKeysVoor('geen_interesse').sort(), ['geen_interesse', 'not_interested'])
-  assert.deepEqual(stageKeysVoor('voorstel'), ['voorstel'])
+  assert.ok(stageKeysVoor('opvolgen').includes('voorstel'), 'leads met een voorstel horen bij Opvolgen')
+})
+
+test('5b. Voorstel verstuurd = Opvolgen: zelfde kolom, label, rang en belronde', () => {
+  assert.equal(normaliseerStage('voorstel'), 'opvolgen')
+  assert.equal(stageLabel('voorstel'), 'Opvolgen')
+  assert.ok(!canTransition('voorstel', 'opvolgen'), 'al in Opvolgen')
+  assert.equal(stageRang('voorstel'), stageRang('opvolgen'))
+  assert.deepEqual(bouwWachtrij([{ id: 'v', stage_key: 'voorstel', do_not_call: false, callback_at: null }], Date.now()).nu.map((l) => l.id), ['v'])
 })
 
 test('6. Vrij bewegen tussen kolommen; niet naar dezelfde of een onbekende kolom', () => {
@@ -99,8 +108,8 @@ test('8. Belrij: vervallen terugbelmoment, dan opvolgdatum, dan Outbound → Inb
 })
 
 test('Verantwoordelijke vereist vanaf Afspraak gepland', () => {
-  for (const k of ['afspraak', 'voorstel', 'gewonnen', 'verloren']) assert.equal(vereistVerantwoordelijke(k), true, k)
-  for (const k of ['outbound', 'inbound', 'gebeld', 'email_verstuurd', 'opvolgen']) assert.equal(vereistVerantwoordelijke(k), false, k)
+  for (const k of ['afspraak', 'gewonnen', 'verloren']) assert.equal(vereistVerantwoordelijke(k), true, k)
+  for (const k of ['outbound', 'inbound', 'gebeld', 'email_verstuurd', 'opvolgen', 'voorstel']) assert.equal(vereistVerantwoordelijke(k), false, k)
   assert.equal(mistVerantwoordelijke({ stage_key: 'afspraak', assigned_to: null }), true)
   assert.equal(mistVerantwoordelijke({ stage_key: 'afspraak', assigned_to: 'x' }), false)
   assert.equal(mistVerantwoordelijke({ stage_key: 'gebeld', assigned_to: null }), false)
