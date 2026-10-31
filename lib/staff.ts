@@ -20,6 +20,9 @@ export const ADMIN_MODULES: AdminModule[] = [
   { key: 'contracts',   label: 'Contracten',           prefixes: ['/admin/contracts', '/api/admin/contracts', '/api/admin/contract-templates'] },
   // Aanvragen van diensten en consultancy uit het klantportaal (geen opdrachten of boekingen).
   { key: 'aanvragen',   label: 'Aanvragen',            prefixes: ['/admin/aanvragen', '/api/admin/aanvragen'] },
+  { key: 'nieuwsbrieven', label: 'Nieuwsbrieven',        prefixes: ['/admin/nieuwsbrieven', '/api/admin/nieuwsbrieven'] },
+  { key: 'founders',    label: 'Founders of Flanders', prefixes: ['/admin/founders-of-flanders', '/api/admin/founders-of-flanders'] },
+  { key: 'onze_partners', label: 'Onze partners',        prefixes: ['/admin/onze-partners', '/api/admin/onze-partners'] },
   { key: 'content',     label: 'Content / Diensten',   prefixes: ['/admin/services', '/api/admin/social-content', '/api/admin/shoot-feedback', '/api/admin/shoot-ideas', '/api/admin/webdesign'] },
   { key: 'metricool',   label: 'Metricool',            prefixes: ['/admin/metricool', '/api/admin/metricool'] },
   { key: 'blogs',       label: 'Blogs',                prefixes: ['/admin/blog-calendar', '/admin/blogaccounts', '/admin/blogs', '/api/admin/blogs', '/api/admin/blog-accounts', '/api/admin/blog-seo', '/api/admin/blog-settings', '/api/admin/framer'] },

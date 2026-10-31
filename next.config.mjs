@@ -15,7 +15,9 @@ const cspReportOnly = [
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com",
   "worker-src 'self' blob: https://cdnjs.cloudflare.com",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://*.supabase.co https://framerusercontent.com",
+  "img-src 'self' data: blob: https://*.supabase.co https://framerusercontent.com https://i.ytimg.com",
+  // YouTube-embeds (nieuwsbrieven, Founders of Flanders): enkel na een klik.
+  "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com",
   "font-src 'self' data:",
   "connect-src 'self' https://*.supabase.co https://cdnjs.cloudflare.com",
   "frame-ancestors 'none'",

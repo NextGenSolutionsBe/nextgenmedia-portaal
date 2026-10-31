@@ -6,10 +6,11 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   Loader2, X, FileText, Sparkles, Paperclip, CalendarDays, MapPin, UserRound, ExternalLink, RotateCcw, Check, Ban, Upload, Info, Save,
+ Clapperboard,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import {
-  STATUS, SCOPE_LABEL, OFFERTE_LABEL, CONSULTANCY_TARIEF, antwoordRegels, timingTekst, vindType,
+  STATUS, SCOPE_LABEL, OFFERTE_LABEL, CONSULTANCY_TARIEF, antwoordRegels, timingTekst, vindType, SOORTEN, isSoort, soortLabel,
   type AanvraagSoort, type AanvraagStatus, type Scope, type OfferteStatus,
 } from '@/lib/aanvragen/model'
 
@@ -56,7 +57,7 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 export function AanvragenAdmin({ magAanpassen }: { magAanpassen: boolean }) {
   const zoek = useSearchParams()
   const router = useRouter()
-  const [soort, setSoort] = useState<AanvraagSoort>(zoek.get('soort') === 'consultancy' ? 'consultancy' : 'dienst')
+  const [soort, setSoort] = useState<AanvraagSoort>(isSoort(zoek.get('soort')) ? zoek.get('soort') as AanvraagSoort : 'dienst')
   const [filter, setFilter] = useState<(typeof FILTERS)[number][0]>('open')
   const [rijen, setRijen] = useState<Rij[] | null>(null)
   const [alle, setAlle] = useState<Rij[]>([])
@@ -85,11 +86,11 @@ export function AanvragenAdmin({ magAanpassen }: { magAanpassen: boolean }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2 justify-between">
-        <div className="flex gap-1.5" role="tablist">
-          {(['dienst', 'consultancy'] as const).map((s) => (
+        <div className="flex gap-1.5 overflow-x-auto max-w-full -mx-1 px-1 pb-1" role="tablist">
+          {SOORTEN.map((s) => (
             <button key={s} type="button" role="tab" aria-selected={soort === s} onClick={() => setSoort(s)}
-              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border ${soort === s ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>
-              {s === 'dienst' ? <FileText className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}{s === 'dienst' ? 'Dienstenaanvragen' : 'Consultancy-aanvragen'}
+              className={`inline-flex shrink-0 items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border ${soort === s ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>
+              {s === 'dienst' ? <FileText className="h-4 w-4" /> : s === 'consultancy' ? <Sparkles className="h-4 w-4" /> : <Clapperboard className="h-4 w-4" />}{s === 'dienst' ? 'Dienstenaanvragen' : s === 'consultancy' ? 'Consultancy-aanvragen' : 'Founders of Flanders'}
               <span className={`rounded-full px-1.5 text-[11px] ${soort === s ? 'bg-white/20' : 'bg-gray-100'}`}>{telOpen(s)}</span>
             </button>
           ))}
@@ -184,7 +185,7 @@ function DetailPaneel({ id, magAanpassen, onSluit, onVeranderd }: { id: string; 
           <>
             <div className="px-5 pt-4 pb-3 border-b border-gray-100 flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <p className="text-[11px] font-medium text-gray-500">{d.aanvraag.soort === 'dienst' ? 'Dienstenaanvraag' : 'Consultancy aanvraag'}</p>
+                <p className="text-[11px] font-medium text-gray-500">{soortLabel(d.aanvraag.soort)}</p>
                 <h2 className="font-semibold text-lg leading-snug">{d.aanvraag.type_label}</h2>
                 <p className="text-sm text-gray-600"><Link href={`/admin/clients/${d.aanvraag.client_id}`} className="underline underline-offset-2">{d.aanvraag.klant}</Link> · {datum(d.aanvraag.created_at)}{d.aanvraag.ingediend_door_naam || d.aanvraag.ingediend_door_email ? ` · ${d.aanvraag.ingediend_door_naam ?? d.aanvraag.ingediend_door_email}` : ''}</p>
               </div>

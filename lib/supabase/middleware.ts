@@ -400,6 +400,7 @@ export async function updateSession(request: NextRequest) {
     path.startsWith('/sign/') ||
     path.startsWith('/f/') ||     // publieke formulieren (token in de link, eigen controle in de pagina)
     path === '/boeken' || path.startsWith('/boeken/') ||   // klanten boeken zelf een meeting (eigen controles in de API)
+    path === '/nieuwsbrief/afmelden' ||   // afmelden voor de nieuwsbrief (ondertekende link per e-mailadres)
     path.startsWith('/_next') ||
     path.startsWith('/api') ||
     // Ontdekkingspaden moeten een EERLIJK antwoord geven, niet een omleiding.

@@ -87,6 +87,18 @@ export function AanvraagModule({ soort }: { soort: AanvraagSoort }) {
   )
 }
 
+/** Enkel de lijst "Mijn aanvragen" van één soort (bv. op de pagina Founders of Flanders). */
+export function MijnAanvragen({ soort, ververs = 0, leeg }: { soort: AanvraagSoort; ververs?: number; leeg: string }) {
+  const [aanvragen, setAanvragen] = useState<Aanvraag[] | null>(null)
+  const laad = useCallback(async () => {
+    try { setAanvragen((await api<{ aanvragen: Aanvraag[] }>(`/api/portal/aanvragen?soort=${soort}`)).aanvragen) } catch { setAanvragen([]) }
+  }, [soort])
+  useEffect(() => { laad() }, [laad, ververs])
+  if (aanvragen === null) return <div className="card-base flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>
+  if (!aanvragen.length) return <div className="card-base text-sm text-gray-500">{leeg}</div>
+  return <ul className="space-y-2">{aanvragen.map((a) => <li key={a.id}><AanvraagKaart a={a} onVeranderd={laad} /></li>)}</ul>
+}
+
 // ── Nieuwe aanvraag ──────────────────────────────────────────────────────────
 
 const STAPPEN = ['Kiezen', 'Details', 'Timing', 'Expert', 'Nakijken'] as const

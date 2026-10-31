@@ -6,7 +6,8 @@
 // gewenste timing door; wij beoordelen, bepalen scope, duur, eventuele offerte
 // en planning. Dat staat in elke tekst die hieruit vertrekt.
 
-export type AanvraagSoort = 'dienst' | 'consultancy'
+export type AanvraagSoort = 'dienst' | 'consultancy' | 'founders'
+export const SOORTEN: AanvraagSoort[] = ['dienst', 'consultancy', 'founders']
 
 // ── Expertises (Personeel → expertprofiel) ───────────────────────────────────
 // Vaste lijst, zodat "relevante experts" bij een dienst echt te bepalen is.
@@ -201,9 +202,19 @@ export const CONSULTANCY: AanvraagType[] = [
   consult('overige', 'Overige consultancy', 'Een ander onderwerp? Leg het ons voor.', []),
 ]
 
-export const catalogus = (soort: AanvraagSoort): AanvraagType[] => (soort === 'dienst' ? DIENSTEN : CONSULTANCY)
+/** Founders of Flanders: een video over de ondernemer en het verhaal achter het bedrijf. */
+export const FOUNDERS: AanvraagType[] = [{
+  key: 'founder_video', label: 'Founder video', uitleg: 'Een video over jou als ondernemer en het verhaal achter je bedrijf.',
+  expertises: ['foto_video'], watLabel: 'Wat is jouw verhaal?', watPlaceholder: 'Bv. hoe je begon, wat je bedrijf anders maakt en waar je naartoe wil.',
+  velden: [{ key: 'wie', label: 'Wie staat er in beeld?', type: 'tekst', placeholder: 'Bv. ik als zaakvoerder en mijn vennoot' }],
+  locatie: 'optioneel',
+}]
+
+export const catalogus = (soort: AanvraagSoort): AanvraagType[] => (soort === 'dienst' ? DIENSTEN : soort === 'consultancy' ? CONSULTANCY : FOUNDERS)
 export const vindType = (soort: AanvraagSoort, key: unknown): AanvraagType | null => catalogus(soort).find((t) => t.key === key) ?? null
-export const soortLabel = (s: AanvraagSoort): string => (s === 'dienst' ? 'Dienstenaanvraag' : 'Consultancy aanvraag')
+export const soortLabel = (s: AanvraagSoort): string => (s === 'dienst' ? 'Dienstenaanvraag' : s === 'consultancy' ? 'Consultancy aanvraag' : 'Founders aanvraag')
+export const nieuweAanvraagTitel = (s: AanvraagSoort): string => (s === 'dienst' ? 'Nieuwe dienstenaanvraag' : s === 'consultancy' ? 'Nieuwe consultancy aanvraag' : 'Nieuwe founders aanvraag')
+export const isSoort = (v: unknown): v is AanvraagSoort => v === 'dienst' || v === 'consultancy' || v === 'founders'
 
 // ── Timing ───────────────────────────────────────────────────────────────────
 
@@ -277,10 +288,10 @@ export function veldenVan(soort: AanvraagSoort, t: AanvraagType): Veld[] {
 }
 
 export function valideerAanvraag(b: AanvraagInvoer, vandaag: string): { ok: true; waarde: GeldigeAanvraag } | { ok: false; fout: string } {
-  const soort: AanvraagSoort | null = b.soort === 'dienst' || b.soort === 'consultancy' ? b.soort : null
+  const soort: AanvraagSoort | null = isSoort(b.soort) ? b.soort : null
   if (!soort) return { ok: false, fout: 'Onbekend soort aanvraag.' }
   const t = vindType(soort, b.type)
-  if (!t) return { ok: false, fout: soort === 'dienst' ? 'Kies een dienst.' : 'Kies een soort consultancy.' }
+  if (!t) return { ok: false, fout: soort === 'dienst' ? 'Kies een dienst.' : soort === 'consultancy' ? 'Kies een soort consultancy.' : 'Kies wat je wil aanvragen.' }
 
   const wat = tekst(b.wat, 3000)
   if (wat.length < 5) return { ok: false, fout: `Vul in: ${t.watLabel.toLowerCase()}` }
