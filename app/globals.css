@@ -9,6 +9,16 @@
   .grid > * {
     min-width: 0;
   }
+  /* Op een gsm zoomt iOS in zodra je een veld aantikt met tekst kleiner dan
+     16px. Daarom krijgen invoervelden daar 16px; op een groter scherm blijft
+     de kleinere tekst van de component. */
+  @media (max-width: 767px) {
+    input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=file]),
+    select,
+    textarea {
+      font-size: 16px;
+    }
+  }
   :root {
     /* NextGen-huisstijl, monochroom: #0f0f0f · #272727 · #4b4b4b · #e0e0e0 · #ffffff */
     --background: 0 0% 100%;
