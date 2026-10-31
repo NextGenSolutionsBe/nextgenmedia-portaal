@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { ArrowRight, CircleCheck, Clapperboard, Loader2, X } from 'lucide-react'
+import { ArrowRight, CircleCheck, Clapperboard, Loader2, X, Youtube } from 'lucide-react'
 import { YoutubeVideo } from '@/components/media/youtube-video'
 import { MijnAanvragen } from '@/components/portal/aanvragen/aanvraag-module'
 import type { FoundersVideo } from '@/lib/founders-of-flanders'
@@ -12,7 +12,7 @@ const LBL = 'block text-xs font-medium text-gray-700 mb-1'
 const vandaag = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Brussels' })
 const sleutel = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : '')
 
-export function FoundersShowcase({ videos, magAanvragen }: { videos: FoundersVideo[]; magAanvragen: boolean }) {
+export function FoundersShowcase({ videos, magAanvragen, kanaal = null }: { videos: FoundersVideo[]; magAanvragen: boolean; kanaal?: string | null }) {
   const [open, setOpen] = useState(false)
   const [ververs, setVervers] = useState(0)
   const [uitgelicht, ...rest] = videos
@@ -27,9 +27,9 @@ export function FoundersShowcase({ videos, magAanvragen }: { videos: FoundersVid
         <div className="absolute -right-20 -top-20 h-72 w-72 rounded-full bg-white/10 blur-3xl" aria-hidden />
         <div className="relative max-w-2xl space-y-4">
           <p className="inline-flex items-center gap-2 rounded-full border border-white/20 px-3 py-1 text-xs font-medium text-white/80"><Clapperboard className="h-3.5 w-3.5" />Founders of Flanders</p>
-          <h1 className="text-3xl sm:text-4xl font-semibold leading-tight">Jouw verhaal als ondernemer, in één sterke video.</h1>
+          <h1 className="text-3xl sm:text-4xl font-semibold leading-tight text-white">Jouw verhaal als ondernemer, in één sterke video.</h1>
           <p className="text-white/75 text-sm sm:text-base">Hoe je begon, waar je voor staat en waar je naartoe wil. Wij maken er een video van die mensen tot het einde bekijken. Bekijk hieronder hoe dat eruitziet bij andere ondernemers.</p>
-          <div className="pt-2"><Cta groot /></div>
+          <div className="pt-2 flex flex-wrap gap-3"><Cta groot />{kanaal && <a href={kanaal} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-xl border border-white/25 px-5 py-3 text-sm font-semibold text-white hover:bg-white/10"><Youtube className="h-4 w-4" />Bekijk alle video's op YouTube</a>}</div>
         </div>
       </section>
 
@@ -38,9 +38,14 @@ export function FoundersShowcase({ videos, magAanvragen }: { videos: FoundersVid
         <div className="card-base text-sm text-gray-500">De eerste voorbeeldvideo's komen hier binnenkort.</div>
       ) : (
         <section className="space-y-4" aria-labelledby="voorbeelden">
-          <h2 id="voorbeelden" className="text-lg font-semibold">Voorbeelden</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 id="voorbeelden" className="text-lg font-semibold">Voorbeelden</h2>
+            {kanaal && <a href={kanaal} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700 hover:text-black"><Youtube className="h-4 w-4 text-red-600" />Alle video's</a>}
+          </div>
           {uitgelicht && <VideoKaart v={uitgelicht} groot />}
-          {rest.length > 0 && <div className="grid gap-5 sm:grid-cols-2">{rest.map((v) => <VideoKaart key={v.id} v={v} />)}</div>}
+          {/* Liggende video's in twee kolommen, reels naast elkaar in een smallere raster. */}
+          {rest.filter((v) => v.formaat !== 'staand').length > 0 && <div className="grid gap-5 sm:grid-cols-2">{rest.filter((v) => v.formaat !== 'staand').map((v) => <VideoKaart key={v.id} v={v} />)}</div>}
+          {rest.filter((v) => v.formaat === 'staand').length > 0 && <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">{rest.filter((v) => v.formaat === 'staand').map((v) => <VideoKaart key={v.id} v={v} />)}</div>}
         </section>
       )}
 
@@ -74,8 +79,8 @@ export function FoundersShowcase({ videos, magAanvragen }: { videos: FoundersVid
 
 function VideoKaart({ v, groot = false }: { v: FoundersVideo; groot?: boolean }) {
   return (
-    <article className={`group ${groot ? 'grid lg:grid-cols-[1.6fr_1fr] gap-5 items-center' : 'space-y-3'}`}>
-      <YoutubeVideo id={v.youtube_id} titel={v.titel} className="shadow-sm" />
+    <article className={`group ${groot ? `grid gap-5 items-center ${v.formaat === 'staand' ? 'sm:grid-cols-[320px_1fr]' : 'lg:grid-cols-[1.6fr_1fr]'}` : 'space-y-3'}`}>
+      <YoutubeVideo id={v.youtube_id} titel={v.titel} className="shadow-sm" staand={v.formaat === 'staand'} />
       <div className="space-y-1">
         <h3 className={`${groot ? 'text-xl sm:text-2xl' : 'text-base'} font-semibold leading-snug`}>{v.titel}</h3>
         {(v.ondernemer || v.bedrijf) && <p className="text-sm text-gray-500">{[v.ondernemer, v.bedrijf].filter(Boolean).join(' · ')}</p>}

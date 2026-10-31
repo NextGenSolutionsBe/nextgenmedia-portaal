@@ -16,7 +16,7 @@ export default async function PortalNieuwsArtikel({ params }: { params: Promise<
   if (!data) notFound()
   const n = metExtra(data as Nieuwsbrief)
   // Verder lezen: eerst dezelfde categorie, dan het nieuwste.
-  const velden = 'id, titel, slug, categorie, samenvatting, cover_pad, cover_youtube_id, blokken, uitgelicht, gepubliceerd_op, auteur_naam'
+  const velden = 'id, titel, slug, categorie, categorie_label, samenvatting, cover_pad, cover_youtube_id, cover_formaat, cover_embed, blokken, uitgelicht, gepubliceerd_op, auteur_naam'
   const [{ data: zelfde }, { data: nieuwst }] = await Promise.all([
     admin.from('nieuwsbrieven').select(velden).eq('status', 'gepubliceerd').eq('categorie', n.categorie).neq('id', n.id).order('gepubliceerd_op', { ascending: false }).limit(3),
     admin.from('nieuwsbrieven').select(velden).eq('status', 'gepubliceerd').neq('id', n.id).order('gepubliceerd_op', { ascending: false }).limit(6),

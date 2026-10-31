@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { ArrowRight, CalendarDays, Check, MapPin, Monitor, Ticket, Video } from 'lucide-react'
-import { EVENT_SOORTEN, SOORT_LABEL, inschrijvingOpen, prijsTekst, type EventSoort } from '@/lib/events'
+import { EVENT_SOORTEN, SOORT_LABEL, soortLabel, inschrijvingOpen, prijsTekst, type EventSoort } from '@/lib/events'
 import type { PortaalEvent } from '@/lib/events-server'
 import { AftelBlokken, AftelLabel, EventKaart, Omslag, dagLang, dagNr, hoofdletter, maandKort, plaatsKort, uurKort, useNu } from './events-ui'
 
@@ -80,7 +80,7 @@ export function EventsOverzicht({ events }: { events: PortaalEvent[] }) {
           <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/50 to-black/10" />
           <div className="relative h-full min-h-[360px] sm:min-h-[340px] flex flex-col justify-end p-5 sm:p-8 text-white gap-3">
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="rounded-full bg-white text-gray-900 font-semibold px-2.5 py-1">Eerstvolgende {SOORT_LABEL[uitgelicht.soort].enkel.toLowerCase()}</span>
+              <span className="rounded-full bg-white text-gray-900 font-semibold px-2.5 py-1">Eerstvolgende {soortLabel(uitgelicht).toLowerCase()}</span>
               <span className="rounded-full bg-white/15 backdrop-blur px-2.5 py-1">{prijsTekst(uitgelicht.prijs_cents)}</span>
               {uitgelicht.capaciteit != null && <span className="rounded-full bg-white/15 backdrop-blur px-2.5 py-1">Nog {Math.max(0, uitgelicht.capaciteit - uitgelicht.bezet)} plaatsen</span>}
             </div>
@@ -117,7 +117,7 @@ export function EventsOverzicht({ events }: { events: PortaalEvent[] }) {
                     <span className="w-10 text-center text-xs text-gray-500"><b className="block text-base text-gray-800">{dagNr(e.start_op)}</b>{maandKort(e.start_op)}</span>
                     <span className="flex-1 min-w-0">
                       <span className="block text-sm font-medium truncate">{e.titel}</span>
-                      <span className="block text-xs text-gray-500">{SOORT_LABEL[e.soort].enkel}{e.status === 'geannuleerd' ? ' · geannuleerd' : ''}</span>
+                      <span className="block text-xs text-gray-500">{soortLabel(e)}{e.status === 'geannuleerd' ? ' · geannuleerd' : ''}</span>
                     </span>
                     {e.mijn.length > 0 && e.status !== 'geannuleerd' && <span className="inline-flex items-center gap-1 text-xs text-green-700"><Check className="h-3.5 w-3.5" />Was erbij</span>}
                   </Link>

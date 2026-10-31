@@ -6,7 +6,7 @@ import { AlertTriangle, Ban, CalendarPlus, Copy, Loader2, MapPin, Monitor, Plus,
 import { Bevestig } from '@/app/admin/instellingen/ui'
 import { EventFormulier, leegFormulier, type Formulier } from './event-formulier'
 import { EventInschrijvingen, type InschrijvingRij } from './event-inschrijvingen'
-import { SOORT_LABEL, euro, naarFormulier, prijsTekst, wanneerTekst, aftelling, type KlantEvent } from '@/lib/events'
+import { soortLabel, euro, naarFormulier, prijsTekst, wanneerTekst, aftelling, type KlantEvent } from '@/lib/events'
 
 type Agenda = { id: string; naam: string; gekoppeld: boolean }
 type Rij = KlantEvent & { ingeschreven: number; te_factureren: { aantal: number; cents: number } }
@@ -94,7 +94,7 @@ export function EventsAdmin({ magToevoegen, magAanpassen, magVerwijderen }: { ma
                     </div>
                     <div className="flex-1 min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">{SOORT_LABEL[r.soort].enkel}</span>
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">{soortLabel(r)}</span>
                         {r.status === 'concept' && <span className="status-badge bg-gray-100 text-gray-600">Concept</span>}
                         {r.status === 'geannuleerd' && <span className="status-badge bg-red-50 text-red-700">Geannuleerd</span>}
                         {r.status === 'gepubliceerd' && a.fase !== 'voorbij' && <span className="status-badge bg-green-50 text-green-700">{a.tekst}</span>}
@@ -203,7 +203,7 @@ function EventPaneel({ id, kopie, agendas, standaard, magAanpassen, magVerwijder
   }
   const verwijder = async () => {
     setBezig('verwijder')
-    try { await api(`/api/admin/events/${id}`, { method: 'DELETE' }); toast.success('Concept verwijderd.'); onWeg() }
+    try { await api(`/api/admin/events/${id}`, { method: 'DELETE' }); toast.success('Event verwijderd.'); onWeg() }
     catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') }
     finally { setBezig(null); setVraag(null) }
   }
@@ -215,7 +215,7 @@ function EventPaneel({ id, kopie, agendas, standaard, magAanpassen, magVerwijder
       <aside className="h-full w-full sm:max-w-xl bg-white shadow-2xl flex flex-col" aria-label="Event">
         <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-100">
           <div className="min-w-0">
-            <div className="text-[11px] text-gray-500">{id ? (event ? `${SOORT_LABEL[event.soort].enkel} · ${event.status === 'concept' ? 'concept' : event.status === 'geannuleerd' ? 'geannuleerd' : 'gepubliceerd'}` : '') : kopie ? 'Kopie' : 'Nieuw event'}</div>
+            <div className="text-[11px] text-gray-500">{id ? (event ? `${soortLabel(event)} · ${event.status === 'concept' ? 'concept' : event.status === 'geannuleerd' ? 'geannuleerd' : 'gepubliceerd'}` : '') : kopie ? 'Kopie' : 'Nieuw event'}</div>
             <h2 className="font-semibold truncate">{id ? (event?.titel ?? '…') : (f.titel || 'Nieuw event')}</h2>
           </div>
           <button type="button" onClick={sluit} className="h-9 w-9 shrink-0 flex items-center justify-center rounded-lg hover:bg-gray-100" aria-label="Sluiten"><X className="h-4 w-4" /></button>
@@ -291,8 +291,8 @@ function EventPaneel({ id, kopie, agendas, standaard, magAanpassen, magVerwijder
               {event?.status === 'gepubliceerd' && magAanpassen && (
                 <button type="button" onClick={() => setVraag('annuleer')} className="btn-danger text-sm" aria-label="Event annuleren"><Ban className="h-4 w-4" /><span className="hidden sm:inline">Annuleren</span></button>
               )}
-              {event?.status === 'concept' && magVerwijderen && (
-                <button type="button" onClick={() => setVraag('verwijder')} className="btn-danger text-sm" aria-label="Concept verwijderen"><Trash2 className="h-4 w-4" /></button>
+              {event && magVerwijderen && (
+                <button type="button" onClick={() => setVraag('verwijder')} className="btn-danger text-sm" aria-label="Event verwijderen" title="Volledig verwijderen"><Trash2 className="h-4 w-4" /></button>
               )}
             </div>
           </div>
@@ -305,8 +305,10 @@ function EventPaneel({ id, kopie, agendas, standaard, magAanpassen, magVerwijder
           onAnnuleer={() => setVraag(null)} onBevestig={() => actie('annuleer', 'Event geannuleerd.')} />
       )}
       {vraag === 'verwijder' && (
-        <Bevestig titel="Concept verwijderen" gevaarlijk bevestigLabel="Verwijderen" bezig={bezig === 'verwijder'}
-          tekst="Dit concept is nog niet gepubliceerd. Het verdwijnt definitief." onAnnuleer={() => setVraag(null)} onBevestig={verwijder} />
+        <Bevestig titel="Event verwijderen" gevaarlijk bevestigLabel="Definitief verwijderen" bezig={bezig === 'verwijder'}
+          tekst={event?.status === 'concept' ? 'Dit concept is nog niet gepubliceerd. Het verdwijnt definitief.'
+            : <>"{event?.titel}" verdwijnt volledig, met alle {rijen.length} inschrijvingen en de facturatiestatus. {event?.status === 'gepubliceerd' && actief > 0 && event && Date.parse(event.start_op) > Date.now() ? <b>Het event wordt eerst geannuleerd: Google stuurt de {actief} ingeschrevenen een annulering.</b> : null} Dit kan je niet ongedaan maken.</>}
+          onAnnuleer={() => setVraag(null)} onBevestig={verwijder} />
       )}
       {vraag === 'wijziging' && (
         <Bevestig titel="Ingeschrevenen verwittigen" bevestigLabel="Bewaren en verwittigen" bezig={bezig === 'bewaar'}

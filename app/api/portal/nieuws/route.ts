@@ -16,10 +16,11 @@ export async function GET(req: NextRequest) {
   if (!g.ok) return g.response
   const sp = req.nextUrl.searchParams
   let q = createAdminSupabaseClient().from('nieuwsbrieven')
-    .select('id, titel, slug, categorie, samenvatting, cover_pad, cover_youtube_id, blokken, uitgelicht, gepubliceerd_op, auteur_naam')
+    .select('id, titel, slug, categorie, categorie_label, samenvatting, cover_pad, cover_youtube_id, cover_formaat, cover_embed, blokken, uitgelicht, gepubliceerd_op, auteur_naam')
     .eq('status', 'gepubliceerd').order('gepubliceerd_op', { ascending: false }).limit(12)
   const cat = sp.get('categorie')
   if (cat && CATEGORIEEN.some((c) => c.key === cat)) q = q.eq('categorie', cat)
+  else if (cat?.startsWith('eigen:') && cat.length > 7) q = q.eq('categorie', 'andere').eq('categorie_label', cat.slice(6, 46))
   const voor = sp.get('voor')
   if (voor && !Number.isNaN(Date.parse(voor))) q = q.lt('gepubliceerd_op', voor)
   const { data, error } = await q

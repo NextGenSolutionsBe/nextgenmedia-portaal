@@ -13,14 +13,18 @@ import { isEmail, zoneNaarIso, datumLang, uur, dag, STANDAARD_TIJDZONE } from '@
 
 // ── Soorten en statussen ─────────────────────────────────────────────────────
 
-export const EVENT_SOORTEN = ['webinar', 'workshop', 'event', 'opleiding'] as const
+export const EVENT_SOORTEN = ['webinar', 'workshop', 'event', 'opleiding', 'andere'] as const
 export type EventSoort = (typeof EVENT_SOORTEN)[number]
 export const SOORT_LABEL: Record<EventSoort, { enkel: string; meer: string }> = {
   webinar: { enkel: 'Webinar', meer: 'Webinars' },
   workshop: { enkel: 'Workshop', meer: 'Workshops' },
   event: { enkel: 'Event', meer: 'Events' },
   opleiding: { enkel: 'Opleiding', meer: 'Opleidingen' },
+  andere: { enkel: 'Andere', meer: 'Andere' },
 }
+/** Het label van een event: de eigen naam bij 'andere' (bv. Masterclass), anders de vaste soort. */
+export const soortLabel = (e: { soort: EventSoort; soort_label?: string | null }): string =>
+  e.soort === 'andere' && e.soort_label?.trim() ? e.soort_label.trim() : SOORT_LABEL[e.soort]?.enkel ?? 'Event'
 export const isEventSoort = (v: unknown): v is EventSoort => (EVENT_SOORTEN as readonly string[]).includes(String(v))
 
 export type EventStatus = 'concept' | 'gepubliceerd' | 'geannuleerd'
@@ -32,6 +36,8 @@ export type KlantEvent = {
   id: string
   titel: string
   soort: EventSoort
+  /** Eigen naam als soort 'andere' is (bv. Masterclass). */
+  soort_label?: string | null
   status: EventStatus
   samenvatting: string | null
   beschrijving: string | null
@@ -99,14 +105,14 @@ const tekst = (v: unknown, max: number): string => String(v ?? '').trim().slice(
 const ofNull = (s: string): string | null => (s ? s : null)
 
 export type EventInvoer = {
-  titel?: unknown; soort?: unknown; samenvatting?: unknown; beschrijving?: unknown; cover_pad?: unknown; spreker?: unknown
+  titel?: unknown; soort?: unknown; soort_label?: unknown; samenvatting?: unknown; beschrijving?: unknown; cover_pad?: unknown; spreker?: unknown
   datum?: unknown; start?: unknown; einde?: unknown; einddatum?: unknown
   vorm?: unknown; locatie?: unknown; met_meet?: unknown
   capaciteit?: unknown; prijs?: unknown; inschrijven_tot?: unknown; agenda_id?: unknown
 }
 
 export type GeldigEvent = {
-  titel: string; soort: EventSoort; samenvatting: string | null; beschrijving: string | null; cover_pad: string | null; spreker: string | null
+  titel: string; soort: EventSoort; soort_label: string | null; samenvatting: string | null; beschrijving: string | null; cover_pad: string | null; spreker: string | null
   start_op: string; einde_op: string; tijdzone: string
   vorm: EventVorm; locatie: string | null; met_meet: boolean
   capaciteit: number | null; prijs_cents: number; inschrijven_tot: string | null; agenda_id: string | null
@@ -130,6 +136,8 @@ export function valideerEvent(b: EventInvoer, nu: Date = new Date(), opties: { b
   const titel = tekst(b.titel, 140)
   if (titel.length < 3) return { ok: false, fout: 'Geef het event een titel.' }
   if (!isEventSoort(b.soort)) return { ok: false, fout: 'Kies wat voor event het is.' }
+  const soort_label = b.soort === 'andere' ? tekst(b.soort_label, 40) : ''
+  if (b.soort === 'andere' && soort_label.length < 2) return { ok: false, fout: 'Typ wat voor event het is (bv. Masterclass).' }
   const datum = tekst(b.datum, 10)
   if (!DAG_RE.test(datum)) return { ok: false, fout: 'Kies een datum.' }
   const start = tekst(b.start, 5)
@@ -176,7 +184,7 @@ export function valideerEvent(b: EventInvoer, nu: Date = new Date(), opties: { b
   return {
     ok: true,
     waarde: {
-      titel, soort: b.soort, samenvatting: ofNull(tekst(b.samenvatting, 300)), beschrijving: ofNull(tekst(b.beschrijving, 20000)),
+      titel, soort: b.soort, soort_label: soort_label || null, samenvatting: ofNull(tekst(b.samenvatting, 300)), beschrijving: ofNull(tekst(b.beschrijving, 20000)),
       cover_pad: ofNull(cover), spreker: ofNull(tekst(b.spreker, 160)),
       start_op, einde_op, tijdzone: STANDAARD_TIJDZONE,
       vorm, locatie: vorm === 'locatie' ? locatie : null, met_meet,
@@ -188,7 +196,7 @@ export function valideerEvent(b: EventInvoer, nu: Date = new Date(), opties: { b
 /** Velden voor het formulier uit een bestaand event (Brusselse muurklok). */
 export function naarFormulier(e: KlantEvent): Record<string, string | boolean> {
   return {
-    titel: e.titel, soort: e.soort, samenvatting: e.samenvatting ?? '', beschrijving: e.beschrijving ?? '', cover_pad: e.cover_pad ?? '', spreker: e.spreker ?? '',
+    titel: e.titel, soort: e.soort, soort_label: e.soort_label ?? '', samenvatting: e.samenvatting ?? '', beschrijving: e.beschrijving ?? '', cover_pad: e.cover_pad ?? '', spreker: e.spreker ?? '',
     datum: dag(e.start_op), start: uur(e.start_op), einde: uur(e.einde_op), einddatum: dag(e.einde_op),
     vorm: e.vorm, locatie: e.locatie ?? '', met_meet: e.met_meet,
     capaciteit: e.capaciteit ? String(e.capaciteit) : '', prijs: e.prijs_cents ? String(e.prijs_cents / 100).replace('.', ',') : '',
@@ -314,8 +322,8 @@ export const coverUrl = (e: Pick<KlantEvent, 'cover_pad'>): string | null => pub
 export const googleEventIdVoor = (eventId: string): string => `ngmev${eventId.replace(/-/g, '').toLowerCase()}`
 
 /** Omschrijving van het Google-event (staat in de agenda van de deelnemers). */
-export function googleOmschrijving(e: Pick<KlantEvent, 'samenvatting' | 'soort'>, appLink: string): string {
-  return [e.samenvatting?.trim() || null, `Details en uitschrijven: ${appLink}`, `${SOORT_LABEL[e.soort].enkel} van NextGenMedia.`].filter(Boolean).join('\n\n')
+export function googleOmschrijving(e: Pick<KlantEvent, 'samenvatting' | 'soort' | 'soort_label'>, appLink: string): string {
+  return [e.samenvatting?.trim() || null, `Details en uitschrijven: ${appLink}`, `${soortLabel(e)} van NextGenMedia.`].filter(Boolean).join('\n\n')
 }
 
 // ── Agendabestand (.ics) ─────────────────────────────────────────────────────
@@ -368,7 +376,7 @@ export function googleAgendaLink(e: Pick<KlantEvent, 'titel' | 'start_op' | 'ein
 
 // ── Mails ────────────────────────────────────────────────────────────────────
 
-type MailEvent = Pick<KlantEvent, 'titel' | 'soort' | 'start_op' | 'einde_op' | 'vorm' | 'locatie' | 'met_meet' | 'meet_url' | 'prijs_cents' | 'spreker'>
+type MailEvent = Pick<KlantEvent, 'titel' | 'soort' | 'soort_label' | 'start_op' | 'einde_op' | 'vorm' | 'locatie' | 'met_meet' | 'meet_url' | 'prijs_cents' | 'spreker'>
 export type EventMail = { onderwerp: string; tekst: string; ctaTekst: string; ctaLink: string }
 const voornaam = (naam: string) => naam.trim().split(/\s+/)[0] || naam
 
@@ -384,7 +392,7 @@ function praktisch(e: MailEvent): string {
 
 /** Meteen na het inschrijven. Met het agendabestand als bijlage. */
 export function bevestigingsMail(e: MailEvent, d: Deelnemer, o: { appLink: string; doorAnder?: string | null }): EventMail {
-  const soort = SOORT_LABEL[e.soort].enkel.toLowerCase()
+  const soort = soortLabel(e).toLowerCase()
   const wie = o.doorAnder ? `${o.doorAnder} heeft je ingeschreven` : 'Je bent ingeschreven'
   const delen = [
     `Hoi ${voornaam(d.naam)},`,

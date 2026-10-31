@@ -356,17 +356,28 @@ export function valideerAanvraag(b: AanvraagInvoer, vandaag: string): { ok: true
 
 export type ExpertBron = { id: string; voornaam: string; achternaam: string | null; actief: boolean; expert_zichtbaar: boolean | null; expertises: string[] | null }
 
-/** Wie de klant mag kiezen: actief, als expert zichtbaar, en met een expertise die past. */
-export function relevanteExperts<T extends ExpertBron>(lijst: T[], t: AanvraagType): (T & { relevant: Expertise[] })[] {
+/**
+ * Wie de klant mag kiezen: actief en als expert zichtbaar. Standaard enkel wie
+ * een passende expertise heeft; met `iedereen` (diensten, instelbaar in
+ * Instellingen → Team in de klantapp) iedereen, met de specialisten eerst.
+ */
+export function relevanteExperts<T extends ExpertBron>(lijst: T[], t: AanvraagType, opties: { iedereen?: boolean } = {}): (T & { relevant: Expertise[] })[] {
   return lijst
     .filter((p) => p.actief && p.expert_zichtbaar === true)
     .map((p) => {
       const eigen = (p.expertises ?? []).filter(isExpertise)
       return { ...p, relevant: t.expertises.length ? eigen.filter((e) => t.expertises.includes(e)) : eigen }
     })
-    .filter((p) => !t.expertises.length || p.relevant.length > 0)
+    .filter((p) => opties.iedereen || !t.expertises.length || p.relevant.length > 0)
     .sort((a, b) => b.relevant.length - a.relevant.length || a.voornaam.localeCompare(b.voornaam, 'nl'))
 }
+
+/** Instelling (app_settings 'team_klantapp'): bij diensten iedereen tonen of enkel specialisten. */
+export type TeamKlantappInstelling = { diensten_iedereen: boolean }
+export const TEAM_KLANTAPP_SLEUTEL = 'team_klantapp'
+export const teamKlantappUit = (v: unknown): TeamKlantappInstelling => ({ diensten_iedereen: (v as { diensten_iedereen?: unknown } | null)?.diensten_iedereen !== false })
+/** Iedereen tonen? Enkel bij diensten (en founders); consultancy blijft op expertise. */
+export const toonIedereen = (soort: AanvraagSoort, inst: TeamKlantappInstelling): boolean => soort !== 'consultancy' && inst.diensten_iedereen
 
 export const volleNaam = (p: { voornaam: string; achternaam: string | null }): string => [p.voornaam, p.achternaam].filter(Boolean).join(' ')
 

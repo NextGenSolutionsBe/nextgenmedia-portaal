@@ -6,8 +6,9 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   Loader2, X, FileText, Sparkles, Paperclip, CalendarDays, MapPin, UserRound, ExternalLink, RotateCcw, Check, Ban, Upload, Info, Save,
- Clapperboard,
+  Clapperboard, Trash2,
 } from 'lucide-react'
+import { Bevestig } from '@/app/admin/instellingen/ui'
 import { createClient } from '@/lib/supabase/client'
 import {
   STATUS, SCOPE_LABEL, OFFERTE_LABEL, CONSULTANCY_TARIEF, antwoordRegels, timingTekst, vindType, SOORTEN, isSoort, soortLabel,
@@ -54,7 +55,7 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   return j as T
 }
 
-export function AanvragenAdmin({ magAanpassen }: { magAanpassen: boolean }) {
+export function AanvragenAdmin({ magAanpassen, magVerwijderen = false }: { magAanpassen: boolean; magVerwijderen?: boolean }) {
   const zoek = useSearchParams()
   const router = useRouter()
   const [soort, setSoort] = useState<AanvraagSoort>(isSoort(zoek.get('soort')) ? zoek.get('soort') as AanvraagSoort : 'dienst')
@@ -136,12 +137,15 @@ export function AanvragenAdmin({ magAanpassen }: { magAanpassen: boolean }) {
             </ul>
           )}
       </div>
-      {open && <DetailPaneel id={open} magAanpassen={magAanpassen} onSluit={() => kiesOpen(null)} onVeranderd={werkBij} />}
+      {open && <DetailPaneel id={open} magAanpassen={magAanpassen} magVerwijderen={magVerwijderen} onSluit={() => kiesOpen(null)} onVeranderd={werkBij}
+        onVerwijderd={(id) => { setAlle((l) => l.filter((r) => r.id !== id)); setRijen((l) => l?.filter((r) => r.id !== id) ?? l); kiesOpen(null) }} />}
     </div>
   )
 }
 
-function DetailPaneel({ id, magAanpassen, onSluit, onVeranderd }: { id: string; magAanpassen: boolean; onSluit: () => void; onVeranderd: (a: Partial<Rij> & { id: string }) => void }) {
+function DetailPaneel({ id, magAanpassen, magVerwijderen, onSluit, onVeranderd, onVerwijderd }: { id: string; magAanpassen: boolean; magVerwijderen: boolean; onSluit: () => void; onVeranderd: (a: Partial<Rij> & { id: string }) => void; onVerwijderd: (id: string) => void }) {
+  const [vraagWeg, setVraagWeg] = useState(false)
+  const [wegBezig, setWegBezig] = useState(false)
   const [d, setD] = useState<Detail | null>(null)
   const [bezig, setBezig] = useState<string | null>(null)
   const laad = useCallback(async () => {
@@ -208,10 +212,25 @@ function DetailPaneel({ id, magAanpassen, onSluit, onVeranderd }: { id: string; 
                 {d.aanvraag.team_mail_status === 'ok' && <p>Melding verstuurd naar info@nextgenmedia.be.</p>}
                 {d.aanvraag.team_mail_status === 'fout' && <p className="text-red-700">Melding naar info@nextgenmedia.be niet verstuurd: {d.aanvraag.team_mail_fout ?? 'onbekende fout'}</p>}
               </section>
+              {magVerwijderen && (
+                <section className="border-t border-gray-100 pt-4">
+                  <button type="button" onClick={() => setVraagWeg(true)} className="btn-danger text-xs"><Trash2 className="h-3.5 w-3.5" />Aanvraag verwijderen</button>
+                </section>
+              )}
             </div>
           </>
         )}
       </aside>
+      {vraagWeg && d && (
+        <Bevestig titel="Aanvraag verwijderen" gevaarlijk bevestigLabel="Definitief verwijderen" bezig={wegBezig}
+          tekst={<>De aanvraag “{d.aanvraag.type_label}” van {d.aanvraag.klant} verdwijnt volledig, ook de bestanden en de offerte. De klant ziet ze niet meer in de klantapp.{d.aanvraag.clickup_task_id ? ' De ClickUp-taak wordt gesloten met een reactie.' : ''} Dit kan je niet ongedaan maken.</>}
+          onAnnuleer={() => setVraagWeg(false)}
+          onBevestig={async () => {
+            setWegBezig(true)
+            try { await api(`/api/admin/aanvragen/${id}`, { method: 'DELETE' }); toast.success('Aanvraag verwijderd.'); setVraagWeg(false); onVerwijderd(id) }
+            catch (e) { toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt') } finally { setWegBezig(false) }
+          }} />
+      )}
     </div>
   )
 }

@@ -27,6 +27,7 @@ import {
 import { KB_MIN_VOORAF_TEKST, perDag } from '@/lib/meetings/klantboeking'
 import { can, metStandaard, fullPermissions, MODULE_IMPLEMENTED } from '@/lib/portal-permissions'
 import { publiceer, syncGasten, stuurBevestiging, verwerkEvents, schrijfUit, annuleerEvent, leesEvent, standaardAgenda } from '@/lib/events-server'
+import { meetingTeam } from '@/lib/meetings/klantboeking-server'
 import { googleEventIdVoor } from '@/lib/events'
 
 export const dynamic = 'force-dynamic'
@@ -68,6 +69,11 @@ export const maxDuration = 60
  *    echte ClickUp-taken in de lijst "Aanvragen" (teruggelezen), offerte,
  *    akkoord van de klant, interne planning, afwijzen en intrekken sluiten de
  *    taak. Daarna zijn de testaanvragen en het testbestand weg.
+ *  · ?zelftest=teamlid&klant=<uuid>: Meeting boeken met een teamlid. Per teamlid
+ *    dat bij Meeting boeken staat de vrije momenten (eigen agenda of de
+ *    standaardagenda); dan één echte boeking met Chiara (of het laatste teamlid)
+ *    via de klantapp-motor: Google, Meet en de ClickUp-taak toegewezen aan dat
+ *    teamlid (teruggelezen bij ClickUp). Daarna geannuleerd en weg.
  *  · ?zelftest=event&klant=<uuid>: een testwebinar binnen 20 uur zoals het
  *    team het publiceert (echt Google-event met Meet, gastenlijst verborgen),
  *    inschrijving van info@ (capaciteit en dubbels), gastenlijst in Google,
@@ -112,6 +118,11 @@ export async function POST(req: NextRequest) {
       const klant = req.nextUrl.searchParams.get('klant') ?? ''
       if (!UUID.test(klant)) return NextResponse.json({ error: 'klant (een testklant) is verplicht' }, { status: 400 })
       return NextResponse.json(await zelftestAanvraag(admin, klant))
+    }
+    if (req.nextUrl.searchParams.get('zelftest') === 'teamlid') {
+      const klant = req.nextUrl.searchParams.get('klant') ?? ''
+      if (!UUID.test(klant)) return NextResponse.json({ error: 'klant (een testklant) is verplicht' }, { status: 400 })
+      return NextResponse.json(await zelftestTeamlid(admin, klant))
     }
     if (req.nextUrl.searchParams.get('zelftest') === 'event') {
       const klant = req.nextUrl.searchParams.get('klant') ?? ''
@@ -996,6 +1007,57 @@ async function zelftestEvent(admin: any, klant: string) {
       await admin.from('klant_events').delete().eq('id', eventId)
       const { data: weg } = await admin.from('klant_events').select('id').eq('id', eventId).maybeSingle()
       log('Opgeruimd', !weg)
+    }
+  }
+  return { ok: stappen.every((x) => x.ok), stappen }
+}
+
+// ── Zelftest Meeting boeken met een teamlid ──────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function zelftestTeamlid(admin: any, klant: string) {
+  const stappen: { stap: string; ok: boolean; detail?: string }[] = []
+  const log = (stap: string, ok: boolean, detail?: string) => { stappen.push({ stap, ok, ...(detail ? { detail } : {}) }) }
+  let id: string | null = null
+  try {
+    const team = await meetingTeam(admin)
+    log('Teamleden bij Meeting boeken', team.length > 0, team.map((t) => `${t.voornaam}${t.foto_url ? ' (foto)' : ''}`).join(', '))
+    const vrij: Record<string, string[]> = {}
+    for (const t of team) {
+      try {
+        const b = await berekenVrijeSlots(admin, { vers: true, teamlidId: t.id })
+        vrij[t.id] = b.slots
+        log(`Vrije momenten met ${t.voornaam}`, b.slots.length > 0, `${b.slots.length} momenten, agenda ${b.agendaId.slice(0, 8)}`)
+      } catch (e) {
+        log(`Vrije momenten met ${t.voornaam}`, false, e instanceof BoekingFout ? `${e.publiek}${e.intern ? ` (${e.intern})` : ''}` : veiligeFout(e))
+      }
+    }
+    const doel = team.find((t) => t.voornaam === 'Chiara' && vrij[t.id]?.length) ?? [...team].reverse().find((t) => vrij[t.id]?.length)
+    if (!doel) return { ok: false, stappen }
+    const { data: lid } = await admin.from('personeel').select('clickup_user_id').eq('id', doel.id).maybeSingle()
+    const cu = lid?.clickup_user_id ? Number(lid.clickup_user_id) : null
+    const slots = vrij[doel.id]
+    const r = await boekKlantmeeting(admin, { aanvraag_sleutel: randomUUID(), naam: 'Test Teamlid', email: TEST_ADRES, reden: `Automatische controle: meeting met ${doel.voornaam}. Wordt meteen geannuleerd.`, start: slots[slots.length - 1] }, new Date(),
+      { clientId: klant, bedrijf: 'NextGenMedia (test teamlid)', doorEmail: TEST_ADRES, teamlidId: doel.id })
+    id = r.id
+    const m = (await leesMeeting(admin, r.id))!
+    log(`Geboekt met ${doel.voornaam}`, m.teamlid_id === doel.id && Number(m.clickup_toegewezen ?? 0) === (cu ?? 0), `start ${r.startsAt}`)
+    log('Google-afspraak met Meet', m.google_status === 'ok' && /^https:\/\/meet\.google\.com\//.test(m.meet_url ?? ''), m.google_fout ?? undefined)
+    log('ClickUp-taak aangemaakt', m.clickup_status === 'ok' && !!m.clickup_task_id, m.clickup_fout ?? undefined)
+    if (m.clickup_task_id) {
+      const t = await leesTaakRuw(m.clickup_task_id)
+      log(`ClickUp-taak toegewezen aan ${doel.voornaam}`, !!cu && t.toegewezen.includes(cu) && t.toegewezen.length === 1, `toegewezen: ${t.toegewezen.join(', ') || 'niemand'} (verwacht ${cu ?? '—'})`)
+    }
+    const weg = await annuleerViaLink(admin, m, new Date(), 'zelftest teamlid')
+    log('Geannuleerd (Google en ClickUp)', weg.status === 'geannuleerd' && weg.google_status === 'geannuleerd', `google=${weg.google_status}, clickup=${weg.clickup_status}`)
+  } catch (e) {
+    log('Onverwachte fout', false, e instanceof BoekingFout ? `${e.publiek}${e.intern ? ` (${e.intern})` : ''}` : veiligeFout(e))
+  } finally {
+    if (id) {
+      const m = await leesMeeting(admin, id).catch(() => null)
+      if (m && m.status === 'ingepland') await annuleerViaLink(admin, m, new Date(), 'zelftest teamlid (opruimen)').catch(() => null)
+      await admin.from('klant_meeting_herinneringen').delete().eq('meeting_id', id)
+      await admin.from('klant_meetings').delete().eq('id', id)
+      log('Opgeruimd', !(await leesMeeting(admin, id).catch(() => null)))
     }
   }
   return { ok: stappen.every((x) => x.ok), stappen }

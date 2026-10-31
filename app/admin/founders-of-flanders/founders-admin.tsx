@@ -3,13 +3,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { ArrowDown, ArrowUp, Eye, EyeOff, Inbox, Loader2, Pencil, Plus, Trash2, ArrowRight } from 'lucide-react'
+import { ArrowDown, ArrowUp, Eye, EyeOff, Inbox, Loader2, Pencil, Plus, Trash2, ArrowRight , Youtube} from 'lucide-react'
 import { Dialoog, Bevestig, INP } from '@/app/admin/instellingen/ui'
 import { YoutubeVideo } from '@/components/media/youtube-video'
 import { youtubeId, youtubeKijkUrl } from '@/lib/youtube'
 import type { FoundersVideo } from '@/lib/founders-of-flanders'
 
-type Concept = { titel: string; ondernemer: string; bedrijf: string; beschrijving: string; youtube: string }
+type Concept = { titel: string; ondernemer: string; bedrijf: string; beschrijving: string; youtube: string; formaat: 'liggend' | 'staand' }
 const LBL = 'block text-xs font-medium text-gray-600 mb-1'
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
@@ -22,10 +22,12 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 export function FoundersAdmin({ magAanpassen }: { magAanpassen: boolean }) {
   const [videos, setVideos] = useState<FoundersVideo[] | null>(null)
   const [open, setOpen] = useState(0)
+  const [kanaal, setKanaal] = useState<string>('')
+  const [kanaalBezig, setKanaalBezig] = useState(false)
   const [bewerk, setBewerk] = useState<{ id: string | null; c: Concept } | null>(null)
   const [weg, setWeg] = useState<FoundersVideo | null>(null)
   const laad = useCallback(async () => {
-    try { const j = await api<{ videos: FoundersVideo[]; open_aanvragen: number }>('/api/admin/founders-of-flanders'); setVideos(j.videos); setOpen(j.open_aanvragen) }
+    try { const j = await api<{ videos: FoundersVideo[]; open_aanvragen: number; kanaal: string | null }>('/api/admin/founders-of-flanders'); setVideos(j.videos); setOpen(j.open_aanvragen); setKanaal(j.kanaal ?? '') }
     catch (e) { toast.error(e instanceof Error ? e.message : 'Laden mislukt'); setVideos([]) }
   }, [])
   useEffect(() => { laad() }, [laad])
@@ -50,14 +52,26 @@ export function FoundersAdmin({ magAanpassen }: { magAanpassen: boolean }) {
         <span className="flex-1 text-sm"><b>{open}</b> open founder-aanvra{open === 1 ? 'ag' : 'gen'} — beoordelen, offerte en planning bij Aanvragen</span>
         <ArrowRight className="h-4 w-4 text-gray-400" />
       </Link>
-      {magAanpassen && <button type="button" onClick={() => setBewerk({ id: null, c: { titel: '', ondernemer: '', bedrijf: '', beschrijving: '', youtube: '' } })} className="btn-primary"><Plus className="h-4 w-4" />Video toevoegen</button>}
+      <div className="card-base !p-4 space-y-2">
+        <label className="text-sm font-medium flex items-center gap-2" htmlFor="f-kanaal"><Youtube className="h-4 w-4 text-red-600" />YouTube-kanaal van Founders of Flanders</label>
+        <p className="text-xs text-gray-500">De klant ziet een knop “Bekijk alle video's op YouTube”. Op deze pagina staan enkel de video's die je hieronder zelf toevoegt; nieuwsbrieven staan hier nooit tussen.</p>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input id="f-kanaal" className={INP} value={kanaal} onChange={(e) => setKanaal(e.target.value)} placeholder="https://www.youtube.com/@foundersofflanders" disabled={!magAanpassen} />
+          {magAanpassen && <button type="button" disabled={kanaalBezig} className="btn-secondary shrink-0" onClick={async () => {
+            setKanaalBezig(true)
+            try { const j = await api<{ kanaal: string | null }>('/api/admin/founders-of-flanders', { method: 'PATCH', body: JSON.stringify({ kanaal }) }); setKanaal(j.kanaal ?? ''); toast.success(j.kanaal ? 'Kanaal bewaard.' : 'Kanaal weggehaald.') }
+            catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setKanaalBezig(false) }
+          }}>{kanaalBezig && <Loader2 className="h-4 w-4 animate-spin" />}Bewaren</button>}
+        </div>
+      </div>
+      {magAanpassen && <button type="button" onClick={() => setBewerk({ id: null, c: { titel: '', ondernemer: '', bedrijf: '', beschrijving: '', youtube: '', formaat: 'liggend' } })} className="btn-primary"><Plus className="h-4 w-4" />Video toevoegen</button>}
       {videos === null ? <div className="card-base flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>
         : videos.length === 0 ? <div className="card-base text-sm text-gray-500">Nog geen voorbeeldvideo's. Zet een video op YouTube (mag “niet vermeld”) en plak hier de link.</div>
         : (
           <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {videos.map((v, i) => (
               <li key={v.id} className={`card-base !p-0 overflow-hidden flex flex-col ${v.zichtbaar ? '' : 'opacity-60'}`}>
-                <YoutubeVideo id={v.youtube_id} titel={v.titel} rond="rounded-none" />
+                <div className={v.formaat === 'staand' ? 'bg-gray-950 py-3' : ''}><YoutubeVideo id={v.youtube_id} titel={v.titel} rond={v.formaat === 'staand' ? 'rounded-xl' : 'rounded-none'} staand={v.formaat === 'staand'} className={v.formaat === 'staand' ? 'max-w-[200px]' : ''} /></div>
                 <div className="p-4 space-y-1 flex-1">
                   <p className="font-semibold">{v.titel}</p>
                   <p className="text-xs text-gray-500">{[v.ondernemer, v.bedrijf].filter(Boolean).join(' · ') || '—'}</p>
@@ -65,7 +79,7 @@ export function FoundersAdmin({ magAanpassen }: { magAanpassen: boolean }) {
                 </div>
                 {magAanpassen && (
                   <div className="px-4 pb-4 flex flex-wrap gap-1.5">
-                    <button type="button" onClick={() => setBewerk({ id: v.id, c: { titel: v.titel, ondernemer: v.ondernemer ?? '', bedrijf: v.bedrijf ?? '', beschrijving: v.beschrijving ?? '', youtube: youtubeKijkUrl(v.youtube_id) } })} className="btn-secondary !py-1.5 text-xs"><Pencil className="h-3.5 w-3.5" />Bewerken</button>
+                    <button type="button" onClick={() => setBewerk({ id: v.id, c: { titel: v.titel, ondernemer: v.ondernemer ?? '', bedrijf: v.bedrijf ?? '', beschrijving: v.beschrijving ?? '', youtube: v.formaat === 'staand' ? `https://www.youtube.com/shorts/${v.youtube_id}` : youtubeKijkUrl(v.youtube_id), formaat: v.formaat === 'staand' ? 'staand' : 'liggend' } })} className="btn-secondary !py-1.5 text-xs"><Pencil className="h-3.5 w-3.5" />Bewerken</button>
                     <button type="button" onClick={() => wissel(v, { zichtbaar: !v.zichtbaar })} className="btn-secondary !py-1.5 text-xs">{v.zichtbaar ? <><EyeOff className="h-3.5 w-3.5" />Verbergen</> : <><Eye className="h-3.5 w-3.5" />Tonen</>}</button>
                     <button type="button" onClick={() => schuif(i, -1)} disabled={i === 0} className="btn-secondary !py-1.5 !px-2 text-xs" aria-label="Naar voren"><ArrowUp className="h-3.5 w-3.5" /></button>
                     <button type="button" onClick={() => schuif(i, 1)} disabled={i === videos.length - 1} className="btn-secondary !py-1.5 !px-2 text-xs" aria-label="Naar achter"><ArrowDown className="h-3.5 w-3.5" /></button>
@@ -87,7 +101,7 @@ function VideoDialoog({ start, onSluit, onKlaar }: { start: { id: string | null;
   const [c, setC] = useState<Concept>(start.c)
   const [bezig, setBezig] = useState(false)
   const id = youtubeId(c.youtube)
-  const zet = (k: keyof Concept, w: string) => setC((x) => ({ ...x, [k]: w }))
+  const zet = (k: keyof Concept, w: string) => setC((x) => ({ ...x, [k]: w, ...(k === 'youtube' && /\/shorts\//.test(w) ? { formaat: 'staand' as const } : {}) }))
   const bewaar = async () => {
     setBezig(true)
     try {
@@ -101,7 +115,14 @@ function VideoDialoog({ start, onSluit, onKlaar }: { start: { id: string | null;
       <div className="space-y-3">
         <div><label className={LBL} htmlFor="f-yt">YouTube-link of embedcode *</label><input id="f-yt" className={INP} value={c.youtube} onChange={(e) => zet('youtube', e.target.value)} placeholder="https://youtu.be/…" />
           {c.youtube && !id && <p className="text-xs text-red-700 mt-1">Dit is geen YouTube-link die we herkennen.</p>}</div>
-        {id && <YoutubeVideo id={id} titel={c.titel || 'Voorbeeld'} />}
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-gray-500">Formaat:</span>
+          {(['liggend', 'staand'] as const).map((f) => (
+            <button key={f} type="button" aria-pressed={c.formaat === f} onClick={() => setC((x) => ({ ...x, formaat: f }))}
+              className={`rounded-full border px-2.5 py-1 ${c.formaat === f ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200 hover:border-gray-400'}`}>{f === 'liggend' ? 'Liggend (16:9)' : 'Staand (reel / Short)'}</button>
+          ))}
+        </div>
+        {id && <YoutubeVideo id={id} titel={c.titel || 'Voorbeeld'} staand={c.formaat === 'staand'} />}
         <div><label className={LBL} htmlFor="f-titel">Titel *</label><input id="f-titel" className={INP} value={c.titel} onChange={(e) => zet('titel', e.target.value)} placeholder="Bv. Van garage tot 20 medewerkers" /></div>
         <div className="grid sm:grid-cols-2 gap-3">
           <div><label className={LBL} htmlFor="f-ond">Ondernemer</label><input id="f-ond" className={INP} value={c.ondernemer} onChange={(e) => zet('ondernemer', e.target.value)} /></div>

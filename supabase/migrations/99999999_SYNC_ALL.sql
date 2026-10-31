@@ -6636,3 +6636,45 @@ DO $$ BEGIN
     ALTER TABLE public.klant_event_inschrijvingen ADD CONSTRAINT klant_event_inschr_bevestiging_check CHECK (bevestiging_status IN ('nog_niet', 'bezig', 'verzonden', 'mislukt', 'overgeslagen'));
   END IF;
 END $$;
+
+-- Content: staand formaat (reels/Shorts), ingesloten posts (Instagram, Facebook,
+-- LinkedIn, YouTube) als cover, en eigen labels naast de vaste keuzes.
+ALTER TABLE public.nieuwsbrieven ADD COLUMN IF NOT EXISTS categorie_label text;
+ALTER TABLE public.nieuwsbrieven ADD COLUMN IF NOT EXISTS cover_formaat text NOT NULL DEFAULT 'liggend';
+ALTER TABLE public.nieuwsbrieven ADD COLUMN IF NOT EXISTS cover_embed jsonb;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'nieuwsbrieven_categorie_check' AND pg_get_constraintdef(oid) NOT LIKE '%andere%') THEN
+    ALTER TABLE public.nieuwsbrieven DROP CONSTRAINT nieuwsbrieven_categorie_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'nieuwsbrieven_categorie_check') THEN
+    ALTER TABLE public.nieuwsbrieven ADD CONSTRAINT nieuwsbrieven_categorie_check CHECK (categorie IN ('projecten', 'klant_in_de_kijker', 'tips', 'nieuws', 'team', 'andere'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'nieuwsbrieven_cover_formaat_check') THEN
+    ALTER TABLE public.nieuwsbrieven ADD CONSTRAINT nieuwsbrieven_cover_formaat_check CHECK (cover_formaat IN ('liggend', 'staand'));
+  END IF;
+END $$;
+ALTER TABLE public.founders_videos ADD COLUMN IF NOT EXISTS formaat text NOT NULL DEFAULT 'liggend';
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'founders_videos_formaat_check') THEN
+    ALTER TABLE public.founders_videos ADD CONSTRAINT founders_videos_formaat_check CHECK (formaat IN ('liggend', 'staand'));
+  END IF;
+END $$;
+ALTER TABLE public.klant_events ADD COLUMN IF NOT EXISTS soort_label text;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_events_soort_check' AND pg_get_constraintdef(oid) NOT LIKE '%andere%') THEN
+    ALTER TABLE public.klant_events DROP CONSTRAINT klant_events_soort_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_events_soort_check') THEN
+    ALTER TABLE public.klant_events ADD CONSTRAINT klant_events_soort_check CHECK (soort IN ('webinar', 'workshop', 'event', 'opleiding', 'andere'));
+  END IF;
+END $$;
+
+-- Team in de klantapp: wie staat bij Meeting boeken (meeting_zichtbaar), met
+-- welke agenda (leeg = de standaardagenda van klantboekingen), in welke volgorde.
+-- Een klantmeeting kan aan een gekozen teamlid hangen; de ClickUp-taak gaat naar
+-- diens ClickUp-gebruiker (clickup_toegewezen).
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS meeting_zichtbaar boolean NOT NULL DEFAULT false;
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS meeting_agenda_id uuid REFERENCES public.sales_calendar_connections(id) ON DELETE SET NULL;
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS klantapp_volgorde integer;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS teamlid_id uuid REFERENCES public.personeel(id) ON DELETE SET NULL;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS clickup_toegewezen bigint;

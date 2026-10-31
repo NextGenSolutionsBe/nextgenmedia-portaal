@@ -4,7 +4,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { magIk } from '@/lib/instellingen/laden'
 import { safeMessage } from '@/lib/api-error'
 import { logAudit, requestMeta } from '@/lib/audit'
-import { teamDetail, teamActie, AanvraagFout, type AanvraagRij, type TeamActie } from '@/lib/aanvragen/server'
+import { teamDetail, teamActie, verwijderAanvraag, AanvraagFout, type AanvraagRij, type TeamActie } from '@/lib/aanvragen/server'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -13,6 +13,7 @@ export const maxDuration = 30
  * Eén aanvraag.
  *  GET   → detail, tijdelijke links naar bestanden en offerte, context (diensten en contracten van de klant), team
  *  PATCH → { actie: 'status' | 'scope' | 'toewijzen' | 'planning' | 'notitie' | 'offerte' | 'offerte_intrekken' | 'clickup_opnieuw', ... }
+ *  DELETE → volledig verwijderen (bestanden, offerte, rij); de ClickUp-taak wordt gesloten
  */
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -45,4 +46,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (e instanceof AanvraagFout) return NextResponse.json({ error: e.publiek }, { status: e.status })
     return NextResponse.json({ error: safeMessage(e, 'aanvragen.id.PATCH') }, { status: 500 })
   }
+}
+
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const persoon = await magIk('aanvragen', 'verwijderen')
+    if (!persoon) return NextResponse.json({ error: 'Je mag aanvragen niet verwijderen.' }, { status: 403 })
+    const { id } = await params
+    const r = await verwijderAanvraag(createAdminSupabaseClient(), id, persoon.naam ?? persoon.email ?? 'NextGenMedia', { achtergrond: waitUntil })
+    if (!r) return NextResponse.json({ ok: true })
+    waitUntil(logAudit({ action: 'aanvraag.verwijderd', entityType: 'klant_aanvraag', entityId: id, actorUserId: persoon.userId, actorEmail: persoon.email, summary: r.titel, ...requestMeta(req) }).catch(() => null))
+    return NextResponse.json({ ok: true })
+  } catch (e) { return NextResponse.json({ error: safeMessage(e, 'aanvragen.id.DELETE') }, { status: 500 }) }
 }

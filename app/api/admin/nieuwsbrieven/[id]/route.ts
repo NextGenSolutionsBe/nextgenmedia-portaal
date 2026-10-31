@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { verwijderMarketingBestand } from '@/lib/marketing-server'
 import { revalidatePath } from 'next/cache'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { magIk } from '@/lib/instellingen/laden'
 import { safeMessage } from '@/lib/api-error'
 import { logAudit } from '@/lib/audit'
-import { valideerNieuwsbrief, klaarVoorPublicatie, type Nieuwsbrief } from '@/lib/nieuwsbrieven'
+import { valideerNieuwsbrief, klaarVoorPublicatie, type Nieuwsbrief, type Blok } from '@/lib/nieuwsbrieven'
 import { metExtra, uniekeSlug } from '@/lib/nieuwsbrieven-server'
 
 export const dynamic = 'force-dynamic'
@@ -59,14 +60,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    if (!(await magIk('nieuwsbrieven', 'verwijderen'))) return NextResponse.json({ error: 'Je mag nieuwsbrieven niet verwijderen.' }, { status: 403 })
+    const persoon = await magIk('nieuwsbrieven', 'verwijderen')
+    if (!persoon) return NextResponse.json({ error: 'Je mag nieuwsbrieven niet verwijderen.' }, { status: 403 })
     const { id } = await params
     const admin = createAdminSupabaseClient()
-    const { data: oud } = await admin.from('nieuwsbrieven').select('status').eq('id', id).maybeSingle()
+    const { data: oud } = await admin.from('nieuwsbrieven').select('status, titel, cover_pad, blokken').eq('id', id).maybeSingle()
     if (!oud) return NextResponse.json({ error: 'Nieuwsbrief niet gevonden.' }, { status: 404 })
-    if (oud.status === 'gepubliceerd') return NextResponse.json({ error: 'Haal de nieuwsbrief eerst offline.' }, { status: 409 })
+    // Ook een gepubliceerde nieuwsbrief mag weg (verdwijnt dan uit de klantapp); de verzendlijst gaat mee.
     const { error } = await admin.from('nieuwsbrieven').delete().eq('id', id)
     if (error) throw new Error(error.message)
+    // Foto's van deze nieuwsbrief uit de opslag (best effort).
+    const paden = [oud.cover_pad, ...((oud.blokken ?? []) as Blok[]).flatMap((b) => (b.type === 'afbeelding' ? [b.pad] : b.type === 'galerij' ? b.paden : []))].filter((p): p is string => !!p)
+    await Promise.all(paden.map((p) => verwijderMarketingBestand(admin, p).catch(() => null)))
+    if (oud.status === 'gepubliceerd') revalidatePath('/portal/nieuws')
+    await logAudit({ action: 'nieuwsbrief.verwijderd', entityType: 'nieuwsbrief', entityId: id, actorUserId: persoon.userId, actorEmail: persoon.email, summary: String(oud.titel) }).catch(() => null)
     return NextResponse.json({ ok: true })
   } catch (e) { return NextResponse.json({ error: safeMessage(e, 'nieuwsbrieven.DELETE') }, { status: 500 }) }
 }
