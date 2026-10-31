@@ -6337,3 +6337,111 @@ DO $$ BEGIN
     ALTER TABLE public.klant_aanvragen ADD CONSTRAINT klant_aanvragen_team_mail_status_check CHECK (team_mail_status IS NULL OR team_mail_status IN ('ok', 'fout'));
   END IF;
 END $$;
+
+-- ── Content voor klanten (31 okt 2026): Onze partners, Founders of Flanders, Nieuwsbrieven ──
+-- Afbeeldingen (nieuwsbrieven, partnerlogo's) in een PUBLIEKE bucket: ze staan in
+-- de klantapp én in de nieuwsbriefmail. Video's nooit opladen: altijd YouTube.
+INSERT INTO storage.buckets (id, name, public, file_size_limit)
+VALUES ('marketing', 'marketing', true, 15728640)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS public.onze_partners (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam text NOT NULL,
+  korte_uitleg text,
+  logo_pad text,
+  website text,
+  instagram text,
+  facebook text,
+  linkedin text,
+  tiktok text,
+  youtube text,
+  volgorde integer NOT NULL DEFAULT 0,
+  zichtbaar boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.onze_partners ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.onze_partners FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.founders_videos (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  titel text NOT NULL,
+  ondernemer text,
+  bedrijf text,
+  beschrijving text,
+  youtube_id text NOT NULL,
+  volgorde integer NOT NULL DEFAULT 0,
+  zichtbaar boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.founders_videos ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.founders_videos FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.nieuwsbrieven (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  titel text NOT NULL,
+  slug text NOT NULL,
+  categorie text NOT NULL DEFAULT 'nieuws',
+  samenvatting text,
+  cover_pad text,
+  cover_youtube_id text,
+  blokken jsonb NOT NULL DEFAULT '[]'::jsonb,
+  status text NOT NULL DEFAULT 'concept',
+  uitgelicht boolean NOT NULL DEFAULT false,
+  gepubliceerd_op timestamptz,
+  auteur_naam text,
+  mail_verstuurd_op timestamptz,
+  mail_aantal integer,
+  created_by uuid,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS nieuwsbrieven_slug ON public.nieuwsbrieven (slug);
+CREATE INDEX IF NOT EXISTS nieuwsbrieven_feed ON public.nieuwsbrieven (status, gepubliceerd_op DESC);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'nieuwsbrieven_status_check') THEN
+    ALTER TABLE public.nieuwsbrieven ADD CONSTRAINT nieuwsbrieven_status_check CHECK (status IN ('concept', 'gepubliceerd'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'nieuwsbrieven_categorie_check') THEN
+    ALTER TABLE public.nieuwsbrieven ADD CONSTRAINT nieuwsbrieven_categorie_check CHECK (categorie IN ('projecten', 'klant_in_de_kijker', 'tips', 'nieuws', 'team'));
+  END IF;
+END $$;
+ALTER TABLE public.nieuwsbrieven ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.nieuwsbrieven FROM anon, authenticated;
+
+-- Eén regel per ontvanger per nieuwsbrief: nooit twee keer dezelfde mail.
+CREATE TABLE IF NOT EXISTS public.nieuwsbrief_verzendingen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nieuwsbrief_id uuid NOT NULL REFERENCES public.nieuwsbrieven(id) ON DELETE CASCADE,
+  email text NOT NULL,
+  client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  status text NOT NULL DEFAULT 'verstuurd',
+  resend_id text,
+  fout text,
+  verstuurd_door text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS nieuwsbrief_verzendingen_uniek ON public.nieuwsbrief_verzendingen (nieuwsbrief_id, lower(email));
+ALTER TABLE public.nieuwsbrief_verzendingen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.nieuwsbrief_verzendingen FROM anon, authenticated;
+
+-- Afgemeld voor de nieuwsbrief per mail (via de link onderaan elke mail).
+CREATE TABLE IF NOT EXISTS public.nieuwsbrief_afmeldingen (
+  email text PRIMARY KEY,
+  afgemeld_op timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.nieuwsbrief_afmeldingen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.nieuwsbrief_afmeldingen FROM anon, authenticated;
+
+-- Aanvragen: derde soort "founders" (Founders of Flanders) naast diensten en consultancy.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_aanvragen_soort_check'
+             AND pg_get_constraintdef(oid) NOT LIKE '%founders%') THEN
+    ALTER TABLE public.klant_aanvragen DROP CONSTRAINT klant_aanvragen_soort_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_aanvragen_soort_check') THEN
+    ALTER TABLE public.klant_aanvragen ADD CONSTRAINT klant_aanvragen_soort_check CHECK (soort IN ('dienst', 'consultancy', 'founders'));
+  END IF;
+END $$;

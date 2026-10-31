@@ -6,7 +6,7 @@ import { deadlineMs } from '@/lib/sales/lead-taken'
 import { clickupConfigured, maakGewoneTaak, zoekOfMaakLijst, sluitTaak, reageerOpTaak, zoekTaakMetMarker, wisOngevraagdeVervaldatum, zetToegewezene, listClickupMembers } from '@/lib/clickup'
 import { veiligeFout } from '@/lib/meetings/server'
 import {
-  valideerAanvraag, vindType, relevanteExperts, volleNaam, expertiseLabel, clickupNaam, clickupOmschrijving, magIntrekken,
+  valideerAanvraag, vindType, nieuweAanvraagTitel, relevanteExperts, volleNaam, expertiseLabel, clickupNaam, clickupOmschrijving, magIntrekken,
   isStatus, STATUS, TEAM_STATUSSEN, OPEN_STATUSSEN, type AanvraagInvoer, type AanvraagSoort, type AanvraagStatus, type ExpertBron, type OfferteStatus, type Scope,
 } from '@/lib/aanvragen/model'
 import { BUCKET, MAX_BESTANDEN, mimeToegestaan, padVanKlant } from '@/lib/aanvragen/bestanden'
@@ -238,7 +238,7 @@ async function stapTeamMail(admin: Admin, a: AanvraagRij): Promise<AanvraagRij> 
     const clickup = a.clickup_url ? `ClickUp-taak: ${a.clickup_url}` : `Let op: de ClickUp-taak kon niet aangemaakt worden (${a.clickup_fout ?? 'onbekende fout'}). Probeer opnieuw vanuit de aanvraag in de app.`
     const opts = { bodyText: `${inhoud}\n\n${clickup}`, ctaText: 'Aanvraag openen', ctaLink: adminLink(a.id) }
     r = await sendEmail({
-      to: INFO_ADRES, subject: `${a.soort === 'consultancy' ? 'Nieuwe consultancy aanvraag' : 'Nieuwe dienstenaanvraag'} – ${klant} – ${a.type_label}`,
+      to: INFO_ADRES, subject: `${nieuweAanvraagTitel(a.soort)} – ${klant} – ${a.type_label}`,
       text: buildEmailText(opts), html: buildEmailHtml(opts), idempotencyKey: `aanvraag-team-${a.id}`,
     })
   } catch (e) { r = { ok: false, error: veiligeFout(e) } }

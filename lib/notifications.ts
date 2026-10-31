@@ -6,7 +6,7 @@ import { FEATURES } from '@/lib/features'
 import { syncGezondheid, SYNC_VEROUDERD_MIN } from '@/lib/sales/clickup-agenda-sync'
 import { getOrCreateSalesOrg } from '@/lib/sales/service'
 import { bouwWachtrij } from '@/lib/sales/focus-queue'
-import { STATUS as AANVRAAG_STATUS } from '@/lib/aanvragen/model'
+import { STATUS as AANVRAAG_STATUS, nieuweAanvraagTitel, type AanvraagSoort } from '@/lib/aanvragen/model'
 
 // Eén bron voor meldingen + "Vandaag": alles live afgeleid uit bestaande data
 // (geen nieuwe tabel). Gelezen/niet-gelezen wordt client-side in localStorage
@@ -162,7 +162,7 @@ export async function buildNotifications(): Promise<Notif[]> {
   // Aanvragen uit het klantportaal: nieuw binnengekomen, of de klant besliste over een offerte.
   try {
     const nieuw = await safe(admin.from('klant_aanvragen').select('id, client_id, soort, type_label, created_at').eq('status', 'ontvangen').order('created_at', { ascending: false }).limit(30)) as { id: string; client_id: string; soort: string; type_label: string; created_at: string }[]
-    for (const a of nieuw) out.push({ id: `aanvraag:${a.id}:nieuw`, kind: 'aanvraag', priority: 'high', title: `${a.soort === 'consultancy' ? 'Nieuwe consultancy aanvraag' : 'Nieuwe dienstenaanvraag'} — ${names.get(a.client_id) ?? 'Klant'}: ${a.type_label}`, date: a.created_at, href: `/admin/aanvragen?aanvraag=${a.id}` })
+    for (const a of nieuw) out.push({ id: `aanvraag:${a.id}:nieuw`, kind: 'aanvraag', priority: 'high', title: `${nieuweAanvraagTitel(a.soort as AanvraagSoort)} — ${names.get(a.client_id) ?? 'Klant'}: ${a.type_label}`, date: a.created_at, href: `/admin/aanvragen?aanvraag=${a.id}` })
     const beslist = await safe(admin.from('klant_aanvragen').select('id, client_id, type_label, offerte_status, offerte_beslist_op, status').in('offerte_status', ['aanvaard', 'geweigerd']).in('status', ['aanvaard', 'in_behandeling']).gte('offerte_beslist_op', since).limit(30)) as { id: string; client_id: string; type_label: string; offerte_status: string; offerte_beslist_op: string }[]
     for (const a of beslist) out.push({ id: `aanvraag:${a.id}:offerte:${a.offerte_status}`, kind: 'aanvraag', priority: a.offerte_status === 'aanvaard' ? 'high' : 'med', title: `Offerte ${a.offerte_status === 'aanvaard' ? 'aanvaard' : 'geweigerd'} door de klant — ${names.get(a.client_id) ?? 'Klant'}: ${a.type_label}`, date: a.offerte_beslist_op, href: `/admin/aanvragen?aanvraag=${a.id}` })
   } catch { /* meldingen mogen nooit stuklopen */ }
@@ -295,7 +295,7 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
         key: 'aanvragen', titel: 'Aanvragen', totaal: count ?? rijen.length, alles: '/admin/aanvragen', leeg: 'Geen open aanvragen.',
         items: rijen.slice(0, OPVOLG_MAX).map((r) => ({
           id: r.id, titel: `${namen.get(r.client_id) ?? 'Klant'} – ${r.type_label}`,
-          sub: [AANVRAAG_STATUS[r.status]?.team ?? r.status, r.soort === 'consultancy' ? 'consultancy' : null, r.periode_van ? `gewenst ${dagKort(r.periode_van)}` : null].filter(Boolean).join(' · '),
+          sub: [AANVRAAG_STATUS[r.status]?.team ?? r.status, r.soort === 'consultancy' ? 'consultancy' : r.soort === 'founders' ? 'Founders of Flanders' : null, r.periode_van ? `gewenst ${dagKort(r.periode_van)}` : null].filter(Boolean).join(' · '),
           href: `/admin/aanvragen?aanvraag=${r.id}`, dringend: r.status === 'ontvangen',
         })),
       }

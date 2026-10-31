@@ -330,3 +330,7 @@ html {
   }
 }
 
+
+/* Horizontaal scrollen zonder zichtbare balk (filterchips op gsm). */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

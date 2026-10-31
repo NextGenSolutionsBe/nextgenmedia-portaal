@@ -7,7 +7,7 @@ import { statusInfo } from '@/lib/opdrachten'
 import { dienstLabel } from '@/lib/formulieren/model'
 import { typeVanContract } from '@/lib/contracten/types'
 import { datumKort, uur } from '@/lib/meetings/model'
-import { STATUS } from '@/lib/aanvragen/model'
+import { STATUS, soortLabel, type AanvraagSoort } from '@/lib/aanvragen/model'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
@@ -84,7 +84,7 @@ export async function GET(req: NextRequest) {
       const alle = [...aanvragen, ...extra.filter((x) => !aanvragen.some((y) => y.id === x.id))].slice(0, L)
       const ids = [...new Set(alle.map((a) => a.client_id))]
       const namen = new Map((ids.length ? await safe(admin.from('clients').select('id, company_name').in('id', ids)) as { id: string; company_name: string }[] : []).map((c) => [c.id, c.company_name]))
-      for (const a of alle) results.push({ type: 'aanvraag', label: a.soort === 'consultancy' ? 'Consultancy aanvraag' : 'Dienstenaanvraag', title: `${namen.get(a.client_id) ?? 'Klant'} · ${a.type_label}`, subtitle: `${STATUS[a.status as keyof typeof STATUS]?.team ?? a.status} · ${datumKort(a.created_at)}`, href: `/admin/aanvragen?aanvraag=${a.id}` })
+      for (const a of alle) results.push({ type: 'aanvraag', label: soortLabel(a.soort as AanvraagSoort), title: `${namen.get(a.client_id) ?? 'Klant'} · ${a.type_label}`, subtitle: `${STATUS[a.status as keyof typeof STATUS]?.team ?? a.status} · ${datumKort(a.created_at)}`, href: `/admin/aanvragen?aanvraag=${a.id}` })
     }
 
     return NextResponse.json({ results })
