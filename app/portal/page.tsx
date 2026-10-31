@@ -12,6 +12,13 @@ import { goedkeuringenVoorKlant } from '@/lib/content/goedkeuring-deadlines'
 import { kalenderRechtenVoorSessie } from '@/lib/content/kalender-beheer-server'
 import { kanGoedkeuren } from '@/lib/content/kalender-rol'
 import { GoedkeuringOverzicht } from '@/components/portal/goedkeuring-overzicht'
+import { UitgelichtNieuws, Snelkoppelingen, PartnersStrook } from '@/components/portal/dashboard/snelkoppelingen'
+import { MODULE_IMPLEMENTED, type PortalModule } from '@/lib/portal-permissions'
+import { metExtra } from '@/lib/nieuwsbrieven-server'
+import type { Nieuwsbrief } from '@/lib/nieuwsbrieven'
+import type { Partner } from '@/lib/partners'
+import { meetingTeam } from '@/lib/meetings/klantboeking-server'
+import { portaalEvents } from '@/lib/events-server'
 
 export default async function PortalDashboard() {
   const session = await resolvePortalSession()
@@ -80,6 +87,23 @@ export default async function PortalDashboard() {
   const goedkeuringen = magGoedkeuren ? await goedkeuringenVoorKlant(admin, clientId) : []
   const pendingContracts = canContracts ? contracts.filter((c) => ['sent', 'viewed'].includes(c.status)) : []
 
+  // Dashboard: uitgelicht nieuws, snelkoppelingen en partners, enkel voor modules met recht.
+  const magModule = (m: PortalModule) => MODULE_IMPLEMENTED[m] && sessionCan(session, m, 'view')
+  const mag = { diensten: magModule('diensten'), consultancy: magModule('consultancy'), founders: magModule('founders'), meetings: magModule('meetings'), bestanden: magModule('files'), events: magModule('events') }
+  const [{ data: nieuwsRij }, team, evts, { data: partnerRijen }] = await Promise.all([
+    magModule('nieuws')
+      ? admin.from('nieuwsbrieven').select('id, titel, slug, categorie, categorie_label, samenvatting, cover_pad, cover_youtube_id, cover_formaat, cover_embed, blokken, uitgelicht, gepubliceerd_op, auteur_naam')
+        .eq('status', 'gepubliceerd').eq('uitgelicht', true).order('gepubliceerd_op', { ascending: false }).limit(1).maybeSingle()
+      : Promise.resolve({ data: null }),
+    mag.meetings ? meetingTeam(admin).catch(() => []) : Promise.resolve([]),
+    mag.events ? portaalEvents(admin, clientId).catch(() => []) : Promise.resolve([]),
+    magModule('partners') ? admin.from('onze_partners').select('*').eq('zichtbaar', true).order('volgorde').order('created_at') : Promise.resolve({ data: [] }),
+  ])
+  const nieuwsItem = nieuwsRij ? (() => { const { blokken: _b, ...rest } = metExtra(nieuwsRij as Nieuwsbrief); void _b; return rest })() : null
+  const komend = evts.filter((e) => e.status === 'gepubliceerd' && Date.parse(e.einde_op) > Date.now())
+  const volgend = komend.find((e) => e.mijn.length > 0) ?? komend[0] ?? null
+  const eventMini = volgend ? { id: volgend.id, titel: volgend.titel, start_op: volgend.start_op, einde_op: volgend.einde_op, prijs_cents: volgend.prijs_cents, ingeschreven: volgend.mijn.length > 0 } : null
+
   // Social media contract config (posts/reels/stories come from service_contracts.config)
   const socialSC = serviceContracts.find((sc) => sc.service_slug === 'social-media')
   const socialCfg = socialSC?.config ?? {}
@@ -132,6 +156,10 @@ export default async function PortalDashboard() {
           )}
         </div>
       )}
+
+      {nieuwsItem && <UitgelichtNieuws item={nieuwsItem} />}
+
+      <Snelkoppelingen mag={mag} team={team.map((t) => ({ id: t.id, voornaam: t.voornaam, foto_url: t.foto_url }))} event={eventMini} aantalEvents={komend.length} />
 
       {/* Services grid */}
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -217,6 +245,8 @@ export default async function PortalDashboard() {
           </div>
         </div>
       )}
+
+      <PartnersStrook partners={(partnerRijen ?? []) as Partner[]} />
     </div>
   )
 }

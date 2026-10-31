@@ -106,7 +106,7 @@ export function HeroKaart({ i, ongelezen, metKnop = false }: { i: FeedItem; onge
             {i.samenvatting && <p className="text-sm sm:text-lg text-white/85 max-w-xl line-clamp-3">{i.samenvatting}</p>}
             <span className="inline-flex items-center gap-2 rounded-xl bg-white text-gray-900 px-4 py-2.5 text-sm font-semibold group-hover:gap-3 transition-all">Lees het verhaal<ArrowRight className="h-4 w-4" /></span>
           </Link>
-          <div className="w-full max-w-[300px] sm:max-w-[320px] mx-auto md:mx-0">
+          <div className="w-full max-w-[230px] sm:max-w-[280px] mx-auto md:mx-0 md:w-[280px] lg:w-[320px] md:max-w-none">
             {i.cover_embed && i.cover_embed.provider !== 'youtube' ? (
               <EmbedFrame e={i.cover_embed} titel={i.titel} />
             ) : yt ? (

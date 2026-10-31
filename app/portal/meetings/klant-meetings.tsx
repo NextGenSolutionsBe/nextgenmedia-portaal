@@ -86,7 +86,7 @@ export function KlantMeetings() {
   const ander = data.meetings.filter((m) => !komend.includes(m)).reverse().slice(0, 5)
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-start">
+    <div className="grid gap-6 items-start">
       {data.magBoeken
         ? <Boeken data={data} onGeboekt={laad} />
         : <div className="card-base text-sm text-gray-600">Je kan de meetings van je organisatie bekijken, maar niet zelf boeken. Vraag het aan de beheerder van jullie account.</div>}
@@ -229,7 +229,7 @@ function Boeken({ data, onGeboekt }: { data: Overzicht; onGeboekt: () => void })
           </div>
           <div className="space-y-3" role="radiogroup" aria-label="Met wie">
             <GeenVoorkeur tekst="Maakt niet uit" sub="Het eerste vrije moment bij ons team" gekozen={teamlid === ''} onKies={() => setTeamlid('')} />
-            <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:grid-cols-3 gap-4 max-w-4xl">
               {team.map((t) => <TeamFotoKaart key={t.id} naam={t.naam} sub={t.rol} foto={t.foto_url} gekozen={teamlid === t.id} onKies={() => setTeamlid(t.id)} />)}
             </div>
           </div>
