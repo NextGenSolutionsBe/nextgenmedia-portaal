@@ -271,7 +271,7 @@ function NieuweAanvraag({ soort, onVerstuurd }: { soort: AanvraagSoort; onVerstu
             <p className="text-xs text-gray-600">Een voorkeur, geen garantie: wij bevestigen wie je aanvraag opvolgt.</p>
           </div>
           {experts === null ? <div className="py-6 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-gray-400" aria-label="Experts laden" /></div> : (
-            <div className="grid sm:grid-cols-2 gap-2" role="radiogroup" aria-label="Expert">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3" role="radiogroup" aria-label="Expert">
               <ExpertKaart gekozen={expert === ''} onKies={() => setExpert('')} naam="Geen voorkeur" sub="Stel zelf een expert voor" />
               {experts.map((e) => <ExpertKaart key={e.id} gekozen={expert === e.id} onKies={() => setExpert(e.id)} naam={e.naam} sub={e.rollen.join(' · ')} foto={e.foto_url} expertises={e.expertises} />)}
             </div>
@@ -358,15 +358,19 @@ function ExpertKaart({ gekozen, onKies, naam, sub, foto, expertises }: { gekozen
   const initialen = naam.split(/\s+/).map((x) => x[0]).slice(0, 2).join('').toUpperCase()
   return (
     <button type="button" role="radio" aria-checked={gekozen} onClick={onKies}
-      className={`text-left rounded-xl border p-3 flex gap-3 items-start transition ${gekozen ? 'border-gray-900 bg-gray-50 ring-1 ring-gray-900' : 'border-gray-200 hover:border-gray-400'} ${knop}`}>
-      {foto
-        // eslint-disable-next-line @next/next/no-img-element
-        ? <img src={foto} alt="" className="h-11 w-11 rounded-full object-cover shrink-0" />
-        : <span className="h-11 w-11 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center text-sm font-semibold shrink-0">{expertises ? initialen : <UserRound className="h-5 w-5" />}</span>}
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center justify-between gap-2"><span className="text-sm font-semibold truncate">{naam}</span>{gekozen && <Check className="h-4 w-4 shrink-0" />}</span>
+      className={`text-left rounded-2xl border overflow-hidden flex flex-col bg-white transition ${gekozen ? 'border-gray-900 ring-2 ring-gray-900' : 'border-gray-200 hover:border-gray-400'} ${knop}`}>
+      {/* Grote foto: je kiest een persoon, dus die mag je goed zien. */}
+      <span className="relative block aspect-[4/5] bg-gray-100">
+        {foto
+          // eslint-disable-next-line @next/next/no-img-element
+          ? <img src={foto} alt={naam} loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
+          : <span className="absolute inset-0 flex items-center justify-center text-3xl font-semibold text-gray-400">{expertises ? initialen : <UserRound className="h-10 w-10" />}</span>}
+        {gekozen && <span className="absolute top-2 right-2 h-7 w-7 rounded-full bg-gray-900 text-white flex items-center justify-center shadow"><Check className="h-4 w-4" /></span>}
+      </span>
+      <span className="p-2.5 sm:p-3 min-w-0">
+        <span className="block text-sm font-semibold truncate">{naam}</span>
         {sub && <span className="block text-xs text-gray-600 truncate">{sub}</span>}
-        {expertises && expertises.length > 0 && <span className="mt-1 flex flex-wrap gap-1">{expertises.map((x) => <span key={x} className="rounded border border-gray-200 bg-white px-1.5 text-[10px] leading-4 text-gray-700">{x}</span>)}</span>}
+        {expertises && expertises.length > 0 && <span className="mt-1.5 flex flex-wrap gap-1">{expertises.map((x) => <span key={x} className="rounded border border-gray-200 bg-white px-1.5 text-[10px] leading-4 text-gray-700">{x}</span>)}</span>}
       </span>
     </button>
   )

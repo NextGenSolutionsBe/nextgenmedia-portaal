@@ -138,7 +138,7 @@ export const STANDAARD_CP: CpInstellingen = {
   routine_links: [
     { label: 'Notion', url: 'https://www.notion.so' },
     { label: 'Frame.io', url: 'https://app.frame.io' },
-    { label: 'Metricool', url: 'https://app.metricool.com' },
+    { label: 'Metricool', url: 'https://app.metricool.com/login' },
   ],
   reeks_detail: {
     // Welke klanten aan de beurt zijn (1 of 3 maanden, meeting of niet), toont de app zelf

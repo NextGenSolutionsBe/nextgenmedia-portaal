@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
   X, Phone, Mail, Globe, Pencil, StickyNote,
@@ -28,6 +28,9 @@ export type DialoogSoort = 'gesprek' | 'email' | 'notitie' | 'voorstel' | 'opvol
 /** Vanaf deze fases ligt het merk vast (er is een afspraak geweest). */
 // Opvolgen hoort erbij: daar staan ook de leads met een verstuurd voorstel.
 const MERK_VAST = ['opvolgen', 'afspraak', 'gewonnen', 'verloren']
+
+/** De gegevens die je in de fiche invult en in één keer bewaart. */
+type Concept = { leadbron: string; assigned_to: string; opvolgdatum: string; dienst: string; verwacht: string; labels: string[]; merken: string[] }
 
 /**
  * Het detailpaneel van één lead: schuift van rechts in. Alles wat je over de
@@ -58,20 +61,41 @@ export function LeadDetail({
   const [bewerkId, setBewerkId] = useState<string | null>(null)
   const [bewerkTekst, setBewerkTekst] = useState('')
   const [nieuweNotitie, setNieuweNotitie] = useState('')
-  const [dienst, setDienst] = useState(lead.dienst ?? '')
-  // Verwachte omzet als tekst (Belgische notatie), bewaard bij verlaten van het veld.
-  const [verwacht, setVerwacht] = useState(verwachtAlsTekst(lead.verwachte_omzet_cents))
-  useEffect(() => { setVerwacht(verwachtAlsTekst(lead.verwachte_omzet_cents)) }, [lead.verwachte_omzet_cents])
-  useEffect(() => { setDienst(lead.dienst ?? '') }, [lead.dienst])
+  // Gegevens van de lead als concept: invullen gaat meteen, bewaren gebeurt in één keer
+  // met de knop onderaan (geen autosave bij elke wijziging; dat voelde traag).
+  const vanLead = useCallback((): Concept => ({
+    leadbron: lead.leadbron ?? 'outbound', assigned_to: lead.assigned_to ?? '', opvolgdatum: lead.opvolgdatum?.slice(0, 10) ?? '',
+    dienst: lead.dienst ?? '', verwacht: verwachtAlsTekst(lead.verwachte_omzet_cents), labels: lead.labels ?? [],
+    merken: merkenVan(lead, pipelines).map((m) => m.key),
+  }), [lead, pipelines])
+  const [concept, setConcept] = useState<Concept>(vanLead)
+  const [bewaren, setBewaren] = useState(false)
+  const basis = vanLead()
+  const gewijzigd = (Object.keys(basis) as (keyof Concept)[]).filter((k) => JSON.stringify(concept[k]) !== JSON.stringify(basis[k]))
+  // Andere lead of wijziging van elders: concept opnieuw vullen, behalve wat je net aanpast.
+  const vorigeLead = useRef(lead.id)
+  const netBewaard = useRef(false)
+  useEffect(() => {
+    if (vorigeLead.current !== lead.id) { vorigeLead.current = lead.id; setConcept(vanLead()); return }
+    // Na bewaren: de server kan opmaak normaliseren (bv. 3250 → 3.250); neem die over.
+    if (netBewaard.current || !gewijzigd.length) { netBewaard.current = false; setConcept(vanLead()) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead.id, lead.updated_at])
+  const zet = <K extends keyof Concept>(k: K, w: Concept[K]) => setConcept((c) => ({ ...c, [k]: w }))
 
   useEffect(() => {
     const esc = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null
-      if (e.key === 'Escape' && !(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA'))) onClose()
+      if (e.key === 'Escape' && !(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA'))) sluitRef.current()
+      // Cmd/Ctrl+S bewaart de gegevens.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); bewaarRef.current() }
     }
     window.addEventListener('keydown', esc)
     return () => window.removeEventListener('keydown', esc)
-  }, [onClose])
+  }, [])
+
+  const sluitRef = useRef<() => void>(() => onClose())
+  const bewaarRef = useRef<() => void>(() => undefined)
 
   const laadNotities = useCallback(async () => {
     try {
@@ -85,6 +109,39 @@ export function LeadDetail({
 
   // Wijzigingen elders (dialogen, bord) → tijdlijn en notities herladen.
   useEffect(() => { setVerversen((n) => n + 1) }, [lead.updated_at, lead.laatste_notitie])
+
+  /** Alle gewijzigde gegevens in één keer bewaren. */
+  const bewaarConcept = async () => {
+    if (!gewijzigd.length || bewaren) return
+    const body: Record<string, unknown> = {}
+    for (const k of gewijzigd) {
+      if (k === 'verwacht') {
+        const tekst = concept.verwacht.trim()
+        const nieuw = tekst === '' ? null : leesGetal(tekst)
+        if (tekst !== '' && (nieuw === null || nieuw < 0)) { toast.error('De verwachte omzet klopt niet (bv. 3.250 of 3250,50).'); return }
+        body.verwachte_omzet = nieuw
+      } else if (k === 'merken') {
+        if (!concept.merken.length) { toast.error('Een lead hoort bij minstens één merk.'); return }
+        body.merken = concept.merken
+      } else if (k === 'assigned_to' || k === 'opvolgdatum' || k === 'dienst') body[k] = String(concept[k]).trim() || null
+      else body[k] = concept[k]
+    }
+    setBewaren(true)
+    try {
+      const r = await fetch(`/api/admin/sales/leads/${lead.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j.error ?? 'Opslaan mislukt')
+      toast.success('Lead bijgewerkt.', { duration: 1500 })
+      netBewaard.current = true
+      onChanged()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opslaan mislukt') } finally { setBewaren(false) }
+  }
+  const sluit = () => {
+    if (gewijzigd.length && !confirm('Je hebt wijzigingen die nog niet bewaard zijn. Toch sluiten?')) return
+    onClose()
+  }
+  sluitRef.current = sluit
+  bewaarRef.current = () => { void bewaarConcept() }
 
   const patch = async (body: Record<string, unknown>, okMsg?: string): Promise<boolean> => {
     setBezig(true)
@@ -177,7 +234,7 @@ De lead, de tijdlijn, notities en activiteiten verdwijnen definitief. Afspraken 
     medewerkers.find((m) => m.id === id)?.naam ?? email?.split('@')[0] ?? 'onbekend'
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/20" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/20" onMouseDown={(e) => { if (e.target === e.currentTarget) sluit() }}>
       <aside className="h-full w-full sm:max-w-lg bg-white shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
         {/* Kop */}
         <div className="px-5 pt-4 pb-3 border-b border-gray-100 flex items-start justify-between gap-2">
@@ -198,7 +255,7 @@ De lead, de tijdlijn, notities en activiteiten verdwijnen definitief. Afspraken 
               className={`h-8 w-8 flex items-center justify-center rounded-lg hover:bg-gray-100 ${bewerken ? 'bg-gray-100 text-black' : 'text-gray-400'}`}>
               <Pencil className="h-4 w-4" />
             </button>
-            <button onClick={onClose} aria-label="Sluiten" className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-gray-100"><X className="h-4 w-4" /></button>
+            <button onClick={sluit} aria-label="Sluiten" className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-gray-100"><X className="h-4 w-4" /></button>
           </div>
         </div>
 
@@ -262,12 +319,12 @@ De lead, de tijdlijn, notities en activiteiten verdwijnen definitief. Afspraken 
           <LeadControle leadId={lead.id} />
 
           {/* Vanaf Afspraak gepland hoort er een verantwoordelijke bij (statistieken per medewerker). */}
-          {mistVerantwoordelijke(lead) && (
+          {mistVerantwoordelijke({ stage_key: lead.stage_key, assigned_to: concept.assigned_to || null }) && (
             <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 space-y-1.5">
               <div className="text-sm font-semibold text-red-700">Geen medewerker verantwoordelijk</div>
               <p className="text-xs text-red-700/90">Vanaf {stageLabel('afspraak')} hoort er een medewerker bij deze lead, zodat de statistieken en closing rate per medewerker kloppen.</p>
-              <select className="input-base text-sm" value="" disabled={bezig}
-                onChange={(e) => { if (e.target.value) patch({ assigned_to: e.target.value }, 'Verantwoordelijke gekoppeld.') }}>
+              <select className="input-base text-sm" value=""
+                onChange={(e) => { if (e.target.value) zet('assigned_to', e.target.value) }}>
                 <option value="">Kies de verantwoordelijke…</option>
                 {meId && <option value={meId}>Ik</option>}
                 {medewerkers.filter((m) => m.id !== meId).map((m) => <option key={m.id} value={m.id}>{m.naam}</option>)}
@@ -283,14 +340,12 @@ De lead, de tijdlijn, notities en activiteiten verdwijnen definitief. Afspraken 
               </select>
             </Label>
             <Label tekst="Leadbron">
-              <select className="input-base text-sm" value={lead.leadbron ?? 'outbound'} disabled={bezig}
-                onChange={(e) => patch({ leadbron: e.target.value }, 'Leadbron bijgewerkt.')}>
+              <select className="input-base text-sm" value={concept.leadbron} onChange={(e) => zet('leadbron', e.target.value)}>
                 {LEADBRONNEN.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
               </select>
             </Label>
             <Label tekst="Verantwoordelijke">
-              <select className="input-base text-sm" value={lead.assigned_to ?? ''} disabled={bezig}
-                onChange={(e) => patch({ assigned_to: e.target.value || null }, 'Verantwoordelijke bijgewerkt.')}>
+              <select className="input-base text-sm" value={concept.assigned_to} onChange={(e) => zet('assigned_to', e.target.value)}>
                 <option value="">Niemand</option>
                 {medewerkers.map((m) => <option key={m.id} value={m.id}>{m.naam}</option>)}
                 {lead.assigned_to && !medewerkers.some((m) => m.id === lead.assigned_to) && (
@@ -299,14 +354,12 @@ De lead, de tijdlijn, notities en activiteiten verdwijnen definitief. Afspraken 
               </select>
             </Label>
             <Label tekst="Opvolgdatum">
-              <input type="date" className="input-base text-sm" value={lead.opvolgdatum?.slice(0, 10) ?? ''} disabled={bezig}
-                onChange={(e) => patch({ opvolgdatum: e.target.value || null }, e.target.value ? 'Opvolgdatum gezet.' : 'Opvolgdatum gewist.')} />
+              <input type="date" className="input-base text-sm" value={concept.opvolgdatum} onChange={(e) => zet('opvolgdatum', e.target.value)} />
             </Label>
             <div className="col-span-2">
               <Label tekst="Geïnteresseerde dienst">
-                <input className="input-base text-sm" list="diensten-lijst" value={dienst} disabled={bezig}
-                  onChange={(e) => setDienst(e.target.value)}
-                  onBlur={() => { if (dienst.trim() !== (lead.dienst ?? '')) patch({ dienst: dienst.trim() || null }, 'Dienst bijgewerkt.') }} />
+                <input className="input-base text-sm" list="diensten-lijst" value={concept.dienst} onChange={(e) => zet('dienst', e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void bewaarConcept() } }} />
               </Label>
               <DienstenLijst />
             </div>
@@ -314,22 +367,13 @@ De lead, de tijdlijn, notities en activiteiten verdwijnen definitief. Afspraken 
 
           {/* Verwachte omzet: indicatief en handmatig — maakt of wijzigt geen opdracht, contract of factuur. */}
           <Label tekst="Verwachte omzet (€)">
-            <input className="input-base text-sm" inputMode="decimal" placeholder="bv. 3.250 — indicatief" disabled={bezig}
-              value={verwacht} onChange={(e) => setVerwacht(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-              onBlur={() => {
-                const tekst = verwacht.trim()
-                const nieuw = tekst === '' ? null : leesGetal(tekst)
-                if (tekst !== '' && (nieuw === null || nieuw < 0)) { toast.error('De verwachte omzet klopt niet (bv. 3.250 of 3250,50).'); setVerwacht(verwachtAlsTekst(lead.verwachte_omzet_cents)); return }
-                const nuCent = lead.verwachte_omzet_cents ?? null
-                const nieuwCent = nieuw === null ? null : Math.round(nieuw * 100)
-                if (nieuwCent !== nuCent) patch({ verwachte_omzet: nieuw }, nieuw === null ? 'Verwachte omzet gewist.' : 'Verwachte omzet bewaard.')
-                setVerwacht(verwachtAlsTekst(nieuwCent))
-              }} />
+            <input className="input-base text-sm" inputMode="decimal" placeholder="bv. 3.250 — indicatief"
+              value={concept.verwacht} onChange={(e) => zet('verwacht', e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void bewaarConcept() } }} />
           </Label>
 
-          <LeadLabels labels={lead.labels ?? []} suggesties={labelSuggesties} bezig={bezig}
-            onOpslaan={(labels, melding) => patch({ labels }, melding)} />
+          <LeadLabels labels={concept.labels} suggesties={labelSuggesties} bezig={false}
+            onOpslaan={async (labels) => { zet('labels', labels); return true }} />
 
           {/* Gewonnen / verloren */}
           {lead.stage_key === 'gewonnen' && (
@@ -353,15 +397,15 @@ De lead, de tijdlijn, notities en activiteiten verdwijnen definitief. Afspraken 
             <Label tekst="Merk">
               <div className="flex gap-1.5">
                 {pipelines.map((p) => {
-                  const actief = merkenVan(lead, pipelines).map((m) => m.key)
+                  const actief = concept.merken
                   const aan = actief.includes(p.key)
                   const stijl = merkStijl(p.key)
                   return (
-                    <button key={p.id} type="button" disabled={bezig}
+                    <button key={p.id} type="button"
                       onClick={() => {
                         const nieuwe = aan ? actief.filter((k) => k !== p.key) : [...actief, p.key]
                         if (!nieuwe.length) { toast.error('Een lead hoort bij minstens één merk.'); return }
-                        patch({ merken: nieuwe }, 'Merk bijgewerkt.')
+                        zet('merken', nieuwe)
                       }}
                       className={`flex-1 px-3 py-1.5 text-xs font-semibold rounded-lg border flex items-center justify-center gap-1.5 ${aan ? stijl.badge : 'border-gray-200 text-gray-400 hover:text-black'}`}>
                       <span className={`inline-block h-2 w-2 rounded-full ${aan ? stijl.stip : 'bg-gray-300'}`} />{p.name}
@@ -459,6 +503,15 @@ De lead, de tijdlijn, notities en activiteiten verdwijnen definitief. Afspraken 
         </div>
 
         {/* Voet */}
+        {gewijzigd.length > 0 && (
+          <div className="px-5 py-3 border-t border-gray-200 bg-gray-50 flex items-center gap-2" role="status">
+            <span className="text-xs text-gray-700 flex-1">Niet bewaarde wijzigingen</span>
+            <button type="button" onClick={() => setConcept(vanLead())} disabled={bewaren} className="btn-secondary text-xs">Annuleren</button>
+            <button type="button" onClick={() => void bewaarConcept()} disabled={bewaren} className="btn-primary text-xs">
+              {bewaren ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}Bewaren
+            </button>
+          </div>
+        )}
         <div className="px-5 py-3 border-t border-gray-100 flex gap-2">
           <button onClick={() => patch({ do_not_call: !lead.do_not_call }, lead.do_not_call ? 'Weer bellen.' : 'Gemarkeerd als niet bellen.')}
             disabled={bezig} className="btn-secondary text-xs flex-1">

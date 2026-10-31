@@ -21,6 +21,9 @@ const CreateClientSchema = z.object({
   niche: z.string().max(120).optional().or(z.literal('')),
   website_url: z.string().max(300).optional().or(z.literal('')),
   btw_nummer: z.string().max(20).optional().or(z.literal('')),
+  adres_straat: z.string().max(200).optional().or(z.literal('')),
+  adres_postcode: z.string().max(12).optional().or(z.literal('')),
+  adres_gemeente: z.string().max(120).optional().or(z.literal('')),
   services: z.array(z.string()).min(1),
   platforms: z.array(z.string()).optional().default([]),
   posts_per_month: z.number().int().min(0).max(60).optional().default(0),
@@ -106,6 +109,9 @@ export async function POST(req: NextRequest) {
         email: data.email,
         niche: data.niche || null,
         website_url: data.website_url || null,
+        adres_straat: data.adres_straat?.trim() || null,
+        adres_postcode: data.adres_postcode?.trim() || null,
+        adres_gemeente: data.adres_gemeente?.trim() || null,
         // Website-administratie. Framer-velden enkel bewaren bij een Framer-site;
         // de beheerlink enkel bij custom code — zo blijft de data eenduidig.
         website_platform: data.website_platform ?? null,

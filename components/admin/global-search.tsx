@@ -12,7 +12,8 @@ const ICON: Record<string, React.ElementType> = {
 }
 
 // Globale fuzzy zoekbalk met Cmd/Ctrl+K. Resultaten zijn direct klikbaar (deep-links).
-export function GlobalSearch() {
+// `verborgen`: geen zichtbare zoekbalk, enkel de sneltoets.
+export function GlobalSearch({ verborgen = false }: { verborgen?: boolean }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
@@ -58,14 +59,14 @@ export function GlobalSearch() {
 
   return (
     <>
-      <button
+      {!verborgen && <button
         onClick={() => setOpen(true)}
         className="flex items-center gap-2 text-sm text-gray-400 bg-white border border-gray-200 rounded-lg px-3 py-2 hover:border-gray-300 transition-colors w-full max-w-xs"
       >
         <Search className="h-4 w-4" />
         <span className="flex-1 text-left">Zoeken…</span>
         <kbd className="hidden sm:inline text-[10px] text-gray-400 border border-gray-200 rounded px-1">⌘K</kbd>
-      </button>
+      </button>}
 
       {open && (
         <div className="fixed inset-0 z-[60] flex items-start justify-center pt-[12vh] px-4 bg-black/30" onClick={() => setOpen(false)}>

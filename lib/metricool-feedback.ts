@@ -15,4 +15,7 @@ export function geldigeMetricoolFeedbackUrl(waarde: string | null | undefined): 
   return u.toString()
 }
 
+/** Loginpagina van Metricool: de knop in het klantportaal gaat altijd hierheen. */
+export const METRICOOL_LOGIN_URL = 'https://app.metricool.com/login'
+
 export const METRICOOL_FEEDBACK_FOUT = 'De feedbacklink moet met https:// beginnen en naar metricool.com verwijzen.'
