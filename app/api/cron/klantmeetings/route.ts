@@ -4,13 +4,15 @@ import { DATABANK_TIJDELIJK } from '@/lib/supabase/herkansing'
 import { verwerkHerinneringen } from '@/lib/meetings/server'
 import { cronToegang } from '@/lib/meetings/cron-toegang'
 import { zorgVoorGsmMeldingen } from '@/lib/meetings/gsm-melding'
+import { verwerkEvents } from '@/lib/events-server'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 /**
  * Herinneringsmails van meetings, elke vijf minuten. Daarna: de gsm-melding
- * (15 min vooraf) op komende afspraken die ze nog niet hebben.
+ * (15 min vooraf) op komende afspraken die ze nog niet hebben, en Workshops &
+ * events (herinnering 24 uur vooraf, hangende bevestigingen, gastenlijst in Google).
  *
  * Aangeroepen door pg_cron (job 'klantmeetings-herinneringen') met het geheim
  * uit cron_geheimen ('klantmeetings'); de Vercel-CRON_SECRET werkt als reserve.
@@ -30,7 +32,11 @@ export async function POST(req: NextRequest) {
       console.error('[cron:klantmeetings:gsm]', e)
       return { ingesteld: 0, mislukt: 0, fout: true }
     })
-    return NextResponse.json({ ok: true, ...telling, gsm })
+    const events = await verwerkEvents(admin).catch((e) => {
+      console.error('[cron:klantmeetings:events]', e)
+      return { fout: 1 }
+    })
+    return NextResponse.json({ ok: true, ...telling, gsm, events })
   } catch (e) {
     console.error('[cron:klantmeetings]', e)
     return NextResponse.json({ ok: false, error: 'Herinneringen niet verwerkt' }, { status: 500 })

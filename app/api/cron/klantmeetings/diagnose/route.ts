@@ -26,6 +26,8 @@ import {
 } from '@/lib/meetings/klantboeking-server'
 import { KB_MIN_VOORAF_TEKST, perDag } from '@/lib/meetings/klantboeking'
 import { can, metStandaard, fullPermissions, MODULE_IMPLEMENTED } from '@/lib/portal-permissions'
+import { publiceer, syncGasten, stuurBevestiging, verwerkEvents, schrijfUit, annuleerEvent, leesEvent, standaardAgenda } from '@/lib/events-server'
+import { googleEventIdVoor } from '@/lib/events'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -66,6 +68,11 @@ export const maxDuration = 60
  *    echte ClickUp-taken in de lijst "Aanvragen" (teruggelezen), offerte,
  *    akkoord van de klant, interne planning, afwijzen en intrekken sluiten de
  *    taak. Daarna zijn de testaanvragen en het testbestand weg.
+ *  · ?zelftest=event&klant=<uuid>: een testwebinar binnen 20 uur zoals het
+ *    team het publiceert (echt Google-event met Meet, gastenlijst verborgen),
+ *    inschrijving van info@ (capaciteit en dubbels), gastenlijst in Google,
+ *    bevestiging met agendabestand en de herinnering via de scheduler (beide
+ *    naar info@), uitschrijven en annuleren. Daarna is alles weg.
  *  · ?opvolging=1: leest enkel. De blokken "Op te volgen" van het Command Center.
  *  · ?kalender=1: leest enkel. Per agenda de werkuren, bezette blokken (per
  *    Google-agenda, zonder titels) en vrije segmenten voor twee weken, plus
@@ -105,6 +112,11 @@ export async function POST(req: NextRequest) {
       const klant = req.nextUrl.searchParams.get('klant') ?? ''
       if (!UUID.test(klant)) return NextResponse.json({ error: 'klant (een testklant) is verplicht' }, { status: 400 })
       return NextResponse.json(await zelftestAanvraag(admin, klant))
+    }
+    if (req.nextUrl.searchParams.get('zelftest') === 'event') {
+      const klant = req.nextUrl.searchParams.get('klant') ?? ''
+      if (!UUID.test(klant)) return NextResponse.json({ error: 'klant (een testklant) is verplicht' }, { status: 400 })
+      return NextResponse.json(await zelftestEvent(admin, klant))
     }
     if (req.nextUrl.searchParams.get('zelftest') === 'klantapp') {
       const klant = req.nextUrl.searchParams.get('klant') ?? '', ander = req.nextUrl.searchParams.get('ander') ?? ''
@@ -903,4 +915,88 @@ async function zelftestAanvraag(admin: { from: (t: string) => any; storage: { fr
     await opruimen().catch(() => undefined)
     return { stappen, taken }
   }
+}
+
+// ── Zelftest Workshops & events ──────────────────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function zelftestEvent(admin: any, klant: string) {
+  const stappen: { stap: string; ok: boolean; detail?: string }[] = []
+  const log = (stap: string, ok: boolean, detail?: string) => { stappen.push({ stap, ok, ...(detail ? { detail } : {}) }) }
+  let eventId: string | null = null
+  try {
+    const { data: c } = await admin.from('clients').select('id').eq('id', klant).maybeSingle()
+    if (!c) return { stappen: [{ stap: 'Testklant bestaat', ok: false }] }
+    const agenda = await standaardAgenda(admin)
+    log('Standaardagenda gekend', !!agenda)
+    // Over 20 uur, op het kwartier: binnen het herinneringsvenster van 24 uur.
+    const start = new Date(Math.ceil((Date.now() + 20 * 3600_000) / 900_000) * 900_000)
+    const einde = new Date(start.getTime() + 3600_000)
+    const { data: ev, error } = await admin.from('klant_events').insert({
+      titel: 'Zelftest webinar (automatische controle)', soort: 'webinar', status: 'concept', samenvatting: 'Automatische controle van de eventmodule.',
+      start_op: start.toISOString(), einde_op: einde.toISOString(), vorm: 'online', met_meet: true, capaciteit: 2, prijs_cents: 0, agenda_id: agenda, created_by_email: 'zelftest',
+    }).select('*').single()
+    if (error) { log('Concept aanmaken', false, error.message); return { stappen } }
+    eventId = ev.id as string
+    log('Concept aanmaken', true)
+
+    const p = await publiceer(admin, ev)
+    log('Publiceren (Google-event + Meet)', p.ok, p.ok ? `${p.event.meet_url ?? 'geen Meet'}${p.waarschuwing ? ` · ${p.waarschuwing}` : ''}` : p.fout)
+    if (!p.ok) return { stappen }
+    const e = p.event
+    log('Google-event-id volgens afspraak', e.google_event_id === googleEventIdVoor(e.id), e.google_event_id ?? '')
+    log('Meet-link aanwezig', /^https:\/\/meet\.google\.com\//.test(e.meet_url ?? ''), e.meet_url ?? '')
+    log('iCal-UID van Google bewaard', !!e.google_ical_uid, e.google_ical_uid ?? '')
+
+    const inschrijf = (deelnemers: { naam: string; email: string }[]) => admin.rpc('klant_event_inschrijven', { p_event: e.id, p_client: klant, p_door_auth: null, p_door_naam: 'Automatische controle', p_deelnemers: deelnemers, p_akkoord_tekst: null })
+    const r1 = await inschrijf([{ naam: 'Zelftest NextGenMedia', email: TEST_ADRES }])
+    const ids = (r1.data?.ids ?? []) as string[]
+    log('Inschrijven (info@)', !!r1.data?.ok && ids.length === 1, JSON.stringify(r1.data ?? r1.error?.message))
+    const r2 = await inschrijf([{ naam: 'Dubbel', email: TEST_ADRES.toUpperCase() }])
+    log('Zelfde adres opnieuw geweigerd', r2.data?.fout === 'al_ingeschreven', JSON.stringify(r2.data))
+    const r3 = await inschrijf([{ naam: 'Twee', email: 'zelftest-2@nextgenmedia.invalid' }, { naam: 'Drie', email: 'zelftest-3@nextgenmedia.invalid' }])
+    log('Capaciteit bewaakt (nog 1 plaats)', r3.data?.fout === 'volzet' && r3.data?.vrij === 1, JSON.stringify(r3.data))
+
+    const g = await syncGasten(admin, e.id)
+    log('Gastenlijst in Google', g.ok && g.aantal === 1, g.ok ? `${g.aantal} gast` : g.fout)
+    const na = await leesEvent(admin, e.id)
+    log('Versie gastenlijst bijgewerkt', !!na && na.google_sync_versie === na.inschrijving_versie, na ? `${na.google_sync_versie}/${na.inschrijving_versie}` : '')
+    const ge = na?.agenda_id && na.google_calendar_id && na.google_event_id ? await haalMeetingEvent(na.agenda_id, na.google_calendar_id, na.google_event_id) : null
+    log('Google toont info@ als gast', !!ge?.genodigden.some((x) => x.email.toLowerCase() === TEST_ADRES), (ge?.genodigden ?? []).map((x) => x.email).join(', '))
+
+    const b = await stuurBevestiging(admin, ids[0])
+    const { data: ib } = await admin.from('klant_event_inschrijvingen').select('bevestiging_status, bevestiging_fout').eq('id', ids[0]).single()
+    log('Bevestiging met agendabestand naar info@', b === 'verzonden' && ib?.bevestiging_status === 'verzonden', ib?.bevestiging_fout ?? b)
+    const b2 = await stuurBevestiging(admin, ids[0])
+    log('Bevestiging niet twee keer', b2 === 'overgeslagen')
+    const { data: logB } = await admin.from('email_messages').select('id, kind').eq('verzend_sleutel', `event-bevestiging-${ids[0]}`).maybeSingle()
+    log('Bevestiging in het E-mail Center', logB?.kind === 'event_bevestiging')
+
+    const t = await verwerkEvents(admin)
+    const { data: ih } = await admin.from('klant_event_inschrijvingen').select('herinnering_status, herinnering_fout').eq('id', ids[0]).single()
+    log('Herinnering via de scheduler', ih?.herinnering_status === 'verzonden', `${ih?.herinnering_status}${ih?.herinnering_fout ? ` · ${ih.herinnering_fout}` : ''} · ${JSON.stringify(t)}`)
+    const { data: logH } = await admin.from('email_messages').select('id, kind').eq('verzend_sleutel', `event-herinnering-${ids[0]}`).maybeSingle()
+    log('Herinnering in het E-mail Center', logH?.kind === 'event_herinnering')
+
+    const u = await schrijfUit(admin, ids[0], 'Automatische controle')
+    log('Uitschrijven', u.ok, u.ok ? '' : u.fout)
+    const g2 = await syncGasten(admin, e.id)
+    const ge2 = na?.agenda_id && na.google_calendar_id && na.google_event_id ? await haalMeetingEvent(na.agenda_id, na.google_calendar_id, na.google_event_id) : null
+    log('Gastenlijst in Google weer leeg (zonder mail)', g2.ok && (ge2?.genodigden.length ?? -1) === 0, `${ge2?.genodigden.length ?? '?'} gasten`)
+
+    const a = await annuleerEvent(admin, (await leesEvent(admin, e.id))!)
+    const ge3 = na?.agenda_id && na.google_calendar_id && na.google_event_id ? await haalMeetingEvent(na.agenda_id, na.google_calendar_id, na.google_event_id) : null
+    log('Annuleren ook in Google', a.event.google_status === 'geannuleerd' && (!ge3 || ge3.geannuleerd), a.waarschuwing ?? '')
+  } catch (err) {
+    log('Onverwachte fout', false, veiligeFout(err))
+  } finally {
+    if (eventId) {
+      const e = await leesEvent(admin, eventId).catch(() => null)
+      if (e && e.status !== 'geannuleerd') await annuleerEvent(admin, e).catch(() => null)
+      await admin.from('klant_event_inschrijvingen').delete().eq('event_id', eventId)
+      await admin.from('klant_events').delete().eq('id', eventId)
+      const { data: weg } = await admin.from('klant_events').select('id').eq('id', eventId).maybeSingle()
+      log('Opgeruimd', !weg)
+    }
+  }
+  return { ok: stappen.every((x) => x.ok), stappen }
 }

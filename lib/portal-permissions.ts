@@ -4,7 +4,7 @@
 
 import { FEATURES } from '@/lib/features'
 
-export const PORTAL_MODULES = ['social_media', 'metricool', 'cms', 'website', 'contracts', 'blogs', 'tasks', 'files', 'meetings', 'diensten', 'consultancy', 'founders', 'nieuws', 'partners'] as const
+export const PORTAL_MODULES = ['social_media', 'metricool', 'cms', 'website', 'contracts', 'blogs', 'tasks', 'files', 'meetings', 'diensten', 'consultancy', 'founders', 'nieuws', 'partners', 'events'] as const
 export type PortalModule = (typeof PORTAL_MODULES)[number]
 
 // Acties per module (de "actie-rechten").
@@ -23,6 +23,7 @@ export const MODULE_ACTIONS: Record<PortalModule, string[]> = {
   founders:     ['view', 'aanvragen'],
   nieuws:       ['view'],
   partners:     ['view'],
+  events:       ['view', 'inschrijven'],
 }
 
 export const MODULE_LABELS: Record<PortalModule, string> = {
@@ -40,6 +41,7 @@ export const MODULE_LABELS: Record<PortalModule, string> = {
   founders:     'Founders of Flanders',
   nieuws:       'Nieuws',
   partners:     'Onze partners',
+  events:       'Workshops & events',
 }
 
 // Welke modules hebben een werkende pagina/route. Een module die hier op false
@@ -61,6 +63,7 @@ export const MODULE_IMPLEMENTED: Record<PortalModule, boolean> = {
   founders:     true,             // /portal/founders — voorbeeldvideo's + founder video aanvragen (via Aanvragen)
   nieuws:       true,             // /portal/nieuws — nieuwsbrieven: projecten, klant in de kijker, tips, nieuws
   partners:     true,             // /portal/partners — onze bedrijven met uitleg en socials
+  events:       true,             // /portal/events — webinars, workshops, events en opleidingen: inschrijven met aftelling
 }
 
 /**
@@ -69,7 +72,7 @@ export const MODULE_IMPLEMENTED: Record<PortalModule, boolean> = {
  * module staat pas uit als iemand ze uitdrukkelijk uitvinkt (opgeslagen als
  * false). Meeting boeken en diensten of consultancy aanvragen horen bij elke klant.
  */
-export const STANDAARD_AAN: readonly PortalModule[] = ['meetings', 'diensten', 'consultancy', 'founders', 'nieuws', 'partners']
+export const STANDAARD_AAN: readonly PortalModule[] = ['meetings', 'diensten', 'consultancy', 'founders', 'nieuws', 'partners', 'events']
 
 export const ACTION_LABELS: Record<string, string> = {
   view: 'Bekijken',
@@ -84,6 +87,7 @@ export const ACTION_LABELS: Record<string, string> = {
   upload: 'Uploaden',
   book: 'Boeken, verplaatsen en annuleren',
   aanvragen: 'Aanvragen indienen en offertes beslissen',
+  inschrijven: 'Inschrijven en uitschrijven',
 }
 
 export type Permissions = Partial<Record<PortalModule, Record<string, boolean>>>

@@ -23,6 +23,8 @@ export const ADMIN_MODULES: AdminModule[] = [
   { key: 'nieuwsbrieven', label: 'Nieuwsbrieven',        prefixes: ['/admin/nieuwsbrieven', '/api/admin/nieuwsbrieven'] },
   { key: 'founders',    label: 'Founders of Flanders', prefixes: ['/admin/founders-of-flanders', '/api/admin/founders-of-flanders'] },
   { key: 'onze_partners', label: 'Onze partners',        prefixes: ['/admin/onze-partners', '/api/admin/onze-partners'] },
+  // Webinars, workshops, events en opleidingen waarvoor klanten zich inschrijven.
+  { key: 'events',      label: 'Workshops & events',   prefixes: ['/admin/events', '/api/admin/events'] },
   { key: 'content',     label: 'Content / Diensten',   prefixes: ['/admin/services', '/api/admin/social-content', '/api/admin/shoot-feedback', '/api/admin/shoot-ideas', '/api/admin/webdesign'] },
   { key: 'metricool',   label: 'Metricool',            prefixes: ['/admin/metricool', '/api/admin/metricool'] },
   { key: 'blogs',       label: 'Blogs',                prefixes: ['/admin/blog-calendar', '/admin/blogaccounts', '/admin/blogs', '/api/admin/blogs', '/api/admin/blog-accounts', '/api/admin/blog-seo', '/api/admin/blog-settings', '/api/admin/framer'] },

@@ -7,7 +7,7 @@
 export const MARKETING_BUCKET = 'marketing'
 export const AFBEELDING_TYPES: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' }
 export const MAX_AFBEELDING = 15 * 1024 * 1024
-export type MarketingMap = 'nieuws' | 'partners'
+export type MarketingMap = 'nieuws' | 'partners' | 'events'
 
 export const isAfbeelding = (mime: unknown): boolean => Object.prototype.hasOwnProperty.call(AFBEELDING_TYPES, String(mime ?? '').toLowerCase())
 
