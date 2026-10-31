@@ -519,8 +519,8 @@ function TariefTab({ id, tarieven, onKlaar }: { id: string; tarieven: TariefMet[
           <div className="space-y-1.5">
             <div className="flex items-center justify-between"><label className={LBL}>Bijkomende kosten voor het bedrijf <span className="text-gray-400 font-normal">— enkel als ze betrouwbaar gekend zijn</span></label></div>
             {lijnen.map((l, i) => (
-              <div key={l.id} className="grid grid-cols-[1fr_150px_90px_auto] gap-1.5 items-center">
-                <input className={INP} value={l.label} onChange={(e) => setLijnen(lijnen.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} aria-label="Omschrijving" />
+              <div key={l.id} className="grid grid-cols-[1fr_90px_auto] sm:grid-cols-[1fr_150px_90px_auto] gap-1.5 items-center">
+                <input className={`${INP} col-span-3 sm:col-span-1`} value={l.label} onChange={(e) => setLijnen(lijnen.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} aria-label="Omschrijving" />
                 <select className={INP} value={l.soort} onChange={(e) => setLijnen(lijnen.map((x, j) => (j === i ? { ...x, soort: e.target.value as KostSoort } : x)))} aria-label="Soort">{KOST_SOORTEN.filter((k) => k.key !== 'eenmalig').map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}</select>
                 <input className={INP} inputMode="decimal" value={String(l.waarde)} onChange={(e) => setLijnen(lijnen.map((x, j) => (j === i ? { ...x, waarde: getal(e.target.value) } : x)))} aria-label="Waarde" />
                 <button type="button" onClick={() => setLijnen(lijnen.filter((_, j) => j !== i))} className="text-gray-400 hover:text-red-600" aria-label="Verwijderen"><X className="h-4 w-4" /></button>

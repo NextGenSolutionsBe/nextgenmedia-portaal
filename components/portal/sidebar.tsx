@@ -95,6 +95,11 @@ export function PortalSidebar({
 
   return (
     <>
+      {/* ── Gsm: vaste balk achter de menuknop, zodat die niet over de inhoud zweeft ── */}
+      <div className="md:hidden fixed top-0 inset-x-0 z-30 h-16 bg-white/95 backdrop-blur border-b border-gray-200 flex items-center pl-16 pr-4">
+        <span className="text-sm font-semibold text-gray-900 truncate">{companyName}</span>
+      </div>
+
       {/* ── Mobile hamburger button ── */}
       <button
         className={cn('md:hidden fixed top-3 left-3 z-50 h-10 w-10 flex items-center justify-center rounded-md bg-white border border-gray-200 text-gray-900', mobileOpen && 'hidden')}

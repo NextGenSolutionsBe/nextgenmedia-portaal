@@ -578,8 +578,8 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
       {/* Gekleurde bovenrand: het merk waarin je werkt, altijd in beeld. */}
       {merk && <div className={`h-1 shrink-0 ${merkStijl(merk.key).balk}`} />}
       {/* ── Kop ── */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-white">
-        <div className="flex items-center gap-3 min-w-0">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 border-b border-gray-200 bg-white">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 min-w-0">
           {/* Voor wie bel je nu? Eén lijst, twee bedrijven — dus is dit een
               knop en geen etiket. De keuze wisselt het script mee en bepaalt
               waar een afspraak terechtkomt. */}
@@ -603,19 +603,19 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
             Nog <b className="text-gray-900">{wachtrij.nu.length}</b> te bellen
           </span>
           {isTeLaat && (
-            <span className="text-xs font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full shrink-0 flex items-center gap-1">
+            <span className="text-xs font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full shrink-0 inline-flex items-center gap-1">
               <Clock className="h-3 w-3" />Terugbelafspraak — nu bellen
             </span>
           )}
           {wachtrij.later.length > 0 && (
-            <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full shrink-0">
+            <span className="hidden sm:inline-flex text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full shrink-0">
               {wachtrij.later.length} wachtend · eerstvolgende {aftelLabel(wachtrij.later[0].callback_at!, nu)}
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={slaOver} disabled={busy} className="btn-secondary text-sm">
-            <SkipForward className="h-4 w-4" />Overslaan
+        <div className="flex items-center gap-2 shrink-0 ml-auto">
+          <button onClick={slaOver} disabled={busy} className="btn-secondary text-sm" aria-label="Overslaan">
+            <SkipForward className="h-4 w-4" /><span className="hidden sm:inline">Overslaan</span>
           </button>
           <button onClick={sluitVeilig} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-gray-100">
             <X className="h-4 w-4" />
@@ -624,10 +624,10 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
       </div>
 
       {/* ── Drie kolommen ── */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[300px_1fr_320px]">
+      <div className="flex-1 min-h-0 overflow-y-auto lg:overflow-hidden grid grid-cols-1 lg:grid-cols-[300px_1fr_320px]">
 
         {/* LINKS — wie heb je aan de lijn */}
-        <div className="overflow-y-auto border-r border-gray-200 bg-white p-4 space-y-4">
+        <div className="lg:overflow-y-auto border-b lg:border-b-0 lg:border-r border-gray-200 bg-white p-4 space-y-4">
           <div>
             <div className="flex items-start justify-between gap-2">
               <h1 className="text-xl font-semibold leading-tight">{bedrijf?.name ?? 'Onbekend bedrijf'}</h1>
@@ -796,7 +796,7 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
         </div>
 
         {/* MIDDEN — het script */}
-        <div className="overflow-y-auto p-5">
+        <div className="lg:overflow-y-auto p-4 sm:p-5">
           {script === 'laden' ? (
             <div className="text-center text-gray-400 pt-16"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div>
           ) : script ? (
@@ -873,7 +873,7 @@ export function FocusMode({ leads, bezet = {}, pipelines, pipelineId, stageFilte
         </div>
 
         {/* RECHTS — bezwaren, weetjes, notitie, terugbellen */}
-        <div className="overflow-y-auto border-l border-gray-200 bg-white p-4 space-y-4">
+        <div className="lg:overflow-y-auto border-t lg:border-t-0 lg:border-l border-gray-200 bg-white p-4 space-y-4">
           {script && script !== 'laden' && script.analyse.bezwaren.length > 0 && (
             <div>
               <h3 className="text-[10px] text-red-600 font-bold mb-1.5">Bezwaren</h3>

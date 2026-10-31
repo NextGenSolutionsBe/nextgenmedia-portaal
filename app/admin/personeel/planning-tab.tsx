@@ -241,8 +241,8 @@ function InboekDialoog({ start, data, actief, kleurVan, onSluit, onKlaar }: { st
   return (
     <Dialoog titel="Inboeken" onSluit={onSluit} breed>
       <div className="space-y-4">
-        <div className="grid grid-cols-3 gap-3">
-          <div><label className={LBL}>Dag</label><input type="date" className={INP} value={datum} onChange={(e) => setDatum(e.target.value)} /></div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="col-span-2 sm:col-span-1"><label className={LBL}>Dag</label><input type="date" className={INP} value={datum} onChange={(e) => setDatum(e.target.value)} /></div>
           <div><label className={LBL}>Van</label><select className={INP} value={van} onChange={(e) => setVan(e.target.value)}>{tijdOpties(van).map((u) => <option key={u}>{u}</option>)}</select></div>
           <div><label className={LBL}>Tot</label><select className={INP} value={tot} onChange={(e) => setTot(e.target.value)}>{tijdOpties(tot).map((u) => <option key={u}>{u}</option>)}</select></div>
         </div>
@@ -429,14 +429,14 @@ function WerkblokDialoog({ w, data, onSluit, onKlaar }: { w: Partial<Werkblok>; 
           </div>
         )}
         {w.status === 'geannuleerd' && <div className="text-xs text-red-700">Dit werkblok is geannuleerd.</div>}
-        <div className="flex justify-between gap-2 pt-1">
+        <div className="flex flex-wrap justify-between gap-2 pt-1">
           {bestaand ? (
             <div className="flex gap-2">
-              {w.status !== 'geannuleerd' && <button type="button" disabled={bezig} onClick={annuleer} className="btn-secondary text-red-600"><Ban className="h-4 w-4" />Annuleren</button>}
+              {w.status !== 'geannuleerd' && <button type="button" disabled={bezig} onClick={annuleer} className="btn-secondary text-red-600" title="Werkblok annuleren" aria-label="Annuleren"><Ban className="h-4 w-4" /><span className="hidden sm:inline">Annuleren</span></button>}
               <button type="button" disabled={bezig} onClick={verwijder} className="btn-secondary text-red-600" title="Definitief verwijderen"><Trash2 className="h-4 w-4" /><span className="hidden sm:inline">Verwijderen</span></button>
             </div>
           ) : <span />}
-          <div className="flex gap-2"><button type="button" onClick={onSluit} className="btn-secondary">Sluiten</button><button type="button" disabled={bezig || !v.personeel_id} onClick={bewaar} className="btn-primary">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}{bestaand ? 'Bewaren' : 'Inplannen'}</button></div>
+          <div className="flex gap-2 ml-auto"><button type="button" onClick={onSluit} className="btn-secondary">Sluiten</button><button type="button" disabled={bezig || !v.personeel_id} onClick={bewaar} className="btn-primary">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}{bestaand ? 'Bewaren' : 'Inplannen'}</button></div>
         </div>
       </div>
     </Dialoog>

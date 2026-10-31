@@ -272,7 +272,7 @@ function Beoordeling({ d, bezig, actie }: { d: Detail; bezig: string | null; act
       <div className="rounded-lg border border-gray-200 p-3 space-y-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <span className="text-sm font-medium">Scope</span>
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
             {([['binnen', 'Binnen contract'], ['buiten', 'Buiten contract'], ['', 'Nog niet bepaald']] as const).map(([k, l]) => (
               <button key={k} type="button" disabled={!!bezig} onClick={() => actie('sc', { actie: 'scope', scope: k || null, notitie: scopeNotitie }, 'Scope bewaard.')}
                 className={`px-2 py-1 rounded-lg text-xs border ${(a.scope ?? '') === k ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200'}`}>{l}</button>

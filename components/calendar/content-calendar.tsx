@@ -113,6 +113,8 @@ export function ContentCalendar({
   const [cursor, setCursor] = useState(() => new Date())
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [view, setView] = useState<'month' | 'week'>('month')
+  // Gsm: de cellen zijn te smal voor titels; de gekozen dag staat daar als lijst onder de kalender.
+  const [dag, setDag] = useState<string | null>(() => ymd(new Date()))
   // Kleuren op status (standaard) of op planning: oranje geplaatst · groen ingepland · wit nog niets. Onthouden per browser.
   const [kleurOp, setKleurOp] = useState<'status' | 'planning'>('status')
   useEffect(() => { try { const v = localStorage.getItem('ngm-kalender-kleur'); if (v === 'planning' || v === 'status') setKleurOp(v) } catch { /* geen opslag */ } }, [])
@@ -132,6 +134,7 @@ export function ContentCalendar({
     setView('month')
     setCursor(new Date(`${it.planned_date}T12:00:00`))
     setSelectedId(it.id)
+    setDag(it.planned_date)
     wortel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [focus?.id, focus?.n]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -167,6 +170,7 @@ export function ContentCalendar({
     if (view === 'month') d.setMonth(d.getMonth() + delta)
     else d.setDate(d.getDate() + delta * 7)
     setCursor(d)
+    setDag(null)
   }
 
   const onDrop = async (e: React.DragEvent, dayStr: string) => {
@@ -174,6 +178,52 @@ export function ContentCalendar({
     e.preventDefault()
     const id = e.dataTransfer.getData('text/plain')
     if (id && actions.onMove) { try { await actions.onMove(id, dayStr) } catch { /* melding komt van de handler */ } }
+  }
+
+  const itemKnop = (it: SocialContentItem, lijst = false) => {
+    const Icon = TYPE_ICONS[it.content_type] ?? FileText
+    const style = STATUS_STYLE[it.status]
+    const plan: Planningkleur = planningkleur(it, nu)
+    const badge = kleurOp === 'planning' ? PLANNING_STIJL[plan].badge : style.badge
+    const isChecked = selection?.selectedIds.has(it.id) ?? false
+    // Adminkalender: op welke platformen dit item verschijnt, als kleine labels.
+    const kanalen = mode === 'admin' ? (it.platforms?.length ? it.platforms : [it.platform]) : null
+    const kanaalTekst = kanalen ? publicatieKanalen(kanalen).map((k) => k.label).join(', ') : ''
+    return (
+      <button
+        key={it.id}
+        type="button"
+        draggable={!lijst && !!actions.onMove && !selectMode}
+        onDragStart={(e) => e.dataTransfer.setData('text/plain', it.id)}
+        onClick={() => {
+          if (selectMode) {
+            selection?.onToggle(it.id)
+          } else {
+            setSelectedId(it.id === selectedId ? null : it.id)
+            // Gsm: het scriptpaneel staat boven de kalender, dus daarheen scrollen.
+            if (lijst && it.id !== selectedId) wortel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }
+        }}
+        className={`text-left ${lijst ? 'text-sm px-2.5 py-2' : 'text-[11px] px-1.5 py-1'} rounded border ${badge}
+          hover:opacity-80 transition flex flex-col gap-0.5 w-full min-w-0
+          ${isChecked ? 'ring-2 ring-red-400 bg-red-50' : ''}`}
+        title={[it.title, kleurOp === 'planning' ? `${PLANNING_STIJL[plan].label} · ${style.label}` : null, kanaalTekst || null].filter(Boolean).join(' · ')}
+      >
+        <span className="flex items-center gap-1 w-full min-w-0">
+        {selectMode && (
+          <span className={`h-3 w-3 shrink-0 rounded border flex items-center justify-center ${
+            isChecked ? 'bg-red-500 border-red-500' : 'border-gray-300 bg-white'
+          }`}>
+            {isChecked && <Check className="h-2 w-2 text-white" />}
+          </span>
+        )}
+        <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${style.dot}`} />
+        <Icon className={`${lijst ? 'h-3.5 w-3.5' : 'h-2.5 w-2.5'} shrink-0 opacity-70`} />
+        <span className="truncate">{it.planned_time ? <span className="tabular-nums opacity-70">{it.planned_time.slice(0, 5)} </span> : null}{it.title}</span>
+        </span>
+        {kanalen && <KanaalLabels platforms={kanalen} compact />}
+      </button>
+    )
   }
 
   return (
@@ -189,13 +239,13 @@ export function ContentCalendar({
       {/* Calendar grid */}
       <div className="flex-1 bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
         {/* Toolbar */}
-        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100">
-          <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-3 border-b border-gray-100">
+          <div className="flex items-center gap-1 min-w-0">
             <button onClick={() => navigate(-1)} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-gray-100">
               <ChevronLeft className="h-4 w-4" />
             </button>
             <button
-              onClick={() => setCursor(new Date())}
+              onClick={() => { setCursor(new Date()); setDag(today) }}
               className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50"
             >
               Vandaag
@@ -203,9 +253,9 @@ export function ContentCalendar({
             <button onClick={() => navigate(1)} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-gray-100">
               <ChevronRight className="h-4 w-4" />
             </button>
-            <span className="ml-2 font-semibold capitalize text-sm">{title}</span>
+            <span className="ml-2 font-semibold capitalize text-sm whitespace-nowrap">{title}</span>
           </div>
-          <div className="flex items-center gap-1 flex-wrap justify-end">
+          <div className="flex items-center gap-1 flex-wrap sm:justify-end">
             <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden mr-1" role="group" aria-label="Kleuren op">
               <span className="text-[11px] text-gray-500 px-2 self-center hidden sm:inline">Kleur</span>
               {(['status', 'planning'] as const).map((k) => (
@@ -252,9 +302,11 @@ export function ContentCalendar({
                 key={idx}
                 onDragOver={(e) => { if (actions.onMove) e.preventDefault() }}
                 onDrop={(e) => onDrop(e, dayStr)}
-                className={`group relative border-r border-b border-gray-100 p-1.5 flex flex-col gap-1
-                  ${view === 'month' ? 'min-h-[100px]' : 'min-h-[200px]'}
+                onClick={() => setDag(dayStr)}
+                className={`group relative border-r border-b border-gray-100 p-1 sm:p-1.5 flex flex-col gap-1
+                  ${view === 'month' ? 'min-h-[52px] sm:min-h-[100px]' : 'min-h-[64px] sm:min-h-[200px]'}
                   ${!inMonth ? 'bg-gray-50/50' : ''}
+                  ${dag === dayStr ? 'max-sm:bg-gray-100' : ''}
                   ${canAdd ? 'hover:bg-gray-50 cursor-pointer' : ''}`}
               >
                 <div className="flex items-center justify-between">
@@ -266,56 +318,24 @@ export function ContentCalendar({
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); actions.onCreateOnDay?.(dayStr) }}
-                      className="opacity-0 group-hover:opacity-100 h-5 w-5 flex items-center justify-center rounded text-gray-400 hover:bg-gray-900 hover:text-white transition-all"
+                      aria-label="Item toevoegen op deze dag"
+                      className="hidden sm:flex opacity-0 group-hover:opacity-100 h-5 w-5 items-center justify-center rounded text-gray-400 hover:bg-gray-900 hover:text-white transition-all"
                     >
                       <Plus className="h-3 w-3" />
                     </button>
                   )}
                 </div>
 
-                <div className="flex flex-col gap-0.5 overflow-hidden">
-                  {dayItems.slice(0, maxShow).map((it) => {
-                    const Icon = TYPE_ICONS[it.content_type] ?? FileText
-                    const style = STATUS_STYLE[it.status]
-                    const plan: Planningkleur = planningkleur(it, nu)
-                    const badge = kleurOp === 'planning' ? PLANNING_STIJL[plan].badge : style.badge
-                    const isChecked = selection?.selectedIds.has(it.id) ?? false
-                    // Adminkalender: op welke platformen dit item verschijnt, als kleine labels.
-                    const kanalen = mode === 'admin' ? (it.platforms?.length ? it.platforms : [it.platform]) : null
-                    const kanaalTekst = kanalen ? publicatieKanalen(kanalen).map((k) => k.label).join(', ') : ''
-                    return (
-                      <button
-                        key={it.id}
-                        draggable={!!actions.onMove && !selectMode}
-                        onDragStart={(e) => e.dataTransfer.setData('text/plain', it.id)}
-                        onClick={() => {
-                          if (selectMode) {
-                            selection?.onToggle(it.id)
-                          } else {
-                            setSelectedId(it.id === selectedId ? null : it.id)
-                          }
-                        }}
-                        className={`text-left text-[11px] px-1.5 py-1 rounded border ${badge}
-                          hover:opacity-80 transition flex flex-col gap-0.5 w-full min-w-0
-                          ${isChecked ? 'ring-2 ring-red-400 bg-red-50' : ''}`}
-                        title={[it.title, kleurOp === 'planning' ? `${PLANNING_STIJL[plan].label} · ${style.label}` : null, kanaalTekst || null].filter(Boolean).join(' · ')}
-                      >
-                        <span className="flex items-center gap-1 w-full min-w-0">
-                        {selectMode && (
-                          <span className={`h-3 w-3 shrink-0 rounded border flex items-center justify-center ${
-                            isChecked ? 'bg-red-500 border-red-500' : 'border-gray-300 bg-white'
-                          }`}>
-                            {isChecked && <Check className="h-2 w-2 text-white" />}
-                          </span>
-                        )}
-                        <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${style.dot}`} />
-                        <Icon className="h-2.5 w-2.5 shrink-0 opacity-70" />
-                        <span className="truncate">{it.planned_time ? <span className="tabular-nums opacity-70">{it.planned_time.slice(0, 5)} </span> : null}{it.title}</span>
-                        </span>
-                        {kanalen && <KanaalLabels platforms={kanalen} compact />}
-                      </button>
-                    )
-                  })}
+                {dayItems.length > 0 && (
+                  <div className="flex flex-wrap gap-0.5 px-0.5 sm:hidden" aria-hidden>
+                    {dayItems.slice(0, 6).map((it) => (
+                      <span key={it.id} className={`h-1.5 w-1.5 rounded-full ${kleurOp === 'planning' ? PLANNING_STIJL[planningkleur(it, nu)].dot : STATUS_STYLE[it.status].dot}`} />
+                    ))}
+                    {dayItems.length > 6 && <span className="text-[9px] leading-none text-gray-400">+{dayItems.length - 6}</span>}
+                  </div>
+                )}
+                <div className="hidden sm:flex flex-col gap-0.5 overflow-hidden">
+                  {dayItems.slice(0, maxShow).map((it) => itemKnop(it))}
                   {dayItems.length > maxShow && (
                     <div className="text-[10px] text-gray-400 px-1">
                       +{dayItems.length - maxShow} meer
@@ -325,6 +345,23 @@ export function ContentCalendar({
               </div>
             )
           })}
+        </div>
+
+        {/* Gsm: de gekozen dag als lijst. */}
+        <div className="sm:hidden border-t border-gray-100 px-3 py-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-semibold capitalize">
+              {dag ? new Date(`${dag}T12:00:00`).toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' }) : 'Tik op een dag'}
+            </span>
+            {dag && actions.onCreateOnDay && (
+              <button type="button" onClick={() => actions.onCreateOnDay?.(dag)} className="btn-secondary text-xs px-2.5 py-1.5 shrink-0">
+                <Plus className="h-3.5 w-3.5" />Toevoegen
+              </button>
+            )}
+          </div>
+          {dag && ((byDay.get(dag) ?? []).length === 0
+            ? <p className="text-xs text-gray-500">Niets gepland op deze dag.</p>
+            : <div className="flex flex-col gap-1.5">{(byDay.get(dag) ?? []).map((it) => itemKnop(it, true))}</div>)}
         </div>
 
         {/* Legend */}

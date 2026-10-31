@@ -298,6 +298,9 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
 
   return (
     <>
+      {/* ── Gsm, werknemers (zonder bovenbalk): vaste balk achter de menuknop ── */}
+      {isEmployee && <div className="md:hidden fixed top-0 inset-x-0 z-30 h-[60px] bg-white/95 backdrop-blur border-b border-gray-200" />}
+
       {/* ── Mobile hamburger button ── */}
       <button
         className={cn('md:hidden fixed top-2.5 left-3 z-50 h-10 w-10 flex items-center justify-center rounded-md bg-white border border-gray-200 text-gray-900', mobileOpen && 'hidden')}

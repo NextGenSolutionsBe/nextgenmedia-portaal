@@ -152,11 +152,11 @@ export function MappenOverzicht({
                     {m.naam}
                   </Link>
                   {magBeheren && (
-                    <div className="flex items-center gap-1.5 shrink-0 text-gray-400">
-                      <button onClick={() => setBewerkt(m.id)} className="hover:text-gray-700" aria-label="Hernoemen">
+                    <div className="flex items-center gap-0.5 -my-1.5 -mr-1.5 shrink-0 text-gray-400">
+                      <button onClick={() => setBewerkt(m.id)} className="p-1.5 rounded-md hover:bg-gray-100 hover:text-gray-700" aria-label="Hernoemen">
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
-                      <button onClick={() => verwijder(m.id, m.aantal)} className="hover:text-red-600" aria-label="Map verwijderen">
+                      <button onClick={() => verwijder(m.id, m.aantal)} className="p-1.5 rounded-md hover:bg-red-50 hover:text-red-600" aria-label="Map verwijderen">
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>

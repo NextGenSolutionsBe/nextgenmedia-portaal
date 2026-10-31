@@ -249,7 +249,7 @@ function OpdrachtRij({ o, onStatus, onOpen, onVerwijder }: {
   const klaar = info.eind && o.status !== 'geannuleerd' && o.status !== 'geen_interesse'
 
   return (
-    <div className="card-base p-3 flex items-start gap-3">
+    <div className="card-base p-3 flex flex-wrap sm:flex-nowrap items-start gap-x-3 gap-y-2">
       {/* Afvinken zonder de dialoog te openen: dat is de handeling die het
           vaakst gebeurt. */}
       <button
@@ -313,7 +313,7 @@ function OpdrachtRij({ o, onStatus, onOpen, onVerwijder }: {
         )}
       </button>
 
-      <div className="flex items-center gap-1 shrink-0">
+      <div className="flex items-center justify-end gap-1 shrink-0 w-full sm:w-auto">
         {volgende && (
           <button onClick={() => onStatus(o, volgende)} className="btn-secondary text-xs px-2" title={`Volgende stap: ${statusInfo(volgende).label}`}>
             <ArrowRight className="h-3.5 w-3.5" /><span className="hidden lg:inline">{statusInfo(volgende).label}</span>

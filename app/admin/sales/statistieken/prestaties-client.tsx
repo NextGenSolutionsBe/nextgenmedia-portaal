@@ -53,9 +53,9 @@ export function PrestatiesClient() {
     <div className="space-y-5">
       {/* Periode */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
+        <div className="inline-flex max-w-full overflow-x-auto no-scrollbar rounded-lg border border-gray-200 bg-white p-0.5">
           {[['maand', 'Deze maand'], ['vorige', 'Vorige maand'], ['30', 'Laatste 30 dagen'], ['jaar', 'Dit jaar'], ['eigen', 'Aangepast']].map(([k, l]) => (
-            <button key={k} type="button" onClick={() => setPreset(k)} className={`px-3 py-1.5 rounded-md text-xs font-medium ${preset === k ? 'bg-black text-white' : 'text-gray-600 hover:bg-gray-50'}`}>{l}</button>
+            <button key={k} type="button" onClick={() => setPreset(k)} className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-medium ${preset === k ? 'bg-black text-white' : 'text-gray-600 hover:bg-gray-50'}`}>{l}</button>
           ))}
         </div>
         {preset === 'eigen' && (
@@ -233,9 +233,9 @@ function Correcties({ data, naam, onGewijzigd }: { data: Data; naam: (id: string
     <div className="card-base">
       <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
         <h2 className="font-semibold">Registraties bevestigen en corrigeren</h2>
-        <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50 text-xs">
+        <div className="inline-flex max-w-full overflow-x-auto no-scrollbar rounded-lg border border-gray-200 p-0.5 bg-gray-50 text-xs">
           {([['afspraken', `Afspraken (${reg.afspraken.length})`], ['registraties', `Gesprekken en verplaatsingen (${reg.activiteiten.length})`], ['log', 'Correctielog']] as const).map(([k, l]) => (
-            <button key={k} type="button" onClick={() => setTab(k)} className={`px-2.5 py-1 rounded-md font-medium ${tab === k ? 'bg-black text-white' : 'text-gray-600'}`}>{l}</button>
+            <button key={k} type="button" onClick={() => setTab(k)} className={`shrink-0 whitespace-nowrap px-2.5 py-1 rounded-md font-medium ${tab === k ? 'bg-black text-white' : 'text-gray-600'}`}>{l}</button>
           ))}
         </div>
       </div>
