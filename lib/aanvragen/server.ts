@@ -489,3 +489,28 @@ export async function teamDetail(admin: Admin, id: string) {
     team: ((team ?? []) as { id: string; voornaam: string; achternaam: string | null }[]).map((p) => ({ id: p.id, naam: volleNaam(p) })),
   }
 }
+
+// ── Verwijderen (admin) ──────────────────────────────────────────────────────
+
+/**
+ * Een aanvraag volledig verwijderen: bestanden en offerte uit de opslag, de
+ * rijen weg. De ClickUp-taak wordt gesloten met een reactie (niet weggegooid,
+ * zodat de geschiedenis in ClickUp blijft); dat mag na het antwoord.
+ */
+export async function verwijderAanvraag(admin: Admin, id: string, door: string, o?: ActieOpties): Promise<{ titel: string } | null> {
+  const { data } = await admin.from('klant_aanvragen').select('*').eq('id', id).maybeSingle()
+  const a = data as AanvraagRij | null
+  if (!a) return null
+  const { data: bs } = await admin.from('klant_aanvraag_bestanden').select('pad').eq('aanvraag_id', id)
+  const paden = [...((bs ?? []) as { pad: string }[]).map((b) => b.pad), a.offerte_pad].filter((p): p is string => !!p)
+  if (paden.length) await admin.storage.from(BUCKET).remove(paden).catch(() => null)
+  await admin.from('klant_aanvraag_bestanden').delete().eq('aanvraag_id', id)
+  const { error } = await admin.from('klant_aanvragen').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+  if (a.clickup_task_id && clickupConfigured()) {
+    const taak = a.clickup_task_id
+    const sluit = (async () => { await reageerOpTaak(taak, `Aanvraag verwijderd in de app door ${door}.`); await sluitTaak(taak).catch(() => null) })()
+    if (o?.achtergrond) o.achtergrond(sluit); else await sluit
+  }
+  return { titel: a.type_label }
+}

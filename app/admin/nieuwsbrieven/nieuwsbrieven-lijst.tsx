@@ -55,7 +55,7 @@ export function NieuwsbrievenLijst({ magMaken }: { magMaken: boolean }) {
                       <span className={`absolute right-3 top-3 rounded-full px-2 py-0.5 text-[11px] font-semibold ${r.status === 'gepubliceerd' ? 'bg-green-600 text-white' : 'bg-white text-gray-700'}`}>{r.status === 'gepubliceerd' ? 'Gepubliceerd' : 'Concept'}</span>
                     </div>
                     <div className="p-4 space-y-1.5 flex-1">
-                      <p className="text-xs text-gray-500 flex items-center gap-1.5">{r.uitgelicht && <Star className="h-3.5 w-3.5 text-amber-500" fill="currentColor" />}{categorieLabel(r.categorie)} · {r.status === 'gepubliceerd' ? datum(r.gepubliceerd_op) : `bewerkt ${datum(r.updated_at)}`}</p>
+                      <p className="text-xs text-gray-500 flex items-center gap-1.5">{r.uitgelicht && <Star className="h-3.5 w-3.5 text-amber-500" fill="currentColor" />}{categorieLabel(r.categorie, r.categorie_label)} · {r.status === 'gepubliceerd' ? datum(r.gepubliceerd_op) : `bewerkt ${datum(r.updated_at)}`}</p>
                       <p className="font-semibold leading-snug line-clamp-2">{r.titel}</p>
                       {r.samenvatting && <p className="text-sm text-gray-600 line-clamp-2">{r.samenvatting}</p>}
                     </div>

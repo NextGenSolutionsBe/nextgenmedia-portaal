@@ -6,7 +6,7 @@ import { CATEGORIEEN } from '@/lib/nieuwsbrieven'
 import { HeroKaart, NieuwsKaart, gelezenIds, type FeedItem } from '@/components/nieuws/nieuws-kaart'
 
 /** De nieuwsfeed: uitgelicht verhaal bovenaan, filter per categorie, en vanzelf meer laden onderaan. */
-export function NieuwsFeed({ begin, meer: beginMeer }: { begin: FeedItem[]; meer: boolean }) {
+export function NieuwsFeed({ begin, meer: beginMeer, eigen = [] }: { begin: FeedItem[]; meer: boolean; eigen?: string[] }) {
   const [cat, setCat] = useState<string>('')
   const [items, setItems] = useState<FeedItem[]>(begin)
   const [meer, setMeer] = useState(beginMeer)
@@ -46,7 +46,7 @@ export function NieuwsFeed({ begin, meer: beginMeer }: { begin: FeedItem[]; meer
       </div>
       <div className="sticky top-16 z-20 -mx-4 px-4 py-2 bg-white/90 backdrop-blur md:static md:mx-0 md:px-0 md:bg-transparent md:backdrop-blur-0">
         <div className="flex gap-1.5 overflow-x-auto no-scrollbar" role="tablist" aria-label="Categorie">
-          {[{ key: '', label: 'Alles' }, ...CATEGORIEEN].map((c) => (
+          {[{ key: '', label: 'Alles' }, ...CATEGORIEEN, ...eigen.map((l) => ({ key: `eigen:${l}`, label: l }))].map((c) => (
             <button key={c.key || 'alles'} type="button" role="tab" aria-selected={cat === c.key} onClick={() => kiesCat(c.key)}
               className={`shrink-0 px-3.5 py-1.5 rounded-full text-sm font-medium border transition ${cat === c.key ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'}`}>{c.label}</button>
           ))}

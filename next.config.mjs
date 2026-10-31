@@ -17,7 +17,7 @@ const cspReportOnly = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https://*.supabase.co https://framerusercontent.com https://i.ytimg.com",
   // YouTube-embeds (nieuwsbrieven, Founders of Flanders): enkel na een klik.
-  "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com",
+  "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://www.instagram.com https://www.facebook.com https://www.linkedin.com",
   "font-src 'self' data:",
   "connect-src 'self' https://*.supabase.co https://cdnjs.cloudflare.com",
   "frame-ancestors 'none'",

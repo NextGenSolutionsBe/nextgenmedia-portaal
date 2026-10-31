@@ -9,14 +9,14 @@ import { publiekeUrl } from '@/lib/marketing-media'
 import { EVENT_SOORTEN, SOORT_LABEL, leesPrijs, prijsTekst, type EventSoort } from '@/lib/events'
 
 export type Formulier = {
-  titel: string; soort: EventSoort; samenvatting: string; beschrijving: string; cover_pad: string; spreker: string
+  titel: string; soort: EventSoort; soort_label: string; samenvatting: string; beschrijving: string; cover_pad: string; spreker: string
   datum: string; start: string; einde: string; einddatum: string
   vorm: 'online' | 'locatie'; locatie: string; met_meet: boolean
   capaciteit: string; prijs: string; inschrijven_tot: string; agenda_id: string
 }
 
 export const leegFormulier = (agenda: string | null): Formulier => ({
-  titel: '', soort: 'workshop', samenvatting: '', beschrijving: '', cover_pad: '', spreker: '',
+  titel: '', soort: 'workshop', soort_label: '', samenvatting: '', beschrijving: '', cover_pad: '', spreker: '',
   datum: '', start: '10:00', einde: '11:00', einddatum: '',
   vorm: 'online', locatie: '', met_meet: false,
   capaciteit: '', prijs: '', inschrijven_tot: '', agenda_id: agenda ?? '',
@@ -67,10 +67,11 @@ export function EventFormulier({ f, zet, agendas, agendaVast, gepubliceerd }: {
             <button key={s} type="button" role="radio" aria-checked={f.soort === s}
               onClick={() => zet({ soort: s, ...(s === 'webinar' ? { vorm: 'online' as const } : {}) })}
               className={`px-3 py-1.5 rounded-full text-sm border ${f.soort === s ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'}`}>
-              {SOORT_LABEL[s].enkel}
+              {s === 'andere' ? 'Andere: zelf typen…' : SOORT_LABEL[s].enkel}
             </button>
           ))}
         </div>
+        {f.soort === 'andere' && <input className={`${INP} mt-2 max-w-xs`} value={f.soort_label} onChange={(e) => zet({ soort_label: e.target.value })} placeholder="Bv. Masterclass, Netwerkavond" maxLength={40} aria-label="Eigen soort" autoFocus />}
       </div>
 
       <div>

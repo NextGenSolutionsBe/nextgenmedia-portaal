@@ -1,5 +1,5 @@
 import { safeMessage } from '@/lib/api-error'
-import { SOORT_LABEL, type EventSoort } from '@/lib/events'
+import { soortLabel as eventSoortLabel, type EventSoort } from '@/lib/events'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { getActor, actorCanSee } from '@/lib/actor-modules'
@@ -80,8 +80,8 @@ export async function GET(req: NextRequest) {
     if (may('meetings')) for (const m of meetings) results.push({ type: 'meeting', label: 'Meeting', title: `${m.klant_naam} · ${m.titel}`, subtitle: m.status === 'geannuleerd' ? 'Geannuleerd' : `${datumKort(m.starts_at)} ${uur(m.starts_at)}`, href: `/admin/meetings?meeting=${m.id}` })
     if (may('formulieren')) for (const f of formulieren) results.push({ type: 'formulier', label: 'Formulier', title: f.titel, subtitle: f.doel ?? dienstLabel(f.dienst), href: `/admin/formulieren/${f.id}` })
     if (may('events')) {
-      const ev = await safe(admin.from('klant_events').select('id, titel, soort, status, start_op').or(`titel.ilike.${like},spreker.ilike.${like}`).order('start_op', { ascending: false }).limit(L)) as { id: string; titel: string; soort: string; status: string; start_op: string }[]
-      for (const e of ev) results.push({ type: 'event', label: SOORT_LABEL[e.soort as EventSoort]?.enkel ?? 'Event', title: e.titel, subtitle: e.status === 'geannuleerd' ? 'Geannuleerd' : e.status === 'concept' ? `Concept · ${datumKort(e.start_op)}` : `${datumKort(e.start_op)} ${uur(e.start_op)}`, href: `/admin/events?event=${e.id}` })
+      const ev = await safe(admin.from('klant_events').select('id, titel, soort, soort_label, status, start_op').or(`titel.ilike.${like},spreker.ilike.${like}`).order('start_op', { ascending: false }).limit(L)) as { id: string; titel: string; soort: string; soort_label: string | null; status: string; start_op: string }[]
+      for (const e of ev) results.push({ type: 'event', label: eventSoortLabel({ soort: e.soort as EventSoort, soort_label: e.soort_label }), title: e.titel, subtitle: e.status === 'geannuleerd' ? 'Geannuleerd' : e.status === 'concept' ? `Concept · ${datumKort(e.start_op)}` : `${datumKort(e.start_op)} ${uur(e.start_op)}`, href: `/admin/events?event=${e.id}` })
     }
     if (may('aanvragen')) {
       // Ook aanvragen van een gevonden klant (op klantnaam), niet enkel op dienst of tekst.

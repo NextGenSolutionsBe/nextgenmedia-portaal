@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 import { ArrowLeft, Ban, CalendarDays, CalendarPlus, Check, Clock, Loader2, MapPin, Mic, Monitor, Plus, Trash2, UserPlus, Users, Video, X } from 'lucide-react'
 import { NieuwsInhoud } from '@/components/nieuws/nieuws-inhoud'
 import {
-  SOORT_LABEL, DICHT_LABEL, MAX_DEELNEMERS_PER_INSCHRIJVING, akkoordTekst, euro, googleAgendaLink, heeftMeet, inschrijvingOpen, prijsTekst, wanneerTekst, aftelling,
+  soortLabel, DICHT_LABEL, MAX_DEELNEMERS_PER_INSCHRIJVING, akkoordTekst, euro, googleAgendaLink, heeftMeet, inschrijvingOpen, prijsTekst, wanneerTekst, aftelling,
 } from '@/lib/events'
 import type { PortaalEvent } from '@/lib/events-server'
 import { AftelBlokken, Omslag, hoofdletter, uurKort, useNu } from './events-ui'
@@ -49,7 +49,7 @@ export function EventDetail({ e, ik, magInschrijven, appLink }: { e: PortaalEven
         <div className="aspect-[16/10] sm:aspect-[21/9]"><Omslag e={e} /></div>
         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent" />
         <div className="absolute inset-x-0 bottom-0 p-5 sm:p-8 text-white space-y-2">
-          <span className="inline-block rounded-full bg-white text-gray-900 text-xs font-semibold px-2.5 py-1">{SOORT_LABEL[e.soort].enkel}</span>
+          <span className="inline-block rounded-full bg-white text-gray-900 text-xs font-semibold px-2.5 py-1">{soortLabel(e)}</span>
           <h1 className="text-2xl sm:text-4xl font-bold leading-tight text-white">{e.titel}</h1>
           {e.samenvatting && <p className="text-sm sm:text-base text-white/80 max-w-2xl">{e.samenvatting}</p>}
         </div>

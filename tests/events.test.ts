@@ -8,7 +8,7 @@ process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://proj.supabase.co'
 import {
   valideerEvent, leesPrijs, akkoordTekst, prijsTekst, valideerDeelnemers, inschrijvingOpen, inschrijfFout,
   aftelling, bouwIcs, googleAgendaLink, bevestigingsMail, herinneringsMail, herinneringNodig, belangrijkeWijziging,
-  googleEventIdVoor, naarFormulier, type KlantEvent,
+  googleEventIdVoor, naarFormulier, soortLabel, type KlantEvent,
 } from '../lib/events'
 import { PORTAL_MODULES, STANDAARD_AAN, MODULE_IMPLEMENTED, MODULE_ACTIONS } from '../lib/portal-permissions'
 
@@ -157,6 +157,15 @@ test('11. Wijziging van tijd, plaats of titel verwittigt de deelnemers; een ande
   assert.equal(belangrijkeWijziging(ev(), v.waarde), false)
   assert.equal(belangrijkeWijziging(ev(), { ...v.waarde, start_op: '2026-11-17T14:00:00.000Z' }), true)
   assert.equal(belangrijkeWijziging(ev(), { ...v.waarde, vorm: 'locatie', locatie: 'Gent' }), true)
+})
+
+test('11b. Eigen soort: "andere" vraagt een label en toont dat overal', () => {
+  assert.match((valideerEvent({ ...basis, soort: 'andere', soort_label: '' }, NU) as { fout: string }).fout, /Masterclass/)
+  const v = valideerEvent({ ...basis, soort: 'andere', soort_label: 'Masterclass' }, NU)
+  assert.ok(v.ok && v.waarde.soort_label === 'Masterclass')
+  assert.equal(soortLabel({ soort: 'andere', soort_label: 'Masterclass' }), 'Masterclass')
+  assert.equal(soortLabel({ soort: 'workshop', soort_label: 'genegeerd' }), 'Workshop')
+  assert.match(bevestigingsMail({ ...ev(), soort: 'andere', soort_label: 'Masterclass' }, { naam: 'Jan', email: 'jan@x.be' }, { appLink: 'https://x' }).tekst, /voor de masterclass "/)
 })
 
 test('12. Klantapp-module Workshops & events bestaat, werkt en staat standaard aan', () => {

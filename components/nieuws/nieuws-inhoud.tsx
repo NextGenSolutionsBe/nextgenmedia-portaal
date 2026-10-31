@@ -2,6 +2,7 @@
 
 import { ArrowUpRight, Quote } from 'lucide-react'
 import { YoutubeVideo } from '@/components/media/youtube-video'
+import { EmbedFrame } from '@/components/media/embed-frame'
 import { publiekeUrl } from '@/lib/marketing-media'
 import { leesTekst, type Blok, type Inline } from '@/lib/nieuwsbrieven'
 
@@ -49,9 +50,17 @@ function BlokWeergave({ b }: { b: Blok }) {
     case 'video':
       return (
         <figure className="space-y-2">
-          <YoutubeVideo id={b.youtube_id} titel={b.onderschrift || 'Video'} />
-          {b.onderschrift && <figcaption className="text-sm text-gray-500">{b.onderschrift}</figcaption>}
+          <YoutubeVideo id={b.youtube_id} titel={b.onderschrift || 'Video'} staand={b.formaat === 'staand'} />
+          {b.onderschrift && <figcaption className={`text-sm text-gray-500 ${b.formaat === 'staand' ? 'text-center' : ''}`}>{b.onderschrift}</figcaption>}
         </figure>
+      )
+    case 'embed':
+      if (!b.embed) return null
+      return (
+        <div className="space-y-2">
+          <EmbedFrame e={b.embed} titel={b.onderschrift || 'Ingesloten post'} />
+          {b.onderschrift && <p className="text-sm text-gray-500 text-center">{b.onderschrift}</p>}
+        </div>
       )
     case 'citaat':
       return (

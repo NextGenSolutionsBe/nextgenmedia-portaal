@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { verwijderMarketingBestand } from '@/lib/marketing-server'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { magIk } from '@/lib/instellingen/laden'
 import { safeMessage } from '@/lib/api-error'
@@ -95,7 +96,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   } catch (err) { return NextResponse.json({ error: safeMessage(err, 'events.id.PATCH') }, { status: 500 }) }
 }
 
-/** Enkel een concept zonder inschrijvingen; anders annuleren. */
+/**
+ * Volledig verwijderen, met inschrijvingen. Staat het event nog in Google, dan
+ * eerst annuleren: wie ingeschreven is voor een komend event, krijgt dan het
+ * bericht van Google. Daarna zijn event, inschrijvingen en coverfoto weg.
+ */
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const persoon = await magIk('events', 'verwijderen')
@@ -103,11 +108,14 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
     const admin = createAdminSupabaseClient()
     const e = await leesEvent(admin, params.id)
     if (!e) return NextResponse.json({ ok: true })
-    if (e.status !== 'concept') return NextResponse.json({ error: 'Een gepubliceerd event verwijder je niet. Annuleer het, dan verwittigt Google de ingeschrevenen.' }, { status: 409 })
-    const { count } = await admin.from('klant_event_inschrijvingen').select('id', { count: 'exact', head: true }).eq('event_id', e.id)
-    if ((count ?? 0) > 0) return NextResponse.json({ error: 'Dit event heeft inschrijvingen.' }, { status: 409 })
-    const { error } = await admin.from('klant_events').delete().eq('id', e.id).eq('status', 'concept')
+    if (e.google_event_id && e.google_status !== 'geannuleerd') {
+      const r = await annuleerEvent(admin, e)
+      if (r.event.google_status === 'fout') return NextResponse.json({ error: `Het Google-event kon niet geannuleerd worden: ${r.event.google_fout}. Probeer opnieuw; er is niets verwijderd.` }, { status: 502 })
+    }
+    await admin.from('klant_event_inschrijvingen').delete().eq('event_id', e.id)
+    const { error } = await admin.from('klant_events').delete().eq('id', e.id)
     if (error) throw new Error(error.message)
+    if (e.cover_pad) await verwijderMarketingBestand(admin, e.cover_pad).catch(() => null)
     await logAudit({ action: 'event.verwijderd', entityType: 'klant_event', entityId: e.id, actorUserId: persoon.userId, actorEmail: persoon.email, summary: e.titel }).catch(() => null)
     return NextResponse.json({ ok: true })
   } catch (err) { return NextResponse.json({ error: safeMessage(err, 'events.id.DELETE') }, { status: 500 }) }

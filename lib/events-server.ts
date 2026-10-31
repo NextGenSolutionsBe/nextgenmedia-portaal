@@ -364,7 +364,7 @@ export async function schrijfUit(admin: Admin, inschrijvingId: string, door: str
 
 export type PortaalInschrijving = { id: string; naam: string; email: string; created_at: string; ingeschreven_door_naam: string | null; prijs_cents: number }
 export type PortaalEvent = Pick<KlantEvent,
-  'id' | 'titel' | 'soort' | 'status' | 'samenvatting' | 'beschrijving' | 'cover_pad' | 'spreker' | 'start_op' | 'einde_op' | 'tijdzone'
+  'id' | 'titel' | 'soort' | 'soort_label' | 'status' | 'samenvatting' | 'beschrijving' | 'cover_pad' | 'spreker' | 'start_op' | 'einde_op' | 'tijdzone'
   | 'vorm' | 'locatie' | 'met_meet' | 'capaciteit' | 'prijs_cents' | 'inschrijven_tot'> & {
   /** Enkel voor wie van deze klant ingeschreven is. */
   meet_url: string | null
@@ -405,7 +405,7 @@ export async function portaalEvents(admin: Admin, clientId: string, opts: { id?:
     .map((e) => {
       const mijn = perEvent.get(e.id) ?? []
       return {
-        id: e.id, titel: e.titel, soort: e.soort, status: e.status, samenvatting: e.samenvatting, beschrijving: e.beschrijving, cover_pad: e.cover_pad,
+        id: e.id, titel: e.titel, soort: e.soort, soort_label: e.soort_label ?? null, status: e.status, samenvatting: e.samenvatting, beschrijving: e.beschrijving, cover_pad: e.cover_pad,
         spreker: e.spreker, start_op: e.start_op, einde_op: e.einde_op, tijdzone: e.tijdzone, vorm: e.vorm, locatie: e.locatie, met_meet: e.met_meet,
         capaciteit: e.capaciteit, prijs_cents: e.prijs_cents, inschrijven_tot: e.inschrijven_tot,
         meet_url: mijn.length && e.status === 'gepubliceerd' ? e.meet_url : null,

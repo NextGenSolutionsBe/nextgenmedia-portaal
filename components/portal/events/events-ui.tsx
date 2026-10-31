@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { CalendarDays, Check, GraduationCap, MapPin, Monitor, Presentation, Sparkles, Users, Video } from 'lucide-react'
-import { aftelling, coverUrl, inschrijvingOpen, prijsTekst, SOORT_LABEL, DICHT_LABEL, type EventSoort } from '@/lib/events'
+import { CalendarDays, CalendarHeart, Check, GraduationCap, MapPin, Monitor, Presentation, Sparkles, Users, Video } from 'lucide-react'
+import { aftelling, coverUrl, inschrijvingOpen, prijsTekst, soortLabel, DICHT_LABEL, type EventSoort } from '@/lib/events'
 import type { PortaalEvent } from '@/lib/events-server'
 
-export const SOORT_ICOON: Record<EventSoort, React.ElementType> = { webinar: Video, workshop: Presentation, event: Sparkles, opleiding: GraduationCap }
+export const SOORT_ICOON: Record<EventSoort, React.ElementType> = { webinar: Video, workshop: Presentation, event: Sparkles, opleiding: GraduationCap, andere: CalendarHeart }
 
 const tz = 'Europe/Brussels'
 export const dagNr = (iso: string) => new Date(iso).toLocaleDateString('nl-BE', { timeZone: tz, day: 'numeric' })
@@ -83,7 +83,7 @@ export function EventKaart({ e }: { e: PortaalEvent }) {
           <div className="text-lg font-bold leading-none">{dagNr(e.start_op)}</div>
           <div className="text-[10px] uppercase tracking-wide text-gray-500 mt-0.5">{maandKort(e.start_op)}</div>
         </div>
-        <span className="absolute top-3 right-3 rounded-full bg-black/60 text-white text-[11px] font-medium px-2.5 py-1 backdrop-blur">{SOORT_LABEL[e.soort].enkel}</span>
+        <span className="absolute top-3 right-3 rounded-full bg-black/60 text-white text-[11px] font-medium px-2.5 py-1 backdrop-blur">{soortLabel(e)}</span>
         {ingeschreven && <span className="absolute bottom-3 left-3 inline-flex items-center gap-1 rounded-full bg-green-500 text-white text-[11px] font-semibold px-2.5 py-1"><Check className="h-3 w-3" />Ingeschreven</span>}
       </div>
       <div className="flex-1 flex flex-col p-4 gap-2">

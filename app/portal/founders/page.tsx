@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { requirePortalView, sessionCan } from '@/lib/portal-auth'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
-import type { FoundersVideo } from '@/lib/founders-of-flanders'
+import { KANAAL_SLEUTEL, type FoundersVideo } from '@/lib/founders-of-flanders'
 import { FoundersShowcase } from '@/components/portal/founders/founders-showcase'
 
 /**
@@ -12,6 +12,11 @@ import { FoundersShowcase } from '@/components/portal/founders/founders-showcase
  */
 export default async function PortalFoundersPage() {
   const session = await requirePortalView('founders')
-  const { data } = await createAdminSupabaseClient().from('founders_videos').select('*').eq('zichtbaar', true).order('volgorde').order('created_at')
-  return <FoundersShowcase videos={(data ?? []) as FoundersVideo[]} magAanvragen={sessionCan(session, 'founders', 'aanvragen')} />
+  const admin = createAdminSupabaseClient()
+  // Enkel de video's die het team hier zelf toevoegde; nieuwsbrieven staan op /portal/nieuws.
+  const [{ data }, { data: k }] = await Promise.all([
+    admin.from('founders_videos').select('*').eq('zichtbaar', true).order('volgorde').order('created_at'),
+    admin.from('app_settings').select('value').eq('key', KANAAL_SLEUTEL).maybeSingle(),
+  ])
+  return <FoundersShowcase videos={(data ?? []) as FoundersVideo[]} magAanvragen={sessionCan(session, 'founders', 'aanvragen')} kanaal={typeof k?.value === 'string' ? k.value : null} />
 }

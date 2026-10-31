@@ -1,4 +1,5 @@
 import 'server-only'
+import { valideerEmbed } from '@/lib/embeds'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { baseUrl, sendEmail } from '@/lib/email'
 import { publiekeUrl } from '@/lib/marketing-media'
@@ -42,7 +43,8 @@ export async function uniekeSlug(admin: Admin, titel: string, behalve?: string):
 }
 
 /** Voor de feed en de editor: met coverlink en leestijd. */
-export const metExtra = (n: Nieuwsbrief) => ({ ...n, cover_url: publiekeUrl(n.cover_pad), leestijd: leestijd(n) })
+// Een opgeslagen embed opnieuw nakijken voor hij naar de browser gaat.
+export const metExtra = (n: Nieuwsbrief) => ({ ...n, cover_embed: valideerEmbed(n.cover_embed), cover_url: publiekeUrl(n.cover_pad), leestijd: leestijd(n) })
 
 // ── Ontvangers ───────────────────────────────────────────────────────────────
 export type Ontvanger = { email: string; naam: string | null; klant: string; client_id: string; bron: 'klant' | 'gebruiker'; afgemeld: boolean; al_verstuurd: boolean }
