@@ -167,6 +167,23 @@ export async function buildNotifications(): Promise<Notif[]> {
     for (const a of beslist) out.push({ id: `aanvraag:${a.id}:offerte:${a.offerte_status}`, kind: 'aanvraag', priority: a.offerte_status === 'aanvaard' ? 'high' : 'med', title: `Offerte ${a.offerte_status === 'aanvaard' ? 'aanvaard' : 'geweigerd'} door de klant — ${names.get(a.client_id) ?? 'Klant'}: ${a.type_label}`, date: a.offerte_beslist_op, href: `/admin/aanvragen?aanvraag=${a.id}` })
   } catch { /* meldingen mogen nooit stuklopen */ }
 
+  // Workshops & events: nieuwe inschrijvingen, afgelopen events met nog te
+  // factureren inschrijvingen, en een Google-agenda die niet lukte.
+  try {
+    const nieuw = await safe(admin.from('klant_event_inschrijvingen').select('id, event_id, client_id, naam, created_at, klant_events ( titel )').eq('status', 'ingeschreven').gte('created_at', since).order('created_at', { ascending: false }).limit(30)) as { id: string; event_id: string; client_id: string; naam: string; created_at: string; klant_events?: { titel?: string } | null }[]
+    for (const i of nieuw) out.push({ id: `event-inschrijving:${i.id}`, kind: 'event', priority: 'med', title: `Nieuwe inschrijving — ${names.get(i.client_id) ?? 'Klant'}: ${i.naam} voor "${i.klant_events?.titel ?? 'event'}"`, date: i.created_at, href: `/admin/events?event=${i.event_id}` })
+    const teFact = await safe(admin.from('klant_event_inschrijvingen').select('event_id, prijs_cents, klant_events ( titel, einde_op )').eq('factuur_status', 'te_factureren').limit(2000)) as { event_id: string; prijs_cents: number; klant_events?: { titel?: string; einde_op?: string } | null }[]
+    const perEvent = new Map<string, { titel: string; einde: string; aantal: number; cents: number }>()
+    for (const r of teFact) {
+      if (!r.klant_events?.einde_op || Date.parse(r.klant_events.einde_op) > Date.now()) continue
+      const t = perEvent.get(r.event_id) ?? { titel: r.klant_events.titel ?? 'Event', einde: r.klant_events.einde_op, aantal: 0, cents: 0 }
+      perEvent.set(r.event_id, { ...t, aantal: t.aantal + 1, cents: t.cents + (r.prijs_cents ?? 0) })
+    }
+    for (const [id, t] of perEvent) out.push({ id: `event-factureren:${id}:${t.aantal}`, kind: 'event', priority: 'high', title: `Te factureren: "${t.titel}" — ${t.aantal} ${t.aantal === 1 ? 'inschrijving' : 'inschrijvingen'}, ${(t.cents / 100).toLocaleString('nl-BE', { style: 'currency', currency: 'EUR' })} excl. btw`, date: t.einde, href: `/admin/events?event=${id}` })
+    const fout = await safe(admin.from('klant_events').select('id, titel, google_fout, updated_at').eq('status', 'gepubliceerd').eq('google_status', 'fout').gt('einde_op', new Date().toISOString()).limit(20)) as { id: string; titel: string; google_fout: string | null; updated_at: string }[]
+    for (const e of fout) out.push({ id: `event-google:${e.id}:${e.updated_at}`, kind: 'event', priority: 'high', title: `Google-agenda lukte niet voor "${e.titel}": ${(e.google_fout ?? '').slice(0, 100)}`, date: e.updated_at, href: `/admin/events?event=${e.id}` })
+  } catch { /* meldingen mogen nooit stuklopen */ }
+
   // Klantmeetings: een stap die misliep, of een herinnering die niet vertrok
   // (mislukt, of de scheduler loopt achter). Enkel voor meetings die nog komen.
   try {

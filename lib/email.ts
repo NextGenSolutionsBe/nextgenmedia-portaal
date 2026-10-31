@@ -33,8 +33,9 @@ export async function sendEmail(opts: {
    *  Het domein moet wél geverifieerd zijn bij Resend, anders weigert die. */
   from?: string | null
   /** Bijlagen. `path` is een publiek bereikbare URL; Resend haalt het bestand
-   *  zelf op, zodat wij geen megabytes door een serverless functie duwen. */
-  attachments?: { filename: string; path: string }[]
+   *  zelf op, zodat wij geen megabytes door een serverless functie duwen.
+   *  Een klein bestand (bv. een agendabestand) kan ook als `content` (base64). */
+  attachments?: ({ filename: string; path: string } | { filename: string; content: string; contentType?: string })[]
   /** ISO-tijdstip waarop de mail moet vertrekken. Resend houdt hem tot dan vast
    *  — maximaal 72 uur vooruit. Zo halen we een verzendmoment op de minuut
    *  zonder dat er elk kwartier een cron moet draaien. */
@@ -69,7 +70,7 @@ export async function sendEmail(opts: {
         ...(opts.replyTo ? { reply_to: opts.replyTo } : {}),
         ...(opts.cc?.length ? { cc: opts.cc } : {}),
         ...(opts.bcc?.length ? { bcc: opts.bcc } : {}),
-        ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
+        ...(opts.attachments?.length ? { attachments: opts.attachments.map((a) => ('content' in a ? { filename: a.filename, content: a.content, ...(a.contentType ? { content_type: a.contentType } : {}) } : a)) } : {}),
         ...(opts.scheduledAt ? { scheduled_at: opts.scheduledAt } : {}),
       }),
     })

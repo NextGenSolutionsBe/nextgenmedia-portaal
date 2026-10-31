@@ -6445,3 +6445,194 @@ DO $$ BEGIN
     ALTER TABLE public.klant_aanvragen ADD CONSTRAINT klant_aanvragen_soort_check CHECK (soort IN ('dienst', 'consultancy', 'founders'));
   END IF;
 END $$;
+
+-- ── Workshops & events (31 okt 2026) ─────────────────────────────────────────
+-- Webinars, workshops, events en opleidingen waar klanten zich in de klantapp
+-- voor inschrijven. Betalend of gratis; betalen gebeurt nooit in de app (wie
+-- inschrijft gaat akkoord met een Peppol-factuur achteraf). Elk event heeft een
+-- Google-agenda-event (online: met Meet); inschrijvers komen stil op de
+-- gastenlijst en krijgen van de app één bevestiging en één herinnering.
+CREATE TABLE IF NOT EXISTS public.klant_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  titel text NOT NULL,
+  soort text NOT NULL DEFAULT 'workshop',
+  status text NOT NULL DEFAULT 'concept',
+  samenvatting text,
+  beschrijving text,
+  cover_pad text,
+  spreker text,
+  start_op timestamptz NOT NULL,
+  einde_op timestamptz NOT NULL,
+  tijdzone text NOT NULL DEFAULT 'Europe/Brussels',
+  vorm text NOT NULL DEFAULT 'online',
+  locatie text,
+  met_meet boolean NOT NULL DEFAULT true,
+  capaciteit integer,
+  prijs_cents integer NOT NULL DEFAULT 0,
+  inschrijven_tot timestamptz,
+  agenda_id uuid REFERENCES public.sales_calendar_connections(id) ON DELETE SET NULL,
+  google_calendar_id text,
+  google_event_id text,
+  google_ical_uid text,
+  meet_url text,
+  google_status text NOT NULL DEFAULT 'nog_niet',
+  google_fout text,
+  -- Gastenlijst in Google: inschrijving_versie stijgt bij elke (uit)schrijving;
+  -- google_sync_versie is wat er in Google staat. Verschil = nog bij te werken.
+  inschrijving_versie integer NOT NULL DEFAULT 0,
+  google_sync_versie integer NOT NULL DEFAULT 0,
+  gepubliceerd_op timestamptz,
+  geannuleerd_op timestamptz,
+  created_by_email text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_events_soort_check') THEN
+    ALTER TABLE public.klant_events ADD CONSTRAINT klant_events_soort_check CHECK (soort IN ('webinar', 'workshop', 'event', 'opleiding'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_events_status_check') THEN
+    ALTER TABLE public.klant_events ADD CONSTRAINT klant_events_status_check CHECK (status IN ('concept', 'gepubliceerd', 'geannuleerd'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_events_vorm_check') THEN
+    ALTER TABLE public.klant_events ADD CONSTRAINT klant_events_vorm_check CHECK (vorm IN ('online', 'locatie'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_events_google_status_check') THEN
+    ALTER TABLE public.klant_events ADD CONSTRAINT klant_events_google_status_check CHECK (google_status IN ('nog_niet', 'ok', 'fout', 'geannuleerd'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_events_tijd_check') THEN
+    ALTER TABLE public.klant_events ADD CONSTRAINT klant_events_tijd_check CHECK (einde_op > start_op);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_events_bedragen_check') THEN
+    ALTER TABLE public.klant_events ADD CONSTRAINT klant_events_bedragen_check CHECK (prijs_cents >= 0 AND (capaciteit IS NULL OR capaciteit > 0));
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS klant_events_start_idx ON public.klant_events (start_op);
+ALTER TABLE public.klant_events ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.klant_events FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.klant_event_inschrijvingen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id uuid NOT NULL REFERENCES public.klant_events(id) ON DELETE CASCADE,
+  client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  ingeschreven_door_auth uuid,
+  ingeschreven_door_naam text,
+  naam text NOT NULL,
+  email text NOT NULL,
+  status text NOT NULL DEFAULT 'ingeschreven',
+  prijs_cents integer NOT NULL DEFAULT 0,
+  akkoord_factuur_op timestamptz,
+  akkoord_tekst text,
+  factuur_status text NOT NULL DEFAULT 'geen',
+  bevestiging_status text NOT NULL DEFAULT 'nog_niet',
+  bevestiging_op timestamptz,
+  bevestiging_fout text,
+  herinnering_status text NOT NULL DEFAULT 'gepland',
+  herinnering_op timestamptz,
+  herinnering_bezig_sinds timestamptz,
+  herinnering_fout text,
+  geannuleerd_op timestamptz,
+  geannuleerd_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_event_inschr_status_check') THEN
+    ALTER TABLE public.klant_event_inschrijvingen ADD CONSTRAINT klant_event_inschr_status_check CHECK (status IN ('ingeschreven', 'geannuleerd'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_event_inschr_factuur_check') THEN
+    ALTER TABLE public.klant_event_inschrijvingen ADD CONSTRAINT klant_event_inschr_factuur_check CHECK (factuur_status IN ('geen', 'te_factureren', 'gefactureerd'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_event_inschr_bevestiging_check') THEN
+    ALTER TABLE public.klant_event_inschrijvingen ADD CONSTRAINT klant_event_inschr_bevestiging_check CHECK (bevestiging_status IN ('nog_niet', 'verzonden', 'mislukt', 'overgeslagen'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_event_inschr_herinnering_check') THEN
+    ALTER TABLE public.klant_event_inschrijvingen ADD CONSTRAINT klant_event_inschr_herinnering_check CHECK (herinnering_status IN ('gepland', 'bezig', 'verzonden', 'mislukt', 'overgeslagen'));
+  END IF;
+END $$;
+-- Eén actieve inschrijving per e-mailadres per event.
+CREATE UNIQUE INDEX IF NOT EXISTS klant_event_inschr_uniek ON public.klant_event_inschrijvingen (event_id, lower(email)) WHERE status = 'ingeschreven';
+CREATE INDEX IF NOT EXISTS klant_event_inschr_client_idx ON public.klant_event_inschrijvingen (client_id);
+ALTER TABLE public.klant_event_inschrijvingen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.klant_event_inschrijvingen FROM anon, authenticated;
+
+-- Inschrijven in één transactie: het event wordt vergrendeld, zodat twee
+-- inschrijvingen tegelijk nooit samen over de capaciteit gaan.
+CREATE OR REPLACE FUNCTION public.klant_event_inschrijven(
+  p_event uuid, p_client uuid, p_door_auth uuid, p_door_naam text, p_deelnemers jsonb, p_akkoord_tekst text
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE
+  e public.klant_events%ROWTYPE;
+  d jsonb;
+  bezet integer;
+  aantal integer := jsonb_array_length(p_deelnemers);
+  ids jsonb := '[]'::jsonb;
+  nieuw uuid;
+BEGIN
+  SELECT * INTO e FROM public.klant_events WHERE id = p_event FOR UPDATE;
+  IF NOT FOUND THEN RETURN jsonb_build_object('fout', 'niet_gevonden'); END IF;
+  IF e.status <> 'gepubliceerd' THEN RETURN jsonb_build_object('fout', 'niet_open'); END IF;
+  IF e.start_op <= now() THEN RETURN jsonb_build_object('fout', 'voorbij'); END IF;
+  IF e.inschrijven_tot IS NOT NULL AND e.inschrijven_tot < now() THEN RETURN jsonb_build_object('fout', 'gesloten'); END IF;
+  IF aantal < 1 THEN RETURN jsonb_build_object('fout', 'geen_deelnemers'); END IF;
+  FOR d IN SELECT * FROM jsonb_array_elements(p_deelnemers) LOOP
+    IF EXISTS (SELECT 1 FROM public.klant_event_inschrijvingen
+               WHERE event_id = p_event AND status = 'ingeschreven' AND lower(email) = lower(d->>'email')) THEN
+      RETURN jsonb_build_object('fout', 'al_ingeschreven', 'email', d->>'email');
+    END IF;
+  END LOOP;
+  IF e.capaciteit IS NOT NULL THEN
+    SELECT count(*) INTO bezet FROM public.klant_event_inschrijvingen WHERE event_id = p_event AND status = 'ingeschreven';
+    IF bezet + aantal > e.capaciteit THEN
+      RETURN jsonb_build_object('fout', 'volzet', 'vrij', greatest(e.capaciteit - bezet, 0));
+    END IF;
+  END IF;
+  FOR d IN SELECT * FROM jsonb_array_elements(p_deelnemers) LOOP
+    INSERT INTO public.klant_event_inschrijvingen
+      (event_id, client_id, ingeschreven_door_auth, ingeschreven_door_naam, naam, email, prijs_cents,
+       akkoord_factuur_op, akkoord_tekst, factuur_status)
+    VALUES
+      (p_event, p_client, p_door_auth, p_door_naam, d->>'naam', lower(d->>'email'), e.prijs_cents,
+       CASE WHEN e.prijs_cents > 0 THEN now() END, CASE WHEN e.prijs_cents > 0 THEN p_akkoord_tekst END,
+       CASE WHEN e.prijs_cents > 0 THEN 'te_factureren' ELSE 'geen' END)
+    RETURNING id INTO nieuw;
+    ids := ids || to_jsonb(nieuw);
+  END LOOP;
+  UPDATE public.klant_events SET inschrijving_versie = inschrijving_versie + 1, updated_at = now() WHERE id = p_event;
+  RETURN jsonb_build_object('ok', true, 'ids', ids);
+END
+$fn$;
+REVOKE ALL ON FUNCTION public.klant_event_inschrijven(uuid, uuid, uuid, text, jsonb, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.klant_event_inschrijven(uuid, uuid, uuid, text, jsonb, text) TO service_role;
+
+-- Uitschrijven: inschrijving en versie van de gastenlijst samen.
+CREATE OR REPLACE FUNCTION public.klant_event_uitschrijven(p_inschrijving uuid, p_door text)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE r public.klant_event_inschrijvingen%ROWTYPE;
+BEGIN
+  UPDATE public.klant_event_inschrijvingen
+     SET status = 'geannuleerd', geannuleerd_op = now(), geannuleerd_door = p_door,
+         factuur_status = CASE WHEN factuur_status = 'te_factureren' THEN 'geen' ELSE factuur_status END,
+         herinnering_status = CASE WHEN herinnering_status IN ('gepland', 'bezig') THEN 'overgeslagen' ELSE herinnering_status END,
+         updated_at = now()
+   WHERE id = p_inschrijving AND status = 'ingeschreven'
+  RETURNING * INTO r;
+  IF NOT FOUND THEN RETURN jsonb_build_object('fout', 'niet_actief'); END IF;
+  UPDATE public.klant_events SET inschrijving_versie = inschrijving_versie + 1, updated_at = now() WHERE id = r.event_id;
+  RETURN jsonb_build_object('ok', true, 'event_id', r.event_id);
+END
+$fn$;
+REVOKE ALL ON FUNCTION public.klant_event_uitschrijven(uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.klant_event_uitschrijven(uuid, text) TO service_role;
+
+-- Events: de bevestiging krijgt een eigen 'bezig' (een afgebroken poging pakt de scheduler na 10 minuten op).
+ALTER TABLE public.klant_event_inschrijvingen ADD COLUMN IF NOT EXISTS bevestiging_bezig_sinds timestamptz;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_event_inschr_bevestiging_check'
+             AND pg_get_constraintdef(oid) NOT LIKE '%bezig%') THEN
+    ALTER TABLE public.klant_event_inschrijvingen DROP CONSTRAINT klant_event_inschr_bevestiging_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'klant_event_inschr_bevestiging_check') THEN
+    ALTER TABLE public.klant_event_inschrijvingen ADD CONSTRAINT klant_event_inschr_bevestiging_check CHECK (bevestiging_status IN ('nog_niet', 'bezig', 'verzonden', 'mislukt', 'overgeslagen'));
+  END IF;
+END $$;

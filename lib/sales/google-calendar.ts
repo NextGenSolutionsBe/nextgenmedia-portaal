@@ -997,3 +997,103 @@ export async function lijstTaakEvents(
   }
   return uit
 }
+
+// ── Workshops & events (lib/events-server.ts) ────────────────────────────────
+//
+// Eén Google-event per workshop of webinar, in de gekozen agenda. Gasten zien
+// elkaar niet en kunnen niets wijzigen of doorsturen. Inschrijvers komen stil
+// op de gastenlijst (sendUpdates=none): de bevestiging stuurt de app zelf, zodat
+// niet elke nieuwe inschrijving een "gewijzigde uitnodiging" naar alle anderen
+// stuurt. Wie op de gastenlijst staat, kan met zijn Google-account zonder
+// wachtkamer in de Meet.
+
+export type EventAgendaVelden = {
+  summary: string
+  description: string
+  startsAt: string
+  endsAt: string
+  timezone: string
+  location?: string | null
+}
+
+const eventPrivacy = { guestsCanSeeOtherGuests: false, guestsCanInviteOthers: false, guestsCanModify: false }
+
+export async function maakEventAgenda(connectionId: string, opts: EventAgendaVelden & {
+  eventId: string; meetRequestId: string; calendarId?: string | null; metMeet: boolean
+}): Promise<MeetingEvent & { icalUid: string | null }> {
+  const auth = await accessToken(connectionId)
+  if (!auth) throw new AgendaNietGekoppeld()
+  const calendarId = opts.calendarId || auth.calendarId
+  const body = {
+    id: opts.eventId,
+    summary: opts.summary,
+    description: opts.description,
+    start: { dateTime: opts.startsAt, timeZone: opts.timezone },
+    end: { dateTime: opts.endsAt, timeZone: opts.timezone },
+    attendees: [],
+    ...eventPrivacy,
+    ...(opts.location?.trim() ? { location: opts.location.trim() } : {}),
+    ...(opts.metMeet ? { conferenceData: meetAanvraag(opts.meetRequestId) } : {}),
+    reminders: popupMelding(GSM_MELDING_MIN),
+  }
+  const res = await fetchMetLimiet(`${eventUrl(calendarId)}?conferenceDataVersion=1&sendUpdates=none`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const json = await res.json().catch(() => ({})) as GEvent & { iCalUID?: string }
+  if (res.status === 409) {
+    // Bestaat al (een eerdere poging kwam aan): dat event terug actief zetten met deze gegevens.
+    return werkEventAgendaBij(connectionId, calendarId, opts.eventId, {
+      summary: opts.summary, description: opts.description, startsAt: opts.startsAt, endsAt: opts.endsAt,
+      timezone: opts.timezone, location: opts.location ?? '', status: 'confirmed',
+      ...(opts.metMeet ? {} : { geenMeet: true }),
+    }, false)
+  }
+  if (!res.ok || !json.id) throw new Error(json.error?.message ?? `Google kon het event niet aanmaken (${res.status})`)
+  return { ...leesMeetingEvent(json, calendarId), icalUid: json.iCalUID ?? null }
+}
+
+/**
+ * Event bijwerken. `verwittigen` = de gasten krijgen de wijziging van Google
+ * (enkel bij een andere tijd, plaats of titel; nooit bij een tekstwijziging).
+ */
+export async function werkEventAgendaBij(connectionId: string, calendarId: string, eventId: string, velden: Partial<EventAgendaVelden> & {
+  nieuweMeetRequestId?: string
+  geenMeet?: boolean
+  status?: 'confirmed'
+}, verwittigen: boolean): Promise<MeetingEvent & { icalUid: string | null }> {
+  const auth = await accessToken(connectionId)
+  if (!auth) throw new AgendaNietGekoppeld()
+  const body: Record<string, unknown> = { ...eventPrivacy }
+  if (velden.summary !== undefined) body.summary = velden.summary
+  if (velden.description !== undefined) body.description = velden.description
+  if (velden.startsAt !== undefined) body.start = { dateTime: velden.startsAt, timeZone: velden.timezone ?? 'Europe/Brussels' }
+  if (velden.endsAt !== undefined) body.end = { dateTime: velden.endsAt, timeZone: velden.timezone ?? 'Europe/Brussels' }
+  if (velden.location !== undefined) body.location = velden.location?.trim() || ''
+  if (velden.status) body.status = velden.status
+  if (velden.nieuweMeetRequestId) body.conferenceData = meetAanvraag(velden.nieuweMeetRequestId)
+  else if (velden.geenMeet) body.conferenceData = null
+  const res = await fetchMetLimiet(`${eventUrl(calendarId, eventId)}?conferenceDataVersion=1&sendUpdates=${verwittigen ? 'all' : 'none'}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const json = await res.json().catch(() => ({})) as GEvent & { iCalUID?: string }
+  if (!res.ok || !json.id) throw new Error(json.error?.message ?? `Google kon het event niet bijwerken (${res.status})`)
+  return { ...leesMeetingEvent(json, calendarId), icalUid: json.iCalUID ?? null }
+}
+
+/** De gastenlijst gelijkzetten met de inschrijvingen, zonder iemand een mail van Google. */
+export async function zetEventGasten(connectionId: string, calendarId: string, eventId: string, gasten: { email: string; displayName?: string }[]): Promise<{ aantal: number; privé: boolean }> {
+  const auth = await accessToken(connectionId)
+  if (!auth) throw new AgendaNietGekoppeld()
+  const res = await fetchMetLimiet(`${eventUrl(calendarId, eventId)}?sendUpdates=none`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ attendees: gasten, ...eventPrivacy }),
+  })
+  const json = await res.json().catch(() => ({})) as GEvent & { guestsCanSeeOtherGuests?: boolean }
+  if (!res.ok || !json.id) throw new Error(json.error?.message ?? `Google kon de gastenlijst niet bijwerken (${res.status})`)
+  return { aantal: (json.attendees ?? []).length, privé: json.guestsCanSeeOtherGuests === false }
+}

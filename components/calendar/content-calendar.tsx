@@ -253,7 +253,7 @@ export function ContentCalendar({
             <button onClick={() => navigate(1)} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-gray-100">
               <ChevronRight className="h-4 w-4" />
             </button>
-            <span className="ml-2 font-semibold capitalize text-sm whitespace-nowrap">{title}</span>
+            <span className="ml-2 font-semibold text-sm whitespace-nowrap">{title.charAt(0).toUpperCase() + title.slice(1)}</span>
           </div>
           <div className="flex items-center gap-1 flex-wrap sm:justify-end">
             <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden mr-1" role="group" aria-label="Kleuren op">
@@ -350,8 +350,8 @@ export function ContentCalendar({
         {/* Gsm: de gekozen dag als lijst. */}
         <div className="sm:hidden border-t border-gray-100 px-3 py-3 space-y-2">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-sm font-semibold capitalize">
-              {dag ? new Date(`${dag}T12:00:00`).toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' }) : 'Tik op een dag'}
+            <span className="text-sm font-semibold">
+              {dag ? (() => { const t = new Date(`${dag}T12:00:00`).toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' }); return t.charAt(0).toUpperCase() + t.slice(1) })() : 'Tik op een dag'}
             </span>
             {dag && actions.onCreateOnDay && (
               <button type="button" onClick={() => actions.onCreateOnDay?.(dag)} className="btn-secondary text-xs px-2.5 py-1.5 shrink-0">
