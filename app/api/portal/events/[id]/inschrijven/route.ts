@@ -6,6 +6,8 @@ import { akkoordTekst, inschrijfFout, inschrijvingOpen, valideerDeelnemers } fro
 import { leesEvent, naInschrijving, bezetting } from '@/lib/events-server'
 
 export const dynamic = 'force-dynamic'
+// Op de achtergrond na het antwoord: gastenlijst in Google en tot vijf bevestigingen.
+export const maxDuration = 60
 
 /**
  * Inschrijven voor een event: de ingelogde persoon zelf en/of collega's.
