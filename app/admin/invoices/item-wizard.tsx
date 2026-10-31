@@ -546,17 +546,17 @@ function StapArtikelen({ regels, setRegels, btw, inst, artikelen, setArtikelen, 
           const vrijeEenheid = !(EENHEDEN as readonly string[]).includes(r.eenheid)
           return (
             <div key={`${r.id ?? 'n'}-${i}`} className="rounded-xl border border-gray-200 p-3 sm:p-4 space-y-3">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-xs font-semibold text-gray-500 flex items-center gap-2 flex-wrap">Artikel {i + 1}
                   {/* Voor de contractaflettering: telt dit artikel binnen de contractwaarde of is het extra (km, meerwerk)? */}
                   <span className="inline-flex rounded-lg border border-gray-200 overflow-hidden font-medium" role="group" aria-label={`Soort van artikel ${i + 1}`}>
                     {[false, true].map((x) => (
                       <button key={String(x)} type="button" aria-pressed={r.is_extra === x} onClick={() => zet(i, { is_extra: x, classificatie: x ? 'doorgerekende_kost' : 'dienst' })}
-                        className={`px-2 py-0.5 text-[10px] border-l first:border-l-0 border-gray-200 ${r.is_extra === x ? 'bg-black text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>{x ? 'Extra kosten / meerwerk' : 'Binnen contractwaarde'}</button>
+                        className={`whitespace-nowrap px-2 py-0.5 text-[10px] border-l first:border-l-0 border-gray-200 ${r.is_extra === x ? 'bg-black text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>{x ? 'Extra kosten / meerwerk' : 'Binnen contractwaarde'}</button>
                     ))}
                   </span>
                 </span>
-                <div className="flex items-center gap-0.5">
+                <div className="flex items-center gap-0.5 ml-auto">
                   <IconKnop titel="Omhoog" disabled={i === 0} onClick={() => setRegels(verplaatsRegel(regels, i, i - 1))}><ArrowUp className="h-3.5 w-3.5" /></IconKnop>
                   <IconKnop titel="Omlaag" disabled={i === regels.length - 1} onClick={() => setRegels(verplaatsRegel(regels, i, i + 1))}><ArrowDown className="h-3.5 w-3.5" /></IconKnop>
                   <IconKnop titel="Bewaren als herbruikbaar artikel" onClick={() => bewaarAlsArtikel(r)}><Bookmark className="h-3.5 w-3.5" /></IconKnop>
@@ -798,7 +798,7 @@ function StapControle({ klant, basis, regels, totalen, kosten, ontbrekend, meded
 
 function Rij({ label, children, onWijzig }: { label: string; children: React.ReactNode; onWijzig: () => void }) {
   return (
-    <div className="grid grid-cols-[150px_1fr_auto] gap-2 items-start">
+    <div className="grid grid-cols-[100px_1fr_auto] sm:grid-cols-[150px_1fr_auto] gap-2 items-start">
       <span className="text-gray-500">{label}</span><div className="min-w-0">{children}</div>
       <button type="button" onClick={onWijzig} className="text-xs underline text-gray-600">wijzigen</button>
     </div>

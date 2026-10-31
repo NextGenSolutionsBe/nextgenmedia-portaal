@@ -535,7 +535,7 @@ function ReeksDialoog({ contractTitle, bezig, onSluit, onBevestig }: { contractT
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[92dvh] flex flex-col overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100"><h3 className="font-semibold">Meerdere facturen plannen</h3><p className="text-xs text-gray-500 mt-0.5">Jij bepaalt aantal, bedrag en datums; de app maakt exact die facturen aan met status Te factureren. Elke factuur blijft daarna volledig bewerkbaar.</p></div>
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             {keuze('eenmalig', 'Eén factuur', 'Eén geplande factuur')}
             {keuze('meerdere', 'Meerdere termijnen', 'Bv. 6 × € 979, maandelijks of per kwartaal')}
             {keuze('maandelijks', 'Maandelijks', 'Doorlopend of voor een aantal maanden')}

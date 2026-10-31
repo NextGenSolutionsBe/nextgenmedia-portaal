@@ -54,9 +54,9 @@ export function SectieIntegraties({ isAdmin }: { isAdmin: boolean }) {
             <ul className="text-[11px] text-gray-600 space-y-0.5">{i.details.map((d) => <li key={d}>· {d}</li>)}</ul>
             {resultaat[i.key] && <div className={`text-xs rounded-lg px-2.5 py-1.5 ${resultaat[i.key].ok ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700'}`}>{resultaat[i.key].bericht}</div>}
             {isAdmin && (i.kanTesten || i.kanSync) && (
-              <div className="flex gap-2 pt-1">
-                {i.kanTesten && <button type="button" onClick={() => doe(i.key, 'test')} disabled={!!bezig} className="btn-secondary text-xs h-8">{bezig === `${i.key}:test` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}Verbinding testen</button>}
-                {i.kanSync && <button type="button" onClick={() => doe(i.key, 'sync')} disabled={!!bezig} className="btn-secondary text-xs h-8">{bezig === `${i.key}:sync` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}Opnieuw synchroniseren</button>}
+              <div className="flex flex-wrap gap-2 pt-1">
+                {i.kanTesten && <button type="button" onClick={() => doe(i.key, 'test')} disabled={!!bezig} className="btn-secondary text-xs h-8 whitespace-nowrap">{bezig === `${i.key}:test` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}Verbinding testen</button>}
+                {i.kanSync && <button type="button" onClick={() => doe(i.key, 'sync')} disabled={!!bezig} className="btn-secondary text-xs h-8 whitespace-nowrap">{bezig === `${i.key}:sync` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}Opnieuw synchroniseren</button>}
               </div>
             )}
           </div>

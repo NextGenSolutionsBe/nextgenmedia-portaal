@@ -100,7 +100,7 @@ export function SectieModules({ ctx }: { ctx: Ctx }) {
                       </div>
                       <div className="text-[11px] text-gray-400">{m.href}</div>
                     </div>
-                    <div className="flex items-center gap-3 text-xs text-gray-600">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600">
                       <span className="text-gray-400">Rollen:</span>
                       <label className="flex items-center gap-1 opacity-60"><input type="checkbox" checked readOnly disabled />{ROL_LABEL.hoofdbeheerder}</label>
                       {STAFF_ROLLEN.map((rol) => {

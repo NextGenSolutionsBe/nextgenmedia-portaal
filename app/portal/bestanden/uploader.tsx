@@ -358,12 +358,12 @@ function Kaart({
               <span className="truncate">{datum(u.created_at)} · {leesbareGrootte(u.grootte)}</span>
 
               {magBewerken && !vast && (
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button onClick={() => openBewerking(true)} className="hover:text-gray-700" aria-label="Bewerken">
+                <div className="flex items-center gap-0.5 -my-1 -mr-1.5 shrink-0">
+                  <button onClick={() => openBewerking(true)} className="p-1.5 rounded-md hover:bg-gray-100 hover:text-gray-700" aria-label="Bewerken">
                     <Pencil className="h-3.5 w-3.5" />
                   </button>
                   {mappen.length > 0 && (
-                    <label className="relative flex items-center hover:text-gray-700 cursor-pointer">
+                    <label className="relative flex items-center p-1.5 rounded-md hover:bg-gray-100 hover:text-gray-700 cursor-pointer">
                       <FolderInput className="h-3.5 w-3.5" />
                       <span className="sr-only">Verplaatsen naar een andere map</span>
                       <select
@@ -382,7 +382,7 @@ function Kaart({
                       </select>
                     </label>
                   )}
-                  <button onClick={opVerwijderen} className="hover:text-red-600" aria-label="Verwijderen">
+                  <button onClick={opVerwijderen} className="p-1.5 rounded-md hover:bg-red-50 hover:text-red-600" aria-label="Verwijderen">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>

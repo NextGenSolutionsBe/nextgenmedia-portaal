@@ -128,7 +128,7 @@ export default async function PortalContractsPage() {
                   return (
                     <div
                       key={c.id}
-                      className="flex items-center justify-between gap-4 p-4 rounded-xl border border-gray-200 bg-white"
+                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl border border-gray-200 bg-white"
                     >
                       <div className="flex items-center gap-4 min-w-0">
                         <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0 bg-green-100">
@@ -141,7 +141,7 @@ export default async function PortalContractsPage() {
                           </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-2 flex-wrap sm:shrink-0">
                         {viewUrl && (
                           <a
                             href={viewUrl}

@@ -98,7 +98,7 @@ export function BlogAccountsManager() {
                       {a.failed > 0 && <span className="status-badge bg-red-100 text-red-700">{a.failed} mislukt</span>}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="flex flex-wrap items-center gap-1.5 shrink-0">
                     {hasFramerCreds && !a.framer_valid && (
                       <button onClick={() => connectFramer(a.id)} disabled={busy === a.id + ':framer'} className="btn-secondary text-xs">{busy === a.id + ':framer' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5" />}Koppel Framer</button>
                     )}

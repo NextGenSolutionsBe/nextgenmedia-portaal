@@ -97,12 +97,12 @@ export function PortalCms() {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setManageFields(true)} disabled={!activeCol} className="btn-secondary text-sm" title="Velden van deze collectie beheren">
-            <Settings2 className="h-4 w-4" />Velden
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={() => setManageFields(true)} disabled={!activeCol} className="btn-secondary text-sm" title="Velden van deze collectie beheren" aria-label="Velden">
+            <Settings2 className="h-4 w-4" /><span className="hidden sm:inline">Velden</span>
           </button>
-          <button onClick={sync} disabled={syncing} className="btn-secondary text-sm" title="Actuele inhoud ophalen van je website">
-            {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}Ververs
+          <button onClick={sync} disabled={syncing} className="btn-secondary text-sm" title="Actuele inhoud ophalen van je website" aria-label="Ververs">
+            {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}<span className="hidden sm:inline">Ververs</span>
           </button>
           <button onClick={publish} disabled={publishing || pendingCount === 0}
             className="btn-primary text-sm disabled:opacity-40 disabled:cursor-not-allowed"
@@ -123,7 +123,7 @@ export function PortalCms() {
 
       {/* Items */}
       <div className="card-base p-0 overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-gray-100">
           <span className="text-sm font-medium">
             {colItems.length} item(s)
             {pendingDeletes > 0 && <span className="ml-2 text-xs font-normal text-red-500">· {pendingDeletes} verwijderd (wacht op publiceren)</span>}

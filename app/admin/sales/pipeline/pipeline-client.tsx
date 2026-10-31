@@ -468,10 +468,10 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
 
       {/* ── Waarde in de pijplijn ── */}
       <div className="grid grid-cols-3 gap-2">
-        <Totaal label="Verwachte omzet · open" waarde={euro(totalen.openCents)}
+        <Totaal label="Verwachte omzet · open" kort="Open" waarde={euro(totalen.openCents)}
           onder={`${totalen.openAantal} ${totalen.openAantal === 1 ? 'lead' : 'leads'} buiten gewonnen/verloren`} />
-        <Totaal label="Verwachte omzet · gewonnen" waarde={euro(totalen.gewonnenCents)} kleur="text-green-700" onder={`${kolommen.get('gewonnen')?.length ?? 0} leads`} />
-        <Totaal label="Verwachte omzet · verloren" waarde={euro(totalen.verlorenCents)} kleur="text-red-600" onder={`${kolommen.get('verloren')?.length ?? 0} leads`} />
+        <Totaal label="Verwachte omzet · gewonnen" kort="Gewonnen" waarde={euro(totalen.gewonnenCents)} kleur="text-green-700" onder={`${kolommen.get('gewonnen')?.length ?? 0} leads`} />
+        <Totaal label="Verwachte omzet · verloren" kort="Verloren" waarde={euro(totalen.verlorenCents)} kleur="text-red-600" onder={`${kolommen.get('verloren')?.length ?? 0} leads`} />
       </div>
       {filtersActief && <p className="text-[11px] text-gray-400 -mt-1">Bedragen volgen de actieve filters.</p>}
 
@@ -774,10 +774,10 @@ function Kaart({
   )
 }
 
-function Totaal({ label, waarde, onder, kleur = 'text-gray-900' }: { label: string; waarde: string; onder?: string; kleur?: string }) {
+function Totaal({ label, kort, waarde, onder, kleur = 'text-gray-900' }: { label: string; kort?: string; waarde: string; onder?: string; kleur?: string }) {
   return (
     <div className="rounded-xl border border-gray-200 bg-white px-2.5 sm:px-3 py-2 min-w-0">
-      <div className="text-[10px] font-semibold text-gray-400 truncate">{label}</div>
+      <div className="text-[10px] font-semibold text-gray-400 truncate" title={label}>{kort ? <><span className="sm:hidden">{kort}</span><span className="hidden sm:inline">{label}</span></> : label}</div>
       <div className={`text-base sm:text-lg font-bold tabular-nums leading-tight truncate ${kleur}`}>{waarde}</div>
       {onder && <div className="hidden sm:block text-[10px] text-gray-400">{onder}</div>}
     </div>

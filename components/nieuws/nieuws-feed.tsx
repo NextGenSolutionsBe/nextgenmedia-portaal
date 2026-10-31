@@ -44,7 +44,7 @@ export function NieuwsFeed({ begin, meer: beginMeer }: { begin: FeedItem[]; meer
         <h1 className="text-xl sm:text-2xl font-semibold flex items-center gap-2"><Megaphone className="h-6 w-6" />Nieuws</h1>
         <p className="text-sm text-gray-500 mt-0.5">Projecten die we afrondden, klanten in de kijker, tips en wat er beweegt in marketing.</p>
       </div>
-      <div className="sticky top-0 z-20 -mx-4 px-4 py-2 bg-white/90 backdrop-blur md:static md:mx-0 md:px-0 md:bg-transparent md:backdrop-blur-0">
+      <div className="sticky top-16 z-20 -mx-4 px-4 py-2 bg-white/90 backdrop-blur md:static md:mx-0 md:px-0 md:bg-transparent md:backdrop-blur-0">
         <div className="flex gap-1.5 overflow-x-auto no-scrollbar" role="tablist" aria-label="Categorie">
           {[{ key: '', label: 'Alles' }, ...CATEGORIEEN].map((c) => (
             <button key={c.key || 'alles'} type="button" role="tab" aria-selected={cat === c.key} onClick={() => kiesCat(c.key)}

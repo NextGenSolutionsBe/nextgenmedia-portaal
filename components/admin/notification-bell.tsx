@@ -53,7 +53,7 @@ export function NotificationBell() {
         )}
       </button>
       {open && (
-        <div className="absolute right-0 mt-1 w-80 bg-white border border-gray-200 rounded-xl shadow-lg z-50 overflow-hidden">
+        <div className="fixed inset-x-3 top-14 sm:absolute sm:inset-x-auto sm:top-auto sm:right-0 sm:mt-1 sm:w-80 bg-white border border-gray-200 rounded-xl shadow-lg z-50 overflow-hidden">
           <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
             <span className="text-sm font-semibold">Meldingen {unread.length > 0 && <span className="text-gray-400 font-normal">({unread.length})</span>}</span>
             {unread.length > 0 && <button onClick={markAll} className="text-xs text-gray-500 hover:text-black flex items-center gap-1"><Check className="h-3 w-3" />Alles gelezen</button>}

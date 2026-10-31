@@ -265,10 +265,10 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
       {/* ── Werkbalk ── */}
       <div className="card-base p-3 space-y-3">
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div role="tablist" aria-label="Facturen" className="inline-flex rounded-xl border border-gray-200 bg-gray-50 p-1">
+          <div role="tablist" aria-label="Facturen" className="inline-flex max-w-full overflow-x-auto no-scrollbar rounded-xl border border-gray-200 bg-gray-50 p-1">
             {TABS.map((t) => (
               <button key={t.key} role="tab" aria-selected={tab === t.key} type="button" onClick={() => { setTab(t.key); setSortering(null); if (weergave !== 'lijst') setWeergave('lijst') }}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${tab === t.key && weergave === 'lijst' ? 'bg-black text-white' : 'text-gray-700 hover:bg-white'}`}>
+                className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${tab === t.key && weergave === 'lijst' ? 'bg-black text-white' : 'text-gray-700 hover:bg-white'}`}>
                 {t.label} <span className={`ml-1 tabular-nums text-xs ${tab === t.key && weergave === 'lijst' ? 'text-gray-400' : 'text-gray-500'}`}>{tellingen[t.key]}</span>
               </button>
             ))}
