@@ -5,10 +5,12 @@ import { toast } from 'sonner'
 import { Loader2, Video, Clock, ArrowLeft, Check, AlertTriangle, CalendarCheck, Plus, X, Users, CalendarX, MoveRight } from 'lucide-react'
 import { datumLang, uur, isEmail } from '@/lib/meetings/model'
 import { Tijdkiezer, type Dag } from '@/app/boeken/tijdkiezer'
+import { TeamFotoKaart, GeenVoorkeur } from '@/components/portal/team-foto-kaart'
 
 /**
- * Klantapp — Meeting boeken en Mijn meetings. Stap 1 een vrij moment, stap 2
- * deelnemers en onderwerp, stap 3 nakijken en bevestigen. De server controleert
+ * Klantapp — Meeting boeken en Mijn meetings. Eerst met wie (Bram, Marco,
+ * Chiara… zoals ingesteld in Instellingen → Team in de klantapp), dan een vrij
+ * moment, deelnemers en onderwerp, en nakijken en bevestigen. De server controleert
  * alles opnieuw; deze pagina toont enkel wat hij teruggeeft (nooit iets uit
  * onze agenda behalve vrije begintijden).
  */
@@ -16,10 +18,12 @@ import { Tijdkiezer, type Dag } from '@/app/boeken/tijdkiezer'
 type Meeting = {
   id: string; status: string; titel: string; startsAt: string; endsAt: string; meetUrl: string | null
   magAnnuleren: boolean; magVerplaatsen: boolean; onderwerp: string | null
-  deelnemers: { naam: string | null; email: string }[]; organisator: string
+  deelnemers: { naam: string | null; email: string }[]; organisator: string; teamlid_id?: string | null
 }
+type TeamKeuze = { id: string; naam: string; voornaam: string; rol: string | null; foto_url: string | null }
 type Overzicht = {
   meetings: Meeting[]
+  team?: TeamKeuze[]
   profiel: { naam: string | null; email: string | null; bedrijf: string }
   magBoeken: boolean
   regels: { duurMinuten: number; minVooraf: string; venster: string; tijdzone: string }
@@ -44,18 +48,19 @@ function Wanneer({ m }: { m: { startsAt: string; endsAt: string } }) {
 }
 
 /** Vrije momenten ophalen en kiezen (ook voor verplaatsen). */
-function MomentKiezer({ verplaats, huidig, gekozen, onKies }: { verplaats?: string; huidig?: string; gekozen: string | null; onKies: (s: string) => void }) {
+function MomentKiezer({ verplaats, huidig, gekozen, onKies, teamlid }: { verplaats?: string; huidig?: string; gekozen: string | null; onKies: (s: string) => void; teamlid?: string }) {
   const [dagen, setDagen] = useState<Dag[] | null>(null)
   const [fout, setFout] = useState<string | null>(null)
   const laad = useCallback(async () => {
     setDagen(null); setFout(null)
     try {
-      const j = await api<{ dagen: Dag[] }>(`/api/portal/meetings/beschikbaarheid${verplaats ? `?verplaats=${verplaats}` : ''}`)
+      const qs = verplaats ? `?verplaats=${verplaats}` : teamlid ? `?teamlid=${teamlid}` : ''
+      const j = await api<{ dagen: Dag[] }>(`/api/portal/meetings/beschikbaarheid${qs}`)
       // Bij verplaatsen is het huidige moment geen keuze.
       const t = huidig ? Date.parse(huidig) : NaN
       setDagen(j.dagen.map((d) => ({ ...d, slots: d.slots.filter((x) => Date.parse(x.start) !== t) })).filter((d) => d.slots.length))
     } catch (e) { setFout(e instanceof Error ? e.message : 'Boeken is tijdelijk niet mogelijk.') }
-  }, [verplaats, huidig])
+  }, [verplaats, huidig, teamlid])
   useEffect(() => { laad() }, [laad])
   if (fout) return (
     <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 space-y-2" role="alert">
@@ -89,7 +94,7 @@ export function KlantMeetings() {
         <h2 id="mijn-meetings" className="text-base font-semibold">Mijn meetings</h2>
         {komend.length === 0 && <div className="card-base text-sm text-gray-500">Nog geen geplande meetings.</div>}
         <ul className="space-y-2">
-          {komend.map((m) => <li key={m.id}><MeetingKaart m={m} magBeheren={data.magBoeken} onVeranderd={laad} /></li>)}
+          {komend.map((m) => <li key={m.id}><MeetingKaart m={m} met={data.team?.find((t) => t.id === m.teamlid_id)?.naam ?? m.organisator} magBeheren={data.magBoeken} onVeranderd={laad} /></li>)}
         </ul>
         {ander.length > 0 && (
           <details className="text-sm">
@@ -106,7 +111,7 @@ export function KlantMeetings() {
   )
 }
 
-function MeetingKaart({ m, magBeheren, onVeranderd }: { m: Meeting; magBeheren: boolean; onVeranderd: () => void }) {
+function MeetingKaart({ m, met, magBeheren, onVeranderd }: { m: Meeting; met: string; magBeheren: boolean; onVeranderd: () => void }) {
   const [modus, setModus] = useState<'niets' | 'verplaats' | 'annuleer'>('niets')
   const [nieuw, setNieuw] = useState<string | null>(null)
   const [bezig, setBezig] = useState(false)
@@ -124,7 +129,7 @@ function MeetingKaart({ m, magBeheren, onVeranderd }: { m: Meeting; magBeheren: 
         <CalendarCheck className="h-5 w-5 shrink-0 mt-0.5" aria-hidden />
         <div className="min-w-0 flex-1">
           <div className="font-medium"><Wanneer m={m} /></div>
-          <div className="text-xs text-gray-600">30 minuten · Belgische tijd · met {m.organisator}</div>
+          <div className="text-xs text-gray-600">30 minuten · Belgische tijd · met {met}</div>
           {m.onderwerp && <div className="text-sm text-gray-700 mt-1 break-words">{m.onderwerp}</div>}
           <div className="text-xs text-gray-500 mt-1 flex items-center gap-1"><Users className="h-3 w-3" aria-hidden />{m.deelnemers.map((d) => d.naam || d.email).join(', ')}</div>
         </div>
@@ -170,7 +175,10 @@ function MeetingKaart({ m, magBeheren, onVeranderd }: { m: Meeting; magBeheren: 
 }
 
 function Boeken({ data, onGeboekt }: { data: Overzicht; onGeboekt: () => void }) {
-  const [stap, setStap] = useState<'tijd' | 'gegevens' | 'controle' | 'klaar'>('tijd')
+  const team = data.team ?? []
+  const [stap, setStap] = useState<'wie' | 'tijd' | 'gegevens' | 'controle' | 'klaar'>(team.length ? 'wie' : 'tijd')
+  const [teamlid, setTeamlid] = useState<string>('')
+  const gekozenLid = team.find((t) => t.id === teamlid) ?? null
   const [start, setStart] = useState<string | null>(null)
   const [naam, setNaam] = useState(data.profiel.naam ?? '')
   const [email, setEmail] = useState(data.profiel.email ?? '')
@@ -192,7 +200,7 @@ function Boeken({ data, onGeboekt }: { data: Overzicht; onGeboekt: () => void })
     try {
       const r = await api<{ startsAt: string; endsAt: string; meetUrl: string | null; bevestigingVerstuurd: boolean }>('/api/portal/meetings', {
         method: 'POST',
-        body: JSON.stringify({ aanvraag_sleutel: sleutel, start, naam: naam.trim(), email: email.trim(), onderwerp: onderwerp.trim(), deelnemers: extraGeldig.map((x) => ({ naam: x.naam.trim(), email: x.email.trim() })) }),
+        body: JSON.stringify({ aanvraag_sleutel: sleutel, start, naam: naam.trim(), email: email.trim(), onderwerp: onderwerp.trim(), deelnemers: extraGeldig.map((x) => ({ naam: x.naam.trim(), email: x.email.trim() })), teamlid_id: teamlid || null }),
       })
       setKlaar(r); setStap('klaar'); onGeboekt()
     } catch (e) {
@@ -202,7 +210,7 @@ function Boeken({ data, onGeboekt }: { data: Overzicht; onGeboekt: () => void })
       if (status === 409) { setStart(null); setStap('tijd'); setKiezerSleutel((x) => x + 1); setSleutel(nieuweSleutel()) }
     } finally { setBezig(false) }
   }
-  const opnieuw = () => { setStap('tijd'); setStart(null); setKlaar(null); setFout(null); setOnderwerp(''); setExtra([]); setSleutel(nieuweSleutel()); setKiezerSleutel((x) => x + 1) }
+  const opnieuw = () => { setStap(team.length ? 'wie' : 'tijd'); setTeamlid(''); setStart(null); setKlaar(null); setFout(null); setOnderwerp(''); setExtra([]); setSleutel(nieuweSleutel()); setKiezerSleutel((x) => x + 1) }
 
   return (
     <section className="card-base space-y-4" aria-labelledby="boeken-titel">
@@ -213,10 +221,30 @@ function Boeken({ data, onGeboekt }: { data: Overzicht; onGeboekt: () => void })
 
       {fout && stap !== 'klaar' && <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">{fout}</p>}
 
+      {stap === 'wie' && (
+        <div className="space-y-3">
+          <div>
+            <p className="text-sm font-semibold">Met wie wil je praten?</p>
+            <p className="text-xs text-gray-600">Je ziet daarna de vrije momenten van die persoon.</p>
+          </div>
+          <div className="space-y-3" role="radiogroup" aria-label="Met wie">
+            <GeenVoorkeur tekst="Maakt niet uit" sub="Het eerste vrije moment bij ons team" gekozen={teamlid === ''} onKies={() => setTeamlid('')} />
+            <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-3 gap-4">
+              {team.map((t) => <TeamFotoKaart key={t.id} naam={t.naam} sub={t.rol} foto={t.foto_url} gekozen={teamlid === t.id} onKies={() => setTeamlid(t.id)} />)}
+            </div>
+          </div>
+          <button type="button" onClick={() => { setStart(null); setKiezerSleutel((x) => x + 1); setStap('tijd') }} className={`btn-primary w-full sm:w-auto justify-center ${knop}`}>Verder{gekozenLid ? `: met ${gekozenLid.voornaam}` : ''}</button>
+        </div>
+      )}
+
       {stap === 'tijd' && (
         <>
-          <MomentKiezer key={kiezerSleutel} gekozen={start} onKies={(s) => { setStart(s); setFout(null) }} />
-          <button type="button" disabled={!start} onClick={() => setStap('gegevens')} className={`btn-primary w-full sm:w-auto justify-center ${knop}`}>Verder{start ? `: ${uur(start)}` : ''}</button>
+          {gekozenLid && <p className="text-sm text-gray-700">Vrije momenten van <b>{gekozenLid.voornaam}</b></p>}
+          <MomentKiezer key={`${kiezerSleutel}-${teamlid}`} teamlid={teamlid || undefined} gekozen={start} onKies={(s) => { setStart(s); setFout(null) }} />
+          <div className="flex gap-2 flex-wrap">
+            {team.length > 0 && <button type="button" onClick={() => setStap('wie')} className={`btn-secondary ${knop}`}><ArrowLeft className="h-4 w-4" />Iemand anders</button>}
+            <button type="button" disabled={!start} onClick={() => setStap('gegevens')} className={`btn-primary w-full sm:w-auto justify-center ${knop}`}>Verder{start ? `: ${uur(start)}` : ''}</button>
+          </div>
         </>
       )}
 
@@ -255,6 +283,7 @@ function Boeken({ data, onGeboekt }: { data: Overzicht; onGeboekt: () => void })
         <div className="space-y-3">
           <dl className="divide-y divide-gray-100 text-sm">
             <div className="py-2 grid grid-cols-[110px_1fr] gap-2"><dt className="text-gray-500">Wanneer</dt><dd className="font-medium"><Wanneer m={{ startsAt: start, endsAt: new Date(Date.parse(start) + 30 * 60000).toISOString() }} /></dd></div>
+            {gekozenLid && <div className="py-2 grid grid-cols-[110px_1fr] gap-2"><dt className="text-gray-500">Met</dt><dd className="font-medium">{gekozenLid.naam}</dd></div>}
             <div className="py-2 grid grid-cols-[110px_1fr] gap-2"><dt className="text-gray-500">Tijdzone</dt><dd>Belgische tijd (Europe/Brussels)</dd></div>
             <div className="py-2 grid grid-cols-[110px_1fr] gap-2"><dt className="text-gray-500">Duur</dt><dd>30 minuten, gratis</dd></div>
             <div className="py-2 grid grid-cols-[110px_1fr] gap-2"><dt className="text-gray-500">Waar</dt><dd>Google Meet (de link komt in de uitnodiging)</dd></div>
@@ -272,7 +301,7 @@ function Boeken({ data, onGeboekt }: { data: Overzicht; onGeboekt: () => void })
       {stap === 'klaar' && klaar && (
         <div className="space-y-3">
           <p className="flex items-center gap-2 font-medium"><Check className="h-5 w-5" />Je meeting staat vast</p>
-          <p className="text-sm"><Wanneer m={klaar} /> (Belgische tijd)</p>
+          <p className="text-sm"><Wanneer m={klaar} /> (Belgische tijd){gekozenLid ? <> met <b>{gekozenLid.naam}</b></> : null}</p>
           {klaar.meetUrl && <a href={klaar.meetUrl} target="_blank" rel="noreferrer" className={`flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium hover:border-gray-400 ${knop}`}><Video className="h-4 w-4" />{klaar.meetUrl.replace(/^https?:\/\//, '')}</a>}
           <p className="text-sm text-gray-600">{klaar.bevestigingVerstuurd ? `De bevestiging is verstuurd naar ${email.trim()}.` : 'De meeting staat vast, maar de bevestigingsmail kon niet vertrekken. De uitnodiging van Google Agenda komt wel aan; wij sturen de bevestiging opnieuw.'}</p>
           <button type="button" onClick={opnieuw} className={`btn-secondary ${knop}`}>Nog een meeting boeken</button>

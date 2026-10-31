@@ -97,6 +97,8 @@ async function main() {
   })
 
   await test('5. Kies jouw expert: naam, foto, rollen en passende expertises; uitgezet of inactief verdwijnt meteen', async () => {
+    // Instelling "enkel specialisten" (Instellingen → Team in de klantapp).
+    tabellen.app_settings = [{ key: 'team_klantapp', value: { diensten_iedereen: false } }]
     let e = await expertsVoor(db, 'dienst', 'content_shoot')
     assert.deepEqual(e.map((x) => x.naam), ['Bram Reinquin', 'Chiara Walmagh'])
     assert.equal(e[0].foto_url, 'https://opslag.test/personeel/fotos/bram.jpg')
@@ -106,6 +108,15 @@ async function main() {
     e = await expertsVoor(db, 'dienst', 'content_shoot')
     assert.deepEqual(e.map((x) => x.naam), ['Bram Reinquin'])
     tabellen.personeel.find((x) => x.id === CHIARA)!.expert_zichtbaar = true
+  })
+
+  await test('5b. Standaard bij diensten: iedereen die zichtbaar staat, specialisten eerst; consultancy blijft op expertise', async () => {
+    tabellen.app_settings = []
+    const e = await expertsVoor(db, 'dienst', 'content_shoot')
+    assert.equal(e.length, 5, 'Bram, Chiara, Marco, Pieter-Jan en Senne')
+    assert.deepEqual(e.slice(0, 2).map((x) => x.naam), ['Bram Reinquin', 'Chiara Walmagh'], 'specialisten bovenaan')
+    assert.ok(e[0].specialist && e[1].specialist && !e[4].specialist)
+    assert.deepEqual((await expertsVoor(db, 'consultancy', 'ai_workshop')).map((x) => x.naam), ['Marco Castermans'])
   })
 
   await test('6. ClickUp-taaknaam en omschrijving: altijd herkenbaar als aanvraag, nooit als opdracht', () => {
@@ -173,7 +184,11 @@ async function main() {
     const vreemd = bouwPad(ANDER, 'image/png', crypto.randomUUID())
     assert.equal(padVanKlant(vreemd, KLANT), false)
     await assert.rejects(maakAanvraag(db, KLANT, { ...shoot(), bestanden: [{ pad: vreemd, bestandsnaam: 'x.png', mimetype: 'image/png', grootte: 1 }] }, door), (e: unknown) => e instanceof AanvraagFout && /hoort niet/.test(e.publiek))
+    // Met "enkel specialisten" past Senne (grafisch) niet bij een shoot; standaard staat iedereen open.
+    tabellen.app_settings = [{ key: 'team_klantapp', value: { diensten_iedereen: false } }]
     await assert.rejects(maakAanvraag(db, KLANT, shoot({ expert_id: SENNE }), door), (e: unknown) => e instanceof AanvraagFout && /niet \(meer\) beschikbaar/.test(e.publiek))
+    tabellen.app_settings = []
+    // Wie niet als expert zichtbaar staat, is nooit te kiezen.
     await assert.rejects(maakAanvraag(db, KLANT, shoot({ expert_id: STUDENT }), door), (e: unknown) => e instanceof AanvraagFout)
   })
 

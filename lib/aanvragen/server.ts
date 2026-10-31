@@ -6,7 +6,7 @@ import { deadlineMs } from '@/lib/sales/lead-taken'
 import { clickupConfigured, maakGewoneTaak, zoekOfMaakLijst, sluitTaak, reageerOpTaak, zoekTaakMetMarker, wisOngevraagdeVervaldatum, zetToegewezene, listClickupMembers } from '@/lib/clickup'
 import { veiligeFout } from '@/lib/meetings/server'
 import {
-  valideerAanvraag, vindType, nieuweAanvraagTitel, relevanteExperts, volleNaam, expertiseLabel, clickupNaam, clickupOmschrijving, magIntrekken,
+  valideerAanvraag, vindType, nieuweAanvraagTitel, relevanteExperts, toonIedereen, teamKlantappUit, TEAM_KLANTAPP_SLEUTEL, type TeamKlantappInstelling, volleNaam, expertiseLabel, clickupNaam, clickupOmschrijving, magIntrekken,
   isStatus, STATUS, TEAM_STATUSSEN, OPEN_STATUSSEN, type AanvraagInvoer, type AanvraagSoort, type AanvraagStatus, type ExpertBron, type OfferteStatus, type Scope,
 } from '@/lib/aanvragen/model'
 import { BUCKET, MAX_BESTANDEN, mimeToegestaan, padVanKlant } from '@/lib/aanvragen/bestanden'
@@ -83,10 +83,16 @@ async function zichtbareExperts(admin: Admin): Promise<PersoneelRij[]> {
 }
 
 /** Wat de klant ziet bij "Kies jouw expert": naam, foto, rollen en de expertises die passen. */
-export async function expertsVoor(admin: Admin, soort: AanvraagSoort, typeKey: string): Promise<{ id: string; naam: string; rollen: string[]; expertises: string[]; foto_url: string | null }[]> {
+async function teamInstelling(admin: Admin): Promise<TeamKlantappInstelling> {
+  const { data } = await admin.from('app_settings').select('value').eq('key', TEAM_KLANTAPP_SLEUTEL).maybeSingle()
+  return teamKlantappUit(data?.value ?? null)
+}
+
+export async function expertsVoor(admin: Admin, soort: AanvraagSoort, typeKey: string): Promise<{ id: string; naam: string; rollen: string[]; expertises: string[]; foto_url: string | null; specialist: boolean }[]> {
   const t = vindType(soort, typeKey)
   if (!t) throw new AanvraagFout('Onbekende dienst of consultancy.')
-  const experts = relevanteExperts(await zichtbareExperts(admin), t)
+  const iedereen = toonIedereen(soort, await teamInstelling(admin))
+  const experts = relevanteExperts(await zichtbareExperts(admin), t, { iedereen })
   const paden = experts.map((e) => e.profielfoto_pad).filter((x): x is string => !!x)
   const urls = new Map<string, string>()
   if (paden.length) {
@@ -98,6 +104,8 @@ export async function expertsVoor(admin: Admin, soort: AanvraagSoort, typeKey: s
     rollen: (e.expert_rollen ?? []).length ? (e.expert_rollen as string[]) : e.functie ? [e.functie] : [],
     expertises: e.relevant.map(expertiseLabel),
     foto_url: e.profielfoto_pad ? urls.get(e.profielfoto_pad) ?? null : null,
+    // Specialist: iemand met een passende expertise in een lijst waar iedereen staat.
+    specialist: iedereen && t.expertises.length > 0 && e.relevant.length > 0,
   }))
 }
 
@@ -130,7 +138,7 @@ export async function maakAanvraag(
   let expertNaam: string | null = null
   if (w.expert_id) {
     const t = vindType(w.soort, w.type)!
-    const ok = relevanteExperts(await zichtbareExperts(admin), t).find((e) => e.id === w.expert_id)
+    const ok = relevanteExperts(await zichtbareExperts(admin), t, { iedereen: toonIedereen(w.soort, await teamInstelling(admin)) }).find((e) => e.id === w.expert_id)
     if (!ok) throw new AanvraagFout('Deze expert is niet (meer) beschikbaar voor deze aanvraag. Kies iemand anders of “Geen voorkeur”.')
     expertNaam = volleNaam(ok)
   }

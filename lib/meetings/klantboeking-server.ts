@@ -27,7 +27,7 @@ import { isEmail, type Persoon } from '@/lib/meetings/model'
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Admin = { from: (t: string) => any }
+type Admin = { from: (t: string) => any; storage?: { from: (b: string) => any } }
 
 /** Voor de klant: kort en eerlijk, zonder technische details. */
 export class BoekingFout extends Error {
@@ -64,11 +64,13 @@ export async function bewaarKbInstellingen(admin: Admin, w: KlantboekingInstelli
 
 type Agenda = { id: string; name: string | null; status: string; active: boolean | null; account_email: string | null; clickup_assignee_id: number | null; signature_email?: string | null }
 
-async function boekbareAgenda(admin: Admin): Promise<Agenda> {
+async function boekbareAgenda(admin: Admin, teamlid?: Teamlid | null): Promise<Agenda> {
   const inst = await leesKbInstellingen(admin)
   if (!inst.actief) throw new BoekingFout('Online boeken staat momenteel uit. Mail ons gerust op info@nextgenmedia.be.', 503)
-  if (!inst.agenda_id) throw new BoekingFout(NIET_BETROUWBAAR, 503, 'Geen agenda ingesteld voor klantboekingen')
-  const { data } = await admin.from('sales_calendar_connections').select('id, name, status, active, account_email, clickup_assignee_id, signature_email').eq('id', inst.agenda_id).maybeSingle()
+  // Een teamlid met een eigen agenda: vrije momenten en de afspraak in die agenda.
+  const agendaId = teamlid?.meeting_agenda_id || inst.agenda_id
+  if (!agendaId) throw new BoekingFout(NIET_BETROUWBAAR, 503, 'Geen agenda ingesteld voor klantboekingen')
+  const { data } = await admin.from('sales_calendar_connections').select('id, name, status, active, account_email, clickup_assignee_id, signature_email').eq('id', agendaId).maybeSingle()
   const a = data as Agenda | null
   if (!a || a.active === false || a.status !== 'connected') throw new BoekingFout(NIET_BETROUWBAAR, 503, 'Agenda voor klantboekingen niet (meer) gekoppeld')
   return a
@@ -83,6 +85,46 @@ async function zusterIds(admin: Admin, a: Agenda): Promise<string[]> {
   return ids.includes(a.id) ? ids : [a.id, ...ids]
 }
 
+// ── Team: met wie boekt de klant? ────────────────────────────────────────────
+//
+// Wie bij Meeting boeken staat, zet je in Instellingen → Team in de klantapp
+// (personeel.meeting_zichtbaar). Met een eigen agenda (meeting_agenda_id) komen
+// de vrije momenten en de afspraak uit die agenda; zonder uit de standaardagenda,
+// en dan blokkeren ook de ClickUp-meetings van dat teamlid. De ClickUp-taak gaat
+// altijd naar het gekozen teamlid.
+
+export type Teamlid = { id: string; voornaam: string; achternaam: string | null; clickup_user_id: number | null; meeting_agenda_id: string | null }
+export type TeamKeuze = { id: string; naam: string; voornaam: string; rol: string | null; foto_url: string | null }
+const PERSONEEL_FOTOS = 'personeel'
+
+async function leesTeamlid(admin: Admin, id: unknown): Promise<Teamlid | null> {
+  if (!id) return null
+  if (!UUID.test(String(id))) throw new BoekingFout('Kies een teamlid uit de lijst.')
+  const { data } = await admin.from('personeel').select('id, voornaam, achternaam, clickup_user_id, meeting_agenda_id, actief, meeting_zichtbaar').eq('id', String(id)).maybeSingle()
+  const t = data as (Teamlid & { actief: boolean; meeting_zichtbaar: boolean }) | null
+  if (!t || !t.actief || !t.meeting_zichtbaar) throw new BoekingFout('Dit teamlid kan je nu niet kiezen. Kies iemand anders.', 409)
+  return { id: t.id, voornaam: t.voornaam, achternaam: t.achternaam, clickup_user_id: t.clickup_user_id ? Number(t.clickup_user_id) : null, meeting_agenda_id: t.meeting_agenda_id }
+}
+
+/** De teamleden waarmee een klant een meeting kan boeken, met een grote foto. */
+export async function meetingTeam(admin: Admin): Promise<TeamKeuze[]> {
+  const { data } = await admin.from('personeel').select('id, voornaam, achternaam, functie, expert_rollen, profielfoto_pad, klantapp_volgorde')
+    .eq('actief', true).eq('meeting_zichtbaar', true)
+  const lijst = ((data ?? []) as { id: string; voornaam: string; achternaam: string | null; functie: string | null; expert_rollen: string[] | null; profielfoto_pad: string | null; klantapp_volgorde: number | null }[])
+    .sort((a, b) => (a.klantapp_volgorde ?? 99) - (b.klantapp_volgorde ?? 99) || a.voornaam.localeCompare(b.voornaam, 'nl'))
+  const paden = lijst.map((t) => t.profielfoto_pad).filter((x): x is string => !!x)
+  const urls = new Map<string, string>()
+  if (paden.length && admin.storage) {
+    const { data: s } = await admin.storage.from(PERSONEEL_FOTOS).createSignedUrls(paden, 3600)
+    for (const r of (s ?? []) as { path: string | null; signedUrl: string | null }[]) if (r.path && r.signedUrl) urls.set(r.path, r.signedUrl)
+  }
+  return lijst.map((t) => ({
+    id: t.id, voornaam: t.voornaam, naam: [t.voornaam, t.achternaam].filter(Boolean).join(' '),
+    rol: (t.expert_rollen ?? [])[0] ?? t.functie ?? null,
+    foto_url: t.profielfoto_pad ? urls.get(t.profielfoto_pad) ?? null : null,
+  }))
+}
+
 export type Beschikbaarheid = { agendaId: string; slots: string[] }
 
 const cache = new Map<string, { tot: number; waarde: Beschikbaarheid }>()
@@ -93,13 +135,14 @@ const CACHE_MS = 60_000
  * werkuren + verkoopafspraken (loadCalendar), Google vrij/bezet (strikt),
  * ClickUp-taken van de eigenaar en de meetings uit de app.
  */
-export async function berekenVrijeSlots(admin: Admin, opts: { nu?: Date; van?: number; tot?: number; vers?: boolean; negeerMeetingId?: string } = {}): Promise<Beschikbaarheid> {
+export async function berekenVrijeSlots(admin: Admin, opts: { nu?: Date; van?: number; tot?: number; vers?: boolean; negeerMeetingId?: string; teamlidId?: string | null } = {}): Promise<Beschikbaarheid> {
   const nu = opts.nu ?? new Date()
-  const agenda = await boekbareAgenda(admin)
+  const teamlid = await leesTeamlid(admin, opts.teamlidId)
+  const agenda = await boekbareAgenda(admin, teamlid)
   const alle = kandidaatSlots(nu)
   const kandidaten = alle.filter((s) => (opts.van === undefined || new Date(s).getTime() >= opts.van) && (opts.tot === undefined || new Date(s).getTime() < opts.tot))
   if (!kandidaten.length) return { agendaId: agenda.id, slots: [] }
-  const sleutel = `${agenda.id}|${kandidaten[0]}|${kandidaten[kandidaten.length - 1]}|${opts.negeerMeetingId ?? ''}`
+  const sleutel = `${agenda.id}|${teamlid?.id ?? ''}|${kandidaten[0]}|${kandidaten[kandidaten.length - 1]}|${opts.negeerMeetingId ?? ''}`
   const hit = cache.get(sleutel)
   if (!opts.vers && hit && hit.tot > Date.now()) return hit.waarde
 
@@ -116,7 +159,8 @@ export async function berekenVrijeSlots(admin: Admin, opts: { nu?: Date; van?: n
     const [cal, g, taken] = await Promise.all([
       loadCalendar(org.id, van, tot, agenda.id),
       haalBezetStrikt(agenda.id, van, tot),
-      haalSyncTaken([Number(agenda.clickup_assignee_id)], van - 86400_000, tot + 86400_000),
+      // ClickUp-meetings van de agenda-eigenaar én van het gekozen teamlid.
+      haalSyncTaken([...new Set([Number(agenda.clickup_assignee_id), ...(teamlid?.clickup_user_id ? [teamlid.clickup_user_id] : [])])], van - 86400_000, tot + 86400_000),
     ])
     if (!cal || cal.ownerId !== agenda.id) throw new Error('Werkuren van de agenda niet gelezen')
     werkuren = cal.segments
@@ -151,9 +195,9 @@ export async function berekenVrijeSlots(admin: Admin, opts: { nu?: Date; van?: n
 }
 
 /** Is precies dit moment nu (vers berekend) nog vrij? */
-async function nogVrij(admin: Admin, startsAt: string, negeerMeetingId?: string): Promise<Beschikbaarheid & { vrij: boolean }> {
+async function nogVrij(admin: Admin, startsAt: string, negeerMeetingId?: string, teamlidId?: string | null): Promise<Beschikbaarheid & { vrij: boolean }> {
   const t = new Date(startsAt).getTime()
-  const b = await berekenVrijeSlots(admin, { van: t - 60_000, tot: t + 60_000, vers: true, negeerMeetingId })
+  const b = await berekenVrijeSlots(admin, { van: t - 60_000, tot: t + 60_000, vers: true, negeerMeetingId, teamlidId })
   return { ...b, vrij: b.slots.includes(new Date(startsAt).toISOString()) }
 }
 
@@ -251,6 +295,8 @@ export type Klantapp = {
   doorEmail: string | null
   /** Collega's die mee uitgenodigd worden. */
   extraDeelnemers?: unknown
+  /** Met wie (Instellingen → Team in de klantapp); leeg = maakt niet uit. */
+  teamlidId?: unknown
 }
 
 /** Extra deelnemers uit de klantapp: geldige, unieke e-mailadressen, hoogstens vijf. */
@@ -295,8 +341,9 @@ export async function boekKlantmeeting(admin: Admin, invoer: BoekingInvoer & { a
   const extra = klantapp ? schoonDeelnemers(klantapp.extraDeelnemers, w.email) : []
   const bedrijf = klantapp ? klantapp.bedrijf : w.bedrijf
 
-  const agenda = await boekbareAgenda(admin)
-  const vrij = await nogVrij(admin, w.startsAt)
+  const teamlid = klantapp ? await leesTeamlid(admin, klantapp.teamlidId) : null
+  const agenda = await boekbareAgenda(admin, teamlid)
+  const vrij = await nogVrij(admin, w.startsAt, undefined, teamlid?.id)
   if (!vrij.vrij) throw new BoekingFout('Dit tijdstip is net niet meer beschikbaar. Kies een ander moment.', 409)
 
   // Via de link: een persoonlijke beheerlink. Via de klantapp: beheren met de login.
@@ -309,6 +356,8 @@ export async function boekKlantmeeting(admin: Admin, invoer: BoekingInvoer & { a
     klant_ontvangers: [{ naam: w.naam, email: w.email }, ...extra], deelnemers: [], herinnering_aan: true,
     boeker_bedrijf: bedrijf, boeker_reden: w.reden, beheer_token_hash: beheer.soort === 'link' ? hashToken(beheer.token) : null,
     created_by_email: klantapp ? `klantapp${klantapp.doorEmail ? `:${klantapp.doorEmail}` : ''}` : 'klantboeking',
+    // Gekozen teamlid: zijn of haar ClickUp-gebruiker krijgt de taak.
+    ...(teamlid ? { teamlid_id: teamlid.id, clickup_toegewezen: teamlid.clickup_user_id } : {}),
   }).select('*').single()
   if (error) {
     if (/klant_meetings_klantslot|duplicate|unique|23505/i.test(error.message)) {
@@ -381,9 +430,10 @@ export async function verplaatsKlantboeking(admin: Admin, m: MeetingRij, beheer:
   if (reden) throw new BoekingFout(reden)
   const startsAt = new Date(start).toISOString()
   if (startsAt === new Date(m.starts_at).toISOString()) return m
-  const agenda = await boekbareAgenda(admin)
+  const teamlid = m.teamlid_id ? await leesTeamlid(admin, m.teamlid_id).catch(() => null) : null
+  const agenda = await boekbareAgenda(admin, teamlid)
   if (m.agenda_id !== agenda.id) throw new BoekingFout('Verplaatsen lukt niet via de link. Mail ons op info@nextgenmedia.be.', 409)
-  const vrij = await nogVrij(admin, startsAt, m.id)
+  const vrij = await nogVrij(admin, startsAt, m.id, teamlid?.id)
   if (!vrij.vrij) throw new BoekingFout('Dit tijdstip is net niet meer beschikbaar. Kies een ander moment.', 409)
   const vorig = { starts_at: m.starts_at, ends_at: m.ends_at }
   try {
@@ -435,5 +485,6 @@ export function klantappWeergave(m: MeetingRij, nu: Date = new Date()) {
     onderwerp: m.boeker_reden ?? null,
     deelnemers: m.klant_ontvangers.map((x) => ({ naam: x.naam ?? null, email: x.email })),
     organisator: m.organisator_naam ?? 'NextGenMedia',
+    teamlid_id: m.teamlid_id ?? null,
   }
 }

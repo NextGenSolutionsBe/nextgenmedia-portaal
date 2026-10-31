@@ -3,7 +3,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { requirePortalPermission, sessionCan, logPortalAction } from '@/lib/portal-auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { KB_DUUR_MIN, KB_MIN_VOORAF_TEKST, KB_VENSTER } from '@/lib/meetings/klantboeking'
-import { boekKlantmeeting, klantappMeetings, klantappMeeting, klantappWeergave, BoekingFout } from '@/lib/meetings/klantboeking-server'
+import { boekKlantmeeting, klantappMeetings, klantappMeeting, klantappWeergave, meetingTeam, BoekingFout } from '@/lib/meetings/klantboeking-server'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -29,9 +29,12 @@ export async function GET() {
   const g = await requirePortalPermission('meetings', 'view')
   if (!g.ok) return g.response
   try {
-    const lijst = await klantappMeetings(createAdminSupabaseClient(), g.session.clientId)
+    const admin = createAdminSupabaseClient()
+    const [lijst, team] = await Promise.all([klantappMeetings(admin, g.session.clientId), meetingTeam(admin).catch(() => [])])
     return NextResponse.json({
       meetings: lijst.map((m) => klantappWeergave(m)),
+      // Met wie kan de klant boeken (naam, rol, grote foto); leeg = geen keuze tonen.
+      team,
       profiel: { naam: g.session.name, email: g.session.email, bedrijf: await bedrijfVan(g.session.clientId) },
       magBoeken: sessionCan(g.session, 'meetings', 'book'),
       regels: { duurMinuten: KB_DUUR_MIN, minVooraf: KB_MIN_VOORAF_TEKST, venster: `${KB_VENSTER.van} en ${KB_VENSTER.tot}`, tijdzone: 'Europe/Brussels' },
@@ -56,7 +59,7 @@ export async function POST(req: NextRequest) {
     const bedrijf = await bedrijfVan(g.session.clientId)
     const r = await boekKlantmeeting(admin, {
       aanvraag_sleutel: b.aanvraag_sleutel, naam: b.naam, email: b.email, reden: b.onderwerp, start: b.start, bedrijf,
-    }, new Date(), { clientId: g.session.clientId, bedrijf, doorEmail: g.session.email, extraDeelnemers: b.deelnemers })
+    }, new Date(), { clientId: g.session.clientId, bedrijf, doorEmail: g.session.email, extraDeelnemers: b.deelnemers, teamlidId: b.teamlid_id || null })
     if (!r.herhaald) await logPortalAction(g.session, 'meeting.geboekt', { type: 'klant_meeting', id: r.id }, { req, meta: { starts_at: r.startsAt, bevestiging: r.bevestigingVerstuurd } })
     const m = await klantappMeeting(admin, g.session.clientId, r.id)
     return NextResponse.json({ ...r, meeting: m ? klantappWeergave(m) : null })

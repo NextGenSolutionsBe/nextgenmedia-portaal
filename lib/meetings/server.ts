@@ -49,6 +49,8 @@ export type MeetingRij = {
   uitnodiging_status?: string | null; uitnodiging_op?: string | null; uitnodiging_naar?: string[] | null
   gsm_melding_status?: string | null; gsm_melding_fout?: string | null
   vorm?: 'online' | 'locatie' | null; locatie?: string | null; met_meet?: boolean | null
+  /** Klantboeking met een gekozen teamlid: die ClickUp-gebruiker krijgt de taak. */
+  teamlid_id?: string | null; clickup_toegewezen?: number | null
 }
 
 export type HerinneringRij = {
@@ -260,7 +262,8 @@ export async function stapClickup(admin: Admin, m: MeetingRij): Promise<MeetingR
     let taskId: string | null = null
     if (vorigeStart) taskId = await zoekTaakMetMarker(doel.listId, clickupMarker(m.id), new Date(vorigeStart).getTime())
     if (taskId) await werkAfspraakTaakBij(taskId, taakVelden(m, k))
-    else taskId = await maakAfspraakTaak(doel.listId, { ...taakVelden(m, k), assigneeId: doel.assigneeId })
+    // Gekozen teamlid gaat voor op de eigenaar van de agenda.
+    else taskId = await maakAfspraakTaak(doel.listId, { ...taakVelden(m, k), assigneeId: m.clickup_toegewezen ? Number(m.clickup_toegewezen) : doel.assigneeId })
     return bewaar(admin, m.id, { clickup_task_id: taskId, clickup_status: 'ok', clickup_fout: null })
   } catch (e) {
     return bewaar(admin, m.id, { clickup_status: 'fout', clickup_fout: veiligeFout(e) })

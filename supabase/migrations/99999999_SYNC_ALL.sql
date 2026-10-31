@@ -6668,3 +6668,13 @@ DO $$ BEGIN
     ALTER TABLE public.klant_events ADD CONSTRAINT klant_events_soort_check CHECK (soort IN ('webinar', 'workshop', 'event', 'opleiding', 'andere'));
   END IF;
 END $$;
+
+-- Team in de klantapp: wie staat bij Meeting boeken (meeting_zichtbaar), met
+-- welke agenda (leeg = de standaardagenda van klantboekingen), in welke volgorde.
+-- Een klantmeeting kan aan een gekozen teamlid hangen; de ClickUp-taak gaat naar
+-- diens ClickUp-gebruiker (clickup_toegewezen).
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS meeting_zichtbaar boolean NOT NULL DEFAULT false;
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS meeting_agenda_id uuid REFERENCES public.sales_calendar_connections(id) ON DELETE SET NULL;
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS klantapp_volgorde integer;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS teamlid_id uuid REFERENCES public.personeel(id) ON DELETE SET NULL;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS clickup_toegewezen bigint;

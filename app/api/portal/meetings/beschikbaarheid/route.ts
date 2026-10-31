@@ -12,6 +12,7 @@ export const maxDuration = 60
  * Klantapp — vrije momenten (11:00–17:00, minstens 72 uur vooraf, 30 minuten).
  * Enkel begintijden: nooit titels, namen of andere info uit de agenda of ClickUp.
  * ?verplaats=<id>: bij het verplaatsen van een eigen boeking telt die zelf niet als bezet.
+ * ?teamlid=<id>: de vrije momenten van dat teamlid (Instellingen → Team in de klantapp).
  */
 export async function GET(req: NextRequest) {
   const g = await requirePortalPermission('meetings', 'book')
@@ -23,7 +24,9 @@ export async function GET(req: NextRequest) {
     const eigen = req.nextUrl.searchParams.get('verplaats')
     const m = eigen ? await klantappMeeting(admin, g.session.clientId, eigen) : null
     if (eigen && !m) return NextResponse.json({ error: 'Meeting niet gevonden.' }, { status: 404 })
-    const b = await berekenVrijeSlots(admin, { negeerMeetingId: m?.id })
+    // Bij verplaatsen: hetzelfde teamlid als bij het boeken.
+    const teamlid = m ? m.teamlid_id ?? null : req.nextUrl.searchParams.get('teamlid')
+    const b = await berekenVrijeSlots(admin, { negeerMeetingId: m?.id, teamlidId: teamlid || null })
     return NextResponse.json({ dagen: perDag(b.slots) }, { headers: { 'Cache-Control': 'no-store' } })
   } catch (e) {
     if (e instanceof BoekingFout) {
