@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { magIk } from '@/lib/instellingen/laden'
 import { safeMessage } from '@/lib/api-error'
@@ -32,12 +33,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const { data } = await admin.from('klant_aanvragen').select('*').eq('id', id).maybeSingle()
     if (!data) return NextResponse.json({ error: 'Aanvraag niet gevonden.' }, { status: 404 })
     const b = await req.json().catch(() => ({})) as TeamActie
-    const x = await teamActie(admin, data as AanvraagRij, b, persoon.naam || persoon.email)
+    // ClickUp en de audit-log ronden af na het antwoord: de knop in het scherm is meteen klaar.
+    const x = await teamActie(admin, data as AanvraagRij, b, persoon.naam || persoon.email, { achtergrond: waitUntil })
     const { ip, userAgent } = requestMeta(req)
-    await logAudit({
+    waitUntil(logAudit({
       action: `aanvraag.${b.actie}`, entityType: 'klant_aanvraag', entityId: id, actorUserId: persoon.userId, actorEmail: persoon.email,
       summary: `${x.type_label}: ${x.status}`, ip, userAgent, metadata: { status: x.status, scope: x.scope, offerte: x.offerte_status },
-    })
+    }))
     return NextResponse.json({ aanvraag: x })
   } catch (e) {
     if (e instanceof AanvraagFout) return NextResponse.json({ error: e.publiek }, { status: e.status })

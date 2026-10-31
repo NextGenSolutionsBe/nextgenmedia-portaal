@@ -108,6 +108,7 @@ export type BestandInvoer = { pad?: unknown; bestandsnaam?: unknown; mimetype?: 
 export async function maakAanvraag(
   admin: Admin, clientId: string, b: AanvraagInvoer & { aanvraag_sleutel?: unknown; bestanden?: unknown },
   door: { userId: string | null; email: string | null; naam: string | null },
+  o?: ActieOpties,
 ): Promise<{ aanvraag: AanvraagRij; herhaald: boolean }> {
   const sleutel = String(b.aanvraag_sleutel ?? '')
   if (!UUID.test(sleutel)) throw new AanvraagFout('Ongeldige aanvraag. Vernieuw de pagina en probeer opnieuw.')
@@ -161,8 +162,10 @@ export async function maakAanvraag(
     const { error: bFout } = await admin.from('klant_aanvraag_bestanden').insert(bestanden.map((x) => ({ ...x, aanvraag_id: a.id, client_id: clientId })))
     if (bFout) throw new Error(bFout.message)
   }
-  const metTaak = await stapClickup(admin, a)
-  return { aanvraag: await stapTeamMail(admin, metTaak), herhaald: false }
+  // ClickUp-taak, dan de melding naar info@ (met de ClickUp-link). In de API na het antwoord.
+  const afronden = async () => stapTeamMail(admin, await stapClickup(admin, a))
+  if (o?.achtergrond) { o.achtergrond(afronden().catch((e) => console.error('[aanvragen:afronden]', veiligeFout(e)))); return { aanvraag: a, herhaald: false } }
+  return { aanvraag: await afronden(), herhaald: false }
 }
 
 // ── ClickUp ──────────────────────────────────────────────────────────────────
@@ -242,6 +245,19 @@ async function stapTeamMail(admin: Admin, a: AanvraagRij): Promise<AanvraagRij> 
   try { return await bewaar(admin, a.id, { team_mail_status: r.ok ? 'ok' : 'fout', team_mail_fout: r.ok ? null : (r.error ?? 'onbekend').slice(0, 300) }) } catch { return a }
 }
 
+/**
+ * Waar de ClickUp-stappen van een actie draaien. Zonder `achtergrond` wacht de
+ * actie erop (tests, scripts). Met `achtergrond` (in de API: waitUntil) is de
+ * gebruiker meteen verder en rondt ClickUp af na het antwoord. Een ClickUp-fout
+ * laat een al bewaarde actie nooit mislukken.
+ */
+export type ActieOpties = { achtergrond?: (p: Promise<unknown>) => void }
+async function inClickup(o: ActieOpties | undefined, stap: () => Promise<void>): Promise<void> {
+  const p = stap().catch((e) => { console.error('[aanvragen:clickup]', veiligeFout(e)) })
+  if (o?.achtergrond) o.achtergrond(p)
+  else await p
+}
+
 /** ClickUp-taak op wie de aanvraag opvolgt, of anders op de gekozen expert. */
 async function volgToegewezene(admin: Admin, a: AanvraagRij): Promise<void> {
   if (!a.clickup_task_id || !clickupConfigured()) return
@@ -310,7 +326,7 @@ export async function bestandVanAanvraag(admin: Admin, aanvraagId: string, besta
 
 // ── Acties van de klant ──────────────────────────────────────────────────────
 
-export async function klantBeslistOfferte(admin: Admin, a: AanvraagRij, besluit: unknown, reden: unknown, door: string): Promise<AanvraagRij> {
+export async function klantBeslistOfferte(admin: Admin, a: AanvraagRij, besluit: unknown, reden: unknown, door: string, o?: ActieOpties): Promise<AanvraagRij> {
   if (besluit !== 'aanvaard' && besluit !== 'geweigerd') throw new AanvraagFout('Kies aanvaarden of weigeren.')
   if (a.offerte_status !== 'open') throw new AanvraagFout(a.offerte_status ? 'Over deze offerte is al beslist.' : 'Er is geen offerte om te beslissen.', 409)
   const r = String(reden ?? '').trim().slice(0, 1000) || null
@@ -319,16 +335,16 @@ export async function klantBeslistOfferte(admin: Admin, a: AanvraagRij, besluit:
     // Aanvaard: wij plannen in. Geweigerd: terug bij ons om op te volgen.
     status: besluit === 'aanvaard' ? 'aanvaard' : 'in_behandeling', status_gewijzigd_op: nu(),
   }, a.status)
-  await meldInClickup(x, besluit === 'aanvaard'
+  await inClickup(o, () => meldInClickup(x, besluit === 'aanvaard'
     ? `Offerte AANVAARD door ${door} via het klantportaal. Nog in te plannen.`
-    : `Offerte GEWEIGERD door ${door} via het klantportaal.${r ? ` Reden: ${r}` : ''}`)
+    : `Offerte GEWEIGERD door ${door} via het klantportaal.${r ? ` Reden: ${r}` : ''}`))
   return x
 }
 
-export async function klantTrektIn(admin: Admin, a: AanvraagRij, door: string): Promise<AanvraagRij> {
+export async function klantTrektIn(admin: Admin, a: AanvraagRij, door: string, o?: ActieOpties): Promise<AanvraagRij> {
   if (!magIntrekken(a.status)) throw new AanvraagFout('Deze aanvraag kan je niet meer intrekken. Neem contact op via info@nextgenmedia.be.', 409)
   const x = await bewaar(admin, a.id, { status: 'ingetrokken', status_gewijzigd_op: nu() }, a.status)
-  await meldInClickup(x, `Aanvraag INGETROKKEN door ${door} via het klantportaal.`, true)
+  await inClickup(o, () => meldInClickup(x, `Aanvraag INGETROKKEN door ${door} via het klantportaal.`, true))
   return x
 }
 
@@ -346,35 +362,36 @@ export type TeamActie =
 
 const isDag = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)
 
-export async function teamActie(admin: Admin, a: AanvraagRij, b: TeamActie, door: string): Promise<AanvraagRij> {
+export async function teamActie(admin: Admin, a: AanvraagRij, b: TeamActie, door: string, o?: ActieOpties): Promise<AanvraagRij> {
   switch (b.actie) {
     case 'status': {
       if (!isStatus(b.status) || !TEAM_STATUSSEN.includes(b.status)) throw new AanvraagFout('Onbekende status.')
       if (a.status === 'ingetrokken') throw new AanvraagFout('De klant trok deze aanvraag in.', 409)
       const reden = b.status === 'afgewezen' ? String(b.reden_klant ?? '').trim().slice(0, 1000) || null : a.reden_klant
-      const x = await bewaar(admin, a.id, { status: b.status, status_gewijzigd_op: nu(), reden_klant: reden }, a.status)
-      await meldInClickup(x, `Status: ${STATUS[b.status].team} (door ${door}).${b.status === 'afgewezen' && reden ? ` Reden voor de klant: ${reden}` : ''}`, b.status === 'afgewezen' || b.status === 'afgerond')
+      const st = b.status
+      const x = await bewaar(admin, a.id, { status: st, status_gewijzigd_op: nu(), reden_klant: reden }, a.status)
+      await inClickup(o, () => meldInClickup(x, `Status: ${STATUS[st].team} (door ${door}).${st === 'afgewezen' && reden ? ` Reden voor de klant: ${reden}` : ''}`, st === 'afgewezen' || st === 'afgerond'))
       return x
     }
     case 'scope': {
       const scope = b.scope === 'binnen' || b.scope === 'buiten' ? b.scope : null
       const x = await bewaar(admin, a.id, { scope, scope_notitie: String(b.notitie ?? '').trim().slice(0, 1000) || null })
-      await meldInClickup(x, `Scope: ${scope === 'binnen' ? 'binnen het bestaande contract' : scope === 'buiten' ? 'buiten het bestaande contract' : 'nog niet bepaald'} (door ${door}).`)
+      await inClickup(o, () => meldInClickup(x, `Scope: ${scope === 'binnen' ? 'binnen het bestaande contract' : scope === 'buiten' ? 'buiten het bestaande contract' : 'nog niet bepaald'} (door ${door}).`))
       return x
     }
     case 'toewijzen': {
       // ClickUp volgt: de taak staat op wie opvolgt, en zonder toewijzing weer op de gekozen expert.
       if (b.personeel_id === null || b.personeel_id === '') {
         const x = await bewaar(admin, a.id, { toegewezen_id: null, toegewezen_naam: null })
-        await volgToegewezene(admin, x)
+        await inClickup(o, () => volgToegewezene(admin, x))
         return x
       }
       if (typeof b.personeel_id !== 'string' || !UUID.test(b.personeel_id)) throw new AanvraagFout('Ongeldig teamlid.')
       const { data: p } = await admin.from('personeel').select('id, voornaam, achternaam, actief').eq('id', b.personeel_id).maybeSingle()
       if (!p || !p.actief) throw new AanvraagFout('Dit teamlid bestaat niet of is niet actief.')
       const x = await bewaar(admin, a.id, { toegewezen_id: p.id, toegewezen_naam: volleNaam(p) })
-      await volgToegewezene(admin, x)
-      await meldInClickup(x, `Opvolging bevestigd: ${volleNaam(p)} (door ${door}).`)
+      await inClickup(o, () => volgToegewezene(admin, x))
+      await inClickup(o, () => meldInClickup(x, `Opvolging bevestigd: ${volleNaam(p)} (door ${door}).`))
       return x
     }
     case 'planning': {
@@ -385,7 +402,7 @@ export async function teamActie(admin: Admin, a: AanvraagRij, b: TeamActie, door
         planning_datum: datum, planning_notitie: String(b.notitie ?? '').trim().slice(0, 2000) || null,
         ...(datum ? { status: 'ingepland' as const, status_gewijzigd_op: nu() } : a.status === 'ingepland' ? { status: 'aanvaard' as const, status_gewijzigd_op: nu() } : {}),
       })
-      await meldInClickup(x, datum ? `Intern ingepland op ${datum} (door ${door}).` : `Interne planning gewist (door ${door}).`)
+      await inClickup(o, () => meldInClickup(x, datum ? `Intern ingepland op ${datum} (door ${door}).` : `Interne planning gewist (door ${door}).`))
       return x
     }
     case 'notitie':
@@ -406,14 +423,14 @@ export async function teamActie(admin: Admin, a: AanvraagRij, b: TeamActie, door
         // Een offerte hoort bij werk buiten de afgesproken scope.
         scope: a.scope ?? 'buiten',
       }, a.status)
-      await meldInClickup(x, `Offerte gekoppeld en zichtbaar voor de klant (door ${door}). Wacht op akkoord van de klant.`)
+      await inClickup(o, () => meldInClickup(x, `Offerte gekoppeld en zichtbaar voor de klant (door ${door}). Wacht op akkoord van de klant.`))
       return x
     }
     case 'offerte_intrekken': {
       if (a.offerte_status !== 'open') throw new AanvraagFout('Er is geen open offerte.', 409)
       const x = await bewaar(admin, a.id, { offerte_status: null, offerte_pad: null, offerte_url: null, offerte_titel: null, offerte_bestandsnaam: null, offerte_notitie: null, offerte_verstuurd_op: null, status: 'in_behandeling', status_gewijzigd_op: nu() }, a.status)
       if (a.offerte_pad) { try { await admin.storage.from(BUCKET).remove([a.offerte_pad]) } catch { /* best effort */ } }
-      await meldInClickup(x, `Offerte ingetrokken (door ${door}).`)
+      await inClickup(o, () => meldInClickup(x, `Offerte ingetrokken (door ${door}).`))
       return x
     }
     case 'clickup_opnieuw':

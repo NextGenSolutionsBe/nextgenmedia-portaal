@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Check, ChevronDown, Loader2, Plus, Search, UserPlus, X, Building2 } from 'lucide-react'
 import { naamSleutel } from '@/lib/clients/snel'
+import { BtwOpzoeken } from '@/components/admin/btw-opzoeken'
 
 /**
  * Klant kiezen of meteen een nieuwe toevoegen, zonder het formulier te
@@ -119,17 +120,24 @@ export function KlantKiezer({ klanten, waarde, onKies, onNieuw, leegLabel, bron 
           <p id={`${id}-nieuw-titel`} className="text-sm font-semibold flex items-center gap-1.5"><UserPlus className="h-4 w-4" />Nieuwe klant</p>
           <button type="button" onClick={() => setNieuw(null)} className="h-7 w-7 rounded-lg hover:bg-gray-200 flex items-center justify-center" aria-label="Annuleren"><X className="h-4 w-4" /></button>
         </div>
-        {veld('company_name', 'Bedrijfsnaam *', { autoFocus: true, placeholder: 'Bv. Bakkerij Peeters', autoComplete: 'organization' })}
+        <div className="grid sm:grid-cols-2 gap-2">
+          {veld('company_name', 'Bedrijfsnaam *', { autoFocus: true, placeholder: 'Bv. Bakkerij Peeters', autoComplete: 'organization' })}
+          <div>
+            {veld('btw_nummer', 'Btw-nummer', { placeholder: 'BE0123456789' })}
+            {/* Naam en adres uit het btw-register: vult enkel wat nog leeg is. */}
+            <BtwOpzoeken btw={nieuw.btw_nummer} onGevonden={(g) => {
+              setNieuw((n) => (n ? { ...n, company_name: n.company_name.trim() || g.naam || '', adres_straat: n.adres_straat || g.straat || '', adres_postcode: n.adres_postcode || g.postcode || '', adres_gemeente: n.adres_gemeente || g.gemeente || '' } : n))
+              if (g.straat || g.gemeente) setMeer(true)
+            }} />
+          </div>
+        </div>
         <div className="grid sm:grid-cols-2 gap-2">
           {veld('contact_name', 'Contactpersoon', { placeholder: 'Voor- en achternaam', autoComplete: 'name' })}
           {veld('email', 'E-mail', { type: 'email', placeholder: 'naam@bedrijf.be', autoComplete: 'email' })}
         </div>
         {meer ? (
           <div className="space-y-2">
-            <div className="grid sm:grid-cols-2 gap-2">
-              {veld('telefoon', 'Telefoon', { type: 'tel', placeholder: '+32 …', autoComplete: 'tel' })}
-              {veld('btw_nummer', 'Btw-nummer', { placeholder: 'BE0123456789' })}
-            </div>
+            {veld('telefoon', 'Telefoon', { type: 'tel', placeholder: '+32 …', autoComplete: 'tel' })}
             {veld('adres_straat', 'Straat en nummer', { autoComplete: 'street-address' })}
             <div className="grid grid-cols-[1fr_2fr] gap-2">
               {veld('adres_postcode', 'Postcode', { autoComplete: 'postal-code' })}
@@ -137,7 +145,7 @@ export function KlantKiezer({ klanten, waarde, onKies, onNieuw, leegLabel, bron 
             </div>
           </div>
         ) : (
-          <button type="button" onClick={() => setMeer(true)} className="text-xs text-gray-600 underline underline-offset-2">Telefoon, btw-nummer en adres toevoegen</button>
+          <button type="button" onClick={() => setMeer(true)} className="text-xs text-gray-600 underline underline-offset-2">Telefoon en adres toevoegen</button>
         )}
         {bestaand && (
           <div className="rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-sm text-amber-900 space-y-2" role="alert">

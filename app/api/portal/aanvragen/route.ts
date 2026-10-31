@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { requirePortalPermission, logPortalAction } from '@/lib/portal-auth'
 import { rateLimit } from '@/lib/rate-limit'
@@ -38,7 +39,7 @@ export async function POST(req: NextRequest) {
   try {
     const { aanvraag, herhaald } = await maakAanvraag(createAdminSupabaseClient(), g.session.clientId, { ...b, soort }, {
       userId: g.session.userId, email: g.session.email, naam: g.session.name,
-    })
+    }, { achtergrond: waitUntil })
     if (!herhaald) await logPortalAction(g.session, 'aanvraag.ingediend', { type: 'klant_aanvraag', id: aanvraag.id }, { req, meta: { soort, type: aanvraag.type } })
     return NextResponse.json({ id: aanvraag.id, status: aanvraag.status, herhaald })
   } catch (e) {

@@ -56,6 +56,8 @@ export const VISIBLE_ADMIN_MODULES: AdminModule[] = ADMIN_MODULES.filter((m) => 
  *  Bevat enkel niet-gevoelige lijstdata (bv. klantnamen voor dropdowns). */
 export const STAFF_API_WHITELIST = [
   '/api/admin/clients-list',
+  // Btw-nummer opzoeken in het Europese register (publieke gegevens, niets bewaard).
+  '/api/admin/btw-opzoeken',
   // Shell-brede endpoints: globale zoek + notificaties. Deze routes filteren ZELF
   // per module (lib/actor-modules.ts), dus een werknemer ziet enkel eigen data.
   '/api/admin/search',

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { requirePortalPermission, logPortalAction } from '@/lib/portal-auth'
 import { safeMessage } from '@/lib/api-error'
@@ -25,12 +26,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!a || a.soort !== soort) return NextResponse.json({ error: 'Aanvraag niet gevonden.' }, { status: 404 })
     const door = g.session.name || g.session.email || 'klant'
     if (b.actie === 'offerte') {
-      const x = await klantBeslistOfferte(admin, a, b.besluit, b.reden, door)
+      const x = await klantBeslistOfferte(admin, a, b.besluit, b.reden, door, { achtergrond: waitUntil })
       await logPortalAction(g.session, `aanvraag.offerte_${x.offerte_status}`, { type: 'klant_aanvraag', id: a.id }, { req })
       return NextResponse.json({ status: x.status, offerte_status: x.offerte_status })
     }
     if (b.actie === 'intrekken') {
-      const x = await klantTrektIn(admin, a, door)
+      const x = await klantTrektIn(admin, a, door, { achtergrond: waitUntil })
       await logPortalAction(g.session, 'aanvraag.ingetrokken', { type: 'klant_aanvraag', id: a.id }, { req })
       return NextResponse.json({ status: x.status })
     }

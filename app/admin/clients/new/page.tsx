@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { ChevronLeft, Loader2, X } from 'lucide-react'
 import Link from 'next/link'
+import { BtwOpzoeken } from '@/components/admin/btw-opzoeken'
 
 const SERVICES = [
   { slug: 'social-media',           label: 'Social Media Management' },
@@ -40,6 +41,9 @@ export default function NewClientPage() {
     niche: '',
     website_url: '',
     btw_nummer: '',
+    adres_straat: '',
+    adres_postcode: '',
+    adres_gemeente: '',
     services: [] as string[],
     platforms: [] as string[],
     posts_per_month: '0',
@@ -111,6 +115,9 @@ export default function NewClientPage() {
           niche: form.niche,
           website_url: form.website_url,
           btw_nummer: form.btw_nummer,
+          adres_straat: form.adres_straat,
+          adres_postcode: form.adres_postcode,
+          adres_gemeente: form.adres_gemeente,
           services: form.services,
           platforms: form.platforms,
           posts_per_month: parseInt(form.posts_per_month) || 0,
@@ -185,6 +192,25 @@ export default function NewClientPage() {
               <label className={lbl}>BTW-nummer</label>
               <input className={inp} value={form.btw_nummer}
                 onChange={e => setForm(p => ({ ...p, btw_nummer: e.target.value }))} placeholder="BE0123456789" />
+              {/* Naam en adres uit het btw-register: vult enkel wat nog leeg is. */}
+              <BtwOpzoeken btw={form.btw_nummer} onGevonden={(g) => setForm((p) => ({
+                ...p, company_name: p.company_name.trim() || g.naam || '', adres_straat: p.adres_straat || g.straat || '',
+                adres_postcode: p.adres_postcode || g.postcode || '', adres_gemeente: p.adres_gemeente || g.gemeente || '',
+              }))} />
+            </div>
+            <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-[2fr_1fr_2fr] gap-4">
+              <div>
+                <label className={lbl}>Straat en nummer</label>
+                <input className={inp} value={form.adres_straat} autoComplete="street-address" onChange={e => setForm(p => ({ ...p, adres_straat: e.target.value }))} />
+              </div>
+              <div>
+                <label className={lbl}>Postcode</label>
+                <input className={inp} value={form.adres_postcode} autoComplete="postal-code" onChange={e => setForm(p => ({ ...p, adres_postcode: e.target.value }))} />
+              </div>
+              <div>
+                <label className={lbl}>Gemeente</label>
+                <input className={inp} value={form.adres_gemeente} autoComplete="address-level2" onChange={e => setForm(p => ({ ...p, adres_gemeente: e.target.value }))} />
+              </div>
             </div>
           </div>
         </div>

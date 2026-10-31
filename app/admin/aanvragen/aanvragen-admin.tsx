@@ -68,6 +68,11 @@ export function AanvragenAdmin({ magAanpassen }: { magAanpassen: boolean }) {
     try { const j = await api<{ aanvragen: Rij[] }>('/api/admin/aanvragen'); setAlle(j.aanvragen); setRijen(j.aanvragen) } catch (e) { toast.error(e instanceof Error ? e.message : 'Laden mislukt'); setRijen([]) }
   }, [])
   useEffect(() => { laad() }, [laad])
+  // Na een actie enkel die ene rij bijwerken, niet de hele lijst opnieuw laden.
+  const werkBij = useCallback((a: Partial<Rij> & { id: string }) => {
+    const pas = (l: Rij[]) => l.map((r) => (r.id === a.id ? { ...r, ...a, klant: r.klant, aantal_bestanden: r.aantal_bestanden } : r))
+    setAlle(pas); setRijen((l) => (l ? pas(l) : l))
+  }, [])
   // Deep link (?aanvraag=): naar het juiste tabblad.
   useEffect(() => { const a = alle.find((x) => x.id === open); if (a && a.soort !== soort) setSoort(a.soort) }, [alle, open]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -130,12 +135,12 @@ export function AanvragenAdmin({ magAanpassen }: { magAanpassen: boolean }) {
             </ul>
           )}
       </div>
-      {open && <DetailPaneel id={open} magAanpassen={magAanpassen} onSluit={() => kiesOpen(null)} onVeranderd={laad} />}
+      {open && <DetailPaneel id={open} magAanpassen={magAanpassen} onSluit={() => kiesOpen(null)} onVeranderd={werkBij} />}
     </div>
   )
 }
 
-function DetailPaneel({ id, magAanpassen, onSluit, onVeranderd }: { id: string; magAanpassen: boolean; onSluit: () => void; onVeranderd: () => void }) {
+function DetailPaneel({ id, magAanpassen, onSluit, onVeranderd }: { id: string; magAanpassen: boolean; onSluit: () => void; onVeranderd: (a: Partial<Rij> & { id: string }) => void }) {
   const [d, setD] = useState<Detail | null>(null)
   const [bezig, setBezig] = useState<string | null>(null)
   const laad = useCallback(async () => {
@@ -147,10 +152,29 @@ function DetailPaneel({ id, magAanpassen, onSluit, onVeranderd }: { id: string; 
     window.addEventListener('keydown', esc); return () => window.removeEventListener('keydown', esc)
   }, [onSluit])
 
+  /**
+   * Een actie toont het resultaat meteen (optimistisch); het antwoord van de
+   * server zet het daarna definitief. Enkel een offerte (tijdelijke links) of
+   * ClickUp opnieuw herlaadt het detail. Mislukt het, dan springt het terug.
+   */
   const actie = async (sleutel: string, body: Record<string, unknown>, ok: string) => {
+    if (!d) return
+    const vorig = d
+    const v: Partial<Detail['aanvraag']> = {}
+    if (body.actie === 'status') v.status = body.status as AanvraagStatus
+    if (body.actie === 'scope') { v.scope = (body.scope as Scope | null) ?? null; v.scope_notitie = String(body.notitie ?? '').trim() || null }
+    if (body.actie === 'toewijzen') { v.toegewezen_id = (body.personeel_id as string | null) || null; v.toegewezen_naam = d.team.find((t) => t.id === body.personeel_id)?.naam ?? null }
+    if (body.actie === 'planning') { v.planning_datum = (body.datum as string | null) || null; if (body.datum) v.status = 'ingepland' }
+    if (body.actie === 'notitie') v.interne_notitie = String(body.tekst ?? '').trim() || null
+    if (Object.keys(v).length) setD({ ...d, aanvraag: { ...d.aanvraag, ...v } })
     setBezig(sleutel)
-    try { await api(`/api/admin/aanvragen/${id}`, { method: 'PATCH', body: JSON.stringify(body) }); toast.success(ok); await laad(); onVeranderd() }
-    catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(null) }
+    try {
+      const j = await api<{ aanvraag: Partial<Detail['aanvraag']> & { id: string } }>(`/api/admin/aanvragen/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
+      toast.success(ok)
+      if (['offerte', 'offerte_intrekken', 'clickup_opnieuw'].includes(String(body.actie))) await laad()
+      else setD((x) => (x ? { ...x, aanvraag: { ...x.aanvraag, ...j.aanvraag } } : x))
+      onVeranderd(j.aanvraag)
+    } catch (e) { setD(vorig); toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(null) }
   }
 
   return (

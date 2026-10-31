@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { DIENST_LABELS } from '@/lib/omzet/diensten'
 import { toast } from 'sonner'
+import { BtwOpzoeken } from '@/components/admin/btw-opzoeken'
 import {
   X, Plus, Trash2, Copy, ArrowUp, ArrowDown, Loader2, Check, ChevronLeft, ChevronRight, Search, UserPlus, Pencil, Car,
   Bookmark, Paperclip, AlertTriangle, Building2, Settings2,
@@ -318,7 +319,17 @@ function KlantFormulier({ v, set, metNaam }: { v: KlantVelden; set: (k: keyof Kl
   return (
     <div className="grid sm:grid-cols-2 gap-3">
       {metNaam && veld('naam', 'Naam of bedrijfsnaam', { verplicht: true, breed: true })}
-      {veld('btw', 'Btw-nummer', { verplicht: metNaam, ph: 'BE0123456789' })}
+      <div>
+        {veld('btw', 'Btw-nummer', { verplicht: metNaam, ph: 'BE0123456789' })}
+        {/* Naam en adres uit het btw-register: vult enkel wat nog leeg is. */}
+        <BtwOpzoeken btw={v.btw} auto={metNaam} onGevonden={(g) => {
+          if (metNaam && !v.naam.trim() && g.naam) set('naam', g.naam)
+          if (!v.straat && g.straat) set('straat', g.straat)
+          if (!v.postcode && g.postcode) set('postcode', g.postcode)
+          if (!v.gemeente && g.gemeente) set('gemeente', g.gemeente)
+          if (!v.land && g.land) set('land', g.land)
+        }} />
+      </div>
       {veld('contact', 'Contactpersoon')}
       {veld('email', 'E-mailadres', { type: 'email' })}
       {veld('facturatie_email', 'E-mailadres voor facturen', { type: 'email', ph: 'als het anders is' })}

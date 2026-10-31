@@ -281,6 +281,22 @@ async function main() {
     assert.match(String(aanvraag.team_mail_fout), /not verified/)
   })
 
+  await test('18. In de API rondt ClickUp af na het antwoord; een ClickUp-fout laat een actie niet mislukken', async () => {
+    const { aanvraag } = await maakAanvraag(db, KLANT, shoot({ type: 'branding', wat: 'Een nieuwe huisstijl', antwoorden: {}, locatie: null, expert_id: null }), door)
+    const achtergrond: Promise<unknown>[] = []
+    const voor = clickup.reacties.length
+    let x = await teamActie(db, aanvraag, { actie: 'status', status: 'in_behandeling' }, 'Bram', { achtergrond: (p) => { achtergrond.push(p) } })
+    assert.equal(x.status, 'in_behandeling')
+    assert.equal(achtergrond.length, 1, 'ClickUp loopt op de achtergrond')
+    await Promise.all(achtergrond)
+    assert.equal(clickup.reacties.length, voor + 1)
+    // ClickUp onbereikbaar: de status staat er toch.
+    const echteFetch = globalThis.fetch
+    globalThis.fetch = (async (u: RequestInfo | URL, i?: RequestInit) => { if (String(u).includes('/comment')) throw new TypeError('fetch failed'); return echteFetch(u, i) }) as typeof fetch
+    try { x = await teamActie(db, x, { actie: 'status', status: 'aanvaard' }, 'Bram') } finally { globalThis.fetch = echteFetch }
+    assert.equal(x.status, 'aanvaard')
+  })
+
   console.log(`\n${n} tests geslaagd\n`)
 }
 

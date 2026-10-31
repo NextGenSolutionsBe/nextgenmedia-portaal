@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, Edit2, Save, X } from 'lucide-react'
 import { GetalInvoer } from '@/components/ui/getal-invoer'
+import { BtwOpzoeken } from '@/components/admin/btw-opzoeken'
 
 const ALL_SERVICES = [
   { slug: 'social-media', label: 'Social Media Management' },
@@ -60,6 +61,7 @@ export function ClientEditForm({
 }) {
   const router = useRouter()
   const [editing, setEditing] = useState(false)
+  const [officieleNaam, setOfficieleNaam] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -193,6 +195,11 @@ export function ClientEditForm({
             <label className={lbl}>BTW-nummer</label>
             <input className={inp} value={form.btw_nummer} onChange={e => setForm(p => ({ ...p, btw_nummer: e.target.value }))} placeholder="BE0123456789" />
             <p className="text-[11px] text-gray-400 mt-1">Optioneel. Belgisch formaat wordt gevalideerd; hergebruikt in contracten/facturen.</p>
+            {/* Bij een bestaande klant enkel tonen, niets stil overschrijven. */}
+            <BtwOpzoeken btw={form.btw_nummer} auto={false} onGevonden={(g) => setOfficieleNaam(g.naam)} />
+            {officieleNaam && officieleNaam !== form.company_name && (
+              <button type="button" onClick={() => setForm((p) => ({ ...p, company_name: officieleNaam }))} className="mt-1 text-xs underline underline-offset-2 text-gray-700">Officiële naam overnemen: {officieleNaam}</button>
+            )}
           </div>
           <div>
             <label className={lbl}>Klant sinds</label>
