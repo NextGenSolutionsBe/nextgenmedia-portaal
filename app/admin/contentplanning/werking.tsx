@@ -6,7 +6,7 @@ import { INP } from '@/app/admin/instellingen/ui'
 import {
   REEKSEN, MAANDSTART, DAG_KORT, eersteWerkdag, faseplanVanMaand, reeksPeriodes, leesWerkwijze, maandag, maandVan, plusDagen, plusMaanden, weekdagNr, werkdagenVanMaand,
   werkwijze1Beurten, inReeks1, REEKS1_AANPASSINGEN, reeks1AanpassingenCheckDatum, type Reeks, type Werk1Beurt,
-  vasteTakenVanDag, isDagtaak, dagenLabel, leesKlantTaken, klantTaakSleutel, maandStart, type VasteTaak,
+  vasteTakenVanDag, isDagtaak, leesKlantTaken, klantTaakSleutel, maandStart, type VasteTaak,
 } from '@/lib/contentplanning/model'
 import { Paneel, focusRing } from './bouwstenen'
 import type { BordCel, CpData, Doe, Weergave } from './types'
@@ -295,79 +295,129 @@ function AanpassingenTaak({ data, doe, anker, tot, kanSchrijven, onWerkwijze }: 
 }
 
 // ── Vaste klant (INN · SLL · K · J): taken op vaste weekdagen ───────────────
+/** Dag(en) van een taak als duidelijk label: "ELKE DAG", "DI", "DO", "1× PER WEEK". */
+function DagLabel({ dagen }: { dagen?: number[] }) {
+  const d = dagen ?? []
+  const tekst = d.length === 5 ? 'Elke dag' : d.length === 0 ? '1× per week' : d.map((x) => DAG_KORT[x - 1]).join(' · ')
+  return <span className="shrink-0 inline-flex items-center justify-center min-w-[2.5rem] rounded-md bg-cp-ink text-cp-op-ink px-1.5 py-1 text-[11px] font-bold uppercase tracking-wide leading-none">{tekst}</span>
+}
+
 /**
- * Dagweergave: de taken van die weekdag (bv. dinsdag "Content van Kristof
- * inplannen", elke dag "Community management") plus de weektaken. Een dagtaak
- * vink je per dag af, een weektaak één keer per week. Weekweergave: per taak
- * een vakje voor elke dag waarop ze valt.
+ * Dagweergave: bovenaan wat je vandaag doet (elke dag community management,
+ * dinsdag content van Kristof, donderdag copy's, vrijdag inplannen), daaronder
+ * wat later in de week komt. Een dagtaak vink je per dag af: morgen staat ze
+ * er gewoon weer. Weekweergave: per taak een vakje voor elke dag.
  */
 export function VasteKlant({ data, doe, anker, kanSchrijven, modus = 'dag' }: { data: CpData; doe: Doe; anker: string; kanSchrijven: boolean; modus?: 'dag' | 'week' }) {
   const inst = data.instellingen
   const week = maandag(anker)
   const [open, setOpen] = useState<string | null>(null)
   if (!inst.vaste_taken.length) return null
-  const taken = modus === 'dag' ? vasteTakenVanDag(inst.vaste_taken, anker) : inst.vaste_taken
+  const vandaagNr = weekdagNr(anker)
+  const weekend = vandaagNr > 5
   const check = (key: string, datum: string) => data.checks.find((c) => c.routine_key === key && c.datum === datum)
   const zet = (key: string, datum: string, aan: boolean) => doe('routine.check', { routine_key: key, datum, aan }, { stil: true })
-  const Details = ({ t }: { t: VasteTaak }) => (
-    <>
-      {t.detail.trim() && <button type="button" onClick={() => setOpen(open === t.key ? null : t.key)} aria-expanded={open === t.key} aria-label={`Details ${t.titel}`} className={`h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-lg hover:bg-cp-achtergrond ${focusRing}`}><ChevronDown className={`h-4 w-4 transition-transform ${open === t.key ? '' : '-rotate-90'}`} /></button>}
-    </>
-  )
-  return (
-    <section className={`${KAART} p-5 space-y-3`}>
-      <div className="flex items-baseline justify-between gap-2">
-        <h3 className="text-cp-kop">{inst.vaste_naam}</h3>
-        <span className="text-cp-klein text-cp-zacht capitalize">{modus === 'dag' ? `${DAG_KORT[weekdagNr(anker) - 1]} ${datumNl(anker)}` : `week ${datumNl(week)}`}</span>
+  const detailKnop = (t: VasteTaak) => t.detail.trim()
+    ? <button type="button" onClick={() => setOpen(open === t.key ? null : t.key)} aria-expanded={open === t.key} aria-label={`Werkwijze ${t.titel}`} className={`h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-lg hover:bg-cp-achtergrond ${focusRing}`}><ChevronDown className={`h-4 w-4 transition-transform ${open === t.key ? '' : '-rotate-90'}`} /></button>
+    : null
+  const detail = (t: VasteTaak) => open === t.key && <div className="border-t border-cp-rand px-4 py-3"><WerkwijzeTekst tekst={t.detail} compact /></div>
+
+  /** Eén taak om af te vinken op `datum` (een dag, of de maandag voor een weektaak). */
+  const Afvinken = ({ t, datum, wanneer }: { t: VasteTaak; datum: string; wanneer: string }) => {
+    const c = check(t.key, datum)
+    return (
+      <div className={`rounded-xl border ${c ? 'border-cp-klaar bg-cp-achtergrond' : 'border-cp-rand'}`}>
+        <div className="flex items-center gap-3 px-3 py-3">
+          <input type="checkbox" className={VINK} checked={!!c} disabled={!kanSchrijven} aria-label={`${t.titel} afvinken ${wanneer}`} onChange={(e) => zet(t.key, datum, e.target.checked)} />
+          <DagLabel dagen={t.dagen} />
+          <span className="flex-1 min-w-0">
+            <span className="block text-cp-basis font-medium">{t.titel}</span>
+            {c && <span className="block text-cp-klein text-cp-zacht"><Check className="inline h-3.5 w-3.5 -mt-0.5" /> Gedaan {wanneer}{c.door ? ` · ${c.door}` : ''}{isDagtaak(t) && (t.dagen?.length ?? 0) > 1 ? ' · morgen staat ze er weer' : ''}</span>}
+          </span>
+          {detailKnop(t)}
+        </div>
+        {detail(t)}
       </div>
-      {taken.length === 0 && <p className="text-cp-basis text-cp-zacht">Geen vaste taken {weekdagNr(anker) > 5 ? 'in het weekend' : 'vandaag'}.</p>}
-      {taken.map((t) => {
-        const dag = isDagtaak(t)
-        // Weekweergave van een dagtaak: een vakje per dag.
-        if (dag && modus === 'week') {
+    )
+  }
+
+  // ── Week: per taak een vakje voor elke dag waarop ze valt ──
+  if (modus === 'week') {
+    return (
+      <section className={`${KAART} p-5 space-y-3`}>
+        <div className="flex items-baseline justify-between gap-2">
+          <h3 className="text-cp-kop">{inst.vaste_naam}</h3>
+          <span className="text-cp-klein text-cp-zacht">week {datumNl(week)}</span>
+        </div>
+        {inst.vaste_taken.map((t) => {
+          if (!isDagtaak(t)) return <Afvinken key={t.key} t={t} datum={week} wanneer="deze week" />
           const dagen = t.dagen!.map((d) => plusDagen(week, d - 1))
           const klaar = dagen.filter((d) => check(t.key, d)).length
           return (
             <div key={t.key} className="rounded-xl border border-cp-rand">
-              <div className="flex items-center gap-3 px-3 py-3">
-                <span className={`text-cp-basis font-medium flex-1 min-w-0 ${klaar === dagen.length ? 'line-through text-cp-zacht' : ''}`}>{t.titel}<span className="block text-cp-klein text-cp-zacht font-normal">{dagenLabel(t.dagen)} · {klaar}/{dagen.length}</span></span>
-                <Details t={t} />
+              <div className="flex items-center gap-3 px-3 pt-3">
+                <DagLabel dagen={t.dagen} />
+                <span className="text-cp-basis font-medium flex-1 min-w-0">{t.titel}</span>
+                <span className="text-cp-klein text-cp-zacht shrink-0">{klaar}/{dagen.length}</span>
+                {detailKnop(t)}
               </div>
-              <div className="flex gap-1.5 px-3 pb-3 flex-wrap">
+              <div className="flex gap-1.5 px-3 py-3 flex-wrap">
                 {dagen.map((d) => {
                   const c = check(t.key, d)
                   return (
                     <label key={d} className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-cp-klein cursor-pointer ${c ? 'border-cp-klaar' : 'border-cp-rand'}`} title={c?.door ? `Afgevinkt door ${c.door}` : undefined}>
                       <input type="checkbox" className="h-4 w-4 accent-[var(--cp-klaar)]" checked={!!c} disabled={!kanSchrijven} aria-label={`${t.titel} op ${DAG_KORT[weekdagNr(d) - 1]} afvinken`} onChange={(e) => zet(t.key, d, e.target.checked)} />
-                      <span className="capitalize">{DAG_KORT[weekdagNr(d) - 1]}</span>
+                      <span className="capitalize">{DAG_KORT[weekdagNr(d) - 1]} {Number(d.slice(8))}/{Number(d.slice(5, 7))}</span>
                     </label>
                   )
                 })}
               </div>
-              {open === t.key && <div className="border-t border-cp-rand px-4 py-3"><WerkwijzeTekst tekst={t.detail} compact /></div>}
+              {detail(t)}
             </div>
           )
-        }
-        const datum = dag ? anker : week
-        const c = check(t.key, datum)
-        return (
-          <div key={t.key} className="rounded-xl border border-cp-rand">
-            <div className="flex items-center gap-3 px-3 py-3">
-              <input type="checkbox" className={VINK} checked={!!c} disabled={!kanSchrijven} aria-label={`${t.titel} afvinken ${dag ? 'voor vandaag' : 'voor deze week'}`}
-                onChange={(e) => zet(t.key, datum, e.target.checked)} />
-              <span className="flex-1 min-w-0">
-                <span className={`block text-cp-basis font-medium ${c ? 'line-through text-cp-zacht' : ''}`}>{t.titel}</span>
-                <span className="block text-cp-klein text-cp-zacht">{dag ? dagenLabel(t.dagen) : 'één keer per week'}{c?.door ? ` · afgevinkt door ${c.door}` : ''}</span>
-              </span>
-              <Details t={t} />
-            </div>
-            {open === t.key && <div className="border-t border-cp-rand px-4 py-3"><WerkwijzeTekst tekst={t.detail} compact /></div>}
-          </div>
-        )
-      })}
-      <div className="flex gap-2 flex-wrap">{inst.routine_links.filter((l) => /^https?:\/\//.test(l.url)).map((l) => <a key={l.label + l.url} href={l.url} target="_blank" rel="noreferrer" className={`${KNOP} h-9`}><ExternalLink className="h-4 w-4" />{l.label}</a>)}</div>
+        })}
+        <Links links={inst.routine_links} />
+      </section>
+    )
+  }
+
+  // ── Dag: vandaag afvinken, de rest van de week ter info ──
+  const vandaag = weekend ? [] : vasteTakenVanDag(inst.vaste_taken, anker)
+  const later = inst.vaste_taken
+    .filter((t) => isDagtaak(t) && t.dagen!.length < 5)
+    .flatMap((t) => t.dagen!.filter((d) => weekend || d > vandaagNr).map((d) => ({ t, d })))
+    .sort((a, b) => a.d - b.d)
+  return (
+    <section className={`${KAART} p-5 space-y-3`}>
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="text-cp-kop">{inst.vaste_naam}</h3>
+        <span className="text-cp-klein text-cp-zacht">{datumLang(anker)}</span>
+      </div>
+      <p className="text-cp-klein font-semibold uppercase tracking-wide text-cp-zacht">{weekend ? 'Weekend' : 'Vandaag'}</p>
+      {weekend && <p className="text-cp-basis text-cp-zacht">Geen vaste taken in het weekend.</p>}
+      {vandaag.map((t) => <Afvinken key={t.key} t={t} datum={isDagtaak(t) ? anker : week} wanneer={isDagtaak(t) ? 'vandaag' : 'deze week'} />)}
+      {later.length > 0 && (
+        <div className="pt-1 space-y-1.5">
+          <p className="text-cp-klein font-semibold uppercase tracking-wide text-cp-zacht">{weekend ? 'Volgende week' : 'Later deze week'}</p>
+          <ul className="space-y-1.5">
+            {later.map(({ t, d }) => (
+              <li key={`${t.key}-${d}`} className="flex items-center gap-3 rounded-xl border border-dashed border-cp-rand px-3 py-2.5">
+                <DagLabel dagen={[d]} />
+                <span className="text-cp-basis flex-1 min-w-0">{t.titel}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <Links links={inst.routine_links} />
     </section>
   )
+}
+
+function Links({ links }: { links: { label: string; url: string }[] }) {
+  const geldig = links.filter((l) => /^https?:\/\//.test(l.url))
+  if (!geldig.length) return null
+  return <div className="flex gap-2 flex-wrap">{geldig.map((l) => <a key={l.label + l.url} href={l.url} target="_blank" rel="noreferrer" className={`${KNOP} h-9`}><ExternalLink className="h-4 w-4" />{l.label}</a>)}</div>
 }
 
 // ── Klanten van één reeks: zelf kiezen en afvinken ─────────────────────────
