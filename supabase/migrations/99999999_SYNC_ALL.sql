@@ -6678,3 +6678,30 @@ ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS meeting_agenda_id uuid REF
 ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS klantapp_volgorde integer;
 ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS teamlid_id uuid REFERENCES public.personeel(id) ON DELETE SET NULL;
 ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS clickup_toegewezen bigint;
+
+-- Opdrachten als kanbanbord (1 nov 2026): bron (inbound/outbound), diensten
+-- (kleur van de kaart), hoe de offerte gedeeld werd, waarom iets stopte, en
+-- interne notities per kaart. De kolom zelf volgt uit de bestaande status.
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS bron text;
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS diensten text[] NOT NULL DEFAULT '{}';
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS offerte_via text;
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS offerte_op date;
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS stop_reden text;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'opdrachten_bron_check') THEN
+    ALTER TABLE public.opdrachten ADD CONSTRAINT opdrachten_bron_check CHECK (bron IS NULL OR bron IN ('inbound', 'outbound'));
+  END IF;
+END $$;
+CREATE TABLE IF NOT EXISTS public.opdracht_notities (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  opdracht_id     uuid NOT NULL REFERENCES public.opdrachten(id) ON DELETE CASCADE,
+  tekst           text NOT NULL CHECK (char_length(tekst) BETWEEN 1 AND 4000),
+  soort           text NOT NULL DEFAULT 'notitie' CHECK (soort IN ('notitie', 'systeem')),
+  auteur_user_id  uuid,
+  auteur_email    text,
+  auteur_naam     text,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS opdracht_notities_opdracht ON public.opdracht_notities (opdracht_id, created_at DESC);
+ALTER TABLE public.opdracht_notities ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.opdracht_notities FROM anon, authenticated;
