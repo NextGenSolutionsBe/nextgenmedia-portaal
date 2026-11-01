@@ -15,12 +15,27 @@ export type FoundersVideo = {
   /** Social post (Instagram, Facebook, LinkedIn); enkel de nagekeken openbare link. */
   embed: EmbedRef | null
   formaat: 'liggend' | 'staand'; volgorde: number; zichtbaar: boolean
+  /** Instagram-video in onze eigen opslag (miniatuur + mp4), zodat ze in de app speelt zonder de speler van Instagram. */
+  media?: { poster: string | null; video: string | null } | null
+  media_status?: string | null
+  media_fout?: string | null
+}
+
+/** Publieke link van een bestand in de bucket founders-media. */
+export function foundersMediaUrl(pad: string | null | undefined): string | null {
+  if (!pad || !/^founders\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(jpg|webp|png|mp4)$/.test(pad)) return null
+  const basis = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '')
+  return `${basis}/storage/v1/object/public/founders-media/${pad}`
 }
 
 /** Bewaarde rij → veilig om te tonen: een opgeslagen post wordt opnieuw nagekeken. */
 export function naarFoundersVideo(r: Record<string, unknown>): FoundersVideo {
   const embed = r.embed ? valideerEmbed(r.embed) : null
-  return { ...(r as unknown as FoundersVideo), youtube_id: typeof r.youtube_id === 'string' && r.youtube_id ? r.youtube_id : null, embed }
+  const poster = foundersMediaUrl(r.media_poster_pad as string | null), video = foundersMediaUrl(r.media_video_pad as string | null)
+  return {
+    ...(r as unknown as FoundersVideo), youtube_id: typeof r.youtube_id === 'string' && r.youtube_id ? r.youtube_id : null, embed,
+    media: embed && (poster || video) ? { poster, video } : null,
+  }
 }
 
 export function valideerFoundersVideo(b: Record<string, unknown>): { ok: true; waarde: Omit<FoundersVideo, 'id' | 'volgorde'> } | { ok: false; fout: string } {

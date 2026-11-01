@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { ArrowRight, CircleCheck, Clapperboard, Loader2, X, Youtube } from 'lucide-react'
 import { YoutubeVideo } from '@/components/media/youtube-video'
 import { EmbedFrame } from '@/components/media/embed-frame'
+import { EigenVideo } from '@/components/media/eigen-video'
 import { MijnAanvragen } from '@/components/portal/aanvragen/aanvraag-module'
 import type { FoundersVideo } from '@/lib/founders-of-flanders'
 
@@ -81,7 +82,8 @@ export function FoundersShowcase({ videos, magAanvragen, kanaal = null }: { vide
 function VideoKaart({ v, groot = false }: { v: FoundersVideo; groot?: boolean }) {
   return (
     <article className={`group ${groot ? `grid gap-5 items-center ${v.formaat === 'staand' ? 'sm:grid-cols-[320px_1fr]' : 'lg:grid-cols-[1.6fr_1fr]'}` : 'space-y-3'}`}>
-      {v.embed ? <EmbedFrame e={v.embed} titel={v.titel} /> : v.youtube_id ? <YoutubeVideo id={v.youtube_id} titel={v.titel} className="shadow-sm" staand={v.formaat === 'staand'} /> : null}
+      {v.media && v.embed ? <EigenVideo video={v.media.video} poster={v.media.poster} titel={v.titel} staand={v.formaat === 'staand'} bron={{ label: 'Instagram', url: v.embed.url }} />
+        : v.embed ? <EmbedFrame e={v.embed} titel={v.titel} /> : v.youtube_id ? <YoutubeVideo id={v.youtube_id} titel={v.titel} className="shadow-sm" staand={v.formaat === 'staand'} /> : null}
       <div className="space-y-1">
         <h3 className={`${groot ? 'text-xl sm:text-2xl' : 'text-base'} font-semibold leading-snug`}>{v.titel}</h3>
         {(v.ondernemer || v.bedrijf) && <p className="text-sm text-gray-500">{[v.ondernemer, v.bedrijf].filter(Boolean).join(' · ')}</p>}

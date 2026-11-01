@@ -7,6 +7,7 @@ import { ArrowDown, ArrowUp, Eye, EyeOff, Inbox, Loader2, Pencil, Plus, Trash2, 
 import { Dialoog, Bevestig, INP } from '@/app/admin/instellingen/ui'
 import { YoutubeVideo } from '@/components/media/youtube-video'
 import { EmbedFrame } from '@/components/media/embed-frame'
+import { EigenVideo } from '@/components/media/eigen-video'
 import { herkenEmbed } from '@/lib/embeds'
 import { youtubeId, youtubeKijkUrl } from '@/lib/youtube'
 import { naarFoundersVideo, type FoundersVideo } from '@/lib/founders-of-flanders'
@@ -28,6 +29,12 @@ export function FoundersAdmin({ magAanpassen }: { magAanpassen: boolean }) {
   const [kanaalBezig, setKanaalBezig] = useState(false)
   const [bewerk, setBewerk] = useState<{ id: string | null; c: Concept } | null>(null)
   const [weg, setWeg] = useState<FoundersVideo | null>(null)
+  const [haalt, setHaalt] = useState<string | null>(null)
+  const haalOp = async (v: FoundersVideo) => {
+    setHaalt(v.id)
+    try { const j = await api<{ video: boolean }>(`/api/admin/founders-of-flanders/${v.id}/media`, { method: 'POST' }); toast.success(j.video ? 'Video opgehaald: ze speelt nu in de app.' : 'Miniatuur opgehaald (geen video gevonden).'); laad() }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'Ophalen mislukt'); laad() } finally { setHaalt(null) }
+  }
   const laad = useCallback(async () => {
     try { const j = await api<{ videos: FoundersVideo[]; open_aanvragen: number; kanaal: string | null }>('/api/admin/founders-of-flanders'); setVideos(j.videos.map((v) => naarFoundersVideo(v as unknown as Record<string, unknown>))); setOpen(j.open_aanvragen); setKanaal(j.kanaal ?? '') }
     catch (e) { toast.error(e instanceof Error ? e.message : 'Laden mislukt'); setVideos([]) }
@@ -74,17 +81,24 @@ export function FoundersAdmin({ magAanpassen }: { magAanpassen: boolean }) {
             {videos.map((v, i) => (
               <li key={v.id} className={`card-base !p-0 overflow-hidden flex flex-col ${v.zichtbaar ? '' : 'opacity-60'}`}>
                 <div className={v.embed ? 'bg-gray-50 p-3' : v.formaat === 'staand' ? 'bg-gray-950 py-3' : ''}>
-                  {v.embed ? <EmbedFrame e={v.embed} titel={v.titel} className="max-w-[260px]" />
+                  {v.media && v.embed ? <EigenVideo video={v.media.video} poster={v.media.poster} titel={v.titel} staand={v.formaat === 'staand'} className="max-w-[220px]" />
+                    : v.embed ? <EmbedFrame e={v.embed} titel={v.titel} className="max-w-[260px]" />
                     : v.youtube_id ? <YoutubeVideo id={v.youtube_id} titel={v.titel} rond={v.formaat === 'staand' ? 'rounded-xl' : 'rounded-none'} staand={v.formaat === 'staand'} className={v.formaat === 'staand' ? 'max-w-[200px]' : ''} /> : null}
                 </div>
                 <div className="p-4 space-y-1 flex-1">
                   <p className="font-semibold">{v.titel}</p>
                   <p className="text-xs text-gray-500">{[v.ondernemer, v.bedrijf].filter(Boolean).join(' · ') || '—'}</p>
                   {v.beschrijving && <p className="text-sm text-gray-600 line-clamp-2">{v.beschrijving}</p>}
+                  {v.embed?.provider === 'instagram' && (
+                    <p className={`text-[11px] ${v.media?.video ? 'text-green-700' : v.media_status === 'mislukt' ? 'text-red-700' : 'text-gray-500'}`}>
+                      {v.media?.video ? 'Speelt in de app (video opgehaald van Instagram)' : v.media_status === 'mislukt' ? `Video niet opgehaald: ${v.media_fout ?? 'onbekende fout'}` : v.media_status === 'bezig' ? 'Video wordt opgehaald…' : 'Video wordt opgehaald bij het volgende bezoek…'}
+                    </p>
+                  )}
                 </div>
                 {magAanpassen && (
                   <div className="px-4 pb-4 flex flex-wrap gap-1.5">
                     <button type="button" onClick={() => setBewerk({ id: v.id, c: { titel: v.titel, ondernemer: v.ondernemer ?? '', bedrijf: v.bedrijf ?? '', beschrijving: v.beschrijving ?? '', youtube: v.embed ? v.embed.url : !v.youtube_id ? '' : v.formaat === 'staand' ? `https://www.youtube.com/shorts/${v.youtube_id}` : youtubeKijkUrl(v.youtube_id), formaat: v.formaat === 'staand' ? 'staand' : 'liggend' } })} className="btn-secondary !py-1.5 text-xs"><Pencil className="h-3.5 w-3.5" />Bewerken</button>
+                    {v.embed?.provider === 'instagram' && <button type="button" disabled={haalt === v.id} onClick={() => haalOp(v)} className="btn-secondary !py-1.5 text-xs">{haalt === v.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}{v.media?.video ? 'Opnieuw ophalen' : 'Video ophalen'}</button>}
                     <button type="button" onClick={() => wissel(v, { zichtbaar: !v.zichtbaar })} className="btn-secondary !py-1.5 text-xs">{v.zichtbaar ? <><EyeOff className="h-3.5 w-3.5" />Verbergen</> : <><Eye className="h-3.5 w-3.5" />Tonen</>}</button>
                     <button type="button" onClick={() => schuif(i, -1)} disabled={i === 0} className="btn-secondary !py-1.5 !px-2 text-xs" aria-label="Naar voren"><ArrowUp className="h-3.5 w-3.5" /></button>
                     <button type="button" onClick={() => schuif(i, 1)} disabled={i === videos.length - 1} className="btn-secondary !py-1.5 !px-2 text-xs" aria-label="Naar achter"><ArrowDown className="h-3.5 w-3.5" /></button>
@@ -114,8 +128,10 @@ function VideoDialoog({ start, onSluit, onKlaar }: { start: { id: string | null;
   const bewaar = async () => {
     setBezig(true)
     try {
-      await api(start.id ? `/api/admin/founders-of-flanders/${start.id}` : '/api/admin/founders-of-flanders', { method: start.id ? 'PATCH' : 'POST', body: JSON.stringify(c) })
+      const j = await api<{ media?: { ok: boolean; video: boolean; fout?: string } | null }>(start.id ? `/api/admin/founders-of-flanders/${start.id}` : '/api/admin/founders-of-flanders', { method: start.id ? 'PATCH' : 'POST', body: JSON.stringify(c) })
       toast.success(start.id ? 'Video bijgewerkt.' : 'Video toegevoegd. Klanten zien ze meteen.')
+      if (j.media && !j.media.ok) toast.error(`De Instagram-video kon niet opgehaald worden: ${j.media.fout ?? 'onbekende fout'}. Probeer "Video ophalen" op de kaart.`)
+      else if (j.media?.ok) toast.success(j.media.video ? 'Instagram-video opgehaald: ze speelt in de app.' : 'Miniatuur opgehaald (geen video gevonden).')
       onKlaar()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt') } finally { setBezig(false) }
   }

@@ -6720,3 +6720,16 @@ END $$;
 -- reeks zit (bv. Verheyen: meeting op het einde van de maand inplannen).
 -- [{ key, titel, reeks }]; afvinken per maand via cp_routine_checks (kt:<klant>:<taak>).
 ALTER TABLE public.cp_klanten ADD COLUMN IF NOT EXISTS extra_taken jsonb NOT NULL DEFAULT '[]'::jsonb;
+
+-- Founders of Flanders: Instagram-video's spelen in de app met de eigen speler.
+-- Bij het bewaren haalt de server de miniatuur en de video één keer op (de
+-- links van Instagram vervallen) en zet ze in de publieke bucket founders-media.
+ALTER TABLE public.founders_videos ADD COLUMN IF NOT EXISTS media_poster_pad text;
+ALTER TABLE public.founders_videos ADD COLUMN IF NOT EXISTS media_video_pad text;
+ALTER TABLE public.founders_videos ADD COLUMN IF NOT EXISTS media_status text;
+ALTER TABLE public.founders_videos ADD COLUMN IF NOT EXISTS media_fout text;
+ALTER TABLE public.founders_videos ADD COLUMN IF NOT EXISTS media_opgehaald_op timestamptz;
+ALTER TABLE public.founders_videos ADD COLUMN IF NOT EXISTS media_bezig_sinds timestamptz;
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('founders-media', 'founders-media', true, 52428800, ARRAY['video/mp4', 'image/jpeg', 'image/webp', 'image/png'])
+ON CONFLICT (id) DO NOTHING;
