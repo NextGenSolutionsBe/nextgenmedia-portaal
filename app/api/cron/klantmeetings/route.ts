@@ -5,6 +5,8 @@ import { verwerkHerinneringen } from '@/lib/meetings/server'
 import { cronToegang } from '@/lib/meetings/cron-toegang'
 import { zorgVoorGsmMeldingen } from '@/lib/meetings/gsm-melding'
 import { verwerkEvents } from '@/lib/events-server'
+import { kopieerInstagramMedia, ontbrekendeMedia } from '@/lib/founders-media-server'
+import { revalidatePath } from 'next/cache'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -36,7 +38,15 @@ export async function POST(req: NextRequest) {
       console.error('[cron:klantmeetings:events]', e)
       return { fout: 1 }
     })
-    return NextResponse.json({ ok: true, ...telling, gsm, events })
+    // Founders of Flanders: Instagram-video's die nog niet in de eigen opslag staan (hoogstens 2 per ronde).
+    const founders = await (async () => {
+      const { data } = await admin.from('founders_videos').select('id, embed, media_video_pad, media_status, media_bezig_sinds, media_opgehaald_op').not('embed', 'is', null)
+      const ids = ontbrekendeMedia((data ?? []) as Record<string, unknown>[]).slice(0, 2)
+      const r = await Promise.all(ids.map((id) => kopieerInstagramMedia(admin, id).catch(() => ({ ok: false }))))
+      if (r.some((x) => x.ok)) revalidatePath('/portal/founders')
+      return { opgehaald: r.filter((x) => x.ok).length, mislukt: r.filter((x) => !x.ok).length }
+    })().catch((e) => { console.error('[cron:klantmeetings:founders]', e); return { fout: 1 } })
+    return NextResponse.json({ ok: true, ...telling, gsm, events, founders })
   } catch (e) {
     console.error('[cron:klantmeetings]', e)
     return NextResponse.json({ ok: false, error: 'Herinneringen niet verwerkt' }, { status: 500 })

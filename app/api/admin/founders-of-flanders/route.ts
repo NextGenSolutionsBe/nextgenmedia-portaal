@@ -4,8 +4,11 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { magIk } from '@/lib/instellingen/laden'
 import { safeMessage } from '@/lib/api-error'
 import { valideerFoundersVideo, valideerKanaal, naarFoundersVideo, KANAAL_SLEUTEL } from '@/lib/founders-of-flanders'
+import { waitUntil } from '@vercel/functions'
+import { kopieerInstagramMedia, ontbrekendeMedia } from '@/lib/founders-media-server'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 /**
  * Founders of Flanders — voorbeeldvideo's. GET → alle (plus de kanaal-link),
@@ -21,6 +24,9 @@ export async function GET() {
     admin.from('app_settings').select('value').eq('key', KANAAL_SLEUTEL).maybeSingle(),
   ])
   if (error) return NextResponse.json({ error: safeMessage(error, 'founders-of-flanders.GET') }, { status: 500 })
+  // Instagram-video's die nog niet in de eigen opslag staan: op de achtergrond ophalen.
+  const teHalen = ontbrekendeMedia((data ?? []) as Record<string, unknown>[])
+  if (teHalen.length) waitUntil(Promise.all(teHalen.map((vid) => kopieerInstagramMedia(admin, vid).catch(() => null))).then(() => revalidatePath('/portal/founders')))
   return NextResponse.json({ videos: ((data ?? []) as Record<string, unknown>[]).map(naarFoundersVideo), open_aanvragen: count ?? 0, kanaal: typeof kanaal?.value === 'string' ? kanaal.value : null }, { headers: { 'Cache-Control': 'no-store' } })
 }
 
@@ -33,8 +39,10 @@ export async function POST(req: NextRequest) {
     const { data: laatste } = await admin.from('founders_videos').select('volgorde').order('volgorde', { ascending: false }).limit(1).maybeSingle()
     const { data, error } = await admin.from('founders_videos').insert({ ...v.waarde, volgorde: (laatste?.volgorde ?? 0) + 1 }).select('*').single()
     if (error) throw new Error(error.message)
+    // Instagram: miniatuur en video meteen naar de eigen opslag, zodat ze in de app speelt.
+    const media = v.waarde.embed?.provider === 'instagram' ? await kopieerInstagramMedia(admin, String((data as { id: string }).id), { forceer: true }) : null
     revalidatePath('/portal/founders')
-    return NextResponse.json({ video: data })
+    return NextResponse.json({ video: data, media })
   } catch (e) { return NextResponse.json({ error: safeMessage(e, 'founders-of-flanders.POST') }, { status: 500 }) }
 }
 
