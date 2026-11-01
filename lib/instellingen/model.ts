@@ -62,7 +62,7 @@ export type ModuleInfo = {
  * en secties volgen de zijbalk.
  */
 const SECTIE_VAN: Record<string, string> = {
-  clients: 'Klanten & content', contracts: 'Klanten & content', content: 'Klanten & content', aanvragen: 'Klanten & content', nieuwsbrieven: 'Klanten & content', founders: 'Klanten & content', onze_partners: 'Klanten & content', events: 'Klanten & content', metricool: 'Klanten & content', blogs: 'Klanten & content', uploads: 'Klanten & content', opdrachten: 'Klanten & content', formulieren: 'Klanten & content',
+  clients: 'Klanten & content', contracts: 'Klanten & content', content: 'Klanten & content', aanvragen: 'Klanten & content', nieuwsbrieven: 'Klanten & content', founders: 'Klanten & content', onze_partners: 'Klanten & content', events: 'Klanten & content', opleveringen: 'Klanten & content', metricool: 'Klanten & content', blogs: 'Klanten & content', uploads: 'Klanten & content', opdrachten: 'Klanten & content', formulieren: 'Klanten & content',
   kantoor: 'Kantoor', partners: 'Partners', assignments: 'Partners', settlements: 'Partners',
   sales: 'Verkoop', harrie_api: 'Verkoop', meetings: 'Verkoop',
   finance: 'Financieel', invoices: 'Financieel', vesting: 'Financieel', purchases: 'Financieel',

@@ -51,6 +51,13 @@ export default async function PortalLayout({ children }: { children: React.React
     hasWebsitePage = !!row?.maintenance_included || !!(row?.website_admin_url ?? '').trim()
   } catch { hasWebsitePage = false }
 
+  // Opleveringen: enkel in het menu als er voor deze klant iets gedeeld werd.
+  let hasOpleveringen = false
+  try {
+    const { data: op } = await admin.from('opleveringen').select('id, oplevering_versies!inner(gepubliceerd_op)').eq('client_id', session.clientId).is('gearchiveerd_op', null).not('oplevering_versies.gepubliceerd_op', 'is', null).limit(1)
+    hasOpleveringen = (op ?? []).length > 0
+  } catch { hasOpleveringen = false }
+
   // Actieve diensten + blogs (gating naast rechten).
   let activeServices: string[] = []
   let hasBlogs = false
@@ -76,6 +83,7 @@ export default async function PortalLayout({ children }: { children: React.React
         hasMetricool={hasMetricool}
         hasCms={hasCms}
         hasWebsitePage={hasWebsitePage}
+        hasOpleveringen={hasOpleveringen}
         allowedModules={allowedModules}
         lang={lang}
       />

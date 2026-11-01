@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { useRefresh } from '@/lib/use-refresh'
 import { Logo } from '@/components/logo'
-import { LayoutDashboard, FileText, Calendar, Globe, LogOut, RefreshCcw, Menu, X, ListChecks, Newspaper, CalendarClock, Database, FolderUp, ShieldCheck, Video, Sparkles, Lightbulb, Megaphone, Clapperboard, Handshake, Ticket } from 'lucide-react'
+import { LayoutDashboard, FileText, Calendar, Globe, LogOut, RefreshCcw, Menu, X, ListChecks, Newspaper, CalendarClock, Database, FolderUp, ShieldCheck, Video, Sparkles, Lightbulb, Megaphone, Clapperboard, Handshake, Ticket, Film } from 'lucide-react'
 import { MODULE_IMPLEMENTED, type PortalModule } from '@/lib/portal-permissions'
 import { t, type Lang } from '@/lib/i18n'
 import { LangToggle } from '@/components/lang-toggle'
@@ -22,6 +22,7 @@ type NavItem = {
   requiresMetricool?: boolean
   requiresCms?: boolean
   requiresWebsitePage?: boolean
+  requiresOpleveringen?: boolean
   module?: string
 }
 
@@ -41,6 +42,7 @@ const NAV: NavItem[] = [
   { tKey: 'nav.meetings',   href: '/portal/meetings',      icon: Video, module: 'meetings' },
   { tKey: 'nav.diensten',   href: '/portal/diensten',      icon: Sparkles, module: 'diensten' },
   { tKey: 'nav.consultancy', href: '/portal/consultancy',  icon: Lightbulb, module: 'consultancy' },
+  { tKey: 'nav.opleveringen', href: '/portal/opleveringen', icon: Film, requiresOpleveringen: true, module: 'opleveringen' },
   { tKey: 'nav.events',     href: '/portal/events',        icon: Ticket, module: 'events' },
   { tKey: 'nav.founders',   href: '/portal/founders',      icon: Clapperboard, module: 'founders' },
   { tKey: 'nav.nieuws',     href: '/portal/nieuws',        icon: Megaphone, module: 'nieuws' },
@@ -54,6 +56,7 @@ export function PortalSidebar({
   hasMetricool = false,
   hasCms = false,
   hasWebsitePage = false,
+  hasOpleveringen = false,
   allowedModules,
   lang = 'nl',
 }: {
@@ -64,6 +67,8 @@ export function PortalSidebar({
   hasCms?: boolean
   /** Website-tab enkel bij onderhoud of een eigen beheeromgeving. */
   hasWebsitePage?: boolean
+  /** Opleveringen enkel als de klant er een heeft (gedeeld). */
+  hasOpleveringen?: boolean
   /** Modules met view-recht. Undefined = alles tonen (owner/backward compat). */
   allowedModules?: string[]
   lang?: Lang
@@ -91,6 +96,7 @@ export function PortalSidebar({
       (!item.requiresMetricool || hasMetricool) &&
       (!item.requiresCms || hasCms) &&
       (!item.requiresWebsitePage || hasWebsitePage) &&
+      (!item.requiresOpleveringen || hasOpleveringen) &&
       (!item.module || !allowedModules || allowedModules.includes(item.module))
   )
 

@@ -167,6 +167,20 @@ export async function buildNotifications(): Promise<Notif[]> {
     for (const a of beslist) out.push({ id: `aanvraag:${a.id}:offerte:${a.offerte_status}`, kind: 'aanvraag', priority: a.offerte_status === 'aanvaard' ? 'high' : 'med', title: `Offerte ${a.offerte_status === 'aanvaard' ? 'aanvaard' : 'geweigerd'} door de klant — ${names.get(a.client_id) ?? 'Klant'}: ${a.type_label}`, date: a.offerte_beslist_op, href: `/admin/aanvragen?aanvraag=${a.id}` })
   } catch { /* meldingen mogen nooit stuklopen */ }
 
+  // Video-opleveringen: de klant vroeg een revisie, keurde goed of stuurde een opmerking.
+  try {
+    const fb = await safe(admin.from('oplevering_feedback').select('id, oplevering_id, soort, ronde, created_at').gte('created_at', since).order('created_at', { ascending: false }).limit(30)) as { id: string; oplevering_id: string; soort: string; ronde: number | null; created_at: string }[]
+    if (fb.length) {
+      const ops = await safe(admin.from('opleveringen').select('id, titel, client_id').in('id', [...new Set(fb.map((f) => f.oplevering_id))])) as { id: string; titel: string; client_id: string }[]
+      const op = new Map(ops.map((o) => [o.id, o]))
+      for (const f of fb) {
+        const o = op.get(f.oplevering_id); if (!o) continue
+        const wat = f.soort === 'goedkeuring' ? 'Goedgekeurd' : f.soort === 'revisie' ? `Revisieronde ${f.ronde} gevraagd` : 'Opmerking'
+        out.push({ id: `oplevering:${f.id}`, kind: 'oplevering', priority: f.soort === 'opmerking' ? 'med' : 'high', title: `${wat} — ${names.get(o.client_id) ?? 'Klant'}: ${o.titel}`, date: f.created_at, href: `/admin/opleveringen?oplevering=${o.id}` })
+      }
+    }
+  } catch { /* meldingen mogen nooit stuklopen */ }
+
   // Workshops & events: nieuwe inschrijvingen, afgelopen events met nog te
   // factureren inschrijvingen, en een Google-agenda die niet lukte.
   try {

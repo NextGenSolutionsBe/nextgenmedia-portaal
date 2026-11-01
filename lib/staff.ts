@@ -25,6 +25,8 @@ export const ADMIN_MODULES: AdminModule[] = [
   { key: 'onze_partners', label: 'Onze partners',        prefixes: ['/admin/onze-partners', '/api/admin/onze-partners'] },
   // Webinars, workshops, events en opleidingen waarvoor klanten zich inschrijven.
   { key: 'events',      label: 'Workshops & events',   prefixes: ['/admin/events', '/api/admin/events'] },
+  // Video-opleveringen: losse video's en beeldmateriaal laten bekijken, downloaden en feedback geven (3 dagen beschikbaar).
+  { key: 'opleveringen', label: 'Video-opleveringen',  prefixes: ['/admin/opleveringen', '/api/admin/opleveringen'] },
   { key: 'content',     label: 'Content / Diensten',   prefixes: ['/admin/services', '/api/admin/social-content', '/api/admin/shoot-feedback', '/api/admin/shoot-ideas', '/api/admin/webdesign'] },
   { key: 'metricool',   label: 'Metricool',            prefixes: ['/admin/metricool', '/api/admin/metricool'] },
   { key: 'blogs',       label: 'Blogs',                prefixes: ['/admin/blog-calendar', '/admin/blogaccounts', '/admin/blogs', '/api/admin/blogs', '/api/admin/blog-accounts', '/api/admin/blog-seo', '/api/admin/blog-settings', '/api/admin/framer'] },

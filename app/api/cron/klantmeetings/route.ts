@@ -7,6 +7,7 @@ import { zorgVoorGsmMeldingen } from '@/lib/meetings/gsm-melding'
 import { verwerkEvents } from '@/lib/events-server'
 import { kopieerInstagramMedia, ontbrekendeMedia } from '@/lib/founders-media-server'
 import { revalidatePath } from 'next/cache'
+import { ruimOpleveringenOp } from '@/lib/opleveringen-server'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -46,7 +47,9 @@ export async function POST(req: NextRequest) {
       if (r.some((x) => x.ok)) revalidatePath('/portal/founders')
       return { opgehaald: r.filter((x) => x.ok).length, mislukt: r.filter((x) => !x.ok).length }
     })().catch((e) => { console.error('[cron:klantmeetings:founders]', e); return { fout: 1 } })
-    return NextResponse.json({ ok: true, ...telling, gsm, events, founders })
+    // Video-opleveringen: bestanden die langer dan 3 dagen gedeeld zijn uit de opslag halen.
+    const opleveringen = await ruimOpleveringenOp(admin).catch((e) => { console.error('[cron:klantmeetings:opleveringen]', e); return { fout: 1 } })
+    return NextResponse.json({ ok: true, ...telling, gsm, events, founders, opleveringen })
   } catch (e) {
     console.error('[cron:klantmeetings]', e)
     return NextResponse.json({ ok: false, error: 'Herinneringen niet verwerkt' }, { status: 500 })
