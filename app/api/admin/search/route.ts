@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { getActor, actorCanSee } from '@/lib/actor-modules'
 import { FEATURES } from '@/lib/features'
-import { statusInfo } from '@/lib/opdrachten'
+import { kolomInfo, kolomVan } from '@/lib/opdrachten-kanban'
 import { dienstLabel } from '@/lib/formulieren/model'
 import { typeVanContract } from '@/lib/contracten/types'
 import { datumKort, uur } from '@/lib/meetings/model'
@@ -76,7 +76,7 @@ export async function GET(req: NextRequest) {
     if (FEATURES.blogs && may('blogs')) for (const b of blogs) results.push({ type: 'blog', label: 'Blog', title: b.titel, subtitle: b.status ?? undefined, href: `/admin/blogs` })
     // Prognose bestaat niet meer als los concept — omzet volgt uit facturen.
     if (FEATURES.partners && may('partners')) for (const p of partners) results.push({ type: 'partner', label: 'Partner', title: p.name, href: `/admin/partners/${p.id}` })
-    if (may('opdrachten')) for (const o of opdrachten) results.push({ type: 'opdracht', label: 'Opdracht', title: o.titel, subtitle: statusInfo(o.status).label, href: '/admin/opdrachten' })
+    if (may('opdrachten')) for (const o of opdrachten) results.push({ type: 'opdracht', label: 'Opdracht', title: o.titel, subtitle: kolomInfo(kolomVan(o.status)).label, href: `/admin/opdrachten?opdracht=${o.id}` })
     if (may('meetings')) for (const m of meetings) results.push({ type: 'meeting', label: 'Meeting', title: `${m.klant_naam} · ${m.titel}`, subtitle: m.status === 'geannuleerd' ? 'Geannuleerd' : `${datumKort(m.starts_at)} ${uur(m.starts_at)}`, href: `/admin/meetings?meeting=${m.id}` })
     if (may('formulieren')) for (const f of formulieren) results.push({ type: 'formulier', label: 'Formulier', title: f.titel, subtitle: f.doel ?? dienstLabel(f.dienst), href: `/admin/formulieren/${f.id}` })
     if (may('events')) {
