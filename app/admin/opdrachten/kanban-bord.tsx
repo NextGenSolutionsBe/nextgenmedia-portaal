@@ -150,9 +150,16 @@ function Kaart({ o, sleept, menuOpen, onOpen, onMenu, onKolom, onDragStart, onDr
       style={{ background: kleur.achtergrond, borderColor: kleur.rand, color: kleur.tekst }}
       className={`relative rounded-2xl border-2 p-3.5 shadow-sm hover:shadow-md cursor-pointer select-none transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-black ${sleept ? 'opacity-40' : ''}`}>
       {/* Fase bovenaan, als label in de kleur van de kolom. */}
-      <div className="flex items-center justify-between gap-2">
-        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${kol.label_kleur}`}>{kol.label}</span>
-        <div className="relative" onClick={stop}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-1 flex-wrap min-w-0">
+          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${kol.label_kleur}`}>{kol.label}</span>
+          {/* De dienst als tekstlabel, in een stevigere tint van de kaartkleur. */}
+          {kleur.key && (
+            <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full truncate ${kleur.donker ? 'bg-white/20 text-white' : ''}`}
+              style={kleur.donker ? undefined : { background: kleur.rand, color: kleur.tekst }}>{kleur.label}</span>
+          )}
+        </div>
+        <div className="relative shrink-0" onClick={stop}>
           <button type="button" onClick={onMenu} aria-label="Verplaatsen naar een andere fase" title="Verplaatsen"
             className={`h-8 px-2 rounded-lg flex items-center gap-1 text-[11px] font-medium ${kleur.donker ? 'hover:bg-white/15' : 'hover:bg-black/5'}`}>
             <ArrowRightLeft className="h-3.5 w-3.5" /><span className="sm:hidden">Verplaats</span>
@@ -180,10 +187,10 @@ function Kaart({ o, sleept, menuOpen, onOpen, onMenu, onKolom, onDragStart, onDr
       </p>
 
       {/* Labels: bron en diensten. */}
-      {(o.bron || o.diensten.length > 0 || toonStap) && (
+      {(o.bron || o.diensten.length > (kleur.key ? 1 : 0) || toonStap) && (
         <div className="mt-2 flex items-center gap-1 flex-wrap">
           {o.bron && <Chip kleur={kleur}>{bronLabel(o.bron)}</Chip>}
-          {o.diensten.map((d) => {
+          {o.diensten.filter((d) => dienstInfo(d).key !== kleur.key || !kleur.key).map((d) => {
             const i = dienstInfo(d)
             return <Chip key={d} kleur={kleur} stip={i.key ? i.achtergrond : undefined}>{i.label}</Chip>
           })}

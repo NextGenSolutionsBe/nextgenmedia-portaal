@@ -5,8 +5,8 @@ import Link from 'next/link'
 import { Loader2, Trash2, Plus, ExternalLink, Pause, Play, Archive, X } from 'lucide-react'
 import { INP } from '@/app/admin/instellingen/ui'
 import {
-  REEKSEN, ACTIVITEIT_RITME_LABEL, verwachteDatum, ritmeVan, beurten, isKlaar, FASE_KEYS, FASE_LABEL,
-  type ActiviteitRitme, type CpInstellingen, type Onderdeel, type Status, type VasteTaak, type Reeks, type Ritme,
+  REEKSEN, ACTIVITEIT_RITME_LABEL, verwachteDatum, ritmeVan, beurten, isKlaar, FASE_KEYS, FASE_LABEL, dagenLabel, leesKlantTaken,
+  type ActiviteitRitme, type CpInstellingen, type Onderdeel, type Status, type VasteTaak, type Reeks, type Ritme, type KlantTaak,
 } from '@/lib/contentplanning/model'
 import { Paneel, Notities, StatusBadge, TaakKaart, focusRing } from './bouwstenen'
 import type { Batch, CpData, Doe, Taak } from './types'
@@ -183,6 +183,9 @@ export function KlantFiche({ clientId, maand, data, doe, vandaag, onSluit, onTaa
         {kanBeheren && ficheGewijzigd && <div className="flex justify-end"><button type="button" onClick={bewaarFiche} className="btn-primary text-sm">Bewaren</button></div>}
       </section>
 
+      {/* Extra taken bij deze klant, per reeks (bv. meeting op het einde van de maand). */}
+      <KlantTaken cp={cp} kanBeheren={kanBeheren} onBewaar={(lijst) => doe('klant.wijzig', { client_id: clientId, extra_taken: lijst }, { melding: 'Taken bewaard.' })} />
+
       {/* Cyclus van deze maand */}
       <section className="space-y-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -322,10 +325,21 @@ export function InstellingenPaneel({ data, doe, onSluit }: { data: CpData; doe: 
           {v.vaste_taken.map((t, i) => (
             <div key={t.key} className="rounded-xl border border-gray-200 p-2.5 space-y-1.5">
               <div className="flex gap-1.5"><input className={INP} value={t.titel} onChange={(e) => zetV(i, { titel: e.target.value })} aria-label="Taak" /><button type="button" onClick={() => setV({ ...v, vaste_taken: v.vaste_taken.filter((_, j) => j !== i) })} className={`h-9 w-9 shrink-0 rounded-lg hover:bg-red-50 text-red-600 flex items-center justify-center ${focusRing}`} aria-label="Taak verwijderen"><Trash2 className="h-4 w-4" /></button></div>
+              {/* Op welke dagen? Geen dag = één keer per week. */}
+              <div className="flex items-center gap-1 flex-wrap text-xs">
+                <span className="text-gray-500 mr-1">Dagen:</span>
+                {['ma', 'di', 'wo', 'do', 'vr'].map((d, j) => {
+                  const aan = (t.dagen ?? []).includes(j + 1)
+                  return <button key={d} type="button" aria-pressed={aan} onClick={() => zetV(i, { dagen: aan ? (t.dagen ?? []).filter((x) => x !== j + 1) : [...(t.dagen ?? []), j + 1].sort() })}
+                    className={`h-7 w-9 rounded-lg border font-semibold ${aan ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200 hover:border-gray-400'}`}>{d}</button>
+                })}
+                <button type="button" onClick={() => zetV(i, { dagen: [1, 2, 3, 4, 5] })} className="ml-1 underline text-gray-600">elke dag</button>
+                <span className="text-gray-400 ml-1">· {dagenLabel(t.dagen)}</span>
+              </div>
               <textarea rows={6} className={`${INP} font-mono text-xs`} value={t.detail} onChange={(e) => zetV(i, { detail: e.target.value })} aria-label={`Details ${t.titel}`} />
             </div>
           ))}
-          <button type="button" onClick={() => setV({ ...v, vaste_taken: [...v.vaste_taken, { key: `vt_${Date.now().toString(36)}`, titel: 'Nieuwe weektaak', detail: '' }] })} className="btn-secondary text-xs"><Plus className="h-3.5 w-3.5" />Weektaak toevoegen</button>
+          <button type="button" onClick={() => setV({ ...v, vaste_taken: [...v.vaste_taken, { key: `vt_${Date.now().toString(36)}`, titel: 'Nieuwe taak', detail: '', dagen: [] }] })} className="btn-secondary text-xs"><Plus className="h-3.5 w-3.5" />Taak toevoegen</button>
           <div>
             <div className="flex items-center justify-between"><label className={lbl}>Links</label><button type="button" onClick={() => setV({ ...v, routine_links: [...v.routine_links, { label: '', url: '' }] })} className="text-xs underline">+ link</button></div>
             <div className="space-y-1.5">{v.routine_links.map((l, i) => (
@@ -361,3 +375,35 @@ function BatchBeheer({ batches, doe }: { batches: Batch[]; doe: Doe }) {
   )
 }
 
+
+/**
+ * Extra taken voor één klant: verschijnen in de dagelijkse werking onder die
+ * klant, telkens die in de gekozen reeks zit. Afvinken per maand.
+ */
+function KlantTaken({ cp, kanBeheren, onBewaar }: { cp: CpData['cpKlanten'][number] | null; kanBeheren: boolean; onBewaar: (lijst: KlantTaak[]) => void }) {
+  const start = leesKlantTaken(cp?.extra_taken)
+  const [lijst, setLijst] = useState<KlantTaak[]>(start)
+  const gewijzigd = JSON.stringify(lijst) !== JSON.stringify(start)
+  if (!kanBeheren && !start.length) return null
+  return (
+    <section className="space-y-2">
+      <h4 className="text-xs font-semibold text-gray-500">Extra taken bij deze klant</h4>
+      {lijst.length === 0 && <p className="text-sm text-gray-500">Geen extra taken. Voeg er een toe als deze klant iets extra vraagt in een reeks.</p>}
+      {lijst.map((t, i) => (
+        <div key={t.key} className="grid grid-cols-[1fr_auto_auto] gap-1.5 items-start">
+          <textarea rows={2} className={INP} disabled={!kanBeheren} value={t.titel} maxLength={300} onChange={(e) => setLijst(lijst.map((x, j) => (j === i ? { ...x, titel: e.target.value } : x)))} aria-label="Taak" />
+          <select className={`${INP} w-auto`} disabled={!kanBeheren} value={t.reeks} onChange={(e) => setLijst(lijst.map((x, j) => (j === i ? { ...x, reeks: Number(e.target.value) as Reeks } : x)))} aria-label="Reeks">
+            {REEKSEN.map((r) => <option key={r.nr} value={r.nr}>{r.kort}</option>)}
+          </select>
+          {kanBeheren && <button type="button" onClick={() => setLijst(lijst.filter((_, j) => j !== i))} className={`h-9 w-9 rounded-lg hover:bg-red-50 text-red-600 flex items-center justify-center ${focusRing}`} aria-label="Taak verwijderen"><Trash2 className="h-4 w-4" /></button>}
+        </div>
+      ))}
+      {kanBeheren && (
+        <div className="flex gap-2 justify-between">
+          <button type="button" onClick={() => setLijst([...lijst, { key: `kt${Date.now().toString(36)}`, titel: '', reeks: 2 }])} className="btn-secondary text-xs"><Plus className="h-3.5 w-3.5" />Taak toevoegen</button>
+          {gewijzigd && <button type="button" onClick={() => onBewaar(lijst.filter((t) => t.titel.trim()))} className="btn-primary text-sm">Bewaren</button>}
+        </div>
+      )}
+    </section>
+  )
+}

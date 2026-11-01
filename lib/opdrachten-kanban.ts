@@ -91,7 +91,7 @@ export function statusVoorKolom(huidig: OpdrachtStatus, doel: KolomKey): Opdrach
 
 // ── Diensten en hun kleur ────────────────────────────────────────────────────
 
-export type DienstKey = 'social_media' | 'grafisch' | 'webdesign' | 'foto_video' | 'branding' | 'consultancy' | 'ngs' | 'founders'
+export type DienstKey = 'social_media' | 'grafisch' | 'webdesign' | 'foto_video' | 'branding' | 'consultancy' | 'meta_ads' | 'google_ads' | 'ngs' | 'founders'
 
 export type DienstInfo = {
   key: DienstKey | null
@@ -102,16 +102,20 @@ export type DienstInfo = {
   tekst: string
   /** Donkere kaart: labels en knoppen in wit. */
   donker: boolean
+  /** Andere schrijfwijzen die we als deze dienst herkennen. */
+  ook?: string[]
 }
 
 export const DIENSTEN: DienstInfo[] = [
-  { key: 'social_media', label: 'Social media',          achtergrond: '#FFF5C2', rand: '#EBD670', tekst: '#2B2600', donker: false },
+  { key: 'social_media', label: 'Sociale media',         achtergrond: '#FFF5C2', rand: '#EBD670', tekst: '#2B2600', donker: false, ook: ['Social media', 'Socials', 'Social media management'] },
   { key: 'grafisch',     label: 'Grafisch ontwerp',      achtergrond: '#FDE0DE', rand: '#F1ACA6', tekst: '#3A1210', donker: false },
   { key: 'webdesign',    label: 'Webdesign',             achtergrond: '#ECE2FB', rand: '#C7AEF0', tekst: '#241446', donker: false },
   { key: 'foto_video',   label: 'Foto & videografie',    achtergrond: '#DCF3E2', rand: '#9CD5AB', tekst: '#0F2E18', donker: false },
   { key: 'branding',     label: 'Branding',              achtergrond: '#FDE0DE', rand: '#F1ACA6', tekst: '#3A1210', donker: false },
-  { key: 'consultancy',  label: 'Marketing consultancy', achtergrond: '#F0E4D6', rand: '#D2B694', tekst: '#33240F', donker: false },
-  { key: 'ngs',          label: 'NextGenSolutions (AI)', achtergrond: '#DDEBFC', rand: '#9FC2EE', tekst: '#0E2440', donker: false },
+  { key: 'consultancy',  label: 'Marketing consultancy', achtergrond: '#F0E4D6', rand: '#D2B694', tekst: '#33240F', donker: false, ook: ['Consultancy'] },
+  { key: 'meta_ads',     label: 'Meta ads',              achtergrond: '#D6F4EF', rand: '#8FD4C8', tekst: '#0D302B', donker: false, ook: ['Facebook ads', 'Instagram ads', 'Meta advertenties'] },
+  { key: 'google_ads',   label: 'Google ads',            achtergrond: '#FFE6CF', rand: '#F2B47C', tekst: '#3A1F05', donker: false, ook: ['Google advertenties', 'SEA'] },
+  { key: 'ngs',          label: 'NextGenSolutions (AI)', achtergrond: '#DDEBFC', rand: '#9FC2EE', tekst: '#0E2440', donker: false, ook: ['NextGenSolutions', 'AI'] },
   { key: 'founders',     label: 'Founders of Flanders',  achtergrond: '#8A5A3B', rand: '#6B4329', tekst: '#FFFFFF', donker: true },
 ]
 
@@ -122,7 +126,8 @@ const sleutelVan = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-
 
 /** Info van een opgeslagen dienst: een vaste sleutel, een vast label, of eigen tekst (dan zonder kleur). */
 export function dienstInfo(v: string): DienstInfo {
-  const vast = DIENSTEN.find((d) => d.key === v || sleutelVan(d.label) === sleutelVan(v))
+  const s = sleutelVan(v)
+  const vast = DIENSTEN.find((d) => d.key === v || sleutelVan(d.label) === s || (d.ook ?? []).some((o) => sleutelVan(o) === s))
   return vast ?? { ...GEEN_DIENST, label: v }
 }
 
@@ -162,7 +167,9 @@ export function raadDiensten(titel: string | null | undefined): DienstKey[] {
   const uit: DienstKey[] = []
   const als = (re: RegExp, k: DienstKey) => { if (re.test(t) && !uit.includes(k)) uit.push(k) }
   als(/founders/, 'founders')
-  als(/social|instagram|linkedin|facebook|tiktok|community|content(?!shoot)/, 'social_media')
+  als(/google ads|google advert|adwords|\bsea\b/, 'google_ads')
+  als(/meta ads|facebook ads|instagram ads|meta advert|advertising|advertenties|campagne|(?<!google )\bads\b/, 'meta_ads')
+  als(/social|instagram(?! ads)|linkedin|facebook(?! ads)|tiktok|community|content(?!shoot)/, 'social_media')
   als(/website|webshop|webdesign|landingspagina|wordpress|\bsite\b|\bweb\b/, 'webdesign')
   als(/huisstijl|branding|logo|merk|identiteit/, 'branding')
   als(/grafisch|flyer|drukwerk|bestickering|sticker|belettering|brochure|affiche|visitekaart|ontwerp/, 'grafisch')

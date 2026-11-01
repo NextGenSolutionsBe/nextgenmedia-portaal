@@ -104,4 +104,20 @@ test('8. Founders: Shorts-link is staand; kanaal-link enkel van YouTube', () => 
   assert.equal(valideerKanaal('https://www.youtube.com/watch?v=dQw4w9WgXcQ').ok, false)
 })
 
+test('9. Founders: een Instagram-reel, Facebook- of LinkedIn-post mag ook; YouTube blijft gewoon werken', () => {
+  const reel = valideerFoundersVideo({ titel: 'Founder in 60 seconden', youtube: '<blockquote class="instagram-media" data-instgrm-permalink="https://www.instagram.com/reel/C9xYzAbCdEf/?igsh=x"></blockquote><script async src="//www.instagram.com/embed.js"></script>' })
+  assert.ok(reel.ok, JSON.stringify(reel))
+  if (!reel.ok) return
+  assert.equal(reel.waarde.youtube_id, null)
+  assert.equal(reel.waarde.embed?.provider, 'instagram')
+  assert.equal(reel.waarde.embed?.url, 'https://www.instagram.com/reel/C9xYzAbCdEf/')
+  assert.equal(reel.waarde.formaat, 'staand')
+  const li = valideerFoundersVideo({ titel: 'Post', youtube: 'https://www.linkedin.com/posts/ngm_founder-activity-7254123456789012345-AbCd', formaat: 'liggend' })
+  assert.ok(li.ok && li.waarde.embed?.provider === 'linkedin' && li.waarde.formaat === 'staand', 'een post staat in het staande raster')
+  const yt = valideerFoundersVideo({ titel: 'YouTube', youtube: 'https://youtu.be/dQw4w9WgXcQ' })
+  assert.ok(yt.ok && yt.waarde.youtube_id === 'dQw4w9WgXcQ' && yt.waarde.embed === null)
+  assert.equal(valideerFoundersVideo({ titel: 'Fout', youtube: 'https://evil.com/reel/abc' }).ok, false)
+  assert.equal(valideerFoundersVideo({ titel: 'Leeg', youtube: '' }).ok, false)
+})
+
 console.log(`\n${n} tests geslaagd\n`)

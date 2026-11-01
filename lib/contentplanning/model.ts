@@ -99,14 +99,54 @@ export type CpInstellingen = {
   routine_links: Link[]
   /** Werkwijze (stappenplan) per reeks, sleutel '1' | '2' | '3', in het tekstformaat van `leesWerkwijze`. */
   reeks_detail: Record<string, string>
-  /** Vaste klant met een eigen weekworkflow (INN · SLL · K · J): korte taken, per week afvinken. */
+  /** Vaste klant met een eigen workflow (INN · SLL · K · J): taken op vaste weekdagen (of één keer per week). */
   vaste_naam: string
   vaste_sub: string
   vaste_taken: VasteTaak[]
   /** Klanten die niet op het Klantenbatches-bord horen (bv. geen social media). */
   bord_verborgen: string[]
 }
-export type VasteTaak = { key: string; titel: string; detail: string }
+/** `dagen`: 1 = maandag … 5 = vrijdag. Leeg = één keer per week, op een dag naar keuze. */
+export type VasteTaak = { key: string; titel: string; detail: string; dagen?: number[] }
+
+/**
+ * Extra taak bij één klant, telkens die klant in de gekozen reeks zit (bv.
+ * Verheyen: op het einde van de maand een meeting inplannen). Afvinken per
+ * maand. Staat in cp_klanten.extra_taken.
+ */
+export type KlantTaak = { key: string; titel: string; reeks: Reeks }
+
+/** Weekdagen nakijken: enkel 1 tot 5, zonder dubbels, gesorteerd. */
+export function leesDagen(v: unknown): number[] {
+  if (!Array.isArray(v)) return []
+  return [...new Set(v.map(Number).filter((d) => Number.isInteger(d) && d >= 1 && d <= 5))].sort((a, b) => a - b)
+}
+export const isDagtaak = (t: Pick<VasteTaak, 'dagen'>) => !!t.dagen?.length
+/** Welke vaste taken horen bij deze dag? Dagtaken van die weekdag plus de weektaken. */
+export const vasteTakenVanDag = (taken: VasteTaak[], datum: string): VasteTaak[] =>
+  taken.filter((t) => !isDagtaak(t) || t.dagen!.includes(weekdagNr(datum)))
+const DAG_NAAM = ['maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag']
+/** "Elke dag", "dinsdag", "dinsdag en vrijdag", of "één keer per week". */
+export function dagenLabel(dagen: number[] | undefined): string {
+  const d = leesDagen(dagen)
+  if (!d.length) return 'één keer per week'
+  if (d.length === 5) return 'elke dag'
+  const n = d.map((x) => DAG_NAAM[x - 1])
+  return n.length === 1 ? n[0] : `${n.slice(0, -1).join(', ')} en ${n[n.length - 1]}`
+}
+
+export function leesKlantTaken(v: unknown): KlantTaak[] {
+  if (!Array.isArray(v)) return []
+  return v.slice(0, 20).map((t) => {
+    const r = (t ?? {}) as Record<string, unknown>
+    const titel = String(r.titel ?? '').replace(/\s+/g, ' ').trim().slice(0, 300)
+    const reeks = Number(r.reeks)
+    const key = String(r.key ?? '').replace(/[^a-z0-9_]/gi, '').slice(0, 30)
+    return titel && isReeks(reeks) && key ? { key, titel, reeks } : null
+  }).filter((t): t is KlantTaak => !!t)
+}
+/** Afvinken van een klanttaak: per klant, taak en maand (datum = eerste dag van de maand). */
+export const klantTaakSleutel = (clientId: string, key: string) => `kt:${clientId}:${key}`
 
 export const STANDAARD_STATUSSEN: Status[] = [
   { key: 'nog_in_te_plannen', label: 'Nog in te plannen', kleur: 'bg-white text-gray-800 border-gray-300', klaar: false },
@@ -213,15 +253,16 @@ export const STANDAARD_CP: CpInstellingen = {
   vaste_naam: 'INN · SLL · K · J',
   vaste_sub: 'Inner Stance, Straight Line Leadership en de persoonlijke kanalen van Kristof en Johan',
   vaste_taken: [
-    { key: 'inn_copy', titel: 'Copy controleren en aanpassen', detail: `# Dagelijks in Notion controleren
+    { key: 'inn_community', titel: 'Community management controleren en opvolgen', detail: '', dagen: [1, 2, 3, 4, 5] },
+    { key: 'inn_kristof', titel: 'Content van Kristof inplannen', detail: '', dagen: [2] },
+    { key: 'inn_copy', titel: "Copy's aanpassen", dagen: [4], detail: `# In Notion controleren
 - Staat er voor de week erna ‘Copy changes needed’?
-- De status kan dagelijks veranderen: controleer op verschillende dagen en vink per week af
 # Indien nodig [Claude]
 - Claude inschakelen om de copy aan te passen
 - De wijzigingen controleren
 - Status op ‘Copy ready for review’ zetten` },
     // Claude plant in via de gepinde chat; Chiara controleert en geeft groen licht voor Scheduled. Artikels blijven handwerk.
-    { key: 'inn_inplannen', titel: 'Content inplannen', detail: `# Zeg tegen Claude in de gepinde chat
+    { key: 'inn_inplannen', titel: 'Content inplannen', dagen: [5], detail: `# Zeg tegen Claude in de gepinde chat
 - "Plan van [datum x] tot [datum y] alle posts in die op Ready staan"
 # Controleer of alles klopt
 # Zeg tegen Claude dat alles op Scheduled mag
@@ -245,7 +286,7 @@ export function leesCp(ruw: unknown): CpInstellingen {
     reeks_detail: { ...STANDAARD_CP.reeks_detail, ...(r.reeks_detail && typeof r.reeks_detail === 'object' ? r.reeks_detail : {}) },
     vaste_naam: typeof r.vaste_naam === 'string' && r.vaste_naam.trim() ? r.vaste_naam : STANDAARD_CP.vaste_naam,
     vaste_sub: typeof r.vaste_sub === 'string' ? r.vaste_sub : STANDAARD_CP.vaste_sub,
-    vaste_taken: Array.isArray(r.vaste_taken) ? r.vaste_taken.filter((t) => t && typeof t.key === 'string').map((t) => ({ key: t.key, titel: String(t.titel ?? ''), detail: String(t.detail ?? '') })) : STANDAARD_CP.vaste_taken,
+    vaste_taken: Array.isArray(r.vaste_taken) ? r.vaste_taken.filter((t) => t && typeof t.key === 'string').map((t) => ({ key: t.key, titel: String(t.titel ?? ''), detail: String(t.detail ?? ''), dagen: leesDagen(t.dagen) })) : STANDAARD_CP.vaste_taken,
     bord_verborgen: Array.isArray(r.bord_verborgen) ? r.bord_verborgen.filter((x): x is string => typeof x === 'string') : [],
     aanpassing_werkdagen: Number.isFinite(Number(r.aanpassing_werkdagen)) ? Math.max(0, Math.round(Number(r.aanpassing_werkdagen))) : 3,
     goedkeuring_werkdagen: r.goedkeuring_werkdagen === null || r.goedkeuring_werkdagen === undefined ? null : Math.max(0, Math.round(Number(r.goedkeuring_werkdagen))),

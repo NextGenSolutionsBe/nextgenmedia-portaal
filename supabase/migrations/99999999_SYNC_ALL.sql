@@ -6705,3 +6705,18 @@ CREATE TABLE IF NOT EXISTS public.opdracht_notities (
 CREATE INDEX IF NOT EXISTS opdracht_notities_opdracht ON public.opdracht_notities (opdracht_id, created_at DESC);
 ALTER TABLE public.opdracht_notities ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.opdracht_notities FROM anon, authenticated;
+
+-- Founders of Flanders: een voorbeeld kan ook een social post zijn (Instagram,
+-- Facebook, LinkedIn). We bewaren enkel de nagekeken openbare link (EmbedRef).
+ALTER TABLE public.founders_videos ADD COLUMN IF NOT EXISTS embed jsonb;
+ALTER TABLE public.founders_videos ALTER COLUMN youtube_id DROP NOT NULL;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'founders_videos_bron_check') THEN
+    ALTER TABLE public.founders_videos ADD CONSTRAINT founders_videos_bron_check CHECK (youtube_id IS NOT NULL OR embed IS NOT NULL);
+  END IF;
+END $$;
+
+-- Dagelijkse planning Chiara: extra taken per klant, telkens die klant in een
+-- reeks zit (bv. Verheyen: meeting op het einde van de maand inplannen).
+-- [{ key, titel, reeks }]; afvinken per maand via cp_routine_checks (kt:<klant>:<taak>).
+ALTER TABLE public.cp_klanten ADD COLUMN IF NOT EXISTS extra_taken jsonb NOT NULL DEFAULT '[]'::jsonb;

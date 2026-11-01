@@ -7,7 +7,7 @@ import {
   STANDAARD_CP as S, beurtenMetBord, faseplanVanMaand, pasFaseAan, wisselDag, planNaarDagen, reeksPeriodes, segmenten, eersteWerkdag, standaardFases, fasesVanMaand, reeksenVanDag, plusWerkdagen, isKwartaalmaand, ritmeVan, beurten, teMakenTaken,
   verwachteDatum, isAchterstallig, deadlineVerstreken, routineVoorDag, werkdagenVanMaand, leesCp, bordVanKlant, leesWerkwijze, MAANDSTART,
   batchNr, startmaandVoorBatch, BORD_BATCHES, werkwijze1Beurten, inReeks1, BORD_MAANDELIJKS, ritmeNaVerplaatsen, opBordMaandelijks,
-  REEKS1_AANPASSINGEN, reeks1AanpassingenCheckDatum,
+  REEKS1_AANPASSINGEN, reeks1AanpassingenCheckDatum, vasteTakenVanDag, dagenLabel, leesKlantTaken, klantTaakSleutel,
 } from '../lib/contentplanning/model'
 
 let n = 0
@@ -161,13 +161,30 @@ test('Werkwijze per reeks: stappen, badges, deelblokken en let-op uit het tekstf
   assert.equal(w2.letOp[0], 'Pitch Please als eerste editen.')
   assert.deepEqual(w2.stappen.map((x) => x.titel), ['Materiaal zoeken', 'Volgorde bepalen', 'Posts & stories', 'Reels', 'Afronden per klant', 'Opvolgtaak zetten', 'Goedkeuringstermijn aanduiden'])
   assert.ok(!c.reeks_detail['2'].includes('in je notities'))
-  assert.deepEqual(c.vaste_taken.map((t) => t.key), ['inn_copy', 'inn_inplannen'])
-  // INN · SLL · K · J: enkel de vier stappen van Chiara (Claude plant in, zij controleert, Claude zet op Scheduled, artikels zelf).
-  const inplannen = c.vaste_taken[1]
+  // INN · SLL · K · J (1 nov 2026): elke dag community management, di content van Kristof, do copy's, vr inplannen.
+  assert.deepEqual(c.vaste_taken.map((t) => [t.key, t.dagen]), [['inn_community', [1, 2, 3, 4, 5]], ['inn_kristof', [2]], ['inn_copy', [4]], ['inn_inplannen', [5]]])
+  assert.deepEqual(vasteTakenVanDag(c.vaste_taken, '2026-11-03').map((t) => t.titel), ['Community management controleren en opvolgen', 'Content van Kristof inplannen'], 'dinsdag')
+  assert.deepEqual(vasteTakenVanDag(c.vaste_taken, '2026-11-05').map((t) => t.titel), ['Community management controleren en opvolgen', "Copy's aanpassen"], 'donderdag')
+  assert.deepEqual(vasteTakenVanDag(c.vaste_taken, '2026-11-06').map((t) => t.titel), ['Community management controleren en opvolgen', 'Content inplannen'], 'vrijdag')
+  assert.deepEqual(vasteTakenVanDag(c.vaste_taken, '2026-11-07'), [], 'weekend')
+  assert.equal(dagenLabel([1, 2, 3, 4, 5]), 'elke dag')
+  assert.equal(dagenLabel([2, 5]), 'dinsdag en vrijdag')
+  assert.equal(dagenLabel([]), 'één keer per week')
+  assert.deepEqual(vasteTakenVanDag([{ key: 'w', titel: 'Week', detail: '' }], '2026-11-04').length, 1, 'zonder dagen: weektaak, elke dag zichtbaar')
+  // Inplannen: de vier stappen van Chiara (Claude plant in, zij controleert, Claude zet op Scheduled, artikels zelf).
+  const inplannen = c.vaste_taken[3]
   assert.equal(inplannen.titel, 'Content inplannen')
   assert.deepEqual(leesWerkwijze(inplannen.detail).stappen.map((x) => x.titel), ['Zeg tegen Claude in de gepinde chat', 'Controleer of alles klopt', 'Zeg tegen Claude dat alles op Scheduled mag', 'Artikels post je zelf'])
   assert.deepEqual(c.routine, [])
   assert.deepEqual(leesCp({ bord_verborgen: ['x', 3] }).bord_verborgen, ['x'])
+})
+
+test('Extra taken per klant: titel, reeks en sleutel nagekeken; afvinken per maand', () => {
+  const t = leesKlantTaken([{ key: 'kt1', titel: '  Meeting op het einde van de maand inplannen  ', reeks: 2 }, { key: 'x', titel: '', reeks: 2 }, { key: 'y', titel: 'Fout', reeks: 7 }, null])
+  assert.deepEqual(t, [{ key: 'kt1', titel: 'Meeting op het einde van de maand inplannen', reeks: 2 }])
+  assert.equal(klantTaakSleutel('1010a71d-05f2-4887-8bf6-906aaa8a847e', 'kt1'), 'kt:1010a71d-05f2-4887-8bf6-906aaa8a847e:kt1')
+  assert.deepEqual(leesKlantTaken('rommel'), [])
+  assert.deepEqual(leesCp({ vaste_taken: [{ key: 'a', titel: 'A', detail: '', dagen: [2, 2, 9, '4'] }] }).vaste_taken[0].dagen, [2, 4])
 })
 
 test('Editen hoort in reeks 2: in oktober 2026 (echte aanpassingen) start reeks 3 pas op 26/10', () => {

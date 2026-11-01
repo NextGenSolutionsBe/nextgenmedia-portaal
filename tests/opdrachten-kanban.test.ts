@@ -75,7 +75,18 @@ test('6. Voorstel van diensten uit de titel (enkel een voorstel)', () => {
   assert.deepEqual(raadDiensten('AI-chatbot'), ['ngs'])
   assert.deepEqual(raadDiensten('Contentshoot Eline Vantilt'), ['foto_video'])
   assert.deepEqual(raadDiensten('Founders of Flanders aflevering'), ['founders'])
-  assert.deepEqual(raadDiensten('Advertising'), [])
+  assert.deepEqual(raadDiensten('Advertising'), ['meta_ads'])
+  assert.deepEqual(raadDiensten('Website + Google Ads'), ['google_ads', 'webdesign'])
+  assert.deepEqual(raadDiensten('Facebook ads campagne'), ['meta_ads'])
+})
+
+test('6b. Meta ads en Google ads hebben elk een eigen pastelkleur; Sociale media heet zo, ook als je "Social media" typt', () => {
+  const kleuren = new Set(['meta_ads', 'google_ads', 'social_media', 'ngs', 'webdesign', 'foto_video', 'consultancy', 'grafisch', 'founders'].map((d) => dienstInfo(d).achtergrond))
+  assert.equal(kleuren.size, 9)
+  assert.equal(dienstInfo('meta_ads').label, 'Meta ads')
+  assert.equal(dienstInfo('Google Ads').key, 'google_ads')
+  assert.equal(dienstInfo('social media').label, 'Sociale media')
+  assert.equal(dienstInfo('Facebook ads').key, 'meta_ads')
 })
 
 test('7. Bron en offertekanaal', () => {

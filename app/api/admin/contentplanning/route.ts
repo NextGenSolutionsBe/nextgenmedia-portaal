@@ -5,7 +5,7 @@ import { magIk } from '@/lib/instellingen/laden'
 import { leesActorNamen } from '@/lib/actor-namen'
 import {
   leesCp, beurtenMetBord, bordVanKlant, teMakenTaken, isReeks, plusDagen, maandVan, plusMaanden, maandEind, werkdagenVanMaand, FASE_KEYS, STANDAARD_CP,
-  batchNr, startmaandVoorBatch, BORD_BATCHES, BORD_MAANDELIJKS, ritmeNaVerplaatsen, type BordKolom,
+  batchNr, startmaandVoorBatch, leesKlantTaken, BORD_BATCHES, BORD_MAANDELIJKS, ritmeNaVerplaatsen, type BordKolom,
   type ActiviteitRitme, type CpInstellingen, type Ritme, type Reeks,
 } from '@/lib/contentplanning/model'
 
@@ -81,7 +81,8 @@ export async function GET(req: NextRequest) {
       admin.from('cp_cycli').select('*').gte('maand', maandVanaf).lte('maand', maandTot),
       admin.from('cp_taken').select('*').is('verwijderd_op', null).or(`werkdatum.is.null,werkdatum.gte.${ruimVan},deadline.gte.${ruimVan}`).order('werkdatum', { nullsFirst: false }).order('volgorde'),
       admin.from('cp_notities').select('*').is('verwijderd_op', null).order('vastgepind', { ascending: false }).order('updated_at', { ascending: false }).limit(1000),
-      admin.from('cp_routine_checks').select('*').gte('datum', plusDagen(van, -7)).lte('datum', tot),
+      // -40 dagen: ook de maandvinkjes van klanttaken (datum = eerste dag van de maand) en de weekvinkjes.
+      admin.from('cp_routine_checks').select('*').gte('datum', plusDagen(van, -40)).lte('datum', tot),
       admin.from('month_planning_overrides').select('plan_date, categories').gte('plan_date', `${maandVan(van)}-01`).lte('plan_date', plusDagen(tot, 31)),
       admin.from('staff_members').select('name, auth_user_id, active, verwijderd_at').eq('active', true).is('verwijderd_at', null),
       admin.from('user_roles').select('user_id').eq('role', 'admin'),
@@ -351,6 +352,7 @@ export async function POST(req: NextRequest) {
       if ('goedkeuring_werkdagen' in b) v.goedkeuring_werkdagen = b.goedkeuring_werkdagen === null || b.goedkeuring_werkdagen === '' ? null : Math.max(0, Math.min(60, Math.round(Number(b.goedkeuring_werkdagen) || 0)))
       if ('afspraken' in b) v.afspraken = tekst(b.afspraken, 4000)
       if ('materiaal' in b) v.materiaal = tekst(b.materiaal, 4000)
+      if ('extra_taken' in b) v.extra_taken = leesKlantTaken(b.extra_taken)
       if ('contactpersonen' in b && Array.isArray(b.contactpersonen)) v.contactpersonen = (b.contactpersonen as Record<string, unknown>[]).slice(0, 20).map((c) => ({ naam: tekst(c.naam, 120) ?? '', rol: tekst(c.rol, 120), email: tekst(c.email, 200), telefoon: tekst(c.telefoon, 40) })).filter((c) => c.naam)
       if ('links' in b && Array.isArray(b.links)) v.links = (b.links as Record<string, unknown>[]).slice(0, 30).map((l) => ({ label: tekst(l.label, 120) ?? '', url: tekst(l.url, 800) ?? '' })).filter((l) => /^https?:\/\//i.test(l.url))
       // Ritme en activiteiten zijn terugkerende instellingen: "alleen deze cyclus" of "ook toekomstige".

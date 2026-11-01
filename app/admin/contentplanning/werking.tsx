@@ -6,6 +6,7 @@ import { INP } from '@/app/admin/instellingen/ui'
 import {
   REEKSEN, MAANDSTART, DAG_KORT, eersteWerkdag, faseplanVanMaand, reeksPeriodes, leesWerkwijze, maandag, maandVan, plusDagen, plusMaanden, weekdagNr, werkdagenVanMaand,
   werkwijze1Beurten, inReeks1, REEKS1_AANPASSINGEN, reeks1AanpassingenCheckDatum, type Reeks, type Werk1Beurt,
+  vasteTakenVanDag, isDagtaak, dagenLabel, leesKlantTaken, klantTaakSleutel, maandStart, type VasteTaak,
 } from '@/lib/contentplanning/model'
 import { Paneel, focusRing } from './bouwstenen'
 import type { BordCel, CpData, Doe, Weergave } from './types'
@@ -293,27 +294,72 @@ function AanpassingenTaak({ data, doe, anker, tot, kanSchrijven, onWerkwijze }: 
   )
 }
 
-// ── Vaste klant met weektaken (INN · SLL · K · J) ───────────────────────────
-export function VasteKlant({ data, doe, anker, kanSchrijven }: { data: CpData; doe: Doe; anker: string; kanSchrijven: boolean }) {
+// ── Vaste klant (INN · SLL · K · J): taken op vaste weekdagen ───────────────
+/**
+ * Dagweergave: de taken van die weekdag (bv. dinsdag "Content van Kristof
+ * inplannen", elke dag "Community management") plus de weektaken. Een dagtaak
+ * vink je per dag af, een weektaak één keer per week. Weekweergave: per taak
+ * een vakje voor elke dag waarop ze valt.
+ */
+export function VasteKlant({ data, doe, anker, kanSchrijven, modus = 'dag' }: { data: CpData; doe: Doe; anker: string; kanSchrijven: boolean; modus?: 'dag' | 'week' }) {
   const inst = data.instellingen
   const week = maandag(anker)
   const [open, setOpen] = useState<string | null>(null)
   if (!inst.vaste_taken.length) return null
+  const taken = modus === 'dag' ? vasteTakenVanDag(inst.vaste_taken, anker) : inst.vaste_taken
+  const check = (key: string, datum: string) => data.checks.find((c) => c.routine_key === key && c.datum === datum)
+  const zet = (key: string, datum: string, aan: boolean) => doe('routine.check', { routine_key: key, datum, aan }, { stil: true })
+  const Details = ({ t }: { t: VasteTaak }) => (
+    <>
+      {t.detail.trim() && <button type="button" onClick={() => setOpen(open === t.key ? null : t.key)} aria-expanded={open === t.key} aria-label={`Details ${t.titel}`} className={`h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-lg hover:bg-cp-achtergrond ${focusRing}`}><ChevronDown className={`h-4 w-4 transition-transform ${open === t.key ? '' : '-rotate-90'}`} /></button>}
+    </>
+  )
   return (
     <section className={`${KAART} p-5 space-y-3`}>
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="text-cp-kop">{inst.vaste_naam}</h3>
-        <span className="text-cp-klein text-cp-zacht">week {datumNl(week)}</span>
+        <span className="text-cp-klein text-cp-zacht capitalize">{modus === 'dag' ? `${DAG_KORT[weekdagNr(anker) - 1]} ${datumNl(anker)}` : `week ${datumNl(week)}`}</span>
       </div>
-      {inst.vaste_taken.map((t) => {
-        const check = data.checks.find((c) => c.routine_key === t.key && c.datum === week)
+      {taken.length === 0 && <p className="text-cp-basis text-cp-zacht">Geen vaste taken {weekdagNr(anker) > 5 ? 'in het weekend' : 'vandaag'}.</p>}
+      {taken.map((t) => {
+        const dag = isDagtaak(t)
+        // Weekweergave van een dagtaak: een vakje per dag.
+        if (dag && modus === 'week') {
+          const dagen = t.dagen!.map((d) => plusDagen(week, d - 1))
+          const klaar = dagen.filter((d) => check(t.key, d)).length
+          return (
+            <div key={t.key} className="rounded-xl border border-cp-rand">
+              <div className="flex items-center gap-3 px-3 py-3">
+                <span className={`text-cp-basis font-medium flex-1 min-w-0 ${klaar === dagen.length ? 'line-through text-cp-zacht' : ''}`}>{t.titel}<span className="block text-cp-klein text-cp-zacht font-normal">{dagenLabel(t.dagen)} · {klaar}/{dagen.length}</span></span>
+                <Details t={t} />
+              </div>
+              <div className="flex gap-1.5 px-3 pb-3 flex-wrap">
+                {dagen.map((d) => {
+                  const c = check(t.key, d)
+                  return (
+                    <label key={d} className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-cp-klein cursor-pointer ${c ? 'border-cp-klaar' : 'border-cp-rand'}`} title={c?.door ? `Afgevinkt door ${c.door}` : undefined}>
+                      <input type="checkbox" className="h-4 w-4 accent-[var(--cp-klaar)]" checked={!!c} disabled={!kanSchrijven} aria-label={`${t.titel} op ${DAG_KORT[weekdagNr(d) - 1]} afvinken`} onChange={(e) => zet(t.key, d, e.target.checked)} />
+                      <span className="capitalize">{DAG_KORT[weekdagNr(d) - 1]}</span>
+                    </label>
+                  )
+                })}
+              </div>
+              {open === t.key && <div className="border-t border-cp-rand px-4 py-3"><WerkwijzeTekst tekst={t.detail} compact /></div>}
+            </div>
+          )
+        }
+        const datum = dag ? anker : week
+        const c = check(t.key, datum)
         return (
           <div key={t.key} className="rounded-xl border border-cp-rand">
             <div className="flex items-center gap-3 px-3 py-3">
-              <input type="checkbox" className={VINK} checked={!!check} disabled={!kanSchrijven} aria-label={`${t.titel} afvinken voor deze week`}
-                onChange={(e) => doe('routine.check', { routine_key: t.key, datum: week, aan: e.target.checked }, { stil: true })} />
-              <span className={`text-cp-basis font-medium flex-1 min-w-0 ${check ? 'line-through text-cp-zacht' : ''}`}>{t.titel}{check?.door && <span className="text-cp-klein text-cp-zacht"> · {check.door}</span>}</span>
-              <button type="button" onClick={() => setOpen(open === t.key ? null : t.key)} aria-expanded={open === t.key} aria-label={`Details ${t.titel}`} className={`h-8 w-8 inline-flex items-center justify-center rounded-lg hover:bg-cp-achtergrond ${focusRing}`}><ChevronDown className={`h-4 w-4 transition-transform ${open === t.key ? '' : '-rotate-90'}`} /></button>
+              <input type="checkbox" className={VINK} checked={!!c} disabled={!kanSchrijven} aria-label={`${t.titel} afvinken ${dag ? 'voor vandaag' : 'voor deze week'}`}
+                onChange={(e) => zet(t.key, datum, e.target.checked)} />
+              <span className="flex-1 min-w-0">
+                <span className={`block text-cp-basis font-medium ${c ? 'line-through text-cp-zacht' : ''}`}>{t.titel}</span>
+                <span className="block text-cp-klein text-cp-zacht">{dag ? dagenLabel(t.dagen) : 'één keer per week'}{c?.door ? ` · afgevinkt door ${c.door}` : ''}</span>
+              </span>
+              <Details t={t} />
             </div>
             {open === t.key && <div className="border-t border-cp-rand px-4 py-3"><WerkwijzeTekst tekst={t.detail} compact /></div>}
           </div>
@@ -336,6 +382,9 @@ function ReeksKaart({ r, maand, data, doe, datum, kanSchrijven, onWerkwijze, onK
   const p = w.periodes(maand)[r]
   const info = REEKSEN[r - 1]
   const vink = (c: BordCel, gedaan: boolean) => doe('reeksvink.zet', { client_id: c.client_id, maand, reeks: r, gedaan, datum }, { stil: true })
+  // Extra taken bij een klant in deze reeks (bv. Verheyen: meeting op het einde van de maand inplannen); afvinken per maand.
+  const extra = (cid: string) => leesKlantTaken(data.cpKlanten.find((k) => k.client_id === cid)?.extra_taken).filter((t) => t.reeks === r)
+  const ktCheck = (cid: string, key: string) => data.checks.find((c) => c.routine_key === klantTaakSleutel(cid, key) && c.datum === maandStart(maand))
   return (
     <section className={`${KAART} overflow-hidden`}>
       <div className={`h-2 ${info.kleur}`} />
@@ -351,12 +400,27 @@ function ReeksKaart({ r, maand, data, doe, datum, kanSchrijven, onWerkwijze, onK
       {lijst.length === 0 ? <p className="px-5 py-4 text-cp-basis text-cp-zacht">Geen klanten</p> : (
         <ul className={`divide-y divide-cp-rand ${klein ? 'max-h-80 overflow-y-auto' : ''}`}>
           {[...open, ...klaar].map((c) => (
-            <li key={c.client_id} className={`flex items-center gap-4 ${klein ? 'px-4 py-2.5' : 'px-5 py-4'} hover:bg-cp-achtergrond transition-colors`}>
+            <li key={c.client_id} className={`flex flex-wrap items-center gap-x-4 gap-y-2 ${klein ? 'px-4 py-2.5' : 'px-5 py-4'} hover:bg-cp-achtergrond transition-colors`}>
               <input type="checkbox" className={VINK} checked={!!c.afgewerkt_op} disabled={!kanSchrijven}
                 aria-label={`${w.naam.get(c.client_id)}: ${info.label} ${c.afgewerkt_op ? 'weer open zetten' : 'afvinken'}`} onChange={(e) => vink(c, e.target.checked)} />
               <button type="button" onClick={() => onKlant(c.client_id)} className={`text-left min-w-0 flex-1 truncate ${klein ? 'text-cp-basis' : 'text-lg'} ${c.afgewerkt_op ? 'line-through text-cp-zacht' : 'font-semibold'} ${focusRing} rounded`}>{w.naam.get(c.client_id)}</button>
               {beurt?.get(c.client_id) && !klein && <span className="hidden sm:flex gap-1 shrink-0"><Badges b={beurt.get(c.client_id)!} /></span>}
               {c.afgewerkt_op && <span className="text-cp-klein text-cp-zacht shrink-0">{datumNl(c.afgewerkt_op)}{c.afgewerkt_door ? ` · ${c.afgewerkt_door}` : ''}</span>}
+              {extra(c.client_id).length > 0 && (
+                <ul className="basis-full pl-10 space-y-1.5">
+                  {extra(c.client_id).map((t) => {
+                    const ck = ktCheck(c.client_id, t.key)
+                    return (
+                      <li key={t.key} className="flex items-start gap-2.5 rounded-lg bg-cp-achtergrond px-3 py-2">
+                        <input type="checkbox" className="h-5 w-5 mt-0.5 shrink-0 cursor-pointer accent-[var(--cp-klaar)]" checked={!!ck} disabled={!kanSchrijven}
+                          aria-label={`${w.naam.get(c.client_id)}: ${t.titel} afvinken`}
+                          onChange={(e) => doe('routine.check', { routine_key: klantTaakSleutel(c.client_id, t.key), datum: maandStart(maand), aan: e.target.checked }, { stil: true })} />
+                        <span className={`text-cp-klein ${ck ? 'line-through text-cp-zacht' : 'font-medium'}`}>{t.titel}{ck?.door ? <span className="text-cp-zacht font-normal"> · {ck.door}</span> : null}</span>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
             </li>
           ))}
         </ul>
@@ -510,7 +574,7 @@ export function DagelijkseWerking(p: Props) {
         </div>
         <div className="grid lg:grid-cols-[1fr_360px] gap-5 items-start">
           <div className="grid md:grid-cols-3 gap-3 items-start">{maanden.flatMap((m) => REEKSEN.map((r) => kaart(r.nr, m, vandaag, true)))}</div>
-          <VasteKlant data={data} doe={doe} anker={anker} kanSchrijven={kanSchrijven} />
+          <VasteKlant data={data} doe={doe} anker={anker} kanSchrijven={kanSchrijven} modus="week" />
         </div>
         {paneel}
       </div>
