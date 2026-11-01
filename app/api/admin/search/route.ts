@@ -83,6 +83,12 @@ export async function GET(req: NextRequest) {
       const ev = await safe(admin.from('klant_events').select('id, titel, soort, soort_label, status, start_op').or(`titel.ilike.${like},spreker.ilike.${like}`).order('start_op', { ascending: false }).limit(L)) as { id: string; titel: string; soort: string; soort_label: string | null; status: string; start_op: string }[]
       for (const e of ev) results.push({ type: 'event', label: eventSoortLabel({ soort: e.soort as EventSoort, soort_label: e.soort_label }), title: e.titel, subtitle: e.status === 'geannuleerd' ? 'Geannuleerd' : e.status === 'concept' ? `Concept · ${datumKort(e.start_op)}` : `${datumKort(e.start_op)} ${uur(e.start_op)}`, href: `/admin/events?event=${e.id}` })
     }
+    if (may('opleveringen')) {
+      const extraKlant = clients.length ? `,client_id.in.(${clients.map((c) => c.id).join(',')})` : ''
+      const op = await safe(admin.from('opleveringen').select('id, titel, client_id, gearchiveerd_op').or(`titel.ilike.${like}${extraKlant}`).order('updated_at', { ascending: false }).limit(L)) as { id: string; titel: string; client_id: string; gearchiveerd_op: string | null }[]
+      const naamVan = new Map(clients.map((c) => [c.id, c.company_name]))
+      for (const o of op) results.push({ type: 'oplevering', label: 'Oplevering', title: o.titel, subtitle: `${naamVan.get(o.client_id) ?? ''}${o.gearchiveerd_op ? ' · archief' : ''}`.replace(/^ · /, ''), href: `/admin/opleveringen?oplevering=${o.id}` })
+    }
     if (may('aanvragen')) {
       // Ook aanvragen van een gevonden klant (op klantnaam), niet enkel op dienst of tekst.
       const extra = clients.length ? await safe(admin.from('klant_aanvragen').select('id, client_id, soort, type_label, status, created_at').in('client_id', clients.map((c) => c.id)).order('created_at', { ascending: false }).limit(L)) as typeof aanvragen : []

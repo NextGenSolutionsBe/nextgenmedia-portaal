@@ -21,6 +21,8 @@ export type MailContext =
   | { type: 'formulier'; link: string; formulierTitel: string; clientId?: string | null; clientName?: string | null; verlooptOp?: string | null }
   // Meeting Inplanner: mail aan de deelnemers, altijd vanuit info@nextgenmedia.be.
   | { type: 'meeting'; meetingId: string }
+  // Video-oplevering: de klant laten weten dat er een versie klaarstaat (link naar de klantapp).
+  | { type: 'oplevering'; titel: string; versieLabel: string; link: string; clientId: string; clientName?: string | null; verlooptOp?: string | null }
 
 /** Resultaat van een gelukte verzending (of van een eerder gelukte, bij dezelfde verzendpoging). */
 export type MailVerstuurd = { id: string | null; verstuurd_op: string | null; al_verstuurd?: boolean }
@@ -126,6 +128,16 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
           setSubject(context.formulierTitel)
           setBody(`Beste${context.clientName ? ` ${context.clientName}` : ''},\n\nMag ik je vragen om het formulier "${context.formulierTitel}" in te vullen? Zo hebben we alle informatie om voor jou aan de slag te gaan.\n\nKlik op de knop hieronder om het formulier te openen.${tot ? `\n\nDe link is geldig tot ${tot}.` : ''}\n\nMet vriendelijke groet,\nNextGenMedia`)
           setCtaText('Formulier invullen'); setCtaLink(context.link)
+        } else if (context.type === 'oplevering') {
+          try {
+            const ctxRes = await fetch(`/api/admin/email/context?${new URLSearchParams({ client_id: context.clientId }).toString()}`)
+            const ctx = await ctxRes.json()
+            if (ctxRes.ok) setToEmail(ctx.toEmail ?? '')
+          } catch { /* ontvanger dan zelf invullen */ }
+          const tot = context.verlooptOp ? new Date(context.verlooptOp).toLocaleString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : ''
+          setSubject(`${context.versieLabel}: ${context.titel}`)
+          setBody(`Beste${context.clientName ? ` ${context.clientName}` : ''},\n\n${context.versieLabel === 'Finale versie' ? 'De finale versie' : `De ${context.versieLabel.toLowerCase()}`} van "${context.titel}" staat klaar in de klantapp. Je kan de video daar bekijken, in volle kwaliteit downloaden${context.versieLabel === 'Finale versie' ? '' : ' en je feedback geven'}.${tot ? `\n\nDe bestanden blijven beschikbaar tot ${tot}. Download ze dus tijdig.` : ''}\n\nMet vriendelijke groet,\nNextGenMedia`)
+          setCtaText('Bekijk de video'); setCtaLink(context.link)
         } else if (context.type === 'meeting') {
           const r = await fetch(`/api/admin/meetings/${context.meetingId}/mail`)
           const j = await r.json()
@@ -183,7 +195,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             to_email: toEmail,
-            to_client_id: (context.type === 'client' || context.type === 'access') ? context.clientId : context.type === 'formulier' ? (context.clientId ?? null) : null,
+            to_client_id: (context.type === 'client' || context.type === 'access' || context.type === 'oplevering') ? context.clientId : context.type === 'formulier' ? (context.clientId ?? null) : null,
             subject, body, cta_text: ctaText || null, cta_link: ctaLink || null,
             template_id: templateId && !templateId.startsWith('standaard:') ? templateId : null, template_name: tpl?.name ?? null,
             kind: context.type === 'client' ? (context.kind ?? 'generic') : 'generic',

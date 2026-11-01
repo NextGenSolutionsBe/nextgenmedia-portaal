@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
   Info, Camera, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
-  MailCheck, PhoneCall, FolderUp, Handshake, Plug, Settings, ClipboardPen, Contact, Timer, UserCircle, Video, Inbox, Megaphone, Clapperboard, Ticket,
+  MailCheck, PhoneCall, FolderUp, Handshake, Plug, Settings, ClipboardPen, Contact, Timer, UserCircle, Video, Inbox, Megaphone, Clapperboard, Ticket, Film,
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
@@ -61,6 +61,7 @@ const SECTIONS: NavSection[] = [
       { label: 'Founders of Flanders', href: '/admin/founders-of-flanders', icon: Clapperboard, module: 'founders' },
       { label: 'Onze partners', href: '/admin/onze-partners', icon: Handshake, module: 'onze_partners' },
       { label: 'Workshops & events', href: '/admin/events', icon: Ticket, module: 'events' },
+      { label: 'Video-opleveringen', href: '/admin/opleveringen', icon: Film, module: 'opleveringen' },
       // Enkel de kalender: de statistieken zijn eruit (Metricool zelf toont ze
       // beter en actueler dan wij ze konden nabouwen).
       { label: 'Metricool', href: '/admin/metricool', icon: CalendarClock, module: 'metricool', exact: true },

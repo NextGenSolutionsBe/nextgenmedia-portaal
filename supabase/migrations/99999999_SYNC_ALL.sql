@@ -6733,3 +6733,79 @@ ALTER TABLE public.founders_videos ADD COLUMN IF NOT EXISTS media_bezig_sinds ti
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES ('founders-media', 'founders-media', true, 52428800, ARRAY['video/mp4', 'image/jpeg', 'image/webp', 'image/png'])
 ON CONFLICT (id) DO NOTHING;
+
+-- Video-opleveringen (1 nov 2026): losse video's en beeldmateriaal opleveren
+-- zonder WeTransfer. Versies (Eerste versie, Revisieronde 1 en 2, Finale
+-- versie), feedback met tijdcodes, twee revisierondes. Bestanden in de
+-- privébucket "opleveringen", rechtstreeks vanuit de browser opgeladen
+-- (hervatbaar), en na 3 dagen weggehaald door de scheduler.
+CREATE TABLE IF NOT EXISTS public.opleveringen (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id     uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  opdracht_id   uuid REFERENCES public.opdrachten(id) ON DELETE SET NULL,
+  titel         text NOT NULL CHECK (char_length(titel) BETWEEN 1 AND 200),
+  omschrijving  text,
+  max_revisies  integer NOT NULL DEFAULT 2 CHECK (max_revisies BETWEEN 0 AND 10),
+  gearchiveerd_op timestamptz,
+  aangemaakt_door text,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS opleveringen_klant ON public.opleveringen (client_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS public.oplevering_versies (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  oplevering_id   uuid NOT NULL REFERENCES public.opleveringen(id) ON DELETE CASCADE,
+  nummer          integer NOT NULL CHECK (nummer >= 1),
+  is_finaal       boolean NOT NULL DEFAULT false,
+  bericht         text,
+  gepubliceerd_op timestamptz,
+  gepubliceerd_door text,
+  verloopt_op     timestamptz,
+  verwijderd_op   timestamptz,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (oplevering_id, nummer)
+);
+CREATE INDEX IF NOT EXISTS oplevering_versies_verloop ON public.oplevering_versies (verloopt_op) WHERE verwijderd_op IS NULL AND verloopt_op IS NOT NULL;
+CREATE TABLE IF NOT EXISTS public.oplevering_bestanden (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  oplevering_id   uuid NOT NULL REFERENCES public.opleveringen(id) ON DELETE CASCADE,
+  versie_id       uuid NOT NULL REFERENCES public.oplevering_versies(id) ON DELETE CASCADE,
+  pad             text NOT NULL UNIQUE,
+  poster_pad      text,
+  naam            text NOT NULL,
+  mimetype        text,
+  grootte         bigint NOT NULL DEFAULT 0,
+  duur            numeric,
+  breedte         integer,
+  hoogte          integer,
+  status          text NOT NULL DEFAULT 'upload' CHECK (status IN ('upload', 'klaar')),
+  volgorde        integer NOT NULL DEFAULT 0,
+  downloads       integer NOT NULL DEFAULT 0,
+  laatst_gedownload_op timestamptz,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS oplevering_bestanden_versie ON public.oplevering_bestanden (versie_id, volgorde);
+CREATE TABLE IF NOT EXISTS public.oplevering_feedback (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  oplevering_id   uuid NOT NULL REFERENCES public.opleveringen(id) ON DELETE CASCADE,
+  versie_id       uuid NOT NULL REFERENCES public.oplevering_versies(id) ON DELETE CASCADE,
+  soort           text NOT NULL CHECK (soort IN ('revisie', 'goedkeuring', 'opmerking')),
+  ronde           integer,
+  tekst           text,
+  punten          jsonb NOT NULL DEFAULT '[]'::jsonb,
+  door_naam       text,
+  door_email      text,
+  door_user_id    uuid,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS oplevering_feedback_oplevering ON public.oplevering_feedback (oplevering_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS oplevering_feedback_ronde ON public.oplevering_feedback (oplevering_id, ronde) WHERE soort = 'revisie';
+CREATE UNIQUE INDEX IF NOT EXISTS oplevering_feedback_beslissing ON public.oplevering_feedback (versie_id) WHERE soort IN ('revisie', 'goedkeuring');
+ALTER TABLE public.opleveringen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.oplevering_versies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.oplevering_bestanden ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.oplevering_feedback ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.opleveringen, public.oplevering_versies, public.oplevering_bestanden, public.oplevering_feedback FROM anon, authenticated;
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('opleveringen', 'opleveringen', false, NULL, NULL)
+ON CONFLICT (id) DO NOTHING;
