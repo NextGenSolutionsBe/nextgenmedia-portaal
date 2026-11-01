@@ -12,6 +12,8 @@ export type CpKlant = {
   activiteiten: Record<string, ActiviteitRitme>; contactpersonen: Contactpersoon[]; links: Link[]; afspraken: string | null
   /** Waar staan de foto’s en video’s van deze klant? */
   materiaal: string | null
+  /** Extra taken bij deze klant per reeks (afvinken per maand). */
+  extra_taken?: unknown
 }
 export type Cyclus = { id: string; client_id: string; maand: string; status: 'actief' | 'gepauzeerd' | 'gearchiveerd'; instellingen: { ritme?: Ritme | null; activiteiten?: Record<string, ActiviteitRitme>; batch_id?: string | null } }
 export type Notitie = {

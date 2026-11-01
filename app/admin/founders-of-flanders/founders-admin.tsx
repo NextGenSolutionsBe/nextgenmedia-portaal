@@ -6,8 +6,10 @@ import { toast } from 'sonner'
 import { ArrowDown, ArrowUp, Eye, EyeOff, Inbox, Loader2, Pencil, Plus, Trash2, ArrowRight , Youtube} from 'lucide-react'
 import { Dialoog, Bevestig, INP } from '@/app/admin/instellingen/ui'
 import { YoutubeVideo } from '@/components/media/youtube-video'
+import { EmbedFrame } from '@/components/media/embed-frame'
+import { herkenEmbed } from '@/lib/embeds'
 import { youtubeId, youtubeKijkUrl } from '@/lib/youtube'
-import type { FoundersVideo } from '@/lib/founders-of-flanders'
+import { naarFoundersVideo, type FoundersVideo } from '@/lib/founders-of-flanders'
 
 type Concept = { titel: string; ondernemer: string; bedrijf: string; beschrijving: string; youtube: string; formaat: 'liggend' | 'staand' }
 const LBL = 'block text-xs font-medium text-gray-600 mb-1'
@@ -27,7 +29,7 @@ export function FoundersAdmin({ magAanpassen }: { magAanpassen: boolean }) {
   const [bewerk, setBewerk] = useState<{ id: string | null; c: Concept } | null>(null)
   const [weg, setWeg] = useState<FoundersVideo | null>(null)
   const laad = useCallback(async () => {
-    try { const j = await api<{ videos: FoundersVideo[]; open_aanvragen: number; kanaal: string | null }>('/api/admin/founders-of-flanders'); setVideos(j.videos); setOpen(j.open_aanvragen); setKanaal(j.kanaal ?? '') }
+    try { const j = await api<{ videos: FoundersVideo[]; open_aanvragen: number; kanaal: string | null }>('/api/admin/founders-of-flanders'); setVideos(j.videos.map((v) => naarFoundersVideo(v as unknown as Record<string, unknown>))); setOpen(j.open_aanvragen); setKanaal(j.kanaal ?? '') }
     catch (e) { toast.error(e instanceof Error ? e.message : 'Laden mislukt'); setVideos([]) }
   }, [])
   useEffect(() => { laad() }, [laad])
@@ -66,12 +68,15 @@ export function FoundersAdmin({ magAanpassen }: { magAanpassen: boolean }) {
       </div>
       {magAanpassen && <button type="button" onClick={() => setBewerk({ id: null, c: { titel: '', ondernemer: '', bedrijf: '', beschrijving: '', youtube: '', formaat: 'liggend' } })} className="btn-primary"><Plus className="h-4 w-4" />Video toevoegen</button>}
       {videos === null ? <div className="card-base flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>
-        : videos.length === 0 ? <div className="card-base text-sm text-gray-500">Nog geen voorbeeldvideo's. Zet een video op YouTube (mag “niet vermeld”) en plak hier de link.</div>
+        : videos.length === 0 ? <div className="card-base text-sm text-gray-500">Nog geen voorbeeldvideo's. Zet een video op YouTube (mag “niet vermeld”) of plak de link van een Instagram-, Facebook- of LinkedIn-post.</div>
         : (
           <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {videos.map((v, i) => (
               <li key={v.id} className={`card-base !p-0 overflow-hidden flex flex-col ${v.zichtbaar ? '' : 'opacity-60'}`}>
-                <div className={v.formaat === 'staand' ? 'bg-gray-950 py-3' : ''}><YoutubeVideo id={v.youtube_id} titel={v.titel} rond={v.formaat === 'staand' ? 'rounded-xl' : 'rounded-none'} staand={v.formaat === 'staand'} className={v.formaat === 'staand' ? 'max-w-[200px]' : ''} /></div>
+                <div className={v.embed ? 'bg-gray-50 p-3' : v.formaat === 'staand' ? 'bg-gray-950 py-3' : ''}>
+                  {v.embed ? <EmbedFrame e={v.embed} titel={v.titel} className="max-w-[260px]" />
+                    : v.youtube_id ? <YoutubeVideo id={v.youtube_id} titel={v.titel} rond={v.formaat === 'staand' ? 'rounded-xl' : 'rounded-none'} staand={v.formaat === 'staand'} className={v.formaat === 'staand' ? 'max-w-[200px]' : ''} /> : null}
+                </div>
                 <div className="p-4 space-y-1 flex-1">
                   <p className="font-semibold">{v.titel}</p>
                   <p className="text-xs text-gray-500">{[v.ondernemer, v.bedrijf].filter(Boolean).join(' · ') || '—'}</p>
@@ -79,7 +84,7 @@ export function FoundersAdmin({ magAanpassen }: { magAanpassen: boolean }) {
                 </div>
                 {magAanpassen && (
                   <div className="px-4 pb-4 flex flex-wrap gap-1.5">
-                    <button type="button" onClick={() => setBewerk({ id: v.id, c: { titel: v.titel, ondernemer: v.ondernemer ?? '', bedrijf: v.bedrijf ?? '', beschrijving: v.beschrijving ?? '', youtube: v.formaat === 'staand' ? `https://www.youtube.com/shorts/${v.youtube_id}` : youtubeKijkUrl(v.youtube_id), formaat: v.formaat === 'staand' ? 'staand' : 'liggend' } })} className="btn-secondary !py-1.5 text-xs"><Pencil className="h-3.5 w-3.5" />Bewerken</button>
+                    <button type="button" onClick={() => setBewerk({ id: v.id, c: { titel: v.titel, ondernemer: v.ondernemer ?? '', bedrijf: v.bedrijf ?? '', beschrijving: v.beschrijving ?? '', youtube: v.embed ? v.embed.url : !v.youtube_id ? '' : v.formaat === 'staand' ? `https://www.youtube.com/shorts/${v.youtube_id}` : youtubeKijkUrl(v.youtube_id), formaat: v.formaat === 'staand' ? 'staand' : 'liggend' } })} className="btn-secondary !py-1.5 text-xs"><Pencil className="h-3.5 w-3.5" />Bewerken</button>
                     <button type="button" onClick={() => wissel(v, { zichtbaar: !v.zichtbaar })} className="btn-secondary !py-1.5 text-xs">{v.zichtbaar ? <><EyeOff className="h-3.5 w-3.5" />Verbergen</> : <><Eye className="h-3.5 w-3.5" />Tonen</>}</button>
                     <button type="button" onClick={() => schuif(i, -1)} disabled={i === 0} className="btn-secondary !py-1.5 !px-2 text-xs" aria-label="Naar voren"><ArrowUp className="h-3.5 w-3.5" /></button>
                     <button type="button" onClick={() => schuif(i, 1)} disabled={i === videos.length - 1} className="btn-secondary !py-1.5 !px-2 text-xs" aria-label="Naar achter"><ArrowDown className="h-3.5 w-3.5" /></button>
@@ -101,7 +106,11 @@ function VideoDialoog({ start, onSluit, onKlaar }: { start: { id: string | null;
   const [c, setC] = useState<Concept>(start.c)
   const [bezig, setBezig] = useState(false)
   const id = youtubeId(c.youtube)
-  const zet = (k: keyof Concept, w: string) => setC((x) => ({ ...x, [k]: w, ...(k === 'youtube' && /\/shorts\//.test(w) ? { formaat: 'staand' as const } : {}) }))
+  // Geen YouTube? Dan misschien een social post (Instagram, Facebook, LinkedIn).
+  const post = !id && c.youtube.trim() ? herkenEmbed(c.youtube, c.formaat === 'staand' ? 'staand' : undefined) : null
+  const embed = post?.ok && post.embed.provider !== 'youtube' ? post.embed : null
+  const geldig = !!id || !!embed
+  const zet = (k: keyof Concept, w: string) => setC((x) => ({ ...x, [k]: w, ...(k === 'youtube' && /\/shorts\/|\/reels?\//.test(w) ? { formaat: 'staand' as const } : {}) }))
   const bewaar = async () => {
     setBezig(true)
     try {
@@ -113,8 +122,9 @@ function VideoDialoog({ start, onSluit, onKlaar }: { start: { id: string | null;
   return (
     <Dialoog titel={start.id ? 'Video bewerken' : 'Video toevoegen'} onSluit={onSluit} breed>
       <div className="space-y-3">
-        <div><label className={LBL} htmlFor="f-yt">YouTube-link of embedcode *</label><input id="f-yt" className={INP} value={c.youtube} onChange={(e) => zet('youtube', e.target.value)} placeholder="https://youtu.be/…" />
-          {c.youtube && !id && <p className="text-xs text-red-700 mt-1">Dit is geen YouTube-link die we herkennen.</p>}</div>
+        <div><label className={LBL} htmlFor="f-yt">YouTube-link of social post *</label><input id="f-yt" className={INP} value={c.youtube} onChange={(e) => zet('youtube', e.target.value)} placeholder="https://youtu.be/… of de link/embedcode van een Instagram-, Facebook- of LinkedIn-post" />
+          <p className="text-[11px] text-gray-500 mt-1">YouTube (ook Shorts), of een post of reel van Instagram, Facebook of LinkedIn: plak de link of de embedcode.</p>
+          {c.youtube && !geldig && <p className="text-xs text-red-700 mt-1">{post && !post.ok ? post.fout : 'Dit herkennen we niet als YouTube-video of social post.'}</p>}</div>
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
           <span className="text-gray-500">Formaat:</span>
           {(['liggend', 'staand'] as const).map((f) => (
@@ -123,6 +133,7 @@ function VideoDialoog({ start, onSluit, onKlaar }: { start: { id: string | null;
           ))}
         </div>
         {id && <YoutubeVideo id={id} titel={c.titel || 'Voorbeeld'} staand={c.formaat === 'staand'} />}
+        {embed && <EmbedFrame e={embed} titel={c.titel || 'Voorbeeld'} />}
         <div><label className={LBL} htmlFor="f-titel">Titel *</label><input id="f-titel" className={INP} value={c.titel} onChange={(e) => zet('titel', e.target.value)} placeholder="Bv. Van garage tot 20 medewerkers" /></div>
         <div className="grid sm:grid-cols-2 gap-3">
           <div><label className={LBL} htmlFor="f-ond">Ondernemer</label><input id="f-ond" className={INP} value={c.ondernemer} onChange={(e) => zet('ondernemer', e.target.value)} /></div>
@@ -131,7 +142,7 @@ function VideoDialoog({ start, onSluit, onKlaar }: { start: { id: string | null;
         <div><label className={LBL} htmlFor="f-besch">Korte beschrijving</label><textarea id="f-besch" rows={3} maxLength={800} className={INP} value={c.beschrijving} onChange={(e) => zet('beschrijving', e.target.value)} /></div>
         <div className="flex gap-2 justify-end pt-1">
           <button type="button" onClick={onSluit} className="btn-secondary">Annuleren</button>
-          <button type="button" onClick={bewaar} disabled={bezig || !id} className="btn-primary">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Bewaren</button>
+          <button type="button" onClick={bewaar} disabled={bezig || !geldig} className="btn-primary">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Bewaren</button>
         </div>
       </div>
     </Dialoog>

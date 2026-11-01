@@ -3,7 +3,7 @@ import { revalidatePath } from 'next/cache'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { magIk } from '@/lib/instellingen/laden'
 import { safeMessage } from '@/lib/api-error'
-import { valideerFoundersVideo, valideerKanaal, KANAAL_SLEUTEL } from '@/lib/founders-of-flanders'
+import { valideerFoundersVideo, valideerKanaal, naarFoundersVideo, KANAAL_SLEUTEL } from '@/lib/founders-of-flanders'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +21,7 @@ export async function GET() {
     admin.from('app_settings').select('value').eq('key', KANAAL_SLEUTEL).maybeSingle(),
   ])
   if (error) return NextResponse.json({ error: safeMessage(error, 'founders-of-flanders.GET') }, { status: 500 })
-  return NextResponse.json({ videos: data ?? [], open_aanvragen: count ?? 0, kanaal: typeof kanaal?.value === 'string' ? kanaal.value : null }, { headers: { 'Cache-Control': 'no-store' } })
+  return NextResponse.json({ videos: ((data ?? []) as Record<string, unknown>[]).map(naarFoundersVideo), open_aanvragen: count ?? 0, kanaal: typeof kanaal?.value === 'string' ? kanaal.value : null }, { headers: { 'Cache-Control': 'no-store' } })
 }
 
 export async function POST(req: NextRequest) {
