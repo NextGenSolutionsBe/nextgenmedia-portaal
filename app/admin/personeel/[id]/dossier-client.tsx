@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { laadProfielfotoOp } from '@/lib/personeel/foto-upload'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
@@ -88,7 +89,7 @@ function Foto({ id, naam, url, onKlaar }: { id: string; naam: string; url: strin
   const kies = async (f: File | null) => {
     if (!f) return
     setBezig(true)
-    try { const fd = new FormData(); fd.append('file', f); await api(`/api/admin/personeel/${id}/foto`, { form: fd }); toast.success('Profielfoto bijgewerkt.'); onKlaar() } catch (e) { toast.error(e instanceof Error ? e.message : 'Uploaden mislukt') } finally { setBezig(false) }
+    try { await laadProfielfotoOp(id, f); toast.success('Profielfoto bijgewerkt.'); onKlaar() } catch (e) { toast.error(e instanceof Error ? e.message : 'Uploaden mislukt') } finally { setBezig(false) }
   }
   const wis = async () => {
     setBezig(true)
@@ -99,7 +100,7 @@ function Foto({ id, naam, url, onKlaar }: { id: string; naam: string; url: strin
       <button type="button" onClick={() => ref.current?.click()} className="relative group block" title="Profielfoto wijzigen">
         <Avatar naam={naam} url={url} groot />
         <span className="absolute inset-0 rounded-full bg-black/40 text-white opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">{bezig ? <Loader2 className="h-5 w-5 animate-spin" /> : <Camera className="h-5 w-5" />}</span>
-        <input ref={ref} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={(e) => { kies(e.target.files?.[0] ?? null); e.target.value = '' }} />
+        <input ref={ref} type="file" accept="image/*" className="hidden" onChange={(e) => { kies(e.target.files?.[0] ?? null); e.target.value = '' }} />
       </button>
       {url && (
         <button type="button" onClick={() => setVraagWis(true)} disabled={bezig} className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-white border border-red-200 text-red-600 shadow-sm flex items-center justify-center hover:bg-red-50" title="Profielfoto verwijderen" aria-label="Profielfoto verwijderen">

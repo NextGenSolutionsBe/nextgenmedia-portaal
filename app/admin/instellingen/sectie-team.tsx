@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { laadProfielfotoOp } from '@/lib/personeel/foto-upload'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { ArrowDown, ArrowUp, Camera, Loader2, Sparkles, Video } from 'lucide-react'
@@ -55,8 +56,7 @@ export function SectieTeam() {
   const foto = async (lid: Lid, file: File) => {
     setBezig(lid.id)
     try {
-      const fd = new FormData(); fd.append('file', file)
-      await api(`/api/admin/personeel/${lid.id}/foto`, { method: 'POST', body: fd })
+      await laadProfielfotoOp(lid.id, file)
       toast.success(`Foto van ${lid.naam.split(' ')[0]} bewaard.`); await laad()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Opladen mislukt') } finally { setBezig(null) }
   }
@@ -138,7 +138,7 @@ function FotoVak({ lid, bezig, onFoto }: { lid: Lid; bezig: boolean; onFoto: (f:
       <button type="button" onClick={() => ref.current?.click()} disabled={bezig} className="absolute right-3 bottom-3 inline-flex items-center gap-1.5 rounded-lg bg-white/95 px-2.5 py-1.5 text-xs font-medium shadow hover:bg-white">
         {bezig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}{lid.foto_url ? 'Andere foto' : 'Foto opladen'}
       </button>
-      <input ref={ref} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onFoto(f) }} />
+      <input ref={ref} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onFoto(f) }} />
     </div>
   )
 }
