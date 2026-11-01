@@ -18,6 +18,7 @@ import { ImportModal } from './import-modal'
 import { ReminderSettings } from './reminder-settings'
 import { FocusMode } from './focus-mode'
 import { LeadDetail, type DialoogSoort } from './lead-detail'
+import { zoekVeld } from '@/lib/zoekveld'
 import {
   EmailDialoog, GesprekDialoog, NieuweLeadDialoog, NotitieDialoog, OpvolgDialoog, SluitDialoog, VoorstelDialoog,
   type SluitGegevens,
@@ -479,7 +480,7 @@ export function PipelineClient({ pipelines, initialPipelineId }: {
       <div className="space-y-2">
         <div className="relative">
           <Search className="h-5 w-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input className="input-base !py-2.5 pl-10 pr-10 w-full text-base" value={q} onChange={(e) => setQ(e.target.value)}
+          <input {...zoekVeld()} className="input-base !py-2.5 pl-10 pr-10 w-full text-base" value={q} onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Escape') setQ('') }}
             placeholder="Zoek op bedrijfsnaam…" aria-label="Zoek een lead op bedrijfsnaam" autoComplete="off" />
           {q && (

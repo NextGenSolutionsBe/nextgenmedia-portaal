@@ -687,13 +687,20 @@ export async function maakGewoneTaak(listId: string, t: GewoneTaak): Promise<{ i
   return { id: task.id, url: task.url ?? null }
 }
 
-export type TaakStatus = { status: string; kleur: string | null; type: string | null; url: string | null; naam: string | null }
+export type TaakStatus = {
+  status: string; kleur: string | null; type: string | null; url: string | null; naam: string | null
+  /** Wie er nu in ClickUp op de taak staat (voor de verantwoordelijke in de app). */
+  toegewezen?: { id: number; naam: string }[]
+}
 
 /** De huidige status van een taak, zoals ClickUp ze nu toont. null = taak bestaat niet meer. */
 export async function leesTaakStatus(taskId: string): Promise<TaakStatus | null> {
   try {
-    const t = await clickupJson<{ name?: string; url?: string; status?: { status?: string; color?: string; type?: string } }>(`/task/${taskId}`)
-    return { status: t.status?.status ?? 'onbekend', kleur: t.status?.color ?? null, type: t.status?.type ?? null, url: t.url ?? null, naam: t.name ?? null }
+    const t = await clickupJson<{ name?: string; url?: string; status?: { status?: string; color?: string; type?: string }; assignees?: { id?: number; username?: string | null; email?: string | null }[] }>(`/task/${taskId}`)
+    return {
+      status: t.status?.status ?? 'onbekend', kleur: t.status?.color ?? null, type: t.status?.type ?? null, url: t.url ?? null, naam: t.name ?? null,
+      toegewezen: (t.assignees ?? []).filter((a) => Number(a.id)).map((a) => ({ id: Number(a.id), naam: a.username || a.email || String(a.id) })),
+    }
   } catch (e) {
     if (isTaskGone(e)) return null
     throw e

@@ -6809,3 +6809,44 @@ REVOKE ALL ON public.opleveringen, public.oplevering_versies, public.oplevering_
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES ('opleveringen', 'opleveringen', false, NULL, NULL)
 ON CONFLICT (id) DO NOTHING;
+
+-- ── Taken bij een opdracht (1 nov 2026) ─────────────────────────────────────
+-- Zoals sales_lead_taken: een gewone ClickUp-taak (deadline, geen agenda-item)
+-- in de lijst van NextGen Media of NextGen Solutions, toegewezen aan de
+-- verantwoordelijke, met een link naar de opdrachtkaart. Additief.
+CREATE TABLE IF NOT EXISTS public.opdracht_taken (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  opdracht_id uuid NOT NULL REFERENCES public.opdrachten(id) ON DELETE CASCADE,
+  aanvraag_sleutel text,
+  omschrijving text NOT NULL,
+  notitie text,
+  deadline date,
+  merk text NOT NULL,
+  clickup_list_id text,
+  clickup_assignee_id bigint,
+  clickup_assignee_naam text,
+  clickup_task_id text,
+  clickup_url text,
+  clickup_status text,
+  clickup_status_kleur text,
+  clickup_status_type text,
+  status_gelezen_op timestamptz,
+  sync_status text NOT NULL DEFAULT 'wacht',
+  sync_fout text,
+  created_by uuid,
+  created_by_email text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS opdracht_taken_aanvraag ON public.opdracht_taken (aanvraag_sleutel) WHERE aanvraag_sleutel IS NOT NULL;
+CREATE INDEX IF NOT EXISTS opdracht_taken_opdracht ON public.opdracht_taken (opdracht_id, created_at DESC);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'opdracht_taken_merk_check') THEN
+    ALTER TABLE public.opdracht_taken ADD CONSTRAINT opdracht_taken_merk_check CHECK (merk IN ('nextgenmedia', 'nextgensolutions'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'opdracht_taken_sync_check') THEN
+    ALTER TABLE public.opdracht_taken ADD CONSTRAINT opdracht_taken_sync_check CHECK (sync_status IN ('wacht', 'ok', 'fout'));
+  END IF;
+END $$;
+ALTER TABLE public.opdracht_taken ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.opdracht_taken FROM anon, authenticated;

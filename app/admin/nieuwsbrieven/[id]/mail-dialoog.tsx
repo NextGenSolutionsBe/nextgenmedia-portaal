@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { CircleCheck, Loader2, Mail, Search, Send } from 'lucide-react'
 import { Dialoog } from '@/app/admin/instellingen/ui'
+import { zoekVeld } from '@/lib/zoekveld'
 
 type Ontvanger = { email: string; naam: string | null; klant: string; client_id: string; bron: 'klant' | 'gebruiker'; afgemeld: boolean; al_verstuurd: boolean }
 type Resultaat = { verstuurd: number; overgeslagen: number; mislukt: { email: string; fout: string }[] }
@@ -71,7 +72,7 @@ export function MailDialoog({ id, onSluit, onVerstuurd }: { id: string; onSluit:
             ) : (
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  <div className="relative flex-1 min-w-[180px]"><Search className="h-4 w-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" /><input className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg" placeholder="Zoek klant of adres" value={zoek} onChange={(e) => setZoek(e.target.value)} /></div>
+                  <div className="relative flex-1 min-w-[180px]"><Search className="h-4 w-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" /><input {...zoekVeld()} className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg" placeholder="Zoek klant of adres" value={zoek} onChange={(e) => setZoek(e.target.value)} /></div>
                   <button type="button" onClick={() => alles(true)} className="btn-secondary !py-1.5 text-xs">Alles aan</button>
                   <button type="button" onClick={() => alles(false)} className="btn-secondary !py-1.5 text-xs">Alles uit</button>
                 </div>

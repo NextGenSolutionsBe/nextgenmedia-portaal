@@ -8,6 +8,7 @@ import { Plus, Search, Loader2, Clock, CalendarClock, AlertCircle, Timer } from 
 import { Dialoog } from '@/app/admin/instellingen/ui'
 import { api, Avatar, Chip, euro, uren, datumNl, kortUur, INP, LBL } from '@/components/personeel/ui'
 import { MEDEWERKER_TYPES, typeLabel, typeKleur, ACCOUNT_LABEL, type AccountStatus } from '@/lib/personeel/model'
+import { zoekVeld } from '@/lib/zoekveld'
 
 type Mw = {
   id: string; voornaam: string; achternaam: string | null; email: string | null; type: string; functie: string | null; actief: boolean; foto_url: string | null
@@ -62,7 +63,7 @@ export function OverzichtTab() {
   return (
     <div className="space-y-4">
       <div className="card-base p-3 flex flex-wrap items-end gap-2">
-        <div className="relative flex-1 min-w-[200px]"><Search className="h-4 w-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" /><input className={`${INP} pl-8`} placeholder="Zoek op naam, e-mail of functie…" value={zoek} onChange={(e) => setZoek(e.target.value)} /></div>
+        <div className="relative flex-1 min-w-[200px]"><Search className="h-4 w-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" /><input {...zoekVeld()} className={`${INP} pl-8`} placeholder="Zoek op naam, e-mail of functie…" value={zoek} onChange={(e) => setZoek(e.target.value)} /></div>
         <select className={sel} value={type} onChange={(e) => setType(e.target.value)}><option value="">Alle types</option>{MEDEWERKER_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}</select>
         <select className={sel} value={status} onChange={(e) => setStatus(e.target.value as typeof status)}><option value="actief">Actief</option><option value="inactief">Inactief</option><option value="">Actief en inactief</option></select>
         <select className={sel} value={functie} onChange={(e) => setFunctie(e.target.value)}><option value="">Alle functies</option>{functies.map((f) => <option key={f} value={f}>{f}</option>)}</select>

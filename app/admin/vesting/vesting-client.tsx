@@ -16,6 +16,7 @@ import { vestingWerkmap } from '@/lib/excel/rapporten/vesting'
 import { GetalInvoer } from '@/components/ui/getal-invoer'
 import { leesGetal, getalAlsInvoer } from '@/lib/getal'
 import { Bevestig } from '@/app/admin/instellingen/ui'
+import { zoekVeld } from '@/lib/zoekveld'
 import {
   berekenVesting, leesInstellingen, pct, totaalwaarde, duurUitData, toerekeningsfactor, wamSchema,
   STATUS_LABEL, ERKENNING_LABEL, JAAR_LABEL, DIENSTEN, FREQUENTIES, TERMIJN_LABEL,
@@ -1583,7 +1584,7 @@ function KoppelContract({ doel, module, onClose }: { doel: { resource: 'contract
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85dvh] flex flex-col overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 space-y-2">
           <div className="flex items-center justify-between gap-2"><h3 className="font-semibold truncate">Contract koppelen · {doel.titel}</h3><button type="button" onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-gray-100" aria-label="Sluiten"><X className="h-4 w-4" /></button></div>
-          <input autoFocus className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" placeholder="Zoek op klant of contracttitel" value={zoek} onChange={(e) => setZoek(e.target.value)} />
+          <input {...zoekVeld()} autoFocus className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" placeholder="Zoek op klant of contracttitel" value={zoek} onChange={(e) => setZoek(e.target.value)} />
         </div>
         <ul className="flex-1 overflow-y-auto divide-y divide-gray-100 text-sm">
           {lijst.map((m) => (

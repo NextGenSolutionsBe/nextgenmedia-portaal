@@ -11,6 +11,7 @@ import { INP } from '@/app/admin/instellingen/ui'
 import { Modal, focusRing } from '@/app/admin/materiaal/dialogen'
 import { MailComposer } from '@/components/admin/mail-composer'
 import { routeLink } from '@/lib/meetings/meeting-mail'
+import { zoekVeld } from '@/lib/zoekveld'
 import {
   DUUR_OPTIES, STANDAARD_TIJDZONE, TIJDZONE_OPTIES, valideerMeeting, kiesHerinnering, herinneringsMail, datumKort, datumLang, uur, dag,
   duurMinuten, wanneer, tijdzoneLabel, naamZonderKlant, ANTWOORD_LABEL, waarTekst, MAX_LOCATIE,
@@ -457,7 +458,7 @@ export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerV
               </div>
             ) : (
               <>
-                <input className={INP} placeholder="Zoek klant of contactpersoon…" value={zoek} onFocus={() => setToonKlanten(true)} onChange={(e) => { setZoek(e.target.value); setToonKlanten(true) }} aria-label="Zoek klant" />
+                <input {...zoekVeld()} className={INP} placeholder="Zoek klant of contactpersoon…" value={zoek} onFocus={() => setToonKlanten(true)} onChange={(e) => { setZoek(e.target.value); setToonKlanten(true) }} aria-label="Zoek klant" />
                 {toonKlanten && (
                   <ul className="mt-1.5 max-h-40 overflow-y-auto divide-y divide-gray-100 rounded-lg border border-gray-200">
                     {klantLijst.map((k) => (

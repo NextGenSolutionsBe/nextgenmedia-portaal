@@ -4,7 +4,7 @@ import { safeMessage } from '@/lib/api-error'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { logLeadEvent } from '@/lib/sales/service'
 import { merkNaam } from '@/lib/sales/lead-taken'
-import { leadTaken, leadTaakOpties, maakLeadTaak, leadTaakOpnieuw, LeadTaakFout } from '@/lib/sales/lead-taken-server'
+import { leadTaken, leadTaakOpties, maakLeadTaak, leadTaakOpnieuw, leadTaakVerantwoordelijke, leadStandaard, LeadTaakFout } from '@/lib/sales/lead-taken-server'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -15,6 +15,7 @@ export const maxDuration = 30
  *  GET ?opties=1  → ClickUp-leden en de lijsten NextGen Media / NextGen Solutions
  *  POST           → nieuwe taak: { aanvraag_sleutel, omschrijving, deadline, notitie, assignee_id, merk }
  *  PATCH          → { taak_id, actie: 'opnieuw' }: een taak die niet in ClickUp raakte
+ *                   { taak_id, actie: 'verantwoordelijke', assignee_id }: andere verantwoordelijke (ook in ClickUp)
  * Toegang: module Verkoop (middleware per methode) en actief teamlid.
  */
 
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const { id } = await params
     if (!UUID.test(id)) return NextResponse.json({ error: 'Lead niet gevonden' }, { status: 404 })
     const admin = createAdminSupabaseClient()
-    if (req.nextUrl.searchParams.get('opties') === '1') return NextResponse.json(await leadTaakOpties(admin, user.email ?? null))
+    if (req.nextUrl.searchParams.get('opties') === '1') return NextResponse.json(await leadTaakOpties(admin, user.email ?? null, await leadStandaard(admin, id)))
     return NextResponse.json(await leadTaken(admin, id), { headers: { 'Cache-Control': 'no-store' } })
   } catch (e) { return fout(e, 'lead-taken.GET') }
 }
@@ -62,11 +63,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    if (!(await requireStaff())) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
+    const user = await requireStaff()
+    if (!user) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
     const { id } = await params
-    const b = await req.json().catch(() => ({})) as { taak_id?: string; actie?: string }
+    const b = await req.json().catch(() => ({})) as { taak_id?: string; actie?: string; assignee_id?: unknown }
+    const admin = createAdminSupabaseClient()
+    if (b.actie === 'verantwoordelijke') {
+      const taak = await leadTaakVerantwoordelijke(admin, id, String(b.taak_id ?? ''), b.assignee_id)
+      await logLeadEvent(id, { kind: 'system', body: `Taak "${taak.omschrijving}": verantwoordelijke is nu ${taak.clickup_assignee_naam ?? '—'}`, actorId: user.id, actorEmail: user.email ?? null, laatsteNotitie: false }).catch(() => undefined)
+      return NextResponse.json({ taak })
+    }
     if (b.actie !== 'opnieuw') return NextResponse.json({ error: 'Onbekende actie' }, { status: 400 })
-    const taak = await leadTaakOpnieuw(createAdminSupabaseClient(), id, String(b.taak_id ?? ''))
+    const taak = await leadTaakOpnieuw(admin, id, String(b.taak_id ?? ''))
     return NextResponse.json({ taak })
   } catch (e) { return fout(e, 'lead-taken.PATCH') }
 }

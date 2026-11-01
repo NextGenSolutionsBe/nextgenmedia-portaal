@@ -18,6 +18,7 @@ import { Facturatieronde } from '../facturatieronde'
 import { VerwijderDialoog, type VerwijderBereik } from '../verwijder-dialoog'
 import { ExportKnop } from '@/components/admin/export-knop'
 import { facturenWerkmap, type FactuurExportRij } from '@/lib/excel/rapporten/facturen'
+import { zoekVeld } from '@/lib/zoekveld'
 
 /**
  * Facturen = interne facturatieplanner en communicatietool. Het team geeft aan
@@ -274,7 +275,7 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
             ))}
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <div className="relative"><Search className="h-3.5 w-3.5 text-gray-400 absolute left-2 top-1/2 -translate-y-1/2" /><input className={`${sel} pl-7 w-44 sm:w-52`} placeholder="Zoek klant, project…" value={filters.project} onChange={(e) => zet('project', e.target.value)} aria-label="Zoeken" /></div>
+            <div className="relative"><Search className="h-3.5 w-3.5 text-gray-400 absolute left-2 top-1/2 -translate-y-1/2" /><input {...zoekVeld()} className={`${sel} pl-7 w-44 sm:w-52`} placeholder="Zoek klant, project…" value={filters.project} onChange={(e) => zet('project', e.target.value)} aria-label="Zoeken" /></div>
             <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50">
               {([['lijst', List, 'Lijst'], ['maand', CalendarDays, 'Kalender'], ['week', CalendarRange, 'Week']] as const).map(([w, Icon, label]) => (
                 <button key={w} type="button" onClick={() => setWeergave(w)} className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium ${weergave === w ? 'bg-black text-white' : 'text-gray-600 hover:bg-white'}`}><Icon className="h-3.5 w-3.5" />{label}</button>

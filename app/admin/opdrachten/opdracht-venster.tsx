@@ -13,6 +13,7 @@ import {
 import type { OpdrachtStatus } from '@/lib/opdrachten'
 import { formatEuro } from '@/lib/utils'
 import { KlantKiezer, type KlantOptie } from '@/components/admin/klant-kiezer'
+import { ClickupTaken } from '@/components/admin/clickup-taken'
 import {
   FACTUUR_LABEL, datumKort, hoeLangGeleden,
   type KaartOpdracht, type Klant, type ContractOptie, type FactuurOptie, type Notitie,
@@ -347,6 +348,14 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
             )}
             {o?.lead_id && <Link href={`/admin/sales/pipeline?lead=${o.lead_id}`} className="text-xs text-gray-600 underline inline-block">Open in de pipeline</Link>}
           </section>
+
+          {/* Taken: elke taak komt in ClickUp, toegewezen aan de verantwoordelijke. */}
+          {o && (
+            <section className="px-5 py-4 border-b border-gray-100">
+              <ClickupTaken api={`/api/admin/opdrachten/${o.id}/taken`} waarbij="opdracht"
+                standaardMerk={o.diensten.some((d) => dienstInfo(d).key === 'ngs') ? 'nextgensolutions' : 'nextgenmedia'} />
+            </section>
+          )}
 
           {/* Interne communicatie. */}
           <section className="px-5 py-4">

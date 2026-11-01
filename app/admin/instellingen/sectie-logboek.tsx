@@ -6,6 +6,7 @@ import { Fragment, useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Search, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import { Kop, INP, datumTijd } from './ui'
+import { zoekVeld } from '@/lib/zoekveld'
 
 type Rij = { id: string; action: string; entity_type: string | null; entity_id: string | null; summary: string | null; actor_email: string | null; actor_role: string | null; metadata: unknown; ip: string | null; created_at: string }
 
@@ -36,7 +37,7 @@ export function SectieLogboek() {
       <form className="grid sm:grid-cols-6 gap-2 mb-4" onSubmit={(e) => { e.preventDefault(); laad(1) }}>
         <div className="sm:col-span-2 relative">
           <Search className="h-4 w-4 absolute left-3 top-2.5 text-gray-400" />
-          <input className={`${INP} pl-9`} placeholder="Zoek in omschrijving, actie, id…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input {...zoekVeld()} className={`${INP} pl-9`} placeholder="Zoek in omschrijving, actie, id…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <select className={INP} value={actie} onChange={(e) => setActie(e.target.value)}>
           <option value="">Alle acties</option>

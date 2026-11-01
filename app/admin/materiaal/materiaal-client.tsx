@@ -7,6 +7,7 @@ import { INP } from '@/app/admin/instellingen/ui'
 import { STATUS, ACTIVITEIT_LABEL, MAIL_LABEL, itemStatus, typeLabel, naamVan, datumKort, datumTijd, datumLang, vandaagBE, type ItemStatus } from '@/lib/materiaal/model'
 import { Modal, UitleenDialoog, TerugDialoog, ItemFormulier, OntlenerFormulier, CorrectieDialoog, focusRing } from './dialogen'
 import type { Activiteit, Data, Doe, Item, Ontlener, Uitlening } from './types'
+import { zoekVeld } from '@/lib/zoekveld'
 
 /**
  * Materiaalbeheer — wat hebben we, wat is beschikbaar, wie heeft wat sinds
@@ -146,7 +147,7 @@ export function MateriaalClient({ startData = null, startTab }: { startData?: Da
       {data && tab === 'materiaal' && (
         <div className="space-y-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <div className="relative flex-1 min-w-[200px] max-w-md"><Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" /><input className={`${INP} pl-9`} placeholder="Zoek materiaal of medewerker…" value={zoek} onChange={(e) => setZoek(e.target.value)} aria-label="Zoeken" /></div>
+            <div className="relative flex-1 min-w-[200px] max-w-md"><Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" /><input {...zoekVeld()} className={`${INP} pl-9`} placeholder="Zoek materiaal of medewerker…" value={zoek} onChange={(e) => setZoek(e.target.value)} aria-label="Zoeken" /></div>
             <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50">
               {(['alles', 'beschikbaar', 'uitgeleend'] as const).map((f) => <button key={f} type="button" aria-pressed={filter === f} onClick={() => setFilter(f)} className={`px-3 py-1.5 rounded-md text-xs font-medium capitalize ${filter === f ? 'bg-black text-white' : 'text-gray-600 hover:bg-white'} ${focusRing}`}>{f}</button>)}
             </div>
@@ -266,7 +267,7 @@ function MedewerkersTab({ data, onOpen, onNieuw }: { data: Data; onOpen: (id: st
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-[200px] max-w-md"><Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" /><input className={`${INP} pl-9`} placeholder="Zoek medewerker…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Zoek medewerker" /></div>
+        <div className="relative flex-1 min-w-[200px] max-w-md"><Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" /><input {...zoekVeld()} className={`${INP} pl-9`} placeholder="Zoek medewerker…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Zoek medewerker" /></div>
         <label className="text-xs text-gray-600 flex items-center gap-1.5 cursor-pointer"><input type="checkbox" checked={archief} onChange={(e) => setArchief(e.target.checked)} />Gearchiveerd tonen</label>
         {data.kan.beheren && <button type="button" onClick={onNieuw} className={`btn-primary text-sm ml-auto ${focusRing}`}><Plus className="h-4 w-4" />Medewerker toevoegen</button>}
       </div>

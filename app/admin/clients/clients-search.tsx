@@ -3,6 +3,7 @@
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import { Search } from 'lucide-react'
 import { useTransition } from 'react'
+import { zoekVeld } from '@/lib/zoekveld'
 
 export function ClientsSearch({ defaultValue }: { defaultValue?: string }) {
   const router = useRouter()
@@ -13,7 +14,7 @@ export function ClientsSearch({ defaultValue }: { defaultValue?: string }) {
   return (
     <div className="relative max-w-xs">
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-      <input
+      <input {...zoekVeld()}
         type="search"
         defaultValue={defaultValue}
         placeholder="Zoek klant..."

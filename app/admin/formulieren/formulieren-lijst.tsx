@@ -12,6 +12,7 @@ import {
   DIENSTEN, dienstLabel, FORMULIER_STATUS_INFO, SJABLONEN, isAntwoordVeld, type FormulierStatus,
 } from '@/lib/formulieren/model'
 import { AiVoorstelPaneel } from '@/components/formulieren/ai-voorstel'
+import { zoekVeld } from '@/lib/zoekveld'
 
 type Rij = {
   id: string; titel: string; dienst: string; doel: string | null; status: FormulierStatus
@@ -87,7 +88,7 @@ export function FormulierenLijst({ klantId }: { klantId: string | null }) {
       <div className="flex flex-wrap gap-2 items-center">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input className="input-base pl-9" placeholder="Zoeken op titel of doel…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input {...zoekVeld()} className="input-base pl-9" placeholder="Zoeken op titel of doel…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <select className="input-base w-auto" value={dienst} onChange={(e) => setDienst(e.target.value)} aria-label="Dienst">
           <option value="">Alle diensten</option>

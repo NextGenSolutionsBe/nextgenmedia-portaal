@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Search, X, Loader2 } from 'lucide-react'
+import { zoekVeld } from '@/lib/zoekveld'
 
 export type LeadOption = { id: string; label: string; email: string | null; pipelineId: string | null }
 
@@ -91,7 +92,7 @@ export function LeadKiezer({ waarde, initialId, onKies }: {
     <div className="relative" ref={doosRef}>
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-        <input
+        <input {...zoekVeld()}
           className="input-base pl-9"
           value={term}
           placeholder="Zoek op bedrijf of contactpersoon…"

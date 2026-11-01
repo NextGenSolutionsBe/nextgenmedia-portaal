@@ -16,6 +16,7 @@ import { FactuurEditor, StatusChip } from '@/app/admin/invoices/factuur-editor'
 import { KostenEnWinstDialoog } from '@/app/admin/invoices/kosten-en-winst'
 import { INP } from '@/app/admin/instellingen/ui'
 import { FactuurVoorstellen } from './factuur-voorstellen'
+import { zoekVeld } from '@/lib/zoekveld'
 
 /**
  * Financieel overzicht van één contract — bovenaan het contract.
@@ -370,7 +371,7 @@ function KoppelDialoog({ data, bezig, onKoppel, onVerdelen, onSluit }: { data: D
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85dvh] flex flex-col overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 space-y-2">
           <h3 className="font-semibold">Bestaande factuur koppelen · {data.contract.klant_naam ?? 'deze klant'}</h3>
-          <div className="relative"><Search className="h-3.5 w-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" /><input autoFocus className={`${INP} pl-8`} placeholder="Zoek op omschrijving, nummer of bedrag" value={zoek} onChange={(e) => setZoek(e.target.value)} /></div>
+          <div className="relative"><Search className="h-3.5 w-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" /><input {...zoekVeld()} autoFocus className={`${INP} pl-8`} placeholder="Zoek op omschrijving, nummer of bedrag" value={zoek} onChange={(e) => setZoek(e.target.value)} /></div>
         </div>
         <div className="flex-1 overflow-y-auto text-sm">
           <div className="px-5 pt-3 text-[11px] font-semibold text-gray-500">Losse facturen</div>
