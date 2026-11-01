@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Search, Loader2, FileText, Users, Newspaper, Receipt, TrendingUp, ListChecks, UserSquare2, CornerDownLeft, ClipboardPen, Ticket } from 'lucide-react'
+import { zoekVeld } from '@/lib/zoekveld'
 
 type Result = { type: string; label: string; title: string; subtitle?: string; href: string }
 
@@ -73,7 +74,7 @@ export function GlobalSearch({ verborgen = false }: { verborgen?: boolean }) {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
               <Search className="h-4 w-4 text-gray-400" />
-              <input
+              <input {...zoekVeld()}
                 ref={inputRef}
                 value={q}
                 onChange={(e) => setQ(e.target.value)}

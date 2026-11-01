@@ -81,3 +81,56 @@ export function statusToon(t: { sync_status: string; clickup_status: string | nu
   const label = t.clickup_status ?? 'onbekend'
   return { label, toon: t.clickup_status_type === 'closed' || t.clickup_status_type === 'done' ? 'ok' : 'neutraal' }
 }
+
+// ── Taken bij een opdracht (opdrachtenbord) ──────────────────────────────────
+// Zelfde soort ClickUp-taak als bij een lead, met een link naar de opdrachtkaart.
+
+/** De kaart op het opdrachtenbord; opent meteen het kaartvenster. */
+export const opdrachtLink = (basis: string, opdrachtId: string): string => `${basis.replace(/\/$/, '')}/admin/opdrachten?opdracht=${encodeURIComponent(opdrachtId)}`
+
+export const opdrachtTaakMarker = (taakId: string): string => `ngm-opdrachttaak:${taakId}`
+
+export function opdrachtTaakOmschrijving(t: {
+  link: string; bedrijf: string | null; titel: string | null; contact: string | null; notitie: string | null; door: string | null; marker: string
+}): { tekst: string; markdown: string } {
+  const kaart = [t.bedrijf, t.titel].filter(Boolean).join(' – ') || 'Opdracht'
+  const tekst = [
+    `Opdracht: ${kaart}`,
+    `Op het opdrachtenbord: ${t.link}`,
+    t.contact ? `Contactpersoon: ${t.contact}` : null,
+    t.notitie ? `\nNotitie:\n${t.notitie}` : null,
+    `\nAangemaakt${t.door ? ` door ${t.door}` : ''} vanuit de opdrachten van NextGenMedia.`,
+    `Ref: ${t.marker}`,
+  ].filter((x) => x !== null).join('\n')
+  const markdown = [
+    `**Opdracht:** [${md(kaart)}](${t.link})`,
+    t.contact ? `**Contactpersoon:** ${md(t.contact)}` : null,
+    t.notitie ? `\n**Notitie**\n\n${md(t.notitie)}` : null,
+    `\n_Aangemaakt${t.door ? ` door ${md(t.door)}` : ''} vanuit de opdrachten van NextGenMedia._`,
+    `Ref: ${t.marker}`,
+  ].filter((x) => x !== null).join('\n')
+  return { tekst, markdown }
+}
+
+/**
+ * Het ClickUp-lid dat bij een verantwoordelijke hoort: eerst op e-mailadres,
+ * dan op naam ("Bram" → "Bram Reinquin"), dan op het begin van het e-mailadres
+ * (bram@…). Enkel een eenduidige match; anders null (dan kiest de mens).
+ */
+export function kiesClickupLid(leden: { id: number; naam: string; email: string }[], wie: { email?: string | null; naam?: string | null }): number | null {
+  const norm = (v: string | null | undefined) => (v ?? '').trim().toLowerCase()
+  const email = norm(wie.email)
+  if (email) {
+    const m = leden.find((l) => norm(l.email) === email)
+    if (m) return m.id
+  }
+  const naam = norm(wie.naam)
+  if (!naam) return null
+  const exact = leden.filter((l) => norm(l.naam) === naam)
+  if (exact.length === 1) return exact[0].id
+  const voornaam = naam.split(/\s+/)[0]
+  const opNaam = leden.filter((l) => norm(l.naam).split(/\s+/)[0] === voornaam)
+  if (opNaam.length === 1) return opNaam[0].id
+  const opMail = leden.filter((l) => norm(l.email).split('@')[0].split(/[._-]/)[0] === voornaam)
+  return opMail.length === 1 ? opMail[0].id : null
+}

@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation'
 import { Trash2, Loader2, Repeat2, ArrowUpRight, Pencil, X, Search, Filter as FilterIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatEuro, SERVICE_LABELS, SERVICE_SLUGS } from '@/lib/utils'
+import { zoekVeld } from '@/lib/zoekveld'
 
 interface EntryRow {
   id: string
@@ -127,7 +128,7 @@ export function RevenueTable({ entries }: { entries: EntryRow[] }) {
       <div className="space-y-2 mb-4">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Zoek op klant, titel, dienst, notitie…" className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15" />
+          <input {...zoekVeld()} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Zoek op klant, titel, dienst, notitie…" className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15" />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <FilterIcon className="h-4 w-4 text-gray-400" />

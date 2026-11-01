@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import { Mail, Search, Loader2, X, RefreshCw, AlertTriangle } from 'lucide-react'
 import { MAIL_STATUS, mailStatusVan } from '@/lib/contracten/mailstatus'
+import { zoekVeld } from '@/lib/zoekveld'
 
 /**
  * Verzonden contractmails: per verzendpoging ontvanger, cc, onderwerp, datum,
@@ -50,7 +51,7 @@ export function VerzondenMails({ contractId, compact }: { contractId?: string; c
         {!contractId && (
           <div className="relative flex-1 min-w-[220px] max-w-md">
             <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg" placeholder="Zoek op klant, contract of ontvanger…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Zoeken in verzonden mails" />
+            <input {...zoekVeld()} className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg" placeholder="Zoek op klant, contract of ontvanger…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Zoeken in verzonden mails" />
           </div>
         )}
         {!mails && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}

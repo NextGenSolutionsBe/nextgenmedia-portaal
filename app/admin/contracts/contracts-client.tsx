@@ -28,6 +28,7 @@ import {
   type Categorie, type Looptijd,
 } from '@/lib/contracten/looptijd'
 import { bewaarNavigatie, bewaarContext, leesContext } from '@/lib/contract-navigatie'
+import { zoekVeld } from '@/lib/zoekveld'
 
 export type Contract = OverzichtContract & {
   service_slug: string | null
@@ -368,7 +369,7 @@ export function ContractsClient({
         <div className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))] mb-3">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <input
+            <input {...zoekVeld()}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Zoek op klantnaam, contractnaam of contracttype…"

@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { Check, ChevronDown, Loader2, Plus, Search, UserPlus, X, Building2 } from 'lucide-react'
 import { naamSleutel } from '@/lib/clients/snel'
 import { BtwOpzoeken } from '@/components/admin/btw-opzoeken'
+import { zoekVeld as zoekVeldProps } from '@/lib/zoekveld'
 
 /**
  * Klant kiezen of meteen een nieuwe toevoegen, zonder het formulier te
@@ -180,7 +181,7 @@ export function KlantKiezer({ klanten, waarde, onKies, onNieuw, leegLabel, bron 
       ) : (
         <div className="relative">
           <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input ref={zoekVeld} id={id} role="combobox" aria-expanded aria-controls={`${id}-lijst`} aria-activedescendant={`${id}-rij-${actief}`} autoComplete="off"
+          <input {...zoekVeldProps('klant')} ref={zoekVeld} id={id} role="combobox" aria-expanded aria-controls={`${id}-lijst`} aria-activedescendant={`${id}-rij-${actief}`} autoComplete="off"
             className={`${INP} pl-9`} placeholder="Zoek op naam, contactpersoon of e-mail…" value={zoek} onChange={(e) => setZoek(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'ArrowDown') { e.preventDefault(); setActief((a) => Math.min(a + 1, rijen.length - 1)) }

@@ -334,3 +334,9 @@ html {
 /* Horizontaal scrollen zonder zichtbare balk (filterchips op gsm). */
 .no-scrollbar { scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* Zoekvelden (type search, zie lib/zoekveld.ts): geen eigen kruisje of
+   afgeronde stijl van Safari/Chrome, zodat ze er net zo uitzien als voorheen. */
+input[type='search']::-webkit-search-cancel-button,
+input[type='search']::-webkit-search-results-button,
+input[type='search']::-webkit-search-results-decoration { -webkit-appearance: none; appearance: none; display: none; }

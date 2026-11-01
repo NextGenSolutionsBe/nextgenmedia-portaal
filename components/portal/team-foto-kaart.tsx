@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useRef, useState } from 'react'
 import { Check, Sparkles } from 'lucide-react'
 
 /**
@@ -10,21 +11,31 @@ import { Check, Sparkles } from 'lucide-react'
 export function TeamFotoKaart({ naam, sub, foto, tags, gekozen, onKies, label }: {
   naam: string; sub?: string | null; foto?: string | null; tags?: string[]; gekozen: boolean; onKies: () => void; label?: string | null
 }) {
-  const initialen = naam.split(/\s+/).map((x) => x[0]).slice(0, 2).join('').toUpperCase()
+  const [fotoFout, setFotoFout] = useState(false)
+  const img = useRef<HTMLImageElement>(null)
+  // Mislukt het laden nog vóór React klaar is, dan komt onError niet: zelf nakijken.
+  useEffect(() => {
+    setFotoFout(false)
+    const i = img.current
+    if (i && i.complete && i.naturalWidth === 0) setFotoFout(true)
+  }, [foto])
+  const initialen = naam.split(/\s+/).map((x) => x[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()
+  // Geen aspect-ratio in een flex-knop: Safari zette die vlak soms op hoogte 0,
+  // waardoor foto en naam verdwenen. Een vaste verhouding via padding werkt overal.
   return (
     <button type="button" role="radio" aria-checked={gekozen} onClick={onKies}
-      className={`group text-left rounded-3xl border overflow-hidden flex flex-col bg-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 ${gekozen ? 'border-gray-900 ring-2 ring-gray-900 shadow-lg' : 'border-gray-200 hover:border-gray-400 hover:shadow-md'}`}>
-      <span className="relative block aspect-[3/4] bg-gradient-to-br from-gray-100 to-gray-200 overflow-hidden">
-        {foto
+      className={`group flex flex-col justify-start w-full text-left rounded-3xl border overflow-hidden bg-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 ${gekozen ? 'border-gray-900 ring-2 ring-gray-900 shadow-lg' : 'border-gray-200 hover:border-gray-400 hover:shadow-md'}`}>
+      <span className="relative block w-full shrink-0 overflow-hidden bg-gradient-to-br from-gray-200 to-gray-300" style={{ paddingTop: '133.333%' }}>
+        {foto && !fotoFout
           // eslint-disable-next-line @next/next/no-img-element
-          ? <img src={foto} alt={naam} loading="lazy" className="absolute inset-0 h-full w-full object-cover object-top transition duration-500 group-hover:scale-[1.03]" />
-          : <span className="absolute inset-0 flex items-center justify-center text-5xl font-semibold text-gray-400">{initialen}</span>}
-        <span className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/50 to-transparent" />
+          ? <img ref={img} src={foto} alt={naam} onError={() => setFotoFout(true)} className="absolute inset-0 text-transparent h-full w-full object-cover object-top transition duration-500 group-hover:scale-[1.03]" />
+          : <span className="absolute inset-0 flex items-center justify-center text-5xl font-semibold text-gray-500">{initialen}</span>}
+        <span className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
         {label && <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-white/95 px-2.5 py-1 text-[11px] font-semibold text-gray-900 shadow"><Sparkles className="h-3 w-3" />{label}</span>}
         {gekozen && <span className="absolute top-3 right-3 h-8 w-8 rounded-full bg-gray-900 text-white flex items-center justify-center shadow-lg"><Check className="h-4 w-4" /></span>}
-        <span className="absolute inset-x-0 bottom-0 p-3 sm:p-4">
-          <span className="block text-base sm:text-lg font-semibold text-white leading-tight drop-shadow">{naam}</span>
-          {sub && <span className="block text-xs sm:text-sm text-white/85 truncate">{sub}</span>}
+        <span className="absolute inset-x-0 bottom-0 block p-3 sm:p-4">
+          <span className="block text-base sm:text-lg font-semibold text-white leading-tight [text-shadow:0_1px_3px_rgba(0,0,0,0.6)]">{naam}</span>
+          {sub && <span className="block text-xs sm:text-sm text-white/90 truncate [text-shadow:0_1px_2px_rgba(0,0,0,0.6)]">{sub}</span>}
         </span>
       </span>
       {tags && tags.length > 0 && (

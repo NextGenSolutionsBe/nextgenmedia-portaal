@@ -6,6 +6,7 @@ import { X, Loader2, Check, Search, Undo2, Camera } from 'lucide-react'
 import { INP } from '@/app/admin/instellingen/ui'
 import { ONTLENER_TYPES, datumLang, naamVan, vandaagBE } from '@/lib/materiaal/model'
 import type { Data, Item, Ontlener, Uitlening, Doe } from './types'
+import { zoekVeld } from '@/lib/zoekveld'
 
 export const focusRing = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-1'
 const lbl = 'block text-xs font-medium text-gray-700 mb-1'
@@ -43,7 +44,7 @@ function KiesOntlener({ ontleners, waarde, onKies, actiefPer }: { ontleners: Ont
         </div>
       ) : (
         <>
-          <div className="relative"><Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" /><input autoFocus className={`${INP} pl-9`} placeholder="Zoek medewerker…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Zoek medewerker" /></div>
+          <div className="relative"><Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" /><input {...zoekVeld()} autoFocus className={`${INP} pl-9`} placeholder="Zoek medewerker…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Zoek medewerker" /></div>
           <ul className="max-h-48 overflow-y-auto divide-y divide-gray-100 rounded-lg border border-gray-200">
             {lijst.map((o) => (
               <li key={o.id}><button type="button" onClick={() => onKies(o.id)} className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2 ${focusRing}`}>
@@ -93,7 +94,7 @@ export function UitleenDialoog({ data, items, ontlenerId, meerdere, doe, onSluit
       {meerdere && (
         <div>
           <label className={lbl}>Materiaal ({gekozen.length} gekozen)</label>
-          <input className={`${INP} mb-1.5`} placeholder="Zoek materiaal…" value={zoek} onChange={(e) => setZoek(e.target.value)} aria-label="Zoek materiaal" />
+          <input {...zoekVeld()} className={`${INP} mb-1.5`} placeholder="Zoek materiaal…" value={zoek} onChange={(e) => setZoek(e.target.value)} aria-label="Zoek materiaal" />
           <ul className="max-h-44 overflow-y-auto divide-y divide-gray-100 rounded-lg border border-gray-200">
             {beschikbaar.filter((i) => `${i.naam} ${i.merk ?? ''} ${i.serienummer ?? ''}`.toLowerCase().includes(zoek.trim().toLowerCase())).map((i) => (
               <li key={i.id}><label className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-gray-50"><input type="checkbox" className="h-4 w-4" checked={gekozen.includes(i.id)} onChange={(e) => setGekozen(e.target.checked ? [...gekozen, i.id] : gekozen.filter((x) => x !== i.id))} /><span className="flex-1">{i.naam}</span>{i.serienummer && <span className="text-[11px] text-gray-400">{i.serienummer}</span>}</label></li>

@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
 import { AlertTriangle, Folder, Search } from 'lucide-react'
+import { zoekVeld } from '@/lib/zoekveld'
 
 export type KlantMap = {
   id: string
@@ -48,7 +49,7 @@ export function MappenView({ mappen, wees }: { mappen: KlantMap[]; wees: KlantMa
       <div className="flex flex-wrap items-center gap-2">
         <label className="relative flex-1 min-w-[220px] max-w-md">
           <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
+          <input {...zoekVeld()}
             type="search"
             value={zoek}
             onChange={(e) => setZoek(e.target.value)}

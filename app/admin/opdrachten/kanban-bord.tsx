@@ -179,21 +179,21 @@ function Kaart({ o, sleept, menuOpen, onOpen, onMenu, onKolom, onDragStart, onDr
         </div>
       </div>
 
-      <h3 className="mt-2 text-[15px] font-semibold leading-snug break-words">{o.titel}</h3>
-      <p className={`mt-0.5 text-[13px] flex items-center gap-1.5 ${zacht}`}>
-        <Building2 className="h-3.5 w-3.5 shrink-0" />
-        <span className="truncate font-medium">{o.klant_naam || 'Geen klant'}</span>
-        <span className="shrink-0 opacity-80">· {o.client_id ? 'klant' : 'prospect'}</span>
+      {/* Eerst het bedrijf, daaronder de dienst en de titel van de opdracht. */}
+      <h3 className="mt-2 text-[15px] font-semibold leading-snug break-words flex items-start gap-1.5">
+        <Building2 className="h-4 w-4 shrink-0 mt-0.5" />
+        <span className="min-w-0">{o.klant_naam || 'Geen klant'}</span>
+      </h3>
+      <p className={`mt-0.5 text-[13px] leading-snug break-words ${zacht}`}>
+        {o.diensten.length > 0 && <span className="font-semibold">{o.diensten.map((d) => dienstInfo(d).label).join(', ')}</span>}
+        {o.diensten.length > 0 && o.titel ? ' · ' : ''}{o.titel}
       </p>
 
-      {/* Labels: bron en diensten. */}
-      {(o.bron || o.diensten.length > (kleur.key ? 1 : 0) || toonStap) && (
+      {/* Labels: bron, prospect en de stap binnen de fase. */}
+      {(o.bron || !o.client_id || toonStap) && (
         <div className="mt-2 flex items-center gap-1 flex-wrap">
           {o.bron && <Chip kleur={kleur}>{bronLabel(o.bron)}</Chip>}
-          {o.diensten.filter((d) => dienstInfo(d).key !== kleur.key || !kleur.key).map((d) => {
-            const i = dienstInfo(d)
-            return <Chip key={d} kleur={kleur} stip={i.key ? i.achtergrond : undefined}>{i.label}</Chip>
-          })}
+          {!o.client_id && <Chip kleur={kleur} titel="Nog geen klant in de app">Prospect</Chip>}
           {toonStap && <Chip kleur={kleur} titel="Stap binnen deze fase">{stap}</Chip>}
         </div>
       )}

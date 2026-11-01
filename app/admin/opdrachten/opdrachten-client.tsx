@@ -14,6 +14,7 @@ import { OpdrachtVenster } from './opdracht-venster'
 import { VerplaatsDialoog, vraagBijVerplaatsen, type VerplaatsSoort } from './verplaats-dialoog'
 import { AanvullenDialoog } from './aanvullen-dialoog'
 import type { KaartOpdracht, Klant, ContractOptie, FactuurOptie, VerplaatsExtra } from './types'
+import { zoekVeld } from '@/lib/zoekveld'
 
 const WEERGAVE_SLEUTEL = 'ngm-opdrachten-weergave'
 
@@ -175,7 +176,7 @@ export function OpdrachtenClient() {
         <div className="flex items-center gap-2 flex-wrap">
           <div className="relative flex-1 min-w-[12rem] sm:flex-none">
             <Search className="h-4 w-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-            <input className="input-base pl-8 sm:w-72" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Zoek op project, klant, notitie…" aria-label="Zoeken" />
+            <input {...zoekVeld()} className="input-base pl-8 sm:w-72" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Zoek op project, klant, notitie…" aria-label="Zoeken" />
           </div>
           <select className="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white" value={wie} onChange={(e) => setWie(e.target.value)} aria-label="Verantwoordelijke">
             <option value="">Iedereen</option>
@@ -266,9 +267,10 @@ function Lijst({ kaarten, onOpen }: { kaarten: KaartOpdracht[]; onOpen: (o: Kaar
                     <button type="button" onClick={() => onOpen(o)} className="w-full text-left card-base p-3 flex items-center gap-3 hover:shadow-md transition-shadow">
                       <span className="h-10 w-2 rounded-full shrink-0 border" style={{ background: kleur.achtergrond, borderColor: kleur.rand }} />
                       <span className="min-w-0 flex-1">
-                        <span className="block font-medium text-sm truncate">{o.titel}</span>
-                        <span className="block text-xs text-gray-500 truncate">
-                          {o.klant_naam || 'Geen klant'}{o.diensten.length ? ` · ${o.diensten.map((d) => dienstInfo(d).label).join(', ')}` : ''}{o.bron ? ` · ${bronLabel(o.bron)}` : ''}
+                        <span className="block font-semibold text-sm truncate">{o.klant_naam || 'Geen klant'}</span>
+                        <span className="block text-xs text-gray-600 truncate">
+                          {o.diensten.length > 0 && <span className="font-medium text-gray-800">{o.diensten.map((d) => dienstInfo(d).label).join(', ')}</span>}
+                          {o.diensten.length > 0 && o.titel ? ' · ' : ''}{o.titel}{o.bron ? ` · ${bronLabel(o.bron)}` : ''}
                         </span>
                       </span>
                       <span className="hidden sm:block text-xs text-gray-500 shrink-0">{stapLabel(o.status)}</span>
