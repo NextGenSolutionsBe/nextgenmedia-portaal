@@ -6880,3 +6880,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS opdrachten_contract_uniek ON public.opdrachten
 
 -- Privébucket voor archieven (o.a. het Excel-archief van de oude verkooppipeline, 2 nov 2026).
 INSERT INTO storage.buckets (id, name, public) VALUES ('archief', 'archief', false) ON CONFLICT (id) DO NOTHING;
+
+-- Opslagverbruik van de app (databank + bestanden per bucket), voor Instellingen → Opslag (2 nov 2026).
+CREATE OR REPLACE FUNCTION public.opslag_verbruik()
+ RETURNS jsonb
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'storage'
+AS $function$
+  SELECT jsonb_build_object(
+    'databank_bytes', pg_database_size(current_database()),
+    'buckets', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object('bucket', bucket_id, 'bytes', bytes, 'bestanden', n) ORDER BY bytes DESC)
+      FROM (SELECT bucket_id, SUM(COALESCE((metadata->>'size')::bigint, 0)) AS bytes, COUNT(*) AS n FROM storage.objects GROUP BY bucket_id) b
+    ), '[]'::jsonb)
+  )
+$function$;
+REVOKE ALL ON FUNCTION public.opslag_verbruik() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.opslag_verbruik() TO service_role;
+
+-- Privébucket voor profielfoto's van interne accounts (Mijn account, 2 nov 2026).
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('accounts', 'accounts', false, 3145728, ARRAY['image/jpeg','image/png','image/webp'])
+ON CONFLICT (id) DO NOTHING;

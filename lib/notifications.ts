@@ -4,6 +4,8 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { followUp } from '@/lib/contract-status'
 import { FEATURES } from '@/lib/features'
 import { syncGezondheid, SYNC_VEROUDERD_MIN } from '@/lib/sales/clickup-agenda-sync'
+import { onderhoudOpvolgen, resterendTekst, type MaintenanceClient } from '@/lib/maintenance'
+import { samenvatting, grootte, OPSLAG_LIMIET_GB, type RuwVerbruik } from '@/lib/opslag'
 import { STATUS as AANVRAAG_STATUS, nieuweAanvraagTitel, type AanvraagSoort } from '@/lib/aanvragen/model'
 
 // Eén bron voor meldingen + "Vandaag": alles live afgeleid uit bestaande data
@@ -273,6 +275,33 @@ export async function buildNotifications(): Promise<Notif[]> {
     for (const d of docs) out.push({ id: `personeel:doc:${d.id}:${d.vervalt_op}`, kind: 'personeel', priority: d.vervalt_op < todayISO() ? 'high' : 'low', title: `Personeelsdocument ${d.vervalt_op < todayISO() ? 'vervallen' : 'vervalt binnenkort'} — ${d.naam}`, date: d.vervalt_op, href: `/admin/personeel/${d.personeel_id}?tab=documenten` })
   } catch { /* tabellen bestaan pas na de migratie */ }
 
+  // Websiteonderhoud: binnen 30 dagen af, verlopen of zonder startdatum. De id
+  // bevat de einddatum, zodat een verlengd pakket later opnieuw meldt.
+  try {
+    const { data } = await admin.from('clients')
+      .select('id, company_name, maintenance_included, maintenance_start_date, maintenance_months').eq('maintenance_included', true).limit(1000)
+    for (const { klant, status } of onderhoudOpvolgen((data ?? []) as MaintenanceClient[])) {
+      out.push({
+        id: `onderhoud:${klant.id}:${status.endDate ?? 'geen-start'}:${status.expired ? 'verlopen' : 'af'}`, kind: 'website',
+        priority: status.expired || (status.daysLeft !== null && status.daysLeft <= 7) ? 'high' : 'med',
+        title: status.endDate
+          ? `Websiteonderhoud ${status.expired ? 'verlopen' : 'loopt af'} — ${klant.company_name} (${resterendTekst(status)})`
+          : `Websiteonderhoud zonder startdatum — ${klant.company_name}`,
+        date: status.endDate, href: `/admin/clients/${klant.id}#website`,
+      })
+    }
+  } catch { /* stil */ }
+
+  // Opslag in Supabase: een signaal vanaf 70% van de 100 GB (zie lib/opslag.ts).
+  try {
+    const { data } = await admin.rpc('opslag_verbruik')
+    const o = samenvatting(data as RuwVerbruik)
+    if (o.niveau !== 'ok') {
+      const pct = Math.floor(o.procent / 5) * 5
+      out.push({ id: `opslag:${pct}`, kind: 'opslag', priority: o.niveau === 'kritiek' ? 'high' : 'med', title: `Opslag in Supabase op ${Math.round(o.procent)}% (${grootte(o.totaalBytes)} van ${OPSLAG_LIMIET_GB} GB)`, date: todayISO(), href: '/admin/instellingen?tab=opslag' })
+    }
+  } catch { /* functie nog niet gemigreerd → geen signaal */ }
+
   const rank: Record<NotifPriority, number> = { high: 0, med: 1, low: 2 }
   return out.sort((a, b) => rank[a.priority] - rank[b.priority] || (b.date ?? '').localeCompare(a.date ?? ''))
 }
@@ -284,7 +313,7 @@ export async function buildNotifications(): Promise<Notif[]> {
 // de pipeline). `modules` = rechten van de medewerker (null = admin, alles).
 
 export type OpvolgItem = { id: string; titel: string; sub: string | null; href: string; dringend?: boolean }
-export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'meetings' | 'projecten' | 'content'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
+export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'meetings' | 'projecten' | 'content' | 'onderhoud'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
 
 const OPVOLG_MAX = 5
 const dagKort = (d: string) => new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' })
@@ -307,6 +336,7 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
     mag('meetings') ? opvolgMeetings() : null,
     mag('opdrachten') ? opvolgProjecten() : null,
     mag('content') ? opvolgContent() : null,
+    mag('content') ? opvolgOnderhoud() : null,
   ])
   return groepen.filter((g): g is OpvolgGroep => !!g)
 
@@ -391,6 +421,28 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
             href: `/admin/opdrachten?opdracht=${r.id}`, dringend: dagen >= 14,
           }
         }),
+      }
+    } catch { return null }
+  }
+
+  /**
+   * Websiteonderhoud dat afloopt (binnen 30 dagen), verlopen is maar nog aan
+   * staat, of geen startdatum heeft. Enkel zichtbaar als er iets is: lopende
+   * contracten vragen geen actie.
+   */
+  async function opvolgOnderhoud(): Promise<OpvolgGroep | null> {
+    try {
+      const { data } = await admin.from('clients')
+        .select('id, company_name, maintenance_included, maintenance_start_date, maintenance_months').eq('maintenance_included', true).limit(1000)
+      const lijst = onderhoudOpvolgen((data ?? []) as MaintenanceClient[])
+      if (!lijst.length) return null
+      return {
+        key: 'onderhoud', titel: 'Website-onderhoud', totaal: lijst.length, alles: '/admin/services/website', leeg: 'Alle onderhoudscontracten lopen nog.',
+        items: lijst.slice(0, OPVOLG_MAX).map(({ klant, status }) => ({
+          id: klant.id, titel: klant.company_name,
+          sub: status.endDate ? `${resterendTekst(status)} · tot ${dagKort(status.endDate)}` : 'Startdatum ontbreekt',
+          href: `/admin/clients/${klant.id}#website`, dringend: status.expired || (status.daysLeft !== null && status.daysLeft <= 7),
+        })),
       }
     } catch { return null }
   }

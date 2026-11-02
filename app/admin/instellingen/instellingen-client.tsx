@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Users, LayoutGrid, Building2, Receipt, Plug, FileImage, ShieldCheck, ScrollText, AlertTriangle, Handshake, UserSquare2 } from 'lucide-react'
+import { Users, LayoutGrid, Building2, Receipt, Plug, FileImage, ShieldCheck, ScrollText, AlertTriangle, Handshake, UserSquare2, HardDrive } from 'lucide-react'
 import type { AlleInstellingen, InstellingenSleutel, ModuleInfo, Rol } from '@/lib/instellingen/model'
 import { Laden, Bevestig } from './ui'
 import { SectieMedewerkers } from './sectie-medewerkers'
@@ -16,6 +16,7 @@ import { SectieRechten } from './sectie-rechten'
 import { SectieLogboek } from './sectie-logboek'
 import { SectieVerkoop } from './sectie-verkoop'
 import { SectieTeam } from './sectie-team'
+import { SectieOpslag } from './sectie-opslag'
 
 export type Bijgewerkt = Record<string, { op: string; door: string | null }>
 
@@ -43,6 +44,7 @@ export const TABS = [
   { key: 'verkoop', label: 'Verkoop', icon: Handshake },
   { key: 'team', label: 'Team in de klantapp', icon: UserSquare2 },
   { key: 'integraties', label: 'Integraties', icon: Plug },
+  { key: 'opslag', label: 'Opslag', icon: HardDrive },
   { key: 'documenten', label: 'Documenten en branding', icon: FileImage },
   { key: 'rechten', label: 'Gebruikersrechten', icon: ShieldCheck },
   { key: 'logboek', label: 'Activiteitenlogboek', icon: ScrollText },
@@ -141,6 +143,7 @@ export function InstellingenClient({ tab, verborgen, isAdmin }: { tab: string; v
         {actief === 'verkoop' && <SectieVerkoop ctx={ctx} />}
         {actief === 'team' && <SectieTeam />}
         {actief === 'integraties' && <SectieIntegraties isAdmin={ctx.isAdmin} />}
+        {actief === 'opslag' && <SectieOpslag />}
         {actief === 'documenten' && <SectieDocumenten ctx={ctx} />}
         {actief === 'rechten' && <SectieRechten ctx={ctx} />}
         {actief === 'logboek' && <SectieLogboek />}

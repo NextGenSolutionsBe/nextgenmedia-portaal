@@ -42,6 +42,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         isEmployee={role === 'employee'}
         naam={ik.naam}
         email={ik.email}
+        fotoVersie={ik.fotoVersie}
         instellingen={instellingen}
         rol={rol}
         verborgenPersoonlijk={verborgenPersoonlijk}
