@@ -29,6 +29,7 @@ import { can, metStandaard, fullPermissions, MODULE_IMPLEMENTED } from '@/lib/po
 import { publiceer, syncGasten, stuurBevestiging, verwerkEvents, schrijfUit, annuleerEvent, leesEvent, standaardAgenda } from '@/lib/events-server'
 import { meetingTeam } from '@/lib/meetings/klantboeking-server'
 import { googleEventIdVoor } from '@/lib/events'
+import { maakPipelineArchief } from '@/lib/sales/pipeline-archief'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -38,6 +39,7 @@ export const maxDuration = 60
  * geheim als de scheduler.
  *  · standaard: leest enkel (Google-agenda, ClickUp-lijst, Resend)
  *  · ?schrijftest=1: afspraak ZONDER genodigden met Meet-link, meteen stil weg
+ *  · ?pipeline_archief=1: Excel-archief van de oude verkooppipeline in de privébucket archief.
  *  · ?agendas=<koppeling>: de Google-agenda's die die koppeling ziet (naam, rol, telt als bezet). Leest enkel.
  *  · ?zelftest=klantboeking: één volledige testboeking zoals een klant ze doet
  *    (op het verste vrije moment, naar info@nextgenmedia.be), daarna verplaatst
@@ -135,6 +137,8 @@ export async function POST(req: NextRequest) {
       if (!UUID.test(klant) || !UUID.test(ander) || klant === ander) return NextResponse.json({ error: 'klant en ander (twee verschillende testklanten) zijn verplicht' }, { status: 400 })
       return NextResponse.json(await zelftestKlantapp(admin, klant, ander))
     }
+    // Archief van de oude verkooppipeline als Excel in de privébucket `archief` (schrijft enkel dat bestand).
+    if (req.nextUrl.searchParams.get('pipeline_archief') === '1') return NextResponse.json(await maakPipelineArchief(admin))
     // Leest enkel: welke Google-agenda's ziet een koppeling (naam, rol) en welke tellen als bezet.
     const agendasVan = req.nextUrl.searchParams.get('agendas')
     if (agendasVan && UUID.test(agendasVan)) {

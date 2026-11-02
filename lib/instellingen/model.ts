@@ -72,7 +72,7 @@ const SECTIE_VAN: Record<string, string> = {
 const HREF_VAN: Record<string, string> = {
   clients: '/admin/clients', contracts: '/admin/contracts', content: '/admin/services', metricool: '/admin/metricool', blogs: '/admin/blog-calendar', uploads: '/admin/uploads', opdrachten: '/admin/opdrachten', formulieren: '/admin/formulieren', meetings: '/admin/meetings',
   kantoor: '/admin/kantoor', partners: '/admin/partners', assignments: '/admin/assignments', settlements: '/admin/settlements',
-  sales: '/admin/sales/pipeline', harrie_api: '/admin/sales/koppeling',
+  sales: '/admin/opdrachten', harrie_api: '/admin/sales/koppeling',
   finance: '/admin/revenue/omzet', invoices: '/admin/invoices', vesting: '/admin/vesting', purchases: '/admin/purchases',
   email: '/admin/email', info: '/admin/informatief', materiaal: '/admin/materiaal',
   personeel: '/admin/personeel',

@@ -1,5 +1,5 @@
 import type { Opdracht } from '@/lib/opdrachten'
-import type { Facturatie, KolomKey, Bron } from '@/lib/opdrachten-kanban'
+import type { Facturatie, KolomKey, Bron, Bedrijf } from '@/lib/opdrachten-kanban'
 
 /** Een opdracht zoals de API ze voor het bord teruggeeft. */
 export type KaartOpdracht = Opdracht & {
@@ -14,9 +14,16 @@ export type KaartOpdracht = Opdracht & {
   laatste_notitie?: { tekst: string; auteur_naam: string | null; auteur_email: string | null; created_at: string } | null
   /** Voorstel voor inbound/outbound uit de leadbron in de pipeline. */
   bron_voorstel?: Bron | null
+  /** Btw-nummer: van de klant, of van de kaart voor een prospect. */
+  btw?: string | null
+  btw_nummer?: string | null
+  /** NextGenMedia, NextGenSolutions of Founders of Flanders. */
+  merk?: Bedrijf
+  /** Wanneer het project begon (filters op maand, kwartaal en jaar). */
+  datum?: string | null
 }
 
-export type Klant = { id: string; naam: string; contact_name?: string | null; email?: string | null; verantwoordelijke?: string | null }
+export type Klant = { id: string; naam: string; contact_name?: string | null; email?: string | null; verantwoordelijke?: string | null; btw?: string | null }
 export type ContractOptie = { id: string; titel: string; status: string; label: string; client_id: string | null }
 export type FactuurOptie = { id: string; description: string | null; status: string; invoice_date: string | null; client_id: string | null; contract_id: string | null; amount_incl: number | null; klant_naam: string | null }
 
@@ -38,6 +45,9 @@ export type VerplaatsExtra = {
   contract_id?: string | null
   stop_reden?: string | null
   notitie?: string | null
+  btw_nummer?: string | null
+  diensten?: string[]
+  klant_vrij?: string | null
 }
 
 export const FACTUUR_LABEL: Record<string, string> = { te_versturen: 'te versturen', verstuurd: 'verstuurd', gefactureerd: 'verstuurd', betaald: 'betaald', geannuleerd: 'geannuleerd' }

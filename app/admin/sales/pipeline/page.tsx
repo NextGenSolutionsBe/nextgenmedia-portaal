@@ -1,31 +1,19 @@
+import { redirect } from 'next/navigation'
+import { createAdminSupabaseClient } from '@/lib/supabase/server'
+
 export const dynamic = 'force-dynamic'
 
-import { listPipelines } from '@/lib/sales/pipelines'
-import { PipelineClient } from './pipeline-client'
-
-// Pipeline — één bestand voor beide merken. Onze setters bellen hieruit en
-// boeken in de agenda van Bram of Marco. Elke lead draagt zelf zijn merk(en);
-// bovenaan filter je desgewenst op één bedrijf.
-export default async function SalesPipelinePage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
+/**
+ * De verkooppipeline is opgegaan in Projecten (2 nov 2026). Oude links
+ * (?lead=<id>, ook in ClickUp-taken en meldingen) openen de kaart die bij die
+ * lead hoort; anders het projectenbord.
+ */
+export default async function OudePipeline({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const sp = await searchParams
-  const pipelines = await listPipelines()
-  // Leeg = alle merken samen. Eén bestand is het uitgangspunt; een merk kiezen
-  // is een filter dat je zelf aanzet (of dat via ?pipeline meekomt).
-  const initial = pipelines.find((p) => p.id === sp.pipeline)?.id ?? ''
-
-  return (
-    <div className="space-y-4 animate-fade-in">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-semibold">Pipeline</h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          Alle prospects van beide merken op één bord. Sleep kaarten tussen de kolommen; gesprekken
-          en e-mails registreer je met de knoppen op de kaart.
-        </p>
-      </div>
-      <PipelineClient
-        pipelines={pipelines.map((p) => ({ id: p.id, name: p.name, key: p.key }))}
-        initialPipelineId={initial}
-      />
-    </div>
-  )
+  const lead = String(sp.lead ?? '')
+  if (/^[0-9a-f-]{36}$/i.test(lead)) {
+    const { data } = await createAdminSupabaseClient().from('opdrachten').select('id').eq('lead_id', lead).order('created_at', { ascending: false }).limit(1).maybeSingle()
+    if (data?.id) redirect(`/admin/opdrachten?opdracht=${data.id}`)
+  }
+  redirect('/admin/opdrachten')
 }

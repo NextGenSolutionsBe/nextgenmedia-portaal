@@ -8,12 +8,14 @@ import {
 } from 'lucide-react'
 import {
   KOLOMMEN, kolomInfo, kolomVan, stapLabel, kaartKleur, DIENSTEN, dienstInfo, BRONNEN, OFFERTE_VIA, raadDiensten, normaliseerDiensten,
-  type KolomKey, type Bron,
+  BEDRIJVEN, bedrijfVan,
+  type KolomKey, type Bron, type Bedrijf,
 } from '@/lib/opdrachten-kanban'
 import type { OpdrachtStatus } from '@/lib/opdrachten'
 import { formatEuro } from '@/lib/utils'
 import { KlantKiezer, type KlantOptie } from '@/components/admin/klant-kiezer'
 import { ClickupTaken } from '@/components/admin/clickup-taken'
+import { BtwOpzoeken } from '@/components/admin/btw-opzoeken'
 import {
   FACTUUR_LABEL, datumKort, hoeLangGeleden,
   type KaartOpdracht, type Klant, type ContractOptie, type FactuurOptie, type Notitie,
@@ -32,6 +34,9 @@ type Concept = {
   offerte_op: string
   contract_id: string
   invoice_id: string
+  btw_nummer: string
+  merk: Bedrijf | ''
+  datum: string
 }
 type Veld = keyof Concept
 
@@ -48,6 +53,9 @@ const uit = (o: KaartOpdracht | null): Concept => ({
   offerte_op: o?.offerte_op ?? '',
   contract_id: o?.contract_id ?? '',
   invoice_id: o?.invoice_id ?? '',
+  btw_nummer: o?.btw_nummer ?? '',
+  merk: o?.merk ?? '',
+  datum: o?.datum ?? '',
 })
 
 const gelijk = (a: Concept[Veld], b: Concept[Veld]) => JSON.stringify(a) === JSON.stringify(b)
@@ -159,18 +167,21 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={sluit}>
-      <aside data-venster role="dialog" aria-modal="true" aria-label={o ? o.titel : 'Nieuwe opdracht'}
+      <aside data-venster role="dialog" aria-modal="true" aria-label={o ? o.titel : 'Nieuw project'}
         className="w-full sm:max-w-2xl h-full bg-white shadow-2xl flex flex-col" onClick={(e) => e.stopPropagation()}>
         {/* Kop in de kleur van de dienst: zo zie je meteen hoe de kaart eruitziet. */}
-        <header className="px-5 pt-4 pb-4 border-b-2 transition-colors" style={{ background: kleur.achtergrond, borderColor: kleur.rand, color: kleur.tekst }}>
+        <header className="px-5 pt-4 pb-4 border-b border-gray-200 bg-white">
           <div className="flex items-center justify-between gap-2">
-            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${kol.label_kleur}`}>{o ? kol.label : `Nieuw · ${kol.label}`}</span>
-            <button type="button" onClick={sluit} aria-label="Sluiten" className={`h-9 w-9 rounded-lg flex items-center justify-center ${kleur.donker ? 'hover:bg-white/15' : 'hover:bg-black/5'}`}><X className="h-5 w-5" /></button>
+            <span className="text-xs font-medium text-gray-600 flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full ring-1 ring-black/10" style={{ background: kleur.key ? kleur.rand : '#E5E7EB' }} />
+              {o ? kol.label : `Nieuw · ${kol.label}`}
+            </span>
+            <button type="button" onClick={sluit} aria-label="Sluiten" className="h-9 w-9 rounded-lg flex items-center justify-center hover:bg-gray-100"><X className="h-5 w-5" /></button>
           </div>
           <input value={c.titel} onChange={(e) => zet('titel', e.target.value)} maxLength={200} autoFocus={!o}
             placeholder="Wat is het project? Bv. Bestickering camionette"
-            className={`mt-2 w-full bg-transparent text-xl sm:text-2xl font-semibold leading-tight outline-none rounded-lg px-1 -mx-1 focus:ring-2 ${kleur.donker ? 'placeholder:text-white/50 focus:ring-white/40' : 'placeholder:text-black/30 focus:ring-black/20'}`} aria-label="Titel" />
-          <p className={`mt-1 text-sm flex items-center gap-1.5 ${kleur.donker ? 'text-white/80' : 'text-gray-700'}`}>
+            className="mt-2 w-full bg-transparent text-xl font-semibold tracking-tight leading-tight outline-none rounded-lg px-1 -mx-1 focus:ring-2 focus:ring-gray-200 placeholder:text-gray-300" aria-label="Titel" />
+          <p className="mt-1 text-sm flex items-center gap-1.5 text-gray-600">
             <Building2 className="h-4 w-4" />{(c.client_id ? klanten.find((k) => k.id === c.client_id)?.naam ?? (c.client_id === o?.client_id ? o?.klant_naam : null) : c.klant_vrij) || 'Nog geen klant'}
             {o?.created_at && <span className="opacity-70">· sinds {datumKort(o.created_at.slice(0, 10))}</span>}
           </p>
@@ -217,6 +228,34 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
               )}
             </div>
 
+            <div className="grid sm:grid-cols-3 gap-3">
+              <div>
+                <label className={LBL} htmlFor="opdracht-btw">Btw-nummer <span className="font-normal text-gray-400">vanaf offerte</span></label>
+                {(() => {
+                  const klantBtw = c.client_id ? klanten.find((k) => k.id === c.client_id)?.btw ?? null : null
+                  return klantBtw ? (
+                    <p className="input-base bg-gray-50 text-gray-700" title="Staat bij de klant">{klantBtw}</p>
+                  ) : (
+                    <>
+                      <input id="opdracht-btw" className="input-base" value={c.btw_nummer} onChange={(e) => zet('btw_nummer', e.target.value)} placeholder="BE0123456789" />
+                      <BtwOpzoeken btw={c.btw_nummer} auto={false} onGevonden={(g) => { if (!c.client_id && !c.klant_vrij.trim() && g.naam) zet('klant_vrij', g.naam) }} />
+                      {c.client_id && <p className="text-[11px] text-gray-500 mt-1">Wordt bij de klant bewaard.</p>}
+                    </>
+                  )
+                })()}
+              </div>
+              <div>
+                <label className={LBL} htmlFor="opdracht-merk">Bedrijf</label>
+                <select id="opdracht-merk" className="input-base" value={c.merk || bedrijfVan(null, c.diensten)} onChange={(e) => zet('merk', e.target.value as Bedrijf)}>
+                  {BEDRIJVEN.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={LBL} htmlFor="opdracht-datum">Gestart op</label>
+                <input id="opdracht-datum" type="date" className="input-base" value={c.datum} onChange={(e) => zet('datum', e.target.value)} />
+              </div>
+            </div>
+
             <div>
               <p className={LBL}>Diensten <span className="font-normal text-gray-400">· de eerste bepaalt de kleur van de kaart</span></p>
               <div className="flex flex-wrap gap-1.5">
@@ -259,7 +298,7 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
                 </div>
                 {!c.bron && o?.bron_voorstel && (
                   <button type="button" onClick={() => zet('bron', o.bron_voorstel!)} className="mt-1.5 text-[11px] text-gray-600 underline">
-                    Volgens de pipeline: {o.bron_voorstel === 'inbound' ? 'Inbound' : 'Outbound'} · overnemen
+                    Voorstel: {o.bron_voorstel === 'inbound' ? 'Inbound' : 'Outbound'} · overnemen
                   </button>
                 )}
               </div>
@@ -307,7 +346,7 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
           {/* Contract en facturen. */}
           <section className="px-5 py-4 space-y-3 border-b border-gray-100">
             <p className="text-sm font-semibold flex items-center gap-2"><FileSignature className="h-4 w-4" />Contract en facturen</p>
-            <p className="text-[11px] text-gray-500 -mt-1">Gekoppeld contract verstuurd → Contract. Getekend → Getekend contract. Alles gefactureerd (ook voorschotten en maandfacturen) → Afgerond.</p>
+            <p className="text-[11px] text-gray-500 -mt-1">Contract opgemaakt → Contract verstuurd. Getekend → Contract getekend. Alles gefactureerd (ook voorschotten en maandfacturen) → Afgerond.</p>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="opdracht-contract">Contract</label>
               <select id="opdracht-contract" className="input-base" value={c.contract_id} onChange={(e) => zet('contract_id', e.target.value)}>
@@ -346,14 +385,13 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
                 )}
               </div>
             )}
-            {o?.lead_id && <Link href={`/admin/sales/pipeline?lead=${o.lead_id}`} className="text-xs text-gray-600 underline inline-block">Open in de pipeline</Link>}
           </section>
 
           {/* Taken: elke taak komt in ClickUp, toegewezen aan de verantwoordelijke. */}
           {o && (
             <section className="px-5 py-4 border-b border-gray-100">
               <ClickupTaken api={`/api/admin/opdrachten/${o.id}/taken`} waarbij="opdracht"
-                standaardMerk={o.diensten.some((d) => dienstInfo(d).key === 'ngs') ? 'nextgensolutions' : 'nextgenmedia'} />
+                standaardMerk={(o.merk ?? bedrijfVan(null, o.diensten)) === 'nextgensolutions' ? 'nextgensolutions' : 'nextgenmedia'} />
             </section>
           )}
 

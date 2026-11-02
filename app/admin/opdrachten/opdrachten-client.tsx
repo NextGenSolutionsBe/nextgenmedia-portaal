@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Loader2, Plus, Search, ClipboardList, LayoutGrid, List, Sparkles, X } from 'lucide-react'
+import { Loader2, Plus, Search, KanbanSquare, LayoutGrid, List, Sparkles, X, FileSpreadsheet, Settings2 } from 'lucide-react'
 import {
   KOLOMMEN, kolomInfo, kolomVan, statusVoorKolom, stapLabel, kaartKleur, DIENSTEN, dienstInfo, bronLabel, sorteerInKolom,
-  type KolomKey, type DienstKey,
+  BEDRIJVEN, WAARDE_SCHIJVEN, inPeriode, inWaardeSchijf, bedrijfLabel,
+  type KolomKey, type DienstKey, type Periode, type Bedrijf,
 } from '@/lib/opdrachten-kanban'
 import type { OpdrachtStatus } from '@/lib/opdrachten'
 import { formatEuro } from '@/lib/utils'
@@ -15,14 +16,18 @@ import { VerplaatsDialoog, vraagBijVerplaatsen, type VerplaatsSoort } from './ve
 import { AanvullenDialoog } from './aanvullen-dialoog'
 import type { KaartOpdracht, Klant, ContractOptie, FactuurOptie, VerplaatsExtra } from './types'
 import { zoekVeld } from '@/lib/zoekveld'
+import { ReminderSettings } from '@/components/admin/projecten/instellingen-per-bedrijf'
+
+const MAANDEN = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus', 'september', 'oktober', 'november', 'december']
 
 const WEERGAVE_SLEUTEL = 'ngm-opdrachten-weergave'
 
 /**
- * Opdrachten als kanbanbord: één kaart per project, ook meerdere per klant.
- * Van potentiële opdracht tot afgerond (of stopgezet). Contract verstuurd,
- * getekend en volledig gefactureerd schuiven de kaart vanzelf door; In
- * uitvoering zet je zelf.
+ * Projecten: één overzicht voor nieuwe leads en lopende projecten, als bord of
+ * als lijst. Eén kaart per project, ook meerdere per klant. Opvolging →
+ * Offerte gestuurd → Contract verstuurd → Contract getekend → In uitvoering →
+ * Afgerond, of Verloren. Een contract opmaken, laten tekenen en volledig
+ * factureren schuiven de kaart vanzelf door; In uitvoering zet je zelf.
  */
 export function OpdrachtenClient() {
   const [rijen, setRijen] = useState<KaartOpdracht[]>([])
@@ -38,10 +43,19 @@ export function OpdrachtenClient() {
   const [wie, setWie] = useState('')
   const [dienst, setDienst] = useState<DienstKey | 'geen' | ''>('')
   const [bron, setBron] = useState<'inbound' | 'outbound' | ''>('')
+  const [periodeSoort, setPeriodeSoort] = useState<Periode['soort']>('alles')
+  const [jaar, setJaar] = useState(new Date().getFullYear())
+  const [maand, setMaand] = useState(new Date().getMonth() + 1)
+  const [kwartaal, setKwartaal] = useState<1 | 2 | 3 | 4>((Math.floor(new Date().getMonth() / 3) + 1) as 1 | 2 | 3 | 4)
+  const [klantFilter, setKlantFilter] = useState('')
+  const [bedrijf, setBedrijf] = useState<Bedrijf | ''>('')
+  const [waardeSchijf, setWaardeSchijf] = useState('alle')
+  const [archief, setArchief] = useState<{ op: string | null } | null>(null)
+  const [instellingen, setInstellingen] = useState(false)
   const [weergave, setWeergave] = useState<'bord' | 'lijst'>('bord')
 
   const [venster, setVenster] = useState<{ id: string | null; kolom: KolomKey } | null>(null)
-  const [vraag, setVraag] = useState<{ id: string; soort: VerplaatsSoort } | null>(null)
+  const [vraag, setVraag] = useState<{ id: string; soort: VerplaatsSoort; doel: KolomKey } | null>(null)
   const [aanvullen, setAanvullen] = useState(false)
   const [bannerWeg, setBannerWeg] = useState(false)
 
@@ -66,6 +80,11 @@ export function OpdrachtenClient() {
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Laden mislukt') } finally { setLaden(false) }
   }, [])
   useEffect(() => { void laad() }, [laad])
+  // Het archief van de oude pipeline (enkel zichtbaar voor admins).
+  useEffect(() => {
+    fetch('/api/admin/opdrachten/pipeline-archief?info=1', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null)).then((j) => setArchief(j?.archief ?? null)).catch(() => setArchief(null))
+  }, [])
 
   // Deeplink: /admin/opdrachten?opdracht=<id> opent die kaart.
   useEffect(() => {
@@ -78,21 +97,35 @@ export function OpdrachtenClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [laden])
 
+  const periode: Periode = periodeSoort === 'alles' ? { soort: 'alles' } : periodeSoort === 'jaar' ? { soort: 'jaar', jaar } : periodeSoort === 'maand' ? { soort: 'maand', jaar, maand } : { soort: 'kwartaal', jaar, kwartaal }
+  const jaren = useMemo(() => {
+    const nu = new Date().getFullYear()
+    const min = Math.min(nu, ...rijen.map((o) => Number(String(o.datum ?? o.created_at).slice(0, 4))).filter((j) => j > 2000))
+    return Array.from({ length: nu - min + 2 }, (_, i) => nu + 1 - i)
+  }, [rijen])
+  const klantNamen = useMemo(() => [...new Set(rijen.map((o) => o.klant_naam).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b, 'nl')), [rijen])
+
   const zichtbaar = useMemo(() => {
     const naald = q.trim().toLowerCase()
     return rijen
+      .filter((o) => inPeriode(o.datum ?? o.created_at, periode))
+      .filter((o) => !klantFilter || o.klant_naam === klantFilter)
+      .filter((o) => !bedrijf || (o.merk ?? 'nextgenmedia') === bedrijf)
+      .filter((o) => inWaardeSchijf(o.waarde, waardeSchijf))
       .filter((o) => !wie || (wie === '-' ? !o.verantwoordelijke : o.verantwoordelijke === wie))
       .filter((o) => !dienst || (dienst === 'geen' ? o.diensten.length === 0 : o.diensten.includes(dienst)))
       .filter((o) => !bron || o.bron === bron)
       .filter((o) => !naald || [o.titel, o.omschrijving, o.klant_naam, o.contract?.title, o.verantwoordelijke, o.laatste_notitie?.tekst, ...o.diensten.map((d) => dienstInfo(d).label)]
         .some((v) => (v ?? '').toLowerCase().includes(naald)))
       .sort(sorteerInKolom)
-  }, [rijen, q, wie, dienst, bron])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rijen, q, wie, dienst, bron, periodeSoort, jaar, maand, kwartaal, klantFilter, bedrijf, waardeSchijf])
 
   const open = useMemo(() => {
-    const lopend = rijen.filter((o) => !['afgerond', 'stopgezet'].includes(kolomVan(o.status)))
-    return { aantal: lopend.length, waarde: lopend.reduce((t, o) => t + (o.waarde ?? 0), 0) }
-  }, [rijen])
+    const lopend = zichtbaar.filter((o) => !['afgerond', 'stopgezet'].includes(kolomVan(o.status)))
+    const gewonnen = zichtbaar.filter((o) => kolomVan(o.status) === 'afgerond')
+    return { aantal: lopend.length, waarde: lopend.reduce((t, o) => t + (o.waarde ?? 0), 0), gewonnen: gewonnen.reduce((t, o) => t + (o.waarde ?? 0), 0) }
+  }, [zichtbaar])
   const onvolledig = rijen.filter((o) => kolomVan(o.status) !== 'stopgezet' && (o.diensten.length === 0 || !o.bron)).length
 
   /** Status zetten: meteen tonen, bij een fout terugdraaien. Daarna stil herladen (tijdlijn, facturatie, automatische stappen). */
@@ -121,12 +154,12 @@ export function OpdrachtenClient() {
   const verplaats = useCallback((o: KaartOpdracht, doel: KolomKey) => {
     if (kolomVan(o.status) === doel) return
     const soort = vraagBijVerplaatsen(o, doel)
-    if (soort) setVraag({ id: o.id, soort })
+    if (soort) setVraag({ id: o.id, soort, doel })
     else void zetStatus(o, statusVoorKolom(o.status, doel)).then((ok) => { if (ok) toast.success(`Naar ${kolomInfo(doel).label}`) })
   }, [zetStatus])
 
   const verwijder = async (o: KaartOpdracht) => {
-    if (!confirm(`"${o.titel}" verwijderen?\n\nGaat het project niet door, zet de kaart dan op Stopgezet: zo blijft ze terugvindbaar. Verwijderen haalt ook alle notities weg.`)) return
+    if (!confirm(`"${o.titel}" verwijderen?\n\nGaat het project niet door, zet de kaart dan op Verloren: zo blijft ze terugvindbaar. Verwijderen haalt ook alle notities weg.`)) return
     try {
       const res = await fetch(`/api/admin/opdrachten?id=${o.id}`, { method: 'DELETE' })
       const j = await res.json(); if (!res.ok) throw new Error(j.error)
@@ -138,66 +171,107 @@ export function OpdrachtenClient() {
 
   const vensterKaart = venster?.id ? rijen.find((r) => r.id === venster.id) ?? null : null
   const vraagKaart = vraag ? rijen.find((r) => r.id === vraag.id) ?? null : null
-  const chip = (actief: boolean) => `text-xs font-semibold px-3 py-1.5 rounded-xl border transition-colors whitespace-nowrap ${actief ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200 hover:bg-gray-50'}`
+  const chip = (actief: boolean) => `text-xs font-medium px-2.5 py-1 rounded-lg border transition-colors whitespace-nowrap ${actief ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'}`
+  const kiezer = 'text-[13px] border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700'
+  const filtersActief = !!(q || wie || dienst || bron || klantFilter || bedrijf || waardeSchijf !== 'alle' || periodeSoort !== 'alles')
+  const wisFilters = () => { setQ(''); setWie(''); setDienst(''); setBron(''); setKlantFilter(''); setBedrijf(''); setWaardeSchijf('alle'); setPeriodeSoort('alles') }
 
   return (
     <div className="space-y-4 animate-fade-in">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl sm:text-2xl font-semibold flex items-center gap-2"><ClipboardList className="h-6 w-6" />Opdrachten</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight flex items-center gap-2"><KanbanSquare className="h-5 w-5 text-gray-500" />Projecten</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Elk project een kaart, ook voor vaste klanten. {open.aantal} lopend · {formatEuro(open.waarde)} excl. btw
+            Leads en projecten in één overzicht. {open.aantal} lopend · {formatEuro(open.waarde)} open{open.gewonnen ? ` · ${formatEuro(open.gewonnen)} afgerond` : ''} (excl. btw)
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="inline-flex rounded-xl border border-gray-200 bg-white p-0.5" role="group" aria-label="Weergave">
-            <button type="button" onClick={() => kiesWeergave('bord')} aria-pressed={weergave === 'bord'} className={`text-xs font-semibold px-2.5 py-1.5 rounded-lg flex items-center gap-1 ${weergave === 'bord' ? 'bg-gray-900 text-white' : 'text-gray-600'}`}><LayoutGrid className="h-3.5 w-3.5" />Bord</button>
-            <button type="button" onClick={() => kiesWeergave('lijst')} aria-pressed={weergave === 'lijst'} className={`text-xs font-semibold px-2.5 py-1.5 rounded-lg flex items-center gap-1 ${weergave === 'lijst' ? 'bg-gray-900 text-white' : 'text-gray-600'}`}><List className="h-3.5 w-3.5" />Lijst</button>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {archief && (
+            <a href="/api/admin/opdrachten/pipeline-archief" className="btn-secondary text-sm" title={`Excel met alle leads van de oude pipeline${archief.op ? ` (${new Date(archief.op).toLocaleDateString('nl-BE')})` : ''}`}>
+              <FileSpreadsheet className="h-4 w-4" /><span className="hidden sm:inline">Oude pipeline</span>
+            </a>
+          )}
+          <button type="button" onClick={() => setInstellingen(true)} className="btn-secondary text-sm" title="ClickUp-lijsten, meldingen en herinneringsmail per bedrijf"><Settings2 className="h-4 w-4" /><span className="hidden sm:inline">Instellingen</span></button>
+          <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5" role="group" aria-label="Weergave">
+            <button type="button" onClick={() => kiesWeergave('bord')} aria-pressed={weergave === 'bord'} className={`text-xs font-medium px-2.5 py-1.5 rounded-md flex items-center gap-1 ${weergave === 'bord' ? 'bg-gray-900 text-white' : 'text-gray-600'}`}><LayoutGrid className="h-3.5 w-3.5" />Bord</button>
+            <button type="button" onClick={() => kiesWeergave('lijst')} aria-pressed={weergave === 'lijst'} className={`text-xs font-medium px-2.5 py-1.5 rounded-md flex items-center gap-1 ${weergave === 'lijst' ? 'bg-gray-900 text-white' : 'text-gray-600'}`}><List className="h-3.5 w-3.5" />Lijst</button>
           </div>
-          <button type="button" onClick={() => setVenster({ id: null, kolom: 'potentieel' })} className="btn-primary text-sm"><Plus className="h-4 w-4" />Nieuwe opdracht</button>
+          <button type="button" onClick={() => setVenster({ id: null, kolom: 'potentieel' })} className="btn-primary text-sm"><Plus className="h-4 w-4" />Nieuw project</button>
         </div>
       </div>
 
       {hint && <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">{hint}</p>}
 
       {onvolledig > 0 && !laden && !bannerWeg && (
-        <div className="flex items-center justify-between gap-3 flex-wrap rounded-xl border border-gray-200 bg-white px-4 py-2.5">
-          <p className="text-sm text-gray-700"><b>{onvolledig}</b> kaart{onvolledig === 1 ? '' : 'en'} zonder dienst of bron. Vul ze in één keer aan, dan krijgen ze hun kleur.</p>
+        <div className="flex items-center justify-between gap-3 flex-wrap rounded-lg border border-gray-200 bg-white px-3 py-2">
+          <p className="text-[13px] text-gray-700"><b>{onvolledig}</b> kaart{onvolledig === 1 ? '' : 'en'} zonder dienst of bron.</p>
           <div className="flex items-center gap-1">
-            <button type="button" onClick={() => setAanvullen(true)} className="btn-secondary text-sm"><Sparkles className="h-4 w-4" />Kaarten aanvullen</button>
+            <button type="button" onClick={() => setAanvullen(true)} className="btn-secondary text-xs"><Sparkles className="h-3.5 w-3.5" />Aanvullen</button>
             <button type="button" onClick={() => { setBannerWeg(true); try { sessionStorage.setItem('ngm-opdrachten-aanvullen-weg', '1') } catch { /* niet erg */ } }}
-              className="h-9 w-9 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-black" aria-label="Melding verbergen" title="Verbergen"><X className="h-4 w-4" /></button>
+              className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-black" aria-label="Melding verbergen" title="Verbergen"><X className="h-4 w-4" /></button>
           </div>
         </div>
       )}
 
-      {/* Filters */}
+      {/* Filters: zoeken, periode, klant, bedrijf, waarde, verantwoordelijke, bron en dienst. */}
       <div className="space-y-2">
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap">
           <div className="relative flex-1 min-w-[12rem] sm:flex-none">
             <Search className="h-4 w-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-            <input {...zoekVeld()} className="input-base pl-8 sm:w-72" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Zoek op project, klant, notitie…" aria-label="Zoeken" />
+            <input {...zoekVeld()} className="input-base !py-1.5 pl-8 sm:w-64 text-[13px]" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Zoek op klant, project, notitie…" aria-label="Zoeken" />
           </div>
-          <select className="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white" value={wie} onChange={(e) => setWie(e.target.value)} aria-label="Verantwoordelijke">
+          <select className={kiezer} value={periodeSoort} onChange={(e) => setPeriodeSoort(e.target.value as Periode['soort'])} aria-label="Periode">
+            <option value="alles">Alle periodes</option>
+            <option value="maand">Maand</option>
+            <option value="kwartaal">Kwartaal</option>
+            <option value="jaar">Jaar</option>
+          </select>
+          {periodeSoort === 'maand' && (
+            <select className={kiezer} value={maand} onChange={(e) => setMaand(Number(e.target.value))} aria-label="Maand">
+              {MAANDEN.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+            </select>
+          )}
+          {periodeSoort === 'kwartaal' && (
+            <select className={kiezer} value={kwartaal} onChange={(e) => setKwartaal(Number(e.target.value) as 1 | 2 | 3 | 4)} aria-label="Kwartaal">
+              {[1, 2, 3, 4].map((k) => <option key={k} value={k}>Q{k}</option>)}
+            </select>
+          )}
+          {periodeSoort !== 'alles' && (
+            <select className={kiezer} value={jaar} onChange={(e) => setJaar(Number(e.target.value))} aria-label="Jaar">
+              {jaren.map((j) => <option key={j} value={j}>{j}</option>)}
+            </select>
+          )}
+          <select className={`${kiezer} max-w-[12rem]`} value={klantFilter} onChange={(e) => setKlantFilter(e.target.value)} aria-label="Klant">
+            <option value="">Alle klanten</option>
+            {klantNamen.map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+          <select className={kiezer} value={bedrijf} onChange={(e) => setBedrijf(e.target.value as Bedrijf | '')} aria-label="Bedrijf">
+            <option value="">Alle bedrijven</option>
+            {BEDRIJVEN.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
+          </select>
+          <select className={kiezer} value={waardeSchijf} onChange={(e) => setWaardeSchijf(e.target.value)} aria-label="Waarde">
+            {WAARDE_SCHIJVEN.map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
+          </select>
+          <select className={kiezer} value={wie} onChange={(e) => setWie(e.target.value)} aria-label="Verantwoordelijke">
             <option value="">Iedereen</option>
             {namen.map((n) => <option key={n} value={n}>{n}</option>)}
             <option value="-">Zonder verantwoordelijke</option>
           </select>
-          <select className="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white" value={bron} onChange={(e) => setBron(e.target.value as typeof bron)} aria-label="Bron">
+          <select className={kiezer} value={bron} onChange={(e) => setBron(e.target.value as typeof bron)} aria-label="Bron">
             <option value="">Inbound en outbound</option>
             <option value="inbound">Inbound</option>
             <option value="outbound">Outbound</option>
           </select>
-          {(q || wie || dienst || bron) && (
-            <button type="button" onClick={() => { setQ(''); setWie(''); setDienst(''); setBron('') }} className="text-xs text-gray-600 hover:text-black inline-flex items-center gap-1"><X className="h-3.5 w-3.5" />Filters wissen</button>
+          {filtersActief && (
+            <button type="button" onClick={wisFilters} className="text-xs text-gray-600 hover:text-black inline-flex items-center gap-1 px-1"><X className="h-3.5 w-3.5" />Wissen</button>
           )}
-          <span className="text-xs text-gray-500 ml-auto">{zichtbaar.length} van {rijen.length} kaarten</span>
+          <span className="text-xs text-gray-500 ml-auto">{zichtbaar.length} van {rijen.length}</span>
         </div>
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0">
+        <div className="flex items-center gap-1 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0">
           <button type="button" onClick={() => setDienst('')} className={chip(!dienst)}>Alle diensten</button>
           {DIENSTEN.map((d) => (
             <button key={d.key} type="button" onClick={() => setDienst(dienst === d.key ? '' : (d.key as DienstKey))} className={`${chip(dienst === d.key)} inline-flex items-center gap-1.5`}>
-              <span className="h-2.5 w-2.5 rounded-full border border-black/10" style={{ background: d.achtergrond }} />{d.label}
+              <span className="h-2 w-2 rounded-full ring-1 ring-black/10" style={{ background: d.rand }} />{d.label}
             </button>
           ))}
           <button type="button" onClick={() => setDienst(dienst === 'geen' ? '' : 'geen')} className={chip(dienst === 'geen')}>Zonder dienst</button>
@@ -231,7 +305,7 @@ export function OpdrachtenClient() {
       )}
 
       {vraag && vraagKaart && (
-        <VerplaatsDialoog o={vraagKaart} soort={vraag.soort} contracten={contracten}
+        <VerplaatsDialoog o={vraagKaart} soort={vraag.soort} doel={vraag.doel} contracten={contracten}
           onClose={() => setVraag(null)}
           onBevestig={async (status, extra) => {
             const ok = await zetStatus(vraagKaart, status, extra)
@@ -240,6 +314,7 @@ export function OpdrachtenClient() {
           }} />
       )}
 
+      {instellingen && <ReminderSettings onClose={() => setInstellingen(false)} />}
       {aanvullen && <AanvullenDialoog kaarten={rijen.filter((o) => kolomVan(o.status) !== 'stopgezet')} onClose={() => setAanvullen(false)} onKlaar={() => { setAanvullen(false); void laad({ stil: true }) }} />}
     </div>
   )

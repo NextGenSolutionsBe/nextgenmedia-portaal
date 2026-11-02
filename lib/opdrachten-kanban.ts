@@ -13,6 +13,7 @@
 // uitvoering zetten gebeurt altijd met de hand.
 
 import { statusInfo, type OpdrachtStatus, type Koppelingen, type FactuurKoppeling } from '@/lib/opdrachten'
+import { canonicalStatus } from '@/lib/contract-status'
 
 export type KolomKey = 'potentieel' | 'offerte' | 'contract' | 'getekend' | 'uitvoering' | 'afgerond' | 'stopgezet'
 
@@ -32,25 +33,25 @@ export type Kolom = {
 }
 
 export const KOLOMMEN: Kolom[] = [
-  { key: 'potentieel', label: 'Potentiële opdracht', uitleg: 'Er is interesse. Nog geen prijs gedeeld.',
+  { key: 'potentieel', label: 'Opvolging', uitleg: 'Interesse of een eerste gesprek. Naam, dienst en notities volstaan.',
     stappen: ['open', 'voorstel_gevraagd', 'voorstel_bezig'], standaard: 'open',
     label_kleur: 'bg-slate-700 text-white', balk: 'bg-slate-500' },
-  { key: 'offerte', label: 'Offerte gestuurd', uitleg: 'Prijs of projectvoorstel gedeeld. We wachten op een antwoord.',
+  { key: 'offerte', label: 'Offerte gestuurd', uitleg: 'Prijs of voorstel gedeeld. Vanaf hier zijn naam, btw-nummer en dienst verplicht.',
     stappen: ['voorstel_klaar', 'voorstel_voorgelegd', 'interesse'], standaard: 'voorstel_voorgelegd',
     label_kleur: 'bg-violet-600 text-white', balk: 'bg-violet-500' },
-  { key: 'contract', label: 'Contract', uitleg: 'Contract verstuurd, nog niet getekend.',
+  { key: 'contract', label: 'Contract verstuurd', uitleg: 'Komt hier vanzelf zodra er een contract voor de klant gemaakt wordt.',
     stappen: ['contract_verstuurd'], standaard: 'contract_verstuurd',
     label_kleur: 'bg-blue-600 text-white', balk: 'bg-blue-500' },
-  { key: 'getekend', label: 'Getekend contract', uitleg: 'Getekend in de app of door ons op getekend gezet.',
+  { key: 'getekend', label: 'Contract getekend', uitleg: 'Vanzelf zodra het contract getekend is.',
     stappen: ['getekend'], standaard: 'getekend',
     label_kleur: 'bg-teal-700 text-white', balk: 'bg-teal-600' },
   { key: 'uitvoering', label: 'In uitvoering', uitleg: 'Het project loopt. Hier zet je het zelf.',
     stappen: ['bezig', 'wacht', 'opgeleverd', 'te_factureren', 'factuur_verstuurd'], standaard: 'bezig',
     label_kleur: 'bg-orange-500 text-white', balk: 'bg-orange-400' },
-  { key: 'afgerond', label: 'Afgerond', uitleg: 'De volledige contractwaarde is gefactureerd.',
+  { key: 'afgerond', label: 'Afgerond', uitleg: 'Vanzelf zodra de volledige waarde gefactureerd is.',
     stappen: ['afgerond', 'betaald'], standaard: 'afgerond',
     label_kleur: 'bg-green-600 text-white', balk: 'bg-green-500' },
-  { key: 'stopgezet', label: 'Stopgezet of geen akkoord', uitleg: 'Gaat niet door of vroegtijdig gestopt.',
+  { key: 'stopgezet', label: 'Verloren', uitleg: 'Geen akkoord, gaat niet door of vroegtijdig gestopt.',
     stappen: ['geen_interesse', 'geannuleerd'], standaard: 'geen_interesse',
     label_kleur: 'bg-red-600 text-white', balk: 'bg-red-500' },
 ]
@@ -297,3 +298,97 @@ export function dagenSinds(iso: string | null | undefined, nu: Date = new Date()
   return Math.max(0, Math.floor((nu.getTime() - t) / 86_400_000))
 }
 
+
+
+// ── Bedrijf: voor welk van onze bedrijven is het project? ────────────────────
+
+export type Bedrijf = 'nextgenmedia' | 'nextgensolutions' | 'foundersofflanders'
+export const BEDRIJVEN: { key: Bedrijf; label: string; kort: string }[] = [
+  { key: 'nextgenmedia', label: 'NextGenMedia', kort: 'NGM' },
+  { key: 'nextgensolutions', label: 'NextGenSolutions', kort: 'NGS' },
+  { key: 'foundersofflanders', label: 'Founders of Flanders', kort: 'FoF' },
+]
+export const isBedrijf = (v: unknown): v is Bedrijf => BEDRIJVEN.some((b) => b.key === v)
+export const bedrijfLabel = (v: string | null | undefined): string => BEDRIJVEN.find((b) => b.key === v)?.label ?? 'NextGenMedia'
+
+/** Het bedrijf van een kaart: zoals ingesteld, anders afgeleid uit de diensten (NGS-dienst → NGS, Founders → FoF, anders NGM). */
+export function bedrijfVan(merk: string | null | undefined, diensten: string[] | null | undefined): Bedrijf {
+  if (isBedrijf(merk)) return merk
+  const keys = (diensten ?? []).map((d) => dienstInfo(d).key)
+  if (keys.includes('ngs')) return 'nextgensolutions'
+  if (keys.includes('founders')) return 'foundersofflanders'
+  return 'nextgenmedia'
+}
+
+// ── Verplichte velden vanaf Offerte gestuurd ─────────────────────────────────
+
+/** Btw-nummer zoals we het bewaren: hoofdletters, zonder spaties, punten of streepjes. */
+export function normaliseerBtw(v: unknown): string | null {
+  const s = String(v ?? '').toUpperCase().replace(/[\s.\-]/g, '')
+  return s.length >= 8 && /^[A-Z]{0,2}[0-9A-Z]+$/.test(s) ? s.slice(0, 20) : null
+}
+
+/**
+ * Wat ontbreekt er om een kaart naar `doel` te zetten? Vanaf Offerte gestuurd
+ * (en verder, behalve Verloren) moeten naam, btw-nummer en dienst er zijn.
+ * Leeg = in orde.
+ */
+export function ontbreektVoorFase(doel: KolomKey, k: { naam: string | null | undefined; btw: string | null | undefined; diensten: string[] | null | undefined }): string[] {
+  if (doel === 'stopgezet' || kolomRang(doel) < kolomRang('offerte')) return []
+  const mist: string[] = []
+  if (!String(k.naam ?? '').trim()) mist.push('naam')
+  if (!normaliseerBtw(k.btw)) mist.push('btw-nummer')
+  if (!(k.diensten ?? []).length) mist.push('dienst')
+  return mist
+}
+
+// ── Filters: periode en waarde ───────────────────────────────────────────────
+
+export type Periode = { soort: 'alles' } | { soort: 'jaar'; jaar: number } | { soort: 'kwartaal'; jaar: number; kwartaal: 1 | 2 | 3 | 4 } | { soort: 'maand'; jaar: number; maand: number }
+
+/** Valt een datum (JJJJ-MM-DD of ISO) in de gekozen periode? */
+export function inPeriode(datum: string | null | undefined, p: Periode): boolean {
+  if (p.soort === 'alles') return true
+  const d = String(datum ?? '').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false
+  const jaar = Number(d.slice(0, 4)), maand = Number(d.slice(5, 7))
+  if (jaar !== p.jaar) return false
+  if (p.soort === 'jaar') return true
+  if (p.soort === 'maand') return maand === p.maand
+  return Math.ceil(maand / 3) === p.kwartaal
+}
+
+export const WAARDE_SCHIJVEN: { key: string; label: string; min: number; max: number | null }[] = [
+  { key: 'alle', label: 'Elke waarde', min: 0, max: null },
+  { key: 'tot1k', label: 'Tot € 1.000', min: 0, max: 1000 },
+  { key: '1k5k', label: '€ 1.000 – 5.000', min: 1000, max: 5000 },
+  { key: '5k10k', label: '€ 5.000 – 10.000', min: 5000, max: 10000 },
+  { key: '10k', label: 'Meer dan € 10.000', min: 10000, max: null },
+  { key: 'geen', label: 'Nog geen waarde', min: 0, max: null },
+]
+
+export function inWaardeSchijf(waarde: number | null | undefined, key: string): boolean {
+  if (key === 'alle' || !key) return true
+  const heeft = waarde !== null && waarde !== undefined && Number.isFinite(Number(waarde)) && Number(waarde) > 0
+  if (key === 'geen') return !heeft
+  if (!heeft) return false
+  const s = WAARDE_SCHIJVEN.find((x) => x.key === key)
+  if (!s) return true
+  const w = Number(waarde)
+  return w >= s.min && (s.max === null || w < s.max)
+}
+
+// ── Contract → kaart ─────────────────────────────────────────────────────────
+
+/**
+ * In welke fase hoort de kaart van een contract? Zodra een contract opgemaakt
+ * is: Contract verstuurd. Getekend: Contract getekend. Geannuleerd, niet
+ * aanvaard, vervangen of verlopen zonder handtekening: Verloren.
+ */
+export function statusUitContract(c: { status: string | null; expires_at?: string | null }, vandaag: string): OpdrachtStatus {
+  const k = canonicalStatus(c.status)
+  if (k === 'getekend') return 'getekend'
+  if (k === 'geannuleerd' || k === 'niet_geaccepteerd' || k === 'vervangen' || k === 'verlopen') return 'geen_interesse'
+  if (c.expires_at && String(c.expires_at).slice(0, 10) < vandaag) return 'geen_interesse'
+  return 'contract_verstuurd'
+}

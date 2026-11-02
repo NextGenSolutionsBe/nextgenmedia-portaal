@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { timingSafeEqual } from 'node:crypto'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
-import { createLead, getOrCreateSalesOrg, logLeadEvent } from '@/lib/sales/service'
-import { defaultPipelineId } from '@/lib/sales/pipelines'
+import { voegNotitieToe } from '@/lib/opdrachten-notities'
+import { raadDiensten, bedrijfVan } from '@/lib/opdrachten-kanban'
+import { vandaagISO } from '@/lib/opdrachten'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * POST /api/leads/website — websiteaanvraag → Inbound-kolom van de pipeline.
+ * POST /api/leads/website — websiteaanvraag → kaart in Opvolging (Projecten), bron inbound.
  *
  * PUBLIEK, maar token-beveiligd. De website (of het formulier-platform) stuurt:
  *
@@ -22,9 +23,10 @@ export const dynamic = 'force-dynamic'
  * env-variabele WEBSITE_LEAD_TOKEN; ontbreekt die op de server, dan is deze
  * route dicht (503).
  *
- * Antwoord: { ok: true, leadId, bestaand: boolean }. `bestaand` = er was al een
- * lead met dit e-mailadres; die kreeg een tijdlijnregel "Nieuwe websiteaanvraag"
- * in plaats van een dubbele kaart.
+ * Antwoord: { ok: true, opdrachtId, leadId (zelfde id, voor oudere formulieren),
+ * bestaand: boolean }. `bestaand` = er was al een lopende kaart met dit
+ * e-mailadres of deze bedrijfsnaam; die kreeg een notitie in plaats van een
+ * dubbele kaart.
  *
  * Lichte ratelimiet per IP (in geheugen, per serverinstantie): 20 per 10 min.
  */
@@ -83,70 +85,55 @@ export async function POST(req: NextRequest) {
     }
 
     const admin = createAdminSupabaseClient()
-    const org = await getOrCreateSalesOrg()
+    const contactRegels = [naam && `Contact: ${naam}`, email && `E-mail: ${email}`, telefoon && `Telefoon: ${telefoon}`, website && `Website: ${website}`].filter(Boolean) as string[]
+    const notitie = [
+      'Websiteaanvraag ontvangen',
+      dienst ? `Dienst: ${dienst}` : null,
+      bericht || null,
+      aanvraag.utm_source ? `UTM: ${[aanvraag.utm_source, aanvraag.utm_medium, aanvraag.utm_campaign].filter(Boolean).join(' / ')}` : null,
+      aanvraag.pagina ? `Pagina: ${aanvraag.pagina}` : null,
+    ].filter(Boolean).join('\n')
 
-    // Ontdubbelen op e-mail: dezelfde persoon die het formulier twee keer
-    // invult, krijgt geen tweede kaart maar een regel op de bestaande.
+    // Ontdubbelen: wie al een lopende kaart heeft (Opvolging of Offerte gestuurd,
+    // zelfde e-mail of bedrijfsnaam), krijgt een notitie in plaats van een tweede kaart.
+    const { data: lopend } = await admin.from('opdrachten').select('id, status, klant_vrij, omschrijving, client_id')
+      .in('status', ['open', 'voorstel_gevraagd', 'voorstel_bezig', 'voorstel_klaar', 'voorstel_voorgelegd', 'interesse'])
+      .order('created_at', { ascending: false }).limit(500)
+    const sleutel = (v: string | null | undefined) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    const bestaand = ((lopend ?? []) as { id: string; klant_vrij: string | null; omschrijving: string | null }[]).find((o) =>
+      (email && String(o.omschrijving ?? '').toLowerCase().includes(email)) || (bedrijf && sleutel(o.klant_vrij) === sleutel(bedrijf)))
+    if (bestaand) {
+      await voegNotitieToe(admin, bestaand.id, notitie, 'systeem', null)
+      return NextResponse.json({ ok: true, leadId: bestaand.id, opdrachtId: bestaand.id, bestaand: true })
+    }
+
+    // Bestaande klant (zelfde e-mail of bedrijfsnaam)? Dan de kaart aan dat dossier.
+    let clientId: string | null = null
     if (email) {
-      const { data: contacten } = await admin.from('sales_contacts').select('id').ilike('email', email).limit(20)
-      const ids = ((contacten ?? []) as { id: string }[]).map((c) => c.id)
-      if (ids.length) {
-        const { data: bestaand } = await admin.from('sales_leads')
-          .select('id').eq('sales_client_id', org.id).in('contact_id', ids).is('archived_at', null)
-          .order('created_at', { ascending: false }).limit(1).maybeSingle()
-        if (bestaand) {
-          const leadId = (bestaand as { id: string }).id
-          const regels = [
-            'Nieuwe websiteaanvraag',
-            dienst ? `Dienst: ${dienst}` : null,
-            bericht ? bericht : null,
-            aanvraag.utm_source ? `UTM: ${[aanvraag.utm_source, aanvraag.utm_medium, aanvraag.utm_campaign].filter(Boolean).join(' / ')}` : null,
-          ].filter(Boolean)
-          await logLeadEvent(leadId, { kind: 'system', body: regels.join('\n'), laatsteNotitie: bericht || false })
-          return NextResponse.json({ ok: true, leadId, bestaand: true })
-        }
-      }
+      const { data: k } = await admin.from('clients').select('id').ilike('email', email).is('archived_at', null).limit(1).maybeSingle()
+      clientId = (k as { id: string } | null)?.id ?? null
+    }
+    if (!clientId && bedrijf) {
+      const { data: k } = await admin.from('clients').select('id').ilike('company_name', bedrijf).is('archived_at', null).limit(1).maybeSingle()
+      clientId = (k as { id: string } | null)?.id ?? null
     }
 
-    const res = await createLead({
-      salesClientId: org.id,
-      pipelineId: await defaultPipelineId(),
-      company: { name: bedrijf || naam, website: website || undefined, phone: telefoon || undefined, email: email || undefined },
-      contact: { name: naam || undefined, email: email || undefined, phone: telefoon || undefined },
-      labels: ['Website'],
-      leadbron: 'website',
-      stage: 'inbound',
-      dienst: dienst || null,
-      websiteAanvraag: aanvraag,
-    })
-    if (!res.ok) {
-      // Bedrijf staat al in de pipeline (op naam/website): ook dan een regel
-      // op de bestaande lead in plaats van een fout naar de website.
-      if (res.existingLeadId) {
-        await logLeadEvent(res.existingLeadId, {
-          kind: 'system',
-          body: ['Nieuwe websiteaanvraag', dienst ? `Dienst: ${dienst}` : null, bericht || null].filter(Boolean).join('\n'),
-          laatsteNotitie: bericht || false,
-        })
-        return NextResponse.json({ ok: true, leadId: res.existingLeadId, bestaand: true })
-      }
-      return NextResponse.json({ error: res.error }, { status: 400 })
+    const diensten = raadDiensten(`${dienst} ${bericht}`)
+    const rij: Record<string, unknown> = {
+      client_id: clientId, klant_vrij: clientId ? null : (bedrijf || naam),
+      titel: (dienst || 'Websiteaanvraag').slice(0, 200), omschrijving: contactRegels.join('\n') || null,
+      status: 'open', status_bron: 'handmatig', status_gewijzigd_op: new Date().toISOString(),
+      bron: 'inbound', diensten, merk: bedrijfVan(null, diensten), datum: vandaagISO(),
     }
-
-    // "Websiteaanvraag ontvangen" als leesbare regel, mét het bericht.
-    await logLeadEvent(res.leadId, {
-      kind: 'system',
-      body: [
-        'Websiteaanvraag ontvangen',
-        dienst ? `Dienst: ${dienst}` : null,
-        bericht || null,
-        aanvraag.utm_source ? `UTM: ${[aanvraag.utm_source, aanvraag.utm_medium, aanvraag.utm_campaign].filter(Boolean).join(' / ')}` : null,
-        aanvraag.pagina ? `Pagina: ${aanvraag.pagina}` : null,
-      ].filter(Boolean).join('\n'),
-      laatsteNotitie: bericht || false,
-    })
-
-    return NextResponse.json({ ok: true, leadId: res.leadId, bestaand: false })
+    let { data: nieuw, error } = await admin.from('opdrachten').insert(rij).select('id').single()
+    if (error && /merk|datum|bron|diensten|schema cache|column/i.test(error.message)) {
+      delete rij.merk; delete rij.datum
+      ;({ data: nieuw, error } = await admin.from('opdrachten').insert(rij).select('id').single())
+    }
+    if (error) throw new Error(error.message)
+    const id = String((nieuw as { id: string }).id)
+    await voegNotitieToe(admin, id, notitie, 'systeem', null)
+    return NextResponse.json({ ok: true, leadId: id, opdrachtId: id, bestaand: false })
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Verwerken mislukt' }, { status: 500 })
   }
