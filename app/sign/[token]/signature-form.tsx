@@ -3,6 +3,7 @@
 import { useRef, useState, useEffect } from 'react'
 import { Loader2, PenLine, RotateCcw, CheckCircle2, Download } from 'lucide-react'
 import Link from 'next/link'
+import { VOORWAARDEN_URL, PRIVACY_PAD, AKKOORD_VOORWAARDEN_TEKST, AKKOORD_PRIVACY_TEKST } from '@/lib/voorwaarden'
 
 type SignField = { label: string; type: string; required?: boolean; placeholder?: string }
 
@@ -25,6 +26,9 @@ export function SignatureForm({
   const [isDrawing, setIsDrawing] = useState(false)
   const [hasSig, setHasSig] = useState(false)
   const [agreed, setAgreed] = useState(false)
+  // Algemene voorwaarden (ook voor toekomstige opdrachten) en privacyverklaring: altijd verplicht.
+  const [voorwaarden, setVoorwaarden] = useState(false)
+  const [privacy, setPrivacy] = useState(false)
   const [loading, setLoading] = useState(false)
   const [done, setDone] = useState(false)
   const [signedPdfUrl, setSignedPdfUrl] = useState<string | null>(null)
@@ -89,7 +93,7 @@ export function SignatureForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!hasSig) return
-    if (!agreed) return
+    if (!agreed || !voorwaarden || !privacy) return
     if (missingRequired) { alert('Vul alle verplichte velden in.'); return }
 
     setLoading(true)
@@ -104,6 +108,8 @@ export function SignatureForm({
           signer_email: signerEmail,
           signature_data_url: canvasRef.current!.toDataURL('image/png'),
           field_values: values,
+          akkoord_voorwaarden: voorwaarden,
+          akkoord_privacy: privacy,
         }),
       })
       const json = await res.json()
@@ -243,7 +249,7 @@ export function SignatureForm({
       </div>
 
       {/* Agreement */}
-      <div className="card-base">
+      <div className="card-base space-y-3.5">
         <label className="flex items-start gap-3 cursor-pointer">
           <input
             type="checkbox"
@@ -256,11 +262,37 @@ export function SignatureForm({
             Mijn digitale handtekening is juridisch bindend.
           </span>
         </label>
+        <div className="flex items-start gap-3">
+          <input
+            id="akkoord-voorwaarden"
+            type="checkbox"
+            checked={voorwaarden}
+            onChange={(e) => setVoorwaarden(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-gray-900 shrink-0 cursor-pointer"
+          />
+          <div className="text-sm text-gray-600 leading-relaxed">
+            <label htmlFor="akkoord-voorwaarden" className="cursor-pointer">{AKKOORD_VOORWAARDEN_TEKST}</label>
+            <a href={VOORWAARDEN_URL} target="_blank" rel="noreferrer" className="block mt-0.5 text-[11px] text-gray-400 underline underline-offset-2 hover:text-gray-700">Lees nu de algemene voorwaarden</a>
+          </div>
+        </div>
+        <div className="flex items-start gap-3">
+          <input
+            id="akkoord-privacy"
+            type="checkbox"
+            checked={privacy}
+            onChange={(e) => setPrivacy(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-gray-900 shrink-0 cursor-pointer"
+          />
+          <div className="text-sm text-gray-600 leading-relaxed">
+            <label htmlFor="akkoord-privacy" className="cursor-pointer">{AKKOORD_PRIVACY_TEKST}</label>
+            <a href={PRIVACY_PAD} target="_blank" rel="noreferrer" className="block mt-0.5 text-[11px] text-gray-400 underline underline-offset-2 hover:text-gray-700">Lees nu de privacyverklaring</a>
+          </div>
+        </div>
       </div>
 
       <button
         type="submit"
-        disabled={loading || !hasSig || !agreed || missingRequired}
+        disabled={loading || !hasSig || !agreed || !voorwaarden || !privacy || missingRequired}
         className="btn-primary w-full justify-center py-3 text-base disabled:opacity-40 disabled:cursor-not-allowed"
       >
         {loading ? (

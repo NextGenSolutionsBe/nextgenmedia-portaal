@@ -6850,3 +6850,11 @@ DO $$ BEGIN
 END $$;
 ALTER TABLE public.opdracht_taken ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.opdracht_taken FROM anon, authenticated;
+
+-- ── Akkoord algemene voorwaarden en privacyverklaring bij ondertekenen (2 nov 2026)
+-- De klant vinkt beide aan bij elke ondertekening (de voorwaarden gelden ook
+-- voor toekomstige opdrachten). Bewijs per handtekening: tijdstip en wat er
+-- aanvaard werd (tekst, link, versie van de privacyverklaring). Additief.
+ALTER TABLE public.contract_signatures ADD COLUMN IF NOT EXISTS voorwaarden_akkoord_op timestamptz;
+ALTER TABLE public.contract_signatures ADD COLUMN IF NOT EXISTS privacy_akkoord_op timestamptz;
+ALTER TABLE public.contract_signatures ADD COLUMN IF NOT EXISTS akkoord_details jsonb;
