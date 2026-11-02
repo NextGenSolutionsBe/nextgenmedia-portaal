@@ -110,12 +110,14 @@ test('9. Founders-aanvraag: eigen soort, module en ClickUp-naam; datum verplicht
   assert.ok(valideerAanvraag({ soort: 'founders', type: 'founder_video', wat: 'Mijn verhaal als ondernemer', periode_van: vandaag, antwoorden: { wie: 'ik' } }, vandaag).ok)
 })
 
-test('10. Klantapp-modules Founders, Nieuws en Onze partners bestaan, werken en staan standaard aan', () => {
+test('10. Klantapp-modules Founders en Onze partners werken en staan standaard aan; Nieuws bestaat maar is verborgen (2 nov 2026)', () => {
   for (const m of ['founders', 'nieuws', 'partners'] as const) {
     assert.ok((PORTAL_MODULES as readonly string[]).includes(m), m)
-    assert.equal(MODULE_IMPLEMENTED[m], true, m)
     assert.ok(STANDAARD_AAN.includes(m), m)
   }
+  assert.equal(MODULE_IMPLEMENTED.founders, true)
+  assert.equal(MODULE_IMPLEMENTED.partners, true)
+  assert.equal(MODULE_IMPLEMENTED.nieuws, false, 'op vraag verborgen: geen marketing in de app')
 })
 
 console.log(`\n${n} tests geslaagd\n`)

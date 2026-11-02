@@ -168,9 +168,9 @@ test('11b. Eigen soort: "andere" vraagt een label en toont dat overal', () => {
   assert.match(bevestigingsMail({ ...ev(), soort: 'andere', soort_label: 'Masterclass' }, { naam: 'Jan', email: 'jan@x.be' }, { appLink: 'https://x' }).tekst, /voor de masterclass "/)
 })
 
-test('12. Klantapp-module Workshops & events bestaat, werkt en staat standaard aan', () => {
+test('12. Klantapp-module Workshops & events bestaat, maar is op vraag verborgen (2 nov 2026)', () => {
   assert.ok((PORTAL_MODULES as readonly string[]).includes('events'))
-  assert.equal(MODULE_IMPLEMENTED.events, true)
+  assert.equal(MODULE_IMPLEMENTED.events, false)
   assert.ok(STANDAARD_AAN.includes('events'))
   assert.deepEqual([...MODULE_ACTIONS.events], ['view', 'inschrijven'])
 })
