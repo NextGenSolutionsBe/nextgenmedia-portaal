@@ -59,7 +59,7 @@ async function overzicht(): Promise<Integratie[]> {
     details: ['Dagelijkse ophaling via cron om 06:00 en 07:00.'], kanTesten: metricoolConfigured(), kanSync: false,
   })
   uit.push({
-    key: 'anthropic', naam: 'Anthropic (NextGen AI)', omschrijving: 'AI-voorstellen, contractvelden en blogteksten.',
+    key: 'anthropic', naam: 'Anthropic (AI)', omschrijving: 'Contractvelden, factuurvoorstellen, formuliervoorstellen en blogteksten.',
     status: process.env.ANTHROPIC_API_KEY ? 'actief' : 'niet_ingesteld', sleutel: maskeer(process.env.ANTHROPIC_API_KEY), laatsteSync: null,
     details: [`Model: ${process.env.BLOG_AI_MODEL || 'claude-sonnet-4-6'}`], kanTesten: false, kanSync: false,
   })

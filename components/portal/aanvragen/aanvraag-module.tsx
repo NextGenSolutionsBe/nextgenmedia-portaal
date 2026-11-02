@@ -281,13 +281,13 @@ function NieuweAanvraag({ soort, onVerstuurd }: { soort: AanvraagSoort; onVerstu
         <div className="space-y-3">
           <div>
             <p className="text-sm font-semibold">Kies jouw expert</p>
-            <p className="text-xs text-gray-600">Een voorkeur, geen garantie: wij bevestigen wie je aanvraag opvolgt.</p>
+            <p className="text-xs text-gray-600">Een voorkeur, geen garantie: wij bevestigen wie je aanvraag opvolgt. Onder elke naam staat waarvoor je bij die persoon terechtkunt.</p>
           </div>
           {experts === null ? <div className="py-6 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-gray-400" aria-label="Experts laden" /></div> : (
             <div className="space-y-3" role="radiogroup" aria-label="Expert">
               <GeenVoorkeur tekst="Geen voorkeur" sub="Wij kiezen de juiste expert voor je aanvraag" gekozen={expert === ''} onKies={() => setExpert('')} />
               <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-3 gap-4">
-                {experts.map((e) => <TeamFotoKaart key={e.id} gekozen={expert === e.id} onKies={() => setExpert(e.id)} naam={e.naam} sub={e.rollen.join(' · ')} foto={e.foto_url} tags={e.expertises} label={e.specialist ? 'Specialist' : null} />)}
+                {experts.map((e) => <TeamFotoKaart key={e.id} gekozen={expert === e.id} onKies={() => setExpert(e.id)} naam={e.naam} sub={e.rollen.join(' · ')} foto={e.foto_url} tags={e.expertises} label={e.specialist ? 'Juiste persoon voor deze dienst' : null} />)}
               </div>
             </div>
           )}

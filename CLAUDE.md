@@ -24,14 +24,14 @@ Het klantportaal gebruikt een **resolver + service-role** model, niet RLS, als p
 - **Globale zoek** — de zoekbalk bovenaan is weg (op vraag); `Cmd/Ctrl+K` opent de zoek nog wel. Nieuwe entiteiten blijven in `/api/admin/search`, niet in aparte zoekschermen.
 - **Notificaties zijn de centrale signalenlaag** — nieuwe signalen toevoegen in `lib/notifications.ts`, niet als losse widgets verspreid.
 - **Command Center — "Op te volgen"** (bovenaan `/admin`, `app/admin/opvolging-panel.tsx`): blokken met namen voor aanvragen, contracten (`followUp`), komende meetings (Meeting Inplanner + leadafspraken), leads (zelfde regels als de belronde, `bouwWachtrij`) en feedback op de contentkalender (posts met `changes_requested` per klant). Data komt uit `buildOpvolging()` in `lib/notifications.ts`; elk blok hangt aan een module.
-- **AI voert niets uit zonder bevestiging.** NextGen AI is read-only: het stelt voor met deep-links ("Voorstel — bevestiging vereist"); de mens bevestigt. Nooit auto-schrijfacties.
+- **Geen AI-assistent in de app** (NextGen AI is op vraag weggehaald, 2 nov 2026). AI enkel voor afgebakende voorstellen (contractvelden, factuurvoorstellen, formulieren, blogs) die een mens bevestigt; nooit zelf schrijfacties.
 - **Mails naar klanten zijn nooit automatisch.** (De nieuwsbrief per mail is een handmatige actie met voorbeeld en bevestiging, zie Content voor klanten.) Alle handmatige mail loopt via één component: `components/admin/mail-composer.tsx` (`<MailComposer context=...>`), altijd met preview + handmatige bevestiging; logging via E-mail Center.
   - Uitzonderingen, allemaal in de Meeting Inplanner (`lib/meetings/`) en gelogd in het E-mail Center:
     - de **herinneringsmail** van een meeting (24 uur vooraf): bevestigd in het planvenster of bij het boeken, verstuurd door de scheduler (pg_cron → `/api/cron/klantmeetings`);
     - de **bevestigingsmail van een klantboeking** (`/boeken` met de persoonlijke beheerlink, of de klantapp-module **Meeting boeken** met een link naar `/portal/meetings`): de klant vraagt er zelf om door te boeken of te verplaatsen.
     - **Workshops & events** (op vraag, 31 okt 2026): de **bevestiging** meteen na het inschrijven (met Meet-link en agendabestand) en **één herinnering** vanaf 24 uur vooraf, via dezelfde scheduler. De klant vraagt er zelf om door in te schrijven.
     Geen andere automatische klantmails toevoegen.
-- **One source of truth:** afgeleide dashboarddata via `lib/notifications.ts` / `lib/ai-context.ts` / `/api/admin/search`; rechten via `lib/portal-auth.ts` + `lib/portal-permissions.ts`.
+- **One source of truth:** afgeleide dashboarddata via `lib/notifications.ts` / `/api/admin/search`; rechten via `lib/portal-auth.ts` + `lib/portal-permissions.ts`.
 
 ## Dagelijkse planning Chiara (`/admin/contentplanning`)
 - **INN · SLL · K · J** (`vaste_taken` in `app_settings.contentplanning`): taken op vaste weekdagen (`dagen`, 1 = ma … 5 = vr; leeg = één keer per week). Nu: elke dag community management controleren en opvolgen, di content van Kristof inplannen, do copy's aanpassen, vr content inplannen. Dagtaken vink je per dag af, weektaken per week (`cp_routine_checks`).

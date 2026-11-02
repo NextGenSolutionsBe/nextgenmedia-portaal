@@ -31,11 +31,11 @@ export function TeamFotoKaart({ naam, sub, foto, tags, gekozen, onKies, label }:
           ? <img ref={img} src={foto} alt={naam} onError={() => setFotoFout(true)} className="absolute inset-0 text-transparent h-full w-full object-cover object-top transition duration-500 group-hover:scale-[1.03]" />
           : <span className="absolute inset-0 flex items-center justify-center text-5xl font-semibold text-gray-500">{initialen}</span>}
         <span className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
-        {label && <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-white/95 px-2.5 py-1 text-[11px] font-semibold text-gray-900 shadow"><Sparkles className="h-3 w-3" />{label}</span>}
+        {label && <span className="absolute left-3 top-3 right-12 inline-flex items-start gap-1 rounded-2xl bg-white/95 px-2.5 py-1 text-[11px] leading-tight font-semibold text-gray-900 shadow w-fit"><Sparkles className="h-3 w-3 shrink-0 mt-px" />{label}</span>}
         {gekozen && <span className="absolute top-3 right-3 h-8 w-8 rounded-full bg-gray-900 text-white flex items-center justify-center shadow-lg"><Check className="h-4 w-4" /></span>}
         <span className="absolute inset-x-0 bottom-0 block p-3 sm:p-4">
           <span className="block text-base sm:text-lg font-semibold text-white leading-tight [text-shadow:0_1px_3px_rgba(0,0,0,0.6)]">{naam}</span>
-          {sub && <span className="block text-xs sm:text-sm text-white/90 truncate [text-shadow:0_1px_2px_rgba(0,0,0,0.6)]">{sub}</span>}
+          {sub && <span className="block text-xs sm:text-sm text-white/90 leading-snug line-clamp-2 [text-shadow:0_1px_2px_rgba(0,0,0,0.6)]">{sub}</span>}
         </span>
       </span>
       {tags && tags.length > 0 && (
