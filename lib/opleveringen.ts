@@ -153,3 +153,40 @@ export function veiligeNaam(naam: string): string {
 /** Pad in de bucket: <oplevering>/<versie>/<uuid>-<naam>. */
 export const bestandPad = (opleveringId: string, versieId: string, id: string, naam: string) => `${opleveringId}/${versieId}/${id}-${veiligeNaam(naam)}`
 export const posterPad = (opleveringId: string, versieId: string, id: string) => `${opleveringId}/${versieId}/${id}-poster.jpg`
+
+export type VolgendeStap = { tekst: string; dringend: boolean; klaar: boolean }
+
+/**
+ * Wat moet het team nu doen met deze oplevering? Eén korte zin voor de kaart
+ * en het detail, zodat niemand moet uitzoeken waar het staat.
+ */
+export function volgendeStap(o: {
+  status: OpleveringStatus
+  versies: (Pick<Versie, 'nummer' | 'is_finaal' | 'gepubliceerd_op' | 'verloopt_op' | 'verwijderd_op'> & { bestanden_aantal: number })[]
+  revisies: { over: number }
+}, nu: Date = new Date()): VolgendeStap {
+  const versies = [...o.versies].sort((a, b) => b.nummer - a.nummer)
+  const laatste = versies[0]
+  if (!laatste) return { tekst: 'Maak een eerste versie en laad de bestanden op', dringend: false, klaar: false }
+  if (!laatste.gepubliceerd_op) {
+    return laatste.bestanden_aantal > 0
+      ? { tekst: `Deel ${versieLabel(laatste).toLowerCase()} met de klant`, dringend: o.status === 'revisie_gevraagd', klaar: false }
+      : { tekst: `Laad de bestanden van ${versieLabel(laatste).toLowerCase()} op`, dringend: o.status === 'revisie_gevraagd', klaar: false }
+  }
+  const b = beschikbaarheid(laatste, nu)
+  switch (o.status) {
+    case 'revisie_gevraagd':
+      return { tekst: `Verwerk de feedback en laad ${versieLabel({ nummer: laatste.nummer + 1, is_finaal: false }).toLowerCase()} op`, dringend: true, klaar: false }
+    case 'goedgekeurd':
+      return { tekst: 'Goedgekeurd: laad de finale versie op', dringend: false, klaar: false }
+    case 'finaal':
+      return b.status === 'beschikbaar'
+        ? { tekst: `Klaar. De klant kan nog downloaden (${resterend(b.resterendMs)})`, dringend: false, klaar: true }
+        : { tekst: 'Klaar. Archiveer de oplevering als alles binnen is', dringend: false, klaar: true }
+    case 'wacht_op_klant':
+      if (b.status === 'verlopen') return { tekst: 'Verlopen zonder reactie: verleng de link of contacteer de klant', dringend: true, klaar: false }
+      return { tekst: `Wacht op de klant · nog ${resterend(b.resterendMs)}${o.revisies.over ? '' : ' · geen revisierondes meer'}`, dringend: b.resterendMs < DAG, klaar: false }
+    default:
+      return { tekst: 'Deel de eerste versie met de klant', dringend: false, klaar: false }
+  }
+}
