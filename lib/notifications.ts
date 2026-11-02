@@ -5,6 +5,7 @@ import { followUp } from '@/lib/contract-status'
 import { FEATURES } from '@/lib/features'
 import { syncGezondheid, SYNC_VEROUDERD_MIN } from '@/lib/sales/clickup-agenda-sync'
 import { onderhoudOpvolgen, resterendTekst, type MaintenanceClient } from '@/lib/maintenance'
+import { opleveringStatus, volgendeStap, revisieStand, type Versie as OpVersie } from '@/lib/opleveringen'
 import { samenvatting, grootte, OPSLAG_LIMIET_GB, type RuwVerbruik } from '@/lib/opslag'
 import { STATUS as AANVRAAG_STATUS, nieuweAanvraagTitel, type AanvraagSoort } from '@/lib/aanvragen/model'
 
@@ -313,7 +314,7 @@ export async function buildNotifications(): Promise<Notif[]> {
 // de pipeline). `modules` = rechten van de medewerker (null = admin, alles).
 
 export type OpvolgItem = { id: string; titel: string; sub: string | null; href: string; dringend?: boolean }
-export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'meetings' | 'projecten' | 'content' | 'onderhoud'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
+export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'meetings' | 'projecten' | 'content' | 'onderhoud' | 'opleveringen'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
 
 const OPVOLG_MAX = 5
 const dagKort = (d: string) => new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' })
@@ -337,6 +338,7 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
     mag('opdrachten') ? opvolgProjecten() : null,
     mag('content') ? opvolgContent() : null,
     mag('content') ? opvolgOnderhoud() : null,
+    mag('opleveringen') ? opvolgOpleveringen() : null,
   ])
   return groepen.filter((g): g is OpvolgGroep => !!g)
 
@@ -442,6 +444,44 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
           id: klant.id, titel: klant.company_name,
           sub: status.endDate ? `${resterendTekst(status)} · tot ${dagKort(status.endDate)}` : 'Startdatum ontbreekt',
           href: `/admin/clients/${klant.id}#website`, dringend: status.expired || (status.daysLeft !== null && status.daysLeft <= 7),
+        })),
+      }
+    } catch { return null }
+  }
+
+  /**
+   * Video-opleveringen die op ons wachten: feedback van de klant te verwerken,
+   * of een gedeelde versie die zonder reactie (bijna) verloopt. Enkel zichtbaar
+   * als er iets is. Zelfde regels als het scherm (volgendeStap).
+   */
+  async function opvolgOpleveringen(): Promise<OpvolgGroep | null> {
+    try {
+      const { data: ops } = await admin.from('opleveringen').select('id, titel, client_id, max_revisies, updated_at').is('gearchiveerd_op', null).order('updated_at', { ascending: false }).limit(200)
+      const rijen = (ops ?? []) as { id: string; titel: string; client_id: string; max_revisies: number | null }[]
+      if (!rijen.length) return null
+      const ids = rijen.map((r) => r.id)
+      const [{ data: vs }, { data: bs }, { data: fb }] = await Promise.all([
+        admin.from('oplevering_versies').select('id, oplevering_id, nummer, is_finaal, bericht, gepubliceerd_op, verloopt_op, verwijderd_op').in('oplevering_id', ids),
+        admin.from('oplevering_bestanden').select('versie_id').in('oplevering_id', ids),
+        admin.from('oplevering_feedback').select('oplevering_id, versie_id, soort').in('oplevering_id', ids),
+      ])
+      const versies = (vs ?? []) as (OpVersie & { oplevering_id: string })[]
+      const perVersie = new Map<string, number>()
+      for (const b of (bs ?? []) as { versie_id: string }[]) perVersie.set(b.versie_id, (perVersie.get(b.versie_id) ?? 0) + 1)
+      const feedback = (fb ?? []) as { oplevering_id: string; versie_id: string; soort: 'revisie' | 'goedkeuring' | 'opmerking' }[]
+      const lijst = rijen.map((r) => {
+        const v = versies.filter((x) => x.oplevering_id === r.id)
+        const f = feedback.filter((x) => x.oplevering_id === r.id)
+        const status = opleveringStatus(v, f)
+        const stap = volgendeStap({ status, versies: v.map((x) => ({ ...x, bestanden_aantal: perVersie.get(x.id) ?? 0 })), revisies: revisieStand(f, r.max_revisies ?? undefined) })
+        return { r, stap }
+      }).filter((x) => x.stap.dringend)
+      if (!lijst.length) return null
+      const namen = await klantNamen(lijst.slice(0, OPVOLG_MAX).map((x) => x.r.client_id))
+      return {
+        key: 'opleveringen', titel: 'Video-opleveringen', totaal: lijst.length, alles: '/admin/opleveringen', leeg: 'Niets wacht op ons.',
+        items: lijst.slice(0, OPVOLG_MAX).map(({ r, stap }) => ({
+          id: r.id, titel: `${namen.get(r.client_id) ?? 'Klant'} – ${r.titel}`, sub: stap.tekst, href: `/admin/opleveringen?oplevering=${r.id}`, dringend: true,
         })),
       }
     } catch { return null }

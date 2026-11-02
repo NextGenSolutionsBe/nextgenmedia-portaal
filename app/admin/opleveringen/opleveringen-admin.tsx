@@ -3,15 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  Plus, Loader2, X, Upload, Film, Image as ImageIcon, FileText, Trash2, Download, Eye, Send, Clock, CheckCircle2, RotateCcw, Archive, MessageSquare, Lock, Timer,
+  Plus, Loader2, X, Upload, Film, ArrowRight, Search, Image as ImageIcon, FileText, Trash2, Download, Eye, Send, Clock, CheckCircle2, RotateCcw, Archive, MessageSquare, Lock, Timer,
 } from 'lucide-react'
 import { KlantKiezer, type KlantOptie } from '@/components/admin/klant-kiezer'
 import { MailComposer } from '@/components/admin/mail-composer'
 import { KijkVenster, TijdKnop } from '@/components/media/kijk-venster'
 import { laadOpleveringBestandOp, type Voortgang } from '@/lib/oplevering-upload'
 import {
-  STATUS_INFO, versieLabel, beschikbaarheid, grootteLabel, tijdLabel, bestandSoort, type OpleveringStatus,
+  STATUS_INFO, versieLabel, beschikbaarheid, grootteLabel, tijdLabel, bestandSoort, volgendeStap, type OpleveringStatus,
 } from '@/lib/opleveringen'
+import { zoekVeld } from '@/lib/zoekveld'
 import type { OpleveringVolledig } from '@/lib/opleveringen-server'
 
 type Klant = { id: string; company_name: string; contact_name?: string | null; email?: string | null }
@@ -24,6 +25,8 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   if (!r.ok) throw new Error(j.error || 'Er ging iets mis')
   return j as T
 }
+/** De volgende stap voor het team (zie lib/opleveringen.ts). */
+const stapVan = (o: OpleveringVolledig) => volgendeStap({ status: o.status, versies: o.versies.map((v) => ({ ...v, bestanden_aantal: v.bestanden.length })), revisies: o.revisies })
 const datumTijd = (iso: string | null | undefined) => iso ? new Date(iso).toLocaleString('nl-BE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
 const SoortIcoon = ({ mime, className = 'h-4 w-4' }: { mime: string | null; className?: string }) => {
   const s = bestandSoort(mime)
@@ -36,6 +39,7 @@ export function OpleveringenAdmin({ magToevoegen, magAanpassen, magVerwijderen }
   const [opdrachten, setOpdrachten] = useState<Opdracht[]>([])
   const [hint, setHint] = useState<string | null>(null)
   const [filter, setFilter] = useState<OpleveringStatus | 'alle'>('alle')
+  const [zoek, setZoek] = useState('')
   const [archief, setArchief] = useState(false)
   const [open, setOpen] = useState<string | null>(null)
   const [nieuw, setNieuw] = useState(false)
@@ -51,7 +55,16 @@ export function OpleveringenAdmin({ magToevoegen, magAanpassen, magVerwijderen }
     try { const id = new URLSearchParams(window.location.search).get('oplevering'); if (id) setOpen(id) } catch { /* niets */ }
   }, [])
 
-  const zichtbaar = useMemo(() => (lijst ?? []).filter((o) => filter === 'alle' || o.status === filter), [lijst, filter])
+  // Dringendste eerst: wat op ons wacht (feedback verwerken, verlopen), dan de rest zoals geladen.
+  const zichtbaar = useMemo(() => {
+    const q = zoek.trim().toLowerCase()
+    return (lijst ?? [])
+      .filter((o) => filter === 'alle' || o.status === filter)
+      .filter((o) => !q || `${o.titel} ${o.klant_naam ?? ''}`.toLowerCase().includes(q))
+      .map((o, i) => ({ o, i, d: stapVan(o).dringend ? 0 : 1 }))
+      .sort((a, b) => a.d - b.d || a.i - b.i)
+      .map((x) => x.o)
+  }, [lijst, filter, zoek])
   const telling = useMemo(() => {
     const m = new Map<string, number>()
     for (const o of lijst ?? []) m.set(o.status, (m.get(o.status) ?? 0) + 1)
@@ -71,7 +84,11 @@ export function OpleveringenAdmin({ magToevoegen, magAanpassen, magVerwijderen }
             <button key={s} type="button" onClick={() => setFilter(s)} className={chip(filter === s)}>{STATUS_INFO[s].team} ({telling.get(s) ?? 0})</button>
           ))}
         </div>
-        <label className="ml-auto text-xs text-gray-600 flex items-center gap-1.5 cursor-pointer"><input type="checkbox" className="h-4 w-4 accent-gray-900" checked={archief} onChange={(e) => setArchief(e.target.checked)} />Toon archief</label>
+        <div className="relative ml-auto">
+          <Search className="h-3.5 w-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <input {...zoekVeld('opleveringen')} value={zoek} onChange={(e) => setZoek(e.target.value)} placeholder="Zoek klant of titel" className="h-8 w-48 pl-8 pr-2 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-gray-900/15" />
+        </div>
+        <label className="text-xs text-gray-600 flex items-center gap-1.5 cursor-pointer"><input type="checkbox" className="h-4 w-4 accent-gray-900" checked={archief} onChange={(e) => setArchief(e.target.checked)} />Toon archief</label>
       </div>
 
       {lijst === null ? <div className="card-base flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>
@@ -123,6 +140,11 @@ function OpleveringKaart({ o, onOpen }: { o: OpleveringVolledig; onOpen: () => v
         <div className="p-3 space-y-1">
           <p className="font-semibold leading-snug">{o.titel}</p>
           <p className="text-xs text-gray-500">{o.klant_naam ?? 'Klant'}</p>
+          {(() => { const st = stapVan(o); return (
+            <p className={`text-xs flex items-start gap-1 pt-0.5 ${st.dringend ? 'text-amber-800 font-medium' : st.klaar ? 'text-green-700' : 'text-gray-700'}`}>
+              {st.klaar ? <CheckCircle2 className="h-3.5 w-3.5 mt-px shrink-0" /> : <ArrowRight className="h-3.5 w-3.5 mt-px shrink-0" />}{st.tekst}
+            </p>
+          ) })()}
           <div className="flex items-center justify-between gap-2 text-[11px] text-gray-600 pt-1">
             <span>Revisies {o.revisies.gebruikt}/{o.revisies.max}</span>
             {b && <span className={`flex items-center gap-1 ${b.status === 'verlopen' ? 'text-gray-400' : b.resterendMs < 86_400_000 ? 'text-red-700 font-semibold' : ''}`}><Timer className="h-3 w-3" />{b.tekst}</span>}
@@ -263,6 +285,12 @@ function Detail({ o, opdrachten, mag, onVernieuw, onSluit }: { o: OpleveringVoll
             </div>
             <button type="button" onClick={onSluit} aria-label="Sluiten" className="h-9 w-9 rounded-lg hover:bg-gray-100 flex items-center justify-center shrink-0"><X className="h-5 w-5" /></button>
           </div>
+          {(() => { const st = stapVan(o); return (
+            <div className={`mt-3 rounded-xl px-3 py-2 text-sm flex items-start gap-2 ${st.dringend ? 'bg-amber-50 text-amber-900 border border-amber-200' : st.klaar ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-gray-50 text-gray-800 border border-gray-100'}`}>
+              {st.klaar ? <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" /> : <ArrowRight className="h-4 w-4 mt-0.5 shrink-0" />}
+              <span><span className="font-medium">Volgende stap:</span> {st.tekst}</span>
+            </div>
+          ) })()}
           <div className="mt-3 flex items-center gap-2 flex-wrap text-xs">
             <span className="rounded-lg bg-gray-100 px-2.5 py-1">Revisierondes: <b>{o.revisies.gebruikt}</b> van {o.revisies.max} gebruikt</span>
             {mag.aanpassen && <button type="button" onClick={() => doe('extra', () => api(`/api/admin/opleveringen/${o.id}`, { method: 'PATCH', body: JSON.stringify({ extra_ronde: true }) }), 'Extra revisieronde gegeven.')} className="underline text-gray-600">+ extra ronde geven</button>}
