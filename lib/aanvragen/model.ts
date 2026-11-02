@@ -168,8 +168,6 @@ export const DIENSTEN: AanvraagType[] = [
   },
 ]
 
-export const CONSULTANCY_TARIEF = '€125 per uur'
-
 /** Gemeenschappelijk voor elke consultancy: waar het gesprek of de workshop doorgaat. */
 export const CONSULTANCY_VORMEN = ['Online', 'Bij ons op kantoor (jullie bedrijf)', 'Bij NextGenMedia']
 export const VORM_MET_ADRES = CONSULTANCY_VORMEN[1]
@@ -419,7 +417,7 @@ export function clickupOmschrijving(a: {
   const t = vindType(a.soort, a.type)
   return [
     `AANVRAAG – nog geen bevestigde opdracht of boeking. Wij beoordelen scope, duur, eventuele offerte en planning.`,
-    a.soort === 'consultancy' ? `Tarief consultancy: ${CONSULTANCY_TARIEF}. Duur en eventuele offerte bepalen wij.` : null,
+    a.soort === 'consultancy' ? `Consultancy: duur en eventuele offerte bepalen wij.` : null,
     ``,
     `Klant: ${a.klant}`,
     `${a.soort === 'dienst' ? 'Dienst' : 'Consultancy'}: ${a.type_label}`,
