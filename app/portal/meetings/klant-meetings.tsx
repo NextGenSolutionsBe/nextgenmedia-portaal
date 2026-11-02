@@ -230,7 +230,7 @@ function Boeken({ data, onGeboekt }: { data: Overzicht; onGeboekt: () => void })
           <div className="space-y-3" role="radiogroup" aria-label="Met wie">
             <GeenVoorkeur tekst="Maakt niet uit" sub="Het eerste vrije moment bij ons team" gekozen={teamlid === ''} onKies={() => setTeamlid('')} />
             <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:grid-cols-3 gap-4 max-w-4xl">
-              {team.map((t) => <TeamFotoKaart key={t.id} naam={t.naam} sub={t.rol} foto={t.foto_url} gekozen={teamlid === t.id} onKies={() => setTeamlid(t.id)} />)}
+              {team.map((t) => <TeamFotoKaart key={t.id} naam={t.naam} foto={t.foto_url} gekozen={teamlid === t.id} onKies={() => setTeamlid(t.id)} />)}
             </div>
           </div>
           <button type="button" onClick={() => { setStart(null); setKiezerSleutel((x) => x + 1); setStap('tijd') }} className={`btn-primary w-full sm:w-auto justify-center ${knop}`}>Verder{gekozenLid ? `: met ${gekozenLid.voornaam}` : ''}</button>

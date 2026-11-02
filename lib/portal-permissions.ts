@@ -63,9 +63,9 @@ export const MODULE_IMPLEMENTED: Record<PortalModule, boolean> = {
   diensten:     true,             // /portal/diensten — dienst aanvragen (geen boeking) + Mijn aanvragen
   consultancy:  true,             // /portal/consultancy — betalende consultancy aanvragen (€125/u) + Mijn aanvragen
   founders:     true,             // /portal/founders — voorbeeldvideo's + founder video aanvragen (via Aanvragen)
-  nieuws:       true,             // /portal/nieuws — nieuwsbrieven: projecten, klant in de kijker, tips, nieuws
+  nieuws:       false,  // verborgen op vraag (2 nov 2026): de app is een werkomgeving, geen marketingkanaal; code en gegevens blijven (/portal/nieuws)
   partners:     true,             // /portal/partners — onze bedrijven met uitleg en socials
-  events:       true,             // /portal/events — webinars, workshops, events en opleidingen: inschrijven met aftelling
+  events:       false,  // verborgen op vraag (2 nov 2026): de app is een werkomgeving, geen marketingkanaal; code en gegevens blijven (/portal/events)
   opleveringen: true,             // /portal/opleveringen — losse video's bekijken, downloaden, feedback en revisierondes (3 dagen beschikbaar)
 }
 

@@ -57,10 +57,8 @@ const SECTIONS: NavSection[] = [
       },
       { label: 'Aanvragen', href: '/admin/aanvragen', icon: Inbox, module: 'aanvragen' },
       // Content voor klanten: wat ze in de klantapp te zien krijgen.
-      { label: 'Nieuwsbrieven', href: '/admin/nieuwsbrieven', icon: Megaphone, module: 'nieuwsbrieven' },
       { label: 'Founders of Flanders', href: '/admin/founders-of-flanders', icon: Clapperboard, module: 'founders' },
       { label: 'Onze partners', href: '/admin/onze-partners', icon: Handshake, module: 'onze_partners' },
-      { label: 'Workshops & events', href: '/admin/events', icon: Ticket, module: 'events' },
       { label: 'Video-opleveringen', href: '/admin/opleveringen', icon: Film, module: 'opleveringen' },
       // Enkel de kalender: de statistieken zijn eruit (Metricool zelf toont ze
       // beter en actueler dan wij ze konden nabouwen).
