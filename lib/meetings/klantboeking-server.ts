@@ -76,10 +76,13 @@ async function boekbareAgenda(admin: Admin, teamlid?: Teamlid | null): Promise<A
   return a
 }
 
-/** Agenda's van dezelfde persoon (zelfde account én persoon), zoals in loadCalendar. */
+/**
+ * Agenda's van dezelfde persoon (zelfdePersoon), ook inactieve: meetings die
+ * nog in een oude agenda staan (bv. van vóór een overstap naar een eigen
+ * Google-account) blijven zo bezet tellen.
+ */
 async function zusterIds(admin: Admin, a: Agenda): Promise<string[]> {
-  if (!a.account_email) return [a.id]
-  const { data } = await admin.from('sales_calendar_connections').select('id, name, account_email, clickup_assignee_id').eq('account_email', a.account_email)
+  const { data } = await admin.from('sales_calendar_connections').select('id, name, account_email, clickup_assignee_id')
   const ids = ((data ?? []) as { id: string; name: string | null; account_email: string | null; clickup_assignee_id: number | null }[])
     .filter((o) => zelfdePersoon(a, o)).map((x) => x.id)
   return ids.includes(a.id) ? ids : [a.id, ...ids]

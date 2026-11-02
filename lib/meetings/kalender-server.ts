@@ -65,7 +65,11 @@ export async function kalenderData(admin: Admin, opts: {
   }
   if (!agenda) return leeg
 
-  const persoon = owners.filter((o) => zelfdePersoon(agenda, o)).map((o) => o.id)
+  // Ook inactieve agenda's van dezelfde persoon: wat daar nog in staat (meetings,
+  // verkoopafspraken van vóór een overstap) blijft bezet en zichtbaar.
+  const { data: alleKoppelingen } = await admin.from('sales_calendar_connections').select('id, name, account_email, clickup_assignee_id')
+  const persoon = [...new Set([...owners, ...((alleKoppelingen ?? []) as typeof owners)]
+    .filter((o) => zelfdePersoon(agenda, o)).map((o) => o.id))]
   const assignee = clickupPersoon(agenda, owners)
   const ruimVan = opts.van - 86400000, ruimTot = opts.tot + 86400000
 

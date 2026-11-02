@@ -96,6 +96,11 @@ async function main() {
     assert.equal(zelfdePersoon(b, bn), true)
     assert.equal(zelfdePersoon(b, m), false)
     assert.equal(clickupPersoon(bn, [b, bn, m]), 200511713)
+    // Bram op zijn eigen Gmail: zelfde ClickUp-persoon = zelfde persoon, ook op een ander account.
+    const eigen = { id: 'bram-eigen', name: 'Bram', account_email: 'nextgenmediabe@gmail.com', clickup_assignee_id: 200511713 } as never
+    assert.equal(zelfdePersoon(eigen, b), true)
+    assert.equal(zelfdePersoon(eigen, m), false, 'Marco blijft een andere persoon')
+    assert.equal(zelfdePersoon({ id: 'x', name: 'Marco', account_email: 'ander@gmail.com', clickup_assignee_id: null } as never, m), false, 'zonder ClickUp-persoon: ander account = ander')
   })
 
   await test('4. Agendasync: enkel meetings blokkeren en krijgen de gsm-melding van 15 minuten', () => {
