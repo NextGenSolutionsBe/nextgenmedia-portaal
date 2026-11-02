@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import {
-  catalogus, vindType, veldenVan, locatieNodig, DAGEN, TIJDSTIPPEN, CONSULTANCY_TARIEF, STATUS, antwoordRegels, timingTekst,
+  catalogus, vindType, veldenVan, locatieNodig, DAGEN, TIJDSTIPPEN, STATUS, antwoordRegels, timingTekst,
   type AanvraagSoort, type AanvraagType, type Veld,
 } from '@/lib/aanvragen/model'
 import { MAX_BESTANDEN, MAX_BYTES, mimeToegestaan } from '@/lib/aanvragen/bestanden'
@@ -208,7 +208,7 @@ function NieuweAanvraag({ soort, onVerstuurd }: { soort: AanvraagSoort; onVerstu
         <p className="text-sm text-gray-700">Bedankt. Je aanvraag voor <b>{t?.label}</b> staat bij ons. Dit is nog geen boeking of bevestigde opdracht.</p>
         <ol className="text-sm text-gray-700 space-y-2">
           <li className="flex gap-2"><span className="h-5 w-5 rounded-full bg-gray-900 text-white text-[11px] flex items-center justify-center shrink-0">1</span>We bekijken je aanvraag en wie ze best opvolgt.</li>
-          <li className="flex gap-2"><span className="h-5 w-5 rounded-full bg-gray-900 text-white text-[11px] flex items-center justify-center shrink-0">2</span>{soort === 'consultancy' ? `We bepalen de duur (${CONSULTANCY_TARIEF}) en sturen indien nodig eerst een offerte.` : 'Valt het binnen je contract, dan plannen we het in. Zo niet, dan krijg je eerst een offerte.'}</li>
+          <li className="flex gap-2"><span className="h-5 w-5 rounded-full bg-gray-900 text-white text-[11px] flex items-center justify-center shrink-0">2</span>{soort === 'consultancy' ? 'We bepalen de duur en sturen indien nodig eerst een offerte.' : 'Valt het binnen je contract, dan plannen we het in. Zo niet, dan krijg je eerst een offerte.'}</li>
           <li className="flex gap-2"><span className="h-5 w-5 rounded-full bg-gray-900 text-white text-[11px] flex items-center justify-center shrink-0">3</span>De status en een eventuele offerte volg je hier bij “Mijn aanvragen”.</li>
         </ol>
         <button type="button" onClick={opnieuw} className={`btn-secondary ${knop}`}>Nog een aanvraag</button>
@@ -319,7 +319,7 @@ function NieuweAanvraag({ soort, onVerstuurd }: { soort: AanvraagSoort; onVerstu
             timing={timingTekst({ periode_van: periodeVan || null, periode_tot: periodeTot || null, voorkeursdagen: dagen, tijdstippen: tijden, deadline: deadline || null })}
             locatie={locatieRegel === 'geen' ? null : locatie.trim() || null} expert={expert ? experts?.find((e) => e.id === expert)?.naam ?? null : null} bestanden={bestanden.length} />
           <p className="text-xs text-gray-600 flex gap-1.5"><Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-            {soort === 'consultancy' ? `Consultancy kost ${CONSULTANCY_TARIEF}. Wij bepalen de benodigde duur en sturen indien nodig eerst een offerte. Je boekt hier geen afspraak.` : 'Een aanvraag is geen boeking of bevestigde opdracht. Wij bekijken ze en laten je weten wat de volgende stap is.'}</p>
+            {soort === 'consultancy' ? 'Wij bepalen de benodigde duur en sturen indien nodig eerst een offerte. Je boekt hier geen afspraak.' : 'Een aanvraag is geen boeking of bevestigde opdracht. Wij bekijken ze en laten je weten wat de volgende stap is.'}</p>
         </div>
       )}
 
@@ -388,7 +388,6 @@ function Samenvatting({ soort, t, wat, briefing, aandachtspunten, antwoorden, ti
         {locatie && rij('Locatie', locatie)}
         {rij('Expert', expert ? `${expert} (voorkeur)` : 'Geen voorkeur')}
         {rij('Bestanden', bestanden ? `${bestanden} bestand${bestanden === 1 ? '' : 'en'}` : 'Geen')}
-        {soort === 'consultancy' && rij('Tarief', CONSULTANCY_TARIEF)}
       </dl>
     </div>
   )

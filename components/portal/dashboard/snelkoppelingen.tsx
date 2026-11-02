@@ -63,8 +63,7 @@ export function Snelkoppelingen({ mag, team, event, aantalEvents }: { mag: Snel;
                 <h3 className="text-lg font-semibold leading-snug">Even sparren met een expert</h3>
                 <p className="text-sm text-gray-600">SEO, AI, campagnes of strategie. Je kiest zelf met wie.</p>
               </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-semibold">€125 per uur</span>
+              <div className="flex items-center justify-end gap-2">
                 <span className="inline-flex items-center gap-1 text-sm font-semibold text-gray-900 group-hover:gap-2 transition-all">Aanvragen<ArrowRight className="h-4 w-4" /></span>
               </div>
             </Link>

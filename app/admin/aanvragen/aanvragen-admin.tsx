@@ -11,7 +11,7 @@ import {
 import { Bevestig } from '@/app/admin/instellingen/ui'
 import { createClient } from '@/lib/supabase/client'
 import {
-  STATUS, SCOPE_LABEL, OFFERTE_LABEL, CONSULTANCY_TARIEF, antwoordRegels, timingTekst, vindType, SOORTEN, isSoort, soortLabel,
+  STATUS, SCOPE_LABEL, OFFERTE_LABEL, antwoordRegels, timingTekst, vindType, SOORTEN, isSoort, soortLabel,
   type AanvraagSoort, type AanvraagStatus, type Scope, type OfferteStatus,
 } from '@/lib/aanvragen/model'
 
@@ -101,7 +101,7 @@ export function AanvragenAdmin({ magAanpassen, magVerwijderen = false }: { magAa
         </div>
       </div>
       {klantNaam && <p className="text-xs"><span className="inline-flex items-center gap-1 rounded-full border border-gray-300 bg-white px-2 py-0.5">Enkel {klantNaam}<button type="button" onClick={() => { setKlant(null); router.replace(`/admin/aanvragen?soort=${soort}`, { scroll: false }) }} aria-label="Filter op klant wissen" className="hover:text-black"><X className="h-3 w-3" /></button></span></p>}
-      {soort === 'consultancy' && <p className="text-xs text-gray-500 flex items-center gap-1"><Info className="h-3.5 w-3.5" />Tarief zoals de klant het ziet: {CONSULTANCY_TARIEF}. Duur en eventuele offerte bepalen wij.</p>}
+      {soort === 'consultancy' && <p className="text-xs text-gray-500 flex items-center gap-1"><Info className="h-3.5 w-3.5" />De klant ziet geen uurtarief. Duur en eventuele offerte bepalen wij.</p>}
 
       <div className="card-base !p-0 overflow-hidden">
         {rijen === null ? <div className="py-10 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>

@@ -7,7 +7,7 @@
 import { tabellen, nepDb, clickup, resend } from './hulp-meetings-nep'
 import assert from 'node:assert/strict'
 import {
-  DIENSTEN, CONSULTANCY, valideerAanvraag, relevanteExperts, vindType, clickupNaam, clickupOmschrijving, CONSULTANCY_TARIEF, VORM_MET_ADRES, STATUS, type ExpertBron,
+  DIENSTEN, CONSULTANCY, valideerAanvraag, relevanteExperts, vindType, clickupNaam, clickupOmschrijving, VORM_MET_ADRES, STATUS, type ExpertBron,
 } from '../lib/aanvragen/model'
 import { padVanKlant, bouwPad } from '../lib/aanvragen/bestanden'
 import { NAKIJKEN, wisOngevraagdeVervaldatum } from '../lib/clickup'
@@ -54,7 +54,6 @@ async function main() {
   await test('1. Catalogus: de 12 diensten en 14 consultancyopties zoals afgesproken', () => {
     assert.deepEqual(DIENSTEN.map((d) => d.label), ['Social media management', 'Foto- en videografie', 'Content shoot', 'Grafisch ontwerp', 'Branding en rebranding', 'Websiteontwerp en -ontwikkeling', 'SEO', 'SEA en advertentiebeheer', 'E-mailmarketing', 'AI-automatisaties', 'Strategie en marketingadvies', 'Overige'])
     assert.deepEqual(CONSULTANCY.map((d) => d.label), ['Strategische marketingconsultancy', 'AI-workshop', 'AI- en automatisatiescan', 'Performance marketing scan', 'Meta Ads- of Google Ads-scan', 'Workflow- en efficiëntiescan', 'Sales operations scan', 'Leadgeneratie- en salesfunnelanalyse', 'CRM- en opvolgingsprocesadvies', 'Website- en conversiescan', 'SEO-scan', 'Social media- en contentstrategie', 'Klantreis- en positioneringsadvies', 'Overige consultancy'])
-    assert.equal(CONSULTANCY_TARIEF, '€125 per uur')
   })
 
   await test('2. Validatie: wat-vraag, verplichte velden per dienst, opties en webadres', () => {
@@ -128,7 +127,8 @@ async function main() {
       expert_naam: null, ingediend_door: 'Ann', bestanden: [],
     }, 'https://app.nextgenmedia.be/admin/aanvragen?aanvraag=x')
     assert.match(o, /^AANVRAAG – nog geen bevestigde opdracht of boeking/)
-    assert.match(o, /Tarief consultancy: €125 per uur/)
+    assert.match(o, /Consultancy: duur en eventuele offerte bepalen wij\./)
+    assert.doesNotMatch(o, /€|per uur|tarief/i, 'geen uurtarief in de ClickUp-taak')
     assert.match(o, /Expertvoorkeur: Geen voorkeur – stel zelf een expert voor \(voorkeur, nog niet bevestigd\)/)
     assert.match(o, /Onderwerp: Vindbaarheid/)
     assert.match(o, /Voorkeursdagen: Ma/)

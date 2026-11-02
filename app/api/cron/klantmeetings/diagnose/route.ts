@@ -924,7 +924,7 @@ async function zelftestAanvraag(admin: { from: (t: string) => any; storage: { fr
     ids.push(c1.id)
     if (c1.clickup_task_id) taken.push(c1.clickup_task_id)
     const ruwC = c1.clickup_task_id ? await leesTaakRuw(c1.clickup_task_id) : null
-    log('Consultancy-taak met naam en tarief', ruwC?.naam === `Consultancy aanvraag – ${klantNaam} – SEO-scan` && /€125 per uur/.test(ruwC.tekst), ruwC?.naam ?? c1.clickup_fout ?? '—')
+    log('Consultancy-taak met naam, zonder tarief', ruwC?.naam === `Consultancy aanvraag – ${klantNaam} – SEO-scan` && !/per uur/.test(ruwC.tekst), ruwC?.naam ?? c1.clickup_fout ?? '—')
     log('Vandaag gekozen: taak staat vandaag, zonder voorkeur niemand toegewezen', dagVan(ruwC?.dueDate) === datum(0) && ruwC?.toegewezen.length === 0, `vervaldag ${dagVan(ruwC?.dueDate) ?? '—'} (vandaag ${datum(0)}), toegewezen ${ruwC?.toegewezen.join(', ') || 'niemand'}`)
     const c2 = await klantTrektIn(admin, c1, 'Automatische controle')
     const st2 = c2.clickup_task_id ? await leesTaakStatus(c2.clickup_task_id) : null
