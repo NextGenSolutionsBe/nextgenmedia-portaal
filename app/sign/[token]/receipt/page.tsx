@@ -2,6 +2,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import { PrintButton } from '@/components/print-button'
 import { CheckCircle2, FileText, Shield } from 'lucide-react'
+import { akkoordRegels } from '@/lib/voorwaarden'
 
 function formatDateLong(dateStr: string | null | undefined): string {
   if (!dateStr) return '—'
@@ -182,6 +183,13 @@ export default async function ReceiptPage({ params }: { params: { token: string 
               <div className="text-xs text-gray-400 mb-1">Tijdstip van ondertekening</div>
               <div className="font-medium text-gray-900">{formatDateTime(contract.signed_at ?? sig?.signed_at)}</div>
             </div>
+
+            {akkoordRegels({ voorwaardenOp: sig?.voorwaarden_akkoord_op, privacyOp: sig?.privacy_akkoord_op, privacyVersie: sig?.akkoord_details?.privacy?.versie }).map(([kop, waarde]) => (
+              <div key={kop}>
+                <div className="text-xs text-gray-400 mb-1">{kop}</div>
+                <div className="text-gray-700">{waarde}</div>
+              </div>
+            ))}
 
             {sig?.ip_address && (
               <div>

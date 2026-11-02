@@ -8,6 +8,8 @@ import { isNietDoorgegaan } from '@/lib/contract-status'
 import { resolvePortalSession, canAccessContract } from '@/lib/portal-auth'
 import { FIELD_FONT_PT, baselineFromTopPct } from '@/lib/contract-render'
 import { naOndertekening } from '@/lib/contract-archief'
+import { controleerAkkoord, akkoordDetails, PRIVACY_VERSIE } from '@/lib/voorwaarden'
+import { baseUrl } from '@/lib/email'
 
 export const maxDuration = 60
 
@@ -23,6 +25,8 @@ export async function POST(req: NextRequest) {
       signer_vat,
       signature_data_url,
       field_values, // optioneel: { [label]: waarde } voor AI-gedetecteerde velden
+      akkoord_voorwaarden, // verplicht: algemene voorwaarden (ook voor toekomstige opdrachten)
+      akkoord_privacy,     // verplicht: privacyverklaring
     } = await req.json()
 
     if (!token || !contract_id || !signer_name || !signer_email) {
@@ -59,6 +63,10 @@ export async function POST(req: NextRequest) {
       if (expErr) console.error('[sign] status → expired mislukt:', expErr.message)
       return NextResponse.json({ error: 'Deze tekenlink is verlopen.' }, { status: 410 })
     }
+
+    // Algemene voorwaarden en privacyverklaring: zonder beide vinkjes wordt er niets getekend.
+    const akkoord = controleerAkkoord({ akkoord_voorwaarden, akkoord_privacy })
+    if (!akkoord.ok) return NextResponse.json({ error: akkoord.fout }, { status: 400 })
 
     const signedAt = new Date().toISOString()
     const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
@@ -156,8 +164,10 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Insert signature record — best effort ─────────────────────────────────
+    // Met het akkoord op de algemene voorwaarden en de privacyverklaring (tekst,
+    // link, versie, tijdstip) als bewijs. Vóór de migratie: zonder die kolommen.
     try {
-      await admin.from('contract_signatures').insert({
+      const sigRij = {
         contract_id,
         signer_name,
         signer_email,
@@ -168,7 +178,14 @@ export async function POST(req: NextRequest) {
         signed_at: signedAt,
         ip_address: ip,
         user_agent: userAgent,
+      }
+      let { error: sigErr } = await admin.from('contract_signatures').insert({
+        ...sigRij, voorwaarden_akkoord_op: signedAt, privacy_akkoord_op: signedAt, akkoord_details: akkoordDetails(signedAt, baseUrl()),
       })
+      if (sigErr && /voorwaarden_akkoord_op|privacy_akkoord_op|akkoord_details|schema cache|column/i.test(sigErr.message)) {
+        ({ error: sigErr } = await admin.from('contract_signatures').insert(sigRij))
+      }
+      if (sigErr) console.error('[sign] handtekeningrij niet bewaard:', sigErr.message)
     } catch { }
 
     // ── Update contract — CRITICAL OPERATION ──────────────────────────────────
@@ -208,7 +225,7 @@ export async function POST(req: NextRequest) {
     if (field_values && Object.keys(field_values as Record<string, unknown>).length > 0) {
       await logContractEvent(admin, contract_id, 'filled', { actor: signer_email, ip, ua: userAgent })
     }
-    await logContractEvent(admin, contract_id, 'signed', { actor: signer_email, ip, ua: userAgent })
+    await logContractEvent(admin, contract_id, 'signed', { actor: signer_email, ip, ua: userAgent, meta: { akkoord_algemene_voorwaarden: true, akkoord_privacyverklaring: true, privacy_versie: PRIVACY_VERSIE } })
     if (signedPdfPath) await logContractEvent(admin, contract_id, 'pdf_generated', { actor: signer_email, ip, ua: userAgent })
 
     // Facturen worden NIET automatisch uit het contract afgeleid: het team voegt

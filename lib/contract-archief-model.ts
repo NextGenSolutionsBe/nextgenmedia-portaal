@@ -5,6 +5,8 @@
 // vingerafdruk) in een aparte, afgeschermde opslag. Dit bestand bepaalt hoe
 // dat dossier eruitziet; lib/contract-archief.ts doet het echte werk.
 
+import { akkoordRegels } from './voorwaarden'
+
 export type DossierGebeurtenis = {
   event_type: string
   created_at: string
@@ -32,6 +34,10 @@ export type Dossier = {
   sentAt: string | null
   ipAdres: string | null
   userAgent: string | null
+  /** Akkoord met de algemene voorwaarden en de privacyverklaring bij het tekenen (ontbreekt bij oudere contracten). */
+  akkoordVoorwaardenOp?: string | null
+  akkoordPrivacyOp?: string | null
+  privacyVersie?: string | null
   startDatum: string | null
   eindDatum: string | null
   verwachtAantal: number | null
@@ -216,6 +222,7 @@ export function certificaatBlokken(d: Dossier): CertificaatBlok[] {
       ['Datum en tijdstip', tijdstipBrussel(d.signedAt)],
       ['Tijdzone', TIJDZONE_LABEL],
       ['Wijze', wijzeVanOndertekenen(d.bron)],
+      ...akkoordRegels({ voorwaardenOp: d.akkoordVoorwaardenOp, privacyOp: d.akkoordPrivacyOp, privacyVersie: d.privacyVersie }),
       ...audit,
     ] },
     { kop: 'Integriteit', regels: [
