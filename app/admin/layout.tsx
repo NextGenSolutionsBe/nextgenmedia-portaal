@@ -2,7 +2,6 @@ import { redirect } from 'next/navigation'
 import { leesAdminIdentiteit } from '@/lib/admin-identiteit'
 import { AdminSidebar } from '@/components/admin/sidebar'
 import { AdminTopBar } from '@/components/admin/admin-topbar'
-import { AiAssistant } from '@/components/admin/ai-assistant'
 import { Toaster } from 'sonner'
 import { leesInstellingen, leesPersoon, leesVoorkeuren } from '@/lib/instellingen/laden'
 import { moduleBeschikbaar, magActie, MODULE_INSTELLINGEN_KEY } from '@/lib/instellingen/model'
@@ -50,14 +49,13 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         mijnWerk={mijnWerk}
       />
       <main className="flex-1 min-w-0 md:ml-[var(--sidebar-width)] min-h-screen overflow-x-clip">
-        <div className={`max-w-[1400px] mx-auto px-4 pb-24 md:pb-8 md:pt-6 md:px-6 lg:px-8 ${role === 'admin' ? 'pt-0' : 'pt-16'}`}>
-          {/* Topbar (zoek/notificaties/AI) is admin-only: de onderliggende
+        <div className={`max-w-[1400px] mx-auto px-4 pb-8 md:pt-6 md:px-6 lg:px-8 ${role === 'admin' ? 'pt-0' : 'pt-16'}`}>
+          {/* Topbar (zoek/notificaties) is admin-only: de onderliggende
               API's zijn dat ook — voor werknemers verbergen i.p.v. 403-ruis. */}
           {role === 'admin' && <AdminTopBar />}
           {children}
         </div>
       </main>
-      {role === 'admin' && <AiAssistant />}
     </div>
   )
 }
