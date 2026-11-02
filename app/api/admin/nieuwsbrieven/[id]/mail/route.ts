@@ -1,3 +1,4 @@
+import { merkStijl } from '@/lib/merk-mail'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { magIk } from '@/lib/instellingen/laden'
@@ -22,7 +23,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { data: n } = await admin.from('nieuwsbrieven').select('*').eq('id', id).maybeSingle()
   if (!n) return NextResponse.json({ error: 'Nieuwsbrief niet gevonden.' }, { status: 404 })
   const voorbeeld = bouwNieuwsbriefMail(n as Nieuwsbrief, { appLink: appLink(n.slug), afmeldLink: afmeldLink('voorbeeld@nextgenmedia.be') })
-  return NextResponse.json({ voorbeeld: { onderwerp: voorbeeld.onderwerp, html: voorbeeld.html }, ontvangers: await ontvangers(admin, id) }, { headers: { 'Cache-Control': 'no-store' } })
+  return NextResponse.json({ voorbeeld: { onderwerp: voorbeeld.onderwerp, html: voorbeeld.html, van: merkStijl((n as Nieuwsbrief).merk).naam }, ontvangers: await ontvangers(admin, id) }, { headers: { 'Cache-Control': 'no-store' } })
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

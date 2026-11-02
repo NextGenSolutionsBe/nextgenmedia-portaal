@@ -1,8 +1,9 @@
 import 'server-only'
+import { mailMerkVan } from '@/lib/merk-mail'
 import { GSM_MELDING_MIN } from '@/lib/meetings/kalender'
 import { randomUUID } from 'crypto'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
-import { sendEmail, baseUrl, EMAIL_FROM, resendKeyFor } from '@/lib/email'
+import { sendEmail, sendEmailMetAfzenderTerugval, baseUrl, EMAIL_FROM, resendKeyFor } from '@/lib/email'
 import { defaultFromFor } from '@/lib/sales/pipelines'
 import { buildEmailHtml } from '@/lib/email-html'
 import {
@@ -490,9 +491,11 @@ async function verstuurAfspraakHerinnering(admin: Admin, r: HerinneringRij, zet:
     organisator_naam: (agenda as { name?: string } | null)?.name?.split(/\s+[—-]\s+/)[0] ?? null,
     ontvangers, afzender: merkNaam, locatie: a.meet_url ? null : a.adres,
   })
-  const html = buildEmailHtml({ bodyText: mail.tekst, ctaText: mail.ctaTekst, ctaLink: mail.ctaLink })
+  const html = buildEmailHtml({ bodyText: mail.tekst, ctaText: mail.ctaTekst, ctaLink: mail.ctaLink, merk: mailMerkVan(merk?.key) })
   const from = merk?.reminder_from || defaultFromFor(merk?.key) || EMAIL_FROM
-  const res = await sendEmail({
+  // NextGenSolutions: zolang dat domein niet geverifieerd is bij Resend, vertrekt
+  // de mail van het hoofdadres met de merknaam en het merkadres als antwoordadres.
+  const res = await sendEmailMetAfzenderTerugval({
     to: ontvangers.map((p) => p.email), subject: mail.onderwerp, text: mail.tekst, html,
     from, replyTo: merk?.reminder_reply_to || null, apiKey: resendKeyFor(merk?.key), idempotencyKey: r.verzend_sleutel,
   })

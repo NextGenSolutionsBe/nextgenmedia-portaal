@@ -1,7 +1,8 @@
 import 'server-only'
 import { valideerEmbed } from '@/lib/embeds'
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import { baseUrl, sendEmail } from '@/lib/email'
+import { baseUrl, sendEmailMetAfzenderTerugval, resendKeyFor } from '@/lib/email'
+import { mailMerkVan, MERK_STIJL } from '@/lib/merk-mail'
 import { publiekeUrl } from '@/lib/marketing-media'
 import { bouwNieuwsbriefMail } from '@/lib/nieuwsbrief-mail'
 import { leestijd, maakSlug, type Nieuwsbrief } from '@/lib/nieuwsbrieven'
@@ -103,12 +104,14 @@ export async function verstuurNieuwsbrief(admin: Admin, n: Nieuwsbrief, emails: 
 
     async function verstuurEen(rijId: string) {
       const m = bouwNieuwsbriefMail(n, { appLink: appLink(n.slug), afmeldLink: afmeldLink(e) })
-      const r = await sendEmail({ to: e, subject: m.onderwerp, text: m.tekst, html: m.html, idempotencyKey: `nieuwsbrief-${n.id}-${e}` })
+      // NextGenSolutions: eigen naam en antwoordadres; vertrekt van het hoofdadres zolang dat domein niet geverifieerd is.
+      const merk = mailMerkVan(n.merk)
+      const r = await sendEmailMetAfzenderTerugval({ to: e, subject: m.onderwerp, text: m.tekst, html: m.html, idempotencyKey: `nieuwsbrief-${n.id}-${e}`, from: merk === 'nextgenmedia' ? null : MERK_STIJL[merk].van, apiKey: resendKeyFor(merk) })
       await admin.from('nieuwsbrief_verzendingen').update({ status: r.ok ? 'verstuurd' : 'mislukt', resend_id: r.id ?? null, fout: r.ok ? null : (r.error ?? 'onbekend').slice(0, 300) }).eq('id', rijId)
       // In het E-mail Center, zoals elke andere mail.
       try {
         await admin.from('email_messages').insert({
-          to_email: e, to_client_id: o!.client_id, subject: m.onderwerp, body: m.tekst, html: m.html, kind: 'nieuwsbrief', audience: 'client', trigger_type: 'manual',
+          to_email: e, to_client_id: o!.client_id, subject: m.onderwerp, body: m.tekst, html: m.html, kind: 'nieuwsbrief', from_email: MERK_STIJL[merk].van, audience: 'client', trigger_type: 'manual',
           related_id: n.id, status: r.ok ? 'sent' : 'error', error: r.ok ? null : r.error ?? null, provider_id: r.id ?? null, sent_by: door.userId, sent_by_email: door.email,
           verzend_sleutel: `nieuwsbrief-${n.id}-${e}`,
         })

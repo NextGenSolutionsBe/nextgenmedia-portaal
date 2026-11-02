@@ -18,9 +18,10 @@ import { publiekeUrl } from '@/lib/marketing-media'
 import { youtubeId, youtubeKijkUrl } from '@/lib/youtube'
 import { BLOK_TYPES, CATEGORIEEN, leestijd, nieuwBlok, type Blok, type BlokType, type Categorie, type Nieuwsbrief } from '@/lib/nieuwsbrieven'
 import { MailDialoog } from './mail-dialoog'
+import { MAIL_MERKEN, MERK_STIJL, mailMerkVan, type MailMerk } from '@/lib/merk-mail'
 
 type Concept = {
-  titel: string; categorie: Categorie; categorie_label: string; samenvatting: string; cover_pad: string | null
+  titel: string; categorie: Categorie; categorie_label: string; samenvatting: string; merk: MailMerk; cover_pad: string | null
   cover_youtube: string; cover_formaat: 'liggend' | 'staand'; cover_embed: string; cover_embed_formaat: Formaat | ''
   blokken: Blok[]; uitgelicht: boolean
 }
@@ -29,7 +30,7 @@ const UPLOAD = '/api/admin/nieuwsbrieven/upload'
 const ICOON: Record<BlokType, React.ElementType> = { tekst: Type, kop: Heading2, afbeelding: ImageIcon, galerij: Images, video: Youtube, embed: Share2, citaat: Quote, knop: MousePointerClick }
 const nieuwId = () => Math.random().toString(36).slice(2, 10)
 const naarConcept = (n: Nieuwsbrief): Concept => ({
-  titel: n.titel, categorie: n.categorie, categorie_label: n.categorie_label ?? '', samenvatting: n.samenvatting ?? '', cover_pad: n.cover_pad,
+  titel: n.titel, categorie: n.categorie, categorie_label: n.categorie_label ?? '', samenvatting: n.samenvatting ?? '', merk: mailMerkVan(n.merk), cover_pad: n.cover_pad,
   cover_youtube: n.cover_youtube_id ? youtubeKijkUrl(n.cover_youtube_id) : '', cover_formaat: n.cover_formaat === 'staand' ? 'staand' : 'liggend',
   cover_embed: n.cover_embed?.url ?? '', cover_embed_formaat: n.cover_embed?.formaat ?? '', blokken: n.blokken ?? [], uitgelicht: n.uitgelicht,
 })
@@ -132,7 +133,12 @@ export function NieuwsbriefEditor({ id, magAanpassen, magVerwijderen }: { id: st
                 </select>
                 {c.categorie === 'andere' && <input className={`${INP} mt-2`} value={c.categorie_label} maxLength={40} onChange={(e) => zet('categorie_label', e.target.value)} placeholder="Bv. Evenementen, Behind the scenes" aria-label="Eigen categorie" autoFocus />}
               </div>
-              <label className="flex items-center gap-2 text-sm sm:pt-6 cursor-pointer"><input type="checkbox" checked={c.uitgelicht} onChange={(e) => zet('uitgelicht', e.target.checked)} /><Star className="h-4 w-4 text-amber-500" />Uitgelicht bovenaan de feed</label>
+              <div><label className={LBL} htmlFor="nb-merk">Van</label>
+                <select id="nb-merk" className={INP} value={c.merk} onChange={(e) => zet('merk', mailMerkVan(e.target.value))}>
+                  {MAIL_MERKEN.map((m) => <option key={m} value={m}>{MERK_STIJL[m].naam} ({m === 'nextgenmedia' ? 'geel' : 'blauw'})</option>)}
+                </select>
+              </div>
+              <label className="flex items-center gap-2 text-sm cursor-pointer sm:col-span-2"><input type="checkbox" checked={c.uitgelicht} onChange={(e) => zet('uitgelicht', e.target.checked)} /><Star className="h-4 w-4 text-amber-500" />Uitgelicht bovenaan de feed</label>
             </div>
             <div><label className={LBL} htmlFor="nb-sam">Korte intro <span className="font-normal text-gray-400">(staat in de feed en bovenaan het artikel)</span></label><textarea id="nb-sam" rows={2} maxLength={400} className={INP} value={c.samenvatting} onChange={(e) => zet('samenvatting', e.target.value)} placeholder="Eén of twee zinnen die zin geven om verder te lezen." /></div>
             <CoverInvoer c={c} zet={zet} />

@@ -6903,3 +6903,11 @@ GRANT EXECUTE ON FUNCTION public.opslag_verbruik() TO service_role;
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES ('accounts', 'accounts', false, 3145728, ARRAY['image/jpeg','image/png','image/webp'])
 ON CONFLICT (id) DO NOTHING;
+
+-- Nieuwsbrief per merk: huisstijl en afzender van de mail (2 nov 2026).
+ALTER TABLE public.nieuwsbrieven ADD COLUMN IF NOT EXISTS merk text NOT NULL DEFAULT 'nextgenmedia';
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'nieuwsbrieven_merk_check') THEN
+    ALTER TABLE public.nieuwsbrieven ADD CONSTRAINT nieuwsbrieven_merk_check CHECK (merk IN ('nextgenmedia','nextgensolutions'));
+  END IF;
+END $$;

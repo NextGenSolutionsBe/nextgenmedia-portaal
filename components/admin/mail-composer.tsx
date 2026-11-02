@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Mail, X, Loader2, Send, CheckCircle2 } from 'lucide-react'
 import { renderTemplate, type MailVars } from '@/lib/email-render'
 import { DEFAULT_TEMPLATES } from '@/lib/email-templates-defaults'
+import { MERK_STIJL, MAIL_MERKEN, type MailMerk } from '@/lib/merk-mail'
 
 // Eén gedeelde mailcomponent voor ALLE handmatige mails (klant/contract/taak/
 // toegang/algemeen). Altijd preview + handmatige bevestiging; nooit automatisch.
@@ -63,6 +64,15 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
   // Meeting: van welk adres de mail vertrekt, of waarom dat nu niet kan. Kopie in de info@-mailbox.
   const [afzender, setAfzender] = useState<{ ok: boolean; van: string; fout?: string } | null>(null)
   const [kopieInfo, setKopieInfo] = useState(true)
+  // Huisstijl van de mail: NextGenMedia (geel) of NextGenSolutions (blauw). Meetingmails vertrekken altijd van NextGenMedia.
+  const [merk, setMerk] = useState<MailMerk>('nextgenmedia')
+  const stijl = MERK_STIJL[context.type === 'meeting' ? 'nextgenmedia' : merk]
+  // Wisselen van merk past ook de merknaam in onderwerp en tekst aan ("Met vriendelijke groet, NextGenMedia").
+  const kiesMerk = (m: MailMerk) => {
+    if (m === merk) return
+    const oud = new RegExp(MERK_STIJL[merk].naam, 'g'), nieuw = MERK_STIJL[m].naam
+    setSubject((x) => x.replace(oud, nieuw)); setBody((x) => x.replace(oud, nieuw)); setMerk(m)
+  }
   // Eén sleutel per verzendpoging: een dubbelklik of herhaald verzoek verstuurt nooit twee keer.
   const [sleutel] = useState(() => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`))
 
@@ -187,7 +197,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
           body: JSON.stringify({
             to_email: toEmail, cc: cc.trim() || null, kopie_naar_mij: kopieNaarMij, subject, body, cta_text: ctaText || null, cta_link: ctaLink || null,
             template_id: templateId && !templateId.startsWith('standaard:') ? templateId : null, template_name: tpl?.name ?? null,
-            herinnering: tpl?.kind === 'contract_herinnering',
+            herinnering: tpl?.kind === 'contract_herinnering', merk,
           }),
         })
       } else {
@@ -200,7 +210,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
             template_id: templateId && !templateId.startsWith('standaard:') ? templateId : null, template_name: tpl?.name ?? null,
             kind: context.type === 'client' ? (context.kind ?? 'generic') : 'generic',
             deadline_id: context.type === 'client' ? (context.deadlineId ?? null) : null,
-            verzend_sleutel: sleutel,
+            verzend_sleutel: sleutel, merk,
           }),
         })
       }
@@ -266,6 +276,19 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
                 </select>
               </div>
             )}
+            {context.type !== 'meeting' && (
+              <div>
+                <span className="block text-xs font-medium text-gray-600 mb-1">Huisstijl</span>
+                <div className="inline-flex rounded-lg border border-gray-200 p-0.5">
+                  {MAIL_MERKEN.map((m) => (
+                    <button key={m} type="button" onClick={() => kiesMerk(m)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors ${merk === m ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-50'}`}>
+                      <span className="h-2.5 w-2.5 rounded-full border border-black/10" style={{ background: MERK_STIJL[m].accent }} />{MERK_STIJL[m].naam}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Onderwerp</label>
               <input className={inp} value={subject} onChange={(e) => setSubject(e.target.value)} />
@@ -279,12 +302,18 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
               <div><label className="block text-xs font-medium text-gray-600 mb-1">Knop-link</label><input className={inp} value={ctaLink} onChange={(e) => setCtaLink(e.target.value)} placeholder="https://…" /></div>
             </div>
             {/* Preview */}
-            <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
-              <span className="text-[11px] text-gray-400 block mb-1">Voorbeeld</span>
-              <div className="text-xs text-gray-700 whitespace-pre-wrap">{body || '—'}</div>
-              {ctaText && ctaLink && (
-                <span className="inline-block mt-2 rounded-lg bg-gray-900 px-4 py-1.5 text-xs font-semibold text-white" style={{ borderBottom: '3px solid #fff848' }}>{ctaText}</span>
-              )}
+            <div className="rounded-lg border border-gray-100 bg-gray-50 overflow-hidden">
+              <div className="px-3 py-2 bg-white text-sm font-extrabold tracking-tight text-gray-900" style={{ borderBottom: `3px solid ${stijl.accent}` }}>
+                {stijl.deel1}<span style={{ borderBottom: `3px solid ${stijl.accent}` }}>{stijl.deel2}</span>
+                <span className="float-right text-[11px] font-normal text-gray-400 pt-0.5">Voorbeeld</span>
+              </div>
+              <div className="p-3">
+                <div className="text-xs text-gray-700 whitespace-pre-wrap">{body || '—'}</div>
+                {ctaText && ctaLink && (
+                  <span className="inline-block mt-2 rounded-lg bg-gray-900 px-4 py-1.5 text-xs font-semibold text-white" style={{ borderBottom: `3px solid ${stijl.accent}` }}>{ctaText}</span>
+                )}
+                <div className="mt-3 text-[10px] text-gray-400">{stijl.naam} · {stijl.adres}</div>
+              </div>
             </div>
             {error && <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</div>}
             <div className="flex gap-2 pt-1">

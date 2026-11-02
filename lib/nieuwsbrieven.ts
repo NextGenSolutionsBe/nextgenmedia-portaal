@@ -1,3 +1,4 @@
+import { mailMerkVan, type MailMerk } from './merk-mail'
 import { youtubeId } from '@/lib/youtube'
 import { geldigPad } from '@/lib/marketing-media'
 import { herkenEmbed, valideerEmbed, type EmbedRef, type Formaat } from '@/lib/embeds'
@@ -39,6 +40,8 @@ export const BLOK_TYPES: { type: BlokType; label: string }[] = [
 
 export type Nieuwsbrief = {
   id: string; titel: string; slug: string; categorie: Categorie; categorie_label: string | null; samenvatting: string | null
+  /** Van welk merk de nieuwsbrief komt (huisstijl en afzender van de mail). */
+  merk?: MailMerk | null
   cover_pad: string | null; cover_youtube_id: string | null; cover_formaat: 'liggend' | 'staand' | null; cover_embed: EmbedRef | null
   blokken: Blok[]; status: 'concept' | 'gepubliceerd'
   uitgelicht: boolean; gepubliceerd_op: string | null; auteur_naam: string | null; mail_verstuurd_op: string | null; mail_aantal: number | null
@@ -116,7 +119,7 @@ export function valideerBlokken(invoer: unknown): { ok: true; blokken: Blok[] } 
 }
 
 export type NieuwsbriefInvoer = {
-  titel: string; categorie: Categorie; categorie_label: string | null; samenvatting: string | null
+  titel: string; categorie: Categorie; categorie_label: string | null; samenvatting: string | null; merk: MailMerk
   cover_pad: string | null; cover_youtube_id: string | null; cover_formaat: 'liggend' | 'staand'; cover_embed: EmbedRef | null
   blokken: Blok[]; uitgelicht: boolean; auteur_naam: string | null
 }
@@ -145,7 +148,7 @@ export function valideerNieuwsbrief(b: Record<string, unknown>): { ok: true; waa
   return {
     ok: true,
     waarde: {
-      titel, categorie, categorie_label, samenvatting: kort(b.samenvatting, 400) || null, cover_pad: cover, cover_youtube_id: coverVideo,
+      titel, categorie, categorie_label, samenvatting: kort(b.samenvatting, 400) || null, merk: mailMerkVan(b.merk), cover_pad: cover, cover_youtube_id: coverVideo,
       cover_formaat: cover_formaat === 'staand' ? 'staand' : 'liggend', cover_embed, blokken: bl.blokken, uitgelicht: b.uitgelicht === true, auteur_naam: kort(b.auteur_naam, 80) || null,
     },
   }
