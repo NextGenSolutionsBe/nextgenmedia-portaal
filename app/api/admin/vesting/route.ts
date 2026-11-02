@@ -370,7 +370,7 @@ async function factureerTermijn(admin: Admin, termijnId: string, actorId: string
 async function extraLezen(admin: Admin) {
   const [termijnen, moduleContracten, contractTermijnen, gekoppeld] = await Promise.all([
     admin.from('vesting_wam_termijnen').select('*').order('factuurdatum').order('volgnr'),
-    admin.from('contracts').select('id, title, status, client_id, start_date, end_date, signed_at, service_slug, clients ( company_name )').order('created_at', { ascending: false }).limit(500),
+    admin.from('contracts').select('id, title, status, client_id, start_date, end_date, signed_at, service_slug, contract_waarde_excl, clients ( company_name )').order('created_at', { ascending: false }).limit(500),
     admin.from('vesting_contract_termijnen').select('*').order('factuurdatum').order('volgnr'),
     admin.from('vesting_contracten').select('contract_id'),
   ])
