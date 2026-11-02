@@ -97,7 +97,12 @@ test('6. Opdrachten-pagina is de bron; de pipeline leest dezelfde tabel', () => 
   const lib = readFileSync(join(root, 'lib/sales/lead-opdrachten.ts'), 'utf8')
   assert.ok(lib.includes("const TABEL = 'opdrachten'"), 'pipeline leest de tabel opdrachten')
   assert.ok(!lib.includes('sales_lead_opdrachten'), 'geen tweede bron')
-  assert.ok(readFileSync(join(root, 'app/api/admin/opdrachten/route.ts'), 'utf8').includes('koppelAanLead'), 'nieuwe opdracht wordt aan de pipeline gekoppeld')
+  // 2 nov 2026: de pipeline is opgegaan in Projecten. Kaarten worden niet meer aan een lead gekoppeld;
+  // een contract opmaken maakt zelf een kaart.
+  assert.ok(!readFileSync(join(root, 'app/api/admin/opdrachten/route.ts'), 'utf8').includes('koppelAanLead'), 'geen leads meer aanmaken vanuit Projecten')
+  for (const f of ['app/api/admin/contracts/route.ts', 'app/api/admin/contracts/from-template/route.ts']) {
+    assert.ok(readFileSync(join(root, f), 'utf8').includes('kaartVoorContract'), `${f}: een nieuw contract krijgt meteen een kaart`)
+  }
   assert.equal(pathToModule('/api/admin/sales/leads/x/opdrachten'), 'sales')
   assert.deepEqual(sanitizeModules(['sales', 'opdrachten', 'onbekend']), ['sales', 'opdrachten'])
   assert.ok(ADMIN_MODULES.some((m) => m.key === 'assignments'))

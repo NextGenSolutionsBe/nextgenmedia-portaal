@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
   Info, Camera, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
-  MailCheck, PhoneCall, FolderUp, Handshake, Plug, Settings, ClipboardPen, Contact, Timer, UserCircle, Video, Inbox, Megaphone, Clapperboard, Ticket, Film,
+  MailCheck, FolderUp, Handshake, Settings, ClipboardPen, Contact, Timer, UserCircle, Video, Inbox, Clapperboard, Film, Building2,
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
@@ -39,30 +39,29 @@ const SECTIONS: NavSection[] = [
   {
     items: [
       { label: 'Command Center', href: '/admin', icon: LayoutDashboard, exact: true },
-      // Eigen plek, bovenaan: de flow die het meest gebruikt wordt.
       { label: 'Dagelijkse planning Chiara', href: '/admin/contentplanning', icon: CalendarDays, module: 'info' },
     ],
   },
   {
-    title: 'Klanten & content',
+    // Van eerste contact tot getekend: wie zijn onze klanten en wat loopt er.
+    title: 'Klanten & projecten',
     items: [
-      { label: 'Klanten',    href: '/admin/clients',   icon: Users, module: 'clients' },
-      { label: 'Contracten', href: '/admin/contracts', icon: FileText, module: 'contracts' },
-      {
-        label: 'Diensten', href: '/admin/services', icon: Briefcase, module: 'content',
-        children: [
-          { label: 'Social Media', href: '/admin/services/social-media', icon: Calendar },
-          { label: 'Website',      href: '/admin/services/website',      icon: Globe },
-        ],
-      },
-      { label: 'Aanvragen', href: '/admin/aanvragen', icon: Inbox, module: 'aanvragen' },
-      // Content voor klanten: wat ze in de klantapp te zien krijgen.
-      { label: 'Founders of Flanders', href: '/admin/founders-of-flanders', icon: Clapperboard, module: 'founders' },
-      { label: 'Onze partners', href: '/admin/onze-partners', icon: Handshake, module: 'onze_partners' },
-      { label: 'Video-opleveringen', href: '/admin/opleveringen', icon: Film, module: 'opleveringen' },
-      // Enkel de kalender: de statistieken zijn eruit (Metricool zelf toont ze
-      // beter en actueler dan wij ze konden nabouwen).
+      { label: 'Klanten',     href: '/admin/clients',    icon: Users, module: 'clients' },
+      // Eén overzicht voor leads en projecten (vervangt de vroegere pipeline).
+      { label: 'Projecten',   href: '/admin/opdrachten', icon: KanbanSquare, module: 'opdrachten' },
+      { label: 'Contracten',  href: '/admin/contracts',  icon: FileText, module: 'contracts' },
+      { label: 'Aanvragen',   href: '/admin/aanvragen',  icon: Inbox, module: 'aanvragen' },
+      { label: 'Meeting Inplanner', href: '/admin/meetings', icon: Video, module: 'meetings', ookModule: 'sales' },
+    ],
+  },
+  {
+    // Het werk zelf: plannen, maken en opleveren.
+    title: 'Uitvoering',
+    items: [
       { label: 'Metricool', href: '/admin/metricool', icon: CalendarClock, module: 'metricool', exact: true },
+      { label: 'Video-opleveringen', href: '/admin/opleveringen', icon: Film, module: 'opleveringen' },
+      // Enkel nog onderhoud: wanneer start en loopt elk onderhoudscontract af.
+      { label: 'Website-onderhoud', href: '/admin/services/website', icon: Globe, module: 'content' },
       {
         label: 'Blogs', href: '/admin/blog-calendar', icon: Newspaper, module: 'blogs',
         children: [
@@ -70,47 +69,17 @@ const SECTIONS: NavSection[] = [
           { label: 'Kalender',  href: '/admin/blog-calendar', icon: CalendarDays },
         ],
       },
-      // Eigen ingang, geen tabblad onder Social Media: materiaal komt binnen
-      // los van de kalender en je wil in één lijst zien wat er nieuw is.
       { label: 'Klantuploads', href: '/admin/uploads', icon: FolderUp, module: 'uploads' },
-      // Werk dat binnenkomt en opgevolgd moet worden. Bewust hier en niet bij
-      // Partners: dat zijn freelance-opdrachten, dit gaat over onze eigen
-      // klantklussen. De badge telt wat te laat is.
-      { label: 'Opdrachten', href: '/admin/opdrachten', icon: ClipboardList, module: 'opdrachten' },
-      // Intake- en algemene formulieren die klanten via een link invullen.
       { label: 'Formulieren', href: '/admin/formulieren', icon: ClipboardPen, module: 'formulieren' },
+      { label: 'Materiaalbeheer', href: '/admin/materiaal', icon: Camera, module: 'materiaal' },
     ],
   },
   {
-    title: 'Kantoor',
+    // Wat klanten in hun app te zien krijgen.
+    title: 'Klantapp',
     items: [
-      // Samenwerking tussen onze eigen bedrijven en externe partners.
-      { label: 'Kantoor', href: '/admin/kantoor', icon: Handshake, module: 'kantoor' },
-    ],
-  },
-  {
-    title: 'Partners',
-    items: [
-      { label: 'Partners',    href: '/admin/partners',    icon: UserSquare2, module: 'partners' },
-      { label: 'Opdrachten',  href: '/admin/assignments', icon: Briefcase, module: 'assignments' },
-      { label: 'Settlements', href: '/admin/settlements', icon: ArrowLeftRight, module: 'settlements' },
-    ],
-  },
-  {
-    title: 'Verkoop',
-    items: [
-      // De Meeting Inplanner vervangt Appointment setting (die agenda zit er nu in;
-      // /admin/sales/appointments stuurt door). Bevestigingen en Resultaten zijn
-      // verborgen uit de navigatie; hun pagina's en gegevens blijven bestaan.
-      { label: 'Meeting Inplanner',   href: '/admin/meetings',           icon: Video,        module: 'meetings', ookModule: 'sales' },
-      { label: 'Pipeline',            href: '/admin/sales/pipeline',     icon: KanbanSquare, module: 'sales' },
-      { label: 'Belscripts',          href: '/admin/sales/scripts',      icon: FileText,     module: 'sales' },
-      // Apart van Resultaten: dat gaat over geld, dit over conversie.
-      { label: 'Statistieken',        href: '/admin/sales/statistieken', icon: TrendingUp,   module: 'sales' },
-      // Harrie praat rechtstreeks met Supabase; het sleutelscherm staat uit via
-      // lib/features.ts. De regel blijft staan zodat hij terugkomt zodra die
-      // vlag weer aan gaat.
-      { label: 'Koppeling',           href: '/admin/sales/koppeling',    icon: Plug,         module: 'harrie_api', adminOnly: true },
+      { label: 'Founders of Flanders', href: '/admin/founders-of-flanders', icon: Clapperboard, module: 'founders' },
+      { label: 'Onze partners', href: '/admin/onze-partners', icon: Handshake, module: 'onze_partners' },
     ],
   },
   {
@@ -119,14 +88,25 @@ const SECTIONS: NavSection[] = [
       { label: 'Financiën', href: '/admin/revenue/omzet', icon: TrendingUp, module: 'finance' },
       { label: 'Omzetrapportage', href: '/admin/revenue/rapportage', icon: BarChart3, module: 'finance' },
       { label: 'Facturen', href: '/admin/invoices',      icon: Receipt, module: 'invoices' },
-      { label: 'Vesting',  href: '/admin/vesting',       icon: Rocket, module: 'vesting' },
       { label: 'Aankopen', href: '/admin/purchases',     icon: ShoppingCart, module: 'purchases' },
+      { label: 'Vesting',  href: '/admin/vesting',       icon: Rocket, module: 'vesting' },
+    ],
+  },
+  {
+    title: 'Team & partners',
+    items: [
+      // Personeel = iedereen die voor ons werkt: dossiers, planning, uren, kosten
+      // en (voor hoofdbeheerders) de logins met rollen en modules.
+      { label: 'Personeel', href: '/admin/personeel', icon: Contact, module: 'personeel', adminOnly: true },
+      { label: 'Kantoor', href: '/admin/kantoor', icon: Building2, module: 'kantoor' },
+      { label: 'Partners',    href: '/admin/partners',    icon: UserSquare2, module: 'partners' },
+      { label: 'Opdrachten partners', href: '/admin/assignments', icon: Briefcase, module: 'assignments' },
+      { label: 'Settlements', href: '/admin/settlements', icon: ArrowLeftRight, module: 'settlements' },
     ],
   },
   {
     title: 'Overig',
     items: [
-      { label: 'Materiaalbeheer', href: '/admin/materiaal', icon: Camera, module: 'materiaal' },
       { label: 'E-mailcenter', href: '/admin/email', icon: Mail, module: 'email' },
       {
         label: 'Informatief', href: '/admin/informatief', icon: Info, module: 'info',
@@ -134,15 +114,6 @@ const SECTIONS: NavSection[] = [
           { label: 'Onboarding Info', href: '/admin/onboarding',   icon: ClipboardList },
         ],
       },
-    ],
-  },
-  {
-    title: 'Beheer',
-    items: [
-      // Personeel = iedereen die voor ons werkt: dossiers, planning, uren, kosten
-      // én (voor hoofdbeheerders) de logins met rollen en modules — de vroegere
-      // pagina Werknemers zit hier als tabblad in.
-      { label: 'Personeel', href: '/admin/personeel', icon: Contact, module: 'personeel', adminOnly: true },
     ],
   },
 ]

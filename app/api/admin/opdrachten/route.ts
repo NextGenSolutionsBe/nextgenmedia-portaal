@@ -8,9 +8,10 @@ import {
 } from '@/lib/opdrachten'
 import { canonicalStatus, statusInfo as contractStatusInfo } from '@/lib/contract-status'
 import { logAudit, requestMeta } from '@/lib/audit'
-import { koppelAanLead } from '@/lib/sales/lead-opdrachten'
+import { zorgVoorContractKaarten } from '@/lib/opdrachten-contracten'
 import {
   automatischeStatus, facturatieVan, kolomVan, verplaatsTekst, normaliseerDiensten, normaliseerVia, isBron, bronUitLead,
+  isBedrijf, bedrijfVan, normaliseerBtw, ontbreektVoorFase,
   type Facturatie,
 } from '@/lib/opdrachten-kanban'
 import { laadAflettering } from '@/lib/contracten/aflettering-server'
@@ -24,10 +25,10 @@ const HINT = 'De tabel voor opdrachten bestaat nog niet. Draai supabase/migratio
 
 const KOLOMMEN_BASIS = 'id, client_id, klant_vrij, titel, omschrijving, status, afgerond_op, created_at'
 const KOLOMMEN_FLOW = `${KOLOMMEN_BASIS}, contract_id, invoice_id, lead_id, status_bron, auto_status, status_gewijzigd_op, bedrag_excl, verantwoordelijke`
-const KOLOMMEN = `${KOLOMMEN_FLOW}, bron, diensten, offerte_via, offerte_op, stop_reden`
+const KOLOMMEN = `${KOLOMMEN_FLOW}, bron, diensten, offerte_via, offerte_op, stop_reden, btw_nummer, merk, datum`
 /** Kolommen die pas na latere migraties bestaan. */
-const NIEUWE_KOLOMMEN = /contract_id|invoice_id|lead_id|status_bron|auto_status|status_gewijzigd_op|bedrag_excl|verantwoordelijke|bron|diensten|offerte_via|offerte_op|stop_reden/i
-const KANBAN_VELDEN = ['bron', 'diensten', 'offerte_via', 'offerte_op', 'stop_reden']
+const NIEUWE_KOLOMMEN = /contract_id|invoice_id|lead_id|status_bron|auto_status|status_gewijzigd_op|bedrag_excl|verantwoordelijke|bron|diensten|offerte_via|offerte_op|stop_reden|btw_nummer|merk|datum/i
+const KANBAN_VELDEN = ['bron', 'diensten', 'offerte_via', 'offerte_op', 'stop_reden', 'btw_nummer', 'merk', 'datum']
 const FLOW_VELDEN = ['contract_id', 'invoice_id', 'lead_id', 'status_bron', 'auto_status', 'status_gewijzigd_op', 'bedrag_excl', 'verantwoordelijke']
 
 /** YYYY-MM-DD of null; onzin = undefined. */
@@ -165,6 +166,8 @@ export async function GET() {
     const ik = await requireStaff()
     if (!ik) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
     const admin = createAdminSupabaseClient()
+    // Elk contract heeft een kaart: wat er sinds de vorige keer bijkwam, krijgt er nu een.
+    await zorgVoorContractKaarten(admin).catch((e) => console.warn('[opdrachten] contractkaarten:', e instanceof Error ? e.message : e))
 
     // Vóór de statusflow-migratie bestaan de koppelkolommen niet: dan valt de
     // selectie terug op de basiskolommen, zodat het scherm blijft werken.
@@ -185,7 +188,7 @@ export async function GET() {
 
     const leadIds = [...new Set(rijen.map((r) => r.lead_id).filter(Boolean))] as string[]
     const [{ data: klantRijen }, { data: contractRijen }, { data: factuurRijen }, koppelingen, notities, { data: leadRijen }] = await Promise.all([
-      admin.from('clients').select('id, company_name, contact_name, email, sales_verantwoordelijke').is('archived_at', null).order('company_name'),
+      admin.from('clients').select('id, company_name, contact_name, email, sales_verantwoordelijke, btw_nummer').is('archived_at', null).order('company_name'),
       // Keuzelijsten voor het koppelen: recente contracten en facturen.
       admin.from('contracts').select('id, title, status, client_id, created_at').neq('status', 'template').order('created_at', { ascending: false }).limit(400),
       admin.from('invoices').select('id, description, status, invoice_date, client_id, contract_id, amount_incl').order('invoice_date', { ascending: false }).limit(400),
@@ -196,9 +199,10 @@ export async function GET() {
     const facturatie = nieuweKolommen ? await laadFacturatie(admin, rijen, koppelingen) : new Map<string, Facturatie>()
     const leadbronVan = new Map(((leadRijen ?? []) as { id: string; leadbron: string | null }[]).map((l) => [l.id, l.leadbron]))
 
-    const klanten = ((klantRijen ?? []) as { id: string; company_name: string | null; contact_name?: string | null; email?: string | null; sales_verantwoordelijke?: string | null }[])
-      .map((c) => ({ id: c.id, naam: c.company_name ?? '(zonder naam)', contact_name: c.contact_name ?? null, email: c.email ?? null, verantwoordelijke: c.sales_verantwoordelijke ?? null }))
+    const klanten = ((klantRijen ?? []) as { id: string; company_name: string | null; contact_name?: string | null; email?: string | null; sales_verantwoordelijke?: string | null; btw_nummer?: string | null }[])
+      .map((c) => ({ id: c.id, naam: c.company_name ?? '(zonder naam)', contact_name: c.contact_name ?? null, email: c.email ?? null, verantwoordelijke: c.sales_verantwoordelijke ?? null, btw: c.btw_nummer ?? null }))
     const naamVan = new Map(klanten.map((c) => [c.id, c.naam]))
+    const btwVan = new Map(klanten.map((c) => [c.id, c.btw]))
 
     // Kaart automatisch vooruit zetten: contract verstuurd → Contract,
     // ondertekend → Getekend contract, volledige waarde gefactureerd →
@@ -236,6 +240,10 @@ export async function GET() {
         waarde_bron: w.bron,
         kolom: kolomVan(status),
         diensten: Array.isArray(o.diensten) ? o.diensten : [],
+        // Btw: van de klant als die gekoppeld is, anders wat op de kaart staat (prospect).
+        btw: (o.client_id ? btwVan.get(String(o.client_id)) : null) || (o.btw_nummer as string | null | undefined) || null,
+        merk: bedrijfVan(o.merk as string | null | undefined, Array.isArray(o.diensten) ? o.diensten as string[] : []),
+        datum: (o.datum as string | null | undefined) || String(o.created_at ?? '').slice(0, 10),
         facturatie: f,
         notities_aantal: notities.get(o.id)?.aantal ?? 0,
         laatste_notitie: notities.get(o.id)?.laatste ?? null,
@@ -296,7 +304,42 @@ function leesKanban(b: Record<string, unknown>, patch: Record<string, unknown>):
     patch.offerte_op = d
   }
   if ('stop_reden' in b) patch.stop_reden = tekst(b.stop_reden, 500)
+  if ('btw_nummer' in b) {
+    if (b.btw_nummer && !normaliseerBtw(b.btw_nummer)) return 'Dat btw-nummer klopt niet (bv. BE0123456789).'
+    patch.btw_nummer = normaliseerBtw(b.btw_nummer)
+  }
+  if ('merk' in b) {
+    if (b.merk && !isBedrijf(b.merk)) return 'Kies NextGenMedia, NextGenSolutions of Founders of Flanders.'
+    patch.merk = b.merk || null
+  }
+  if ('datum' in b) {
+    const d = datum(b.datum)
+    if (d === undefined) return 'Die datum begrijpen we niet.'
+    patch.datum = d
+  }
   return null
+}
+
+/**
+ * Vanaf Offerte gestuurd zijn naam, btw-nummer en dienst verplicht. Het
+ * btw-nummer hoort bij de klant: is er een klantdossier zonder btw, dan komt
+ * het daar (nooit op twee plaatsen); voor een prospect op de kaart.
+ */
+async function controleerVerplicht(admin: Admin, status: OpdrachtStatus, k: { client_id: string | null; klant_vrij: string | null; diensten: string[]; btw_nummer: string | null }): Promise<string | null> {
+  let naam = k.klant_vrij
+  let btw = k.btw_nummer
+  if (k.client_id) {
+    const { data: c } = await admin.from('clients').select('company_name, btw_nummer').eq('id', k.client_id).maybeSingle()
+    const klant = c as { company_name?: string | null; btw_nummer?: string | null } | null
+    naam = klant?.company_name ?? null
+    if (normaliseerBtw(klant?.btw_nummer)) btw = klant?.btw_nummer ?? null
+    else if (normaliseerBtw(k.btw_nummer)) {
+      await admin.from('clients').update({ btw_nummer: normaliseerBtw(k.btw_nummer) }).eq('id', k.client_id)
+      btw = k.btw_nummer
+    }
+  }
+  const mist = ontbreektVoorFase(kolomVan(status), { naam, btw, diensten: k.diensten })
+  return mist.length ? `Vanaf Offerte gestuurd zijn naam, btw-nummer en dienst verplicht. Vul nog in: ${mist.join(', ')}.` : null
 }
 
 /** Schrijven met terugval: zonder de nieuwe kolommen (migratie nog niet gedraaid) gaat de rest gewoon door. */
@@ -352,6 +395,14 @@ export async function POST(req: NextRequest) {
     const fout = (await leesKoppelingen(admin, b, rij)) ?? leesKanban(b, rij)
     if (fout) return NextResponse.json({ error: fout }, { status: 400 })
     if (rij.offerte_via && !rij.offerte_op && kolomVan(status) === 'offerte') rij.offerte_op = vandaagISO()
+    if (!rij.datum) rij.datum = vandaagISO()
+    if (!rij.merk) rij.merk = bedrijfVan(null, (rij.diensten as string[] | undefined) ?? [])
+    const verplicht = await controleerVerplicht(admin, status, {
+      client_id: clientId, klant_vrij: (rij.klant_vrij as string | null) ?? null,
+      diensten: (rij.diensten as string[] | undefined) ?? [], btw_nummer: (rij.btw_nummer as string | null | undefined) ?? null,
+    })
+    if (verplicht) return NextResponse.json({ error: verplicht, verplicht: true }, { status: 400 })
+    if (clientId) rij.btw_nummer = null
     // Geen verantwoordelijke gekozen? Dan die van de klant ("klant van").
     if (!rij.verantwoordelijke && clientId) {
       const { data: k } = await admin.from('clients').select('sales_verantwoordelijke').eq('id', clientId).maybeSingle()
@@ -364,8 +415,6 @@ export async function POST(req: NextRequest) {
       throw new Error(error.message)
     }
 
-    // Meteen in de pipeline: aan de lead van dezelfde klant, of een nieuwe lead.
-    if (!rij.lead_id) await koppelAanLead(admin, String((data as { id: string }).id), { id: actor.id, email: actor.email ?? null })
     const auteur = await auteurVan(actor)
     const eerste = tekst(b.notitie, 4000)
     if (eerste) await voegNotitieToe(admin, String((data as { id: string }).id), eerste, 'notitie', auteur)
@@ -439,19 +488,33 @@ export async function PATCH(req: NextRequest) {
       if (kolomVan(s) === 'offerte' && patch.offerte_via && !('offerte_op' in b)) patch.offerte_op = vandaagISO()
     }
 
+    // Handmatig naar Offerte gestuurd of verder: naam, btw-nummer en dienst moeten er zijn.
+    if ('status' in b && oud && kolomVan(String(patch.status)) !== kolomVan(String(oud.status))) {
+      const { data: huidig } = await admin.from('opdrachten').select('client_id, klant_vrij, diensten, btw_nummer').eq('id', id).maybeSingle()
+      const h = (huidig ?? {}) as { client_id?: string | null; klant_vrij?: string | null; diensten?: string[] | null; btw_nummer?: string | null }
+      const verplicht = await controleerVerplicht(admin, patch.status as OpdrachtStatus, {
+        client_id: 'client_id' in patch ? (patch.client_id as string | null) : (h.client_id ?? null),
+        klant_vrij: 'klant_vrij' in patch ? (patch.klant_vrij as string | null) : (h.klant_vrij ?? null),
+        diensten: 'diensten' in patch ? (patch.diensten as string[]) : (h.diensten ?? []),
+        btw_nummer: 'btw_nummer' in patch ? (patch.btw_nummer as string | null) : (h.btw_nummer ?? null),
+      })
+      if (verplicht) return NextResponse.json({ error: verplicht, verplicht: true }, { status: 400 })
+    }
+    // Btw van een klant met dossier hoort bij de klant (controleerVerplicht zette het daar), niet op de kaart.
+    if ('btw_nummer' in patch) {
+      const klantId = 'client_id' in patch ? patch.client_id : oudKlant?.client_id
+      if (klantId && patch.btw_nummer) {
+        const { data: c } = await admin.from('clients').select('btw_nummer').eq('id', String(klantId)).maybeSingle()
+        if (!normaliseerBtw((c as { btw_nummer?: string | null } | null)?.btw_nummer)) await admin.from('clients').update({ btw_nummer: patch.btw_nummer }).eq('id', String(klantId))
+        patch.btw_nummer = null
+      }
+    }
+
     const { error } = await schrijf((p) => admin.from('opdrachten').update(p).eq('id', id), patch)
     if (error) {
       if (MIST.test(error.message)) return NextResponse.json({ error: HINT }, { status: 503 })
       throw new Error(error.message)
     }
-    // Klant gewijzigd of nog niet gekoppeld: koppel aan de juiste lead in de pipeline.
-    if (('client_id' in b || 'klant_vrij' in b) && !('lead_id' in b)) {
-      const { data: huidig } = await admin.from('opdrachten').select('lead_id, client_id, klant_vrij').eq('id', id).maybeSingle()
-      if (huidig && oudKlant && (String(oudKlant.client_id ?? '') !== String(huidig.client_id ?? '') || String(oudKlant.klant_vrij ?? '') !== String(huidig.klant_vrij ?? ''))) {
-        await admin.from('opdrachten').update({ lead_id: null }).eq('id', id)
-      }
-    }
-    await koppelAanLead(admin, id, { id: actor.id, email: actor.email ?? null })
 
     // Na een handmatige statuskeuze de huidige afleiding als "al toegepast"
     // vastleggen: anders zet de volgende lijstlading de correctie meteen weer

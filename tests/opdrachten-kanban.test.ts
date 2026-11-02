@@ -9,14 +9,15 @@ import { STATUSSEN, magAutomatischNaar, type OpdrachtStatus, type Koppelingen } 
 import {
   KOLOMMEN, kolomVan, statusVoorKolom, stapLabel, kaartKleur, dienstInfo, normaliseerDiensten, raadDiensten,
   bronUitLead, normaliseerVia, offerteViaLabel, facturatieVan, automatischeStatus, verplaatsTekst, dagenSinds,
+  ontbreektVoorFase, normaliseerBtw, bedrijfVan, inPeriode, inWaardeSchijf, statusUitContract,
 } from '../lib/opdrachten-kanban'
 
 let n = 0
 const test = (naam: string, fn: () => void) => { fn(); n++; console.log(`  ✓ ${naam}`) }
 console.log('\nOpdrachten als kanban\n')
 
-test('1. Zeven kolommen in de gevraagde volgorde; elke bestaande status valt in precies één kolom', () => {
-  assert.deepEqual(KOLOMMEN.map((k) => k.label), ['Potentiële opdracht', 'Offerte gestuurd', 'Contract', 'Getekend contract', 'In uitvoering', 'Afgerond', 'Stopgezet of geen akkoord'])
+test('1. Zeven fasen in de gevraagde volgorde (2 nov 2026); elke bestaande status valt in precies één fase', () => {
+  assert.deepEqual(KOLOMMEN.map((k) => k.label), ['Opvolging', 'Offerte gestuurd', 'Contract verstuurd', 'Contract getekend', 'In uitvoering', 'Afgerond', 'Verloren'])
   for (const s of STATUSSEN) assert.equal(KOLOMMEN.filter((k) => k.stappen.includes(s.key)).length, 1, s.key)
   for (const k of KOLOMMEN) assert.equal(kolomVan(k.standaard), k.key)
 })
@@ -146,12 +147,56 @@ test('11. Enkel vooruit: een kaart die we zelf in uitvoering zetten, valt niet t
 
 test('12. Tijdlijn: korte systeemnotities bij verplaatsen', () => {
   assert.equal(verplaatsTekst('open', 'voorstel_voorgelegd', { via: 'mail' }), 'Naar Offerte gestuurd (per mail)')
-  assert.equal(verplaatsTekst('contract_verstuurd', 'getekend', { automatisch: 'contract ondertekend' }), 'Automatisch naar Getekend contract: contract ondertekend')
+  assert.equal(verplaatsTekst('contract_verstuurd', 'getekend', { automatisch: 'contract ondertekend' }), 'Automatisch naar Contract getekend: contract ondertekend')
   assert.equal(verplaatsTekst('bezig', 'geannuleerd', { reden: 'budget weg' }), 'Vroegtijdig stopgezet: budget weg')
   assert.equal(verplaatsTekst('bezig', 'wacht'), 'Stap: In uitvoering → Wacht op klant')
   assert.equal(verplaatsTekst('bezig', 'bezig'), null)
   assert.equal(dagenSinds('2026-10-20T10:00:00Z', new Date('2026-11-01T09:00:00Z')), 11)
   assert.equal(dagenSinds(null), null)
+})
+
+test('Projecten: vanaf Offerte gestuurd zijn naam, btw-nummer en dienst verplicht; Opvolging en Verloren niet', () => {
+  const leeg = { naam: '', btw: null, diensten: [] }
+  assert.deepEqual(ontbreektVoorFase('potentieel', leeg), [])
+  assert.deepEqual(ontbreektVoorFase('stopgezet', leeg), [])
+  assert.deepEqual(ontbreektVoorFase('offerte', leeg), ['naam', 'btw-nummer', 'dienst'])
+  assert.deepEqual(ontbreektVoorFase('uitvoering', { naam: 'Group Cé', btw: 'be 0123.456.789', diensten: ['webdesign'] }), [])
+  assert.deepEqual(ontbreektVoorFase('contract', { naam: 'Group Cé', btw: '12', diensten: ['webdesign'] }), ['btw-nummer'])
+  assert.equal(normaliseerBtw('be 0123.456.789'), 'BE0123456789')
+  assert.equal(normaliseerBtw('abc'), null)
+})
+
+test('Projecten: bedrijf uit de instelling of de diensten (NGS, Founders, anders NGM)', () => {
+  assert.equal(bedrijfVan(null, ['ngs']), 'nextgensolutions')
+  assert.equal(bedrijfVan(null, ['founders']), 'foundersofflanders')
+  assert.equal(bedrijfVan(null, ['webdesign']), 'nextgenmedia')
+  assert.equal(bedrijfVan('nextgensolutions', ['webdesign']), 'nextgensolutions')
+  assert.equal(bedrijfVan('onzin', []), 'nextgenmedia')
+})
+
+test('Projecten: filters op maand, kwartaal, jaar en waarde', () => {
+  assert.equal(inPeriode('2026-11-02', { soort: 'alles' }), true)
+  assert.equal(inPeriode('2026-11-02T10:00:00Z', { soort: 'maand', jaar: 2026, maand: 11 }), true)
+  assert.equal(inPeriode('2026-11-02', { soort: 'maand', jaar: 2026, maand: 10 }), false)
+  assert.equal(inPeriode('2026-11-02', { soort: 'kwartaal', jaar: 2026, kwartaal: 4 }), true)
+  assert.equal(inPeriode('2026-03-31', { soort: 'kwartaal', jaar: 2026, kwartaal: 2 }), false)
+  assert.equal(inPeriode('2025-12-31', { soort: 'jaar', jaar: 2026 }), false)
+  assert.equal(inPeriode(null, { soort: 'jaar', jaar: 2026 }), false)
+  assert.equal(inWaardeSchijf(4950, '1k5k'), true)
+  assert.equal(inWaardeSchijf(5000, '1k5k'), false)
+  assert.equal(inWaardeSchijf(12000, '10k'), true)
+  assert.equal(inWaardeSchijf(null, 'geen'), true)
+  assert.equal(inWaardeSchijf(null, 'tot1k'), false)
+  assert.equal(inWaardeSchijf(null, 'alle'), true)
+})
+
+test('Projecten: een contract opmaken = Contract verstuurd; getekend = Contract getekend; niet doorgegaan of verlopen = Verloren', () => {
+  assert.equal(statusUitContract({ status: 'draft' }, '2026-11-02'), 'contract_verstuurd')
+  assert.equal(statusUitContract({ status: 'viewed' }, '2026-11-02'), 'contract_verstuurd')
+  assert.equal(statusUitContract({ status: 'signed', expires_at: '2020-01-01' }, '2026-11-02'), 'getekend')
+  assert.equal(statusUitContract({ status: 'cancelled' }, '2026-11-02'), 'geen_interesse')
+  assert.equal(statusUitContract({ status: 'viewed', expires_at: '2026-10-31' }, '2026-11-02'), 'geen_interesse')
+  assert.equal(kolomVan(statusUitContract({ status: 'sent' }, '2026-11-02')), 'contract')
 })
 
 console.log(`\n${n} tests geslaagd\n`)

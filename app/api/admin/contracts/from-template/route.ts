@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto'
 import { revalidatePath } from 'next/cache'
 import { logContractEvent } from '@/lib/contract-audit'
 import { typeVanContract } from '@/lib/contracten/types'
+import { kaartVoorContract } from '@/lib/opdrachten-contracten'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
@@ -95,6 +96,8 @@ export async function POST(req: NextRequest) {
       revalidatePath('/portal/contracts')
     } catch { }
 
+    // Projecten: een contract opmaken zet meteen een kaart in "Contract verstuurd".
+    await kaartVoorContract(admin, contractId).catch((e) => console.warn('[contracts] kaart voor contract:', e instanceof Error ? e.message : e))
     return NextResponse.json({ id: contractId })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })

@@ -4,8 +4,6 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { followUp } from '@/lib/contract-status'
 import { FEATURES } from '@/lib/features'
 import { syncGezondheid, SYNC_VEROUDERD_MIN } from '@/lib/sales/clickup-agenda-sync'
-import { getOrCreateSalesOrg } from '@/lib/sales/service'
-import { bouwWachtrij } from '@/lib/sales/focus-queue'
 import { STATUS as AANVRAAG_STATUS, nieuweAanvraagTitel, type AanvraagSoort } from '@/lib/aanvragen/model'
 
 // Eén bron voor meldingen + "Vandaag": alles live afgeleid uit bestaande data
@@ -286,7 +284,7 @@ export async function buildNotifications(): Promise<Notif[]> {
 // de pipeline). `modules` = rechten van de medewerker (null = admin, alles).
 
 export type OpvolgItem = { id: string; titel: string; sub: string | null; href: string; dringend?: boolean }
-export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'meetings' | 'leads' | 'content'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
+export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'meetings' | 'projecten' | 'content'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
 
 const OPVOLG_MAX = 5
 const dagKort = (d: string) => new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' })
@@ -307,7 +305,7 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
     mag('aanvragen') ? opvolgAanvragen() : null,
     mag('contracts') ? opvolgContracten() : null,
     mag('meetings') ? opvolgMeetings() : null,
-    mag('sales') ? opvolgLeads() : null,
+    mag('opdrachten') ? opvolgProjecten() : null,
     mag('content') ? opvolgContent() : null,
   ])
   return groepen.filter((g): g is OpvolgGroep => !!g)
@@ -368,27 +366,31 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
     } catch { return null }
   }
 
-  async function opvolgLeads(): Promise<OpvolgGroep | null> {
+  /**
+   * Projecten die opvolging vragen: kaarten in Opvolging of Offerte gestuurd
+   * waarvan de fase al 7 dagen niet veranderde (oudste eerst). Vervangt het
+   * vroegere blok "Leads opvolgen" uit de belronde.
+   */
+  async function opvolgProjecten(): Promise<OpvolgGroep | null> {
     try {
-      const org = await getOrCreateSalesOrg()
-      const nu = Date.now()
-      // Dezelfde regels als de belronde: vervallen terugbelafspraken en opvolgdatum vandaag of vroeger.
-      const { data } = await admin.from('sales_leads')
-        .select('id, company_id, stage_key, harrie, do_not_call, callback_at, callback_note, opvolgdatum, geen_gehoor_count')
-        .eq('sales_client_id', org.id).is('archived_at', null)
-        .or(`callback_at.lte."${new Date(nu).toISOString()}",opvolgdatum.lte.${vandaagBrussel()}`).limit(1000)
-      const leads = ((data ?? []) as { id: string; company_id: string | null; stage_key: string; harrie: { nogBezig?: boolean | null; reageerde?: boolean | null } | null; do_not_call: boolean; callback_at: string | null; callback_note: string | null; opvolgdatum: string | null; geen_gehoor_count: number | null }[])
-      const rij = bouwWachtrij(leads, nu).nu
-      const ids = rij.slice(0, OPVOLG_MAX).map((l) => l.company_id).filter((x): x is string => !!x)
-      const { data: bedrijven } = ids.length ? await admin.from('sales_companies').select('id, name').in('id', ids) : { data: [] }
-      const naam = new Map(((bedrijven ?? []) as { id: string; name: string }[]).map((b) => [b.id, b.name]))
+      const grens = new Date(Date.now() - 7 * 86_400_000).toISOString()
+      const { data, count } = await admin.from('opdrachten')
+        .select('id, titel, client_id, klant_vrij, status, status_gewijzigd_op, created_at', { count: 'exact' })
+        .in('status', ['open', 'voorstel_gevraagd', 'voorstel_bezig', 'voorstel_klaar', 'voorstel_voorgelegd', 'interesse'])
+        .lt('status_gewijzigd_op', grens).order('status_gewijzigd_op', { ascending: true }).limit(OPVOLG_MAX)
+      const rijen = (data ?? []) as { id: string; titel: string; client_id: string | null; klant_vrij: string | null; status: string; status_gewijzigd_op: string | null; created_at: string }[]
+      const namen = await klantNamen(rijen.map((r) => r.client_id ?? ''))
+      const offerte = new Set(['voorstel_klaar', 'voorstel_voorgelegd', 'interesse'])
       return {
-        key: 'leads', titel: 'Leads opvolgen', totaal: rij.length, alles: '/admin/sales/pipeline', leeg: 'Geen leads die vandaag opvolging vragen.',
-        items: rij.slice(0, OPVOLG_MAX).map((l) => ({
-          id: l.id, titel: (l.company_id && naam.get(l.company_id)) || 'Lead',
-          sub: l.callback_at ? `terugbellen sinds ${momentKort(l.callback_at)}${l.callback_note ? ` · ${l.callback_note.slice(0, 40)}` : ''}` : `opvolgen sinds ${dagKort(l.opvolgdatum ?? '')}`,
-          href: `/admin/sales/pipeline?lead=${l.id}`, dringend: !!l.callback_at,
-        })),
+        key: 'projecten', titel: 'Projecten opvolgen', totaal: count ?? rijen.length, alles: '/admin/opdrachten', leeg: 'Geen projecten die al een week stilstaan.',
+        items: rijen.map((r) => {
+          const dagen = Math.floor((Date.now() - new Date(r.status_gewijzigd_op ?? r.created_at).getTime()) / 86_400_000)
+          return {
+            id: r.id, titel: (r.client_id ? namen.get(r.client_id) : r.klant_vrij) || r.titel,
+            sub: `${offerte.has(r.status) ? 'offerte' : 'opvolging'} · ${dagen} dagen stil · ${r.titel}`.slice(0, 80),
+            href: `/admin/opdrachten?opdracht=${r.id}`, dringend: dagen >= 14,
+          }
+        }),
       }
     } catch { return null }
   }

@@ -5,7 +5,6 @@ import { getActor, actorCanSee } from '@/lib/actor-modules'
 import { TodayPanel } from './today-panel'
 import { ContractsWidget } from './contracts-widget'
 import { RecentActivity } from './recent-activity'
-import { SalesToday } from './sales-today'
 import { OpvolgingPanel } from './opvolging-panel'
 
 // Compact Command Center: Op te volgen (aanvragen, contracten, meetings, leads,
@@ -43,12 +42,6 @@ export default async function CommandCenter() {
       <Suspense fallback={<div className="card-base text-sm text-gray-400">Vandaag laden…</div>}>
         <TodayPanel modules={actor?.modules ?? null} />
       </Suspense>
-
-      {can('sales') && (
-        <Suspense fallback={<div className="card-base text-sm text-gray-400">Verkoop laden…</div>}>
-          <SalesToday />
-        </Suspense>
-      )}
 
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Kritieke contracten + opvolging */}

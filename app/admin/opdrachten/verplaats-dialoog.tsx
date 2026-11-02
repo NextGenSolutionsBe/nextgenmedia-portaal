@@ -3,16 +3,19 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Loader2, X, Send, FileSignature, Ban, CheckCircle2, Euro } from 'lucide-react'
-import { OFFERTE_VIA, kolomInfo, statusVoorKolom, type KolomKey } from '@/lib/opdrachten-kanban'
+import { OFFERTE_VIA, DIENSTEN, kolomInfo, statusVoorKolom, ontbreektVoorFase, normaliseerBtw, type KolomKey } from '@/lib/opdrachten-kanban'
+import { BtwOpzoeken } from '@/components/admin/btw-opzoeken'
 import { formatEuro } from '@/lib/utils'
 import { vandaagISO, type OpdrachtStatus } from '@/lib/opdrachten'
 import type { ContractOptie, KaartOpdracht, VerplaatsExtra } from './types'
 
-export type VerplaatsSoort = 'offerte' | 'contract' | 'stop' | 'afronden'
+export type VerplaatsSoort = 'offerte' | 'contract' | 'stop' | 'afronden' | 'gegevens'
 
 /** Welke vraag hoort bij een verplaatsing? Null = meteen verplaatsen. */
 export function vraagBijVerplaatsen(o: KaartOpdracht, doel: KolomKey): VerplaatsSoort | null {
   if (doel === 'offerte') return 'offerte'
+  // Vanaf Offerte gestuurd: eerst naam, btw-nummer en dienst.
+  if (ontbreektVoorFase(doel, { naam: o.klant_naam, btw: o.btw, diensten: o.diensten }).length) return 'gegevens'
   if (doel === 'contract' && !o.contract_id) return 'contract'
   if (doel === 'stopgezet') return 'stop'
   if (doel === 'afgerond' && !o.facturatie?.volledig) return 'afronden'
@@ -24,9 +27,11 @@ export function vraagBijVerplaatsen(o: KaartOpdracht, doel: KolomKey): Verplaats
  * contract hoort erbij, waarom stopt het, of toch afronden zonder dat alles
  * gefactureerd is.
  */
-export function VerplaatsDialoog({ o, soort, contracten, onClose, onBevestig }: {
+export function VerplaatsDialoog({ o, soort, doel = 'offerte', contracten, onClose, onBevestig }: {
   o: KaartOpdracht
   soort: VerplaatsSoort
+  /** Waar de kaart heen gaat (nodig bij 'gegevens'). */
+  doel?: KolomKey
   contracten: ContractOptie[]
   onClose: () => void
   onBevestig: (status: OpdrachtStatus, extra: VerplaatsExtra) => Promise<boolean>
@@ -41,6 +46,12 @@ export function VerplaatsDialoog({ o, soort, contracten, onClose, onBevestig }: 
   const [notitie, setNotitie] = useState('')
   const [bezig, setBezig] = useState(false)
   const [fout, setFout] = useState<string | null>(null)
+  // Verplicht vanaf Offerte gestuurd: wat nog ontbreekt.
+  const doelKolom: KolomKey = soort === 'gegevens' ? doel : soort === 'offerte' ? 'offerte' : soort === 'contract' ? 'contract' : soort === 'stop' ? 'stopgezet' : 'afgerond'
+  const mist = ontbreektVoorFase(doelKolom, { naam: o.klant_naam, btw: o.btw, diensten: o.diensten })
+  const [naam, setNaam] = useState('')
+  const [btw, setBtw] = useState('')
+  const [diensten, setDiensten] = useState<string[]>(o.diensten)
 
   const opties = useMemo(() => ({
     eigen: contracten.filter((c) => o.client_id && c.client_id === o.client_id),
@@ -50,7 +61,10 @@ export function VerplaatsDialoog({ o, soort, contracten, onClose, onBevestig }: 
   const bevestig = async (zonder?: boolean) => {
     setFout(null)
     const extra: VerplaatsExtra = {}
-    let status: OpdrachtStatus = statusVoorKolom(o.status, soort === 'offerte' ? 'offerte' : soort === 'contract' ? 'contract' : soort === 'stop' ? 'stopgezet' : 'afgerond')
+    let status: OpdrachtStatus = statusVoorKolom(o.status, doelKolom)
+    if (mist.includes('naam')) { if (!naam.trim()) { setFout('Vul de bedrijfsnaam in.'); return } extra.klant_vrij = naam.trim() }
+    if (mist.includes('btw-nummer')) { if (!normaliseerBtw(btw)) { setFout('Vul een geldig btw-nummer in (bv. BE0123456789).'); return } extra.btw_nummer = normaliseerBtw(btw) }
+    if (mist.includes('dienst')) { if (!diensten.length) { setFout('Kies minstens één dienst.'); return } extra.diensten = diensten }
     if (soort === 'offerte') {
       const gekozen = via === 'andere' ? viaEigen.trim() : via
       if (!gekozen) { setFout('Kies hoe je de prijs of offerte gedeeld hebt.'); return }
@@ -70,7 +84,7 @@ export function VerplaatsDialoog({ o, soort, contracten, onClose, onBevestig }: 
     if (ok) onClose()
   }
 
-  const titel = soort === 'offerte' ? 'Offerte gestuurd' : soort === 'contract' ? 'Contract koppelen' : soort === 'stop' ? 'Stopzetten of geen akkoord' : 'Afronden'
+  const titel = soort === 'offerte' ? 'Offerte gestuurd' : soort === 'contract' ? 'Contract koppelen' : soort === 'stop' ? 'Verloren' : soort === 'gegevens' ? `Naar ${kolomInfo(doel).label}` : 'Afronden'
   const Ikoon = soort === 'offerte' ? Send : soort === 'contract' ? FileSignature : soort === 'stop' ? Ban : CheckCircle2
   const keuze = (actief: boolean) => `text-sm px-3 py-2 rounded-xl border transition-colors ${actief ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200 hover:border-gray-400'}`
 
@@ -80,13 +94,47 @@ export function VerplaatsDialoog({ o, soort, contracten, onClose, onBevestig }: 
         role="dialog" aria-modal="true" aria-label={titel}>
         <div className="flex items-start justify-between gap-3 p-5 pb-3">
           <div>
-            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">{o.titel}</p>
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">{o.klant_naam || o.titel}</p>
             <h3 className="text-lg font-semibold flex items-center gap-2 mt-0.5"><Ikoon className="h-5 w-5" />{titel}</h3>
           </div>
           <button type="button" onClick={onClose} aria-label="Sluiten" className="h-9 w-9 rounded-lg flex items-center justify-center hover:bg-gray-100"><X className="h-4 w-4" /></button>
         </div>
 
         <div className="px-5 pb-2 space-y-4 overflow-y-auto">
+          {mist.length > 0 && (
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
+              <p className="text-xs text-gray-600">Vanaf Offerte gestuurd zijn naam, btw-nummer en dienst verplicht. Nog nodig:</p>
+              {mist.includes('naam') && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="vd-naam">Bedrijfsnaam</label>
+                  <input id="vd-naam" className="input-base" value={naam} onChange={(e) => setNaam(e.target.value)} maxLength={120} />
+                </div>
+              )}
+              {mist.includes('btw-nummer') && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="vd-btw">Btw-nummer{o.client_id ? ' (komt bij de klant)' : ''}</label>
+                  <input id="vd-btw" className="input-base" value={btw} onChange={(e) => setBtw(e.target.value)} placeholder="BE0123456789" />
+                  <BtwOpzoeken btw={btw} auto={false} onGevonden={(g) => { if (mist.includes('naam') && !naam.trim() && g.naam) setNaam(g.naam) }} />
+                </div>
+              )}
+              {mist.includes('dienst') && (
+                <div>
+                  <p className="text-xs font-medium text-gray-600 mb-1">Dienst</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {DIENSTEN.map((d) => {
+                      const aan = diensten.includes(d.key as string)
+                      return (
+                        <button key={d.key} type="button" onClick={() => setDiensten((l) => (aan ? l.filter((x) => x !== d.key) : [...l, d.key as string]))}
+                          className={`text-xs px-2.5 py-1.5 rounded-lg border inline-flex items-center gap-1.5 ${aan ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200 hover:border-gray-400'}`}>
+                          <span className="h-2 w-2 rounded-full" style={{ background: d.rand }} />{d.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           {soort === 'offerte' && (
             <>
               <div>
@@ -118,7 +166,7 @@ export function VerplaatsDialoog({ o, soort, contracten, onClose, onBevestig }: 
           {soort === 'contract' && (
             <div>
               <p className="text-sm text-gray-600 mb-2">
-                Koppel het contract dat je verstuurde. Tekent de klant in de app, dan schuift de kaart vanzelf naar Getekend contract.
+                Koppel het contract dat je verstuurde. Tekent de klant in de app, dan schuift de kaart vanzelf naar Contract getekend.
               </p>
               <select className="input-base" value={contractId} onChange={(e) => setContractId(e.target.value)} aria-label="Contract">
                 <option value="">Kies een contract…</option>
@@ -138,7 +186,7 @@ export function VerplaatsDialoog({ o, soort, contracten, onClose, onBevestig }: 
           {soort === 'stop' && (
             <>
               <div className="grid grid-cols-2 gap-2">
-                <button type="button" onClick={() => setStopStatus('geen_interesse')} className={keuze(stopStatus === 'geen_interesse')}>Geen akkoord</button>
+                <button type="button" onClick={() => setStopStatus('geen_interesse')} className={keuze(stopStatus === 'geen_interesse')}>Geen akkoord / verloren</button>
                 <button type="button" onClick={() => setStopStatus('geannuleerd')} className={keuze(stopStatus === 'geannuleerd')}>Vroegtijdig stopgezet</button>
               </div>
               <div>
@@ -172,7 +220,7 @@ export function VerplaatsDialoog({ o, soort, contracten, onClose, onBevestig }: 
           <button type="button" onClick={onClose} className="btn-secondary text-sm">Annuleer</button>
           <button type="button" onClick={() => bevestig()} disabled={bezig} className="btn-primary text-sm">
             {bezig && <Loader2 className="h-4 w-4 animate-spin" />}
-            {soort === 'afronden' ? 'Toch afronden' : `Naar ${kolomInfo(soort === 'offerte' ? 'offerte' : soort === 'contract' ? 'contract' : 'stopgezet').label}`}
+            {soort === 'afronden' ? 'Toch afronden' : `Naar ${kolomInfo(doelKolom).label}`}
           </button>
         </div>
       </div>

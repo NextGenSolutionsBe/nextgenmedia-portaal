@@ -4675,6 +4675,9 @@ DECLARE
   v_nieuw    int := 0;
   v_bestaand int := 0;
 BEGIN
+  -- Uitgeschakeld (2 nov 2026): de pipeline is opgegaan in Projecten. Kaarten
+  -- zonder lead zijn nu normaal; dit blok mag er geen leads meer voor maken.
+  RETURN;
   IF to_regclass('public.opdrachten') IS NULL OR to_regclass('public.sales_lead_opdrachten') IS NULL THEN
     RETURN;
   END IF;
@@ -6858,3 +6861,22 @@ REVOKE ALL ON public.opdracht_taken FROM anon, authenticated;
 ALTER TABLE public.contract_signatures ADD COLUMN IF NOT EXISTS voorwaarden_akkoord_op timestamptz;
 ALTER TABLE public.contract_signatures ADD COLUMN IF NOT EXISTS privacy_akkoord_op timestamptz;
 ALTER TABLE public.contract_signatures ADD COLUMN IF NOT EXISTS akkoord_details jsonb;
+
+-- ── Projecten (2 nov 2026): één CRM voor leads en projecten ─────────────────
+-- Vanaf "Offerte gestuurd" zijn naam, btw-nummer en dienst verplicht. Het
+-- btw-nummer staat bij de klant (clients.btw_nummer); voor een prospect zonder
+-- klantdossier op de kaart zelf. Bedrijf: NextGenMedia, NextGenSolutions of
+-- Founders of Flanders. Datum: wanneer het project begon (voor de filters op
+-- maand, kwartaal en jaar). Elk contract heeft hoogstens één kaart.
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS btw_nummer text;
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS merk text;
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS datum date;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'opdrachten_merk_check') THEN
+    ALTER TABLE public.opdrachten ADD CONSTRAINT opdrachten_merk_check CHECK (merk IS NULL OR merk IN ('nextgenmedia', 'nextgensolutions', 'foundersofflanders'));
+  END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS opdrachten_contract_uniek ON public.opdrachten (contract_id) WHERE contract_id IS NOT NULL;
+
+-- Privébucket voor archieven (o.a. het Excel-archief van de oude verkooppipeline, 2 nov 2026).
+INSERT INTO storage.buckets (id, name, public) VALUES ('archief', 'archief', false) ON CONFLICT (id) DO NOTHING;
