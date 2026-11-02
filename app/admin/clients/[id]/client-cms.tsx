@@ -97,13 +97,13 @@ export function ClientCms({ clientId }: { clientId: string }) {
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Fout') }
   }
 
-  if (loading) return <div className="card-base"><div className="py-4 text-center text-gray-400"><Loader2 className="h-4 w-4 animate-spin mx-auto" /></div></div>
+  if (loading) return <div id="website" className="card-base scroll-mt-6"><div className="py-4 text-center text-gray-400"><Loader2 className="h-4 w-4 animate-spin mx-auto" /></div></div>
 
   const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15'
   const ms = status?.maintenance?.status
 
   return (
-    <div className="card-base space-y-4">
+    <div id="website" className="card-base space-y-4 scroll-mt-6">
       <h2 className="font-semibold text-sm text-gray-900 flex items-center gap-2"><Globe className="h-4 w-4 text-gray-400" />Website</h2>
 
       {/* Hoe is de site gebouwd? Interne administratie — de klant ziet dit nooit. */}

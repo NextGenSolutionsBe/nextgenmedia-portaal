@@ -79,8 +79,8 @@ export default async function WebsitePage() {
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-xl sm:text-2xl font-semibold">Website</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Onderhoudsvragen en websiteklanten beheren</p>
+        <h1 className="text-xl sm:text-2xl font-semibold">Website-onderhoud</h1>
+        <p className="text-sm text-gray-500 mt-0.5">Hoe lang elk onderhoudscontract nog loopt, en de onderhoudsvragen van klanten.</p>
       </div>
       <MaintenanceOverview />
       <WebsiteAdmin

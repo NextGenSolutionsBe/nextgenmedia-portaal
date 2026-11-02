@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
+import { OpslagMeter } from './opslag-meter'
 import { moduleBeschikbaar, MODULE_DASHBOARD_KEY, type AlleInstellingen, type Rol } from '@/lib/instellingen/model'
 import { useEffect, useState } from 'react'
 import { useRefresh } from '@/lib/use-refresh'
@@ -196,13 +197,15 @@ function NavItem({
   )
 }
 
-export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, instellingen, rol = 'hoofdbeheerder', verborgenPersoonlijk = [], toonInstellingen = false, mijnWerk = false }: {
+export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, fotoVersie = null, instellingen, rol = 'hoofdbeheerder', verborgenPersoonlijk = [], toonInstellingen = false, mijnWerk = false }: {
   allowedModules?: string[]
   isEmployee?: boolean
   /** Voornaam van wie er ingelogd is — voor de begroeting bovenaan. */
   naam?: string
   /** Het e-mailadres eronder: het harde antwoord op "welk account is dit?". */
   email?: string
+  /** Eigen profielfoto (Mijn account); null = initiaal. */
+  fotoVersie?: string | null
   /** Centrale instellingen (globale zichtbaarheid + toegang per rol). Zonder = alles zoals vroeger. */
   instellingen?: AlleInstellingen
   rol?: Rol
@@ -216,6 +219,8 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
   const router = useRouter()
   const { refresh, spinning } = useRefresh()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [fotoKapot, setFotoKapot] = useState(false)
+  useEffect(() => { setFotoKapot(false) }, [fotoVersie])
   // Telbolletjes. Los van de rest opgehaald: haperen ze, dan staat het menu er
   // gewoon zonder — een bolletje is nooit de reden om navigatie op te houden.
   const [badges, setBadges] = useState<Record<string, number>>({})
@@ -334,9 +339,11 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
             naam voor het gemak, het adres als het harde antwoord. */}
         {(naam || email) && (
           <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2.5">
-            <div className="h-8 w-8 shrink-0 rounded-full bg-white/10 text-white flex items-center justify-center text-sm font-semibold">
-              {(naam || email || '?').charAt(0).toUpperCase()}
-            </div>
+            <Link href="/admin/account" prefetch={false} onClick={closeMobile} title="Mijn account" className="h-8 w-8 shrink-0 rounded-full bg-white/10 text-white flex items-center justify-center text-sm font-semibold overflow-hidden">
+              {fotoVersie && !fotoKapot
+                ? <img src={`/api/admin/account/foto?v=${encodeURIComponent(fotoVersie)}`} alt="" className="h-full w-full object-cover" onError={() => setFotoKapot(true)} />
+                : (naam || email || '?').charAt(0).toUpperCase()}
+            </Link>
             <div className="min-w-0">
               <div className="text-sm font-medium text-white leading-tight truncate">
                 {naam ? `Welkom, ${naam}` : 'Welkom'}
@@ -380,6 +387,7 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
             <UserCircle className="h-4 w-4 shrink-0" />
             Mijn account
           </Link>
+          {toonInstellingen && <OpslagMeter onNavigate={closeMobile} />}
           {toonInstellingen && (
             <Link href="/admin/instellingen" prefetch={false} onClick={closeMobile}
               className={cn('sidebar-item', padNu.startsWith('/admin/instellingen') && 'active')}>

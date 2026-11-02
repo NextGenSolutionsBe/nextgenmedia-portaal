@@ -101,3 +101,48 @@ export function needsReminder(c: MaintenanceClient, now = new Date()): boolean {
   if (s.daysLeft < -7) return false
   return c.maintenance_reminder_sent_for !== s.endDate
 }
+
+/** Hele kalendermaanden tussen vandaag en de einddatum (0 als er minder dan een maand rest). */
+function heleMaanden(van: Date, tot: Date): number {
+  let n = 0
+  while (n < 600 && addMonths(van, n + 1).getTime() <= tot.getTime()) n++
+  return n
+}
+
+/**
+ * Hoe lang het onderhoud nog loopt, kort: "nog 7 maanden", "nog 23 dagen",
+ * "loopt vandaag af", "3 dagen verlopen". Onder twee maanden in dagen, want
+ * dan telt elke dag.
+ */
+export function resterendTekst(s: MaintenanceStatus, now = new Date()): string {
+  if (!s.active) return 'Geen onderhoud'
+  if (s.daysLeft === null || !s.endDate) return 'Startdatum ontbreekt'
+  if (s.daysLeft < 0) { const d = -s.daysLeft; return `${d} ${d === 1 ? 'dag' : 'dagen'} verlopen` }
+  if (s.daysLeft === 0) return 'Loopt vandaag af'
+  if (s.daysLeft < 60) return `nog ${s.daysLeft} ${s.daysLeft === 1 ? 'dag' : 'dagen'}`
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  const m = heleMaanden(today, parseDate(s.endDate) as Date)
+  return `nog ${m} ${m === 1 ? 'maand' : 'maanden'}`
+}
+
+/** Welk deel van de looptijd voorbij is (0 tot 1), voor een voortgangsbalk. */
+export function verstreken(s: MaintenanceStatus, now = new Date()): number | null {
+  if (!s.startDate || !s.endDate) return null
+  const start = (parseDate(s.startDate) as Date).getTime()
+  const eind = (parseDate(s.endDate) as Date).getTime()
+  if (eind <= start) return 1
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  return Math.min(1, Math.max(0, (today - start) / (eind - start)))
+}
+
+/**
+ * Onderhoud dat opvolging vraagt (Command Center, meldingen): verlopen maar nog
+ * aangevinkt (verlengen of afzetten), binnen 30 dagen af, of zonder startdatum.
+ * Dringendste eerst: zonder startdatum, dan op einddatum.
+ */
+export function onderhoudOpvolgen<T extends MaintenanceClient>(klanten: T[], now = new Date()): { klant: T; status: MaintenanceStatus }[] {
+  return klanten
+    .map((klant) => ({ klant, status: maintenanceStatus(klant, now) }))
+    .filter(({ status: s }) => s.active && (s.daysLeft === null || s.expired || s.expiringSoon))
+    .sort((a, b) => (a.status.daysLeft ?? -Infinity) - (b.status.daysLeft ?? -Infinity))
+}

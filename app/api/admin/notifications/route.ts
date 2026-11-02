@@ -19,6 +19,7 @@ export async function GET() {
     const notifications = all.filter((n) => {
       const mod = KIND_MODULE[n.kind]
       if (mod === 'personeel') return actor.isAdmin // Personeel = enkel hoofdbeheerders
+      if (n.kind === 'opslag') return actor.isAdmin  // opslag = instellingen
       return !mod || actorCanSee(actor, mod)
     })
     return NextResponse.json({ notifications })

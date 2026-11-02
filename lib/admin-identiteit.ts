@@ -1,6 +1,7 @@
 import 'server-only'
 import { headers } from 'next/headers'
 import { getSessionUser, getUserRole, getStaffRow } from '@/lib/supabase/server'
+import { fotoVersie } from '@/lib/account'
 
 /**
  * Rol en modulerechten van de ingelogde interne gebruiker, voor de adminshell.
@@ -33,6 +34,8 @@ export type AdminIdentiteit = {
   naam: string
   /** Het e-mailadres van de sessie — het harde antwoord op "welk account is dit?". */
   email: string
+  /** Versie van de eigen profielfoto (Mijn account), of null zonder foto. */
+  fotoVersie: string | null
   /** 'admin' | 'employee', of undefined als de gebruiker geen van beide is. */
   role: string | undefined
   /** undefined = admin (alles); anders de toegestane module-keys. */
@@ -111,19 +114,20 @@ const GEDEELD = new Set(['info', 'admin', 'contact', 'hallo', 'hello', 'team', '
 function naamVan(
   user: { email?: string | null; user_metadata?: Record<string, unknown> },
   staffNaam: string | null,
-): { naam: string; email: string } {
+): { naam: string; email: string; fotoVersie: string | null } {
   const email = user.email ?? ''
+  const foto = fotoVersie(user)
   const uitMeta = (k: string) => {
     const v = user.user_metadata?.[k]
     return typeof v === 'string' && v.trim() ? v.trim() : ''
   }
   const lokaal = email.split('@')[0] ?? ''
-  const ruw = uitMeta('name') || uitMeta('full_name') || (staffNaam ?? '').trim()
+  const ruw = uitMeta('voornaam') || uitMeta('name') || uitMeta('full_name') || (staffNaam ?? '').trim()
     || (GEDEELD.has(lokaal.toLowerCase()) ? '' : lokaal)
-  if (!ruw) return { naam: '', email }
+  if (!ruw) return { naam: '', email, fotoVersie: foto }
 
   // Alleen de voornaam, met een hoofdletter: "Welkom, Fabio" leest beter dan
   // "Welkom, fabio.vandenberghe".
   const eerste = ruw.split(/[\s._-]+/)[0]
-  return { naam: eerste.charAt(0).toUpperCase() + eerste.slice(1), email }
+  return { naam: eerste.charAt(0).toUpperCase() + eerste.slice(1), email, fotoVersie: foto }
 }

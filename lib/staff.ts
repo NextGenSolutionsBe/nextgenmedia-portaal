@@ -69,6 +69,9 @@ export const STAFF_API_WHITELIST = [
   // per module (lib/actor-modules.ts), dus een werknemer ziet enkel eigen data.
   '/api/admin/search',
   '/api/admin/notifications',
+  // Mijn account: enkel het eigen account (naam, e-mail, wachtwoord, foto).
+  '/api/admin/account/profiel',
+  '/api/admin/account/foto',
 ]
 
 /** Gevoelige API-paden die ALTIJD admin-only blijven, ook al valt het pad binnen
