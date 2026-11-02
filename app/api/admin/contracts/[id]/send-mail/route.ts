@@ -1,7 +1,8 @@
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient , isActiveStaff } from '@/lib/supabase/server'
-import { sendEmail, EMAIL_FROM } from '@/lib/email'
+import { sendEmailMetAfzenderTerugval, EMAIL_FROM, resendKeyFor } from '@/lib/email'
+import { mailMerkVan, MERK_STIJL } from '@/lib/merk-mail'
 import { buildEmailHtml, buildEmailText } from '@/lib/email-html'
 import { logContractEvent } from '@/lib/contract-audit'
 import { revalidatePath } from 'next/cache'
@@ -67,7 +68,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // Optioneel: een verborgen kopie naar het eigen adres (aanvulling op het logboek, geen vervanging).
     const bcc = b.kopie_naar_mij === true && user.email && EMAIL.test(user.email) ? [user.email] : []
 
-    const htmlOpts = { bodyText: body, ctaText, ctaLink }
+    const merk = mailMerkVan(b.merk)
+    const van = merk === 'nextgenmedia' ? EMAIL_FROM : MERK_STIJL[merk].van
+    const htmlOpts = { bodyText: body, ctaText, ctaLink, merk }
     const html = buildEmailHtml(htmlOpts)
     const text = buildEmailText(htmlOpts)
     const nu = () => new Date().toISOString()
@@ -76,13 +79,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // 1. Eerst loggen: zo is elke verzendpoging terug te vinden, ook als er onderweg iets misgaat.
     const logId = await veerkrachtig(admin, 'insert', {
       to_email: toEmail, to_client_id: contract.client_id || null, contract_id: id, related_id: id,
-      subject, body, html, cc: cc.join(', ') || null, bcc: bcc.join(', ') || null, from_email: EMAIL_FROM, bijlage,
+      subject, body, html, cc: cc.join(', ') || null, bcc: bcc.join(', ') || null, from_email: van, bijlage,
       template_id: b.template_id || null, template_name: b.template_name || null, kind: 'contract', audience: 'client',
       status: 'bezig', sent_by: user.id, sent_by_email: user.email ?? null, updated_at: nu(),
     })
 
     // 2. Versturen.
-    const result = await sendEmail({ to: toEmail, subject, text, html, cc, bcc })
+    const result = await sendEmailMetAfzenderTerugval({ to: toEmail, subject, text, html, cc, bcc, from: merk === 'nextgenmedia' ? null : van, apiKey: resendKeyFor(merk) })
 
     // 3. Resultaat vastleggen (status + berichtreferentie of foutmelding).
     if (logId) await veerkrachtig(admin, 'update', { status: result.ok ? 'sent' : 'error', error: result.ok ? null : result.error ?? 'Onbekende fout', provider_id: result.id || null, updated_at: nu() }, logId)

@@ -1,7 +1,8 @@
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient , isActiveStaff } from '@/lib/supabase/server'
-import { sendEmail, EMAIL_FROM } from '@/lib/email'
+import { sendEmailMetAfzenderTerugval, EMAIL_FROM, resendKeyFor } from '@/lib/email'
+import { mailMerkVan, MERK_STIJL } from '@/lib/merk-mail'
 import { buildEmailHtml, buildEmailText } from '@/lib/email-html'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
@@ -85,12 +86,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const htmlOpts = { bodyText: body, ctaText, ctaLink }
+    // Merk: huisstijl en afzender (NextGenSolutions valt terug op het hoofdadres zolang dat domein niet geverifieerd is).
+    const merk = mailMerkVan(b.merk)
+    const van = merk === 'nextgenmedia' ? EMAIL_FROM : MERK_STIJL[merk].van
+    const htmlOpts = { bodyText: body, ctaText, ctaLink, merk }
     const html = buildEmailHtml(htmlOpts)
     const text = buildEmailText(htmlOpts)
     const nu = () => new Date().toISOString()
     const rij = {
-      to_email: toEmail, to_client_id: clientId, subject, body, html, from_email: EMAIL_FROM,
+      to_email: toEmail, to_client_id: clientId, subject, body, html, from_email: van,
       template_id: b.template_id && UUID.test(String(b.template_id)) ? b.template_id : null, template_name: b.template_name || null,
       kind: b.kind || 'generic', audience: 'client', related_id: deadline?.id ?? null, verzend_sleutel: sleutel,
       sent_by: user.id, sent_by_email: user.email ?? null, updated_at: nu(),
@@ -107,7 +111,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Versturen.
-    const result = await sendEmail({ to: toEmail, subject, text, html })
+    const result = await sendEmailMetAfzenderTerugval({ to: toEmail, subject, text, html, from: merk === 'nextgenmedia' ? null : van, apiKey: resendKeyFor(merk) })
 
     // 3. Resultaat vastleggen. Lukte het vooraf loggen niet, dan alsnog achteraf (zoals voorheen).
     const resultaat = { status: result.ok ? 'sent' : 'error', error: result.ok ? null : result.error ?? 'Onbekende fout', provider_id: result.id || null, updated_at: nu() }

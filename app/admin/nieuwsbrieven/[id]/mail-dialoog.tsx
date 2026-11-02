@@ -15,7 +15,7 @@ type Resultaat = { verstuurd: number; overgeslagen: number; mislukt: { email: st
  * staat uit en kan niet aangevinkt worden.
  */
 export function MailDialoog({ id, onSluit, onVerstuurd }: { id: string; onSluit: () => void; onVerstuurd: () => void }) {
-  const [data, setData] = useState<{ voorbeeld: { onderwerp: string; html: string }; ontvangers: Ontvanger[] } | null>(null)
+  const [data, setData] = useState<{ voorbeeld: { onderwerp: string; html: string; van?: string }; ontvangers: Ontvanger[] } | null>(null)
   const [gekozen, setGekozen] = useState<Set<string>>(new Set())
   const [zoek, setZoek] = useState('')
   const [nagekeken, setNagekeken] = useState(false)
@@ -63,7 +63,7 @@ export function MailDialoog({ id, onSluit, onVerstuurd }: { id: string; onSluit:
           </div>
         ) : (
           <div className="space-y-3">
-            <p className="text-sm text-gray-600">Onderwerp: <b>{data.voorbeeld.onderwerp}</b>. Vertrekt vanuit info@nextgenmedia.be, met onderaan een afmeldlink.</p>
+            <p className="text-sm text-gray-600">Onderwerp: <b>{data.voorbeeld.onderwerp}</b>. Vertrekt namens {data.voorbeeld.van ?? 'NextGenMedia'}, met onderaan een afmeldlink.</p>
             <div className="flex gap-1.5" role="tablist">
               {(['ontvangers', 'voorbeeld'] as const).map((t) => <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${tab === t ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200'}`}>{t === 'ontvangers' ? `Ontvangers (${gekozen.size})` : 'Voorbeeld van de mail'}</button>)}
             </div>
