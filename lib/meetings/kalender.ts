@@ -198,8 +198,9 @@ type AgendaPersoon = { id: string; name?: string | null; account_email?: string 
 export const korteNaam = (n?: string | null): string => String(n ?? '').split(/\s+[—–-]\s+/)[0].trim().toLowerCase()
 
 /**
- * Horen twee agenda-koppelingen bij dezelfde persoon? Zelfde Google-account
- * EN dezelfde ClickUp-persoon (of, als die ontbreekt, dezelfde voornaam).
+ * Horen twee agenda-koppelingen bij dezelfde persoon? Dezelfde ClickUp-persoon
+ * (ook op een ander Google-account), of op hetzelfde Google-account dezelfde
+ * voornaam als een ClickUp-persoon ontbreekt.
  *
  * Waarom niet enkel het Google-account: bij NextGenMedia hangen de agenda's
  * van Bram én Marco aan hetzelfde Google-account. Op account alleen telde een
@@ -209,8 +210,12 @@ export const korteNaam = (n?: string | null): string => String(n ?? '').split(/\
  */
 export function zelfdePersoon(a: AgendaPersoon, b: AgendaPersoon): boolean {
   if (a.id === b.id) return true
+  // Dezelfde ClickUp-persoon is dezelfde persoon, ook over Google-accounts heen
+  // (Bram verhuisde in nov 2026 van Marco's account naar zijn eigen Gmail).
+  const ca = Number(a.clickup_assignee_id) || 0, cb = Number(b.clickup_assignee_id) || 0
+  if (ca && cb && ca === cb) return true
   if (!a.account_email || a.account_email !== b.account_email) return false
-  if (a.clickup_assignee_id && b.clickup_assignee_id) return Number(a.clickup_assignee_id) === Number(b.clickup_assignee_id)
+  if (ca && cb) return false
   const na = korteNaam(a.name)
   return !!na && na === korteNaam(b.name)
 }

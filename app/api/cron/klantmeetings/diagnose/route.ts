@@ -38,6 +38,7 @@ export const maxDuration = 60
  * geheim als de scheduler.
  *  · standaard: leest enkel (Google-agenda, ClickUp-lijst, Resend)
  *  · ?schrijftest=1: afspraak ZONDER genodigden met Meet-link, meteen stil weg
+ *  · ?agendas=<koppeling>: de Google-agenda's die die koppeling ziet (naam, rol, telt als bezet). Leest enkel.
  *  · ?zelftest=klantboeking: één volledige testboeking zoals een klant ze doet
  *    (op het verste vrije moment, naar info@nextgenmedia.be), daarna verplaatst
  *    en geannuleerd via de beheerlink. Echte Google-, ClickUp- en mailstappen.
@@ -133,6 +134,15 @@ export async function POST(req: NextRequest) {
       const klant = req.nextUrl.searchParams.get('klant') ?? '', ander = req.nextUrl.searchParams.get('ander') ?? ''
       if (!UUID.test(klant) || !UUID.test(ander) || klant === ander) return NextResponse.json({ error: 'klant en ander (twee verschillende testklanten) zijn verplicht' }, { status: 400 })
       return NextResponse.json(await zelftestKlantapp(admin, klant, ander))
+    }
+    // Leest enkel: welke Google-agenda's ziet een koppeling (naam, rol) en welke tellen als bezet.
+    const agendasVan = req.nextUrl.searchParams.get('agendas')
+    if (agendasVan && UUID.test(agendasVan)) {
+      const { data: k } = await admin.from('sales_calendar_connections').select('id, name, account_email, calendar_id, busy_calendar_ids').eq('id', agendasVan).maybeSingle()
+      if (!k) return NextResponse.json({ error: 'Onbekende koppeling' }, { status: 404 })
+      const bezet = new Set(Array.isArray(k.busy_calendar_ids) ? k.busy_calendar_ids as string[] : [])
+      const lijst = await listCalendars(agendasVan)
+      return NextResponse.json({ koppeling: k.name, account: k.account_email, schrijfagenda: k.calendar_id, agendas: lijst.map((a) => ({ ...a, telt_als_bezet: bezet.has(a.id) })) })
     }
     if (req.nextUrl.searchParams.get('kalenderdata') === '1') return NextResponse.json(await kalenderOverzicht(admin, req.nextUrl.searchParams.get('agenda')))
     if (req.nextUrl.searchParams.get('kalender') === '1') return NextResponse.json(await kalenderDiagnose(req.nextUrl.searchParams.get('taken')))
