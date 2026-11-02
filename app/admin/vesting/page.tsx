@@ -5,6 +5,7 @@ import { createAdminSupabaseClient, requireAdmin } from '@/lib/supabase/server'
 import { VestingClient } from './vesting-client'
 import { directeKostenVoorContracten } from '@/lib/facturen/kosten-data'
 import { factuurUitRij } from '@/lib/vesting'
+import { NIET_MEETELLEN_SLEUTEL } from '@/lib/vesting-snel'
 
 /**
  * Vestigingsprincipe — het contractmodel van de samenwerkingsovereenkomst.
@@ -25,11 +26,19 @@ export default async function VestingPage() {
     admin.from('vesting_revenue').select('*').order('entry_date'),
     admin.from('vesting_wam_termijnen').select('*').order('factuurdatum').order('volgnr'),
     // De Contractenmodule: waar een vestingcontract aan gekoppeld kan worden.
-    admin.from('contracts').select('id, title, status, client_id, start_date, end_date, signed_at, service_slug, clients ( company_name )').order('created_at', { ascending: false }).limit(500),
+    admin.from('contracts').select('id, title, status, client_id, start_date, end_date, signed_at, service_slug, contract_waarde_excl, clients ( company_name )').order('created_at', { ascending: false }).limit(500),
     admin.from('clients').select('id, company_name, sales_verantwoordelijke, appointment_setter').order('company_name'),
     // De facturen (termijnen) per vestingcontract.
     admin.from('vesting_contract_termijnen').select('*').order('factuurdatum').order('volgnr'),
   ])
+  // Getekende contracten die bewust niet meetellen (uit "Te beoordelen" gehaald).
+  let nietMeetellen: string[] = []
+  try {
+    const { data } = await admin.from('app_settings').select('value').eq('key', NIET_MEETELLEN_SLEUTEL).maybeSingle()
+    const ids = (data?.value as { ids?: unknown } | null)?.ids
+    nietMeetellen = Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : []
+  } catch { /* lijst is een extra */ }
+  const wamGekoppeld = ((wam.data ?? []) as { contract_id?: string | null }[]).map((r) => r.contract_id).filter((x): x is string => !!x)
 
   // Directe kosten op de facturen van gekoppelde contracten → aftrek in de
   // nettoberekening (afgeleid; het handmatige veld blijft bestaan).
@@ -66,6 +75,8 @@ export default async function VestingPage() {
       termijnRijen={(termijnen.data ?? []) as Record<string, unknown>[]}
       contractTermijnRijen={(contractTermijnen.data ?? []) as Record<string, unknown>[]}
       facturen={facturen}
+      nietMeetellen={nietMeetellen}
+      wamGekoppeld={wamGekoppeld}
       moduleContracten={(moduleContracten.data ?? []) as unknown as Record<string, unknown>[]}
       klanten={((klanten.data ?? []) as { id: string; company_name: string | null; sales_verantwoordelijke?: string | null; appointment_setter?: string | null }[]).map((k) => ({ id: k.id, naam: k.company_name ?? '—', closer: k.sales_verantwoordelijke ?? null, setter: k.appointment_setter ?? null }))}
     />

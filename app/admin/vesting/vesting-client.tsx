@@ -17,6 +17,8 @@ import { GetalInvoer } from '@/components/ui/getal-invoer'
 import { leesGetal, getalAlsInvoer } from '@/lib/getal'
 import { Bevestig } from '@/app/admin/instellingen/ui'
 import { zoekVeld } from '@/lib/zoekveld'
+import { teBeoordelen, type KandidaatContract } from '@/lib/vesting-snel'
+import { PrijsToevoegen, TeBeoordelen } from './prijs-toevoegen'
 import {
   berekenVesting, leesInstellingen, pct, totaalwaarde, duurUitData, toerekeningsfactor, wamSchema,
   STATUS_LABEL, ERKENNING_LABEL, JAAR_LABEL, DIENSTEN, FREQUENTIES, TERMIJN_LABEL,
@@ -26,7 +28,7 @@ import {
 } from '@/lib/vesting'
 
 /** Een contract uit de Contractenmodule, zoals de picker het toont. */
-type ModuleContract = { id: string; titel: string; status: string; client_id: string | null; klant: string | null; start_date: string | null; end_date: string | null; signed_at: string | null; service_slug: string | null }
+type ModuleContract = { id: string; titel: string; status: string; client_id: string | null; klant: string | null; start_date: string | null; end_date: string | null; signed_at: string | null; service_slug: string | null; waarde: number | null }
 /** closer/setter = 'Klant van' en 'Appointment gezet door' uit het klantenbestand. */
 type Klant = { id: string; naam: string; closer?: string | null; setter?: string | null }
 
@@ -126,6 +128,7 @@ function naarModuleContract(r: Record<string, unknown>): ModuleContract {
     id: String(r.id), titel: String(r.title ?? 'Contract'), status: String(r.status ?? 'draft'),
     client_id: (r.client_id as string | null) ?? null, klant: klant ?? null,
     start_date: d(r.start_date), end_date: d(r.end_date), signed_at: d(r.signed_at), service_slug: (r.service_slug as string | null) ?? null,
+    waarde: n(r.contract_waarde_excl),
   }
 }
 function naarKost(r: Record<string, unknown>): WamKost {
@@ -137,7 +140,11 @@ const ERKENNING_STIJL: Record<Erkenning, string> = {
   uitgesloten: 'bg-red-100 text-red-700', onvolledig: 'bg-gray-100 text-gray-600',
 }
 
-export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRijen, oudeRegistraties, termijnRijen = [], moduleContracten = [], klanten = [], contractTermijnRijen = [], facturen = [] }: {
+export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRijen, oudeRegistraties, termijnRijen = [], moduleContracten = [], klanten = [], contractTermijnRijen = [], facturen = [], nietMeetellen = [], wamGekoppeld = [] }: {
+  /** Getekende contracten die bewust niet meetellen. */
+  nietMeetellen?: string[]
+  /** Contracten die al aan een WAM-klant hangen. */
+  wamGekoppeld?: string[]
   contractTermijnRijen?: Record<string, unknown>[]
   facturen?: GekoppeldeFactuur[]
   instellingenRij: Record<string, unknown> | null
@@ -152,6 +159,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
   const router = useRouter()
   const [tab, setTab] = useState<Tab>('overzicht')
   const [contractDialoog, setContractDialoog] = useState<Contract | 'nieuw' | null>(null)
+  const [prijsDialoog, setPrijsDialoog] = useState<KandidaatContract | 'nieuw' | null>(null)
   const [wamDialoog, setWamDialoog] = useState<WamRij | 'nieuw' | null>(null)
   const [kostDialoog, setKostDialoog] = useState<WamKost | 'nieuw' | null>(null)
   const [openWam, setOpenWam] = useState<string | null>(null)
@@ -170,6 +178,12 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
   const module = useMemo(() => moduleContracten.map(naarModuleContract), [moduleContracten])
   const modulePerId = useMemo(() => new Map(module.map((m) => [m.id, m])), [module])
   const contractTermijnen = useMemo(() => contractTermijnRijen.map(naarContractTermijn), [contractTermijnRijen])
+  // Getekend in Contracten/Projecten maar nog niet in Vesting (en niet afgewezen).
+  const kandidaten = useMemo(() => teBeoordelen(
+    module.map((m) => ({ id: m.id, titel: m.titel, status: m.status, client_id: m.client_id, klant: m.klant, signed_at: m.signed_at, start_date: m.start_date, waarde: m.waarde })),
+    new Set([...contracten.map((c) => c.contract_id).filter((x): x is string => !!x), ...wamGekoppeld]),
+    new Set(nietMeetellen),
+  ), [module, contracten, wamGekoppeld, nietMeetellen])
   const v = useMemo(() => berekenVesting(contracten, wam, kosten, inst, termijnen, contractTermijnen, facturen), [contracten, wam, kosten, inst, termijnen, contractTermijnen, facturen])
 
   // Verwijderen gaat altijd via een bevestiging die zegt wat er gebeurt.
@@ -225,8 +239,8 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
         </div>
         <div className="flex gap-2 flex-wrap">
           <ExportKnop werkmap={() => vestingWerkmap({ v, inst, kosten, tab: TABS.find((t) => t.key === tab)?.label })} />
-          <button onClick={() => { setTab('contracten'); setContractDialoog('nieuw') }} className="btn-primary text-sm">
-            <Plus className="h-4 w-4" />Contract toevoegen
+          <button onClick={() => setPrijsDialoog('nieuw')} className="btn-primary text-sm">
+            <Plus className="h-4 w-4" />Prijs toevoegen
           </button>
         </div>
       </div>
@@ -244,6 +258,17 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
       </div>
 
       {/* ══ OVERZICHT ══════════════════════════════════════════════════════ */}
+      {(tab === 'overzicht' || tab === 'contracten') && (
+        <TeBeoordelen lijst={kandidaten} onToevoegen={(c) => setPrijsDialoog(c)} onVerwerkt={() => startVerversen(() => router.refresh())} />
+      )}
+
+      {prijsDialoog && (
+        <PrijsToevoegen kandidaat={prijsDialoog === 'nieuw' ? null : prijsDialoog} kandidaten={kandidaten} klanten={klanten}
+          onClose={() => setPrijsDialoog(null)}
+          onBewaard={() => { setPrijsDialoog(null); startVerversen(() => router.refresh()) }}
+          onUitgebreid={() => { setPrijsDialoog(null); setTab('contracten'); setContractDialoog('nieuw') }} />
+      )}
+
       {tab === 'overzicht' && (
         <div className="space-y-6">
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
