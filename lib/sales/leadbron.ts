@@ -44,9 +44,9 @@ export const LEADBRON_STYLE: Record<Leadbron, string> = {
 export const DIENSTEN = [
   'Social media',
   'Website',
-  'Branding',
+  'Grafisch ontwerp',
   'Video',
-  'Advertenties',
+  'Advertising',
   'SEO',
   'Automatisering',
   'Anders',

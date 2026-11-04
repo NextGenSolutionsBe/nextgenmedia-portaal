@@ -3,22 +3,22 @@
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2, X, Sparkles, Check } from 'lucide-react'
-import { DIENSTEN, BRONNEN, raadDiensten, kaartKleur, kolomInfo, kolomVan, type Bron } from '@/lib/opdrachten-kanban'
+import { DIENSTEN, PROJECT_VERANTWOORDELIJKEN, projectVerantwoordelijke, raadDiensten, kaartKleur, kolomInfo, kolomVan } from '@/lib/opdrachten-kanban'
 import type { KaartOpdracht } from './types'
 
-type Rij = { id: string; diensten: string[]; bron: Bron | '' }
+type Rij = { id: string; diensten: string[]; verantwoordelijke: string }
 
 /**
- * Kaarten zonder dienst of bron in één keer aanvullen. Per kaart staat een
- * voorstel klaar (dienst uit de titel, bron uit de pipeline); je past aan wat
- * niet klopt en bewaart. Niets wordt zonder deze knop gewijzigd.
+ * Kaarten zonder dienst of verantwoordelijke in één keer aanvullen. Per kaart
+ * staat een voorstel klaar (dienst uit de titel); je past aan wat niet klopt en
+ * bewaart. Niets wordt zonder deze knop gewijzigd.
  */
 export function AanvullenDialoog({ kaarten, onClose, onKlaar }: { kaarten: KaartOpdracht[]; onClose: () => void; onKlaar: () => void }) {
-  const teDoen = useMemo(() => kaarten.filter((o) => o.diensten.length === 0 || !o.bron), [kaarten])
+  const teDoen = useMemo(() => kaarten.filter((o) => o.diensten.length === 0 || !projectVerantwoordelijke(o.verantwoordelijke)), [kaarten])
   const [rijen, setRijen] = useState<Record<string, Rij>>(() => Object.fromEntries(teDoen.map((o) => [o.id, {
     id: o.id,
     diensten: o.diensten.length ? o.diensten : raadDiensten(o.titel),
-    bron: o.bron ?? o.bron_voorstel ?? '',
+    verantwoordelijke: projectVerantwoordelijke(o.verantwoordelijke) ?? '',
   }])))
   const [bezig, setBezig] = useState(false)
 
@@ -33,7 +33,7 @@ export function AanvullenDialoog({ kaarten, onClose, onKlaar }: { kaarten: Kaart
       const r = rijen[o.id]
       const it: Record<string, unknown> = { id: o.id }
       if (o.diensten.length === 0 && r.diensten.length) it.diensten = r.diensten
-      if (!o.bron && r.bron) it.bron = r.bron
+      if (!projectVerantwoordelijke(o.verantwoordelijke) && r.verantwoordelijke) it.verantwoordelijke = r.verantwoordelijke
       return it
     }).filter((it) => Object.keys(it).length > 1)
     if (!items.length) { toast.message('Niets ingevuld om te bewaren.'); return }
@@ -52,7 +52,7 @@ export function AanvullenDialoog({ kaarten, onClose, onKlaar }: { kaarten: Kaart
         <div className="flex items-start justify-between gap-3 p-5 border-b border-gray-100">
           <div>
             <h3 className="text-lg font-semibold flex items-center gap-2"><Sparkles className="h-5 w-5" />Kaarten aanvullen</h3>
-            <p className="text-sm text-gray-600 mt-0.5">{teDoen.length} kaart{teDoen.length === 1 ? '' : 'en'} zonder dienst of bron. Het voorstel komt uit de titel en de pipeline: klopt het niet, klik het weg.</p>
+            <p className="text-sm text-gray-600 mt-0.5">{teDoen.length} kaart{teDoen.length === 1 ? '' : 'en'} zonder dienst of verantwoordelijke. De dienst is een voorstel uit de titel: klopt het niet, klik het weg.</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Sluiten" className="h-9 w-9 rounded-lg flex items-center justify-center hover:bg-gray-100"><X className="h-4 w-4" /></button>
         </div>
@@ -83,14 +83,13 @@ export function AanvullenDialoog({ kaarten, onClose, onKlaar }: { kaarten: Kaart
                       })}
                     </div>
                   )}
-                  {!o.bron && (
-                    <div className="mt-2 flex gap-1 items-center">
-                      <span className="text-[11px] text-gray-500 mr-1">Bron:</span>
-                      {BRONNEN.map((b) => (
-                        <button key={b.key} type="button" onClick={() => zet(o.id, { bron: r.bron === b.key ? '' : b.key })}
-                          className={`text-xs px-2 py-1 rounded-lg border ${r.bron === b.key ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-400'}`}>{b.label}</button>
+                  {!projectVerantwoordelijke(o.verantwoordelijke) && (
+                    <div className="mt-2 flex gap-1 items-center flex-wrap">
+                      <span className="text-[11px] text-gray-500 mr-1">Verantwoordelijke:</span>
+                      {PROJECT_VERANTWOORDELIJKEN.map((n) => (
+                        <button key={n} type="button" onClick={() => zet(o.id, { verantwoordelijke: r.verantwoordelijke === n ? '' : n })}
+                          className={`text-xs px-2 py-1 rounded-lg border ${r.verantwoordelijke === n ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-400'}`}>{n}</button>
                       ))}
-                      {!r.bron && <span className="text-[11px] text-gray-400 ml-1">onbekend</span>}
                     </div>
                   )}
                 </div>

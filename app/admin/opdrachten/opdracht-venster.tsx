@@ -7,12 +7,13 @@ import {
   X, Loader2, Check, Trash2, Euro, FileSignature, Receipt, Send, MessageSquare, Sparkles, Plus, ExternalLink, Building2, Lock,
 } from 'lucide-react'
 import {
-  KOLOMMEN, kolomInfo, kolomVan, stapLabel, kaartKleur, DIENSTEN, dienstInfo, BRONNEN, OFFERTE_VIA, raadDiensten, normaliseerDiensten,
+  KOLOMMEN, kolomInfo, kolomVan, stapLabel, kaartKleur, DIENSTEN, dienstInfo, BRONNEN, OFFERTE_VIA, raadDiensten, normaliseerDiensten, PROJECT_VERANTWOORDELIJKEN, projectVerantwoordelijke,
   BEDRIJVEN, bedrijfVan,
   type KolomKey, type Bron, type Bedrijf,
 } from '@/lib/opdrachten-kanban'
 import type { OpdrachtStatus } from '@/lib/opdrachten'
 import { formatEuro } from '@/lib/utils'
+import { geopendTekst } from '@/lib/klant-geopend'
 import { KlantKiezer, type KlantOptie } from '@/components/admin/klant-kiezer'
 import { ClickupTaken } from '@/components/admin/clickup-taken'
 import { BtwOpzoeken } from '@/components/admin/btw-opzoeken'
@@ -45,10 +46,10 @@ const uit = (o: KaartOpdracht | null): Concept => ({
   omschrijving: o?.omschrijving ?? '',
   client_id: o?.client_id ?? '',
   klant_vrij: o?.klant_vrij ?? '',
-  verantwoordelijke: o?.verantwoordelijke ?? '',
+  verantwoordelijke: projectVerantwoordelijke(o?.verantwoordelijke) ?? '',
   bedrag_excl: o?.bedrag_excl !== null && o?.bedrag_excl !== undefined ? String(o.bedrag_excl) : '',
   bron: o?.bron ?? '',
-  diensten: o?.diensten ?? [],
+  diensten: normaliseerDiensten(o?.diensten ?? []),
   offerte_via: o?.offerte_via ?? '',
   offerte_op: o?.offerte_op ?? '',
   contract_id: o?.contract_id ?? '',
@@ -127,6 +128,7 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
 
   const bewaar = useCallback(async () => {
     if (!c.titel.trim()) { toast.error('Geef de opdracht een titel.'); return }
+    if (!PROJECT_VERANTWOORDELIJKEN.includes(c.verantwoordelijke as never)) { toast.error('Kies een verantwoordelijke: Marco, Bram of gezamenlijke lead.'); return }
     if (o && !gewijzigd.length) { toast.message('Niets gewijzigd.'); return }
     setBezig(true)
     try {
@@ -219,7 +221,7 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
                 onKies={(k) => {
                   zet('client_id', k?.id ?? '')
                   const kl = klanten.find((x) => x.id === k?.id)
-                  if (kl?.verantwoordelijke && !c.verantwoordelijke) zet('verantwoordelijke', kl.verantwoordelijke)
+                  if (kl?.verantwoordelijke && !c.verantwoordelijke && projectVerantwoordelijke(kl.verantwoordelijke)) zet('verantwoordelijke', projectVerantwoordelijke(kl.verantwoordelijke)!)
                 }}
                 onNieuw={(k) => onKlantNieuw({ id: k.id, naam: k.company_name, contact_name: k.contact_name ?? null, email: k.email ?? null })} bron="opdracht" />
               {!c.client_id && (
@@ -288,27 +290,14 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
               )}
             </div>
 
-            <div className="grid sm:grid-cols-2 gap-4">
-              <div>
-                <p className={LBL}>Hoe kwam het binnen?</p>
-                <div className="flex gap-1.5">
-                  {BRONNEN.map((b) => (
-                    <button key={b.key} type="button" title={b.uitleg} onClick={() => zet('bron', c.bron === b.key ? '' : b.key)} className={keuze(c.bron === b.key)}>{b.label}</button>
-                  ))}
-                </div>
-                {!c.bron && o?.bron_voorstel && (
-                  <button type="button" onClick={() => zet('bron', o.bron_voorstel!)} className="mt-1.5 text-[11px] text-gray-600 underline">
-                    Voorstel: {o.bron_voorstel === 'inbound' ? 'Inbound' : 'Outbound'} · overnemen
-                  </button>
-                )}
+            <div>
+              <p className={LBL}>Verantwoordelijke <span className="text-red-600">*</span></p>
+              <div className="flex gap-1.5 flex-wrap">
+                {PROJECT_VERANTWOORDELIJKEN.map((n) => (
+                  <button key={n} type="button" onClick={() => zet('verantwoordelijke', n)} className={keuze(c.verantwoordelijke === n)} aria-pressed={c.verantwoordelijke === n}>{n}</button>
+                ))}
               </div>
-              <div>
-                <label className={LBL} htmlFor="opdracht-verantw">Verantwoordelijke</label>
-                <select id="opdracht-verantw" className="input-base" value={c.verantwoordelijke} onChange={(e) => zet('verantwoordelijke', e.target.value)}>
-                  <option value="">Nog niet gekozen</option>
-                  {[...namen, ...(c.verantwoordelijke && !namen.includes(c.verantwoordelijke) ? [c.verantwoordelijke] : [])].map((n) => <option key={n} value={n}>{n}</option>)}
-                </select>
-              </div>
+              {!c.verantwoordelijke && <p className="text-[11px] text-amber-700 mt-1">Kies wie dit project opvolgt.</p>}
             </div>
 
             <div>
@@ -356,6 +345,7 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
               </select>
               <div className="mt-1.5 flex gap-3 text-xs">
                 {c.contract_id && <Link href={`/admin/contracts/${c.contract_id}`} className="text-blue-700 underline inline-flex items-center gap-1">Contract openen<ExternalLink className="h-3 w-3" /></Link>}
+                {c.contract_id && o?.contract?.id === c.contract_id && <span className="text-gray-600">{geopendTekst(o.contract.klant_geopend_op) ?? 'Nog niet geopend door de klant'}</span>}
                 <Link href={`/admin/contracts/new${c.client_id ? `?client=${c.client_id}` : ''}`} target="_blank" className="text-gray-600 underline">Nieuw contract maken</Link>
               </div>
             </div>
@@ -386,6 +376,14 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
               </div>
             )}
           </section>
+
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <label htmlFor="opdracht-bron">Bron (optioneel)</label>
+            <select id="opdracht-bron" className="text-xs border border-gray-200 rounded-md bg-white px-2 py-1" value={c.bron} onChange={(e) => zet('bron', e.target.value as Bron | '')}>
+              <option value="">Onbekend</option>
+              {BRONNEN.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
+            </select>
+          </div>
 
           {/* Taken: elke taak komt in ClickUp, toegewezen aan de verantwoordelijke. */}
           {o && (

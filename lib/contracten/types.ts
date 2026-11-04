@@ -35,7 +35,7 @@ export const SEED_CONTRACTTYPES: string[] = [
   'Klantcontract',
   'Websitecontract',
   'Social Media contract',
-  'Brandingcontract',
+  'Grafisch ontwerpcontract',
   'Foto/videografiecontract',
   'Partnercontract',
   'Onderaannemerscontract',
@@ -61,6 +61,9 @@ export const SAMENGEVOEGD: Record<string, string> = {
   'geheimhouding/nda': 'NDA / geheimhouding',
   freelancer: 'Freelancecontract',
   samenwerking: 'Samenwerkingsovereenkomst',
+  // Branding valt sinds 4 nov 2026 onder grafisch ontwerp.
+  brandingcontract: 'Grafisch ontwerpcontract',
+  branding: 'Grafisch ontwerpcontract',
 }
 
 /** Trim, spaties normaliseren en afkappen op `MAX_TYPE_LENGTE`. */

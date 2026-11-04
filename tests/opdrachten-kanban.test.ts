@@ -55,14 +55,17 @@ test('4. Kleuren: hele kaart in de kleur van de eerste dienst; founders bruin me
   assert.equal(kaartKleur([]).achtergrond, '#FFFFFF')
   const f = kaartKleur(['founders'])
   assert.equal(f.donker, true); assert.equal(f.tekst, '#FFFFFF')
-  assert.equal(dienstInfo('grafisch').achtergrond, dienstInfo('branding').achtergrond, 'grafisch en branding allebei pastel rood')
+  assert.equal(dienstInfo('branding').key, 'grafisch', 'branding valt onder grafisch ontwerp')
+  assert.equal(dienstInfo('meta_ads').key, 'advertising', 'Meta ads = advertising')
+  assert.equal(dienstInfo('google_ads').label, 'Advertising', 'Google ads = advertising')
   assert.notEqual(dienstInfo('consultancy').achtergrond, f.achtergrond, 'pastel bruin is niet hetzelfde als bruin')
   assert.equal(dienstInfo('Bestickering').key, null)
 })
 
 test('5. Diensten nakijken: labels worden sleutels, eigen tekst blijft, geen dubbels, max 6', () => {
   assert.deepEqual(normaliseerDiensten(['Social media', 'webdesign', 'social_media', '  Camionette  bestickering ', '']), ['social_media', 'webdesign', 'Camionette bestickering'])
-  assert.deepEqual(normaliseerDiensten('Branding, NextGenSolutions (AI)'), ['branding', 'ngs'])
+  assert.deepEqual(normaliseerDiensten('Branding, NextGenSolutions (AI)'), ['grafisch', 'ngs'])
+  assert.deepEqual(normaliseerDiensten(['meta_ads', 'google_ads', 'branding', 'grafisch']), ['advertising', 'grafisch'], 'samengevoegd zonder dubbels')
   assert.equal(normaliseerDiensten(['a', 'b', 'c', 'd', 'e', 'f', 'g']).length, 6)
   assert.deepEqual(normaliseerDiensten(null), [])
 })
@@ -70,24 +73,25 @@ test('5. Diensten nakijken: labels worden sleutels, eigen tekst blijft, geen dub
 test('6. Voorstel van diensten uit de titel (enkel een voorstel)', () => {
   assert.deepEqual(raadDiensten('Social Media Management'), ['social_media'])
   assert.deepEqual(raadDiensten('Website + LinkedIn Beheer'), ['social_media', 'webdesign'])
-  assert.deepEqual(raadDiensten('Huisstijl'), ['branding'])
+  assert.deepEqual(raadDiensten('Huisstijl'), ['grafisch'])
   assert.deepEqual(raadDiensten('Bestickering Camionette Group Cé'), ['grafisch'])
   assert.deepEqual(raadDiensten("Productfoto's Powertools"), ['foto_video'])
   assert.deepEqual(raadDiensten('AI-chatbot'), ['ngs'])
   assert.deepEqual(raadDiensten('Contentshoot Eline Vantilt'), ['foto_video'])
   assert.deepEqual(raadDiensten('Founders of Flanders aflevering'), ['founders'])
-  assert.deepEqual(raadDiensten('Advertising'), ['meta_ads'])
-  assert.deepEqual(raadDiensten('Website + Google Ads'), ['google_ads', 'webdesign'])
-  assert.deepEqual(raadDiensten('Facebook ads campagne'), ['meta_ads'])
+  assert.deepEqual(raadDiensten('Advertising'), ['advertising'])
+  assert.deepEqual(raadDiensten('Website + Google Ads'), ['advertising', 'webdesign'])
+  assert.deepEqual(raadDiensten('Facebook ads campagne'), ['advertising'])
 })
 
-test('6b. Meta ads en Google ads hebben elk een eigen pastelkleur; Sociale media heet zo, ook als je "Social media" typt', () => {
-  const kleuren = new Set(['meta_ads', 'google_ads', 'social_media', 'ngs', 'webdesign', 'foto_video', 'consultancy', 'grafisch', 'founders'].map((d) => dienstInfo(d).achtergrond))
-  assert.equal(kleuren.size, 9)
-  assert.equal(dienstInfo('meta_ads').label, 'Meta ads')
-  assert.equal(dienstInfo('Google Ads').key, 'google_ads')
+test('6b. Elke dienst een eigen pastelkleur; Meta en Google ads samen = Advertising; Sociale media heet zo, ook als je "Social media" typt', () => {
+  const kleuren = new Set(['advertising', 'social_media', 'ngs', 'webdesign', 'foto_video', 'consultancy', 'grafisch', 'founders'].map((d) => dienstInfo(d).achtergrond))
+  assert.equal(kleuren.size, 8)
+  assert.equal(dienstInfo('meta_ads').label, 'Advertising')
+  assert.equal(dienstInfo('Google Ads').key, 'advertising')
   assert.equal(dienstInfo('social media').label, 'Sociale media')
-  assert.equal(dienstInfo('Facebook ads').key, 'meta_ads')
+  assert.equal(dienstInfo('Facebook ads').key, 'advertising')
+  assert.equal(dienstInfo('Branding').key, 'grafisch')
 })
 
 test('7. Bron en offertekanaal', () => {
@@ -200,3 +204,4 @@ test('Projecten: een contract opmaken = Contract verstuurd; getekend = Contract 
 })
 
 console.log(`\n${n} tests geslaagd\n`)
+

@@ -6911,3 +6911,6 @@ DO $$ BEGIN
     ALTER TABLE public.nieuwsbrieven ADD CONSTRAINT nieuwsbrieven_merk_check CHECK (merk IN ('nextgenmedia','nextgensolutions'));
   END IF;
 END $$;
+
+-- Contract: wanneer de klant het voor het eerst opende (niet als het team kijkt) (4 nov 2026).
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS klant_geopend_op timestamptz;

@@ -92,7 +92,14 @@ export function statusVoorKolom(huidig: OpdrachtStatus, doel: KolomKey): Opdrach
 
 // ── Diensten en hun kleur ────────────────────────────────────────────────────
 
-export type DienstKey = 'social_media' | 'grafisch' | 'webdesign' | 'foto_video' | 'branding' | 'consultancy' | 'meta_ads' | 'google_ads' | 'ngs' | 'founders'
+export type DienstKey = 'social_media' | 'grafisch' | 'webdesign' | 'foto_video' | 'consultancy' | 'advertising' | 'ngs' | 'founders'
+
+/**
+ * Samengevoegde diensten (4 nov 2026): branding valt onder Grafisch ontwerp,
+ * Meta ads en Google ads samen onder Advertising. Oude sleutels op bestaande
+ * kaarten tellen gewoon als de nieuwe.
+ */
+export const DIENST_ALIAS: Record<string, DienstKey> = { branding: 'grafisch', meta_ads: 'advertising', google_ads: 'advertising' }
 
 export type DienstInfo = {
   key: DienstKey | null
@@ -109,13 +116,11 @@ export type DienstInfo = {
 
 export const DIENSTEN: DienstInfo[] = [
   { key: 'social_media', label: 'Sociale media',         achtergrond: '#FFF5C2', rand: '#EBD670', tekst: '#2B2600', donker: false, ook: ['Social media', 'Socials', 'Social media management'] },
-  { key: 'grafisch',     label: 'Grafisch ontwerp',      achtergrond: '#FDE0DE', rand: '#F1ACA6', tekst: '#3A1210', donker: false },
+  { key: 'grafisch',     label: 'Grafisch ontwerp',      achtergrond: '#FDE0DE', rand: '#F1ACA6', tekst: '#3A1210', donker: false, ook: ['Branding', 'Huisstijl', 'Grafisch ontwerp & branding', 'Grafisch ontwerp en branding'] },
   { key: 'webdesign',    label: 'Webdesign',             achtergrond: '#ECE2FB', rand: '#C7AEF0', tekst: '#241446', donker: false },
   { key: 'foto_video',   label: 'Foto & videografie',    achtergrond: '#DCF3E2', rand: '#9CD5AB', tekst: '#0F2E18', donker: false },
-  { key: 'branding',     label: 'Branding',              achtergrond: '#FDE0DE', rand: '#F1ACA6', tekst: '#3A1210', donker: false },
   { key: 'consultancy',  label: 'Marketing consultancy', achtergrond: '#F0E4D6', rand: '#D2B694', tekst: '#33240F', donker: false, ook: ['Consultancy'] },
-  { key: 'meta_ads',     label: 'Meta ads',              achtergrond: '#D6F4EF', rand: '#8FD4C8', tekst: '#0D302B', donker: false, ook: ['Facebook ads', 'Instagram ads', 'Meta advertenties'] },
-  { key: 'google_ads',   label: 'Google ads',            achtergrond: '#FFE6CF', rand: '#F2B47C', tekst: '#3A1F05', donker: false, ook: ['Google advertenties', 'SEA'] },
+  { key: 'advertising',  label: 'Advertising',           achtergrond: '#D6F4EF', rand: '#8FD4C8', tekst: '#0D302B', donker: false, ook: ['Meta ads', 'Google ads', 'Facebook ads', 'Instagram ads', 'Meta advertenties', 'Google advertenties', 'SEA', 'Advertenties', 'Ads', 'Meta & Google ads'] },
   { key: 'ngs',          label: 'NextGenSolutions (AI)', achtergrond: '#DDEBFC', rand: '#9FC2EE', tekst: '#0E2440', donker: false, ook: ['NextGenSolutions', 'AI'] },
   { key: 'founders',     label: 'Founders of Flanders',  achtergrond: '#8A5A3B', rand: '#6B4329', tekst: '#FFFFFF', donker: true },
 ]
@@ -128,7 +133,8 @@ const sleutelVan = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-
 /** Info van een opgeslagen dienst: een vaste sleutel, een vast label, of eigen tekst (dan zonder kleur). */
 export function dienstInfo(v: string): DienstInfo {
   const s = sleutelVan(v)
-  const vast = DIENSTEN.find((d) => d.key === v || sleutelVan(d.label) === s || (d.ook ?? []).some((o) => sleutelVan(o) === s))
+  const k = DIENST_ALIAS[v] ?? v
+  const vast = DIENSTEN.find((d) => d.key === k || sleutelVan(d.label) === s || (d.ook ?? []).some((o) => sleutelVan(o) === s))
   return vast ?? { ...GEEN_DIENST, label: v }
 }
 
@@ -168,16 +174,30 @@ export function raadDiensten(titel: string | null | undefined): DienstKey[] {
   const uit: DienstKey[] = []
   const als = (re: RegExp, k: DienstKey) => { if (re.test(t) && !uit.includes(k)) uit.push(k) }
   als(/founders/, 'founders')
-  als(/google ads|google advert|adwords|\bsea\b/, 'google_ads')
-  als(/meta ads|facebook ads|instagram ads|meta advert|advertising|advertenties|campagne|(?<!google )\bads\b/, 'meta_ads')
+  als(/google ads|google advert|adwords|\bsea\b|meta ads|facebook ads|instagram ads|meta advert|advertising|advertenties|campagne|\bads\b/, 'advertising')
   als(/social|instagram(?! ads)|linkedin|facebook(?! ads)|tiktok|community|content(?!shoot)/, 'social_media')
   als(/website|webshop|webdesign|landingspagina|wordpress|\bsite\b|\bweb\b/, 'webdesign')
-  als(/huisstijl|branding|logo|merk|identiteit/, 'branding')
-  als(/grafisch|flyer|drukwerk|bestickering|sticker|belettering|brochure|affiche|visitekaart|ontwerp/, 'grafisch')
+  als(/huisstijl|branding|logo|merk|identiteit|grafisch|flyer|drukwerk|bestickering|sticker|belettering|brochure|affiche|visitekaart|ontwerp/, 'grafisch')
   als(/foto|video|reel|shoot|film|opname|drone/, 'foto_video')
   als(/consultancy|advies|strategie|marketingpartner|marketing partner|business partner|workshop|coaching/, 'consultancy')
   als(/\bai\b|chatbot|automatisatie|automatisering|solutions|\bcrm\b|software|programma|\bapp\b/, 'ngs')
   return uit.slice(0, 3)
+}
+
+// ── Verantwoordelijke ───────────────────────────────────────────────────────
+
+/** Elk project heeft een verantwoordelijke: Marco, Bram of beiden samen. */
+export const PROJECT_VERANTWOORDELIJKEN = ['Marco', 'Bram', 'Gezamenlijke lead'] as const
+export type ProjectVerantwoordelijke = (typeof PROJECT_VERANTWOORDELIJKEN)[number]
+
+/** Een vrije naam naar een van de drie keuzes ("Bram Reinquin" → Bram, "samen" → Gezamenlijke lead); anders null. */
+export function projectVerantwoordelijke(v: unknown): ProjectVerantwoordelijke | null {
+  const s = String(v ?? '').trim().toLowerCase()
+  if (!s) return null
+  if (s.startsWith('marco')) return 'Marco'
+  if (s.startsWith('bram')) return 'Bram'
+  if (/gezamen|samen|beide|bram.*marco|marco.*bram/.test(s)) return 'Gezamenlijke lead'
+  return null
 }
 
 // ── Bron en offertekanaal ───────────────────────────────────────────────────

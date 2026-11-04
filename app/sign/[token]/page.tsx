@@ -1,7 +1,9 @@
 export const dynamic = 'force-dynamic'
 
-import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { createAdminSupabaseClient, getSessionUser, getUserRole, isActiveStaff } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
+import { headers } from 'next/headers'
+import { isAutomatischeBezoeker, toestelVan } from '@/lib/klant-geopend'
 import { FileText, CheckCircle2, Clock } from 'lucide-react'
 import { SignatureForm } from './signature-form'
 import { Logo } from '@/components/logo'
@@ -82,12 +84,28 @@ export default async function SignContractPage({ params }: { params: { token: st
     )
   }
 
-  // ── Audit: geopend (best-effort) + status naar 'bekeken' indien nog verzonden ─
+  // ── Audit: geopend door de klant (best-effort) + status naar 'bekeken' ─────
+  // Enkel als de klant kijkt: niet als iemand van het team ingelogd is (dan
+  // geen melding "geopend"), en niet bij een linkvoorbeeld of virusscanner.
   if (!alreadySignedStatus) {
-    try { await logContractEvent(admin, contract.id, 'opened', { meta: { via: 'sign-page' } }) } catch { }
-    if (contract.status === 'sent') {
-      const { error } = await admin.from('contracts').update({ status: 'viewed' }).eq('id', contract.id)
-      if (error) console.error('[sign page] status → viewed mislukt:', error.message)
+    const ua = headers().get('user-agent')
+    let team = false
+    try {
+      const ik = await getSessionUser()
+      team = !!ik && ((await getUserRole(ik.id)) === 'admin' || (await isActiveStaff(ik.id)))
+    } catch { team = false }
+    if (!team && !isAutomatischeBezoeker(ua)) {
+      try { await logContractEvent(admin, contract.id, 'opened', { ua, meta: { via: 'sign-page', door: 'klant', toestel: toestelVan(ua) } }) } catch { }
+      const nu = new Date().toISOString()
+      // Eerste keer dat de klant opent: datum bewaren (veerkrachtig vóór de migratie).
+      if (!contract.klant_geopend_op) {
+        const { error: e1 } = await admin.from('contracts').update({ klant_geopend_op: nu }).eq('id', contract.id).is('klant_geopend_op', null)
+        if (e1 && !/klant_geopend_op/.test(e1.message)) console.error('[sign page] klant_geopend_op mislukt:', e1.message)
+      }
+      if (contract.status === 'sent') {
+        const { error } = await admin.from('contracts').update({ status: 'viewed' }).eq('id', contract.id)
+        if (error) console.error('[sign page] status → viewed mislukt:', error.message)
+      }
     }
   }
 

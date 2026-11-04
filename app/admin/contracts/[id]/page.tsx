@@ -239,6 +239,12 @@ export default async function ContractDetailPage({ params }: { params: { id: str
                   <span>{formatDate(c.sent_at)}</span>
                 </div>
               )}
+              {c.sent_at && (
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Door klant geopend:</span>
+                  <span>{c.klant_geopend_op ? formatDate(c.klant_geopend_op) : <span className="text-gray-400">nog niet</span>}</span>
+                </div>
+              )}
               {c.signed_at && (
                 <div className="flex justify-between">
                   <span className="text-gray-500">Getekend:</span>

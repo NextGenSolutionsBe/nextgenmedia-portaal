@@ -1,5 +1,5 @@
 import 'server-only'
-import { raadDiensten, bedrijfVan, kolomVan, statusUitContract } from '@/lib/opdrachten-kanban'
+import { raadDiensten, bedrijfVan, kolomVan, statusUitContract, projectVerantwoordelijke } from '@/lib/opdrachten-kanban'
 import { voegNotitieToe } from '@/lib/opdrachten-notities'
 import { vandaagISO, type OpdrachtStatus } from '@/lib/opdrachten'
 
@@ -63,7 +63,7 @@ export async function kaartVoorContract(admin: Admin, contractId: string): Promi
     client_id: contract.client_id, klant_vrij: null, titel: titel.slice(0, 200), status, contract_id: contract.id,
     status_bron: 'automatisch', auto_status: status, status_gewijzigd_op: nu,
     diensten, merk: bedrijfVan(null, diensten), datum: String(contract.created_at ?? nu).slice(0, 10),
-    verantwoordelijke: klant?.sales_verantwoordelijke ?? null,
+    verantwoordelijke: projectVerantwoordelijke(klant?.sales_verantwoordelijke),
     stop_reden: status === 'geen_interesse' ? 'Contract verlopen of niet doorgegaan' : null,
   }
   let { data: nieuw, error } = await admin.from('opdrachten').insert(rij).select('id').single()

@@ -28,7 +28,7 @@ export const CONTRACT_BLOCKS: ContractBlock[] = [
   },
   {
     id: 'branding',
-    name: 'Branding',
+    name: 'Grafisch ontwerp',
     fields: [
       { label: 'Deliverables', type: 'text', required: true, placeholder: 'Logo, huisstijl, ...' },
       { label: 'Revisierondes', type: 'number', required: false, placeholder: 'Bv. 2' },

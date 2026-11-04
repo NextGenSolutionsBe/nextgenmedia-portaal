@@ -141,6 +141,8 @@ export type ContractKoppeling = {
   /** Canonieke contractstatus (lib/contract-status): verzonden, getekend, … */
   status: string
   label?: string
+  /** Eerste keer dat de klant de tekenlink opende. */
+  klant_geopend_op?: string | null
 }
 
 export type FactuurKoppeling = {

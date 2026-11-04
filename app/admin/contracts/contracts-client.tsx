@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { formatDate, formatEuro, SERVICE_LABELS } from '@/lib/utils'
 import { statusInfo, canonicalStatus, STATUS_FILTER_OPTIONS, DURATION_TYPES } from '@/lib/contract-status'
+import { geopendTekst } from '@/lib/klant-geopend'
 import { typeVanContract, isNietToegewezen } from '@/lib/contracten/types'
 import {
   bouwKlantmappen, typeOpties, totalen, ZONDER_KLANT,
@@ -40,6 +41,8 @@ export type Contract = OverzichtContract & {
   signer_email: string | null
   /** Wie het contract aanmaakte (Bram, Marco, Chiara…). */
   door?: string | null
+  /** Eerste keer dat de klant de tekenlink opende (niet als het team kijkt). */
+  klant_geopend_op?: string | null
   invoice_count: number
   invoice_sent: number
   expected_invoice_count: number | null
@@ -578,6 +581,7 @@ export function ContractsClient({
                                 </td>
                                 <td className="table-td">
                                   <span className={`status-badge ${style.cls}`}>{style.label}</span>
+                                  {c.klant_geopend_op && <div className="text-[10px] text-gray-500 mt-1 whitespace-nowrap">{geopendTekst(c.klant_geopend_op)}</div>}
                                   {c.mail_status && c.mail_status !== 'niet' && <div className="mt-1"><span title={MAIL_STATUS[c.mail_status].uitleg} className={`inline-flex rounded-full border px-1.5 text-[10px] font-medium ${MAIL_STATUS[c.mail_status].cls}`}>{MAIL_STATUS[c.mail_status].label}</span></div>}
                                 </td>
                                 <td className="table-td">

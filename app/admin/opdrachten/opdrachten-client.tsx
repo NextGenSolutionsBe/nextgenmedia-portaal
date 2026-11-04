@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2, Plus, Search, KanbanSquare, LayoutGrid, List, Sparkles, X, FileSpreadsheet, Settings2 } from 'lucide-react'
 import {
-  KOLOMMEN, kolomInfo, kolomVan, statusVoorKolom, stapLabel, kaartKleur, DIENSTEN, dienstInfo, bronLabel, sorteerInKolom,
+  KOLOMMEN, kolomInfo, kolomVan, statusVoorKolom, stapLabel, kaartKleur, DIENSTEN, dienstInfo, sorteerInKolom, projectVerantwoordelijke,
   BEDRIJVEN, WAARDE_SCHIJVEN, inPeriode, inWaardeSchijf, bedrijfLabel,
   type KolomKey, type DienstKey, type Periode, type Bedrijf,
 } from '@/lib/opdrachten-kanban'
@@ -42,7 +42,6 @@ export function OpdrachtenClient() {
   const [q, setQ] = useState('')
   const [wie, setWie] = useState('')
   const [dienst, setDienst] = useState<DienstKey | 'geen' | ''>('')
-  const [bron, setBron] = useState<'inbound' | 'outbound' | ''>('')
   const [periodeSoort, setPeriodeSoort] = useState<Periode['soort']>('alles')
   const [jaar, setJaar] = useState(new Date().getFullYear())
   const [maand, setMaand] = useState(new Date().getMonth() + 1)
@@ -113,20 +112,19 @@ export function OpdrachtenClient() {
       .filter((o) => !bedrijf || (o.merk ?? 'nextgenmedia') === bedrijf)
       .filter((o) => inWaardeSchijf(o.waarde, waardeSchijf))
       .filter((o) => !wie || (wie === '-' ? !o.verantwoordelijke : o.verantwoordelijke === wie))
-      .filter((o) => !dienst || (dienst === 'geen' ? o.diensten.length === 0 : o.diensten.includes(dienst)))
-      .filter((o) => !bron || o.bron === bron)
+      .filter((o) => !dienst || (dienst === 'geen' ? o.diensten.length === 0 : o.diensten.some((d) => dienstInfo(d).key === dienst)))
       .filter((o) => !naald || [o.titel, o.omschrijving, o.klant_naam, o.contract?.title, o.verantwoordelijke, o.laatste_notitie?.tekst, ...o.diensten.map((d) => dienstInfo(d).label)]
         .some((v) => (v ?? '').toLowerCase().includes(naald)))
       .sort(sorteerInKolom)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rijen, q, wie, dienst, bron, periodeSoort, jaar, maand, kwartaal, klantFilter, bedrijf, waardeSchijf])
+  }, [rijen, q, wie, dienst, periodeSoort, jaar, maand, kwartaal, klantFilter, bedrijf, waardeSchijf])
 
   const open = useMemo(() => {
     const lopend = zichtbaar.filter((o) => !['afgerond', 'stopgezet'].includes(kolomVan(o.status)))
     const gewonnen = zichtbaar.filter((o) => kolomVan(o.status) === 'afgerond')
     return { aantal: lopend.length, waarde: lopend.reduce((t, o) => t + (o.waarde ?? 0), 0), gewonnen: gewonnen.reduce((t, o) => t + (o.waarde ?? 0), 0) }
   }, [zichtbaar])
-  const onvolledig = rijen.filter((o) => kolomVan(o.status) !== 'stopgezet' && (o.diensten.length === 0 || !o.bron)).length
+  const onvolledig = rijen.filter((o) => kolomVan(o.status) !== 'stopgezet' && (o.diensten.length === 0 || !projectVerantwoordelijke(o.verantwoordelijke))).length
 
   /** Status zetten: meteen tonen, bij een fout terugdraaien. Daarna stil herladen (tijdlijn, facturatie, automatische stappen). */
   const zetStatus = useCallback(async (o: KaartOpdracht, status: OpdrachtStatus, extra: VerplaatsExtra = {}): Promise<boolean> => {
@@ -173,8 +171,8 @@ export function OpdrachtenClient() {
   const vraagKaart = vraag ? rijen.find((r) => r.id === vraag.id) ?? null : null
   const chip = (actief: boolean) => `text-xs font-medium px-2.5 py-1 rounded-lg border transition-colors whitespace-nowrap ${actief ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'}`
   const kiezer = 'text-[13px] border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700'
-  const filtersActief = !!(q || wie || dienst || bron || klantFilter || bedrijf || waardeSchijf !== 'alle' || periodeSoort !== 'alles')
-  const wisFilters = () => { setQ(''); setWie(''); setDienst(''); setBron(''); setKlantFilter(''); setBedrijf(''); setWaardeSchijf('alle'); setPeriodeSoort('alles') }
+  const filtersActief = !!(q || wie || dienst || klantFilter || bedrijf || waardeSchijf !== 'alle' || periodeSoort !== 'alles')
+  const wisFilters = () => { setQ(''); setWie(''); setDienst(''); setKlantFilter(''); setBedrijf(''); setWaardeSchijf('alle'); setPeriodeSoort('alles') }
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -204,7 +202,7 @@ export function OpdrachtenClient() {
 
       {onvolledig > 0 && !laden && !bannerWeg && (
         <div className="flex items-center justify-between gap-3 flex-wrap rounded-lg border border-gray-200 bg-white px-3 py-2">
-          <p className="text-[13px] text-gray-700"><b>{onvolledig}</b> kaart{onvolledig === 1 ? '' : 'en'} zonder dienst of bron.</p>
+          <p className="text-[13px] text-gray-700"><b>{onvolledig}</b> kaart{onvolledig === 1 ? '' : 'en'} zonder dienst of verantwoordelijke.</p>
           <div className="flex items-center gap-1">
             <button type="button" onClick={() => setAanvullen(true)} className="btn-secondary text-xs"><Sparkles className="h-3.5 w-3.5" />Aanvullen</button>
             <button type="button" onClick={() => { setBannerWeg(true); try { sessionStorage.setItem('ngm-opdrachten-aanvullen-weg', '1') } catch { /* niet erg */ } }}
@@ -213,7 +211,7 @@ export function OpdrachtenClient() {
         </div>
       )}
 
-      {/* Filters: zoeken, periode, klant, bedrijf, waarde, verantwoordelijke, bron en dienst. */}
+      {/* Filters: zoeken, periode, klant, bedrijf, waarde, verantwoordelijke en dienst. */}
       <div className="space-y-2">
         <div className="flex items-center gap-1.5 flex-wrap">
           <div className="relative flex-1 min-w-[12rem] sm:flex-none">
@@ -256,11 +254,6 @@ export function OpdrachtenClient() {
             <option value="">Iedereen</option>
             {namen.map((n) => <option key={n} value={n}>{n}</option>)}
             <option value="-">Zonder verantwoordelijke</option>
-          </select>
-          <select className={kiezer} value={bron} onChange={(e) => setBron(e.target.value as typeof bron)} aria-label="Bron">
-            <option value="">Inbound en outbound</option>
-            <option value="inbound">Inbound</option>
-            <option value="outbound">Outbound</option>
           </select>
           {filtersActief && (
             <button type="button" onClick={wisFilters} className="text-xs text-gray-600 hover:text-black inline-flex items-center gap-1 px-1"><X className="h-3.5 w-3.5" />Wissen</button>
@@ -345,11 +338,15 @@ function Lijst({ kaarten, onOpen }: { kaarten: KaartOpdracht[]; onOpen: (o: Kaar
                         <span className="block font-semibold text-sm truncate">{o.klant_naam || 'Geen klant'}</span>
                         <span className="block text-xs text-gray-600 truncate">
                           {o.diensten.length > 0 && <span className="font-medium text-gray-800">{o.diensten.map((d) => dienstInfo(d).label).join(', ')}</span>}
-                          {o.diensten.length > 0 && o.titel ? ' · ' : ''}{o.titel}{o.bron ? ` · ${bronLabel(o.bron)}` : ''}
+                          {o.diensten.length > 0 && o.titel ? ' · ' : ''}{o.titel}
                         </span>
                       </span>
+                      <span className="hidden md:block text-xs text-gray-500 shrink-0 w-28 truncate">{projectVerantwoordelijke(o.verantwoordelijke) ?? <span className="text-amber-700">Geen verantwoordelijke</span>}</span>
                       <span className="hidden sm:block text-xs text-gray-500 shrink-0">{stapLabel(o.status)}</span>
-                      <span className="text-sm font-semibold tabular-nums shrink-0">{o.waarde !== null && o.waarde !== undefined ? formatEuro(o.waarde) : '—'}</span>
+                      <span className="text-right shrink-0">
+                        <span className="block text-sm font-semibold tabular-nums">{o.waarde !== null && o.waarde !== undefined ? formatEuro(o.waarde) : '—'}</span>
+                        {!!o.facturatie?.gefactureerd && <span className="block text-[11px] text-gray-500 tabular-nums">gefactureerd {formatEuro(o.facturatie.gefactureerd)}</span>}
+                      </span>
                     </button>
                   </li>
                 )
