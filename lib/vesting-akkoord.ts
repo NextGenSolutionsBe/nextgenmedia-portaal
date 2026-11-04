@@ -54,7 +54,25 @@ export type KostSoort = (typeof KOST_SOORTEN)[number]['key']
 export const kostSoortLabel = (k: string): string => KOST_SOORTEN.find((s) => s.key === k)?.label ?? 'Andere'
 const isKostSoort = (v: unknown): v is KostSoort => KOST_SOORTEN.some((s) => s.key === v)
 
-export type KostLijn = { id: string; vesting_contract_id: string; soort: KostSoort; omschrijving: string | null; bedrag: number; verantwoording?: string | null }
+/** Het opgeladen bewijsstuk (contract, factuur …): waar het staat en de SHA-256 van het bestand. */
+export type Bewijs = { pad: string; naam: string; sha256: string; grootte: number | null }
+
+export function naarBewijs(r: Record<string, unknown>): Bewijs | null {
+  const pad = typeof r.bewijs_pad === 'string' ? r.bewijs_pad : ''
+  const sha = typeof r.bewijs_sha256 === 'string' ? r.bewijs_sha256 : ''
+  if (!pad || !sha) return null
+  return { pad, naam: String(r.bewijs_naam ?? pad.split('/').pop() ?? 'document'), sha256: sha, grootte: Number.isFinite(Number(r.bewijs_grootte)) ? Number(r.bewijs_grootte) : null }
+}
+
+/** Een opgeladen bestand uit een verzoek: enkel in de map bewijs/ van de vestingopslag. */
+export function controleerBewijsInvoer(v: unknown): { pad: string; naam: string } | null {
+  if (!v || typeof v !== 'object') return null
+  const { pad, naam } = v as { pad?: unknown; naam?: unknown }
+  if (typeof pad !== 'string' || !/^bewijs\/[0-9a-f-]{36}\/[^/]{1,200}$/i.test(pad) || pad.includes('..')) return null
+  return { pad, naam: typeof naam === 'string' && naam.trim() ? naam.trim().slice(0, 200) : pad.split('/').pop()! }
+}
+
+export type KostLijn = { id: string; vesting_contract_id: string; soort: KostSoort; omschrijving: string | null; bedrag: number; verantwoording?: string | null; bewijs?: Bewijs | null }
 
 const rond = (x: number) => Math.round(x * 100) / 100
 
@@ -65,6 +83,7 @@ export function naarKostLijn(r: Record<string, unknown>): KostLijn {
     omschrijving: typeof r.omschrijving === 'string' && r.omschrijving.trim() ? r.omschrijving.trim() : null,
     bedrag: Number.isFinite(Number(r.bedrag)) ? rond(Number(r.bedrag)) : 0,
     verantwoording: typeof r.verantwoording === 'string' && r.verantwoording.trim() ? r.verantwoording.trim() : null,
+    bewijs: naarBewijs(r),
   }
 }
 
@@ -95,6 +114,7 @@ export type RegistratieSoort = 'inkomst' | 'kost'
 export type Registratie = {
   id: string; soort: RegistratieSoort; datum: string; omschrijving: string; bedrag: number
   verantwoording: string; referentie: string | null; geschrapt: boolean
+  bewijs?: Bewijs | null
 }
 
 export function naarRegistratie(r: Record<string, unknown>): Registratie {
@@ -106,13 +126,14 @@ export function naarRegistratie(r: Record<string, unknown>): Registratie {
     verantwoording: String(r.verantwoording ?? '').trim(),
     referentie: typeof r.referentie === 'string' && r.referentie.trim() ? r.referentie.trim() : null,
     geschrapt: !!r.geschrapt_op,
+    bewijs: naarBewijs(r),
   }
 }
 
 /** Velden uit een verzoek: alles verplicht behalve de referentie (factuurnummer, contract …). */
 export function controleerRegistratie(b: { soort?: unknown; datum?: unknown; omschrijving?: unknown; bedrag?: unknown; verantwoording?: unknown; referentie?: unknown }, bijAanmaak = true):
-  { rij: Partial<Omit<Registratie, 'id' | 'geschrapt'>> } | { fout: string } {
-  const rij: Partial<Omit<Registratie, 'id' | 'geschrapt'>> = {}
+  { rij: Partial<Omit<Registratie, 'id' | 'geschrapt' | 'bewijs'>> } | { fout: string } {
+  const rij: Partial<Omit<Registratie, 'id' | 'geschrapt' | 'bewijs'>> = {}
   if (bijAanmaak || b.soort !== undefined) {
     if (b.soort !== 'inkomst' && b.soort !== 'kost') return { fout: 'Kies inkomst of kost.' }
     rij.soort = b.soort
@@ -152,7 +173,7 @@ export type ContractAkkoord = {
   nr: string
   contract: string | null
   contractwaarde: number | null
-  kosten: { soort: string; omschrijving: string | null; bedrag: number; verantwoording?: string | null }[]
+  kosten: { soort: string; omschrijving: string | null; bedrag: number; verantwoording?: string | null; bewijs?: { naam: string; sha256: string } }[]
   /** Wat er effectief afgetrokken wordt (de kostenlijnen, of meer als de facturen hogere directe kosten tonen). */
   kosten_totaal: number
   netto: number | null
@@ -170,6 +191,8 @@ export type ContractAkkoord = {
 export type RegistratieAkkoord = {
   soort: RegistratieSoort; omschrijving: string; datum: string; bedrag: number
   verantwoording: string; referentie: string | null; geschrapt: boolean
+  /** Het bewijsstuk: naam en SHA-256, zodat de handtekening ook over exact dat bestand gaat. */
+  bewijs?: { naam: string; sha256: string }
 }
 export type Akkoord = ContractAkkoord | RegistratieAkkoord
 
@@ -185,7 +208,11 @@ export function contractAkkoord(c: ContractVoorAkkoord, lijnen: KostLijn[], tite
     klant: c.klant.trim(), nr: c.nr, contract: titel?.trim() || null,
     contractwaarde: c.totaal === null ? null : rond(c.totaal),
     kosten: [...lijnen]
-      .map((l) => ({ soort: l.soort, omschrijving: l.omschrijving, bedrag: rond(l.bedrag), ...(l.verantwoording ? { verantwoording: l.verantwoording } : {}) }))
+      .map((l) => ({
+        soort: l.soort, omschrijving: l.omschrijving, bedrag: rond(l.bedrag),
+        ...(l.verantwoording ? { verantwoording: l.verantwoording } : {}),
+        ...(l.bewijs ? { bewijs: { naam: l.bewijs.naam, sha256: l.bewijs.sha256 } } : {}),
+      }))
       .sort((a, b) => a.soort.localeCompare(b.soort) || String(a.omschrijving ?? '').localeCompare(String(b.omschrijving ?? '')) || a.bedrag - b.bedrag),
     kosten_totaal: rond(c.kostenAftrek),
     netto: c.netto === null ? null : rond(c.netto),
@@ -200,6 +227,7 @@ export function registratieAkkoord(r: Registratie): RegistratieAkkoord {
   return {
     soort: r.soort, omschrijving: r.omschrijving, datum: r.datum, bedrag: rond(r.bedrag),
     verantwoording: r.verantwoording, referentie: r.referentie, geschrapt: r.geschrapt,
+    ...(r.bewijs ? { bewijs: { naam: r.bewijs.naam, sha256: r.bewijs.sha256 } } : {}),
   }
 }
 
@@ -297,6 +325,7 @@ export function wijzigingen(vorigeTekst: string | null, huidig: Akkoord): string
     if (o.datum !== huidig.datum) uit.push('Datum aangepast')
     if ((o.verantwoording ?? '') !== huidig.verantwoording) uit.push('Verantwoording aangepast')
     if ((o.referentie ?? null) !== huidig.referentie) uit.push('Referentie aangepast')
+    if ((o.bewijs?.sha256 ?? null) !== (huidig.bewijs?.sha256 ?? null)) uit.push(o.bewijs ? 'Document vervangen' : 'Document toegevoegd')
   }
   if (huidig.soort === 'contract' && oud.soort === 'contract') {
     if (oud.contractwaarde !== huidig.contractwaarde) uit.push(`Contractwaarde ${eur(oud.contractwaarde)} → ${eur(huidig.contractwaarde)}`)
@@ -332,4 +361,77 @@ export function beschrijfAkkoord(a: Akkoord): string {
   }
   const wat = a.soort === 'inkomst' ? 'Inkomst' : 'Kost'
   return `${a.geschrapt ? 'Geschrapt: ' : ''}${wat} ${a.omschrijving}: ${a.soort === 'kost' ? '−' : ''}${eur(a.bedrag)}`
+}
+
+// ── Certificaat en archiefmail ──────────────────────────────────────────────
+
+export type CertificaatHandtekening = { vennoot: Vennoot; naam: string; email: string | null; getekend_op: string }
+export type CertificaatGegevens = {
+  nummer: string
+  inhoud: Akkoord
+  /** SHA-256 van de getekende cijfers (inhoud_tekst). */
+  inhoud_sha256: string
+  handtekeningen: CertificaatHandtekening[]
+  /** Wat het contract Marco oplevert (fractie), berekend toen alle drie tekenden. */
+  aandeel: number | null
+  /** De aandelen op dat moment. */
+  stand: { marco: number; bram: number; chiara: number } | null
+  volledig_op: string
+}
+
+const pctTekst = (f: number, c = 2) => `${(f * 100).toLocaleString('nl-BE', { minimumFractionDigits: c, maximumFractionDigits: c })}%`
+const tijd = (iso: string) => new Date(iso).toLocaleString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Brussels' })
+
+/** De kernregels van een certificaat: label en waarde, voor de pdf én de mail. */
+export function certificaatRegels(g: CertificaatGegevens): [string, string][] {
+  const a = g.inhoud
+  if (a.soort === 'contract') {
+    const rol = [a.afspraak && 'afspraak gezet', a.closing && 'klant geclosed'].filter(Boolean).join(' en ') || 'geen rol'
+    return [
+      ['Klant', a.klant],
+      ['Contract', `${a.contract ?? '—'} (${a.nr})`],
+      ['Contractwaarde', eur(a.contractwaarde)],
+      ['Kosten', a.kosten_totaal ? `${eur(a.kosten_totaal)}${a.kosten.length ? ` (${a.kosten.map((k) => `${kostSoortLabel(k.soort)} ${eur(k.bedrag)}`).join(', ')})` : ''}` : 'geen'],
+      ['Netto', eur(a.netto)],
+      ['Marco', `${rol}: ${a.deel_pct}%`],
+      ...(a.verloop === 'stopgezet' ? [['Verloop', `vroegtijdig stopgezet, ${eur(a.betaald_bij_stop)} betaald`] as [string, string]] : []),
+      ...(a.verloop === 'niet_betaler' ? [['Verloop', 'niet-betaler'] as [string, string]] : []),
+      ['Telt mee voor Marco', eur(a.telt_mee)],
+      ...(g.aandeel !== null ? [['Levert Marco op', pctTekst(g.aandeel)] as [string, string]] : []),
+    ]
+  }
+  return [
+    ['Soort', a.soort === 'inkomst' ? 'Inkomst (telt zoals de WAM-afspraak)' : "Kost (gaat van Marco's totaal af)"],
+    ['Omschrijving', `${a.omschrijving}${a.geschrapt ? ' (geschrapt)' : ''}`],
+    ['Bedrag', eur(a.bedrag)],
+    ['Datum', a.datum],
+    ...(a.referentie ? [['Referentie', a.referentie] as [string, string]] : []),
+    ['Verantwoording', a.verantwoording],
+    ...(a.bewijs ? [['Document', `${a.bewijs.naam} · SHA-256 ${a.bewijs.sha256}`] as [string, string]] : []),
+  ]
+}
+
+export function certificaatTitel(a: Akkoord): string {
+  if (a.soort === 'contract') return `${a.klant} (${a.nr})`
+  return `${a.soort === 'inkomst' ? 'Inkomst' : 'Kost'}: ${a.omschrijving}`
+}
+
+/** Onderwerp en tekst van de archiefmail naar legal@, zodra alle drie tekenden. */
+export function certificaatMail(g: CertificaatGegevens, vennoten: Record<Vennoot, string>): { onderwerp: string; tekst: string } {
+  const onderwerp = `Vesting – getekend door alle drie – ${certificaatTitel(g.inhoud)}`
+  const regels = [
+    'Marco, Bram en Chiara hebben alle drie getekend in de app.',
+    '',
+    ...certificaatRegels(g).map(([l, w]) => `${l}: ${w}`),
+    '',
+    'Getekend door:',
+    ...g.handtekeningen.map((h) => `- ${vennoten[h.vennoot] ?? h.naam}${h.email ? ` (${h.email})` : ''} op ${tijd(h.getekend_op)}`),
+    '',
+    ...(g.stand ? [`Stand van de aandelen op ${tijd(g.volledig_op)}: Marco ${pctTekst(g.stand.marco, 0)}, Bram ${pctTekst(g.stand.bram, 0)}, Chiara ${pctTekst(g.stand.chiara, 0)}.`, ''] : []),
+    `Certificaat ${g.nummer} in bijlage, met de drie handtekeningen.`,
+    `Vingerafdruk van de getekende cijfers (SHA-256): ${g.inhoud_sha256}`,
+    '',
+    'Deze mail is het archief buiten de app. Niet beantwoorden.',
+  ]
+  return { onderwerp, tekst: regels.join('\n') }
 }

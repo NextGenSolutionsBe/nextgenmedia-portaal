@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Check, Loader2, PenLine, RotateCcw, X } from 'lucide-react'
+import { Check, Download, Loader2, Mail, PenLine, RotateCcw, X } from 'lucide-react'
 import { HandtekeningVak } from '@/components/admin/handtekening-vak'
 import { VENNOTEN, type Vennoot } from '@/lib/vesting-akkoord'
-import type { AkkoordWeergave, ContractWeergave } from '@/lib/vesting-weergave'
+import type { AkkoordWeergave, CertificaatKort, ContractWeergave } from '@/lib/vesting-weergave'
 
 export const eur = (n: number | null | undefined, cent = false) =>
   n === null || n === undefined ? '—' : new Intl.NumberFormat('nl-BE', { style: 'currency', currency: 'EUR', minimumFractionDigits: cent ? 2 : 0, maximumFractionDigits: cent ? 2 : 0 }).format(n)
@@ -47,10 +47,11 @@ type OpgeslagenHandtekening = { id: string; vennoot: Vennoot; naam: string | nul
  * zelf), wat er veranderde sinds de vorige keer, en voor een vennoot die nog
  * niet tekende het tekenvak.
  */
-export function Akkoord({ onderwerp, id, akkoord, vennoten, ik, laatste, onLaatste, onGetekend, uitleg }: {
+export function Akkoord({ onderwerp, id, akkoord, certificaat, vennoten, ik, laatste, onLaatste, onGetekend, uitleg }: {
   onderwerp: 'contract' | 'kost' | 'inkomst'
   id: string
   akkoord: AkkoordWeergave
+  certificaat?: CertificaatKort | null
   vennoten: Record<Vennoot, string>
   ik: Vennoot | null
   laatste: string | null
@@ -78,9 +79,11 @@ export function Akkoord({ onderwerp, id, akkoord, vennoten, ik, laatste, onLaats
     if (!png || !akkoordVinkje) return
     setBezig(true)
     try {
-      await api('/api/admin/vesting/akkoord', { method: 'POST', body: JSON.stringify({ onderwerp, onderwerp_id: id, inhoud_tekst: akkoord.tekst, handtekening: png }) })
+      const j = await api('/api/admin/vesting/akkoord', { method: 'POST', body: JSON.stringify({ onderwerp, onderwerp_id: id, inhoud_tekst: akkoord.tekst, handtekening: png }) })
       onLaatste(png)
-      toast.success('Getekend.')
+      const cert = j.certificaat as { nummer: string; mail_status: string } | null | undefined
+      if (cert) toast.success(cert.mail_status === 'verstuurd' ? `Alle drie getekend. Certificaat ${cert.nummer} is gemaild naar legal@.` : `Alle drie getekend. Certificaat ${cert.nummer} is klaar, maar de mail naar legal@ lukte niet.`)
+      else toast.success('Getekend.')
       setAkkoordVinkje(false)
       onGetekend()
     } catch (e) {
@@ -125,6 +128,8 @@ export function Akkoord({ onderwerp, id, akkoord, vennoten, ik, laatste, onLaats
         })}
       </ul>
 
+      <CertificaatBlok onderwerp={onderwerp} id={id} certificaat={certificaat ?? null} volledig={akkoord.stand.volledig} heeftOoit={!!akkoord.stand.laatsteVolledig} onVernieuw={onGetekend} />
+
       <Geschiedenis lijst={lijst} huidig={akkoord.tekst} vennoten={vennoten} />
 
       {ik && mijnStand !== 'getekend' && (
@@ -144,6 +149,53 @@ export function Akkoord({ onderwerp, id, akkoord, vennoten, ik, laatste, onLaats
       )}
       {!ik && <p className="mt-3 text-xs text-gray-500">Enkel Marco, Bram en Chiara tekenen, elk met hun eigen account.</p>}
     </section>
+  )
+}
+
+/**
+ * Het certificaat van de laatste versie die alle drie tekenden: downloaden, en
+ * of de archiefmail naar legal@ vertrokken is (anders opnieuw versturen).
+ */
+function CertificaatBlok({ onderwerp, id, certificaat, volledig, heeftOoit, onVernieuw }: {
+  onderwerp: 'contract' | 'kost' | 'inkomst'; id: string; certificaat: CertificaatKort | null; volledig: boolean; heeftOoit: boolean; onVernieuw: () => void
+}) {
+  const [bezig, setBezig] = useState(false)
+  if (!heeftOoit) return null
+  const maak = async () => {
+    setBezig(true)
+    try { await api('/api/admin/vesting/certificaat', { method: 'POST', body: JSON.stringify({ onderwerp, id }) }); onVernieuw() }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'Certificaat maken mislukt') } finally { setBezig(false) }
+  }
+  const mail = async () => {
+    if (!certificaat) return
+    setBezig(true)
+    try { await api('/api/admin/vesting/certificaat', { method: 'POST', body: JSON.stringify({ certificaat_id: certificaat.id, actie: 'mail' }) }); toast.success('Gemaild naar legal@.'); onVernieuw() }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'Mailen mislukt'); onVernieuw() } finally { setBezig(false) }
+  }
+  if (!certificaat) {
+    return (
+      <div className="mt-3 rounded-lg border border-gray-200 p-3 text-sm flex items-center justify-between gap-2 flex-wrap">
+        <span className="text-gray-600">Alle drie tekenden, maar het certificaat is er nog niet.</span>
+        <button type="button" onClick={maak} disabled={bezig} className="btn-secondary text-xs h-8">{bezig && <Loader2 className="h-3.5 w-3.5 animate-spin" />}Certificaat maken</button>
+      </div>
+    )
+  }
+  return (
+    <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3 text-sm space-y-1.5">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="min-w-0">
+          <div className="font-medium text-gray-900">Certificaat {certificaat.nummer}</div>
+          <div className="text-xs text-gray-500">{certificaat.huidig ? 'Voor de huidige cijfers' : 'Voor de vorige versie die alle drie tekenden'} · {tijdstip(certificaat.volledig_op)}</div>
+        </div>
+        <a href={`/api/admin/vesting/certificaat?id=${certificaat.id}`} className="btn-secondary text-xs h-8"><Download className="h-3.5 w-3.5" />Downloaden</a>
+      </div>
+      <div className={`text-xs flex items-center gap-1.5 ${certificaat.mail_status === 'verstuurd' ? 'text-green-700' : certificaat.mail_status === 'mislukt' ? 'text-red-700' : 'text-gray-500'}`}>
+        <Mail className="h-3.5 w-3.5" />
+        {certificaat.mail_status === 'verstuurd' && certificaat.mail_op ? `Gemaild naar legal@ op ${tijdstip(certificaat.mail_op)}` : certificaat.mail_status === 'mislukt' ? `Mail naar legal@ mislukt${certificaat.mail_fout ? `: ${certificaat.mail_fout}` : ''}` : 'Mail naar legal@ nog niet verstuurd'}
+        {certificaat.mail_status !== 'verstuurd' && <button type="button" onClick={mail} disabled={bezig} className="ml-1 underline">{bezig ? 'Bezig…' : 'Opnieuw versturen'}</button>}
+      </div>
+      {!volledig && <p className="text-xs text-amber-700">De cijfers zijn sindsdien gewijzigd. Zodra alle drie opnieuw tekenen, komt er een nieuw certificaat.</p>}
+    </div>
   )
 }
 

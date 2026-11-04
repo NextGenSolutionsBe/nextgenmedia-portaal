@@ -10,7 +10,7 @@ import {
   type Akkoord, type AkkoordStand, type ContractAkkoord, type Handtekening, type KostLijn, type Onderwerp, type Registratie,
   type RegistratieAkkoord, type Vennoot, type VennotenInstelling,
 } from '@/lib/vesting-akkoord'
-import type { ContractWeergave, RegistratieWeergave, VestingWeergave } from '@/lib/vesting-weergave'
+import type { CertificaatKort, ContractWeergave, RegistratieWeergave, VestingWeergave } from '@/lib/vesting-weergave'
 
 type Admin = ReturnType<typeof createAdminSupabaseClient>
 
@@ -50,6 +50,8 @@ export type VestingData = {
   vennoten: VennotenInstelling
   akkoordContract: Map<string, AkkoordInfo>
   akkoordRegistratie: Map<string, AkkoordInfo>
+  /** Per kaart het laatste certificaat (met de getekende tekst, om te weten of het over de huidige cijfers gaat). */
+  certificaten: Map<string, Omit<CertificaatKort, 'huidig'> & { inhoud_tekst: string }>
   /** Contracten uit Contracten/Projecten die nog niet beoordeeld zijn (ook nog niet getekend). */
   kandidaten: KandidaatContract[]
   /** Bewust "telt niet mee". */
@@ -72,7 +74,7 @@ function naarKandidaat(r: Record<string, unknown>): KandidaatContract {
 }
 
 export async function laadVestingData(admin: Admin = createAdminSupabaseClient()): Promise<VestingData> {
-  const [inst, contracten, registratieRijen, oud, moduleContracten, klanten, contractTermijnen, kostLijnen, handtekeningen, instellingen] = await Promise.all([
+  const [inst, contracten, registratieRijen, oud, moduleContracten, klanten, contractTermijnen, kostLijnen, handtekeningen, instellingen, certificaatRijen] = await Promise.all([
     admin.from('vesting_instellingen').select('*').eq('id', 1).maybeSingle(),
     admin.from('vesting_contracten').select('*').order('ondertekend_op').order('nr'),
     admin.from('vesting_registraties').select('*').order('datum').order('created_at'),
@@ -83,6 +85,7 @@ export async function laadVestingData(admin: Admin = createAdminSupabaseClient()
     admin.from('vesting_kosten').select('*').order('created_at'),
     admin.from('vesting_handtekeningen').select('id, onderwerp, onderwerp_id, vennoot, naam, getekend_op, inhoud_tekst').order('getekend_op'),
     admin.from('app_settings').select('key, value').in('key', [NIET_MEETELLEN_SLEUTEL, VENNOTEN_SLEUTEL]),
+    admin.from('vesting_certificaten').select('id, nummer, onderwerp_id, inhoud_tekst, volledig_op, mail_status, mail_op, mail_fout').order('volledig_op', { ascending: false }),
   ])
   const setting = (k: string) => ((instellingen.data ?? []) as { key: string; value: unknown }[]).find((r) => r.key === k)?.value
   const ids = (setting(NIET_MEETELLEN_SLEUTEL) as { ids?: unknown } | undefined)?.ids
@@ -169,7 +172,29 @@ export async function laadVestingData(admin: Admin = createAdminSupabaseClient()
       facturen, nietMeetellen, wamGekoppeld: [],
     },
     v, ctermijnen, kostLijnen: lijnen, registraties, vennoten, akkoordContract, akkoordRegistratie, kandidaten, nietMee, moduleTitel,
+    certificaten: laatsteCertificaten((certificaatRijen.data ?? []) as Record<string, unknown>[]),
   }
+}
+
+function laatsteCertificaten(rijen: Record<string, unknown>[]): VestingData['certificaten'] {
+  const uit: VestingData['certificaten'] = new Map()
+  for (const r of rijen) {
+    const id = String(r.onderwerp_id)
+    if (uit.has(id)) continue   // nieuwste eerst
+    uit.set(id, {
+      id: String(r.id), nummer: String(r.nummer), volledig_op: String(r.volledig_op), inhoud_tekst: String(r.inhoud_tekst),
+      mail_status: (r.mail_status === 'verstuurd' || r.mail_status === 'mislukt' ? r.mail_status : 'wacht') as CertificaatKort['mail_status'],
+      mail_op: (r.mail_op as string | null) ?? null, mail_fout: (r.mail_fout as string | null) ?? null,
+    })
+  }
+  return uit
+}
+
+const certificaatVoor = (data: VestingData, id: string, tekst: string): CertificaatKort | null => {
+  const c = data.certificaten.get(id)
+  if (!c) return null
+  const { inhoud_tekst, ...rest } = c
+  return { ...rest, huidig: inhoud_tekst === tekst }
 }
 
 /** Hoeveel contracten en registraties wachten op de handtekening van deze vennoot? */
@@ -247,21 +272,21 @@ export function naarWeergave(data: VestingData, userId: string | null): VestingW
       titel: c.contract_id ? data.moduleTitel.get(c.contract_id)?.titel ?? null : null,
       contract_id: c.contract_id, ondertekend_op: c.ondertekend_op || null, wachtOpKlant: c.wachtOpKlant,
       facturatiemodel: c.facturatiemodel, maandbedrag: c.maandbedrag, duur: c.duur, totaal: c.totaal,
-      kostLijnen: data.kostLijnen.filter((l) => l.vesting_contract_id === c.id).map(({ id, soort, omschrijving, bedrag, verantwoording }) => ({ id, soort, omschrijving, bedrag, verantwoording: verantwoording ?? null })),
+      kostLijnen: data.kostLijnen.filter((l) => l.vesting_contract_id === c.id).map(({ id, soort, omschrijving, bedrag, verantwoording, bewijs }) => ({ id, soort, omschrijving, bedrag, verantwoording: verantwoording ?? null, bewijs: bewijs ? { pad: bewijs.pad, naam: bewijs.naam } : null })),
       kostenFacturen: c.directe_kosten_facturen ?? null, kostenAftrek: c.kostenAftrek, netto: c.netto,
       afspraak: c.appointment_door_marco, closing: c.closed_door_marco, toerekening_pct: c.toerekening_pct ?? null, factor: c.factor,
       teltMee: akkoord.inhoud.soort === 'contract' ? akkoord.inhoud.telt_mee : 0,
       algemeneKostenAftrek: c.algemeneKostenAftrek, teltVoorAandeel: c.teltVoorAandeel, status: c.status,
       telt: c.erkenning !== 'uitgesloten', definitief: c.erkenning === 'definitief', ruweVesting: c.ruweVesting,
       schijven: { goedkoop: c.goedkopeSchijf, jaar: c.jaarschijf, regulierTarief: i.regulier_tarief, jaarTarief: c.tarief, jaar_label: c.jaar },
-      akkoord,
+      akkoord, certificaat: certificaatVoor(data, c.id, akkoord.tekst),
     }
   })
   // Nieuwste bovenaan; wat de klant nog moet tekenen eerst.
   contracten.sort((a, b) => (b.ondertekend_op ?? '9999').localeCompare(a.ondertekend_op ?? '9999') || b.nr.localeCompare(a.nr, 'nl', { numeric: true }))
 
   const registraties: RegistratieWeergave[] = data.registraties
-    .map((r) => ({ ...r, akkoord: data.akkoordRegistratie.get(r.id)! }))
+    .map((r) => { const akkoord = data.akkoordRegistratie.get(r.id)!; return { ...r, akkoord, certificaat: certificaatVoor(data, r.id, akkoord.tekst) } })
     .sort((a, b) => Number(a.geschrapt) - Number(b.geschrapt) || b.datum.localeCompare(a.datum))
 
   const g = getekendeStand(data)

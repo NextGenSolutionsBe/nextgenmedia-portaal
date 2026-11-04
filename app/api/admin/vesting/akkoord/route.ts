@@ -4,9 +4,11 @@ import { createAdminSupabaseClient, requireAdmin } from '@/lib/supabase/server'
 import { safeMessage } from '@/lib/api-error'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { laadVestingData } from '@/lib/vesting-data-server'
+import { zorgVoorCertificaat } from '@/lib/vesting-certificaat-server'
 import { VENNOOT_NAAM, beschrijfAkkoord, controleerHandtekening, vennootVan, type Akkoord, type Onderwerp } from '@/lib/vesting-akkoord'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const isOnderwerp = (v: unknown): v is Onderwerp => v === 'contract' || v === 'kost' || v === 'inkomst'
@@ -55,8 +57,19 @@ export async function POST(req: NextRequest) {
       actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'admin', ip: meta.ip, userAgent: meta.userAgent,
       metadata: { vennoot, inhoud: info.inhoud },
     })
+    // Was dit de derde handtekening? Dan het certificaat maken en één keer naar legal@ mailen.
+    let certificaat: { nummer: string; mail_status: string } | null = null
+    if (info.stand.getekend === 2) {
+      try {
+        const na = await laadVestingData(admin)
+        const rij = await zorgVoorCertificaat(admin, na, onderwerp, id, { mail: true })
+        if (rij) certificaat = { nummer: rij.nummer, mail_status: rij.mail_status }
+      } catch (e) {
+        console.error('[vesting] certificaat na ondertekening mislukt', e instanceof Error ? e.message : e)
+      }
+    }
     revalidatePath('/admin/vesting')
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({ ok: true, certificaat })
   } catch (e) {
     return NextResponse.json({ error: safeMessage(e, 'Tekenen mislukt') }, { status: 500 })
   }

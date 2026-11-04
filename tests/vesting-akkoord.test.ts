@@ -5,6 +5,7 @@ import { STANDAARD_INSTELLINGEN as I, berekenVesting, type Contract, type WamRij
 import {
   akkoordStand, beschrijfAkkoord, contractAkkoord, controleerHandtekening, controleerKostLijn, controleerRegistratie, inhoudTekst,
   laatsteVolledigeVersie, leesVennoten, registratieAkkoord, registratiesVoorBerekening, vennootVan, wijzigingen,
+  certificaatMail, certificaatRegels, controleerBewijsInvoer,
   type Handtekening, type KostLijn, type Registratie,
 } from '../lib/vesting-akkoord'
 import { controleerSnel, snelNaarRij, teBeoordelen } from '../lib/vesting-snel'
@@ -173,6 +174,47 @@ test('Te beoordelen: ook contracten die de klant nog niet tekende, getekende eer
   assert.match(String(controleerSnel(basis)), /datum/)
   assert.equal(controleerSnel({ ...basis, wachtOpKlant: true }), null)
   assert.equal(snelNaarRij({ ...basis, wachtOpKlant: true }).ondertekend_op, null)
+})
+
+test('Het bewijsstuk zit mee in wat getekend wordt: een ander document = opnieuw tekenen', () => {
+  const bewijs = { pad: 'bewijs/00000000-0000-4000-8000-000000000001/factuur.pdf', naam: 'factuur.pdf', sha256: 'a'.repeat(64), grootte: 1000 }
+  const met = registratieAkkoord(reg({ bewijs }))
+  assert.deepEqual(met.bewijs, { naam: 'factuur.pdf', sha256: 'a'.repeat(64) })
+  const ander = registratieAkkoord(reg({ bewijs: { ...bewijs, sha256: 'b'.repeat(64) } }))
+  assert.deepEqual(wijzigingen(inhoudTekst(met), ander), ['Document vervangen'])
+  // Zonder document blijft de tekst zoals voorheen (oude kaarten tekenen niet opnieuw voor niets).
+  assert.equal(inhoudTekst(registratieAkkoord(reg())).includes('bewijs'), false)
+})
+
+test('Opgeladen documenten: enkel uit de map bewijs/ van de vestingopslag', () => {
+  assert.deepEqual(controleerBewijsInvoer({ pad: 'bewijs/00000000-0000-4000-8000-000000000001/contract-wam.pdf', naam: 'Contract WAM.pdf' }), { pad: 'bewijs/00000000-0000-4000-8000-000000000001/contract-wam.pdf', naam: 'Contract WAM.pdf' })
+  assert.equal(controleerBewijsInvoer({ pad: 'certificaten/VC-1.pdf', naam: 'x' }), null)
+  assert.equal(controleerBewijsInvoer({ pad: 'bewijs/../geheim.pdf', naam: 'x' }), null)
+  assert.equal(controleerBewijsInvoer(null), null)
+})
+
+test('Certificaat en mail naar legal@: cijfers, %, drie handtekeningen en de vingerafdruk', () => {
+  const c = berekenVesting([contract()], [], [], I).contracten[0]
+  const inhoud = contractAkkoord(c, lijnen, 'Webshop')
+  const g = {
+    nummer: 'VC-ABCDEF1234', inhoud, inhoud_sha256: 'f'.repeat(64), aandeel: c.ruweVesting, volledig_op: '2026-11-04T14:00:00Z',
+    stand: { marco: 0.02, bram: 0.65, chiara: 0.33 },
+    handtekeningen: [
+      { vennoot: 'marco' as const, naam: 'Marco', email: 'marco@nextgenmedia.be', getekend_op: '2026-11-04T13:00:00Z' },
+      { vennoot: 'bram' as const, naam: 'Bram', email: 'bram@nextgenmedia.be', getekend_op: '2026-11-04T13:30:00Z' },
+      { vennoot: 'chiara' as const, naam: 'Chiara', email: 'chiara@nextgenmedia.be', getekend_op: '2026-11-04T14:00:00Z' },
+    ],
+  }
+  const regels = Object.fromEntries(certificaatRegels(g))
+  assert.equal(regels['Telt mee voor Marco'], '€1.500')
+  assert.equal(regels['Levert Marco op'], '0,30%')
+  assert.match(regels['Marco'], /afspraak gezet: 50%/)
+  const mail = certificaatMail(g, { marco: 'Marco Castermans', bram: 'Bram Reinquin', chiara: 'Chiara Walmagh' })
+  assert.match(mail.onderwerp, /getekend door alle drie – Apex \(C-001\)/)
+  assert.match(mail.tekst, /Levert Marco op: 0,30%/)
+  assert.match(mail.tekst, /Chiara Walmagh \(chiara@nextgenmedia\.be\)/)
+  assert.match(mail.tekst, /VC-ABCDEF1234/)
+  assert.match(mail.tekst, /Marco 2%, Bram 65%, Chiara 33%/)
 })
 
 console.log(`\n${n} tests geslaagd\n`)
