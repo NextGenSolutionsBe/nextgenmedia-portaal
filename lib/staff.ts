@@ -72,6 +72,8 @@ export const STAFF_API_WHITELIST = [
   // Mijn account: enkel het eigen account (naam, e-mail, wachtwoord, foto).
   '/api/admin/account/profiel',
   '/api/admin/account/foto',
+  // Taken aan elkaar toewijzen (Command Center): elk teamlid.
+  '/api/admin/taken',
 ]
 
 /** Gevoelige API-paden die ALTIJD admin-only blijven, ook al valt het pad binnen

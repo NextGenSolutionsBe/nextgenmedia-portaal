@@ -6,6 +6,7 @@ import { TodayPanel } from './today-panel'
 import { ContractsWidget } from './contracts-widget'
 import { RecentActivity } from './recent-activity'
 import { OpvolgingPanel } from './opvolging-panel'
+import { TakenBlok } from '@/components/admin/taken-blok'
 
 // Compact Command Center: Op te volgen (aanvragen, contracten, meetings, leads,
 // contentfeedback, met namen) + Vandaag (acties) + kritieke contracten + recente
@@ -31,6 +32,9 @@ export default async function CommandCenter() {
           {today.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
         </p>
       </div>
+
+      {/* Taken aan elkaar toewijzen, gesynchroniseerd met ClickUp. */}
+      {actor && <TakenBlok />}
 
       {/* Op te volgen — bovenaan: concreet wie en wat, per module afgeschermd. */}
       <Suspense fallback={<div className="card-base text-sm text-gray-400">Opvolging laden…</div>}>
