@@ -1,4 +1,5 @@
 import 'server-only'
+import { verschuifMaanden, maandenTussen as maandAfstand } from './maanden'
 import { recurringActiveInMonth, billingDateFor, inclFromExcl, normalizeInvoiceStatus, shiftYM, type RecurringInvoice } from '@/lib/invoices'
 import { SERVICE_LABELS } from '@/lib/utils'
 import { leesInstellingen } from '@/lib/instellingen/laden'
@@ -161,7 +162,7 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
       const dagLabel = r.invoice_day === 'first' ? 'dag 1' : r.invoice_day === 'mid' ? 'dag 15' : 'laatste dag'
       uit.push({
         id: momentSleutel('recurring', r.id, m), bron: 'recurring', bronId: r.id, maand: m, datum,
-        client_id: r.client_id, klant: naam(r.client_id), project: r.contract_id ? (contractTitel.get(r.contract_id) || svc(r.service_slug)) : svc(r.service_slug), omschrijving: r.description,
+        client_id: r.client_id, klant: naam(r.client_id), project: r.contract_id ? (contractTitel.get(r.contract_id) || svc(r.service_slug)) : svc(r.service_slug), omschrijving: r.description ? verschuifMaanden(r.description, maandAfstand((r.start_month ?? m).slice(0, 7), m)) : r.description,
         type: 'Maandfactuur', bedrag_excl: excl, btw_pct: btw, bedrag_incl: incl,
         status, ruweStatus: ruwe, herkomst: r.contract_id ? 'contract' : 'recurring', terugkerend: true, verantwoordelijke: r.verantwoordelijke || verantwoordelijke,
         volledig: ontbrekend.length === 0, ontbrekend,

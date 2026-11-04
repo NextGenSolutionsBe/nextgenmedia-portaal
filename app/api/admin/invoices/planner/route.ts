@@ -12,6 +12,7 @@ import { billingDateFor, inclFromExcl } from '@/lib/invoices'
 import { kostenPerFactuur, rijSleutel } from '@/lib/facturen/kosten-data'
 import { leesGetal } from '@/lib/getal'
 import { leesActorNamen } from '@/lib/actor-namen'
+import { nummerAlGebruikt } from '@/lib/facturatie/factuurnummer-server'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -92,6 +93,12 @@ export async function POST(req: NextRequest) {
     const klaar = () => { try { revalidatePath('/admin/invoices'); revalidatePath('/admin/invoices/planner') } catch { /* */ } }
     // Extern factuurnummer (optioneel): Bram registreert het bij het afwerken of later.
     const externNr = b.extern_nummer === undefined ? undefined : (String(b.extern_nummer ?? '').trim().slice(0, 60) || null)
+    // Een factuurnummer staat maar op één factuur.
+    const dubbel = async (zelf: { invoice_id?: string; recurring_id?: string; maand?: string }) => {
+      if (!externNr || (b.actie !== 'extern_nummer' && b.actie !== 'verstuurd')) return null
+      const waar = await nummerAlGebruikt(admin, externNr, zelf)
+      return waar ? NextResponse.json({ error: `Factuurnummer ${externNr} staat al op ${waar}. Kies het volgende nummer.`, code: 'nummer_bezet' }, { status: 409 }) : null
+    }
     // ── Verwijderen (interne planner; nooit iets in de externe boekhouding) ──
     //   bereik 'dit'      → enkel dit item (bij een reeks: enkel deze maand)
     //   bereik 'toekomst' → dit item + toekomstige herhalingen; eerdere blijven
@@ -158,6 +165,7 @@ export async function POST(req: NextRequest) {
         await audit('Factuur teruggezet naar te factureren')
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
       }
+      { const bezet = await dubbel({ invoice_id: inv.id as string }); if (bezet && !(b.actie === 'verstuurd' && definitief)) return bezet }
       if (b.actie === 'extern_nummer') {
         const { error } = await admin.from('invoices').update({ extern_factuurnummer: externNr ?? null, updated_at: new Date().toISOString() }).eq('id', inv.id)
         if (error) throw new Error(error.message)
@@ -246,6 +254,7 @@ export async function POST(req: NextRequest) {
         await audit(`Maand ${sleutel.maand} teruggezet naar te factureren`)
         klaar(); return NextResponse.json({ ok: true, waarschuwingen })
       }
+      { const bezet = await dubbel({ recurring_id: rec.id as string, maand: sleutel.maand }); if (bezet && !(b.actie === 'verstuurd' && rij && (rij.status === 'verstuurd' || rij.status === 'betaald'))) return bezet }
       if (b.actie === 'extern_nummer') {
         const { error } = await admin.from('recurring_invoice_months').upsert({ recurring_id: rec.id, month: sleutel.maand, status: rij?.status ?? 'te_versturen', billing_date: huidigeDatum, extern_factuurnummer: externNr ?? null }, { onConflict: 'recurring_id,month' })
         if (error) throw new Error(error.message)

@@ -63,6 +63,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (heeft('contract_id')) patch.contract_id = UUID.test(String(b.contract_id ?? '')) ? b.contract_id : null
     if (heeft('service_slug')) patch.service_slug = tekst(b.service_slug, 100)
     if (heeft('description')) patch.description = tekst(b.description, 2000)
+    if (heeft('klant_referentie')) patch.klant_referentie = tekst(b.klant_referentie, 200)
     if (heeft('verantwoordelijke')) patch.verantwoordelijke = tekst(b.verantwoordelijke, 120)
     if (heeft('payment_term_days')) {
       const d = b.payment_term_days === '' || b.payment_term_days == null ? null : leesGetal(b.payment_term_days)

@@ -12,7 +12,7 @@ import { euro2, type Moment } from '@/lib/facturatie/planner-model'
 type Reeks = {
   id: string; client_id: string | null; contract_id: string | null; service_slug: string | null; description: string | null
   amount_excl: number; vat_pct: number; start_month: string; end_month: string | null; invoice_day: string | null
-  verantwoordelijke: string | null; payment_term_days: number | null; deleted_at: string | null
+  verantwoordelijke: string | null; payment_term_days: number | null; deleted_at: string | null; klant_referentie?: string | null
 }
 type Antwoord = { reeks: Reeks; uitgevoerd: number; klanten: { id: string; company_name: string }[]; contracten: { id: string; title: string; client_id: string | null }[] }
 
@@ -48,6 +48,7 @@ export function ReeksBewerken({ recurringId, onSluit, onKlaar }: { recurringId: 
         client_id: v.client_id ?? null, contract_id: v.contract_id ?? null, description: v.description ?? '', service_slug: v.service_slug ?? '',
         amount_excl: v.amount_excl, vat_pct: v.vat_pct, start_month: v.start_month, end_month: v.end_month || null,
         invoice_day: v.invoice_day ?? 'last', verantwoordelijke: v.verantwoordelijke ?? '', payment_term_days: v.payment_term_days ?? '',
+        klant_referentie: v.klant_referentie ?? '',
       } })
       toast.success('Terugkerende facturatie bijgewerkt. Verstuurde maanden blijven zoals ze waren.'); onKlaar()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(false) }
@@ -78,7 +79,9 @@ export function ReeksBewerken({ recurringId, onSluit, onKlaar }: { recurringId: 
               <select className={INP} value={v.contract_id ?? ''} onChange={(e) => zet('contract_id', e.target.value || null)}>
                 <option value="">— Geen contract —</option>{d.contracten.filter((c) => !v.client_id || !c.client_id || c.client_id === v.client_id || c.id === v.contract_id).map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
               </select></div>
-            <div className="sm:col-span-2"><label className={LBL}>Omschrijving op de factuur</label><input className={INP} value={v.description ?? ''} onChange={(e) => zet('description', e.target.value)} placeholder="bv. Social media beheer" /></div>
+            <div className="sm:col-span-2"><label className={LBL}>Titel op de factuur</label><input className={INP} value={v.description ?? ''} onChange={(e) => zet('description', e.target.value)} placeholder="bv. Sociale media management oktober" />
+              <p className="text-[11px] text-gray-500 mt-1">Een maand in de titel schuift elke maand mee (zoals de startmaand: oktober, dan november …).</p></div>
+            <div className="sm:col-span-2"><label className={LBL}>Bestelbonnummer <span className="text-gray-400 font-normal">(optioneel)</span></label><input className={INP} value={v.klant_referentie ?? ''} onChange={(e) => zet('klant_referentie', e.target.value)} placeholder="bv. PO-2026-0815" /></div>
             <div><label className={LBL}>Bedrag per maand excl. btw (€)</label><GetalInvoer className={INP} waarde={v.amount_excl ?? 0} min={0} onWaarde={(n) => zet('amount_excl', n)} /></div>
             <div><label className={LBL}>Btw %</label><GetalInvoer className={INP} waarde={v.vat_pct ?? 21} min={0} max={100} onWaarde={(n) => zet('vat_pct', n)} /></div>
             <div><label className={LBL}>Startmaand</label><input type="month" className={INP} value={v.start_month ?? ''} onChange={(e) => zet('start_month', e.target.value)} /></div>

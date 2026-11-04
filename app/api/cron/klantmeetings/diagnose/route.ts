@@ -83,6 +83,10 @@ export const maxDuration = 60
  *    bevestiging met agendabestand en de herinnering via de scheduler (beide
  *    naar info@), uitschrijven en annuleren. Daarna is alles weg.
  *  · ?opvolging=1: leest enkel. De blokken "Op te volgen" van het Command Center.
+ *  · ?contractwaarde=<contract-uuid>: maakt het voorstel voor de contractwaarde
+ *    (pdf via AI, anders de contractgegevens). Schrijft enkel de voorstelkolommen,
+ *    nooit de contractwaarde zelf. Geeft voorstel + uitleg terug.
+ *  · ?volgendnummer=1: leest enkel. Het volgende externe factuurnummer.
  *  · ?kalender=1: leest enkel. Per agenda de werkuren, bezette blokken (per
  *    Google-agenda, zonder titels) en vrije segmenten voor twee weken, plus
  *    hoe de ClickUp-taken binnenkomen (pagina's, tijdvelden).
@@ -98,6 +102,15 @@ export async function POST(req: NextRequest) {
   const admin = createAdminSupabaseClient()
   try {
     if (req.nextUrl.searchParams.get('zelftest') === 'klantboeking') return NextResponse.json(await zelftestKlantboeking(admin))
+    const cw = req.nextUrl.searchParams.get('contractwaarde')
+    if (cw && UUID.test(cw)) {
+      const { maakWaardeVoorstel } = await import('@/lib/contracten/waarde-voorstel-server')
+      return NextResponse.json(await maakWaardeVoorstel(admin as never, cw, true))
+    }
+    if (req.nextUrl.searchParams.get('volgendnummer') === '1') {
+      const { volgendNummer } = await import('@/lib/facturatie/factuurnummer-server')
+      return NextResponse.json(await volgendNummer(admin))
+    }
     if (req.nextUrl.searchParams.get('clickupvarianten') === '1') {
       const nu = Date.now()
       const zoek = (req.nextUrl.searchParams.get('taken') ?? '').split(',').filter((x) => /^[A-Za-z0-9_-]{5,40}$/.test(x)).slice(0, 10)

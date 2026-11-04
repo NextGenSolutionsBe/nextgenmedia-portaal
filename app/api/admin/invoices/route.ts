@@ -396,6 +396,7 @@ export async function POST(req: NextRequest) {
         contract_id: b.contract_id || null, verantwoordelijke: b.verantwoordelijke ? String(b.verantwoordelijke).slice(0, 120) : null,
         payment_term_days: b.payment_term_days === undefined || b.payment_term_days === null || b.payment_term_days === '' ? null : Math.max(0, Math.round(Number(b.payment_term_days) || 30)),
         mededeling: b.mededeling ? String(b.mededeling).slice(0, 4000) : null,
+        klant_referentie: b.klant_referentie ? String(b.klant_referentie).trim().slice(0, 200) : null,
       })
       await slaLijnenOp(admin, { recurring_id: id, maand: start }, b.lines, actor)
       try {

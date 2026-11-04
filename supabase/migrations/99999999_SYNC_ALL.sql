@@ -7039,3 +7039,11 @@ REVOKE ALL ON public.offerte_sjablonen, public.offertes, public.offerte_events F
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES ('offertes', 'offertes', false, 26214400, ARRAY['application/pdf'])
 ON CONFLICT (id) DO NOTHING;
+
+-- ── Facturatie (4 nov 2026): voorstel contractwaarde, bestelbon op maandreeksen ──
+-- Het voorstel wordt NOOIT de contractwaarde zonder bevestiging (contract_waarde_excl blijft leeg).
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS contract_waarde_voorstel numeric(12,2);
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS contract_waarde_voorstel_uitleg text;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS contract_waarde_voorstel_bron text;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS contract_waarde_voorstel_op timestamptz;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS klant_referentie text;

@@ -89,10 +89,10 @@ export function ItemInhoud({ data, metBijlagen = true }: { data: ItemData; metBi
         <Veld label="Geplande facturatiedatum">{datumNl(d.datum)}</Veld>
         <Veld label="Type">{type ?? '—'}</Veld>
         <Veld label="Project">{d.project ?? '—'}</Veld>
-        <Veld label="Klantreferentie">{d.klant_referentie ? <span className="inline-flex items-center gap-1">{d.klant_referentie}<KopieerKnop klein tekst={d.klant_referentie} /></span> : '—'}</Veld>
+        <Veld label="Bestelbonnummer">{d.klant_referentie ? <span className="inline-flex items-center gap-1">{d.klant_referentie}<KopieerKnop klein tekst={d.klant_referentie} label="Kopieer" melding="Bestelbonnummer gekopieerd." /></span> : '—'}</Veld>
         <Veld label="Prestatieperiode">{prestatieTekst(d) || '—'}</Veld>
         <Veld label="Betaaltermijn">{d.betaaltermijn} dagen</Veld>
-        {d.titel && <div className="col-span-2"><Veld label="Omschrijving">{d.titel}</Veld></div>}
+        {d.titel && <div className="col-span-2"><Veld label="Titel"><span className="inline-flex items-start gap-2"><span>{d.titel}</span><KopieerKnop klein tekst={d.titel} label="Kopieer" melding="Titel gekopieerd." /></span></Veld></div>}
         {d.extern_factuurnummer && <Veld label="Extern factuurnummer">{d.extern_factuurnummer}</Veld>}
       </section>
 

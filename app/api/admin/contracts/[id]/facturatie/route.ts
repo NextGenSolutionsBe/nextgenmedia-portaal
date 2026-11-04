@@ -12,6 +12,7 @@ import { berekenRegel } from '@/lib/facturen/regels'
 import { laadAflettering } from '@/lib/contracten/aflettering-server'
 import { isWijzigingSoort, WIJZIGING_LABEL } from '@/lib/contracten/aflettering'
 import { logContractEvent } from '@/lib/contract-audit'
+import { maakWaardeVoorstel, voorstelVan } from '@/lib/contracten/waarde-voorstel-server'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -39,7 +40,8 @@ export type ContractFactuurRij = {
 }
 
 async function laad(admin: Admin, contractId: string) {
-  const { data: c } = await admin.from('contracts').select('id, title, client_id, status').eq('id', contractId).maybeSingle()
+  // select('*'): de voorstelkolommen bestaan pas na de migratie.
+  const { data: c } = await admin.from('contracts').select('*').eq('id', contractId).maybeSingle()
   if (!c) throw new Error('Contract niet gevonden')
   const [{ data: facturen }, { data: recurring }, { data: klant }, { data: lijnen }] = await Promise.all([
     admin.from('invoices').select('*').eq('contract_id', contractId).order('invoice_date'),
@@ -111,6 +113,9 @@ async function laad(admin: Admin, contractId: string) {
   return {
     contract: { id: c.id, title: c.title, client_id: c.client_id, status: c.status, klant_naam: klant?.company_name ?? null },
     facturen: rijen, totalen, kandidaten, gekoppeldElders, andereContracten, afl, regels,
+    // Voorstel voor de contractwaarde (enkel zolang ze ontbreekt); bevestigen = actie 'waarde'.
+    waardeVoorstel: c.contract_waarde_excl === null || c.contract_waarde_excl === undefined ? voorstelVan(c) : null,
+    kanVoorstellen: !!(c.pdf_path || c.signed_pdf_path || c.expected_invoice_amount_excl),
   }
 }
 
@@ -155,6 +160,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           bedrag_excl: Number(b.bedrag_excl) || 0, btw_pct: b.btw_pct === undefined ? 21 : Number(b.btw_pct),
           start_datum: String(b.start_datum ?? ''), interval_maanden: Number(b.interval_maanden) || 1,
           omschrijving: String(b.omschrijving ?? c.title ?? 'Factuur'), betalingstermijn_dagen: b.betalingstermijn_dagen === undefined || b.betalingstermijn_dagen === '' ? 30 : Number(b.betalingstermijn_dagen),
+          beschrijving: b.beschrijving ? String(b.beschrijving).slice(0, 2000) : '',
+          bestelbon: b.bestelbon ? String(b.bestelbon).trim().slice(0, 200) : '',
         }
         const fouten = valideerReeks(inv)
         if (fouten.length) return NextResponse.json({ error: `Controleer de invoer: ${fouten.join(', ')}.` }, { status: 400 })
@@ -170,8 +177,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             client_id: c.client_id, service_slug: c.service_slug ?? null, contract_id: id, start_month: start, end_month: null,
             description: inv.omschrijving.trim(), amount_excl: inv.bedrag_excl, vat_pct: inv.btw_pct, amount_incl: inclFromExcl(inv.bedrag_excl, inv.btw_pct),
             active: true, invoice_day: factuurdagVan(inv.start_datum), created_by: actor.userId, verantwoordelijke, payment_term_days: inv.betalingstermijn_dagen,
+            klant_referentie: inv.bestelbon || null,
           }
           const ingevoegd = await insertVeerkrachtig(admin, 'recurring_invoices', rij)
+          // Een langere omschrijving wordt de regel van elke maand (de maandnaam schuift mee in Facturen).
+          if (inv.beschrijving?.trim() && !regelsInvoer.length) {
+            try { await admin.from('invoice_lines').insert({ recurring_id: ingevoegd, invoice_id: null, volgnr: 1, artikel: inv.omschrijving.trim().slice(0, 200), omschrijving: inv.beschrijving.trim(), aantal: 1, eenheid: 'forfait', prijs_excl: inv.bedrag_excl, btw_pct: inv.btw_pct, korting_pct: 0, is_extra: false, classificatie: 'dienst' }) } catch { /* de titel volstaat */ }
+          }
           await audit(`Maandelijkse facturatie toegevoegd vanaf ${start}: € ${inv.bedrag_excl} excl.`, { recurring_id: ingevoegd })
           return klaar({ aangemaakt: 0, recurring_id: ingevoegd })
         }
@@ -183,14 +195,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         const ids: string[] = []; let overgeslagen = 0
         for (const m of momenten) {
           if (alBezet.has(sleutel(m.factuurdatum, m.bedrag_excl, m.omschrijving))) { overgeslagen++; continue }   // dubbel klikken → geen dubbele facturen
-          const regels = regelsInvoer.length ? regelsInvoer.map((r) => ({ ...r })) : [nieuweRegel({ artikel: inv.omschrijving.trim().slice(0, 120), omschrijving: m.omschrijving, aantal: 1, eenheid: 'forfait', prijs_excl: m.bedrag_excl }, inv.btw_pct)]
+          const regels = regelsInvoer.length ? regelsInvoer.map((r) => ({ ...r })) : [nieuweRegel({ artikel: m.omschrijving.slice(0, 200), omschrijving: m.beschrijving || m.omschrijving, aantal: 1, eenheid: 'forfait', prijs_excl: m.bedrag_excl }, inv.btw_pct)]
           const t = berekenTotalen(regels)
           const vervaldatum = new Date(m.factuurdatum + 'T12:00:00Z'); vervaldatum.setUTCDate(vervaldatum.getUTCDate() + inv.betalingstermijn_dagen)
           const rij: Record<string, unknown> = {
             client_id: c.client_id, contract_id: id, service_slug: c.service_slug ?? null, invoice_date: m.factuurdatum, invoice_month: m.periode, periode: m.periode,
             description: m.omschrijving, amount_excl: t.excl, vat_pct: inv.btw_pct, amount_incl: t.incl, contract_bedrag_excl: t.contractueel.excl,
             status: 'te_versturen', source: 'contract', currency: 'EUR', payment_term_days: inv.betalingstermijn_dagen, due_date: vervaldatum.toISOString().slice(0, 10),
-            verantwoordelijke, note: notitie, created_by: actor.userId,
+            verantwoordelijke, note: notitie, created_by: actor.userId, klant_referentie: inv.bestelbon || null,
           }
           const invoiceId = await insertVeerkrachtig(admin, 'invoices', rij)
           ids.push(invoiceId)
@@ -225,6 +237,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           id: String(r.id), artikel: (r.artikel as string | null) ?? null, omschrijving: (r.omschrijving as string | null) ?? null, is_extra: r.is_extra === true, contract_id: (r.contract_id as string | null) ?? null,
           bedrag_excl: berekenRegel({ aantal: Number(r.aantal) || 0, prijs_excl: Number(r.prijs_excl) || 0, btw_pct: Number(r.btw_pct) || 0, korting_pct: Number(r.korting_pct) || 0, korting_eur: Number(r.korting_eur) || 0 }).excl,
         })) })
+      }
+      case 'waarde_voorstel': {
+        // Enkel een voorstel: de contractwaarde zelf verandert niet (dat doet 'waarde' na bevestiging).
+        const r = await maakWaardeVoorstel(admin as never, id, b.opnieuw === true)
+        if (r.voorstel) await audit(`Voorstel contractwaarde: € ${r.voorstel.waarde} excl. (${r.voorstel.bron})`, { voorstel: r.voorstel })
+        return klaar({ voorstel: r.voorstel, reden: r.reden, melding: r.voorstel ? 'Voorstel klaar. Kijk het na en bevestig.' : (r.reden ?? 'Geen voorstel gevonden.') })
       }
       case 'waarde': {
         // Contractwaarde excl. btw: leeg = ontbreekt (≠ € 0). Ondertekenen wordt nooit geblokkeerd.

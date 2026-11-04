@@ -6,6 +6,7 @@ import { SERVICE_LABELS } from '@/lib/utils'
 import { normaliseerRegels, regelUitBedrag, type FactuurRegel } from '@/lib/facturen/regels'
 import { bepaalStatus, ontleedSleutel, vandaagBrussel } from '@/lib/facturatie/planner-model'
 import { aandachtspunten, ontbrekendeGegevens, type ItemDetail, type KlantInfo } from '@/lib/facturatie/item-model'
+import { verschuifMaanden, maandenTussen } from '@/lib/facturatie/maanden'
 
 export const dynamic = 'force-dynamic'
 
@@ -98,13 +99,17 @@ export async function GET(req: NextRequest) {
       ? [regelUitBedrag(String(rec.description ?? 'Maandfactuur'), Number(rij.amount_excl) || 0, btw)]
       : normaliseerRegels((lijnen ?? []).map(lijnNaarRegel), btw)
     if (regels.length === 0 && Number(rec.amount_excl) > 0) regels = [regelUitBedrag(String(rec.description ?? 'Maandfactuur'), Number(rec.amount_excl) || 0, btw)]
+    // Maandnamen in titel, regels en mededeling schuiven mee met de maand ("… oktober" → "… november").
+    const stap = maandenTussen(String(rec.start_month ?? maand).slice(0, 7), maand)
+    const schuif = (t: string | null | undefined) => (t ? verschuifMaanden(t, stap) : t ?? null)
+    regels = regels.map((r) => ({ ...r, artikel: schuif(r.artikel) ?? r.artikel, omschrijving: schuif(r.omschrijving) ?? r.omschrijving }))
     const datum = String(rij?.billing_date ?? billingDateFor(maand, rec.invoice_day)).slice(0, 10)
     const detail: ItemDetail = {
       klant: naarKlant(klant as KlantRij | null),
-      project: (contract as { title?: string } | null)?.title ?? svc(rec.service_slug), titel: rec.description ?? null, type: 'terugkerend', datum,
+      project: (contract as { title?: string } | null)?.title ?? svc(rec.service_slug), titel: schuif(rec.description), type: 'terugkerend', datum,
       prestatie_van: null, prestatie_tot: null, periode: maand,
       betaaltermijn: Number.isFinite(Number(rec.payment_term_days)) && rec.payment_term_days !== null ? Number(rec.payment_term_days) : 30,
-      klant_referentie: null, regels, mededeling: rec.mededeling ?? null, notitie: rij?.note ?? null, extern_factuurnummer: rij?.extern_factuurnummer ?? null,
+      klant_referentie: rec.klant_referentie ?? null, regels, mededeling: schuif(rec.mededeling), notitie: rij?.note ?? null, extern_factuurnummer: rij?.extern_factuurnummer ?? null,
     }
     let ruwe: string = rij?.status ? normalizeInvoiceStatus(rij.status) : 'te_versturen'
     if (ruwe === 'verstuurd' && (rij?.betaald_op || rij?.status === 'betaald')) ruwe = 'betaald'

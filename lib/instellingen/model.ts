@@ -125,6 +125,8 @@ export type FacturatieInstellingen = {
   km_tarief_excl: number
   /** Btw op de kilometervergoeding (afzonderlijk instelbaar). */
   km_btw_pct: number
+  /** Extern factuurnummer: van hier verder als de reeks buiten de app hoger staat (bv. "2026-130"); leeg = gewoon het hoogste in de app + 1. */
+  factuurnummer_vanaf: string
 }
 export type DocumentenInstellingen = {
   logo_path: string; primaire_kleur: string; secundaire_kleur: string; voettekst: string; contactregel: string; bestandsnaam_patroon: string
@@ -145,6 +147,7 @@ export const STANDAARD_FACTURATIE: FacturatieInstellingen = {
   clickup_sync_aan: false, clickup_lijst_id: '', clickup_lijst_pad: '', clickup_assignee_id: '', clickup_assignee_naam: '',
   verantwoordelijke_naam: 'Bram Reinquin',
   km_tarief_excl: 0, km_btw_pct: 21,
+  factuurnummer_vanaf: '',
 }
 export const STANDAARD_DOCUMENTEN: DocumentenInstellingen = {
   logo_path: '', primaire_kleur: '#fff848', secundaire_kleur: '#111111',
