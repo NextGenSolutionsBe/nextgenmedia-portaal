@@ -10,6 +10,7 @@ import { Lade, StatusBadge } from './planner/planner-detail'
 import { ReeksBewerken } from './planner/reeks-bewerken'
 import { ItemInhoud, KopieerKnop, factuurTekst, laadItem, type ItemData } from './item-inhoud'
 import { KostenEnWinstDialoog } from './kosten-en-winst'
+import { useVolgendNummer } from './volgend-nummer'
 
 /**
  * “Bekijken”: alles van één facturatie-item op één plek. Bovenaan wat je
@@ -36,18 +37,25 @@ export function ItemDetail({ moment, onSluit, onGewijzigd, onBewerk, onEigenArti
   const [meer, setMeer] = useState(false)
   const [kosten, setKosten] = useState(false)
   const [reeks, setReeks] = useState(false)
+  const [aangeraakt, setAangeraakt] = useState(false)
+  const { volgend, opnieuw: nummerOpnieuw } = useVolgendNummer()
 
   const laad = useCallback(async () => {
-    try { const d = await laadItem(moment.id); setData(d); setExtern(d.detail.extern_factuurnummer ?? '') } catch (e) { setFout(e instanceof Error ? e.message : 'Laden mislukt') }
+    try { const d = await laadItem(moment.id); setData(d); setExtern(d.detail.extern_factuurnummer ?? ''); setAangeraakt(false) } catch (e) { setFout(e instanceof Error ? e.message : 'Laden mislukt') }
   }, [moment.id])
   useEffect(() => { laad() }, [laad])
+  // Nog geen nummer en nog te factureren: het volgende nummer staat al klaar.
+  const teFactureren = tabVan({ status: data?.status ?? moment.status }) === 'te_factureren'
+  const autoNummer = !!data && !data.detail.extern_factuurnummer && teFactureren && !aangeraakt && !!volgend
+  useEffect(() => { if (autoNummer && volgend) setExtern(volgend) }, [autoNummer, volgend])
 
   const actie = async (a: string, extra: Record<string, unknown> = {}, melding = 'Bijgewerkt.') => {
     if (!data) return false
     setBezig(true)
     try {
       const r = await fetch('/api/admin/invoices/planner', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actie: a, id: data.id, ...extra }) })
-      const j = await r.json(); if (!r.ok) throw new Error(j.error || 'Actie mislukt')
+      const j = await r.json()
+      if (!r.ok) { if (j.code === 'nummer_bezet') { setAangeraakt(false); void nummerOpnieuw() } throw new Error(j.error || 'Actie mislukt') }
       toast.success(j.melding ?? melding); onGewijzigd(); await laad(); return true
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Actie mislukt'); return false } finally { setBezig(false) }
   }
@@ -85,6 +93,7 @@ export function ItemDetail({ moment, onSluit, onGewijzigd, onBewerk, onEigenArti
           {/* Dagelijkse acties */}
           <div className="flex flex-wrap gap-2">
             <KopieerKnop tekst={factuurTekst(data)} label="Kopieer factuurgegevens" melding="Factuurgegevens gekopieerd (zonder interne notities)." />
+            {data.contract_id && <a href={`/admin/contracts/${data.contract_id}`} target="_blank" rel="noreferrer" className="btn-secondary text-sm"><ExternalLink className="h-4 w-4" />Contract bekijken</a>}
             {isFactuur && <button type="button" onClick={() => onBewerk(data.invoice_id!)} className="btn-secondary text-sm"><Pencil className="h-4 w-4" />Aanpassen</button>}
             {isReeksMaand && tab === 'te_factureren' && <button type="button" onClick={() => onEigenArtikelen(moment)} className="btn-secondary text-sm" title="Extra kilometers of kosten enkel voor deze maand"><Pencil className="h-4 w-4" />Artikelen voor deze maand aanpassen</button>}
             <button type="button" onClick={() => onVerwijder(moment)} className="btn-secondary text-sm text-red-600 hover:border-red-300"><Trash2 className="h-4 w-4" />Verwijderen</button>
@@ -102,7 +111,11 @@ export function ItemDetail({ moment, onSluit, onGewijzigd, onBewerk, onEigenArti
           {tab === 'te_factureren' && (
             <div className="rounded-xl border-2 border-[#166534]/30 bg-green-50/40 p-3 space-y-2">
               <div className="grid sm:grid-cols-[1fr_auto] gap-2 items-end">
-                <div><label className="block text-xs font-medium text-gray-700 mb-1">Extern factuurnummer <span className="text-gray-400 font-normal">— optioneel</span></label><input className={INP} value={extern} onChange={(e) => setExtern(e.target.value)} placeholder="bv. 2026-81" /></div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Factuurnummer</label>
+                  <input className={INP} value={extern} onChange={(e) => { setAangeraakt(true); setExtern(e.target.value) }} placeholder="bv. 2026-124" />
+                  {autoNummer && extern === volgend && <p className="text-[11px] text-gray-500 mt-0.5">Volgend nummer, vanzelf ingevuld. Pas aan als het anders moet.</p>}
+                </div>
                 <button type="button" disabled={bezig || (ontbreekt && !bevestigOntbrekend)} onClick={() => actie('verstuurd', { extern_nummer: extern }, 'Gemarkeerd als gefactureerd.')}
                   className="btn-primary text-sm bg-[#166534] hover:bg-[#14532d] text-white border-[#166534]">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}Markeren als gefactureerd</button>
               </div>
@@ -114,7 +127,7 @@ export function ItemDetail({ moment, onSluit, onGewijzigd, onBewerk, onEigenArti
             <div className="rounded-xl bg-[#166534] text-white p-3 space-y-2">
               <div className="flex items-center gap-2 text-sm font-medium"><CheckCircle2 className="h-4 w-4" />Gefactureerd{data.verzonden_op ? ` op ${datumNl(data.verzonden_op)}` : ''}{data.verzonden_door ? ` door ${data.verzonden_door.split('@')[0]}` : ''}</div>
               <div className="grid sm:grid-cols-[1fr_auto_auto] gap-2 items-end">
-                <div><label className="block text-[11px] text-green-100 mb-1">Extern factuurnummer</label><input className={`${INP} text-gray-900`} value={extern} onChange={(e) => setExtern(e.target.value)} placeholder="optioneel" /></div>
+                <div><label className="block text-[11px] text-green-100 mb-1">Extern factuurnummer</label><input className={`${INP} text-gray-900`} value={extern} onChange={(e) => setExtern(e.target.value)} placeholder="bv. 2026-124" /></div>
                 <button type="button" disabled={bezig || extern === (data.detail.extern_factuurnummer ?? '')} onClick={() => actie('extern_nummer', { extern_nummer: extern }, 'Factuurnummer bewaard.')} className="btn-secondary text-sm">Bewaren</button>
                 <button type="button" disabled={bezig} onClick={() => setVraag('heropen')} className="btn-secondary text-sm"><RotateCcw className="h-4 w-4" />Terugzetten</button>
               </div>

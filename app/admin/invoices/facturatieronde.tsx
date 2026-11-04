@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { X, Loader2, CheckCircle2, SkipForward, ChevronRight, ChevronLeft, RotateCcw, AlertTriangle, PartyPopper } from 'lucide-react'
+import { X, Loader2, CheckCircle2, SkipForward, ChevronRight, ChevronLeft, RotateCcw, AlertTriangle, PartyPopper, ExternalLink } from 'lucide-react'
 import { INP } from '@/app/admin/instellingen/ui'
 import { datumNl, euro2, type Moment } from '@/lib/facturatie/planner-model'
 import { StatusBadge } from './planner/planner-detail'
 import { ItemInhoud, KopieerKnop, factuurTekst, laadItem, type ItemData } from './item-inhoud'
+import { useVolgendNummer } from './volgend-nummer'
+import { hoogsteFactuurnummer, naFactuurnummer } from '@/lib/facturatie/factuurnummer'
 
 /**
  * Facturatieronde: Bram werkt alles af wat t.e.m. vandaag gefactureerd moet
@@ -31,13 +33,17 @@ export function Facturatieronde({ items, onSluit, onGewijzigd }: { items: Moment
   const [klaar, setKlaar] = useState(false)
   const verder = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => () => { if (verder.current) clearTimeout(verder.current) }, [])
+  // Factuurnummers lopen vanzelf door: het voorstel van de server, of het nummer na het vorige item in deze ronde.
+  const { volgend, opnieuw: nummerOpnieuw } = useVolgendNummer()
+  const [laatsteNr, setLaatsteNr] = useState<string | null>(null)
+  const voorstelNr = hoogsteFactuurnummer(volgend, laatsteNr ? naFactuurnummer(laatsteNr) : null)
 
   const huidig = lijst[index]
   const data = huidig ? cache[huidig.id] : undefined
 
   const haal = useCallback(async (m: Moment | undefined) => {
     if (!m || cache[m.id]) return
-    try { const d = await laadItem(m.id); setCache((c) => ({ ...c, [m.id]: d })); setExtern((e) => (m.id in e ? e : { ...e, [m.id]: d.detail.extern_factuurnummer ?? '' })) }
+    try { const d = await laadItem(m.id); setCache((c) => ({ ...c, [m.id]: d })); if (d.detail.extern_factuurnummer) setExtern((e) => (m.id in e ? e : { ...e, [m.id]: d.detail.extern_factuurnummer ?? '' })) }
     catch (e) { setFout(e instanceof Error ? e.message : 'Laden mislukt') }
   }, [cache])
   useEffect(() => { setFout(null); haal(huidig); haal(lijst[index + 1]) }, [index, huidig, lijst, haal])
@@ -55,8 +61,11 @@ export function Facturatieronde({ items, onSluit, onGewijzigd }: { items: Moment
     if (data.ontbrekend.length > 0 && !bevestigd.has(huidig.id)) { toast.error('Er ontbreken gegevens. Vink eerst aan dat je de factuur toch volledig opmaakte.'); return }
     setBezig(true)
     try {
-      const r = await fetch('/api/admin/invoices/planner', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actie: 'verstuurd', id: data.id, extern_nummer: extern[huidig.id] ?? '' }) })
-      const j = await r.json(); if (!r.ok) throw new Error(j.error || 'Mislukt')
+      const nummer = (huidig.id in extern ? extern[huidig.id] : voorstelNr ?? '').trim()
+      const r = await fetch('/api/admin/invoices/planner', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actie: 'verstuurd', id: data.id, extern_nummer: nummer }) })
+      const j = await r.json()
+      if (!r.ok) { if (j.code === 'nummer_bezet') { void nummerOpnieuw(); setExtern((x) => { const n = { ...x }; delete n[huidig.id]; return n }) } throw new Error(j.error || 'Mislukt') }
+      if (nummer) { setLaatsteNr((v) => hoogsteFactuurnummer(v, nummer)); setExtern((x) => ({ ...x, [huidig.id]: nummer })) }
       const nieuw = new Set(afgewerkt); nieuw.add(huidig.id)
       setAfgewerkt(nieuw); setOvergeslagen((s) => { const n = new Set(s); n.delete(huidig.id); return n })
       setCache((c) => ({ ...c, [huidig.id]: { ...data, status: 'verstuurd' } }))
@@ -132,6 +141,7 @@ export function Facturatieronde({ items, onSluit, onGewijzigd }: { items: Moment
                 <div className={isKlaar ? 'text-white' : ''}>
                   <div className={`text-xs ${isKlaar ? 'text-green-100' : 'text-gray-500'}`}>Item {index + 1} van {lijst.length} · gepland {datumNl(huidig.datum)}</div>
                   <h3 className="text-lg font-semibold">{huidig.klant}</h3>
+                  {data?.contract_id && <a href={`/admin/contracts/${data.contract_id}`} target="_blank" rel="noreferrer" className={`mt-1 inline-flex items-center gap-1 text-xs underline ${isKlaar ? 'text-green-50' : 'text-gray-700 hover:text-black'}`}><ExternalLink className="h-3.5 w-3.5" />Contract bekijken</a>}
                   <div className={`text-sm ${isKlaar ? 'text-green-50' : 'text-gray-600'}`}>{huidig.project ?? huidig.dienst ?? huidig.type} · {euro2(huidig.bedrag_excl)} excl. btw</div>
                 </div>
                 {isKlaar
@@ -164,7 +174,11 @@ export function Facturatieronde({ items, onSluit, onGewijzigd }: { items: Moment
             )}
             <div className="flex items-end gap-2 flex-wrap">
               {!isKlaar && (
-                <div className="w-full sm:w-48"><label className="block text-[11px] text-gray-500 mb-1">Extern factuurnummer (optioneel)</label><input className={INP} value={extern[huidig.id] ?? ''} onChange={(e) => setExtern((x) => ({ ...x, [huidig.id]: e.target.value }))} placeholder="bv. 2026-81" /></div>
+                <div className="w-full sm:w-48">
+                  <label className="block text-[11px] text-gray-500 mb-1">Factuurnummer</label>
+                  <input className={INP} value={huidig.id in extern ? extern[huidig.id] : voorstelNr ?? ''} onChange={(e) => setExtern((x) => ({ ...x, [huidig.id]: e.target.value }))} placeholder="bv. 2026-124" />
+                  {!(huidig.id in extern) && voorstelNr && <p className="text-[10px] text-gray-500 mt-0.5">Volgend nummer, vanzelf ingevuld</p>}
+                </div>
               )}
               <button type="button" onClick={() => ga(Math.max(0, index - 1))} disabled={index === 0} className="btn-secondary text-sm"><ChevronLeft className="h-4 w-4" /><span className="sr-only sm:not-sr-only">Vorige</span></button>
               <div className="flex-1" />

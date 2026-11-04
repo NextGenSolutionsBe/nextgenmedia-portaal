@@ -11,6 +11,7 @@ import { normaliseerVerzendstatus, afgeleideBetaalstatus, magInhoudBewerken, mag
 import { vandaagBrussel } from '@/lib/facturatie/planner-model'
 import { isFactuurType } from '@/lib/facturatie/item-model'
 import { verwijderFactuur } from '@/lib/facturen/verwijder'
+import { nummerAlGebruikt } from '@/lib/facturatie/factuurnummer-server'
 
 export const dynamic = 'force-dynamic'
 
@@ -124,7 +125,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if ('terugkerende_omzet' in b) patch.terugkerende_omzet = typeof b.terugkerende_omzet === 'boolean' ? b.terugkerende_omzet : null
     if ('mededeling' in b) patch.mededeling = tekst(b.mededeling, 4000)
     if ('klant_referentie' in b) patch.klant_referentie = tekst(b.klant_referentie, 200)
-    if ('extern_factuurnummer' in b) patch.extern_factuurnummer = tekst(b.extern_factuurnummer, 60)
+    if ('extern_factuurnummer' in b) {
+      patch.extern_factuurnummer = tekst(b.extern_factuurnummer, 60)
+      const waar = await nummerAlGebruikt(admin, patch.extern_factuurnummer as string | null, { invoice_id: id })
+      if (waar) return NextResponse.json({ error: `Factuurnummer ${patch.extern_factuurnummer} staat al op ${waar}.`, code: 'nummer_bezet' }, { status: 409 })
+    }
     if ('prestatie_van' in b) { const d = datum(b.prestatie_van); if (d === undefined) return NextResponse.json({ error: 'Ongeldige startdatum van de prestatieperiode.' }, { status: 400 }); patch.prestatie_van = d }
     if ('prestatie_tot' in b) { const d = datum(b.prestatie_tot); if (d === undefined) return NextResponse.json({ error: 'Ongeldige einddatum van de prestatieperiode.' }, { status: 400 }); patch.prestatie_tot = d }
     // Werkelijke verzenddatum: bij een verstuurde factuur aanpasbaar (verwacht binnen rekent daarmee).

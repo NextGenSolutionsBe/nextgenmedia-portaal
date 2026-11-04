@@ -5,6 +5,8 @@
 // Deze module rekent enkel de geplande momenten uit die daaruit volgen, zodat
 // het scherm een voorbeeld kan tonen vóór er iets wordt aangemaakt.
 
+import { heeftMaand, verschuifMaanden } from './maanden'
+
 export type ReeksType = 'eenmalig' | 'meerdere' | 'maandelijks'
 
 export type ReeksInvoer = {
@@ -17,11 +19,16 @@ export type ReeksInvoer = {
   start_datum: string
   /** Interval in maanden tussen twee facturen (1 = maandelijks, 3 = per kwartaal). */
   interval_maanden: number
+  /** De titel van de factuur. Staat er een maand in ("… oktober"), dan schuift die per factuur mee. */
   omschrijving: string
   betalingstermijn_dagen: number
+  /** Langere omschrijving op de factuur (optioneel); maanden schuiven ook hier mee. */
+  beschrijving?: string
+  /** Bestelbonnummer van de klant (optioneel), op elke factuur van de reeks. */
+  bestelbon?: string
 }
 
-export type ReeksMoment = { volgnr: number; aantal: number; factuurdatum: string; periode: string; omschrijving: string; bedrag_excl: number; btw_pct: number; bedrag_incl: number }
+export type ReeksMoment = { volgnr: number; aantal: number; factuurdatum: string; periode: string; omschrijving: string; beschrijving: string; bedrag_excl: number; btw_pct: number; bedrag_incl: number }
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/
 const rond = (n: number) => Math.round(n * 100) / 100
@@ -69,8 +76,11 @@ export function maakReeks(r: ReeksInvoer): ReeksMoment[] {
     const periode = datum.slice(0, 7)
     const excl = rond(r.bedrag_excl)
     const btw = rond(excl * r.btw_pct / 100)
-    const omschrijving = n === 1 ? r.omschrijving.trim() : `${r.omschrijving.trim()} · ${r.type === 'maandelijks' ? periode : `termijn ${i + 1}/${n}`}`
-    uit.push({ volgnr: i + 1, aantal: n, factuurdatum: datum, periode, omschrijving, bedrag_excl: excl, btw_pct: r.btw_pct, bedrag_incl: rond(excl + btw) })
+    // Een maand in de titel schuift mee (oktober → november → december); anders "termijn i/n" of de maand erachter.
+    const titel = r.omschrijving.trim()
+    const omschrijving = n === 1 ? titel : heeftMaand(titel) ? verschuifMaanden(titel, i * stap) : `${titel} · ${r.type === 'maandelijks' ? periode : `termijn ${i + 1}/${n}`}`
+    const beschrijving = verschuifMaanden((r.beschrijving ?? '').trim(), i * stap)
+    uit.push({ volgnr: i + 1, aantal: n, factuurdatum: datum, periode, omschrijving, beschrijving, bedrag_excl: excl, btw_pct: r.btw_pct, bedrag_incl: rond(excl + btw) })
   }
   return uit
 }

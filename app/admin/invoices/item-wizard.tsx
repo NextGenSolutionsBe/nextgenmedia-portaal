@@ -164,7 +164,7 @@ export function FacturatieItemWizard({ invoiceId = null, recurringMaand = null, 
         const r = await fetch('/api/admin/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
           action: 'recurring', client_id: klant!.id, contract_id: kop.contract_id, start_month: basis.datum.slice(0, 7), end_month: basis.eind_maand || null,
           description: kop.description, amount_excl: totalen.excl, vat_pct: totalen.perBtw.length === 1 ? totalen.perBtw[0].pct : btw,
-          invoice_day: factuurdagVan(basis.datum), payment_term_days: termijn, mededeling: kop.mededeling,
+          invoice_day: factuurdagVan(basis.datum), payment_term_days: termijn, mededeling: kop.mededeling, klant_referentie: kop.klant_referentie,
           lines: regels.map((x) => ({ artikel: x.artikel, omschrijving: x.omschrijving || x.artikel, aantal: x.aantal, eenheid: x.eenheid, prijs_excl: x.prijs_excl, btw_pct: x.btw_pct, korting_pct: x.korting_pct, korting_eur: x.korting_eur, is_extra: x.is_extra, classificatie: x.classificatie, dienst: x.dienst ?? null })),
         }) })
         const j = await r.json(); if (!r.ok) throw new Error(j.error)
@@ -482,7 +482,7 @@ function StapBasis({ basis, setBasis, contracten, nieuw }: { basis: Basis; setBa
           <div className="flex items-center gap-2"><input className={INP} inputMode="numeric" value={basis.termijn} onChange={(e) => zet('termijn', e.target.value.replace(/[^0-9]/g, ''))} /><span className="text-sm text-gray-500">dagen</span></div>
         </div>
         <div className="sm:col-span-2">
-          <label className={lbl}>Klantreferentie of bestelbonnummer <span className="text-gray-400 font-normal">— optioneel</span></label>
+          <label className={lbl}>Bestelbonnummer of klantreferentie <span className="text-gray-400 font-normal">— optioneel</span></label>
           <input className={INP} value={basis.klant_referentie} onChange={(e) => zet('klant_referentie', e.target.value)} placeholder="bv. PO-2026-0815" />
           <p className={hint}>Er wordt geen officieel factuurnummer aangemaakt; Bram kan het externe factuurnummer achteraf registreren.</p>
         </div>

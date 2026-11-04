@@ -19,6 +19,10 @@ export function SectieFacturatie({ ctx }: { ctx: Ctx }) {
   const { zetVuil } = ctx
   useEffect(() => { zetVuil(vuil) }, [vuil, zetVuil])
   const zet = <K extends keyof FacturatieInstellingen>(k: K, w: FacturatieInstellingen[K]) => setV((p) => ({ ...p, [k]: w }))
+  const [nummer, setNummer] = useState<{ nummer: string; laatste: string | null } | null>(null)
+  useEffect(() => {
+    fetch('/api/admin/invoices/volgend-nummer', { cache: 'no-store' }).then((r) => r.json()).then((j) => { if (typeof j.nummer === 'string') setNummer(j) }).catch(() => {})
+  }, [bron])
 
   return (
     <div className="card-base">
@@ -45,14 +49,11 @@ export function SectieFacturatie({ ctx }: { ctx: Ctx }) {
           </div>
           <p className="text-[11px] text-gray-500 mt-1">Voorgesteld bij “Kilometers toevoegen” in Facturen; per item aanpasbaar. Dit is jullie commerciële tarief, geen wettelijk vergoedingstarief. 0 = elke keer zelf invullen.</p>
         </Groep>
-        <Groep titel="Nummering">
-          <div className="grid sm:grid-cols-4 gap-3">
-            <Tekst label="Factuurnummer — voorvoegsel" value={v.factuurnummer_prefix} onChange={(w) => zet('factuurnummer_prefix', w)} />
-            <Getal label="Volgend factuurnummer" value={v.factuurnummer_volgend} onChange={(w) => zet('factuurnummer_volgend', w)} min={1} />
-            <Tekst label="Creditnota — voorvoegsel" value={v.creditnota_prefix} onChange={(w) => zet('creditnota_prefix', w)} />
-            <Getal label="Volgende creditnota" value={v.creditnota_volgend} onChange={(w) => zet('creditnota_volgend', w)} min={1} />
+        <Groep titel="Factuurnummers">
+          <p className="text-sm text-gray-700">Het factuurnummer loopt vanzelf door: na <b>{nummer?.laatste ?? '…'}</b> stelt de app <b>{nummer?.nummer ?? '…'}</b> voor bij het markeren als gefactureerd. Op 1 januari begint het nieuwe jaar op 001 (bv. 2027-001). Een nummer dat al op een andere factuur staat, wordt geweigerd.</p>
+          <div className="grid sm:grid-cols-3 gap-3 mt-2">
+            <Tekst label="Verder vanaf (optioneel)" value={v.factuurnummer_vanaf} onChange={(w) => zet('factuurnummer_vanaf', w.trim())} placeholder="bv. 2026-130" hint="Enkel nodig als er facturen buiten de app gemaakt zijn. Leeg = hoogste nummer in de app + 1." />
           </div>
-          <p className="text-[11px] text-gray-400 mt-1">Voorbeeld: {v.factuurnummer_prefix}{String(v.factuurnummer_volgend || 1).padStart(4, '0')} · {v.creditnota_prefix}{String(v.creditnota_volgend || 1).padStart(4, '0')}</p>
         </Groep>
         <Groep titel="Verantwoordelijke">
           <div className="grid sm:grid-cols-2 gap-3">

@@ -10,6 +10,7 @@ import { Loader2, Receipt, Plus, CalendarRange, Link2, Unlink, Pencil, Repeat, A
 import { formatEuro } from '@/lib/utils'
 import { DEFAULT_VAT } from '@/lib/invoices'
 import { maakReeks, valideerReeks, isDoorlopend, reeksTotaal, type ReeksInvoer } from '@/lib/facturatie/reeks'
+import { heeftMaand } from '@/lib/facturatie/maanden'
 import { AFL_STATUS_LABEL, WIJZIGING_LABEL, euro, isActiefItem, type AflItem, type AflStatus, type Aflettering, type ContractWinst, type Wijziging, type WijzigingSoort } from '@/lib/contracten/aflettering'
 import { AflBadgeChip } from '@/components/contracten/afl-badge'
 import { FactuurEditor, StatusChip } from '@/app/admin/invoices/factuur-editor'
@@ -43,6 +44,8 @@ type Data = {
   andereContracten: { id: string; title: string | null }[]
   afl: ContractAfl | null
   regels: Regel[]
+  waardeVoorstel?: { waarde: number; uitleg: string; bron: string; op: string } | null
+  kanVoorstellen?: boolean
 }
 
 const d = (s: string | null | undefined) => (s ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : '—')
@@ -138,11 +141,31 @@ export function ContractFacturatie({ contractId, clientId, contractTitle, isSign
   const contractNaam = (cid: string | null) => (cid === contractId || cid === null ? 'Dit contract' : data?.andereContracten.find((x) => x.id === cid)?.title ?? 'Ander contract')
   const factuurLabel = (id: string | null) => { const i = afl?.items.find((x) => x.invoice_id === id); return i ? `${d(i.datum)}${i.referentie ? ` · nr. ${i.referentie}` : ''} · ${eur(i.contractCent + i.extraCent)}` : null }
 
+  // Voorstel voor de contractwaarde: de app leest het contract één keer zelf; een mens bevestigt altijd.
+  const [voorstelBezig, setVoorstelBezig] = useState(false)
+  const [voorstelReden, setVoorstelReden] = useState<string | null>(null)
+  const [voorstelGevraagd, setVoorstelGevraagd] = useState(false)
+  const vraagVoorstel = useCallback(async (opnieuw: boolean) => {
+    setVoorstelBezig(true); setVoorstelReden(null)
+    try {
+      const r = await fetch(`/api/admin/contracts/${contractId}/facturatie`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'waarde_voorstel', opnieuw }) })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j.error || 'Voorstel maken mislukt')
+      if (j.afl !== undefined) setData(j)
+      if (!j.voorstel) setVoorstelReden(typeof j.reden === 'string' ? j.reden : 'Geen bedrag gevonden.')
+    } catch (e) { setVoorstelReden(e instanceof Error ? e.message : 'Voorstel maken mislukt') } finally { setVoorstelBezig(false) }
+  }, [contractId])
+  useEffect(() => {
+    if (!data || voorstelGevraagd) return
+    if (data.afl && data.afl.waarde === null && !data.waardeVoorstel && data.kanVoorstellen) { setVoorstelGevraagd(true); void vraagVoorstel(false) }
+  }, [data, voorstelGevraagd, vraagVoorstel])
+  const voorstel = afl && afl.waarde === null ? data?.waardeVoorstel ?? null : null
+
   const bewaarWaarde = async (v: string | null) => {
     const r = await actie({ action: 'waarde', waarde: v }, 'waarde', v === null ? 'Contractwaarde leeggemaakt.' : 'Contractwaarde bewaard.')
     if (r.ok) setWaardeBewerken(false)
   }
-  const startWaarde = () => { setWaardeInvoer(afl?.waarde !== null && afl?.waarde !== undefined ? String(afl.waarde).replace('.', ',') : suggestie !== null ? String(suggestie).replace('.', ',') : ''); setWaardeBewerken(true) }
+  const startWaarde = () => { setWaardeInvoer(afl?.waarde !== null && afl?.waarde !== undefined ? String(afl.waarde).replace('.', ',') : voorstel ? String(voorstel.waarde).replace('.', ',') : suggestie !== null ? String(suggestie).replace('.', ',') : ''); setWaardeBewerken(true) }
 
   return (
     <div id="facturatie" className="card-base space-y-4">
@@ -168,6 +191,30 @@ export function ContractFacturatie({ contractId, clientId, contractTitle, isSign
 
       {fout && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 flex items-center gap-2 flex-wrap">Het overzicht kon niet geladen worden: {fout}<button type="button" onClick={() => { setLaden(true); laad() }} className="btn-secondary text-xs ml-auto">Opnieuw proberen</button></div>}
       {!data && !fout && <div className="h-24 rounded-xl bg-gray-50 animate-pulse" />}
+
+      {/* Voorstel voor de contractwaarde: nakijken en bevestigen */}
+      {afl && afl.waarde === null && !waardeBewerken && (voorstel || voorstelBezig || voorstelReden) && (
+        <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3 flex items-start gap-3 flex-wrap">
+          <Sparkles className="h-4 w-4 text-violet-700 mt-0.5 shrink-0" />
+          <div className="flex-1 min-w-[220px] text-sm">
+            {voorstelBezig ? <span className="text-violet-900 inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Het contract wordt gelezen voor een voorstel van de contractwaarde…</span>
+              : voorstel ? (
+                <>
+                  <div className="text-violet-950">Voorstel contractwaarde: <b className="tabular-nums">{formatEuro(voorstel.waarde)}</b> excl. btw</div>
+                  <div className="text-xs text-violet-900/80 mt-0.5">{voorstel.uitleg}</div>
+                  <div className="text-[11px] text-gray-500 mt-1">Kijk het na en bevestig. Zonder bevestiging telt het nergens mee.</div>
+                </>
+              ) : <span className="text-gray-700">Geen voorstel: {voorstelReden}</span>}
+          </div>
+          {!voorstelBezig && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {voorstel && <button type="button" disabled={bezig === 'waarde'} onClick={() => bewaarWaarde(String(voorstel.waarde))} className="btn-primary text-xs">{bezig === 'waarde' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}Bevestigen</button>}
+              {voorstel && <button type="button" onClick={startWaarde} className="btn-secondary text-xs"><Pencil className="h-3.5 w-3.5" />Aanpassen</button>}
+              <button type="button" onClick={() => vraagVoorstel(true)} className="btn-secondary text-xs">{voorstel ? 'Opnieuw lezen' : 'Opnieuw proberen'}</button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Contractwaarde invullen of aanpassen */}
       {afl && waardeBewerken && (
@@ -520,13 +567,16 @@ function ReeksDialoog({ contractTitle, bezig, onSluit, onBevestig }: { contractT
   const [termijn, setTermijn] = useState('30')
   const [verantwoordelijke, setVerantwoordelijke] = useState('')
   const [notitie, setNotitie] = useState('')
+  const [beschrijving, setBeschrijving] = useState('')
+  const [bestelbon, setBestelbon] = useState('')
   const inv: ReeksInvoer = {
     type, aantal: type === 'eenmalig' ? 1 : type === 'maandelijks' && doorlopend ? null : Number(aantal) || 0,
     bedrag_excl: leesGetal(bedrag) ?? 0, btw_pct: leesGetal(btw) ?? 0, start_datum: start, interval_maanden: Number(interval) || 1,
-    omschrijving, betalingstermijn_dagen: Number(termijn) || 0,
+    omschrijving, betalingstermijn_dagen: Number(termijn) || 0, beschrijving, bestelbon,
   }
   const fouten = valideerReeks(inv)
-  const voorbeeld = useMemo(() => maakReeks(inv), [inv.type, inv.aantal, inv.bedrag_excl, inv.btw_pct, inv.start_datum, inv.interval_maanden, inv.omschrijving, inv.betalingstermijn_dagen]) // eslint-disable-line react-hooks/exhaustive-deps
+  const voorbeeld = useMemo(() => maakReeks(inv), [inv.type, inv.aantal, inv.bedrag_excl, inv.btw_pct, inv.start_datum, inv.interval_maanden, inv.omschrijving, inv.beschrijving, inv.betalingstermijn_dagen]) // eslint-disable-line react-hooks/exhaustive-deps
+  const maandInTitel = heeftMaand(omschrijving) || heeftMaand(beschrijving)
   const tot = reeksTotaal(voorbeeld)
   const keuze = (v: ReeksInvoer['type'], label: string, uitleg: string) => (
     <button type="button" onClick={() => setType(v)} className={`rounded-xl border p-2.5 text-left text-sm transition-colors ${type === v ? 'border-gray-900 bg-gray-100 ring-1 ring-gray-900' : 'border-gray-200 hover:border-gray-300'}`}><div className="font-medium">{label}</div><div className="text-[11px] text-gray-500">{uitleg}</div></button>
@@ -554,7 +604,11 @@ function ReeksDialoog({ contractTitle, bezig, onSluit, onBevestig }: { contractT
             {type === 'meerdere' && <div><label className="block text-xs font-medium text-gray-600 mb-1">Interval</label><select className={INP} value={interval} onChange={(e) => setInterval_(e.target.value)}><option value="1">Maandelijks</option><option value="2">Om de 2 maanden</option><option value="3">Per kwartaal</option><option value="6">Per half jaar</option><option value="12">Jaarlijks</option></select></div>}
             <div><label className="block text-xs font-medium text-gray-600 mb-1">Betaaltermijn (dagen)</label><input className={INP} inputMode="numeric" value={termijn} onChange={(e) => setTermijn(e.target.value)} /></div>
             <div><label className="block text-xs font-medium text-gray-600 mb-1">Verantwoordelijke</label><input className={INP} list="ngm-verantwoordelijken-reeks" value={verantwoordelijke} onChange={(e) => setVerantwoordelijke(e.target.value)} placeholder="Bv. Bram Reinquin" /><datalist id="ngm-verantwoordelijken-reeks"><option value="Bram Reinquin" /><option value="Marco Castermans" /></datalist></div>
-            <div className="col-span-2 md:col-span-4"><label className="block text-xs font-medium text-gray-600 mb-1">Omschrijving</label><input className={INP} value={omschrijving} onChange={(e) => setOmschrijving(e.target.value)} placeholder="Bv. Social media beheer" /></div>
+            <div className="col-span-2 md:col-span-3"><label className="block text-xs font-medium text-gray-600 mb-1">Titel</label><input className={INP} value={omschrijving} onChange={(e) => setOmschrijving(e.target.value)} placeholder="Bv. Sociale media management oktober" />
+              <p className="text-[11px] text-gray-500 mt-1">{maandInTitel && type !== 'eenmalig' ? 'De maand schuift per factuur mee (oktober, november, december …). De rest blijft hetzelfde.' : 'Zet er een maand in (bv. "… oktober") en die schuift per factuur mee.'}</p>
+            </div>
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Bestelbonnummer <span className="text-gray-400">(optioneel)</span></label><input className={INP} value={bestelbon} onChange={(e) => setBestelbon(e.target.value)} placeholder="Bv. PO-2026-0815" /></div>
+            <div className="col-span-2 md:col-span-4"><label className="block text-xs font-medium text-gray-600 mb-1">Omschrijving op de factuur <span className="text-gray-400">(optioneel)</span></label><textarea rows={3} className={INP} value={beschrijving} onChange={(e) => setBeschrijving(e.target.value)} placeholder="Bv. Beheer van Instagram en Facebook in oktober: 12 posts, 4 reels en community management" /></div>
             <div className="col-span-2 md:col-span-4"><label className="block text-xs font-medium text-gray-600 mb-1">Interne notitie <span className="text-gray-400">— optioneel, niet voor de klant</span></label><input className={INP} value={notitie} onChange={(e) => setNotitie(e.target.value)} placeholder="Bv. kilometervergoeding nog toevoegen" /></div>
           </div>
           {fouten.length > 0 && <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">Nog in te vullen: {fouten.join(', ')}.</div>}
@@ -562,7 +616,7 @@ function ReeksDialoog({ contractTitle, bezig, onSluit, onBevestig }: { contractT
           {voorbeeld.length > 0 && (
             <div>
               <div className="text-[11px] font-medium text-gray-400 mb-1">Voorbeeld — {voorbeeld.length} factu{voorbeeld.length === 1 ? 'ur' : 'ren'} · {formatEuro(tot.excl)} excl. · {formatEuro(tot.incl)} incl.</div>
-              <ul className="divide-y divide-gray-100 rounded-lg border border-gray-100 text-xs max-h-48 overflow-y-auto">{voorbeeld.map((m) => <li key={m.volgnr} className="px-3 py-1.5 flex justify-between gap-2"><span>{d(m.factuurdatum)} · {m.omschrijving}</span><span className="tabular-nums">{formatEuro(m.bedrag_excl)}</span></li>)}</ul>
+              <ul className="divide-y divide-gray-100 rounded-lg border border-gray-100 text-xs max-h-56 overflow-y-auto">{voorbeeld.map((m) => <li key={m.volgnr} className="px-3 py-1.5"><div className="flex justify-between gap-2"><span>{d(m.factuurdatum)} · <b className="font-medium">{m.omschrijving}</b></span><span className="tabular-nums">{formatEuro(m.bedrag_excl)}</span></div>{m.beschrijving && <div className="text-gray-500 truncate">{m.beschrijving}</div>}</li>)}</ul>
             </div>
           )}
         </div>
