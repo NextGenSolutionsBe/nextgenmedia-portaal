@@ -22,6 +22,7 @@ import { ClientBlogs } from './client-blogs'
 import { FEATURES } from '@/lib/features'
 import { ClientCms } from './client-cms'
 import { ClientFormulieren } from './client-formulieren'
+import { OffertesBij } from '@/components/admin/offertes-bij'
 
 async function getClient(id: string) {
   const admin = createAdminSupabaseClient()
@@ -349,6 +350,12 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                 ))}
               </div>
             )}
+          </div>
+
+          {/* Offertes: versturen vanuit de klant, met wanneer de klant opende of accepteerde. */}
+          <div className="card-base" id="offertes">
+            <h2 className="font-semibold text-gray-900 mb-3">Offertes</h2>
+            <OffertesBij clientId={id} />
           </div>
 
           {/* Social Media config */}

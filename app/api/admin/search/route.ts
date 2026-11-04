@@ -89,6 +89,12 @@ export async function GET(req: NextRequest) {
       const naamVan = new Map(clients.map((c) => [c.id, c.company_name]))
       for (const o of op) results.push({ type: 'oplevering', label: 'Oplevering', title: o.titel, subtitle: `${naamVan.get(o.client_id) ?? ''}${o.gearchiveerd_op ? ' · archief' : ''}`.replace(/^ · /, ''), href: `/admin/opleveringen?oplevering=${o.id}` })
     }
+    if (may('offertes')) {
+      const extraKlant = clients.length ? `,client_id.in.(${clients.map((c) => c.id).join(',')})` : ''
+      const offs = await safe(admin.from('offertes').select('id, titel, klant_naam, status').or(`titel.ilike.${like},klant_naam.ilike.${like}${extraKlant}`).order('created_at', { ascending: false }).limit(L)) as { id: string; titel: string; klant_naam: string | null; status: string }[]
+      const stand: Record<string, string> = { concept: 'Concept', verstuurd: 'Verstuurd', geaccepteerd: 'Geaccepteerd', ingetrokken: 'Ingetrokken' }
+      for (const o of offs) results.push({ type: 'offerte', label: 'Offerte', title: o.titel, subtitle: [o.klant_naam, stand[o.status] ?? o.status].filter(Boolean).join(' · '), href: `/admin/offertes?offerte=${o.id}` })
+    }
     if (may('aanvragen')) {
       // Ook aanvragen van een gevonden klant (op klantnaam), niet enkel op dienst of tekst.
       const extra = clients.length ? await safe(admin.from('klant_aanvragen').select('id, client_id, soort, type_label, status, created_at').in('client_id', clients.map((c) => c.id)).order('created_at', { ascending: false }).limit(L)) as typeof aanvragen : []

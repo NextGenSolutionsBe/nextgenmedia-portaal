@@ -6,6 +6,7 @@ import { FEATURES } from '@/lib/features'
 import { syncGezondheid, SYNC_VEROUDERD_MIN } from '@/lib/sales/clickup-agenda-sync'
 import { onderhoudOpvolgen, resterendTekst, type MaintenanceClient } from '@/lib/maintenance'
 import { opleveringStatus, volgendeStap, revisieStand, type Versie as OpVersie } from '@/lib/opleveringen'
+import { offerteWeergave, moetOpvolgen, isVerlopen, type Offerte } from '@/lib/offertes'
 import { samenvatting, grootte, OPSLAG_LIMIET_GB, type RuwVerbruik } from '@/lib/opslag'
 import { STATUS as AANVRAAG_STATUS, nieuweAanvraagTitel, type AanvraagSoort } from '@/lib/aanvragen/model'
 
@@ -182,6 +183,12 @@ export async function buildNotifications(): Promise<Notif[]> {
     }
   } catch { /* meldingen mogen nooit stuklopen */ }
 
+  // Offertes: de klant accepteerde (via de knop op /offerte/<token>).
+  try {
+    const ok = await safe(admin.from('offertes').select('id, client_id, klant_naam, titel, geaccepteerd_op').eq('status', 'geaccepteerd').gte('geaccepteerd_op', since).order('geaccepteerd_op', { ascending: false }).limit(30)) as { id: string; client_id: string | null; klant_naam: string | null; titel: string; geaccepteerd_op: string }[]
+    for (const o of ok) out.push({ id: `offerte:${o.id}:geaccepteerd`, kind: 'offerte', priority: 'high', title: `Offerte geaccepteerd — ${(o.client_id ? names.get(o.client_id) : null) ?? o.klant_naam ?? 'Klant'}: ${o.titel}. Maak het contract op.`, date: o.geaccepteerd_op, href: `/admin/offertes?offerte=${o.id}` })
+  } catch { /* meldingen mogen nooit stuklopen */ }
+
   // Workshops & events: nieuwe inschrijvingen, afgelopen events met nog te
   // factureren inschrijvingen, en een Google-agenda die niet lukte.
   try {
@@ -314,7 +321,7 @@ export async function buildNotifications(): Promise<Notif[]> {
 // de pipeline). `modules` = rechten van de medewerker (null = admin, alles).
 
 export type OpvolgItem = { id: string; titel: string; sub: string | null; href: string; dringend?: boolean }
-export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'meetings' | 'projecten' | 'content' | 'onderhoud' | 'opleveringen'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
+export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'meetings' | 'projecten' | 'content' | 'onderhoud' | 'opleveringen' | 'offertes'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
 
 const OPVOLG_MAX = 5
 const dagKort = (d: string) => new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' })
@@ -339,6 +346,7 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
     mag('content') ? opvolgContent() : null,
     mag('content') ? opvolgOnderhoud() : null,
     mag('opleveringen') ? opvolgOpleveringen() : null,
+    mag('offertes') ? opvolgOffertes() : null,
   ])
   return groepen.filter((g): g is OpvolgGroep => !!g)
 
@@ -483,6 +491,40 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
         items: lijst.slice(0, OPVOLG_MAX).map(({ r, stap }) => ({
           id: r.id, titel: `${namen.get(r.client_id) ?? 'Klant'} – ${r.titel}`, sub: stap.tekst, href: `/admin/opleveringen?oplevering=${r.id}`, dringend: true,
         })),
+      }
+    } catch { return null }
+  }
+
+  /**
+   * Offertes: alles wat verstuurd is en nog geen akkoord heeft (stil sinds een
+   * paar dagen of verlopen = dringend, zie moetOpvolgen), plus wat de klant de
+   * voorbije week accepteerde: dan moet het contract nog opgemaakt worden.
+   * Enkel zichtbaar als er iets is.
+   */
+  async function opvolgOffertes(): Promise<OpvolgGroep | null> {
+    try {
+      const week = new Date(Date.now() - 7 * 86_400_000).toISOString()
+      const [{ data: open, error }, { data: ok }] = await Promise.all([
+        admin.from('offertes').select('id, client_id, klant_naam, titel, status, verstuurd_op, klant_geopend_op, geldig_tot, geaccepteerd_op, geaccepteerd_door').eq('status', 'verstuurd').order('verstuurd_op', { ascending: true }).limit(300),
+        admin.from('offertes').select('id, client_id, klant_naam, titel, status, verstuurd_op, klant_geopend_op, geldig_tot, geaccepteerd_op, geaccepteerd_door').eq('status', 'geaccepteerd').gte('geaccepteerd_op', week).order('geaccepteerd_op', { ascending: false }).limit(50),
+      ])
+      if (error) return null
+      type R = Pick<Offerte, 'id' | 'client_id' | 'klant_naam' | 'titel' | 'status' | 'verstuurd_op' | 'klant_geopend_op' | 'geldig_tot' | 'geaccepteerd_op' | 'geaccepteerd_door'>
+      const nu = new Date()
+      const verstuurd = ((open ?? []) as R[]).map((o) => ({ o, dringend: moetOpvolgen(o, nu) })).sort((a, b) => Number(b.dringend) - Number(a.dringend))
+      const lijst = [...((ok ?? []) as R[]).map((o) => ({ o, dringend: true })), ...verstuurd]
+      if (!lijst.length) return null
+      const namen = await klantNamen(lijst.slice(0, OPVOLG_MAX).map((x) => x.o.client_id ?? ''))
+      const dagen = (iso: string | null) => (iso ? Math.floor((nu.getTime() - new Date(iso).getTime()) / 86_400_000) : 0)
+      return {
+        key: 'offertes', titel: 'Offertes opvolgen', totaal: lijst.length, alles: '/admin/offertes', leeg: 'Geen offertes op te volgen.',
+        items: lijst.slice(0, OPVOLG_MAX).map(({ o, dringend }) => {
+          const w = offerteWeergave(o, nu)
+          const sub = o.status === 'geaccepteerd'
+            ? `Geaccepteerd ${w.sub ?? ''} · contract opmaken`.replace(/\s+/g, ' ')
+            : `${w.sub ?? ''}${dringend && !isVerlopen(o, nu.toLocaleDateString('sv-SE', { timeZone: 'Europe/Brussels' })) ? ` · ${dagen(o.verstuurd_op)} dagen geen akkoord` : w.label === 'Verlopen' ? ' · verlopen' : ''}`
+          return { id: o.id, titel: [(o.client_id ? namen.get(o.client_id) : null) ?? o.klant_naam, o.titel].filter(Boolean).join(' – '), sub, href: `/admin/offertes?offerte=${o.id}`, dringend }
+        }),
       }
     } catch { return null }
   }

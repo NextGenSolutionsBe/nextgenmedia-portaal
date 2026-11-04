@@ -16,6 +16,7 @@ import {
 import { laadAflettering } from '@/lib/contracten/aflettering-server'
 import { voegNotitieToe, notitieSamenvatting, type Auteur } from '@/lib/opdrachten-notities'
 import { leesAdminIdentiteit } from '@/lib/admin-identiteit'
+import type { OfferteOpKaart } from '@/lib/offertes'
 
 export const dynamic = 'force-dynamic'
 
@@ -161,6 +162,20 @@ async function laadKoppelingen(admin: Admin, rijen: Rij[]): Promise<Map<string, 
 
 // GET — alle opdrachten met klantnaam, koppelingen en (automatisch bijgewerkte) status.
 /** Contracten voor de kaarten, met de datum waarop de klant opende (vóór de migratie zonder). */
+/** De laatste verstuurde of geaccepteerde offerte per project (voor de kaart). Zonder tabel: niets. */
+async function laatsteOffertes(admin: Admin): Promise<Map<string, OfferteOpKaart>> {
+  const uit = new Map<string, OfferteOpKaart>()
+  const { data, error } = await admin.from('offertes')
+    .select('id, opdracht_id, titel, status, bedrag_excl, verstuurd_op, klant_geopend_op, geaccepteerd_op, geldig_tot')
+    .not('opdracht_id', 'is', null).in('status', ['verstuurd', 'geaccepteerd'])
+    .order('created_at', { ascending: false }).limit(1000)
+  if (error) return uit
+  for (const r of (data ?? []) as (OfferteOpKaart & { opdracht_id: string })[]) {
+    if (!uit.has(r.opdracht_id)) uit.set(r.opdracht_id, { id: r.id, titel: r.titel, status: r.status, bedrag_excl: r.bedrag_excl === null ? null : Number(r.bedrag_excl), verstuurd_op: r.verstuurd_op, klant_geopend_op: r.klant_geopend_op, geaccepteerd_op: r.geaccepteerd_op, geldig_tot: r.geldig_tot })
+  }
+  return uit
+}
+
 async function leesContracten(admin: Admin, ids: string[]): Promise<{ data: unknown[] | null }> {
   const met = await admin.from('contracts').select('id, title, status, klant_geopend_op').in('id', ids)
   if (!met.error) return met
@@ -202,6 +217,7 @@ export async function GET() {
       notitieSamenvatting(admin, rijen.map((r) => r.id)).catch(() => new Map()),
       leadIds.length ? admin.from('sales_leads').select('id, leadbron').in('id', leadIds) : Promise.resolve({ data: [] }),
     ])
+    const offerteVan = await laatsteOffertes(admin)
     const facturatie = nieuweKolommen ? await laadFacturatie(admin, rijen, koppelingen) : new Map<string, Facturatie>()
     const leadbronVan = new Map(((leadRijen ?? []) as { id: string; leadbron: string | null }[]).map((l) => [l.id, l.leadbron]))
 
@@ -254,6 +270,7 @@ export async function GET() {
         facturatie: f,
         notities_aantal: notities.get(o.id)?.aantal ?? 0,
         laatste_notitie: notities.get(o.id)?.laatste ?? null,
+        offerte: offerteVan.get(o.id) ?? null,
         bron_voorstel: o.lead_id ? bronUitLead(leadbronVan.get(String(o.lead_id)) ?? null) : null,
       }
     }))

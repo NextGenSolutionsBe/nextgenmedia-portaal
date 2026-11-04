@@ -16,6 +16,7 @@ import { formatEuro } from '@/lib/utils'
 import { geopendTekst } from '@/lib/klant-geopend'
 import { KlantKiezer, type KlantOptie } from '@/components/admin/klant-kiezer'
 import { ClickupTaken } from '@/components/admin/clickup-taken'
+import { OffertesBij } from '@/components/admin/offertes-bij'
 import { BtwOpzoeken } from '@/components/admin/btw-opzoeken'
 import {
   FACTUUR_LABEL, datumKort, hoeLangGeleden,
@@ -66,7 +67,7 @@ const gelijk = (a: Concept[Veld], b: Concept[Veld]) => JSON.stringify(a) === JSO
  * tijdlijn. De gegevens zijn een concept met één knop Bewaren (of Cmd/Ctrl+S);
  * de fase wijzigen en notities plaatsen gebeurt meteen.
  */
-export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, namen, ik, onClose, onOpgeslagen, onVerplaats, onStap, onVerwijder, onKlantNieuw }: {
+export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, namen, ik, onClose, onOpgeslagen, onVerplaats, onStap, onVerwijder, onKlantNieuw, onVernieuw }: {
   o: KaartOpdracht | null
   nieuwKolom: KolomKey
   klanten: Klant[]
@@ -80,6 +81,7 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
   onStap: (o: KaartOpdracht, status: OpdrachtStatus) => void
   onVerwijder: (o: KaartOpdracht) => void
   onKlantNieuw: (k: Klant) => void
+  onVernieuw?: () => void
 }) {
   const [c, setC] = useState<Concept>(() => uit(o))
   const aangeraakt = useRef(new Set<Veld>())
@@ -319,6 +321,12 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
           {/* Offerte: hoe en wanneer de prijs gedeeld werd. */}
           <section className={`px-5 py-4 space-y-3 border-b border-gray-100 ${kolom === 'offerte' && !c.offerte_via ? 'bg-amber-50/60' : ''}`}>
             <p className="text-sm font-semibold flex items-center gap-2"><Send className="h-4 w-4" />Offerte</p>
+            {o && (
+              <OffertesBij opdrachtId={o.id} clientId={o.client_id ?? null} klantNaam={o.client_id ? null : (o.klant_vrij ?? null)}
+                merk={(o.merk ?? bedrijfVan(null, o.diensten)) === 'nextgensolutions' ? 'nextgensolutions' : 'nextgenmedia'}
+                onVerstuurd={onVernieuw} />
+            )}
+            <p className="text-[11px] text-gray-500">{o ? 'Of hou bij hoe je de prijs anders deelde:' : 'Hoe deelde je de prijs?'}</p>
             <div className="flex flex-wrap gap-1.5">
               {OFFERTE_VIA.map((v) => (
                 <button key={v.key} type="button" onClick={() => { setViaAnders(false); zet('offerte_via', c.offerte_via === v.key ? '' : v.key) }} className={keuze(c.offerte_via === v.key && !viaAnders)}>{v.label}</button>

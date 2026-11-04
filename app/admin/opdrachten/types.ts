@@ -1,5 +1,6 @@
 import type { Opdracht } from '@/lib/opdrachten'
 import type { Facturatie, KolomKey, Bron, Bedrijf } from '@/lib/opdrachten-kanban'
+import type { OfferteOpKaart } from '@/lib/offertes'
 
 /** Een opdracht zoals de API ze voor het bord teruggeeft. */
 export type KaartOpdracht = Opdracht & {
@@ -21,6 +22,8 @@ export type KaartOpdracht = Opdracht & {
   merk?: Bedrijf
   /** Wanneer het project begon (filters op maand, kwartaal en jaar). */
   datum?: string | null
+  /** Laatste verstuurde of geaccepteerde offerte via de app. */
+  offerte?: OfferteOpKaart | null
 }
 
 export type Klant = { id: string; naam: string; contact_name?: string | null; email?: string | null; verantwoordelijke?: string | null; btw?: string | null }

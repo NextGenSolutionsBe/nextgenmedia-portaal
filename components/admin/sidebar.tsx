@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
   Info, Camera, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
-  MailCheck, FolderUp, Handshake, Settings, ClipboardPen, Contact, Timer, UserCircle, Video, Inbox, Clapperboard, Film, Building2,
+  MailCheck, FolderUp, Handshake, Settings, ClipboardPen, Contact, Timer, UserCircle, Video, Inbox, Clapperboard, Film, Building2, FileSignature,
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
@@ -51,6 +51,7 @@ const SECTIONS: NavSection[] = [
       // Eén overzicht voor leads en projecten (vervangt de vroegere pipeline).
       { label: 'Projecten',   href: '/admin/opdrachten', icon: KanbanSquare, module: 'opdrachten' },
       { label: 'Contracten',  href: '/admin/contracts',  icon: FileText, module: 'contracts' },
+      { label: 'Offertes',    href: '/admin/offertes',   icon: FileSignature, module: 'offertes' },
       { label: 'Aanvragen',   href: '/admin/aanvragen',  icon: Inbox, module: 'aanvragen' },
       { label: 'Meeting Inplanner', href: '/admin/meetings', icon: Video, module: 'meetings', ookModule: 'sales' },
     ],
