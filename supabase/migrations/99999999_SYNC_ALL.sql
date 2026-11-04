@@ -7185,3 +7185,7 @@ CREATE TABLE IF NOT EXISTS public.vesting_certificaten (
 CREATE UNIQUE INDEX IF NOT EXISTS vesting_certificaten_versie ON public.vesting_certificaten (onderwerp, onderwerp_id, md5(inhoud_tekst));
 ALTER TABLE public.vesting_certificaten ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.vesting_certificaten FROM anon, authenticated;
+
+-- ── Projecten ↔ offertes (4 nov 2026) ────────────────────────────────────────
+-- Kaart die de app maakte bij een offerte: valt weg als dat concept weggegooid wordt (en er niets anders aan hangt).
+ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS aangemaakt_door_offerte uuid;

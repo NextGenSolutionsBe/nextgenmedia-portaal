@@ -265,7 +265,10 @@ function EditDialog({ template, onClose, onDone }: { template: Template; onClose
 
 function FromTemplateDialog({ template, clients, onClose }: { template: Template; clients: Client[]; onClose: () => void }) {
   const [klanten, setKlanten] = useState<Client[]>(clients)
-  const [clientId, setClientId] = useState('')
+  // Vanaf een projectkaart: ?client=<id>&opdracht=<id> (het contract hangt dan aan die kaart).
+  const vooraf = (() => { try { return new URLSearchParams(window.location.search) } catch { return new URLSearchParams() } })()
+  const [clientId, setClientId] = useState(/^[0-9a-f-]{36}$/i.test(vooraf.get('client') ?? '') ? (vooraf.get('client') as string) : '')
+  const opdrachtId = /^[0-9a-f-]{36}$/i.test(vooraf.get('opdracht') ?? '') ? vooraf.get('opdracht') : null
   const [service, setService] = useState('')
   const [signerName, setSignerName] = useState('')
   const [signerEmail, setSignerEmail] = useState('')
@@ -287,6 +290,7 @@ function FromTemplateDialog({ template, clients, onClose }: { template: Template
           signer_email: signerEmail || null,
           title: title || null,
           expires_at: expiresAt || null,
+          ...(opdrachtId ? { opdracht_id: opdrachtId } : {}),
         }),
       })
       const json = await readJson(res)

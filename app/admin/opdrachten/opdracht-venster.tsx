@@ -18,6 +18,7 @@ import { KlantKiezer, type KlantOptie } from '@/components/admin/klant-kiezer'
 import { ClickupTaken } from '@/components/admin/clickup-taken'
 import { OffertesBij } from '@/components/admin/offertes-bij'
 import { BtwOpzoeken } from '@/components/admin/btw-opzoeken'
+import { offerteBevestigdLabel } from '@/lib/opdrachten-offerte-model'
 import {
   FACTUUR_LABEL, datumKort, hoeLangGeleden,
   type KaartOpdracht, type Klant, type ContractOptie, type FactuurOptie, type Notitie,
@@ -192,6 +193,10 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
         </header>
 
         <div className="flex-1 overflow-y-auto">
+          {/* Offerte bevestigd: zelf beslissen of er een contract nodig is of de offerte volstaat. */}
+          {o && offerteBevestigdLabel(o.offerte?.status, kolom) && (
+            <OfferteBevestigd o={o} onVernieuw={onVernieuw} />
+          )}
           {/* Fase: meteen verplaatsen, zoals slepen op het bord. */}
           {o && (
             <section className="px-5 py-4 border-b border-gray-100">
@@ -507,5 +512,37 @@ function Notities({ opdrachtId, ik }: { opdrachtId: string; ik: string | null })
         </ol>
       )}
     </div>
+  )
+}
+
+/**
+ * De klant bevestigde de offerte. Volstaat de offerte, dan zet je het project
+ * in gang (In uitvoering); is er een contract nodig, dan maak je het aan vanaf
+ * hier en hangt het meteen aan deze kaart.
+ */
+function OfferteBevestigd({ o, onVernieuw }: { o: NonNullable<Parameters<typeof OpdrachtVenster>[0]['o']>; onVernieuw?: () => void }) {
+  const [bezig, setBezig] = useState(false)
+  const query = new URLSearchParams({ ...(o.client_id ? { client: String(o.client_id) } : {}), opdracht: o.id }).toString()
+  const inGang = async () => {
+    setBezig(true)
+    try {
+      const r = await fetch('/api/admin/opdrachten/in-gang', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: o.id }) })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j.error || 'In gang zetten mislukt')
+      toast.success('In gang gezet. De kaart staat nu in In uitvoering.')
+      onVernieuw?.()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'In gang zetten mislukt') } finally { setBezig(false) }
+  }
+  const op = o.offerte?.geaccepteerd_op ? datumKort(o.offerte.geaccepteerd_op.slice(0, 10)) : null
+  return (
+    <section className="px-5 py-4 border-b border-emerald-200 bg-emerald-50">
+      <p className="text-sm font-semibold text-emerald-900 flex items-center gap-2"><Check className="h-4 w-4" />Offerte bevestigd{op ? ` op ${op}` : ''}</p>
+      <p className="mt-0.5 text-xs text-emerald-900/80">{o.offerte?.titel ? `"${o.offerte.titel}". ` : ''}Volstaat de offerte, zet het project in gang. Is er een contract nodig, maak het aan; het hangt dan aan deze kaart.</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button type="button" onClick={inGang} disabled={bezig} className="btn-primary text-sm">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}In gang zetten</button>
+        <Link href={`/admin/contracts/templates?${query}`} className="btn-secondary text-sm"><FileSignature className="h-4 w-4" />Contract aanmaken</Link>
+        <Link href={`/admin/contracts/new?${query}`} className="text-xs text-emerald-900/80 underline self-center">of een pdf opladen</Link>
+      </div>
+    </section>
   )
 }

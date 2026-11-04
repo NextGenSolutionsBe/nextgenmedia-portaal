@@ -8,6 +8,7 @@ import {
 import { canonicalStatus, statusInfo as contractStatusInfo } from '@/lib/contract-status'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { zorgVoorContractKaarten } from '@/lib/opdrachten-contracten'
+import { zorgVoorOfferteKaarten } from '@/lib/opdrachten-offertes'
 import {
   automatischeStatus, facturatieVan, kolomVan, verplaatsTekst, normaliseerDiensten, normaliseerVia, isBron, bronUitLead, PROJECT_VERANTWOORDELIJKEN, projectVerantwoordelijke,
   isBedrijf, bedrijfVan, normaliseerBtw, ontbreektVoorFase,
@@ -170,7 +171,9 @@ async function laatsteOffertes(admin: Admin): Promise<Map<string, OfferteOpKaart
     .not('opdracht_id', 'is', null).in('status', ['verstuurd', 'geaccepteerd'])
     .order('created_at', { ascending: false }).limit(1000)
   if (error) return uit
-  for (const r of (data ?? []) as (OfferteOpKaart & { opdracht_id: string })[]) {
+  // Een bevestigde offerte gaat voor (groene label op de kaart), daarna de recentste.
+  const rijen = ((data ?? []) as (OfferteOpKaart & { opdracht_id: string })[]).sort((a, b) => Number(b.status === 'geaccepteerd') - Number(a.status === 'geaccepteerd'))
+  for (const r of rijen) {
     if (!uit.has(r.opdracht_id)) uit.set(r.opdracht_id, { id: r.id, titel: r.titel, status: r.status, bedrag_excl: r.bedrag_excl === null ? null : Number(r.bedrag_excl), verstuurd_op: r.verstuurd_op, klant_geopend_op: r.klant_geopend_op, geaccepteerd_op: r.geaccepteerd_op, geldig_tot: r.geldig_tot })
   }
   return uit
@@ -189,6 +192,8 @@ export async function GET() {
     const admin = createAdminSupabaseClient()
     // Elk contract heeft een kaart: wat er sinds de vorige keer bijkwam, krijgt er nu een.
     await zorgVoorContractKaarten(admin).catch((e) => console.warn('[opdrachten] contractkaarten:', e instanceof Error ? e.message : e))
+    // Elke offerte heeft een kaart in Offerte gestuurd.
+    await zorgVoorOfferteKaarten(admin).catch((e) => console.warn('[opdrachten] offertekaarten:', e instanceof Error ? e.message : e))
 
     // Vóór de statusflow-migratie bestaan de koppelkolommen niet: dan valt de
     // selectie terug op de basiskolommen, zodat het scherm blijft werken.
