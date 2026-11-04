@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { MessageSquare, Plus, MoreHorizontal, Check, FileSignature, AlertCircle, UserRound } from 'lucide-react'
+import { MessageSquare, Plus, MoreHorizontal, Check, FileSignature, AlertCircle, UserRound, Send } from 'lucide-react'
 import {
   KOLOMMEN, kolomVan, dienstInfo, kaartKleur, offerteViaLabel, dagenSinds, BEDRIJVEN, projectVerantwoordelijke,
   type KolomKey,
@@ -156,7 +156,12 @@ function Kaart({ o, sleept, menuOpen, onOpen, onMenu, onKolom, onDragStart, onDr
           {waarschuwing && (
             <p className="mt-1 text-[11px] text-amber-700 flex items-center gap-1"><AlertCircle className="h-3 w-3 shrink-0" />{waarschuwing}</p>
           )}
-          {kolom === 'offerte' && o.offerte_via && (
+          {o.offerte && (kolom === 'potentieel' || kolom === 'offerte') ? (
+            <p className={`mt-1 text-[11px] flex items-center gap-1 min-w-0 ${o.offerte.status === 'geaccepteerd' ? 'text-emerald-700 font-medium' : o.offerte.klant_geopend_op ? 'text-gray-700' : 'text-gray-400'}`}>
+              <Send className="h-3 w-3 shrink-0" />
+              <span className="truncate">{o.offerte.status === 'geaccepteerd' ? `Offerte geaccepteerd${o.offerte.geaccepteerd_op ? ` op ${datumKort(o.offerte.geaccepteerd_op)}` : ''}` : geopendTekst(o.offerte.klant_geopend_op) ?? 'Offerte nog niet geopend door de klant'}</span>
+            </p>
+          ) : kolom === 'offerte' && o.offerte_via && (
             <p className="mt-1 text-[11px] text-gray-500">Offerte {offerteViaLabel(o.offerte_via)?.toLowerCase()}{o.offerte_op ? ` · ${datumKort(o.offerte_op)}` : ''}</p>
           )}
           {o.contract && (kolom === 'contract' || kolom === 'getekend') && (

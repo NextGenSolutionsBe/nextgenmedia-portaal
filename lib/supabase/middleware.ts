@@ -398,6 +398,7 @@ export async function updateSession(request: NextRequest) {
     path === '/login/wachtwoord' ||   // wachtwoord kiezen na een uitnodiging (eenmalige token in de link)
     path === '/' ||
     path.startsWith('/sign/') ||
+    path.startsWith('/offerte/') ||   // publieke offertes (token in de link, eigen controle in de pagina)
     path.startsWith('/f/') ||     // publieke formulieren (token in de link, eigen controle in de pagina)
     path === '/boeken' || path.startsWith('/boeken/') ||   // klanten boeken zelf een meeting (eigen controles in de API)
     path === '/nieuwsbrief/afmelden' ||   // afmelden voor de nieuwsbrief (ondertekende link per e-mailadres)

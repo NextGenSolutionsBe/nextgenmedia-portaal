@@ -6956,3 +6956,86 @@ END $$;
 ALTER TABLE public.team_taken ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.team_taken FROM anon, authenticated;
 ALTER TABLE public.opdracht_taken ADD COLUMN IF NOT EXISTS afgerond_op timestamptz;
+
+-- ── Offertes (4 nov 2026) ───────────────────────────────────────────────────
+-- Sjablonen (achterliggende pdf's, te vervangen als de prijzen wijzigen) en
+-- verstuurde offertes met een publieke link: de klant bekijkt en accepteert.
+-- Geopend telt enkel als de klant kijkt (zoals bij contracten).
+CREATE TABLE IF NOT EXISTS public.offerte_sjablonen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam text NOT NULL,
+  merk text NOT NULL DEFAULT 'nextgenmedia',
+  dienst text,
+  beschrijving text,
+  pdf_pad text NOT NULL,
+  pdf_naam text,
+  bytes bigint,
+  actief boolean NOT NULL DEFAULT true,
+  volgorde integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by_email text
+);
+CREATE TABLE IF NOT EXISTS public.offertes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  opdracht_id uuid REFERENCES public.opdrachten(id) ON DELETE SET NULL,
+  klant_naam text,
+  titel text NOT NULL,
+  bedrag_excl numeric(12,2),
+  merk text NOT NULL DEFAULT 'nextgenmedia',
+  sjabloon_id uuid REFERENCES public.offerte_sjablonen(id) ON DELETE SET NULL,
+  pdf_pad text NOT NULL,
+  pdf_naam text,
+  token text NOT NULL,
+  status text NOT NULL DEFAULT 'concept',
+  ontvanger_email text,
+  ontvanger_naam text,
+  geldig_tot date,
+  verstuurd_op timestamptz,
+  klant_geopend_op timestamptz,
+  laatst_geopend_op timestamptz,
+  aantal_keer_geopend integer NOT NULL DEFAULT 0,
+  geaccepteerd_op timestamptz,
+  geaccepteerd_door text,
+  geaccepteerd_ip text,
+  geaccepteerd_ua text,
+  ingetrokken_op timestamptz,
+  email_message_id uuid,
+  created_by uuid,
+  created_by_email text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS offertes_token ON public.offertes (token);
+CREATE INDEX IF NOT EXISTS offertes_status ON public.offertes (status, verstuurd_op DESC);
+CREATE INDEX IF NOT EXISTS offertes_opdracht ON public.offertes (opdracht_id);
+CREATE INDEX IF NOT EXISTS offertes_klant ON public.offertes (client_id);
+CREATE TABLE IF NOT EXISTS public.offerte_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  offerte_id uuid NOT NULL REFERENCES public.offertes(id) ON DELETE CASCADE,
+  soort text NOT NULL,
+  meta jsonb,
+  ip text,
+  user_agent text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS offerte_events_offerte ON public.offerte_events (offerte_id, created_at DESC);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'offertes_status_check') THEN
+    ALTER TABLE public.offertes ADD CONSTRAINT offertes_status_check CHECK (status IN ('concept', 'verstuurd', 'geaccepteerd', 'ingetrokken'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'offertes_merk_check') THEN
+    ALTER TABLE public.offertes ADD CONSTRAINT offertes_merk_check CHECK (merk IN ('nextgenmedia', 'nextgensolutions'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'offerte_sjablonen_merk_check') THEN
+    ALTER TABLE public.offerte_sjablonen ADD CONSTRAINT offerte_sjablonen_merk_check CHECK (merk IN ('nextgenmedia', 'nextgensolutions'));
+  END IF;
+END $$;
+ALTER TABLE public.offerte_sjablonen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.offertes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.offerte_events ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.offerte_sjablonen, public.offertes, public.offerte_events FROM anon, authenticated;
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('offertes', 'offertes', false, 26214400, ARRAY['application/pdf'])
+ON CONFLICT (id) DO NOTHING;

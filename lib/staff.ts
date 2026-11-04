@@ -20,6 +20,8 @@ export const ADMIN_MODULES: AdminModule[] = [
   { key: 'contracts',   label: 'Contracten',           prefixes: ['/admin/contracts', '/api/admin/contracts', '/api/admin/contract-templates'] },
   // Aanvragen van diensten en consultancy uit het klantportaal (geen opdrachten of boekingen).
   { key: 'aanvragen',   label: 'Aanvragen',            prefixes: ['/admin/aanvragen', '/api/admin/aanvragen'] },
+  // Offertes: sjablonen (pdf's) en verstuurde offertes met publieke link en accepteren.
+  { key: 'offertes',    label: 'Offertes',             prefixes: ['/admin/offertes', '/api/admin/offertes'] },
   { key: 'nieuwsbrieven', label: 'Nieuwsbrieven',        prefixes: ['/admin/nieuwsbrieven', '/api/admin/nieuwsbrieven'] },
   { key: 'founders',    label: 'Founders of Flanders', prefixes: ['/admin/founders-of-flanders', '/api/admin/founders-of-flanders'] },
   { key: 'onze_partners', label: 'Onze partners',        prefixes: ['/admin/onze-partners', '/api/admin/onze-partners'] },
@@ -106,6 +108,8 @@ const SHARED_API: Array<{ test: (p: string) => boolean; modules: string[] }> = [
   // Meeting Inplanner: de centrale meetingmodule. Setters (Verkoop) boeken er
   // hun afspraken in, dus wie Verkoop mag, mag ook hier binnen.
   { test: (p) => p === '/api/admin/meetings' || p.startsWith('/api/admin/meetings/') || p.startsWith('/api/admin/meetings?'), modules: ['meetings', 'sales'] },
+  // Offertes versturen kan ook vanuit een projectkaart of de klantdetail.
+  { test: (p) => p === '/api/admin/offertes' || p.startsWith('/api/admin/offertes/') || p.startsWith('/api/admin/offertes?'), modules: ['offertes', 'opdrachten', 'clients'] },
   // Mail-composer: content (scripts/shoot), klanten (hub), contracten, blogs, partners.
   {
     test: (p) => p.startsWith('/api/admin/email/send') || p.startsWith('/api/admin/email/context') || p.startsWith('/api/admin/email/templates'),

@@ -5,6 +5,7 @@ import { Mail, X, Loader2, Send, CheckCircle2 } from 'lucide-react'
 import { renderTemplate, type MailVars } from '@/lib/email-render'
 import { DEFAULT_TEMPLATES } from '@/lib/email-templates-defaults'
 import { MERK_STIJL, MAIL_MERKEN, type MailMerk } from '@/lib/merk-mail'
+import { offerteMail } from '@/lib/offertes'
 
 // Eén gedeelde mailcomponent voor ALLE handmatige mails (klant/contract/taak/
 // toegang/algemeen). Altijd preview + handmatige bevestiging; nooit automatisch.
@@ -24,6 +25,8 @@ export type MailContext =
   | { type: 'meeting'; meetingId: string }
   // Video-oplevering: de klant laten weten dat er een versie klaarstaat (link naar de klantapp).
   | { type: 'oplevering'; titel: string; versieLabel: string; link: string; clientId: string; clientName?: string | null; verlooptOp?: string | null }
+  // Offerte: de knop in de mail opent altijd de publieke offertepagina (accepteren met één knop).
+  | { type: 'offerte'; offerteId: string; titel: string; link: string; klant?: string | null; contact?: string | null; email?: string | null; geldigTot?: string | null; merk?: MailMerk | null }
 
 /** Resultaat van een gelukte verzending (of van een eerder gelukte, bij dezelfde verzendpoging). */
 export type MailVerstuurd = { id: string | null; verstuurd_op: string | null; al_verstuurd?: boolean }
@@ -84,7 +87,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
     (async () => {
       try {
         // Een meetingmail vertrekt uit de meeting zelf, niet uit een template.
-        const tpl = context.type === 'meeting' ? { templates: [] } : await (await fetch('/api/admin/email/templates')).json()
+        const tpl = context.type === 'meeting' || context.type === 'offerte' ? { templates: [] } : await (await fetch('/api/admin/email/templates')).json()
         const eigen = (tpl.templates ?? []) as Template[]
         // De ingebouwde template van deze soort tonen zolang er geen eigen versie van bestaat.
         const extra = context.type === 'client' && !eigen.some((t) => t.kind === context.kind) ? ingebouwd(context.kind) : null
@@ -148,6 +151,11 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
           setSubject(`${context.versieLabel}: ${context.titel}`)
           setBody(`Beste${context.clientName ? ` ${context.clientName}` : ''},\n\n${context.versieLabel === 'Finale versie' ? 'De finale versie' : `De ${context.versieLabel.toLowerCase()}`} van "${context.titel}" staat klaar in de klantapp. Je kan de video daar bekijken, in volle kwaliteit downloaden${context.versieLabel === 'Finale versie' ? '' : ' en je feedback geven'}.${tot ? `\n\nDe bestanden blijven beschikbaar tot ${tot}. Download ze dus tijdig.` : ''}\n\nMet vriendelijke groet,\nNextGenMedia`)
           setCtaText('Bekijk de video'); setCtaLink(context.link)
+        } else if (context.type === 'offerte') {
+          const m = offerteMail({ contact: context.contact ?? null, klant: context.klant ?? null, titel: context.titel, geldigTot: context.geldigTot ?? null, merk: context.merk ?? 'nextgenmedia' })
+          setToEmail(context.email ?? '')
+          setSubject(m.onderwerp); setBody(m.tekst); setCtaText(m.knop); setCtaLink(context.link)
+          if (context.merk) setMerk(context.merk)
         } else if (context.type === 'meeting') {
           const r = await fetch(`/api/admin/meetings/${context.meetingId}/mail`)
           const j = await r.json()
@@ -190,6 +198,11 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
         res = await fetch(`/api/admin/meetings/${context.meetingId}/mail`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ aan: toEmail, onderwerp: subject, tekst: body, cta_tekst: ctaText || null, cta_link: ctaLink || null, verzend_sleutel: sleutel, kopie_info: kopieInfo }),
+        })
+      } else if (context.type === 'offerte') {
+        res = await fetch(`/api/admin/offertes/${context.offerteId}/send-mail`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ to_email: toEmail, subject, body, cta_text: ctaText || null, verzend_sleutel: sleutel, merk }),
         })
       } else if (context.type === 'contract') {
         res = await fetch(`/api/admin/contracts/${context.contractId}/send-mail`, {
@@ -299,7 +312,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div><label className="block text-xs font-medium text-gray-600 mb-1">Knop-tekst</label><input className={inp} value={ctaText} onChange={(e) => setCtaText(e.target.value)} placeholder="Bv. Bekijken" /></div>
-              <div><label className="block text-xs font-medium text-gray-600 mb-1">Knop-link</label><input className={inp} value={ctaLink} onChange={(e) => setCtaLink(e.target.value)} placeholder="https://…" /></div>
+              <div><label className="block text-xs font-medium text-gray-600 mb-1">Knop-link</label><input className={`${inp} ${context.type === 'offerte' ? 'bg-gray-50 text-gray-500' : ''}`} value={ctaLink} onChange={(e) => setCtaLink(e.target.value)} readOnly={context.type === 'offerte'} title={context.type === 'offerte' ? 'De knop opent altijd de offerte' : undefined} placeholder="https://…" /></div>
             </div>
             {/* Preview */}
             <div className="rounded-lg border border-gray-100 bg-gray-50 overflow-hidden">

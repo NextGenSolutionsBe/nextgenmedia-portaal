@@ -293,6 +293,7 @@ export function OpdrachtenClient() {
           onVerplaats={verplaats}
           onStap={(o, s) => void zetStatus(o, s)}
           onVerwijder={verwijder}
+          onVernieuw={() => void laad({ stil: true })}
           onKlantNieuw={(k) => setKlanten((p) => [...p, k].sort((a, b) => a.naam.localeCompare(b.naam, 'nl')))}
         />
       )}
