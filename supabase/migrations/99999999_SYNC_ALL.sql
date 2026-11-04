@@ -7047,3 +7047,18 @@ ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS contract_waarde_voorstel_u
 ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS contract_waarde_voorstel_bron text;
 ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS contract_waarde_voorstel_op timestamptz;
 ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS klant_referentie text;
+
+-- ── Dagelijkse planning Chiara (4 nov 2026) ──────────────────────────────────
+-- Meetings inplannen: rijen zonder eigen socialmediadienst (INN, SLL, K, J), per sleutel en maand.
+CREATE TABLE IF NOT EXISTS public.cp_meeting_planning_extra (
+  sleutel text NOT NULL,
+  maand text NOT NULL,
+  status text NOT NULL CHECK (status IN ('nodig', 'niet_nodig', 'ingepland')),
+  door text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (sleutel, maand)
+);
+ALTER TABLE public.cp_meeting_planning_extra ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.cp_meeting_planning_extra FROM anon, authenticated;
+-- Aandachtspunten voor de contentkalender (cp_notities.soort = 'kalender'): geldig van maand tot tot_maand (leeg = altijd).
+ALTER TABLE public.cp_notities ADD COLUMN IF NOT EXISTS tot_maand text;

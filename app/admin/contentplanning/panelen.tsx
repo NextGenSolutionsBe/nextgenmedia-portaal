@@ -2,14 +2,14 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, Trash2, Plus, ExternalLink, Pause, Play, Archive, X } from 'lucide-react'
+import { Loader2, Trash2, Plus, ExternalLink, Pause, Play, Archive, X, Pencil, Lightbulb } from 'lucide-react'
 import { INP } from '@/app/admin/instellingen/ui'
 import {
   REEKSEN, ACTIVITEIT_RITME_LABEL, verwachteDatum, ritmeVan, beurten, isKlaar, FASE_KEYS, FASE_LABEL, dagenLabel, leesKlantTaken,
   type ActiviteitRitme, type CpInstellingen, type Onderdeel, type Status, type VasteTaak, type Reeks, type Ritme, type KlantTaak,
 } from '@/lib/contentplanning/model'
 import { Paneel, Notities, StatusBadge, TaakKaart, focusRing } from './bouwstenen'
-import type { Batch, CpData, Doe, Taak } from './types'
+import type { Batch, CpData, Doe, Notitie, Taak } from './types'
 import { MAANDEN, datumNl, maandNaam } from './types'
 
 const lbl = 'block text-xs font-medium text-gray-700 mb-1'
@@ -183,6 +183,9 @@ export function KlantFiche({ clientId, maand, data, doe, vandaag, onSluit, onTaa
         {kanBeheren && ficheGewijzigd && <div className="flex justify-end"><button type="button" onClick={bewaarFiche} className="btn-primary text-sm">Bewaren</button></div>}
       </section>
 
+      {/* Aandachtspunten voor toekomstige contentkalenders: blijven bewaard en komen vanzelf mee bij het genereren en invullen. */}
+      <KalenderPunten clientId={clientId} punten={data.notities.filter((n) => n.client_id === clientId && n.soort === 'kalender')} doe={doe} kanSchrijven={data.kan.aanpassen || kanBeheren} />
+
       {/* Extra taken bij deze klant, per reeks (bv. meeting op het einde van de maand). */}
       <KlantTaken cp={cp} kanBeheren={kanBeheren} onBewaar={(lijst) => doe('klant.wijzig', { client_id: clientId, extra_taken: lijst }, { melding: 'Taken bewaard.' })} />
 
@@ -207,7 +210,7 @@ export function KlantFiche({ clientId, maand, data, doe, vandaag, onSluit, onTaa
         </div>
       </section>
 
-      <Notities titel="Notities en herinneringen" notities={data.notities.filter((n) => n.client_id === clientId && !n.taak_id && (n.soort !== 'cyclus' || !n.maand || n.maand === maand))}
+      <Notities titel="Notities en herinneringen" notities={data.notities.filter((n) => n.client_id === clientId && !n.taak_id && n.soort !== 'kalender' && (n.soort !== 'cyclus' || !n.maand || n.maand === maand))}
         standaard={{ client_id: clientId, cyclus_id: cyclus?.id ?? null, maand, soort: 'cyclus' }} doe={doe} kanSchrijven={data.kan.aanpassen || kanBeheren} />
 
       {eerder.length > 0 && (
@@ -404,6 +407,71 @@ function KlantTaken({ cp, kanBeheren, onBewaar }: { cp: CpData['cpKlanten'][numb
           {gewijzigd && <button type="button" onClick={() => onBewaar(lijst.filter((t) => t.titel.trim()))} className="btn-primary text-sm">Bewaren</button>}
         </div>
       )}
+    </section>
+  )
+}
+
+// ── Voor de contentkalender: ideeën, feedback en aandachtspunten per klant ──
+const periodeTekst = (van: string | null | undefined, tot: string | null | undefined) => {
+  const m = (ym: string) => `${MAANDEN[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`
+  if (van && tot && tot !== van) return `${m(van)} t/m ${m(tot)}`
+  if (van) return m(van)
+  return 'Altijd'
+}
+
+function KalenderPunten({ clientId, punten, doe, kanSchrijven }: { clientId: string; punten: Notitie[]; doe: Doe; kanSchrijven: boolean }) {
+  const [open, setOpen] = useState<'nieuw' | string | null>(null)
+  const [v, setV] = useState({ tekst: '', maand: '', tot_maand: '' })
+  const [bezig, setBezig] = useState(false)
+  const lijst = [...punten].sort((a, b) => (a.maand ?? '0000').localeCompare(b.maand ?? '0000') || b.updated_at.localeCompare(a.updated_at))
+  const start = (n?: Notitie) => { setV({ tekst: n?.tekst ?? '', maand: n?.maand ?? '', tot_maand: n?.tot_maand ?? '' }); setOpen(n ? n.id : 'nieuw') }
+  const bewaar = async () => {
+    setBezig(true)
+    const velden = { tekst: v.tekst, maand: v.maand || null, tot_maand: v.tot_maand && v.tot_maand !== v.maand ? v.tot_maand : null }
+    const r = open === 'nieuw'
+      ? await doe('notitie.maak', { client_id: clientId, soort: 'kalender', ...velden }, { melding: 'Aandachtspunt bewaard.' })
+      : await doe('notitie.wijzig', { id: open, ...velden }, { melding: 'Aandachtspunt aangepast.' })
+    setBezig(false)
+    if (r) setOpen(null)
+  }
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <h4 className="text-xs font-semibold text-gray-500 flex items-center gap-1.5"><Lightbulb className="h-3.5 w-3.5" />Voor de contentkalender</h4>
+        {kanSchrijven && open === null && <button type="button" onClick={() => start()} className={`text-xs underline text-gray-700 ${focusRing}`}>+ aandachtspunt</button>}
+      </div>
+      <p className="text-[11px] text-gray-500 -mt-1">Ideeën, feedback en wensen voor volgende kalenders. Ze blijven bewaard en komen vanzelf mee bij "Genereer planning" en wanneer Claude de content invult.</p>
+      {open !== null && (
+        <div className="rounded-xl border border-gray-200 p-3 space-y-2">
+          <textarea rows={4} className={INP} value={v.tekst} onChange={(e) => setV({ ...v, tekst: e.target.value })} autoFocus
+            placeholder="bv. Instagram: meer fun content en interviews. LinkedIn: meer professionele insights." />
+          <div className="flex items-end gap-2 flex-wrap">
+            <div><label className="block text-[11px] text-gray-500 mb-0.5">Vanaf maand (leeg = altijd)</label><input type="month" className={`${INP} w-44`} value={v.maand} onChange={(e) => setV({ ...v, maand: e.target.value })} /></div>
+            <div><label className="block text-[11px] text-gray-500 mb-0.5">Tot en met (optioneel)</label><input type="month" className={`${INP} w-44`} value={v.tot_maand} disabled={!v.maand} min={v.maand || undefined} onChange={(e) => setV({ ...v, tot_maand: e.target.value })} /></div>
+          </div>
+          <div className="flex justify-end gap-2"><button type="button" onClick={() => setOpen(null)} className="btn-secondary text-xs">Annuleren</button><button type="button" disabled={bezig || !v.tekst.trim()} onClick={bewaar} className="btn-primary text-xs">{bezig && <Loader2 className="h-3.5 w-3.5 animate-spin" />}Bewaren</button></div>
+        </div>
+      )}
+      {lijst.length === 0 && open === null && <p className="text-sm text-gray-400">Nog geen aandachtspunten.</p>}
+      <ul className="space-y-2">
+        {lijst.map((n) => (
+          <li key={n.id} className="rounded-xl border border-violet-200 bg-violet-50/50 p-2.5 text-sm">
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-semibold text-violet-800 mb-0.5">{periodeTekst(n.maand, n.tot_maand)}</div>
+                <div className="whitespace-pre-wrap">{n.tekst}</div>
+                <div className="text-[11px] text-gray-500 mt-1">{n.auteur ?? 'onbekend'} · {new Date(n.updated_at).toLocaleDateString('nl-BE', { day: '2-digit', month: '2-digit', year: '2-digit' })}</div>
+              </div>
+              {kanSchrijven && open === null && (
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <button type="button" onClick={() => start(n)} className={`h-7 w-7 rounded-lg hover:bg-white flex items-center justify-center ${focusRing}`} aria-label="Aanpassen"><Pencil className="h-3.5 w-3.5" /></button>
+                  <button type="button" onClick={() => { if (confirm('Dit aandachtspunt verwijderen?')) doe('notitie.verwijder', { id: n.id }, { melding: 'Aandachtspunt verwijderd.' }) }} className={`h-7 w-7 rounded-lg hover:bg-red-50 text-red-600 flex items-center justify-center ${focusRing}`} aria-label="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></button>
+                </div>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
     </section>
   )
 }

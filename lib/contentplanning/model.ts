@@ -105,6 +105,42 @@ export type CpInstellingen = {
   vaste_taken: VasteTaak[]
   /** Klanten die niet op het Klantenbatches-bord horen (bv. geen social media). */
   bord_verborgen: string[]
+  /** Meetings inplannen (reeks 3): klanten die niet in de lijst horen (bv. de eigen merken). */
+  meeting_verborgen: string[]
+  /** Meetings inplannen: extra rijen zonder eigen socialmediadienst (INN, SLL, K, J). client_id = link naar de klantfiche, of null. */
+  meeting_extra: MeetingExtra[]
+  /** Vervolgstappen bij elke klant in een reeks (bv. reeks 1: kalender naar Bram, shootbriefing), afvinken per maand. */
+  reeks_vervolg: KlantTaak[]
+}
+export type MeetingExtra = { key: string; naam: string; client_id: string | null }
+
+/** Vaste reminder bij Meetings inplannen: per rij af te vinken voor de volgende maand. */
+export const shootHerinnering = (maandNaam: string) => `Contentshoot voor ${maandNaam} vastleggen`
+/** Afvinken van de shoot-reminder: per rij (klant-id of extra sleutel), datum = eerste dag van de volgende maand. */
+export const shootSleutel = (rij: string) => `shoot:${rij}`
+/** Afvinken van een vervolgstap: per klant en stap, datum = eerste dag van de maand. */
+export const vervolgSleutel = (clientId: string, key: string) => `vs:${clientId}:${key}`
+
+/**
+ * Geldt een aandachtspunt voor de contentkalender (cp_notities, soort 'kalender')
+ * in de periode van–tot (maanden 'JJJJ-MM', null = open)? Zonder maand: altijd.
+ */
+export function kalenderPuntGeldt(p: { maand: string | null; tot_maand?: string | null }, van: string | null, tot: string | null): boolean {
+  if (!p.maand) return true
+  const eind = p.tot_maand && p.tot_maand >= p.maand ? p.tot_maand : p.maand
+  return (!tot || p.maand <= tot) && (!van || eind >= van)
+}
+
+/** Extra meetingrijen nakijken: sleutel, naam, eventueel een klant-id. */
+export function leesMeetingExtra(v: unknown): MeetingExtra[] {
+  if (!Array.isArray(v)) return []
+  return v.slice(0, 20).map((x) => {
+    const r = (x ?? {}) as Record<string, unknown>
+    const key = String(r.key ?? '').replace(/[^a-z0-9_]/gi, '').slice(0, 30)
+    const naam = String(r.naam ?? '').replace(/\s+/g, ' ').trim().slice(0, 80)
+    const cid = typeof r.client_id === 'string' && /^[0-9a-f-]{36}$/i.test(r.client_id) ? r.client_id : null
+    return key && naam ? { key, naam, client_id: cid } : null
+  }).filter((x): x is MeetingExtra => !!x)
 }
 /** `dagen`: 1 = maandag … 5 = vrijdag. Leeg = één keer per week, op een dag naar keuze. */
 export type VasteTaak = { key: string; titel: string; detail: string; dagen?: number[] }
@@ -188,12 +224,20 @@ export const STANDAARD_CP: CpInstellingen = {
 - Per klant genereren voor 1 of 3 maanden
 # Content invullen [Claude]
 - Bestaande klant: eerst evalueren wat beter kan dan vorige periode
+- De aandachtspunten van de klant komen vanzelf mee (klantfiche → Voor de contentkalender)
 - Richting meegeven
 - Claude levert: concept per post, concept per story, scripts bij reels
 # Reelscripts doornemen met Bram
 # Contentkalender naar ClickUp [portaal]
 - Op de knop in de app drukken
 - Wordt automatisch weggeschreven naar ClickUp
+# Contentkalender doorgeven aan Bram
+- Na elke klant: de kalender doorgeven aan Bram
+- Afvinken bij de klant in reeks 1
+# Shootbriefings opstellen en doorsturen
+- Per klant de shootbriefing opstellen
+- Doorsturen naar de klant
+- Afvinken bij de klant in reeks 1
 # Meetings
 - Werk inplannen 1 à 2 dagen vóór elke meeting
 ## Onboarding
@@ -237,8 +281,9 @@ export const STANDAARD_CP: CpInstellingen = {
 - Klant krijgt zo te zien hoeveel dagen er nog zijn
 - Mail sturen naar de klant`,
     3: `# Meetings voor volgende maand inplannen (eerste dag van reeks 3)
-- Per socialmediaklant bekijken of er een meeting nodig is
+- Per klant bekijken of er een meeting nodig is
 - Link en mail sturen
+- Bij elke klant de contentshoot voor de volgende maand vastleggen (afvinken in de lijst)
 # Aanpassingen + definitief inplannen
 - Feedback verwerken
 - Definitief inplannen in Metricool
@@ -270,6 +315,17 @@ export const STANDAARD_CP: CpInstellingen = {
 - Claude geeft aan wanneer er een artikel bij zit` },
   ],
   bord_verborgen: [],
+  meeting_verborgen: [],
+  meeting_extra: [
+    { key: 'inn', naam: 'INN · Inner Stance', client_id: null },
+    { key: 'sll', naam: 'SLL · Straight Line Leadership', client_id: null },
+    { key: 'j', naam: 'J · Johan', client_id: null },
+    { key: 'k', naam: 'K · Kristof', client_id: null },
+  ],
+  reeks_vervolg: [
+    { key: 'kalender_bram', titel: 'Contentkalender doorgegeven aan Bram', reeks: 1 },
+    { key: 'shootbriefing', titel: 'Shootbriefing opgesteld en naar de klant gestuurd', reeks: 1 },
+  ],
 }
 
 /** Instellingen uit de databank, aangevuld met de standaard (nooit een leeg scherm). */
@@ -288,6 +344,9 @@ export function leesCp(ruw: unknown): CpInstellingen {
     vaste_sub: typeof r.vaste_sub === 'string' ? r.vaste_sub : STANDAARD_CP.vaste_sub,
     vaste_taken: Array.isArray(r.vaste_taken) ? r.vaste_taken.filter((t) => t && typeof t.key === 'string').map((t) => ({ key: t.key, titel: String(t.titel ?? ''), detail: String(t.detail ?? ''), dagen: leesDagen(t.dagen) })) : STANDAARD_CP.vaste_taken,
     bord_verborgen: Array.isArray(r.bord_verborgen) ? r.bord_verborgen.filter((x): x is string => typeof x === 'string') : [],
+    meeting_verborgen: Array.isArray(r.meeting_verborgen) ? r.meeting_verborgen.filter((x): x is string => typeof x === 'string') : [],
+    meeting_extra: Array.isArray(r.meeting_extra) ? leesMeetingExtra(r.meeting_extra) : STANDAARD_CP.meeting_extra,
+    reeks_vervolg: Array.isArray(r.reeks_vervolg) ? leesKlantTaken(r.reeks_vervolg) : STANDAARD_CP.reeks_vervolg,
     aanpassing_werkdagen: Number.isFinite(Number(r.aanpassing_werkdagen)) ? Math.max(0, Math.round(Number(r.aanpassing_werkdagen))) : 3,
     goedkeuring_werkdagen: r.goedkeuring_werkdagen === null || r.goedkeuring_werkdagen === undefined ? null : Math.max(0, Math.round(Number(r.goedkeuring_werkdagen))),
   }

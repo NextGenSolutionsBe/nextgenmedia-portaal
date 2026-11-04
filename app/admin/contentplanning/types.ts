@@ -17,8 +17,8 @@ export type CpKlant = {
 }
 export type Cyclus = { id: string; client_id: string; maand: string; status: 'actief' | 'gepauzeerd' | 'gearchiveerd'; instellingen: { ritme?: Ritme | null; activiteiten?: Record<string, ActiviteitRitme>; batch_id?: string | null } }
 export type Notitie = {
-  id: string; soort: 'afspraak' | 'cyclus' | 'herinnering'; client_id: string | null; taak_id: string | null; cyclus_id: string | null; batch_id: string | null
-  reeks: Reeks | null; maand: string | null; tekst: string; herinner_op: string | null; afgevinkt_op: string | null; vastgepind: boolean; auteur: string | null; created_at: string; updated_at: string
+  id: string; soort: 'afspraak' | 'cyclus' | 'herinnering' | 'kalender'; client_id: string | null; taak_id: string | null; cyclus_id: string | null; batch_id: string | null
+  reeks: Reeks | null; maand: string | null; tot_maand?: string | null; tekst: string; herinner_op: string | null; afgevinkt_op: string | null; vastgepind: boolean; auteur: string | null; created_at: string; updated_at: string
 }
 export type Batch = { id: string; name: string; color: string; start_month: number; sort_order: number }
 export type Check = { routine_key: string; datum: string; door: string | null }
@@ -30,6 +30,8 @@ export type CpData = {
   bord: BordCel[]
   /** Reeks 3: per klant en (volgende) maand of er een meeting komt. */
   meetings: MeetingPlan[]
+  /** Meetings inplannen: statussen van de extra rijen (INN, SLL, K, J), per sleutel en maand. */
+  meetingsExtra?: { sleutel: string; maand: string; status: MeetingPlan['status'] }[]
   /** Klanten met de dienst social media (de rijen van het bord). */
   socialKlanten: string[]
   /** Werkwijze 1: per klant de maanden (YYYY-MM) waarvoor al content gepland staat. */

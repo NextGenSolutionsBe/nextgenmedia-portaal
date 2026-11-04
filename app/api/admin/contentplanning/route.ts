@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
     const admin = createAdminSupabaseClient()
     const ruimVan = plusDagen(van, -200)
     const maandVanaf = plusMaanden(maandVan(van), -6), maandTot = plusMaanden(maandVan(tot), 3)
-    const [inst, { data: batches }, { data: klanten }, { data: cpKlanten }, { data: cycli }, { data: taken }, { data: notities }, { data: checks }, { data: fases }, { data: staff }, { data: admins }, { data: bord }, { data: social }, { data: meetings }, { data: content }] = await Promise.all([
+    const [inst, { data: batches }, { data: klanten }, { data: cpKlanten }, { data: cycli }, { data: taken }, { data: notities }, { data: checks }, { data: fases }, { data: staff }, { data: admins }, { data: bord }, { data: social }, { data: meetings }, { data: content }, { data: meetingsExtra }] = await Promise.all([
       leesInstellingenCp(admin),
       admin.from('batches').select('*').order('sort_order').order('name'),
       admin.from('clients').select('id, company_name, batch_id, contact_name, email').is('archived_at', null).order('company_name'),
@@ -94,6 +94,8 @@ export async function GET(req: NextRequest) {
       admin.from('cp_meeting_planning').select('*').gte('maand', maandVanaf).lte('maand', maandTot),
       // Werkwijze 1: hoe ver staat de contentkalender per klant al gepland? (enkel klant + datum)
       admin.from('social_content_items').select('client_id, planned_date').gte('planned_date', `${maandVan(van)}-01`).limit(20000),
+      // Meetings inplannen: de extra rijen (INN, SLL, K, J). Zonder tabel: gewoon leeg.
+      admin.from('cp_meeting_planning_extra').select('*').gte('maand', maandVanaf).lte('maand', maandTot),
     ])
     const contentMaanden: Record<string, string[]> = {}
     for (const r of (content ?? []) as { client_id: string | null; planned_date: string }[]) {
@@ -113,7 +115,7 @@ export async function GET(req: NextRequest) {
       notities: notities ?? [], checks: checks ?? [],
       faseAanpassingen: Object.fromEntries(((fases ?? []) as { plan_date: string; categories: string[] }[]).map((f) => [String(f.plan_date).slice(0, 10), f.categories])),
       mensen, kan: { aanpassen: r.aanpassen, beheren: r.beheren }, ik: wie(r.persoon),
-      bord: bord ?? [], meetings: meetings ?? [], contentMaanden, socialKlanten: [...new Set(((social ?? []) as { client_id: string; active: boolean | null }[]).filter((x) => x.active !== false).map((x) => x.client_id))],
+      bord: bord ?? [], meetings: meetings ?? [], meetingsExtra: meetingsExtra ?? [], contentMaanden, socialKlanten: [...new Set(((social ?? []) as { client_id: string; active: boolean | null }[]).filter((x) => x.active !== false).map((x) => x.client_id))],
     })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
@@ -179,7 +181,8 @@ export async function POST(req: NextRequest) {
     if (actie === 'notitie.maak' || actie === 'notitie.wijzig') {
       const v: Record<string, unknown> = {}
       if ('tekst' in b || actie === 'notitie.maak') { const t = tekst(b.tekst, 4000); if (!t) return NextResponse.json({ error: 'Schrijf een notitie.' }, { status: 400 }); v.tekst = t }
-      if ('soort' in b) v.soort = ['afspraak', 'cyclus', 'herinnering'].includes(String(b.soort)) ? b.soort : 'cyclus'
+      if ('soort' in b) v.soort = ['afspraak', 'cyclus', 'herinnering', 'kalender'].includes(String(b.soort)) ? b.soort : 'cyclus'
+      if ('tot_maand' in b) v.tot_maand = typeof b.tot_maand === 'string' && YM.test(b.tot_maand) ? b.tot_maand : null
       for (const k of ['client_id', 'taak_id', 'cyclus_id', 'batch_id'] as const) if (k in b) v[k] = uuid(b[k])
       if ('reeks' in b) v.reeks = isReeks(Number(b.reeks)) ? Number(b.reeks) : null
       if ('maand' in b) v.maand = typeof b.maand === 'string' && YM.test(b.maand) ? b.maand : null
@@ -187,6 +190,8 @@ export async function POST(req: NextRequest) {
       if ('vastgepind' in b) v.vastgepind = b.vastgepind === true
       if ('afgevinkt' in b) v.afgevinkt_op = b.afgevinkt === true ? nu : null
       if (v.soort === 'herinnering' && actie === 'notitie.maak' && !v.herinner_op) return NextResponse.json({ error: 'Kies de dag van de herinnering.' }, { status: 400 })
+      if (v.soort === 'kalender' && actie === 'notitie.maak' && !v.client_id) return NextResponse.json({ error: 'Een aandachtspunt hoort bij een klant.' }, { status: 400 })
+      if (typeof v.maand === 'string' && typeof v.tot_maand === 'string' && v.tot_maand < v.maand) return NextResponse.json({ error: 'De laatste maand ligt vóór de eerste.' }, { status: 400 })
       if (actie === 'notitie.maak') {
         const { data, error } = await admin.from('cp_notities').insert({ ...v, auteur: ik }).select('*').single()
         if (error) throw new Error(error.message)
@@ -248,6 +253,15 @@ export async function POST(req: NextRequest) {
     if (actie === 'meetingplan.zet') {
       const cid = uuid(b.client_id); const maand = typeof b.maand === 'string' && YM.test(b.maand) ? b.maand : null
       const status = b.status === 'nodig' || b.status === 'niet_nodig' || b.status === 'ingepland' ? b.status : null
+      // Extra rij (INN, SLL, K, J): bewaard op de sleutel, niet op een klant.
+      const sleutel = typeof b.sleutel === 'string' && /^[a-z0-9_]{1,30}$/i.test(b.sleutel) ? b.sleutel : null
+      if (sleutel && maand) {
+        const { error } = status
+          ? await admin.from('cp_meeting_planning_extra').upsert({ sleutel, maand, status, door: ik, updated_at: nu }, { onConflict: 'sleutel,maand' })
+          : await admin.from('cp_meeting_planning_extra').delete().eq('sleutel', sleutel).eq('maand', maand)
+        if (error) throw new Error(error.message)
+        return NextResponse.json({ ok: true })
+      }
       if (!cid || !maand) return NextResponse.json({ error: 'Kies klant en maand.' }, { status: 400 })
       const { error } = status
         ? await admin.from('cp_meeting_planning').upsert({ client_id: cid, maand, status, door: ik, updated_at: nu }, { onConflict: 'client_id,maand' })

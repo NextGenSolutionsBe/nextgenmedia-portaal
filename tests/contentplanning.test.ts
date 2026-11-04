@@ -151,11 +151,11 @@ test('Werkwijze per reeks: stappen, badges, deelblokken en let-op uit het tekstf
   assert.deepEqual(w.stappen[1].blokken.map((b) => [b.titel, b.punten.length]), [['Onboarding', 1], ['Kwartaalmeeting', 2]])
   // Standaard: drie reeksen met een stappenplan, INN met twee weektaken, geen dagelijkse Inner Stance-checks meer.
   const c = leesCp({})
-  // Werkwijze 1: zes stappen, zonder "Notities bekijken" (de app toont zelf wie aan de beurt is).
+  // Werkwijze 1: acht stappen (na ClickUp: kalender naar Bram en shootbriefings), zonder "Notities bekijken".
   const w1 = leesWerkwijze(c.reeks_detail['1'])
-  assert.deepEqual(w1.stappen.map((x) => x.titel), ['Contentkalender genereren', 'Content invullen', 'Reelscripts doornemen met Bram', 'Contentkalender naar ClickUp', 'Meetings', 'Laatste dag: alle aanpassingen doorvoeren'])
-  assert.ok(w1.stappen[4].punten.includes('Werk inplannen 1 à 2 dagen vóór elke meeting'))
-  assert.match(w1.stappen[5].punten[0], /^Aparte taak/)
+  assert.deepEqual(w1.stappen.map((x) => x.titel), ['Contentkalender genereren', 'Content invullen', 'Reelscripts doornemen met Bram', 'Contentkalender naar ClickUp', 'Contentkalender doorgeven aan Bram', 'Shootbriefings opstellen en doorsturen', 'Meetings', 'Laatste dag: alle aanpassingen doorvoeren'])
+  assert.ok(w1.stappen[6].punten.includes('Werk inplannen 1 à 2 dagen vóór elke meeting'))
+  assert.match(w1.stappen[7].punten[0], /^Aparte taak/)
   // Werkwijze 2: eerst weten waar het materiaal staat, pas dan plannen en editen.
   const w2 = leesWerkwijze(c.reeks_detail['2'])
   assert.equal(w2.letOp[0], 'Pitch Please als eerste editen.')
