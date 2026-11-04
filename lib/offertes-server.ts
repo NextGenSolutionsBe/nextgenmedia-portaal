@@ -234,11 +234,12 @@ export async function offerteVanToken(admin: Admin, token: string): Promise<Offe
 /** De klant opende de offerte (niet het team, geen linkvoorbeeld: dat beslist de pagina). */
 export async function registreerGeopend(admin: Admin, o: Offerte, ua: string | null, ip: string | null): Promise<void> {
   const t = nu()
-  await admin.from('offertes').update({
-    klant_geopend_op: o.klant_geopend_op ?? t, laatst_geopend_op: t, aantal_keer_geopend: (o.aantal_keer_geopend ?? 0) + 1,
-  }).eq('id', o.id)
-  await log(admin, o.id, 'geopend', { ua, ip, meta: { toestel: toestelVan(ua), eerste: !o.klant_geopend_op } })
-  if (!o.klant_geopend_op && o.opdracht_id) {
+  // Eerste keer voorwaardelijk: twee keer tegelijk openen geeft nooit twee "eerste keren".
+  const { data: eerste } = await admin.from('offertes').update({ klant_geopend_op: t }).eq('id', o.id).is('klant_geopend_op', null).select('id')
+  const isEerste = (eerste ?? []).length > 0
+  await admin.from('offertes').update({ laatst_geopend_op: t, aantal_keer_geopend: (o.aantal_keer_geopend ?? 0) + 1 }).eq('id', o.id)
+  await log(admin, o.id, 'geopend', { ua, ip, meta: { toestel: toestelVan(ua), eerste: isEerste } })
+  if (isEerste && o.opdracht_id) {
     await voegNotitieToe(admin, o.opdracht_id, `De klant opende de offerte "${o.titel}" (${toestelVan(ua)}).`, 'systeem', null).catch(() => null)
   }
 }

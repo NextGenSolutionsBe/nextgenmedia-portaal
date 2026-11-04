@@ -24,5 +24,14 @@ export function createAdminSupabaseClient() {
     // standaard te vertrouwen: dan kan een wijziging elders nooit stilletjes
     // onze queries naar het verkeerde schema laten wijzen.
     db: { schema: 'public' },
+    // Nooit in de datacache van Next: een publieke pagina (tekenlink, offerte)
+    // leest de databank vóór cookies of headers, en dan bewaarde Next dat
+    // antwoord voor altijd. Gevolg: een getekend contract toonde opnieuw het
+    // tekenformulier en "geopend" telde verkeerd (gezien op 4 nov 2026).
+    // Niet in de middleware (edge): daar is er geen datacache en hoort de
+    // fetch ongewijzigd te blijven.
+    ...(process.env.NEXT_RUNTIME === 'edge' ? {} : {
+      global: { fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, cache: 'no-store' }) },
+    }),
   })
 }
