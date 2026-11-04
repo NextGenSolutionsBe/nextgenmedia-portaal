@@ -64,7 +64,7 @@ export function TaakKaart({ t, klant, statussen, vandaag, aantalNotities, onOpen
   )
 }
 
-const SOORT_LABEL: Record<Notitie['soort'], string> = { afspraak: 'Blijvende afspraak', cyclus: 'Notitie voor deze cyclus', herinnering: 'Herinnering' }
+const SOORT_LABEL: Record<Notitie['soort'], string> = { afspraak: 'Blijvende afspraak', cyclus: 'Notitie voor deze cyclus', herinnering: 'Herinnering', kalender: 'Voor de contentkalender' }
 
 /**
  * Notities bij een klant, taak, batch, reeks of cyclus: blijvende afspraak,

@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 
     const admin = createAdminSupabaseClient()
 
-    const [{ data: client }, { data: sc }] = await Promise.all([
+    const [{ data: client }, { data: sc }, { data: punten }] = await Promise.all([
       admin.from('clients').select('niche, company_name').eq('id', clientId).maybeSingle(),
       admin
         .from('service_contracts')
@@ -32,6 +32,8 @@ export async function GET(req: NextRequest) {
         .eq('client_id', clientId)
         .eq('service_slug', 'social-media')
         .maybeSingle(),
+      // Aandachtspunten voor de contentkalender (dagelijkse planning → klantfiche). Zonder kolom: gewoon geen.
+      admin.from('cp_notities').select('tekst, maand, tot_maand').eq('client_id', clientId).eq('soort', 'kalender').is('verwijderd_op', null).order('maand', { nullsFirst: true }).limit(50),
     ])
 
     const cfg = (sc?.config ?? {}) as Record<string, unknown>
@@ -44,6 +46,7 @@ export async function GET(req: NextRequest) {
       reelsPerMonth: Number(cfg.reels ?? 0),
       storiesPerMonth: Number(cfg.stories ?? 0),
       channels: Array.isArray(cfg.channels) ? (cfg.channels as string[]) : [],
+      aandachtspunten: (punten ?? []) as { tekst: string; maand: string | null; tot_maand: string | null }[],
     })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })

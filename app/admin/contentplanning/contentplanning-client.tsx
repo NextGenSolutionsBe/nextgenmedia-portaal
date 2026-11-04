@@ -198,7 +198,7 @@ export function ContentplanningClient() {
       {data && paneel?.soort === 'instellingen' && <InstellingenPaneel data={data} doe={doe} onSluit={() => setPaneel(null)} />}
       {data && paneel?.soort === 'notities' && (
         <Paneel titel={paneel.scope.titel} onSluit={() => setPaneel(null)}>
-          <Notities notities={data.notities.filter((n) => (paneel.scope.batch_id ? n.batch_id === paneel.scope.batch_id : true) && (paneel.scope.reeks ? n.reeks === paneel.scope.reeks && n.maand === paneel.scope.maand : true))}
+          <Notities notities={data.notities.filter((n) => n.soort !== 'kalender' && (paneel.scope.batch_id ? n.batch_id === paneel.scope.batch_id : true) && (paneel.scope.reeks ? n.reeks === paneel.scope.reeks && n.maand === paneel.scope.maand : true))}
             standaard={{ batch_id: paneel.scope.batch_id ?? null, reeks: paneel.scope.reeks ?? null, maand: paneel.scope.maand ?? null, soort: paneel.scope.soort ?? 'cyclus' }} doe={doe} kanSchrijven={kanSchrijven} />
         </Paneel>
       )}

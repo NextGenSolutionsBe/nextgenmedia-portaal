@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { X, Loader2, CalendarDays, Sparkles, CheckCircle2, Info } from 'lucide-react'
+import { X, Loader2, CalendarDays, Sparkles, CheckCircle2, Info, Lightbulb } from 'lucide-react'
 import { KANALEN, normaliseerKanalen } from '@/lib/social-platforms'
+import { kalenderPuntGeldt } from '@/lib/contentplanning/model'
 
 const MONTH_NAMES = [
   'Januari', 'Februari', 'Maart', 'April', 'Mei', 'Juni',
@@ -21,6 +22,8 @@ interface ClientConfig {
   reelsPerMonth: number
   storiesPerMonth: number
   channels: string[]
+  /** Aandachtspunten voor de contentkalender (klantfiche in de dagelijkse planning). */
+  aandachtspunten?: { tekst: string; maand: string | null; tot_maand: string | null }[]
 }
 
 interface SelectedMonth { year: number; month: number }
@@ -193,6 +196,8 @@ export function GenerateDialog({ clientId, onClose, onGenerated }: GenerateDialo
               </div>
             </div>
 
+            {config?.aandachtspunten?.length ? <Aandachtspunten punten={config.aandachtspunten} maanden={selectedMonths} /> : null}
+
             {/* Summary recap */}
             <div className="bg-gray-50 rounded-xl p-4 text-sm space-y-1.5">
               <div className="flex justify-between text-gray-500">
@@ -253,6 +258,8 @@ export function GenerateDialog({ clientId, onClose, onGenerated }: GenerateDialo
                 {config.niche && <span className="text-gray-400"> · {config.niche}</span>}
               </div>
             )}
+
+            {config?.aandachtspunten?.length ? <Aandachtspunten punten={config.aandachtspunten} maanden={selectedMonths} /> : null}
 
             {/* Month selector */}
             <div>
@@ -375,6 +382,32 @@ export function GenerateDialog({ clientId, onClose, onGenerated }: GenerateDialo
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+/** De aandachtspunten van de klant voor de gekozen maanden: komen vanzelf mee bij het genereren. */
+function Aandachtspunten({ punten, maanden }: { punten: NonNullable<ClientConfig['aandachtspunten']>; maanden: SelectedMonth[] }) {
+  const ym = maanden.map((m) => `${m.year}-${String(m.month + 1).padStart(2, '0')}`).sort()
+  const van = ym[0] ?? null, tot = ym[ym.length - 1] ?? null
+  const lijst = punten.filter((p) => kalenderPuntGeldt(p, van, tot))
+  if (!lijst.length) return null
+  const periode = (p: { maand: string | null; tot_maand: string | null }) => {
+    const m = (x: string) => `${MONTH_NAMES[Number(x.slice(5, 7)) - 1]} ${x.slice(0, 4)}`
+    return !p.maand ? 'Altijd' : p.tot_maand && p.tot_maand !== p.maand ? `${m(p.maand)} t/m ${m(p.tot_maand)}` : m(p.maand)
+  }
+  return (
+    <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-4 space-y-2">
+      <div className="flex items-center gap-2 text-sm font-medium text-violet-900"><Lightbulb className="h-4 w-4" />Aandachtspunten voor deze kalender</div>
+      <ul className="space-y-2">
+        {lijst.map((p, i) => (
+          <li key={i} className="text-sm text-violet-950">
+            <div className="text-[11px] font-semibold text-violet-700">{periode(p)}</div>
+            <div className="whitespace-pre-wrap">{p.tekst}</div>
+          </li>
+        ))}
+      </ul>
+      <p className="text-[11px] text-violet-800/80">Deze punten krijgt Claude ook mee bij het invullen van de content.</p>
     </div>
   )
 }
