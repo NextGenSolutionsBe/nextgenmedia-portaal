@@ -3,8 +3,9 @@
 import assert from 'node:assert/strict'
 import { STANDAARD_INSTELLINGEN as I, berekenVesting, type Contract, type WamRij, type WamKost } from '../lib/vesting'
 import {
-  akkoordStand, contractAkkoord, controleerHandtekening, controleerKostLijn, inhoudTekst, kostAkkoord, leesVennoten,
-  vennootVan, wijzigingen, type Handtekening, type KostLijn,
+  akkoordStand, beschrijfAkkoord, contractAkkoord, controleerHandtekening, controleerKostLijn, controleerRegistratie, inhoudTekst,
+  laatsteVolledigeVersie, leesVennoten, registratieAkkoord, registratiesVoorBerekening, vennootVan, wijzigingen,
+  type Handtekening, type KostLijn, type Registratie,
 } from '../lib/vesting-akkoord'
 import { controleerSnel, snelNaarRij, teBeoordelen } from '../lib/vesting-snel'
 
@@ -83,12 +84,55 @@ test('Een handtekening geldt enkel voor de cijfers waarvoor getekend werd', () =
   assert.ok(w.some((x) => /Closing door Marco: nee → ja/.test(x)), w.join(' | '))
 })
 
-test('Algemene kost: bedrag aangepast = opnieuw tekenen', () => {
-  const k = { id: 'x', datum: '2026-10-30', omschrijving: 'Afsluiting VOF', bedrag: 1600 }
-  const oud = inhoudTekst(kostAkkoord(k))
-  const nieuw = kostAkkoord({ ...k, bedrag: 1800 })
+const reg = (over: Partial<Registratie> = {}): Registratie => ({
+  id: 'r1', soort: 'inkomst', datum: '2026-11-04', omschrijving: 'Factuur WAM november', bedrag: 6000,
+  verantwoording: 'Marco factureert WAM via de BV; WAM is de klant.', referentie: '2026-125', geschrapt: false, ...over,
+})
+
+test('Inkomst achteraf lager (factuur verminderd) = opnieuw tekenen, en je ziet wat veranderde', () => {
+  const oud = inhoudTekst(registratieAkkoord(reg()))
+  const nieuw = registratieAkkoord(reg({ bedrag: 5000 }))
   assert.notEqual(oud, inhoudTekst(nieuw))
-  assert.deepEqual(wijzigingen(oud, nieuw), ['Bedrag €1.600 → €1.800'])
+  assert.deepEqual(wijzigingen(oud, nieuw), ['Bedrag €6.000 → €5.000'])
+  assert.deepEqual(wijzigingen(oud, registratieAkkoord(reg({ geschrapt: true }))), ['Geschrapt'])
+})
+
+test('Inkomsten tellen zoals WAM (€5.000 = 1%), kosten gaan eraf, geschrapt telt niet', () => {
+  const { inkomsten, kosten } = registratiesVoorBerekening([
+    reg(), reg({ id: 'r2', bedrag: 5000, geschrapt: true }),
+    reg({ id: 'k1', soort: 'kost', omschrijving: 'Afsluiting VOF', bedrag: 1600 }),
+  ])
+  assert.equal(inkomsten.length, 1)
+  assert.equal(kosten.length, 1)
+  const v = berekenVesting([], inkomsten, kosten, I)
+  assert.equal(v.wam.nettoMeetellend, 4400)           // 6.000 − 1.600
+  assert.equal(v.wam.voorlopig, 0)                      // nog geen volle 5.000
+  const meer = registratiesVoorBerekening([reg({ bedrag: 11600 }), reg({ id: 'k1', soort: 'kost', omschrijving: 'Afsluiting VOF', bedrag: 1600 })])
+  assert.equal(berekenVesting([], meer.inkomsten, meer.kosten, I).wam.voorlopig, 0.02)
+})
+
+test('Registreren vraagt omschrijving, bedrag, datum en een verantwoording', () => {
+  assert.ok('fout' in controleerRegistratie({ soort: 'inkomst', datum: '2026-11-04', omschrijving: 'WAM', bedrag: 100, verantwoording: '' }))
+  assert.ok('fout' in controleerRegistratie({ soort: 'iets', datum: '2026-11-04', omschrijving: 'WAM', bedrag: 100, verantwoording: 'via de BV' }))
+  assert.ok('fout' in controleerRegistratie({ soort: 'kost', datum: '', omschrijving: 'WAM', bedrag: 100, verantwoording: 'via de BV' }))
+  const ok = controleerRegistratie({ soort: 'kost', datum: '2026-11-04', omschrijving: ' Boekhouder ', bedrag: '1.600', verantwoording: 'Afsluiting WAM' })
+  assert.ok('rij' in ok)
+  if ('rij' in ok) { assert.equal(ok.rij.bedrag, 1600); assert.equal(ok.rij.omschrijving, 'Boekhouder') }
+  // Aanpassen: enkel wat meegegeven wordt.
+  const deel = controleerRegistratie({ bedrag: 5000 }, false)
+  assert.ok('rij' in deel && deel.rij.bedrag === 5000 && deel.rij.omschrijving === undefined)
+  assert.match(beschrijfAkkoord(registratieAkkoord(reg())), /Inkomst Factuur WAM november: €6\.000/)
+})
+
+test('Getekend is getekend: de laatste versie die alle drie tekenden blijft gelden', () => {
+  const h = (vennoot: Handtekening['vennoot'], tekst: string, op: string) => ({ vennoot, inhoud_tekst: tekst, getekend_op: op })
+  const lijst = [
+    h('marco', 'v1', '2026-11-01T10:00:00Z'), h('bram', 'v1', '2026-11-01T11:00:00Z'), h('chiara', 'v1', '2026-11-02T09:00:00Z'),
+    h('marco', 'v2', '2026-11-03T10:00:00Z'), h('bram', 'v2', '2026-11-03T11:00:00Z'),
+  ]
+  assert.deepEqual(laatsteVolledigeVersie(lijst), { tekst: 'v1', op: '2026-11-02T09:00:00Z' })
+  assert.deepEqual(laatsteVolledigeVersie([...lijst, h('chiara', 'v2', '2026-11-04T08:00:00Z')]), { tekst: 'v2', op: '2026-11-04T08:00:00Z' })
+  assert.equal(laatsteVolledigeVersie(lijst.slice(0, 2)), null)
 })
 
 test('Kostenlijnen: soort en bedrag verplicht, Belgische notatie', () => {

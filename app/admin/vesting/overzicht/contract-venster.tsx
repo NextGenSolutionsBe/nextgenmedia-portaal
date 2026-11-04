@@ -7,7 +7,7 @@ import { ExternalLink, Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
 import { leesGetal } from '@/lib/getal'
 import { KOST_SOORTEN, kostSoortLabel, type KostSoort, type Vennoot } from '@/lib/vesting-akkoord'
 import type { ContractWeergave } from '@/lib/vesting-weergave'
-import { Akkoord, Paneel, Rekensom, RolKnop, api, datumKort, eur } from './delen'
+import { Akkoord, Paneel, Rekensom, RolKnop, api, datumKort, eur, pct, procentUitleg } from './delen'
 
 const INP = 'input-base'
 
@@ -47,7 +47,8 @@ export function ContractVenster({ c, vennoten, ik, laatste, onLaatste, onClose, 
     ...(c.status === 'niet_betaler' ? [{ label: 'Niet-betaler', waarde: '€ 0' }] : []),
     { label: `Deel van Marco${eigenVerdeling ? ' (eigen verdeling)' : ''}`, waarde: `× ${Math.round(c.factor * 100)}%` },
     { label: 'Telt mee voor Marco', waarde: eur(c.teltMee, true), sterk: true },
-    ...(c.algemeneKostenAftrek > 0 ? [{ label: 'Waarvan naar algemene kosten (afsluiting WAM)', waarde: `− ${eur(c.algemeneKostenAftrek, true)}`, zacht: true }] : []),
+    ...(c.algemeneKostenAftrek > 0 ? [{ label: 'Waarvan naar algemene kosten', waarde: `− ${eur(c.algemeneKostenAftrek, true)}`, zacht: true }] : []),
+    ...(c.telt && !c.wachtOpKlant ? [{ label: 'Levert Marco op', waarde: pct(c.ruweVesting, 2), sterk: true }] : []),
   ]
 
   return (
@@ -104,6 +105,8 @@ export function ContractVenster({ c, vennoten, ik, laatste, onLaatste, onClose, 
       <section>
         <h3 className="text-sm font-semibold text-gray-900 mb-2">Wat telt mee</h3>
         <Rekensom regels={regels} />
+        {c.telt && !c.wachtOpKlant && <p className="mt-2 text-xs text-gray-500">{procentUitleg(c)}</p>}
+        {c.wachtOpKlant && <p className="mt-2 text-xs text-gray-500">Het percentage volgt zodra de klant tekent: het tarief hangt af van het jaar van ondertekening.</p>}
       </section>
 
       <Akkoord onderwerp="contract" id={c.id} akkoord={c.akkoord} vennoten={vennoten} ik={ik} laatste={laatste} onLaatste={onLaatste}
@@ -150,23 +153,16 @@ function WaardeForm({ c, onBewaar, onAnnuleer, bezig }: { c: ContractWeergave; o
   )
 }
 
-/** De kosten die van de contractwaarde afgaan: hosting, onderaanneming, advertentiebudget … */
+/**
+ * De kosten die van de contractwaarde afgaan (hosting, onderaanneming,
+ * advertentiebudget …), elk met een verantwoording. Achteraf bijkomende kosten
+ * voeg je hier toe; een kost aanpassen kan ook. Daarna tekent iedereen opnieuw.
+ */
 function Kosten({ c, onVernieuw }: { c: ContractWeergave; onVernieuw: () => void }) {
-  const [soort, setSoort] = useState<KostSoort>('hosting')
-  const [omschrijving, setOmschrijving] = useState('')
-  const [bedrag, setBedrag] = useState('')
+  const [open, setOpen] = useState<string | 'nieuw' | null>(null)
   const [bezig, setBezig] = useState<string | null>(null)
-  const [open, setOpen] = useState(false)
   const som = c.kostLijnen.reduce((s, l) => s + l.bedrag, 0)
 
-  const voegToe = async () => {
-    setBezig('nieuw')
-    try {
-      await api('/api/admin/vesting/kosten', { method: 'POST', body: JSON.stringify({ vesting_contract_id: c.id, soort, omschrijving, bedrag: leesGetal(bedrag) }) })
-      setOmschrijving(''); setBedrag(''); setOpen(false)
-      onVernieuw()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt') } finally { setBezig(null) }
-  }
   const verwijder = async (id: string) => {
     setBezig(id)
     try { await api(`/api/admin/vesting/kosten?id=${id}`, { method: 'DELETE' }); onVernieuw() }
@@ -177,21 +173,28 @@ function Kosten({ c, onVernieuw }: { c: ContractWeergave; onVernieuw: () => void
     <section>
       <div className="flex items-center justify-between gap-2 mb-2">
         <h3 className="text-sm font-semibold text-gray-900">Kosten verbonden aan dit contract</h3>
-        {!open && <button type="button" onClick={() => setOpen(true)} className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-black"><Plus className="h-3 w-3" />Kost toevoegen</button>}
+        {open === null && <button type="button" onClick={() => setOpen('nieuw')} className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-black"><Plus className="h-3 w-3" />Kost toevoegen</button>}
       </div>
-      {c.kostLijnen.length === 0 && !open && <p className="text-sm text-gray-500">Geen kosten. Hosting, onderaanneming of advertentiebudget? Voeg ze toe, dan gaan ze van de waarde af.</p>}
+      {c.kostLijnen.length === 0 && open === null && <p className="text-sm text-gray-500">Geen kosten. Hosting, onderaanneming of advertentiebudget? Voeg ze toe, dan gaan ze van de waarde af.</p>}
       {c.kostLijnen.length > 0 && (
         <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200 text-sm">
           {c.kostLijnen.map((l) => (
-            <li key={l.id} className="flex items-center gap-3 px-3 py-2">
-              <div className="min-w-0 flex-1">
-                <div className="text-gray-900">{kostSoortLabel(l.soort)}</div>
-                {l.omschrijving && <div className="text-xs text-gray-500 truncate">{l.omschrijving}</div>}
-              </div>
-              <span className="tabular-nums">{eur(l.bedrag, true)}</span>
-              <button type="button" onClick={() => verwijder(l.id)} disabled={bezig === l.id} className="h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50" aria-label="Kost verwijderen">
-                {bezig === l.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-              </button>
+            <li key={l.id} className="px-3 py-2">
+              {open === l.id
+                ? <KostForm contractId={c.id} lijn={l} onKlaar={() => { setOpen(null); onVernieuw() }} onAnnuleer={() => setOpen(null)} />
+                : (
+                  <div className="flex items-start gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-gray-900">{kostSoortLabel(l.soort)}{l.omschrijving && <span className="text-gray-500"> · {l.omschrijving}</span>}</div>
+                      {l.verantwoording ? <div className="text-xs text-gray-500 whitespace-pre-wrap">{l.verantwoording}</div> : <div className="text-xs text-amber-700">Nog geen verantwoording</div>}
+                    </div>
+                    <span className="tabular-nums">{eur(l.bedrag, true)}</span>
+                    <button type="button" onClick={() => setOpen(l.id)} className="h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:text-black hover:bg-gray-100" aria-label="Kost aanpassen"><Pencil className="h-3.5 w-3.5" /></button>
+                    <button type="button" onClick={() => verwijder(l.id)} disabled={bezig === l.id} className="h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50" aria-label="Kost verwijderen">
+                      {bezig === l.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
+                )}
             </li>
           ))}
           {c.kostLijnen.length > 1 && <li className="flex justify-between px-3 py-2 text-gray-600"><span>Samen</span><span className="tabular-nums font-medium">{eur(som, true)}</span></li>}
@@ -200,24 +203,47 @@ function Kosten({ c, onVernieuw }: { c: ContractWeergave; onVernieuw: () => void
       {c.kostenFacturen !== null && c.kostenFacturen > som + 0.005 && (
         <p className="mt-2 text-xs text-gray-600">Op de facturen van dit contract staan {eur(c.kostenFacturen, true)} directe kosten. Het hoogste bedrag gaat eraf.</p>
       )}
-      {open && (
-        <div className="mt-2 rounded-lg border border-gray-200 p-3 space-y-2">
-          <div className="grid grid-cols-1 sm:grid-cols-[1fr_120px] gap-2">
-            <select className={INP} value={soort} onChange={(e) => setSoort(e.target.value as KostSoort)} aria-label="Soort kost">
-              {KOST_SOORTEN.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-            </select>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">€</span>
-              <input className={`${INP} pl-7`} inputMode="decimal" value={bedrag} onChange={(e) => setBedrag(e.target.value)} placeholder="0" aria-label="Bedrag excl. btw" autoFocus />
-            </div>
-          </div>
-          <input className={INP} value={omschrijving} onChange={(e) => setOmschrijving(e.target.value)} placeholder="Omschrijving (optioneel), bv. hosting 12 maanden" maxLength={200} />
-          <div className="flex gap-2">
-            <button type="button" onClick={voegToe} disabled={bezig === 'nieuw' || !(leesGetal(bedrag) ?? 0)} className="btn-primary text-sm">{bezig === 'nieuw' && <Loader2 className="h-4 w-4 animate-spin" />}Toevoegen</button>
-            <button type="button" onClick={() => setOpen(false)} className="btn-secondary text-sm">Annuleren</button>
-          </div>
-        </div>
-      )}
+      {open === 'nieuw' && <div className="mt-2 rounded-lg border border-gray-200 p-3"><KostForm contractId={c.id} onKlaar={() => { setOpen(null); onVernieuw() }} onAnnuleer={() => setOpen(null)} /></div>}
     </section>
+  )
+}
+
+function KostForm({ contractId, lijn, onKlaar, onAnnuleer }: { contractId: string; lijn?: ContractWeergave['kostLijnen'][number]; onKlaar: () => void; onAnnuleer: () => void }) {
+  const [soort, setSoort] = useState<KostSoort>(lijn?.soort ?? 'hosting')
+  const [omschrijving, setOmschrijving] = useState(lijn?.omschrijving ?? '')
+  const [bedrag, setBedrag] = useState(lijn ? String(lijn.bedrag).replace('.', ',') : '')
+  const [verantwoording, setVerantwoording] = useState(lijn?.verantwoording ?? '')
+  const [bezig, setBezig] = useState(false)
+  const b = leesGetal(bedrag)
+  const ok = b !== null && b > 0 && verantwoording.trim().length >= 5
+
+  const bewaar = async () => {
+    setBezig(true)
+    try {
+      const velden = { soort, omschrijving: omschrijving.trim(), bedrag: b, verantwoording: verantwoording.trim() }
+      if (lijn) await api('/api/admin/vesting/kosten', { method: 'PATCH', body: JSON.stringify({ id: lijn.id, ...velden }) })
+      else await api('/api/admin/vesting/kosten', { method: 'POST', body: JSON.stringify({ vesting_contract_id: contractId, ...velden }) })
+      onKlaar()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt') } finally { setBezig(false) }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-1 sm:grid-cols-[1fr_120px] gap-2">
+        <select className={INP} value={soort} onChange={(e) => setSoort(e.target.value as KostSoort)} aria-label="Soort kost">
+          {KOST_SOORTEN.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+        </select>
+        <div className="relative">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">€</span>
+          <input className={`${INP} pl-7`} inputMode="decimal" value={bedrag} onChange={(e) => setBedrag(e.target.value)} placeholder="0" aria-label="Bedrag excl. btw" autoFocus />
+        </div>
+      </div>
+      <input className={INP} value={omschrijving} onChange={(e) => setOmschrijving(e.target.value)} placeholder="Omschrijving (optioneel), bv. hosting 12 maanden" maxLength={200} />
+      <textarea className={`${INP} min-h-[64px]`} value={verantwoording} onChange={(e) => setVerantwoording(e.target.value)} placeholder="Verantwoording: waarom gaat dit eraf?" maxLength={1000} />
+      <div className="flex gap-2">
+        <button type="button" onClick={bewaar} disabled={bezig || !ok} className="btn-primary text-sm">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}{lijn ? 'Bewaren' : 'Toevoegen'}</button>
+        <button type="button" onClick={onAnnuleer} className="btn-secondary text-sm">Annuleren</button>
+      </div>
+    </div>
   )
 }

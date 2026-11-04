@@ -3,15 +3,15 @@ import { createAdminSupabaseClient, requireAdmin } from '@/lib/supabase/server'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { safeMessage } from '@/lib/api-error'
 import { loadCore, readPeriodParams } from '@/lib/finance-data'
-import { berekenVesting, leesInstellingen } from '@/lib/vesting'
+import { laadVestingData } from '@/lib/vesting-data-server'
 import { statsFor, payoutsFor, monthPeriod } from '@/lib/sales/setters'
 import { laadStatistieken } from '@/lib/sales/statistieken-data'
 import { financienWerkmap } from '@/lib/excel/rapporten/financien'
 import { vestingWerkmap } from '@/lib/excel/rapporten/vesting'
 import { resultatenWerkmap } from '@/lib/excel/rapporten/resultaten'
 import { statistiekenWerkmap } from '@/lib/excel/rapporten/statistieken'
-import { naarContract, naarWam, naarKost, naarTermijn } from '@/lib/vesting-rijen'
-import { directeKostenVoorContracten, directeKostenPerJaar } from '@/lib/facturen/kosten-data'
+import { naarKost } from '@/lib/vesting-rijen'
+import { directeKostenPerJaar } from '@/lib/facturen/kosten-data'
 import { schrijfWerkmap } from '@/lib/excel/xlsx-schrijf'
 import { xlsxAntwoord } from '@/lib/excel/antwoord'
 import type { Werkmap, Blad } from '@/lib/excel/spec'
@@ -35,13 +35,10 @@ export async function GET(req: NextRequest) {
     const admin = createAdminSupabaseClient()
     const nu = new Date()
 
-    const [core, inst, contracten, wam, kosten, termijnen, stats, payouts, statistieken] = await Promise.all([
+    const [core, vesting, stats, payouts, statistieken] = await Promise.all([
       loadCore(year),
-      admin.from('vesting_instellingen').select('*').eq('id', 1).maybeSingle(),
-      admin.from('vesting_contracten').select('*').order('ondertekend_op').order('nr'),
-      admin.from('vesting_wam').select('*').order('nr'),
-      admin.from('vesting_wam_kosten').select('*').order('datum'),
-      admin.from('vesting_wam_termijnen').select('*').order('factuurdatum').order('volgnr'),
+      // Vesting: dezelfde data en berekening als het scherm (inkomsten en kosten via registraties).
+      laadVestingData(admin),
       statsFor(monthPeriod(nu)).catch(() => []),
       payoutsFor(nu).catch(() => []),
       laadStatistieken({ periode: { van: new Date(year, 0, 1), tot: new Date(year, 11, 31, 23, 59, 59) } }).catch(() => null),
@@ -51,20 +48,9 @@ export async function GET(req: NextRequest) {
     try { kostenlaag = await directeKostenPerJaar(admin, year) } catch { kostenlaag = null }
     const delen: Werkmap[] = [financienWerkmap({ core, year, period, quarter, month, kosten: kostenlaag })]
 
-    const instellingen = leesInstellingen((inst.data ?? null) as Record<string, unknown> | null)
-    const wamKosten = ((kosten.data ?? []) as Record<string, unknown>[]).map(naarKost)
-    let contractRijen = (contracten.data ?? []) as Record<string, unknown>[]
-    try {
-      const ids = Array.from(new Set(contractRijen.map((r) => r.contract_id).filter(Boolean))) as string[]
-      const kosten = await directeKostenVoorContracten(admin, ids)
-      contractRijen = contractRijen.map((r) => { const k = r.contract_id ? kosten.get(String(r.contract_id)) : undefined; return k ? { ...r, directe_kosten_facturen: k.directeKosten, kostenstatus_facturen: k.status, facturen_gekoppeld: k.aantalFacturen } : r })
-    } catch { }
-    const v = berekenVesting(
-      contractRijen.map(naarContract),
-      ((wam.data ?? []) as Record<string, unknown>[]).map(naarWam),
-      wamKosten, instellingen,
-      ((termijnen.data ?? []) as Record<string, unknown>[]).map(naarTermijn),
-    )
+    const v = vesting.v
+    const instellingen = v.instellingen
+    const wamKosten = vesting.ruw.kosten.map(naarKost)
     delen.push(vestingWerkmap({ v, inst: instellingen, kosten: wamKosten }))
 
     const maandParam = `${nu.getFullYear()}-${String(nu.getMonth() + 1).padStart(2, '0')}-01`

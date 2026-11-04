@@ -4,24 +4,26 @@ import { createAdminSupabaseClient, requireAdmin } from '@/lib/supabase/server'
 import { safeMessage } from '@/lib/api-error'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { laadVestingData } from '@/lib/vesting-data-server'
-import { VENNOOT_NAAM, controleerHandtekening, vennootVan, type Onderwerp } from '@/lib/vesting-akkoord'
+import { VENNOOT_NAAM, beschrijfAkkoord, controleerHandtekening, vennootVan, type Akkoord, type Onderwerp } from '@/lib/vesting-akkoord'
 
 export const dynamic = 'force-dynamic'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const isOnderwerp = (v: unknown): v is Onderwerp => v === 'contract' || v === 'kost' || v === 'inkomst'
 
 /**
- * Tekenen voor een vestingcontract of een algemene kost. Enkel Marco, Bram en
- * Chiara, elk met het eigen account. De server rekent de cijfers opnieuw uit
+ * Tekenen voor een vestingcontract, een inkomst of een kost. Enkel Marco, Bram
+ * en Chiara, elk met het eigen account. De server rekent de cijfers opnieuw uit
  * en weigert als ze niet meer gelijk zijn aan wat de vennoot op het scherm zag:
- * zo hoort een handtekening altijd bij exact die cijfers.
+ * zo hoort een handtekening altijd bij exact die cijfers. Handtekeningen worden
+ * nooit gewijzigd of verwijderd (getekend is getekend).
  */
 export async function POST(req: NextRequest) {
   const actor = await requireAdmin()
   if (!actor) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
   try {
     const b = (await req.json().catch(() => ({}))) as { onderwerp?: unknown; onderwerp_id?: unknown; inhoud_tekst?: unknown; handtekening?: unknown }
-    const onderwerp: Onderwerp | null = b.onderwerp === 'contract' || b.onderwerp === 'kost' ? b.onderwerp : null
+    const onderwerp = isOnderwerp(b.onderwerp) ? b.onderwerp : null
     const id = typeof b.onderwerp_id === 'string' && UUID.test(b.onderwerp_id) ? b.onderwerp_id : null
     const gezien = typeof b.inhoud_tekst === 'string' ? b.inhoud_tekst : null
     const handtekening = controleerHandtekening(b.handtekening)
@@ -33,8 +35,8 @@ export async function POST(req: NextRequest) {
     const vennoot = vennootVan(actor.id, data.vennoten)
     if (!vennoot) return NextResponse.json({ error: 'Enkel Marco, Bram en Chiara tekenen, elk met het eigen account.' }, { status: 403 })
 
-    const info = onderwerp === 'contract' ? data.akkoordContract.get(id) : data.akkoordKost.get(id)
-    if (!info) return NextResponse.json({ error: 'Niet gevonden.' }, { status: 404 })
+    const info = onderwerp === 'contract' ? data.akkoordContract.get(id) : data.akkoordRegistratie.get(id)
+    if (!info || (onderwerp !== 'contract' && info.inhoud.soort !== onderwerp)) return NextResponse.json({ error: 'Niet gevonden.' }, { status: 404 })
     if (info.tekst !== gezien) return NextResponse.json({ error: 'De cijfers zijn intussen gewijzigd. Kijk ze opnieuw na en teken dan.', gewijzigd: true }, { status: 409 })
     if (info.stand.per[vennoot].stand === 'getekend') return NextResponse.json({ ok: true, al: true })
 
@@ -47,10 +49,9 @@ export async function POST(req: NextRequest) {
     })
     if (error && !/duplicate|unique/i.test(error.message)) throw new Error(error.message)
 
-    const wat = info.inhoud.soort === 'contract' ? `${info.inhoud.klant} (${info.inhoud.nr})` : info.inhoud.omschrijving
     await logAudit({
-      action: 'vesting.getekend', entityType: onderwerp === 'contract' ? 'vesting_contract' : 'vesting_kost', entityId: id,
-      summary: `Vesting: ${VENNOOT_NAAM[vennoot]} tekende voor ${wat}`,
+      action: 'vesting.getekend', entityType: onderwerp === 'contract' ? 'vesting_contract' : 'vesting_registratie', entityId: id,
+      summary: `Vesting: ${VENNOOT_NAAM[vennoot]} tekende · ${beschrijfAkkoord(info.inhoud)}`,
       actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'admin', ip: meta.ip, userAgent: meta.userAgent,
       metadata: { vennoot, inhoud: info.inhoud },
     })
@@ -61,19 +62,43 @@ export async function POST(req: NextRequest) {
   }
 }
 
-/** GET ?onderwerp=contract|kost&id= — de handtekeningen van één contract of kost, met de afbeelding. */
+/**
+ * GET ?onderwerp=&id=   — alle handtekeningen van één kaart, met de afbeelding (alle versies).
+ * GET ?register=1       — het volledige register (zonder afbeeldingen), nieuwste eerst.
+ * GET ?handtekening=<id> — één handtekening met afbeelding.
+ */
 export async function GET(req: NextRequest) {
   if (!(await requireAdmin())) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
   try {
-    const onderwerp = req.nextUrl.searchParams.get('onderwerp')
-    const id = req.nextUrl.searchParams.get('id') ?? ''
-    if ((onderwerp !== 'contract' && onderwerp !== 'kost') || !UUID.test(id)) return NextResponse.json({ error: 'Ongeldige vraag.' }, { status: 400 })
+    const sp = req.nextUrl.searchParams
     const admin = createAdminSupabaseClient()
+
+    if (sp.get('register') === '1') {
+      const { data, error } = await admin.from('vesting_handtekeningen')
+        .select('id, onderwerp, onderwerp_id, vennoot, naam, email, getekend_op, inhoud, ip')
+        .order('getekend_op', { ascending: false }).limit(2000)
+      if (error) throw new Error(error.message)
+      const rijen = ((data ?? []) as { inhoud: Akkoord }[]).map((h) => ({ ...h, beschrijving: beschrijfAkkoord(h.inhoud) }))
+      return NextResponse.json({ handtekeningen: rijen })
+    }
+
+    const een = sp.get('handtekening') ?? ''
+    if (een) {
+      if (!UUID.test(een)) return NextResponse.json({ error: 'Ongeldige vraag.' }, { status: 400 })
+      const { data } = await admin.from('vesting_handtekeningen').select('id, vennoot, naam, email, getekend_op, handtekening').eq('id', een).maybeSingle()
+      if (!data) return NextResponse.json({ error: 'Niet gevonden.' }, { status: 404 })
+      return NextResponse.json({ handtekening: data })
+    }
+
+    const onderwerp = sp.get('onderwerp')
+    const id = sp.get('id') ?? ''
+    if (!isOnderwerp(onderwerp) || !UUID.test(id)) return NextResponse.json({ error: 'Ongeldige vraag.' }, { status: 400 })
     const { data, error } = await admin.from('vesting_handtekeningen')
-      .select('id, vennoot, naam, email, getekend_op, inhoud_tekst, handtekening')
+      .select('id, vennoot, naam, email, getekend_op, inhoud_tekst, inhoud, handtekening')
       .eq('onderwerp', onderwerp).eq('onderwerp_id', id).order('getekend_op', { ascending: false })
     if (error) throw new Error(error.message)
-    return NextResponse.json({ handtekeningen: data ?? [] })
+    const rijen = ((data ?? []) as { inhoud: Akkoord }[]).map((h) => ({ ...h, beschrijving: beschrijfAkkoord(h.inhoud) }))
+    return NextResponse.json({ handtekeningen: rijen })
   } catch (e) {
     return NextResponse.json({ error: safeMessage(e, 'Laden mislukt') }, { status: 500 })
   }

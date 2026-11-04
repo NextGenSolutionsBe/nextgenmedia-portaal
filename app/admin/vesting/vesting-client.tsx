@@ -210,7 +210,7 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
   const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
     { key: 'overzicht', label: 'Overzicht', icon: Rocket },
     { key: 'contracten', label: `Contracten (${contracten.length})`, icon: Briefcase },
-    { key: 'wam', label: 'WAM-portefeuille', icon: Layers },
+    // WAM loopt sinds 4 nov 2026 via "Inkomst registreren" in het overzicht; geen aparte tab meer.
     { key: 'jaren', label: 'Per contractjaar', icon: CalendarRange },
     { key: 'instellingen', label: 'Instellingen', icon: Settings2 },
   ]
