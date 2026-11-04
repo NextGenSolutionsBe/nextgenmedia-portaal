@@ -20,10 +20,17 @@ export const NIET_MEETELLEN_SLEUTEL = 'vesting_niet_meetellen'
 const GETEKEND = new Set(['signed', 'getekend'])
 const TESTKLANT = /^test$/i
 
-export function teBeoordelen(module: KandidaatContract[], gekoppeld: Set<string>, nietMeetellen: Set<string>): KandidaatContract[] {
+export const isGetekend = (status: string | null | undefined) => GETEKEND.has(String(status ?? '').toLowerCase())
+
+/**
+ * Standaard enkel getekende contracten. Met `ookNietGetekend` ook wat nog bij de
+ * klant ligt (verstuurd, bekeken, concept): zo beslissen we bij elk contract dat
+ * aangemaakt wordt of het voor Marco meetelt. Getekende eerst, nieuwste bovenaan.
+ */
+export function teBeoordelen(module: KandidaatContract[], gekoppeld: Set<string>, nietMeetellen: Set<string>, opties: { ookNietGetekend?: boolean } = {}): KandidaatContract[] {
   return module
-    .filter((m) => GETEKEND.has(String(m.status).toLowerCase()) && !gekoppeld.has(m.id) && !nietMeetellen.has(m.id) && !TESTKLANT.test(String(m.klant ?? '').trim()))
-    .sort((a, b) => String(b.signed_at ?? '').localeCompare(String(a.signed_at ?? '')))
+    .filter((m) => (opties.ookNietGetekend || isGetekend(m.status)) && !gekoppeld.has(m.id) && !nietMeetellen.has(m.id) && !TESTKLANT.test(String(m.klant ?? '').trim()))
+    .sort((a, b) => Number(isGetekend(b.status)) - Number(isGetekend(a.status)) || String(b.signed_at ?? '').localeCompare(String(a.signed_at ?? '')))
 }
 
 type Dienst = (typeof DIENSTEN)[number]
@@ -47,13 +54,16 @@ export type SnelInvoer = {
   soort: 'eenmalig' | 'maand'
   prijs: number | null; maanden: number | null
   afspraak: boolean; closing: boolean
+  /** Gekoppeld contract dat de klant nog niet tekende: de datum volgt bij ondertekening. */
+  wachtOpKlant?: boolean
 }
 
 export type SnelFout = string | null
 
 export function controleerSnel(i: SnelInvoer): SnelFout {
   if (!i.klant.trim()) return 'Kies of typ de klant.'
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(i.ondertekend_op)) return 'Vul de datum van ondertekening in.'
+  const zonderDatum = !!i.wachtOpKlant && !!i.contract_id && !i.ondertekend_op
+  if (!zonderDatum && !/^\d{4}-\d{2}-\d{2}$/.test(i.ondertekend_op)) return 'Vul de datum van ondertekening in.'
   if (i.prijs === null || !Number.isFinite(i.prijs) || i.prijs <= 0) return 'Vul de prijs in (excl. btw).'
   if (i.soort === 'maand' && (i.maanden === null || !Number.isInteger(i.maanden) || i.maanden < 1 || i.maanden > 120)) return 'Hoeveel maanden loopt het contract?'
   return null
@@ -70,12 +80,12 @@ export function snelTotaal(i: Pick<SnelInvoer, 'soort' | 'prijs' | 'maanden'>): 
 export function snelNaarRij(i: SnelInvoer): Record<string, unknown> {
   const basis = {
     resource: 'contract', klant: i.klant.trim(), client_id: i.client_id || null, contract_id: i.contract_id || null,
-    ondertekend_op: i.ondertekend_op, dienst: raadVestingDienst(i.titel ?? ''),
+    ondertekend_op: i.ondertekend_op || null, dienst: raadVestingDienst(i.titel ?? ''),
     appointment_door_marco: i.afspraak, closed_door_marco: i.closing,
     status: 'actief', betalingen_op_schema: true, uitgesloten_kosten: 0,
   }
   if (i.soort === 'maand') {
-    return { ...basis, facturatiemodel: 'maandcontract', maandbedrag: i.prijs, duur_maanden: i.maanden, handmatige_totaalwaarde: null, start_dienst: i.start_dienst || i.ondertekend_op }
+    return { ...basis, facturatiemodel: 'maandcontract', maandbedrag: i.prijs, duur_maanden: i.maanden, handmatige_totaalwaarde: null, start_dienst: i.start_dienst || i.ondertekend_op || null }
   }
   return { ...basis, facturatiemodel: 'eenmalig', handmatige_totaalwaarde: i.prijs, maandbedrag: null, duur_maanden: null, start_dienst: i.start_dienst || null }
 }

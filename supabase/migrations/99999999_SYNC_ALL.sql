@@ -7062,3 +7062,53 @@ ALTER TABLE public.cp_meeting_planning_extra ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.cp_meeting_planning_extra FROM anon, authenticated;
 -- Aandachtspunten voor de contentkalender (cp_notities.soort = 'kalender'): geldig van maand tot tot_maand (leeg = altijd).
 ALTER TABLE public.cp_notities ADD COLUMN IF NOT EXISTS tot_maand text;
+
+-- ── Vesting: akkoord per contract (4 nov 2026) ───────────────────────────────
+-- Een contract dat de klant nog niet tekende kan al meetellen; de datum volgt bij ondertekening.
+ALTER TABLE public.vesting_contracten ALTER COLUMN ondertekend_op DROP NOT NULL;
+-- Directe kosten per contract (hosting, onderaanneming, advertentiebudget …). De som staat ook in uitgesloten_kosten.
+CREATE TABLE IF NOT EXISTS public.vesting_kosten (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  vesting_contract_id uuid NOT NULL REFERENCES public.vesting_contracten(id) ON DELETE CASCADE,
+  soort text NOT NULL DEFAULT 'andere' CHECK (soort IN ('hosting', 'onderaanneming', 'advertentiebudget', 'software', 'andere')),
+  omschrijving text,
+  bedrag numeric(12,2) NOT NULL CHECK (bedrag > 0),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by_email text
+);
+CREATE INDEX IF NOT EXISTS vesting_kosten_contract_idx ON public.vesting_kosten (vesting_contract_id);
+-- Bestaande kostenaftrek als één lijn, enkel waar er nog geen lijnen zijn (som blijft gelijk).
+INSERT INTO public.vesting_kosten (vesting_contract_id, soort, omschrijving, bedrag)
+SELECT c.id, 'andere', 'Kosten (vorige invoer)', c.uitgesloten_kosten
+FROM public.vesting_contracten c
+WHERE c.uitgesloten_kosten > 0
+  AND NOT EXISTS (SELECT 1 FROM public.vesting_kosten k WHERE k.vesting_contract_id = c.id);
+-- Handtekeningen: per vennoot, voor exact de cijfers in `inhoud_tekst`. Nooit bijwerken, enkel toevoegen.
+CREATE TABLE IF NOT EXISTS public.vesting_handtekeningen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  onderwerp text NOT NULL CHECK (onderwerp IN ('contract', 'kost')),
+  onderwerp_id uuid NOT NULL,
+  vennoot text NOT NULL CHECK (vennoot IN ('marco', 'bram', 'chiara')),
+  user_id uuid NOT NULL,
+  naam text,
+  email text,
+  inhoud jsonb NOT NULL,
+  inhoud_tekst text NOT NULL,
+  handtekening text NOT NULL,
+  getekend_op timestamptz NOT NULL DEFAULT now(),
+  ip text,
+  user_agent text
+);
+CREATE INDEX IF NOT EXISTS vesting_handtekeningen_onderwerp_idx ON public.vesting_handtekeningen (onderwerp, onderwerp_id);
+CREATE UNIQUE INDEX IF NOT EXISTS vesting_handtekeningen_uniek ON public.vesting_handtekeningen (onderwerp, onderwerp_id, vennoot, md5(inhoud_tekst));
+ALTER TABLE public.vesting_kosten ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vesting_handtekeningen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.vesting_kosten, public.vesting_handtekeningen FROM anon, authenticated;
+-- Wie welk account heeft (tekenen kan enkel met het eigen account).
+INSERT INTO public.app_settings (key, value, updated_at)
+SELECT 'vesting_vennoten', jsonb_build_object(
+  'marco', jsonb_build_object('naam', 'Marco Castermans', 'user_ids', COALESCE((SELECT jsonb_agg(id) FROM auth.users WHERE email = 'marco@nextgenmedia.be'), '[]'::jsonb)),
+  'bram', jsonb_build_object('naam', 'Bram Reinquin', 'user_ids', COALESCE((SELECT jsonb_agg(id) FROM auth.users WHERE email = 'bram@nextgenmedia.be'), '[]'::jsonb)),
+  'chiara', jsonb_build_object('naam', 'Chiara Walmagh', 'user_ids', COALESCE((SELECT jsonb_agg(id) FROM auth.users WHERE email = 'chiara@nextgenmedia.be'), '[]'::jsonb))
+), now()
+WHERE NOT EXISTS (SELECT 1 FROM public.app_settings WHERE key = 'vesting_vennoten');

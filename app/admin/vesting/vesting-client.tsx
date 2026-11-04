@@ -232,7 +232,8 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl sm:text-2xl font-semibold">Vesting</h1>
+          <a href="/admin/vesting" className="text-xs text-gray-500 hover:text-black">← Terug naar het overzicht</a>
+          <h1 className="text-xl sm:text-2xl font-semibold">Vesting · uitgebreid</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             Het vestigingsprincipe uit de samenwerkingsovereenkomst — uitsluitend informatief, wijzigt geen aandelen.
           </p>

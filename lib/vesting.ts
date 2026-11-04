@@ -425,6 +425,15 @@ export type ContractBerekend = Contract & {
   factor: number
   /** Wat er in de aandelenpot telt: netto × factor, of €0. */
   meetellend: number
+  /**
+   * Algemene kosten (bv. de afsluiting van WAM) die WAM niet kon dragen, gaan
+   * van de contracten af, vanaf het eerste contract. Dit deel ervan valt op dit contract.
+   */
+  algemeneKostenAftrek: number
+  /** Wat er na die aftrek in de aandelen telt: `meetellend − algemeneKostenAftrek`. */
+  teltVoorAandeel: number
+  /** Gekoppeld aan een contract dat de klant nog niet tekende: telt pas mee na ondertekening. */
+  wachtOpKlant: boolean
   erkenning: Erkenning
   /** Som van `meetellend` van alle eerdere contracten (chronologisch). */
   cumulatiefVoor: number
@@ -637,6 +646,11 @@ export type VestingOverzicht = {
   marcoDefinitief: number
   bram: number
   chiara: number
+  /**
+   * Algemene kosten (afsluiting WAM e.d.) gaan van Marco's totaal af: eerst van
+   * wat WAM opbracht, wat overblijft van de contracten.
+   */
+  algemeneKosten: { totaal: number; vanWam: number; vanContracten: number; nietGedekt: number }
   /** Contractwaarde die wegviel door stop, niet-betaling of WAM-kosten. Nooit geld dat nog moet komen. */
   uitgevallenWaarde: number
   /** Geld van lopende klanten dat nog moet binnenkomen (geplande en openstaande facturen). */
@@ -682,8 +696,16 @@ export function berekenVesting(
    */
   const goedkoopBudget = Math.max(0, (i.einde_goedkope_schijf - wam.voorlopig) * 100 * i.regulier_tarief)
 
+  // Nog niet door de klant getekend (geen datum) komt achteraan.
+  const sorteerDatum = (c: Contract) => c.ondertekend_op || '9999-12-31'
   const gesorteerd = [...contractRijen].sort((a, b) =>
-    a.ondertekend_op.localeCompare(b.ondertekend_op) || a.nr.localeCompare(b.nr, 'nl', { numeric: true }))
+    sorteerDatum(a).localeCompare(sorteerDatum(b)) || a.nr.localeCompare(b.nr, 'nl', { numeric: true }))
+
+  // Algemene kosten die WAM niet draagt (WAM bracht minder op dan de kosten),
+  // gaan van de contracten af, vanaf het eerste contract.
+  const wamBruto = wam.rijen.reduce((s, r) => s + r.meetellend, 0)
+  const kostenVanWam = Math.min(wam.kosten, wamBruto)
+  let restKosten = Math.max(0, wam.kosten - wamBruto)
 
   let cumulatief = 0
   const contracten: ContractBerekend[] = gesorteerd.map((c) => {
@@ -731,8 +753,11 @@ export function berekenVesting(
       : betaaldBijStop !== null ? betaaldBijStop * factor
       : netto === null ? 0 : netto * factor
 
-    const goedkopeSchijf = Math.min(meetellend, Math.max(0, goedkoopBudget - cumulatief))
-    const jaarschijf = Math.max(0, meetellend - goedkopeSchijf)
+    const algemeneKostenAftrek = Math.min(meetellend, restKosten)
+    restKosten -= algemeneKostenAftrek
+    const teltVoorAandeel = meetellend - algemeneKostenAftrek
+    const goedkopeSchijf = Math.min(teltVoorAandeel, Math.max(0, goedkoopBudget - cumulatief))
+    const jaarschijf = Math.max(0, teltVoorAandeel - goedkopeSchijf)
     const ruweVesting = goedkopeSchijf / i.regulier_tarief / 100 + (tarief ? jaarschijf / tarief / 100 : 0)
 
     const maanden = betaaldeMaanden(c.start_dienst, c.laatste_betaalde_maand)
@@ -749,13 +774,14 @@ export function berekenVesting(
 
     const uit: ContractBerekend = {
       ...c, jaar, tarief, duur, totaal, netto, kostenAftrek, kostenWaarschuwing, factor, meetellend, erkenning,
+      algemeneKostenAftrek, teltVoorAandeel, wachtOpKlant: !c.ondertekend_op,
       cumulatiefVoor: cumulatief, goedkopeSchijf, jaarschijf, ruweVesting,
       betaaldeMaanden: maanden, ontvangenVoorStop, uitgevallen, opBetaaldBedrag, nogBinnen,
       termijnen, inContract, gefactureerd, betaald, openstaand: Math.max(0, gefactureerd - betaald),
       // Vroegtijdig stopgezet: er wordt niets meer gefactureerd.
       nogTeFactureren: c.status === 'stopgezet' ? 0 : Math.max(0, (totaal ?? inContract) - gefactureerd), extraGefactureerd, volledigBetaald, termijnVerschil,
     }
-    cumulatief += meetellend
+    cumulatief += teltVoorAandeel
     return uit
   })
 
@@ -766,7 +792,9 @@ export function berekenVesting(
   const marcoVoorlopig = Math.min(i.max_aandeel_marco, wam.voorlopig + afkap(somVesting))
   const marcoDefinitief = Math.min(i.max_aandeel_marco, wam.definitief + afkap(somDefinitief))
 
-  const meetellendeWaarde = wam.nettoMeetellend + contracten.reduce((s, c) => s + c.meetellend, 0)
+  const meetellendeWaarde = wam.nettoMeetellend + contracten.reduce((s, c) => s + c.teltVoorAandeel, 0)
+  const kostenVanContracten = contracten.reduce((s, c) => s + c.algemeneKostenAftrek, 0)
+  const algemeneKosten = { totaal: wam.kosten, vanWam: kostenVanWam, vanContracten: kostenVanContracten, nietGedekt: Math.max(0, restKosten) }
   // Uitgevallen = enkel stopgezet, niet-betaler en WAM-kosten. Wat een lopende klant
   // nog moet betalen, staat apart onder nogBinnen.
   const uitgevallenWaarde = contracten.reduce((s, c) => s + c.uitgevallen, 0)
@@ -782,7 +810,7 @@ export function berekenVesting(
       : { van: i.jaar3_start, tot: i.jaar3_eind }
     return {
       jaar, label: JAAR_LABEL[jaar], periode, tarief: jaartarief(jaar, i),
-      meetellend: van.reduce((s, c) => s + c.meetellend, 0),
+      meetellend: van.reduce((s, c) => s + c.teltVoorAandeel, 0),
       ruweVesting: van.reduce((s, c) => s + c.ruweVesting, 0),
       aantal: van.length,
     }
@@ -816,7 +844,7 @@ export function berekenVesting(
   }
 
   return {
-    instellingen: i, contracten, wam, meetellendeWaarde,
+    instellingen: i, contracten, wam, meetellendeWaarde, algemeneKosten,
     marcoVoorlopig, marcoDefinitief, bram, chiara: i.vast_aandeel_chiara,
     uitgevallenWaarde, nogBinnen, perJaar, volgendeProcent, contractTotalen,
   }

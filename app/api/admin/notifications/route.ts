@@ -2,6 +2,7 @@ import { safeMessage } from '@/lib/api-error'
 import { NextResponse } from 'next/server'
 import { getActor, actorCanSee } from '@/lib/actor-modules'
 import { buildNotifications } from '@/lib/notifications'
+import { vestingMeldingVoor } from '@/lib/vesting-data-server'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,6 +23,10 @@ export async function GET() {
       if (n.kind === 'opslag') return actor.isAdmin  // opslag = instellingen
       return !mod || actorCanSee(actor, mod)
     })
+    // Vesting: enkel voor Marco, Bram en Chiara, en enkel wat zij zelf nog moeten tekenen.
+    if (actor.isAdmin) {
+      try { notifications.unshift(...(await vestingMeldingVoor(actor.userId))) } catch { /* melding is een extra */ }
+    }
     return NextResponse.json({ notifications })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
