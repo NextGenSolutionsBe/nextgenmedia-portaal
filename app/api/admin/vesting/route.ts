@@ -93,7 +93,9 @@ function velden(resource: Resource, b: Record<string, unknown>, bijAanmaak: bool
 
     if (bijAanmaak) {
       if (!rij.klant) return { rij, fout: 'Klant is verplicht.' }
-      if (!rij.ondertekend_op) return { rij, fout: 'De ondertekeningsdatum is verplicht — die bepaalt het contractjaar.' }
+      // Zonder datum enkel bij een gekoppeld contract dat de klant nog moet tekenen:
+      // de datum komt dan uit Contracten zodra het getekend is.
+      if (!rij.ondertekend_op && !rij.contract_id) return { rij, fout: 'De ondertekeningsdatum is verplicht — die bepaalt het contractjaar.' }
     }
     if (rij.dienst && !(DIENSTEN as readonly string[]).includes(String(rij.dienst))) rij.dienst = 'Andere'
     // Een stop zonder laatste betaalde maand is onvolledig, maar niet fout:
@@ -605,6 +607,11 @@ export async function PATCH(req: NextRequest) {
         const { data: oudeFacturen } = await admin.from('invoices').select('id').eq('contract_id', String(oudContract.contract_id))
         const ids = ((oudeFacturen ?? []) as { id: string }[]).map((x) => x.id)
         if (ids.length) await admin.from(TABEL.contracttermijn).update({ invoice_id: null, updated_at: rij.updated_at }).eq('contract_id', id).in('invoice_id', ids)
+      }
+      if (resource === 'contract' && rij.uitgesloten_kosten !== undefined) {
+        // Met kostenlijnen is hun som de kostenaftrek; die beheer je per lijn (POST /api/admin/vesting/kosten).
+        const { count } = await admin.from('vesting_kosten').select('id', { count: 'exact', head: true }).eq('vesting_contract_id', id)
+        if ((count ?? 0) > 0) delete rij.uitgesloten_kosten
       }
       ;({ error } = await admin.from(TABEL[resource]).update(rij).eq('id', id))
       if (error && /toerekening_pct|contract_id|betaald_bij_stop/.test(error.message)) throw new Error('De databank is nog niet bijgewerkt voor deze velden.')
