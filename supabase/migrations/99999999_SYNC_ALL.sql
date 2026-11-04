@@ -7149,3 +7149,39 @@ ALTER TABLE public.vesting_handtekeningen ADD CONSTRAINT vesting_handtekeningen_
 -- Eenmalig (live, 4 nov 2026, op vraag): de oude WAM-portefeuille, -termijnen en -kosten zijn
 -- bewaard in vesting_wam_backup_20261104, vesting_wam_termijnen_backup_20261104 en
 -- vesting_wam_kosten_backup_20261104 en daarna leeggemaakt. WAM loopt nu via registraties.
+
+-- ── Vesting: bewijsstuk en certificaten (4 nov 2026) ─────────────────────────
+-- Privébucket voor bewijsstukken (contract, factuur) en certificaten.
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('vesting', 'vesting', false, 26214400, ARRAY['application/pdf', 'image/jpeg', 'image/png'])
+ON CONFLICT (id) DO NOTHING;
+ALTER TABLE public.vesting_registraties ADD COLUMN IF NOT EXISTS bewijs_pad text;
+ALTER TABLE public.vesting_registraties ADD COLUMN IF NOT EXISTS bewijs_naam text;
+ALTER TABLE public.vesting_registraties ADD COLUMN IF NOT EXISTS bewijs_sha256 text;
+ALTER TABLE public.vesting_registraties ADD COLUMN IF NOT EXISTS bewijs_grootte bigint;
+ALTER TABLE public.vesting_kosten ADD COLUMN IF NOT EXISTS bewijs_pad text;
+ALTER TABLE public.vesting_kosten ADD COLUMN IF NOT EXISTS bewijs_naam text;
+ALTER TABLE public.vesting_kosten ADD COLUMN IF NOT EXISTS bewijs_sha256 text;
+ALTER TABLE public.vesting_kosten ADD COLUMN IF NOT EXISTS bewijs_grootte bigint;
+-- Eén certificaat per versie die alle drie tekenden; de mail naar legal@ vertrekt één keer.
+CREATE TABLE IF NOT EXISTS public.vesting_certificaten (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nummer text NOT NULL UNIQUE,
+  onderwerp text NOT NULL CHECK (onderwerp IN ('contract', 'kost', 'inkomst')),
+  onderwerp_id uuid NOT NULL,
+  inhoud_tekst text NOT NULL,
+  inhoud jsonb NOT NULL,
+  aandeel numeric,
+  stand jsonb,
+  volledig_op timestamptz NOT NULL,
+  pdf_pad text,
+  pdf_sha256 text,
+  mail_naar text[],
+  mail_status text NOT NULL DEFAULT 'wacht' CHECK (mail_status IN ('wacht', 'verstuurd', 'mislukt')),
+  mail_fout text,
+  mail_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS vesting_certificaten_versie ON public.vesting_certificaten (onderwerp, onderwerp_id, md5(inhoud_tekst));
+ALTER TABLE public.vesting_certificaten ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.vesting_certificaten FROM anon, authenticated;

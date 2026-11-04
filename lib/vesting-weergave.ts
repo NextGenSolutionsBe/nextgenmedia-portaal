@@ -9,6 +9,9 @@ import type { KandidaatContract } from './vesting-snel'
 
 export type AkkoordWeergave = { inhoud: Akkoord; tekst: string; stand: AkkoordStand; wijzigingen: string[] }
 
+/** Het laatste certificaat van een kaart (als alle drie ooit tekenden). */
+export type CertificaatKort = { id: string; nummer: string; volledig_op: string; mail_status: 'wacht' | 'verstuurd' | 'mislukt'; mail_op: string | null; mail_fout: string | null; huidig: boolean }
+
 export type ContractWeergave = {
   id: string
   nr: string
@@ -24,7 +27,7 @@ export type ContractWeergave = {
   maandbedrag: number | null
   duur: number | null
   totaal: number | null
-  kostLijnen: { id: string; soort: KostSoort; omschrijving: string | null; bedrag: number; verantwoording: string | null }[]
+  kostLijnen: { id: string; soort: KostSoort; omschrijving: string | null; bedrag: number; verantwoording: string | null; bewijs: { pad: string; naam: string } | null }[]
   /** Directe kosten op de facturen van het contract (afgeleid), als die er zijn. */
   kostenFacturen: number | null
   kostenAftrek: number
@@ -48,10 +51,11 @@ export type ContractWeergave = {
   /** Hoe dat aandeel berekend werd: deel aan het reguliere tarief, deel aan het jaartarief. */
   schijven: { goedkoop: number; jaar: number; regulierTarief: number; jaarTarief: number | null; jaar_label: string }
   akkoord: AkkoordWeergave
+  certificaat: CertificaatKort | null
 }
 
 /** Een inkomst (bv. via WAM) of algemene kost, met verantwoording en akkoord. */
-export type RegistratieWeergave = Registratie & { akkoord: AkkoordWeergave }
+export type RegistratieWeergave = Registratie & { akkoord: AkkoordWeergave; certificaat: CertificaatKort | null }
 
 export type AandelenWeergave = {
   marco: number

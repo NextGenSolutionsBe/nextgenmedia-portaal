@@ -8,6 +8,7 @@ import { leesGetal } from '@/lib/getal'
 import { KOST_SOORTEN, kostSoortLabel, type KostSoort, type Vennoot } from '@/lib/vesting-akkoord'
 import type { ContractWeergave } from '@/lib/vesting-weergave'
 import { Akkoord, Paneel, Rekensom, RolKnop, api, datumKort, eur, pct, procentUitleg } from './delen'
+import { BewijsKiezer, BewijsLink, type BewijsWaarde } from './bewijs-kiezer'
 
 const INP = 'input-base'
 
@@ -109,7 +110,7 @@ export function ContractVenster({ c, vennoten, ik, laatste, onLaatste, onClose, 
         {c.wachtOpKlant && <p className="mt-2 text-xs text-gray-500">Het percentage volgt zodra de klant tekent: het tarief hangt af van het jaar van ondertekening.</p>}
       </section>
 
-      <Akkoord onderwerp="contract" id={c.id} akkoord={c.akkoord} vennoten={vennoten} ik={ik} laatste={laatste} onLaatste={onLaatste}
+      <Akkoord onderwerp="contract" id={c.id} akkoord={c.akkoord} certificaat={c.certificaat} vennoten={vennoten} ik={ik} laatste={laatste} onLaatste={onLaatste}
         onGetekend={onVernieuw}
         uitleg={`Je tekent dat ${eur(c.teltMee, true)} van dit contract meetelt voor de vesting van Marco: ${eur(c.totaal)} min ${eur(c.kostenAftrek)} kosten, ${Math.round(c.factor * 100)}% voor Marco.`} />
     </Paneel>
@@ -187,6 +188,7 @@ function Kosten({ c, onVernieuw }: { c: ContractWeergave; onVernieuw: () => void
                     <div className="min-w-0 flex-1">
                       <div className="text-gray-900">{kostSoortLabel(l.soort)}{l.omschrijving && <span className="text-gray-500"> · {l.omschrijving}</span>}</div>
                       {l.verantwoording ? <div className="text-xs text-gray-500 whitespace-pre-wrap">{l.verantwoording}</div> : <div className="text-xs text-amber-700">Nog geen verantwoording</div>}
+                      {l.bewijs ? <BewijsLink bewijs={l.bewijs} klein /> : <div className="text-[11px] text-amber-700">Nog geen document</div>}
                     </div>
                     <span className="tabular-nums">{eur(l.bedrag, true)}</span>
                     <button type="button" onClick={() => setOpen(l.id)} className="h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:text-black hover:bg-gray-100" aria-label="Kost aanpassen"><Pencil className="h-3.5 w-3.5" /></button>
@@ -213,14 +215,15 @@ function KostForm({ contractId, lijn, onKlaar, onAnnuleer }: { contractId: strin
   const [omschrijving, setOmschrijving] = useState(lijn?.omschrijving ?? '')
   const [bedrag, setBedrag] = useState(lijn ? String(lijn.bedrag).replace('.', ',') : '')
   const [verantwoording, setVerantwoording] = useState(lijn?.verantwoording ?? '')
+  const [bewijs, setBewijs] = useState<BewijsWaarde>(null)
   const [bezig, setBezig] = useState(false)
   const b = leesGetal(bedrag)
-  const ok = b !== null && b > 0 && verantwoording.trim().length >= 5
+  const ok = b !== null && b > 0 && verantwoording.trim().length >= 5 && (!!bewijs || !!lijn?.bewijs)
 
   const bewaar = async () => {
     setBezig(true)
     try {
-      const velden = { soort, omschrijving: omschrijving.trim(), bedrag: b, verantwoording: verantwoording.trim() }
+      const velden = { soort, omschrijving: omschrijving.trim(), bedrag: b, verantwoording: verantwoording.trim(), ...(bewijs ? { bewijs } : {}) }
       if (lijn) await api('/api/admin/vesting/kosten', { method: 'PATCH', body: JSON.stringify({ id: lijn.id, ...velden }) })
       else await api('/api/admin/vesting/kosten', { method: 'POST', body: JSON.stringify({ vesting_contract_id: contractId, ...velden }) })
       onKlaar()
@@ -240,6 +243,7 @@ function KostForm({ contractId, lijn, onKlaar, onAnnuleer }: { contractId: strin
       </div>
       <input className={INP} value={omschrijving} onChange={(e) => setOmschrijving(e.target.value)} placeholder="Omschrijving (optioneel), bv. hosting 12 maanden" maxLength={200} />
       <textarea className={`${INP} min-h-[64px]`} value={verantwoording} onChange={(e) => setVerantwoording(e.target.value)} placeholder="Verantwoording: waarom gaat dit eraf?" maxLength={1000} />
+      <BewijsKiezer waarde={bewijs} onChange={setBewijs} bestaand={lijn?.bewijs ?? null} label="Factuur of contract van de kost (verplicht)" />
       <div className="flex gap-2">
         <button type="button" onClick={bewaar} disabled={bezig || !ok} className="btn-primary text-sm">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}{lijn ? 'Bewaren' : 'Toevoegen'}</button>
         <button type="button" onClick={onAnnuleer} className="btn-secondary text-sm">Annuleren</button>

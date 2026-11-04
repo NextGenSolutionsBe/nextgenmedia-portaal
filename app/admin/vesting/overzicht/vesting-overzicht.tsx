@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Ban, ChevronDown, ChevronUp, Loader2, Minus, PenLine, Plus, RotateCcw } from 'lucide-react'
+import { Ban, ChevronDown, ChevronUp, FileText, Loader2, Minus, PenLine, Plus, RotateCcw } from 'lucide-react'
 import { isGetekend, type KandidaatContract } from '@/lib/vesting-snel'
 import type { ContractWeergave, RegistratieWeergave, VestingWeergave } from '@/lib/vesting-weergave'
 import { PrijsToevoegen } from '../prijs-toevoegen'
@@ -277,6 +277,7 @@ function ContractKaart({ c, vennoten, onOpen }: { c: ContractWeergave; vennoten:
             {c.status === 'niet_betaler' && <Tag>Niet-betaler</Tag>}
             {c.wachtOpKlant && <Tag>Wacht op de klant</Tag>}
             {c.definitief && c.status !== 'stopgezet' && <Tag>Betaald</Tag>}
+            {c.certificaat?.huidig && <Tag>Certificaat {c.certificaat.nummer}</Tag>}
           </div>
         </div>
       </button>
@@ -296,7 +297,11 @@ function RegistratieKaart({ r, vennoten, onOpen }: { r: RegistratieWeergave; ven
           <div className={`font-semibold tabular-nums shrink-0 ${r.geschrapt ? 'line-through text-gray-400' : ''}`}>{r.soort === 'kost' ? '− ' : '+ '}{eur(r.bedrag)}</div>
         </div>
         {r.verantwoording && <div className="mt-1.5 text-[11px] text-gray-500 line-clamp-2">{r.verantwoording}</div>}
-        <div className="mt-2.5"><TekenStand akkoord={r.akkoord} vennoten={vennoten} /></div>
+        <div className="mt-1 text-[11px]">{r.bewijs ? <span className="inline-flex items-center gap-1 text-gray-500"><FileText className="h-3 w-3" />{r.bewijs.naam}</span> : <span className="text-amber-700">Nog geen document</span>}</div>
+        <div className="mt-2.5 flex items-center justify-between gap-2 flex-wrap">
+          <TekenStand akkoord={r.akkoord} vennoten={vennoten} />
+          {r.certificaat?.huidig && <Tag>Certificaat {r.certificaat.nummer}</Tag>}
+        </div>
       </button>
     </li>
   )

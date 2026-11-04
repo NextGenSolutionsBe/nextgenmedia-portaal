@@ -3,7 +3,8 @@ import { revalidatePath } from 'next/cache'
 import { createAdminSupabaseClient, requireAdmin } from '@/lib/supabase/server'
 import { safeMessage } from '@/lib/api-error'
 import { logAudit, requestMeta } from '@/lib/audit'
-import { controleerKostLijn, kostSoortLabel, somKosten } from '@/lib/vesting-akkoord'
+import { controleerBewijsInvoer, controleerKostLijn, kostSoortLabel, somKosten } from '@/lib/vesting-akkoord'
+import { BewijsFout, bewijsKolommen, verwerkBewijs } from '@/lib/vesting-bewijs-server'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,10 +33,14 @@ export async function POST(req: NextRequest) {
     if (!contractId) return NextResponse.json({ error: 'Ongeldige vraag.' }, { status: 400 })
     const c = controleerKostLijn(b)
     if ('fout' in c) return NextResponse.json({ error: c.fout }, { status: 400 })
+    const invoer = controleerBewijsInvoer(b.bewijs)
+    if (!invoer) return NextResponse.json({ error: 'Laad het document van de kost op (factuur, contract …).' }, { status: 400 })
+    if (!c.lijn.verantwoording) return NextResponse.json({ error: 'Geef een verantwoording: waarom gaat dit eraf?' }, { status: 400 })
     const admin = createAdminSupabaseClient()
     const { data: contract } = await admin.from('vesting_contracten').select('id, klant, nr').eq('id', contractId).maybeSingle()
     if (!contract) return NextResponse.json({ error: 'Contract niet gevonden.' }, { status: 404 })
-    const { data: rij, error } = await admin.from('vesting_kosten').insert({ vesting_contract_id: contractId, ...c.lijn, created_by_email: actor.email ?? null }).select('id').single()
+    const bewijs = await verwerkBewijs(admin, invoer)
+    const { data: rij, error } = await admin.from('vesting_kosten').insert({ vesting_contract_id: contractId, ...c.lijn, ...bewijsKolommen(bewijs), created_by_email: actor.email ?? null }).select('id').single()
     if (error) throw new Error(error.message)
     const som = await zetSom(admin, contractId)
     const meta = requestMeta(req)
@@ -47,6 +52,7 @@ export async function POST(req: NextRequest) {
     revalidatePath('/admin/vesting')
     return NextResponse.json({ ok: true, id: (rij as { id: string }).id, som })
   } catch (e) {
+    if (e instanceof BewijsFout) return NextResponse.json({ error: e.message }, { status: 400 })
     return NextResponse.json({ error: safeMessage(e, 'Bewaren mislukt') }, { status: 500 })
   }
 }
@@ -94,7 +100,13 @@ export async function PATCH(req: NextRequest) {
       verantwoording: b.verantwoording ?? o.verantwoording ?? '',
     })
     if ('fout' in c) return NextResponse.json({ error: c.fout }, { status: 400 })
-    const { error } = await admin.from('vesting_kosten').update({ ...c.lijn, updated_at: new Date().toISOString() }).eq('id', id)
+    let extra: Record<string, unknown> = {}
+    if (b.bewijs !== undefined) {
+      const invoer = controleerBewijsInvoer(b.bewijs)
+      if (!invoer) return NextResponse.json({ error: 'Ongeldig document.' }, { status: 400 })
+      extra = bewijsKolommen(await verwerkBewijs(admin, invoer))
+    }
+    const { error } = await admin.from('vesting_kosten').update({ ...c.lijn, ...extra, updated_at: new Date().toISOString() }).eq('id', id)
     if (error) throw new Error(error.message)
     const som = await zetSom(admin, o.vesting_contract_id)
     const meta = requestMeta(req)
@@ -106,6 +118,7 @@ export async function PATCH(req: NextRequest) {
     revalidatePath('/admin/vesting')
     return NextResponse.json({ ok: true, som })
   } catch (e) {
+    if (e instanceof BewijsFout) return NextResponse.json({ error: e.message }, { status: 400 })
     return NextResponse.json({ error: safeMessage(e, 'Bewaren mislukt') }, { status: 500 })
   }
 }
