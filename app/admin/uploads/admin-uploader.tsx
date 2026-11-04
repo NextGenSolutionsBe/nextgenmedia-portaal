@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { BUCKET, LOSSE_BESTANDEN, MAX_BYTES, TOEGESTAAN, leesbareGrootte, mimeToegestaan } from '@/lib/client-uploads'
@@ -29,6 +29,10 @@ export function AdminUploader({
   const [onderweg, setOnderweg] = useState<Bezig[]>([])
   const [melding, setMelding] = useState<string | null>(null)
   const [bezig, setBezig] = useState(false)
+  // Vanuit het overzicht ("Bestanden opladen" → klant gekozen): meteen open.
+  useEffect(() => {
+    try { if (new URLSearchParams(window.location.search).get('opladen') === '1') setOpen(true) } catch { /* niets */ }
+  }, [])
   const invoer = useRef<HTMLInputElement>(null)
 
   const openPaneel = () => { setMapId(standaardMapId ?? ''); setOnderweg([]); setMelding(null); setOpen(true) }

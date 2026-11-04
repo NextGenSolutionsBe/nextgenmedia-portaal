@@ -1,5 +1,6 @@
 'use client'
 
+import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
@@ -22,6 +23,7 @@ const datum = (s: string) =>
  * Puur weergave — de data komt van de serverpagina.
  */
 export function MappenView({ mappen, wees }: { mappen: KlantMap[]; wees: KlantMap | null }) {
+  const router = useRouter()
   const [zoek, setZoek] = useState('')
   const [recentEerst, setRecentEerst] = useState(false)
 
@@ -80,6 +82,15 @@ export function MappenView({ mappen, wees }: { mappen: KlantMap[]; wees: KlantMa
         <p className="ml-auto text-xs text-gray-500">
           {mappen.length} klantmappen · {totaal} bestanden
         </p>
+        <select
+          aria-label="Bestanden opladen voor een klant"
+          value=""
+          onChange={(e) => { if (e.target.value) router.push(`/admin/uploads/${e.target.value}?opladen=1`) }}
+          className="text-xs font-semibold px-3 py-2 rounded-xl bg-black text-white border border-black cursor-pointer"
+        >
+          <option value="">Bestanden opladen voor…</option>
+          {[...mappen].sort((a, b) => a.naam.localeCompare(b.naam, 'nl')).map((m) => <option key={m.id} value={m.id}>{m.naam}</option>)}
+        </select>
       </div>
 
       {wees && (

@@ -1,10 +1,10 @@
 import 'server-only'
 import { baseUrl } from '@/lib/email'
-import { clickupConfigured, listClickupMembers, maakGewoneTaak, leesTaakStatus, zoekTaakMetMarker, lijstToegang, zetToegewezene, type TaakStatus } from '@/lib/clickup'
+import { clickupConfigured, listClickupMembers, maakGewoneTaak, leesTaakStatus, zoekTaakMetMarker, lijstToegang, zetToegewezene, sluitTaak, type TaakStatus } from '@/lib/clickup'
 import { veiligeFout } from '@/lib/meetings/server'
 import {
   valideerLeadTaak, leadLink, leadTaakMarker, leadTaakNaam, leadTaakOmschrijving, deadlineMs, merkNaam, type LeadTaakInvoer,
-  opdrachtLink, opdrachtTaakMarker, opdrachtTaakOmschrijving, kiesClickupLid,
+  opdrachtLink, opdrachtTaakMarker, opdrachtTaakOmschrijving, kiesClickupLid, teamTaakMarker, teamTaakOmschrijving, taakIsAf,
 } from '@/lib/sales/lead-taken'
 
 /**
@@ -29,6 +29,7 @@ export type TaakRij = {
   clickup_task_id: string | null; clickup_url: string | null; clickup_status: string | null; clickup_status_kleur: string | null; clickup_status_type: string | null
   status_gelezen_op: string | null; sync_status: 'wacht' | 'ok' | 'fout'; sync_fout: string | null
   created_by: string | null; created_by_email: string | null; created_at: string; updated_at: string
+  afgerond_op?: string | null; client_id?: string | null; klant_naam?: string | null
 }
 export type LeadTaakRij = TaakRij & { lead_id: string }
 export type OpdrachtTaakRij = TaakRij & { opdracht_id: string }
@@ -36,8 +37,8 @@ export type OpdrachtTaakRij = TaakRij & { opdracht_id: string }
 /** Waar een taak bij hoort: de tabel, de koppeling en hoe de ClickUp-taak eruitziet. */
 type Context = { bedrijf: string | null; contact: string | null; titel: string | null; verantwoordelijke: { email: string | null; naam: string | null } }
 type Bron = {
-  tabel: 'sales_lead_taken' | 'opdracht_taken'
-  kolom: 'lead_id' | 'opdracht_id'
+  tabel: 'sales_lead_taken' | 'opdracht_taken' | 'team_taken'
+  kolom: 'lead_id' | 'opdracht_id' | 'bron'
   nietGevonden: string
   info: (admin: Admin, id: string) => Promise<Context | null>
   marker: (taakId: string) => string
@@ -177,7 +178,7 @@ const OPDRACHT: Bron = {
 
 // ── Algemeen: aanmaken, opnieuw, lezen, verantwoordelijke wijzigen ──────────
 
-async function maakTaak(admin: Admin, bron: Bron, bronId: string, b: LeadTaakInvoer & { aanvraag_sleutel?: unknown }, door: { userId: string | null; email: string | null }): Promise<{ taak: TaakRij; herhaald: boolean }> {
+async function maakTaak(admin: Admin, bron: Bron, bronId: string, b: LeadTaakInvoer & { aanvraag_sleutel?: unknown }, door: { userId: string | null; email: string | null }, extra: Record<string, unknown> = {}): Promise<{ taak: TaakRij; herhaald: boolean }> {
   const sleutel = String(b.aanvraag_sleutel ?? '')
   if (!UUID.test(sleutel)) throw new LeadTaakFout('Ongeldige aanvraag. Open het venster opnieuw.')
   const { data: al } = await admin.from(bron.tabel).select('*').eq('aanvraag_sleutel', sleutel).maybeSingle()
@@ -204,15 +205,15 @@ async function maakTaak(admin: Admin, bron: Bron, bronId: string, b: LeadTaakInv
   const { data: rij, error } = await admin.from(bron.tabel).insert({
     [bron.kolom]: bronId, aanvraag_sleutel: sleutel, omschrijving: w.omschrijving, notitie: w.notitie, deadline: w.deadline, merk: w.merk,
     clickup_list_id: listId, clickup_assignee_id: lid.id, clickup_assignee_naam: lid.username || lid.email,
-    sync_status: 'wacht', created_by: door.userId, created_by_email: door.email,
+    sync_status: 'wacht', created_by: door.userId, created_by_email: door.email, ...extra,
   }).select('*').single()
   if (error) {
     if (/duplicate|unique|23505/i.test(error.message)) {
       const { data: dubbel } = await admin.from(bron.tabel).select('*').eq('aanvraag_sleutel', sleutel).maybeSingle()
       if (dubbel) return { taak: dubbel as TaakRij, herhaald: true }
     }
-    if (bron.tabel === 'opdracht_taken' && /opdracht_taken|relation|does not exist|schema cache/i.test(error.message)) {
-      throw new LeadTaakFout('Taken bij opdrachten zijn nog niet klaar in de databank (migratie ontbreekt). Er is niets aangemaakt.', 503)
+    if (bron.tabel !== 'sales_lead_taken' && /_taken|relation|does not exist|schema cache/i.test(error.message)) {
+      throw new LeadTaakFout('Deze taken zijn nog niet klaar in de databank (migratie ontbreekt). Er is niets aangemaakt.', 503)
     }
     throw new Error(error.message)
   }
@@ -340,3 +341,106 @@ export async function opdrachtTaakVerantwoordelijke(admin: Admin, opdrachtId: st
   return wijzigVerantwoordelijke(admin, OPDRACHT, opdrachtId, taakId, assigneeId) as Promise<OpdrachtTaakRij>
 }
 export const opdrachtStandaard = (admin: Admin, opdrachtId: string) => standaardVoor(admin, OPDRACHT, opdrachtId)
+
+// ── Teamtaken (Command Center) ───────────────────────────────────────────────
+// Taken die we aan elkaar toewijzen, los van een lead of project. Zelfde
+// ClickUp-flow (gewone taak, deadline, toegewezen), in de lijst van
+// NextGenMedia of NextGenSolutions. Alle rijen hangen aan bron 'team'.
+
+const TEAM_ID = 'team'
+const TEAM: Bron = {
+  tabel: 'team_taken', kolom: 'bron', nietGevonden: 'Taak niet gevonden.',
+  async info() { return { bedrijf: null, contact: null, titel: null, verantwoordelijke: { email: null, naam: null } } },
+  marker: teamTaakMarker,
+  naam: (t) => leadTaakNaam(t.omschrijving, t.klant_naam ?? null),
+  omschrijving: (t, _c, marker) => teamTaakOmschrijving({ link: `${baseUrl().replace(/\/$/, '')}/admin`, klant: t.klant_naam ?? null, notitie: t.notitie, door: t.created_by_email, marker }),
+}
+
+export async function maakTeamTaak(admin: Admin, b: LeadTaakInvoer & { aanvraag_sleutel?: unknown; client_id?: unknown }, door: { userId: string | null; email: string | null }): Promise<{ taak: TaakRij; herhaald: boolean }> {
+  const extra: Record<string, unknown> = {}
+  if (typeof b.client_id === 'string' && UUID.test(b.client_id)) {
+    const { data: k } = await admin.from('clients').select('id, company_name').eq('id', b.client_id).maybeSingle()
+    if (!k) throw new LeadTaakFout('Die klant bestaat niet.')
+    extra.client_id = (k as { id: string }).id
+    extra.klant_naam = (k as { company_name: string | null }).company_name ?? null
+  }
+  return maakTaak(admin, TEAM, TEAM_ID, b, door, extra)
+}
+export const teamTaakOpnieuw = (admin: Admin, taakId: string) => taakOpnieuw(admin, TEAM, TEAM_ID, taakId)
+export const teamTaakVerantwoordelijke = (admin: Admin, taakId: string, assigneeId: unknown) => wijzigVerantwoordelijke(admin, TEAM, TEAM_ID, taakId, assigneeId)
+
+/** Een taak afvinken: in ClickUp op de sluitstatus van de lijst, en bij ons afgerond. */
+export async function taakAfvinken(admin: Admin, soort: 'team' | 'opdracht', taakId: string): Promise<TaakRij> {
+  if (!UUID.test(taakId)) throw new LeadTaakFout('Taak niet gevonden.', 404)
+  const tabel = soort === 'team' ? 'team_taken' : 'opdracht_taken'
+  const { data } = await admin.from(tabel).select('*').eq('id', taakId).maybeSingle()
+  if (!data) throw new LeadTaakFout('Taak niet gevonden.', 404)
+  const t = data as TaakRij
+  if (t.clickup_task_id && t.sync_status === 'ok' && !taakIsAf(t)) {
+    try { await sluitTaak(t.clickup_task_id) } catch (e) {
+      throw new LeadTaakFout(`ClickUp aanpassen lukte niet (${veiligeFout(e)}). De taak staat nog open.`, 502)
+    }
+  }
+  const s = t.clickup_task_id ? await leesTaakStatus(t.clickup_task_id).catch(() => null) : null
+  return bewaarIn(admin, tabel, t.id, { afgerond_op: nu(), ...(s ? { clickup_status: s.status, clickup_status_kleur: s.kleur, clickup_status_type: s.type, status_gelezen_op: nu() } : {}) })
+}
+
+export type TaakInOverzicht = TaakRij & { soort: 'team' | 'opdracht'; project: { id: string; titel: string; klant: string | null } | null }
+
+/** Hoogstens n tegelijk, zodat ClickUp niet overspoeld wordt. */
+async function perStuk<T, U>(lijst: T[], n: number, f: (x: T) => Promise<U>): Promise<U[]> {
+  const uit: U[] = new Array(lijst.length)
+  let i = 0
+  await Promise.all(Array.from({ length: Math.min(n, lijst.length) }, async () => {
+    while (i < lijst.length) { const k = i++; uit[k] = await f(lijst[k]) }
+  }))
+  return uit
+}
+
+/**
+ * De open taken voor het Command Center: teamtaken en taken bij projecten,
+ * met status en toegewezene zoals ClickUp ze nu toont. Wat in ClickUp
+ * afgesloten werd, valt weg. Lukt ClickUp niet, dan de laatst gekende stand.
+ */
+export async function takenOverzicht(admin: Admin): Promise<{ taken: TaakInOverzicht[]; statusFout: string | null }> {
+  const [team, opdr] = await Promise.all([
+    admin.from('team_taken').select('*').is('afgerond_op', null).order('deadline', { ascending: true }).limit(150),
+    admin.from('opdracht_taken').select('*').is('afgerond_op', null).order('deadline', { ascending: true }).limit(150),
+  ])
+  const teamRijen = team.error ? [] : ((team.data ?? []) as TaakRij[])
+  const opdrRijen = opdr.error ? [] : ((opdr.data ?? []) as TaakRij[])
+  // Projecten erbij (titel en klant) voor de link.
+  const ids = [...new Set(opdrRijen.map((t) => t.opdracht_id).filter(Boolean))] as string[]
+  const projecten = new Map<string, { id: string; titel: string; klant: string | null }>()
+  if (ids.length) {
+    const { data } = await admin.from('opdrachten').select('id, titel, client_id, klant_vrij').in('id', ids)
+    const rijen = (data ?? []) as { id: string; titel: string; client_id: string | null; klant_vrij: string | null }[]
+    const kIds = [...new Set(rijen.map((r) => r.client_id).filter(Boolean))] as string[]
+    const { data: kl } = kIds.length ? await admin.from('clients').select('id, company_name').in('id', kIds) : { data: [] }
+    const naam = new Map(((kl ?? []) as { id: string; company_name: string | null }[]).map((k) => [k.id, k.company_name]))
+    for (const r of rijen) projecten.set(r.id, { id: r.id, titel: r.titel, klant: (r.client_id ? naam.get(r.client_id) : null) ?? r.klant_vrij ?? null })
+  }
+  let statusFout: string | null = null
+  const ververs = async (t: TaakRij, tabel: 'team_taken' | 'opdracht_taken'): Promise<TaakRij> => {
+    if (!t.clickup_task_id || t.sync_status !== 'ok') return t
+    try {
+      const s = await leesTaakStatus(t.clickup_task_id)
+      if (!s) return t.clickup_status_type === 'weg' ? t : bewaarIn(admin, tabel, t.id, { clickup_status: 'verwijderd', clickup_status_type: 'weg', status_gelezen_op: nu() })
+      const v = verschil(t, s)
+      return v ? bewaarIn(admin, tabel, t.id, { ...v, status_gelezen_op: nu() }) : t
+    } catch (e) {
+      statusFout = `Status niet bijgewerkt uit ClickUp (${veiligeFout(e)}). Je ziet de laatst gekende stand.`
+      return t
+    }
+  }
+  const alle = [
+    ...teamRijen.map((t) => ({ t, tabel: 'team_taken' as const })),
+    ...opdrRijen.map((t) => ({ t, tabel: 'opdracht_taken' as const })),
+  ]
+  const vers = await perStuk(alle, 6, async ({ t, tabel }) => ({ t: await ververs(t, tabel), tabel }))
+  const taken: TaakInOverzicht[] = vers
+    .filter(({ t }) => !taakIsAf(t))
+    .map(({ t, tabel }) => ({ ...t, soort: tabel === 'team_taken' ? 'team' as const : 'opdracht' as const, project: t.opdracht_id ? projecten.get(t.opdracht_id) ?? null : null }))
+    .sort((a, b) => String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')))
+  return { taken, statusFout }
+}

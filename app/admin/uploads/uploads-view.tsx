@@ -9,6 +9,7 @@ import { maakZipSchrijver, verdeelInDelen, uniekeNaam, zipBestandsnaam, zipSegme
 import { Archive, CheckSquare, Download, Film, FolderInput, ImageIcon, Loader2, Pencil, Square, Trash2, ExternalLink, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { AdminUploader } from './admin-uploader'
+import { MappenBeheer } from './mappen-beheer'
 
 export type AdminUpload = {
   id: string
@@ -323,7 +324,8 @@ export function UploadsView({
         </div>
 
         {clientId && (
-          <span className="ml-auto">
+          <span className="ml-auto flex items-center gap-2">
+            <MappenBeheer clientId={clientId} mappen={submappen} />
             <AdminUploader
               clientId={clientId}
               mappen={submappen}

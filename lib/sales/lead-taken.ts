@@ -134,3 +134,39 @@ export function kiesClickupLid(leden: { id: number; naam: string; email: string 
   const opMail = leden.filter((l) => norm(l.email).split('@')[0].split(/[._-]/)[0] === voornaam)
   return opMail.length === 1 ? opMail[0].id : null
 }
+
+// ── Teamtaken (Command Center) ────────────────────────────────────────────────
+// Taken die we aan elkaar toewijzen, los van een lead of project.
+
+export const teamTaakMarker = (taakId: string): string => `ngm-teamtaak:${taakId}`
+
+export function teamTaakOmschrijving(t: { link: string; klant: string | null; notitie: string | null; door: string | null; marker: string }): { tekst: string; markdown: string } {
+  const tekst = [
+    t.klant ? `Klant: ${t.klant}` : null,
+    t.notitie ? `${t.klant ? '\n' : ''}Notitie:\n${t.notitie}` : null,
+    `\nToegewezen${t.door ? ` door ${t.door}` : ''} vanuit het Command Center: ${t.link}`,
+    `Ref: ${t.marker}`,
+  ].filter((x) => x !== null).join('\n')
+  const markdown = [
+    t.klant ? `**Klant:** ${md(t.klant)}` : null,
+    t.notitie ? `\n**Notitie**\n\n${md(t.notitie)}` : null,
+    `\n_Toegewezen${t.door ? ` door ${md(t.door)}` : ''} vanuit het [Command Center](${t.link})._`,
+    `Ref: ${t.marker}`,
+  ].filter((x) => x !== null).join('\n')
+  return { tekst, markdown }
+}
+
+/** Is de taak af? Afgevinkt in de app, of in ClickUp op een sluit- of klaarstatus gezet (of verwijderd). */
+export function taakIsAf(t: { afgerond_op?: string | null; clickup_status_type?: string | null }): boolean {
+  return !!t.afgerond_op || t.clickup_status_type === 'closed' || t.clickup_status_type === 'done' || t.clickup_status_type === 'weg'
+}
+
+/** "vandaag", "morgen", "over 3 dagen", "2 dagen te laat". */
+export function deadlineTekst(deadline: string | null | undefined, vandaag: string): { tekst: string; telaat: boolean; vandaag: boolean } {
+  if (!deadline) return { tekst: 'geen deadline', telaat: false, vandaag: false }
+  const dagen = Math.round((Date.parse(`${deadline}T12:00:00Z`) - Date.parse(`${vandaag}T12:00:00Z`)) / 86_400_000)
+  if (dagen < 0) return { tekst: `${-dagen} ${dagen === -1 ? 'dag' : 'dagen'} te laat`, telaat: true, vandaag: false }
+  if (dagen === 0) return { tekst: 'vandaag', telaat: false, vandaag: true }
+  if (dagen === 1) return { tekst: 'morgen', telaat: false, vandaag: false }
+  return { tekst: `over ${dagen} dagen`, telaat: false, vandaag: false }
+}

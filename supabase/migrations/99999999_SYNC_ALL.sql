@@ -6914,3 +6914,45 @@ END $$;
 
 -- Contract: wanneer de klant het voor het eerst opende (niet als het team kijkt) (4 nov 2026).
 ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS klant_geopend_op timestamptz;
+
+-- Teamtaken: taken aan elkaar toewijzen vanuit het Command Center, gesynchroniseerd met ClickUp (4 nov 2026).
+CREATE TABLE IF NOT EXISTS public.team_taken (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  bron text NOT NULL DEFAULT 'team',
+  client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  klant_naam text,
+  aanvraag_sleutel text,
+  omschrijving text NOT NULL,
+  notitie text,
+  deadline date,
+  merk text NOT NULL,
+  clickup_list_id text,
+  clickup_assignee_id bigint,
+  clickup_assignee_naam text,
+  clickup_task_id text,
+  clickup_url text,
+  clickup_status text,
+  clickup_status_kleur text,
+  clickup_status_type text,
+  status_gelezen_op timestamptz,
+  sync_status text NOT NULL DEFAULT 'wacht',
+  sync_fout text,
+  afgerond_op timestamptz,
+  created_by uuid,
+  created_by_email text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS team_taken_aanvraag ON public.team_taken (aanvraag_sleutel) WHERE aanvraag_sleutel IS NOT NULL;
+CREATE INDEX IF NOT EXISTS team_taken_open ON public.team_taken (afgerond_op, deadline);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'team_taken_merk_check') THEN
+    ALTER TABLE public.team_taken ADD CONSTRAINT team_taken_merk_check CHECK (merk IN ('nextgenmedia', 'nextgensolutions'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'team_taken_sync_check') THEN
+    ALTER TABLE public.team_taken ADD CONSTRAINT team_taken_sync_check CHECK (sync_status IN ('wacht', 'ok', 'fout'));
+  END IF;
+END $$;
+ALTER TABLE public.team_taken ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.team_taken FROM anon, authenticated;
+ALTER TABLE public.opdracht_taken ADD COLUMN IF NOT EXISTS afgerond_op timestamptz;
