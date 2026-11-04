@@ -103,7 +103,8 @@ export default async function SignContractPage({ params }: { params: { token: st
         if (e1 && !/klant_geopend_op/.test(e1.message)) console.error('[sign page] klant_geopend_op mislukt:', e1.message)
       }
       if (contract.status === 'sent') {
-        const { error } = await admin.from('contracts').update({ status: 'viewed' }).eq('id', contract.id)
+        // Voorwaardelijk: nooit een intussen getekend contract terugzetten.
+        const { error } = await admin.from('contracts').update({ status: 'viewed' }).eq('id', contract.id).eq('status', 'sent')
         if (error) console.error('[sign page] status → viewed mislukt:', error.message)
       }
     }
