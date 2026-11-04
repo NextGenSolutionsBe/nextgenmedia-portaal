@@ -2,6 +2,7 @@ import 'server-only'
 import { raadDiensten, bedrijfVan, kolomVan, statusUitContract, projectVerantwoordelijke } from '@/lib/opdrachten-kanban'
 import { voegNotitieToe } from '@/lib/opdrachten-notities'
 import { vandaagISO, type OpdrachtStatus } from '@/lib/opdrachten'
+import { sluitContractTaak } from '@/lib/opdrachten-offertes'
 
 /**
  * Projecten: elk contract heeft een kaart. Zodra een contract opgemaakt wordt,
@@ -20,7 +21,7 @@ type Contract = { id: string; title: string | null; status: string | null; clien
 
 const TESTKLANT = /^test$/i
 
-export async function kaartVoorContract(admin: Admin, contractId: string): Promise<'bestaat' | 'gekoppeld' | 'aangemaakt' | 'overgeslagen'> {
+export async function kaartVoorContract(admin: Admin, contractId: string, opties: { opdrachtId?: string | null } = {}): Promise<'bestaat' | 'gekoppeld' | 'aangemaakt' | 'overgeslagen'> {
   const { data: al } = await admin.from('opdrachten').select('id').eq('contract_id', contractId).limit(1)
   if ((al ?? []).length) return 'bestaat'
   const { data: c } = await admin.from('contracts').select('id, title, status, client_id, created_at, expires_at, contract_type').eq('id', contractId).maybeSingle()
@@ -41,18 +42,37 @@ export async function kaartVoorContract(admin: Admin, contractId: string): Promi
 
   // Een lopende kaart van dezelfde klant (Opvolging of Offerte gestuurd, nog
   // zonder contract) krijgt dit contract: dat is hetzelfde project.
-  if (contract.client_id) {
+  // Aangemaakt vanaf een kaart ("Contract aanmaken" na een bevestigde offerte): precies die kaart.
+  let kandidaat: { id: string; zonderKlant?: boolean } | undefined
+  if (opties.opdrachtId) {
+    const { data: gekozen } = await admin.from('opdrachten').select('id, status, contract_id, client_id').eq('id', opties.opdrachtId).maybeSingle()
+    const g = gekozen as { id: string; status: OpdrachtStatus; contract_id: string | null; client_id: string | null } | null
+    if (g && !g.contract_id && kolomVan(g.status) !== 'stopgezet') kandidaat = { id: g.id, zonderKlant: !g.client_id }
+  }
+  if (!kandidaat && contract.client_id) {
     const { data: open } = await admin.from('opdrachten').select('id, status, titel')
       .eq('client_id', contract.client_id).is('contract_id', null).order('created_at', { ascending: false }).limit(20)
-    const kandidaat = ((open ?? []) as { id: string; status: OpdrachtStatus; titel: string }[])
-      .find((o) => kolomVan(o.status) === 'potentieel' || kolomVan(o.status) === 'offerte')
+    const lopend = ((open ?? []) as { id: string; status: OpdrachtStatus; titel: string }[])
+      .filter((o) => kolomVan(o.status) === 'potentieel' || kolomVan(o.status) === 'offerte')
+    // Een kaart met een bevestigde offerte gaat voor.
+    if (lopend.length > 1) {
+      const { data: akkoord } = await admin.from('offertes').select('opdracht_id').in('opdracht_id', lopend.map((o) => o.id)).eq('status', 'geaccepteerd').limit(1)
+      const metAkkoord = ((akkoord ?? []) as { opdracht_id: string }[])[0]?.opdracht_id
+      kandidaat = lopend.find((o) => o.id === metAkkoord) ?? lopend[0]
+    } else kandidaat = lopend[0]
+  }
+  {
     if (kandidaat) {
       const { error } = await admin.from('opdrachten').update({
         contract_id: contract.id, status, status_bron: 'automatisch', auto_status: status, status_gewijzigd_op: nu, updated_at: nu,
         ...(status === 'geen_interesse' ? { stop_reden: 'Contract verlopen of niet doorgegaan' } : {}),
+        // Een prospect-kaart krijgt de klant van het contract.
+        ...(kandidaat.zonderKlant && contract.client_id ? { client_id: contract.client_id, klant_vrij: null } : {}),
       }).eq('id', kandidaat.id).is('contract_id', null)
       if (!error) {
         await voegNotitieToe(admin, kandidaat.id, `Contract "${titel}" opgemaakt: de kaart staat nu in ${status === 'getekend' ? 'Contract getekend' : status === 'geen_interesse' ? 'Verloren' : 'Contract verstuurd'}.`, 'systeem', null)
+        // De taak "contract opmaken of in gang zetten" is daarmee gedaan.
+        await sluitContractTaak(admin, kandidaat.id).catch(() => {})
         return 'gekoppeld'
       }
     }

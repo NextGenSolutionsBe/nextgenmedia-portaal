@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { naOfferteAkkoord } from '@/lib/opdrachten-offertes'
 import { accepteer, OfferteFout } from '@/lib/offertes-server'
 import { requestMeta } from '@/lib/audit'
 
@@ -14,7 +16,10 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
   try {
     const b = await req.json().catch(() => ({})) as { naam?: unknown }
     const meta = requestMeta(req)
-    const o = await accepteer(createAdminSupabaseClient(), params.token, { naam: b.naam, ip: meta.ip, ua: meta.userAgent })
+    const admin = createAdminSupabaseClient()
+    const o = await accepteer(admin, params.token, { naam: b.naam, ip: meta.ip, ua: meta.userAgent })
+    // Projecten: kaart met de groene label en de taak "contract opmaken of in gang zetten" (na het antwoord).
+    if (o.status === 'geaccepteerd') waitUntil(naOfferteAkkoord(admin, o.id).catch((e) => console.warn('[offertes] na akkoord mislukt:', e instanceof Error ? e.message : e)))
     return NextResponse.json({ ok: true, geaccepteerd_op: o.geaccepteerd_op, geaccepteerd_door: o.geaccepteerd_door })
   } catch (e) {
     if (e instanceof OfferteFout) return NextResponse.json({ error: e.publiek }, { status: e.status })

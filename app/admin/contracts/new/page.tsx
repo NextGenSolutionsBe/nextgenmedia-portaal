@@ -68,6 +68,8 @@ export default function NewContractPage() {
       fd.append('signer_email', form.signer_email)
       fd.append('already_signed', String(form.already_signed))
       fd.append('start_month', form.start_month)
+      // Vanaf een projectkaart (?opdracht=<id>): het contract hangt aan die kaart.
+      try { const op = new URLSearchParams(window.location.search).get('opdracht'); if (op && /^[0-9a-f-]{36}$/i.test(op)) fd.append('opdracht_id', op) } catch { /* geen querystring */ }
       fd.append('duration_months', form.duration_months)
       if (form.already_signed) fd.append('signed_at', form.signed_at)
 

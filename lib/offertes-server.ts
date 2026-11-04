@@ -3,8 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { baseUrl, sendEmail } from '@/lib/email'
 import { buildEmailHtml, buildEmailText } from '@/lib/email-html'
 import { voegNotitieToe } from '@/lib/opdrachten-notities'
-import { kolomVan, statusVoorKolom, ontbreektVoorFase } from '@/lib/opdrachten-kanban'
-import type { OpdrachtStatus } from '@/lib/opdrachten'
+import { kaartVoorOfferte, ruimKaartVanConceptOp } from '@/lib/opdrachten-offertes'
 import { toestelVan } from '@/lib/klant-geopend'
 import {
   OFFERTE_BUCKET, geldigOffertePad, geldigSjabloonPad, veiligePdfNaam, offerteLink, valideerOfferte,
@@ -155,6 +154,11 @@ export async function maakOfferte(admin: Admin, b: Record<string, unknown>, door
   }).select('*').single()
   if (error) throw new Error(error.message)
   await log(admin, id, 'aangemaakt', { meta: { door: door.email, sjabloon: w.sjabloon_id } })
+  // Projecten: elke offerte hangt aan een kaart in Offerte gestuurd (die van het project, van de klant, of een nieuwe).
+  try {
+    const { opdrachtId } = await kaartVoorOfferte(admin, id, { id: door.userId, email: door.email, naam: null })
+    if (opdrachtId && opdrachtId !== (data as Offerte).opdracht_id) return { ...(data as Offerte), opdracht_id: opdrachtId }
+  } catch (e) { console.warn('[offertes] kaart voor offerte mislukt:', e instanceof Error ? e.message : e) }
   return data as Offerte
 }
 
@@ -183,27 +187,11 @@ export async function markeerVerstuurd(admin: Admin, o: Offerte, m: { aan: strin
     status: o.status === 'concept' ? 'verstuurd' : o.status, verstuurd_op: nu(), ontvanger_email: m.aan, email_message_id: m.logId, updated_at: nu(),
   }).eq('id', o.id)
   await log(admin, o.id, eerste ? 'verstuurd' : 'opnieuw_verstuurd', { meta: { aan: m.aan, door: m.door.email } })
-  if (!o.opdracht_id) return
   const auteur = { id: m.door.id, email: m.door.email, naam: m.door.naam }
-  const { data: kaart } = await admin.from('opdrachten').select('id, status, client_id, klant_vrij, diensten, btw_nummer').eq('id', o.opdracht_id).maybeSingle()
-  if (!kaart) return
-  const k = kaart as { id: string; status: OpdrachtStatus; client_id: string | null; klant_vrij: string | null; diensten: string[] | null; btw_nummer: string | null }
-  const tekst = `Offerte "${o.titel}" ${eerste ? 'verstuurd' : 'opnieuw verstuurd'} naar ${m.aan}.`
-  if (kolomVan(k.status) !== 'potentieel') { await voegNotitieToe(admin, k.id, tekst, 'systeem', auteur).catch(() => null); return }
-  let naam = k.klant_vrij, btw = k.btw_nummer
-  if (k.client_id) {
-    const { data: c } = await admin.from('clients').select('company_name, btw_nummer').eq('id', k.client_id).maybeSingle()
-    naam = (c as { company_name?: string | null } | null)?.company_name ?? naam
-    btw = (c as { btw_nummer?: string | null } | null)?.btw_nummer ?? btw
-  }
-  const mist = ontbreektVoorFase('offerte', { naam, btw, diensten: k.diensten ?? [] })
-  if (mist.length) {
-    await voegNotitieToe(admin, k.id, `${tekst} De kaart blijft in Opvolging tot ${mist.join(', ')} ingevuld ${mist.length === 1 ? 'is' : 'zijn'}.`, 'systeem', auteur).catch(() => null)
-    return
-  }
-  const doel = statusVoorKolom(k.status, 'offerte')
-  const { error } = await admin.from('opdrachten').update({ status: doel, offerte_via: 'mail', offerte_op: vandaagBrussel(), status_bron: 'handmatig', status_gewijzigd_op: nu(), updated_at: nu() }).eq('id', k.id).eq('status', k.status)
-  await voegNotitieToe(admin, k.id, error ? tekst : `${tekst} De kaart staat nu in Offerte gestuurd.`, 'systeem', auteur).catch(() => null)
+  // De kaart staat (of komt) in Offerte gestuurd; zonder project krijgt de offerte er een.
+  let opdrachtId = o.opdracht_id
+  try { opdrachtId = (await kaartVoorOfferte(admin, o.id, auteur)).opdrachtId } catch (e) { console.warn('[offertes] kaart voor offerte mislukt:', e instanceof Error ? e.message : e) }
+  if (opdrachtId) await voegNotitieToe(admin, opdrachtId, `Offerte "${o.titel}" ${eerste ? 'verstuurd' : 'opnieuw verstuurd'} naar ${m.aan}.`, 'systeem', auteur).catch(() => null)
 }
 
 export async function trekIn(admin: Admin, id: string, door: string | null): Promise<void> {
@@ -221,6 +209,8 @@ export async function verwijderConcept(admin: Admin, id: string): Promise<void> 
   const { error } = await admin.from('offertes').delete().eq('id', id)
   if (error) throw new Error(error.message)
   if (geldigOffertePad(o.pdf_pad)) await admin.storage.from(OFFERTE_BUCKET).remove([o.pdf_pad]).catch(() => {})
+  // De kaart die de app voor dit concept maakte, gaat mee als er niets anders aan hangt.
+  await ruimKaartVanConceptOp(admin, id, o.opdracht_id).catch(() => {})
 }
 
 // ── Publiek (de klant) ───────────────────────────────────────────────────────
