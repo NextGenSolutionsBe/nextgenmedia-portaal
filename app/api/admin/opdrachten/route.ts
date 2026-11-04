@@ -1,5 +1,4 @@
 import { safeMessage } from '@/lib/api-error'
-import { leesVerantwoordelijken, naamOfNull } from '@/lib/verkoop/verantwoordelijken'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import {
@@ -10,7 +9,7 @@ import { canonicalStatus, statusInfo as contractStatusInfo } from '@/lib/contrac
 import { logAudit, requestMeta } from '@/lib/audit'
 import { zorgVoorContractKaarten } from '@/lib/opdrachten-contracten'
 import {
-  automatischeStatus, facturatieVan, kolomVan, verplaatsTekst, normaliseerDiensten, normaliseerVia, isBron, bronUitLead,
+  automatischeStatus, facturatieVan, kolomVan, verplaatsTekst, normaliseerDiensten, normaliseerVia, isBron, bronUitLead, PROJECT_VERANTWOORDELIJKEN, projectVerantwoordelijke,
   isBedrijf, bedrijfVan, normaliseerBtw, ontbreektVoorFase,
   type Facturatie,
 } from '@/lib/opdrachten-kanban'
@@ -120,15 +119,15 @@ async function laadKoppelingen(admin: Admin, rijen: Rij[]): Promise<Map<string, 
   if (contractIds.length === 0 && invoiceIds.length === 0) return uit
 
   const [{ data: contracten }, { data: perContract }, { data: los }, { data: opdrachtRijen }] = await Promise.all([
-    contractIds.length ? admin.from('contracts').select('id, title, status').in('id', contractIds) : { data: [] },
+    contractIds.length ? leesContracten(admin, contractIds) : { data: [] },
     contractIds.length ? admin.from('invoices').select('id, status, invoice_date, amount_incl, amount_excl, description, contract_id').in('contract_id', contractIds) : { data: [] },
     invoiceIds.length ? admin.from('invoices').select('id, status, invoice_date, amount_incl, amount_excl, description, contract_id').in('id', invoiceIds) : { data: [] },
     contractIds.length ? admin.from('contract_facturatie_opdrachten').select('contract_id, status, factuurdatum').in('contract_id', contractIds).in('status', ['open', 'controle_vereist']) : { data: [] },
   ])
   const contractVan = new Map<string, ContractKoppeling>()
-  for (const c of (contracten ?? []) as { id: string; title: string | null; status: string | null }[]) {
+  for (const c of (contracten ?? []) as { id: string; title: string | null; status: string | null; klant_geopend_op?: string | null }[]) {
     const key = canonicalStatus(c.status)
-    contractVan.set(c.id, { id: c.id, title: c.title, status: key, label: contractStatusInfo(c.status).label })
+    contractVan.set(c.id, { id: c.id, title: c.title, status: key, label: contractStatusInfo(c.status).label, klant_geopend_op: c.klant_geopend_op ?? null })
   }
   type F = FactuurKoppeling & { contract_id: string | null }
   const facturenPerContract = new Map<string, F[]>()
@@ -161,6 +160,13 @@ async function laadKoppelingen(admin: Admin, rijen: Rij[]): Promise<Map<string, 
 }
 
 // GET — alle opdrachten met klantnaam, koppelingen en (automatisch bijgewerkte) status.
+/** Contracten voor de kaarten, met de datum waarop de klant opende (vóór de migratie zonder). */
+async function leesContracten(admin: Admin, ids: string[]): Promise<{ data: unknown[] | null }> {
+  const met = await admin.from('contracts').select('id, title, status, klant_geopend_op').in('id', ids)
+  if (!met.error) return met
+  return admin.from('contracts').select('id, title, status').in('id', ids)
+}
+
 export async function GET() {
   try {
     const ik = await requireStaff()
@@ -239,7 +245,8 @@ export async function GET() {
         waarde: w.waarde,
         waarde_bron: w.bron,
         kolom: kolomVan(status),
-        diensten: Array.isArray(o.diensten) ? o.diensten : [],
+        // Samengevoegde diensten: oude sleutels (branding, meta_ads, google_ads) tonen als de nieuwe.
+        diensten: normaliseerDiensten(Array.isArray(o.diensten) ? o.diensten : []),
         // Btw: van de klant als die gekoppeld is, anders wat op de kaart staat (prospect).
         btw: (o.client_id ? btwVan.get(String(o.client_id)) : null) || (o.btw_nummer as string | null | undefined) || null,
         merk: bedrijfVan(o.merk as string | null | undefined, Array.isArray(o.diensten) ? o.diensten as string[] : []),
@@ -256,7 +263,7 @@ export async function GET() {
     const facturen = ((factuurRijen ?? []) as { id: string; description: string | null; status: string; invoice_date: string | null; client_id: string | null; contract_id: string | null; amount_incl: number | null }[])
       .map((f) => ({ ...f, klant_naam: f.client_id ? naamVan.get(f.client_id) ?? null : null }))
 
-    return NextResponse.json({ opdrachten, klanten, contracten, facturen, verantwoordelijken: await leesVerantwoordelijken(), ik: ik.id })
+    return NextResponse.json({ opdrachten, klanten, contracten, facturen, verantwoordelijken: [...PROJECT_VERANTWOORDELIJKEN], ik: ik.id })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
@@ -387,7 +394,7 @@ export async function POST(req: NextRequest) {
       titel,
       omschrijving: tekst(b.omschrijving, 4000),
       status,
-      verantwoordelijke: naamOfNull(b.verantwoordelijke),
+      verantwoordelijke: projectVerantwoordelijke(b.verantwoordelijke),
       aangemaakt_door_email: actor.email ?? null,
       status_bron: 'handmatig',
       status_gewijzigd_op: new Date().toISOString(),
@@ -403,11 +410,8 @@ export async function POST(req: NextRequest) {
     })
     if (verplicht) return NextResponse.json({ error: verplicht, verplicht: true }, { status: 400 })
     if (clientId) rij.btw_nummer = null
-    // Geen verantwoordelijke gekozen? Dan die van de klant ("klant van").
-    if (!rij.verantwoordelijke && clientId) {
-      const { data: k } = await admin.from('clients').select('sales_verantwoordelijke').eq('id', clientId).maybeSingle()
-      rij.verantwoordelijke = (k as { sales_verantwoordelijke?: string | null } | null)?.sales_verantwoordelijke ?? null
-    }
+    // Verplicht: Marco, Bram of een gezamenlijke lead.
+    if (!rij.verantwoordelijke) return NextResponse.json({ error: 'Kies een verantwoordelijke: Marco, Bram of gezamenlijke lead.', verplicht: true }, { status: 400 })
 
     const { data, error } = await schrijf((p) => admin.from('opdrachten').insert(p).select('id').single(), rij)
     if (error) {
@@ -449,7 +453,11 @@ export async function PATCH(req: NextRequest) {
       patch.titel = t
     }
     if ('omschrijving' in b) patch.omschrijving = tekst(b.omschrijving, 4000)
-    if ('verantwoordelijke' in b) patch.verantwoordelijke = naamOfNull(b.verantwoordelijke)
+    if ('verantwoordelijke' in b) {
+      const v = projectVerantwoordelijke(b.verantwoordelijke)
+      if (!v) return NextResponse.json({ error: 'Kies een verantwoordelijke: Marco, Bram of gezamenlijke lead.' }, { status: 400 })
+      patch.verantwoordelijke = v
+    }
     if ('client_id' in b) {
       if (b.client_id) {
         const { data: k } = await admin.from('clients').select('id').eq('id', String(b.client_id)).maybeSingle()

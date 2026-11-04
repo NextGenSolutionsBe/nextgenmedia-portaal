@@ -60,6 +60,7 @@ async function getContracts() {
       service_slug: c.service_slug ?? null,
       signed_at: c.signed_at ?? null,
       sent_at: c.sent_at ?? null,
+      klant_geopend_op: c.klant_geopend_op ?? null,
       created_at: c.created_at,
       expires_at: c.expires_at ?? null,
       // start/end bestaan mogelijk niet op een oudere tabel → altijd null-safe.

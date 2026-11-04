@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { safeMessage } from '@/lib/api-error'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
-import { normaliseerDiensten, isBron } from '@/lib/opdrachten-kanban'
+import { normaliseerDiensten, isBron, projectVerantwoordelijke } from '@/lib/opdrachten-kanban'
 import { logAudit, requestMeta } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * POST { items: [{ id, diensten?, bron? }] } — kaarten in één keer aanvullen
- * (dienst en bron), na nakijken in het venster "Kaarten aanvullen". Enkel wat
+ * POST { items: [{ id, diensten?, verantwoordelijke?, bron? }] } — kaarten in één keer aanvullen
+ * (dienst en verantwoordelijke), na nakijken in het venster "Kaarten aanvullen". Enkel wat
  * meegestuurd wordt verandert; status en koppelingen blijven ongemoeid.
  */
 export async function POST(req: NextRequest) {
@@ -28,6 +28,7 @@ export async function POST(req: NextRequest) {
       const patch: Record<string, unknown> = { updated_at: nu }
       if ('diensten' in it) patch.diensten = normaliseerDiensten(it.diensten)
       if ('bron' in it) { if (it.bron && !isBron(it.bron)) continue; patch.bron = it.bron || null }
+      if ('verantwoordelijke' in it) { const v = projectVerantwoordelijke(it.verantwoordelijke); if (!v) continue; patch.verantwoordelijke = v }
       if (Object.keys(patch).length === 1) continue
       const { error } = await admin.from('opdrachten').update(patch).eq('id', id)
       if (error) fouten.push(error.message); else gelukt++
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
     const meta = requestMeta(req)
     await logAudit({
       action: 'opdracht.aanvullen', entityType: 'opdracht', entityId: null,
-      summary: `${gelukt} opdracht${gelukt === 1 ? '' : 'en'} aangevuld (dienst/bron)`,
+      summary: `${gelukt} opdracht${gelukt === 1 ? '' : 'en'} aangevuld (dienst/verantwoordelijke)`,
       actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'admin', ip: meta.ip, userAgent: meta.userAgent,
     })
     return NextResponse.json({ ok: true, gelukt, mislukt: fouten.length })

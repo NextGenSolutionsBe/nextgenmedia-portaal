@@ -170,7 +170,7 @@ export const SERVICE_LABELS: Record<string, string> = {
   'webdesign': 'Website',
   'marketing-consultancy': 'Marketing Consultancy',
   'grafisch-ontwerp': 'Grafisch Ontwerp',
-  'ads': 'Google Advertising',
+  'ads': 'Advertising',
   'foto-video': 'Foto & Videografie',
 }
 

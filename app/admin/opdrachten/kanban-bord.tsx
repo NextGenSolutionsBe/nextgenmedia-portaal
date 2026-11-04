@@ -1,12 +1,13 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { MessageSquare, Plus, MoreHorizontal, Check, FileSignature, AlertCircle } from 'lucide-react'
+import { MessageSquare, Plus, MoreHorizontal, Check, FileSignature, AlertCircle, UserRound } from 'lucide-react'
 import {
-  KOLOMMEN, kolomVan, dienstInfo, kaartKleur, bronLabel, offerteViaLabel, dagenSinds, BEDRIJVEN,
+  KOLOMMEN, kolomVan, dienstInfo, kaartKleur, offerteViaLabel, dagenSinds, BEDRIJVEN, projectVerantwoordelijke,
   type KolomKey,
 } from '@/lib/opdrachten-kanban'
 import { formatEuro } from '@/lib/utils'
+import { geopendTekst } from '@/lib/klant-geopend'
 import { datumKort, type KaartOpdracht } from './types'
 
 const PER_KOLOM = 30
@@ -118,7 +119,14 @@ function Kaart({ o, sleept, menuOpen, onOpen, onMenu, onKolom, onDragStart, onDr
   const kolom = kolomVan(o.status)
   const dagen = dagenSinds(o.status_gewijzigd_op ?? o.created_at)
   const f = o.facturatie
-  const pct = f?.totaal ? Math.min(100, Math.round((f.gefactureerd / f.totaal) * 100)) : null
+  // Contractwaarde en wat er al gefactureerd is. Afgerond = de volledige waarde
+  // is gefactureerd (dat is net waarom de kaart vanzelf naar Afgerond ging).
+  const contractwaarde = f?.totaal ?? (o.waarde ?? null)
+  const gefactureerd = f?.gefactureerd ?? 0
+  const balk = contractwaarde ? Math.min(100, Math.round((gefactureerd / contractwaarde) * 100)) : (kolom === 'afgerond' && f?.volledig ? 100 : null)
+  const facturatieZichtbaar = (kolom === 'getekend' || kolom === 'uitvoering' || kolom === 'afgerond') && (gefactureerd > 0 || contractwaarde !== null)
+  const wie = projectVerantwoordelijke(o.verantwoordelijke)
+  const notitie = o.laatste_notitie?.tekst?.replace(/\s+/g, ' ').trim() ?? ''
   const diensten = o.diensten.map((d) => dienstInfo(d).label).join(', ')
   const bedrijf = o.merk && o.merk !== 'nextgenmedia' ? BEDRIJVEN.find((b) => b.key === o.merk)?.kort : null
   const stop = (e: React.SyntheticEvent) => e.stopPropagation()
@@ -154,18 +162,29 @@ function Kaart({ o, sleept, menuOpen, onOpen, onMenu, onKolom, onDragStart, onDr
           {o.contract && (kolom === 'contract' || kolom === 'getekend') && (
             <p className="mt-1 text-[11px] text-gray-500 flex items-center gap-1 min-w-0"><FileSignature className="h-3 w-3 shrink-0" /><span className="truncate">{o.contract.label ?? o.contract.status}</span></p>
           )}
-          {pct !== null && (kolom === 'getekend' || kolom === 'uitvoering') && (
-            <div className="mt-1.5 flex items-center gap-2" title={`${formatEuro(f!.gefactureerd)} van ${formatEuro(f!.totaal ?? 0)} gefactureerd`}>
-              <div className="h-1 flex-1 rounded-full bg-gray-100 overflow-hidden"><div className="h-full rounded-full bg-gray-800" style={{ width: `${pct}%` }} /></div>
-              <span className="text-[10px] text-gray-500 tabular-nums">{pct}%</span>
+          {o.contract && kolom === 'contract' && (
+            <p className={`text-[11px] ${o.contract.klant_geopend_op ? 'text-gray-600' : 'text-gray-400'}`}>{geopendTekst(o.contract.klant_geopend_op) ?? 'Nog niet geopend door de klant'}</p>
+          )}
+          {facturatieZichtbaar && (
+            <div className="mt-1.5" title={f?.totaal ? `${formatEuro(f.gefactureerd)} van ${formatEuro(f.totaal)} gefactureerd` : undefined}>
+              <div className="flex items-center justify-between gap-2 text-[10px] tabular-nums text-gray-500">
+                <span>Gefactureerd <b className="font-semibold text-gray-800">{formatEuro(gefactureerd)}</b></span>
+                {contractwaarde !== null && <span>van {formatEuro(contractwaarde)}</span>}
+              </div>
+              {balk !== null && (
+                <div className="mt-0.5 h-1 rounded-full bg-gray-100 overflow-hidden"><div className={`h-full rounded-full ${balk >= 100 ? 'bg-emerald-500' : 'bg-gray-800'}`} style={{ width: `${balk}%` }} /></div>
+              )}
             </div>
           )}
           {kolom === 'stopgezet' && o.stop_reden && <p className="mt-1 text-[11px] text-gray-500 line-clamp-1">{o.stop_reden}</p>}
+          {notitie && (
+            <p className="mt-1 text-[11px] text-gray-500 truncate" title={notitie}><MessageSquare className="inline h-3 w-3 -mt-px mr-1 text-gray-400" />{notitie}</p>
+          )}
           <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-gray-400 min-w-0">
             {bedrijf && <span className="rounded bg-gray-100 px-1 py-px text-gray-600 font-medium">{bedrijf}</span>}
-            {[o.bron ? bronLabel(o.bron) : null, o.verantwoordelijke].filter(Boolean).length > 0 && (
-              <span className="truncate">{[o.bron ? bronLabel(o.bron) : null, o.verantwoordelijke].filter(Boolean).join(' · ')}</span>
-            )}
+            {wie
+              ? <span className="truncate flex items-center gap-0.5 text-gray-600"><UserRound className="h-3 w-3 shrink-0" />{wie}</span>
+              : <span className="truncate text-amber-700">Geen verantwoordelijke</span>}
             <span className="ml-auto flex items-center gap-2 shrink-0">
               {!!o.notities_aantal && <span className="flex items-center gap-0.5"><MessageSquare className="h-3 w-3" />{o.notities_aantal}</span>}
               {dagen !== null && <span title="Zo lang in deze fase">{dagen === 0 ? 'vandaag' : `${dagen} d`}</span>}

@@ -51,9 +51,9 @@ const shoot = (extra: Record<string, unknown> = {}) => ({
 async function main() {
   console.log('\nAanvragen — diensten en consultancy\n')
 
-  await test('1. Catalogus: de 12 diensten en 14 consultancyopties zoals afgesproken', () => {
-    assert.deepEqual(DIENSTEN.map((d) => d.label), ['Social media management', 'Foto- en videografie', 'Content shoot', 'Grafisch ontwerp', 'Branding en rebranding', 'Websiteontwerp en -ontwikkeling', 'SEO', 'SEA en advertentiebeheer', 'E-mailmarketing', 'AI-automatisaties', 'Strategie en marketingadvies', 'Overige'])
-    assert.deepEqual(CONSULTANCY.map((d) => d.label), ['Strategische marketingconsultancy', 'AI-workshop', 'AI- en automatisatiescan', 'Performance marketing scan', 'Meta Ads- of Google Ads-scan', 'Workflow- en efficiëntiescan', 'Sales operations scan', 'Leadgeneratie- en salesfunnelanalyse', 'CRM- en opvolgingsprocesadvies', 'Website- en conversiescan', 'SEO-scan', 'Social media- en contentstrategie', 'Klantreis- en positioneringsadvies', 'Overige consultancy'])
+  await test('1. Catalogus: de 11 diensten en 14 consultancyopties (branding onder Grafisch ontwerp, Meta en Google onder Advertising)', () => {
+    assert.deepEqual(DIENSTEN.map((d) => d.label), ['Social media management', 'Foto- en videografie', 'Content shoot', 'Grafisch ontwerp', 'Websiteontwerp en -ontwikkeling', 'SEO', 'Advertising', 'E-mailmarketing', 'AI-automatisaties', 'Strategie en marketingadvies', 'Overige'])
+    assert.deepEqual(CONSULTANCY.map((d) => d.label), ['Strategische marketingconsultancy', 'AI-workshop', 'AI- en automatisatiescan', 'Performance marketing scan', 'Advertising-scan', 'Workflow- en efficiëntiescan', 'Sales operations scan', 'Leadgeneratie- en salesfunnelanalyse', 'CRM- en opvolgingsprocesadvies', 'Website- en conversiescan', 'SEO-scan', 'Social media- en contentstrategie', 'Klantreis- en positioneringsadvies', 'Overige consultancy'])
   })
 
   await test('2. Validatie: wat-vraag, verplichte velden per dienst, opties en webadres', () => {
@@ -86,13 +86,16 @@ async function main() {
     const lijst = tabellen.personeel as unknown as ExpertBron[]
     const namen = (soort: 'dienst' | 'consultancy', key: string) => relevanteExperts(lijst, vindType(soort, key)!).map((e) => e.voornaam)
     assert.deepEqual(namen('dienst', 'content_shoot'), ['Bram', 'Chiara'], 'student Alida staat niet als expert aan')
-    assert.deepEqual(namen('dienst', 'grafisch'), ['Senne'])
+    // Branding valt onder grafisch ontwerp: wie "branding" als expertise had, telt hier mee.
+    assert.deepEqual(namen('dienst', 'grafisch').sort(), ['Bram', 'Chiara', 'Senne'])
     assert.deepEqual(namen('dienst', 'sea').sort(), ['Bram', 'Marco', 'Pieter-Jan'])
     assert.deepEqual(namen('consultancy', 'ai_workshop'), ['Marco'])
     assert.deepEqual(namen('consultancy', 'seo_scan').sort(), ['Bram', 'Marco'])
     assert.equal(namen('dienst', 'overige').length, 5, 'Overige: iedereen die als expert aan staat')
     const r = relevanteExperts(lijst, vindType('dienst', 'branding')!)
-    assert.deepEqual(r.find((e) => e.voornaam === 'Bram')!.relevant, ['branding'], 'enkel de expertises die passen')
+    assert.equal(vindType('dienst', 'branding')!.key, 'grafisch', 'oude aanvragen voor branding horen bij grafisch ontwerp')
+    assert.deepEqual(r.find((e) => e.voornaam === 'Bram')!.relevant, ['grafisch'], 'enkel de expertises die passen')
+    assert.deepEqual(relevanteExperts(lijst, vindType('dienst', 'sea')!).find((e) => e.voornaam === 'Marco')!.relevant, ['advertising'], 'Google ads = advertising')
   })
 
   await test('5. Kies jouw expert: naam, foto, rollen en passende expertises; uitgezet of inactief verdwijnt meteen', async () => {

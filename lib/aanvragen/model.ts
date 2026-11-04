@@ -16,12 +16,10 @@ export const EXPERTISES = [
   { key: 'marketing', label: 'Marketing' },
   { key: 'foto_video', label: 'Foto- en videografie' },
   { key: 'sales', label: 'Sales optimisation' },
-  { key: 'branding', label: 'Branding' },
   { key: 'seo', label: 'SEO' },
-  { key: 'meta_ads', label: 'Meta Ads' },
+  { key: 'advertising', label: 'Advertising' },
   { key: 'ai', label: 'AI' },
   { key: 'websites', label: 'Websites' },
-  { key: 'google_ads', label: 'Google Ads' },
   { key: 'campagnes', label: 'Campagnes' },
   { key: 'performance', label: 'Performance marketing' },
   { key: 'grafisch', label: 'Grafisch ontwerp' },
@@ -30,6 +28,20 @@ export const EXPERTISES = [
 export type Expertise = (typeof EXPERTISES)[number]['key']
 export const expertiseLabel = (k: string): string => EXPERTISES.find((e) => e.key === k)?.label ?? k
 export const isExpertise = (k: unknown): k is Expertise => EXPERTISES.some((e) => e.key === k)
+
+/**
+ * Samengevoegd (4 nov 2026): branding valt onder grafisch ontwerp, Meta ads en
+ * Google ads onder advertising. Oude sleutels in Personeel tellen als de nieuwe.
+ */
+const EXPERTISE_ALIAS: Record<string, Expertise> = { branding: 'grafisch', meta_ads: 'advertising', google_ads: 'advertising' }
+export function normaliseerExpertises(lijst: unknown): Expertise[] {
+  const uit: Expertise[] = []
+  for (const k of Array.isArray(lijst) ? lijst : []) {
+    const e = EXPERTISE_ALIAS[String(k)] ?? k
+    if (isExpertise(e) && !uit.includes(e)) uit.push(e)
+  }
+  return uit
+}
 
 // ── Vragen per dienst of consultancy ─────────────────────────────────────────
 
@@ -84,22 +96,12 @@ export const DIENSTEN: AanvraagType[] = [
     locatie: 'verplicht',
   },
   {
-    key: 'grafisch', label: 'Grafisch ontwerp', uitleg: 'Flyers, brochures, visuals, banners en meer.',
-    expertises: ['grafisch'], watLabel: 'Wat moet er ontworpen worden?', watPlaceholder: 'Bv. een flyer A5 recto-verso voor onze opendeurdag.',
+    key: 'grafisch', label: 'Grafisch ontwerp', uitleg: 'Logo, huisstijl en (re)branding, maar ook flyers, brochures, visuals en banners.',
+    expertises: ['grafisch'], watLabel: 'Wat moet er ontworpen worden?', watPlaceholder: 'Bv. een nieuw logo en huisstijl, of een flyer A5 voor onze opendeurdag.',
     velden: [
-      { key: 'wat', label: 'Soort ontwerp', type: 'meerkeuze', opties: ['Flyer', 'Brochure', 'Social media visuals', 'Banner', 'Presentatie', 'Verpakking', 'Andere'] },
+      { key: 'wat', label: 'Soort ontwerp', type: 'meerkeuze', opties: ['Logo', 'Huisstijl of (re)branding', 'Flyer', 'Brochure', 'Social media visuals', 'Banner', 'Presentatie', 'Verpakking', 'Andere'] },
       { key: 'formaten', label: 'Formaten', type: 'tekst', placeholder: 'Bv. A5, 1080×1350 px' },
       { key: 'huisstijl', label: 'Is er een huisstijl?', type: 'keuze', opties: ['Ja', 'Deels', 'Nee'] },
-    ],
-    locatie: 'geen',
-  },
-  {
-    key: 'branding', label: 'Branding en rebranding', uitleg: 'Logo, huisstijl en de manier waarop jullie merk overkomt.',
-    expertises: ['branding', 'grafisch'], watLabel: 'Wat willen jullie bereiken met de (re)branding?', watPlaceholder: 'Bv. een frissere uitstraling die beter past bij onze nieuwe klanten.',
-    velden: [
-      { key: 'soort', label: 'Soort traject', type: 'keuze', opties: ['Nieuwe branding', 'Rebranding', 'Opfrissing'] },
-      { key: 'onderdelen', label: 'Wat hoort erbij?', type: 'meerkeuze', opties: ['Logo', 'Huisstijl', 'Brandbook', 'Tone of voice', 'Naam'] },
-      { key: 'website', label: 'Huidige website', type: 'url', placeholder: 'https://' },
     ],
     locatie: 'geen',
   },
@@ -125,8 +127,8 @@ export const DIENSTEN: AanvraagType[] = [
     locatie: 'geen',
   },
   {
-    key: 'sea', label: 'SEA en advertentiebeheer', uitleg: 'Advertenties op Google, Meta, LinkedIn of TikTok.',
-    expertises: ['google_ads', 'meta_ads', 'campagnes', 'performance'], watLabel: 'Wat willen jullie met advertenties bereiken?', watPlaceholder: 'Bv. meer offerteaanvragen voor onze renovatiediensten.',
+    key: 'sea', label: 'Advertising', uitleg: 'Advertenties op Google, Meta, LinkedIn of TikTok.',
+    expertises: ['advertising', 'campagnes', 'performance'], watLabel: 'Wat willen jullie met advertenties bereiken?', watPlaceholder: 'Bv. meer offerteaanvragen voor onze renovatiediensten.',
     velden: [
       { key: 'kanalen', label: 'Kanalen', type: 'meerkeuze', opties: ['Google Ads', 'Meta Ads', 'LinkedIn Ads', 'TikTok Ads'] },
       { key: 'doel', label: 'Doel', type: 'keuze', opties: ['Leads', 'Verkoop', 'Naamsbekendheid', 'Websiteverkeer'] },
@@ -179,14 +181,14 @@ const consult = (key: string, label: string, uitleg: string, expertises: Experti
 const WEBSITE: Veld = { key: 'website', label: 'Website', type: 'url', placeholder: 'https://', verplicht: true }
 
 export const CONSULTANCY: AanvraagType[] = [
-  consult('strategie', 'Strategische marketingconsultancy', 'Richting en prioriteiten voor jullie marketing.', ['marketing', 'branding', 'performance']),
+  consult('strategie', 'Strategische marketingconsultancy', 'Richting en prioriteiten voor jullie marketing.', ['marketing', 'performance']),
   consult('ai_workshop', 'AI-workshop', 'Met jullie team leren werken met AI-tools.', ['ai'], [
     { key: 'deelnemers', label: 'Hoeveel deelnemers?', type: 'tekst', placeholder: 'Bv. 8' },
     { key: 'niveau', label: 'Niveau', type: 'keuze', opties: ['Beginners', 'Gevorderd', 'Gemengd'] },
   ]),
   consult('ai_scan', 'AI- en automatisatiescan', 'Waar kan AI jullie tijd besparen?', ['ai']),
-  consult('performance_scan', 'Performance marketing scan', 'Een kritische blik op jullie campagnes en resultaten.', ['performance', 'campagnes', 'google_ads', 'meta_ads']),
-  consult('ads_scan', 'Meta Ads- of Google Ads-scan', 'Analyse van jullie advertentieaccount.', ['meta_ads', 'google_ads'], [
+  consult('performance_scan', 'Performance marketing scan', 'Een kritische blik op jullie campagnes en resultaten.', ['performance', 'campagnes', 'advertising']),
+  consult('ads_scan', 'Advertising-scan', 'Analyse van jullie advertentieaccount (Meta of Google).', ['advertising'], [
     { key: 'platform', label: 'Platform', type: 'meerkeuze', opties: ['Meta Ads', 'Google Ads'] },
   ]),
   consult('workflow_scan', 'Workflow- en efficiëntiescan', 'Waar verliezen jullie tijd in de dagelijkse werking?', ['ai', 'sales']),
@@ -196,7 +198,7 @@ export const CONSULTANCY: AanvraagType[] = [
   consult('website_conversie_scan', 'Website- en conversiescan', 'Waarom bezoekers niet (genoeg) contact opnemen.', ['websites', 'seo', 'performance'], [WEBSITE]),
   consult('seo_scan', 'SEO-scan', 'Hoe vindbaar jullie website vandaag is.', ['seo'], [WEBSITE]),
   consult('social_content_strategie', 'Social media- en contentstrategie', 'Welke content, op welk kanaal, voor wie.', ['social', 'marketing', 'foto_video']),
-  consult('klantreis_positionering', 'Klantreis- en positioneringsadvies', 'Hoe klanten jullie leren kennen en kiezen.', ['branding', 'marketing']),
+  consult('klantreis_positionering', 'Klantreis- en positioneringsadvies', 'Hoe klanten jullie leren kennen en kiezen.', ['marketing']),
   consult('overige', 'Overige consultancy', 'Een ander onderwerp? Leg het ons voor.', []),
 ]
 
@@ -209,7 +211,9 @@ export const FOUNDERS: AanvraagType[] = [{
 }]
 
 export const catalogus = (soort: AanvraagSoort): AanvraagType[] => (soort === 'dienst' ? DIENSTEN : soort === 'consultancy' ? CONSULTANCY : FOUNDERS)
-export const vindType = (soort: AanvraagSoort, key: unknown): AanvraagType | null => catalogus(soort).find((t) => t.key === key) ?? null
+// Oude aanvragen van de vroegere dienst "Branding en rebranding" horen nu bij Grafisch ontwerp.
+const TYPE_ALIAS: Record<string, string> = { branding: 'grafisch' }
+export const vindType = (soort: AanvraagSoort, key: unknown): AanvraagType | null => catalogus(soort).find((t) => t.key === (TYPE_ALIAS[String(key)] ?? key)) ?? null
 export const soortLabel = (s: AanvraagSoort): string => (s === 'dienst' ? 'Dienstenaanvraag' : s === 'consultancy' ? 'Consultancy aanvraag' : 'Founders aanvraag')
 export const nieuweAanvraagTitel = (s: AanvraagSoort): string => (s === 'dienst' ? 'Nieuwe dienstenaanvraag' : s === 'consultancy' ? 'Nieuwe consultancy aanvraag' : 'Nieuwe founders aanvraag')
 export const isSoort = (v: unknown): v is AanvraagSoort => v === 'dienst' || v === 'consultancy' || v === 'founders'
@@ -363,7 +367,7 @@ export function relevanteExperts<T extends ExpertBron>(lijst: T[], t: AanvraagTy
   return lijst
     .filter((p) => p.actief && p.expert_zichtbaar === true)
     .map((p) => {
-      const eigen = (p.expertises ?? []).filter(isExpertise)
+      const eigen = normaliseerExpertises(p.expertises)
       return { ...p, relevant: t.expertises.length ? eigen.filter((e) => t.expertises.includes(e)) : eigen }
     })
     .filter((p) => opties.iedereen || !t.expertises.length || p.relevant.length > 0)
