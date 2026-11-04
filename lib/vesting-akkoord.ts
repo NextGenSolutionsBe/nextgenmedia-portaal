@@ -12,7 +12,7 @@
  * het scherm (stand per contract).
  */
 
-import type { ContractBerekend, WamKost } from './vesting'
+import type { ContractBerekend, WamKost, WamRij } from './vesting'
 import { leesGetal } from './getal'
 
 export const VENNOTEN = ['marco', 'bram', 'chiara'] as const
@@ -54,7 +54,7 @@ export type KostSoort = (typeof KOST_SOORTEN)[number]['key']
 export const kostSoortLabel = (k: string): string => KOST_SOORTEN.find((s) => s.key === k)?.label ?? 'Andere'
 const isKostSoort = (v: unknown): v is KostSoort => KOST_SOORTEN.some((s) => s.key === v)
 
-export type KostLijn = { id: string; vesting_contract_id: string; soort: KostSoort; omschrijving: string | null; bedrag: number }
+export type KostLijn = { id: string; vesting_contract_id: string; soort: KostSoort; omschrijving: string | null; bedrag: number; verantwoording?: string | null }
 
 const rond = (x: number) => Math.round(x * 100) / 100
 
@@ -64,19 +64,82 @@ export function naarKostLijn(r: Record<string, unknown>): KostLijn {
     soort: isKostSoort(r.soort) ? r.soort : 'andere',
     omschrijving: typeof r.omschrijving === 'string' && r.omschrijving.trim() ? r.omschrijving.trim() : null,
     bedrag: Number.isFinite(Number(r.bedrag)) ? rond(Number(r.bedrag)) : 0,
+    verantwoording: typeof r.verantwoording === 'string' && r.verantwoording.trim() ? r.verantwoording.trim() : null,
   }
 }
 
 /** Een kostenlijn uit een verzoek: soort, omschrijving en een bedrag > 0 (excl. btw). */
-export function controleerKostLijn(b: { soort?: unknown; omschrijving?: unknown; bedrag?: unknown }):
-  { lijn: { soort: KostSoort; omschrijving: string | null; bedrag: number } } | { fout: string } {
+export function controleerKostLijn(b: { soort?: unknown; omschrijving?: unknown; bedrag?: unknown; verantwoording?: unknown }):
+  { lijn: { soort: KostSoort; omschrijving: string | null; bedrag: number; verantwoording: string | null } } | { fout: string } {
   const soort = isKostSoort(b.soort) ? b.soort : null
   if (!soort) return { fout: 'Kies wat voor kost het is.' }
   const omschrijving = typeof b.omschrijving === 'string' ? b.omschrijving.trim().slice(0, 200) || null : null
   const bedrag = leesGetal(b.bedrag)
   if (bedrag === null || bedrag <= 0) return { fout: 'Vul een bedrag in (excl. btw).' }
   if (bedrag > 10_000_000) return { fout: 'Dat bedrag is te groot.' }
-  return { lijn: { soort, omschrijving, bedrag: rond(bedrag) } }
+  const verantwoording = typeof b.verantwoording === 'string' ? b.verantwoording.trim().slice(0, 1000) || null : null
+  return { lijn: { soort, omschrijving, bedrag: rond(bedrag), verantwoording } }
+}
+
+// ── Inkomsten en algemene kosten (registraties) ─────────────────────────────
+
+/**
+ * Een inkomst of kost die niet uit een gewoon klantcontract komt, altijd met
+ * een verantwoording. Bv. Marco factureert zijn WAM-contracten voortaan via de
+ * BV: WAM wordt klant, de factuur gaat naar WAM en dat geld telt mee (zoals de
+ * WAM-afspraak: elke €5.000 = 1%, tot 5%). Een kost (bv. de afsluiting van
+ * WAM) gaat van Marco's totaal af. Nooit verwijderd, enkel geschrapt (ook
+ * daarvoor tekent iedereen).
+ */
+export type RegistratieSoort = 'inkomst' | 'kost'
+export type Registratie = {
+  id: string; soort: RegistratieSoort; datum: string; omschrijving: string; bedrag: number
+  verantwoording: string; referentie: string | null; geschrapt: boolean
+}
+
+export function naarRegistratie(r: Record<string, unknown>): Registratie {
+  return {
+    id: String(r.id), soort: r.soort === 'kost' ? 'kost' : 'inkomst',
+    datum: r.datum ? String(r.datum).slice(0, 10) : '',
+    omschrijving: String(r.omschrijving ?? '').trim(),
+    bedrag: Number.isFinite(Number(r.bedrag)) ? rond(Number(r.bedrag)) : 0,
+    verantwoording: String(r.verantwoording ?? '').trim(),
+    referentie: typeof r.referentie === 'string' && r.referentie.trim() ? r.referentie.trim() : null,
+    geschrapt: !!r.geschrapt_op,
+  }
+}
+
+/** Velden uit een verzoek: alles verplicht behalve de referentie (factuurnummer, contract …). */
+export function controleerRegistratie(b: { soort?: unknown; datum?: unknown; omschrijving?: unknown; bedrag?: unknown; verantwoording?: unknown; referentie?: unknown }, bijAanmaak = true):
+  { rij: Partial<Omit<Registratie, 'id' | 'geschrapt'>> } | { fout: string } {
+  const rij: Partial<Omit<Registratie, 'id' | 'geschrapt'>> = {}
+  if (bijAanmaak || b.soort !== undefined) {
+    if (b.soort !== 'inkomst' && b.soort !== 'kost') return { fout: 'Kies inkomst of kost.' }
+    rij.soort = b.soort
+  }
+  if (bijAanmaak || b.datum !== undefined) {
+    const d = typeof b.datum === 'string' ? b.datum.slice(0, 10) : ''
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !Number.isFinite(new Date(`${d}T12:00:00`).getTime())) return { fout: 'Vul de datum in.' }
+    rij.datum = d
+  }
+  if (bijAanmaak || b.omschrijving !== undefined) {
+    const o = typeof b.omschrijving === 'string' ? b.omschrijving.trim().slice(0, 200) : ''
+    if (o.length < 2) return { fout: 'Waarover gaat het? Vul een omschrijving in.' }
+    rij.omschrijving = o
+  }
+  if (bijAanmaak || b.bedrag !== undefined) {
+    const x = leesGetal(b.bedrag)
+    if (x === null || x <= 0) return { fout: 'Vul een bedrag in (excl. btw).' }
+    if (x > 10_000_000) return { fout: 'Dat bedrag is te groot.' }
+    rij.bedrag = rond(x)
+  }
+  if (bijAanmaak || b.verantwoording !== undefined) {
+    const v = typeof b.verantwoording === 'string' ? b.verantwoording.trim().slice(0, 2000) : ''
+    if (v.length < 5) return { fout: 'Geef een verantwoording: waarom telt dit mee?' }
+    rij.verantwoording = v
+  }
+  if (b.referentie !== undefined) rij.referentie = typeof b.referentie === 'string' ? b.referentie.trim().slice(0, 200) || null : null
+  return { rij }
 }
 
 export const somKosten = (lijnen: Pick<KostLijn, 'bedrag'>[]): number => rond(lijnen.reduce((s, l) => s + l.bedrag, 0))
@@ -89,7 +152,7 @@ export type ContractAkkoord = {
   nr: string
   contract: string | null
   contractwaarde: number | null
-  kosten: { soort: string; omschrijving: string | null; bedrag: number }[]
+  kosten: { soort: string; omschrijving: string | null; bedrag: number; verantwoording?: string | null }[]
   /** Wat er effectief afgetrokken wordt (de kostenlijnen, of meer als de facturen hogere directe kosten tonen). */
   kosten_totaal: number
   netto: number | null
@@ -104,8 +167,11 @@ export type ContractAkkoord = {
   /** Wat er voor Marco meetelt, in euro. */
   telt_mee: number
 }
-export type KostAkkoord = { soort: 'kost'; omschrijving: string; datum: string | null; bedrag: number }
-export type Akkoord = ContractAkkoord | KostAkkoord
+export type RegistratieAkkoord = {
+  soort: RegistratieSoort; omschrijving: string; datum: string; bedrag: number
+  verantwoording: string; referentie: string | null; geschrapt: boolean
+}
+export type Akkoord = ContractAkkoord | RegistratieAkkoord
 
 type ContractVoorAkkoord = Pick<ContractBerekend,
   'klant' | 'nr' | 'totaal' | 'kostenAftrek' | 'netto' | 'appointment_door_marco' | 'closed_door_marco' | 'factor' | 'status' | 'betaald_bij_stop' | 'opBetaaldBedrag'>
@@ -119,7 +185,7 @@ export function contractAkkoord(c: ContractVoorAkkoord, lijnen: KostLijn[], tite
     klant: c.klant.trim(), nr: c.nr, contract: titel?.trim() || null,
     contractwaarde: c.totaal === null ? null : rond(c.totaal),
     kosten: [...lijnen]
-      .map((l) => ({ soort: l.soort, omschrijving: l.omschrijving, bedrag: rond(l.bedrag) }))
+      .map((l) => ({ soort: l.soort, omschrijving: l.omschrijving, bedrag: rond(l.bedrag), ...(l.verantwoording ? { verantwoording: l.verantwoording } : {}) }))
       .sort((a, b) => a.soort.localeCompare(b.soort) || String(a.omschrijving ?? '').localeCompare(String(b.omschrijving ?? '')) || a.bedrag - b.bedrag),
     kosten_totaal: rond(c.kostenAftrek),
     netto: c.netto === null ? null : rond(c.netto),
@@ -130,8 +196,24 @@ export function contractAkkoord(c: ContractVoorAkkoord, lijnen: KostLijn[], tite
   }
 }
 
-export function kostAkkoord(k: WamKost): KostAkkoord {
-  return { soort: 'kost', omschrijving: k.omschrijving.trim(), datum: k.datum, bedrag: rond(k.bedrag) }
+export function registratieAkkoord(r: Registratie): RegistratieAkkoord {
+  return {
+    soort: r.soort, omschrijving: r.omschrijving, datum: r.datum, bedrag: rond(r.bedrag),
+    verantwoording: r.verantwoording, referentie: r.referentie, geschrapt: r.geschrapt,
+  }
+}
+
+/** Registraties in de vorm van de rekenkern: inkomsten tellen zoals WAM, kosten gaan van het totaal af. */
+export function registratiesVoorBerekening(lijst: Pick<Registratie, 'id' | 'soort' | 'datum' | 'omschrijving' | 'bedrag' | 'geschrapt'>[]): { inkomsten: WamRij[]; kosten: WamKost[] } {
+  const actief = lijst.filter((r) => !r.geschrapt && r.bedrag > 0)
+  return {
+    inkomsten: actief.filter((r) => r.soort === 'inkomst').map((r) => ({
+      id: r.id, nr: r.datum, klant: r.omschrijving, client_id: null, contractwaarde: r.bedrag, netto_ontvangen: r.bedrag,
+      status: 'voltooid', betalingen_op_schema: true, notitie: null,
+      start_datum: null, contract_maanden: null, bedrag_per_factuur: null, frequentie: null, btw_pct: 21, omschrijving: null,
+    })),
+    kosten: actief.filter((r) => r.soort === 'kost').map((r) => ({ id: r.id, datum: r.datum, omschrijving: r.omschrijving, bedrag: r.bedrag })),
+  }
 }
 
 /** Vaste tekstvorm (gesorteerde sleutels): twee keer dezelfde cijfers = exact dezelfde tekst. */
@@ -146,7 +228,7 @@ export function inhoudTekst(a: Akkoord): string {
 
 // ── De stand van de handtekeningen ──────────────────────────────────────────
 
-export type Onderwerp = 'contract' | 'kost'
+export type Onderwerp = 'contract' | 'kost' | 'inkomst'
 export type Handtekening = {
   id: string; onderwerp: Onderwerp; onderwerp_id: string; vennoot: Vennoot
   naam: string | null; getekend_op: string; inhoud_tekst: string
@@ -159,6 +241,8 @@ export type AkkoordStand = {
   getekend: number
   /** De inhoud waarvoor het laatst getekend werd, als die verschilt van nu. */
   vorige: string | null
+  /** De laatste versie die alle drie tekenden (getekend is getekend), met het moment waarop de derde tekende. */
+  laatsteVolledig: { tekst: string; op: string } | null
 }
 
 export function akkoordStand(huidig: string, handtekeningen: Handtekening[]): AkkoordStand {
@@ -174,7 +258,25 @@ export function akkoordStand(huidig: string, handtekeningen: Handtekening[]): Ak
     } else per[v] = { stand: 'open', op: null, naam: null }
   }
   const getekend = VENNOTEN.filter((v) => per[v].stand === 'getekend').length
-  return { per, volledig: getekend === VENNOTEN.length, getekend, vorige }
+  return { per, volledig: getekend === VENNOTEN.length, getekend, vorige, laatsteVolledig: laatsteVolledigeVersie(handtekeningen) }
+}
+
+/** Welke versie tekenden alle drie het laatst? Het moment = wanneer de laatste van de drie tekende. */
+export function laatsteVolledigeVersie(handtekeningen: Pick<Handtekening, 'vennoot' | 'getekend_op' | 'inhoud_tekst'>[]): { tekst: string; op: string } | null {
+  const per = new Map<string, Map<Vennoot, string>>()
+  for (const h of handtekeningen) {
+    const m = per.get(h.inhoud_tekst) ?? new Map<Vennoot, string>()
+    const al = m.get(h.vennoot)
+    if (!al || h.getekend_op < al) m.set(h.vennoot, h.getekend_op)
+    per.set(h.inhoud_tekst, m)
+  }
+  let beste: { tekst: string; op: string } | null = null
+  for (const [tekst, m] of Array.from(per.entries())) {
+    if (m.size < VENNOTEN.length) continue
+    const op = Array.from(m.values()).sort().pop()!
+    if (!beste || op > beste.op) beste = { tekst, op }
+  }
+  return beste
 }
 
 const eur = (n: number | null) => (n === null ? '—' : `€${n.toLocaleString('nl-BE', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`)
@@ -187,15 +289,19 @@ export function wijzigingen(vorigeTekst: string | null, huidig: Akkoord): string
   try { oud = JSON.parse(vorigeTekst) as Akkoord } catch { return ['De cijfers zijn gewijzigd.'] }
   if (oud.soort !== huidig.soort) return ['De cijfers zijn gewijzigd.']
   const uit: string[] = []
-  if (huidig.soort === 'kost' && oud.soort === 'kost') {
-    if (oud.bedrag !== huidig.bedrag) uit.push(`Bedrag ${eur(oud.bedrag)} → ${eur(huidig.bedrag)}`)
-    if (oud.omschrijving !== huidig.omschrijving) uit.push('Omschrijving aangepast')
-    if (oud.datum !== huidig.datum) uit.push('Datum aangepast')
+  if (huidig.soort !== 'contract' && oud.soort !== 'contract') {
+    const o = oud as RegistratieAkkoord
+    if (!!o.geschrapt !== huidig.geschrapt) uit.push(huidig.geschrapt ? 'Geschrapt' : 'Teruggezet')
+    if (o.bedrag !== huidig.bedrag) uit.push(`Bedrag ${eur(o.bedrag)} → ${eur(huidig.bedrag)}`)
+    if (o.omschrijving !== huidig.omschrijving) uit.push('Omschrijving aangepast')
+    if (o.datum !== huidig.datum) uit.push('Datum aangepast')
+    if ((o.verantwoording ?? '') !== huidig.verantwoording) uit.push('Verantwoording aangepast')
+    if ((o.referentie ?? null) !== huidig.referentie) uit.push('Referentie aangepast')
   }
   if (huidig.soort === 'contract' && oud.soort === 'contract') {
     if (oud.contractwaarde !== huidig.contractwaarde) uit.push(`Contractwaarde ${eur(oud.contractwaarde)} → ${eur(huidig.contractwaarde)}`)
     if (oud.kosten_totaal !== huidig.kosten_totaal) uit.push(`Kosten ${eur(oud.kosten_totaal)} → ${eur(huidig.kosten_totaal)}`)
-    else if (JSON.stringify(oud.kosten) !== JSON.stringify(huidig.kosten)) uit.push('Kostenlijnen aangepast')
+    else if (JSON.stringify(oud.kosten) !== JSON.stringify(huidig.kosten)) uit.push('Kostenlijnen of hun verantwoording aangepast')
     if (oud.afspraak !== huidig.afspraak) uit.push(`Afspraak door Marco: ${jaNee(oud.afspraak)} → ${jaNee(huidig.afspraak)}`)
     if (oud.closing !== huidig.closing) uit.push(`Closing door Marco: ${jaNee(oud.closing)} → ${jaNee(huidig.closing)}`)
     if (oud.deel_pct !== huidig.deel_pct && oud.afspraak === huidig.afspraak && oud.closing === huidig.closing) uit.push(`Deel van Marco ${oud.deel_pct}% → ${huidig.deel_pct}%`)
@@ -213,4 +319,17 @@ export function controleerHandtekening(v: unknown): string | null {
   if (!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(v)) return null
   if (v.length < 200 || v.length > 400_000) return null
   return v
+}
+
+/** Eén regel die zegt waarvoor getekend werd, voor het handtekeningenregister. */
+export function beschrijfAkkoord(a: Akkoord): string {
+  if (a.soort === 'contract') {
+    const kosten = a.kosten_totaal ? ` − ${eur(a.kosten_totaal)} kosten` : ''
+    const rol = [a.afspraak && 'afspraak', a.closing && 'closing'].filter(Boolean).join(' + ') || 'geen rol'
+    if (a.verloop === 'niet_betaler') return `${a.klant}: niet-betaler, telt voor €0`
+    if (a.verloop === 'stopgezet') return `${a.klant}: gestopt, ${eur(a.betaald_bij_stop)} betaald × ${a.deel_pct}% (${rol}) = ${eur(a.telt_mee)} telt mee`
+    return `${a.klant}: ${eur(a.contractwaarde)}${kosten} = ${eur(a.netto)} × ${a.deel_pct}% (${rol}) = ${eur(a.telt_mee)} telt mee`
+  }
+  const wat = a.soort === 'inkomst' ? 'Inkomst' : 'Kost'
+  return `${a.geschrapt ? 'Geschrapt: ' : ''}${wat} ${a.omschrijving}: ${a.soort === 'kost' ? '−' : ''}${eur(a.bedrag)}`
 }

@@ -7112,3 +7112,40 @@ SELECT 'vesting_vennoten', jsonb_build_object(
   'chiara', jsonb_build_object('naam', 'Chiara Walmagh', 'user_ids', COALESCE((SELECT jsonb_agg(id) FROM auth.users WHERE email = 'chiara@nextgenmedia.be'), '[]'::jsonb))
 ), now()
 WHERE NOT EXISTS (SELECT 1 FROM public.app_settings WHERE key = 'vesting_vennoten');
+
+-- ── Vesting: inkomsten en kosten registreren (4 nov 2026) ────────────────────
+-- Inkomsten via een andere weg (bv. WAM wordt klant van de BV) en algemene kosten, altijd met verantwoording.
+-- Nooit verwijderen: schrappen (geschrapt_op) en ook daarvoor tekent iedereen.
+CREATE TABLE IF NOT EXISTS public.vesting_registraties (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  soort text NOT NULL CHECK (soort IN ('inkomst', 'kost')),
+  datum date NOT NULL DEFAULT current_date,
+  omschrijving text NOT NULL,
+  bedrag numeric(12,2) NOT NULL CHECK (bedrag > 0),
+  verantwoording text,
+  referentie text,
+  geschrapt_op timestamptz,
+  geschrapt_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by_email text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by_email text
+);
+CREATE INDEX IF NOT EXISTS vesting_registraties_soort_idx ON public.vesting_registraties (soort, datum);
+ALTER TABLE public.vesting_registraties ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.vesting_registraties FROM anon, authenticated;
+-- De algemene kosten (afsluiting WAM) worden registraties, met hetzelfde id.
+INSERT INTO public.vesting_registraties (id, soort, datum, omschrijving, bedrag, verantwoording, created_at)
+SELECT id, 'kost', COALESCE(datum, current_date), omschrijving, bedrag, 'Afsluiting van WAM, de vorige zaak van Marco. Overgenomen uit de vorige Vesting.', created_at
+FROM public.vesting_wam_kosten
+WHERE bedrag > 0
+ON CONFLICT (id) DO NOTHING;
+-- Kostenlijnen per contract krijgen een verantwoording.
+ALTER TABLE public.vesting_kosten ADD COLUMN IF NOT EXISTS verantwoording text;
+ALTER TABLE public.vesting_kosten ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+-- Handtekeningen ook voor inkomsten.
+ALTER TABLE public.vesting_handtekeningen DROP CONSTRAINT IF EXISTS vesting_handtekeningen_onderwerp_check;
+ALTER TABLE public.vesting_handtekeningen ADD CONSTRAINT vesting_handtekeningen_onderwerp_check CHECK (onderwerp IN ('contract', 'kost', 'inkomst'));
+-- Eenmalig (live, 4 nov 2026, op vraag): de oude WAM-portefeuille, -termijnen en -kosten zijn
+-- bewaard in vesting_wam_backup_20261104, vesting_wam_termijnen_backup_20261104 en
+-- vesting_wam_kosten_backup_20261104 en daarna leeggemaakt. WAM loopt nu via registraties.

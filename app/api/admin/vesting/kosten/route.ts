@@ -76,3 +76,36 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: safeMessage(e, 'Verwijderen mislukt') }, { status: 500 })
   }
 }
+
+/** PATCH { id, soort?, omschrijving?, bedrag?, verantwoording? } — een kost achteraf aanpassen (iedereen tekent daarna opnieuw). */
+export async function PATCH(req: NextRequest) {
+  const actor = await requireAdmin()
+  if (!actor) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
+  try {
+    const b = (await req.json().catch(() => ({}))) as Record<string, unknown>
+    const id = typeof b.id === 'string' && UUID.test(b.id) ? b.id : null
+    if (!id) return NextResponse.json({ error: 'Ongeldige vraag.' }, { status: 400 })
+    const admin = createAdminSupabaseClient()
+    const { data: oud } = await admin.from('vesting_kosten').select('*').eq('id', id).maybeSingle()
+    if (!oud) return NextResponse.json({ error: 'Niet gevonden.' }, { status: 404 })
+    const o = oud as { vesting_contract_id: string; soort: string; omschrijving: string | null; bedrag: number; verantwoording: string | null }
+    const c = controleerKostLijn({
+      soort: b.soort ?? o.soort, omschrijving: b.omschrijving ?? o.omschrijving ?? '', bedrag: b.bedrag ?? o.bedrag,
+      verantwoording: b.verantwoording ?? o.verantwoording ?? '',
+    })
+    if ('fout' in c) return NextResponse.json({ error: c.fout }, { status: 400 })
+    const { error } = await admin.from('vesting_kosten').update({ ...c.lijn, updated_at: new Date().toISOString() }).eq('id', id)
+    if (error) throw new Error(error.message)
+    const som = await zetSom(admin, o.vesting_contract_id)
+    const meta = requestMeta(req)
+    await logAudit({
+      action: 'vesting.kost_aangepast', entityType: 'vesting_contract', entityId: o.vesting_contract_id,
+      summary: `Vesting: kost ${kostSoortLabel(c.lijn.soort)} €${o.bedrag} → €${c.lijn.bedrag} (totaal €${som})`,
+      actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'admin', ip: meta.ip, userAgent: meta.userAgent,
+    })
+    revalidatePath('/admin/vesting')
+    return NextResponse.json({ ok: true, som })
+  } catch (e) {
+    return NextResponse.json({ error: safeMessage(e, 'Bewaren mislukt') }, { status: 500 })
+  }
+}

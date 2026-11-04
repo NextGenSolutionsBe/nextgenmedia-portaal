@@ -1,22 +1,27 @@
 import 'server-only'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { directeKostenVoorContracten } from '@/lib/facturen/kosten-data'
-import { berekenVesting, factuurUitRij, leesInstellingen, type ContractTermijn, type GekoppeldeFactuur, type VestingOverzicht } from '@/lib/vesting'
-import { naarContract, naarKost, naarTermijn, naarWam } from '@/lib/vesting-rijen'
+import { berekenVesting, factuurUitRij, leesInstellingen, type Contract, type ContractTermijn, type GekoppeldeFactuur, type VestingOverzicht } from '@/lib/vesting'
+import { naarContract, naarKost, naarWam } from '@/lib/vesting-rijen'
 import { NIET_MEETELLEN_SLEUTEL, teBeoordelen, type KandidaatContract } from '@/lib/vesting-snel'
 import {
-  VENNOTEN_SLEUTEL, akkoordStand, contractAkkoord, inhoudTekst, kostAkkoord, leesVennoten, naarKostLijn, vennootVan, wijzigingen,
-  type Akkoord, type AkkoordStand, type Handtekening, type KostLijn, type Onderwerp, type Vennoot, type VennotenInstelling,
+  VENNOTEN_SLEUTEL, akkoordStand, contractAkkoord, inhoudTekst, leesVennoten, naarKostLijn, naarRegistratie, registratieAkkoord,
+  registratiesVoorBerekening, vennootVan, wijzigingen,
+  type Akkoord, type AkkoordStand, type ContractAkkoord, type Handtekening, type KostLijn, type Onderwerp, type Registratie,
+  type RegistratieAkkoord, type Vennoot, type VennotenInstelling,
 } from '@/lib/vesting-akkoord'
-import type { ContractWeergave, KostWeergave, VestingWeergave } from '@/lib/vesting-weergave'
+import type { ContractWeergave, RegistratieWeergave, VestingWeergave } from '@/lib/vesting-weergave'
 
 type Admin = ReturnType<typeof createAdminSupabaseClient>
 
 /**
  * Alle Vesting-data in één keer: de rijen, de berekening (lib/vesting.ts) en
- * per contract en algemene kost de cijfers waarvoor getekend wordt en wie al
- * tekende. Eén bron voor het scherm, het tekenen (controle dat iemand tekent
- * voor wat er nu staat) en de melding "wacht op jouw handtekening".
+ * per contract en registratie (inkomst of kost) de cijfers waarvoor getekend
+ * wordt en wie al tekende. Eén bron voor het scherm, het tekenen (controle dat
+ * iemand tekent voor wat er nu staat) en de melding "wacht op jouw handtekening".
+ *
+ * WAM loopt sinds 4 nov 2026 via registraties (inkomsten met verantwoording);
+ * de oude WAM-tabellen worden niet meer gelezen.
  */
 
 export type AkkoordInfo = { inhoud: Akkoord; tekst: string; stand: AkkoordStand; wijzigingen: string[] }
@@ -25,7 +30,9 @@ export type VestingData = {
   ruw: {
     instellingen: Record<string, unknown> | null
     contracten: Record<string, unknown>[]
+    /** Inkomsten in de vorm van WAM-rijen (voor de uitgebreide weergave en de export). */
     wam: Record<string, unknown>[]
+    /** Algemene kosten in de vorm van WAM-kosten. */
     kosten: Record<string, unknown>[]
     oud: Record<string, unknown>[]
     wamTermijnen: Record<string, unknown>[]
@@ -37,10 +44,12 @@ export type VestingData = {
     wamGekoppeld: string[]
   }
   v: VestingOverzicht
+  ctermijnen: ContractTermijn[]
   kostLijnen: KostLijn[]
+  registraties: Registratie[]
   vennoten: VennotenInstelling
   akkoordContract: Map<string, AkkoordInfo>
-  akkoordKost: Map<string, AkkoordInfo>
+  akkoordRegistratie: Map<string, AkkoordInfo>
   /** Contracten uit Contracten/Projecten die nog niet beoordeeld zijn (ook nog niet getekend). */
   kandidaten: KandidaatContract[]
   /** Bewust "telt niet mee". */
@@ -63,13 +72,11 @@ function naarKandidaat(r: Record<string, unknown>): KandidaatContract {
 }
 
 export async function laadVestingData(admin: Admin = createAdminSupabaseClient()): Promise<VestingData> {
-  const [inst, contracten, wam, kosten, oud, wamTermijnen, moduleContracten, klanten, contractTermijnen, kostLijnen, handtekeningen, instellingen] = await Promise.all([
+  const [inst, contracten, registratieRijen, oud, moduleContracten, klanten, contractTermijnen, kostLijnen, handtekeningen, instellingen] = await Promise.all([
     admin.from('vesting_instellingen').select('*').eq('id', 1).maybeSingle(),
     admin.from('vesting_contracten').select('*').order('ondertekend_op').order('nr'),
-    admin.from('vesting_wam').select('*').order('nr'),
-    admin.from('vesting_wam_kosten').select('*').order('datum'),
+    admin.from('vesting_registraties').select('*').order('datum').order('created_at'),
     admin.from('vesting_revenue').select('*').order('entry_date'),
-    admin.from('vesting_wam_termijnen').select('*').order('factuurdatum').order('volgnr'),
     admin.from('contracts').select('id, title, status, client_id, start_date, end_date, signed_at, service_slug, contract_waarde_excl, contract_waarde_voorstel, created_at, clients ( company_name )').order('created_at', { ascending: false }).limit(500),
     admin.from('clients').select('id, company_name, sales_verantwoordelijke, appointment_setter').order('company_name'),
     admin.from('vesting_contract_termijnen').select('*').order('factuurdatum').order('volgnr'),
@@ -114,9 +121,8 @@ export async function laadVestingData(admin: Admin = createAdminSupabaseClient()
     }
   } catch { /* enkel handmatige status */ }
 
-  const wamRijen = (wam.data ?? []) as Record<string, unknown>[]
-  const kostRijen = (kosten.data ?? []) as Record<string, unknown>[]
-  const wamTermijnRijen = (wamTermijnen.data ?? []) as Record<string, unknown>[]
+  const registraties = ((registratieRijen.data ?? []) as Record<string, unknown>[]).map(naarRegistratie)
+  const { inkomsten, kosten } = registratiesVoorBerekening(registraties)
   const contractTermijnRijen = (contractTermijnen.data ?? []) as Record<string, unknown>[]
   const ctermijnen: ContractTermijn[] = contractTermijnRijen.map((r) => ({
     id: String(r.id), contract_id: String(r.contract_id), volgnr: Number(r.volgnr) || 0, periode: String(r.periode ?? '').slice(0, 7),
@@ -125,10 +131,8 @@ export async function laadVestingData(admin: Admin = createAdminSupabaseClient()
     betaald_op: d(r.betaald_op), invoice_id: (r.invoice_id as string | null) ?? null, in_contract: r.in_contract !== false, notitie: (r.notitie as string | null) ?? null,
   }))
 
-  const v = berekenVesting(
-    contractRijen.map(naarContract), wamRijen.map(naarWam), kostRijen.map(naarKost), leesInstellingen((inst.data ?? null) as Record<string, unknown> | null),
-    wamTermijnRijen.map(naarTermijn), ctermijnen, facturen,
-  )
+  const instellingenWaarden = leesInstellingen((inst.data ?? null) as Record<string, unknown> | null)
+  const v = berekenVesting(contractRijen.map(naarContract), inkomsten, kosten, instellingenWaarden, [], ctermijnen, facturen)
 
   const lijnen = ((kostLijnen.data ?? []) as Record<string, unknown>[]).map(naarKostLijn)
   const tekeningen = ((handtekeningen.data ?? []) as Record<string, unknown>[]).map((h) => ({
@@ -144,11 +148,10 @@ export async function laadVestingData(admin: Admin = createAdminSupabaseClient()
     contractAkkoord(c, lijnen.filter((l) => l.vesting_contract_id === c.id), c.contract_id ? moduleTitel.get(c.contract_id)?.titel ?? null : null),
     'contract', c.id,
   )]))
-  const akkoordKost = new Map(kostRijen.map(naarKost).map((k) => [k.id, info(kostAkkoord(k), 'kost', k.id)]))
+  const akkoordRegistratie = new Map(registraties.map((r) => [r.id, info(registratieAkkoord(r), r.soort, r.id)]))
 
-  const wamGekoppeld = wamRijen.map((r) => r.contract_id).filter((x): x is string => typeof x === 'string' && !!x)
   const alle = module.map(naarKandidaat)
-  const inVesting = new Set([...contractRijen.map((r) => r.contract_id).filter((x): x is string => typeof x === 'string' && !!x), ...wamGekoppeld])
+  const inVesting = new Set(contractRijen.map((r) => r.contract_id).filter((x): x is string => typeof x === 'string' && !!x))
   const kandidaten = teBeoordelen(alle, inVesting, new Set(nietMeetellen), { ookNietGetekend: true })
   const nietSet = new Set(nietMeetellen)
   const nietMee = alle.filter((m) => nietSet.has(m.id))
@@ -156,20 +159,23 @@ export async function laadVestingData(admin: Admin = createAdminSupabaseClient()
   return {
     ruw: {
       instellingen: (inst.data ?? null) as Record<string, unknown> | null,
-      contracten: contractRijen, wam: wamRijen, kosten: kostRijen, oud: (oud.data ?? []) as Record<string, unknown>[],
-      wamTermijnen: wamTermijnRijen, contractTermijnen: contractTermijnRijen, moduleContracten: module,
+      contracten: contractRijen,
+      wam: inkomsten as unknown as Record<string, unknown>[],
+      kosten: kosten as unknown as Record<string, unknown>[],
+      oud: (oud.data ?? []) as Record<string, unknown>[],
+      wamTermijnen: [], contractTermijnen: contractTermijnRijen, moduleContracten: module,
       klanten: ((klanten.data ?? []) as { id: string; company_name: string | null; sales_verantwoordelijke?: string | null; appointment_setter?: string | null }[])
         .map((k) => ({ id: k.id, naam: k.company_name ?? '—', closer: k.sales_verantwoordelijke ?? null, setter: k.appointment_setter ?? null })),
-      facturen, nietMeetellen, wamGekoppeld,
+      facturen, nietMeetellen, wamGekoppeld: [],
     },
-    v, kostLijnen: lijnen, vennoten, akkoordContract, akkoordKost, kandidaten, nietMee, moduleTitel,
+    v, ctermijnen, kostLijnen: lijnen, registraties, vennoten, akkoordContract, akkoordRegistratie, kandidaten, nietMee, moduleTitel,
   }
 }
 
-/** Hoeveel contracten en kosten wachten op de handtekening van deze vennoot? */
-export function openVoor(data: Pick<VestingData, 'akkoordContract' | 'akkoordKost'>, vennoot: Vennoot): { contracten: number; kosten: number } {
+/** Hoeveel contracten en registraties wachten op de handtekening van deze vennoot? */
+export function openVoor(data: Pick<VestingData, 'akkoordContract' | 'akkoordRegistratie'>, vennoot: Vennoot): { contracten: number; registraties: number } {
   const open = (m: Map<string, AkkoordInfo>) => Array.from(m.values()).filter((a) => a.stand.per[vennoot].stand !== 'getekend').length
-  return { contracten: open(data.akkoordContract), kosten: open(data.akkoordKost) }
+  return { contracten: open(data.akkoordContract), registraties: open(data.akkoordRegistratie) }
 }
 
 /**
@@ -183,15 +189,14 @@ export async function vestingMeldingVoor(userId: string): Promise<{ id: string; 
   const vennoot = vennootVan(userId, leesVennoten((rij as { value?: unknown } | null)?.value))
   if (!vennoot) return []
   const data = await laadVestingData(admin)
-  const open = [
-    ...Array.from(data.akkoordContract.entries()).filter(([, a]) => a.stand.per[vennoot].stand !== 'getekend').map(([id, a]) => `${id}:${a.tekst.length}`),
-    ...Array.from(data.akkoordKost.entries()).filter(([, a]) => a.stand.per[vennoot].stand !== 'getekend').map(([id, a]) => `${id}:${a.tekst.length}`),
-  ]
+  const open = [...Array.from(data.akkoordContract.entries()), ...Array.from(data.akkoordRegistratie.entries())]
+    .filter(([, a]) => a.stand.per[vennoot].stand !== 'getekend')
+    .map(([id, a]) => `${id}:${a.tekst}`)
   if (!open.length) return []
   let h = 0
   for (const ch of open.sort().join('|')) h = (h * 31 + ch.charCodeAt(0)) >>> 0
-  const { contracten, kosten } = openVoor(data, vennoot)
-  const delen = [contracten ? `${contracten} ${contracten === 1 ? 'contract' : 'contracten'}` : '', kosten ? `${kosten} ${kosten === 1 ? 'kost' : 'kosten'}` : ''].filter(Boolean).join(' en ')
+  const { contracten, registraties } = openVoor(data, vennoot)
+  const delen = [contracten ? `${contracten} ${contracten === 1 ? 'contract' : 'contracten'}` : '', registraties ? `${registraties} ${registraties === 1 ? 'inkomst of kost' : 'inkomsten en kosten'}` : ''].filter(Boolean).join(' en ')
   return [{
     id: `vesting:${vennoot}:${h.toString(36)}`, kind: 'vesting', priority: 'high',
     title: `Vesting: ${delen} ${open.length === 1 ? 'wacht' : 'wachten'} op jouw handtekening`,
@@ -199,9 +204,42 @@ export async function vestingMeldingVoor(userId: string): Promise<{ id: string; 
   }]
 }
 
+/**
+ * Wat er getekend is, telt: per kaart de laatste versie die alle drie tekenden.
+ * Een contract telt met het bedrag uit die versie (aan het tarief van zijn
+ * ondertekeningsjaar), een registratie met haar bedrag (of niet, als ze toen
+ * geschrapt was). Kaarten die nog nooit door alle drie getekend werden, tellen niet.
+ */
+function getekendeStand(data: VestingData): VestingOverzicht {
+  const contracten: Contract[] = []
+  for (const rij of data.ruw.contracten) {
+    const c = naarContract(rij)
+    const laatste = data.akkoordContract.get(c.id)?.stand.laatsteVolledig
+    if (!laatste) continue
+    let a: ContractAkkoord
+    try { a = JSON.parse(laatste.tekst) as ContractAkkoord } catch { continue }
+    contracten.push({
+      ...c, facturatiemodel: 'eenmalig', handmatige_totaalwaarde: a.telt_mee, maandbedrag: null, duur_maanden: null,
+      uitgesloten_kosten: 0, directe_kosten_facturen: null, kostenstatus_facturen: null, toerekening_pct: 100,
+      status: 'actief', betaald_bij_stop: null,
+    })
+  }
+  const registraties: Registratie[] = []
+  for (const r of data.registraties) {
+    const laatste = data.akkoordRegistratie.get(r.id)?.stand.laatsteVolledig
+    if (!laatste) continue
+    let a: RegistratieAkkoord
+    try { a = JSON.parse(laatste.tekst) as RegistratieAkkoord } catch { continue }
+    registraties.push({ ...r, bedrag: a.bedrag, geschrapt: !!a.geschrapt, soort: a.soort })
+  }
+  const { inkomsten, kosten } = registratiesVoorBerekening(registraties)
+  return berekenVesting(contracten, inkomsten, kosten, data.v.instellingen, [], [], [])
+}
+
 /** Alles voor het nieuwe scherm, voor deze gebruiker. */
 export function naarWeergave(data: VestingData, userId: string | null): VestingWeergave {
   const { v } = data
+  const i = v.instellingen
   const contracten: ContractWeergave[] = v.contracten.map((c) => {
     const akkoord = data.akkoordContract.get(c.id)!
     return {
@@ -209,43 +247,45 @@ export function naarWeergave(data: VestingData, userId: string | null): VestingW
       titel: c.contract_id ? data.moduleTitel.get(c.contract_id)?.titel ?? null : null,
       contract_id: c.contract_id, ondertekend_op: c.ondertekend_op || null, wachtOpKlant: c.wachtOpKlant,
       facturatiemodel: c.facturatiemodel, maandbedrag: c.maandbedrag, duur: c.duur, totaal: c.totaal,
-      kostLijnen: data.kostLijnen.filter((l) => l.vesting_contract_id === c.id).map(({ id, soort, omschrijving, bedrag }) => ({ id, soort, omschrijving, bedrag })),
+      kostLijnen: data.kostLijnen.filter((l) => l.vesting_contract_id === c.id).map(({ id, soort, omschrijving, bedrag, verantwoording }) => ({ id, soort, omschrijving, bedrag, verantwoording: verantwoording ?? null })),
       kostenFacturen: c.directe_kosten_facturen ?? null, kostenAftrek: c.kostenAftrek, netto: c.netto,
       afspraak: c.appointment_door_marco, closing: c.closed_door_marco, toerekening_pct: c.toerekening_pct ?? null, factor: c.factor,
       teltMee: akkoord.inhoud.soort === 'contract' ? akkoord.inhoud.telt_mee : 0,
-      algemeneKostenAftrek: c.algemeneKostenAftrek, status: c.status,
+      algemeneKostenAftrek: c.algemeneKostenAftrek, teltVoorAandeel: c.teltVoorAandeel, status: c.status,
       telt: c.erkenning !== 'uitgesloten', definitief: c.erkenning === 'definitief', ruweVesting: c.ruweVesting,
+      schijven: { goedkoop: c.goedkopeSchijf, jaar: c.jaarschijf, regulierTarief: i.regulier_tarief, jaarTarief: c.tarief, jaar_label: c.jaar },
       akkoord,
     }
   })
   // Nieuwste bovenaan; wat de klant nog moet tekenen eerst.
   contracten.sort((a, b) => (b.ondertekend_op ?? '9999').localeCompare(a.ondertekend_op ?? '9999') || b.nr.localeCompare(a.nr, 'nl', { numeric: true }))
 
-  const kosten: KostWeergave[] = data.ruw.kosten.map(naarKost).map((k) => ({ ...k, akkoord: data.akkoordKost.get(k.id)! }))
+  const registraties: RegistratieWeergave[] = data.registraties
+    .map((r) => ({ ...r, akkoord: data.akkoordRegistratie.get(r.id)! }))
+    .sort((a, b) => Number(a.geschrapt) - Number(b.geschrapt) || b.datum.localeCompare(a.datum))
 
-  // Hetzelfde model, maar enkel met de contracten die alle drie tekenden.
-  const volledig = new Set(contracten.filter((c) => c.akkoord.stand.volledig).map((c) => c.id))
-  const vGetekend = berekenVesting(
-    data.ruw.contracten.map(naarContract).filter((c) => volledig.has(c.id)), data.ruw.wam.map(naarWam), data.ruw.kosten.map(naarKost),
-    v.instellingen, data.ruw.wamTermijnen.map(naarTermijn), [], data.ruw.facturen,
-  )
-
+  const g = getekendeStand(data)
   const vennoot = vennootVan(userId, data.vennoten)
-  const contractenAandeel = Math.max(0, v.marcoVoorlopig - v.wam.voorlopig)
+  const alleKaarten = [...contracten.map((c) => c.akkoord), ...registraties.map((r) => r.akkoord)]
+  const inkomstenActief = registraties.filter((r) => r.soort === 'inkomst' && !r.geschrapt)
   return {
     aandelen: {
-      marco: v.marcoVoorlopig, marcoDefinitief: v.marcoDefinitief, marcoGetekend: vGetekend.marcoVoorlopig,
-      bram: v.bram, chiara: v.chiara, maxMarco: v.instellingen.max_aandeel_marco,
+      marco: v.marcoVoorlopig, marcoDefinitief: v.marcoDefinitief, marcoGetekend: g.marcoVoorlopig, bramGetekend: g.bram,
+      bram: v.bram, chiara: v.chiara, maxMarco: i.max_aandeel_marco,
       meetellend: v.meetellendeWaarde,
-      wam: { ontvangen: v.wam.nettoOntvangen, aandeel: v.wam.voorlopig, bedragPerPct: v.instellingen.wam_bedrag_per_pct, max: v.instellingen.wam_max_aandeel },
-      contracten: { teltMee: contracten.filter((c) => c.telt).reduce((s, c) => s + c.teltMee, 0), aantal: contracten.length, aandeel: contractenAandeel },
+      wam: { ontvangen: v.wam.nettoOntvangen, aantal: inkomstenActief.length, aandeel: v.wam.voorlopig, bedragPerPct: i.wam_bedrag_per_pct, max: i.wam_max_aandeel },
+      contracten: { teltMee: contracten.filter((c) => c.telt).reduce((s, c) => s + c.teltMee, 0), aantal: contracten.filter((c) => c.telt).length, aandeel: Math.max(0, v.marcoVoorlopig - v.wam.voorlopig) },
       algemeneKosten: v.algemeneKosten,
       volgendeProcent: v.volgendeProcent,
-      getekend: { volledig: volledig.size, totaal: contracten.length },
+      getekend: { volledig: alleKaarten.filter((a) => a.stand.volledig).length, totaal: alleKaarten.length },
     },
-    contracten, kosten,
+    contracten, registraties,
     teBeoordelen: data.kandidaten, nietMee: data.nietMee, klanten: data.ruw.klanten,
     ik: { vennoot, naam: vennoot ? data.vennoten[vennoot].naam : null },
     vennoten: { marco: data.vennoten.marco.naam, bram: data.vennoten.bram.naam, chiara: data.vennoten.chiara.naam },
   }
 }
+
+/** De weergave voor de uitgebreide (oude) weergave en de export: dezelfde rijen. */
+export const naarWamRijen = (data: VestingData) => data.ruw.wam.map((r) => naarWam(r))
+export const naarAlgemeneKosten = (data: VestingData) => data.ruw.kosten.map((r) => naarKost(r))

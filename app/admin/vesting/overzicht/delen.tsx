@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { Check, Loader2, PenLine, RotateCcw, X } from 'lucide-react'
 import { HandtekeningVak } from '@/components/admin/handtekening-vak'
 import { VENNOTEN, type Vennoot } from '@/lib/vesting-akkoord'
-import type { AkkoordWeergave } from '@/lib/vesting-weergave'
+import type { AkkoordWeergave, ContractWeergave } from '@/lib/vesting-weergave'
 
 export const eur = (n: number | null | undefined, cent = false) =>
   n === null || n === undefined ? '—' : new Intl.NumberFormat('nl-BE', { style: 'currency', currency: 'EUR', minimumFractionDigits: cent ? 2 : 0, maximumFractionDigits: cent ? 2 : 0 }).format(n)
@@ -40,7 +40,7 @@ export function TekenStand({ akkoord, vennoten }: { akkoord: AkkoordWeergave; ve
   )
 }
 
-type OpgeslagenHandtekening = { id: string; vennoot: Vennoot; naam: string | null; email: string | null; getekend_op: string; inhoud_tekst: string; handtekening: string }
+type OpgeslagenHandtekening = { id: string; vennoot: Vennoot; naam: string | null; email: string | null; getekend_op: string; inhoud_tekst: string; handtekening: string; beschrijving: string }
 
 /**
  * Het akkoord onderaan een contract of kost: wie tekende (met de handtekening
@@ -48,7 +48,7 @@ type OpgeslagenHandtekening = { id: string; vennoot: Vennoot; naam: string | nul
  * niet tekende het tekenvak.
  */
 export function Akkoord({ onderwerp, id, akkoord, vennoten, ik, laatste, onLaatste, onGetekend, uitleg }: {
-  onderwerp: 'contract' | 'kost'
+  onderwerp: 'contract' | 'kost' | 'inkomst'
   id: string
   akkoord: AkkoordWeergave
   vennoten: Record<Vennoot, string>
@@ -125,6 +125,8 @@ export function Akkoord({ onderwerp, id, akkoord, vennoten, ik, laatste, onLaats
         })}
       </ul>
 
+      <Geschiedenis lijst={lijst} huidig={akkoord.tekst} vennoten={vennoten} />
+
       {ik && mijnStand !== 'getekend' && (
         <div className="mt-4 rounded-lg border border-gray-900 p-3 sm:p-4 space-y-3">
           <div className="flex items-center gap-2 text-sm font-semibold"><PenLine className="h-4 w-4" />Teken als {vennoten[ik]}</div>
@@ -142,6 +144,44 @@ export function Akkoord({ onderwerp, id, akkoord, vennoten, ik, laatste, onLaats
       )}
       {!ik && <p className="mt-3 text-xs text-gray-500">Enkel Marco, Bram en Chiara tekenen, elk met hun eigen account.</p>}
     </section>
+  )
+}
+
+/**
+ * Vorige versies van deze kaart, elk met waarvoor getekend werd en door wie
+ * (met de handtekening zelf). Getekend is getekend: niets verdwijnt hier.
+ */
+function Geschiedenis({ lijst, huidig, vennoten }: { lijst: OpgeslagenHandtekening[] | null; huidig: string; vennoten: Record<Vennoot, string> }) {
+  const [open, setOpen] = useState(false)
+  if (!lijst) return null
+  const versies = new Map<string, OpgeslagenHandtekening[]>()
+  for (const h of lijst) if (h.inhoud_tekst !== huidig) versies.set(h.inhoud_tekst, [...(versies.get(h.inhoud_tekst) ?? []), h])
+  if (!versies.size) return null
+  const rijen = Array.from(versies.values()).sort((a, b) => b[0].getekend_op.localeCompare(a[0].getekend_op))
+  return (
+    <div className="mt-3">
+      <button type="button" onClick={() => setOpen((x) => !x)} className="text-xs text-gray-500 hover:text-black underline-offset-2 hover:underline">
+        {open ? 'Verberg' : 'Toon'} eerdere versies ({rijen.length})
+      </button>
+      {open && (
+        <ol className="mt-2 space-y-2">
+          {rijen.map((h) => (
+            <li key={h[0].inhoud_tekst} className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+              <div className="text-xs text-gray-700">{h[0].beschrijving}</div>
+              <ul className="mt-2 space-y-1">
+                {h.map((x) => (
+                  <li key={x.id} className="flex items-center justify-between gap-2 text-[11px] text-gray-600">
+                    <span>{vennoten[x.vennoot]} · {tijdstip(x.getekend_op)}</span>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={x.handtekening} alt={`Handtekening ${vennoten[x.vennoot]}`} className="h-7 w-20 object-contain" />
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
   )
 }
 
@@ -194,4 +234,16 @@ export function Rekensom({ regels }: { regels: { label: string; waarde: string; 
       ))}
     </dl>
   )
+}
+
+/** "€1.500 ÷ €5.000 per procent = 0,30%" — hoe het percentage van één contract tot stand komt. */
+export function procentUitleg(c: Pick<ContractWeergave, 'teltVoorAandeel' | 'ruweVesting' | 'schijven' | 'algemeneKostenAftrek'>): string {
+  const { goedkoop, jaar, regulierTarief, jaarTarief } = c.schijven
+  const delen: string[] = []
+  if (goedkoop > 0.005) delen.push(`${eur(goedkoop)} ÷ ${eur(regulierTarief)} per procent`)
+  if (jaar > 0.005 && jaarTarief) delen.push(`${eur(jaar)} ÷ ${eur(jaarTarief)} per procent`)
+  if (!delen.length) return 'Dit contract levert geen aandeel op.'
+  const voor = c.algemeneKostenAftrek > 0 ? `Na ${eur(c.algemeneKostenAftrek)} algemene kosten telt ${eur(c.teltVoorAandeel)}. ` : ''
+  const tarief = goedkoop > 0.005 && jaar > 0.005 ? ' (deels aan het tarief tot 10%, deels aan het jaartarief)' : jaar > 0.005 ? ' (jaartarief: de eerste 10% zijn al bereikt)' : ' (tarief tot 10% in totaal)'
+  return `${voor}${delen.join(' + ')} = ${pct(c.ruweVesting, 2)}${tarief}.`
 }
