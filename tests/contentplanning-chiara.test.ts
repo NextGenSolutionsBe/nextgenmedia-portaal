@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import { leesCp, kalenderPuntGeldt, leesMeetingExtra, shootHerinnering, STANDAARD_CP } from '../lib/contentplanning/model'
 
-// Standaard: INN, SLL, J en K bij Meetings inplannen; twee vervolgstappen in reeks 1.
+// Standaard: INN · SLL · K · J als één rij bij Meetings inplannen (samen één klant); twee vervolgstappen in reeks 1.
 const cp = leesCp({})
-assert.deepEqual(cp.meeting_extra.map((e) => e.key), ['inn', 'sll', 'j', 'k'])
+assert.deepEqual(cp.meeting_extra.map((e) => [e.key, e.naam]), [['inn_sll_k_j', 'INN · SLL · K · J']])
 assert.deepEqual(cp.reeks_vervolg.map((t) => [t.key, t.reeks]), [['kalender_bram', 1], ['shootbriefing', 1]])
 assert.deepEqual(cp.meeting_verborgen, [])
 // Wat in de databank staat, gaat voor; onzin valt weg.

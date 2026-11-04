@@ -107,7 +107,7 @@ export type CpInstellingen = {
   bord_verborgen: string[]
   /** Meetings inplannen (reeks 3): klanten die niet in de lijst horen (bv. de eigen merken). */
   meeting_verborgen: string[]
-  /** Meetings inplannen: extra rijen zonder eigen socialmediadienst (INN, SLL, K, J). client_id = link naar de klantfiche, of null. */
+  /** Meetings inplannen: extra rijen zonder eigen socialmediadienst (INN · SLL · K · J, samen één klant). client_id = link naar de klantfiche, of null. */
   meeting_extra: MeetingExtra[]
   /** Vervolgstappen bij elke klant in een reeks (bv. reeks 1: kalender naar Bram, shootbriefing), afvinken per maand. */
   reeks_vervolg: KlantTaak[]
@@ -316,12 +316,8 @@ export const STANDAARD_CP: CpInstellingen = {
   ],
   bord_verborgen: [],
   meeting_verborgen: [],
-  meeting_extra: [
-    { key: 'inn', naam: 'INN · Inner Stance', client_id: null },
-    { key: 'sll', naam: 'SLL · Straight Line Leadership', client_id: null },
-    { key: 'j', naam: 'J · Johan', client_id: null },
-    { key: 'k', naam: 'K · Kristof', client_id: null },
-  ],
+  // INN, SLL, K en J zijn samen één klant: één rij.
+  meeting_extra: [{ key: 'inn_sll_k_j', naam: 'INN · SLL · K · J', client_id: null }],
   reeks_vervolg: [
     { key: 'kalender_bram', titel: 'Contentkalender doorgegeven aan Bram', reeks: 1 },
     { key: 'shootbriefing', titel: 'Shootbriefing opgesteld en naar de klant gestuurd', reeks: 1 },
