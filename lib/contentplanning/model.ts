@@ -319,8 +319,8 @@ export const STANDAARD_CP: CpInstellingen = {
   // INN, SLL, K en J zijn samen één klant: één rij.
   meeting_extra: [{ key: 'inn_sll_k_j', naam: 'INN · SLL · K · J', client_id: null }],
   reeks_vervolg: [
-    { key: 'kalender_bram', titel: 'Contentkalender doorgegeven aan Bram', reeks: 1 },
-    { key: 'shootbriefing', titel: 'Shootbriefing opgesteld en naar de klant gestuurd', reeks: 1 },
+    { key: 'kalender_bram', titel: 'Contentkalender genereren', reeks: 1 },
+    { key: 'shootbriefing', titel: 'Taak Bram: shootbriefing opstellen & doorsturen', reeks: 1 },
   ],
 }
 
