@@ -8,7 +8,7 @@ async function getData(clientId?: string) {
     const admin = createAdminSupabaseClient()
 
     // Fetch all clients AND their services separately — avoids FK join failures
-    const [{ data: allClients }, { data: socialServices }, { data: items }] = await Promise.all([
+    const [{ data: allClients }, { data: socialServices }, { data: items }, { data: contentClients }] = await Promise.all([
       admin.from('clients').select('id, company_name').order('company_name'),
       admin.from('client_services')
         .select('client_id')
@@ -23,10 +23,14 @@ async function getData(clientId?: string) {
           .select('*')
           .order('planned_date', { ascending: false })
           .limit(200),
+      // Klanten die al content hebben — zodat een klant met content NOOIT uit
+      // het keuzemenu valt (voorkomt "verdwenen" content).
+      admin.from('social_content_items').select('client_id'),
     ])
 
-    // Filter: only show clients that have an active social-media service
+    // Toon klanten met een actieve social-media-dienst ÓF met bestaande content.
     const socialClientIds = new Set((socialServices ?? []).map((s) => s.client_id))
+    for (const r of contentClients ?? []) if (r.client_id) socialClientIds.add(r.client_id)
     const clients = (allClients ?? []).filter((c) => socialClientIds.has(c.id))
 
     return { clients, items: items ?? [] }
@@ -46,7 +50,7 @@ export default async function SocialMediaPage({
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold">Social Media</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold">Social Media</h1>
         <p className="text-sm text-gray-500 mt-0.5">Beheer contentkalenders en scripts per klant</p>
       </div>
       <SocialMediaAdmin

@@ -1,3 +1,4 @@
+import { KaartTabel } from '@/components/ui/kaart-tabel'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { formatEuro } from '@/lib/utils'
 import { TrendingUp, Monitor } from 'lucide-react'
@@ -33,7 +34,7 @@ export default async function AdsAdminPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold">Google Advertising</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold">Google Advertising</h1>
         <p className="text-sm text-gray-500 mt-0.5">Overzicht van advertentiebudgetten per klant</p>
       </div>
 
@@ -65,7 +66,7 @@ export default async function AdsAdminPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <KaartTabel><table className="w-full text-sm">
               <thead>
                 <tr>
                   <th className="table-th">Klant</th>
@@ -91,7 +92,7 @@ export default async function AdsAdminPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></KaartTabel>
           </div>
         )}
       </div>

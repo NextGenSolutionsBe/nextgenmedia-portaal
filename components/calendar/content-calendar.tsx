@@ -1,11 +1,20 @@
 'use client'
 
-import { useMemo, useState, useCallback } from 'react'
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react'
 import {
   ChevronLeft, ChevronRight, X, Check, RefreshCw,
-  Send, Pencil, Save, Image, Video, FileText, Plus,
+  Send, Pencil, Save, Image, Video, FileText, Plus, MessageSquare, Palette, Trash2,
 } from 'lucide-react'
 import { ymd } from '@/lib/utils'
+import { planningkleur, nuInBrussel, PLANNING_STIJL, type Planningkleur } from '@/lib/content/planning-kleur'
+import { KANAAL_SLUGS, kanaalLabel, normaliseerKanalen, publicatieKanalen } from '@/lib/social-platforms'
+import { KanaalLabels } from './kanaal-labels'
+import {
+  magBewerken, magVerwijderen, statusOvergangen, magBeoordelen, overgangLabel, type KalenderRechten,
+} from '@/lib/content/kalender-rol'
+import {
+  FASES, KLEUREN, leegStijl, tekstOp, tinten, type ContentLabel, type FaseKey, type FaseKleuren, type KalenderStijl,
+} from '@/lib/content/kalender-stijl'
 
 export type SocialContentStatus =
   | 'draft' | 'ready_for_review' | 'approved'
@@ -26,17 +35,62 @@ export type SocialContentItem = {
   client_feedback: string | null
   reviewed_at: string | null
   created_at: string
+  /** Enkel in de admin geladen (aparte tabel); nooit in het portaal. */
+  interne_notitie?: string | null
+  /** De klant paste dit item zelf aan in het portaal. */
+  klant_gewijzigd_op?: string | null
+  klant_gewijzigd_door?: string | null
+  /** De klant plande dit item zelf in. */
+  klant_aangemaakt_op?: string | null
+  /** Tijdstip 'HH:MM' (optioneel). */
+  planned_time?: string | null
+  published_at?: string | null
+  published_url?: string | null
+  published_platform?: string | null
+  /** Eigen labels van deze klantkalender (ids uit content_labels). */
+  labels?: string[] | null
 }
+
+export type ContentActiviteit = { op: string; door: string | null; rol: 'klant' | 'nextgenmedia'; actie: string; details: Record<string, unknown> | null }
 
 export type CalendarMode = 'admin' | 'client'
 
 const STATUS_STYLE: Record<SocialContentStatus, { dot: string; badge: string; label: string }> = {
   draft: { dot: 'bg-gray-400', badge: 'bg-gray-100 text-gray-600 border-gray-200', label: 'Concept' },
-  ready_for_review: { dot: 'bg-amber-400', badge: 'bg-amber-50 text-amber-700 border-amber-200', label: 'Bij klant' },
+  ready_for_review: { dot: 'bg-amber-400', badge: 'bg-amber-50 text-amber-700 border-amber-200', label: 'Feedback gevraagd' },
   approved: { dot: 'bg-green-500', badge: 'bg-green-50 text-green-700 border-green-200', label: 'Goedgekeurd' },
-  changes_requested: { dot: 'bg-red-500', badge: 'bg-red-50 text-red-700 border-red-200', label: 'Feedback' },
+  changes_requested: { dot: 'bg-red-500', badge: 'bg-red-50 text-red-700 border-red-200', label: 'Aanpassing gevraagd' },
   scheduled: { dot: 'bg-blue-500', badge: 'bg-blue-50 text-blue-700 border-blue-200', label: 'Ingepland' },
   published: { dot: 'bg-purple-500', badge: 'bg-purple-50 text-purple-700 border-purple-200', label: 'Gepubliceerd' },
+}
+
+/** Eigen fasekleur van de klant, anders de vaste stijl. */
+function faseBadge(s: SocialContentStatus, kleuren: FaseKleuren): { className: string; style?: React.CSSProperties } {
+  const k = kleuren[s as FaseKey]
+  if (!k) return { className: STATUS_STYLE[s].badge }
+  const t = tinten(k)
+  return { className: '', style: { backgroundColor: t.achtergrond, borderColor: t.rand, color: t.tekst } }
+}
+function faseStip(s: SocialContentStatus, kleuren: FaseKleuren): { className: string; style?: React.CSSProperties } {
+  const k = kleuren[s as FaseKey]
+  return k ? { className: '', style: { backgroundColor: k } } : { className: STATUS_STYLE[s].dot }
+}
+
+/** Een label als klein gekleurd pilletje. */
+function LabelPil({ label, klein = false }: { label: ContentLabel; klein?: boolean }) {
+  return (
+    <span className={`${klein ? 'text-[9px] px-1' : 'text-[11px] px-1.5 py-0.5'} leading-tight rounded truncate max-w-full font-medium`}
+      style={{ backgroundColor: label.kleur, color: tekstOp(label.kleur) }}>{label.naam}</span>
+  )
+}
+
+/** Labels en fasekleuren van deze klantkalender (lib/content/kalender-stijl.ts). Klant en team zien dezelfde. */
+export type KalenderStijlBeheer = {
+  stijl: KalenderStijl
+  /** Labels en kleuren beheren en labels op posts zetten. Bekijken en filteren kan iedereen. */
+  magBeheren: boolean
+  /** Eén ingang naar de server: { actie, … } → { stijl?, labels? }. Gooit bij een fout (de melding komt van de handler). */
+  actie: (b: Record<string, unknown>) => Promise<{ stijl?: KalenderStijl; labels?: string[] }>
 }
 
 const TYPE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -57,33 +111,91 @@ function startOfMonthGrid(d: Date): Date {
 export type CalendarActions = {
   onUpdate?: (id: string, patch: Partial<SocialContentItem>) => Promise<void>
   onMove?: (id: string, planned_date: string) => Promise<void>
-  onSetStatus?: (id: string, status: SocialContentStatus) => Promise<void>
+  onSetStatus?: (id: string, status: SocialContentStatus, extra?: Record<string, unknown>) => Promise<void>
+  /** Activiteit van een item (wie, wanneer, wat) voor het detailpaneel. */
+  onLaadActiviteit?: (id: string) => Promise<ContentActiviteit[]>
   onDelete?: (id: string) => Promise<void>
   onCreateOnDay?: (planned_date: string) => void
   onApprove?: (id: string) => Promise<void>
   onRequestChanges?: (id: string, feedback: string) => Promise<void>
+  /** Opmerking bij een item (verandert niets aan inhoud of status); geeft de bijgewerkte activiteit terug. */
+  onOpmerking?: (id: string, tekst: string) => Promise<ContentActiviteit[]>
 }
 
+/** Zonder rechten (zou niet mogen gebeuren in het portaal): enkel kijken. */
+const ALLEEN_KIJKEN: KalenderRechten = { rol: 'bekijken', bekijken: true, opmerkingen: false, aanmaken: false, bewerkbaar: [], verwijderen: 'nooit', goedkeuren: [], afkeuren: [], overgangen: {}, startStatussen: [] }
+const tijdstip = (iso: string) => new Date(iso).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+const wie = (a: ContentActiviteit) => a.door ?? (a.rol === 'klant' ? 'Klant' : 'NextGenMedia')
+
 export function ContentCalendar({
-  items: itemsProp, mode, actions, selection,
+  items: itemsProp, mode, actions, selection, rechten, focus, stijlBeheer,
 }: {
   items: SocialContentItem[] | null
   mode: CalendarMode
   actions: CalendarActions
+  /** Eigen labels en fasekleuren van deze klant. */
+  stijlBeheer?: KalenderStijlBeheer
+  /** Portaal: wat deze klantgebruiker mag (lib/content/kalender-rol.ts). De server controleert hetzelfde. */
+  rechten?: KalenderRechten
+  /** Een item van buitenaf openen (overzicht "wacht op goedkeuring", link ?item=). `n` verhogen = opnieuw openen. */
+  focus?: { id: string; n: number } | null
   selection?: {
     enabled: boolean
     selectedIds: Set<string>
     onToggle: (id: string) => void
   }
 }) {
-  const items = itemsProp ?? []
+  const alleItems = itemsProp ?? []
+  // Labels en fasekleuren: lokaal bijgehouden na elke wijziging, opnieuw gezet als de klant wisselt.
+  const [stijl, setStijl] = useState<KalenderStijl>(stijlBeheer?.stijl ?? leegStijl)
+  useEffect(() => { setStijl(stijlBeheer?.stijl ?? leegStijl) }, [stijlBeheer?.stijl])
+  const [labelsVan, setLabelsVan] = useState<Record<string, string[]>>({})
+  const [filter, setFilter] = useState<string[]>([])
+  const [personaliseer, setPersonaliseer] = useState(false)
+  const magStijl = !!stijlBeheer?.magBeheren
+  const labelMap = useMemo(() => new Map(stijl.labels.map((l) => [l.id, l])), [stijl.labels])
+  const labelIds = useCallback((it: SocialContentItem) => (labelsVan[it.id] ?? it.labels ?? []).filter((id) => labelMap.has(id)), [labelsVan, labelMap])
+  const actieveFilter = filter.filter((id) => labelMap.has(id))
+  const items = actieveFilter.length ? alleItems.filter((it) => labelIds(it).some((id) => actieveFilter.includes(id))) : alleItems
+  const zetItemLabels = async (id: string, ids: string[]) => {
+    if (!stijlBeheer) return
+    const vorige = labelsVan[id]
+    setLabelsVan((m) => ({ ...m, [id]: ids }))
+    try {
+      const u = await stijlBeheer.actie({ actie: 'item_labels', item: id, labels: ids })
+      if (u.labels) setLabelsVan((m) => ({ ...m, [id]: u.labels! }))
+    } catch {
+      setLabelsVan((m) => { const n = { ...m }; if (vorige) n[id] = vorige; else delete n[id]; return n })
+    }
+  }
   const [cursor, setCursor] = useState(() => new Date())
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [view, setView] = useState<'month' | 'week'>('month')
+  // Gsm: de cellen zijn te smal voor titels; de gekozen dag staat daar als lijst onder de kalender.
+  const [dag, setDag] = useState<string | null>(() => ymd(new Date()))
+  // Kleuren op status (standaard) of op planning: oranje geplaatst · groen ingepland · wit nog niets. Onthouden per browser.
+  const [kleurOp, setKleurOp] = useState<'status' | 'planning'>('status')
+  useEffect(() => { try { const v = localStorage.getItem('ngm-kalender-kleur'); if (v === 'planning' || v === 'status') setKleurOp(v) } catch { /* geen opslag */ } }, [])
+  const kiesKleur = (v: 'status' | 'planning') => { setKleurOp(v); try { localStorage.setItem('ngm-kalender-kleur', v) } catch { /* geen opslag */ } }
+  const nu = useMemo(() => nuInBrussel(), [])
   const selectMode = !!selection?.enabled
 
-  const selected = items.find((i) => i.id === selectedId) ?? null
+  const selected = alleItems.find((i) => i.id === selectedId) ?? null
   const today = ymd(new Date())
+  const wortel = useRef<HTMLDivElement>(null)
+
+  // Van buitenaf geopend: naar de maand van het item, het item selecteren en in beeld brengen.
+  useEffect(() => {
+    if (!focus) return
+    const it = alleItems.find((i) => i.id === focus.id)
+    if (!it) return
+    setFilter([])
+    setView('month')
+    setCursor(new Date(`${it.planned_date}T12:00:00`))
+    setSelectedId(it.id)
+    setDag(it.planned_date)
+    wortel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [focus?.id, focus?.n]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const days = useMemo(() => {
     const start = view === 'month'
@@ -117,27 +229,93 @@ export function ContentCalendar({
     if (view === 'month') d.setMonth(d.getMonth() + delta)
     else d.setDate(d.getDate() + delta * 7)
     setCursor(d)
+    setDag(null)
   }
 
   const onDrop = async (e: React.DragEvent, dayStr: string) => {
     if (mode !== 'admin') return
     e.preventDefault()
     const id = e.dataTransfer.getData('text/plain')
-    if (id && actions.onMove) await actions.onMove(id, dayStr)
+    if (id && actions.onMove) { try { await actions.onMove(id, dayStr) } catch { /* melding komt van de handler */ } }
+  }
+
+  const itemKnop = (it: SocialContentItem, lijst = false) => {
+    const Icon = TYPE_ICONS[it.content_type] ?? FileText
+    const style = STATUS_STYLE[it.status]
+    const plan: Planningkleur = planningkleur(it, nu)
+    const fase = faseBadge(it.status, stijl.faseKleuren)
+    const badge = kleurOp === 'planning' ? PLANNING_STIJL[plan].badge : fase.className
+    const stip = faseStip(it.status, stijl.faseKleuren)
+    const lbls = labelIds(it).map((id) => labelMap.get(id)!)
+    const isChecked = selection?.selectedIds.has(it.id) ?? false
+    // Adminkalender: op welke platformen dit item verschijnt, als kleine labels.
+    const kanalen = mode === 'admin' ? (it.platforms?.length ? it.platforms : [it.platform]) : null
+    const kanaalTekst = kanalen ? publicatieKanalen(kanalen).map((k) => k.label).join(', ') : ''
+    return (
+      <button
+        key={it.id}
+        type="button"
+        draggable={!lijst && !!actions.onMove && !selectMode}
+        onDragStart={(e) => e.dataTransfer.setData('text/plain', it.id)}
+        onClick={() => {
+          if (selectMode) {
+            selection?.onToggle(it.id)
+          } else {
+            setSelectedId(it.id === selectedId ? null : it.id)
+            // Gsm: het scriptpaneel staat boven de kalender, dus daarheen scrollen.
+            if (lijst && it.id !== selectedId) wortel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }
+        }}
+        style={kleurOp === 'planning' ? undefined : fase.style}
+        className={`text-left ${lijst ? 'text-sm px-2.5 py-2' : 'text-[11px] px-1.5 py-1'} rounded border ${badge}
+          hover:opacity-80 transition flex flex-col gap-0.5 w-full min-w-0
+          ${isChecked ? 'ring-2 ring-red-400 bg-red-50' : ''}`}
+        title={[it.title, kleurOp === 'planning' ? `${PLANNING_STIJL[plan].label} · ${style.label}` : null, kanaalTekst || null, lbls.length ? lbls.map((l) => l.naam).join(', ') : null].filter(Boolean).join(' · ')}
+      >
+        <span className="flex items-center gap-1 w-full min-w-0">
+        {selectMode && (
+          <span className={`h-3 w-3 shrink-0 rounded border flex items-center justify-center ${
+            isChecked ? 'bg-red-500 border-red-500' : 'border-gray-300 bg-white'
+          }`}>
+            {isChecked && <Check className="h-2 w-2 text-white" />}
+          </span>
+        )}
+        <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${stip.className}`} style={stip.style} />
+        <Icon className={`${lijst ? 'h-3.5 w-3.5' : 'h-2.5 w-2.5'} shrink-0 opacity-70`} />
+        <span className="truncate">{it.planned_time ? <span className="tabular-nums opacity-70">{it.planned_time.slice(0, 5)} </span> : null}{it.title}</span>
+        </span>
+        {lbls.length > 0 && (
+          <span className="flex flex-wrap gap-0.5 min-w-0">
+            {lbls.slice(0, lijst ? 10 : 2).map((l) => <LabelPil key={l.id} label={l} klein={!lijst} />)}
+            {!lijst && lbls.length > 2 && <span className="text-[9px] leading-tight opacity-70">+{lbls.length - 2}</span>}
+          </span>
+        )}
+        {kanalen && <KanaalLabels platforms={kanalen} compact />}
+      </button>
+    )
   }
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4">
+    <div ref={wortel} className="flex flex-col gap-4 scroll-mt-20">
+      {/* Script panel — on mobile appears ABOVE calendar when an item is selected */}
+      {selected && (
+        <div className="lg:hidden">
+          <ScriptPanel item={selected} mode={mode} actions={actions} rechten={rechten} onClose={() => setSelectedId(null)}
+            stijl={stijl} itemLabels={selected ? labelIds(selected) : []} magLabels={magStijl} onLabels={zetItemLabels} />
+        </div>
+      )}
+
+      <div className="flex flex-col lg:flex-row gap-4">
       {/* Calendar grid */}
       <div className="flex-1 bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
         {/* Toolbar */}
-        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100">
-          <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-3 border-b border-gray-100">
+          <div className="flex items-center gap-1 min-w-0">
             <button onClick={() => navigate(-1)} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-gray-100">
               <ChevronLeft className="h-4 w-4" />
             </button>
             <button
-              onClick={() => setCursor(new Date())}
+              onClick={() => { setCursor(new Date()); setDag(today) }}
               className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50"
             >
               Vandaag
@@ -145,9 +323,16 @@ export function ContentCalendar({
             <button onClick={() => navigate(1)} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-gray-100">
               <ChevronRight className="h-4 w-4" />
             </button>
-            <span className="ml-2 font-semibold capitalize text-sm">{title}</span>
+            <span className="ml-2 font-semibold text-sm whitespace-nowrap">{title.charAt(0).toUpperCase() + title.slice(1)}</span>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-wrap sm:justify-end">
+            <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden mr-1" role="group" aria-label="Kleuren op">
+              <span className="text-[11px] text-gray-500 px-2 self-center hidden sm:inline">Kleur</span>
+              {(['status', 'planning'] as const).map((k) => (
+                <button key={k} type="button" onClick={() => kiesKleur(k)} aria-pressed={kleurOp === k}
+                  className={`text-xs px-2.5 py-1.5 border-l border-gray-200 ${kleurOp === k ? 'bg-black text-white' : 'hover:bg-gray-50'}`}>{k === 'status' ? 'Status' : 'Planning'}</button>
+              ))}
+            </div>
             <button
               onClick={() => setView('month')}
               className={`text-xs px-3 py-1.5 rounded-lg border ${view === 'month' ? 'bg-black text-white border-black' : 'border-gray-200 hover:bg-gray-50'}`}
@@ -163,10 +348,45 @@ export function ContentCalendar({
           </div>
         </div>
 
+        {/* Eigen labels: filteren (iedereen) en beheren (wie de kalender mag aanpassen). */}
+        {stijlBeheer && (stijl.labels.length > 0 || magStijl) && (
+          <div className="flex flex-wrap items-center gap-1.5 px-3 sm:px-4 py-2 border-b border-gray-100">
+            {stijl.labels.length > 0 ? (
+              <>
+                <span className="text-[11px] text-gray-500 mr-0.5">Labels</span>
+                {stijl.labels.map((l) => {
+                  const aan = actieveFilter.includes(l.id)
+                  return (
+                    <button key={l.id} type="button" aria-pressed={aan}
+                      onClick={() => setFilter((f) => (f.includes(l.id) ? f.filter((x) => x !== l.id) : [...f, l.id]))}
+                      className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border ${aan ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}>
+                      <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: l.kleur }} />{l.naam}
+                    </button>
+                  )
+                })}
+                {actieveFilter.length > 0 && (
+                  <button type="button" onClick={() => setFilter([])} className="text-[11px] text-gray-500 underline underline-offset-2 ml-1">Alles tonen</button>
+                )}
+              </>
+            ) : (
+              <span className="text-[11px] text-gray-500">Maak eigen labels voor deze kalender en kies een kleur per fase.</span>
+            )}
+            {magStijl && (
+              <button type="button" onClick={() => setPersonaliseer((v) => !v)} aria-expanded={personaliseer}
+                className={`ml-auto inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border ${personaliseer ? 'bg-black text-white border-black' : 'border-gray-200 hover:bg-gray-50'}`}>
+                <Palette className="h-3.5 w-3.5" />Labels en kleuren
+              </button>
+            )}
+          </div>
+        )}
+        {stijlBeheer && magStijl && personaliseer && (
+          <Personaliseren stijl={stijl} actie={stijlBeheer.actie} onStijl={setStijl} onSluit={() => setPersonaliseer(false)} />
+        )}
+
         {/* Weekdays header */}
         <div className="grid grid-cols-7 border-b border-gray-100">
           {WEEKDAYS.map((w) => (
-            <div key={w} className="text-center text-[10px] font-semibold text-gray-400 uppercase tracking-wider py-2">
+            <div key={w} className="text-center text-[10px] font-semibold text-gray-400 py-2">
               {w}
             </div>
           ))}
@@ -180,69 +400,48 @@ export function ContentCalendar({
             const isToday = dayStr === today
             const dayItems = byDay.get(dayStr) ?? []
             const maxShow = view === 'week' ? 10 : 3
-            const canAdd = mode === 'admin' && !!actions.onCreateOnDay
+            const canAdd = !!actions.onCreateOnDay
 
             return (
               <div
                 key={idx}
-                onDragOver={(e) => mode === 'admin' && e.preventDefault()}
+                onDragOver={(e) => { if (actions.onMove) e.preventDefault() }}
                 onDrop={(e) => onDrop(e, dayStr)}
-                className={`group relative border-r border-b border-gray-100 p-1.5 flex flex-col gap-1
-                  ${view === 'month' ? 'min-h-[100px]' : 'min-h-[200px]'}
+                onClick={() => setDag(dayStr)}
+                className={`group relative border-r border-b border-gray-100 p-1 sm:p-1.5 flex flex-col gap-1
+                  ${view === 'month' ? 'min-h-[52px] sm:min-h-[100px]' : 'min-h-[64px] sm:min-h-[200px]'}
                   ${!inMonth ? 'bg-gray-50/50' : ''}
-                  ${canAdd ? 'hover:bg-yellow-50/30 cursor-pointer' : ''}`}
+                  ${dag === dayStr ? 'max-sm:bg-gray-100' : ''}
+                  ${canAdd ? 'hover:bg-gray-50 cursor-pointer' : ''}`}
               >
                 <div className="flex items-center justify-between">
                   <span className={`text-[11px] font-medium px-1 py-0.5 rounded-full
-                    ${isToday ? 'bg-[#fff848] text-black font-bold' : inMonth ? 'text-gray-700' : 'text-gray-300'}`}>
+                    ${isToday ? 'bg-gray-900 text-white font-semibold' : inMonth ? 'text-gray-700' : 'text-gray-300'}`}>
                     {d.getDate()}
                   </span>
                   {canAdd && inMonth && (
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); actions.onCreateOnDay?.(dayStr) }}
-                      className="opacity-0 group-hover:opacity-100 h-5 w-5 flex items-center justify-center rounded text-gray-400 hover:bg-[#fff848] hover:text-black transition-all"
+                      aria-label="Item toevoegen op deze dag"
+                      className="hidden sm:flex opacity-0 group-hover:opacity-100 h-5 w-5 items-center justify-center rounded text-gray-400 hover:bg-gray-900 hover:text-white transition-all"
                     >
                       <Plus className="h-3 w-3" />
                     </button>
                   )}
                 </div>
 
-                <div className="flex flex-col gap-0.5 overflow-hidden">
-                  {dayItems.slice(0, maxShow).map((it) => {
-                    const Icon = TYPE_ICONS[it.content_type] ?? FileText
-                    const style = STATUS_STYLE[it.status]
-                    const isChecked = selection?.selectedIds.has(it.id) ?? false
-                    return (
-                      <button
-                        key={it.id}
-                        draggable={mode === 'admin' && !selectMode}
-                        onDragStart={(e) => e.dataTransfer.setData('text/plain', it.id)}
-                        onClick={() => {
-                          if (selectMode) {
-                            selection?.onToggle(it.id)
-                          } else {
-                            setSelectedId(it.id === selectedId ? null : it.id)
-                          }
-                        }}
-                        className={`text-left text-[11px] px-1.5 py-1 rounded border ${style.badge}
-                          hover:opacity-80 transition truncate flex items-center gap-1 w-full
-                          ${isChecked ? 'ring-2 ring-red-400 bg-red-50' : ''}`}
-                        title={it.title}
-                      >
-                        {selectMode && (
-                          <span className={`h-3 w-3 shrink-0 rounded border flex items-center justify-center ${
-                            isChecked ? 'bg-red-500 border-red-500' : 'border-gray-300 bg-white'
-                          }`}>
-                            {isChecked && <Check className="h-2 w-2 text-white" />}
-                          </span>
-                        )}
-                        <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${style.dot}`} />
-                        <Icon className="h-2.5 w-2.5 shrink-0 opacity-70" />
-                        <span className="truncate">{it.title}</span>
-                      </button>
-                    )
-                  })}
+                {dayItems.length > 0 && (
+                  <div className="flex flex-wrap gap-0.5 px-0.5 sm:hidden" aria-hidden>
+                    {dayItems.slice(0, 6).map((it) => {
+                      const st = kleurOp === 'planning' ? { className: PLANNING_STIJL[planningkleur(it, nu)].dot } : faseStip(it.status, stijl.faseKleuren)
+                      return <span key={it.id} className={`h-1.5 w-1.5 rounded-full ${st.className}`} style={st.style} />
+                    })}
+                    {dayItems.length > 6 && <span className="text-[9px] leading-none text-gray-400">+{dayItems.length - 6}</span>}
+                  </div>
+                )}
+                <div className="hidden sm:flex flex-col gap-0.5 overflow-hidden">
+                  {dayItems.slice(0, maxShow).map((it) => itemKnop(it))}
                   {dayItems.length > maxShow && (
                     <div className="text-[10px] text-gray-400 px-1">
                       +{dayItems.length - maxShow} meer
@@ -254,50 +453,106 @@ export function ContentCalendar({
           })}
         </div>
 
+        {/* Gsm: de gekozen dag als lijst. */}
+        <div className="sm:hidden border-t border-gray-100 px-3 py-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-semibold">
+              {dag ? (() => { const t = new Date(`${dag}T12:00:00`).toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' }); return t.charAt(0).toUpperCase() + t.slice(1) })() : 'Tik op een dag'}
+            </span>
+            {dag && actions.onCreateOnDay && (
+              <button type="button" onClick={() => actions.onCreateOnDay?.(dag)} className="btn-secondary text-xs px-2.5 py-1.5 shrink-0">
+                <Plus className="h-3.5 w-3.5" />Toevoegen
+              </button>
+            )}
+          </div>
+          {dag && ((byDay.get(dag) ?? []).length === 0
+            ? <p className="text-xs text-gray-500">Niets gepland op deze dag.</p>
+            : <div className="flex flex-col gap-1.5">{(byDay.get(dag) ?? []).map((it) => itemKnop(it, true))}</div>)}
+        </div>
+
         {/* Legend */}
         <div className="flex flex-wrap gap-4 px-4 py-3 border-t border-gray-100">
-          {(Object.entries(STATUS_STYLE) as [SocialContentStatus, typeof STATUS_STYLE[SocialContentStatus]][]).map(([s, v]) => (
-            <span key={s} className="flex items-center gap-1.5 text-[11px] text-gray-500">
-              <span className={`h-2 w-2 rounded-full ${v.dot}`} />
-              {v.label}
-            </span>
-          ))}
+          {kleurOp === 'planning' ? (
+            <>
+              {(Object.keys(PLANNING_STIJL) as Planningkleur[]).map((k) => (
+                <span key={k} className="flex items-center gap-1.5 text-[11px] text-gray-600">
+                  <span className={`h-3 w-5 rounded border ${PLANNING_STIJL[k].badge}`} />
+                  {PLANNING_STIJL[k].label}
+                </span>
+              ))}
+              <span className="text-[11px] text-gray-400">· het bolletje blijft de status tonen</span>
+            </>
+          ) : (Object.entries(STATUS_STYLE) as [SocialContentStatus, typeof STATUS_STYLE[SocialContentStatus]][]).map(([s, v]) => {
+            const st = faseStip(s, stijl.faseKleuren)
+            return (
+              <span key={s} className="flex items-center gap-1.5 text-[11px] text-gray-500">
+                <span className={`h-2 w-2 rounded-full ${st.className}`} style={st.style} />
+                {v.label}
+              </span>
+            )
+          })}
+          {actieveFilter.length > 0 && <span className="text-[11px] text-gray-500 ml-auto">Gefilterd op {actieveFilter.map((id) => labelMap.get(id)?.naam).join(', ')} · {items.length} van {alleItems.length}</span>}
         </div>
       </div>
 
-      {/* Script panel */}
-      <ScriptPanel
-        item={selected}
-        mode={mode}
-        actions={actions}
-        onClose={() => setSelectedId(null)}
-      />
+      {/* Script panel — desktop only (mobile version shown above) */}
+      <div className="hidden lg:block lg:w-[360px]">
+        <ScriptPanel
+          item={selected}
+          mode={mode}
+          actions={actions}
+          rechten={rechten}
+          onClose={() => setSelectedId(null)}
+          stijl={stijl}
+          itemLabels={selected ? labelIds(selected) : []}
+          magLabels={magStijl}
+          onLabels={zetItemLabels}
+        />
+      </div>
+    </div>
     </div>
   )
 }
 
 function ScriptPanel({
-  item, mode, actions, onClose,
+  item, mode, actions, rechten, onClose, stijl = leegStijl, itemLabels = [], magLabels = false, onLabels,
 }: {
   item: SocialContentItem | null
   mode: CalendarMode
   actions: CalendarActions
+  rechten?: KalenderRechten
   onClose: () => void
+  stijl?: KalenderStijl
+  itemLabels?: string[]
+  magLabels?: boolean
+  onLabels?: (id: string, ids: string[]) => Promise<void>
 }) {
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<SocialContentItem | null>(null)
   const [feedback, setFeedback] = useState('')
+  const [opmerking, setOpmerking] = useState('')
   const [busy, setBusy] = useState(false)
+  const [publiceer, setPubliceer] = useState<{ datum: string; kanaal: string; link: string } | null>(null)
+  const [activiteit, setActiviteit] = useState<ContentActiviteit[] | null>(null)
+  const laadActiviteit = actions.onLaadActiviteit
+  useEffect(() => {
+    setActiviteit(null); setPubliceer(null)
+    if (!item || !laadActiviteit) return
+    let weg = false
+    laadActiviteit(item.id).then((a) => { if (!weg) setActiviteit(a) }).catch(() => { if (!weg) setActiviteit([]) })
+    return () => { weg = true }
+  }, [item?.id, item?.status, item?.klant_gewijzigd_op, laadActiviteit]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (item && form?.id !== item.id) {
     setForm(item)
     setEditing(false)
     setFeedback(item.client_feedback ?? '')
+    setOpmerking('')
   }
 
   if (!item) {
     return (
-      <aside className="lg:w-[340px] bg-white border border-gray-200 rounded-xl p-5 h-fit sticky top-6 shadow-sm">
+      <aside className="w-full bg-white border border-gray-200 rounded-xl p-5 h-fit shadow-sm">
         <div className="text-center py-8">
           <FileText className="h-8 w-8 text-gray-200 mx-auto mb-3" />
           <p className="text-sm text-gray-400">Klik op een item om details te bekijken</p>
@@ -309,41 +564,79 @@ function ScriptPanel({
   const f = form ?? item
   const isAdmin = mode === 'admin'
   const style = STATUS_STYLE[item.status]
-  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]'
+  const fase = faseBadge(item.status, stijl.faseKleuren)
+  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900'
 
   const save = async () => {
-    if (!isAdmin || !actions.onUpdate || !form) return
+    if (!actions.onUpdate || !form) return
     setBusy(true)
     try {
-      const resolvedPlatforms = form.platforms?.length > 0 ? form.platforms : [form.platform]
+      const resolvedPlatforms = normaliseerKanalen(
+        form.platforms?.length > 0 ? form.platforms : [form.platform],
+      )
       await actions.onUpdate(item.id, {
         title: form.title,
         platforms: resolvedPlatforms,
         platform: resolvedPlatforms[0],
-        content_type: form.content_type, planned_date: form.planned_date,
+        content_type: form.content_type, planned_date: form.planned_date, planned_time: form.planned_time ? form.planned_time.slice(0, 5) : null,
         caption: form.caption, script: form.script, media_notes: form.media_notes,
+        // De interne notitie bestaat enkel in de admin; de klant ziet of verstuurt ze nooit.
+        ...(isAdmin ? { interne_notitie: form.interne_notitie ?? null } : {}),
       })
       setEditing(false)
+    } catch {
+      /* melding komt van de handler; bewerkmodus blijft open */
     } finally { setBusy(false) }
   }
 
-  const ALL_PLATFORMS = ['instagram', 'facebook', 'tiktok', 'linkedin', 'pinterest', 'twitter']
+  // Opmerkingen en activiteit komen uit hetzelfde logboek; opmerkingen staan apart, oudste eerst.
+  const opmerkingen = (activiteit ?? []).filter((a) => a.actie === 'opmerking').reverse()
+  const overigeActiviteit = (activiteit ?? []).filter((a) => a.actie !== 'opmerking')
+  // Wie zette dit item op zijn huidige status, en wanneer?
+  const laatsteStatus = overigeActiviteit.find((a) => a.details && typeof a.details.naar === 'string')
+  const statusDoor = laatsteStatus && laatsteStatus.details?.naar === item.status ? laatsteStatus : null
+  const plaatsOpmerking = async () => {
+    if (!actions.onOpmerking || !opmerking.trim()) return
+    setBusy(true)
+    try { setActiviteit(await actions.onOpmerking(item.id, opmerking)); setOpmerking('') } catch { /* melding komt van de handler */ } finally { setBusy(false) }
+  }
+  const zetStatus = async (naar: SocialContentStatus) => {
+    setBusy(true)
+    try { await actions.onSetStatus?.(item.id, naar) } catch { /* melding komt van de handler */ } finally { setBusy(false) }
+  }
+
+  // Portaal: wat mag deze gebruiker bij DIT item (zelfde regels als de server).
+  const r = rechten ?? ALLEEN_KIJKEN
+  const klantMagBewerken = !isAdmin && !!actions.onUpdate && magBewerken(r, item)
+  const klantVergrendeld = !isAdmin && !!actions.onUpdate && !klantMagBewerken
+  const klantGoedkeuren = !isAdmin && !!actions.onApprove && magBeoordelen(r, item.status, 'approved')
+  const klantAfkeuren = !isAdmin && !!actions.onRequestChanges && magBeoordelen(r, item.status, 'changes_requested')
+  const klantPlanning = !isAdmin && actions.onSetStatus ? statusOvergangen(r, item.status) : []
+  const klantVerwijderen = !isAdmin && !!actions.onDelete && magVerwijderen(r, item)
+  const klantNiets = !klantMagBewerken && !klantGoedkeuren && !klantAfkeuren && klantPlanning.length === 0 && !klantVerwijderen
+  const toonActies = isAdmin || editing || !klantNiets || klantVergrendeld || !actions.onOpmerking
+
+  // Eén bron (lib/social-platforms.ts); Instagram + Facebook = Meta.
+  const ALL_PLATFORMS = KANAAL_SLUGS
   const togglePlatform = (p: string) => {
     if (!form) return
-    const current = form.platforms?.length > 0 ? form.platforms : [form.platform]
+    const current = normaliseerKanalen(form.platforms?.length > 0 ? form.platforms : [form.platform])
     const next = current.includes(p) ? current.filter((x) => x !== p) : [...current, p]
     setForm({ ...form, platforms: next.length > 0 ? next : [p], platform: next[0] ?? p })
   }
 
   return (
-    <aside className="lg:w-[360px] bg-white border border-gray-200 rounded-xl shadow-sm h-fit sticky top-6 max-h-[calc(100vh-5rem)] flex flex-col overflow-hidden">
+    <aside className="w-full bg-white border border-gray-200 rounded-xl shadow-sm h-fit lg:sticky lg:top-6 max-h-[80vh] flex flex-col overflow-hidden">
       {/* Header */}
       <div className="p-4 border-b border-gray-100 flex items-start gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-2">
-            <span className={`status-badge border ${style.badge}`}>{style.label}</span>
-            <span className="text-xs text-gray-400">{f.planned_date}</span>
+            <span className={`status-badge border ${fase.className}`} style={fase.style}>{style.label}</span>
+            <span className="text-xs text-gray-400">{f.planned_date}{f.planned_time ? ` · ${f.planned_time.slice(0, 5)}` : ''}</span>
           </div>
+          {statusDoor && (
+            <p className="text-[11px] text-gray-400 -mt-1 mb-2">Op “{style.label}” gezet door {wie(statusDoor)}{statusDoor.rol === 'klant' ? ' (klant)' : ''} · {tijdstip(statusDoor.op)}</p>
+          )}
           {editing ? (
             <input
               className={inp}
@@ -354,9 +647,13 @@ function ScriptPanel({
             <h3 className="font-semibold text-gray-900 leading-snug">{f.title}</h3>
           )}
           <div className="text-xs text-gray-400 mt-1 flex items-center gap-1 flex-wrap">
-            {(f.platforms?.length > 0 ? f.platforms : [f.platform]).map((p) => (
-              <span key={p} className="capitalize bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-[10px]">{p}</span>
-            ))}
+            {/* Admin: dezelfde platformlabels als in de kalender (Meta = Instagram + Facebook).
+                Portaal: oude items op 'instagram'/'facebook' tonen als één Meta-badge. */}
+            {mode === 'admin'
+              ? <KanaalLabels platforms={f.platforms?.length > 0 ? f.platforms : [f.platform]} />
+              : normaliseerKanalen(f.platforms?.length > 0 ? f.platforms : [f.platform]).map((p) => (
+                <span key={p} className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-[10px]">{kanaalLabel(p)}</span>
+              ))}
             <span>· {f.content_type}</span>
           </div>
         </div>
@@ -367,15 +664,48 @@ function ScriptPanel({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {(itemLabels.length > 0 || (magLabels && onLabels)) && (
+          <div>
+            <div className="text-[10px] text-gray-500 mb-1">Labels</div>
+            {magLabels && onLabels ? (
+              stijl.labels.length === 0 ? (
+                <p className="text-xs text-gray-400">Nog geen labels. Maak ze via “Labels en kleuren” boven de kalender.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1">
+                  {stijl.labels.map((l) => {
+                    const aan = itemLabels.includes(l.id)
+                    return (
+                      <button key={l.id} type="button" aria-pressed={aan}
+                        onClick={() => onLabels(item.id, aan ? itemLabels.filter((x) => x !== l.id) : [...itemLabels, l.id])}
+                        style={aan ? { backgroundColor: l.kleur, borderColor: l.kleur, color: tekstOp(l.kleur) } : undefined}
+                        className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border transition-colors ${aan ? 'font-medium' : 'border-gray-200 text-gray-600 hover:border-gray-400'}`}>
+                        {aan ? <Check className="h-3 w-3" /> : <span className="h-2 w-2 rounded-full" style={{ backgroundColor: l.kleur }} />}
+                        {l.naam}
+                      </button>
+                    )
+                  })}
+                </div>
+              )
+            ) : (
+              <div className="flex flex-wrap gap-1">
+                {itemLabels.map((id) => stijl.labels.find((l) => l.id === id)).filter((l): l is ContentLabel => !!l).map((l) => <LabelPil key={l.id} label={l} />)}
+              </div>
+            )}
+          </div>
+        )}
         {editing && (
           <div className="space-y-2">
             <div className="grid grid-cols-2 gap-2">
               <label>
-                <span className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">Datum</span>
+                <span className="block text-[10px] text-gray-500 mb-1">Datum</span>
                 <input type="date" className={inp} value={f.planned_date} onChange={(e) => setForm({ ...f, planned_date: e.target.value })} />
               </label>
               <label>
-                <span className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">Type</span>
+                <span className="block text-[10px] text-gray-500 mb-1">Tijdstip <span className="normal-case text-gray-400">(optioneel)</span></span>
+                <input type="time" className={inp} value={(f.planned_time ?? '').slice(0, 5)} onChange={(e) => setForm({ ...f, planned_time: e.target.value || null })} />
+              </label>
+              <label>
+                <span className="block text-[10px] text-gray-500 mb-1">Type</span>
                 <select className={inp} value={f.content_type} onChange={(e) => setForm({ ...f, content_type: e.target.value })}>
                   {['post', 'reel', 'story', 'carousel'].map((t) => (
                     <option key={t} value={t}>{t}</option>
@@ -384,24 +714,26 @@ function ScriptPanel({
               </label>
             </div>
             <div>
-              <span className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">
+              <span className="block text-[10px] text-gray-500 mb-1">
                 Kanalen <span className="normal-case text-gray-400">(meerdere mogelijk)</span>
               </span>
               <div className="flex flex-wrap gap-1.5">
                 {ALL_PLATFORMS.map((p) => {
-                  const active = (f.platforms?.length > 0 ? f.platforms : [f.platform]).includes(p)
+                  const active = normaliseerKanalen(
+                    f.platforms?.length > 0 ? f.platforms : [f.platform],
+                  ).includes(p)
                   return (
                     <button
                       key={p}
                       type="button"
                       onClick={() => togglePlatform(p)}
-                      className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors capitalize ${
+                      className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
                         active
-                          ? 'border-[#fff848] bg-[#fff848]/10 text-black'
+                          ? 'border-gray-900 bg-gray-100 text-black'
                           : 'border-gray-200 text-gray-500 hover:border-gray-300'
                       }`}
                     >
-                      {p}
+                      {kanaalLabel(p)}
                     </button>
                   )
                 })}
@@ -412,7 +744,7 @@ function ScriptPanel({
 
         {(editing || f.caption) && (
           <div>
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Caption</div>
+            <div className="text-[10px] text-gray-500 mb-1">Caption</div>
             {editing ? (
               <textarea rows={3} value={f.caption ?? ''} onChange={(e) => setForm({ ...f, caption: e.target.value })} className={inp} />
             ) : (
@@ -423,7 +755,7 @@ function ScriptPanel({
 
         {(editing || f.script) && (
           <div>
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Script / Hook / CTA</div>
+            <div className="text-[10px] text-gray-500 mb-1">Script / Hook / CTA</div>
             {editing ? (
               <textarea rows={6} value={f.script ?? ''} onChange={(e) => setForm({ ...f, script: e.target.value })} className={inp} />
             ) : (
@@ -434,7 +766,7 @@ function ScriptPanel({
 
         {(editing || f.media_notes) && (
           <div>
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Media-notities</div>
+            <div className="text-[10px] text-gray-500 mb-1">Media-notities</div>
             {editing ? (
               <textarea rows={3} value={f.media_notes ?? ''} onChange={(e) => setForm({ ...f, media_notes: e.target.value })} className={inp} />
             ) : (
@@ -443,15 +775,80 @@ function ScriptPanel({
           </div>
         )}
 
+        {item.status === 'published' && (item.published_at || item.published_url || item.published_platform) && (
+          <div className="rounded-lg border border-purple-200 bg-purple-50 p-2.5 text-sm text-purple-900">
+            <div className="text-[10px] mb-0.5">Gepubliceerd</div>
+            {item.published_at && <div>{new Date(item.published_at).toLocaleDateString('nl-BE', { timeZone: 'Europe/Brussels' })}{item.published_platform ? ` · ${kanaalLabel(item.published_platform)}` : ''}</div>}
+            {item.published_url && <a href={item.published_url} target="_blank" rel="noopener noreferrer" className="underline break-all">{item.published_url}</a>}
+          </div>
+        )}
+
+        {isAdmin && (editing || f.interne_notitie) && (
+          <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-2.5">
+            <div className="text-[10px] text-gray-500 mb-1">Interne notitie <span className="normal-case">— enkel zichtbaar voor NextGenMedia</span></div>
+            {editing ? (
+              <textarea rows={2} value={f.interne_notitie ?? ''} onChange={(e) => setForm({ ...f, interne_notitie: e.target.value })} className={inp} />
+            ) : (
+              <p className="text-sm whitespace-pre-wrap text-gray-700">{f.interne_notitie}</p>
+            )}
+          </div>
+        )}
+
+        {isAdmin && item.klant_gewijzigd_op && (
+          <p className="text-[11px] text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1.5">Aangepast door de klant{item.klant_gewijzigd_door ? ` (${item.klant_gewijzigd_door})` : ''} op {new Date(item.klant_gewijzigd_op).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+        )}
+
+        {laadActiviteit && (opmerkingen.length > 0 || actions.onOpmerking) && (
+          <div>
+            <div className="text-[10px] text-gray-500 mb-1">Opmerkingen</div>
+            {activiteit === null ? <p className="text-xs text-gray-400">Laden…</p> : opmerkingen.length === 0 ? <p className="text-xs text-gray-400">Nog geen opmerkingen.</p> : (
+              <ul className="space-y-1.5">
+                {opmerkingen.map((o, i) => (
+                  <li key={i} className={`rounded-lg border px-2.5 py-1.5 ${o.rol === 'klant' ? 'border-amber-100 bg-amber-50/60' : 'border-gray-100 bg-gray-50'}`}>
+                    <div className="text-[11px] text-gray-500"><b className="font-medium text-gray-800">{wie(o)}</b>{o.rol === 'klant' ? ' (klant)' : ' (NextGenMedia)'} · <span className="tabular-nums">{tijdstip(o.op)}</span></div>
+                    <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{String(o.details?.tekst ?? '')}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {actions.onOpmerking && (
+              <div className="mt-2 space-y-1.5">
+                <textarea rows={2} maxLength={2000} value={opmerking} onChange={(e) => setOpmerking(e.target.value)} className={inp} placeholder="Schrijf een opmerking…" aria-label="Opmerking" />
+                <button type="button" disabled={busy || !opmerking.trim()} onClick={plaatsOpmerking} className="btn-secondary text-xs w-full">
+                  <MessageSquare className="h-3 w-3" />
+                  Opmerking plaatsen
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {laadActiviteit && (
+          <div>
+            <div className="text-[10px] text-gray-500 mb-1">Activiteit</div>
+            {activiteit === null ? <p className="text-xs text-gray-400">Laden…</p> : overigeActiviteit.length === 0 ? <p className="text-xs text-gray-400">Nog geen activiteit geregistreerd.</p> : (
+              <ul className="space-y-1">
+                {overigeActiviteit.slice(0, 12).map((a, i) => (
+                  <li key={i} className="text-xs text-gray-600 flex gap-2">
+                    <span className="tabular-nums text-gray-400 shrink-0">{tijdstip(a.op)}</span>
+                    <span><b className="font-medium text-gray-800">{wie(a)}</b>{a.rol === 'klant' ? ' (klant)' : ''} {a.actie}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
         {item.status === 'changes_requested' && item.client_feedback && (
           <div className="text-sm rounded-lg border border-red-200 bg-red-50 p-3 text-red-700">
-            <strong className="block mb-1 text-xs uppercase tracking-wide">Feedback klant</strong>
+            <strong className="block mb-1 text-xs">Gevraagde aanpassing</strong>
             {item.client_feedback}
           </div>
         )}
       </div>
 
       {/* Actions */}
+      {toonActies && (
       <div className="p-4 border-t border-gray-100 space-y-3">
         {isAdmin ? (
           <>
@@ -474,10 +871,21 @@ function ScriptPanel({
               )}
             </div>
             <div className="flex flex-wrap gap-1.5">
+              {item.status === 'ready_for_review' && (
+                <>
+                  <button disabled={busy} onClick={() => zetStatus('approved')} className="btn-secondary text-xs flex-1">
+                    <Check className="h-3 w-3" />
+                    Goedkeuren
+                  </button>
+                  <button disabled={busy} onClick={() => zetStatus('draft')} className="btn-secondary text-xs">
+                    Terug naar concept
+                  </button>
+                </>
+              )}
               {(item.status === 'draft' || item.status === 'changes_requested') && (
                 <button
                   disabled={busy}
-                  onClick={async () => { setBusy(true); try { await actions.onSetStatus?.(item.id, 'ready_for_review') } finally { setBusy(false) } }}
+                  onClick={async () => { setBusy(true); try { await actions.onSetStatus?.(item.id, 'ready_for_review') } catch { /* melding komt van de handler */ } finally { setBusy(false) } }}
                   className="btn-secondary text-xs flex-1"
                 >
                   <Send className="h-3 w-3" />
@@ -487,7 +895,7 @@ function ScriptPanel({
               {item.status === 'approved' && (
                 <button
                   disabled={busy}
-                  onClick={async () => { setBusy(true); try { await actions.onSetStatus?.(item.id, 'scheduled') } finally { setBusy(false) } }}
+                  onClick={async () => { setBusy(true); try { await actions.onSetStatus?.(item.id, 'scheduled') } catch { /* melding komt van de handler */ } finally { setBusy(false) } }}
                   className="btn-secondary text-xs"
                 >
                   Inplannen
@@ -496,7 +904,7 @@ function ScriptPanel({
               {item.status === 'scheduled' && (
                 <button
                   disabled={busy}
-                  onClick={async () => { setBusy(true); try { await actions.onSetStatus?.(item.id, 'published') } finally { setBusy(false) } }}
+                  onClick={async () => { setBusy(true); try { await actions.onSetStatus?.(item.id, 'published') } catch { /* melding komt van de handler */ } finally { setBusy(false) } }}
                   className="btn-secondary text-xs"
                 >
                   Gepubliceerd
@@ -508,7 +916,7 @@ function ScriptPanel({
                   onClick={async () => {
                     if (!confirm('Item verwijderen?')) return
                     setBusy(true)
-                    try { await actions.onDelete!(item.id); onClose() } finally { setBusy(false) }
+                    try { await actions.onDelete!(item.id); onClose() } catch { /* melding komt van de handler */ } finally { setBusy(false) }
                   }}
                   className="btn-danger text-xs ml-auto"
                 >
@@ -519,45 +927,228 @@ function ScriptPanel({
           </>
         ) : (
           <>
-            {(item.status === 'ready_for_review' || item.status === 'changes_requested') ? (
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">
-                    Feedback / opmerkingen
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={feedback}
-                    onChange={(e) => setFeedback(e.target.value)}
-                    className={inp}
-                    placeholder="Wat zou je aanpassen?"
-                  />
-                </div>
+            {klantMagBewerken && (
+              editing ? (
                 <div className="flex gap-2">
-                  <button
-                    disabled={busy || !feedback.trim()}
-                    onClick={async () => { setBusy(true); try { await actions.onRequestChanges?.(item.id, feedback) } finally { setBusy(false) } }}
-                    className="btn-secondary flex-1 text-xs"
-                  >
-                    <RefreshCw className="h-3 w-3" />
-                    Feedback
+                  <button disabled={busy} onClick={save} className="btn-primary flex-1">
+                    {busy ? <span className="h-4 w-4 border-2 border-black/20 border-t-black rounded-full animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                    Opslaan
                   </button>
-                  <button
-                    disabled={busy}
-                    onClick={async () => { setBusy(true); try { await actions.onApprove?.(item.id) } finally { setBusy(false) } }}
-                    className="btn-primary flex-1 text-xs"
-                  >
-                    <Check className="h-3 w-3" />
-                    Goedkeuren
-                  </button>
+                  <button onClick={() => { setForm(item); setEditing(false) }} className="btn-secondary">Annuleer</button>
+                </div>
+              ) : (
+                <button onClick={() => setEditing(true)} className="btn-secondary w-full">
+                  <Pencil className="h-3.5 w-3.5" />
+                  Zelf aanpassen
+                </button>
+              )
+            )}
+            {!editing && klantVergrendeld && (
+              <p className="text-[11px] text-gray-500">Een item met status “{style.label}” kan je niet meer aanpassen.{actions.onOpmerking ? ' Plaats een opmerking als er iets moet veranderen.' : ''}</p>
+            )}
+            {!editing && (klantGoedkeuren || klantAfkeuren) && (
+              <div className="space-y-3">
+                {klantAfkeuren && (
+                  <div>
+                    <label className="block text-[10px] text-gray-500 mb-1">
+                      Wat moet er anders?
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={feedback}
+                      onChange={(e) => setFeedback(e.target.value)}
+                      className={inp}
+                      placeholder="Beschrijf de aanpassing die je wil"
+                    />
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  {klantAfkeuren && (
+                    <button
+                      disabled={busy || !feedback.trim()}
+                      onClick={async () => { setBusy(true); try { await actions.onRequestChanges!(item.id, feedback) } catch { /* melding komt van de handler */ } finally { setBusy(false) } }}
+                      className="btn-secondary flex-1 text-xs"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      Aanpassing vragen
+                    </button>
+                  )}
+                  {klantGoedkeuren && (
+                    <button
+                      disabled={busy}
+                      onClick={async () => { setBusy(true); try { await actions.onApprove!(item.id) } catch { /* melding komt van de handler */ } finally { setBusy(false) } }}
+                      className="btn-primary flex-1 text-xs"
+                    >
+                      <Check className="h-3 w-3" />
+                      Goedkeuren
+                    </button>
+                  )}
                 </div>
               </div>
-            ) : (
+            )}
+            {!editing && klantPlanning.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-1.5">
+                  {klantPlanning.map((naar) => (
+                    <button key={naar} type="button" disabled={busy}
+                      onClick={async () => {
+                        if (naar === 'published') { setPubliceer({ datum: new Date().toISOString().slice(0, 10), kanaal: normaliseerKanalen(item.platforms?.length ? item.platforms : [item.platform])[0] ?? '', link: '' }); return }
+                        await zetStatus(naar)
+                      }}
+                      className={naar === 'published' || naar === 'ready_for_review' ? 'btn-primary text-xs flex-1' : 'btn-secondary text-xs flex-1'}>
+                      {naar === 'ready_for_review' && <Send className="h-3 w-3" />}
+                      {overgangLabel(item.status, naar)}
+                    </button>
+                  ))}
+                </div>
+                {publiceer && (
+                  <div className="rounded-lg border border-gray-200 p-2.5 space-y-2">
+                    <p className="text-[11px] text-gray-500">Enkel de status in de kalender — er wordt niets op sociale media geplaatst.</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label><span className="block text-[10px] text-gray-500 mb-1">Publicatiedatum</span><input type="date" className={inp} max={new Date().toISOString().slice(0, 10)} value={publiceer.datum} onChange={(e) => setPubliceer({ ...publiceer, datum: e.target.value })} /></label>
+                      <label><span className="block text-[10px] text-gray-500 mb-1">Kanaal</span><select className={inp} value={publiceer.kanaal} onChange={(e) => setPubliceer({ ...publiceer, kanaal: e.target.value })}>{normaliseerKanalen(item.platforms?.length ? item.platforms : [item.platform]).map((k) => <option key={k} value={k}>{kanaalLabel(k)}</option>)}</select></label>
+                    </div>
+                    <label className="block"><span className="block text-[10px] text-gray-500 mb-1">Link naar de post <span className="normal-case text-gray-400">(optioneel)</span></span><input type="url" className={inp} value={publiceer.link} onChange={(e) => setPubliceer({ ...publiceer, link: e.target.value })} placeholder="https://" /></label>
+                    <div className="flex gap-2">
+                      <button type="button" disabled={busy} onClick={async () => { setBusy(true); try { await actions.onSetStatus!(item.id, 'published', { published_at: publiceer.datum, published_platform: publiceer.kanaal || null, published_url: publiceer.link || null }); setPubliceer(null) } catch { /* melding komt van de handler */ } finally { setBusy(false) } }} className="btn-primary text-xs flex-1">Bevestigen</button>
+                      <button type="button" onClick={() => setPubliceer(null)} className="btn-secondary text-xs">Annuleer</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {!editing && klantVerwijderen && (
+              <button
+                disabled={busy}
+                onClick={async () => {
+                  if (!confirm(`“${item.title}” definitief verwijderen? Dit kan niet ongedaan gemaakt worden.`)) return
+                  setBusy(true)
+                  try { await actions.onDelete!(item.id); onClose() } catch { /* melding komt van de handler */ } finally { setBusy(false) }
+                }}
+                className="btn-secondary text-xs w-full text-red-700"
+              >
+                Verwijderen
+              </button>
+            )}
+            {!editing && klantNiets && !klantVergrendeld && !actions.onOpmerking && (
               <p className="text-xs text-gray-400 text-center">Geen actie vereist op dit moment.</p>
             )}
           </>
         )}
       </div>
+      )}
     </aside>
+  )
+}
+
+/** Eigen labels en een kleur per fase. Enkel voor deze kalender; klant en team zien hetzelfde. */
+function Personaliseren({
+  stijl, actie, onStijl, onSluit,
+}: {
+  stijl: KalenderStijl
+  actie: KalenderStijlBeheer['actie']
+  onStijl: (s: KalenderStijl) => void
+  onSluit: () => void
+}) {
+  const [naam, setNaam] = useState('')
+  const [kleur, setKleur] = useState(KLEUREN[7])
+  const [bewerk, setBewerk] = useState<ContentLabel | null>(null)
+  const [bezig, setBezig] = useState(false)
+  const inp = 'w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900'
+
+  const doe = async (b: Record<string, unknown>): Promise<boolean> => {
+    setBezig(true)
+    try { const u = await actie(b); if (u.stijl) onStijl(u.stijl); return true } catch { return false } finally { setBezig(false) }
+  }
+  const voegToe = async () => {
+    if (!naam.trim()) return
+    if (await doe({ actie: 'label_maak', naam, kleur })) setNaam('')
+  }
+  const faseKleur = async (fase: FaseKey, k: string | null) => {
+    const vorige = stijl
+    const kleuren: FaseKleuren = { ...stijl.faseKleuren }
+    if (k) kleuren[fase] = k; else delete kleuren[fase]
+    onStijl({ ...stijl, faseKleuren: kleuren })
+    if (!(await doe({ actie: 'kleuren', kleuren }))) onStijl(vorige)
+  }
+
+  return (
+    <div className="border-b border-gray-100 bg-gray-50/60 px-3 sm:px-4 py-4 grid gap-5 md:grid-cols-2">
+      <section className="space-y-2.5">
+        <div>
+          <h3 className="text-sm font-semibold">Eigen labels</h3>
+          <p className="text-xs text-gray-500">Enkel voor deze kalender, bijvoorbeeld “Nieuwbouwproject” of “Renovatiepand”. Een label verandert niets aan de post zelf.</p>
+        </div>
+        {stijl.labels.length > 0 && (
+          <ul className="space-y-1">
+            {stijl.labels.map((l) => bewerk?.id === l.id ? (
+              <li key={l.id} className="rounded-lg border border-gray-200 bg-white p-2 space-y-2">
+                <input className={inp} value={bewerk.naam} maxLength={40} onChange={(e) => setBewerk({ ...bewerk, naam: e.target.value })} aria-label="Naam van het label"
+                  onKeyDown={async (e) => { if (e.key === 'Enter') { e.preventDefault(); if (await doe({ actie: 'label_wijzig', id: l.id, naam: bewerk.naam, kleur: bewerk.kleur })) setBewerk(null) } }} />
+                <KleurKiezer waarde={bewerk.kleur} onKies={(k) => setBewerk({ ...bewerk, kleur: k })} />
+                <div className="flex gap-2">
+                  <button type="button" disabled={bezig || !bewerk.naam.trim()} onClick={async () => { if (await doe({ actie: 'label_wijzig', id: l.id, naam: bewerk.naam, kleur: bewerk.kleur })) setBewerk(null) }} className="btn-primary text-xs flex-1">Bewaren</button>
+                  <button type="button" onClick={() => setBewerk(null)} className="btn-secondary text-xs">Annuleer</button>
+                </div>
+              </li>
+            ) : (
+              <li key={l.id} className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-2 py-1.5">
+                <LabelPil label={l} />
+                <span className="flex-1" />
+                <button type="button" onClick={() => setBewerk(l)} aria-label={`${l.naam} aanpassen`} className="h-6 w-6 flex items-center justify-center rounded hover:bg-gray-100 text-gray-500"><Pencil className="h-3.5 w-3.5" /></button>
+                <button type="button" disabled={bezig} aria-label={`${l.naam} verwijderen`}
+                  onClick={() => { if (confirm(`Label “${l.naam}” verwijderen? Het verdwijnt ook van de posts waar het op staat. De posts zelf blijven.`)) void doe({ actie: 'label_verwijder', id: l.id }) }}
+                  className="h-6 w-6 flex items-center justify-center rounded hover:bg-red-50 text-gray-500 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="rounded-lg border border-dashed border-gray-300 bg-white p-2 space-y-2">
+          <div className="flex gap-2">
+            <input className={inp} value={naam} maxLength={40} onChange={(e) => setNaam(e.target.value)} placeholder="Nieuw label" aria-label="Nieuw label"
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void voegToe() } }} />
+            <button type="button" disabled={bezig || !naam.trim()} onClick={voegToe} className="btn-primary text-xs shrink-0"><Plus className="h-3.5 w-3.5" />Toevoegen</button>
+          </div>
+          <KleurKiezer waarde={kleur} onKies={setKleur} />
+        </div>
+      </section>
+
+      <section className="space-y-2.5">
+        <div className="flex items-start gap-2">
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold">Kleur per fase</h3>
+            <p className="text-xs text-gray-500">Zo zie je in één oogopslag waar elke post staat.</p>
+          </div>
+          <button type="button" onClick={onSluit} aria-label="Sluiten" className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400"><X className="h-4 w-4" /></button>
+        </div>
+        <ul className="space-y-2">
+          {FASES.map((f) => {
+            const eigen = stijl.faseKleuren[f.key]
+            return (
+              <li key={f.key} className="rounded-lg border border-gray-200 bg-white px-2.5 py-2">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: eigen ?? f.standaard }} />
+                  <span className="text-xs font-medium">{f.label}</span>
+                  {eigen && <button type="button" disabled={bezig} onClick={() => faseKleur(f.key, null)} className="ml-auto text-[11px] text-gray-500 underline underline-offset-2">Standaard</button>}
+                </div>
+                <KleurKiezer waarde={eigen ?? f.standaard} onKies={(k) => faseKleur(f.key, k === f.standaard ? null : k)} />
+              </li>
+            )
+          })}
+        </ul>
+      </section>
+    </div>
+  )
+}
+
+function KleurKiezer({ waarde, onKies }: { waarde: string; onKies: (k: string) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Kleur">
+      {KLEUREN.map((k) => (
+        <button key={k} type="button" role="radio" aria-checked={waarde === k} aria-label={k} onClick={() => onKies(k)}
+          className={`h-5 w-5 rounded-full border border-black/10 transition ${waarde === k ? 'ring-2 ring-offset-1 ring-gray-900' : 'hover:scale-110'}`}
+          style={{ backgroundColor: k }} />
+      ))}
+    </div>
   )
 }
