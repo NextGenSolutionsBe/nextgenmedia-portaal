@@ -437,6 +437,28 @@ function Links({ links }: { links: { label: string; url: string }[] }) {
   return <div className="flex gap-2 flex-wrap">{geldig.map((l) => <a key={l.label + l.url} href={l.url} target="_blank" rel="noreferrer" className={`${KNOP} h-9`}><ExternalLink className="h-4 w-4" />{l.label}</a>)}</div>
 }
 
+/** Eén regel boven reeks 1, enkel als er klanten aan de beurt zijn die er nog niet in staan. */
+function Reeks1Seintje({ data, doe, maand, kanSchrijven, onWerkwijze }: { data: CpData; doe: Doe; maand: string; kanSchrijven: boolean; onWerkwijze: () => void }) {
+  const w = useWerk(data)
+  const [bezig, setBezig] = useState(false)
+  const opBord = new Set(data.bord.filter((c) => c.maand === maand && c.reeks === 1).map((c) => c.client_id))
+  const ontbreekt = w.beurtenReeks1(maand).filter(inReeks1).filter((b) => !opBord.has(b.client_id))
+  if (!ontbreekt.length) return null
+  const namen = ontbreekt.map((b) => w.naam.get(b.client_id)).filter(Boolean)
+  const zet = async () => {
+    setBezig(true)
+    await doe('reeks1.voorstel', { maand, client_ids: ontbreekt.map((b) => b.client_id) }, { melding: `${ontbreekt.length} klant${ontbreekt.length === 1 ? '' : 'en'} in reeks 1 gezet.` })
+    setBezig(false)
+  }
+  return (
+    <div className="px-5 py-2.5 border-b border-cp-rand flex items-center gap-3 flex-wrap text-cp-klein">
+      <span className="min-w-0 flex-1">Nog niet in reeks 1: <b className="font-semibold">{namen.join(', ')}</b></span>
+      {kanSchrijven && <button type="button" disabled={bezig} onClick={zet} className={`${KNOP} h-8`}>{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Toevoegen</button>}
+      <button type="button" onClick={onWerkwijze} className={`underline text-cp-zacht ${focusRing} rounded`}>Waarom?</button>
+    </div>
+  )
+}
+
 // ── Klanten van één reeks: zelf kiezen en afvinken ─────────────────────────
 function ReeksKaart({ r, maand, data, doe, datum, kanSchrijven, onWerkwijze, onKlant, klein }: {
   r: Reeks; maand: string; data: CpData; doe: Doe; datum: string; kanSchrijven: boolean; onWerkwijze: () => void; onKlant: (id: string) => void; klein?: boolean
@@ -450,7 +472,7 @@ function ReeksKaart({ r, maand, data, doe, datum, kanSchrijven, onWerkwijze, onK
   const info = REEKSEN[r - 1]
   const vink = (c: BordCel, gedaan: boolean) => doe('reeksvink.zet', { client_id: c.client_id, maand, reeks: r, gedaan, datum }, { stil: true })
   // Extra taken bij een klant in deze reeks (bv. Verheyen: meeting op het einde van de maand inplannen); afvinken per maand.
-  // Vaste vervolgstappen bij elke klant in deze reeks (reeks 1: kalender naar Bram, shootbriefing), plus de eigen extra taken.
+  // Vaste vervolgstappen bij elke klant in deze reeks (reeks 1: contentkalender genereren, taak Bram shootbriefing), plus de eigen extra taken.
   const extra = (cid: string) => [
     ...data.instellingen.reeks_vervolg.filter((t) => t.reeks === r).map((t) => ({ ...t, sleutel: vervolgSleutel(cid, t.key) })),
     ...leesKlantTaken(data.cpKlanten.find((k) => k.client_id === cid)?.extra_taken).filter((t) => t.reeks === r).map((t) => ({ ...t, sleutel: klantTaakSleutel(cid, t.key) })),
@@ -467,7 +489,8 @@ function ReeksKaart({ r, maand, data, doe, datum, kanSchrijven, onWerkwijze, onK
         <button type="button" onClick={onWerkwijze} className={KNOP}><BookOpen className="h-4 w-4" />Werkwijze</button>
       </div>
       {lijst.length > 0 && <div className="h-1.5 bg-cp-achtergrond"><div className={`h-1.5 ${info.kleur} transition-all duration-500`} style={{ width: `${Math.round((klaar.length / lijst.length) * 100)}%` }} /></div>}
-      {r === 1 && !klein && <div className="px-5 py-4 border-b border-cp-rand"><Reeks1Voorstel data={data} doe={doe} maand={maand} kanSchrijven={kanSchrijven} onKlant={onKlant} /></div>}
+      {/* Het volledige voorstel (wie aan de beurt is en waarom) staat in Werkwijze; hier enkel een seintje als er nog klanten bij moeten. */}
+      {r === 1 && !klein && <Reeks1Seintje data={data} doe={doe} maand={maand} kanSchrijven={kanSchrijven} onWerkwijze={onWerkwijze} />}
       {lijst.length === 0 ? <p className="px-5 py-4 text-cp-basis text-cp-zacht">Geen klanten</p> : (
         <ul className={`divide-y divide-cp-rand ${klein ? 'max-h-80 overflow-y-auto' : ''}`}>
           {[...open, ...klaar].map((c) => (
