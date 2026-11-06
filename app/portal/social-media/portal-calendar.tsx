@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Plus, X, Loader2 } from 'lucide-react'
 import { ContentCalendar, type SocialContentItem, type SocialContentStatus, type ContentActiviteit } from '@/components/calendar/content-calendar'
+import type { KalenderStijl } from '@/lib/content/kalender-stijl'
 import { KANAAL_SLUGS, kanaalLabel } from '@/lib/social-platforms'
 import type { KalenderRechten } from '@/lib/content/kalender-rol'
 import type { Status } from '@/lib/content/kalender-beheer'
@@ -11,8 +12,12 @@ import { GoedkeuringOverzicht, type Goedkeuring } from '@/components/portal/goed
 import type { Lang } from '@/lib/i18n'
 
 export function PortalCalendar({
-  initialItems, clientId, rechten, goedkeuringen = [], lang = 'nl', openItem = null,
+  initialItems, clientId, rechten, goedkeuringen = [], lang = 'nl', openItem = null, stijl, magStijl = false,
 }: {
+  /** Eigen labels en fasekleuren van deze kalender. */
+  stijl: KalenderStijl
+  /** Labels en kleuren beheren (Meewerken, Beheren). */
+  magStijl?: boolean
   initialItems: Array<{
     id: string; client_id: string; planned_date: string; platform: string;
     platforms: string[]; content_type: string; title: string;
@@ -86,6 +91,16 @@ export function PortalCalendar({
     toast.success(status === 'published' ? 'Gemarkeerd als gepubliceerd.' : status === 'ready_for_review' ? 'Ter goedkeuring voorgelegd.' : 'Status gewijzigd.')
   }
   const laadActiviteit = async (id: string) => { const r = await fetch(`/api/portal/social-content/item?activiteit=${id}`, { cache: 'no-store' }); const j = await r.json().catch(() => ({})); return r.ok ? j.activiteit ?? [] : [] }
+  // Labels en fasekleuren: altijd op de eigen kalender (de server gebruikt de geresolveerde klant).
+  const stijlActie = async (b: Record<string, unknown>) => {
+    const r = await fetch('/api/portal/social-content/stijl', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) { toast.error(j.error || 'Bewaren mislukt'); throw new Error(j.error || 'Bewaren mislukt') }
+    if (b.actie === 'label_maak') toast.success('Label toegevoegd.')
+    if (b.actie === 'label_verwijder') toast.success('Label verwijderd.')
+    return { stijl: j.stijl, labels: j.labels }
+  }
+  const stijlBeheer = useMemo(() => ({ stijl, magBeheren: magStijl, actie: stijlActie }), [stijl, magStijl]) // eslint-disable-line react-hooks/exhaustive-deps
   const handleDelete = async (id: string) => {
     const r = await fetch(`/api/portal/social-content/item?id=${id}`, { method: 'DELETE' })
     const j = await r.json().catch(() => ({}))
@@ -107,6 +122,7 @@ export function PortalCalendar({
       mode="client"
       rechten={rechten}
       focus={focus}
+      stijlBeheer={stijlBeheer}
       actions={{
         onApprove: rechten.goedkeuren.length ? handleApprove : undefined,
         onRequestChanges: rechten.afkeuren.length ? handleRequestChanges : undefined,

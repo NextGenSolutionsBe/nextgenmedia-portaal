@@ -3,7 +3,7 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from 'react'
 import {
   ChevronLeft, ChevronRight, X, Check, RefreshCw,
-  Send, Pencil, Save, Image, Video, FileText, Plus, MessageSquare,
+  Send, Pencil, Save, Image, Video, FileText, Plus, MessageSquare, Palette, Trash2,
 } from 'lucide-react'
 import { ymd } from '@/lib/utils'
 import { planningkleur, nuInBrussel, PLANNING_STIJL, type Planningkleur } from '@/lib/content/planning-kleur'
@@ -12,6 +12,9 @@ import { KanaalLabels } from './kanaal-labels'
 import {
   magBewerken, magVerwijderen, statusOvergangen, magBeoordelen, overgangLabel, type KalenderRechten,
 } from '@/lib/content/kalender-rol'
+import {
+  FASES, KLEUREN, leegStijl, tekstOp, tinten, type ContentLabel, type FaseKey, type FaseKleuren, type KalenderStijl,
+} from '@/lib/content/kalender-stijl'
 
 export type SocialContentStatus =
   | 'draft' | 'ready_for_review' | 'approved'
@@ -44,6 +47,8 @@ export type SocialContentItem = {
   published_at?: string | null
   published_url?: string | null
   published_platform?: string | null
+  /** Eigen labels van deze klantkalender (ids uit content_labels). */
+  labels?: string[] | null
 }
 
 export type ContentActiviteit = { op: string; door: string | null; rol: 'klant' | 'nextgenmedia'; actie: string; details: Record<string, unknown> | null }
@@ -57,6 +62,35 @@ const STATUS_STYLE: Record<SocialContentStatus, { dot: string; badge: string; la
   changes_requested: { dot: 'bg-red-500', badge: 'bg-red-50 text-red-700 border-red-200', label: 'Aanpassing gevraagd' },
   scheduled: { dot: 'bg-blue-500', badge: 'bg-blue-50 text-blue-700 border-blue-200', label: 'Ingepland' },
   published: { dot: 'bg-purple-500', badge: 'bg-purple-50 text-purple-700 border-purple-200', label: 'Gepubliceerd' },
+}
+
+/** Eigen fasekleur van de klant, anders de vaste stijl. */
+function faseBadge(s: SocialContentStatus, kleuren: FaseKleuren): { className: string; style?: React.CSSProperties } {
+  const k = kleuren[s as FaseKey]
+  if (!k) return { className: STATUS_STYLE[s].badge }
+  const t = tinten(k)
+  return { className: '', style: { backgroundColor: t.achtergrond, borderColor: t.rand, color: t.tekst } }
+}
+function faseStip(s: SocialContentStatus, kleuren: FaseKleuren): { className: string; style?: React.CSSProperties } {
+  const k = kleuren[s as FaseKey]
+  return k ? { className: '', style: { backgroundColor: k } } : { className: STATUS_STYLE[s].dot }
+}
+
+/** Een label als klein gekleurd pilletje. */
+function LabelPil({ label, klein = false }: { label: ContentLabel; klein?: boolean }) {
+  return (
+    <span className={`${klein ? 'text-[9px] px-1' : 'text-[11px] px-1.5 py-0.5'} leading-tight rounded truncate max-w-full font-medium`}
+      style={{ backgroundColor: label.kleur, color: tekstOp(label.kleur) }}>{label.naam}</span>
+  )
+}
+
+/** Labels en fasekleuren van deze klantkalender (lib/content/kalender-stijl.ts). Klant en team zien dezelfde. */
+export type KalenderStijlBeheer = {
+  stijl: KalenderStijl
+  /** Labels en kleuren beheren en labels op posts zetten. Bekijken en filteren kan iedereen. */
+  magBeheren: boolean
+  /** Eén ingang naar de server: { actie, … } → { stijl?, labels? }. Gooit bij een fout (de melding komt van de handler). */
+  actie: (b: Record<string, unknown>) => Promise<{ stijl?: KalenderStijl; labels?: string[] }>
 }
 
 const TYPE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -94,11 +128,13 @@ const tijdstip = (iso: string) => new Date(iso).toLocaleString('nl-BE', { timeZo
 const wie = (a: ContentActiviteit) => a.door ?? (a.rol === 'klant' ? 'Klant' : 'NextGenMedia')
 
 export function ContentCalendar({
-  items: itemsProp, mode, actions, selection, rechten, focus,
+  items: itemsProp, mode, actions, selection, rechten, focus, stijlBeheer,
 }: {
   items: SocialContentItem[] | null
   mode: CalendarMode
   actions: CalendarActions
+  /** Eigen labels en fasekleuren van deze klant. */
+  stijlBeheer?: KalenderStijlBeheer
   /** Portaal: wat deze klantgebruiker mag (lib/content/kalender-rol.ts). De server controleert hetzelfde. */
   rechten?: KalenderRechten
   /** Een item van buitenaf openen (overzicht "wacht op goedkeuring", link ?item=). `n` verhogen = opnieuw openen. */
@@ -109,7 +145,29 @@ export function ContentCalendar({
     onToggle: (id: string) => void
   }
 }) {
-  const items = itemsProp ?? []
+  const alleItems = itemsProp ?? []
+  // Labels en fasekleuren: lokaal bijgehouden na elke wijziging, opnieuw gezet als de klant wisselt.
+  const [stijl, setStijl] = useState<KalenderStijl>(stijlBeheer?.stijl ?? leegStijl)
+  useEffect(() => { setStijl(stijlBeheer?.stijl ?? leegStijl) }, [stijlBeheer?.stijl])
+  const [labelsVan, setLabelsVan] = useState<Record<string, string[]>>({})
+  const [filter, setFilter] = useState<string[]>([])
+  const [personaliseer, setPersonaliseer] = useState(false)
+  const magStijl = !!stijlBeheer?.magBeheren
+  const labelMap = useMemo(() => new Map(stijl.labels.map((l) => [l.id, l])), [stijl.labels])
+  const labelIds = useCallback((it: SocialContentItem) => (labelsVan[it.id] ?? it.labels ?? []).filter((id) => labelMap.has(id)), [labelsVan, labelMap])
+  const actieveFilter = filter.filter((id) => labelMap.has(id))
+  const items = actieveFilter.length ? alleItems.filter((it) => labelIds(it).some((id) => actieveFilter.includes(id))) : alleItems
+  const zetItemLabels = async (id: string, ids: string[]) => {
+    if (!stijlBeheer) return
+    const vorige = labelsVan[id]
+    setLabelsVan((m) => ({ ...m, [id]: ids }))
+    try {
+      const u = await stijlBeheer.actie({ actie: 'item_labels', item: id, labels: ids })
+      if (u.labels) setLabelsVan((m) => ({ ...m, [id]: u.labels! }))
+    } catch {
+      setLabelsVan((m) => { const n = { ...m }; if (vorige) n[id] = vorige; else delete n[id]; return n })
+    }
+  }
   const [cursor, setCursor] = useState(() => new Date())
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [view, setView] = useState<'month' | 'week'>('month')
@@ -122,15 +180,16 @@ export function ContentCalendar({
   const nu = useMemo(() => nuInBrussel(), [])
   const selectMode = !!selection?.enabled
 
-  const selected = items.find((i) => i.id === selectedId) ?? null
+  const selected = alleItems.find((i) => i.id === selectedId) ?? null
   const today = ymd(new Date())
   const wortel = useRef<HTMLDivElement>(null)
 
   // Van buitenaf geopend: naar de maand van het item, het item selecteren en in beeld brengen.
   useEffect(() => {
     if (!focus) return
-    const it = items.find((i) => i.id === focus.id)
+    const it = alleItems.find((i) => i.id === focus.id)
     if (!it) return
+    setFilter([])
     setView('month')
     setCursor(new Date(`${it.planned_date}T12:00:00`))
     setSelectedId(it.id)
@@ -184,7 +243,10 @@ export function ContentCalendar({
     const Icon = TYPE_ICONS[it.content_type] ?? FileText
     const style = STATUS_STYLE[it.status]
     const plan: Planningkleur = planningkleur(it, nu)
-    const badge = kleurOp === 'planning' ? PLANNING_STIJL[plan].badge : style.badge
+    const fase = faseBadge(it.status, stijl.faseKleuren)
+    const badge = kleurOp === 'planning' ? PLANNING_STIJL[plan].badge : fase.className
+    const stip = faseStip(it.status, stijl.faseKleuren)
+    const lbls = labelIds(it).map((id) => labelMap.get(id)!)
     const isChecked = selection?.selectedIds.has(it.id) ?? false
     // Adminkalender: op welke platformen dit item verschijnt, als kleine labels.
     const kanalen = mode === 'admin' ? (it.platforms?.length ? it.platforms : [it.platform]) : null
@@ -204,10 +266,11 @@ export function ContentCalendar({
             if (lijst && it.id !== selectedId) wortel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
           }
         }}
+        style={kleurOp === 'planning' ? undefined : fase.style}
         className={`text-left ${lijst ? 'text-sm px-2.5 py-2' : 'text-[11px] px-1.5 py-1'} rounded border ${badge}
           hover:opacity-80 transition flex flex-col gap-0.5 w-full min-w-0
           ${isChecked ? 'ring-2 ring-red-400 bg-red-50' : ''}`}
-        title={[it.title, kleurOp === 'planning' ? `${PLANNING_STIJL[plan].label} · ${style.label}` : null, kanaalTekst || null].filter(Boolean).join(' · ')}
+        title={[it.title, kleurOp === 'planning' ? `${PLANNING_STIJL[plan].label} · ${style.label}` : null, kanaalTekst || null, lbls.length ? lbls.map((l) => l.naam).join(', ') : null].filter(Boolean).join(' · ')}
       >
         <span className="flex items-center gap-1 w-full min-w-0">
         {selectMode && (
@@ -217,10 +280,16 @@ export function ContentCalendar({
             {isChecked && <Check className="h-2 w-2 text-white" />}
           </span>
         )}
-        <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${style.dot}`} />
+        <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${stip.className}`} style={stip.style} />
         <Icon className={`${lijst ? 'h-3.5 w-3.5' : 'h-2.5 w-2.5'} shrink-0 opacity-70`} />
         <span className="truncate">{it.planned_time ? <span className="tabular-nums opacity-70">{it.planned_time.slice(0, 5)} </span> : null}{it.title}</span>
         </span>
+        {lbls.length > 0 && (
+          <span className="flex flex-wrap gap-0.5 min-w-0">
+            {lbls.slice(0, lijst ? 10 : 2).map((l) => <LabelPil key={l.id} label={l} klein={!lijst} />)}
+            {!lijst && lbls.length > 2 && <span className="text-[9px] leading-tight opacity-70">+{lbls.length - 2}</span>}
+          </span>
+        )}
         {kanalen && <KanaalLabels platforms={kanalen} compact />}
       </button>
     )
@@ -231,7 +300,8 @@ export function ContentCalendar({
       {/* Script panel — on mobile appears ABOVE calendar when an item is selected */}
       {selected && (
         <div className="lg:hidden">
-          <ScriptPanel item={selected} mode={mode} actions={actions} rechten={rechten} onClose={() => setSelectedId(null)} />
+          <ScriptPanel item={selected} mode={mode} actions={actions} rechten={rechten} onClose={() => setSelectedId(null)}
+            stijl={stijl} itemLabels={selected ? labelIds(selected) : []} magLabels={magStijl} onLabels={zetItemLabels} />
         </div>
       )}
 
@@ -277,6 +347,41 @@ export function ContentCalendar({
             </button>
           </div>
         </div>
+
+        {/* Eigen labels: filteren (iedereen) en beheren (wie de kalender mag aanpassen). */}
+        {stijlBeheer && (stijl.labels.length > 0 || magStijl) && (
+          <div className="flex flex-wrap items-center gap-1.5 px-3 sm:px-4 py-2 border-b border-gray-100">
+            {stijl.labels.length > 0 ? (
+              <>
+                <span className="text-[11px] text-gray-500 mr-0.5">Labels</span>
+                {stijl.labels.map((l) => {
+                  const aan = actieveFilter.includes(l.id)
+                  return (
+                    <button key={l.id} type="button" aria-pressed={aan}
+                      onClick={() => setFilter((f) => (f.includes(l.id) ? f.filter((x) => x !== l.id) : [...f, l.id]))}
+                      className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border ${aan ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}>
+                      <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: l.kleur }} />{l.naam}
+                    </button>
+                  )
+                })}
+                {actieveFilter.length > 0 && (
+                  <button type="button" onClick={() => setFilter([])} className="text-[11px] text-gray-500 underline underline-offset-2 ml-1">Alles tonen</button>
+                )}
+              </>
+            ) : (
+              <span className="text-[11px] text-gray-500">Maak eigen labels voor deze kalender en kies een kleur per fase.</span>
+            )}
+            {magStijl && (
+              <button type="button" onClick={() => setPersonaliseer((v) => !v)} aria-expanded={personaliseer}
+                className={`ml-auto inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border ${personaliseer ? 'bg-black text-white border-black' : 'border-gray-200 hover:bg-gray-50'}`}>
+                <Palette className="h-3.5 w-3.5" />Labels en kleuren
+              </button>
+            )}
+          </div>
+        )}
+        {stijlBeheer && magStijl && personaliseer && (
+          <Personaliseren stijl={stijl} actie={stijlBeheer.actie} onStijl={setStijl} onSluit={() => setPersonaliseer(false)} />
+        )}
 
         {/* Weekdays header */}
         <div className="grid grid-cols-7 border-b border-gray-100">
@@ -328,9 +433,10 @@ export function ContentCalendar({
 
                 {dayItems.length > 0 && (
                   <div className="flex flex-wrap gap-0.5 px-0.5 sm:hidden" aria-hidden>
-                    {dayItems.slice(0, 6).map((it) => (
-                      <span key={it.id} className={`h-1.5 w-1.5 rounded-full ${kleurOp === 'planning' ? PLANNING_STIJL[planningkleur(it, nu)].dot : STATUS_STYLE[it.status].dot}`} />
-                    ))}
+                    {dayItems.slice(0, 6).map((it) => {
+                      const st = kleurOp === 'planning' ? { className: PLANNING_STIJL[planningkleur(it, nu)].dot } : faseStip(it.status, stijl.faseKleuren)
+                      return <span key={it.id} className={`h-1.5 w-1.5 rounded-full ${st.className}`} style={st.style} />
+                    })}
                     {dayItems.length > 6 && <span className="text-[9px] leading-none text-gray-400">+{dayItems.length - 6}</span>}
                   </div>
                 )}
@@ -376,12 +482,16 @@ export function ContentCalendar({
               ))}
               <span className="text-[11px] text-gray-400">· het bolletje blijft de status tonen</span>
             </>
-          ) : (Object.entries(STATUS_STYLE) as [SocialContentStatus, typeof STATUS_STYLE[SocialContentStatus]][]).map(([s, v]) => (
-            <span key={s} className="flex items-center gap-1.5 text-[11px] text-gray-500">
-              <span className={`h-2 w-2 rounded-full ${v.dot}`} />
-              {v.label}
-            </span>
-          ))}
+          ) : (Object.entries(STATUS_STYLE) as [SocialContentStatus, typeof STATUS_STYLE[SocialContentStatus]][]).map(([s, v]) => {
+            const st = faseStip(s, stijl.faseKleuren)
+            return (
+              <span key={s} className="flex items-center gap-1.5 text-[11px] text-gray-500">
+                <span className={`h-2 w-2 rounded-full ${st.className}`} style={st.style} />
+                {v.label}
+              </span>
+            )
+          })}
+          {actieveFilter.length > 0 && <span className="text-[11px] text-gray-500 ml-auto">Gefilterd op {actieveFilter.map((id) => labelMap.get(id)?.naam).join(', ')} · {items.length} van {alleItems.length}</span>}
         </div>
       </div>
 
@@ -393,6 +503,10 @@ export function ContentCalendar({
           actions={actions}
           rechten={rechten}
           onClose={() => setSelectedId(null)}
+          stijl={stijl}
+          itemLabels={selected ? labelIds(selected) : []}
+          magLabels={magStijl}
+          onLabels={zetItemLabels}
         />
       </div>
     </div>
@@ -401,13 +515,17 @@ export function ContentCalendar({
 }
 
 function ScriptPanel({
-  item, mode, actions, rechten, onClose,
+  item, mode, actions, rechten, onClose, stijl = leegStijl, itemLabels = [], magLabels = false, onLabels,
 }: {
   item: SocialContentItem | null
   mode: CalendarMode
   actions: CalendarActions
   rechten?: KalenderRechten
   onClose: () => void
+  stijl?: KalenderStijl
+  itemLabels?: string[]
+  magLabels?: boolean
+  onLabels?: (id: string, ids: string[]) => Promise<void>
 }) {
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<SocialContentItem | null>(null)
@@ -446,6 +564,7 @@ function ScriptPanel({
   const f = form ?? item
   const isAdmin = mode === 'admin'
   const style = STATUS_STYLE[item.status]
+  const fase = faseBadge(item.status, stijl.faseKleuren)
   const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900'
 
   const save = async () => {
@@ -512,7 +631,7 @@ function ScriptPanel({
       <div className="p-4 border-b border-gray-100 flex items-start gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-2">
-            <span className={`status-badge border ${style.badge}`}>{style.label}</span>
+            <span className={`status-badge border ${fase.className}`} style={fase.style}>{style.label}</span>
             <span className="text-xs text-gray-400">{f.planned_date}{f.planned_time ? ` · ${f.planned_time.slice(0, 5)}` : ''}</span>
           </div>
           {statusDoor && (
@@ -545,6 +664,35 @@ function ScriptPanel({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {(itemLabels.length > 0 || (magLabels && onLabels)) && (
+          <div>
+            <div className="text-[10px] text-gray-500 mb-1">Labels</div>
+            {magLabels && onLabels ? (
+              stijl.labels.length === 0 ? (
+                <p className="text-xs text-gray-400">Nog geen labels. Maak ze via “Labels en kleuren” boven de kalender.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1">
+                  {stijl.labels.map((l) => {
+                    const aan = itemLabels.includes(l.id)
+                    return (
+                      <button key={l.id} type="button" aria-pressed={aan}
+                        onClick={() => onLabels(item.id, aan ? itemLabels.filter((x) => x !== l.id) : [...itemLabels, l.id])}
+                        style={aan ? { backgroundColor: l.kleur, borderColor: l.kleur, color: tekstOp(l.kleur) } : undefined}
+                        className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border transition-colors ${aan ? 'font-medium' : 'border-gray-200 text-gray-600 hover:border-gray-400'}`}>
+                        {aan ? <Check className="h-3 w-3" /> : <span className="h-2 w-2 rounded-full" style={{ backgroundColor: l.kleur }} />}
+                        {l.naam}
+                      </button>
+                    )
+                  })}
+                </div>
+              )
+            ) : (
+              <div className="flex flex-wrap gap-1">
+                {itemLabels.map((id) => stijl.labels.find((l) => l.id === id)).filter((l): l is ContentLabel => !!l).map((l) => <LabelPil key={l.id} label={l} />)}
+              </div>
+            )}
+          </div>
+        )}
         {editing && (
           <div className="space-y-2">
             <div className="grid grid-cols-2 gap-2">
@@ -890,5 +1038,117 @@ function ScriptPanel({
       </div>
       )}
     </aside>
+  )
+}
+
+/** Eigen labels en een kleur per fase. Enkel voor deze kalender; klant en team zien hetzelfde. */
+function Personaliseren({
+  stijl, actie, onStijl, onSluit,
+}: {
+  stijl: KalenderStijl
+  actie: KalenderStijlBeheer['actie']
+  onStijl: (s: KalenderStijl) => void
+  onSluit: () => void
+}) {
+  const [naam, setNaam] = useState('')
+  const [kleur, setKleur] = useState(KLEUREN[7])
+  const [bewerk, setBewerk] = useState<ContentLabel | null>(null)
+  const [bezig, setBezig] = useState(false)
+  const inp = 'w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900'
+
+  const doe = async (b: Record<string, unknown>): Promise<boolean> => {
+    setBezig(true)
+    try { const u = await actie(b); if (u.stijl) onStijl(u.stijl); return true } catch { return false } finally { setBezig(false) }
+  }
+  const voegToe = async () => {
+    if (!naam.trim()) return
+    if (await doe({ actie: 'label_maak', naam, kleur })) setNaam('')
+  }
+  const faseKleur = async (fase: FaseKey, k: string | null) => {
+    const vorige = stijl
+    const kleuren: FaseKleuren = { ...stijl.faseKleuren }
+    if (k) kleuren[fase] = k; else delete kleuren[fase]
+    onStijl({ ...stijl, faseKleuren: kleuren })
+    if (!(await doe({ actie: 'kleuren', kleuren }))) onStijl(vorige)
+  }
+
+  return (
+    <div className="border-b border-gray-100 bg-gray-50/60 px-3 sm:px-4 py-4 grid gap-5 md:grid-cols-2">
+      <section className="space-y-2.5">
+        <div>
+          <h3 className="text-sm font-semibold">Eigen labels</h3>
+          <p className="text-xs text-gray-500">Enkel voor deze kalender, bijvoorbeeld “Nieuwbouwproject” of “Renovatiepand”. Een label verandert niets aan de post zelf.</p>
+        </div>
+        {stijl.labels.length > 0 && (
+          <ul className="space-y-1">
+            {stijl.labels.map((l) => bewerk?.id === l.id ? (
+              <li key={l.id} className="rounded-lg border border-gray-200 bg-white p-2 space-y-2">
+                <input className={inp} value={bewerk.naam} maxLength={40} onChange={(e) => setBewerk({ ...bewerk, naam: e.target.value })} aria-label="Naam van het label"
+                  onKeyDown={async (e) => { if (e.key === 'Enter') { e.preventDefault(); if (await doe({ actie: 'label_wijzig', id: l.id, naam: bewerk.naam, kleur: bewerk.kleur })) setBewerk(null) } }} />
+                <KleurKiezer waarde={bewerk.kleur} onKies={(k) => setBewerk({ ...bewerk, kleur: k })} />
+                <div className="flex gap-2">
+                  <button type="button" disabled={bezig || !bewerk.naam.trim()} onClick={async () => { if (await doe({ actie: 'label_wijzig', id: l.id, naam: bewerk.naam, kleur: bewerk.kleur })) setBewerk(null) }} className="btn-primary text-xs flex-1">Bewaren</button>
+                  <button type="button" onClick={() => setBewerk(null)} className="btn-secondary text-xs">Annuleer</button>
+                </div>
+              </li>
+            ) : (
+              <li key={l.id} className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-2 py-1.5">
+                <LabelPil label={l} />
+                <span className="flex-1" />
+                <button type="button" onClick={() => setBewerk(l)} aria-label={`${l.naam} aanpassen`} className="h-6 w-6 flex items-center justify-center rounded hover:bg-gray-100 text-gray-500"><Pencil className="h-3.5 w-3.5" /></button>
+                <button type="button" disabled={bezig} aria-label={`${l.naam} verwijderen`}
+                  onClick={() => { if (confirm(`Label “${l.naam}” verwijderen? Het verdwijnt ook van de posts waar het op staat. De posts zelf blijven.`)) void doe({ actie: 'label_verwijder', id: l.id }) }}
+                  className="h-6 w-6 flex items-center justify-center rounded hover:bg-red-50 text-gray-500 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="rounded-lg border border-dashed border-gray-300 bg-white p-2 space-y-2">
+          <div className="flex gap-2">
+            <input className={inp} value={naam} maxLength={40} onChange={(e) => setNaam(e.target.value)} placeholder="Nieuw label" aria-label="Nieuw label"
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void voegToe() } }} />
+            <button type="button" disabled={bezig || !naam.trim()} onClick={voegToe} className="btn-primary text-xs shrink-0"><Plus className="h-3.5 w-3.5" />Toevoegen</button>
+          </div>
+          <KleurKiezer waarde={kleur} onKies={setKleur} />
+        </div>
+      </section>
+
+      <section className="space-y-2.5">
+        <div className="flex items-start gap-2">
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold">Kleur per fase</h3>
+            <p className="text-xs text-gray-500">Zo zie je in één oogopslag waar elke post staat.</p>
+          </div>
+          <button type="button" onClick={onSluit} aria-label="Sluiten" className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400"><X className="h-4 w-4" /></button>
+        </div>
+        <ul className="space-y-2">
+          {FASES.map((f) => {
+            const eigen = stijl.faseKleuren[f.key]
+            return (
+              <li key={f.key} className="rounded-lg border border-gray-200 bg-white px-2.5 py-2">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: eigen ?? f.standaard }} />
+                  <span className="text-xs font-medium">{f.label}</span>
+                  {eigen && <button type="button" disabled={bezig} onClick={() => faseKleur(f.key, null)} className="ml-auto text-[11px] text-gray-500 underline underline-offset-2">Standaard</button>}
+                </div>
+                <KleurKiezer waarde={eigen ?? f.standaard} onKies={(k) => faseKleur(f.key, k === f.standaard ? null : k)} />
+              </li>
+            )
+          })}
+        </ul>
+      </section>
+    </div>
+  )
+}
+
+function KleurKiezer({ waarde, onKies }: { waarde: string; onKies: (k: string) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Kleur">
+      {KLEUREN.map((k) => (
+        <button key={k} type="button" role="radio" aria-checked={waarde === k} aria-label={k} onClick={() => onKies(k)}
+          className={`h-5 w-5 rounded-full border border-black/10 transition ${waarde === k ? 'ring-2 ring-offset-1 ring-gray-900' : 'hover:scale-110'}`}
+          style={{ backgroundColor: k }} />
+      ))}
+    </div>
   )
 }

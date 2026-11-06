@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Check, X, Loader2, Paperclip, Plus, Clock, Trash2, Pencil, FileDown, History, Undo2, AlertTriangle } from 'lucide-react'
+import { Check, X, Loader2, Paperclip, Plus, Clock, Trash2, Pencil, FileDown, History, Undo2, AlertTriangle, ExternalLink } from 'lucide-react'
+import { linkDomein } from '@/lib/aankoop-link'
 import { toast } from 'sonner'
 import { formatEuro, formatDate } from '@/lib/utils'
 import { FOUNDER_EMAILS, founderName } from '@/lib/founders'
@@ -17,6 +18,8 @@ export type Purchase = {
   reference?: string | null; version?: number
   deleted_at?: string | null; deleted_by_email?: string | null
   confirmed_at?: string | null; confirmed_by_email?: string | null
+  /** Optioneel: waar je het bestelt. */
+  bestel_link?: string | null
 }
 export type Certificaat = { version: number; certificate_no: string; file_name: string; status: 'actueel' | 'vervangen'; generated_at: string }
 export type Wijziging = { id: number; version: number | null; actie: string; actor_email: string | null; oud: Record<string, unknown> | null; nieuw: Record<string, unknown> | null; opmerking: string | null; created_at: string }
@@ -29,7 +32,7 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   approved_under_threshold: { label: 'Goedgekeurd (onder drempel)', cls: 'bg-green-100 text-green-700' },
   rejected: { label: 'Afgekeurd', cls: 'bg-red-100 text-red-700' },
 }
-const VELD: Record<string, string> = { title: 'Titel', description: 'Omschrijving', amount_excl: 'Bedrag excl.', vat_pct: 'Btw %', supplier: 'Leverancier', category: 'Categorie', entry_date: 'Datum', status: 'Status', deleted_at: 'Verwijderd' }
+const VELD: Record<string, string> = { title: 'Titel', description: 'Omschrijving', amount_excl: 'Bedrag excl.', vat_pct: 'Btw %', supplier: 'Leverancier', category: 'Categorie', entry_date: 'Datum', status: 'Status', deleted_at: 'Verwijderd', bestel_link: 'Bestellink' }
 const ACTIE: Record<string, string> = { gewijzigd: 'Aangepast', nieuwe_versie: 'Nieuwe versie', verwijderd: 'Verwijderd', hersteld: 'Hersteld' }
 
 export function PurchaseCard({ purchase: p, approvals, currentEmail, attachmentUrl, rechten, certificaten = [], wijzigingen = [], archief = false }: {
@@ -114,6 +117,9 @@ export function PurchaseCard({ purchase: p, approvals, currentEmail, attachmentU
 
       {p.description && <p className="text-sm text-gray-600 mb-2">{p.description}</p>}
       <div className="flex items-center gap-3 flex-wrap mb-1">
+        {p.bestel_link && /^https?:\/\//i.test(p.bestel_link) && (
+          <a href={p.bestel_link} target="_blank" rel="noopener noreferrer nofollow" className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline" title={p.bestel_link}><ExternalLink className="h-3 w-3" />Bestelpagina · {linkDomein(p.bestel_link)}</a>
+        )}
         {attachmentUrl && <a href={attachmentUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"><Paperclip className="h-3 w-3" />Bijlage</a>}
         {/* Bewijsdocument: één per bevestigde versie; downloaden geeft altijd hetzelfde bestand. */}
         {bevestigd && r.bewijs && (
@@ -202,7 +208,7 @@ export function PurchaseCard({ purchase: p, approvals, currentEmail, attachmentU
 
       {bewerk && (
         <PurchaseForm
-          purchase={{ id: p.id, reference: p.reference ?? null, version: p.version ?? 1, status: p.status, title: p.title, description: p.description, amount_excl: Number(p.amount_excl), vat_pct: Number(p.vat_pct), supplier: p.supplier, category: p.category, entry_date: p.entry_date }}
+          purchase={{ id: p.id, reference: p.reference ?? null, version: p.version ?? 1, status: p.status, title: p.title, description: p.description, amount_excl: Number(p.amount_excl), vat_pct: Number(p.vat_pct), supplier: p.supplier, category: p.category, entry_date: p.entry_date, bestel_link: p.bestel_link ?? null }}
           onClose={() => setBewerk(false)} />
       )}
 

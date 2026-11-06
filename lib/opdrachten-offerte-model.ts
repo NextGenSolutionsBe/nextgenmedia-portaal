@@ -4,9 +4,10 @@
  *  - Een offerte aangemaakt → een kaart in "Offerte gestuurd": de kaart van het
  *    project, anders de lopende kaart van die klant (Opvolging of Offerte, nog
  *    zonder contract), anders een nieuwe kaart.
- *  - Offerte bevestigd door de klant → de kaart blijft in Offerte gestuurd met
- *    een groene label "Offerte bevestigd" en er komt een taak: contract opmaken
- *    of het project in gang zetten. Dat beslist het team zelf.
+ *  - Offerte bevestigd door de klant → de kaart schuift vanzelf naar Offerte
+ *    geaccepteerd en er komt een taak: contract opmaken of het project in gang
+ *    zetten. Dat beslist het team zelf. Zette iemand de kaart bewust terug,
+ *    dan blijft ze daar met de groene label.
  *  - In gang zetten = naar In uitvoering (de offerte volstaat). Contract
  *    aanmaken = het contract hangt aan deze kaart en de kaart schuift vanzelf
  *    naar Contract verstuurd, daarna getekend.
@@ -16,7 +17,11 @@ import { kolomVan, type KolomKey } from './opdrachten-kanban'
 
 export type KaartKandidaat = { id: string; status: string; contract_id: string | null; created_at: string | null }
 
-/** Welke lopende kaart van de klant hoort bij een nieuwe offerte? De recentste in Opvolging of Offerte zonder contract. */
+/**
+ * Welke lopende kaart van de klant hoort bij een nieuwe offerte? De recentste
+ * in Opvolging of Offerte zonder contract. Een kaart met een al geaccepteerde
+ * offerte krijgt er geen tweede bij: dat is een nieuw project.
+ */
 export function kiesKaartVoorOfferte(kaarten: KaartKandidaat[]): string | null {
   const open = kaarten
     .filter((k) => !k.contract_id && (kolomVan(k.status) === 'potentieel' || kolomVan(k.status) === 'offerte'))
@@ -27,9 +32,18 @@ export function kiesKaartVoorOfferte(kaarten: KaartKandidaat[]): string | null {
 /** Moet de kaart naar Offerte gestuurd? Enkel vanuit Opvolging; verder op het bord blijft ze staan. */
 export const moetNaarOfferte = (status: string): boolean => kolomVan(status) === 'potentieel'
 
-/** Toont de kaart de groene label? Bevestigde offerte en nog vóór het contract of de uitvoering. */
+/**
+ * Toont de kaart de groene label? Een bevestigde offerte op een kaart die nog
+ * in Opvolging of Offerte gestuurd staat (bv. omdat iemand ze bewust terugzette).
+ * In de kolom Offerte geaccepteerd zegt de kolom het al.
+ */
 export function offerteBevestigdLabel(offerteStatus: string | null | undefined, kolom: KolomKey): boolean {
   return offerteStatus === 'geaccepteerd' && (kolom === 'potentieel' || kolom === 'offerte')
+}
+
+/** Het blok "contract aanmaken of in gang zetten" in het kaartvenster: bevestigde offerte, nog vóór het contract. */
+export function toonVolgendeStapNaOfferte(offerteStatus: string | null | undefined, kolom: KolomKey): boolean {
+  return kolom === 'geaccepteerd' || offerteBevestigdLabel(offerteStatus, kolom)
 }
 
 /** n werkdagen na een dag (JJJJ-MM-DD), weekends overgeslagen. */

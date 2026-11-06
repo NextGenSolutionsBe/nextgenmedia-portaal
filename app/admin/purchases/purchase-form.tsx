@@ -19,9 +19,10 @@ export type BewerkbareAanvraag = {
   id: string; reference: string | null; version: number; status: string
   title: string; description: string | null; amount_excl: number; vat_pct: number
   supplier: string | null; category: string | null; entry_date: string
+  bestel_link?: string | null
 }
 const BEVESTIGD = ['approved', 'approved_under_threshold']
-const LABEL: Record<string, string> = { title: 'Titel', description: 'Omschrijving', amount_excl: 'Bedrag excl. btw', vat_pct: 'Btw %', supplier: 'Leverancier', category: 'Categorie', entry_date: 'Datum' }
+const LABEL: Record<string, string> = { title: 'Titel', description: 'Omschrijving', amount_excl: 'Bedrag excl. btw', vat_pct: 'Btw %', supplier: 'Leverancier', category: 'Categorie', entry_date: 'Datum', bestel_link: 'Bestellink' }
 
 /**
  * Hetzelfde formulier voor aanmaken én aanpassen. Zonder `purchase` gedraagt
@@ -36,10 +37,11 @@ export function PurchaseForm({ purchase, onClose }: { purchase?: BewerkbareAanvr
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const today = new Date().toISOString().slice(0, 10)
-  const leeg = { title: '', description: '', amount_excl: '', vat_pct: '21', supplier: '', category: 'Hardware', entry_date: today }
+  const leeg = { title: '', description: '', amount_excl: '', vat_pct: '21', supplier: '', category: 'Hardware', entry_date: today, bestel_link: '' }
   const start = purchase ? {
     title: purchase.title ?? '', description: purchase.description ?? '', amount_excl: String(Number(purchase.amount_excl)), vat_pct: String(Number(purchase.vat_pct)),
     supplier: purchase.supplier ?? '', category: purchase.category ?? 'Hardware', entry_date: (purchase.entry_date ?? today).slice(0, 10),
+    bestel_link: purchase.bestel_link ?? '',
   } : leeg
   const [form, setForm] = useState(start)
   const [file, setFile] = useState<File | null>(null)
@@ -119,7 +121,7 @@ export function PurchaseForm({ purchase, onClose }: { purchase?: BewerkbareAanvr
         {bewerken && overzicht ? (
           <div className="p-5 space-y-4">
             <p className="text-sm text-gray-700">Controleer de wijzigingen vóór je opslaat.</p>
-            {wasBevestigd && (
+            {wasBevestigd && wijzigingen.some((w) => w.veld !== 'bestel_link') && (
               <div className="text-sm rounded-lg px-3 py-2.5 border bg-amber-50 border-amber-200 text-amber-900 flex gap-2">
                 <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
                 <span>Deze aanvraag is al bevestigd. Een wijziging maakt een nieuwe versie en een nieuw bewijsdocument aan. Het huidige bewijsdocument blijft bewaard als vervangen.{needsApproval ? ' De aanvraag moet opnieuw goedgekeurd worden door de twee andere zaakvoerders.' : ''}</span>
@@ -164,6 +166,10 @@ export function PurchaseForm({ purchase, onClose }: { purchase?: BewerkbareAanvr
               <div><label className={lbl}>Categorie</label><select className={inp} value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value }))}>{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
               <div><label className={lbl}>Datum</label><input type="date" className={inp} value={form.entry_date} onChange={e => setForm(p => ({ ...p, entry_date: e.target.value }))} /></div>
               {!bewerken && <div><label className={lbl}>Bijlage (optioneel)</label><input type="file" className="text-xs w-full" onChange={e => setFile(e.target.files?.[0] ?? null)} /></div>}
+            </div>
+            <div>
+              <label className={lbl}>Link naar de bestelpagina <span className="font-normal text-gray-400">(optioneel)</span></label>
+              <input type="url" inputMode="url" className={inp} value={form.bestel_link} onChange={e => setForm(p => ({ ...p, bestel_link: e.target.value }))} placeholder="https://…" />
             </div>
 
             {excl > 0 && (

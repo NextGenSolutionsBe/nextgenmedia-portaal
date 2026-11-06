@@ -7189,3 +7189,28 @@ REVOKE ALL ON public.vesting_certificaten FROM anon, authenticated;
 -- ── Projecten ↔ offertes (4 nov 2026) ────────────────────────────────────────
 -- Kaart die de app maakte bij een offerte: valt weg als dat concept weggegooid wordt (en er niets anders aan hangt).
 ALTER TABLE public.opdrachten ADD COLUMN IF NOT EXISTS aangemaakt_door_offerte uuid;
+
+-- ── Contentkalender personaliseren (6 nov 2026) ──────────────────────────────
+-- Eigen labels per klant (enkel voor die kalender), labels op een post en eigen kleuren per fase.
+CREATE TABLE IF NOT EXISTS public.content_labels (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  naam text NOT NULL,
+  kleur text NOT NULL DEFAULT '#6b7280',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by text
+);
+CREATE UNIQUE INDEX IF NOT EXISTS content_labels_naam ON public.content_labels (client_id, lower(naam));
+ALTER TABLE public.social_content_items ADD COLUMN IF NOT EXISTS labels uuid[] NOT NULL DEFAULT '{}';
+CREATE TABLE IF NOT EXISTS public.content_kalender_stijl (
+  client_id uuid PRIMARY KEY REFERENCES public.clients(id) ON DELETE CASCADE,
+  fase_kleuren jsonb NOT NULL DEFAULT '{}'::jsonb,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text
+);
+ALTER TABLE public.content_labels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.content_kalender_stijl ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.content_labels, public.content_kalender_stijl FROM anon, authenticated;
+
+-- ── Aankopen: optionele link naar de bestelpagina (6 nov 2026) ─────────────
+ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS bestel_link text;

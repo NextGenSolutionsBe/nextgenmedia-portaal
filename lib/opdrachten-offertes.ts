@@ -1,7 +1,7 @@
 import 'server-only'
 import { bedrijfVan, kolomVan, projectVerantwoordelijke, raadDiensten, statusVoorKolom, ontbreektVoorFase } from '@/lib/opdrachten-kanban'
 import { voegNotitieToe } from '@/lib/opdrachten-notities'
-import { vandaagISO, type OpdrachtStatus } from '@/lib/opdrachten'
+import { magAutomatischNaar, vandaagISO, type OpdrachtStatus } from '@/lib/opdrachten'
 import { contractTaak, kiesKaartVoorOfferte, moetNaarOfferte, taakVoorWie, werkdagenLater, type KaartKandidaat } from '@/lib/opdrachten-offerte-model'
 import { leadTaakOpties, maakOpdrachtTaak, taakAfvinken } from '@/lib/sales/lead-taken-server'
 
@@ -11,8 +11,8 @@ import { leadTaakOpties, maakOpdrachtTaak, taakAfvinken } from '@/lib/sales/lead
  * Elke offerte hangt aan een kaart in Projecten: bij het aanmaken (en bij het
  * openen van het bord voor wat ervoor bestond) koppelt de app de offerte aan
  * de kaart van het project of van de klant, of maakt ze een kaart. Die kaart
- * staat dan in "Offerte gestuurd". Bevestigt de klant, dan komt er een taak in
- * ClickUp (contract opmaken of in gang zetten). De testklant krijgt nooit een kaart.
+ * staat dan in "Offerte gestuurd". Bevestigt de klant, dan schuift ze naar
+ * "Offerte geaccepteerd" en komt er een taak in ClickUp (contract opmaken of in gang zetten). De testklant krijgt nooit een kaart.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -143,15 +143,33 @@ export async function zorgVoorOfferteKaarten(admin: Admin): Promise<number> {
 }
 
 /**
- * De klant bevestigde de offerte: kaart in Offerte gestuurd (met de groene
- * label op het bord) en één taak in ClickUp om het contract op te maken of het
- * project in gang te zetten. Dezelfde offerte maakt nooit twee taken.
+ * Bevestigde offerte: de kaart vanzelf naar Offerte geaccepteerd. Enkel vooruit
+ * (vanuit Opvolging of Offerte gestuurd) en niet als iemand ze daarna bewust
+ * terugzette (auto_status). Het bord doet hetzelfde bij het openen.
+ */
+async function naarGeaccepteerd(admin: Admin, kaartId: string, o: OfferteRij): Promise<boolean> {
+  const { data } = await admin.from('opdrachten').select('id, status, auto_status').eq('id', kaartId).maybeSingle()
+  const k = data as { id: string; status: OpdrachtStatus; auto_status: string | null } | null
+  if (!k || !magAutomatischNaar(k.status, 'interesse', k.auto_status)) return false
+  const { data: gelukt } = await admin.from('opdrachten').update({
+    status: 'interesse', status_bron: 'automatisch', auto_status: 'interesse', status_gewijzigd_op: nu(), updated_at: nu(),
+  }).eq('id', k.id).eq('status', k.status).select('id')
+  if (!(gelukt ?? []).length) return false
+  await voegNotitieToe(admin, k.id, `Offerte "${o.titel}" bevestigd${o.geaccepteerd_door ? ` door ${o.geaccepteerd_door}` : ''}: de kaart staat nu in Offerte geaccepteerd.`, 'systeem', null).catch(() => null)
+  return true
+}
+
+/**
+ * De klant bevestigde de offerte: kaart naar Offerte geaccepteerd en één taak
+ * in ClickUp om het contract op te maken of het project in gang te zetten.
+ * Dezelfde offerte maakt nooit twee taken.
  */
 export async function naOfferteAkkoord(admin: Admin, offerteId: string): Promise<void> {
   const { opdrachtId } = await kaartVoorOfferte(admin, offerteId)
   if (!opdrachtId) return
   const o = await leesOfferte(admin, offerteId)
   if (!o || o.status !== 'geaccepteerd') return
+  await naarGeaccepteerd(admin, opdrachtId, o).catch((e) => console.warn('[opdrachten] naar Offerte geaccepteerd mislukt:', e instanceof Error ? e.message : e))
   const { data: k } = await admin.from('opdrachten').select('verantwoordelijke, merk').eq('id', opdrachtId).maybeSingle()
   const kaart = k as { verantwoordelijke: string | null; merk: string | null } | null
   let klant = o.klant_naam

@@ -15,12 +15,12 @@ const PER_KOLOM = 30
 
 /** Een rustige stip per fase in plaats van volle kleurvlakken. */
 const FASE_STIP: Record<KolomKey, string> = {
-  potentieel: 'bg-slate-400', offerte: 'bg-violet-500', contract: 'bg-blue-500', getekend: 'bg-teal-500',
+  potentieel: 'bg-slate-400', offerte: 'bg-violet-500', geaccepteerd: 'bg-lime-500', contract: 'bg-blue-500', getekend: 'bg-teal-500',
   uitvoering: 'bg-amber-500', afgerond: 'bg-emerald-500', stopgezet: 'bg-rose-400',
 }
 
 /**
- * Het bord: zeven smalle kolommen met compacte witte kaarten. Slepen met de
+ * Het bord: acht smalle kolommen met compacte witte kaarten. Slepen met de
  * muis; op een touchscherm (en voor wie liever klikt) via het menu "…" op de
  * kaart. De kleur van de dienst is een stip, het bedrag staat rechts.
  */
@@ -162,7 +162,7 @@ function Kaart({ o, sleept, menuOpen, onOpen, onMenu, onKolom, onDragStart, onDr
               <Check className="h-3 w-3" />Offerte bevestigd · contract aanmaken of in gang zetten
             </p>
           )}
-          {o.offerte && (kolom === 'potentieel' || kolom === 'offerte') ? (
+          {o.offerte && (kolom === 'potentieel' || kolom === 'offerte' || kolom === 'geaccepteerd') ? (
             <p className={`mt-1 text-[11px] flex items-center gap-1 min-w-0 ${o.offerte.status === 'geaccepteerd' ? 'text-emerald-700 font-medium' : o.offerte.klant_geopend_op ? 'text-gray-700' : 'text-gray-400'}`}>
               <Send className="h-3 w-3 shrink-0" />
               <span className="truncate">{o.offerte.status === 'geaccepteerd' ? `Bevestigd${o.offerte.geaccepteerd_op ? ` op ${datumKort(o.offerte.geaccepteerd_op)}` : ''}` : geopendTekst(o.offerte.klant_geopend_op) ?? 'Offerte nog niet geopend door de klant'}</span>

@@ -60,6 +60,8 @@ const SECTIONS: NavSection[] = [
     // Het werk zelf: plannen, maken en opleveren.
     title: 'Uitvoering',
     items: [
+      // De contentkalenders per klant (ingeplande posts, feedback van de klant).
+      { label: 'Social media', href: '/admin/services/social-media', icon: Calendar, module: 'content' },
       { label: 'Metricool', href: '/admin/metricool', icon: CalendarClock, module: 'metricool', exact: true },
       { label: 'Video-opleveringen', href: '/admin/opleveringen', icon: Film, module: 'opleveringen' },
       // Enkel nog onderhoud: wanneer start en loopt elk onderhoudscontract af.
