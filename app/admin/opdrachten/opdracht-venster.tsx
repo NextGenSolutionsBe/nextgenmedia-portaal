@@ -18,7 +18,7 @@ import { KlantKiezer, type KlantOptie } from '@/components/admin/klant-kiezer'
 import { ClickupTaken } from '@/components/admin/clickup-taken'
 import { OffertesBij } from '@/components/admin/offertes-bij'
 import { BtwOpzoeken } from '@/components/admin/btw-opzoeken'
-import { offerteBevestigdLabel } from '@/lib/opdrachten-offerte-model'
+import { toonVolgendeStapNaOfferte } from '@/lib/opdrachten-offerte-model'
 import {
   FACTUUR_LABEL, datumKort, hoeLangGeleden,
   type KaartOpdracht, type Klant, type ContractOptie, type FactuurOptie, type Notitie,
@@ -194,7 +194,7 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
 
         <div className="flex-1 overflow-y-auto">
           {/* Offerte bevestigd: zelf beslissen of er een contract nodig is of de offerte volstaat. */}
-          {o && offerteBevestigdLabel(o.offerte?.status, kolom) && (
+          {o && toonVolgendeStapNaOfferte(o.offerte?.status, kolom) && (
             <OfferteBevestigd o={o} onVernieuw={onVernieuw} />
           )}
           {/* Fase: meteen verplaatsen, zoals slepen op het bord. */}
@@ -536,8 +536,8 @@ function OfferteBevestigd({ o, onVernieuw }: { o: NonNullable<Parameters<typeof 
   const op = o.offerte?.geaccepteerd_op ? datumKort(o.offerte.geaccepteerd_op.slice(0, 10)) : null
   return (
     <section className="px-5 py-4 border-b border-emerald-200 bg-emerald-50">
-      <p className="text-sm font-semibold text-emerald-900 flex items-center gap-2"><Check className="h-4 w-4" />Offerte bevestigd{op ? ` op ${op}` : ''}</p>
-      <p className="mt-0.5 text-xs text-emerald-900/80">{o.offerte?.titel ? `"${o.offerte.titel}". ` : ''}Volstaat de offerte, zet het project in gang. Is er een contract nodig, maak het aan; het hangt dan aan deze kaart.</p>
+      <p className="text-sm font-semibold text-emerald-900 flex items-center gap-2"><Check className="h-4 w-4" />{o.offerte?.status === 'geaccepteerd' ? `Offerte bevestigd${op ? ` op ${op}` : ''}` : 'De klant wil verder'}</p>
+      <p className="mt-0.5 text-xs text-emerald-900/80">{o.offerte?.status === 'geaccepteerd' && o.offerte.titel ? `"${o.offerte.titel}". ` : ''}Volstaat de offerte, zet het project in gang. Is er een contract nodig, maak het aan; het hangt dan aan deze kaart.</p>
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" onClick={inGang} disabled={bezig} className="btn-primary text-sm">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}In gang zetten</button>
         <Link href={`/admin/contracts/templates?${query}`} className="btn-secondary text-sm"><FileSignature className="h-4 w-4" />Contract aanmaken</Link>

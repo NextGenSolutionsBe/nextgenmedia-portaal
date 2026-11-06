@@ -1,4 +1,5 @@
 import { leesGetal } from '@/lib/getal'
+import { leesBestelLink } from '@/lib/aankoop-link'
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
@@ -42,6 +43,10 @@ export async function POST(req: NextRequest) {
     if (!title) return NextResponse.json({ error: 'Titel is verplicht' }, { status: 400 })
     if (!amountExcl || amountExcl <= 0) return NextResponse.json({ error: 'Bedrag is verplicht' }, { status: 400 })
 
+    // Optionele link naar de bestelpagina.
+    const link = leesBestelLink(fd.get('bestel_link'))
+    if (!link.ok) return NextResponse.json({ error: link.fout }, { status: 400 })
+
     const incl = amountExcl * (1 + vatPct / 100)
     const needsApproval = incl > THRESHOLD
     const isConcept = fd.get('concept') === 'true'
@@ -63,7 +68,7 @@ export async function POST(req: NextRequest) {
     let reference: string | null = null
     try { reference = await volgendNummer(admin, 'aanvraag', new Date().getFullYear()) } catch { reference = null }
 
-    const { data, error } = await admin.from('purchases').insert({
+    const rij: Record<string, unknown> = {
       reference,
       title, description: (fd.get('description') as string)?.trim() || null,
       amount_excl: amountExcl, vat_pct: vatPct,
@@ -72,8 +77,12 @@ export async function POST(req: NextRequest) {
       requester_user_id: actor.id, requester_email: actor.email ?? null,
       entry_date: (fd.get('entry_date') as string) || new Date().toISOString().slice(0, 10),
       attachment_path: attachmentPath, status, needs_approval: needsApproval,
-    }).select('id').single()
-    if (error) throw new Error(error.message)
+      ...(link.link ? { bestel_link: link.link } : {}),
+    }
+    let { data, error } = await admin.from('purchases').insert(rij).select('id').single()
+    // Vóór de migratie: zonder de kolom bestel_link.
+    if (error && /bestel_link/i.test(error.message)) { delete rij.bestel_link; ({ data, error } = await admin.from('purchases').insert(rij).select('id').single()) }
+    if (error || !data) throw new Error(error?.message ?? 'Bewaren mislukt')
     // Onder de drempel is de aanvraag meteen bevestigd → bewijsdocument (best-effort).
     if (status === 'approved_under_threshold') { try { await bevestigAankoop(admin, data.id, actor.email ?? null) } catch (e) { console.error('[purchases] bewijs:', e instanceof Error ? e.message : e) } }
 

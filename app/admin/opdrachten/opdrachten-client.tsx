@@ -25,9 +25,10 @@ const WEERGAVE_SLEUTEL = 'ngm-opdrachten-weergave'
 /**
  * Projecten: één overzicht voor nieuwe leads en lopende projecten, als bord of
  * als lijst. Eén kaart per project, ook meerdere per klant. Opvolging →
- * Offerte gestuurd → Contract verstuurd → Contract getekend → In uitvoering →
- * Afgerond, of Verloren. Een contract opmaken, laten tekenen en volledig
- * factureren schuiven de kaart vanzelf door; In uitvoering zet je zelf.
+ * Offerte gestuurd → Offerte geaccepteerd → Contract verstuurd → Contract
+ * getekend → In uitvoering → Afgerond, of Verloren. Een offerte maken of laten
+ * bevestigen, een contract opmaken, laten tekenen en volledig factureren
+ * schuiven de kaart vanzelf door; In uitvoering zet je zelf.
  */
 export function OpdrachtenClient() {
   const [rijen, setRijen] = useState<KaartOpdracht[]>([])

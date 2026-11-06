@@ -1,4 +1,5 @@
 import { leesGetal } from '@/lib/getal'
+import { leesBestelLink } from '@/lib/aankoop-link'
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
@@ -53,6 +54,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (!nieuw.amount_excl || Number(nieuw.amount_excl) <= 0) return NextResponse.json({ error: 'Bedrag is verplicht' }, { status: 400 })
     if (Number(nieuw.vat_pct) < 0 || Number(nieuw.vat_pct) > 100) return NextResponse.json({ error: 'Btw % moet tussen 0 en 100 liggen' }, { status: 400 })
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(nieuw.entry_date))) return NextResponse.json({ error: 'Datum is ongeldig' }, { status: 400 })
+    // De bestellink is enkel een verwijzing: wijzigen maakt geen nieuwe versie en raakt geen goedkeuring.
+    const link = 'bestel_link' in b ? leesBestelLink(b.bestel_link) : null
+    if (link && !link.ok) return NextResponse.json({ error: link.fout }, { status: 400 })
+    const linkWas = (p.bestel_link as string | null | undefined) ?? null
+    const linkGewijzigd = !!link && link.ok && link.link !== linkWas
 
     // Wat verandert er echt?
     const oud: Record<string, unknown> = {}; const wijzigingen: Record<string, unknown> = {}
@@ -61,7 +67,22 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       const wordt = nieuw[v] === null || nieuw[v] === undefined ? null : (v === 'amount_excl' || v === 'vat_pct' ? Number(nieuw[v]) : String(nieuw[v]))
       if (was !== wordt) { oud[v] = was; wijzigingen[v] = wordt }
     }
-    if (Object.keys(wijzigingen).length === 0) return NextResponse.json({ ok: true, ongewijzigd: true })
+    if (Object.keys(wijzigingen).length === 0) {
+      if (!linkGewijzigd || !link?.ok) return NextResponse.json({ ok: true, ongewijzigd: true })
+      const { error: e } = await admin.from('purchases').update({ bestel_link: link.link }).eq('id', params.id)
+      if (e) return NextResponse.json({ error: /bestel_link/i.test(e.message) ? 'De bestellink kan nog niet bewaard worden (databank wordt bijgewerkt).' : e.message }, { status: 400 })
+      await admin.from('purchase_edits').insert({
+        purchase_id: params.id, version: Number(p.version ?? 1), actie: 'gewijzigd',
+        actor_user_id: actor.id, actor_email: actor.email, oud: { bestel_link: linkWas }, nieuw: { bestel_link: link.link }, opmerking: tekst(b.opmerking),
+      })
+      const meta = requestMeta(req)
+      await logAudit({
+        action: 'purchase.update', entityType: 'purchase', entityId: params.id, summary: `Aankoopaanvraag ${p.reference ?? ''}: bestellink ${link.link ? 'aangepast' : 'verwijderd'}`,
+        actorUserId: actor.id, actorEmail: actor.email, actorRole: actor.isAdmin ? 'admin' : 'staff', ip: meta.ip, userAgent: meta.userAgent,
+      })
+      try { revalidatePath('/admin/purchases') } catch { }
+      return NextResponse.json({ ok: true, status: String(p.status), versie: Number(p.version ?? 1), goedkeuringenVervallen: false, certificaat: null })
+    }
 
     const incl = Number(nieuw.amount_excl) * (1 + Number(nieuw.vat_pct) / 100)
     const needsApproval = incl > THRESHOLD
@@ -69,7 +90,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const materieel = MATERIEEL.some((v) => v in wijzigingen)
     const opmerking = tekst(b.opmerking)
     const nu = new Date().toISOString()
-    const update: Record<string, unknown> = { ...wijzigingen, needs_approval: needsApproval }
+    const update: Record<string, unknown> = { ...wijzigingen, needs_approval: needsApproval, ...(linkGewijzigd && link?.ok ? { bestel_link: link.link } : {}) }
     let nieuweStatus = String(p.status)
     let nieuweVersie = Number(p.version ?? 1)
     let goedkeuringenVervallen = false
@@ -102,8 +123,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
     // Concept: velden aanpassen, status blijft concept.
 
-    const { error } = await admin.from('purchases').update(update).eq('id', params.id)
+    let { error } = await admin.from('purchases').update(update).eq('id', params.id)
+    // Vóór de migratie: zonder de kolom bestel_link.
+    if (error && /bestel_link/i.test(error.message)) { delete update.bestel_link; ({ error } = await admin.from('purchases').update(update).eq('id', params.id)) }
     if (error) throw new Error(error.message)
+    if (linkGewijzigd && link?.ok) { oud.bestel_link = linkWas; wijzigingen.bestel_link = link.link }
 
     await admin.from('purchase_edits').insert({
       purchase_id: params.id, version: nieuweVersie, actie: wasBevestigd ? 'nieuwe_versie' : 'gewijzigd',

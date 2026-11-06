@@ -40,8 +40,8 @@ export async function kaartVoorContract(admin: Admin, contractId: string, opties
   const titel = String(contract.title ?? '').trim() || 'Contract'
   const nu = new Date().toISOString()
 
-  // Een lopende kaart van dezelfde klant (Opvolging of Offerte gestuurd, nog
-  // zonder contract) krijgt dit contract: dat is hetzelfde project.
+  // Een lopende kaart van dezelfde klant (Opvolging, Offerte gestuurd of
+  // Offerte geaccepteerd, nog zonder contract) krijgt dit contract: dat is hetzelfde project.
   // Aangemaakt vanaf een kaart ("Contract aanmaken" na een bevestigde offerte): precies die kaart.
   let kandidaat: { id: string; zonderKlant?: boolean } | undefined
   if (opties.opdrachtId) {
@@ -53,9 +53,11 @@ export async function kaartVoorContract(admin: Admin, contractId: string, opties
     const { data: open } = await admin.from('opdrachten').select('id, status, titel')
       .eq('client_id', contract.client_id).is('contract_id', null).order('created_at', { ascending: false }).limit(20)
     const lopend = ((open ?? []) as { id: string; status: OpdrachtStatus; titel: string }[])
-      .filter((o) => kolomVan(o.status) === 'potentieel' || kolomVan(o.status) === 'offerte')
-    // Een kaart met een bevestigde offerte gaat voor.
-    if (lopend.length > 1) {
+      .filter((o) => kolomVan(o.status) === 'potentieel' || kolomVan(o.status) === 'offerte' || kolomVan(o.status) === 'geaccepteerd')
+    // Een kaart in Offerte geaccepteerd (of met een bevestigde offerte) gaat voor.
+    const geaccepteerd = lopend.find((o) => kolomVan(o.status) === 'geaccepteerd')
+    if (geaccepteerd) kandidaat = geaccepteerd
+    else if (lopend.length > 1) {
       const { data: akkoord } = await admin.from('offertes').select('opdracht_id').in('opdracht_id', lopend.map((o) => o.id)).eq('status', 'geaccepteerd').limit(1)
       const metAkkoord = ((akkoord ?? []) as { opdracht_id: string }[])[0]?.opdracht_id
       kandidaat = lopend.find((o) => o.id === metAkkoord) ?? lopend[0]

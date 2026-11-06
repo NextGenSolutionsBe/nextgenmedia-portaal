@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useCallback, useTransition, useEffect } from 'react'
+import { useState, useCallback, useTransition, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { ContentCalendar, type SocialContentItem, type SocialContentStatus } from '@/components/calendar/content-calendar'
+import { ContentCalendar, type SocialContentItem, type SocialContentStatus, type KalenderStijlBeheer } from '@/components/calendar/content-calendar'
+import { leegStijl, type KalenderStijl } from '@/lib/content/kalender-stijl'
 import { Plus, X, Loader2, Sparkles, CheckSquare, Trash2, AlertTriangle, CalendarRange, ArrowRight, History } from 'lucide-react'
 import { GenerateDialog } from './generate-dialog'
 import { ClickUpSyncControl } from '@/components/admin/clickup-sync-control'
@@ -295,6 +296,32 @@ export function SocialMediaAdmin({
     }
   }, [])
 
+  // Eigen labels en fasekleuren van de gekozen klant (dezelfde die de klant in het portaal ziet).
+  const [stijl, setStijl] = useState<KalenderStijl>(leegStijl)
+  useEffect(() => {
+    setStijl(leegStijl)
+    if (!selectedClient) return
+    let weg = false
+    fetch(`/api/admin/social-content/stijl?client_id=${selectedClient}`, { cache: 'no-store' })
+      .then((r) => r.json().then((j) => ({ ok: r.ok, j })))
+      .then(({ ok, j }) => { if (!weg && ok && j.stijl) setStijl(j.stijl) })
+      .catch(() => { /* zonder labels blijft de kalender gewoon werken */ })
+    return () => { weg = true }
+  }, [selectedClient])
+  const stijlBeheer = useMemo<KalenderStijlBeheer>(() => ({
+    stijl,
+    magBeheren: true,
+    actie: async (b) => {
+      const r = await fetch('/api/admin/social-content/stijl', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...b, client_id: selectedClient }) })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) { toast.error(j.error || 'Bewaren mislukt'); throw new Error(j.error || 'Bewaren mislukt') }
+      if (b.actie === 'label_maak') toast.success('Label toegevoegd. De klant ziet het ook.')
+      if (b.actie === 'label_verwijder') toast.success('Label verwijderd.')
+      if (j.labels) setItems((prev) => prev.map((it) => (it.id === b.item ? { ...it, labels: j.labels } : it)))
+      return { stijl: j.stijl, labels: j.labels }
+    },
+  }), [stijl, selectedClient])
+
   const handleClientChange = (id: string) => {
     setSelectedClient(id)
     loadItems(id)
@@ -506,6 +533,7 @@ export function SocialMediaAdmin({
         ) : (
           <ContentCalendar
             items={clientItems}
+            stijlBeheer={stijlBeheer}
             mode="admin"
             actions={{
               onUpdate: handleUpdate,

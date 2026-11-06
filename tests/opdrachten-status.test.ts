@@ -97,7 +97,7 @@ test('9. Sortering: open werk eerst, daarbinnen de nieuwste (geen deadline meer)
 test('10. Labels zijn de gevraagde benamingen', () => {
   assert.equal(statusInfo('voorstel_gevraagd').label, 'Projectvoorstel gevraagd')
   assert.equal(statusInfo('voorstel_klaar').label, 'Projectvoorstel klaar')
-  assert.equal(statusInfo('interesse').label, 'Interesse')
+  assert.equal(statusInfo('interesse').label, 'Offerte geaccepteerd')   // eigen fase op het bord sinds 6 nov 2026
   assert.equal(statusInfo('geen_interesse').label, 'Geen interesse')
   assert.equal(statusInfo('getekend').label, 'Getekend')
   assert.equal(statusInfo('factuur_verstuurd').label, 'Factuur verstuurd')

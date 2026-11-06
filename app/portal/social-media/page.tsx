@@ -4,7 +4,11 @@ import { PortalCalendar } from './portal-calendar'
 import { ShootBriefingView, type Shoot } from '@/components/portal/shoot-briefing-view'
 import { type Feedback } from '@/components/portal/shoot-feedback'
 import { type Idea } from '@/components/portal/shoot-ideas'
-import { requirePortalView } from '@/lib/portal-auth'
+import { requirePortalView, sessionCan } from '@/lib/portal-auth'
+import { MODULE_IMPLEMENTED, type PortalModule } from '@/lib/portal-permissions'
+import { leesKalenderStijl } from '@/lib/content/kalender-stijl-server'
+import { magPersonaliseren } from '@/lib/content/kalender-rol'
+import { KalenderCta } from '@/components/portal/kalender-cta'
 import { kalenderRechtenVoorSessie } from '@/lib/content/kalender-beheer-server'
 import { ROL_INFO, kanGoedkeuren } from '@/lib/content/kalender-rol'
 import { ShootDocumentKnop } from '@/components/shoot-document-knop'
@@ -42,12 +46,16 @@ export default async function PortalSocialMediaPage({ searchParams }: { searchPa
   // ?item=<id> (vanuit het dashboard of de mail): dat item meteen openen, als het van deze klant is.
   const openItem = /^[0-9a-f-]{36}$/i.test(searchParams?.item ?? '') ? searchParams!.item! : null
 
-  const { data: items } = await admin
-    .from('social_content_items')
-    // Expliciete kolommen: geen interne velden (ClickUp, aanmaker, contract) naar de klant.
-    .select('id, client_id, planned_date, planned_time, platform, platforms, content_type, title, caption, script, media_notes, status, client_feedback, reviewed_at, created_at, klant_aangemaakt_op, published_at, published_url, published_platform')
-    .eq('client_id', clientId)
-    .order('planned_date', { ascending: true })
+  // Expliciete kolommen: geen interne velden (ClickUp, aanmaker, contract) naar de klant.
+  // Ontbreekt de kolom labels nog (vóór de migratie), dan zonder: de kalender blijft altijd zichtbaar.
+  const KOLOMMEN = 'id, client_id, planned_date, planned_time, platform, platforms, content_type, title, caption, script, media_notes, status, client_feedback, reviewed_at, created_at, klant_aangemaakt_op, published_at, published_url, published_platform'
+  const leesItems = (kolommen: string) => admin.from('social_content_items').select(kolommen).eq('client_id', clientId).order('planned_date', { ascending: true })
+  let res = await leesItems(`${KOLOMMEN}, labels`)
+  if (res.error && /labels/i.test(res.error.message)) res = await leesItems(KOLOMMEN)
+  const items = (res.data ?? []) as unknown as Array<{ status: string; platform: string; platforms: unknown } & Record<string, unknown>>
+  const stijl = await leesKalenderStijl(admin, clientId).catch(() => ({ labels: [], faseKleuren: {} }))
+  const magModule = (m: PortalModule) => MODULE_IMPLEMENTED[m] && sessionCan(session, m, 'view')
+  const cta = { diensten: magModule('diensten'), consultancy: magModule('consultancy'), meetings: magModule('meetings') }
 
   // Shoot briefings. Resilient: tabel kan nog ontbreken vóór de migratie.
   const { data: shootRows } = await admin
@@ -83,7 +91,7 @@ export default async function PortalSocialMediaPage({ searchParams }: { searchPa
     }
   }
 
-  const pendingCount = (items ?? []).filter((i) => i.status === 'ready_for_review').length
+  const pendingCount = items.filter((i) => i.status === 'ready_for_review').length
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -110,16 +118,20 @@ export default async function PortalSocialMediaPage({ searchParams }: { searchPa
 
 
       <PortalCalendar
-        initialItems={(items ?? []).map((it) => ({
+        initialItems={items.map((it) => ({
           ...it,
           platforms: Array.isArray(it.platforms) ? it.platforms : it.platform ? [it.platform] : [],
-        }))}
+        })) as never}
+        stijl={stijl}
+        magStijl={magPersonaliseren(rechten)}
         clientId={clientId}
         rechten={rechten}
         goedkeuringen={goedkeuringen}
         lang={lang}
         openItem={openItem}
       />
+
+      <KalenderCta mag={cta} />
 
       <ShootBriefingView shoots={shoots} feedbackByShoot={feedbackByShoot} ideasByShoot={ideasByShoot} />
     </div>

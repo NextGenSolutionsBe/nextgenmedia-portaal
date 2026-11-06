@@ -1,7 +1,7 @@
 // Projecten ↔ offertes: welke kaart, wanneer de groene label, de taak na een bevestiging.
 // Uitvoeren: npx tsx tests/opdrachten-offertes.test.ts
 import assert from 'node:assert/strict'
-import { contractTaak, kiesKaartVoorOfferte, moetNaarOfferte, offerteBevestigdLabel, taakVoorWie, werkdagenLater } from '../lib/opdrachten-offerte-model'
+import { contractTaak, kiesKaartVoorOfferte, moetNaarOfferte, offerteBevestigdLabel, taakVoorWie, toonVolgendeStapNaOfferte, werkdagenLater } from '../lib/opdrachten-offerte-model'
 
 let n = 0
 const test = (naam: string, fn: () => void) => { fn(); n++; console.log(`  ✓ ${naam}`) }
@@ -35,6 +35,15 @@ test('Groene label "Offerte bevestigd" enkel zolang er nog geen contract of uitv
   assert.equal(offerteBevestigdLabel('geaccepteerd', 'uitvoering'), false)
   assert.equal(offerteBevestigdLabel('verstuurd', 'offerte'), false)
   assert.equal(offerteBevestigdLabel(null, 'offerte'), false)
+  assert.equal(offerteBevestigdLabel('geaccepteerd', 'geaccepteerd'), false, 'de kolom zegt het al')
+})
+
+test('Kaartvenster: contract aanmaken of in gang zetten zolang de kaart in Offerte geaccepteerd staat', () => {
+  assert.equal(toonVolgendeStapNaOfferte('geaccepteerd', 'geaccepteerd'), true)
+  assert.equal(toonVolgendeStapNaOfferte(null, 'geaccepteerd'), true, 'ook een kaart die met de hand naar Offerte geaccepteerd ging')
+  assert.equal(toonVolgendeStapNaOfferte('geaccepteerd', 'offerte'), true)
+  assert.equal(toonVolgendeStapNaOfferte('geaccepteerd', 'contract'), false)
+  assert.equal(toonVolgendeStapNaOfferte('verstuurd', 'offerte'), false)
 })
 
 test('De taak: contract opmaken of in gang zetten, binnen twee werkdagen, bij de verantwoordelijke', () => {

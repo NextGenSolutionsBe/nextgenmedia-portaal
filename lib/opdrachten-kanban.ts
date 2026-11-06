@@ -7,15 +7,16 @@
 // kolom hoort; binnen een kolom blijft de fijnere stap (bv. "Wacht op klant")
 // bewaard.
 //
-// Automatisch schuift een kaart enkel naar Contract (gekoppeld contract
-// verstuurd), Getekend contract (ondertekend) en Afgerond (de volledige
-// contractwaarde gefactureerd, voorschotten en maandfacturen samen). In
-// uitvoering zetten gebeurt altijd met de hand.
+// Automatisch schuift een kaart enkel naar Offerte geaccepteerd (de klant
+// bevestigde de offerte), Contract (gekoppeld contract verstuurd), Getekend
+// contract (ondertekend) en Afgerond (de volledige contractwaarde
+// gefactureerd, voorschotten en maandfacturen samen). In uitvoering zetten
+// gebeurt altijd met de hand.
 
 import { statusInfo, type OpdrachtStatus, type Koppelingen, type FactuurKoppeling } from '@/lib/opdrachten'
 import { canonicalStatus } from '@/lib/contract-status'
 
-export type KolomKey = 'potentieel' | 'offerte' | 'contract' | 'getekend' | 'uitvoering' | 'afgerond' | 'stopgezet'
+export type KolomKey = 'potentieel' | 'offerte' | 'geaccepteerd' | 'contract' | 'getekend' | 'uitvoering' | 'afgerond' | 'stopgezet'
 
 export type Kolom = {
   key: KolomKey
@@ -37,8 +38,11 @@ export const KOLOMMEN: Kolom[] = [
     stappen: ['open', 'voorstel_gevraagd', 'voorstel_bezig'], standaard: 'open',
     label_kleur: 'bg-slate-700 text-white', balk: 'bg-slate-500' },
   { key: 'offerte', label: 'Offerte gestuurd', uitleg: 'Prijs of voorstel gedeeld. Vanaf hier zijn naam, btw-nummer en dienst verplicht.',
-    stappen: ['voorstel_klaar', 'voorstel_voorgelegd', 'interesse'], standaard: 'voorstel_voorgelegd',
+    stappen: ['voorstel_klaar', 'voorstel_voorgelegd'], standaard: 'voorstel_voorgelegd',
     label_kleur: 'bg-violet-600 text-white', balk: 'bg-violet-500' },
+  { key: 'geaccepteerd', label: 'Offerte geaccepteerd', uitleg: 'Vanzelf zodra de klant de offerte bevestigt. Maak het contract op of zet het project in gang.',
+    stappen: ['interesse'], standaard: 'interesse',
+    label_kleur: 'bg-lime-600 text-white', balk: 'bg-lime-500' },
   { key: 'contract', label: 'Contract verstuurd', uitleg: 'Komt hier vanzelf zodra er een contract voor de klant gemaakt wordt.',
     stappen: ['contract_verstuurd'], standaard: 'contract_verstuurd',
     label_kleur: 'bg-blue-600 text-white', balk: 'bg-blue-500' },
@@ -72,7 +76,7 @@ const STAP_LABEL: Partial<Record<OpdrachtStatus, string>> = {
   open: 'Nieuw',
   voorstel_klaar: 'Projectvoorstel klaar',
   voorstel_voorgelegd: 'Offerte gedeeld',
-  interesse: 'Klant wil verder',
+  interesse: 'Offerte geaccepteerd',
   geen_interesse: 'Geen akkoord',
   geannuleerd: 'Vroegtijdig stopgezet',
 }
@@ -286,11 +290,15 @@ export function facturatieVan(input: {
  * is. Te factureren of factuur verstuurd zet het bord nooit zelf: In
  * uitvoering is een handmatige stap.
  */
-export function automatischeStatus(k: Koppelingen | null | undefined, facturatie: Facturatie | null | undefined): OpdrachtStatus | null {
+export function automatischeStatus(
+  k: Koppelingen | null | undefined, facturatie: Facturatie | null | undefined, offerteStatus?: string | null,
+): OpdrachtStatus | null {
   if (facturatie?.volledig) return 'afgerond'
   const c = k?.contract?.status
   if (c === 'getekend') return 'getekend'
   if (c === 'verzonden' || c === 'geopend' || c === 'ingevuld') return 'contract_verstuurd'
+  // De klant bevestigde de offerte van deze kaart.
+  if (offerteStatus === 'geaccepteerd') return 'interesse'
   return null
 }
 

@@ -74,7 +74,7 @@ async function laadFacturatie(admin: Admin, rijen: Rij[], koppelingen: Map<strin
 
 /** Waarom schoof de kaart vanzelf? Voor de systeemnotitie. */
 const AUTO_REDEN: Record<string, string> = {
-  contract_verstuurd: 'contract verstuurd', getekend: 'contract ondertekend', afgerond: 'volledige waarde gefactureerd',
+  interesse: 'offerte bevestigd door de klant', contract_verstuurd: 'contract verstuurd', getekend: 'contract ondertekend', afgerond: 'volledige waarde gefactureerd',
 }
 
 const geldigeStatus = (v: unknown): OpdrachtStatus | null => (isStatus(v) ? v : null)
@@ -231,7 +231,7 @@ export async function GET() {
     const naamVan = new Map(klanten.map((c) => [c.id, c.naam]))
     const btwVan = new Map(klanten.map((c) => [c.id, c.btw]))
 
-    // Kaart automatisch vooruit zetten: contract verstuurd → Contract,
+    // Kaart automatisch vooruit zetten: offerte bevestigd → Offerte geaccepteerd, contract verstuurd → Contract,
     // ondertekend → Getekend contract, volledige waarde gefactureerd →
     // Afgerond. Enkel vooruit, nooit weg van een eindpunt, en een al
     // doorgevoerde (of bewust overschreven) stap niet nog eens.
@@ -239,7 +239,7 @@ export async function GET() {
     const opdrachten = await Promise.all(rijen.map(async (o) => {
       const k = koppelingen.get(o.id) ?? null
       const f = facturatie.get(o.id) ?? null
-      const afgeleid = automatischeStatus(k, f)
+      const afgeleid = automatischeStatus(k, f, offerteVan.get(o.id)?.status)
       let status = o.status
       if (nieuweKolommen && magAutomatischNaar(o.status, afgeleid, o.auto_status)) {
         const patch: Record<string, unknown> = { status: afgeleid, status_bron: 'automatisch', auto_status: afgeleid, status_gewijzigd_op: nu, updated_at: nu }
@@ -555,7 +555,8 @@ export async function PATCH(req: NextRequest) {
         if (rij) {
           const k = await laadKoppelingen(admin, [rij as Rij])
           const f = await laadFacturatie(admin, [rij as Rij], k)
-          const afgeleid = automatischeStatus(k.get(id) ?? null, f.get(id) ?? null)
+          const { data: akkoord } = await admin.from('offertes').select('id').eq('opdracht_id', id).eq('status', 'geaccepteerd').limit(1)
+          const afgeleid = automatischeStatus(k.get(id) ?? null, f.get(id) ?? null, (akkoord ?? []).length ? 'geaccepteerd' : null)
           await admin.from('opdrachten').update({ auto_status: afgeleid }).eq('id', id)
         }
       } catch { /* enkel vóór de migratie; dan is er ook geen automatiek */ }

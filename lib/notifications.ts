@@ -420,14 +420,14 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
         .lt('status_gewijzigd_op', grens).order('status_gewijzigd_op', { ascending: true }).limit(OPVOLG_MAX)
       const rijen = (data ?? []) as { id: string; titel: string; client_id: string | null; klant_vrij: string | null; status: string; status_gewijzigd_op: string | null; created_at: string }[]
       const namen = await klantNamen(rijen.map((r) => r.client_id ?? ''))
-      const offerte = new Set(['voorstel_klaar', 'voorstel_voorgelegd', 'interesse'])
+      const offerte = new Set(['voorstel_klaar', 'voorstel_voorgelegd'])
       return {
         key: 'projecten', titel: 'Projecten opvolgen', totaal: count ?? rijen.length, alles: '/admin/opdrachten', leeg: 'Geen projecten die al een week stilstaan.',
         items: rijen.map((r) => {
           const dagen = Math.floor((Date.now() - new Date(r.status_gewijzigd_op ?? r.created_at).getTime()) / 86_400_000)
           return {
             id: r.id, titel: (r.client_id ? namen.get(r.client_id) : r.klant_vrij) || r.titel,
-            sub: `${offerte.has(r.status) ? 'offerte' : 'opvolging'} · ${dagen} dagen stil · ${r.titel}`.slice(0, 80),
+            sub: `${r.status === 'interesse' ? 'offerte geaccepteerd, nog geen contract' : offerte.has(r.status) ? 'offerte' : 'opvolging'} · ${dagen} dagen stil · ${r.titel}`.slice(0, 80),
             href: `/admin/opdrachten?opdracht=${r.id}`, dringend: dagen >= 14,
           }
         }),

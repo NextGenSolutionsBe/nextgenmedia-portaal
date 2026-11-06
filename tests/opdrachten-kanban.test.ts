@@ -16,8 +16,8 @@ let n = 0
 const test = (naam: string, fn: () => void) => { fn(); n++; console.log(`  ✓ ${naam}`) }
 console.log('\nOpdrachten als kanban\n')
 
-test('1. Zeven fasen in de gevraagde volgorde (2 nov 2026); elke bestaande status valt in precies één fase', () => {
-  assert.deepEqual(KOLOMMEN.map((k) => k.label), ['Opvolging', 'Offerte gestuurd', 'Contract verstuurd', 'Contract getekend', 'In uitvoering', 'Afgerond', 'Verloren'])
+test('1. Acht fasen in de gevraagde volgorde (2 nov 2026; Offerte geaccepteerd erbij op 6 nov); elke bestaande status valt in precies één fase', () => {
+  assert.deepEqual(KOLOMMEN.map((k) => k.label), ['Opvolging', 'Offerte gestuurd', 'Offerte geaccepteerd', 'Contract verstuurd', 'Contract getekend', 'In uitvoering', 'Afgerond', 'Verloren'])
   for (const s of STATUSSEN) assert.equal(KOLOMMEN.filter((k) => k.stappen.includes(s.key)).length, 1, s.key)
   for (const k of KOLOMMEN) assert.equal(kolomVan(k.standaard), k.key)
 })
@@ -25,7 +25,7 @@ test('1. Zeven fasen in de gevraagde volgorde (2 nov 2026); elke bestaande statu
 test('2. De bestaande opdrachten komen op de juiste plek (projectvoorstel = offerte gestuurd)', () => {
   const verwacht: Record<string, string> = {
     open: 'potentieel', voorstel_gevraagd: 'potentieel', voorstel_bezig: 'potentieel',
-    voorstel_klaar: 'offerte', voorstel_voorgelegd: 'offerte', interesse: 'offerte',
+    voorstel_klaar: 'offerte', voorstel_voorgelegd: 'offerte', interesse: 'geaccepteerd',
     contract_verstuurd: 'contract', getekend: 'getekend',
     bezig: 'uitvoering', wacht: 'uitvoering', opgeleverd: 'uitvoering', te_factureren: 'uitvoering', factuur_verstuurd: 'uitvoering',
     afgerond: 'afgerond', betaald: 'afgerond', geen_interesse: 'stopgezet', geannuleerd: 'stopgezet',
@@ -40,6 +40,8 @@ test('3. Slepen: standaardstatus per kolom, binnen dezelfde kolom verandert niet
   assert.equal(statusVoorKolom('getekend', 'uitvoering'), 'bezig')
   assert.equal(statusVoorKolom('wacht', 'uitvoering'), 'wacht', 'de fijnere stap blijft')
   assert.equal(statusVoorKolom('interesse', 'stopgezet'), 'geen_interesse')
+  assert.equal(statusVoorKolom('voorstel_voorgelegd', 'geaccepteerd'), 'interesse')
+  assert.equal(stapLabel('interesse'), 'Offerte geaccepteerd')
   assert.equal(statusVoorKolom('contract_verstuurd', 'stopgezet'), 'geen_interesse', 'contract nooit getekend = geen akkoord')
   assert.equal(statusVoorKolom('bezig', 'stopgezet'), 'geannuleerd', 'al bezig = vroegtijdig stopgezet')
   assert.equal(statusVoorKolom('geannuleerd', 'potentieel'), 'open')
@@ -136,6 +138,22 @@ test('10. Automatisch enkel naar Contract, Getekend en Afgerond; nooit vanzelf I
   assert.equal(automatischeStatus(k({ contract: { id: 'c', title: 'x', status: 'getekend' } }), { ...geen, volledig: true }), 'afgerond')
   assert.equal(automatischeStatus(k({ contract: { id: 'c', title: 'x', status: 'concept' } }), geen), null)
   assert.equal(automatischeStatus(null, null), null)
+})
+
+test('10b. Offerte bevestigd → Offerte geaccepteerd; een contract of volledige facturatie gaat voor', () => {
+  const geen = { gefactureerd: 0, totaal: null, volledig: false, bron: null } as const
+  assert.equal(automatischeStatus(null, null, 'geaccepteerd'), 'interesse')
+  assert.equal(automatischeStatus(k({}), geen, 'verstuurd'), null)
+  assert.equal(automatischeStatus(k({ contract: { id: 'c', title: 'x', status: 'verzonden' } }), geen, 'geaccepteerd'), 'contract_verstuurd')
+  assert.equal(automatischeStatus(k({ contract: { id: 'c', title: 'x', status: 'getekend' } }), geen, 'geaccepteerd'), 'getekend')
+  assert.equal(automatischeStatus(k({ contract: { id: 'c', title: 'x', status: 'concept' } }), geen, 'geaccepteerd'), 'interesse', 'contract nog in opmaak: blijft bij Offerte geaccepteerd')
+  // Enkel vooruit: vanuit Opvolging en Offerte gestuurd wel, vanuit Contract of In uitvoering niet.
+  assert.equal(magAutomatischNaar('open', 'interesse'), true)
+  assert.equal(magAutomatischNaar('voorstel_voorgelegd', 'interesse'), true)
+  assert.equal(magAutomatischNaar('contract_verstuurd', 'interesse'), false)
+  assert.equal(magAutomatischNaar('bezig', 'interesse'), false)
+  assert.equal(magAutomatischNaar('voorstel_voorgelegd', 'interesse', 'interesse'), false, 'bewust teruggezet: niet nog eens')
+  assert.equal(verplaatsTekst('voorstel_voorgelegd', 'interesse', { automatisch: 'offerte bevestigd door de klant' }), 'Automatisch naar Offerte geaccepteerd: offerte bevestigd door de klant')
 })
 
 test('11. Enkel vooruit: een kaart die we zelf in uitvoering zetten, valt niet terug naar Getekend; stopgezet blijft stopgezet', () => {

@@ -192,3 +192,10 @@ export function opmerkingTekst(invoer: unknown): string {
   if (t.length > 2000) throw new Error('Een opmerking is maximaal 2000 tekens.')
   return t
 }
+
+/**
+ * Labels en kleuren van de kalender beheren (en labels op posts zetten): wie
+ * items mag aanmaken of aanpassen (Meewerken, Beheren). Labels zijn ordening,
+ * geen inhoud: ze veranderen nooit de status van een post.
+ */
+export const magPersonaliseren = (r: KalenderRechten) => r.aanmaken || r.bewerkbaar.length > 0
