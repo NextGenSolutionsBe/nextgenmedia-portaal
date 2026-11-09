@@ -10,7 +10,7 @@ import { taakVoorWie, werkdagenLater } from '@/lib/opdrachten-offerte-model'
 import { leadTaakOpties, maakOpdrachtTaak, taakAfvinken } from '@/lib/sales/lead-taken-server'
 import { stempelTegenhandtekening } from './tegenhandtekening-pdf'
 import {
-  annotatie, bedrijfVoorMerk, controleerNaam, leesHandtekening, moetTegentekenen, redenNietTegentekenen,
+  datumRegel, bedrijfVoorMerk, controleerNaam, leesHandtekening, moetTegentekenen, redenNietTegentekenen,
   tegentekenTaak, zoneKolommen, type OnsZone,
 } from './tegenhandtekening'
 
@@ -53,7 +53,7 @@ export type TegentekenInvoer = {
   ip?: string | null; ua?: string | null
 }
 
-export async function tegenteken(admin: Admin, contractId: string, inv: TegentekenInvoer): Promise<{ pdfPad: string; archiefVersie: number | null; certificaatNr: string | null; legal: boolean }> {
+export async function tegenteken(admin: Admin, contractId: string, inv: TegentekenInvoer): Promise<{ pdfPad: string; op: string }> {
   const { data: c } = await admin.from('contracts').select('*').eq('id', contractId).maybeSingle()
   if (!c) throw new TegentekenFout('Contract niet gevonden.', 404)
   if (!('tegengetekend_op' in c)) throw new TegentekenFout('De databank wordt nog bijgewerkt. Probeer het zo meteen opnieuw.', 503)
@@ -61,7 +61,7 @@ export async function tegenteken(admin: Admin, contractId: string, inv: Tegentek
   if (reden) throw new TegentekenFout(reden, c.tegengetekend_op ? 409 : 400)
 
   const naam = controleerNaam(inv.naam)
-  if (!naam) throw new TegentekenFout('Vul je naam in zoals ze onder de handtekening moet staan.')
+  if (!naam) throw new TegentekenFout('Je naam ontbreekt op je account. Vul ze in bij Mijn account.')
   const hand = leesHandtekening(inv.handtekening)
   if (!hand.ok) throw new TegentekenFout(hand.fout)
 
@@ -74,7 +74,7 @@ export async function tegenteken(admin: Admin, contractId: string, inv: Tegentek
   const op = new Date().toISOString()
   let gestempeld: { bytes: Uint8Array; zone: OnsZone }
   try {
-    gestempeld = await stempelTegenhandtekening(new Uint8Array(await bestand.arrayBuffer()), png, inv.zone, annotatie({ naam, bedrijf, op }))
+    gestempeld = await stempelTegenhandtekening(new Uint8Array(await bestand.arrayBuffer()), png, inv.zone, datumRegel(op))
   } catch (e) {
     throw new TegentekenFout(`De handtekening kon niet op het PDF gezet worden (${e instanceof Error ? e.message : 'onbekende fout'}).`, 500)
   }
@@ -100,26 +100,31 @@ export async function tegenteken(admin: Admin, contractId: string, inv: Tegentek
 
   await logContractEvent(admin, contractId, 'tegengetekend', { actor: inv.door.email ?? naam, ip: inv.ip ?? null, ua: inv.ua ?? null, meta: { naam, bedrijf, zone, basis } })
 
-  // Archief: nieuwe versie met het certificaat met beide handtekeningen, één melding naar Legal.
-  let archiefVersie: number | null = null, certificaatNr: string | null = null, legal = false
+  return { pdfPad: pad, op }
+}
+
+/**
+ * Wat na het tekenen volgt, op de achtergrond (zo ga je meteen door naar het
+ * volgende contract): het archief maakt een nieuwe versie met het certificaat
+ * met beide handtekeningen en Legal krijgt die één keer; de projectkaart krijgt
+ * een notitie en de taak "contract tegentekenen" wordt afgevinkt.
+ */
+export async function naTegentekenen(admin: Admin, contractId: string, door: { userId: string; email: string | null; naam: string }): Promise<void> {
+  const { data: c } = await admin.from('contracts').select('id, title, ondertekening_wijze, tegengetekend_bedrijf').eq('id', contractId).maybeSingle()
+  if (!c) return
   if (c.ondertekening_wijze !== MANUEEL) {
     try {
       const vorige = await laatsteArchief(admin, contractId)
       const bron = vorige?.dossier?.bron && vorige.dossier.bron !== 'handmatig' ? vorige.dossier.bron : 'tekenlink'
-      const archief = await archiveerContract(admin, contractId, bron, inv.door.email ?? naam)
-      archiefVersie = archief.versie; certificaatNr = archief.certificaatNr
-      const m = await meldOndertekening(admin, archief, { actor: inv.door.email ?? naam })
-      legal = m.ok
+      const archief = await archiveerContract(admin, contractId, bron, door.email ?? door.naam)
+      await meldOndertekening(admin, archief, { actor: door.email ?? door.naam })
     } catch (e) { console.error('[tegenhandtekening] archief:', e instanceof Error ? e.message : e) }
   }
-
-  // Projectkaart: notitie en de taak "contract tegentekenen" afvinken.
+  const kaart = await kaartVan(admin, contractId)
   if (kaart) {
-    await voegNotitieToe(admin, kaart.id, `Contract "${c.title ?? ''}" ondertekend namens ${bedrijf} door ${naam}.`, 'systeem', { id: inv.door.userId, email: inv.door.email, naam }).catch(() => null)
+    await voegNotitieToe(admin, kaart.id, `Contract "${c.title ?? ''}" ondertekend namens ${c.tegengetekend_bedrijf ?? 'NextGenMedia'} door ${door.naam}.`, 'systeem', { id: door.userId, email: door.email, naam: door.naam }).catch(() => null)
   }
   await sluitTegentekenTaak(admin, contractId).catch(() => null)
-
-  return { pdfPad: pad, archiefVersie, certificaatNr, legal }
 }
 
 /** Zodra de klant tekende: één ClickUp-taak op de projectkaart, voor de verantwoordelijke. */

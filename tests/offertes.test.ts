@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { valideerOfferte, leesBedrag, veiligePdfNaam, geldigOffertePad, geldigSjabloonPad, offerteWeergave, moetOpvolgen, isVerlopen, offerteMail, offerteLink } from '../lib/offertes'
+import { valideerOfferte, leesBedrag, veiligePdfNaam, geldigOffertePad, geldigSjabloonPad, offerteWeergave, moetOpvolgen, isVerlopen, offerteMail, offerteLink, verwijderVraag } from '../lib/offertes'
 
 const U = '11111111-2222-4333-8444-555555555555'
 const vandaag = '2026-11-04'
@@ -57,4 +57,8 @@ assert.match(m.tekst, /^Beste Jan,/)
 assert.match(m.tekst, /geldig tot 4 december 2026/)
 assert.match(m.tekst, /NextGenSolutions$/)
 assert.equal(offerteLink('https://app.nextgenmedia.be/', 'abc'), 'https://app.nextgenmedia.be/offerte/abc')
+// Volledig verwijderen: een concept kort, anders met wat er weggaat (en of de klant al aanvaardde).
+assert.equal(verwijderVraag({ titel: 'Reel', status: 'concept', klant_naam: 'Apex' }), 'Concept "Reel" verwijderen?')
+assert.match(verwijderVraag({ titel: 'Website', status: 'verstuurd', klant_naam: 'Apex' }), /^"Website" van Apex volledig verwijderen\? De pdf, de link voor de klant/)
+assert.match(verwijderVraag({ titel: 'Website', status: 'geaccepteerd', klant_naam: null }), /aanvaardde deze offerte al/)
 console.log('offertes: ok')

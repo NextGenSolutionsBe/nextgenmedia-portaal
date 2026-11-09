@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { baseUrl, sendEmail } from '@/lib/email'
 import { buildEmailHtml, buildEmailText } from '@/lib/email-html'
 import { voegNotitieToe } from '@/lib/opdrachten-notities'
-import { kaartVoorOfferte, ruimKaartVanConceptOp } from '@/lib/opdrachten-offertes'
+import { kaartVoorOfferte, ruimKaartVanConceptOp, sluitTakenVanOfferte } from '@/lib/opdrachten-offertes'
 import { toestelVan } from '@/lib/klant-geopend'
 import {
   OFFERTE_BUCKET, geldigOffertePad, geldigSjabloonPad, veiligePdfNaam, offerteLink, valideerOfferte,
@@ -201,16 +201,25 @@ export async function trekIn(admin: Admin, id: string, door: string | null): Pro
   await log(admin, id, 'ingetrokken', { meta: { door } })
 }
 
-/** Concept weggooien (nog nooit verstuurd): rij en pdf weg. */
-export async function verwijderConcept(admin: Admin, id: string): Promise<void> {
+/**
+ * Een offerte volledig verwijderen, in elke status: de rij (met haar tijdlijn),
+ * de pdf en de link voor de klant. De taak "contract opmaken" na een akkoord
+ * wordt in ClickUp gesloten (niet weggegooid). De kaart die de app voor deze
+ * offerte maakte, gaat mee als er niets anders aan hangt; anders krijgt de
+ * kaart een notitie.
+ */
+export async function verwijderOfferte(admin: Admin, id: string, door: string | null): Promise<{ titel: string; klant: string | null; status: string }> {
   const o = await leesOfferte(admin, id)
   if (!o) throw new OfferteFout('Offerte niet gevonden.', 404)
-  if (o.status !== 'concept') throw new OfferteFout('Enkel een concept kan weg. Een verstuurde offerte trek je in.')
+  await sluitTakenVanOfferte(admin, id).catch(() => {})
   const { error } = await admin.from('offertes').delete().eq('id', id)
   if (error) throw new Error(error.message)
   if (geldigOffertePad(o.pdf_pad)) await admin.storage.from(OFFERTE_BUCKET).remove([o.pdf_pad]).catch(() => {})
-  // De kaart die de app voor dit concept maakte, gaat mee als er niets anders aan hangt.
-  await ruimKaartVanConceptOp(admin, id, o.opdracht_id).catch(() => {})
+  const kaartWeg = await ruimKaartVanConceptOp(admin, id, o.opdracht_id).catch(() => false)
+  if (!kaartWeg && o.opdracht_id) {
+    await voegNotitieToe(admin, o.opdracht_id, `Offerte "${o.titel}" verwijderd${door ? ` door ${door}` : ''}.`, 'systeem', null).catch(() => null)
+  }
+  return { titel: o.titel, klant: o.klant_naam ?? null, status: o.status }
 }
 
 // ── Publiek (de klant) ───────────────────────────────────────────────────────

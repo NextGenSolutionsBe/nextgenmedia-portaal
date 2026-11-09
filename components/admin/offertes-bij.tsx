@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { Eye, Send, Loader2 } from 'lucide-react'
+import { Eye, Send, Loader2, Trash2 } from 'lucide-react'
 import { formatEuro } from '@/lib/utils'
-import { offerteWeergave, type Offerte } from '@/lib/offertes'
+import { offerteWeergave, verwijderVraag, type Offerte } from '@/lib/offertes'
 import type { MailMerk } from '@/lib/merk-mail'
 import { MailDialog } from '@/components/admin/mail-composer'
 import { OfferteVersturen } from '@/components/admin/offerte-versturen'
@@ -37,6 +37,17 @@ export function OffertesBij({ opdrachtId = null, clientId = null, klantNaam = nu
   useEffect(() => { void laad() }, [laad])
 
   const klaar = () => { void laad(); onVerstuurd?.() }
+  const [weg, setWeg] = useState<string | null>(null)
+  const verwijder = async (o: Rij) => {
+    if (!confirm(verwijderVraag(o))) return
+    setWeg(o.id)
+    try {
+      const r = await fetch(`/api/admin/offertes/${o.id}`, { method: 'DELETE' })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j.error || 'Verwijderen mislukt')
+      toast.success('Offerte verwijderd.'); klaar()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt') } finally { setWeg(null) }
+  }
 
   return (
     <div className="space-y-2">
@@ -59,6 +70,7 @@ export function OffertesBij({ opdrachtId = null, clientId = null, klantNaam = nu
                 {(o.status === 'concept' || o.status === 'verstuurd') && (
                   <button type="button" onClick={() => setMail(o)} className="h-7 w-7 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100" title={o.status === 'concept' ? 'Versturen' : 'Opnieuw versturen'}><Send className="h-3.5 w-3.5" /></button>
                 )}
+                <button type="button" onClick={() => verwijder(o)} disabled={weg === o.id} className="h-7 w-7 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-red-600" title="Volledig verwijderen">{weg === o.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}</button>
               </li>
             )
           })}

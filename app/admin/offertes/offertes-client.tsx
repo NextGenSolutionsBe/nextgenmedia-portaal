@@ -8,7 +8,7 @@ import { createClient } from '@/lib/supabase/client'
 import { formatEuro } from '@/lib/utils'
 import { zoekVeld } from '@/lib/zoekveld'
 import { MERK_STIJL, type MailMerk } from '@/lib/merk-mail'
-import { offerteWeergave, moetOpvolgen, MAX_PDF, type Offerte, type Sjabloon } from '@/lib/offertes'
+import { verwijderVraag, offerteWeergave, moetOpvolgen, MAX_PDF, type Offerte, type Sjabloon } from '@/lib/offertes'
 import { MailDialog } from '@/components/admin/mail-composer'
 import { OfferteVersturen } from '@/components/admin/offerte-versturen'
 import { KlantKiezer, type KlantOptie } from '@/components/admin/klant-kiezer'
@@ -78,7 +78,7 @@ function OffertesLijst({ focus }: { focus: string | null }) {
     { k: 'alles', l: 'Alles' }, { k: 'opvolgen', l: 'Opvolgen' }, { k: 'open', l: 'Wacht op klant' }, { k: 'geaccepteerd', l: 'Geaccepteerd' }, { k: 'concept', l: 'Concept' }, { k: 'gesloten', l: 'Verlopen of ingetrokken' },
   ]
   const actie = async (o: Rij, soort: 'intrekken' | 'verwijderen') => {
-    if (!confirm(soort === 'intrekken' ? `"${o.titel}" intrekken? De klant kan ze dan niet meer accepteren.` : `Concept "${o.titel}" verwijderen?`)) return
+    if (!confirm(soort === 'intrekken' ? `"${o.titel}" intrekken? De klant kan ze dan niet meer accepteren.` : verwijderVraag(o))) return
     setBezig(o.id)
     try {
       if (soort === 'intrekken') await api(`/api/admin/offertes/${o.id}`, { method: 'PATCH', body: JSON.stringify({ actie: 'intrekken' }) })
@@ -130,7 +130,7 @@ function OffertesLijst({ focus }: { focus: string | null }) {
                       <button type="button" onClick={() => setMail(o)} className="btn-secondary text-xs h-8"><Send className="h-3.5 w-3.5" />{o.status === 'concept' ? 'Versturen' : 'Opnieuw'}</button>
                     )}
                     {o.status === 'verstuurd' && <button type="button" onClick={() => actie(o, 'intrekken')} disabled={bezig === o.id} className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-red-600" title="Intrekken"><Ban className="h-4 w-4" /></button>}
-                    {o.status === 'concept' && <button type="button" onClick={() => actie(o, 'verwijderen')} disabled={bezig === o.id} className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-red-600" title="Concept verwijderen"><Trash2 className="h-4 w-4" /></button>}
+                    <button type="button" onClick={() => actie(o, 'verwijderen')} disabled={bezig === o.id} className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-red-600" title="Volledig verwijderen"><Trash2 className="h-4 w-4" /></button>
                     {o.opdracht_id && <Link href={`/admin/opdrachten?opdracht=${o.opdracht_id}`} className="text-xs text-gray-500 hover:text-black underline px-1">Project</Link>}
                   </div>
                 </li>
