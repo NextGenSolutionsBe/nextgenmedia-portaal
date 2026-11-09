@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import {
   standaardOnsZone, onsZoneVan, controleerZone, moetTegentekenen, redenNietTegentekenen, bedrijfVoorMerk,
-  controleerNaam, leesHandtekening, annotatie, tegentekenTaak, handtekeningStand, zoneKolommen,
+  controleerNaam, leesHandtekening, annotatie, tegentekenTaak, handtekeningStand, zoneKolommen, datumRegel, volgendeInLijst,
 } from '../lib/contracten/tegenhandtekening'
 
 let n = 0
@@ -61,6 +61,20 @@ test('Regel onder de handtekening en de taak', () => {
   assert.equal(t.omschrijving, 'Contract tegentekenen – Era Nobis')
   assert.match(t.notitie, /Social media 2027/)
   assert.match(t.notitie, /https:\/\/app\/x/)
+})
+
+test('Datum en uur onder de handtekening: het moment van tekenen, in Belgische tijd', () => {
+  assert.equal(datumRegel('2026-11-09T13:32:00Z'), '9 november 2026, 14:32')
+  assert.equal(datumRegel('2026-07-01T22:05:00Z'), '2 juli 2026, 00:05', 'zomertijd en over middernacht')
+})
+
+test('Volgende contract: in de volgorde van de lijst, daarna terug naar wat overgeslagen werd', () => {
+  const open = ['a', 'b', 'c']
+  assert.equal(volgendeInLijst(open, 'a'), 'b')
+  assert.equal(volgendeInLijst(open, 'c'), 'a', 'na het laatste: het eerste dat nog open staat')
+  assert.equal(volgendeInLijst(['a'], 'a'), null, 'enkel dit contract: geen volgende')
+  assert.equal(volgendeInLijst(['b', 'c'], 'x'), 'b', 'dit contract staat er niet (meer) in: het eerste')
+  assert.equal(volgendeInLijst([], 'x'), null)
 })
 
 console.log(`\n${n} tests geslaagd\n`)

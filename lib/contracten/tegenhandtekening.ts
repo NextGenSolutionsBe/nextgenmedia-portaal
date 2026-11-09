@@ -100,6 +100,33 @@ export function annotatie(o: { naam: string; bedrijf: string; op: string }): str
   return `Ondertekend namens ${o.bedrijf} door ${o.naam} · ${datum}`
 }
 
+/**
+ * Datum en uur onder de handtekening, in hetzelfde blok: het moment van tekenen
+ * in Belgische tijd, bv. "9 november 2026, 14:32". Niemand vult dit zelf in.
+ */
+export function datumRegel(op: string | Date): string {
+  const d = typeof op === 'string' ? new Date(op) : op
+  const dag = d.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Brussels' })
+  const uur = d.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Europe/Brussels' })
+  return `${dag}, ${uur}`
+}
+
+/** Hoogte (punten) die de datumregel onderaan het blok inneemt; de handtekening krijgt de rest. */
+export const DATUM_HOOGTE = 12
+
+/**
+ * Het volgende contract om te tekenen, in de volgorde van de lijst (recentste
+ * eerst). Na het laatste begint het opnieuw bij het eerste dat nog open staat
+ * (bv. een overgeslagen contract). null = er is geen ander meer.
+ */
+export function volgendeInLijst(open: string[], huidig: string): string | null {
+  const i = open.indexOf(huidig)
+  if (i === -1) return open[0] ?? null
+  const na = open[i + 1]
+  if (na) return na
+  return open[0] && open[0] !== huidig ? open[0] : null
+}
+
 /** De taak in ClickUp zodra de klant tekende. */
 export function tegentekenTaak(o: { klant: string | null; titel: string; ondertekenaar: string | null; op: string | null; url: string }): { omschrijving: string; notitie: string } {
   const klant = o.klant?.trim() || 'klant'

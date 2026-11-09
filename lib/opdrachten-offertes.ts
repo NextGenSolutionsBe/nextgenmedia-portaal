@@ -205,17 +205,37 @@ export async function sluitContractTaak(admin: Admin, opdrachtId: string): Promi
   }
 }
 
-/** Een weggegooid concept: de kaart die de app er speciaal voor maakte, mag mee weg als er niets anders aan hangt. */
-export async function ruimKaartVanConceptOp(admin: Admin, offerteId: string, opdrachtId: string | null): Promise<void> {
-  if (!opdrachtId) return
-  const { data: k } = await admin.from('opdrachten').select('id, aangemaakt_door_offerte, contract_id, invoice_id').eq('id', opdrachtId).maybeSingle()
-  const kaart = k as { aangemaakt_door_offerte?: string | null; contract_id: string | null; invoice_id: string | null } | null
-  if (!kaart || kaart.aangemaakt_door_offerte !== offerteId || kaart.contract_id || kaart.invoice_id) return
-  const [{ data: andere }, { data: taken }] = await Promise.all([
+/**
+ * Een verwijderde offerte (of weggegooid concept): de kaart die de app er
+ * speciaal voor maakte, gaat mee als er verder niets aan hangt. Geen contract,
+ * factuur, andere offerte, eigen taak of notitie van het team, en nog niet in
+ * uitvoering. Geeft true als de kaart weg is.
+ */
+export async function ruimKaartVanConceptOp(admin: Admin, offerteId: string, opdrachtId: string | null): Promise<boolean> {
+  if (!opdrachtId) return false
+  const { data: k } = await admin.from('opdrachten').select('id, status, aangemaakt_door_offerte, contract_id, invoice_id').eq('id', opdrachtId).maybeSingle()
+  const kaart = k as { status: string; aangemaakt_door_offerte?: string | null; contract_id: string | null; invoice_id: string | null } | null
+  if (!kaart || kaart.aangemaakt_door_offerte !== offerteId || kaart.contract_id || kaart.invoice_id) return false
+  if (!['potentieel', 'offerte', 'geaccepteerd'].includes(kolomVan(kaart.status))) return false
+  const [{ data: andere }, { data: taken }, { data: notities }] = await Promise.all([
     admin.from('offertes').select('id').eq('opdracht_id', opdrachtId).neq('id', offerteId).limit(1),
-    admin.from('opdracht_taken').select('id').eq('opdracht_id', opdrachtId).limit(1),
+    admin.from('opdracht_taken').select('id, aanvraag_sleutel').eq('opdracht_id', opdrachtId).limit(20),
+    admin.from('opdracht_notities').select('id').eq('opdracht_id', opdrachtId).neq('soort', 'systeem').limit(1),
   ])
-  if ((andere ?? []).length || (taken ?? []).length) return
+  // Enkel de taak die bij deze offerte hoort (contract opmaken) mag er staan; die is dan al afgevinkt.
+  const eigenTaken = ((taken ?? []) as { id: string; aanvraag_sleutel: string | null }[]).filter((t) => t.aanvraag_sleutel !== offerteId)
+  if ((andere ?? []).length || eigenTaken.length || (notities ?? []).length) return false
+  await admin.from('opdracht_taken').delete().eq('opdracht_id', opdrachtId).eq('aanvraag_sleutel', offerteId)
   await admin.from('opdracht_notities').delete().eq('opdracht_id', opdrachtId)
-  await admin.from('opdrachten').delete().eq('id', opdrachtId).eq('aangemaakt_door_offerte', offerteId)
+  const { data: weg } = await admin.from('opdrachten').delete().eq('id', opdrachtId).eq('aangemaakt_door_offerte', offerteId).select('id')
+  return (weg ?? []).length > 0
+}
+
+/** De taak "contract opmaken of in gang zetten" van een offerte afvinken (ook in ClickUp), als ze nog open staat. */
+export async function sluitTakenVanOfferte(admin: Admin, offerteId: string): Promise<void> {
+  const { data } = await admin.from('opdracht_taken').select('id').eq('aanvraag_sleutel', offerteId).is('afgerond_op', null)
+  for (const t of (data ?? []) as { id: string }[]) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    try { await taakAfvinken(admin as any, 'opdracht', t.id) } catch (e) { console.warn('[opdrachten] taak afvinken mislukt:', e instanceof Error ? e.message : e) }
+  }
 }

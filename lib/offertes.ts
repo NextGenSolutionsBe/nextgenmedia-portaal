@@ -154,3 +154,10 @@ export function offerteMail(o: { contact: string | null; klant: string | null; t
 
 /** Publieke link van een offerte. */
 export const offerteLink = (basis: string, token: string): string => `${basis.replace(/\/$/, '')}/offerte/${encodeURIComponent(token)}`
+
+/** De vraag vóór een offerte volledig verwijderd wordt (concept kort, anders met wat er weggaat). */
+export function verwijderVraag(o: Pick<Offerte, 'titel' | 'status' | 'klant_naam'>): string {
+  if (o.status === 'concept') return `Concept "${o.titel}" verwijderen?`
+  const akkoord = o.status === 'geaccepteerd' ? ' De klant aanvaardde deze offerte al.' : ''
+  return `"${o.titel}"${o.klant_naam ? ` van ${o.klant_naam}` : ''} volledig verwijderen? De pdf, de link voor de klant en de tijdlijn gaan weg.${akkoord} Dit kan niet ongedaan gemaakt worden.`
+}
