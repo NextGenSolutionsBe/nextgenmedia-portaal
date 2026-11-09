@@ -321,7 +321,7 @@ export async function buildNotifications(): Promise<Notif[]> {
 // de pipeline). `modules` = rechten van de medewerker (null = admin, alles).
 
 export type OpvolgItem = { id: string; titel: string; sub: string | null; href: string; dringend?: boolean }
-export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'meetings' | 'projecten' | 'content' | 'onderhoud' | 'opleveringen' | 'offertes'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
+export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'tegentekenen' | 'meetings' | 'projecten' | 'content' | 'onderhoud' | 'opleveringen' | 'offertes'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
 
 const OPVOLG_MAX = 5
 const dagKort = (d: string) => new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' })
@@ -341,6 +341,7 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
   const groepen = await Promise.all([
     mag('aanvragen') ? opvolgAanvragen() : null,
     mag('contracts') ? opvolgContracten() : null,
+    mag('contracts') ? opvolgTegentekenen() : null,
     mag('meetings') ? opvolgMeetings() : null,
     mag('opdrachten') ? opvolgProjecten() : null,
     mag('content') ? opvolgContent() : null,
@@ -382,6 +383,31 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
         key: 'contracten', titel: 'Contracten opvolgen', totaal: rijen.length, alles: '/admin/contracts', leeg: 'Alle contracten zijn bij.',
         items: rijen.slice(0, OPVOLG_MAX).map(({ c, fu }) => ({
           id: c.id, titel: [c.client_id ? namen.get(c.client_id) : null, c.title].filter(Boolean).join(' – '), sub: fu.reason, href: `/admin/contracts/${c.id}`, dringend: fu.level === 'urgent',
+        })),
+      }
+    } catch { return null }
+  }
+
+  /**
+   * Contracten die de klant tekende en wij nog niet: recentste eerst. Ook de
+   * oudere contracten, zodat je ze één voor één kan aftekenen. Enkel zichtbaar als er iets is.
+   */
+  async function opvolgTegentekenen(): Promise<OpvolgGroep | null> {
+    try {
+      const { data, count, error } = await admin.from('contracts')
+        .select('id, title, client_id, signed_at, signer_name', { count: 'exact' })
+        .in('status', ['signed', 'getekend']).is('tegengetekend_op', null)
+        .order('signed_at', { ascending: false, nullsFirst: false }).limit(OPVOLG_MAX)
+      if (error) return null
+      const rijen = (data ?? []) as { id: string; title: string; client_id: string | null; signed_at: string | null; signer_name: string | null }[]
+      if (!rijen.length) return null
+      const namen = await klantNamen(rijen.map((r) => r.client_id ?? ''))
+      return {
+        key: 'tegentekenen', titel: 'Contracten tegentekenen', totaal: count ?? rijen.length, alles: '/admin/contracts?tegentekenen=1', leeg: 'Alles is door ons ondertekend.',
+        items: rijen.map((r) => ({
+          id: r.id, titel: [r.client_id ? namen.get(r.client_id) : null, r.title].filter(Boolean).join(' – '),
+          sub: `getekend door ${r.signer_name ?? 'de klant'}${r.signed_at ? ` op ${dagKort(r.signed_at)}` : ''} · wacht op onze handtekening`,
+          href: `/admin/contracts/${r.id}/tegentekenen`, dringend: !!r.signed_at && Date.now() - new Date(r.signed_at).getTime() > 3 * 86_400_000,
         })),
       }
     } catch { return null }

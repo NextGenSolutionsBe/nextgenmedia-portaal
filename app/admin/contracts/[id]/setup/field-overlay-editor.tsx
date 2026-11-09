@@ -11,6 +11,8 @@ import { FIELD_FONT_PT } from '@/lib/contract-render'
 
 type Field = { label: string; type: string; page_number: number; x: number; y: number; width: number; height: number; required: boolean; placeholder?: string; confidence?: number }
 type Zone = { sig_page: number; sig_x_pct: number; sig_y_pct: number; sig_width: number; sig_height: number }
+/** Zone voor de handtekening van NextGenMedia (x/y in %, w/h in punten, zoals die van de klant). */
+export type OnsZone = { page: number; x: number; y: number; w: number; h: number }
 
 // pdf.js wordt lazy geladen (alleen client). Bewust de LEGACY-build: pdf.js 6
 // gebruikt splinternieuwe JavaScript (o.a. Map.prototype.getOrInsertComputed)
@@ -20,7 +22,7 @@ type Zone = { sig_page: number; sig_x_pct: number; sig_y_pct: number; sig_width:
 // public/pdfjs/ (de CDN heeft geen legacy-worker), dus altijd dezelfde versie.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let pdfjsPromise: Promise<any> | null = null
-function loadPdfjs() {
+export function loadPdfjs() {
   if (!pdfjsPromise) {
     pdfjsPromise = import('pdfjs-dist/legacy/build/pdf.mjs').then((pdfjs) => {
       pdfjs.GlobalWorkerOptions.workerSrc = `/pdfjs/pdf.worker.min.mjs?v=${pdfjs.version}`
@@ -31,8 +33,11 @@ function loadPdfjs() {
 }
 
 export function FieldOverlayEditor({
-  pdfUrl, fields, setFields, zone, setZone, page, setPage, selected, setSelected,
+  pdfUrl, fields, setFields, zone, setZone, page, setPage, selected, setSelected, ons, setOns,
 }: {
+  /** Zone voor onze eigen handtekening (NextGenMedia tekent na de klant). */
+  ons?: OnsZone
+  setOns?: (updater: (z: OnsZone) => OnsZone) => void
   pdfUrl: string | null
   fields: Field[]
   setFields: (updater: (f: Field[]) => Field[]) => void
@@ -56,12 +61,16 @@ export function FieldOverlayEditor({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pdfDocRef = useRef<any>(null)
+  // pdf.js mag maar één weergave tegelijk op hetzelfde canvas: de vorige eerst annuleren.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const renderTaak = useRef<any>(null)
+  const renderBeurt = useRef(0)
   // Nieuwe link (na vernieuwen) = document opnieuw ophalen. Staat vóór het
   // teken-effect, zodat de oude kopie eerst weg is.
   useEffect(() => { pdfDocRef.current = null }, [pdfUrl])
-  const drag = useRef<null | { kind: 'field' | 'zone'; index: number; mode: 'move' | 'resize'; startX: number; startY: number; orig: { x: number; y: number; w: number; h: number } }>(null)
+  const drag = useRef<null | { kind: 'field' | 'zone' | 'ons'; index: number; mode: 'move' | 'resize'; startX: number; startY: number; orig: { x: number; y: number; w: number; h: number } }>(null)
 
-  const maxPage = Math.max(1, zone.sig_page, ...fields.map((f) => f.page_number || 1))
+  const maxPage = Math.max(1, zone.sig_page, ons?.page ?? 1, ...fields.map((f) => f.page_number || 1))
   // Navigeer over álle PDF-pagina's (numPages), ook waar nog geen velden staan.
   const totalPages = Math.max(maxPage, numPages)
   const scale = pageDims.wPx / pageDims.wPt // px per punt
@@ -69,6 +78,7 @@ export function FieldOverlayEditor({
   // Render de gekozen pagina naar het canvas op de breedte van de container.
   const renderPage = useCallback(async () => {
     if (!pdfUrl || !wrapRef.current || !canvasRef.current) return
+    const mijn = ++renderBeurt.current
     setLoading(true); setError(null)
     try {
       const pdfjs = await loadPdfjs()
@@ -91,6 +101,7 @@ export function FieldOverlayEditor({
         vernieuwd.current = false
       }
       const doc = pdfDocRef.current
+      if (mijn !== renderBeurt.current) return
       setNumPages(doc.numPages)
       const pageNum = Math.min(page, doc.numPages)
       const pdfPage = await doc.getPage(pageNum)
@@ -98,6 +109,8 @@ export function FieldOverlayEditor({
       const containerWidth = wrapRef.current.clientWidth || 600
       const renderScale = containerWidth / vp1.width
       const vp = pdfPage.getViewport({ scale: renderScale })
+      if (mijn !== renderBeurt.current || !canvasRef.current) return
+      try { renderTaak.current?.cancel() } catch { /* al klaar */ }
       const canvas = canvasRef.current
       const ctx = canvas.getContext('2d')!
       const dpr = Math.min(2, window.devicePixelRatio || 1)
@@ -106,12 +119,17 @@ export function FieldOverlayEditor({
       canvas.style.width = `${vp.width}px`
       canvas.style.height = `${vp.height}px`
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      await pdfPage.render({ canvasContext: ctx, viewport: vp }).promise
+      const taak = pdfPage.render({ canvasContext: ctx, viewport: vp })
+      renderTaak.current = taak
+      await taak.promise
+      if (mijn !== renderBeurt.current) return
       setPageDims({ wPt: vp1.width, hPt: vp1.height, wPx: vp.width, hPx: vp.height })
     } catch (e) {
+      // Geannuleerd door een nieuwere weergave: geen fout.
+      if ((e as { name?: string })?.name === 'RenderingCancelledException' || mijn !== renderBeurt.current) return
       setError(e instanceof Error && !/getOrInsert|is not a function/i.test(e.message) ? e.message : 'De PDF kon niet geladen worden. Herlaad de pagina.')
     } finally {
-      setLoading(false)
+      if (mijn === renderBeurt.current) setLoading(false)
     }
   }, [pdfUrl, page, router])
 
@@ -123,12 +141,14 @@ export function FieldOverlayEditor({
     return () => window.removeEventListener('resize', onResize)
   }, [renderPage])
 
-  const onPointerDown = (e: React.PointerEvent, kind: 'field' | 'zone', index: number, mode: 'move' | 'resize') => {
+  const onPointerDown = (e: React.PointerEvent, kind: 'field' | 'zone' | 'ons', index: number, mode: 'move' | 'resize') => {
     e.preventDefault(); e.stopPropagation()
     ;(e.target as HTMLElement).setPointerCapture?.(e.pointerId)
     const orig = kind === 'zone'
       ? { x: zone.sig_x_pct, y: zone.sig_y_pct, w: zone.sig_width, h: zone.sig_height }
-      : { x: fields[index].x, y: fields[index].y, w: fields[index].width, h: fields[index].height }
+      : kind === 'ons' && ons
+        ? { x: ons.x, y: ons.y, w: ons.w, h: ons.h }
+        : { x: fields[index].x, y: fields[index].y, w: fields[index].width, h: fields[index].height }
     drag.current = { kind, index, mode, startX: e.clientX, startY: e.clientY, orig }
     if (kind === 'field') setSelected(index)
   }
@@ -143,6 +163,7 @@ export function FieldOverlayEditor({
       const nx = clamp(d.orig.x + dxPct)
       const ny = clamp(d.orig.y + dyPct)
       if (d.kind === 'zone') setZone((z) => ({ ...z, sig_x_pct: round1(nx), sig_y_pct: round1(ny) }))
+      else if (d.kind === 'ons') setOns?.((z) => ({ ...z, x: round1(nx), y: round1(ny) }))
       else setFields((fs) => fs.map((f, i) => i === d.index ? { ...f, x: round1(nx), y: round1(ny) } : f))
     } else {
       // Resize: pixel-delta exact terug naar punten via de echte schaal.
@@ -151,6 +172,7 @@ export function FieldOverlayEditor({
       const nw = Math.max(30, Math.round(d.orig.w + dwPt))
       const nh = Math.max(12, Math.round(d.orig.h + dhPt))
       if (d.kind === 'zone') setZone((z) => ({ ...z, sig_width: Math.max(50, nw), sig_height: Math.max(24, nh) }))
+      else if (d.kind === 'ons') setOns?.((z) => ({ ...z, w: Math.min(400, Math.max(60, nw)), h: Math.min(200, Math.max(24, nh)) }))
       else setFields((fs) => fs.map((f, i) => i === d.index ? { ...f, width: nw, height: nh } : f))
     }
   }
@@ -246,8 +268,19 @@ export function FieldOverlayEditor({
                   className="absolute rounded border-2 border-gray-900 bg-gray-100 flex items-center justify-center cursor-move select-none"
                   style={boxStyle(zone.sig_x_pct, zone.sig_y_pct, zone.sig_width, zone.sig_height)}
                 >
-                  <span className="text-[10px] text-gray-900 font-semibold">✎ Handtekening</span>
+                  <span className="text-[10px] text-gray-900 font-semibold">✎ Handtekening klant</span>
                   <span onPointerDown={(e) => onPointerDown(e, 'zone', -1, 'resize')} className="absolute -bottom-1 -right-1 h-3 w-3 bg-gray-900 rounded-sm cursor-se-resize" />
+                </div>
+              )}
+
+              {ons && ons.page === page && (
+                <div
+                  onPointerDown={(e) => onPointerDown(e, 'ons', -1, 'move')}
+                  className="absolute rounded border-2 border-amber-500 bg-amber-100/80 flex items-center justify-center cursor-move select-none"
+                  style={boxStyle(ons.x, ons.y, ons.w, ons.h)}
+                >
+                  <span className="text-[10px] text-amber-900 font-semibold">✎ Handtekening NextGenMedia</span>
+                  <span onPointerDown={(e) => onPointerDown(e, 'ons', -1, 'resize')} className="absolute -bottom-1 -right-1 h-3 w-3 bg-amber-600 rounded-sm cursor-se-resize" />
                 </div>
               )}
             </div>
@@ -255,11 +288,18 @@ export function FieldOverlayEditor({
         )}
       </div>
 
-      {zone.sig_page !== page && (
-        <button onClick={() => setZone((z) => ({ ...z, sig_page: page }))} className="text-xs text-gray-900 hover:underline">
-          ✎ Handtekeningzone naar pagina {page} verplaatsen
-        </button>
-      )}
+      <div className="flex flex-wrap gap-x-4 gap-y-1">
+        {zone.sig_page !== page && (
+          <button onClick={() => setZone((z) => ({ ...z, sig_page: page }))} className="text-xs text-gray-900 hover:underline">
+            ✎ Handtekening klant naar pagina {page}
+          </button>
+        )}
+        {ons && setOns && ons.page !== page && (
+          <button onClick={() => setOns((z) => ({ ...z, page }))} className="text-xs text-amber-800 hover:underline">
+            ✎ Handtekening NextGenMedia naar pagina {page}
+          </button>
+        )}
+      </div>
     </div>
   )
 }

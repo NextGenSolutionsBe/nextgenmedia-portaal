@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Save, Loader2, Sparkles, Plus, Trash2, Blocks } from 'lucide-react'
 import { toast } from 'sonner'
-import { FieldOverlayEditor } from './field-overlay-editor'
+import { FieldOverlayEditor, type OnsZone } from './field-overlay-editor'
 import { CONTRACT_BLOCKS } from '@/lib/contract-blocks'
 
 interface Zone {
@@ -23,7 +23,10 @@ export function SignatureZoneEditor({
   initialZone,
   initialFields = [],
   apiBase,
+  initialOns,
 }: {
+  /** Zone voor de handtekening van NextGenMedia; altijd mee te bewaren naast die van de klant. */
+  initialOns?: OnsZone
   contractId: string
   pdfUrl: string | null
   initialZone: Zone
@@ -33,6 +36,7 @@ export function SignatureZoneEditor({
 }) {
   const base = apiBase ?? `/api/admin/contracts/${contractId}`
   const [zone, setZone] = useState<Zone>(initialZone)
+  const [ons, setOns] = useState<OnsZone | undefined>(initialOns)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -104,7 +108,7 @@ export function SignatureZoneEditor({
       const res = await fetch(`${base}/signature-zone`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(zone),
+        body: JSON.stringify({ ...zone, ...(ons ? { ons } : {}) }),
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error)
@@ -121,7 +125,7 @@ export function SignatureZoneEditor({
     <div className="space-y-6">
       {/* Toolbar: AI-analyse + standaardblokken + opslaan */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <p className="text-sm text-gray-500 max-w-md">Sleep velden en de handtekeningzone rechtstreeks op de PDF. AI helpt detecteren — jij beslist.</p>
+        <p className="text-sm text-gray-500 max-w-md">Sleep velden en beide handtekeningen (klant en NextGenMedia) rechtstreeks op de PDF. AI helpt detecteren, jij beslist.</p>
         <div className="flex items-center gap-2 flex-wrap">
           <button onClick={analyze} disabled={analyzing} className="btn-secondary text-sm">{analyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}Analyseer met AI</button>
           <button onClick={saveAll} disabled={saving || savingFields} className={`btn-primary text-sm ${saved ? '!bg-green-500' : ''}`}>
@@ -143,7 +147,8 @@ export function SignatureZoneEditor({
 
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Drag & drop PDF-editor */}
-        <FieldOverlayEditor pdfUrl={pdfUrl} fields={fields} setFields={setFields} zone={zone} setZone={setZone} page={page} setPage={setPage} selected={selected} setSelected={setSelected} />
+        <FieldOverlayEditor pdfUrl={pdfUrl} fields={fields} setFields={setFields} zone={zone} setZone={setZone} page={page} setPage={setPage} selected={selected} setSelected={setSelected}
+          ons={ons} setOns={(u) => setOns((z) => (z ? u(z) : z))} />
 
         {/* Veldenlijst (labels, types, verplicht) — posities komen van het slepen */}
         <div className="card-base h-fit">

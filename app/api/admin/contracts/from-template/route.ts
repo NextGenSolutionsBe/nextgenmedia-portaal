@@ -1,6 +1,7 @@
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient, insertResilient , isActiveStaff } from '@/lib/supabase/server'
+import { onsZoneVan, zoneKolommen } from '@/lib/contracten/tegenhandtekening'
 import { randomUUID } from 'crypto'
 import { revalidatePath } from 'next/cache'
 import { logContractEvent } from '@/lib/contract-audit'
@@ -63,6 +64,8 @@ export async function POST(req: NextRequest) {
         sig_y_pct: tpl.sig_y_pct ?? 25,
         sig_width: tpl.sig_width ?? 200,
         sig_height: tpl.sig_height ?? 60,
+        // Zone voor onze handtekening: die van de template, anders gespiegeld naast de klant.
+        ...zoneKolommen(onsZoneVan(tpl)),
         access_token: accessToken,
       },
       { required: ['title', 'access_token'] },

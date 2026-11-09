@@ -28,6 +28,8 @@ export type ContractEvent =
   | 'herinnering_verstuurd'
   // Geannuleerd, niet geaccepteerd door de klant, of terug opengezet.
   | 'cancelled' | 'niet_geaccepteerd' | 'heropend'
+  // NextGenMedia tekende na de klant (lib/contracten/tegenhandtekening-server.ts).
+  | 'tegengetekend'
 
 export async function logContractEvent(
   admin: Admin,

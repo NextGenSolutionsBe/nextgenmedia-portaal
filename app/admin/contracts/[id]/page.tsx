@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation'
 import { createAdminSupabaseClient, trySignedUrl } from '@/lib/supabase/server'
 import { formatDate } from '@/lib/utils'
 import Link from 'next/link'
-import { ChevronLeft, CheckCircle2, ExternalLink, Settings2 } from 'lucide-react'
+import { ChevronLeft, CheckCircle2, ExternalLink, Settings2, PenLine } from 'lucide-react'
 import { ContractActions } from './contract-actions'
 import { GetekendeDocumenten } from './getekende-documenten'
 import { laatsteArchief } from '@/lib/contract-archief'
@@ -179,6 +179,20 @@ export default async function ContractDetailPage({ params }: { params: { id: str
           <div className="text-xs mt-1 opacity-80">De gekoppelde facturen worden niet verstuurd. Tekent de klant toch? Zet het contract terug open bij Acties.</div>
         </div>
       )}
+
+      {/* Na de klant tekenen wij ook: wacht het nog op ons, of staan beide handtekeningen erop? */}
+      {isSigned && (c.tegengetekend_op ? (
+        <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900 flex items-start gap-2">
+          <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
+          <span><b className="font-semibold">Door beide partijen ondertekend.</b> {c.signer_name ?? 'De klant'}{c.signed_at ? ` op ${formatDate(c.signed_at)}` : ''}, {c.tegengetekend_door} namens {c.tegengetekend_bedrijf ?? 'NextGenMedia'} op {formatDate(c.tegengetekend_op)}. De klant ziet deze versie in de klantapp.</span>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 flex items-center gap-3 flex-wrap">
+          <PenLine className="h-4 w-4 shrink-0" />
+          <span className="flex-1 min-w-[200px]"><b className="font-semibold">Wacht nog op onze handtekening.</b> De klant tekende{c.signed_at ? ` op ${formatDate(c.signed_at)}` : ''}. Zet ook de handtekening van NextGenMedia, dan krijgt de klant het contract met beide handtekeningen.</span>
+          <Link href={`/admin/contracts/${c.id}/tegentekenen`} className="btn-primary text-sm shrink-0"><PenLine className="h-4 w-4" />Nu ondertekenen</Link>
+        </div>
+      ))}
 
       {/* Financieel overzicht bovenaan: contractwaarde, facturen, kosten en winst in één oogopslag. */}
       <ContractFacturatie

@@ -61,6 +61,7 @@ async function getContracts() {
       signed_at: c.signed_at ?? null,
       sent_at: c.sent_at ?? null,
       klant_geopend_op: c.klant_geopend_op ?? null,
+      tegengetekend_op: c.tegengetekend_op ?? null,
       created_at: c.created_at,
       expires_at: c.expires_at ?? null,
       // start/end bestaan mogelijk niet op een oudere tabel → altijd null-safe.
@@ -99,7 +100,7 @@ async function getContracts() {
   return { contracts: enriched, clients: clients ?? [], templates: templates ?? [], contracttypes }
 }
 
-export default async function ContractsPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
+export default async function ContractsPage({ searchParams }: { searchParams: Promise<{ status?: string; tegentekenen?: string }> }) {
   const { contracts, clients, templates, contracttypes } = await getContracts()
   const sp = await searchParams
   const initialStatus = typeof sp?.status === 'string' ? sp.status : 'all'
@@ -107,6 +108,7 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
   return (
     <ContractsClient
       initialStatus={initialStatus}
+      initialTegentekenen={sp?.tegentekenen === '1'}
       initialContracts={contracts}
       clients={clients as Array<{ id: string; company_name: string }>}
       templates={templates as Array<{ id: string; name: string }>}

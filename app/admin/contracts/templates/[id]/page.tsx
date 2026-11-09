@@ -2,6 +2,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
+import { onsZoneVan } from '@/lib/contracten/tegenhandtekening'
 import { SignatureZoneEditor } from '@/app/admin/contracts/[id]/setup/signature-zone-editor'
 
 export const dynamic = 'force-dynamic'
@@ -43,6 +44,7 @@ export default async function TemplateSetupPage({ params }: { params: Promise<{ 
           sig_width:  tpl.sig_width  ?? 200,
           sig_height: tpl.sig_height ?? 60,
         }}
+        initialOns={onsZoneVan(tpl)}
       />
     </div>
   )
