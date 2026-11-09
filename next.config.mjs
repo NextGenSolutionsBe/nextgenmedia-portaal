@@ -19,7 +19,8 @@ const cspReportOnly = [
   // Eigen video's (Founders of Flanders: Instagram-reels in onze opslag).
   "media-src 'self' blob: https://*.supabase.co",
   // YouTube-embeds (nieuwsbrieven, Founders of Flanders): enkel na een klik.
-  "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://www.instagram.com https://www.facebook.com https://www.linkedin.com",
+  // Supabase: een pdf uit een oplevering bekijken (kortlevende ondertekende link).
+  "frame-src 'self' https://*.supabase.co https://www.youtube-nocookie.com https://www.youtube.com https://www.instagram.com https://www.facebook.com https://www.linkedin.com",
   "font-src 'self' data:",
   "connect-src 'self' https://*.supabase.co https://cdnjs.cloudflare.com",
   "frame-ancestors 'none'",

@@ -15,6 +15,7 @@
 
 import { statusInfo, type OpdrachtStatus, type Koppelingen, type FactuurKoppeling } from '@/lib/opdrachten'
 import { canonicalStatus } from '@/lib/contract-status'
+import { normalizeBtw } from '@/lib/btw'
 
 export type KolomKey = 'potentieel' | 'offerte' | 'geaccepteerd' | 'contract' | 'getekend' | 'uitvoering' | 'afgerond' | 'stopgezet'
 
@@ -116,17 +117,19 @@ export type DienstInfo = {
   donker: boolean
   /** Andere schrijfwijzen die we als deze dienst herkennen. */
   ook?: string[]
+  /** Kort, voor tussen haakjes naast de klant: "Bakkerij Peeters (sociale media)". */
+  kort?: string
 }
 
 export const DIENSTEN: DienstInfo[] = [
-  { key: 'social_media', label: 'Sociale media',         achtergrond: '#FFF5C2', rand: '#EBD670', tekst: '#2B2600', donker: false, ook: ['Social media', 'Socials', 'Social media management'] },
-  { key: 'grafisch',     label: 'Grafisch ontwerp',      achtergrond: '#FDE0DE', rand: '#F1ACA6', tekst: '#3A1210', donker: false, ook: ['Branding', 'Huisstijl', 'Grafisch ontwerp & branding', 'Grafisch ontwerp en branding'] },
-  { key: 'webdesign',    label: 'Webdesign',             achtergrond: '#ECE2FB', rand: '#C7AEF0', tekst: '#241446', donker: false },
-  { key: 'foto_video',   label: 'Foto & videografie',    achtergrond: '#DCF3E2', rand: '#9CD5AB', tekst: '#0F2E18', donker: false },
-  { key: 'consultancy',  label: 'Marketing consultancy', achtergrond: '#F0E4D6', rand: '#D2B694', tekst: '#33240F', donker: false, ook: ['Consultancy'] },
-  { key: 'advertising',  label: 'Advertising',           achtergrond: '#D6F4EF', rand: '#8FD4C8', tekst: '#0D302B', donker: false, ook: ['Meta ads', 'Google ads', 'Facebook ads', 'Instagram ads', 'Meta advertenties', 'Google advertenties', 'SEA', 'Advertenties', 'Ads', 'Meta & Google ads'] },
-  { key: 'ngs',          label: 'NextGenSolutions (AI)', achtergrond: '#DDEBFC', rand: '#9FC2EE', tekst: '#0E2440', donker: false, ook: ['NextGenSolutions', 'AI'] },
-  { key: 'founders',     label: 'Founders of Flanders',  achtergrond: '#8A5A3B', rand: '#6B4329', tekst: '#FFFFFF', donker: true },
+  { key: 'social_media', label: 'Sociale media',         achtergrond: '#FFF5C2', rand: '#EBD670', tekst: '#2B2600', donker: false, ook: ['Social media', 'Socials', 'Social media management'] , kort: 'sociale media' },
+  { key: 'grafisch',     label: 'Grafisch ontwerp',      achtergrond: '#FDE0DE', rand: '#F1ACA6', tekst: '#3A1210', donker: false, ook: ['Branding', 'Huisstijl', 'Grafisch ontwerp & branding', 'Grafisch ontwerp en branding'] , kort: 'grafisch ontwerp' },
+  { key: 'webdesign',    label: 'Webdesign',             achtergrond: '#ECE2FB', rand: '#C7AEF0', tekst: '#241446', donker: false, kort: 'website' },
+  { key: 'foto_video',   label: 'Foto & videografie',    achtergrond: '#DCF3E2', rand: '#9CD5AB', tekst: '#0F2E18', donker: false, kort: 'foto & video' },
+  { key: 'consultancy',  label: 'Marketing consultancy', achtergrond: '#F0E4D6', rand: '#D2B694', tekst: '#33240F', donker: false, ook: ['Consultancy'] , kort: 'consultancy' },
+  { key: 'advertising',  label: 'Advertising',           achtergrond: '#D6F4EF', rand: '#8FD4C8', tekst: '#0D302B', donker: false, ook: ['Meta ads', 'Google ads', 'Facebook ads', 'Instagram ads', 'Meta advertenties', 'Google advertenties', 'SEA', 'Advertenties', 'Ads', 'Meta & Google ads'] , kort: 'advertising' },
+  { key: 'ngs',          label: 'NextGenSolutions (AI)', achtergrond: '#DDEBFC', rand: '#9FC2EE', tekst: '#0E2440', donker: false, ook: ['NextGenSolutions', 'AI'] , kort: 'AI-automatisatie' },
+  { key: 'founders',     label: 'Founders of Flanders',  achtergrond: '#8A5A3B', rand: '#6B4329', tekst: '#FFFFFF', donker: true, kort: 'founder video' },
 ]
 
 /** Kaart zonder dienst: wit. */
@@ -140,6 +143,25 @@ export function dienstInfo(v: string): DienstInfo {
   const k = DIENST_ALIAS[v] ?? v
   const vast = DIENSTEN.find((d) => d.key === k || sleutelVan(d.label) === s || (d.ook ?? []).some((o) => sleutelVan(o) === s))
   return vast ?? { ...GEEN_DIENST, label: v }
+}
+
+/**
+ * Waar gaat het project over, kort, voor tussen haakjes naast de klant:
+ * de diensten ("sociale media", "website + advertising"), anders de titel.
+ * Leeg als er niets is.
+ */
+export function projectOnderwerp(diensten: string[] | null | undefined, titel?: string | null): string {
+  const korte = [...new Set((diensten ?? []).map((d) => { const i = dienstInfo(d); return i.kort ?? i.label.toLowerCase() }))]
+  if (korte.length) return korte.length > 2 ? `${korte.slice(0, 2).join(' + ')} +${korte.length - 2}` : korte.join(' + ')
+  return String(titel ?? '').replace(/\s+/g, ' ').trim().slice(0, 60)
+}
+
+/** "Bakkerij Peeters (sociale media)": klant met tussen haakjes waarover het gaat. */
+export function projectNaam(klant: string | null | undefined, diensten: string[] | null | undefined, titel?: string | null): string {
+  const k = String(klant ?? '').trim()
+  const o = projectOnderwerp(diensten, titel)
+  if (!k) return String(titel ?? '').trim() || 'Geen klant'
+  return o && o.toLowerCase() !== k.toLowerCase() ? `${k} (${o})` : k
 }
 
 /** De kleur van de kaart: die van de eerste dienst met een vaste kleur. */
@@ -352,7 +374,7 @@ export function bedrijfVan(merk: string | null | undefined, diensten: string[] |
 
 /** Btw-nummer zoals we het bewaren: hoofdletters, zonder spaties, punten of streepjes. */
 export function normaliseerBtw(v: unknown): string | null {
-  const s = String(v ?? '').toUpperCase().replace(/[\s.\-]/g, '')
+  const s = normalizeBtw(String(v ?? ''))
   return s.length >= 8 && /^[A-Z]{0,2}[0-9A-Z]+$/.test(s) ? s.slice(0, 20) : null
 }
 

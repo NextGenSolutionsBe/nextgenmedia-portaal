@@ -9,6 +9,7 @@ import { opleveringStatus, volgendeStap, revisieStand, type Versie as OpVersie }
 import { offerteWeergave, moetOpvolgen, isVerlopen, type Offerte } from '@/lib/offertes'
 import { samenvatting, grootte, OPSLAG_LIMIET_GB, type RuwVerbruik } from '@/lib/opslag'
 import { STATUS as AANVRAAG_STATUS, nieuweAanvraagTitel, type AanvraagSoort } from '@/lib/aanvragen/model'
+import { projectNaam } from '@/lib/opdrachten-kanban'
 
 // Eén bron voor meldingen + "Vandaag": alles live afgeleid uit bestaande data
 // (geen nieuwe tabel). Gelezen/niet-gelezen wordt client-side in localStorage
@@ -169,7 +170,7 @@ export async function buildNotifications(): Promise<Notif[]> {
     for (const a of beslist) out.push({ id: `aanvraag:${a.id}:offerte:${a.offerte_status}`, kind: 'aanvraag', priority: a.offerte_status === 'aanvaard' ? 'high' : 'med', title: `Offerte ${a.offerte_status === 'aanvaard' ? 'aanvaard' : 'geweigerd'} door de klant — ${names.get(a.client_id) ?? 'Klant'}: ${a.type_label}`, date: a.offerte_beslist_op, href: `/admin/aanvragen?aanvraag=${a.id}` })
   } catch { /* meldingen mogen nooit stuklopen */ }
 
-  // Video-opleveringen: de klant vroeg een revisie, keurde goed of stuurde een opmerking.
+  // Opleveringen: de klant vroeg een revisie, keurde goed of stuurde een opmerking.
   try {
     const fb = await safe(admin.from('oplevering_feedback').select('id, oplevering_id, soort, ronde, created_at').gte('created_at', since).order('created_at', { ascending: false }).limit(30)) as { id: string; oplevering_id: string; soort: string; ronde: number | null; created_at: string }[]
     if (fb.length) {
@@ -441,10 +442,10 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
     try {
       const grens = new Date(Date.now() - 7 * 86_400_000).toISOString()
       const { data, count } = await admin.from('opdrachten')
-        .select('id, titel, client_id, klant_vrij, status, status_gewijzigd_op, created_at', { count: 'exact' })
+        .select('id, titel, client_id, klant_vrij, status, status_gewijzigd_op, created_at, diensten', { count: 'exact' })
         .in('status', ['open', 'voorstel_gevraagd', 'voorstel_bezig', 'voorstel_klaar', 'voorstel_voorgelegd', 'interesse'])
         .lt('status_gewijzigd_op', grens).order('status_gewijzigd_op', { ascending: true }).limit(OPVOLG_MAX)
-      const rijen = (data ?? []) as { id: string; titel: string; client_id: string | null; klant_vrij: string | null; status: string; status_gewijzigd_op: string | null; created_at: string }[]
+      const rijen = (data ?? []) as { id: string; titel: string; client_id: string | null; klant_vrij: string | null; status: string; status_gewijzigd_op: string | null; created_at: string; diensten?: string[] | null }[]
       const namen = await klantNamen(rijen.map((r) => r.client_id ?? ''))
       const offerte = new Set(['voorstel_klaar', 'voorstel_voorgelegd'])
       return {
@@ -452,7 +453,7 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
         items: rijen.map((r) => {
           const dagen = Math.floor((Date.now() - new Date(r.status_gewijzigd_op ?? r.created_at).getTime()) / 86_400_000)
           return {
-            id: r.id, titel: (r.client_id ? namen.get(r.client_id) : r.klant_vrij) || r.titel,
+            id: r.id, titel: projectNaam((r.client_id ? namen.get(r.client_id) : r.klant_vrij) || null, r.diensten, r.titel),
             sub: `${r.status === 'interesse' ? 'offerte geaccepteerd, nog geen contract' : offerte.has(r.status) ? 'offerte' : 'opvolging'} · ${dagen} dagen stil · ${r.titel}`.slice(0, 80),
             href: `/admin/opdrachten?opdracht=${r.id}`, dringend: dagen >= 14,
           }
@@ -484,7 +485,7 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
   }
 
   /**
-   * Video-opleveringen die op ons wachten: feedback van de klant te verwerken,
+   * Opleveringen die op ons wachten: feedback van de klant te verwerken,
    * of een gedeelde versie die zonder reactie (bijna) verloopt. Enkel zichtbaar
    * als er iets is. Zelfde regels als het scherm (volgendeStap).
    */
@@ -513,7 +514,7 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
       if (!lijst.length) return null
       const namen = await klantNamen(lijst.slice(0, OPVOLG_MAX).map((x) => x.r.client_id))
       return {
-        key: 'opleveringen', titel: 'Video-opleveringen', totaal: lijst.length, alles: '/admin/opleveringen', leeg: 'Niets wacht op ons.',
+        key: 'opleveringen', titel: 'Opleveringen', totaal: lijst.length, alles: '/admin/opleveringen', leeg: 'Niets wacht op ons.',
         items: lijst.slice(0, OPVOLG_MAX).map(({ r, stap }) => ({
           id: r.id, titel: `${namen.get(r.client_id) ?? 'Klant'} – ${r.titel}`, sub: stap.tekst, href: `/admin/opleveringen?oplevering=${r.id}`, dringend: true,
         })),

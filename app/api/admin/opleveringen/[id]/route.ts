@@ -3,6 +3,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { magIk } from '@/lib/instellingen/laden'
 import { safeMessage } from '@/lib/api-error'
 import { laadOpleveringen, wisBestanden } from '@/lib/opleveringen-server'
+import { soortVan } from '@/lib/opleveringen'
 
 export const dynamic = 'force-dynamic'
 const isUuid = (v: string) => /^[0-9a-f-]{36}$/i.test(v)
@@ -18,7 +19,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   } catch (e) { return NextResponse.json({ error: safeMessage(e, 'oplevering.GET') }, { status: 500 }) }
 }
 
-/** PATCH { titel?, omschrijving?, opdracht_id?, max_revisies?, extra_ronde?, archiveer? } */
+/** PATCH { titel?, soort?, omschrijving?, opdracht_id?, max_revisies?, extra_ronde?, archiveer? } */
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     if (!(await magIk('opleveringen', 'aanpassen'))) return NextResponse.json({ error: 'Je mag dit niet aanpassen.' }, { status: 403 })
@@ -34,6 +35,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (!t) return NextResponse.json({ error: 'De titel mag niet leeg zijn.' }, { status: 400 })
       patch.titel = t
     }
+    if ('soort' in b) patch.soort = soortVan(b.soort)
     if ('omschrijving' in b) patch.omschrijving = String(b.omschrijving ?? '').trim().slice(0, 4000) || null
     if ('opdracht_id' in b) patch.opdracht_id = isUuid(String(b.opdracht_id ?? '')) ? String(b.opdracht_id) : null
     if ('max_revisies' in b && Number.isInteger(Number(b.max_revisies))) patch.max_revisies = Math.max(0, Math.min(10, Number(b.max_revisies)))

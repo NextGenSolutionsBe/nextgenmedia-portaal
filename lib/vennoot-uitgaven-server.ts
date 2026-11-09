@@ -76,6 +76,26 @@ export async function laadVennotenData(admin: Admin, userId: string | null): Pro
   return { uitgaven: ((u.data ?? []) as Record<string, unknown>[]).map(naarUitgave), regels, handtekeningen, namen, ik }
 }
 
+export type RegelsMetHandtekeningen = RegelsVersie & { handtekeningen: RegelHandtekening[] }
+
+/**
+ * Alle versies van de regels (nieuwste eerst, max 50), elk met wie die
+ * versie tekende. Een handtekening telt enkel bij exact die tekst.
+ */
+export async function regelsGeschiedenis(admin: Admin): Promise<RegelsMetHandtekeningen[]> {
+  const { data, error } = await admin.from('vennoot_regels').select('*').order('versie', { ascending: false }).limit(50)
+  if (error) { if (MIST.test(error.message)) return []; throw new Error(error.message) }
+  const versies = ((data ?? []) as Record<string, unknown>[]).map(naarRegels)
+  if (!versies.length) return []
+  const { data: h } = await admin.from('vennoot_regels_handtekeningen').select('regels_id, vennoot, naam, getekend_op, inhoud_tekst, handtekening').in('regels_id', versies.map((v) => v.id))
+  const per = new Map<string, RegelHandtekening[]>()
+  for (const x of (h ?? []) as (RegelHandtekening & { regels_id: string })[]) {
+    const { regels_id, ...rest } = x
+    per.set(regels_id, [...(per.get(regels_id) ?? []), rest])
+  }
+  return versies.map((v) => ({ ...v, handtekeningen: per.get(v.id) ?? [] }))
+}
+
 // ── Bonnetjes ────────────────────────────────────────────────────────────────
 
 export async function bonUploadLink(admin: Admin, naam: string, grootte: number): Promise<{ pad: string; token: string; bucket: string; contentType: string }> {

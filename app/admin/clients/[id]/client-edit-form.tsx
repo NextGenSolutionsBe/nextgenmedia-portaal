@@ -196,7 +196,7 @@ export function ClientEditForm({
             <input className={inp} value={form.btw_nummer} onChange={e => setForm(p => ({ ...p, btw_nummer: e.target.value }))} placeholder="BE0123456789" />
             <p className="text-[11px] text-gray-400 mt-1">Optioneel. Belgisch formaat wordt gevalideerd; hergebruikt in contracten/facturen.</p>
             {/* Bij een bestaande klant enkel tonen, niets stil overschrijven. */}
-            <BtwOpzoeken btw={form.btw_nummer} auto={false} onGevonden={(g) => setOfficieleNaam(g.naam)} />
+            <BtwOpzoeken btw={form.btw_nummer} onNetjes={(x) => setForm((p) => ({ ...p, btw_nummer: x }))} onGevonden={(g) => setOfficieleNaam(g.naam)} />
             {officieleNaam && officieleNaam !== form.company_name && (
               <button type="button" onClick={() => setForm((p) => ({ ...p, company_name: officieleNaam }))} className="mt-1 text-xs underline underline-offset-2 text-gray-700">Officiële naam overnemen: {officieleNaam}</button>
             )}

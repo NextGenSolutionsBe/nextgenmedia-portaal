@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict'
 import {
   versieLabel, revisieStand, beschikbaarheid, resterend, opleveringStatus, actieveVersie, valideerFeedback, tijdLabel, grootteLabel,
-  bestandSoort, veiligeNaam, bestandPad, nieuweVervaldatum, type Versie,
+  bestandSoort, veiligeNaam, bestandPad, nieuweVervaldatum, formaatLabel, soortVan, soortInfo, type Versie,
 } from '../lib/opleveringen'
 
 let n = 0
@@ -85,6 +85,25 @@ test('7. Tijd, grootte, soort en veilige namen', () => {
   assert.equal(veiligeNaam('Aftermovie Oeterdal (4K) – finaal.mov'), 'Aftermovie-Oeterdal-4K-finaal.mov')
   assert.equal(veiligeNaam('../../etc/passwd'), 'etc-passwd')
   assert.equal(bestandPad('o1', 'v1', 'b1', 'Mijn video.mp4'), 'o1/v1/b1-Mijn-video.mp4')
+})
+
+test('Alle opleveringen: soorten, bestandstypes en feedback per bestand', () => {
+  assert.equal(soortVan('ontwerp'), 'ontwerp')
+  assert.equal(soortVan('iets'), 'video')
+  assert.equal(soortInfo(null).label, 'Video')
+  assert.equal(bestandSoort('image/svg+xml'), 'foto')
+  assert.equal(bestandSoort('image/png'), 'foto')
+  assert.equal(bestandSoort('image/vnd.adobe.photoshop', 'logo.psd'), 'ander')
+  assert.equal(bestandSoort('image/heic'), 'ander')
+  assert.equal(bestandSoort('application/pdf'), 'pdf')
+  assert.equal(bestandSoort('', 'flyer.pdf'), 'pdf')
+  assert.equal(bestandSoort('application/postscript', 'logo.ai'), 'ander')
+  assert.equal(formaatLabel('Logo NGM.svg'), 'SVG')
+  assert.equal(formaatLabel('foto.jpeg'), 'JPG')
+  assert.equal(formaatLabel('bestand', 'application/pdf'), 'PDF')
+  const r = valideerFeedback({ soort: 'revisie', punten: [{ tijd: null, tekst: 'Blauw donkerder', bestand: '  logo.svg ' }, { tijd: 12, tekst: 'Logo groter' }] })
+  assert.ok(r.ok)
+  if (r.ok) assert.deepEqual(r.waarde.punten, [{ tijd: null, tekst: 'Blauw donkerder', bestand: 'logo.svg' }, { tijd: 12, tekst: 'Logo groter' }])
 })
 
 console.log(`\n${n} tests geslaagd\n`)

@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { useRefresh } from '@/lib/use-refresh'
 import { Logo } from '@/components/logo'
-import { LayoutDashboard, FileText, Calendar, Globe, LogOut, RefreshCcw, Menu, X, ListChecks, Newspaper, CalendarClock, Database, FolderUp, ShieldCheck, Video, Sparkles, Lightbulb, Megaphone, Clapperboard, Handshake, Ticket, Film } from 'lucide-react'
+import { LayoutDashboard, FileText, Calendar, Globe, LogOut, RefreshCcw, Menu, X, ListChecks, Newspaper, CalendarClock, Database, FolderUp, ShieldCheck, Video, Sparkles, Lightbulb, Megaphone, Clapperboard, Handshake, Ticket, PackageCheck } from 'lucide-react'
 import { MODULE_IMPLEMENTED, type PortalModule } from '@/lib/portal-permissions'
 import { t, type Lang } from '@/lib/i18n'
 import { LangToggle } from '@/components/lang-toggle'
@@ -42,7 +42,7 @@ const NAV: NavItem[] = [
   { tKey: 'nav.meetings',   href: '/portal/meetings',      icon: Video, module: 'meetings' },
   { tKey: 'nav.diensten',   href: '/portal/diensten',      icon: Sparkles, module: 'diensten' },
   { tKey: 'nav.consultancy', href: '/portal/consultancy',  icon: Lightbulb, module: 'consultancy' },
-  { tKey: 'nav.opleveringen', href: '/portal/opleveringen', icon: Film, requiresOpleveringen: true, module: 'opleveringen' },
+  { tKey: 'nav.opleveringen', href: '/portal/opleveringen', icon: PackageCheck, requiresOpleveringen: true, module: 'opleveringen' },
   { tKey: 'nav.events',     href: '/portal/events',        icon: Ticket, module: 'events' },
   { tKey: 'nav.founders',   href: '/portal/founders',      icon: Clapperboard, module: 'founders' },
   { tKey: 'nav.nieuws',     href: '/portal/nieuws',        icon: Megaphone, module: 'nieuws' },

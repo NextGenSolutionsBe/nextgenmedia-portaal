@@ -2,6 +2,7 @@
 
 import * as tus from 'tus-js-client'
 import { createClient } from '@/lib/supabase/client'
+import { loadPdfjs } from '@/lib/pdfjs-laden'
 
 /**
  * Een bestand voor een oplevering opladen, rechtstreeks van de browser naar
@@ -24,7 +25,34 @@ function storageHost(): string {
 }
 const anonKey = () => process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ''
 
-/** Miniatuur (JPEG, max. 640 px) en gegevens van een video of foto. Lukt het niet: zonder miniatuur verder. */
+/** Een foto via een gewoon <img> (ook svg, dat createImageBitmap niet altijd leest). */
+function laadAlsImg(f: File): Promise<HTMLImageElement> {
+  return new Promise((ok, fout) => {
+    const url = URL.createObjectURL(f)
+    const img = new Image()
+    img.onload = () => { URL.revokeObjectURL(url); ok(img) }
+    img.onerror = () => { URL.revokeObjectURL(url); fout(new Error('Kan de afbeelding niet lezen')) }
+    img.src = url
+  })
+}
+
+/** Eerste pagina van een pdf als miniatuur (grafisch ontwerp, drukwerk, brandbooks). */
+async function pdfPagina(f: File): Promise<{ canvas: HTMLCanvasElement; b: number; h: number } | null> {
+  const pdfjs = await loadPdfjs()
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(await f.arrayBuffer()) }).promise
+  try {
+    const p = await doc.getPage(1)
+    const basis = p.getViewport({ scale: 1 })
+    const vp = p.getViewport({ scale: Math.min(2, 900 / Math.max(basis.width, basis.height)) })
+    const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height)
+    const ctx = c.getContext('2d'); if (!ctx) return null
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, c.width, c.height)
+    await p.render({ canvasContext: ctx, viewport: vp }).promise
+    return { canvas: c, b: Math.round(basis.width), h: Math.round(basis.height) }
+  } finally { doc.destroy?.() }
+}
+
+/** Miniatuur (JPEG, max. 640 px) en gegevens van een video, foto of pdf. Lukt het niet: zonder miniatuur verder. */
 export async function leesBeeld(f: File): Promise<{ poster: Blob | null; duur: number | null; breedte: number | null; hoogte: number | null }> {
   type Beeld = { poster: Blob | null; duur: number | null; breedte: number | null; hoogte: number | null }
   const leeg: Beeld = { poster: null, duur: null, breedte: null, hoogte: null }
@@ -36,12 +64,32 @@ export async function leesBeeld(f: File): Promise<{ poster: Blob | null; duur: n
     return await new Promise<Blob | null>((ok) => c.toBlob(ok, 'image/jpeg', 0.8))
   }
   try {
-    if (f.type.startsWith('image/')) {
-      const bm = await createImageBitmap(f)
-      const poster = await naarJpeg(bm, bm.width, bm.height)
-      const r = { poster, duur: null, breedte: bm.width, hoogte: bm.height }
-      bm.close?.()
-      return r
+    const svg = f.type === 'image/svg+xml' || /\.svg$/i.test(f.name)
+    if (f.type.startsWith('image/') || svg) {
+      try {
+        if (svg) throw new Error('svg via img')
+        const bm = await createImageBitmap(f)
+        const poster = await naarJpeg(bm, bm.width, bm.height)
+        const r = { poster, duur: null, breedte: bm.width, hoogte: bm.height }
+        bm.close?.()
+        return r
+      } catch {
+        // Svg (en wat createImageBitmap niet kent): via een gewoon <img>, op een witte achtergrond.
+        const img = await laadAlsImg(f)
+        const b = img.naturalWidth || 800, h = img.naturalHeight || 800
+        const schaal = Math.min(1, 1280 / Math.max(b, h))
+        const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(b * schaal)); c.height = Math.max(1, Math.round(h * schaal))
+        const ctx = c.getContext('2d'); if (!ctx) return leeg
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, c.width, c.height)
+        ctx.drawImage(img, 0, 0, c.width, c.height)
+        return { poster: await naarJpeg(c, c.width, c.height), duur: null, breedte: img.naturalWidth || null, hoogte: img.naturalHeight || null }
+      }
+    }
+    if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) {
+      // Grote pdf's (drukbestanden van honderden MB) lezen we niet in: dan zonder miniatuur.
+      if (f.size > 80 * 1024 * 1024) return leeg
+      const p = await pdfPagina(f).catch(() => null)
+      return p ? { poster: await naarJpeg(p.canvas, p.canvas.width, p.canvas.height), duur: null, breedte: p.b, hoogte: p.h } : leeg
     }
     if (!f.type.startsWith('video/') && !/\.(mp4|mov|m4v|webm)$/i.test(f.name)) return leeg
     const url = URL.createObjectURL(f)

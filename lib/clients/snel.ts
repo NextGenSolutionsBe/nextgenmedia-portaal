@@ -32,7 +32,7 @@ export function valideerSnelleKlant(b: Record<string, unknown>): { ok: true; waa
   if (!company_name || company_name.length < 2) return { ok: false, fout: 'Vul de bedrijfsnaam in.' }
   const email = tekst(b.email, 200)?.toLowerCase() ?? null
   if (email && !EMAIL.test(email)) return { ok: false, fout: 'Dit e-mailadres klopt niet.' }
-  const btw = validateBtw(tekst(b.btw_nummer, 20))
+  const btw = validateBtw(tekst(b.btw_nummer, 60))
   if (!btw.ok) return { ok: false, fout: btw.error ?? 'Ongeldig btw-nummer.' }
   const telefoon = tekst(b.telefoon, 40)
   if (telefoon && !/^[+0-9 ()./-]{6,}$/.test(telefoon)) return { ok: false, fout: 'Dit telefoonnummer klopt niet.' }

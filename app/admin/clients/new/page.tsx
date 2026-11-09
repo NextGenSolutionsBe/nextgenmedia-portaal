@@ -193,7 +193,7 @@ export default function NewClientPage() {
               <input className={inp} value={form.btw_nummer}
                 onChange={e => setForm(p => ({ ...p, btw_nummer: e.target.value }))} placeholder="BE0123456789" />
               {/* Naam en adres uit het btw-register: vult enkel wat nog leeg is. */}
-              <BtwOpzoeken btw={form.btw_nummer} onGevonden={(g) => setForm((p) => ({
+              <BtwOpzoeken btw={form.btw_nummer} onNetjes={(x) => setForm((p) => ({ ...p, btw_nummer: x }))} onGevonden={(g) => setForm((p) => ({
                 ...p, company_name: p.company_name.trim() || g.naam || '', adres_straat: p.adres_straat || g.straat || '',
                 adres_postcode: p.adres_postcode || g.postcode || '', adres_gemeente: p.adres_gemeente || g.gemeente || '',
               }))} />

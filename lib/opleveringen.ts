@@ -1,8 +1,10 @@
-// Video-opleveringen — pure module (client- en serverveilig).
+// Opleveringen — pure module (client- en serverveilig).
 //
-// Losse video's (aftermovies, promotievideo's, testimonials) en ander
-// beeldmateriaal opleveren zonder WeTransfer. De klant bekijkt, downloadt in
-// volle kwaliteit, geeft feedback met tijdcodes en krijgt twee revisierondes:
+// Alles wat we aan een klant opleveren, zonder WeTransfer: video's
+// (aftermovies, promotievideo's, testimonials), grafisch ontwerp (logo, svg,
+// pdf, drukwerk), foto's en documenten. De klant bekijkt, downloadt in volle
+// kwaliteit, geeft feedback (bij video met tijdcodes, anders per bestand) en
+// krijgt twee revisierondes:
 // Eerste versie → Revisieronde 1 → Revisieronde 2 → Finale versie.
 //
 // De bestanden staan maar 3 dagen in de app (wij hebben altijd een backup op
@@ -25,7 +27,19 @@ export type Versie = {
   verloopt_op: string | null
   verwijderd_op: string | null
 }
-export type FeedbackPunt = { tijd: number | null; tekst: string }
+/** Een opmerking: bij video met tijdcode, bij andere bestanden over één bestand (de naam). */
+export type FeedbackPunt = { tijd: number | null; tekst: string; bestand?: string | null }
+
+/** Wat leveren we op? Bepaalt de teksten, het voorbeeld en of feedback met tijdcodes gaat. */
+export type OpleveringSoort = 'video' | 'ontwerp' | 'foto' | 'document'
+export const OPLEVERING_SOORTEN: { key: OpleveringSoort; label: string; uitleg: string; voorbeeld: string; feedbackVoorbeeld: string }[] = [
+  { key: 'video', label: 'Video', uitleg: "Aftermovies, promotievideo's, testimonials. Ook 4K.", voorbeeld: 'Aftermovie zomerfeest', feedbackVoorbeeld: 'bv. muziek iets zachter, logo op het einde groter' },
+  { key: 'ontwerp', label: 'Grafisch ontwerp', uitleg: 'Logo, huisstijl, flyers, drukwerk. Svg, pdf, png, ai, eps …', voorbeeld: 'Logo en huisstijl', feedbackVoorbeeld: 'bv. het blauw iets donkerder, de slogan kleiner' },
+  { key: 'foto', label: "Foto's", uitleg: "Fotoshoot, productfoto's, portretten. Jpg, png, raw …", voorbeeld: 'Fotoshoot kantoor', feedbackVoorbeeld: 'bv. foto 12 iets lichter, foto 4 mag weg' },
+  { key: 'document', label: 'Documenten', uitleg: 'Teksten, presentaties, brandbooks. Pdf, docx, pptx, zip …', voorbeeld: 'Brandbook', feedbackVoorbeeld: 'bv. op pagina 3 de tweede alinea korter' },
+]
+export const soortVan = (v: unknown): OpleveringSoort => (OPLEVERING_SOORTEN.some((s) => s.key === v) ? v as OpleveringSoort : 'video')
+export const soortInfo = (v: unknown) => OPLEVERING_SOORTEN.find((s) => s.key === soortVan(v))!
 export type FeedbackSoort = 'revisie' | 'goedkeuring' | 'opmerking'
 export type Feedback = {
   id: string
@@ -116,7 +130,9 @@ export function valideerFeedback(b: Record<string, unknown>): { ok: true; waarde
   const punten: FeedbackPunt[] = (Array.isArray(b.punten) ? b.punten : []).slice(0, 60).map((p) => {
     const r = (p ?? {}) as Record<string, unknown>
     const t = Number(r.tijd)
-    return { tijd: r.tijd === null || r.tijd === undefined || r.tijd === '' || !Number.isFinite(t) || t < 0 ? null : Math.round(t * 10) / 10, tekst: String(r.tekst ?? '').trim().slice(0, 1000) }
+    const bestand = String(r.bestand ?? '').replace(/\s+/g, ' ').trim().slice(0, 200)
+    const punt: FeedbackPunt = { tijd: r.tijd === null || r.tijd === undefined || r.tijd === '' || !Number.isFinite(t) || t < 0 ? null : Math.round(t * 10) / 10, tekst: String(r.tekst ?? '').trim().slice(0, 1000) }
+    return bestand ? { ...punt, bestand } : punt
   }).filter((p) => p.tekst)
   if (soort !== 'goedkeuring' && !tekst && !punten.length) return { ok: false, fout: 'Schrijf wat er anders moet.' }
   return { ok: true, waarde: { soort, tekst, punten } }
@@ -140,9 +156,28 @@ export function grootteLabel(bytes: number | null | undefined): string {
   return `${x.toLocaleString('nl-BE', { maximumFractionDigits: x < 10 ? 1 : 0 })} ${eenheden[i]}`
 }
 
-export type BestandSoort = 'video' | 'foto' | 'ander'
-export const bestandSoort = (mime: string | null | undefined): BestandSoort =>
-  /^video\//.test(String(mime)) ? 'video' : /^image\//.test(String(mime)) ? 'foto' : 'ander'
+export type BestandSoort = 'video' | 'foto' | 'pdf' | 'ander'
+// Foto's die elke browser zelf toont. Heic, tiff, raw en psd: enkel downloaden.
+const TOONBAAR = /^image\/(jpeg|jpg|pjpeg|png|gif|webp|avif|bmp|svg\+xml)$/i
+const extensie = (naam: string | null | undefined) => (String(naam ?? '').match(/\.([a-z0-9]{1,6})$/i)?.[1] ?? '').toLowerCase()
+/** Hoe tonen we een bestand: video afspelen, foto tonen, pdf openen of enkel downloaden. */
+export function bestandSoort(mime: string | null | undefined, naam?: string | null): BestandSoort {
+  const m = String(mime ?? '')
+  const ext = extensie(naam)
+  const onbekend = !m || m === 'application/octet-stream'
+  if (/^video\//.test(m) || (onbekend && ['mp4', 'mov', 'm4v', 'webm'].includes(ext))) return 'video'
+  if (TOONBAAR.test(m) || (onbekend && ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext))) return 'foto'
+  if (m === 'application/pdf' || (onbekend && ext === 'pdf')) return 'pdf'
+  return 'ander'
+}
+
+/** "SVG", "PDF", "PNG": het formaat als klein label bij een bestand. */
+export function formaatLabel(naam: string | null | undefined, mime?: string | null): string {
+  const ext = extensie(naam)
+  if (ext) return ext === 'jpeg' ? 'JPG' : ext.toUpperCase()
+  const m = String(mime ?? '').split('/')[1] ?? ''
+  return m.replace(/^x-|\+xml$/g, '').slice(0, 5).toUpperCase()
+}
 
 /** Een veilige bestandsnaam voor in de opslag (de echte naam bewaren we apart, voor de download). */
 export function veiligeNaam(naam: string): string {

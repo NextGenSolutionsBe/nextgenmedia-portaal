@@ -1,6 +1,6 @@
 import 'server-only'
 import type { OpleveringVolledig } from '@/lib/opleveringen-server'
-import { beschikbaarheid } from '@/lib/opleveringen'
+import { beschikbaarheid, soortVan } from '@/lib/opleveringen'
 
 /**
  * Wat de klant van een oplevering te zien krijgt: geen opslagpaden, enkel
@@ -9,7 +9,7 @@ import { beschikbaarheid } from '@/lib/opleveringen'
  */
 export function voorKlant(o: OpleveringVolledig, nu: Date = new Date()) {
   return {
-    id: o.id, titel: o.titel, omschrijving: o.omschrijving, status: o.status, revisies: o.revisies,
+    id: o.id, titel: o.titel, soort: soortVan(o.soort), omschrijving: o.omschrijving, status: o.status, revisies: o.revisies,
     actieve_versie_id: o.actieve_versie_id, updated_at: o.updated_at,
     versies: o.versies.map((v) => ({
       id: v.id, nummer: v.nummer, label: v.label, is_finaal: v.is_finaal, bericht: v.bericht, gepubliceerd_op: v.gepubliceerd_op,

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { GripVertical, Loader2, ChevronLeft, ChevronRight } from 'lucide-react'
 import { FIELD_FONT_PT } from '@/lib/contract-render'
+import { loadPdfjs } from '@/lib/pdfjs-laden'
 
 // Echte WYSIWYG drag & drop editor: de PDF-pagina wordt met pdf.js naar een canvas
 // gerenderd op exact dezelfde schaal als de overlay. Wat je hier ziet = wat op de
@@ -14,23 +15,8 @@ type Zone = { sig_page: number; sig_x_pct: number; sig_y_pct: number; sig_width:
 /** Zone voor de handtekening van NextGenMedia (x/y in %, w/h in punten, zoals die van de klant). */
 export type OnsZone = { page: number; x: number; y: number; w: number; h: number }
 
-// pdf.js wordt lazy geladen (alleen client). Bewust de LEGACY-build: pdf.js 6
-// gebruikt splinternieuwe JavaScript (o.a. Map.prototype.getOrInsertComputed)
-// die de meeste browsers nog niet kennen → "getOrInsertComputed is not a
-// function". De legacy-build brengt daar polyfills voor mee. De worker komt uit
-// hetzelfde pakket: scripts/kopieer-pdf-worker.mjs zet hem bij elke build in
-// public/pdfjs/ (de CDN heeft geen legacy-worker), dus altijd dezelfde versie.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let pdfjsPromise: Promise<any> | null = null
-export function loadPdfjs() {
-  if (!pdfjsPromise) {
-    pdfjsPromise = import('pdfjs-dist/legacy/build/pdf.mjs').then((pdfjs) => {
-      pdfjs.GlobalWorkerOptions.workerSrc = `/pdfjs/pdf.worker.min.mjs?v=${pdfjs.version}`
-      return pdfjs
-    }).catch((e) => { pdfjsPromise = null; throw e })
-  }
-  return pdfjsPromise
-}
+// pdf.js laden: één plek (lib/pdfjs-laden.ts), hier opnieuw uitgevoerd voor bestaande imports.
+export { loadPdfjs }
 
 export function FieldOverlayEditor({
   pdfUrl, fields, setFields, zone, setZone, page, setPage, selected, setSelected, ons, setOns,

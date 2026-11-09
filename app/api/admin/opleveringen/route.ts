@@ -3,7 +3,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { magIk } from '@/lib/instellingen/laden'
 import { safeMessage } from '@/lib/api-error'
 import { laadOpleveringen } from '@/lib/opleveringen-server'
-import { MAX_REVISIES_STANDAARD } from '@/lib/opleveringen'
+import { MAX_REVISIES_STANDAARD, soortVan } from '@/lib/opleveringen'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   } catch (e) { return NextResponse.json({ error: safeMessage(e, 'opleveringen.GET') }, { status: 500 }) }
 }
 
-/** POST { client_id, titel, omschrijving?, opdracht_id?, max_revisies? } — nieuwe oplevering met een lege eerste versie. */
+/** POST { client_id, titel, soort?, omschrijving?, opdracht_id?, max_revisies? } — nieuwe oplevering met een lege eerste versie. */
 export async function POST(req: NextRequest) {
   try {
     const persoon = await magIk('opleveringen', 'toevoegen')
@@ -41,10 +41,13 @@ export async function POST(req: NextRequest) {
     if (!k) return NextResponse.json({ error: 'Die klant bestaat niet.' }, { status: 400 })
     const opdracht = /^[0-9a-f-]{36}$/i.test(String(b.opdracht_id ?? '')) ? String(b.opdracht_id) : null
     const max = Number.isInteger(Number(b.max_revisies)) ? Math.max(0, Math.min(10, Number(b.max_revisies))) : MAX_REVISIES_STANDAARD
-    const { data: o, error } = await admin.from('opleveringen').insert({
+    const rij: Record<string, unknown> = {
       client_id: clientId, opdracht_id: opdracht, titel, omschrijving: String(b.omschrijving ?? '').trim().slice(0, 4000) || null,
-      max_revisies: max, aangemaakt_door: persoon.naam || persoon.email || null,
-    }).select('id').single()
+      max_revisies: max, aangemaakt_door: persoon.naam || persoon.email || null, soort: soortVan(b.soort),
+    }
+    let { data: o, error } = await admin.from('opleveringen').insert(rij).select('id').single()
+    // Vóór de migratie bestaat de kolom soort nog niet: dan zonder.
+    if (error && /soort/.test(error.message)) { delete rij.soort; ({ data: o, error } = await admin.from('opleveringen').insert(rij).select('id').single()) }
     if (error) throw new Error(MIST.test(error.message) ? HINT : error.message)
     const { error: ev } = await admin.from('oplevering_versies').insert({ oplevering_id: (o as { id: string }).id, nummer: 1 })
     if (ev) throw new Error(ev.message)

@@ -5,8 +5,9 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   ArrowLeft, Clock, Download, Film, Image as ImageIcon, FileText, Play, Plus, Trash2, CheckCircle2, RotateCcw, MessageSquare, Loader2, AlertTriangle, Timer,
+  PackageCheck, Palette, Camera, Paperclip, Eye,
 } from 'lucide-react'
-import { STATUS_INFO, grootteLabel, tijdLabel, bestandSoort, resterend, type FeedbackPunt } from '@/lib/opleveringen'
+import { STATUS_INFO, grootteLabel, tijdLabel, bestandSoort, formaatLabel, resterend, soortInfo, soortVan, type FeedbackPunt } from '@/lib/opleveringen'
 import { KijkVenster, TijdKnop } from '@/components/media/kijk-venster'
 import type { KlantOplevering } from '@/lib/opleveringen-portaal'
 
@@ -14,10 +15,18 @@ type Versie = KlantOplevering['versies'][number]
 type Bestand = Versie['bestanden'][number]
 
 const datumLang = (iso: string | null) => iso ? new Date(iso).toLocaleString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : ''
-const SoortIcoon = ({ mime, className = 'h-4 w-4' }: { mime: string | null; className?: string }) => {
-  const s = bestandSoort(mime)
-  return s === 'video' ? <Film className={className} /> : s === 'foto' ? <ImageIcon className={className} /> : <FileText className={className} />
+const SoortIcoon = ({ mime, naam, className = 'h-4 w-4' }: { mime: string | null; naam?: string | null; className?: string }) => {
+  const s = bestandSoort(mime, naam)
+  return s === 'video' ? <Film className={className} /> : s === 'foto' ? <ImageIcon className={className} /> : s === 'pdf' ? <FileText className={className} /> : <Paperclip className={className} />
 }
+const OpleveringIcoon = ({ soort, className = 'h-4 w-4' }: { soort: unknown; className?: string }) => {
+  const s = soortVan(soort)
+  return s === 'video' ? <Film className={className} /> : s === 'ontwerp' ? <Palette className={className} /> : s === 'foto' ? <Camera className={className} /> : <FileText className={className} />
+}
+/** Bestandsnaam als label bij een opmerking. */
+const BestandLabel = ({ naam, onKlik }: { naam: string; onKlik?: () => void }) => onKlik
+  ? <button type="button" onClick={onKlik} title={naam} className="shrink-0 max-w-[60%] truncate text-xs font-semibold rounded-md bg-gray-900 text-white px-1.5 py-0.5 hover:bg-gray-700">{naam}</button>
+  : <span title={naam} className="shrink-0 max-w-[80%] truncate text-xs font-semibold rounded-md bg-gray-200 text-gray-800 px-1.5 py-0.5">{naam}</span>
 
 async function haalLink(opleveringId: string, bestandId: string, download: boolean): Promise<string> {
   const r = await fetch(`/api/portal/opleveringen/${opleveringId}/bestanden/${bestandId}${download ? '?download=1' : ''}`, { cache: 'no-store' })
@@ -42,10 +51,10 @@ export function OpleveringenKlant({ opleveringen, magDownloaden, magFeedback }: 
   return (
     <div className="space-y-5 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-semibold flex items-center gap-2"><Film className="h-6 w-6" />Opleveringen</h1>
-        <p className="text-sm text-gray-600 mt-1">Bekijk je video&apos;s, download ze in volle kwaliteit en laat ons weten wat er anders moet. Bestanden blijven 3 dagen beschikbaar: download ze tijdig.</p>
+        <h1 className="text-2xl font-semibold flex items-center gap-2"><PackageCheck className="h-6 w-6" />Opleveringen</h1>
+        <p className="text-sm text-gray-600 mt-1">Je video&apos;s, ontwerpen, foto&apos;s en documenten van ons. Bekijk ze, download ze in volle kwaliteit en laat weten wat er anders moet. Bestanden blijven 3 dagen beschikbaar: download ze tijdig.</p>
       </div>
-      {opleveringen.length === 0 ? <div className="card-base text-sm text-gray-500">Er staat nog niets klaar. Zodra we een video met je delen, vind je ze hier.</div> : (
+      {opleveringen.length === 0 ? <div className="card-base text-sm text-gray-500">Er staat nog niets klaar. Zodra we iets met je delen, vind je het hier.</div> : (
         <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {opleveringen.map((o) => {
             const laatste = [...o.versies].sort((a, b) => b.nummer - a.nummer)[0]
@@ -55,12 +64,13 @@ export function OpleveringenKlant({ opleveringen, magDownloaden, magFeedback }: 
                 <button type="button" onClick={() => setOpen(o.id)} className="w-full text-left card-base !p-0 overflow-hidden hover:shadow-md transition-shadow">
                   <div className="relative aspect-video bg-gray-900">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    {poster ? <img src={poster} alt="" className="absolute inset-0 h-full w-full object-cover" loading="lazy" /> : <Film className="absolute inset-0 m-auto h-8 w-8 text-white/30" />}
-                    <span className="absolute inset-0 m-auto h-12 w-12 rounded-full bg-white/90 flex items-center justify-center"><Play className="h-5 w-5 translate-x-0.5" fill="currentColor" /></span>
+                    {poster ? <img src={poster} alt="" className={`absolute inset-0 h-full w-full ${o.soort === 'video' || o.soort === 'foto' ? 'object-cover' : 'object-contain bg-white'}`} loading="lazy" /> : <OpleveringIcoon soort={o.soort} className="absolute inset-0 m-auto h-8 w-8 text-white/30" />}
+                    {o.soort === 'video' && <span className="absolute inset-0 m-auto h-12 w-12 rounded-full bg-white/90 flex items-center justify-center"><Play className="h-5 w-5 translate-x-0.5" fill="currentColor" /></span>}
                     {laatste && <span className="absolute left-2 top-2 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-black/60 text-white">{laatste.label}</span>}
                   </div>
                   <div className="p-3 space-y-1">
                     <p className="font-semibold">{o.titel}</p>
+                    <p className="text-xs text-gray-500 flex items-center gap-1"><OpleveringIcoon soort={o.soort} className="h-3.5 w-3.5" />{soortInfo(o.soort).label}</p>
                     <span className={`inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full border ${STATUS_INFO[o.status].kleur}`}>{STATUS_INFO[o.status].klant}</span>
                     {laatste && <p className={`text-xs flex items-center gap-1 ${laatste.beschikbaarheid.status === 'verlopen' ? 'text-gray-400' : laatste.beschikbaarheid.resterendMs < 86_400_000 ? 'text-red-700 font-semibold' : 'text-gray-600'}`}><Timer className="h-3.5 w-3.5" />{laatste.beschikbaarheid.tekst}</p>}
                   </div>
@@ -79,8 +89,11 @@ function Detail({ o, terug, magDownloaden, magFeedback }: { o: KlantOplevering; 
   const versies = [...o.versies].sort((a, b) => b.nummer - a.nummer)
   const [versieId, setVersieId] = useState(versies[0]?.id ?? '')
   const v = versies.find((x) => x.id === versieId) ?? versies[0]
-  const video = v?.bestanden.find((b) => bestandSoort(b.mimetype) === 'video') ?? null
+  const video = v?.bestanden.find((b) => bestandSoort(b.mimetype, b.naam) === 'video') ?? null
   const overige = v?.bestanden.filter((b) => b.id !== video?.id) ?? []
+  // Geen video: ontwerp, foto's, documenten als galerij met grote miniaturen.
+  const galerij = !video
+  const [punten, setPunten] = useState<FeedbackPunt[]>([])
   const [kijk, setKijk] = useState<Bestand | null>(null)
   const [speelt, setSpeelt] = useState<{ url: string; start?: number } | null>(null)
   const [laadt, setLaadt] = useState(false)
@@ -90,7 +103,7 @@ function Detail({ o, terug, magDownloaden, magFeedback }: { o: KlantOplevering; 
   const actief = magFeedback && o.actieve_versie_id === v?.id
   const fb = o.feedback.filter((f) => f.versie_id === v?.id)
 
-  useEffect(() => { setSpeelt(null); tijd.current = 0 }, [versieId])
+  useEffect(() => { setSpeelt(null); tijd.current = 0; setPunten([]) }, [versieId])
 
   const speel = async (start?: number) => {
     if (!video) return
@@ -164,14 +177,41 @@ function Detail({ o, terug, magDownloaden, magFeedback }: { o: KlantOplevering; 
             </div>
           )}
 
-          {/* Andere bestanden */}
-          {overige.length > 0 && (
+          {/* Ontwerp, foto's, documenten: galerij */}
+          {galerij && overige.length > 0 && (
+            <ul className="grid gap-3 grid-cols-2 sm:grid-cols-3">
+              {overige.map((b) => {
+                const toonbaar = bestandSoort(b.mimetype, b.naam) !== 'ander'
+                return (
+                  <li key={b.id} className="rounded-2xl border border-gray-200 bg-white overflow-hidden flex flex-col">
+                    <button type="button" disabled={!beschikbaar} onClick={() => (toonbaar ? setKijk(b) : void download(b))} className="relative aspect-[4/3] bg-gray-50 disabled:opacity-50 group" aria-label={`${toonbaar ? 'Bekijk' : 'Download'} ${b.naam}`}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      {b.poster_url ? <img src={b.poster_url} alt="" className="absolute inset-0 h-full w-full object-contain p-1" loading="lazy" /> : <SoortIcoon mime={b.mimetype} naam={b.naam} className="absolute inset-0 m-auto h-8 w-8 text-gray-300" />}
+                      <span className="absolute left-2 top-2 text-[10px] font-bold tracking-wide rounded bg-black/70 text-white px-1.5 py-0.5">{formaatLabel(b.naam, b.mimetype)}</span>
+                      {beschikbaar && toonbaar && <span className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition bg-black/20"><span className="rounded-full bg-white/95 h-10 w-10 flex items-center justify-center"><Eye className="h-4 w-4" /></span></span>}
+                    </button>
+                    <div className="p-2.5 flex-1 flex flex-col gap-1.5">
+                      <p className="text-sm font-medium leading-snug [overflow-wrap:anywhere] line-clamp-2">{b.naam}</p>
+                      <p className="text-[11px] text-gray-500">{grootteLabel(b.grootte)}{b.breedte && b.hoogte && bestandSoort(b.mimetype, b.naam) === 'foto' ? ` · ${b.breedte}×${b.hoogte}` : ''}</p>
+                      <div className="mt-auto flex items-center gap-1">
+                        {magDownloaden && beschikbaar && <button type="button" onClick={() => download(b)} aria-label={`Download ${b.naam}`} className="h-8 w-8 rounded-lg hover:bg-gray-100 flex items-center justify-center"><Download className="h-4 w-4" /></button>}
+                        {actief && <button type="button" onClick={() => setPunten((p) => [...p, { tijd: null, tekst: '', bestand: b.naam }])} className="ml-auto text-xs font-medium rounded-lg border border-gray-200 px-2 py-1 hover:bg-gray-50 inline-flex items-center gap-1"><MessageSquare className="h-3.5 w-3.5" />Opmerking</button>}
+                      </div>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+
+          {/* Andere bestanden naast een video */}
+          {!galerij && overige.length > 0 && (
             <ul className="grid gap-2 sm:grid-cols-2">
               {overige.map((b) => (
                 <li key={b.id} className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-2">
                   <button type="button" disabled={!beschikbaar} onClick={() => setKijk(b)} className="relative h-14 w-20 shrink-0 rounded-lg bg-gray-900 overflow-hidden disabled:opacity-50" aria-label={`Bekijk ${b.naam}`}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    {b.poster_url ? <img src={b.poster_url} alt="" className="h-full w-full object-cover" loading="lazy" /> : <SoortIcoon mime={b.mimetype} className="absolute inset-0 m-auto h-5 w-5 text-white/40" />}
+                    {b.poster_url ? <img src={b.poster_url} alt="" className="h-full w-full object-cover" loading="lazy" /> : <SoortIcoon mime={b.mimetype} naam={b.naam} className="absolute inset-0 m-auto h-5 w-5 text-white/40" />}
                   </button>
                   <div className="min-w-0 flex-1"><p className="text-sm font-medium truncate">{b.naam}</p><p className="text-[11px] text-gray-500">{grootteLabel(b.grootte)}</p></div>
                   {magDownloaden && beschikbaar && <button type="button" onClick={() => download(b)} aria-label={`Download ${b.naam}`} className="h-9 w-9 shrink-0 rounded-lg hover:bg-gray-100 flex items-center justify-center"><Download className="h-4 w-4" /></button>}
@@ -194,7 +234,7 @@ function Detail({ o, terug, magDownloaden, magFeedback }: { o: KlantOplevering; 
         {/* Feedback */}
         <aside className="space-y-4 min-w-0">
           {actief ? (
-            <FeedbackFormulier o={o} v={v} huidigeTijd={() => (speelt ? tijd.current : null)} onVerstuurd={() => router.refresh()} />
+            <FeedbackFormulier o={o} v={v} punten={punten} setPunten={setPunten} huidigeTijd={() => (speelt ? tijd.current : null)} onVerstuurd={() => router.refresh()} />
           ) : (
             <StatusUitleg o={o} v={v} />
           )}
@@ -209,7 +249,10 @@ function Detail({ o, terug, magDownloaden, magFeedback }: { o: KlantOplevering; 
                     <span className="font-normal text-gray-500">· {new Date(f.created_at).toLocaleString('nl-BE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
                   </p>
                   {f.tekst && <p className="mt-1 whitespace-pre-line">{f.tekst}</p>}
-                  {f.punten.length > 0 && <ul className="mt-2 space-y-1">{f.punten.map((p, i) => <li key={i} className="flex items-start gap-2"><TijdKnop sec={p.tijd} onKies={video && beschikbaar ? (s) => void speel(s) : undefined} /><span>{p.tekst}</span></li>)}</ul>}
+                  {f.punten.length > 0 && <ul className="mt-2 space-y-1">{f.punten.map((p, i) => {
+                    const bij = p.bestand ? v.bestanden.find((x) => x.naam === p.bestand) : null
+                    return <li key={i} className="flex items-start gap-2"><TijdKnop sec={p.tijd} onKies={video && beschikbaar ? (s) => void speel(s) : undefined} />{p.bestand && <BestandLabel naam={p.bestand} onKlik={bij && beschikbaar && bestandSoort(bij.mimetype, bij.naam) !== 'ander' ? () => setKijk(bij) : undefined} />}<span>{p.tekst}</span></li>
+                  })}</ul>}
                 </div>
               ))}
             </div>
@@ -217,7 +260,10 @@ function Detail({ o, terug, magDownloaden, magFeedback }: { o: KlantOplevering; 
         </aside>
       </div>
 
-      {kijk && <KijkVenster titel={kijk.naam} soort={bestandSoort(kijk.mimetype)} haalUrl={() => haalLink(o.id, kijk.id, false)} onDownload={magDownloaden ? () => download(kijk) : undefined} onSluit={() => setKijk(null)} />}
+      {kijk && <KijkVenster titel={kijk.naam} soort={bestandSoort(kijk.mimetype, kijk.naam)} haalUrl={() => haalLink(o.id, kijk.id, false)} onDownload={magDownloaden ? () => download(kijk) : undefined} onSluit={() => setKijk(null)}
+        onderaan={actief && bestandSoort(kijk.mimetype, kijk.naam) !== 'video' ? (
+          <div className="p-3 flex justify-center"><button type="button" onClick={() => { setPunten((p) => [...p, { tijd: null, tekst: '', bestand: kijk.naam }]); setKijk(null) }} className="btn-secondary text-sm"><MessageSquare className="h-4 w-4" />Opmerking bij dit bestand</button></div>
+        ) : undefined} />}
     </div>
   )
 }
@@ -232,13 +278,12 @@ function StatusUitleg({ o, v }: { o: KlantOplevering; v: Versie }) {
   return <div className="rounded-2xl border border-gray-200 bg-white p-4 text-sm text-gray-700">{tekst}</div>
 }
 
-function FeedbackFormulier({ o, v, huidigeTijd, onVerstuurd }: { o: KlantOplevering; v: Versie; huidigeTijd: () => number | null; onVerstuurd: () => void }) {
-  const [punten, setPunten] = useState<FeedbackPunt[]>([])
+function FeedbackFormulier({ o, v, punten, setPunten, huidigeTijd, onVerstuurd }: { o: KlantOplevering; v: Versie; punten: FeedbackPunt[]; setPunten: React.Dispatch<React.SetStateAction<FeedbackPunt[]>>; huidigeTijd: () => number | null; onVerstuurd: () => void }) {
   const [tekst, setTekst] = useState('')
   const [bezig, setBezig] = useState<string | null>(null)
   const [bevestig, setBevestig] = useState(false)
   const rondes = o.revisies
-  const heeftVideo = v.bestanden.some((b) => bestandSoort(b.mimetype) === 'video')
+  const heeftVideo = v.bestanden.some((b) => bestandSoort(b.mimetype, b.naam) === 'video')
 
   const stuur = async (soort: 'revisie' | 'goedkeuring' | 'opmerking') => {
     setBezig(soort)
@@ -267,8 +312,8 @@ function FeedbackFormulier({ o, v, huidigeTijd, onVerstuurd }: { o: KlantOplever
       {punten.length > 0 && (
         <ul className="space-y-2">
           {punten.map((p, i) => (
-            <li key={i} className="flex items-start gap-2">
-              {p.tijd !== null ? <TijdKnop sec={p.tijd} /> : <span className="shrink-0 text-xs text-gray-400 mt-1">algemeen</span>}
+            <li key={i} className={`flex gap-2 ${p.bestand ? 'flex-wrap items-center' : 'items-start'}`}>
+              {p.tijd !== null ? <TijdKnop sec={p.tijd} /> : p.bestand ? <span className="basis-full flex text-xs text-gray-500 items-center gap-1.5 min-w-0">Over <BestandLabel naam={p.bestand} /></span> : <span className="shrink-0 text-xs text-gray-400 mt-1">algemeen</span>}
               <input className="input-base flex-1 !py-1.5" autoFocus value={p.tekst} maxLength={1000} onChange={(e) => setPunten((x) => x.map((y, j) => (j === i ? { ...y, tekst: e.target.value } : y)))} placeholder="Wat moet er anders?" aria-label="Opmerking" />
               <button type="button" onClick={() => setPunten((x) => x.filter((_, j) => j !== i))} aria-label="Opmerking weghalen" className="h-9 w-9 shrink-0 rounded-lg hover:bg-gray-100 text-gray-400 flex items-center justify-center"><Trash2 className="h-4 w-4" /></button>
             </li>
@@ -276,7 +321,8 @@ function FeedbackFormulier({ o, v, huidigeTijd, onVerstuurd }: { o: KlantOplever
         </ul>
       )}
       {heeftVideo && <p className="text-[11px] text-gray-500 -mt-1">Pauzeer de video op het juiste moment en klik op &quot;Opmerking op dit moment&quot;: we zien dan precies waar het over gaat.</p>}
-      <textarea rows={3} className="input-base" value={tekst} onChange={(e) => setTekst(e.target.value)} maxLength={4000} placeholder="Algemene feedback, bv. muziek iets zachter, logo op het einde groter" aria-label="Algemene feedback" />
+      {!heeftVideo && v.bestanden.length > 1 && <p className="text-[11px] text-gray-500">Gaat het over één bestand? Klik er op &quot;Opmerking&quot;: dan weten we precies welk.</p>}
+      <textarea rows={3} className="input-base" value={tekst} onChange={(e) => setTekst(e.target.value)} maxLength={4000} placeholder={`Algemene feedback, ${soortInfo(o.soort).feedbackVoorbeeld}`} aria-label="Algemene feedback" />
       <div className="grid gap-2">
         {rondes.over > 0 && (
           <button type="button" disabled={!!bezig || !heeftInhoud} onClick={() => stuur('revisie')} className="btn-primary justify-center">

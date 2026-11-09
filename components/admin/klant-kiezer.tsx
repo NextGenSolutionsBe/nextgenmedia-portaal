@@ -126,7 +126,7 @@ export function KlantKiezer({ klanten, waarde, onKies, onNieuw, leegLabel, bron 
           <div>
             {veld('btw_nummer', 'Btw-nummer', { placeholder: 'BE0123456789' })}
             {/* Naam en adres uit het btw-register: vult enkel wat nog leeg is. */}
-            <BtwOpzoeken btw={nieuw.btw_nummer} onGevonden={(g) => {
+            <BtwOpzoeken btw={nieuw.btw_nummer} onNetjes={(x) => setNieuw((n) => (n ? { ...n, btw_nummer: x } : n))} onGevonden={(g) => {
               setNieuw((n) => (n ? { ...n, company_name: n.company_name.trim() || g.naam || '', adres_straat: n.adres_straat || g.straat || '', adres_postcode: n.adres_postcode || g.postcode || '', adres_gemeente: n.adres_gemeente || g.gemeente || '' } : n))
               if (g.straat || g.gemeente) setMeer(true)
             }} />

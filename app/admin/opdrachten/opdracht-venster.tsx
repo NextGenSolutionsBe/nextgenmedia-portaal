@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import {
   KOLOMMEN, kolomInfo, kolomVan, stapLabel, kaartKleur, DIENSTEN, dienstInfo, BRONNEN, OFFERTE_VIA, raadDiensten, normaliseerDiensten, PROJECT_VERANTWOORDELIJKEN, projectVerantwoordelijke,
-  BEDRIJVEN, bedrijfVan,
+  BEDRIJVEN, bedrijfVan, projectOnderwerp,
   type KolomKey, type Bron, type Bedrijf,
 } from '@/lib/opdrachten-kanban'
 import type { OpdrachtStatus } from '@/lib/opdrachten'
@@ -188,6 +188,7 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
             className="mt-2 w-full bg-transparent text-xl font-semibold tracking-tight leading-tight outline-none rounded-lg px-1 -mx-1 focus:ring-2 focus:ring-gray-200 placeholder:text-gray-300" aria-label="Titel" />
           <p className="mt-1 text-sm flex items-center gap-1.5 text-gray-600">
             <Building2 className="h-4 w-4" />{(c.client_id ? klanten.find((k) => k.id === c.client_id)?.naam ?? (c.client_id === o?.client_id ? o?.klant_naam : null) : c.klant_vrij) || 'Nog geen klant'}
+            {c.diensten.length > 0 && <span className="text-gray-500">({projectOnderwerp(c.diensten)})</span>}
             {o?.created_at && <span className="opacity-70">· sinds {datumKort(o.created_at.slice(0, 10))}</span>}
           </p>
         </header>
@@ -247,7 +248,7 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
                   ) : (
                     <>
                       <input id="opdracht-btw" className="input-base" value={c.btw_nummer} onChange={(e) => zet('btw_nummer', e.target.value)} placeholder="BE0123456789" />
-                      <BtwOpzoeken btw={c.btw_nummer} auto={false} onGevonden={(g) => { if (!c.client_id && !c.klant_vrij.trim() && g.naam) zet('klant_vrij', g.naam) }} />
+                      <BtwOpzoeken btw={c.btw_nummer} onNetjes={(x) => zet('btw_nummer', x)} onGevonden={(g) => { if (!c.client_id && !c.klant_vrij.trim() && g.naam) zet('klant_vrij', g.naam) }} />
                       {c.client_id && <p className="text-[11px] text-gray-500 mt-1">Wordt bij de klant bewaard.</p>}
                     </>
                   )

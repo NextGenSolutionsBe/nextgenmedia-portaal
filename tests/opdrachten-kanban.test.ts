@@ -9,7 +9,7 @@ import { STATUSSEN, magAutomatischNaar, type OpdrachtStatus, type Koppelingen } 
 import {
   KOLOMMEN, kolomVan, statusVoorKolom, stapLabel, kaartKleur, dienstInfo, normaliseerDiensten, raadDiensten,
   bronUitLead, normaliseerVia, offerteViaLabel, facturatieVan, automatischeStatus, verplaatsTekst, dagenSinds,
-  ontbreektVoorFase, normaliseerBtw, bedrijfVan, inPeriode, inWaardeSchijf, statusUitContract,
+  ontbreektVoorFase, normaliseerBtw, projectNaam, projectOnderwerp, bedrijfVan, inPeriode, inWaardeSchijf, statusUitContract,
 } from '../lib/opdrachten-kanban'
 
 let n = 0
@@ -219,6 +219,18 @@ test('Projecten: een contract opmaken = Contract verstuurd; getekend = Contract 
   assert.equal(statusUitContract({ status: 'cancelled' }, '2026-11-02'), 'geen_interesse')
   assert.equal(statusUitContract({ status: 'viewed', expires_at: '2026-10-31' }, '2026-11-02'), 'geen_interesse')
   assert.equal(kolomVan(statusUitContract({ status: 'sent' }, '2026-11-02')), 'contract')
+})
+
+test('Projecten: titel = klant met tussen haakjes waarover het gaat', () => {
+  assert.equal(projectNaam('Bakkerij Peeters', ['social_media'], 'Socials 2027'), 'Bakkerij Peeters (sociale media)')
+  assert.equal(projectNaam('Era Nobis', ['ngs'], null), 'Era Nobis (AI-automatisatie)')
+  assert.equal(projectNaam('Era Nobis', ['webdesign', 'meta_ads'], null), 'Era Nobis (website + advertising)')
+  assert.equal(projectNaam('Era Nobis', ['webdesign', 'grafisch', 'social_media'], null), 'Era Nobis (website + grafisch ontwerp +1)')
+  assert.equal(projectNaam('Era Nobis', [], 'Bestickering camionette'), 'Era Nobis (Bestickering camionette)')
+  assert.equal(projectNaam('Era Nobis', [], ''), 'Era Nobis')
+  assert.equal(projectNaam(null, ['social_media'], 'Nieuwe lead'), 'Nieuwe lead')
+  assert.equal(projectOnderwerp(['Eigen dienst']), 'eigen dienst')
+  assert.equal(normaliseerBtw('Btw: BE 1016.637.895'), 'BE1016637895')
 })
 
 console.log(`\n${n} tests geslaagd\n`)

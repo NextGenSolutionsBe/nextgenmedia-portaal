@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { MessageSquare, Plus, MoreHorizontal, Check, FileSignature, AlertCircle, UserRound, Send } from 'lucide-react'
 import { offerteBevestigdLabel } from '@/lib/opdrachten-offerte-model'
 import {
-  KOLOMMEN, kolomVan, dienstInfo, kaartKleur, offerteViaLabel, dagenSinds, BEDRIJVEN, projectVerantwoordelijke,
+  KOLOMMEN, kolomVan, kaartKleur, projectNaam, projectOnderwerp, offerteViaLabel, dagenSinds, BEDRIJVEN, projectVerantwoordelijke,
   type KolomKey,
 } from '@/lib/opdrachten-kanban'
 import { formatEuro } from '@/lib/utils'
@@ -128,7 +128,7 @@ function Kaart({ o, sleept, menuOpen, onOpen, onMenu, onKolom, onDragStart, onDr
   const facturatieZichtbaar = (kolom === 'getekend' || kolom === 'uitvoering' || kolom === 'afgerond') && (gefactureerd > 0 || contractwaarde !== null)
   const wie = projectVerantwoordelijke(o.verantwoordelijke)
   const notitie = o.laatste_notitie?.tekst?.replace(/\s+/g, ' ').trim() ?? ''
-  const diensten = o.diensten.map((d) => dienstInfo(d).label).join(', ')
+  const onderwerp = projectOnderwerp(o.diensten, o.titel)
   const bedrijf = o.merk && o.merk !== 'nextgenmedia' ? BEDRIJVEN.find((b) => b.key === o.merk)?.kort : null
   const stop = (e: React.SyntheticEvent) => e.stopPropagation()
   const waarschuwing = kolom === 'offerte' && !o.offerte_via ? 'Hoe is de offerte gedeeld?' : kolom === 'contract' && !o.contract ? 'Nog geen contract gekoppeld' : null
@@ -147,13 +147,12 @@ function Kaart({ o, sleept, menuOpen, onOpen, onMenu, onKolom, onDragStart, onDr
         <span className="mt-[5px] h-2 w-2 rounded-full shrink-0 ring-1 ring-black/10" style={{ background: kleur.key ? kleur.rand : '#E5E7EB' }} title={kleur.label} />
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
-            <p className="text-[13px] font-medium text-gray-900 leading-snug truncate">{o.klant_naam || 'Geen klant'}</p>
+            <p className="text-[13px] font-medium text-gray-900 leading-snug truncate" title={projectNaam(o.klant_naam, o.diensten, o.titel)}>
+              {o.klant_naam || o.titel || 'Geen klant'}{onderwerp && o.klant_naam ? <span className="font-normal text-gray-500"> ({onderwerp})</span> : null}
+            </p>
             <span className="text-xs tabular-nums text-gray-700 shrink-0">{o.waarde !== null && o.waarde !== undefined ? formatEuro(o.waarde) : ''}</span>
           </div>
-          <p className="text-xs text-gray-500 leading-snug line-clamp-2">
-            {diensten && <span className="text-gray-700">{diensten}</span>}
-            {diensten && o.titel ? ' · ' : ''}{o.titel}
-          </p>
+          {o.titel && o.klant_naam && o.diensten.length > 0 && <p className="text-xs text-gray-500 leading-snug line-clamp-2">{o.titel}</p>}
           {waarschuwing && (
             <p className="mt-1 text-[11px] text-amber-700 flex items-center gap-1"><AlertCircle className="h-3 w-3 shrink-0" />{waarschuwing}</p>
           )}

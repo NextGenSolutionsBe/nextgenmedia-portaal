@@ -49,7 +49,7 @@ export function SectieOpslag() {
         {o.niveau !== 'ok' && (
           <p className={`mt-3 text-sm rounded-lg px-3 py-2 ${o.niveau === 'kritiek' ? 'bg-red-50 text-red-800' : 'bg-amber-50 text-amber-900'}`}>
             {o.niveau === 'kritiek' ? 'De opslag zit bijna vol. ' : 'De opslag loopt op. '}
-            Kijk welk onderdeel het meeste plaats inneemt; video-opleveringen ruimen zichzelf na 3 dagen op.
+            Kijk welk onderdeel het meeste plaats inneemt; opleveringen ruimen zichzelf na 3 dagen op.
           </p>
         )}
       </div>

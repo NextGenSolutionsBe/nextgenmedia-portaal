@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2, Plus, Search, KanbanSquare, LayoutGrid, List, Sparkles, X, FileSpreadsheet, Settings2 } from 'lucide-react'
 import {
-  KOLOMMEN, kolomInfo, kolomVan, statusVoorKolom, stapLabel, kaartKleur, DIENSTEN, dienstInfo, sorteerInKolom, projectVerantwoordelijke,
+  KOLOMMEN, kolomInfo, kolomVan, statusVoorKolom, stapLabel, kaartKleur, DIENSTEN, dienstInfo, sorteerInKolom, projectVerantwoordelijke, projectNaam,
   BEDRIJVEN, WAARDE_SCHIJVEN, inPeriode, inWaardeSchijf, bedrijfLabel,
   type KolomKey, type DienstKey, type Periode, type Bedrijf,
 } from '@/lib/opdrachten-kanban'
@@ -337,11 +337,8 @@ function Lijst({ kaarten, onOpen }: { kaarten: KaartOpdracht[]; onOpen: (o: Kaar
                     <button type="button" onClick={() => onOpen(o)} className="w-full text-left card-base p-3 flex items-center gap-3 hover:shadow-md transition-shadow">
                       <span className="h-10 w-2 rounded-full shrink-0 border" style={{ background: kleur.achtergrond, borderColor: kleur.rand }} />
                       <span className="min-w-0 flex-1">
-                        <span className="block font-semibold text-sm truncate">{o.klant_naam || 'Geen klant'}</span>
-                        <span className="block text-xs text-gray-600 truncate">
-                          {o.diensten.length > 0 && <span className="font-medium text-gray-800">{o.diensten.map((d) => dienstInfo(d).label).join(', ')}</span>}
-                          {o.diensten.length > 0 && o.titel ? ' · ' : ''}{o.titel}
-                        </span>
+                        <span className="block font-semibold text-sm truncate">{projectNaam(o.klant_naam, o.diensten, o.titel)}</span>
+                        {o.titel && o.klant_naam && o.diensten.length > 0 && <span className="block text-xs text-gray-600 truncate">{o.titel}</span>}
                       </span>
                       <span className="hidden md:block text-xs text-gray-500 shrink-0 w-28 truncate">{projectVerantwoordelijke(o.verantwoordelijke) ?? <span className="text-amber-700">Geen verantwoordelijke</span>}</span>
                       <span className="hidden sm:block text-xs text-gray-500 shrink-0">{stapLabel(o.status)}</span>

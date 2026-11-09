@@ -2,6 +2,7 @@
 // Uitvoeren: npx tsx tests/vennoot-uitgaven.test.ts
 import assert from 'node:assert/strict'
 import {
+  regelsVerschil,
   controleerUitgave, controleerReden, periodeVan, verschuif, maandenTussen, budgetVan, standPerVennoot, uitgavenIn,
   controleerRegels, regelsTekst, tekenStand, type Uitgave, type RegelsVersie,
 } from '../lib/vennoot-uitgaven'
@@ -102,6 +103,18 @@ test('Tekenen: enkel een handtekening op exact deze versie telt; aanpassen = opn
   const s2 = tekenStand(v2, [...h, { vennoot: 'bram', naam: 'Bram', getekend_op: 'y', inhoud_tekst: regelsTekst(v2) }, { vennoot: 'chiara', naam: 'Chiara', getekend_op: 'y', inhoud_tekst: regelsTekst(v2) }])
   assert.equal(s2.allen, true)
   assert.equal(tekenStand(null, h).allen, false)
+})
+
+test('Regelsviewer: wat is nieuw of weg tegenover de vorige versie', () => {
+  const v1 = { regels: ['Max 250 per maand', 'Altijd een bon'], maandbudget: 250, start_maand: '2026-11' }
+  const v2 = { regels: ['Max 250 per maand', 'Bon binnen de week', 'Altijd een bon'], maandbudget: 300, start_maand: '2026-11' }
+  const d = regelsVerschil(v2, v1)
+  assert.deepEqual(d.nieuw, [false, true, false])
+  assert.deepEqual(d.weg, [])
+  assert.equal(d.budget, true)
+  assert.equal(d.start, false)
+  assert.deepEqual(regelsVerschil(v1, v2).weg, ['Bon binnen de week'])
+  assert.deepEqual(regelsVerschil(v1, null).nieuw, [false, false])
 })
 
 console.log(`\n${n} tests geslaagd\n`)
