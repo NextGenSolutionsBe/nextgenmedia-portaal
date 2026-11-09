@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { offerteVanToken, pdfVan } from '@/lib/offertes-server'
+import { offerteBestandsnaam } from '@/lib/offertes'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,7 +14,7 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
     const buf = await pdfVan(admin, o)
     if (!buf) return new NextResponse('Document niet beschikbaar', { status: 404 })
     const download = req.nextUrl.searchParams.get('download') === '1'
-    const naam = (o.pdf_naam || `Offerte ${o.titel}.pdf`).replace(/[^\w .-]+/g, '').slice(0, 120) || 'offerte.pdf'
+    const naam = offerteBestandsnaam(o)
     return new NextResponse(new Uint8Array(buf), {
       status: 200,
       headers: {

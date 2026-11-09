@@ -29,6 +29,28 @@ export type Offerte = {
   verstuurd_op: string | null; klant_geopend_op: string | null; laatst_geopend_op: string | null; aantal_keer_geopend: number
   geaccepteerd_op: string | null; geaccepteerd_door: string | null; ingetrokken_op: string | null
   created_at: string; created_by_email: string | null
+  /** 'opgemaakt' = in de app opgemaakt met de invulfiches (lib/offerte-fiche.ts); 'pdf' = sjabloon of eigen pdf. */
+  bron?: 'pdf' | 'opgemaakt' | null
+  inhoud?: unknown
+  offertenummer?: string | null
+  verantwoordelijke?: string | null
+  /** Na het akkoord: de pdf met het akkoord (en de handtekening) van de klant. */
+  getekend_pdf_pad?: string | null
+  handtekening_pad?: string | null
+  getekend_op?: string | null
+  voorwaarden_akkoord_op?: string | null
+  privacy_akkoord_op?: string | null
+}
+
+/** Wat de klant aanvinkt bij het aanvaarden van een offerte. */
+export const OFFERTE_AKKOORD_VOORWAARDEN = 'Ik ga akkoord met de algemene voorwaarden van NextGen. Ze gelden voor deze offerte en voor elke toekomstige samenwerking.'
+export const OFFERTE_AKKOORD_PRIVACY = 'Ik ga akkoord met de privacyverklaring van NextGen.'
+
+/** Bestandsnaam voor downloads: "Offerte OF-2026-014 Bakkerij Peeters.pdf". */
+export function offerteBestandsnaam(o: Pick<Offerte, 'offertenummer' | 'klant_naam' | 'titel' | 'pdf_naam'>): string {
+  const basis = o.offertenummer ? `Offerte ${o.offertenummer} ${o.klant_naam ?? ''}` : (o.pdf_naam || `Offerte ${o.titel}`)
+  const s = String(basis).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w .-]+/g, '').replace(/\s+/g, ' ').trim().slice(0, 120) || 'offerte'
+  return /\.pdf$/i.test(s) ? s : `${s}.pdf`
 }
 
 /** Wat de projectkaart van een offerte toont. */

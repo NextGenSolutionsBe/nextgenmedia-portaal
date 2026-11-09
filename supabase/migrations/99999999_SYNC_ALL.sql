@@ -7296,3 +7296,21 @@ do $$ begin
     alter table public.opleveringen add constraint opleveringen_soort_check check (soort in ('video','ontwerp','foto','document'));
   end if;
 end $$;
+
+-- Offertes opmaken in de app (9 nov 2026): invulfiches, nummer, verantwoordelijke, akkoord met vinkjes en handtekening.
+alter table public.offertes add column if not exists bron text not null default 'pdf';
+alter table public.offertes add column if not exists inhoud jsonb;
+alter table public.offertes add column if not exists offertenummer text;
+alter table public.offertes add column if not exists verantwoordelijke text;
+alter table public.offertes add column if not exists getekend_pdf_pad text;
+alter table public.offertes add column if not exists handtekening_pad text;
+alter table public.offertes add column if not exists getekend_op timestamptz;
+alter table public.offertes add column if not exists voorwaarden_akkoord_op timestamptz;
+alter table public.offertes add column if not exists privacy_akkoord_op timestamptz;
+alter table public.offertes add column if not exists akkoord_details jsonb;
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'offertes_bron_check') then
+    alter table public.offertes add constraint offertes_bron_check check (bron in ('pdf','opgemaakt'));
+  end if;
+end $$;
+create unique index if not exists offertes_offertenummer_uniek on public.offertes (upper(offertenummer)) where offertenummer is not null;

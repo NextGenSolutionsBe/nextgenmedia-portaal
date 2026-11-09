@@ -9,6 +9,7 @@ import { offerteVanToken, registreerGeopend } from '@/lib/offertes-server'
 import { isAutomatischeBezoeker } from '@/lib/klant-geopend'
 import { merkStijl } from '@/lib/merk-mail'
 import { AccepteerKnop } from './accepteer-knop'
+import { getekendOp } from '@/lib/offerte-fiche'
 
 export const metadata: Metadata = { title: 'Offerte', robots: { index: false, follow: false } }
 
@@ -65,25 +66,29 @@ export default async function OffertePagina({ params }: { params: { token: strin
       {kop}
       <main className="max-w-4xl mx-auto px-4 py-6 space-y-5">
         <section className="bg-white rounded-2xl border border-gray-200 p-5 sm:p-6">
-          <p className="text-xs text-gray-500">{o.klant_naam ? `Voor ${o.klant_naam}` : 'Offerte'}</p>
+          <p className="text-xs text-gray-500">{[o.offertenummer ? `Offerte ${o.offertenummer}` : 'Offerte', o.klant_naam ? `voor ${o.klant_naam}` : null].filter(Boolean).join(' ')}</p>
           <h1 className="text-2xl font-semibold text-gray-900 mt-1">{o.titel}</h1>
           <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm text-gray-600">
             {o.bedrag_excl !== null && o.bedrag_excl !== undefined && <span><b className="text-gray-900">{euro(Number(o.bedrag_excl))}</b> excl. btw</span>}
             {o.geldig_tot && o.status !== 'geaccepteerd' && <span className={`flex items-center gap-1 ${verlopen ? 'text-red-700' : ''}`}><Clock className="h-4 w-4" />{verlopen ? 'Verlopen op' : 'Geldig tot'} {datum(o.geldig_tot)}</span>}
           </div>
-          <div className="mt-5 flex flex-col sm:flex-row gap-3 sm:items-center">
-            {o.status === 'geaccepteerd' ? (
-              <div className="rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-green-900 text-sm flex items-center gap-2">
-                <CheckCircle2 className="h-5 w-5" />Geaccepteerd{o.geaccepteerd_door ? ` door ${o.geaccepteerd_door}` : ''}{o.geaccepteerd_op ? ` op ${datum(o.geaccepteerd_op)}` : ''}. Bedankt!
-              </div>
-            ) : verlopen ? (
-              <p className="text-sm text-red-700">Deze offerte is verlopen. Neem contact op met {m.naam} ({m.adres}) voor een nieuwe.</p>
-            ) : (
+          <div className="mt-5 space-y-3">
+            <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+              {o.status === 'geaccepteerd' ? (
+                <div className="rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-green-900 text-sm flex items-center gap-2">
+                  <CheckCircle2 className="h-5 w-5 shrink-0" />
+                  <span>Aanvaard{o.geaccepteerd_door ? ` door ${o.geaccepteerd_door}` : ''}{o.geaccepteerd_op ? ` op ${getekendOp(o.geaccepteerd_op)}` : ''}{o.getekend_op ? ', met handtekening' : ''}. Bedankt!</span>
+                </div>
+              ) : verlopen ? (
+                <p className="text-sm text-red-700">Deze offerte is verlopen. Neem contact op met {m.naam} ({m.adres}) voor een nieuwe.</p>
+              ) : null}
+              <a href={`/offerte/${params.token}/document?download=1`} className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-800 hover:bg-gray-50">
+                <Download className="h-4 w-4" />Download pdf
+              </a>
+            </div>
+            {o.status === 'verstuurd' && !verlopen && (
               <AccepteerKnop token={params.token} naamVoorstel={o.ontvanger_naam ?? ''} klant={o.klant_naam} accent={m.accent} opAccent={m.opAccent} />
             )}
-            <a href={`/offerte/${params.token}/document?download=1`} className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-800 hover:bg-gray-50">
-              <Download className="h-4 w-4" />Download pdf
-            </a>
           </div>
         </section>
 

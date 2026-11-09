@@ -14,10 +14,10 @@ export const dynamic = 'force-dynamic'
  */
 export async function POST(req: NextRequest, { params }: { params: { token: string } }) {
   try {
-    const b = await req.json().catch(() => ({})) as { naam?: unknown }
+    const b = await req.json().catch(() => ({})) as { naam?: unknown; akkoord_voorwaarden?: unknown; akkoord_privacy?: unknown; handtekening?: unknown }
     const meta = requestMeta(req)
     const admin = createAdminSupabaseClient()
-    const o = await accepteer(admin, params.token, { naam: b.naam, ip: meta.ip, ua: meta.userAgent })
+    const o = await accepteer(admin, params.token, { naam: b.naam, akkoord_voorwaarden: b.akkoord_voorwaarden, akkoord_privacy: b.akkoord_privacy, handtekening: b.handtekening, ip: meta.ip, ua: meta.userAgent })
     // Projecten: kaart met de groene label en de taak "contract opmaken of in gang zetten" (na het antwoord).
     if (o.status === 'geaccepteerd') waitUntil(naOfferteAkkoord(admin, o.id).catch((e) => console.warn('[offertes] na akkoord mislukt:', e instanceof Error ? e.message : e)))
     return NextResponse.json({ ok: true, geaccepteerd_op: o.geaccepteerd_op, geaccepteerd_door: o.geaccepteerd_door })
