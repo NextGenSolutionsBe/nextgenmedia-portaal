@@ -4,13 +4,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
   Plus, Loader2, X, Upload, Film, ArrowRight, Search, Image as ImageIcon, FileText, Trash2, Download, Eye, Send, Clock, CheckCircle2, RotateCcw, Archive, MessageSquare, Lock, Timer,
+  PackageCheck, Palette, Camera, Paperclip,
 } from 'lucide-react'
 import { KlantKiezer, type KlantOptie } from '@/components/admin/klant-kiezer'
 import { MailComposer } from '@/components/admin/mail-composer'
 import { KijkVenster, TijdKnop } from '@/components/media/kijk-venster'
 import { laadOpleveringBestandOp, type Voortgang } from '@/lib/oplevering-upload'
 import {
-  STATUS_INFO, versieLabel, beschikbaarheid, grootteLabel, tijdLabel, bestandSoort, volgendeStap, type OpleveringStatus,
+  STATUS_INFO, versieLabel, beschikbaarheid, grootteLabel, tijdLabel, bestandSoort, formaatLabel, volgendeStap, OPLEVERING_SOORTEN, soortInfo, soortVan,
+  type OpleveringStatus, type OpleveringSoort,
 } from '@/lib/opleveringen'
 import { zoekVeld } from '@/lib/zoekveld'
 import type { OpleveringVolledig } from '@/lib/opleveringen-server'
@@ -28,9 +30,14 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 /** De volgende stap voor het team (zie lib/opleveringen.ts). */
 const stapVan = (o: OpleveringVolledig) => volgendeStap({ status: o.status, versies: o.versies.map((v) => ({ ...v, bestanden_aantal: v.bestanden.length })), revisies: o.revisies })
 const datumTijd = (iso: string | null | undefined) => iso ? new Date(iso).toLocaleString('nl-BE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
-const SoortIcoon = ({ mime, className = 'h-4 w-4' }: { mime: string | null; className?: string }) => {
-  const s = bestandSoort(mime)
-  return s === 'video' ? <Film className={className} /> : s === 'foto' ? <ImageIcon className={className} /> : <FileText className={className} />
+const SoortIcoon = ({ mime, naam, className = 'h-4 w-4' }: { mime: string | null; naam?: string | null; className?: string }) => {
+  const s = bestandSoort(mime, naam)
+  return s === 'video' ? <Film className={className} /> : s === 'foto' ? <ImageIcon className={className} /> : s === 'pdf' ? <FileText className={className} /> : <Paperclip className={className} />
+}
+/** Icoon per soort oplevering: video, grafisch ontwerp, foto's, documenten. */
+export const OpleveringIcoon = ({ soort, className = 'h-4 w-4' }: { soort: unknown; className?: string }) => {
+  const s = soortVan(soort)
+  return s === 'video' ? <Film className={className} /> : s === 'ontwerp' ? <Palette className={className} /> : s === 'foto' ? <Camera className={className} /> : <FileText className={className} />
 }
 
 export function OpleveringenAdmin({ magToevoegen, magAanpassen, magVerwijderen }: { magToevoegen: boolean; magAanpassen: boolean; magVerwijderen: boolean }) {
@@ -39,6 +46,7 @@ export function OpleveringenAdmin({ magToevoegen, magAanpassen, magVerwijderen }
   const [opdrachten, setOpdrachten] = useState<Opdracht[]>([])
   const [hint, setHint] = useState<string | null>(null)
   const [filter, setFilter] = useState<OpleveringStatus | 'alle'>('alle')
+  const [soortFilter, setSoortFilter] = useState<OpleveringSoort | 'alle'>('alle')
   const [zoek, setZoek] = useState('')
   const [archief, setArchief] = useState(false)
   const [open, setOpen] = useState<string | null>(null)
@@ -60,11 +68,12 @@ export function OpleveringenAdmin({ magToevoegen, magAanpassen, magVerwijderen }
     const q = zoek.trim().toLowerCase()
     return (lijst ?? [])
       .filter((o) => filter === 'alle' || o.status === filter)
+      .filter((o) => soortFilter === 'alle' || soortVan(o.soort) === soortFilter)
       .filter((o) => !q || `${o.titel} ${o.klant_naam ?? ''}`.toLowerCase().includes(q))
       .map((o, i) => ({ o, i, d: stapVan(o).dringend ? 0 : 1 }))
       .sort((a, b) => a.d - b.d || a.i - b.i)
       .map((x) => x.o)
-  }, [lijst, filter, zoek])
+  }, [lijst, filter, soortFilter, zoek])
   const telling = useMemo(() => {
     const m = new Map<string, number>()
     for (const o of lijst ?? []) m.set(o.status, (m.get(o.status) ?? 0) + 1)
@@ -90,12 +99,19 @@ export function OpleveringenAdmin({ magToevoegen, magAanpassen, magVerwijderen }
         </div>
         <label className="text-xs text-gray-600 flex items-center gap-1.5 cursor-pointer"><input type="checkbox" className="h-4 w-4 accent-gray-900" checked={archief} onChange={(e) => setArchief(e.target.checked)} />Toon archief</label>
       </div>
+      <div className="flex items-center gap-1.5 overflow-x-auto -mt-1" role="group" aria-label="Soort oplevering">
+        <button type="button" onClick={() => setSoortFilter('alle')} className={chip(soortFilter === 'alle')}>Alle soorten</button>
+        {OPLEVERING_SOORTEN.map((s) => {
+          const n = (lijst ?? []).filter((o) => soortVan(o.soort) === s.key).length
+          return <button key={s.key} type="button" onClick={() => setSoortFilter(s.key)} className={`${chip(soortFilter === s.key)} inline-flex items-center gap-1`}><OpleveringIcoon soort={s.key} className="h-3.5 w-3.5" />{s.label} ({n})</button>
+        })}
+      </div>
 
       {lijst === null ? <div className="card-base flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>
         : zichtbaar.length === 0 ? (
           <div className="card-base text-center py-12 text-sm text-gray-500">
-            <Film className="h-8 w-8 mx-auto text-gray-300 mb-2" />
-            {lijst.length === 0 ? 'Nog geen opleveringen. Maak er een aan, laad de video op en deel ze met de klant.' : 'Niets met deze filter.'}
+            <PackageCheck className="h-8 w-8 mx-auto text-gray-300 mb-2" />
+            {lijst.length === 0 ? "Nog geen opleveringen. Maak er een aan (video, ontwerp, foto's of documenten), laad de bestanden op en deel ze met de klant." : 'Niets met deze filter.'}
           </div>
         ) : (
           <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -133,13 +149,13 @@ function OpleveringKaart({ o, onOpen }: { o: OpleveringVolledig; onOpen: () => v
       <button type="button" onClick={onOpen} className="w-full text-left card-base !p-0 overflow-hidden hover:shadow-md transition-shadow">
         <div className="relative aspect-video bg-gray-900">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          {poster ? <img src={poster} alt="" className="absolute inset-0 h-full w-full object-cover" loading="lazy" /> : <Film className="absolute inset-0 m-auto h-8 w-8 text-white/30" />}
+          {poster ? <img src={poster} alt="" className={`absolute inset-0 h-full w-full ${soortVan(o.soort) === 'video' || soortVan(o.soort) === 'foto' ? 'object-cover' : 'object-contain bg-white'}`} loading="lazy" /> : <OpleveringIcoon soort={o.soort} className="absolute inset-0 m-auto h-8 w-8 text-white/30" />}
           <span className={`absolute left-2 top-2 text-[11px] font-semibold px-2 py-0.5 rounded-full border ${STATUS_INFO[o.status].kleur}`}>{STATUS_INFO[o.status].team}</span>
           {laatste && <span className="absolute right-2 top-2 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-black/60 text-white">{versieLabel(laatste)}{!laatste.gepubliceerd_op ? ' · concept' : ''}</span>}
         </div>
         <div className="p-3 space-y-1">
           <p className="font-semibold leading-snug">{o.titel}</p>
-          <p className="text-xs text-gray-500">{o.klant_naam ?? 'Klant'}</p>
+          <p className="text-xs text-gray-500 flex items-center gap-1.5"><span className="truncate">{o.klant_naam ?? 'Klant'}</span><span className="text-gray-300">·</span><span className="inline-flex items-center gap-1 shrink-0"><OpleveringIcoon soort={o.soort} className="h-3 w-3" />{soortInfo(o.soort).label}</span></p>
           {(() => { const st = stapVan(o); return (
             <p className={`text-xs flex items-start gap-1 pt-0.5 ${st.dringend ? 'text-amber-800 font-medium' : st.klaar ? 'text-green-700' : 'text-gray-700'}`}>
               {st.klaar ? <CheckCircle2 className="h-3.5 w-3.5 mt-px shrink-0" /> : <ArrowRight className="h-3.5 w-3.5 mt-px shrink-0" />}{st.tekst}
@@ -157,6 +173,7 @@ function OpleveringKaart({ o, onOpen }: { o: OpleveringVolledig; onOpen: () => v
 
 function NieuweOplevering({ klanten, opdrachten, onSluit, onKlaar }: { klanten: Klant[]; opdrachten: Opdracht[]; onSluit: () => void; onKlaar: (id: string) => void }) {
   const [klant, setKlant] = useState('')
+  const [soort, setSoort] = useState<OpleveringSoort>('video')
   const [titel, setTitel] = useState('')
   const [omschrijving, setOmschrijving] = useState('')
   const [opdracht, setOpdracht] = useState('')
@@ -167,8 +184,8 @@ function NieuweOplevering({ klanten, opdrachten, onSluit, onKlaar }: { klanten: 
   const maak = async () => {
     setBezig(true)
     try {
-      const j = await api<{ id: string }>('/api/admin/opleveringen', { method: 'POST', body: JSON.stringify({ client_id: klant, titel, omschrijving, opdracht_id: opdracht || null, max_revisies: max }) })
-      toast.success('Oplevering aangemaakt. Laad nu de video op.')
+      const j = await api<{ id: string }>('/api/admin/opleveringen', { method: 'POST', body: JSON.stringify({ client_id: klant, soort, titel, omschrijving, opdracht_id: opdracht || null, max_revisies: max }) })
+      toast.success('Oplevering aangemaakt. Laad nu de bestanden op.')
       onKlaar(j.id)
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(false) }
   }
@@ -176,15 +193,26 @@ function NieuweOplevering({ klanten, opdrachten, onSluit, onKlaar }: { klanten: 
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40" onClick={onSluit}>
       <div className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-xl max-h-[92dvh] overflow-y-auto" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Nieuwe oplevering">
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
-          <h3 className="font-semibold flex items-center gap-2"><Film className="h-4 w-4" />Nieuwe oplevering</h3>
+          <h3 className="font-semibold flex items-center gap-2"><PackageCheck className="h-4 w-4" />Nieuwe oplevering</h3>
           <button type="button" onClick={onSluit} aria-label="Sluiten" className="h-8 w-8 rounded-lg hover:bg-gray-100 flex items-center justify-center"><X className="h-4 w-4" /></button>
         </div>
         <div className="p-5 space-y-3">
           <div><p className="text-xs font-medium text-gray-600 mb-1">Klant *</p>
             <KlantKiezer id="oplevering-klant" klanten={lokaal} waarde={klant} onKies={(k) => { setKlant(k?.id ?? ''); setOpdracht('') }} onNieuw={(k) => setLokaal((l) => [...l, k])} bron="oplevering" />
           </div>
+          <div><p className="text-xs font-medium text-gray-600 mb-1">Wat lever je op? *</p>
+            <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Soort oplevering">
+              {OPLEVERING_SOORTEN.map((s) => (
+                <button key={s.key} type="button" role="radio" aria-checked={soort === s.key} onClick={() => setSoort(s.key)}
+                  className={`text-left rounded-xl border p-2.5 transition ${soort === s.key ? 'border-gray-900 ring-1 ring-gray-900 bg-gray-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                  <span className="flex items-center gap-1.5 text-sm font-semibold"><OpleveringIcoon soort={s.key} />{s.label}</span>
+                  <span className="block text-[11px] text-gray-500 mt-0.5 leading-snug">{s.uitleg}</span>
+                </button>
+              ))}
+            </div>
+          </div>
           <div><label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="op-titel">Titel *</label>
-            <input id="op-titel" className="input-base" value={titel} onChange={(e) => setTitel(e.target.value)} maxLength={200} placeholder="Bv. Aftermovie zomerfeest 2026" /></div>
+            <input id="op-titel" className="input-base" value={titel} onChange={(e) => setTitel(e.target.value)} maxLength={200} placeholder={`Bv. ${soortInfo(soort).voorbeeld}`} /></div>
           <div><label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="op-omschr">Omschrijving <span className="text-gray-400">optioneel, de klant ziet dit</span></label>
             <textarea id="op-omschr" rows={2} className="input-base" value={omschrijving} onChange={(e) => setOmschrijving(e.target.value)} maxLength={4000} /></div>
           {vanKlant.length > 0 && (
@@ -292,6 +320,13 @@ function Detail({ o, opdrachten, mag, onVernieuw, onSluit }: { o: OpleveringVoll
             </div>
           ) })()}
           <div className="mt-3 flex items-center gap-2 flex-wrap text-xs">
+            {mag.aanpassen ? (
+              <label className="rounded-lg bg-gray-100 pl-2.5 pr-1 py-0.5 inline-flex items-center gap-1.5"><OpleveringIcoon soort={o.soort} className="h-3.5 w-3.5" />
+                <select aria-label="Soort oplevering" className="bg-transparent text-xs font-semibold py-0.5 focus:outline-none" value={soortVan(o.soort)} onChange={(e) => doe('soort', () => api(`/api/admin/opleveringen/${o.id}`, { method: 'PATCH', body: JSON.stringify({ soort: e.target.value }) }))}>
+                  {OPLEVERING_SOORTEN.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                </select>
+              </label>
+            ) : <span className="rounded-lg bg-gray-100 px-2.5 py-1 inline-flex items-center gap-1.5"><OpleveringIcoon soort={o.soort} className="h-3.5 w-3.5" />{soortInfo(o.soort).label}</span>}
             <span className="rounded-lg bg-gray-100 px-2.5 py-1">Revisierondes: <b>{o.revisies.gebruikt}</b> van {o.revisies.max} gebruikt</span>
             {mag.aanpassen && <button type="button" onClick={() => doe('extra', () => api(`/api/admin/opleveringen/${o.id}`, { method: 'PATCH', body: JSON.stringify({ extra_ronde: true }) }), 'Extra revisieronde gegeven.')} className="underline text-gray-600">+ extra ronde geven</button>}
           </div>
@@ -307,7 +342,9 @@ function Detail({ o, opdrachten, mag, onVernieuw, onSluit }: { o: OpleveringVoll
               </div>
               <button type="button" onClick={() => kiezer.current?.click()} className="w-full rounded-xl bg-gray-50 hover:bg-gray-100 border border-gray-200 py-6 text-sm text-gray-700 flex flex-col items-center gap-1.5">
                 <Upload className="h-6 w-6" /><span className="font-semibold">Bestanden kiezen of hierheen slepen</span>
-                <span className="text-xs text-gray-500">Video&apos;s (ook 4K), foto&apos;s of andere bestanden. Grote bestanden gaan in stukjes en hervatten na een onderbreking. MP4 speelt in elke browser af.</span>
+                <span className="text-xs text-gray-500">{soortVan(o.soort) === 'video'
+                  ? "Video's (ook 4K) en andere bestanden. Grote bestanden gaan in stukjes en hervatten na een onderbreking. MP4 speelt in elke browser af."
+                  : `Elk bestand mag: svg, pdf, png, jpg, ai, eps, psd, docx, zip … Png, jpg, svg en pdf kan de klant meteen bekijken, de rest downloaden.`}</span>
               </button>
               <input ref={kiezer} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files?.length) void voegToe(e.target.files); e.target.value = '' }} />
               {uploads.length > 0 && (
@@ -337,7 +374,7 @@ function Detail({ o, opdrachten, mag, onVernieuw, onSluit }: { o: OpleveringVoll
               {concept && (
                 <>
                   <div><label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="op-bericht">Bericht voor de klant <span className="text-gray-400">optioneel</span></label>
-                    <textarea id="op-bericht" rows={2} className="input-base" value={bericht} onChange={(e) => setBericht(e.target.value)} maxLength={4000} placeholder={concept.nummer > 1 ? 'Bv. Muziek zachter gezet en het logo op het einde groter.' : 'Bv. Hier is de eerste versie. Laat ons weten wat je ervan vindt.'} /></div>
+                    <textarea id="op-bericht" rows={2} className="input-base" value={bericht} onChange={(e) => setBericht(e.target.value)} maxLength={4000} placeholder={concept.nummer > 1 ? (soortVan(o.soort) === 'video' ? 'Bv. Muziek zachter gezet en het logo op het einde groter.' : 'Bv. Kleuren aangepast zoals gevraagd.') : 'Bv. Hier is de eerste versie. Laat ons weten wat je ervan vindt.'} /></div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <button type="button" onClick={publiceer} disabled={bezig === 'publiceer' || bezigMetUpload || !concept.bestanden.some((b) => b.status === 'klaar')} className="btn-primary">{bezig === 'publiceer' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}Delen met de klant</button>
                     <span className="text-xs text-gray-500">Vanaf dan 3 dagen beschikbaar. De klant krijgt geen automatische mail.</span>
@@ -352,7 +389,7 @@ function Detail({ o, opdrachten, mag, onVernieuw, onSluit }: { o: OpleveringVoll
           {mailVersie?.gepubliceerd_op && beschikbaarheid(mailVersie).status === 'beschikbaar' && (
             <section className={`rounded-xl border p-3 flex items-center gap-3 flex-wrap ${net ? 'border-green-300 bg-green-50' : 'border-gray-200'}`}>
               <p className="text-sm flex-1 min-w-0">{net ? 'Gedeeld. Laat het de klant weten met een mail (je ziet eerst een voorbeeld).' : `${mailVersie.label} staat klaar voor de klant.`}</p>
-              <MailComposer label="Klant verwittigen" className="btn-secondary text-sm" context={{ type: 'oplevering', titel: o.titel, versieLabel: mailVersie.label, link: portaalLink, clientId: o.client_id, clientName: o.klant_naam, verlooptOp: beschikbaarheid(mailVersie).tot }} />
+              <MailComposer label="Klant verwittigen" className="btn-secondary text-sm" context={{ type: 'oplevering', soort: soortVan(o.soort), titel: o.titel, versieLabel: mailVersie.label, link: portaalLink, clientId: o.client_id, clientName: o.klant_naam, verlooptOp: beschikbaarheid(mailVersie).tot }} />
             </section>
           )}
 
@@ -386,8 +423,17 @@ function Detail({ o, opdrachten, mag, onVernieuw, onSluit }: { o: OpleveringVoll
                             {f.punten.length > 0 && (
                               <ul className="mt-2 space-y-1">
                                 {f.punten.map((p, i) => {
-                                  const video = v.bestanden.find((x) => bestandSoort(x.mimetype) === 'video')
-                                  return <li key={i} className="flex items-start gap-2"><TijdKnop sec={p.tijd} onKies={video && b.status === 'beschikbaar' ? (s) => setKijk({ b: video, tijd: s }) : undefined} /><span>{p.tekst}</span></li>
+                                  const video = v.bestanden.find((x) => bestandSoort(x.mimetype, x.naam) === 'video')
+                                  const bijBestand = p.bestand ? v.bestanden.find((x) => x.naam === p.bestand) : null
+                                  return (
+                                    <li key={i} className="flex items-start gap-2">
+                                      <TijdKnop sec={p.tijd} onKies={video && b.status === 'beschikbaar' ? (s) => setKijk({ b: video, tijd: s }) : undefined} />
+                                      {p.bestand && (bijBestand && b.status === 'beschikbaar'
+                                        ? <button type="button" onClick={() => setKijk({ b: bijBestand })} className="shrink-0 max-w-[45%] truncate text-xs font-semibold rounded-md bg-gray-900 text-white px-1.5 py-0.5 hover:bg-gray-700" title={p.bestand}>{p.bestand}</button>
+                                        : <span className="shrink-0 max-w-[45%] truncate text-xs font-semibold rounded-md bg-gray-200 text-gray-800 px-1.5 py-0.5" title={p.bestand}>{p.bestand}</span>)}
+                                      <span>{p.tekst}</span>
+                                    </li>
+                                  )
                                 })}
                               </ul>
                             )}
@@ -413,7 +459,7 @@ function Detail({ o, opdrachten, mag, onVernieuw, onSluit }: { o: OpleveringVoll
 
       {kijk && (
         <div onClick={(e) => e.stopPropagation()}>
-          <KijkVenster titel={kijk.b.naam} soort={bestandSoort(kijk.b.mimetype)} startTijd={kijk.tijd ?? null} haalUrl={() => urlVoor(kijk.b)} onDownload={() => download(kijk.b)} onSluit={() => setKijk(null)} />
+          <KijkVenster titel={kijk.b.naam} soort={bestandSoort(kijk.b.mimetype, kijk.b.naam)} startTijd={kijk.tijd ?? null} haalUrl={() => urlVoor(kijk.b)} onDownload={() => download(kijk.b)} onSluit={() => setKijk(null)} />
         </div>
       )}
       {vraagWeg && (
@@ -440,7 +486,8 @@ function BestandLijst({ bestanden, verlopen = false, onKijk, onDownload, onWeg }
         <li key={b.id} className="flex items-center gap-3 rounded-xl border border-gray-200 p-2">
           <div className="relative h-14 w-24 shrink-0 rounded-lg bg-gray-900 overflow-hidden">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            {b.poster_url ? <img src={b.poster_url} alt="" className="h-full w-full object-cover" loading="lazy" /> : <SoortIcoon mime={b.mimetype} className="absolute inset-0 m-auto h-5 w-5 text-white/40" />}
+            {b.poster_url ? <img src={b.poster_url} alt="" className={`h-full w-full ${bestandSoort(b.mimetype, b.naam) === 'video' ? 'object-cover' : 'object-contain bg-white'}`} loading="lazy" /> : <SoortIcoon mime={b.mimetype} naam={b.naam} className="absolute inset-0 m-auto h-5 w-5 text-white/40" />}
+            <span className="absolute right-1 bottom-1 text-[9px] font-bold tracking-wide rounded bg-black/70 text-white px-1 py-px">{formaatLabel(b.naam, b.mimetype)}</span>
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium truncate">{b.naam}</p>

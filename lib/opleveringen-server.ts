@@ -7,7 +7,7 @@ import {
   type Versie, type Feedback, type FeedbackPunt, type OpleveringStatus,
 } from '@/lib/opleveringen'
 
-// Video-opleveringen (server). De bestanden gaan nooit door een Vercel-functie:
+// Opleveringen (server). De bestanden gaan nooit door een Vercel-functie:
 // opladen gebeurt rechtstreeks vanuit de browser naar de opslag (met een
 // ondertekende link, hervatbaar) en kijken of downloaden met een kortlevende
 // ondertekende link die pas aangemaakt wordt als iemand op de knop drukt. Zo
@@ -28,6 +28,8 @@ export type BestandRij = {
 export type VersieRij = Versie & { oplevering_id: string; gepubliceerd_door: string | null; created_at: string }
 export type OpleveringRij = {
   id: string; client_id: string; opdracht_id: string | null; titel: string; omschrijving: string | null; max_revisies: number
+  /** video, ontwerp, foto of document (ontbreekt vóór de migratie = video). */
+  soort?: string | null
   gearchiveerd_op: string | null; aangemaakt_door: string | null; created_at: string; updated_at: string
 }
 export type FeedbackRij = Feedback & { oplevering_id: string; door_email: string | null; door_user_id: string | null }
@@ -150,7 +152,7 @@ export async function meldFeedbackAanTeam(o: { oplevering: Pick<OpleveringRij, '
     `${o.klant} · ${o.oplevering.titel} · ${versieLabel(o.versie)}`,
     `${titel} door ${o.door}.`,
     o.tekst ? `\n${o.tekst}` : '',
-    ...o.punten.map((p) => `• ${p.tijd !== null ? `${tijdLabel(p.tijd)} – ` : ''}${p.tekst}`),
+    ...o.punten.map((p) => `• ${p.tijd !== null ? `${tijdLabel(p.tijd)} – ` : p.bestand ? `${p.bestand} – ` : ''}${p.tekst}`),
   ].filter(Boolean)
   const link = `${baseUrl()}/admin/opleveringen?oplevering=${o.oplevering.id}`
   const opts = { bodyText: regels.join('\n'), ctaText: 'Oplevering openen', ctaLink: link }

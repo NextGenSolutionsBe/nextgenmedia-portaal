@@ -1,18 +1,18 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Download, Loader2, X } from 'lucide-react'
+import { Download, ExternalLink, Loader2, X } from 'lucide-react'
 import { tijdLabel } from '@/lib/opleveringen'
 
 /**
- * Een video of foto uit een oplevering bekijken. De ondertekende link wordt
+ * Een video, foto, svg of pdf uit een oplevering bekijken. De ondertekende link wordt
  * pas opgehaald als het venster opent; de video streamt (de browser haalt
  * enkel het stuk op dat hij afspeelt), dus ook 4K laadt niet in één keer.
  * `onTijd` geeft de huidige afspeeltijd door (voor feedback met tijdcode).
  */
 export function KijkVenster({ titel, soort, haalUrl, startTijd, onSluit, onDownload, onTijd, onderaan }: {
   titel: string
-  soort: 'video' | 'foto' | 'ander'
+  soort: 'video' | 'foto' | 'pdf' | 'ander'
   haalUrl: () => Promise<string>
   startTijd?: number | null
   onSluit: () => void
@@ -37,6 +37,7 @@ export function KijkVenster({ titel, soort, haalUrl, startTijd, onSluit, onDownl
     <div className="fixed inset-0 z-[70] bg-black/90 flex flex-col" role="dialog" aria-modal="true" aria-label={titel}>
       <div className="flex items-center gap-3 px-4 py-3 text-white">
         <p className="font-semibold truncate flex-1 min-w-0">{titel}</p>
+        {url && soort === 'pdf' && <a href={url} target="_blank" rel="noreferrer" className="hidden sm:inline-flex items-center gap-1.5 rounded-lg bg-white/10 hover:bg-white/20 px-3 py-2 text-sm"><ExternalLink className="h-4 w-4" />Nieuw tabblad</a>}
         {onDownload && <button type="button" onClick={onDownload} className="inline-flex items-center gap-1.5 rounded-lg bg-white/10 hover:bg-white/20 px-3 py-2 text-sm"><Download className="h-4 w-4" />Downloaden</button>}
         <button type="button" onClick={onSluit} aria-label="Sluiten" className="h-10 w-10 rounded-lg hover:bg-white/10 flex items-center justify-center"><X className="h-5 w-5" /></button>
       </div>
@@ -48,8 +49,11 @@ export function KijkVenster({ titel, soort, haalUrl, startTijd, onSluit, onDownl
               onLoadedMetadata={() => { if (startTijd && ref.current) ref.current.currentTime = startTijd }}
               onTimeUpdate={() => { if (ref.current) onTijd?.(ref.current.currentTime) }} />
           ) : soort === 'foto' ? (
+            // Witte achtergrond: een logo of svg met transparantie leest anders niet.
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={url} alt={titel} className="max-h-full max-w-full object-contain rounded-lg" />
+            <img src={url} alt={titel} className="max-h-full max-w-full object-contain rounded-lg bg-white" />
+          ) : soort === 'pdf' ? (
+            <iframe src={url} title={titel} className="h-full w-full max-w-5xl rounded-lg bg-white" />
           ) : (
             <a href={url} className="rounded-xl bg-white text-gray-900 px-5 py-3 font-semibold inline-flex items-center gap-2"><Download className="h-4 w-4" />Bestand openen</a>
           )}

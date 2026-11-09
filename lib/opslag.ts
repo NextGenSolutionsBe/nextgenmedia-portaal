@@ -34,7 +34,7 @@ const LABELS: Record<string, string> = {
   'fof-media': 'Founders of Flanders: media',
   'founders-media': "Founders of Flanders: voorbeeldvideo's",
   'client-uploads': 'Klantuploads',
-  opleveringen: 'Video-opleveringen',
+  opleveringen: 'Opleveringen',
   contracts: 'Contracten',
   'contract-archief': 'Contractarchief',
   aanvragen: 'Aanvragen',

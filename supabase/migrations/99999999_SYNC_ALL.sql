@@ -7288,3 +7288,11 @@ REVOKE ALL ON public.vennoot_uitgaven, public.vennoot_regels, public.vennoot_reg
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES ('vennoot-uitgaven', 'vennoot-uitgaven', false, 26214400, ARRAY['application/pdf', 'image/jpeg', 'image/png', 'image/heic', 'image/heif', 'image/webp'])
 ON CONFLICT (id) DO NOTHING;
+
+-- Opleveringen: ook ontwerp, foto's en documenten (9 nov 2026).
+alter table public.opleveringen add column if not exists soort text not null default 'video';
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'opleveringen_soort_check') then
+    alter table public.opleveringen add constraint opleveringen_soort_check check (soort in ('video','ontwerp','foto','document'));
+  end if;
+end $$;

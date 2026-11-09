@@ -1,4 +1,4 @@
-import { validateBtw } from '@/lib/btw'
+import { validateBtw, inEuRegister } from '@/lib/btw'
 
 /**
  * Bedrijfsgegevens opzoeken op btw-nummer via VIES, het officiële btw-register
@@ -9,7 +9,7 @@ import { validateBtw } from '@/lib/btw'
 
 export type BtwGegevens = { btw: string; geldig: boolean; naam: string | null; straat: string | null; postcode: string | null; gemeente: string | null; land: string | null }
 
-const LAND: Record<string, string> = { BE: 'België', NL: 'Nederland', FR: 'Frankrijk', DE: 'Duitsland', LU: 'Luxemburg' }
+const LAND: Record<string, string> = { BE: 'België', NL: 'Nederland', FR: 'Frankrijk', DE: 'Duitsland', LU: 'Luxemburg', ES: 'Spanje', IT: 'Italië', AT: 'Oostenrijk', IE: 'Ierland', PT: 'Portugal', DK: 'Denemarken', SE: 'Zweden', FI: 'Finland', PL: 'Polen' }
 // Rechtsvormen die VIES vooraan zet ("BV NEXTGENMEDIA"); wij zetten ze achteraan.
 const VORMEN = new Set(['BV', 'NV', 'VZW', 'VOF', 'COMMV', 'CV', 'CVBA', 'BVBA', 'SA', 'SRL', 'SPRL', 'ASBL', 'SC', 'SCRL', 'SCS', 'SNC', 'DPU', 'EV', 'IVZW', 'ESV', 'GCV', 'LV'])
 
@@ -40,22 +40,40 @@ export function leesVies(btw: string, j: Record<string, unknown>): BtwGegevens {
   return { btw, geldig, naam: geldig ? netteNaam(String(j.name ?? '')) : null, straat: geldig ? straat : null, postcode: geldig ? postcode : null, gemeente: geldig ? gemeente : null, land: geldig ? LAND[btw.slice(0, 2)] ?? btw.slice(0, 2) : null }
 }
 
-/** Opzoeken bij VIES. Werpt bij een ongeldig nummer of als VIES niet antwoordt. */
+class TijdelijkeFout extends Error {}
+
+/** Eén vraag aan VIES. Een TijdelijkeFout mag één keer opnieuw. */
+async function vraagVies(btw: string, f: typeof fetch, ms: number): Promise<BtwGegevens> {
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), ms)
+  try {
+    const r = await f(`https://ec.europa.eu/taxation_customs/vies/rest-api/ms/${btw.slice(0, 2)}/vat/${encodeURIComponent(btw.slice(2))}`, { headers: { Accept: 'application/json' }, signal: ctrl.signal, cache: 'no-store' })
+    if (!r.ok) throw new TijdelijkeFout('Het Europese btw-register antwoordt niet. Probeer het zo meteen opnieuw.')
+    const j = await r.json() as Record<string, unknown>
+    // VIES meldt drukte of onderhoud van een land als userError (bv. MS_UNAVAILABLE).
+    if (typeof j.userError === 'string' && !['VALID', 'INVALID'].includes(j.userError)) throw new TijdelijkeFout('Het btw-register van dit land is even niet bereikbaar. Probeer het zo meteen opnieuw.')
+    return leesVies(btw, j)
+  } catch (e) {
+    if ((e as Error).name === 'AbortError') throw new TijdelijkeFout('Het Europese btw-register antwoordt te traag. Probeer het zo meteen opnieuw.')
+    if (e instanceof TijdelijkeFout) throw e
+    throw new TijdelijkeFout('Het Europese btw-register is even niet bereikbaar. Probeer het zo meteen opnieuw.')
+  } finally { clearTimeout(t) }
+}
+
+/**
+ * Opzoeken bij VIES. Werpt bij een ongeldig nummer of als VIES niet antwoordt.
+ * Is VIES even druk of traag, dan nog één keer na een halve seconde.
+ */
 export async function zoekInBtwRegister(invoer: string, f: typeof fetch = fetch): Promise<BtwGegevens> {
   const v = validateBtw(invoer)
   if (!v.ok || !v.value) throw new Error(v.error ?? 'Vul een btw-nummer in.')
   const btw = v.value
-  const ctrl = new AbortController()
-  const t = setTimeout(() => ctrl.abort(), 8000)
+  if (!inEuRegister(btw)) throw new Error(`${btw.slice(0, 2)} zit niet in het Europese btw-register. Vul naam en adres zelf in.`)
   try {
-    const r = await f(`https://ec.europa.eu/taxation_customs/vies/rest-api/ms/${btw.slice(0, 2)}/vat/${encodeURIComponent(btw.slice(2))}`, { headers: { Accept: 'application/json' }, signal: ctrl.signal, cache: 'no-store' })
-    if (!r.ok) throw new Error('Het Europese btw-register antwoordt niet. Probeer het zo meteen opnieuw.')
-    const j = await r.json() as Record<string, unknown>
-    // VIES meldt drukte of onderhoud van een land als userError (bv. MS_UNAVAILABLE).
-    if (typeof j.userError === 'string' && !['VALID', 'INVALID'].includes(j.userError)) throw new Error('Het btw-register van dit land is even niet bereikbaar. Probeer het zo meteen opnieuw.')
-    return leesVies(btw, j)
+    return await vraagVies(btw, f, 6000)
   } catch (e) {
-    if ((e as Error).name === 'AbortError') throw new Error('Het Europese btw-register antwoordt te traag. Probeer het zo meteen opnieuw.')
-    throw e
-  } finally { clearTimeout(t) }
+    if (!(e instanceof TijdelijkeFout)) throw e
+    await new Promise((r) => setTimeout(r, 500))
+    return vraagVies(btw, f, 7000)
+  }
 }

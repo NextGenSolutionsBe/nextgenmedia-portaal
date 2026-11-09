@@ -5,18 +5,21 @@ import { createAdminSupabaseClient, requireAdmin } from '@/lib/supabase/server'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { leesProfiel } from '@/lib/account-server'
 import {
-  UitgaveFout, archiveerUitgave, laadVennotenData, maakUitgave, nieuweRegels, tekenRegels, wijzigUitgave, zetTerug,
+  UitgaveFout, archiveerUitgave, laadVennotenData, maakUitgave, nieuweRegels, regelsGeschiedenis, tekenRegels, wijzigUitgave, zetTerug,
 } from '@/lib/vennoot-uitgaven-server'
 
 export const dynamic = 'force-dynamic'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-/** Uitgaven vennoten. Enkel admins. GET = alles; POST { actie, … }. */
-export async function GET() {
+/** Uitgaven vennoten. Enkel admins. GET = alles (?regels=alle = alle versies van de regels); POST { actie, … }. */
+export async function GET(req: NextRequest) {
   const ik = await requireAdmin()
   if (!ik) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
-  try { return NextResponse.json(await laadVennotenData(createAdminSupabaseClient(), ik.id)) }
+  try {
+    if (req.nextUrl.searchParams.get('regels') === 'alle') return NextResponse.json({ versies: await regelsGeschiedenis(createAdminSupabaseClient()) })
+    return NextResponse.json(await laadVennotenData(createAdminSupabaseClient(), ik.id))
+  }
   catch (e) { return NextResponse.json({ error: safeMessage(e, 'vennoten.GET') }, { status: 500 }) }
 }
 

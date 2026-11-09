@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
       if (r.some((x) => x.ok)) revalidatePath('/portal/founders')
       return { opgehaald: r.filter((x) => x.ok).length, mislukt: r.filter((x) => !x.ok).length }
     })().catch((e) => { console.error('[cron:klantmeetings:founders]', e); return { fout: 1 } })
-    // Video-opleveringen: bestanden die langer dan 3 dagen gedeeld zijn uit de opslag halen.
+    // Opleveringen: bestanden die langer dan 3 dagen gedeeld zijn uit de opslag halen.
     const opleveringen = await ruimOpleveringenOp(admin).catch((e) => { console.error('[cron:klantmeetings:opleveringen]', e); return { fout: 1 } })
     return NextResponse.json({ ok: true, ...telling, gsm, events, founders, opleveringen })
   } catch (e) {

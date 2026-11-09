@@ -192,6 +192,19 @@ export function regelsTekst(v: Pick<RegelsVersie, 'versie' | 'regels' | 'maandbu
   ].join('\n')
 }
 
+/** Wat veranderde er tegenover de vorige versie? Voor de regelsviewer. */
+export function regelsVerschil(nu: Pick<RegelsVersie, 'regels' | 'maandbudget' | 'start_maand'>, vorige: Pick<RegelsVersie, 'regels' | 'maandbudget' | 'start_maand'> | null): { nieuw: boolean[]; weg: string[]; budget: boolean; start: boolean } {
+  if (!vorige) return { nieuw: nu.regels.map(() => false), weg: [], budget: false, start: false }
+  const oud = new Set(vorige.regels.map((r) => r.trim()))
+  const hier = new Set(nu.regels.map((r) => r.trim()))
+  return {
+    nieuw: nu.regels.map((r) => !oud.has(r.trim())),
+    weg: vorige.regels.filter((r) => !hier.has(r.trim())),
+    budget: nu.maandbudget !== vorige.maandbudget,
+    start: nu.start_maand !== vorige.start_maand,
+  }
+}
+
 export type RegelHandtekening = { vennoot: Vennoot; naam: string | null; getekend_op: string; inhoud_tekst: string; handtekening?: string | null }
 
 /** Wie tekende de huidige versie (met exact deze tekst)? */

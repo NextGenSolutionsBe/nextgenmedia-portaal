@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Loader2, X, Send, FileSignature, Ban, CheckCircle2, Euro } from 'lucide-react'
-import { OFFERTE_VIA, DIENSTEN, kolomInfo, statusVoorKolom, ontbreektVoorFase, normaliseerBtw, type KolomKey } from '@/lib/opdrachten-kanban'
+import { OFFERTE_VIA, DIENSTEN, kolomInfo, statusVoorKolom, ontbreektVoorFase, normaliseerBtw, projectNaam, type KolomKey } from '@/lib/opdrachten-kanban'
 import { BtwOpzoeken } from '@/components/admin/btw-opzoeken'
 import { formatEuro } from '@/lib/utils'
 import { vandaagISO, type OpdrachtStatus } from '@/lib/opdrachten'
@@ -94,7 +94,7 @@ export function VerplaatsDialoog({ o, soort, doel = 'offerte', contracten, onClo
         role="dialog" aria-modal="true" aria-label={titel}>
         <div className="flex items-start justify-between gap-3 p-5 pb-3">
           <div>
-            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">{o.klant_naam || o.titel}</p>
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">{projectNaam(o.klant_naam, o.diensten, o.titel)}</p>
             <h3 className="text-lg font-semibold flex items-center gap-2 mt-0.5"><Ikoon className="h-5 w-5" />{titel}</h3>
           </div>
           <button type="button" onClick={onClose} aria-label="Sluiten" className="h-9 w-9 rounded-lg flex items-center justify-center hover:bg-gray-100"><X className="h-4 w-4" /></button>
@@ -114,7 +114,7 @@ export function VerplaatsDialoog({ o, soort, doel = 'offerte', contracten, onClo
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="vd-btw">Btw-nummer{o.client_id ? ' (komt bij de klant)' : ''}</label>
                   <input id="vd-btw" className="input-base" value={btw} onChange={(e) => setBtw(e.target.value)} placeholder="BE0123456789" />
-                  <BtwOpzoeken btw={btw} auto={false} onGevonden={(g) => { if (mist.includes('naam') && !naam.trim() && g.naam) setNaam(g.naam) }} />
+                  <BtwOpzoeken btw={btw} onNetjes={setBtw} onGevonden={(g) => { if (mist.includes('naam') && !naam.trim() && g.naam) setNaam(g.naam) }} />
                 </div>
               )}
               {mist.includes('dienst') && (

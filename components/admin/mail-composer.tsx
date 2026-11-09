@@ -23,8 +23,8 @@ export type MailContext =
   | { type: 'formulier'; link: string; formulierTitel: string; clientId?: string | null; clientName?: string | null; verlooptOp?: string | null }
   // Meeting Inplanner: mail aan de deelnemers, altijd vanuit info@nextgenmedia.be.
   | { type: 'meeting'; meetingId: string }
-  // Video-oplevering: de klant laten weten dat er een versie klaarstaat (link naar de klantapp).
-  | { type: 'oplevering'; titel: string; versieLabel: string; link: string; clientId: string; clientName?: string | null; verlooptOp?: string | null }
+  // Oplevering (video, ontwerp, foto's, documenten): de klant laten weten dat er een versie klaarstaat (link naar de klantapp).
+  | { type: 'oplevering'; titel: string; versieLabel: string; link: string; clientId: string; clientName?: string | null; verlooptOp?: string | null; soort?: string | null }
   // Offerte: de knop in de mail opent altijd de publieke offertepagina (accepteren met één knop).
   | { type: 'offerte'; offerteId: string; titel: string; link: string; klant?: string | null; contact?: string | null; email?: string | null; geldigTot?: string | null; merk?: MailMerk | null }
 
@@ -149,8 +149,8 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
           } catch { /* ontvanger dan zelf invullen */ }
           const tot = context.verlooptOp ? new Date(context.verlooptOp).toLocaleString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : ''
           setSubject(`${context.versieLabel}: ${context.titel}`)
-          setBody(`Beste${context.clientName ? ` ${context.clientName}` : ''},\n\n${context.versieLabel === 'Finale versie' ? 'De finale versie' : `De ${context.versieLabel.toLowerCase()}`} van "${context.titel}" staat klaar in de klantapp. Je kan de video daar bekijken, in volle kwaliteit downloaden${context.versieLabel === 'Finale versie' ? '' : ' en je feedback geven'}.${tot ? `\n\nDe bestanden blijven beschikbaar tot ${tot}. Download ze dus tijdig.` : ''}\n\nMet vriendelijke groet,\nNextGenMedia`)
-          setCtaText('Bekijk de video'); setCtaLink(context.link)
+          setBody(`Beste${context.clientName ? ` ${context.clientName}` : ''},\n\n${context.versieLabel === 'Finale versie' ? 'De finale versie' : `De ${context.versieLabel.toLowerCase()}`} van "${context.titel}" staat klaar in de klantapp. Je kan ${context.soort && context.soort !== 'video' ? 'de bestanden' : 'de video'} daar bekijken, in volle kwaliteit downloaden${context.versieLabel === 'Finale versie' ? '' : ' en je feedback geven'}.${tot ? `\n\nDe bestanden blijven beschikbaar tot ${tot}. Download ze dus tijdig.` : ''}\n\nMet vriendelijke groet,\nNextGenMedia`)
+          setCtaText(context.soort && context.soort !== 'video' ? 'Bekijk de oplevering' : 'Bekijk de video'); setCtaLink(context.link)
         } else if (context.type === 'offerte') {
           const m = offerteMail({ contact: context.contact ?? null, klant: context.klant ?? null, titel: context.titel, geldigTot: context.geldigTot ?? null, merk: context.merk ?? 'nextgenmedia' })
           setToEmail(context.email ?? '')

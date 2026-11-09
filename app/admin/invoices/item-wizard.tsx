@@ -322,7 +322,7 @@ function KlantFormulier({ v, set, metNaam }: { v: KlantVelden; set: (k: keyof Kl
       <div>
         {veld('btw', 'Btw-nummer', { verplicht: metNaam, ph: 'BE0123456789' })}
         {/* Naam en adres uit het btw-register: vult enkel wat nog leeg is. */}
-        <BtwOpzoeken btw={v.btw} auto={metNaam} onGevonden={(g) => {
+        <BtwOpzoeken btw={v.btw} auto={metNaam} onNetjes={(x) => set('btw', x)} onGevonden={(g) => {
           if (metNaam && !v.naam.trim() && g.naam) set('naam', g.naam)
           if (!v.straat && g.straat) set('straat', g.straat)
           if (!v.postcode && g.postcode) set('postcode', g.postcode)
