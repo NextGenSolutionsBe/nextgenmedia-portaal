@@ -58,6 +58,13 @@ export default async function PortalLayout({ children }: { children: React.React
     hasOpleveringen = (op ?? []).length > 0
   } catch { hasOpleveringen = false }
 
+  // Offertes: enkel in het menu als er voor deze klant een offerte verstuurd werd.
+  let hasOffertes = false
+  try {
+    const { data: of } = await admin.from('offertes').select('id').eq('client_id', session.clientId).in('status', ['verstuurd', 'geaccepteerd']).limit(1)
+    hasOffertes = (of ?? []).length > 0
+  } catch { hasOffertes = false }
+
   // Actieve diensten + blogs (gating naast rechten).
   let activeServices: string[] = []
   let hasBlogs = false
@@ -84,6 +91,7 @@ export default async function PortalLayout({ children }: { children: React.React
         hasCms={hasCms}
         hasWebsitePage={hasWebsitePage}
         hasOpleveringen={hasOpleveringen}
+        hasOffertes={hasOffertes}
         allowedModules={allowedModules}
         lang={lang}
       />

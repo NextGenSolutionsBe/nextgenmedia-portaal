@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { useRefresh } from '@/lib/use-refresh'
 import { Logo } from '@/components/logo'
-import { LayoutDashboard, FileText, Calendar, Globe, LogOut, RefreshCcw, Menu, X, ListChecks, Newspaper, CalendarClock, Database, FolderUp, ShieldCheck, Video, Sparkles, Lightbulb, Megaphone, Clapperboard, Handshake, Ticket, PackageCheck } from 'lucide-react'
+import { LayoutDashboard, FileText, Calendar, Globe, LogOut, RefreshCcw, Menu, X, ListChecks, Newspaper, CalendarClock, Database, FolderUp, ShieldCheck, Video, Sparkles, Lightbulb, Megaphone, Clapperboard, Handshake, Ticket, PackageCheck, FileSignature } from 'lucide-react'
 import { MODULE_IMPLEMENTED, type PortalModule } from '@/lib/portal-permissions'
 import { t, type Lang } from '@/lib/i18n'
 import { LangToggle } from '@/components/lang-toggle'
@@ -23,12 +23,14 @@ type NavItem = {
   requiresCms?: boolean
   requiresWebsitePage?: boolean
   requiresOpleveringen?: boolean
+  requiresOffertes?: boolean
   module?: string
 }
 
 const NAV: NavItem[] = [
   { tKey: 'nav.dashboard',  href: '/portal',               icon: LayoutDashboard, exact: true },
   { tKey: 'nav.contracts',  href: '/portal/contracts',     icon: FileText,  module: 'contracts' },
+  { tKey: 'nav.offertes',   href: '/portal/offertes',      icon: FileSignature, requiresOffertes: true, module: 'offertes' },
   { tKey: 'nav.tasks',      href: '/portal/tasks',         icon: ListChecks, module: 'tasks' },
   { tKey: 'nav.social',     href: '/portal/social-media',  icon: Calendar, requiresService: 'social-media', module: 'social_media' },
   { tKey: 'nav.metricool',  href: '/portal/metricool',     icon: CalendarClock, requiresMetricool: true, module: 'metricool' },
@@ -57,6 +59,7 @@ export function PortalSidebar({
   hasCms = false,
   hasWebsitePage = false,
   hasOpleveringen = false,
+  hasOffertes = false,
   allowedModules,
   lang = 'nl',
 }: {
@@ -69,6 +72,7 @@ export function PortalSidebar({
   hasWebsitePage?: boolean
   /** Opleveringen enkel als de klant er een heeft (gedeeld). */
   hasOpleveringen?: boolean
+  hasOffertes?: boolean
   /** Modules met view-recht. Undefined = alles tonen (owner/backward compat). */
   allowedModules?: string[]
   lang?: Lang
@@ -97,6 +101,7 @@ export function PortalSidebar({
       (!item.requiresCms || hasCms) &&
       (!item.requiresWebsitePage || hasWebsitePage) &&
       (!item.requiresOpleveringen || hasOpleveringen) &&
+      (!item.requiresOffertes || hasOffertes) &&
       (!item.module || !allowedModules || allowedModules.includes(item.module))
   )
 

@@ -5,8 +5,10 @@ import { buildEmailHtml, buildEmailText } from '@/lib/email-html'
 import { voegNotitieToe } from '@/lib/opdrachten-notities'
 import { kaartVoorOfferte, ruimKaartVanConceptOp, sluitTakenVanOfferte } from '@/lib/opdrachten-offertes'
 import { toestelVan } from '@/lib/klant-geopend'
+import { controleerAkkoord, VOORWAARDEN_URL, PRIVACY_PAD, PRIVACY_VERSIE } from '@/lib/voorwaarden'
+import { leesHandtekening } from '@/lib/contracten/tegenhandtekening'
 import {
-  OFFERTE_BUCKET, geldigOffertePad, geldigSjabloonPad, veiligePdfNaam, offerteLink, valideerOfferte,
+  OFFERTE_BUCKET, OFFERTE_AKKOORD_VOORWAARDEN, OFFERTE_AKKOORD_PRIVACY, geldigSjabloonPad, veiligePdfNaam, offerteLink, valideerOfferte,
   type Offerte, type Sjabloon,
 } from '@/lib/offertes'
 
@@ -214,7 +216,8 @@ export async function verwijderOfferte(admin: Admin, id: string, door: string | 
   await sluitTakenVanOfferte(admin, id).catch(() => {})
   const { error } = await admin.from('offertes').delete().eq('id', id)
   if (error) throw new Error(error.message)
-  if (geldigOffertePad(o.pdf_pad)) await admin.storage.from(OFFERTE_BUCKET).remove([o.pdf_pad]).catch(() => {})
+  const weg = [o.pdf_pad, o.getekend_pdf_pad, o.handtekening_pad].filter((p): p is string => typeof p === 'string' && p.startsWith('offertes/'))
+  if (weg.length) await admin.storage.from(OFFERTE_BUCKET).remove(weg).catch(() => {})
   const kaartWeg = await ruimKaartVanConceptOp(admin, id, o.opdracht_id).catch(() => false)
   if (!kaartWeg && o.opdracht_id) {
     await voegNotitieToe(admin, o.opdracht_id, `Offerte "${o.titel}" verwijderd${door ? ` door ${door}` : ''}.`, 'systeem', null).catch(() => null)
@@ -248,7 +251,7 @@ export async function registreerGeopend(admin: Admin, o: Offerte, ua: string | n
  * keer klikken accepteert één keer. Daarna een interne melding naar info@
  * (nooit een mail naar de klant) en een notitie op het project.
  */
-export async function accepteer(admin: Admin, token: string, b: { naam: unknown; ip: string | null; ua: string | null }): Promise<Offerte> {
+export async function accepteer(admin: Admin, token: string, b: { naam: unknown; akkoord_voorwaarden?: unknown; akkoord_privacy?: unknown; handtekening?: unknown; ip: string | null; ua: string | null }): Promise<Offerte> {
   const o = await offerteVanToken(admin, token)
   if (!o) throw new OfferteFout('Deze offerte bestaat niet.', 404)
   if (o.status === 'geaccepteerd') return o
@@ -256,30 +259,89 @@ export async function accepteer(admin: Admin, token: string, b: { naam: unknown;
   if (o.geldig_tot && o.geldig_tot < vandaagBrussel()) throw new OfferteFout('Deze offerte is verlopen. Neem contact met ons op voor een nieuwe.', 409)
   const naam = String(b.naam ?? '').replace(/\s+/g, ' ').trim().slice(0, 120)
   if (naam.length < 2) throw new OfferteFout('Vul je naam in.')
+  const akkoord = controleerAkkoord(b)
+  if (!akkoord.ok) throw new OfferteFout(akkoord.fout)
+  // Handtekening is een keuze; als ze er is, moet ze kloppen.
+  let handtekening: Uint8Array | null = null
+  if (b.handtekening !== undefined && b.handtekening !== null && b.handtekening !== '') {
+    const h = leesHandtekening(b.handtekening)
+    if (!h.ok) throw new OfferteFout(h.fout)
+    handtekening = new Uint8Array(Buffer.from(h.base64, 'base64'))
+  }
   const t = nu()
-  const { data, error } = await admin.from('offertes').update({
-    status: 'geaccepteerd', geaccepteerd_op: t, geaccepteerd_door: naam, geaccepteerd_ip: b.ip, geaccepteerd_ua: b.ua?.slice(0, 400) ?? null, updated_at: t,
-  }).eq('id', o.id).eq('status', 'verstuurd').select('*')
+  const details = {
+    voorwaarden: { tekst: OFFERTE_AKKOORD_VOORWAARDEN, url: VOORWAARDEN_URL, op: t },
+    privacy: { tekst: OFFERTE_AKKOORD_PRIVACY, url: `${baseUrl().replace(/\/$/, '')}${PRIVACY_PAD}`, versie: PRIVACY_VERSIE, op: t },
+    handtekening: !!handtekening,
+  }
+  const basis = { status: 'geaccepteerd', geaccepteerd_op: t, geaccepteerd_door: naam, geaccepteerd_ip: b.ip, geaccepteerd_ua: b.ua?.slice(0, 400) ?? null, updated_at: t }
+  let { data, error } = await admin.from('offertes').update({ ...basis, voorwaarden_akkoord_op: t, privacy_akkoord_op: t, akkoord_details: details }).eq('id', o.id).eq('status', 'verstuurd').select('*')
+  // Vóór de migratie: zonder de nieuwe kolommen (het akkoord staat dan in het logboek).
+  if (error && /column|schema cache/i.test(error.message)) ({ data, error } = await admin.from('offertes').update(basis).eq('id', o.id).eq('status', 'verstuurd').select('*'))
   if (error) throw new Error(error.message)
-  const na = ((data ?? [])[0] ?? null) as Offerte | null
+  let na = ((data ?? [])[0] ?? null) as Offerte | null
   if (!na) return (await offerteVanToken(admin, token)) ?? o
-  await log(admin, o.id, 'geaccepteerd', { ip: b.ip, ua: b.ua, meta: { naam, toestel: toestelVan(b.ua) } })
+  await log(admin, o.id, 'geaccepteerd', { ip: b.ip, ua: b.ua, meta: { naam, toestel: toestelVan(b.ua), akkoord: details } })
+  // De pdf met het akkoord (en de handtekening). Lukt dat niet, dan staat het akkoord toch vast.
+  try { na = (await bewaarAkkoordPdf(admin, na, { naam, op: t, handtekening })) ?? na } catch (e) { console.warn('[offertes] akkoord-pdf mislukt:', e instanceof Error ? e.message : e) }
   if (o.opdracht_id) await voegNotitieToe(admin, o.opdracht_id, `Offerte "${o.titel}" geaccepteerd door ${naam}. Tijd om het contract op te maken.`, 'systeem', null).catch(() => null)
   // Interne melding (geen klantmail).
   try {
     const link = `${baseUrl().replace(/\/$/, '')}/admin/offertes?offerte=${o.id}`
     const bedrag = o.bedrag_excl ? ` (${Number(o.bedrag_excl).toLocaleString('nl-BE', { style: 'currency', currency: 'EUR' })} excl. btw)` : ''
-    const tekst = `${o.klant_naam ?? 'Een klant'} accepteerde de offerte "${o.titel}"${bedrag}.\n\nGeaccepteerd door: ${naam}\nOp: ${new Date(t).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels' })}\n\nVolgende stap: het contract opmaken.`
+    const tekst = `${o.klant_naam ?? 'Een klant'} accepteerde de offerte ${o.offertenummer ? `${o.offertenummer} ` : ''}"${o.titel}"${bedrag}.\n\nGeaccepteerd door: ${naam}${handtekening ? ' (met handtekening)' : ''}\nOp: ${new Date(t).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels' })}\nAkkoord met de algemene voorwaarden en de privacyverklaring.\n\nVolgende stap: het contract opmaken.`
     await sendEmail({ to: INFO, subject: `Offerte geaccepteerd: ${o.klant_naam ?? ''} – ${o.titel}`.slice(0, 180), text: buildEmailText({ bodyText: tekst, ctaText: 'Offerte openen', ctaLink: link }), html: buildEmailHtml({ bodyText: tekst, ctaText: 'Offerte openen', ctaLink: link, merk: o.merk }), idempotencyKey: `offerte-geaccepteerd-${o.id}` })
   } catch { /* melding is een extra; de acceptatie staat vast */ }
   return na
 }
 
-/** De pdf voor de publieke pagina of het team (stream, geen verlopende link). */
-export async function pdfVan(admin: Admin, o: Pick<Offerte, 'pdf_pad'>): Promise<Buffer | null> {
-  const { data, error } = await admin.storage.from(OFFERTE_BUCKET).download(o.pdf_pad)
-  if (error || !data) return null
-  return Buffer.from(await data.arrayBuffer())
+/**
+ * Na het akkoord: een opgemaakte offerte krijgt een nieuwe pdf met het akkoord
+ * (handtekening, naam, datum en uur) in het akkoordblok; een opgeladen pdf
+ * krijgt één akkoordpagina achteraan. Het origineel blijft bewaard.
+ */
+async function bewaarAkkoordPdf(admin: Admin, o: Offerte, a: { naam: string; op: string; handtekening: Uint8Array | null }): Promise<Offerte | null> {
+  const stamp = a.op.replace(/[^0-9]/g, '').slice(0, 14)
+  let handtekeningPad: string | null = null
+  if (a.handtekening) {
+    handtekeningPad = `offertes/${o.id}/handtekening-${stamp}.png`
+    const { error } = await admin.storage.from(OFFERTE_BUCKET).upload(handtekeningPad, a.handtekening, { contentType: 'image/png', upsert: false })
+    if (error) handtekeningPad = null
+  }
+  let bytes: Uint8Array
+  if (o.bron === 'opgemaakt' && o.inhoud) {
+    const { bouwOffertePdf } = await import('@/lib/offertes-opmaak-server')
+    const { leesInhoud, isVerantwoordelijke } = await import('@/lib/offerte-fiche')
+    const { data: k } = o.client_id ? await admin.from('clients').select('company_name, contact_name, email, telefoon, adres_straat, adres_postcode, adres_gemeente, btw_nummer').eq('id', o.client_id).maybeSingle() : { data: null }
+    const kk = (k ?? {}) as Record<string, string | null>
+    const adres = [kk.adres_straat, [kk.adres_postcode, kk.adres_gemeente].filter(Boolean).join(' ')].filter(Boolean).join(', ') || null
+    bytes = await bouwOffertePdf(admin, {
+      inhoud: leesInhoud(o.inhoud), merk: o.merk, verantwoordelijke: isVerantwoordelijke(o.verantwoordelijke) ? o.verantwoordelijke : 'bram', nummer: o.offertenummer ?? '',
+      klant: { naam: kk.company_name ?? o.klant_naam ?? 'Klant', contact: kk.contact_name ?? null, email: kk.email ?? null, telefoon: kk.telefoon ?? null, adres, btw: kk.btw_nummer ?? null },
+      handtekening: a.handtekening ? { png: a.handtekening, naam: a.naam, op: a.op } : null,
+      akkoord: a.handtekening ? null : { naam: a.naam, op: a.op },
+    })
+  } else {
+    const bron = await pdfVan(admin, o, true)
+    if (!bron) return null
+    const { voegAkkoordPaginaToe } = await import('@/lib/offerte-pdf')
+    bytes = await voegAkkoordPaginaToe(new Uint8Array(bron), { merk: o.merk, titel: o.titel, klant: o.klant_naam, naam: a.naam, op: a.op, handtekening: a.handtekening, voorwaardenUrl: VOORWAARDEN_URL })
+  }
+  const pad = `offertes/${o.id}/akkoord-${stamp}.pdf`
+  const { error } = await admin.storage.from(OFFERTE_BUCKET).upload(pad, bytes, { contentType: 'application/pdf', upsert: false })
+  if (error) throw new Error(error.message)
+  const { data } = await admin.from('offertes').update({ getekend_pdf_pad: pad, handtekening_pad: handtekeningPad, getekend_op: a.handtekening ? a.op : null }).eq('id', o.id).select('*')
+  return ((data ?? [])[0] ?? null) as Offerte | null
+}
+
+/** De pdf voor de publieke pagina of het team (stream, geen verlopende link). Na het akkoord: de versie met het akkoord. */
+export async function pdfVan(admin: Admin, o: Pick<Offerte, 'pdf_pad' | 'getekend_pdf_pad'>, origineel = false): Promise<Buffer | null> {
+  for (const pad of [!origineel ? o.getekend_pdf_pad : null, o.pdf_pad]) {
+    if (!pad) continue
+    const { data, error } = await admin.storage.from(OFFERTE_BUCKET).download(pad)
+    if (!error && data) return Buffer.from(await data.arrayBuffer())
+  }
+  return null
 }
 
 export const publiekeLink = (o: Pick<Offerte, 'token'>) => offerteLink(baseUrl(), o.token)

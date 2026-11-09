@@ -4,7 +4,7 @@
 
 import { FEATURES } from '@/lib/features'
 
-export const PORTAL_MODULES = ['social_media', 'metricool', 'cms', 'website', 'contracts', 'blogs', 'tasks', 'files', 'meetings', 'diensten', 'consultancy', 'founders', 'nieuws', 'partners', 'events', 'opleveringen'] as const
+export const PORTAL_MODULES = ['social_media', 'metricool', 'cms', 'website', 'contracts', 'blogs', 'tasks', 'files', 'meetings', 'diensten', 'consultancy', 'founders', 'nieuws', 'partners', 'events', 'opleveringen', 'offertes'] as const
 export type PortalModule = (typeof PORTAL_MODULES)[number]
 
 // Acties per module (de "actie-rechten").
@@ -25,6 +25,7 @@ export const MODULE_ACTIONS: Record<PortalModule, string[]> = {
   partners:     ['view'],
   events:       ['view', 'inschrijven'],
   opleveringen: ['view', 'download', 'feedback'],
+  offertes:     ['view', 'download'],
 }
 
 export const MODULE_LABELS: Record<PortalModule, string> = {
@@ -43,7 +44,8 @@ export const MODULE_LABELS: Record<PortalModule, string> = {
   nieuws:       'Nieuws',
   partners:     'Onze partners',
   events:       'Workshops & events',
-  opleveringen: 'Opleveringen (video\'s bekijken, downloaden en feedback)',
+  opleveringen: 'Opleveringen (video\'s, ontwerpen, foto\'s en documenten bekijken, downloaden en feedback)',
+  offertes:     'Offertes (bekijken, downloaden en aanvaarden)',
 }
 
 // Welke modules hebben een werkende pagina/route. Een module die hier op false
@@ -66,7 +68,8 @@ export const MODULE_IMPLEMENTED: Record<PortalModule, boolean> = {
   nieuws:       false,  // verborgen op vraag (2 nov 2026): de app is een werkomgeving, geen marketingkanaal; code en gegevens blijven (/portal/nieuws)
   partners:     true,             // /portal/partners — onze bedrijven met uitleg en socials
   events:       false,  // verborgen op vraag (2 nov 2026): de app is een werkomgeving, geen marketingkanaal; code en gegevens blijven (/portal/events)
-  opleveringen: true,             // /portal/opleveringen — losse video's bekijken, downloaden, feedback en revisierondes (3 dagen beschikbaar)
+  opleveringen: true,             // /portal/opleveringen — video's, ontwerpen, foto's en documenten bekijken, downloaden, feedback en revisierondes (3 dagen beschikbaar)
+  offertes:     true,             // /portal/offertes — verstuurde offertes bekijken, downloaden en (via de offertepagina) aanvaarden
 }
 
 /**
@@ -75,7 +78,7 @@ export const MODULE_IMPLEMENTED: Record<PortalModule, boolean> = {
  * module staat pas uit als iemand ze uitdrukkelijk uitvinkt (opgeslagen als
  * false). Meeting boeken en diensten of consultancy aanvragen horen bij elke klant.
  */
-export const STANDAARD_AAN: readonly PortalModule[] = ['meetings', 'diensten', 'consultancy', 'founders', 'nieuws', 'partners', 'events', 'opleveringen']
+export const STANDAARD_AAN: readonly PortalModule[] = ['meetings', 'diensten', 'consultancy', 'founders', 'nieuws', 'partners', 'events', 'opleveringen', 'offertes']
 
 export const ACTION_LABELS: Record<string, string> = {
   view: 'Bekijken',
@@ -125,7 +128,7 @@ export const PRESETS: { key: PresetKey; label: string; description: string; perm
   // zou zo iemand foto's alleen per mail kwijt kunnen.
   { key: 'marketing',  label: 'Marketing',         description: 'Social Media + Metricool + Blogs + Taken + Bestanden', permissions: () => only(['social_media', 'metricool', 'blogs', 'tasks', 'files']) },
   { key: 'website',    label: 'Websitebeheerder',  description: 'Website-CMS + Website + Taken',        permissions: () => only(['cms', 'website', 'tasks']) },
-  { key: 'financieel', label: 'Financieel',        description: 'Contracten bekijken + downloaden',    permissions: () => ({ contracts: { view: true, sign: false, download: true } }) },
+  { key: 'financieel', label: 'Financieel',        description: 'Contracten en offertes bekijken + downloaden', permissions: () => ({ contracts: { view: true, sign: false, download: true }, offertes: { view: true, download: true } }) },
   { key: 'readonly',   label: 'Alleen lezen',      description: 'Alles bekijken, niets aanpassen',     permissions: viewOnly },
 ]
 

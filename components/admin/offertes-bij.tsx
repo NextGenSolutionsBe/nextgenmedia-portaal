@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { Eye, Send, Loader2, Trash2 } from 'lucide-react'
+import { Eye, Send, Loader2, Trash2, FilePlus2 } from 'lucide-react'
 import { formatEuro } from '@/lib/utils'
 import { offerteWeergave, verwijderVraag, type Offerte } from '@/lib/offertes'
 import type { MailMerk } from '@/lib/merk-mail'
@@ -52,7 +52,10 @@ export function OffertesBij({ opdrachtId = null, clientId = null, klantNaam = nu
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <OfferteVersturen clientId={clientId} opdrachtId={opdrachtId} klantNaam={klantNaam} merkStandaard={merk} className="btn-primary text-xs h-8" onVerstuurd={klaar} />
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <Link href={`/admin/offertes/opmaken?${new URLSearchParams({ ...(clientId ? { client: clientId } : {}), ...(opdrachtId ? { opdracht: opdrachtId } : {}) }).toString()}`} className="btn-primary text-xs h-8"><FilePlus2 className="h-3.5 w-3.5" />Offerte opmaken</Link>
+          <OfferteVersturen clientId={clientId} opdrachtId={opdrachtId} klantNaam={klantNaam} merkStandaard={merk} label="Pdf versturen" className="btn-secondary text-xs h-8" onVerstuurd={klaar} />
+        </div>
         <Link href="/admin/offertes?tab=sjablonen" className="text-[11px] text-gray-500 hover:text-black underline">Sjablonen beheren</Link>
       </div>
       {rijen === null ? <Loader2 className="h-4 w-4 animate-spin text-gray-400" /> : rijen.length > 0 && (
@@ -62,7 +65,7 @@ export function OffertesBij({ opdrachtId = null, clientId = null, klantNaam = nu
             return (
               <li key={o.id} className="flex items-center gap-2 px-3 py-2">
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium text-gray-900 truncate">{o.titel}{o.bedrag_excl !== null && <span className="font-normal text-gray-500"> · {formatEuro(Number(o.bedrag_excl))}</span>}</p>
+                  <p className="text-xs font-medium text-gray-900 truncate">{o.offertenummer ? `${o.offertenummer} · ` : ''}{o.titel}{o.bedrag_excl !== null && <span className="font-normal text-gray-500"> · {formatEuro(Number(o.bedrag_excl))}</span>}</p>
                   {w.sub && <p className="text-[11px] text-gray-500 truncate">{w.sub}</p>}
                 </div>
                 <span className={`status-badge ${KLEUR[w.kleur]}`}>{w.label}</span>

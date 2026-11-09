@@ -33,6 +33,7 @@ const nl: Dict = {
   'nav.partners': 'Onze partners',
   'nav.events': 'Workshops & events',
   'nav.opleveringen': 'Opleveringen',
+  'nav.offertes': 'Offertes',
   'nav.security': 'Beveiliging',
   // Dashboard
   'dash.noProfile': 'Geen klantprofiel gevonden. Contacteer NextGenMedia.',
@@ -87,6 +88,7 @@ const en: Dict = {
   'nav.nieuws': 'News',
   'nav.partners': 'Our partners',
   'nav.opleveringen': 'Deliveries',
+  'nav.offertes': 'Quotes',
   'nav.events': 'Workshops & events',
   'nav.security': 'Security',
   'dash.noProfile': 'No client profile found. Please contact NextGenMedia.',

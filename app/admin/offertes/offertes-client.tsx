@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { Loader2, FileText, Eye, Copy, Send, Ban, Trash2, Upload, Plus, Pencil, Check, X, Search } from 'lucide-react'
+import { Loader2, FileText, Eye, Copy, Send, Ban, Trash2, Upload, Plus, Pencil, Check, X, Search, FilePlus2, CopyPlus, PenLine } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatEuro } from '@/lib/utils'
 import { zoekVeld } from '@/lib/zoekveld'
@@ -27,16 +27,17 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   return j as T
 }
 
-export function OffertesClient({ tabStart, focus }: { tabStart: 'offertes' | 'sjablonen'; focus: string | null }) {
+export function OffertesClient({ tabStart, focus }: { tabStart: 'offertes' | 'sjablonen' | 'instellingen'; focus: string | null }) {
   const [tab, setTab] = useState(tabStart)
+  const LABEL = { offertes: 'Offertes', sjablonen: 'Sjablonen (pdf)', instellingen: 'Instellingen' } as const
   return (
     <div className="space-y-4">
       <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
-        {(['offertes', 'sjablonen'] as const).map((t) => (
-          <button key={t} type="button" onClick={() => setTab(t)} className={`text-sm font-medium px-3 py-1.5 rounded-md ${tab === t ? 'bg-gray-900 text-white' : 'text-gray-600'}`}>{t === 'offertes' ? 'Offertes' : 'Sjablonen'}</button>
+        {(['offertes', 'sjablonen', 'instellingen'] as const).map((t) => (
+          <button key={t} type="button" onClick={() => setTab(t)} className={`text-sm font-medium px-3 py-1.5 rounded-md ${tab === t ? 'bg-gray-900 text-white' : 'text-gray-600'}`}>{LABEL[t]}</button>
         ))}
       </div>
-      {tab === 'offertes' ? <OffertesLijst focus={focus} /> : <Sjablonen />}
+      {tab === 'offertes' ? <OffertesLijst focus={focus} /> : tab === 'sjablonen' ? <Sjablonen /> : <OfferteInstellingenTab />}
     </div>
   )
 }
@@ -86,6 +87,14 @@ function OffertesLijst({ focus }: { focus: string | null }) {
       toast.success(soort === 'intrekken' ? 'Ingetrokken.' : 'Verwijderd.'); void laad()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(null) }
   }
+  const kopie = async (o: Rij) => {
+    setBezig(o.id)
+    try {
+      const j = await api<{ offerte: Rij }>(`/api/admin/offertes/${o.id}/opmaken`, { method: 'POST', body: JSON.stringify({ actie: 'kopie' }) })
+      toast.success(`Kopie ${j.offerte.offertenummer ?? ''} gemaakt. Pas ze aan en verstuur.`)
+      window.location.href = `/admin/offertes/opmaken?id=${j.offerte.id}`
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Kopiëren mislukt'); setBezig(null) }
+  }
   const chip = (aan: boolean) => `text-xs font-medium px-3 py-1.5 rounded-full border whitespace-nowrap ${aan ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-400'}`
 
   return (
@@ -95,7 +104,8 @@ function OffertesLijst({ focus }: { focus: string | null }) {
           <label className="block text-[11px] text-gray-500 mb-1">Nieuwe offerte voor</label>
           <KlantKiezer klanten={klanten} waarde={klant?.id ?? ''} onKies={setKlant} onNieuw={(k) => { setKlanten((l) => [...(l ?? []), k]); setKlant(k) }} bron="offerte" id="offerte-klant" />
         </div>
-        <OfferteVersturen key={klant?.id ?? 'geen'} clientId={klant?.id ?? null} klantNaam={klant?.company_name ?? null} label="Stuur offerte" onVerstuurd={() => void laad()} />
+        <Link href={`/admin/offertes/opmaken${klant ? `?client=${klant.id}` : ''}`} className="btn-primary text-sm"><FilePlus2 className="h-4 w-4" />Offerte opmaken</Link>
+        <OfferteVersturen key={klant?.id ?? 'geen'} clientId={klant?.id ?? null} klantNaam={klant?.company_name ?? null} label="Pdf versturen" className="btn-secondary text-sm" onVerstuurd={() => void laad()} />
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
@@ -107,7 +117,7 @@ function OffertesLijst({ focus }: { focus: string | null }) {
       </div>
 
       {rijen === null ? <div className="card-base flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>
-        : zichtbaar.length === 0 ? <div className="card-base text-center py-10 text-sm text-gray-500">{rijen.length ? 'Niets met deze filter.' : 'Nog geen offertes. Kies hierboven een klant en klik op "Stuur offerte".'}</div>
+        : zichtbaar.length === 0 ? <div className="card-base text-center py-10 text-sm text-gray-500">{rijen.length ? 'Niets met deze filter.' : 'Nog geen offertes. Kies hierboven een klant en klik op "Offerte opmaken".'}</div>
         : (
           <ul className="space-y-2">
             {zichtbaar.map((o) => {
@@ -116,7 +126,7 @@ function OffertesLijst({ focus }: { focus: string | null }) {
                 <li key={o.id} id={`offerte-${o.id}`} className={`card-base !p-3 !pl-6 relative flex flex-wrap items-center gap-x-3 gap-y-2 ${focus === o.id ? 'ring-2 ring-gray-900' : ''}`}>
                   <span className="absolute left-2.5 top-3 bottom-3 w-1.5 rounded-full" style={{ background: MERK_STIJL[o.merk].accent }} title={MERK_STIJL[o.merk].naam} />
                   <div className="min-w-0 w-full sm:w-auto sm:flex-1">
-                    <p className="text-sm font-semibold text-gray-900 truncate">{o.klant_naam ?? '—'} <span className="font-normal text-gray-500">· {o.titel}</span></p>
+                    <p className="text-sm font-semibold text-gray-900 truncate">{o.klant_naam ?? '—'} <span className="font-normal text-gray-500">· {o.offertenummer ? `${o.offertenummer} · ` : ''}{o.titel}</span>{o.getekend_op && <PenLine className="inline h-3.5 w-3.5 ml-1 text-green-700" aria-label="Getekend" />}</p>
                     <p className="text-xs text-gray-500 truncate">{w.sub}</p>
                   </div>
                   {o.bedrag_excl !== null && o.bedrag_excl !== undefined && <span className="text-sm tabular-nums text-gray-800">{formatEuro(Number(o.bedrag_excl))}</span>}
@@ -129,6 +139,8 @@ function OffertesLijst({ focus }: { focus: string | null }) {
                     {(o.status === 'concept' || o.status === 'verstuurd') && (
                       <button type="button" onClick={() => setMail(o)} className="btn-secondary text-xs h-8"><Send className="h-3.5 w-3.5" />{o.status === 'concept' ? 'Versturen' : 'Opnieuw'}</button>
                     )}
+                    {o.bron === 'opgemaakt' && o.status === 'concept' && <Link href={`/admin/offertes/opmaken?id=${o.id}`} className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Aanpassen"><Pencil className="h-4 w-4" /></Link>}
+                    {o.bron === 'opgemaakt' && <button type="button" onClick={() => kopie(o)} disabled={bezig === o.id} className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Kopie maken (nieuw nummer)"><CopyPlus className="h-4 w-4" /></button>}
                     {o.status === 'verstuurd' && <button type="button" onClick={() => actie(o, 'intrekken')} disabled={bezig === o.id} className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-red-600" title="Intrekken"><Ban className="h-4 w-4" /></button>}
                     <button type="button" onClick={() => actie(o, 'verwijderen')} disabled={bezig === o.id} className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-red-600" title="Volledig verwijderen"><Trash2 className="h-4 w-4" /></button>
                     {o.opdracht_id && <Link href={`/admin/opdrachten?opdracht=${o.opdracht_id}`} className="text-xs text-gray-500 hover:text-black underline px-1">Project</Link>}
@@ -255,5 +267,60 @@ function SjabloonRij({ s, onGewijzigd }: { s: Sjabloon; onGewijzigd: () => void 
       <button type="button" onClick={wissel} disabled={bezig} className="btn-secondary text-xs h-8">{s.actief ? <><X className="h-3.5 w-3.5" />Uitzetten</> : <><Check className="h-3.5 w-3.5" />Aanzetten</>}</button>
       <button type="button" onClick={weg} disabled={bezig} className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-red-600" title="Verwijderen"><Trash2 className="h-4 w-4" /></button>
     </li>
+  )
+}
+
+/** De betalingstermijn op de offerte; de contactpersonen komen uit Personeel en de bedrijfsgegevens liggen vast. */
+function OfferteInstellingenTab() {
+  type C = { naam: string; functie: string; telefoon: string; email: string; heeftFoto?: boolean }
+  const [termijn, setTermijn] = useState<number | null>(null)
+  const [contacten, setContacten] = useState<{ marco: C; bram: C } | null>(null)
+  const [mag, setMag] = useState(false)
+  const [bezig, setBezig] = useState(false)
+  useEffect(() => {
+    api<{ instellingen: { betalingstermijn: number }; contacten: { marco: C; bram: C }; mag_aanpassen: boolean }>('/api/admin/offertes/instellingen')
+      .then((j) => { setTermijn(j.instellingen.betalingstermijn); setContacten(j.contacten); setMag(j.mag_aanpassen) })
+      .catch((e) => toast.error(e instanceof Error ? e.message : 'Laden mislukt'))
+  }, [])
+  if (termijn === null || !contacten) return <div className="card-base flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>
+  const bewaar = async () => {
+    setBezig(true)
+    try { await api('/api/admin/offertes/instellingen', { method: 'PUT', body: JSON.stringify({ betalingstermijn: termijn }) }); toast.success('Bewaard. Nieuwe offertes gebruiken deze termijn.') }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt') } finally { setBezig(false) }
+  }
+  return (
+    <div className="space-y-3 max-w-3xl">
+      <div className="card-base space-y-3">
+        <div>
+          <h2 className="font-semibold">Contactpersoon op de offerte</h2>
+          <p className="text-xs text-gray-500 mt-0.5">Bij elke offerte kies je Marco of Bram. Naam, functie, telefoon, e-mail en profielfoto komen uit <Link href="/admin/personeel" className="underline">Personeel</Link>; pas ze daar aan en elke nieuwe offerte volgt.</p>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-3">
+          {(['marco', 'bram'] as const).map((k) => {
+            const c = contacten[k]
+            const mist = [!c.telefoon && 'telefoon', c.email === 'info@nextgenmedia.be' && 'eigen e-mailadres', !c.heeftFoto && 'foto'].filter(Boolean) as string[]
+            return (
+              <div key={k} className="rounded-xl border border-gray-200 p-3 text-sm">
+                <p className="font-semibold">{c.naam}</p>
+                <p className="text-gray-600">{c.functie}</p>
+                <p className="text-gray-600">{c.telefoon || '—'} · {c.email}</p>
+                {mist.length > 0 && <p className="text-xs text-amber-700 mt-1">Nog aan te vullen in Personeel: {mist.join(', ')}.</p>}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+      <div className="card-base space-y-2">
+        <label className="block max-w-[260px]">
+          <span className="block text-xs font-medium text-gray-600 mb-1">Betalingstermijn op de offerte (dagen)</span>
+          <input className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg disabled:bg-gray-50" disabled={!mag} inputMode="numeric" value={String(termijn)} onChange={(e) => setTermijn(Number(e.target.value.replace(/\D/g, '')) || 0)} />
+        </label>
+        {mag ? <button type="button" onClick={bewaar} disabled={bezig} className="btn-primary">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Bewaren</button>
+          : <p className="text-xs text-gray-500">Enkel wie de instellingen van Offertes mag beheren, past dit aan.</p>}
+      </div>
+      <div className="card-base text-sm text-gray-600">
+        Op elke offerte staat als dienstverlener: NextGen Agency BV, handelsnaam NextGenMedia, ondernemingsnummer 1044.961.303, Corda Campus, Kempische Steenweg 293/16 B, 3500 Hasselt, vertegenwoordigd door Bram Reinquin (zaakvoerder), legal@nextgenmedia.be.
+      </div>
+    </div>
   )
 }
