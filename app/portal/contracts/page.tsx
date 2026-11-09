@@ -139,6 +139,10 @@ export default async function PortalContractsPage() {
                           <div className="text-xs text-gray-400 mt-0.5">
                             {c.signed_at ? `Getekend op ${formatDate(c.signed_at)}` : formatDate(c.created_at)}
                           </div>
+                          {/* Wij tekenen na de klant: dan is het exemplaar hieronder dat met beide handtekeningen. */}
+                          {c.tegengetekend_op
+                            ? <div className="text-xs text-green-700 mt-0.5">Door beide partijen ondertekend · {c.tegengetekend_bedrijf ?? 'NextGenMedia'} op {formatDate(c.tegengetekend_op)}</div>
+                            : <div className="text-xs text-gray-500 mt-0.5">Handtekening van NextGenMedia volgt</div>}
                         </div>
                       </div>
                       <div className="flex items-center gap-2 flex-wrap sm:shrink-0">

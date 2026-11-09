@@ -210,6 +210,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const { data: oud } = await admin.from('contracts').select('*').eq('id', id).maybeSingle()
       if (!oud) return NextResponse.json({ error: 'Contract niet gevonden' }, { status: 404 })
       if (!isManueelGetekend(oud)) return NextResponse.json({ error: 'Enkel een contract dat handmatig op getekend gezet werd, kan zo teruggezet worden.' }, { status: 409 })
+      // Wij tekenden al (tegenhandtekening): dan klopt het exemplaar met beide handtekeningen niet meer na terugzetten.
+      if (oud.tegengetekend_op) return NextResponse.json({ error: 'NextGenMedia tekende dit contract al. Terugzetten kan niet meer.' }, { status: 409 })
       const { data: ev } = await admin.from('contract_events').select('meta').eq('contract_id', id).eq('event_type', 'signed').order('created_at', { ascending: false }).limit(1).maybeSingle()
       const vorige = (ev?.meta as { wijze?: string; vorige_status?: string | null } | null)
       const status = statusNaOngedaan(vorige?.wijze === MANUEEL ? vorige.vorige_status : null, oud.sent_at)

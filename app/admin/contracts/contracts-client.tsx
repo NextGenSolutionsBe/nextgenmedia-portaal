@@ -43,6 +43,8 @@ export type Contract = OverzichtContract & {
   door?: string | null
   /** Eerste keer dat de klant de tekenlink opende (niet als het team kijkt). */
   klant_geopend_op?: string | null
+  /** NextGenMedia tekende na de klant. Getekend zonder dit = wacht op onze handtekening. */
+  tegengetekend_op?: string | null
   invoice_count: number
   invoice_sent: number
   expected_invoice_count: number | null
@@ -65,13 +67,15 @@ const ALL_SERVICES = ['social-media', 'webdesign', 'foto-video', 'grafisch-ontwe
 const MAPPEN_SLEUTEL = 'ngm.contractMappen'
 
 export function ContractsClient({
-  initialContracts, clients, templates = [], contracttypes = [], initialStatus = 'all',
+  initialContracts, clients, templates = [], contracttypes = [], initialStatus = 'all', initialTegentekenen = false,
 }: {
   initialContracts: Contract[]
   clients: Client[]
   templates?: Template[]
   contracttypes?: string[]
   initialStatus?: string
+  /** Vanuit het Command Center: enkel wat nog op onze handtekening wacht. */
+  initialTegentekenen?: boolean
 }) {
   const router = useRouter()
   // Lokale kopie: een statuswijziging werkt meteen door in mappen, cijfers en
@@ -86,6 +90,7 @@ export function ContractsClient({
   const [filterType, setFilterType] = useState<string>('all')        // contracttype
   const [filterDuration, setFilterDuration] = useState<string>('all') // contractduur-type
   const [filterLinked, setFilterLinked] = useState<string>('all') // all | yes | no
+  const [filterOns, setFilterOns] = useState<string>(initialTegentekenen ? 'wacht' : 'all') // all | wacht | beide
   const [filterInvoice, setFilterInvoice] = useState<string>('all') // all | aandacht | <AflBadge>
   const [filterMail, setFilterMail] = useState<string>('all') // all | <MailStatus>
   const [dateFrom, setDateFrom] = useState<string>('')
@@ -180,6 +185,11 @@ export function ContractsClient({
       if (filterDuration !== 'all' && (c.duration_type ?? '') !== filterDuration) return false
       if (filterLinked === 'yes' && !c.client_id) return false
       if (filterLinked === 'no' && !!c.client_id) return false
+      if (filterOns !== 'all') {
+        if (canonicalStatus(c.status) !== 'getekend') return false
+        if (filterOns === 'wacht' && c.tegengetekend_op) return false
+        if (filterOns === 'beide' && !c.tegengetekend_op) return false
+      }
       if (filterInvoice !== 'all') {
         const a = (c as Contract).afl
         // "Aandacht": getekende contracten met ontbrekende gegevens of resterende acties.
@@ -196,7 +206,7 @@ export function ContractsClient({
       zoekExtra: [c.signer_name, c.signer_email, (c as Contract).door ?? '', c.service_slug ? SERVICE_LABELS[c.service_slug] ?? c.service_slug : '', c.template_id ? templateName.get(c.template_id) : '']
         .filter(Boolean).join(' '),
     }))
-  }, [contracten, filterClient, filterService, filterTemplate, filterDuration, filterLinked, filterInvoice, filterMail, dateFrom, dateTo, templateName])
+  }, [contracten, filterClient, filterService, filterTemplate, filterDuration, filterLinked, filterOns, filterInvoice, filterMail, dateFrom, dateTo, templateName])
 
   // Alles behalve de categorie: daarop tellen we de aantallen per categorie,
   // zodat elke kaart toont hoeveel contracten je krijgt als je erop klikt.
@@ -238,7 +248,7 @@ export function ContractsClient({
     setContracten((lijst) => lijst.map((c) => (c.id === id ? { ...c, ...w } : c)))
   }, [])
 
-  const hasActiveFilters = categorie !== 'alle' || filterClient !== 'all' || filterService !== 'all' || filterStatus !== 'all' || filterTemplate !== 'all' || filterType !== 'all' || filterDuration !== 'all' || filterLinked !== 'all' || filterInvoice !== 'all' || filterMail !== 'all' || dateFrom !== '' || dateTo !== '' || query.trim() !== ''
+  const hasActiveFilters = categorie !== 'alle' || filterClient !== 'all' || filterService !== 'all' || filterStatus !== 'all' || filterTemplate !== 'all' || filterType !== 'all' || filterDuration !== 'all' || filterLinked !== 'all' || filterOns !== 'all' || filterInvoice !== 'all' || filterMail !== 'all' || dateFrom !== '' || dateTo !== '' || query.trim() !== ''
 
   const clearFilters = () => {
     setCategorie('alle')
@@ -246,6 +256,7 @@ export function ContractsClient({
     setFilterService('all')
     setFilterStatus('all')
     setFilterTemplate('all')
+    setFilterOns('all')
     setFilterType('all')
     setFilterDuration('all')
     setFilterLinked('all')
@@ -430,6 +441,14 @@ export function ContractsClient({
             </select>
           </div>
           <div>
+            <label className="block text-xs text-gray-500 mb-1">Onze handtekening</label>
+            <select className={`${sel} w-full`} value={filterOns} onChange={(e) => setFilterOns(e.target.value)}>
+              <option value="all">Alle</option>
+              <option value="wacht">Wacht op onze handtekening</option>
+              <option value="beide">Door beide partijen getekend</option>
+            </select>
+          </div>
+          <div>
             <label className="block text-xs text-gray-500 mb-1">Gekoppeld aan klant</label>
             <select className={`${sel} w-full`} value={filterLinked} onChange={(e) => setFilterLinked(e.target.value)}>
               <option value="all">Alle</option>
@@ -582,6 +601,9 @@ export function ContractsClient({
                                 <td className="table-td">
                                   <span className={`status-badge ${style.cls}`}>{style.label}</span>
                                   {c.klant_geopend_op && <div className="text-[10px] text-gray-500 mt-1 whitespace-nowrap">{geopendTekst(c.klant_geopend_op)}</div>}
+                                  {canonicalStatus(c.status) === 'getekend' && (c.tegengetekend_op
+                                    ? <div className="text-[10px] text-green-700 mt-1 whitespace-nowrap">Door beide partijen</div>
+                                    : <a href={`/admin/contracts/${c.id}/tegentekenen`} onClick={(e) => e.stopPropagation()} className="mt-1 inline-flex whitespace-nowrap rounded-full border border-amber-300 bg-amber-50 px-1.5 text-[10px] font-medium text-amber-900 hover:bg-amber-100">Wacht op onze handtekening</a>)}
                                   {c.mail_status && c.mail_status !== 'niet' && <div className="mt-1"><span title={MAIL_STATUS[c.mail_status].uitleg} className={`inline-flex rounded-full border px-1.5 text-[10px] font-medium ${MAIL_STATUS[c.mail_status].cls}`}>{MAIL_STATUS[c.mail_status].label}</span></div>}
                                 </td>
                                 <td className="table-td">

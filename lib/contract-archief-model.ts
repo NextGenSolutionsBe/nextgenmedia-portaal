@@ -38,6 +38,11 @@ export type Dossier = {
   akkoordVoorwaardenOp?: string | null
   akkoordPrivacyOp?: string | null
   privacyVersie?: string | null
+  /** Onze handtekening na die van de klant (ontbreekt zolang wij nog niet tekenden). */
+  tegengetekendDoor?: string | null
+  tegengetekendEmail?: string | null
+  tegengetekendOp?: string | null
+  tegengetekendBedrijf?: string | null
   startDatum: string | null
   eindDatum: string | null
   verwachtAantal: number | null
@@ -85,6 +90,7 @@ export const GEBEURTENIS_LABEL: Record<string, string> = {
   gearchiveerd: 'Gearchiveerd in het contractarchief',
   melding_verstuurd: 'Melding naar Legal verstuurd',
   melding_mislukt: 'Melding naar Legal mislukt',
+  tegengetekend: 'Ondertekend door NextGenMedia',
 }
 
 export const gebeurtenisLabel = (t: string): string => GEBEURTENIS_LABEL[t] ?? t
@@ -225,6 +231,12 @@ export function certificaatBlokken(d: Dossier): CertificaatBlok[] {
       ...akkoordRegels({ voorwaardenOp: d.akkoordVoorwaardenOp, privacyOp: d.akkoordPrivacyOp, privacyVersie: d.privacyVersie }),
       ...audit,
     ] },
+    ...(d.tegengetekendOp ? [{ kop: `Ondertekening ${d.tegengetekendBedrijf ?? d.bedrijfsnaam ?? 'NextGenMedia'}`, regels: [
+      ['Ondertekend door', d.tegengetekendDoor ?? '—'],
+      ...(d.tegengetekendEmail ? [['E-mailadres', d.tegengetekendEmail] as [string, string]] : []),
+      ['Datum en tijdstip', tijdstipBrussel(d.tegengetekendOp)],
+      ['Wijze', 'Handtekening in de app, na de ondertekening door de klant'],
+    ] as [string, string][] }] : []),
     { kop: 'Integriteit', regels: [
       ['SHA-256 van het getekende PDF', vingerafdrukLeesbaar(d.sha256Contract)],
       ['Archiefversie', `v${d.versie}`],
@@ -258,9 +270,11 @@ export function legalOntvangers(env: { CONTRACT_LEGAL_EMAIL?: string | null | un
 
 /** Onderwerp en tekst van de melding naar Legal. */
 export function meldingTekst(d: Dossier, extra: { adminUrl: string; ontvangstUrl?: string | null }): { onderwerp: string; tekst: string } {
-  const onderwerp = `Contract getekend – ${d.klantNaam ?? 'Zonder klant'} – ${d.titel}`
+  const beide = !!d.tegengetekendOp
+  const onderwerp = `${beide ? 'Contract door beide partijen getekend' : 'Contract getekend'} – ${d.klantNaam ?? 'Zonder klant'} – ${d.titel}`
   const regels = [
     `${d.signerName ?? 'Iemand'}${d.signerEmail ? ` (${d.signerEmail})` : ''} heeft "${d.titel}" ondertekend op ${tijdstipBrussel(d.signedAt)} (${TIJDZONE_LABEL}).`,
+    ...(beide ? [`${d.tegengetekendDoor ?? 'NextGenMedia'} tekende namens ${d.tegengetekendBedrijf ?? d.bedrijfsnaam ?? 'NextGenMedia'} op ${tijdstipBrussel(d.tegengetekendOp)}.`] : []),
     '',
     `Klantnaam:          ${d.klantNaam ?? '—'}`,
     ...(d.contactNaam ? [`Contactpersoon:     ${d.contactNaam}`] : []),
@@ -270,6 +284,7 @@ export function meldingTekst(d: Dossier, extra: { adminUrl: string; ontvangstUrl
     `Ondertekenaar:      ${d.signerName ?? '—'}${d.signerEmail ? ` <${d.signerEmail}>` : ''}`,
     `Ondertekend op:     ${tijdstipBrussel(d.signedAt)}`,
     `Wijze:              ${wijzeVanOndertekenen(d.bron)}`,
+    ...(beide ? [`Tegengetekend door: ${d.tegengetekendDoor ?? '—'} (${d.tegengetekendBedrijf ?? d.bedrijfsnaam ?? 'NextGenMedia'}) op ${tijdstipBrussel(d.tegengetekendOp)}`] : []),
     `Certificaatnummer:  ${d.certificaatNr ?? '—'}`,
     `SHA-256:            ${vingerafdrukLeesbaar(d.sha256Contract)}`,
     '',

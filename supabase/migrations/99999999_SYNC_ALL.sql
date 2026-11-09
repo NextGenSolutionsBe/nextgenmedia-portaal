@@ -7214,3 +7214,25 @@ REVOKE ALL ON public.content_labels, public.content_kalender_stijl FROM anon, au
 
 -- ── Aankopen: optionele link naar de bestelpagina (6 nov 2026) ─────────────
 ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS bestel_link text;
+
+-- ── Tegenhandtekening: NextGenMedia tekent na de klant (9 nov 2026) ─────────
+-- Zone voor onze handtekening (naast die van de klant) op contracten en templates,
+-- en wie wanneer namens ons tekende. Het door de klant getekende bestand blijft
+-- bewaard in klant_getekend_pdf_path; signed_pdf_path wordt de versie met beide.
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS ons_sig_page integer;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS ons_sig_x_pct numeric;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS ons_sig_y_pct numeric;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS ons_sig_width integer;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS ons_sig_height integer;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS tegengetekend_op timestamptz;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS tegengetekend_door text;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS tegengetekend_door_email text;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS tegengetekend_user_id uuid;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS tegengetekend_bedrijf text;
+ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS klant_getekend_pdf_path text;
+ALTER TABLE public.contract_templates ADD COLUMN IF NOT EXISTS ons_sig_page integer;
+ALTER TABLE public.contract_templates ADD COLUMN IF NOT EXISTS ons_sig_x_pct numeric;
+ALTER TABLE public.contract_templates ADD COLUMN IF NOT EXISTS ons_sig_y_pct numeric;
+ALTER TABLE public.contract_templates ADD COLUMN IF NOT EXISTS ons_sig_width integer;
+ALTER TABLE public.contract_templates ADD COLUMN IF NOT EXISTS ons_sig_height integer;
+CREATE INDEX IF NOT EXISTS contracts_tegentekenen ON public.contracts (signed_at) WHERE tegengetekend_op IS NULL;

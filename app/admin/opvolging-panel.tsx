@@ -1,12 +1,12 @@
 import Link from 'next/link'
 import { buildOpvolging, type OpvolgGroep } from '@/lib/notifications'
-import { Inbox, FileText, CalendarClock, KanbanSquare, MessageSquare, Wrench, Film, Send, ArrowRight } from 'lucide-react'
+import { Inbox, FileText, CalendarClock, KanbanSquare, MessageSquare, Wrench, Film, Send, ArrowRight, PenLine } from 'lucide-react'
 
 // "Op te volgen" — bovenaan het Command Center: per soort wat er nu ligt, met
 // namen, zodat je meteen ziet bij wie je moet zijn. Elke kaart hangt aan een
 // module; wie die niet heeft, ziet de kaart niet.
 const ICOON: Record<OpvolgGroep['key'], React.ElementType> = {
-  aanvragen: Inbox, contracten: FileText, meetings: CalendarClock, projecten: KanbanSquare, content: MessageSquare, onderhoud: Wrench, opleveringen: Film, offertes: Send,
+  aanvragen: Inbox, contracten: FileText, tegentekenen: PenLine, meetings: CalendarClock, projecten: KanbanSquare, content: MessageSquare, onderhoud: Wrench, opleveringen: Film, offertes: Send,
 }
 
 export async function OpvolgingPanel({ modules = null }: { modules?: string[] | null }) {

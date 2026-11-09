@@ -10,6 +10,8 @@ import { FIELD_FONT_PT, baselineFromTopPct } from '@/lib/contract-render'
 import { naOndertekening } from '@/lib/contract-archief'
 import { controleerAkkoord, akkoordDetails, PRIVACY_VERSIE } from '@/lib/voorwaarden'
 import { baseUrl } from '@/lib/email'
+import { waitUntil } from '@vercel/functions'
+import { maakTegentekenTaak } from '@/lib/contracten/tegenhandtekening-server'
 
 export const maxDuration = 60
 
@@ -236,6 +238,9 @@ export async function POST(req: NextRequest) {
     // beschermde archiefbucket, en één mail naar het team met beide PDF's,
     // zodat de factuur meteen kan vertrekken.
     await naOndertekening(admin, contract_id, 'tekenlink', null, signer_email)
+
+    // ── Wij tekenen ook: een taak voor de verantwoordelijke (ClickUp, op de projectkaart) ──
+    waitUntil(maakTegentekenTaak(admin, contract_id).catch((e) => console.warn('[sign] taak tegentekenen:', e instanceof Error ? e.message : e)))
 
     // ── Invalidate caches so admin/portal pages refresh immediately ───────────
     try {
