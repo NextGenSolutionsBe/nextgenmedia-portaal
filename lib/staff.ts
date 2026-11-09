@@ -43,6 +43,8 @@ export const ADMIN_MODULES: AdminModule[] = [
   { key: 'invoices',    label: 'Facturen',             prefixes: ['/admin/invoices', '/api/admin/invoices'] },
   { key: 'vesting',     label: 'Vesting',              prefixes: ['/admin/vesting', '/api/admin/vesting'] },
   { key: 'purchases',   label: 'Aankopen',             prefixes: ['/admin/purchases', '/api/admin/purchases'] },
+  // Uitgaven vennoten: aankopen op de zaak met een persoonlijk voordeel (enkel admins = de drie vennoten).
+  { key: 'vennoten',    label: 'Uitgaven vennoten',    prefixes: ['/admin/vennoten', '/api/admin/vennoten'] },
   { key: 'uploads',     label: 'Klantuploads',         prefixes: ['/admin/uploads', '/api/admin/uploads'] },
   { key: 'opdrachten',  label: 'Opdrachten (klanten)', prefixes: ['/admin/opdrachten', '/api/admin/opdrachten'] },
   { key: 'formulieren', label: 'Formulieren',          prefixes: ['/admin/formulieren', '/api/admin/formulieren'] },
