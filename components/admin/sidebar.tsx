@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
   Info, Camera, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
-  MailCheck, FolderUp, Handshake, Settings, ClipboardPen, Contact, Timer, UserCircle, Video, Inbox, Clapperboard, Film, Building2, FileSignature,
+  MailCheck, FolderUp, Handshake, Settings, ClipboardPen, Contact, Timer, UserCircle, Video, Inbox, Clapperboard, Film, Building2, FileSignature, Wallet,
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
@@ -94,6 +94,7 @@ const SECTIONS: NavSection[] = [
       { label: 'Facturen', href: '/admin/invoices',      icon: Receipt, module: 'invoices' },
       { label: 'Aankopen', href: '/admin/purchases',     icon: ShoppingCart, module: 'purchases' },
       { label: 'Vesting',  href: '/admin/vesting',       icon: Rocket, module: 'vesting' },
+      { label: 'Uitgaven vennoten', href: '/admin/vennoten', icon: Wallet, module: 'vennoten', adminOnly: true },
     ],
   },
   {

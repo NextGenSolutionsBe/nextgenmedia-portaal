@@ -7236,3 +7236,55 @@ ALTER TABLE public.contract_templates ADD COLUMN IF NOT EXISTS ons_sig_y_pct num
 ALTER TABLE public.contract_templates ADD COLUMN IF NOT EXISTS ons_sig_width integer;
 ALTER TABLE public.contract_templates ADD COLUMN IF NOT EXISTS ons_sig_height integer;
 CREATE INDEX IF NOT EXISTS contracts_tegentekenen ON public.contracts (signed_at) WHERE tegengetekend_op IS NULL;
+
+-- ── Uitgaven vennoten (9 nov 2026) ──────────────────────────────────────────
+-- Aankopen op de zaak met een persoonlijk voordeel voor één vennoot, met een
+-- maandbudget dat je opspaart. Regels + budget tekenen alle drie per versie.
+CREATE TABLE IF NOT EXISTS public.vennoot_uitgaven (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  vennoot text NOT NULL CHECK (vennoot IN ('marco', 'bram', 'chiara')),
+  datum date NOT NULL,
+  omschrijving text NOT NULL,
+  doel text,
+  bedrag numeric(12,2) NOT NULL CHECK (bedrag > 0),
+  bewijs_pad text,
+  bewijs_naam text,
+  gearchiveerd_op timestamptz,
+  gearchiveerd_door text,
+  archief_reden text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by text,
+  updated_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS vennoot_uitgaven_vennoot_datum ON public.vennoot_uitgaven (vennoot, datum DESC);
+CREATE TABLE IF NOT EXISTS public.vennoot_regels (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  versie integer NOT NULL UNIQUE,
+  regels jsonb NOT NULL,
+  maandbudget numeric(10,2) NOT NULL DEFAULT 250,
+  start_maand text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by text
+);
+CREATE TABLE IF NOT EXISTS public.vennoot_regels_handtekeningen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  regels_id uuid NOT NULL REFERENCES public.vennoot_regels(id) ON DELETE CASCADE,
+  vennoot text NOT NULL CHECK (vennoot IN ('marco', 'bram', 'chiara')),
+  user_id uuid NOT NULL,
+  naam text,
+  email text,
+  inhoud_tekst text NOT NULL,
+  handtekening text NOT NULL,
+  getekend_op timestamptz NOT NULL DEFAULT now(),
+  ip text,
+  user_agent text
+);
+CREATE UNIQUE INDEX IF NOT EXISTS vennoot_regels_handtekeningen_uniek ON public.vennoot_regels_handtekeningen (regels_id, vennoot);
+ALTER TABLE public.vennoot_uitgaven ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vennoot_regels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vennoot_regels_handtekeningen ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.vennoot_uitgaven, public.vennoot_regels, public.vennoot_regels_handtekeningen FROM anon, authenticated;
+-- Privébucket voor bonnetjes en facturen (foto of pdf).
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('vennoot-uitgaven', 'vennoot-uitgaven', false, 26214400, ARRAY['application/pdf', 'image/jpeg', 'image/png', 'image/heic', 'image/heif', 'image/webp'])
+ON CONFLICT (id) DO NOTHING;
