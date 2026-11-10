@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { safeMessage } from '@/lib/api-error'
-import { BUCKET, MAX_BYTES, TOEGESTAAN, bouwPad, leesbareGrootte, mimeToegestaan } from '@/lib/client-uploads'
+import { BUCKET, MAX_BYTES, SOORTEN_TEKST, bouwPad, leesbareGrootte, mimeToegestaan, typeVanBestand } from '@/lib/client-uploads'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,16 +22,15 @@ export async function POST(req: NextRequest) {
 
     const b = await req.json().catch(() => ({}))
     const clientId = String(b.client_id ?? '').trim()
-    const mime = String(b.mimetype ?? '').toLowerCase()
+    const mime = typeVanBestand(b.bestandsnaam, b.mimetype) ?? ''
     const grootte = Number(b.grootte)
 
     if (!/^[0-9a-f-]{36}$/i.test(clientId)) {
       return NextResponse.json({ error: 'Geen klant opgegeven.' }, { status: 400 })
     }
     if (!mimeToegestaan(mime)) {
-      const soorten = [...new Set(Object.values(TOEGESTAAN))].join(', ')
       return NextResponse.json(
-        { error: `Dit bestandstype kunnen we niet aannemen. Toegestaan: ${soorten}.` },
+        { error: `Dit bestandstype kunnen we niet aannemen. Toegestaan: ${SOORTEN_TEKST}.` },
         { status: 400 },
       )
     }

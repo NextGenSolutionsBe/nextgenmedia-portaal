@@ -12,17 +12,119 @@ export const BUCKET = 'client-uploads'
  * Wat mag erin. Bewust een witte lijst en geen zwarte: bij een zwarte lijst is
  * alles wat je vergeet automatisch toegestaan, en dat is precies de verkeerde
  * kant om je te vergissen. HEIC staat erbij omdat iPhones daar standaard in
- * fotograferen — zonder dat werkt de helft van de uploads niet.
+ * fotograferen. Sinds 10 nov 2026 ook documenten, ontwerpbestanden, zip en
+ * audio: logo's, huisstijlgidsen, teksten en presentaties komen ook zo binnen.
+ * Geen uitvoerbare bestanden en geen html (dat zou in de browser kunnen lopen).
  */
 export const TOEGESTAAN: Record<string, string> = {
+  // Foto's en beeld
   'image/jpeg': 'jpg',
   'image/png': 'png',
   'image/webp': 'webp',
   'image/gif': 'gif',
   'image/heic': 'heic',
   'image/heif': 'heif',
+  'image/avif': 'avif',
+  'image/tiff': 'tif',
+  'image/svg+xml': 'svg',
+  // Video
   'video/mp4': 'mp4',
   'video/quicktime': 'mov',
+  'video/webm': 'webm',
+  'video/x-m4v': 'm4v',
+  // Documenten
+  'application/pdf': 'pdf',
+  'application/msword': 'doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'application/vnd.ms-excel': 'xls',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+  'application/vnd.ms-powerpoint': 'ppt',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+  'application/vnd.oasis.opendocument.text': 'odt',
+  'application/vnd.oasis.opendocument.spreadsheet': 'ods',
+  'application/vnd.oasis.opendocument.presentation': 'odp',
+  'application/rtf': 'rtf',
+  'text/plain': 'txt',
+  'text/csv': 'csv',
+  // Ontwerpbestanden
+  'application/illustrator': 'ai',
+  'application/postscript': 'eps',
+  'image/vnd.adobe.photoshop': 'psd',
+  'application/x-indesign': 'indd',
+  // Archief en audio
+  'application/zip': 'zip',
+  'audio/mpeg': 'mp3',
+  'audio/wav': 'wav',
+  'audio/mp4': 'm4a',
+}
+
+/**
+ * Extensie → type. Browsers geven het type niet altijd (mee): .ai, .psd, .eps,
+ * .indd en soms .heic komen binnen als "" of application/octet-stream, een zip
+ * op Windows als application/x-zip-compressed. Dan beslist de extensie.
+ */
+const EXTENSIE_TYPE: Record<string, string> = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif',
+  heic: 'image/heic', heif: 'image/heif', avif: 'image/avif', tif: 'image/tiff', tiff: 'image/tiff', svg: 'image/svg+xml',
+  mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', m4v: 'video/x-m4v',
+  pdf: 'application/pdf', doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  odt: 'application/vnd.oasis.opendocument.text', ods: 'application/vnd.oasis.opendocument.spreadsheet', odp: 'application/vnd.oasis.opendocument.presentation',
+  rtf: 'application/rtf', txt: 'text/plain', csv: 'text/csv',
+  ai: 'application/illustrator', eps: 'application/postscript', psd: 'image/vnd.adobe.photoshop', indd: 'application/x-indesign',
+  zip: 'application/zip', mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4',
+}
+
+/** Andere schrijfwijzen van hetzelfde type. */
+const ALIAS: Record<string, string> = {
+  'image/jpg': 'image/jpeg', 'image/pjpeg': 'image/jpeg', 'image/x-png': 'image/png',
+  'image/heic-sequence': 'image/heic', 'image/heif-sequence': 'image/heif',
+  'application/x-zip-compressed': 'application/zip', 'application/x-zip': 'application/zip', 'multipart/x-zip': 'application/zip',
+  'application/x-photoshop': 'image/vnd.adobe.photoshop', 'image/x-photoshop': 'image/vnd.adobe.photoshop', 'image/psd': 'image/vnd.adobe.photoshop',
+  'application/x-illustrator': 'application/illustrator', 'application/eps': 'application/postscript', 'image/x-eps': 'application/postscript',
+  'application/x-pdf': 'application/pdf', 'text/rtf': 'application/rtf', 'application/csv': 'text/csv',
+  'audio/x-wav': 'audio/wav', 'audio/wave': 'audio/wav', 'audio/x-m4a': 'audio/mp4', 'audio/mp3': 'audio/mpeg',
+}
+
+const extensieVan = (naam: unknown) => (String(naam ?? '').match(/\.([a-z0-9]{1,5})$/i)?.[1] ?? '').toLowerCase()
+
+/**
+ * Welk type is dit bestand voor ons? Eerst wat de browser zegt (met de andere
+ * schrijfwijzen), anders de extensie. Een .ai-bestand dat als
+ * application/postscript of application/pdf binnenkomt, blijft een .ai.
+ * Niet toegestaan = null.
+ */
+export function typeVanBestand(naam: unknown, mime: unknown): string | null {
+  const m = String(mime ?? '').toLowerCase().split(';')[0].trim()
+  const ext = extensieVan(naam)
+  const viaExt = EXTENSIE_TYPE[ext] ?? null
+  // Ontwerpbestanden: de extensie is betrouwbaarder dan het type (ai = pdf/postscript in veel browsers).
+  if (viaExt && ['ai', 'eps', 'psd', 'indd'].includes(ext)) return viaExt
+  const t = ALIAS[m] ?? m
+  if (t && t !== 'application/octet-stream' && Object.prototype.hasOwnProperty.call(TOEGESTAAN, t)) return t
+  return viaExt
+}
+
+/** Voor het bestandsvenster: enkel de toegelaten extensies kiezen. */
+export const ACCEPT = Object.keys(EXTENSIE_TYPE).map((e) => `.${e}`).join(',')
+
+/** Leesbaar lijstje voor onder de uploadknop. */
+export const SOORTEN_TEKST = "foto's, video's, pdf, Word, Excel, PowerPoint, ontwerpbestanden (ai, eps, psd, svg, indd), zip en audio"
+
+/** Hoe tonen we een upload: foto die elke browser toont, video, pdf, of enkel een bestandsicoon. */
+export function weergaveVan(mime: string | null | undefined): 'foto' | 'video' | 'pdf' | 'bestand' {
+  const m = String(mime ?? '').toLowerCase()
+  if (/^image\/(jpeg|png|webp|gif|avif|svg\+xml)$/.test(m)) return 'foto'
+  if (m.startsWith('video/')) return 'video'
+  if (m === 'application/pdf') return 'pdf'
+  return 'bestand'
+}
+
+/** "PDF", "DOCX", "AI": het formaat als klein label. */
+export function formaatVan(mime: string | null | undefined): string {
+  return (TOEGESTAAN[String(mime ?? '').toLowerCase()] ?? 'bestand').toUpperCase()
 }
 
 /** 200 MB. Ruim genoeg voor een telefoonvideo, krap genoeg om te merken dat er

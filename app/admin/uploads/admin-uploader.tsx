@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
-import { BUCKET, LOSSE_BESTANDEN, MAX_BYTES, TOEGESTAAN, leesbareGrootte, mimeToegestaan } from '@/lib/client-uploads'
+import { ACCEPT, BUCKET, LOSSE_BESTANDEN, MAX_BYTES, SOORTEN_TEKST, leesbareGrootte, typeVanBestand } from '@/lib/client-uploads'
 import { CheckCircle2, AlertCircle, Loader2, Upload, X } from 'lucide-react'
 
 type Bezig = { sleutel: string; naam: string; klaar: boolean; fout: string | null }
@@ -38,16 +38,17 @@ export function AdminUploader({
   const openPaneel = () => { setMapId(standaardMapId ?? ''); setOnderweg([]); setMelding(null); setOpen(true) }
 
   const verstuurEen = async (bestand: File) => {
+    const type = typeVanBestand(bestand.name, bestand.type) ?? bestand.type
     const aanvraag = await fetch('/api/admin/uploads/aanvragen', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_id: clientId, bestandsnaam: bestand.name, mimetype: bestand.type, grootte: bestand.size, map_id: mapId || null }),
+      body: JSON.stringify({ client_id: clientId, bestandsnaam: bestand.name, mimetype: type, grootte: bestand.size, map_id: mapId || null }),
     })
     const a = await aanvraag.json().catch(() => ({}))
     if (!aanvraag.ok) throw new Error(a.error ?? 'De upload kon niet gestart worden.')
 
     const supabase = createClient()
-    const { error } = await supabase.storage.from(BUCKET).uploadToSignedUrl(a.pad, a.token, bestand)
+    const { error } = await supabase.storage.from(BUCKET).uploadToSignedUrl(a.pad, a.token, bestand, { contentType: type })
     if (error) throw new Error(error.message)
 
     const bevestig = await fetch('/api/admin/uploads', {
@@ -57,7 +58,7 @@ export function AdminUploader({
         client_id: clientId,
         pad: a.pad,
         titel: bestand.name.replace(/\.[^.]+$/, '').slice(0, 200) || bestand.name,
-        mimetype: bestand.type,
+        mimetype: type,
         bestandsnaam: bestand.name,
         map_id: mapId || null,
       }),
@@ -71,7 +72,7 @@ export function AdminUploader({
     const goed: File[] = []
     const geweigerd: string[] = []
     for (const b of Array.from(bestanden)) {
-      if (!mimeToegestaan(b.type)) { geweigerd.push(`${b.name} (type niet ondersteund)`); continue }
+      if (!typeVanBestand(b.name, b.type)) { geweigerd.push(`${b.name} (type niet ondersteund)`); continue }
       if (b.size > MAX_BYTES) { geweigerd.push(`${b.name} (${leesbareGrootte(b.size)} is te groot)`); continue }
       goed.push(b)
     }
@@ -105,7 +106,6 @@ export function AdminUploader({
     onKlaar()
   }
 
-  const soorten = [...new Set(Object.values(TOEGESTAAN))].join(', ')
   const geslaagd = onderweg.filter((r) => r.klaar).length
   const mislukt = onderweg.filter((r) => r.fout).length
 
@@ -158,7 +158,7 @@ export function AdminUploader({
                 ref={invoer}
                 type="file"
                 multiple
-                accept={Object.keys(TOEGESTAAN).join(',')}
+                accept={ACCEPT}
                 className="hidden"
                 onChange={(e) => { void neemAan(e.target.files); e.target.value = '' }}
               />
@@ -175,7 +175,7 @@ export function AdminUploader({
                   ? <Loader2 className="h-6 w-6 mx-auto animate-spin" />
                   : <Upload className="h-6 w-6 mx-auto text-gray-400" />}
                 <span className="block text-sm font-semibold mt-2">{bezig ? 'Bezig met uploaden…' : 'Kies bestanden'}</span>
-                <span className="block text-xs text-gray-500 mt-1">{soorten} · max. {leesbareGrootte(MAX_BYTES)} per bestand</span>
+                <span className="block text-xs text-gray-500 mt-1">{SOORTEN_TEKST} · max. {leesbareGrootte(MAX_BYTES)} per bestand</span>
               </button>
 
               {melding && (

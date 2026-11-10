@@ -3,7 +3,7 @@ import { createAdminSupabaseClient, insertResilient, requireStaff, signedUrlMap 
 import { logAudit, requestMeta } from '@/lib/audit'
 import { safeMessage } from '@/lib/api-error'
 import {
-  BUCKET, LOSSE_BESTANDEN, MAX_BYTES, STATUSSEN, mimeToegestaan, padHoortBij, schooneNaam, type Status,
+  BUCKET, LOSSE_BESTANDEN, MAX_BYTES, STATUSSEN, mimeToegestaan, padHoortBij, schooneNaam, typeVanBestand, type Status,
 } from '@/lib/client-uploads'
 
 export const dynamic = 'force-dynamic'
@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
     const b = await req.json().catch(() => ({}))
     const clientId = String(b.client_id ?? '').trim()
     const pad = String(b.pad ?? '')
-    const mime = String(b.mimetype ?? '').toLowerCase()
+    const mime = typeVanBestand(b.bestandsnaam, b.mimetype) ?? ''
     const titel = String(b.titel ?? '').trim() || schooneNaam(b.bestandsnaam).replace(/\.[^.]+$/, '')
     const beschrijving = String(b.beschrijving ?? '').trim()
 

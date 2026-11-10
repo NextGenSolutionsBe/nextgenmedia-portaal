@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { requirePortalPermission } from '@/lib/portal-auth'
 import { safeMessage } from '@/lib/api-error'
-import { BUCKET, MAX_BYTES, TOEGESTAAN, bouwPad, leesbareGrootte, mimeToegestaan } from '@/lib/client-uploads'
+import { BUCKET, MAX_BYTES, SOORTEN_TEKST, bouwPad, leesbareGrootte, mimeToegestaan, typeVanBestand } from '@/lib/client-uploads'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,13 +25,12 @@ export async function POST(req: NextRequest) {
     if (!g.ok) return g.response
 
     const b = await req.json().catch(() => ({}))
-    const mime = String(b.mimetype ?? '').toLowerCase()
+    const mime = typeVanBestand(b.bestandsnaam, b.mimetype) ?? ''
     const grootte = Number(b.grootte)
 
     if (!mimeToegestaan(mime)) {
-      const soorten = [...new Set(Object.values(TOEGESTAAN))].join(', ')
       return NextResponse.json(
-        { error: `Dit bestandstype kunnen we niet aannemen. Toegestaan: ${soorten}.` },
+        { error: `Dit bestandstype kunnen we niet aannemen. Toegestaan: ${SOORTEN_TEKST}.` },
         { status: 400 },
       )
     }

@@ -3,7 +3,7 @@ import { createAdminSupabaseClient, insertResilient, signedUrlMap } from '@/lib/
 import { requirePortalPermission, logPortalAction } from '@/lib/portal-auth'
 import { safeMessage } from '@/lib/api-error'
 import {
-  BUCKET, MAX_BYTES, mimeToegestaan, padHoortBij, schooneNaam,
+  BUCKET, MAX_BYTES, mimeToegestaan, padHoortBij, schooneNaam, typeVanBestand,
 } from '@/lib/client-uploads'
 
 export const dynamic = 'force-dynamic'
@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
     const pad = String(b.pad ?? '')
     const titel = String(b.titel ?? '').trim()
     const beschrijving = String(b.beschrijving ?? '').trim()
-    const mime = String(b.mimetype ?? '').toLowerCase()
+    const mime = typeVanBestand(b.bestandsnaam, b.mimetype) ?? ''
 
     if (!titel) return NextResponse.json({ error: 'Geef een titel op.' }, { status: 400 })
     // Het pad moet met het eigen client_id beginnen — anders wijst het naar het
