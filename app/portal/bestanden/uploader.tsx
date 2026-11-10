@@ -6,10 +6,10 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import {
-  BUCKET, MAX_BYTES, STATUS_LABELS, isVideo, leesbareGrootte, mimeToegestaan, type Status,
+  ACCEPT, BUCKET, MAX_BYTES, SOORTEN_TEKST, STATUS_LABELS, leesbareGrootte, typeVanBestand, weergaveVan, formaatVan, type Status,
 } from '@/lib/client-uploads'
 import {
-  Upload, Trash2, CheckCircle2, AlertCircle, ImageIcon, Film, Loader2, Pencil, Check, X, FolderInput,
+  Upload, Trash2, CheckCircle2, AlertCircle, Film, FileText, Loader2, Pencil, Check, X, FolderInput,
 } from 'lucide-react'
 
 export type Bestaand = {
@@ -65,17 +65,18 @@ export function Uploader({
 
   /** Eén bestand: link opvragen, rechtstreeks uploaden, dan bevestigen. */
   const verstuurEen = async (bestand: File) => {
+    const type = typeVanBestand(bestand.name, bestand.type) ?? bestand.type
     const aanvraag = await fetch('/api/portal/uploads/aanvragen', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mimetype: bestand.type, grootte: bestand.size }),
+      body: JSON.stringify({ mimetype: type, bestandsnaam: bestand.name, grootte: bestand.size }),
     })
     const a = await aanvraag.json()
     if (!aanvraag.ok) throw new Error(a.error ?? 'De upload kon niet gestart worden.')
 
     const supabase = createClient()
     const { error } = await supabase.storage.from(BUCKET)
-      .uploadToSignedUrl(a.pad, a.token, bestand)
+      .uploadToSignedUrl(a.pad, a.token, bestand, { contentType: type })
     if (error) throw new Error(error.message)
 
     const bevestig = await fetch('/api/portal/uploads', {
@@ -87,7 +88,7 @@ export function Uploader({
         // kan achteraf; vooraf twintig velden invullen zou niemand doen.
         titel: bestand.name.replace(/\.[^.]+$/, '').slice(0, 200) || bestand.name,
         beschrijving: reeksTekst,
-        mimetype: bestand.type,
+        mimetype: type,
         bestandsnaam: bestand.name,
         map_id: mapId,
       }),
@@ -105,7 +106,7 @@ export function Uploader({
     const geweigerd: string[] = []
 
     for (const b of Array.from(bestanden)) {
-      if (!mimeToegestaan(b.type)) { geweigerd.push(`${b.name} (type niet ondersteund)`); continue }
+      if (!typeVanBestand(b.name, b.type)) { geweigerd.push(`${b.name} (type niet ondersteund)`); continue }
       if (b.size > MAX_BYTES) { geweigerd.push(`${b.name} (${leesbareGrootte(b.size)} is te groot)`); continue }
       goed.push(b)
     }
@@ -193,18 +194,18 @@ export function Uploader({
             )}
           >
             <Upload className="h-8 w-8 mx-auto text-gray-400" />
-            <p className="mt-3 font-semibold text-sm">Sleep hier je foto&apos;s en video&apos;s in</p>
+            <p className="mt-3 font-semibold text-sm">Sleep hier je bestanden in</p>
             <p className="text-xs text-gray-500 mt-1">
               of klik om te kiezen — selecteer er gerust honderd tegelijk
             </p>
             <p className="text-[11px] text-gray-400 mt-3">
-              JPG, PNG, WEBP, GIF, HEIC, MP4 of MOV · max {leesbareGrootte(MAX_BYTES)} per bestand
+              {SOORTEN_TEKST} · max {leesbareGrootte(MAX_BYTES)} per bestand
             </p>
             <input
               ref={invoer}
               type="file"
               multiple
-              accept="image/*,video/mp4,video/quicktime"
+              accept={ACCEPT}
               className="hidden"
               onChange={(e) => { if (e.target.files) neemAan(e.target.files); e.target.value = '' }}
             />
@@ -301,11 +302,11 @@ function Kaart({
   return (
     <div className="border border-gray-200 rounded-2xl overflow-hidden flex flex-col bg-white">
       <div className="aspect-[4/3] bg-gray-100 flex items-center justify-center overflow-hidden">
-        {u.url && !isVideo(u.mimetype)
+        {u.url && weergaveVan(u.mimetype) === 'foto'
           ? <Image src={u.url} alt={u.titel} width={400} height={300} unoptimized className="h-full w-full object-cover" />
-          : isVideo(u.mimetype)
+          : weergaveVan(u.mimetype) === 'video'
             ? <Film className="h-8 w-8 text-gray-400" />
-            : <ImageIcon className="h-8 w-8 text-gray-400" />}
+            : <span className="flex flex-col items-center gap-1 text-gray-400"><FileText className="h-8 w-8" /><span className="text-[10px] font-bold tracking-wide">{formaatVan(u.mimetype)}</span></span>}
       </div>
 
       <div className="p-3 flex-1 flex flex-col gap-1.5">

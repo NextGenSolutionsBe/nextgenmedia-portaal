@@ -4,9 +4,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { LOSSE_BESTANDEN, STATUSSEN, STATUS_LABELS, isVideo, leesbareGrootte, type Status } from '@/lib/client-uploads'
+import { LOSSE_BESTANDEN, STATUSSEN, STATUS_LABELS, leesbareGrootte, weergaveVan, formaatVan, type Status } from '@/lib/client-uploads'
 import { maakZipSchrijver, verdeelInDelen, uniekeNaam, zipBestandsnaam, zipSegment } from '@/lib/zip-browser'
-import { Archive, CheckSquare, Download, Film, FolderInput, ImageIcon, Loader2, Pencil, Square, Trash2, ExternalLink, X } from 'lucide-react'
+import { Archive, CheckSquare, Download, Film, FileText, FolderInput, Loader2, Pencil, Square, Trash2, ExternalLink, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { AdminUploader } from './admin-uploader'
 import { MappenBeheer } from './mappen-beheer'
@@ -407,12 +407,12 @@ export function UploadsView({
                 onClick={() => openFoto(u)}
                 className="aspect-[4/3] bg-gray-100 flex items-center justify-center overflow-hidden group relative"
               >
-                {u.url && !isVideo(u.mimetype)
+                {u.url && weergaveVan(u.mimetype) === 'foto'
                   ? <Image src={u.url} alt={u.titel} width={400} height={300} unoptimized
                       className="h-full w-full object-cover group-hover:scale-105 transition-transform" />
-                  : isVideo(u.mimetype)
+                  : weergaveVan(u.mimetype) === 'video'
                     ? <Film className="h-8 w-8 text-gray-400" />
-                    : <ImageIcon className="h-8 w-8 text-gray-400" />}
+                    : <span className="flex flex-col items-center gap-1 text-gray-400"><FileText className="h-8 w-8" /><span className="text-[10px] font-bold tracking-wide">{formaatVan(u.mimetype)}</span></span>}
                 <span className={cn(
                   'absolute top-2 left-2 text-[10px] font-bold px-2 py-0.5 rounded-full',
                   KLEUR[u.status],
@@ -474,11 +474,21 @@ export function UploadsView({
             </div>
 
             <div className="bg-gray-100 flex items-center justify-center max-h-[50vh] overflow-hidden">
-              {open.url && !isVideo(open.mimetype) && (
+              {open.url && weergaveVan(open.mimetype) === 'foto' && (
                 <Image src={open.url} alt={open.titel} width={1200} height={800} unoptimized
                   className="max-h-[50vh] w-auto object-contain" />
               )}
-              {open.url && isVideo(open.mimetype) && (
+              {open.url && weergaveVan(open.mimetype) === 'pdf' && (
+                <iframe src={open.url} title={open.titel} className="w-full h-[50vh] bg-white" />
+              )}
+              {weergaveVan(open.mimetype) === 'bestand' && (
+                <div className="py-10 text-center text-gray-500">
+                  <FileText className="h-10 w-10 mx-auto text-gray-400" />
+                  <p className="text-xs font-bold tracking-wide mt-1">{formaatVan(open.mimetype)}</p>
+                  <p className="text-xs mt-1">Geen voorbeeld in de browser. Download het bestand om het te openen.</p>
+                </div>
+              )}
+              {open.url && weergaveVan(open.mimetype) === 'video' && (
                 // eslint-disable-next-line jsx-a11y/media-has-caption
                 <video src={open.url} controls className="max-h-[50vh] w-auto" />
               )}
