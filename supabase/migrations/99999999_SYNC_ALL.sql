@@ -7314,3 +7314,28 @@ do $$ begin
   end if;
 end $$;
 create unique index if not exists offertes_offertenummer_uniek on public.offertes (upper(offertenummer)) where offertenummer is not null;
+
+-- Regels vesting (11 nov 2026): zelfde werking als de regels bij Uitgaven vennoten.
+create table if not exists public.vesting_regels (
+  id uuid primary key default gen_random_uuid(),
+  versie integer not null unique,
+  regels jsonb not null,
+  created_at timestamptz not null default now(),
+  created_by text
+);
+create table if not exists public.vesting_regels_handtekeningen (
+  id uuid primary key default gen_random_uuid(),
+  regels_id uuid not null references public.vesting_regels(id) on delete restrict,
+  vennoot text not null,
+  user_id uuid not null,
+  naam text,
+  email text,
+  inhoud_tekst text not null,
+  handtekening text not null,
+  getekend_op timestamptz not null default now(),
+  ip text,
+  user_agent text
+);
+create unique index if not exists vesting_regels_handtekeningen_uniek on public.vesting_regels_handtekeningen (regels_id, vennoot);
+alter table public.vesting_regels enable row level security;
+alter table public.vesting_regels_handtekeningen enable row level security;

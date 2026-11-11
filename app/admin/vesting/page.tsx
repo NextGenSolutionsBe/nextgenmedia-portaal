@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { redirect } from 'next/navigation'
 import { createAdminSupabaseClient, requireAdmin } from '@/lib/supabase/server'
 import { laadVestingData, naarWeergave } from '@/lib/vesting-data-server'
+import { laadVestingRegels } from '@/lib/vesting-regels-server'
 import { VestingClient } from './vesting-client'
 import { VestingOverzicht } from './overzicht/vesting-overzicht'
 
@@ -14,7 +15,7 @@ import { VestingOverzicht } from './overzicht/vesting-overzicht'
  * facturen, WAM-termijnen en instellingen. De data en berekening komen uit één
  * plek (lib/vesting-data-server.ts → lib/vesting.ts). Enkel voor admins.
  */
-export default async function VestingPage({ searchParams }: { searchParams: { weergave?: string; tekenen?: string } }) {
+export default async function VestingPage({ searchParams }: { searchParams: { weergave?: string; tekenen?: string; regels?: string } }) {
   const actor = await requireAdmin()
   if (!actor) redirect('/admin')
 
@@ -40,5 +41,6 @@ export default async function VestingPage({ searchParams }: { searchParams: { we
     )
   }
 
-  return <VestingOverzicht data={naarWeergave(data, actor.id)} tekenen={searchParams.tekenen === '1'} />
+  const regels = await laadVestingRegels(createAdminSupabaseClient(), actor.id)
+  return <VestingOverzicht data={naarWeergave(data, actor.id)} tekenen={searchParams.tekenen === '1'} regels={regels} regelsOpen={searchParams.regels === '1'} />
 }

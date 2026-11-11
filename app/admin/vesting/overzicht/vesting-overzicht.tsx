@@ -13,6 +13,8 @@ import { ContractVenster } from './contract-venster'
 import { BeoordeelVenster } from './beoordeel-venster'
 import { InkomstRegistreren, KostRegistreren, RegistratieVenster } from './registratie-venster'
 import { Register } from './register'
+import { RegelsKaart, RegelsKnop, RegelsVenster, type RegelsBegin } from '@/components/admin/regels-akkoord'
+import type { RegelsData } from '@/lib/regels-akkoord'
 
 type Tab = 'contracten' | 'beoordelen' | 'registraties' | 'register'
 type Open = { soort: 'contract' | 'registratie'; id: string } | null
@@ -25,7 +27,7 @@ const STATUS_KLANT: Record<string, string> = { draft: 'Concept', sent: 'Bij de k
  * beoordeeld moet worden, de inkomsten en kosten met verantwoording en het
  * register van alle handtekeningen. Alles komt uitgerekend van de server.
  */
-export function VestingOverzicht({ data, tekenen }: { data: VestingWeergave; tekenen: boolean }) {
+export function VestingOverzicht({ data, tekenen, regels, regelsOpen = false }: { data: VestingWeergave; tekenen: boolean; regels: RegelsData; regelsOpen?: boolean }) {
   const router = useRouter()
   const [, start] = useTransition()
   const vernieuw = useCallback(() => start(() => router.refresh()), [router])
@@ -37,6 +39,7 @@ export function VestingOverzicht({ data, tekenen }: { data: VestingWeergave; tek
   const [laatste, setLaatste] = useState<string | null>(null)
   const [alleenOpen, setAlleenOpen] = useState(tekenen && !!ik)
   const [nieuw, setNieuw] = useState<'contract' | 'inkomst' | 'kost' | null>(null)
+  const [regelsVenster, setRegelsVenster] = useState<RegelsBegin | null>(regelsOpen ? 'bekijk' : null)
 
   const mijnOpen = useMemo(() => (ik ? {
     contracten: data.contracten.filter((c) => c.akkoord.stand.per[ik].stand !== 'getekend'),
@@ -77,6 +80,7 @@ export function VestingOverzicht({ data, tekenen }: { data: VestingWeergave; tek
           <p className="text-sm text-gray-500 mt-0.5">Wat meetelt voor Marco, wat eraf gaat, en wie getekend heeft.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
+          <RegelsKnop set="vesting" data={regels} onOpen={setRegelsVenster} />
           <button type="button" onClick={() => setNieuw('inkomst')} className="btn-secondary text-sm"><Plus className="h-4 w-4" />Inkomst registreren</button>
           <button type="button" onClick={() => setNieuw('kost')} className="btn-secondary text-sm"><Minus className="h-4 w-4" />Kost registreren</button>
         </div>
@@ -225,6 +229,12 @@ export function VestingOverzicht({ data, tekenen }: { data: VestingWeergave; tek
         <PrijsToevoegen kandidaat={null} kandidaten={[]} klanten={data.klanten} onClose={() => setNieuw(null)}
           onBewaard={() => { setNieuw(null); setTab('contracten'); vernieuw() }}
           onUitgebreid={() => { setNieuw(null); router.push('/admin/vesting?weergave=uitgebreid') }} />
+      )}
+
+      <RegelsKaart set="vesting" data={regels} onOpen={setRegelsVenster} />
+      {regelsVenster && (
+        <RegelsVenster set="vesting" data={regels} begin={regelsVenster} onSluit={() => setRegelsVenster(null)}
+          onKlaar={(m) => { toast.success(m); vernieuw() }} />
       )}
 
       <p className="text-xs text-gray-400">
