@@ -1,16 +1,17 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Archive, Check, ChevronLeft, ChevronRight, FileText, History, Loader2, Paperclip, Pencil, Plus, RotateCcw, ScrollText, X } from 'lucide-react'
+import { Archive, Check, ChevronLeft, ChevronRight, Loader2, Paperclip, Pencil, Plus, RotateCcw, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { HandtekeningVak } from '@/components/admin/handtekening-vak'
+import { RegelsKaart, RegelsKnop, RegelsVenster, type RegelsBegin } from '@/components/admin/regels-akkoord'
+import type { RegelsData } from '@/lib/regels-akkoord'
 import {
-  VENNOTEN, REDEN_VOORSTEL, STANDAARD_REGELS, budgetVan, maandLabel, periodeVan, regelsVerschil, standPerVennoot, tekenStand, uitgavenIn, verschuif,
-  type Periode, type PeriodeSoort, type RegelsVersie, type RegelHandtekening, type Uitgave, type Vennoot,
+  VENNOTEN, REDEN_VOORSTEL, STANDAARD_REGELS, budgetVan, periodeVan, standPerVennoot, uitgavenIn, verschuif,
+  type Periode, type PeriodeSoort, type Uitgave, type Vennoot,
 } from '@/lib/vennoot-uitgaven'
-import type { RegelsMetHandtekeningen, VennotenData } from '@/lib/vennoot-uitgaven-server'
+import type { VennotenData } from '@/lib/vennoot-uitgaven-server'
 
 const eur = (n: number) => n.toLocaleString('nl-BE', { style: 'currency', currency: 'EUR' })
 const dag = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -47,16 +48,12 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen }: { da
   const lijst = useMemo(() => uitgavenIn(data.uitgaven, alles ? null : periode, vennoot, archief), [data.uitgaven, alles, periode, vennoot, archief])
   const aantalArchief = useMemo(() => uitgavenIn(data.uitgaven, alles ? null : periode, vennoot, true).length, [data.uitgaven, alles, periode, vennoot])
   const totaal = lijst.reduce((s, u) => s + u.bedrag, 0)
-  const teken = tekenStand(data.regels, data.handtekeningen)
+  const regelsData: RegelsData = { versie: data.regels, handtekeningen: data.handtekeningen, namen: data.namen, ik: data.ik }
   const label = alles ? 'alle periodes' : periode.label
 
   const kiesSoort = (s: PeriodeSoort | 'alles') => { setSoort(s); if (s !== 'alles') setPeriode(periodeVan(s, periode.ref > huidigeMaand ? huidigeMaand : periode.ref)) }
   const klaar = (melding: string) => { toast.success(melding); router.refresh() }
 
-  const regelsKnop = !data.regels ? 'Regels opstellen'
-    : teken.allen ? 'Regels · getekend door alle drie'
-    : data.ik && !teken[data.ik] ? 'Regels · teken jij nog'
-    : `Regels · wacht op ${VENNOTEN.filter((k) => !teken[k]).map((k) => data.namen[k]).join(', ')}`
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -66,7 +63,7 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen }: { da
           <p className="text-sm text-gray-500 mt-0.5 max-w-2xl">Aankopen op de zaak die één vennoot persoonlijk voordeel geven. {eur(budget.maandbudget)} per vennoot per maand; wat je niet gebruikt, spaar je.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button type="button" onClick={() => setRegels('bekijk')} className={`btn-secondary text-sm ${data.regels && !teken.allen ? '!border-amber-300 !bg-amber-50' : ''}`}><ScrollText className="h-4 w-4" />{regelsKnop}</button>
+          <RegelsKnop set="vennoten" data={regelsData} onOpen={setRegels} />
           <button type="button" onClick={() => setBewerk('nieuw')} className="btn-primary text-sm"><Plus className="h-4 w-4" />Uitgave</button>
         </div>
       </div>
@@ -161,11 +158,11 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen }: { da
         {lijst.length > 0 && <div className="px-4 py-3 border-t border-gray-100 flex justify-between text-sm"><span className="text-gray-600">{lijst.length} {lijst.length === 1 ? 'uitgave' : 'uitgaven'}</span><span className="font-semibold tabular-nums">{eur(totaal)}</span></div>}
       </section>
 
-      <RegelsKaart data={data} onOpen={setRegels} />
+      <RegelsKaart set="vennoten" data={regelsData} onOpen={setRegels} />
 
       {bewerk && <UitgaveVenster u={bewerk === 'nieuw' ? null : bewerk} beginVennoot={vennoot ?? data.ik} namen={data.namen} vandaag={vandaag} onSluit={() => setBewerk(null)} onKlaar={(m) => { setBewerk(null); klaar(m) }} />}
       {archiveer && <ArchiefVenster u={archiveer} naam={data.namen[archiveer.vennoot]} onSluit={() => setArchiveer(null)} onKlaar={() => { setArchiveer(null); klaar('Gearchiveerd. Telt niet meer mee.') }} />}
-      {regels && <RegelsVenster data={data} huidigeMaand={huidigeMaand} begin={regels} onSluit={() => setRegels(null)} onKlaar={(m) => klaar(m)} />}
+      {regels && <RegelsVenster set="vennoten" data={regelsData} huidigeMaand={huidigeMaand} standaardRegels={STANDAARD_REGELS} begin={regels} onSluit={() => setRegels(null)} onKlaar={(m) => klaar(m)} />}
     </div>
   )
 }
@@ -257,186 +254,6 @@ function ArchiefVenster({ u, naam, onSluit, onKlaar }: { u: Uitgave; naam: strin
       <label className="block"><span className={lbl}>Verantwoording</span><textarea rows={3} className={inp} value={reden} onChange={(e) => setReden(e.target.value)} maxLength={500} placeholder="Waarom archiveer je deze uitgave?" /></label>
       <button type="button" onClick={() => setReden(REDEN_VOORSTEL)} className="text-xs px-2.5 py-1 rounded-full border border-gray-200 hover:bg-gray-50 text-left">{REDEN_VOORSTEL}</button>
       <button type="button" onClick={doe} disabled={bezig || reden.trim().length < 3} className="btn-primary w-full">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4" />}Archiveren</button>
-    </Venster>
-  )
-}
-
-type RegelsBegin = 'bekijk' | 'bewerk' | 'versies'
-
-const kortDatum = (iso: string) => new Date(iso).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' })
-
-/** Wie tekende (of nog niet), per vennoot. Met de handtekening als die er is. */
-function Tekenrij({ namen, stand }: { namen: Record<Vennoot, string>; stand: Record<Vennoot, RegelHandtekening | null> }) {
-  return (
-    <div className="rounded-xl border border-gray-200 divide-y divide-gray-100">
-      {VENNOTEN.map((k) => {
-        const h = stand[k]
-        return (
-          <div key={k} className="flex items-center gap-3 px-3 py-2">
-            <span className="text-sm font-medium w-16">{namen[k]}</span>
-            {h ? (
-              <>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                {h.handtekening && <img src={h.handtekening} alt={`Handtekening ${namen[k]}`} className="h-8 w-24 object-contain" />}
-                <span className="text-xs text-green-700 ml-auto">getekend {kortDatum(h.getekend_op)}</span>
-              </>
-            ) : <span className="text-xs text-amber-700 ml-auto">nog niet getekend</span>}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-/** De regels zelf: genummerd, met "nieuw" bij wat er tegenover de vorige versie bijkwam. */
-function RegelsLijst({ v, vorige }: { v: RegelsVersie; vorige: RegelsVersie | null }) {
-  const d = regelsVerschil(v, vorige)
-  return (
-    <div className="space-y-2">
-      <ol className="space-y-1.5 list-decimal pl-5 text-sm text-gray-800">
-        {v.regels.map((x, i) => <li key={i}>{x}{d.nieuw[i] && <span className="ml-1.5 align-middle text-[10px] font-semibold uppercase text-emerald-700 bg-emerald-50 rounded px-1 py-px">nieuw</span>}</li>)}
-      </ol>
-      {d.weg.length > 0 && (
-        <div className="text-xs text-gray-500">
-          Weg tegenover versie {vorige?.versie}:
-          <ul className="mt-0.5 space-y-0.5">{d.weg.map((x, i) => <li key={i} className="line-through">{x}</li>)}</ul>
-        </div>
-      )}
-      <p className="text-xs text-gray-500">
-        Budget <span className={d.budget ? 'font-semibold text-gray-800' : ''}>{eur(v.maandbudget)}</span> per vennoot per maand · tegoed telt vanaf <span className={d.start ? 'font-semibold text-gray-800' : ''}>{maandLabel(v.start_maand)}</span>
-        {v.created_at && <> · versie {v.versie} van {kortDatum(v.created_at)}{v.created_by ? ` door ${v.created_by}` : ''}</>}
-      </p>
-    </div>
-  )
-}
-
-/** Altijd zichtbaar onderaan de pagina: de geldende regels, gewoon om te lezen. */
-function RegelsKaart({ data, onOpen }: { data: VennotenData; onOpen: (b: RegelsBegin) => void }) {
-  const r = data.regels
-  const stand = tekenStand(r, data.handtekeningen)
-  const ikMoet = !!r && !!data.ik && !stand[data.ik]
-  return (
-    <section className="card-base space-y-3">
-      <div className="flex items-center gap-2 flex-wrap">
-        <h2 className="font-semibold text-gray-900 flex items-center gap-1.5 flex-1 min-w-0"><ScrollText className="h-4 w-4" />De regels{r ? ` · versie ${r.versie}` : ''}</h2>
-        {r && (
-          <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${stand.allen ? 'bg-green-50 text-green-800' : 'bg-amber-50 text-amber-800'}`}>
-            {stand.allen ? 'getekend door alle drie' : `wacht op ${VENNOTEN.filter((k) => !stand[k]).map((k) => data.namen[k]).join(', ')}`}
-          </span>
-        )}
-      </div>
-      {r ? <RegelsLijst v={r} vorige={null} /> : <p className="text-sm text-gray-500">Er zijn nog geen regels vastgelegd.</p>}
-      <div className="flex gap-2 flex-wrap">
-        {ikMoet && <button type="button" onClick={() => onOpen('bekijk')} className="btn-primary text-sm"><FileText className="h-4 w-4" />Lezen en tekenen</button>}
-        {r && <button type="button" onClick={() => onOpen('versies')} className="btn-secondary text-sm"><History className="h-4 w-4" />Eerdere versies en handtekeningen</button>}
-        <button type="button" onClick={() => onOpen('bewerk')} className="btn-secondary text-sm"><Pencil className="h-4 w-4" />{r ? 'Regels aanpassen' : 'Regels opstellen'}</button>
-      </div>
-    </section>
-  )
-}
-
-/** Elke versie, nieuwste eerst: wat er stond, wat veranderde en wie wanneer tekende. */
-function Versies({ namen }: { namen: Record<Vennoot, string> }) {
-  const [versies, setVersies] = useState<RegelsMetHandtekeningen[] | null>(null)
-  const [fout, setFout] = useState<string | null>(null)
-  const [open, setOpen] = useState<string | null>(null)
-  useEffect(() => {
-    let weg = false
-    fetch('/api/admin/vennoten?regels=alle', { cache: 'no-store' })
-      .then(async (r) => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Laden mislukt'); return j.versies as RegelsMetHandtekeningen[] })
-      .then((v) => { if (!weg) { setVersies(v); setOpen(v[0]?.id ?? null) } })
-      .catch((e) => { if (!weg) setFout(e instanceof Error ? e.message : 'Laden mislukt') })
-    return () => { weg = true }
-  }, [])
-  if (fout) return <p className="text-sm text-red-700">{fout}</p>
-  if (!versies) return <p className="text-sm text-gray-500 flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Versies laden…</p>
-  if (!versies.length) return <p className="text-sm text-gray-500">Nog geen versies.</p>
-  return (
-    <ul className="space-y-2">
-      {versies.map((v, i) => {
-        const vorige = versies[i + 1] ?? null
-        const stand = tekenStand(v, v.handtekeningen)
-        const isOpen = open === v.id
-        return (
-          <li key={v.id} className="rounded-xl border border-gray-200">
-            <button type="button" onClick={() => setOpen(isOpen ? null : v.id)} aria-expanded={isOpen} className="w-full flex items-center gap-2 px-3 py-2 text-left">
-              <span className="text-sm font-semibold">Versie {v.versie}{i === 0 ? ' (geldt nu)' : ''}</span>
-              <span className="text-xs text-gray-500">{v.created_at ? kortDatum(v.created_at) : ''}</span>
-              <span className={`ml-auto text-[11px] font-semibold ${stand.allen ? 'text-green-700' : 'text-amber-700'}`}>{stand.allen ? 'alle drie getekend' : `${VENNOTEN.filter((k) => stand[k]).length} van 3 getekend`}</span>
-            </button>
-            {isOpen && (
-              <div className="px-3 pb-3 space-y-3 border-t border-gray-100 pt-3">
-                <RegelsLijst v={v} vorige={vorige} />
-                <Tekenrij namen={namen} stand={stand} />
-              </div>
-            )}
-          </li>
-        )
-      })}
-    </ul>
-  )
-}
-
-function RegelsVenster({ data, huidigeMaand, begin, onSluit, onKlaar }: { data: VennotenData; huidigeMaand: string; begin: RegelsBegin; onSluit: () => void; onKlaar: (m: string) => void }) {
-  const r = data.regels
-  const stand = tekenStand(r, data.handtekeningen)
-  const [modus, setModus] = useState<RegelsBegin>(!r ? 'bewerk' : begin)
-  const bewerk = modus === 'bewerk'
-  const setBewerk = (b: boolean) => setModus(b ? 'bewerk' : 'bekijk')
-  const [tekst, setTekst] = useState((r?.regels ?? STANDAARD_REGELS).join('\n'))
-  const [budget, setBudget] = useState(String(r?.maandbudget ?? 250).replace('.', ','))
-  const [start, setStart] = useState(r?.start_maand ?? huidigeMaand)
-  const [png, setPng] = useState<string | null>(null)
-  const [bezig, setBezig] = useState(false)
-  const ikMoet = !!r && !!data.ik && !stand[data.ik]
-
-  const bewaar = async () => {
-    setBezig(true)
-    try { await post({ actie: 'regels', regels: tekst, maandbudget: budget, start_maand: start }); setBewerk(false); onKlaar('Nieuwe versie bewaard. Alle drie tekenen opnieuw.') } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt') } finally { setBezig(false) }
-  }
-  const tekenNu = async () => {
-    if (!r || !png) return
-    setBezig(true)
-    try { await post({ actie: 'teken', id: r.id, handtekening: png }); onKlaar('Getekend.') } catch (e) { toast.error(e instanceof Error ? e.message : 'Tekenen mislukt') } finally { setBezig(false) }
-  }
-
-  return (
-    <Venster titel={modus === 'versies' ? 'Alle versies van de regels' : r ? `Regels · versie ${r.versie}` : 'Regels opstellen'} onSluit={onSluit}>
-      {modus === 'versies' ? (
-        <>
-          <Versies namen={data.namen} />
-          <button type="button" onClick={() => setModus('bekijk')} className="btn-secondary w-full text-sm">Terug naar de geldende regels</button>
-        </>
-      ) : bewerk ? (
-        <>
-          <label className="block"><span className={lbl}>Regels (één per lijn)</span><textarea rows={8} className={inp} value={tekst} onChange={(e) => setTekst(e.target.value)} /></label>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block"><span className={lbl}>Budget per vennoot per maand (€)</span><input inputMode="decimal" className={inp} value={budget} onChange={(e) => setBudget(e.target.value)} /></label>
-            <label className="block"><span className={lbl}>Tegoed telt vanaf</span><input type="month" className={inp} value={start} onChange={(e) => setStart(e.target.value)} /></label>
-          </div>
-          <p className="text-xs text-gray-500">Bewaren maakt een nieuwe versie. Daarna tekenen Marco, Bram en Chiara alle drie opnieuw.</p>
-          <div className="flex gap-2">
-            <button type="button" onClick={bewaar} disabled={bezig} className="btn-primary flex-1">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Bewaren als nieuwe versie</button>
-            {r && <button type="button" onClick={() => setBewerk(false)} className="btn-secondary">Annuleer</button>}
-          </div>
-        </>
-      ) : r && (
-        <>
-          <RegelsLijst v={r} vorige={null} />
-          <Tekenrij namen={data.namen} stand={stand} />
-          {ikMoet && (
-            <div className="space-y-2">
-              <span className={lbl}>Jouw handtekening</span>
-              <HandtekeningVak onChange={setPng} hoogte={130} />
-              <button type="button" onClick={tekenNu} disabled={bezig || !png} className="btn-primary w-full">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}Akkoord en tekenen</button>
-            </div>
-          )}
-          <div className="grid grid-cols-2 gap-2">
-            <button type="button" onClick={() => setModus('versies')} className="btn-secondary text-sm"><History className="h-4 w-4" />Eerdere versies</button>
-            <button type="button" onClick={() => setBewerk(true)} className="btn-secondary text-sm"><Pencil className="h-4 w-4" />Aanpassen</button>
-          </div>
-        </>
-      )}
     </Venster>
   )
 }
