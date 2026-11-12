@@ -249,7 +249,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     const user = await requireAdmin(supabase)
     if (!user) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
 
-    const { confirmed_name } = await req.json()
+    const { confirmed_name, contracten_bevestigd } = await req.json()
     if (!confirmed_name) return NextResponse.json({ error: 'Bevestigingsnaam ontbreekt' }, { status: 400 })
 
     const admin = createAdminSupabaseClient()
@@ -271,6 +271,14 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       .from('contracts')
       .select('id, pdf_path, signed_pdf_path')
       .eq('client_id', id)
+
+    // Contracten gaan mee weg: enkel als het scherm exact deze lijst toonde en
+    // iemand bevestigde dat die contracten mee verwijderd worden.
+    const ids = (clientContracts ?? []).map((c) => c.id).sort()
+    const gezien = Array.isArray(contracten_bevestigd) ? (contracten_bevestigd as unknown[]).map(String).sort() : []
+    if (ids.length && (ids.length !== gezien.length || ids.some((x, i) => x !== gezien[i]))) {
+      return NextResponse.json({ error: 'Deze klant heeft contracten. Bevestig eerst dat die mee verwijderd worden.', contracten: ids.length }, { status: 409 })
+    }
 
     // 2. Delete contracts (cascades: contract_signatures, contract_events)
     if (clientContracts && clientContracts.length > 0) {

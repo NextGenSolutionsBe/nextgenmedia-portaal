@@ -320,7 +320,7 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
               <div key={m.id} className={`flex items-stretch ${gef ? 'bg-[#f1f7f3] text-gray-900 shadow-[inset_3px_0_0_#166534]' : grijs ? 'bg-gray-50 text-gray-500' : 'bg-white'}`}>
                 <button type="button" onClick={() => bekijk(m)} className="flex-1 min-w-0 text-left px-3 py-3 space-y-1.5">
                   <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0"><div className="font-semibold text-sm truncate">{m.klant}</div><div className="text-xs truncate text-gray-600">{m.project ?? m.dienst ?? m.omschrijving ?? '—'}</div></div>
+                    <div className="min-w-0"><div className="font-semibold text-sm truncate">{m.klant}</div><div className="text-xs truncate text-gray-600">{m.project ?? m.dienst ?? m.omschrijving ?? '—'}</div>{m.klant_referentie && <div className="text-[10.5px] font-semibold text-amber-800">Bestelbon {m.klant_referentie}</div>}</div>
                     <div className="font-bold tabular-nums text-sm shrink-0">{euro2(m.bedrag_excl)}</div>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap text-[11px]"><StatusBadge status={m.status} klein /><span>{datumNlKort(m.datum)}</span>{m.terugkerend && <Repeat className="h-3 w-3" aria-label="terugkerend" />}{!m.volledig && !gef && <span className="text-amber-700">gegevens ontbreken</span>}</div>
@@ -350,7 +350,7 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
                   <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">{datumNlKort(m.datum)}</td>
                   <td className="px-3 py-2.5 font-medium truncate" title={m.klant}>{m.klant}</td>
                   <td className="px-3 py-2.5 truncate" title={m.project ?? m.dienst ?? ''}><span className="text-gray-600">{m.project ?? m.dienst ?? '—'}</span>{m.terugkerend && <Repeat className={`h-3 w-3 inline ml-1 -mt-0.5 ${gef ? 'text-gray-500' : 'text-purple-700'}`} aria-label="terugkerend" />}</td>
-                  <td className="px-3 py-2.5 truncate" title={m.omschrijving ?? ''}><span className="text-gray-600">{m.omschrijving ?? '—'}</span>{m.opmerking && <StickyNote className="h-3 w-3 inline ml-1 -mt-0.5 text-amber-500" aria-label="interne notitie" />}{m.extern_nr && <span className="ml-1 text-[11px] text-gray-500">· nr {m.extern_nr}</span>}</td>
+                  <td className="px-3 py-2.5 truncate" title={m.omschrijving ?? ''}><span className="text-gray-600">{m.omschrijving ?? '—'}</span>{m.opmerking && <StickyNote className="h-3 w-3 inline ml-1 -mt-0.5 text-amber-500" aria-label="interne notitie" />}{m.extern_nr && <span className="ml-1 text-[11px] text-gray-500">· nr {m.extern_nr}</span>}{m.klant_referentie && <span className="ml-1.5 inline-flex rounded-full bg-amber-100 text-amber-900 px-1.5 py-0.5 text-[10.5px] font-semibold" title="Bestelbonnummer">Bestelbon {m.klant_referentie}</span>}</td>
                   <td className="px-3 py-2.5 text-right font-semibold tabular-nums">{euro2(m.bedrag_excl)}</td>
                   <td className="px-3 py-2.5"><StatusBadge status={m.status} /></td>
                   <td className="px-3 py-2.5 text-right whitespace-nowrap">

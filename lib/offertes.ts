@@ -40,6 +40,9 @@ export type Offerte = {
   getekend_op?: string | null
   voorwaarden_akkoord_op?: string | null
   privacy_akkoord_op?: string | null
+  /** Zelf op aanvaard gezet: hoe (mail, papier, bestelbon) en het bestelbonnummer. */
+  aanvaard_via?: string | null
+  bestelbon_nummer?: string | null
 }
 
 /** Wat de klant aanvinkt bij het aanvaarden van een offerte. */

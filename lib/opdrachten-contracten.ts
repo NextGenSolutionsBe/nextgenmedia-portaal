@@ -21,6 +21,13 @@ type Contract = { id: string; title: string | null; status: string | null; clien
 
 const TESTKLANT = /^test$/i
 
+/** Bestelbonnummer van de aanvaarde offerte op dit project → het contract (enkel als dat er nog geen heeft). */
+async function neemBestelbonOver(admin: Admin, opdrachtId: string, contractId: string): Promise<void> {
+  const { data: o } = await admin.from('offertes').select('bestelbon_nummer').eq('opdracht_id', opdrachtId).eq('status', 'geaccepteerd').not('bestelbon_nummer', 'is', null).order('geaccepteerd_op', { ascending: false }).limit(1).maybeSingle()
+  const nr = (o as { bestelbon_nummer?: string | null } | null)?.bestelbon_nummer
+  if (nr) await admin.from('contracts').update({ bestelbon_nummer: nr }).eq('id', contractId).is('bestelbon_nummer', null)
+}
+
 export async function kaartVoorContract(admin: Admin, contractId: string, opties: { opdrachtId?: string | null } = {}): Promise<'bestaat' | 'gekoppeld' | 'aangemaakt' | 'overgeslagen'> {
   const { data: al } = await admin.from('opdrachten').select('id').eq('contract_id', contractId).limit(1)
   if ((al ?? []).length) return 'bestaat'
@@ -75,6 +82,8 @@ export async function kaartVoorContract(admin: Admin, contractId: string, opties
         await voegNotitieToe(admin, kandidaat.id, `Contract "${titel}" opgemaakt: de kaart staat nu in ${status === 'getekend' ? 'Contract getekend' : status === 'geen_interesse' ? 'Verloren' : 'Contract verstuurd'}.`, 'systeem', null)
         // De taak "contract opmaken of in gang zetten" is daarmee gedaan.
         await sluitContractTaak(admin, kandidaat.id).catch(() => {})
+        // Aanvaard met een bestelbon? Dan krijgt het contract dat nummer (voor de facturen).
+        await neemBestelbonOver(admin, kandidaat.id, contract.id).catch(() => {})
         return 'gekoppeld'
       }
     }

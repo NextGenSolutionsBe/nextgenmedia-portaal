@@ -7339,3 +7339,10 @@ create table if not exists public.vesting_regels_handtekeningen (
 create unique index if not exists vesting_regels_handtekeningen_uniek on public.vesting_regels_handtekeningen (regels_id, vennoot);
 alter table public.vesting_regels enable row level security;
 alter table public.vesting_regels_handtekeningen enable row level security;
+
+-- Op getekend zetten via een bestelbon (12 nov 2026): het nummer gaat mee naar elke factuur van het contract.
+alter table public.contracts add column if not exists bestelbon_nummer text;
+alter table public.contracts add column if not exists ondertekening_via text;
+-- Offerte zelf op aanvaard zetten (mail, papier of bestelbon); het bestelbonnummer gaat mee naar het contract.
+alter table public.offertes add column if not exists bestelbon_nummer text;
+alter table public.offertes add column if not exists aanvaard_via text;

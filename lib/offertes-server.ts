@@ -296,6 +296,39 @@ export async function accepteer(admin: Admin, token: string, b: { naam: unknown;
 }
 
 /**
+ * Het team zet een offerte zelf op aanvaard: de klant bevestigde per mail, op
+ * papier of met een bestelbon (dan is het nummer verplicht). Geen akkoordpdf
+ * en geen vinkjes: de klant klikte niets aan. Het bewijs zit in de notitie.
+ */
+export async function markeerAanvaard(admin: Admin, id: string, b: { via: unknown; bestelbon?: unknown; notitie?: unknown }, door: { naam: string | null; email: string | null }): Promise<Offerte> {
+  const o = await leesOfferte(admin, id)
+  if (!o) throw new OfferteFout('Offerte niet gevonden.', 404)
+  if (o.status === 'geaccepteerd') return o
+  if (o.status !== 'verstuurd' && o.status !== 'concept') throw new OfferteFout('Een ingetrokken offerte zet je niet meer op aanvaard.', 409)
+  const via = b.via === 'bestelbon' || b.via === 'papier' || b.via === 'mail' ? b.via : null
+  if (!via) throw new OfferteFout('Kies hoe de klant de offerte aanvaardde.')
+  const bestelbon = String(b.bestelbon ?? '').replace(/\s+/g, ' ').trim().slice(0, 60) || null
+  if (via === 'bestelbon' && !bestelbon) throw new OfferteFout('Vul het bestelbonnummer in: het moet op elke factuur komen.')
+  const notitie = String(b.notitie ?? '').trim().slice(0, 1000) || null
+  const label = via === 'bestelbon' ? `via bestelbon ${bestelbon}` : via === 'papier' ? 'op papier' : 'per mail'
+  const t = nu()
+  const wie = door.naam ?? door.email ?? 'het team'
+  const basis: Record<string, unknown> = { status: 'geaccepteerd', geaccepteerd_op: t, geaccepteerd_door: `${o.klant_naam ?? 'De klant'} (${label}, gezet door ${wie})`, updated_at: t, aanvaard_via: via, bestelbon_nummer: bestelbon }
+  let { data, error } = await admin.from('offertes').update(basis).eq('id', id).in('status', ['verstuurd', 'concept']).select('*')
+  if (error && /aanvaard_via|bestelbon_nummer|schema cache/i.test(error.message)) {
+    if (via === 'bestelbon') throw new Error('Het bestelbonnummer bewaren vereist een database-migratie (offertes.bestelbon_nummer).')
+    delete basis.aanvaard_via; delete basis.bestelbon_nummer
+    ;({ data, error } = await admin.from('offertes').update(basis).eq('id', id).in('status', ['verstuurd', 'concept']).select('*'))
+  }
+  if (error) throw new Error(error.message)
+  const na = ((data ?? [])[0] ?? null) as Offerte | null
+  if (!na) return (await leesOfferte(admin, id)) ?? o
+  await log(admin, id, 'geaccepteerd', { meta: { manueel: true, via, bestelbon, notitie, door: wie } })
+  if (o.opdracht_id) await voegNotitieToe(admin, o.opdracht_id, `Offerte "${o.titel}" aanvaard ${label}${notitie ? ` (${notitie})` : ''}. Tijd om het contract op te maken.`, 'systeem', null).catch(() => null)
+  return na
+}
+
+/**
  * Na het akkoord: een opgemaakte offerte krijgt een nieuwe pdf met het akkoord
  * (handtekening, naam, datum en uur) in het akkoordblok; een opgeladen pdf
  * krijgt één akkoordpagina achteraan. Het origineel blijft bewaard.
