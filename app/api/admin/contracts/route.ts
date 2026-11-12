@@ -1,4 +1,6 @@
 import { safeMessage } from '@/lib/api-error'
+import { waitUntil } from '@vercel/functions'
+import { planNaOndertekening } from '@/lib/facturatie/contract-plan-server'
 import { MAX_UPLOAD_MB, fileTooBig } from '@/lib/upload'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient, insertResilient , isActiveStaff } from '@/lib/supabase/server'
@@ -11,6 +13,8 @@ import { kaartVoorContract } from '@/lib/opdrachten-contracten'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
+// Na het tekenen plant de app de facturen (pdf lezen) via waitUntil.
+export const maxDuration = 120
 
 export async function POST(req: NextRequest) {
   try {
@@ -120,6 +124,7 @@ export async function POST(req: NextRequest) {
       try { await admin.from('contracts').update({ signed_pdf_path: pdfPath }).eq('id', contractId) } catch { }
       // Ook een opgeladen getekend contract gaat het archief in, met melding.
       await naOndertekening(admin, contractId, 'upload_getekend', null, user.email ?? null)
+      waitUntil(planNaOndertekening(admin, contractId, user.email ?? null))
     }
 
     await logContractEvent(admin, contractId, 'uploaded', { actor: user.email ?? user.id, meta: { title } })

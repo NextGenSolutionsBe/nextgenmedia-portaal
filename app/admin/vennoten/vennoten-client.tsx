@@ -8,7 +8,7 @@ import { createClient } from '@/lib/supabase/client'
 import { RegelsKaart, RegelsKnop, RegelsVenster, type RegelsBegin } from '@/components/admin/regels-akkoord'
 import type { RegelsData } from '@/lib/regels-akkoord'
 import {
-  VENNOTEN, REDEN_VOORSTEL, STANDAARD_REGELS, budgetVan, periodeVan, standPerVennoot, uitgavenIn, verschuif,
+  VENNOTEN, REDEN_VOORSTEL, STANDAARD_REGELS, akkoordStand, budgetVan, periodeVan, standPerVennoot, uitgavenIn, verschuif, wachtOpAkkoord,
   type Periode, type PeriodeSoort, type Uitgave, type Vennoot,
 } from '@/lib/vennoot-uitgaven'
 import type { VennotenData } from '@/lib/vennoot-uitgaven-server'
@@ -31,7 +31,7 @@ async function post(body: Record<string, unknown>) {
  * voor enkel zijn of haar uitgaven. "+ Uitgave" met bonnetje (foto of pdf),
  * archiveren met een verantwoording, en de regels die alle drie tekenen.
  */
-export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen }: { data: VennotenData; vandaag: string; beginVennoot: Vennoot | null; regelsOpen: boolean }) {
+export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoordFilter = false }: { data: VennotenData; vandaag: string; beginVennoot: Vennoot | null; regelsOpen: boolean; akkoordFilter?: boolean }) {
   const router = useRouter()
   const huidigeMaand = vandaag.slice(0, 7)
   const [soort, setSoort] = useState<PeriodeSoort | 'alles'>('maand')
@@ -41,11 +41,21 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen }: { da
   const [bewerk, setBewerk] = useState<Uitgave | 'nieuw' | null>(null)
   const [archiveer, setArchiveer] = useState<Uitgave | null>(null)
   const [regels, setRegels] = useState<RegelsBegin | null>(regelsOpen ? 'bekijk' : null)
+  const [enkelWacht, setEnkelWacht] = useState(akkoordFilter)
+  const [akkoordBezig, setAkkoordBezig] = useState<string | null>(null)
+  const mijnWacht = useMemo(() => (data.ik ? wachtOpAkkoord(data.uitgaven, data.akkoorden, data.ik) : []), [data.uitgaven, data.akkoorden, data.ik])
+  const geefAkkoord = async (u: Uitgave) => {
+    setAkkoordBezig(u.id)
+    try { await post({ actie: 'akkoord', id: u.id }); klaar('Akkoord gegeven.') } catch (e) { toast.error(e instanceof Error ? e.message : 'Akkoord mislukt') } finally { setAkkoordBezig(null) }
+  }
 
   const budget = budgetVan(data.regels, data.uitgaven, huidigeMaand)
   const alles = soort === 'alles'
   const stand = useMemo(() => standPerVennoot(data.uitgaven, budget, periode, huidigeMaand), [data.uitgaven, budget, periode, huidigeMaand])
-  const lijst = useMemo(() => uitgavenIn(data.uitgaven, alles ? null : periode, vennoot, archief), [data.uitgaven, alles, periode, vennoot, archief])
+  const lijst = useMemo(() => {
+    const l = uitgavenIn(data.uitgaven, alles ? null : periode, vennoot, archief)
+    return enkelWacht && !archief ? l.filter((u) => mijnWacht.some((w) => w.id === u.id)) : l
+  }, [data.uitgaven, alles, periode, vennoot, archief, enkelWacht, mijnWacht])
   const aantalArchief = useMemo(() => uitgavenIn(data.uitgaven, alles ? null : periode, vennoot, true).length, [data.uitgaven, alles, periode, vennoot])
   const totaal = lijst.reduce((s, u) => s + u.bedrag, 0)
   const regelsData: RegelsData = { versie: data.regels, handtekeningen: data.handtekeningen, namen: data.namen, ik: data.ik }
@@ -67,6 +77,14 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen }: { da
           <button type="button" onClick={() => setBewerk('nieuw')} className="btn-primary text-sm"><Plus className="h-4 w-4" />Uitgave</button>
         </div>
       </div>
+
+      {/* Wat wacht op jouw akkoord */}
+      {data.ik && mijnWacht.length > 0 && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 flex items-center gap-3 flex-wrap">
+          <span className="flex-1 min-w-[200px]"><b className="font-semibold">{mijnWacht.length} {mijnWacht.length === 1 ? 'uitgave wacht' : 'uitgaven wachten'} op jouw akkoord.</b> Kijk ze na en druk op Akkoord, zo is er achteraf geen discussie.</span>
+          <button type="button" onClick={() => { setEnkelWacht((x) => !x); setArchief(false); if (!enkelWacht) setSoort('alles') }} className="btn-secondary text-sm">{enkelWacht ? 'Alle uitgaven tonen' : 'Toon enkel die'}</button>
+        </div>
+      )}
 
       {/* Periode */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -137,6 +155,7 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen }: { da
                   <div className="text-sm font-medium text-gray-900 mt-0.5">{u.omschrijving}</div>
                   {u.doel && <div className="text-xs text-gray-500 mt-0.5">{u.doel}</div>}
                   {u.gearchiveerd_op && <div className="text-xs text-amber-800 mt-1">Gearchiveerd{u.gearchiveerd_door ? ` door ${u.gearchiveerd_door}` : ''}: {u.archief_reden}</div>}
+                  {!u.gearchiveerd_op && <AkkoordRij u={u} data={data} bezig={akkoordBezig === u.id} onAkkoord={() => geefAkkoord(u)} />}
                 </div>
                 <div className="flex flex-col items-end gap-1 shrink-0">
                   <div className="text-sm font-semibold tabular-nums">{eur(u.bedrag)}</div>
@@ -255,5 +274,31 @@ function ArchiefVenster({ u, naam, onSluit, onKlaar }: { u: Uitgave; naam: strin
       <button type="button" onClick={() => setReden(REDEN_VOORSTEL)} className="text-xs px-2.5 py-1 rounded-full border border-gray-200 hover:bg-gray-50 text-left">{REDEN_VOORSTEL}</button>
       <button type="button" onClick={doe} disabled={bezig || reden.trim().length < 3} className="btn-primary w-full">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4" />}Archiveren</button>
     </Venster>
+  )
+}
+
+/** Akkoord van de drie vennoten bij één uitgave: wie al akkoord gaf, en de knop voor jou. */
+function AkkoordRij({ u, data, bezig, onAkkoord }: { u: Uitgave; data: VennotenData; bezig: boolean; onAkkoord: () => void }) {
+  const stand = akkoordStand(u, data.akkoorden)
+  const ikMoet = !!data.ik && !stand[data.ik]
+  return (
+    <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+      {VENNOTEN.map((k) => {
+        const a = stand[k]
+        return (
+          <span key={k} title={a ? `Akkoord op ${new Date(a.akkoord_op).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels' })}` : 'Nog geen akkoord'}
+            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ${a ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-white text-gray-500 border border-gray-200'}`}>
+            {a ? <Check className="h-3 w-3" /> : null}{data.namen[k]}
+          </span>
+        )
+      })}
+      {stand.allen && <span className="text-[11px] text-green-700 font-medium">akkoord van alle drie</span>}
+      {!stand.allen && stand.aangepast && <span className="text-[11px] text-amber-700">aangepast na een akkoord</span>}
+      {ikMoet && (
+        <button type="button" onClick={onAkkoord} disabled={bezig} className="ml-1 inline-flex items-center gap-1 rounded-full bg-gray-900 text-white px-2.5 py-0.5 text-[11px] font-semibold hover:bg-black disabled:opacity-50">
+          {bezig ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}Akkoord
+        </button>
+      )}
+    </div>
   )
 }

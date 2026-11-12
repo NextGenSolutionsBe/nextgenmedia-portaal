@@ -91,6 +91,8 @@ export const GEBEURTENIS_LABEL: Record<string, string> = {
   melding_verstuurd: 'Melding naar Legal verstuurd',
   melding_mislukt: 'Melding naar Legal mislukt',
   tegengetekend: 'Ondertekend door NextGenMedia',
+  facturen_gepland: 'Facturen automatisch gepland uit het contract',
+  facturen_plannen_onvolledig: 'Facturen nog niet gepland: gegevens ontbreken',
 }
 
 export const gebeurtenisLabel = (t: string): string => GEBEURTENIS_LABEL[t] ?? t

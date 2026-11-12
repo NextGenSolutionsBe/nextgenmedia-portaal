@@ -34,16 +34,34 @@ export function redenNietOpGetekend(status: string | null | undefined): string |
   return null
 }
 
+/** Hoe het contract buiten de app getekend werd. Via een bestelbon = het nummer is verplicht. */
+export const ONDERTEKEND_VIA = [
+  { key: 'mail', label: 'Per mail bevestigd' },
+  { key: 'papier', label: 'Op papier getekend' },
+  { key: 'bestelbon', label: 'Via een bestelbon' },
+] as const
+export type OndertekendVia = typeof ONDERTEKEND_VIA[number]['key']
+export const MAX_BESTELBON = 60
+
+/** Bestelbonnummer netjes: spaties samen, max 60 tekens; leeg = null. */
+export function normaliseerBestelbon(v: unknown): string | null {
+  const s = String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_BESTELBON)
+  return s || null
+}
+
 export function valideerOpGetekend(
-  b: { datum?: unknown; notitie?: unknown },
+  b: { datum?: unknown; notitie?: unknown; via?: unknown; bestelbon_nummer?: unknown },
   vandaag: string,
-): { ok: true; datum: string; notitie: string | null } | { ok: false; fout: string } {
+): { ok: true; datum: string; notitie: string | null; via?: OndertekendVia; bestelbon?: string } | { ok: false; fout: string } {
   const d = String(b.datum ?? '').trim()
   if (d && !/^\d{4}-\d{2}-\d{2}$/.test(d)) return { ok: false, fout: 'Ongeldige datum.' }
   const datum = d || vandaag
   if (datum > vandaag) return { ok: false, fout: 'De datum van ondertekening ligt in de toekomst.' }
   const n = String(b.notitie ?? '').trim().slice(0, MAX_NOTITIE)
-  return { ok: true, datum, notitie: n || null }
+  const via = ONDERTEKEND_VIA.some((x) => x.key === b.via) ? b.via as OndertekendVia : null
+  const bestelbon = normaliseerBestelbon(b.bestelbon_nummer)
+  if (via === 'bestelbon' && !bestelbon) return { ok: false, fout: 'Vul het bestelbonnummer in: het moet op elke factuur komen.' }
+  return { ok: true, datum, notitie: n || null, ...(via ? { via } : {}), ...(bestelbon ? { bestelbon } : {}) }
 }
 
 /** signed_at voor de gekozen dag: vandaag = nu, een eerdere dag = 12u UTC (zo verschuift de datum nooit). */

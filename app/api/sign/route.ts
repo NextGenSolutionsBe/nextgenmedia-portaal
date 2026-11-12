@@ -11,9 +11,10 @@ import { naOndertekening } from '@/lib/contract-archief'
 import { controleerAkkoord, akkoordDetails, PRIVACY_VERSIE } from '@/lib/voorwaarden'
 import { baseUrl } from '@/lib/email'
 import { waitUntil } from '@vercel/functions'
+import { planNaOndertekening } from '@/lib/facturatie/contract-plan-server'
 import { maakTegentekenTaak } from '@/lib/contracten/tegenhandtekening-server'
 
-export const maxDuration = 60
+export const maxDuration = 120
 
 export async function POST(req: NextRequest) {
   try {
@@ -230,8 +231,9 @@ export async function POST(req: NextRequest) {
     await logContractEvent(admin, contract_id, 'signed', { actor: signer_email, ip, ua: userAgent, meta: { akkoord_algemene_voorwaarden: true, akkoord_privacyverklaring: true, privacy_versie: PRIVACY_VERSIE } })
     if (signedPdfPath) await logContractEvent(admin, contract_id, 'pdf_generated', { actor: signer_email, ip, ua: userAgent })
 
-    // Facturen worden NIET automatisch uit het contract afgeleid: het team voegt
-    // ze zelf toe op de contractpagina (eenmalig, meerdere of maandelijks).
+    // Facturen: elke factuur van het contract komt meteen bij "Te factureren"
+    // (lib/facturatie/contract-plan-server.ts), na het antwoord aan de klant.
+    waitUntil(planNaOndertekening(admin, contract_id, signer_email))
 
     // ── Contractarchief + interne melding — best-effort ───────────────────────
     // Onveranderlijke kopie (getekende PDF, certificaat, dossier) in de

@@ -213,3 +213,35 @@ export function tekenStand(v: RegelsVersie | null, handtekeningen: RegelHandteke
   const per = Object.fromEntries(VENNOTEN.map((k) => [k, (tekst && handtekeningen.find((h) => h.vennoot === k && h.inhoud_tekst === tekst)) || null])) as Record<Vennoot, RegelHandtekening | null>
   return { ...per, allen: !!tekst && VENNOTEN.every((k) => !!per[k]) }
 }
+
+// ── Akkoord per uitgave ──────────────────────────────────────────────────────
+// Marco, Bram en Chiara drukken elk op "Akkoord" bij een uitgave. Het akkoord
+// hoort bij exact deze tekst: wordt de uitgave aangepast (bedrag, datum, wat,
+// waarvoor, voor wie of de bon), dan geeft iedereen opnieuw akkoord.
+
+export type UitgaveAkkoord = { uitgave_id: string; vennoot: Vennoot; naam: string | null; akkoord_op: string; inhoud_tekst: string }
+
+export function uitgaveTekst(u: Pick<Uitgave, 'id' | 'vennoot' | 'datum' | 'omschrijving' | 'doel' | 'bedrag' | 'bewijs_pad' | 'bewijs_naam'>): string {
+  return [
+    `Uitgave ${u.id}`,
+    `Voor: ${u.vennoot}`,
+    `Datum: ${u.datum}`,
+    `Wat: ${u.omschrijving}`,
+    `Waarvoor: ${u.doel ?? '—'}`,
+    `Bedrag: ${rond(u.bedrag).toFixed(2)}`,
+    `Bon: ${u.bewijs_pad ? `${u.bewijs_naam ?? 'bon'} (${u.bewijs_pad})` : 'geen'}`,
+  ].join('\n')
+}
+
+/** Wie gaf akkoord op de uitgave zoals ze nu is? */
+export function akkoordStand(u: Parameters<typeof uitgaveTekst>[0], akkoorden: UitgaveAkkoord[]): Record<Vennoot, UitgaveAkkoord | null> & { allen: boolean; aangepast: boolean } {
+  const tekst = uitgaveTekst(u)
+  const hier = akkoorden.filter((a) => a.uitgave_id === u.id)
+  const per = Object.fromEntries(VENNOTEN.map((k) => [k, hier.find((a) => a.vennoot === k && a.inhoud_tekst === tekst) ?? null])) as Record<Vennoot, UitgaveAkkoord | null>
+  return { ...per, allen: VENNOTEN.every((k) => !!per[k]), aangepast: hier.some((a) => a.inhoud_tekst !== tekst) }
+}
+
+/** Uitgaven (niet gearchiveerd) die nog op het akkoord van deze vennoot wachten. */
+export function wachtOpAkkoord(uitgaven: Uitgave[], akkoorden: UitgaveAkkoord[], wie: Vennoot): Uitgave[] {
+  return uitgaven.filter((u) => !u.gearchiveerd_op && !akkoordStand(u, akkoorden)[wie])
+}

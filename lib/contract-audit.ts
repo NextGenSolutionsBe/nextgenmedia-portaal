@@ -30,6 +30,8 @@ export type ContractEvent =
   | 'cancelled' | 'niet_geaccepteerd' | 'heropend'
   // NextGenMedia tekende na de klant (lib/contracten/tegenhandtekening-server.ts).
   | 'tegengetekend'
+  // Facturen automatisch gepland na ondertekening (lib/facturatie/contract-plan-server.ts).
+  | 'facturen_gepland' | 'facturen_plannen_onvolledig'
 
 export async function logContractEvent(
   admin: Admin,

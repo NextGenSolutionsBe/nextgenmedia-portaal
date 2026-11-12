@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Copy, Check, AlertTriangle, Info, StickyNote, Paperclip } from 'lucide-react'
+import { Copy, Check, AlertTriangle, Info, StickyNote, Paperclip, Receipt } from 'lucide-react'
 import { formatEuro } from '@/lib/utils'
 import { berekenRegel, berekenTotalen, eenheidTekst } from '@/lib/facturen/regels'
 import { adresRegels, kopieerTekst, prestatieTekst, regelKopie, FACTUUR_TYPES, type ItemDetail } from '@/lib/facturatie/item-model'
@@ -68,6 +68,18 @@ export function ItemInhoud({ data, metBijlagen = true }: { data: ItemData; metBi
       )}
       {data.aandacht.length > 0 && (
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700 flex gap-2"><Info className="h-4 w-4 shrink-0 mt-0.5" /><div>{data.aandacht.join(' ')}</div></div>
+      )}
+
+      {/* Bestelbon: groot bovenaan, want het nummer moet op de factuur. */}
+      {d.klant_referentie && (
+        <section className="rounded-xl border border-amber-300 bg-amber-50 p-3 flex items-center gap-3 flex-wrap">
+          <Receipt className="h-5 w-5 text-amber-700 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="text-[11px] text-amber-800">Bestelbon · zet dit nummer op de factuur</div>
+            <div className="font-semibold text-amber-950 text-base flex items-center gap-2">{d.klant_referentie}<KopieerKnop klein tekst={d.klant_referentie} label="Kopieer" melding="Bestelbonnummer gekopieerd." /></div>
+          </div>
+          {data.contract_id && <a href={`/admin/contracts/${data.contract_id}#bijlagen`} target="_blank" rel="noreferrer" className="text-xs font-medium text-amber-900 underline underline-offset-2">Bestelbon bekijken</a>}
+        </section>
       )}
 
       {/* Klant */}

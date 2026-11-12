@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { logContractEvent } from '@/lib/contract-audit'
 import { documentBestandsnaam, contentDisposition } from '@/lib/contract-archief-model'
+import { contractPdf } from '@/lib/contracten/pdf-herstel'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
@@ -30,8 +31,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       : contract.pdf_path
     if (!path) return NextResponse.json({ error: 'Geen bestand beschikbaar' }, { status: 404 })
 
-    const { data: bestand, error } = await admin.storage.from('contracts').download(path)
-    if (error || !bestand) return NextResponse.json({ error: 'Bestand niet gevonden' }, { status: 404 })
+    const bestand = await contractPdf(admin, id, path)
+    if (!bestand) return NextResponse.json({ error: 'Bestand niet gevonden' }, { status: 404 })
 
     const klantNaam = contract.client_id
       ? ((await admin.from('clients').select('company_name').eq('id', contract.client_id).maybeSingle()).data?.company_name ?? null)

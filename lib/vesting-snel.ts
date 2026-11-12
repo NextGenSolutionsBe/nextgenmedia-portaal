@@ -1,4 +1,5 @@
 import { DIENSTEN } from './vesting'
+import type { LeadSoort } from './vesting'
 
 /**
  * Vesting, de korte weg: een getekend contract met een prijs erbij, en wie het
@@ -54,6 +55,8 @@ export type SnelInvoer = {
   soort: 'eenmalig' | 'maand'
   prijs: number | null; maanden: number | null
   afspraak: boolean; closing: boolean
+  /** Hoe de klant binnenkwam; leeg = outbound door Marco (afspraak + closing). */
+  lead?: LeadSoort | null
   /** Gekoppeld contract dat de klant nog niet tekende: de datum volgt bij ondertekening. */
   wachtOpKlant?: boolean
 }
@@ -81,7 +84,7 @@ export function snelNaarRij(i: SnelInvoer): Record<string, unknown> {
   const basis = {
     resource: 'contract', klant: i.klant.trim(), client_id: i.client_id || null, contract_id: i.contract_id || null,
     ondertekend_op: i.ondertekend_op || null, dienst: raadVestingDienst(i.titel ?? ''),
-    appointment_door_marco: i.afspraak, closed_door_marco: i.closing,
+    appointment_door_marco: i.afspraak, closed_door_marco: i.closing, lead_soort: i.lead ?? null,
     status: 'actief', betalingen_op_schema: true, uitgesloten_kosten: 0,
   }
   if (i.soort === 'maand') {

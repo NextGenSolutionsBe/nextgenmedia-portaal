@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { CheckCircle2, Download, Loader2, Paperclip, Trash2, Undo2, X, FileText } from 'lucide-react'
 import { fileTooBig, readJson, MAX_UPLOAD_MB } from '@/lib/upload'
+import { ONDERTEKEND_VIA, type OndertekendVia } from '@/lib/contracten/manueel-getekend'
 
 export type ContractBijlage = { id: string; naam: string; grootte: number | null; created_by: string | null; created_at: string }
 
@@ -29,17 +30,20 @@ export function OpGetekendZetten({ contractId }: { contractId: string }) {
   const [open, setOpen] = useState(false)
   const [datum, setDatum] = useState(vandaag())
   const [notitie, setNotitie] = useState('')
+  const [via, setVia] = useState<OndertekendVia>('mail')
+  const [bestelbon, setBestelbon] = useState('')
   const [bestanden, setBestanden] = useState<File[]>([])
   const [bezig, setBezig] = useState(false)
   const teGroot = bestanden.filter((f) => fileTooBig(f))
 
   const bevestig = async () => {
     if (bezig || teGroot.length) return
+    if (via === 'bestelbon' && !bestelbon.trim()) { toast.error('Vul het bestelbonnummer in: het moet op elke factuur komen.'); return }
     setBezig(true)
     try {
       await readJson(await fetch(`/api/admin/contracts/${contractId}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'manueel_getekend', datum, notitie }),
+        body: JSON.stringify({ action: 'manueel_getekend', datum, notitie, via, bestelbon_nummer: via === 'bestelbon' ? bestelbon : null }),
       }))
       const mislukt: string[] = []
       for (const f of bestanden) {
@@ -56,7 +60,7 @@ export function OpGetekendZetten({ contractId }: { contractId: string }) {
 
   return (
     <>
-      <button type="button" onClick={() => { setDatum(vandaag()); setOpen(true) }} className="btn-secondary flex items-center gap-2 text-sm" title="Getekend buiten de app, bv. per mail bevestigd">
+      <button type="button" onClick={() => { setDatum(vandaag()); setVia('mail'); setBestelbon(''); setOpen(true) }} className="btn-secondary flex items-center gap-2 text-sm" title="Getekend buiten de app, bv. per mail bevestigd">
         <CheckCircle2 className="h-4 w-4" />
         Op getekend zetten
       </button>
@@ -69,7 +73,21 @@ export function OpGetekendZetten({ contractId }: { contractId: string }) {
               <button type="button" onClick={() => !bezig && setOpen(false)} className="text-gray-400 hover:text-black" aria-label="Sluiten"><X className="h-4 w-4" /></button>
             </div>
             <div className="p-5 space-y-4">
-              <p className="text-sm text-gray-600">Voor een contract dat buiten de app getekend is, bijvoorbeeld per mail bevestigd.</p>
+              <p className="text-sm text-gray-600">Voor een contract dat buiten de app getekend is, bijvoorbeeld per mail bevestigd of met een bestelbon.</p>
+              <fieldset className="space-y-1.5">
+                <legend className="text-xs text-gray-500 mb-1">Hoe werd het getekend?</legend>
+                {ONDERTEKEND_VIA.map((o) => (
+                  <label key={o.key} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer ${via === o.key ? 'border-gray-900 bg-gray-50' : 'border-gray-200'}`}>
+                    <input type="radio" name="ondertekend-via" checked={via === o.key} onChange={() => setVia(o.key)} className="accent-gray-900" />{o.label}
+                  </label>
+                ))}
+              </fieldset>
+              {via === 'bestelbon' && (
+                <label className="block text-xs text-gray-500">Bestelbonnummer <span className="text-red-600">*</span>
+                  <input autoFocus maxLength={60} placeholder="bv. PO-2026-0815" className="mt-0.5 w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg" value={bestelbon} onChange={(e) => setBestelbon(e.target.value)} />
+                  <span className="block mt-1 text-[11px] text-gray-400">Komt op elke factuur van dit contract bij Te factureren. Voeg de bestelbon hieronder toe als bijlage.</span>
+                </label>
+              )}
               <label className="block text-xs text-gray-500">Getekend op
                 <input type="date" max={vandaag()} className="mt-0.5 w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg" value={datum} onChange={(e) => setDatum(e.target.value)} />
               </label>
@@ -77,7 +95,7 @@ export function OpGetekendZetten({ contractId }: { contractId: string }) {
                 <textarea rows={2} maxLength={1000} placeholder="bv. per mail bevestigd" className="mt-0.5 w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg" value={notitie} onChange={(e) => setNotitie(e.target.value)} />
               </label>
               <div className="space-y-2">
-                <div className="text-xs text-gray-500">Bijlage <span className="text-gray-400">(optioneel, bv. het mailverkeer)</span></div>
+                <div className="text-xs text-gray-500">{via === 'bestelbon' ? 'De bestelbon' : 'Bijlage'} <span className="text-gray-400">({via === 'bestelbon' ? 'pdf of foto' : 'optioneel, bv. het mailverkeer'})</span></div>
                 {bestanden.map((f, i) => (
                   <div key={`${f.name}-${i}`} className={`flex items-center justify-between gap-2 rounded-lg border px-2 py-1.5 text-sm ${fileTooBig(f) ? 'border-red-200 bg-red-50' : 'border-gray-200'}`}>
                     <span className="truncate flex items-center gap-1.5"><Paperclip className="h-3.5 w-3.5 text-gray-400 shrink-0" />{f.name}</span>
@@ -117,11 +135,24 @@ export function GetekendBuitenApp(p: {
   signedAt: string | null
   door: string | null
   notitie: string | null
+  via?: string | null
+  bestelbon?: string | null
   bijlagen: ContractBijlage[]
   heeftOrigineel: boolean
 }) {
   const router = useRouter()
   const [bezig, setBezig] = useState<string | null>(null)
+  const [bbOpen, setBbOpen] = useState(false)
+  const [bb, setBb] = useState(p.bestelbon ?? '')
+
+  const bewaarBestelbon = async () => {
+    setBezig('bestelbon')
+    try {
+      const j = await readJson(await fetch(`/api/admin/contracts/${p.contractId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'bestelbon', bestelbon_nummer: bb }) })) as { facturen?: number }
+      toast.success(j.facturen ? `Bestelbonnummer bewaard en op ${j.facturen} factuur${j.facturen === 1 ? '' : 'en'} gezet.` : 'Bestelbonnummer bewaard.')
+      setBbOpen(false); router.refresh()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt') } finally { setBezig(null) }
+  }
   const basis = `/api/admin/contracts/${p.contractId}`
 
   const voegToe = async (files: File[]) => {
@@ -161,7 +192,7 @@ export function GetekendBuitenApp(p: {
   }
 
   return (
-    <div className="card-base space-y-4">
+    <div id="bijlagen" className="card-base space-y-4 scroll-mt-20">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <h2 className="font-semibold text-sm flex items-center gap-2">
           {p.getekend ? <><CheckCircle2 className="h-4 w-4 text-green-500" />Getekend buiten de app</> : <><Paperclip className="h-4 w-4 text-gray-500" />Bijlagen</>}
@@ -178,7 +209,27 @@ export function GetekendBuitenApp(p: {
           <div className="text-gray-600">
             {p.signedAt ? `Getekend op ${datumTekst(p.signedAt)}` : 'Getekend'}{p.door ? ` · op getekend gezet door ${p.door}` : ''}
           </div>
+          {p.via && <div className="text-gray-600">{ONDERTEKEND_VIA.find((o) => o.key === p.via)?.label}</div>}
           {p.notitie && <div className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2 text-gray-800 whitespace-pre-wrap">{p.notitie}</div>}
+        </div>
+      )}
+
+      {(p.bestelbon || p.via === 'bestelbon' || bbOpen) && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm">
+          {bbOpen ? (
+            <div className="flex gap-2 items-center flex-wrap">
+              <input autoFocus maxLength={60} className="flex-1 min-w-[160px] px-2 py-1.5 text-sm border border-amber-300 rounded-lg bg-white" placeholder="Bestelbonnummer" value={bb} onChange={(e) => setBb(e.target.value)} />
+              <button type="button" onClick={bewaarBestelbon} disabled={!!bezig} className="btn-primary text-sm">{bezig === 'bestelbon' && <Loader2 className="h-4 w-4 animate-spin" />}Bewaren</button>
+              <button type="button" onClick={() => { setBbOpen(false); setBb(p.bestelbon ?? '') }} className="btn-secondary text-sm">Annuleer</button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-amber-900">Bestelbon</span>
+              <b className="text-amber-950">{p.bestelbon ?? 'nummer ontbreekt'}</b>
+              <button type="button" onClick={() => setBbOpen(true)} className="ml-auto text-xs text-amber-900 underline underline-offset-2">{p.bestelbon ? 'Aanpassen' : 'Invullen'}</button>
+            </div>
+          )}
+          <p className="text-[11px] text-amber-800 mt-1">Staat op elke factuur van dit contract die nog te factureren is.</p>
         </div>
       )}
 

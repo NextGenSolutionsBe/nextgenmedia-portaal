@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { createAdminSupabaseClient, requireAdmin } from '@/lib/supabase/server'
 import { logAudit, requestMeta } from '@/lib/audit'
-import { volgendNr, wamSchema, planTermijnSync, contractSchema, stelKoppelingenVoor, factuurUitRij, DIENSTEN, FREQUENTIES, type Frequentie, type BestaandeTermijn, type Contract, type GekoppeldeFactuur } from '@/lib/vesting'
+import { volgendNr, wamSchema, planTermijnSync, contractSchema, stelKoppelingenVoor, factuurUitRij, DIENSTEN, FREQUENTIES, leadSoortVan, type Frequentie, type BestaandeTermijn, type Contract, type GekoppeldeFactuur } from '@/lib/vesting'
 import { inclFromExcl } from '@/lib/invoices'
 
 export const dynamic = 'force-dynamic'
@@ -78,6 +78,12 @@ function velden(resource: Resource, b: Record<string, unknown>, bijAanmaak: bool
       const p = b.toerekening_pct === null || b.toerekening_pct === '' ? null : getal(b.toerekening_pct)
       if (p !== null && (p < 0 || p > 100)) return { rij, fout: 'Het percentage ligt tussen 0 en 100.' }
       rij.toerekening_pct = p === null ? null : Math.round(p * 100) / 100
+    }
+    if (heeft('lead_soort')) {
+      // Leeg = outbound door Marco (afspraak + closing).
+      const l = b.lead_soort === null || b.lead_soort === '' ? null : leadSoortVan(b.lead_soort)
+      if (b.lead_soort && !l) return { rij, fout: 'Onbekende soort lead.' }
+      rij.lead_soort = l
     }
     if (heeft('laatste_betaalde_maand')) rij.laatste_betaalde_maand = datum(b.laatste_betaalde_maand)
     if (heeft('reden_stop')) rij.reden_stop = tekst(b.reden_stop)
@@ -614,7 +620,7 @@ export async function PATCH(req: NextRequest) {
         if ((count ?? 0) > 0) delete rij.uitgesloten_kosten
       }
       ;({ error } = await admin.from(TABEL[resource]).update(rij).eq('id', id))
-      if (error && /toerekening_pct|contract_id|betaald_bij_stop/.test(error.message)) throw new Error('De databank is nog niet bijgewerkt voor deze velden.')
+      if (error && /toerekening_pct|contract_id|betaald_bij_stop|lead_soort/.test(error.message)) throw new Error('De databank is nog niet bijgewerkt voor deze velden.')
       if (!error && resource === 'wam') await synchroniseerTermijnen(admin, id, oudeWam)
       if (!error && resource === 'contract') await synchroniseerContractTermijnen(admin, id, oudContract)
     }

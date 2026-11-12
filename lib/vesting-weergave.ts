@@ -5,6 +5,7 @@
  */
 
 import type { Akkoord, AkkoordStand, KostSoort, Registratie, Vennoot } from './vesting-akkoord'
+import type { LeadSoort } from './vesting'
 import type { KandidaatContract } from './vesting-snel'
 
 export type AkkoordWeergave = { inhoud: Akkoord; tekst: string; stand: AkkoordStand; wijzigingen: string[] }
@@ -35,6 +36,8 @@ export type ContractWeergave = {
   afspraak: boolean
   closing: boolean
   toerekening_pct: number | null
+  /** Hoe de klant binnenkwam; null = outbound door Marco. */
+  lead_soort: LeadSoort | null
   factor: number
   /** Wat er voor Marco meetelt (zoals getekend). */
   teltMee: number

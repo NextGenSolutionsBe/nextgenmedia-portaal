@@ -322,7 +322,7 @@ export async function buildNotifications(): Promise<Notif[]> {
 // de pipeline). `modules` = rechten van de medewerker (null = admin, alles).
 
 export type OpvolgItem = { id: string; titel: string; sub: string | null; href: string; dringend?: boolean }
-export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'tegentekenen' | 'meetings' | 'projecten' | 'content' | 'onderhoud' | 'opleveringen' | 'offertes'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
+export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'tegentekenen' | 'facturen' | 'meetings' | 'projecten' | 'content' | 'onderhoud' | 'opleveringen' | 'offertes'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
 
 const OPVOLG_MAX = 5
 const dagKort = (d: string) => new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' })
@@ -343,6 +343,7 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
     mag('aanvragen') ? opvolgAanvragen() : null,
     mag('contracts') ? opvolgContracten() : null,
     mag('contracts') ? opvolgTegentekenen() : null,
+    mag('contracts') ? opvolgFacturenPlannen() : null,
     mag('meetings') ? opvolgMeetings() : null,
     mag('opdrachten') ? opvolgProjecten() : null,
     mag('content') ? opvolgContent() : null,
@@ -409,6 +410,43 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
           id: r.id, titel: [r.client_id ? namen.get(r.client_id) : null, r.title].filter(Boolean).join(' – '),
           sub: `getekend door ${r.signer_name ?? 'de klant'}${r.signed_at ? ` op ${dagKort(r.signed_at)}` : ''} · wacht op onze handtekening`,
           href: `/admin/contracts/${r.id}/tegentekenen`, dringend: !!r.signed_at && Date.now() - new Date(r.signed_at).getTime() > 3 * 86_400_000,
+        })),
+      }
+    } catch { return null }
+  }
+
+  /**
+   * Vangnet: getekende, lopende contracten zonder één factuur of maandreeks.
+   * Normaal plant de app ze bij het tekenen; lukte dat niet, dan staat het hier
+   * tot iemand ze plant. Enkel zichtbaar als er iets is.
+   */
+  async function opvolgFacturenPlannen(): Promise<OpvolgGroep | null> {
+    try {
+      const { data, error } = await admin.from('contracts').select('id, title, client_id, signed_at, looptijd_status')
+        .in('status', ['signed', 'getekend']).order('signed_at', { ascending: false, nullsFirst: false }).limit(400)
+      if (error) return null
+      const lopend = ((data ?? []) as { id: string; title: string; client_id: string | null; signed_at: string | null; looptijd_status: string | null }[])
+        .filter((c) => !c.looptijd_status || c.looptijd_status === 'lopend')
+      if (!lopend.length) return null
+      const ids = lopend.map((c) => c.id)
+      const [{ data: inv }, { data: rec }] = await Promise.all([
+        admin.from('invoices').select('contract_id, status').in('contract_id', ids),
+        admin.from('recurring_invoices').select('contract_id, deleted_at').in('contract_id', ids),
+      ])
+      const met = new Set<string>()
+      for (const f of (inv ?? []) as { contract_id: string; status: string }[]) if (!['geannuleerd', 'gecrediteerd'].includes(f.status)) met.add(f.contract_id)
+      for (const r of (rec ?? []) as { contract_id: string; deleted_at: string | null }[]) if (!r.deleted_at) met.add(r.contract_id)
+      const zonder = lopend.filter((c) => !met.has(c.id))
+      if (!zonder.length) return null
+      const namen = await klantNamen(zonder.map((c) => c.client_id ?? ''))
+      const rijen = zonder.filter((c) => !/^test$/i.test((c.client_id ? namen.get(c.client_id) : '')?.trim() ?? ''))
+      if (!rijen.length) return null
+      return {
+        key: 'facturen', titel: 'Facturen plannen', totaal: rijen.length, alles: '/admin/contracts', leeg: 'Elk getekend contract heeft facturen.',
+        items: rijen.slice(0, OPVOLG_MAX).map((c) => ({
+          id: c.id, titel: [c.client_id ? namen.get(c.client_id) : null, c.title].filter(Boolean).join(' – '),
+          sub: `getekend${c.signed_at ? ` op ${dagKort(c.signed_at)}` : ''} · nog geen facturen`,
+          href: `/admin/contracts/${c.id}`, dringend: true,
         })),
       }
     } catch { return null }

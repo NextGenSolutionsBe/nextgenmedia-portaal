@@ -4,8 +4,8 @@ import type { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { VENNOTEN_SLEUTEL, leesVennoten, vennootVan } from '@/lib/vesting-akkoord'
 import { leesHandtekening } from '@/lib/contracten/tegenhandtekening'
 import {
-  VENNOTEN, controleerReden, controleerRegels, controleerUitgave, regelsTekst, tekenStand,
-  type RegelHandtekening, type RegelsVersie, type Uitgave, type Vennoot,
+  VENNOTEN, controleerReden, controleerRegels, controleerUitgave, regelsTekst, tekenStand, uitgaveTekst, wachtOpAkkoord,
+  type RegelHandtekening, type RegelsVersie, type Uitgave, type UitgaveAkkoord, type Vennoot,
 } from '@/lib/vennoot-uitgaven'
 
 type Admin = ReturnType<typeof createAdminSupabaseClient>
@@ -52,6 +52,8 @@ async function vennotenInstelling(admin: Admin) {
 
 export type VennotenData = {
   uitgaven: Uitgave[]
+  /** Akkoord per uitgave (Marco, Bram, Chiara), op de tekst van dat moment. */
+  akkoorden: UitgaveAkkoord[]
   regels: RegelsVersie | null
   handtekeningen: RegelHandtekening[]
   namen: Record<Vennoot, string>
@@ -66,14 +68,19 @@ export async function laadVennotenData(admin: Admin, userId: string | null): Pro
     admin.from('vennoot_uitgaven').select('*').order('datum', { ascending: false }).limit(5000),
     admin.from('vennoot_regels').select('*').order('versie', { ascending: false }).limit(1).maybeSingle(),
   ])
-  if (u.error && MIST.test(u.error.message)) return { uitgaven: [], regels: null, handtekeningen: [], namen, ik }
+  if (u.error && MIST.test(u.error.message)) return { uitgaven: [], akkoorden: [], regels: null, handtekeningen: [], namen, ik }
   const regels = r.data ? naarRegels(r.data as Record<string, unknown>) : null
   let handtekeningen: RegelHandtekening[] = []
   if (regels) {
     const { data } = await admin.from('vennoot_regels_handtekeningen').select('vennoot, naam, getekend_op, inhoud_tekst, handtekening').eq('regels_id', regels.id)
     handtekeningen = (data ?? []) as RegelHandtekening[]
   }
-  return { uitgaven: ((u.data ?? []) as Record<string, unknown>[]).map(naarUitgave), regels, handtekeningen, namen, ik }
+  let akkoorden: UitgaveAkkoord[] = []
+  {
+    const { data, error } = await admin.from('vennoot_uitgave_akkoorden').select('uitgave_id, vennoot, naam, akkoord_op, inhoud_tekst').order('akkoord_op').limit(20000)
+    if (!error) akkoorden = (data ?? []) as UitgaveAkkoord[]
+  }
+  return { uitgaven: ((u.data ?? []) as Record<string, unknown>[]).map(naarUitgave), akkoorden, regels, handtekeningen, namen, ik }
 }
 
 export type RegelsMetHandtekeningen = RegelsVersie & { handtekeningen: RegelHandtekening[] }
@@ -160,6 +167,28 @@ export async function archiveerUitgave(admin: Admin, id: string, redenIn: unknow
 export async function zetTerug(admin: Admin, id: string): Promise<void> {
   const { error } = await admin.from('vennoot_uitgaven').update({ gearchiveerd_op: null, gearchiveerd_door: null, archief_reden: null }).eq('id', id)
   if (error) throw new Error(error.message)
+}
+
+/** Akkoord van de ingelogde vennoot op de uitgave zoals ze nu is. */
+export async function keurUitgaveGoed(admin: Admin, id: string, inv: { userId: string; naam: string | null; ip: string | null; ua: string | null }): Promise<void> {
+  const wie = vennootVan(inv.userId, await vennotenInstelling(admin))
+  if (!wie) throw new UitgaveFout('Enkel Marco, Bram en Chiara geven akkoord, elk met hun eigen account.', 403)
+  const { data } = await admin.from('vennoot_uitgaven').select('*').eq('id', id).maybeSingle()
+  if (!data) throw new UitgaveFout('Uitgave niet gevonden.', 404)
+  const u = naarUitgave(data as Record<string, unknown>)
+  if (u.gearchiveerd_op) throw new UitgaveFout('Een gearchiveerde uitgave telt niet mee; daar is geen akkoord voor nodig.', 409)
+  const { error } = await admin.from('vennoot_uitgave_akkoorden').insert({ uitgave_id: id, vennoot: wie, user_id: inv.userId, naam: inv.naam, inhoud_tekst: uitgaveTekst(u), ip: inv.ip, user_agent: inv.ua?.slice(0, 400) ?? null })
+  if (error && !/duplicate|23505/i.test(`${error.code} ${error.message}`)) throw new Error(error.message)
+}
+
+/** Melding per vennoot: uitgaven die op jouw akkoord wachten. */
+export async function uitgavenMeldingVoor(userId: string, admin: Admin): Promise<{ id: string; kind: string; priority: 'high' | 'med'; title: string; date: string | null; href: string }[]> {
+  const data = await laadVennotenData(admin, userId)
+  if (!data.ik) return []
+  const wacht = wachtOpAkkoord(data.uitgaven, data.akkoorden, data.ik)
+  if (!wacht.length) return []
+  const laatste = wacht.map((u) => u.created_at ?? u.datum).sort().pop() ?? null
+  return [{ id: `vennoot-uitgaven:${data.ik}:${wacht.length}:${laatste}`, kind: 'vennoten', priority: 'med', title: `${wacht.length} ${wacht.length === 1 ? 'uitgave wacht' : 'uitgaven wachten'} op jouw akkoord`, date: laatste ? laatste.slice(0, 10) : null, href: '/admin/vennoten?akkoord=1' }]
 }
 
 // ── Regels ───────────────────────────────────────────────────────────────────

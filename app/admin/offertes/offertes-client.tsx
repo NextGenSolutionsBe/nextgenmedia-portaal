@@ -47,6 +47,7 @@ function OffertesLijst({ focus }: { focus: string | null }) {
   const [filter, setFilter] = useState<Filter>('alles')
   const [zoek, setZoek] = useState('')
   const [mail, setMail] = useState<Rij | null>(null)
+  const [aanvaard, setAanvaard] = useState<Rij | null>(null)
   const [bezig, setBezig] = useState<string | null>(null)
   const [klanten, setKlanten] = useState<KlantOptie[] | null>(null)
   const [klant, setKlant] = useState<KlantOptie | null>(null)
@@ -127,7 +128,7 @@ function OffertesLijst({ focus }: { focus: string | null }) {
                   <span className="absolute left-2.5 top-3 bottom-3 w-1.5 rounded-full" style={{ background: MERK_STIJL[o.merk].accent }} title={MERK_STIJL[o.merk].naam} />
                   <div className="min-w-0 w-full sm:w-auto sm:flex-1">
                     <p className="text-sm font-semibold text-gray-900 truncate">{o.klant_naam ?? '—'} <span className="font-normal text-gray-500">· {o.offertenummer ? `${o.offertenummer} · ` : ''}{o.titel}</span>{o.getekend_op && <PenLine className="inline h-3.5 w-3.5 ml-1 text-green-700" aria-label="Getekend" />}</p>
-                    <p className="text-xs text-gray-500 truncate">{w.sub}</p>
+                    <p className="text-xs text-gray-500 truncate">{w.sub}{o.bestelbon_nummer && <span className="ml-1.5 rounded-full bg-amber-100 text-amber-900 px-1.5 py-0.5 text-[10.5px] font-semibold">Bestelbon {o.bestelbon_nummer}</span>}</p>
                   </div>
                   {o.bedrag_excl !== null && o.bedrag_excl !== undefined && <span className="text-sm tabular-nums text-gray-800">{formatEuro(Number(o.bedrag_excl))}</span>}
                   <span className={`status-badge ${KLEUR[w.kleur]}`}>{w.label}</span>
@@ -141,6 +142,7 @@ function OffertesLijst({ focus }: { focus: string | null }) {
                     )}
                     {o.bron === 'opgemaakt' && o.status === 'concept' && <Link href={`/admin/offertes/opmaken?id=${o.id}`} className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Aanpassen"><Pencil className="h-4 w-4" /></Link>}
                     {o.bron === 'opgemaakt' && <button type="button" onClick={() => kopie(o)} disabled={bezig === o.id} className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Kopie maken (nieuw nummer)"><CopyPlus className="h-4 w-4" /></button>}
+                    {(o.status === 'verstuurd' || o.status === 'concept') && <button type="button" onClick={() => setAanvaard(o)} className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100 hover:text-green-700" title="Op aanvaard zetten (per mail, op papier of met een bestelbon)"><Check className="h-4 w-4" /></button>}
                     {o.status === 'verstuurd' && <button type="button" onClick={() => actie(o, 'intrekken')} disabled={bezig === o.id} className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-red-600" title="Intrekken"><Ban className="h-4 w-4" /></button>}
                     <button type="button" onClick={() => actie(o, 'verwijderen')} disabled={bezig === o.id} className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-red-600" title="Volledig verwijderen"><Trash2 className="h-4 w-4" /></button>
                     {o.opdracht_id && <Link href={`/admin/opdrachten?opdracht=${o.opdracht_id}`} className="text-xs text-gray-500 hover:text-black underline px-1">Project</Link>}
@@ -151,6 +153,8 @@ function OffertesLijst({ focus }: { focus: string | null }) {
           </ul>
         )}
 
+      {aanvaard && <AanvaardDialoog offerte={aanvaard} onSluit={() => setAanvaard(null)} onKlaar={() => { setAanvaard(null); toast.success('Offerte staat op aanvaard. De kaart schuift naar Offerte geaccepteerd.'); void laad() }} />}
+
       {mail && (
         <MailDialog
           context={{ type: 'offerte', offerteId: mail.id, titel: mail.titel, link: mail.link, klant: mail.klant_naam, contact: mail.ontvanger_naam, email: mail.ontvanger_email, geldigTot: mail.geldig_tot, merk: mail.merk }}
@@ -158,6 +162,57 @@ function OffertesLijst({ focus }: { focus: string | null }) {
           onSent={() => { toast.success('Verstuurd.'); setMail(null); void laad() }}
         />
       )}
+    </div>
+  )
+}
+
+/** De klant aanvaardde buiten de app: per mail, op papier of met een bestelbon (dan het nummer erbij). */
+function AanvaardDialoog({ offerte, onSluit, onKlaar }: { offerte: Rij; onSluit: () => void; onKlaar: () => void }) {
+  const [via, setVia] = useState<'mail' | 'papier' | 'bestelbon'>('mail')
+  const [bestelbon, setBestelbon] = useState('')
+  const [notitie, setNotitie] = useState('')
+  const [bezig, setBezig] = useState(false)
+  const bewaar = async () => {
+    if (via === 'bestelbon' && !bestelbon.trim()) { toast.error('Vul het bestelbonnummer in.'); return }
+    setBezig(true)
+    try {
+      await api(`/api/admin/offertes/${offerte.id}`, { method: 'PATCH', body: JSON.stringify({ actie: 'aanvaard', via, bestelbon: via === 'bestelbon' ? bestelbon : null, notitie }) })
+      onKlaar()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt') } finally { setBezig(false) }
+  }
+  const OPTIES = [{ k: 'mail', l: 'Per mail bevestigd' }, { k: 'papier', l: 'Op papier getekend' }, { k: 'bestelbon', l: 'Via een bestelbon' }] as const
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" role="dialog" aria-modal="true">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-y-auto">
+        <div className="flex items-center justify-between gap-2 p-5 border-b border-gray-100">
+          <h3 className="font-semibold text-gray-900 flex items-center gap-2"><Check className="h-5 w-5 text-green-600" />Op aanvaard zetten</h3>
+          <button type="button" onClick={() => !bezig && onSluit()} className="text-gray-400 hover:text-black" aria-label="Sluiten"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <p className="text-sm text-gray-600">{offerte.klant_naam ?? 'De klant'} aanvaardde <b>{offerte.titel}</b> buiten de app.</p>
+          <fieldset className="space-y-1.5">
+            <legend className="text-xs text-gray-500 mb-1">Hoe?</legend>
+            {OPTIES.map((o) => (
+              <label key={o.k} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer ${via === o.k ? 'border-gray-900 bg-gray-50' : 'border-gray-200'}`}>
+                <input type="radio" name="aanvaard-via" checked={via === o.k} onChange={() => setVia(o.k)} className="accent-gray-900" />{o.l}
+              </label>
+            ))}
+          </fieldset>
+          {via === 'bestelbon' && (
+            <label className="block text-xs text-gray-500">Bestelbonnummer <span className="text-red-600">*</span>
+              <input autoFocus maxLength={60} placeholder="bv. PO-2026-0815" className="mt-0.5 w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg" value={bestelbon} onChange={(e) => setBestelbon(e.target.value)} />
+              <span className="block mt-1 text-[11px] text-gray-400">Gaat mee naar het contract van dit project en zo naar elke factuur.</span>
+            </label>
+          )}
+          <label className="block text-xs text-gray-500">Notitie <span className="text-gray-400">(optioneel)</span>
+            <textarea rows={2} maxLength={1000} className="mt-0.5 w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg" value={notitie} onChange={(e) => setNotitie(e.target.value)} placeholder="bv. bestelbon ontvangen van de aankoopdienst" />
+          </label>
+          <div className="flex gap-2">
+            <button type="button" onClick={bewaar} disabled={bezig} className="btn-primary flex-1 justify-center">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Op aanvaard zetten</button>
+            <button type="button" onClick={onSluit} disabled={bezig} className="btn-secondary">Annuleer</button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

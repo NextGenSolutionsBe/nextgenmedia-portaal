@@ -15,6 +15,7 @@ import { ContractPdfPreview } from './contract-pdf-preview'
 import { ContractTimeline } from './contract-timeline'
 import { VerzondenMails } from '@/components/contracten/verzonden-mails'
 import { ContractFacturatie } from './contract-facturatie'
+import { FacturenUitContract } from './facturen-uit-contract'
 import { ContractNavigatie } from './contract-navigatie'
 import { statusInfo, canonicalStatus, isNietDoorgegaan } from '@/lib/contract-status'
 import { ContracttypeBewerker } from './contracttype-bewerker'
@@ -194,6 +195,9 @@ export default async function ContractDetailPage({ params }: { params: { id: str
         </div>
       ))}
 
+      {/* Facturen uit het getekende contract: automatisch gepland, of wat er nog ontbreekt. */}
+      {isSigned && <FacturenUitContract contractId={c.id} />}
+
       {/* Financieel overzicht bovenaan: contractwaarde, facturen, kosten en winst in één oogopslag. */}
       <ContractFacturatie
         contractId={c.id} clientId={clientId} serviceSlug={c.service_slug ?? null} contractTitle={c.title} isSigned={!!isSigned} nietDoorgegaan={nietDoorgegaan}
@@ -213,6 +217,8 @@ export default async function ContractDetailPage({ params }: { params: { id: str
               signedAt={c.signed_at ?? null}
               door={c.ondertekening_door ?? null}
               notitie={c.ondertekening_notitie ?? null}
+              via={c.ondertekening_via ?? null}
+              bestelbon={c.bestelbon_nummer ?? null}
               bijlagen={data.bijlagen}
               heeftOrigineel={!!pdfUrl}
             />

@@ -1,4 +1,6 @@
 import { safeMessage } from '@/lib/api-error'
+import { waitUntil } from '@vercel/functions'
+import { planNaOndertekening } from '@/lib/facturatie/contract-plan-server'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient , isActiveStaff } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
@@ -6,11 +8,13 @@ import { randomUUID } from 'crypto'
 import { logContractEvent } from '@/lib/contract-audit'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { typeVanContract } from '@/lib/contracten/types'
-import { MANUEEL, isManueelGetekend, redenNietOpGetekend, valideerOpGetekend, signedAtVoor, statusNaOngedaan, vandaagBrussel } from '@/lib/contracten/manueel-getekend'
+import { MANUEEL, isManueelGetekend, redenNietOpGetekend, valideerOpGetekend, signedAtVoor, statusNaOngedaan, vandaagBrussel, normaliseerBestelbon } from '@/lib/contracten/manueel-getekend'
 import { canonicalStatus } from '@/lib/contract-status'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
+// Na het tekenen plant de app de facturen (pdf lezen) via waitUntil.
+export const maxDuration = 120
 
 async function requireAdmin() {
   const supabase = await createClient()
@@ -186,6 +190,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const p: Record<string, unknown> = {
         status: 'signed', signed_at: signedAtVoor(v.datum, vandaag),
         ondertekening_wijze: MANUEEL, ondertekening_notitie: v.notitie, ondertekening_door: user.email ?? user.id,
+        ondertekening_via: v.via ?? null, ...(v.bestelbon ? { bestelbon_nummer: v.bestelbon } : {}),
       }
       for (let i = 0; i < 4; i++) {
         const { error } = await admin.from('contracts').update(p).eq('id', id)
@@ -193,10 +198,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         const col = String(error.message || '').match(/Could not find the '([^']+)' column/)?.[1]
         // Zonder ondertekening_wijze zou het contract later een vals certificaat kunnen krijgen.
         if (col === 'ondertekening_wijze') return NextResponse.json({ error: 'Op getekend zetten vereist een database-migratie (ondertekening_wijze).' }, { status: 400 })
+        if (col === 'bestelbon_nummer') return NextResponse.json({ error: 'Het bestelbonnummer bewaren vereist een database-migratie (bestelbon_nummer).' }, { status: 400 })
         if (col && col in p) { delete p[col]; continue }
         throw new Error(error.message)
       }
-      await logContractEvent(admin, id, 'signed', { actor: user.email ?? user.id, meta: { wijze: MANUEEL, datum: v.datum, notitie: v.notitie, vorige_status: oud.status ?? null } })
+      await logContractEvent(admin, id, 'signed', { actor: user.email ?? user.id, meta: { wijze: MANUEEL, via: v.via ?? null, bestelbon: v.bestelbon ?? null, datum: v.datum, notitie: v.notitie, vorige_status: oud.status ?? null } })
       const m = requestMeta(req)
       await logAudit({
         action: 'contract.manueel_getekend', entityType: 'contract', entityId: id,
@@ -205,6 +211,28 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         metadata: { datum: v.datum, notitie: v.notitie, vorige_status: oud.status ?? null }, ip: m.ip, userAgent: m.userAgent,
       })
       if (oud.client_id) try { revalidatePath(`/admin/clients/${oud.client_id}`) } catch { }
+      waitUntil(planNaOndertekening(admin, id, user.email ?? null))
+    } else if (action === 'bestelbon') {
+      // Bestelbonnummer van het contract (ook achteraf). Gaat mee naar elke
+      // factuur van dit contract die nog niet verstuurd is.
+      const { data: oud } = await admin.from('contracts').select('id, title, bestelbon_nummer').eq('id', id).maybeSingle()
+      if (!oud) return NextResponse.json({ error: 'Contract niet gevonden' }, { status: 404 })
+      const nieuw = normaliseerBestelbon(body.bestelbon_nummer)
+      const { error } = await admin.from('contracts').update({ bestelbon_nummer: nieuw }).eq('id', id)
+      if (error) throw new Error(/bestelbon_nummer/.test(error.message) ? 'Het bestelbonnummer bewaren vereist een database-migratie (bestelbon_nummer).' : error.message)
+      const vorig = (oud.bestelbon_nummer as string | null) ?? null
+      const { data: open } = await admin.from('invoices').select('id, klant_referentie').eq('contract_id', id).eq('status', 'te_versturen')
+      const teZetten = ((open ?? []) as { id: string; klant_referentie: string | null }[]).filter((f) => !f.klant_referentie || f.klant_referentie === vorig).map((f) => f.id)
+      if (teZetten.length) await admin.from('invoices').update({ klant_referentie: nieuw }).in('id', teZetten)
+      const m = requestMeta(req)
+      await logAudit({
+        action: 'contract.bestelbon', entityType: 'contract', entityId: id,
+        summary: `Bestelbonnummer van "${oud.title ?? id}": ${nieuw ?? 'leeg'}${teZetten.length ? ` (op ${teZetten.length} factuur${teZetten.length === 1 ? '' : 'en'} gezet)` : ''}`,
+        actorUserId: user.id, actorEmail: user.email ?? null, actorRole: 'admin',
+        metadata: { oud: vorig, nieuw, facturen: teZetten }, ip: m.ip, userAgent: m.userAgent,
+      })
+      try { revalidatePath(`/admin/contracts/${id}`); revalidatePath('/admin/invoices') } catch { }
+      return NextResponse.json({ ok: true, bestelbon_nummer: nieuw, facturen: teZetten.length })
     } else if (action === 'manueel_getekend_ongedaan') {
       // Enkel voor een contract dat handmatig op getekend gezet werd. Bijlagen blijven staan.
       const { data: oud } = await admin.from('contracts').select('*').eq('id', id).maybeSingle()
@@ -215,7 +243,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const { data: ev } = await admin.from('contract_events').select('meta').eq('contract_id', id).eq('event_type', 'signed').order('created_at', { ascending: false }).limit(1).maybeSingle()
       const vorige = (ev?.meta as { wijze?: string; vorige_status?: string | null } | null)
       const status = statusNaOngedaan(vorige?.wijze === MANUEEL ? vorige.vorige_status : null, oud.sent_at)
-      const { error } = await admin.from('contracts').update({ status, signed_at: null, ondertekening_wijze: null, ondertekening_notitie: null, ondertekening_door: null }).eq('id', id)
+      const { error } = await admin.from('contracts').update({ status, signed_at: null, ondertekening_wijze: null, ondertekening_notitie: null, ondertekening_door: null, ondertekening_via: null }).eq('id', id)
       if (error) throw new Error(error.message)
       await logContractEvent(admin, id, 'manueel_getekend_ongedaan', { actor: user.email ?? user.id, meta: { status, notitie: oud.ondertekening_notitie ?? null } })
       const m = requestMeta(req)

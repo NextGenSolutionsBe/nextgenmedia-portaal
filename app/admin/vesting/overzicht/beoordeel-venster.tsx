@@ -5,10 +5,10 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import { ExternalLink, Loader2, Plus, Trash2 } from 'lucide-react'
 import { leesGetal } from '@/lib/getal'
-import { toerekeningsfactor } from '@/lib/vesting'
+import { toerekeningsfactor, type LeadSoort } from '@/lib/vesting'
 import { KOST_SOORTEN, kostSoortLabel, type KostSoort } from '@/lib/vesting-akkoord'
 import { isGetekend, snelNaarRij, snelTotaal, controleerSnel, type KandidaatContract, type SnelInvoer } from '@/lib/vesting-snel'
-import { Paneel, Rekensom, RolKnop, api, datumKort, eur } from './delen'
+import { LeadKiezer, Paneel, Rekensom, RolKnop, api, datumKort, eur } from './delen'
 
 type Klant = { id: string; naam: string; closer: string | null; setter: string | null }
 const isMarco = (s?: string | null) => !!s && s.trim().toLowerCase().startsWith('marco')
@@ -32,6 +32,7 @@ export function BeoordeelVenster({ k, klanten, onClose, onToegevoegd }: {
   const [maanden, setMaanden] = useState('')
   const [afspraak, setAfspraak] = useState(klant?.setter ? isMarco(klant.setter) : false)
   const [closing, setClosing] = useState(klant?.closer ? isMarco(klant.closer) : false)
+  const [lead, setLead] = useState<LeadSoort | null>(null)
   const [kosten, setKosten] = useState<{ soort: KostSoort; omschrijving: string; bedrag: string }[]>([])
   const [bezig, setBezig] = useState(false)
 
@@ -39,12 +40,12 @@ export function BeoordeelVenster({ k, klanten, onClose, onToegevoegd }: {
     klant: k.klant ?? klant?.naam ?? '', client_id: k.client_id, contract_id: k.id, titel: k.titel,
     ondertekend_op: getekend && k.signed_at ? k.signed_at : '', start_dienst: k.start_date,
     soort, prijs: leesGetal(prijs), maanden: soort === 'maand' ? leesGetal(maanden) : null,
-    afspraak, closing, wachtOpKlant: !getekend,
+    afspraak, closing, lead, wachtOpKlant: !getekend,
   }
   const totaal = snelTotaal(invoer)
   const kostSom = kosten.reduce((s, x) => s + (leesGetal(x.bedrag) ?? 0), 0)
   const netto = totaal === null ? null : Math.max(0, totaal - kostSom)
-  const factor = toerekeningsfactor({ appointment_door_marco: afspraak, closed_door_marco: closing })
+  const factor = toerekeningsfactor({ appointment_door_marco: afspraak, closed_door_marco: closing, lead_soort: lead })
   const fout = controleerSnel(invoer) ?? (kosten.some((x) => !(leesGetal(x.bedrag) ?? 0)) ? 'Vul bij elke kost een bedrag in.' : null)
 
   const bewaar = async () => {
@@ -83,11 +84,18 @@ export function BeoordeelVenster({ k, klanten, onClose, onToegevoegd }: {
       )}
 
       <section>
+        <h3 className="text-sm font-semibold text-gray-900 mb-2">Hoe kwam de klant binnen?</h3>
+        <LeadKiezer waarde={lead} onChange={setLead} />
+      </section>
+
+      <section>
+        {!lead && <>
         <h3 className="text-sm font-semibold text-gray-900 mb-2">Wat deed Marco?</h3>
         <div className="flex flex-wrap gap-2">
           <RolKnop aan={afspraak} label="Afspraak gezet" onClick={() => setAfspraak((x) => !x)} />
           <RolKnop aan={closing} label="Klant geclosed" onClick={() => setClosing((x) => !x)} />
         </div>
+        </>}
         {factor === 0 && <p className="mt-2 text-xs text-amber-800">Zonder afspraak of closing door Marco telt dit contract niet mee. Kies dan "Telt niet mee" in de lijst.</p>}
       </section>
 
