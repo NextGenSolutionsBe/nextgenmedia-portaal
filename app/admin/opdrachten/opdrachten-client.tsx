@@ -11,6 +11,7 @@ import {
 import type { OpdrachtStatus } from '@/lib/opdrachten'
 import { formatEuro } from '@/lib/utils'
 import { KanbanBord } from './kanban-bord'
+import { AbmKolom } from './abm-kolom'
 import { OpdrachtVenster } from './opdracht-venster'
 import { VerplaatsDialoog, vraagBijVerplaatsen, type VerplaatsSoort } from './verplaats-dialoog'
 import { AanvullenDialoog } from './aanvullen-dialoog'
@@ -275,7 +276,7 @@ export function OpdrachtenClient() {
       {laden && rijen.length === 0 ? (
         <div className="py-16 text-center text-gray-400"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div>
       ) : weergave === 'bord' ? (
-        <KanbanBord kaarten={zichtbaar} laden={laden}
+        <KanbanBord kaarten={zichtbaar} laden={laden} voor={<AbmKolom onVernieuw={() => laad({ stil: true })} />}
           onOpen={(o) => setVenster({ id: o.id, kolom: kolomVan(o.status) })}
           onVerplaats={verplaats}
           onNieuw={(k) => setVenster({ id: null, kolom: k })} />

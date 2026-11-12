@@ -27,7 +27,7 @@ async function post<T>(url: string, body?: unknown): Promise<T> {
   return j as T
 }
 
-export function PortaalBeveiliging() {
+export function PortaalBeveiliging({ instellen = false }: { instellen?: boolean }) {
   const [status, setStatus] = useState<Status | null>(null)
   const [fout, setFout] = useState<string | null>(null)
   const [setup, setSetup] = useState<Setup | null>(null)
@@ -43,12 +43,16 @@ export function PortaalBeveiliging() {
     } catch (e) { setFout(e instanceof Error ? e.message : 'Laden mislukt') }
   }, [])
   useEffect(() => { laad() }, [laad])
+  // Vanuit de welkomstmail: meteen de stap "inschakelen" openen.
+  const [autoOpen, setAutoOpen] = useState(instellen)
+  useEffect(() => { if (autoOpen && status && !status.actief && status.beschikbaar !== false) { setDialoog('aan'); setAutoOpen(false) } }, [autoOpen, status])
 
   if (fout) return <div className="card-base text-sm text-red-600">{fout}</div>
   if (!status) return <div className="card-base py-10 text-center text-gray-400"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div>
 
   return (
     <div className="space-y-4">
+      <WachtwoordKaart />
       <div className="card-base">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="min-w-0">
@@ -258,5 +262,45 @@ function Herbevestig({ soort, onSluit, onKlaar }: { soort: Actie; onSluit: () =>
         </div>
       </form>
     </Dialoog>
+  )
+}
+
+/** Eigen wachtwoord wijzigen: huidig wachtwoord + twee keer het nieuwe. */
+function WachtwoordKaart() {
+  const [open, setOpen] = useState(false)
+  const [huidig, setHuidig] = useState('')
+  const [n1, setN1] = useState(''); const [n2, setN2] = useState('')
+  const [bezig, setBezig] = useState(false)
+  const [fout, setFout] = useState<string | null>(null)
+  const sluit = () => { setOpen(false); setHuidig(''); setN1(''); setN2(''); setFout(null) }
+  const bewaar = async (e: React.FormEvent) => {
+    e.preventDefault(); setFout(null)
+    if (n1 !== n2) { setFout('De twee nieuwe wachtwoorden zijn niet gelijk.'); return }
+    setBezig(true)
+    try { await post('/api/portal/wachtwoord', { huidig, nieuw: n1 }); toast.success('Je wachtwoord is gewijzigd.'); sluit() }
+    catch (e) { setFout(e instanceof Error ? e.message : 'Bewaren mislukt') } finally { setBezig(false) }
+  }
+  return (
+    <div className="card-base">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <h2 className="font-semibold text-gray-900 flex items-center gap-2"><KeyRound className="h-4 w-4 text-gray-400" />Wachtwoord</h2>
+          <p className="text-sm text-gray-500 mt-0.5">Wijzig je wachtwoord wanneer je wil. Je hebt je huidige wachtwoord nodig.</p>
+        </div>
+        <button type="button" className="btn-secondary" onClick={() => setOpen(true)}><KeyRound className="h-4 w-4" />Wachtwoord wijzigen</button>
+      </div>
+      {open && (
+        <Dialoog titel="Wachtwoord wijzigen" onSluit={sluit}>
+          <form onSubmit={bewaar} className="space-y-4">
+            <div><label htmlFor="ww-huidig" className="block text-xs font-medium text-gray-600 mb-1">Huidig wachtwoord</label><input id="ww-huidig" type="password" autoComplete="current-password" autoFocus className={INP} value={huidig} onChange={(e) => setHuidig(e.target.value)} /></div>
+            <div><label htmlFor="ww-nieuw" className="block text-xs font-medium text-gray-600 mb-1">Nieuw wachtwoord</label><input id="ww-nieuw" type="password" autoComplete="new-password" className={INP} value={n1} onChange={(e) => setN1(e.target.value)} /></div>
+            <div><label htmlFor="ww-nieuw2" className="block text-xs font-medium text-gray-600 mb-1">Nieuw wachtwoord, nog een keer</label><input id="ww-nieuw2" type="password" autoComplete="new-password" className={INP} value={n2} onChange={(e) => setN2(e.target.value)} /></div>
+            <p className="text-[11px] text-gray-400">Minstens 10 tekens.</p>
+            {fout && <div role="alert" className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{fout}</div>}
+            <div className="flex gap-2 justify-end"><button type="button" onClick={sluit} disabled={bezig} className="btn-secondary">Annuleren</button><button type="submit" disabled={bezig || !huidig || !n1} className="btn-primary">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Bewaren</button></div>
+          </form>
+        </Dialoog>
+      )}
+    </div>
   )
 }
