@@ -52,7 +52,7 @@ export function normaliseerBestelbon(v: unknown): string | null {
 export function valideerOpGetekend(
   b: { datum?: unknown; notitie?: unknown; via?: unknown; bestelbon_nummer?: unknown },
   vandaag: string,
-): { ok: true; datum: string; notitie: string | null; via: OndertekendVia | null; bestelbon: string | null } | { ok: false; fout: string } {
+): { ok: true; datum: string; notitie: string | null; via?: OndertekendVia; bestelbon?: string } | { ok: false; fout: string } {
   const d = String(b.datum ?? '').trim()
   if (d && !/^\d{4}-\d{2}-\d{2}$/.test(d)) return { ok: false, fout: 'Ongeldige datum.' }
   const datum = d || vandaag
@@ -61,7 +61,7 @@ export function valideerOpGetekend(
   const via = ONDERTEKEND_VIA.some((x) => x.key === b.via) ? b.via as OndertekendVia : null
   const bestelbon = normaliseerBestelbon(b.bestelbon_nummer)
   if (via === 'bestelbon' && !bestelbon) return { ok: false, fout: 'Vul het bestelbonnummer in: het moet op elke factuur komen.' }
-  return { ok: true, datum, notitie: n || null, via, bestelbon }
+  return { ok: true, datum, notitie: n || null, ...(via ? { via } : {}), ...(bestelbon ? { bestelbon } : {}) }
 }
 
 /** signed_at voor de gekozen dag: vandaag = nu, een eerdere dag = 12u UTC (zo verschuift de datum nooit). */

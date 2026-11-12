@@ -13,6 +13,7 @@
  */
 
 import type { ContractBerekend, WamKost, WamRij } from './vesting'
+import { leadInfo, leadSoortVan, type LeadSoort } from './vesting'
 import { leesGetal } from './getal'
 
 export const VENNOTEN = ['marco', 'bram', 'chiara'] as const
@@ -179,7 +180,9 @@ export type ContractAkkoord = {
   netto: number | null
   afspraak: boolean
   closing: boolean
-  /** Marco's deel in procent (50 + 50, of een eigen percentage). */
+  /** Hoe de klant binnenkwam (enkel als het geen outbound door Marco is: zo blijven oudere handtekeningen geldig). */
+  lead?: LeadSoort
+  /** Marco's deel in procent (50 + 50, de soort lead, of een eigen percentage). */
   deel_pct: number
   /** Loopt, vroegtijdig stopgezet of niet-betaler. */
   verloop: 'loopt' | 'stopgezet' | 'niet_betaler'
@@ -197,7 +200,7 @@ export type RegistratieAkkoord = {
 export type Akkoord = ContractAkkoord | RegistratieAkkoord
 
 type ContractVoorAkkoord = Pick<ContractBerekend,
-  'klant' | 'nr' | 'totaal' | 'kostenAftrek' | 'netto' | 'appointment_door_marco' | 'closed_door_marco' | 'factor' | 'status' | 'betaald_bij_stop' | 'opBetaaldBedrag'>
+  'klant' | 'nr' | 'totaal' | 'kostenAftrek' | 'netto' | 'appointment_door_marco' | 'closed_door_marco' | 'factor' | 'status' | 'betaald_bij_stop' | 'opBetaaldBedrag'> & { lead_soort?: LeadSoort | string | null }
 
 export function contractAkkoord(c: ContractVoorAkkoord, lijnen: KostLijn[], titel: string | null = null): ContractAkkoord {
   const verloop: ContractAkkoord['verloop'] = c.status === 'stopgezet' ? 'stopgezet' : c.status === 'niet_betaler' ? 'niet_betaler' : 'loopt'
@@ -217,6 +220,7 @@ export function contractAkkoord(c: ContractVoorAkkoord, lijnen: KostLijn[], tite
     kosten_totaal: rond(c.kostenAftrek),
     netto: c.netto === null ? null : rond(c.netto),
     afspraak: c.appointment_door_marco, closing: c.closed_door_marco,
+    ...(leadSoortVan(c.lead_soort) ? { lead: leadSoortVan(c.lead_soort) as LeadSoort } : {}),
     deel_pct: rond(c.factor * 100),
     verloop, betaald_bij_stop: betaald,
     telt_mee: rond(basis * c.factor),
@@ -333,6 +337,7 @@ export function wijzigingen(vorigeTekst: string | null, huidig: Akkoord): string
     else if (JSON.stringify(oud.kosten) !== JSON.stringify(huidig.kosten)) uit.push('Kostenlijnen of hun verantwoording aangepast')
     if (oud.afspraak !== huidig.afspraak) uit.push(`Afspraak door Marco: ${jaNee(oud.afspraak)} → ${jaNee(huidig.afspraak)}`)
     if (oud.closing !== huidig.closing) uit.push(`Closing door Marco: ${jaNee(oud.closing)} → ${jaNee(huidig.closing)}`)
+    if ((oud.lead ?? null) !== (huidig.lead ?? null)) uit.push(`Soort lead: ${leadInfo(oud.lead)?.label ?? 'outbound door Marco'} → ${leadInfo(huidig.lead)?.label ?? 'outbound door Marco'}`)
     if (oud.deel_pct !== huidig.deel_pct && oud.afspraak === huidig.afspraak && oud.closing === huidig.closing) uit.push(`Deel van Marco ${oud.deel_pct}% → ${huidig.deel_pct}%`)
     if (oud.verloop !== huidig.verloop) uit.push(huidig.verloop === 'stopgezet' ? 'Vroegtijdig stopgezet' : huidig.verloop === 'niet_betaler' ? 'Niet-betaler' : 'Loopt weer')
     if (oud.betaald_bij_stop !== huidig.betaald_bij_stop && huidig.verloop === 'stopgezet') uit.push(`Betaald bij stop ${eur(oud.betaald_bij_stop)} → ${eur(huidig.betaald_bij_stop)}`)
@@ -354,7 +359,7 @@ export function controleerHandtekening(v: unknown): string | null {
 export function beschrijfAkkoord(a: Akkoord): string {
   if (a.soort === 'contract') {
     const kosten = a.kosten_totaal ? ` − ${eur(a.kosten_totaal)} kosten` : ''
-    const rol = [a.afspraak && 'afspraak', a.closing && 'closing'].filter(Boolean).join(' + ') || 'geen rol'
+    const rol = leadInfo(a.lead)?.kort ?? ([a.afspraak && 'afspraak', a.closing && 'closing'].filter(Boolean).join(' + ') || 'geen rol')
     if (a.verloop === 'niet_betaler') return `${a.klant}: niet-betaler, telt voor €0`
     if (a.verloop === 'stopgezet') return `${a.klant}: gestopt, ${eur(a.betaald_bij_stop)} betaald × ${a.deel_pct}% (${rol}) = ${eur(a.telt_mee)} telt mee`
     return `${a.klant}: ${eur(a.contractwaarde)}${kosten} = ${eur(a.netto)} × ${a.deel_pct}% (${rol}) = ${eur(a.telt_mee)} telt mee`
@@ -386,7 +391,7 @@ const tijd = (iso: string) => new Date(iso).toLocaleString('nl-BE', { day: 'nume
 export function certificaatRegels(g: CertificaatGegevens): [string, string][] {
   const a = g.inhoud
   if (a.soort === 'contract') {
-    const rol = [a.afspraak && 'afspraak gezet', a.closing && 'klant geclosed'].filter(Boolean).join(' en ') || 'geen rol'
+    const rol = leadInfo(a.lead)?.label ?? ([a.afspraak && 'afspraak gezet', a.closing && 'klant geclosed'].filter(Boolean).join(' en ') || 'geen rol')
     return [
       ['Klant', a.klant],
       ['Contract', `${a.contract ?? '—'} (${a.nr})`],

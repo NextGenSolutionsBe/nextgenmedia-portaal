@@ -5,7 +5,7 @@ import { createAdminSupabaseClient, requireAdmin } from '@/lib/supabase/server'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { leesProfiel } from '@/lib/account-server'
 import {
-  UitgaveFout, archiveerUitgave, laadVennotenData, maakUitgave, nieuweRegels, regelsGeschiedenis, tekenRegels, wijzigUitgave, zetTerug,
+  UitgaveFout, archiveerUitgave, laadVennotenData, maakUitgave, nieuweRegels, regelsGeschiedenis, tekenRegels, wijzigUitgave, zetTerug, keurUitgaveGoed,
 } from '@/lib/vennoot-uitgaven-server'
 
 export const dynamic = 'force-dynamic'
@@ -39,6 +39,7 @@ export async function POST(req: NextRequest) {
       case 'wijzig': if (!id) throw new UitgaveFout('Ongeldige vraag.'); await wijzigUitgave(admin, id, b); samenvatting = 'Uitgave aangepast'; break
       case 'archiveer': if (!id) throw new UitgaveFout('Ongeldige vraag.'); await archiveerUitgave(admin, id, b.reden, naam); samenvatting = `Uitgave gearchiveerd: ${String(b.reden ?? '')}`; break
       case 'terugzetten': if (!id) throw new UitgaveFout('Ongeldige vraag.'); await zetTerug(admin, id); samenvatting = 'Uitgave teruggezet uit het archief'; break
+      case 'akkoord': if (!id) throw new UitgaveFout('Ongeldige vraag.'); await keurUitgaveGoed(admin, id, { userId: ik.id, naam, ip: meta.ip, ua: meta.userAgent }); samenvatting = 'Akkoord met de uitgave'; break
       case 'regels': { const v = await nieuweRegels(admin, b, naam); samenvatting = `Regels uitgaven vennoten: versie ${v.versie}`; break }
       case 'teken': if (!id) throw new UitgaveFout('Ongeldige vraag.'); await tekenRegels(admin, id, { userId: ik.id, email: ik.email ?? null, naam, handtekening: b.handtekening, ip: meta.ip, ua: meta.userAgent }); samenvatting = 'Regels uitgaven vennoten getekend'; break
       default: throw new UitgaveFout('Onbekende actie.')

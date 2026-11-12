@@ -190,7 +190,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const p: Record<string, unknown> = {
         status: 'signed', signed_at: signedAtVoor(v.datum, vandaag),
         ondertekening_wijze: MANUEEL, ondertekening_notitie: v.notitie, ondertekening_door: user.email ?? user.id,
-        ondertekening_via: v.via, ...(v.bestelbon ? { bestelbon_nummer: v.bestelbon } : {}),
+        ondertekening_via: v.via ?? null, ...(v.bestelbon ? { bestelbon_nummer: v.bestelbon } : {}),
       }
       for (let i = 0; i < 4; i++) {
         const { error } = await admin.from('contracts').update(p).eq('id', id)
@@ -202,7 +202,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         if (col && col in p) { delete p[col]; continue }
         throw new Error(error.message)
       }
-      await logContractEvent(admin, id, 'signed', { actor: user.email ?? user.id, meta: { wijze: MANUEEL, via: v.via, bestelbon: v.bestelbon, datum: v.datum, notitie: v.notitie, vorige_status: oud.status ?? null } })
+      await logContractEvent(admin, id, 'signed', { actor: user.email ?? user.id, meta: { wijze: MANUEEL, via: v.via ?? null, bestelbon: v.bestelbon ?? null, datum: v.datum, notitie: v.notitie, vorige_status: oud.status ?? null } })
       const m = requestMeta(req)
       await logAudit({
         action: 'contract.manueel_getekend', entityType: 'contract', entityId: id,

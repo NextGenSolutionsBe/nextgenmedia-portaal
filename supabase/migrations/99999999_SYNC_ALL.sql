@@ -7346,3 +7346,20 @@ alter table public.contracts add column if not exists ondertekening_via text;
 -- Offerte zelf op aanvaard zetten (mail, papier of bestelbon); het bestelbonnummer gaat mee naar het contract.
 alter table public.offertes add column if not exists bestelbon_nummer text;
 alter table public.offertes add column if not exists aanvaard_via text;
+-- Vesting: soort lead per contract (Google Ads 100%, website 50%, inbound met Bram als closer 25%).
+alter table public.vesting_contracten add column if not exists lead_soort text;
+-- Uitgaven vennoten: akkoord van Marco, Bram en Chiara per uitgave, op exact die cijfers.
+create table if not exists public.vennoot_uitgave_akkoorden (
+  id uuid primary key default gen_random_uuid(),
+  uitgave_id uuid not null references public.vennoot_uitgaven(id) on delete cascade,
+  vennoot text not null,
+  user_id uuid not null,
+  naam text,
+  inhoud_tekst text not null,
+  akkoord_op timestamptz not null default now(),
+  ip text,
+  user_agent text
+);
+create unique index if not exists vennoot_uitgave_akkoorden_uniek on public.vennoot_uitgave_akkoorden (uitgave_id, vennoot, md5(inhoud_tekst));
+create index if not exists vennoot_uitgave_akkoorden_uitgave on public.vennoot_uitgave_akkoorden (uitgave_id);
+alter table public.vennoot_uitgave_akkoorden enable row level security;

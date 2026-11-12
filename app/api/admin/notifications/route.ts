@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { getActor, actorCanSee } from '@/lib/actor-modules'
 import { buildNotifications } from '@/lib/notifications'
 import { vestingMeldingVoor } from '@/lib/vesting-data-server'
-import { regelsMeldingVoor } from '@/lib/vennoot-uitgaven-server'
+import { regelsMeldingVoor, uitgavenMeldingVoor } from '@/lib/vennoot-uitgaven-server'
 import { vestingRegelsMeldingVoor } from '@/lib/vesting-regels-server'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 
@@ -31,6 +31,8 @@ export async function GET() {
       try { notifications.unshift(...(await vestingMeldingVoor(actor.userId))) } catch { /* melding is een extra */ }
       // Uitgaven vennoten: de regels wachten op jouw handtekening.
       try { notifications.unshift(...(await regelsMeldingVoor(actor.userId, createAdminSupabaseClient()))) } catch { /* melding is een extra */ }
+      // Uitgaven vennoten: uitgaven die op jouw akkoord wachten.
+      try { notifications.unshift(...(await uitgavenMeldingVoor(actor.userId, createAdminSupabaseClient()))) } catch { /* melding is een extra */ }
       // Vesting: de regels wachten op jouw handtekening.
       try { notifications.unshift(...(await vestingRegelsMeldingVoor(actor.userId, createAdminSupabaseClient()))) } catch { /* melding is een extra */ }
     }

@@ -5,9 +5,10 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import { ExternalLink, Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
 import { leesGetal } from '@/lib/getal'
+import { leadInfo } from '@/lib/vesting'
 import { KOST_SOORTEN, kostSoortLabel, type KostSoort, type Vennoot } from '@/lib/vesting-akkoord'
 import type { ContractWeergave } from '@/lib/vesting-weergave'
-import { Akkoord, Paneel, Rekensom, RolKnop, api, datumKort, eur, pct, procentUitleg } from './delen'
+import { Akkoord, LeadKiezer, Paneel, Rekensom, RolKnop, api, datumKort, eur, pct, procentUitleg } from './delen'
 import { BewijsKiezer, BewijsLink, type BewijsWaarde } from './bewijs-kiezer'
 
 const INP = 'input-base'
@@ -46,7 +47,7 @@ export function ContractVenster({ c, vennoten, ik, laatste, onLaatste, onClose, 
     { label: 'Netto', waarde: eur(c.netto, true) },
     ...(c.status === 'stopgezet' ? [{ label: 'Vroegtijdig stopgezet: wat de klant betaalde', waarde: c.akkoord.inhoud.soort === 'contract' && c.akkoord.inhoud.betaald_bij_stop !== null ? eur(c.akkoord.inhoud.betaald_bij_stop, true) : 'nog in te vullen' }] : []),
     ...(c.status === 'niet_betaler' ? [{ label: 'Niet-betaler', waarde: '€ 0' }] : []),
-    { label: `Deel van Marco${eigenVerdeling ? ' (eigen verdeling)' : ''}`, waarde: `× ${Math.round(c.factor * 100)}%` },
+    { label: `Deel van Marco${eigenVerdeling ? ' (eigen verdeling)' : c.lead_soort ? ` (${leadInfo(c.lead_soort)?.kort})` : ''}`, waarde: `× ${Math.round(c.factor * 100)}%` },
     { label: 'Telt mee voor Marco', waarde: eur(c.teltMee, true), sterk: true },
     ...(c.algemeneKostenAftrek > 0 ? [{ label: 'Waarvan naar algemene kosten', waarde: `− ${eur(c.algemeneKostenAftrek, true)}`, zacht: true }] : []),
     ...(c.telt && !c.wachtOpKlant ? [{ label: 'Levert Marco op', waarde: pct(c.ruweVesting, 2), sterk: true }] : []),
@@ -72,6 +73,11 @@ export function ContractVenster({ c, vennoten, ik, laatste, onLaatste, onClose, 
       )}
 
       <section>
+        <h3 className="text-sm font-semibold text-gray-900 mb-2">Hoe kwam de klant binnen?</h3>
+        <LeadKiezer waarde={c.lead_soort} bezig={bezig === 'lead'} onChange={(v) => patch({ lead_soort: v, toerekening_pct: null }, 'lead')} />
+      </section>
+
+      {!c.lead_soort && <section>
         <h3 className="text-sm font-semibold text-gray-900 mb-2">Wat deed Marco?</h3>
         <div className="flex flex-wrap gap-2">
           <RolKnop aan={c.afspraak} label="Afspraak gezet" bezig={bezig === 'afspraak'} onClick={() => patch({ appointment_door_marco: !c.afspraak }, 'afspraak')} />
@@ -83,7 +89,7 @@ export function ContractVenster({ c, vennoten, ik, laatste, onLaatste, onClose, 
             <button type="button" className="underline" onClick={() => patch({ toerekening_pct: null }, 'verdeling')}>Terug naar 50% + 50%</button>
           </p>
         )}
-      </section>
+      </section>}
 
       <section>
         <div className="flex items-center justify-between gap-2 mb-2">

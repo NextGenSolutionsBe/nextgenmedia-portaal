@@ -6,6 +6,7 @@ import { Check, Download, Loader2, Mail, PenLine, RotateCcw, X } from 'lucide-re
 import { HandtekeningVak } from '@/components/admin/handtekening-vak'
 import { VENNOTEN, type Vennoot } from '@/lib/vesting-akkoord'
 import type { AkkoordWeergave, CertificaatKort, ContractWeergave } from '@/lib/vesting-weergave'
+import { LEAD_SOORTEN, type LeadSoort } from '@/lib/vesting'
 
 export const eur = (n: number | null | undefined, cent = false) =>
   n === null || n === undefined ? '—' : new Intl.NumberFormat('nl-BE', { style: 'currency', currency: 'EUR', minimumFractionDigits: cent ? 2 : 0, maximumFractionDigits: cent ? 2 : 0 }).format(n)
@@ -298,4 +299,29 @@ export function procentUitleg(c: Pick<ContractWeergave, 'teltVoorAandeel' | 'ruw
   const voor = c.algemeneKostenAftrek > 0 ? `Na ${eur(c.algemeneKostenAftrek)} algemene kosten telt ${eur(c.teltVoorAandeel)}. ` : ''
   const tarief = goedkoop > 0.005 && jaar > 0.005 ? ' (deels aan het tarief tot 10%, deels aan het jaartarief)' : jaar > 0.005 ? ' (jaartarief: de eerste 10% zijn al bereikt)' : ' (tarief tot 10% in totaal)'
   return `${voor}${delen.join(' + ')} = ${pct(c.ruweVesting, 2)}${tarief}.`
+}
+
+/**
+ * Hoe kwam de klant binnen? Outbound = wat Marco deed (afspraak 50% + closing
+ * 50%); inbound via Google Ads 100%, via de website 50%, inbound met Bram als closer 25%.
+ */
+export function LeadKiezer({ waarde, onChange, bezig }: { waarde: LeadSoort | null; onChange: (v: LeadSoort | null) => void; bezig?: boolean }) {
+  const opties: { key: LeadSoort | null; label: string; sub: string }[] = [
+    { key: null, label: 'Outbound door Marco', sub: 'afspraak 50% + closing 50%' },
+    ...LEAD_SOORTEN.map((l) => ({ key: l.key, label: l.label, sub: `${l.pct}% in de pot` })),
+  ]
+  return (
+    <div className="grid sm:grid-cols-2 gap-2" role="radiogroup" aria-label="Hoe kwam de klant binnen?">
+      {opties.map((o) => {
+        const aan = waarde === o.key
+        return (
+          <button key={o.key ?? 'outbound'} type="button" role="radio" aria-checked={aan} disabled={bezig} onClick={() => onChange(o.key)}
+            className={`rounded-lg border px-3 py-2 text-left transition-colors ${aan ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'}`}>
+            <div className="text-sm font-medium">{o.label}</div>
+            <div className={`text-xs mt-0.5 ${aan ? 'text-gray-300' : 'text-gray-500'}`}>{o.sub}</div>
+          </button>
+        )
+      })}
+    </div>
+  )
 }

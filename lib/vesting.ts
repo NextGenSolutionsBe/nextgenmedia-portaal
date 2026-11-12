@@ -120,6 +120,11 @@ export type Contract = {
   contract_id: string | null
   /** Eigen toerekening in procent (0–100). Leeg = 50% appointment + 50% closing. */
   toerekening_pct?: number | null
+  /**
+   * Hoe de klant binnenkwam. Leeg = outbound door Marco (afspraak 50% +
+   * closing 50%). Google Ads 100%, website 50%, inbound met Bram als closer 25%.
+   */
+  lead_soort?: LeadSoort | null
   /** Gekoppelde klant uit het klantenbestand (optioneel; `klant` blijft de naam). */
   client_id?: string | null
   /**
@@ -489,14 +494,32 @@ export function totaalwaarde(c: Pick<Contract, 'facturatiemodel' | 'maandbedrag'
   return c.handmatige_totaalwaarde === null || c.handmatige_totaalwaarde === undefined ? null : n(c.handmatige_totaalwaarde)
 }
 
+/** Hoe de klant binnenkwam, met het deel dat in de pot gaat. */
+export type LeadSoort = 'google_ads' | 'website' | 'inbound_bram'
+export const LEAD_SOORTEN: { key: LeadSoort; label: string; kort: string; pct: number }[] = [
+  { key: 'google_ads', label: 'Inbound via Google Ads', kort: 'inbound via Google Ads', pct: 100 },
+  { key: 'website', label: 'Inbound via de website, zonder Google Ads', kort: 'inbound via de website', pct: 50 },
+  { key: 'inbound_bram', label: 'Inbound, Bram closet', kort: 'inbound, Bram closet', pct: 25 },
+]
+export function leadSoortVan(v: unknown): LeadSoort | null {
+  return LEAD_SOORTEN.some((l) => l.key === v) ? v as LeadSoort : null
+}
+export const leadInfo = (v: unknown) => LEAD_SOORTEN.find((l) => l.key === v) ?? null
+
 /** Afgeleid uit appointment/closing: 50% + 50%. */
 export function standaardToerekening(c: Pick<Contract, 'appointment_door_marco' | 'closed_door_marco'>): number {
   return Math.min(1, (c.appointment_door_marco ? 0.5 : 0) + (c.closed_door_marco ? 0.5 : 0))
 }
-/** De toerekening van één contract: het eigen percentage als dat ingevuld is, anders 50% + 50%. */
-export function toerekeningsfactor(c: Pick<Contract, 'appointment_door_marco' | 'closed_door_marco'> & { toerekening_pct?: number | null }): number {
+/**
+ * De toerekening van één contract: het eigen percentage als dat ingevuld is,
+ * anders de soort lead (Google Ads 100%, website 50%, Bram closet 25%),
+ * anders 50% afspraak + 50% closing.
+ */
+export function toerekeningsfactor(c: Pick<Contract, 'appointment_door_marco' | 'closed_door_marco'> & { toerekening_pct?: number | null; lead_soort?: LeadSoort | string | null }): number {
   const eigen = c.toerekening_pct
   if (eigen !== null && eigen !== undefined && Number.isFinite(Number(eigen))) return Math.max(0, Math.min(1, Number(eigen) / 100))
+  const lead = leadInfo(c.lead_soort)
+  if (lead) return lead.pct / 100
   return standaardToerekening(c)
 }
 

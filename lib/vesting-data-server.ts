@@ -1,7 +1,7 @@
 import 'server-only'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { directeKostenVoorContracten } from '@/lib/facturen/kosten-data'
-import { berekenVesting, factuurUitRij, leesInstellingen, type Contract, type ContractTermijn, type GekoppeldeFactuur, type VestingOverzicht } from '@/lib/vesting'
+import { berekenVesting, factuurUitRij, leesInstellingen, leadSoortVan, type Contract, type ContractTermijn, type GekoppeldeFactuur, type VestingOverzicht } from '@/lib/vesting'
 import { naarContract, naarKost, naarWam } from '@/lib/vesting-rijen'
 import { NIET_MEETELLEN_SLEUTEL, teBeoordelen, type KandidaatContract } from '@/lib/vesting-snel'
 import {
@@ -155,7 +155,8 @@ export async function laadVestingData(admin: Admin = createAdminSupabaseClient()
 
   const alle = module.map(naarKandidaat)
   const inVesting = new Set(contractRijen.map((r) => r.contract_id).filter((x): x is string => typeof x === 'string' && !!x))
-  const kandidaten = teBeoordelen(alle, inVesting, new Set(nietMeetellen), { ookNietGetekend: true })
+  // Enkel getekende contracten komen als keuze "telt mee / telt niet mee" (12 nov 2026).
+  const kandidaten = teBeoordelen(alle, inVesting, new Set(nietMeetellen))
   const nietSet = new Set(nietMeetellen)
   const nietMee = alle.filter((m) => nietSet.has(m.id))
 
@@ -274,7 +275,7 @@ export function naarWeergave(data: VestingData, userId: string | null): VestingW
       facturatiemodel: c.facturatiemodel, maandbedrag: c.maandbedrag, duur: c.duur, totaal: c.totaal,
       kostLijnen: data.kostLijnen.filter((l) => l.vesting_contract_id === c.id).map(({ id, soort, omschrijving, bedrag, verantwoording, bewijs }) => ({ id, soort, omschrijving, bedrag, verantwoording: verantwoording ?? null, bewijs: bewijs ? { pad: bewijs.pad, naam: bewijs.naam } : null })),
       kostenFacturen: c.directe_kosten_facturen ?? null, kostenAftrek: c.kostenAftrek, netto: c.netto,
-      afspraak: c.appointment_door_marco, closing: c.closed_door_marco, toerekening_pct: c.toerekening_pct ?? null, factor: c.factor,
+      afspraak: c.appointment_door_marco, closing: c.closed_door_marco, toerekening_pct: c.toerekening_pct ?? null, lead_soort: leadSoortVan(c.lead_soort), factor: c.factor,
       teltMee: akkoord.inhoud.soort === 'contract' ? akkoord.inhoud.telt_mee : 0,
       algemeneKostenAftrek: c.algemeneKostenAftrek, teltVoorAandeel: c.teltVoorAandeel, status: c.status,
       telt: c.erkenning !== 'uitgesloten', definitief: c.erkenning === 'definitief', ruweVesting: c.ruweVesting,
