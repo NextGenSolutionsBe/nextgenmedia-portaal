@@ -147,7 +147,7 @@ function Rijtje({ label, children }: { label: string; children: ReactNode }) {
 export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerVrij, onSluit, onKlaar, onOpen }: {
   opties: Opties; bestaand: Meeting | null; startDag?: string
   /** Vanuit Calendar (gesleept of getikt): datum, uur, duur en agenda alvast ingevuld. */
-  voorinvul?: { dag: string; uur: string; duur: number; agendaId?: string | null }
+  voorinvul?: { dag?: string; uur?: string; duur?: number; agendaId?: string | null; clientId?: string | null }
   /** Vlak vóór het opslaan opnieuw nagaan of het moment nog vrij is (Calendar). */
   controleerVrij?: boolean
   onSluit: () => void; onKlaar: (m: Meeting, melding: string) => void; onOpen: (id: string) => void
@@ -155,7 +155,7 @@ export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerV
   const [sleutel] = useState(nieuweSleutel)
   const [stap, setStap] = useState<'invullen' | 'controle'>('invullen')
   const tzStart = bestaand?.tijdzone ?? STANDAARD_TIJDZONE
-  const [clientId, setClientId] = useState(bestaand?.client_id ?? '')
+  const [clientId, setClientId] = useState(bestaand?.client_id ?? voorinvul?.clientId ?? '')
   const [zoek, setZoek] = useState('')
   const [toonKlanten, setToonKlanten] = useState(false)
   const [projectId, setProjectId] = useState(bestaand?.project_id ?? '')
@@ -842,7 +842,7 @@ function Bron({ x }: { x: Item }) {
 }
 
 type Tab = 'komend' | 'voorbij' | 'geannuleerd'
-type Venster = { soort: 'plan'; meeting: Meeting | null; dag?: string } | { soort: 'detail'; id: string } | { soort: 'annuleer'; meeting: Meeting } | { soort: 'koppelingen' } | { soort: 'afspraak'; a: Afspraak } | null
+type Venster = { soort: 'plan'; meeting: Meeting | null; dag?: string; klant?: string | null } | { soort: 'detail'; id: string } | { soort: 'annuleer'; meeting: Meeting } | { soort: 'koppelingen' } | { soort: 'afspraak'; a: Afspraak } | null
 
 export function MeetingsClient() {
   const router = useRouter()
@@ -866,6 +866,8 @@ export function MeetingsClient() {
   }, [laad])
   // Deep-link vanuit zoeken of een melding: ?meeting=<id>
   useEffect(() => { const id = params.get('meeting'); if (id) setVenster({ soort: 'detail', id }) }, [params])
+  // Vanuit Projecten (Account-based marketing): ?plan=1&klant=<id> opent het planvenster met die klant.
+  useEffect(() => { if (params.get('plan') === '1') setVenster({ soort: 'plan', meeting: null, klant: params.get('klant') }) }, [params])
 
   const sluit = useCallback(() => { setVenster(null); if (params.get('meeting')) router.replace('/admin/meetings') }, [params, router])
   const open = (x: Item) => setVenster(x.soort === 'meeting' ? { soort: 'detail', id: x.m.id } : { soort: 'afspraak', a: x.a })
@@ -951,7 +953,7 @@ export function MeetingsClient() {
       )}
 
       {venster?.soort === 'plan' && opties && (
-        <PlanVenster opties={opties} bestaand={venster.meeting} startDag={venster.dag} onSluit={() => setVenster(venster.meeting ? { soort: 'detail', id: venster.meeting.id } : null)}
+        <PlanVenster opties={opties} bestaand={venster.meeting} startDag={venster.dag} voorinvul={venster.klant ? { clientId: venster.klant } : undefined} onSluit={() => setVenster(venster.meeting ? { soort: 'detail', id: venster.meeting.id } : null)}
           onOpen={(id) => setVenster({ soort: 'detail', id })}
           onKlaar={(m, melding) => { if (melding) toast.success(melding); laad(); setVenster({ soort: 'detail', id: m.id }) }} />
       )}

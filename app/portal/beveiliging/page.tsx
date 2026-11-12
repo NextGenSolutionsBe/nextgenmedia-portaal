@@ -10,7 +10,7 @@ import { PortaalBeveiliging } from './beveiliging-client'
  * elke ingelogde portaalgebruiker beheert enkel zijn eigen tweestapsverificatie.
  * Alle acties lopen via /api/auth/2fa/* en gelden altijd voor de ingelogde gebruiker.
  */
-export default async function PortaalBeveiligingPage() {
+export default async function PortaalBeveiligingPage({ searchParams }: { searchParams?: { instellen?: string } }) {
   const session = await resolvePortalSession()
   if (!session || !session.active) redirect('/login')
   return (
@@ -19,10 +19,10 @@ export default async function PortaalBeveiligingPage() {
         <div className="h-9 w-9 rounded-lg bg-gray-100 flex items-center justify-center"><ShieldCheck className="h-4 w-4 text-black" /></div>
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Beveiliging</h1>
-          <p className="text-sm text-gray-500">Bescherm je account extra met tweestapsverificatie.</p>
+          <p className="text-sm text-gray-500">Je wachtwoord en tweestapsverificatie.</p>
         </div>
       </div>
-      <PortaalBeveiliging />
+      <PortaalBeveiliging instellen={searchParams?.instellen === '1'} />
     </div>
   )
 }

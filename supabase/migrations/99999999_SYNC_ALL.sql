@@ -7363,3 +7363,39 @@ create table if not exists public.vennoot_uitgave_akkoorden (
 create unique index if not exists vennoot_uitgave_akkoorden_uniek on public.vennoot_uitgave_akkoorden (uitgave_id, vennoot, md5(inhoud_tekst));
 create index if not exists vennoot_uitgave_akkoorden_uitgave on public.vennoot_uitgave_akkoorden (uitgave_id);
 alter table public.vennoot_uitgave_akkoorden enable row level security;
+-- Klantaccount activeren (12 nov 2026): persoonlijke link (7 dagen) om zelf een wachtwoord te kiezen. Enkel de SHA-256 van de token.
+create table if not exists public.klant_activaties (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid references public.clients(id) on delete cascade,
+  user_id uuid not null,
+  email text not null,
+  token_hash text not null unique,
+  verloopt_op timestamptz not null,
+  geopend_op timestamptz,
+  gebruikt_op timestamptz,
+  created_at timestamptz not null default now(),
+  created_by text
+);
+create index if not exists klant_activaties_user on public.klant_activaties (user_id);
+alter table public.klant_activaties enable row level security;
+-- Projecten: Account-based marketing (12 nov 2026). Bedrijven waar we gericht achter gaan, geïmporteerd uit csv of xlsx.
+create table if not exists public.abm_bedrijven (
+  id uuid primary key default gen_random_uuid(),
+  naam text not null,
+  btw_nummer text,
+  telefoon text,
+  email text,
+  website text,
+  contactpersoon text,
+  functie text,
+  gemeente text,
+  sector text,
+  notitie text,
+  client_id uuid references public.clients(id) on delete set null,
+  opdracht_id uuid references public.opdrachten(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  created_by text
+);
+create index if not exists abm_bedrijven_naam on public.abm_bedrijven (lower(naam));
+alter table public.abm_bedrijven enable row level security;

@@ -6,6 +6,7 @@ import { renderTemplate, type MailVars } from '@/lib/email-render'
 import { DEFAULT_TEMPLATES } from '@/lib/email-templates-defaults'
 import { MERK_STIJL, MAIL_MERKEN, type MailMerk } from '@/lib/merk-mail'
 import { offerteMail } from '@/lib/offertes'
+import { welkomstMail } from '@/lib/klant-account'
 
 // Eén gedeelde mailcomponent voor ALLE handmatige mails (klant/contract/taak/
 // toegang/algemeen). Altijd preview + handmatige bevestiging; nooit automatisch.
@@ -18,6 +19,7 @@ export type MailContext =
   // herinnering: opent met de herinneringsmail i.p.v. de eerste contractmail.
   | { type: 'contract'; contractId: string; contractTitle: string; signLink: string; defaultEmail?: string | null; signerName?: string | null; clientName?: string | null; expiresAt?: string | null; herinnering?: boolean }
   | { type: 'access'; clientId: string; clientName: string; toEmail: string; tempPassword?: string }
+  | { type: 'klantaccount'; clientId: string; clientName: string }
   | { type: 'generic'; toEmail?: string }
   // Formulierlink (Formulieren → Delen): onderwerp/tekst/knop voorgevuld, ontvanger aanpasbaar.
   | { type: 'formulier'; link: string; formulierTitel: string; clientId?: string | null; clientName?: string | null; verlooptOp?: string | null }
@@ -123,6 +125,14 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
             setSubject(`Contract ter ondertekening — ${context.contractTitle}`)
             setBody(defaultContractBody(context, vervaldatum)); setCtaText(CONTRACT_KNOP); setCtaLink(context.signLink)
           }
+        } else if (context.type === 'klantaccount') {
+          // Welkomstmail: de knop wordt bij het versturen een persoonlijke link (7 dagen) om zelf een wachtwoord te kiezen.
+          const r = await fetch(`/api/admin/clients/${context.clientId}/account`, { cache: 'no-store' })
+          const j = await r.json()
+          if (!r.ok) throw new Error(j.error || 'Laden mislukt')
+          const m = welkomstMail({ klant: j.klant ?? context.clientName, contact: j.contact ?? null, email: j.email ?? '' })
+          setToEmail(j.email ?? '')
+          setSubject(m.onderwerp); setBody(m.tekst); setCtaText(m.knop); setCtaLink(`${window.location.origin}/welkom/(persoonlijke link, aangemaakt bij het versturen)`)
         } else if (context.type === 'access') {
           setToEmail(context.toEmail)
           setSubject('Toegang tot NextGenMedia portaal')
@@ -167,7 +177,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
         } else {
           setToEmail(context.toEmail ?? '')
         }
-      } catch (e) { setError(e instanceof Error && context.type === 'meeting' ? e.message : 'Laden mislukt') } finally { setLoadingCtx(false) }
+      } catch (e) { setError(e instanceof Error && (context.type === 'meeting' || context.type === 'klantaccount') ? e.message : 'Laden mislukt') } finally { setLoadingCtx(false) }
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -201,6 +211,11 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
         })
       } else if (context.type === 'offerte') {
         res = await fetch(`/api/admin/offertes/${context.offerteId}/send-mail`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ to_email: toEmail, subject, body, cta_text: ctaText || null, verzend_sleutel: sleutel, merk }),
+        })
+      } else if (context.type === 'klantaccount') {
+        res = await fetch(`/api/admin/clients/${context.clientId}/welkomstmail`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ to_email: toEmail, subject, body, cta_text: ctaText || null, verzend_sleutel: sleutel, merk }),
         })

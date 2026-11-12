@@ -24,7 +24,9 @@ const FASE_STIP: Record<KolomKey, string> = {
  * muis; op een touchscherm (en voor wie liever klikt) via het menu "…" op de
  * kaart. De kleur van de dienst is een stip, het bedrag staat rechts.
  */
-export function KanbanBord({ kaarten, laden, onOpen, onVerplaats, onNieuw }: {
+export function KanbanBord({ kaarten, laden, onOpen, onVerplaats, onNieuw, voor }: {
+  /** Een eigen kolom vooraan (Account-based marketing). */
+  voor?: React.ReactNode
   kaarten: KaartOpdracht[]
   laden: boolean
   onOpen: (o: KaartOpdracht) => void
@@ -53,6 +55,7 @@ export function KanbanBord({ kaarten, laden, onOpen, onVerplaats, onNieuw }: {
 
   return (
     <div className="-mx-4 sm:mx-0 px-4 sm:px-0 flex gap-2.5 overflow-x-auto pb-3 snap-x snap-mandatory sm:snap-none overscroll-x-contain">
+      {voor}
       {KOLOMMEN.map((kol) => {
         const lijst = kaarten.filter((o) => kolomVan(o.status) === kol.key)
         const waarde = lijst.reduce((t, o) => t + (o.waarde ?? 0), 0)

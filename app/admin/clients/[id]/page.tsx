@@ -11,6 +11,7 @@ import { leesVerantwoordelijken } from '@/lib/verkoop/verantwoordelijken'
 import { DeleteClientButton } from './delete-client-button'
 import { PortalAccessCard } from './portal-access-card'
 import { CredentialsCard } from '@/components/credentials-card'
+import { KlantAccountKaart } from '@/components/admin/klant-account-kaart'
 import { ClientUsers } from './client-users'
 import { KalenderRolInstelling } from './kalender-rol'
 import { KlantTweestap } from './klant-tweestap'
@@ -175,6 +176,9 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
               </div>
             )}
           </div>
+
+          {/* Klantaccount: aanmaken en de login doorsturen (activatielink, zelf wachtwoord kiezen, 2FA). */}
+          <KlantAccountKaart clientId={id} clientName={client.company_name} emailVoorstel={client.email ?? null} />
 
           {/* Login credentials */}
           <CredentialsCard
