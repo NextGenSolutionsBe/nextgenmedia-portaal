@@ -472,7 +472,8 @@ export function VestingClient({ instellingenRij, contractRijen, wamRijen, kostRi
                           {c.opBetaaldBedrag && (
                             <div className="text-[11px] text-gray-500 font-normal">{Math.round(c.factor * 100)}% van {formatEuro(c.betaald_bij_stop ?? 0)} betaald</div>
                           )}
-                          {!c.opBetaaldBedrag && c.totaal !== null && c.meetellend > 0 && c.factor < 1 && (
+                          {c.opVastBedrag && <div className="text-[11px] text-gray-500 font-normal">vastgelegd bedrag, klant vroeger gestopt</div>}
+                          {!c.opBetaaldBedrag && !c.opVastBedrag && c.totaal !== null && c.meetellend > 0 && c.factor < 1 && (
                             <div className="text-[11px] text-gray-500 font-normal">{Math.round(c.factor * 100)}% van {formatEuro(c.totaal)}{c.kostenAftrek > 0 ? <> − {Math.round(c.factor * 100)}% van {formatEuro(c.kostenAftrek)} kosten</> : null}</div>
                           )}
                           {c.jaarschijf > 0 && <div className="text-[11px] text-gray-400 font-normal">{formatEuro(c.jaarschijf)} aan jaartarief</div>}

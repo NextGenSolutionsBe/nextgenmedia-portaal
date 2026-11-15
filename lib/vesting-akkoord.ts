@@ -190,6 +190,12 @@ export type ContractAkkoord = {
   betaald_bij_stop: number | null
   /** Wat er voor Marco meetelt, in euro. */
   telt_mee: number
+  /**
+   * Klant vroeger gestopt: het vastgelegde bedrag dat meetelt en de beschrijving
+   * waarom. Enkel aanwezig als het ingevuld is (oudere handtekeningen blijven geldig).
+   */
+  vast?: number
+  uitleg?: string
 }
 export type RegistratieAkkoord = {
   soort: RegistratieSoort; omschrijving: string; datum: string; bedrag: number
@@ -200,12 +206,15 @@ export type RegistratieAkkoord = {
 export type Akkoord = ContractAkkoord | RegistratieAkkoord
 
 type ContractVoorAkkoord = Pick<ContractBerekend,
-  'klant' | 'nr' | 'totaal' | 'kostenAftrek' | 'netto' | 'appointment_door_marco' | 'closed_door_marco' | 'factor' | 'status' | 'betaald_bij_stop' | 'opBetaaldBedrag'> & { lead_soort?: LeadSoort | string | null }
+  'klant' | 'nr' | 'totaal' | 'kostenAftrek' | 'netto' | 'appointment_door_marco' | 'closed_door_marco' | 'factor' | 'status' | 'betaald_bij_stop' | 'opBetaaldBedrag'> & {
+  lead_soort?: LeadSoort | string | null; opVastBedrag?: boolean; meetellend_vast?: number | null; meetellend_uitleg?: string | null
+}
 
 export function contractAkkoord(c: ContractVoorAkkoord, lijnen: KostLijn[], titel: string | null = null): ContractAkkoord {
   const verloop: ContractAkkoord['verloop'] = c.status === 'stopgezet' ? 'stopgezet' : c.status === 'niet_betaler' ? 'niet_betaler' : 'loopt'
   const betaald = c.opBetaaldBedrag && c.betaald_bij_stop !== null && c.betaald_bij_stop !== undefined ? rond(Number(c.betaald_bij_stop)) : null
   const basis = verloop === 'niet_betaler' ? 0 : betaald !== null ? betaald : verloop === 'stopgezet' ? 0 : (c.netto ?? 0)
+  const vast = c.opVastBedrag && c.meetellend_vast !== null && c.meetellend_vast !== undefined && Number.isFinite(Number(c.meetellend_vast)) ? rond(Math.max(0, Number(c.meetellend_vast))) : null
   return {
     soort: 'contract',
     klant: c.klant.trim(), nr: c.nr, contract: titel?.trim() || null,
@@ -223,7 +232,8 @@ export function contractAkkoord(c: ContractVoorAkkoord, lijnen: KostLijn[], tite
     ...(leadSoortVan(c.lead_soort) ? { lead: leadSoortVan(c.lead_soort) as LeadSoort } : {}),
     deel_pct: rond(c.factor * 100),
     verloop, betaald_bij_stop: betaald,
-    telt_mee: rond(basis * c.factor),
+    telt_mee: vast !== null ? vast : rond(basis * c.factor),
+    ...(vast !== null ? { vast, uitleg: String(c.meetellend_uitleg ?? '').trim() } : {}),
   }
 }
 
@@ -337,10 +347,12 @@ export function wijzigingen(vorigeTekst: string | null, huidig: Akkoord): string
     else if (JSON.stringify(oud.kosten) !== JSON.stringify(huidig.kosten)) uit.push('Kostenlijnen of hun verantwoording aangepast')
     if (oud.afspraak !== huidig.afspraak) uit.push(`Afspraak door Marco: ${jaNee(oud.afspraak)} → ${jaNee(huidig.afspraak)}`)
     if (oud.closing !== huidig.closing) uit.push(`Closing door Marco: ${jaNee(oud.closing)} → ${jaNee(huidig.closing)}`)
-    if ((oud.lead ?? null) !== (huidig.lead ?? null)) uit.push(`Soort lead: ${leadInfo(oud.lead)?.label ?? 'outbound door Marco'} → ${leadInfo(huidig.lead)?.label ?? 'outbound door Marco'}`)
+    if ((oud.lead ?? null) !== (huidig.lead ?? null)) uit.push(`Soort lead: ${leadInfo(oud.lead)?.label ?? 'outbound'} → ${leadInfo(huidig.lead)?.label ?? 'outbound'}`)
     if (oud.deel_pct !== huidig.deel_pct && oud.afspraak === huidig.afspraak && oud.closing === huidig.closing) uit.push(`Deel van Marco ${oud.deel_pct}% → ${huidig.deel_pct}%`)
     if (oud.verloop !== huidig.verloop) uit.push(huidig.verloop === 'stopgezet' ? 'Vroegtijdig stopgezet' : huidig.verloop === 'niet_betaler' ? 'Niet-betaler' : 'Loopt weer')
     if (oud.betaald_bij_stop !== huidig.betaald_bij_stop && huidig.verloop === 'stopgezet') uit.push(`Betaald bij stop ${eur(oud.betaald_bij_stop)} → ${eur(huidig.betaald_bij_stop)}`)
+    if ((oud.vast ?? null) !== (huidig.vast ?? null)) uit.push(huidig.vast === undefined ? 'Vastgelegd bedrag weggehaald' : `Effectief meetellend bedrag ${eur(oud.vast ?? null)} → ${eur(huidig.vast)}`)
+    else if ((oud.uitleg ?? '') !== (huidig.uitleg ?? '')) uit.push('Beschrijving aangepast')
     if (oud.klant !== huidig.klant) uit.push('Klantnaam aangepast')
     if (!uit.length && oud.telt_mee !== huidig.telt_mee) uit.push(`Telt mee ${eur(oud.telt_mee)} → ${eur(huidig.telt_mee)}`)
   }
@@ -361,6 +373,7 @@ export function beschrijfAkkoord(a: Akkoord): string {
     const kosten = a.kosten_totaal ? ` − ${eur(a.kosten_totaal)} kosten` : ''
     const rol = leadInfo(a.lead)?.kort ?? ([a.afspraak && 'afspraak', a.closing && 'closing'].filter(Boolean).join(' + ') || 'geen rol')
     if (a.verloop === 'niet_betaler') return `${a.klant}: niet-betaler, telt voor €0`
+    if (a.vast !== undefined) return `${a.klant}: vroeger gestopt, vastgelegd bedrag ${eur(a.vast)} telt mee${a.uitleg ? ` (${a.uitleg.length > 120 ? `${a.uitleg.slice(0, 117)}…` : a.uitleg})` : ''}`
     if (a.verloop === 'stopgezet') return `${a.klant}: gestopt, ${eur(a.betaald_bij_stop)} betaald × ${a.deel_pct}% (${rol}) = ${eur(a.telt_mee)} telt mee`
     return `${a.klant}: ${eur(a.contractwaarde)}${kosten} = ${eur(a.netto)} × ${a.deel_pct}% (${rol}) = ${eur(a.telt_mee)} telt mee`
   }
@@ -392,6 +405,18 @@ export function certificaatRegels(g: CertificaatGegevens): [string, string][] {
   const a = g.inhoud
   if (a.soort === 'contract') {
     const rol = leadInfo(a.lead)?.label ?? ([a.afspraak && 'afspraak gezet', a.closing && 'klant geclosed'].filter(Boolean).join(' en ') || 'geen rol')
+    if (a.vast !== undefined) {
+      return [
+        ['Klant', a.klant],
+        ['Contract', `${a.contract ?? '—'} (${a.nr})`],
+        ['Contractwaarde', eur(a.contractwaarde)],
+        ['Verloop', 'klant vroeger gestopt'],
+        ['Effectief meetellend bedrag', eur(a.vast)],
+        ['Beschrijving', a.uitleg || '—'],
+        ['Telt mee voor Marco', eur(a.telt_mee)],
+        ...(g.aandeel !== null ? [['Levert Marco op', pctTekst(g.aandeel)] as [string, string]] : []),
+      ]
+    }
     return [
       ['Klant', a.klant],
       ['Contract', `${a.contract ?? '—'} (${a.nr})`],

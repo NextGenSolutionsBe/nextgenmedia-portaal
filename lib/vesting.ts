@@ -121,10 +121,23 @@ export type Contract = {
   /** Eigen toerekening in procent (0–100). Leeg = 50% appointment + 50% closing. */
   toerekening_pct?: number | null
   /**
-   * Hoe de klant binnenkwam. Leeg = outbound door Marco (afspraak 50% +
-   * closing 50%). Google Ads 100%, website 50%, inbound met Bram als closer 25%.
+   * Hoe de opdracht binnenkwam (regels commerciële verdeling). Leeg = outbound:
+   * afspraak 50% + closing 50%. Inbound NextGenSolutions: Marco closet 50%,
+   * Bram closet 25%. Inbound NextGenMedia: 0%.
    */
   lead_soort?: LeadSoort | null
+  /**
+   * Wat het team aanduidde: 'outbound' of een soort inbound. Leeg = nog niet
+   * aangeduid; dan rekent het zoals outbound (afspraak + closing), zoals vroeger.
+   */
+  herkomst?: Herkomst | null
+  /**
+   * Klant vroeger gestopt: het bedrag dat effectief meetelt voor Marco, door het
+   * team vastgelegd met een beschrijving (`meetellend_uitleg`). Geen rekensom
+   * meer: dit bedrag telt zo. Enkel bij status stopgezet.
+   */
+  meetellend_vast?: number | null
+  meetellend_uitleg?: string | null
   /** Gekoppelde klant uit het klantenbestand (optioneel; `klant` blijft de naam). */
   client_id?: string | null
   /**
@@ -456,6 +469,8 @@ export type ContractBerekend = Contract & {
   uitgevallen: number
   /** Vroegtijdig stopgezet mét betaald bedrag: Marco's deel telt op dat bedrag, niet op de contractwaarde. */
   opBetaaldBedrag: boolean
+  /** Klant vroeger gestopt met een vastgelegd meetellend bedrag: dat bedrag telt zo. */
+  opVastBedrag: boolean
   /** Loopt nog (niet gestopt, geen niet-betaler): contractwaarde die nog moet binnenkomen. */
   nogBinnen: number
   /** De facturen (termijnen) van dit contract, met de status die telt. */
@@ -494,13 +509,26 @@ export function totaalwaarde(c: Pick<Contract, 'facturatiemodel' | 'maandbedrag'
   return c.handmatige_totaalwaarde === null || c.handmatige_totaalwaarde === undefined ? null : n(c.handmatige_totaalwaarde)
 }
 
-/** Hoe de klant binnenkwam, met het deel dat in de pot gaat. */
-export type LeadSoort = 'google_ads' | 'website' | 'inbound_bram'
+/**
+ * Inbound: hoe de opdracht binnenkwam, met het deel van Marco (regels
+ * commerciële verdeling, 15 nov 2026). Outbound staat hier niet bij: dat is
+ * leeg, en dan telt afspraak 50% + closing 50%.
+ */
+export type LeadSoort = 'inbound_ngs_marco' | 'inbound_ngs_bram' | 'inbound_ngm'
 export const LEAD_SOORTEN: { key: LeadSoort; label: string; kort: string; pct: number }[] = [
-  { key: 'google_ads', label: 'Inbound via Google Ads', kort: 'inbound via Google Ads', pct: 100 },
-  { key: 'website', label: 'Inbound via de website, zonder Google Ads', kort: 'inbound via de website', pct: 50 },
-  { key: 'inbound_bram', label: 'Inbound, Bram closet', kort: 'inbound, Bram closet', pct: 25 },
+  { key: 'inbound_ngs_marco', label: 'Inbound NextGenSolutions, Marco closet', kort: 'inbound NextGenSolutions, Marco closet', pct: 50 },
+  { key: 'inbound_ngs_bram', label: 'Inbound NextGenSolutions, Bram closet', kort: 'inbound NextGenSolutions, Bram closet', pct: 25 },
+  { key: 'inbound_ngm', label: 'Inbound NextGenMedia', kort: 'inbound NextGenMedia', pct: 0 },
 ]
+/**
+ * Wat er aangeduid is: outbound of een soort inbound. Opgeslagen in
+ * `vesting_contracten.lead_soort`; leeg = nog niet aangeduid (rekent als outbound).
+ * 'outbound' komt nooit in de getekende tekst: afspraak en closing staan daar al.
+ */
+export type Herkomst = 'outbound' | LeadSoort
+export function herkomstVan(v: unknown): Herkomst | null {
+  return v === 'outbound' ? 'outbound' : leadSoortVan(v)
+}
 export function leadSoortVan(v: unknown): LeadSoort | null {
   return LEAD_SOORTEN.some((l) => l.key === v) ? v as LeadSoort : null
 }
@@ -512,8 +540,8 @@ export function standaardToerekening(c: Pick<Contract, 'appointment_door_marco' 
 }
 /**
  * De toerekening van één contract: het eigen percentage als dat ingevuld is,
- * anders de soort lead (Google Ads 100%, website 50%, Bram closet 25%),
- * anders 50% afspraak + 50% closing.
+ * anders de soort lead (inbound NextGenSolutions: Marco 50%, Bram 25%;
+ * inbound NextGenMedia 0%), anders outbound: 50% afspraak + 50% closing.
  */
 export function toerekeningsfactor(c: Pick<Contract, 'appointment_door_marco' | 'closed_door_marco'> & { toerekening_pct?: number | null; lead_soort?: LeadSoort | string | null }): number {
   const eigen = c.toerekening_pct
@@ -523,7 +551,15 @@ export function toerekeningsfactor(c: Pick<Contract, 'appointment_door_marco' | 
   return standaardToerekening(c)
 }
 
-type StatusVelden = Pick<Contract, 'status' | 'betalingen_op_schema'> & { betaald_bij_stop?: number | null }
+type StatusVelden = Pick<Contract, 'status' | 'betalingen_op_schema'> & { betaald_bij_stop?: number | null; meetellend_vast?: number | null }
+
+/** Klant vroeger gestopt met een vastgelegd meetellend bedrag? Dan telt dat bedrag zo, zonder rekensom. */
+export function vastBedragVan(c: { status: ContractStatus; meetellend_vast?: number | null }): number | null {
+  if (c.status !== 'stopgezet') return null
+  const v = c.meetellend_vast
+  if (v === null || v === undefined || !Number.isFinite(Number(v))) return null
+  return Math.max(0, Number(v))
+}
 
 /** Vroegtijdig stopgezet en het werkelijk betaalde bedrag is ingevuld? Dan telt dat bedrag (× toerekening). */
 export function stopMetBetaling(c: { status: ContractStatus; betaald_bij_stop?: number | null }): boolean {
@@ -537,14 +573,14 @@ export function stopMetBetaling(c: { status: ContractStatus; betaald_bij_stop?: 
  */
 export function isUitgesloten(c: StatusVelden, jaar: Contractjaar): boolean {
   if (jaar === 'buiten') return true
-  if (stopMetBetaling(c)) return false
+  if (vastBedragVan(c) !== null || stopMetBetaling(c)) return false
   return c.status === 'stopgezet' || c.status === 'niet_betaler' || !c.betalingen_op_schema
 }
 
 export function erkenningVan(c: StatusVelden, jaar: Contractjaar, volledigBetaald = false): Erkenning {
   if (isUitgesloten(c, jaar)) return 'uitgesloten'
-  // Gestopt met een vastgelegd betaald bedrag: er komt niets meer bij, dus definitief.
-  if (stopMetBetaling(c)) return 'definitief'
+  // Gestopt met een vastgelegd bedrag: er komt niets meer bij, dus definitief.
+  if (vastBedragVan(c) !== null || stopMetBetaling(c)) return 'definitief'
   // Definitief zodra het contract voltooid is óf alles uit het contract betaald is.
   if (c.status === 'voltooid' || volledigBetaald) return 'definitief'
   if (c.status === 'actief') return 'voorlopig'
@@ -770,9 +806,13 @@ export function berekenVesting(
 
     const erkenning = erkenningVan(c, jaar, volledigBetaald)
     // Vroegtijdig stopgezet: werkelijk betaald bedrag × toerekening (bv. €3.000 × 50% = €1.500).
-    const opBetaaldBedrag = stopMetBetaling(c)
-    const betaaldBijStop = opBetaaldBedrag ? Math.max(0, n(c.betaald_bij_stop)) : null
+    // Klant vroeger gestopt met een vastgelegd bedrag: dat bedrag telt zo.
+    const vast = vastBedragVan(c)
+    const opVastBedrag = vast !== null
+    const betaaldBijStop = stopMetBetaling(c) ? Math.max(0, n(c.betaald_bij_stop)) : null
+    const opBetaaldBedrag = !opVastBedrag && betaaldBijStop !== null
     const meetellend = erkenning === 'uitgesloten' ? 0
+      : vast !== null ? vast
       : betaaldBijStop !== null ? betaaldBijStop * factor
       : netto === null ? 0 : netto * factor
 
@@ -791,7 +831,7 @@ export function berekenVesting(
     // contract. Zonder stopinfo: de hele contractwaarde.
     const gestopt = c.status === 'stopgezet' || c.status === 'niet_betaler'
     const uitgevallen = gestopt && totaal !== null
-      ? Math.max(0, totaal - (betaaldBijStop ?? ontvangenVoorStop ?? 0)) : 0
+      ? Math.max(0, totaal - (betaaldBijStop ?? ontvangenVoorStop ?? vast ?? 0)) : 0
     // Lopend contract: wat er van de contractwaarde nog niet betaald is, komt nog binnen.
     const nogBinnen = gestopt ? 0 : Math.max(0, (totaal ?? inContract) - betaald)
 
@@ -799,7 +839,7 @@ export function berekenVesting(
       ...c, jaar, tarief, duur, totaal, netto, kostenAftrek, kostenWaarschuwing, factor, meetellend, erkenning,
       algemeneKostenAftrek, teltVoorAandeel, wachtOpKlant: !c.ondertekend_op,
       cumulatiefVoor: cumulatief, goedkopeSchijf, jaarschijf, ruweVesting,
-      betaaldeMaanden: maanden, ontvangenVoorStop, uitgevallen, opBetaaldBedrag, nogBinnen,
+      betaaldeMaanden: maanden, ontvangenVoorStop, uitgevallen, opBetaaldBedrag, opVastBedrag, nogBinnen,
       termijnen, inContract, gefactureerd, betaald, openstaand: Math.max(0, gefactureerd - betaald),
       // Vroegtijdig stopgezet: er wordt niets meer gefactureerd.
       nogTeFactureren: c.status === 'stopgezet' ? 0 : Math.max(0, (totaal ?? inContract) - gefactureerd), extraGefactureerd, volledigBetaald, termijnVerschil,

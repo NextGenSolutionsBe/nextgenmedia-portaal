@@ -5,7 +5,7 @@
  */
 
 import type { Akkoord, AkkoordStand, KostSoort, Registratie, Vennoot } from './vesting-akkoord'
-import type { LeadSoort } from './vesting'
+import type { Herkomst, LeadSoort } from './vesting'
 import type { KandidaatContract } from './vesting-snel'
 
 export type AkkoordWeergave = { inhoud: Akkoord; tekst: string; stand: AkkoordStand; wijzigingen: string[] }
@@ -36,8 +36,15 @@ export type ContractWeergave = {
   afspraak: boolean
   closing: boolean
   toerekening_pct: number | null
-  /** Hoe de klant binnenkwam; null = outbound door Marco. */
+  /** Soort inbound (bepaalt het deel); null = outbound of nog niet aangeduid. */
   lead_soort: LeadSoort | null
+  /** Wat aangeduid is: outbound of een soort inbound; null = nog niet aangeduid (rekent als outbound). */
+  herkomst: Herkomst | null
+  /** Klant vroeger gestopt: het vastgelegde bedrag dat meetelt en de beschrijving. */
+  vast: number | null
+  vastUitleg: string | null
+  /** Vroegtijdig stopgezet: wat de klant betaalde, als het ingevuld is (oude manier). */
+  betaaldBijStop: number | null
   factor: number
   /** Wat er voor Marco meetelt (zoals getekend). */
   teltMee: number
