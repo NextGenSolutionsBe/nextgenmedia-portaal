@@ -6,6 +6,8 @@ import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { logContractEvent } from '@/lib/contract-audit'
 import { veiligeBestandsnaam } from '@/lib/personeel/invoer'
+import { waitUntil } from '@vercel/functions'
+import { bestelbonUitBijlage } from '@/lib/contracten/bestelbon-server'
 
 export const dynamic = 'force-dynamic'
 
@@ -64,6 +66,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { data, error } = await admin.from('contract_bijlagen').insert({ contract_id: id, naam, pad, grootte: file.size, mime: file.type || null, created_by: actor.email ?? null }).select(VELDEN).single()
     if (error) { await admin.storage.from(BUCKET).remove([pad]); throw new Error(error.message) }
     await logContractEvent(admin, id, 'bijlage_toegevoegd', { actor: actor.email ?? actor.id, meta: { naam } })
+    // Een bestelbon bij een contract zonder bestelbonnummer: het nummer eruit lezen (na het antwoord).
+    waitUntil(bestelbonUitBijlage(admin, id, { id: String((data as { id: string }).id), pad, naam, mime: file.type || null }))
     try { revalidatePath(`/admin/contracts/${id}`) } catch { }
     return NextResponse.json({ bijlage: data })
   } catch (err) {

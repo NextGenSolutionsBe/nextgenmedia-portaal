@@ -25,6 +25,8 @@ export type PlanPost = {
   /** Start van de dienstverlening of factuurdatum (eenmalig), 'YYYY-MM-DD'. */
   start: string | null
   inbegrepen: string[]
+  /** Eén of twee zakelijke zinnen voor op de factuur (uit het contract gelezen). Optioneel. */
+  omschrijving?: string | null
 }
 
 export type PlanInvoer = {
@@ -86,11 +88,15 @@ export function factuurTitel(naam: string, vanM: string, maanden: number): strin
   return /^(Q\d|H\d|\d{4}$)/.test(p) ? `${naam} ${p}` : `${naam} (${p})`
 }
 
-function omschrijvingVoor(p: { naam: string; periode: string | null; van: string; tot: string; inbegrepen: string[]; nr: number | null; van_n: number | null }, invoer: PlanInvoer): string {
+function omschrijvingVoor(p: { naam: string; periode: string | null; van: string; tot: string; inbegrepen: string[]; nr: number | null; van_n: number | null; tekst?: string | null }, invoer: PlanInvoer): string {
   const regels: string[] = []
-  if (p.periode) {
-    const zelfdeMaand = p.van.slice(0, 7) === p.tot.slice(0, 7)
-    const bereik = zelfdeMaand ? `${Number(p.van.slice(8, 10))} – ${datumLang(p.tot)}` : `${datumLang(p.van)} – ${datumLang(p.tot)}`
+  const tekst = p.tekst?.replace(/\s+/g, ' ').trim()
+  const bereik = p.periode ? (p.van.slice(0, 7) === p.tot.slice(0, 7) ? `${Number(p.van.slice(8, 10))} – ${datumLang(p.tot)}` : `${datumLang(p.van)} – ${datumLang(p.tot)}`) : null
+  if (tekst) {
+    // Een zakelijke omschrijving uit het contract, met daaronder de periode.
+    regels.push(tekst)
+    if (p.periode) regels.push(`Periode: ${p.periode} (${bereik}).`)
+  } else if (p.periode) {
     regels.push(`${p.naam} voor ${p.periode} (${bereik}).`)
   } else {
     regels.push(`${p.naam}.`)
@@ -120,7 +126,7 @@ export function maakPlan(invoer: PlanInvoer): Plan {
     if (post.soort === 'eenmalig' || post.frequentie === 'eenmalig') {
       facturen.push({
         sleutel: `${voor}eenmalig:${start}`, periode: start.slice(0, 7), van: start, tot: start, datum: start,
-        titel: naam, omschrijving: omschrijvingVoor({ naam, periode: null, van: start, tot: start, inbegrepen: post.inbegrepen, nr: null, van_n: null }, invoer),
+        titel: naam, omschrijving: omschrijvingVoor({ naam, periode: null, van: start, tot: start, inbegrepen: post.inbegrepen, nr: null, van_n: null, tekst: post.omschrijving }, invoer),
         bedrag, btw, eenheid: 'forfait', post: i,
       })
       return
@@ -140,7 +146,7 @@ export function maakPlan(invoer: PlanInvoer): Plan {
       facturen.push({
         sleutel: `${voor}${vanM}`, periode: vanM, van, tot, datum: invoer.moment === 'laatste' ? tot : van,
         titel: factuurTitel(naam, vanM, f.maanden),
-        omschrijving: omschrijvingVoor({ naam, periode: periodeNaam(vanM, f.maanden), van, tot, inbegrepen: post.inbegrepen, nr: n + 1, van_n: aantal }, invoer),
+        omschrijving: omschrijvingVoor({ naam, periode: periodeNaam(vanM, f.maanden), van, tot, inbegrepen: post.inbegrepen, nr: n + 1, van_n: aantal, tekst: post.omschrijving }, invoer),
         bedrag, btw, eenheid: f.maanden === 1 ? 'maand' : 'forfait', post: i,
       })
     }

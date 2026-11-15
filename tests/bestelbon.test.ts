@@ -12,6 +12,11 @@ test('Via bestelbon zonder nummer: geweigerd', () => {
   assert.equal(r.ok, false)
 })
 
+test('Via bestelbon zonder nummer maar met de bestelbon als bijlage: mag (het nummer wordt eruit gelezen)', () => {
+  assert.deepEqual(valideerOpGetekend({ via: 'bestelbon', bestelbon_nummer: '', bestelbon_uit_bijlage: true }, '2026-11-12'), { ok: true, datum: '2026-11-12', notitie: null, via: 'bestelbon' })
+  assert.equal(valideerOpGetekend({ via: 'bestelbon', bestelbon_uit_bijlage: 'ja' }, '2026-11-12').ok, false, 'enkel echt true')
+})
+
 test('Via bestelbon met nummer: via en nummer mee', () => {
   const r = valideerOpGetekend({ via: 'bestelbon', bestelbon_nummer: ' PO  2026-0815 ' }, '2026-11-12')
   assert.deepEqual(r, { ok: true, datum: '2026-11-12', notitie: null, via: 'bestelbon', bestelbon: 'PO 2026-0815' })

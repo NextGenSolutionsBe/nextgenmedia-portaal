@@ -32,6 +32,8 @@ export type ContractEvent =
   | 'tegengetekend'
   // Facturen automatisch gepland na ondertekening (lib/facturatie/contract-plan-server.ts).
   | 'facturen_gepland' | 'facturen_plannen_onvolledig'
+  // Bestelbonnummer uit een bijgevoegde bestelbon gelezen (lib/contracten/bestelbon-server.ts).
+  | 'bestelbon_gelezen'
 
 export async function logContractEvent(
   admin: Admin,

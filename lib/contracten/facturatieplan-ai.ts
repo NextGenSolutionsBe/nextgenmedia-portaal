@@ -15,8 +15,9 @@ export type AiPlan = { posten: (PlanPost & { citaat: string | null })[]; btwPct:
 export async function leesFacturatieplan(base64Pdf: string): Promise<AiPlan> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('AI niet geconfigureerd: ANTHROPIC_API_KEY ontbreekt in deze omgeving.')
-  const prompt = `Je bent boekhouder bij een Belgisch marketingbureau. Lees dit getekende contract en bepaal welke facturen we de klant moeten sturen.
+  const prompt = `Je bent boekhouder bij een Belgisch marketingbureau. Lees dit contract en bepaal welke facturen we de klant moeten sturen.
 Splits het contract in posten: een terugkerend bedrag (per maand, per kwartaal, per jaar …) en/of eenmalige bedragen (opstartkost, website, shoot).
+Hosting, onderhoud, licenties of een onderhoudscontract zijn altijd een aparte post met hun eigen frequentie en startdatum, ook als ze in hetzelfde contract staan.
 
 Geef UITSLUITEND geldige JSON:
 {
@@ -29,6 +30,7 @@ Geef UITSLUITEND geldige JSON:
       "aantal_perioden": 6,
       "start": "2026-07-01",
       "inbegrepen": ["12 posts per maand op Instagram en Facebook", "Community management"],
+      "omschrijving": "Beheer van de sociale media: planning, creatie en publicatie van content en opvolging van de community.",
       "citaat": "…"
     },
     { "naam": "Hosting", "soort": "terugkerend", "frequentie": "kwartaal", "bedrag_excl": 60, "aantal_perioden": 4, "start": "2027-01-01", "inbegrepen": ["Hosting en SSL"], "citaat": "…" },
@@ -39,7 +41,8 @@ Geef UITSLUITEND geldige JSON:
   "opmerking": null
 }
 Regels:
-- naam: kort, in het Nederlands, zoals op een factuur (geen klantnaam, geen periode). Bv. "Sociale media management", "Hosting", "Website", "Videoproductie".
+- naam: korte, duidelijke titel van wat we leveren (max 6 woorden), in het Nederlands, zoals op een factuur, zo specifiek als het contract toelaat (geen klantnaam, geen periode, geen bedrag). Bv. "Ontwerp infopanelen", "Sociale media management", "Hosting", "Onderhoudscontract website", "Bedrijfsvideo".
+- omschrijving: één of twee zakelijke zinnen voor op de factuur die zeggen wat de klant krijgt, in de u-vorm of onpersoonlijk, zonder bedragen, datums of klantnaam. Niets concreets in het contract: null.
 - soort ∈ terugkerend | eenmalig. frequentie ∈ eenmalig | maandelijks | tweemaandelijks | kwartaal | halfjaarlijks | jaarlijks.
 - bedrag_excl = bedrag excl. btw per factuur (eenmalig: het totaal van die post). Staat er enkel incl. btw, reken om (÷ 1,21) en zeg het in "opmerking".
 - aantal_perioden = hoeveel facturen van die post (6 maanden maandelijks = 6; 1 jaar per kwartaal = 4). Onbepaalde duur zonder minimum: null.
@@ -77,6 +80,7 @@ Regels:
       start: typeof r.start === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.start) ? r.start : null,
       inbegrepen: Array.isArray(r.inbegrepen) ? r.inbegrepen.filter((x): x is string => typeof x === 'string').map((x) => x.replace(/\s+/g, ' ').trim().slice(0, 140)).filter(Boolean).slice(0, 8) : [],
       citaat: typeof r.citaat === 'string' ? r.citaat.slice(0, 300) : null,
+      omschrijving: typeof r.omschrijving === 'string' && r.omschrijving.trim() ? r.omschrijving.replace(/\s+/g, ' ').trim().slice(0, 400) : null,
     }
   }).filter((x) => x.naam || x.bedrag)
   const btw = getal(p.btw_pct)

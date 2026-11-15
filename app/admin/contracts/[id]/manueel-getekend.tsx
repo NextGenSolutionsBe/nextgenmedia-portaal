@@ -38,19 +38,21 @@ export function OpGetekendZetten({ contractId }: { contractId: string }) {
 
   const bevestig = async () => {
     if (bezig || teGroot.length) return
-    if (via === 'bestelbon' && !bestelbon.trim()) { toast.error('Vul het bestelbonnummer in: het moet op elke factuur komen.'); return }
+    // Geen nummer? Dan moet de bestelbon erbij: we lezen het nummer eruit.
+    const uitBijlage = via === 'bestelbon' && !bestelbon.trim() && bestanden.length > 0
+    if (via === 'bestelbon' && !bestelbon.trim() && !uitBijlage) { toast.error('Vul het bestelbonnummer in of voeg de bestelbon toe: het nummer moet op elke factuur komen.'); return }
     setBezig(true)
     try {
       await readJson(await fetch(`/api/admin/contracts/${contractId}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'manueel_getekend', datum, notitie, via, bestelbon_nummer: via === 'bestelbon' ? bestelbon : null }),
+        body: JSON.stringify({ action: 'manueel_getekend', datum, notitie, via, bestelbon_nummer: via === 'bestelbon' ? bestelbon : null, bestelbon_uit_bijlage: uitBijlage }),
       }))
       const mislukt: string[] = []
       for (const f of bestanden) {
         try { await laadOp(contractId, f) } catch { mislukt.push(f.name) }
       }
       if (mislukt.length) toast.error(`Op getekend gezet, maar niet opgeladen: ${mislukt.join(', ')}. Voeg ze opnieuw toe.`)
-      else toast.success('Contract staat op getekend.')
+      else toast.success(uitBijlage ? 'Contract staat op getekend. Het bestelbonnummer lezen we uit de bijlage; dat duurt even.' : 'Contract staat op getekend.')
       setOpen(false)
       router.refresh()
     } catch (e) {
@@ -83,9 +85,9 @@ export function OpGetekendZetten({ contractId }: { contractId: string }) {
                 ))}
               </fieldset>
               {via === 'bestelbon' && (
-                <label className="block text-xs text-gray-500">Bestelbonnummer <span className="text-red-600">*</span>
+                <label className="block text-xs text-gray-500">Bestelbonnummer <span className="text-gray-400">(of de bestelbon als bijlage)</span>
                   <input autoFocus maxLength={60} placeholder="bv. PO-2026-0815" className="mt-0.5 w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg" value={bestelbon} onChange={(e) => setBestelbon(e.target.value)} />
-                  <span className="block mt-1 text-[11px] text-gray-400">Komt op elke factuur van dit contract bij Te factureren. Voeg de bestelbon hieronder toe als bijlage.</span>
+                  <span className="block mt-1 text-[11px] text-gray-400">Komt op elke factuur van dit contract bij Te factureren. Geen nummer bij de hand? Voeg de bestelbon hieronder toe, dan lezen we het nummer eruit.</span>
                 </label>
               )}
               <label className="block text-xs text-gray-500">Getekend op
