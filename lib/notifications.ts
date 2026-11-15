@@ -10,6 +10,8 @@ import { offerteWeergave, moetOpvolgen, isVerlopen, type Offerte } from '@/lib/o
 import { samenvatting, grootte, OPSLAG_LIMIET_GB, type RuwVerbruik } from '@/lib/opslag'
 import { STATUS as AANVRAAG_STATUS, nieuweAanvraagTitel, type AanvraagSoort } from '@/lib/aanvragen/model'
 import { projectNaam } from '@/lib/opdrachten-kanban'
+import { laadOpvolgingen } from '@/lib/mail-opvolging/server'
+import { moetOpvolgen as mailMoetOpvolgen } from '@/lib/mail-opvolging/regels'
 
 // Eén bron voor meldingen + "Vandaag": alles live afgeleid uit bestaande data
 // (geen nieuwe tabel). Gelezen/niet-gelezen wordt client-side in localStorage
@@ -322,7 +324,7 @@ export async function buildNotifications(): Promise<Notif[]> {
 // de pipeline). `modules` = rechten van de medewerker (null = admin, alles).
 
 export type OpvolgItem = { id: string; titel: string; sub: string | null; href: string; dringend?: boolean }
-export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'tegentekenen' | 'facturen' | 'meetings' | 'projecten' | 'content' | 'onderhoud' | 'opleveringen' | 'offertes'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
+export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'tegentekenen' | 'facturen' | 'mails' | 'meetings' | 'projecten' | 'content' | 'onderhoud' | 'opleveringen' | 'offertes'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
 
 const OPVOLG_MAX = 5
 const dagKort = (d: string) => new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' })
@@ -344,6 +346,7 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
     mag('contracts') ? opvolgContracten() : null,
     mag('contracts') ? opvolgTegentekenen() : null,
     mag('contracts') ? opvolgFacturenPlannen() : null,
+    mag('opdrachten') ? opvolgMails() : null,
     mag('meetings') ? opvolgMeetings() : null,
     mag('opdrachten') ? opvolgProjecten() : null,
     mag('content') ? opvolgContent() : null,
@@ -447,6 +450,28 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
           id: c.id, titel: [c.client_id ? namen.get(c.client_id) : null, c.title].filter(Boolean).join(' – '),
           sub: `getekend${c.signed_at ? ` op ${dagKort(c.signed_at)}` : ''} · nog geen facturen`,
           href: `/admin/contracts/${c.id}`, dringend: true,
+        })),
+      }
+    } catch { return null }
+  }
+
+  /**
+   * Mails opvolgen: projecten waar we iets voorlegden (meeting, offerte,
+   * contract) en waar nu iets op ons wacht of de klant niet reageert. Uit de
+   * gelezen mailboxen en de agenda (lib/mail-opvolging). Enkel zichtbaar als er iets is.
+   */
+  async function opvolgMails(): Promise<OpvolgGroep | null> {
+    try {
+      const lijst = (await laadOpvolgingen(admin)).filter((x) => mailMoetOpvolgen(x.opvolging))
+      if (!lijst.length) return null
+      const rang: Record<string, number> = { akkoord: 0, weigering: 1, wacht_op_ons: 2, geen_reactie: 3, na_meeting: 4 }
+      lijst.sort((a, b) => Number(b.opvolging!.dringend) - Number(a.opvolging!.dringend) || (rang[a.opvolging!.status] ?? 9) - (rang[b.opvolging!.status] ?? 9) || a.opvolging!.sinds.localeCompare(b.opvolging!.sinds))
+      return {
+        key: 'mails', titel: 'Mails opvolgen', totaal: lijst.length, alles: '/admin/opdrachten', leeg: 'Niets op te volgen.',
+        items: lijst.slice(0, OPVOLG_MAX).map((x) => ({
+          id: x.project.id, titel: projectNaam(x.project.klant, x.project.diensten, x.project.titel),
+          sub: x.opvolging!.tekst.length > 150 ? `${x.opvolging!.tekst.slice(0, 147)}…` : x.opvolging!.tekst,
+          href: `/admin/opdrachten?opdracht=${x.project.id}`, dringend: x.opvolging!.dringend,
         })),
       }
     } catch { return null }

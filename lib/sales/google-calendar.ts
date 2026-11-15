@@ -443,6 +443,8 @@ export type AgendaEvent = {
   id: string; agenda: string; titel: string; start: string; eind: string
   heleDag: boolean; vrij: boolean; geannuleerd: boolean
   meetUrl: string | null; link: string | null; clickupTaskId: string | null
+  /** E-mailadressen van de genodigden (voor de mail-opvolging: met wie was de meeting). */
+  genodigden?: string[]
 }
 
 /**
@@ -474,6 +476,7 @@ export async function lijstAgendaEvents(connectionId: string, from: number, to: 
           start?: { dateTime?: string; date?: string }; end?: { dateTime?: string; date?: string }
           extendedProperties?: { private?: Record<string, string> }
           conferenceData?: { entryPoints?: { entryPointType?: string; uri?: string }[] }
+          attendees?: { email?: string }[]
         }>
         nextPageToken?: string; error?: { message?: string }
       }
@@ -488,6 +491,7 @@ export async function lijstAgendaEvents(connectionId: string, from: number, to: 
           heleDag, vrij: e.transparency === 'transparent', geannuleerd: e.status === 'cancelled',
           meetUrl: e.hangoutLink ?? e.conferenceData?.entryPoints?.find((x) => x.entryPointType === 'video')?.uri ?? null,
           link: e.htmlLink ?? null, clickupTaskId: e.extendedProperties?.private?.clickupTaskId ?? null,
+          genodigden: (e.attendees ?? []).map((x) => String(x.email ?? '')).filter(Boolean),
         })
       }
       pageToken = j.nextPageToken

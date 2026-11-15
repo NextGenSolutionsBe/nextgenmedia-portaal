@@ -52,6 +52,8 @@ const nextConfig = {
   // aanvaller die gericht op frameworkversies zoekt.
   poweredByHeader: false,
   experimental: {
+    // IMAP en mailverwerking (mail-opvolging) draaien enkel op de server: niet bundelen.
+    serverComponentsExternalPackages: ['imapflow', 'mailparser'],
     serverActions: {
       bodySizeLimit: '10mb',
     },

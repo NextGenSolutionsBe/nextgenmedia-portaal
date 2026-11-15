@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { MessageSquare, Plus, MoreHorizontal, Check, FileSignature, AlertCircle, UserRound, Send } from 'lucide-react'
+import { MessageSquare, Plus, MoreHorizontal, Check, FileSignature, AlertCircle, UserRound, Send, Mail } from 'lucide-react'
 import { offerteBevestigdLabel } from '@/lib/opdrachten-offerte-model'
 import {
   KOLOMMEN, kolomVan, kaartKleur, projectNaam, projectOnderwerp, offerteViaLabel, dagenSinds, BEDRIJVEN, projectVerantwoordelijke,
@@ -24,9 +24,11 @@ const FASE_STIP: Record<KolomKey, string> = {
  * muis; op een touchscherm (en voor wie liever klikt) via het menu "…" op de
  * kaart. De kleur van de dienst is een stip, het bedrag staat rechts.
  */
-export function KanbanBord({ kaarten, laden, onOpen, onVerplaats, onNieuw, voor }: {
+export function KanbanBord({ kaarten, laden, onOpen, onVerplaats, onNieuw, voor, opvolging }: {
   /** Een eigen kolom vooraan (Account-based marketing). */
   voor?: React.ReactNode
+  /** Mail-opvolging per kaart (lib/mail-opvolging): wat er opgevolgd moet worden. */
+  opvolging?: Record<string, { dringend: boolean; tekst: string; telt: boolean }>
   kaarten: KaartOpdracht[]
   laden: boolean
   onOpen: (o: KaartOpdracht) => void
@@ -85,7 +87,7 @@ export function KanbanBord({ kaarten, laden, onOpen, onVerplaats, onNieuw, voor 
             </header>
             <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1.5">
               {lijst.slice(0, max).map((o) => (
-                <Kaart key={o.id} o={o} sleept={sleepId === o.id} menuOpen={menuId === o.id}
+                <Kaart key={o.id} o={o} sleept={sleepId === o.id} menuOpen={menuId === o.id} opvolging={opvolging?.[o.id]}
                   onOpen={() => onOpen(o)}
                   onMenu={() => setMenuId(menuId === o.id ? null : o.id)}
                   onKolom={(k) => { setMenuId(null); if (k !== kolomVan(o.status)) onVerplaats(o, k) }}
@@ -109,7 +111,8 @@ export function KanbanBord({ kaarten, laden, onOpen, onVerplaats, onNieuw, voor 
   )
 }
 
-function Kaart({ o, sleept, menuOpen, onOpen, onMenu, onKolom, onDragStart, onDragEnd }: {
+function Kaart({ o, sleept, menuOpen, onOpen, onMenu, onKolom, onDragStart, onDragEnd, opvolging }: {
+  opvolging?: { dringend: boolean; tekst: string; telt: boolean }
   o: KaartOpdracht
   sleept: boolean
   menuOpen: boolean
@@ -156,6 +159,9 @@ function Kaart({ o, sleept, menuOpen, onOpen, onMenu, onKolom, onDragStart, onDr
             <span className="text-xs tabular-nums text-gray-700 shrink-0">{o.waarde !== null && o.waarde !== undefined ? formatEuro(o.waarde) : ''}</span>
           </div>
           {o.titel && o.klant_naam && o.diensten.length > 0 && <p className="text-xs text-gray-500 leading-snug line-clamp-2">{o.titel}</p>}
+          {opvolging?.telt && (
+            <p className={`mt-1 text-[11px] flex items-center gap-1 ${opvolging.dringend ? 'text-red-700' : 'text-amber-700'}`} title={opvolging.tekst}><Mail className="h-3 w-3 shrink-0" /><span className="truncate">{opvolging.tekst}</span></p>
+          )}
           {waarschuwing && (
             <p className="mt-1 text-[11px] text-amber-700 flex items-center gap-1"><AlertCircle className="h-3 w-3 shrink-0" />{waarschuwing}</p>
           )}

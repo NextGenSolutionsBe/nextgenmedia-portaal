@@ -7399,3 +7399,67 @@ create table if not exists public.abm_bedrijven (
 );
 create index if not exists abm_bedrijven_naam on public.abm_bedrijven (lower(naam));
 alter table public.abm_bedrijven enable row level security;
+
+-- Mail-opvolging (15 nov 2026): mails van en naar klanten (enkel wie we kennen), meetings uit de agenda, afgehandelde opvolgingen.
+create table if not exists public.mail_berichten (
+  id uuid primary key default gen_random_uuid(),
+  message_id text not null,
+  mailbox text not null,
+  map text not null,
+  uid bigint,
+  richting text not null check (richting in ('in','uit')),
+  van text,
+  aan text[] not null default '{}',
+  onderwerp text,
+  verzonden_op timestamptz not null,
+  in_reply_to text,
+  tegenpartij text,
+  client_id uuid references public.clients(id) on delete set null,
+  opdracht_id uuid references public.opdrachten(id) on delete set null,
+  fragment text,
+  ai_soort text,
+  ai_samenvatting text,
+  ai_op timestamptz,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists mail_berichten_message_id on public.mail_berichten (message_id);
+create index if not exists mail_berichten_client on public.mail_berichten (client_id, verzonden_op desc);
+create index if not exists mail_berichten_opdracht on public.mail_berichten (opdracht_id, verzonden_op desc);
+alter table public.mail_berichten enable row level security;
+create table if not exists public.mail_sync_status (
+  mailbox text not null,
+  map text not null,
+  pad text,
+  uidvalidity bigint,
+  laatste_uid bigint,
+  laatst_gelezen_op timestamptz,
+  aantal_bewaard integer not null default 0,
+  fout text,
+  primary key (mailbox, map)
+);
+alter table public.mail_sync_status enable row level security;
+create table if not exists public.opvolg_meetings (
+  id uuid primary key default gen_random_uuid(),
+  bron text not null default 'google',
+  event_id text not null,
+  agenda text,
+  titel text,
+  start timestamptz not null,
+  eind timestamptz not null,
+  genodigde text,
+  client_id uuid references public.clients(id) on delete set null,
+  opdracht_id uuid references public.opdrachten(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists opvolg_meetings_event on public.opvolg_meetings (bron, event_id);
+alter table public.opvolg_meetings enable row level security;
+create table if not exists public.mail_opvolging_afgehandeld (
+  id uuid primary key default gen_random_uuid(),
+  opdracht_id uuid not null references public.opdrachten(id) on delete cascade,
+  sleutel text not null,
+  reden text,
+  door text,
+  op timestamptz not null default now()
+);
+create unique index if not exists mail_opvolging_afgehandeld_uniek on public.mail_opvolging_afgehandeld (opdracht_id, sleutel);
+alter table public.mail_opvolging_afgehandeld enable row level security;
