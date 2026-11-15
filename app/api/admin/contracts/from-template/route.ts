@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
 
     // Projecten: een contract opmaken zet meteen een kaart in "Contract verstuurd".
     const opdrachtVan = typeof b.opdracht_id === 'string' && /^[0-9a-f-]{36}$/i.test(b.opdracht_id) ? b.opdracht_id : null
-    await kaartVoorContract(admin, contractId, { opdrachtId: opdrachtVan }).catch((e) => console.warn('[contracts] kaart voor contract:', e instanceof Error ? e.message : e))
+    await kaartVoorContract(admin, contractId, { opdrachtId: opdrachtVan, verantwoordelijke: typeof b.verantwoordelijke === 'string' ? b.verantwoordelijke : null }).catch((e) => console.warn('[contracts] kaart voor contract:', e instanceof Error ? e.message : e))
     return NextResponse.json({ id: contractId })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })

@@ -5,13 +5,17 @@ import { createAdminSupabaseClient, requireAdmin, trySignedUrl } from '@/lib/sup
 import { leesProfiel } from '@/lib/account-server'
 import { bedrijfVoorMerk, onsZoneVan, redenNietTegentekenen, volgendeInLijst } from '@/lib/contracten/tegenhandtekening'
 import { formatDate } from '@/lib/utils'
+import { hoortBij } from '@/lib/te-tekenen'
 import { TegentekenScherm } from './tegenteken-scherm'
 
 export const dynamic = 'force-dynamic'
 
 /** Het contract ook namens NextGenMedia ondertekenen, na de klant. Enkel zaakvoerders (admins). */
-export default async function TegentekenenPagina({ params }: { params: { id: string } }) {
+export default async function TegentekenenPagina({ params, searchParams }: { params: { id: string }; searchParams?: { van?: string } }) {
   const admin = createAdminSupabaseClient()
+  // Vanuit de taak "contracten tegentekenen" van Marco of Bram: enkel hun contracten (+ gezamenlijk en zonder verantwoordelijke).
+  const van = searchParams?.van === 'Marco' || searchParams?.van === 'Bram' ? searchParams.van : null
+  const qs = van ? `?van=${van}` : ''
   const [{ data: c }, { data: openRijen }] = await Promise.all([
     admin.from('contracts').select('*').eq('id', params.id).maybeSingle(),
     // Alles wat nog op onze handtekening wacht, recentste eerst (zelfde volgorde als het Command Center).
@@ -19,10 +23,15 @@ export default async function TegentekenenPagina({ params }: { params: { id: str
       .order('signed_at', { ascending: false, nullsFirst: false }).order('id').limit(500),
   ])
   if (!c) notFound()
-  const open = ((openRijen ?? []) as { id: string }[]).map((r) => r.id)
+  let open = ((openRijen ?? []) as { id: string }[]).map((r) => r.id)
+  if (van && open.length) {
+    const { data: kaarten } = await admin.from('opdrachten').select('contract_id, verantwoordelijke').in('contract_id', open)
+    const verantw = new Map(((kaarten ?? []) as { contract_id: string; verantwoordelijke: string | null }[]).map((k) => [k.contract_id, k.verantwoordelijke]))
+    open = open.filter((id) => id === params.id || hoortBij(van, verantw.get(id) ?? null))
+  }
   const volgende = volgendeInLijst(open, c.id)
   const naarVolgende = volgende ? (
-    <Link href={`/admin/contracts/${volgende}/tegentekenen`} className="btn-primary text-sm">Volgende contract ({open.filter((x) => x !== c.id).length} nog te tekenen)</Link>
+    <Link href={`/admin/contracts/${volgende}/tegentekenen${qs}`} className="btn-primary text-sm">Volgende contract ({open.filter((x) => x !== c.id).length} nog te tekenen)</Link>
   ) : null
   const ik = await requireAdmin()
   const terug = (
@@ -74,6 +83,7 @@ export default async function TegentekenenPagina({ params }: { params: { id: str
         beginZone={onsZoneVan(c)}
         naam={naam}
         volgendeId={volgende}
+        qs={qs}
         aantalOpen={open.length}
         positie={Math.max(1, open.indexOf(c.id) + 1)}
         bedrijf={bedrijfVoorMerk((kaart as { merk?: string | null } | null)?.merk)}

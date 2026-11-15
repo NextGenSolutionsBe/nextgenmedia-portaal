@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
+import { createAdminSupabaseClient, requireAdmin, requireStaff } from '@/lib/supabase/server'
+import { teTekenenOverzicht } from '@/lib/te-tekenen-server'
+import { tegentekenSleutel } from '@/lib/contracten/tegenhandtekening-server'
 import { safeMessage } from '@/lib/api-error'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { merkNaam, kiesClickupLid } from '@/lib/sales/lead-taken'
@@ -13,7 +15,8 @@ export const maxDuration = 30
 
 /**
  * Taken in het Command Center: aan elkaar toewijzen, gesynchroniseerd met ClickUp.
- *  GET            → open taken (teamtaken en taken bij projecten), live uit ClickUp
+ *  GET            → open taken (teamtaken en taken bij projecten), live uit ClickUp,
+ *                   plus `teTekenen`: wat nog op een handtekening van ons wacht (enkel voor admins)
  *  GET ?opties=1  → ClickUp-leden, de lijsten (NextGenMedia/NextGenSolutions) en wie ik ben
  *  POST           → nieuwe teamtaak: { aanvraag_sleutel, omschrijving, deadline, notitie, assignee_id, merk, client_id? }
  *  PATCH          → { taak_id, soort, actie: 'af' | 'opnieuw' | 'verantwoordelijke', assignee_id? }
@@ -39,8 +42,15 @@ export async function GET(req: NextRequest) {
       }
       return NextResponse.json(o)
     }
-    const { taken, statusFout } = await takenOverzicht(admin)
-    return NextResponse.json({ taken, statusFout })
+    // Nog te tekenen (regels, vesting, uitgaven, tegentekenen): enkel voor de zaakvoerders.
+    const isAdmin = !!(await requireAdmin())
+    const [{ taken, statusFout }, teTekenen] = await Promise.all([
+      takenOverzicht(admin),
+      isAdmin ? teTekenenOverzicht(admin) : Promise.resolve([]),
+    ])
+    // Een tegenteken-taak uit ClickUp staat al in "Nog te tekenen": niet dubbel tonen.
+    const tegenSleutels = new Set(teTekenen.flatMap((t) => (t.soort === 'tegentekenen' ? (t.lijst ?? []).map((c) => tegentekenSleutel(c.id)) : [])))
+    return NextResponse.json({ taken: taken.filter((t) => !t.aanvraag_sleutel || !tegenSleutels.has(t.aanvraag_sleutel)), statusFout, teTekenen })
   } catch (e) { return fout(e, 'taken.GET') }
 }
 

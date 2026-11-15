@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { ListTodo, Plus, Loader2, Check, ExternalLink, X, RotateCcw, AlertTriangle } from 'lucide-react'
+import { ListTodo, Plus, Loader2, Check, ExternalLink, X, RotateCcw, AlertTriangle, PenLine, ChevronDown, ChevronUp } from 'lucide-react'
+import { isVoor, type TeTekenenItem } from '@/lib/te-tekenen'
 import { deadlineTekst } from '@/lib/sales/lead-taken'
 import { MERK_STIJL } from '@/lib/merk-mail'
 import { MailTaken } from '@/components/admin/mail-taken'
@@ -40,6 +41,8 @@ async function api<T>(init?: RequestInit, qs = ''): Promise<T> {
  */
 export function TakenBlok() {
   const [taken, setTaken] = useState<Taak[] | null>(null)
+  // Nog te tekenen (regels, vesting, uitgaven, tegentekenen): afgeleid, verdwijnt vanzelf na het tekenen.
+  const [teTekenen, setTeTekenen] = useState<TeTekenenItem[]>([])
   const [statusFout, setStatusFout] = useState<string | null>(null)
   const [opties, setOpties] = useState<Opties | null>(null)
   const [wie, setWie] = useState<number | 'mij' | null>(null)
@@ -48,8 +51,8 @@ export function TakenBlok() {
 
   const laad = useCallback(async () => {
     try {
-      const j = await api<{ taken: Taak[]; statusFout: string | null }>()
-      setTaken(j.taken); setStatusFout(j.statusFout)
+      const j = await api<{ taken: Taak[]; statusFout: string | null; teTekenen?: TeTekenenItem[] }>()
+      setTaken(j.taken); setStatusFout(j.statusFout); setTeTekenen(j.teTekenen ?? [])
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Taken laden mislukt'); setTaken([]) }
   }, [])
   useEffect(() => { void laad() }, [laad])
@@ -58,10 +61,19 @@ export function TakenBlok() {
   const mensen = useMemo(() => {
     const m = new Map<number, string>()
     for (const t of taken ?? []) if (t.clickup_assignee_id) m.set(t.clickup_assignee_id, voornaam(t.clickup_assignee_naam))
+    // Wie nog moet tekenen, krijgt ook een filter (op voornaam gekoppeld aan het ClickUp-lid).
+    for (const v of new Set(teTekenen.flatMap((t) => t.voor))) {
+      const lid = (opties?.leden ?? []).find((l) => voornaam(l.naam).toLowerCase() === v.toLowerCase())
+      if (lid) m.set(lid.id, voornaam(lid.naam))
+    }
     return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1]))
-  }, [taken])
+  }, [taken, teTekenen, opties])
   const ik = opties?.ik ?? null
+  const naamVan = (id: number | null) => (id === null ? null : (opties?.leden ?? []).find((l) => l.id === id)?.naam ?? mensen.find(([x]) => x === id)?.[1] ?? null)
   const zichtbaar = useMemo(() => (taken ?? []).filter((t) => wie === null || (wie === 'mij' ? t.clickup_assignee_id === ik : t.clickup_assignee_id === wie)), [taken, wie, ik])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const zichtbaarTekenen = useMemo(() => teTekenen.filter((t) => wie === null || isVoor(t, naamVan(wie === 'mij' ? ik : wie))), [teTekenen, wie, ik, opties, mensen])
+  const totaal = zichtbaar.length + zichtbaarTekenen.length
   const vd = vandaag()
 
   const af = async (t: Taak) => {
@@ -88,17 +100,20 @@ export function TakenBlok() {
       <div className="flex items-center gap-2 flex-wrap mb-3">
         <ListTodo className="h-4 w-4 text-gray-500" />
         <h2 id="taken-kop" className="text-sm font-semibold text-gray-900">Taken</h2>
-        <span className={`min-w-[1.75rem] text-center rounded-full px-2 py-0.5 text-xs font-bold ${zichtbaar.length ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-400'}`}>{taken === null ? '…' : zichtbaar.length}</span>
+        <span className={`min-w-[1.75rem] text-center rounded-full px-2 py-0.5 text-xs font-bold ${totaal ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-400'}`}>{taken === null ? '…' : totaal}</span>
         <button type="button" onClick={() => setNieuw(true)} className="btn-primary text-xs h-8 ml-auto"><Plus className="h-3.5 w-3.5" />Taak toewijzen</button>
       </div>
 
-      {(taken?.length ?? 0) > 0 && (
+      {((taken?.length ?? 0) > 0 || teTekenen.length > 0) && (
         <div className="flex gap-1.5 overflow-x-auto pb-2 -mx-1 px-1">
           <button type="button" onClick={() => setWie(null)} className={chip(wie === null)}>Iedereen</button>
           {ik && <button type="button" onClick={() => setWie('mij')} className={chip(wie === 'mij')}>Mijn taken</button>}
           {mensen.filter(([id]) => id !== ik).map(([id, naam]) => <button key={id} type="button" onClick={() => setWie(id)} className={chip(wie === id)}>{naam}</button>)}
         </div>
       )}
+
+      {/* Nog te tekenen: bij wie het moet doen; verdwijnt vanzelf zodra getekend. */}
+      {zichtbaarTekenen.length > 0 && <TeTekenenLijst items={zichtbaarTekenen} />}
 
       {/* Taken uit de mail: Zet taak of Verwijder. */}
       <MailTaken leden={opties?.leden ?? []} ik={opties?.ik ?? null} onIngepland={laad} />
@@ -108,7 +123,7 @@ export function TakenBlok() {
       {taken === null ? (
         <div className="py-6 flex justify-center"><Loader2 className="h-4 w-4 animate-spin text-gray-400" /></div>
       ) : zichtbaar.length === 0 ? (
-        <p className="text-sm text-gray-400 py-2">{taken.length ? 'Niets voor deze persoon.' : 'Geen open taken. Wijs er een toe met de knop hierboven.'}</p>
+        <p className="text-sm text-gray-400 py-2">{taken.length ? 'Geen andere taken voor deze persoon.' : 'Geen open taken in ClickUp. Wijs er een toe met de knop hierboven.'}</p>
       ) : (
         <ul className="divide-y divide-gray-100 -mx-1">
           {zichtbaar.slice(0, 12).map((t) => {
@@ -252,6 +267,48 @@ function TaakToewijzen({ opties, onSluit, onKlaar }: { opties: Opties | null; on
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+/** Wat nog op een handtekening van ons wacht, elk met een knop om meteen te tekenen. */
+function TeTekenenLijst({ items }: { items: TeTekenenItem[] }) {
+  const [open, setOpen] = useState<string | null>(null)
+  return (
+    <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50/60">
+      <div className="px-3 pt-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-amber-900">Nog te tekenen</div>
+      <ul className="divide-y divide-amber-100">
+        {items.map((t) => (
+          <li key={t.id} className="px-3 py-2">
+            <div className="flex items-start gap-2.5">
+              <PenLine className={`h-4 w-4 mt-0.5 shrink-0 ${t.dringend ? 'text-red-600' : 'text-amber-700'}`} />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-gray-900 leading-snug">{t.wat}</p>
+                <p className="text-xs text-gray-600 mt-0.5">
+                  <span className="font-medium text-gray-800">{t.voor.join(', ')}</span>
+                  {t.sub && <span className={t.dringend ? 'text-red-700' : ''}> · {t.sub}</span>}
+                </p>
+                {t.lijst && t.lijst.length > 0 && (
+                  <button type="button" onClick={() => setOpen((x) => (x === t.id ? null : t.id))} className="mt-1 inline-flex items-center gap-0.5 text-xs text-gray-500 hover:text-black">
+                    {open === t.id ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}{open === t.id ? 'Verbergen' : `Toon ${t.lijst.length === 1 ? 'het contract' : `de ${t.lijst.length} contracten`}`}
+                  </button>
+                )}
+              </div>
+              <Link href={t.href} className="btn-secondary text-xs h-8 shrink-0">Tekenen</Link>
+            </div>
+            {open === t.id && t.lijst && (
+              <ul className="mt-2 ml-6 space-y-1">
+                {t.lijst.map((c) => (
+                  <li key={c.id} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="min-w-0 truncate text-gray-800">{c.titel}{c.sub && <span className="text-gray-500"> · {c.sub}</span>}</span>
+                    <Link href={c.href} className="shrink-0 text-gray-500 hover:text-black underline decoration-gray-300">Tekenen</Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

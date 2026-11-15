@@ -7,12 +7,17 @@ import { readJson, fileTooBig, MAX_UPLOAD_MB } from '@/lib/upload'
 import { DURATION_TYPES } from '@/lib/contract-status'
 import { ContracttypeKiezer } from '../contracttype-kiezer'
 import { KlantKiezer, vulOndertekenaar, type KlantOptie } from '@/components/admin/klant-kiezer'
+import { VerantwoordelijkeKiezer } from '@/components/admin/verantwoordelijke-kiezer'
+import type { ContractVerantwoordelijke } from '@/lib/contracten/verantwoordelijke'
 
 export default function NewContractPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [clients, setClients] = useState<KlantOptie[] | null>(null)
   const [file, setFile] = useState<File | null>(null)
+  // Wie volgt het contract op en tekent namens ons tegen (verplicht). Voorstel uit de kaart of de klant.
+  const [verantwoordelijke, setVerantwoordelijke] = useState<ContractVerantwoordelijke | null>(null)
+  const [zelfGekozen, setZelfGekozen] = useState(false)
   const now = new Date()
   const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   const [form, setForm] = useState({
@@ -48,9 +53,20 @@ export default function NewContractPage() {
     } catch { /* geen querystring */ }
   }, [])
 
+  useEffect(() => {
+    if (zelfGekozen) return
+    let opdracht = ''
+    try { opdracht = new URLSearchParams(window.location.search).get('opdracht') ?? '' } catch { /* geen querystring */ }
+    const q = new URLSearchParams({ ...(form.client_id ? { client: form.client_id } : {}), ...(/^[0-9a-f-]{36}$/i.test(opdracht) ? { opdracht } : {}) })
+    if (!q.toString()) return
+    fetch(`/api/admin/contracts/verantwoordelijke?${q}`, { cache: 'no-store' })
+      .then((r) => r.json()).then((j) => { if (j.voorstel) setVerantwoordelijke(j.voorstel) }).catch(() => null)
+  }, [form.client_id, zelfGekozen])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!file) { setError('Selecteer een PDF-bestand'); return }
+    if (!verantwoordelijke) { setError('Kies wie verantwoordelijk is voor dit contract.'); return }
     if (!form.contract_type) { setError('Contracttype is verplicht'); return }
     if (fileTooBig(file)) { setError(`PDF te groot — max ${MAX_UPLOAD_MB} MB. Comprimeer het bestand en probeer opnieuw.`); return }
     setLoading(true)
@@ -68,6 +84,7 @@ export default function NewContractPage() {
       fd.append('signer_email', form.signer_email)
       fd.append('already_signed', String(form.already_signed))
       fd.append('start_month', form.start_month)
+      fd.append('verantwoordelijke', verantwoordelijke)
       // Vanaf een projectkaart (?opdracht=<id>): het contract hangt aan die kaart.
       try { const op = new URLSearchParams(window.location.search).get('opdracht'); if (op && /^[0-9a-f-]{36}$/i.test(op)) fd.append('opdracht_id', op) } catch { /* geen querystring */ }
       fd.append('duration_months', form.duration_months)
@@ -109,6 +126,11 @@ export default function NewContractPage() {
               return { ...p, client_id: k?.id ?? '', signer_name: o.naam, signer_email: o.email }
             })} />
           <p className="text-xs text-gray-400 mt-1">Zonder klant verschijnt het contract niet in een klantportaal — enkel intern + via de publieke tekenlink.</p>
+        </div>
+        <div>
+          <span className={lbl} id="nieuw-verantwoordelijke-label">Verantwoordelijke *</span>
+          <VerantwoordelijkeKiezer id="nieuw-verantwoordelijke" waarde={verantwoordelijke} onChange={(v) => { setVerantwoordelijke(v); setZelfGekozen(true) }} />
+          <p className="text-xs text-gray-400 mt-1">Volgt het contract op en tekent namens ons tegen zodra de klant getekend heeft.</p>
         </div>
         <div>
           <label className={lbl}>Contracttitel *</label>

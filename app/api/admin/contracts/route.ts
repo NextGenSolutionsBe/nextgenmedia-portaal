@@ -139,7 +139,7 @@ export async function POST(req: NextRequest) {
 
     // Projecten: een contract opmaken zet meteen een kaart in "Contract verstuurd".
     const opdrachtVan = String(formData.get('opdracht_id') ?? '')
-    await kaartVoorContract(admin, contractId, { opdrachtId: /^[0-9a-f-]{36}$/i.test(opdrachtVan) ? opdrachtVan : null }).catch((e) => console.warn('[contracts] kaart voor contract:', e instanceof Error ? e.message : e))
+    await kaartVoorContract(admin, contractId, { opdrachtId: /^[0-9a-f-]{36}$/i.test(opdrachtVan) ? opdrachtVan : null, verantwoordelijke: String(formData.get('verantwoordelijke') ?? '') || null }).catch((e) => console.warn('[contracts] kaart voor contract:', e instanceof Error ? e.message : e))
     return NextResponse.json({ id: contractId })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
