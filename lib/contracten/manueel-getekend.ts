@@ -50,7 +50,7 @@ export function normaliseerBestelbon(v: unknown): string | null {
 }
 
 export function valideerOpGetekend(
-  b: { datum?: unknown; notitie?: unknown; via?: unknown; bestelbon_nummer?: unknown },
+  b: { datum?: unknown; notitie?: unknown; via?: unknown; bestelbon_nummer?: unknown; bestelbon_uit_bijlage?: unknown },
   vandaag: string,
 ): { ok: true; datum: string; notitie: string | null; via?: OndertekendVia; bestelbon?: string } | { ok: false; fout: string } {
   const d = String(b.datum ?? '').trim()
@@ -60,7 +60,8 @@ export function valideerOpGetekend(
   const n = String(b.notitie ?? '').trim().slice(0, MAX_NOTITIE)
   const via = ONDERTEKEND_VIA.some((x) => x.key === b.via) ? b.via as OndertekendVia : null
   const bestelbon = normaliseerBestelbon(b.bestelbon_nummer)
-  if (via === 'bestelbon' && !bestelbon) return { ok: false, fout: 'Vul het bestelbonnummer in: het moet op elke factuur komen.' }
+  // Geen nummer, maar de bestelbon zit als bijlage bij? Dan lezen we het nummer eruit.
+  if (via === 'bestelbon' && !bestelbon && b.bestelbon_uit_bijlage !== true) return { ok: false, fout: 'Vul het bestelbonnummer in of voeg de bestelbon toe: het nummer moet op elke factuur komen.' }
   return { ok: true, datum, notitie: n || null, ...(via ? { via } : {}), ...(bestelbon ? { bestelbon } : {}) }
 }
 

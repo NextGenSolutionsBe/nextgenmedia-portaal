@@ -6,7 +6,8 @@ import { GetalInvoer } from '@/components/ui/getal-invoer'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { X, Plus, Trash2, Copy, ArrowUp, ArrowDown, Loader2, Save, Send, Ban, RotateCcw, Wallet, History, AlertTriangle, ExternalLink } from 'lucide-react'
+import { X, Plus, Trash2, Copy, ArrowUp, ArrowDown, Loader2, Save, Send, Ban, RotateCcw, Wallet, History, AlertTriangle, ExternalLink, Sparkles } from 'lucide-react'
+import { SlimInvullen } from './slim-invullen'
 import { formatEuro } from '@/lib/utils'
 import { DEFAULT_VAT } from '@/lib/invoices'
 import { factuurdagVan } from '@/lib/facturatie/reeks'
@@ -23,11 +24,12 @@ import { KostenEnWinstDialoog, KostenSamenvatting } from './kosten-en-winst'
  */
 
 type Klant = { id: string; naam: string }
-type ContractOptie = { id: string; titel: string; status: string; label: string; client_id: string | null }
+type ContractOptie = { id: string; titel: string; status: string; label: string; client_id: string | null; bestelbon?: string | null }
 type Wijziging = { id: number; actie: string; veld: string | null; oud: string | null; nieuw: string | null; reden: string | null; actor_email: string | null; created_at: string }
 type Factuur = {
   id: string; client_id: string | null; contract_id: string | null; service_slug: string | null; invoice_date: string; due_date: string | null; periode: string | null; verantwoordelijke?: string | null; sent_by_email?: string | null
   description: string | null; reference: string | null; note: string | null; currency: string | null; vat_pct: number; payment_term_days: number | null
+  klant_referentie?: string | null
   amount_excl: number; amount_incl: number; status: string; verzendstatus: Verzendstatus; betaalstatus_afgeleid: Betaalstatus | null; betaald_bedrag: number; betaald_op: string | null
   sent_at: string | null; status_reden: string | null; contract_bedrag_excl: number | null; klant_naam: string | null; contract_titel: string | null; magInhoud: boolean
   voorstel: { volgnr: number; aantal: number } | null
@@ -67,10 +69,10 @@ export function RegelsEditor({ regels, onChange, btw, alleenLezen }: { regels: F
   return (
     <div className="space-y-2">
       <div className="overflow-x-auto -mx-1">
-        <KaartTabel><table className="w-full text-xs min-w-[860px]">
+        <KaartTabel><table className="w-full text-xs min-w-[1040px]">
           <thead>
             <tr className="text-[10px] text-gray-500">
-              <th className="px-1 py-1 text-left w-8">#</th><th className="px-1 py-1 text-left">Artikel</th><th className="px-1 py-1 text-left">Omschrijving</th>
+              <th className="px-1 py-1 text-left w-8">#</th><th className="px-1 py-1 text-left w-44">Artikel</th><th className="px-1 py-1 text-left min-w-[280px]">Omschrijving</th>
               <th className="px-1 py-1 text-right w-16">Aantal</th><th className="px-1 py-1 text-left w-20">Eenheid</th><th className="px-1 py-1 text-right w-24">Prijs excl.</th>
               <th className="px-1 py-1 text-right w-14">Btw %</th><th className="px-1 py-1 text-right w-16">Korting %</th>
               <th className="px-1 py-1 text-right w-24">Excl.</th><th className="px-1 py-1 text-right w-20">Btw</th><th className="px-1 py-1 text-right w-24">Incl.</th><th className="px-1 py-1 w-28" />
@@ -82,8 +84,8 @@ export function RegelsEditor({ regels, onChange, btw, alleenLezen }: { regels: F
               return (
                 <tr key={`${r.id ?? 'n'}-${i}`} className="border-t border-gray-100">
                   <td className="px-1 py-1 text-gray-400">{r.volgnr}</td>
-                  <td className="px-1 py-1"><input className={cel} value={r.artikel} disabled={alleenLezen} onChange={(e) => zet(i, { artikel: e.target.value })} placeholder="Bv. Social media beheer" /></td>
-                  <td className="px-1 py-1"><input className={cel} value={r.omschrijving} disabled={alleenLezen} onChange={(e) => zet(i, { omschrijving: e.target.value })} placeholder="Omschrijving op de factuur" /></td>
+                  <td className="px-1 py-1 align-top"><textarea rows={2} className={`${cel} resize-y`} value={r.artikel} disabled={alleenLezen} onChange={(e) => zet(i, { artikel: e.target.value })} placeholder="Bv. Social media beheer" /></td>
+                  <td className="px-1 py-1 align-top"><textarea rows={Math.min(10, Math.max(3, r.omschrijving.split('\n').length + 1))} className={`${cel} resize-y leading-relaxed`} value={r.omschrijving} disabled={alleenLezen} onChange={(e) => zet(i, { omschrijving: e.target.value })} placeholder="Omschrijving op de factuur: wat de klant krijgt" /></td>
                   <td className="px-1 py-1"><GetalInvoer className={`${cel} text-right`} waarde={r.aantal} min={0} disabled={alleenLezen} onWaarde={(n) => zet(i, { aantal: n })} /></td>
                   <td className="px-1 py-1"><select className={cel} value={r.eenheid} disabled={alleenLezen} onChange={(e) => zet(i, { eenheid: e.target.value })}>{[...EENHEDEN, ...(EENHEDEN.includes(r.eenheid as typeof EENHEDEN[number]) ? [] : [r.eenheid])].map((u) => <option key={u} value={u}>{u}</option>)}</select></td>
                   <td className="px-1 py-1"><GetalInvoer className={`${cel} text-right`} waarde={r.prijs_excl} disabled={alleenLezen} onWaarde={(n) => zet(i, { prijs_excl: n })} /></td>
@@ -154,7 +156,12 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
   const [kop, setKop] = useState({
     invoice_date: standaard?.invoice_date ?? new Date().toISOString().slice(0, 10), due_date: '', payment_term_days: '30', periode: '',
     client_id: standaard?.client_id ?? '', contract_id: standaard?.contract_id ?? '', description: standaard?.description ?? '', reference: '', currency: 'EUR', note: '', vat_pct: String(DEFAULT_VAT), verantwoordelijke: '',
+    // Bestelbonnummer van de klant: komt vanzelf van het contract als dat er een heeft.
+    klant_referentie: '',
   })
+  // Slim invullen uit het contract (enkel bij een nieuwe factuur met een contract).
+  // Geopend vanuit een contract: meteen het contract lezen, zoals het voorstel voor de contractwaarde.
+  const [slim, setSlim] = useState(() => !invoiceId && !!standaard?.contract_id)
   // Enkel bij een nieuwe factuur: eenmalig of maandelijks doorlopend (terugkerende definitie).
   const [herhaling, setHerhaling] = useState<'eenmalig' | 'maandelijks'>('eenmalig')
   const [regels, setRegels] = useState<FactuurRegel[]>(() => (nieuw ? [nieuweRegel({ artikel: standaard?.description ?? '', omschrijving: standaard?.description ?? '' })] : []))
@@ -171,12 +178,18 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
         if (f.error) throw new Error(f.error)
         const inv = f.factuur as Factuur
         setFactuur(inv); setWijzigingen(f.wijzigingen ?? [])
-        const k2 = { invoice_date: dag(inv.invoice_date), due_date: dag(inv.due_date), payment_term_days: inv.payment_term_days === null || inv.payment_term_days === undefined ? '' : String(inv.payment_term_days), periode: inv.periode ?? '', client_id: inv.client_id ?? '', contract_id: inv.contract_id ?? '', description: inv.description ?? '', reference: inv.reference ?? '', currency: inv.currency ?? 'EUR', note: inv.note ?? '', vat_pct: String(inv.vat_pct ?? DEFAULT_VAT), verantwoordelijke: inv.verantwoordelijke ?? '' }
+        const k2 = { invoice_date: dag(inv.invoice_date), due_date: dag(inv.due_date), payment_term_days: inv.payment_term_days === null || inv.payment_term_days === undefined ? '' : String(inv.payment_term_days), periode: inv.periode ?? '', client_id: inv.client_id ?? '', contract_id: inv.contract_id ?? '', description: inv.description ?? '', reference: inv.reference ?? '', currency: inv.currency ?? 'EUR', note: inv.note ?? '', vat_pct: String(inv.vat_pct ?? DEFAULT_VAT), verantwoordelijke: inv.verantwoordelijke ?? '', klant_referentie: inv.klant_referentie ?? '' }
         setKop(k2); setRegels(f.regels ?? []); setOrigineel(JSON.stringify({ k: k2, r: f.regels ?? [], v: dag(inv.sent_at) })); setVerzendDatum(dag(inv.sent_at))
       }
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Laden mislukt') } finally { setLaden(false) }
   }, [id])
   useEffect(() => { laad() }, [laad])
+  // Nieuwe factuur bij een contract met een bestelbon: het nummer staat er meteen op.
+  useEffect(() => {
+    if (!nieuw || !kop.contract_id) return
+    const b = contracten.find((c) => c.id === kop.contract_id)?.bestelbon
+    if (b) setKop((k) => (k.klant_referentie ? k : { ...k, klant_referentie: b }))
+  }, [nieuw, kop.contract_id, contracten])
 
   const btw = getal(kop.vat_pct, DEFAULT_VAT)
   const totalen = useMemo(() => berekenTotalen(regels), [regels])
@@ -302,10 +315,19 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
                   <select className={INP} value={kop.client_id} onChange={(e) => setKop((k) => ({ ...k, client_id: e.target.value }))}><option value="">— Kies klant —</option>{klanten.map((k) => <option key={k.id} value={k.id}>{k.naam}</option>)}</select>
                 </div>
                 <div className="col-span-2"><label className="block text-xs font-medium text-gray-600 mb-1">Contract of project <span className="text-gray-400">— optioneel</span></label>
-                  <select className={INP} value={kop.contract_id} onChange={(e) => setKop((k) => ({ ...k, contract_id: e.target.value }))}><option value="">— Losse factuur, geen contract —</option>{contractOpties.map((c) => <option key={c.id} value={c.id}>{c.titel} · {c.label}</option>)}</select>
+                  <select className={INP} value={kop.contract_id} onChange={(e) => {
+                    const c = contracten.find((x) => x.id === e.target.value)
+                    setKop((k) => ({ ...k, contract_id: e.target.value, client_id: k.client_id || c?.client_id || '', klant_referentie: k.klant_referentie || c?.bestelbon || '' }))
+                  }}><option value="">— Losse factuur, geen contract —</option>{contractOpties.map((c) => <option key={c.id} value={c.id}>{c.titel} · {c.label}</option>)}</select>
+                  {nieuw && kop.contract_id && !slim && (
+                    <button type="button" onClick={() => setSlim(true)} className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-violet-700 hover:text-violet-900">
+                      <Sparkles className="h-3.5 w-3.5" />Slim invullen uit het contract
+                    </button>
+                  )}
                 </div>
-                <div className="col-span-2"><label className="block text-xs font-medium text-gray-600 mb-1">Omschrijving</label><input className={INP} value={kop.description} onChange={(e) => setKop((k) => ({ ...k, description: e.target.value }))} placeholder="Wat staat er bovenaan de factuur?" /></div>
-                <div><label className="block text-xs font-medium text-gray-600 mb-1">Referentie</label><input className={INP} value={kop.reference} onChange={(e) => setKop((k) => ({ ...k, reference: e.target.value }))} placeholder="PO-nummer, kenmerk klant" /></div>
+                <div className="col-span-2 md:col-span-4"><label className="block text-xs font-medium text-gray-600 mb-1">Omschrijving</label><textarea rows={2} className={`${INP} leading-relaxed`} value={kop.description} onChange={(e) => setKop((k) => ({ ...k, description: e.target.value }))} placeholder="Wat staat er bovenaan de factuur?" /></div>
+                <div><label className="block text-xs font-medium text-gray-600 mb-1">Bestelbonnummer</label><input className={INP} value={kop.klant_referentie} onChange={(e) => setKop((k) => ({ ...k, klant_referentie: e.target.value }))} placeholder="Van de klant, als er een is" /></div>
+                <div><label className="block text-xs font-medium text-gray-600 mb-1">Referentie</label><input className={INP} value={kop.reference} onChange={(e) => setKop((k) => ({ ...k, reference: e.target.value }))} placeholder="Kenmerk klant" /></div>
                 <div><label className="block text-xs font-medium text-gray-600 mb-1">Verantwoordelijke</label><input className={INP} list="ngm-verantwoordelijken" value={kop.verantwoordelijke} onChange={(e) => setKop((k) => ({ ...k, verantwoordelijke: e.target.value }))} placeholder="Bv. Bram Reinquin" /><datalist id="ngm-verantwoordelijken"><option value="Bram Reinquin" /><option value="Marco Castermans" /></datalist></div>
                 {nieuw && (
                   <div><label className="block text-xs font-medium text-gray-600 mb-1">Herhaling</label>
@@ -317,6 +339,20 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
                   <div><label className="block text-xs font-medium text-gray-600 mb-1">Std. btw %</label><input className={INP} inputMode="decimal" value={kop.vat_pct} onChange={(e) => setKop((k) => ({ ...k, vat_pct: e.target.value }))} /></div>
                 </div>
               </div>
+
+              {slim && kop.contract_id && (
+                <SlimInvullen contractId={kop.contract_id} onSluit={() => setSlim(false)}
+                  onInvullen={(f, extra) => {
+                    setKop((k) => ({
+                      ...k, invoice_date: f.datum, due_date: k.payment_term_days ? plusDagen(f.datum, Math.max(0, Math.round(getal(k.payment_term_days, 30)))) : k.due_date,
+                      periode: f.periode, description: f.titel, vat_pct: String(f.btw), client_id: k.client_id || extra.klantId || '', klant_referentie: k.klant_referentie || extra.bestelbon || '',
+                    }))
+                    setRegels([nieuweRegel({ artikel: f.titel, omschrijving: f.omschrijving, aantal: 1, eenheid: f.eenheid, prijs_excl: f.bedrag, btw_pct: f.btw }, f.btw)])
+                    setSlim(false)
+                    toast.success('Ingevuld uit het contract. Kijk het na en bewaar.')
+                  }}
+                  onToegevoegd={(n) => { if (n) { onSaved?.(''); onClose() } }} />
+              )}
 
               <div>
                 <div className="text-[11px] font-medium text-gray-400 mb-2">Factuurregels</div>

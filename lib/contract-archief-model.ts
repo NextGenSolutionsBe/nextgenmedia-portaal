@@ -93,6 +93,7 @@ export const GEBEURTENIS_LABEL: Record<string, string> = {
   tegengetekend: 'Ondertekend door NextGenMedia',
   facturen_gepland: 'Facturen automatisch gepland uit het contract',
   facturen_plannen_onvolledig: 'Facturen nog niet gepland: gegevens ontbreken',
+  bestelbon_gelezen: 'Bestelbonnummer uit de bijgevoegde bestelbon gelezen',
 }
 
 export const gebeurtenisLabel = (t: string): string => GEBEURTENIS_LABEL[t] ?? t
