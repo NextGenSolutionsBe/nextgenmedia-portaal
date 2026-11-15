@@ -94,11 +94,11 @@ async function main() {
     await assert.rejects(voegFacturenToe(admin, 'c2', [factuur()]), /Koppel eerst een klant/)
   })
 
-  await test('Omschrijving uit het contract bovenaan, met de periode eronder', () => {
+  await test('Omschrijving uit het contract met de periode erin', () => {
     const p = maakPlan({ contractTitel: 'Contract', getekendOp: null, btwPct: 21, moment: 'eerste', posten: [{ naam: 'Hosting', soort: 'terugkerend', frequentie: 'kwartaal', bedrag: 60, perioden: 2, start: '2027-01-01', inbegrepen: ['Hosting en SSL'], omschrijving: 'Hosting van de website met SSL en dagelijkse back-ups.' }] })
     assert.equal(p.facturen[0].titel, 'Hosting Q1 2027')
-    assert.match(p.facturen[0].omschrijving, /^Hosting van de website met SSL en dagelijkse back-ups\.\nPeriode: Q1 2027 \(1 januari 2027 – 31 maart 2027\)\./)
-    assert.match(p.facturen[1].omschrijving, /Factuur 2 van 2/)
+    assert.equal(p.facturen[0].omschrijving, 'Hosting van de website met SSL en dagelijkse back-ups voor de periode Q1 2027.')
+    assert.equal(p.facturen[1].omschrijving, 'Hosting van de website met SSL en dagelijkse back-ups voor de periode Q2 2027.')
   })
 
   await test('Bestelbonnummer: enkel overnemen bij een bestelbon met genoeg zekerheid', () => {

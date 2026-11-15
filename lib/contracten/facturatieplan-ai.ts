@@ -10,17 +10,21 @@ import type { Frequentie } from '@/lib/facturatie/factuurvoorstellen'
 const MODEL = () => process.env.BLOG_AI_MODEL || 'claude-sonnet-4-6'
 const FREQ: Frequentie[] = ['eenmalig', 'maandelijks', 'tweemaandelijks', 'kwartaal', 'halfjaarlijks', 'jaarlijks']
 
-export type AiPlan = { posten: (PlanPost & { citaat: string | null })[]; btwPct: number | null; moment: 'eerste' | 'laatste' | null; opmerking: string | null }
+export type AiPlan = { posten: (PlanPost & { citaat: string | null })[]; btwPct: number | null; moment: 'eerste' | 'laatste' | null; opmerking: string | null; analyse: string | null }
 
 export async function leesFacturatieplan(base64Pdf: string): Promise<AiPlan> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('AI niet geconfigureerd: ANTHROPIC_API_KEY ontbreekt in deze omgeving.')
-  const prompt = `Je bent boekhouder bij een Belgisch marketingbureau. Lees dit contract en bepaal welke facturen we de klant moeten sturen.
-Splits het contract in posten: een terugkerend bedrag (per maand, per kwartaal, per jaar …) en/of eenmalige bedragen (opstartkost, website, shoot).
-Hosting, onderhoud, licenties of een onderhoudscontract zijn altijd een aparte post met hun eigen frequentie en startdatum, ook als ze in hetzelfde contract staan.
+  const prompt = `Je bent de boekhouder van een Belgisch marketingbureau (NextGenMedia / NextGenSolutions). Lees dit contract volledig, ook prijstabellen, bijlagen, betalingsvoorwaarden en kleine lettertjes, en bepaal precies welke facturen we de klant moeten sturen, wanneer en voor hoeveel.
+
+Werkwijze:
+1. Zoek alle bedragen en wat ze dekken: maandbedragen, kwartaal- of jaarbedragen, eenmalige bedragen, opstartkosten, voorschotten, saldo's, hosting, onderhoud, licenties.
+2. Zoek de betalingsafspraken: wanneer wordt er gefactureerd (bij ondertekening, bij de start, bij oplevering, maandelijks vooraf of achteraf), hoe lang loopt het contract, vanaf wanneer.
+3. Maak per factuurreeks één post.
 
 Geef UITSLUITEND geldige JSON:
 {
+  "analyse": "Maandelijks € 979 voor sociale media van januari tot en met juni 2027, vooraf te factureren. Daarnaast een opstartkost van € 500 bij ondertekening.",
   "posten": [
     {
       "naam": "Sociale media management",
@@ -28,29 +32,33 @@ Geef UITSLUITEND geldige JSON:
       "frequentie": "maandelijks",
       "bedrag_excl": 979,
       "aantal_perioden": 6,
-      "start": "2026-07-01",
-      "inbegrepen": ["12 posts per maand op Instagram en Facebook", "Community management"],
-      "omschrijving": "Beheer van de sociale media: planning, creatie en publicatie van content en opvolging van de community.",
+      "start": "2027-01-01",
+      "inbegrepen": ["contentplanning", "creatie en publicatie van berichten", "beheer van de afgesproken sociale mediakanalen"],
+      "omschrijving": "Socialmediadiensten conform overeenkomst voor de periode [periode], inclusief contentplanning, creatie en publicatie van berichten en beheer van de afgesproken sociale mediakanalen.",
       "citaat": "…"
     },
-    { "naam": "Hosting", "soort": "terugkerend", "frequentie": "kwartaal", "bedrag_excl": 60, "aantal_perioden": 4, "start": "2027-01-01", "inbegrepen": ["Hosting en SSL"], "citaat": "…" },
-    { "naam": "Website", "soort": "eenmalig", "frequentie": "eenmalig", "bedrag_excl": 2500, "aantal_perioden": 1, "start": "2026-11-15", "inbegrepen": ["Ontwerp en bouw van 5 pagina's"], "citaat": "…" }
+    { "naam": "Opstartkost sociale media", "soort": "eenmalig", "frequentie": "eenmalig", "bedrag_excl": 500, "aantal_perioden": 1, "start": null, "inbegrepen": ["strategie en opmaak van de contentlijnen"], "omschrijving": "Eenmalige opstartkost conform overeenkomst, inclusief de strategie en de opmaak van de contentlijnen.", "citaat": "…" },
+    { "naam": "Hosting", "soort": "terugkerend", "frequentie": "jaarlijks", "bedrag_excl": 240, "aantal_perioden": 1, "start": "2027-01-01", "inbegrepen": ["hosting", "SSL-certificaat"], "omschrijving": "Hosting van de website conform overeenkomst voor de periode [periode], inclusief SSL-certificaat en back-ups.", "citaat": "…" }
   ],
   "btw_pct": 21,
   "facturatiemoment": "eerste",
   "opmerking": null
 }
+
 Regels:
-- naam: korte, duidelijke titel van wat we leveren (max 6 woorden), in het Nederlands, zoals op een factuur, zo specifiek als het contract toelaat (geen klantnaam, geen periode, geen bedrag). Bv. "Ontwerp infopanelen", "Sociale media management", "Hosting", "Onderhoudscontract website", "Bedrijfsvideo".
-- omschrijving: één of twee zakelijke zinnen voor op de factuur die zeggen wat de klant krijgt, in de u-vorm of onpersoonlijk, zonder bedragen, datums of klantnaam. Niets concreets in het contract: null.
+- analyse: 1 tot 3 korte zinnen: wat het contract zegt over prijzen, looptijd en wanneer er gefactureerd wordt.
+- naam: korte, duidelijke titel van wat we leveren (max 6 woorden), zoals op een factuur, zo specifiek als het contract toelaat (geen klantnaam, geen periode, geen bedrag). Bv. "Sociale media management", "Ontwerp infopanelen", "Website", "Hosting", "Onderhoudscontract website", "Bedrijfsvideo".
+- omschrijving: één duidelijke, zakelijke zin voor op de factuur, in de stijl van het voorbeeld: wat de klant krijgt, "conform overeenkomst", en bij een terugkerende post letterlijk "voor de periode [periode]" (de app vult de maand, het kwartaal of het jaar in). Geen bedragen, geen datums, geen klantnaam. Elke factuur van dezelfde post krijgt zo exact dezelfde titel en omschrijving, enkel de periode verschilt.
 - soort ∈ terugkerend | eenmalig. frequentie ∈ eenmalig | maandelijks | tweemaandelijks | kwartaal | halfjaarlijks | jaarlijks.
-- bedrag_excl = bedrag excl. btw per factuur (eenmalig: het totaal van die post). Staat er enkel incl. btw, reken om (÷ 1,21) en zeg het in "opmerking".
-- aantal_perioden = hoeveel facturen van die post (6 maanden maandelijks = 6; 1 jaar per kwartaal = 4). Onbepaalde duur zonder minimum: null.
-- start = start van de dienstverlening van die post (JJJJ-MM-DD), NIET de ondertekendatum. Niet vermeld: null.
-- inbegrepen = wat het contract concreet opsomt voor die post (max 8, kort, zonder bedragen). Niets vermeld: [].
-- Facturatie in schijven van een eenmalig totaal (bv. 50% voorschot, 50% bij oplevering): maak per schijf een eenmalige post met dat bedrag ("Website, voorschot 50%").
+- Hosting, onderhoud, licenties of een onderhoudscontract zijn altijd een aparte post met hun eigen frequentie en startdatum.
+- Voorschot: altijd een aparte eenmalige post ("Voorschot website (50%)"), met als start de datum van ondertekening of de datum die het contract noemt (onbekend: null). Het saldo ook apart ("Saldo website (50%)"), met als start de opleverdatum als die er staat (anders null). Gaat het voorschot af van latere facturen, zeg dat in "opmerking".
+- Facturatie in schijven van een eenmalig totaal (bv. 30% / 40% / 30%): per schijf een eenmalige post met dat bedrag en de naam van de schijf.
+- bedrag_excl = bedrag excl. btw per factuur (eenmalig: het bedrag van die factuur). Staat er enkel incl. btw, reken om (÷ 1,21) en zeg het in "opmerking". Reken percentages zelf uit (50% van € 3.000 = 1500).
+- aantal_perioden = hoeveel facturen van die post (januari tot en met juni maandelijks = 6; 1 jaar per kwartaal = 4). Onbepaalde duur zonder minimum: null.
+- start = eerste dag van de eerste periode van die post (JJJJ-MM-DD), NIET de ondertekendatum, tenzij het contract zegt dat er bij ondertekening gefactureerd wordt. Niet vermeld: null.
+- inbegrepen = wat het contract concreet opsomt voor die post (max 8, kort, kleine letters, zonder bedragen). Niets vermeld: [].
 - Variabel advertentiebudget, commissies of opties die niet zeker zijn: geen post, wel kort in "opmerking".
-- btw_pct enkel als het contract het noemt, anders null. facturatiemoment: eerste (begin van de periode) | laatste (einde) | null.
+- btw_pct enkel als het contract het noemt, anders null. facturatiemoment: eerste (begin van de periode, vooraf) | laatste (einde, achteraf) | null.
 - Nooit gokken: wat niet in het contract staat is null.
 - citaat = de letterlijke zinsnede uit het contract (max 200 tekens). opmerking = max 2 korte zinnen of null.`
   let res: Response
@@ -58,7 +66,7 @@ Regels:
     res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: MODEL(), max_tokens: 3000, messages: [{ role: 'user', content: [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Pdf } }, { type: 'text', text: prompt }] }] }),
+      body: JSON.stringify({ model: MODEL(), max_tokens: 4000, messages: [{ role: 'user', content: [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Pdf } }, { type: 'text', text: prompt }] }] }),
     })
   } catch (e) { throw new Error(`Kan de AI-dienst niet bereiken: ${e instanceof Error ? e.message : 'netwerkfout'}`) }
   const json = await res.json().catch(() => null)
@@ -69,7 +77,7 @@ Regels:
   let p: Record<string, unknown>
   try { p = JSON.parse(text.slice(a, z + 1)) } catch { throw new Error('AI-antwoord kon niet als JSON gelezen worden.') }
   const getal = (v: unknown) => { if (v === null || v === undefined || v === '') return null; const n = Number(String(v).replace(',', '.')); return Number.isFinite(n) ? n : null }
-  const posten = (Array.isArray(p.posten) ? p.posten : []).slice(0, 8).map((o) => {
+  const posten = (Array.isArray(p.posten) ? p.posten : []).slice(0, 10).map((o) => {
     const r = (o && typeof o === 'object' ? o : {}) as Record<string, unknown>
     const freq = FREQ.includes(r.frequentie as Frequentie) ? r.frequentie as Frequentie : null
     const soort: PlanPost['soort'] = r.soort === 'eenmalig' || freq === 'eenmalig' ? 'eenmalig' : 'terugkerend'
@@ -88,5 +96,6 @@ Regels:
     posten, btwPct: btw !== null && btw >= 0 && btw <= 100 ? btw : null,
     moment: p.facturatiemoment === 'laatste' ? 'laatste' : p.facturatiemoment === 'eerste' ? 'eerste' : null,
     opmerking: typeof p.opmerking === 'string' && p.opmerking.trim() ? p.opmerking.trim().slice(0, 300) : null,
+    analyse: typeof p.analyse === 'string' && p.analyse.trim() ? p.analyse.replace(/\s+/g, ' ').trim().slice(0, 400) : null,
   }
 }

@@ -68,7 +68,7 @@ async function log(admin: Admin, id: string, status: string | null, sync: 'ok' |
 }
 
 /** Het plan berekenen zonder iets te bewaren (voor het scherm en de diagnose). */
-export async function berekenPlan(admin: Admin, contractId: string, opties: { metAi?: boolean } = {}): Promise<{ plan: Plan; aiFout: string | null; contract: Record<string, unknown>; klant: { company_name?: string; btw_nummer?: string | null } | null }> {
+export async function berekenPlan(admin: Admin, contractId: string, opties: { metAi?: boolean; terugvalVandaag?: boolean } = {}): Promise<{ plan: Plan; aiFout: string | null; contract: Record<string, unknown>; klant: { company_name?: string; btw_nummer?: string | null } | null }> {
   const { data: c } = await admin.from('contracts').select('*').eq('id', contractId).maybeSingle()
   if (!c) throw new Error('Contract niet gevonden')
   const { data: klant } = c.client_id ? await admin.from('clients').select('company_name, btw_nummer').eq('id', c.client_id).maybeSingle() : { data: null }
@@ -81,8 +81,10 @@ export async function berekenPlan(admin: Admin, contractId: string, opties: { me
     } catch (e) { aiFout = e instanceof Error ? e.message : String(e) }
   }
   const { posten, btwPct, moment, opmerkingen } = postenVoorContract(c, ai, klant?.btw_nummer ?? null)
-  const getekendOp = c.signed_at ? String(c.signed_at).slice(0, 10) : null
-  const plan = maakPlan({ contractTitel: c.title ?? 'contract', getekendOp, posten, btwPct, moment })
+  // Nog niet getekend (Slim invullen vóór ondertekening): wat geen datum heeft, plannen we vanaf vandaag.
+  const vandaag = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Brussels', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+  const getekendOp = c.signed_at ? String(c.signed_at).slice(0, 10) : opties.terugvalVandaag ? vandaag : null
+  const plan = maakPlan({ contractTitel: c.title ?? 'contract', getekendOp, posten, btwPct, moment, ...(!c.signed_at && opties.terugvalVandaag ? { terugvalLabel: 'vandaag' } : {}) })
   plan.opmerkingen.unshift(...opmerkingen)
   if (aiFout) plan.opmerkingen.push(`Het contract kon niet gelezen worden (${aiFout}); gepland uit de gegevens in de app.`)
   return { plan, aiFout, contract: c, klant }
@@ -187,7 +189,7 @@ export type FactuurVoorstel = {
  * of dezelfde maand met hetzelfde bedrag) is aangeduid, zodat je het niet dubbel toevoegt.
  */
 export async function voorstelFacturen(admin: Admin, contractId: string): Promise<FactuurVoorstel> {
-  const { plan, aiFout, contract } = await berekenPlan(admin, contractId)
+  const { plan, aiFout, contract } = await berekenPlan(admin, contractId, { terugvalVandaag: true })
   const { data: bestaand } = await admin.from('invoices').select('voorstel_sleutel, invoice_month, invoice_date, amount_excl, status').eq('contract_id', contractId)
   const rijen = ((bestaand ?? []) as { voorstel_sleutel: string | null; invoice_month: string | null; invoice_date: string | null; amount_excl: number | null; status: string }[])
     .filter((r) => !['geannuleerd', 'gecrediteerd'].includes(r.status))
