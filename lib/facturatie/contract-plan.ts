@@ -31,8 +31,10 @@ export type PlanPost = {
 
 export type PlanInvoer = {
   contractTitel: string
-  /** 'YYYY-MM-DD' of null. */
+  /** 'YYYY-MM-DD' of null. Ook de terugval als een post geen startdatum heeft. */
   getekendOp: string | null
+  /** Hoe die terugval heet in de opmerking: standaard "de ondertekening" (nog niet getekend: "vandaag"). */
+  terugvalLabel?: string
   posten: PlanPost[]
   btwPct: number
   /** Factuurdatum: eerste of laatste dag van de periode. */
@@ -88,24 +90,32 @@ export function factuurTitel(naam: string, vanM: string, maanden: number): strin
   return /^(Q\d|H\d|\d{4}$)/.test(p) ? `${naam} ${p}` : `${naam} (${p})`
 }
 
-function omschrijvingVoor(p: { naam: string; periode: string | null; van: string; tot: string; inbegrepen: string[]; nr: number | null; van_n: number | null; tekst?: string | null }, invoer: PlanInvoer): string {
-  const regels: string[] = []
-  const tekst = p.tekst?.replace(/\s+/g, ' ').trim()
-  const bereik = p.periode ? (p.van.slice(0, 7) === p.tot.slice(0, 7) ? `${Number(p.van.slice(8, 10))} – ${datumLang(p.tot)}` : `${datumLang(p.van)} – ${datumLang(p.tot)}`) : null
-  if (tekst) {
-    // Een zakelijke omschrijving uit het contract, met daaronder de periode.
-    regels.push(tekst)
-    if (p.periode) regels.push(`Periode: ${p.periode} (${bereik}).`)
-  } else if (p.periode) {
-    regels.push(`${p.naam} voor ${p.periode} (${bereik}).`)
-  } else {
-    regels.push(`${p.naam}.`)
+/** "a, b en c" */
+function opsomming(lijst: string[]): string {
+  const l = lijst.map((x) => x.trim().replace(/[.;]+$/, '')).filter(Boolean)
+    // Kleine letter tenzij het een naam of afkorting is ("Instagram", "SEO").
+    .map((x) => (/^[A-Z][a-z]/.test(x) && !/^(Instagram|Facebook|LinkedIn|TikTok|YouTube|Google|Meta|Pinterest|WordPress|Shopify)\b/.test(x) ? x[0].toLowerCase() + x.slice(1) : x))
+  return l.length <= 1 ? (l[0] ?? '') : `${l.slice(0, -1).join(', ')} en ${l[l.length - 1]}`
+}
+
+/**
+ * De omschrijving op de factuur: één duidelijke zin, bij een terugkerende post
+ * telkens dezelfde met enkel een andere periode, bv. "Socialmediadiensten
+ * conform overeenkomst voor de periode januari 2027, inclusief contentplanning,
+ * creatie en publicatie van berichten en beheer van de afgesproken sociale
+ * mediakanalen." De tekst uit het contract (AI) mag "[periode]" bevatten.
+ */
+function omschrijvingVoor(p: { naam: string; periode: string | null; inbegrepen: string[]; tekst?: string | null }): string {
+  const t = p.tekst?.replace(/\s+/g, ' ').trim()
+  if (t) {
+    const zin = /[.!?]$/.test(t) ? t : `${t}.`
+    if (!p.periode) return zin.replace(/\s*(voor|in|over|tijdens)\s+de\s+periode\s+\[periode\]/gi, '').replace(/\s*\[periode\]/gi, '').replace(/\s+([,.])/g, '$1')
+    if (/\[periode\]/i.test(zin)) return zin.replace(/\[periode\]/gi, p.periode)
+    if (/conform (de )?overeenkomst/i.test(zin)) return zin.replace(/conform (de )?overeenkomst/i, (m) => `${m} voor de periode ${p.periode}`)
+    return `${zin.replace(/\.$/, '')} voor de periode ${p.periode}.`
   }
-  const lijst = p.inbegrepen.map((x) => x.trim()).filter(Boolean)
-  if (lijst.length) regels.push('', 'Inbegrepen:', ...lijst.map((x) => `- ${x}`))
-  const bron = `Volgens de overeenkomst "${invoer.contractTitel}"${invoer.getekendOp ? `, getekend op ${datumLang(invoer.getekendOp)}` : ''}.`
-  regels.push('', p.nr && p.van_n && p.van_n > 1 ? `Factuur ${p.nr} van ${p.van_n}. ${bron}` : bron)
-  return regels.join('\n')
+  const incl = p.inbegrepen.length ? `, inclusief ${opsomming(p.inbegrepen)}` : ''
+  return p.periode ? `${p.naam} conform overeenkomst voor de periode ${p.periode}${incl}.` : `${p.naam} conform overeenkomst${incl}.`
 }
 
 /** Het plan: alle facturen van alle posten, met wat ontbreekt en wat je best nakijkt. */
@@ -120,13 +130,13 @@ export function maakPlan(invoer: PlanInvoer): Plan {
     const bedrag = rond(post.bedrag)
     const voor = i === 0 ? '' : `p${i + 1}:`
     let start = post.start && ISO.test(post.start) ? post.start : null
-    if (!start && invoer.getekendOp) { start = invoer.getekendOp; opmerkingen.push(`Geen startdatum gevonden${wie}: gepland vanaf de ondertekening (${datumLang(start)}). Kijk dat na.`) }
+    if (!start && invoer.getekendOp) { start = invoer.getekendOp; opmerkingen.push(`Geen startdatum gevonden${wie}: gepland vanaf ${invoer.terugvalLabel ?? 'de ondertekening'} (${datumLang(start)}). Kijk dat na.`) }
     if (!start) { ontbreekt.push(`startdatum${wie}`); return }
 
     if (post.soort === 'eenmalig' || post.frequentie === 'eenmalig') {
       facturen.push({
         sleutel: `${voor}eenmalig:${start}`, periode: start.slice(0, 7), van: start, tot: start, datum: start,
-        titel: naam, omschrijving: omschrijvingVoor({ naam, periode: null, van: start, tot: start, inbegrepen: post.inbegrepen, nr: null, van_n: null, tekst: post.omschrijving }, invoer),
+        titel: naam, omschrijving: omschrijvingVoor({ naam, periode: null, inbegrepen: post.inbegrepen, tekst: post.omschrijving }),
         bedrag, btw, eenheid: 'forfait', post: i,
       })
       return
@@ -146,7 +156,7 @@ export function maakPlan(invoer: PlanInvoer): Plan {
       facturen.push({
         sleutel: `${voor}${vanM}`, periode: vanM, van, tot, datum: invoer.moment === 'laatste' ? tot : van,
         titel: factuurTitel(naam, vanM, f.maanden),
-        omschrijving: omschrijvingVoor({ naam, periode: periodeNaam(vanM, f.maanden), van, tot, inbegrepen: post.inbegrepen, nr: n + 1, van_n: aantal, tekst: post.omschrijving }, invoer),
+        omschrijving: omschrijvingVoor({ naam, periode: periodeNaam(vanM, f.maanden), inbegrepen: post.inbegrepen, tekst: post.omschrijving }),
         bedrag, btw, eenheid: f.maanden === 1 ? 'maand' : 'forfait', post: i,
       })
     }
@@ -190,7 +200,7 @@ export type ContractVelden = {
   invoice_frequency?: string | null; expected_invoice_count?: number | string | null
   expected_invoice_amount_excl?: number | string | null; contract_waarde_excl?: number | string | null
 }
-export type AiPosten = { posten: PlanPost[]; btwPct: number | null; moment: 'eerste' | 'laatste' | null; opmerking: string | null }
+export type AiPosten = { posten: PlanPost[]; btwPct: number | null; moment: 'eerste' | 'laatste' | null; opmerking: string | null; analyse?: string | null }
 
 const getal = (v: unknown): number | null => { if (v === null || v === undefined || v === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null }
 
@@ -256,6 +266,7 @@ export function postenVoorContract(c: ContractVelden, ai: AiPosten | null, klant
       if (!hoofd.bedrag && (perFactuur ?? waarde)) hoofd.bedrag = perFactuur ?? waarde
     }
     for (const p of posten) if (!p.start && start) p.start = start
+    if (ai.analyse) opmerkingen.push(`Wat het contract zegt over facturatie: ${ai.analyse}`)
     if (ai.opmerking) opmerkingen.push(`Uit het contract: ${ai.opmerking}`)
   } else if (freq === 'eenmalig' || (!freq && String(c.duration_type ?? '') === 'eenmalig')) {
     posten = [{ naam, soort: 'eenmalig', frequentie: 'eenmalig', bedrag: perFactuur ?? waarde, perioden: 1, start, inbegrepen: [] }]

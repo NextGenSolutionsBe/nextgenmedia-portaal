@@ -39,10 +39,9 @@ test('Maandelijks: 6 facturen juli – december, eerste dag van de maand, € 5.
   assert.equal(p.facturen[0].tot, '2026-07-31')
   assert.equal(p.facturen[0].sleutel, '2026-07')
   assert.equal(p.facturen[0].eenheid, 'maand')
-  const o = p.facturen[2].omschrijving
-  assert.match(o, /^Sociale media management voor september 2026 \(1 – 30 september 2026\)\./)
-  assert.match(o, /Inbegrepen:\n- 12 posts per maand\n- Community management/)
-  assert.match(o, /Factuur 3 van 6\. Volgens de overeenkomst "Social Media Samenwerkingsovereenkomst 2026", getekend op 28 mei 2026\./)
+  // Eén duidelijke zin met de periode erin; elke maand dezelfde tekst, enkel de maand verschilt.
+  assert.equal(p.facturen[2].omschrijving, 'Sociale media management conform overeenkomst voor de periode september 2026, inclusief 12 posts per maand en community management.')
+  assert.equal(p.facturen[3].omschrijving, p.facturen[2].omschrijving.replace('september', 'oktober'))
   assert.equal(planSamenvatting(p).replace(/ /g, ' '), '6 facturen, juli – december 2026, € 5.874 excl. btw')
 })
 
@@ -65,7 +64,7 @@ test('Eenmalig: één factuur met de naam als titel', () => {
   assert.equal(p.facturen[0].titel, 'Website')
   assert.equal(p.facturen[0].sleutel, 'eenmalig:2026-11-15')
   assert.equal(p.facturen[0].datum, '2026-11-15')
-  assert.doesNotMatch(p.facturen[0].omschrijving, /Factuur 1 van/)
+  assert.equal(p.facturen[0].omschrijving, "Website conform overeenkomst, inclusief 5 pagina's.")
 })
 
 test('Meerdere posten: website eenmalig + hosting per kwartaal, eigen sleutels', () => {
@@ -136,6 +135,34 @@ test('Klant buiten België: 0% btw met opmerking', () => {
   assert.equal(r.btwPct, 0)
   assert.match(r.opmerkingen.join(' '), /buiten België/)
   assert.equal(postenVoorContract({ duration_type: 'eenmalig', contract_waarde_excl: 500 }, null, 'BE0123456789').btwPct, 21)
+})
+
+test('Omschrijving uit het contract met [periode]: per maand exact dezelfde zin, enkel de maand verschilt', () => {
+  const tekst = 'Socialmediadiensten conform overeenkomst voor de periode [periode], inclusief contentplanning, creatie en publicatie van berichten en beheer van de afgesproken sociale mediakanalen.'
+  const p = plan([post({ perioden: 6, start: '2027-01-01', omschrijving: tekst })])
+  assert.deepEqual(p.facturen.map((f) => f.titel), ['januari', 'februari', 'maart', 'april', 'mei', 'juni'].map((m) => `Sociale media management (${m} 2027)`))
+  assert.equal(p.facturen[0].omschrijving, 'Socialmediadiensten conform overeenkomst voor de periode januari 2027, inclusief contentplanning, creatie en publicatie van berichten en beheer van de afgesproken sociale mediakanalen.')
+  for (let i = 1; i < 6; i++) assert.equal(p.facturen[i].omschrijving.replace(/(januari|februari|maart|april|mei|juni) 2027/, 'X'), p.facturen[0].omschrijving.replace('januari 2027', 'X'))
+  // Zonder [periode] komt de periode na "conform overeenkomst".
+  const q = plan([post({ perioden: 1, start: '2027-01-01', omschrijving: 'Hosting van de website conform overeenkomst, inclusief SSL' })])
+  assert.equal(q.facturen[0].omschrijving, 'Hosting van de website conform overeenkomst voor de periode januari 2027, inclusief SSL.')
+})
+
+test('Voorschot en saldo: elk een aparte factuur; eenmalig zonder periode in de tekst', () => {
+  const p = plan([
+    post({ naam: 'Voorschot website (50%)', soort: 'eenmalig', frequentie: 'eenmalig', bedrag: 1500, perioden: 1, start: '2026-11-15', omschrijving: 'Voorschot van 50% op het ontwerp en de bouw van de website conform overeenkomst voor de periode [periode].' }),
+    post({ naam: 'Saldo website (50%)', soort: 'eenmalig', frequentie: 'eenmalig', bedrag: 1500, perioden: 1, start: '2027-02-01' }),
+    post({ naam: 'Hosting', frequentie: 'jaarlijks', bedrag: 240, perioden: 1, start: '2027-02-01' }),
+  ])
+  assert.deepEqual(p.facturen.map((f) => [f.titel, f.datum, f.bedrag]), [['Voorschot website (50%)', '2026-11-15', 1500], ['Saldo website (50%)', '2027-02-01', 1500], ['Hosting (februari 2027 – januari 2028)', '2027-02-01', 240]])
+  assert.equal(p.facturen[0].omschrijving, 'Voorschot van 50% op het ontwerp en de bouw van de website conform overeenkomst.')
+  assert.equal(new Set(p.facturen.map((f) => f.sleutel)).size, 3)
+})
+
+test('Nog niet getekend: zonder startdatum gepland vanaf vandaag, en dat staat erbij', () => {
+  const p = plan([post({ naam: 'Ontwerp infopanelen', soort: 'eenmalig', frequentie: 'eenmalig', bedrag: 650, perioden: 1, start: null })], { getekendOp: '2026-11-15', terugvalLabel: 'vandaag' })
+  assert.equal(p.facturen[0].datum, '2026-11-15')
+  assert.match(p.opmerkingen.join(' '), /gepland vanaf vandaag \(15 november 2026\)/)
 })
 
 console.log(`\n${n} tests geslaagd\n`)
