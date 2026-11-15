@@ -1005,3 +1005,23 @@ export async function clickupZoekVarianten(assigneeIds: number[], vanMs: number,
   }
   return uit
 }
+
+export type RecenteTaak = { id: string; naam: string; status: string | null; type: string | null; url: string | null; gewijzigd: number | null }
+
+/**
+ * Taken in de hele werkruimte die sinds een moment gewijzigd werden, ook de
+ * afgesloten (voor de taken uit de mail: staat het al in ClickUp, of is het al
+ * gedaan?). Leest enkel. last_page is niet betrouwbaar: doorlezen tot een lege pagina.
+ */
+export async function recenteTaken(sindsMs: number, maxPaginas = 15): Promise<RecenteTaak[]> {
+  const team = await teamId()
+  const uit: RecenteTaak[] = []
+  for (let page = 0; page < maxPaginas; page++) {
+    const p = new URLSearchParams({ page: String(page), date_updated_gt: String(Math.floor(sindsMs)), include_closed: 'true', subtasks: 'true', order_by: 'updated' })
+    const r = await clickupJson<{ tasks?: { id: string; name?: string; url?: string; date_updated?: string; status?: { status?: string; type?: string } }[] }>(`/team/${team}/task?${p}`)
+    const lijst = r.tasks ?? []
+    for (const t of lijst) uit.push({ id: t.id, naam: t.name ?? '', status: t.status?.status ?? null, type: t.status?.type ?? null, url: t.url ?? null, gewijzigd: t.date_updated ? Number(t.date_updated) : null })
+    if (lijst.length === 0) break
+  }
+  return uit
+}

@@ -17,7 +17,7 @@ export type ActiefProject = { id: string; client_id: string | null; lead_id: str
  * eigen bedrijfsdomein, nooit gmail.com en co). Enkel mails met iemand uit dit
  * adresboek worden bewaard.
  */
-export async function laadAdresboek(admin: Admin): Promise<Adresboek & { projecten: ActiefProject[] }> {
+export async function laadAdresboek(admin: Admin): Promise<Adresboek & { projecten: ActiefProject[]; namen: Map<string, string> }> {
   const veilig = async <T,>(p: PromiseLike<{ data: T[] | null; error?: unknown }>): Promise<T[]> => { try { return (await p).data ?? [] } catch { return [] } }
   const [klanten, gebruikers, contracten, offertes, meetings, opdrachten, afspraken, abm] = await Promise.all([
     veilig(admin.from('clients').select('id, company_name, email, facturatie_email, website_url, archived_at').limit(5000)),
@@ -73,7 +73,7 @@ export async function laadAdresboek(admin: Admin): Promise<Adresboek & { project
   const projecten: ActiefProject[] = opdrachten
     .map((o) => ({ id: o.id, client_id: o.client_id, lead_id: o.lead_id, status: o.status, kolom: kolomVan(o.status), updated_at: o.updated_at, titel: o.titel, klant: o.client_id ? naam.get(o.client_id) ?? null : o.klant_vrij }))
     .filter((o) => ACTIEVE_KOLOMMEN.has(o.kolom))
-  return { adressen, domeinen, projecten }
+  return { adressen, domeinen, projecten, namen: naam }
 }
 
 /** Het lopende project van een klant (het recentst bijgewerkte), voor mails die enkel aan de klant hangen. */

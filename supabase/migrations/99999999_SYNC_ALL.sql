@@ -7463,3 +7463,30 @@ create table if not exists public.mail_opvolging_afgehandeld (
 );
 create unique index if not exists mail_opvolging_afgehandeld_uniek on public.mail_opvolging_afgehandeld (opdracht_id, sleutel);
 alter table public.mail_opvolging_afgehandeld enable row level security;
+-- Taken uit de mail (15 nov 2026): wat we beloofden of wat de klant vroeg; voorstel → Zet taak (ClickUp) of Verwijder.
+create table if not exists public.mail_taken (
+  id uuid primary key default gen_random_uuid(),
+  mail_id uuid references public.mail_berichten(id) on delete cascade,
+  message_id text not null,
+  client_id uuid references public.clients(id) on delete set null,
+  opdracht_id uuid references public.opdrachten(id) on delete set null,
+  wat text not null,
+  deadline date,
+  citaat text,
+  wie text not null default 'wij',
+  status text not null default 'voorstel',
+  taak_soort text,
+  taak_id uuid,
+  clickup_task_id text,
+  clickup_url text,
+  clickup_naam text,
+  clickup_status_type text,
+  reden text,
+  beslist_door text,
+  beslist_op timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists mail_taken_uniek on public.mail_taken (message_id, md5(lower(wat)));
+create index if not exists mail_taken_status on public.mail_taken (status, created_at desc);
+alter table public.mail_taken enable row level security;
