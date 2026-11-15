@@ -81,6 +81,13 @@ export function OpdrachtenClient() {
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Laden mislukt') } finally { setLaden(false) }
   }, [])
   useEffect(() => { void laad() }, [laad])
+  // Mail-opvolging per kaart (wat er na een meeting, offerte of contract nog moet gebeuren).
+  const [opvolging, setOpvolging] = useState<Record<string, { dringend: boolean; tekst: string; telt: boolean }>>({})
+  useEffect(() => {
+    fetch('/api/admin/mail-opvolging?lijst=1', { cache: 'no-store' }).then((r) => r.json()).then((j: { items?: { opdracht_id: string; dringend: boolean; tekst: string; telt: boolean }[] }) => {
+      setOpvolging(Object.fromEntries((j.items ?? []).map((x) => [x.opdracht_id, { dringend: x.dringend, tekst: x.tekst, telt: x.telt }])))
+    }).catch(() => { /* kaartjes zijn een extra */ })
+  }, [rijen])
   // Het archief van de oude pipeline (enkel zichtbaar voor admins).
   useEffect(() => {
     fetch('/api/admin/opdrachten/pipeline-archief?info=1', { cache: 'no-store' })
@@ -276,7 +283,7 @@ export function OpdrachtenClient() {
       {laden && rijen.length === 0 ? (
         <div className="py-16 text-center text-gray-400"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div>
       ) : weergave === 'bord' ? (
-        <KanbanBord kaarten={zichtbaar} laden={laden} voor={<AbmKolom onVernieuw={() => laad({ stil: true })} />}
+        <KanbanBord kaarten={zichtbaar} laden={laden} opvolging={opvolging} voor={<AbmKolom onVernieuw={() => laad({ stil: true })} />}
           onOpen={(o) => setVenster({ id: o.id, kolom: kolomVan(o.status) })}
           onVerplaats={verplaats}
           onNieuw={(k) => setVenster({ id: null, kolom: k })} />

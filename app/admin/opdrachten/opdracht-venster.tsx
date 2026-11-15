@@ -16,6 +16,7 @@ import { formatEuro } from '@/lib/utils'
 import { geopendTekst } from '@/lib/klant-geopend'
 import { KlantKiezer, type KlantOptie } from '@/components/admin/klant-kiezer'
 import { ClickupTaken } from '@/components/admin/clickup-taken'
+import { MailOpvolging } from './mail-opvolging'
 import { OffertesBij } from '@/components/admin/offertes-bij'
 import { BtwOpzoeken } from '@/components/admin/btw-opzoeken'
 import { toonVolgendeStapNaOfferte } from '@/lib/opdrachten-offerte-model'
@@ -221,6 +222,9 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
               {o.status_bron === 'automatisch' && <p className="mt-2 text-[11px] text-gray-500">Deze fase volgde automatisch uit het gekoppelde contract of de facturen.</p>}
             </section>
           )}
+
+          {/* Opvolging: wat er na een meeting, offerte of contract nog moet gebeuren (uit mails en agenda). */}
+          {o && <MailOpvolging opdrachtId={o.id} onNaarFase={(k) => onVerplaats(o, k)} />}
 
           <section className="px-5 py-4 space-y-4 border-b border-gray-100">
             <div>

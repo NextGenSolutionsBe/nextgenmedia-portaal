@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { ListTodo, Plus, Loader2, Check, ExternalLink, X, RotateCcw, AlertTriangle } from 'lucide-react'
 import { deadlineTekst } from '@/lib/sales/lead-taken'
 import { MERK_STIJL } from '@/lib/merk-mail'
+import { MailTaken } from '@/components/admin/mail-taken'
 
 type Taak = {
   id: string; soort: 'team' | 'opdracht'; omschrijving: string; notitie: string | null; deadline: string | null; merk: string
@@ -98,6 +99,9 @@ export function TakenBlok() {
           {mensen.filter(([id]) => id !== ik).map(([id, naam]) => <button key={id} type="button" onClick={() => setWie(id)} className={chip(wie === id)}>{naam}</button>)}
         </div>
       )}
+
+      {/* Taken uit de mail: Zet taak of Verwijder. */}
+      <MailTaken leden={opties?.leden ?? []} ik={opties?.ik ?? null} onIngepland={laad} />
 
       {statusFout && <p className="text-[11px] text-amber-700 mb-2">{statusFout}</p>}
 
