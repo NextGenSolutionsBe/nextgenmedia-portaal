@@ -28,9 +28,18 @@ async function neemBestelbonOver(admin: Admin, opdrachtId: string, contractId: s
   if (nr) await admin.from('contracts').update({ bestelbon_nummer: nr }).eq('id', contractId).is('bestelbon_nummer', null)
 }
 
-export async function kaartVoorContract(admin: Admin, contractId: string, opties: { opdrachtId?: string | null } = {}): Promise<'bestaat' | 'gekoppeld' | 'aangemaakt' | 'overgeslagen'> {
+/**
+ * `verantwoordelijke`: gekozen bij het aanmaken van het contract (Marco, Bram of
+ * Gezamenlijke lead). Die komt op de kaart: de verantwoordelijke van de kaart is
+ * die van het contract.
+ */
+export async function kaartVoorContract(admin: Admin, contractId: string, opties: { opdrachtId?: string | null; verantwoordelijke?: string | null } = {}): Promise<'bestaat' | 'gekoppeld' | 'aangemaakt' | 'overgeslagen'> {
+  const gekozen = projectVerantwoordelijke(opties.verantwoordelijke)
   const { data: al } = await admin.from('opdrachten').select('id').eq('contract_id', contractId).limit(1)
-  if ((al ?? []).length) return 'bestaat'
+  if ((al ?? []).length) {
+    if (gekozen) await admin.from('opdrachten').update({ verantwoordelijke: gekozen, updated_at: new Date().toISOString() }).eq('id', (al as { id: string }[])[0].id)
+    return 'bestaat'
+  }
   const { data: c } = await admin.from('contracts').select('id, title, status, client_id, created_at, expires_at, contract_type').eq('id', contractId).maybeSingle()
   const contract = c as Contract | null
   if (!contract || String(contract.status ?? '').toLowerCase() === 'template') return 'overgeslagen'
@@ -77,6 +86,7 @@ export async function kaartVoorContract(admin: Admin, contractId: string, opties
         ...(status === 'geen_interesse' ? { stop_reden: 'Contract verlopen of niet doorgegaan' } : {}),
         // Een prospect-kaart krijgt de klant van het contract.
         ...(kandidaat.zonderKlant && contract.client_id ? { client_id: contract.client_id, klant_vrij: null } : {}),
+        ...(gekozen ? { verantwoordelijke: gekozen } : {}),
       }).eq('id', kandidaat.id).is('contract_id', null)
       if (!error) {
         await voegNotitieToe(admin, kandidaat.id, `Contract "${titel}" opgemaakt: de kaart staat nu in ${status === 'getekend' ? 'Contract getekend' : status === 'geen_interesse' ? 'Verloren' : 'Contract verstuurd'}.`, 'systeem', null)
@@ -94,7 +104,7 @@ export async function kaartVoorContract(admin: Admin, contractId: string, opties
     client_id: contract.client_id, klant_vrij: null, titel: titel.slice(0, 200), status, contract_id: contract.id,
     status_bron: 'automatisch', auto_status: status, status_gewijzigd_op: nu,
     diensten, merk: bedrijfVan(null, diensten), datum: String(contract.created_at ?? nu).slice(0, 10),
-    verantwoordelijke: projectVerantwoordelijke(klant?.sales_verantwoordelijke),
+    verantwoordelijke: gekozen ?? projectVerantwoordelijke(klant?.sales_verantwoordelijke),
     stop_reden: status === 'geen_interesse' ? 'Contract verlopen of niet doorgegaan' : null,
   }
   let { data: nieuw, error } = await admin.from('opdrachten').insert(rij).select('id').single()

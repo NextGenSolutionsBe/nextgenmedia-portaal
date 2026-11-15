@@ -23,7 +23,11 @@ export const ABM_KOLOMMEN: { veld: AbmVeld; kop: string; voorbeeld: string; name
 ]
 
 export type AbmRij = Partial<Record<AbmVeld, string | null>> & { naam: string }
-export type AbmBedrijf = AbmRij & { id: string; client_id: string | null; opdracht_id: string | null; created_at: string; created_by: string | null }
+export type AbmBedrijf = AbmRij & {
+  id: string; client_id: string | null; opdracht_id: string | null; created_at: string; created_by: string | null
+  /** Geen interesse: uit de kolom, in het vuilbakje (terugzetten kan). */
+  geen_interesse_op?: string | null; geen_interesse_door?: string | null
+}
 
 const sleutel = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '')
 

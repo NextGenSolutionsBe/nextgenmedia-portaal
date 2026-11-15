@@ -20,6 +20,7 @@ const HINT = 'Account-based marketing vereist een database-migratie (abm_bedrijv
  *  POST { actie: 'verwijder', id }
  *  POST { actie: 'klant', id }      → klant aanmaken (of de bestaande koppelen) voor offerte, contract, meeting of klantaccount.
  *  POST { actie: 'opdracht', id, opdracht_id } → gekoppeld aan de kaart in Opvolging.
+ *  POST { actie: 'geen_interesse', id } / { actie: 'terug', id } → naar het vuilbakje "Geen interesse" en terug (niets wordt verwijderd).
  * Rechten: module opdrachten (bekijken / toevoegen / aanpassen / verwijderen); een klant aanmaken vraagt clients/toevoegen.
  */
 export async function GET() {
@@ -86,6 +87,17 @@ export async function POST(req: NextRequest) {
       if (!p) return NextResponse.json({ error: 'Je mag dit niet verwijderen.' }, { status: 403 })
       await admin.from('abm_bedrijven').delete().eq('id', id)
       await logAudit({ action: 'abm.verwijderd', entityType: 'abm', entityId: id, summary: `Account-based marketing: ${bedrijf.naam} weggehaald`, actorUserId: p.userId, actorEmail: p.email, ...meta })
+      return NextResponse.json({ ok: true })
+    }
+    if (b.actie === 'geen_interesse' || b.actie === 'terug') {
+      const p = await magIk('opdrachten', 'aanpassen')
+      if (!p) return NextResponse.json({ error: 'Je mag dit niet aanpassen.' }, { status: 403 })
+      const weg = b.actie === 'geen_interesse'
+      const { error } = await admin.from('abm_bedrijven').update({
+        geen_interesse_op: weg ? new Date().toISOString() : null, geen_interesse_door: weg ? p.naam ?? p.email ?? null : null, updated_at: new Date().toISOString(),
+      }).eq('id', id)
+      if (error) return NextResponse.json({ error: /geen_interesse/.test(error.message) ? 'Geen interesse vereist een database-migratie (abm_bedrijven.geen_interesse_op).' : error.message }, { status: 400 })
+      await logAudit({ action: weg ? 'abm.geen_interesse' : 'abm.terug', entityType: 'abm', entityId: id, summary: `Account-based marketing: ${bedrijf.naam} ${weg ? 'naar Geen interesse' : 'terug in de lijst'}`, actorUserId: p.userId, actorEmail: p.email, ...meta })
       return NextResponse.json({ ok: true })
     }
     if (b.actie === 'opdracht') {

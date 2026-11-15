@@ -7496,3 +7496,8 @@ alter table public.mail_taken enable row level security;
 -- lead_soort mag nu ook 'outbound' zijn (aangeduid); leeg = nog niet aangeduid.
 alter table public.vesting_contracten add column if not exists meetellend_vast numeric;
 alter table public.vesting_contracten add column if not exists meetellend_uitleg text;
+
+-- ── Account-based marketing: geen interesse (15 nov 2026) ──
+-- Bedrijf uit de kolom, in het vuilbakje "Geen interesse" (terugzetten kan). Niets wordt verwijderd.
+alter table public.abm_bedrijven add column if not exists geen_interesse_op timestamptz;
+alter table public.abm_bedrijven add column if not exists geen_interesse_door text;

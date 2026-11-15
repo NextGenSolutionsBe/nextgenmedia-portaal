@@ -27,6 +27,8 @@ import { leesActorNamen } from '@/lib/actor-namen'
 import { ContractGegevens } from './contract-gegevens'
 import { OpGetekendZetten, GetekendBuitenApp, type ContractBijlage } from './manueel-getekend'
 import { isManueelGetekend } from '@/lib/contracten/manueel-getekend'
+import { contractVerantwoordelijke } from '@/lib/contracten/verantwoordelijke'
+import { ContractVerantwoordelijkeKaart } from './verantwoordelijke'
 
 async function getContract(id: string) {
   try {
@@ -58,7 +60,11 @@ async function getContract(id: string) {
       // Nieuwste archiefversie (certificaatnummer, datum) — enkel relevant als getekend.
       isSigned ? laatsteArchief(admin, contract.id).catch(() => null) : Promise.resolve(null),
     ])
-    const { data: klantenLijst } = await admin.from('clients').select('id, company_name, contact_name, email, archived_at').order('company_name').limit(2000)
+    const [{ data: klantenLijst }, { data: kaart }] = await Promise.all([
+      admin.from('clients').select('id, company_name, contact_name, email, archived_at').order('company_name').limit(2000),
+      // De verantwoordelijke van het contract = die van zijn projectkaart.
+      admin.from('opdrachten').select('verantwoordelijke').eq('contract_id', id).maybeSingle(),
+    ])
     const aangemaaktDoor = contract.created_by ? (await leesActorNamen(admin, [contract.created_by]))[contract.created_by]?.naam ?? null : null
 
     return {
@@ -78,6 +84,7 @@ async function getContract(id: string) {
       pdfUrl: pdfUrl ? `/api/admin/contracts/${contract.id}/download?type=original&weergave=inline&voorbeeld=1` : null,
       signedPdfUrl: (signedPdfStored ?? signedPdfFallback) ? `/api/admin/contracts/${contract.id}/download?type=signed&weergave=inline&voorbeeld=1` : null,
       archief,
+      verantwoordelijke: contractVerantwoordelijke((kaart as { verantwoordelijke?: string | null } | null)?.verantwoordelijke),
     }
   } catch {
     return null
@@ -88,7 +95,7 @@ export default async function ContractDetailPage({ params }: { params: { id: str
   const data = await getContract(params.id)
   if (!data) notFound()
 
-  const { contract: c, clientName, clientId, clientBtw, signatures, events, pdfUrl, signedPdfUrl, archief } = data
+  const { contract: c, clientName, clientId, clientBtw, signatures, events, pdfUrl, signedPdfUrl, archief, verantwoordelijke } = data
   const style = statusInfo(c.status)
   const statusKey = canonicalStatus(c.status)
   const isSigned = statusKey === 'getekend'
@@ -173,6 +180,10 @@ export default async function ContractDetailPage({ params }: { params: { id: str
         </div>
       </div>
 
+      {statusKey !== 'template' && !/^test$/i.test(String(clientName ?? '').trim()) && (
+        <ContractVerantwoordelijkeKaart contractId={c.id} begin={verantwoordelijke} />
+      )}
+
       {nietDoorgegaan && statusKey !== 'vervangen' && (
         <div className={`rounded-xl border px-4 py-3 text-sm ${statusKey === 'niet_geaccepteerd' ? 'border-red-200 bg-red-50 text-red-900' : 'border-gray-200 bg-gray-50 text-gray-700'}`}>
           <div className="font-semibold">{statusKey === 'niet_geaccepteerd' ? 'Niet geaccepteerd door de klant' : 'Contract geannuleerd'}{stopEvent ? <span className="font-normal"> · {formatDate(stopEvent.created_at)}</span> : null}</div>
@@ -190,7 +201,7 @@ export default async function ContractDetailPage({ params }: { params: { id: str
       ) : (
         <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 flex items-center gap-3 flex-wrap">
           <PenLine className="h-4 w-4 shrink-0" />
-          <span className="flex-1 min-w-[200px]"><b className="font-semibold">Wacht nog op onze handtekening.</b> De klant tekende{c.signed_at ? ` op ${formatDate(c.signed_at)}` : ''}. Zet ook de handtekening van NextGenMedia, dan krijgt de klant het contract met beide handtekeningen.</span>
+          <span className="flex-1 min-w-[200px]"><b className="font-semibold">Wacht nog op onze handtekening{verantwoordelijke === 'Marco' || verantwoordelijke === 'Bram' ? ` (${verantwoordelijke})` : ''}.</b> De klant tekende{c.signed_at ? ` op ${formatDate(c.signed_at)}` : ''}. Zet ook de handtekening van NextGenMedia, dan krijgt de klant het contract met beide handtekeningen.</span>
           <Link href={`/admin/contracts/${c.id}/tegentekenen`} className="btn-primary text-sm shrink-0"><PenLine className="h-4 w-4" />Nu ondertekenen</Link>
         </div>
       ))}

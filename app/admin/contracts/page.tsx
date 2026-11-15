@@ -6,6 +6,7 @@ import { typeNamen } from '@/lib/contracten/db'
 import { leesActorNamen } from '@/lib/actor-namen'
 import { laadAflettering } from '@/lib/contracten/aflettering-server'
 import { mailStatusVan } from '@/lib/contracten/mailstatus'
+import { contractVerantwoordelijke } from '@/lib/contracten/verantwoordelijke'
 
 async function getContracts() {
   const admin = createAdminSupabaseClient()
@@ -36,6 +37,12 @@ async function getContracts() {
   } catch { /* kolom contract_id bestaat nog niet */ }
 
   const clientMap = new Map((clients ?? []).map((c) => [c.id, c]))
+  // Verantwoordelijke per contract = die van zijn projectkaart.
+  const verantw = new Map<string, string | null>()
+  try {
+    const { data: kaarten } = await admin.from('opdrachten').select('contract_id, verantwoordelijke').not('contract_id', 'is', null).limit(5000)
+    for (const k of (kaarten ?? []) as { contract_id: string; verantwoordelijke: string | null }[]) verantw.set(k.contract_id, contractVerantwoordelijke(k.verantwoordelijke))
+  } catch { /* lijst blijft werken zonder */ }
   const namen = await leesActorNamen(admin, (contracts ?? []).map((c) => c.created_by as string | null))
   // Per contract: aantal gekoppelde + verstuurde facturen.
   const invByContract = new Map<string, { count: number; sent: number }>()
@@ -91,6 +98,7 @@ async function getContracts() {
       mail_status: mailStatusVan(mailsPer.get(c.id) ?? [], c.sent_at ?? null),
       client: clientMap.get(c.client_id) ?? null,
       door: c.created_by ? namen[c.created_by]?.kort ?? null : null,
+      verantwoordelijke: verantw.get(c.id) ?? null,
     }
   })
 

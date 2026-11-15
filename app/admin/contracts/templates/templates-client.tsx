@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Plus, LayoutTemplate, Loader2, Upload, Trash2, Sliders, Send, X, FileText, Pencil, Tags } from 'lucide-react'
@@ -10,6 +10,8 @@ import { fileTooBig, MAX_UPLOAD_MB, readJson } from '@/lib/upload'
 import { Dialoog, Bevestig, INP } from '@/app/admin/instellingen/ui'
 import { ContracttypesBeheer } from '../contracttypes-beheer'
 import { KlantKiezer, vulOndertekenaar, type KlantOptie } from '@/components/admin/klant-kiezer'
+import { VerantwoordelijkeKiezer } from '@/components/admin/verantwoordelijke-kiezer'
+import type { ContractVerantwoordelijke } from '@/lib/contracten/verantwoordelijke'
 
 type Template = {
   id: string; name: string; category: string | null; active: boolean
@@ -276,8 +278,19 @@ function FromTemplateDialog({ template, clients, onClose }: { template: Template
   const [expiresAt, setExpiresAt] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Wie volgt het contract op en tekent namens ons tegen (verplicht). Voorstel uit de kaart of de klant.
+  const [verantwoordelijke, setVerantwoordelijke] = useState<ContractVerantwoordelijke | null>(null)
+  const [zelfGekozen, setZelfGekozen] = useState(false)
+  useEffect(() => {
+    if (zelfGekozen) return
+    const q = new URLSearchParams({ ...(clientId ? { client: clientId } : {}), ...(opdrachtId ? { opdracht: opdrachtId } : {}) })
+    if (!q.toString()) return
+    fetch(`/api/admin/contracts/verantwoordelijke?${q}`, { cache: 'no-store' })
+      .then((r) => r.json()).then((j) => { if (j.voorstel) setVerantwoordelijke(j.voorstel) }).catch(() => null)
+  }, [clientId, opdrachtId, zelfGekozen])
 
   const submit = async () => {
+    if (!verantwoordelijke) { setError('Kies wie verantwoordelijk is voor dit contract.'); return }
     setLoading(true); setError(null)
     try {
       const res = await fetch('/api/admin/contracts/from-template', {
@@ -291,6 +304,7 @@ function FromTemplateDialog({ template, clients, onClose }: { template: Template
           title: title || null,
           expires_at: expiresAt || null,
           ...(opdrachtId ? { opdracht_id: opdrachtId } : {}),
+          verantwoordelijke,
         }),
       })
       const json = await readJson(res)
@@ -316,6 +330,11 @@ function FromTemplateDialog({ template, clients, onClose }: { template: Template
               const o = vulOndertekenaar({ naam: signerName, email: signerEmail }, klanten.find((c) => c.id === clientId), k)
               setClientId(k?.id ?? ''); setSignerName(o.naam); setSignerEmail(o.email)
             }} />
+        </div>
+        <div>
+          <span className={lbl} id="tpl-verantwoordelijke-label">Verantwoordelijke *</span>
+          <VerantwoordelijkeKiezer id="tpl-verantwoordelijke" waarde={verantwoordelijke} onChange={(v) => { setVerantwoordelijke(v); setZelfGekozen(true) }} />
+          <p className="text-[11px] text-gray-400 mt-1">Volgt het contract op en tekent namens ons tegen.</p>
         </div>
         <div>
           <label className={lbl}>Dienst (optioneel)</label>

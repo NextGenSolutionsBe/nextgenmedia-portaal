@@ -17,7 +17,7 @@ const rond = (v: number) => Math.round(v * 10) / 10
  * datum en uur van tekenen (vanzelf ingevuld). Rechts enkel tekenen. Met
  * "Ondertekenen en volgende" ga je meteen naar het volgende contract.
  */
-export function TegentekenScherm({ contractId, pdfUrl, beginZone, naam, bedrijf, klant, volgendeId, aantalOpen, positie }: {
+export function TegentekenScherm({ contractId, pdfUrl, beginZone, naam, bedrijf, klant, volgendeId, aantalOpen, positie, qs }: {
   contractId: string
   pdfUrl: string | null
   beginZone: OnsZone
@@ -27,6 +27,8 @@ export function TegentekenScherm({ contractId, pdfUrl, beginZone, naam, bedrijf,
   klant: { naam: string | null; op: string | null; manueel: boolean }
   /** Het volgende contract dat nog op onze handtekening wacht (null = dit is het laatste). */
   volgendeId: string | null
+  /** "?van=Bram": de ronde blijft bij de contracten van die persoon. */
+  qs?: string
   aantalOpen: number
   positie: number
 }) {
@@ -51,7 +53,7 @@ export function TegentekenScherm({ contractId, pdfUrl, beginZone, naam, bedrijf,
       if (!r.ok) throw new Error(j.error || 'Tekenen mislukt')
       if (doorgaan && volgendeId) {
         toast.success(`Ondertekend. Nog ${aantalOpen - 1} te gaan.`)
-        router.push(`/admin/contracts/${volgendeId}/tegentekenen`)
+        router.push(`/admin/contracts/${volgendeId}/tegentekenen${qs ?? ''}`)
       } else {
         toast.success(volgendeId ? 'Ondertekend.' : 'Ondertekend. Alle contracten zijn door ons getekend.')
         router.push(`/admin/contracts/${contractId}`)
@@ -67,7 +69,7 @@ export function TegentekenScherm({ contractId, pdfUrl, beginZone, naam, bedrijf,
       <aside className="card-base space-y-4 lg:sticky lg:top-6">
         <div className="flex items-center justify-between gap-2 text-xs">
           <span className="font-medium text-gray-700">Contract {positie} van {aantalOpen} te tekenen</span>
-          {volgendeId && <Link href={`/admin/contracts/${volgendeId}/tegentekenen`} className="inline-flex items-center gap-0.5 text-gray-500 hover:text-black">Overslaan<ChevronRight className="h-3.5 w-3.5" /></Link>}
+          {volgendeId && <Link href={`/admin/contracts/${volgendeId}/tegentekenen${qs ?? ''}`} className="inline-flex items-center gap-0.5 text-gray-500 hover:text-black">Overslaan<ChevronRight className="h-3.5 w-3.5" /></Link>}
         </div>
         <div>
           <h2 className="font-semibold text-gray-900">Namens {bedrijf}</h2>
