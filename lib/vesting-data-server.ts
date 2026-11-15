@@ -247,7 +247,7 @@ function getekendeStand(data: VestingData): VestingOverzicht {
     contracten.push({
       ...c, facturatiemodel: 'eenmalig', handmatige_totaalwaarde: a.telt_mee, maandbedrag: null, duur_maanden: null,
       uitgesloten_kosten: 0, directe_kosten_facturen: null, kostenstatus_facturen: null, toerekening_pct: 100,
-      status: 'actief', betaald_bij_stop: null,
+      status: 'actief', betaald_bij_stop: null, meetellend_vast: null,
     })
   }
   const registraties: Registratie[] = []
@@ -275,7 +275,9 @@ export function naarWeergave(data: VestingData, userId: string | null): VestingW
       facturatiemodel: c.facturatiemodel, maandbedrag: c.maandbedrag, duur: c.duur, totaal: c.totaal,
       kostLijnen: data.kostLijnen.filter((l) => l.vesting_contract_id === c.id).map(({ id, soort, omschrijving, bedrag, verantwoording, bewijs }) => ({ id, soort, omschrijving, bedrag, verantwoording: verantwoording ?? null, bewijs: bewijs ? { pad: bewijs.pad, naam: bewijs.naam } : null })),
       kostenFacturen: c.directe_kosten_facturen ?? null, kostenAftrek: c.kostenAftrek, netto: c.netto,
-      afspraak: c.appointment_door_marco, closing: c.closed_door_marco, toerekening_pct: c.toerekening_pct ?? null, lead_soort: leadSoortVan(c.lead_soort), factor: c.factor,
+      afspraak: c.appointment_door_marco, closing: c.closed_door_marco, toerekening_pct: c.toerekening_pct ?? null, lead_soort: leadSoortVan(c.lead_soort), herkomst: c.herkomst ?? null, factor: c.factor,
+      vast: c.opVastBedrag ? Number(c.meetellend_vast) : null, vastUitleg: c.opVastBedrag ? c.meetellend_uitleg ?? null : null,
+      betaaldBijStop: c.status === 'stopgezet' && c.betaald_bij_stop !== null && c.betaald_bij_stop !== undefined ? Number(c.betaald_bij_stop) : null,
       teltMee: akkoord.inhoud.soort === 'contract' ? akkoord.inhoud.telt_mee : 0,
       algemeneKostenAftrek: c.algemeneKostenAftrek, teltVoorAandeel: c.teltVoorAandeel, status: c.status,
       telt: c.erkenning !== 'uitgesloten', definitief: c.erkenning === 'definitief', ruweVesting: c.ruweVesting,

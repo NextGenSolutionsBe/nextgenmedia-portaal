@@ -1,5 +1,5 @@
 import {
-  FREQUENTIES, type Contract, type WamRij, type WamKost, type WamTermijn, type ContractStatus, type TermijnStatus,
+  FREQUENTIES, herkomstVan, leadSoortVan, type Contract, type WamRij, type WamKost, type WamTermijn, type ContractStatus, type TermijnStatus,
 } from '@/lib/vesting'
 
 /**
@@ -27,6 +27,10 @@ export function naarContract(r: Record<string, unknown>): Contract {
     laatste_betaalde_maand: d(r.laatste_betaalde_maand), reden_stop: (r.reden_stop as string | null) ?? null,
     betaald_bij_stop: n(r.betaald_bij_stop),
     toerekening_pct: n(r.toerekening_pct),
+    lead_soort: leadSoortVan(r.lead_soort),
+    herkomst: herkomstVan(r.lead_soort),
+    meetellend_vast: n(r.meetellend_vast),
+    meetellend_uitleg: (r.meetellend_uitleg as string | null) ?? null,
     client_id: (r.client_id as string | null) ?? null,
     notitie: (r.notitie as string | null) ?? null,
     contract_id: (r.contract_id as string | null) ?? null,

@@ -10,6 +10,8 @@ import type { ContractWeergave, RegistratieWeergave, VestingWeergave } from '@/l
 import { PrijsToevoegen } from '../prijs-toevoegen'
 import { TekenStand, api, datumKort, eur, pct } from './delen'
 import { ContractVenster } from './contract-venster'
+import { GestopteKlantToevoegen } from './gestopt'
+import { leadInfo } from '@/lib/vesting'
 import { BeoordeelVenster } from './beoordeel-venster'
 import { InkomstRegistreren, KostRegistreren, RegistratieVenster } from './registratie-venster'
 import { Register } from './register'
@@ -38,7 +40,9 @@ export function VestingOverzicht({ data, tekenen, regels, regelsOpen = false }: 
   const [beoordeel, setBeoordeel] = useState<KandidaatContract | null>(null)
   const [laatste, setLaatste] = useState<string | null>(null)
   const [alleenOpen, setAlleenOpen] = useState(tekenen && !!ik)
-  const [nieuw, setNieuw] = useState<'contract' | 'inkomst' | 'kost' | null>(null)
+  const [nieuw, setNieuw] = useState<'contract' | 'inkomst' | 'kost' | 'gestopt' | null>(null)
+  // Aanduiden: alle contracten aflopen waar nog niet staat of het inbound of outbound was.
+  const [aanduiden, setAanduiden] = useState(false)
   const [regelsVenster, setRegelsVenster] = useState<RegelsBegin | null>(regelsOpen ? 'bekijk' : null)
 
   const mijnOpen = useMemo(() => (ik ? {
@@ -58,6 +62,13 @@ export function VestingOverzicht({ data, tekenen, regels, regelsOpen = false }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const volgendeOpen = (huidig: string): Open => openLijst.find((x) => x.id !== huidig) ?? null
+  const nogAanTeDuiden = data.contracten.filter((c) => !c.herkomst && c.vast === null)
+  const volgendeAanTeDuiden = (huidig: string): Open => {
+    const i = data.contracten.findIndex((c) => c.id === huidig)
+    const na = [...data.contracten.slice(i + 1), ...data.contracten.slice(0, Math.max(0, i))]
+    const v = na.find((c) => !c.herkomst && c.vast === null && c.id !== huidig)
+    return v ? { soort: 'contract', id: v.id } : null
+  }
   const startTekenen = () => {
     setAlleenOpen(true)
     setTab(mijnOpen.contracten.length ? 'contracten' : 'registraties')
@@ -83,6 +94,7 @@ export function VestingOverzicht({ data, tekenen, regels, regelsOpen = false }: 
           <RegelsKnop set="vesting" data={regels} onOpen={setRegelsVenster} />
           <button type="button" onClick={() => setNieuw('inkomst')} className="btn-secondary text-sm"><Plus className="h-4 w-4" />Inkomst registreren</button>
           <button type="button" onClick={() => setNieuw('kost')} className="btn-secondary text-sm"><Minus className="h-4 w-4" />Kost registreren</button>
+          <button type="button" onClick={() => setNieuw('gestopt')} className="btn-secondary text-sm"><Ban className="h-4 w-4" />Gestopte klant</button>
         </div>
       </div>
 
@@ -169,6 +181,14 @@ export function VestingOverzicht({ data, tekenen, regels, regelsOpen = false }: 
 
         {tab === 'contracten' && (
           <div className="pt-3 space-y-3">
+            {nogAanTeDuiden.length > 0 && (
+              <div className="flex items-center justify-between gap-3 flex-wrap rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5">
+                <p className="text-sm text-amber-900">
+                  Bij {nogAanTeDuiden.length} {nogAanTeDuiden.length === 1 ? 'contract staat' : 'contracten staat'} nog niet of het inbound of outbound was. Tot dan rekenen ze zoals nu.
+                </p>
+                <button type="button" onClick={() => { setAanduiden(true); setOpen({ soort: 'contract', id: nogAanTeDuiden[0].id }) }} className="btn-secondary text-xs h-8 shrink-0">Aanduiden</button>
+              </div>
+            )}
             <div className="flex justify-end">
               <button type="button" onClick={() => setNieuw('contract')} className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-black"><Plus className="h-3.5 w-3.5" />Contract buiten Contracten</button>
             </div>
@@ -204,9 +224,11 @@ export function VestingOverzicht({ data, tekenen, regels, regelsOpen = false }: 
       </div>
 
       {contract && (
-        <ContractVenster c={contract} vennoten={data.vennoten} ik={ik} laatste={laatste} onLaatste={setLaatste}
-          onClose={() => setOpen(null)} onVernieuw={vernieuw}
-          volgende={alleenOpen && ik && volgendeOpen(contract.id) ? () => setOpen(volgendeOpen(contract.id)) : null} />
+        <ContractVenster key={contract.id} c={contract} vennoten={data.vennoten} ik={ik} laatste={laatste} onLaatste={setLaatste}
+          onClose={() => { setOpen(null); setAanduiden(false) }} onVernieuw={vernieuw}
+          volgende={aanduiden
+            ? (volgendeAanTeDuiden(contract.id) ? () => setOpen(volgendeAanTeDuiden(contract.id)) : null)
+            : alleenOpen && ik && volgendeOpen(contract.id) ? () => setOpen(volgendeOpen(contract.id)) : null} />
       )}
       {registratie && (
         <RegistratieVenster r={registratie} vennoten={data.vennoten} ik={ik} laatste={laatste} onLaatste={setLaatste}
@@ -224,6 +246,10 @@ export function VestingOverzicht({ data, tekenen, regels, regelsOpen = false }: 
       {nieuw === 'kost' && (
         <KostRegistreren contracten={data.contracten} onClose={() => setNieuw(null)}
           onKlaar={(o) => { setNieuw(null); vernieuw(); if (o) { setTab(o.soort === 'contract' ? 'contracten' : 'registraties'); setOpen(o.soort === 'contract' ? { soort: 'contract', id: o.id } : { soort: 'registratie', id: o.id }) } }} />
+      )}
+      {nieuw === 'gestopt' && (
+        <GestopteKlantToevoegen klanten={data.klanten} onClose={() => setNieuw(null)}
+          onKlaar={(id) => { setNieuw(null); setTab('contracten'); vernieuw(); if (id) setOpen({ soort: 'contract', id }) }} />
       )}
       {nieuw === 'contract' && (
         <PrijsToevoegen kandidaat={null} kandidaten={[]} klanten={data.klanten} onClose={() => setNieuw(null)}
@@ -254,10 +280,12 @@ function Lijn({ label, waarde, sterk }: { label: string; waarde: string; sterk?:
 
 /** De rekensom van een contract in één regel: waarde − kosten = netto × deel = telt mee = %. */
 function rekensomTekst(c: ContractWeergave): string {
-  const rol = c.afspraak && c.closing ? 'afspraak gezet en geclosed' : c.afspraak ? 'afspraak gezet' : c.closing ? 'geclosed' : 'geen rol'
+  const rol = c.lead_soort ? leadInfo(c.lead_soort)?.kort ?? 'inbound'
+    : c.afspraak && c.closing ? 'afspraak gezet en geclosed' : c.afspraak ? 'afspraak gezet' : c.closing ? 'geclosed' : 'geen rol'
   const deel = `${Math.round(c.factor * 100)}% (${c.toerekening_pct !== null ? 'eigen verdeling' : rol})`
   const procent = c.telt && !c.wachtOpKlant ? ` = ${pct(c.ruweVesting, 2)}` : ''
   if (c.status === 'niet_betaler') return 'Niet-betaler: telt voor € 0'
+  if (c.vast !== null) return `Vroeger gestopt: vastgelegd bedrag ${eur(c.vast)} telt mee${procent}`
   if (c.status === 'stopgezet' && c.akkoord.inhoud.soort === 'contract' && c.akkoord.inhoud.betaald_bij_stop !== null) {
     return `Gestopt: ${eur(c.akkoord.inhoud.betaald_bij_stop)} betaald × ${deel} = ${eur(c.teltMee)} telt mee${procent}`
   }
@@ -283,7 +311,8 @@ function ContractKaart({ c, vennoten, onOpen }: { c: ContractWeergave; vennoten:
         <div className="mt-2.5 flex items-center justify-between gap-2 flex-wrap">
           <TekenStand akkoord={c.akkoord} vennoten={vennoten} />
           <div className="flex gap-1.5">
-            {c.status === 'stopgezet' && <Tag>Vroegtijdig stopgezet</Tag>}
+            {c.vast !== null ? <Tag>Vroeger gestopt</Tag> : c.status === 'stopgezet' && <Tag>Vroegtijdig stopgezet</Tag>}
+            {!c.herkomst && c.vast === null && <Tag>Inbound of outbound?</Tag>}
             {c.status === 'niet_betaler' && <Tag>Niet-betaler</Tag>}
             {c.wachtOpKlant && <Tag>Wacht op de klant</Tag>}
             {c.definitief && c.status !== 'stopgezet' && <Tag>Betaald</Tag>}

@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { ExternalLink, Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
 import { leesGetal } from '@/lib/getal'
 import { leadInfo } from '@/lib/vesting'
+import { GestoptBlok } from './gestopt'
 import { KOST_SOORTEN, kostSoortLabel, type KostSoort, type Vennoot } from '@/lib/vesting-akkoord'
 import type { ContractWeergave } from '@/lib/vesting-weergave'
 import { Akkoord, LeadKiezer, Paneel, Rekensom, RolKnop, api, datumKort, eur, pct, procentUitleg } from './delen'
@@ -32,16 +33,23 @@ export function ContractVenster({ c, vennoten, ik, laatste, onLaatste, onClose, 
   const [bezig, setBezig] = useState<string | null>(null)
   const [waardeOpen, setWaardeOpen] = useState(false)
 
-  const patch = async (velden: Record<string, unknown>, sleutel: string) => {
+  const patch = async (velden: Record<string, unknown>, sleutel: string): Promise<boolean> => {
     setBezig(sleutel)
     try {
       await api('/api/admin/vesting', { method: 'PATCH', body: JSON.stringify({ resource: 'contract', id: c.id, ...velden }) })
       onVernieuw()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt') } finally { setBezig(null) }
+      return true
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt'); return false } finally { setBezig(null) }
   }
 
   const eigenVerdeling = c.toerekening_pct !== null
-  const regels = [
+  const regels = c.vast !== null ? [
+    ...(c.totaal !== null ? [{ label: 'Contractwaarde', waarde: eur(c.totaal, true) }] : []),
+    { label: 'Klant vroeger gestopt: vastgelegd bedrag', waarde: eur(c.vast, true) },
+    { label: 'Telt mee voor Marco', waarde: eur(c.teltMee, true), sterk: true },
+    ...(c.algemeneKostenAftrek > 0 ? [{ label: 'Waarvan naar algemene kosten', waarde: `− ${eur(c.algemeneKostenAftrek, true)}`, zacht: true }] : []),
+    ...(c.telt && !c.wachtOpKlant ? [{ label: 'Levert Marco op', waarde: pct(c.ruweVesting, 2), sterk: true }] : []),
+  ] : [
     { label: 'Contractwaarde', waarde: eur(c.totaal, true) },
     { label: c.kostLijnen.length || c.kostenAftrek ? 'Kosten' : 'Kosten (geen)', waarde: c.kostenAftrek ? `− ${eur(c.kostenAftrek, true)}` : eur(0) },
     { label: 'Netto', waarde: eur(c.netto, true) },
@@ -72,23 +80,28 @@ export function ContractVenster({ c, vennoten, ik, laatste, onLaatste, onClose, 
         </p>
       )}
 
-      <section>
-        <h3 className="text-sm font-semibold text-gray-900 mb-2">Hoe kwam de klant binnen?</h3>
-        <LeadKiezer waarde={c.lead_soort} bezig={bezig === 'lead'} onChange={(v) => patch({ lead_soort: v, toerekening_pct: null }, 'lead')} />
-      </section>
+      {c.vast === null && <section>
+        <h3 className="text-sm font-semibold text-gray-900 mb-2">Hoe kwam de opdracht binnen?</h3>
+        {!c.herkomst && (
+          <p className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            Nog niet aangeduid. Tot dan rekent dit contract zoals nu: met de afspraak en closing hieronder.
+          </p>
+        )}
+        <LeadKiezer waarde={c.herkomst} bezig={bezig === 'lead'} onChange={(v) => patch({ lead_soort: v }, 'lead')} />
+        {eigenVerdeling && (
+          <p className="mt-2 text-xs text-amber-800">
+            Voor dit contract geldt een eigen verdeling van {c.toerekening_pct}%. Die gaat voor op de regels.{' '}
+            <button type="button" className="underline" onClick={() => patch({ toerekening_pct: null }, 'verdeling')}>Terug naar de regels</button>
+          </p>
+        )}
+      </section>}
 
-      {!c.lead_soort && <section>
+      {c.vast === null && !c.lead_soort && <section>
         <h3 className="text-sm font-semibold text-gray-900 mb-2">Wat deed Marco?</h3>
         <div className="flex flex-wrap gap-2">
           <RolKnop aan={c.afspraak} label="Afspraak gezet" bezig={bezig === 'afspraak'} onClick={() => patch({ appointment_door_marco: !c.afspraak }, 'afspraak')} />
           <RolKnop aan={c.closing} label="Klant geclosed" bezig={bezig === 'closing'} onClick={() => patch({ closed_door_marco: !c.closing }, 'closing')} />
         </div>
-        {eigenVerdeling && (
-          <p className="mt-2 text-xs text-amber-800">
-            Voor dit contract geldt een eigen verdeling van {c.toerekening_pct}%.{' '}
-            <button type="button" className="underline" onClick={() => patch({ toerekening_pct: null }, 'verdeling')}>Terug naar 50% + 50%</button>
-          </p>
-        )}
       </section>}
 
       <section>
@@ -107,7 +120,12 @@ export function ContractVenster({ c, vennoten, ik, laatste, onLaatste, onClose, 
             </div>}
       </section>
 
-      <Kosten c={c} onVernieuw={onVernieuw} />
+      {(c.vast === null || c.kostLijnen.length > 0) && <Kosten c={c} onVernieuw={onVernieuw} />}
+
+      <section>
+        <h3 className="text-sm font-semibold text-gray-900 mb-2">Klant gestopt?</h3>
+        <GestoptBlok c={c} bezig={bezig === 'gestopt'} onPatch={patch} />
+      </section>
 
       <section>
         <h3 className="text-sm font-semibold text-gray-900 mb-2">Wat telt mee</h3>
@@ -118,7 +136,9 @@ export function ContractVenster({ c, vennoten, ik, laatste, onLaatste, onClose, 
 
       <Akkoord onderwerp="contract" id={c.id} akkoord={c.akkoord} certificaat={c.certificaat} vennoten={vennoten} ik={ik} laatste={laatste} onLaatste={onLaatste}
         onGetekend={onVernieuw}
-        uitleg={`Je tekent dat ${eur(c.teltMee, true)} van dit contract meetelt voor de vesting van Marco: ${eur(c.totaal)} min ${eur(c.kostenAftrek)} kosten, ${Math.round(c.factor * 100)}% voor Marco.`} />
+        uitleg={c.vast !== null
+          ? `Je tekent dat ${eur(c.teltMee, true)} van dit contract meetelt voor de vesting van Marco. De klant stopte vroeger; dit bedrag werd vastgelegd met de beschrijving hierboven.`
+          : `Je tekent dat ${eur(c.teltMee, true)} van dit contract meetelt voor de vesting van Marco: ${eur(c.totaal)} min ${eur(c.kostenAftrek)} kosten, ${Math.round(c.factor * 100)}% voor Marco.`} />
     </Paneel>
   )
 }

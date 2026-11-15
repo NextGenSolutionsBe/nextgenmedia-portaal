@@ -7490,3 +7490,9 @@ create table if not exists public.mail_taken (
 create unique index if not exists mail_taken_uniek on public.mail_taken (message_id, md5(lower(wat)));
 create index if not exists mail_taken_status on public.mail_taken (status, created_at desc);
 alter table public.mail_taken enable row level security;
+
+-- ── Vesting: klant vroeger gestopt met een vastgelegd meetellend bedrag (15 nov 2026) ──
+-- Het bedrag dat effectief meetelt voor Marco, met een beschrijving; enkel bij status stopgezet.
+-- lead_soort mag nu ook 'outbound' zijn (aangeduid); leeg = nog niet aangeduid.
+alter table public.vesting_contracten add column if not exists meetellend_vast numeric;
+alter table public.vesting_contracten add column if not exists meetellend_uitleg text;

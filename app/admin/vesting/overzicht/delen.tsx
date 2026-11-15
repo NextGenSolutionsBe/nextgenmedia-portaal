@@ -6,7 +6,7 @@ import { Check, Download, Loader2, Mail, PenLine, RotateCcw, X } from 'lucide-re
 import { HandtekeningVak } from '@/components/admin/handtekening-vak'
 import { VENNOTEN, type Vennoot } from '@/lib/vesting-akkoord'
 import type { AkkoordWeergave, CertificaatKort, ContractWeergave } from '@/lib/vesting-weergave'
-import { LEAD_SOORTEN, type LeadSoort } from '@/lib/vesting'
+import { LEAD_SOORTEN, type Herkomst } from '@/lib/vesting'
 
 export const eur = (n: number | null | undefined, cent = false) =>
   n === null || n === undefined ? '—' : new Intl.NumberFormat('nl-BE', { style: 'currency', currency: 'EUR', minimumFractionDigits: cent ? 2 : 0, maximumFractionDigits: cent ? 2 : 0 }).format(n)
@@ -305,23 +305,49 @@ export function procentUitleg(c: Pick<ContractWeergave, 'teltVoorAandeel' | 'ruw
  * Hoe kwam de klant binnen? Outbound = wat Marco deed (afspraak 50% + closing
  * 50%); inbound via Google Ads 100%, via de website 50%, inbound met Bram als closer 25%.
  */
-export function LeadKiezer({ waarde, onChange, bezig }: { waarde: LeadSoort | null; onChange: (v: LeadSoort | null) => void; bezig?: boolean }) {
-  const opties: { key: LeadSoort | null; label: string; sub: string }[] = [
-    { key: null, label: 'Outbound door Marco', sub: 'afspraak 50% + closing 50%' },
-    ...LEAD_SOORTEN.map((l) => ({ key: l.key, label: l.label, sub: `${l.pct}% in de pot` })),
-  ]
+/**
+ * Hoe kwam de opdracht binnen? Volgens de regels commerciële verdeling:
+ * outbound = afspraak 50% + closing 50%; inbound NextGenSolutions = Marco closet
+ * 50%, Bram closet 25%; inbound NextGenMedia = 0%. Leeg = nog niet aangeduid.
+ */
+export function LeadKiezer({ waarde, onChange, bezig }: { waarde: Herkomst | null; onChange: (v: Herkomst) => void; bezig?: boolean }) {
+  const [inboundOpen, setInboundOpen] = useState(false)
+  const inbound = waarde !== null && waarde !== 'outbound'
+  const knop = (aan: boolean) => `rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-60 ${aan ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'}`
+  const sub = (aan: boolean) => `text-xs mt-0.5 ${aan ? 'text-gray-300' : 'text-gray-500'}`
   return (
-    <div className="grid sm:grid-cols-2 gap-2" role="radiogroup" aria-label="Hoe kwam de klant binnen?">
-      {opties.map((o) => {
-        const aan = waarde === o.key
-        return (
-          <button key={o.key ?? 'outbound'} type="button" role="radio" aria-checked={aan} disabled={bezig} onClick={() => onChange(o.key)}
-            className={`rounded-lg border px-3 py-2 text-left transition-colors ${aan ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'}`}>
-            <div className="text-sm font-medium">{o.label}</div>
-            <div className={`text-xs mt-0.5 ${aan ? 'text-gray-300' : 'text-gray-500'}`}>{o.sub}</div>
-          </button>
-        )
-      })}
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Inbound of outbound?">
+        <button type="button" role="radio" aria-checked={waarde === 'outbound'} disabled={bezig} onClick={() => { setInboundOpen(false); onChange('outbound') }} className={knop(waarde === 'outbound')}>
+          <div className="text-sm font-medium">Outbound</div>
+          <div className={sub(waarde === 'outbound')}>afspraak 50% + closing 50%</div>
+        </button>
+        <button type="button" role="radio" aria-checked={inbound} disabled={bezig} onClick={() => setInboundOpen(true)} className={knop(inbound)}>
+          <div className="text-sm font-medium">Inbound</div>
+          <div className={sub(inbound)}>de klant vroeg het zelf</div>
+        </button>
+      </div>
+      {(inbound || inboundOpen) && (
+        <div className="grid sm:grid-cols-3 gap-2" role="radiogroup" aria-label="Welke inbound?">
+          {LEAD_SOORTEN.map((l) => {
+            const aan = waarde === l.key
+            return (
+              <button key={l.key} type="button" role="radio" aria-checked={aan} disabled={bezig} onClick={() => onChange(l.key)} className={knop(aan)}>
+                <div className="text-sm font-medium">{l.key === 'inbound_ngm' ? 'NextGenMedia' : `NextGenSolutions, ${l.key === 'inbound_ngs_marco' ? 'Marco' : 'Bram'} closet`}</div>
+                <div className={sub(aan)}>{l.pct}% voor Marco</div>
+              </button>
+            )
+          })}
+        </div>
+      )}
+      <details className="text-xs text-gray-500">
+        <summary className="cursor-pointer select-none hover:text-gray-800">Wanneer is het inbound, wanneer outbound?</summary>
+        <div className="mt-1.5 space-y-1.5 leading-relaxed">
+          <p><b className="text-gray-700">Inbound</b>: de klant geeft zelf aan dat hij een dienst nodig heeft, of vraagt zelf een offerte of afspraak. Bv. een klant mailt dat hij een nieuwe website nodig heeft, of een bestaande klant vraagt zelf naar AI-automatiseringen.</p>
+          <p><b className="text-gray-700">Outbound</b>: iemand herkent een opportuniteit, brengt een behoefte onder de aandacht of neemt zelf contact op, ook bij een bestaande klant. Bv. een klant zegt dat zijn website traag is en iemand stelt een nieuwe voor en zet een afspraak.</p>
+          <p>Een verlenging houdt de verdeling van het oorspronkelijke contract. Een nieuwe dienst, een apart project of een nieuw contract krijgt een eigen verdeling.</p>
+        </div>
+      </details>
     </div>
   )
 }

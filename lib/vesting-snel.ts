@@ -1,5 +1,5 @@
 import { DIENSTEN } from './vesting'
-import type { LeadSoort } from './vesting'
+import type { Herkomst } from './vesting'
 
 /**
  * Vesting, de korte weg: een getekend contract met een prijs erbij, en wie het
@@ -55,8 +55,8 @@ export type SnelInvoer = {
   soort: 'eenmalig' | 'maand'
   prijs: number | null; maanden: number | null
   afspraak: boolean; closing: boolean
-  /** Hoe de klant binnenkwam; leeg = outbound door Marco (afspraak + closing). */
-  lead?: LeadSoort | null
+  /** Outbound of een soort inbound; leeg = nog niet aangeduid (rekent als outbound: afspraak + closing). */
+  lead?: Herkomst | null
   /** Gekoppeld contract dat de klant nog niet tekende: de datum volgt bij ondertekening. */
   wachtOpKlant?: boolean
 }
