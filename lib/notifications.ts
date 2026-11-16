@@ -2,6 +2,7 @@ import 'server-only'
 import { dagenTot, maandenTekst, vandaagBrussel } from '@/lib/content/deadline-model'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { followUp } from '@/lib/contract-status'
+import { KLANT_TEKENDE_IN_APP } from '@/lib/contracten/tegenhandtekening'
 import { FEATURES } from '@/lib/features'
 import { syncGezondheid, SYNC_VEROUDERD_MIN } from '@/lib/sales/clickup-agenda-sync'
 import { onderhoudOpvolgen, resterendTekst, type MaintenanceClient } from '@/lib/maintenance'
@@ -394,13 +395,14 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
   }
 
   /**
-   * Contracten die de klant tekende en wij nog niet: recentste eerst. Ook de
-   * oudere contracten, zodat je ze één voor één kan aftekenen. Enkel zichtbaar als er iets is.
+   * Contracten die de klant in de app tekende en wij nog niet: recentste eerst.
+   * Handmatig op getekend gezet of als getekende pdf opgeladen staat hier niet
+   * (KLANT_TEKENDE_IN_APP). Enkel zichtbaar als er iets is.
    */
   async function opvolgTegentekenen(): Promise<OpvolgGroep | null> {
     try {
       const { data, count, error } = await admin.from('contracts')
-        .select('id, title, client_id, signed_at, signer_name', { count: 'exact' })
+        .select(`id, title, client_id, signed_at, signer_name, ${KLANT_TEKENDE_IN_APP}`, { count: 'exact' })
         .in('status', ['signed', 'getekend']).is('tegengetekend_op', null)
         .order('signed_at', { ascending: false, nullsFirst: false }).limit(OPVOLG_MAX)
       if (error) return null

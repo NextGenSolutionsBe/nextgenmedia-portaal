@@ -43,6 +43,12 @@ async function getContracts() {
     const { data: kaarten } = await admin.from('opdrachten').select('contract_id, verantwoordelijke').not('contract_id', 'is', null).limit(5000)
     for (const k of (kaarten ?? []) as { contract_id: string; verantwoordelijke: string | null }[]) verantw.set(k.contract_id, contractVerantwoordelijke(k.verantwoordelijke))
   } catch { /* lijst blijft werken zonder */ }
+  // Welke contracten tekende de klant zelf in de app? Enkel die wachten op onze handtekening.
+  const klantTekendeInApp = new Set<string>()
+  try {
+    const { data: sigs } = await admin.from('contract_signatures').select('contract_id').limit(5000)
+    for (const s of (sigs ?? []) as { contract_id: string | null }[]) if (s.contract_id) klantTekendeInApp.add(s.contract_id)
+  } catch { /* zonder: geen tegentekenlabel */ }
   const namen = await leesActorNamen(admin, (contracts ?? []).map((c) => c.created_by as string | null))
   // Per contract: aantal gekoppelde + verstuurde facturen.
   const invByContract = new Map<string, { count: number; sent: number }>()
@@ -69,6 +75,7 @@ async function getContracts() {
       sent_at: c.sent_at ?? null,
       klant_geopend_op: c.klant_geopend_op ?? null,
       tegengetekend_op: c.tegengetekend_op ?? null,
+      klant_tekende_in_app: klantTekendeInApp.has(c.id),
       created_at: c.created_at,
       expires_at: c.expires_at ?? null,
       // start/end bestaan mogelijk niet op een oudere tabel → altijd null-safe.

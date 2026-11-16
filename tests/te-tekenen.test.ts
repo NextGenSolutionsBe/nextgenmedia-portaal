@@ -38,7 +38,8 @@ function nepAdmin(t: Record<string, any[]>) {
     from(tabel: string) {
       let rijen = [...(t[tabel] ?? [])]
       const q: any = {
-        select: () => q,
+        // contract_signatures!inner(id): enkel rijen met een handtekening van de klant (zoals PostgREST).
+        select: (k?: string) => { if (k?.includes('contract_signatures!inner')) rijen = rijen.filter((r) => (t.contract_signatures ?? []).some((s) => s.contract_id === r.id)); return q },
         in: (k: string, w: any[]) => { rijen = rijen.filter((r) => w.includes(r[k])); return q },
         is: (k: string, w: any) => { rijen = rijen.filter((r) => (r[k] ?? null) === w); return q },
         eq: (k: string, w: any) => { rijen = rijen.filter((r) => r[k] === w); return q },
@@ -106,13 +107,16 @@ async function main() {
         { id: 'k1', title: 'Website', client_id: 'cl1', signed_at: '2026-11-14T10:00:00Z', status: 'signed', tegengetekend_op: null },
         { id: 'k2', title: 'Test', client_id: 'test', signed_at: '2026-11-14T10:00:00Z', status: 'signed', tegengetekend_op: null },
         { id: 'k3', title: 'Al getekend', client_id: 'cl1', signed_at: '2026-11-10T10:00:00Z', status: 'signed', tegengetekend_op: '2026-11-11' },
+        // Handmatig op getekend gezet of als getekende pdf opgeladen: geen tegentekenopdracht.
+        { id: 'k4', title: 'Op getekend gezet', client_id: 'cl1', signed_at: '2026-11-15T10:00:00Z', status: 'signed', tegengetekend_op: null },
       ],
+      contract_signatures: [{ contract_id: 'k1' }, { contract_id: 'k2' }, { contract_id: 'k3' }],
       clients: [{ id: 'cl1', company_name: 'Bakkerij Peeters' }, { id: 'test', company_name: 'test' }],
-      opdrachten: [{ contract_id: 'k1', verantwoordelijke: 'Bram' }],
+      opdrachten: [{ contract_id: 'k1', verantwoordelijke: 'Bram' }, { contract_id: 'k4', verantwoordelijke: 'Bram' }],
     })
     const items = await teTekenenOverzicht(admin)
     const per = (id: string) => items.find((i) => i.id === id)
-    assert.deepEqual(per('tegentekenen:Bram')?.lijst?.map((c) => c.id), ['k1'], 'testklant en al tegengetekend niet')
+    assert.deepEqual(per('tegentekenen:Bram')?.lijst?.map((c) => c.id), ['k1'], 'testklant, al tegengetekend en niet door de klant in de app getekend niet')
     assert.equal(per('tegentekenen:Marco'), undefined)
     assert.deepEqual(per('regels_vesting:1')?.voor, ['Marco', 'Chiara'])
     assert.equal(per('vesting:marco')?.wat, 'Vesting tekenen: 1 contract')
