@@ -154,6 +154,7 @@ export function Uploader({
   }
 
   const verwijder = async (id: string) => {
+    if (!confirm('Dit bestand verwijderen? Het verdwijnt ook bij ons.')) return
     const r = await fetch(`/api/portal/uploads?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
     if (!r.ok) { setMelding((await r.json()).error ?? 'Verwijderen mislukt.'); return }
     setLijst((l) => l.filter((x) => x.id !== id))
