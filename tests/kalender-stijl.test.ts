@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { controleerFaseKleuren, controleerLabel, geldigeLabelIds, isKleur, meng, tekstOp, tinten } from '../lib/content/kalender-stijl'
+import { controleerFaseKleuren, controleerLabel, controleerTypeKleuren, geldigeLabelIds, isKleur, leegStijl, meng, tekstOp, tinten, typeKleur, typeLabel, TYPES } from '../lib/content/kalender-stijl'
 import { magPersonaliseren, type KalenderRechten } from '../lib/content/kalender-rol'
 
 let ok = 0
@@ -17,6 +17,23 @@ t('fasekleuren: enkel gekende fases met een geldige kleur', () => {
   assert.deepEqual(controleerFaseKleuren({ approved: '#14B8A6', onbekend: '#ffffff', draft: 'blauw', scheduled: '#3b82f6' }), { approved: '#14b8a6', scheduled: '#3b82f6' })
   assert.deepEqual(controleerFaseKleuren(null), {})
   assert.deepEqual(controleerFaseKleuren('x'), {})
+})
+
+t('typekleuren: enkel post, reel, story, carrousel met een geldige kleur', () => {
+  assert.deepEqual(controleerTypeKleuren({ reel: '#A855F7', post: 'rood', story: '#f97316', video: '#000000' }), { reel: '#a855f7', story: '#f97316' })
+  assert.deepEqual(controleerTypeKleuren(null), {})
+  assert.deepEqual(controleerTypeKleuren([]), {})
+  assert.deepEqual(leegStijl.typeKleuren, {})
+})
+
+t('kleur van een type: eigen kleur, anders standaard, onbekend grijs', () => {
+  assert.equal(typeKleur('reel', { reel: '#22c55e' }), '#22c55e')
+  assert.equal(typeKleur('reel', {}), TYPES.find((x) => x.key === 'reel')!.standaard)
+  assert.equal(typeKleur('iets', { reel: '#22c55e' }), '#6b7280')
+  // Elke soort een andere standaardkleur, zodat Type meteen iets zegt.
+  assert.equal(new Set(TYPES.map((x) => x.standaard)).size, TYPES.length)
+  assert.equal(typeLabel('carousel'), 'Carrousel')
+  assert.equal(typeLabel('video'), 'Video')
 })
 
 t('labels op een post: enkel van deze klant, geen dubbels, max 10', () => {

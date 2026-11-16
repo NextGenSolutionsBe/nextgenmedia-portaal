@@ -7,6 +7,7 @@ import { type Idea } from '@/components/portal/shoot-ideas'
 import { requirePortalView, sessionCan } from '@/lib/portal-auth'
 import { MODULE_IMPLEMENTED, type PortalModule } from '@/lib/portal-permissions'
 import { leesKalenderStijl } from '@/lib/content/kalender-stijl-server'
+import { leegStijl } from '@/lib/content/kalender-stijl'
 import { magPersonaliseren } from '@/lib/content/kalender-rol'
 import { KalenderCta } from '@/components/portal/kalender-cta'
 import { kalenderRechtenVoorSessie } from '@/lib/content/kalender-beheer-server'
@@ -53,7 +54,7 @@ export default async function PortalSocialMediaPage({ searchParams }: { searchPa
   let res = await leesItems(`${KOLOMMEN}, labels`)
   if (res.error && /labels/i.test(res.error.message)) res = await leesItems(KOLOMMEN)
   const items = (res.data ?? []) as unknown as Array<{ status: string; platform: string; platforms: unknown } & Record<string, unknown>>
-  const stijl = await leesKalenderStijl(admin, clientId).catch(() => ({ labels: [], faseKleuren: {} }))
+  const stijl = await leesKalenderStijl(admin, clientId).catch(() => leegStijl)
   const magModule = (m: PortalModule) => MODULE_IMPLEMENTED[m] && sessionCan(session, m, 'view')
   const cta = { diensten: magModule('diensten'), consultancy: magModule('consultancy'), meetings: magModule('meetings') }
 

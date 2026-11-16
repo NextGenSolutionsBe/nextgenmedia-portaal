@@ -13,7 +13,8 @@ import {
   magBewerken, magVerwijderen, statusOvergangen, magBeoordelen, overgangLabel, type KalenderRechten,
 } from '@/lib/content/kalender-rol'
 import {
-  FASES, KLEUREN, leegStijl, tekstOp, tinten, type ContentLabel, type FaseKey, type FaseKleuren, type KalenderStijl,
+  FASES, KLEUREN, TYPES, leegStijl, meng, tekstOp, tinten, typeKleur, typeLabel,
+  type ContentLabel, type FaseKey, type FaseKleuren, type KalenderStijl, type TypeKey, type TypeKleuren,
 } from '@/lib/content/kalender-stijl'
 
 export type SocialContentStatus =
@@ -75,6 +76,18 @@ function faseStip(s: SocialContentStatus, kleuren: FaseKleuren): { className: st
   const k = kleuren[s as FaseKey]
   return k ? { className: '', style: { backgroundColor: k } } : { className: STATUS_STYLE[s].dot }
 }
+/** Het blokje in de kleur van zijn soort (post, reel …): duidelijk gekleurd, volle kleur links, donkere tekst. */
+function typeBlok(type: string, kleuren: TypeKleuren): React.CSSProperties {
+  const k = typeKleur(type, kleuren)
+  const rand = meng(k, 0.45)
+  // Elke zijde apart: React mengt geen borderColor met borderLeftColor.
+  return { backgroundColor: meng(k, 0.76), color: meng(k, -0.62), borderTopColor: rand, borderRightColor: rand, borderBottomColor: rand, borderLeftColor: k, borderLeftWidth: 3 }
+}
+
+type KleurOp = 'status' | 'planning' | 'type'
+const KLEUR_OP: { key: KleurOp; label: string }[] = [
+  { key: 'status', label: 'Status' }, { key: 'planning', label: 'Planning' }, { key: 'type', label: 'Type' },
+]
 
 /** Een label als klein gekleurd pilletje. */
 function LabelPil({ label, klein = false }: { label: ContentLabel; klein?: boolean }) {
@@ -173,10 +186,12 @@ export function ContentCalendar({
   const [view, setView] = useState<'month' | 'week'>('month')
   // Gsm: de cellen zijn te smal voor titels; de gekozen dag staat daar als lijst onder de kalender.
   const [dag, setDag] = useState<string | null>(() => ymd(new Date()))
-  // Kleuren op status (standaard) of op planning: oranje geplaatst · groen ingepland · wit nog niets. Onthouden per browser.
-  const [kleurOp, setKleurOp] = useState<'status' | 'planning'>('status')
-  useEffect(() => { try { const v = localStorage.getItem('ngm-kalender-kleur'); if (v === 'planning' || v === 'status') setKleurOp(v) } catch { /* geen opslag */ } }, [])
-  const kiesKleur = (v: 'status' | 'planning') => { setKleurOp(v); try { localStorage.setItem('ngm-kalender-kleur', v) } catch { /* geen opslag */ } }
+  // Kleuren op status, op planning (oranje geplaatst · groen ingepland · wit nog niets) of op type (post, reel …).
+  // Onthouden per browser. Nog niets gekozen: Type als deze kalender eigen typekleuren heeft, anders Status.
+  const [gekozenKleur, setGekozenKleur] = useState<KleurOp | null>(null)
+  useEffect(() => { try { const v = localStorage.getItem('ngm-kalender-kleur'); if (v === 'planning' || v === 'status' || v === 'type') setGekozenKleur(v) } catch { /* geen opslag */ } }, [])
+  const kleurOp: KleurOp = gekozenKleur ?? (Object.keys(stijl.typeKleuren ?? {}).length ? 'type' : 'status')
+  const kiesKleur = (v: KleurOp) => { setGekozenKleur(v); try { localStorage.setItem('ngm-kalender-kleur', v) } catch { /* geen opslag */ } }
   const nu = useMemo(() => nuInBrussel(), [])
   const selectMode = !!selection?.enabled
 
@@ -244,7 +259,8 @@ export function ContentCalendar({
     const style = STATUS_STYLE[it.status]
     const plan: Planningkleur = planningkleur(it, nu)
     const fase = faseBadge(it.status, stijl.faseKleuren)
-    const badge = kleurOp === 'planning' ? PLANNING_STIJL[plan].badge : fase.className
+    const badge = kleurOp === 'planning' ? PLANNING_STIJL[plan].badge : kleurOp === 'type' ? '' : fase.className
+    const blokStijl = kleurOp === 'planning' ? undefined : kleurOp === 'type' ? typeBlok(it.content_type, stijl.typeKleuren ?? {}) : fase.style
     const stip = faseStip(it.status, stijl.faseKleuren)
     const lbls = labelIds(it).map((id) => labelMap.get(id)!)
     const isChecked = selection?.selectedIds.has(it.id) ?? false
@@ -266,11 +282,11 @@ export function ContentCalendar({
             if (lijst && it.id !== selectedId) wortel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
           }
         }}
-        style={kleurOp === 'planning' ? undefined : fase.style}
+        style={blokStijl}
         className={`text-left ${lijst ? 'text-sm px-2.5 py-2' : 'text-[11px] px-1.5 py-1'} rounded border ${badge}
           hover:opacity-80 transition flex flex-col gap-0.5 w-full min-w-0
           ${isChecked ? 'ring-2 ring-red-400 bg-red-50' : ''}`}
-        title={[it.title, kleurOp === 'planning' ? `${PLANNING_STIJL[plan].label} · ${style.label}` : null, kanaalTekst || null, lbls.length ? lbls.map((l) => l.naam).join(', ') : null].filter(Boolean).join(' · ')}
+        title={[it.title, kleurOp === 'planning' ? `${PLANNING_STIJL[plan].label} · ${style.label}` : kleurOp === 'type' ? `${typeLabel(it.content_type)} · ${style.label}` : null, kanaalTekst || null, lbls.length ? lbls.map((l) => l.naam).join(', ') : null].filter(Boolean).join(' · ')}
       >
         <span className="flex items-center gap-1 w-full min-w-0">
         {selectMode && (
@@ -328,9 +344,10 @@ export function ContentCalendar({
           <div className="flex items-center gap-1 flex-wrap sm:justify-end">
             <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden mr-1" role="group" aria-label="Kleuren op">
               <span className="text-[11px] text-gray-500 px-2 self-center hidden sm:inline">Kleur</span>
-              {(['status', 'planning'] as const).map((k) => (
-                <button key={k} type="button" onClick={() => kiesKleur(k)} aria-pressed={kleurOp === k}
-                  className={`text-xs px-2.5 py-1.5 border-l border-gray-200 ${kleurOp === k ? 'bg-black text-white' : 'hover:bg-gray-50'}`}>{k === 'status' ? 'Status' : 'Planning'}</button>
+              {KLEUR_OP.map((k) => (
+                <button key={k.key} type="button" onClick={() => kiesKleur(k.key)} aria-pressed={kleurOp === k.key}
+                  title={k.key === 'type' ? 'Elk blokje in de kleur van zijn soort: post, reel, story, carrousel' : undefined}
+                  className={`text-xs px-2.5 py-1.5 border-l border-gray-200 ${kleurOp === k.key ? 'bg-black text-white' : 'hover:bg-gray-50'}`}>{k.label}</button>
               ))}
             </div>
             <button
@@ -369,7 +386,7 @@ export function ContentCalendar({
                 )}
               </>
             ) : (
-              <span className="text-[11px] text-gray-500">Maak eigen labels voor deze kalender en kies een kleur per fase.</span>
+              <span className="text-[11px] text-gray-500">Maak eigen labels voor deze kalender en kies een kleur per fase of per type.</span>
             )}
             {magStijl && (
               <button type="button" onClick={() => setPersonaliseer((v) => !v)} aria-expanded={personaliseer}
@@ -380,7 +397,7 @@ export function ContentCalendar({
           </div>
         )}
         {stijlBeheer && magStijl && personaliseer && (
-          <Personaliseren stijl={stijl} actie={stijlBeheer.actie} onStijl={setStijl} onSluit={() => setPersonaliseer(false)} />
+          <Personaliseren stijl={stijl} actie={stijlBeheer.actie} onStijl={setStijl} onSluit={() => setPersonaliseer(false)} onTypeKleur={() => kiesKleur('type')} />
         )}
 
         {/* Weekdays header */}
@@ -434,7 +451,9 @@ export function ContentCalendar({
                 {dayItems.length > 0 && (
                   <div className="flex flex-wrap gap-0.5 px-0.5 sm:hidden" aria-hidden>
                     {dayItems.slice(0, 6).map((it) => {
-                      const st = kleurOp === 'planning' ? { className: PLANNING_STIJL[planningkleur(it, nu)].dot } : faseStip(it.status, stijl.faseKleuren)
+                      const st = kleurOp === 'planning' ? { className: PLANNING_STIJL[planningkleur(it, nu)].dot }
+                        : kleurOp === 'type' ? { className: '', style: { backgroundColor: typeKleur(it.content_type, stijl.typeKleuren ?? {}) } }
+                        : faseStip(it.status, stijl.faseKleuren)
                       return <span key={it.id} className={`h-1.5 w-1.5 rounded-full ${st.className}`} style={st.style} />
                     })}
                     {dayItems.length > 6 && <span className="text-[9px] leading-none text-gray-400">+{dayItems.length - 6}</span>}
@@ -481,6 +500,22 @@ export function ContentCalendar({
                 </span>
               ))}
               <span className="text-[11px] text-gray-400">· het bolletje blijft de status tonen</span>
+            </>
+          ) : kleurOp === 'type' ? (
+            <>
+              {TYPES.map((t) => {
+                const b = typeBlok(t.key, stijl.typeKleuren ?? {})
+                return (
+                  <span key={t.key} className="flex items-center gap-1.5 text-[11px] text-gray-600">
+                    <span className="h-3 w-5 rounded border" style={b} />
+                    {t.label}
+                  </span>
+                )
+              })}
+              <span className="text-[11px] text-gray-400">· het bolletje blijft de status tonen</span>
+              {magStijl && (
+                <button type="button" onClick={() => setPersonaliseer(true)} className="text-[11px] text-gray-500 underline underline-offset-2">Kleuren aanpassen</button>
+              )}
             </>
           ) : (Object.entries(STATUS_STYLE) as [SocialContentStatus, typeof STATUS_STYLE[SocialContentStatus]][]).map(([s, v]) => {
             const st = faseStip(s, stijl.faseKleuren)
@@ -654,7 +689,7 @@ function ScriptPanel({
               : normaliseerKanalen(f.platforms?.length > 0 ? f.platforms : [f.platform]).map((p) => (
                 <span key={p} className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-[10px]">{kanaalLabel(p)}</span>
               ))}
-            <span>· {f.content_type}</span>
+            <span>· {typeLabel(f.content_type)}</span>
           </div>
         </div>
         <button onClick={onClose} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400 shrink-0">
@@ -707,8 +742,8 @@ function ScriptPanel({
               <label>
                 <span className="block text-[10px] text-gray-500 mb-1">Type</span>
                 <select className={inp} value={f.content_type} onChange={(e) => setForm({ ...f, content_type: e.target.value })}>
-                  {['post', 'reel', 'story', 'carousel'].map((t) => (
-                    <option key={t} value={t}>{t}</option>
+                  {TYPES.map((t) => (
+                    <option key={t.key} value={t.key}>{t.label}</option>
                   ))}
                 </select>
               </label>
@@ -1041,14 +1076,16 @@ function ScriptPanel({
   )
 }
 
-/** Eigen labels en een kleur per fase. Enkel voor deze kalender; klant en team zien hetzelfde. */
+/** Eigen labels, een kleur per type en een kleur per fase. Enkel voor deze kalender; klant en team zien hetzelfde. */
 function Personaliseren({
-  stijl, actie, onStijl, onSluit,
+  stijl, actie, onStijl, onSluit, onTypeKleur,
 }: {
   stijl: KalenderStijl
   actie: KalenderStijlBeheer['actie']
   onStijl: (s: KalenderStijl) => void
   onSluit: () => void
+  /** Een typekleur gekozen: de kalender toont meteen de kleuren per type. */
+  onTypeKleur?: () => void
 }) {
   const [naam, setNaam] = useState('')
   const [kleur, setKleur] = useState(KLEUREN[7])
@@ -1070,6 +1107,14 @@ function Personaliseren({
     if (k) kleuren[fase] = k; else delete kleuren[fase]
     onStijl({ ...stijl, faseKleuren: kleuren })
     if (!(await doe({ actie: 'kleuren', kleuren }))) onStijl(vorige)
+  }
+  const zetTypeKleur = async (type: TypeKey, k: string | null) => {
+    const vorige = stijl
+    const kleuren: TypeKleuren = { ...(stijl.typeKleuren ?? {}) }
+    if (k) kleuren[type] = k; else delete kleuren[type]
+    onStijl({ ...stijl, typeKleuren: kleuren })
+    onTypeKleur?.()
+    if (!(await doe({ actie: 'type_kleuren', kleuren }))) onStijl(vorige)
   }
 
   return (
@@ -1111,6 +1156,26 @@ function Personaliseren({
           </div>
           <KleurKiezer waarde={kleur} onKies={setKleur} />
         </div>
+
+        <div className="pt-3">
+          <h3 className="text-sm font-semibold">Kleur per type</h3>
+          <p className="text-xs text-gray-500">Kies boven de kalender “Kleur: Type” en elk blokje krijgt de kleur van zijn soort.</p>
+        </div>
+        <ul className="space-y-2">
+          {TYPES.map((t) => {
+            const eigen = stijl.typeKleuren?.[t.key]
+            return (
+              <li key={t.key} className="rounded-lg border border-gray-200 bg-white px-2.5 py-2">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="h-3 w-5 rounded border" style={typeBlok(t.key, stijl.typeKleuren ?? {})} />
+                  <span className="text-xs font-medium">{t.label}</span>
+                  {eigen && <button type="button" disabled={bezig} onClick={() => zetTypeKleur(t.key, null)} className="ml-auto text-[11px] text-gray-500 underline underline-offset-2">Standaard</button>}
+                </div>
+                <KleurKiezer waarde={eigen ?? t.standaard} onKies={(k) => zetTypeKleur(t.key, k === t.standaard ? null : k)} />
+              </li>
+            )
+          })}
+        </ul>
       </section>
 
       <section className="space-y-2.5">

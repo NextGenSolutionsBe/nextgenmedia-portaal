@@ -5,12 +5,16 @@
  * Era Nobis) die enkel in die kalender bestaan, en kan per fase een eigen kleur
  * kiezen. Klant en team zien dezelfde labels en kleuren. Labels zijn ordening,
  * geen inhoud: een label toevoegen verandert niets aan de status van een post.
+ * Daarnaast een kleur per soort post (post, reel, story, carrousel): met
+ * "Kleur: Type" boven de kalender krijgt elk blokje de kleur van zijn soort.
  */
 
 export type ContentLabel = { id: string; naam: string; kleur: string }
 export type FaseKey = 'draft' | 'ready_for_review' | 'approved' | 'changes_requested' | 'scheduled' | 'published'
 export type FaseKleuren = Partial<Record<FaseKey, string>>
-export type KalenderStijl = { labels: ContentLabel[]; faseKleuren: FaseKleuren }
+export type TypeKey = 'post' | 'reel' | 'story' | 'carousel'
+export type TypeKleuren = Partial<Record<TypeKey, string>>
+export type KalenderStijl = { labels: ContentLabel[]; faseKleuren: FaseKleuren; typeKleuren: TypeKleuren }
 
 export const FASES: { key: FaseKey; label: string; standaard: string }[] = [
   { key: 'draft', label: 'Concept', standaard: '#9ca3af' },
@@ -21,12 +25,30 @@ export const FASES: { key: FaseKey; label: string; standaard: string }[] = [
   { key: 'published', label: 'Gepubliceerd', standaard: '#a855f7' },
 ]
 
-/** Kleuren om uit te kiezen voor labels en fases. */
+/** De soorten posts in de kalender (social_content_items.content_type), met een eigen standaardkleur. */
+export const TYPES: { key: TypeKey; label: string; standaard: string }[] = [
+  { key: 'post', label: 'Post', standaard: '#3b82f6' },
+  { key: 'reel', label: 'Reel', standaard: '#ec4899' },
+  { key: 'story', label: 'Story', standaard: '#f97316' },
+  { key: 'carousel', label: 'Carrousel', standaard: '#14b8a6' },
+]
+
+/** Kleuren om uit te kiezen voor labels, fases en types. */
 export const KLEUREN = ['#ef4444', '#f97316', '#f59e0b', '#eab308', '#22c55e', '#14b8a6', '#06b6d4', '#3b82f6', '#6366f1', '#a855f7', '#ec4899', '#6b7280', '#111827']
 
 const HEX = /^#[0-9a-f]{6}$/i
 export const isKleur = (v: unknown): v is string => typeof v === 'string' && HEX.test(v)
 export const isFase = (v: unknown): v is FaseKey => FASES.some((f) => f.key === v)
+export const isType = (v: unknown): v is TypeKey => TYPES.some((t) => t.key === v)
+
+/** De kleur van een soort post: eigen kleur van de klant, anders de standaard (onbekend = grijs). */
+export function typeKleur(type: string, eigen: TypeKleuren): string {
+  if (isType(type)) return eigen[type] ?? TYPES.find((t) => t.key === type)!.standaard
+  return '#6b7280'
+}
+
+/** Naam van een soort post zoals we hem tonen ("carousel" → "Carrousel"). */
+export const typeLabel = (type: string): string => TYPES.find((t) => t.key === type)?.label ?? (type ? type.charAt(0).toUpperCase() + type.slice(1) : 'Post')
 
 /** Naam en kleur van een label uit een verzoek. */
 export function controleerLabel(b: { naam?: unknown; kleur?: unknown }): { label: { naam: string; kleur: string } } | { fout: string } {
@@ -43,6 +65,16 @@ export function controleerFaseKleuren(v: unknown): FaseKleuren {
   if (!v || typeof v !== 'object') return uit
   for (const [k, kleur] of Object.entries(v as Record<string, unknown>)) {
     if (isFase(k) && isKleur(kleur)) uit[k] = kleur.toLowerCase()
+  }
+  return uit
+}
+
+/** Enkel gekende types met een geldige kleur; leeg = standaardkleur. */
+export function controleerTypeKleuren(v: unknown): TypeKleuren {
+  const uit: TypeKleuren = {}
+  if (!v || typeof v !== 'object') return uit
+  for (const [k, kleur] of Object.entries(v as Record<string, unknown>)) {
+    if (isType(k) && isKleur(kleur)) uit[k] = kleur.toLowerCase()
   }
   return uit
 }
@@ -68,7 +100,7 @@ export function tinten(hex: string): { achtergrond: string; rand: string; tekst:
   return { achtergrond: meng(k, 0.88), rand: meng(k, 0.55), tekst: meng(k, -0.55), stip: k }
 }
 
-export const leegStijl: KalenderStijl = { labels: [], faseKleuren: {} }
+export const leegStijl: KalenderStijl = { labels: [], faseKleuren: {}, typeKleuren: {} }
 
 /** Leesbare tekstkleur op een volle kleur: donker op licht (geel, lichtgroen), wit op donker. */
 export function tekstOp(hex: string): string {

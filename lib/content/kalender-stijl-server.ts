@@ -1,11 +1,11 @@
 import 'server-only'
-import { controleerFaseKleuren, controleerLabel, geldigeLabelIds, leegStijl, type ContentLabel, type KalenderStijl } from './kalender-stijl'
+import { controleerFaseKleuren, controleerLabel, controleerTypeKleuren, geldigeLabelIds, leegStijl, type ContentLabel, type KalenderStijl } from './kalender-stijl'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Admin = { from: (t: string) => any }
 
 /**
- * Labels en fasekleuren van één klantkalender. De oproeper heeft de toegang tot
+ * Labels, fasekleuren en typekleuren van één klantkalender. De oproeper heeft de toegang tot
  * die klant al gecontroleerd (portaal: geresolveerde clientId; admin: staff).
  * Vóór de migratie (tabellen ontbreken) is alles gewoon leeg.
  */
@@ -16,15 +16,26 @@ export class StijlFout extends Error {
 
 const MIST = /content_labels|content_kalender_stijl|labels|does not exist|schema cache/i
 
+/** Fase- en typekleuren; vóór de migratie van type_kleuren enkel de fasekleuren. */
+async function leesKleuren(admin: Admin, clientId: string): Promise<{ fase_kleuren?: unknown; type_kleuren?: unknown } | null> {
+  const s = await admin.from('content_kalender_stijl').select('fase_kleuren, type_kleuren').eq('client_id', clientId).maybeSingle()
+  if (s.error && /type_kleuren/i.test(s.error.message)) {
+    const z = await admin.from('content_kalender_stijl').select('fase_kleuren').eq('client_id', clientId).maybeSingle()
+    return z.data ?? null
+  }
+  return s.data ?? null
+}
+
 export async function leesKalenderStijl(admin: Admin, clientId: string): Promise<KalenderStijl> {
   const [l, s] = await Promise.all([
     admin.from('content_labels').select('id, naam, kleur').eq('client_id', clientId).order('naam'),
-    admin.from('content_kalender_stijl').select('fase_kleuren').eq('client_id', clientId).maybeSingle(),
+    leesKleuren(admin, clientId),
   ])
   if (l.error && MIST.test(l.error.message)) return leegStijl
   return {
     labels: ((l.data ?? []) as ContentLabel[]).map((x) => ({ id: x.id, naam: x.naam, kleur: x.kleur })),
-    faseKleuren: controleerFaseKleuren((s.data as { fase_kleuren?: unknown } | null)?.fase_kleuren),
+    faseKleuren: controleerFaseKleuren(s?.fase_kleuren),
+    typeKleuren: controleerTypeKleuren(s?.type_kleuren),
   }
 }
 
@@ -71,6 +82,17 @@ export async function zetFaseKleuren(admin: Admin, clientId: string, kleuren: un
   return leesKalenderStijl(admin, clientId)
 }
 
+/** Een kleur per soort post (post, reel, story, carrousel). De fasekleuren blijven zoals ze zijn. */
+export async function zetTypeKleuren(admin: Admin, clientId: string, kleuren: unknown, door: string | null): Promise<KalenderStijl> {
+  const k = controleerTypeKleuren(kleuren)
+  const { error } = await admin.from('content_kalender_stijl').upsert({ client_id: clientId, type_kleuren: k, updated_at: new Date().toISOString(), updated_by: door }, { onConflict: 'client_id' })
+  if (error) {
+    if (/type_kleuren/i.test(error.message)) throw new StijlFout('Kleuren per type zijn nog niet beschikbaar. Probeer het straks opnieuw.', 503)
+    throw new Error(error.message)
+  }
+  return leesKalenderStijl(admin, clientId)
+}
+
 /** De labels van één post zetten (enkel labels van deze klant). Inhoud en status blijven zoals ze zijn. */
 export async function zetItemLabels(admin: Admin, clientId: string, itemId: string, ids: unknown): Promise<string[]> {
   const { data: item } = await admin.from('social_content_items').select('id').eq('id', itemId).eq('client_id', clientId).maybeSingle()
@@ -90,6 +112,7 @@ export async function stijlActie(admin: Admin, clientId: string, b: Record<strin
     case 'label_wijzig': if (!id) throw new StijlFout('Ongeldige vraag.'); return { stijl: await wijzigLabel(admin, clientId, id, b) }
     case 'label_verwijder': if (!id) throw new StijlFout('Ongeldige vraag.'); return { stijl: await verwijderLabel(admin, clientId, id) }
     case 'kleuren': return { stijl: await zetFaseKleuren(admin, clientId, b.kleuren, door) }
+    case 'type_kleuren': return { stijl: await zetTypeKleuren(admin, clientId, b.kleuren, door) }
     case 'item_labels': {
       const item = typeof b.item === 'string' && /^[0-9a-f-]{36}$/i.test(b.item) ? b.item : null
       if (!item) throw new StijlFout('Ongeldige vraag.')

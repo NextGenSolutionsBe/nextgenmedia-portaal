@@ -7501,3 +7501,7 @@ alter table public.vesting_contracten add column if not exists meetellend_uitleg
 -- Bedrijf uit de kolom, in het vuilbakje "Geen interesse" (terugzetten kan). Niets wordt verwijderd.
 alter table public.abm_bedrijven add column if not exists geen_interesse_op timestamptz;
 alter table public.abm_bedrijven add column if not exists geen_interesse_door text;
+
+-- ── Contentkalender: kleur per type (post, reel, story, carrousel) (16 nov 2026) ──
+-- Leeg = standaardkleur per type. Klant en team zien dezelfde kleuren.
+alter table public.content_kalender_stijl add column if not exists type_kleuren jsonb not null default '{}'::jsonb;
