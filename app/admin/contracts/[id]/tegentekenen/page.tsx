@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 import { ChevronLeft, CheckCircle2 } from 'lucide-react'
 import { createAdminSupabaseClient, requireAdmin, trySignedUrl } from '@/lib/supabase/server'
 import { leesProfiel } from '@/lib/account-server'
-import { bedrijfVoorMerk, onsZoneVan, redenNietTegentekenen, volgendeInLijst } from '@/lib/contracten/tegenhandtekening'
+import { KLANT_TEKENDE_IN_APP, bedrijfVoorMerk, onsZoneVan, redenNietTegentekenen, volgendeInLijst } from '@/lib/contracten/tegenhandtekening'
 import { formatDate } from '@/lib/utils'
 import { hoortBij } from '@/lib/te-tekenen'
 import { TegentekenScherm } from './tegenteken-scherm'
@@ -18,8 +18,8 @@ export default async function TegentekenenPagina({ params, searchParams }: { par
   const qs = van ? `?van=${van}` : ''
   const [{ data: c }, { data: openRijen }] = await Promise.all([
     admin.from('contracts').select('*').eq('id', params.id).maybeSingle(),
-    // Alles wat nog op onze handtekening wacht, recentste eerst (zelfde volgorde als het Command Center).
-    admin.from('contracts').select('id').in('status', ['signed', 'getekend']).is('tegengetekend_op', null)
+    // Alles wat nog op onze handtekening wacht (de klant tekende in de app), recentste eerst: zelfde lijst als het Command Center.
+    admin.from('contracts').select(`id, ${KLANT_TEKENDE_IN_APP}`).in('status', ['signed', 'getekend']).is('tegengetekend_op', null)
       .order('signed_at', { ascending: false, nullsFirst: false }).order('id').limit(500),
   ])
   if (!c) notFound()

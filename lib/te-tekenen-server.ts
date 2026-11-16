@@ -8,6 +8,7 @@ import { tekenStand, wachtOpAkkoord } from '@/lib/vennoot-uitgaven'
 import { tegentekenTaken, voornaam, type TeTekenenItem, type TegentekenContract } from '@/lib/te-tekenen'
 
 import type { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { KLANT_TEKENDE_IN_APP } from '@/lib/contracten/tegenhandtekening'
 
 type Admin = ReturnType<typeof createAdminSupabaseClient>
 
@@ -62,7 +63,8 @@ export async function teTekenenOverzicht(admin: Admin): Promise<TeTekenenItem[]>
       return uit
     }, []),
     veilig('tegentekenen', async (): Promise<TeTekenenItem[]> => {
-      const { data, error } = await admin.from('contracts').select('id, title, client_id, signed_at')
+      // Enkel wat de klant in de app tekende (KLANT_TEKENDE_IN_APP), niet wat handmatig op getekend kwam.
+      const { data, error } = await admin.from('contracts').select(`id, title, client_id, signed_at, ${KLANT_TEKENDE_IN_APP}`)
         .in('status', ['signed', 'getekend']).is('tegengetekend_op', null).order('signed_at', { ascending: false, nullsFirst: false }).limit(500)
       if (error) throw new Error(error.message)
       const rijen = (data ?? []) as { id: string; title: string | null; client_id: string | null; signed_at: string | null }[]

@@ -47,6 +47,8 @@ export type Contract = OverzichtContract & {
   klant_geopend_op?: string | null
   /** NextGenMedia tekende na de klant. Getekend zonder dit = wacht op onze handtekening. */
   tegengetekend_op?: string | null
+  /** De klant tekende zelf in de app (tekenlink). Enkel dan wacht het op onze handtekening; handmatig getekend niet. */
+  klant_tekende_in_app?: boolean
   invoice_count: number
   invoice_sent: number
   expected_invoice_count: number | null
@@ -189,7 +191,7 @@ export function ContractsClient({
       if (filterLinked === 'no' && !!c.client_id) return false
       if (filterOns !== 'all') {
         if (canonicalStatus(c.status) !== 'getekend') return false
-        if (filterOns === 'wacht' && c.tegengetekend_op) return false
+        if (filterOns === 'wacht' && (c.tegengetekend_op || !c.klant_tekende_in_app)) return false
         if (filterOns === 'beide' && !c.tegengetekend_op) return false
       }
       if (filterInvoice !== 'all') {
@@ -605,7 +607,7 @@ export function ContractsClient({
                                   {c.klant_geopend_op && <div className="text-[10px] text-gray-500 mt-1 whitespace-nowrap">{geopendTekst(c.klant_geopend_op)}</div>}
                                   {canonicalStatus(c.status) === 'getekend' && (c.tegengetekend_op
                                     ? <div className="text-[10px] text-green-700 mt-1 whitespace-nowrap">Door beide partijen</div>
-                                    : <a href={`/admin/contracts/${c.id}/tegentekenen`} onClick={(e) => e.stopPropagation()} className="mt-1 inline-flex whitespace-nowrap rounded-full border border-amber-300 bg-amber-50 px-1.5 text-[10px] font-medium text-amber-900 hover:bg-amber-100">Wacht op onze handtekening{c.verantwoordelijke === 'Marco' || c.verantwoordelijke === 'Bram' ? ` (${c.verantwoordelijke})` : ''}</a>)}
+                                    : c.klant_tekende_in_app && <a href={`/admin/contracts/${c.id}/tegentekenen`} onClick={(e) => e.stopPropagation()} className="mt-1 inline-flex whitespace-nowrap rounded-full border border-amber-300 bg-amber-50 px-1.5 text-[10px] font-medium text-amber-900 hover:bg-amber-100">Wacht op onze handtekening{c.verantwoordelijke === 'Marco' || c.verantwoordelijke === 'Bram' ? ` (${c.verantwoordelijke})` : ''}</a>)}
                                   {c.mail_status && c.mail_status !== 'niet' && <div className="mt-1"><span title={MAIL_STATUS[c.mail_status].uitleg} className={`inline-flex rounded-full border px-1.5 text-[10px] font-medium ${MAIL_STATUS[c.mail_status].cls}`}>{MAIL_STATUS[c.mail_status].label}</span></div>}
                                 </td>
                                 <td className="table-td">

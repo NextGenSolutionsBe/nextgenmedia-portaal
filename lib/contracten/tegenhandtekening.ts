@@ -60,6 +60,15 @@ export const zoneKolommen = (z: OnsZone) => ({ ons_sig_page: z.page, ons_sig_x_p
 
 type ContractStand = { status?: string | null; tegengetekend_op?: string | null }
 
+/**
+ * Enkel contracten die de klant zelf in de app tekende (via de tekenlink, met
+ * een rij in contract_signatures) komen als opdracht "tegentekenen" in het
+ * Command Center, de taken en de contractenlijst. Handmatig op getekend gezet
+ * of als getekende pdf opgeladen: geen opdracht (tegentekenen kan nog wel).
+ * Gebruik het in een select, naast de gewone kolommen (inner join: enkel die contracten).
+ */
+export const KLANT_TEKENDE_IN_APP = 'contract_signatures!inner(id)'
+
 /** Wacht dit contract nog op onze handtekening? (De klant tekende, wij nog niet.) */
 export const moetTegentekenen = (c: ContractStand): boolean => canonicalStatus(c.status) === 'getekend' && !c.tegengetekend_op
 export const isTegengetekend = (c: ContractStand): boolean => !!c.tegengetekend_op

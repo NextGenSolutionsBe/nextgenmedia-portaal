@@ -192,11 +192,18 @@ export default async function ContractDetailPage({ params }: { params: { id: str
         </div>
       )}
 
-      {/* Na de klant tekenen wij ook: wacht het nog op ons, of staan beide handtekeningen erop? */}
+      {/* Na de klant tekenen wij ook: wacht het nog op ons, of staan beide handtekeningen erop? Enkel als de klant in de app tekende. */}
       {isSigned && (c.tegengetekend_op ? (
         <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900 flex items-start gap-2">
           <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
           <span><b className="font-semibold">Door beide partijen ondertekend.</b> {c.signer_name ?? 'De klant'}{c.signed_at ? ` op ${formatDate(c.signed_at)}` : ''}, {c.tegengetekend_door} namens {c.tegengetekend_bedrijf ?? 'NextGenMedia'} op {formatDate(c.tegengetekend_op)}. De klant ziet deze versie in de klantapp.</span>
+        </div>
+      ) : signatures.length === 0 ? (
+        // Handmatig op getekend gezet of als getekende pdf opgeladen: geen opdracht, tegentekenen kan wel.
+        <div className="text-xs text-gray-500 flex items-center gap-2 flex-wrap">
+          <PenLine className="h-3.5 w-3.5 shrink-0" />
+          <span>Getekend buiten de app, dus geen tegentekening nodig.</span>
+          <Link href={`/admin/contracts/${c.id}/tegentekenen`} className="underline underline-offset-2 hover:text-gray-900">Toch ondertekenen namens NextGenMedia</Link>
         </div>
       ) : (
         <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 flex items-center gap-3 flex-wrap">
