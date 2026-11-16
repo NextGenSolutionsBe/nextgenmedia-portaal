@@ -10,7 +10,7 @@ export default function AfmeldPagina({ searchParams }: { searchParams: { e?: str
   const t = String(searchParams.t ?? '')
   const geldig = afmeldTokenKlopt(email, t)
   return (
-    <main className="min-h-screen bg-gray-50 flex items-center justify-center px-4 py-12">
+    <main className="min-h-screen flex items-center justify-center px-4 py-12">
       <div className="w-full max-w-md bg-white rounded-3xl border border-gray-200 shadow-sm p-6 sm:p-8 space-y-4">
         <p className="text-sm font-bold">NextGenMedia</p>
         {geldig ? <Afmelden email={email} token={t} /> : (

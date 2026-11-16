@@ -12,19 +12,20 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // NextGen-huisstijl: monochroom. `gray` is het merkpalet (neutraal, geen
-        // blauwzweem) zodat elke bestaande gray-klasse vanzelf in lijn valt:
-        // 900 = bijna zwart #0f0f0f · 800 = donkergrijs #272727 ·
-        // 600 = middengrijs #4b4b4b · 200 = lichtgrijs #e0e0e0.
+        // Design 16 nov 2026: zacht, licht, een tikje koel grijs (glas, witte
+        // kaarten op een lichtgrijze achtergrond). `gray` blijft het merkpalet,
+        // zodat elke bestaande gray-klasse vanzelf meegaat. Lichtere randen.
         gray: {
-          50: '#fafafa', 100: '#f4f4f4', 200: '#e0e0e0', 300: '#c8c8c8', 400: '#8c8c8c',
-          500: '#6b6b6b', 600: '#4b4b4b', 700: '#373737', 800: '#272727', 900: '#0f0f0f', 950: '#080808',
+          50: '#f7f7f9', 100: '#f1f1f4', 200: '#e6e6eb', 300: '#d3d3da', 400: '#9a9aa4',
+          500: '#71717b', 600: '#52525b', 700: '#3c3c44', 800: '#28282e', 900: '#17171b', 950: '#0b0b0e',
         },
         accent: {
-          DEFAULT: '#0f0f0f',
+          DEFAULT: '#17171b',
           foreground: '#ffffff',
         },
-        brand: '#0f0f0f',
+        brand: '#17171b',
+        // Het geel van NextGenMedia, spaarzaam: een stip, een balkje, de selectie.
+        geel: { DEFAULT: '#fff848', warm: '#f5cf2b', zacht: '#fffbd1' },
         // Contentplanning — waarden in app/globals.css (--cp-*).
         cp: {
           ink: 'var(--cp-ink)', zacht: 'var(--cp-ink-zacht)', 'op-ink': 'var(--cp-op-ink)', vlak: 'var(--cp-vlak)',
@@ -56,25 +57,32 @@ const config: Config = {
           'Helvetica Neue', 'Arial', 'sans-serif',
         ],
       },
-      // Bescheiden afgeronde hoeken, overal dezelfde schaal.
+      // Ruim afgeronde hoeken (design 16 nov 2026), overal dezelfde schaal:
+      // kaarten en vensters voelen zacht aan, kleine knoppen worden "squircles".
       borderRadius: {
-        DEFAULT: '0.25rem',
-        sm: '0.25rem',
-        md: '0.375rem',
-        lg: '0.5rem',
-        xl: '0.625rem',
-        '2xl': '0.75rem',
-        '3xl': '0.875rem',
+        DEFAULT: '0.5rem',
+        sm: '0.375rem',
+        md: '0.75rem',
+        lg: '1rem',
+        xl: '1.25rem',
+        '2xl': '1.5rem',
+        '3xl': '1.75rem',
         cp: 'var(--cp-radius)',
       },
-      // Weinig schaduw: enkel genoeg om een venster van de pagina te scheiden.
+      // Zachte, diffuse schaduwen: kaarten zweven licht boven de grijze achtergrond.
       boxShadow: {
-        sm: '0 1px 2px rgba(15, 15, 15, 0.04)',
-        DEFAULT: '0 1px 2px rgba(15, 15, 15, 0.06)',
-        md: '0 2px 6px rgba(15, 15, 15, 0.06)',
-        lg: '0 4px 12px rgba(15, 15, 15, 0.08)',
-        xl: '0 8px 24px rgba(15, 15, 15, 0.10)',
-        '2xl': '0 12px 32px rgba(15, 15, 15, 0.12)',
+        sm: '0 1px 2px rgba(20, 20, 28, 0.04), 0 2px 8px -4px rgba(20, 20, 28, 0.06)',
+        DEFAULT: '0 1px 3px rgba(20, 20, 28, 0.05), 0 6px 16px -8px rgba(20, 20, 28, 0.08)',
+        md: '0 1px 2px rgba(20, 20, 28, 0.03), 0 12px 28px -14px rgba(20, 20, 28, 0.12)',
+        lg: '0 2px 6px rgba(20, 20, 28, 0.03), 0 20px 44px -20px rgba(20, 20, 28, 0.16)',
+        xl: '0 4px 12px rgba(20, 20, 28, 0.04), 0 30px 64px -28px rgba(20, 20, 28, 0.22)',
+        '2xl': '0 8px 20px rgba(20, 20, 28, 0.05), 0 40px 90px -36px rgba(20, 20, 28, 0.30)',
+      },
+      // Lichtere letter: wat vroeger "vet" was, is nu half-vet. Zo blijft de
+      // hiërarchie, maar met de luchtige uitstraling van het nieuwe design.
+      fontWeight: {
+        semibold: '500',
+        bold: '600',
       },
       // Geen inloopanimaties op pagina's: de klassen blijven bestaan, maar doen niets.
       animation: {

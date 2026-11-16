@@ -47,7 +47,7 @@ export default function WachtwoordPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+    <div className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
         <div className="flex justify-center mb-6"><Logo /></div>
         {stap === 'controle' && <div className="text-center text-gray-400 py-6"><Loader2 className="h-5 w-5 animate-spin mx-auto" /><p className="text-sm mt-2">Link controleren…</p></div>}

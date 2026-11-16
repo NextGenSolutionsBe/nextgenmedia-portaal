@@ -27,11 +27,15 @@
     --accent-foreground: 0 0% 6%;
     --destructive: 0 72% 45%;
     --destructive-foreground: 0 0% 100%;
-    --border: 0 0% 88%;
-    --input: 0 0% 88%;
-    --ring: 0 0% 6%;
-    --radius: 0.5rem;
-    --sidebar-width: 232px;
+    --border: 240 7% 91%;
+    --input: 240 7% 91%;
+    --ring: 240 8% 10%;
+    --radius: 1rem;
+    /* Zwevende zijbalk: 12px marge + 240px paneel + 12px lucht naar de inhoud. */
+    --sidebar-width: 264px;
+    /* Glas: lichte, halfdoorzichtige vlakken met wazige achtergrond. */
+    --glas: rgba(246, 246, 249, 0.72);
+    --glas-rand: rgba(255, 255, 255, 0.75);
 
     /* ── Contentplanning: kleuren en typografie op één plek ──────────────────
        Voorlopig zwart-wit; de branding komt later — enkel deze waarden
@@ -40,8 +44,8 @@
     --cp-ink-zacht: #6b6b6b;      /* labels, datums */
     --cp-op-ink: #ffffff;         /* tekst op een donkere knop */
     --cp-vlak: #ffffff;           /* kaarten */
-    --cp-achtergrond: #f4f4f4;    /* zachte vlakken, kolommen */
-    --cp-rand: #e0e0e0;
+    --cp-achtergrond: #f1f1f4;    /* zachte vlakken, kolommen */
+    --cp-rand: #e6e6eb;
     --cp-klaar: #0f0f0f;          /* afgevinkt */
     --cp-vandaag: #0f0f0f;        /* rand rond vandaag */
     --cp-r1: #facc15;  --cp-r1-zacht: #fefce8;   /* reeks 1 · geel */
@@ -52,7 +56,7 @@
     --cp-tekst-kop: 1.125rem;
     --cp-tekst-basis: 1rem;
     --cp-tekst-klein: 0.8125rem;
-    --cp-radius: 0.5rem;
+    --cp-radius: 1rem;
   }
 
   * {
@@ -66,20 +70,27 @@
       -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   }
 
+  /* Zachte lichtgrijze achtergrond met wat licht in de hoeken, zoals glas op een bureau. */
   body {
-    @apply bg-white text-gray-900 font-sans antialiased;
+    @apply text-gray-900 font-sans antialiased;
+    background-color: #ebebef;
+    background-image:
+      radial-gradient(1100px 620px at 8% -8%, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0) 62%),
+      radial-gradient(900px 560px at 100% 0%, rgba(250, 249, 240, 0.85) 0%, rgba(250, 249, 240, 0) 58%),
+      radial-gradient(1000px 700px at 60% 110%, rgba(226, 226, 233, 0.9) 0%, rgba(226, 226, 233, 0) 60%);
+    background-attachment: fixed;
     text-rendering: optimizeLegibility;
   }
 
   ::selection {
-    background: #e0e0e0;
-    color: #0f0f0f;
+    background: #fff848;
+    color: #17171b;
   }
 
   /* Zichtbare, consistente toetsenbordfocus. :where() houdt de specificiteit op
      nul, zodat elementen met een eigen focusstijl (ring-klassen) die behouden. */
   :where(a, button, [role='button'], summary, [tabindex]):focus-visible {
-    outline: 2px solid #0f0f0f;
+    outline: 2px solid #17171b;
     outline-offset: 2px;
   }
 
@@ -107,60 +118,65 @@
   h1, h2, h3, h4, h5, h6 {
     @apply font-semibold tracking-tight text-gray-900;
   }
+  /* Paginatitels licht en ruim, zoals "Management Overview" in het design. */
+  h1 {
+    letter-spacing: -0.02em;
+  }
 }
 
 @layer components {
-  /* Oude merkhulpjes, nu monochroom. */
-  .brand-yellow { color: #0f0f0f; }
-  .bg-brand { background-color: #0f0f0f; }
-  .border-brand { border-color: #0f0f0f; }
+  /* Oude merkhulpjes. */
+  .brand-yellow { color: #17171b; }
+  .bg-brand { background-color: #17171b; }
+  .border-brand { border-color: #17171b; }
 
-  /* Navigatie: donkere kolom, witte tekst, subtiele markering van de huidige pagina. */
+  /* Glas: het zwevende paneel van de zijbalk, de bovenbalk en zachte vlakken. */
+  .glas {
+    background: var(--glas);
+    border: 1px solid var(--glas-rand);
+    -webkit-backdrop-filter: blur(24px) saturate(140%);
+    backdrop-filter: blur(24px) saturate(140%);
+  }
+
+  /* Navigatie: licht glaspaneel; de huidige pagina is een witte pil met een zachte schaduw. */
   .sidebar-item {
-    @apply relative flex items-center gap-3 px-3 py-1.5 rounded-md text-sm font-medium text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors duration-150;
+    @apply relative flex items-center gap-3 px-3.5 py-2 rounded-full text-[13px] font-normal text-gray-600 hover:text-gray-900 hover:bg-white/70 transition-colors duration-150;
   }
   .sidebar-item.active {
-    @apply text-white bg-white/[0.09];
-  }
-  .sidebar-item.active::before {
-    content: '';
-    @apply absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-white;
-  }
-  .sidebar-item:focus-visible {
-    outline-color: #ffffff;
+    @apply text-gray-900 bg-white font-medium shadow-sm;
   }
 
   .card-base {
-    @apply bg-white border border-gray-200 rounded-lg p-4 md:p-5;
+    @apply bg-white border border-black/[0.04] rounded-[22px] shadow-md p-4 md:p-5;
   }
 
   .stat-card {
-    @apply bg-white border border-gray-200 rounded-lg p-4;
+    @apply bg-white border border-black/[0.04] rounded-[22px] shadow-md p-4;
   }
 
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 px-3.5 py-2 bg-gray-900 text-white font-medium rounded-md border border-gray-900 hover:bg-gray-800 hover:border-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2 transition-colors duration-150 text-sm disabled:opacity-50 disabled:pointer-events-none;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 bg-gray-900 text-white font-medium rounded-full border border-gray-900 shadow-[0_8px_20px_-10px_rgba(16,16,20,0.55)] hover:bg-gray-800 hover:border-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2 transition-colors duration-150 text-sm disabled:opacity-50 disabled:pointer-events-none;
   }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 px-3.5 py-2 bg-white text-gray-900 font-medium rounded-md border border-gray-200 hover:bg-gray-50 hover:border-gray-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2 transition-colors duration-150 text-sm disabled:opacity-50 disabled:pointer-events-none;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 bg-white text-gray-900 font-medium rounded-full border border-black/[0.07] shadow-sm hover:bg-gray-50 hover:border-black/[0.12] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2 transition-colors duration-150 text-sm disabled:opacity-50 disabled:pointer-events-none;
   }
 
   .btn-danger {
-    @apply inline-flex items-center justify-center gap-2 px-3.5 py-2 bg-white text-red-700 font-medium rounded-md border border-red-200 hover:bg-red-50 hover:border-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2 transition-colors duration-150 text-sm disabled:opacity-50 disabled:pointer-events-none;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 bg-white text-red-700 font-medium rounded-full border border-red-200 shadow-sm hover:bg-red-50 hover:border-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2 transition-colors duration-150 text-sm disabled:opacity-50 disabled:pointer-events-none;
   }
 
-  /* Klikbare kaarten: enkel de rand reageert, niets beweegt. */
+  /* Klikbare kaarten: de schaduw wordt iets dieper, niets beweegt. */
   a.card-base:hover {
-    @apply border-gray-300;
+    @apply border-black/[0.08] shadow-lg;
   }
 
   .input-base {
-    @apply w-full px-3 py-2 text-sm text-gray-900 border border-gray-200 rounded-md bg-white placeholder:text-gray-400 focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition-colors;
+    @apply w-full px-3.5 py-2 text-sm text-gray-900 border border-black/[0.08] rounded-xl bg-white/90 placeholder:text-gray-400 focus:outline-none focus:bg-white focus:border-gray-400 focus:ring-4 focus:ring-gray-900/[0.06] transition-colors;
   }
 
   .table-th {
-    @apply px-4 py-2.5 text-left text-xs font-medium text-gray-500 whitespace-nowrap;
+    @apply px-4 py-2.5 text-left text-[11px] font-normal text-gray-400 tracking-wide whitespace-nowrap;
   }
 
   .table-td {
@@ -168,7 +184,7 @@
   }
 
   .status-badge {
-    @apply inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium whitespace-nowrap;
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium whitespace-nowrap;
   }
 
   /* Nette lege staat — consistent over alle modules */
@@ -236,13 +252,14 @@ html {
   .kaart-tabel tbody tr,
   .kaart-tabel tfoot tr {
     background: #fff;
-    border: 1px solid #e0e0e0;
-    border-radius: 0.5rem;
-    padding: 0.5rem 0.75rem;
-    margin-bottom: 0.5rem;
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    border-radius: 1.125rem;
+    box-shadow: 0 1px 2px rgba(20, 20, 28, 0.03), 0 10px 24px -14px rgba(20, 20, 28, 0.12);
+    padding: 0.625rem 0.875rem;
+    margin-bottom: 0.625rem;
   }
   .kaart-tabel tfoot tr {
-    background: #fafafa;
+    background: #f7f7f9;
   }
   .kaart-tabel td {
     display: block;
@@ -266,7 +283,7 @@ html {
     font-size: 11px;
     font-weight: 500;
     line-height: 1.6;
-    color: #6b6b6b;
+    color: #71717b;
     text-align: left;
   }
   .kaart-tabel td[data-label='']::before {
@@ -302,11 +319,26 @@ html {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #c8c8c8;
+  background: #d3d3da;
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #8c8c8c;
+  background: #9a9aa4;
+}
+
+/* Witte kaders met een grijze rand (overal in de app) krijgen dezelfde zachte
+   uitstraling als de kaarten: een lichtere rand en een diffuse schaduw. Enkel
+   als ze zelf geen schaduw kiezen, en nooit voor invoervelden. */
+:is(div, section, article, li, a, aside, form, details, header, ul).bg-white.border[class*='rounded-'][class*='border-gray-200']:not([class*='shadow']) {
+  border-color: rgba(20, 20, 28, 0.06);
+  box-shadow: 0 1px 2px rgba(20, 20, 28, 0.03), 0 10px 26px -16px rgba(20, 20, 28, 0.12);
+}
+
+/* Vensters: de pagina achter een venster wordt wazig, zoals matglas. Geldt voor
+   elke overlay met een zwarte doorschijnende achtergrond (bg-black/30, /40 …). */
+.fixed.inset-0[class*='bg-black/'] {
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
 }
 
 /* Calendar drag ghost */

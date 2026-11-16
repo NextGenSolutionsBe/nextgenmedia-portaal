@@ -22,7 +22,7 @@ export default async function PubliekFormulierPagina({ params }: { params: { tok
   try { pub = await laadPubliekeLink(params.token) } catch { pub = { status: 'onbekend' } }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen flex flex-col">
       <header className="bg-white border-b border-gray-200 px-4 py-3">
         <div className="max-w-2xl mx-auto flex items-center gap-3">
           <Logo className="h-8 w-8" />

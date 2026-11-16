@@ -46,7 +46,7 @@ export function NotificationBell() {
 
   return (
     <div className="relative" ref={ref}>
-      <button onClick={() => setOpen((v) => !v)} className="relative h-9 w-9 flex items-center justify-center rounded-lg bg-white border border-gray-200 hover:border-gray-300" title="Meldingen">
+      <button onClick={() => setOpen((v) => !v)} className="relative h-9 w-9 flex items-center justify-center rounded-full bg-white border border-black/[0.06] shadow-sm hover:border-black/[0.12]" title="Meldingen">
         <Bell className="h-4 w-4 text-gray-600" />
         {unread.length > 0 && (
           <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{unread.length > 99 ? '99+' : unread.length}</span>

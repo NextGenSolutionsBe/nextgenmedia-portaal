@@ -32,15 +32,15 @@ export function OpslagMeter({ onNavigate }: { onNavigate?: () => void }) {
     return () => { levend = false }
   }, [])
   if (!o) return null
-  const kleur = o.niveau === 'kritiek' ? 'bg-red-400' : o.niveau === 'let_op' ? 'bg-amber-400' : 'bg-white/60'
+  const kleur = o.niveau === 'kritiek' ? 'bg-red-400' : o.niveau === 'let_op' ? 'bg-amber-400' : 'bg-gray-900/70'
   return (
     <Link href="/admin/instellingen?tab=opslag" prefetch={false} onClick={onNavigate}
-      className="block px-3 py-2 rounded-lg hover:bg-white/5 transition-colors" title="Opslag in Supabase">
+      className="block px-3.5 py-2 rounded-2xl hover:bg-white/70 transition-colors" title="Opslag in Supabase">
       <div className="flex items-center justify-between gap-2 text-[11px] text-gray-400">
         <span className="flex items-center gap-1.5"><HardDrive className="h-3.5 w-3.5" />Opslag</span>
         <span className="tabular-nums">{grootte(o.totaalBytes)} / {OPSLAG_LIMIET_GB} GB</span>
       </div>
-      <div className="mt-1.5 h-1 rounded-full bg-white/10 overflow-hidden">
+      <div className="mt-1.5 h-1 rounded-full bg-black/[0.06] overflow-hidden">
         <div className={`h-full rounded-full ${kleur}`} style={{ width: `${Math.max(1, Math.min(100, o.procent))}%` }} />
       </div>
     </Link>

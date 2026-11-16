@@ -22,6 +22,12 @@ Het klantportaal gebruikt een **resolver + service-role** model, niet RLS, als p
 - **Publieke tekenlinks (`/sign/[token]`) blijven token-based** voor externe ontvangers. Enkel wanneer een ingelogde subaccount van dezelfde klant tekent, geldt `contracts.sign`.
 - **Algemene voorwaarden en privacyverklaring bij elke ondertekening** (2 nov 2026, `lib/voorwaarden.ts`): twee verplichte vinkjes op `/sign/[token]`, met een klein linkje "Lees nu de algemene voorwaarden" (https://nextgenmedia.be/algemene-voorwaarden) en "Lees nu de privacyverklaring" (PDF in `public/documenten/privacyverklaring-nextgenmedia.pdf`, versie `PRIVACY_VERSIE`; pas die aan als de PDF vervangen wordt). De voorwaarden gelden ook voor elke toekomstige samenwerking. `/api/sign` weigert zonder beide (`controleerAkkoord`) en bewaart het bewijs op `contract_signatures` (`voorwaarden_akkoord_op`, `privacy_akkoord_op`, `akkoord_details`), in het `signed`-event en op het certificaat en de ontvangstpagina (`akkoordRegels`).
 
+## Design (16 nov 2026)
+- **Licht en zacht, met glas**: lichtgrijze achtergrond met wat licht in de hoeken (body in `app/globals.css`), witte kaarten met ruim afgeronde hoeken en diffuse schaduwen, Poppins (licht en rond, `app/layout.tsx`). Het merkgeel `#fff848` spaarzaam (`geel` in `tailwind.config.ts`: selectie, Mijn werk, balkjes).
+- **Eén plek**: kleuren (koel grijs palet), hoeken (lg = 16px, 2xl = 24px), schaduwen en gewichten (`semibold` = 500, `bold` = 600) staan in `tailwind.config.ts`; de bouwstenen (`card-base`, `stat-card`, `btn-primary`/`btn-secondary`/`btn-danger` als pillen, `input-base`, `table-th`, `status-badge`, `sidebar-item`, `glas`) in `app/globals.css`. Nieuwe schermen gebruiken die klassen, geen eigen kleuren of hoeken.
+- **Zijbalk** (admin, klantapp, partner): zwevend glaspaneel (`glas`, 240px, 12px van de rand; `--sidebar-width` 264px), de huidige pagina als witte pil. **Bovenbalk**: geen balk, enkel de knoppen als zwevende glazen pil.
+- **Vangnetten in CSS**: elk wit kader met `border-gray-200` en zonder eigen schaduw krijgt de zachte kaartstijl; elke overlay `fixed inset-0 bg-black/…` maakt de pagina erachter wazig.
+
 ## Platformregels (Platform 1.0 — lees vóór je iets toevoegt)
 - **Geen nieuwe modules zonder expliciete reden.** Het platform is functioneel af; werk bestaande modules uit i.p.v. nieuwe te bouwen.
 - **Klanten zijn de centrale hub.** Beheer klant-gerelateerde info vanaf de klantdetail (`ClientHub`), niet in losse schermen. Nooit dezelfde info op twee plaatsen beheren.

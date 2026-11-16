@@ -13,7 +13,7 @@ export default async function KantoorPage() {
   if (!sessie) redirect('/login')
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen">
       <div className="max-w-[1100px] mx-auto px-4 py-8">
         <KantoorClient />
       </div>
