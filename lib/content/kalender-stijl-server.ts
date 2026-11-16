@@ -1,11 +1,11 @@
 import 'server-only'
-import { controleerFaseKleuren, controleerLabel, controleerTypeKleuren, geldigeLabelIds, leegStijl, type ContentLabel, type KalenderStijl } from './kalender-stijl'
+import { controleerFaseKleuren, controleerLabel, controleerTypeKleuren, controleerWeergave, geldigeLabelIds, leegStijl, stijlUitRij, type ContentLabel, type KalenderStijl } from './kalender-stijl'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Admin = { from: (t: string) => any }
 
 /**
- * Labels, fasekleuren en typekleuren van één klantkalender. De oproeper heeft de toegang tot
+ * Labels en weergave (fase-, type- en kanaalkleuren, eigen namen, kleur van de vakjes) van één klantkalender. De oproeper heeft de toegang tot
  * die klant al gecontroleerd (portaal: geresolveerde clientId; admin: staff).
  * Vóór de migratie (tabellen ontbreken) is alles gewoon leeg.
  */
@@ -16,15 +16,14 @@ export class StijlFout extends Error {
 
 const MIST = /content_labels|content_kalender_stijl|labels|does not exist|schema cache/i
 
-/** Fase- en typekleuren; vóór de migratie van type_kleuren enkel de fasekleuren. */
-async function leesKleuren(admin: Admin, clientId: string): Promise<{ fase_kleuren?: unknown; type_kleuren?: unknown } | null> {
-  const s = await admin.from('content_kalender_stijl').select('fase_kleuren, type_kleuren').eq('client_id', clientId).maybeSingle()
-  if (s.error && /type_kleuren/i.test(s.error.message)) {
-    const z = await admin.from('content_kalender_stijl').select('fase_kleuren').eq('client_id', clientId).maybeSingle()
-    return z.data ?? null
-  }
-  return s.data ?? null
+/** De weergave van deze kalender. select('*'): kolommen die nog ontbreken (vóór de migratie) zijn gewoon leeg. */
+async function leesKleuren(admin: Admin, clientId: string): Promise<Record<string, unknown> | null> {
+  const s = await admin.from('content_kalender_stijl').select('*').eq('client_id', clientId).maybeSingle()
+  return (s.data as Record<string, unknown> | null) ?? null
 }
+
+/** Kolommen van de weergave die (nog) niet bestaan: dan een duidelijke melding. */
+const MIST_WEERGAVE = /type_kleuren|type_namen|kanaal_kleuren|kanaal_namen|blok_kleur|een_kleur/i
 
 export async function leesKalenderStijl(admin: Admin, clientId: string): Promise<KalenderStijl> {
   const [l, s] = await Promise.all([
@@ -34,8 +33,7 @@ export async function leesKalenderStijl(admin: Admin, clientId: string): Promise
   if (l.error && MIST.test(l.error.message)) return leegStijl
   return {
     labels: ((l.data ?? []) as ContentLabel[]).map((x) => ({ id: x.id, naam: x.naam, kleur: x.kleur })),
-    faseKleuren: controleerFaseKleuren(s?.fase_kleuren),
-    typeKleuren: controleerTypeKleuren(s?.type_kleuren),
+    ...stijlUitRij(s),
   }
 }
 
@@ -93,6 +91,21 @@ export async function zetTypeKleuren(admin: Admin, clientId: string, kleuren: un
   return leesKalenderStijl(admin, clientId)
 }
 
+/**
+ * De weergave aanpassen: eigen namen en kleuren per type en kanaal, en waarop
+ * de vakjes hun kleur krijgen. Enkel de velden die meekomen; de rest blijft.
+ */
+export async function zetWeergave(admin: Admin, clientId: string, b: Record<string, unknown>, door: string | null): Promise<KalenderStijl> {
+  const c = controleerWeergave(b)
+  if ('fout' in c) throw new StijlFout(c.fout)
+  const { error } = await admin.from('content_kalender_stijl').upsert({ client_id: clientId, ...c.kolommen, updated_at: new Date().toISOString(), updated_by: door }, { onConflict: 'client_id' })
+  if (error) {
+    if (MIST_WEERGAVE.test(error.message)) throw new StijlFout('Deze instelling is nog niet beschikbaar. Probeer het straks opnieuw.', 503)
+    throw new Error(error.message)
+  }
+  return leesKalenderStijl(admin, clientId)
+}
+
 /** De labels van één post zetten (enkel labels van deze klant). Inhoud en status blijven zoals ze zijn. */
 export async function zetItemLabels(admin: Admin, clientId: string, itemId: string, ids: unknown): Promise<string[]> {
   const { data: item } = await admin.from('social_content_items').select('id').eq('id', itemId).eq('client_id', clientId).maybeSingle()
@@ -113,6 +126,7 @@ export async function stijlActie(admin: Admin, clientId: string, b: Record<strin
     case 'label_verwijder': if (!id) throw new StijlFout('Ongeldige vraag.'); return { stijl: await verwijderLabel(admin, clientId, id) }
     case 'kleuren': return { stijl: await zetFaseKleuren(admin, clientId, b.kleuren, door) }
     case 'type_kleuren': return { stijl: await zetTypeKleuren(admin, clientId, b.kleuren, door) }
+    case 'weergave': return { stijl: await zetWeergave(admin, clientId, b, door) }
     case 'item_labels': {
       const item = typeof b.item === 'string' && /^[0-9a-f-]{36}$/i.test(b.item) ? b.item : null
       if (!item) throw new StijlFout('Ongeldige vraag.')

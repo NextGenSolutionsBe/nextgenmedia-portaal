@@ -31,12 +31,13 @@ function nepAdmin(opties: { zonderTypeKolom?: boolean } = {}) {
           if (opties.zonderTypeKolom && kolommen.includes('type_kleuren')) return { data: null, error: geenKolom }
           const rij = stijl[String(filters.client_id)]
           if (!rij) return { data: null, error: null }
+          if (kolommen === '*') return { data: { ...rij }, error: null }
           const uit: Record<string, unknown> = {}
           for (const k of kolommen.split(',').map((x) => x.trim())) uit[k] = rij[k]
           return { data: uit, error: null }
         },
         async upsert(rij: any) {
-          if (opties.zonderTypeKolom && 'type_kleuren' in rij) return { error: geenKolom }
+          if (opties.zonderTypeKolom && ['type_kleuren', 'type_namen', 'kanaal_kleuren', 'kanaal_namen', 'blok_kleur', 'een_kleur'].some((k) => k in rij)) return { error: geenKolom }
           stijl[rij.client_id] = { fase_kleuren: {}, type_kleuren: {}, ...stijl[rij.client_id], ...rij }
           return { error: null }
         },
@@ -72,6 +73,27 @@ async function main() {
     assert.deepEqual(s.faseKleuren, { scheduled: '#3b82f6' })
     assert.deepEqual(s.typeKleuren, {})
     await assert.rejects(stijlActie(a, 'k1', { actie: 'type_kleuren', kleuren: { reel: '#a855f7' } }, null), (e: unknown) => e instanceof StijlFout && (e as InstanceType<typeof StijlFout>).status === 503)
+    await assert.rejects(stijlActie(a, 'k1', { actie: 'weergave', blokKleur: 'type' }, null), (e: unknown) => e instanceof StijlFout && (e as InstanceType<typeof StijlFout>).status === 503)
+    assert.equal(s.blokKleur, null)
+    ok++
+  }
+
+  // Weergave: enkel wat meekomt verandert; namen, kanaalkleuren en de kleur van de vakjes.
+  {
+    const a = nepAdmin()
+    await stijlActie(a, 'k1', { actie: 'type_kleuren', kleuren: { reel: '#a855f7' } }, 'Chiara')
+    let { stijl } = await stijlActie(a, 'k1', { actie: 'weergave', typeNamen: { reel: '  Korte   video ', video: 'x' }, kanaalKleuren: { tiktok: '#EC4899', instagram: '#000000' }, kanaalNamen: { meta: 'Insta + FB' } }, 'Chiara')
+    assert.deepEqual(stijl!.typeNamen, { reel: 'Korte video' })
+    assert.deepEqual(stijl!.kanaalKleuren, { tiktok: '#ec4899' })
+    assert.deepEqual(stijl!.kanaalNamen, { meta: 'Insta + FB' })
+    assert.deepEqual(stijl!.typeKleuren, { reel: '#a855f7' }, 'typekleuren blijven')
+    assert.equal(stijl!.blokKleur, null)
+    ;({ stijl } = await stijlActie(a, 'k1', { actie: 'weergave', blokKleur: 'een', eenKleur: '#22C55E' }, 'Chiara'))
+    assert.equal(stijl!.blokKleur, 'een')
+    assert.equal(stijl!.eenKleur, '#22c55e')
+    assert.deepEqual(stijl!.typeNamen, { reel: 'Korte video' }, 'namen blijven')
+    await assert.rejects(stijlActie(a, 'k1', { actie: 'weergave', blokKleur: 'planning' }, null), (e: unknown) => e instanceof StijlFout)
+    await assert.rejects(stijlActie(a, 'k1', { actie: 'weergave' }, null), (e: unknown) => e instanceof StijlFout)
     ok++
   }
 

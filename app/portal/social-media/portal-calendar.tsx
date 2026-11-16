@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { Plus, X, Loader2 } from 'lucide-react'
 import { ContentCalendar, type SocialContentItem, type SocialContentStatus, type ContentActiviteit } from '@/components/calendar/content-calendar'
 import type { KalenderStijl } from '@/lib/content/kalender-stijl'
-import { KANAAL_SLUGS, kanaalLabel } from '@/lib/social-platforms'
+import { KanaalKeuze, TypeKeuze } from '@/components/calendar/kalender-keuzes'
 import type { KalenderRechten } from '@/lib/content/kalender-rol'
 import type { Status } from '@/lib/content/kalender-beheer'
 import { GoedkeuringOverzicht, type Goedkeuring } from '@/components/portal/goedkeuring-overzicht'
@@ -98,9 +98,12 @@ export function PortalCalendar({
     if (!r.ok) { toast.error(j.error || 'Bewaren mislukt'); throw new Error(j.error || 'Bewaren mislukt') }
     if (b.actie === 'label_maak') toast.success('Label toegevoegd.')
     if (b.actie === 'label_verwijder') toast.success('Label verwijderd.')
+    if (j.stijl) setStijlNu(j.stijl)
     return { stijl: j.stijl, labels: j.labels }
   }
-  const stijlBeheer = useMemo(() => ({ stijl, magBeheren: magStijl, actie: stijlActie }), [stijl, magStijl]) // eslint-disable-line react-hooks/exhaustive-deps
+  // De stijl zoals hij nu is (na elke aanpassing), ook voor het venster "Nieuw item".
+  const [stijlNu, setStijlNu] = useState<KalenderStijl>(stijl)
+  const stijlBeheer = useMemo(() => ({ stijl: stijlNu, magBeheren: magStijl, actie: stijlActie }), [stijlNu, magStijl]) // eslint-disable-line react-hooks/exhaustive-deps
   const handleDelete = async (id: string) => {
     const r = await fetch(`/api/portal/social-content/item?id=${id}`, { method: 'DELETE' })
     const j = await r.json().catch(() => ({}))
@@ -135,7 +138,7 @@ export function PortalCalendar({
         onLaadActiviteit: laadActiviteit,
       }}
     />
-    {nieuwOp && <NieuwItem datum={nieuwOp} startStatussen={rechten.startStatussen} onSluit={() => setNieuwOp(null)} onAangemaakt={(it) => { setItems((prev) => [...prev, it]); setNieuwOp(null) }} />}
+    {nieuwOp && <NieuwItem stijl={stijlNu} datum={nieuwOp} startStatussen={rechten.startStatussen} onSluit={() => setNieuwOp(null)} onAangemaakt={(it) => { setItems((prev) => [...prev, it]); setNieuwOp(null) }} />}
     </div>
   )
 }
@@ -152,7 +155,7 @@ const START_MELDING: Partial<Record<Status, string>> = {
 }
 
 /** Zelf een nieuw item aanmaken; de startstatus kan enkel wat de rol toelaat (de server controleert opnieuw). */
-function NieuwItem({ datum, startStatussen, onSluit, onAangemaakt }: { datum: string; startStatussen: Status[]; onSluit: () => void; onAangemaakt: (it: SocialContentItem) => void }) {
+function NieuwItem({ datum, startStatussen, onSluit, onAangemaakt, stijl }: { datum: string; startStatussen: Status[]; onSluit: () => void; onAangemaakt: (it: SocialContentItem) => void; stijl?: KalenderStijl }) {
   const [v, setV] = useState({ title: '', planned_date: datum, planned_time: '', content_type: 'post', platforms: ['meta'] as string[], caption: '', script: '', status: 'draft' as Status })
   const [bezig, setBezig] = useState(false)
   const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900'
@@ -178,10 +181,10 @@ function NieuwItem({ datum, startStatussen, onSluit, onAangemaakt }: { datum: st
           <div className="grid grid-cols-2 gap-3">
             <div><label className={lbl}>{startStatussen.includes('scheduled') ? 'Datum *' : 'Voorgestelde datum *'}</label><input type="date" className={inp} value={v.planned_date} onChange={(e) => setV({ ...v, planned_date: e.target.value })} /></div>
             <div><label className={lbl}>Tijdstip</label><input type="time" className={inp} value={v.planned_time} onChange={(e) => setV({ ...v, planned_time: e.target.value })} /></div>
-            <div className="col-span-2"><label className={lbl}>Type</label><select className={inp} value={v.content_type} onChange={(e) => setV({ ...v, content_type: e.target.value })}>{['post', 'reel', 'story', 'carousel'].map((t) => <option key={t} value={t}>{t}</option>)}</select></div>
+            <div className="col-span-2"><label className={lbl}>Type</label><TypeKeuze waarde={v.content_type} onKies={(t) => setV({ ...v, content_type: t })} stijl={stijl} /></div>
           </div>
           <div><label className={lbl}>Kanalen *</label>
-            <div className="flex flex-wrap gap-1.5">{KANAAL_SLUGS.map((k) => { const aan = v.platforms.includes(k); return <button key={k} type="button" aria-pressed={aan} onClick={() => setV({ ...v, platforms: aan ? v.platforms.filter((x) => x !== k) : [...v.platforms, k] })} className={`px-2.5 py-1 rounded-full text-xs font-medium border ${aan ? 'border-gray-900 bg-gray-100 text-black' : 'border-gray-200 text-gray-500'}`}>{kanaalLabel(k)}</button> })}</div>
+            <KanaalKeuze waarde={v.platforms} onWissel={(k) => setV({ ...v, platforms: v.platforms.includes(k) ? v.platforms.filter((x) => x !== k) : [...v.platforms, k] })} stijl={stijl} />
           </div>
           <div><label className={lbl}>Caption</label><textarea rows={3} className={inp} value={v.caption} onChange={(e) => setV({ ...v, caption: e.target.value })} /></div>
           <div><label className={lbl}>Script / hook / CTA</label><textarea rows={4} className={inp} value={v.script} onChange={(e) => setV({ ...v, script: e.target.value })} /></div>
