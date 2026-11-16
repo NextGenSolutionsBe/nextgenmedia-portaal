@@ -245,7 +245,7 @@ function VerifyForm() {
 
 export default function VerifyPage() {
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+    <div className="min-h-screen flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <Logo className="inline-flex h-14 w-14 rounded-2xl mb-4" />

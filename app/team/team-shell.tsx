@@ -33,7 +33,7 @@ export function TeamShell({ voornaam, portaal = false, children }: { voornaam: s
   const uitloggen = async () => { await createClient().auth.signOut(); router.replace('/login') }
 
   return (
-    <div className="min-h-dvh bg-gray-50 flex flex-col">
+    <div className="min-h-dvh flex flex-col">
       <header className="sticky top-0 z-30 bg-white border-b border-gray-100">
         <div className="max-w-2xl mx-auto flex items-center justify-between px-4 h-14">
           <div className="flex items-center gap-2"><Logo className="h-8 w-8" /><span className="font-semibold text-sm">Hoi {voornaam}</span></div>

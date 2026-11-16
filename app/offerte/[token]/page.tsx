@@ -51,7 +51,7 @@ export default async function OffertePagina({ params }: { params: { token: strin
 
   if (o.status === 'ingetrokken') {
     return (
-      <div className="min-h-screen bg-gray-50">{kop}
+      <div className="min-h-screen">{kop}
         <main className="max-w-xl mx-auto p-6"><div className="bg-white rounded-2xl border border-gray-200 p-8 text-center">
           <FileText className="h-8 w-8 text-gray-400 mx-auto mb-2" />
           <h1 className="text-lg font-semibold">Deze offerte is niet meer geldig.</h1>
@@ -62,7 +62,7 @@ export default async function OffertePagina({ params }: { params: { token: strin
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen">
       {kop}
       <main className="max-w-4xl mx-auto px-4 py-6 space-y-5">
         <section className="bg-white rounded-2xl border border-gray-200 p-5 sm:p-6">

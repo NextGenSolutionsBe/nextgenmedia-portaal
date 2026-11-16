@@ -35,7 +35,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const toonInstellingen = role === 'admin' || (!!persoon && moduleBeschikbaar(instellingen, persoon, MODULE_INSTELLINGEN_KEY) && magActie(instellingen, persoon, MODULE_INSTELLINGEN_KEY, 'instellingen'))
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex min-h-screen">
       <Toaster richColors position="top-right" />
       <AdminSidebar
         allowedModules={allowedModules}

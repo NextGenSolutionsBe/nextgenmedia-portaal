@@ -82,7 +82,7 @@ export default async function PortalLayout({ children }: { children: React.React
   const lang = await getLang()
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex min-h-screen">
       <PortalSidebar
         companyName={client?.company_name ?? 'Klantenportaal'}
         activeServices={activeServices}
