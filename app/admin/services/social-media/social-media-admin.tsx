@@ -12,23 +12,23 @@ import { SendMailButton } from '@/components/admin/send-mail-button'
 import { GoedkeuringDeadlines } from '@/components/admin/goedkeuring-deadlines'
 import { GoedkeuringAanvragen } from '@/components/admin/goedkeuring-aanvragen'
 import { ShootDocumentKnop } from '@/components/shoot-document-knop'
-import { KANAAL_SLUGS, kanaalLabel } from '@/lib/social-platforms'
+import { KanaalKeuze, TypeKeuze } from '@/components/calendar/kalender-keuzes'
 import { toast } from 'sonner'
 import { ROL_INFO, type KalenderRol } from '@/lib/content/kalender-rol'
 
 type Client = { id: string; company_name: string }
 
-// Eén bron voor de kanalen; Meta vervangt Instagram + Facebook.
-const PLATFORMS = KANAAL_SLUGS
-const TYPES = ['post', 'reel', 'story', 'carousel']
 
 function CreateDialog({
   clientId,
   defaultDate,
   onClose,
   onCreated,
+  stijl,
 }: {
   clientId: string
+  /** Eigen namen en kleuren van deze klantkalender. */
+  stijl?: KalenderStijl
   defaultDate?: string
   onClose: () => void
   onCreated: (item: SocialContentItem) => void
@@ -112,30 +112,18 @@ function CreateDialog({
             </div>
             <div>
               <label className={lbl}>Type</label>
-              <select className={inp} value={form.content_type} onChange={(e) => setForm((p) => ({ ...p, content_type: e.target.value }))}>
-                {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
             </div>
+          </div>
+          <div>
+            <label className={lbl}>Type</label>
+            <TypeKeuze waarde={form.content_type} onKies={(t) => setForm((p) => ({ ...p, content_type: t }))} stijl={stijl} />
           </div>
           <div>
             <label className={lbl}>
               Kanalen <span className="font-normal text-gray-400">(meerdere mogelijk)</span>
             </label>
-            <div className="flex flex-wrap gap-1.5 mt-1">
-              {PLATFORMS.map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => togglePlatform(p)}
-                  className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
-                    form.platforms.includes(p)
-                      ? 'border-gray-900 bg-gray-100 text-black'
-                      : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                  }`}
-                >
-                  {kanaalLabel(p)}
-                </button>
-              ))}
+            <div className="mt-1">
+              <KanaalKeuze waarde={form.platforms} onWissel={togglePlatform} stijl={stijl} />
             </div>
           </div>
           <div>
@@ -318,6 +306,7 @@ export function SocialMediaAdmin({
       if (b.actie === 'label_maak') toast.success('Label toegevoegd. De klant ziet het ook.')
       if (b.actie === 'label_verwijder') toast.success('Label verwijderd.')
       if (j.labels) setItems((prev) => prev.map((it) => (it.id === b.item ? { ...it, labels: j.labels } : it)))
+      if (j.stijl) setStijl(j.stijl)
       return { stijl: j.stijl, labels: j.labels }
     },
   }), [stijl, selectedClient])
@@ -579,6 +568,7 @@ export function SocialMediaAdmin({
       {createDialog.open && selectedClient && (
         <CreateDialog
           clientId={selectedClient}
+          stijl={stijl}
           defaultDate={createDialog.date}
           onClose={() => setCreateDialog({ open: false })}
           onCreated={(item) => {

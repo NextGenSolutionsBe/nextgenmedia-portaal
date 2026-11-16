@@ -7505,3 +7505,17 @@ alter table public.abm_bedrijven add column if not exists geen_interesse_door te
 -- ── Contentkalender: kleur per type (post, reel, story, carrousel) (16 nov 2026) ──
 -- Leeg = standaardkleur per type. Klant en team zien dezelfde kleuren.
 alter table public.content_kalender_stijl add column if not exists type_kleuren jsonb not null default '{}'::jsonb;
+
+-- ── Contentkalender: eigen namen en kleuren per type en kanaal, kleur van de vakjes (16 nov 2026) ──
+-- Leeg = standaardnaam/-kleur; blok_kleur null = Status (of Type als er typekleuren zijn).
+alter table public.content_kalender_stijl add column if not exists type_namen jsonb not null default '{}'::jsonb;
+alter table public.content_kalender_stijl add column if not exists kanaal_kleuren jsonb not null default '{}'::jsonb;
+alter table public.content_kalender_stijl add column if not exists kanaal_namen jsonb not null default '{}'::jsonb;
+alter table public.content_kalender_stijl add column if not exists blok_kleur text;
+alter table public.content_kalender_stijl add column if not exists een_kleur text;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'content_kalender_stijl_blok_kleur_check') THEN
+    ALTER TABLE public.content_kalender_stijl ADD CONSTRAINT content_kalender_stijl_blok_kleur_check
+      CHECK (blok_kleur IS NULL OR blok_kleur IN ('status','type','kanaal','label','een'));
+  END IF;
+END $$;

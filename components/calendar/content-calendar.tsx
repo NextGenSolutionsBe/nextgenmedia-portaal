@@ -7,14 +7,15 @@ import {
 } from 'lucide-react'
 import { ymd } from '@/lib/utils'
 import { planningkleur, nuInBrussel, PLANNING_STIJL, type Planningkleur } from '@/lib/content/planning-kleur'
-import { KANAAL_SLUGS, kanaalLabel, normaliseerKanalen, publicatieKanalen } from '@/lib/social-platforms'
+import { KANAAL_SLUGS, KANALEN, kanaalLabel, normaliseerKanalen, publicatieKanalen } from '@/lib/social-platforms'
 import { KanaalLabels } from './kanaal-labels'
 import {
   magBewerken, magVerwijderen, statusOvergangen, magBeoordelen, overgangLabel, type KalenderRechten,
 } from '@/lib/content/kalender-rol'
 import {
-  FASES, KLEUREN, TYPES, leegStijl, meng, tekstOp, tinten, typeKleur, typeLabel,
-  type ContentLabel, type FaseKey, type FaseKleuren, type KalenderStijl, type TypeKey, type TypeKleuren,
+  BLOK_KLEUREN, FASES, KANAAL_STANDAARD, KLEUREN, TYPES, blokKleurHex, kanaalKleur, kanaalNaam, leegStijl, meng, standaardBlokKleur,
+  tekstOp, tinten, typeKleur, typeNaam,
+  type BlokKleur, type ContentLabel, type FaseKey, type FaseKleuren, type KalenderStijl, type TypeKey,
 } from '@/lib/content/kalender-stijl'
 
 export type SocialContentStatus =
@@ -76,18 +77,16 @@ function faseStip(s: SocialContentStatus, kleuren: FaseKleuren): { className: st
   const k = kleuren[s as FaseKey]
   return k ? { className: '', style: { backgroundColor: k } } : { className: STATUS_STYLE[s].dot }
 }
-/** Het blokje in de kleur van zijn soort (post, reel …): duidelijk gekleurd, volle kleur links, donkere tekst. */
-function typeBlok(type: string, kleuren: TypeKleuren): React.CSSProperties {
-  const k = typeKleur(type, kleuren)
+/** Een vakje in een eigen kleur (type, kanaal, label of één kleur): duidelijk gekleurd, volle kleur links, donkere tekst. */
+function kleurBlok(k: string): React.CSSProperties {
   const rand = meng(k, 0.45)
   // Elke zijde apart: React mengt geen borderColor met borderLeftColor.
   return { backgroundColor: meng(k, 0.76), color: meng(k, -0.62), borderTopColor: rand, borderRightColor: rand, borderBottomColor: rand, borderLeftColor: k, borderLeftWidth: 3 }
 }
 
-type KleurOp = 'status' | 'planning' | 'type'
-const KLEUR_OP: { key: KleurOp; label: string }[] = [
-  { key: 'status', label: 'Status' }, { key: 'planning', label: 'Planning' }, { key: 'type', label: 'Type' },
-]
+/** Waarop de vakjes kleuren: de keuze van de kalender, of "Planning" (enkel voor jou, in deze browser). */
+type KleurOp = BlokKleur | 'planning'
+type PersTab = 'vakjes' | 'labels' | 'types' | 'kanalen' | 'fases'
 
 /** Een label als klein gekleurd pilletje. */
 function LabelPil({ label, klein = false }: { label: ContentLabel; klein?: boolean }) {
@@ -165,6 +164,8 @@ export function ContentCalendar({
   const [labelsVan, setLabelsVan] = useState<Record<string, string[]>>({})
   const [filter, setFilter] = useState<string[]>([])
   const [personaliseer, setPersonaliseer] = useState(false)
+  const [persTab, setPersTab] = useState<PersTab>('vakjes')
+  const openPers = (tab: PersTab) => { setPersTab(tab); setPersonaliseer(true) }
   const magStijl = !!stijlBeheer?.magBeheren
   const labelMap = useMemo(() => new Map(stijl.labels.map((l) => [l.id, l])), [stijl.labels])
   const labelIds = useCallback((it: SocialContentItem) => (labelsVan[it.id] ?? it.labels ?? []).filter((id) => labelMap.has(id)), [labelsVan, labelMap])
@@ -186,12 +187,22 @@ export function ContentCalendar({
   const [view, setView] = useState<'month' | 'week'>('month')
   // Gsm: de cellen zijn te smal voor titels; de gekozen dag staat daar als lijst onder de kalender.
   const [dag, setDag] = useState<string | null>(() => ymd(new Date()))
-  // Kleuren op status, op planning (oranje geplaatst · groen ingepland · wit nog niets) of op type (post, reel …).
-  // Onthouden per browser. Nog niets gekozen: Type als deze kalender eigen typekleuren heeft, anders Status.
-  const [gekozenKleur, setGekozenKleur] = useState<KleurOp | null>(null)
-  useEffect(() => { try { const v = localStorage.getItem('ngm-kalender-kleur'); if (v === 'planning' || v === 'status' || v === 'type') setGekozenKleur(v) } catch { /* geen opslag */ } }, [])
-  const kleurOp: KleurOp = gekozenKleur ?? (Object.keys(stijl.typeKleuren ?? {}).length ? 'type' : 'status')
-  const kiesKleur = (v: KleurOp) => { setGekozenKleur(v); try { localStorage.setItem('ngm-kalender-kleur', v) } catch { /* geen opslag */ } }
+  // Waarop de vakjes kleuren (status, type, kanaal, label, één kleur) is een keuze van de kalender: klant en team
+  // zien hetzelfde, wie mag personaliseren kiest. "Planning" (oranje geplaatst · groen ingepland · wit nog niets)
+  // is een werkweergave die enkel deze browser onthoudt. Wie niet mag personaliseren, wisselt enkel voor zichzelf.
+  const [planningLokaal, setPlanningLokaal] = useState(false)
+  const [voorMij, setVoorMij] = useState<BlokKleur | null>(null)
+  useEffect(() => { try { if (localStorage.getItem('ngm-kalender-kleur') === 'planning') setPlanningLokaal(true) } catch { /* geen opslag */ } }, [])
+  const kleurOp: KleurOp = planningLokaal ? 'planning' : voorMij ?? standaardBlokKleur(stijl)
+  const kiesKleur = async (v: KleurOp) => {
+    if (v === 'planning') { setPlanningLokaal(true); try { localStorage.setItem('ngm-kalender-kleur', 'planning') } catch { /* geen opslag */ } return }
+    setPlanningLokaal(false); try { localStorage.removeItem('ngm-kalender-kleur') } catch { /* geen opslag */ }
+    if (!magStijl || !stijlBeheer) { setVoorMij(v); return }
+    const vorige = stijl
+    setVoorMij(null)
+    setStijl({ ...stijl, blokKleur: v })
+    try { const u = await stijlBeheer.actie({ actie: 'weergave', blokKleur: v }); if (u.stijl) setStijl(u.stijl) } catch { setStijl(vorige) }
+  }
   const nu = useMemo(() => nuInBrussel(), [])
   const selectMode = !!selection?.enabled
 
@@ -259,14 +270,16 @@ export function ContentCalendar({
     const style = STATUS_STYLE[it.status]
     const plan: Planningkleur = planningkleur(it, nu)
     const fase = faseBadge(it.status, stijl.faseKleuren)
-    const badge = kleurOp === 'planning' ? PLANNING_STIJL[plan].badge : kleurOp === 'type' ? '' : fase.className
-    const blokStijl = kleurOp === 'planning' ? undefined : kleurOp === 'type' ? typeBlok(it.content_type, stijl.typeKleuren ?? {}) : fase.style
+    // Status: de fasekleur · Planning: de planningkleur · anders de eigen kleur (type, kanaal, label, één kleur); geen kleur = wit.
+    const eigenKleur = kleurOp === 'status' || kleurOp === 'planning' ? null : blokKleurHex({ ...it, labels: labelIds(it) }, stijl, kleurOp)
+    const badge = kleurOp === 'planning' ? PLANNING_STIJL[plan].badge : kleurOp === 'status' ? fase.className : eigenKleur ? '' : 'bg-white border-gray-200 text-gray-700'
+    const blokStijl = kleurOp === 'planning' ? undefined : kleurOp === 'status' ? fase.style : eigenKleur ? kleurBlok(eigenKleur) : undefined
     const stip = faseStip(it.status, stijl.faseKleuren)
     const lbls = labelIds(it).map((id) => labelMap.get(id)!)
     const isChecked = selection?.selectedIds.has(it.id) ?? false
-    // Adminkalender: op welke platformen dit item verschijnt, als kleine labels.
-    const kanalen = mode === 'admin' ? (it.platforms?.length ? it.platforms : [it.platform]) : null
-    const kanaalTekst = kanalen ? publicatieKanalen(kanalen).map((k) => k.label).join(', ') : ''
+    // Op welke kanalen dit item verschijnt, als kleine labels (met de eigen namen en kleuren van de kalender).
+    const kanalen = it.platforms?.length ? it.platforms : [it.platform]
+    const kanaalTekst = publicatieKanalen(kanalen).map((k) => kanaalNaam(k.slug, stijl)).filter((x, i, a) => a.indexOf(x) === i).join(', ')
     return (
       <button
         key={it.id}
@@ -286,7 +299,7 @@ export function ContentCalendar({
         className={`text-left ${lijst ? 'text-sm px-2.5 py-2' : 'text-[11px] px-1.5 py-1'} rounded border ${badge}
           hover:opacity-80 transition flex flex-col gap-0.5 w-full min-w-0
           ${isChecked ? 'ring-2 ring-red-400 bg-red-50' : ''}`}
-        title={[it.title, kleurOp === 'planning' ? `${PLANNING_STIJL[plan].label} · ${style.label}` : kleurOp === 'type' ? `${typeLabel(it.content_type)} · ${style.label}` : null, kanaalTekst || null, lbls.length ? lbls.map((l) => l.naam).join(', ') : null].filter(Boolean).join(' · ')}
+        title={[it.title, kleurOp === 'planning' ? PLANNING_STIJL[plan].label : null, typeNaam(it.content_type, stijl), style.label, kanaalTekst || null, lbls.length ? lbls.map((l) => l.naam).join(', ') : null].filter(Boolean).join(' · ')}
       >
         <span className="flex items-center gap-1 w-full min-w-0">
         {selectMode && (
@@ -306,7 +319,7 @@ export function ContentCalendar({
             {!lijst && lbls.length > 2 && <span className="text-[9px] leading-tight opacity-70">+{lbls.length - 2}</span>}
           </span>
         )}
-        {kanalen && <KanaalLabels platforms={kanalen} compact />}
+        <KanaalLabels platforms={kanalen} compact stijl={stijl} />
       </button>
     )
   }
@@ -342,14 +355,19 @@ export function ContentCalendar({
             <span className="ml-2 font-semibold text-sm whitespace-nowrap">{title.charAt(0).toUpperCase() + title.slice(1)}</span>
           </div>
           <div className="flex items-center gap-1 flex-wrap sm:justify-end">
-            <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden mr-1" role="group" aria-label="Kleuren op">
-              <span className="text-[11px] text-gray-500 px-2 self-center hidden sm:inline">Kleur</span>
-              {KLEUR_OP.map((k) => (
-                <button key={k.key} type="button" onClick={() => kiesKleur(k.key)} aria-pressed={kleurOp === k.key}
-                  title={k.key === 'type' ? 'Elk blokje in de kleur van zijn soort: post, reel, story, carrousel' : undefined}
-                  className={`text-xs px-2.5 py-1.5 border-l border-gray-200 ${kleurOp === k.key ? 'bg-black text-white' : 'hover:bg-gray-50'}`}>{k.label}</button>
-              ))}
-            </div>
+            {/* Waarop de vakjes kleuren. Bewaard voor deze kalender (wie mag personaliseren); Planning enkel voor jou. */}
+            <label className="inline-flex items-center gap-1.5 mr-1" title={magStijl ? 'Geldt voor deze kalender: klant en team zien dezelfde kleuren.' : 'Enkel voor jou, tot je de pagina herlaadt.'}>
+              <span className="text-[11px] text-gray-500 hidden sm:inline">Kleur vakjes</span>
+              <select value={kleurOp} onChange={(e) => void kiesKleur(e.target.value as KleurOp)} aria-label="Kleur van de vakjes"
+                className="text-xs rounded-full border border-gray-200 bg-white pl-3 pr-7 py-1.5 w-32 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900/15">
+                {BLOK_KLEUREN.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
+                <option value="planning">Planning (voor jou)</option>
+              </select>
+              {kleurOp === 'een' && (
+                <button type="button" disabled={!magStijl} onClick={() => openPers('vakjes')} aria-label="Kleur kiezen"
+                  className="h-6 w-6 rounded-full border border-black/10 disabled:cursor-default" style={{ backgroundColor: blokKleurHex({ content_type: 'post' }, stijl, 'een') ?? undefined }} />
+              )}
+            </label>
             <button
               onClick={() => setView('month')}
               className={`text-xs px-3 py-1.5 rounded-lg border ${view === 'month' ? 'bg-black text-white border-black' : 'border-gray-200 hover:bg-gray-50'}`}
@@ -386,10 +404,10 @@ export function ContentCalendar({
                 )}
               </>
             ) : (
-              <span className="text-[11px] text-gray-500">Maak eigen labels voor deze kalender en kies een kleur per fase of per type.</span>
+              <span className="text-[11px] text-gray-500">Personaliseer deze kalender: eigen labels, en een naam en kleur per type, kanaal en fase.</span>
             )}
             {magStijl && (
-              <button type="button" onClick={() => setPersonaliseer((v) => !v)} aria-expanded={personaliseer}
+              <button type="button" onClick={() => (personaliseer ? setPersonaliseer(false) : openPers(stijl.labels.length ? 'vakjes' : 'labels'))} aria-expanded={personaliseer}
                 className={`ml-auto inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border ${personaliseer ? 'bg-black text-white border-black' : 'border-gray-200 hover:bg-gray-50'}`}>
                 <Palette className="h-3.5 w-3.5" />Labels en kleuren
               </button>
@@ -397,7 +415,7 @@ export function ContentCalendar({
           </div>
         )}
         {stijlBeheer && magStijl && personaliseer && (
-          <Personaliseren stijl={stijl} actie={stijlBeheer.actie} onStijl={setStijl} onSluit={() => setPersonaliseer(false)} onTypeKleur={() => kiesKleur('type')} />
+          <Personaliseren stijl={stijl} actie={stijlBeheer.actie} onStijl={setStijl} onSluit={() => setPersonaliseer(false)} tab={persTab} onTab={setPersTab} />
         )}
 
         {/* Weekdays header */}
@@ -451,9 +469,10 @@ export function ContentCalendar({
                 {dayItems.length > 0 && (
                   <div className="flex flex-wrap gap-0.5 px-0.5 sm:hidden" aria-hidden>
                     {dayItems.slice(0, 6).map((it) => {
+                      const eigen = kleurOp === 'planning' || kleurOp === 'status' ? null : blokKleurHex({ ...it, labels: labelIds(it) }, stijl, kleurOp)
                       const st = kleurOp === 'planning' ? { className: PLANNING_STIJL[planningkleur(it, nu)].dot }
-                        : kleurOp === 'type' ? { className: '', style: { backgroundColor: typeKleur(it.content_type, stijl.typeKleuren ?? {}) } }
-                        : faseStip(it.status, stijl.faseKleuren)
+                        : kleurOp === 'status' ? faseStip(it.status, stijl.faseKleuren)
+                        : eigen ? { className: '', style: { backgroundColor: eigen } } : { className: 'bg-gray-300' }
                       return <span key={it.id} className={`h-1.5 w-1.5 rounded-full ${st.className}`} style={st.style} />
                     })}
                     {dayItems.length > 6 && <span className="text-[9px] leading-none text-gray-400">+{dayItems.length - 6}</span>}
@@ -501,20 +520,21 @@ export function ContentCalendar({
               ))}
               <span className="text-[11px] text-gray-400">· het bolletje blijft de status tonen</span>
             </>
-          ) : kleurOp === 'type' ? (
+          ) : kleurOp !== 'status' ? (
             <>
-              {TYPES.map((t) => {
-                const b = typeBlok(t.key, stijl.typeKleuren ?? {})
-                return (
-                  <span key={t.key} className="flex items-center gap-1.5 text-[11px] text-gray-600">
-                    <span className="h-3 w-5 rounded border" style={b} />
-                    {t.label}
-                  </span>
-                )
-              })}
+              {(kleurOp === 'type' ? TYPES.map((t) => ({ k: t.key, naam: typeNaam(t.key, stijl), kleur: typeKleur(t.key, stijl.typeKleuren) }))
+                : kleurOp === 'kanaal' ? KANALEN.map((c) => ({ k: c.slug, naam: kanaalNaam(c.slug, stijl), kleur: kanaalKleur(c.slug, stijl) }))
+                : kleurOp === 'label' ? [...stijl.labels.map((l) => ({ k: l.id, naam: l.naam, kleur: l.kleur as string | null })), { k: '-', naam: 'Zonder label', kleur: null }]
+                : [{ k: 'een', naam: 'Alle vakjes', kleur: blokKleurHex({ content_type: 'post' }, stijl, 'een') }]
+              ).map((x) => (
+                <span key={x.k} className="flex items-center gap-1.5 text-[11px] text-gray-600">
+                  <span className={`h-3 w-5 rounded border ${x.kleur ? '' : 'bg-white border-gray-200'}`} style={x.kleur ? kleurBlok(x.kleur) : undefined} />
+                  {x.naam}
+                </span>
+              ))}
               <span className="text-[11px] text-gray-400">· het bolletje blijft de status tonen</span>
               {magStijl && (
-                <button type="button" onClick={() => setPersonaliseer(true)} className="text-[11px] text-gray-500 underline underline-offset-2">Kleuren aanpassen</button>
+                <button type="button" onClick={() => openPers(kleurOp === 'type' ? 'types' : kleurOp === 'kanaal' ? 'kanalen' : kleurOp === 'label' ? 'labels' : 'vakjes')} className="text-[11px] text-gray-500 underline underline-offset-2">Kleuren aanpassen</button>
               )}
             </>
           ) : (Object.entries(STATUS_STYLE) as [SocialContentStatus, typeof STATUS_STYLE[SocialContentStatus]][]).map(([s, v]) => {
@@ -682,14 +702,9 @@ function ScriptPanel({
             <h3 className="font-semibold text-gray-900 leading-snug">{f.title}</h3>
           )}
           <div className="text-xs text-gray-400 mt-1 flex items-center gap-1 flex-wrap">
-            {/* Admin: dezelfde platformlabels als in de kalender (Meta = Instagram + Facebook).
-                Portaal: oude items op 'instagram'/'facebook' tonen als één Meta-badge. */}
-            {mode === 'admin'
-              ? <KanaalLabels platforms={f.platforms?.length > 0 ? f.platforms : [f.platform]} />
-              : normaliseerKanalen(f.platforms?.length > 0 ? f.platforms : [f.platform]).map((p) => (
-                <span key={p} className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-[10px]">{kanaalLabel(p)}</span>
-              ))}
-            <span>· {typeLabel(f.content_type)}</span>
+            {/* Dezelfde kanaallabels als in de kalender (Meta = Instagram + Facebook), met de eigen namen en kleuren. */}
+            <KanaalLabels platforms={f.platforms?.length > 0 ? f.platforms : [f.platform]} stijl={stijl} />
+            <span className="inline-flex items-center gap-1">· <span className="h-2 w-2 rounded-full" style={{ backgroundColor: typeKleur(f.content_type, stijl.typeKleuren) }} />{typeNaam(f.content_type, stijl)}</span>
           </div>
         </div>
         <button onClick={onClose} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400 shrink-0">
@@ -743,7 +758,7 @@ function ScriptPanel({
                 <span className="block text-[10px] text-gray-500 mb-1">Type</span>
                 <select className={inp} value={f.content_type} onChange={(e) => setForm({ ...f, content_type: e.target.value })}>
                   {TYPES.map((t) => (
-                    <option key={t.key} value={t.key}>{t.label}</option>
+                    <option key={t.key} value={t.key}>{typeNaam(t.key, stijl)}</option>
                   ))}
                 </select>
               </label>
@@ -768,7 +783,7 @@ function ScriptPanel({
                           : 'border-gray-200 text-gray-500 hover:border-gray-300'
                       }`}
                     >
-                      {kanaalLabel(p)}
+                      <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: kanaalKleur(p, stijl) }} />{kanaalNaam(p, stijl)}</span>
                     </button>
                   )
                 })}
@@ -813,7 +828,7 @@ function ScriptPanel({
         {item.status === 'published' && (item.published_at || item.published_url || item.published_platform) && (
           <div className="rounded-lg border border-purple-200 bg-purple-50 p-2.5 text-sm text-purple-900">
             <div className="text-[10px] mb-0.5">Gepubliceerd</div>
-            {item.published_at && <div>{new Date(item.published_at).toLocaleDateString('nl-BE', { timeZone: 'Europe/Brussels' })}{item.published_platform ? ` · ${kanaalLabel(item.published_platform)}` : ''}</div>}
+            {item.published_at && <div>{new Date(item.published_at).toLocaleDateString('nl-BE', { timeZone: 'Europe/Brussels' })}{item.published_platform ? ` · ${kanaalNaam(item.published_platform, stijl)}` : ''}</div>}
             {item.published_url && <a href={item.published_url} target="_blank" rel="noopener noreferrer" className="underline break-all">{item.published_url}</a>}
           </div>
         )}
@@ -1041,7 +1056,7 @@ function ScriptPanel({
                     <p className="text-[11px] text-gray-500">Enkel de status in de kalender — er wordt niets op sociale media geplaatst.</p>
                     <div className="grid grid-cols-2 gap-2">
                       <label><span className="block text-[10px] text-gray-500 mb-1">Publicatiedatum</span><input type="date" className={inp} max={new Date().toISOString().slice(0, 10)} value={publiceer.datum} onChange={(e) => setPubliceer({ ...publiceer, datum: e.target.value })} /></label>
-                      <label><span className="block text-[10px] text-gray-500 mb-1">Kanaal</span><select className={inp} value={publiceer.kanaal} onChange={(e) => setPubliceer({ ...publiceer, kanaal: e.target.value })}>{normaliseerKanalen(item.platforms?.length ? item.platforms : [item.platform]).map((k) => <option key={k} value={k}>{kanaalLabel(k)}</option>)}</select></label>
+                      <label><span className="block text-[10px] text-gray-500 mb-1">Kanaal</span><select className={inp} value={publiceer.kanaal} onChange={(e) => setPubliceer({ ...publiceer, kanaal: e.target.value })}>{normaliseerKanalen(item.platforms?.length ? item.platforms : [item.platform]).map((k) => <option key={k} value={k}>{kanaalNaam(k, stijl)}</option>)}</select></label>
                     </div>
                     <label className="block"><span className="block text-[10px] text-gray-500 mb-1">Link naar de post <span className="normal-case text-gray-400">(optioneel)</span></span><input type="url" className={inp} value={publiceer.link} onChange={(e) => setPubliceer({ ...publiceer, link: e.target.value })} placeholder="https://" /></label>
                     <div className="flex gap-2">
@@ -1076,26 +1091,37 @@ function ScriptPanel({
   )
 }
 
-/** Eigen labels, een kleur per type en een kleur per fase. Enkel voor deze kalender; klant en team zien hetzelfde. */
+/**
+ * De kalender personaliseren, per klant (klant en team zien hetzelfde):
+ * waarop de vakjes kleuren, eigen labels, en een naam en kleur per type,
+ * kanaal en fase. Elke wijziging is meteen bewaard.
+ */
 function Personaliseren({
-  stijl, actie, onStijl, onSluit, onTypeKleur,
+  stijl, actie, onStijl, onSluit, tab, onTab,
 }: {
   stijl: KalenderStijl
   actie: KalenderStijlBeheer['actie']
   onStijl: (s: KalenderStijl) => void
   onSluit: () => void
-  /** Een typekleur gekozen: de kalender toont meteen de kleuren per type. */
-  onTypeKleur?: () => void
+  tab: PersTab
+  onTab: (t: PersTab) => void
 }) {
   const [naam, setNaam] = useState('')
   const [kleur, setKleur] = useState(KLEUREN[7])
   const [bewerk, setBewerk] = useState<ContentLabel | null>(null)
   const [bezig, setBezig] = useState(false)
   const inp = 'w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900'
+  const blok = standaardBlokKleur(stijl)
 
   const doe = async (b: Record<string, unknown>): Promise<boolean> => {
     setBezig(true)
     try { const u = await actie(b); if (u.stijl) onStijl(u.stijl); return true } catch { return false } finally { setBezig(false) }
+  }
+  /** Meteen tonen, bewaren, en terugzetten als het niet lukt. */
+  const weergave = async (deel: Partial<KalenderStijl>, b: Record<string, unknown>) => {
+    const vorige = stijl
+    onStijl({ ...stijl, ...deel })
+    if (!(await doe({ actie: 'weergave', ...b }))) onStijl(vorige)
   }
   const voegToe = async () => {
     if (!naam.trim()) return
@@ -1108,101 +1134,183 @@ function Personaliseren({
     onStijl({ ...stijl, faseKleuren: kleuren })
     if (!(await doe({ actie: 'kleuren', kleuren }))) onStijl(vorige)
   }
-  const zetTypeKleur = async (type: TypeKey, k: string | null) => {
-    const vorige = stijl
-    const kleuren: TypeKleuren = { ...(stijl.typeKleuren ?? {}) }
-    if (k) kleuren[type] = k; else delete kleuren[type]
-    onStijl({ ...stijl, typeKleuren: kleuren })
-    onTypeKleur?.()
-    if (!(await doe({ actie: 'type_kleuren', kleuren }))) onStijl(vorige)
+  const zet = <T extends Record<string, string | undefined>>(map: T, k: string, v: string | null): T => {
+    const n = { ...map } as Record<string, string | undefined>
+    if (v) n[k] = v; else delete n[k]
+    return n as T
   }
+  const typeKleurZet = (t: TypeKey, k: string | null) => { const m = zet(stijl.typeKleuren, t, k); void weergave({ typeKleuren: m }, { typeKleuren: m }) }
+  const typeNaamZet = (t: TypeKey, n: string | null) => { const m = zet(stijl.typeNamen, t, n); void weergave({ typeNamen: m }, { typeNamen: m }) }
+  const kanaalKleurZet = (c: string, k: string | null) => { const m = zet(stijl.kanaalKleuren, c, k); void weergave({ kanaalKleuren: m }, { kanaalKleuren: m }) }
+  const kanaalNaamZet = (c: string, n: string | null) => { const m = zet(stijl.kanaalNamen, c, n); void weergave({ kanaalNamen: m }, { kanaalNamen: m }) }
+  const kiesBlok = (b: BlokKleur) => void weergave({ blokKleur: b }, { blokKleur: b })
+
+  /** "Zet de vakjes op …" als de kalender nu op iets anders kleurt. */
+  const NaarBlok = ({ op, tekst }: { op: BlokKleur; tekst: string }) => blok === op ? null : (
+    <button type="button" disabled={bezig} onClick={() => kiesBlok(op)} className="text-[11px] text-gray-600 underline underline-offset-2 hover:text-gray-900">{tekst}</button>
+  )
+
+  const TABS: { key: PersTab; label: string }[] = [
+    { key: 'vakjes', label: 'Kleur vakjes' }, { key: 'labels', label: 'Labels' }, { key: 'types', label: 'Types' },
+    { key: 'kanalen', label: 'Kanalen' }, { key: 'fases', label: 'Fases' },
+  ]
 
   return (
-    <div className="border-b border-gray-100 bg-gray-50/60 px-3 sm:px-4 py-4 grid gap-5 md:grid-cols-2">
-      <section className="space-y-2.5">
-        <div>
-          <h3 className="text-sm font-semibold">Eigen labels</h3>
-          <p className="text-xs text-gray-500">Enkel voor deze kalender, bijvoorbeeld “Nieuwbouwproject” of “Renovatiepand”. Een label verandert niets aan de post zelf.</p>
+    <div className="border-b border-gray-100 bg-gray-50/60 px-3 sm:px-4 py-4 space-y-4">
+      <div className="flex items-center gap-2">
+        <div className="flex flex-wrap gap-1 flex-1" role="tablist" aria-label="Personaliseren">
+          {TABS.map((t) => (
+            <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} onClick={() => onTab(t.key)}
+              className={`text-xs px-3 py-1.5 rounded-full border ${tab === t.key ? 'bg-black text-white border-black' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'}`}>{t.label}</button>
+          ))}
         </div>
-        {stijl.labels.length > 0 && (
-          <ul className="space-y-1">
-            {stijl.labels.map((l) => bewerk?.id === l.id ? (
-              <li key={l.id} className="rounded-lg border border-gray-200 bg-white p-2 space-y-2">
-                <input className={inp} value={bewerk.naam} maxLength={40} onChange={(e) => setBewerk({ ...bewerk, naam: e.target.value })} aria-label="Naam van het label"
-                  onKeyDown={async (e) => { if (e.key === 'Enter') { e.preventDefault(); if (await doe({ actie: 'label_wijzig', id: l.id, naam: bewerk.naam, kleur: bewerk.kleur })) setBewerk(null) } }} />
-                <KleurKiezer waarde={bewerk.kleur} onKies={(k) => setBewerk({ ...bewerk, kleur: k })} />
-                <div className="flex gap-2">
-                  <button type="button" disabled={bezig || !bewerk.naam.trim()} onClick={async () => { if (await doe({ actie: 'label_wijzig', id: l.id, naam: bewerk.naam, kleur: bewerk.kleur })) setBewerk(null) }} className="btn-primary text-xs flex-1">Bewaren</button>
-                  <button type="button" onClick={() => setBewerk(null)} className="btn-secondary text-xs">Annuleer</button>
-                </div>
-              </li>
-            ) : (
-              <li key={l.id} className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-2 py-1.5">
-                <LabelPil label={l} />
-                <span className="flex-1" />
-                <button type="button" onClick={() => setBewerk(l)} aria-label={`${l.naam} aanpassen`} className="h-6 w-6 flex items-center justify-center rounded hover:bg-gray-100 text-gray-500"><Pencil className="h-3.5 w-3.5" /></button>
-                <button type="button" disabled={bezig} aria-label={`${l.naam} verwijderen`}
-                  onClick={() => { if (confirm(`Label “${l.naam}” verwijderen? Het verdwijnt ook van de posts waar het op staat. De posts zelf blijven.`)) void doe({ actie: 'label_verwijder', id: l.id }) }}
-                  className="h-6 w-6 flex items-center justify-center rounded hover:bg-red-50 text-gray-500 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
-              </li>
+        <button type="button" onClick={onSluit} aria-label="Sluiten" className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400 shrink-0"><X className="h-4 w-4" /></button>
+      </div>
+
+      {tab === 'vakjes' && (
+        <section className="space-y-2.5">
+          <p className="text-xs text-gray-500">Waarop krijgen de vakjes in de kalender hun kleur? Geldt voor deze kalender: klant en team zien hetzelfde. Het bolletje in elk vakje blijft de status tonen.</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {BLOK_KLEUREN.map((b) => (
+              <button key={b.key} type="button" disabled={bezig} onClick={() => kiesBlok(b.key)} aria-pressed={blok === b.key}
+                className={`text-left rounded-lg border bg-white px-3 py-2 ${blok === b.key ? 'border-gray-900 ring-1 ring-gray-900' : 'border-gray-200 hover:border-gray-300'}`}>
+                <div className="text-sm font-medium">{b.label}</div>
+                <div className="text-[11px] text-gray-500">{b.uitleg}</div>
+              </button>
+            ))}
+          </div>
+          {blok === 'een' && (
+            <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+              <div className="text-xs font-medium mb-1.5">Kleur van alle vakjes</div>
+              <KleurKiezer waarde={stijl.eenKleur ?? '#3b82f6'} onKies={(k) => void weergave({ eenKleur: k }, { eenKleur: k })} />
+            </div>
+          )}
+        </section>
+      )}
+
+      {tab === 'labels' && (
+        <section className="space-y-2.5 max-w-xl">
+          <div className="flex items-start gap-2 flex-wrap">
+            <p className="text-xs text-gray-500 flex-1 min-w-[200px]">Eigen labels voor deze kalender, bijvoorbeeld “Nieuwbouwproject” of “Renovatiepand”. Een label verandert niets aan de post zelf. Je zet ze op een post in het detailvenster en filtert erop boven de kalender.</p>
+            <NaarBlok op="label" tekst="Vakjes kleuren op label" />
+          </div>
+          {stijl.labels.length > 0 && (
+            <ul className="space-y-1">
+              {stijl.labels.map((l) => bewerk?.id === l.id ? (
+                <li key={l.id} className="rounded-lg border border-gray-200 bg-white p-2 space-y-2">
+                  <input className={inp} value={bewerk.naam} maxLength={40} onChange={(e) => setBewerk({ ...bewerk, naam: e.target.value })} aria-label="Naam van het label"
+                    onKeyDown={async (e) => { if (e.key === 'Enter') { e.preventDefault(); if (await doe({ actie: 'label_wijzig', id: l.id, naam: bewerk.naam, kleur: bewerk.kleur })) setBewerk(null) } }} />
+                  <KleurKiezer waarde={bewerk.kleur} onKies={(k) => setBewerk({ ...bewerk, kleur: k })} />
+                  <div className="flex gap-2">
+                    <button type="button" disabled={bezig || !bewerk.naam.trim()} onClick={async () => { if (await doe({ actie: 'label_wijzig', id: l.id, naam: bewerk.naam, kleur: bewerk.kleur })) setBewerk(null) }} className="btn-primary text-xs flex-1">Bewaren</button>
+                    <button type="button" onClick={() => setBewerk(null)} className="btn-secondary text-xs">Annuleer</button>
+                  </div>
+                </li>
+              ) : (
+                <li key={l.id} className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-2 py-1.5">
+                  <LabelPil label={l} />
+                  <span className="flex-1" />
+                  <button type="button" onClick={() => setBewerk(l)} aria-label={`${l.naam} aanpassen`} className="h-6 w-6 flex items-center justify-center rounded hover:bg-gray-100 text-gray-500"><Pencil className="h-3.5 w-3.5" /></button>
+                  <button type="button" disabled={bezig} aria-label={`${l.naam} verwijderen`}
+                    onClick={() => { if (confirm(`Label “${l.naam}” verwijderen? Het verdwijnt ook van de posts waar het op staat. De posts zelf blijven.`)) void doe({ actie: 'label_verwijder', id: l.id }) }}
+                    className="h-6 w-6 flex items-center justify-center rounded hover:bg-red-50 text-gray-500 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="rounded-lg border border-dashed border-gray-300 bg-white p-2 space-y-2">
+            <div className="flex gap-2">
+              <input className={inp} value={naam} maxLength={40} onChange={(e) => setNaam(e.target.value)} placeholder="Nieuw label" aria-label="Nieuw label"
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void voegToe() } }} />
+              <button type="button" disabled={bezig || !naam.trim()} onClick={voegToe} className="btn-primary text-xs shrink-0"><Plus className="h-3.5 w-3.5" />Toevoegen</button>
+            </div>
+            <KleurKiezer waarde={kleur} onKies={setKleur} />
+          </div>
+        </section>
+      )}
+
+      {tab === 'types' && (
+        <section className="space-y-2.5">
+          <div className="flex items-start gap-2 flex-wrap">
+            <p className="text-xs text-gray-500 flex-1 min-w-[200px]">Een eigen naam en kleur voor elk type. De naam zie je overal: in de kalender, bij het inplannen en in het detail.</p>
+            <NaarBlok op="type" tekst="Vakjes kleuren op type" />
+          </div>
+          <ul className="grid gap-2 md:grid-cols-2">
+            {TYPES.map((t) => (
+              <OptieRij key={t.key} standaardNaam={t.label} naam={stijl.typeNamen[t.key] ?? null} kleur={stijl.typeKleuren[t.key] ?? null} standaardKleur={t.standaard} bezig={bezig}
+                onNaam={(n) => typeNaamZet(t.key, n)} onKleur={(k) => typeKleurZet(t.key, k)} />
             ))}
           </ul>
-        )}
-        <div className="rounded-lg border border-dashed border-gray-300 bg-white p-2 space-y-2">
-          <div className="flex gap-2">
-            <input className={inp} value={naam} maxLength={40} onChange={(e) => setNaam(e.target.value)} placeholder="Nieuw label" aria-label="Nieuw label"
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void voegToe() } }} />
-            <button type="button" disabled={bezig || !naam.trim()} onClick={voegToe} className="btn-primary text-xs shrink-0"><Plus className="h-3.5 w-3.5" />Toevoegen</button>
-          </div>
-          <KleurKiezer waarde={kleur} onKies={setKleur} />
-        </div>
+        </section>
+      )}
 
-        <div className="pt-3">
-          <h3 className="text-sm font-semibold">Kleur per type</h3>
-          <p className="text-xs text-gray-500">Kies boven de kalender “Kleur: Type” en elk blokje krijgt de kleur van zijn soort.</p>
-        </div>
-        <ul className="space-y-2">
-          {TYPES.map((t) => {
-            const eigen = stijl.typeKleuren?.[t.key]
-            return (
-              <li key={t.key} className="rounded-lg border border-gray-200 bg-white px-2.5 py-2">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="h-3 w-5 rounded border" style={typeBlok(t.key, stijl.typeKleuren ?? {})} />
-                  <span className="text-xs font-medium">{t.label}</span>
-                  {eigen && <button type="button" disabled={bezig} onClick={() => zetTypeKleur(t.key, null)} className="ml-auto text-[11px] text-gray-500 underline underline-offset-2">Standaard</button>}
-                </div>
-                <KleurKiezer waarde={eigen ?? t.standaard} onKies={(k) => zetTypeKleur(t.key, k === t.standaard ? null : k)} />
-              </li>
-            )
-          })}
-        </ul>
-      </section>
-
-      <section className="space-y-2.5">
-        <div className="flex items-start gap-2">
-          <div className="flex-1">
-            <h3 className="text-sm font-semibold">Kleur per fase</h3>
-            <p className="text-xs text-gray-500">Zo zie je in één oogopslag waar elke post staat.</p>
+      {tab === 'kanalen' && (
+        <section className="space-y-2.5">
+          <div className="flex items-start gap-2 flex-wrap">
+            <p className="text-xs text-gray-500 flex-1 min-w-[200px]">Een eigen naam en kleur voor elk kanaal: voor de labels op de vakjes en bij het inplannen. Meta staat in de vakjes als Instagram en Facebook, tenzij je Meta een eigen naam geeft.</p>
+            <NaarBlok op="kanaal" tekst="Vakjes kleuren op kanaal" />
           </div>
-          <button type="button" onClick={onSluit} aria-label="Sluiten" className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400"><X className="h-4 w-4" /></button>
-        </div>
-        <ul className="space-y-2">
-          {FASES.map((f) => {
-            const eigen = stijl.faseKleuren[f.key]
-            return (
-              <li key={f.key} className="rounded-lg border border-gray-200 bg-white px-2.5 py-2">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: eigen ?? f.standaard }} />
-                  <span className="text-xs font-medium">{f.label}</span>
-                  {eigen && <button type="button" disabled={bezig} onClick={() => faseKleur(f.key, null)} className="ml-auto text-[11px] text-gray-500 underline underline-offset-2">Standaard</button>}
-                </div>
-                <KleurKiezer waarde={eigen ?? f.standaard} onKies={(k) => faseKleur(f.key, k === f.standaard ? null : k)} />
-              </li>
-            )
-          })}
-        </ul>
-      </section>
+          <ul className="grid gap-2 md:grid-cols-2">
+            {KANALEN.map((c) => (
+              <OptieRij key={c.slug} standaardNaam={c.label} naam={stijl.kanaalNamen[c.slug] ?? null} kleur={stijl.kanaalKleuren[c.slug] ?? null} standaardKleur={KANAAL_STANDAARD[c.slug] ?? '#6b7280'} bezig={bezig}
+                onNaam={(n) => kanaalNaamZet(c.slug, n)} onKleur={(k) => kanaalKleurZet(c.slug, k)} />
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {tab === 'fases' && (
+        <section className="space-y-2.5">
+          <div className="flex items-start gap-2 flex-wrap">
+            <p className="text-xs text-gray-500 flex-1 min-w-[200px]">Een kleur per fase: voor het bolletje in elk vakje, en voor het hele vakje als je op status kleurt.</p>
+            <NaarBlok op="status" tekst="Vakjes kleuren op status" />
+          </div>
+          <ul className="grid gap-2 md:grid-cols-2">
+            {FASES.map((f) => {
+              const eigen = stijl.faseKleuren[f.key]
+              return (
+                <li key={f.key} className="rounded-lg border border-gray-200 bg-white px-2.5 py-2">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: eigen ?? f.standaard }} />
+                    <span className="text-xs font-medium">{f.label}</span>
+                    {eigen && <button type="button" disabled={bezig} onClick={() => faseKleur(f.key, null)} className="ml-auto text-[11px] text-gray-500 underline underline-offset-2">Standaard</button>}
+                  </div>
+                  <KleurKiezer waarde={eigen ?? f.standaard} onKies={(k) => faseKleur(f.key, k === f.standaard ? null : k)} />
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      )}
     </div>
+  )
+}
+
+/** Eén type of kanaal: eigen naam (bewaard bij Enter of het verlaten van het veld) en kleur. */
+function OptieRij({ standaardNaam, naam, kleur, standaardKleur, bezig, onNaam, onKleur }: {
+  standaardNaam: string; naam: string | null; kleur: string | null; standaardKleur: string; bezig: boolean
+  onNaam: (n: string | null) => void; onKleur: (k: string | null) => void
+}) {
+  const [tekst, setTekst] = useState(naam ?? '')
+  useEffect(() => { setTekst(naam ?? '') }, [naam])
+  const bewaar = () => {
+    const n = tekst.replace(/\s+/g, ' ').trim()
+    const nieuw = n && n !== standaardNaam ? n : null
+    if (nieuw !== (naam ?? null)) onNaam(nieuw)
+    if (!nieuw) setTekst('')
+  }
+  const k = kleur ?? standaardKleur
+  return (
+    <li className="rounded-lg border border-gray-200 bg-white px-2.5 py-2 space-y-1.5">
+      <div className="flex items-center gap-2">
+        <span className="h-3 w-5 rounded border shrink-0" style={kleurBlok(k)} />
+        <input value={tekst} onChange={(e) => setTekst(e.target.value)} onBlur={bewaar} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur() } }}
+          placeholder={standaardNaam} maxLength={30} aria-label={`Naam voor ${standaardNaam}`}
+          className="flex-1 min-w-0 px-2 py-1 text-sm border border-transparent rounded-md hover:border-gray-200 focus:border-gray-900 focus:outline-none font-medium" />
+        {(naam || kleur) && <button type="button" disabled={bezig} onClick={() => { if (naam) onNaam(null); if (kleur) onKleur(null); setTekst('') }} className="text-[11px] text-gray-500 underline underline-offset-2 shrink-0">Standaard</button>}
+      </div>
+      <KleurKiezer waarde={k} onKies={(x) => onKleur(x === standaardKleur ? null : x)} />
+    </li>
   )
 }
 
