@@ -242,13 +242,37 @@ export function UploadsView({
   const downloadSelectie = () => downloadLijst(zichtbaar.filter((u) => selectie.has(u.id)), `${naamBasis}-selectie`)
   const geselecteerdZichtbaar = zichtbaar.filter((u) => selectie.has(u.id))
 
+  // Verwijderen kan altijd: wat wij opladen en wat de klant oplaadt. Ook uit de opslag.
+  const [weg, setWeg] = useState<string | null>(null)
   const verwijder = async (id: string) => {
     if (!confirm('Dit bestand definitief verwijderen? Ook uit de opslag.')) return
-    const r = await fetch(`/api/admin/uploads?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
-    if (!r.ok) { setFout((await r.json()).error ?? 'Verwijderen mislukt.'); return }
-    setLijst((l) => l.filter((u) => u.id !== id))
-    setSelectie((sel) => { const n = new Set(sel); n.delete(id); return n })
-    sluitFoto()
+    setWeg(id)
+    try {
+      const r = await fetch(`/api/admin/uploads?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+      if (!r.ok) { setFout((await r.json().catch(() => ({}))).error ?? 'Verwijderen mislukt.'); return }
+      setLijst((l) => l.filter((u) => u.id !== id))
+      setSelectie((sel) => { const n = new Set(sel); n.delete(id); return n })
+      sluitFoto()
+      router.refresh()
+    } finally { setWeg(null) }
+  }
+  /** Alle geselecteerde (zichtbare) bestanden in één keer weg, na één bevestiging. */
+  const verwijderSelectie = async () => {
+    const ids = geselecteerdZichtbaar.map((u) => u.id)
+    if (!ids.length) return
+    if (!confirm(`${ids.length} ${ids.length === 1 ? 'bestand' : 'bestanden'} definitief verwijderen? Ook uit de opslag.`)) return
+    setWeg('selectie'); setFout(null)
+    const mislukt: string[] = []
+    try {
+      for (const id of ids) {
+        const r = await fetch(`/api/admin/uploads?id=${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => null)
+        if (!r || !r.ok) { mislukt.push(id); continue }
+        setLijst((l) => l.filter((u) => u.id !== id))
+        setSelectie((sel) => { const n = new Set(sel); n.delete(id); return n })
+      }
+      if (mislukt.length) setFout(`${mislukt.length} ${mislukt.length === 1 ? 'bestand kon' : 'bestanden konden'} niet verwijderd worden. Probeer opnieuw.`)
+      router.refresh()
+    } finally { setWeg(null) }
   }
 
   /**
@@ -363,6 +387,11 @@ export function UploadsView({
               <Download className="h-3.5 w-3.5" />
               Selectie downloaden ({geselecteerdZichtbaar.length} · {leesbareGrootte(geselecteerdZichtbaar.reduce((s, u) => s + (Number(u.grootte) || 0), 0))})
             </button>
+            <button type="button" onClick={verwijderSelectie} disabled={geselecteerdZichtbaar.length === 0 || !!bulk || !!weg}
+              className="text-xs font-semibold px-3 py-1.5 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 flex items-center gap-1.5">
+              {weg === 'selectie' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+              Selectie verwijderen ({geselecteerdZichtbaar.length})
+            </button>
             {geselecteerdZichtbaar.length < selectie.size && (
               <span className="text-[11px] text-gray-500">{selectie.size - geselecteerdZichtbaar.length} geselecteerde foto's vallen buiten de huidige filters.</span>
             )}
@@ -441,10 +470,17 @@ export function UploadsView({
                 {u.beschrijving && (
                   <p className="text-xs text-gray-600 line-clamp-2">{u.beschrijving}</p>
                 )}
-                <p className="mt-auto pt-2 text-[11px] text-gray-400">
-                  {datum(u.created_at)} · {leesbareGrootte(u.grootte)}
-                  {u.door_naam && ` · ${u.door_naam}`}
-                </p>
+                <div className="mt-auto pt-2 flex items-end gap-2">
+                  <p className="flex-1 min-w-0 text-[11px] text-gray-400">
+                    {datum(u.created_at)} · {leesbareGrootte(u.grootte)}
+                    {u.door_naam && ` · ${u.door_naam}`}
+                  </p>
+                  <button type="button" onClick={() => verwijder(u.id)} disabled={!!weg}
+                    className="h-7 w-7 shrink-0 rounded-full flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    title="Verwijderen" aria-label={`${u.titel} verwijderen`}>
+                    {weg === u.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
               </div>
             </div>
           ))}
