@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
   Info, Camera, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
-  MailCheck, FolderUp, Handshake, Settings, ClipboardPen, Contact, Timer, UserCircle, Video, Inbox, Clapperboard, Building2, FileSignature, Wallet, PackageCheck,
+  MailCheck, FolderUp, Handshake, Settings, ClipboardPen, Contact, Timer, UserCircle, Video, Inbox, Clapperboard, Building2, FileSignature, ScrollText, Wallet, PackageCheck,
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
@@ -50,7 +50,7 @@ const SECTIONS: NavSection[] = [
       { label: 'Klanten',     href: '/admin/clients',    icon: Users, module: 'clients' },
       // Eén overzicht voor leads en projecten (vervangt de vroegere pipeline).
       { label: 'Projecten',   href: '/admin/opdrachten', icon: KanbanSquare, module: 'opdrachten' },
-      { label: 'Contracten',  href: '/admin/contracts',  icon: FileText, module: 'contracts' },
+      { label: 'Klantcontracten',  href: '/admin/contracts',  icon: FileText, module: 'contracts' },
       { label: 'Offertes',    href: '/admin/offertes',   icon: FileSignature, module: 'offertes' },
       { label: 'Aanvragen',   href: '/admin/aanvragen',  icon: Inbox, module: 'aanvragen' },
       { label: 'Meeting Inplanner', href: '/admin/meetings', icon: Video, module: 'meetings', ookModule: 'sales' },
@@ -104,6 +104,8 @@ const SECTIONS: NavSection[] = [
       // en (voor hoofdbeheerders) de logins met rollen en modules.
       { label: 'Personeel', href: '/admin/personeel', icon: Contact, module: 'personeel', adminOnly: true },
       { label: 'Kantoor', href: '/admin/kantoor', icon: Building2, module: 'kantoor' },
+      // Eigen contracten van NextGenMedia (huur, verzekeringen, NDA's …) met e-sign; enkel zaakvoerders.
+      { label: 'Algemene contracten', href: '/admin/algemene-contracten', icon: ScrollText, module: 'algemene_contracten', adminOnly: true },
       { label: 'Partners',    href: '/admin/partners',    icon: UserSquare2, module: 'partners' },
       { label: 'Opdrachten partners', href: '/admin/assignments', icon: Briefcase, module: 'assignments' },
       { label: 'Settlements', href: '/admin/settlements', icon: ArrowLeftRight, module: 'settlements' },

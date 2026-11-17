@@ -7519,3 +7519,95 @@ DO $$ BEGIN
       CHECK (blok_kleur IS NULL OR blok_kleur IN ('status','type','kanaal','label','een'));
   END IF;
 END $$;
+-- ── Algemene contracten: eigen contracten van NextGenMedia met e-sign (17 nov 2026) ──
+-- Huurovereenkomsten, verzekeringen, commissieregelingen, NDA's … in mappen met labels.
+-- Een opgeladen PDF tekenen wij en eventueel de andere partij (persoonlijke link per mail).
+CREATE TABLE IF NOT EXISTS public.algemene_contract_mappen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam text NOT NULL,
+  volgorde integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by text
+);
+CREATE UNIQUE INDEX IF NOT EXISTS algemene_contract_mappen_naam ON public.algemene_contract_mappen (lower(naam));
+INSERT INTO public.algemene_contract_mappen (naam, volgorde)
+SELECT v.naam, v.volgorde FROM (VALUES ('Huurovereenkomsten', 1), ('Verzekeringen', 2), ('Commissieregelingen', 3), ('Partnerships', 4), ('NDA''s', 5), ('Andere', 99)) AS v(naam, volgorde)
+WHERE NOT EXISTS (SELECT 1 FROM public.algemene_contract_mappen m WHERE lower(m.naam) = lower(v.naam));
+
+CREATE TABLE IF NOT EXISTS public.algemene_contracten (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  map_id uuid REFERENCES public.algemene_contract_mappen(id) ON DELETE SET NULL,
+  titel text NOT NULL,
+  tegenpartij text,
+  tegenpartij_email text,
+  labels text[] NOT NULL DEFAULT '{}',
+  notitie text,
+  begin_datum date,
+  eind_datum date,
+  bestand_pad text NOT NULL,
+  bestand_naam text,
+  bestand_grootte bigint,
+  bestand_sha256 text,
+  paginas integer,
+  huidig_pad text,
+  huidig_sha256 text,
+  versie integer NOT NULL DEFAULT 1,
+  ons_nodig boolean NOT NULL DEFAULT true,
+  ondertekenaar text,
+  ons_zone jsonb,
+  ons_getekend_op timestamptz,
+  ons_getekend_door text,
+  ons_getekend_email text,
+  ons_user_id uuid,
+  partij_nodig boolean NOT NULL DEFAULT false,
+  partij_zone jsonb,
+  partij_getekend_op timestamptz,
+  partij_naam text,
+  partij_email text,
+  partij_ip text,
+  partij_ua text,
+  partij_geopend_op timestamptz,
+  laatst_verstuurd_op timestamptz,
+  gearchiveerd_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by text,
+  created_by_user uuid,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS algemene_contracten_map ON public.algemene_contracten (map_id);
+CREATE INDEX IF NOT EXISTS algemene_contracten_open ON public.algemene_contracten (ons_nodig, ons_getekend_op) WHERE gearchiveerd_op IS NULL;
+
+-- Persoonlijke links voor de andere partij: enkel de SHA-256 van de link, één per verzonden mail.
+CREATE TABLE IF NOT EXISTS public.algemene_contract_links (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id uuid NOT NULL REFERENCES public.algemene_contracten(id) ON DELETE CASCADE,
+  token_hash text NOT NULL UNIQUE,
+  email text,
+  verloopt_op timestamptz NOT NULL,
+  geopend_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by text
+);
+CREATE INDEX IF NOT EXISTS algemene_contract_links_contract ON public.algemene_contract_links (contract_id);
+
+-- Tijdlijn: opgeladen, getekend (door wie, van waar), verstuurd, geopend, aangepast.
+CREATE TABLE IF NOT EXISTS public.algemene_contract_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id uuid NOT NULL REFERENCES public.algemene_contracten(id) ON DELETE CASCADE,
+  actie text NOT NULL,
+  door text,
+  details jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS algemene_contract_events_contract ON public.algemene_contract_events (contract_id, created_at DESC);
+
+ALTER TABLE public.algemene_contract_mappen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.algemene_contracten ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.algemene_contract_links ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.algemene_contract_events ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.algemene_contract_mappen, public.algemene_contracten, public.algemene_contract_links, public.algemene_contract_events FROM anon, authenticated;
+
+-- Privébucket voor de PDF's (origineel, getekende versies, handtekeningen), max 50 MB.
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('algemene-contracten', 'algemene-contracten', false, 52428800, ARRAY['application/pdf', 'image/png'])
+ON CONFLICT (id) DO NOTHING;

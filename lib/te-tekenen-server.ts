@@ -5,7 +5,7 @@ import { laadVestingRegels } from '@/lib/vesting-regels-server'
 import { laadVestingData } from '@/lib/vesting-data-server'
 import { laadVennotenData } from '@/lib/vennoot-uitgaven-server'
 import { tekenStand, wachtOpAkkoord } from '@/lib/vennoot-uitgaven'
-import { tegentekenTaken, voornaam, type TeTekenenItem, type TegentekenContract } from '@/lib/te-tekenen'
+import { algemeneTaken, tegentekenTaken, voornaam, type AlgemeenTeTekenen, type TeTekenenItem, type TegentekenContract } from '@/lib/te-tekenen'
 
 import type { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { KLANT_TEKENDE_IN_APP } from '@/lib/contracten/tegenhandtekening'
@@ -27,7 +27,7 @@ export async function teTekenenOverzicht(admin: Admin): Promise<TeTekenenItem[]>
   const inst = leesVennoten((rij as { value?: unknown } | null)?.value)
   const wie = (k: Vennoot) => voornaam(inst[k].naam) || k.charAt(0).toUpperCase() + k.slice(1)
 
-  const [regelsVesting, vennoten, vesting, tegen] = await Promise.all([
+  const [regelsVesting, vennoten, vesting, tegen, algemeen] = await Promise.all([
     veilig('regels vesting', async (): Promise<TeTekenenItem[]> => {
       const d = await laadVestingRegels(admin, null)
       if (!d.versie) return []
@@ -81,6 +81,13 @@ export async function teTekenenOverzicht(admin: Admin): Promise<TeTekenenItem[]>
         .filter((c) => !/^test$/i.test(String(c.klant ?? '').trim()))
       return tegentekenTaken(lijst)
     }, []),
+    // Algemene contracten (huur, verzekering, NDA …) die op onze handtekening wachten.
+    veilig('algemeen', async (): Promise<TeTekenenItem[]> => {
+      const { data, error } = await admin.from('algemene_contracten').select('id, titel, tegenpartij, created_at, ondertekenaar')
+        .eq('ons_nodig', true).is('ons_getekend_op', null).is('gearchiveerd_op', null).limit(500)
+      if (error) throw new Error(error.message)
+      return algemeneTaken((data ?? []) as AlgemeenTeTekenen[])
+    }, []),
   ])
-  return [...tegen, ...regelsVesting, ...vesting, ...vennoten]
+  return [...tegen, ...algemeen, ...regelsVesting, ...vesting, ...vennoten]
 }

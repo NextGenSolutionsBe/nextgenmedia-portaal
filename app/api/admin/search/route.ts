@@ -95,6 +95,11 @@ export async function GET(req: NextRequest) {
       const stand: Record<string, string> = { concept: 'Concept', verstuurd: 'Verstuurd', geaccepteerd: 'Geaccepteerd', ingetrokken: 'Ingetrokken' }
       for (const o of offs) results.push({ type: 'offerte', label: 'Offerte', title: o.titel, subtitle: [o.klant_naam, stand[o.status] ?? o.status].filter(Boolean).join(' · '), href: `/admin/offertes?offerte=${o.id}` })
     }
+    // Algemene contracten (huur, verzekeringen, NDA's …): enkel zaakvoerders.
+    if (actor.isAdmin) {
+      const ac = await safe(admin.from('algemene_contracten').select('id, titel, tegenpartij, gearchiveerd_op').or(`titel.ilike.${like},tegenpartij.ilike.${like},notitie.ilike.${like}`).order('created_at', { ascending: false }).limit(L)) as { id: string; titel: string; tegenpartij: string | null; gearchiveerd_op: string | null }[]
+      for (const a of ac) results.push({ type: 'algemeen_contract', label: 'Algemeen contract', title: a.titel, subtitle: [a.tegenpartij, a.gearchiveerd_op ? 'archief' : null].filter(Boolean).join(' · ') || undefined, href: `/admin/algemene-contracten/${a.id}` })
+    }
     if (may('aanvragen')) {
       // Ook aanvragen van een gevonden klant (op klantnaam), niet enkel op dienst of tekst.
       const extra = clients.length ? await safe(admin.from('klant_aanvragen').select('id, client_id, soort, type_label, status, created_at').in('client_id', clients.map((c) => c.id)).order('created_at', { ascending: false }).limit(L)) as typeof aanvragen : []

@@ -9,7 +9,7 @@
 
 import { wieTekentTegen, contractVerantwoordelijke, type Tegentekenaar } from './contracten/verantwoordelijke'
 
-export type TeTekenenSoort = 'regels_vesting' | 'regels_vennoten' | 'vesting' | 'uitgaven' | 'tegentekenen'
+export type TeTekenenSoort = 'regels_vesting' | 'regels_vennoten' | 'vesting' | 'uitgaven' | 'tegentekenen' | 'algemeen'
 export type TeTekenenItem = {
   id: string
   soort: TeTekenenSoort
@@ -60,6 +60,34 @@ export function tegentekenTaken(contracten: TegentekenContract[], nu = new Date(
           href: `/admin/contracts/${c.id}/tegentekenen?van=${p}`,
         }
       }),
+    })
+  }
+  return uit
+}
+
+export type AlgemeenTeTekenen = { id: string; titel: string; tegenpartij: string | null; created_at: string; ondertekenaar: string | null }
+
+/**
+ * Algemene contracten (huur, verzekering, NDA …) die op onze handtekening
+ * wachten: per persoon één taak, bij wie tekent (gezamenlijk of niemand
+ * aangeduid = Marco en Bram). Oudste eerst: wat het langst wacht, staat vooraan.
+ */
+export function algemeneTaken(lijst: AlgemeenTeTekenen[], nu = new Date()): TeTekenenItem[] {
+  const per = new Map<Tegentekenaar, AlgemeenTeTekenen[]>()
+  const gesorteerd = [...lijst].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
+  for (const c of gesorteerd) for (const p of wieTekentTegen(c.ondertekenaar)) per.set(p, [...(per.get(p) ?? []), c])
+  const uit: TeTekenenItem[] = []
+  for (const p of ['Marco', 'Bram'] as const) {
+    const l = per.get(p) ?? []
+    if (!l.length) continue
+    const oud = l.filter((c) => nu.getTime() - new Date(c.created_at).getTime() > DRIE_DAGEN).length
+    uit.push({
+      id: `algemeen:${p}`, soort: 'algemeen', voor: [p],
+      wat: `${meervoud(l.length, 'algemeen contract', 'algemene contracten')} tekenen`,
+      sub: oud ? `${oud} wacht al langer dan 3 dagen` : null,
+      href: `/admin/algemene-contracten/${l[0].id}/tekenen`,
+      dringend: oud > 0,
+      lijst: l.map((c) => ({ id: c.id, titel: [c.tegenpartij, c.titel].filter(Boolean).join(' – '), sub: `opgeladen ${dag(c.created_at)}`, href: `/admin/algemene-contracten/${c.id}/tekenen` })),
     })
   }
   return uit
