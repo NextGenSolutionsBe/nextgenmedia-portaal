@@ -7,7 +7,7 @@ import { mailMerkVan, MERK_STIJL } from '@/lib/merk-mail'
 import { INFO_ADRES } from '@/lib/meetings/meeting-mail'
 import { pdfInfo, stempelBlok } from './pdf'
 import {
-  blokRegels, controleerMapnaam, controleerVelden, downloadNaam, redenOnsNiet, redenPartijNiet, standaardZone, zoneOfNull,
+  blokRegels, controleerMapnaam, controleerVelden, downloadNaam, magIn, redenOnsNiet, redenPartijNiet, standaardZone, zoneOfNull,
   type AlgemeenContract, type Map, type Zone,
 } from './model'
 
@@ -50,11 +50,13 @@ export async function logEvent(admin: Admin, contractId: string, actie: string, 
 /** Alles voor het overzicht: mappen en contracten (ook gearchiveerde, het scherm filtert). */
 export async function laadOverzicht(admin: Admin): Promise<{ mappen: Map[]; contracten: AlgemeenContract[] }> {
   const [m, c] = await Promise.all([
-    admin.from('algemene_contract_mappen').select('id, naam, volgorde').order('volgorde').order('naam'),
+    // select('*'): parent_id (submappen) bestaat pas na de migratie.
+    admin.from('algemene_contract_mappen').select('*').order('volgorde').order('naam'),
     admin.from('algemene_contracten').select(KOLOMMEN).order('created_at', { ascending: false }).limit(2000),
   ])
   if (m.error) throw new AcFout(/does not exist|schema cache/i.test(m.error.message) ? 'De tabellen voor algemene contracten bestaan nog niet. Draai supabase/migrations/99999999_SYNC_ALL.sql.' : m.error.message, 500)
-  return { mappen: (m.data ?? []) as Map[], contracten: ((c.data ?? []) as AlgemeenContract[]).map((x) => ({ ...x, labels: x.labels ?? [] })) }
+  const mappen = ((m.data ?? []) as Map[]).map((x) => ({ id: x.id, naam: x.naam, volgorde: x.volgorde, parent_id: x.parent_id ?? null }))
+  return { mappen, contracten: ((c.data ?? []) as AlgemeenContract[]).map((x) => ({ ...x, labels: x.labels ?? [] })) }
 }
 
 export async function laadContract(admin: Admin, id: string): Promise<Volledig> {
@@ -138,24 +140,43 @@ export async function verwijderContract(admin: Admin, id: string): Promise<void>
 // ── Mappen ──────────────────────────────────────────────────────────────────
 
 export async function mapActie(admin: Admin, b: Record<string, unknown>, door: string | null): Promise<void> {
-  const id = typeof b.id === 'string' && /^[0-9a-f-]{36}$/i.test(b.id) ? b.id : null
-  if (b.actie === 'maak' || b.actie === 'hernoem') {
+  const uuid = (v: unknown) => (typeof v === 'string' && /^[0-9a-f-]{36}$/i.test(v) ? v : null)
+  const id = uuid(b.id)
+  const { data: rijen } = await admin.from('algemene_contract_mappen').select('*')
+  const mappen = ((rijen ?? []) as Map[]).map((x) => ({ ...x, parent_id: x.parent_id ?? null }))
+  const heeftOuderKolom = (rijen ?? []).length === 0 || 'parent_id' in ((rijen ?? [])[0] ?? {})
+  // In welke map (null = bovenaan); enkel als het verzoek het vraagt.
+  const vraagtOuder = 'parent_id' in b
+  const ouder = vraagtOuder ? uuid(b.parent_id) : undefined
+  if (vraagtOuder && ouder && !heeftOuderKolom) throw new AcFout('Submappen zijn nog niet beschikbaar: de databank wordt nog bijgewerkt.', 503)
+  const dubbel = (e: { message: string }) => {
+    const ja = /duplicate|unique/i.test(e.message)
+    throw new AcFout(ja ? 'Daar staat al een map met die naam.' : e.message, ja ? 409 : 500)
+  }
+
+  if (b.actie === 'maak') {
     const n = controleerMapnaam(b.naam)
     if ('fout' in n) throw new AcFout(n.fout)
-    if (b.actie === 'hernoem' && !id) throw new AcFout('Ongeldige map.')
-    const { error } = b.actie === 'maak'
-      ? await admin.from('algemene_contract_mappen').insert({ naam: n.naam, volgorde: 50, created_by: door })
-      : await admin.from('algemene_contract_mappen').update({ naam: n.naam }).eq('id', id)
-    if (error) {
-      const dubbel = /duplicate|unique/i.test(error.message)
-      throw new AcFout(dubbel ? 'Die map bestaat al.' : error.message, dubbel ? 409 : 500)
-    }
+    if (ouder && !magIn(mappen, null, ouder)) throw new AcFout('Zo diep kunnen mappen niet. Maak de map een niveau hoger.')
+    const { error } = await admin.from('algemene_contract_mappen').insert({ naam: n.naam, volgorde: 50, created_by: door, ...(ouder ? { parent_id: ouder } : {}) })
+    if (error) dubbel(error)
+    return
+  }
+  if (b.actie === 'hernoem') {
+    if (!id) throw new AcFout('Ongeldige map.')
+    const n = controleerMapnaam(b.naam)
+    if ('fout' in n) throw new AcFout(n.fout)
+    if (vraagtOuder && !magIn(mappen, id, ouder ?? null)) throw new AcFout('Een map kan niet in zichzelf of in een eigen submap, en niet zo diep.')
+    const { error } = await admin.from('algemene_contract_mappen').update({ naam: n.naam, ...(vraagtOuder && heeftOuderKolom ? { parent_id: ouder ?? null } : {}) }).eq('id', id)
+    if (error) dubbel(error)
     return
   }
   if (b.actie === 'verwijder') {
     if (!id) throw new AcFout('Ongeldige map.')
-    // De contracten blijven, zonder map.
-    await admin.from('algemene_contracten').update({ map_id: null }).eq('map_id', id)
+    // Niets gaat verloren: submappen en contracten schuiven een niveau hoger.
+    const boven = mappen.find((m) => m.id === id)?.parent_id ?? null
+    if (heeftOuderKolom) await admin.from('algemene_contract_mappen').update({ parent_id: boven }).eq('parent_id', id)
+    await admin.from('algemene_contracten').update({ map_id: boven }).eq('map_id', id)
     const { error } = await admin.from('algemene_contract_mappen').delete().eq('id', id)
     if (error) throw new AcFout(error.message, 500)
     return
@@ -330,4 +351,40 @@ export async function verstuurMail(admin: Admin, id: string, b: Record<string, u
   await admin.from('algemene_contracten').update({ laatst_verstuurd_op: op, ...(c.tegenpartij_email ? {} : { tegenpartij_email: aan }) }).eq('id', id)
   await logEvent(admin, id, 'verstuurd', door.email, { aan, bijlage: !!bijlage, ter_ondertekening: c.partij_nodig && !c.partij_getekend_op })
   return { id: logId, verstuurd_op: op }
+}
+
+// ── Opruimen (planner) ──────────────────────────────────────────────────────
+
+/**
+ * Bestanden zonder contract uit de opslag halen: getekende versies en
+ * handtekeningen van verwijderde contracten, en opgeladen PDF's die na een dag
+ * nog bij geen contract horen (opladen begonnen, nooit bewaard). Bestanden
+ * wissen kan enkel via de opslag-API, niet rechtstreeks in de databank.
+ */
+export async function ruimAlgemeneContractenOp(admin: Admin, max = 100): Promise<{ verwijderd: number }> {
+  const { data: rijen, error } = await admin.from('algemene_contracten').select('id, bestand_pad')
+  if (error) throw new Error(error.message)
+  const ids = new Set(((rijen ?? []) as { id: string }[]).map((r) => r.id))
+  const mappen = new Set(((rijen ?? []) as { bestand_pad: string }[]).map((r) => r.bestand_pad.split('/').slice(0, 2).join('/')))
+  const weg: string[] = []
+  const lijst = async (pad: string) => ((await admin.storage.from(AC_BUCKET).list(pad, { limit: 1000 })).data ?? []) as { name: string; id: string | null; created_at: string | null }[]
+  for (const map of ['getekend', 'handtekeningen']) {
+    for (const f of await lijst(map)) {
+      const id = f.name.slice(0, 36)
+      if (f.id && /^[0-9a-f-]{36}$/i.test(id) && !ids.has(id)) weg.push(`${map}/${f.name}`)
+    }
+  }
+  const dag = Date.now() - 86_400_000
+  for (const f of await lijst('origineel')) {
+    if (f.id || mappen.has(`origineel/${f.name}`)) continue // f.id null = een map
+    for (const g of await lijst(`origineel/${f.name}`)) {
+      if (g.id && g.created_at && new Date(g.created_at).getTime() < dag) weg.push(`origineel/${f.name}/${g.name}`)
+    }
+  }
+  const deel = weg.slice(0, max)
+  if (deel.length) {
+    const { error: e } = await admin.storage.from(AC_BUCKET).remove(deel)
+    if (e) throw new Error(e.message)
+  }
+  return { verwijderd: deel.length }
 }

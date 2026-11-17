@@ -46,7 +46,77 @@ export type AlgemeenContract = {
   versie: number
 }
 
-export type Map = { id: string; naam: string; volgorde: number }
+export type Map = { id: string; naam: string; volgorde: number; parent_id?: string | null }
+
+// ── Mappenstructuur (mappen in mappen) ──────────────────────────────────────
+
+/** Hoe diep mappen mogen gaan: Verzekeringen / Auto / Bestelwagen. */
+export const MAX_DIEPTE = 4
+
+const ouderVan = (m: Map) => m.parent_id ?? null
+const opVolgorde = (a: Map, b: Map) => a.volgorde - b.volgorde || a.naam.localeCompare(b.naam, 'nl')
+
+/** De mappen direct in een map (null = bovenaan). */
+export const kinderen = (mappen: Map[], ouder: string | null): Map[] => mappen.filter((m) => ouderVan(m) === ouder).sort(opVolgorde)
+
+/** Het pad van bovenaan tot en met deze map (beschermd tegen een lus). */
+export function padVan(mappen: Map[], id: string | null): Map[] {
+  const pad: Map[] = []
+  let huidig = id ? mappen.find((m) => m.id === id) : undefined
+  while (huidig && pad.length < 20 && !pad.includes(huidig)) {
+    pad.unshift(huidig)
+    const o = ouderVan(huidig)
+    huidig = o ? mappen.find((m) => m.id === o) : undefined
+  }
+  return pad
+}
+
+/** "Verzekeringen / Auto", of null zonder map. */
+export const padNaam = (mappen: Map[], id: string | null): string | null => {
+  const p = padVan(mappen, id)
+  return p.length ? p.map((m) => m.naam).join(' / ') : null
+}
+
+/** Alle mappen onder deze map (niet de map zelf). */
+export function nakomelingen(mappen: Map[], id: string): Set<string> {
+  const uit = new Set<string>()
+  const stapel = [id]
+  while (stapel.length) {
+    const x = stapel.pop()!
+    for (const k of mappen) if (ouderVan(k) === x && !uit.has(k.id) && k.id !== id) { uit.add(k.id); stapel.push(k.id) }
+  }
+  return uit
+}
+
+/** Mag deze map in die andere (null = bovenaan)? Niet in zichzelf of een eigen submap, en niet te diep. */
+export function magIn(mappen: Map[], id: string | null, ouder: string | null): boolean {
+  if (ouder === null) return true
+  if (!mappen.some((m) => m.id === ouder)) return false
+  if (id && (ouder === id || nakomelingen(mappen, id).has(ouder))) return false
+  const diepteOnder = id ? Math.max(0, ...Array.from(nakomelingen(mappen, id)).map((k) => padVan(mappen, k).length - padVan(mappen, id).length)) : 0
+  return padVan(mappen, ouder).length + 1 + diepteOnder <= MAX_DIEPTE
+}
+
+/** Alle mappen in boomvolgorde, met diepte en volledig pad (voor keuzelijsten en de boom). */
+export function boom(mappen: Map[]): { map: Map; diepte: number; pad: string }[] {
+  const uit: { map: Map; diepte: number; pad: string }[] = []
+  const loop = (ouder: string | null, diepte: number, prefix: string) => {
+    if (diepte > MAX_DIEPTE + 2) return
+    for (const m of kinderen(mappen, ouder)) {
+      const pad = prefix ? `${prefix} / ${m.naam}` : m.naam
+      uit.push({ map: m, diepte, pad })
+      loop(m.id, diepte + 1, pad)
+    }
+  }
+  loop(null, 0, '')
+  return uit
+}
+
+/** Hoeveel (niet-gearchiveerde) contracten in deze map en alle submappen. */
+export function aantalIn(contracten: Pick<AlgemeenContract, 'map_id' | 'gearchiveerd_op'>[], mappen: Map[], id: string): number {
+  const alle = new Set([id, ...Array.from(nakomelingen(mappen, id))])
+  return contracten.filter((c) => !c.gearchiveerd_op && c.map_id && alle.has(c.map_id)).length
+}
 
 /** De mappen waarmee de module start; eigen mappen komen erbij. */
 export const STANDAARD_MAPPEN = ['Huurovereenkomsten', 'Verzekeringen', 'Commissieregelingen', 'Partnerships', "NDA's", 'Andere']

@@ -7611,3 +7611,9 @@ REVOKE ALL ON public.algemene_contract_mappen, public.algemene_contracten, publi
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES ('algemene-contracten', 'algemene-contracten', false, 52428800, ARRAY['application/pdf', 'image/png'])
 ON CONFLICT (id) DO NOTHING;
+
+-- ── Algemene contracten: submappen (17 nov 2026) ──
+-- Mappen in mappen (parent_id); dezelfde naam mag in een andere map.
+ALTER TABLE public.algemene_contract_mappen ADD COLUMN IF NOT EXISTS parent_id uuid REFERENCES public.algemene_contract_mappen(id) ON DELETE SET NULL;
+DROP INDEX IF EXISTS public.algemene_contract_mappen_naam;
+CREATE UNIQUE INDEX IF NOT EXISTS algemene_contract_mappen_naam_ouder ON public.algemene_contract_mappen (coalesce(parent_id, '00000000-0000-0000-0000-000000000000'::uuid), lower(naam));
