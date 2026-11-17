@@ -7,6 +7,7 @@ import { DEFAULT_TEMPLATES } from '@/lib/email-templates-defaults'
 import { MERK_STIJL, MAIL_MERKEN, type MailMerk } from '@/lib/merk-mail'
 import { offerteMail } from '@/lib/offertes'
 import { welkomstMail } from '@/lib/klant-account'
+import { aanhefVoor, adresSleutel, alleGebruikers, extraAdressen, metAanhef, standaardKeuze, type Ontvanger } from '@/lib/opleveringen-ontvangers'
 
 // Eén gedeelde mailcomponent voor ALLE handmatige mails (klant/contract/taak/
 // toegang/algemeen). Altijd preview + handmatige bevestiging; nooit automatisch.
@@ -78,6 +79,20 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
     const oud = new RegExp(MERK_STIJL[merk].naam, 'g'), nieuw = MERK_STIJL[m].naam
     setSubject((x) => x.replace(oud, nieuw)); setBody((x) => x.replace(oud, nieuw)); setMerk(m)
   }
+  // Oplevering: alle accounts van de klant om uit te kiezen ("Alle gebruikers"), plus vrije adressen. Eén mail per persoon.
+  const [ontvangers, setOntvangers] = useState<Ontvanger[] | null>(null)
+  const [gekozen, setGekozen] = useState<string[]>([])
+  const [extra, setExtra] = useState('')
+  const [verstuurdAan, setVerstuurdAan] = useState<string[]>([])
+  const opl = context.type === 'oplevering'
+  const extraLijst = extraAdressen(extra)
+  const aanLijst: { email: string; naam: string | null; soort: Ontvanger['soort'] | 'extra' }[] = opl
+    ? [
+        ...(ontvangers ?? []).filter((o) => gekozen.includes(o.email)),
+        ...extraLijst.geldig.filter((e) => !gekozen.some((g) => g.toLowerCase() === e.toLowerCase())).map((email) => ({ email, naam: null, soort: 'extra' as const })),
+      ]
+    : []
+  const wissel = (email: string) => setGekozen((l) => (l.includes(email) ? l.filter((x) => x !== email) : [...l, email]))
   // Eén sleutel per verzendpoging: een dubbelklik of herhaald verzoek verstuurt nooit twee keer.
   const [sleutel] = useState(() => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`))
 
@@ -152,14 +167,24 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
           setBody(`Beste${context.clientName ? ` ${context.clientName}` : ''},\n\nMag ik je vragen om het formulier "${context.formulierTitel}" in te vullen? Zo hebben we alle informatie om voor jou aan de slag te gaan.\n\nKlik op de knop hieronder om het formulier te openen.${tot ? `\n\nDe link is geldig tot ${tot}.` : ''}\n\nMet vriendelijke groet,\nNextGenMedia`)
           setCtaText('Formulier invullen'); setCtaLink(context.link)
         } else if (context.type === 'oplevering') {
+          // Alle accounts van de klant; lukt dat niet, dan het algemene adres van de klant als vrij adres (zoals vroeger).
           try {
-            const ctxRes = await fetch(`/api/admin/email/context?${new URLSearchParams({ client_id: context.clientId }).toString()}`)
-            const ctx = await ctxRes.json()
-            if (ctxRes.ok) setToEmail(ctx.toEmail ?? '')
-          } catch { /* ontvanger dan zelf invullen */ }
+            const r = await fetch(`/api/admin/opleveringen/ontvangers?${new URLSearchParams({ client_id: context.clientId }).toString()}`, { cache: 'no-store' })
+            const j = await r.json()
+            if (!r.ok) throw new Error(j.error)
+            const lijst = (j.ontvangers ?? []) as Ontvanger[]
+            setOntvangers(lijst); setGekozen(standaardKeuze(lijst))
+          } catch {
+            setOntvangers([])
+            try {
+              const ctxRes = await fetch(`/api/admin/email/context?${new URLSearchParams({ client_id: context.clientId }).toString()}`)
+              const ctx = await ctxRes.json()
+              if (ctxRes.ok) setExtra(ctx.toEmail ?? '')
+            } catch { /* ontvanger dan zelf invullen */ }
+          }
           const tot = context.verlooptOp ? new Date(context.verlooptOp).toLocaleString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : ''
           setSubject(`${context.versieLabel}: ${context.titel}`)
-          setBody(`Beste${context.clientName ? ` ${context.clientName}` : ''},\n\n${context.versieLabel === 'Finale versie' ? 'De finale versie' : `De ${context.versieLabel.toLowerCase()}`} van "${context.titel}" staat klaar in de klantapp. Je kan ${context.soort && context.soort !== 'video' ? 'de bestanden' : 'de video'} daar bekijken, in volle kwaliteit downloaden${context.versieLabel === 'Finale versie' ? '' : ' en je feedback geven'}.${tot ? `\n\nDe bestanden blijven beschikbaar tot ${tot}. Download ze dus tijdig.` : ''}\n\nMet vriendelijke groet,\nNextGenMedia`)
+          setBody(`Beste [voornaam],\n\n${context.versieLabel === 'Finale versie' ? 'De finale versie' : `De ${context.versieLabel.toLowerCase()}`} van "${context.titel}" staat klaar in de klantapp. Je kan ${context.soort && context.soort !== 'video' ? 'de bestanden' : 'de video'} daar bekijken, in volle kwaliteit downloaden${context.versieLabel === 'Finale versie' ? '' : ' en je feedback geven'}.${tot ? `\n\nDe bestanden blijven beschikbaar tot ${tot}. Download ze dus tijdig.` : ''}\n\nMet vriendelijke groet,\nNextGenMedia`)
           setCtaText(context.soort && context.soort !== 'video' ? 'Bekijk de oplevering' : 'Bekijk de video'); setCtaLink(context.link)
         } else if (context.type === 'offerte') {
           const m = offerteMail({ contact: context.contact ?? null, klant: context.klant ?? null, titel: context.titel, geldigTot: context.geldigTot ?? null, merk: context.merk ?? 'nextgenmedia' })
@@ -197,7 +222,46 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
     else { setTemplateId(''); }
   }
 
+  /** Oplevering: één mail per ontvanger, elk met de eigen aanhef en een eigen verzendsleutel (nooit dubbel). */
+  const sendOplevering = async () => {
+    if (context.type !== 'oplevering') return
+    if (extraLijst.ongeldig.length) { setError(`Geen geldig e-mailadres: ${extraLijst.ongeldig.join(', ')}`); return }
+    if (!aanLijst.length) { setError('Kies minstens één ontvanger.'); return }
+    if (!subject.trim()) { setError('Onderwerp is verplicht'); return }
+    setSending(true); setError(null)
+    const tpl = templates.find((t) => t.id === templateId)
+    const gelukt: string[] = [], mislukt: string[] = []
+    let laatste: MailVerstuurd | null = null
+    for (const o of aanLijst) {
+      try {
+        const res = await fetch('/api/admin/email/send', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to_email: o.email, to_client_id: context.clientId,
+            subject, body: metAanhef(body, aanhefVoor(o, context.clientName)), cta_text: ctaText || null, cta_link: ctaLink || null,
+            template_id: templateId && !templateId.startsWith('standaard:') ? templateId : null, template_name: tpl?.name ?? null,
+            kind: 'generic', verzend_sleutel: adresSleutel(sleutel, o.email), merk,
+          }),
+        })
+        const j = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(j.error || 'Verzenden mislukt')
+        gelukt.push(o.email)
+        laatste = { id: j.id ?? null, verstuurd_op: j.verstuurd_op ?? null, al_verstuurd: j.al_verstuurd === true }
+      } catch (e) { mislukt.push(`${o.email} (${e instanceof Error ? e.message : 'fout'})`) }
+    }
+    setVerstuurdAan(gelukt)
+    setSending(false)
+    if (mislukt.length) {
+      setError(`${gelukt.length ? `Verstuurd naar ${gelukt.length}. ` : ''}Niet gelukt voor ${mislukt.join(', ')}. Opnieuw versturen stuurt enkel naar wie nog niets kreeg.`)
+      return
+    }
+    setToEmail(gelukt.join(', '))
+    setDone(true)
+    if (laatste) onSent?.(laatste)
+  }
+
   const send = async () => {
+    if (opl) return sendOplevering()
     if (!toEmail.trim()) { setError('Geen e-mailadres'); return }
     if (!subject.trim()) { setError('Onderwerp is verplicht'); return }
     setSending(true); setError(null)
@@ -233,7 +297,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             to_email: toEmail,
-            to_client_id: (context.type === 'client' || context.type === 'access' || context.type === 'oplevering') ? context.clientId : context.type === 'formulier' ? (context.clientId ?? null) : null,
+            to_client_id: (context.type === 'client' || context.type === 'access') ? context.clientId : context.type === 'formulier' ? (context.clientId ?? null) : null,
             subject, body, cta_text: ctaText || null, cta_link: ctaLink || null,
             template_id: templateId && !templateId.startsWith('standaard:') ? templateId : null, template_name: tpl?.name ?? null,
             kind: context.type === 'client' ? (context.kind ?? 'generic') : 'generic',
@@ -261,7 +325,8 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
         {done ? (
           <div className="p-8 text-center space-y-3">
             <CheckCircle2 className="h-10 w-10 text-green-500 mx-auto" />
-            <p className="text-sm font-medium">Mail verstuurd naar {toEmail}</p>
+            <p className="text-sm font-medium">{opl && verstuurdAan.length > 1 ? `Mail verstuurd naar ${verstuurdAan.length} personen` : `Mail verstuurd naar ${toEmail}`}</p>
+            {opl && verstuurdAan.length > 1 && <p className="text-xs text-gray-600">{verstuurdAan.join(', ')}. Elk kreeg een eigen mail; ze staan in het E-mail Center.</p>}
             {context.type === 'meeting' && afzender && <p className="text-xs text-gray-600">Vanaf {afzender.van}{kopieInfo ? ', met een kopie in de mailbox van info@nextgenmedia.be' : ''}. Staat in het E-mail Center.</p>}
             <button onClick={onClose} className="btn-primary">Sluiten</button>
           </div>
@@ -274,12 +339,17 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
                 ? <div className="text-xs text-gray-600"><span className="font-medium text-gray-700">Van:</span> {afzender.van}</div>
                 : <div className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2" role="alert">Versturen kan nu niet: {afzender.fout}</div>
             )}
+            {opl ? (
+              <OntvangersKiezer ontvangers={ontvangers ?? []} gekozen={gekozen} onWissel={wissel} onKies={setGekozen}
+                extra={extra} onExtra={setExtra} ongeldig={extraLijst.ongeldig} aantal={aanLijst.length} verstuurdAan={verstuurdAan} />
+            ) : (
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Aan{context.type === 'meeting' && <span className="text-gray-400"> — meerdere adressen met een komma</span>}</label>
               {recipientEditable
                 ? <input className={inp} value={toEmail} onChange={(e) => setToEmail(e.target.value)} placeholder="ontvanger@bedrijf.be" />
                 : <div className="text-sm text-gray-800">{toEmail || '— geen e-mailadres —'}</div>}
             </div>
+            )}
             {eerder && (
               <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                 Voor deze goedkeuringstermijn ging al een mail op {new Date(eerder.verstuurd_op).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}{eerder.deadline ? ` (met deadline ${eerder.deadline.split('-').reverse().join('/')})` : ''}. Verstuur enkel opnieuw als dat de bedoeling is.
@@ -345,7 +415,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
             </div>
             {error && <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</div>}
             <div className="flex gap-2 pt-1">
-              <button onClick={send} disabled={sending || !toEmail || (context.type === 'meeting' && !afzender?.ok)} className="btn-primary flex-1 justify-center">{sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}{context.type === 'meeting' ? 'Versturen' : 'Verstuur'}</button>
+              <button onClick={send} disabled={sending || (opl ? !aanLijst.length : !toEmail) || (context.type === 'meeting' && !afzender?.ok)} className="btn-primary flex-1 justify-center">{sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}{context.type === 'meeting' ? 'Versturen' : opl && aanLijst.length > 1 ? `Verstuur naar ${aanLijst.length} personen` : 'Verstuur'}</button>
               <button onClick={onClose} className="btn-secondary">Annuleer</button>
             </div>
           </div>
@@ -356,6 +426,53 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
 }
 
 const CONTRACT_KNOP = 'Bekijken'
+
+const SOORT_LABEL: Record<Ontvanger['soort'], string> = { eigenaar: 'Hoofdaccount', gebruiker: 'Gebruiker', klantadres: 'Algemeen adres van de klant' }
+
+/** Oplevering: kies wie de mail krijgt. "Alle gebruikers" = iedereen met een account die de oplevering kan bekijken. */
+function OntvangersKiezer({ ontvangers, gekozen, onWissel, onKies, extra, onExtra, ongeldig, aantal, verstuurdAan }: {
+  ontvangers: Ontvanger[]; gekozen: string[]; onWissel: (email: string) => void; onKies: (l: string[]) => void
+  extra: string; onExtra: (v: string) => void; ongeldig: string[]; aantal: number; verstuurdAan: string[]
+}) {
+  const alle = alleGebruikers(ontvangers)
+  const allesAan = alle.length > 0 && alle.every((e) => gekozen.includes(e))
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-medium text-gray-600 flex-1">Aan</span>
+        {alle.length > 0 && (
+          <button type="button" onClick={() => onKies(allesAan ? gekozen.filter((e) => !alle.includes(e)) : Array.from(new Set([...gekozen, ...alle])))}
+            className={`text-xs px-3 py-1 rounded-full border ${allesAan ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 hover:bg-gray-50'}`}>
+            Alle gebruikers ({alle.length})
+          </button>
+        )}
+      </div>
+      {ontvangers.length > 0 ? (
+        <ul className="rounded-lg border border-gray-200 divide-y divide-gray-100 max-h-80 overflow-y-auto">
+          {ontvangers.map((o) => (
+            <li key={o.email}>
+              <label className={`flex items-center gap-2.5 px-3 py-2 text-sm ${o.kan ? 'cursor-pointer hover:bg-gray-50' : 'opacity-60 cursor-not-allowed'}`} title={o.reden ?? undefined}>
+                <input type="checkbox" disabled={!o.kan} checked={o.kan && gekozen.includes(o.email)} onChange={() => onWissel(o.email)} className="h-4 w-4 accent-gray-900 shrink-0" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{o.naam ? <><span className="font-medium">{o.naam}</span> <span className="text-gray-500">· {o.email}</span></> : o.email}</span>
+                  <span className="block text-[11px] text-gray-500">{o.reden ?? SOORT_LABEL[o.soort]}{verstuurdAan.includes(o.email) ? ' · verstuurd' : ''}</span>
+                </span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs text-gray-500">Deze klant heeft nog geen accounts in de klantapp. Vul hieronder een adres in.</p>
+      )}
+      <div>
+        <label className="block text-[11px] text-gray-500 mb-1">Andere adressen <span className="text-gray-400">(optioneel, met een komma)</span></label>
+        <input className={`w-full px-3 py-2 text-sm border rounded-lg ${ongeldig.length ? 'border-red-300' : 'border-gray-200'}`} value={extra} onChange={(e) => onExtra(e.target.value)} placeholder="collega@bedrijf.be" />
+        {ongeldig.length > 0 && <p className="text-[11px] text-red-600 mt-0.5">Geen geldig adres: {ongeldig.join(', ')}</p>}
+      </div>
+      <p className="text-[11px] text-gray-500">{aantal > 1 ? `${aantal} personen krijgen elk een eigen mail` : aantal === 1 ? 'Eén persoon krijgt de mail' : 'Nog niemand gekozen'}; [voornaam] in de tekst wordt hun voornaam.</p>
+    </div>
+  )
+}
 
 function defaultContractBody(c: { contractTitle: string; signerName?: string | null; clientName?: string | null }, vervaldatum: string): string {
   return `Beste ${c.signerName || c.clientName || 'klant'},\n\n` +
