@@ -8,6 +8,7 @@ import { verwerkEvents } from '@/lib/events-server'
 import { kopieerInstagramMedia, ontbrekendeMedia } from '@/lib/founders-media-server'
 import { revalidatePath } from 'next/cache'
 import { ruimOpleveringenOp } from '@/lib/opleveringen-server'
+import { ruimAlgemeneContractenOp } from '@/lib/algemene-contracten/server'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -49,7 +50,11 @@ export async function POST(req: NextRequest) {
     })().catch((e) => { console.error('[cron:klantmeetings:founders]', e); return { fout: 1 } })
     // Opleveringen: bestanden die langer dan 3 dagen gedeeld zijn uit de opslag halen.
     const opleveringen = await ruimOpleveringenOp(admin).catch((e) => { console.error('[cron:klantmeetings:opleveringen]', e); return { fout: 1 } })
-    return NextResponse.json({ ok: true, ...telling, gsm, events, founders, opleveringen })
+    // Algemene contracten: bestanden zonder contract opruimen, één keer per uur.
+    const algemeneContracten = new Date().getUTCMinutes() < 5
+      ? await ruimAlgemeneContractenOp(admin).catch((e) => { console.error('[cron:klantmeetings:algemene-contracten]', e); return { fout: 1 } })
+      : null
+    return NextResponse.json({ ok: true, ...telling, gsm, events, founders, opleveringen, algemeneContracten })
   } catch (e) {
     console.error('[cron:klantmeetings]', e)
     return NextResponse.json({ ok: false, error: 'Herinneringen niet verwerkt' }, { status: 500 })

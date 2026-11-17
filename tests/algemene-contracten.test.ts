@@ -58,6 +58,7 @@ async function voorbeeldPdf(paginas = 2): Promise<Uint8Array> {
 function nepAdmin(start: { contracten?: any[]; links?: any[] } = {}) {
   const t: Record<string, any[]> = { algemene_contracten: start.contracten ?? [], algemene_contract_links: start.links ?? [], algemene_contract_events: [], algemene_contract_mappen: [], email_messages: [] }
   const opslag = new Map<string, Uint8Array>()
+  const aanmaak = new Map<string, string>()
   const from = (tabel: string) => {
     const filters: ((r: any) => boolean)[] = []
     let upd: any = null, ins: any = null, del = false
@@ -84,13 +85,19 @@ function nepAdmin(start: { contracten?: any[]; links?: any[] } = {}) {
     return q
   }
   return {
-    t, opslag, from,
+    t, opslag, aanmaak, from,
     storage: {
       from: () => ({
         download: async (p: string) => (opslag.has(p) ? { data: new Blob([opslag.get(p)! as BlobPart]), error: null } : { data: null, error: { message: 'niet gevonden' } }),
         upload: async (p: string, b: Uint8Array) => { opslag.set(p, new Uint8Array(b)); return { error: null } },
         createSignedUrl: async (p: string) => ({ data: { signedUrl: `https://opslag/${p}` } }),
-        remove: async () => ({ error: null }),
+        remove: async (paden: string[]) => { for (const x of paden) opslag.delete(x); return { error: null } },
+        // Zoals Supabase: mappen hebben id null, bestanden een id en created_at.
+        list: async (pad: string) => {
+          const namen = new Map<string, boolean>()
+          for (const k of Array.from(opslag.keys())) if (k.startsWith(`${pad}/`)) { const rest = k.slice(pad.length + 1); namen.set(rest.split('/')[0], rest.includes('/')) }
+          return { data: Array.from(namen.entries()).map(([name, map]) => (map ? { name, id: null, created_at: null } : { name, id: 'f', created_at: aanmaak.get(`${pad}/${name}`) ?? new Date().toISOString() })), error: null }
+        },
       }),
     },
   }
@@ -225,6 +232,57 @@ async function main() {
     // Verlopen link.
     a.t.algemene_contract_links[0].verloopt_op = '2020-01-01T00:00:00Z'
     assert.equal(await server.vindLink(a, token), null)
+  })
+
+  await test('mappenboom: pad, submappen, tellen, niet in zichzelf of te diep', () => {
+    const m = [
+      { id: 'v', naam: 'Verzekeringen', volgorde: 2, parent_id: null },
+      { id: 'h', naam: 'Huur', volgorde: 1, parent_id: null },
+      { id: 'a', naam: 'Auto', volgorde: 50, parent_id: 'v' },
+      { id: 'b', naam: 'Bestelwagen', volgorde: 50, parent_id: 'a' },
+    ]
+    assert.deepEqual(model.kinderen(m, null).map((x) => x.id), ['h', 'v'], 'op volgorde')
+    assert.equal(model.padNaam(m, 'b'), 'Verzekeringen / Auto / Bestelwagen')
+    assert.equal(model.padNaam(m, null), null)
+    assert.deepEqual(Array.from(model.nakomelingen(m, 'v')).sort(), ['a', 'b'])
+    assert.deepEqual(model.boom(m).map((x) => `${x.diepte}:${x.pad}`), ['0:Huur', '0:Verzekeringen', '1:Verzekeringen / Auto', '2:Verzekeringen / Auto / Bestelwagen'])
+    assert.equal(model.aantalIn([{ map_id: 'b', gearchiveerd_op: null }, { map_id: 'v', gearchiveerd_op: null }, { map_id: 'a', gearchiveerd_op: 'x' }, { map_id: 'h', gearchiveerd_op: null }], m, 'v'), 2)
+    assert.equal(model.magIn(m, 'v', 'b'), false, 'niet in een eigen submap')
+    assert.equal(model.magIn(m, 'v', 'v'), false)
+    assert.equal(model.magIn(m, 'h', 'b'), true, 'Verzekeringen / Auto / Bestelwagen / Huur = 4 niveaus')
+    assert.equal(model.magIn([...m, { id: 'c', naam: 'Leasing', volgorde: 1, parent_id: 'b' }], null, 'c'), false, 'een vijfde niveau niet')
+    assert.equal(model.magIn(m, 'a', 'h'), true, 'Auto met Bestelwagen onder Huur = 3 niveaus')
+    // Een lus in de gegevens hangt niets op.
+    assert.equal(model.padVan([{ id: 'x', naam: 'X', volgorde: 1, parent_id: 'y' }, { id: 'y', naam: 'Y', volgorde: 1, parent_id: 'x' }], 'x').length, 2)
+  })
+
+  await test('map verwijderen: submappen en contracten schuiven een niveau hoger', async () => {
+    const V = '0a000000-0000-4000-8000-000000000001', A = '0a000000-0000-4000-8000-000000000002', B = '0a000000-0000-4000-8000-000000000003'
+    const a = nepAdmin({ contracten: [contract({ map_id: A }), { ...contract(), id: 'c2', map_id: B }] })
+    a.t.algemene_contract_mappen = [
+      { id: V, naam: 'Verzekeringen', volgorde: 2, parent_id: null },
+      { id: A, naam: 'Auto', volgorde: 50, parent_id: V },
+      { id: B, naam: 'Bestelwagen', volgorde: 50, parent_id: A },
+    ]
+    await server.mapActie(a, { actie: 'verwijder', id: A }, null)
+    assert.deepEqual(a.t.algemene_contract_mappen.map((x: any) => [x.id, x.parent_id]), [[V, null], [B, V]])
+    assert.equal(a.t.algemene_contracten[0].map_id, V)
+    assert.equal(a.t.algemene_contracten[1].map_id, B)
+    await assert.rejects(server.mapActie(a, { actie: 'hernoem', id: V, naam: 'Verzekeringen', parent_id: B }, null), /niet in zichzelf/)
+    await server.mapActie(a, { actie: 'maak', naam: 'Brand', parent_id: V }, null)
+    assert.equal(a.t.algemene_contract_mappen.find((x: any) => x.naam === 'Brand')?.parent_id, V)
+  })
+
+  await test('opruimen: bestanden van verwijderde contracten en oude losse uploads, nooit van bestaande', async () => {
+    const a = nepAdmin({ contracten: [contract({ id: '11111111-1111-1111-1111-111111111111', bestand_pad: 'origineel/aaaa/huur.pdf' })] })
+    const weg = '22222222-2222-2222-2222-222222222222'
+    const bewaar = ['origineel/aaaa/huur.pdf', 'getekend/11111111-1111-1111-1111-111111111111-20261117-ons.pdf', 'handtekeningen/11111111-1111-1111-1111-111111111111-ons-20261117.png', 'origineel/nieuw/bezig.pdf']
+    const opruimen = [`getekend/${weg}-20261117-ons.pdf`, `handtekeningen/${weg}-partij-20261117.png`, 'origineel/oud/vergeten.pdf']
+    for (const p of [...bewaar, ...opruimen]) a.opslag.set(p, new Uint8Array([1]))
+    a.aanmaak.set('origineel/oud/vergeten.pdf', '2026-11-10T10:00:00Z')
+    const r = await server.ruimAlgemeneContractenOp(a)
+    assert.equal(r.verwijderd, 3)
+    assert.deepEqual(Array.from(a.opslag.keys()).sort(), [...bewaar].sort(), 'een upload van vandaag blijft, die kan nog bewaard worden')
   })
 
   await test('taken: per persoon bij wie tekent (gezamenlijk of niemand = Marco en Bram)', () => {

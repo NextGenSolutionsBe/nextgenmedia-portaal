@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 import { Archive, ArchiveRestore, ChevronLeft, Clock, Download, FileText, Loader2, MapPin, PenLine, Save, Trash2 } from 'lucide-react'
 import { MailDialog } from '@/components/admin/mail-composer'
 import { PdfVakken } from '@/components/esign/pdf-vakken'
-import { ONDERTEKENAARS, STATUS_INFO, statusLabel, statusVan, type AlgemeenContract, type Map } from '@/lib/algemene-contracten/model'
+import { ONDERTEKENAARS, STATUS_INFO, boom, padNaam, statusLabel, statusVan, type AlgemeenContract, type Map } from '@/lib/algemene-contracten/model'
 import { LabelsVeld } from '../overzicht'
 
 const moment = (iso: string) => new Date(iso).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -57,12 +57,13 @@ export function AcDetail({ contract: c, heeftGetekendeVersie, mappen, tijdlijn, 
   return (
     <div className="space-y-5 animate-fade-in">
       <div className="flex items-start gap-3 flex-wrap">
-        <Link href="/admin/algemene-contracten" className="btn-secondary px-2 shrink-0" title="Alle algemene contracten"><ChevronLeft className="h-4 w-4" /></Link>
+        <Link href={`/admin/algemene-contracten${c.map_id ? `?map=${c.map_id}` : ''}`} className="btn-secondary px-2 shrink-0" title={c.map_id ? `Terug naar ${padNaam(mappen, c.map_id) ?? 'de map'}` : 'Alle algemene contracten'}><ChevronLeft className="h-4 w-4" /></Link>
         <div className="min-w-0 flex-1">
           <h1 className="text-xl font-semibold break-words">{c.titel}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-500">
             <span className={`status-badge border text-[11px] ${STATUS_INFO[s].cls}`}>{statusLabel(c)}</span>
             {c.tegenpartij && <span>{c.tegenpartij}</span>}
+            {padNaam(mappen, c.map_id) && <span className="text-xs">· {padNaam(mappen, c.map_id)}</span>}
             {c.gearchiveerd_op && <span className="text-[11px] rounded-full bg-gray-100 px-2 py-0.5">Gearchiveerd</span>}
           </div>
         </div>
@@ -71,8 +72,17 @@ export function AcDetail({ contract: c, heeftGetekendeVersie, mappen, tijdlijn, 
           {c.partij_nodig && !c.partij_getekend_op && !c.gearchiveerd_op && s !== 'wacht_op_ons' && <Link href={`/admin/algemene-contracten/${c.id}/tekenen`} className="btn-secondary text-sm"><MapPin className="h-4 w-4" />Plaats voor {partij}</Link>}
           {!c.gearchiveerd_op && <button type="button" onClick={() => setMail(true)} className={s === 'wacht_op_ons' ? 'btn-secondary text-sm' : 'btn-primary text-sm'}>Versturen</button>}
           <a href={`${pdf}?download=1`} className="btn-secondary text-sm"><Download className="h-4 w-4" />{heeftGetekendeVersie ? 'Getekende PDF' : 'PDF'}</a>
+          <button type="button" disabled={!!bezig} onClick={() => patch({ archief: !c.gearchiveerd_op }, 'archief', c.gearchiveerd_op ? 'Uit het archief gehaald.' : 'Gearchiveerd. Je vindt het terug onder Archief.')} className="btn-secondary text-sm" title={c.gearchiveerd_op ? 'Uit het archief halen' : 'Archiveren'}>
+            {bezig === 'archief' ? <Loader2 className="h-4 w-4 animate-spin" /> : c.gearchiveerd_op ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}{c.gearchiveerd_op ? 'Terugzetten' : 'Archiveren'}
+          </button>
         </div>
       </div>
+
+      {c.gearchiveerd_op && (
+        <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+          <b className="font-semibold">Gearchiveerd.</b> Dit contract staat niet meer in de mappen, enkel onder Archief. Tekenen en versturen kan pas weer na terugzetten.
+        </div>
+      )}
 
       {s === 'wacht_op_partij' && !c.gearchiveerd_op && (
         <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
@@ -94,9 +104,6 @@ export function AcDetail({ contract: c, heeftGetekendeVersie, mappen, tijdlijn, 
             <a href={`${pdf}?download=1`} className="flex items-center gap-2 text-sm text-gray-700 hover:text-black"><Download className="h-4 w-4" />{heeftGetekendeVersie ? 'Getekende versie downloaden' : 'PDF downloaden'}</a>
             {heeftGetekendeVersie && <a href={`${pdf}?origineel=1&download=1`} className="flex items-center gap-2 text-sm text-gray-700 hover:text-black"><FileText className="h-4 w-4" />Origineel (zonder handtekeningen)</a>}
             <div className="flex flex-wrap gap-3 pt-1 text-xs">
-              <button type="button" disabled={!!bezig} onClick={() => patch({ archief: !c.gearchiveerd_op }, 'archief', c.gearchiveerd_op ? 'Uit het archief gehaald.' : 'Gearchiveerd.')} className="inline-flex items-center gap-1 text-gray-500 hover:text-black">
-                {c.gearchiveerd_op ? <><ArchiveRestore className="h-3.5 w-3.5" />Uit het archief halen</> : <><Archive className="h-3.5 w-3.5" />Archiveren</>}
-              </button>
               {!c.ons_getekend_op && !c.partij_getekend_op && (
                 <button type="button" disabled={!!bezig} onClick={verwijder} className="inline-flex items-center gap-1 text-gray-500 hover:text-red-600">{bezig === 'verwijder' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}Verwijderen</button>
               )}
@@ -174,7 +181,7 @@ function Gegevens({ c, mappen, labelVoorstellen, bezig, onBewaar }: {
           <label className={LBL}>Map</label>
           <select className="input-base" value={v.map_id} onChange={(e) => setV({ ...v, map_id: e.target.value })}>
             <option value="">Zonder map</option>
-            {mappen.map((m) => <option key={m.id} value={m.id}>{m.naam}</option>)}
+            {boom(mappen).map(({ map: m, pad }) => <option key={m.id} value={m.id}>{pad}</option>)}
           </select>
         </div>
         <div><label className={LBL}>Andere partij</label><input className="input-base" value={v.tegenpartij} maxLength={200} onChange={(e) => setV({ ...v, tegenpartij: e.target.value })} /></div>
