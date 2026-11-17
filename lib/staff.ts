@@ -17,7 +17,7 @@ export type AdminModule = {
 // af te schermen (pagina verbergen zonder API-gate is schijnveiligheid).
 export const ADMIN_MODULES: AdminModule[] = [
   { key: 'clients',     label: 'Klanten',              prefixes: ['/admin/clients', '/api/admin/clients', '/api/admin/tasks'] },
-  { key: 'contracts',   label: 'Contracten',           prefixes: ['/admin/contracts', '/api/admin/contracts', '/api/admin/contract-templates'] },
+  { key: 'contracts',   label: 'Klantcontracten',      prefixes: ['/admin/contracts', '/api/admin/contracts', '/api/admin/contract-templates'] },
   // Aanvragen van diensten en consultancy uit het klantportaal (geen opdrachten of boekingen).
   { key: 'aanvragen',   label: 'Aanvragen',            prefixes: ['/admin/aanvragen', '/api/admin/aanvragen'] },
   // Offertes: sjablonen (pdf's) en verstuurde offertes met publieke link en accepteren.
@@ -51,6 +51,8 @@ export const ADMIN_MODULES: AdminModule[] = [
   // Personeel: dossiers, planning, uren en personeelskosten. De medewerker zelf
   // werkt in /team (eigen omgeving, eigen API /api/team), nooit in /admin.
   { key: 'personeel',   label: 'Personeel',            prefixes: ['/admin/personeel', '/api/admin/personeel'] },
+  // Algemene contracten: eigen contracten van NextGenMedia (huur, verzekeringen, NDA's …) met e-sign. Enkel zaakvoerders.
+  { key: 'algemene_contracten', label: 'Algemene contracten', prefixes: ['/admin/algemene-contracten', '/api/admin/algemene-contracten'] },
   { key: 'kantoor',     label: 'Kantoor',              prefixes: ['/admin/kantoor', '/api/kantoor'] },
   // Materiaalbeheer: camera's, lenzen, audio… wie heeft wat sinds wanneer.
   { key: 'materiaal',   label: 'Materiaalbeheer',      prefixes: ['/admin/materiaal', '/api/admin/materiaal'] },

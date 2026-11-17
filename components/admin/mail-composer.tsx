@@ -7,6 +7,7 @@ import { DEFAULT_TEMPLATES } from '@/lib/email-templates-defaults'
 import { MERK_STIJL, MAIL_MERKEN, type MailMerk } from '@/lib/merk-mail'
 import { offerteMail } from '@/lib/offertes'
 import { welkomstMail } from '@/lib/klant-account'
+import { mailVoorstel } from '@/lib/algemene-contracten/model'
 import { aanhefVoor, adresSleutel, alleGebruikers, extraAdressen, metAanhef, standaardKeuze, type Ontvanger } from '@/lib/opleveringen-ontvangers'
 
 // Eén gedeelde mailcomponent voor ALLE handmatige mails (klant/contract/taak/
@@ -30,6 +31,8 @@ export type MailContext =
   | { type: 'oplevering'; titel: string; versieLabel: string; link: string; clientId: string; clientName?: string | null; verlooptOp?: string | null; soort?: string | null }
   // Offerte: de knop in de mail opent altijd de publieke offertepagina (accepteren met één knop).
   | { type: 'offerte'; offerteId: string; titel: string; link: string; klant?: string | null; contact?: string | null; email?: string | null; geldigTot?: string | null; merk?: MailMerk | null }
+  // Algemeen contract (huur, verzekering, NDA …): de knop opent een persoonlijke link (bekijken, downloaden, eventueel tekenen); de PDF als bijlage.
+  | { type: 'algemeen_contract'; contractId: string; titel: string; email?: string | null; tegenpartij?: string | null; partijNodig: boolean; partijGetekend: boolean; onsGetekend: boolean }
 
 /** Resultaat van een gelukte verzending (of van een eerder gelukte, bij dezelfde verzendpoging). */
 export type MailVerstuurd = { id: string | null; verstuurd_op: string | null; al_verstuurd?: boolean }
@@ -70,6 +73,8 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
   // Meeting: van welk adres de mail vertrekt, of waarom dat nu niet kan. Kopie in de info@-mailbox.
   const [afzender, setAfzender] = useState<{ ok: boolean; van: string; fout?: string } | null>(null)
   const [kopieInfo, setKopieInfo] = useState(true)
+  // Algemeen contract: de huidige PDF (met de handtekeningen) als bijlage meesturen.
+  const [bijlage, setBijlage] = useState(true)
   // Huisstijl van de mail: NextGenMedia (geel) of NextGenSolutions (blauw). Meetingmails vertrekken altijd van NextGenMedia.
   const [merk, setMerk] = useState<MailMerk>('nextgenmedia')
   const stijl = MERK_STIJL[context.type === 'meeting' ? 'nextgenmedia' : merk]
@@ -104,7 +109,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
     (async () => {
       try {
         // Een meetingmail vertrekt uit de meeting zelf, niet uit een template.
-        const tpl = context.type === 'meeting' || context.type === 'offerte' ? { templates: [] } : await (await fetch('/api/admin/email/templates')).json()
+        const tpl = context.type === 'meeting' || context.type === 'offerte' || context.type === 'algemeen_contract' ? { templates: [] } : await (await fetch('/api/admin/email/templates')).json()
         const eigen = (tpl.templates ?? []) as Template[]
         // De ingebouwde template van deze soort tonen zolang er geen eigen versie van bestaat.
         const extra = context.type === 'client' && !eigen.some((t) => t.kind === context.kind) ? ingebouwd(context.kind) : null
@@ -186,6 +191,10 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
           setSubject(`${context.versieLabel}: ${context.titel}`)
           setBody(`Beste [voornaam],\n\n${context.versieLabel === 'Finale versie' ? 'De finale versie' : `De ${context.versieLabel.toLowerCase()}`} van "${context.titel}" staat klaar in de klantapp. Je kan ${context.soort && context.soort !== 'video' ? 'de bestanden' : 'de video'} daar bekijken, in volle kwaliteit downloaden${context.versieLabel === 'Finale versie' ? '' : ' en je feedback geven'}.${tot ? `\n\nDe bestanden blijven beschikbaar tot ${tot}. Download ze dus tijdig.` : ''}\n\nMet vriendelijke groet,\nNextGenMedia`)
           setCtaText(context.soort && context.soort !== 'video' ? 'Bekijk de oplevering' : 'Bekijk de video'); setCtaLink(context.link)
+        } else if (context.type === 'algemeen_contract') {
+          const m = mailVoorstel({ titel: context.titel, tegenpartij: context.tegenpartij ?? null, partij_nodig: context.partijNodig, partij_getekend_op: context.partijGetekend ? 'ja' : null, ons_getekend_op: context.onsGetekend ? 'ja' : null })
+          setToEmail(context.email ?? '')
+          setSubject(m.onderwerp); setBody(m.tekst); setCtaText(m.knop); setCtaLink(`${window.location.origin}/document/(persoonlijke link, aangemaakt bij het versturen)`)
         } else if (context.type === 'offerte') {
           const m = offerteMail({ contact: context.contact ?? null, klant: context.klant ?? null, titel: context.titel, geldigTot: context.geldigTot ?? null, merk: context.merk ?? 'nextgenmedia' })
           setToEmail(context.email ?? '')
@@ -272,6 +281,11 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
         res = await fetch(`/api/admin/meetings/${context.meetingId}/mail`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ aan: toEmail, onderwerp: subject, tekst: body, cta_tekst: ctaText || null, cta_link: ctaLink || null, verzend_sleutel: sleutel, kopie_info: kopieInfo }),
+        })
+      } else if (context.type === 'algemeen_contract') {
+        res = await fetch(`/api/admin/algemene-contracten/${context.contractId}/mail`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ to_email: toEmail, subject, body, cta_text: ctaText || null, verzend_sleutel: sleutel, merk, bijlage }),
         })
       } else if (context.type === 'offerte') {
         res = await fetch(`/api/admin/offertes/${context.offerteId}/send-mail`, {
@@ -363,7 +377,10 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
                 <p className="text-[11px] text-gray-400 mt-0.5">De volledige mail wordt bij het contract bewaard onder “Verzonden mails”.</p>
               </div>
             )}
-            {context.type === 'meeting' ? (
+            {context.type === 'algemeen_contract' && (
+              <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer"><input type="checkbox" checked={bijlage} onChange={(e) => setBijlage(e.target.checked)} />{context.onsGetekend || context.partijGetekend ? 'De getekende PDF' : 'De PDF'} als bijlage meesturen (tot 10 MB)</label>
+            )}
+            {context.type === 'algemeen_contract' ? null : context.type === 'meeting' ? (
               <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer"><input type="checkbox" checked={kopieInfo} onChange={(e) => setKopieInfo(e.target.checked)} />Kopie in de mailbox van info@nextgenmedia.be (bcc)</label>
             ) : (
               <div>
@@ -397,7 +414,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div><label className="block text-xs font-medium text-gray-600 mb-1">Knop-tekst</label><input className={inp} value={ctaText} onChange={(e) => setCtaText(e.target.value)} placeholder="Bv. Bekijken" /></div>
-              <div><label className="block text-xs font-medium text-gray-600 mb-1">Knop-link</label><input className={`${inp} ${context.type === 'offerte' ? 'bg-gray-50 text-gray-500' : ''}`} value={ctaLink} onChange={(e) => setCtaLink(e.target.value)} readOnly={context.type === 'offerte'} title={context.type === 'offerte' ? 'De knop opent altijd de offerte' : undefined} placeholder="https://…" /></div>
+              <div><label className="block text-xs font-medium text-gray-600 mb-1">Knop-link</label><input className={`${inp} ${context.type === 'offerte' || context.type === 'algemeen_contract' ? 'bg-gray-50 text-gray-500' : ''}`} value={ctaLink} onChange={(e) => setCtaLink(e.target.value)} readOnly={context.type === 'offerte' || context.type === 'algemeen_contract'} title={context.type === 'offerte' ? 'De knop opent altijd de offerte' : context.type === 'algemeen_contract' ? 'Elke ontvanger krijgt een eigen link (30 dagen geldig)' : undefined} placeholder="https://…" /></div>
             </div>
             {/* Preview */}
             <div className="rounded-lg border border-gray-100 bg-gray-50 overflow-hidden">

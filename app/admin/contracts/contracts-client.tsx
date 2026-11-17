@@ -302,7 +302,7 @@ export function ContractsClient({
       <ContractTabs />
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl sm:text-2xl font-semibold">Contracten</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold">Klantcontracten</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             {cijfers.mappen} klantmap{cijfers.mappen === 1 ? '' : 'pen'} · {cijfers.contracten} van {contracten.length} contracten
           </p>
