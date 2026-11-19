@@ -36,7 +36,6 @@ export async function POST(req: NextRequest) {
     // De factuur mag later: het bedrag gaat meteen van de waarde af.
     const invoer = b.bewijs ? controleerBewijsInvoer(b.bewijs) : null
     if (b.bewijs && !invoer) return NextResponse.json({ error: 'Ongeldig document.' }, { status: 400 })
-    if (!c.lijn.verantwoording) return NextResponse.json({ error: 'Geef een verantwoording: waarom gaat dit eraf?' }, { status: 400 })
     const admin = createAdminSupabaseClient()
     const { data: contract } = await admin.from('vesting_contracten').select('id, klant, nr').eq('id', contractId).maybeSingle()
     if (!contract) return NextResponse.json({ error: 'Contract niet gevonden.' }, { status: 404 })
