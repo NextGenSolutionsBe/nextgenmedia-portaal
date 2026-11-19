@@ -1,10 +1,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { MessageSquare, Plus, MoreHorizontal, Check, FileSignature, AlertCircle, UserRound, Send, Mail } from 'lucide-react'
+import { MessageSquare, Plus, MoreHorizontal, Check, FileSignature, AlertCircle, UserRound, Send, Mail, ListPlus, X } from 'lucide-react'
+import { NieuweTaak } from '@/components/admin/clickup-taken'
 import { offerteBevestigdLabel } from '@/lib/opdrachten-offerte-model'
 import {
-  KOLOMMEN, kolomVan, kaartKleur, projectNaam, projectOnderwerp, offerteViaLabel, dagenSinds, BEDRIJVEN, projectVerantwoordelijke,
+  KOLOMMEN, kolomVan, kaartKleur, projectNaam, projectOnderwerp, offerteViaLabel, dagenSinds, BEDRIJVEN, projectVerantwoordelijke, bedrijfVan,
   type KolomKey,
 } from '@/lib/opdrachten-kanban'
 import { formatEuro } from '@/lib/utils'
@@ -24,7 +25,9 @@ const FASE_STIP: Record<KolomKey, string> = {
  * muis; op een touchscherm (en voor wie liever klikt) via het menu "…" op de
  * kaart. De kleur van de dienst is een stip, het bedrag staat rechts.
  */
-export function KanbanBord({ kaarten, laden, onOpen, onVerplaats, onNieuw, voor, opvolging }: {
+export function KanbanBord({ kaarten, laden, onOpen, onVerplaats, onNieuw, voor, opvolging, onVernieuw }: {
+  /** Na een taak via de kaart: het bord stil herladen (de notitie verschijnt). */
+  onVernieuw?: () => void
   /** Een eigen kolom vooraan (Account-based marketing). */
   voor?: React.ReactNode
   /** Mail-opvolging per kaart (lib/mail-opvolging): wat er opgevolgd moet worden. */
@@ -39,6 +42,7 @@ export function KanbanBord({ kaarten, laden, onOpen, onVerplaats, onNieuw, voor,
   const [doel, setDoel] = useState<KolomKey | null>(null)
   const [zichtbaar, setZichtbaar] = useState<Partial<Record<KolomKey, number>>>({})
   const [menuId, setMenuId] = useState<string | null>(null)
+  const [taakVoor, setTaakVoor] = useState<KaartOpdracht | null>(null)
 
   useEffect(() => {
     if (!menuId) return
@@ -56,6 +60,8 @@ export function KanbanBord({ kaarten, laden, onOpen, onVerplaats, onNieuw, voor,
   }
 
   return (
+    <>
+    {taakVoor && <TaakVenster o={taakVoor} onSluit={() => setTaakVoor(null)} onKlaar={() => { setTaakVoor(null); onVernieuw?.() }} />}
     <div className="-mx-4 sm:mx-0 px-4 sm:px-0 flex gap-2.5 overflow-x-auto pb-3 snap-x snap-mandatory sm:snap-none overscroll-x-contain">
       {voor}
       {KOLOMMEN.map((kol) => {
@@ -89,6 +95,7 @@ export function KanbanBord({ kaarten, laden, onOpen, onVerplaats, onNieuw, voor,
               {lijst.slice(0, max).map((o) => (
                 <Kaart key={o.id} o={o} sleept={sleepId === o.id} menuOpen={menuId === o.id} opvolging={opvolging?.[o.id]}
                   onOpen={() => onOpen(o)}
+                  onTaak={() => { setMenuId(null); setTaakVoor(o) }}
                   onMenu={() => setMenuId(menuId === o.id ? null : o.id)}
                   onKolom={(k) => { setMenuId(null); if (k !== kolomVan(o.status)) onVerplaats(o, k) }}
                   onDragStart={(e) => { e.dataTransfer.setData('text/plain', o.id); e.dataTransfer.effectAllowed = 'move'; setSleepId(o.id); setMenuId(null) }}
@@ -108,10 +115,44 @@ export function KanbanBord({ kaarten, laden, onOpen, onVerplaats, onNieuw, voor,
         )
       })}
     </div>
+    </>
   )
 }
 
-function Kaart({ o, sleept, menuOpen, onOpen, onMenu, onKolom, onDragStart, onDragEnd, opvolging }: {
+/**
+ * Taak toevoegen vanaf de kaart: wat (standaard "Opvolgen"), op welke dag en
+ * een notitie (typen of inspreken). Wordt een gewone ClickUp-taak bij deze
+ * kaart, toegewezen aan de verantwoordelijke; de kaart krijgt een regel.
+ */
+function TaakVenster({ o, onSluit, onKlaar }: { o: KaartOpdracht; onSluit: () => void; onKlaar: () => void }) {
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onSluit() }
+    window.addEventListener('keydown', esc)
+    return () => window.removeEventListener('keydown', esc)
+  }, [onSluit])
+  const naam = projectNaam(o.klant_naam, o.diensten, o.titel)
+  const merk = (o.merk ?? bedrijfVan(null, o.diensten)) === 'nextgensolutions' ? 'nextgensolutions' : 'nextgenmedia'
+  return (
+    <div className="fixed inset-0 z-50 bg-black/30 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onSluit}>
+      <div role="dialog" aria-modal="true" aria-label={`Taak voor ${naam}`} onClick={(e) => e.stopPropagation()}
+        className="w-full sm:max-w-md max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-white shadow-xl p-4">
+        <div className="flex items-start justify-between gap-2 mb-3">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-gray-900">Taak toevoegen</p>
+            <p className="text-xs text-gray-500 truncate">{naam} · komt in ClickUp</p>
+          </div>
+          <button type="button" onClick={onSluit} aria-label="Sluiten" className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100"><X className="h-4 w-4" /></button>
+        </div>
+        <NieuweTaak basis={`/api/admin/opdrachten/${o.id}/taken`} waarbij="opdracht" standaardMerk={merk} klant={o.klant_naam ?? null}
+          context={[o.klant_naam, o.titel, projectOnderwerp(o.diensten, null) || null].filter(Boolean).join(' · ') || null}
+          kader={false} onSluit={onSluit} onKlaar={onKlaar} />
+      </div>
+    </div>
+  )
+}
+
+function Kaart({ o, sleept, menuOpen, onOpen, onTaak, onMenu, onKolom, onDragStart, onDragEnd, opvolging }: {
+  onTaak: () => void
   opvolging?: { dringend: boolean; tekst: string; telt: boolean }
   o: KaartOpdracht
   sleept: boolean
@@ -211,7 +252,11 @@ function Kaart({ o, sleept, menuOpen, onOpen, onMenu, onKolom, onDragStart, onDr
           </div>
         </div>
       </div>
-      <div className="absolute right-1 bottom-1 sm:top-1 sm:bottom-auto" onClick={stop}>
+      <div className="absolute right-1 bottom-1 sm:top-1 sm:bottom-auto flex items-center gap-0.5" onClick={stop}>
+        <button type="button" onClick={onTaak} aria-label="Taak toevoegen in ClickUp" title="Taak toevoegen (ClickUp)"
+          className="h-6 w-6 rounded-md flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-900 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100">
+          <ListPlus className="h-4 w-4" />
+        </button>
         <button type="button" onClick={onMenu} aria-label="Verplaatsen naar een andere fase" title="Verplaatsen"
           className={`h-6 w-6 rounded-md flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-900 ${menuOpen ? 'bg-gray-100 text-gray-900' : 'sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100'}`}>
           <MoreHorizontal className="h-4 w-4" />

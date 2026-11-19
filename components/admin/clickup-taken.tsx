@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { ListTodo, Plus, Loader2, ExternalLink, RotateCcw, X, Check, UserRound } from 'lucide-react'
-import { MERKEN, MAX_NOTITIE, MAX_OMSCHRIJVING, merkNaam, statusToon } from '@/lib/sales/lead-taken'
+import { MERKEN, MAX_NOTITIE, MAX_OMSCHRIJVING, SNELLE_TAKEN, leadTaakNaam, merkNaam, snelleDatums, statusToon } from '@/lib/sales/lead-taken'
+import { DicteerKnop } from '@/components/admin/dicteer-knop'
 
 /**
  * Taken in ClickUp, bij een lead (leadfiche) of een opdracht (kaartvenster).
@@ -39,7 +40,7 @@ export function LeadTaken({ leadId, standaardMerk, onGewijzigd }: { leadId: stri
   return <ClickupTaken api={`/api/admin/sales/leads/${leadId}/taken`} waarbij="lead" standaardMerk={standaardMerk} onGewijzigd={onGewijzigd} />
 }
 
-export function ClickupTaken({ api: basis, waarbij, standaardMerk, onGewijzigd, titel = 'Taken' }: { api: string; waarbij: 'lead' | 'opdracht'; standaardMerk: string | null; onGewijzigd?: () => void; titel?: string }) {
+export function ClickupTaken({ api: basis, waarbij, standaardMerk, onGewijzigd, titel = 'Taken', klant, context }: { api: string; waarbij: 'lead' | 'opdracht'; standaardMerk: string | null; onGewijzigd?: () => void; titel?: string; klant?: string | null; context?: string | null }) {
   const [taken, setTaken] = useState<Taak2[] | null>(null)
   const [opties, setOpties] = useState<Opties | null>(null)
   const [wijzig, setWijzig] = useState<string | null>(null)
@@ -89,7 +90,7 @@ export function ClickupTaken({ api: basis, waarbij, standaardMerk, onGewijzigd, 
         <h3 className="text-[11px] text-gray-400 font-bold flex items-center gap-1"><ListTodo className="h-3 w-3" />{titel}</h3>
         {!open && <button type="button" onClick={() => setOpen(true)} className="btn-secondary !py-1 !px-2 text-xs"><Plus className="h-3.5 w-3.5" />Taak toevoegen</button>}
       </div>
-      {open && <NieuweTaak basis={basis} waarbij={waarbij} standaardMerk={standaardMerk} onSluit={() => setOpen(false)} onKlaar={() => { setOpen(false); laad(); onGewijzigd?.() }} />}
+      {open && <NieuweTaak basis={basis} waarbij={waarbij} standaardMerk={standaardMerk} klant={klant} context={context} onSluit={() => setOpen(false)} onKlaar={() => { setOpen(false); laad(); onGewijzigd?.() }} />}
       {statusFout && <p className="text-[11px] text-amber-700 mb-1.5">{statusFout}</p>}
       {taken === null ? (
         <div className="py-2 text-center text-gray-300"><Loader2 className="h-4 w-4 animate-spin mx-auto" /></div>
@@ -151,10 +152,22 @@ export function ClickupTaken({ api: basis, waarbij, standaardMerk, onGewijzigd, 
   )
 }
 
-function NieuweTaak({ basis, waarbij, standaardMerk, onSluit, onKlaar }: { basis: string; waarbij: 'lead' | 'opdracht'; standaardMerk: string | null; onSluit: () => void; onKlaar: () => void }) {
+/**
+ * Nieuwe taak: wat (standaard "Opvolgen", snelle keuzes), wanneer (snelle
+ * datums of zelf kiezen), voor wie en een notitie die je ook kan inspreken.
+ * Ook gebruikt in het venster "Taak" op de kaarten van het bord.
+ */
+export function NieuweTaak({ basis, waarbij, standaardMerk, onSluit, onKlaar, klant, context, kader = true }: {
+  basis: string; waarbij: 'lead' | 'opdracht'; standaardMerk: string | null; onSluit: () => void; onKlaar: () => void
+  /** De klant van de kaart: komt in de taaknaam in ClickUp ("Opvolgen (Kilowot)"). */
+  klant?: string | null
+  /** Waar de taak bij hoort, voor het inspreken van de notitie (namen juist schrijven). */
+  context?: string | null
+  kader?: boolean
+}) {
   const [opties, setOpties] = useState<Opties | null>(null)
   const [optieFout, setOptieFout] = useState<string | null>(null)
-  const [omschrijving, setOmschrijving] = useState('')
+  const [omschrijving, setOmschrijving] = useState<string>('Opvolgen')
   const [deadline, setDeadline] = useState('')
   const [notitie, setNotitie] = useState('')
   const [lid, setLid] = useState<string>('')
@@ -187,17 +200,32 @@ function NieuweTaak({ basis, waarbij, standaardMerk, onSluit, onKlaar }: { basis
   }
 
   const lbl = 'block text-[11px] font-medium text-gray-500 mb-0.5'
+  const chip = (aan: boolean) => `px-2.5 py-1 rounded-full text-xs border ${aan ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 text-gray-600 hover:border-gray-400'}`
+  const snel = snelleDatums(vandaag())
+  const lidNaam = opties?.leden.find((m) => String(m.id) === lid)?.naam ?? null
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2.5 mb-2">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold">Taak toevoegen</span>
-        <button type="button" onClick={onSluit} aria-label="Sluiten" className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100"><X className="h-4 w-4" /></button>
+    <div className={kader ? 'rounded-xl border border-gray-200 bg-white p-3 space-y-2.5 mb-2' : 'space-y-2.5'}>
+      {kader && (
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-semibold">Taak toevoegen</span>
+          <button type="button" onClick={onSluit} aria-label="Sluiten" className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100"><X className="h-4 w-4" /></button>
+        </div>
+      )}
+      <div>
+        <span className={lbl}>Wat moet er gebeuren?</span>
+        <div className="flex gap-1.5 flex-wrap mb-1.5">
+          {SNELLE_TAKEN.map((t) => <button key={t} type="button" onClick={() => setOmschrijving(t)} className={chip(omschrijving === t)}>{t}</button>)}
+        </div>
+        <input className="input-base text-sm" value={omschrijving} maxLength={MAX_OMSCHRIJVING} onChange={(e) => setOmschrijving(e.target.value)} placeholder="Bv. Offerte opmaken voor de website" aria-label="Taakomschrijving" />
       </div>
-      <label className="block"><span className={lbl}>Taakomschrijving</span>
-        <input className="input-base text-sm" autoFocus value={omschrijving} maxLength={MAX_OMSCHRIJVING} onChange={(e) => setOmschrijving(e.target.value)} placeholder="Bv. Offerte opmaken voor de website" />
-      </label>
+      <div>
+        <span className={lbl}>Op welke dag?</span>
+        <div className="flex gap-1.5 flex-wrap mb-1.5">
+          {snel.map((d) => <button key={d.dag} type="button" onClick={() => setDeadline(d.dag)} className={chip(deadline === d.dag)} title={datum(d.dag)}>{d.label}</button>)}
+        </div>
+      </div>
       <div className="grid grid-cols-2 gap-2">
-        <label className="block"><span className={lbl}>Deadline</span>
+        <label className="block"><span className={lbl}>Datum</span>
           <input type="date" className="input-base text-sm" value={deadline} min={vandaag()} onChange={(e) => setDeadline(e.target.value)} />
         </label>
         <label className="block"><span className={lbl}>Verantwoordelijke</span>
@@ -217,10 +245,15 @@ function NieuweTaak({ basis, waarbij, standaardMerk, onSluit, onKlaar }: { basis
         </div>
       </div>
       {lijst && !lijst.ok && <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5" role="alert">{lijst.probleem}</p>}
-      <label className="block"><span className={lbl}>Notitie <span className="font-normal text-gray-400">(extra uitleg, optioneel)</span></span>
-        <textarea rows={3} className="input-base text-sm" value={notitie} maxLength={MAX_NOTITIE} onChange={(e) => setNotitie(e.target.value)} placeholder="Wat moet er gebeuren, wat weten we al?" />
-      </label>
-      <p className="text-[11px] text-gray-500">Wordt een gewone taak in ClickUp (geen agenda-item), toegewezen aan de verantwoordelijke, met een link naar deze {waarbij === 'lead' ? 'lead' : 'opdracht'}.</p>
+      <div>
+        <div className="flex items-center justify-between gap-2"><span className={lbl}>Notitie <span className="font-normal text-gray-400">(wat er moet gebeuren, optioneel)</span></span><DicteerKnop zet={setNotitie} context={context ?? klant ?? null} klein /></div>
+        <textarea rows={3} className="input-base text-sm" value={notitie} maxLength={MAX_NOTITIE} onChange={(e) => setNotitie(e.target.value)} placeholder="Typ of spreek in: wat moet er gebeuren, wat weten we al?" />
+      </div>
+      <p className="text-[11px] text-gray-500">
+        {omschrijving.trim() && deadline
+          ? <>In ClickUp: <b className="font-medium text-gray-700">{leadTaakNaam(omschrijving.trim(), klant ?? null)}</b> op {datum(deadline)}{lidNaam ? ` voor ${lidNaam}` : ''}, met de notitie eronder.</>
+          : <>Wordt een gewone taak in ClickUp op die dag (geen agenda-item), toegewezen aan de verantwoordelijke, met een link naar deze {waarbij === 'lead' ? 'lead' : 'kaart'}.</>}
+      </p>
       {optieFout && <p className="text-xs text-red-700">{optieFout}</p>}
       {opties && !opties.ingesteld && <p className="text-xs text-red-700">ClickUp is niet gekoppeld; een taak aanmaken lukt nu niet.</p>}
       {fout && <p className="text-xs text-red-700" role="alert">{fout}</p>}

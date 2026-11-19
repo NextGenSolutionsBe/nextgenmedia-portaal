@@ -40,7 +40,7 @@ const securityHeaders = [
   // Only send the origin (not the full path) as referrer to other origins.
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
   // Disable powerful browser features the app doesn't use.
-  { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), interest-cohort=()' },
+  { key: 'Permissions-Policy', value: 'camera=(), microphone=(self), geolocation=(), interest-cohort=()' },
   // Force HTTPS for two years (browsers only honour this over HTTPS).
   { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
   { key: 'X-DNS-Prefetch-Control', value: 'on' },

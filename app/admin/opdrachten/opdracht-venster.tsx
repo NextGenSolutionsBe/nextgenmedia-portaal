@@ -16,6 +16,7 @@ import { formatEuro } from '@/lib/utils'
 import { geopendTekst } from '@/lib/klant-geopend'
 import { KlantKiezer, type KlantOptie } from '@/components/admin/klant-kiezer'
 import { ClickupTaken } from '@/components/admin/clickup-taken'
+import { DicteerKnop } from '@/components/admin/dicteer-knop'
 import { MailOpvolging } from './mail-opvolging'
 import { OffertesBij } from '@/components/admin/offertes-bij'
 import { BtwOpzoeken } from '@/components/admin/btw-opzoeken'
@@ -123,6 +124,9 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
     const bij = (f: FactuurOptie) => (c.contract_id && f.contract_id === c.contract_id) || (c.client_id && f.client_id === c.client_id)
     return { eigen: facturen.filter(bij), rest: facturen.filter((f) => !bij(f)) }
   }, [facturen, c.client_id, c.contract_id])
+  // Waar de kaart over gaat: voor het inspreken (namen juist) en de taaknaam in ClickUp.
+  const klantNaam = (c.client_id ? klanten.find((k) => k.id === c.client_id)?.naam ?? (c.client_id === o?.client_id ? o?.klant_naam : null) : c.klant_vrij) || null
+  const dicteerContext = [klantNaam, c.titel, c.diensten.length ? projectOnderwerp(c.diensten) : null].filter(Boolean).join(' · ') || null
   const factuurTekst = (f: FactuurOptie) => `${datumKort(f.invoice_date)} · ${formatEuro(Number(f.amount_incl) || 0)} · ${FACTUUR_LABEL[f.status] ?? f.status}${f.description ? ` · ${f.description}` : ''}${!c.client_id && f.klant_naam ? ` · ${f.klant_naam}` : ''}`
 
   const sluit = useCallback(() => {
@@ -322,7 +326,7 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
             </div>
 
             <div>
-              <label className={LBL} htmlFor="opdracht-omschrijving">Omschrijving</label>
+              <div className="flex items-center justify-between gap-2"><label className={LBL} htmlFor="opdracht-omschrijving">Omschrijving</label><DicteerKnop klein context={dicteerContext} zet={(f) => { aangeraakt.current.add('omschrijving'); setC((p) => ({ ...p, omschrijving: f(p.omschrijving) })) }} /></div>
               <textarea id="opdracht-omschrijving" rows={3} className="input-base" value={c.omschrijving} onChange={(e) => zet('omschrijving', e.target.value)} maxLength={4000}
                 placeholder="Wat houdt het project in? Afspraken, planning, wensen van de klant." />
             </div>
@@ -406,7 +410,7 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
           {/* Taken: elke taak komt in ClickUp, toegewezen aan de verantwoordelijke. */}
           {o && (
             <section className="px-5 py-4 border-b border-gray-100">
-              <ClickupTaken api={`/api/admin/opdrachten/${o.id}/taken`} waarbij="opdracht"
+              <ClickupTaken api={`/api/admin/opdrachten/${o.id}/taken`} waarbij="opdracht" klant={klantNaam} context={dicteerContext}
                 standaardMerk={(o.merk ?? bedrijfVan(null, o.diensten)) === 'nextgensolutions' ? 'nextgensolutions' : 'nextgenmedia'} />
             </section>
           )}
@@ -414,9 +418,12 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
           {/* Interne communicatie. */}
           <section className="px-5 py-4">
             <p className="text-sm font-semibold flex items-center gap-2"><MessageSquare className="h-4 w-4" />Notities <span className="text-[11px] font-normal text-gray-500 flex items-center gap-1"><Lock className="h-3 w-3" />enkel intern</span></p>
-            {o ? <Notities opdrachtId={o.id} ik={ik} /> : (
-              <textarea rows={3} className="input-base mt-2" value={eersteNotitie} onChange={(e) => setEersteNotitie(e.target.value)} maxLength={4000}
-                placeholder="Bv. afspraak gehad om dit te bespreken, klant wil starten in januari" aria-label="Eerste notitie" />
+            {o ? <Notities opdrachtId={o.id} ik={ik} context={dicteerContext} /> : (
+              <div className="mt-2">
+                <textarea rows={3} className="input-base" value={eersteNotitie} onChange={(e) => setEersteNotitie(e.target.value)} maxLength={4000}
+                  placeholder="Bv. afspraak gehad om dit te bespreken, klant wil starten in januari" aria-label="Eerste notitie" />
+                <div className="mt-1"><DicteerKnop zet={setEersteNotitie} context={dicteerContext} /></div>
+              </div>
             )}
           </section>
         </div>
@@ -438,7 +445,7 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
 }
 
 /** Tijdlijn van de kaart: notities van het team en wat er automatisch gebeurde. */
-function Notities({ opdrachtId, ik }: { opdrachtId: string; ik: string | null }) {
+function Notities({ opdrachtId, ik, context }: { opdrachtId: string; ik: string | null; context?: string | null }) {
   const [lijst, setLijst] = useState<Notitie[] | null>(null)
   const [tekst, setTekst] = useState('')
   const [bezig, setBezig] = useState(false)
@@ -478,11 +485,14 @@ function Notities({ opdrachtId, ik }: { opdrachtId: string; ik: string | null })
       <div className="rounded-xl border border-gray-200 focus-within:ring-2 focus-within:ring-gray-900/15">
         <textarea rows={2} className="w-full px-3 pt-2.5 text-sm outline-none resize-none rounded-t-xl" value={tekst} onChange={(e) => setTekst(e.target.value)} maxLength={4000}
           onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void plaats() } }}
-          placeholder="Schrijf een notitie voor het team… (Cmd/Ctrl+Enter)" aria-label="Nieuwe notitie" />
+          placeholder="Schrijf of spreek een notitie in voor het team… (Cmd/Ctrl+Enter)" aria-label="Nieuwe notitie" />
         <div className="flex items-center justify-between px-2 pb-2">
-          <label className="text-[11px] text-gray-500 flex items-center gap-1.5 cursor-pointer px-1">
-            <input type="checkbox" className="h-3.5 w-3.5 accent-gray-900" checked={toonSysteem} onChange={(e) => setToonSysteem(e.target.checked)} />Toon verplaatsingen
-          </label>
+          <span className="flex items-center gap-2 min-w-0">
+            <DicteerKnop zet={setTekst} context={context} />
+            <label className="text-[11px] text-gray-500 flex items-center gap-1.5 cursor-pointer px-1 shrink-0">
+              <input type="checkbox" className="h-3.5 w-3.5 accent-gray-900" checked={toonSysteem} onChange={(e) => setToonSysteem(e.target.checked)} />Toon verplaatsingen
+            </label>
+          </span>
           <button type="button" onClick={plaats} disabled={bezig || !tekst.trim()} className="btn-primary text-xs px-3 py-1.5">
             {bezig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}Plaatsen
           </button>
