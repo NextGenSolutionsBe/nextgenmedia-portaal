@@ -10,7 +10,7 @@ import { GestoptBlok } from './gestopt'
 import { KOST_SOORTEN, kostSoortLabel, type KostSoort, type Vennoot } from '@/lib/vesting-akkoord'
 import type { ContractWeergave } from '@/lib/vesting-weergave'
 import { Akkoord, LeadKiezer, Paneel, Rekensom, RolKnop, api, datumKort, eur, pct, procentUitleg } from './delen'
-import { BewijsKiezer, BewijsLink, type BewijsWaarde } from './bewijs-kiezer'
+import { BewijsKiezer, BewijsLink, FactuurToevoegen, type BewijsWaarde } from './bewijs-kiezer'
 
 const INP = 'input-base'
 
@@ -56,6 +56,8 @@ export function ContractVenster({ c, vennoten, ik, laatste, onLaatste, onClose, 
     ...(c.status === 'stopgezet' ? [{ label: 'Vroegtijdig stopgezet: wat de klant betaalde', waarde: c.akkoord.inhoud.soort === 'contract' && c.akkoord.inhoud.betaald_bij_stop !== null ? eur(c.akkoord.inhoud.betaald_bij_stop, true) : 'nog in te vullen' }] : []),
     ...(c.status === 'niet_betaler' ? [{ label: 'Niet-betaler', waarde: '€ 0' }] : []),
     { label: `Deel van Marco${eigenVerdeling ? ' (eigen verdeling)' : c.lead_soort ? ` (${leadInfo(c.lead_soort)?.kort})` : ''}`, waarde: `× ${Math.round(c.factor * 100)}%` },
+    // De kosten tellen tegen hetzelfde percentage als het contract: (waarde − kosten) × deel.
+    ...(c.kostenAftrek > 0 && c.status !== 'stopgezet' && c.status !== 'niet_betaler' ? [{ label: `Kosten voor Marco (${Math.round(c.factor * 100)}% van ${eur(c.kostenAftrek)})`, waarde: `− ${eur(Math.round(c.kostenAftrek * c.factor * 100) / 100, true)}`, zacht: true }] : []),
     { label: 'Telt mee voor Marco', waarde: eur(c.teltMee, true), sterk: true },
     ...(c.algemeneKostenAftrek > 0 ? [{ label: 'Waarvan naar algemene kosten', waarde: `− ${eur(c.algemeneKostenAftrek, true)}`, zacht: true }] : []),
     ...(c.telt && !c.wachtOpKlant ? [{ label: 'Levert Marco op', waarde: pct(c.ruweVesting, 2), sterk: true }] : []),
@@ -214,7 +216,7 @@ function Kosten({ c, onVernieuw }: { c: ContractWeergave; onVernieuw: () => void
                     <div className="min-w-0 flex-1">
                       <div className="text-gray-900">{kostSoortLabel(l.soort)}{l.omschrijving && <span className="text-gray-500"> · {l.omschrijving}</span>}</div>
                       {l.verantwoording ? <div className="text-xs text-gray-500 whitespace-pre-wrap">{l.verantwoording}</div> : <div className="text-xs text-amber-700">Nog geen verantwoording</div>}
-                      {l.bewijs ? <BewijsLink bewijs={l.bewijs} klein /> : <div className="text-[11px] text-amber-700">Nog geen document</div>}
+                      {l.bewijs ? <BewijsLink bewijs={l.bewijs} klein /> : <div className="mt-1"><FactuurToevoegen klein onBewaar={async (bewijs) => { await api('/api/admin/vesting/kosten', { method: 'PATCH', body: JSON.stringify({ id: l.id, bewijs }) }); onVernieuw() }} /></div>}
                     </div>
                     <span className="tabular-nums">{eur(l.bedrag, true)}</span>
                     <button type="button" onClick={() => setOpen(l.id)} className="h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:text-black hover:bg-gray-100" aria-label="Kost aanpassen"><Pencil className="h-3.5 w-3.5" /></button>
@@ -244,7 +246,7 @@ function KostForm({ contractId, lijn, onKlaar, onAnnuleer }: { contractId: strin
   const [bewijs, setBewijs] = useState<BewijsWaarde>(null)
   const [bezig, setBezig] = useState(false)
   const b = leesGetal(bedrag)
-  const ok = b !== null && b > 0 && verantwoording.trim().length >= 5 && (!!bewijs || !!lijn?.bewijs)
+  const ok = b !== null && b > 0 && verantwoording.trim().length >= 5
 
   const bewaar = async () => {
     setBezig(true)
@@ -269,7 +271,7 @@ function KostForm({ contractId, lijn, onKlaar, onAnnuleer }: { contractId: strin
       </div>
       <input className={INP} value={omschrijving} onChange={(e) => setOmschrijving(e.target.value)} placeholder="Omschrijving (optioneel), bv. hosting 12 maanden" maxLength={200} />
       <textarea className={`${INP} min-h-[64px]`} value={verantwoording} onChange={(e) => setVerantwoording(e.target.value)} placeholder="Verantwoording: waarom gaat dit eraf?" maxLength={1000} />
-      <BewijsKiezer waarde={bewijs} onChange={setBewijs} bestaand={lijn?.bewijs ?? null} label="Factuur of contract van de kost (verplicht)" />
+      <BewijsKiezer waarde={bewijs} onChange={setBewijs} bestaand={lijn?.bewijs ?? null} label="Factuur of contract van de kost" later={!lijn?.bewijs} />
       <div className="flex gap-2">
         <button type="button" onClick={bewaar} disabled={bezig || !ok} className="btn-primary text-sm">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}{lijn ? 'Bewaren' : 'Toevoegen'}</button>
         <button type="button" onClick={onAnnuleer} className="btn-secondary text-sm">Annuleren</button>

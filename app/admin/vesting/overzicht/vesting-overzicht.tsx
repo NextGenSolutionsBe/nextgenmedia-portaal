@@ -290,6 +290,8 @@ function rekensomTekst(c: ContractWeergave): string {
     return `Gestopt: ${eur(c.akkoord.inhoud.betaald_bij_stop)} betaald × ${deel} = ${eur(c.teltMee)} telt mee${procent}`
   }
   const kosten = c.kostenAftrek > 0 ? ` − ${eur(c.kostenAftrek)} kosten = ${eur(c.netto)} netto` : ''
+  // Kosten tellen tegen hetzelfde percentage: bij 25% gaat 25% van de kosten van Marco af.
+  if (c.kostenAftrek > 0) return `Contractwaarde ${eur(c.totaal)}${kosten} × ${deel} = ${eur(c.teltMee)} telt mee (kosten voor Marco ${eur(Math.round(c.kostenAftrek * c.factor * 100) / 100)})${procent}`
   return `Contractwaarde ${eur(c.totaal)}${kosten} × ${deel} = ${eur(c.teltMee)} telt mee${procent}`
 }
 
@@ -313,6 +315,7 @@ function ContractKaart({ c, vennoten, onOpen }: { c: ContractWeergave; vennoten:
           <div className="flex gap-1.5">
             {c.vast !== null ? <Tag>Vroeger gestopt</Tag> : c.status === 'stopgezet' && <Tag>Vroegtijdig stopgezet</Tag>}
             {!c.herkomst && c.vast === null && <Tag>Inbound of outbound?</Tag>}
+            {c.kostLijnen.some((l) => !l.bewijs) && <Tag>Factuur ontbreekt</Tag>}
             {c.status === 'niet_betaler' && <Tag>Niet-betaler</Tag>}
             {c.wachtOpKlant && <Tag>Wacht op de klant</Tag>}
             {c.definitief && c.status !== 'stopgezet' && <Tag>Betaald</Tag>}
@@ -336,7 +339,7 @@ function RegistratieKaart({ r, vennoten, onOpen }: { r: RegistratieWeergave; ven
           <div className={`font-semibold tabular-nums shrink-0 ${r.geschrapt ? 'line-through text-gray-400' : ''}`}>{r.soort === 'kost' ? '− ' : '+ '}{eur(r.bedrag)}</div>
         </div>
         {r.verantwoording && <div className="mt-1.5 text-[11px] text-gray-500 line-clamp-2">{r.verantwoording}</div>}
-        <div className="mt-1 text-[11px]">{r.bewijs ? <span className="inline-flex items-center gap-1 text-gray-500"><FileText className="h-3 w-3" />{r.bewijs.naam}</span> : <span className="text-amber-700">Nog geen document</span>}</div>
+        <div className="mt-1 text-[11px]">{r.bewijs ? <span className="inline-flex items-center gap-1 text-gray-500"><FileText className="h-3 w-3" />{r.bewijs.naam}</span> : <span className="text-amber-700">Factuur nog toe te voegen</span>}</div>
         <div className="mt-2.5 flex items-center justify-between gap-2 flex-wrap">
           <TekenStand akkoord={r.akkoord} vennoten={vennoten} />
           {r.certificaat?.huidig && <Tag>Certificaat {r.certificaat.nummer}</Tag>}

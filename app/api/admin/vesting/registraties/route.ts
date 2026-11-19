@@ -24,14 +24,14 @@ export async function POST(req: NextRequest) {
     const b = (await req.json().catch(() => ({}))) as Record<string, unknown>
     const c = controleerRegistratie(b, true)
     if ('fout' in c) return NextResponse.json({ error: c.fout }, { status: 400 })
-    // Het contract of de factuur hoort er altijd bij.
-    const invoer = controleerBewijsInvoer(b.bewijs)
-    if (!invoer) return NextResponse.json({ error: b.soort === 'kost' ? 'Laad het document van de kost op (factuur, contract …).' : 'Laad het contract of de factuur op.' }, { status: 400 })
+    // Het contract of de factuur mag later: het bedrag telt meteen mee, het document voeg je toe zodra je het hebt.
+    const invoer = b.bewijs ? controleerBewijsInvoer(b.bewijs) : null
+    if (b.bewijs && !invoer) return NextResponse.json({ error: 'Ongeldig document.' }, { status: 400 })
     const admin = createAdminSupabaseClient()
-    const bewijs = await verwerkBewijs(admin, invoer)
+    const bewijs = invoer ? bewijsKolommen(await verwerkBewijs(admin, invoer)) : {}
     const nu = new Date().toISOString()
     const { data, error } = await admin.from('vesting_registraties')
-      .insert({ ...c.rij, ...bewijsKolommen(bewijs), created_by_email: actor.email ?? null, updated_at: nu, updated_by_email: actor.email ?? null })
+      .insert({ ...c.rij, ...bewijs, created_by_email: actor.email ?? null, updated_at: nu, updated_by_email: actor.email ?? null })
       .select('*').single()
     if (error) throw new Error(error.message)
     const r = naarRegistratie(data as Record<string, unknown>)
