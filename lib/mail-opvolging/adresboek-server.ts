@@ -19,7 +19,7 @@ export type ActiefProject = { id: string; client_id: string | null; lead_id: str
  */
 export async function laadAdresboek(admin: Admin): Promise<Adresboek & { projecten: ActiefProject[]; namen: Map<string, string> }> {
   const veilig = async <T,>(p: PromiseLike<{ data: T[] | null; error?: unknown }>): Promise<T[]> => { try { return (await p).data ?? [] } catch { return [] } }
-  const [klanten, gebruikers, contracten, offertes, meetings, opdrachten, afspraken, abm] = await Promise.all([
+  const [klanten, gebruikers, contracten, offertes, meetings, opdrachten, afspraken, abm, uitMail] = await Promise.all([
     veilig(admin.from('clients').select('id, company_name, email, facturatie_email, website_url, archived_at').limit(5000)),
     veilig(admin.from('client_users').select('client_id, email').limit(10000)),
     veilig(admin.from('contracts').select('client_id, signer_email').not('signer_email', 'is', null).limit(10000)),
@@ -28,6 +28,7 @@ export async function laadAdresboek(admin: Admin): Promise<Adresboek & { project
     veilig(admin.from('opdrachten').select('id, client_id, lead_id, status, updated_at, titel, klant_vrij').limit(5000)),
     veilig(admin.from('sales_appointments').select('lead_id, attendee_email').not('attendee_email', 'is', null).limit(10000)),
     veilig(admin.from('abm_bedrijven').select('email, website, client_id, opdracht_id').limit(5000)),
+    veilig(admin.from('mail_projecten').select('email, client_id, opdracht_id').eq('status', 'ja').not('email', 'is', null).limit(5000)),
   ]) as [
     { id: string; company_name: string; email: string | null; facturatie_email: string | null; website_url: string | null; archived_at: string | null }[],
     { client_id: string; email: string | null }[],
@@ -37,6 +38,7 @@ export async function laadAdresboek(admin: Admin): Promise<Adresboek & { project
     { id: string; client_id: string | null; lead_id: string | null; status: string; updated_at: string; titel: string; klant_vrij: string | null }[],
     { lead_id: string | null; attendee_email: string | null }[],
     { email: string | null; website: string | null; client_id: string | null; opdracht_id: string | null }[],
+    { email: string | null; client_id: string | null; opdracht_id: string | null }[],
   ]
 
   const naam = new Map(klanten.map((k) => [k.id, k.company_name]))
@@ -57,6 +59,8 @@ export async function laadAdresboek(admin: Admin): Promise<Adresboek & { project
   for (const m of meetings) for (const r of m.klant_ontvangers ?? []) zet(r?.email, { client_id: m.client_id, opdracht_id: m.project_id ?? (m.lead_id ? opdrachtVanLead.get(m.lead_id) ?? null : null) })
   for (const a of afspraken) if (a.lead_id && opdrachtVanLead.get(a.lead_id)) zet(a.attendee_email, { client_id: null, opdracht_id: opdrachtVanLead.get(a.lead_id) as string })
   for (const b of abm) if (b.client_id || b.opdracht_id) zet(b.email, { client_id: b.client_id, opdracht_id: b.opdracht_id })
+  // Projecten die uit een mail kwamen: die prospect volgen we voortaan op die kaart op.
+  for (const m of uitMail) if (m.client_id || m.opdracht_id) zet(m.email, { client_id: m.client_id, opdracht_id: m.opdracht_id })
 
   // Domeinen: enkel als één klant dat domein heeft (anders weten we niet wie).
   const kandidaat = new Map<string, Set<string>>()

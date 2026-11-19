@@ -3,11 +3,12 @@ import { ImapFlow } from 'imapflow'
 import { simpleParser } from 'mailparser'
 import { lijstAgendaEvents } from '@/lib/sales/google-calendar'
 import { laadAdresboek, projectVanKlant, type ActiefProject } from './adresboek-server'
-import { mailboxen, veiligeFout, type Mailbox } from './mailboxen'
+import { mailboxen, mapPaden, veiligeFout, type Mailbox } from './mailboxen'
 import { leesMailInhoud, type MailTaakVoorstel } from './ai'
 import { isEigen, koppel, nieuwDeel, normEmail, type Adresboek } from './regels'
 import { recenteTaken } from '@/lib/clickup'
 import { lijktOp, isAfInClickup } from './taken'
+import { zoekNieuweProjecten, type ProjectScan } from './projecten-server'
 
 /**
  * Mailboxen lezen (IMAP, enkel lezen: niets verplaatsen, markeren of wissen).
@@ -26,7 +27,7 @@ import { lijktOp, isAfInClickup } from './taken'
 type Admin = { from: (t: string) => any }
 
 export type MapResultaat = { mailbox: string; map: string; gelezen: number; bewaard: number; fout: string | null }
-export type SyncResultaat = { gekoppeld: boolean; mappen: MapResultaat[]; meetings: number; agendaFout: string | null }
+export type SyncResultaat = { gekoppeld: boolean; mappen: MapResultaat[]; meetings: number; agendaFout: string | null; projecten: ProjectScan[] }
 
 const DAGEN_TERUG = 60
 const MAX_PER_MAP = 400
@@ -40,12 +41,6 @@ type Rij = {
   taken?: MailTaakVoorstel[]
 }
 
-function mapPaden(lijst: { path: string; specialUse?: string }[]): { inbox: string; verzonden: string | null } {
-  const inbox = lijst.find((m) => m.specialUse === '\\Inbox')?.path ?? lijst.find((m) => m.path.toUpperCase() === 'INBOX')?.path ?? 'INBOX'
-  const verzonden = lijst.find((m) => m.specialUse === '\\Sent')?.path
-    ?? lijst.find((m) => /^(inbox[./])?(sent|sent items|sent messages|verzonden|verzonden items|verzonden berichten)$/i.test(m.path))?.path ?? null
-  return { inbox, verzonden }
-}
 
 async function leesMailbox(admin: Admin, mb: Mailbox, boek: Adresboek & { namen: Map<string, string> }, projecten: ActiefProject[], aiBudget: { over: number }): Promise<MapResultaat[]> {
   const eigen = new Set(mailboxen().map((m) => m.gebruiker))
@@ -231,6 +226,7 @@ export async function controleerMailTaken(admin: Admin): Promise<{ gedaan: numbe
 
 /** Alles lezen: mailboxen en agenda's. Veilig om vaak te draaien (enkel nieuwe mails, nooit dubbels). */
 export async function leesMailEnAgenda(admin: Admin): Promise<SyncResultaat> {
+  const start = Date.now()
   const boek = await laadAdresboek(admin)
   const lijst = mailboxen()
   const mappen: MapResultaat[] = []
@@ -238,5 +234,7 @@ export async function leesMailEnAgenda(admin: Admin): Promise<SyncResultaat> {
   for (const mb of lijst) mappen.push(...(await leesMailbox(admin, mb, boek, boek.projecten, aiBudget)))
   const agenda = await leesAgendaMeetings(admin, boek, boek.projecten).catch((e) => ({ aantal: 0, fout: e instanceof Error ? e.message : String(e) }))
   await controleerMailTaken(admin).catch(() => null)
-  return { gekoppeld: lijst.length > 0, mappen, meetings: agenda.aantal, agendaFout: agenda.fout }
+  // Nieuwe projecten: wat niet past binnen de tijd van deze ronde, volgt de volgende keer.
+  const projecten = await zoekNieuweProjecten(admin, boek, { tot: start + 230_000 }).catch((e) => [{ mailbox: '-', gelezen: 0, beoordeeld: 0, voorstellen: 0, fout: e instanceof Error ? e.message.slice(0, 200) : 'mislukt', klaar: false }])
+  return { gekoppeld: lijst.length > 0, mappen, meetings: agenda.aantal, agendaFout: agenda.fout, projecten }
 }

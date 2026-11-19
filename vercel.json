@@ -22,7 +22,7 @@
     },
     {
       "path": "/api/cron/mail-opvolging",
-      "schedule": "0 5,11 * * *"
+      "schedule": "0 5,8,11,14,17 * * *"
     }
   ]
 }

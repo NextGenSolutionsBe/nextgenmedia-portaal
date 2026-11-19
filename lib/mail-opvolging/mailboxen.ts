@@ -32,3 +32,11 @@ export function veiligeFout(e: unknown, m?: Mailbox): string {
   if (m?.wachtwoord) t = t.split(m.wachtwoord).join('•••')
   return t.slice(0, 300)
 }
+
+/** De Inbox en de map Verzonden van een mailbox (namen verschillen per server). */
+export function mapPaden(lijst: { path: string; specialUse?: string }[]): { inbox: string; verzonden: string | null } {
+  const inbox = lijst.find((m) => m.specialUse === '\\Inbox')?.path ?? lijst.find((m) => m.path.toUpperCase() === 'INBOX')?.path ?? 'INBOX'
+  const verzonden = lijst.find((m) => m.specialUse === '\\Sent')?.path
+    ?? lijst.find((m) => /^(inbox[./])?(sent|sent items|sent messages|verzonden|verzonden items|verzonden berichten)$/i.test(m.path))?.path ?? null
+  return { inbox, verzonden }
+}

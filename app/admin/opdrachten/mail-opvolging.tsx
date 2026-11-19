@@ -56,7 +56,7 @@ export function MailOpvolging({ opdrachtId, onNaarFase }: { opdrachtId: string; 
       const j = await post({ actie: 'lezen' }, 'lezen')
       if (!j.gekoppeld) toast.info('Er is nog geen mailbox gekoppeld. De agenda is wel gelezen.')
       else if (j.fouten?.length) toast.error(`Niet alles gelezen: ${j.fouten.join(' · ')}`)
-      else toast.success(`Mails gelezen: ${j.bewaard} nieuwe mail${j.bewaard === 1 ? '' : 's'} met klanten.`)
+      else toast.success(`Mails gelezen: ${j.bewaard} nieuwe mail${j.bewaard === 1 ? '' : 's'} met klanten.${j.nieuweProjecten ? ` ${j.nieuweProjecten} mogelijk nieuw project in het Command Center.` : ''}`)
       laad()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Lezen mislukt') }
   }

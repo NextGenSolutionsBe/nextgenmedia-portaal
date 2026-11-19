@@ -7617,3 +7617,48 @@ ON CONFLICT (id) DO NOTHING;
 ALTER TABLE public.algemene_contract_mappen ADD COLUMN IF NOT EXISTS parent_id uuid REFERENCES public.algemene_contract_mappen(id) ON DELETE SET NULL;
 DROP INDEX IF EXISTS public.algemene_contract_mappen_naam;
 CREATE UNIQUE INDEX IF NOT EXISTS algemene_contract_mappen_naam_ouder ON public.algemene_contract_mappen (coalesce(parent_id, '00000000-0000-0000-0000-000000000000'::uuid), lower(naam));
+
+-- ── Nieuwe projecten uit de mail (19 nov 2026) ──
+-- De AI leest inkomende mails en stelt streng voor wat een nieuw project lijkt; een mens kiest Ja (projectkaart) of Nee.
+create table if not exists public.mail_projecten (
+  id uuid primary key default gen_random_uuid(),
+  message_id text not null,
+  mailbox text not null,
+  van text,
+  van_naam text,
+  onderwerp text,
+  onderwerp_sleutel text,
+  ontvangen_op timestamptz not null,
+  formulier boolean not null default false,
+  client_id uuid references public.clients(id) on delete set null,
+  lopende_opdracht_id uuid references public.opdrachten(id) on delete set null,
+  opdracht_id uuid references public.opdrachten(id) on delete set null,
+  status text not null default 'voorstel' check (status in ('voorstel','ja','nee','al_op_bord')),
+  zekerheid numeric,
+  reden text,
+  titel text,
+  samenvatting text,
+  project text,
+  diensten text[] not null default '{}',
+  ads text,
+  contact jsonb not null default '{}'::jsonb,
+  email text,
+  beslist_door text,
+  beslist_op timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists mail_projecten_message_id on public.mail_projecten (message_id);
+create index if not exists mail_projecten_status on public.mail_projecten (status, ontvangen_op desc);
+create index if not exists mail_projecten_van on public.mail_projecten (van, ontvangen_op desc);
+alter table public.mail_projecten enable row level security;
+-- Bladwijzer per mailbox voor deze leesronde (los van de gewone mail-opvolging).
+create table if not exists public.mail_project_scan (
+  mailbox text primary key,
+  uidvalidity bigint,
+  laatste_uid bigint,
+  laatst_gelezen_op timestamptz,
+  beoordeeld integer not null default 0,
+  fout text
+);
+alter table public.mail_project_scan enable row level security;

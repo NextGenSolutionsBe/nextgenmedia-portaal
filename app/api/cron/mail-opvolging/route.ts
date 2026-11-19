@@ -12,5 +12,5 @@ export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET
   if (!secret || req.headers.get('authorization') !== `Bearer ${secret}`) return NextResponse.json({ error: 'Niet geautoriseerd' }, { status: 401 })
   const r = await leesMailEnAgenda(createAdminSupabaseClient())
-  return NextResponse.json({ ok: true, gekoppeld: r.gekoppeld, mappen: r.mappen.map((m) => ({ mailbox: m.mailbox, map: m.map, gelezen: m.gelezen, bewaard: m.bewaard, fout: m.fout })), meetings: r.meetings, agendaFout: r.agendaFout })
+  return NextResponse.json({ ok: true, gekoppeld: r.gekoppeld, mappen: r.mappen.map((m) => ({ mailbox: m.mailbox, map: m.map, gelezen: m.gelezen, bewaard: m.bewaard, fout: m.fout })), meetings: r.meetings, agendaFout: r.agendaFout, projecten: r.projecten })
 }

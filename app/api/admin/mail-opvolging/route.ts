@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
     if (b.actie === 'lezen') {
       const r = await leesMailEnAgenda(admin)
       try { revalidatePath('/admin') } catch { }
-      return NextResponse.json({ ok: true, gekoppeld: r.gekoppeld, bewaard: r.mappen.reduce((s, m) => s + m.bewaard, 0), fouten: r.mappen.filter((m) => m.fout).map((m) => `${m.mailbox} (${m.map}): ${m.fout}`), meetings: r.meetings, agendaFout: r.agendaFout })
+      return NextResponse.json({ ok: true, gekoppeld: r.gekoppeld, bewaard: r.mappen.reduce((s, m) => s + m.bewaard, 0), fouten: r.mappen.filter((m) => m.fout).map((m) => `${m.mailbox} (${m.map}): ${m.fout}`), meetings: r.meetings, agendaFout: r.agendaFout, nieuweProjecten: r.projecten.reduce((t, x) => t + x.voorstellen, 0) })
     }
     return NextResponse.json({ error: 'Onbekende actie.' }, { status: 400 })
   } catch (e) { return NextResponse.json({ error: safeMessage(e) }, { status: 400 }) }

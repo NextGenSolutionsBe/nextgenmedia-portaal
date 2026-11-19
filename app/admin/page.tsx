@@ -7,6 +7,7 @@ import { ContractsWidget } from './contracts-widget'
 import { RecentActivity } from './recent-activity'
 import { OpvolgingPanel } from './opvolging-panel'
 import { TakenBlok } from '@/components/admin/taken-blok'
+import { MailProjecten } from '@/components/admin/mail-projecten'
 
 // Compact Command Center: Op te volgen (aanvragen, contracten, meetings, leads,
 // contentfeedback, met namen) + Vandaag (acties) + kritieke contracten + recente
@@ -32,6 +33,9 @@ export default async function CommandCenter() {
           {today.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
         </p>
       </div>
+
+      {/* Nieuwe projecten uit de mail: Ja (projectkaart) of Nee. Enkel als er iets te beslissen is. */}
+      {can('opdrachten') && <MailProjecten />}
 
       {/* Taken aan elkaar toewijzen, gesynchroniseerd met ClickUp. */}
       {actor && <TakenBlok />}
