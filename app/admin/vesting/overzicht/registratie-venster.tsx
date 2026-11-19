@@ -115,9 +115,18 @@ export function RegistratieForm({ soort, r, onKlaar, onAnnuleer }: { soort: Regi
   const [bewijs, setBewijs] = useState<BewijsWaarde>(null)
   const [bezig, setBezig] = useState(false)
   const b = leesGetal(bedrag)
-  const ok = omschrijving.trim().length >= 2 && b !== null && b > 0 && verantwoording.trim().length >= 5 && /^\d{4}-\d{2}-\d{2}$/.test(datum)
+  const [fout, setFout] = useState<string | null>(null)
+  const ontbreekt = [
+    omschrijving.trim().length < 2 && 'een omschrijving',
+    (b === null || b <= 0) && 'het bedrag',
+    !/^\d{4}-\d{2}-\d{2}$/.test(datum) && 'de datum',
+    verantwoording.trim().length < 5 && 'een korte verantwoording (minstens 5 tekens)',
+  ].filter(Boolean) as string[]
 
   const bewaar = async () => {
+    // Nooit een grijze knop zonder uitleg: zeg wat er ontbreekt.
+    if (ontbreekt.length) { setFout(`Vul nog in: ${ontbreekt.join(', ')}.`); return }
+    setFout(null)
     setBezig(true)
     try {
       const velden = { omschrijving: omschrijving.trim(), bedrag: b, datum, verantwoording: verantwoording.trim(), referentie: referentie.trim() || null, ...(bewijs ? { bewijs } : {}) }
@@ -126,7 +135,7 @@ export function RegistratieForm({ soort, r, onKlaar, onAnnuleer }: { soort: Regi
         : await api('/api/admin/vesting/registraties', { method: 'POST', body: JSON.stringify({ soort, ...velden }) })
       toast.success(r ? 'Aangepast. Iedereen tekent opnieuw.' : `${SOORT_TEKST[soort].titel} geregistreerd${bewijs ? '' : '. De factuur voeg je later toe'}.`)
       onKlaar(r ? r.id : typeof j.id === 'string' ? j.id : null)
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt') } finally { setBezig(false) }
+    } catch (e) { setFout(e instanceof Error ? e.message : 'Bewaren mislukt') } finally { setBezig(false) }
   }
 
   return (
@@ -161,8 +170,9 @@ export function RegistratieForm({ soort, r, onKlaar, onAnnuleer }: { soort: Regi
         <input className={INP} value={referentie} onChange={(e) => setReferentie(e.target.value)} maxLength={200} placeholder="Bv. 2026-125" />
       </div>
       <BewijsKiezer waarde={bewijs} onChange={setBewijs} bestaand={r?.bewijs ?? null} label={soort === 'inkomst' ? 'Contract of factuur' : 'Factuur of contract'} later={!r?.bewijs} />
+      {fout && <p className="text-xs text-red-700">{fout}</p>}
       <div className="flex gap-2">
-        <button type="button" onClick={bewaar} disabled={!ok || bezig} className="btn-primary text-sm">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}{r ? 'Bewaren' : 'Registreren'}</button>
+        <button type="button" onClick={bewaar} disabled={bezig} className="btn-primary text-sm">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}{r ? 'Bewaren' : 'Registreren'}</button>
         <button type="button" onClick={onAnnuleer} className="btn-secondary text-sm">Annuleren</button>
       </div>
     </div>
@@ -183,19 +193,22 @@ export function KostRegistreren({ contracten, onKlaar, onClose }: { contracten: 
   const [bewijs, setBewijs] = useState<BewijsWaarde>(null)
   const [bezig, setBezig] = useState(false)
   const b = leesGetal(bedrag)
-  const ok = !!contractId && b !== null && b > 0 && verantwoording.trim().length >= 5
+  const [fout, setFout] = useState<string | null>(null)
 
   const bewaarContractKost = async () => {
+    const mist = [!contractId && 'het contract', (b === null || b <= 0) && 'het bedrag'].filter(Boolean) as string[]
+    if (mist.length) { setFout(`Vul nog in: ${mist.join(' en ')}.`); return }
+    setFout(null)
     setBezig(true)
     try {
       await api('/api/admin/vesting/kosten', { method: 'POST', body: JSON.stringify({ vesting_contract_id: contractId, soort, omschrijving: omschrijving.trim(), bedrag: b, verantwoording: verantwoording.trim(), bewijs }) })
       toast.success(bewijs ? 'Kost geregistreerd. Iedereen tekent het contract opnieuw.' : 'Kost geregistreerd en telt mee. De factuur voeg je later toe.')
       onKlaar({ soort: 'contract', id: contractId })
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt'); setBezig(false) }
+    } catch (e) { setFout(e instanceof Error ? e.message : 'Bewaren mislukt'); setBezig(false) }
   }
 
   return (
-    <Paneel titel="Kost registreren" sub="Elke kost met een verantwoording; daarna tekent iedereen." onClose={onClose}>
+    <Paneel titel="Kost registreren" sub="Het bedrag telt meteen mee, de factuur kan later. Daarna tekent iedereen." onClose={onClose}>
       <div className="flex flex-wrap gap-2">
         {([['contract', 'Bij een contract', 'gaat van de waarde van dat contract af'], ['algemeen', 'Algemeen', "gaat van Marco's totaal af (bv. afsluiting WAM)"]] as const).map(([k, l, s]) => (
           <button key={k} type="button" onClick={() => setWaar(k)} aria-pressed={waar === k}
@@ -236,12 +249,13 @@ export function KostRegistreren({ contracten, onKlaar, onClose }: { contracten: 
               <input className={INP} value={omschrijving} onChange={(e) => setOmschrijving(e.target.value)} maxLength={200} placeholder="Bv. hosting 12 maanden" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Verantwoording</label>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Waarom gaat dit eraf? <span className="font-normal text-gray-400">(optioneel)</span></label>
               <textarea className={`${INP} min-h-[80px]`} value={verantwoording} onChange={(e) => setVerantwoording(e.target.value)} maxLength={1000} placeholder="Bv. extra developer ingehuurd na de oplevering." />
             </div>
             <BewijsKiezer waarde={bewijs} onChange={setBewijs} label="Factuur of contract van de kost" later />
+            {fout && <p className="text-xs text-red-700">{fout}</p>}
             <div className="flex gap-2">
-              <button type="button" onClick={bewaarContractKost} disabled={!ok || bezig} className="btn-primary text-sm">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Registreren</button>
+              <button type="button" onClick={bewaarContractKost} disabled={bezig} className="btn-primary text-sm">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Registreren</button>
               <button type="button" onClick={onClose} className="btn-secondary text-sm">Annuleren</button>
             </div>
           </div>

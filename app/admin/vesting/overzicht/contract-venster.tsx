@@ -184,56 +184,68 @@ function WaardeForm({ c, onBewaar, onAnnuleer, bezig }: { c: ContractWeergave; o
 
 /**
  * De kosten die van de contractwaarde afgaan (hosting, onderaanneming,
- * advertentiebudget …), elk met een verantwoording. Achteraf bijkomende kosten
- * voeg je hier toe; een kost aanpassen kan ook. Daarna tekent iedereen opnieuw.
+ * advertentiebudget …). Een kost toevoegen kan altijd, ook achteraf en zonder
+ * factuur (die voeg je later toe); aanpassen en weghalen ook. Elke wijziging
+ * verandert de getekende cijfers, dus daarna tekent iedereen opnieuw.
  */
-function Kosten({ c, onVernieuw }: { c: ContractWeergave; onVernieuw: () => void }) {
+export function Kosten({ c, onVernieuw }: { c: ContractWeergave; onVernieuw: () => void }) {
   const [open, setOpen] = useState<string | 'nieuw' | null>(null)
+  const [weg, setWeg] = useState<string | null>(null)
   const [bezig, setBezig] = useState<string | null>(null)
   const som = c.kostLijnen.reduce((s, l) => s + l.bedrag, 0)
 
   const verwijder = async (id: string) => {
     setBezig(id)
-    try { await api(`/api/admin/vesting/kosten?id=${id}`, { method: 'DELETE' }); onVernieuw() }
-    catch (e) { toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt') } finally { setBezig(null) }
+    try {
+      await api(`/api/admin/vesting/kosten?id=${id}`, { method: 'DELETE' })
+      toast.success('Kost weggehaald. Iedereen tekent het contract opnieuw.')
+      setWeg(null)
+      onVernieuw()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Weghalen mislukt') } finally { setBezig(null) }
   }
 
   return (
     <section>
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <h3 className="text-sm font-semibold text-gray-900">Kosten verbonden aan dit contract</h3>
-        {open === null && <button type="button" onClick={() => setOpen('nieuw')} className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-black"><Plus className="h-3 w-3" />Kost toevoegen</button>}
-      </div>
-      {c.kostLijnen.length === 0 && open === null && <p className="text-sm text-gray-500">Geen kosten. Hosting, onderaanneming of advertentiebudget? Voeg ze toe, dan gaan ze van de waarde af.</p>}
+      <h3 className="text-sm font-semibold text-gray-900 mb-2">Kosten verbonden aan dit contract</h3>
+      {c.kostLijnen.length === 0 && open !== 'nieuw' && <p className="text-sm text-gray-500 mb-2">Nog geen kosten. Hosting, onderaanneming of advertentiebudget? Voeg ze toe, dan gaan ze van de waarde af.</p>}
       {c.kostLijnen.length > 0 && (
         <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200 text-sm">
           {c.kostLijnen.map((l) => (
-            <li key={l.id} className="px-3 py-2">
+            <li key={l.id} className="px-3 py-2.5">
               {open === l.id
                 ? <KostForm contractId={c.id} lijn={l} onKlaar={() => { setOpen(null); onVernieuw() }} onAnnuleer={() => setOpen(null)} />
                 : (
-                  <div className="flex items-start gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-gray-900">{kostSoortLabel(l.soort)}{l.omschrijving && <span className="text-gray-500"> · {l.omschrijving}</span>}</div>
-                      {l.verantwoording ? <div className="text-xs text-gray-500 whitespace-pre-wrap">{l.verantwoording}</div> : <div className="text-xs text-amber-700">Nog geen verantwoording</div>}
-                      {l.bewijs ? <BewijsLink bewijs={l.bewijs} klein /> : <div className="mt-1"><FactuurToevoegen klein onBewaar={async (bewijs) => { await api('/api/admin/vesting/kosten', { method: 'PATCH', body: JSON.stringify({ id: l.id, bewijs }) }); onVernieuw() }} /></div>}
+                  <>
+                    <div className="flex items-start gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-gray-900">{kostSoortLabel(l.soort)}{l.omschrijving && <span className="text-gray-500"> · {l.omschrijving}</span>}</div>
+                        {l.verantwoording && <div className="text-xs text-gray-500 whitespace-pre-wrap">{l.verantwoording}</div>}
+                        <div className="mt-1">{l.bewijs ? <BewijsLink bewijs={l.bewijs} klein /> : <FactuurToevoegen klein onBewaar={async (bewijs) => { await api('/api/admin/vesting/kosten', { method: 'PATCH', body: JSON.stringify({ id: l.id, bewijs }) }); onVernieuw() }} />}</div>
+                      </div>
+                      <span className="tabular-nums font-medium">− {eur(l.bedrag, true)}</span>
+                      <button type="button" onClick={() => { setWeg(null); setOpen(l.id) }} className="h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:text-black hover:bg-gray-100" aria-label="Kost aanpassen" title="Aanpassen"><Pencil className="h-3.5 w-3.5" /></button>
+                      <button type="button" onClick={() => setWeg(weg === l.id ? null : l.id)} className="h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50" aria-label="Kost weghalen" title="Weghalen"><Trash2 className="h-3.5 w-3.5" /></button>
                     </div>
-                    <span className="tabular-nums">{eur(l.bedrag, true)}</span>
-                    <button type="button" onClick={() => setOpen(l.id)} className="h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:text-black hover:bg-gray-100" aria-label="Kost aanpassen"><Pencil className="h-3.5 w-3.5" /></button>
-                    <button type="button" onClick={() => verwijder(l.id)} disabled={bezig === l.id} className="h-7 w-7 flex items-center justify-center rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50" aria-label="Kost verwijderen">
-                      {bezig === l.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                    </button>
-                  </div>
+                    {weg === l.id && (
+                      <div className="mt-2 flex items-center gap-2 flex-wrap rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-900">
+                        <span className="flex-1 min-w-[160px]">{kostSoortLabel(l.soort)} van {eur(l.bedrag, true)} weghalen? Het telt dan niet meer mee.</span>
+                        <button type="button" onClick={() => verwijder(l.id)} disabled={bezig === l.id} className="btn-danger text-xs h-7">{bezig === l.id && <Loader2 className="h-3 w-3 animate-spin" />}Ja, weghalen</button>
+                        <button type="button" onClick={() => setWeg(null)} className="btn-secondary text-xs h-7">Nee</button>
+                      </div>
+                    )}
+                  </>
                 )}
             </li>
           ))}
-          {c.kostLijnen.length > 1 && <li className="flex justify-between px-3 py-2 text-gray-600"><span>Samen</span><span className="tabular-nums font-medium">{eur(som, true)}</span></li>}
+          {c.kostLijnen.length > 1 && <li className="flex justify-between px-3 py-2 text-gray-600"><span>Samen</span><span className="tabular-nums font-medium">− {eur(som, true)}</span></li>}
         </ul>
       )}
       {c.kostenFacturen !== null && c.kostenFacturen > som + 0.005 && (
         <p className="mt-2 text-xs text-gray-600">Op de facturen van dit contract staan {eur(c.kostenFacturen, true)} directe kosten. Het hoogste bedrag gaat eraf.</p>
       )}
-      {open === 'nieuw' && <div className="mt-2 rounded-lg border border-gray-200 p-3"><KostForm contractId={c.id} onKlaar={() => { setOpen(null); onVernieuw() }} onAnnuleer={() => setOpen(null)} /></div>}
+      {open === 'nieuw'
+        ? <div className="mt-2 rounded-lg border border-gray-200 p-3"><KostForm contractId={c.id} onKlaar={() => { setOpen(null); onVernieuw() }} onAnnuleer={() => setOpen(null)} /></div>
+        : <button type="button" onClick={() => { setWeg(null); setOpen('nieuw') }} className="btn-secondary text-sm mt-2"><Plus className="h-4 w-4" />{c.kostLijnen.length ? 'Nog een kost toevoegen' : 'Kost toevoegen'}</button>}
     </section>
   )
 }
@@ -245,35 +257,52 @@ function KostForm({ contractId, lijn, onKlaar, onAnnuleer }: { contractId: strin
   const [verantwoording, setVerantwoording] = useState(lijn?.verantwoording ?? '')
   const [bewijs, setBewijs] = useState<BewijsWaarde>(null)
   const [bezig, setBezig] = useState(false)
+  const [fout, setFout] = useState<string | null>(null)
   const b = leesGetal(bedrag)
-  const ok = b !== null && b > 0 && verantwoording.trim().length >= 5
 
   const bewaar = async () => {
+    // Nooit een grijze knop zonder uitleg: zeg wat er ontbreekt.
+    if (b === null || b <= 0) { setFout('Vul het bedrag in (excl. btw), bv. 1500 of 1.500,50.'); return }
+    setFout(null)
     setBezig(true)
     try {
       const velden = { soort, omschrijving: omschrijving.trim(), bedrag: b, verantwoording: verantwoording.trim(), ...(bewijs ? { bewijs } : {}) }
       if (lijn) await api('/api/admin/vesting/kosten', { method: 'PATCH', body: JSON.stringify({ id: lijn.id, ...velden }) })
       else await api('/api/admin/vesting/kosten', { method: 'POST', body: JSON.stringify({ vesting_contract_id: contractId, ...velden }) })
+      toast.success(lijn ? 'Kost aangepast. Iedereen tekent het contract opnieuw.' : `Kost toegevoegd: ${eur(b, true)} gaat van de waarde af.${bewijs ? '' : ' De factuur voeg je later toe.'}`)
       onKlaar()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt') } finally { setBezig(false) }
+    } catch (e) { setFout(e instanceof Error ? e.message : 'Bewaren mislukt') } finally { setBezig(false) }
   }
 
   return (
     <div className="space-y-2">
-      <div className="grid grid-cols-1 sm:grid-cols-[1fr_120px] gap-2">
-        <select className={INP} value={soort} onChange={(e) => setSoort(e.target.value as KostSoort)} aria-label="Soort kost">
-          {KOST_SOORTEN.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-        </select>
-        <div className="relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">€</span>
-          <input className={`${INP} pl-7`} inputMode="decimal" value={bedrag} onChange={(e) => setBedrag(e.target.value)} placeholder="0" aria-label="Bedrag excl. btw" autoFocus />
+      <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px] gap-2">
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Soort kost</label>
+          <select className={INP} value={soort} onChange={(e) => setSoort(e.target.value as KostSoort)}>
+            {KOST_SOORTEN.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Bedrag (excl. btw)</label>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">€</span>
+            <input className={`${INP} pl-7`} inputMode="decimal" value={bedrag} onChange={(e) => { setBedrag(e.target.value); setFout(null) }} onKeyDown={(e) => { if (e.key === 'Enter') bewaar() }} placeholder="0" autoFocus />
+          </div>
         </div>
       </div>
-      <input className={INP} value={omschrijving} onChange={(e) => setOmschrijving(e.target.value)} placeholder="Omschrijving (optioneel), bv. hosting 12 maanden" maxLength={200} />
-      <textarea className={`${INP} min-h-[64px]`} value={verantwoording} onChange={(e) => setVerantwoording(e.target.value)} placeholder="Verantwoording: waarom gaat dit eraf?" maxLength={1000} />
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">Omschrijving <span className="font-normal text-gray-400">(optioneel)</span></label>
+        <input className={INP} value={omschrijving} onChange={(e) => setOmschrijving(e.target.value)} placeholder="Bv. hosting 12 maanden" maxLength={200} />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">Waarom gaat dit eraf? <span className="font-normal text-gray-400">(optioneel)</span></label>
+        <textarea className={`${INP} min-h-[56px]`} value={verantwoording} onChange={(e) => setVerantwoording(e.target.value)} placeholder="Bv. extra developer ingehuurd na de oplevering." maxLength={1000} />
+      </div>
       <BewijsKiezer waarde={bewijs} onChange={setBewijs} bestaand={lijn?.bewijs ?? null} label="Factuur of contract van de kost" later={!lijn?.bewijs} />
+      {fout && <p className="text-xs text-red-700">{fout}</p>}
       <div className="flex gap-2">
-        <button type="button" onClick={bewaar} disabled={bezig || !ok} className="btn-primary text-sm">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}{lijn ? 'Bewaren' : 'Toevoegen'}</button>
+        <button type="button" onClick={bewaar} disabled={bezig} className="btn-primary text-sm">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}{lijn ? 'Bewaren' : 'Kost toevoegen'}</button>
         <button type="button" onClick={onAnnuleer} className="btn-secondary text-sm">Annuleren</button>
       </div>
     </div>
