@@ -170,3 +170,28 @@ export function deadlineTekst(deadline: string | null | undefined, vandaag: stri
   if (dagen === 1) return { tekst: 'morgen', telaat: false, vandaag: false }
   return { tekst: `over ${dagen} dagen`, telaat: false, vandaag: false }
 }
+
+/** Snelle keuzes voor een taak bij een kaart: wat er meestal moet gebeuren. */
+export const SNELLE_TAKEN = ['Opvolgen', 'Bellen', 'Mail sturen', 'Offerte opmaken', 'Meeting inplannen'] as const
+
+/**
+ * Snelle datums vanaf vandaag (JJJJ-MM-DD): morgen en overmorgen (enkel op een
+ * werkdag), volgende maandag, over een week en over twee weken (een weekenddag
+ * schuift naar de maandag erna). Nooit een zaterdag of zondag, geen dubbels.
+ */
+export function snelleDatums(vandaag: string): { label: string; dag: string }[] {
+  const basis = new Date(`${vandaag}T12:00:00Z`)
+  const plus = (n: number) => { const d = new Date(basis); d.setUTCDate(d.getUTCDate() + n); return d }
+  const iso = (d: Date) => d.toISOString().slice(0, 10)
+  const weekend = (d: Date) => d.getUTCDay() === 0 || d.getUTCDay() === 6
+  const werkdag = (d: Date) => { const w = d.getUTCDay(); if (w === 6) d.setUTCDate(d.getUTCDate() + 2); else if (w === 0) d.setUTCDate(d.getUTCDate() + 1); return iso(d) }
+  const totMaandag = ((8 - basis.getUTCDay()) % 7) || 7
+  const lijst = [
+    ...(weekend(plus(1)) ? [] : [{ label: 'Morgen', dag: iso(plus(1)) }]),
+    ...(weekend(plus(2)) ? [] : [{ label: 'Overmorgen', dag: iso(plus(2)) }]),
+    { label: 'Volgende maandag', dag: iso(plus(totMaandag)) },
+    { label: 'Over een week', dag: werkdag(plus(7)) },
+    { label: 'Over twee weken', dag: werkdag(plus(14)) },
+  ]
+  return lijst.filter((x, i) => lijst.findIndex((y) => y.dag === x.dag) === i)
+}

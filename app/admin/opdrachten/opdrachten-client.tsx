@@ -283,7 +283,7 @@ export function OpdrachtenClient() {
       {laden && rijen.length === 0 ? (
         <div className="py-16 text-center text-gray-400"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div>
       ) : weergave === 'bord' ? (
-        <KanbanBord kaarten={zichtbaar} laden={laden} opvolging={opvolging} voor={<AbmKolom onVernieuw={() => laad({ stil: true })} />}
+        <KanbanBord kaarten={zichtbaar} laden={laden} opvolging={opvolging} voor={<AbmKolom onVernieuw={() => laad({ stil: true })} />} onVernieuw={() => laad({ stil: true })}
           onOpen={(o) => setVenster({ id: o.id, kolom: kolomVan(o.status) })}
           onVerplaats={verplaats}
           onNieuw={(k) => setVenster({ id: null, kolom: k })} />
