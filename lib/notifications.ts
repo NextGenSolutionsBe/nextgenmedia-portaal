@@ -304,6 +304,13 @@ export async function buildNotifications(): Promise<Notif[]> {
     }
   } catch { /* stil */ }
 
+  // Nieuwe projecten uit de mail: wat de AI voorstelt en nog op een ja of nee wacht (Command Center).
+  try {
+    const { data } = await admin.from('mail_projecten').select('id, ontvangen_op').eq('status', 'voorstel').order('ontvangen_op', { ascending: false }).limit(50)
+    const open = (data ?? []) as { id: string; ontvangen_op: string }[]
+    if (open.length) out.push({ id: `mail-project:${open[0].id}:${open.length}`, kind: 'project', priority: 'high', title: open.length === 1 ? 'Mogelijk nieuw project uit de mail: kies ja of nee' : `${open.length} mogelijke nieuwe projecten uit de mail: kies ja of nee`, date: open[0].ontvangen_op.slice(0, 10), href: '/admin' })
+  } catch { /* tabel nog niet gemigreerd → geen signaal */ }
+
   // Opslag in Supabase: een signaal vanaf 70% van de 100 GB (zie lib/opslag.ts).
   try {
     const { data } = await admin.rpc('opslag_verbruik')

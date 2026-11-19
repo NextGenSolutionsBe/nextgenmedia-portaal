@@ -1,5 +1,6 @@
 import 'server-only'
 import type { AiSoort } from './regels'
+import { naarOordeel, type ProjectOordeel } from './projecten'
 
 // Een mail lezen met de AI. Enkel het nieuwe deel (zonder geciteerde tekst,
 // adressen of bijlagen) gaat mee. Twee dingen komen terug, allebei voorstellen
@@ -57,4 +58,77 @@ ${p.richting === 'in' ? `soort: akkoord = gaat duidelijk akkoord of wil starten;
     }).filter((t) => t.wat.length >= 4)
     return { soort, samenvatting, taken }
   } catch { return null }
+}
+
+/**
+ * Nieuw project of niet? Streng: de meeste mails zijn het niet. Enkel het nieuwe
+ * deel van een inkomende mail gaat mee, met wat we van de afzender weten (klant
+ * of niet, lopende projecten). Altijd een voorstel: een mens beslist.
+ */
+export async function beoordeelProject(p: {
+  onderwerp: string | null; tekst: string; datum: string; van: string | null; vanNaam: string | null
+  klant: string | null; lopend: { titel: string; fase: string; diensten: string[] }[]; merk: 'NextGenMedia' | 'NextGenSolutions'; formulier: boolean
+}): Promise<ProjectOordeel | null> {
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey || !p.tekst.trim()) return null
+  const dag = p.datum.slice(0, 10)
+  const afzender = [p.vanNaam?.slice(0, 80), p.van ? `<${p.van}>` : null].filter(Boolean).join(' ') || 'onbekend'
+  const wie = p.klant
+    ? `De afzender hoort bij onze bestaande klant "${p.klant.slice(0, 80)}".${p.lopend.length ? `\nLopende projecten van deze klant:\n${p.lopend.slice(0, 8).map((l) => `- ${l.titel.slice(0, 80)} (${l.fase}${l.diensten.length ? `, ${l.diensten.join(', ')}` : ''})`).join('\n')}` : '\nDeze klant heeft geen lopend project.'}`
+    : p.lopend.length
+      ? `De afzender is een prospect met een lopende kaart:\n${p.lopend.slice(0, 4).map((l) => `- ${l.titel.slice(0, 80)} (${l.fase})`).join('\n')}`
+      : 'De afzender is (nog) geen klant van ons.'
+  const prompt = `Je beoordeelt één inkomende mail voor een Belgisch bureau. NextGenMedia doet sociale media, grafisch ontwerp en branding, websites, foto en video, marketingconsultancy, Meta- en Google-advertenties en founder video's (Founders of Flanders). NextGenSolutions doet AI-automatisatie, chatbots en software op maat.
+
+De vraag: is deze mail de start van een NIEUW project voor ons, waarvoor we een projectkaart in onze CRM moeten maken? Wees heel streng. De meeste mails zijn GEEN nieuw project.
+
+JA, enkel als de afzender duidelijk iets nieuws van ons wil:
+- een prijs, offerte, voorstel of kennismakingsgesprek vraagt voor een dienst die wij aanbieden;
+- een aanvraag via een website- of contactformulier met een concrete vraag;
+- een potentiële klant die duidelijk wil samenwerken of iets wil laten maken;
+- een bestaande klant die iets vraagt dat buiten zijn lopende projecten valt (een nieuwe dienst, een nieuwe campagne, een extra opdracht) en daar een prijs of voorstel voor wil.
+
+NEE bij:
+- opvolging, feedback, planning, vragen of aanpassingen binnen een lopend project;
+- facturen, betalingen, administratie, contracten die al lopen, toegang of wachtwoorden;
+- iemand die ONS iets wil verkopen of aanbieden (bureaus, freelancers, SEO, leadgeneratie, software, sponsoring, advertentieruimte, samenwerkingsvoorstellen van leveranciers), sollicitaties, stages, studenten, enquêtes;
+- nieuwsbrieven, meldingen, automatische mails, uitnodigingen voor events of webinars, spam;
+- bedankjes, afspraken verzetten, algemene vragen zonder opdracht, vage interesse ("mooi werk!").
+Twijfel = nee.
+
+Mailbox: ${p.merk}. Ontvangen op ${dag}.${p.formulier ? ' Dit lijkt een melding van een websiteformulier: beoordeel wat de invuller vraagt.' : ''}
+Afzender: ${afzender}
+${wie}
+Onderwerp: ${(p.onderwerp ?? '').slice(0, 200)}
+---
+${p.tekst.slice(0, 3000)}
+---
+Geef UITSLUITEND geldige JSON:
+{
+  "nieuw_project": true,
+  "zekerheid": 0.0,
+  "hoort_bij_lopend_project": false,
+  "reden": "max 120 tekens: waarom wel of niet",
+  "titel": "korte titel van het project, max 50 tekens, zonder klantnaam (bv. Nieuwe website, Meta-advertenties voor de opening)",
+  "samenvatting": "2 à 3 korte zinnen in het Nederlands: wat staat er in de mail, zonder aanspreking",
+  "project": "1 zin: wat het project inhoudt en wat ze van ons verwachten, met budget of timing als die er staan",
+  "diensten": ["social_media|grafisch|webdesign|foto_video|consultancy|advertising|ngs|founders"],
+  "ads": "meta|google|beide|null",
+  "contact": { "bedrijf": "", "naam": "", "email": "", "telefoon": "", "website": "", "btw": "" }
+}
+zekerheid: hoe zeker je bent dat het een nieuw project is (0 = zeker niet, 1 = zeker wel).
+hoort_bij_lopend_project: true als de vraag over een van de lopende projecten hierboven gaat.
+contact: enkel wat letterlijk in de mail of de handtekening staat, anders leeg. Bij een formulier: de gegevens van wie het invulde.`
+  // Niet bereikbaar of te druk: gooien, zodat de mail de volgende ronde opnieuw beoordeeld wordt.
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model: MODEL(), max_tokens: 700, messages: [{ role: 'user', content: prompt }] }),
+  })
+  const json = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(`AI niet bereikbaar (${res.status})`)
+  const text: string = (json?.content ?? []).map((b: { text?: string }) => b.text ?? '').join('')
+  const a = text.indexOf('{'), z = text.lastIndexOf('}')
+  if (a < 0 || z < 0) return null
+  try { return naarOordeel(JSON.parse(text.slice(a, z + 1))) } catch { return null }
 }
