@@ -33,14 +33,15 @@ export async function POST(req: NextRequest) {
     if (!contractId) return NextResponse.json({ error: 'Ongeldige vraag.' }, { status: 400 })
     const c = controleerKostLijn(b)
     if ('fout' in c) return NextResponse.json({ error: c.fout }, { status: 400 })
-    const invoer = controleerBewijsInvoer(b.bewijs)
-    if (!invoer) return NextResponse.json({ error: 'Laad het document van de kost op (factuur, contract …).' }, { status: 400 })
+    // De factuur mag later: het bedrag gaat meteen van de waarde af.
+    const invoer = b.bewijs ? controleerBewijsInvoer(b.bewijs) : null
+    if (b.bewijs && !invoer) return NextResponse.json({ error: 'Ongeldig document.' }, { status: 400 })
     if (!c.lijn.verantwoording) return NextResponse.json({ error: 'Geef een verantwoording: waarom gaat dit eraf?' }, { status: 400 })
     const admin = createAdminSupabaseClient()
     const { data: contract } = await admin.from('vesting_contracten').select('id, klant, nr').eq('id', contractId).maybeSingle()
     if (!contract) return NextResponse.json({ error: 'Contract niet gevonden.' }, { status: 404 })
-    const bewijs = await verwerkBewijs(admin, invoer)
-    const { data: rij, error } = await admin.from('vesting_kosten').insert({ vesting_contract_id: contractId, ...c.lijn, ...bewijsKolommen(bewijs), created_by_email: actor.email ?? null }).select('id').single()
+    const bewijs = invoer ? bewijsKolommen(await verwerkBewijs(admin, invoer)) : {}
+    const { data: rij, error } = await admin.from('vesting_kosten').insert({ vesting_contract_id: contractId, ...c.lijn, ...bewijs, created_by_email: actor.email ?? null }).select('id').single()
     if (error) throw new Error(error.message)
     const som = await zetSom(admin, contractId)
     const meta = requestMeta(req)

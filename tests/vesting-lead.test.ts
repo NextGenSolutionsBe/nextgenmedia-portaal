@@ -91,6 +91,15 @@ test('Berekening: vastgelegd bedrag telt zo (geen rekensom), weghalen = terug zo
   assert.equal(zonder.meetellend, 1000) // € 2.000 betaald × 50%, zoals vroeger
 })
 
+test('Kosten tellen tegen hetzelfde percentage als het contract (25%, 50%, 100%)', () => {
+  const rij = (extra: Record<string, unknown>) => naarContract({ id: 'k', nr: 'C9', klant: 'K', ondertekend_op: '2026-09-01', status: 'actief', facturatiemodel: 'eenmalig', handmatige_totaalwaarde: 5000, uitgesloten_kosten: 2000, ...extra })
+  const meetellend = (extra: Record<string, unknown>) => berekenVesting([rij(extra)], [], [], STANDAARD_INSTELLINGEN).contracten[0].meetellend
+  // Zonder kosten 25% van € 5.000 = € 1.250; de kost van € 2.000 haalt er 25% af = € 500.
+  assert.equal(meetellend({ appointment_door_marco: true, closed_door_marco: true, lead_soort: 'inbound_ngs_bram' }), 750)
+  assert.equal(meetellend({ appointment_door_marco: true, closed_door_marco: false }), 1500)
+  assert.equal(meetellend({ appointment_door_marco: true, closed_door_marco: true }), 3000)
+})
+
 test('Te beoordelen: enkel getekende contracten', () => {
   const k = (id: string, status: string) => ({ id, status, klant: 'K', titel: 't', client_id: null, signed_at: status === 'signed' ? '2026-11-01' : null, start_date: null, waarde: null }) as never
   const lijst = teBeoordelen([k('a', 'signed'), k('b', 'sent'), k('c', 'viewed')], new Set(), new Set())

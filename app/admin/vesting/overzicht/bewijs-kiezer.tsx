@@ -22,15 +22,17 @@ async function laadOp(f: File): Promise<{ pad: string; naam: string }> {
 }
 
 /**
- * Het bewijsstuk bij een inkomst of kost: het contract of de factuur. Bij een
- * nieuwe registratie verplicht; bij aanpassen kan je het bestaande vervangen.
+ * Het bewijsstuk bij een inkomst of kost: het contract of de factuur. Mag later
+ * (het bedrag telt meteen mee); bij aanpassen kan je het bestaande vervangen.
  */
-export function BewijsKiezer({ waarde, onChange, bestaand, label = 'Contract of factuur' }: {
+export function BewijsKiezer({ waarde, onChange, bestaand, label = 'Contract of factuur', later }: {
   waarde: BewijsWaarde
   onChange: (v: BewijsWaarde) => void
   /** Het document dat er al hangt (bij aanpassen). */
   bestaand?: { pad: string; naam: string } | null
   label?: string
+  /** Toon dat de factuur ook later mag (het bedrag telt meteen mee). */
+  later?: boolean
 }) {
   const kiezer = useRef<HTMLInputElement>(null)
   const [bezig, setBezig] = useState(false)
@@ -60,6 +62,7 @@ export function BewijsKiezer({ waarde, onChange, bestaand, label = 'Contract of 
           {bezig ? 'Bezig met opladen…' : bestaand ? `Vervangen (nu: ${bestaand.naam})` : 'Document opladen'}
         </button>
       )}
+      {later && !waarde && !bestaand && <p className="mt-1 text-[11px] text-gray-500">Nog geen factuur? Ga gewoon verder: het bedrag telt meteen mee en je voegt de factuur later toe.</p>}
     </div>
   )
 }
@@ -72,5 +75,31 @@ export function BewijsLink({ bewijs, klein }: { bewijs: { pad: string; naam: str
       className={`inline-flex items-center gap-1 text-gray-600 hover:text-black underline-offset-2 hover:underline ${klein ? 'text-[11px]' : 'text-xs'}`}>
       <FileText className={klein ? 'h-3 w-3' : 'h-3.5 w-3.5'} /><span className="truncate max-w-[220px]">{bewijs.naam}</span>
     </a>
+  )
+}
+
+/**
+ * Factuur achteraf toevoegen: één klik, bestand kiezen, meteen bewaard. Voor
+ * kosten en inkomsten die al meetellen maar waarvan de factuur pas later kwam.
+ * Het document hoort bij de getekende cijfers, dus daarna tekent iedereen opnieuw.
+ */
+export function FactuurToevoegen({ onBewaar, klein }: { onBewaar: (b: { pad: string; naam: string }) => Promise<void>; klein?: boolean }) {
+  const kiezer = useRef<HTMLInputElement>(null)
+  const [bezig, setBezig] = useState(false)
+  const kies = async (f: File | undefined) => {
+    if (!f) return
+    setBezig(true)
+    try { await onBewaar(await laadOp(f)); toast.success('Factuur toegevoegd. Iedereen tekent nog even opnieuw.') }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'Opladen mislukt') }
+    finally { setBezig(false); if (kiezer.current) kiezer.current.value = '' }
+  }
+  return (
+    <>
+      <input ref={kiezer} type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" className="hidden" onChange={(e) => kies(e.target.files?.[0])} />
+      <button type="button" onClick={(e) => { e.stopPropagation(); kiezer.current?.click() }} disabled={bezig}
+        className={`inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 ${klein ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-1 text-xs'}`}>
+        {bezig ? <Loader2 className="h-3 w-3 animate-spin" /> : <Paperclip className="h-3 w-3" />}{bezig ? 'Bezig…' : 'Factuur toevoegen'}
+      </button>
+    </>
   )
 }
