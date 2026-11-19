@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { Loader2, CalendarClock, X, Video } from 'lucide-react'
 import { LeadKiezer, type LeadOption } from './lead-kiezer'
 import { merkStijl } from '@/lib/sales/merk'
+import { KANTOOR } from '@/lib/meetings/model'
 
 type Pipeline = { id: string; key: string; name: string; defaultCalendarId?: string | null }
 
@@ -16,7 +17,9 @@ const hhmm = (ms: number) =>
   new Date(ms).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })
 
 // ── Boekingspaneel ───────────────────────────────────────────────────────────
-export function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId, merkVoorkeur, merkVast, onClose, onBooked }: {
+export function BookingPanel({ ownerId, ownerName, start, end, pipelines, initialLeadId, merkVoorkeur, merkVast, onClose, onBooked, onAlgemeen }: {
+  /** Geen verkoop? Naar een algemene afspraak (Meeting Inplanner) met hetzelfde moment. */
+  onAlgemeen?: () => void
   ownerId: string; ownerName: string | null
   start: number; end: number
   pipelines: Pipeline[]; initialLeadId?: string
@@ -88,7 +91,7 @@ export function BookingPanel({ ownerId, ownerName, start, end, pipelines, initia
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
           <div>
             <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-              <CalendarClock className="h-4 w-4 text-gray-400" />Afspraak boeken
+              <CalendarClock className="h-4 w-4 text-gray-400" />Verkoopafspraak
               {(() => {
                 const gekozen = pipelines.find((p) => p.id === pipelineId)
                 if (!gekozen) return null
@@ -130,6 +133,12 @@ export function BookingPanel({ ownerId, ownerName, start, end, pipelines, initia
               </div>
             )
           })()}
+          {onAlgemeen && !controle && (
+            <p className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 text-xs text-gray-600">
+              Geen verkoop, maar bv. een stagebespreking of een gesprek over een verzekering?{' '}
+              <button type="button" onClick={onAlgemeen} className="underline font-medium text-gray-900">Plan een algemene afspraak</button>
+            </p>
+          )}
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Lead koppelen <span className="text-gray-400">— optioneel</span></label>
             <LeadKiezer waarde={lead} initialId={initialLeadId} onKies={setLead} />
@@ -199,6 +208,9 @@ export function BookingPanel({ ownerId, ownerName, start, end, pipelines, initia
             <label className="block text-xs font-medium text-gray-600 mb-1">Adres van de afspraak</label>
             <textarea rows={2} className="input-base" value={adres} onChange={(e) => setAdres(e.target.value)}
               placeholder="Dorpsstraat 12, 2400 Mol" />
+            {adres.trim() !== KANTOOR.adres && (
+              <button type="button" onClick={() => setAdres(KANTOOR.adres)} className="mt-1 inline-flex items-center gap-1 rounded-full border border-gray-300 px-2.5 py-0.5 text-xs hover:bg-gray-50">Corda Campus (gebouw 6A)</button>
+            )}
             <p className="text-[11px] text-gray-400 mt-1">
               Komt in het agenda-item als locatie, zodat de closer er rechtstreeks naartoe kan navigeren.
             </p>

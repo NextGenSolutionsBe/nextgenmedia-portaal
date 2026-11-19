@@ -117,6 +117,9 @@ export type GeldigeMeeting = {
   vorm: MeetingVorm; locatie: string | null; metMeet: boolean
 }
 
+/** Ons kantoor: één klik in elk adresveld van een afspraak (Meeting Inplanner en verkoopafspraken). */
+export const KANTOOR = { naam: 'Corda Campus', adres: 'Corda Campus, gebouw 6A, Kempische Steenweg 293/16 B, 3500 Hasselt' } as const
+
 export const MAX_LOCATIE = 300
 
 /**

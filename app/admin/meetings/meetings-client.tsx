@@ -14,7 +14,7 @@ import { routeLink } from '@/lib/meetings/meeting-mail'
 import { zoekVeld } from '@/lib/zoekveld'
 import {
   DUUR_OPTIES, STANDAARD_TIJDZONE, TIJDZONE_OPTIES, valideerMeeting, kiesHerinnering, herinneringsMail, datumKort, datumLang, uur, dag,
-  duurMinuten, wanneer, tijdzoneLabel, naamZonderKlant, ANTWOORD_LABEL, waarTekst, MAX_LOCATIE,
+  duurMinuten, wanneer, tijdzoneLabel, naamZonderKlant, ANTWOORD_LABEL, waarTekst, MAX_LOCATIE, KANTOOR,
   stapAgenda, stapMeet, stapUitnodiging, stapClickup, stapHerinnering, momentLabel, isEmail, type Persoon, type StapWeergave, type Toon,
 } from '@/lib/meetings/model'
 
@@ -144,8 +144,10 @@ function Rijtje({ label, children }: { label: string; children: ReactNode }) {
 
 // ── Planvenster (nieuw of aanpassen) ─────────────────────────────────────────
 
-export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerVrij, onSluit, onKlaar, onOpen }: {
+export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerVrij, onSluit, onKlaar, onOpen, soort }: {
   opties: Opties; bestaand: Meeting | null; startDag?: string
+  /** Vanuit Calendar: een algemene afspraak (stage, verzekering, overleg; standaard op ons kantoor) of een meeting met een klant. */
+  soort?: 'algemeen' | 'klant'
   /** Vanuit Calendar (gesleept of getikt): datum, uur, duur en agenda alvast ingevuld. */
   voorinvul?: { dag?: string; uur?: string; duur?: number; agendaId?: string | null; clientId?: string | null }
   /** Vlak vóór het opslaan opnieuw nagaan of het moment nog vrij is (Calendar). */
@@ -173,8 +175,8 @@ export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerV
   const [genodigden, setGenodigden] = useState<Rij[]>(bestaand ? bestaand.klant_ontvangers.map((p) => ({ naam: p.naam ?? '', email: p.email })) : [{ naam: '', email: '' }])
   const [extra, setExtra] = useState<Rij[]>((bestaand?.deelnemers ?? []).map((p) => ({ naam: p.naam ?? '', email: p.email })))
   const [herinnering, setHerinnering] = useState(bestaand?.herinnering_aan ?? true)
-  const [vorm, setVorm] = useState<'online' | 'locatie'>(bestaand?.vorm === 'locatie' ? 'locatie' : 'online')
-  const [locatie, setLocatie] = useState(bestaand?.locatie ?? '')
+  const [vorm, setVorm] = useState<'online' | 'locatie'>(bestaand ? (bestaand.vorm === 'locatie' ? 'locatie' : 'online') : soort === 'algemeen' ? 'locatie' : 'online')
+  const [locatie, setLocatie] = useState(bestaand?.locatie ?? (soort === 'algemeen' ? KANTOOR.adres : ''))
   const [metMeet, setMetMeet] = useState(bestaand?.vorm === 'locatie' ? !!bestaand.met_meet : false)
   // Wie zien de genodigden als organisator van de Google-uitnodiging? (agenda en Google-account)
   const [uitnodiger, setUitnodiger] = useState<{ agenda: string; account: string | null; viaInfo: boolean } | { fout: string } | null>(null)
@@ -350,7 +352,8 @@ export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerV
 
   // ── Stap 1: invullen ───────────────────────────────────────────────────────
   return (
-    <Modal breed titel={bestaand ? 'Meeting aanpassen of verplaatsen' : 'Meeting plannen'} sub={bestaand ? 'Zelfde Google-afspraak en Meet-link; de genodigden krijgen een update' : 'Google Agenda met Meet-link en uitnodiging, ClickUp en herinneringsmail'} onSluit={onSluit}
+    <Modal breed titel={bestaand ? 'Meeting aanpassen of verplaatsen' : soort === 'algemeen' ? 'Algemene afspraak' : soort === 'klant' ? 'Meeting met een klant' : 'Meeting plannen'}
+      sub={bestaand ? 'Zelfde Google-afspraak en Meet-link; de genodigden krijgen een update' : soort === 'algemeen' ? 'Stagebespreking, verzekering, overleg … Google Agenda met uitnodiging, ClickUp en herinneringsmail' : 'Google Agenda met Meet-link en uitnodiging, ClickUp en herinneringsmail'} onSluit={onSluit}
       voet={<>
         <button type="button" onClick={onSluit} className={`btn-secondary ${focusRing}`}>Annuleren</button>
         <button type="button" onClick={() => { if (probleem) { toast.error(probleem); return } setStap('controle') }} disabled={!!probleem} className={`btn-primary ${focusRing}`} title={probleem ?? undefined}>
@@ -358,12 +361,12 @@ export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerV
         </button>
       </>}>
       <div>
-        <label className={lbl} htmlFor="mt-titel">Titel</label>
-        <input id="mt-titel" autoFocus={!bestaand} className={INP} value={titel} maxLength={200} onChange={(e) => setTitel(e.target.value)} placeholder="Bv. Kennismaking" />
+        <label className={lbl} htmlFor="mt-titel">{soort === 'algemeen' ? 'Waarover gaat de afspraak?' : 'Titel'}</label>
+        <input id="mt-titel" autoFocus={!bestaand} className={INP} value={titel} maxLength={200} onChange={(e) => setTitel(e.target.value)} placeholder={soort === 'algemeen' ? 'Bv. Stagebespreking Semih, nieuwe verzekering' : 'Bv. Kennismaking'} />
       </div>
 
-      <Personen label="Genodigden" rijen={genodigden} zet={setGenodigden}
-        uitleg="Krijgen de agenda-uitnodiging van Google én de herinneringsmail. Iedereen kan, ook wie geen klant is."
+      <Personen label={soort === 'algemeen' ? 'Met wie?' : 'Genodigden'} rijen={genodigden} zet={setGenodigden}
+        uitleg={soort === 'algemeen' ? 'Bv. de stagiair of de verzekeraar: krijgt de agenda-uitnodiging en de herinneringsmail.' : 'Krijgen de agenda-uitnodiging van Google én de herinneringsmail. Iedereen kan, ook wie geen klant is.'}
         leegTekst="Nog niemand. Voeg minstens één e-mailadres toe." />
       {suggesties.length > 0 && (
         <div className="flex flex-wrap gap-1.5 -mt-1" aria-label="Contactpersonen van de klant">
@@ -415,6 +418,9 @@ export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerV
               <div>
                 <label className={lbl} htmlFor="mt-locatie">Adres</label>
                 <textarea id="mt-locatie" rows={2} className={INP} value={locatie} maxLength={MAX_LOCATIE} onChange={(e) => setLocatie(e.target.value)} placeholder="Straat en nummer, postcode en gemeente" />
+                {locatie.trim() !== KANTOOR.adres && (
+                  <button type="button" onClick={() => setLocatie(KANTOOR.adres)} className={`mt-1 mr-3 inline-flex items-center gap-1 rounded-full border border-gray-300 px-2.5 py-0.5 text-xs hover:bg-gray-50 ${focusRing}`}><MapPin className="h-3 w-3" aria-hidden />Corda Campus (gebouw 6A)</button>
+                )}
                 {klant?.adres && locatie.trim() !== klant.adres && (
                   <button type="button" onClick={() => setLocatie(klant.adres ?? '')} className={`mt-1 text-xs underline underline-offset-2 ${focusRing}`}>Adres van {klantNaam} gebruiken: {klant.adres}</button>
                 )}
@@ -446,7 +452,7 @@ export function PlanVenster({ opties, bestaand, startDag, voorinvul, controleerV
         <textarea id="mt-besch" rows={3} className={INP} value={beschrijving} maxLength={5000} onChange={(e) => setBeschrijving(e.target.value)} placeholder="Wat bespreken we?" />
       </div>
 
-      <details className="rounded-lg border border-gray-200" open={!!(clientId || projectId || clickupItem)}>
+      <details className="rounded-lg border border-gray-200" open={!!(clientId || projectId || clickupItem) || soort === 'klant'}>
         <summary className={`px-3 py-2 text-xs font-medium cursor-pointer ${focusRing}`}>Koppelen aan klant, project of ClickUp-item <span className="font-normal text-gray-500">(optioneel)</span></summary>
         <div className="px-3 pb-3 space-y-3">
           <div>
