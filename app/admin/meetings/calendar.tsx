@@ -48,7 +48,7 @@ type SalesClient = { id: string; name: string; timezone: string; slot_interval_m
 
 type Venster =
   | { soort: 'kies'; start: number; eind: number; op: number; vrij: boolean }
-  | { soort: 'plan'; start: number; eind: number }
+  | { soort: 'plan'; start: number; eind: number; wat?: 'algemeen' | 'klant' }
   | { soort: 'nieuw' }
   | { soort: 'lead'; start: number; eind: number }
   | { soort: 'detail'; id: string }
@@ -155,7 +155,10 @@ export function Calendar({ client, pipelines, isAdmin, verkoop, initialLeadId, i
   }, [])
   const kiesWeergave = (w: Weergave) => { setWeergave(w); try { localStorage.setItem('ngm-calendar-weergave', w) } catch { /* */ } }
 
-  useEffect(() => { api<Opties>('/api/admin/meetings?opties=1').then(setOpties).catch(() => setOpties(null)) }, [])
+  // Geladen (ook als het mislukte): zolang niet, tonen we de keuze nog niet, anders
+  // belandt een snelle klik meteen in de verkoopafspraak zonder keuze.
+  const [optiesGeladen, setOptiesGeladen] = useState(false)
+  useEffect(() => { api<Opties>('/api/admin/meetings?opties=1').then(setOpties).catch(() => setOpties(null)).finally(() => setOptiesGeladen(true)) }, [])
 
   // ── Venster per weergave ───────────────────────────────────────────────────
   const maandag = maandagVan(datum)
@@ -222,7 +225,7 @@ export function Calendar({ client, pipelines, isAdmin, verkoop, initialLeadId, i
     const vrij = !!data?.beschikbaarheid.ok && isBookable(data.segmenten, start, eind)
     const leadNietVrij = () => toast.error('Een afspraak voor een lead boek je op een wit (vrij) moment binnen de werkuren.')
     if (initialLeadId && verkoop) return vrij ? setVenster({ soort: 'lead', start, eind }) : leadNietVrij()
-    if (!opties && !verkoop) { toast('Even geduld, de planner laadt nog.'); return }
+    if (!optiesGeladen || (!opties && !verkoop)) { toast('Even geduld, de planner laadt nog.'); return }
     if (kanMeeting && verkoop) return setVenster({ soort: 'kies', start, eind, op: Date.now(), vrij })
     if (kanMeeting) return setVenster({ soort: 'plan', start, eind })
     if (verkoop) return vrij ? setVenster({ soort: 'lead', start, eind }) : leadNietVrij()
@@ -332,20 +335,24 @@ export function Calendar({ client, pipelines, isAdmin, verkoop, initialLeadId, i
       {venster?.soort === 'kies' && (
         <Modal titel="Wat wil je plannen?" sub={`${datumLang(new Date(venster.start).toISOString())}, ${uur(new Date(venster.start).toISOString())}–${uur(new Date(venster.eind).toISOString())} (Belgische tijd)`} onSluit={() => setVenster(null)}>
           <div className="grid gap-2">
-            <button type="button" onClick={() => { if (!spookklik(venster.op)) setVenster({ soort: 'plan', start: venster.start, eind: venster.eind }) }} className={`card-base !p-3 text-left hover:border-gray-400 ${focusRing}`}>
-              <div className="font-medium flex items-center gap-2"><Video className="h-4 w-4" />Meeting met Google Meet</div>
-              <div className="text-xs text-gray-600 mt-0.5">Met of zonder klant: echte Meet-link, uitnodiging, ClickUp en herinneringen.</div>
+            <button type="button" onClick={() => { if (!spookklik(venster.op)) setVenster({ soort: 'plan', start: venster.start, eind: venster.eind, wat: 'algemeen' }) }} className={`card-base !p-3 text-left hover:border-gray-400 ${focusRing}`}>
+              <div className="font-medium flex items-center gap-2"><CalendarDays className="h-4 w-4" />Algemene afspraak</div>
+              <div className="text-xs text-gray-600 mt-0.5">Stagebespreking, nieuwe verzekering, overleg … Titel, plaats (bv. Corda Campus) en met wie.</div>
+            </button>
+            <button type="button" onClick={() => { if (!spookklik(venster.op)) setVenster({ soort: 'plan', start: venster.start, eind: venster.eind, wat: 'klant' }) }} className={`card-base !p-3 text-left hover:border-gray-400 ${focusRing}`}>
+              <div className="font-medium flex items-center gap-2"><Video className="h-4 w-4" />Meeting met een klant</div>
+              <div className="text-xs text-gray-600 mt-0.5">Online of op locatie, gekoppeld aan de klant: uitnodiging, ClickUp en herinneringen.</div>
             </button>
             <button type="button" disabled={!venster.vrij} onClick={() => { if (!spookklik(venster.op)) setVenster({ soort: 'lead', start: venster.start, eind: venster.eind }) }} className={`card-base !p-3 text-left hover:border-gray-400 disabled:opacity-50 disabled:hover:border-gray-200 ${focusRing}`}>
-              <div className="font-medium flex items-center gap-2"><CalendarDays className="h-4 w-4" />Afspraak voor een lead</div>
-              <div className="text-xs text-gray-600 mt-0.5">{venster.vrij ? 'Verkoopafspraak uit de pipeline, met setter, merk en uitkomst zoals altijd.' : 'Kan enkel op een wit (vrij) moment binnen de werkuren.'}</div>
+              <div className="font-medium flex items-center gap-2"><UserRound className="h-4 w-4" />Verkoopafspraak met een lead</div>
+              <div className="text-xs text-gray-600 mt-0.5">{venster.vrij ? 'Uit de pipeline, met setter, merk en uitkomst zoals altijd.' : 'Kan enkel op een wit (vrij) moment binnen de werkuren.'}</div>
             </button>
           </div>
           {!venster.vrij && <p className="text-xs text-amber-800">Dit moment valt buiten de werkuren of overlapt met iets anders. Een interne meeting kan toch: je krijgt bij het opslaan een waarschuwing als er iets overlapt.</p>}
         </Modal>
       )}
       {(venster?.soort === 'plan' || venster?.soort === 'nieuw') && opties && (
-        <PlanVenster opties={opties} bestaand={null}
+        <PlanVenster opties={opties} bestaand={null} soort={venster.soort === 'plan' ? venster.wat : undefined}
           voorinvul={venster.soort === 'plan'
             ? { dag: dag(new Date(venster.start).toISOString()), uur: uur(new Date(venster.start).toISOString()), duur: Math.round((venster.eind - venster.start) / MIN), agendaId: agenda?.id ?? null }
             : { dag: datum < vandaag() ? vandaag() : datum, uur: '10:00', duur, agendaId: agenda?.id ?? null }}
@@ -360,6 +367,7 @@ export function Calendar({ client, pipelines, isAdmin, verkoop, initialLeadId, i
         <BookingPanel start={venster.start} end={venster.eind} pipelines={pipelines} initialLeadId={initialLeadId}
           merkVoorkeur={agenda.pipeline_id ?? initialMerkId ?? undefined} merkVast={!!agenda.pipeline_id}
           ownerId={agenda.id} ownerName={agenda.name}
+          onAlgemeen={kanMeeting ? () => setVenster({ soort: 'plan', start: venster.start, eind: venster.eind, wat: 'algemeen' }) : undefined}
           onClose={() => setVenster(null)} onBooked={() => { setVenster(null); laad() }} />
       )}
       {venster?.soort === 'detail' && opties && (
