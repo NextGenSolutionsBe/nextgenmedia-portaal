@@ -185,6 +185,11 @@ export function kmRegel(p: { datum?: string | null; traject: string; km: number;
   }, p.btw)
 }
 
+/** Staat er al een regel met kilometers op? (eenheid km of "kilometer" in artikel of omschrijving) */
+export function heeftKilometers(regels: Pick<FactuurRegel, 'eenheid' | 'artikel' | 'omschrijving'>[] | null | undefined): boolean {
+  return (regels ?? []).some((r) => String(r.eenheid ?? '').trim().toLowerCase() === 'km' || /kilometer|km-vergoeding|verplaatsingsvergoeding/i.test(`${r.artikel ?? ''} ${r.omschrijving ?? ''}`))
+}
+
 /** Een leesbaar verschil tussen twee waarden voor de wijzigingshistoriek. */
 export function verschillen(oud: Record<string, unknown>, nieuw: Record<string, unknown>, velden: string[]): { veld: string; oud: string; nieuw: string }[] {
   const uit: { veld: string; oud: string; nieuw: string }[] = []
