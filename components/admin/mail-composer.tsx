@@ -9,6 +9,7 @@ import { offerteMail } from '@/lib/offertes'
 import { welkomstMail } from '@/lib/klant-account'
 import { mailVoorstel } from '@/lib/algemene-contracten/model'
 import { aanhefVoor, adresSleutel, alleGebruikers, extraAdressen, metAanhef, standaardKeuze, type Ontvanger } from '@/lib/opleveringen-ontvangers'
+import { standaardShootKeuze } from '@/lib/shoots/model'
 
 // Eén gedeelde mailcomponent voor ALLE handmatige mails (klant/contract/taak/
 // toegang/algemeen). Altijd preview + handmatige bevestiging; nooit automatisch.
@@ -33,6 +34,8 @@ export type MailContext =
   | { type: 'offerte'; offerteId: string; titel: string; link: string; klant?: string | null; contact?: string | null; email?: string | null; geldigTot?: string | null; merk?: MailMerk | null }
   // Algemeen contract (huur, verzekering, NDA …): de knop opent een persoonlijke link (bekijken, downloaden, eventueel tekenen); de PDF als bijlage.
   | { type: 'algemeen_contract'; contractId: string; titel: string; email?: string | null; tegenpartij?: string | null; partijNodig: boolean; partijGetekend: boolean; onsGetekend: boolean }
+  // Shoot planner: het shootplan naar iedereen die erbij is. Eén mail per persoon, elk met een eigen link; de pdf als bijlage.
+  | { type: 'shoot'; shootId: string }
 
 /** Resultaat van een gelukte verzending (of van een eerder gelukte, bij dezelfde verzendpoging). */
 export type MailVerstuurd = { id: string | null; verstuurd_op: string | null; al_verstuurd?: boolean }
@@ -90,8 +93,13 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
   const [extra, setExtra] = useState('')
   const [verstuurdAan, setVerstuurdAan] = useState<string[]>([])
   const opl = context.type === 'oplevering'
+  // Shoot: dezelfde keuze van ontvangers als bij een oplevering (iedereen bij "Wie is erbij").
+  const isShoot = context.type === 'shoot'
+  const meer = opl || isShoot
+  const [shootKlant, setShootKlant] = useState<string | null>(null)
+  const [shootNog, setShootNog] = useState<string[]>([])
   const extraLijst = extraAdressen(extra)
-  const aanLijst: { email: string; naam: string | null; soort: Ontvanger['soort'] | 'extra' }[] = opl
+  const aanLijst: { email: string; naam: string | null; soort: Ontvanger['soort'] | 'extra' }[] = meer
     ? [
         ...(ontvangers ?? []).filter((o) => gekozen.includes(o.email)),
         ...extraLijst.geldig.filter((e) => !gekozen.some((g) => g.toLowerCase() === e.toLowerCase())).map((email) => ({ email, naam: null, soort: 'extra' as const })),
@@ -109,7 +117,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
     (async () => {
       try {
         // Een meetingmail vertrekt uit de meeting zelf, niet uit een template.
-        const tpl = context.type === 'meeting' || context.type === 'offerte' || context.type === 'algemeen_contract' ? { templates: [] } : await (await fetch('/api/admin/email/templates')).json()
+        const tpl = context.type === 'meeting' || context.type === 'offerte' || context.type === 'algemeen_contract' || context.type === 'shoot' ? { templates: [] } : await (await fetch('/api/admin/email/templates')).json()
         const eigen = (tpl.templates ?? []) as Template[]
         // De ingebouwde template van deze soort tonen zolang er geen eigen versie van bestaat.
         const extra = context.type === 'client' && !eigen.some((t) => t.kind === context.kind) ? ingebouwd(context.kind) : null
@@ -191,6 +199,15 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
           setSubject(`${context.versieLabel}: ${context.titel}`)
           setBody(`Beste [voornaam],\n\n${context.versieLabel === 'Finale versie' ? 'De finale versie' : `De ${context.versieLabel.toLowerCase()}`} van "${context.titel}" staat klaar in de klantapp. Je kan ${context.soort && context.soort !== 'video' ? 'de bestanden' : 'de video'} daar bekijken, in volle kwaliteit downloaden${context.versieLabel === 'Finale versie' ? '' : ' en je feedback geven'}.${tot ? `\n\nDe bestanden blijven beschikbaar tot ${tot}. Download ze dus tijdig.` : ''}\n\nMet vriendelijke groet,\nNextGenMedia`)
           setCtaText(context.soort && context.soort !== 'video' ? 'Bekijk de oplevering' : 'Bekijk de video'); setCtaLink(context.link)
+        } else if (context.type === 'shoot') {
+          const r = await fetch(`/api/admin/shoots/${context.shootId}/mail`, { cache: 'no-store' })
+          const j = await r.json()
+          if (!r.ok) throw new Error(j.error || 'Laden mislukt')
+          const lijst = (j.ontvangers ?? []) as Ontvanger[]
+          setOntvangers(lijst); setGekozen(standaardShootKeuze(lijst))
+          setShootKlant(j.klant ?? null); setShootNog(j.nog ?? [])
+          setSubject(j.voorstel.onderwerp); setBody(j.voorstel.tekst); setCtaText(j.voorstel.knop)
+          setCtaLink(`${window.location.origin}/shoot/(persoonlijke link per ontvanger)`)
         } else if (context.type === 'algemeen_contract') {
           const m = mailVoorstel({ titel: context.titel, tegenpartij: context.tegenpartij ?? null, partij_nodig: context.partijNodig, partij_getekend_op: context.partijGetekend ? 'ja' : null, ons_getekend_op: context.onsGetekend ? 'ja' : null })
           setToEmail(context.email ?? '')
@@ -211,7 +228,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
         } else {
           setToEmail(context.toEmail ?? '')
         }
-      } catch (e) { setError(e instanceof Error && (context.type === 'meeting' || context.type === 'klantaccount') ? e.message : 'Laden mislukt') } finally { setLoadingCtx(false) }
+      } catch (e) { setError(e instanceof Error && (context.type === 'meeting' || context.type === 'klantaccount' || context.type === 'shoot') ? e.message : 'Laden mislukt') } finally { setLoadingCtx(false) }
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -233,7 +250,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
 
   /** Oplevering: één mail per ontvanger, elk met de eigen aanhef en een eigen verzendsleutel (nooit dubbel). */
   const sendOplevering = async () => {
-    if (context.type !== 'oplevering') return
+    if (context.type !== 'oplevering' && context.type !== 'shoot') return
     if (extraLijst.ongeldig.length) { setError(`Geen geldig e-mailadres: ${extraLijst.ongeldig.join(', ')}`); return }
     if (!aanLijst.length) { setError('Kies minstens één ontvanger.'); return }
     if (!subject.trim()) { setError('Onderwerp is verplicht'); return }
@@ -243,7 +260,13 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
     let laatste: MailVerstuurd | null = null
     for (const o of aanLijst) {
       try {
-        const res = await fetch('/api/admin/email/send', {
+        const res = context.type === 'shoot' ? await fetch(`/api/admin/shoots/${context.shootId}/mail`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to_email: o.email, naam: o.naam, subject, body: metAanhef(body, aanhefVoor(o, shootKlant)), cta_text: ctaText || null,
+            verzend_sleutel: adresSleutel(sleutel, o.email), merk, bijlage,
+          }),
+        }) : await fetch('/api/admin/email/send', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             to_email: o.email, to_client_id: context.clientId,
@@ -270,7 +293,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
   }
 
   const send = async () => {
-    if (opl) return sendOplevering()
+    if (meer) return sendOplevering()
     if (!toEmail.trim()) { setError('Geen e-mailadres'); return }
     if (!subject.trim()) { setError('Onderwerp is verplicht'); return }
     setSending(true); setError(null)
@@ -339,8 +362,8 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
         {done ? (
           <div className="p-8 text-center space-y-3">
             <CheckCircle2 className="h-10 w-10 text-green-500 mx-auto" />
-            <p className="text-sm font-medium">{opl && verstuurdAan.length > 1 ? `Mail verstuurd naar ${verstuurdAan.length} personen` : `Mail verstuurd naar ${toEmail}`}</p>
-            {opl && verstuurdAan.length > 1 && <p className="text-xs text-gray-600">{verstuurdAan.join(', ')}. Elk kreeg een eigen mail; ze staan in het E-mail Center.</p>}
+            <p className="text-sm font-medium">{meer && verstuurdAan.length > 1 ? `Mail verstuurd naar ${verstuurdAan.length} personen` : `Mail verstuurd naar ${toEmail}`}</p>
+            {meer && verstuurdAan.length > 1 && <p className="text-xs text-gray-600">{verstuurdAan.join(', ')}. Elk kreeg een eigen mail; ze staan in het E-mail Center.</p>}
             {context.type === 'meeting' && afzender && <p className="text-xs text-gray-600">Vanaf {afzender.van}{kopieInfo ? ', met een kopie in de mailbox van info@nextgenmedia.be' : ''}. Staat in het E-mail Center.</p>}
             <button onClick={onClose} className="btn-primary">Sluiten</button>
           </div>
@@ -353,9 +376,14 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
                 ? <div className="text-xs text-gray-600"><span className="font-medium text-gray-700">Van:</span> {afzender.van}</div>
                 : <div className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2" role="alert">Versturen kan nu niet: {afzender.fout}</div>
             )}
-            {opl ? (
+            {isShoot && shootNog.length > 0 && (
+              <div className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">Nog aan te vullen in het plan: {shootNog.join(' · ')}. Versturen mag; wie de link heeft, ziet later altijd de laatste versie.</div>
+            )}
+            {meer ? (
               <OntvangersKiezer ontvangers={ontvangers ?? []} gekozen={gekozen} onWissel={wissel} onKies={setGekozen}
-                extra={extra} onExtra={setExtra} ongeldig={extraLijst.ongeldig} aantal={aanLijst.length} verstuurdAan={verstuurdAan} />
+                extra={extra} onExtra={setExtra} ongeldig={extraLijst.ongeldig} aantal={aanLijst.length} verstuurdAan={verstuurdAan}
+                alleLabel={isShoot ? 'Iedereen bij de shoot' : undefined}
+                leeg={isShoot ? 'Nog niemand met een e-mailadres bij "Wie is erbij". Vul hieronder een adres in.' : undefined} />
             ) : (
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Aan{context.type === 'meeting' && <span className="text-gray-400"> — meerdere adressen met een komma</span>}</label>
@@ -377,10 +405,13 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
                 <p className="text-[11px] text-gray-400 mt-0.5">De volledige mail wordt bij het contract bewaard onder “Verzonden mails”.</p>
               </div>
             )}
+            {isShoot && (
+              <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer"><input type="checkbox" checked={bijlage} onChange={(e) => setBijlage(e.target.checked)} />Het shootplan als pdf meesturen</label>
+            )}
             {context.type === 'algemeen_contract' && (
               <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer"><input type="checkbox" checked={bijlage} onChange={(e) => setBijlage(e.target.checked)} />{context.onsGetekend || context.partijGetekend ? 'De getekende PDF' : 'De PDF'} als bijlage meesturen (tot 10 MB)</label>
             )}
-            {context.type === 'algemeen_contract' ? null : context.type === 'meeting' ? (
+            {context.type === 'algemeen_contract' || isShoot ? null : context.type === 'meeting' ? (
               <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer"><input type="checkbox" checked={kopieInfo} onChange={(e) => setKopieInfo(e.target.checked)} />Kopie in de mailbox van info@nextgenmedia.be (bcc)</label>
             ) : (
               <div>
@@ -414,7 +445,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div><label className="block text-xs font-medium text-gray-600 mb-1">Knop-tekst</label><input className={inp} value={ctaText} onChange={(e) => setCtaText(e.target.value)} placeholder="Bv. Bekijken" /></div>
-              <div><label className="block text-xs font-medium text-gray-600 mb-1">Knop-link</label><input className={`${inp} ${context.type === 'offerte' || context.type === 'algemeen_contract' ? 'bg-gray-50 text-gray-500' : ''}`} value={ctaLink} onChange={(e) => setCtaLink(e.target.value)} readOnly={context.type === 'offerte' || context.type === 'algemeen_contract'} title={context.type === 'offerte' ? 'De knop opent altijd de offerte' : context.type === 'algemeen_contract' ? 'Elke ontvanger krijgt een eigen link (30 dagen geldig)' : undefined} placeholder="https://…" /></div>
+              <div><label className="block text-xs font-medium text-gray-600 mb-1">Knop-link</label><input className={`${inp} ${context.type === 'offerte' || context.type === 'algemeen_contract' || isShoot ? 'bg-gray-50 text-gray-500' : ''}`} value={ctaLink} onChange={(e) => setCtaLink(e.target.value)} readOnly={context.type === 'offerte' || context.type === 'algemeen_contract' || isShoot} title={context.type === 'offerte' ? 'De knop opent altijd de offerte' : context.type === 'algemeen_contract' ? 'Elke ontvanger krijgt een eigen link (30 dagen geldig)' : isShoot ? 'Elke ontvanger krijgt een eigen link naar het shootplan (geldig tot twee weken na de shoot)' : undefined} placeholder="https://…" /></div>
             </div>
             {/* Preview */}
             <div className="rounded-lg border border-gray-100 bg-gray-50 overflow-hidden">
@@ -432,7 +463,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
             </div>
             {error && <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</div>}
             <div className="flex gap-2 pt-1">
-              <button onClick={send} disabled={sending || (opl ? !aanLijst.length : !toEmail) || (context.type === 'meeting' && !afzender?.ok)} className="btn-primary flex-1 justify-center">{sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}{context.type === 'meeting' ? 'Versturen' : opl && aanLijst.length > 1 ? `Verstuur naar ${aanLijst.length} personen` : 'Verstuur'}</button>
+              <button onClick={send} disabled={sending || (meer ? !aanLijst.length : !toEmail) || (context.type === 'meeting' && !afzender?.ok)} className="btn-primary flex-1 justify-center">{sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}{context.type === 'meeting' ? 'Versturen' : meer && aanLijst.length > 1 ? `Verstuur naar ${aanLijst.length} personen` : 'Verstuur'}</button>
               <button onClick={onClose} className="btn-secondary">Annuleer</button>
             </div>
           </div>
@@ -447,9 +478,10 @@ const CONTRACT_KNOP = 'Bekijken'
 const SOORT_LABEL: Record<Ontvanger['soort'], string> = { eigenaar: 'Hoofdaccount', gebruiker: 'Gebruiker', klantadres: 'Algemeen adres van de klant' }
 
 /** Oplevering: kies wie de mail krijgt. "Alle gebruikers" = iedereen met een account die de oplevering kan bekijken. */
-function OntvangersKiezer({ ontvangers, gekozen, onWissel, onKies, extra, onExtra, ongeldig, aantal, verstuurdAan }: {
+function OntvangersKiezer({ ontvangers, gekozen, onWissel, onKies, extra, onExtra, ongeldig, aantal, verstuurdAan, alleLabel = 'Alle gebruikers', leeg }: {
   ontvangers: Ontvanger[]; gekozen: string[]; onWissel: (email: string) => void; onKies: (l: string[]) => void
   extra: string; onExtra: (v: string) => void; ongeldig: string[]; aantal: number; verstuurdAan: string[]
+  alleLabel?: string; leeg?: string
 }) {
   const alle = alleGebruikers(ontvangers)
   const allesAan = alle.length > 0 && alle.every((e) => gekozen.includes(e))
@@ -460,7 +492,7 @@ function OntvangersKiezer({ ontvangers, gekozen, onWissel, onKies, extra, onExtr
         {alle.length > 0 && (
           <button type="button" onClick={() => onKies(allesAan ? gekozen.filter((e) => !alle.includes(e)) : Array.from(new Set([...gekozen, ...alle])))}
             className={`text-xs px-3 py-1 rounded-full border ${allesAan ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 hover:bg-gray-50'}`}>
-            Alle gebruikers ({alle.length})
+            {alleLabel} ({alle.length})
           </button>
         )}
       </div>
@@ -472,14 +504,14 @@ function OntvangersKiezer({ ontvangers, gekozen, onWissel, onKies, extra, onExtr
                 <input type="checkbox" disabled={!o.kan} checked={o.kan && gekozen.includes(o.email)} onChange={() => onWissel(o.email)} className="h-4 w-4 accent-gray-900 shrink-0" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate">{o.naam ? <><span className="font-medium">{o.naam}</span> <span className="text-gray-500">· {o.email}</span></> : o.email}</span>
-                  <span className="block text-[11px] text-gray-500">{o.reden ?? SOORT_LABEL[o.soort]}{verstuurdAan.includes(o.email) ? ' · verstuurd' : ''}</span>
+                  <span className="block text-[11px] text-gray-500">{o.reden ?? o.label ?? SOORT_LABEL[o.soort]}{verstuurdAan.includes(o.email) ? ' · verstuurd' : ''}</span>
                 </span>
               </label>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="text-xs text-gray-500">Deze klant heeft nog geen accounts in de klantapp. Vul hieronder een adres in.</p>
+        <p className="text-xs text-gray-500">{leeg ?? 'Deze klant heeft nog geen accounts in de klantapp. Vul hieronder een adres in.'}</p>
       )}
       <div>
         <label className="block text-[11px] text-gray-500 mb-1">Andere adressen <span className="text-gray-400">(optioneel, met een komma)</span></label>

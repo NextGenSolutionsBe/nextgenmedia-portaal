@@ -399,6 +399,7 @@ export async function updateSession(request: NextRequest) {
     path === '/' ||
     path.startsWith('/sign/') ||
     path.startsWith('/offerte/') ||   // publieke offertes (token in de link, eigen controle in de pagina)
+    path.startsWith('/shoot/') ||   // shootplan: bekijken door wie de mail kreeg (persoonlijke link, eigen controle)
     path.startsWith('/document/') ||   // algemene contracten: bekijken en tekenen door de andere partij (persoonlijke link, eigen controle)
     path.startsWith('/welkom/') ||   // klantaccount activeren: zelf een wachtwoord kiezen (token in de link, eigen controle in de API)
     path.startsWith('/f/') ||     // publieke formulieren (token in de link, eigen controle in de pagina)

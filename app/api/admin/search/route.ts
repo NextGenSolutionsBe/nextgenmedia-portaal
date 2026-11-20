@@ -89,6 +89,13 @@ export async function GET(req: NextRequest) {
       const naamVan = new Map(clients.map((c) => [c.id, c.company_name]))
       for (const o of op) results.push({ type: 'oplevering', label: 'Oplevering', title: o.titel, subtitle: `${naamVan.get(o.client_id) ?? ''}${o.gearchiveerd_op ? ' · archief' : ''}`.replace(/^ · /, ''), href: `/admin/opleveringen?oplevering=${o.id}` })
     }
+    if (may('shoots')) {
+      // Shoots: op titel of locatie, of alle shoots van een klant die gevonden werd.
+      const extraKlant = clients.length ? `,client_id.in.(${clients.map((c) => c.id).join(',')})` : ''
+      const sh = await safe(admin.from('shoot_briefings').select('id, titel, client_id, shoot_date, start_time, location').or(`titel.ilike.${like},location.ilike.${like}${extraKlant}`).order('shoot_date', { ascending: false }).limit(L)) as { id: string; titel: string | null; client_id: string; shoot_date: string | null; start_time: string | null; location: string | null }[]
+      const naamVan = new Map(clients.map((c) => [c.id, c.company_name]))
+      for (const x of sh) results.push({ type: 'shoot', label: 'Shoot', title: x.titel || `Shoot ${naamVan.get(x.client_id) ?? ''}`.trim(), subtitle: [naamVan.get(x.client_id), x.shoot_date ? `${datumKort(x.shoot_date)}${x.start_time ? ` ${x.start_time}` : ''}` : null, x.location].filter(Boolean).join(' · ') || undefined, href: `/admin/shoots/${x.id}` })
+    }
     if (may('offertes')) {
       const extraKlant = clients.length ? `,client_id.in.(${clients.map((c) => c.id).join(',')})` : ''
       const offs = await safe(admin.from('offertes').select('id, titel, klant_naam, status').or(`titel.ilike.${like},klant_naam.ilike.${like}${extraKlant}`).order('created_at', { ascending: false }).limit(L)) as { id: string; titel: string; klant_naam: string | null; status: string }[]

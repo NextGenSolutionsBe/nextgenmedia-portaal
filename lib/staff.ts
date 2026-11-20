@@ -29,6 +29,8 @@ export const ADMIN_MODULES: AdminModule[] = [
   { key: 'events',      label: 'Workshops & events',   prefixes: ['/admin/events', '/api/admin/events'] },
   // Opleveringen: video's, ontwerpen, foto's en documenten laten bekijken, downloaden en feedback geven (3 dagen beschikbaar).
   { key: 'opleveringen', label: 'Opleveringen',  prefixes: ['/admin/opleveringen', '/api/admin/opleveringen'] },
+  // Shoot planner: kalender met shoots, plan per uur en locatie, briefing (ook met AI), mail met een persoonlijke link.
+  { key: 'shoots',      label: 'Shoot planner',        prefixes: ['/admin/shoots', '/api/admin/shoots'] },
   { key: 'content',     label: 'Content / Diensten',   prefixes: ['/admin/services', '/api/admin/social-content', '/api/admin/shoot-feedback', '/api/admin/shoot-ideas', '/api/admin/webdesign'] },
   { key: 'metricool',   label: 'Metricool',            prefixes: ['/admin/metricool', '/api/admin/metricool'] },
   { key: 'blogs',       label: 'Blogs',                prefixes: ['/admin/blog-calendar', '/admin/blogaccounts', '/admin/blogs', '/api/admin/blogs', '/api/admin/blog-accounts', '/api/admin/blog-seo', '/api/admin/blog-settings', '/api/admin/framer'] },

@@ -7662,3 +7662,46 @@ create table if not exists public.mail_project_scan (
   fout text
 );
 alter table public.mail_project_scan enable row level security;
+
+-- ── Shoot planner (20 nov 2026) ──
+-- Eén plek voor shoots: shoot_briefings (per klant, ook zichtbaar in de klantapp)
+-- krijgt een volledig shootplan. shoot_date/start_time/end_time/location blijven
+-- gevuld (afgeleid uit het programma), zodat klantfiche, klantapp en het
+-- bestaande shootdocument gewoon blijven werken.
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS titel text;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'gepland';
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS doel text;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS locaties jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS programma jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS betrokkenen jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS paklijst jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS shotlist jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS praktisch text;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS briefing_pad text;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS briefing_naam text;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS briefing_type text;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS versie integer NOT NULL DEFAULT 1;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS bijgewerkt_door text;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS laatst_verstuurd_op timestamptz;
+CREATE INDEX IF NOT EXISTS shoot_briefings_datum ON public.shoot_briefings (shoot_date);
+
+-- Persoonlijke link naar het shootplan (/shoot/<token>): één per ontvanger per mail, enkel de SHA-256.
+CREATE TABLE IF NOT EXISTS public.shoot_links (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  shoot_id uuid NOT NULL REFERENCES public.shoot_briefings(id) ON DELETE CASCADE,
+  token_hash text NOT NULL UNIQUE,
+  email text,
+  naam text,
+  verloopt_op timestamptz NOT NULL,
+  geopend_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by text
+);
+CREATE INDEX IF NOT EXISTS shoot_links_shoot ON public.shoot_links (shoot_id);
+ALTER TABLE public.shoot_links ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.shoot_links FROM anon, authenticated;
+
+-- Privébucket voor briefingdocumenten (pdf, foto, Word, tekst), max 25 MB.
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('shoots', 'shoots', false, 26214400, ARRAY['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'])
+ON CONFLICT (id) DO NOTHING;

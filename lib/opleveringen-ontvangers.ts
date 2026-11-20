@@ -18,6 +18,8 @@ export type Ontvanger = {
   kan: boolean
   /** Waarom niet, als `kan` false is. */
   reden: string | null
+  /** Eigen omschrijving onder de naam (bv. de rol bij een shoot); anders volgens de soort. */
+  label?: string | null
 }
 
 const EMAIL = /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/
