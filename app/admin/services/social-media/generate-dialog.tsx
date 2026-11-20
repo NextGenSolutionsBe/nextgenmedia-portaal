@@ -1,21 +1,18 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { X, Loader2, CalendarDays, Sparkles, CheckCircle2, Info } from 'lucide-react'
+import { X, Loader2, CalendarDays, Sparkles, CheckCircle2, Info, Lightbulb } from 'lucide-react'
+import { KANALEN, normaliseerKanalen } from '@/lib/social-platforms'
+import { kalenderPuntGeldt } from '@/lib/contentplanning/model'
 
 const MONTH_NAMES = [
   'Januari', 'Februari', 'Maart', 'April', 'Mei', 'Juni',
   'Juli', 'Augustus', 'September', 'Oktober', 'November', 'December',
 ]
 
-const ALL_PLATFORMS = [
-  { slug: 'instagram', label: 'Instagram' },
-  { slug: 'facebook',  label: 'Facebook' },
-  { slug: 'linkedin',  label: 'LinkedIn' },
-  { slug: 'tiktok',    label: 'TikTok' },
-  { slug: 'pinterest', label: 'Pinterest' },
-  { slug: 'twitter',   label: 'Twitter/X' },
-]
+// Kanalen komen uit één lijst (lib/social-platforms.ts): Instagram en Facebook
+// staan daar samen als Meta, want je plant er nooit apart voor.
+const ALL_PLATFORMS = KANALEN
 
 interface ClientConfig {
   niche: string
@@ -25,6 +22,8 @@ interface ClientConfig {
   reelsPerMonth: number
   storiesPerMonth: number
   channels: string[]
+  /** Aandachtspunten voor de contentkalender (klantfiche in de dagelijkse planning). */
+  aandachtspunten?: { tekst: string; maand: string | null; tot_maand: string | null }[]
 }
 
 interface SelectedMonth { year: number; month: number }
@@ -77,7 +76,10 @@ export function GenerateDialog({ clientId, onClose, onGenerated }: GenerateDialo
         setStoriesPerMonth(json.storiesPerMonth)
         setSelectedMonths(getDefaultMonths(json.start_date))
         // Pre-select the platforms the client has configured (admin can adjust)
-        setSelectedPlatforms(json.channels?.length > 0 ? json.channels : ['instagram'])
+        // Oude klantinstellingen kunnen nog 'instagram'/'facebook' bevatten;
+        // normaliseren maakt daar één keer Meta van in plaats van twee vinkjes.
+        const kanalen = normaliseerKanalen(json.channels)
+        setSelectedPlatforms(kanalen.length > 0 ? kanalen : ['meta'])
       })
       .catch(() => setError('Kan configuratie niet laden'))
       .finally(() => setLoadingConfig(false))
@@ -119,7 +121,7 @@ export function GenerateDialog({ clientId, onClose, onGenerated }: GenerateDialo
           postsPerMonth,
           reelsPerMonth,
           storiesPerMonth,
-          channels: selectedPlatforms.length > 0 ? selectedPlatforms : ['instagram'],
+          channels: selectedPlatforms.length > 0 ? selectedPlatforms : ['meta'],
           niche: config?.niche ?? '',
         }),
       })
@@ -137,16 +139,16 @@ export function GenerateDialog({ clientId, onClose, onGenerated }: GenerateDialo
     }
   }
 
-  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848] text-center font-semibold'
+  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900 text-center font-semibold'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
 
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl">
           <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-[#c5b800]" />
+            <Sparkles className="h-4 w-4 text-gray-500" />
             <h3 className="font-semibold">
               {step === 'confirm' ? 'Bevestig planning' : 'Content inplannen'}
             </h3>
@@ -193,6 +195,8 @@ export function GenerateDialog({ clientId, onClose, onGenerated }: GenerateDialo
                 </div>
               </div>
             </div>
+
+            {config?.aandachtspunten?.length ? <Aandachtspunten punten={config.aandachtspunten} maanden={selectedMonths} /> : null}
 
             {/* Summary recap */}
             <div className="bg-gray-50 rounded-xl p-4 text-sm space-y-1.5">
@@ -255,6 +259,8 @@ export function GenerateDialog({ clientId, onClose, onGenerated }: GenerateDialo
               </div>
             )}
 
+            {config?.aandachtspunten?.length ? <Aandachtspunten punten={config.aandachtspunten} maanden={selectedMonths} /> : null}
+
             {/* Month selector */}
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-2">
@@ -268,7 +274,7 @@ export function GenerateDialog({ clientId, onClose, onGenerated }: GenerateDialo
                     onClick={() => toggleMonth(year, month)}
                     className={`px-2 py-2.5 rounded-xl border text-xs font-medium transition-colors ${
                       isSelected(year, month)
-                        ? 'border-[#fff848] bg-[#fff848]/10 text-black'
+                        ? 'border-gray-900 bg-gray-100 text-black'
                         : 'border-gray-200 text-gray-500 hover:border-gray-300'
                     }`}
                   >
@@ -292,7 +298,7 @@ export function GenerateDialog({ clientId, onClose, onGenerated }: GenerateDialo
                     onClick={() => togglePlatform(slug)}
                     className={`px-2.5 py-2 rounded-xl border text-xs font-medium transition-colors ${
                       selectedPlatforms.includes(slug)
-                        ? 'border-[#fff848] bg-[#fff848]/10 text-black'
+                        ? 'border-gray-900 bg-gray-100 text-black'
                         : 'border-gray-200 text-gray-500 hover:border-gray-300'
                     }`}
                   >
@@ -310,7 +316,7 @@ export function GenerateDialog({ clientId, onClose, onGenerated }: GenerateDialo
               <label className="block text-xs font-medium text-gray-600 mb-2">
                 Frequentie per maand
               </label>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {[
                   { label: 'Posts', value: postsPerMonth, set: setPostsPerMonth },
                   { label: 'Reels', value: reelsPerMonth, set: setReelsPerMonth },
@@ -333,7 +339,7 @@ export function GenerateDialog({ clientId, onClose, onGenerated }: GenerateDialo
 
             {/* Summary card */}
             {selectedMonths.length > 0 && totalPerMonth > 0 && selectedPlatforms.length > 0 && (
-              <div className="bg-[#fff848]/10 border border-[#fff848]/40 rounded-xl p-3.5">
+              <div className="bg-gray-100 border border-gray-300 rounded-xl p-3.5">
                 <div className="flex items-center gap-2 font-semibold text-gray-900 text-sm mb-1">
                   <CalendarDays className="h-4 w-4 shrink-0" />
                   {totalItems} contentmomenten over {selectedMonths.length} maand{selectedMonths.length !== 1 ? 'en' : ''}
@@ -376,6 +382,32 @@ export function GenerateDialog({ clientId, onClose, onGenerated }: GenerateDialo
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+/** De aandachtspunten van de klant voor de gekozen maanden: komen vanzelf mee bij het genereren. */
+function Aandachtspunten({ punten, maanden }: { punten: NonNullable<ClientConfig['aandachtspunten']>; maanden: SelectedMonth[] }) {
+  const ym = maanden.map((m) => `${m.year}-${String(m.month + 1).padStart(2, '0')}`).sort()
+  const van = ym[0] ?? null, tot = ym[ym.length - 1] ?? null
+  const lijst = punten.filter((p) => kalenderPuntGeldt(p, van, tot))
+  if (!lijst.length) return null
+  const periode = (p: { maand: string | null; tot_maand: string | null }) => {
+    const m = (x: string) => `${MONTH_NAMES[Number(x.slice(5, 7)) - 1]} ${x.slice(0, 4)}`
+    return !p.maand ? 'Altijd' : p.tot_maand && p.tot_maand !== p.maand ? `${m(p.maand)} t/m ${m(p.tot_maand)}` : m(p.maand)
+  }
+  return (
+    <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-4 space-y-2">
+      <div className="flex items-center gap-2 text-sm font-medium text-violet-900"><Lightbulb className="h-4 w-4" />Aandachtspunten voor deze kalender</div>
+      <ul className="space-y-2">
+        {lijst.map((p, i) => (
+          <li key={i} className="text-sm text-violet-950">
+            <div className="text-[11px] font-semibold text-violet-700">{periode(p)}</div>
+            <div className="whitespace-pre-wrap">{p.tekst}</div>
+          </li>
+        ))}
+      </ul>
+      <p className="text-[11px] text-violet-800/80">Deze punten krijgt Claude ook mee bij het invullen van de content.</p>
     </div>
   )
 }

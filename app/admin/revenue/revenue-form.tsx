@@ -68,7 +68,7 @@ export function RevenueForm() {
     }
   }, [open, clients.length])
 
-  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#fff848]/50 focus:border-[#fff848]'
+  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900'
   const lbl = 'block text-xs font-medium text-gray-600 mb-1'
 
   const reset = () => {
@@ -124,7 +124,7 @@ export function RevenueForm() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl">
           <h3 className="font-semibold text-gray-900">Omzet toevoegen</h3>
@@ -186,7 +186,7 @@ export function RevenueForm() {
               {/* Billing frequency */}
               <div>
                 <label className={lbl}>Facturatiefrequentie</label>
-                <div className="grid grid-cols-4 gap-1.5">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                   {FREQ_OPTIONS.map(f => (
                     <button
                       key={f.value}
@@ -194,7 +194,7 @@ export function RevenueForm() {
                       onClick={() => setForm(p => ({ ...p, billing_frequency: f.value }))}
                       className={`py-2 rounded-lg border text-xs font-medium transition-colors ${
                         form.billing_frequency === f.value
-                          ? 'border-[#fff848] bg-[#fff848]/10 text-black'
+                          ? 'border-gray-900 bg-gray-100 text-black'
                           : 'border-gray-200 text-gray-500 hover:border-gray-300'
                       }`}
                     >
@@ -209,9 +209,8 @@ export function RevenueForm() {
                 <label className={lbl}>Bedrag {freqSuffix} (€) *</label>
                 <input
                   required
-                  type="number"
-                  min="0"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   className={inp}
                   value={form.amount_per_month}
                   onChange={e => setForm(p => ({ ...p, amount_per_month: e.target.value }))}
@@ -242,7 +241,7 @@ export function RevenueForm() {
                       onClick={() => setEndMode(o.v as typeof endMode)}
                       className={`flex-1 py-1.5 text-xs rounded-lg border transition-colors ${
                         endMode === o.v
-                          ? 'border-[#fff848] bg-[#fff848]/10 text-black font-medium'
+                          ? 'border-gray-900 bg-gray-100 text-black font-medium'
                           : 'border-gray-200 text-gray-500 hover:border-gray-300'
                       }`}
                     >
@@ -257,7 +256,7 @@ export function RevenueForm() {
                       min="1"
                       max="60"
                       step="1"
-                      className="flex-1 accent-[#fff848]"
+                      className="flex-1 accent-gray-900"
                       value={form.months_count}
                       onChange={e => setForm(p => ({ ...p, months_count: e.target.value }))}
                     />
@@ -281,9 +280,8 @@ export function RevenueForm() {
                 <label className={lbl}>Bedrag (€) *</label>
                 <input
                   required
-                  type="number"
-                  min="0"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   className={inp}
                   value={form.amount}
                   onChange={e => setForm(p => ({ ...p, amount: e.target.value }))}

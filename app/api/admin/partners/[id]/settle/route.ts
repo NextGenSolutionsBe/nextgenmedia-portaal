@@ -1,12 +1,17 @@
+import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
+import { createClient, createAdminSupabaseClient , isActiveStaff } from '@/lib/supabase/server'
+import { logAudit, requestMeta } from '@/lib/audit'
+
+// Gebruikt cookies/sessie: nooit statisch renderen.
+export const dynamic = 'force-dynamic'
 
 async function requireAdmin() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
   const { data } = await supabase.from('user_roles').select('role').eq('user_id', user.id).maybeSingle()
-  return data?.role === 'admin' ? user : null
+  return data?.role === 'admin' || (await isActiveStaff(user.id)) ? user : null
 }
 
 export async function POST(
@@ -23,10 +28,11 @@ export async function POST(
 
     const admin = createAdminSupabaseClient()
 
-    // Fetch all pending ledger entries for this partner
+    // Fetch all pending ledger entries for this partner. select('*') so the
+    // direction column is included without breaking on older schemas.
     const { data: entries, error: fetchErr } = await admin
       .from('partner_ledger_entries')
-      .select('id, amount, occurred_on')
+      .select('*')
       .eq('freelancer_id', id)
       .eq('status', 'pending')
 
@@ -36,9 +42,18 @@ export async function POST(
       return NextResponse.json({ error: 'Geen openstaande items om af te rekenen' }, { status: 400 })
     }
 
-    // Calculate totals (positive entries = owed to partner, negative = partner owes us)
-    const totalOwedToPartner = entries.filter((e) => Number(e.amount) > 0).reduce((s, e) => s + Number(e.amount), 0)
-    const totalOwedByPartner = entries.filter((e) => Number(e.amount) < 0).reduce((s, e) => s + Math.abs(Number(e.amount)), 0)
+    // Direction is explicit when present, else inferred from the amount sign.
+    const dirOf = (e: { direction?: string | null; amount: number }) =>
+      e.direction === 'partner_pays_us' || e.direction === 'we_pay_partner'
+        ? e.direction
+        : (Number(e.amount) >= 0 ? 'we_pay_partner' : 'partner_pays_us')
+
+    const totalOwedToPartner = entries
+      .filter((e) => dirOf(e) === 'we_pay_partner')
+      .reduce((s, e) => s + Math.abs(Number(e.amount)), 0)
+    const totalOwedByPartner = entries
+      .filter((e) => dirOf(e) === 'partner_pays_us')
+      .reduce((s, e) => s + Math.abs(Number(e.amount)), 0)
     const netAmount = totalOwedToPartner - totalOwedByPartner
 
     // Determine period from occurred_on dates
@@ -77,6 +92,119 @@ export async function POST(
 
     return NextResponse.json({ settlement })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Fout' }, { status: 400 })
+    return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
+  }
+}
+
+// PATCH — update a settlement's status (e.g. mark as paid)
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const user = await requireAdmin()
+    if (!user) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
+
+    const { id } = await params
+    const { settlement_id, status } = await req.json()
+    if (!settlement_id) return NextResponse.json({ error: 'settlement_id vereist' }, { status: 400 })
+    if (!['draft', 'finalized', 'paid'].includes(status)) {
+      return NextResponse.json({ error: 'Ongeldige status' }, { status: 400 })
+    }
+
+    const admin = createAdminSupabaseClient()
+
+    // Scope to this partner so one partner's settlement can't be touched via another.
+    const { data: existing } = await admin
+      .from('partner_settlements')
+      .select('id')
+      .eq('id', settlement_id)
+      .eq('freelancer_id', id)
+      .maybeSingle()
+    if (!existing) return NextResponse.json({ error: 'Afrekening niet gevonden' }, { status: 404 })
+
+    const nowIso = new Date().toISOString()
+    const patch: Record<string, unknown> = { status }
+    if (status === 'paid') { patch.paid_at = nowIso; patch.finalized_at = nowIso }
+    if (status === 'finalized') patch.finalized_at = nowIso
+
+    const { error } = await admin.from('partner_settlements').update(patch).eq('id', settlement_id)
+    if (error) throw error
+
+    const meta = requestMeta(req)
+    await logAudit({
+      action: 'settlement.status.update',
+      entityType: 'settlement',
+      entityId: settlement_id,
+      summary: `Afrekening status → ${status}`,
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      actorRole: 'admin',
+      metadata: { partner_id: id, status },
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    })
+
+    return NextResponse.json({ ok: true })
+  } catch (err) {
+    return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
+  }
+}
+
+// DELETE — remove a settlement. Only allowed once it has been marked paid.
+// The ledger entries that were rolled into this (paid) settlement are removed
+// with it, so they don't linger as orphaned "settled" rows.
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const user = await requireAdmin()
+    if (!user) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
+
+    const { id } = await params
+    const settlementId = req.nextUrl.searchParams.get('settlement_id')
+    if (!settlementId) return NextResponse.json({ error: 'settlement_id vereist' }, { status: 400 })
+
+    const admin = createAdminSupabaseClient()
+
+    const { data: existing } = await admin
+      .from('partner_settlements')
+      .select('*')
+      .eq('id', settlementId)
+      .eq('freelancer_id', id)
+      .maybeSingle()
+    if (!existing) return NextResponse.json({ error: 'Afrekening niet gevonden' }, { status: 404 })
+
+    if (existing.status !== 'paid') {
+      return NextResponse.json(
+        { error: 'Alleen afrekeningen met status "Betaald" kunnen verwijderd worden. Markeer deze eerst als betaald.' },
+        { status: 400 },
+      )
+    }
+
+    // Remove the ledger entries that belonged to this paid settlement, then the
+    // settlement itself.
+    try { await admin.from('partner_ledger_entries').delete().eq('settlement_id', settlementId) } catch { }
+    const { error } = await admin.from('partner_settlements').delete().eq('id', settlementId)
+    if (error) throw error
+
+    const meta = requestMeta(req)
+    await logAudit({
+      action: 'settlement.delete',
+      entityType: 'settlement',
+      entityId: settlementId,
+      summary: 'Betaalde afrekening verwijderd (incl. gekoppelde ledgerposten)',
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      actorRole: 'admin',
+      metadata: { partner_id: id, net_amount: existing.net_amount ?? null },
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    })
+
+    return NextResponse.json({ ok: true })
+  } catch (err) {
+    return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
 }
