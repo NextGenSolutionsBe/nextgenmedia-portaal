@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { Camera, Plus, Pencil, Trash2, Loader2, Check, X, Calendar, Clock, MapPin, MessageSquare, Lightbulb, Paperclip } from 'lucide-react'
+import Link from 'next/link'
+import { Camera, Plus, Pencil, Trash2, Loader2, Check, X, Calendar, Clock, MapPin, MessageSquare, Lightbulb, Paperclip, Aperture } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 import { ShootDocumentKnop } from '@/components/shoot-document-knop'
 import { toast } from 'sonner'
@@ -18,7 +19,13 @@ export type Shoot = {
   end_time: string | null
   location: string | null
   briefing: string | null
+  /** Uit de shoot planner: een shoot met een volledig plan bewerk je daar. */
+  titel?: string | null
+  programma?: unknown[] | null
 }
+
+/** Heeft deze shoot een plan uit de shoot planner (titel of programma)? */
+const metPlan = (s: Shoot) => !!s.titel || (Array.isArray(s.programma) && s.programma.length > 0)
 
 type FormState = { shoot_date: string; start_time: string; end_time: string; location: string; briefing: string }
 const empty: FormState = { shoot_date: '', start_time: '', end_time: '', location: '', briefing: '' }
@@ -175,7 +182,8 @@ function ShootCard({ shoot, base, clientId, onEdit, onDeleted }: {
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <ShootDocumentKnop href={`/api/admin/clients/${clientId}/shoot-document?shoot=${shoot.id}`} label="Shootdocument" className="text-xs !py-1.5 !px-2.5 mr-1" />
-          <button onClick={onEdit} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400" title="Bewerken"><Pencil className="h-3.5 w-3.5" /></button>
+          <Link href={`/admin/shoots/${shoot.id}`} prefetch={false} className="btn-secondary text-xs !py-1.5 !px-2.5 mr-1" title="Openen in de shoot planner"><Aperture className="h-3.5 w-3.5" />Shootplan</Link>
+          {!metPlan(shoot) && <button onClick={onEdit} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400" title="Bewerken"><Pencil className="h-3.5 w-3.5" /></button>}
           <button onClick={() => setVraagVerwijder(true)} disabled={busy} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-red-50 text-red-400" title="Verwijderen">
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
           </button>

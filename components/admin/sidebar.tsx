@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
   Info, Camera, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
-  MailCheck, FolderUp, Handshake, Settings, ClipboardPen, Contact, Timer, UserCircle, Video, Inbox, Clapperboard, Building2, FileSignature, ScrollText, Wallet, PackageCheck,
+  MailCheck, FolderUp, Handshake, Settings, ClipboardPen, Contact, Timer, UserCircle, Video, Inbox, Clapperboard, Building2, FileSignature, ScrollText, Wallet, PackageCheck, Aperture,
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
@@ -62,6 +62,8 @@ const SECTIONS: NavSection[] = [
     items: [
       // De contentkalenders per klant (ingeplande posts, feedback van de klant).
       { label: 'Social media', href: '/admin/services/social-media', icon: Calendar, module: 'content' },
+      // Shoots: kalender, plan per uur en locatie, briefing en mail met het plan.
+      { label: 'Shoot planner', href: '/admin/shoots', icon: Aperture, module: 'shoots' },
       { label: 'Metricool', href: '/admin/metricool', icon: CalendarClock, module: 'metricool', exact: true },
       { label: 'Opleveringen', href: '/admin/opleveringen', icon: PackageCheck, module: 'opleveringen' },
       // Enkel nog onderhoud: wanneer start en loopt elk onderhoudscontract af.

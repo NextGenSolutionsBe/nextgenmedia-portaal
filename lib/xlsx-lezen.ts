@@ -3,14 +3,15 @@
 // (DecompressionStream) en leest de xml (DOMParser). Geeft een tabel van
 // teksten terug (eerste rij = de koppen). Enkel voor imports, nooit op de server.
 
-type Item = { naam: string; methode: number; grootte: number; offset: number }
+export type ZipItem = { naam: string; methode: number; grootte: number; offset: number }
+type Item = ZipItem
 
-function zipInhoud(buf: ArrayBuffer): Item[] {
+export function zipInhoud(buf: ArrayBuffer, soort = 'Excel-bestand (.xlsx)'): Item[] {
   const d = new DataView(buf)
   // Einde van de centrale map zoeken (vanaf achteraan).
   let eocd = -1
   for (let i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 70000); i--) if (d.getUint32(i, true) === 0x06054b50) { eocd = i; break }
-  if (eocd < 0) throw new Error('Dit is geen geldig Excel-bestand (.xlsx).')
+  if (eocd < 0) throw new Error(`Dit is geen geldig ${soort}.`)
   const aantal = d.getUint16(eocd + 10, true)
   let p = d.getUint32(eocd + 16, true)
   const uit: Item[] = []

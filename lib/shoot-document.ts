@@ -41,7 +41,7 @@ export type MaakShootDocumentInvoer = {
 }
 
 /** Regelafbreking op breedte; te lange woorden (URL's) worden hard afgebroken. */
-function wikkel(font: PDFFont, tekst: string, grootte: number, breedte: number): string[] {
+export function wikkel(font: PDFFont, tekst: string, grootte: number, breedte: number): string[] {
   const regels: string[] = []
   for (const alinea of tekst.split(/\r?\n/)) {
     const woorden = alinea.split(/\s+/).filter(Boolean)
@@ -63,14 +63,14 @@ function wikkel(font: PDFFont, tekst: string, grootte: number, breedte: number):
   return regels
 }
 
-function kleurUitHex(hex: string | undefined, terugval: ReturnType<typeof rgb>) {
+export function kleurUitHex(hex: string | undefined, terugval: ReturnType<typeof rgb>) {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex ?? '')
   if (!m) return terugval
   const n = parseInt(m[1], 16)
   return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255)
 }
 
-async function laadLogo(logoPath: string | undefined): Promise<Uint8Array | null> {
+export async function laadLogo(logoPath: string | undefined): Promise<Uint8Array | null> {
   if (logoPath) {
     try {
       const { data } = await createAdminSupabaseClient().storage.from(LOGO_BUCKET).download(logoPath)
