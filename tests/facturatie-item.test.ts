@@ -4,7 +4,7 @@
 //   npx tsx tests/facturatie-item.test.ts
 
 import assert from 'node:assert/strict'
-import { berekenRegel, berekenTotalen, kmRegel, nieuweRegel, normaliseerRegels, type FactuurRegel } from '../lib/facturen/regels'
+import { berekenRegel, berekenTotalen, heeftKilometers, kmRegel, nieuweRegel, normaliseerRegels, type FactuurRegel } from '../lib/facturen/regels'
 import { kopieerTekst, ontbrekendeGegevens, aandachtspunten, regelKopie, type ItemDetail, type KlantInfo } from '../lib/facturatie/item-model'
 import { tabVan, inTermijn, sorteerWerklijst, tabTellingen, rondeItems, STATUS_INFO, type Moment } from '../lib/facturatie/planner-model'
 
@@ -90,6 +90,14 @@ test('Werklijst: achterstallig bovenaan; ronde = alles t.e.m. vandaag (geen WAM,
   assert.deepEqual(sorteerWerklijst(l).map((m) => m.id), ['oud1', 'oud2', 'vandaag', 'later'])
   const ronde = rondeItems([...l, mom('wam', 'achterstallig', '2026-09-02', { bron: 'wam' }), mom('klaar', 'verstuurd', '2026-09-03')], VANDAAG)
   assert.deepEqual(ronde.map((m) => m.id), ['oud1', 'oud2', 'vandaag'])
+})
+
+test('Kilometers op de factuur herkennen (voor het vinkje bij gefactureerd)', () => {
+  assert.equal(heeftKilometers([r({ artikel: 'Shoot', aantal: 1, prijs_excl: 650 })]), false)
+  assert.equal(heeftKilometers([kmRegel({ traject: 'Hasselt – Genk', km: 40, tarief: 0.4, btw: 21 })]), true)
+  assert.equal(heeftKilometers([r({ artikel: 'Verplaatsing', omschrijving: 'Kilometervergoeding shoot', aantal: 1, prijs_excl: 20 })]), true)
+  assert.equal(heeftKilometers([r({ artikel: 'Reis', eenheid: 'KM', aantal: 10, prijs_excl: 0.4 })]), true)
+  assert.equal(heeftKilometers(null), false)
 })
 
 console.log(`\n${n} tests geslaagd\n`)

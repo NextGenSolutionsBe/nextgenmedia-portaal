@@ -6,12 +6,13 @@ import { GetalInvoer } from '@/components/ui/getal-invoer'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { X, Plus, Trash2, Copy, ArrowUp, ArrowDown, Loader2, Save, Send, Ban, RotateCcw, Wallet, History, AlertTriangle, ExternalLink, Sparkles } from 'lucide-react'
+import { X, Plus, Trash2, Copy, ArrowUp, ArrowDown, Loader2, Save, Send, Ban, RotateCcw, Wallet, History, AlertTriangle, ExternalLink, Sparkles, CheckCircle2 } from 'lucide-react'
+import { KilometerCheck } from './kilometer-check'
 import { SlimInvullen } from './slim-invullen'
 import { formatEuro } from '@/lib/utils'
 import { DEFAULT_VAT } from '@/lib/invoices'
 import { factuurdagVan } from '@/lib/facturatie/reeks'
-import { berekenTotalen, berekenRegel, nieuweRegel, hernummer, verplaatsRegel, dupliceerRegel, verwijderRegel, getal, EENHEDEN, type FactuurRegel } from '@/lib/facturen/regels'
+import { heeftKilometers, berekenTotalen, berekenRegel, nieuweRegel, hernummer, verplaatsRegel, dupliceerRegel, verwijderRegel, getal, EENHEDEN, type FactuurRegel } from '@/lib/facturen/regels'
 import { VERZENDSTATUS, BETAALSTATUS, KIESBARE_STATUSSEN, redenVerplicht, normaliseerVerzendstatus, type Verzendstatus, type Betaalstatus } from '@/lib/facturen/status'
 import { Bevestig, INP } from '@/app/admin/instellingen/ui'
 import { KostenEnWinstDialoog, KostenSamenvatting } from './kosten-en-winst'
@@ -143,6 +144,7 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
   const [laden, setLaden] = useState(!nieuw)
   const [bezig, setBezig] = useState<string | null>(null)
   const [vraag, setVraag] = useState<{ naar: Verzendstatus } | null>(null)
+  const [kmOk, setKmOk] = useState(false)
   const [reden, setReden] = useState('')
   const [betaling, setBetaling] = useState<{ bedrag: string; op: string } | null>(null)
   const [vraagVerwijder, setVraagVerwijder] = useState(false)
@@ -369,7 +371,7 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
                   <div className="flex flex-wrap items-end gap-2">
                     <div>
                       <label className="block text-[11px] text-gray-500 mb-1">Status</label>
-                      <select className={`${INP} w-48`} value={status} disabled={!!bezig} onChange={(e) => { const naar = e.target.value as Verzendstatus; if (naar === status) return; if (vuil) { toast.error('Sla eerst je wijzigingen op.'); return } if (redenVerplicht(naar)) setVraag({ naar }); else zetStatus(naar) }}>
+                      <select className={`${INP} w-48`} value={status} disabled={!!bezig} onChange={(e) => { const naar = e.target.value as Verzendstatus; if (naar === status) return; if (vuil) { toast.error('Sla eerst je wijzigingen op.'); return } if (naar === 'verstuurd') { setKmOk(false); setVraag({ naar }) } else if (redenVerplicht(naar)) setVraag({ naar }); else zetStatus(naar) }}>
                         {KIESBARE_STATUSSEN.map((k) => <option key={k} value={k}>{VERZENDSTATUS[k].label}</option>)}
                       </select>
                     </div>
@@ -475,7 +477,19 @@ export function FactuurEditor({ invoiceId, standaard, onClose, onSaved }: Editor
           </div>
         </div>
       )}
-      {vraag && (
+      {vraag?.naar === 'verstuurd' && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/30">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 space-y-3">
+            <h4 className="font-semibold">Markeren als verstuurd</h4>
+            <KilometerCheck aan={kmOk} onChange={setKmOk} heeftKm={heeftKilometers(regels)} />
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setVraag(null)} className="btn-secondary text-sm">Terug</button>
+              <button type="button" disabled={!!bezig || !kmOk} onClick={() => zetStatus('verstuurd')} className="btn-primary text-sm bg-[#166534] hover:bg-[#14532d] text-white border-[#166534]">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}Markeren als verstuurd</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {vraag && vraag.naar !== 'verstuurd' && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/30">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 space-y-3">
             <h4 className="font-semibold">{vraag.naar === 'gecrediteerd' ? 'Factuur crediteren' : 'Factuur annuleren'}</h4>

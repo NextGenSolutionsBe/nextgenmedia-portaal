@@ -6,6 +6,7 @@ import { X, RotateCcw, Send, CalendarClock, Ban, Eye, Pencil, FilePlus2, Loader2
 import { Bevestig, INP } from '@/app/admin/instellingen/ui'
 import { STATUS_INFO, HERKOMST_LABEL, datumLang, datumNl, euro2, isDatum, type Moment } from '@/lib/facturatie/planner-model'
 import { ReeksBewerken, MaandBedrag } from './reeks-bewerken'
+import { KilometerCheck } from '../kilometer-check'
 
 export type Actie = 'verstuurd' | 'verplaats' | 'annuleer' | 'heropen' | 'betaald' | 'onbetaald'
 export type ActieUitvoerder = (actie: Actie, moment: Moment, extra?: { datum?: string }) => Promise<boolean>
@@ -49,6 +50,8 @@ export function PlannerDetail({ moment: m, onSluit, onActie, bezig, onOpenFactuu
   const [vraagAnnuleer, setVraagAnnuleer] = useState(false)
   const [reeks, setReeks] = useState(false)
   const [maandBedrag, setMaandBedrag] = useState(false)
+  // Kilometervergoeding nagekeken, per moment (een ander moment = opnieuw vinken).
+  const [kmVoor, setKmVoor] = useState<string | null>(null)
   const isReeks = m.bron === 'recurring' && !!m.recurring_id
   const maandOpen = isReeks && !['verstuurd', 'betaald', 'geannuleerd', 'gecrediteerd'].includes(m.status) && !m.invoice_id
   const a = m.acties
@@ -90,6 +93,7 @@ export function PlannerDetail({ moment: m, onSluit, onActie, bezig, onOpenFactuu
 
       <div className="mt-4 space-y-2">
         <div className="text-[11px] font-medium text-gray-400">Acties</div>
+        {a.kanVerstuurd && <KilometerCheck klein aan={kmVoor === m.id} onChange={(aan) => setKmVoor(aan ? m.id : null)} />}
         <div className="flex flex-wrap gap-2">
           {isFactuur && <button type="button" onClick={() => onOpenFactuur!(m.invoice_id!)} className="btn-primary text-xs"><Pencil className="h-3.5 w-3.5" />{m.status === 'te_versturen' || m.status === 'gepland' ? 'Factuur openen en bewerken' : 'Factuur openen'}</button>}
           {!isFactuur && a.bekijkenUrl && <Link href={a.bekijkenUrl} prefetch={false} className="btn-secondary text-xs"><Eye className="h-3.5 w-3.5" />Bekijken</Link>}
@@ -97,7 +101,7 @@ export function PlannerDetail({ moment: m, onSluit, onActie, bezig, onOpenFactuu
           {maandOpen && <button type="button" onClick={() => setMaandBedrag((x) => !x)} className="btn-secondary text-xs"><Pencil className="h-3.5 w-3.5" />Bedrag deze maand</button>}
           {!isFactuur && !isReeks && a.aanpassenUrl && <Link href={a.aanpassenUrl} prefetch={false} className="btn-secondary text-xs"><Pencil className="h-3.5 w-3.5" />Aanpassen</Link>}
           {a.voorbereidenUrl && <Link href={a.voorbereidenUrl} prefetch={false} className="btn-secondary text-xs"><FilePlus2 className="h-3.5 w-3.5" />Factuur voorbereiden</Link>}
-          {a.kanVerstuurd && <button type="button" disabled={bezig} onClick={() => onActie('verstuurd', m)} className="btn-primary text-xs">{bezig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}Markeren als verstuurd</button>}
+          {a.kanVerstuurd && <button type="button" disabled={bezig || kmVoor !== m.id} title={kmVoor !== m.id ? 'Vink eerst de kilometervergoeding aan' : undefined} onClick={() => onActie('verstuurd', m)} className="btn-primary text-xs">{bezig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}Markeren als verstuurd</button>}
           {(m.bron === 'invoice' || m.bron === 'recurring') && m.status === 'verstuurd' && <button type="button" disabled={bezig} onClick={() => onActie('betaald', m)} className="btn-primary text-xs bg-emerald-700 hover:bg-emerald-800 text-white border-emerald-700"><Wallet className="h-3.5 w-3.5" />Markeren als betaald</button>}
           {(m.bron === 'invoice' || m.bron === 'recurring') && m.status === 'betaald' && <button type="button" disabled={bezig} onClick={() => onActie('onbetaald', m)} className="btn-secondary text-xs"><RotateCcw className="h-3.5 w-3.5" />Betaling terugdraaien</button>}
           {a.kanVerplaatsen && <button type="button" disabled={bezig} onClick={() => setVerplaatsen((v) => !v)} className="btn-secondary text-xs"><CalendarClock className="h-3.5 w-3.5" />Facturatiedatum verplaatsen</button>}

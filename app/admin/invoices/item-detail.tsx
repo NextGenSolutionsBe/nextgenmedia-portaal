@@ -11,6 +11,8 @@ import { ReeksBewerken } from './planner/reeks-bewerken'
 import { ItemInhoud, KopieerKnop, factuurTekst, laadItem, type ItemData } from './item-inhoud'
 import { KostenEnWinstDialoog } from './kosten-en-winst'
 import { useVolgendNummer } from './volgend-nummer'
+import { KilometerCheck } from './kilometer-check'
+import { heeftKilometers } from '@/lib/facturen/regels'
 
 /**
  * “Bekijken”: alles van één facturatie-item op één plek. Bovenaan wat je
@@ -31,6 +33,8 @@ export function ItemDetail({ moment, onSluit, onGewijzigd, onBewerk, onEigenArti
   const [bezig, setBezig] = useState(false)
   const [extern, setExtern] = useState('')
   const [bevestigOntbrekend, setBevestigOntbrekend] = useState(false)
+  // Kilometervergoeding nagekeken (per item: wisselt het item, dan opnieuw vinken).
+  const [kmVoor, setKmVoor] = useState<string | null>(null)
   const [vraag, setVraag] = useState<'heropen' | 'annuleer' | null>(null)
   const [verplaats, setVerplaats] = useState(false)
   const [nieuweDatum, setNieuweDatum] = useState(moment.datum)
@@ -116,9 +120,10 @@ export function ItemDetail({ moment, onSluit, onGewijzigd, onBewerk, onEigenArti
                   <input className={INP} value={extern} onChange={(e) => { setAangeraakt(true); setExtern(e.target.value) }} placeholder="bv. 2026-124" />
                   {autoNummer && extern === volgend && <p className="text-[11px] text-gray-500 mt-0.5">Volgend nummer, vanzelf ingevuld. Pas aan als het anders moet.</p>}
                 </div>
-                <button type="button" disabled={bezig || (ontbreekt && !bevestigOntbrekend)} onClick={() => actie('verstuurd', { extern_nummer: extern }, 'Gemarkeerd als gefactureerd.')}
+                <button type="button" disabled={bezig || (ontbreekt && !bevestigOntbrekend) || kmVoor !== data.id} onClick={() => actie('verstuurd', { extern_nummer: extern }, 'Gemarkeerd als gefactureerd.')}
                   className="btn-primary text-sm bg-[#166534] hover:bg-[#14532d] text-white border-[#166534]">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}Markeren als gefactureerd</button>
               </div>
+              <KilometerCheck klein aan={kmVoor === data.id} heeftKm={heeftKilometers(data.detail.regels)} onChange={(aan) => setKmVoor(aan ? data.id : null)} />
               {ontbreekt && <label className="flex items-start gap-2 text-xs text-amber-900"><input type="checkbox" checked={bevestigOntbrekend} onChange={(e) => setBevestigOntbrekend(e.target.checked)} className="mt-0.5" />Er ontbreken gegevens (zie hieronder). Ik heb de factuur toch volledig opgemaakt.</label>}
               <p className="text-[11px] text-gray-500">Gefactureerd = extern aangemaakt en verstuurd. Betaling volg je apart op.</p>
             </div>

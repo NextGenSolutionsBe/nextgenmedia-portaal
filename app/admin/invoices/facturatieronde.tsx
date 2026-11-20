@@ -9,6 +9,8 @@ import { StatusBadge } from './planner/planner-detail'
 import { ItemInhoud, KopieerKnop, factuurTekst, laadItem, type ItemData } from './item-inhoud'
 import { useVolgendNummer } from './volgend-nummer'
 import { hoogsteFactuurnummer, naFactuurnummer } from '@/lib/facturatie/factuurnummer'
+import { heeftKilometers } from '@/lib/facturen/regels'
+import { KilometerCheck } from './kilometer-check'
 
 /**
  * Facturatieronde: Bram werkt alles af wat t.e.m. vandaag gefactureerd moet
@@ -29,6 +31,8 @@ export function Facturatieronde({ items, onSluit, onGewijzigd }: { items: Moment
   const [overgeslagen, setOvergeslagen] = useState<Set<string>>(new Set())
   const [extern, setExtern] = useState<Record<string, string>>({})
   const [bevestigd, setBevestigd] = useState<Set<string>>(new Set())
+  // Per item: kilometervergoeding nagekeken. Zonder vinkje gaat Markeren als gefactureerd niet.
+  const [kmOk, setKmOk] = useState<Set<string>>(new Set())
   const [bezig, setBezig] = useState(false)
   const [klaar, setKlaar] = useState(false)
   const verder = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -59,6 +63,7 @@ export function Facturatieronde({ items, onSluit, onGewijzigd }: { items: Moment
   const markeer = async () => {
     if (!huidig || !data) return
     if (data.ontbrekend.length > 0 && !bevestigd.has(huidig.id)) { toast.error('Er ontbreken gegevens. Vink eerst aan dat je de factuur toch volledig opmaakte.'); return }
+    if (!kmOk.has(huidig.id)) { toast.error('Vink eerst aan dat je de kilometervergoeding nakeek.'); return }
     setBezig(true)
     try {
       const nummer = (huidig.id in extern ? extern[huidig.id] : voorstelNr ?? '').trim()
@@ -172,6 +177,10 @@ export function Facturatieronde({ items, onSluit, onGewijzigd }: { items: Moment
                 <span><b className="inline-flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5" />Gegevens ontbreken.</b> Ik heb de factuur toch volledig opgemaakt en wil dit item afwerken.</span>
               </label>
             )}
+            {data && !isKlaar && (
+              <KilometerCheck aan={kmOk.has(huidig.id)} heeftKm={heeftKilometers(data.detail.regels)}
+                onChange={(aan) => setKmOk((s) => { const n = new Set(s); if (aan) n.add(huidig.id); else n.delete(huidig.id); return n })} />
+            )}
             <div className="flex items-end gap-2 flex-wrap">
               {!isKlaar && (
                 <div className="w-full sm:w-48">
@@ -185,7 +194,7 @@ export function Facturatieronde({ items, onSluit, onGewijzigd }: { items: Moment
               {!isKlaar && <button type="button" onClick={sla} disabled={bezig} className="btn-secondary text-sm"><SkipForward className="h-4 w-4" />Overslaan</button>}
               <button type="button" onClick={() => ga(index + 1 < lijst.length ? index + 1 : -1)} className="btn-secondary text-sm">Volgende<ChevronRight className="h-4 w-4" /></button>
               {!isKlaar && (
-                <button type="button" onClick={markeer} disabled={bezig || !data || (data.ontbrekend.length > 0 && !bevestigd.has(huidig.id))}
+                <button type="button" onClick={markeer} disabled={bezig || !data || (data.ontbrekend.length > 0 && !bevestigd.has(huidig.id)) || !kmOk.has(huidig.id)}
                   className="btn-primary text-sm bg-[#166534] hover:bg-[#14532d] text-white border-[#166534]">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}Markeren als gefactureerd</button>
               )}
             </div>
