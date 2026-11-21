@@ -3,12 +3,12 @@
 import { useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Archive, Check, ChevronLeft, ChevronRight, Loader2, Paperclip, Pencil, Plus, RotateCcw, X } from 'lucide-react'
+import { Archive, Check, ChevronLeft, ChevronRight, Eye, Loader2, Paperclip, Pencil, Plus, RotateCcw, Trash2, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { RegelsKaart, RegelsKnop, RegelsVenster, type RegelsBegin } from '@/components/admin/regels-akkoord'
 import type { RegelsData } from '@/lib/regels-akkoord'
 import {
-  VENNOTEN, REDEN_VOORSTEL, STANDAARD_REGELS, akkoordStand, budgetVan, periodeVan, standPerVennoot, uitgavenIn, verschuif, wachtOpAkkoord,
+  VENNOTEN, REDEN_VOORSTEL, STANDAARD_REGELS, akkoordStand, budgetVan, perMaand, periodeOpties, periodeVan, standPerVennoot, uitgavenIn, verschuif, wachtOpAkkoord,
   type Periode, type PeriodeSoort, type Uitgave, type Vennoot,
 } from '@/lib/vennoot-uitgaven'
 import type { VennotenData } from '@/lib/vennoot-uitgaven-server'
@@ -61,6 +61,16 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoor
   const regelsData: RegelsData = { versie: data.regels, handtekeningen: data.handtekeningen, namen: data.namen, ik: data.ik }
   const label = alles ? 'alle periodes' : periode.label
 
+  // De periodes om uit te kiezen: van de eerste uitgave (of de start van het budget) tot nu.
+  const eersteMaand = useMemo(() => [budget.start_maand, ...data.uitgaven.map((u) => u.datum.slice(0, 7))].sort()[0] ?? null, [budget.start_maand, data.uitgaven])
+  const opties = useMemo(() => {
+    if (alles) return []
+    const l = periodeOpties(soort as PeriodeSoort, eersteMaand, huidigeMaand)
+    return l.some((p) => p.ref === periode.ref) ? l : [...l, periode].sort((a, b) => b.ref.localeCompare(a.ref))
+  }, [alles, soort, eersteMaand, huidigeMaand, periode])
+  const groepen = useMemo(() => perMaand(lijst), [lijst])
+  const metKoppen = groepen.length > 1 || soort !== 'maand'
+
   const kiesSoort = (s: PeriodeSoort | 'alles') => { setSoort(s); if (s !== 'alles') setPeriode(periodeVan(s, periode.ref > huidigeMaand ? huidigeMaand : periode.ref)) }
   const klaar = (melding: string) => { toast.success(melding); router.refresh() }
 
@@ -96,7 +106,10 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoor
         {!alles && (
           <div className="inline-flex items-center gap-1">
             <button type="button" onClick={() => setPeriode((p) => verschuif(p, -1))} className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-gray-100" aria-label="Vorige periode"><ChevronLeft className="h-4 w-4" /></button>
-            <span className="text-sm font-semibold min-w-[8rem] text-center capitalize">{periode.label}</span>
+            <select aria-label="Kies de periode" value={periode.ref} onChange={(e) => setPeriode(periodeVan(soort as PeriodeSoort, e.target.value))}
+              className="text-sm font-semibold capitalize bg-white border border-gray-200 rounded-lg pl-3 pr-8 py-1.5 min-w-[9.5rem]">
+              {opties.map((p) => <option key={p.ref} value={p.ref}>{p.label}</option>)}
+            </select>
             <button type="button" onClick={() => setPeriode((p) => verschuif(p, 1))} disabled={periode.maanden.includes(huidigeMaand) || periode.ref > huidigeMaand} className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-gray-100 disabled:opacity-30" aria-label="Volgende periode"><ChevronRight className="h-4 w-4" /></button>
             {!periode.maanden.includes(huidigeMaand) && <button type="button" onClick={() => setPeriode(periodeVan(soort as PeriodeSoort, huidigeMaand))} className="text-xs text-gray-500 underline ml-1">Nu</button>}
           </div>
@@ -104,7 +117,7 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoor
       </div>
 
       {/* Per vennoot */}
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-2 sm:gap-3 grid-cols-3">
         {stand.map((s) => {
           const besteed = alles ? s.besteedTotaal : s.besteedPeriode
           const max = alles ? s.budgetTotaal : s.budgetPeriode
@@ -112,20 +125,20 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoor
           const aan = vennoot === s.vennoot
           return (
             <button key={s.vennoot} type="button" onClick={() => setVennoot(aan ? null : s.vennoot)} aria-pressed={aan}
-              className={`card-base text-left space-y-2 transition ${aan ? 'ring-2 ring-gray-900' : 'hover:border-gray-300'}`}>
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="font-semibold text-gray-900">{data.namen[s.vennoot]}</span>
-                <span className="text-[11px] text-gray-500">{aan ? 'geopend' : 'openen'}</span>
+              className={`card-base !p-3 sm:!p-5 text-left space-y-1.5 sm:space-y-2 transition min-w-0 ${aan ? 'ring-2 ring-gray-900' : 'hover:border-gray-300'}`}>
+              <div className="flex items-center justify-between gap-1">
+                <span className="font-semibold text-gray-900 truncate">{data.namen[s.vennoot]}</span>
+                {aan ? <Check className="h-4 w-4 shrink-0" /> : <span className="hidden sm:inline text-[11px] text-gray-500">klik om te kiezen</span>}
               </div>
               <div>
-                <div className="text-[11px] text-gray-500">Tegoed vandaag</div>
-                <div className={`text-2xl font-semibold tabular-nums ${s.tegoed < 0 ? 'text-red-600' : 'text-green-700'}`}>{eur(s.tegoed)}</div>
+                <div className="text-[10px] sm:text-[11px] text-gray-500">Tegoed</div>
+                <div className={`text-base sm:text-2xl font-semibold tabular-nums ${s.tegoed < 0 ? 'text-red-600' : 'text-green-700'}`}>{eur(s.tegoed)}</div>
               </div>
               <div>
-                <div className="flex justify-between text-xs text-gray-600"><span>Besteed in {label}</span><span className="tabular-nums">{eur(besteed)} van {eur(max)}</span></div>
+                <div className="flex flex-col sm:flex-row sm:justify-between text-[10px] sm:text-xs text-gray-600"><span className="truncate">Besteed{alles ? '' : ` in ${label}`}</span><span className="tabular-nums">{eur(besteed)}<span className="hidden sm:inline"> van {eur(max)}</span></span></div>
                 <div className="h-1.5 rounded-full bg-gray-100 mt-1 overflow-hidden"><div className={`h-1.5 rounded-full ${besteed > max ? 'bg-red-500' : 'bg-gray-900'}`} style={{ width: `${pct}%` }} /></div>
               </div>
-              <div className="text-[11px] text-gray-500">In totaal besteed: {eur(s.besteedTotaal)}</div>
+              <div className="hidden sm:block text-[11px] text-gray-500">In totaal besteed: {eur(s.besteedTotaal)}</div>
             </button>
           )
         })}
@@ -134,52 +147,72 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoor
       {/* Lijst */}
       <section className="card-base !p-0 overflow-hidden">
         <div className="flex items-center gap-2 flex-wrap px-4 py-3 border-b border-gray-100">
-          <h2 className="font-semibold text-gray-900 flex-1 min-w-0">
+          <h2 className="font-semibold text-gray-900 w-full sm:w-auto sm:flex-1 min-w-0">
             {vennoot ? `${data.namen[vennoot]}: ` : 'Alle vennoten: '}{archief ? 'gearchiveerd' : 'uitgaven'} in {label}
           </h2>
           {vennoot && <button type="button" onClick={() => setVennoot(null)} className="text-xs px-2.5 py-1 rounded-full border border-gray-200 hover:bg-gray-50 inline-flex items-center gap-1"><X className="h-3 w-3" />Alle vennoten</button>}
           <button type="button" onClick={() => setArchief((a) => !a)} aria-pressed={archief} className={`text-xs px-2.5 py-1 rounded-full border inline-flex items-center gap-1 ${archief ? 'bg-black text-white border-black' : 'border-gray-200 hover:bg-gray-50'}`}><Archive className="h-3 w-3" />Archief ({aantalArchief})</button>
         </div>
-        {lijst.length === 0 ? <p className="px-4 py-8 text-sm text-gray-500 text-center">{archief ? 'Niets gearchiveerd in deze periode.' : 'Geen uitgaven in deze periode.'}</p> : (
-          <ul className="divide-y divide-gray-100">
-            {lijst.map((u) => (
-              <li key={u.id} className="px-4 py-3 flex items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs text-gray-500 flex items-center gap-2 flex-wrap">
-                    <span className="tabular-nums">{dag(u.datum)}</span>
-                    {!vennoot && <span className="inline-flex text-[11px] font-semibold text-gray-800 rounded-full bg-gray-100 px-2 py-0.5">{data.namen[u.vennoot]}</span>}
-                    {u.bewijs_pad
-                      ? <a href={`/api/admin/vennoten/bon?pad=${encodeURIComponent(u.bewijs_pad)}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-gray-600 hover:text-black" title={u.bewijs_naam ?? 'Bonnetje'}><Paperclip className="h-3.5 w-3.5" />Bon</a>
-                      : <span className="text-amber-700">geen bon</span>}
+        {lijst.length === 0 ? (
+          <div className="px-4 py-8 text-sm text-gray-500 text-center space-y-2">
+            <p>{archief ? 'Niets gearchiveerd' : `Geen uitgaven${vennoot ? ` van ${data.namen[vennoot]}` : ''}`} in {label}.</p>
+            {!alles && soort !== 'jaar' && <button type="button" onClick={() => kiesSoort('jaar')} className="btn-secondary text-xs">Toon het hele jaar</button>}
+          </div>
+        ) : (
+          <div>
+            {groepen.map((g) => (
+              <div key={g.maand}>
+                {metKoppen && (
+                  <div className="px-4 py-2 bg-gray-50/80 border-b border-gray-100 flex items-baseline justify-between text-xs">
+                    <span className="font-semibold text-gray-700 capitalize">{g.label}</span>
+                    <span className="text-gray-500 tabular-nums">{g.uitgaven.length} · <b className="font-semibold text-gray-800">{eur(g.totaal)}</b></span>
                   </div>
-                  <div className="text-sm font-medium text-gray-900 mt-0.5">{u.omschrijving}</div>
-                  {u.doel && <div className="text-xs text-gray-500 mt-0.5">{u.doel}</div>}
-                  {u.gearchiveerd_op && <div className="text-xs text-amber-800 mt-1">Gearchiveerd{u.gearchiveerd_door ? ` door ${u.gearchiveerd_door}` : ''}: {u.archief_reden}</div>}
-                  {!u.gearchiveerd_op && <AkkoordRij u={u} data={data} bezig={akkoordBezig === u.id} onAkkoord={() => geefAkkoord(u)} />}
-                </div>
-                <div className="flex flex-col items-end gap-1 shrink-0">
-                  <div className="text-sm font-semibold tabular-nums">{eur(u.bedrag)}</div>
-                  <div className="flex items-center gap-0.5">
-                    {u.gearchiveerd_op ? (
-                      <button type="button" onClick={async () => { try { await post({ actie: 'terugzetten', id: u.id }); klaar('Teruggezet.') } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } }} className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Terugzetten"><RotateCcw className="h-4 w-4" /></button>
-                    ) : (
-                      <>
-                        <button type="button" onClick={() => setBewerk(u)} className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Aanpassen"><Pencil className="h-4 w-4" /></button>
-                        <button type="button" onClick={() => setArchiveer(u)} className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Archiveren"><Archive className="h-4 w-4" /></button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </li>
+                )}
+                <ul className="divide-y divide-gray-100 border-b border-gray-100 last:border-b-0">
+                  {g.uitgaven.map((u) => (
+                    <li key={u.id} className="px-4 py-3 flex items-start gap-2">
+                      <div className="min-w-0 flex-1">
+                        <button type="button" onClick={() => (u.gearchiveerd_op ? null : setBewerk(u))} disabled={!!u.gearchiveerd_op} className="w-full text-left flex items-start gap-3 rounded-lg -m-1 p-1 hover:bg-gray-50 disabled:hover:bg-transparent">
+                          <span className="min-w-0 flex-1">
+                            <span className="text-xs text-gray-500 flex items-center gap-2 flex-wrap">
+                              <span className="tabular-nums">{dag(u.datum)}</span>
+                              {!vennoot && <span className="inline-flex text-[11px] font-semibold text-gray-800 rounded-full bg-gray-100 px-2 py-0.5">{data.namen[u.vennoot]}</span>}
+                              {u.bewijs_pad ? <span className="inline-flex items-center gap-1 text-gray-600"><Paperclip className="h-3.5 w-3.5" />Bon</span> : <span className="text-amber-700">geen bon</span>}
+                            </span>
+                            <span className="block text-sm font-medium text-gray-900 mt-0.5">{u.omschrijving}</span>
+                            {u.doel && <span className="block text-xs text-gray-500 mt-0.5">{u.doel}</span>}
+                          </span>
+                          <span className="text-sm font-semibold tabular-nums shrink-0">{eur(u.bedrag)}</span>
+                        </button>
+                        {u.gearchiveerd_op && <div className="text-xs text-amber-800 mt-1">Gearchiveerd{u.gearchiveerd_door ? ` door ${u.gearchiveerd_door}` : ''}: {u.archief_reden}</div>}
+                        {!u.gearchiveerd_op && <AkkoordRij u={u} data={data} bezig={akkoordBezig === u.id} onAkkoord={() => geefAkkoord(u)} />}
+                      </div>
+                      <div className="flex flex-col items-center gap-0.5 shrink-0 -mr-1">
+                        {u.gearchiveerd_op ? (
+                          <button type="button" onClick={async () => { try { await post({ actie: 'terugzetten', id: u.id }); klaar('Teruggezet.') } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } }} className="h-9 w-9 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Terugzetten" aria-label="Terugzetten"><RotateCcw className="h-4 w-4" /></button>
+                        ) : (
+                          <>
+                            <button type="button" onClick={() => setBewerk(u)} className="h-9 w-9 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Aanpassen" aria-label="Aanpassen"><Pencil className="h-4 w-4" /></button>
+                            <button type="button" onClick={() => setArchiveer(u)} className="h-9 w-9 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Archiveren" aria-label="Archiveren"><Archive className="h-4 w-4" /></button>
+                          </>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ))}
-          </ul>
+          </div>
         )}
         {lijst.length > 0 && <div className="px-4 py-3 border-t border-gray-100 flex justify-between text-sm"><span className="text-gray-600">{lijst.length} {lijst.length === 1 ? 'uitgave' : 'uitgaven'}</span><span className="font-semibold tabular-nums">{eur(totaal)}</span></div>}
       </section>
 
       <RegelsKaart set="vennoten" data={regelsData} onOpen={setRegels} />
 
-      {bewerk && <UitgaveVenster u={bewerk === 'nieuw' ? null : bewerk} beginVennoot={vennoot ?? data.ik} namen={data.namen} vandaag={vandaag} onSluit={() => setBewerk(null)} onKlaar={(m) => { setBewerk(null); klaar(m) }} />}
+      {bewerk && <UitgaveVenster u={bewerk === 'nieuw' ? null : bewerk} beginVennoot={vennoot ?? data.ik} namen={data.namen} vandaag={vandaag}
+        akkoorden={bewerk === 'nieuw' ? 0 : data.akkoorden.filter((a) => a.uitgave_id === bewerk.id).length}
+        onArchiveer={bewerk === 'nieuw' ? undefined : () => { const x = bewerk; setBewerk(null); setArchiveer(x) }}
+        onSluit={() => setBewerk(null)} onKlaar={(m) => { setBewerk(null); klaar(m) }} />}
       {archiveer && <ArchiefVenster u={archiveer} naam={data.namen[archiveer.vennoot]} onSluit={() => setArchiveer(null)} onKlaar={() => { setArchiveer(null); klaar('Gearchiveerd. Telt niet meer mee.') }} />}
       {regels && <RegelsVenster set="vennoten" data={regelsData} huidigeMaand={huidigeMaand} standaardRegels={STANDAARD_REGELS} begin={regels} onSluit={() => setRegels(null)} onKlaar={(m) => klaar(m)} />}
     </div>
@@ -200,9 +233,17 @@ function Venster({ titel, onSluit, children }: { titel: string; onSluit: () => v
   )
 }
 
-function UitgaveVenster({ u, beginVennoot, namen, vandaag, onSluit, onKlaar }: { u: Uitgave | null; beginVennoot: Vennoot | null; namen: Record<Vennoot, string>; vandaag: string; onSluit: () => void; onKlaar: (m: string) => void }) {
-  const [v, setV] = useState({ vennoot: u?.vennoot ?? beginVennoot ?? ('' as Vennoot | ''), omschrijving: u?.omschrijving ?? '', doel: u?.doel ?? '', datum: u?.datum ?? vandaag, bedrag: u ? String(u.bedrag).replace('.', ',') : '' })
+function UitgaveVenster({ u, beginVennoot, namen, vandaag, akkoorden, onArchiveer, onSluit, onKlaar }: {
+  u: Uitgave | null; beginVennoot: Vennoot | null; namen: Record<Vennoot, string>; vandaag: string
+  /** Hoeveel akkoorden er al op deze uitgave staan (aanpassen = iedereen opnieuw). */
+  akkoorden: number
+  onArchiveer?: () => void; onSluit: () => void; onKlaar: (m: string) => void
+}) {
+  const [v, setV] = useState({ vennoot: u?.vennoot ?? beginVennoot ?? ('' as Vennoot | ''), omschrijving: u?.omschrijving ?? '', doel: u?.doel ?? '', datum: u?.datum ?? vandaag, bedrag: u ? u.bedrag.toFixed(2).replace('.', ',') : '' })
   const [bon, setBon] = useState<{ pad: string; naam: string } | null>(null)
+  // Het huidige bonnetje van de uitgave weghalen (bij het bewaren).
+  const [bonWeg, setBonWeg] = useState(false)
+  const huidigeBon = u?.bewijs_pad && !bonWeg && !bon ? u : null
   const [laden, setLaden] = useState(false)
   const [bezig, setBezig] = useState(false)
   const kiezer = useRef<HTMLInputElement>(null)
@@ -224,7 +265,7 @@ function UitgaveVenster({ u, beginVennoot, namen, vandaag, onSluit, onKlaar }: {
   const bewaar = async () => {
     setBezig(true)
     try {
-      await post({ actie: u ? 'wijzig' : 'nieuw', id: u?.id, ...v, bon })
+      await post({ actie: u ? 'wijzig' : 'nieuw', id: u?.id, ...v, bon, bon_weg: !bon && bonWeg })
       onKlaar(u ? 'Uitgave aangepast.' : 'Uitgave bewaard.')
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt'); setBezig(false) }
   }
@@ -248,13 +289,24 @@ function UitgaveVenster({ u, beginVennoot, namen, vandaag, onSluit, onKlaar }: {
       <div>
         <span className={lbl}>Bonnetje of factuur</span>
         <input ref={kiezer} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => laadBonOp(e.target.files?.[0])} />
+        {huidigeBon && (
+          <div className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 mb-2 text-sm">
+            <Paperclip className="h-4 w-4 text-gray-400 shrink-0" />
+            <span className="truncate flex-1 min-w-0">{huidigeBon.bewijs_naam ?? 'Bonnetje'}</span>
+            <a href={`/api/admin/vennoten/bon?pad=${encodeURIComponent(huidigeBon.bewijs_pad!)}`} target="_blank" rel="noreferrer" className="h-8 px-2 rounded-lg inline-flex items-center gap-1 text-xs hover:bg-gray-100"><Eye className="h-3.5 w-3.5" />Bekijken</a>
+            <button type="button" onClick={() => setBonWeg(true)} className="h-8 px-2 rounded-lg inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50"><Trash2 className="h-3.5 w-3.5" />Weghalen</button>
+          </div>
+        )}
+        {bonWeg && !bon && <p className="text-xs text-amber-800 mb-2">Het bonnetje gaat weg bij het bewaren. <button type="button" onClick={() => setBonWeg(false)} className="underline">Ongedaan maken</button></p>}
         <button type="button" onClick={() => kiezer.current?.click()} disabled={laden} className="btn-secondary text-sm w-full justify-center">
           {laden ? <Loader2 className="h-4 w-4 animate-spin" /> : bon ? <Check className="h-4 w-4 text-green-600" /> : <Paperclip className="h-4 w-4" />}
-          {bon ? bon.naam : u?.bewijs_pad ? 'Ander bonnetje kiezen' : 'Foto trekken of bestand kiezen'}
+          {bon ? bon.naam : huidigeBon ? 'Ander bonnetje kiezen' : 'Foto trekken of bestand kiezen'}
         </button>
         <p className="text-[11px] text-gray-500 mt-1">Op je gsm kan je meteen een foto trekken. Een pdf van een factuur kan ook.</p>
       </div>
-      <button type="button" onClick={bewaar} disabled={bezig || laden || !v.vennoot} className="btn-primary w-full">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Bewaren</button>
+      {u && akkoorden > 0 && <p className="text-xs text-gray-500">Er staat al akkoord op deze uitgave. Pas je iets aan, dan geven Marco, Bram en Chiara opnieuw akkoord.</p>}
+      <button type="button" onClick={bewaar} disabled={bezig || laden || !v.vennoot} className="btn-primary w-full">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}{u ? 'Wijzigingen bewaren' : 'Bewaren'}</button>
+      {onArchiveer && <button type="button" onClick={onArchiveer} className="btn-secondary w-full justify-center text-sm"><Archive className="h-4 w-4" />Archiveren</button>}
     </Venster>
   )
 }

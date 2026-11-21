@@ -159,6 +159,31 @@ export function uitgavenIn(uitgaven: Uitgave[], periode: Periode | null, vennoot
     .sort((a, b) => b.datum.localeCompare(a.datum) || String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))
 }
 
+/** De uitgaven per maand (nieuwste maand eerst), met het totaal van die maand. */
+export function perMaand(uitgaven: Uitgave[]): { maand: string; label: string; uitgaven: Uitgave[]; totaal: number }[] {
+  const groepen = new Map<string, Uitgave[]>()
+  for (const u of uitgaven) { const m = u.datum.slice(0, 7); groepen.set(m, [...(groepen.get(m) ?? []), u]) }
+  return Array.from(groepen.entries())
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([maand, l]) => ({ maand, label: maandLabel(maand), uitgaven: l, totaal: rond(l.reduce((s, u) => s + u.bedrag, 0)) }))
+}
+
+/**
+ * De periodes om uit te kiezen (nieuwste eerst): van de eerste uitgave (of de
+ * start van het budget, als die vroeger ligt) tot en met deze maand.
+ */
+export function periodeOpties(soort: PeriodeSoort, eersteMaand: string | null, huidigeMaand: string): Periode[] {
+  const start = eersteMaand && MAAND.test(eersteMaand) && eersteMaand < huidigeMaand ? eersteMaand : huidigeMaand
+  const uit: Periode[] = []
+  let p = periodeVan(soort, huidigeMaand)
+  for (let i = 0; i < 240; i++) {
+    uit.push(p)
+    if (p.ref <= start || p.maanden.includes(start)) break
+    p = verschuif(p, -1)
+  }
+  return uit
+}
+
 // ── Regels ──────────────────────────────────────────────────────────────────
 
 export const STANDAARD_REGELS = [

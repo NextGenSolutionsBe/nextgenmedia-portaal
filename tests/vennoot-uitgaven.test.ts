@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import {
   regelsVerschil,
   controleerUitgave, controleerReden, periodeVan, verschuif, maandenTussen, budgetVan, standPerVennoot, uitgavenIn,
-  controleerRegels, regelsTekst, tekenStand, type Uitgave, type RegelsVersie,
+  controleerRegels, regelsTekst, tekenStand, perMaand, periodeOpties, type Uitgave, type RegelsVersie,
 } from '../lib/vennoot-uitgaven'
 
 let n = 0
@@ -115,6 +115,20 @@ test('Regelsviewer: wat is nieuw of weg tegenover de vorige versie', () => {
   assert.equal(d.start, false)
   assert.deepEqual(regelsVerschil(v1, v2).weg, ['Bon binnen de week'])
   assert.deepEqual(regelsVerschil(v1, null).nieuw, [false, false])
+})
+
+test('Per maand groeperen: nieuwste maand eerst, met het totaal', () => {
+  const mk = (id: string, datum: string, bedrag: number) => ({ id, vennoot: 'bram', datum, omschrijving: 'x', doel: null, bedrag, bewijs_pad: null, bewijs_naam: null, gearchiveerd_op: null, gearchiveerd_door: null, archief_reden: null, created_at: null, created_by: null }) as Uitgave
+  const g = perMaand([mk('a', '2026-11-21', 22.9), mk('b', '2026-10-03', 18.5), mk('c', '2026-11-02', 10.1)])
+  assert.deepEqual(g.map((x) => `${x.label}|${x.uitgaven.length}|${x.totaal}`), ['november 2026|2|33', 'oktober 2026|1|18.5'])
+  assert.deepEqual(perMaand([]), [])
+})
+
+test('Periodes om uit te kiezen: van de eerste uitgave tot nu, nieuwste eerst', () => {
+  assert.deepEqual(periodeOpties('maand', '2026-08', '2026-11').map((p) => p.label), ['november 2026', 'oktober 2026', 'september 2026', 'augustus 2026'])
+  assert.deepEqual(periodeOpties('kwartaal', '2026-02', '2026-11').map((p) => p.label), ['Q4 2026', 'Q3 2026', 'Q2 2026', 'Q1 2026'])
+  assert.deepEqual(periodeOpties('jaar', '2025-12', '2026-11').map((p) => p.label), ['2026', '2025'])
+  assert.deepEqual(periodeOpties('maand', null, '2026-11').map((p) => p.label), ['november 2026'])
 })
 
 console.log(`\n${n} tests geslaagd\n`)
