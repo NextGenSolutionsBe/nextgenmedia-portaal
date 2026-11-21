@@ -150,7 +150,8 @@ export async function maakUitgave(admin: Admin, b: Record<string, unknown>, door
 export async function wijzigUitgave(admin: Admin, id: string, b: Record<string, unknown>): Promise<void> {
   const v = controleerUitgave(b, vandaagBrussel())
   if (!v.ok) throw new UitgaveFout(v.fout)
-  const bon = b.bon ? await leesBon(admin, b.bon) : null
+  // Een nieuw bonnetje vervangt het oude; bon_weg haalt het van de uitgave (het bestand blijft bewaard).
+  const bon = b.bon ? await leesBon(admin, b.bon) : b.bon_weg === true ? { bewijs_pad: null, bewijs_naam: null } : null
   const { data, error } = await admin.from('vennoot_uitgaven').update({ ...v.waarde, ...(bon ?? {}), updated_at: new Date().toISOString() }).eq('id', id).select('id')
   if (error) throw new Error(error.message)
   if (!(data ?? []).length) throw new UitgaveFout('Uitgave niet gevonden.', 404)
