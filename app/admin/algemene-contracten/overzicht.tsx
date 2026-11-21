@@ -89,7 +89,7 @@ export function AcOverzicht({ mappen, contracten, fout, beginMap = null }: { map
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl sm:text-2xl font-semibold">Algemene contracten</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Huurovereenkomsten, verzekeringen, commissieregelingen, NDA's … van NextGenMedia zelf. Opladen, tekenen en terugsturen.</p>
+          <p className="text-sm text-gray-500 mt-0.5">Eigen contracten van NextGenMedia: opladen, tekenen en terugsturen.</p>
         </div>
         <button type="button" onClick={() => setOpladen(true)} className="btn-primary"><Upload className="h-4 w-4" />PDF opladen</button>
       </div>

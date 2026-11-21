@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Loader2, Plus, Search, KanbanSquare, LayoutGrid, List, Sparkles, X, FileSpreadsheet, Settings2 } from 'lucide-react'
+import { Loader2, Plus, Search, KanbanSquare, LayoutGrid, List, Sparkles, X, FileSpreadsheet, Settings2, SlidersHorizontal } from 'lucide-react'
 import {
   KOLOMMEN, kolomInfo, kolomVan, statusVoorKolom, stapLabel, kaartKleur, DIENSTEN, dienstInfo, sorteerInKolom, projectVerantwoordelijke, projectNaam,
   BEDRIJVEN, WAARDE_SCHIJVEN, inPeriode, inWaardeSchijf, bedrijfLabel,
@@ -181,6 +181,10 @@ export function OpdrachtenClient() {
   const chip = (actief: boolean) => `text-xs font-medium px-2.5 py-1 rounded-lg border transition-colors whitespace-nowrap ${actief ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'}`
   const kiezer = 'text-[13px] border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700'
   const filtersActief = !!(q || wie || dienst || klantFilter || bedrijf || waardeSchijf !== 'alle' || periodeSoort !== 'alles')
+  // De minder gebruikte filters (periode, klant, bedrijf, waarde, dienst) zitten achter één knop.
+  const extraActief = [dienst, klantFilter, bedrijf, waardeSchijf !== 'alle' ? 'w' : '', periodeSoort !== 'alles' ? 'p' : ''].filter(Boolean).length
+  const [meerFilters, setMeerFilters] = useState(false)
+  const toonMeer = meerFilters || extraActief > 0
   const wisFilters = () => { setQ(''); setWie(''); setDienst(''); setKlantFilter(''); setBedrijf(''); setWaardeSchijf('alle'); setPeriodeSoort('alles') }
 
   return (
@@ -193,11 +197,6 @@ export function OpdrachtenClient() {
           </p>
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
-          {archief && (
-            <a href="/api/admin/opdrachten/pipeline-archief" className="btn-secondary text-sm" title={`Excel met alle leads van de oude pipeline${archief.op ? ` (${new Date(archief.op).toLocaleDateString('nl-BE')})` : ''}`}>
-              <FileSpreadsheet className="h-4 w-4" /><span className="hidden sm:inline">Oude pipeline</span>
-            </a>
-          )}
           <button type="button" onClick={() => setInstellingen(true)} className="btn-secondary text-sm" title="ClickUp-lijsten, meldingen en herinneringsmail per bedrijf"><Settings2 className="h-4 w-4" /><span className="hidden sm:inline">Instellingen</span></button>
           <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5" role="group" aria-label="Weergave">
             <button type="button" onClick={() => kiesWeergave('bord')} aria-pressed={weergave === 'bord'} className={`text-xs font-medium px-2.5 py-1.5 rounded-md flex items-center gap-1 ${weergave === 'bord' ? 'bg-gray-900 text-white' : 'text-gray-600'}`}><LayoutGrid className="h-3.5 w-3.5" />Bord</button>
@@ -227,6 +226,21 @@ export function OpdrachtenClient() {
             <Search className="h-4 w-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
             <input {...zoekVeld()} className="input-base !py-1.5 pl-8 sm:w-64 text-[13px]" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Zoek op klant, project, notitie…" aria-label="Zoeken" />
           </div>
+          <select className={kiezer} value={wie} onChange={(e) => setWie(e.target.value)} aria-label="Verantwoordelijke">
+            <option value="">Iedereen</option>
+            {namen.map((n) => <option key={n} value={n}>{n}</option>)}
+            <option value="-">Zonder verantwoordelijke</option>
+          </select>
+          <button type="button" onClick={() => setMeerFilters((x) => !x)} aria-expanded={toonMeer} className={`${kiezer} inline-flex items-center gap-1.5`}>
+            <SlidersHorizontal className="h-3.5 w-3.5" />Filters{extraActief > 0 && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-gray-900 text-white text-[10px] font-bold inline-flex items-center justify-center">{extraActief}</span>}
+          </button>
+          {filtersActief && (
+            <button type="button" onClick={() => { wisFilters(); setMeerFilters(false) }} className="text-xs text-gray-600 hover:text-black inline-flex items-center gap-1 px-1"><X className="h-3.5 w-3.5" />Wissen</button>
+          )}
+          <span className="text-xs text-gray-500 ml-auto">{zichtbaar.length} van {rijen.length}</span>
+        </div>
+        {toonMeer && (
+        <div className="flex items-center gap-1.5 flex-wrap">
           <select className={kiezer} value={periodeSoort} onChange={(e) => setPeriodeSoort(e.target.value as Periode['soort'])} aria-label="Periode">
             <option value="alles">Alle periodes</option>
             <option value="maand">Maand</option>
@@ -259,16 +273,9 @@ export function OpdrachtenClient() {
           <select className={kiezer} value={waardeSchijf} onChange={(e) => setWaardeSchijf(e.target.value)} aria-label="Waarde">
             {WAARDE_SCHIJVEN.map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
           </select>
-          <select className={kiezer} value={wie} onChange={(e) => setWie(e.target.value)} aria-label="Verantwoordelijke">
-            <option value="">Iedereen</option>
-            {namen.map((n) => <option key={n} value={n}>{n}</option>)}
-            <option value="-">Zonder verantwoordelijke</option>
-          </select>
-          {filtersActief && (
-            <button type="button" onClick={wisFilters} className="text-xs text-gray-600 hover:text-black inline-flex items-center gap-1 px-1"><X className="h-3.5 w-3.5" />Wissen</button>
-          )}
-          <span className="text-xs text-gray-500 ml-auto">{zichtbaar.length} van {rijen.length}</span>
         </div>
+        )}
+        {toonMeer && (
         <div className="flex items-center gap-1 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0">
           <button type="button" onClick={() => setDienst('')} className={chip(!dienst)}>Alle diensten</button>
           {DIENSTEN.map((d) => (
@@ -278,6 +285,7 @@ export function OpdrachtenClient() {
           ))}
           <button type="button" onClick={() => setDienst(dienst === 'geen' ? '' : 'geen')} className={chip(dienst === 'geen')}>Zonder dienst</button>
         </div>
+        )}
       </div>
 
       {laden && rijen.length === 0 ? (
@@ -315,6 +323,14 @@ export function OpdrachtenClient() {
             if (ok) toast.success(`Naar ${kolomInfo(kolomVan(status)).label}`)
             return ok
           }} />
+      )}
+
+      {archief && (
+        <div className="text-right">
+          <a href="/api/admin/opdrachten/pipeline-archief" className="text-xs text-gray-400 hover:text-gray-700 inline-flex items-center gap-1" title={archief.op ? `Bewaard op ${new Date(archief.op).toLocaleDateString('nl-BE')}` : undefined}>
+            <FileSpreadsheet className="h-3.5 w-3.5" />Oude pipeline (Excel)
+          </a>
+        </div>
       )}
 
       {instellingen && <ReminderSettings onClose={() => setInstellingen(false)} />}

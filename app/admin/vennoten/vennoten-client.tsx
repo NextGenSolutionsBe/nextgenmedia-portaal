@@ -80,7 +80,7 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoor
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="min-w-0">
           <h1 className="text-xl sm:text-2xl font-semibold">Uitgaven vennoten</h1>
-          <p className="text-sm text-gray-500 mt-0.5 max-w-2xl">Aankopen op de zaak die één vennoot persoonlijk voordeel geven. {eur(budget.maandbudget)} per vennoot per maand; wat je niet gebruikt, spaar je.</p>
+          <p className="text-sm text-gray-500 mt-0.5 max-w-2xl">{eur(budget.maandbudget)} per vennoot per maand; wat je niet gebruikt, spaar je.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <RegelsKnop set="vennoten" data={regelsData} onOpen={setRegels} />

@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { buildNotifications } from '@/lib/notifications'
-import { Receipt, FileText, Newspaper, Globe, ListChecks, ArrowRight, Sun } from 'lucide-react'
+import { Newspaper, Globe, ListChecks, ArrowRight, Sun } from 'lucide-react'
 
 // "Vandaag" — geen cijfers, enkel acties. De dagelijkse werkplek bovenaan het
 // Command Center. Afgeleid uit dezelfde bron als het notificatiecentrum.
@@ -14,7 +14,7 @@ export async function TodayPanel({ modules = null }: { modules?: string[] | null
 
   // Heeft deze persoon geen enkele module die hier iets kan opleveren, dan
   // halen we de signalen ook niet op.
-  const notifModules = ['invoices', 'contracts', 'blogs', 'content']
+  const notifModules = ['blogs', 'content']
   const notifs = notifModules.some(maySee) ? await buildNotifications() : []
   const count = (kind: string) => notifs.filter((n) => n.kind === kind).length
 
@@ -27,17 +27,15 @@ export async function TodayPanel({ modules = null }: { modules?: string[] | null
     } catch { /* */ }
   }
 
+  // Facturen en contracten staan al bij "Op te volgen" (met namen); hier niet dubbel.
   const rows = [
-    { icon: Receipt, n: count('invoice'), label: 'facturen versturen', href: '/admin/invoices', accent: 'text-red-600', module: 'invoices' },
-    { icon: FileText, n: count('contract'), label: 'contract(en) opvolgen', href: '/admin/contracts', accent: 'text-amber-600', module: 'contracts' },
     { icon: Newspaper, n: count('blog'), label: 'blogs klaar voor publicatie', href: '/admin/blog-calendar', accent: 'text-green-600', module: 'blogs' },
     { icon: Globe, n: count('website'), label: 'websitefeedback', href: '/admin/services/website', accent: 'text-blue-600', module: 'content' },
     { icon: ListChecks, n: openTasks, label: 'taken afwerken', href: '/admin/clients', accent: 'text-gray-700', module: 'clients' },
   ].filter((r) => r.n > 0 && maySee(r.module))
 
-  // Voor een werknemer met een smal takenpakket (bv. een appointment setter)
-  // is een leeg "Vandaag" enkel ruis — dan tonen we het blok gewoon niet.
-  if (rows.length === 0 && modules !== null) return null
+  // Niets te doen = geen blok (een lege kaart is enkel ruis).
+  if (rows.length === 0) return null
 
   return (
     <div className="card-base">

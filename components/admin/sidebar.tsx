@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
   Info, Camera, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
-  MailCheck, FolderUp, Handshake, Settings, ClipboardPen, Contact, Timer, UserCircle, Video, Inbox, Clapperboard, Building2, FileSignature, ScrollText, Wallet, PackageCheck, Aperture,
+  MailCheck, FolderUp, Handshake, Settings, ClipboardPen, Contact, Timer, Video, Inbox, Clapperboard, Building2, FileSignature, ScrollText, Wallet, PackageCheck, Aperture,
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
@@ -32,7 +32,8 @@ type NavEntry = {
   /** Sleutel uit /api/admin/badges: toont een rood telbolletje. */
   badge?: string
 }
-type NavSection = { title?: string; items: NavEntry[] }
+/** `open`: standaard opengeklapt (de dagelijkse secties). De andere klap je open met een klik; de keuze wordt onthouden. */
+type NavSection = { title?: string; items: NavEntry[]; open?: boolean }
 
 // Gegroepeerd per thema zodat de zijbalk overzichtelijk blijft. Volgorde binnen
 // een sectie = werkvolgorde. Gating (module/adminOnly) blijft per item behouden.
@@ -46,6 +47,7 @@ const SECTIONS: NavSection[] = [
   {
     // Van eerste contact tot getekend: wie zijn onze klanten en wat loopt er.
     title: 'Klanten & projecten',
+    open: true,
     items: [
       { label: 'Klanten',     href: '/admin/clients',    icon: Users, module: 'clients' },
       // Eén overzicht voor leads en projecten (vervangt de vroegere pipeline).
@@ -266,6 +268,7 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
   const visibleSections = SECTIONS
     .map((s) => ({
       title: s.title,
+      open: s.open ?? false,
       items: s.items.filter(canSee).map((it, i) => [it, i] as const).sort((a, b) => (volgordeVan(a[0]) - volgordeVan(b[0])) || (a[1] - b[1])).map(([it]) => it),
     }))
     .filter((s) => s.items.length > 0)
@@ -279,6 +282,20 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
   }
 
   const closeMobile = () => setMobileOpen(false)
+
+  // In- en uitgeklapte secties: standaard enkel de dagelijkse; de sectie van de huidige pagina staat altijd open.
+  const [sectieKeuze, setSectieKeuze] = useState<Record<string, boolean>>({})
+  useEffect(() => {
+    try { const v = JSON.parse(localStorage.getItem('ngm-zijbalk-secties') ?? '{}'); if (v && typeof v === 'object') setSectieKeuze(v) } catch { /* geen opslag */ }
+  }, [])
+  const isHier = (item: NavEntry) => (item.exact ? padNu === item.href : padNu.startsWith(item.href)) || !!item.children?.some((c) => padNu.startsWith(c.href))
+  const sectieOpen = (sec: { title?: string; open: boolean; items: NavEntry[] }) =>
+    !sec.title || sec.items.some(isHier) || (sectieKeuze[sec.title] ?? sec.open)
+  const wisselSectie = (titel: string, nu: boolean) => {
+    const v = { ...sectieKeuze, [titel]: !nu }
+    setSectieKeuze(v)
+    try { localStorage.setItem('ngm-zijbalk-secties', JSON.stringify(v)) } catch { /* geen opslag */ }
+  }
 
   return (
     <>
@@ -346,19 +363,20 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
             misgokt. Daarom de voornaam groot en het e-mailadres eronder: de
             naam voor het gemak, het adres als het harde antwoord. */}
         {(naam || email) && (
-          <div className="mx-3 mb-1 px-3 py-2.5 rounded-2xl bg-white/60 border border-white/80 flex items-center gap-2.5">
-            <Link href="/admin/account" prefetch={false} onClick={closeMobile} title="Mijn account" className="h-8 w-8 shrink-0 rounded-full bg-white text-gray-900 shadow-sm flex items-center justify-center text-sm font-semibold overflow-hidden">
+          <Link href="/admin/account" prefetch={false} onClick={closeMobile} title="Mijn account"
+            className={cn('mx-3 mb-1 px-3 py-2.5 rounded-2xl bg-white/60 border border-white/80 flex items-center gap-2.5 hover:bg-white transition-colors', padNu.startsWith('/admin/account') && 'bg-white')}>
+            <span className="h-8 w-8 shrink-0 rounded-full bg-white text-gray-900 shadow-sm flex items-center justify-center text-sm font-semibold overflow-hidden">
               {fotoVersie && !fotoKapot
                 ? <img src={`/api/admin/account/foto?v=${encodeURIComponent(fotoVersie)}`} alt="" className="h-full w-full object-cover" onError={() => setFotoKapot(true)} />
                 : (naam || email || '?').charAt(0).toUpperCase()}
-            </Link>
+            </span>
             <div className="min-w-0">
               <div className="text-sm font-medium text-gray-900 leading-tight truncate">
-                {naam ? `Welkom, ${naam}` : 'Welkom'}
+                {naam || 'Mijn account'}
               </div>
               {email && <div className="text-[10px] text-gray-400 truncate" title={email}>{email}</div>}
             </div>
-          </div>
+          </Link>
         )}
 
         {/* Navigation */}
@@ -371,30 +389,34 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
               Mijn werk · inklokken
             </Link>
           )}
-          {visibleSections.map((section, si) => (
-            <div key={section.title ?? `sec-${si}`} className={si > 0 ? 'mt-4' : ''}>
-              {section.title && (
-                <div className="px-3.5 mb-1 text-[11px] font-normal text-gray-400">
-                  {section.title}
-                </div>
-              )}
-              <div className="space-y-0.5">
-                {section.items.map((item) => (
-                  <NavItem key={item.href} item={item} onNavigate={closeMobile}
-                    badge={item.badge ? (badges[item.badge] ?? 0) : 0} />
-                ))}
+          {visibleSections.map((section, si) => {
+            const open = sectieOpen(section)
+            const telling = section.items.reduce((n, it) => n + (it.badge ? (badges[it.badge] ?? 0) : 0), 0)
+            return (
+              <div key={section.title ?? `sec-${si}`} className={si > 0 ? 'mt-3' : ''}>
+                {section.title && (
+                  <button type="button" onClick={() => wisselSectie(section.title!, open)} aria-expanded={open}
+                    className="w-full px-3.5 py-1 mb-0.5 flex items-center gap-1.5 text-[11px] font-normal text-gray-400 hover:text-gray-700 rounded-lg">
+                    <span className="flex-1 text-left">{section.title}</span>
+                    {!open && telling > 0 && <span className="min-w-[16px] h-[16px] px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">{telling > 99 ? '99+' : telling}</span>}
+                    <ChevronDown className={cn('h-3 w-3 transition-transform', !open && '-rotate-90')} />
+                  </button>
+                )}
+                {open && (
+                  <div className="space-y-0.5">
+                    {section.items.map((item) => (
+                      <NavItem key={item.href} item={item} onNavigate={closeMobile}
+                        badge={item.badge ? (badges[item.badge] ?? 0) : 0} />
+                    ))}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            )
+          })}
         </nav>
 
         {/* Instellingen (centraal beheer) + eigen account + uitloggen */}
         <div className="px-3 py-3 border-t border-black/[0.05] space-y-0.5">
-          <Link href="/admin/account" prefetch={false} onClick={closeMobile}
-            className={cn('sidebar-item', padNu.startsWith('/admin/account') && 'active')}>
-            <UserCircle className="h-4 w-4 shrink-0" />
-            Mijn account
-          </Link>
           {toonInstellingen && <OpslagMeter onNavigate={closeMobile} />}
           {toonInstellingen && (
             <Link href="/admin/instellingen" prefetch={false} onClick={closeMobile}

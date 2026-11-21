@@ -114,9 +114,9 @@ export type CpInstellingen = {
 }
 export type MeetingExtra = { key: string; naam: string; client_id: string | null }
 
-/** Vaste reminder bij Meetings inplannen: per rij af te vinken voor de volgende maand. */
-export const shootHerinnering = (maandNaam: string) => `Contentshoot voor ${maandNaam} vastleggen`
-/** Afvinken van de shoot-reminder: per rij (klant-id of extra sleutel), datum = eerste dag van de volgende maand. */
+/** Reeks 3, een eigen wekelijks actiepunt (los van de meetings): per rij af te vinken voor de volgende maand. */
+export const shootHerinnering = (maandNaam: string) => `Contentshoots voor ${maandNaam} vastleggen`
+/** Afvinken van een contentshoot: per rij (klant-id of extra sleutel) en shootmaand, datum = eerste dag van deze maand. */
 export const shootSleutel = (rij: string) => `shoot:${rij}`
 /** Afvinken van een vervolgstap: per klant en stap, datum = eerste dag van de maand. */
 export const vervolgSleutel = (clientId: string, key: string) => `vs:${clientId}:${key}`
@@ -146,11 +146,12 @@ export function leesMeetingExtra(v: unknown): MeetingExtra[] {
 export type VasteTaak = { key: string; titel: string; detail: string; dagen?: number[] }
 
 /**
- * Extra taak bij één klant, telkens die klant in de gekozen reeks zit (bv.
- * Verheyen: op het einde van de maand een meeting inplannen). Afvinken per
- * maand. Staat in cp_klanten.extra_taken.
+ * Extra taak bij één klant, telkens die klant in de gekozen reeks zit. Afvinken
+ * per maand. Staat in cp_klanten.extra_taken. `algemeen`: een reminder die
+ * bovenaan de reeks staat zodra die begint, ook als de klant er die maand niet
+ * in zit (bv. Verheyen bij reeks 1: meeting einde van de maand vastleggen).
  */
-export type KlantTaak = { key: string; titel: string; reeks: Reeks }
+export type KlantTaak = { key: string; titel: string; reeks: Reeks; algemeen?: boolean }
 
 /** Weekdagen nakijken: enkel 1 tot 5, zonder dubbels, gesorteerd. */
 export function leesDagen(v: unknown): number[] {
@@ -178,7 +179,7 @@ export function leesKlantTaken(v: unknown): KlantTaak[] {
     const titel = String(r.titel ?? '').replace(/\s+/g, ' ').trim().slice(0, 300)
     const reeks = Number(r.reeks)
     const key = String(r.key ?? '').replace(/[^a-z0-9_]/gi, '').slice(0, 30)
-    return titel && isReeks(reeks) && key ? { key, titel, reeks } : null
+    return titel && isReeks(reeks) && key ? { key, titel, reeks, ...(r.algemeen === true ? { algemeen: true } : {}) } : null
   }).filter((t): t is KlantTaak => !!t)
 }
 /** Afvinken van een klanttaak: per klant, taak en maand (datum = eerste dag van de maand). */
@@ -280,10 +281,12 @@ export const STANDAARD_CP: CpInstellingen = {
 - Aanduiden dat de termijn loopt vanaf vandaag
 - Klant krijgt zo te zien hoeveel dagen er nog zijn
 - Mail sturen naar de klant`,
-    3: `# Meetings voor volgende maand inplannen (eerste dag van reeks 3)
+    3: `# Meetings inplannen voor begin volgende maand (eerste dag van reeks 3)
 - Per klant bekijken of er een meeting nodig is
 - Link en mail sturen
-- Bij elke klant de contentshoot voor de volgende maand vastleggen (afvinken in de lijst)
+# Contentshoots vastleggen voor volgende maand (elke week)
+- Elke maandag nakijken welke shoots nog vastgelegd moeten worden
+- Afvinken in de lijst zodra de datum vastligt
 # Aanpassingen + definitief inplannen
 - Feedback verwerken
 - Definitief inplannen in Metricool

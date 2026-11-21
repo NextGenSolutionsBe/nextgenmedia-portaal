@@ -381,7 +381,9 @@ function BatchBeheer({ batches, doe }: { batches: Batch[]; doe: Doe }) {
 
 /**
  * Extra taken voor één klant: verschijnen in de dagelijkse werking onder die
- * klant, telkens die in de gekozen reeks zit. Afvinken per maand.
+ * klant, telkens die in de gekozen reeks zit. Met "Bovenaan de reeks" staat de
+ * taak als reminder bovenaan zodra de reeks begint, ook als de klant er die
+ * maand niet in zit. Afvinken per maand.
  */
 function KlantTaken({ cp, kanBeheren, onBewaar }: { cp: CpData['cpKlanten'][number] | null; kanBeheren: boolean; onBewaar: (lijst: KlantTaak[]) => void }) {
   const start = leesKlantTaken(cp?.extra_taken)
@@ -393,12 +395,18 @@ function KlantTaken({ cp, kanBeheren, onBewaar }: { cp: CpData['cpKlanten'][numb
       <h4 className="text-xs font-semibold text-gray-500">Extra taken bij deze klant</h4>
       {lijst.length === 0 && <p className="text-sm text-gray-500">Geen extra taken. Voeg er een toe als deze klant iets extra vraagt in een reeks.</p>}
       {lijst.map((t, i) => (
-        <div key={t.key} className="grid grid-cols-[1fr_auto_auto] gap-1.5 items-start">
-          <textarea rows={2} className={INP} disabled={!kanBeheren} value={t.titel} maxLength={300} onChange={(e) => setLijst(lijst.map((x, j) => (j === i ? { ...x, titel: e.target.value } : x)))} aria-label="Taak" />
-          <select className={`${INP} w-auto`} disabled={!kanBeheren} value={t.reeks} onChange={(e) => setLijst(lijst.map((x, j) => (j === i ? { ...x, reeks: Number(e.target.value) as Reeks } : x)))} aria-label="Reeks">
-            {REEKSEN.map((r) => <option key={r.nr} value={r.nr}>{r.kort}</option>)}
-          </select>
-          {kanBeheren && <button type="button" onClick={() => setLijst(lijst.filter((_, j) => j !== i))} className={`h-9 w-9 rounded-lg hover:bg-red-50 text-red-600 flex items-center justify-center ${focusRing}`} aria-label="Taak verwijderen"><Trash2 className="h-4 w-4" /></button>}
+        <div key={t.key} className="space-y-1">
+          <div className="grid grid-cols-[1fr_auto_auto] gap-1.5 items-start">
+            <textarea rows={2} className={INP} disabled={!kanBeheren} value={t.titel} maxLength={300} onChange={(e) => setLijst(lijst.map((x, j) => (j === i ? { ...x, titel: e.target.value } : x)))} aria-label="Taak" />
+            <select className={`${INP} w-auto`} disabled={!kanBeheren} value={t.reeks} onChange={(e) => setLijst(lijst.map((x, j) => (j === i ? { ...x, reeks: Number(e.target.value) as Reeks } : x)))} aria-label="Reeks">
+              {REEKSEN.map((r) => <option key={r.nr} value={r.nr}>{r.kort}</option>)}
+            </select>
+            {kanBeheren && <button type="button" onClick={() => setLijst(lijst.filter((_, j) => j !== i))} className={`h-9 w-9 rounded-lg hover:bg-red-50 text-red-600 flex items-center justify-center ${focusRing}`} aria-label="Taak verwijderen"><Trash2 className="h-4 w-4" /></button>}
+          </div>
+          <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+            <input type="checkbox" disabled={!kanBeheren} checked={!!t.algemeen} onChange={(e) => setLijst(lijst.map((x, j) => (j === i ? { ...x, algemeen: e.target.checked || undefined } : x)))} />
+            Bovenaan de reeks tonen zodra die begint (ook als de klant er die maand niet in zit)
+          </label>
         </div>
       ))}
       {kanBeheren && (
