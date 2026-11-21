@@ -26,7 +26,7 @@ export default async function PortalBlogsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl sm:text-2xl font-semibold text-black">Blogs</h1>
-        <p className="text-sm text-gray-500 mt-1">Bekijk en bewerk je blogs. Een opgeslagen wijziging aan een gepubliceerde blog wordt automatisch op je website doorgevoerd.</p>
+        <p className="text-sm text-gray-500 mt-1">Bekijk en bewerk je blogs. Een bewaarde wijziging komt vanzelf op je website.</p>
       </div>
       {accountIds.length === 0 ? (
         <div className="card-base text-sm text-gray-500">Er is nog geen blogaccount aan jouw bedrijf gekoppeld.</div>

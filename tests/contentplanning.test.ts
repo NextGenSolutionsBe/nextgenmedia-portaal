@@ -184,6 +184,9 @@ test('Extra taken per klant: titel, reeks en sleutel nagekeken; afvinken per maa
   assert.deepEqual(t, [{ key: 'kt1', titel: 'Meeting op het einde van de maand inplannen', reeks: 2 }])
   assert.equal(klantTaakSleutel('1010a71d-05f2-4887-8bf6-906aaa8a847e', 'kt1'), 'kt:1010a71d-05f2-4887-8bf6-906aaa8a847e:kt1')
   assert.deepEqual(leesKlantTaken('rommel'), [])
+  // Algemene reminder (bovenaan de reeks, bv. Verheyen bij reeks 1): enkel echt true telt.
+  assert.deepEqual(leesKlantTaken([{ key: 'kt2', titel: 'Meeting einde van de maand vastleggen – feedback bespreken', reeks: 1, algemeen: true }, { key: 'kt3', titel: 'Gewoon', reeks: 1, algemeen: 'ja' }]),
+    [{ key: 'kt2', titel: 'Meeting einde van de maand vastleggen – feedback bespreken', reeks: 1, algemeen: true }, { key: 'kt3', titel: 'Gewoon', reeks: 1 }])
   assert.deepEqual(leesCp({ vaste_taken: [{ key: 'a', titel: 'A', detail: '', dagen: [2, 2, 9, '4'] }] }).vaste_taken[0].dagen, [2, 4])
 })
 

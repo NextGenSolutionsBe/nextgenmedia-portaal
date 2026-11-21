@@ -28,7 +28,7 @@ type PaneelStaat =
 
 const VOORKEUR = 'ngm-contentplanning-v1'
 const WEERGAVEN: { key: Weergave; label: string; icon: typeof ListChecks }[] = [
-  { key: 'werking', label: 'Dagelijkse werking', icon: ListChecks },
+  { key: 'werking', label: 'Werking', icon: ListChecks },
   { key: 'reeksen', label: 'Reeksen', icon: Route },
   { key: 'batches', label: 'Batches', icon: Layers },
   { key: 'bord', label: 'Klantenbord', icon: LayoutGrid },
@@ -157,11 +157,11 @@ export function ContentplanningClient() {
       </div>
 
       {/* Weergaven */}
-      <div role="tablist" aria-label="Weergave" className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <div role="tablist" aria-label="Weergave" className="grid grid-cols-4 rounded-cp border border-cp-rand bg-cp-achtergrond p-1 gap-1 sm:inline-grid sm:w-auto">
         {WEERGAVEN.map((w) => (
           <button key={w.key} role="tab" aria-selected={weergave === w.key} type="button" onClick={() => setWeergave(w.key)}
-            className={`inline-flex items-center justify-center gap-2 h-14 px-3 sm:px-4 rounded-cp border-2 text-sm sm:text-cp-basis font-semibold transition-all ${weergave === w.key ? 'bg-cp-ink text-cp-op-ink border-cp-ink shadow-md' : 'bg-cp-vlak border-cp-rand hover:border-cp-ink active:scale-[0.98]'} ${focusRing}`}>
-            <w.icon className="h-5 w-5 shrink-0 hidden min-[400px]:block" /><span className="truncate">{w.label}</span>
+            className={`inline-flex items-center justify-center gap-2 h-10 px-2 sm:px-4 rounded-lg text-sm font-semibold transition-colors ${weergave === w.key ? 'bg-cp-ink text-cp-op-ink' : 'hover:bg-cp-vlak'} ${focusRing}`}>
+            <w.icon className="h-4 w-4 shrink-0 hidden sm:block" /><span className="truncate">{w.label}</span>
           </button>
         ))}
       </div>

@@ -4,7 +4,8 @@ import { Activity } from 'lucide-react'
 
 // Compacte recente activiteit uit het audit_log (read-only, gelimiteerd).
 // Vervangt de zware losse widgets op het Command Center.
-export async function RecentActivity() {
+/** `kaal`: zonder eigen kaart en titel (staat in een inklapbaar blok). */
+export async function RecentActivity({ kaal = false }: { kaal?: boolean } = {}) {
   let rows: { id: string; action: string; summary: string | null; entity_type: string | null; entity_id: string | null; actor_email: string | null; created_at: string }[] = []
   try {
     const admin = createAdminSupabaseClient()
@@ -25,12 +26,7 @@ export async function RecentActivity() {
     return null
   }
 
-  return (
-    <div className="card-base">
-      <h2 className="font-semibold text-gray-900 text-sm flex items-center gap-2 mb-3">
-        <Activity className="h-4 w-4 text-gray-400" />
-        Recente activiteit
-      </h2>
+  const lijst = (
       <div className="space-y-1.5">
         {rows.map((r) => {
           const href = hrefFor(r.entity_type, r.entity_id)
@@ -49,6 +45,15 @@ export async function RecentActivity() {
             : <div key={r.id} className="px-1">{body}</div>
         })}
       </div>
+  )
+  if (kaal) return lijst
+  return (
+    <div className="card-base">
+      <h2 className="font-semibold text-gray-900 text-sm flex items-center gap-2 mb-3">
+        <Activity className="h-4 w-4 text-gray-400" />
+        Recente activiteit
+      </h2>
+      {lijst}
     </div>
   )
 }

@@ -69,7 +69,7 @@ export default async function SettlementsPage() {
     <div className="space-y-6 animate-fade-in">
       <div>
         <h1 className="text-xl sm:text-2xl font-semibold">Settlements</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Openstaande balansen tussen NextGenMedia en partners — commissie (beide richtingen) en onderaanneming, na aftrek van geregistreerde betalingen</p>
+        <p className="text-sm text-gray-500 mt-0.5">Openstaande balansen tussen ons en partners.</p>
       </div>
 
       {/* KPI's */}

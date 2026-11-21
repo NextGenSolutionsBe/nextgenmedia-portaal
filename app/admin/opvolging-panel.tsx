@@ -15,10 +15,14 @@ export async function OpvolgingPanel({ modules = null }: { modules?: string[] | 
   return <OpvolgingKaarten groepen={groepen} />
 }
 
-export function OpvolgingKaarten({ groepen }: { groepen: OpvolgGroep[] }) {
+export function OpvolgingKaarten({ groepen: alle }: { groepen: OpvolgGroep[] }) {
+  // Enkel blokken waar iets in staat; die met iets dringends eerst, dan de grootste.
+  const dringend = (g: OpvolgGroep) => g.items.some((i) => i.dringend)
+  const groepen = alle.filter((g) => g.totaal > 0).sort((a, b) => Number(dringend(b)) - Number(dringend(a)) || b.totaal - a.totaal)
   return (
     <section aria-labelledby="op-te-volgen" className="space-y-3">
       <h2 id="op-te-volgen" className="font-semibold text-gray-900">Op te volgen</h2>
+      {groepen.length === 0 && <div className="card-base !p-4 text-sm text-gray-500">Alles is bij. Niets om op te volgen.</div>}
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {groepen.map((g) => {
           const Icoon = ICOON[g.key]

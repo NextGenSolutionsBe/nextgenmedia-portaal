@@ -3,15 +3,16 @@ export const dynamic = 'force-dynamic'
 import { Suspense } from 'react'
 import { getActor, actorCanSee } from '@/lib/actor-modules'
 import { TodayPanel } from './today-panel'
-import { ContractsWidget } from './contracts-widget'
 import { RecentActivity } from './recent-activity'
 import { OpvolgingPanel } from './opvolging-panel'
 import { TakenBlok } from '@/components/admin/taken-blok'
 import { MailProjecten } from '@/components/admin/mail-projecten'
 
-// Compact Command Center: Op te volgen (aanvragen, contracten, meetings, leads,
-// contentfeedback, met namen) + Vandaag (acties) + kritieke contracten + recente
-// activiteit. Notificaties leven in het globale belletje. De zware module-
+// Compact Command Center: wat beslist moet worden (nieuwe projecten), taken,
+// Op te volgen (enkel blokken waar iets in staat, dringendste eerst) en wat
+// daar niet al in staat. Recente activiteit ingeklapt onderaan. Het vroegere
+// contractenblok met tellers staat niet meer hier: de opvolging zit in
+// "Op te volgen", de cijfers in Klantcontracten. Notificaties leven in het globale belletje. De zware module-
 // widgets (finance/lifecycle/blogs/framer/scripts) zijn verplaatst naar hun
 // eigen modules — niet verwijderd, enkel niet meer op het dashboard.
 //
@@ -45,28 +46,24 @@ export default async function CommandCenter() {
         <OpvolgingPanel modules={actor?.modules ?? null} />
       </Suspense>
 
-      {/* Vandaag — dagelijkse acties (de werkplek). Elke regel hangt aan een
-          module, zodat een werknemer enkel ziet waar hij bij kan. */}
-      <Suspense fallback={<div className="card-base text-sm text-gray-400">Vandaag laden…</div>}>
+      {/* Vandaag — enkel wat niet al bij "Op te volgen" staat (blogs, websitefeedback, klanttaken). */}
+      <Suspense fallback={null}>
         <TodayPanel modules={actor?.modules ?? null} />
       </Suspense>
 
-      <div className="grid lg:grid-cols-2 gap-6">
-        {/* Kritieke contracten + opvolging */}
-        {can('contracts') && (
-          <Suspense fallback={<div className="card-base text-sm text-gray-400">Contracten laden…</div>}>
-            <ContractsWidget />
-          </Suspense>
-        )}
-
-        {/* Recente activiteit — het audit-log loopt over alle modules heen en
-            blijft daarom admin-only. */}
-        {isAdmin && (
-          <Suspense fallback={<div className="card-base text-sm text-gray-400">Activiteit laden…</div>}>
-            <RecentActivity />
-          </Suspense>
-        )}
-      </div>
+      {/* Recente activiteit — ingeklapt onderaan: nuttig om iets terug te vinden, geen dagelijkse actie. Admin-only (audit-log). */}
+      {isAdmin && (
+        <details className="card-base group">
+          <summary className="cursor-pointer list-none text-sm font-semibold text-gray-700 flex items-center gap-2">
+            <span className="text-gray-400 group-open:rotate-90 transition-transform">›</span>Recente activiteit
+          </summary>
+          <div className="mt-3">
+            <Suspense fallback={<div className="text-sm text-gray-400">Laden…</div>}>
+              <RecentActivity kaal />
+            </Suspense>
+          </div>
+        </details>
+      )}
     </div>
   )
 }

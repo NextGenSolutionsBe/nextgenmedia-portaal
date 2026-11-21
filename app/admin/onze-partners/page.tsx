@@ -13,7 +13,7 @@ export default async function OnzePartnersPage() {
     <div className="space-y-5 animate-fade-in">
       <div>
         <h1 className="text-xl sm:text-2xl font-semibold flex items-center gap-2"><Handshake className="h-6 w-6" />Onze partners</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Onze bedrijven en partners zoals klanten ze zien in de klantapp: logo, korte uitleg en links naar website en socials.</p>
+        <p className="text-sm text-gray-500 mt-0.5">Onze partners zoals klanten ze zien in de klantapp.</p>
       </div>
       <PartnersAdmin magAanpassen={magAanpassen} />
     </div>

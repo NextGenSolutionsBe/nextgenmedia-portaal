@@ -16,7 +16,7 @@ export default async function AanvragenPage() {
     <div className="space-y-5 animate-fade-in">
       <div>
         <h1 className="text-xl sm:text-2xl font-semibold flex items-center gap-2"><Inbox className="h-6 w-6" />Aanvragen</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Wat klanten aanvragen via hun klantapp. Een aanvraag is nog geen opdracht of boeking: beoordeel ze, duid de scope aan, koppel indien nodig een offerte en plan intern in.</p>
+        <p className="text-sm text-gray-500 mt-0.5">Wat klanten aanvragen in de klantapp. Een aanvraag is nog geen opdracht.</p>
       </div>
       <Suspense><AanvragenAdmin magAanpassen={magAanpassen} magVerwijderen={magVerwijderen} /></Suspense>
     </div>

@@ -475,9 +475,12 @@ function ReeksKaart({ r, maand, data, doe, datum, kanSchrijven, onWerkwijze, onK
   // Vaste vervolgstappen bij elke klant in deze reeks (reeks 1: contentkalender genereren, taak Bram shootbriefing), plus de eigen extra taken.
   const extra = (cid: string) => [
     ...data.instellingen.reeks_vervolg.filter((t) => t.reeks === r).map((t) => ({ ...t, sleutel: vervolgSleutel(cid, t.key) })),
-    ...leesKlantTaken(data.cpKlanten.find((k) => k.client_id === cid)?.extra_taken).filter((t) => t.reeks === r).map((t) => ({ ...t, sleutel: klantTaakSleutel(cid, t.key) })),
+    ...leesKlantTaken(data.cpKlanten.find((k) => k.client_id === cid)?.extra_taken).filter((t) => t.reeks === r && !t.algemeen).map((t) => ({ ...t, sleutel: klantTaakSleutel(cid, t.key) })),
   ]
   const ktCheck = (sleutel: string) => data.checks.find((c) => c.routine_key === sleutel && c.datum === maandStart(maand))
+  // Algemene reminders van één klant (bv. Verheyen): bovenaan de reeks, ook als die klant er deze maand niet in zit.
+  const algemeen = data.cpKlanten.flatMap((k) => leesKlantTaken(k.extra_taken).filter((t) => t.reeks === r && t.algemeen)
+    .map((t) => ({ ...t, clientId: k.client_id, sleutel: klantTaakSleutel(k.client_id, t.key) })))
   return (
     <section className={`${KAART} overflow-hidden`}>
       <div className={`h-2 ${info.kleur}`} />
@@ -489,6 +492,25 @@ function ReeksKaart({ r, maand, data, doe, datum, kanSchrijven, onWerkwijze, onK
         <button type="button" onClick={onWerkwijze} className={KNOP}><BookOpen className="h-4 w-4" />Werkwijze</button>
       </div>
       {lijst.length > 0 && <div className="h-1.5 bg-cp-achtergrond"><div className={`h-1.5 ${info.kleur} transition-all duration-500`} style={{ width: `${Math.round((klaar.length / lijst.length) * 100)}%` }} /></div>}
+      {algemeen.length > 0 && (
+        <ul className={`${klein ? 'px-4 pt-3' : 'px-5 pt-4'} space-y-2`}>
+          {algemeen.map((t) => {
+            const ck = ktCheck(t.sleutel)
+            return (
+              <li key={t.sleutel} className={`flex items-start gap-3 rounded-xl border px-3 py-2.5 ${ck ? 'border-cp-rand bg-cp-achtergrond' : 'border-amber-300 bg-amber-50'}`}>
+                <input type="checkbox" className="h-5 w-5 mt-0.5 shrink-0 cursor-pointer accent-[var(--cp-klaar)]" checked={!!ck} disabled={!kanSchrijven}
+                  aria-label={`${w.naam.get(t.clientId) ?? 'Klant'}: ${t.titel} afvinken`}
+                  onChange={(e) => doe('routine.check', { routine_key: t.sleutel, datum: maandStart(maand), aan: e.target.checked }, { stil: true })} />
+                <span className={`min-w-0 flex-1 text-cp-basis ${ck ? 'line-through text-cp-zacht' : 'text-amber-950'}`}>
+                  <button type="button" onClick={() => onKlant(t.clientId)} className={`font-semibold hover:underline ${focusRing} rounded`}>{w.naam.get(t.clientId) ?? 'Klant'}</button>: {t.titel}
+                  {ck?.door ? <span className="text-cp-klein text-cp-zacht"> · {ck.door}</span> : null}
+                </span>
+                {!ck && <Flag className="h-4 w-4 text-amber-700 shrink-0 mt-1" />}
+              </li>
+            )
+          })}
+        </ul>
+      )}
       {/* Het volledige voorstel (wie aan de beurt is en waarom) staat in Werkwijze; hier enkel een seintje als er nog klanten bij moeten. */}
       {r === 1 && !klein && <Reeks1Seintje data={data} doe={doe} maand={maand} kanSchrijven={kanSchrijven} onWerkwijze={onWerkwijze} />}
       {lijst.length === 0 ? <p className="px-5 py-4 text-cp-basis text-cp-zacht">Geen klanten</p> : (
@@ -523,47 +545,76 @@ function ReeksKaart({ r, maand, data, doe, datum, kanSchrijven, onWerkwijze, onK
   )
 }
 
-// ── Reeks 3: meetings voor volgende maand ──────────────────────────────────
+// ── Reeks 3: meetings inplannen (begin volgende maand) ─────────────────────
 function MeetingPlanning({ data, doe, maand, kanSchrijven, onKlant }: { data: CpData; doe: Doe; maand: string; kanSchrijven: boolean; onKlant: (id: string) => void }) {
   const w = useWerk(data)
   const volgende = plusMaanden(maand, 1)
   const rijen = w.meetingRijen(volgende)
   const beslist = rijen.filter((r) => r.status === 'niet_nodig' || r.status === 'ingepland').length
   const zet = (r: MeetingRij, s: MeetingStatus) => doe('meetingplan.zet', { ...(r.extra ? { sleutel: r.sleutel } : { client_id: r.sleutel }), maand: volgende, status: r.status === s ? null : s }, { stil: true })
-  // De shoot-reminder komt bij elke rij terug; afvinken per maand (datum = deze maand, sleutel met de shootmaand).
-  const shootKey = (r: MeetingRij) => `${shootSleutel(r.sleutel)}:${volgende}`
-  const shoot = (r: MeetingRij) => data.checks.find((c) => c.routine_key === shootKey(r) && c.datum === maandStart(maand))
-  const shoots = rijen.filter((r) => shoot(r)).length
   return (
     <section className={`${KAART} overflow-hidden`}>
       <div className="h-2 bg-cp-r3" />
       <div className="px-5 py-4 flex items-center gap-3 flex-wrap">
         <CalendarClock className="h-5 w-5" />
-        <h2 className="text-cp-kop flex-1">Kijken welke meetings ingepland moeten worden ({MAAND_KORT(volgende)})</h2>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-cp-kop">Meetings inplannen</h2>
+          <p className="text-cp-klein text-cp-zacht">Voor begin {MAAND_KORT(volgende)}</p>
+        </div>
         <span className="text-cp-klein text-cp-zacht">{beslist}/{rijen.length}</span>
       </div>
-      <div className="mx-5 mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-cp-klein text-amber-900 flex items-center gap-2 flex-wrap">
-        <Flag className="h-4 w-4 shrink-0" /><span className="flex-1 min-w-0"><b>Bij elke meeting:</b> {shootHerinnering(MAAND_KORT(volgende))}.</span><span className="text-amber-800">{shoots}/{rijen.length} vastgelegd</span>
+      <ul className="divide-y divide-cp-rand border-t border-cp-rand">
+        {rijen.map((r) => (
+          <li key={r.sleutel} className="px-5 py-3 flex items-center gap-3 flex-wrap">
+            {r.clientId
+              ? <button type="button" onClick={() => onKlant(r.clientId!)} className={`text-cp-basis font-semibold text-left min-w-[160px] flex-1 truncate ${focusRing} rounded`}>{r.naam}</button>
+              : <span className="text-cp-basis font-semibold min-w-[160px] flex-1 truncate">{r.naam}</span>}
+            <div className="inline-flex rounded-xl border border-cp-rand overflow-hidden" role="group" aria-label={`Meeting ${r.naam}`}>
+              {(['nodig', 'ingepland', 'niet_nodig'] as MeetingStatus[]).map((x) => (
+                <button key={x} type="button" disabled={!kanSchrijven} aria-pressed={r.status === x} onClick={() => zet(r, x)}
+                  className={`h-10 px-3 text-cp-klein font-semibold border-l first:border-l-0 border-cp-rand transition-colors ${r.status === x ? 'bg-cp-ink text-cp-op-ink' : 'bg-cp-vlak hover:bg-cp-achtergrond'} ${focusRing}`}>{MEETING_LABEL[x]}</button>
+              ))}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+// ── Reeks 3: contentshoots vastleggen (volgende maand), een eigen wekelijks actiepunt ──
+const shootKey = (rij: string, volgende: string) => `${shootSleutel(rij)}:${volgende}`
+function shootStand(data: CpData, rijen: MeetingRij[], maand: string) {
+  const volgende = plusMaanden(maand, 1)
+  const check = (r: MeetingRij) => data.checks.find((c) => c.routine_key === shootKey(r.sleutel, volgende) && c.datum === maandStart(maand))
+  return { volgende, check, klaar: rijen.filter((r) => check(r)).length }
+}
+function ShootsVastleggen({ data, doe, maand, kanSchrijven, onKlant }: { data: CpData; doe: Doe; maand: string; kanSchrijven: boolean; onKlant: (id: string) => void }) {
+  const w = useWerk(data)
+  const rijen = w.meetingRijen(plusMaanden(maand, 1))
+  const { volgende, check, klaar } = shootStand(data, rijen, maand)
+  return (
+    <section className={`${KAART} overflow-hidden`}>
+      <div className="h-2 bg-cp-r3" />
+      <div className="px-5 py-4 flex items-center gap-3 flex-wrap">
+        <Flag className="h-5 w-5" />
+        <div className="flex-1 min-w-0">
+          <h2 className="text-cp-kop">{shootHerinnering(MAAND_KORT(volgende))}</h2>
+          <p className="text-cp-klein text-cp-zacht">Elke week nakijken tot alles vastligt</p>
+        </div>
+        <span className="text-cp-klein text-cp-zacht">{klaar}/{rijen.length}</span>
       </div>
       <ul className="divide-y divide-cp-rand border-t border-cp-rand">
         {rijen.map((r) => {
-          const ck = shoot(r)
+          const ck = check(r)
           return (
-            <li key={r.sleutel} className="px-5 py-3 flex items-center gap-3 flex-wrap">
+            <li key={r.sleutel} className="px-5 py-3 flex items-center gap-3">
+              <input type="checkbox" className={VINK} checked={!!ck} disabled={!kanSchrijven} aria-label={`Shoot ${r.naam} vastgelegd`}
+                onChange={(e) => doe('routine.check', { routine_key: shootKey(r.sleutel, volgende), datum: maandStart(maand), aan: e.target.checked }, { stil: true })} />
               {r.clientId
-                ? <button type="button" onClick={() => onKlant(r.clientId!)} className={`text-cp-basis font-semibold text-left min-w-[160px] flex-1 truncate ${focusRing} rounded`}>{r.naam}</button>
-                : <span className="text-cp-basis font-semibold min-w-[160px] flex-1 truncate">{r.naam}</span>}
-              <div className="inline-flex rounded-xl border border-cp-rand overflow-hidden" role="group" aria-label={`Meeting ${r.naam}`}>
-                {(['nodig', 'ingepland', 'niet_nodig'] as MeetingStatus[]).map((x) => (
-                  <button key={x} type="button" disabled={!kanSchrijven} aria-pressed={r.status === x} onClick={() => zet(r, x)}
-                    className={`h-10 px-3 text-cp-klein font-semibold border-l first:border-l-0 border-cp-rand transition-colors ${r.status === x ? 'bg-cp-ink text-cp-op-ink' : 'bg-cp-vlak hover:bg-cp-achtergrond'} ${focusRing}`}>{MEETING_LABEL[x]}</button>
-                ))}
-              </div>
-              <label className="basis-full sm:basis-auto flex items-center gap-2 text-cp-klein cursor-pointer">
-                <input type="checkbox" className="h-5 w-5 shrink-0 cursor-pointer accent-[var(--cp-klaar)]" checked={!!ck} disabled={!kanSchrijven}
-                  onChange={(e) => doe('routine.check', { routine_key: shootKey(r), datum: maandStart(maand), aan: e.target.checked }, { stil: true })} />
-                <span className={ck ? 'line-through text-cp-zacht' : ''}>Shoot {MAAND_KORT(volgende)} vastgelegd{ck?.door ? <span className="text-cp-zacht"> · {ck.door}</span> : null}</span>
-              </label>
+                ? <button type="button" onClick={() => onKlant(r.clientId!)} className={`text-cp-basis text-left min-w-0 flex-1 truncate ${ck ? 'line-through text-cp-zacht' : 'font-semibold'} ${focusRing} rounded`}>{r.naam}</button>
+                : <span className={`text-cp-basis min-w-0 flex-1 truncate ${ck ? 'line-through text-cp-zacht' : 'font-semibold'}`}>{r.naam}</span>}
+              {ck?.door && <span className="text-cp-klein text-cp-zacht shrink-0">{ck.door}</span>}
             </li>
           )
         })}
@@ -611,6 +662,10 @@ export function DagelijkseWerking(p: Props) {
     const r3van = per[3]?.van ?? null
     const meetingsOpen = w.meetingRijen(plusMaanden(maand, 1)).some((r) => r.status !== 'niet_nodig' && r.status !== 'ingepland')
     const toonMeetings = !!r3van && anker >= r3van && (anker === r3van || meetingsOpen)
+    // Contentshoots: een eigen actiepunt, elke maandag (en op de eerste dag van reeks 3) tot alles vastligt.
+    const shootRijen = w.meetingRijen(plusMaanden(maand, 1))
+    const shootsOpen = shootStand(data, shootRijen, maand).klaar < shootRijen.length
+    const toonShoots = shootsOpen && (weekdagNr(anker) === 1 || anker === r3van)
     const overige = REEKSEN.map((r) => r.nr).filter((r) => !reeksen.includes(r) && w.cellen(maand, r).length > 0)
     return (
       <div className="space-y-4">
@@ -634,8 +689,11 @@ export function DagelijkseWerking(p: Props) {
               </div>
             )}
             {toonMeetings && <MeetingPlanning data={data} doe={doe} maand={maand} kanSchrijven={kanSchrijven} onKlant={p.onKlant} />}
+            {/* Reeks 3: de twee actiepunten naast elkaar; op een gewone maandag staat de shootlijst onder het reekswerk. */}
+            {toonShoots && anker === r3van && <ShootsVastleggen data={data} doe={doe} maand={maand} kanSchrijven={kanSchrijven} onKlant={p.onKlant} />}
             {bordMelding}
             {reeksen.map((r) => kaart(r, maand, datum))}
+            {toonShoots && anker !== r3van && <ShootsVastleggen data={data} doe={doe} maand={maand} kanSchrijven={kanSchrijven} onKlant={p.onKlant} />}
             {overige.length > 0 && (
               <details className={`${KAART} p-5 group`}>
                 <summary className="text-cp-basis font-semibold cursor-pointer list-none flex items-center gap-2"><ChevronDown className="h-4 w-4 -rotate-90 group-open:rotate-0 transition-transform" />Andere reeksen van {MAAND_KORT(maand)}</summary>
@@ -676,6 +734,7 @@ export function DagelijkseWerking(p: Props) {
             )
           })}
         </div>
+        <ShootsVastleggen data={data} doe={doe} maand={maandVan(ma)} kanSchrijven={kanSchrijven} onKlant={p.onKlant} />
         <div className="grid lg:grid-cols-[1fr_360px] gap-5 items-start">
           <div className="grid md:grid-cols-3 gap-3 items-start">{maanden.flatMap((m) => REEKSEN.map((r) => kaart(r.nr, m, vandaag, true)))}</div>
           <VasteKlant data={data} doe={doe} anker={anker} kanSchrijven={kanSchrijven} modus="week" />
@@ -761,6 +820,7 @@ export function DagelijkseWerking(p: Props) {
         </>
       )}
       {per[3] && <MeetingPlanning data={data} doe={doe} maand={maand} kanSchrijven={kanSchrijven} onKlant={p.onKlant} />}
+      <ShootsVastleggen data={data} doe={doe} maand={maand} kanSchrijven={kanSchrijven} onKlant={p.onKlant} />
       {paneel}
     </div>
   )

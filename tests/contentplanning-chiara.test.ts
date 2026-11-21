@@ -16,8 +16,11 @@ assert.deepEqual(leesMeetingExtra([{ key: 'k', naam: 'K', client_id: 'geen-uuid'
 // De werkwijze van reeks 1 en 3 bevat de nieuwe stappen.
 assert.match(STANDAARD_CP.reeks_detail[1], /# Contentkalender doorgeven aan Bram/)
 assert.match(STANDAARD_CP.reeks_detail[1], /# Shootbriefings opstellen en doorsturen/)
-assert.match(STANDAARD_CP.reeks_detail[3], /contentshoot voor de volgende maand vastleggen/)
-assert.equal(shootHerinnering('december'), 'Contentshoot voor december vastleggen')
+// Reeks 3: meetings en contentshoots zijn twee aparte actiepunten (shoots elke week).
+assert.match(STANDAARD_CP.reeks_detail[3], /# Meetings inplannen voor begin volgende maand/)
+assert.match(STANDAARD_CP.reeks_detail[3], /# Contentshoots vastleggen voor volgende maand \(elke week\)/)
+assert.doesNotMatch(STANDAARD_CP.reeks_detail[3], /Bij elke klant de contentshoot/)
+assert.equal(shootHerinnering('december'), 'Contentshoots voor december vastleggen')
 
 // Aandachtspunten: altijd, één maand of een reeks maanden.
 assert.equal(kalenderPuntGeldt({ maand: null }, '2026-12', '2027-02'), true)

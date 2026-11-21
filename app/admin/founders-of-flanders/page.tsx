@@ -13,7 +13,7 @@ export default async function FoundersOfFlandersPage() {
     <div className="space-y-5 animate-fade-in">
       <div>
         <h1 className="text-xl sm:text-2xl font-semibold flex items-center gap-2"><Clapperboard className="h-6 w-6" />Founders of Flanders</h1>
-        <p className="text-sm text-gray-500 mt-0.5">De voorbeeldvideo's in de klantapp, met de knop “Vraag nu jouw founder video aan”. Video's staan op YouTube; je plakt hier enkel de link. Aanvragen komen binnen bij Aanvragen.</p>
+        <p className="text-sm text-gray-500 mt-0.5">Voorbeeldvideo&apos;s in de klantapp. Plak enkel de YouTube-link.</p>
       </div>
       <FoundersAdmin magAanpassen={magAanpassen} />
     </div>

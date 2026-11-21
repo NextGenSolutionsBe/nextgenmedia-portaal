@@ -34,7 +34,7 @@ export default async function PortalOffertesPage() {
     <div className="space-y-5 animate-fade-in">
       <div>
         <h1 className="text-2xl font-semibold flex items-center gap-2"><FileSignature className="h-6 w-6" />Offertes</h1>
-        <p className="text-sm text-gray-600 mt-1">Al onze offertes voor jou. Open een offerte om ze te lezen en te aanvaarden; na je akkoord staat hier de versie met je handtekening.</p>
+        <p className="text-sm text-gray-600 mt-1">Open een offerte om ze te lezen en te aanvaarden.</p>
       </div>
       {rijen.length === 0 ? <div className="card-base text-sm text-gray-500">Er staan nog geen offertes voor je klaar.</div> : (
         <ul className="space-y-3">

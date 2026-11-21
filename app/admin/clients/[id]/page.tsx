@@ -5,7 +5,8 @@ import { statusInfo } from '@/lib/contract-status'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { formatDate, formatEuro, SERVICE_LABELS, daysUntil } from '@/lib/utils'
 import Link from 'next/link'
-import { ChevronLeft, Globe, Calendar, FileText } from 'lucide-react'
+import { ChevronDown, ChevronLeft, Globe, Calendar, FileText } from 'lucide-react'
+import { OpenBijAnker } from '@/components/admin/open-bij-anker'
 import { ClientEditForm } from './client-edit-form'
 import { leesVerantwoordelijken } from '@/lib/verkoop/verantwoordelijken'
 import { DeleteClientButton } from './delete-client-button'
@@ -177,21 +178,28 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             )}
           </div>
 
-          {/* Klantaccount: aanmaken en de login doorsturen (activatielink, zelf wachtwoord kiezen, 2FA). */}
-          <KlantAccountKaart clientId={id} clientName={client.company_name} emailVoorstel={client.email ?? null} />
-
-          {/* Login credentials */}
-          <CredentialsCard
-            endpoint={`/api/admin/clients/${id}/credentials`}
-            email={client.email ?? null}
-          />
-
-          {/* Subaccounts & rechten */}
-          <div id="gebruikers" className="scroll-mt-20">
-            <ClientUsers clientId={id} clientName={client.company_name} ownerEmail={client.email ?? null} />
-            <KalenderRolInstelling clientId={id} />
-            <KlantTweestap clientId={id} />
-          </div>
+          {/* Klantapp en toegang: account, login, gebruikers, rechten en tweestap. Ingeklapt: niet dagelijks nodig. */}
+          <OpenBijAnker id="gebruikers" />
+          <details id="gebruikers" className="group scroll-mt-20">
+            <summary className="card-base !py-3 cursor-pointer list-none flex items-center gap-2">
+              <span className="flex-1 font-semibold text-sm text-gray-900">Klantapp en toegang</span>
+              <span className="text-xs text-gray-500">account, gebruikers, rechten</span>
+              <ChevronDown className="h-4 w-4 text-gray-400 transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="space-y-4 mt-4">
+              {/* Klantaccount: aanmaken en de login doorsturen (activatielink, zelf wachtwoord kiezen, 2FA). */}
+              <KlantAccountKaart clientId={id} clientName={client.company_name} emailVoorstel={client.email ?? null} />
+              {/* Login credentials */}
+              <CredentialsCard
+                endpoint={`/api/admin/clients/${id}/credentials`}
+                email={client.email ?? null}
+              />
+              {/* Subaccounts & rechten */}
+              <ClientUsers clientId={id} clientName={client.company_name} ownerEmail={client.email ?? null} />
+              <KalenderRolInstelling clientId={id} />
+              <KlantTweestap clientId={id} />
+            </div>
+          </details>
 
           {/* Klant Lifecycle (batch, contract, reviews) */}
           <ClientLifecycleBlock clientId={id} companyName={client.company_name} />
