@@ -16,6 +16,7 @@ import { AkkoordChips, SchrapVenster, dag, eur, eurKort, maand, post } from './g
 import { ExtraBudgetKaart, ExtraVenster, extraTeTonen } from './extra-budget'
 import { TerugkerendKaart } from './terugkerend'
 import { UitgaveVenster, type Soort } from './uitgave-venster'
+import { PersoonFoto } from '@/components/admin/persoon-foto'
 
 type Open =
   | { soort: 'uitgave'; u: Uitgave | null; begin?: Soort }
@@ -140,7 +141,7 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoor
             <button key={s.vennoot} type="button" onClick={() => setVennoot(aan ? null : s.vennoot)} aria-pressed={aan}
               className={`card-base !p-3 sm:!p-5 text-left space-y-1.5 sm:space-y-2 transition min-w-0 ${aan ? 'ring-2 ring-gray-900' : 'hover:border-gray-300'}`}>
               <div className="flex items-center justify-between gap-1">
-                <span className="font-semibold text-gray-900 truncate">{data.namen[s.vennoot]}</span>
+                <span className="flex items-center gap-1.5 min-w-0"><PersoonFoto naam={data.namen[s.vennoot]} maat={24} /><span className="font-semibold text-gray-900 truncate">{data.namen[s.vennoot]}</span></span>
                 {aan ? <Check className="h-4 w-4 shrink-0" /> : <span className="hidden sm:inline text-[11px] text-gray-500">klik om te kiezen</span>}
               </div>
               <div>

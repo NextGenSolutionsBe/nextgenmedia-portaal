@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { Loader2, X, Sparkles, Check } from 'lucide-react'
 import { DIENSTEN, PROJECT_VERANTWOORDELIJKEN, projectVerantwoordelijke, raadDiensten, kaartKleur, kolomInfo, kolomVan } from '@/lib/opdrachten-kanban'
 import type { KaartOpdracht } from './types'
+import { PersoonKnop } from '@/components/admin/persoon-foto'
 
 type Rij = { id: string; diensten: string[]; verantwoordelijke: string }
 
@@ -87,8 +88,7 @@ export function AanvullenDialoog({ kaarten, onClose, onKlaar }: { kaarten: Kaart
                     <div className="mt-2 flex gap-1 items-center flex-wrap">
                       <span className="text-[11px] text-gray-500 mr-1">Verantwoordelijke:</span>
                       {PROJECT_VERANTWOORDELIJKEN.map((n) => (
-                        <button key={n} type="button" onClick={() => zet(o.id, { verantwoordelijke: r.verantwoordelijke === n ? '' : n })}
-                          className={`text-xs px-2 py-1 rounded-lg border ${r.verantwoordelijke === n ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-400'}`}>{n}</button>
+                        <PersoonKnop key={n} naam={n} aan={r.verantwoordelijke === n} klein rol="button" onClick={() => zet(o.id, { verantwoordelijke: r.verantwoordelijke === n ? '' : n })} />
                       ))}
                     </div>
                   )}

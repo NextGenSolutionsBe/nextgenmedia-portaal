@@ -7,6 +7,7 @@ import { leesGetal } from '@/lib/getal'
 import { VENNOTEN, extraStand, namenLijst, type BudgetExtra, type Periode, type Vennoot } from '@/lib/vennoot-uitgaven'
 import type { VennotenData } from '@/lib/vennoot-uitgaven-server'
 import { AkkoordChips, KleinKnopje, Venster, bedragTekst, dag, eurKort, inp, lbl, maand, post } from './gedeeld'
+import { PersoonFoto } from '@/components/admin/persoon-foto'
 
 type Status = { tekst: string; klasse: string }
 
@@ -163,8 +164,8 @@ export function ExtraVenster({ e, data, huidigeMaand, beginVennoot, onSchrap, on
         <span className={lbl}>Voor wie</span>
         <div className="grid grid-cols-3 gap-2">
           {VENNOTEN.map((k) => (
-            <button key={k} type="button" onClick={() => zet(k)} aria-pressed={wie.includes(k)} className={`h-10 rounded-lg border text-sm font-medium inline-flex items-center justify-center gap-1 ${wie.includes(k) ? 'bg-black text-white border-black' : 'border-gray-200 hover:bg-gray-50'}`}>
-              {wie.includes(k) && <Check className="h-3.5 w-3.5" />}{data.namen[k]}
+            <button key={k} type="button" onClick={() => zet(k)} aria-pressed={wie.includes(k)} className={`h-11 rounded-lg border text-sm font-medium inline-flex items-center justify-center gap-1.5 ${wie.includes(k) ? 'bg-black text-white border-black' : 'border-gray-200 hover:bg-gray-50'}`}>
+              <PersoonFoto naam={data.namen[k]} maat={26} />{data.namen[k]}{wie.includes(k) && <Check className="h-3.5 w-3.5" />}
             </button>
           ))}
         </div>

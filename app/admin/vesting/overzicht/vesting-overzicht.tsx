@@ -17,6 +17,7 @@ import { InkomstRegistreren, KostRegistreren, RegistratieVenster } from './regis
 import { Register } from './register'
 import { RegelsKaart, RegelsKnop, RegelsVenster, type RegelsBegin } from '@/components/admin/regels-akkoord'
 import type { RegelsData } from '@/lib/regels-akkoord'
+import { PersoonFoto } from '@/components/admin/persoon-foto'
 
 type Tab = 'contracten' | 'beoordelen' | 'registraties' | 'register'
 type Open = { soort: 'contract' | 'registratie'; id: string } | null
@@ -119,7 +120,7 @@ export function VestingOverzicht({ data, tekenen, regels, regelsOpen = false }: 
             ['Marco', a.marco, `van maximaal ${pct(a.maxMarco)}`],
           ] as const).map(([naam, waarde, sub]) => (
             <div key={naam}>
-              <div className="text-xs text-gray-500">{naam}</div>
+              <div className="flex items-center gap-1.5 text-xs text-gray-500"><PersoonFoto naam={naam} maat={22} />{naam}</div>
               <div className="text-2xl sm:text-3xl font-semibold tabular-nums text-gray-900">{pct(waarde)}</div>
               <div className="text-[11px] text-gray-500 leading-tight">{sub}</div>
             </div>

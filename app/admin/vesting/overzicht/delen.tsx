@@ -7,6 +7,7 @@ import { HandtekeningVak } from '@/components/admin/handtekening-vak'
 import { VENNOTEN, type Vennoot } from '@/lib/vesting-akkoord'
 import type { AkkoordWeergave, CertificaatKort, ContractWeergave } from '@/lib/vesting-weergave'
 import { LEAD_SOORTEN, type Herkomst } from '@/lib/vesting'
+import { PersoonFoto } from '@/components/admin/persoon-foto'
 
 export const eur = (n: number | null | undefined, cent = false) =>
   n === null || n === undefined ? '—' : new Intl.NumberFormat('nl-BE', { style: 'currency', currency: 'EUR', minimumFractionDigits: cent ? 2 : 0, maximumFractionDigits: cent ? 2 : 0 }).format(n)
@@ -32,8 +33,9 @@ export function TekenStand({ akkoord, vennoten }: { akkoord: AkkoordWeergave; ve
           <span key={v} title={s === 'getekend' ? `${voornaam} tekende` : s === 'opnieuw' ? `${voornaam} tekende voor vorige cijfers` : `${voornaam} moet nog tekenen`}
             className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${
               s === 'getekend' ? 'border-green-200 bg-green-50 text-green-800' : s === 'opnieuw' ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-gray-200 text-gray-500'}`}>
-            {s === 'getekend' ? <Check className="h-3 w-3" /> : s === 'opnieuw' ? <RotateCcw className="h-3 w-3" /> : <span className="h-1.5 w-1.5 rounded-full bg-gray-300" />}
+            <PersoonFoto naam={voornaam} maat={16} />
             {voornaam}
+            {s === 'getekend' ? <Check className="h-3 w-3" /> : s === 'opnieuw' ? <RotateCcw className="h-3 w-3" /> : null}
           </span>
         )
       })}
@@ -114,6 +116,7 @@ export function Akkoord({ onderwerp, id, akkoord, certificaat, vennoten, ik, laa
           const geldige = lijst?.find((h) => h.vennoot === v && h.inhoud_tekst === akkoord.tekst)
           return (
             <li key={v} className="flex items-center gap-3 px-3 py-2.5 min-h-[56px]">
+              <PersoonFoto naam={vennoten[v]} maat={32} />
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium text-gray-900">{vennoten[v]}{ik === v && <span className="ml-1 text-xs font-normal text-gray-500">(jij)</span>}</div>
                 <div className={`text-xs ${s.stand === 'getekend' ? 'text-green-700' : s.stand === 'opnieuw' ? 'text-amber-700' : 'text-gray-500'}`}>

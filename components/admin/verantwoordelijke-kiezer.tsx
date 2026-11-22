@@ -1,6 +1,7 @@
 'use client'
 
 import { CONTRACT_VERANTWOORDELIJKEN, type ContractVerantwoordelijke } from '@/lib/contracten/verantwoordelijke'
+import { PersoonKnop } from '@/components/admin/persoon-foto'
 
 /**
  * Wie is verantwoordelijk voor dit contract? Marco, Bram of Gezamenlijke lead.
@@ -17,10 +18,7 @@ export function VerantwoordelijkeKiezer({ waarde, onChange, bezig, id = 'verantw
       {CONTRACT_VERANTWOORDELIJKEN.map((v) => {
         const aan = waarde === v
         return (
-          <button key={v} type="button" role="radio" aria-checked={aan} disabled={bezig} onClick={() => onChange(v)}
-            className={`text-sm px-3 py-1.5 rounded-full border transition-colors disabled:opacity-60 ${aan ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}>
-            {v}
-          </button>
+          <PersoonKnop key={v} naam={v} aan={aan} disabled={bezig} onClick={() => onChange(v)} />
         )
       })}
     </div>

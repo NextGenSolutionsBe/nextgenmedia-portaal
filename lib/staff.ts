@@ -85,6 +85,8 @@ export const STAFF_API_WHITELIST = [
   '/api/admin/account/foto',
   // Taken aan elkaar toewijzen (Command Center): elk teamlid.
   '/api/admin/taken',
+  // Profielfoto's van het team bij het kiezen van een persoon (enkel naam en foto).
+  '/api/admin/team-fotos',
 ]
 
 /** Gevoelige API-paden die ALTIJD admin-only blijven, ook al valt het pad binnen

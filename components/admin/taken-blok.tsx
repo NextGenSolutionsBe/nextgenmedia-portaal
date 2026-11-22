@@ -9,6 +9,7 @@ import { deadlineTekst } from '@/lib/sales/lead-taken'
 import { MERK_STIJL } from '@/lib/merk-mail'
 import { MailTaken } from '@/components/admin/mail-taken'
 import { MAIL_TAKEN_AAN } from '@/lib/mail-opvolging/taken'
+import { PersoonKnop } from '@/components/admin/persoon-foto'
 
 type Taak = {
   id: string; soort: 'team' | 'opdracht'; omschrijving: string; notitie: string | null; deadline: string | null; merk: string
@@ -109,7 +110,7 @@ export function TakenBlok() {
         <div className="flex gap-1.5 overflow-x-auto pb-2 -mx-1 px-1">
           <button type="button" onClick={() => setWie(null)} className={chip(wie === null)}>Iedereen</button>
           {ik && <button type="button" onClick={() => setWie('mij')} className={chip(wie === 'mij')}>Mijn taken</button>}
-          {mensen.filter(([id]) => id !== ik).map(([id, naam]) => <button key={id} type="button" onClick={() => setWie(id)} className={chip(wie === id)}>{naam}</button>)}
+          {mensen.filter(([id]) => id !== ik).map(([id, naam]) => <PersoonKnop key={id} naam={naam} klein rol="button" aan={wie === id} onClick={() => setWie(id)} />)}
         </div>
       )}
 
@@ -221,10 +222,7 @@ function TaakToewijzen({ opties, onSluit, onKlaar }: { opties: Opties | null; on
                 <span className="block text-xs font-medium text-gray-600 mb-1">Voor wie?</span>
                 <div className="flex flex-wrap gap-1.5">
                   {leden.map((l) => (
-                    <button key={l.id} type="button" onClick={() => setAssignee(l.id)} aria-pressed={assignee === l.id}
-                      className={`text-sm px-3 py-1.5 rounded-full border ${assignee === l.id ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}>
-                      {label(l)}{l.id === opties.ik ? ' (ik)' : ''}
-                    </button>
+                    <PersoonKnop key={l.id} naam={l.naam} label={`${label(l)}${l.id === opties.ik ? ' (ik)' : ''}`} rol="button" aan={assignee === l.id} onClick={() => setAssignee(l.id)} />
                   ))}
                 </div>
               </div>

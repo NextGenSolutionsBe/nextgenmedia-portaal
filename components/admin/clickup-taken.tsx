@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { ListTodo, Plus, Loader2, ExternalLink, RotateCcw, X, Check, UserRound } from 'lucide-react'
 import { MERKEN, MAX_NOTITIE, MAX_OMSCHRIJVING, SNELLE_TAKEN, leadTaakNaam, merkNaam, snelleDatums, statusToon } from '@/lib/sales/lead-taken'
 import { DicteerKnop } from '@/components/admin/dicteer-knop'
+import { PersoonKnop } from '@/components/admin/persoon-foto'
 
 /**
  * Taken in ClickUp, bij een lead (leadfiche) of een opdracht (kaartvenster).
@@ -233,16 +234,28 @@ export function NieuweTaak({ basis, waarbij, standaardMerk, onSluit, onKlaar, kl
           {snel.map((d) => <button key={d.dag} type="button" onClick={() => setDeadline(d.dag)} className={chip(deadline === d.dag)} title={datum(d.dag)}>{d.label}</button>)}
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        <label className="block"><span className={lbl}>Datum</span>
-          <input type="date" className="input-base text-sm" value={deadline} min={vandaag()} onChange={(e) => setDeadline(e.target.value)} />
-        </label>
-        <label className="block"><span className={lbl}>Verantwoordelijke</span>
-          <select className="input-base text-sm" value={lid} onChange={(e) => setLid(e.target.value)} disabled={!opties}>
-            <option value="">{opties ? 'Kies…' : 'Laden…'}</option>
-            {opties?.leden.map((m) => <option key={m.id} value={m.id}>{m.naam}</option>)}
-          </select>
-        </label>
+      <label className="block"><span className={lbl}>Datum</span>
+        <input type="date" className="input-base text-sm" value={deadline} min={vandaag()} onChange={(e) => setDeadline(e.target.value)} />
+      </label>
+      <div>
+        <span className={lbl}>Voor wie?</span>
+        {!opties ? <p className="text-xs text-gray-400">Laden…</p> : (() => {
+          // De zaakvoerders met hun foto; de rest in een keuzelijst.
+          const hoofd = opties.leden.filter((m) => /^(marco|bram|chiara)\b/i.test(m.naam))
+          const rest = opties.leden.filter((m) => !hoofd.includes(m))
+          const inRest = rest.some((m) => String(m.id) === lid)
+          return (
+            <div className="flex gap-1.5 flex-wrap items-center" role="radiogroup" aria-label="Verantwoordelijke">
+              {hoofd.map((m) => <PersoonKnop key={m.id} naam={m.naam} label={m.naam.split(' ')[0]} klein aan={lid === String(m.id)} onClick={() => setLid(String(m.id))} />)}
+              {rest.length > 0 && (
+                <select className={`input-base text-xs !py-1 !h-auto w-auto ${inRest ? '!border-gray-900' : ''}`} value={inRest ? lid : ''} onChange={(e) => e.target.value && setLid(e.target.value)} aria-label="Iemand anders">
+                  <option value="">Iemand anders…</option>
+                  {rest.map((m) => <option key={m.id} value={m.id}>{m.naam}</option>)}
+                </select>
+              )}
+            </div>
+          )
+        })()}
       </div>
       <div>
         <span className={lbl}>Lijst in ClickUp</span>

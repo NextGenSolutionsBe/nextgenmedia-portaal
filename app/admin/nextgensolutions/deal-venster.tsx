@@ -10,6 +10,7 @@ import {
   BRONNEN, FASES, STANDAARD_LOOPTIJD, VERLOREN_REDENEN, dealWaarde, faseLabel, type Deal, type Fase,
 } from '@/lib/ngs/model'
 import { Chip, FASE_STIJL, Venster, dagKort, eur, eurCent, inp, lbl, post, tijdstip } from './ui'
+import { PersoonKnop } from '@/components/admin/persoon-foto'
 
 type Velden = {
   bedrijf: string; contactpersoon: string; email: string; telefoon: string; titel: string; diensten: string[]
@@ -73,7 +74,7 @@ function Formulier({ v, zet, namen }: { v: Velden; zet: (p: Partial<Velden>) => 
           <span className={lbl}>Verantwoordelijke</span>
           <input className={inp} value={v.verantwoordelijke} onChange={(e) => zet({ verantwoordelijke: e.target.value })} list="ngs-namen" placeholder="bv. Marco" />
           <datalist id="ngs-namen">{namen.map((n) => <option key={n} value={n} />)}</datalist>
-          <div className="flex gap-1.5 flex-wrap mt-1.5">{namen.slice(0, 4).map((n) => <Chip key={n} aan={v.verantwoordelijke === n} onClick={() => zet({ verantwoordelijke: n })}>{n}</Chip>)}</div>
+          <div className="flex gap-1.5 flex-wrap mt-1.5">{namen.slice(0, 4).map((n) => <PersoonKnop key={n} naam={n} klein rol="button" aan={v.verantwoordelijke === n} onClick={() => zet({ verantwoordelijke: n })} />)}</div>
         </div>
       </div>
       <div>

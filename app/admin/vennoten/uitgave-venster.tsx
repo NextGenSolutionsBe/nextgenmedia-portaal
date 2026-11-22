@@ -12,6 +12,7 @@ import {
 } from '@/lib/vennoot-uitgaven'
 import type { VennotenData } from '@/lib/vennoot-uitgaven-server'
 import { AkkoordChips, Venster, bedragTekst, dag, eur, inp, lbl, post } from './gedeeld'
+import { PersoonFoto } from '@/components/admin/persoon-foto'
 
 export type Soort = 'eenmalig' | 'terugkerend'
 const DAG = /^\d{4}-\d{2}-\d{2}$/
@@ -228,8 +229,8 @@ export function UitgaveVenster({ u, t, begin = 'eenmalig', beginVennoot, data, v
         <span className={lbl}>Voor wie</span>
         <div className="grid grid-cols-3 gap-2">
           {VENNOTEN.map((k) => (
-            <button key={k} type="button" onClick={() => kiesWie(k)} aria-pressed={wie.includes(k)} className={`h-10 rounded-lg border text-sm font-medium inline-flex items-center justify-center gap-1 ${wie.includes(k) ? 'bg-black text-white border-black' : 'border-gray-200 hover:bg-gray-50'}`}>
-              {!terug && wie.includes(k) && <Check className="h-3.5 w-3.5" />}{data.namen[k]}
+            <button key={k} type="button" onClick={() => kiesWie(k)} aria-pressed={wie.includes(k)} className={`h-11 rounded-lg border text-sm font-medium inline-flex items-center justify-center gap-1.5 ${wie.includes(k) ? 'bg-black text-white border-black' : 'border-gray-200 hover:bg-gray-50'}`}>
+              <PersoonFoto naam={data.namen[k]} maat={26} />{data.namen[k]}{!terug && wie.includes(k) && <Check className="h-3.5 w-3.5" />}
             </button>
           ))}
         </div>

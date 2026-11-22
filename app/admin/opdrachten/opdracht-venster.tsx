@@ -25,6 +25,7 @@ import {
   FACTUUR_LABEL, datumKort, hoeLangGeleden,
   type KaartOpdracht, type Klant, type ContractOptie, type FactuurOptie, type Notitie,
 } from './types'
+import { PersoonKnop } from '@/components/admin/persoon-foto'
 
 type Concept = {
   titel: string
@@ -310,7 +311,7 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
               <p className={LBL}>Verantwoordelijke <span className="text-red-600">*</span></p>
               <div className="flex gap-1.5 flex-wrap">
                 {PROJECT_VERANTWOORDELIJKEN.map((n) => (
-                  <button key={n} type="button" onClick={() => zet('verantwoordelijke', n)} className={keuze(c.verantwoordelijke === n)} aria-pressed={c.verantwoordelijke === n}>{n}</button>
+                  <PersoonKnop key={n} naam={n} aan={c.verantwoordelijke === n} rol="button" onClick={() => zet('verantwoordelijke', n)} />
                 ))}
               </div>
               {!c.verantwoordelijke && <p className="text-[11px] text-amber-700 mt-1">Kies wie dit project opvolgt.</p>}

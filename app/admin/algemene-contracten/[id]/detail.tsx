@@ -9,6 +9,7 @@ import { MailDialog } from '@/components/admin/mail-composer'
 import { PdfVakken } from '@/components/esign/pdf-vakken'
 import { ONDERTEKENAARS, STATUS_INFO, boom, padNaam, statusLabel, statusVan, type AlgemeenContract, type Map } from '@/lib/algemene-contracten/model'
 import { LabelsVeld } from '../overzicht'
+import { PersoonKnop } from '@/components/admin/persoon-foto'
 
 const moment = (iso: string) => new Date(iso).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 
@@ -197,10 +198,9 @@ function Gegevens({ c, mappen, labelVoorstellen, bezig, onBewaar }: {
           <input type="checkbox" disabled={!!c.ons_getekend_op} checked={v.ons_nodig} onChange={(e) => setV({ ...v, ons_nodig: e.target.checked })} className="h-4 w-4 accent-gray-900" />Wij tekenen
         </label>
         {v.ons_nodig && !c.ons_getekend_op && (
-          <select className="input-base py-1.5 text-sm ml-6 w-[calc(100%-1.5rem)]" value={v.ondertekenaar} onChange={(e) => setV({ ...v, ondertekenaar: e.target.value })} aria-label="Wie tekent namens ons">
-            <option value="">Wie tekent? (Marco of Bram)</option>
-            {ONDERTEKENAARS.map((o) => <option key={o} value={o}>{o === 'Gezamenlijke lead' ? 'Marco of Bram (maakt niet uit)' : o}</option>)}
-          </select>
+          <div className="ml-6 flex gap-1.5 flex-wrap" role="radiogroup" aria-label="Wie tekent namens ons">
+            {ONDERTEKENAARS.map((o) => <PersoonKnop key={o} naam={o} label={o === 'Gezamenlijke lead' ? 'Marco of Bram' : o} klein aan={v.ondertekenaar === o} onClick={() => setV({ ...v, ondertekenaar: o })} />)}
+          </div>
         )}
         <label className="flex items-center gap-2 text-sm cursor-pointer">
           <input type="checkbox" disabled={!!c.partij_getekend_op} checked={v.partij_nodig} onChange={(e) => setV({ ...v, partij_nodig: e.target.checked })} className="h-4 w-4 accent-gray-900" />De andere partij tekent ook

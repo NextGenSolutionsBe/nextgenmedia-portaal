@@ -12,6 +12,7 @@ import {
 import type { NgsData } from '@/lib/ngs/server'
 import { DealVenster, VerplaatsVenster } from './deal-venster'
 import { FASE_STIJL, Kop, dagKort, eur, post, tijdstip } from './ui'
+import { PersoonKnop } from '@/components/admin/persoon-foto'
 
 type Open = { soort: 'deal'; deal: Deal | null } | { soort: 'verplaats'; deal: Deal; naar: Fase }
 /** Closed won/lost: standaard enkel de laatste 90 dagen op het bord (de cijfers tonen alles). */
@@ -119,10 +120,9 @@ export function PipelineClient({ begin, vandaag, openDeal }: { begin: NgsData; v
           <input {...zoekVeld()} className="input-base text-sm pl-9" placeholder="Zoek bedrijf, contact of info" value={zoek} onChange={(e) => setZoek(e.target.value)} aria-label="Zoek een deal" />
         </div>
         <div className="flex gap-1.5 flex-wrap">
-          {[null, ...namen].map((n) => (
-            <button key={n ?? 'iedereen'} type="button" onClick={() => setWie(n)} aria-pressed={wie === n}
-              className={`px-2.5 py-1 rounded-full text-xs border ${wie === n ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'}`}>{n ?? 'Iedereen'}</button>
-          ))}
+          <button type="button" onClick={() => setWie(null)} aria-pressed={wie === null}
+            className={`px-2.5 py-1 rounded-full text-xs border ${wie === null ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'}`}>Iedereen</button>
+          {namen.map((n) => <PersoonKnop key={n} naam={n} klein rol="button" aan={wie === n} onClick={() => setWie(n)} />)}
         </div>
       </div>
 
