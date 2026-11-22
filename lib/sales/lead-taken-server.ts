@@ -5,6 +5,7 @@ import { veiligeFout } from '@/lib/meetings/server'
 import {
   valideerLeadTaak, leadLink, leadTaakMarker, leadTaakNaam, leadTaakOmschrijving, deadlineMs, merkNaam, type LeadTaakInvoer,
   opdrachtLink, opdrachtTaakMarker, opdrachtTaakOmschrijving, kiesClickupLid, teamTaakMarker, teamTaakOmschrijving, taakIsAf,
+  ngsLink, ngsTaakMarker, ngsTaakOmschrijving,
 } from '@/lib/sales/lead-taken'
 
 /**
@@ -33,12 +34,13 @@ export type TaakRij = {
 }
 export type LeadTaakRij = TaakRij & { lead_id: string }
 export type OpdrachtTaakRij = TaakRij & { opdracht_id: string }
+export type NgsTaakRij = TaakRij & { deal_id: string }
 
 /** Waar een taak bij hoort: de tabel, de koppeling en hoe de ClickUp-taak eruitziet. */
 type Context = { bedrijf: string | null; contact: string | null; titel: string | null; verantwoordelijke: { email: string | null; naam: string | null } }
 type Bron = {
-  tabel: 'sales_lead_taken' | 'opdracht_taken' | 'team_taken'
-  kolom: 'lead_id' | 'opdracht_id' | 'bron'
+  tabel: 'sales_lead_taken' | 'opdracht_taken' | 'team_taken' | 'ngs_deal_taken'
+  kolom: 'lead_id' | 'opdracht_id' | 'bron' | 'deal_id'
   nietGevonden: string
   info: (admin: Admin, id: string) => Promise<Context | null>
   marker: (taakId: string) => string
@@ -176,6 +178,20 @@ const OPDRACHT: Bron = {
   omschrijving: (t, c, marker) => opdrachtTaakOmschrijving({ link: opdrachtLink(baseUrl(), t.opdracht_id as string), bedrijf: c.bedrijf, titel: c.titel, contact: c.contact, notitie: t.notitie, door: t.created_by_email, marker }),
 }
 
+/** Een deal in de eigen pipeline van NextGen Solutions (los van klanten en projecten). */
+const NGS: Bron = {
+  tabel: 'ngs_deal_taken', kolom: 'deal_id', nietGevonden: 'Deal niet gevonden.',
+  async info(admin, dealId) {
+    const { data } = await admin.from('ngs_deals').select('id, bedrijf, contactpersoon, titel, verantwoordelijke').eq('id', dealId).is('verwijderd_op', null).maybeSingle()
+    if (!data) return null
+    const d = data as { bedrijf: string; contactpersoon: string | null; titel: string | null; verantwoordelijke: string | null }
+    return { bedrijf: d.bedrijf, contact: d.contactpersoon, titel: d.titel, verantwoordelijke: { email: null, naam: d.verantwoordelijke } }
+  },
+  marker: ngsTaakMarker,
+  naam: (t, c) => leadTaakNaam(t.omschrijving, c.bedrijf),
+  omschrijving: (t, c, marker) => ngsTaakOmschrijving({ link: ngsLink(baseUrl(), (t as TaakRij & { deal_id?: string }).deal_id as string), bedrijf: c.bedrijf, titel: c.titel, contact: c.contact, notitie: t.notitie, door: t.created_by_email, marker }),
+}
+
 // ── Algemeen: aanmaken, opnieuw, lezen, verantwoordelijke wijzigen ──────────
 
 async function maakTaak(admin: Admin, bron: Bron, bronId: string, b: LeadTaakInvoer & { aanvraag_sleutel?: unknown }, door: { userId: string | null; email: string | null }, extra: Record<string, unknown> = {}): Promise<{ taak: TaakRij; herhaald: boolean }> {
@@ -261,7 +277,7 @@ async function takenVan(admin: Admin, bron: Bron, bronId: string): Promise<{ tak
   const { data, error } = await admin.from(bron.tabel).select('*').eq(bron.kolom, bronId).order('created_at', { ascending: false }).limit(50)
   if (error) {
     // Vóór de migratie: nog geen taken bij opdrachten, geen fout tonen.
-    if (bron.tabel === 'opdracht_taken' && /opdracht_taken|relation|does not exist|schema cache/i.test(error.message)) return { taken: [], statusFout: null }
+    if ((bron.tabel === 'opdracht_taken' || bron.tabel === 'ngs_deal_taken') && /_taken|relation|does not exist|schema cache/i.test(error.message)) return { taken: [], statusFout: null }
     throw new Error(error.message)
   }
   const taken = (data ?? []) as TaakRij[]
@@ -341,6 +357,22 @@ export async function opdrachtTaakVerantwoordelijke(admin: Admin, opdrachtId: st
   return wijzigVerantwoordelijke(admin, OPDRACHT, opdrachtId, taakId, assigneeId) as Promise<OpdrachtTaakRij>
 }
 export const opdrachtStandaard = (admin: Admin, opdrachtId: string) => standaardVoor(admin, OPDRACHT, opdrachtId)
+
+// ── NextGenSolutions (eigen pipeline) ────────────────────────────────────────
+
+export async function maakNgsTaak(admin: Admin, dealId: string, b: LeadTaakInvoer & { aanvraag_sleutel?: unknown }, door: { userId: string | null; email: string | null }): Promise<{ taak: NgsTaakRij; herhaald: boolean }> {
+  return maakTaak(admin, NGS, dealId, b, door) as Promise<{ taak: NgsTaakRij; herhaald: boolean }>
+}
+export async function ngsTaakOpnieuw(admin: Admin, dealId: string, taakId: string): Promise<NgsTaakRij> {
+  return taakOpnieuw(admin, NGS, dealId, taakId) as Promise<NgsTaakRij>
+}
+export async function ngsTaken(admin: Admin, dealId: string): Promise<{ taken: NgsTaakRij[]; statusFout: string | null }> {
+  return takenVan(admin, NGS, dealId) as Promise<{ taken: NgsTaakRij[]; statusFout: string | null }>
+}
+export async function ngsTaakVerantwoordelijke(admin: Admin, dealId: string, taakId: string, assigneeId: unknown): Promise<NgsTaakRij> {
+  return wijzigVerantwoordelijke(admin, NGS, dealId, taakId, assigneeId) as Promise<NgsTaakRij>
+}
+export const ngsStandaard = (admin: Admin, dealId: string) => standaardVoor(admin, NGS, dealId)
 
 // ── Teamtaken (Command Center) ───────────────────────────────────────────────
 // Taken die we aan elkaar toewijzen, los van een lead of project. Zelfde

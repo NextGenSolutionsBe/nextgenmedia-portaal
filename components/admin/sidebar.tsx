@@ -9,6 +9,7 @@ import {
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
   Info, Camera, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
   MailCheck, FolderUp, Handshake, Settings, ClipboardPen, Contact, Timer, Video, Inbox, Clapperboard, Building2, FileSignature, ScrollText, Wallet, PackageCheck, Aperture,
+  Target, LineChart,
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
@@ -56,6 +57,15 @@ const SECTIONS: NavSection[] = [
       { label: 'Offertes',    href: '/admin/offertes',   icon: FileSignature, module: 'offertes' },
       { label: 'Aanvragen',   href: '/admin/aanvragen',  icon: Inbox, module: 'aanvragen' },
       { label: 'Meeting Inplanner', href: '/admin/meetings', icon: Video, module: 'meetings', ookModule: 'sales' },
+    ],
+  },
+  {
+    // Eigen omgeving van NextGen Solutions: pipeline en cijfers, los van de rest.
+    title: 'NextGen Solutions',
+    open: true,
+    items: [
+      { label: 'Pipeline', href: '/admin/nextgensolutions', icon: Target, module: 'nextgensolutions', exact: true },
+      { label: 'Cijfers', href: '/admin/nextgensolutions/cijfers', icon: LineChart, module: 'nextgensolutions' },
     ],
   },
   {

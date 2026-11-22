@@ -112,6 +112,33 @@ export function opdrachtTaakOmschrijving(t: {
   return { tekst, markdown }
 }
 
+// ── NextGenSolutions-pipeline (deals) ───────────────────────────────────────
+
+export const ngsLink = (basis: string, dealId: string): string => `${basis.replace(/\/$/, '')}/admin/nextgensolutions?deal=${encodeURIComponent(dealId)}`
+export const ngsTaakMarker = (taakId: string): string => `ngm-ngsdeal:${taakId}`
+
+export function ngsTaakOmschrijving(t: {
+  link: string; bedrijf: string | null; titel: string | null; contact: string | null; notitie: string | null; door: string | null; marker: string
+}): { tekst: string; markdown: string } {
+  const deal = [t.bedrijf, t.titel].filter(Boolean).join(' – ') || 'Deal'
+  const tekst = [
+    `Deal: ${deal}`,
+    `In de pipeline van NextGen Solutions: ${t.link}`,
+    t.contact ? `Contactpersoon: ${t.contact}` : null,
+    t.notitie ? `\nNotitie:\n${t.notitie}` : null,
+    `\nAangemaakt${t.door ? ` door ${t.door}` : ''} vanuit de pipeline van NextGen Solutions.`,
+    `Ref: ${t.marker}`,
+  ].filter((x) => x !== null).join('\n')
+  const markdown = [
+    `**Deal:** [${md(deal)}](${t.link})`,
+    t.contact ? `**Contactpersoon:** ${md(t.contact)}` : null,
+    t.notitie ? `\n**Notitie**\n\n${md(t.notitie)}` : null,
+    `\n_Aangemaakt${t.door ? ` door ${md(t.door)}` : ''} vanuit de pipeline van NextGen Solutions._`,
+    `Ref: ${t.marker}`,
+  ].filter((x) => x !== null).join('\n')
+  return { tekst, markdown }
+}
+
 /**
  * Het ClickUp-lid dat bij een verantwoordelijke hoort: eerst op e-mailadres,
  * dan op naam ("Bram" → "Bram Reinquin"), dan op het begin van het e-mailadres

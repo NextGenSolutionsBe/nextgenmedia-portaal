@@ -64,7 +64,7 @@ export type ModuleInfo = {
 const SECTIE_VAN: Record<string, string> = {
   clients: 'Klanten & content', contracts: 'Klanten & content', offertes: 'Klanten & content', content: 'Klanten & content', aanvragen: 'Klanten & content', nieuwsbrieven: 'Klanten & content', founders: 'Klanten & content', onze_partners: 'Klanten & content', events: 'Klanten & content', opleveringen: 'Klanten & content', shoots: 'Klanten & content', metricool: 'Klanten & content', blogs: 'Klanten & content', uploads: 'Klanten & content', opdrachten: 'Klanten & content', formulieren: 'Klanten & content',
   kantoor: 'Kantoor', algemene_contracten: 'Kantoor', partners: 'Partners', assignments: 'Partners', settlements: 'Partners',
-  sales: 'Verkoop', harrie_api: 'Verkoop', meetings: 'Verkoop',
+  sales: 'Verkoop', harrie_api: 'Verkoop', meetings: 'Verkoop', nextgensolutions: 'Verkoop',
   finance: 'Financieel', invoices: 'Financieel', vesting: 'Financieel', purchases: 'Financieel',
   email: 'Overig', info: 'Overig', materiaal: 'Overig',
   personeel: 'Beheer',
@@ -72,7 +72,7 @@ const SECTIE_VAN: Record<string, string> = {
 const HREF_VAN: Record<string, string> = {
   clients: '/admin/clients', contracts: '/admin/contracts', offertes: '/admin/offertes', content: '/admin/services', metricool: '/admin/metricool', blogs: '/admin/blog-calendar', uploads: '/admin/uploads', opdrachten: '/admin/opdrachten', formulieren: '/admin/formulieren', meetings: '/admin/meetings', shoots: '/admin/shoots',
   kantoor: '/admin/kantoor', algemene_contracten: '/admin/algemene-contracten', partners: '/admin/partners', assignments: '/admin/assignments', settlements: '/admin/settlements',
-  sales: '/admin/opdrachten', harrie_api: '/admin/sales/koppeling',
+  sales: '/admin/opdrachten', harrie_api: '/admin/sales/koppeling', nextgensolutions: '/admin/nextgensolutions',
   finance: '/admin/revenue/omzet', invoices: '/admin/invoices', vesting: '/admin/vesting', purchases: '/admin/purchases',
   email: '/admin/email', info: '/admin/informatief', materiaal: '/admin/materiaal',
   personeel: '/admin/personeel',

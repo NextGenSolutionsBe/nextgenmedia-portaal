@@ -40,7 +40,7 @@ export function LeadTaken({ leadId, standaardMerk, onGewijzigd }: { leadId: stri
   return <ClickupTaken api={`/api/admin/sales/leads/${leadId}/taken`} waarbij="lead" standaardMerk={standaardMerk} onGewijzigd={onGewijzigd} />
 }
 
-export function ClickupTaken({ api: basis, waarbij, standaardMerk, onGewijzigd, titel = 'Taken', klant, context }: { api: string; waarbij: 'lead' | 'opdracht'; standaardMerk: string | null; onGewijzigd?: () => void; titel?: string; klant?: string | null; context?: string | null }) {
+export function ClickupTaken({ api: basis, waarbij, standaardMerk, onGewijzigd, titel = 'Taken', klant, context }: { api: string; waarbij: 'lead' | 'opdracht' | 'deal'; standaardMerk: string | null; onGewijzigd?: () => void; titel?: string; klant?: string | null; context?: string | null }) {
   const [taken, setTaken] = useState<Taak2[] | null>(null)
   const [opties, setOpties] = useState<Opties | null>(null)
   const [wijzig, setWijzig] = useState<string | null>(null)
@@ -158,7 +158,7 @@ export function ClickupTaken({ api: basis, waarbij, standaardMerk, onGewijzigd, 
  * Ook gebruikt in het venster "Taak" op de kaarten van het bord.
  */
 export function NieuweTaak({ basis, waarbij, standaardMerk, onSluit, onKlaar, klant, context, kader = true }: {
-  basis: string; waarbij: 'lead' | 'opdracht'; standaardMerk: string | null; onSluit: () => void; onKlaar: () => void
+  basis: string; waarbij: 'lead' | 'opdracht' | 'deal'; standaardMerk: string | null; onSluit: () => void; onKlaar: () => void
   /** De klant van de kaart: komt in de taaknaam in ClickUp ("Opvolgen (Kilowot)"). */
   klant?: string | null
   /** Waar de taak bij hoort, voor het inspreken van de notitie (namen juist schrijven). */
@@ -252,7 +252,7 @@ export function NieuweTaak({ basis, waarbij, standaardMerk, onSluit, onKlaar, kl
       <p className="text-[11px] text-gray-500">
         {omschrijving.trim() && deadline
           ? <>In ClickUp: <b className="font-medium text-gray-700">{leadTaakNaam(omschrijving.trim(), klant ?? null)}</b> op {datum(deadline)}{lidNaam ? ` voor ${lidNaam}` : ''}, met de notitie eronder.</>
-          : <>Wordt een gewone taak in ClickUp op die dag (geen agenda-item), toegewezen aan de verantwoordelijke, met een link naar deze {waarbij === 'lead' ? 'lead' : 'kaart'}.</>}
+          : <>Wordt een gewone taak in ClickUp op die dag (geen agenda-item), toegewezen aan de verantwoordelijke, met een link naar deze {waarbij === 'lead' ? 'lead' : waarbij === 'deal' ? 'deal' : 'kaart'}.</>}
       </p>
       {optieFout && <p className="text-xs text-red-700">{optieFout}</p>}
       {opties && !opties.ingesteld && <p className="text-xs text-red-700">ClickUp is niet gekoppeld; een taak aanmaken lukt nu niet.</p>}

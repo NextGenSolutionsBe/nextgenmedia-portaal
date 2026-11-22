@@ -41,6 +41,7 @@ export const ADMIN_MODULES: AdminModule[] = [
   // Meeting Inplanner: Google Agenda + Meet en uitnodiging, ClickUp-taak, herinneringsmail en klantboekingen.
   // Ook bereikbaar met de module Verkoop (zie SHARED_API / SHARED_PAGES).
   { key: 'meetings',    label: 'Meeting Inplanner',    prefixes: ['/admin/meetings', '/api/admin/meetings'] },
+  { key: 'nextgensolutions', label: 'NextGenSolutions', prefixes: ['/admin/nextgensolutions', '/api/admin/nextgensolutions'] },
   { key: 'sales',       label: 'Verkoop',              prefixes: ['/admin/sales', '/api/admin/sales'] },
   { key: 'invoices',    label: 'Facturen',             prefixes: ['/admin/invoices', '/api/admin/invoices'] },
   { key: 'vesting',     label: 'Vesting',              prefixes: ['/admin/vesting', '/api/admin/vesting'] },
