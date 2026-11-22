@@ -4,8 +4,9 @@ import type { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { VENNOTEN_SLEUTEL, leesVennoten, vennootVan } from '@/lib/vesting-akkoord'
 import { leesHandtekening } from '@/lib/contracten/tegenhandtekening'
 import {
-  VENNOTEN, controleerReden, controleerRegels, controleerUitgave, regelsTekst, tekenStand, uitgaveTekst, wachtOpAkkoord,
-  type RegelHandtekening, type RegelsVersie, type Uitgave, type UitgaveAkkoord, type Vennoot,
+  VENNOTEN, controleerExtra, controleerReden, controleerRegels, controleerTerugkerend, controleerUitgave, extraTekst, isFrequentie, openAkkoorden, openAkkoordenTekst,
+  regelsTekst, tekenStand, terugkerendTekst, uitgaveTekst,
+  type BudgetExtra, type ExtraAkkoord, type RegelHandtekening, type RegelsVersie, type Terugkerend, type TerugkerendAkkoord, type Uitgave, type UitgaveAkkoord, type Vennoot,
 } from '@/lib/vennoot-uitgaven'
 
 type Admin = ReturnType<typeof createAdminSupabaseClient>
@@ -50,10 +51,44 @@ async function vennotenInstelling(admin: Admin) {
   return leesVennoten((data as { value?: unknown } | null)?.value)
 }
 
+const isV = (v: unknown): v is Vennoot => (VENNOTEN as readonly string[]).includes(String(v))
+const tekstOfNull = (v: unknown) => (v as string | null) ?? null
+
+function naarExtra(r: Record<string, unknown>): BudgetExtra {
+  return {
+    id: String(r.id), vennoten: (Array.isArray(r.vennoten) ? r.vennoten : []).filter(isV), maand: String(r.maand ?? ''), bedrag: Number(r.bedrag), reden: String(r.reden ?? ''),
+    gearchiveerd_op: tekstOfNull(r.gearchiveerd_op), gearchiveerd_door: tekstOfNull(r.gearchiveerd_door), archief_reden: tekstOfNull(r.archief_reden),
+    created_at: tekstOfNull(r.created_at), created_by: tekstOfNull(r.created_by),
+  }
+}
+
+function naarTerugkerend(r: Record<string, unknown>): Terugkerend {
+  return {
+    id: String(r.id), vennoot: r.vennoot as Vennoot, omschrijving: String(r.omschrijving ?? ''), doel: tekstOfNull(r.doel), bedrag: Number(r.bedrag),
+    frequentie: isFrequentie(r.frequentie) ? r.frequentie : 'maand', start_datum: String(r.start_datum).slice(0, 10), eind_datum: r.eind_datum ? String(r.eind_datum).slice(0, 10) : null,
+    bewijs_pad: tekstOfNull(r.bewijs_pad), bewijs_naam: tekstOfNull(r.bewijs_naam),
+    gearchiveerd_op: tekstOfNull(r.gearchiveerd_op), gearchiveerd_door: tekstOfNull(r.gearchiveerd_door), archief_reden: tekstOfNull(r.archief_reden),
+    created_at: tekstOfNull(r.created_at), created_by: tekstOfNull(r.created_by),
+  }
+}
+
+/** Lezen zonder te breken: een tabel die nog niet bestaat (vóór de migratie) = leeg. */
+async function leesLijst<T>(q: PromiseLike<{ data: unknown; error: { message: string } | null }>, naar: (r: Record<string, unknown>) => T): Promise<T[]> {
+  const { data, error } = await q
+  if (error) { if (MIST.test(error.message)) return []; throw new Error(error.message) }
+  return ((data ?? []) as Record<string, unknown>[]).map(naar)
+}
+
 export type VennotenData = {
   uitgaven: Uitgave[]
   /** Akkoord per uitgave (Marco, Bram, Chiara), op de tekst van dat moment. */
   akkoorden: UitgaveAkkoord[]
+  /** Extra budget: telt pas als alle drie akkoord gaven. */
+  extras: BudgetExtra[]
+  extraAkkoorden: ExtraAkkoord[]
+  /** Terugkerende uitgaven (lease, huur, abonnement); de betalingen rekent het model uit. */
+  terugkerend: Terugkerend[]
+  terugkerendAkkoorden: TerugkerendAkkoord[]
   regels: RegelsVersie | null
   handtekeningen: RegelHandtekening[]
   namen: Record<Vennoot, string>
@@ -68,7 +103,7 @@ export async function laadVennotenData(admin: Admin, userId: string | null): Pro
     admin.from('vennoot_uitgaven').select('*').order('datum', { ascending: false }).limit(5000),
     admin.from('vennoot_regels').select('*').order('versie', { ascending: false }).limit(1).maybeSingle(),
   ])
-  if (u.error && MIST.test(u.error.message)) return { uitgaven: [], akkoorden: [], regels: null, handtekeningen: [], namen, ik }
+  if (u.error && MIST.test(u.error.message)) return { uitgaven: [], akkoorden: [], extras: [], extraAkkoorden: [], terugkerend: [], terugkerendAkkoorden: [], regels: null, handtekeningen: [], namen, ik }
   const regels = r.data ? naarRegels(r.data as Record<string, unknown>) : null
   let handtekeningen: RegelHandtekening[] = []
   if (regels) {
@@ -80,7 +115,14 @@ export async function laadVennotenData(admin: Admin, userId: string | null): Pro
     const { data, error } = await admin.from('vennoot_uitgave_akkoorden').select('uitgave_id, vennoot, naam, akkoord_op, inhoud_tekst').order('akkoord_op').limit(20000)
     if (!error) akkoorden = (data ?? []) as UitgaveAkkoord[]
   }
-  return { uitgaven: ((u.data ?? []) as Record<string, unknown>[]).map(naarUitgave), akkoorden, regels, handtekeningen, namen, ik }
+  const akkoord = (r: Record<string, unknown>) => ({ vennoot: r.vennoot as Vennoot, naam: tekstOfNull(r.naam), akkoord_op: String(r.akkoord_op), inhoud_tekst: String(r.inhoud_tekst) })
+  const [extras, extraAkkoorden, terugkerend, terugkerendAkkoorden] = await Promise.all([
+    leesLijst(admin.from('vennoot_budget_extra').select('*').order('maand', { ascending: false }).limit(2000), naarExtra),
+    leesLijst(admin.from('vennoot_budget_extra_akkoorden').select('extra_id, vennoot, naam, akkoord_op, inhoud_tekst').order('akkoord_op').limit(20000), (r) => ({ ...akkoord(r), extra_id: String(r.extra_id) })),
+    leesLijst(admin.from('vennoot_terugkerend').select('*').order('start_datum', { ascending: false }).limit(2000), naarTerugkerend),
+    leesLijst(admin.from('vennoot_terugkerend_akkoorden').select('terugkerend_id, vennoot, naam, akkoord_op, inhoud_tekst').order('akkoord_op').limit(20000), (r) => ({ ...akkoord(r), terugkerend_id: String(r.terugkerend_id) })),
+  ])
+  return { uitgaven: ((u.data ?? []) as Record<string, unknown>[]).map(naarUitgave), akkoorden, extras, extraAkkoorden, terugkerend, terugkerendAkkoorden, regels, handtekeningen, namen, ik }
 }
 
 export type RegelsMetHandtekeningen = RegelsVersie & { handtekeningen: RegelHandtekening[] }
@@ -130,8 +172,12 @@ async function leesBon(admin: Admin, v: unknown): Promise<{ bewijs_pad: string; 
 
 export async function bonLink(admin: Admin, pad: string): Promise<string | null> {
   if (!BON_PAD.test(pad)) return null
-  const { data: rij } = await admin.from('vennoot_uitgaven').select('id').eq('bewijs_pad', pad).limit(1)
-  if (!(rij ?? []).length) return null
+  // Enkel een bon die echt bij een uitgave of een terugkerende uitgave hoort.
+  const [{ data: rij }, { data: tk }] = await Promise.all([
+    admin.from('vennoot_uitgaven').select('id').eq('bewijs_pad', pad).limit(1),
+    admin.from('vennoot_terugkerend').select('id').eq('bewijs_pad', pad).limit(1),
+  ])
+  if (!(rij ?? []).length && !(tk ?? []).length) return null
   const { data } = await admin.storage.from(BON_BUCKET).createSignedUrl(pad, 120)
   return data?.signedUrl ?? null
 }
@@ -182,14 +228,142 @@ export async function keurUitgaveGoed(admin: Admin, id: string, inv: { userId: s
   if (error && !/duplicate|23505/i.test(`${error.code} ${error.message}`)) throw new Error(error.message)
 }
 
-/** Melding per vennoot: uitgaven die op jouw akkoord wachten. */
+/** Melding per vennoot: uitgaven, extra budget en terugkerende uitgaven die op jouw akkoord wachten. */
 export async function uitgavenMeldingVoor(userId: string, admin: Admin): Promise<{ id: string; kind: string; priority: 'high' | 'med'; title: string; date: string | null; href: string }[]> {
   const data = await laadVennotenData(admin, userId)
   if (!data.ik) return []
-  const wacht = wachtOpAkkoord(data.uitgaven, data.akkoorden, data.ik)
-  if (!wacht.length) return []
-  const laatste = wacht.map((u) => u.created_at ?? u.datum).sort().pop() ?? null
-  return [{ id: `vennoot-uitgaven:${data.ik}:${wacht.length}:${laatste}`, kind: 'vennoten', priority: 'med', title: `${wacht.length} ${wacht.length === 1 ? 'uitgave wacht' : 'uitgaven wachten'} op jouw akkoord`, date: laatste ? laatste.slice(0, 10) : null, href: '/admin/vennoten?akkoord=1' }]
+  const open = openAkkoorden(data, data.ik)
+  if (!open.totaal) return []
+  const laatste = [...open.uitgaven.map((u) => u.created_at ?? u.datum), ...open.extras.map((e) => e.created_at ?? ''), ...open.terugkerend.map((t) => t.created_at ?? t.start_datum)].filter(Boolean).sort().pop() ?? null
+  return [{ id: `vennoot-uitgaven:${data.ik}:${open.totaal}:${laatste}`, kind: 'vennoten', priority: open.extras.length ? 'high' : 'med', title: `${openAkkoordenTekst(open)} ${open.totaal === 1 ? 'wacht' : 'wachten'} op jouw akkoord`, date: laatste ? laatste.slice(0, 10) : null, href: '/admin/vennoten?akkoord=1' }]
+}
+
+// ── Akkoord (extra budget, terugkerende uitgaven) ────────────────────────────
+
+type AkkoordInvoer = { userId: string; naam: string | null; ip: string | null; ua: string | null }
+
+/**
+ * Akkoord van de ingelogde vennoot op exact deze tekst. Wie iets voorstelt of
+ * aanpast gaat er zelf mee akkoord (`stil`: geen fout als het geen vennoot is).
+ */
+async function voegAkkoordToe(admin: Admin, tabel: 'vennoot_budget_extra_akkoorden' | 'vennoot_terugkerend_akkoorden', kolom: 'extra_id' | 'terugkerend_id', id: string, tekst: string, inv: AkkoordInvoer, stil = false): Promise<void> {
+  const wie = vennootVan(inv.userId, await vennotenInstelling(admin))
+  if (!wie) { if (stil) return; throw new UitgaveFout('Enkel Marco, Bram en Chiara geven akkoord, elk met hun eigen account.', 403) }
+  const { error } = await admin.from(tabel).insert({ [kolom]: id, vennoot: wie, user_id: inv.userId, naam: inv.naam, inhoud_tekst: tekst, ip: inv.ip, user_agent: inv.ua?.slice(0, 400) ?? null })
+  if (error && !/duplicate|23505/i.test(`${error.code} ${error.message}`)) throw new Error(error.message)
+}
+
+// ── Extra budget ─────────────────────────────────────────────────────────────
+
+async function leesExtra(admin: Admin, id: string): Promise<BudgetExtra> {
+  const { data, error } = await admin.from('vennoot_budget_extra').select('*').eq('id', id).maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data) throw new UitgaveFout('Extra budget niet gevonden.', 404)
+  return naarExtra(data as Record<string, unknown>)
+}
+
+export async function maakExtra(admin: Admin, b: Record<string, unknown>, inv: AkkoordInvoer): Promise<string> {
+  const v = controleerExtra(b)
+  if (!v.ok) throw new UitgaveFout(v.fout)
+  const { data, error } = await admin.from('vennoot_budget_extra').insert({ ...v.waarde, created_by: inv.naam }).select('*').single()
+  if (error) throw new Error(error.message)
+  const e = naarExtra(data as Record<string, unknown>)
+  await voegAkkoordToe(admin, 'vennoot_budget_extra_akkoorden', 'extra_id', e.id, extraTekst(e), inv, true)
+  return e.id
+}
+
+export async function wijzigExtra(admin: Admin, id: string, b: Record<string, unknown>, inv: AkkoordInvoer): Promise<void> {
+  const v = controleerExtra(b)
+  if (!v.ok) throw new UitgaveFout(v.fout)
+  const oud = await leesExtra(admin, id)
+  if (oud.gearchiveerd_op) throw new UitgaveFout('Dit extra budget is geschrapt. Zet het eerst terug.', 409)
+  const { data, error } = await admin.from('vennoot_budget_extra').update({ ...v.waarde, updated_at: new Date().toISOString() }).eq('id', id).select('*').single()
+  if (error) throw new Error(error.message)
+  const e = naarExtra(data as Record<string, unknown>)
+  await voegAkkoordToe(admin, 'vennoot_budget_extra_akkoorden', 'extra_id', e.id, extraTekst(e), inv, true)
+}
+
+export async function archiveerExtra(admin: Admin, id: string, redenIn: unknown, door: string | null): Promise<void> {
+  const reden = controleerReden(redenIn)
+  if (!reden) throw new UitgaveFout('Schrijf kort waarom je dit extra budget schrapt.')
+  const { data, error } = await admin.from('vennoot_budget_extra').update({ gearchiveerd_op: new Date().toISOString(), gearchiveerd_door: door, archief_reden: reden }).eq('id', id).is('gearchiveerd_op', null).select('id')
+  if (error) throw new Error(error.message)
+  if (!(data ?? []).length) throw new UitgaveFout('Dit extra budget is al geschrapt.', 409)
+}
+
+export async function zetExtraTerug(admin: Admin, id: string): Promise<void> {
+  const { error } = await admin.from('vennoot_budget_extra').update({ gearchiveerd_op: null, gearchiveerd_door: null, archief_reden: null }).eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+export async function keurExtraGoed(admin: Admin, id: string, inv: AkkoordInvoer): Promise<void> {
+  const e = await leesExtra(admin, id)
+  if (e.gearchiveerd_op) throw new UitgaveFout('Dit extra budget is geschrapt; daar is geen akkoord voor nodig.', 409)
+  await voegAkkoordToe(admin, 'vennoot_budget_extra_akkoorden', 'extra_id', id, extraTekst(e), inv)
+}
+
+// ── Terugkerende uitgaven ────────────────────────────────────────────────────
+
+async function leesTerugkerend(admin: Admin, id: string): Promise<Terugkerend> {
+  const { data, error } = await admin.from('vennoot_terugkerend').select('*').eq('id', id).maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data) throw new UitgaveFout('Terugkerende uitgave niet gevonden.', 404)
+  return naarTerugkerend(data as Record<string, unknown>)
+}
+
+export async function maakTerugkerend(admin: Admin, b: Record<string, unknown>, inv: AkkoordInvoer): Promise<string> {
+  const v = controleerTerugkerend(b)
+  if (!v.ok) throw new UitgaveFout(v.fout)
+  const bon = await leesBon(admin, b.bon)
+  const { data, error } = await admin.from('vennoot_terugkerend').insert({ ...v.waarde, ...(bon ?? {}), created_by: inv.naam }).select('*').single()
+  if (error) throw new Error(error.message)
+  const t = naarTerugkerend(data as Record<string, unknown>)
+  await voegAkkoordToe(admin, 'vennoot_terugkerend_akkoorden', 'terugkerend_id', t.id, terugkerendTekst(t), inv, true)
+  return t.id
+}
+
+export async function wijzigTerugkerend(admin: Admin, id: string, b: Record<string, unknown>, inv: AkkoordInvoer): Promise<void> {
+  const v = controleerTerugkerend(b)
+  if (!v.ok) throw new UitgaveFout(v.fout)
+  const oud = await leesTerugkerend(admin, id)
+  if (oud.gearchiveerd_op) throw new UitgaveFout('Deze terugkerende uitgave is geschrapt. Zet ze eerst terug.', 409)
+  const bon = b.bon ? await leesBon(admin, b.bon) : b.bon_weg === true ? { bewijs_pad: null, bewijs_naam: null } : null
+  const { data, error } = await admin.from('vennoot_terugkerend').update({ ...v.waarde, ...(bon ?? {}), updated_at: new Date().toISOString() }).eq('id', id).select('*').single()
+  if (error) throw new Error(error.message)
+  const t = naarTerugkerend(data as Record<string, unknown>)
+  await voegAkkoordToe(admin, 'vennoot_terugkerend_akkoorden', 'terugkerend_id', t.id, terugkerendTekst(t), inv, true)
+}
+
+/** Stoppen: de laatste betaling die nog telt is die tot en met `datum` (standaard vandaag). */
+export async function stopTerugkerend(admin: Admin, id: string, datumIn: unknown, inv: AkkoordInvoer): Promise<void> {
+  const oud = await leesTerugkerend(admin, id)
+  if (oud.gearchiveerd_op) throw new UitgaveFout('Deze terugkerende uitgave is geschrapt.', 409)
+  const datum = typeof datumIn === 'string' && datumIn ? datumIn : vandaagBrussel()
+  const v = controleerTerugkerend({ ...oud, eind_datum: datum })
+  if (!v.ok) throw new UitgaveFout(datum < oud.start_datum ? 'Er werd nog niets betaald. Schrap de uitgave in de plaats van te stoppen.' : v.fout)
+  const { data, error } = await admin.from('vennoot_terugkerend').update({ eind_datum: v.waarde.eind_datum, updated_at: new Date().toISOString() }).eq('id', id).select('*').single()
+  if (error) throw new Error(error.message)
+  const t = naarTerugkerend(data as Record<string, unknown>)
+  await voegAkkoordToe(admin, 'vennoot_terugkerend_akkoorden', 'terugkerend_id', t.id, terugkerendTekst(t), inv, true)
+}
+
+export async function archiveerTerugkerend(admin: Admin, id: string, redenIn: unknown, door: string | null): Promise<void> {
+  const reden = controleerReden(redenIn)
+  if (!reden) throw new UitgaveFout('Schrijf kort waarom je deze terugkerende uitgave schrapt.')
+  const { data, error } = await admin.from('vennoot_terugkerend').update({ gearchiveerd_op: new Date().toISOString(), gearchiveerd_door: door, archief_reden: reden }).eq('id', id).is('gearchiveerd_op', null).select('id')
+  if (error) throw new Error(error.message)
+  if (!(data ?? []).length) throw new UitgaveFout('Deze terugkerende uitgave is al geschrapt.', 409)
+}
+
+export async function zetTerugkerendTerug(admin: Admin, id: string): Promise<void> {
+  const { error } = await admin.from('vennoot_terugkerend').update({ gearchiveerd_op: null, gearchiveerd_door: null, archief_reden: null }).eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+export async function keurTerugkerendGoed(admin: Admin, id: string, inv: AkkoordInvoer): Promise<void> {
+  const t = await leesTerugkerend(admin, id)
+  if (t.gearchiveerd_op) throw new UitgaveFout('Deze terugkerende uitgave is geschrapt; daar is geen akkoord voor nodig.', 409)
+  await voegAkkoordToe(admin, 'vennoot_terugkerend_akkoorden', 'terugkerend_id', id, terugkerendTekst(t), inv)
 }
 
 // ── Regels ───────────────────────────────────────────────────────────────────

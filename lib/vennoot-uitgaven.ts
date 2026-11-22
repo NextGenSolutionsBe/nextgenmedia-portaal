@@ -33,6 +33,9 @@ export type Uitgave = {
   archief_reden: string | null
   created_at: string | null
   created_by: string | null
+  /** Een betaling van een terugkerende uitgave (afgeleid, geen eigen rij): de afspraak en hoe vaak. */
+  terugkerend_id?: string
+  frequentie?: Frequentie
 }
 
 export type RegelsVersie = { id: string; versie: number; regels: string[]; maandbudget: number; start_maand: string; created_at: string | null; created_by: string | null }
@@ -118,7 +121,12 @@ const telt = (u: Pick<Uitgave, 'gearchiveerd_op'>) => !u.gearchiveerd_op
 export type VennootStand = {
   vennoot: Vennoot
   besteedPeriode: number
+  /** Budget van de periode, inclusief het extra budget waar alle drie akkoord op gaven. */
   budgetPeriode: number
+  /** Het extra budget in de periode (zit al in budgetPeriode). */
+  extraPeriode: number
+  /** Al het extra budget tot nu (zit al in budgetTotaal). */
+  extraTotaal: number
   aantalPeriode: number
   besteedTotaal: number
   budgetTotaal: number
@@ -131,17 +139,24 @@ export type VennootStand = {
  * die periode, en het tegoed vandaag (alles sinds de start). Enkel maanden
  * vanaf de start en tot en met deze maand geven budget.
  */
-export function standPerVennoot(uitgaven: Uitgave[], budget: Budget, periode: Periode, huidigeMaand: string): VennootStand[] {
+export function standPerVennoot(uitgaven: Uitgave[], budget: Budget, periode: Periode, huidigeMaand: string, extras: BudgetExtra[] = [], extraAkkoorden: ExtraAkkoord[] = []): VennootStand[] {
   const maandenMetBudget = periode.maanden.filter((m) => m >= budget.start_maand && m <= huidigeMaand).length
-  const budgetTotaal = rond(budget.maandbudget * maandenTussen(budget.start_maand, huidigeMaand))
+  const basisTotaal = rond(budget.maandbudget * maandenTussen(budget.start_maand, huidigeMaand))
+  // Extra budget telt pas als alle drie akkoord gaven, en pas vanaf zijn maand (zoals het gewone budget).
+  const geldig = extras.filter((e) => extraTelt(e, extraAkkoorden) && e.maand <= huidigeMaand)
   return VENNOTEN.map((v) => {
     const eigen = uitgaven.filter((u) => u.vennoot === v && telt(u))
     const inPeriode = eigen.filter((u) => u.datum >= periode.van && u.datum <= periode.tot)
     const besteedTotaal = rond(eigen.reduce((s, u) => s + u.bedrag, 0))
+    const extraTotaal = extraVoor(geldig, v)
+    const extraPeriode = extraVoor(geldig, v, periode.maanden)
+    const budgetTotaal = rond(basisTotaal + extraTotaal)
     return {
       vennoot: v,
       besteedPeriode: rond(inPeriode.reduce((s, u) => s + u.bedrag, 0)),
-      budgetPeriode: rond(budget.maandbudget * maandenMetBudget),
+      budgetPeriode: rond(budget.maandbudget * maandenMetBudget + extraPeriode),
+      extraPeriode,
+      extraTotaal,
       aantalPeriode: inPeriode.length,
       besteedTotaal,
       budgetTotaal,
@@ -269,4 +284,211 @@ export function akkoordStand(u: Parameters<typeof uitgaveTekst>[0], akkoorden: U
 /** Uitgaven (niet gearchiveerd) die nog op het akkoord van deze vennoot wachten. */
 export function wachtOpAkkoord(uitgaven: Uitgave[], akkoorden: UitgaveAkkoord[], wie: Vennoot): Uitgave[] {
   return uitgaven.filter((u) => !u.gearchiveerd_op && !akkoordStand(u, akkoorden)[wie])
+}
+
+// ── Akkoord: gedeeld door extra budget en terugkerende uitgaven ─────────────
+
+export type Akkoord = { vennoot: Vennoot; naam: string | null; akkoord_op: string; inhoud_tekst: string }
+export type AkkoordStand = Record<Vennoot, Akkoord | null> & { allen: boolean; aangepast: boolean }
+
+function standOp(tekst: string, hier: Akkoord[]): AkkoordStand {
+  const per = Object.fromEntries(VENNOTEN.map((k) => [k, hier.find((a) => a.vennoot === k && a.inhoud_tekst === tekst) ?? null])) as Record<Vennoot, Akkoord | null>
+  return { ...per, allen: VENNOTEN.every((k) => !!per[k]), aangepast: hier.some((a) => a.inhoud_tekst !== tekst) }
+}
+
+/** "Marco", "Marco en Bram", "Marco, Bram en Chiara". */
+export function namenLijst(namen: string[]): string {
+  if (namen.length <= 1) return namen[0] ?? ''
+  return `${namen.slice(0, -1).join(', ')} en ${namen[namen.length - 1]}`
+}
+
+// ── Extra budget ────────────────────────────────────────────────────────────
+// Een vennoot (of alle drie) mag in een bepaalde maand meer uitgeven, met een
+// onderbouwing. Het telt pas mee in het tegoed als Marco, Bram en Chiara alle
+// drie akkoord gaven op exact die tekst; aangepast = opnieuw akkoord.
+
+export type BudgetExtra = {
+  id: string
+  vennoten: Vennoot[]
+  maand: string            // JJJJ-MM
+  bedrag: number           // per vennoot
+  reden: string
+  gearchiveerd_op: string | null
+  gearchiveerd_door: string | null
+  archief_reden: string | null
+  created_at: string | null
+  created_by: string | null
+}
+export type ExtraAkkoord = Akkoord & { extra_id: string }
+export type ExtraInvoer = { vennoten: Vennoot[]; maand: string; bedrag: number; reden: string }
+
+export function controleerExtra(b: Record<string, unknown>): { ok: true; waarde: ExtraInvoer } | { ok: false; fout: string } {
+  const lijst = Array.isArray(b.vennoten) ? b.vennoten : []
+  const vennoten = VENNOTEN.filter((v) => lijst.includes(v))
+  if (!vennoten.length) return { ok: false, fout: 'Kies voor welke vennoot of vennoten.' }
+  const maand = String(b.maand ?? '').trim()
+  if (!MAAND.test(maand)) return { ok: false, fout: 'Kies de maand.' }
+  const bedrag = leesGetal(b.bedrag)
+  if (bedrag === null || bedrag <= 0) return { ok: false, fout: 'Vul het bedrag per vennoot in.' }
+  if (bedrag > 100_000) return { ok: false, fout: 'Dat bedrag is te hoog.' }
+  const reden = String(b.reden ?? '').replace(/\s+/g, ' ').trim()
+  if (reden.length < 10) return { ok: false, fout: 'Schrijf kort waarom (minstens een zin).' }
+  return { ok: true, waarde: { vennoten, maand, bedrag: rond(bedrag), reden: reden.slice(0, 1000) } }
+}
+
+/** Wat er precies goedgekeurd wordt. */
+export function extraTekst(e: Pick<BudgetExtra, 'id' | 'vennoten' | 'maand' | 'bedrag' | 'reden'>): string {
+  return [
+    `Extra budget ${e.id}`,
+    `Voor: ${VENNOTEN.filter((v) => e.vennoten.includes(v)).join(', ')}`,
+    `Maand: ${e.maand}`,
+    `Bedrag per vennoot: ${rond(e.bedrag).toFixed(2)}`,
+    `Waarom: ${e.reden}`,
+  ].join('\n')
+}
+
+export const extraStand = (e: Parameters<typeof extraTekst>[0], akkoorden: ExtraAkkoord[]): AkkoordStand =>
+  standOp(extraTekst(e), akkoorden.filter((a) => a.extra_id === e.id))
+
+/** Telt mee: niet geschrapt en alle drie akkoord. */
+export const extraTelt = (e: BudgetExtra, akkoorden: ExtraAkkoord[]) => !e.gearchiveerd_op && extraStand(e, akkoorden).allen
+
+/** Het extra budget van één vennoot, eventueel enkel in bepaalde maanden. */
+export function extraVoor(extras: BudgetExtra[], v: Vennoot, maanden?: string[]): number {
+  return rond(extras.filter((e) => e.vennoten.includes(v) && (!maanden || maanden.includes(e.maand))).reduce((s, e) => s + e.bedrag, 0))
+}
+
+// ── Terugkerende uitgaven ───────────────────────────────────────────────────
+// Lease, huur, abonnement: een vast bedrag elke maand, elk kwartaal of elk
+// jaar. Elke betaling tot vandaag telt mee als een uitgave van die vennoot;
+// het akkoord geven de drie één keer, op de afspraak zelf.
+
+export const FREQUENTIES = ['maand', 'kwartaal', 'jaar'] as const
+export type Frequentie = (typeof FREQUENTIES)[number]
+export const FREQ: Record<Frequentie, { elke: string; per: string; stap: number }> = {
+  maand: { elke: 'Elke maand', per: 'per maand', stap: 1 },
+  kwartaal: { elke: 'Elk kwartaal', per: 'per kwartaal', stap: 3 },
+  jaar: { elke: 'Elk jaar', per: 'per jaar', stap: 12 },
+}
+export const isFrequentie = (v: unknown): v is Frequentie => (FREQUENTIES as readonly string[]).includes(String(v))
+
+export type Terugkerend = {
+  id: string
+  vennoot: Vennoot
+  omschrijving: string
+  doel: string | null
+  bedrag: number           // per keer
+  frequentie: Frequentie
+  start_datum: string      // eerste betaling
+  eind_datum: string | null // laatste mogelijke betaling; leeg = loopt door
+  bewijs_pad: string | null
+  bewijs_naam: string | null
+  gearchiveerd_op: string | null
+  gearchiveerd_door: string | null
+  archief_reden: string | null
+  created_at: string | null
+  created_by: string | null
+}
+export type TerugkerendAkkoord = Akkoord & { terugkerend_id: string }
+export type TerugkerendInvoer = { vennoot: Vennoot; omschrijving: string; doel: string | null; bedrag: number; frequentie: Frequentie; start_datum: string; eind_datum: string | null }
+
+const geldigeDag = (d: string) => DAG.test(d) && new Date(`${d}T12:00:00Z`).toISOString().slice(0, 10) === d
+
+export function controleerTerugkerend(b: Record<string, unknown>): { ok: true; waarde: TerugkerendInvoer } | { ok: false; fout: string } {
+  if (!isVennoot(b.vennoot)) return { ok: false, fout: 'Kies voor welke vennoot de uitgave is.' }
+  const omschrijving = String(b.omschrijving ?? '').replace(/\s+/g, ' ').trim()
+  if (omschrijving.length < 2) return { ok: false, fout: 'Wat is de uitgave? (bv. Lease Tesla)' }
+  if (omschrijving.length > 200) return { ok: false, fout: 'Hou de omschrijving kort (max 200 tekens).' }
+  const doel = String(b.doel ?? '').trim().slice(0, 500) || null
+  const bedrag = leesGetal(b.bedrag)
+  if (bedrag === null || bedrag <= 0) return { ok: false, fout: 'Vul het bedrag per keer in.' }
+  if (bedrag > 100_000) return { ok: false, fout: 'Dat bedrag is te hoog.' }
+  if (!isFrequentie(b.frequentie)) return { ok: false, fout: 'Kies hoe vaak: elke maand, elk kwartaal of elk jaar.' }
+  const start = String(b.start_datum ?? '').trim()
+  if (!geldigeDag(start)) return { ok: false, fout: 'Kies de datum van de eerste betaling.' }
+  const eindRuw = String(b.eind_datum ?? '').trim()
+  const eind = eindRuw ? eindRuw : null
+  if (eind && !geldigeDag(eind)) return { ok: false, fout: 'De einddatum klopt niet.' }
+  if (eind && eind < start) return { ok: false, fout: 'De einddatum ligt vóór de eerste betaling.' }
+  return { ok: true, waarde: { vennoot: b.vennoot, omschrijving, doel, bedrag: rond(bedrag), frequentie: b.frequentie, start_datum: start, eind_datum: eind } }
+}
+
+export function terugkerendTekst(t: Pick<Terugkerend, 'id' | 'vennoot' | 'omschrijving' | 'doel' | 'bedrag' | 'frequentie' | 'start_datum' | 'eind_datum' | 'bewijs_pad' | 'bewijs_naam'>): string {
+  return [
+    `Terugkerende uitgave ${t.id}`,
+    `Voor: ${t.vennoot}`,
+    `Wat: ${t.omschrijving}`,
+    `Waarvoor: ${t.doel ?? '—'}`,
+    `Bedrag: ${rond(t.bedrag).toFixed(2)} ${FREQ[t.frequentie].per}`,
+    `Vanaf: ${t.start_datum}`,
+    `Tot en met: ${t.eind_datum ?? 'loopt door'}`,
+    `Contract of factuur: ${t.bewijs_pad ? `${t.bewijs_naam ?? 'document'} (${t.bewijs_pad})` : 'geen'}`,
+  ].join('\n')
+}
+
+export const terugkerendStand = (t: Parameters<typeof terugkerendTekst>[0], akkoorden: TerugkerendAkkoord[]): AkkoordStand =>
+  standOp(terugkerendTekst(t), akkoorden.filter((a) => a.terugkerend_id === t.id))
+
+/**
+ * De datums van de betalingen: de eerste, dan telkens 1, 3 of 12 maanden later
+ * op dezelfde dag (bestaat die dag niet, de laatste dag van de maand), tot en
+ * met de einddatum en tot en met `tot`.
+ */
+export function betaaldata(t: Pick<Terugkerend, 'start_datum' | 'eind_datum' | 'frequentie'>, tot: string): string[] {
+  if (!geldigeDag(t.start_datum)) return []
+  const [j0, m0, d0] = t.start_datum.split('-').map(Number)
+  const grens = t.eind_datum && t.eind_datum < tot ? t.eind_datum : tot
+  const uit: string[] = []
+  for (let i = 0; i < 1200; i++) {
+    const totaal = j0 * 12 + (m0 - 1) + i * FREQ[t.frequentie].stap
+    const j = Math.floor(totaal / 12), m = (totaal % 12) + 1
+    const d = Math.min(d0, laatsteDag(j, m))
+    const datum = `${maandStr(j, m)}-${String(d).padStart(2, '0')}`
+    if (datum > grens) break
+    uit.push(datum)
+  }
+  return uit
+}
+
+/** De eerstvolgende betaling na vandaag, of null (gestopt of afgelopen). */
+export function volgendeBetaling(t: Pick<Terugkerend, 'start_datum' | 'eind_datum' | 'frequentie'>, vandaag: string): string | null {
+  const ver = `${Number(vandaag.slice(0, 4)) + 2}${vandaag.slice(4)}`
+  return betaaldata(t, ver).find((d) => d > vandaag) ?? null
+}
+
+/** Loopt nog: niet geschrapt en (geen einde of het einde ligt niet in het verleden). */
+export const isLopend = (t: Pick<Terugkerend, 'gearchiveerd_op' | 'eind_datum'>, vandaag: string) => !t.gearchiveerd_op && (!t.eind_datum || t.eind_datum >= vandaag)
+
+/** De betalingen tot en met vandaag, als uitgaven (voor de lijst per maand en het tegoed). Geschrapte afspraken tellen niet. */
+export function terugkerendeUitgaven(lijst: Terugkerend[], vandaag: string): Uitgave[] {
+  return lijst.filter((t) => !t.gearchiveerd_op).flatMap((t) => betaaldata(t, vandaag).map((d) => ({
+    id: `t:${t.id}:${d}`, vennoot: t.vennoot, datum: d, omschrijving: t.omschrijving, doel: t.doel, bedrag: t.bedrag,
+    bewijs_pad: t.bewijs_pad, bewijs_naam: t.bewijs_naam, gearchiveerd_op: null, gearchiveerd_door: null, archief_reden: null,
+    created_at: t.created_at, created_by: t.created_by, terugkerend_id: t.id, frequentie: t.frequentie,
+  })))
+}
+
+// ── Wat wacht op jouw akkoord ───────────────────────────────────────────────
+
+export type OpenAkkoorden = { uitgaven: Uitgave[]; extras: BudgetExtra[]; terugkerend: Terugkerend[]; totaal: number }
+
+export function openAkkoorden(d: {
+  uitgaven: Uitgave[]; akkoorden: UitgaveAkkoord[]
+  extras?: BudgetExtra[]; extraAkkoorden?: ExtraAkkoord[]
+  terugkerend?: Terugkerend[]; terugkerendAkkoorden?: TerugkerendAkkoord[]
+}, wie: Vennoot): OpenAkkoorden {
+  const uitgaven = wachtOpAkkoord(d.uitgaven, d.akkoorden, wie)
+  const extras = (d.extras ?? []).filter((e) => !e.gearchiveerd_op && !extraStand(e, d.extraAkkoorden ?? [])[wie])
+  const terugkerend = (d.terugkerend ?? []).filter((t) => !t.gearchiveerd_op && !terugkerendStand(t, d.terugkerendAkkoorden ?? [])[wie])
+  return { uitgaven, extras, terugkerend, totaal: uitgaven.length + extras.length + terugkerend.length }
+}
+
+/** "2 uitgaven, 1 extra budget en 1 terugkerende uitgave". */
+export function openAkkoordenTekst(o: OpenAkkoorden): string {
+  const delen = [
+    o.uitgaven.length ? `${o.uitgaven.length} ${o.uitgaven.length === 1 ? 'uitgave' : 'uitgaven'}` : null,
+    o.extras.length ? `${o.extras.length} keer extra budget` : null,
+    o.terugkerend.length ? `${o.terugkerend.length} ${o.terugkerend.length === 1 ? 'terugkerende uitgave' : 'terugkerende uitgaven'}` : null,
+  ].filter((x): x is string => !!x)
+  return namenLijst(delen)
 }

@@ -7705,3 +7705,70 @@ REVOKE ALL ON public.shoot_links FROM anon, authenticated;
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES ('shoots', 'shoots', false, 26214400, ARRAY['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'])
 ON CONFLICT (id) DO NOTHING;
+
+-- ── Uitgaven vennoten: extra budget en terugkerende uitgaven (22 nov 2026) ──
+-- Extra budget: één beslissing voor één, twee of alle drie de vennoten, voor één maand,
+-- met een onderbouwing. Telt pas mee als alle drie akkoord gaven (op exact die tekst).
+create table if not exists public.vennoot_budget_extra (
+  id uuid primary key default gen_random_uuid(),
+  vennoten text[] not null,
+  maand text not null,
+  bedrag numeric(12,2) not null,
+  reden text not null,
+  gearchiveerd_op timestamptz,
+  gearchiveerd_door text,
+  archief_reden text,
+  created_at timestamptz not null default now(),
+  created_by text,
+  updated_at timestamptz
+);
+create index if not exists vennoot_budget_extra_maand on public.vennoot_budget_extra (maand);
+alter table public.vennoot_budget_extra enable row level security;
+create table if not exists public.vennoot_budget_extra_akkoorden (
+  id uuid primary key default gen_random_uuid(),
+  extra_id uuid not null references public.vennoot_budget_extra(id) on delete cascade,
+  vennoot text not null,
+  user_id uuid not null,
+  naam text,
+  inhoud_tekst text not null,
+  akkoord_op timestamptz not null default now(),
+  ip text,
+  user_agent text
+);
+create unique index if not exists vennoot_budget_extra_akkoorden_uniek on public.vennoot_budget_extra_akkoorden (extra_id, vennoot, md5(inhoud_tekst));
+alter table public.vennoot_budget_extra_akkoorden enable row level security;
+-- Terugkerende uitgave (lease, huur, abonnement): elke maand, elk kwartaal of elk jaar vanaf start_datum,
+-- tot eind_datum (leeg = loopt door). Elke betaling tot vandaag telt mee; akkoord één keer op de afspraak.
+create table if not exists public.vennoot_terugkerend (
+  id uuid primary key default gen_random_uuid(),
+  vennoot text not null,
+  omschrijving text not null,
+  doel text,
+  bedrag numeric(12,2) not null,
+  frequentie text not null,
+  start_datum date not null,
+  eind_datum date,
+  bewijs_pad text,
+  bewijs_naam text,
+  gearchiveerd_op timestamptz,
+  gearchiveerd_door text,
+  archief_reden text,
+  created_at timestamptz not null default now(),
+  created_by text,
+  updated_at timestamptz
+);
+alter table public.vennoot_terugkerend enable row level security;
+create table if not exists public.vennoot_terugkerend_akkoorden (
+  id uuid primary key default gen_random_uuid(),
+  terugkerend_id uuid not null references public.vennoot_terugkerend(id) on delete cascade,
+  vennoot text not null,
+  user_id uuid not null,
+  naam text,
+  inhoud_tekst text not null,
+  akkoord_op timestamptz not null default now(),
+  ip text,
+  user_agent text
+);
+create unique index if not exists vennoot_terugkerend_akkoorden_uniek on public.vennoot_terugkerend_akkoorden (terugkerend_id, vennoot, md5(inhoud_tekst));
+alter table public.vennoot_terugkerend_akkoorden enable row level security;
+revoke all on public.vennoot_budget_extra, public.vennoot_budget_extra_akkoorden, public.vennoot_terugkerend, public.vennoot_terugkerend_akkoorden from anon, authenticated;

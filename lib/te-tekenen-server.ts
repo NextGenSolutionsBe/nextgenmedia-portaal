@@ -4,7 +4,7 @@ import { tekenStandVoor } from '@/lib/regels-akkoord'
 import { laadVestingRegels } from '@/lib/vesting-regels-server'
 import { laadVestingData } from '@/lib/vesting-data-server'
 import { laadVennotenData } from '@/lib/vennoot-uitgaven-server'
-import { tekenStand, wachtOpAkkoord } from '@/lib/vennoot-uitgaven'
+import { openAkkoorden, openAkkoordenTekst, tekenStand } from '@/lib/vennoot-uitgaven'
 import { algemeneTaken, tegentekenTaken, voornaam, type AlgemeenTeTekenen, type TeTekenenItem, type TegentekenContract } from '@/lib/te-tekenen'
 
 import type { createAdminSupabaseClient } from '@/lib/supabase/server'
@@ -45,8 +45,8 @@ export async function teTekenenOverzicht(admin: Admin): Promise<TeTekenenItem[]>
         if (nog.length) uit.push({ id: `regels_vennoten:${d.regels.versie}`, soort: 'regels_vennoten', wat: `Regels uitgaven vennoten tekenen (versie ${d.regels.versie})`, sub: `nog te tekenen door ${nog.join(', ')}`, href: '/admin/vennoten?regels=1', voor: nog, dringend: false })
       }
       for (const k of VENNOTEN) {
-        const wacht = wachtOpAkkoord(d.uitgaven, d.akkoorden, k)
-        if (wacht.length) uit.push({ id: `uitgaven:${k}`, soort: 'uitgaven', wat: `Akkoord geven op ${meervoud(wacht.length, 'uitgave', 'uitgaven')} van de vennoten`, sub: null, href: '/admin/vennoten?akkoord=1', voor: [wie(k)], dringend: false })
+        const open = openAkkoorden(d, k)
+        if (open.totaal) uit.push({ id: `uitgaven:${k}`, soort: 'uitgaven', wat: `Uitgaven vennoten: akkoord op ${openAkkoordenTekst(open)}`, sub: null, href: '/admin/vennoten?akkoord=1', voor: [wie(k)], dringend: false })
       }
       return uit
     }, []),

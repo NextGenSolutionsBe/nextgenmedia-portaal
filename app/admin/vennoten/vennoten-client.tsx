@@ -1,35 +1,38 @@
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Archive, Check, ChevronLeft, ChevronRight, Eye, Loader2, Paperclip, Pencil, Plus, RotateCcw, Trash2, X } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
+import { Archive, Check, ChevronLeft, ChevronRight, Paperclip, Pencil, PiggyBank, Plus, Repeat, RotateCcw, X } from 'lucide-react'
 import { RegelsKaart, RegelsKnop, RegelsVenster, type RegelsBegin } from '@/components/admin/regels-akkoord'
 import type { RegelsData } from '@/lib/regels-akkoord'
 import {
-  VENNOTEN, REDEN_VOORSTEL, STANDAARD_REGELS, akkoordStand, budgetVan, perMaand, periodeOpties, periodeVan, standPerVennoot, uitgavenIn, verschuif, wachtOpAkkoord,
-  type Periode, type PeriodeSoort, type Uitgave, type Vennoot,
+  FREQ, STANDAARD_REGELS, akkoordStand, budgetVan, openAkkoorden, openAkkoordenTekst, perMaand, periodeOpties, periodeVan, standPerVennoot,
+  terugkerendStand, terugkerendeUitgaven, uitgavenIn, verschuif,
+  type BudgetExtra, type Periode, type PeriodeSoort, type Terugkerend, type Uitgave, type Vennoot,
 } from '@/lib/vennoot-uitgaven'
 import type { VennotenData } from '@/lib/vennoot-uitgaven-server'
+import { AkkoordChips, SchrapVenster, dag, eur, eurKort, maand, post } from './gedeeld'
+import { ExtraBudgetKaart, ExtraVenster, extraTeTonen } from './extra-budget'
+import { TerugkerendKaart } from './terugkerend'
+import { UitgaveVenster, type Soort } from './uitgave-venster'
 
-const eur = (n: number) => n.toLocaleString('nl-BE', { style: 'currency', currency: 'EUR' })
-const dag = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' })
-const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900'
-const lbl = 'block text-xs font-medium text-gray-600 mb-1'
-
-async function post(body: Record<string, unknown>) {
-  const r = await fetch('/api/admin/vennoten', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-  const j = await r.json().catch(() => ({}))
-  if (!r.ok) throw new Error(j.error || 'Bewaren mislukt')
-  return j
-}
+type Open =
+  | { soort: 'uitgave'; u: Uitgave | null; begin?: Soort }
+  | { soort: 'terugkerend'; t: Terugkerend }
+  | { soort: 'extra'; e: BudgetExtra | null }
+  | { soort: 'archiveer'; u: Uitgave }
+  | { soort: 'schrapExtra'; e: BudgetExtra }
+  | { soort: 'schrapTerugkerend'; t: Terugkerend }
 
 /**
- * Uitgaven vennoten. Bovenaan per vennoot het tegoed (opgespaard budget min wat
- * al besteed is) en wat er in de gekozen periode uitging; klik op een vennoot
- * voor enkel zijn of haar uitgaven. "+ Uitgave" met bonnetje (foto of pdf),
- * archiveren met een verantwoording, en de regels die alle drie tekenen.
+ * Uitgaven vennoten. Bovenaan per vennoot het tegoed (opgespaard budget plus
+ * goedgekeurd extra budget, min wat al besteed is) en wat er in de gekozen
+ * periode uitging; klik op een vennoot voor enkel zijn of haar uitgaven.
+ * "+ Uitgave" is eenmalig (met bonnetje) of terugkerend (lease, huur,
+ * abonnement: elke betaling telt vanzelf mee). "Extra budget" = een vennoot
+ * (of alle drie) mag in een maand meer uitgeven, met een onderbouwing; het
+ * telt pas als alle drie akkoord gaven.
  */
 export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoordFilter = false }: { data: VennotenData; vandaag: string; beginVennoot: Vennoot | null; regelsOpen: boolean; akkoordFilter?: boolean }) {
   const router = useRouter()
@@ -38,12 +41,18 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoor
   const [periode, setPeriode] = useState<Periode>(() => periodeVan('maand', huidigeMaand))
   const [vennoot, setVennoot] = useState<Vennoot | null>(beginVennoot)
   const [archief, setArchief] = useState(false)
-  const [bewerk, setBewerk] = useState<Uitgave | 'nieuw' | null>(null)
-  const [archiveer, setArchiveer] = useState<Uitgave | null>(null)
+  const [open, setOpen] = useState<Open | null>(null)
   const [regels, setRegels] = useState<RegelsBegin | null>(regelsOpen ? 'bekijk' : null)
   const [enkelWacht, setEnkelWacht] = useState(akkoordFilter)
   const [akkoordBezig, setAkkoordBezig] = useState<string | null>(null)
-  const mijnWacht = useMemo(() => (data.ik ? wachtOpAkkoord(data.uitgaven, data.akkoorden, data.ik) : []), [data.uitgaven, data.akkoorden, data.ik])
+  const klaar = (melding: string) => { setOpen(null); toast.success(melding); router.refresh() }
+
+  // De betalingen van terugkerende uitgaven tot vandaag tellen als gewone uitgaven.
+  const terugMap = useMemo(() => new Map(data.terugkerend.map((t) => [t.id, t])), [data.terugkerend])
+  const alleUitgaven = useMemo(() => [...data.uitgaven, ...terugkerendeUitgaven(data.terugkerend, vandaag)], [data.uitgaven, data.terugkerend, vandaag])
+  const mijnOpen = useMemo(() => (data.ik ? openAkkoorden(data, data.ik) : null), [data])
+  const mijnWacht = mijnOpen?.uitgaven ?? []
+
   const geefAkkoord = async (u: Uitgave) => {
     setAkkoordBezig(u.id)
     try { await post({ actie: 'akkoord', id: u.id }); klaar('Akkoord gegeven.') } catch (e) { toast.error(e instanceof Error ? e.message : 'Akkoord mislukt') } finally { setAkkoordBezig(null) }
@@ -51,18 +60,18 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoor
 
   const budget = budgetVan(data.regels, data.uitgaven, huidigeMaand)
   const alles = soort === 'alles'
-  const stand = useMemo(() => standPerVennoot(data.uitgaven, budget, periode, huidigeMaand), [data.uitgaven, budget, periode, huidigeMaand])
+  const stand = useMemo(() => standPerVennoot(alleUitgaven, budget, periode, huidigeMaand, data.extras, data.extraAkkoorden), [alleUitgaven, budget, periode, huidigeMaand, data.extras, data.extraAkkoorden])
   const lijst = useMemo(() => {
-    const l = uitgavenIn(data.uitgaven, alles ? null : periode, vennoot, archief)
+    const l = uitgavenIn(alleUitgaven, alles ? null : periode, vennoot, archief)
     return enkelWacht && !archief ? l.filter((u) => mijnWacht.some((w) => w.id === u.id)) : l
-  }, [data.uitgaven, alles, periode, vennoot, archief, enkelWacht, mijnWacht])
+  }, [alleUitgaven, alles, periode, vennoot, archief, enkelWacht, mijnWacht])
   const aantalArchief = useMemo(() => uitgavenIn(data.uitgaven, alles ? null : periode, vennoot, true).length, [data.uitgaven, alles, periode, vennoot])
   const totaal = lijst.reduce((s, u) => s + u.bedrag, 0)
   const regelsData: RegelsData = { versie: data.regels, handtekeningen: data.handtekeningen, namen: data.namen, ik: data.ik }
   const label = alles ? 'alle periodes' : periode.label
 
   // De periodes om uit te kiezen: van de eerste uitgave (of de start van het budget) tot nu.
-  const eersteMaand = useMemo(() => [budget.start_maand, ...data.uitgaven.map((u) => u.datum.slice(0, 7))].sort()[0] ?? null, [budget.start_maand, data.uitgaven])
+  const eersteMaand = useMemo(() => [budget.start_maand, ...alleUitgaven.map((u) => u.datum.slice(0, 7))].sort()[0] ?? null, [budget.start_maand, alleUitgaven])
   const opties = useMemo(() => {
     if (alles) return []
     const l = periodeOpties(soort as PeriodeSoort, eersteMaand, huidigeMaand)
@@ -70,10 +79,11 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoor
   }, [alles, soort, eersteMaand, huidigeMaand, periode])
   const groepen = useMemo(() => perMaand(lijst), [lijst])
   const metKoppen = groepen.length > 1 || soort !== 'maand'
-
   const kiesSoort = (s: PeriodeSoort | 'alles') => { setSoort(s); if (s !== 'alles') setPeriode(periodeVan(s, periode.ref > huidigeMaand ? huidigeMaand : periode.ref)) }
-  const klaar = (melding: string) => { toast.success(melding); router.refresh() }
 
+  // De kaarten voor extra budget en terugkerende uitgaven verschijnen zodra er iets in staat.
+  const toonExtra = extraTeTonen(data, vennoot, alles ? null : periode)
+  const toonTerug = data.terugkerend.some((t) => !vennoot || t.vennoot === vennoot)
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -84,15 +94,16 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoor
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <RegelsKnop set="vennoten" data={regelsData} onOpen={setRegels} />
-          <button type="button" onClick={() => setBewerk('nieuw')} className="btn-primary text-sm"><Plus className="h-4 w-4" />Uitgave</button>
+          <button type="button" onClick={() => setOpen({ soort: 'extra', e: null })} className="btn-secondary text-sm"><PiggyBank className="h-4 w-4" />Extra budget</button>
+          <button type="button" onClick={() => setOpen({ soort: 'uitgave', u: null })} className="btn-primary text-sm"><Plus className="h-4 w-4" />Uitgave</button>
         </div>
       </div>
 
       {/* Wat wacht op jouw akkoord */}
-      {data.ik && mijnWacht.length > 0 && (
+      {mijnOpen && mijnOpen.totaal > 0 && (
         <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 flex items-center gap-3 flex-wrap">
-          <span className="flex-1 min-w-[200px]"><b className="font-semibold">{mijnWacht.length} {mijnWacht.length === 1 ? 'uitgave wacht' : 'uitgaven wachten'} op jouw akkoord.</b> Kijk ze na en druk op Akkoord, zo is er achteraf geen discussie.</span>
-          <button type="button" onClick={() => { setEnkelWacht((x) => !x); setArchief(false); if (!enkelWacht) setSoort('alles') }} className="btn-secondary text-sm">{enkelWacht ? 'Alle uitgaven tonen' : 'Toon enkel die'}</button>
+          <span className="flex-1 min-w-[200px]"><b className="font-semibold">{openAkkoordenTekst(mijnOpen)} {mijnOpen.totaal === 1 ? 'wacht' : 'wachten'} op jouw akkoord.</b> Kijk na en druk op Akkoord, zo is er achteraf geen discussie.</span>
+          {mijnWacht.length > 0 && <button type="button" onClick={() => { setEnkelWacht((x) => !x); setArchief(false); if (!enkelWacht) setSoort('alles') }} className="btn-secondary text-sm">{enkelWacht ? 'Alle uitgaven tonen' : 'Toon enkel die uitgaven'}</button>}
         </div>
       )}
 
@@ -121,6 +132,7 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoor
         {stand.map((s) => {
           const besteed = alles ? s.besteedTotaal : s.besteedPeriode
           const max = alles ? s.budgetTotaal : s.budgetPeriode
+          const extra = alles ? s.extraTotaal : s.extraPeriode
           const pct = max > 0 ? Math.min(100, Math.round((besteed / max) * 100)) : besteed > 0 ? 100 : 0
           const aan = vennoot === s.vennoot
           return (
@@ -138,11 +150,22 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoor
                 <div className="flex flex-col sm:flex-row sm:justify-between text-[10px] sm:text-xs text-gray-600"><span className="truncate">Besteed{alles ? '' : ` in ${label}`}</span><span className="tabular-nums">{eur(besteed)}<span className="hidden sm:inline"> van {eur(max)}</span></span></div>
                 <div className="h-1.5 rounded-full bg-gray-100 mt-1 overflow-hidden"><div className={`h-1.5 rounded-full ${besteed > max ? 'bg-red-500' : 'bg-gray-900'}`} style={{ width: `${pct}%` }} /></div>
               </div>
+              {extra > 0 && <div className="text-[10px] sm:text-[11px] text-green-700 font-medium truncate">+{eurKort(extra)} extra<span className="hidden sm:inline"> budget</span></div>}
               <div className="hidden sm:block text-[11px] text-gray-500">In totaal besteed: {eur(s.besteedTotaal)}</div>
             </button>
           )
         })}
       </div>
+
+      {/* Extra budget en terugkerende uitgaven */}
+      {(toonExtra || toonTerug) && (
+        <div className={`grid gap-3 sm:gap-4 items-start ${toonExtra && toonTerug ? 'lg:grid-cols-2' : ''}`}>
+          {toonExtra && <ExtraBudgetKaart data={data} huidigeMaand={huidigeMaand} periode={alles ? null : periode} label={label} vennoot={vennoot}
+            onNieuw={() => setOpen({ soort: 'extra', e: null })} onBewerk={(e) => setOpen({ soort: 'extra', e })} onKlaar={klaar} />}
+          {toonTerug && <TerugkerendKaart data={data} vandaag={vandaag} vennoot={vennoot}
+            onNieuw={() => setOpen({ soort: 'uitgave', u: null, begin: 'terugkerend' })} onBewerk={(t) => setOpen({ soort: 'terugkerend', t })} onKlaar={klaar} />}
+        </div>
+      )}
 
       {/* Lijst */}
       <section className="card-base !p-0 overflow-hidden">
@@ -169,36 +192,47 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoor
                   </div>
                 )}
                 <ul className="divide-y divide-gray-100 border-b border-gray-100 last:border-b-0">
-                  {g.uitgaven.map((u) => (
-                    <li key={u.id} className="px-4 py-3 flex items-start gap-2">
-                      <div className="min-w-0 flex-1">
-                        <button type="button" onClick={() => (u.gearchiveerd_op ? null : setBewerk(u))} disabled={!!u.gearchiveerd_op} className="w-full text-left flex items-start gap-3 rounded-lg -m-1 p-1 hover:bg-gray-50 disabled:hover:bg-transparent">
-                          <span className="min-w-0 flex-1">
-                            <span className="text-xs text-gray-500 flex items-center gap-2 flex-wrap">
-                              <span className="tabular-nums">{dag(u.datum)}</span>
-                              {!vennoot && <span className="inline-flex text-[11px] font-semibold text-gray-800 rounded-full bg-gray-100 px-2 py-0.5">{data.namen[u.vennoot]}</span>}
-                              {u.bewijs_pad ? <span className="inline-flex items-center gap-1 text-gray-600"><Paperclip className="h-3.5 w-3.5" />Bon</span> : <span className="text-amber-700">geen bon</span>}
+                  {g.uitgaven.map((u) => {
+                    const t = u.terugkerend_id ? terugMap.get(u.terugkerend_id) ?? null : null
+                    const bewerk = () => (t ? setOpen({ soort: 'terugkerend', t }) : u.gearchiveerd_op ? null : setOpen({ soort: 'uitgave', u }))
+                    return (
+                      <li key={u.id} className="px-4 py-3 flex items-start gap-2">
+                        <div className="min-w-0 flex-1">
+                          <button type="button" onClick={bewerk} disabled={!t && !!u.gearchiveerd_op} className="w-full text-left flex items-start gap-3 rounded-lg -m-1 p-1 hover:bg-gray-50 disabled:hover:bg-transparent">
+                            <span className="min-w-0 flex-1">
+                              <span className="text-xs text-gray-500 flex items-center gap-2 flex-wrap">
+                                <span className="tabular-nums">{dag(u.datum)}</span>
+                                {!vennoot && <span className="inline-flex text-[11px] font-semibold text-gray-800 rounded-full bg-gray-100 px-2 py-0.5">{data.namen[u.vennoot]}</span>}
+                                {t ? (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-800 rounded-full bg-blue-50 border border-blue-100 px-2 py-0.5"><Repeat className="h-3 w-3" />{FREQ[t.frequentie].elke}</span>
+                                ) : u.bewijs_pad ? <span className="inline-flex items-center gap-1 text-gray-600"><Paperclip className="h-3.5 w-3.5" />Bon</span> : <span className="text-amber-700">geen bon</span>}
+                              </span>
+                              <span className="block text-sm font-medium text-gray-900 mt-0.5">{u.omschrijving}</span>
+                              {u.doel && <span className="block text-xs text-gray-500 mt-0.5">{u.doel}</span>}
                             </span>
-                            <span className="block text-sm font-medium text-gray-900 mt-0.5">{u.omschrijving}</span>
-                            {u.doel && <span className="block text-xs text-gray-500 mt-0.5">{u.doel}</span>}
-                          </span>
-                          <span className="text-sm font-semibold tabular-nums shrink-0">{eur(u.bedrag)}</span>
-                        </button>
-                        {u.gearchiveerd_op && <div className="text-xs text-amber-800 mt-1">Gearchiveerd{u.gearchiveerd_door ? ` door ${u.gearchiveerd_door}` : ''}: {u.archief_reden}</div>}
-                        {!u.gearchiveerd_op && <AkkoordRij u={u} data={data} bezig={akkoordBezig === u.id} onAkkoord={() => geefAkkoord(u)} />}
-                      </div>
-                      <div className="flex flex-col items-center gap-0.5 shrink-0 -mr-1">
-                        {u.gearchiveerd_op ? (
-                          <button type="button" onClick={async () => { try { await post({ actie: 'terugzetten', id: u.id }); klaar('Teruggezet.') } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } }} className="h-9 w-9 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Terugzetten" aria-label="Terugzetten"><RotateCcw className="h-4 w-4" /></button>
-                        ) : (
-                          <>
-                            <button type="button" onClick={() => setBewerk(u)} className="h-9 w-9 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Aanpassen" aria-label="Aanpassen"><Pencil className="h-4 w-4" /></button>
-                            <button type="button" onClick={() => setArchiveer(u)} className="h-9 w-9 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Archiveren" aria-label="Archiveren"><Archive className="h-4 w-4" /></button>
-                          </>
-                        )}
-                      </div>
-                    </li>
-                  ))}
+                            <span className="text-sm font-semibold tabular-nums shrink-0">{eur(u.bedrag)}</span>
+                          </button>
+                          {u.gearchiveerd_op && <div className="text-xs text-amber-800 mt-1">Gearchiveerd{u.gearchiveerd_door ? ` door ${u.gearchiveerd_door}` : ''}: {u.archief_reden}</div>}
+                          {!u.gearchiveerd_op && !t && (
+                            <div className="mt-1.5"><AkkoordChips stand={akkoordStand(u, data.akkoorden)} namen={data.namen} ik={data.ik} bezig={akkoordBezig === u.id} onAkkoord={() => geefAkkoord(u)} /></div>
+                          )}
+                          {t && !terugkerendStand(t, data.terugkerendAkkoorden).allen && <div className="text-[11px] text-amber-700 mt-1">De afspraak wacht nog op een akkoord</div>}
+                        </div>
+                        <div className="flex flex-col items-center gap-0.5 shrink-0 -mr-1">
+                          {t ? (
+                            <button type="button" onClick={bewerk} className="h-9 w-9 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Terugkerende uitgave aanpassen" aria-label="Terugkerende uitgave aanpassen"><Pencil className="h-4 w-4" /></button>
+                          ) : u.gearchiveerd_op ? (
+                            <button type="button" onClick={async () => { try { await post({ actie: 'terugzetten', id: u.id }); klaar('Teruggezet.') } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } }} className="h-9 w-9 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Terugzetten" aria-label="Terugzetten"><RotateCcw className="h-4 w-4" /></button>
+                          ) : (
+                            <>
+                              <button type="button" onClick={bewerk} className="h-9 w-9 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Aanpassen" aria-label="Aanpassen"><Pencil className="h-4 w-4" /></button>
+                              <button type="button" onClick={() => setOpen({ soort: 'archiveer', u })} className="h-9 w-9 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Archiveren" aria-label="Archiveren"><Archive className="h-4 w-4" /></button>
+                            </>
+                          )}
+                        </div>
+                      </li>
+                    )
+                  })}
                 </ul>
               </div>
             ))}
@@ -209,148 +243,40 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoor
 
       <RegelsKaart set="vennoten" data={regelsData} onOpen={setRegels} />
 
-      {bewerk && <UitgaveVenster u={bewerk === 'nieuw' ? null : bewerk} beginVennoot={vennoot ?? data.ik} namen={data.namen} vandaag={vandaag}
-        akkoorden={bewerk === 'nieuw' ? 0 : data.akkoorden.filter((a) => a.uitgave_id === bewerk.id).length}
-        onArchiveer={bewerk === 'nieuw' ? undefined : () => { const x = bewerk; setBewerk(null); setArchiveer(x) }}
-        onSluit={() => setBewerk(null)} onKlaar={(m) => { setBewerk(null); klaar(m) }} />}
-      {archiveer && <ArchiefVenster u={archiveer} naam={data.namen[archiveer.vennoot]} onSluit={() => setArchiveer(null)} onKlaar={() => { setArchiveer(null); klaar('Gearchiveerd. Telt niet meer mee.') }} />}
-      {regels && <RegelsVenster set="vennoten" data={regelsData} huidigeMaand={huidigeMaand} standaardRegels={STANDAARD_REGELS} begin={regels} onSluit={() => setRegels(null)} onKlaar={(m) => klaar(m)} />}
-    </div>
-  )
-}
-
-function Venster({ titel, onSluit, children }: { titel: string; onSluit: () => void; children: React.ReactNode }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/30 sm:p-4" onClick={onSluit}>
-      <div className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-xl max-h-[92dvh] overflow-y-auto" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={titel}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 sticky top-0 bg-white">
-          <h3 className="font-semibold">{titel}</h3>
-          <button type="button" onClick={onSluit} className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-gray-100" aria-label="Sluiten"><X className="h-4 w-4" /></button>
-        </div>
-        <div className="p-5 space-y-4">{children}</div>
-      </div>
-    </div>
-  )
-}
-
-function UitgaveVenster({ u, beginVennoot, namen, vandaag, akkoorden, onArchiveer, onSluit, onKlaar }: {
-  u: Uitgave | null; beginVennoot: Vennoot | null; namen: Record<Vennoot, string>; vandaag: string
-  /** Hoeveel akkoorden er al op deze uitgave staan (aanpassen = iedereen opnieuw). */
-  akkoorden: number
-  onArchiveer?: () => void; onSluit: () => void; onKlaar: (m: string) => void
-}) {
-  const [v, setV] = useState({ vennoot: u?.vennoot ?? beginVennoot ?? ('' as Vennoot | ''), omschrijving: u?.omschrijving ?? '', doel: u?.doel ?? '', datum: u?.datum ?? vandaag, bedrag: u ? u.bedrag.toFixed(2).replace('.', ',') : '' })
-  const [bon, setBon] = useState<{ pad: string; naam: string } | null>(null)
-  // Het huidige bonnetje van de uitgave weghalen (bij het bewaren).
-  const [bonWeg, setBonWeg] = useState(false)
-  const huidigeBon = u?.bewijs_pad && !bonWeg && !bon ? u : null
-  const [laden, setLaden] = useState(false)
-  const [bezig, setBezig] = useState(false)
-  const kiezer = useRef<HTMLInputElement>(null)
-
-  const laadBonOp = async (f?: File) => {
-    if (!f) return
-    if (f.size > 25 * 1024 * 1024) { toast.error('Het bestand is groter dan 25 MB.'); return }
-    setLaden(true)
-    try {
-      const naam = f.name && /\.[a-z0-9]+$/i.test(f.name) ? f.name : `bon.${(f.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg')}`
-      const r = await fetch('/api/admin/vennoten/bon', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ naam, grootte: f.size }) })
-      const j = await r.json().catch(() => ({}))
-      if (!r.ok) throw new Error(j.error || 'Opladen mislukt')
-      const { error } = await createClient().storage.from(j.bucket).uploadToSignedUrl(j.pad, j.token, f, { contentType: j.contentType, upsert: false })
-      if (error) throw new Error(error.message)
-      setBon({ pad: j.pad, naam })
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Opladen mislukt') } finally { setLaden(false); if (kiezer.current) kiezer.current.value = '' }
-  }
-  const bewaar = async () => {
-    setBezig(true)
-    try {
-      await post({ actie: u ? 'wijzig' : 'nieuw', id: u?.id, ...v, bon, bon_weg: !bon && bonWeg })
-      onKlaar(u ? 'Uitgave aangepast.' : 'Uitgave bewaard.')
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt'); setBezig(false) }
-  }
-
-  return (
-    <Venster titel={u ? 'Uitgave aanpassen' : 'Nieuwe uitgave'} onSluit={onSluit}>
-      <div>
-        <span className={lbl}>Voor wie</span>
-        <div className="grid grid-cols-3 gap-2">
-          {VENNOTEN.map((k) => (
-            <button key={k} type="button" onClick={() => setV({ ...v, vennoot: k })} aria-pressed={v.vennoot === k} className={`h-10 rounded-lg border text-sm font-medium ${v.vennoot === k ? 'bg-black text-white border-black' : 'border-gray-200 hover:bg-gray-50'}`}>{namen[k]}</button>
-          ))}
-        </div>
-      </div>
-      <label className="block"><span className={lbl}>Wat</span><input className={inp} value={v.omschrijving} onChange={(e) => setV({ ...v, omschrijving: e.target.value })} placeholder="bv. Fiets, broodje bij klantbezoek" maxLength={200} /></label>
-      <label className="block"><span className={lbl}>Waarvoor dient het</span><textarea rows={2} className={inp} value={v.doel} onChange={(e) => setV({ ...v, doel: e.target.value })} placeholder="bv. Woon-werkverkeer, lunch tijdens bezoek bij Era Nobis" maxLength={500} /></label>
-      <div className="grid grid-cols-2 gap-3">
-        <label className="block"><span className={lbl}>Wanneer</span><input type="date" className={inp} value={v.datum} max={vandaag} onChange={(e) => setV({ ...v, datum: e.target.value })} /></label>
-        <label className="block"><span className={lbl}>Bedrag (€, incl. btw)</span><input inputMode="decimal" className={inp} value={v.bedrag} onChange={(e) => setV({ ...v, bedrag: e.target.value })} placeholder="0,00" /></label>
-      </div>
-      <div>
-        <span className={lbl}>Bonnetje of factuur</span>
-        <input ref={kiezer} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => laadBonOp(e.target.files?.[0])} />
-        {huidigeBon && (
-          <div className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 mb-2 text-sm">
-            <Paperclip className="h-4 w-4 text-gray-400 shrink-0" />
-            <span className="truncate flex-1 min-w-0">{huidigeBon.bewijs_naam ?? 'Bonnetje'}</span>
-            <a href={`/api/admin/vennoten/bon?pad=${encodeURIComponent(huidigeBon.bewijs_pad!)}`} target="_blank" rel="noreferrer" className="h-8 px-2 rounded-lg inline-flex items-center gap-1 text-xs hover:bg-gray-100"><Eye className="h-3.5 w-3.5" />Bekijken</a>
-            <button type="button" onClick={() => setBonWeg(true)} className="h-8 px-2 rounded-lg inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50"><Trash2 className="h-3.5 w-3.5" />Weghalen</button>
-          </div>
-        )}
-        {bonWeg && !bon && <p className="text-xs text-amber-800 mb-2">Het bonnetje gaat weg bij het bewaren. <button type="button" onClick={() => setBonWeg(false)} className="underline">Ongedaan maken</button></p>}
-        <button type="button" onClick={() => kiezer.current?.click()} disabled={laden} className="btn-secondary text-sm w-full justify-center">
-          {laden ? <Loader2 className="h-4 w-4 animate-spin" /> : bon ? <Check className="h-4 w-4 text-green-600" /> : <Paperclip className="h-4 w-4" />}
-          {bon ? bon.naam : huidigeBon ? 'Ander bonnetje kiezen' : 'Foto trekken of bestand kiezen'}
-        </button>
-        <p className="text-[11px] text-gray-500 mt-1">Op je gsm kan je meteen een foto trekken. Een pdf van een factuur kan ook.</p>
-      </div>
-      {u && akkoorden > 0 && <p className="text-xs text-gray-500">Er staat al akkoord op deze uitgave. Pas je iets aan, dan geven Marco, Bram en Chiara opnieuw akkoord.</p>}
-      <button type="button" onClick={bewaar} disabled={bezig || laden || !v.vennoot} className="btn-primary w-full">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}{u ? 'Wijzigingen bewaren' : 'Bewaren'}</button>
-      {onArchiveer && <button type="button" onClick={onArchiveer} className="btn-secondary w-full justify-center text-sm"><Archive className="h-4 w-4" />Archiveren</button>}
-    </Venster>
-  )
-}
-
-function ArchiefVenster({ u, naam, onSluit, onKlaar }: { u: Uitgave; naam: string; onSluit: () => void; onKlaar: () => void }) {
-  const [reden, setReden] = useState('')
-  const [bezig, setBezig] = useState(false)
-  const doe = async () => {
-    setBezig(true)
-    try { await post({ actie: 'archiveer', id: u.id, reden }); onKlaar() } catch (e) { toast.error(e instanceof Error ? e.message : 'Archiveren mislukt'); setBezig(false) }
-  }
-  return (
-    <Venster titel="Uitgave archiveren" onSluit={onSluit}>
-      <p className="text-sm text-gray-700"><b className="font-semibold">{naam}</b> · {u.omschrijving} · {eur(u.bedrag)}</p>
-      <p className="text-xs text-gray-500">Een gearchiveerde uitgave telt niet meer mee voor het tegoed. Ze blijft zichtbaar in het archief, met de reden erbij.</p>
-      <label className="block"><span className={lbl}>Verantwoording</span><textarea rows={3} className={inp} value={reden} onChange={(e) => setReden(e.target.value)} maxLength={500} placeholder="Waarom archiveer je deze uitgave?" /></label>
-      <button type="button" onClick={() => setReden(REDEN_VOORSTEL)} className="text-xs px-2.5 py-1 rounded-full border border-gray-200 hover:bg-gray-50 text-left">{REDEN_VOORSTEL}</button>
-      <button type="button" onClick={doe} disabled={bezig || reden.trim().length < 3} className="btn-primary w-full">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4" />}Archiveren</button>
-    </Venster>
-  )
-}
-
-/** Akkoord van de drie vennoten bij één uitgave: wie al akkoord gaf, en de knop voor jou. */
-function AkkoordRij({ u, data, bezig, onAkkoord }: { u: Uitgave; data: VennotenData; bezig: boolean; onAkkoord: () => void }) {
-  const stand = akkoordStand(u, data.akkoorden)
-  const ikMoet = !!data.ik && !stand[data.ik]
-  return (
-    <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-      {VENNOTEN.map((k) => {
-        const a = stand[k]
-        return (
-          <span key={k} title={a ? `Akkoord op ${new Date(a.akkoord_op).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels' })}` : 'Nog geen akkoord'}
-            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ${a ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-white text-gray-500 border border-gray-200'}`}>
-            {a ? <Check className="h-3 w-3" /> : null}{data.namen[k]}
-          </span>
-        )
-      })}
-      {stand.allen && <span className="text-[11px] text-green-700 font-medium">akkoord van alle drie</span>}
-      {!stand.allen && stand.aangepast && <span className="text-[11px] text-amber-700">aangepast na een akkoord</span>}
-      {ikMoet && (
-        <button type="button" onClick={onAkkoord} disabled={bezig} className="ml-1 inline-flex items-center gap-1 rounded-full bg-gray-900 text-white px-2.5 py-0.5 text-[11px] font-semibold hover:bg-black disabled:opacity-50">
-          {bezig ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}Akkoord
-        </button>
+      {open?.soort === 'uitgave' && (
+        <UitgaveVenster u={open.u} begin={open.begin} beginVennoot={vennoot ?? data.ik} data={data} vandaag={vandaag}
+          onArchiveer={open.u ? () => setOpen({ soort: 'archiveer', u: open.u! }) : undefined}
+          onSluit={() => setOpen(null)} onKlaar={klaar} />
       )}
+      {open?.soort === 'terugkerend' && (
+        <UitgaveVenster t={open.t} beginVennoot={vennoot ?? data.ik} data={data} vandaag={vandaag}
+          onSchrap={open.t.gearchiveerd_op ? undefined : () => setOpen({ soort: 'schrapTerugkerend', t: open.t })}
+          onSluit={() => setOpen(null)} onKlaar={klaar} />
+      )}
+      {open?.soort === 'extra' && (
+        <ExtraVenster e={open.e} data={data} huidigeMaand={huidigeMaand} beginVennoot={vennoot}
+          onSchrap={open.e && !open.e.gearchiveerd_op ? () => setOpen({ soort: 'schrapExtra', e: open.e! }) : undefined}
+          onSluit={() => setOpen(null)} onKlaar={klaar} />
+      )}
+      {open?.soort === 'archiveer' && (
+        <SchrapVenster titel="Uitgave archiveren" actie="archiveer" id={open.u.id} knop="Archiveren"
+          regel={<><b className="font-semibold">{data.namen[open.u.vennoot]}</b> · {open.u.omschrijving} · {eur(open.u.bedrag)}</>}
+          uitleg="Een gearchiveerde uitgave telt niet meer mee voor het tegoed. Ze blijft zichtbaar in het archief, met de reden erbij."
+          onSluit={() => setOpen(null)} onKlaar={() => klaar('Gearchiveerd. Telt niet meer mee.')} />
+      )}
+      {open?.soort === 'schrapExtra' && (
+        <SchrapVenster titel="Extra budget schrappen" actie="extra.archiveer" id={open.e.id} knop="Schrappen" voorstel="Niet doorgegaan."
+          regel={<><b className="font-semibold capitalize">{maand(open.e.maand)}</b> · +{eurKort(open.e.bedrag)}{open.e.vennoten.length > 1 ? ' per vennoot' : ''}</>}
+          uitleg="Geschrapt extra budget telt niet mee. Het blijft zichtbaar onder Geschrapt, met de reden erbij, en kan teruggezet worden."
+          onSluit={() => setOpen(null)} onKlaar={() => klaar('Geschrapt. Telt niet meer mee.')} />
+      )}
+      {open?.soort === 'schrapTerugkerend' && (
+        <SchrapVenster titel="Terugkerende uitgave schrappen" actie="terugkerend.archiveer" id={open.t.id} knop="Schrappen" voorstel="Per vergissing ingegeven."
+          regel={<><b className="font-semibold">{data.namen[open.t.vennoot]}</b> · {open.t.omschrijving} · {eur(open.t.bedrag)} {FREQ[open.t.frequentie].per}</>}
+          uitleg="Schrappen = geen enkele betaling telt nog mee, ook de vorige niet. Loopt het gewoon af? Gebruik dan Stoppen."
+          onSluit={() => setOpen(null)} onKlaar={() => klaar('Geschrapt. De betalingen tellen niet meer mee.')} />
+      )}
+      {regels && <RegelsVenster set="vennoten" data={regelsData} huidigeMaand={huidigeMaand} standaardRegels={STANDAARD_REGELS} begin={regels} onSluit={() => setRegels(null)} onKlaar={(m) => klaar(m)} />}
     </div>
   )
 }

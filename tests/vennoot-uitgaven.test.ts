@@ -5,6 +5,9 @@ import {
   regelsVerschil,
   controleerUitgave, controleerReden, periodeVan, verschuif, maandenTussen, budgetVan, standPerVennoot, uitgavenIn,
   controleerRegels, regelsTekst, tekenStand, perMaand, periodeOpties, type Uitgave, type RegelsVersie,
+  controleerExtra, extraTekst, extraStand, extraTelt, controleerTerugkerend, terugkerendTekst, terugkerendStand, betaaldata,
+  volgendeBetaling, terugkerendeUitgaven, isLopend, openAkkoorden, openAkkoordenTekst, namenLijst,
+  type BudgetExtra, type ExtraAkkoord, type Terugkerend, type TerugkerendAkkoord,
 } from '../lib/vennoot-uitgaven'
 
 let n = 0
@@ -129,6 +132,123 @@ test('Periodes om uit te kiezen: van de eerste uitgave tot nu, nieuwste eerst', 
   assert.deepEqual(periodeOpties('kwartaal', '2026-02', '2026-11').map((p) => p.label), ['Q4 2026', 'Q3 2026', 'Q2 2026', 'Q1 2026'])
   assert.deepEqual(periodeOpties('jaar', '2025-12', '2026-11').map((p) => p.label), ['2026', '2025'])
   assert.deepEqual(periodeOpties('maand', null, '2026-11').map((p) => p.label), ['november 2026'])
+})
+
+// ── Extra budget ───────────────────────────────────────────────────────────
+
+const ex = (extra: Partial<BudgetExtra> = {}): BudgetExtra => ({
+  id: 'e1', vennoten: ['marco'], maand: '2026-11', bedrag: 200, reden: 'Klantbezoeken in Antwerpen deze maand',
+  gearchiveerd_op: null, gearchiveerd_door: null, archief_reden: null, created_at: null, created_by: null, ...extra,
+})
+const akE = (e: BudgetExtra, wie: ExtraAkkoord['vennoot'][]): ExtraAkkoord[] =>
+  wie.map((v) => ({ extra_id: e.id, vennoot: v, naam: v, akkoord_op: '2026-11-20T10:00:00Z', inhoud_tekst: extraTekst(e) }))
+
+test('Extra budget: voor wie, maand, bedrag en een onderbouwing verplicht', () => {
+  const ok = controleerExtra({ vennoten: ['chiara', 'marco', 'jan'], maand: '2026-05', bedrag: '500', reden: '  Alle drie  extra voor de teamdag ' })
+  assert.ok(ok.ok)
+  if (ok.ok) assert.deepEqual(ok.waarde, { vennoten: ['marco', 'chiara'], maand: '2026-05', bedrag: 500, reden: 'Alle drie extra voor de teamdag' })
+  assert.equal(controleerExtra({ vennoten: [], maand: '2026-05', bedrag: 500, reden: 'Een goede reden hier' }).ok, false)
+  assert.equal(controleerExtra({ vennoten: ['bram'], maand: '2026-5', bedrag: 500, reden: 'Een goede reden hier' }).ok, false)
+  assert.equal(controleerExtra({ vennoten: ['bram'], maand: '2026-05', bedrag: 0, reden: 'Een goede reden hier' }).ok, false)
+  assert.equal(controleerExtra({ vennoten: ['bram'], maand: '2026-05', bedrag: 200, reden: 'kort' }).ok, false, 'reden te kort')
+})
+
+test('Extra budget telt pas als alle drie akkoord gaven, en enkel voor wie het geldt', () => {
+  const budget = { maandbudget: 250, start_maand: '2026-11' }
+  const per = periodeVan('maand', '2026-11')
+  const e = ex()
+  const zonder = standPerVennoot([], budget, per, '2026-11', [e], akE(e, ['marco', 'bram']))
+  assert.equal(zonder.find((s) => s.vennoot === 'marco')!.tegoed, 250, 'twee van de drie: telt nog niet')
+  const met = standPerVennoot([], budget, per, '2026-11', [e], akE(e, ['marco', 'bram', 'chiara']))
+  const m = met.find((s) => s.vennoot === 'marco')!
+  assert.equal(m.tegoed, 450)
+  assert.equal(m.budgetPeriode, 450)
+  assert.equal(m.extraPeriode, 200)
+  assert.equal(met.find((s) => s.vennoot === 'bram')!.tegoed, 250, 'Bram krijgt niets extra')
+  // Aangepast na het akkoord: telt niet meer tot iedereen opnieuw akkoord gaf.
+  const aangepast = { ...e, bedrag: 300 }
+  assert.equal(extraTelt(aangepast, akE(e, ['marco', 'bram', 'chiara'])), false)
+  assert.equal(extraStand(aangepast, akE(e, ['marco', 'bram', 'chiara'])).aangepast, true)
+  // Geschrapt telt nooit.
+  assert.equal(extraTelt({ ...e, gearchiveerd_op: '2026-11-21T00:00:00Z' }, akE(e, ['marco', 'bram', 'chiara'])), false)
+})
+
+test('Extra budget voor een latere maand telt pas vanaf die maand; in het jaar zit het mee', () => {
+  const budget = { maandbudget: 250, start_maand: '2026-01' }
+  const mei = ex({ id: 'mei', vennoten: ['marco', 'bram', 'chiara'], maand: '2026-05', bedrag: 500 })
+  const dec = ex({ id: 'dec', vennoten: ['bram'], maand: '2026-12', bedrag: 200 })
+  const ak = [...akE(mei, ['marco', 'bram', 'chiara']), ...akE(dec, ['marco', 'bram', 'chiara'])]
+  const jaar = standPerVennoot([], budget, periodeVan('jaar', '2026-11'), '2026-11', [mei, dec], ak)
+  const b = jaar.find((s) => s.vennoot === 'bram')!
+  assert.equal(b.budgetTotaal, 250 * 11 + 500, 'december nog niet')
+  assert.equal(b.budgetPeriode, 250 * 11 + 500)
+  const nov = standPerVennoot([], budget, periodeVan('maand', '2026-11'), '2026-11', [mei, dec], ak).find((s) => s.vennoot === 'bram')!
+  assert.equal(nov.budgetPeriode, 250, 'november heeft geen extra')
+  assert.equal(nov.tegoed, 250 * 11 + 500, 'het gespaarde tegoed bevat mei')
+})
+
+// ── Terugkerende uitgaven ──────────────────────────────────────────────────
+
+const tk = (extra: Partial<Terugkerend> = {}): Terugkerend => ({
+  id: 't1', vennoot: 'marco', omschrijving: 'Lease wagen', doel: 'Klantbezoeken', bedrag: 450, frequentie: 'maand',
+  start_datum: '2026-08-31', eind_datum: null, bewijs_pad: null, bewijs_naam: null,
+  gearchiveerd_op: null, gearchiveerd_door: null, archief_reden: null, created_at: null, created_by: null, ...extra,
+})
+
+test('Terugkerend: invoer met hoe vaak, eerste betaling en optioneel een einde', () => {
+  const ok = controleerTerugkerend({ vennoot: 'marco', omschrijving: ' Lease  wagen ', doel: '', bedrag: '450,00', frequentie: 'maand', start_datum: '2026-09-01', eind_datum: '' })
+  assert.ok(ok.ok)
+  if (ok.ok) assert.deepEqual(ok.waarde, { vennoot: 'marco', omschrijving: 'Lease wagen', doel: null, bedrag: 450, frequentie: 'maand', start_datum: '2026-09-01', eind_datum: null })
+  assert.equal(controleerTerugkerend({ vennoot: 'marco', omschrijving: 'Lease', bedrag: 450, frequentie: 'week', start_datum: '2026-09-01' }).ok, false)
+  assert.equal(controleerTerugkerend({ vennoot: 'marco', omschrijving: 'Lease', bedrag: 450, frequentie: 'maand', start_datum: '2026-09-01', eind_datum: '2026-08-01' }).ok, false, 'einde vóór start')
+  assert.equal(controleerTerugkerend({ vennoot: 'marco', omschrijving: 'Lease', bedrag: 450, frequentie: 'maand', start_datum: '2026-02-30' }).ok, false, 'bestaat niet')
+})
+
+test('Betaaldata: zelfde dag elke maand, of de laatste dag als die dag niet bestaat', () => {
+  assert.deepEqual(betaaldata(tk(), '2026-11-22'), ['2026-08-31', '2026-09-30', '2026-10-31'])
+  assert.deepEqual(betaaldata(tk({ frequentie: 'kwartaal', start_datum: '2026-01-15' }), '2026-11-22'), ['2026-01-15', '2026-04-15', '2026-07-15', '2026-10-15'])
+  assert.deepEqual(betaaldata(tk({ frequentie: 'jaar', start_datum: '2024-02-29' }), '2026-11-22'), ['2024-02-29', '2025-02-28', '2026-02-28'])
+  assert.deepEqual(betaaldata(tk({ start_datum: '2026-10-01', eind_datum: '2026-10-31' }), '2026-11-22'), ['2026-10-01'], 'gestopt')
+  assert.deepEqual(betaaldata(tk({ start_datum: '2026-12-01' }), '2026-11-22'), [], 'start later')
+  assert.equal(volgendeBetaling(tk(), '2026-11-22'), '2026-11-30')
+  assert.equal(volgendeBetaling(tk({ start_datum: '2026-10-01', eind_datum: '2026-10-31' }), '2026-11-22'), null)
+  assert.equal(isLopend(tk({ eind_datum: '2026-11-21' }), '2026-11-22'), false)
+  assert.equal(isLopend(tk(), '2026-11-22'), true)
+})
+
+test('Elke betaling tot vandaag telt als uitgave van die vennoot; geschrapt telt niet', () => {
+  const lijst = terugkerendeUitgaven([tk(), tk({ id: 't2', gearchiveerd_op: '2026-11-01T00:00:00Z' })], '2026-11-22')
+  assert.equal(lijst.length, 3)
+  assert.deepEqual(lijst.map((x) => x.id), ['t:t1:2026-08-31', 't:t1:2026-09-30', 't:t1:2026-10-31'])
+  assert.equal(lijst[0].terugkerend_id, 't1')
+  const s = standPerVennoot(lijst, { maandbudget: 250, start_maand: '2026-08' }, periodeVan('maand', '2026-10'), '2026-11')
+  const m = s.find((x) => x.vennoot === 'marco')!
+  assert.equal(m.besteedPeriode, 450)
+  assert.equal(m.besteedTotaal, 1350)
+  assert.equal(m.tegoed, 1000 - 1350)
+  assert.equal(perMaand(lijst)[0].label, 'oktober 2026')
+})
+
+test('Akkoord op een terugkerende uitgave hoort bij exact de afspraak', () => {
+  const t = tk()
+  const ak: TerugkerendAkkoord[] = (['marco', 'bram', 'chiara'] as const).map((v) => ({ terugkerend_id: 't1', vennoot: v, naam: v, akkoord_op: 'x', inhoud_tekst: terugkerendTekst(t) }))
+  assert.equal(terugkerendStand(t, ak).allen, true)
+  const hoger = { ...t, bedrag: 500 }
+  assert.equal(terugkerendStand(hoger, ak).allen, false)
+  assert.equal(terugkerendStand(hoger, ak).aangepast, true)
+  assert.ok(terugkerendTekst(t).includes('450.00 per maand'))
+})
+
+test('Wat wacht op jou: uitgaven, extra budget en terugkerende samen', () => {
+  const e = ex()
+  const t = tk()
+  const o = openAkkoorden({ uitgaven: [], akkoorden: [], extras: [e, ex({ id: 'weg', gearchiveerd_op: 'x' })], extraAkkoorden: akE(e, ['marco']), terugkerend: [t], terugkerendAkkoorden: [] }, 'bram')
+  assert.equal(o.extras.length, 1)
+  assert.equal(o.terugkerend.length, 1)
+  assert.equal(o.totaal, 2)
+  assert.equal(openAkkoordenTekst(o), '1 keer extra budget en 1 terugkerende uitgave')
+  assert.equal(openAkkoorden({ uitgaven: [], akkoorden: [], extras: [e], extraAkkoorden: akE(e, ['marco']) }, 'marco').totaal, 0)
+  assert.equal(namenLijst(['Marco', 'Bram', 'Chiara']), 'Marco, Bram en Chiara')
 })
 
 console.log(`\n${n} tests geslaagd\n`)
