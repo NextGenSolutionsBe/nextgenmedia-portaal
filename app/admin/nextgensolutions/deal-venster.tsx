@@ -7,7 +7,7 @@ import { leesGetal } from '@/lib/getal'
 import { ClickupTaken, NieuweTaak } from '@/components/admin/clickup-taken'
 import { DicteerKnop } from '@/components/admin/dicteer-knop'
 import {
-  BRONNEN, DIENSTEN, FASES, STANDAARD_LOOPTIJD, VERLOREN_REDENEN, dealWaarde, faseLabel, type Deal, type Fase,
+  BRONNEN, FASES, STANDAARD_LOOPTIJD, VERLOREN_REDENEN, dealWaarde, faseLabel, type Deal, type Fase,
 } from '@/lib/ngs/model'
 import { Chip, FASE_STIJL, Venster, dagKort, eur, eurCent, inp, lbl, post, tijdstip } from './ui'
 
@@ -55,13 +55,9 @@ function Formulier({ v, zet, namen }: { v: Velden; zet: (p: Partial<Velden>) => 
         <label className="block"><span className={lbl}>E-mail</span><input type="email" className={inp} value={v.email} onChange={(e) => zet({ email: e.target.value })} /></label>
         <label className="block"><span className={lbl}>Telefoon</span><input type="tel" className={inp} value={v.telefoon} onChange={(e) => zet({ telefoon: e.target.value })} /></label>
       </div>
-      <label className="block"><span className={lbl}>Waarover</span><input className={inp} value={v.titel} onChange={(e) => zet({ titel: e.target.value })} placeholder="bv. Nieuwe website met boekingsmodule" /></label>
-      <div>
-        <span className={lbl}>Diensten</span>
-        <div className="flex gap-1.5 flex-wrap">
-          {DIENSTEN.map((d) => <Chip key={d.key} aan={v.diensten.includes(d.key)} onClick={() => zet({ diensten: v.diensten.includes(d.key) ? v.diensten.filter((x) => x !== d.key) : [...v.diensten, d.key] })}>{d.label}</Chip>)}
-        </div>
-      </div>
+      <label className="block"><span className={lbl}>Info <span className="text-gray-400 font-normal">(vrijblijvend)</span></span>
+        <textarea rows={3} className={inp} value={v.titel} onChange={(e) => zet({ titel: e.target.value })} placeholder="bv. AI-automatisatie van hun offertes, budget rond € 8.000, beslissen in januari" />
+      </label>
       <div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <label className="block"><span className={lbl}>Eenmalig (€)</span><input inputMode="decimal" className={inp} value={v.waarde_eenmalig} onChange={(e) => zet({ waarde_eenmalig: e.target.value })} placeholder="0" /></label>
@@ -106,6 +102,10 @@ export function DealVenster({ deal, ik, namen, onSluit, onKlaar, onVerplaats, on
 }) {
   const [v, setV] = useState<Velden>(() => veldenVan(deal, ik))
   const [fase, setFase] = useState<Fase>('afspraak')
+  // Toevoegen als Closed Won (bv. een bestaande klant) of Closed Lost: wanneer, en bij lost waarom.
+  const vandaagBE = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Brussels', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+  const [datum, setDatum] = useState(vandaagBE)
+  const [reden, setReden] = useState('')
   const [bezig, setBezig] = useState(false)
   const [notities, setNotities] = useState<Notitie[] | null>(null)
   const [nieuweNotitie, setNieuweNotitie] = useState('')
@@ -126,7 +126,7 @@ export function DealVenster({ deal, ik, namen, onSluit, onKlaar, onVerplaats, on
     setBezig(true)
     try {
       if (deal) { await post({ actie: 'wijzig', id: deal.id, ...lichaam(v) }); onKlaar('Deal bewaard.') }
-      else { const j = await post({ actie: 'nieuw', fase, ...lichaam(v) }); onKlaar(`${v.bedrijf} staat in ${faseLabel(fase)}.`, { id: String(j.id), fase }) }
+      else { const j = await post({ actie: 'nieuw', fase, datum, reden, ...lichaam(v) }); onKlaar(`${v.bedrijf} staat in ${faseLabel(fase)}.`, { id: String(j.id), fase }) }
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt'); setBezig(false) }
   }
   const voegNotitieToe = async () => {
@@ -141,18 +141,35 @@ export function DealVenster({ deal, ik, namen, onSluit, onKlaar, onVerplaats, on
 
   if (!deal) {
     return (
-      <Venster titel="Nieuwe deal" onSluit={onSluit} breed>
+      <Venster titel="Klant toevoegen" onSluit={onSluit} breed>
         <div>
-          <span className={lbl}>Start in</span>
-          <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-gray-100">
-            {FASES.filter((f) => f.key === 'afspraak' || f.key === 'voorstel' || f.key === 'opvolgen').map((f) => (
-              <button key={f.key} type="button" onClick={() => setFase(f.key)} aria-pressed={fase === f.key} className={`h-9 rounded-lg text-sm ${fase === f.key ? 'bg-white shadow-sm font-semibold text-gray-900' : 'text-gray-600'}`}>{f.label}</button>
+          <span className={lbl}>Status</span>
+          <div className="grid grid-cols-5 gap-1 p-1 rounded-xl bg-gray-100" role="group" aria-label="Status">
+            {FASES.map((f) => (
+              <button key={f.key} type="button" onClick={() => setFase(f.key)} aria-pressed={fase === f.key}
+                className={`h-9 rounded-lg text-[11px] sm:text-xs leading-tight px-1 ${fase === f.key ? 'bg-white shadow-sm font-semibold text-gray-900' : 'text-gray-600'}`}>
+                <span className="hidden sm:inline">{f.label}</span><span className="sm:hidden">{f.kort}</span>
+              </button>
             ))}
           </div>
           {fase === 'opvolgen' && <p className="text-[11px] text-gray-500 mt-1">Na het toevoegen kies je wanneer je opvolgt; dat wordt een taak in ClickUp.</p>}
         </div>
+        {fase === 'won' && (
+          <div className="rounded-xl bg-green-50 border border-green-100 p-3 space-y-2">
+            <label className="block"><span className={lbl}>Gewonnen op</span><input type="date" className={inp} value={datum} max={vandaagBE} onChange={(e) => setDatum(e.target.value)} /></label>
+            <p className="text-[11px] text-green-900">Vul hieronder de waarde in (eenmalig en/of per maand): daar komen de cijfers uit.</p>
+          </div>
+        )}
+        {fase === 'lost' && (
+          <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 space-y-2">
+            <span className={lbl}>Waarom ging het niet door?</span>
+            <div className="flex gap-1.5 flex-wrap">{VERLOREN_REDENEN.map((r) => <Chip key={r} aan={reden === r} onClick={() => setReden(r)}>{r}</Chip>)}</div>
+            <input className={inp} value={reden} onChange={(e) => setReden(e.target.value)} placeholder="Of schrijf het zelf" />
+            <label className="block"><span className={lbl}>Op</span><input type="date" className={inp} value={datum} max={vandaagBE} onChange={(e) => setDatum(e.target.value)} /></label>
+          </div>
+        )}
         <Formulier v={v} zet={zet} namen={namen} />
-        <button type="button" onClick={bewaar} disabled={bezig || !v.bedrijf.trim()} className="btn-primary w-full">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Toevoegen</button>
+        <button type="button" onClick={bewaar} disabled={bezig || !v.bedrijf.trim() || (fase === 'lost' && reden.trim().length < 2)} className="btn-primary w-full">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Toevoegen</button>
       </Venster>
     )
   }
@@ -160,7 +177,7 @@ export function DealVenster({ deal, ik, namen, onSluit, onKlaar, onVerplaats, on
   const stijl = FASE_STIJL[deal.fase]
   return (
     <Venster breed onSluit={onSluit} titel={deal.bedrijf}
-      sub={<span className="inline-flex items-center gap-1.5"><span className={`h-1.5 w-1.5 rounded-full ${stijl.stip}`} />{faseLabel(deal.fase)} · {eur(dealWaarde(deal))}{deal.titel ? ` · ${deal.titel}` : ''}</span>}>
+      sub={<span className="inline-flex items-center gap-1.5"><span className={`h-1.5 w-1.5 rounded-full ${stijl.stip}`} />{faseLabel(deal.fase)} · {eur(dealWaarde(deal))}</span>}>
       {/* Fase: klik = verplaatsen */}
       <div className="grid grid-cols-5 gap-1 p-1 rounded-xl bg-gray-100" role="group" aria-label="Fase">
         {FASES.map((f) => (

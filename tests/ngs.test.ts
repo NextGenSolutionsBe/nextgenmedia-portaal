@@ -17,13 +17,13 @@ const deal = (x: Partial<Deal>): Deal => ({
 })
 
 test('Deal invoeren: bedrijf verplicht, bedragen zoals mensen ze typen, enkel bekende diensten', () => {
-  const ok = controleerDeal({ bedrijf: '  Kilowot ', email: 'jan@kilowot.be', waarde_eenmalig: '4.500', waarde_maandelijks: '79,50', looptijd_maanden: '24', diensten: ['website', 'seo', 'raketten'], bron: 'inbound' })
+  const ok = controleerDeal({ bedrijf: '  Kilowot ', email: 'jan@kilowot.be', waarde_eenmalig: '4.500', waarde_maandelijks: '79,50', looptijd_maanden: '24', diensten: ['ai', 'software', 'seo'], bron: 'inbound' })
   assert.ok(ok.ok)
   if (ok.ok) {
     assert.equal(ok.waarde.bedrijf, 'Kilowot')
     assert.equal(ok.waarde.waarde_eenmalig, 4500)
     assert.equal(ok.waarde.waarde_maandelijks, 79.5)
-    assert.deepEqual(ok.waarde.diensten, ['website', 'seo'])
+    assert.deepEqual(ok.waarde.diensten, ['ai', 'software'], 'enkel wat NextGenSolutions doet')
   }
   assert.equal(controleerDeal({ bedrijf: '' }).ok, false)
   assert.equal(controleerDeal({ bedrijf: 'X', email: 'geen-mail' }).ok, false)
@@ -59,7 +59,7 @@ test('Omzet per maand: eenmalig in de maand van gewonnen, maandbedrag zolang de 
 
 test('Cijfers: winrate, gemiddelde, open pipeline gewogen, per dienst en redenen', () => {
   const deals = [
-    deal({ id: 'a', fase: 'won', gewonnen_op: '2026-11-05', waarde_eenmalig: 6000, diensten: ['website', 'seo'], bron: 'inbound', created_at: '2026-10-06T10:00:00Z' }),
+    deal({ id: 'a', fase: 'won', gewonnen_op: '2026-11-05', waarde_eenmalig: 6000, diensten: ['ai', 'software'], bron: 'inbound', created_at: '2026-10-06T10:00:00Z' }),
     deal({ id: 'b', fase: 'lost', verloren_op: '2026-11-10', verloren_reden: 'Te duur', bron: 'outbound' }),
     deal({ id: 'c', fase: 'voorstel', waarde_eenmalig: 10000 }),
     deal({ id: 'd', fase: 'opvolgen', waarde_maandelijks: 500, looptijd_maanden: 12 }),
@@ -72,7 +72,7 @@ test('Cijfers: winrate, gemiddelde, open pipeline gewogen, per dienst en redenen
   assert.equal(c.doorlooptijd, 30)
   assert.equal(c.pipelineWaarde, 16000)
   assert.equal(c.gewogen, 10000 * 0.4 + 6000 * 0.6)
-  assert.deepEqual(c.perDienst, [{ dienst: 'website', aantal: 1, waarde: 3000 }, { dienst: 'seo', aantal: 1, waarde: 3000 }])
+  assert.deepEqual(c.perDienst, [{ dienst: 'ai', aantal: 1, waarde: 3000 }, { dienst: 'software', aantal: 1, waarde: 3000 }])
   assert.deepEqual(c.redenen, [{ reden: 'Te duur', aantal: 1 }])
   assert.equal(cijfersVoor(deals, null).gewonnen.aantal, 2, 'alles')
 })

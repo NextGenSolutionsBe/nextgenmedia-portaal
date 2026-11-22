@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { ArrowRight, CalendarClock, Check, Plus, Search, X } from 'lucide-react'
 import { zoekVeld } from '@/lib/zoekveld'
 import {
-  FASES, cijfersVoor, dealWaarde, dienstLabel, isOpen, periodeVan, sorteerKolom, volgendeOpvolging, wanneer, zoekDeal,
+  FASES, cijfersVoor, dealWaarde, isOpen, periodeVan, sorteerKolom, volgendeOpvolging, wanneer, zoekDeal,
   type Deal, type Fase,
 } from '@/lib/ngs/model'
 import type { NgsData } from '@/lib/ngs/server'
@@ -20,7 +20,7 @@ const RECENT_DAGEN = 90
 const initialen = (naam: string | null) => (naam ?? '').split(/\s+/).filter(Boolean).slice(0, 2).map((x) => x[0]!.toUpperCase()).join('') || '?'
 
 /**
- * De pipeline van NextGen Solutions: Afspraak → Voorstel maken → Opvolgen →
+ * De pipeline van NextGenSolutions: Afspraak → Voorstel maken → Opvolgen →
  * Closed Won / Closed Lost. Slepen tussen kolommen (computer) of de knop op de
  * kaart (gsm). Naar Opvolgen = meteen zeggen wanneer, dat wordt een ClickUp-taak.
  */
@@ -99,8 +99,8 @@ export function PipelineClient({ begin, vandaag, openDeal }: { begin: NgsData; v
   return (
     <div className="space-y-5 animate-fade-in">
       <Kop actief="pipeline" titel="Pipeline"
-        sub={`${eur(deze.pipelineWaarde)} open · ${data.deals.filter((d) => isOpen(d.fase)).length} deals`}
-        rechts={<button type="button" onClick={() => setOpen({ soort: 'deal', deal: null })} className="btn-primary text-sm"><Plus className="h-4 w-4" />Deal</button>} />
+        sub={(() => { const n = data.deals.filter((d) => isOpen(d.fase)).length; return `${eur(deze.pipelineWaarde)} open · ${n} ${n === 1 ? 'deal' : 'deals'}` })()}
+        rechts={<button type="button" onClick={() => setOpen({ soort: 'deal', deal: null })} className="btn-primary text-sm"><Plus className="h-4 w-4" />Klant</button>} />
 
       {!data.klaar && <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">De databank is nog niet klaar voor de pipeline (migratie ontbreekt).</div>}
 
@@ -116,7 +116,7 @@ export function PipelineClient({ begin, vandaag, openDeal }: { begin: NgsData; v
       <div className="flex items-center gap-2 flex-wrap">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input {...zoekVeld()} className="input-base text-sm pl-9" placeholder="Zoek bedrijf, contact of dienst" value={zoek} onChange={(e) => setZoek(e.target.value)} aria-label="Zoek een deal" />
+          <input {...zoekVeld()} className="input-base text-sm pl-9" placeholder="Zoek bedrijf, contact of info" value={zoek} onChange={(e) => setZoek(e.target.value)} aria-label="Zoek een deal" />
         </div>
         <div className="flex gap-1.5 flex-wrap">
           {[null, ...namen].map((n) => (
@@ -220,9 +220,8 @@ function Kaart({ d, vandaag, opvolging, sleept, onOpen, onVerplaats, onSleep }: 
           <span className="font-semibold text-sm text-gray-900 flex-1 min-w-0 break-words">{d.bedrijf}</span>
           {d.verantwoordelijke && <span title={d.verantwoordelijke} className="h-6 w-6 shrink-0 rounded-full bg-gray-100 text-[10px] font-semibold text-gray-700 flex items-center justify-center">{initialen(d.verantwoordelijke)}</span>}
         </div>
-        {d.titel && <p className="text-xs text-gray-600 line-clamp-2">{d.titel}</p>}
+        {d.titel && <p className="text-xs text-gray-600 line-clamp-3 whitespace-pre-line break-words">{d.titel}</p>}
         {bedragen && <p className="text-xs font-semibold text-gray-900 tabular-nums">{bedragen}</p>}
-        {d.diensten.length > 0 && <div className="flex gap-1 flex-wrap">{d.diensten.slice(0, 3).map((k) => <span key={k} className="text-[10px] rounded-full bg-gray-100 text-gray-700 px-1.5 py-0.5">{dienstLabel(k)}</span>)}{d.diensten.length > 3 && <span className="text-[10px] text-gray-400">+{d.diensten.length - 3}</span>}</div>}
         {d.fase === 'afspraak' && (d.afspraak_op
           ? <p className={`text-[11px] inline-flex items-center gap-1 ${d.afspraak_op.slice(0, 10) < vandaag ? 'text-amber-700' : 'text-gray-600'}`}><CalendarClock className="h-3 w-3" />{tijdstip(d.afspraak_op)}</p>
           : <p className="text-[11px] text-gray-400">Nog geen datum</p>)}

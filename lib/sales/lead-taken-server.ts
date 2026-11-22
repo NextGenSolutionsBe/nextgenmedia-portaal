@@ -178,14 +178,16 @@ const OPDRACHT: Bron = {
   omschrijving: (t, c, marker) => opdrachtTaakOmschrijving({ link: opdrachtLink(baseUrl(), t.opdracht_id as string), bedrijf: c.bedrijf, titel: c.titel, contact: c.contact, notitie: t.notitie, door: t.created_by_email, marker }),
 }
 
-/** Een deal in de eigen pipeline van NextGen Solutions (los van klanten en projecten). */
+/** Een deal in de eigen pipeline van NextGenSolutions (los van klanten en projecten). */
 const NGS: Bron = {
   tabel: 'ngs_deal_taken', kolom: 'deal_id', nietGevonden: 'Deal niet gevonden.',
   async info(admin, dealId) {
     const { data } = await admin.from('ngs_deals').select('id, bedrijf, contactpersoon, titel, verantwoordelijke').eq('id', dealId).is('verwijderd_op', null).maybeSingle()
     if (!data) return null
     const d = data as { bedrijf: string; contactpersoon: string | null; titel: string | null; verantwoordelijke: string | null }
-    return { bedrijf: d.bedrijf, contact: d.contactpersoon, titel: d.titel, verantwoordelijke: { email: null, naam: d.verantwoordelijke } }
+    // De info kan lang zijn: in de taaknaam en -tekst enkel de eerste regel, kort.
+    const kort = (d.titel ?? '').split('\n')[0].trim().slice(0, 80) || null
+    return { bedrijf: d.bedrijf, contact: d.contactpersoon, titel: kort, verantwoordelijke: { email: null, naam: d.verantwoordelijke } }
   },
   marker: ngsTaakMarker,
   naam: (t, c) => leadTaakNaam(t.omschrijving, c.bedrijf),

@@ -19,15 +19,10 @@ export const isFase = (v: unknown): v is Fase => FASES.some((f) => f.key === v)
 export const faseLabel = (f: string) => FASES.find((x) => x.key === f)?.label ?? f
 export const isOpen = (f: string) => (OPEN_FASES as string[]).includes(f)
 
+/** Wat NextGenSolutions doet (22 nov 2026: geen keuze meer in het formulier, de info is vrije tekst). */
 export const DIENSTEN = [
-  { key: 'website', label: 'Website' },
-  { key: 'webshop', label: 'Webshop' },
-  { key: 'seo', label: 'SEO' },
-  { key: 'google_ads', label: 'Google Ads' },
   { key: 'ai', label: 'AI-automatisatie' },
   { key: 'software', label: 'Software op maat' },
-  { key: 'hosting', label: 'Hosting en onderhoud' },
-  { key: 'andere', label: 'Andere' },
 ] as const
 export const dienstLabel = (k: string) => DIENSTEN.find((d) => d.key === k)?.label ?? k
 
@@ -51,7 +46,9 @@ export type Deal = {
   contactpersoon: string | null
   email: string | null
   telefoon: string | null
+  /** Vrije info: wat de klant wil, budget, timing … (vrijblijvend). */
   titel: string | null
+  /** Niet meer in te vullen (22 nov 2026); oude waarden blijven bewaard. */
   diensten: string[]
   fase: Fase
   fase_sinds: string
@@ -76,6 +73,8 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const rond = (x: number) => Math.round(x * 100) / 100
 const geldigeDag = (d: string) => DAG.test(d) && new Date(`${d}T12:00:00Z`).toISOString().slice(0, 10) === d
 const tekst = (v: unknown, max: number) => { const t = String(v ?? '').replace(/\s+/g, ' ').trim(); return t ? t.slice(0, max) : null }
+/** Vrije tekst met regels (de info bij een deal): regels blijven, lege regels vallen weg. */
+const metRegels = (v: unknown, max: number) => { const t = String(v ?? '').split(/\r?\n/).map((r) => r.replace(/[ \t]+/g, ' ').trim()).filter(Boolean).join('\n'); return t ? t.slice(0, max) : null }
 const bedrag = (v: unknown): number | null | false => {
   if (v === null || v === undefined || String(v).trim() === '') return null
   const n = leesGetal(v)
@@ -109,7 +108,7 @@ export function controleerDeal(b: Record<string, unknown>): { ok: true; waarde: 
   return {
     ok: true,
     waarde: {
-      bedrijf, contactpersoon: tekst(b.contactpersoon, 160), email, telefoon: tekst(b.telefoon, 40), titel: tekst(b.titel, 200),
+      bedrijf, contactpersoon: tekst(b.contactpersoon, 160), email, telefoon: tekst(b.telefoon, 40), titel: metRegels(b.titel, 2000),
       diensten: DIENSTEN.map((d) => d.key).filter((k) => lijst.includes(k)),
       afspraak_op: afspraak, waarde_eenmalig: eenmalig, waarde_maandelijks: maandelijks, looptijd_maanden: looptijd, start_datum: start,
       bron: BRONNEN.some((x) => x.key === b.bron) ? String(b.bron) : null,
@@ -244,7 +243,7 @@ export function cijfersVoor(deals: Deal[], periode: Periode | null): Cijfers {
   const kans = (f: Fase) => FASES.find((x) => x.key === f)!.kans
   const perDienst = new Map<string, { aantal: number; waarde: number }>()
   for (const d of won) {
-    const lijst = d.diensten.length ? d.diensten : ['andere']
+    const lijst = d.diensten.length ? d.diensten : ['geen']
     for (const k of lijst) {
       const x = perDienst.get(k) ?? { aantal: 0, waarde: 0 }
       x.aantal += 1; x.waarde += dealWaarde(d) / lijst.length
