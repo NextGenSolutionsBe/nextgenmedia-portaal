@@ -8,6 +8,7 @@ import { isVoor, type TeTekenenItem } from '@/lib/te-tekenen'
 import { deadlineTekst } from '@/lib/sales/lead-taken'
 import { MERK_STIJL } from '@/lib/merk-mail'
 import { MailTaken } from '@/components/admin/mail-taken'
+import { MAIL_TAKEN_AAN } from '@/lib/mail-opvolging/taken'
 
 type Taak = {
   id: string; soort: 'team' | 'opdracht'; omschrijving: string; notitie: string | null; deadline: string | null; merk: string
@@ -115,8 +116,8 @@ export function TakenBlok() {
       {/* Nog te tekenen: bij wie het moet doen; verdwijnt vanzelf zodra getekend. */}
       {zichtbaarTekenen.length > 0 && <TeTekenenLijst items={zichtbaarTekenen} />}
 
-      {/* Taken uit de mail: Zet taak of Verwijder. */}
-      <MailTaken leden={opties?.leden ?? []} ik={opties?.ik ?? null} onIngepland={laad} />
+      {/* Taken uit de mail: uitgezet (MAIL_TAKEN_AAN), code blijft bewaard. */}
+      {MAIL_TAKEN_AAN && <MailTaken leden={opties?.leden ?? []} ik={opties?.ik ?? null} onIngepland={laad} />}
 
       {statusFout && <p className="text-[11px] text-amber-700 mb-2">{statusFout}</p>}
 

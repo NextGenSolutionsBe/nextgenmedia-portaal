@@ -6,6 +6,14 @@
 // Zet taak (wordt een ClickUp-taak, zelfde flow als Taken toewijzen) of Verwijder.
 // Staat iets al in ClickUp, of is het daar al afgesloten, dan valt het vanzelf weg.
 
+/**
+ * Uitgezet op vraag (22 nov 2026): de werking beviel niet. Het blok staat niet
+ * meer in het Command Center en de leesronde haalt geen nieuwe taken meer uit
+ * de mail. Code, API en de tabel mail_taken blijven bewaard: op true zetten
+ * en alles werkt weer zoals voorheen.
+ */
+export const MAIL_TAKEN_AAN = false
+
 export type MailTaakStatus = 'voorstel' | 'ingepland' | 'in_clickup' | 'al_gedaan' | 'verwijderd'
 export type MailTaakFilter = 'beslissen' | 'open' | 'gedaan' | 'verwijderd'
 
