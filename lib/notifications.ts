@@ -7,12 +7,15 @@ import { FEATURES } from '@/lib/features'
 import { syncGezondheid, SYNC_VEROUDERD_MIN } from '@/lib/sales/clickup-agenda-sync'
 import { onderhoudOpvolgen, resterendTekst, type MaintenanceClient } from '@/lib/maintenance'
 import { opleveringStatus, volgendeStap, revisieStand, type Versie as OpVersie } from '@/lib/opleveringen'
-import { offerteWeergave, moetOpvolgen, isVerlopen, type Offerte } from '@/lib/offertes'
+import { offerteWeergave, moetOpvolgen, isVerlopen, OPVOLGEN_NA_DAGEN, type Offerte } from '@/lib/offertes'
 import { samenvatting, grootte, OPSLAG_LIMIET_GB, type RuwVerbruik } from '@/lib/opslag'
 import { STATUS as AANVRAAG_STATUS, nieuweAanvraagTitel, type AanvraagSoort } from '@/lib/aanvragen/model'
 import { projectNaam } from '@/lib/opdrachten-kanban'
 import { laadOpvolgingen } from '@/lib/mail-opvolging/server'
-import { moetOpvolgen as mailMoetOpvolgen } from '@/lib/mail-opvolging/regels'
+import { moetOpvolgen as mailMoetOpvolgen, DREMPELS as MAIL_DREMPELS } from '@/lib/mail-opvolging/regels'
+import { teDoen, gewenst, beschikbaar, meeting as meetingLabel, looptAf, info as infoLabel, taakLabel, vergelijkLabels, brusselDag, plusDagen, plusWerkdagen, type OpvolgLabel, type OpvolgTaak, type TaakVoorstel } from '@/lib/opvolging-label'
+import { taakIsAf } from '@/lib/sales/lead-taken'
+import { tegentekenSleutel } from '@/lib/contracten/tegenhandtekening-server'
 
 // Eén bron voor meldingen + "Vandaag": alles live afgeleid uit bestaande data
 // (geen nieuwe tabel). Gelezen/niet-gelezen wordt client-side in localStorage
@@ -331,12 +334,19 @@ export async function buildNotifications(): Promise<Notif[]> {
 // Zelfde bron en regels als de rest van de app (followUp, de focuswachtrij van
 // de pipeline). `modules` = rechten van de medewerker (null = admin, alles).
 
-export type OpvolgItem = { id: string; titel: string; sub: string | null; href: string; dringend?: boolean }
+export type OpvolgItem = {
+  id: string; titel: string; sub: string | null; href: string; dringend?: boolean
+  /** Wanneer het moet gebeuren ("Vandaag te doen", "3 dagen te laat", "Nog 1 dag beschikbaar"). */
+  label?: OpvolgLabel | null
+  /** De open taak bij deze regel (ClickUp en de app); dan telt haar datum. */
+  taak?: OpvolgTaak | null
+  /** Om een taak bij deze regel te maken. */
+  nieuweTaak?: TaakVoorstel | null
+}
 export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'tegentekenen' | 'facturen' | 'mails' | 'meetings' | 'projecten' | 'content' | 'onderhoud' | 'opleveringen' | 'offertes'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
 
 const OPVOLG_MAX = 5
 const dagKort = (d: string) => new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' })
-const momentKort = (iso: string) => new Date(iso).toLocaleString('nl-BE', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Brussels' })
 
 export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGroep[]> {
   let admin: ReturnType<typeof createAdminSupabaseClient>
@@ -348,6 +358,13 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
     const { data } = await admin.from('clients').select('id, company_name').in('id', uniek)
     return new Map(((data ?? []) as { id: string; company_name: string }[]).map((c) => [c.id, c.company_name]))
   }
+
+  const vandaag = vandaagBrussel()
+  const nuDag = new Date()
+  const teamTaak = (key: OpvolgGroep['key'], id: string, voorstellen: string[], klant: string | null | undefined, clientId: string | null | undefined): TaakVoorstel =>
+    ({ basis: '/api/admin/taken', ref: `${key}:${id}`, voorstellen, klant: klant ?? null, client_id: clientId ?? null })
+  const projectTaak = (id: string, voorstellen: string[], klant: string | null | undefined): TaakVoorstel =>
+    ({ basis: `/api/admin/opdrachten/${id}/taken`, ref: null, voorstellen, klant: klant ?? null, client_id: null })
 
   const groepen = await Promise.all([
     mag('aanvragen') ? opvolgAanvragen() : null,
@@ -362,7 +379,49 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
     mag('opleveringen') ? opvolgOpleveringen() : null,
     mag('offertes') ? opvolgOffertes() : null,
   ])
-  return groepen.filter((g): g is OpvolgGroep => !!g)
+  const lijst = groepen.filter((g): g is OpvolgGroep => !!g)
+  await koppelTaken(lijst).catch(() => null)
+  for (const g of lijst) g.items.sort((a, b) => vergelijkLabels(a.label, b.label))
+  return lijst
+
+  /**
+   * De open taak bij elke regel: een teamtaak die vanuit deze regel gemaakt werd
+   * (opvolg_ref), een taak bij het project (mails, projecten), de tegenteken-taak
+   * van een contract of de taak "contract opmaken" van een geaccepteerde offerte.
+   * Is er een, dan telt haar datum: dat is het moment dat we zelf kozen.
+   */
+  async function koppelTaken(lijst: OpvolgGroep[]) {
+    const items = lijst.flatMap((g) => g.items.map((i) => ({ g, i })))
+    const sleutelVan = (i: OpvolgItem) => i.nieuweTaak?.ref ?? (i.nieuweTaak ? `project:${i.id}` : null)
+    const refs = items.map(({ i }) => i.nieuweTaak?.ref).filter((x): x is string => !!x)
+    const projecten = [...new Set(items.filter(({ i }) => i.nieuweTaak && !i.nieuweTaak.ref).map(({ i }) => i.id))]
+    const extra = new Map<string, string>()
+    for (const { g, i } of items) {
+      if (g.key === 'tegentekenen') extra.set(tegentekenSleutel(i.id), `tegentekenen:${i.id}`)
+      if (g.key === 'offertes') extra.set(i.id, `offertes:${i.id}`)
+    }
+    if (!refs.length && !projecten.length && !extra.size) return
+    type T = { omschrijving: string; deadline: string | null; clickup_assignee_naam: string | null; clickup_url: string | null; afgerond_op: string | null; clickup_status_type: string | null; aanvraag_sleutel: string | null; opvolg_ref?: string | null; opdracht_id?: string | null }
+    const kol = 'omschrijving, deadline, clickup_assignee_naam, clickup_url, afgerond_op, clickup_status_type, aanvraag_sleutel'
+    const [team, opdr, sleutel] = await Promise.all([
+      refs.length ? admin.from('team_taken').select(`${kol}, opvolg_ref`).in('opvolg_ref', refs).is('afgerond_op', null).limit(500) : null,
+      projecten.length ? admin.from('opdracht_taken').select(`${kol}, opdracht_id`).in('opdracht_id', projecten).is('afgerond_op', null).limit(500) : null,
+      extra.size ? admin.from('opdracht_taken').select(kol).in('aanvraag_sleutel', [...extra.keys()]).is('afgerond_op', null).limit(300) : null,
+    ])
+    const per = new Map<string, T[]>()
+    const zet = (k: string | null | undefined, t: T) => { if (!k || taakIsAf(t)) return; const l = per.get(k); if (l) l.push(t); else per.set(k, [t]) }
+    for (const t of (team?.error ? [] : (team?.data ?? [])) as T[]) zet(t.opvolg_ref, t)
+    for (const t of (opdr?.error ? [] : (opdr?.data ?? [])) as T[]) zet(t.opdracht_id ? `project:${t.opdracht_id}` : null, t)
+    for (const t of (sleutel?.error ? [] : (sleutel?.data ?? [])) as T[]) zet(t.aanvraag_sleutel ? extra.get(t.aanvraag_sleutel) : null, t)
+    for (const { i } of items) {
+      const k = sleutelVan(i)
+      const lijstT = k ? per.get(k) : null
+      if (!lijstT?.length) continue
+      const t = [...lijstT].sort((a, b) => String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')))[0]
+      i.taak = { omschrijving: t.omschrijving, deadline: t.deadline ? String(t.deadline).slice(0, 10) : null, wie: t.clickup_assignee_naam, url: t.clickup_url }
+      i.label = taakLabel(i.taak, vandaag)
+    }
+  }
 
   async function opvolgAanvragen(): Promise<OpvolgGroep | null> {
     try {
@@ -378,8 +437,10 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
         key: 'aanvragen', titel: 'Aanvragen', totaal: count ?? rijen.length, alles: '/admin/aanvragen', leeg: 'Geen open aanvragen.',
         items: rijen.slice(0, OPVOLG_MAX).map((r) => ({
           id: r.id, titel: `${namen.get(r.client_id) ?? 'Klant'} – ${r.type_label}`,
-          sub: [AANVRAAG_STATUS[r.status]?.team ?? r.status, r.soort === 'consultancy' ? 'consultancy' : r.soort === 'founders' ? 'Founders of Flanders' : null, r.periode_van ? `gewenst ${dagKort(r.periode_van)}` : null].filter(Boolean).join(' · '),
+          sub: [AANVRAAG_STATUS[r.status]?.team ?? r.status, r.soort === 'consultancy' ? 'consultancy' : r.soort === 'founders' ? 'Founders of Flanders' : null, r.periode_van && (r.status === 'offerte' || r.status === 'ontvangen') ? `gewenst ${dagKort(r.periode_van)}` : null].filter(Boolean).join(' · '),
           href: `/admin/aanvragen?aanvraag=${r.id}`, dringend: r.status === 'ontvangen',
+          label: r.status === 'ontvangen' ? teDoen(plusWerkdagen(brusselDag(r.created_at), 1), vandaag) : r.status === 'offerte' ? infoLabel('Wacht op de klant') : r.periode_van ? gewenst(r.periode_van, vandaag) : null,
+          nieuweTaak: teamTaak('aanvragen', r.id, ['Aanvraag behandelen', 'Klant bellen', 'Offerte opmaken'], namen.get(r.client_id), r.client_id),
         })),
       }
     } catch { return null }
@@ -396,6 +457,10 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
         key: 'contracten', titel: 'Contracten opvolgen', totaal: rijen.length, alles: '/admin/contracts', leeg: 'Alle contracten zijn bij.',
         items: rijen.slice(0, OPVOLG_MAX).map(({ c, fu }) => ({
           id: c.id, titel: [c.client_id ? namen.get(c.client_id) : null, c.title].filter(Boolean).join(' – '), sub: fu.reason, href: `/admin/contracts/${c.id}`, dringend: fu.level === 'urgent',
+          label: fu.reason === 'Tekenlink verlopen'
+            ? { tekst: 'Tekenlink verlopen', toon: 'te_laat' as const, datum: c.expires_at ? brusselDag(c.expires_at) : null }
+            : teDoen(plusDagen(c.sent_at || c.created_at ? brusselDag((c.sent_at || c.created_at)!) : vandaag, 3), vandaag),
+          nieuweTaak: teamTaak('contracten', c.id, ['Klant opbellen: gaat het contract nog door?', 'Herinnering sturen om te tekenen', 'Nieuwe tekenlink sturen'], c.client_id ? namen.get(c.client_id) : null, c.client_id),
         })),
       }
     } catch { return null }
@@ -422,6 +487,8 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
           id: r.id, titel: [r.client_id ? namen.get(r.client_id) : null, r.title].filter(Boolean).join(' – '),
           sub: `getekend door ${r.signer_name ?? 'de klant'}${r.signed_at ? ` op ${dagKort(r.signed_at)}` : ''} · wacht op onze handtekening`,
           href: `/admin/contracts/${r.id}/tegentekenen`, dringend: !!r.signed_at && Date.now() - new Date(r.signed_at).getTime() > 3 * 86_400_000,
+          label: teDoen(plusWerkdagen(r.signed_at ? brusselDag(r.signed_at) : vandaag, 2), vandaag),
+          nieuweTaak: teamTaak('tegentekenen', r.id, ['Contract tegentekenen'], r.client_id ? namen.get(r.client_id) : null, r.client_id),
         })),
       }
     } catch { return null }
@@ -459,6 +526,8 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
           id: c.id, titel: [c.client_id ? namen.get(c.client_id) : null, c.title].filter(Boolean).join(' – '),
           sub: `getekend${c.signed_at ? ` op ${dagKort(c.signed_at)}` : ''} · nog geen facturen`,
           href: `/admin/contracts/${c.id}`, dringend: true,
+          label: teDoen(c.signed_at ? brusselDag(c.signed_at) : vandaag, vandaag),
+          nieuweTaak: teamTaak('facturen', c.id, ['Facturen plannen'], c.client_id ? namen.get(c.client_id) : null, c.client_id),
         })),
       }
     } catch { return null }
@@ -481,6 +550,17 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
           id: x.project.id, titel: projectNaam(x.project.klant, x.project.diensten, x.project.titel),
           sub: x.opvolging!.tekst.length > 150 ? `${x.opvolging!.tekst.slice(0, 147)}…` : x.opvolging!.tekst,
           href: `/admin/opdrachten?opdracht=${x.project.id}`, dringend: x.opvolging!.dringend,
+          label: (() => {
+            const o = x.opvolging!
+            const d = brusselDag(o.sinds)
+            return teDoen(o.status === 'geen_reactie' ? plusWerkdagen(d, MAIL_DREMPELS.geenReactie) : o.status === 'na_meeting' ? plusWerkdagen(d, MAIL_DREMPELS.naMeeting) : plusWerkdagen(d, MAIL_DREMPELS.wachtOpOnsDringend), vandaag)
+          })(),
+          nieuweTaak: projectTaak(x.project.id,
+            x.opvolging!.status === 'wacht_op_ons' ? ['Mail beantwoorden', 'Bellen']
+              : x.opvolging!.status === 'na_meeting' ? ['Opvolgmail sturen na de meeting', 'Bellen']
+              : x.opvolging!.status === 'akkoord' ? ['Akkoord bevestigen en contract opmaken', 'Bellen']
+              : x.opvolging!.status === 'weigering' ? ['Bellen: waarom haken ze af?']
+              : ['Bellen: nog geen reactie op onze mail', 'Herinnering mailen'], x.project.klant),
         })),
       }
     } catch { return null }
@@ -490,17 +570,20 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
     try {
       const nuIso = new Date().toISOString()
       const [km, sa] = await Promise.all([
-        admin.from('klant_meetings').select('id, titel, klant_naam, starts_at', { count: 'exact' }).eq('status', 'ingepland').gte('starts_at', nuIso).order('starts_at').limit(OPVOLG_MAX),
+        admin.from('klant_meetings').select('id, titel, klant_naam, starts_at, client_id', { count: 'exact' }).eq('status', 'ingepland').gte('starts_at', nuIso).order('starts_at').limit(OPVOLG_MAX),
         admin.from('sales_appointments').select('id, titel, starts_at', { count: 'exact' }).eq('status', 'scheduled').gte('starts_at', nuIso).order('starts_at').limit(OPVOLG_MAX),
       ])
       const items = [
-        ...((km.data ?? []) as { id: string; titel: string; klant_naam: string | null; starts_at: string }[]).map((m) => ({ id: m.id, titel: [m.klant_naam, m.titel].filter(Boolean).join(' · '), starts: m.starts_at, href: `/admin/meetings?meeting=${m.id}` })),
-        ...((sa.data ?? []) as { id: string; titel: string | null; starts_at: string }[]).map((a) => ({ id: a.id, titel: a.titel || 'Leadafspraak', starts: a.starts_at, href: '/admin/meetings?tab=agenda' })),
+        ...((km.data ?? []) as { id: string; titel: string; klant_naam: string | null; starts_at: string; client_id: string | null }[]).map((m) => ({ id: m.id, titel: [m.klant_naam, m.titel].filter(Boolean).join(' · '), starts: m.starts_at, href: `/admin/meetings?meeting=${m.id}`, klant: m.klant_naam, client_id: m.client_id })),
+        ...((sa.data ?? []) as { id: string; titel: string | null; starts_at: string }[]).map((a) => ({ id: a.id, titel: a.titel || 'Leadafspraak', starts: a.starts_at, href: '/admin/meetings?tab=agenda', klant: null, client_id: null })),
       ].sort((a, b) => a.starts.localeCompare(b.starts)).slice(0, OPVOLG_MAX)
       const vandaag = vandaagBrussel()
       return {
         key: 'meetings', titel: 'Komende meetings', totaal: (km.count ?? 0) + (sa.count ?? 0), alles: '/admin/meetings', leeg: 'Geen meetings meer ingepland.',
-        items: items.map((m) => ({ id: m.id, titel: m.titel, sub: momentKort(m.starts), href: m.href, dringend: new Date(m.starts).toLocaleDateString('sv-SE', { timeZone: 'Europe/Brussels' }) === vandaag })),
+        items: items.map((m) => ({
+          id: m.id, titel: m.titel, sub: null, href: m.href, dringend: new Date(m.starts).toLocaleDateString('sv-SE', { timeZone: 'Europe/Brussels' }) === vandaag,
+          label: meetingLabel(m.starts, vandaag), nieuweTaak: teamTaak('meetings', m.id, ['Meeting voorbereiden', 'Agenda doorsturen'], m.klant, m.client_id),
+        })),
       }
     } catch { return null }
   }
@@ -528,6 +611,8 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
             id: r.id, titel: projectNaam((r.client_id ? namen.get(r.client_id) : r.klant_vrij) || null, r.diensten, r.titel),
             sub: `${r.status === 'interesse' ? 'offerte geaccepteerd, nog geen contract' : offerte.has(r.status) ? 'offerte' : 'opvolging'} · ${dagen} dagen stil · ${r.titel}`.slice(0, 80),
             href: `/admin/opdrachten?opdracht=${r.id}`, dringend: dagen >= 14,
+            label: teDoen(plusDagen(brusselDag(r.status_gewijzigd_op ?? r.created_at), 7), vandaag),
+            nieuweTaak: projectTaak(r.id, ['Opvolgen', 'Bellen', 'Mail sturen'], (r.client_id ? namen.get(r.client_id) : r.klant_vrij) || null),
           }
         }),
       }
@@ -549,8 +634,10 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
         key: 'onderhoud', titel: 'Website-onderhoud', totaal: lijst.length, alles: '/admin/services/website', leeg: 'Alle onderhoudscontracten lopen nog.',
         items: lijst.slice(0, OPVOLG_MAX).map(({ klant, status }) => ({
           id: klant.id, titel: klant.company_name,
-          sub: status.endDate ? `${resterendTekst(status)} · tot ${dagKort(status.endDate)}` : 'Startdatum ontbreekt',
+          sub: status.endDate ? `tot ${dagKort(status.endDate)}` : 'vul de startdatum in bij de klant',
           href: `/admin/clients/${klant.id}#website`, dringend: status.expired || (status.daysLeft !== null && status.daysLeft <= 7),
+          label: status.endDate ? looptAf(String(status.endDate).slice(0, 10), vandaag) : infoLabel('Startdatum ontbreekt'),
+          nieuweTaak: teamTaak('onderhoud', klant.id, ['Verlenging website-onderhoud bespreken', 'Startdatum invullen'], klant.company_name, klant.id),
         })),
       }
     } catch { return null }
@@ -570,25 +657,31 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
       const [{ data: vs }, { data: bs }, { data: fb }] = await Promise.all([
         admin.from('oplevering_versies').select('id, oplevering_id, nummer, is_finaal, bericht, gepubliceerd_op, verloopt_op, verwijderd_op').in('oplevering_id', ids),
         admin.from('oplevering_bestanden').select('versie_id').in('oplevering_id', ids),
-        admin.from('oplevering_feedback').select('oplevering_id, versie_id, soort').in('oplevering_id', ids),
+        admin.from('oplevering_feedback').select('oplevering_id, versie_id, soort, created_at').in('oplevering_id', ids),
       ])
       const versies = (vs ?? []) as (OpVersie & { oplevering_id: string })[]
       const perVersie = new Map<string, number>()
       for (const b of (bs ?? []) as { versie_id: string }[]) perVersie.set(b.versie_id, (perVersie.get(b.versie_id) ?? 0) + 1)
-      const feedback = (fb ?? []) as { oplevering_id: string; versie_id: string; soort: 'revisie' | 'goedkeuring' | 'opmerking' }[]
+      const feedback = (fb ?? []) as { oplevering_id: string; versie_id: string; soort: 'revisie' | 'goedkeuring' | 'opmerking'; created_at?: string | null }[]
       const lijst = rijen.map((r) => {
         const v = versies.filter((x) => x.oplevering_id === r.id)
         const f = feedback.filter((x) => x.oplevering_id === r.id)
         const status = opleveringStatus(v, f)
         const stap = volgendeStap({ status, versies: v.map((x) => ({ ...x, bestanden_aantal: perVersie.get(x.id) ?? 0 })), revisies: revisieStand(f, r.max_revisies ?? undefined) })
-        return { r, stap }
-      }).filter((x) => x.stap.dringend)
+        // Wanneer: gedeeld = hoe lang de klant nog kan kijken; feedback = twee werkdagen om ze te verwerken.
+        const laatste = [...v].sort((a, b) => b.nummer - a.nummer)[0]
+        const revisie = f.filter((x) => x.soort === 'revisie').sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))[0]
+        const label: OpvolgLabel | null = status === 'wacht_op_klant' && laatste?.verloopt_op ? beschikbaar(laatste.verloopt_op, nuDag)
+          : status === 'revisie_gevraagd' ? teDoen(plusWerkdagen(revisie?.created_at ? brusselDag(revisie.created_at) : vandaag, 2), vandaag) : null
+        return { r, stap, status, label }
+      }).filter((x) => x.stap.dringend || (x.status === 'wacht_op_klant' && !!x.label))
       if (!lijst.length) return null
       const namen = await klantNamen(lijst.slice(0, OPVOLG_MAX).map((x) => x.r.client_id))
       return {
         key: 'opleveringen', titel: 'Opleveringen', totaal: lijst.length, alles: '/admin/opleveringen', leeg: 'Niets wacht op ons.',
-        items: lijst.slice(0, OPVOLG_MAX).map(({ r, stap }) => ({
-          id: r.id, titel: `${namen.get(r.client_id) ?? 'Klant'} – ${r.titel}`, sub: stap.tekst, href: `/admin/opleveringen?oplevering=${r.id}`, dringend: true,
+        items: lijst.slice(0, OPVOLG_MAX).map(({ r, stap, status, label }) => ({
+          id: r.id, titel: `${namen.get(r.client_id) ?? 'Klant'} – ${r.titel}`, sub: label ? stap.tekst.replace(/ · nog [^·]+/, '') : stap.tekst, href: `/admin/opleveringen?oplevering=${r.id}`, dringend: stap.dringend,
+          label, nieuweTaak: teamTaak('opleveringen', r.id, status === 'wacht_op_klant' ? ['Klant herinneren aan de oplevering', 'Link verlengen'] : ['Feedback verwerken', 'Nieuwe versie opladen'], namen.get(r.client_id), r.client_id),
         })),
       }
     } catch { return null }
@@ -622,7 +715,12 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
           const sub = o.status === 'geaccepteerd'
             ? `Geaccepteerd ${w.sub ?? ''} · contract opmaken`.replace(/\s+/g, ' ')
             : `${w.sub ?? ''}${dringend && !isVerlopen(o, nu.toLocaleDateString('sv-SE', { timeZone: 'Europe/Brussels' })) ? ` · ${dagen(o.verstuurd_op)} dagen geen akkoord` : w.label === 'Verlopen' ? ' · verlopen' : ''}`
-          return { id: o.id, titel: [(o.client_id ? namen.get(o.client_id) : null) ?? o.klant_naam, o.titel].filter(Boolean).join(' – '), sub, href: `/admin/offertes?offerte=${o.id}`, dringend }
+          const klant = (o.client_id ? namen.get(o.client_id) : null) ?? o.klant_naam
+          const label: OpvolgLabel = o.status === 'geaccepteerd' ? teDoen(plusWerkdagen(o.geaccepteerd_op ? brusselDag(o.geaccepteerd_op) : vandaag, 2), vandaag)
+            : isVerlopen(o, vandaag) ? { tekst: 'Offerte verlopen', toon: 'te_laat', datum: o.geldig_tot ? String(o.geldig_tot).slice(0, 10) : null }
+            : teDoen(plusDagen(o.verstuurd_op ? brusselDag(o.verstuurd_op) : vandaag, OPVOLGEN_NA_DAGEN), vandaag)
+          const nieuweTaak = teamTaak('offertes', o.id, o.status === 'geaccepteerd' ? ['Contract opmaken', 'Project in gang zetten'] : ['Klant opbellen over de offerte', 'Herinnering sturen'], klant, o.client_id)
+          return { id: o.id, titel: [klant, o.titel].filter(Boolean).join(' – '), sub, href: `/admin/offertes?offerte=${o.id}`, dringend, label, nieuweTaak }
         }),
       }
     } catch { return null }
@@ -644,6 +742,8 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
         key: 'content', titel: 'Feedback op content', totaal: lijst.reduce((s, [, x]) => s + x.n, 0), alles: '/admin/services/social-media', leeg: 'Geen open feedback in de contentkalender.',
         items: lijst.slice(0, OPVOLG_MAX).map(([id, x]) => ({
           id, titel: namen.get(id) ?? 'Klant', sub: `${x.n} post${x.n === 1 ? '' : 's'} met feedback${x.laatste ? ` · laatste ${dagKort(x.laatste)}` : ''}`, href: `/admin/services/social-media?client=${id}`,
+          label: teDoen(plusWerkdagen(x.laatste ? brusselDag(x.laatste) : vandaag, 2), vandaag),
+          nieuweTaak: teamTaak('content', id, ['Feedback op content verwerken'], namen.get(id), id),
         })),
       }
     } catch { return null }
