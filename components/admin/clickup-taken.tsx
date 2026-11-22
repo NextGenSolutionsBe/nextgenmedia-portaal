@@ -157,8 +157,16 @@ export function ClickupTaken({ api: basis, waarbij, standaardMerk, onGewijzigd, 
  * datums of zelf kiezen), voor wie en een notitie die je ook kan inspreken.
  * Ook gebruikt in het venster "Taak" op de kaarten van het bord.
  */
-export function NieuweTaak({ basis, waarbij, standaardMerk, onSluit, onKlaar, klant, context, kader = true }: {
-  basis: string; waarbij: 'lead' | 'opdracht' | 'deal'; standaardMerk: string | null; onSluit: () => void; onKlaar: () => void
+export function NieuweTaak({ basis, waarbij, standaardMerk, onSluit, onKlaar, klant, context, kader = true, voorstellen, standaardDeadline, metVandaag = false, extra }: {
+  basis: string; waarbij: 'lead' | 'opdracht' | 'deal' | 'opvolging'; standaardMerk: string | null; onSluit: () => void; onKlaar: () => void
+  /** Eigen snelle keuzes voor "Wat moet er gebeuren?"; de eerste staat klaar. */
+  voorstellen?: readonly string[]
+  /** De dag die klaarstaat (JJJJ-MM-DD). */
+  standaardDeadline?: string | null
+  /** "Vandaag" als snelle keuze (voor wat al moest gebeuren). */
+  metVandaag?: boolean
+  /** Extra velden mee in de vraag (bv. client_id en opvolg_ref). */
+  extra?: Record<string, unknown>
   /** De klant van de kaart: komt in de taaknaam in ClickUp ("Opvolgen (Kilowot)"). */
   klant?: string | null
   /** Waar de taak bij hoort, voor het inspreken van de notitie (namen juist schrijven). */
@@ -167,8 +175,9 @@ export function NieuweTaak({ basis, waarbij, standaardMerk, onSluit, onKlaar, kl
 }) {
   const [opties, setOpties] = useState<Opties | null>(null)
   const [optieFout, setOptieFout] = useState<string | null>(null)
-  const [omschrijving, setOmschrijving] = useState<string>('Opvolgen')
-  const [deadline, setDeadline] = useState('')
+  const keuzes = voorstellen?.length ? voorstellen : SNELLE_TAKEN
+  const [omschrijving, setOmschrijving] = useState<string>(voorstellen?.[0] ?? 'Opvolgen')
+  const [deadline, setDeadline] = useState(standaardDeadline && standaardDeadline >= vandaag() ? standaardDeadline : '')
   const [notitie, setNotitie] = useState('')
   const [lid, setLid] = useState<string>('')
   const [merk, setMerk] = useState<string>(MERKEN.some((m) => m.key === standaardMerk) ? (standaardMerk as string) : 'nextgenmedia')
@@ -191,7 +200,7 @@ export function NieuweTaak({ basis, waarbij, standaardMerk, onSluit, onKlaar, kl
     setBezig(true); setFout(null)
     try {
       const j = await api<{ taak: Taak }>(basis, {
-        method: 'POST', body: JSON.stringify({ aanvraag_sleutel: sleutel, omschrijving, deadline, notitie, assignee_id: Number(lid), merk }),
+        method: 'POST', body: JSON.stringify({ ...(extra ?? {}), aanvraag_sleutel: sleutel, omschrijving, deadline, notitie, assignee_id: Number(lid), merk }),
       })
       if (j.taak.sync_status === 'ok') toast.success(`Taak staat in ClickUp (${merkNaam(merk)}).`)
       else toast.error(`Taak bewaard, maar niet in ClickUp: ${j.taak.sync_fout ?? 'onbekende fout'}. Probeer opnieuw vanuit de lijst.`)
@@ -201,7 +210,7 @@ export function NieuweTaak({ basis, waarbij, standaardMerk, onSluit, onKlaar, kl
 
   const lbl = 'block text-[11px] font-medium text-gray-500 mb-0.5'
   const chip = (aan: boolean) => `px-2.5 py-1 rounded-full text-xs border ${aan ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 text-gray-600 hover:border-gray-400'}`
-  const snel = snelleDatums(vandaag())
+  const snel = [...(metVandaag ? [{ label: 'Vandaag', dag: vandaag() }] : []), ...snelleDatums(vandaag())]
   const lidNaam = opties?.leden.find((m) => String(m.id) === lid)?.naam ?? null
   return (
     <div className={kader ? 'rounded-xl border border-gray-200 bg-white p-3 space-y-2.5 mb-2' : 'space-y-2.5'}>
@@ -214,7 +223,7 @@ export function NieuweTaak({ basis, waarbij, standaardMerk, onSluit, onKlaar, kl
       <div>
         <span className={lbl}>Wat moet er gebeuren?</span>
         <div className="flex gap-1.5 flex-wrap mb-1.5">
-          {SNELLE_TAKEN.map((t) => <button key={t} type="button" onClick={() => setOmschrijving(t)} className={chip(omschrijving === t)}>{t}</button>)}
+          {keuzes.map((t) => <button key={t} type="button" onClick={() => setOmschrijving(t)} className={chip(omschrijving === t)}>{t}</button>)}
         </div>
         <input className="input-base text-sm" value={omschrijving} maxLength={MAX_OMSCHRIJVING} onChange={(e) => setOmschrijving(e.target.value)} placeholder="Bv. Offerte opmaken voor de website" aria-label="Taakomschrijving" />
       </div>
@@ -252,7 +261,7 @@ export function NieuweTaak({ basis, waarbij, standaardMerk, onSluit, onKlaar, kl
       <p className="text-[11px] text-gray-500">
         {omschrijving.trim() && deadline
           ? <>In ClickUp: <b className="font-medium text-gray-700">{leadTaakNaam(omschrijving.trim(), klant ?? null)}</b> op {datum(deadline)}{lidNaam ? ` voor ${lidNaam}` : ''}, met de notitie eronder.</>
-          : <>Wordt een gewone taak in ClickUp op die dag (geen agenda-item), toegewezen aan de verantwoordelijke, met een link naar deze {waarbij === 'lead' ? 'lead' : waarbij === 'deal' ? 'deal' : 'kaart'}.</>}
+          : <>Wordt een gewone taak in ClickUp op die dag (geen agenda-item), toegewezen aan de verantwoordelijke, met een link naar {waarbij === 'lead' ? 'deze lead' : waarbij === 'deal' ? 'deze deal' : waarbij === 'opvolging' ? 'het Command Center' : 'deze kaart'}.</>}
       </p>
       {optieFout && <p className="text-xs text-red-700">{optieFout}</p>}
       {opties && !opties.ingesteld && <p className="text-xs text-red-700">ClickUp is niet gekoppeld; een taak aanmaken lukt nu niet.</p>}

@@ -1,6 +1,7 @@
 import 'server-only'
 import { baseUrl } from '@/lib/email'
 import { clickupConfigured, listClickupMembers, maakGewoneTaak, leesTaakStatus, zoekTaakMetMarker, lijstToegang, zetToegewezene, sluitTaak, type TaakStatus } from '@/lib/clickup'
+import { REF as OPVOLG_REF } from '@/lib/opvolging-label'
 import { veiligeFout } from '@/lib/meetings/server'
 import {
   valideerLeadTaak, leadLink, leadTaakMarker, leadTaakNaam, leadTaakOmschrijving, deadlineMs, merkNaam, type LeadTaakInvoer,
@@ -390,7 +391,7 @@ const TEAM: Bron = {
   omschrijving: (t, _c, marker) => teamTaakOmschrijving({ link: `${baseUrl().replace(/\/$/, '')}/admin`, klant: t.klant_naam ?? null, notitie: t.notitie, door: t.created_by_email, marker }),
 }
 
-export async function maakTeamTaak(admin: Admin, b: LeadTaakInvoer & { aanvraag_sleutel?: unknown; client_id?: unknown }, door: { userId: string | null; email: string | null }): Promise<{ taak: TaakRij; herhaald: boolean }> {
+export async function maakTeamTaak(admin: Admin, b: LeadTaakInvoer & { aanvraag_sleutel?: unknown; client_id?: unknown; opvolg_ref?: unknown }, door: { userId: string | null; email: string | null }): Promise<{ taak: TaakRij; herhaald: boolean }> {
   const extra: Record<string, unknown> = {}
   if (typeof b.client_id === 'string' && UUID.test(b.client_id)) {
     const { data: k } = await admin.from('clients').select('id, company_name').eq('id', b.client_id).maybeSingle()
@@ -398,7 +399,18 @@ export async function maakTeamTaak(admin: Admin, b: LeadTaakInvoer & { aanvraag_
     extra.client_id = (k as { id: string }).id
     extra.klant_naam = (k as { company_name: string | null }).company_name ?? null
   }
-  return maakTaak(admin, TEAM, TEAM_ID, b, door, extra)
+  // Vanuit een regel in "Op te volgen": de regel vindt haar taak terug.
+  if (typeof b.opvolg_ref === 'string' && OPVOLG_REF.test(b.opvolg_ref)) extra.opvolg_ref = b.opvolg_ref
+  try {
+    return await maakTaak(admin, TEAM, TEAM_ID, b, door, extra)
+  } catch (e) {
+    // Vóór de migratie bestaat de kolom nog niet: dan zonder koppeling.
+    if (extra.opvolg_ref && e instanceof Error && !(e instanceof LeadTaakFout) && /opvolg_ref/i.test(e.message)) {
+      const { opvolg_ref: _weg, ...zonder } = extra
+      return maakTaak(admin, TEAM, TEAM_ID, b, door, zonder)
+    }
+    throw e
+  }
 }
 export const teamTaakOpnieuw = (admin: Admin, taakId: string) => taakOpnieuw(admin, TEAM, TEAM_ID, taakId)
 export const teamTaakVerantwoordelijke = (admin: Admin, taakId: string, assigneeId: unknown) => wijzigVerantwoordelijke(admin, TEAM, TEAM_ID, taakId, assigneeId)

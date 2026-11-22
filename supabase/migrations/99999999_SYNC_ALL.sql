@@ -7860,3 +7860,9 @@ ALTER TABLE public.ngs_deal_taken ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.ngs_deals FROM anon, authenticated;
 REVOKE ALL ON public.ngs_deal_notities FROM anon, authenticated;
 REVOKE ALL ON public.ngs_deal_taken FROM anon, authenticated;
+
+-- ── Op te volgen: taak bij een regel (22 nov 2026) ─────────────────────────
+-- Een teamtaak die vanuit een regel in "Op te volgen" gemaakt werd ("contracten:<id>"),
+-- zodat de regel haar taak en datum terugvindt.
+ALTER TABLE IF EXISTS public.team_taken ADD COLUMN IF NOT EXISTS opvolg_ref text;
+CREATE INDEX IF NOT EXISTS team_taken_opvolg_ref_idx ON public.team_taken (opvolg_ref) WHERE opvolg_ref IS NOT NULL;
