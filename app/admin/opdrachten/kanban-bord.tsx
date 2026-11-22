@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { MessageSquare, Plus, MoreHorizontal, Check, FileSignature, AlertCircle, UserRound, Send, Mail, ListPlus, X } from 'lucide-react'
+import { MessageSquare, Plus, MoreHorizontal, Check, FileSignature, AlertCircle, Send, Mail, ListPlus, X } from 'lucide-react'
 import { NieuweTaak } from '@/components/admin/clickup-taken'
 import { offerteBevestigdLabel } from '@/lib/opdrachten-offerte-model'
 import {
@@ -11,6 +11,7 @@ import {
 import { formatEuro } from '@/lib/utils'
 import { geopendTekst } from '@/lib/klant-geopend'
 import { datumKort, type KaartOpdracht } from './types'
+import { PersoonFoto } from '@/components/admin/persoon-foto'
 
 const PER_KOLOM = 30
 
@@ -243,7 +244,7 @@ function Kaart({ o, sleept, menuOpen, onOpen, onTaak, onMenu, onKolom, onDragSta
           <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-gray-400 min-w-0">
             {bedrijf && <span className="rounded bg-gray-100 px-1 py-px text-gray-600 font-medium">{bedrijf}</span>}
             {wie
-              ? <span className="truncate flex items-center gap-0.5 text-gray-600"><UserRound className="h-3 w-3 shrink-0" />{wie}</span>
+              ? <span className="truncate flex items-center gap-1 text-gray-600"><PersoonFoto naam={wie} maat={16} />{wie}</span>
               : <span className="truncate text-amber-700">Geen verantwoordelijke</span>}
             <span className="ml-auto flex items-center gap-2 shrink-0">
               {!!o.notities_aantal && <span className="flex items-center gap-0.5"><MessageSquare className="h-3 w-3" />{o.notities_aantal}</span>}

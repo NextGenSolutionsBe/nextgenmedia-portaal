@@ -7,6 +7,7 @@ import { ChevronLeft, ChevronRight, Crosshair, Download, ExternalLink, FileSigna
 import { ABM_KOLOMMEN, rijenUitTabel, leesCsv, voorbeeldCsv, type AbmBedrijf, type AbmRij, type AbmVeld } from '@/lib/abm'
 import { PROJECT_VERANTWOORDELIJKEN } from '@/lib/opdrachten-kanban'
 import { zoekVeld } from '@/lib/zoekveld'
+import { PersoonKnop } from '@/components/admin/persoon-foto'
 
 type Bedrijf = AbmBedrijf & { klant_naam?: string | null }
 const SLEUTEL = 'ngm-abm-open'
@@ -282,10 +283,10 @@ function BedrijfVenster({ b, onSluit, onVernieuw, onInteresse }: { b: Bedrijf | 
           {clientId && <a href={`/admin/clients/${clientId}`} className="text-xs text-gray-500 hover:text-black inline-flex items-center gap-1">Klantfiche{b.klant_naam ? `: ${b.klant_naam}` : ''}<ExternalLink className="h-3 w-3" /></a>}
           {!b.opdracht_id ? (
             <div className="rounded-lg border border-gray-200 p-2.5 flex items-center gap-2 flex-wrap">
-              <select value={wie} onChange={(e) => setWie(e.target.value)} className="px-2 py-1.5 text-sm border border-gray-200 rounded-lg" aria-label="Wie volgt op?">
-                <option value="">Wie volgt op?</option>
-                {PROJECT_VERANTWOORDELIJKEN.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
+              <span className="w-full text-xs text-gray-500">Wie volgt op?</span>
+              <div className="w-full flex gap-1.5 flex-wrap" role="radiogroup" aria-label="Wie volgt op?">
+                {PROJECT_VERANTWOORDELIJKEN.map((p) => <PersoonKnop key={p} naam={p} aan={wie === p} klein onClick={() => setWie(p)} />)}
+              </div>
               <button type="button" onClick={naarOpvolging} disabled={!!bezig} className="btn-primary text-sm flex-1 justify-center">{bezig === 'opvolging' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}Naar Opvolging</button>
             </div>
           ) : <a href={`/admin/opdrachten?opdracht=${b.opdracht_id}`} className="text-xs text-gray-600 underline">Staat in Opvolging: kaart openen</a>}

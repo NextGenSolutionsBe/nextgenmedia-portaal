@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { Archive, Check, Loader2, X } from 'lucide-react'
 import { REDEN_VOORSTEL, VENNOTEN, maandLabel, type Vennoot } from '@/lib/vennoot-uitgaven'
+import { PersoonFoto } from '@/components/admin/persoon-foto'
 
 /** Gedeeld door de schermen van Uitgaven vennoten (uitgaven, extra budget, terugkerend). */
 
@@ -51,8 +52,8 @@ export function AkkoordChips({ stand, namen, ik, bezig, onAkkoord, klaarTekst = 
         const a = stand[k]
         return (
           <span key={k} title={a ? `Akkoord op ${new Date(a.akkoord_op).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels' })}` : 'Nog geen akkoord'}
-            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ${a ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-white text-gray-500 border border-gray-200'}`}>
-            {a ? <Check className="h-3 w-3" /> : null}{namen[k]}
+            className={`inline-flex items-center gap-1 rounded-full pl-0.5 pr-2 py-0.5 text-[11px] ${a ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-white text-gray-500 border border-gray-200'}`}>
+            <PersoonFoto naam={namen[k]} maat={16} />{namen[k]}{a ? <Check className="h-3 w-3" /> : null}
           </span>
         )
       })}

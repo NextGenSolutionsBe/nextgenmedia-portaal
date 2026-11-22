@@ -11,6 +11,7 @@ import {
   ONDERTEKENAARS, STATUS_INFO, aantalIn, boom, filter, kinderen, labelsInGebruik, looptAf, magIn, nakomelingen, padNaam, padVan, statusLabel, statusVan,
   type AcStatus, type AlgemeenContract, type Map,
 } from '@/lib/algemene-contracten/model'
+import { PersoonKnop } from '@/components/admin/persoon-foto'
 
 const dag = (iso: string) => new Date(iso.length === 10 ? `${iso}T12:00:00` : iso).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' })
 const vandaag = () => new Date().toISOString().slice(0, 10)
@@ -461,10 +462,10 @@ function OpladenVenster({ mappen, beginMap, labels, onSluit, onKlaar }: {
             </label>
             {onsNodig && (
               <div className="ml-6">
-                <select className="input-base py-1.5 text-sm" value={ondertekenaar} onChange={(e) => setOndertekenaar(e.target.value)} aria-label="Wie tekent namens ons">
-                  <option value="">Wie tekent? (Marco of Bram)</option>
-                  {ONDERTEKENAARS.map((o) => <option key={o} value={o}>{o === 'Gezamenlijke lead' ? 'Marco of Bram (maakt niet uit)' : o}</option>)}
-                </select>
+                <p className="text-xs text-gray-500 mb-1">Wie tekent?</p>
+                <div className="flex gap-1.5 flex-wrap" role="radiogroup" aria-label="Wie tekent namens ons">
+                  {ONDERTEKENAARS.map((o) => <PersoonKnop key={o} naam={o} label={o === 'Gezamenlijke lead' ? 'Marco of Bram' : o} klein aan={ondertekenaar === o} onClick={() => setOndertekenaar(o)} />)}
+                </div>
               </div>
             )}
             <label className="flex items-start gap-2 text-sm cursor-pointer">

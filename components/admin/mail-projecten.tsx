@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { ArrowRight, Check, Globe, Loader2, Mail, Phone, RotateCcw, Sparkles, X } from 'lucide-react'
 import { DIENSTEN, BEDRIJVEN, PROJECT_VERANTWOORDELIJKEN, projectNaam, type Bedrijf } from '@/lib/opdrachten-kanban'
 import type { MailProject } from '@/lib/mail-opvolging/projecten-server'
+import { PersoonKnop } from '@/components/admin/persoon-foto'
 
 const dagKort = (iso: string) => new Date(iso).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' })
 
@@ -172,7 +173,7 @@ function KaartMaken({ p, naam, onSluit, onKlaar }: { p: MailProject; naam: strin
       <div className="flex gap-4 flex-wrap">
         <div>
           <p className="text-xs text-gray-500 mb-1">Verantwoordelijke</p>
-          <div className="flex gap-1.5">{PROJECT_VERANTWOORDELIJKEN.map((v) => <button key={v} type="button" onClick={() => setWie(v)} className={pil(wie === v)}>{v}</button>)}</div>
+          <div className="flex gap-1.5 flex-wrap" role="radiogroup" aria-label="Verantwoordelijke">{PROJECT_VERANTWOORDELIJKEN.map((v) => <PersoonKnop key={v} naam={v} aan={wie === v} klein onClick={() => setWie(v)} />)}</div>
         </div>
         <div>
           <p className="text-xs text-gray-500 mb-1">Bedrijf</p>
