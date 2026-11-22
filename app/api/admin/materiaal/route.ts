@@ -5,6 +5,7 @@ import { safeMessage } from '@/lib/api-error'
 import { sendEmail, EMAIL_FROM } from '@/lib/email'
 import { buildEmailHtml, buildEmailText } from '@/lib/email-html'
 import { mailUitgeleend, mailTeruggebracht, typeUitPersoneel, ONTLENER_TYPES, type Uitlening } from '@/lib/materiaal/model'
+import { regelsUit } from '@/lib/materiaal/factuur'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -31,6 +32,13 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const BUCKET = 'documenten'
 const tekst = (v: unknown, max = 500) => { const t = String(v ?? '').trim(); return t ? t.slice(0, max) : null }
 const getal = (v: unknown) => { if (v === null || v === undefined || v === '') return null; const n = Number(String(v).replace(',', '.')); return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null }
+/** Lijstje (inhoud, kenmerken): uit een array of een tekstvak met één per regel; leeg = null. */
+const lijstVan = (v: unknown) => { const l = regelsUit(v); return l.length ? l : null }
+const FACTUUR_PAD = /^materiaal\/facturen\/[0-9a-f-]{36}\/[^/]{1,200}$/i
+// Kolommen van 22 nov 2026: ontbreken ze nog (vóór de migratie), dan bewaren we zonder.
+const NIEUWE_KOLOMMEN = ['omschrijving', 'inhoud', 'kenmerken', 'leverancier', 'factuurnummer', 'garantie_tot', 'factuur_pad', 'factuur_naam']
+const zonderNieuw = <T extends Record<string, unknown>>(v: T) => Object.fromEntries(Object.entries(v).filter(([k]) => !NIEUWE_KOLOMMEN.includes(k))) as T
+const kolomOntbreekt = (e: { message?: string } | null) => !!e && /column|schema cache/i.test(e.message ?? '') && NIEUWE_KOLOMMEN.some((k) => (e.message ?? '').includes(k))
 const tijdstip = (v: unknown): string | null => { if (!v) return null; const d = new Date(String(v)); return Number.isNaN(d.getTime()) ? null : d.toISOString() }
 
 async function rechten() {
@@ -240,14 +248,29 @@ export async function POST(req: NextRequest) {
       const categorie = typeof b.categorie_id === 'string' && UUID.test(b.categorie_id) ? b.categorie_id : null
       if (!naam) return NextResponse.json({ error: 'Geef het materiaal een naam.' }, { status: 400 })
       if (!categorie) return NextResponse.json({ error: 'Kies een categorie.' }, { status: 400 })
-      const velden = {
+      const velden: Record<string, unknown> = {
         naam, categorie_id: categorie, merk: tekst(b.merk, 120), model: tekst(b.model, 120), serienummer: tekst(b.serienummer, 120),
         aankoopdatum: typeof b.aankoopdatum === 'string' && ISO.test(b.aankoopdatum) ? b.aankoopdatum : null, aankoopwaarde: getal(b.aankoopwaarde), opmerkingen: tekst(b.opmerkingen, 2000),
+        // Wat het is, wat erbij zit en de aankoop (ook uit de factuur gelezen).
+        omschrijving: tekst(b.omschrijving, 1000), inhoud: lijstVan(b.inhoud), kenmerken: lijstVan(b.kenmerken),
+        leverancier: tekst(b.leverancier, 160), factuurnummer: tekst(b.factuurnummer, 80),
+        garantie_tot: typeof b.garantie_tot === 'string' && ISO.test(b.garantie_tot) ? b.garantie_tot : null,
       }
+      // De factuur: een net opgeladen bestand (moet echt in de opslag staan) of weghalen. Anders blijft ze zoals ze is.
+      const f = b.factuur as { pad?: unknown; naam?: unknown } | null | undefined
+      if (f && typeof f.pad === 'string') {
+        if (!FACTUUR_PAD.test(f.pad) || f.pad.includes('..')) return NextResponse.json({ error: 'De factuur is niet goed opgeladen. Probeer opnieuw.' }, { status: 400 })
+        const map = f.pad.split('/').slice(0, 3).join('/')
+        const { data: bestanden } = await admin.storage.from(BUCKET).list(map, { limit: 5 })
+        if (!((bestanden ?? []) as { name: string }[]).some((x) => `${map}/${x.name}` === f.pad)) return NextResponse.json({ error: 'De factuur is niet (volledig) opgeladen. Probeer opnieuw.' }, { status: 400 })
+        velden.factuur_pad = f.pad
+        velden.factuur_naam = typeof f.naam === 'string' && f.naam.trim() ? f.naam.trim().slice(0, 200) : f.pad.split('/').pop()
+      } else if (b.factuur_weg === true) { velden.factuur_pad = null; velden.factuur_naam = null }
       if (actie === 'item.maak') {
         // Zelfde serienummer twee keer = waarschijnlijk dubbel geregistreerd.
         if (velden.serienummer) { const { data: al } = await admin.from('materiaal_items').select('id, naam').eq('serienummer', velden.serienummer).is('gearchiveerd_op', null).maybeSingle(); if (al) return NextResponse.json({ error: `Serienummer ${velden.serienummer} is al geregistreerd (${al.naam}).` }, { status: 409 }) }
-        const { data, error } = await admin.from('materiaal_items').insert({ ...velden, created_by: ik }).select('id').single()
+        let { data, error } = await admin.from('materiaal_items').insert({ ...velden, created_by: ik }).select('id').single()
+        if (kolomOntbreekt(error)) ({ data, error } = await admin.from('materiaal_items').insert({ ...zonderNieuw(velden), created_by: ik }).select('id').single())
         if (error) throw new Error(error.message)
         await log(admin, { soort: 'item_toegevoegd', item_id: data.id, door: ik, meta: velden })
         return NextResponse.json({ ok: true, id: data.id })
@@ -255,7 +278,8 @@ export async function POST(req: NextRequest) {
       const id = String(b.id ?? '')
       const { data: oud } = await admin.from('materiaal_items').select('*').eq('id', id).maybeSingle()
       if (!oud) return NextResponse.json({ error: 'Materiaal niet gevonden.' }, { status: 404 })
-      const { error } = await admin.from('materiaal_items').update({ ...velden, updated_at: nu }).eq('id', id)
+      let { error } = await admin.from('materiaal_items').update({ ...velden, updated_at: nu }).eq('id', id)
+      if (kolomOntbreekt(error)) ({ error } = await admin.from('materiaal_items').update({ ...zonderNieuw(velden), updated_at: nu }).eq('id', id))
       if (error) throw new Error(error.message)
       const gewijzigd = Object.fromEntries(Object.entries(velden).filter(([k, v]) => String(oud[k] ?? '') !== String(v ?? '')))
       if (Object.keys(gewijzigd).length) await log(admin, { soort: 'item_gewijzigd', item_id: id, door: ik, meta: { oud: Object.fromEntries(Object.keys(gewijzigd).map((k) => [k, oud[k]])), nieuw: gewijzigd } })

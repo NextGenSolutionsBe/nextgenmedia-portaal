@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { Archive, Camera, Check, CircleStop, Eye, Loader2, Paperclip, Repeat, Sparkles, Trash2, Undo2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { leesGetal } from '@/lib/getal'
+import { alsJpeg } from '@/lib/foto-naar-jpeg'
 import {
   FREQ, FREQUENTIES, VENNOTEN, betaaldata, delenVan, gelijkVerdeeld, isLopend, terugkerendStand, volgendeBetaling,
   type BonVoorstel, type Frequentie, type Terugkerend, type Uitgave, type Vennoot,
@@ -14,28 +15,6 @@ import { AkkoordChips, Venster, bedragTekst, dag, eur, inp, lbl, post } from './
 
 export type Soort = 'eenmalig' | 'terugkerend'
 const DAG = /^\d{4}-\d{2}-\d{2}$/
-const MAX_PX = 2000
-
-/**
- * Een foto van een bonnetje verkleinen naar JPEG (max. 2000 px): sneller op te
- * laden en leesbaar voor de AI (een iPhone-foto in HEIC wordt zo ook JPEG).
- * Lukt het niet, dan gaat het origineel.
- */
-async function alsJpeg(f: File): Promise<File> {
-  if (!f.type.startsWith('image/') || f.type === 'image/gif') return f
-  if ((f.type === 'image/jpeg' || f.type === 'image/png') && f.size < 900 * 1024) return f
-  try {
-    const beeld = await createImageBitmap(f)
-    const schaal = Math.min(1, MAX_PX / Math.max(beeld.width, beeld.height))
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.round(beeld.width * schaal); canvas.height = Math.round(beeld.height * schaal)
-    canvas.getContext('2d')?.drawImage(beeld, 0, 0, canvas.width, canvas.height)
-    const blob = await new Promise<Blob | null>((ok) => canvas.toBlob(ok, 'image/jpeg', 0.85))
-    if (!blob) return f
-    return new File([blob], (f.name || 'bon').replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' })
-  } catch { return f }
-}
-
 type Lezing = { status: 'bezig' } | { status: 'fout'; fout: string } | { status: 'klaar'; voorstel: BonVoorstel; vorige: Record<string, unknown> }
 
 /**
