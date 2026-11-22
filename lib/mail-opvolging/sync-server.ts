@@ -7,7 +7,7 @@ import { mailboxen, mapPaden, veiligeFout, type Mailbox } from './mailboxen'
 import { leesMailInhoud, type MailTaakVoorstel } from './ai'
 import { isEigen, koppel, nieuwDeel, normEmail, type Adresboek } from './regels'
 import { recenteTaken } from '@/lib/clickup'
-import { lijktOp, isAfInClickup } from './taken'
+import { lijktOp, isAfInClickup, MAIL_TAKEN_AAN } from './taken'
 import { zoekNieuweProjecten, type ProjectScan } from './projecten-server'
 
 /**
@@ -99,6 +99,8 @@ async function leesMailbox(admin: Admin, mb: Mailbox, boek: Adresboek & { namen:
           if (aiBudget.over <= 0) break
           if (bekend.has(rij.message_id) || rij.fragment === null) continue
           if (Date.now() - new Date(rij.verzonden_op).getTime() > AI_DAGEN * 86_400_000) continue
+          // Zonder taken uit de mail lezen we enkel nog antwoorden op een lopend project.
+          if (!MAIL_TAKEN_AAN && !(rij.richting === 'in' && rij.opdracht_id && actief.has(rij.opdracht_id))) continue
           try {
             const msg = await client.fetchOne(String(rij.uid), { source: true }, { uid: true })
             if (!msg || !msg.source) continue
@@ -112,7 +114,7 @@ async function leesMailbox(admin: Admin, mb: Mailbox, boek: Adresboek & { namen:
             if (a) {
               if (rij.richting === 'in' && project) { rij.ai_soort = a.soort; rij.ai_samenvatting = a.samenvatting }
               rij.ai_op = new Date().toISOString()
-              rij.taken = a.taken
+              if (MAIL_TAKEN_AAN) rij.taken = a.taken
             }
           } catch { /* lezen is een extra */ }
         }
@@ -233,7 +235,7 @@ export async function leesMailEnAgenda(admin: Admin): Promise<SyncResultaat> {
   const aiBudget = { over: AI_MAX }
   for (const mb of lijst) mappen.push(...(await leesMailbox(admin, mb, boek, boek.projecten, aiBudget)))
   const agenda = await leesAgendaMeetings(admin, boek, boek.projecten).catch((e) => ({ aantal: 0, fout: e instanceof Error ? e.message : String(e) }))
-  await controleerMailTaken(admin).catch(() => null)
+  if (MAIL_TAKEN_AAN) await controleerMailTaken(admin).catch(() => null)
   // Nieuwe projecten: wat niet past binnen de tijd van deze ronde, volgt de volgende keer.
   const projecten = await zoekNieuweProjecten(admin, boek, { tot: start + 230_000 }).catch((e) => [{ mailbox: '-', gelezen: 0, beoordeeld: 0, voorstellen: 0, fout: e instanceof Error ? e.message.slice(0, 200) : 'mislukt', klaar: false }])
   return { gekoppeld: lijst.length > 0, mappen, meetings: agenda.aantal, agendaFout: agenda.fout, projecten }
