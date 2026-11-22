@@ -7786,3 +7786,77 @@ ALTER TABLE public.materiaal_items ADD COLUMN IF NOT EXISTS factuurnummer text;
 ALTER TABLE public.materiaal_items ADD COLUMN IF NOT EXISTS garantie_tot date;
 ALTER TABLE public.materiaal_items ADD COLUMN IF NOT EXISTS factuur_pad text;    -- privébucket documenten, materiaal/facturen/…
 ALTER TABLE public.materiaal_items ADD COLUMN IF NOT EXISTS factuur_naam text;
+
+-- ── NextGenSolutions: eigen pipeline en cijfers (22 nov 2026) ───────────────
+-- Los van de rest van de app (geen klanten, projecten of facturen): deals van
+-- NextGen Solutions van afspraak tot closed won/lost, met notities en
+-- opvolgtaken die naar ClickUp gaan (lijst van NextGen Solutions). Additief.
+CREATE TABLE IF NOT EXISTS public.ngs_deals (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  bedrijf text NOT NULL,
+  contactpersoon text, email text, telefoon text,
+  titel text,
+  diensten text[] NOT NULL DEFAULT '{}',
+  fase text NOT NULL DEFAULT 'afspraak',
+  fase_sinds timestamptz NOT NULL DEFAULT now(),
+  afspraak_op timestamptz,
+  waarde_eenmalig numeric(12,2),
+  waarde_maandelijks numeric(12,2),
+  looptijd_maanden integer,
+  start_datum date,
+  bron text,
+  verantwoordelijke text,
+  gewonnen_op date, verloren_op date, verloren_reden text,
+  verwijderd_op timestamptz, verwijderd_door text,
+  created_by text, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ngs_deals_fase_check') THEN
+    ALTER TABLE public.ngs_deals ADD CONSTRAINT ngs_deals_fase_check CHECK (fase IN ('afspraak', 'voorstel', 'opvolgen', 'won', 'lost'));
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS ngs_deals_fase ON public.ngs_deals (fase) WHERE verwijderd_op IS NULL;
+
+CREATE TABLE IF NOT EXISTS public.ngs_deal_notities (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id uuid NOT NULL REFERENCES public.ngs_deals(id) ON DELETE CASCADE,
+  tekst text NOT NULL,
+  soort text NOT NULL DEFAULT 'notitie',
+  door text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ngs_deal_notities_deal ON public.ngs_deal_notities (deal_id, created_at DESC);
+
+-- Opvolgtaken: zelfde vorm als opdracht_taken (één server: lib/sales/lead-taken-server.ts).
+CREATE TABLE IF NOT EXISTS public.ngs_deal_taken (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id uuid NOT NULL REFERENCES public.ngs_deals(id) ON DELETE CASCADE,
+  aanvraag_sleutel text,
+  omschrijving text NOT NULL,
+  notitie text,
+  deadline date,
+  merk text NOT NULL,
+  clickup_list_id text, clickup_assignee_id bigint, clickup_assignee_naam text,
+  clickup_task_id text, clickup_url text, clickup_status text, clickup_status_kleur text, clickup_status_type text,
+  status_gelezen_op timestamptz,
+  sync_status text NOT NULL DEFAULT 'wacht', sync_fout text,
+  created_by uuid, created_by_email text,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  afgerond_op timestamptz
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ngs_deal_taken_aanvraag ON public.ngs_deal_taken (aanvraag_sleutel) WHERE aanvraag_sleutel IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ngs_deal_taken_deal ON public.ngs_deal_taken (deal_id, created_at DESC);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ngs_deal_taken_merk_check') THEN
+    ALTER TABLE public.ngs_deal_taken ADD CONSTRAINT ngs_deal_taken_merk_check CHECK (merk IN ('nextgenmedia', 'nextgensolutions'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ngs_deal_taken_sync_check') THEN
+    ALTER TABLE public.ngs_deal_taken ADD CONSTRAINT ngs_deal_taken_sync_check CHECK (sync_status IN ('wacht', 'ok', 'fout'));
+  END IF;
+END $$;
+ALTER TABLE public.ngs_deals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ngs_deal_notities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ngs_deal_taken ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.ngs_deals FROM anon, authenticated;
+REVOKE ALL ON public.ngs_deal_notities FROM anon, authenticated;
+REVOKE ALL ON public.ngs_deal_taken FROM anon, authenticated;
