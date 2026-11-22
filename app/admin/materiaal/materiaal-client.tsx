@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Plus, Search, Loader2, Camera, Package, ArrowUpRight, Undo2, Users, History, Pencil, Archive, RotateCcw, Mail, AlertTriangle, Layers } from 'lucide-react'
+import { Plus, Search, Loader2, Camera, Package, ArrowUpRight, Undo2, Users, History, Pencil, Archive, RotateCcw, Mail, AlertTriangle, Layers, Check, FileText } from 'lucide-react'
 import { INP } from '@/app/admin/instellingen/ui'
 import { STATUS, ACTIVITEIT_LABEL, MAIL_LABEL, itemStatus, typeLabel, naamVan, datumKort, datumTijd, datumLang, vandaagBE, type ItemStatus } from '@/lib/materiaal/model'
 import { Modal, UitleenDialoog, TerugDialoog, ItemFormulier, OntlenerFormulier, CorrectieDialoog, focusRing } from './dialogen'
@@ -95,7 +95,7 @@ export function MateriaalClient({ startData = null, startTab }: { startData?: Da
     if (filter === 'uitgeleend' && s !== 'uitgeleend' && s !== 'te_laat') return false
     if (!q) return true
     const u = actiefPerItem.get(i.id)
-    return `${i.naam} ${i.merk ?? ''} ${i.model ?? ''} ${i.serienummer ?? ''} ${catMap.get(i.categorie_id ?? '') ?? ''} ${u ? naamVan(ontlenerMap.get(u.ontlener_id)) : ''}`.toLowerCase().includes(q)
+    return `${i.naam} ${i.merk ?? ''} ${i.model ?? ''} ${i.serienummer ?? ''} ${i.omschrijving ?? ''} ${i.leverancier ?? ''} ${i.factuurnummer ?? ''} ${catMap.get(i.categorie_id ?? '') ?? ''} ${u ? naamVan(ontlenerMap.get(u.ontlener_id)) : ''}`.toLowerCase().includes(q)
   })
   const kan = data?.kan
 
@@ -376,10 +376,22 @@ function ItemDetail({ data, item, status, catNaam, ontlenerMap, doe, onSluit, on
           {actief && <><dt className="text-gray-500">Bij</dt><dd className="font-medium">{naamVan(ontlenerMap.get(actief.ontlener_id))}</dd><dt className="text-gray-500">Sinds</dt><dd>{datumLang(actief.uitgeleend_op)}</dd>{actief.verwacht_terug && <><dt className="text-gray-500">Verwacht terug</dt><dd>{datumLang(actief.verwacht_terug)}</dd></>}</>}
           {(item.merk || item.model) && <><dt className="text-gray-500">Merk / model</dt><dd>{[item.merk, item.model].filter(Boolean).join(' ')}</dd></>}
           {item.serienummer && <><dt className="text-gray-500">Serienummer</dt><dd>{item.serienummer}</dd></>}
-          {item.aankoopdatum && <><dt className="text-gray-500">Aankoop</dt><dd>{datumKort(item.aankoopdatum)}{item.aankoopwaarde !== null ? ` · € ${String(item.aankoopwaarde).replace('.', ',')}` : ''}</dd></>}
+          {(item.aankoopdatum || item.aankoopwaarde !== null) && <><dt className="text-gray-500">Aankoop</dt><dd>{[item.aankoopdatum ? datumKort(item.aankoopdatum) : null, item.aankoopwaarde !== null ? `${Number(item.aankoopwaarde).toLocaleString('nl-BE', { style: 'currency', currency: 'EUR' })} excl. btw` : null, item.leverancier].filter(Boolean).join(' · ')}</dd></>}
+          {!item.aankoopdatum && item.aankoopwaarde === null && item.leverancier && <><dt className="text-gray-500">Leverancier</dt><dd>{item.leverancier}</dd></>}
+          {item.garantie_tot && <><dt className="text-gray-500">Garantie</dt><dd>tot {datumKort(item.garantie_tot)} <span className={`text-[11px] ${item.garantie_tot >= vandaagBE() ? 'text-green-700' : 'text-gray-500'}`}>{item.garantie_tot >= vandaagBE() ? 'loopt nog' : 'verlopen'}</span></dd></>}
+          {(item.factuur_pad || item.factuurnummer) && <><dt className="text-gray-500">Factuur</dt><dd className="flex items-center gap-2 flex-wrap">{item.factuurnummer && <span>{item.factuurnummer}</span>}{item.factuur_pad && <a href={`/api/admin/materiaal/factuur?item_id=${item.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs underline"><FileText className="h-3.5 w-3.5" />Bekijken</a>}</dd></>}
           {item.opmerkingen && <><dt className="text-gray-500">Opmerkingen</dt><dd className="whitespace-pre-line">{item.opmerkingen}</dd></>}
         </dl>
       </div>
+      {(item.omschrijving || item.inhoud?.length || item.kenmerken?.length) && (
+        <section className="rounded-xl bg-gray-50 border border-gray-100 p-3.5 space-y-3 text-sm">
+          {item.omschrijving && <p className="text-gray-800">{item.omschrijving}</p>}
+          <div className="grid sm:grid-cols-2 gap-3">
+            {!!item.inhoud?.length && <div><h4 className="text-xs font-semibold text-gray-700 mb-1">Wat zit erbij</h4><ul className="space-y-0.5 text-gray-700">{item.inhoud.map((x, i) => <li key={i} className="flex gap-1.5"><Check className="h-3.5 w-3.5 mt-0.5 text-gray-400 shrink-0" />{x}</li>)}</ul></div>}
+            {!!item.kenmerken?.length && <div><h4 className="text-xs font-semibold text-gray-700 mb-1">Kenmerken</h4><ul className="space-y-0.5 text-gray-700 list-disc pl-4">{item.kenmerken.map((x, i) => <li key={i}>{x}</li>)}</ul></div>}
+          </div>
+        </section>
+      )}
       <section>
         <h4 className="text-sm font-semibold mb-1.5">Uitleengeschiedenis</h4>
         {historie.length === 0 ? <p className="text-sm text-gray-500">Nog nooit uitgeleend.</p> : (

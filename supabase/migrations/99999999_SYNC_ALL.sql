@@ -7776,3 +7776,13 @@ revoke all on public.vennoot_budget_extra, public.vennoot_budget_extra_akkoorden
 -- Uitgaven vennoten: één bonnetje verdeeld over meerdere vennoten (22 nov 2026).
 -- Leeg = de hele uitgave is van `vennoot`; anders {"bram": 25, "chiara": 25}.
 alter table public.vennoot_uitgaven add column if not exists verdeling jsonb;
+
+-- Materiaalbeheer: alles over een toestel, ook uit de factuur gelezen (22 nov 2026).
+ALTER TABLE public.materiaal_items ADD COLUMN IF NOT EXISTS omschrijving text;   -- wat het is
+ALTER TABLE public.materiaal_items ADD COLUMN IF NOT EXISTS inhoud text[];       -- wat erbij zit (batterij, lader …)
+ALTER TABLE public.materiaal_items ADD COLUMN IF NOT EXISTS kenmerken text[];    -- belangrijkste specificaties
+ALTER TABLE public.materiaal_items ADD COLUMN IF NOT EXISTS leverancier text;
+ALTER TABLE public.materiaal_items ADD COLUMN IF NOT EXISTS factuurnummer text;
+ALTER TABLE public.materiaal_items ADD COLUMN IF NOT EXISTS garantie_tot date;
+ALTER TABLE public.materiaal_items ADD COLUMN IF NOT EXISTS factuur_pad text;    -- privébucket documenten, materiaal/facturen/…
+ALTER TABLE public.materiaal_items ADD COLUMN IF NOT EXISTS factuur_naam text;

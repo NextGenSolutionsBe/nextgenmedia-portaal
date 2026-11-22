@@ -5,6 +5,10 @@ export type Item = {
   id: string; naam: string; categorie_id: string | null; merk: string | null; model: string | null; serienummer: string | null
   foto_pad: string | null; foto_url: string | null; aankoopdatum: string | null; aankoopwaarde: number | null; opmerkingen: string | null
   gearchiveerd_op: string | null; created_at: string
+  /** Wat het is, wat erbij zit en de aankoop (22 nov 2026; ook uit de factuur gelezen). */
+  omschrijving?: string | null; inhoud?: string[] | null; kenmerken?: string[] | null
+  leverancier?: string | null; factuurnummer?: string | null; garantie_tot?: string | null
+  factuur_pad?: string | null; factuur_naam?: string | null
 }
 export type Categorie = { id: string; naam: string; volgorde: number }
 export type Ontlener = { id: string; personeel_id: string | null; voornaam: string; achternaam: string | null; email: string | null; telefoon: string | null; type: string | null; gearchiveerd_op: string | null }
