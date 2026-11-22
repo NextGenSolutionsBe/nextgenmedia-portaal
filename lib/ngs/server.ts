@@ -70,16 +70,22 @@ export async function voegNotitieToe(admin: Admin, dealId: string, tekstIn: unkn
   if (error) throw new Error(error.message)
 }
 
-/** Nieuwe deal; standaard in Afspraak (of de fase die meekomt, behalve won/lost: die gaan via verplaatsen). */
+/**
+ * Nieuwe klant of deal, in elke fase: standaard Afspraak; Closed Won met de
+ * datum (bv. een bestaande klant), Closed Lost met de reden. Zelfde regels als verplaatsen.
+ */
 export async function maakDeal(admin: Admin, b: Record<string, unknown>, door: string | null): Promise<string> {
   const v = controleerDeal(b)
   if (!v.ok) throw new NgsFout(v.fout)
-  const fase = b.fase === 'voorstel' || b.fase === 'opvolgen' ? b.fase : 'afspraak'
-  const { data, error } = await admin.from('ngs_deals').insert({ ...v.waarde, fase, created_by: door }).select('id').single()
+  const fase = isFase(b.fase) ? b.fase : 'afspraak'
+  const p = verplaatsing({ start_datum: v.waarde.start_datum }, fase, { datum: b.datum, reden: b.reden }, vandaagBrussel(), new Date().toISOString())
+  if (!p.ok) throw new NgsFout(p.fout)
+  const { data, error } = await admin.from('ngs_deals').insert({ ...v.waarde, ...p.patch, created_by: door }).select('*').single()
   if (error) throw new Error(error.message)
-  const id = String((data as { id: string }).id)
-  await systeem(admin, id, `Deal aangemaakt in ${faseLabel(fase)}`, door)
-  return id
+  const d = naarDeal(data as Record<string, unknown>)
+  const extra = d.fase === 'won' ? ` (${eur(dealWaarde(d))})` : d.fase === 'lost' ? `: ${d.verloren_reden}` : ''
+  await systeem(admin, d.id, `Toegevoegd in ${faseLabel(fase)}${extra}`, door)
+  return d.id
 }
 
 export async function wijzigDeal(admin: Admin, id: string, b: Record<string, unknown>, door: string | null): Promise<void> {

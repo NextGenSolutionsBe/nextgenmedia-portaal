@@ -4,15 +4,15 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import {
-  FASES, bronLabel, cijfersVoor, dealWaarde, dienstLabel, lopendeMrr, periodeVan, verschuif, type Deal, type PeriodeSoort,
+  FASES, bronLabel, cijfersVoor, dealWaarde, lopendeMrr, periodeVan, verschuif, type Deal, type PeriodeSoort,
 } from '@/lib/ngs/model'
 import { FASE_STIJL, Kop, NGS_BLAUW, dagKort, eur } from '../ui'
 import { OmzetGrafiek } from './omzet-grafiek'
 
 /**
- * Cijfers van NextGen Solutions, enkel uit de eigen pipeline: omzet,
+ * Cijfers van NextGenSolutions, enkel uit de eigen pipeline: omzet,
  * gewonnen en verloren in de gekozen periode, wat er elke maand binnenkomt
- * en wat er open staat. Per dienst, per bron en waarom deals niet doorgingen.
+ * en wat er open staat. Per bron en waarom deals niet doorgingen.
  */
 export function CijfersClient({ deals, vandaag }: { deals: Deal[]; vandaag: string }) {
   const nu = vandaag.slice(0, 7)
@@ -27,11 +27,10 @@ export function CijfersClient({ deals, vandaag }: { deals: Deal[]; vandaag: stri
   const label = alles ? 'altijd' : periode.label
   const isNu = !alles && periode.maanden.includes(nu)
   const maxPipe = Math.max(...c.pipeline.map((p) => p.waarde), 1)
-  const maxDienst = Math.max(...c.perDienst.map((p) => p.waarde), 1)
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <Kop actief="cijfers" titel="Cijfers" sub="Omzet en verkoop uit de pipeline van NextGen Solutions, excl. btw." />
+      <Kop actief="cijfers" titel="Cijfers" sub="Omzet en verkoop uit de pipeline van NextGenSolutions, excl. btw." />
 
       {/* Periode */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -77,19 +76,6 @@ export function CijfersClient({ deals, vandaag }: { deals: Deal[]; vandaag: stri
           </ul>
         </Kaart>
 
-        <Kaart titel="Per dienst" sub={`Gewonnen ${label}. Een deal met meer diensten telt voor elke dienst een deel.`}>
-          {c.perDienst.length === 0 ? <Leeg /> : (
-            <ul className="space-y-2.5">
-              {c.perDienst.map((p) => (
-                <li key={p.dienst} className="space-y-1">
-                  <div className="flex items-center justify-between gap-2 text-sm"><span className="text-gray-800">{dienstLabel(p.dienst)} <span className="text-gray-400">{p.aantal}</span></span><span className="tabular-nums font-semibold text-gray-900">{eur(p.waarde)}</span></div>
-                  <Balk deel={p.waarde / maxDienst} />
-                </li>
-              ))}
-            </ul>
-          )}
-        </Kaart>
-
         <Kaart titel="Per bron" sub={`Afgesloten ${label}.`}>
           {c.perBron.length === 0 ? <Leeg /> : (
             <table className="w-full text-sm">
@@ -126,7 +112,7 @@ export function CijfersClient({ deals, vandaag }: { deals: Deal[]; vandaag: stri
                 <Link href={`/admin/nextgensolutions?deal=${d.id}`} className="py-2 flex items-center gap-3 hover:bg-gray-50 -mx-2 px-2 rounded-lg">
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-medium text-gray-900 truncate">{d.bedrijf}</span>
-                    <span className="block text-[11px] text-gray-500 truncate">{[d.titel, d.diensten.map(dienstLabel).join(', ')].filter(Boolean).join(' · ') || '—'}</span>
+                    {d.titel && <span className="block text-[11px] text-gray-500 truncate">{d.titel.split('\n')[0]}</span>}
                   </span>
                   <span className="text-right shrink-0">
                     <span className="block text-sm font-semibold tabular-nums">{eur(dealWaarde(d))}</span>

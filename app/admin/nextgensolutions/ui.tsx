@@ -31,7 +31,7 @@ export async function post(body: Record<string, unknown>) {
   return j as Record<string, unknown>
 }
 
-/** Bovenaan elke pagina: wie we zijn (NextGen Solutions) en de twee tabbladen. */
+/** Bovenaan elke pagina: wie we zijn (logo en NextGenSolutions) en de twee tabbladen. */
 export function Kop({ actief, titel, sub, rechts }: { actief: 'pipeline' | 'cijfers'; titel: string; sub?: React.ReactNode; rechts?: React.ReactNode }) {
   const tab = (k: 'pipeline' | 'cijfers', href: string, label: string) => (
     <Link href={href} aria-current={actief === k ? 'page' : undefined}
@@ -41,10 +41,11 @@ export function Kop({ actief, titel, sub, rechts }: { actief: 'pipeline' | 'cijf
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2.5">
-          <span className="h-8 w-8 rounded-xl flex items-center justify-center text-white text-[13px] font-semibold shadow-sm" style={{ background: NGS_BLAUW }} aria-hidden>NGS</span>
-          <span className="text-sm font-semibold text-gray-900">NextGen Solutions</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logos/nextgensolutions-icoon-128.png" alt="" width={36} height={36} className="h-9 w-9" />
+          <span className="text-base font-semibold text-gray-900 tracking-tight">NextGenSolutions</span>
         </div>
-        <nav className="inline-flex p-1 rounded-full bg-gray-100" aria-label="NextGen Solutions">
+        <nav className="inline-flex p-1 rounded-full bg-gray-100" aria-label="NextGenSolutions">
           {tab('pipeline', '/admin/nextgensolutions', 'Pipeline')}
           {tab('cijfers', '/admin/nextgensolutions/cijfers', 'Cijfers')}
         </nav>

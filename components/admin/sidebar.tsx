@@ -60,8 +60,8 @@ const SECTIONS: NavSection[] = [
     ],
   },
   {
-    // Eigen omgeving van NextGen Solutions: pipeline en cijfers, los van de rest.
-    title: 'NextGen Solutions',
+    // Eigen omgeving van NextGenSolutions: pipeline en cijfers, los van de rest.
+    title: 'NextGenSolutions',
     open: true,
     items: [
       { label: 'Pipeline', href: '/admin/nextgensolutions', icon: Target, module: 'nextgensolutions', exact: true },

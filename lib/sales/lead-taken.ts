@@ -5,7 +5,7 @@ import { zoneNaarIso } from '@/lib/meetings/model'
 
 export const MERKEN = [
   { key: 'nextgenmedia', naam: 'NextGen Media' },
-  { key: 'nextgensolutions', naam: 'NextGen Solutions' },
+  { key: 'nextgensolutions', naam: 'NextGenSolutions' },
 ] as const
 export type Merk = (typeof MERKEN)[number]['key']
 export const merkNaam = (k: string | null | undefined): string => MERKEN.find((m) => m.key === k)?.naam ?? (k ?? '')
@@ -123,17 +123,17 @@ export function ngsTaakOmschrijving(t: {
   const deal = [t.bedrijf, t.titel].filter(Boolean).join(' – ') || 'Deal'
   const tekst = [
     `Deal: ${deal}`,
-    `In de pipeline van NextGen Solutions: ${t.link}`,
+    `In de pipeline van NextGenSolutions: ${t.link}`,
     t.contact ? `Contactpersoon: ${t.contact}` : null,
     t.notitie ? `\nNotitie:\n${t.notitie}` : null,
-    `\nAangemaakt${t.door ? ` door ${t.door}` : ''} vanuit de pipeline van NextGen Solutions.`,
+    `\nAangemaakt${t.door ? ` door ${t.door}` : ''} vanuit de pipeline van NextGenSolutions.`,
     `Ref: ${t.marker}`,
   ].filter((x) => x !== null).join('\n')
   const markdown = [
     `**Deal:** [${md(deal)}](${t.link})`,
     t.contact ? `**Contactpersoon:** ${md(t.contact)}` : null,
     t.notitie ? `\n**Notitie**\n\n${md(t.notitie)}` : null,
-    `\n_Aangemaakt${t.door ? ` door ${md(t.door)}` : ''} vanuit de pipeline van NextGen Solutions._`,
+    `\n_Aangemaakt${t.door ? ` door ${md(t.door)}` : ''} vanuit de pipeline van NextGenSolutions._`,
     `Ref: ${t.marker}`,
   ].filter((x) => x !== null).join('\n')
   return { tekst, markdown }
