@@ -7772,3 +7772,7 @@ create table if not exists public.vennoot_terugkerend_akkoorden (
 create unique index if not exists vennoot_terugkerend_akkoorden_uniek on public.vennoot_terugkerend_akkoorden (terugkerend_id, vennoot, md5(inhoud_tekst));
 alter table public.vennoot_terugkerend_akkoorden enable row level security;
 revoke all on public.vennoot_budget_extra, public.vennoot_budget_extra_akkoorden, public.vennoot_terugkerend, public.vennoot_terugkerend_akkoorden from anon, authenticated;
+
+-- Uitgaven vennoten: één bonnetje verdeeld over meerdere vennoten (22 nov 2026).
+-- Leeg = de hele uitgave is van `vennoot`; anders {"bram": 25, "chiara": 25}.
+alter table public.vennoot_uitgaven add column if not exists verdeling jsonb;

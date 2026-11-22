@@ -8,6 +8,7 @@ import {
   controleerExtra, extraTekst, extraStand, extraTelt, controleerTerugkerend, terugkerendTekst, terugkerendStand, betaaldata,
   volgendeBetaling, terugkerendeUitgaven, isLopend, openAkkoorden, openAkkoordenTekst, namenLijst,
   type BudgetExtra, type ExtraAkkoord, type Terugkerend, type TerugkerendAkkoord,
+  gelijkVerdeeld, delenVan, deelVan, wieBetrokken, uitgaveTekst, leesBonVoorstel,
 } from '../lib/vennoot-uitgaven'
 
 let n = 0
@@ -249,6 +250,55 @@ test('Wat wacht op jou: uitgaven, extra budget en terugkerende samen', () => {
   assert.equal(openAkkoordenTekst(o), '1 keer extra budget en 1 terugkerende uitgave')
   assert.equal(openAkkoorden({ uitgaven: [], akkoorden: [], extras: [e], extraAkkoorden: akE(e, ['marco']) }, 'marco').totaal, 0)
   assert.equal(namenLijst(['Marco', 'Bram', 'Chiara']), 'Marco, Bram en Chiara')
+})
+
+// ── Eén bonnetje, meerdere vennoten ────────────────────────────────────────
+
+test('Verdelen: gelijk tot op de cent, of zelf gekozen delen die samen het totaal zijn', () => {
+  assert.deepEqual(gelijkVerdeeld(50, ['chiara', 'bram']), { bram: 25, chiara: 25 })
+  assert.deepEqual(gelijkVerdeeld(10, ['marco', 'bram', 'chiara']), { marco: 3.34, bram: 3.33, chiara: 3.33 })
+  const gelijk = controleerUitgave({ vennoten: ['chiara', 'bram'], datum: '2026-11-20', omschrijving: 'Lunch', bedrag: '50' }, '2026-11-22')
+  assert.ok(gelijk.ok)
+  if (gelijk.ok) { assert.equal(gelijk.waarde.vennoot, 'bram'); assert.deepEqual(gelijk.waarde.verdeling, { bram: 25, chiara: 25 }) }
+  const zelf = controleerUitgave({ vennoten: ['bram', 'chiara'], datum: '2026-11-20', omschrijving: 'Lunch', bedrag: '50', verdeling: { bram: '30', chiara: '20' } }, '2026-11-22')
+  assert.ok(zelf.ok)
+  if (zelf.ok) assert.deepEqual(zelf.waarde.verdeling, { bram: 30, chiara: 20 })
+  assert.equal(controleerUitgave({ vennoten: ['bram', 'chiara'], datum: '2026-11-20', omschrijving: 'Lunch', bedrag: '50', verdeling: { bram: '30', chiara: '10' } }, '2026-11-22').ok, false, 'som klopt niet')
+  // Eén vennoot via de lijst = gewone uitgave, zonder verdeling.
+  const een = controleerUitgave({ vennoten: ['marco'], datum: '2026-11-20', omschrijving: 'Broodje', bedrag: 5 }, '2026-11-22')
+  assert.ok(een.ok && !('verdeling' in een.waarde))
+})
+
+test('Een verdeelde uitgave telt bij elke vennoot voor zijn deel', () => {
+  const gedeeld = u('chiara', '2026-11-20', 50, { id: 'g1', vennoot: 'bram', verdeling: { bram: 25, chiara: 25 } })
+  assert.deepEqual(delenVan(gedeeld), [{ vennoot: 'bram', bedrag: 25 }, { vennoot: 'chiara', bedrag: 25 }])
+  assert.deepEqual(wieBetrokken(gedeeld), ['bram', 'chiara'])
+  assert.equal(deelVan(gedeeld, 'marco'), 0)
+  const s = standPerVennoot([gedeeld], { maandbudget: 250, start_maand: '2026-11' }, periodeVan('maand', '2026-11'), '2026-11')
+  assert.deepEqual(s.map((x) => `${x.vennoot}:${x.besteedPeriode}:${x.tegoed}:${x.aantalPeriode}`), ['marco:0:250:0', 'bram:25:225:1', 'chiara:25:225:1'])
+  assert.equal(uitgavenIn([gedeeld], null, 'chiara', false).length, 1)
+  assert.equal(uitgavenIn([gedeeld], null, 'marco', false).length, 0)
+  assert.equal(perMaand([gedeeld], 'chiara')[0].totaal, 25)
+  assert.equal(perMaand([gedeeld])[0].totaal, 50)
+})
+
+test('Akkoordtekst: een gewone uitgave blijft exact dezelfde tekst, een verdeelde zegt wie wat draagt', () => {
+  const gewoon = u('bram', '2026-11-08', 12.5, { id: 'x1', bewijs_pad: null })
+  assert.equal(uitgaveTekst(gewoon), 'Uitgave x1\nVoor: bram\nDatum: 2026-11-08\nWat: x\nWaarvoor: —\nBedrag: 12.50\nBon: geen')
+  const verdeeld = { ...gewoon, verdeling: { bram: 6.25, chiara: 6.25 } }
+  assert.ok(uitgaveTekst(verdeeld).includes('Voor: bram, chiara'))
+  assert.ok(uitgaveTekst(verdeeld).includes('Verdeling: bram 6.25, chiara 6.25'))
+})
+
+test('Bonnetje lezen: enkel een geldige datum (niet in de toekomst) en een bedrag in euro', () => {
+  const ok = leesBonVoorstel('Hier: {"is_bon": true, "winkel": "Exki", "omschrijving": "Lunch: 2 broodjes en 2 drankjes", "datum": "2026-11-18", "totaal": "23,40", "munt": "EUR", "zekerheid": 0.9}', '2026-11-22')
+  assert.deepEqual(ok, { winkel: 'Exki', omschrijving: 'Lunch: 2 broodjes en 2 drankjes', datum: '2026-11-18', bedrag: 23.4, zekerheid: 0.9, opmerking: null })
+  assert.equal(leesBonVoorstel('{"is_bon": true, "datum": "2026-12-01", "totaal": 10}', '2026-11-22').datum, null, 'toekomst')
+  const dollar = leesBonVoorstel('{"is_bon": true, "totaal": 12, "munt": "USD"}', '2026-11-22')
+  assert.equal(dollar.bedrag, null)
+  assert.ok(dollar.opmerking?.includes('USD'))
+  assert.equal(leesBonVoorstel('{"is_bon": false}', '2026-11-22').bedrag, null)
+  assert.equal(leesBonVoorstel('geen json', '2026-11-22').zekerheid, 0)
 })
 
 console.log(`\n${n} tests geslaagd\n`)
