@@ -33,10 +33,14 @@ export type Uitgave = {
   archief_reden: string | null
   created_at: string | null
   created_by: string | null
+  /** Eén bonnetje verdeeld over meerdere vennoten ({ bram: 25, chiara: 25 }); leeg = alles is van `vennoot`. */
+  verdeling?: Verdeling | null
   /** Een betaling van een terugkerende uitgave (afgeleid, geen eigen rij): de afspraak en hoe vaak. */
   terugkerend_id?: string
   frequentie?: Frequentie
 }
+
+export type Verdeling = Partial<Record<Vennoot, number>>
 
 export type RegelsVersie = { id: string; versie: number; regels: string[]; maandbudget: number; start_maand: string; created_at: string | null; created_by: string | null }
 
@@ -47,10 +51,16 @@ const MAAND = /^\d{4}-(0[1-9]|1[0-2])$/
 
 // ── Een uitgave invoeren ────────────────────────────────────────────────────
 
-export type UitgaveInvoer = { vennoot: Vennoot; datum: string; omschrijving: string; doel: string | null; bedrag: number }
+export type UitgaveInvoer = { vennoot: Vennoot; datum: string; omschrijving: string; doel: string | null; bedrag: number; verdeling?: Verdeling }
 
+/**
+ * Een uitgave: voor één vennoot (`vennoot`) of verdeeld over meerdere
+ * (`vennoten`, standaard gelijk; `verdeling` = zelf gekozen bedragen die samen
+ * het totaal moeten zijn). `vennoot` is dan de eerste van de lijst.
+ */
 export function controleerUitgave(b: Record<string, unknown>, vandaag: string): { ok: true; waarde: UitgaveInvoer } | { ok: false; fout: string } {
-  if (!isVennoot(b.vennoot)) return { ok: false, fout: 'Kies voor welke vennoot de uitgave was.' }
+  const lijst = Array.isArray(b.vennoten) ? VENNOTEN.filter((v) => (b.vennoten as unknown[]).includes(v)) : isVennoot(b.vennoot) ? [b.vennoot] : []
+  if (!lijst.length) return { ok: false, fout: 'Kies voor welke vennoot de uitgave was.' }
   const datum = String(b.datum ?? '').trim()
   if (!DAG.test(datum) || Number.isNaN(Date.parse(`${datum}T12:00:00Z`))) return { ok: false, fout: 'Kies de datum van de uitgave.' }
   if (datum > vandaag) return { ok: false, fout: 'De datum ligt in de toekomst.' }
@@ -61,8 +71,42 @@ export function controleerUitgave(b: Record<string, unknown>, vandaag: string): 
   const bedrag = leesGetal(b.bedrag)
   if (bedrag === null || bedrag <= 0) return { ok: false, fout: 'Vul het bedrag in.' }
   if (bedrag > 100_000) return { ok: false, fout: 'Dat bedrag is te hoog.' }
-  return { ok: true, waarde: { vennoot: b.vennoot, datum, omschrijving, doel, bedrag: rond(bedrag) } }
+  const waarde: UitgaveInvoer = { vennoot: lijst[0], datum, omschrijving, doel, bedrag: rond(bedrag) }
+  if (lijst.length === 1) return { ok: true, waarde }
+  // Verdeeld: zelf gekozen bedragen, of gelijk (de centen die overschieten bij de eersten).
+  if (b.verdeling && typeof b.verdeling === 'object') {
+    const ruw = b.verdeling as Record<string, unknown>
+    const verdeling: Verdeling = {}
+    for (const v of lijst) {
+      const deel = leesGetal(ruw[v])
+      if (deel === null || deel <= 0) return { ok: false, fout: 'Vul voor elke gekozen vennoot een deel in (meer dan € 0).' }
+      verdeling[v] = rond(deel)
+    }
+    const som = rond(Object.values(verdeling).reduce((t, x) => t + (x ?? 0), 0))
+    if (Math.abs(som - waarde.bedrag) > 0.004) return { ok: false, fout: `De delen samen (€ ${som.toFixed(2).replace('.', ',')}) moeten het totaal zijn (€ ${waarde.bedrag.toFixed(2).replace('.', ',')}).` }
+    return { ok: true, waarde: { ...waarde, verdeling } }
+  }
+  return { ok: true, waarde: { ...waarde, verdeling: gelijkVerdeeld(waarde.bedrag, lijst) } }
 }
+
+/** Gelijk verdelen tot op de cent: € 50 over twee = 25 + 25, € 10 over drie = 3,34 + 3,33 + 3,33. */
+export function gelijkVerdeeld(bedrag: number, vennoten: Vennoot[]): Verdeling {
+  const lijst = VENNOTEN.filter((v) => vennoten.includes(v))
+  const centen = Math.round(bedrag * 100)
+  const basis = Math.floor(centen / lijst.length)
+  const rest = centen - basis * lijst.length
+  return Object.fromEntries(lijst.map((v, i) => [v, (basis + (i < rest ? 1 : 0)) / 100])) as Verdeling
+}
+
+/** Wie wat draagt van een uitgave: de verdeling, of alles voor `vennoot`. */
+export function delenVan(u: Pick<Uitgave, 'vennoot' | 'bedrag' | 'verdeling'>): { vennoot: Vennoot; bedrag: number }[] {
+  const v = u.verdeling ? VENNOTEN.filter((k) => typeof u.verdeling![k] === 'number') : []
+  if (v.length < 2) return [{ vennoot: u.vennoot, bedrag: u.bedrag }]
+  return v.map((k) => ({ vennoot: k, bedrag: u.verdeling![k]! }))
+}
+export const wieBetrokken = (u: Pick<Uitgave, 'vennoot' | 'bedrag' | 'verdeling'>) => delenVan(u).map((d) => d.vennoot)
+export const deelVan = (u: Pick<Uitgave, 'vennoot' | 'bedrag' | 'verdeling'>, v: Vennoot) => delenVan(u).find((d) => d.vennoot === v)?.bedrag ?? 0
+export const isVerdeeld = (u: Pick<Uitgave, 'vennoot' | 'bedrag' | 'verdeling'>) => delenVan(u).length > 1
 
 /** Een archiefverantwoording: verplicht, kort. */
 export function controleerReden(v: unknown): string | null {
@@ -145,7 +189,8 @@ export function standPerVennoot(uitgaven: Uitgave[], budget: Budget, periode: Pe
   // Extra budget telt pas als alle drie akkoord gaven, en pas vanaf zijn maand (zoals het gewone budget).
   const geldig = extras.filter((e) => extraTelt(e, extraAkkoorden) && e.maand <= huidigeMaand)
   return VENNOTEN.map((v) => {
-    const eigen = uitgaven.filter((u) => u.vennoot === v && telt(u))
+    // Een verdeelde uitgave telt bij elke vennoot voor zijn deel.
+    const eigen = uitgaven.filter((u) => telt(u) && deelVan(u, v) > 0).map((u) => ({ ...u, bedrag: deelVan(u, v) }))
     const inPeriode = eigen.filter((u) => u.datum >= periode.van && u.datum <= periode.tot)
     const besteedTotaal = rond(eigen.reduce((s, u) => s + u.bedrag, 0))
     const extraTotaal = extraVoor(geldig, v)
@@ -169,18 +214,18 @@ export function standPerVennoot(uitgaven: Uitgave[], budget: Budget, periode: Pe
 export function uitgavenIn(uitgaven: Uitgave[], periode: Periode | null, vennoot: Vennoot | null, archief: boolean): Uitgave[] {
   return uitgaven
     .filter((u) => (archief ? !!u.gearchiveerd_op : !u.gearchiveerd_op))
-    .filter((u) => !vennoot || u.vennoot === vennoot)
+    .filter((u) => !vennoot || wieBetrokken(u).includes(vennoot))
     .filter((u) => !periode || (u.datum >= periode.van && u.datum <= periode.tot))
     .sort((a, b) => b.datum.localeCompare(a.datum) || String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))
 }
 
-/** De uitgaven per maand (nieuwste maand eerst), met het totaal van die maand. */
-export function perMaand(uitgaven: Uitgave[]): { maand: string; label: string; uitgaven: Uitgave[]; totaal: number }[] {
+/** De uitgaven per maand (nieuwste maand eerst), met het totaal van die maand (met `vennoot`: enkel zijn of haar deel). */
+export function perMaand(uitgaven: Uitgave[], vennoot: Vennoot | null = null): { maand: string; label: string; uitgaven: Uitgave[]; totaal: number }[] {
   const groepen = new Map<string, Uitgave[]>()
   for (const u of uitgaven) { const m = u.datum.slice(0, 7); groepen.set(m, [...(groepen.get(m) ?? []), u]) }
   return Array.from(groepen.entries())
     .sort(([a], [b]) => b.localeCompare(a))
-    .map(([maand, l]) => ({ maand, label: maandLabel(maand), uitgaven: l, totaal: rond(l.reduce((s, u) => s + u.bedrag, 0)) }))
+    .map(([maand, l]) => ({ maand, label: maandLabel(maand), uitgaven: l, totaal: rond(l.reduce((s, u) => s + (vennoot ? deelVan(u, vennoot) : u.bedrag), 0)) }))
 }
 
 /**
@@ -261,14 +306,18 @@ export function tekenStand(v: RegelsVersie | null, handtekeningen: RegelHandteke
 
 export type UitgaveAkkoord = { uitgave_id: string; vennoot: Vennoot; naam: string | null; akkoord_op: string; inhoud_tekst: string }
 
-export function uitgaveTekst(u: Pick<Uitgave, 'id' | 'vennoot' | 'datum' | 'omschrijving' | 'doel' | 'bedrag' | 'bewijs_pad' | 'bewijs_naam'>): string {
+export function uitgaveTekst(u: Pick<Uitgave, 'id' | 'vennoot' | 'datum' | 'omschrijving' | 'doel' | 'bedrag' | 'bewijs_pad' | 'bewijs_naam'> & { verdeling?: Verdeling | null }): string {
+  // Eén vennoot: exact dezelfde tekst als vroeger (bestaande akkoorden blijven geldig).
+  const delen = delenVan({ vennoot: u.vennoot, bedrag: u.bedrag, verdeling: u.verdeling ?? null })
+  const verdeeld = delen.length > 1
   return [
     `Uitgave ${u.id}`,
-    `Voor: ${u.vennoot}`,
+    `Voor: ${verdeeld ? delen.map((d) => d.vennoot).join(', ') : u.vennoot}`,
     `Datum: ${u.datum}`,
     `Wat: ${u.omschrijving}`,
     `Waarvoor: ${u.doel ?? '—'}`,
     `Bedrag: ${rond(u.bedrag).toFixed(2)}`,
+    ...(verdeeld ? [`Verdeling: ${delen.map((d) => `${d.vennoot} ${rond(d.bedrag).toFixed(2)}`).join(', ')}`] : []),
     `Bon: ${u.bewijs_pad ? `${u.bewijs_naam ?? 'bon'} (${u.bewijs_pad})` : 'geen'}`,
   ].join('\n')
 }
@@ -491,4 +540,35 @@ export function openAkkoordenTekst(o: OpenAkkoorden): string {
     o.terugkerend.length ? `${o.terugkerend.length} ${o.terugkerend.length === 1 ? 'terugkerende uitgave' : 'terugkerende uitgaven'}` : null,
   ].filter((x): x is string => !!x)
   return namenLijst(delen)
+}
+
+// ── Bonnetje lezen (AI) ─────────────────────────────────────────────────────
+// De AI leest een foto of pdf van een bonnetje en stelt voor wat het is, de
+// datum en het bedrag. Enkel een voorstel: wie en waarvoor kiest de vennoot,
+// en niets wordt bewaard tot iemand op Bewaren drukt.
+
+export type BonVoorstel = { winkel: string | null; omschrijving: string | null; datum: string | null; bedrag: number | null; zekerheid: number; opmerking: string | null }
+
+/** Het antwoord van de AI nakijken: enkel een geldige datum (niet in de toekomst) en een bedrag in euro. */
+export function leesBonVoorstel(text: string, vandaag: string): BonVoorstel {
+  const leeg: BonVoorstel = { winkel: null, omschrijving: null, datum: null, bedrag: null, zekerheid: 0, opmerking: 'Het bonnetje kon niet gelezen worden.' }
+  const a = text.indexOf('{'), z = text.lastIndexOf('}')
+  if (a === -1 || z === -1) return leeg
+  let p: Record<string, unknown>
+  try { p = JSON.parse(text.slice(a, z + 1)) } catch { return leeg }
+  if (p.is_bon === false) return { ...leeg, opmerking: 'Dit lijkt geen bonnetje of factuur.' }
+  const kort = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : '') || null
+  const datumRuw = typeof p.datum === 'string' ? p.datum.trim() : ''
+  const datum = DAG.test(datumRuw) && new Date(`${datumRuw}T12:00:00Z`).toISOString().slice(0, 10) === datumRuw && datumRuw <= vandaag ? datumRuw : null
+  const munt = typeof p.munt === 'string' ? p.munt.trim().toUpperCase() : 'EUR'
+  const getal = leesGetal(p.totaal)
+  const bedrag = munt === 'EUR' && getal !== null && getal > 0 && getal <= 100_000 ? rond(getal) : null
+  const zekerheid = Number(p.zekerheid)
+  return {
+    winkel: kort(p.winkel, 80),
+    omschrijving: kort(p.omschrijving, 200),
+    datum, bedrag,
+    zekerheid: Number.isFinite(zekerheid) ? Math.max(0, Math.min(1, zekerheid)) : 0,
+    opmerking: munt !== 'EUR' && getal !== null ? `Het bonnetje is in ${munt}; vul het bedrag in euro in.` : null,
+  }
 }

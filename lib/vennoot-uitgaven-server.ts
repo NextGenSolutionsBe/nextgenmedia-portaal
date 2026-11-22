@@ -3,10 +3,11 @@ import { randomUUID } from 'crypto'
 import type { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { VENNOTEN_SLEUTEL, leesVennoten, vennootVan } from '@/lib/vesting-akkoord'
 import { leesHandtekening } from '@/lib/contracten/tegenhandtekening'
+import { kanBonLezen, leesBonnetje } from '@/lib/vennoot-bon-ai'
 import {
   VENNOTEN, controleerExtra, controleerReden, controleerRegels, controleerTerugkerend, controleerUitgave, extraTekst, isFrequentie, openAkkoorden, openAkkoordenTekst,
-  regelsTekst, tekenStand, terugkerendTekst, uitgaveTekst,
-  type BudgetExtra, type ExtraAkkoord, type RegelHandtekening, type RegelsVersie, type Terugkerend, type TerugkerendAkkoord, type Uitgave, type UitgaveAkkoord, type Vennoot,
+  regelsTekst, tekenStand, terugkerendTekst, uitgaveTekst, type BonVoorstel,
+  type BudgetExtra, type ExtraAkkoord, type RegelHandtekening, type RegelsVersie, type Terugkerend, type TerugkerendAkkoord, type Uitgave, type UitgaveAkkoord, type Vennoot, type Verdeling,
 } from '@/lib/vennoot-uitgaven'
 
 type Admin = ReturnType<typeof createAdminSupabaseClient>
@@ -36,7 +37,16 @@ function naarUitgave(r: Record<string, unknown>): Uitgave {
     doel: (r.doel as string | null) ?? null, bedrag: Number(r.bedrag), bewijs_pad: (r.bewijs_pad as string | null) ?? null, bewijs_naam: (r.bewijs_naam as string | null) ?? null,
     gearchiveerd_op: (r.gearchiveerd_op as string | null) ?? null, gearchiveerd_door: (r.gearchiveerd_door as string | null) ?? null, archief_reden: (r.archief_reden as string | null) ?? null,
     created_at: (r.created_at as string | null) ?? null, created_by: (r.created_by as string | null) ?? null,
+    verdeling: leesVerdeling(r.verdeling),
   }
+}
+
+/** Een bewaarde verdeling ({ bram: 25, chiara: 25 }); minder dan twee vennoten = geen verdeling. */
+function leesVerdeling(v: unknown): Verdeling | null {
+  if (!v || typeof v !== 'object') return null
+  const uit: Verdeling = {}
+  for (const k of VENNOTEN) { const x = Number((v as Record<string, unknown>)[k]); if (Number.isFinite(x) && x > 0) uit[k] = x }
+  return Object.keys(uit).length > 1 ? uit : null
 }
 
 function naarRegels(r: Record<string, unknown>): RegelsVersie {
@@ -170,6 +180,22 @@ async function leesBon(admin: Admin, v: unknown): Promise<{ bewijs_pad: string; 
   return { bewijs_pad: pad, bewijs_naam: typeof naam === 'string' && naam.trim() ? naam.trim().slice(0, 200) : pad.split('/').pop()! }
 }
 
+/**
+ * Een net opgeladen bonnetje laten lezen door de AI (enkel een voorstel).
+ * Enkel bestanden in bonnen/, die echt in de opslag staan.
+ */
+export async function leesOpgeladenBon(admin: Admin, pad: unknown): Promise<BonVoorstel> {
+  if (typeof pad !== 'string' || !BON_PAD.test(pad) || pad.includes('..')) throw new UitgaveFout('Ongeldig bonnetje.')
+  const ext = (pad.split('.').pop() ?? '').toLowerCase()
+  const mime = TYPES[ext]
+  if (!mime || !kanBonLezen(mime)) throw new UitgaveFout('Dit formaat kan de AI niet lezen. Neem een foto (jpg of png) of kies een pdf.')
+  const { data, error } = await admin.storage.from(BON_BUCKET).download(pad)
+  if (error || !data) throw new UitgaveFout('Het bonnetje is (nog) niet opgeladen. Probeer opnieuw.', 404)
+  const buf = Buffer.from(await data.arrayBuffer())
+  if (buf.byteLength > 20 * 1024 * 1024) throw new UitgaveFout('Het bestand is te groot om te lezen. Vul de gegevens zelf in.')
+  return leesBonnetje(buf.toString('base64'), mime, vandaagBrussel())
+}
+
 export async function bonLink(admin: Admin, pad: string): Promise<string | null> {
   if (!BON_PAD.test(pad)) return null
   // Enkel een bon die echt bij een uitgave of een terugkerende uitgave hoort.
@@ -188,7 +214,8 @@ export async function maakUitgave(admin: Admin, b: Record<string, unknown>, door
   const v = controleerUitgave(b, vandaagBrussel())
   if (!v.ok) throw new UitgaveFout(v.fout)
   const bon = await leesBon(admin, b.bon)
-  const { data, error } = await admin.from('vennoot_uitgaven').insert({ ...v.waarde, ...(bon ?? {}), created_by: door }).select('id').single()
+  // Altijd expliciet: een uitgave voor één vennoot heeft geen verdeling.
+  const { data, error } = await admin.from('vennoot_uitgaven').insert({ ...v.waarde, verdeling: v.waarde.verdeling ?? null, ...(bon ?? {}), created_by: door }).select('id').single()
   if (error) throw new Error(error.message)
   return String((data as { id: string }).id)
 }
@@ -198,7 +225,7 @@ export async function wijzigUitgave(admin: Admin, id: string, b: Record<string, 
   if (!v.ok) throw new UitgaveFout(v.fout)
   // Een nieuw bonnetje vervangt het oude; bon_weg haalt het van de uitgave (het bestand blijft bewaard).
   const bon = b.bon ? await leesBon(admin, b.bon) : b.bon_weg === true ? { bewijs_pad: null, bewijs_naam: null } : null
-  const { data, error } = await admin.from('vennoot_uitgaven').update({ ...v.waarde, ...(bon ?? {}), updated_at: new Date().toISOString() }).eq('id', id).select('id')
+  const { data, error } = await admin.from('vennoot_uitgaven').update({ ...v.waarde, verdeling: v.waarde.verdeling ?? null, ...(bon ?? {}), updated_at: new Date().toISOString() }).eq('id', id).select('id')
   if (error) throw new Error(error.message)
   if (!(data ?? []).length) throw new UitgaveFout('Uitgave niet gevonden.', 404)
 }

@@ -7,7 +7,7 @@ import { Archive, Check, ChevronLeft, ChevronRight, Paperclip, Pencil, PiggyBank
 import { RegelsKaart, RegelsKnop, RegelsVenster, type RegelsBegin } from '@/components/admin/regels-akkoord'
 import type { RegelsData } from '@/lib/regels-akkoord'
 import {
-  FREQ, STANDAARD_REGELS, akkoordStand, budgetVan, openAkkoorden, openAkkoordenTekst, perMaand, periodeOpties, periodeVan, standPerVennoot,
+  FREQ, STANDAARD_REGELS, akkoordStand, budgetVan, deelVan, isVerdeeld, namenLijst, wieBetrokken, openAkkoorden, openAkkoordenTekst, perMaand, periodeOpties, periodeVan, standPerVennoot,
   terugkerendStand, terugkerendeUitgaven, uitgavenIn, verschuif,
   type BudgetExtra, type Periode, type PeriodeSoort, type Terugkerend, type Uitgave, type Vennoot,
 } from '@/lib/vennoot-uitgaven'
@@ -66,7 +66,8 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoor
     return enkelWacht && !archief ? l.filter((u) => mijnWacht.some((w) => w.id === u.id)) : l
   }, [alleUitgaven, alles, periode, vennoot, archief, enkelWacht, mijnWacht])
   const aantalArchief = useMemo(() => uitgavenIn(data.uitgaven, alles ? null : periode, vennoot, true).length, [data.uitgaven, alles, periode, vennoot])
-  const totaal = lijst.reduce((s, u) => s + u.bedrag, 0)
+  // Met een gekozen vennoot telt enkel zijn of haar deel van een verdeelde uitgave.
+  const totaal = lijst.reduce((s, u) => s + (vennoot ? deelVan(u, vennoot) : u.bedrag), 0)
   const regelsData: RegelsData = { versie: data.regels, handtekeningen: data.handtekeningen, namen: data.namen, ik: data.ik }
   const label = alles ? 'alle periodes' : periode.label
 
@@ -77,7 +78,7 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoor
     const l = periodeOpties(soort as PeriodeSoort, eersteMaand, huidigeMaand)
     return l.some((p) => p.ref === periode.ref) ? l : [...l, periode].sort((a, b) => b.ref.localeCompare(a.ref))
   }, [alles, soort, eersteMaand, huidigeMaand, periode])
-  const groepen = useMemo(() => perMaand(lijst), [lijst])
+  const groepen = useMemo(() => perMaand(lijst, vennoot), [lijst, vennoot])
   const metKoppen = groepen.length > 1 || soort !== 'maand'
   const kiesSoort = (s: PeriodeSoort | 'alles') => { setSoort(s); if (s !== 'alles') setPeriode(periodeVan(s, periode.ref > huidigeMaand ? huidigeMaand : periode.ref)) }
 
@@ -202,7 +203,8 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoor
                             <span className="min-w-0 flex-1">
                               <span className="text-xs text-gray-500 flex items-center gap-2 flex-wrap">
                                 <span className="tabular-nums">{dag(u.datum)}</span>
-                                {!vennoot && <span className="inline-flex text-[11px] font-semibold text-gray-800 rounded-full bg-gray-100 px-2 py-0.5">{data.namen[u.vennoot]}</span>}
+                                {!vennoot && wieBetrokken(u).map((k) => <span key={k} className="inline-flex text-[11px] font-semibold text-gray-800 rounded-full bg-gray-100 px-2 py-0.5">{data.namen[k]}</span>)}
+                                {vennoot && isVerdeeld(u) && <span className="inline-flex text-[11px] text-gray-700 rounded-full border border-gray-200 px-2 py-0.5">gedeeld met {namenLijst(wieBetrokken(u).filter((k) => k !== vennoot).map((k) => data.namen[k]))}</span>}
                                 {t ? (
                                   <span className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-800 rounded-full bg-blue-50 border border-blue-100 px-2 py-0.5"><Repeat className="h-3 w-3" />{FREQ[t.frequentie].elke}</span>
                                 ) : u.bewijs_pad ? <span className="inline-flex items-center gap-1 text-gray-600"><Paperclip className="h-3.5 w-3.5" />Bon</span> : <span className="text-amber-700">geen bon</span>}
@@ -210,7 +212,10 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoor
                               <span className="block text-sm font-medium text-gray-900 mt-0.5">{u.omschrijving}</span>
                               {u.doel && <span className="block text-xs text-gray-500 mt-0.5">{u.doel}</span>}
                             </span>
-                            <span className="text-sm font-semibold tabular-nums shrink-0">{eur(u.bedrag)}</span>
+                            <span className="text-right shrink-0">
+                              <span className="block text-sm font-semibold tabular-nums">{eur(vennoot ? deelVan(u, vennoot) : u.bedrag)}</span>
+                              {isVerdeeld(u) && <span className="block text-[11px] text-gray-500 tabular-nums">{vennoot ? `van ${eur(u.bedrag)}` : 'verdeeld'}</span>}
+                            </span>
                           </button>
                           {u.gearchiveerd_op && <div className="text-xs text-amber-800 mt-1">Gearchiveerd{u.gearchiveerd_door ? ` door ${u.gearchiveerd_door}` : ''}: {u.archief_reden}</div>}
                           {!u.gearchiveerd_op && !t && (
@@ -260,7 +265,7 @@ export function VennotenClient({ data, vandaag, beginVennoot, regelsOpen, akkoor
       )}
       {open?.soort === 'archiveer' && (
         <SchrapVenster titel="Uitgave archiveren" actie="archiveer" id={open.u.id} knop="Archiveren"
-          regel={<><b className="font-semibold">{data.namen[open.u.vennoot]}</b> · {open.u.omschrijving} · {eur(open.u.bedrag)}</>}
+          regel={<><b className="font-semibold">{namenLijst(wieBetrokken(open.u).map((k) => data.namen[k]))}</b> · {open.u.omschrijving} · {eur(open.u.bedrag)}</>}
           uitleg="Een gearchiveerde uitgave telt niet meer mee voor het tegoed. Ze blijft zichtbaar in het archief, met de reden erbij."
           onSluit={() => setOpen(null)} onKlaar={() => klaar('Gearchiveerd. Telt niet meer mee.')} />
       )}
