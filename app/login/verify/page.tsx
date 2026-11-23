@@ -76,7 +76,7 @@ function VerifyForm() {
         const r = await fetch('/api/auth/2fa/stap', { cache: 'no-store' })
         if (r.status === 401) { router.replace('/login'); return }
         const j = await r.json().catch(() => ({}))
-        if (r.status === 403) { setStap('fout'); setError('Voor dit account is de extra verificatie niet van toepassing. Neem contact op met NextGenMedia.'); return }
+        if (r.status === 403) { setStap('fout'); setError('Voor dit account is de extra verificatie niet van toepassing. Neem contact op met NextGen Agency.'); return }
         if (!r.ok) throw new Error(j.error ?? 'Laden mislukt')
         setEmail(j.email ?? null)
         // Klant zonder app: geen tweede stap (vrijwillig) → meteen verder.
@@ -238,7 +238,7 @@ function VerifyForm() {
         </button>
         {annuleren}
       </div>
-      {!herstel && <p className="text-[11px] text-gray-400">Telefoon én herstelcodes kwijt? Vraag NextGenMedia om je tweestapsverificatie te resetten.</p>}
+      {!herstel && <p className="text-[11px] text-gray-400">Telefoon én herstelcodes kwijt? Vraag NextGen Agency om je tweestapsverificatie te resetten.</p>}
     </form>
   )
 }
@@ -259,7 +259,7 @@ export default function VerifyPage() {
           </Suspense>
         </div>
 
-        <p className="text-center text-xs text-gray-400 mt-6">NextGenMedia © {new Date().getFullYear()}</p>
+        <p className="text-center text-xs text-gray-400 mt-6">NextGen Agency © {new Date().getFullYear()}</p>
       </div>
     </div>
   )

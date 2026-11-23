@@ -31,14 +31,29 @@ function naamVan(email: string | null, meta: Record<string, unknown> | null | un
   return { naam: lokaal ? lokaal.charAt(0).toUpperCase() + lokaal.slice(1) : 'Onbekend', gedeeld: false }
 }
 
+// De lijst van accounts verandert zelden, maar opvragen kost telkens een ronde
+// naar de Auth-server met alle gebruikers. Vijf minuten onthouden per
+// serverinstantie (enkel id, e-mail en metadata; een mislukte vraag niet).
+type Gebruiker = { id: string; email?: string | null; user_metadata?: Record<string, unknown> | null }
+let gebruikersCache: { tot: number; lijst: Promise<Gebruiker[]> } | null = null
+function gebruikers(admin: SupabaseClient): Promise<Gebruiker[]> {
+  if (gebruikersCache && gebruikersCache.tot > Date.now()) return gebruikersCache.lijst
+  const lijst = admin.auth.admin.listUsers({ page: 1, perPage: 1000 }).then(({ data, error }) => {
+    if (error) throw error
+    return (data?.users ?? []).map((u) => ({ id: u.id, email: u.email ?? null, user_metadata: (u.user_metadata ?? null) as Record<string, unknown> | null }))
+  })
+  gebruikersCache = { tot: Date.now() + 5 * 60_000, lijst }
+  lijst.catch(() => { gebruikersCache = null })
+  return lijst
+}
+
 /** Namen voor een lijst gebruikers-id's (onbekende id's worden overgeslagen). */
 export async function leesActorNamen(admin: SupabaseClient, ids: (string | null | undefined)[]): Promise<Record<string, ActorNaam>> {
   const uniek = [...new Set(ids.filter((x): x is string => !!x))]
   if (!uniek.length) return {}
   const uit: Record<string, ActorNaam> = {}
   try {
-    const { data } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
-    for (const u of data?.users ?? []) {
+    for (const u of await gebruikers(admin)) {
       if (!uniek.includes(u.id)) continue
       const { naam, gedeeld } = naamVan(u.email ?? null, u.user_metadata as Record<string, unknown>)
       uit[u.id] = { id: u.id, naam, kort: gedeeld ? 'info@ (gedeeld)' : naam.split(' ')[0], email: u.email ?? null, gedeeld }
@@ -57,8 +72,7 @@ export async function leesActorNamenOpEmail(admin: SupabaseClient, emails: (stri
   if (!uniek.length) return {}
   const uit: Record<string, ActorNaam> = {}
   try {
-    const { data } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
-    for (const u of data?.users ?? []) {
+    for (const u of await gebruikers(admin)) {
       const e = (u.email ?? '').toLowerCase()
       if (!uniek.includes(e)) continue
       const { naam, gedeeld } = naamVan(e, u.user_metadata as Record<string, unknown>)

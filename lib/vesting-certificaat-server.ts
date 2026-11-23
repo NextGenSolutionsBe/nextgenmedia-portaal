@@ -166,7 +166,7 @@ export async function maakVestingCertificaatPdf(g: CertificaatGegevens, getekend
   const pdf = await PDFDocument.create()
   pdf.setTitle(`Vestingcertificaat ${g.nummer}`)
   pdf.setAuthor('NextGenMedia')
-  pdf.setCreator('NextGenMedia Portal')
+  pdf.setCreator('NextGen Agency')
   const font = await pdf.embedFont(StandardFonts.Helvetica)
   const vet = await pdf.embedFont(StandardFonts.HelveticaBold)
   const mono = await pdf.embedFont(StandardFonts.Courier)
@@ -244,7 +244,7 @@ export async function maakVestingCertificaatPdf(g: CertificaatGegevens, getekend
   for (const r of wikkel(g.inhoud_sha256, mono, 8, breedte)) { page.drawText(r, { x: M, y, size: 8, font: mono, color: TEKST }); y -= 10 }
 
   page.drawLine({ start: { x: M, y: 40 }, end: { x: A4.w - M, y: 40 }, thickness: 0.5, color: LICHT })
-  page.drawText(veilig(`${g.nummer} · NextGenMedia Portal · gemaakt ${tijdstip(new Date().toISOString())}`), { x: M, y: 28, size: 7.5, font, color: GRIJS })
+  page.drawText(veilig(`${g.nummer} · NextGen Agency · gemaakt ${tijdstip(new Date().toISOString())}`), { x: M, y: 28, size: 7.5, font, color: GRIJS })
   return pdf.save()
 }
 

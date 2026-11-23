@@ -34,6 +34,9 @@ export type Notif = {
 const todayISO = () => new Date().toISOString().slice(0, 10)
 const thisMonth = () => new Date().toISOString().slice(0, 7)
 
+/** Het opslagverbruik (voor de melding vanaf 70%), een uur onthouden per serverinstantie. */
+let opslagCache: { tot: number; data: unknown } | null = null
+
 export async function buildNotifications(): Promise<Notif[]> {
   let admin: ReturnType<typeof createAdminSupabaseClient>
   try { admin = createAdminSupabaseClient() } catch { return [] }
@@ -59,271 +62,312 @@ export async function buildNotifications(): Promise<Notif[]> {
   ]
 
   const names = new Map(clientMap.map((c) => [c.id, c.company_name]))
-  const out: Notif[] = []
+  // Elk blok apart en allemaal tegelijk: na elkaar waren dat een twintigtal
+  // rondes naar de databank. Elk blok vult zijn eigen lijst; achteraf in de
+  // vaste volgorde samengevoegd, dus dezelfde uitkomst als vroeger.
+  const blokken: Promise<Notif[]>[] = []
+  const blok = (f: (out: Notif[]) => Promise<void> | void) => { const out: Notif[] = []; blokken.push(Promise.resolve().then(() => f(out)).then(() => out, () => out)) }
 
   // Nieuwe formulierinzendingen: één signaal per formulier (status 'nieuw').
   // De id bevat de laatste inzending, zodat een nieuwe inzending opnieuw ongelezen is.
-  try {
-    const nieuweInzendingen = await safe(admin.from('formulier_inzendingen')
-      .select('formulier_id, created_at').eq('status', 'nieuw').order('created_at', { ascending: false }).limit(500)) as { formulier_id: string; created_at: string }[]
-    if (nieuweInzendingen.length) {
-      const perFormulier = new Map<string, { n: number; laatste: string }>()
-      for (const r of nieuweInzendingen) {
-        const x = perFormulier.get(r.formulier_id)
-        if (x) x.n++; else perFormulier.set(r.formulier_id, { n: 1, laatste: r.created_at })
+  blok(async (out) => {
+    try {
+      const nieuweInzendingen = await safe(admin.from('formulier_inzendingen')
+        .select('formulier_id, created_at').eq('status', 'nieuw').order('created_at', { ascending: false }).limit(500)) as { formulier_id: string; created_at: string }[]
+      if (nieuweInzendingen.length) {
+        const perFormulier = new Map<string, { n: number; laatste: string }>()
+        for (const r of nieuweInzendingen) {
+          const x = perFormulier.get(r.formulier_id)
+          if (x) x.n++; else perFormulier.set(r.formulier_id, { n: 1, laatste: r.created_at })
+        }
+        const titels = await safe(admin.from('formulieren').select('id, titel').in('id', [...perFormulier.keys()])) as { id: string; titel: string }[]
+        const titel = new Map(titels.map((f) => [f.id, f.titel]))
+        for (const [id, { n, laatste }] of perFormulier) {
+          out.push({
+            id: `formulier:${id}:${laatste}`, kind: 'formulier', priority: 'med',
+            title: `${n} nieuwe formulierinzending${n === 1 ? '' : 'en'} — ${titel.get(id) ?? 'Formulier'}`,
+            date: laatste.slice(0, 10), href: `/admin/formulieren/${id}?tab=inzendingen`,
+          })
+        }
       }
-      const titels = await safe(admin.from('formulieren').select('id, titel').in('id', [...perFormulier.keys()])) as { id: string; titel: string }[]
-      const titel = new Map(titels.map((f) => [f.id, f.titel]))
-      for (const [id, { n, laatste }] of perFormulier) {
-        out.push({
-          id: `formulier:${id}:${laatste}`, kind: 'formulier', priority: 'med',
-          title: `${n} nieuwe formulierinzending${n === 1 ? '' : 'en'} — ${titel.get(id) ?? 'Formulier'}`,
-          date: laatste.slice(0, 10), href: `/admin/formulieren/${id}?tab=inzendingen`,
-        })
-      }
-    }
-  } catch { /* tabel nog niet gemigreerd → geen signaal */ }
+    } catch { /* tabel nog niet gemigreerd → geen signaal */ }
+  })
 
   // Klant paste zelf content aan in de contentplanner (laatste 7 dagen): één signaal
   // per klant; de id bevat de laatste wijziging zodat een nieuwe wijziging opnieuw ongelezen is.
-  try {
-    const gewijzigd = await safe(admin.from('social_content_items').select('client_id, klant_gewijzigd_op')
-      .gte('klant_gewijzigd_op', since).order('klant_gewijzigd_op', { ascending: false }).limit(500)) as { client_id: string; klant_gewijzigd_op: string }[]
-    const perKlant = new Map<string, { n: number; laatste: string }>()
-    for (const r of gewijzigd) { const x = perKlant.get(r.client_id); if (x) x.n++; else perKlant.set(r.client_id, { n: 1, laatste: r.klant_gewijzigd_op }) }
-    for (const [cid, { n, laatste }] of perKlant) {
-      out.push({
-        id: `content-klant:${cid}:${laatste}`, kind: 'content', priority: 'med',
-        title: `${names.get(cid) ?? 'Klant'} plande of paste ${n} contentitem${n === 1 ? '' : 's'} zelf aan`,
-        date: laatste.slice(0, 10), href: `/admin/services/social-media?client=${cid}`,
-      })
-    }
-  } catch { /* kolom nog niet gemigreerd → geen signaal */ }
+  blok(async (out) => {
+    try {
+      const gewijzigd = await safe(admin.from('social_content_items').select('client_id, klant_gewijzigd_op')
+        .gte('klant_gewijzigd_op', since).order('klant_gewijzigd_op', { ascending: false }).limit(500)) as { client_id: string; klant_gewijzigd_op: string }[]
+      const perKlant = new Map<string, { n: number; laatste: string }>()
+      for (const r of gewijzigd) { const x = perKlant.get(r.client_id); if (x) x.n++; else perKlant.set(r.client_id, { n: 1, laatste: r.klant_gewijzigd_op }) }
+      for (const [cid, { n, laatste }] of perKlant) {
+        out.push({
+          id: `content-klant:${cid}:${laatste}`, kind: 'content', priority: 'med',
+          title: `${names.get(cid) ?? 'Klant'} plande of paste ${n} contentitem${n === 1 ? '' : 's'} zelf aan`,
+          date: laatste.slice(0, 10), href: `/admin/services/social-media?client=${cid}`,
+        })
+      }
+    } catch { /* kolom nog niet gemigreerd → geen signaal */ }
+  })
 
   // Opmerkingen van klanten in de contentkalender (laatste 7 dagen): één signaal per klant,
   // opnieuw ongelezen bij een nieuwe opmerking.
-  try {
-    const opmerkingen = await safe(admin.from('social_content_activiteit').select('client_id, op')
-      .eq('rol', 'klant').eq('actie', 'opmerking').gte('op', since).order('op', { ascending: false }).limit(500)) as { client_id: string | null; op: string }[]
-    const perKlant = new Map<string, { n: number; laatste: string }>()
-    for (const r of opmerkingen) { if (!r.client_id) continue; const x = perKlant.get(r.client_id); if (x) x.n++; else perKlant.set(r.client_id, { n: 1, laatste: r.op }) }
-    for (const [cid, { n, laatste }] of perKlant) {
-      out.push({
-        id: `content-opmerking:${cid}:${laatste}`, kind: 'content', priority: 'med',
-        title: `${names.get(cid) ?? 'Klant'} plaatste ${n} opmerking${n === 1 ? '' : 'en'} in de contentkalender`,
-        date: laatste.slice(0, 10), href: `/admin/services/social-media?client=${cid}`,
-      })
-    }
-  } catch { /* tabel nog niet gemigreerd → geen signaal */ }
+  blok(async (out) => {
+    try {
+      const opmerkingen = await safe(admin.from('social_content_activiteit').select('client_id, op')
+        .eq('rol', 'klant').eq('actie', 'opmerking').gte('op', since).order('op', { ascending: false }).limit(500)) as { client_id: string | null; op: string }[]
+      const perKlant = new Map<string, { n: number; laatste: string }>()
+      for (const r of opmerkingen) { if (!r.client_id) continue; const x = perKlant.get(r.client_id); if (x) x.n++; else perKlant.set(r.client_id, { n: 1, laatste: r.op }) }
+      for (const [cid, { n, laatste }] of perKlant) {
+        out.push({
+          id: `content-opmerking:${cid}:${laatste}`, kind: 'content', priority: 'med',
+          title: `${names.get(cid) ?? 'Klant'} plaatste ${n} opmerking${n === 1 ? '' : 'en'} in de contentkalender`,
+          date: laatste.slice(0, 10), href: `/admin/services/social-media?client=${cid}`,
+        })
+      }
+    } catch { /* tabel nog niet gemigreerd → geen signaal */ }
+  })
 
   // Goedkeuringsdeadlines van de contentkalender die binnen 3 dagen vallen
   // (of vandaag). De id bevat de datum: een verschoven deadline is opnieuw ongelezen.
   // Verstreken maar nog open = wij moeten manueel "Alles goedkeuren" (nooit automatisch).
-  try {
-    const vandaag = vandaagBrussel()
-    const binnen3 = new Date(Date.parse(`${vandaag}T12:00:00Z`) + 3 * 86400000).toISOString().slice(0, 10)
-    const dl = await safe(admin.from('content_goedkeuring_deadlines').select('id, client_id, maanden, deadline')
-      .eq('status', 'open').lte('deadline', binnen3).order('deadline').limit(50)) as { id: string; client_id: string; maanden: string[]; deadline: string }[]
-    for (const d of dl) {
-      const n = dagenTot(d.deadline, vandaag)
-      if (n < 0) {
+  blok(async (out) => {
+    try {
+      const vandaag = vandaagBrussel()
+      const binnen3 = new Date(Date.parse(`${vandaag}T12:00:00Z`) + 3 * 86400000).toISOString().slice(0, 10)
+      const dl = await safe(admin.from('content_goedkeuring_deadlines').select('id, client_id, maanden, deadline')
+        .eq('status', 'open').lte('deadline', binnen3).order('deadline').limit(50)) as { id: string; client_id: string; maanden: string[]; deadline: string }[]
+      for (const d of dl) {
+        const n = dagenTot(d.deadline, vandaag)
+        if (n < 0) {
+          out.push({
+            id: `goedkeuring:${d.id}:verstreken`, kind: 'content', priority: 'high',
+            title: `Goedkeuringsdeadline verstreken — ${names.get(d.client_id) ?? 'klant'} (${maandenTekst(d.maanden)}): keur goed met “Alles goedkeuren”`,
+            date: d.deadline, href: `/admin/services/social-media?client=${d.client_id}`,
+          })
+          continue
+        }
         out.push({
-          id: `goedkeuring:${d.id}:verstreken`, kind: 'content', priority: 'high',
-          title: `Goedkeuringsdeadline verstreken — ${names.get(d.client_id) ?? 'klant'} (${maandenTekst(d.maanden)}): keur goed met “Alles goedkeuren”`,
+          id: `goedkeuring:${d.id}:${d.deadline}`, kind: 'content', priority: n <= 1 ? 'high' : 'med',
+          title: `Goedkeuringsdeadline ${n === 0 ? 'vandaag' : n === 1 ? 'morgen' : `over ${n} dagen`} — ${names.get(d.client_id) ?? 'klant'} (${maandenTekst(d.maanden)})`,
           date: d.deadline, href: `/admin/services/social-media?client=${d.client_id}`,
         })
-        continue
       }
-      out.push({
-        id: `goedkeuring:${d.id}:${d.deadline}`, kind: 'content', priority: n <= 1 ? 'high' : 'med',
-        title: `Goedkeuringsdeadline ${n === 0 ? 'vandaag' : n === 1 ? 'morgen' : `over ${n} dagen`} — ${names.get(d.client_id) ?? 'klant'} (${maandenTekst(d.maanden)})`,
-        date: d.deadline, href: `/admin/services/social-media?client=${d.client_id}`,
-      })
-    }
-  } catch { /* tabel nog niet gemigreerd → geen signaal */ }
-
+    } catch { /* tabel nog niet gemigreerd → geen signaal */ }
+  })
 
   // ClickUp→Google-agendasync: ligt die stil, dan zien de setters niet wat er
   // in ClickUp gepland staat en kán er dubbel geboekt worden. Dat verdient de
   // hoogste prioriteit in de bel — naast de mail die de sync zelf al stuurt.
-  try {
-    const sync = await syncGezondheid()
-    if (sync.actief && sync.verouderd) {
-      out.push({
-        id: `clickupsync:verouderd:${sync.laatsteOkOp ?? 'nooit'}`,
-        kind: 'sales', priority: 'high',
-        title: sync.laatsteOkOp
-          ? `ClickUp-agendasync draait niet meer (laatste keer gelukt: ${Math.round(sync.minutenSindsOk ?? 0)} min geleden — hoort elke 10 min)`
-          : `ClickUp-agendasync is nog nooit gelukt (hoort elke ${SYNC_VEROUDERD_MIN / 3} min te draaien)`,
-        date: sync.laatsteOkOp?.slice(0, 10) ?? null,
-        href: '/admin/meetings?tab=agenda',
-      })
-    } else if (sync.actief && sync.laatsteFout) {
-      out.push({
-        id: 'clickupsync:fout',
-        kind: 'sales', priority: 'high',
-        title: `ClickUp-agendasync geeft een fout: ${sync.laatsteFout.slice(0, 120)}`,
-        date: todayISO(), href: '/admin/meetings?tab=agenda',
-      })
-    }
-  } catch { /* meldingen mogen nooit stuklopen op de waakhond */ }
+  blok(async (out) => {
+    try {
+      const sync = await syncGezondheid()
+      if (sync.actief && sync.verouderd) {
+        out.push({
+          id: `clickupsync:verouderd:${sync.laatsteOkOp ?? 'nooit'}`,
+          kind: 'sales', priority: 'high',
+          title: sync.laatsteOkOp
+            ? `ClickUp-agendasync draait niet meer (laatste keer gelukt: ${Math.round(sync.minutenSindsOk ?? 0)} min geleden — hoort elke 10 min)`
+            : `ClickUp-agendasync is nog nooit gelukt (hoort elke ${SYNC_VEROUDERD_MIN / 3} min te draaien)`,
+          date: sync.laatsteOkOp?.slice(0, 10) ?? null,
+          href: '/admin/meetings?tab=agenda',
+        })
+      } else if (sync.actief && sync.laatsteFout) {
+        out.push({
+          id: 'clickupsync:fout',
+          kind: 'sales', priority: 'high',
+          title: `ClickUp-agendasync geeft een fout: ${sync.laatsteFout.slice(0, 120)}`,
+          date: todayISO(), href: '/admin/meetings?tab=agenda',
+        })
+      }
+    } catch { /* meldingen mogen nooit stuklopen op de waakhond */ }
+  })
 
   // Aanvragen uit het klantportaal: nieuw binnengekomen, of de klant besliste over een offerte.
-  try {
-    const nieuw = await safe(admin.from('klant_aanvragen').select('id, client_id, soort, type_label, created_at').eq('status', 'ontvangen').order('created_at', { ascending: false }).limit(30)) as { id: string; client_id: string; soort: string; type_label: string; created_at: string }[]
-    for (const a of nieuw) out.push({ id: `aanvraag:${a.id}:nieuw`, kind: 'aanvraag', priority: 'high', title: `${nieuweAanvraagTitel(a.soort as AanvraagSoort)} — ${names.get(a.client_id) ?? 'Klant'}: ${a.type_label}`, date: a.created_at, href: `/admin/aanvragen?aanvraag=${a.id}` })
-    const beslist = await safe(admin.from('klant_aanvragen').select('id, client_id, type_label, offerte_status, offerte_beslist_op, status').in('offerte_status', ['aanvaard', 'geweigerd']).in('status', ['aanvaard', 'in_behandeling']).gte('offerte_beslist_op', since).limit(30)) as { id: string; client_id: string; type_label: string; offerte_status: string; offerte_beslist_op: string }[]
-    for (const a of beslist) out.push({ id: `aanvraag:${a.id}:offerte:${a.offerte_status}`, kind: 'aanvraag', priority: a.offerte_status === 'aanvaard' ? 'high' : 'med', title: `Offerte ${a.offerte_status === 'aanvaard' ? 'aanvaard' : 'geweigerd'} door de klant — ${names.get(a.client_id) ?? 'Klant'}: ${a.type_label}`, date: a.offerte_beslist_op, href: `/admin/aanvragen?aanvraag=${a.id}` })
-  } catch { /* meldingen mogen nooit stuklopen */ }
+  blok(async (out) => {
+    try {
+      const nieuw = await safe(admin.from('klant_aanvragen').select('id, client_id, soort, type_label, created_at').eq('status', 'ontvangen').order('created_at', { ascending: false }).limit(30)) as { id: string; client_id: string; soort: string; type_label: string; created_at: string }[]
+      for (const a of nieuw) out.push({ id: `aanvraag:${a.id}:nieuw`, kind: 'aanvraag', priority: 'high', title: `${nieuweAanvraagTitel(a.soort as AanvraagSoort)} — ${names.get(a.client_id) ?? 'Klant'}: ${a.type_label}`, date: a.created_at, href: `/admin/aanvragen?aanvraag=${a.id}` })
+      const beslist = await safe(admin.from('klant_aanvragen').select('id, client_id, type_label, offerte_status, offerte_beslist_op, status').in('offerte_status', ['aanvaard', 'geweigerd']).in('status', ['aanvaard', 'in_behandeling']).gte('offerte_beslist_op', since).limit(30)) as { id: string; client_id: string; type_label: string; offerte_status: string; offerte_beslist_op: string }[]
+      for (const a of beslist) out.push({ id: `aanvraag:${a.id}:offerte:${a.offerte_status}`, kind: 'aanvraag', priority: a.offerte_status === 'aanvaard' ? 'high' : 'med', title: `Offerte ${a.offerte_status === 'aanvaard' ? 'aanvaard' : 'geweigerd'} door de klant — ${names.get(a.client_id) ?? 'Klant'}: ${a.type_label}`, date: a.offerte_beslist_op, href: `/admin/aanvragen?aanvraag=${a.id}` })
+    } catch { /* meldingen mogen nooit stuklopen */ }
+  })
 
   // Opleveringen: de klant vroeg een revisie, keurde goed of stuurde een opmerking.
-  try {
-    const fb = await safe(admin.from('oplevering_feedback').select('id, oplevering_id, soort, ronde, created_at').gte('created_at', since).order('created_at', { ascending: false }).limit(30)) as { id: string; oplevering_id: string; soort: string; ronde: number | null; created_at: string }[]
-    if (fb.length) {
-      const ops = await safe(admin.from('opleveringen').select('id, titel, client_id').in('id', [...new Set(fb.map((f) => f.oplevering_id))])) as { id: string; titel: string; client_id: string }[]
-      const op = new Map(ops.map((o) => [o.id, o]))
-      for (const f of fb) {
-        const o = op.get(f.oplevering_id); if (!o) continue
-        const wat = f.soort === 'goedkeuring' ? 'Goedgekeurd' : f.soort === 'revisie' ? `Revisieronde ${f.ronde} gevraagd` : 'Opmerking'
-        out.push({ id: `oplevering:${f.id}`, kind: 'oplevering', priority: f.soort === 'opmerking' ? 'med' : 'high', title: `${wat} — ${names.get(o.client_id) ?? 'Klant'}: ${o.titel}`, date: f.created_at, href: `/admin/opleveringen?oplevering=${o.id}` })
+  blok(async (out) => {
+    try {
+      const fb = await safe(admin.from('oplevering_feedback').select('id, oplevering_id, soort, ronde, created_at').gte('created_at', since).order('created_at', { ascending: false }).limit(30)) as { id: string; oplevering_id: string; soort: string; ronde: number | null; created_at: string }[]
+      if (fb.length) {
+        const ops = await safe(admin.from('opleveringen').select('id, titel, client_id').in('id', [...new Set(fb.map((f) => f.oplevering_id))])) as { id: string; titel: string; client_id: string }[]
+        const op = new Map(ops.map((o) => [o.id, o]))
+        for (const f of fb) {
+          const o = op.get(f.oplevering_id); if (!o) continue
+          const wat = f.soort === 'goedkeuring' ? 'Goedgekeurd' : f.soort === 'revisie' ? `Revisieronde ${f.ronde} gevraagd` : 'Opmerking'
+          out.push({ id: `oplevering:${f.id}`, kind: 'oplevering', priority: f.soort === 'opmerking' ? 'med' : 'high', title: `${wat} — ${names.get(o.client_id) ?? 'Klant'}: ${o.titel}`, date: f.created_at, href: `/admin/opleveringen?oplevering=${o.id}` })
+        }
       }
-    }
-  } catch { /* meldingen mogen nooit stuklopen */ }
+    } catch { /* meldingen mogen nooit stuklopen */ }
+  })
 
   // Offertes: de klant accepteerde (via de knop op /offerte/<token>).
-  try {
-    const ok = await safe(admin.from('offertes').select('id, client_id, klant_naam, titel, geaccepteerd_op').eq('status', 'geaccepteerd').gte('geaccepteerd_op', since).order('geaccepteerd_op', { ascending: false }).limit(30)) as { id: string; client_id: string | null; klant_naam: string | null; titel: string; geaccepteerd_op: string }[]
-    for (const o of ok) out.push({ id: `offerte:${o.id}:geaccepteerd`, kind: 'offerte', priority: 'high', title: `Offerte geaccepteerd — ${(o.client_id ? names.get(o.client_id) : null) ?? o.klant_naam ?? 'Klant'}: ${o.titel}. Maak het contract op.`, date: o.geaccepteerd_op, href: `/admin/offertes?offerte=${o.id}` })
-  } catch { /* meldingen mogen nooit stuklopen */ }
+  blok(async (out) => {
+    try {
+      const ok = await safe(admin.from('offertes').select('id, client_id, klant_naam, titel, geaccepteerd_op').eq('status', 'geaccepteerd').gte('geaccepteerd_op', since).order('geaccepteerd_op', { ascending: false }).limit(30)) as { id: string; client_id: string | null; klant_naam: string | null; titel: string; geaccepteerd_op: string }[]
+      for (const o of ok) out.push({ id: `offerte:${o.id}:geaccepteerd`, kind: 'offerte', priority: 'high', title: `Offerte geaccepteerd — ${(o.client_id ? names.get(o.client_id) : null) ?? o.klant_naam ?? 'Klant'}: ${o.titel}. Maak het contract op.`, date: o.geaccepteerd_op, href: `/admin/offertes?offerte=${o.id}` })
+    } catch { /* meldingen mogen nooit stuklopen */ }
+  })
 
   // Workshops & events: nieuwe inschrijvingen, afgelopen events met nog te
   // factureren inschrijvingen, en een Google-agenda die niet lukte.
-  try {
-    const nieuw = await safe(admin.from('klant_event_inschrijvingen').select('id, event_id, client_id, naam, created_at, klant_events ( titel )').eq('status', 'ingeschreven').gte('created_at', since).order('created_at', { ascending: false }).limit(30)) as { id: string; event_id: string; client_id: string; naam: string; created_at: string; klant_events?: { titel?: string } | null }[]
-    for (const i of nieuw) out.push({ id: `event-inschrijving:${i.id}`, kind: 'event', priority: 'med', title: `Nieuwe inschrijving — ${names.get(i.client_id) ?? 'Klant'}: ${i.naam} voor "${i.klant_events?.titel ?? 'event'}"`, date: i.created_at, href: `/admin/events?event=${i.event_id}` })
-    const teFact = await safe(admin.from('klant_event_inschrijvingen').select('event_id, prijs_cents, klant_events ( titel, einde_op )').eq('factuur_status', 'te_factureren').limit(2000)) as { event_id: string; prijs_cents: number; klant_events?: { titel?: string; einde_op?: string } | null }[]
-    const perEvent = new Map<string, { titel: string; einde: string; aantal: number; cents: number }>()
-    for (const r of teFact) {
-      if (!r.klant_events?.einde_op || Date.parse(r.klant_events.einde_op) > Date.now()) continue
-      const t = perEvent.get(r.event_id) ?? { titel: r.klant_events.titel ?? 'Event', einde: r.klant_events.einde_op, aantal: 0, cents: 0 }
-      perEvent.set(r.event_id, { ...t, aantal: t.aantal + 1, cents: t.cents + (r.prijs_cents ?? 0) })
-    }
-    for (const [id, t] of perEvent) out.push({ id: `event-factureren:${id}:${t.aantal}`, kind: 'event', priority: 'high', title: `Te factureren: "${t.titel}" — ${t.aantal} ${t.aantal === 1 ? 'inschrijving' : 'inschrijvingen'}, ${(t.cents / 100).toLocaleString('nl-BE', { style: 'currency', currency: 'EUR' })} excl. btw`, date: t.einde, href: `/admin/events?event=${id}` })
-    const fout = await safe(admin.from('klant_events').select('id, titel, google_fout, updated_at').eq('status', 'gepubliceerd').eq('google_status', 'fout').gt('einde_op', new Date().toISOString()).limit(20)) as { id: string; titel: string; google_fout: string | null; updated_at: string }[]
-    for (const e of fout) out.push({ id: `event-google:${e.id}:${e.updated_at}`, kind: 'event', priority: 'high', title: `Google-agenda lukte niet voor "${e.titel}": ${(e.google_fout ?? '').slice(0, 100)}`, date: e.updated_at, href: `/admin/events?event=${e.id}` })
-  } catch { /* meldingen mogen nooit stuklopen */ }
+  blok(async (out) => {
+    try {
+      const nieuw = await safe(admin.from('klant_event_inschrijvingen').select('id, event_id, client_id, naam, created_at, klant_events ( titel )').eq('status', 'ingeschreven').gte('created_at', since).order('created_at', { ascending: false }).limit(30)) as { id: string; event_id: string; client_id: string; naam: string; created_at: string; klant_events?: { titel?: string } | null }[]
+      for (const i of nieuw) out.push({ id: `event-inschrijving:${i.id}`, kind: 'event', priority: 'med', title: `Nieuwe inschrijving — ${names.get(i.client_id) ?? 'Klant'}: ${i.naam} voor "${i.klant_events?.titel ?? 'event'}"`, date: i.created_at, href: `/admin/events?event=${i.event_id}` })
+      const teFact = await safe(admin.from('klant_event_inschrijvingen').select('event_id, prijs_cents, klant_events ( titel, einde_op )').eq('factuur_status', 'te_factureren').limit(2000)) as { event_id: string; prijs_cents: number; klant_events?: { titel?: string; einde_op?: string } | null }[]
+      const perEvent = new Map<string, { titel: string; einde: string; aantal: number; cents: number }>()
+      for (const r of teFact) {
+        if (!r.klant_events?.einde_op || Date.parse(r.klant_events.einde_op) > Date.now()) continue
+        const t = perEvent.get(r.event_id) ?? { titel: r.klant_events.titel ?? 'Event', einde: r.klant_events.einde_op, aantal: 0, cents: 0 }
+        perEvent.set(r.event_id, { ...t, aantal: t.aantal + 1, cents: t.cents + (r.prijs_cents ?? 0) })
+      }
+      for (const [id, t] of perEvent) out.push({ id: `event-factureren:${id}:${t.aantal}`, kind: 'event', priority: 'high', title: `Te factureren: "${t.titel}" — ${t.aantal} ${t.aantal === 1 ? 'inschrijving' : 'inschrijvingen'}, ${(t.cents / 100).toLocaleString('nl-BE', { style: 'currency', currency: 'EUR' })} excl. btw`, date: t.einde, href: `/admin/events?event=${id}` })
+      const fout = await safe(admin.from('klant_events').select('id, titel, google_fout, updated_at').eq('status', 'gepubliceerd').eq('google_status', 'fout').gt('einde_op', new Date().toISOString()).limit(20)) as { id: string; titel: string; google_fout: string | null; updated_at: string }[]
+      for (const e of fout) out.push({ id: `event-google:${e.id}:${e.updated_at}`, kind: 'event', priority: 'high', title: `Google-agenda lukte niet voor "${e.titel}": ${(e.google_fout ?? '').slice(0, 100)}`, date: e.updated_at, href: `/admin/events?event=${e.id}` })
+    } catch { /* meldingen mogen nooit stuklopen */ }
+  })
 
   // Klantmeetings: een stap die misliep, of een herinnering die niet vertrok
   // (mislukt, of de scheduler loopt achter). Enkel voor meetings die nog komen.
-  try {
-    const nuIso = new Date().toISOString()
-    const meetings = await safe(admin.from('klant_meetings')
-      .select('*')
-      .eq('status', 'ingepland').gte('starts_at', nuIso).limit(200)) as { id: string; titel: string; klant_naam: string; starts_at: string; google_status: string; meet_url: string | null; clickup_status: string; bron?: string; bevestiging_status?: string | null; created_at?: string }[]
-    if (meetings.length) {
-      const herinneringen = await safe(admin.from('klant_meeting_herinneringen')
-        .select('meeting_id, status, gepland_voor').in('meeting_id', meetings.map((m) => m.id)).in('status', ['mislukt', 'gepland'])) as { meeting_id: string; status: string; gepland_voor: string }[]
-      const achterstand = new Date(Date.now() - 20 * 60000).toISOString()
-      for (const m of meetings) {
-        const href = `/admin/meetings?meeting=${m.id}`
-        const naam = `${m.klant_naam} · ${m.titel}`
-        const stappen = [
-          m.google_status === 'fout' ? 'agenda' : null,
-          m.google_status === 'ok' && !m.meet_url ? 'Meet-link' : null,
-          m.clickup_status === 'fout' ? 'ClickUp' : null,
-        ].filter(Boolean)
-        if (stappen.length) out.push({ id: `meeting:${m.id}:${stappen.join('-')}`, kind: 'meeting', priority: 'high', title: `Klantmeeting niet volledig ingepland (${stappen.join(', ')}) — ${naam}`, date: m.starts_at.slice(0, 10), href })
-        if (m.bron === 'klantboeking') {
-          if (m.bevestiging_status === 'mislukt') out.push({ id: `klantboeking:${m.id}:bevestiging`, kind: 'meeting', priority: 'high', title: `Bevestigingsmail van een klantboeking mislukt — ${naam}`, date: m.starts_at.slice(0, 10), href })
-          else if (m.created_at && Date.now() - new Date(m.created_at).getTime() < 7 * 86400000) out.push({ id: `klantboeking:${m.id}`, kind: 'meeting', priority: 'med', title: `Nieuwe klantboeking — ${naam}`, date: m.created_at.slice(0, 10), href })
+  blok(async (out) => {
+    try {
+      const nuIso = new Date().toISOString()
+      const meetings = await safe(admin.from('klant_meetings')
+        .select('*')
+        .eq('status', 'ingepland').gte('starts_at', nuIso).limit(200)) as { id: string; titel: string; klant_naam: string; starts_at: string; google_status: string; meet_url: string | null; clickup_status: string; bron?: string; bevestiging_status?: string | null; created_at?: string }[]
+      if (meetings.length) {
+        const herinneringen = await safe(admin.from('klant_meeting_herinneringen')
+          .select('meeting_id, status, gepland_voor').in('meeting_id', meetings.map((m) => m.id)).in('status', ['mislukt', 'gepland'])) as { meeting_id: string; status: string; gepland_voor: string }[]
+        const achterstand = new Date(Date.now() - 20 * 60000).toISOString()
+        for (const m of meetings) {
+          const href = `/admin/meetings?meeting=${m.id}`
+          const naam = `${m.klant_naam} · ${m.titel}`
+          const stappen = [
+            m.google_status === 'fout' ? 'agenda' : null,
+            m.google_status === 'ok' && !m.meet_url ? 'Meet-link' : null,
+            m.clickup_status === 'fout' ? 'ClickUp' : null,
+          ].filter(Boolean)
+          if (stappen.length) out.push({ id: `meeting:${m.id}:${stappen.join('-')}`, kind: 'meeting', priority: 'high', title: `Klantmeeting niet volledig ingepland (${stappen.join(', ')}) — ${naam}`, date: m.starts_at.slice(0, 10), href })
+          if (m.bron === 'klantboeking') {
+            if (m.bevestiging_status === 'mislukt') out.push({ id: `klantboeking:${m.id}:bevestiging`, kind: 'meeting', priority: 'high', title: `Bevestigingsmail van een klantboeking mislukt — ${naam}`, date: m.starts_at.slice(0, 10), href })
+            else if (m.created_at && Date.now() - new Date(m.created_at).getTime() < 7 * 86400000) out.push({ id: `klantboeking:${m.id}`, kind: 'meeting', priority: 'med', title: `Nieuwe klantboeking — ${naam}`, date: m.created_at.slice(0, 10), href })
+          }
+          const h = herinneringen.find((x) => x.meeting_id === m.id)
+          if (h?.status === 'mislukt') out.push({ id: `meeting-herinnering:${m.id}:mislukt`, kind: 'meeting', priority: 'high', title: `Herinneringsmail mislukt — ${naam}`, date: m.starts_at.slice(0, 10), href })
+          else if (h?.status === 'gepland' && h.gepland_voor < achterstand) out.push({ id: `meeting-herinnering:${m.id}:achter`, kind: 'meeting', priority: 'high', title: `Herinneringsmail had al moeten vertrekken (scheduler loopt achter) — ${naam}`, date: m.starts_at.slice(0, 10), href })
         }
-        const h = herinneringen.find((x) => x.meeting_id === m.id)
-        if (h?.status === 'mislukt') out.push({ id: `meeting-herinnering:${m.id}:mislukt`, kind: 'meeting', priority: 'high', title: `Herinneringsmail mislukt — ${naam}`, date: m.starts_at.slice(0, 10), href })
-        else if (h?.status === 'gepland' && h.gepland_voor < achterstand) out.push({ id: `meeting-herinnering:${m.id}:achter`, kind: 'meeting', priority: 'high', title: `Herinneringsmail had al moeten vertrekken (scheduler loopt achter) — ${naam}`, date: m.starts_at.slice(0, 10), href })
+      }
+    } catch { /* meldingen mogen nooit stuklopen */ }
+  })
+
+  blok((out) => {
+    for (const i of invoices) {
+      const due = (i.invoice_month ?? '') <= thisMonth()
+      out.push({
+        id: `invoice:${i.id}`, kind: 'invoice', priority: due ? 'high' : 'med',
+        title: `Factuur te versturen — ${i.client_id ? names.get(i.client_id) ?? '' : ''} ${i.description ?? ''}`.trim(),
+        date: i.invoice_month ?? null, href: '/admin/invoices',
+      })
+    }
+    for (const c of contracts) {
+      const fu = followUp(c)
+      if (!fu.needs) continue
+      out.push({
+        id: `contract:${c.id}`, kind: 'contract', priority: fu.level === 'urgent' ? 'high' : 'med',
+        title: `Contract opvolgen — ${c.title} (${fu.reason})`, date: c.sent_at ?? c.created_at ?? null,
+        href: `/admin/contracts/${c.id}`,
+      })
+    }
+    // Blog-signalen enkel als de module aan staat (lib/features.ts).
+    if (FEATURES.blogs) {
+      for (const b of blogs) {
+        out.push({ id: `blog:${b.id}`, kind: 'blog', priority: 'low', title: `Blog klaar voor publicatie — ${b.titel}`, date: null, href: '/admin/blog-calendar' })
       }
     }
-  } catch { /* meldingen mogen nooit stuklopen */ }
-
-  for (const i of invoices) {
-    const due = (i.invoice_month ?? '') <= thisMonth()
-    out.push({
-      id: `invoice:${i.id}`, kind: 'invoice', priority: due ? 'high' : 'med',
-      title: `Factuur te versturen — ${i.client_id ? names.get(i.client_id) ?? '' : ''} ${i.description ?? ''}`.trim(),
-      date: i.invoice_month ?? null, href: '/admin/invoices',
-    })
-  }
-  for (const c of contracts) {
-    const fu = followUp(c)
-    if (!fu.needs) continue
-    out.push({
-      id: `contract:${c.id}`, kind: 'contract', priority: fu.level === 'urgent' ? 'high' : 'med',
-      title: `Contract opvolgen — ${c.title} (${fu.reason})`, date: c.sent_at ?? c.created_at ?? null,
-      href: `/admin/contracts/${c.id}`,
-    })
-  }
-  // Blog-signalen enkel als de module aan staat (lib/features.ts).
-  if (FEATURES.blogs) {
-    for (const b of blogs) {
-      out.push({ id: `blog:${b.id}`, kind: 'blog', priority: 'low', title: `Blog klaar voor publicatie — ${b.titel}`, date: null, href: '/admin/blog-calendar' })
+    for (const w of webRequests) {
+      out.push({ id: `website:${w.id}`, kind: 'website', priority: 'med', title: `Nieuwe websitefeedback — ${w.title}`, date: w.created_at ?? null, href: '/admin/services/website' })
     }
-  }
-  for (const w of webRequests) {
-    out.push({ id: `website:${w.id}`, kind: 'website', priority: 'med', title: `Nieuwe websitefeedback — ${w.title}`, date: w.created_at ?? null, href: '/admin/services/website' })
-  }
-  for (const c of clients) {
-    out.push({ id: `client:${c.id}`, kind: 'client', priority: 'low', title: `Nieuwe klant toegevoegd — ${c.company_name}`, date: c.created_at ?? null, href: `/admin/clients/${c.id}` })
-  }
+    for (const c of clients) {
+      out.push({ id: `client:${c.id}`, kind: 'client', priority: 'low', title: `Nieuwe klant toegevoegd — ${c.company_name}`, date: c.created_at ?? null, href: `/admin/clients/${c.id}` })
+    }
+  })
 
   // Personeel: uren en beschikbaarheden die op een beslissing wachten, vergeten
   // uit te klokken, en documenten die vervallen. Eén signaal per soort.
-  try {
-    const [uren, beschikbaar, actief, docs] = await Promise.all([
-      safe(admin.from('personeel_sessies').select('id, created_at').in('status', ['ingediend']).limit(500)),
-      safe(admin.from('personeel_beschikbaarheid').select('id, created_at').eq('status', 'ingediend').limit(500)),
-      safe(admin.from('personeel_sessies').select('id, personeel_id, start_at').eq('status', 'actief').limit(100)),
-      safe(admin.from('personeel_documenten').select('id, naam, vervalt_op, personeel_id').not('vervalt_op', 'is', null).lte('vervalt_op', new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)).limit(100)),
-    ]) as [{ id: string; created_at: string }[], { id: string; created_at: string }[], { id: string; personeel_id: string; start_at: string }[], { id: string; naam: string; vervalt_op: string; personeel_id: string }[]]
-    if (uren.length) out.push({ id: `personeel:uren:${uren.length}:${uren[0].created_at}`, kind: 'personeel', priority: 'med', title: `${uren.length} urenregistratie${uren.length === 1 ? '' : 's'} klaar voor controle`, date: uren[0].created_at, href: '/admin/personeel?tab=uren' })
-    if (beschikbaar.length) out.push({ id: `personeel:beschikbaar:${beschikbaar.length}:${beschikbaar[0].created_at}`, kind: 'personeel', priority: 'med', title: `${beschikbaar.length} beschikbaarhe${beschikbaar.length === 1 ? 'id' : 'den'} te behandelen`, date: beschikbaar[0].created_at, href: '/admin/personeel?tab=planning' })
-    const vergeten = actief.filter((x) => Date.now() - new Date(x.start_at).getTime() > 10 * 3600000)
-    for (const v of vergeten) out.push({ id: `personeel:vergeten:${v.id}`, kind: 'personeel', priority: 'high', title: 'Een medewerker is vergeten uit te klokken', date: v.start_at, href: `/admin/personeel/${v.personeel_id}?tab=uren` })
-    for (const d of docs) out.push({ id: `personeel:doc:${d.id}:${d.vervalt_op}`, kind: 'personeel', priority: d.vervalt_op < todayISO() ? 'high' : 'low', title: `Personeelsdocument ${d.vervalt_op < todayISO() ? 'vervallen' : 'vervalt binnenkort'} — ${d.naam}`, date: d.vervalt_op, href: `/admin/personeel/${d.personeel_id}?tab=documenten` })
-  } catch { /* tabellen bestaan pas na de migratie */ }
+  blok(async (out) => {
+    try {
+      const [uren, beschikbaar, actief, docs] = await Promise.all([
+        safe(admin.from('personeel_sessies').select('id, created_at').in('status', ['ingediend']).limit(500)),
+        safe(admin.from('personeel_beschikbaarheid').select('id, created_at').eq('status', 'ingediend').limit(500)),
+        safe(admin.from('personeel_sessies').select('id, personeel_id, start_at').eq('status', 'actief').limit(100)),
+        safe(admin.from('personeel_documenten').select('id, naam, vervalt_op, personeel_id').not('vervalt_op', 'is', null).lte('vervalt_op', new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)).limit(100)),
+      ]) as [{ id: string; created_at: string }[], { id: string; created_at: string }[], { id: string; personeel_id: string; start_at: string }[], { id: string; naam: string; vervalt_op: string; personeel_id: string }[]]
+      if (uren.length) out.push({ id: `personeel:uren:${uren.length}:${uren[0].created_at}`, kind: 'personeel', priority: 'med', title: `${uren.length} urenregistratie${uren.length === 1 ? '' : 's'} klaar voor controle`, date: uren[0].created_at, href: '/admin/personeel?tab=uren' })
+      if (beschikbaar.length) out.push({ id: `personeel:beschikbaar:${beschikbaar.length}:${beschikbaar[0].created_at}`, kind: 'personeel', priority: 'med', title: `${beschikbaar.length} beschikbaarhe${beschikbaar.length === 1 ? 'id' : 'den'} te behandelen`, date: beschikbaar[0].created_at, href: '/admin/personeel?tab=planning' })
+      const vergeten = actief.filter((x) => Date.now() - new Date(x.start_at).getTime() > 10 * 3600000)
+      for (const v of vergeten) out.push({ id: `personeel:vergeten:${v.id}`, kind: 'personeel', priority: 'high', title: 'Een medewerker is vergeten uit te klokken', date: v.start_at, href: `/admin/personeel/${v.personeel_id}?tab=uren` })
+      for (const d of docs) out.push({ id: `personeel:doc:${d.id}:${d.vervalt_op}`, kind: 'personeel', priority: d.vervalt_op < todayISO() ? 'high' : 'low', title: `Personeelsdocument ${d.vervalt_op < todayISO() ? 'vervallen' : 'vervalt binnenkort'} — ${d.naam}`, date: d.vervalt_op, href: `/admin/personeel/${d.personeel_id}?tab=documenten` })
+    } catch { /* tabellen bestaan pas na de migratie */ }
+  })
 
   // Websiteonderhoud: binnen 30 dagen af, verlopen of zonder startdatum. De id
   // bevat de einddatum, zodat een verlengd pakket later opnieuw meldt.
-  try {
-    const { data } = await admin.from('clients')
-      .select('id, company_name, maintenance_included, maintenance_start_date, maintenance_months').eq('maintenance_included', true).limit(1000)
-    for (const { klant, status } of onderhoudOpvolgen((data ?? []) as MaintenanceClient[])) {
-      out.push({
-        id: `onderhoud:${klant.id}:${status.endDate ?? 'geen-start'}:${status.expired ? 'verlopen' : 'af'}`, kind: 'website',
-        priority: status.expired || (status.daysLeft !== null && status.daysLeft <= 7) ? 'high' : 'med',
-        title: status.endDate
-          ? `Websiteonderhoud ${status.expired ? 'verlopen' : 'loopt af'} — ${klant.company_name} (${resterendTekst(status)})`
-          : `Websiteonderhoud zonder startdatum — ${klant.company_name}`,
-        date: status.endDate, href: `/admin/clients/${klant.id}#website`,
-      })
-    }
-  } catch { /* stil */ }
+  blok(async (out) => {
+    try {
+      const { data } = await admin.from('clients')
+        .select('id, company_name, maintenance_included, maintenance_start_date, maintenance_months').eq('maintenance_included', true).limit(1000)
+      for (const { klant, status } of onderhoudOpvolgen((data ?? []) as MaintenanceClient[])) {
+        out.push({
+          id: `onderhoud:${klant.id}:${status.endDate ?? 'geen-start'}:${status.expired ? 'verlopen' : 'af'}`, kind: 'website',
+          priority: status.expired || (status.daysLeft !== null && status.daysLeft <= 7) ? 'high' : 'med',
+          title: status.endDate
+            ? `Websiteonderhoud ${status.expired ? 'verlopen' : 'loopt af'} — ${klant.company_name} (${resterendTekst(status)})`
+            : `Websiteonderhoud zonder startdatum — ${klant.company_name}`,
+          date: status.endDate, href: `/admin/clients/${klant.id}#website`,
+        })
+      }
+    } catch { /* stil */ }
+  })
 
   // Nieuwe projecten uit de mail: wat de AI voorstelt en nog op een ja of nee wacht (Command Center).
-  try {
-    const { data } = await admin.from('mail_projecten').select('id, ontvangen_op').eq('status', 'voorstel').order('ontvangen_op', { ascending: false }).limit(50)
-    const open = (data ?? []) as { id: string; ontvangen_op: string }[]
-    if (open.length) out.push({ id: `mail-project:${open[0].id}:${open.length}`, kind: 'project', priority: 'high', title: open.length === 1 ? 'Mogelijk nieuw project uit de mail: kies ja of nee' : `${open.length} mogelijke nieuwe projecten uit de mail: kies ja of nee`, date: open[0].ontvangen_op.slice(0, 10), href: '/admin' })
-  } catch { /* tabel nog niet gemigreerd → geen signaal */ }
+  blok(async (out) => {
+    try {
+      const { data } = await admin.from('mail_projecten').select('id, ontvangen_op').eq('status', 'voorstel').order('ontvangen_op', { ascending: false }).limit(50)
+      const open = (data ?? []) as { id: string; ontvangen_op: string }[]
+      if (open.length) out.push({ id: `mail-project:${open[0].id}:${open.length}`, kind: 'project', priority: 'high', title: open.length === 1 ? 'Mogelijk nieuw project uit de mail: kies ja of nee' : `${open.length} mogelijke nieuwe projecten uit de mail: kies ja of nee`, date: open[0].ontvangen_op.slice(0, 10), href: '/admin' })
+    } catch { /* tabel nog niet gemigreerd → geen signaal */ }
+  })
 
   // Opslag in Supabase: een signaal vanaf 70% van de 100 GB (zie lib/opslag.ts).
-  try {
-    const { data } = await admin.rpc('opslag_verbruik')
-    const o = samenvatting(data as RuwVerbruik)
-    if (o.niveau !== 'ok') {
-      const pct = Math.floor(o.procent / 5) * 5
-      out.push({ id: `opslag:${pct}`, kind: 'opslag', priority: o.niveau === 'kritiek' ? 'high' : 'med', title: `Opslag in Supabase op ${Math.round(o.procent)}% (${grootte(o.totaalBytes)} van ${OPSLAG_LIMIET_GB} GB)`, date: todayISO(), href: '/admin/instellingen?tab=opslag' })
-    }
-  } catch { /* functie nog niet gemigreerd → geen signaal */ }
+  blok(async (out) => {
+    try {
+      // Telt alle bestanden in de opslag: zwaar en verandert traag. Een uur onthouden.
+      let data = opslagCache && opslagCache.tot > Date.now() ? opslagCache.data : null
+      if (!data) {
+        const r = await admin.rpc('opslag_verbruik')
+        if (r.error) throw r.error
+        data = r.data
+        opslagCache = { tot: Date.now() + 60 * 60_000, data }
+      }
+      const o = samenvatting(data as RuwVerbruik)
+      if (o.niveau !== 'ok') {
+        const pct = Math.floor(o.procent / 5) * 5
+        out.push({ id: `opslag:${pct}`, kind: 'opslag', priority: o.niveau === 'kritiek' ? 'high' : 'med', title: `Opslag in Supabase op ${Math.round(o.procent)}% (${grootte(o.totaalBytes)} van ${OPSLAG_LIMIET_GB} GB)`, date: todayISO(), href: '/admin/instellingen?tab=opslag' })
+      }
+    } catch { /* functie nog niet gemigreerd → geen signaal */ }
+  })
 
+  const out = (await Promise.all(blokken)).flat()
   const rank: Record<NotifPriority, number> = { high: 0, med: 1, low: 2 }
   return out.sort((a, b) => rank[a.priority] - rank[b.priority] || (b.date ?? '').localeCompare(a.date ?? ''))
 }

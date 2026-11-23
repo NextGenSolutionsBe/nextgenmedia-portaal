@@ -15,7 +15,8 @@ export const maxDuration = 30
 
 /**
  * Taken in het Command Center: aan elkaar toewijzen, gesynchroniseerd met ClickUp.
- *  GET            → open taken (teamtaken en taken bij projecten), live uit ClickUp,
+ *  GET            → open taken (teamtaken en taken bij projecten), meteen uit de databank,
+ *                   met `teVerversen`; GET ?vernieuw=1 kijkt die daarna na in ClickUp,
  *                   plus `teTekenen`: wat nog op een handtekening van ons wacht (enkel voor admins)
  *  GET ?opties=1  → ClickUp-leden, de lijsten (NextGenMedia/NextGenSolutions) en wie ik ben
  *  POST           → nieuwe teamtaak: { aanvraag_sleutel, omschrijving, deadline, notitie, assignee_id, merk, client_id? }
@@ -42,15 +43,19 @@ export async function GET(req: NextRequest) {
       }
       return NextResponse.json(o)
     }
+    // ?vernieuw=1: enkel de taken waarvan de stand ouder is dan een paar minuten
+    // opnieuw in ClickUp nakijken. Het scherm vraagt dit op de achtergrond, na
+    // de snelle eerste lezing uit de databank.
+    const live = req.nextUrl.searchParams.get('vernieuw') === '1'
     // Nog te tekenen (regels, vesting, uitgaven, tegentekenen): enkel voor de zaakvoerders.
     const isAdmin = !!(await requireAdmin())
-    const [{ taken, statusFout }, teTekenen] = await Promise.all([
-      takenOverzicht(admin),
+    const [{ taken, statusFout, teVerversen }, teTekenen] = await Promise.all([
+      takenOverzicht(admin, { live }),
       isAdmin ? teTekenenOverzicht(admin) : Promise.resolve([]),
     ])
     // Een tegenteken-taak uit ClickUp staat al in "Nog te tekenen": niet dubbel tonen.
     const tegenSleutels = new Set(teTekenen.flatMap((t) => (t.soort === 'tegentekenen' ? (t.lijst ?? []).map((c) => tegentekenSleutel(c.id)) : [])))
-    return NextResponse.json({ taken: taken.filter((t) => !t.aanvraag_sleutel || !tegenSleutels.has(t.aanvraag_sleutel)), statusFout, teTekenen })
+    return NextResponse.json({ taken: taken.filter((t) => !t.aanvraag_sleutel || !tegenSleutels.has(t.aanvraag_sleutel)), statusFout, teTekenen, teVerversen })
   } catch (e) { return fout(e, 'taken.GET') }
 }
 

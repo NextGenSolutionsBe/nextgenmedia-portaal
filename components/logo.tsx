@@ -19,7 +19,7 @@ const LOGO_SRC = '/logo.png'
 export function Logo({
   className,
   variant = 'tile',
-  alt = 'NextGenMedia',
+  alt = 'NextGen Agency',
 }: {
   className?: string
   variant?: 'tile' | 'plain'

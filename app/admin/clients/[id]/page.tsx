@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic'
 
+import { PasBijOpenen } from '@/components/admin/pas-bij-openen'
 import { notFound, redirect } from 'next/navigation'
 import { statusInfo } from '@/lib/contract-status'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
@@ -186,7 +187,8 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
               <span className="text-xs text-gray-500">account, gebruikers, rechten</span>
               <ChevronDown className="h-4 w-4 text-gray-400 transition-transform group-open:rotate-180" />
             </summary>
-            <div className="space-y-4 mt-4">
+            {/* Pas bij het openklappen laden: anders haalden deze vijf kaarten bij elk bezoek hun gegevens op. */}
+            <PasBijOpenen className="space-y-4 mt-4">
               {/* Klantaccount: aanmaken en de login doorsturen (activatielink, zelf wachtwoord kiezen, 2FA). */}
               <KlantAccountKaart clientId={id} clientName={client.company_name} emailVoorstel={client.email ?? null} />
               {/* Login credentials */}
@@ -198,7 +200,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
               <ClientUsers clientId={id} clientName={client.company_name} ownerEmail={client.email ?? null} />
               <KalenderRolInstelling clientId={id} />
               <KlantTweestap clientId={id} />
-            </div>
+            </PasBijOpenen>
           </details>
 
           {/* Klant Lifecycle (batch, contract, reviews) */}

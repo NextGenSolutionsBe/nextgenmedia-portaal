@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { getActor, actorCanSee } from '@/lib/actor-modules'
 import { buildNotifications } from '@/lib/notifications'
 import { vestingMeldingVoor } from '@/lib/vesting-data-server'
-import { regelsMeldingVoor, uitgavenMeldingVoor } from '@/lib/vennoot-uitgaven-server'
+import { regelsMeldingVoor, uitgavenMeldingVoor, laadVennotenData } from '@/lib/vennoot-uitgaven-server'
 import { vestingRegelsMeldingVoor } from '@/lib/vesting-regels-server'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 
@@ -16,26 +16,35 @@ export async function GET() {
     const actor = await getActor()
     if (!actor) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
 
-    const all = await buildNotifications()
+    // Alles tegelijk: de meldingen en (voor Marco, Bram en Chiara) wat zij zelf
+    // nog moeten tekenen of goedkeuren. Na elkaar waren dat vijf rondes.
+    const extra = async <T,>(f: () => Promise<T[]>): Promise<T[]> => { try { return await f() } catch { return [] /* melding is een extra */ } }
+    const admin = createAdminSupabaseClient()
+    // Uitgaven vennoten: één keer laden voor beide meldingen.
+    const vennoten = actor.isAdmin ? laadVennotenData(admin, actor.userId) : null
+    vennoten?.catch(() => null)
+    const [all, vesting, regels, uitgaven, vestingRegels] = await Promise.all([
+      buildNotifications(),
+      // Vesting: enkel voor Marco, Bram en Chiara, en enkel wat zij zelf nog moeten tekenen.
+      actor.isAdmin ? extra(() => vestingMeldingVoor(actor.userId)) : [],
+      // Uitgaven vennoten: de regels wachten op jouw handtekening.
+      vennoten ? extra(() => regelsMeldingVoor(actor.userId, admin, vennoten)) : [],
+      // Uitgaven vennoten: uitgaven die op jouw akkoord wachten.
+      vennoten ? extra(() => uitgavenMeldingVoor(actor.userId, admin, vennoten)) : [],
+      // Vesting: de regels wachten op jouw handtekening.
+      actor.isAdmin ? extra(() => vestingRegelsMeldingVoor(actor.userId, admin)) : [],
+    ])
     const KIND_MODULE: Record<string, string> = {
       invoice: 'invoices', contract: 'contracts', blog: 'blogs', website: 'content', client: 'clients', formulier: 'formulieren', personeel: 'personeel', content: 'content', meeting: 'meetings', aanvraag: 'aanvragen', offerte: 'offertes', oplevering: 'opleveringen', project: 'opdrachten',
     }
-    const notifications = all.filter((n) => {
+    const gefilterd = all.filter((n) => {
       const mod = KIND_MODULE[n.kind]
       if (mod === 'personeel') return actor.isAdmin // Personeel = enkel hoofdbeheerders
       if (n.kind === 'opslag') return actor.isAdmin  // opslag = instellingen
       return !mod || actorCanSee(actor, mod)
     })
-    // Vesting: enkel voor Marco, Bram en Chiara, en enkel wat zij zelf nog moeten tekenen.
-    if (actor.isAdmin) {
-      try { notifications.unshift(...(await vestingMeldingVoor(actor.userId))) } catch { /* melding is een extra */ }
-      // Uitgaven vennoten: de regels wachten op jouw handtekening.
-      try { notifications.unshift(...(await regelsMeldingVoor(actor.userId, createAdminSupabaseClient()))) } catch { /* melding is een extra */ }
-      // Uitgaven vennoten: uitgaven die op jouw akkoord wachten.
-      try { notifications.unshift(...(await uitgavenMeldingVoor(actor.userId, createAdminSupabaseClient()))) } catch { /* melding is een extra */ }
-      // Vesting: de regels wachten op jouw handtekening.
-      try { notifications.unshift(...(await vestingRegelsMeldingVoor(actor.userId, createAdminSupabaseClient()))) } catch { /* melding is een extra */ }
-    }
+    // Zelfde volgorde als vroeger: de persoonlijke meldingen bovenaan.
+    const notifications = [...vestingRegels, ...uitgaven, ...regels, ...vesting, ...gefilterd]
     return NextResponse.json({ notifications })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })

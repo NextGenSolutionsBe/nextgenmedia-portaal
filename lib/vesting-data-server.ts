@@ -98,31 +98,33 @@ export async function laadVestingData(admin: Admin = createAdminSupabaseClient()
 
   // Een contract dat de klant nog moest tekenen, krijgt de datum zodra het getekend is.
   const teDateren = contractRijen.filter((r) => !r.ondertekend_op && r.contract_id && moduleTitel.get(String(r.contract_id))?.signed_at)
-  for (const r of teDateren) {
+  await Promise.all(teDateren.map(async (r) => {
     const op = moduleTitel.get(String(r.contract_id))!.signed_at!
     const { error } = await admin.from('vesting_contracten').update({ ondertekend_op: op, updated_at: new Date().toISOString() }).eq('id', String(r.id)).is('ondertekend_op', null)
     if (!error) r.ondertekend_op = op
-  }
+  }))
 
   // Directe kosten op de facturen van gekoppelde contracten (het hoogste van lijnen en facturen telt).
   const gekoppeld = Array.from(new Set(contractRijen.map((r) => r.contract_id).filter(Boolean))) as string[]
-  try {
-    const k = await directeKostenVoorContracten(admin, gekoppeld)
+  // Kosten en facturen van die contracten: tegelijk (ze hangen niet van elkaar af).
+  const [k, facturen] = await Promise.all([
+    directeKostenVoorContracten(admin, gekoppeld).catch(() => null), // kostenlaag nog niet beschikbaar
+    (async (): Promise<GekoppeldeFactuur[]> => {
+      try {
+        if (!gekoppeld.length) return []
+        const { data } = await admin.from('invoices')
+          .select('id, reference, invoice_date, invoice_month, amount_excl, amount_incl, status, betaalstatus, betaald_bedrag, betaald_op, cancelled_at, credited_at, contract_id')
+          .in('contract_id', gekoppeld)
+        return ((data ?? []) as Record<string, unknown>[]).map(factuurUitRij)
+      } catch { return [] /* enkel handmatige status */ }
+    })(),
+  ])
+  if (k) {
     contractRijen = contractRijen.map((r) => {
       const x = r.contract_id ? k.get(String(r.contract_id)) : undefined
       return x ? { ...r, directe_kosten_facturen: x.directeKosten, kostenstatus_facturen: x.status, facturen_gekoppeld: x.aantalFacturen } : r
     })
-  } catch { /* kostenlaag nog niet beschikbaar */ }
-
-  let facturen: GekoppeldeFactuur[] = []
-  try {
-    if (gekoppeld.length) {
-      const { data } = await admin.from('invoices')
-        .select('id, reference, invoice_date, invoice_month, amount_excl, amount_incl, status, betaalstatus, betaald_bedrag, betaald_op, cancelled_at, credited_at, contract_id')
-        .in('contract_id', gekoppeld)
-      facturen = ((data ?? []) as Record<string, unknown>[]).map(factuurUitRij)
-    }
-  } catch { /* enkel handmatige status */ }
+  }
 
   const registraties = ((registratieRijen.data ?? []) as Record<string, unknown>[]).map(naarRegistratie)
   const { inkomsten, kosten } = registratiesVoorBerekening(registraties)

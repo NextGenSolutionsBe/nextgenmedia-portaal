@@ -29,9 +29,10 @@ const brusselsMaand = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe
 const stukken = <T,>(a: T[], n = 150): T[][] => { const uit: T[][] = []; for (let i = 0; i < a.length; i += n) uit.push(a.slice(i, i + n)); return uit }
 async function inLijst<T>(admin: Admin, tabel: string, velden: string, kolom: string, ids: string[]): Promise<T[]> {
   if (!ids.length) return []
+  // De stukken tegelijk opvragen (na elkaar kostte dat een ronde per 150 id's).
+  const antwoorden = await Promise.all(stukken([...new Set(ids)]).map((s) => admin.from(tabel).select(velden).in(kolom, s)))
   const uit: T[] = []
-  for (const s of stukken([...new Set(ids)])) {
-    const { data, error } = await admin.from(tabel).select(velden).in(kolom, s)
+  for (const { data, error } of antwoorden) {
     if (error) throw new Error(error.message)
     uit.push(...((data ?? []) as T[]))
   }
@@ -59,22 +60,28 @@ export async function laadAflettering(admin: Admin, contractIds?: string[]): Pro
     inLijst<RuweRegel>(admin, 'invoice_lines', '*', 'contract_id', ids).catch(() => [] as RuweRegel[]),
     inLijst<RuweReeks & { contract_id: string }>(admin, 'recurring_invoices', 'id, contract_id, description, start_month, end_month, amount_excl, deleted_at', 'contract_id', ids),
   ])
-  const maanden = await inLijst<RuweMaand>(admin, 'recurring_invoice_months', 'recurring_id, month, status, amount_excl, billing_date, invoice_id, betaald_op, verwijderd_op, cancelled_at, extern_factuurnummer', 'recurring_id', reeksen.map((r) => r.id)).catch(async () =>
-    inLijst<RuweMaand>(admin, 'recurring_invoice_months', 'recurring_id, month, status, amount_excl, billing_date, invoice_id, cancelled_at', 'recurring_id', reeksen.map((r) => r.id)))
-  const wijzigingen = await inLijst<Wijziging & { contract_id: string }>(admin, 'contract_waarde_wijzigingen', '*', 'contract_id', ids).catch(() => [] as (Wijziging & { contract_id: string })[])
+  const reeksIds = reeksen.map((r) => r.id)
+  const [maanden, wijzigingen, regelsVanReeksen, kostenVanReeksen] = await Promise.all([
+    inLijst<RuweMaand>(admin, 'recurring_invoice_months', 'recurring_id, month, status, amount_excl, billing_date, invoice_id, betaald_op, verwijderd_op, cancelled_at, extern_factuurnummer', 'recurring_id', reeksIds).catch(async () =>
+      inLijst<RuweMaand>(admin, 'recurring_invoice_months', 'recurring_id, month, status, amount_excl, billing_date, invoice_id, cancelled_at', 'recurring_id', reeksIds)),
+    inLijst<Wijziging & { contract_id: string }>(admin, 'contract_waarde_wijzigingen', '*', 'contract_id', ids).catch(() => [] as (Wijziging & { contract_id: string })[]),
+    inLijst<RuweRegel>(admin, 'invoice_lines', '*', 'recurring_id', reeksIds),
+    // Interne kosten van de reeksmaanden (Kosten en winst).
+    inLijst<RuweKost>(admin, 'invoice_costs', 'invoice_id, recurring_id, maand, line_id, kostprijs_excl, status', 'recurring_id', reeksIds).catch(() => [] as RuweKost[]),
+  ])
   const bekend = new Set(rechtstreeks.map((f) => f.id))
   const extraIds = [...regelsMetContract.map((r) => r.invoice_id), ...maanden.map((m) => m.invoice_id)].filter((x): x is string => !!x && !bekend.has(x))
   const extra = await inLijst<RuweFactuur & { kind?: string }>(admin, 'invoices', FACTUUR_VELDEN, 'id', extraIds)
   const facturen = [...rechtstreeks, ...extra].filter((f) => !String(f.kind ?? '').startsWith('setter'))
-  const regels = [
-    ...(await inLijst<RuweRegel>(admin, 'invoice_lines', '*', 'invoice_id', facturen.map((f) => f.id))),
-    ...(await inLijst<RuweRegel>(admin, 'invoice_lines', '*', 'recurring_id', reeksen.map((r) => r.id))),
-  ]
-  // Interne kosten van die facturen en reeksmaanden (Kosten en winst).
-  const kosten = [
-    ...(await inLijst<RuweKost>(admin, 'invoice_costs', 'invoice_id, recurring_id, maand, line_id, kostprijs_excl, status', 'invoice_id', facturen.map((f) => f.id)).catch(() => [] as RuweKost[])),
-    ...(await inLijst<RuweKost>(admin, 'invoice_costs', 'invoice_id, recurring_id, maand, line_id, kostprijs_excl, status', 'recurring_id', reeksen.map((r) => r.id)).catch(() => [] as RuweKost[])),
-  ]
+  const factuurIdLijst = facturen.map((f) => f.id)
+  const [regelsVanFacturen, kostenVanFacturen] = await Promise.all([
+    inLijst<RuweRegel>(admin, 'invoice_lines', '*', 'invoice_id', factuurIdLijst),
+    // Interne kosten van die facturen (Kosten en winst).
+    inLijst<RuweKost>(admin, 'invoice_costs', 'invoice_id, recurring_id, maand, line_id, kostprijs_excl, status', 'invoice_id', factuurIdLijst).catch(() => [] as RuweKost[]),
+  ])
+  // Zelfde volgorde als vroeger: eerst per factuur, dan per reeks.
+  const regels = [...regelsVanFacturen, ...regelsVanReeksen]
+  const kosten = [...kostenVanFacturen, ...kostenVanReeksen]
   const factuurIds = new Set(facturen.map((f) => f.id))
   // Een maandfactuur uit een contractreeks hoort bij dat contract, ook als ze zelf (nog) geen contract_id heeft.
   const maandFactuurContract = new Map<string, string>()

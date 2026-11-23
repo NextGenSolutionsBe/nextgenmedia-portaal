@@ -11,45 +11,42 @@ import { contractVerantwoordelijke } from '@/lib/contracten/verantwoordelijke'
 async function getContracts() {
   const admin = createAdminSupabaseClient()
 
-  // select('*') zodat ontbrekende kolommen (template_id vóór migratie) nooit breken.
-  // Facturen apart ophalen (resilient: contract_id kan ontbreken vóór migratie).
-  let invoiceRows: { contract_id: string | null; status: string }[] = []
-  const [{ data: contracts }, { data: clients }, { data: templates }] = await Promise.all([
+  // Alles wat niet van elkaar afhangt tegelijk; daarna enkel nog wat de lijst van
+  // contracten nodig heeft (aflettering en namen). Vroeger waren dat negen rondes na elkaar.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const veilig = async <T,>(vraag: () => PromiseLike<{ data: any }>): Promise<T[]> => { try { return ((await vraag()).data ?? []) as T[] } catch { return [] } }
+  const [{ data: contracts }, { data: clients }, { data: templates }, invoiceRows, mails, kaarten, sigs, contracttypes] = await Promise.all([
+    // select('*') zodat ontbrekende kolommen (template_id vóór migratie) nooit breken.
     admin.from('contracts').select('*').order('created_at', { ascending: false }).limit(1000),
     admin.from('clients').select('id, company_name').order('company_name'),
     admin.from('contract_templates').select('id, name').order('name'),
+    // Facturen apart ophalen (resilient: contract_id kan ontbreken vóór migratie).
+    veilig<{ contract_id: string | null; status: string }>(() => admin.from('invoices').select('contract_id, status').not('contract_id', 'is', null).limit(5000)),
+    veilig<{ contract_id: string; status: string | null; created_at: string; provider_status: string | null }>(() => admin.from('email_messages').select('contract_id, status, created_at, provider_status').not('contract_id', 'is', null).order('created_at', { ascending: false }).limit(5000)),
+    // Verantwoordelijke per contract = die van zijn projectkaart.
+    veilig<{ contract_id: string; verantwoordelijke: string | null }>(() => admin.from('opdrachten').select('contract_id, verantwoordelijke').not('contract_id', 'is', null).limit(5000)),
+    // Welke contracten tekende de klant zelf in de app? Enkel die wachten op onze handtekening.
+    veilig<{ contract_id: string | null }>(() => admin.from('contract_signatures').select('contract_id').limit(5000)),
+    // Keuzelijst voor het contracttype-filter (valt vóór de migratie terug op de startlijst).
+    typeNamen(admin),
   ])
-  try {
-    const { data } = await admin.from('invoices').select('contract_id, status').not('contract_id', 'is', null).limit(5000)
-    invoiceRows = (data ?? []) as typeof invoiceRows
-  } catch { invoiceRows = [] }
 
   // Aflettering (contractwaarde ↔ facturen) en mailstatus: berekend uit de actuele gegevens, nooit opgeslagen.
   const echte = (contracts ?? []).filter((c) => c.status !== 'template').map((c) => c.id as string)
-  let afl: Awaited<ReturnType<typeof laadAflettering>> = new Map()
-  try { afl = await laadAflettering(admin, echte) } catch { /* lijst blijft werken zonder aflettering */ }
+  const [afl, namen] = await Promise.all([
+    laadAflettering(admin, echte).catch(() => new Map() as Awaited<ReturnType<typeof laadAflettering>>), // lijst blijft werken zonder aflettering
+    leesActorNamen(admin, (contracts ?? []).map((c) => c.created_by as string | null)),
+  ])
   const mailsPer = new Map<string, { status: string | null; created_at: string; provider_status: string | null }[]>()
-  try {
-    const { data: mails } = await admin.from('email_messages').select('contract_id, status, created_at, provider_status').not('contract_id', 'is', null).order('created_at', { ascending: false }).limit(5000)
-    for (const m of (mails ?? []) as { contract_id: string; status: string | null; created_at: string; provider_status: string | null }[]) {
-      const l = mailsPer.get(m.contract_id) ?? []; l.push(m); mailsPer.set(m.contract_id, l)
-    }
-  } catch { /* kolom contract_id bestaat nog niet */ }
+  for (const m of mails) {
+    const l = mailsPer.get(m.contract_id) ?? []; l.push(m); mailsPer.set(m.contract_id, l)
+  }
 
   const clientMap = new Map((clients ?? []).map((c) => [c.id, c]))
-  // Verantwoordelijke per contract = die van zijn projectkaart.
   const verantw = new Map<string, string | null>()
-  try {
-    const { data: kaarten } = await admin.from('opdrachten').select('contract_id, verantwoordelijke').not('contract_id', 'is', null).limit(5000)
-    for (const k of (kaarten ?? []) as { contract_id: string; verantwoordelijke: string | null }[]) verantw.set(k.contract_id, contractVerantwoordelijke(k.verantwoordelijke))
-  } catch { /* lijst blijft werken zonder */ }
-  // Welke contracten tekende de klant zelf in de app? Enkel die wachten op onze handtekening.
+  for (const k of kaarten) verantw.set(k.contract_id, contractVerantwoordelijke(k.verantwoordelijke))
   const klantTekendeInApp = new Set<string>()
-  try {
-    const { data: sigs } = await admin.from('contract_signatures').select('contract_id').limit(5000)
-    for (const s of (sigs ?? []) as { contract_id: string | null }[]) if (s.contract_id) klantTekendeInApp.add(s.contract_id)
-  } catch { /* zonder: geen tegentekenlabel */ }
-  const namen = await leesActorNamen(admin, (contracts ?? []).map((c) => c.created_by as string | null))
+  for (const sg of sigs) if (sg.contract_id) klantTekendeInApp.add(sg.contract_id)
   // Per contract: aantal gekoppelde + verstuurde facturen.
   const invByContract = new Map<string, { count: number; sent: number }>()
   for (const r of invoiceRows) {
@@ -108,9 +105,6 @@ async function getContracts() {
       verantwoordelijke: verantw.get(c.id) ?? null,
     }
   })
-
-  // Keuzelijst voor het contracttype-filter (valt vóór de migratie terug op de startlijst).
-  const contracttypes = await typeNamen(admin)
 
   return { contracts: enriched, clients: clients ?? [], templates: templates ?? [], contracttypes }
 }

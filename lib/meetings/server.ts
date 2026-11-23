@@ -671,7 +671,7 @@ export async function testAfspraak(agendaId: string): Promise<{ ok: boolean; mee
   const start = new Date(Date.now() + 30 * 86400000)
   try {
     const ev = await maakMeetingEvent(agendaId, {
-      eventId: id, meetRequestId: id, summary: 'Test NextGenMedia-app (wordt meteen verwijderd)', description: 'Automatische controle van de koppeling.',
+      eventId: id, meetRequestId: id, summary: 'Test NextGen Agency-app (wordt meteen verwijderd)', description: 'Automatische controle van de koppeling.',
       startsAt: start.toISOString(), endsAt: new Date(start.getTime() + 15 * 60000).toISOString(), timezone: STANDAARD_TIJDZONE, attendees: [],
     })
     let meet = ev

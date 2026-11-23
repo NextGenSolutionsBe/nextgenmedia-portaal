@@ -256,8 +256,8 @@ export async function keurUitgaveGoed(admin: Admin, id: string, inv: { userId: s
 }
 
 /** Melding per vennoot: uitgaven, extra budget en terugkerende uitgaven die op jouw akkoord wachten. */
-export async function uitgavenMeldingVoor(userId: string, admin: Admin): Promise<{ id: string; kind: string; priority: 'high' | 'med'; title: string; date: string | null; href: string }[]> {
-  const data = await laadVennotenData(admin, userId)
+export async function uitgavenMeldingVoor(userId: string, admin: Admin, vooraf?: Promise<VennotenData>): Promise<{ id: string; kind: string; priority: 'high' | 'med'; title: string; date: string | null; href: string }[]> {
+  const data = await (vooraf ?? laadVennotenData(admin, userId))
   if (!data.ik) return []
   const open = openAkkoorden(data, data.ik)
   if (!open.totaal) return []
@@ -430,8 +430,8 @@ export async function tekenRegels(admin: Admin, regelsId: string, inv: { userId:
 }
 
 /** Melding "wacht op jouw handtekening" voor een vennoot die de huidige regels nog niet tekende. */
-export async function regelsMeldingVoor(userId: string, admin: Admin): Promise<{ id: string; kind: string; priority: 'high' | 'med'; title: string; date: string | null; href: string }[]> {
-  const d = await laadVennotenData(admin, userId)
+export async function regelsMeldingVoor(userId: string, admin: Admin, vooraf?: Promise<VennotenData>): Promise<{ id: string; kind: string; priority: 'high' | 'med'; title: string; date: string | null; href: string }[]> {
+  const d = await (vooraf ?? laadVennotenData(admin, userId))
   if (!d.ik || !d.regels) return []
   if (tekenStand(d.regels, d.handtekeningen)[d.ik]) return []
   return [{ id: `vennoot-regels:${d.ik}:${d.regels.versie}`, kind: 'vennoten', priority: 'high', title: `Uitgaven vennoten: de regels (versie ${d.regels.versie}) wachten op jouw handtekening`, date: null, href: '/admin/vennoten?regels=1' }]
