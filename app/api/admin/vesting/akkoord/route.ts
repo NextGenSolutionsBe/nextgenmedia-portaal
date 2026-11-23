@@ -3,18 +3,17 @@ import { revalidatePath } from 'next/cache'
 import { createAdminSupabaseClient, requireAdmin } from '@/lib/supabase/server'
 import { safeMessage } from '@/lib/api-error'
 import { logAudit, requestMeta } from '@/lib/audit'
-import { laadVestingData } from '@/lib/vesting-data-server'
+import { akkoordVan, laadVestingData } from '@/lib/vesting-data-server'
 import { zorgVoorCertificaat } from '@/lib/vesting-certificaat-server'
-import { VENNOOT_NAAM, beschrijfAkkoord, controleerHandtekening, vennootVan, type Akkoord, type Onderwerp } from '@/lib/vesting-akkoord'
+import { VENNOOT_NAAM, beschrijfAkkoord, controleerHandtekening, isOnderwerp, vennootVan, type Akkoord } from '@/lib/vesting-akkoord'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const isOnderwerp = (v: unknown): v is Onderwerp => v === 'contract' || v === 'kost' || v === 'inkomst'
 
 /**
- * Tekenen voor een vestingcontract, een inkomst of een kost. Enkel Marco, Bram
+ * Tekenen voor een vestingcontract, een WAM-contract, een inkomst of een kost. Enkel Marco, Bram
  * en Chiara, elk met het eigen account. De server rekent de cijfers opnieuw uit
  * en weigert als ze niet meer gelijk zijn aan wat de vennoot op het scherm zag:
  * zo hoort een handtekening altijd bij exact die cijfers. Handtekeningen worden
@@ -37,8 +36,8 @@ export async function POST(req: NextRequest) {
     const vennoot = vennootVan(actor.id, data.vennoten)
     if (!vennoot) return NextResponse.json({ error: 'Enkel Marco, Bram en Chiara tekenen, elk met het eigen account.' }, { status: 403 })
 
-    const info = onderwerp === 'contract' ? data.akkoordContract.get(id) : data.akkoordRegistratie.get(id)
-    if (!info || (onderwerp !== 'contract' && info.inhoud.soort !== onderwerp)) return NextResponse.json({ error: 'Niet gevonden.' }, { status: 404 })
+    const info = akkoordVan(data, onderwerp, id)
+    if (!info) return NextResponse.json({ error: 'Niet gevonden.' }, { status: 404 })
     if (info.tekst !== gezien) return NextResponse.json({ error: 'De cijfers zijn intussen gewijzigd. Kijk ze opnieuw na en teken dan.', gewijzigd: true }, { status: 409 })
     if (info.stand.per[vennoot].stand === 'getekend') return NextResponse.json({ ok: true, al: true })
 
@@ -52,7 +51,7 @@ export async function POST(req: NextRequest) {
     if (error && !/duplicate|unique/i.test(error.message)) throw new Error(error.message)
 
     await logAudit({
-      action: 'vesting.getekend', entityType: onderwerp === 'contract' ? 'vesting_contract' : 'vesting_registratie', entityId: id,
+      action: 'vesting.getekend', entityType: onderwerp === 'contract' ? 'vesting_contract' : onderwerp === 'wam' ? 'vesting_wam' : 'vesting_registratie', entityId: id,
       summary: `Vesting: ${VENNOOT_NAAM[vennoot]} tekende · ${beschrijfAkkoord(info.inhoud)}`,
       actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'admin', ip: meta.ip, userAgent: meta.userAgent,
       metadata: { vennoot, inhoud: info.inhoud },

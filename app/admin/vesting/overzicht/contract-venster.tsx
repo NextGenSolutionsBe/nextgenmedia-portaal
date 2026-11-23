@@ -9,7 +9,7 @@ import { leadInfo } from '@/lib/vesting'
 import { GestoptBlok } from './gestopt'
 import { KOST_SOORTEN, kostSoortLabel, type KostSoort, type Vennoot } from '@/lib/vesting-akkoord'
 import type { ContractWeergave } from '@/lib/vesting-weergave'
-import { Akkoord, LeadKiezer, Paneel, Rekensom, RolKnop, api, datumKort, eur, pct, procentUitleg } from './delen'
+import { Akkoord, LeadKiezer, Paneel, Rekensom, RolKnop, api, datumKort, eur, pct, procentUitleg, VerwijderBlok } from './delen'
 import { BewijsKiezer, BewijsLink, FactuurToevoegen, type BewijsWaarde } from './bewijs-kiezer'
 
 const INP = 'input-base'
@@ -76,6 +76,11 @@ export function ContractVenster({ c, vennoten, ik, laatste, onLaatste, onClose, 
         </div>
       }
     >
+      {c.geschrapt && (
+        <p className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-3 text-xs text-gray-700">
+          Geschrapt uit de vesting: dit contract telt niet meer mee. Marco, Bram en Chiara tekenen voor het schrappen; terugzetten kan onderaan.
+        </p>
+      )}
       {c.wachtOpKlant && (
         <p className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600">
           De klant tekende dit contract nog niet. Het telt mee vanaf de ondertekening; de datum komt dan vanzelf uit Contracten.
@@ -122,7 +127,9 @@ export function ContractVenster({ c, vennoten, ik, laatste, onLaatste, onClose, 
             </div>}
       </section>
 
-      {(c.vast === null || c.kostLijnen.length > 0) && <Kosten c={c} onVernieuw={onVernieuw} />}
+      {/* Kosten kan je altijd toevoegen; bij een vastgelegd bedrag (klant vroeger gestopt) telt dat bedrag. */}
+      <Kosten c={c} onVernieuw={onVernieuw} />
+      {c.vast !== null && c.kostLijnen.length === 0 && <p className="-mt-3 text-xs text-gray-500">Bij een vastgelegd bedrag telt dat bedrag. Moet er een kost af, pas dan ook het vastgelegde bedrag aan bij Klant gestopt.</p>}
 
       <section>
         <h3 className="text-sm font-semibold text-gray-900 mb-2">Klant gestopt?</h3>
@@ -138,9 +145,13 @@ export function ContractVenster({ c, vennoten, ik, laatste, onLaatste, onClose, 
 
       <Akkoord onderwerp="contract" id={c.id} akkoord={c.akkoord} certificaat={c.certificaat} vennoten={vennoten} ik={ik} laatste={laatste} onLaatste={onLaatste}
         onGetekend={onVernieuw}
-        uitleg={c.vast !== null
+        uitleg={c.geschrapt ? `Je tekent dat ${c.klant} geschrapt is en niet meer meetelt voor de vesting van Marco.` : c.vast !== null
           ? `Je tekent dat ${eur(c.teltMee, true)} van dit contract meetelt voor de vesting van Marco. De klant stopte vroeger; dit bedrag werd vastgelegd met de beschrijving hierboven.`
           : `Je tekent dat ${eur(c.teltMee, true)} van dit contract meetelt voor de vesting van Marco: ${eur(c.totaal)} min ${eur(c.kostenAftrek)} kosten, ${Math.round(c.factor * 100)}% voor Marco.`} />
+
+      <VerwijderBlok onderwerp="contract" id={c.id} naam={c.klant} akkoord={c.akkoord} geschrapt={c.geschrapt}
+        extra={c.contract_id ? 'Het contract staat daarna weer bij Te beoordelen.' : undefined}
+        onKlaar={onVernieuw} onWeg={() => { onClose(); onVernieuw() }} />
     </Paneel>
   )
 }

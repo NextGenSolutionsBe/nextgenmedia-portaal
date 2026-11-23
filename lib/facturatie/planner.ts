@@ -14,7 +14,7 @@ import { bepaalStatus, ymVan, momentSleutel, magVerplaatsen, verwachtOp, OPEN_ST
  *  - recurring_invoices × maanden (met momentopname per maand als die bestaat)
  *  - (facturen uit een contract zijn gewone invoices met contract_id; de app
  *    leidt niets meer automatisch uit een contract af)
- *  - vesting_wam_termijnen (WAM-portefeuille, nog zonder factuur)
+ *  - (WAM-termijnen niet meer: die staan enkel in Vesting)
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -43,7 +43,9 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
     admin.from('invoices').select('*').gte('invoice_date', van).lte('invoice_date', tot),
     admin.from('recurring_invoices').select('*'),
     admin.from('recurring_invoice_months').select('*').in('month', maanden),
-    admin.from('vesting_wam_termijnen').select('id, wam_id, volgnr, periode, factuurdatum, bedrag_excl, btw_pct, status, betaald_op, invoice_id, notitie').gte('factuurdatum', van).lte('factuurdatum', tot).is('invoice_id', null),
+    // WAM-termijnen staan sinds 4 nov 2026 niet meer in de planner: Marco's WAM-contracten
+    // tellen enkel nog in Vesting (23 nov 2026 teruggezet als kaarten), ze worden hier niet gefactureerd.
+    Promise.resolve({ data: [] as { id: string; wam_id: string; volgnr: number; periode: string; factuurdatum: string; bedrag_excl: number; btw_pct: number; status: string; betaald_op: string | null; invoice_id: string | null; notitie: string | null }[] }),
   ])
   const verantwoordelijke = inst.facturatie.verantwoordelijke_naam || inst.facturatie.clickup_assignee_naam || 'Bram Reinquin'
   const klanten = new Map<string, Klant>(((klantRijen ?? []) as Klant[]).map((k) => [k.id, k]))

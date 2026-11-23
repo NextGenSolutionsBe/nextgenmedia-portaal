@@ -7870,3 +7870,22 @@ CREATE INDEX IF NOT EXISTS team_taken_opvolg_ref_idx ON public.team_taken (opvol
 -- ── Kilometervergoeding: de ritten achter de kilometerregel (23 nov 2026) ───
 -- { ritten: [{ van, naar, km, berekend, heenEnTerug, keer, datum }], tarief, btw, waarvoor }
 ALTER TABLE IF EXISTS public.invoices ADD COLUMN IF NOT EXISTS km_ritten jsonb;
+
+-- ── Vesting: WAM-contracten terug als eigen kaart + schrappen na handtekeningen (23 nov 2026) ──
+-- Een WAM-contract tekenen Marco, Bram en Chiara net als een contract of inkomst
+-- (onderwerp 'wam'). Wat door alle drie getekend werd, verwijder je niet maar
+-- schrap je (geschrapt_op): dat tekenen ze opnieuw.
+DO $$ BEGIN
+  IF to_regclass('public.vesting_handtekeningen') IS NOT NULL THEN
+    ALTER TABLE public.vesting_handtekeningen DROP CONSTRAINT IF EXISTS vesting_handtekeningen_onderwerp_check;
+    ALTER TABLE public.vesting_handtekeningen ADD CONSTRAINT vesting_handtekeningen_onderwerp_check CHECK (onderwerp = ANY (ARRAY['contract'::text, 'kost'::text, 'inkomst'::text, 'wam'::text]));
+  END IF;
+  IF to_regclass('public.vesting_certificaten') IS NOT NULL THEN
+    ALTER TABLE public.vesting_certificaten DROP CONSTRAINT IF EXISTS vesting_certificaten_onderwerp_check;
+    ALTER TABLE public.vesting_certificaten ADD CONSTRAINT vesting_certificaten_onderwerp_check CHECK (onderwerp = ANY (ARRAY['contract'::text, 'kost'::text, 'inkomst'::text, 'wam'::text]));
+  END IF;
+END $$;
+ALTER TABLE IF EXISTS public.vesting_wam ADD COLUMN IF NOT EXISTS geschrapt_op timestamptz;
+ALTER TABLE IF EXISTS public.vesting_wam ADD COLUMN IF NOT EXISTS geschrapt_door text;
+ALTER TABLE IF EXISTS public.vesting_contracten ADD COLUMN IF NOT EXISTS geschrapt_op timestamptz;
+ALTER TABLE IF EXISTS public.vesting_contracten ADD COLUMN IF NOT EXISTS geschrapt_door text;

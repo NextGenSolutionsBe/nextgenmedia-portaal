@@ -4,13 +4,12 @@ import { safeMessage } from '@/lib/api-error'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { laadVestingData } from '@/lib/vesting-data-server'
 import { certificaatBytes, mailCertificaat, zorgVoorCertificaat, type CertificaatRij } from '@/lib/vesting-certificaat-server'
-import type { Onderwerp } from '@/lib/vesting-akkoord'
+import { isOnderwerp } from '@/lib/vesting-akkoord'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const isOnderwerp = (v: unknown): v is Onderwerp => v === 'contract' || v === 'kost' || v === 'inkomst'
 const kort = (r: CertificaatRij) => ({ id: r.id, nummer: r.nummer, volledig_op: r.volledig_op, mail_status: r.mail_status, mail_op: r.mail_op, mail_fout: r.mail_fout })
 
 /**
