@@ -7889,3 +7889,49 @@ ALTER TABLE IF EXISTS public.vesting_wam ADD COLUMN IF NOT EXISTS geschrapt_op t
 ALTER TABLE IF EXISTS public.vesting_wam ADD COLUMN IF NOT EXISTS geschrapt_door text;
 ALTER TABLE IF EXISTS public.vesting_contracten ADD COLUMN IF NOT EXISTS geschrapt_op timestamptz;
 ALTER TABLE IF EXISTS public.vesting_contracten ADD COLUMN IF NOT EXISTS geschrapt_door text;
+
+-- ── Metricool-statistieken voor de klantapp (23 nov 2026) ─────────────────────
+-- De sync (lib/metricool-stats-server.ts, via /api/cron/metricool-stats) haalt
+-- per merk dagcijfers per netwerk en de recente posts op; de klantapp leest
+-- enkel hieruit. Enkel de service role (geen policies).
+CREATE TABLE IF NOT EXISTS public.metricool_statistieken (
+  blog_id text NOT NULL,
+  netwerk text NOT NULL,
+  kpi text NOT NULL,
+  datum date NOT NULL,
+  waarde numeric NOT NULL,
+  bijgewerkt_op timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (blog_id, netwerk, kpi, datum)
+);
+CREATE TABLE IF NOT EXISTS public.metricool_posts (
+  blog_id text NOT NULL,
+  netwerk text NOT NULL,
+  post_id text NOT NULL,
+  gepubliceerd_op timestamptz,
+  soort text,
+  tekst text,
+  link text,
+  beeld text,
+  metrics jsonb NOT NULL DEFAULT '{}'::jsonb,
+  bijgewerkt_op timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (blog_id, netwerk, post_id)
+);
+CREATE INDEX IF NOT EXISTS metricool_posts_datum ON public.metricool_posts (blog_id, gepubliceerd_op DESC);
+CREATE TABLE IF NOT EXISTS public.metricool_sync (
+  blog_id text PRIMARY KEY,
+  laatst_op timestamptz,
+  volledig_op timestamptz,
+  bronnen jsonb NOT NULL DEFAULT '{}'::jsonb,
+  netwerken text[] NOT NULL DEFAULT '{}',
+  fouten jsonb NOT NULL DEFAULT '[]'::jsonb,
+  bezig_sinds timestamptz
+);
+ALTER TABLE public.metricool_statistieken ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.metricool_posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.metricool_sync ENABLE ROW LEVEL SECURITY;
+-- Elke 10 minuten één merk bijwerken (wat ouder is dan 6 uur), met het geheim van de scheduler.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') AND NOT EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'metricool-statistieken') THEN
+    PERFORM cron.schedule('metricool-statistieken', '*/10 * * * *', $job$ SELECT net.http_post( url := 'https://app.nextgenmedia.be/api/cron/metricool-stats', headers := jsonb_build_object( 'Content-Type', 'application/json', 'x-sync-secret', (SELECT waarde FROM public.cron_geheimen WHERE sleutel = 'klantmeetings') ), body := '{}'::jsonb, timeout_milliseconds := 58000 ); $job$);
+  END IF;
+END $$;

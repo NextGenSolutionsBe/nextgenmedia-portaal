@@ -57,6 +57,30 @@ async function mcJson<T>(path: string, query?: Record<string, string | number | 
   return text ? (JSON.parse(text) as T) : ({} as T)
 }
 
+/**
+ * Eén GET zonder te gooien: status en JSON (of null). Voor de statistieken-sync,
+ * die per cijfer wil weten of Metricool het kent (200 met data) of niet (4xx).
+ */
+export async function mcVraag(path: string, query: Record<string, string | number | undefined> = {}): Promise<{ ok: boolean; status: number; json: unknown; tekst: string }> {
+  const res = await mcFetch(path, query)
+  const tekst = await res.text()
+  let json: unknown = null
+  try { json = tekst ? JSON.parse(tekst) : null } catch { json = null }
+  return { ok: res.ok, status: res.status, json, tekst: tekst.slice(0, 300) }
+}
+
+/** De ruwe profielen van de merken (om te zien welke netwerken gekoppeld zijn). */
+export async function brandProfielen(): Promise<Record<string, unknown>[]> {
+  for (const path of ['/admin/simpleProfiles', '/admin/profiles']) {
+    try {
+      const data = await mcJson<unknown>(path)
+      const arr = Array.isArray(data) ? data : (data as { data?: unknown[] })?.data
+      if (Array.isArray(arr) && arr.length) return arr as Record<string, unknown>[]
+    } catch { /* volgende */ }
+  }
+  return []
+}
+
 // ── Merken (brands / blogs) ───────────────────────────────────────────────────
 
 export type MetricoolBrand = { blogId: string; name: string; picture?: string | null }
