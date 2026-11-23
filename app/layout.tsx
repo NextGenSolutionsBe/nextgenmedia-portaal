@@ -21,8 +21,8 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'NextGenMedia Portal',
-  description: 'Operations platform voor NextGenMedia',
+  title: 'NextGen Agency',
+  description: 'Werkomgeving van NextGen Agency, met NextGenMedia en NextGenSolutions',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -78,15 +78,33 @@ export function lijstProbleem(merk: string, listId: string | null, toegang: 'ok'
  * `standaard`: de verantwoordelijke van de lead of opdracht (e-mail of naam);
  * lukt dat niet, dan wie het venster open heeft.
  */
+// ClickUp-leden en toegang tot de lijsten veranderen zelden, maar elke vraag
+// kost 650 ms (de limiet van ClickUp). Tien minuten onthouden per serverinstantie;
+// een mislukte vraag onthouden we niet.
+const OPTIES_MS = 10 * 60_000
+const optiesCache = new Map<string, { tot: number; waarde: Promise<unknown> }>()
+function gecachet<T>(sleutel: string, vraag: () => Promise<T>): Promise<T> {
+  const c = optiesCache.get(sleutel)
+  if (c && c.tot > Date.now()) return c.waarde as Promise<T>
+  const waarde = vraag()
+  optiesCache.set(sleutel, { tot: Date.now() + OPTIES_MS, waarde })
+  waarde.catch(() => optiesCache.delete(sleutel))
+  return waarde
+}
+
 export async function leadTaakOpties(admin: Admin, mijnEmail: string | null = null, standaard: { email?: string | null; naam?: string | null } | null = null): Promise<{ ingesteld: boolean; leden: { id: number; naam: string; email: string }[]; lijsten: { merk: string; naam: string; ok: boolean; probleem: string | null }[]; ik: number | null; standaard: number | null }> {
   const [leden, { data: pipes }] = await Promise.all([
-    listClickupMembers(),
+    gecachet('leden', () => listClickupMembers()),
     admin.from('sales_pipelines').select('key, clickup_list_id'),
   ])
   const p = (pipes ?? []) as { key: string; clickup_list_id: string | null }[]
   const lijsten = await Promise.all(['nextgenmedia', 'nextgensolutions'].map(async (k) => {
     const id = p.find((x) => x.key === k)?.clickup_list_id ?? null
-    const probleem = lijstProbleem(k, id, id ? await lijstToegang(id) : null)
+    // Enkel "ok" onthouden: een probleem met de lijst zie je meteen weer na.
+    const toegang = id
+      ? await gecachet(`lijst:${id}`, async () => { const r = await lijstToegang(id); if (r !== 'ok') throw r; return r }).catch((r) => r as Awaited<ReturnType<typeof lijstToegang>>)
+      : null
+    const probleem = lijstProbleem(k, id, toegang)
     return { merk: k, naam: merkNaam(k), ok: !probleem, probleem }
   }))
   const lijst = leden.map((m) => ({ id: m.id, naam: m.username || m.email, email: m.email })).sort((a, b) => a.naam.localeCompare(b.naam))
@@ -444,11 +462,33 @@ async function perStuk<T, U>(lijst: T[], n: number, f: (x: T) => Promise<U>): Pr
 }
 
 /**
- * De open taken voor het Command Center: teamtaken en taken bij projecten,
- * met status en toegewezene zoals ClickUp ze nu toont. Wat in ClickUp
- * afgesloten werd, valt weg. Lukt ClickUp niet, dan de laatst gekende stand.
+ * Wanneer een taak voor het laatst in ClickUp nagekeken werd, per serverinstantie.
+ * Samen met `status_gelezen_op` (enkel gezet als er iets veranderde) bepaalt
+ * dit of een taak opnieuw nagekeken moet worden.
  */
-export async function takenOverzicht(admin: Admin): Promise<{ taken: TaakInOverzicht[]; statusFout: string | null }> {
+const NAGEKEKEN = new Map<string, number>()
+/** Een stand van minder dan drie minuten oud halen we niet opnieuw op. */
+const VERS_MS = 3 * 60_000
+/** Hoeveel taken één verversronde hoogstens bij ClickUp navraagt (650 ms per vraag, ruim binnen de 30 s). */
+const MAX_PER_RONDE = 25
+
+function moetNakijken(t: TaakRij, nuMs: number): boolean {
+  if (!t.clickup_task_id || t.sync_status !== 'ok') return false
+  const db = t.status_gelezen_op ? Date.parse(t.status_gelezen_op) : 0
+  return Math.max(Number.isFinite(db) ? db : 0, NAGEKEKEN.get(t.id) ?? 0) < nuMs - VERS_MS
+}
+
+/**
+ * De open taken voor het Command Center: teamtaken en taken bij projecten.
+ *
+ * Snel eerst: zonder `live` komt de laatst gekende stand meteen uit de databank
+ * (geen ClickUp), met `teVerversen` = hoeveel taken een nieuwe blik in ClickUp
+ * nodig hebben. Het scherm vraagt die daarna op de achtergrond op (`live`):
+ * dan kijken we enkel die taken na (status en toegewezene zoals ClickUp ze nu
+ * toont; wat in ClickUp afgesloten werd, valt weg). Vroeger gebeurde dat voor
+ * elke taak vóór er iets op het scherm kwam, aan 650 ms per taak.
+ */
+export async function takenOverzicht(admin: Admin, opties: { live?: boolean } = {}): Promise<{ taken: TaakInOverzicht[]; statusFout: string | null; teVerversen: number }> {
   const [team, opdr] = await Promise.all([
     admin.from('team_taken').select('*').is('afgerond_op', null).order('deadline', { ascending: true }).limit(150),
     admin.from('opdracht_taken').select('*').is('afgerond_op', null).order('deadline', { ascending: true }).limit(150),
@@ -471,6 +511,7 @@ export async function takenOverzicht(admin: Admin): Promise<{ taken: TaakInOverz
     if (!t.clickup_task_id || t.sync_status !== 'ok') return t
     try {
       const s = await leesTaakStatus(t.clickup_task_id)
+      NAGEKEKEN.set(t.id, Date.now())
       if (!s) return t.clickup_status_type === 'weg' ? t : bewaarIn(admin, tabel, t.id, { clickup_status: 'verwijderd', clickup_status_type: 'weg', status_gelezen_op: nu() })
       const v = verschil(t, s)
       return v ? bewaarIn(admin, tabel, t.id, { ...v, status_gelezen_op: nu() }) : t
@@ -483,10 +524,21 @@ export async function takenOverzicht(admin: Admin): Promise<{ taken: TaakInOverz
     ...teamRijen.map((t) => ({ t, tabel: 'team_taken' as const })),
     ...opdrRijen.map((t) => ({ t, tabel: 'opdracht_taken' as const })),
   ]
-  const vers = await perStuk(alle, 6, async ({ t, tabel }) => ({ t: await ververs(t, tabel), tabel }))
+  const nuMs = Date.now()
+  const nakijken = new Set(alle.filter(({ t }) => moetNakijken(t, nuMs)).map(({ t }) => t.id))
+  let teVerversen = nakijken.size
+  let vers = alle
+  if (opties.live && nakijken.size) {
+    // De oudste stand eerst; wat niet past, volgt bij de volgende ronde.
+    const ronde = new Set(alle.filter(({ t }) => nakijken.has(t.id))
+      .sort((a, b) => String(a.t.status_gelezen_op ?? '').localeCompare(String(b.t.status_gelezen_op ?? '')))
+      .slice(0, MAX_PER_RONDE).map(({ t }) => t.id))
+    vers = await perStuk(alle, 6, async ({ t, tabel }) => ({ t: ronde.has(t.id) ? await ververs(t, tabel) : t, tabel }))
+    teVerversen = nakijken.size - ronde.size
+  }
   const taken: TaakInOverzicht[] = vers
     .filter(({ t }) => !taakIsAf(t))
     .map(({ t, tabel }) => ({ ...t, soort: tabel === 'team_taken' ? 'team' as const : 'opdracht' as const, project: t.opdracht_id ? projecten.get(t.opdracht_id) ?? null : null }))
     .sort((a, b) => String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')))
-  return { taken, statusFout }
+  return { taken, statusFout, teVerversen }
 }

@@ -56,22 +56,27 @@ export async function laadMomenten(admin: Admin, van: string, tot: string, vanda
   for (const r of (recurring ?? []) as { contract_id?: string | null }[]) if (r.contract_id) contractIds.add(r.contract_id)
   const contractTitel = new Map<string, string>()
   const contractStatus = new Map<string, string | null>()
-  if (contractIds.size) {
-    try {
-      const { data } = await admin.from('contracts').select('id, title, status').in('id', [...contractIds])
-      for (const c of (data ?? []) as { id: string; title: string | null; status: string | null }[]) { contractTitel.set(c.id, c.title ?? ''); contractStatus.set(c.id, c.status ?? null) }
-    } catch { /* geen titels */ }
-  }
-  /** Status van het contract; onbekend (verwijderd contract, fout bij laden) = geen beperking. */
-  const statusVan = (id: string | null | undefined) => (id ? contractStatus.get(id) ?? null : null)
   const wamIds = [...new Set(((termijnen ?? []) as { wam_id: string }[]).map((t) => t.wam_id))]
   const wamInfo = new Map<string, { nr: string; klant: string }>()
-  if (wamIds.length) {
-    try {
-      const { data } = await admin.from('vesting_wam').select('id, nr, klant').in('id', wamIds)
-      for (const w of (data ?? []) as { id: string; nr: string; klant: string }[]) wamInfo.set(w.id, { nr: w.nr, klant: w.klant })
-    } catch { /* geen WAM-info */ }
-  }
+  // Contracten en WAM-info tegelijk (ze hangen niet van elkaar af).
+  await Promise.all([
+    (async () => {
+      if (!contractIds.size) return
+      try {
+        const { data } = await admin.from('contracts').select('id, title, status').in('id', [...contractIds])
+        for (const c of (data ?? []) as { id: string; title: string | null; status: string | null }[]) { contractTitel.set(c.id, c.title ?? ''); contractStatus.set(c.id, c.status ?? null) }
+      } catch { /* geen titels */ }
+    })(),
+    (async () => {
+      if (!wamIds.length) return
+      try {
+        const { data } = await admin.from('vesting_wam').select('id, nr, klant').in('id', wamIds)
+        for (const w of (data ?? []) as { id: string; nr: string; klant: string }[]) wamInfo.set(w.id, { nr: w.nr, klant: w.klant })
+      } catch { /* geen WAM-info */ }
+    })(),
+  ])
+  /** Status van het contract; onbekend (verwijderd contract, fout bij laden) = geen beperking. */
+  const statusVan = (id: string | null | undefined) => (id ? contractStatus.get(id) ?? null : null)
 
   const uit: Moment[] = []
 

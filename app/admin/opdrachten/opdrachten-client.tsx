@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2, Plus, Search, KanbanSquare, LayoutGrid, List, Sparkles, X, FileSpreadsheet, Settings2, SlidersHorizontal } from 'lucide-react'
 import {
@@ -83,7 +83,11 @@ export function OpdrachtenClient() {
   useEffect(() => { void laad() }, [laad])
   // Mail-opvolging per kaart (wat er na een meeting, offerte of contract nog moet gebeuren).
   const [opvolging, setOpvolging] = useState<Record<string, { dringend: boolean; tekst: string; telt: boolean }>>({})
+  // Meteen bij het openen (tegelijk met het bord) en opnieuw na elke wijziging,
+  // maar niet nog eens zodra het bord de eerste keer binnenkomt.
+  const opvolgRonde = useRef(0)
   useEffect(() => {
+    if (++opvolgRonde.current === 2) return
     fetch('/api/admin/mail-opvolging?lijst=1', { cache: 'no-store' }).then((r) => r.json()).then((j: { items?: { opdracht_id: string; dringend: boolean; tekst: string; telt: boolean }[] }) => {
       setOpvolging(Object.fromEntries((j.items ?? []).map((x) => [x.opdracht_id, { dringend: x.dringend, tekst: x.tekst, telt: x.telt }])))
     }).catch(() => { /* kaartjes zijn een extra */ })

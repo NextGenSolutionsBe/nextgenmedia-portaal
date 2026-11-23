@@ -1,3 +1,4 @@
+import { waitUntil } from '@vercel/functions'
 import { safeMessage } from '@/lib/api-error'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient, requireStaff } from '@/lib/supabase/server'
@@ -179,6 +180,19 @@ async function laatsteOffertes(admin: Admin): Promise<Map<string, OfferteOpKaart
   return uit
 }
 
+/** Laatste keer dat het vangnet liep in deze serverinstantie. */
+let vangnetOp = 0
+function vangnet(admin: Admin): void {
+  if (Date.now() - vangnetOp < 2 * 60_000) return
+  vangnetOp = Date.now()
+  waitUntil((async () => {
+    // Elk contract heeft een kaart: wat er sinds de vorige keer bijkwam, krijgt er nu een.
+    await zorgVoorContractKaarten(admin).catch((e) => console.warn('[opdrachten] contractkaarten:', e instanceof Error ? e.message : e))
+    // Elke offerte heeft een kaart in Offerte gestuurd.
+    await zorgVoorOfferteKaarten(admin).catch((e) => console.warn('[opdrachten] offertekaarten:', e instanceof Error ? e.message : e))
+  })())
+}
+
 async function leesContracten(admin: Admin, ids: string[]): Promise<{ data: unknown[] | null }> {
   const met = await admin.from('contracts').select('id, title, status, klant_geopend_op').in('id', ids)
   if (!met.error) return met
@@ -190,10 +204,11 @@ export async function GET() {
     const ik = await requireStaff()
     if (!ik) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
     const admin = createAdminSupabaseClient()
-    // Elk contract heeft een kaart: wat er sinds de vorige keer bijkwam, krijgt er nu een.
-    await zorgVoorContractKaarten(admin).catch((e) => console.warn('[opdrachten] contractkaarten:', e instanceof Error ? e.message : e))
-    // Elke offerte heeft een kaart in Offerte gestuurd.
-    await zorgVoorOfferteKaarten(admin).catch((e) => console.warn('[opdrachten] offertekaarten:', e instanceof Error ? e.message : e))
+    // Vangnet: elk contract en elke offerte heeft een kaart. Dat gebeurt al bij het
+    // aanmaken; dit vult enkel aan wat er toch tussendoor glipte. Het bord wacht
+    // er niet meer op (dat kostte per contract en offerte een paar rondes na
+    // elkaar): het loopt na het antwoord, hoogstens om de twee minuten.
+    vangnet(admin)
 
     // Vóór de statusflow-migratie bestaan de koppelkolommen niet: dan valt de
     // selectie terug op de basiskolommen, zodat het scherm blijft werken.
@@ -213,7 +228,7 @@ export async function GET() {
     const rijen = (data ?? []) as Rij[]
 
     const leadIds = [...new Set(rijen.map((r) => r.lead_id).filter(Boolean))] as string[]
-    const [{ data: klantRijen }, { data: contractRijen }, { data: factuurRijen }, koppelingen, notities, { data: leadRijen }] = await Promise.all([
+    const [{ data: klantRijen }, { data: contractRijen }, { data: factuurRijen }, koppelingen, notities, { data: leadRijen }, offerteVan] = await Promise.all([
       admin.from('clients').select('id, company_name, contact_name, email, sales_verantwoordelijke, btw_nummer').is('archived_at', null).order('company_name'),
       // Keuzelijsten voor het koppelen: recente contracten en facturen.
       admin.from('contracts').select('id, title, status, client_id, created_at').neq('status', 'template').order('created_at', { ascending: false }).limit(400),
@@ -221,8 +236,8 @@ export async function GET() {
       nieuweKolommen ? laadKoppelingen(admin, rijen) : Promise.resolve(new Map<string, Koppelingen>()),
       notitieSamenvatting(admin, rijen.map((r) => r.id)).catch(() => new Map()),
       leadIds.length ? admin.from('sales_leads').select('id, leadbron').in('id', leadIds) : Promise.resolve({ data: [] }),
+      laatsteOffertes(admin),
     ])
-    const offerteVan = await laatsteOffertes(admin)
     const facturatie = nieuweKolommen ? await laadFacturatie(admin, rijen, koppelingen) : new Map<string, Facturatie>()
     const leadbronVan = new Map(((leadRijen ?? []) as { id: string; leadbron: string | null }[]).map((l) => [l.id, l.leadbron]))
 

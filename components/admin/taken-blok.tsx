@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { ListTodo, Plus, Loader2, Check, ExternalLink, X, RotateCcw, AlertTriangle, PenLine, ChevronDown, ChevronUp } from 'lucide-react'
@@ -51,12 +51,30 @@ export function TakenBlok() {
   const [nieuw, setNieuw] = useState(false)
   const [bezig, setBezig] = useState<string | null>(null)
 
-  const laad = useCallback(async () => {
-    try {
-      const j = await api<{ taken: Taak[]; statusFout: string | null; teTekenen?: TeTekenenItem[] }>()
+  // Elke nieuwe lezing krijgt een nummer: een trager antwoord van de achtergrondronde
+  // mag nooit over een nieuwere stand heen schrijven (bv. net afgevinkt).
+  const lezing = useRef(0)
+  type Antwoord = { taken: Taak[]; statusFout: string | null; teTekenen?: TeTekenenItem[]; teVerversen?: number }
+  // Eerst meteen de laatst gekende stand, daarna op de achtergrond de taken
+  // waarvan de stand al wat ouder is opnieuw in ClickUp nakijken.
+  const vernieuw = useCallback(async (nr: number) => {
+    for (let ronde = 0; ronde < 3; ronde++) {
+      let j: Antwoord
+      try { j = await api<Antwoord>(undefined, '?vernieuw=1') } catch { return }
+      if (lezing.current !== nr) return
       setTaken(j.taken); setStatusFout(j.statusFout); setTeTekenen(j.teTekenen ?? [])
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Taken laden mislukt'); setTaken([]) }
+      if (!j.teVerversen) return
+    }
   }, [])
+  const laad = useCallback(async () => {
+    const nr = ++lezing.current
+    try {
+      const j = await api<Antwoord>()
+      if (lezing.current !== nr) return
+      setTaken(j.taken); setStatusFout(j.statusFout); setTeTekenen(j.teTekenen ?? [])
+      if (j.teVerversen) void vernieuw(nr)
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Taken laden mislukt'); setTaken([]) }
+  }, [vernieuw])
   useEffect(() => { void laad() }, [laad])
   useEffect(() => { api<Opties>(undefined, '?opties=1').then(setOpties).catch(() => setOpties(null)) }, [])
 

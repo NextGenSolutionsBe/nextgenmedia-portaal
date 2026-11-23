@@ -44,10 +44,14 @@ export async function notitiesVan(admin: Admin, opdrachtId: string): Promise<Not
 export async function notitieSamenvatting(admin: Admin, ids: string[]): Promise<Map<string, { aantal: number; laatste: Pick<Notitie, 'tekst' | 'auteur_naam' | 'auteur_email' | 'created_at'> | null }>> {
   const uit = new Map<string, { aantal: number; laatste: Pick<Notitie, 'tekst' | 'auteur_naam' | 'auteur_email' | 'created_at'> | null }>()
   if (!ids.length) return uit
+  // Enkel notities van mensen tellen mee (systeemregels niet), dus enkel die ophalen;
+  // de stukken van 150 kaarten tegelijk in plaats van na elkaar.
+  const stukken: string[][] = []
+  for (let i = 0; i < ids.length; i += 150) stukken.push(ids.slice(i, i + 150))
+  const antwoorden = await Promise.all(stukken.map((stuk) => admin.from('opdracht_notities').select('opdracht_id, tekst, soort, auteur_naam, auteur_email, created_at')
+    .in('opdracht_id', stuk).eq('soort', 'notitie').order('created_at', { ascending: false }).limit(5000)))
   const rijen: Notitie[] = []
-  for (let i = 0; i < ids.length; i += 150) {
-    const { data, error } = await admin.from('opdracht_notities').select('opdracht_id, tekst, soort, auteur_naam, auteur_email, created_at')
-      .in('opdracht_id', ids.slice(i, i + 150)).order('created_at', { ascending: false }).limit(5000)
+  for (const { data, error } of antwoorden) {
     if (error) { if (MIST.test(error.message)) return uit; throw new Error(error.message) }
     rijen.push(...((data ?? []) as Notitie[]))
   }

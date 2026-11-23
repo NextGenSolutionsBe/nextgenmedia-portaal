@@ -244,14 +244,17 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
   // Telbolletjes. Los van de rest opgehaald: haperen ze, dan staat het menu er
   // gewoon zonder — een bolletje is nooit de reden om navigatie op te houden.
   const [badges, setBadges] = useState<Record<string, number>>({})
+  // Enkel opvragen als een menu-item een bolletje kan hebben (nu geen enkel).
+  const heeftBolletjes = SECTIONS.some((sectie) => sectie.items.some((it) => !!it.badge))
   useEffect(() => {
+    if (!heeftBolletjes) return
     let levend = true
     fetch('/api/admin/badges')
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => { if (levend && j) setBadges(j) })
       .catch(() => { /* stil */ })
     return () => { levend = false }
-  }, [])
+  }, [heeftBolletjes])
 
   // Werknemer ziet enkel toegestane modules; admin (allowedModules undefined) ziet alles.
   const padNu = usePathname() ?? ''
@@ -343,7 +346,7 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
           <div className="flex items-center gap-3">
             <Logo className="h-8 w-8 shrink-0" />
             <div className="flex-1 min-w-0">
-              <div className="text-[15px] font-medium text-gray-900 leading-tight tracking-tight">NextGenMedia</div>
+              <div className="text-[15px] font-medium text-gray-900 leading-tight tracking-tight">NextGen Agency</div>
               <div className="text-[11px] text-gray-400">Admin</div>
             </div>
             {/* Refresh */}

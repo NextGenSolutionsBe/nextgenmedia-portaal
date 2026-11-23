@@ -1,10 +1,10 @@
 import Link from 'next/link'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
-import { buildNotifications } from '@/lib/notifications'
+import { FEATURES } from '@/lib/features'
 import { Newspaper, Globe, ListChecks, ArrowRight, Sun } from 'lucide-react'
 
 // "Vandaag" — geen cijfers, enkel acties. De dagelijkse werkplek bovenaan het
-// Command Center. Afgeleid uit dezelfde bron als het notificatiecentrum.
+// Command Center. Dezelfde tabellen als het notificatiecentrum, enkel geteld.
 //
 // `modules` = de rechten van de ingelogde werknemer (null = admin, ziet alles).
 // Elke regel hangt aan de module waar hij naartoe linkt: wie de module niet
@@ -12,25 +12,24 @@ import { Newspaper, Globe, ListChecks, ArrowRight, Sun } from 'lucide-react'
 export async function TodayPanel({ modules = null }: { modules?: string[] | null }) {
   const maySee = (key: string) => modules === null || modules.includes(key)
 
-  // Heeft deze persoon geen enkele module die hier iets kan opleveren, dan
-  // halen we de signalen ook niet op.
-  const notifModules = ['blogs', 'content']
-  const notifs = notifModules.some(maySee) ? await buildNotifications() : []
-  const count = (kind: string) => notifs.filter((n) => n.kind === kind).length
-
-  let openTasks = 0
-  if (maySee('clients')) {
-    try {
-      const admin = createAdminSupabaseClient()
-      const { count: c } = await admin.from('client_tasks').select('id', { count: 'exact', head: true }).neq('status', 'done')
-      openTasks = c ?? 0
-    } catch { /* */ }
+  // Enkel drie tellingen, tegelijk. Vroeger liep hier het hele notificatiecentrum
+  // (een twintigtal lezingen plus de opslagtelling) om twee getallen te tonen.
+  // Websitefeedback = nieuwe aanvragen; het onderhoud staat al bij "Op te volgen".
+  const admin = createAdminSupabaseClient()
+  const tel = async (aan: boolean, vraag: () => PromiseLike<{ count: number | null }>): Promise<number> => {
+    if (!aan) return 0
+    try { return (await vraag()).count ?? 0 } catch { return 0 }
   }
+  const [blogs, feedback, openTasks] = await Promise.all([
+    tel(FEATURES.blogs && maySee('blogs'), () => admin.from('blogs').select('id', { count: 'exact', head: true }).eq('status', 'goedgekeurd')),
+    tel(maySee('content'), () => admin.from('webdesign_change_requests').select('id', { count: 'exact', head: true }).eq('status', 'new')),
+    tel(maySee('clients'), () => admin.from('client_tasks').select('id', { count: 'exact', head: true }).neq('status', 'done')),
+  ])
 
   // Facturen en contracten staan al bij "Op te volgen" (met namen); hier niet dubbel.
   const rows = [
-    { icon: Newspaper, n: count('blog'), label: 'blogs klaar voor publicatie', href: '/admin/blog-calendar', accent: 'text-green-600', module: 'blogs' },
-    { icon: Globe, n: count('website'), label: 'websitefeedback', href: '/admin/services/website', accent: 'text-blue-600', module: 'content' },
+    { icon: Newspaper, n: blogs, label: 'blogs klaar voor publicatie', href: '/admin/blog-calendar', accent: 'text-green-600', module: 'blogs' },
+    { icon: Globe, n: feedback, label: 'websitefeedback', href: '/admin/services/website', accent: 'text-blue-600', module: 'content' },
     { icon: ListChecks, n: openTasks, label: 'taken afwerken', href: '/admin/clients', accent: 'text-gray-700', module: 'clients' },
   ].filter((r) => r.n > 0 && maySee(r.module))
 

@@ -22,16 +22,21 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   // Centrale instellingen voor de zijbalk (zichtbaarheid per tabblad, rol,
   // persoonlijke voorkeuren). Faalt dit, dan toont de zijbalk alles zoals vroeger.
-  const [instellingen, persoon] = await Promise.all([leesInstellingen(), leesPersoon()])
-  const verborgenPersoonlijk = persoon ? await leesVoorkeuren(persoon.userId) : []
-  const rol = persoon?.rol ?? (role === 'admin' ? 'hoofdbeheerder' : 'medewerker')
+  // Alles tegelijk: elke lezing apart wachten kostte vier rondes na elkaar.
   // Wie ook een personeelsdossier heeft (bv. een student met modules), krijgt
   // "Mijn werk": inklokken, planning en beschikbaarheid op dezelfde login.
-  let mijnWerk = false
-  try {
-    const { data: dossier } = await createAdminSupabaseClient().from('personeel').select('id, actief').eq('auth_user_id', ik.userId).maybeSingle()
-    mijnWerk = !!dossier && dossier.actief !== false
-  } catch { mijnWerk = false }
+  const dossierLezing = (async () => {
+    try {
+      const { data } = await createAdminSupabaseClient().from('personeel').select('id, actief').eq('auth_user_id', ik.userId).maybeSingle()
+      return data as { id: string; actief: boolean | null } | null
+    } catch { return null }
+  })()
+  const [instellingen, persoon, voorkeuren, dossier] = await Promise.all([
+    leesInstellingen(), leesPersoon(), leesVoorkeuren(ik.userId), dossierLezing,
+  ])
+  const verborgenPersoonlijk = persoon ? voorkeuren : []
+  const rol = persoon?.rol ?? (role === 'admin' ? 'hoofdbeheerder' : 'medewerker')
+  const mijnWerk = !!dossier && dossier.actief !== false
   const toonInstellingen = role === 'admin' || (!!persoon && moduleBeschikbaar(instellingen, persoon, MODULE_INSTELLINGEN_KEY) && magActie(instellingen, persoon, MODULE_INSTELLINGEN_KEY, 'instellingen'))
 
   return (

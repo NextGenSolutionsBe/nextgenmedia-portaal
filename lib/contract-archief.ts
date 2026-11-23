@@ -111,7 +111,7 @@ async function laadDossier(admin: Admin, contractId: string, bron: string, versi
     bron,
     versie,
     gearchiveerdOp: new Date().toISOString(),
-    app: `NextGenMedia Portal · ${baseUrl()}`,
+    app: `NextGen Agency · ${baseUrl()}`,
   }
 }
 
@@ -176,7 +176,7 @@ export async function maakCertificaatPdf(d: Dossier, stijl: CertificaatHuisstijl
   const pdf = await PDFDocument.create()
   pdf.setTitle(`Ondertekeningscertificaat ${d.certificaatNr ?? d.referentie}`)
   pdf.setAuthor(d.bedrijfsnaam ?? 'NextGenMedia')
-  pdf.setCreator('NextGenMedia Portal')
+  pdf.setCreator('NextGen Agency')
   pdf.setSubject(`${d.titel} — ${STATUS_ONDERTEKEND}`)
   pdf.setKeywords([d.referentie, d.certificaatNr ?? '', 'ondertekeningscertificaat'].filter(Boolean))
   const font = await pdf.embedFont(StandardFonts.Helvetica)
@@ -462,7 +462,7 @@ export async function haalBeideDocumenten(admin: Admin, contractId: string): Pro
 export async function combineerPdfs(contract: Uint8Array, certificaat: Uint8Array, titel: string): Promise<Uint8Array> {
   const uit = await PDFDocument.create()
   uit.setTitle(titel)
-  uit.setCreator('NextGenMedia Portal')
+  uit.setCreator('NextGen Agency')
   for (const bron of [contract, certificaat]) {
     const doc = await PDFDocument.load(bron, { ignoreEncryption: true })
     const paginas = await uit.copyPages(doc, doc.getPageIndices())

@@ -88,7 +88,7 @@ function LoginForm() {
 
       {geenToegang && !error && (
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          Dit account is wel bekend, maar heeft nog geen toegang tot een portaal. Neem contact op met NextGenMedia om je toegang te laten activeren.
+          Dit account is wel bekend, maar heeft nog geen toegang tot een portaal. Neem contact op met NextGen Agency om je toegang te laten activeren.
         </div>
       )}
       {error && (
@@ -116,7 +116,7 @@ export default function LoginPage() {
         {/* Logo */}
         <div className="text-center mb-8">
           <Logo className="inline-flex h-11 w-11 rounded-lg mb-4" />
-          <h1 className="text-xl font-semibold text-gray-900">NextGenMedia</h1>
+          <h1 className="text-xl font-semibold text-gray-900">NextGen Agency</h1>
           <p className="text-sm text-gray-500 mt-1">Portaal toegang</p>
         </div>
 
@@ -127,7 +127,7 @@ export default function LoginPage() {
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-6">
-          NextGenMedia © {new Date().getFullYear()}
+          NextGen Agency © {new Date().getFullYear()}
         </p>
       </div>
     </div>
