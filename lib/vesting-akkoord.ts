@@ -12,7 +12,7 @@
  * het scherm (stand per contract).
  */
 
-import type { ContractBerekend, WamKost, WamRij } from './vesting'
+import type { ContractBerekend, WamKost, WamRij, WamRijBerekend } from './vesting'
 import { leadInfo, leadSoortVan, type LeadSoort } from './vesting'
 import { leesGetal } from './getal'
 
@@ -196,6 +196,30 @@ export type ContractAkkoord = {
    */
   vast?: number
   uitleg?: string
+  /** Uit de vesting gehaald nadat alle drie tekenden: telt niet meer mee (enkel aanwezig als het zo is). */
+  geschrapt?: true
+}
+/**
+ * Een WAM-contract: Marco's klanten van vóór de samenwerking. Wat er van die
+ * klant binnenkwam (de betaalde termijnen) telt zoals de WAM-afspraak: elke
+ * €5.000 netto = 1%, tot 5%. Een termijn als betaald aanduiden verandert de
+ * cijfers, dus dan tekent iedereen opnieuw.
+ */
+export type WamAkkoord = {
+  soort: 'wam'
+  nr: string
+  klant: string
+  omschrijving: string | null
+  contractwaarde: number
+  verloop: 'loopt' | 'voltooid' | 'stopgezet' | 'niet_betaler'
+  /** Wat er al binnen was vóór de termijnen in de app liepen (enkel als het er is). */
+  historiek?: number
+  termijnen: { periode: string; bedrag: number; betaald: boolean; geannuleerd?: true }[]
+  /** Effectief ontvangen: historiek + betaalde termijnen. */
+  ontvangen: number
+  /** Wat er voor Marco meetelt (0 als gestopt, niet-betaler of geschrapt). */
+  telt_mee: number
+  geschrapt: boolean
 }
 export type RegistratieAkkoord = {
   soort: RegistratieSoort; omschrijving: string; datum: string; bedrag: number
@@ -203,14 +227,14 @@ export type RegistratieAkkoord = {
   /** Het bewijsstuk: naam en SHA-256, zodat de handtekening ook over exact dat bestand gaat. */
   bewijs?: { naam: string; sha256: string }
 }
-export type Akkoord = ContractAkkoord | RegistratieAkkoord
+export type Akkoord = ContractAkkoord | RegistratieAkkoord | WamAkkoord
 
 type ContractVoorAkkoord = Pick<ContractBerekend,
   'klant' | 'nr' | 'totaal' | 'kostenAftrek' | 'netto' | 'appointment_door_marco' | 'closed_door_marco' | 'factor' | 'status' | 'betaald_bij_stop' | 'opBetaaldBedrag'> & {
   lead_soort?: LeadSoort | string | null; opVastBedrag?: boolean; meetellend_vast?: number | null; meetellend_uitleg?: string | null
 }
 
-export function contractAkkoord(c: ContractVoorAkkoord, lijnen: KostLijn[], titel: string | null = null): ContractAkkoord {
+export function contractAkkoord(c: ContractVoorAkkoord, lijnen: KostLijn[], titel: string | null = null, geschrapt = false): ContractAkkoord {
   const verloop: ContractAkkoord['verloop'] = c.status === 'stopgezet' ? 'stopgezet' : c.status === 'niet_betaler' ? 'niet_betaler' : 'loopt'
   const betaald = c.opBetaaldBedrag && c.betaald_bij_stop !== null && c.betaald_bij_stop !== undefined ? rond(Number(c.betaald_bij_stop)) : null
   const basis = verloop === 'niet_betaler' ? 0 : betaald !== null ? betaald : verloop === 'stopgezet' ? 0 : (c.netto ?? 0)
@@ -232,8 +256,25 @@ export function contractAkkoord(c: ContractVoorAkkoord, lijnen: KostLijn[], tite
     ...(leadSoortVan(c.lead_soort) ? { lead: leadSoortVan(c.lead_soort) as LeadSoort } : {}),
     deel_pct: rond(c.factor * 100),
     verloop, betaald_bij_stop: betaald,
-    telt_mee: vast !== null ? vast : rond(basis * c.factor),
+    telt_mee: geschrapt ? 0 : vast !== null ? vast : rond(basis * c.factor),
     ...(vast !== null ? { vast, uitleg: String(c.meetellend_uitleg ?? '').trim() } : {}),
+    ...(geschrapt ? { geschrapt: true as const } : {}),
+  }
+}
+
+type WamVoorAkkoord = Pick<WamRijBerekend, 'nr' | 'klant' | 'omschrijving' | 'contractwaarde' | 'status' | 'netto_ontvangen' | 'termijnen' | 'ontvangen' | 'meetellend'>
+
+export function wamAkkoord(r: WamVoorAkkoord, geschrapt = false): WamAkkoord {
+  const verloop: WamAkkoord['verloop'] = r.status === 'stopgezet' ? 'stopgezet' : r.status === 'niet_betaler' ? 'niet_betaler' : r.status === 'voltooid' ? 'voltooid' : 'loopt'
+  const historiek = rond(Number(r.netto_ontvangen) || 0)
+  return {
+    soort: 'wam', nr: r.nr, klant: r.klant.trim(), omschrijving: r.omschrijving?.trim() || null,
+    contractwaarde: rond(Number(r.contractwaarde) || 0), verloop,
+    ...(historiek > 0 ? { historiek } : {}),
+    termijnen: [...r.termijnen]
+      .sort((a, b) => a.periode.localeCompare(b.periode) || a.volgnr - b.volgnr)
+      .map((t) => ({ periode: t.periode, bedrag: rond(Number(t.bedrag_excl) || 0), betaald: t.status === 'betaald', ...(t.status === 'geannuleerd' ? { geannuleerd: true as const } : {}) })),
+    ontvangen: rond(r.ontvangen), telt_mee: geschrapt ? 0 : rond(r.meetellend), geschrapt,
   }
 }
 
@@ -270,7 +311,8 @@ export function inhoudTekst(a: Akkoord): string {
 
 // ── De stand van de handtekeningen ──────────────────────────────────────────
 
-export type Onderwerp = 'contract' | 'kost' | 'inkomst'
+export type Onderwerp = 'contract' | 'kost' | 'inkomst' | 'wam'
+export const isOnderwerp = (v: unknown): v is Onderwerp => v === 'contract' || v === 'kost' || v === 'inkomst' || v === 'wam'
 export type Handtekening = {
   id: string; onderwerp: Onderwerp; onderwerp_id: string; vennoot: Vennoot
   naam: string | null; getekend_op: string; inhoud_tekst: string
@@ -323,6 +365,11 @@ export function laatsteVolledigeVersie(handtekeningen: Pick<Handtekening, 'venno
 
 const eur = (n: number | null) => (n === null ? '—' : `€${n.toLocaleString('nl-BE', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`)
 const jaNee = (b: boolean) => (b ? 'ja' : 'nee')
+const VERLOOP_WAM: Record<WamAkkoord['verloop'], string> = { loopt: 'loopt', voltooid: 'voltooid', stopgezet: 'gestopt', niet_betaler: 'niet-betaler' }
+const MAANDEN = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec']
+/** "2026-08" → "aug 2026". */
+export const maandTekst = (p: string) => (/^\d{4}-\d{2}$/.test(p) ? `${MAANDEN[Number(p.slice(5, 7)) - 1]} ${p.slice(0, 4)}` : p)
+const betaaldTekst = (a: WamAkkoord) => { const n = a.termijnen.filter((t) => !t.geannuleerd); return `${n.filter((t) => t.betaald).length} van ${n.length} termijnen betaald` }
 
 /** Wat is er veranderd sinds de vorige handtekening? In gewone woorden. */
 export function wijzigingen(vorigeTekst: string | null, huidig: Akkoord): string[] {
@@ -331,7 +378,31 @@ export function wijzigingen(vorigeTekst: string | null, huidig: Akkoord): string
   try { oud = JSON.parse(vorigeTekst) as Akkoord } catch { return ['De cijfers zijn gewijzigd.'] }
   if (oud.soort !== huidig.soort) return ['De cijfers zijn gewijzigd.']
   const uit: string[] = []
-  if (huidig.soort !== 'contract' && oud.soort !== 'contract') {
+  if (huidig.soort === 'wam' && oud.soort === 'wam') {
+    if (!!oud.geschrapt !== huidig.geschrapt) uit.push(huidig.geschrapt ? 'Geschrapt' : 'Teruggezet')
+    if (oud.contractwaarde !== huidig.contractwaarde) uit.push(`Contractwaarde ${eur(oud.contractwaarde)} → ${eur(huidig.contractwaarde)}`)
+    if (oud.verloop !== huidig.verloop) uit.push(`Verloop: ${VERLOOP_WAM[oud.verloop]} → ${VERLOOP_WAM[huidig.verloop]}`)
+    if (oud.klant !== huidig.klant) uit.push('Klantnaam aangepast')
+    if ((oud.omschrijving ?? null) !== huidig.omschrijving) uit.push('Omschrijving aangepast')
+    if ((oud.historiek ?? 0) !== (huidig.historiek ?? 0)) uit.push(`Al ontvangen vóór de app ${eur(oud.historiek ?? 0)} → ${eur(huidig.historiek ?? 0)}`)
+    const sleutel = (t: WamAkkoord['termijnen'][number], i: number) => `${t.periode}#${i}`
+    const perPeriode = (l: WamAkkoord['termijnen']) => { const tel = new Map<string, number>(); return new Map(l.map((t) => { const i = tel.get(t.periode) ?? 0; tel.set(t.periode, i + 1); return [sleutel(t, i), t] as const })) }
+    const o = perPeriode(oud.termijnen ?? []), h = perPeriode(huidig.termijnen)
+    for (const [k, t] of Array.from(h.entries())) {
+      const v = o.get(k)
+      const maand = maandTekst(t.periode)
+      if (!v) uit.push(`Termijn ${maand} toegevoegd (${eur(t.bedrag)})`)
+      else {
+        if (v.betaald !== t.betaald) uit.push(`Termijn ${maand} ${t.betaald ? 'betaald' : 'niet meer betaald'} (${eur(t.bedrag)})`)
+        if (v.bedrag !== t.bedrag) uit.push(`Termijn ${maand}: ${eur(v.bedrag)} → ${eur(t.bedrag)}`)
+        if (!!v.geannuleerd !== !!t.geannuleerd) uit.push(`Termijn ${maand} ${t.geannuleerd ? 'geannuleerd' : 'niet meer geannuleerd'}`)
+      }
+    }
+    for (const [k, t] of Array.from(o.entries())) if (!h.has(k)) uit.push(`Termijn ${maandTekst(t.periode)} weggehaald`)
+    if (!uit.length && oud.telt_mee !== huidig.telt_mee) uit.push(`Telt mee ${eur(oud.telt_mee)} → ${eur(huidig.telt_mee)}`)
+    return uit.length ? uit : ['De cijfers zijn gewijzigd.']
+  }
+  if ((huidig.soort === 'inkomst' || huidig.soort === 'kost') && (oud.soort === 'inkomst' || oud.soort === 'kost')) {
     const o = oud as RegistratieAkkoord
     if (!!o.geschrapt !== huidig.geschrapt) uit.push(huidig.geschrapt ? 'Geschrapt' : 'Teruggezet')
     if (o.bedrag !== huidig.bedrag) uit.push(`Bedrag ${eur(o.bedrag)} → ${eur(huidig.bedrag)}`)
@@ -342,6 +413,7 @@ export function wijzigingen(vorigeTekst: string | null, huidig: Akkoord): string
     if ((o.bewijs?.sha256 ?? null) !== (huidig.bewijs?.sha256 ?? null)) uit.push(o.bewijs ? 'Document vervangen' : 'Document toegevoegd')
   }
   if (huidig.soort === 'contract' && oud.soort === 'contract') {
+    if (!!oud.geschrapt !== !!huidig.geschrapt) uit.push(huidig.geschrapt ? 'Geschrapt uit de vesting' : 'Teruggezet')
     if (oud.contractwaarde !== huidig.contractwaarde) uit.push(`Contractwaarde ${eur(oud.contractwaarde)} → ${eur(huidig.contractwaarde)}`)
     if (oud.kosten_totaal !== huidig.kosten_totaal) uit.push(`Kosten ${eur(oud.kosten_totaal)} → ${eur(huidig.kosten_totaal)}`)
     else if (JSON.stringify(oud.kosten) !== JSON.stringify(huidig.kosten)) uit.push('Kostenlijnen of hun verantwoording aangepast')
@@ -369,6 +441,10 @@ export function controleerHandtekening(v: unknown): string | null {
 
 /** Eén regel die zegt waarvoor getekend werd, voor het handtekeningenregister. */
 export function beschrijfAkkoord(a: Akkoord): string {
+  if (a.soort === 'wam') {
+    return `${a.geschrapt ? 'Geschrapt: ' : ''}WAM ${a.nr} ${a.klant}: ${eur(a.ontvangen)} ontvangen van ${eur(a.contractwaarde)} (${betaaldTekst(a)}), telt mee ${eur(a.telt_mee)}`
+  }
+  if (a.soort === 'contract' && a.geschrapt) return `Geschrapt: ${a.klant} telt niet meer mee`
   if (a.soort === 'contract') {
     const kosten = a.kosten_totaal ? ` − ${eur(a.kosten_totaal)} kosten` : ''
     const rol = leadInfo(a.lead)?.kort ?? ([a.afspraak && 'afspraak', a.closing && 'closing'].filter(Boolean).join(' + ') || 'geen rol')
@@ -403,6 +479,19 @@ const tijd = (iso: string) => new Date(iso).toLocaleString('nl-BE', { day: 'nume
 /** De kernregels van een certificaat: label en waarde, voor de pdf én de mail. */
 export function certificaatRegels(g: CertificaatGegevens): [string, string][] {
   const a = g.inhoud
+  if (a.soort === 'wam') {
+    return [
+      ['Klant', a.klant],
+      ['WAM-contract', `${a.nr}${a.omschrijving ? ` · ${a.omschrijving}` : ''}${a.geschrapt ? ' (geschrapt)' : ''}`],
+      ['Contractwaarde', eur(a.contractwaarde)],
+      ['Ontvangen', `${eur(a.ontvangen)} (${betaaldTekst(a)})`],
+      ['Verloop', VERLOOP_WAM[a.verloop]],
+      ['Telt mee voor Marco', `${eur(a.telt_mee)} (zoals de WAM-afspraak)`],
+    ]
+  }
+  if (a.soort === 'contract' && a.geschrapt) {
+    return [['Klant', a.klant], ['Contract', `${a.contract ?? '—'} (${a.nr})`], ['Verloop', 'geschrapt uit de vesting'], ['Telt mee voor Marco', eur(0)]]
+  }
   if (a.soort === 'contract') {
     const rol = leadInfo(a.lead)?.label ?? ([a.afspraak && 'afspraak gezet', a.closing && 'klant geclosed'].filter(Boolean).join(' en ') || 'geen rol')
     if (a.vast !== undefined) {
@@ -442,6 +531,7 @@ export function certificaatRegels(g: CertificaatGegevens): [string, string][] {
 }
 
 export function certificaatTitel(a: Akkoord): string {
+  if (a.soort === 'wam') return `WAM ${a.klant} (${a.nr})`
   if (a.soort === 'contract') return `${a.klant} (${a.nr})`
   return `${a.soort === 'inkomst' ? 'Inkomst' : 'Kost'}: ${a.omschrijving}`
 }

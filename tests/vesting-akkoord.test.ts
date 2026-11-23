@@ -1,11 +1,11 @@
 // Vesting: kosten per contract, algemene kosten en het akkoord (handtekeningen) per contract.
 // Uitvoeren: npx tsx tests/vesting-akkoord.test.ts
 import assert from 'node:assert/strict'
-import { STANDAARD_INSTELLINGEN as I, berekenVesting, type Contract, type WamRij, type WamKost } from '../lib/vesting'
+import { STANDAARD_INSTELLINGEN as I, berekenVesting, berekenWam, type Contract, type WamRij, type WamKost, type WamTermijn } from '../lib/vesting'
 import {
   akkoordStand, beschrijfAkkoord, contractAkkoord, controleerHandtekening, controleerKostLijn, controleerRegistratie, inhoudTekst,
   laatsteVolledigeVersie, leesVennoten, registratieAkkoord, registratiesVoorBerekening, vennootVan, wijzigingen,
-  certificaatMail, certificaatRegels, controleerBewijsInvoer,
+  certificaatMail, certificaatRegels, controleerBewijsInvoer, wamAkkoord, maandTekst, isOnderwerp,
   type Handtekening, type KostLijn, type Registratie,
 } from '../lib/vesting-akkoord'
 import { controleerSnel, snelNaarRij, teBeoordelen } from '../lib/vesting-snel'
@@ -215,6 +215,78 @@ test('Certificaat en mail naar legal@: cijfers, %, drie handtekeningen en de vin
   assert.match(mail.tekst, /Chiara Walmagh \(chiara@nextgenmedia\.be\)/)
   assert.match(mail.tekst, /VC-ABCDEF1234/)
   assert.match(mail.tekst, /Marco 2%, Bram 65%, Chiara 33%/)
+})
+
+// ── WAM-contracten als eigen kaart (23 nov 2026) ─────────────────────────────
+
+const wamRij = (over: Partial<WamRij> = {}): WamRij => ({
+  id: 'w1', nr: 'CW-5', klant: 'Student Clean', client_id: null, contractwaarde: 2160, netto_ontvangen: 0,
+  status: 'voltooid', betalingen_op_schema: true, notitie: null, start_datum: '2025-11-25', contract_maanden: 36,
+  bedrag_per_factuur: 180, frequentie: 'kwartaal', btw_pct: 21, omschrijving: null, ...over,
+})
+const termijn = (volgnr: number, periode: string, status: WamTermijn['status'], wam_id = 'w1'): WamTermijn => ({
+  id: `t${volgnr}`, wam_id, volgnr, periode, factuurdatum: `${periode}-25`, bedrag_excl: 180, btw_pct: 21, status,
+  betaald_op: status === 'betaald' ? `${periode}-28` : null, invoice_id: null, clickup_task_id: null, notitie: null,
+})
+
+test('WAM-kaart: enkel betaalde termijnen tellen mee; nog te komen blijft apart', () => {
+  const t = [termijn(1, '2025-11', 'betaald'), termijn(2, '2026-02', 'betaald'), termijn(3, '2026-05', 'gepland')]
+  const r = berekenWam([wamRij()], [], I, t).rijen[0]
+  const a = wamAkkoord(r)
+  assert.equal(a.soort, 'wam')
+  assert.equal(a.ontvangen, 360)
+  assert.equal(a.telt_mee, 360)
+  assert.equal(a.termijnen.filter((x) => x.betaald).length, 2)
+  assert.equal(a.historiek, undefined)
+  assert.match(beschrijfAkkoord(a), /CW-5 Student Clean: €360 ontvangen van €2.160 \(2 van 3 termijnen betaald\)/)
+  assert.equal(certificaatRegels({ nummer: 'VC-1', inhoud: a, inhoud_sha256: 'x', handtekeningen: [], aandeel: null, stand: null, volledig_op: '2026-11-23T10:00:00Z' })[0][1], 'Student Clean')
+})
+
+test('WAM-kaart: een termijn betaald aanduiden verandert de getekende tekst en zegt wat er veranderde', () => {
+  const voor = wamAkkoord(berekenWam([wamRij()], [], I, [termijn(1, '2025-11', 'betaald'), termijn(2, '2026-02', 'gepland')]).rijen[0])
+  const na = wamAkkoord(berekenWam([wamRij()], [], I, [termijn(1, '2025-11', 'betaald'), termijn(2, '2026-02', 'betaald')]).rijen[0])
+  assert.notEqual(inhoudTekst(voor), inhoudTekst(na))
+  assert.deepEqual(wijzigingen(inhoudTekst(voor), na), ['Termijn feb 2026 betaald (€180)'])
+  // Een handtekening op de oude cijfers geldt niet meer.
+  const h: Handtekening[] = ['marco', 'bram', 'chiara'].map((v, i) => ({ id: `h${i}`, onderwerp: 'wam', onderwerp_id: 'w1', vennoot: v as Handtekening['vennoot'], naam: v, getekend_op: `2026-11-2${i}T10:00:00Z`, inhoud_tekst: inhoudTekst(voor) }))
+  const stand = akkoordStand(inhoudTekst(na), h)
+  assert.equal(stand.volledig, false)
+  assert.equal(stand.per.marco.stand, 'opnieuw')
+  assert.ok(stand.laatsteVolledig)
+})
+
+test('WAM-kaart: gestopt of geschrapt telt voor €0', () => {
+  const t = [termijn(1, '2025-11', 'betaald')]
+  assert.equal(wamAkkoord(berekenWam([wamRij({ status: 'stopgezet' })], [], I, t).rijen[0]).telt_mee, 0)
+  const g = wamAkkoord(berekenWam([wamRij()], [], I, t).rijen[0], true)
+  assert.equal(g.telt_mee, 0)
+  assert.equal(g.geschrapt, true)
+  assert.match(beschrijfAkkoord(g), /^Geschrapt: WAM/)
+})
+
+test('WAM-contracten tellen samen met de inkomsten zoals de WAM-afspraak', () => {
+  const wam = [wamRij({ id: 'a', contractwaarde: 6000 }), wamRij({ id: 'b', nr: 'CW-6', contractwaarde: 4000 })]
+  const t = [{ ...termijn(1, '2026-01', 'betaald', 'a'), bedrag_excl: 6000 }, { ...termijn(1, '2026-02', 'betaald', 'b'), id: 'tb', bedrag_excl: 4000 }]
+  const { inkomsten, kosten } = registratiesVoorBerekening([{ id: 'r', soort: 'kost', datum: '2026-10-30', omschrijving: 'Afsluiting VOF', bedrag: 1600, geschrapt: false }])
+  const v = berekenVesting([], [...inkomsten, ...wam], kosten, I, t)
+  assert.equal(v.wam.nettoOntvangen, 10000)
+  // 10.000 − 1.600 = 8.400 → 1% (elke volle 5.000).
+  assert.equal(v.wam.voorlopig, 0.01)
+})
+
+test('Een geschrapt contract telt niet meer mee; oude handtekeningen blijven geldig voor wat ze tekenden', () => {
+  const c = berekenVesting([contract()], [], [], I).contracten[0]
+  const gewoon = contractAkkoord(c, [])
+  const geschrapt = contractAkkoord(c, [], null, true)
+  assert.equal(geschrapt.telt_mee, 0)
+  assert.equal(geschrapt.geschrapt, true)
+  assert.equal('geschrapt' in gewoon, false)
+  assert.deepEqual(wijzigingen(inhoudTekst(gewoon), geschrapt)[0], 'Geschrapt uit de vesting')
+})
+
+test('Onderwerp en maandnaam', () => {
+  assert.ok(isOnderwerp('wam') && isOnderwerp('contract') && !isOnderwerp('iets'))
+  assert.equal(maandTekst('2026-08'), 'aug 2026')
 })
 
 console.log(`\n${n} tests geslaagd\n`)

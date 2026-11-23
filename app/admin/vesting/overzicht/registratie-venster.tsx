@@ -2,11 +2,11 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Loader2, Pencil, RotateCcw, Trash2 } from 'lucide-react'
+import { Loader2, Pencil } from 'lucide-react'
 import { leesGetal } from '@/lib/getal'
 import { KOST_SOORTEN, type KostSoort, type RegistratieSoort, type Vennoot } from '@/lib/vesting-akkoord'
 import type { ContractWeergave, RegistratieWeergave } from '@/lib/vesting-weergave'
-import { Akkoord, Paneel, api, datumKort, eur } from './delen'
+import { Akkoord, Paneel, VerwijderBlok, api, datumKort, eur } from './delen'
 import { BewijsKiezer, BewijsLink, FactuurToevoegen, type BewijsWaarde } from './bewijs-kiezer'
 
 const INP = 'input-base'
@@ -35,18 +35,6 @@ export function RegistratieVenster({ r, vennoten, ik, laatste, onLaatste, onClos
   volgende?: (() => void) | null
 }) {
   const [bewerk, setBewerk] = useState(false)
-  const [schrap, setSchrap] = useState(false)
-  const [bezig, setBezig] = useState(false)
-
-  const actie = async (a: 'schrappen' | 'herstellen') => {
-    setBezig(true)
-    try {
-      await api('/api/admin/vesting/registraties', { method: 'PATCH', body: JSON.stringify({ id: r.id, actie: a }) })
-      toast.success(a === 'schrappen' ? 'Geschrapt. Iedereen tekent nu voor het schrappen.' : 'Teruggezet.')
-      setSchrap(false)
-      onVernieuw()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(false) }
-  }
 
   return (
     <Paneel
@@ -84,19 +72,8 @@ export function RegistratieVenster({ r, vennoten, ik, laatste, onLaatste, onClos
             ? `Je tekent dat ${eur(r.bedrag, true)} (${r.omschrijving}) meetelt voor de vesting van Marco.`
             : `Je tekent dat ${eur(r.bedrag, true)} (${r.omschrijving}) van Marco's totaal afgaat.`} />
 
-      <section className="pt-1">
-        {r.geschrapt
-          ? <button type="button" onClick={() => actie('herstellen')} disabled={bezig} className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-black">{bezig ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}Terugzetten</button>
-          : !schrap
-            ? <button type="button" onClick={() => setSchrap(true)} className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-red-700"><Trash2 className="h-3 w-3" />Schrappen</button>
-            : <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900 space-y-2">
-                <p>Geschrapt telt niet meer mee, maar blijft zichtbaar met alle handtekeningen. Ook het schrappen tekent iedereen.</p>
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => actie('schrappen')} disabled={bezig} className="btn-danger text-sm">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Schrappen</button>
-                  <button type="button" onClick={() => setSchrap(false)} className="btn-secondary text-sm">Annuleren</button>
-                </div>
-              </div>}
-      </section>
+      <VerwijderBlok onderwerp={r.soort} id={r.id} naam={r.omschrijving} akkoord={r.akkoord} geschrapt={r.geschrapt}
+        onKlaar={onVernieuw} onWeg={() => { onClose(); onVernieuw() }} />
     </Paneel>
   )
 }

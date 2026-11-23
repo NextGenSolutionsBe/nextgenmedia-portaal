@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Check, Download, Loader2, Mail, PenLine, RotateCcw, X } from 'lucide-react'
+import { Check, Download, Loader2, Mail, PenLine, RotateCcw, Trash2, X } from 'lucide-react'
 import { HandtekeningVak } from '@/components/admin/handtekening-vak'
-import { VENNOTEN, type Vennoot } from '@/lib/vesting-akkoord'
+import { VENNOTEN, type Onderwerp, type Vennoot } from '@/lib/vesting-akkoord'
 import type { AkkoordWeergave, CertificaatKort, ContractWeergave } from '@/lib/vesting-weergave'
 import { LEAD_SOORTEN, type Herkomst } from '@/lib/vesting'
 import { PersoonFoto } from '@/components/admin/persoon-foto'
@@ -51,7 +51,7 @@ type OpgeslagenHandtekening = { id: string; vennoot: Vennoot; naam: string | nul
  * niet tekende het tekenvak.
  */
 export function Akkoord({ onderwerp, id, akkoord, certificaat, vennoten, ik, laatste, onLaatste, onGetekend, uitleg }: {
-  onderwerp: 'contract' | 'kost' | 'inkomst'
+  onderwerp: Onderwerp
   id: string
   akkoord: AkkoordWeergave
   certificaat?: CertificaatKort | null
@@ -161,7 +161,7 @@ export function Akkoord({ onderwerp, id, akkoord, certificaat, vennoten, ik, laa
  * of de archiefmail naar legal@ vertrokken is (anders opnieuw versturen).
  */
 function CertificaatBlok({ onderwerp, id, certificaat, volledig, heeftOoit, onVernieuw }: {
-  onderwerp: 'contract' | 'kost' | 'inkomst'; id: string; certificaat: CertificaatKort | null; volledig: boolean; heeftOoit: boolean; onVernieuw: () => void
+  onderwerp: Onderwerp; id: string; certificaat: CertificaatKort | null; volledig: boolean; heeftOoit: boolean; onVernieuw: () => void
 }) {
   const [bezig, setBezig] = useState(false)
   if (!heeftOoit) return null
@@ -352,5 +352,70 @@ export function LeadKiezer({ waarde, onChange, bezig }: { waarde: Herkomst | nul
         </div>
       </details>
     </div>
+  )
+}
+
+/**
+ * Uit de vesting halen, volgens één regel voor elke kaart:
+ * nog nooit door alle drie getekend = gewoon verwijderen (helemaal weg);
+ * wel al door alle drie getekend = schrappen (telt niet meer mee, blijft
+ * zichtbaar) en iedereen tekent opnieuw. Geschrapt kan terug.
+ */
+export function VerwijderBlok({ onderwerp, id, naam, akkoord, geschrapt, extra, onKlaar, onWeg }: {
+  onderwerp: Onderwerp
+  id: string
+  naam: string
+  akkoord: AkkoordWeergave
+  geschrapt: boolean
+  /** Extra zin bij echt verwijderen (bv. "komt terug bij Te beoordelen"). */
+  extra?: string
+  onKlaar: () => void
+  /** Helemaal verwijderd: het venster sluiten. */
+  onWeg: () => void
+}) {
+  const [vraag, setVraag] = useState(false)
+  const [bezig, setBezig] = useState(false)
+  const ooitGetekend = !!akkoord.stand.laatsteVolledig
+  const doe = async (actie: 'verwijderen' | 'terugzetten') => {
+    setBezig(true)
+    try {
+      const j = await api('/api/admin/vesting/verwijderen', { method: 'POST', body: JSON.stringify({ onderwerp, id, actie }) })
+      const u = j.uitkomst as string
+      toast.success(u === 'verwijderd' ? `${naam} is verwijderd.` : u === 'geschrapt' ? `${naam} is geschrapt. Marco, Bram en Chiara tekenen nu opnieuw.` : `${naam} telt weer mee. Iedereen tekent opnieuw.`)
+      setVraag(false)
+      if (u === 'verwijderd') onWeg(); else onKlaar()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') } finally { setBezig(false) }
+  }
+  if (geschrapt) {
+    return (
+      <section className="rounded-lg border border-dashed border-gray-300 p-3 text-sm space-y-2">
+        <p className="text-gray-700">Geschrapt: telt niet meer mee. Het blijft zichtbaar met alle handtekeningen; ook het schrappen tekent iedereen.</p>
+        <button type="button" onClick={() => doe('terugzetten')} disabled={bezig} className="inline-flex items-center gap-1 text-xs text-gray-600 hover:text-black">
+          {bezig ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}Terugzetten
+        </button>
+      </section>
+    )
+  }
+  if (!vraag) {
+    return (
+      <section className="pt-1">
+        <button type="button" onClick={() => setVraag(true)} className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-red-700">
+          <Trash2 className="h-3 w-3" />Verwijderen
+        </button>
+      </section>
+    )
+  }
+  return (
+    <section className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900 space-y-2">
+      {ooitGetekend
+        ? <p>Marco, Bram en Chiara tekenden dit al alle drie. Daarom wordt het geschrapt in plaats van verwijderd: het telt niet meer mee, blijft zichtbaar en iedereen tekent opnieuw.</p>
+        : <p>Nog niet door alle drie getekend, dus het verdwijnt helemaal uit de vesting.{extra ? ` ${extra}` : ''}</p>}
+      <div className="flex gap-2">
+        <button type="button" onClick={() => doe('verwijderen')} disabled={bezig} className="btn-danger text-sm">
+          {bezig && <Loader2 className="h-4 w-4 animate-spin" />}{ooitGetekend ? 'Ja, schrappen' : 'Ja, verwijderen'}
+        </button>
+        <button type="button" onClick={() => setVraag(false)} className="btn-secondary text-sm">Annuleren</button>
+      </div>
+    </section>
   )
 }

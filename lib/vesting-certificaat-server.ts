@@ -12,7 +12,7 @@ import {
   VENNOTEN, certificaatMail, certificaatRegels, certificaatTitel,
   type Akkoord, type CertificaatGegevens, type CertificaatHandtekening, type Onderwerp, type Vennoot,
 } from '@/lib/vesting-akkoord'
-import type { VestingData } from '@/lib/vesting-data-server'
+import { akkoordVan, type VestingData } from '@/lib/vesting-data-server'
 
 type Admin = ReturnType<typeof createAdminSupabaseClient>
 
@@ -46,7 +46,7 @@ async function handtekeningenVoor(admin: Admin, onderwerp: Onderwerp, id: string
 
 /** Bestaat het certificaat voor de laatste volledig getekende versie? Zo niet: maken, bewaren en (één keer) mailen. */
 export async function zorgVoorCertificaat(admin: Admin, data: VestingData, onderwerp: Onderwerp, id: string, opties: { mail?: boolean } = {}): Promise<CertificaatRij | null> {
-  const info = onderwerp === 'contract' ? data.akkoordContract.get(id) : data.akkoordRegistratie.get(id)
+  const info = akkoordVan(data, onderwerp, id)
   const laatste = info?.stand.laatsteVolledig
   if (!info || !laatste) return null
   const tekst = laatste.tekst
@@ -110,7 +110,7 @@ export async function mailCertificaat(admin: Admin, rij: CertificaatRij, vennote
   if (rij.onderwerp === 'contract') {
     const { data } = await admin.from('vesting_kosten').select('bewijs_pad, bewijs_naam').eq('vesting_contract_id', rij.onderwerp_id).not('bewijs_pad', 'is', null)
     for (const k of (data ?? []) as { bewijs_pad: string; bewijs_naam: string | null }[]) bewijzen.push({ naam: k.bewijs_naam ?? 'document', pad: k.bewijs_pad })
-  } else {
+  } else if (rij.onderwerp !== 'wam') {
     const { data } = await admin.from('vesting_registraties').select('bewijs_pad, bewijs_naam').eq('id', rij.onderwerp_id).maybeSingle()
     const b = data as { bewijs_pad: string | null; bewijs_naam: string | null } | null
     if (b?.bewijs_pad) bewijzen.push({ naam: b.bewijs_naam ?? 'document', pad: b.bewijs_pad })

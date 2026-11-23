@@ -1,16 +1,16 @@
 import 'server-only'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { directeKostenVoorContracten } from '@/lib/facturen/kosten-data'
-import { berekenVesting, factuurUitRij, leesInstellingen, leadSoortVan, type Contract, type ContractTermijn, type GekoppeldeFactuur, type VestingOverzicht } from '@/lib/vesting'
-import { naarContract, naarKost, naarWam } from '@/lib/vesting-rijen'
+import { berekenVesting, berekenWam, factuurUitRij, leesInstellingen, leadSoortVan, type Contract, type ContractBerekend, type ContractTermijn, type GekoppeldeFactuur, type VestingOverzicht, type WamRij, type WamRijBerekend, type WamTermijn } from '@/lib/vesting'
+import { naarContract, naarKost, naarTermijn, naarWam } from '@/lib/vesting-rijen'
 import { NIET_MEETELLEN_SLEUTEL, teBeoordelen, type KandidaatContract } from '@/lib/vesting-snel'
 import {
   VENNOTEN_SLEUTEL, akkoordStand, contractAkkoord, inhoudTekst, leesVennoten, naarKostLijn, naarRegistratie, registratieAkkoord,
-  registratiesVoorBerekening, vennootVan, wijzigingen,
+  registratiesVoorBerekening, vennootVan, wamAkkoord, wijzigingen,
   type Akkoord, type AkkoordStand, type ContractAkkoord, type Handtekening, type KostLijn, type Onderwerp, type Registratie,
-  type RegistratieAkkoord, type Vennoot, type VennotenInstelling,
+  type RegistratieAkkoord, type Vennoot, type VennotenInstelling, type WamAkkoord,
 } from '@/lib/vesting-akkoord'
-import type { CertificaatKort, ContractWeergave, RegistratieWeergave, VestingWeergave } from '@/lib/vesting-weergave'
+import type { CertificaatKort, ContractWeergave, RegistratieWeergave, VestingWeergave, WamWeergave } from '@/lib/vesting-weergave'
 
 type Admin = ReturnType<typeof createAdminSupabaseClient>
 
@@ -20,8 +20,11 @@ type Admin = ReturnType<typeof createAdminSupabaseClient>
  * wordt en wie al tekende. Eén bron voor het scherm, het tekenen (controle dat
  * iemand tekent voor wat er nu staat) en de melding "wacht op jouw handtekening".
  *
- * WAM loopt sinds 4 nov 2026 via registraties (inkomsten met verantwoording);
- * de oude WAM-tabellen worden niet meer gelezen.
+ * WAM: inkomsten via registraties (sinds 4 nov 2026) én, sinds 23 nov 2026
+ * weer, de WAM-contracten zelf (vesting_wam + termijnen) als eigen kaart met
+ * handtekeningen. Beide tellen samen zoals de WAM-afspraak. Een kaart die alle
+ * drie tekenden en daarna verwijderd wordt, is geschrapt (geschrapt_op): ze
+ * telt niet meer mee en iedereen tekent opnieuw.
  */
 
 export type AkkoordInfo = { inhoud: Akkoord; tekst: string; stand: AkkoordStand; wijzigingen: string[] }
@@ -50,6 +53,13 @@ export type VestingData = {
   vennoten: VennotenInstelling
   akkoordContract: Map<string, AkkoordInfo>
   akkoordRegistratie: Map<string, AkkoordInfo>
+  akkoordWam: Map<string, AkkoordInfo>
+  /** De WAM-contracten (ook geschrapte), uitgerekend per kaart. */
+  wam: { rij: WamRijBerekend; geschrapt: boolean; client_id: string | null; start_datum: string | null; frequentie: string | null; bedrag_per_factuur: number | null; contract_maanden: number | null; notitie: string | null }[]
+  /** Uit de vesting geschrapte contracten (telden ooit voor alle drie), apart uitgerekend voor hun kaart. */
+  geschrapteContracten: ContractBerekend[]
+  /** Alle vestingcontracten, ook de geschrapte. */
+  contractRijenAlle: Record<string, unknown>[]
   /** Per kaart het laatste certificaat (met de getekende tekst, om te weten of het over de huidige cijfers gaat). */
   certificaten: Map<string, Omit<CertificaatKort, 'huidig'> & { inhoud_tekst: string }>
   /** Contracten uit Contracten/Projecten die nog niet beoordeeld zijn (ook nog niet getekend). */
@@ -74,7 +84,7 @@ function naarKandidaat(r: Record<string, unknown>): KandidaatContract {
 }
 
 export async function laadVestingData(admin: Admin = createAdminSupabaseClient()): Promise<VestingData> {
-  const [inst, contracten, registratieRijen, oud, moduleContracten, klanten, contractTermijnen, kostLijnen, handtekeningen, instellingen, certificaatRijen] = await Promise.all([
+  const [inst, contracten, registratieRijen, oud, moduleContracten, klanten, contractTermijnen, kostLijnen, handtekeningen, instellingen, certificaatRijen, wamRes, wamTermijnRes] = await Promise.all([
     admin.from('vesting_instellingen').select('*').eq('id', 1).maybeSingle(),
     admin.from('vesting_contracten').select('*').order('ondertekend_op').order('nr'),
     admin.from('vesting_registraties').select('*').order('datum').order('created_at'),
@@ -86,6 +96,8 @@ export async function laadVestingData(admin: Admin = createAdminSupabaseClient()
     admin.from('vesting_handtekeningen').select('id, onderwerp, onderwerp_id, vennoot, naam, getekend_op, inhoud_tekst').order('getekend_op'),
     admin.from('app_settings').select('key, value').in('key', [NIET_MEETELLEN_SLEUTEL, VENNOTEN_SLEUTEL]),
     admin.from('vesting_certificaten').select('id, nummer, onderwerp_id, inhoud_tekst, volledig_op, mail_status, mail_op, mail_fout').order('volledig_op', { ascending: false }),
+    admin.from('vesting_wam').select('*').order('nr'),
+    admin.from('vesting_wam_termijnen').select('*').order('factuurdatum').order('volgnr'),
   ])
   const setting = (k: string) => ((instellingen.data ?? []) as { key: string; value: unknown }[]).find((r) => r.key === k)?.value
   const ids = (setting(NIET_MEETELLEN_SLEUTEL) as { ids?: unknown } | undefined)?.ids
@@ -94,7 +106,10 @@ export async function laadVestingData(admin: Admin = createAdminSupabaseClient()
   const module = ((moduleContracten.data ?? []) as Record<string, unknown>[])
   const moduleTitel = new Map(module.map((m) => [String(m.id), { titel: String(m.title ?? 'Contract'), status: String(m.status ?? ''), signed_at: d(m.signed_at) }]))
 
-  let contractRijen = (contracten.data ?? []) as Record<string, unknown>[]
+  // Geschrapte contracten tellen niet mee in de berekening, maar blijven zichtbaar (en te tekenen).
+  const contractRijenAlleRuw = (contracten.data ?? []) as Record<string, unknown>[]
+  let contractRijen = contractRijenAlleRuw.filter((r) => !r.geschrapt_op)
+  const geschrapteRijen = contractRijenAlleRuw.filter((r) => !!r.geschrapt_op)
 
   // Een contract dat de klant nog moest tekenen, krijgt de datum zodra het getekend is.
   const teDateren = contractRijen.filter((r) => !r.ondertekend_op && r.contract_id && moduleTitel.get(String(r.contract_id))?.signed_at)
@@ -137,7 +152,22 @@ export async function laadVestingData(admin: Admin = createAdminSupabaseClient()
   }))
 
   const instellingenWaarden = leesInstellingen((inst.data ?? null) as Record<string, unknown> | null)
-  const v = berekenVesting(contractRijen.map(naarContract), inkomsten, kosten, instellingenWaarden, [], ctermijnen, facturen)
+
+  // WAM-contracten: de rijen en hun termijnen (tabellen ontbreken = geen WAM).
+  const wamRuw = (wamRes.error ? [] : (wamRes.data ?? [])) as Record<string, unknown>[]
+  const wamTermijnRijen = (wamTermijnRes.error ? [] : (wamTermijnRes.data ?? [])) as Record<string, unknown>[]
+  const wamTermijnen: WamTermijn[] = wamTermijnRijen.map(naarTermijn)
+  const wamGeschrapt = new Set(wamRuw.filter((r) => !!r.geschrapt_op).map((r) => String(r.id)))
+  const wamRijen: WamRij[] = wamRuw.map(naarWam)
+  const wamActief = wamRijen.filter((r) => !wamGeschrapt.has(r.id))
+  // Per kaart uitgerekend (ook de geschrapte, voor hun kaart en akkoord).
+  const wamPerKaart = berekenWam(wamRijen, [], instellingenWaarden, wamTermijnen).rijen
+
+  // De berekening: actieve contracten, inkomsten én WAM-contracten (samen zoals de WAM-afspraak).
+  const v = berekenVesting(contractRijen.map(naarContract), [...inkomsten, ...wamActief], kosten, instellingenWaarden, wamTermijnen.filter((t) => !wamGeschrapt.has(t.wam_id)), ctermijnen, facturen)
+  const geschrapteContracten = geschrapteRijen.length
+    ? berekenVesting(geschrapteRijen.map(naarContract), [], [], instellingenWaarden, [], ctermijnen, facturen).contracten
+    : []
 
   const lijnen = ((kostLijnen.data ?? []) as Record<string, unknown>[]).map(naarKostLijn)
   const tekeningen = ((handtekeningen.data ?? []) as Record<string, unknown>[]).map((h) => ({
@@ -149,14 +179,27 @@ export async function laadVestingData(admin: Admin = createAdminSupabaseClient()
     const stand = akkoordStand(tekst, tekeningen.filter((h) => h.onderwerp === onderwerp && h.onderwerp_id === id))
     return { inhoud, tekst, stand, wijzigingen: stand.vorige ? wijzigingen(stand.vorige, inhoud) : [] }
   }
-  const akkoordContract = new Map(v.contracten.map((c) => [c.id, info(
-    contractAkkoord(c, lijnen.filter((l) => l.vesting_contract_id === c.id), c.contract_id ? moduleTitel.get(c.contract_id)?.titel ?? null : null),
+  const contractInfo = (c: ContractBerekend, geschrapt: boolean) => info(
+    contractAkkoord(c, lijnen.filter((l) => l.vesting_contract_id === c.id), c.contract_id ? moduleTitel.get(c.contract_id)?.titel ?? null : null, geschrapt),
     'contract', c.id,
-  )]))
+  )
+  const akkoordContract = new Map([
+    ...v.contracten.map((c) => [c.id, contractInfo(c, false)] as const),
+    ...geschrapteContracten.map((c) => [c.id, contractInfo(c, true)] as const),
+  ])
   const akkoordRegistratie = new Map(registraties.map((r) => [r.id, info(registratieAkkoord(r), r.soort, r.id)]))
+  const akkoordWam = new Map(wamPerKaart.map((r) => [r.id, info(wamAkkoord(r, wamGeschrapt.has(r.id)), 'wam', r.id)]))
+  const wamKaarten: VestingData['wam'] = wamPerKaart.map((r) => {
+    const ruw = wamRuw.find((x) => String(x.id) === r.id) ?? {}
+    return {
+      rij: r, geschrapt: wamGeschrapt.has(r.id), client_id: r.client_id, start_datum: r.start_datum, frequentie: r.frequentie,
+      bedrag_per_factuur: r.bedrag_per_factuur, contract_maanden: r.contract_maanden, notitie: (ruw.notitie as string | null) ?? null,
+    }
+  })
 
   const alle = module.map(naarKandidaat)
-  const inVesting = new Set(contractRijen.map((r) => r.contract_id).filter((x): x is string => typeof x === 'string' && !!x))
+  // Ook een geschrapt contract hoort al bij de vesting: het komt niet terug bij Te beoordelen.
+  const inVesting = new Set(contractRijenAlleRuw.map((r) => r.contract_id).filter((x): x is string => typeof x === 'string' && !!x))
   // Enkel getekende contracten komen als keuze "telt mee / telt niet mee" (12 nov 2026).
   const kandidaten = teBeoordelen(alle, inVesting, new Set(nietMeetellen))
   const nietSet = new Set(nietMeetellen)
@@ -166,15 +209,17 @@ export async function laadVestingData(admin: Admin = createAdminSupabaseClient()
     ruw: {
       instellingen: (inst.data ?? null) as Record<string, unknown> | null,
       contracten: contractRijen,
-      wam: inkomsten as unknown as Record<string, unknown>[],
+      // De uitgebreide weergave rekent zelf: inkomsten én WAM-contracten, met hun termijnen.
+      wam: [...inkomsten, ...wamActief] as unknown as Record<string, unknown>[],
       kosten: kosten as unknown as Record<string, unknown>[],
       oud: (oud.data ?? []) as Record<string, unknown>[],
-      wamTermijnen: [], contractTermijnen: contractTermijnRijen, moduleContracten: module,
+      wamTermijnen: wamTermijnRijen.filter((t) => !wamGeschrapt.has(String(t.wam_id))), contractTermijnen: contractTermijnRijen, moduleContracten: module,
       klanten: ((klanten.data ?? []) as { id: string; company_name: string | null; sales_verantwoordelijke?: string | null; appointment_setter?: string | null }[])
         .map((k) => ({ id: k.id, naam: k.company_name ?? '—', closer: k.sales_verantwoordelijke ?? null, setter: k.appointment_setter ?? null })),
       facturen, nietMeetellen, wamGekoppeld: [],
     },
-    v, ctermijnen, kostLijnen: lijnen, registraties, vennoten, akkoordContract, akkoordRegistratie, kandidaten, nietMee, moduleTitel,
+    v, ctermijnen, kostLijnen: lijnen, registraties, vennoten, akkoordContract, akkoordRegistratie, akkoordWam, wam: wamKaarten,
+    geschrapteContracten, contractRijenAlle: contractRijenAlleRuw, kandidaten, nietMee, moduleTitel,
     certificaten: laatsteCertificaten((certificaatRijen.data ?? []) as Record<string, unknown>[]),
   }
 }
@@ -201,9 +246,17 @@ const certificaatVoor = (data: VestingData, id: string, tekst: string): Certific
 }
 
 /** Hoeveel contracten en registraties wachten op de handtekening van deze vennoot? */
-export function openVoor(data: Pick<VestingData, 'akkoordContract' | 'akkoordRegistratie'>, vennoot: Vennoot): { contracten: number; registraties: number } {
+export function openVoor(data: Pick<VestingData, 'akkoordContract' | 'akkoordRegistratie' | 'akkoordWam'>, vennoot: Vennoot): { contracten: number; registraties: number; wam: number } {
   const open = (m: Map<string, AkkoordInfo>) => Array.from(m.values()).filter((a) => a.stand.per[vennoot].stand !== 'getekend').length
-  return { contracten: open(data.akkoordContract), registraties: open(data.akkoordRegistratie) }
+  return { contracten: open(data.akkoordContract), registraties: open(data.akkoordRegistratie), wam: open(data.akkoordWam) }
+}
+
+/** Het akkoord van één kaart, wat voor kaart het ook is. */
+export function akkoordVan(data: Pick<VestingData, 'akkoordContract' | 'akkoordRegistratie' | 'akkoordWam'>, onderwerp: Onderwerp, id: string): AkkoordInfo | null {
+  const info = onderwerp === 'contract' ? data.akkoordContract.get(id) : onderwerp === 'wam' ? data.akkoordWam.get(id) : data.akkoordRegistratie.get(id)
+  if (!info) return null
+  if ((onderwerp === 'inkomst' || onderwerp === 'kost') && info.inhoud.soort !== onderwerp) return null
+  return info
 }
 
 /**
@@ -217,14 +270,18 @@ export async function vestingMeldingVoor(userId: string): Promise<{ id: string; 
   const vennoot = vennootVan(userId, leesVennoten((rij as { value?: unknown } | null)?.value))
   if (!vennoot) return []
   const data = await laadVestingData(admin)
-  const open = [...Array.from(data.akkoordContract.entries()), ...Array.from(data.akkoordRegistratie.entries())]
+  const open = [...Array.from(data.akkoordContract.entries()), ...Array.from(data.akkoordRegistratie.entries()), ...Array.from(data.akkoordWam.entries())]
     .filter(([, a]) => a.stand.per[vennoot].stand !== 'getekend')
     .map(([id, a]) => `${id}:${a.tekst}`)
   if (!open.length) return []
   let h = 0
   for (const ch of open.sort().join('|')) h = (h * 31 + ch.charCodeAt(0)) >>> 0
-  const { contracten, registraties } = openVoor(data, vennoot)
-  const delen = [contracten ? `${contracten} ${contracten === 1 ? 'contract' : 'contracten'}` : '', registraties ? `${registraties} ${registraties === 1 ? 'inkomst of kost' : 'inkomsten en kosten'}` : ''].filter(Boolean).join(' en ')
+  const { contracten, registraties, wam } = openVoor(data, vennoot)
+  const delen = [
+    contracten ? `${contracten} ${contracten === 1 ? 'contract' : 'contracten'}` : '',
+    wam ? `${wam} ${wam === 1 ? 'WAM-contract' : 'WAM-contracten'}` : '',
+    registraties ? `${registraties} ${registraties === 1 ? 'inkomst of kost' : 'inkomsten en kosten'}` : '',
+  ].filter(Boolean).join(', ').replace(/, ([^,]*)$/, ' en $1')
   return [{
     id: `vesting:${vennoot}:${h.toString(36)}`, kind: 'vesting', priority: 'high',
     title: `Vesting: ${delen} ${open.length === 1 ? 'wacht' : 'wachten'} op jouw handtekening`,
@@ -240,12 +297,13 @@ export async function vestingMeldingVoor(userId: string): Promise<{ id: string; 
  */
 function getekendeStand(data: VestingData): VestingOverzicht {
   const contracten: Contract[] = []
-  for (const rij of data.ruw.contracten) {
+  for (const rij of data.contractRijenAlle) {
     const c = naarContract(rij)
     const laatste = data.akkoordContract.get(c.id)?.stand.laatsteVolledig
     if (!laatste) continue
     let a: ContractAkkoord
     try { a = JSON.parse(laatste.tekst) as ContractAkkoord } catch { continue }
+    if (a.geschrapt) continue
     contracten.push({
       ...c, facturatiemodel: 'eenmalig', handmatige_totaalwaarde: a.telt_mee, maandbedrag: null, duur_maanden: null,
       uitgesloten_kosten: 0, directe_kosten_facturen: null, kostenstatus_facturen: null, toerekening_pct: 100,
@@ -261,14 +319,27 @@ function getekendeStand(data: VestingData): VestingOverzicht {
     registraties.push({ ...r, bedrag: a.bedrag, geschrapt: !!a.geschrapt, soort: a.soort })
   }
   const { inkomsten, kosten } = registratiesVoorBerekening(registraties)
-  return berekenVesting(contracten, inkomsten, kosten, data.v.instellingen, [], [], [])
+  // WAM-contracten: wat er in de getekende versie meetelde, als ontvangen bedrag.
+  const wamGetekend: WamRij[] = []
+  for (const k of data.wam) {
+    const laatste = data.akkoordWam.get(k.rij.id)?.stand.laatsteVolledig
+    if (!laatste) continue
+    let a: WamAkkoord
+    try { a = JSON.parse(laatste.tekst) as WamAkkoord } catch { continue }
+    if (a.geschrapt || !(a.telt_mee > 0)) continue
+    wamGetekend.push({
+      ...k.rij, contractwaarde: a.contractwaarde, netto_ontvangen: a.telt_mee, status: a.verloop === 'voltooid' ? 'voltooid' : 'actief',
+      betalingen_op_schema: true, start_datum: null, contract_maanden: null, bedrag_per_factuur: null, frequentie: null,
+    })
+  }
+  return berekenVesting(contracten, [...inkomsten, ...wamGetekend], kosten, data.v.instellingen, [], [], [])
 }
 
 /** Alles voor het nieuwe scherm, voor deze gebruiker. */
 export function naarWeergave(data: VestingData, userId: string | null): VestingWeergave {
   const { v } = data
   const i = v.instellingen
-  const contracten: ContractWeergave[] = v.contracten.map((c) => {
+  const naarContractWeergave = (c: ContractBerekend, geschrapt: boolean): ContractWeergave => {
     const akkoord = data.akkoordContract.get(c.id)!
     return {
       id: c.id, nr: c.nr, klant: c.klant, client_id: c.client_id ?? null,
@@ -281,23 +352,39 @@ export function naarWeergave(data: VestingData, userId: string | null): VestingW
       vast: c.opVastBedrag ? Number(c.meetellend_vast) : null, vastUitleg: c.opVastBedrag ? c.meetellend_uitleg ?? null : null,
       betaaldBijStop: c.status === 'stopgezet' && c.betaald_bij_stop !== null && c.betaald_bij_stop !== undefined ? Number(c.betaald_bij_stop) : null,
       teltMee: akkoord.inhoud.soort === 'contract' ? akkoord.inhoud.telt_mee : 0,
-      algemeneKostenAftrek: c.algemeneKostenAftrek, teltVoorAandeel: c.teltVoorAandeel, status: c.status,
-      telt: c.erkenning !== 'uitgesloten', definitief: c.erkenning === 'definitief', ruweVesting: c.ruweVesting,
-      schijven: { goedkoop: c.goedkopeSchijf, jaar: c.jaarschijf, regulierTarief: i.regulier_tarief, jaarTarief: c.tarief, jaar_label: c.jaar },
-      akkoord, certificaat: certificaatVoor(data, c.id, akkoord.tekst),
+      algemeneKostenAftrek: geschrapt ? 0 : c.algemeneKostenAftrek, teltVoorAandeel: geschrapt ? 0 : c.teltVoorAandeel, status: c.status,
+      telt: !geschrapt && c.erkenning !== 'uitgesloten', definitief: !geschrapt && c.erkenning === 'definitief', ruweVesting: geschrapt ? 0 : c.ruweVesting,
+      schijven: { goedkoop: geschrapt ? 0 : c.goedkopeSchijf, jaar: geschrapt ? 0 : c.jaarschijf, regulierTarief: i.regulier_tarief, jaarTarief: c.tarief, jaar_label: c.jaar },
+      akkoord, certificaat: certificaatVoor(data, c.id, akkoord.tekst), geschrapt,
     }
-  })
-  // Nieuwste bovenaan; wat de klant nog moet tekenen eerst.
-  contracten.sort((a, b) => (b.ondertekend_op ?? '9999').localeCompare(a.ondertekend_op ?? '9999') || b.nr.localeCompare(a.nr, 'nl', { numeric: true }))
+  }
+  const contracten: ContractWeergave[] = [
+    ...v.contracten.map((c) => naarContractWeergave(c, false)),
+    ...data.geschrapteContracten.map((c) => naarContractWeergave(c, true)),
+  ]
+  // Nieuwste bovenaan; wat de klant nog moet tekenen eerst; geschrapte onderaan.
+  contracten.sort((a, b) => Number(a.geschrapt) - Number(b.geschrapt) || (b.ondertekend_op ?? '9999').localeCompare(a.ondertekend_op ?? '9999') || b.nr.localeCompare(a.nr, 'nl', { numeric: true }))
 
   const registraties: RegistratieWeergave[] = data.registraties
     .map((r) => { const akkoord = data.akkoordRegistratie.get(r.id)!; return { ...r, akkoord, certificaat: certificaatVoor(data, r.id, akkoord.tekst) } })
     .sort((a, b) => Number(a.geschrapt) - Number(b.geschrapt) || b.datum.localeCompare(a.datum))
 
+  const wam: WamWeergave[] = data.wam.map(({ rij: r, geschrapt, client_id, start_datum, frequentie, bedrag_per_factuur, contract_maanden, notitie }) => {
+    const akkoord = data.akkoordWam.get(r.id)!
+    return {
+      id: r.id, nr: r.nr, klant: r.klant, omschrijving: r.omschrijving, client_id, contractwaarde: r.contractwaarde,
+      status: r.status, betalingenOpSchema: r.betalingen_op_schema, notitie,
+      schema: { start: start_datum, frequentie, bedrag: bedrag_per_factuur, maanden: contract_maanden },
+      termijnen: r.termijnen.map((t) => ({ id: t.id, volgnr: t.volgnr, periode: t.periode, factuurdatum: t.factuurdatum, bedrag: t.bedrag_excl, status: t.status, betaald_op: t.betaald_op, heeftFactuur: !!t.invoice_id })),
+      ontvangen: r.ontvangen, nogBinnen: geschrapt ? 0 : r.nogBinnen, teltMee: akkoord.inhoud.soort === 'wam' ? akkoord.inhoud.telt_mee : 0, geschrapt,
+      akkoord, certificaat: certificaatVoor(data, r.id, akkoord.tekst),
+    }
+  }).sort((a, b) => Number(a.geschrapt) - Number(b.geschrapt) || a.nr.localeCompare(b.nr, 'nl', { numeric: true }))
+
   const g = getekendeStand(data)
   const vennoot = vennootVan(userId, data.vennoten)
-  const alleKaarten = [...contracten.map((c) => c.akkoord), ...registraties.map((r) => r.akkoord)]
-  const inkomstenActief = registraties.filter((r) => r.soort === 'inkomst' && !r.geschrapt)
+  const alleKaarten = [...contracten.map((c) => c.akkoord), ...registraties.map((r) => r.akkoord), ...wam.map((w) => w.akkoord)]
+  const inkomstenActief = [...registraties.filter((r) => r.soort === 'inkomst' && !r.geschrapt), ...wam.filter((w) => !w.geschrapt)]
   return {
     aandelen: {
       marco: v.marcoVoorlopig, marcoDefinitief: v.marcoDefinitief, marcoGetekend: g.marcoVoorlopig, bramGetekend: g.bram,
@@ -309,7 +396,7 @@ export function naarWeergave(data: VestingData, userId: string | null): VestingW
       volgendeProcent: v.volgendeProcent,
       getekend: { volledig: alleKaarten.filter((a) => a.stand.volledig).length, totaal: alleKaarten.length },
     },
-    contracten, registraties,
+    contracten, registraties, wam,
     teBeoordelen: data.kandidaten, nietMee: data.nietMee, klanten: data.ruw.klanten,
     ik: { vennoot, naam: vennoot ? data.vennoten[vennoot].naam : null },
     vennoten: { marco: data.vennoten.marco.naam, bram: data.vennoten.bram.naam, chiara: data.vennoten.chiara.naam },

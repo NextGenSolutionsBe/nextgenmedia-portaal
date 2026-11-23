@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Ban, ChevronDown, ChevronUp, FileText, Loader2, Minus, PenLine, Plus, RotateCcw } from 'lucide-react'
 import { isGetekend, type KandidaatContract } from '@/lib/vesting-snel'
-import type { ContractWeergave, RegistratieWeergave, VestingWeergave } from '@/lib/vesting-weergave'
+import type { ContractWeergave, RegistratieWeergave, VestingWeergave, WamWeergave } from '@/lib/vesting-weergave'
 import { PrijsToevoegen } from '../prijs-toevoegen'
 import { TekenStand, api, datumKort, eur, pct } from './delen'
 import { ContractVenster } from './contract-venster'
@@ -15,12 +15,13 @@ import { leadInfo } from '@/lib/vesting'
 import { BeoordeelVenster } from './beoordeel-venster'
 import { InkomstRegistreren, KostRegistreren, RegistratieVenster } from './registratie-venster'
 import { Register } from './register'
+import { WamVenster, WAM_VERLOOP } from './wam-venster'
 import { RegelsKaart, RegelsKnop, RegelsVenster, type RegelsBegin } from '@/components/admin/regels-akkoord'
 import type { RegelsData } from '@/lib/regels-akkoord'
 import { PersoonFoto } from '@/components/admin/persoon-foto'
 
-type Tab = 'contracten' | 'beoordelen' | 'registraties' | 'register'
-type Open = { soort: 'contract' | 'registratie'; id: string } | null
+type Tab = 'contracten' | 'wam' | 'beoordelen' | 'registraties' | 'register'
+type Open = { soort: 'contract' | 'registratie' | 'wam'; id: string } | null
 
 const STATUS_KLANT: Record<string, string> = { draft: 'Concept', sent: 'Bij de klant', viewed: 'Bekeken door de klant', signed: 'Getekend', getekend: 'Getekend' }
 
@@ -48,11 +49,13 @@ export function VestingOverzicht({ data, tekenen, regels, regelsOpen = false }: 
 
   const mijnOpen = useMemo(() => (ik ? {
     contracten: data.contracten.filter((c) => c.akkoord.stand.per[ik].stand !== 'getekend'),
+    wam: data.wam.filter((w) => w.akkoord.stand.per[ik].stand !== 'getekend'),
     registraties: data.registraties.filter((r) => r.akkoord.stand.per[ik].stand !== 'getekend'),
-  } : { contracten: [], registraties: [] }), [data, ik])
-  const aantalOpen = mijnOpen.contracten.length + mijnOpen.registraties.length
+  } : { contracten: [], wam: [], registraties: [] }), [data, ik])
+  const aantalOpen = mijnOpen.contracten.length + mijnOpen.wam.length + mijnOpen.registraties.length
   const openLijst: NonNullable<Open>[] = useMemo(() => [
     ...mijnOpen.contracten.map((c) => ({ soort: 'contract' as const, id: c.id })),
+    ...mijnOpen.wam.map((w) => ({ soort: 'wam' as const, id: w.id })),
     ...mijnOpen.registraties.map((r) => ({ soort: 'registratie' as const, id: r.id })),
   ], [mijnOpen])
 
@@ -63,22 +66,25 @@ export function VestingOverzicht({ data, tekenen, regels, regelsOpen = false }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const volgendeOpen = (huidig: string): Open => openLijst.find((x) => x.id !== huidig) ?? null
-  const nogAanTeDuiden = data.contracten.filter((c) => !c.herkomst && c.vast === null)
+  const nogAanTeDuiden = data.contracten.filter((c) => !c.herkomst && c.vast === null && !c.geschrapt)
   const volgendeAanTeDuiden = (huidig: string): Open => {
     const i = data.contracten.findIndex((c) => c.id === huidig)
     const na = [...data.contracten.slice(i + 1), ...data.contracten.slice(0, Math.max(0, i))]
-    const v = na.find((c) => !c.herkomst && c.vast === null && c.id !== huidig)
+    const v = na.find((c) => !c.herkomst && c.vast === null && !c.geschrapt && c.id !== huidig)
     return v ? { soort: 'contract', id: v.id } : null
   }
   const startTekenen = () => {
     setAlleenOpen(true)
-    setTab(mijnOpen.contracten.length ? 'contracten' : 'registraties')
+    setTab(mijnOpen.contracten.length ? 'contracten' : mijnOpen.wam.length ? 'wam' : 'registraties')
     setOpen(openLijst[0] ?? null)
   }
 
   const contract = open?.soort === 'contract' ? data.contracten.find((c) => c.id === open.id) ?? null : null
   const registratie = open?.soort === 'registratie' ? data.registraties.find((r) => r.id === open.id) ?? null : null
+  const wam = open?.soort === 'wam' ? data.wam.find((w) => w.id === open.id) ?? null : null
   const zichtbareContracten = alleenOpen && ik ? mijnOpen.contracten : data.contracten
+  const zichtbareWam = alleenOpen && ik ? mijnOpen.wam : data.wam
+  const wamActief = data.wam.filter((w) => !w.geschrapt)
   const zichtbareRegistraties = alleenOpen && ik ? mijnOpen.registraties : data.registraties
   const a = data.aandelen
   const inkomsten = data.registraties.filter((r) => r.soort === 'inkomst')
@@ -143,7 +149,7 @@ export function VestingOverzicht({ data, tekenen, regels, regelsOpen = false }: 
       <section className="card-base">
         <h2 className="text-sm font-semibold text-gray-900 mb-3">Hoe Marco aan {pct(a.marco)} komt</h2>
         <dl className="text-sm tabular-nums divide-y divide-gray-100">
-          <Lijn label={`Inkomsten via WAM of een andere weg (${a.wam.aantal})`} waarde={eur(a.wam.ontvangen)} />
+          <Lijn label={`Inkomsten via WAM-contracten en andere inkomsten (${a.wam.aantal})`} waarde={eur(a.wam.ontvangen)} />
           {a.algemeneKosten.totaal > 0 && <Lijn label={`Algemene kosten (${kosten.filter((k) => !k.geschrapt).length})`} waarde={`− ${eur(a.algemeneKosten.totaal)}`} />}
           <Lijn label={`Contracten die meetellen (${a.contracten.aantal})`} waarde={eur(a.contracten.teltMee)} />
           <Lijn label="Telt mee voor Marco" waarde={eur(a.meetellend)} sterk />
@@ -160,7 +166,8 @@ export function VestingOverzicht({ data, tekenen, regels, regelsOpen = false }: 
       <div>
         <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto">
           {([
-            ['contracten', `Contracten (${data.contracten.length})`],
+            ['contracten', `Contracten (${data.contracten.filter((c) => !c.geschrapt).length})`],
+            ['wam', `WAM-contracten (${wamActief.length})`],
             ['beoordelen', `Te beoordelen (${data.teBeoordelen.length})`],
             ['registraties', `Inkomsten en kosten (${data.registraties.length})`],
             ['register', 'Handtekeningen'],
@@ -173,10 +180,10 @@ export function VestingOverzicht({ data, tekenen, regels, regelsOpen = false }: 
           ))}
         </div>
 
-        {(tab === 'contracten' || tab === 'registraties') && ik && (
+        {(tab === 'contracten' || tab === 'wam' || tab === 'registraties') && ik && (
           <label className="mt-4 inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
             <input type="checkbox" checked={alleenOpen} onChange={(e) => setAlleenOpen(e.target.checked)} className="h-4 w-4 accent-gray-900" />
-            Enkel wat ik nog moet tekenen ({tab === 'contracten' ? mijnOpen.contracten.length : mijnOpen.registraties.length})
+            Enkel wat ik nog moet tekenen ({tab === 'contracten' ? mijnOpen.contracten.length : tab === 'wam' ? mijnOpen.wam.length : mijnOpen.registraties.length})
           </label>
         )}
 
@@ -196,6 +203,18 @@ export function VestingOverzicht({ data, tekenen, regels, regelsOpen = false }: 
             {zichtbareContracten.length === 0 && <p className="text-sm text-gray-500 py-6 text-center">{alleenOpen ? 'Alles getekend. Niets meer te doen.' : 'Nog geen contracten.'}</p>}
             <ul className="space-y-2">
               {zichtbareContracten.map((c) => <ContractKaart key={c.id} c={c} vennoten={data.vennoten} onOpen={() => setOpen({ soort: 'contract', id: c.id })} />)}
+            </ul>
+          </div>
+        )}
+
+        {tab === 'wam' && (
+          <div className="pt-3 space-y-3">
+            <p className="text-sm text-gray-500 max-w-2xl">
+              Marco&apos;s klanten van vóór de samenwerking. Wat er binnenkwam telt zoals de WAM-afspraak: elke € 5.000 netto = 1%, tot 5%. Een betaalde termijn aanduiden of iets aanpassen tekenen jullie alle drie opnieuw.
+            </p>
+            {zichtbareWam.length === 0 && <p className="text-sm text-gray-500 py-6 text-center">{alleenOpen ? 'Alles getekend. Niets meer te doen.' : 'Geen WAM-contracten.'}</p>}
+            <ul className="space-y-2">
+              {zichtbareWam.map((w) => <WamKaart key={w.id} w={w} vennoten={data.vennoten} onOpen={() => setOpen({ soort: 'wam', id: w.id })} />)}
             </ul>
           </div>
         )}
@@ -230,6 +249,11 @@ export function VestingOverzicht({ data, tekenen, regels, regelsOpen = false }: 
           volgende={aanduiden
             ? (volgendeAanTeDuiden(contract.id) ? () => setOpen(volgendeAanTeDuiden(contract.id)) : null)
             : alleenOpen && ik && volgendeOpen(contract.id) ? () => setOpen(volgendeOpen(contract.id)) : null} />
+      )}
+      {wam && (
+        <WamVenster key={wam.id} w={wam} vennoten={data.vennoten} ik={ik} laatste={laatste} onLaatste={setLaatste}
+          onClose={() => setOpen(null)} onVernieuw={vernieuw}
+          volgende={alleenOpen && ik && volgendeOpen(wam.id) ? () => setOpen(volgendeOpen(wam.id)) : null} />
       )}
       {registratie && (
         <RegistratieVenster r={registratie} vennoten={data.vennoten} ik={ik} laatste={laatste} onLaatste={setLaatste}
@@ -299,10 +323,10 @@ function rekensomTekst(c: ContractWeergave): string {
 function ContractKaart({ c, vennoten, onOpen }: { c: ContractWeergave; vennoten: VestingWeergave['vennoten']; onOpen: () => void }) {
   return (
     <li>
-      <button type="button" onClick={onOpen} className="w-full text-left rounded-lg border border-gray-200 bg-white p-3.5 sm:p-4 hover:border-gray-400 transition-colors">
+      <button type="button" onClick={onOpen} className={`w-full text-left rounded-lg border bg-white p-3.5 sm:p-4 hover:border-gray-400 transition-colors ${c.geschrapt ? 'border-dashed border-gray-300 opacity-70' : 'border-gray-200'}`}>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="font-medium text-gray-900 truncate">{c.klant}</div>
+            <div className="font-medium text-gray-900 truncate">{c.geschrapt && <span className="text-red-700">Geschrapt · </span>}{c.klant}</div>
             <div className="text-xs text-gray-500 truncate">{c.titel ?? c.nr} · {c.wachtOpKlant ? 'klant tekende nog niet' : datumKort(c.ondertekend_op)}</div>
           </div>
           <div className="text-right shrink-0">
@@ -310,7 +334,7 @@ function ContractKaart({ c, vennoten, onOpen }: { c: ContractWeergave; vennoten:
             <div className="text-[11px] text-gray-500">{c.wachtOpKlant ? 'na ondertekening' : c.telt ? `${eur(c.teltMee)} telt mee` : 'telt niet'}</div>
           </div>
         </div>
-        <div className="mt-2 text-[11px] text-gray-500 tabular-nums leading-snug">{rekensomTekst(c)}</div>
+        <div className="mt-2 text-[11px] text-gray-500 tabular-nums leading-snug">{c.geschrapt ? 'Uit de vesting geschrapt: telt niet meer mee.' : rekensomTekst(c)}</div>
         <div className="mt-2.5 flex items-center justify-between gap-2 flex-wrap">
           <TekenStand akkoord={c.akkoord} vennoten={vennoten} />
           <div className="flex gap-1.5">
@@ -321,6 +345,40 @@ function ContractKaart({ c, vennoten, onOpen }: { c: ContractWeergave; vennoten:
             {c.wachtOpKlant && <Tag>Wacht op de klant</Tag>}
             {c.definitief && c.status !== 'stopgezet' && <Tag>Betaald</Tag>}
             {c.certificaat?.huidig && <Tag>Certificaat {c.certificaat.nummer}</Tag>}
+          </div>
+        </div>
+      </button>
+    </li>
+  )
+}
+
+function WamKaart({ w, vennoten, onOpen }: { w: WamWeergave; vennoten: VestingWeergave['vennoten']; onOpen: () => void }) {
+  const open = w.termijnen.filter((t) => t.status !== 'geannuleerd')
+  const betaald = open.filter((t) => t.status === 'betaald').length
+  return (
+    <li>
+      <button type="button" onClick={onOpen} className={`w-full text-left rounded-lg border bg-white p-3.5 sm:p-4 hover:border-gray-400 transition-colors ${w.geschrapt ? 'border-dashed border-gray-300 opacity-70' : 'border-gray-200'}`}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="font-medium text-gray-900 truncate">{w.geschrapt && <span className="text-red-700">Geschrapt · </span>}{w.klant}</div>
+            <div className="text-xs text-gray-500 truncate">{w.nr}{w.omschrijving ? ` · ${w.omschrijving}` : ''} · {betaald} van {open.length} termijnen betaald</div>
+          </div>
+          <div className="text-right shrink-0">
+            <div className={`font-semibold tabular-nums ${w.teltMee > 0 ? 'text-gray-900' : 'text-gray-400'}`}>{eur(w.teltMee)}</div>
+            <div className="text-[11px] text-gray-500">van {eur(w.contractwaarde)}</div>
+          </div>
+        </div>
+        {open.length > 0 && (
+          <div className="mt-2 h-1.5 rounded-full bg-gray-100 overflow-hidden" aria-hidden>
+            <div className="h-full bg-gray-900" style={{ width: `${Math.min(100, Math.round((betaald / open.length) * 100))}%` }} />
+          </div>
+        )}
+        <div className="mt-2.5 flex items-center justify-between gap-2 flex-wrap">
+          <TekenStand akkoord={w.akkoord} vennoten={vennoten} />
+          <div className="flex gap-1.5">
+            {w.status !== 'actief' && !w.geschrapt && <Tag>{WAM_VERLOOP[w.status]}</Tag>}
+            {w.nogBinnen > 0 && <Tag>Nog {eur(w.nogBinnen)} te komen</Tag>}
+            {w.certificaat?.huidig && <Tag>Certificaat {w.certificaat.nummer}</Tag>}
           </div>
         </div>
       </button>

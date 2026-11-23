@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Download, Loader2 } from 'lucide-react'
 import { zoekVeld } from '@/lib/zoekveld'
-import { VENNOTEN, kostSoortLabel, type Akkoord, type Vennoot } from '@/lib/vesting-akkoord'
+import { VENNOTEN, kostSoortLabel, maandTekst, type Akkoord, type Vennoot } from '@/lib/vesting-akkoord'
 import { api, eur, tijdstip } from './delen'
 
 type Rij = {
@@ -97,6 +97,15 @@ function Detail({ r, naam }: { r: Rij; naam: string }) {
             <Veld k="Netto">{eur(a.netto, true)}</Veld>
             <Veld k="Marco">{[a.afspraak && 'afspraak gezet', a.closing && 'geclosed'].filter(Boolean).join(' en ') || 'geen rol'} · {a.deel_pct}%</Veld>
             {a.verloop !== 'loopt' && <Veld k="Verloop">{a.verloop === 'stopgezet' ? `vroegtijdig stopgezet, ${eur(a.betaald_bij_stop, true)} betaald` : 'niet-betaler'}</Veld>}
+            {a.geschrapt && <Veld k="Verloop">geschrapt uit de vesting</Veld>}
+            <Veld k="Telt mee"><b>{eur(a.telt_mee, true)}</b></Veld>
+          </>
+        ) : a.soort === 'wam' ? (
+          <>
+            <Veld k="WAM-contract">{a.klant} ({a.nr}){a.omschrijving ? ` · ${a.omschrijving}` : ''}{a.geschrapt ? ' (geschrapt)' : ''}</Veld>
+            <Veld k="Contractwaarde">{eur(a.contractwaarde, true)}</Veld>
+            <Veld k="Termijnen">{a.termijnen.length ? a.termijnen.map((t) => `${maandTekst(t.periode)} ${eur(t.bedrag, true)}${t.geannuleerd ? ' geannuleerd' : t.betaald ? ' betaald' : ' open'}`).join(' · ') : 'geen'}</Veld>
+            <Veld k="Ontvangen">{eur(a.ontvangen, true)}</Veld>
             <Veld k="Telt mee"><b>{eur(a.telt_mee, true)}</b></Veld>
           </>
         ) : (

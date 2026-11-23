@@ -62,6 +62,33 @@ export type ContractWeergave = {
   schijven: { goedkoop: number; jaar: number; regulierTarief: number; jaarTarief: number | null; jaar_label: string }
   akkoord: AkkoordWeergave
   certificaat: CertificaatKort | null
+  /** Uit de vesting geschrapt na de handtekeningen: telt niet meer mee, blijft zichtbaar. */
+  geschrapt: boolean
+}
+
+/** Een WAM-contract (Marco's klanten van vóór de samenwerking), met termijnen en akkoord. */
+export type WamWeergave = {
+  id: string
+  nr: string
+  klant: string
+  omschrijving: string | null
+  client_id: string | null
+  contractwaarde: number
+  status: 'actief' | 'voltooid' | 'stopgezet' | 'niet_betaler'
+  betalingenOpSchema: boolean
+  notitie: string | null
+  /** Het schema (enkel ter info). */
+  schema: { start: string | null; frequentie: string | null; bedrag: number | null; maanden: number | null }
+  termijnen: { id: string; volgnr: number; periode: string; factuurdatum: string; bedrag: number; status: 'gepland' | 'gefactureerd' | 'betaald' | 'geannuleerd'; betaald_op: string | null; heeftFactuur: boolean }[]
+  /** Effectief ontvangen (historiek + betaalde termijnen). */
+  ontvangen: number
+  /** Nog te komen bij een lopende klant. */
+  nogBinnen: number
+  /** Wat er voor Marco meetelt. */
+  teltMee: number
+  geschrapt: boolean
+  akkoord: AkkoordWeergave
+  certificaat: CertificaatKort | null
 }
 
 /** Een inkomst (bv. via WAM) of algemene kost, met verantwoording en akkoord. */
@@ -78,7 +105,7 @@ export type AandelenWeergave = {
   maxMarco: number
   /** Alles wat voor Marco meetelt na kosten: WAM netto + contracten. */
   meetellend: number
-  /** Inkomsten via WAM of een andere weg (registraties). */
+  /** Inkomsten via WAM of een andere weg (WAM-contracten en registraties). */
   wam: { ontvangen: number; aantal: number; aandeel: number; bedragPerPct: number; max: number }
   contracten: { teltMee: number; aantal: number; aandeel: number }
   algemeneKosten: { totaal: number; vanWam: number; vanContracten: number; nietGedekt: number }
@@ -90,6 +117,7 @@ export type VestingWeergave = {
   aandelen: AandelenWeergave
   contracten: ContractWeergave[]
   registraties: RegistratieWeergave[]
+  wam: WamWeergave[]
   teBeoordelen: KandidaatContract[]
   nietMee: KandidaatContract[]
   klanten: { id: string; naam: string; closer: string | null; setter: string | null }[]
