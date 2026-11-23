@@ -150,8 +150,8 @@ export const STANDAARD_FACTURATIE: FacturatieInstellingen = {
   factuurnummer_vanaf: '',
 }
 export const STANDAARD_DOCUMENTEN: DocumentenInstellingen = {
-  logo_path: '', primaire_kleur: '#fff848', secundaire_kleur: '#111111',
-  voettekst: 'Dit document werd automatisch gegenereerd door het NextGenMedia-portaal.', contactregel: '',
+  logo_path: '', primaire_kleur: '#0f0f0f', secundaire_kleur: '#272727',
+  voettekst: 'Dit document werd automatisch gegenereerd door de app van NextGen Agency.', contactregel: '',
   bestandsnaam_patroon: '{type}_{nummer}_{datum}',
 }
 

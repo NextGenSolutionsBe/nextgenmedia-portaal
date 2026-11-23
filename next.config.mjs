@@ -54,6 +54,11 @@ const nextConfig = {
   experimental: {
     // IMAP en mailverwerking (mail-opvolging) draaien enkel op de server: niet bundelen.
     serverComponentsExternalPackages: ['imapflow', 'mailparser'],
+    // De lettertypes van de huisstijl (Archivo, JetBrains Mono) voor de pdf's
+    // (lib/pdf-merk.ts) en het woordmerk (public/logo-pdf.png) mee in elke functie.
+    outputFileTracingIncludes: {
+      '/**/*': ['./lib/fonts/**/*', './public/logo-pdf.png'],
+    },
     serverActions: {
       bodySizeLimit: '10mb',
     },

@@ -1,20 +1,17 @@
 import { cn } from '@/lib/utils'
 
-// Logo source. A temporary SVG placeholder lives at /public/logo.svg.
-// To use the real logo: drop your PNG at /public/logo.png and change this to
-// '/logo.png' (or just overwrite logo.svg with your own SVG).
-const LOGO_SRC = '/logo.png'
+// Huisstijl NextGen Agency (brand guideline, 23 nov 2026): de ster als icoon,
+// het woordmerk NEXTGEN AGENCY met de vervaagde X. Beide uit de aangeleverde
+// logobestanden (public/merk/); de blur van de X nooit zelf opnieuw maken.
+const STER_WIT = '/merk/ster-wit.png'
+const STER_ZWART = '/merk/ster-zwart.png'
 
 /**
- * NextGenMedia logo mark.
- *
- * Renders the brand logo. Drop the lightning-bolt PNG (transparent background
- * recommended) in the project's `public/` folder as `logo.png` and it appears
- * everywhere this component is used.
+ * Het icoon van NextGen Agency: de ster.
  *
  * `variant`:
- *   - 'tile'  → rounded square with the dark brand background (sidebars, headers)
- *   - 'plain' → just the mark, no background (use on already-dark surfaces)
+ *   - 'tile'  → witte ster op een zwart vlak (zijbalken, kopjes, publieke pagina's)
+ *   - 'plain' → enkel de zwarte ster, zonder vlak
  */
 export function Logo({
   className,
@@ -28,14 +25,22 @@ export function Logo({
   if (variant === 'plain') {
     return (
       // eslint-disable-next-line @next/next/no-img-element
-      <img src={LOGO_SRC} alt={alt} className={cn('object-contain', className)} />
+      <img src={STER_ZWART} alt={alt} className={cn('object-contain', className)} />
     )
   }
 
   return (
-    <div className={cn('rounded-lg bg-[#0b0f1a] flex items-center justify-center overflow-hidden', className)}>
+    <div className={cn('rounded-lg bg-[#0f0f0f] flex items-center justify-center overflow-hidden', className)}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={LOGO_SRC} alt={alt} className="h-[78%] w-[78%] object-contain" />
+      <img src={STER_WIT} alt={alt} className="h-[56%] w-[56%] object-contain" />
     </div>
+  )
+}
+
+/** Het woordmerk NEXTGEN AGENCY (zwart op licht, of wit op donker). Hoogte via className. */
+export function Woordmerk({ className, wit = false }: { className?: string; wit?: boolean }) {
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={wit ? '/merk/logo-wit.png' : '/merk/logo-zwart.png'} alt="NextGen Agency" className={cn('w-auto object-contain', className)} />
   )
 }

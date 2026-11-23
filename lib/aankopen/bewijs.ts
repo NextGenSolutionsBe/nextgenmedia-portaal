@@ -20,7 +20,7 @@ import { BEVESTIGD } from './status'
 type Admin = { from: (t: string) => any; rpc: (fn: string, args: Record<string, unknown>) => any; storage: any }
 
 export const BUCKET = 'contracts'
-const GEEL = rgb(1, 0.973, 0.282)
+const GEEL = rgb(0.059, 0.059, 0.059) /* huisstijl NextGen Agency: zwart (vroeger geel) */
 const ZWART = rgb(0.07, 0.07, 0.07)
 const GRIJS = rgb(0.42, 0.45, 0.5)
 const LICHT = rgb(0.95, 0.96, 0.97)

@@ -1,0 +1,2 @@
+Archivo (Omnibus-Type) en JetBrains Mono (JetBrains): SIL Open Font License 1.1
+https://openfontlicense.org — gebruikt in de pdf's van de app (lib/pdf-merk.ts).

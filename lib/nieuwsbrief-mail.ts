@@ -67,7 +67,7 @@ export function bouwNieuwsbriefMail(n: Pick<Nieuwsbrief, 'titel' | 'categorie' |
 <body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5"><tr><td align="center" style="padding:24px 12px">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:#fff;border-radius:16px;overflow:hidden">
-<tr><td style="padding:20px 32px;border-bottom:4px solid ${m.accent}"><span style="font-size:16px;font-weight:800;color:#111;letter-spacing:-0.02em">${m.deel1}<span style="border-bottom:3px solid ${m.accent}">${m.deel2}</span></span><span style="float:right;font-size:12px;color:#71717a;padding-top:2px">${esc(categorieLabel(n.categorie, n.categorie_label))}</span></td></tr>
+<tr><td style="padding:20px 32px;border-bottom:${m.logo ? '1px solid #e0e0e0' : `4px solid ${m.accent}`}">${m.logo ? `<img src="${m.logo}" alt="${m.naam}" width="120" style="display:inline-block;width:120px;height:auto;border:0;vertical-align:middle">` : `<span style="font-size:16px;font-weight:800;color:#111;letter-spacing:-0.02em">${m.deel1}<span style="border-bottom:3px solid ${m.accent}">${m.deel2}</span></span>`}<span style="float:right;font-size:12px;color:#71717a;padding-top:2px">${esc(categorieLabel(n.categorie, n.categorie_label))}</span></td></tr>
 ${cover ? `<tr><td><a href="${esc(o.appLink)}"><img src="${esc(cover)}" alt="" width="600" style="width:100%;height:auto;display:block"></a></td></tr>` : ''}
 <tr><td style="padding:28px 32px 8px">
 <h1 style="margin:0 0 12px;font-size:28px;line-height:1.2;color:#111">${esc(n.titel)}</h1>

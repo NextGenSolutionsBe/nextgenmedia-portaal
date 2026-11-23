@@ -42,7 +42,7 @@ export function PostKaart({ netwerk, tekst, link, beeld, gepubliceerd, cijfers }
       </div>
     </>
   )
-  const klas = 'block bg-white rounded-[22px] border border-black/[0.04] shadow-md overflow-hidden'
+  const klas = 'block bg-white rounded-[14px] border border-black/[0.05] shadow-md overflow-hidden'
   return link
     ? <a href={link} target="_blank" rel="noopener noreferrer" className={`${klas} hover:shadow-lg transition-shadow`}>{inhoud}</a>
     : <div className={klas}>{inhoud}</div>

@@ -1,6 +1,4 @@
-import { readFile } from 'fs/promises'
-import path from 'path'
-import { PDFDocument, StandardFonts, rgb, pushGraphicsState, popGraphicsState, moveTo, appendBezierCurve, closePath, clip, endPath, type PDFFont, type PDFPage, type PDFImage, type RGB } from 'pdf-lib'
+import { PDFDocument, rgb, pushGraphicsState, popGraphicsState, moveTo, appendBezierCurve, closePath, clip, endPath, type PDFFont, type PDFPage, type PDFImage, type RGB } from 'pdf-lib'
 import { veilig } from '@/lib/shoot-document-model'
 import { MERK_STIJL, type MailMerk } from '@/lib/merk-mail'
 import {
@@ -8,6 +6,7 @@ import {
   type OfferteInhoud,
 } from '@/lib/offerte-fiche'
 import { offerteVoorwaarden } from '@/lib/offerte-voorwaarden'
+import { merkFonts, merkLogo, MERK_ZWART } from '@/lib/pdf-merk'
 import type { OfferteBedrijf, OfferteContact } from '@/lib/offerte-afzender'
 
 /**
@@ -39,19 +38,16 @@ export type OffertePdfInvoer = {
 const A4 = { w: 595.28, h: 841.89 }
 const M = 50
 const ONDER = 64
-const ZWART = rgb(0.07, 0.07, 0.08)
-const DONKER = rgb(0.2, 0.21, 0.24)
-const GRIJS = rgb(0.45, 0.47, 0.52)
-const LICHTGRIJS = rgb(0.62, 0.64, 0.68)
-const LIJN = rgb(0.87, 0.88, 0.9)
-const VOORWAARDEN = rgb(0.5, 0.52, 0.56)
-const VLAK = rgb(0.965, 0.968, 0.975)
+// Neutrale grijzen uit de huisstijl (zwart #0F0F0F, antraciet #272727, lichtgrijs #E0E0E0).
+const ZWART = rgb(0.059, 0.059, 0.059)
+const DONKER = rgb(0.153, 0.153, 0.153)
+const GRIJS = rgb(0.43, 0.43, 0.43)
+const LICHTGRIJS = rgb(0.6, 0.6, 0.6)
+const LIJN = rgb(0.878, 0.878, 0.878)
+const VOORWAARDEN = rgb(0.5, 0.5, 0.5)
+const VLAK = rgb(0.957, 0.957, 0.957)
 const GROEN = rgb(0.09, 0.45, 0.25)
 
-function hex(h: string): RGB {
-  const n = parseInt(h.replace('#', ''), 16)
-  return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255)
-}
 
 /** Regelafbreking op breedte; te lange woorden worden hard afgebroken. */
 function wikkel(font: PDFFont, tekst: string, grootte: number, breedte: number): string[] {
@@ -78,14 +74,12 @@ function wikkel(font: PDFFont, tekst: string, grootte: number, breedte: number):
   return regels
 }
 
-async function logo(pdf: PDFDocument): Promise<PDFImage | null> {
-  try { return await pdf.embedPng(new Uint8Array(await readFile(path.join(process.cwd(), 'public', 'logo-pdf.png')))) } catch { return null }
-}
-
 export async function maakOffertePdf(inv: OffertePdfInvoer): Promise<Uint8Array> {
+  // Elke offerte in de huisstijl van NextGen Agency: zwart-wit, Archivo en
+  // JetBrains Mono, het woordmerk (ongeacht het merk; de handelsnaam staat bij de dienstverlener).
   const stijl = MERK_STIJL[inv.merk]
-  const ACCENT = hex(stijl.accent)
-  const OP_ACCENT = hex(stijl.opAccent)
+  const ACCENT = MERK_ZWART
+  const OP_ACCENT = rgb(1, 1, 1)
   const i = inv.inhoud
   const a = i.algemeen
   const prijs = berekenPrijs(i.prijs, i.extra)
@@ -96,8 +90,7 @@ export async function maakOffertePdf(inv: OffertePdfInvoer): Promise<Uint8Array>
   pdf.setSubject(`Offerte voor ${veilig(inv.klant.naam)}`)
   pdf.setAuthor(stijl.naam)
   pdf.setCreator(`${stijl.naam} portaal`)
-  const font = await pdf.embedFont(StandardFonts.Helvetica)
-  const vet = await pdf.embedFont(StandardFonts.HelveticaBold)
+  const { font, vet, mono } = await merkFonts(pdf)
   const breedte = A4.w - M * 2
 
   let page: PDFPage = pdf.addPage([A4.w, A4.h])
@@ -140,17 +133,11 @@ export async function maakOffertePdf(inv: OffertePdfInvoer): Promise<Uint8Array>
   // ── Kop ─────────────────────────────────────────────────────────────────────
   page.drawRectangle({ x: 0, y: A4.h - 6, width: A4.w, height: 6, color: ACCENT })
   y = A4.h - 40
-  let woordX = M
-  if (inv.merk === 'nextgenmedia') {
-    const l = await logo(pdf)
-    if (l) { const h = 36, w = (l.width / l.height) * h; page.drawImage(l, { x: M - 4, y: y - h + 6, width: w, height: h }); woordX = M + w + 2 }
-  }
-  tekst(stijl.deel1, woordX, y - 18, { size: 17, f: vet })
-  const d1 = vet.widthOfTextAtSize(stijl.deel1, 17)
-  tekst(stijl.deel2, woordX + d1, y - 18, { size: 17, f: font })
-  page.drawRectangle({ x: woordX + d1, y: y - 23, width: font.widthOfTextAtSize(stijl.deel2, 17), height: 2.5, color: ACCENT })
+  const l = await merkLogo(pdf)
+  if (l) { const h = 40, w = (l.width / l.height) * h; page.drawImage(l, { x: M - 3, y: y - h + 8, width: w, height: h }) }
+  else tekst('NEXTGEN AGENCY', M, y - 18, { size: 17, f: vet })
   tekst('OFFERTE', A4.w - M, y - 14, { size: 20, f: vet, rechts: true })
-  tekst(inv.nummer, A4.w - M, y - 28, { size: 10, kleur: GRIJS, rechts: true })
+  tekst(inv.nummer, A4.w - M, y - 28, { size: 9, f: mono, kleur: GRIJS, rechts: true })
   if (inv.voorbeeld) tekst('Voorbeeld, nog niet verstuurd', A4.w - M, y - 41, { size: 8, kleur: rgb(0.75, 0.42, 0.05), rechts: true })
   y -= 64
 
@@ -158,7 +145,7 @@ export async function maakOffertePdf(inv: OffertePdfInvoer): Promise<Uint8Array>
   const kol = (breedte - 24) / 2
   const blok = (x: number, label: string, regels: (string | null | undefined)[]): number => {
     let yy = y
-    tekst(label, x, yy - 8, { size: 7.5, f: vet, kleur: GRIJS })
+    tekst(label, x, yy - 8, { size: 7.5, f: mono, kleur: GRIJS })
     yy -= 20
     regels.filter((r): r is string => !!r && !!veilig(r)).forEach((r, idx) => {
       for (const w of wikkel(idx === 0 ? vet : font, r, idx === 0 ? 10 : 9, kol)) {
@@ -186,7 +173,7 @@ export async function maakOffertePdf(inv: OffertePdfInvoer): Promise<Uint8Array>
   const cel = breedte / meta.length
   meta.forEach(([l, w], idx) => {
     const x = M + 14 + idx * cel
-    tekst(l, x, y - 16, { size: 7, f: vet, kleur: GRIJS })
+    tekst(l, x, y - 16, { size: 7, f: mono, kleur: GRIJS })
     const v = wikkel(vet, w, 10, cel - 20)[0] ?? ''
     tekst(v, x, y - 32, { size: 10, f: vet })
   })
@@ -216,7 +203,7 @@ export async function maakOffertePdf(inv: OffertePdfInvoer): Promise<Uint8Array>
   if (prijs.excl > 0) {
     ruimte(72); y -= 8
     page.drawRectangle({ x: M, y: y - 58, width: breedte, height: 58, color: ACCENT })
-    tekst('TOTALE INVESTERING', M + 18, y - 20, { size: 7.5, f: vet, kleur: OP_ACCENT })
+    tekst('TOTALE INVESTERING', M + 18, y - 20, { size: 7.5, f: mono, kleur: OP_ACCENT })
     tekst(euro(prijs.excl), M + 18, y - 44, { size: 22, f: vet, kleur: OP_ACCENT })
     tekst('excl. btw', M + 24 + vet.widthOfTextAtSize(veilig(euro(prijs.excl)), 22), y - 44, { size: 9, kleur: OP_ACCENT })
     const rechts: string[] = []
@@ -344,7 +331,7 @@ export async function maakOffertePdf(inv: OffertePdfInvoer): Promise<Uint8Array>
       tekst(ini, cx - vet.widthOfTextAtSize(ini, 16) / 2, cy - 6, { size: 16, f: vet, kleur: OP_ACCENT })
     }
     const tx = cx + r + 20
-    tekst('JOUW CONTACTPERSOON', tx, y - 20, { size: 7.5, f: vet, kleur: GRIJS })
+    tekst('JOUW CONTACTPERSOON', tx, y - 20, { size: 7.5, f: mono, kleur: GRIJS })
     tekst(c.naam, tx, y - 38, { size: 14, f: vet })
     tekst(c.functie, tx, y - 52, { size: 9.5, kleur: DONKER })
     const lijnen = [c.telefoon ? `Tel. ${c.telefoon}` : null, c.email].filter(Boolean).join('   ·   ')
@@ -359,7 +346,7 @@ export async function maakOffertePdf(inv: OffertePdfInvoer): Promise<Uint8Array>
   const bw = (breedte - 16) / 2, bh = 128
   const vak = (x: number, label: string) => {
     page.drawRectangle({ x, y: y - bh, width: bw, height: bh, borderColor: LIJN, borderWidth: 1, color: rgb(1, 1, 1) })
-    tekst(label, x + 12, y - 16, { size: 7.5, f: vet, kleur: GRIJS })
+    tekst(label, x + 12, y - 16, { size: 7.5, f: mono, kleur: GRIJS })
   }
   vak(M, 'VOOR AKKOORD, DE KLANT')
   vak(M + bw + 16, `VOOR ${veilig(b.vennootschap).toUpperCase()}`)
@@ -394,7 +381,7 @@ export async function maakOffertePdf(inv: OffertePdfInvoer): Promise<Uint8Array>
   const art = offerteVoorwaarden({ vennootschap: b.vennootschap, adres: b.adres, ondernemingsnummer: b.ondernemingsnummer, betalingstermijn: inv.betalingstermijn })
   const VS = 6.2, VI = 8.1, GAP = 18, kw2 = (breedte - GAP) / 2
   if (y - ONDER < 240) nieuwePagina(); else y -= 18
-  tekst('ALGEMENE VOORWAARDEN', M, y - 8, { size: 7.5, f: vet, kleur: GRIJS })
+  tekst('ALGEMENE VOORWAARDEN', M, y - 8, { size: 7.5, f: mono, kleur: GRIJS })
   y -= 18
   // Eerst alle regels, dan per pagina verdelen; de laatste pagina krijgt twee even lange kolommen.
   type Regel = { t: string; f: PDFFont; h: number }
@@ -444,16 +431,16 @@ export async function voegAkkoordPaginaToe(bron: Uint8Array, a: {
   merk: MailMerk; titel: string; klant: string | null; naam: string; op: string
   handtekening?: Uint8Array | null; voorwaardenUrl: string
 }): Promise<Uint8Array> {
-  const stijl = MERK_STIJL[a.merk]
-  const ACCENT = hex(stijl.accent)
+  const ACCENT = MERK_ZWART
   const pdf = await PDFDocument.load(bron, { ignoreEncryption: true })
-  const font = await pdf.embedFont(StandardFonts.Helvetica)
-  const vet = await pdf.embedFont(StandardFonts.HelveticaBold)
+  const { font, vet, mono } = await merkFonts(pdf)
   const p = pdf.addPage([A4.w, A4.h])
   const t = (s: string, x: number, y: number, size = 10, f: PDFFont = font, kleur: RGB = ZWART) => p.drawText(veilig(s), { x, y, size, font: f, color: kleur })
   p.drawRectangle({ x: 0, y: A4.h - 6, width: A4.w, height: 6, color: ACCENT })
   let y = A4.h - 70
-  t(`${stijl.deel1}${stijl.deel2}`, M, y, 16, vet)
+  const l = await merkLogo(pdf)
+  if (l) { const h = 40, w = (l.width / l.height) * h; p.drawImage(l, { x: M - 3, y: y - 12, width: w, height: h }) }
+  else t('NEXTGEN AGENCY', M, y, 16, vet)
   y -= 50
   t('Akkoord met de offerte', M, y, 22, vet)
   y -= 30
@@ -471,7 +458,7 @@ export async function voegAkkoordPaginaToe(bron: Uint8Array, a: {
   }
   if (a.handtekening) {
     y -= 10
-    t('HANDTEKENING', M, y, 7.5, vet, GRIJS)
+    t('HANDTEKENING', M, y, 7.5, mono, GRIJS)
     try {
       const img = await pdf.embedPng(a.handtekening)
       const s = Math.min(240 / img.width, 90 / img.height)

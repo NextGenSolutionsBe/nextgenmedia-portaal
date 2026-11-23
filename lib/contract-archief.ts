@@ -183,7 +183,7 @@ export async function maakCertificaatPdf(d: Dossier, stijl: CertificaatHuisstijl
   const vet = await pdf.embedFont(StandardFonts.HelveticaBold)
   const mono = await pdf.embedFont(StandardFonts.Courier)
 
-  const ACCENT = rgb(...hexKleur(stijl.accent, [1, 0.973, 0.282]))     // #fff848
+  const ACCENT = rgb(...hexKleur(stijl.accent, [0.059, 0.059, 0.059]))     // #0f0f0f (huisstijl NextGen Agency)
   const TEKST = rgb(...hexKleur(stijl.tekstkleur, [0.07, 0.07, 0.07]))
   const GRIJS = rgb(0.42, 0.42, 0.42)
   const LICHT = rgb(0.86, 0.86, 0.86)

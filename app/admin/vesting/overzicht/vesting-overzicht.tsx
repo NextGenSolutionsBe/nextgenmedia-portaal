@@ -134,8 +134,8 @@ export function VestingOverzicht({ data, tekenen, regels, regelsOpen = false }: 
         </div>
         <div className="mt-4 h-2.5 rounded-full overflow-hidden flex bg-gray-100" aria-hidden>
           <div className="bg-gray-900" style={{ width: `${a.bram * 100}%` }} />
-          <div className="bg-gray-400" style={{ width: `${a.chiara * 100}%` }} />
-          <div className="bg-[#fff848] border-l border-white" style={{ width: `${a.marco * 100}%` }} />
+          <div className="bg-gray-300" style={{ width: `${a.chiara * 100}%` }} />
+          <div className="bg-gray-600 border-l border-white" style={{ width: `${a.marco * 100}%` }} />
         </div>
         <div className="mt-3 rounded-md bg-gray-50 px-3 py-2 text-xs text-gray-600 flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className="font-medium text-gray-900">Volgens wat alle drie tekenden:</span>

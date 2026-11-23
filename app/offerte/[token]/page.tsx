@@ -8,6 +8,7 @@ import { createAdminSupabaseClient, getSessionUser, getUserRole, isActiveStaff }
 import { offerteVanToken, registreerGeopend } from '@/lib/offertes-server'
 import { isAutomatischeBezoeker } from '@/lib/klant-geopend'
 import { merkStijl } from '@/lib/merk-mail'
+import { Woordmerk } from '@/components/logo'
 import { AccepteerKnop } from './accepteer-knop'
 import { getekendOp } from '@/lib/offerte-fiche'
 
@@ -25,7 +26,8 @@ export default async function OffertePagina({ params }: { params: { token: strin
   const admin = createAdminSupabaseClient()
   const o = await offerteVanToken(admin, params.token)
   if (!o || o.status === 'concept') notFound()
-  const m = merkStijl(o.merk)
+  // Elke offerte in de huisstijl van NextGen Agency (zwart-wit), ongeacht het merk.
+  const m = { ...merkStijl(o.merk), accent: '#0f0f0f', opAccent: '#ffffff' }
   const vandaag = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Brussels' })
   const verlopen = o.status === 'verstuurd' && !!o.geldig_tot && o.geldig_tot < vandaag
 
@@ -41,10 +43,10 @@ export default async function OffertePagina({ params }: { params: { token: strin
   }
 
   const kop = (
-    <header className="bg-white border-b border-gray-200" style={{ borderBottomColor: m.accent, borderBottomWidth: 3 }}>
+    <header className="bg-white border-b border-gray-200">
       <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between gap-3">
-        <span className="text-lg font-extrabold tracking-tight text-gray-900">{m.deel1}<span style={{ borderBottom: `3px solid ${m.accent}` }}>{m.deel2}</span></span>
-        <span className="text-xs text-gray-500">Offerte</span>
+        <Woordmerk className="h-9" />
+        <span className="label-mono">Offerte</span>
       </div>
     </header>
   )

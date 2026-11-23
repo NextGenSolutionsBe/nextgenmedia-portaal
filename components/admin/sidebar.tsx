@@ -17,7 +17,7 @@ import { OpslagMeter } from './opslag-meter'
 import { moduleBeschikbaar, MODULE_DASHBOARD_KEY, type AlleInstellingen, type Rol } from '@/lib/instellingen/model'
 import { useEffect, useState } from 'react'
 import { useRefresh } from '@/lib/use-refresh'
-import { Logo } from '@/components/logo'
+import { Woordmerk } from '@/components/logo'
 
 type NavChild = { label: string; href: string; icon: React.ElementType; exact?: boolean }
 type NavEntry = {
@@ -335,7 +335,7 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
       {/* ── Sidebar panel ── */}
       <aside
         className={cn(
-          'fixed left-3 top-3 bottom-3 w-[240px] max-w-[calc(100vw-24px)] glas rounded-[28px] shadow-xl text-gray-700 flex flex-col z-40 overflow-hidden',
+          'fixed left-3 top-3 bottom-3 w-[240px] max-w-[calc(100vw-24px)] glas rounded-[18px] shadow-xl text-gray-700 flex flex-col z-40 overflow-hidden',
           'transition-transform duration-300 ease-in-out',
           'md:translate-x-0',
           mobileOpen ? 'translate-x-0' : '-translate-x-[110%]',
@@ -344,10 +344,8 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
         {/* Logo + close */}
         <div className="px-5 pt-5 pb-3">
           <div className="flex items-center gap-3">
-            <Logo className="h-8 w-8 shrink-0" />
             <div className="flex-1 min-w-0">
-              <div className="text-[15px] font-medium text-gray-900 leading-tight tracking-tight">NextGen Agency</div>
-              <div className="text-[11px] text-gray-400">Admin</div>
+              <Woordmerk className="h-[30px]" />
             </div>
             {/* Refresh */}
             <button
@@ -409,7 +407,7 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
               <div key={section.title ?? `sec-${si}`} className={si > 0 ? 'mt-3' : ''}>
                 {section.title && (
                   <button type="button" onClick={() => wisselSectie(section.title!, open)} aria-expanded={open}
-                    className="w-full px-3.5 py-1 mb-0.5 flex items-center gap-1.5 text-[11px] font-normal text-gray-400 hover:text-gray-700 rounded-lg">
+                    className="w-full px-3.5 py-1 mb-0.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] font-normal text-gray-400 hover:text-gray-700 rounded-lg">
                     <span className="flex-1 text-left">{section.title}</span>
                     {!open && telling > 0 && <span className="min-w-[16px] h-[16px] px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">{telling > 99 ? '99+' : telling}</span>}
                     <ChevronDown className={cn('h-3 w-3 transition-transform', !open && '-rotate-90')} />

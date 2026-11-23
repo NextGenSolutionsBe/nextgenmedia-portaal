@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { Suspense } from 'react'
-import { Logo } from '@/components/logo'
+import { Woordmerk } from '@/components/logo'
 
 function LoginForm() {
   const router = useRouter()
@@ -115,9 +115,9 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="text-center mb-8">
-          <Logo className="inline-flex h-11 w-11 rounded-lg mb-4" />
-          <h1 className="text-xl font-semibold text-gray-900">NextGen Agency</h1>
-          <p className="text-sm text-gray-500 mt-1">Portaal toegang</p>
+          <h1 className="sr-only">NextGen Agency</h1>
+          <Woordmerk className="h-14 mx-auto mb-5" />
+          <p className="label-mono">Portaal toegang</p>
         </div>
 
         <div className="bg-white rounded-lg border border-gray-200 p-6">
