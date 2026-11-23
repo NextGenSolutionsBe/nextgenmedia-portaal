@@ -88,6 +88,8 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
   onVernieuw?: () => void
 }) {
   const [c, setC] = useState<Concept>(() => uit(o))
+  // Na een opvolgmail: de tijdlijn opnieuw laden (de mail staat er als notitie).
+  const [notitieVersie, setNotitieVersie] = useState(0)
   const aangeraakt = useRef(new Set<Veld>())
   const [bezig, setBezig] = useState(false)
   const [eigenDienst, setEigenDienst] = useState('')
@@ -229,7 +231,8 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
           )}
 
           {/* Opvolging: wat er na een meeting, offerte of contract nog moet gebeuren (uit mails en agenda). */}
-          {o && <MailOpvolging opdrachtId={o.id} onNaarFase={(k) => onVerplaats(o, k)} />}
+          {o && <MailOpvolging opdrachtId={o.id} onNaarFase={(k) => onVerplaats(o, k)}
+            contractOpen={o.kolom === 'contract' && !!o.contract_id} offerteOpen={o.offerte?.status === 'verstuurd'} onMail={() => setNotitieVersie((v) => v + 1)} />}
 
           <section className="px-5 py-4 space-y-4 border-b border-gray-100">
             <div>
@@ -419,7 +422,7 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
           {/* Interne communicatie. */}
           <section className="px-5 py-4">
             <p className="text-sm font-semibold flex items-center gap-2"><MessageSquare className="h-4 w-4" />Notities <span className="text-[11px] font-normal text-gray-500 flex items-center gap-1"><Lock className="h-3 w-3" />enkel intern</span></p>
-            {o ? <Notities opdrachtId={o.id} ik={ik} context={dicteerContext} /> : (
+            {o ? <Notities opdrachtId={o.id} ik={ik} context={dicteerContext} versie={notitieVersie} /> : (
               <div className="mt-2">
                 <textarea rows={3} className="input-base" value={eersteNotitie} onChange={(e) => setEersteNotitie(e.target.value)} maxLength={4000}
                   placeholder="Bv. afspraak gehad om dit te bespreken, klant wil starten in januari" aria-label="Eerste notitie" />
@@ -446,7 +449,7 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
 }
 
 /** Tijdlijn van de kaart: notities van het team en wat er automatisch gebeurde. */
-function Notities({ opdrachtId, ik, context }: { opdrachtId: string; ik: string | null; context?: string | null }) {
+function Notities({ opdrachtId, ik, context, versie = 0 }: { opdrachtId: string; ik: string | null; context?: string | null; versie?: number }) {
   const [lijst, setLijst] = useState<Notitie[] | null>(null)
   const [tekst, setTekst] = useState('')
   const [bezig, setBezig] = useState(false)
@@ -459,7 +462,7 @@ function Notities({ opdrachtId, ik, context }: { opdrachtId: string; ik: string 
       setLijst(j.notities ?? [])
     } catch (e) { setLijst([]); toast.error(e instanceof Error ? e.message : 'Notities laden mislukt') }
   }, [opdrachtId])
-  useEffect(() => { void laad() }, [laad])
+  useEffect(() => { void laad() }, [laad, versie])
 
   const plaats = async () => {
     const t = tekst.trim()

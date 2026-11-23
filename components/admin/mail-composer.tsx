@@ -36,6 +36,8 @@ export type MailContext =
   | { type: 'algemeen_contract'; contractId: string; titel: string; email?: string | null; tegenpartij?: string | null; partijNodig: boolean; partijGetekend: boolean; onsGetekend: boolean }
   // Shoot planner: het shootplan naar iedereen die erbij is. Eén mail per persoon, elk met een eigen link; de pdf als bijlage.
   | { type: 'shoot'; shootId: string }
+  // Projectkaart: opvolgmail met voorstellen (herinnering contract, offerte, na de meeting, even polsen, samen zitten, eigen mail).
+  | { type: 'project'; opdrachtId: string; voorkeur?: string | null }
 
 /** Resultaat van een gelukte verzending (of van een eerder gelukte, bij dezelfde verzendpoging). */
 export type MailVerstuurd = { id: string | null; verstuurd_op: string | null; al_verstuurd?: boolean }
@@ -80,6 +82,13 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
   const [bijlage, setBijlage] = useState(true)
   // Huisstijl van de mail: NextGenMedia (geel) of NextGenSolutions (blauw). Meetingmails vertrekken altijd van NextGenMedia.
   const [merk, setMerk] = useState<MailMerk>('nextgenmedia')
+  // Projectkaart: klant, contract (voor de herinnering via de contractroute) en het beste adres per soort voorstel.
+  const [project, setProject] = useState<{ client_id: string | null; contract_id: string | null; adressen: { contract: string | null; offerte: string | null; klant: string | null } } | null>(null)
+  const adresVoor = (kind: string | null | undefined, pr = project): string => {
+    if (!pr) return ''
+    const a = pr.adressen
+    return (kind === 'contract' ? a.contract : kind === 'offerte' ? a.offerte : null) || a.klant || a.contract || a.offerte || ''
+  }
   const stijl = MERK_STIJL[context.type === 'meeting' ? 'nextgenmedia' : merk]
   // Wisselen van merk past ook de merknaam in onderwerp en tekst aan ("Met vriendelijke groet, NextGenMedia").
   const kiesMerk = (m: MailMerk) => {
@@ -117,7 +126,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
     (async () => {
       try {
         // Een meetingmail vertrekt uit de meeting zelf, niet uit een template.
-        const tpl = context.type === 'meeting' || context.type === 'offerte' || context.type === 'algemeen_contract' || context.type === 'shoot' ? { templates: [] } : await (await fetch('/api/admin/email/templates')).json()
+        const tpl = context.type === 'meeting' || context.type === 'offerte' || context.type === 'algemeen_contract' || context.type === 'shoot' || context.type === 'project' ? { templates: [] } : await (await fetch('/api/admin/email/templates')).json()
         const eigen = (tpl.templates ?? []) as Template[]
         // De ingebouwde template van deze soort tonen zolang er geen eigen versie van bestaat.
         const extra = context.type === 'client' && !eigen.some((t) => t.kind === context.kind) ? ingebouwd(context.kind) : null
@@ -217,6 +226,18 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
           setToEmail(context.email ?? '')
           setSubject(m.onderwerp); setBody(m.tekst); setCtaText(m.knop); setCtaLink(context.link)
           if (context.merk) setMerk(context.merk)
+        } else if (context.type === 'project') {
+          const r = await fetch(`/api/admin/opdrachten/${context.opdrachtId}/mail`, { cache: 'no-store' })
+          const j = await r.json()
+          if (!r.ok) throw new Error(j.error || 'Laden mislukt')
+          const lijst: Template[] = ((j.voorstellen ?? []) as { id: string; naam: string; onderwerp: string; tekst: string; knop: string | null; link: string | null }[])
+            .map((v) => ({ id: `voorstel:${v.id}`, name: v.naam, subject: v.onderwerp, body: v.tekst, kind: v.id, cta_text: v.knop, cta_link: v.link }))
+          setTemplates(lijst)
+          const pr = { client_id: j.client_id ?? null, contract_id: j.contract_id ?? null, adressen: j.adressen ?? { contract: null, offerte: null, klant: j.aan ?? null } }
+          setProject(pr)
+          if (j.merk === 'nextgensolutions' || j.merk === 'nextgenmedia') setMerk(j.merk)
+          const kies = lijst.find((t) => t.kind === (context.voorkeur ?? j.standaard)) ?? lijst[0]
+          if (kies) { applyTemplate(kies, {}); setToEmail(adresVoor(kies.kind, pr) || j.aan || '') }
         } else if (context.type === 'meeting') {
           const r = await fetch(`/api/admin/meetings/${context.meetingId}/mail`)
           const j = await r.json()
@@ -228,7 +249,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
         } else {
           setToEmail(context.toEmail ?? '')
         }
-      } catch (e) { setError(e instanceof Error && (context.type === 'meeting' || context.type === 'klantaccount' || context.type === 'shoot') ? e.message : 'Laden mislukt') } finally { setLoadingCtx(false) }
+      } catch (e) { setError(e instanceof Error && (context.type === 'meeting' || context.type === 'klantaccount' || context.type === 'shoot' || context.type === 'project') ? e.message : 'Laden mislukt') } finally { setLoadingCtx(false) }
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -244,6 +265,11 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
   const onPick = (id: string) => {
     const t = templates.find((x) => x.id === id)
     // De gegevens van de klant blijven gelden bij het wisselen van template.
+    // Projectkaart: ook het adres volgt het voorstel (de ondertekenaar voor het contract), tenzij je het zelf aanpaste.
+    if (t && context.type === 'project' && project) {
+      const auto = [project.adressen.contract, project.adressen.offerte, project.adressen.klant, ''].filter((x) => x !== null)
+      if (auto.includes(toEmail.trim())) setToEmail(adresVoor(t.kind))
+    }
     if (t) applyTemplate(t, vars)
     else { setTemplateId(''); }
   }
@@ -329,6 +355,27 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
             herinnering: tpl?.kind === 'contract_herinnering', merk,
           }),
         })
+      } else if (context.type === 'project') {
+        // Herinnering voor het contract via de contractroute (komt bij het contract onder Verzonden mails), de rest als gewone mail.
+        const viaContract = tpl?.kind === 'contract' && !!project?.contract_id
+        res = viaContract
+          ? await fetch(`/api/admin/contracts/${project!.contract_id}/send-mail`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ to_email: toEmail, subject, body, cta_text: ctaText || null, cta_link: ctaLink || null, herinnering: true, merk }),
+          })
+          : await fetch('/api/admin/email/send', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              to_email: toEmail, to_client_id: project?.client_id ?? null, subject, body, cta_text: ctaText || null, cta_link: ctaLink || null,
+              template_name: tpl?.name ?? null, kind: 'project_opvolging', verzend_sleutel: sleutel, merk,
+            }),
+          })
+        const j = await res.clone().json().catch(() => ({}))
+        const emailId = viaContract ? j.log_id : j.id
+        if (res.ok && emailId) {
+          // Op de kaart en in de opvolging; lukt dat niet, dan is de mail toch vertrokken.
+          await fetch(`/api/admin/opdrachten/${context.opdrachtId}/mail`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actie: 'verstuurd', email_id: emailId, soort: tpl?.kind ?? 'eigen' }) }).catch(() => null)
+        }
       } else {
         res = await fetch('/api/admin/email/send', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -415,7 +462,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
               <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer"><input type="checkbox" checked={kopieInfo} onChange={(e) => setKopieInfo(e.target.checked)} />Kopie in de mailbox van info@nextgenmedia.be (bcc)</label>
             ) : (
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Template</label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">{context.type === 'project' ? 'Voorstel' : 'Template'}</label>
                 <select className={inp} value={templateId} onChange={(e) => onPick(e.target.value)}>
                   <option value="">— Eigen mail —</option>
                   {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}

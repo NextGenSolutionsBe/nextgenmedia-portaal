@@ -329,7 +329,7 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
                   </div>
                   <div className="flex items-center gap-2 flex-wrap text-[11px]"><StatusBadge status={m.status} klein /><span>{datumNlKort(m.datum)}</span>{m.terugkerend && <Repeat className="h-3 w-3" aria-label="terugkerend" />}{!m.volledig && !gef && <span className="text-amber-700">gegevens ontbreken</span>}</div>
                 </button>
-                {kanKm(m) && <button type="button" onClick={() => setKmVoor(m)} className="px-3 text-gray-600 hover:bg-gray-100" aria-label={`Kilometers voor ${m.klant}`} title="Kilometervergoeding"><Car className="h-4 w-4" /></button>}
+                {kanKm(m) && <button type="button" onClick={() => setKmVoor(m)} className="px-3 text-gray-700 hover:bg-gray-100" aria-label={`Kilometers toevoegen voor ${m.klant}`} title="Kilometers toevoegen"><AutoPlus /></button>}
                 {(m.bron === 'invoice' || m.bron === 'recurring') && <button type="button" onClick={() => setTeVerwijderen(m)} className="px-3 text-red-600 hover:bg-red-50" aria-label={`${m.klant} verwijderen`}><Trash2 className="h-4 w-4" /></button>}
               </div>
             ) })}
@@ -361,8 +361,8 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
                   <td className="px-3 py-2.5 text-right whitespace-nowrap">
                     <span className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium border-gray-200 text-gray-700 bg-white"><Eye className="h-3.5 w-3.5" />Bekijken</span>
                     {kanKm(m) && (
-                      <button type="button" onClick={(e) => { e.stopPropagation(); setKmVoor(m) }} title="Kilometervergoeding toevoegen" aria-label={`Kilometers voor ${m.klant}`}
-                        className="ml-1 inline-flex items-center justify-center h-7 w-7 rounded-md border align-middle border-gray-200 bg-white text-gray-700 hover:border-gray-400"><Car className="h-3.5 w-3.5" /></button>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); setKmVoor(m) }} title="Kilometers toevoegen" aria-label={`Kilometers toevoegen voor ${m.klant}`}
+                        className="ml-1 inline-flex items-center justify-center h-7 w-8 rounded-md border align-middle border-gray-200 bg-white text-gray-800 hover:border-gray-900 hover:bg-gray-50"><AutoPlus /></button>
                     )}
                     {(m.bron === 'invoice' || m.bron === 'recurring') && (
                       <button type="button" onClick={(e) => { e.stopPropagation(); setTeVerwijderen(m) }} title="Verwijderen" aria-label={`${m.klant} verwijderen`}
@@ -518,5 +518,15 @@ function Kop({ veld, sortering, onClick, children, rechts }: { veld: Sortering['
     <th className={`px-3 py-2 font-medium ${rechts ? 'text-right' : ''}`}>
       <button type="button" onClick={() => onClick(veld)} className={`inline-flex items-center gap-1 ${actief ? 'text-black' : ''}`}>{children}<ArrowUpDown className={`h-3 w-3 ${actief ? '' : 'opacity-40'}`} /></button>
     </th>
+  )
+}
+
+/** Een autootje met een plusteken: kilometers toevoegen aan de factuur. */
+function AutoPlus() {
+  return (
+    <span className="relative inline-flex" aria-hidden>
+      <Car className="h-4 w-4" />
+      <span className="absolute -top-1.5 -right-2 h-3 w-3 rounded-full bg-gray-900 text-white flex items-center justify-center"><Plus className="h-2.5 w-2.5" strokeWidth={3.5} /></span>
+    </span>
   )
 }

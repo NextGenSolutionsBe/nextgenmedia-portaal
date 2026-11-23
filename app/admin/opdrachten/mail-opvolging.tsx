@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { ArrowDownLeft, ArrowUpRight, CalendarCheck, Check, ChevronDown, FileSignature, FileText, Loader2, Mail, RefreshCw } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, CalendarCheck, Check, ChevronDown, FileSignature, FileText, Loader2, Mail, RefreshCw, Send } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { MailDialog } from '@/components/admin/mail-composer'
 import { AI_SOORT_LABEL, STATUS_LABEL, type Gebeurtenis, type Opvolging } from '@/lib/mail-opvolging/regels'
 
 type Stand = { gekoppeld: boolean; mailboxen: { mailbox: string; map: string; laatst_gelezen_op: string | null; fout: string | null }[] }
@@ -20,14 +22,23 @@ const tijd = (iso: string) => new Date(iso).toLocaleString('nl-BE', { day: 'nume
 /**
  * Opvolging van één project op de projectkaart: wat er nu moet gebeuren (de
  * klant wacht op ons, geen reactie, na de meeting nog niets gestuurd, lijkt
- * akkoord) en de tijdlijn van mails, meetings, offerte en contract. Geen
- * mailconcepten: enkel wat er opgevolgd moet worden. "Opgevolgd" haalt het weg
- * tot er iets nieuws gebeurt.
+ * akkoord) en de tijdlijn van mails, meetings, offerte en contract. "Opgevolgd"
+ * haalt het weg tot er iets nieuws gebeurt. Met **Mail sturen** (en Herinnering
+ * contract / Offerte opvolgen als die openstaan) stuur je meteen een opvolgmail
+ * met een voorgestelde tekst, altijd met voorbeeld en zelf op Verstuur. Daarna
+ * staat ze als notitie op de kaart en telt ze in de opvolging.
  */
-export function MailOpvolging({ opdrachtId, onNaarFase }: { opdrachtId: string; onNaarFase: (kolom: 'geaccepteerd' | 'stopgezet') => void }) {
+export function MailOpvolging({ opdrachtId, onNaarFase, contractOpen = false, offerteOpen = false, onMail }: {
+  opdrachtId: string; onNaarFase: (kolom: 'geaccepteerd' | 'stopgezet') => void
+  contractOpen?: boolean; offerteOpen?: boolean
+  /** Na een verstuurde mail (de kaart toont de notitie). */
+  onMail?: () => void
+}) {
   const [data, setData] = useState<Data | null>(null)
   const [bezig, setBezig] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
+  // Mailvenster: welk voorstel eerst ('' = wat het best past).
+  const [mail, setMail] = useState<string | null>(null)
 
   const laad = useCallback(async () => {
     try {
@@ -61,7 +72,30 @@ export function MailOpvolging({ opdrachtId, onNaarFase }: { opdrachtId: string; 
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Lezen mislukt') }
   }
 
-  if (!data || !data.actief) return null
+  const mailKnoppen = (
+    <div className="flex gap-2 flex-wrap">
+      <button type="button" onClick={() => setMail('')} className="btn-primary text-xs"><Send className="h-3.5 w-3.5" />Mail sturen</button>
+      {contractOpen && <button type="button" onClick={() => setMail('contract')} className="btn-secondary text-xs"><FileSignature className="h-3.5 w-3.5" />Herinnering contract</button>}
+      {offerteOpen && <button type="button" onClick={() => setMail('offerte')} className="btn-secondary text-xs"><FileText className="h-3.5 w-3.5" />Offerte opvolgen</button>}
+    </div>
+  )
+  // Bovenop de pagina (portal), zodat het kaartvenster het nooit afsnijdt.
+  const venster = mail !== null && typeof document !== 'undefined' && createPortal(
+    <MailDialog context={{ type: 'project', opdrachtId, voorkeur: mail || null }} onClose={() => setMail(null)}
+      onSent={() => { toast.success('Mail verstuurd. Ze staat als notitie op de kaart.'); void laad(); onMail?.() }} />,
+    document.body,
+  )
+
+  // Nog geen opvolging (bv. afgerond of nog niets voorgelegd): enkel de mailknoppen.
+  if (!data || !data.actief) {
+    return (
+      <section className="px-5 py-4 border-b border-gray-100 space-y-2.5">
+        <p className="text-sm font-semibold flex items-center gap-2"><Mail className="h-4 w-4" />Opvolging</p>
+        {mailKnoppen}
+        {venster}
+      </section>
+    )
+  }
   const o = data.opvolging
   const laatst = data.stand.mailboxen.map((m) => m.laatst_gelezen_op).filter(Boolean).sort().pop() ?? null
   const fouten = data.stand.mailboxen.filter((m) => m.fout)
@@ -84,6 +118,9 @@ export function MailOpvolging({ opdrachtId, onNaarFase }: { opdrachtId: string; 
       ) : (
         <p className="text-sm text-gray-500">{data.gebeurtenissen.some((g) => g.soort === 'meeting' || g.soort === 'offerte' || g.soort === 'contract') ? 'Niets op te volgen.' : 'De opvolging start na een meeting, offerte of contract.'}</p>
       )}
+
+      {mailKnoppen}
+      {venster}
 
       {data.gebeurtenissen.length > 0 && (
         <div>
