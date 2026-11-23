@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { useRefresh } from '@/lib/use-refresh'
 import { Logo } from '@/components/logo'
-import { LayoutDashboard, FileText, Calendar, Globe, LogOut, RefreshCcw, Menu, X, ListChecks, Newspaper, CalendarClock, Database, FolderUp, ShieldCheck, Video, Sparkles, Lightbulb, Megaphone, Clapperboard, Handshake, Ticket, PackageCheck, FileSignature } from 'lucide-react'
+import { LayoutDashboard, FileText, Calendar, Globe, LogOut, RefreshCcw, Menu, X, ListChecks, Newspaper, BarChart3, Database, FolderUp, ShieldCheck, Video, Sparkles, Lightbulb, Megaphone, Clapperboard, Handshake, Ticket, PackageCheck, FileSignature } from 'lucide-react'
 import { MODULE_IMPLEMENTED, type PortalModule } from '@/lib/portal-permissions'
 import { t, type Lang } from '@/lib/i18n'
 import { LangToggle } from '@/components/lang-toggle'
@@ -33,7 +33,7 @@ const NAV: NavItem[] = [
   { tKey: 'nav.offertes',   href: '/portal/offertes',      icon: FileSignature, requiresOffertes: true, module: 'offertes' },
   { tKey: 'nav.tasks',      href: '/portal/tasks',         icon: ListChecks, module: 'tasks' },
   { tKey: 'nav.social',     href: '/portal/social-media',  icon: Calendar, requiresService: 'social-media', module: 'social_media' },
-  { tKey: 'nav.metricool',  href: '/portal/metricool',     icon: CalendarClock, requiresMetricool: true, module: 'metricool' },
+  { tKey: 'nav.metricool',  href: '/portal/metricool',     icon: BarChart3, requiresMetricool: true, module: 'metricool' },
   { tKey: 'nav.cms',        href: '/portal/cms',           icon: Database, requiresCms: true, module: 'cms' },
   { tKey: 'nav.website',    href: '/portal/website',       icon: Globe,    requiresService: 'webdesign', requiresWebsitePage: true, module: 'website' },
   { tKey: 'nav.blogs',      href: '/portal/blogs',         icon: Newspaper, requiresBlogs: true, module: 'blogs' },

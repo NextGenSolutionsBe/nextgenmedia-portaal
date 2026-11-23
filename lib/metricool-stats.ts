@@ -66,10 +66,11 @@ export const BRONNEN: Record<Netwerk, Partial<Record<Kpi, Bron[]>>> = {
   tiktok: {
     volgers: [{ metric: 'followers_count', subject: 'account' }],
     nieuwe_volgers: [{ metric: 'followers_delta_count', subject: 'account' }],
-    bereik: [{ metric: 'reach', subject: 'videos' }],
-    weergaven: [{ metric: 'video_views', subject: 'account' }, { metric: 'views', subject: 'videos' }],
-    interacties: [{ metric: 'interactions', subject: 'videos' }],
-    posts: [{ metric: 'videos', subject: 'videos' }],
+    // Videocijfers: subject 'video' (enkelvoud, zo valideert Metricool).
+    bereik: [{ metric: 'reach', subject: 'video' }],
+    weergaven: [{ metric: 'video_views', subject: 'account' }, { metric: 'views', subject: 'video' }],
+    interacties: [{ metric: 'interactions', subject: 'video' }],
+    posts: [{ metric: 'videos', subject: 'video' }],
   },
   pinterest: {
     volgers: [{ metric: 'followers', subject: 'account' }],

@@ -136,7 +136,8 @@ export async function syncMerk(admin: Admin, blogId: string, opties: { volledig?
   const deadline = opties.deadline ?? Date.now() + 50_000
   const { data } = await admin.from('metricool_sync').select('*').eq('blog_id', blogId).maybeSingle()
   const vroeger = data as SyncRij | null
-  const volledig = !!opties.volledig || !vroeger?.volledig_op
+  // Eén keer per week een volledige ronde: zo komen nieuwe kanalen en bronnen vanzelf mee.
+  const volledig = !!opties.volledig || !vroeger?.volledig_op || Date.parse(vroeger.volledig_op) < Date.now() - 7 * 86_400_000
   const vandaag = vandaagBrussel()
   const from = isoBrussel(plusDagen(vandaag, -(volledig ? VOLLEDIG_DAGEN : RECENT_DAGEN)), '00:00:00')
   const to = isoBrussel(vandaag, '23:59:59')
