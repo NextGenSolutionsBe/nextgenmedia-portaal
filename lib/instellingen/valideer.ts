@@ -93,7 +93,7 @@ export function valideerFacturatie(ruw: unknown): Validatie<FacturatieInstelling
     clickup_lijst_id: tekst(r.clickup_lijst_id, 40), clickup_lijst_pad: tekst(r.clickup_lijst_pad, 300),
     clickup_assignee_id: tekst(r.clickup_assignee_id, 40), clickup_assignee_naam: tekst(r.clickup_assignee_naam, 120),
     verantwoordelijke_naam: tekst(r.verantwoordelijke_naam, 120) || 'Bram Reinquin',
-    km_tarief_excl: Math.round(getal(r.km_tarief_excl, 0) * 10000) / 10000,
+    km_tarief_excl: Math.round(getal(r.km_tarief_excl, 0.43) * 10000) / 10000,
     km_btw_pct: getal(r.km_btw_pct, 21),
     factuurnummer_vanaf: tekst(r.factuurnummer_vanaf, 20),
   }

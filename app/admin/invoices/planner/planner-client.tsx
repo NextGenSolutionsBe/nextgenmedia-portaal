@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, CalendarDays, CalendarRange, List, Loader2, X, ArrowUpDown, Eye, AlertTriangle, Filter, Search, StickyNote, Plus, Play, ChevronDown, Wallet, Send, CheckCircle2, Repeat, Trash2, Target } from 'lucide-react'
+import { ChevronLeft, ChevronRight, CalendarDays, CalendarRange, List, Loader2, X, ArrowUpDown, Eye, AlertTriangle, Filter, Search, StickyNote, Plus, Play, ChevronDown, Wallet, Send, CheckCircle2, Repeat, Trash2, Target, Car } from 'lucide-react'
 import {
   vandaagBrussel, isDatum, ymVan, plusDagen, maandStart, maandEind, maandRooster, roosterBereik, weekBereik, shiftYM,
   maandNaam, datumKort, DAGEN_KORT, euro, euro2, kort, pasFiltersToe, dagTotalen, sorteer, filtersActief,
@@ -16,6 +16,7 @@ import { FacturatieItemWizard } from '../item-wizard'
 import { ItemDetail } from '../item-detail'
 import { Facturatieronde } from '../facturatieronde'
 import { VerwijderDialoog, type VerwijderBereik } from '../verwijder-dialoog'
+import { KilometerVenster } from '../kilometer-venster'
 import { ExportKnop } from '@/components/admin/export-knop'
 import { facturenWerkmap, type FactuurExportRij } from '@/lib/excel/rapporten/facturen'
 import { zoekVeld } from '@/lib/zoekveld'
@@ -55,6 +56,9 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
   const [geavanceerd, setGeavanceerd] = useState<string | null>(null)
   const [ronde, setRonde] = useState<Moment[] | null>(null)
   const [teVerwijderen, setTeVerwijderen] = useState<Moment | null>(null)
+  // Kilometervergoeding op een factuur in Te factureren (autootje per regel).
+  const [kmVoor, setKmVoor] = useState<Moment | null>(null)
+  const kanKm = (m: Moment) => (m.bron === 'invoice' || m.bron === 'recurring') && tabVan(m) === 'te_factureren'
   const cache = useRef(new Map<string, Data>())
   const [versie, setVersie] = useState(0)
   const startGeopend = useRef(false)
@@ -325,13 +329,14 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
                   </div>
                   <div className="flex items-center gap-2 flex-wrap text-[11px]"><StatusBadge status={m.status} klein /><span>{datumNlKort(m.datum)}</span>{m.terugkerend && <Repeat className="h-3 w-3" aria-label="terugkerend" />}{!m.volledig && !gef && <span className="text-amber-700">gegevens ontbreken</span>}</div>
                 </button>
+                {kanKm(m) && <button type="button" onClick={() => setKmVoor(m)} className="px-3 text-gray-600 hover:bg-gray-100" aria-label={`Kilometers voor ${m.klant}`} title="Kilometervergoeding"><Car className="h-4 w-4" /></button>}
                 {(m.bron === 'invoice' || m.bron === 'recurring') && <button type="button" onClick={() => setTeVerwijderen(m)} className="px-3 text-red-600 hover:bg-red-50" aria-label={`${m.klant} verwijderen`}><Trash2 className="h-4 w-4" /></button>}
               </div>
             ) })}
           </div>
           {/* Desktop: compacte tabel, geen horizontaal scrollen */}
           <table className="hidden md:table w-full text-sm table-fixed">
-            <colgroup><col className="w-[118px]" /><col className="w-[20%]" /><col className="w-[18%]" /><col /><col className="w-[118px]" /><col className="w-[178px]" /><col className="w-[140px]" /></colgroup>
+            <colgroup><col className="w-[118px]" /><col className="w-[20%]" /><col className="w-[18%]" /><col /><col className="w-[118px]" /><col className="w-[178px]" /><col className="w-[176px]" /></colgroup>
             <thead>
               <tr className="text-left text-[11px] text-gray-500 bg-gray-50 border-b border-gray-100">
                 <Kop veld="datum" sortering={sortering} onClick={sorteerOp}>Gepland</Kop>
@@ -355,6 +360,10 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
                   <td className="px-3 py-2.5"><StatusBadge status={m.status} /></td>
                   <td className="px-3 py-2.5 text-right whitespace-nowrap">
                     <span className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium border-gray-200 text-gray-700 bg-white"><Eye className="h-3.5 w-3.5" />Bekijken</span>
+                    {kanKm(m) && (
+                      <button type="button" onClick={(e) => { e.stopPropagation(); setKmVoor(m) }} title="Kilometervergoeding toevoegen" aria-label={`Kilometers voor ${m.klant}`}
+                        className="ml-1 inline-flex items-center justify-center h-7 w-7 rounded-md border align-middle border-gray-200 bg-white text-gray-700 hover:border-gray-400"><Car className="h-3.5 w-3.5" /></button>
+                    )}
                     {(m.bron === 'invoice' || m.bron === 'recurring') && (
                       <button type="button" onClick={(e) => { e.stopPropagation(); setTeVerwijderen(m) }} title="Verwijderen" aria-label={`${m.klant} verwijderen`}
                         className="ml-1 inline-flex items-center justify-center h-7 w-7 rounded-md border align-middle border-gray-200 bg-white text-red-600 hover:bg-red-50 hover:border-red-300"><Trash2 className="h-3.5 w-3.5" /></button>
@@ -469,6 +478,7 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
       </div>
 
       {/* ── Vensters ── */}
+      {kmVoor && <KilometerVenster momentId={kmVoor.id} titel={kmVoor.omschrijving ?? kmVoor.project} onSluit={() => setKmVoor(null)} onKlaar={() => { setKmVoor(null); ververs() }} />}
       {dag && <DagPaneel datum={dag} momenten={perDag.get(dag) ?? []} onSluit={() => setDag(null)} onKies={(m) => { setDag(null); bekijk(m) }} onNieuw={(d) => { setDag(null); setWizard({ datum: d }) }} />}
       {geselecteerdMoment && (geselecteerdMoment.bron === 'invoice' || geselecteerdMoment.bron === 'recurring'
         ? <ItemDetail key={geselecteerdMoment.id} moment={geselecteerdMoment} onSluit={() => setGeselecteerd(null)} onGewijzigd={ververs}

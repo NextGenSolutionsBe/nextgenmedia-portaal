@@ -123,7 +123,8 @@ export function ItemDetail({ moment, onSluit, onGewijzigd, onBewerk, onEigenArti
                 <button type="button" disabled={bezig || (ontbreekt && !bevestigOntbrekend) || kmVoor !== data.id} onClick={() => actie('verstuurd', { extern_nummer: extern }, 'Gemarkeerd als gefactureerd.')}
                   className="btn-primary text-sm bg-[#166534] hover:bg-[#14532d] text-white border-[#166534]">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}Markeren als gefactureerd</button>
               </div>
-              <KilometerCheck klein aan={kmVoor === data.id} heeftKm={heeftKilometers(data.detail.regels)} onChange={(aan) => setKmVoor(aan ? data.id : null)} />
+              <KilometerCheck klein aan={kmVoor === data.id} heeftKm={heeftKilometers(data.detail.regels)} onChange={(aan) => setKmVoor(aan ? data.id : null)}
+                momentId={data.id} titel={data.detail.titel} onKm={(nieuw) => { onGewijzigd(); if (nieuw) onSluit(); else void laad() }} />
               {ontbreekt && <label className="flex items-start gap-2 text-xs text-amber-900"><input type="checkbox" checked={bevestigOntbrekend} onChange={(e) => setBevestigOntbrekend(e.target.checked)} className="mt-0.5" />Er ontbreken gegevens (zie hieronder). Ik heb de factuur toch volledig opgemaakt.</label>}
               <p className="text-[11px] text-gray-500">Gefactureerd = extern aangemaakt en verstuurd. Betaling volg je apart op.</p>
             </div>
