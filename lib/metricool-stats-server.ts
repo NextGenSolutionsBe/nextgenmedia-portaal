@@ -232,22 +232,25 @@ export async function syncVolgende(admin: Admin, opties: { budgetMs?: number } =
 
 export type StatistiekenData = { rijen: Rij[]; posts: StatPost[]; laatstOp: string | null; netwerken: string[] }
 
+/** De dagcijfers van één merk vanaf een dag, uit onze databank (per 1000 rijen). */
+export async function laadRijen(admin: Admin, blogId: string, vanaf: string): Promise<Rij[]> {
+  const uit: Rij[] = []
+  for (let i = 0; i < 20; i++) {
+    const { data, error } = await admin.from('metricool_statistieken').select('netwerk, kpi, datum, waarde')
+      .eq('blog_id', blogId).gte('datum', vanaf).order('datum').range(i * 1000, i * 1000 + 999)
+    if (error) break
+    const blok = (data ?? []) as { netwerk: string; kpi: string; datum: string; waarde: number | string }[]
+    uit.push(...blok.map((r) => ({ netwerk: r.netwerk, kpi: r.kpi, datum: String(r.datum).slice(0, 10), waarde: Number(r.waarde) })))
+    if (blok.length < 1000) break
+  }
+  return uit
+}
+
 /** Alles voor het scherm van één merk: dagcijfers (200 dagen) en posts, uit onze databank. */
 export async function laadStatistieken(admin: Admin, blogId: string): Promise<StatistiekenData> {
   const vanaf = plusDagen(vandaagBrussel(), -VOLLEDIG_DAGEN)
   const [rijen, posts, sync] = await Promise.all([
-    (async () => {
-      const uit: Rij[] = []
-      for (let i = 0; i < 20; i++) {
-        const { data, error } = await admin.from('metricool_statistieken').select('netwerk, kpi, datum, waarde')
-          .eq('blog_id', blogId).gte('datum', vanaf).order('datum').range(i * 1000, i * 1000 + 999)
-        if (error) break
-        const blok = (data ?? []) as { netwerk: string; kpi: string; datum: string; waarde: number | string }[]
-        uit.push(...blok.map((r) => ({ netwerk: r.netwerk, kpi: r.kpi, datum: String(r.datum).slice(0, 10), waarde: Number(r.waarde) })))
-        if (blok.length < 1000) break
-      }
-      return uit
-    })(),
+    laadRijen(admin, blogId, vanaf),
     admin.from('metricool_posts').select('netwerk, post_id, gepubliceerd_op, soort, tekst, link, beeld, metrics')
       .eq('blog_id', blogId).gte('gepubliceerd_op', `${vanaf}T00:00:00Z`).order('gepubliceerd_op', { ascending: false }).limit(600)
       .then((r) => (r.error ? [] : ((r.data ?? []) as StatPost[]))),
