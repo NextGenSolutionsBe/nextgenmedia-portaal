@@ -432,8 +432,8 @@ export async function POST(req: NextRequest) {
     })
     if (verplicht) return NextResponse.json({ error: verplicht, verplicht: true }, { status: 400 })
     if (clientId) rij.btw_nummer = null
-    // Verplicht: Marco, Bram of een gezamenlijke lead.
-    if (!rij.verantwoordelijke) return NextResponse.json({ error: 'Kies een verantwoordelijke: Marco, Bram of gezamenlijke lead.', verplicht: true }, { status: 400 })
+    // Verplicht: Marco, Bram, Chiara of een gezamenlijke lead.
+    if (!rij.verantwoordelijke) return NextResponse.json({ error: 'Kies een verantwoordelijke: Marco, Bram, Chiara of gezamenlijke lead.', verplicht: true }, { status: 400 })
 
     const { data, error } = await schrijf((p) => admin.from('opdrachten').insert(p).select('id').single(), rij)
     if (error) {
@@ -477,7 +477,7 @@ export async function PATCH(req: NextRequest) {
     if ('omschrijving' in b) patch.omschrijving = tekst(b.omschrijving, 4000)
     if ('verantwoordelijke' in b) {
       const v = projectVerantwoordelijke(b.verantwoordelijke)
-      if (!v) return NextResponse.json({ error: 'Kies een verantwoordelijke: Marco, Bram of gezamenlijke lead.' }, { status: 400 })
+      if (!v) return NextResponse.json({ error: 'Kies een verantwoordelijke: Marco, Bram, Chiara of gezamenlijke lead.' }, { status: 400 })
       patch.verantwoordelijke = v
     }
     if ('client_id' in b) {

@@ -348,7 +348,7 @@ function OfferteInstellingenTab() {
       <div className="card-base space-y-3">
         <div>
           <h2 className="font-semibold">Contactpersoon op de offerte</h2>
-          <p className="text-xs text-gray-500 mt-0.5">Bij elke offerte kies je Marco of Bram. Naam, functie, telefoon, e-mail en profielfoto komen uit <Link href="/admin/personeel" className="underline">Personeel</Link>; pas ze daar aan en elke nieuwe offerte volgt.</p>
+          <p className="text-xs text-gray-500 mt-0.5">Bij elke offerte kies je Marco, Bram of Chiara. Naam, functie, telefoon, e-mail en profielfoto komen uit <Link href="/admin/personeel" className="underline">Personeel</Link>; pas ze daar aan en elke nieuwe offerte volgt.</p>
         </div>
         <div className="grid sm:grid-cols-2 gap-3">
           {(['marco', 'bram'] as const).map((k) => {

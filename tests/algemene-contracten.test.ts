@@ -128,7 +128,8 @@ async function main() {
     assert.ok('fout' in model.controleerVelden({ titel: '  ' }))
     assert.ok('fout' in model.controleerVelden({ titel: 'NDA', tegenpartij_email: 'geen-mail' }))
     assert.ok('fout' in model.controleerVelden({ titel: 'NDA', begin_datum: '2026-05-01', eind_datum: '2026-04-01' }))
-    assert.ok('fout' in model.controleerVelden({ titel: 'NDA', ondertekenaar: 'Chiara' }))
+    assert.ok('fout' in model.controleerVelden({ titel: 'NDA', ondertekenaar: 'Jan' }))
+    assert.ok(!('fout' in model.controleerVelden({ titel: 'NDA', ondertekenaar: 'Chiara' })))
     const v = model.controleerVelden({ titel: ' NDA   Partner ', tegenpartij_email: 'Jan@Voorbeeld.be', labels: ['Auto', 'auto', ' leasing ', ''], partij_nodig: true }) as { velden: any }
     assert.equal(v.velden.titel, 'NDA Partner')
     assert.equal(v.velden.tegenpartij_email, 'jan@voorbeeld.be')

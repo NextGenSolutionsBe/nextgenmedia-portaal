@@ -137,7 +137,7 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
 
   const bewaar = useCallback(async () => {
     if (!c.titel.trim()) { toast.error('Geef de opdracht een titel.'); return }
-    if (!PROJECT_VERANTWOORDELIJKEN.includes(c.verantwoordelijke as never)) { toast.error('Kies een verantwoordelijke: Marco, Bram of gezamenlijke lead.'); return }
+    if (!PROJECT_VERANTWOORDELIJKEN.includes(c.verantwoordelijke as never)) { toast.error('Kies een verantwoordelijke: Marco, Bram, Chiara of gezamenlijke lead.'); return }
     if (o && !gewijzigd.length) { toast.message('Niets gewijzigd.'); return }
     setBezig(true)
     try {

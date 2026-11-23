@@ -7,7 +7,7 @@
 // verantwoordelijke van dat contract (gezamenlijk of nog niemand: bij Marco én Bram).
 // Afgeleid uit de gegevens zelf: wie tekent, ziet de taak vanzelf verdwijnen.
 
-import { wieTekentTegen, contractVerantwoordelijke, type Tegentekenaar } from './contracten/verantwoordelijke'
+import { wieTekentTegen, contractVerantwoordelijke, isTegentekenaar, TEGENTEKENAARS, type Tegentekenaar } from './contracten/verantwoordelijke'
 
 export type TeTekenenSoort = 'regels_vesting' | 'regels_vennoten' | 'vesting' | 'uitgaven' | 'tegentekenen' | 'algemeen'
 export type TeTekenenItem = {
@@ -41,7 +41,7 @@ export function tegentekenTaken(contracten: TegentekenContract[], nu = new Date(
   const gesorteerd = [...contracten].sort((a, b) => String(b.signed_at ?? '').localeCompare(String(a.signed_at ?? '')) || a.id.localeCompare(b.id))
   for (const c of gesorteerd) for (const p of wieTekentTegen(c.verantwoordelijke)) per.set(p, [...(per.get(p) ?? []), c])
   const uit: TeTekenenItem[] = []
-  for (const p of ['Marco', 'Bram'] as const) {
+  for (const p of TEGENTEKENAARS) {
     const lijst = per.get(p) ?? []
     if (!lijst.length) continue
     const zonder = lijst.filter((c) => !contractVerantwoordelijke(c.verantwoordelijke)).length
@@ -77,7 +77,7 @@ export function algemeneTaken(lijst: AlgemeenTeTekenen[], nu = new Date()): TeTe
   const gesorteerd = [...lijst].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
   for (const c of gesorteerd) for (const p of wieTekentTegen(c.ondertekenaar)) per.set(p, [...(per.get(p) ?? []), c])
   const uit: TeTekenenItem[] = []
-  for (const p of ['Marco', 'Bram'] as const) {
+  for (const p of TEGENTEKENAARS) {
     const l = per.get(p) ?? []
     if (!l.length) continue
     const oud = l.filter((c) => nu.getTime() - new Date(c.created_at).getTime() > DRIE_DAGEN).length
@@ -95,7 +95,7 @@ export function algemeneTaken(lijst: AlgemeenTeTekenen[], nu = new Date()): TeTe
 
 /** Welke contracten horen bij "?van=Bram" in de tegentekenronde? Die van Bram, plus gezamenlijk en zonder verantwoordelijke. */
 export function hoortBij(van: string | null | undefined, verantwoordelijke: string | null | undefined): boolean {
-  const p = van === 'Marco' || van === 'Bram' ? van : null
+  const p = isTegentekenaar(van) ? van : null
   if (!p) return true
   return wieTekentTegen(verantwoordelijke).includes(p)
 }

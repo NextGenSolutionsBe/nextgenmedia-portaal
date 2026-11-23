@@ -29,6 +29,7 @@ import { OpGetekendZetten, GetekendBuitenApp, type ContractBijlage } from './man
 import { isManueelGetekend } from '@/lib/contracten/manueel-getekend'
 import { contractVerantwoordelijke } from '@/lib/contracten/verantwoordelijke'
 import { ContractVerantwoordelijkeKaart } from './verantwoordelijke'
+import { isTegentekenaar } from '@/lib/contracten/verantwoordelijke'
 
 async function getContract(id: string) {
   try {
@@ -208,7 +209,7 @@ export default async function ContractDetailPage({ params }: { params: { id: str
       ) : (
         <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 flex items-center gap-3 flex-wrap">
           <PenLine className="h-4 w-4 shrink-0" />
-          <span className="flex-1 min-w-[200px]"><b className="font-semibold">Wacht nog op onze handtekening{verantwoordelijke === 'Marco' || verantwoordelijke === 'Bram' ? ` (${verantwoordelijke})` : ''}.</b> De klant tekende{c.signed_at ? ` op ${formatDate(c.signed_at)}` : ''}. Zet ook de handtekening van NextGenMedia, dan krijgt de klant het contract met beide handtekeningen.</span>
+          <span className="flex-1 min-w-[200px]"><b className="font-semibold">Wacht nog op onze handtekening{isTegentekenaar(verantwoordelijke) ? ` (${verantwoordelijke})` : ''}.</b> De klant tekende{c.signed_at ? ` op ${formatDate(c.signed_at)}` : ''}. Zet ook de handtekening van NextGenMedia, dan krijgt de klant het contract met beide handtekeningen.</span>
           <Link href={`/admin/contracts/${c.id}/tegentekenen`} className="btn-primary text-sm shrink-0"><PenLine className="h-4 w-4" />Nu ondertekenen</Link>
         </div>
       ))}

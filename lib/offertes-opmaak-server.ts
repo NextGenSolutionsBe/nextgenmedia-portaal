@@ -4,7 +4,7 @@ import { MERK_STIJL, mailMerkVan, type MailMerk } from '@/lib/merk-mail'
 import { OFFERTE_BUCKET, type Offerte } from '@/lib/offertes'
 import { OfferteFout, maakOfferte, leesOfferte, verwijderOfferte } from '@/lib/offertes-server'
 import {
-  leesInhoud, controleerOpmaak, berekenPrijs, volgendOffertenummer, isVerantwoordelijke, FICHE_NAAR_DIENST,
+  leesInhoud, controleerOpmaak, berekenPrijs, volgendOffertenummer, isVerantwoordelijke, verantwoordelijkeNaam, FICHE_NAAR_DIENST,
   type OfferteInhoud, type Verantwoordelijke,
 } from '@/lib/offerte-fiche'
 import {
@@ -50,10 +50,10 @@ async function personeelVan(admin: Admin, wie: Verantwoordelijke) {
   return ((data ?? [])[0] ?? null) as { voornaam: string | null; achternaam: string | null; functie: string | null; telefoon: string | null; email: string | null; profielfoto_pad: string | null } | null
 }
 
-/** Marco en Bram zoals ze op de offerte komen (zonder foto), voor het formulier. */
+/** Marco, Bram en Chiara zoals ze op de offerte komen (zonder foto), voor het formulier. */
 export async function offerteContacten(admin: Admin): Promise<Record<Verantwoordelijke, OfferteContact>> {
-  const [marco, bram] = await Promise.all([personeelVan(admin, 'marco'), personeelVan(admin, 'bram')])
-  return { marco: contactUitPersoneel('marco', marco), bram: contactUitPersoneel('bram', bram) }
+  const [marco, bram, chiara] = await Promise.all([personeelVan(admin, 'marco'), personeelVan(admin, 'bram'), personeelVan(admin, 'chiara')])
+  return { marco: contactUitPersoneel('marco', marco), bram: contactUitPersoneel('bram', bram), chiara: contactUitPersoneel('chiara', chiara) }
 }
 
 /** De contactpersoon met profielfoto (jpg of png) voor de pdf. Geen foto = initialen. */
@@ -169,7 +169,7 @@ async function vulKaartAan(admin: Admin, opdrachtId: string | null, v: Invoer, o
   const patch: Record<string, unknown> = {}
   const eigen = !!offerteId && k.aangemaakt_door_offerte === offerteId
   if (eigen || !(k.diensten ?? []).length) patch.diensten = [...new Set(v.inhoud.diensten.map((d) => FICHE_NAAR_DIENST[d]))]
-  if (!k.verantwoordelijke) patch.verantwoordelijke = v.verantwoordelijke === 'marco' ? 'Marco' : 'Bram'
+  if (!k.verantwoordelijke) patch.verantwoordelijke = verantwoordelijkeNaam(v.verantwoordelijke)
   if (Object.keys(patch).length) await admin.from('opdrachten').update({ ...patch, updated_at: nu() }).eq('id', opdrachtId)
 }
 

@@ -76,7 +76,7 @@ export function PipelineClient({ begin, vandaag, openDeal }: { begin: NgsData; v
   const namen = useMemo(() => {
     const s = new Set<string>()
     if (data.ik) s.add(data.ik.split(' ')[0])
-    for (const n of ['Marco', 'Bram']) s.add(n)
+    for (const n of ['Marco', 'Bram', 'Chiara']) s.add(n)
     for (const d of data.deals) if (d.verantwoordelijke) s.add(d.verantwoordelijke)
     return Array.from(s)
   }, [data])

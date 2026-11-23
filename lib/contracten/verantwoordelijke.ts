@@ -11,11 +11,13 @@ export const CONTRACT_VERANTWOORDELIJKEN = PROJECT_VERANTWOORDELIJKEN
 export type ContractVerantwoordelijke = ProjectVerantwoordelijke
 export const contractVerantwoordelijke = projectVerantwoordelijke
 
-export type Tegentekenaar = 'Marco' | 'Bram'
+export const TEGENTEKENAARS = ['Marco', 'Bram', 'Chiara'] as const
+export type Tegentekenaar = (typeof TEGENTEKENAARS)[number]
+export const isTegentekenaar = (v: unknown): v is Tegentekenaar => TEGENTEKENAARS.includes(v as Tegentekenaar)
 
-/** Wie moet dit contract namens ons tekenen? */
+/** Wie moet dit contract namens ons tekenen? Gezamenlijke lead of nog niemand = Marco en Bram. */
 export function wieTekentTegen(v: unknown): Tegentekenaar[] {
   const p = projectVerantwoordelijke(v)
-  if (p === 'Marco' || p === 'Bram') return [p]
+  if (isTegentekenaar(p)) return [p]
   return ['Marco', 'Bram']
 }
