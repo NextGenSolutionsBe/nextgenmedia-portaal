@@ -170,7 +170,7 @@ export async function maakVestingCertificaatPdf(g: CertificaatGegevens, getekend
   const font = await pdf.embedFont(StandardFonts.Helvetica)
   const vet = await pdf.embedFont(StandardFonts.HelveticaBold)
   const mono = await pdf.embedFont(StandardFonts.Courier)
-  const TEKST = rgb(0.07, 0.07, 0.07), GRIJS = rgb(0.42, 0.42, 0.42), LICHT = rgb(0.86, 0.86, 0.86), GEEL = rgb(1, 0.973, 0.282)
+  const TEKST = rgb(0.07, 0.07, 0.07), GRIJS = rgb(0.42, 0.42, 0.42), LICHT = rgb(0.86, 0.86, 0.86), GEEL = rgb(0.059, 0.059, 0.059) /* huisstijl NextGen Agency: zwart (vroeger geel) */
   const page = pdf.addPage([A4.w, A4.h])
   const breedte = A4.w - 2 * M
   let y = A4.h - M

@@ -78,7 +78,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         ? 'Je hebt een persoonlijke login gekregen voor de NextGenMedia-werkomgeving. Daar klok je in en uit, geef je je beschikbaarheid door en zie je je planning en briefings. Kies via de knop hieronder een wachtwoord.'
         : 'Via de knop hieronder kies je een nieuw wachtwoord voor de NextGenMedia-werkomgeving.'
       const html = `<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.55;color:#111"><p>${aanhef}</p><p>${uitleg}</p>
-        <p style="margin:24px 0"><a href="${url}" style="background:#fff848;color:#111;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:10px;display:inline-block">Wachtwoord kiezen</a></p>
+        <p style="margin:24px 0"><a href="${url}" style="background:#0f0f0f;color:#ffffff;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:10px;display:inline-block">Wachtwoord kiezen</a></p>
         <p style="font-size:13px;color:#555">Werkt de knop niet? Kopieer deze link:<br><span style="word-break:break-all">${url}</span></p>
         <p style="font-size:13px;color:#555">De link is ongeveer een uur geldig en werkt één keer. Daarna log je in op ${baseUrl()}/login met ${p.email}.</p><p>Groeten<br>NextGenMedia</p></div>`
       const r = await sendEmail({ to: p.email, subject: nieuw ? 'Je login voor de NextGenMedia-werkomgeving' : 'Nieuw wachtwoord instellen', text: `${aanhef}\n\n${uitleg}\n\n${url}\n\nDe link is ongeveer een uur geldig en werkt één keer.\n\nGroeten\nNextGenMedia`, html })

@@ -43,7 +43,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const html = `<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.55;color:#111">
       <p>${aanhef}</p>
       <p>Je hebt toegang gekregen tot het NextGenMedia-portaal. Kies via onderstaande knop een wachtwoord; daarna kun je inloggen met dit e-mailadres.</p>
-      <p style="margin:24px 0"><a href="${url}" style="background:#fff848;color:#111;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:10px;display:inline-block">Wachtwoord kiezen</a></p>
+      <p style="margin:24px 0"><a href="${url}" style="background:#0f0f0f;color:#ffffff;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:10px;display:inline-block">Wachtwoord kiezen</a></p>
       <p style="font-size:13px;color:#555">Werkt de knop niet? Kopieer deze link in je browser:<br><span style="word-break:break-all">${url}</span></p>
       <p style="font-size:13px;color:#555">De link is ongeveer een uur geldig en werkt één keer. Verwachtte je deze mail niet? Dan mag je ze negeren.</p>
       <p>Groeten<br>NextGenMedia</p></div>`

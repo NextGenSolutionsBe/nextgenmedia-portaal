@@ -1,5 +1,6 @@
 // Bouwt een nette, responsive HTML-mail in de huisstijl van het merk
-// (NextGenMedia geel, NextGenSolutions blauw). Puur, zodat het overal bruikbaar is.
+// (NextGenMedia = NextGen Agency zwart-wit met woordmerk, NextGenSolutions blauw).
+// Puur, zodat het overal bruikbaar is.
 import { merkStijl, type MailMerk } from './merk-mail'
 
 function escapeHtml(s: string): string {
@@ -12,7 +13,7 @@ function paragraphs(text: string): string {
     .split(/\n\s*\n/)
     .map((p) => p.trim())
     .filter(Boolean)
-    .map((p) => `<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#1f2937">${escapeHtml(p).replace(/\n/g, '<br>')}</p>`)
+    .map((p) => `<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#272727">${escapeHtml(p).replace(/\n/g, '<br>')}</p>`)
     .join('')
 }
 
@@ -31,9 +32,9 @@ export function buildEmailHtml(opts: EmailHtmlOpts): string {
   const hasCta = !!(opts.ctaText && opts.ctaLink)
   const cta = hasCta
     ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 24px">
-         <tr><td style="border-radius:10px;background:#111827">
+         <tr><td style="border-radius:8px;background:#0f0f0f">
            <a href="${escapeHtml(opts.ctaLink!)}" target="_blank"
-              style="display:inline-block;padding:13px 30px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px;border-bottom:3px solid ${ACCENT}">
+              style="display:inline-block;padding:13px 30px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:8px;border-bottom:3px solid ${ACCENT}">
              ${escapeHtml(opts.ctaText!)}
            </a>
          </td></tr>
@@ -42,22 +43,26 @@ export function buildEmailHtml(opts: EmailHtmlOpts): string {
 
   return `<!DOCTYPE html>
 <html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting"></head>
-<body style="margin:0;padding:0;background:#f3f4f6">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:24px 12px">
+<body style="margin:0;padding:0;background:#f0f0f0">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f0f0f0;padding:24px 12px;font-family:Archivo,'Helvetica Neue',Arial,sans-serif">
     <tr><td align="center">
-      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e5e7eb">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e0e0e0">
         <!-- Header -->
-        <tr><td style="background:#ffffff;padding:22px 28px 18px;border-bottom:3px solid ${ACCENT}">
+        ${m.logo
+          ? `<tr><td style="background:#ffffff;padding:24px 28px 20px;border-bottom:1px solid #e0e0e0">
+          <img src="${m.logo}" alt="${m.naam}" width="132" height="40" style="display:block;width:132px;height:auto;border:0">
+        </td></tr>`
+          : `<tr><td style="background:#ffffff;padding:22px 28px 18px;border-bottom:3px solid ${ACCENT}">
           <span style="font-size:19px;font-weight:800;color:#111827;letter-spacing:-0.02em">${m.deel1}<span style="color:#111827;border-bottom:3px solid ${ACCENT};padding-bottom:1px">${m.deel2}</span></span>
-        </td></tr>
+        </td></tr>`}
         <!-- Body -->
         <tr><td style="padding:32px 32px 28px">
           ${paragraphs(opts.bodyText)}
           ${cta}
         </td></tr>
         <!-- Footer -->
-        <tr><td style="padding:18px 28px;background:#f9fafb;border-top:1px solid #f0f0f0">
-          <p style="margin:0;font-size:12px;line-height:1.5;color:#9ca3af">
+        <tr><td style="padding:18px 28px;background:#f7f7f7;border-top:1px solid #f0f0f0">
+          <p style="margin:0;font-size:12px;line-height:1.5;color:#999999">
             ${m.naam} · ${m.adres}<br>
             Deze e-mail werd verstuurd vanuit je ${m.naam}-portaal.
           </p>

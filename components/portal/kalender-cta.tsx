@@ -10,7 +10,7 @@ export function KalenderCta({ mag }: { mag: { diensten: boolean; consultancy: bo
   if (!mag.diensten && !mag.consultancy && !mag.meetings) return null
   return (
     <section aria-label="Meer nodig?" className="relative overflow-hidden rounded-2xl bg-gray-950 text-white p-5 sm:p-6">
-      <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full bg-[#fff848]/20 blur-3xl" aria-hidden />
+      <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full bg-white/10 blur-3xl" aria-hidden />
       <div className="relative flex flex-col lg:flex-row lg:items-center gap-4 lg:gap-8">
         <div className="flex-1 space-y-1.5">
           <h2 className="text-lg sm:text-xl font-semibold text-white leading-snug">Iets extra nodig naast je kalender?</h2>
@@ -18,7 +18,7 @@ export function KalenderCta({ mag }: { mag: { diensten: boolean; consultancy: bo
         </div>
         <div className="flex flex-col sm:flex-row flex-wrap gap-2 shrink-0">
           {mag.diensten && (
-            <Link href="/portal/diensten" className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#fff848] text-gray-950 font-semibold px-4 py-2.5 text-sm hover:brightness-95 transition">
+            <Link href="/portal/diensten" className="inline-flex items-center justify-center gap-2 rounded-xl bg-white text-gray-950 font-semibold px-4 py-2.5 text-sm hover:bg-gray-100 transition">
               <Sparkles className="h-4 w-4" />Dienst aanvragen<ArrowRight className="h-4 w-4" />
             </Link>
           )}

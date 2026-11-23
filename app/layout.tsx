@@ -1,16 +1,15 @@
 import type { Metadata } from 'next'
-import { Poppins, JetBrains_Mono } from 'next/font/google'
+import { Archivo, JetBrains_Mono } from 'next/font/google'
 import './globals.css'
 
-// Design 16 nov 2026: Poppins (licht en rond) voor alle tekst (titels, labels, knoppen, inhoud),
-// JetBrains Mono spaarzaam voor codes en compacte technische info (font-mono).
-// Via next/font zelf-gehost: geen render-blokkerende Google-request en geen
-// font-flikkering. `adjustFontFallback` (standaard aan) maakt een fallback met
-// dezelfde metrics. Zie ook de font-stack in tailwind.config.ts: die is bewust
-// zo geschreven dat er NOOIT een serif kan verschijnen als een variabele wegvalt.
-const poppins = Poppins({
-  subsets: ['latin'],
-  weight: ['300', '400', '500', '600', '700'],
+// Huisstijl NextGen Agency (23 nov 2026): Archivo voor alle tekst (titels in
+// Archivo Bold, zoals het logo), JetBrains Mono voor labels en ondertitels
+// (font-mono, .label-mono). Via next/font zelf-gehost: geen render-blokkerende
+// Google-request en geen font-flikkering. Zie ook de font-stack in
+// tailwind.config.ts: die is bewust zo geschreven dat er NOOIT een serif kan
+// verschijnen als een variabele wegvalt.
+const archivo = Archivo({
+  subsets: ['latin', 'latin-ext'],
   variable: '--font-sans',
   display: 'swap',
 })
@@ -27,7 +26,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="nl" className={`${poppins.variable} ${jetbrainsMono.variable}`}>
+    <html lang="nl" className={`${archivo.variable} ${jetbrainsMono.variable}`}>
       <body>{children}</body>
     </html>
   )

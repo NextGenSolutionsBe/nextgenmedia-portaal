@@ -15,7 +15,7 @@ import { datumLang, locatieVan, shootNaam, tijdBereik, type Shoot } from './mode
 const A4 = { w: 595.28, h: 841.89 }
 const MARGE = 48
 const ONDER = 60
-const GEEL = rgb(1, 0.973, 0.282)
+const GEEL = rgb(0.059, 0.059, 0.059) /* huisstijl NextGen Agency: zwart (vroeger geel) */
 const ZWART = rgb(0.07, 0.07, 0.07)
 const GRIJS = rgb(0.42, 0.45, 0.5)
 const LIJN = rgb(0.85, 0.86, 0.88)

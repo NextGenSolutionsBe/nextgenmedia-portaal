@@ -1,5 +1,6 @@
 /**
- * Huisstijl per merk in mails. NextGenMedia = geel, NextGenSolutions = blauw.
+ * Huisstijl per merk in mails. NextGenMedia = de huisstijl van NextGen Agency
+ * (zwart-wit met het woordmerk, 23 nov 2026), NextGenSolutions = blauw.
  * Pure module: gebruikt door de mailtemplates (server) en de voorbeelden in de
  * MailComposer en de nieuwsbriefeditor (browser).
  *
@@ -24,10 +25,15 @@ export type MerkStijl = {
   website: string
   /** Afzender in "Naam <adres>"-vorm. */
   van: string
+  /** Woordmerk als afbeelding (absolute link, ook in mailclients); zonder = het woordmerk in tekst. */
+  logo?: string
 }
 
+/** Het woordmerk NEXTGEN AGENCY voor mails (public/merk/logo-mail.png, 360 × 109). */
+export const AGENCY_LOGO_MAIL = 'https://app.nextgenmedia.be/merk/logo-mail.png'
+
 export const MERK_STIJL: Record<MailMerk, MerkStijl> = {
-  nextgenmedia: { naam: 'NextGenMedia', deel1: 'NextGen', deel2: 'Media', accent: '#fff848', opAccent: '#111111', adres: 'info@nextgenmedia.be', website: 'nextgenmedia.be', van: 'NextGenMedia <info@nextgenmedia.be>' },
+  nextgenmedia: { naam: 'NextGenMedia', deel1: 'NextGen', deel2: 'Media', accent: '#0f0f0f', opAccent: '#ffffff', adres: 'info@nextgenmedia.be', website: 'nextgenmedia.be', van: 'NextGenMedia <info@nextgenmedia.be>', logo: AGENCY_LOGO_MAIL },
   nextgensolutions: { naam: 'NextGenSolutions', deel1: 'NextGen', deel2: 'Solutions', accent: '#3b82f6', opAccent: '#ffffff', adres: 'info@nextgensolutions.be', website: 'nextgensolutions.be', van: 'NextGenSolutions <info@nextgensolutions.be>' },
 }
 

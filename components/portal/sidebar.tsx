@@ -132,7 +132,7 @@ export function PortalSidebar({
       {/* ── Sidebar panel ── */}
       <aside
         className={cn(
-          'fixed left-3 top-3 bottom-3 w-[240px] max-w-[calc(100vw-24px)] glas rounded-[28px] shadow-xl text-gray-700 flex flex-col z-40 overflow-hidden',
+          'fixed left-3 top-3 bottom-3 w-[240px] max-w-[calc(100vw-24px)] glas rounded-[18px] shadow-xl text-gray-700 flex flex-col z-40 overflow-hidden',
           'transition-transform duration-300 ease-in-out',
           'md:translate-x-0',
           mobileOpen ? 'translate-x-0' : '-translate-x-[110%]',
@@ -143,7 +143,7 @@ export function PortalSidebar({
             <Logo className="h-8 w-8 shrink-0" />
             <div className="flex-1 min-w-0">
               <div className="text-[15px] font-medium text-gray-900 leading-tight tracking-tight truncate">{companyName}</div>
-              <div className="text-[11px] text-gray-400">{t(lang, 'portal.subtitle')}</div>
+              <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-gray-400">{t(lang, 'portal.subtitle')}</div>
             </div>
             {/* Refresh */}
             <button

@@ -47,7 +47,7 @@ function alertHtml(opts: {
 <body style="margin:0;padding:0;background:#f3f4f6">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:24px 12px"><tr><td align="center">
     <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e5e7eb">
-      <tr><td style="background:#ffffff;padding:22px 28px 18px;border-bottom:3px solid #fff848">
+      <tr><td style="background:#ffffff;padding:22px 28px 18px;border-bottom:3px solid #0f0f0f">
         <span style="font-size:19px;font-weight:800;color:#111827;letter-spacing:-0.02em">NextGenMedia</span>
         <div style="font-size:12px;color:#9ca3af;margin-top:2px">Interne melding voor admins</div>
       </td></tr>
@@ -58,7 +58,7 @@ function alertHtml(opts: {
         ${descHtml}
         ${linksHtml}
         <table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0 4px"><tr><td style="border-radius:10px;background:#111827">
-          <a href="${esc(opts.ctaHref)}" target="_blank" style="display:inline-block;padding:12px 28px;font-size:14px;font-weight:700;color:#fff;text-decoration:none;border-radius:10px;border-bottom:3px solid #fff848">${esc(opts.ctaText)}</a>
+          <a href="${esc(opts.ctaHref)}" target="_blank" style="display:inline-block;padding:12px 28px;font-size:14px;font-weight:700;color:#fff;text-decoration:none;border-radius:10px;border-bottom:3px solid #0f0f0f">${esc(opts.ctaText)}</a>
         </td></tr></table>
       </td></tr>
       <tr><td style="padding:16px 28px;background:#f9fafb;border-top:1px solid #f0f0f0">
