@@ -8,8 +8,10 @@ import type { StatistiekenData } from '@/lib/metricool-stats-server'
 import { DagGrafiek } from './dag-grafiek'
 import { PostKaart } from './post-kaart'
 
-const link = (q: { periode: PeriodeSoort; netwerk: Netwerk | 'alle' }) =>
-  `/portal/metricool?${new URLSearchParams({ periode: q.periode, netwerk: q.netwerk }).toString()}`
+type Link = (q: { periode: PeriodeSoort; netwerk: Netwerk | 'alle' }) => string
+/** Links naar dezelfde pagina met een andere periode of ander kanaal (klantapp of admin). */
+const maakLink = (pad: string, vast: Record<string, string>): Link => (q) =>
+  `${pad}?${new URLSearchParams({ ...vast, periode: q.periode, netwerk: q.netwerk }).toString()}`
 
 function Pil({ href, actief, children }: { href: string; actief: boolean; children: React.ReactNode }) {
   return (
@@ -33,7 +35,12 @@ function Verschil({ c }: { c: KpiCijfer }) {
   )
 }
 
-export function Statistieken({ data, periode, netwerk }: { data: StatistiekenData; periode: Periode; netwerk: Netwerk | 'alle' }) {
+export function Statistieken({ data, periode, netwerk, pad = '/portal/metricool', vast = {} }: {
+  data: StatistiekenData; periode: Periode; netwerk: Netwerk | 'alle'
+  /** Waar de filters naartoe linken (klantapp of admin) en welke parameters blijven staan. */
+  pad?: string; vast?: Record<string, string>
+}) {
+  const link = maakLink(pad, vast)
   const netwerken = netwerkenMetData(data.rijen)
   const kies: Netwerk | 'alle' = netwerk !== 'alle' && !netwerken.includes(netwerk) ? 'alle' : netwerk
   const cijfers = samenvatting(data.rijen, periode, kies).filter((c) => c.waarde !== null)

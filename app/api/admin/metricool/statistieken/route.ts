@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminSupabaseClient, requireAdmin } from '@/lib/supabase/server'
+import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { magIk } from '@/lib/instellingen/laden'
 import { safeMessage } from '@/lib/api-error'
 import { syncMerk } from '@/lib/metricool-stats-server'
 import { metricoolConfigured } from '@/lib/metricool'
@@ -8,12 +9,12 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 /**
- * Admin: de stand van de statistieken-sync per merk.
+ * Team: de stand van de statistieken-sync per merk (recht Metricool).
  *  GET ?blog=<id>  → laatste sync, welke metric per cijfer werkte, fouten
  *  POST { blog_id, volledig? } → dit merk nu bijwerken
  */
 export async function GET(req: NextRequest) {
-  if (!(await requireAdmin())) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
+  if (!(await magIk('metricool', 'bekijken'))) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
   const blog = req.nextUrl.searchParams.get('blog') ?? ''
   if (!/^\d{1,20}$/.test(blog)) return NextResponse.json({ error: 'Ongeldig merk.' }, { status: 400 })
   const { data } = await createAdminSupabaseClient().from('metricool_sync').select('*').eq('blog_id', blog).maybeSingle()
@@ -21,7 +22,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  if (!(await requireAdmin())) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
+  // Nu bijwerken (knop bij een klant op Metricool → Statistieken): wie Metricool mag aanpassen.
+  if (!(await magIk('metricool', 'aanpassen'))) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
   try {
     const b = (await req.json().catch(() => ({}))) as { blog_id?: unknown; volledig?: unknown }
     const blog = typeof b.blog_id === 'string' && /^\d{1,20}$/.test(b.blog_id) ? b.blog_id : null
