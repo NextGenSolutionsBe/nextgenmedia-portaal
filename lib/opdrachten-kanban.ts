@@ -212,16 +212,17 @@ export function raadDiensten(titel: string | null | undefined): DienstKey[] {
 
 // ── Verantwoordelijke ───────────────────────────────────────────────────────
 
-/** Elk project heeft een verantwoordelijke: Marco, Bram of beiden samen. */
-export const PROJECT_VERANTWOORDELIJKEN = ['Marco', 'Bram', 'Gezamenlijke lead'] as const
+/** Elk project heeft een verantwoordelijke: Marco, Bram, Chiara of Marco en Bram samen. */
+export const PROJECT_VERANTWOORDELIJKEN = ['Marco', 'Bram', 'Chiara', 'Gezamenlijke lead'] as const
 export type ProjectVerantwoordelijke = (typeof PROJECT_VERANTWOORDELIJKEN)[number]
 
-/** Een vrije naam naar een van de drie keuzes ("Bram Reinquin" → Bram, "samen" → Gezamenlijke lead); anders null. */
+/** Een vrije naam naar een van de keuzes ("Bram Reinquin" → Bram, "samen" → Gezamenlijke lead); anders null. */
 export function projectVerantwoordelijke(v: unknown): ProjectVerantwoordelijke | null {
   const s = String(v ?? '').trim().toLowerCase()
   if (!s) return null
   if (s.startsWith('marco')) return 'Marco'
   if (s.startsWith('bram')) return 'Bram'
+  if (s.startsWith('chiara')) return 'Chiara'
   if (/gezamen|samen|beide|bram.*marco|marco.*bram/.test(s)) return 'Gezamenlijke lead'
   return null
 }

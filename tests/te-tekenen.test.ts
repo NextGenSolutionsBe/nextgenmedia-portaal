@@ -62,6 +62,7 @@ async function main() {
     assert.deepEqual(wieTekentTegen('Bram Reinquin'), ['Bram'])
     assert.deepEqual(wieTekentTegen('Gezamenlijke lead'), ['Marco', 'Bram'])
     assert.deepEqual(wieTekentTegen(null), ['Marco', 'Bram'])
+    assert.deepEqual(wieTekentTegen('Chiara'), ['Chiara'])
   })
 
   await test('Tegentekenen: per persoon één taak met de lijst, recentste eerst, link blijft bij die persoon', () => {
@@ -87,6 +88,8 @@ async function main() {
     assert.ok(!hoortBij('Bram', 'Marco'))
     assert.ok(hoortBij('Bram', 'Gezamenlijke lead'))
     assert.ok(hoortBij('Bram', null))
+    assert.ok(hoortBij('Chiara', 'Chiara'))
+    assert.ok(!hoortBij('Chiara', 'Bram'))
     assert.ok(hoortBij(null, 'Marco'), 'zonder ?van= alles')
   })
 

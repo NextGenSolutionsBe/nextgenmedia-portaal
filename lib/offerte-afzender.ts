@@ -2,7 +2,7 @@
  * Wie de offerte stuurt.
  *  - Het bedrijf: altijd NextGen Agency BV (vaste gegevens, zie BEDRIJF). Die
  *    staan op elke offerte en in de algemene voorwaarden.
- *  - De contactpersoon (Marco of Bram): naam, functie, telefoon, e-mail en
+ *  - De contactpersoon (Marco, Bram of Chiara): naam, functie, telefoon, e-mail en
  *    foto komen uit Personeel, zodat er maar één plek is om ze bij te houden.
  * Offertes → Instellingen bewaart enkel nog de betalingstermijn
  * (`app_settings.offerte_instellingen`). Puur: pdf, formulier en tests
@@ -49,6 +49,7 @@ export function controleerOfferteInstellingen(b: unknown): { ok: true; waarde: O
 const TERUGVAL: Record<Verantwoordelijke, OfferteContact> = {
   marco: { naam: 'Marco Castermans', functie: 'Zaakvoerder', telefoon: '', email: 'info@nextgenmedia.be' },
   bram: { naam: 'Bram Reinquin', functie: 'Zaakvoerder', telefoon: '', email: 'info@nextgenmedia.be' },
+  chiara: { naam: 'Chiara Walmagh', functie: 'Zaakvoerder', telefoon: '', email: 'info@nextgenmedia.be' },
 }
 
 /** Een rij uit Personeel naar de contactpersoon op de offerte; lege velden vallen terug. */

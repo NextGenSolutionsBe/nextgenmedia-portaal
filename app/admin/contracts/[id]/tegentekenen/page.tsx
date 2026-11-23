@@ -7,14 +7,15 @@ import { KLANT_TEKENDE_IN_APP, bedrijfVoorMerk, onsZoneVan, redenNietTegentekene
 import { formatDate } from '@/lib/utils'
 import { hoortBij } from '@/lib/te-tekenen'
 import { TegentekenScherm } from './tegenteken-scherm'
+import { isTegentekenaar } from '@/lib/contracten/verantwoordelijke'
 
 export const dynamic = 'force-dynamic'
 
 /** Het contract ook namens NextGenMedia ondertekenen, na de klant. Enkel zaakvoerders (admins). */
 export default async function TegentekenenPagina({ params, searchParams }: { params: { id: string }; searchParams?: { van?: string } }) {
   const admin = createAdminSupabaseClient()
-  // Vanuit de taak "contracten tegentekenen" van Marco of Bram: enkel hun contracten (+ gezamenlijk en zonder verantwoordelijke).
-  const van = searchParams?.van === 'Marco' || searchParams?.van === 'Bram' ? searchParams.van : null
+  // Vanuit de taak "contracten tegentekenen" van Marco, Bram of Chiara: enkel hun contracten (+ gezamenlijk en zonder verantwoordelijke).
+  const van = isTegentekenaar(searchParams?.van) ? searchParams.van : null
   const qs = van ? `?van=${van}` : ''
   const [{ data: c }, { data: openRijen }] = await Promise.all([
     admin.from('contracts').select('*').eq('id', params.id).maybeSingle(),

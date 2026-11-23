@@ -302,7 +302,7 @@ export async function maakKaartUitMail(
   if (r.status !== 'voorstel') throw new MailProjectFout('Hierover werd al beslist.', 409)
 
   const verantwoordelijke = projectVerantwoordelijke(b.verantwoordelijke)
-  if (!verantwoordelijke) throw new MailProjectFout('Kies een verantwoordelijke: Marco, Bram of gezamenlijke lead.')
+  if (!verantwoordelijke) throw new MailProjectFout('Kies een verantwoordelijke: Marco, Bram, Chiara of gezamenlijke lead.')
   const titel = String(b.titel ?? r.titel ?? '').replace(/\s+/g, ' ').trim().slice(0, 200)
   if (!titel) throw new MailProjectFout('Geef het project een titel.')
   let clientId: string | null = typeof b.client_id === 'string' && UUID.test(b.client_id) ? b.client_id : b.client_id === null ? null : (r.client_id as string | null)

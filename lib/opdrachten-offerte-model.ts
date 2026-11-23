@@ -74,7 +74,7 @@ export function contractTaak(o: { klant: string | null; titel: string; bedrag: n
 
 /** Aan wie de taak in ClickUp gaat: de verantwoordelijke van de kaart, anders wie de offerte maakte, anders Bram. */
 export function taakVoorWie(verantwoordelijke: string | null | undefined, offerteDoor: string | null | undefined): { naam?: string; email?: string } {
-  if (verantwoordelijke === 'Marco' || verantwoordelijke === 'Bram') return { naam: verantwoordelijke }
+  if (verantwoordelijke === 'Marco' || verantwoordelijke === 'Bram' || verantwoordelijke === 'Chiara') return { naam: verantwoordelijke }
   if (offerteDoor && offerteDoor.includes('@')) return { email: offerteDoor }
   return { naam: 'Bram' }
 }

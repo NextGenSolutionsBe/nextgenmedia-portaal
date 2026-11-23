@@ -30,6 +30,7 @@ import {
 } from '@/lib/contracten/looptijd'
 import { bewaarNavigatie, bewaarContext, leesContext } from '@/lib/contract-navigatie'
 import { zoekVeld } from '@/lib/zoekveld'
+import { isTegentekenaar } from '@/lib/contracten/verantwoordelijke'
 
 export type Contract = OverzichtContract & {
   service_slug: string | null
@@ -607,7 +608,7 @@ export function ContractsClient({
                                   {c.klant_geopend_op && <div className="text-[10px] text-gray-500 mt-1 whitespace-nowrap">{geopendTekst(c.klant_geopend_op)}</div>}
                                   {canonicalStatus(c.status) === 'getekend' && (c.tegengetekend_op
                                     ? <div className="text-[10px] text-green-700 mt-1 whitespace-nowrap">Door beide partijen</div>
-                                    : c.klant_tekende_in_app && <a href={`/admin/contracts/${c.id}/tegentekenen`} onClick={(e) => e.stopPropagation()} className="mt-1 inline-flex whitespace-nowrap rounded-full border border-amber-300 bg-amber-50 px-1.5 text-[10px] font-medium text-amber-900 hover:bg-amber-100">Wacht op onze handtekening{c.verantwoordelijke === 'Marco' || c.verantwoordelijke === 'Bram' ? ` (${c.verantwoordelijke})` : ''}</a>)}
+                                    : c.klant_tekende_in_app && <a href={`/admin/contracts/${c.id}/tegentekenen`} onClick={(e) => e.stopPropagation()} className="mt-1 inline-flex whitespace-nowrap rounded-full border border-amber-300 bg-amber-50 px-1.5 text-[10px] font-medium text-amber-900 hover:bg-amber-100">Wacht op onze handtekening{isTegentekenaar(c.verantwoordelijke) ? ` (${c.verantwoordelijke})` : ''}</a>)}
                                   {c.mail_status && c.mail_status !== 'niet' && <div className="mt-1"><span title={MAIL_STATUS[c.mail_status].uitleg} className={`inline-flex rounded-full border px-1.5 text-[10px] font-medium ${MAIL_STATUS[c.mail_status].cls}`}>{MAIL_STATUS[c.mail_status].label}</span></div>}
                                 </td>
                                 <td className="table-td">

@@ -27,7 +27,7 @@ export async function kaartVanContract(admin: Admin, contractId: string): Promis
  */
 export async function zetContractVerantwoordelijke(admin: Admin, contractId: string, waarde: unknown, door: string | null): Promise<{ verantwoordelijke: ContractVerantwoordelijke; kaartId: string }> {
   const v = contractVerantwoordelijke(waarde)
-  if (!v) throw new VerantwoordelijkeFout('Kies Marco, Bram of Gezamenlijke lead.')
+  if (!v) throw new VerantwoordelijkeFout('Kies Marco, Bram, Chiara of Gezamenlijke lead.')
   let kaart = await kaartVanContract(admin, contractId)
   if (!kaart) {
     await kaartVoorContract(admin, contractId)

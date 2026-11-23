@@ -250,9 +250,11 @@ export type OfferteInhoud = {
   extra: ExtraLijn[]
 }
 
-export const VERANTWOORDELIJKEN = ['marco', 'bram'] as const
+export const VERANTWOORDELIJKEN = ['marco', 'bram', 'chiara'] as const
 export type Verantwoordelijke = (typeof VERANTWOORDELIJKEN)[number]
-export const isVerantwoordelijke = (v: unknown): v is Verantwoordelijke => v === 'marco' || v === 'bram'
+export const isVerantwoordelijke = (v: unknown): v is Verantwoordelijke => VERANTWOORDELIJKEN.includes(v as Verantwoordelijke)
+/** "marco" → "Marco" (de verantwoordelijke op de projectkaart). */
+export const verantwoordelijkeNaam = (v: Verantwoordelijke): string => v.charAt(0).toUpperCase() + v.slice(1)
 
 export const ficheVan = (k: string): DienstFiche | undefined => DIENST_FICHES.find((d) => d.key === k)
 

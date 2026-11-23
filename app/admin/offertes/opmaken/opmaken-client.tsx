@@ -10,10 +10,11 @@ import { MailDialog } from '@/components/admin/mail-composer'
 import { MERK_STIJL, type MailMerk } from '@/lib/merk-mail'
 import { GELDIG_DAGEN, type Offerte } from '@/lib/offertes'
 import {
-  ALGEMEEN, DIENST_FICHES, PRIJS, berekenPrijs, controleerOpmaak, euro, ficheVan, leesInhoud, legeInhoud, isGeldigBedrag,
+  ALGEMEEN, DIENST_FICHES, PRIJS, berekenPrijs, controleerOpmaak, euro, ficheVan, leesInhoud, legeInhoud, isGeldigBedrag, isVerantwoordelijke, verantwoordelijkeNaam, VERANTWOORDELIJKEN,
   type DienstFicheKey, type OfferteInhoud, type Veld, type Waarden, type Verantwoordelijke,
 } from '@/lib/offerte-fiche'
 import type { OfferteContact } from '@/lib/offerte-afzender'
+import { PersoonKnop } from '@/components/admin/persoon-foto'
 
 const vandaag = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Brussels' })
 const plus = (n: number) => { const d = new Date(`${vandaag()}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10) }
@@ -141,7 +142,7 @@ export function OfferteOpmaken({ beginKlant, opdrachtId, offerteId }: { beginKla
     if (!offerteId) return
     api<{ offerte: Rij }>(`/api/admin/offertes/${offerteId}`).then(({ offerte: o }) => {
       if (o.bron !== 'opgemaakt') { toast.error('Deze offerte is een pdf en kan je hier niet aanpassen.'); router.push('/admin/offertes'); return }
-      setInhoud(leesInhoud(o.inhoud)); setMerk(o.merk); setWie(o.verantwoordelijke === 'marco' || o.verantwoordelijke === 'bram' ? o.verantwoordelijke : null)
+      setInhoud(leesInhoud(o.inhoud)); setMerk(o.merk); setWie(isVerantwoordelijke(o.verantwoordelijke) ? o.verantwoordelijke : null)
       setProject(o.opdracht_id)
       setKlant(o.client_id ? { id: o.client_id, company_name: o.klant_naam ?? 'Klant' } : null)
       if (o.status !== 'concept') toast.message('Deze offerte is al verstuurd. Bewaren maakt een kopie met een nieuw nummer.')
@@ -225,10 +226,9 @@ export function OfferteOpmaken({ beginKlant, opdrachtId, offerteId }: { beginKla
             </div>
             <div>
               <span className={LBL}>Verantwoordelijke van de offerte *</span>
-              <div className="grid grid-cols-2 gap-1.5">
-                {(['marco', 'bram'] as Verantwoordelijke[]).map((k) => (
-                  <button key={k} type="button" onClick={() => setWie(k)} aria-pressed={wie === k}
-                    className={`rounded-lg border-2 px-2 py-2 text-xs font-semibold ${wie === k ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 text-gray-700'}`}>{contacten?.[k].naam ?? (k === 'marco' ? 'Marco' : 'Bram')}</button>
+              <div className="flex gap-1.5 flex-wrap" role="radiogroup" aria-label="Verantwoordelijke van de offerte">
+                {VERANTWOORDELIJKEN.map((k) => (
+                  <PersoonKnop key={k} naam={verantwoordelijkeNaam(k)} label={contacten?.[k].naam ?? verantwoordelijkeNaam(k)} aan={wie === k} onClick={() => setWie(k)} />
                 ))}
               </div>
               {contact && (

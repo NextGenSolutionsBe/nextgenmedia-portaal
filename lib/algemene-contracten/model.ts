@@ -122,7 +122,7 @@ export function aantalIn(contracten: Pick<AlgemeenContract, 'map_id' | 'gearchiv
 export const STANDAARD_MAPPEN = ['Huurovereenkomsten', 'Verzekeringen', 'Commissieregelingen', 'Partnerships', "NDA's", 'Andere']
 
 /** Wie namens NextGenMedia tekent (zelfde keuze als bij projecten). */
-export const ONDERTEKENAARS = ['Marco', 'Bram', 'Gezamenlijke lead'] as const
+export const ONDERTEKENAARS = ['Marco', 'Bram', 'Chiara', 'Gezamenlijke lead'] as const
 
 /** Waar staat het contract? Eerst wij (als wij moeten tekenen), dan de andere partij. */
 export function statusVan(c: Pick<AlgemeenContract, 'ons_nodig' | 'ons_getekend_op' | 'partij_nodig' | 'partij_getekend_op'>): AcStatus {
@@ -204,7 +204,7 @@ export function controleerVelden(b: Record<string, unknown>, deel = false): { ve
   if (heeft('partij_nodig')) v.partij_nodig = b.partij_nodig === true
   if (heeft('ondertekenaar')) {
     const o = b.ondertekenaar
-    if (o !== null && o !== undefined && o !== '' && !ONDERTEKENAARS.includes(o as (typeof ONDERTEKENAARS)[number])) return { fout: 'Kies Marco, Bram of Gezamenlijke lead.' }
+    if (o !== null && o !== undefined && o !== '' && !ONDERTEKENAARS.includes(o as (typeof ONDERTEKENAARS)[number])) return { fout: 'Kies Marco, Bram, Chiara of Gezamenlijke lead.' }
     v.ondertekenaar = typeof o === 'string' && o ? o : null
   }
   return { velden: v }
