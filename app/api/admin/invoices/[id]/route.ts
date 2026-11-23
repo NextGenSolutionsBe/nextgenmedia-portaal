@@ -12,6 +12,7 @@ import { vandaagBrussel } from '@/lib/facturatie/planner-model'
 import { isFactuurType } from '@/lib/facturatie/item-model'
 import { verwijderFactuur } from '@/lib/facturen/verwijder'
 import { nummerAlGebruikt } from '@/lib/facturatie/factuurnummer-server'
+import { leesVerplaatsing } from '@/lib/facturen/kilometers'
 
 export const dynamic = 'force-dynamic'
 
@@ -145,6 +146,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if ('service_slug' in b) patch.service_slug = tekst(b.service_slug, 80)
     if ('currency' in b) patch.currency = (tekst(b.currency, 3) ?? 'EUR').toUpperCase()
     if ('vat_pct' in b) { const n = num(b.vat_pct); if (n === null || n < 0 || n > 100) return NextResponse.json({ error: 'Ongeldig btw-tarief.' }, { status: 400 }); patch.vat_pct = n }
+    // Kilometervergoeding: de ritten achter de kilometerregel (om later aan te passen). null = weg.
+    if ('km_ritten' in b) patch.km_ritten = b.km_ritten === null ? null : leesVerplaatsing(b.km_ritten)
 
     const btw = typeof patch.vat_pct === 'number' ? patch.vat_pct : Number(inv.vat_pct) || DEFAULT_VAT
     let regels: FactuurRegel[] | null = null
@@ -166,7 +169,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (Object.keys(patch).length === 0 && !regels) return NextResponse.json({ ok: true })
     patch.updated_at = new Date().toISOString()
 
-    const { error } = await admin.from('invoices').update(patch).eq('id', id)
+    let { error } = await admin.from('invoices').update(patch).eq('id', id)
+    // Vóór de migratie bestaat km_ritten nog niet: de factuur zelf gaat voor.
+    if (error && 'km_ritten' in patch && /km_ritten/.test(error.message)) {
+      delete patch.km_ritten
+      ;({ error } = await admin.from('invoices').update(patch).eq('id', id))
+    }
     if (error) throw new Error(error.message)
     let kostenLosgekoppeld = 0
     if (regels) {

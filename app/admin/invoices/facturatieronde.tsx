@@ -23,7 +23,7 @@ import { KilometerCheck } from './kilometer-check'
  *  · Ontbreken er gegevens, dan moet Bram dat eerst uitdrukkelijk aanvinken.
  */
 export function Facturatieronde({ items, onSluit, onGewijzigd }: { items: Moment[]; onSluit: () => void; onGewijzigd: () => void }) {
-  const [lijst] = useState(items)   // vaste volgorde voor de hele ronde
+  const [lijst, setLijst] = useState(items)   // vaste volgorde voor de hele ronde (een reeksmaand kan een eigen factuur worden)
   const [index, setIndex] = useState(0)
   const [cache, setCache] = useState<Record<string, ItemData>>({})
   const [fout, setFout] = useState<string | null>(null)
@@ -178,7 +178,17 @@ export function Facturatieronde({ items, onSluit, onGewijzigd }: { items: Moment
               </label>
             )}
             {data && !isKlaar && (
-              <KilometerCheck aan={kmOk.has(huidig.id)} heeftKm={heeftKilometers(data.detail.regels)}
+              <KilometerCheck aan={kmOk.has(huidig.id)} heeftKm={heeftKilometers(data.detail.regels)} momentId={huidig.id} titel={data.detail.titel}
+                onKm={(nieuw) => {
+                  onGewijzigd()
+                  if (nieuw) {
+                    const bronId = nieuw.slice(4)
+                    setLijst((l) => l.map((x) => (x.id === huidig.id ? { ...x, id: nieuw, bron: 'invoice', bronId, invoice_id: bronId } : x)))
+                    setKmOk((s) => new Set([...s, nieuw]))
+                  } else {
+                    setCache((c) => { const n = { ...c }; delete n[huidig.id]; return n })
+                  }
+                }}
                 onChange={(aan) => setKmOk((s) => { const n = new Set(s); if (aan) n.add(huidig.id); else n.delete(huidig.id); return n })} />
             )}
             <div className="flex items-end gap-2 flex-wrap">

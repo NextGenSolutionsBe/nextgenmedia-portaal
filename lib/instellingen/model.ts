@@ -146,7 +146,7 @@ export const STANDAARD_FACTURATIE: FacturatieInstellingen = {
   betaalgegevens: '', standaard_status: 'te_versturen',
   clickup_sync_aan: false, clickup_lijst_id: '', clickup_lijst_pad: '', clickup_assignee_id: '', clickup_assignee_naam: '',
   verantwoordelijke_naam: 'Bram Reinquin',
-  km_tarief_excl: 0, km_btw_pct: 21,
+  km_tarief_excl: 0.43, km_btw_pct: 21,
   factuurnummer_vanaf: '',
 }
 export const STANDAARD_DOCUMENTEN: DocumentenInstellingen = {

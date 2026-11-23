@@ -7866,3 +7866,7 @@ REVOKE ALL ON public.ngs_deal_taken FROM anon, authenticated;
 -- zodat de regel haar taak en datum terugvindt.
 ALTER TABLE IF EXISTS public.team_taken ADD COLUMN IF NOT EXISTS opvolg_ref text;
 CREATE INDEX IF NOT EXISTS team_taken_opvolg_ref_idx ON public.team_taken (opvolg_ref) WHERE opvolg_ref IS NOT NULL;
+
+-- ── Kilometervergoeding: de ritten achter de kilometerregel (23 nov 2026) ───
+-- { ritten: [{ van, naar, km, berekend, heenEnTerug, keer, datum }], tarief, btw, waarvoor }
+ALTER TABLE IF EXISTS public.invoices ADD COLUMN IF NOT EXISTS km_ritten jsonb;

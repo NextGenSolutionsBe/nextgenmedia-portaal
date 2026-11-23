@@ -76,6 +76,7 @@ export async function GET(req: NextRequest) {
         contract_id: contractId, contract_status: contractStatus, client_id: inv.client_id ?? null,
         verzonden_op: dag(inv.sent_at), verzonden_door: inv.sent_by_email ?? null, betaald_op: betaald ? dag(inv.betaald_op) : null,
         betaald_bedrag: Number(inv.betaald_bedrag) || 0, bedrag_incl: incl,
+        km_ritten: (inv as { km_ritten?: unknown }).km_ritten ?? null,
       })
     }
 
