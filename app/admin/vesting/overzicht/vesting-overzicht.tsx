@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Ban, ChevronDown, ChevronUp, FileText, Loader2, Minus, PenLine, Plus, RotateCcw } from 'lucide-react'
 import { isGetekend, type KandidaatContract } from '@/lib/vesting-snel'
-import type { ContractWeergave, RegistratieWeergave, VestingWeergave, WamWeergave } from '@/lib/vesting-weergave'
+import type { ContractWeergave, RegistratieWeergave, VestingWeergave } from '@/lib/vesting-weergave'
 import { PrijsToevoegen } from '../prijs-toevoegen'
 import { TekenStand, api, datumKort, eur, pct } from './delen'
 import { ContractVenster } from './contract-venster'
@@ -15,7 +15,8 @@ import { leadInfo } from '@/lib/vesting'
 import { BeoordeelVenster } from './beoordeel-venster'
 import { InkomstRegistreren, KostRegistreren, RegistratieVenster } from './registratie-venster'
 import { Register } from './register'
-import { WamVenster, WAM_VERLOOP } from './wam-venster'
+import { WamVenster } from './wam-venster'
+import { WamKlanten } from './wam-klanten'
 import { RegelsKaart, RegelsKnop, RegelsVenster, type RegelsBegin } from '@/components/admin/regels-akkoord'
 import type { RegelsData } from '@/lib/regels-akkoord'
 import { PersoonFoto } from '@/components/admin/persoon-foto'
@@ -210,12 +211,11 @@ export function VestingOverzicht({ data, tekenen, regels, regelsOpen = false }: 
         {tab === 'wam' && (
           <div className="pt-3 space-y-3">
             <p className="text-sm text-gray-500 max-w-2xl">
-              Marco&apos;s klanten van vóór de samenwerking. Wat er binnenkwam telt zoals de WAM-afspraak: elke € 5.000 netto = 1%, tot 5%. Een betaalde termijn aanduiden of iets aanpassen tekenen jullie alle drie opnieuw.
+              Marco&apos;s klanten van vóór de samenwerking, per klant. Telt zoals de WAM-afspraak: elke € 5.000 netto = 1%, tot 5%. Wat je aanpast tekenen jullie alle drie opnieuw.
             </p>
-            {zichtbareWam.length === 0 && <p className="text-sm text-gray-500 py-6 text-center">{alleenOpen ? 'Alles getekend. Niets meer te doen.' : 'Geen WAM-contracten.'}</p>}
-            <ul className="space-y-2">
-              {zichtbareWam.map((w) => <WamKaart key={w.id} w={w} vennoten={data.vennoten} onOpen={() => setOpen({ soort: 'wam', id: w.id })} />)}
-            </ul>
+            {zichtbareWam.length === 0
+              ? <p className="text-sm text-gray-500 py-6 text-center">{alleenOpen ? 'Alles getekend. Niets meer te doen.' : 'Geen WAM-contracten.'}</p>
+              : <WamKlanten wam={zichtbareWam} vennoten={data.vennoten} onTekenen={(id) => setOpen({ soort: 'wam', id })} onVernieuw={vernieuw} />}
           </div>
         )}
 
@@ -345,40 +345,6 @@ function ContractKaart({ c, vennoten, onOpen }: { c: ContractWeergave; vennoten:
             {c.wachtOpKlant && <Tag>Wacht op de klant</Tag>}
             {c.definitief && c.status !== 'stopgezet' && <Tag>Betaald</Tag>}
             {c.certificaat?.huidig && <Tag>Certificaat {c.certificaat.nummer}</Tag>}
-          </div>
-        </div>
-      </button>
-    </li>
-  )
-}
-
-function WamKaart({ w, vennoten, onOpen }: { w: WamWeergave; vennoten: VestingWeergave['vennoten']; onOpen: () => void }) {
-  const open = w.termijnen.filter((t) => t.status !== 'geannuleerd')
-  const betaald = open.filter((t) => t.status === 'betaald').length
-  return (
-    <li>
-      <button type="button" onClick={onOpen} className={`w-full text-left rounded-lg border bg-white p-3.5 sm:p-4 hover:border-gray-400 transition-colors ${w.geschrapt ? 'border-dashed border-gray-300 opacity-70' : 'border-gray-200'}`}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="font-medium text-gray-900 truncate">{w.geschrapt && <span className="text-red-700">Geschrapt · </span>}{w.klant}</div>
-            <div className="text-xs text-gray-500 truncate">{w.nr}{w.omschrijving ? ` · ${w.omschrijving}` : ''} · {betaald} van {open.length} termijnen betaald</div>
-          </div>
-          <div className="text-right shrink-0">
-            <div className={`font-semibold tabular-nums ${w.teltMee > 0 ? 'text-gray-900' : 'text-gray-400'}`}>{eur(w.teltMee)}</div>
-            <div className="text-[11px] text-gray-500">van {eur(w.contractwaarde)}</div>
-          </div>
-        </div>
-        {open.length > 0 && (
-          <div className="mt-2 h-1.5 rounded-full bg-gray-100 overflow-hidden" aria-hidden>
-            <div className="h-full bg-gray-900" style={{ width: `${Math.min(100, Math.round((betaald / open.length) * 100))}%` }} />
-          </div>
-        )}
-        <div className="mt-2.5 flex items-center justify-between gap-2 flex-wrap">
-          <TekenStand akkoord={w.akkoord} vennoten={vennoten} />
-          <div className="flex gap-1.5">
-            {w.status !== 'actief' && !w.geschrapt && <Tag>{WAM_VERLOOP[w.status]}</Tag>}
-            {w.nogBinnen > 0 && <Tag>Nog {eur(w.nogBinnen)} te komen</Tag>}
-            {w.certificaat?.huidig && <Tag>Certificaat {w.certificaat.nummer}</Tag>}
           </div>
         </div>
       </button>
