@@ -139,11 +139,12 @@ function Rij({ label, children }: { label: string; children: React.ReactNode }) 
   return <div className="flex items-center justify-between gap-3 px-3 py-2.5"><dt className="text-gray-500">{label}</dt><dd className="text-right">{children}</dd></div>
 }
 
-function Gegevens({ w, onKlaar, onAnnuleer }: { w: WamWeergave; onKlaar: () => void; onAnnuleer: () => void }) {
+export function Gegevens({ w, onKlaar, onAnnuleer }: { w: WamWeergave; onKlaar: () => void; onAnnuleer: () => void }) {
   const [klant, setKlant] = useState(w.klant)
   const [omschrijving, setOmschrijving] = useState(w.omschrijving ?? '')
   const [waarde, setWaarde] = useState(String(w.contractwaarde).replace('.', ','))
   const [status, setStatus] = useState<WamWeergave['status']>(w.status)
+  const [notitie, setNotitie] = useState(w.notitie ?? '')
   const [bezig, setBezig] = useState(false)
   const [fout, setFout] = useState<string | null>(null)
   const bewaar = async () => {
@@ -152,7 +153,7 @@ function Gegevens({ w, onKlaar, onAnnuleer }: { w: WamWeergave; onKlaar: () => v
     if (x === null || x < 0) { setFout('Vul de contractwaarde in (excl. btw).'); return }
     setFout(null); setBezig(true)
     try {
-      await api('/api/admin/vesting', { method: 'PATCH', body: JSON.stringify({ resource: 'wam', id: w.id, klant: klant.trim(), omschrijving: omschrijving.trim() || null, contractwaarde: x, status }) })
+      await api('/api/admin/vesting', { method: 'PATCH', body: JSON.stringify({ resource: 'wam', id: w.id, klant: klant.trim(), omschrijving: omschrijving.trim() || null, contractwaarde: x, status, notitie: notitie.trim() || null }) })
       toast.success('Aangepast. Iedereen tekent opnieuw als de cijfers veranderden.')
       onKlaar()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt') } finally { setBezig(false) }
@@ -169,6 +170,7 @@ function Gegevens({ w, onKlaar, onAnnuleer }: { w: WamWeergave; onKlaar: () => v
           </select>
         </label>
       </div>
+      <label className="block text-xs text-gray-500">Notitie (optioneel)<input className={`${INP} mt-1`} value={notitie} onChange={(e) => setNotitie(e.target.value)} /></label>
       {fout && <p className="text-xs text-red-700">{fout}</p>}
       <div className="flex gap-2">
         <button type="button" onClick={bewaar} disabled={bezig} className="btn-primary text-sm">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Bewaren</button>
@@ -178,7 +180,7 @@ function Gegevens({ w, onKlaar, onAnnuleer }: { w: WamWeergave; onKlaar: () => v
   )
 }
 
-function NieuweTermijn({ wamId, onKlaar, onAnnuleer }: { wamId: string; onKlaar: () => void; onAnnuleer: () => void }) {
+export function NieuweTermijn({ wamId, onKlaar, onAnnuleer }: { wamId: string; onKlaar: () => void; onAnnuleer: () => void }) {
   const [datum, setDatum] = useState(vandaag())
   const [bedrag, setBedrag] = useState('')
   const [bezig, setBezig] = useState(false)
