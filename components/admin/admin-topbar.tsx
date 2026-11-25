@@ -10,7 +10,7 @@ export function AdminTopBar() {
     // De strook zelf laat klikken door naar de inhoud eronder.
     <div className="sticky top-0 z-30 -mx-4 md:-mx-6 lg:-mx-8 mb-3 pl-16 pr-4 md:px-6 lg:px-8 py-3 flex items-center gap-2 md:gap-3 pointer-events-none">
       <div className="flex-1 min-w-0" />
-      <div className="pointer-events-auto flex items-center gap-2 md:gap-3 rounded-full glas shadow-md p-1">
+      <div data-zwevende-knoppen className="pointer-events-auto flex items-center gap-2 md:gap-3 rounded-full glas shadow-md p-1">
         <GlobalSearch verborgen />
         <NotificationBell />
         <QuickActions />

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  ChevronLeft, ChevronRight, Loader2, Plus, Printer, PanelLeft, Search, Tag, Building2, Eye, EyeOff, Mail, X, Users, List as ListIcon,
+  ChevronLeft, ChevronRight, ChevronDown, Loader2, Plus, Printer, PanelLeft, Search, Tag, Building2, Eye, EyeOff, Mail, X, Users, List as ListIcon,
 } from 'lucide-react'
 import { PersoonFoto } from '@/components/admin/persoon-foto'
 import { zoekVeld } from '@/lib/zoekveld'
@@ -35,6 +35,15 @@ type Voorkeur = { modus?: Modus; personen?: string[]; kleur?: KleurVolgens; klaa
 const leesVoorkeur = (): Voorkeur => { try { return JSON.parse(localStorage.getItem(VOORKEUR) ?? '{}') as Voorkeur } catch { return {} } }
 const hhmm = (min: number) => `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
 
+/** Kort, voor een smal scherm: "wo 25 nov", "23 – 29 nov", "nov 2026". */
+function periodeKort(w: Weergave, d: string): string {
+  const f = (x: string, o: Intl.DateTimeFormatOptions) => new Date(`${x}T12:00:00Z`).toLocaleDateString('nl-BE', { ...o, timeZone: 'UTC' })
+  if (w === 'dag') return f(d, { weekday: 'short', day: 'numeric', month: 'short' })
+  if (w === 'maand') return f(`${d.slice(0, 7)}-15`, { month: 'short', year: 'numeric' })
+  const dagen = dagenVan('week', d)
+  return `${Number(dagen[0].slice(8))} – ${f(dagen[6], { day: 'numeric', month: 'short' })}`
+}
+
 function periodeTitel(w: Weergave, d: string): string {
   if (w === 'dag') return new Date(`${d}T12:00:00Z`).toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
   if (w === 'maand') return new Date(`${d.slice(0, 7)}-15T12:00:00Z`).toLocaleDateString('nl-BE', { month: 'long', year: 'numeric', timeZone: 'UTC' })
@@ -44,7 +53,7 @@ function periodeTitel(w: Weergave, d: string): string {
   return `${a.getUTCDate()}${zelfdeMaand ? '' : ` ${a.toLocaleDateString('nl-BE', { month: 'short', timeZone: 'UTC' })}`} – ${b.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}`
 }
 
-export function AgendaApp() {
+export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
   const [boom, setBoom] = useState<BoomData | null>(null)
   const [fout, setFout] = useState<string | null>(null)
   const [keuze, setKeuze] = useState<Keuze>(null)
@@ -67,6 +76,22 @@ export function AgendaApp() {
   const [pop, setPop] = useState<null | 'personen' | 'labels' | 'klant' | 'zoek'>(null)
   const sluitPop = useCallback(() => setPop(null), [])
   const geladen = useRef(false)
+  // De zwevende knoppen rechtsboven (meldingen, Nieuw): de bovenbalk laat er plaats voor, gemeten want hun plek hangt af van de schermbreedte.
+  const balkRef = useRef<HTMLDivElement>(null)
+  const [ruimteRechts, setRuimteRechts] = useState(0)
+  useEffect(() => {
+    if (!metTopbalk) return
+    const meet = () => {
+      const balk = balkRef.current, knoppen = document.querySelector('[data-zwevende-knoppen]')
+      if (!balk || !knoppen || window.innerWidth < 768) { setRuimteRechts(0); return }
+      const b = balk.getBoundingClientRect(), k = knoppen.getBoundingClientRect()
+      setRuimteRechts(k.bottom > b.top && k.top < b.bottom ? Math.max(0, Math.round(b.right - k.left + 12)) : 0)
+    }
+    meet()
+    const t = setTimeout(meet, 400)
+    window.addEventListener('resize', meet)
+    return () => { clearTimeout(t); window.removeEventListener('resize', meet) }
+  }, [metTopbalk, boom, toonBoom])
 
   // ── Voorkeuren en adresbalk ────────────────────────────────────────────────
   useEffect(() => {
@@ -76,7 +101,8 @@ export function AgendaApp() {
     if (v.personen) setPersonen(v.personen)
     if (v.kleur) setKleurVolgens(v.kleur)
     if (typeof v.klaar === 'boolean') setToonKlaar(v.klaar)
-    setToonBoom(smal ? false : v.boom !== false)
+    // Zelf gekozen = onthouden; anders enkel open op een groot scherm, zodat de kalender op een laptop de ruimte krijgt.
+    setToonBoom(smal ? false : typeof v.boom === 'boolean' ? v.boom : window.innerWidth >= 1600)
     const q = new URLSearchParams(window.location.search)
     for (const s of ['lijst', 'map', 'space', 'doc'] as const) { const id = q.get(s); if (id) setKeuze({ soort: s, id }) }
     if (q.get('item')) setOpenItem(q.get('item'))
@@ -221,72 +247,84 @@ export function AgendaApp() {
   const filterTeller = (personen.length ? 1 : 0) + (labels.length ? 1 : 0) + (klant ? 1 : 0)
   const printUrl = `/api/admin/agenda/print?dag=${modus === 'dag' ? datum : vandaag()}${personen.length ? `&personen=${personen.join(',')}` : ''}${toonKlaar ? '&klaar=1' : ''}`
 
+  const zetPersonen = (n: string[]) => { setPersonen(n); bewaarVoorkeur({ personen: n }) }
+  const hoogte = metTopbalk
+    ? 'h-[calc(100dvh-92px)] md:h-[calc(100dvh-72px)] md:-mt-16'
+    : 'h-[calc(100dvh-80px)] md:h-[calc(100dvh-60px)]'
+
   return (
-    <div className="flex gap-3 md:h-[calc(100dvh-3.5rem)] min-h-[620px]">
+    <div className={`volle-breedte flex gap-3 ${hoogte} min-h-[520px]`}>
       {/* Boom: vast op de computer, als lade op de gsm */}
       {toonBoom && (
         <>
           <div className="md:hidden fixed inset-0 z-40 bg-black/30" onClick={() => setToonBoom(false)} aria-hidden />
-          <aside className="fixed md:static inset-y-0 left-0 z-50 md:z-auto w-[280px] md:w-64 shrink-0 bg-white md:card-base md:!p-0 overflow-hidden flex flex-col shadow-xl md:shadow-none">
+          <aside className="fixed md:static inset-y-0 left-0 z-50 md:z-auto w-[86vw] max-w-[320px] md:w-60 shrink-0 bg-white md:card-base md:!p-0 overflow-hidden flex flex-col shadow-xl md:shadow-none">
             <Boom boom={boom} keuze={keuze} onVernieuw={laadBoom} onNieuwDoc={nieuwDoc}
-              onKies={(k) => { setKeuze(k); if (window.innerWidth < 768) setToonBoom(false) }} onPaneel={(p) => setPaneel(p)} />
+              onKies={(k) => { setKeuze(k); if (window.innerWidth < 768) setToonBoom(false) }} onPaneel={(p) => { setPaneel(p); if (window.innerWidth < 768) setToonBoom(false) }} />
           </aside>
         </>
       )}
 
-      <section className="flex-1 min-w-0 flex flex-col gap-2.5 min-h-0">
-        {/* Bovenbalk */}
-        <div className="flex flex-wrap items-center gap-2">
-          <button type="button" onClick={() => { setToonBoom(!toonBoom); bewaarVoorkeur({ boom: !toonBoom }) }} aria-label={toonBoom ? 'Boom verbergen' : 'Boom tonen'} className={`h-9 w-9 rounded-lg border border-gray-200 bg-white flex items-center justify-center hover:border-gray-400 ${focusRing}`}><PanelLeft className="h-4 w-4" /></button>
-          <div className="min-w-0 mr-auto">
+      <section className="flex-1 min-w-0 flex flex-col gap-2 min-h-0">
+        {/* Bovenbalk (op de computer naast de zwevende knoppen rechtsboven) */}
+        <div ref={balkRef} className="flex flex-wrap items-center gap-2 md:min-h-[44px]" style={ruimteRechts ? { paddingRight: ruimteRechts } : undefined}>
+          <button type="button" onClick={() => { setToonBoom(!toonBoom); bewaarVoorkeur({ boom: !toonBoom }) }} aria-label={toonBoom ? 'Mappen verbergen' : 'Mappen tonen'} title={toonBoom ? 'Mappen verbergen' : 'Mappen tonen'} className={`order-1 h-9 w-9 shrink-0 rounded-lg border border-gray-200 bg-white flex items-center justify-center hover:border-gray-400 ${focusRing}`}><PanelLeft className="h-4 w-4" /></button>
+          <div className="order-2 min-w-0 flex-1 md:flex-none md:mr-2">
             <h1 className="text-xl font-bold text-gray-900 truncate">{titelKeuze ? titelKeuze[titelKeuze.length - 1] : keuze?.soort === 'doc' ? 'Document' : 'Agenda'}</h1>
             {titelKeuze && titelKeuze.length > 1 && <div className="text-xs text-gray-500 truncate">{titelKeuze.slice(0, -1).join(' › ')}</div>}
           </div>
+          {keuze?.soort !== 'doc' && boom.rechten.toevoegen && (
+            <button type="button" onClick={() => setNieuw({ dag: modus === 'lijst' ? vandaag() : datum < vandaag() && weergave !== 'dag' ? vandaag() : datum, heelDag: true })} aria-label="Nieuwe taak" className={`order-4 md:order-6 btn-primary !py-2 !px-2.5 md:!px-3.5 !text-sm shrink-0 ${focusRing}`}><Plus className="h-4 w-4" /><span className="hidden md:inline">Nieuwe taak</span></button>
+          )}
           {keuze?.soort !== 'doc' && (
-            <>
+            <div className="order-5 md:order-3 w-full md:w-auto md:flex-1 flex items-center gap-1.5 min-w-0">
               {modus !== 'lijst' && (
-                <div className="flex items-center gap-1">
-                  <button type="button" onClick={() => setDatum(vandaag())} className={`btn-secondary !py-1.5 !px-3 !text-sm ${focusRing}`}>Vandaag</button>
-                  <button type="button" onClick={() => setDatum(verschuif(weergave, datum, -1))} aria-label="Vorige" className={`h-9 w-9 rounded-lg hover:bg-white flex items-center justify-center ${focusRing}`}><ChevronLeft className="h-4 w-4" /></button>
-                  <button type="button" onClick={() => setDatum(verschuif(weergave, datum, 1))} aria-label="Volgende" className={`h-9 w-9 rounded-lg hover:bg-white flex items-center justify-center ${focusRing}`}><ChevronRight className="h-4 w-4" /></button>
-                  <span className="text-sm font-semibold text-gray-900 min-w-[9rem] capitalize">{periodeTitel(weergave, datum)}</span>
-                  {laden && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
-                </div>
+                <>
+                  <button type="button" onClick={() => setDatum(vandaag())} className={`btn-secondary !py-1.5 !px-3 !text-sm shrink-0 ${focusRing}`}>Vandaag</button>
+                  <button type="button" onClick={() => setDatum(verschuif(weergave, datum, -1))} aria-label="Vorige" className={`h-9 w-9 shrink-0 rounded-lg hover:bg-white flex items-center justify-center ${focusRing}`}><ChevronLeft className="h-5 w-5" /></button>
+                  <button type="button" onClick={() => setDatum(verschuif(weergave, datum, 1))} aria-label="Volgende" className={`h-9 w-9 shrink-0 rounded-lg hover:bg-white flex items-center justify-center ${focusRing}`}><ChevronRight className="h-5 w-5" /></button>
+                  <span className="text-[15px] font-semibold text-gray-900 capitalize truncate"><span className="xl:hidden">{periodeKort(weergave, datum)}</span><span className="hidden xl:inline">{periodeTitel(weergave, datum)}</span></span>
+                  {laden && <Loader2 className="h-4 w-4 animate-spin text-gray-400 shrink-0" />}
+                </>
               )}
-              <div className="flex rounded-lg border border-gray-200 bg-white p-0.5" role="tablist" aria-label="Weergave">
-                {container && <Tab aan={modus === 'lijst'} onClick={() => kiesModus('lijst')}><ListIcon className="h-3.5 w-3.5" />Lijst</Tab>}
-                <Tab aan={modus === 'dag'} onClick={() => kiesModus('dag')}>Dag</Tab>
-                <Tab aan={modus === 'week'} onClick={() => kiesModus('week')}>Week</Tab>
-                <Tab aan={modus === 'maand'} onClick={() => kiesModus('maand')}>Maand</Tab>
-              </div>
-              <a href={printUrl} target="_blank" rel="noopener noreferrer" className={`btn-secondary !py-1.5 !px-3 !text-sm ${focusRing}`} title="Takenlijst als pdf om af te drukken"><Printer className="h-4 w-4" /><span className="hidden lg:inline">{modus === 'dag' && datum !== vandaag() ? 'Takenlijst' : 'Takenlijst vandaag'}</span></a>
-              {boom.rechten.toevoegen && <button type="button" onClick={() => setNieuw({ dag: modus === 'lijst' ? vandaag() : datum < vandaag() && weergave !== 'dag' ? vandaag() : datum, heelDag: true })} className={`btn-primary !py-1.5 !px-3 !text-sm ${focusRing}`}><Plus className="h-4 w-4" />Nieuw</button>}
-            </>
+            </div>
+          )}
+          {keuze?.soort !== 'doc' && (
+            <div className="order-3 md:order-5 flex shrink-0 rounded-lg border border-gray-200 bg-white p-0.5" role="tablist" aria-label="Weergave">
+              {container && <Tab aan={modus === 'lijst'} onClick={() => kiesModus('lijst')}><ListIcon className="h-3.5 w-3.5" /><span className="hidden sm:inline">Lijst</span></Tab>}
+              <Tab aan={modus === 'dag'} onClick={() => kiesModus('dag')}>Dag</Tab>
+              <Tab aan={modus === 'week'} onClick={() => kiesModus('week')}>Week</Tab>
+              <Tab aan={modus === 'maand'} onClick={() => kiesModus('maand')}>Maand</Tab>
+            </div>
           )}
         </div>
 
-        {/* Filters */}
+        {/* Filters: op de gsm één rij om opzij te schuiven */}
         {keuze?.soort !== 'doc' && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Chip aan={!personen.length} onClick={() => { setPersonen([]); bewaarVoorkeur({ personen: [] }) }}><Users className="h-3.5 w-3.5" />Iedereen</Chip>
-            {mensen.slice(0, 8).map((p) => {
-              const aan = personen.includes(p.id)
-              return (
-                <button key={p.id} type="button" onClick={() => { const n = aan ? personen.filter((x) => x !== p.id) : [...personen, p.id]; setPersonen(n); bewaarVoorkeur({ personen: n }) }} aria-pressed={aan}
-                  className={`inline-flex items-center gap-1.5 rounded-full border pl-0.5 pr-2.5 py-0.5 text-xs ${aan ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200 text-gray-700 hover:border-gray-400'} ${focusRing}`}>
-                  <PersoonFoto naam={p.naam} maat={20} />{p.naam.split(' ')[0]}{p.id === boom.ik && <span className={aan ? 'text-white/70' : 'text-gray-400'}>(ik)</span>}
-                </button>
-              )
-            })}
+          <div className="flex items-center gap-1.5 overflow-x-auto md:overflow-visible md:flex-wrap -mx-4 px-4 md:mx-0 md:px-0 pb-0.5 [&>*]:shrink-0">
             <div className="relative">
-              <Chip aan={personen.some((p) => !mensen.slice(0, 8).some((m) => m.id === p))} onClick={() => setPop(pop === 'personen' ? null : 'personen')}>Iemand anders…</Chip>
-              <Popover open={pop === 'personen'} onSluit={sluitPop}><PersonenLijst personen={boom.personen} ik={boom.ik} gekozen={personen} onWissel={(p) => { const n = personen.includes(p) ? personen.filter((x) => x !== p) : [...personen, p]; setPersonen(n); bewaarVoorkeur({ personen: n }) }} /></Popover>
+              <button type="button" onClick={() => setPop(pop === 'personen' ? null : 'personen')} aria-expanded={pop === 'personen'}
+                className={`inline-flex items-center gap-1.5 rounded-full border h-8 ${personen.length ? 'pl-1 pr-2.5 bg-gray-900 text-white border-gray-900' : 'px-3 bg-white border-gray-200 text-gray-700 hover:border-gray-400'} text-xs ${focusRing}`}>
+                {personen.length ? (
+                  <>
+                    <span className="inline-flex -space-x-1.5">{personen.slice(0, 3).map((p) => <span key={p} className="rounded-full ring-2 ring-gray-900 inline-flex"><PersoonFoto naam={personenMap.get(p)?.naam ?? '?'} maat={22} /></span>)}</span>
+                    <span>{personen.length === 1 ? (personen[0] === boom.ik ? 'Mijn agenda' : personenMap.get(personen[0])?.naam.split(' ')[0]) : `${personen.length} personen`}</span>
+                  </>
+                ) : <><Users className="h-3.5 w-3.5" />Iedereen</>}
+                <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+              </button>
+              <Popover open={pop === 'personen'} onSluit={sluitPop}>
+                <div className="p-2 pb-0 flex gap-1.5">
+                  <button type="button" onClick={() => zetPersonen([])} aria-pressed={!personen.length} className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-semibold ${!personen.length ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 hover:border-gray-400'}`}>Iedereen</button>
+                  <button type="button" onClick={() => zetPersonen([boom.ik])} aria-pressed={personen.length === 1 && personen[0] === boom.ik} className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-semibold ${personen.length === 1 && personen[0] === boom.ik ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 hover:border-gray-400'}`}>Mijn agenda</button>
+                </div>
+                <PersonenLijst personen={boom.personen} eerst={boom.zaakvoerders} ik={boom.ik} gekozen={personen} onWissel={(p) => zetPersonen(personen.includes(p) ? personen.filter((x) => x !== p) : [...personen, p])} />
+              </Popover>
             </div>
-            <span className="w-px h-5 bg-gray-200 mx-1" />
             <div className="relative">
-              <Chip aan={labels.length > 0} onClick={() => setPop(pop === 'labels' ? null : 'labels')}><Tag className="h-3.5 w-3.5" />{labels.length ? `${labels.length} label${labels.length > 1 ? 's' : ''}` : 'Labels'}</Chip>
+              <Chip aan={labels.length > 0} onClick={() => setPop(pop === 'labels' ? null : 'labels')}><Tag className="h-3.5 w-3.5" />{labels.length ? `${labels.length} label${labels.length > 1 ? 's' : ''}` : 'Labels'}<ChevronDown className="h-3.5 w-3.5 opacity-70" /></Chip>
               <Popover open={pop === 'labels'} onSluit={sluitPop}>
-                <div className="w-56 p-2 max-h-72 overflow-y-auto">
+                <div className="w-full md:w-56 p-2 max-h-72 overflow-y-auto">
                   {boom.labels.map((l) => (
                     <button key={l.id} type="button" role="checkbox" aria-checked={labels.includes(l.id)} onClick={() => setLabels(labels.includes(l.id) ? labels.filter((x) => x !== l.id) : [...labels, l.id])} className="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-gray-50">
                       <span className="h-3 w-3 rounded-full" style={{ background: l.kleur }} /><span className="flex-1 text-left">{l.naam}</span>{labels.includes(l.id) && <span className="text-xs">✓</span>}
@@ -296,17 +334,18 @@ export function AgendaApp() {
               </Popover>
             </div>
             <div className="relative">
-              <Chip aan={!!klant} onClick={() => setPop(pop === 'klant' ? null : 'klant')}><Building2 className="h-3.5 w-3.5" />{klant ? boom.klanten.find((k) => k.id === klant)?.naam ?? 'Klant' : 'Klant'}</Chip>
+              <Chip aan={!!klant} onClick={() => setPop(pop === 'klant' ? null : 'klant')}><Building2 className="h-3.5 w-3.5" /><span className="max-w-[10rem] truncate">{klant ? boom.klanten.find((k) => k.id === klant)?.naam ?? 'Klant' : 'Klant'}</span><ChevronDown className="h-3.5 w-3.5 opacity-70" /></Chip>
               <Popover open={pop === 'klant'} onSluit={sluitPop}><KlantLijst boom={boom} gekozen={klant} onKies={(k) => { setKlant(k); sluitPop() }} /></Popover>
             </div>
             <Chip aan={toonKlaar} onClick={() => { setToonKlaar(!toonKlaar); bewaarVoorkeur({ klaar: !toonKlaar }) }}>{toonKlaar ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}Afgevinkt</Chip>
-            {filterTeller > 0 && <button type="button" onClick={() => { setPersonen([]); setLabels([]); setKlant(null); bewaarVoorkeur({ personen: [] }) }} className="text-xs text-gray-500 hover:underline inline-flex items-center gap-0.5"><X className="h-3 w-3" />Wis filters</button>}
-            <span className="flex-1" />
-            <label className="text-xs text-gray-500 flex items-center gap-1.5">Kleur volgens
-              <select value={kleurVolgens} onChange={(e) => { setKleurVolgens(e.target.value as KleurVolgens); bewaarVoorkeur({ kleur: e.target.value as KleurVolgens }) }} className="input-base !py-1 !px-2 !text-xs w-auto">
+            {filterTeller > 0 && <button type="button" onClick={() => { setLabels([]); setKlant(null); zetPersonen([]) }} className="text-xs text-gray-500 hover:underline inline-flex items-center gap-0.5"><X className="h-3 w-3" />Wis filters</button>}
+            <span className="flex-1 hidden md:block" />
+            <label className="text-xs text-gray-500 flex items-center gap-1.5">Kleur
+              <select value={kleurVolgens} onChange={(e) => { setKleurVolgens(e.target.value as KleurVolgens); bewaarVoorkeur({ kleur: e.target.value as KleurVolgens }) }} className="input-base !py-1 !px-2 !text-xs w-auto" aria-label="Kleur volgens">
                 {KLEUR_VOLGENS.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}
               </select>
             </label>
+            <a href={printUrl} target="_blank" rel="noopener noreferrer" className={`inline-flex items-center gap-1.5 rounded-full border h-8 px-3 bg-white border-gray-200 text-gray-700 hover:border-gray-400 text-xs ${focusRing}`} title="Takenlijst als pdf om af te drukken"><Printer className="h-3.5 w-3.5" />{modus === 'dag' && datum !== vandaag() ? 'Takenlijst' : 'Takenlijst vandaag'}</a>
             <Zoeken boom={boom} open={pop === 'zoek'} onOpen={() => setPop('zoek')} onSluit={sluitPop} onKies={(i) => { sluitPop(); open(i) }} />
           </div>
         )}
@@ -378,7 +417,7 @@ function Tab({ aan, onClick, children }: { aan: boolean; onClick: () => void; ch
   return <button type="button" role="tab" aria-selected={aan} onClick={onClick} className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-sm ${aan ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'} ${focusRing}`}>{children}</button>
 }
 function Chip({ aan, onClick, children }: { aan: boolean; onClick: () => void; children: React.ReactNode }) {
-  return <button type="button" onClick={onClick} aria-pressed={aan} className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${aan ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200 text-gray-700 hover:border-gray-400'} ${focusRing}`}>{children}</button>
+  return <button type="button" onClick={onClick} aria-pressed={aan} className={`inline-flex items-center gap-1.5 rounded-full border h-8 px-3 text-xs ${aan ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200 text-gray-700 hover:border-gray-400'} ${focusRing}`}>{children}</button>
 }
 
 /** Zoeken in alle taken en afspraken (titel). */
@@ -394,7 +433,7 @@ function Zoeken({ boom, open, onOpen, onSluit, onKies }: { boom: BoomData; open:
     <div className="relative">
       <Chip aan={open} onClick={open ? onSluit : onOpen}><Search className="h-3.5 w-3.5" />Zoeken</Chip>
       <Popover open={open} onSluit={onSluit} uitlijnen="rechts">
-        <div className="w-80 p-2">
+        <div className="w-full md:w-80 p-2">
           <input {...zoekVeld()} autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Zoek een taak of afspraak…" className="input-base !py-1.5 text-sm" aria-label="Zoek een taak of afspraak" />
           <ul className="max-h-80 overflow-y-auto mt-1.5">
             {res?.map((i) => (

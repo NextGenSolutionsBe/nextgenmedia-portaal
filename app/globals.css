@@ -135,6 +135,14 @@
   }
 }
 
+/* Agenda: de volle breedte naast de zijbalk, ook voorbij de maximale paginabreedte. */
+@media (min-width: 768px) {
+  .volle-breedte {
+    width: calc(100vw - var(--sidebar-width) - 28px);
+    margin-left: calc((100% - (100vw - var(--sidebar-width) - 28px)) / 2);
+  }
+}
+
 @layer components {
   /* Oude merkhulpjes. */
   .brand-yellow { color: #0f0f0f; }

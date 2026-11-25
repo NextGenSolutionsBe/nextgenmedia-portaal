@@ -83,26 +83,33 @@ export function Popover({ open, onSluit, children, className = '', uitlijnen = '
     return () => { clearTimeout(t); document.removeEventListener('mousedown', klik); document.removeEventListener('keydown', toets) }
   }, [open, onSluit])
   if (!open) return null
-  return <div ref={ref} className={`absolute z-40 mt-1 ${uitlijnen === 'rechts' ? 'right-0' : 'left-0'} bg-white rounded-xl border border-gray-200 shadow-xl ${className}`}>{children}</div>
+  // Op de gsm een blad onderaan over de volle breedte (een menu in een schuivende rij zou afgesneden worden).
+  return (
+    <>
+      <div className="md:hidden fixed inset-0 z-40 bg-black/20" aria-hidden onMouseDown={onSluit} />
+      <div ref={ref} className={`fixed md:absolute inset-x-2 bottom-2 md:inset-x-auto md:bottom-auto z-50 md:z-40 md:mt-1 ${uitlijnen === 'rechts' ? 'md:right-0' : 'md:left-0'} bg-white rounded-2xl md:rounded-xl border border-gray-200 shadow-2xl md:shadow-xl max-h-[75dvh] overflow-y-auto md:max-h-none md:overflow-visible ${className} max-md:!w-auto`}>{children}</div>
+    </>
+  )
 }
 
 /** Personen kiezen met foto en zoeken (meerdere). */
-export function PersonenLijst({ personen, gekozen, onWissel, ik }: { personen: Persoon[]; gekozen: string[]; onWissel: (id: string) => void; ik?: string }) {
+export function PersonenLijst({ personen, gekozen, onWissel, ik, eerst = [], vol = false }: { personen: Persoon[]; gekozen: string[]; onWissel: (id: string) => void; ik?: string; eerst?: string[]; vol?: boolean }) {
   const [q, setQ] = useState('')
+  const rang = (p: Persoon) => (p.id === ik ? 0 : eerst.includes(p.id) ? 1 : p.user_id ? 2 : 3)
   const lijst = personen.filter((p) => p.actief && p.naam.toLowerCase().includes(q.trim().toLowerCase()))
-    .sort((a, b) => Number(gekozen.includes(b.id)) - Number(gekozen.includes(a.id)) || Number(b.id === ik) - Number(a.id === ik) || Number(!!b.user_id) - Number(!!a.user_id) || a.naam.localeCompare(b.naam))
+    .sort((a, b) => rang(a) - rang(b) || a.naam.localeCompare(b.naam))
   return (
-    <div className="w-64 p-2">
+    <div className={`w-full ${vol ? '' : 'md:w-64'} p-2`}>
       <div className="relative mb-1.5"><Search className="h-3.5 w-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-        <input {...zoekVeld()} autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Zoek iemand…" className="input-base !py-1.5 !pl-8 text-sm" aria-label="Zoek iemand" />
+        <input {...zoekVeld()} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Zoek iemand…" className="input-base !py-1.5 !pl-8 text-sm" aria-label="Zoek iemand" />
       </div>
-      <ul className="max-h-64 overflow-y-auto">
+      <ul className="max-h-72 overflow-y-auto">
         {lijst.map((p) => {
           const aan = gekozen.includes(p.id)
           return (
             <li key={p.id}>
-              <button type="button" role="checkbox" aria-checked={aan} onClick={() => onWissel(p.id)} className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-gray-50 ${focusRing}`}>
-                <PersoonFoto naam={p.naam} maat={22} />
+              <button type="button" role="checkbox" aria-checked={aan} onClick={() => onWissel(p.id)} className={`w-full flex items-center gap-2.5 rounded-lg px-2 py-2 md:py-1.5 text-sm hover:bg-gray-50 ${aan ? 'bg-gray-50 font-semibold' : ''} ${focusRing}`}>
+                <PersoonFoto naam={p.naam} maat={26} />
                 <span className="flex-1 text-left truncate">{p.naam}{p.id === ik && <span className="text-gray-400"> (ik)</span>}</span>
                 {aan && <Check className="h-4 w-4" />}
               </button>
@@ -141,7 +148,7 @@ export function Schakel({ aan, onWissel, label, disabled }: { aan: boolean; onWi
 }
 
 /** Paneel dat rechts inschuift (op de gsm volledig scherm). */
-export function Lade({ titel, onSluit, children, breed = false, acties }: { titel: ReactNode; onSluit: () => void; children: ReactNode; breed?: boolean; acties?: ReactNode }) {
+export function Lade({ titel, onSluit, children, breed = false, maat, acties }: { titel: ReactNode; onSluit: () => void; children: ReactNode; breed?: boolean; maat?: 'groot'; acties?: ReactNode }) {
   useEffect(() => {
     const t = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target as HTMLElement)?.closest?.('input,textarea,select')) onSluit() }
     document.addEventListener('keydown', t)
@@ -149,7 +156,7 @@ export function Lade({ titel, onSluit, children, breed = false, acties }: { tite
   }, [onSluit])
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/30" role="dialog" aria-modal="true" onMouseDown={(e) => { if (e.target === e.currentTarget) onSluit() }}>
-      <div className={`bg-white h-full w-full ${breed ? 'sm:max-w-3xl' : 'sm:max-w-xl'} shadow-2xl flex flex-col`}>
+      <div className={`bg-white h-full w-full ${maat === 'groot' ? 'sm:max-w-[min(1080px,92vw)] sm:rounded-l-2xl' : breed ? 'sm:max-w-3xl' : 'sm:max-w-xl'} shadow-2xl flex flex-col overflow-hidden`}>
         <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
           <div className="flex-1 min-w-0 text-sm text-gray-500 truncate">{titel}</div>
           {acties}
