@@ -27,12 +27,16 @@ export async function GET(req: NextRequest) {
   const vroeger = zoneNaarIso(plusDagen(d, -60), '00:00')
 
   const magMeetings = !!(await magIk('meetings', 'bekijken')) || !!(await magIk('sales', 'bekijken'))
-  const [z, ruw, laat, pers, lab] = await Promise.all([
+  const V = `"${vroeger}"`, D = `"${van}"`
+  const [z, ruw, laat, dl, pers, lab] = await Promise.all([
     laadZicht(admin, k),
     itemsInBereik(admin, van, tot),
-    // Wat nog open staat van de voorbije 60 dagen.
+    // Wat nog open staat van de voorbije 60 dagen (einde of, zonder einde, de deadline).
     alleRijen<RuwItem>((a, b) => admin.from('ag_items').select(ITEM_VELDEN).is('verwijderd_op', null).eq('status', 'open').eq('soort', 'taak')
-      .gte('eind_op', vroeger).lt('eind_op', van).order('id').range(a, b), 3000),
+      .or(`and(eind_op.gte.${V},eind_op.lt.${D}),and(eind_op.is.null,deadline_op.gte.${V},deadline_op.lt.${D})`).order('id').range(a, b), 3000),
+    // Deadlines van die dag, ook van taken die op een andere dag gepland staan.
+    alleRijen<RuwItem>((a, b) => admin.from('ag_items').select(ITEM_VELDEN).is('verwijderd_op', null).eq('status', 'open')
+      .gte('deadline_op', van).lt('deadline_op', tot).order('id').range(a, b), 1000),
     admin.from('ag_personen').select('id, naam, email'),
     admin.from('ag_labels').select('id, naam'),
   ])
@@ -41,7 +45,8 @@ export async function GET(req: NextRequest) {
   const mt = magMeetings
     ? await meetingsInBereik(admin, van, tot, new Map([...personen.values()].filter((p) => p.email).map((p) => [p.email!.toLowerCase(), p.id])))
     : { items: [] as Item[], clickupIds: new Set<string>() }
-  const vandaagItems = [...await metToegewezen(admin, ruw.filter((r) => !r.clickup_id || !mt.clickupIds.has(r.clickup_id)), z), ...mt.items]
+  const metDeadline = [...ruw, ...dl.filter((r) => !ruw.some((x) => x.id === r.id))]
+  const vandaagItems = [...await metToegewezen(admin, metDeadline.filter((r) => !r.clickup_id || !mt.clickupIds.has(r.clickup_id)), z), ...mt.items]
   const teLaatItems = await metToegewezen(admin, laat, z)
   const voorWie = (i: Item) => !wie.length || i.toegewezen.some((p) => wie.includes(p))
 
@@ -62,15 +67,19 @@ export async function GET(req: NextRequest) {
   }
   const sorteer = (a: Item, b: Item) => Number(b.urgent) - Number(a.urgent) || (a.start_op ?? a.eind_op ?? '').localeCompare(b.start_op ?? b.eind_op ?? '') || a.titel.localeCompare(b.titel)
   const dezeDag = vandaagItems.filter(voorWie)
-  const afspraken = dezeDag.filter((i) => plaatsVan(i)?.soort === 'rooster' && (i.status === 'open' || i.soort === 'meeting')).sort((a, b) => (a.start_op ?? a.eind_op ?? '').localeCompare(b.start_op ?? b.eind_op ?? ''))
-  const taken = dezeDag.filter((i) => plaatsVan(i)?.soort === 'dag' && i.status === 'open').sort(sorteer)
+  // Deadlines bovenaan, op uur. Wat daar staat, staat niet nog eens bij de afspraken of taken.
+  const deadlines = dezeDag.filter((i) => i.status === 'open' && i.deadline_op && Date.parse(i.deadline_op) >= Date.parse(van) && Date.parse(i.deadline_op) < Date.parse(tot))
+    .sort((a, b) => a.deadline_op!.localeCompare(b.deadline_op!) || a.titel.localeCompare(b.titel))
+  const isDeadline = new Set(deadlines.map((i) => i.id))
+  const afspraken = dezeDag.filter((i) => !isDeadline.has(i.id) && plaatsVan(i)?.soort === 'rooster' && (i.status === 'open' || i.soort === 'meeting')).sort((a, b) => (a.start_op ?? a.eind_op ?? '').localeCompare(b.start_op ?? b.eind_op ?? ''))
+  const taken = dezeDag.filter((i) => !isDeadline.has(i.id) && plaatsVan(i)?.soort === 'dag' && i.status === 'open').sort(sorteer)
   const klaar = metKlaar ? dezeDag.filter((i) => i.status === 'klaar' && i.soort !== 'meeting').sort(sorteer) : []
-  const teLaat = teLaatItems.filter(voorWie).sort((a, b) => (a.eind_op ?? '').localeCompare(b.eind_op ?? '')).slice(0, 60)
+  const teLaat = teLaatItems.filter(voorWie).sort((a, b) => (a.eind_op ?? a.deadline_op ?? '').localeCompare(b.eind_op ?? b.deadline_op ?? '')).slice(0, 60)
 
   const namen = wie.map((p) => personen.get(p)?.naam).filter(Boolean)
   const bytes = await maakTakenlijstPdf({
     dag: d, voor: namen.length ? `Voor ${namen.join(', ')}` : 'Voor iedereen',
-    afspraken: afspraken.map(regel), taken: taken.map(regel), teLaat: teLaat.map(regel), klaar: klaar.map(regel),
+    deadlines: deadlines.map(regel), afspraken: afspraken.map(regel), taken: taken.map(regel), teLaat: teLaat.map(regel), klaar: klaar.map(regel),
   })
   return new NextResponse(Buffer.from(bytes), {
     headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="takenlijst-${d}.pdf"`, 'Cache-Control': 'no-store' },

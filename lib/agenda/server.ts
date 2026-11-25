@@ -100,7 +100,7 @@ export function docZichtbaar(d: { space_id: string | null; map_id: string | null
   return !d.clickup_parent_id
 }
 
-export const ITEM_VELDEN = 'id, soort, titel, status, clickup_status, clickup_status_kleur, urgent, prioriteit, start_op, eind_op, heel_dag, lijst_id, parent_id, client_id, labels, kleur, locatie, meet_url, prive, eigenaar_id, afgerond_op, afgerond_door, clickup_url, clickup_id, clickup_lijst_id, updated_at'
+export const ITEM_VELDEN = 'id, soort, titel, status, clickup_status, clickup_status_kleur, urgent, prioriteit, start_op, eind_op, deadline_op, heel_dag, lijst_id, parent_id, client_id, labels, kleur, locatie, meet_url, prive, eigenaar_id, afgerond_op, afgerond_door, clickup_url, clickup_id, clickup_lijst_id, updated_at'
 
 /** Items met hun toegewezenen en het aantal subtaken, enkel wat de kijker mag zien. */
 export async function metToegewezen(admin: Admin, ruw: RuwItem[], z: Zicht, opts: { subtaken?: boolean } = {}): Promise<Item[]> {
@@ -146,7 +146,7 @@ export async function meetingsInBereik(admin: Admin, van: string, tot: string, p
       id: m.id, bron: 'meeting', soort: 'meeting', titel: m.titel || (m.klant_naam ? `Meeting ${m.klant_naam}` : 'Meeting'), beschrijving: m.beschrijving,
       // Een meeting uit de Meeting Inplanner vink je niet af: ze blijft staan, ook als ze voorbij is.
       status: 'open', clickup_status: null, clickup_status_kleur: null, urgent: false, prioriteit: null,
-      start_op: m.starts_at, eind_op: m.ends_at, heel_dag: false, lijst_id: null, parent_id: null, client_id: m.client_id, labels: [], kleur: null,
+      start_op: m.starts_at, eind_op: m.ends_at, deadline_op: null, heel_dag: false, lijst_id: null, parent_id: null, client_id: m.client_id, labels: [], kleur: null,
       locatie: m.vorm === 'locatie' ? m.locatie : null, meet_url: m.meet_url, prive: false, eigenaar_id: null, toegewezen, afgerond_op: null, afgerond_door: null,
       clickup_url: null, velden: m.bron === 'klantboeking' ? { Bron: 'Klantboeking' } : null, updated_at: m.updated_at,
     })
@@ -201,10 +201,10 @@ export async function alleRijen<T>(maak: (van: number, tot: number) => PromiseLi
   return uit
 }
 
-/** Alle items die een periode raken (met begin en einde, enkel een einde, of enkel een begin). */
+/** Alle items die een periode raken (met begin en einde, enkel een einde, enkel een begin of enkel een deadline). */
 export async function itemsInBereik(admin: Admin, van: string, tot: string, extra = ''): Promise<RuwItem[]> {
   const V = `"${new Date(van).toISOString()}"`, T = `"${new Date(tot).toISOString()}"`
   return alleRijen<RuwItem>((a, b) => admin.from('ag_items').select(ITEM_VELDEN + extra).is('verwijderd_op', null)
-    .or(`and(eind_op.gte.${V},start_op.lt.${T}),and(start_op.is.null,eind_op.gte.${V},eind_op.lt.${T}),and(eind_op.is.null,start_op.gte.${V},start_op.lt.${T})`)
+    .or(`and(eind_op.gte.${V},start_op.lt.${T}),and(start_op.is.null,eind_op.gte.${V},eind_op.lt.${T}),and(eind_op.is.null,start_op.gte.${V},start_op.lt.${T}),and(start_op.is.null,eind_op.is.null,deadline_op.gte.${V},deadline_op.lt.${T})`)
     .order('id').range(a, b))
 }

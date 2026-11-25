@@ -326,7 +326,8 @@ async function docs(admin: Admin, cu: Cu, team: string, bron: Bron, deadline: nu
       } catch (e) { if (!(e instanceof ClickupFout && (e.status === 403 || e.status === 404))) throw e }
       const type = d.parent ? PARENT[Number(d.parent.type)] ?? null : null
       await admin.from('ag_docs').upsert({
-        clickup_id: d.id, titel: (d.name || 'Naamloos document').slice(0, 300), inhoud,
+        // Nieuwer in ClickUp: de tekst uit ClickUp geldt, de opmaak uit de app wordt opnieuw opgebouwd uit die tekst.
+        clickup_id: d.id, titel: (d.name || 'Naamloos document').slice(0, 300), inhoud, inhoud_json: null,
         clickup_parent_id: type ? d.parent!.id : null, clickup_parent_type: type, clickup_bijgewerkt_op: bijgewerkt, eigenaar_id: eigenaar,
         ...(al ? {} : { space_id: null, map_id: null, lijst_id: null }), updated_at: new Date().toISOString(),
       }, { onConflict: 'clickup_id' })

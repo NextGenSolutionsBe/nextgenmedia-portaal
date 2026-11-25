@@ -2,7 +2,7 @@ import 'server-only'
 import { PDFDocument, rgb, type PDFFont, type PDFPage } from 'pdf-lib'
 import { merkFonts, merkLogo, MERK_ZWART } from '@/lib/pdf-merk'
 import { wikkel } from '@/lib/shoot-document'
-import { plaatsVan, type Item } from '@/lib/agenda/model'
+import { plaatsVan, uur, TZ, type Item } from '@/lib/agenda/model'
 
 /**
  * De takenlijst van één dag als pdf om af te drukken: afspraken op uur, taken
@@ -20,7 +20,7 @@ export type PdfRegel = { item: Item; pad: string; wie: string[]; labels: string[
 
 const hm = (n: number) => `${String(Math.floor(n / 60) % 24).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`
 
-export async function maakTakenlijstPdf(p: { dag: string; voor: string; afspraken: PdfRegel[]; taken: PdfRegel[]; teLaat: PdfRegel[]; klaar: PdfRegel[] }): Promise<Uint8Array> {
+export async function maakTakenlijstPdf(p: { dag: string; voor: string; deadlines?: PdfRegel[]; afspraken: PdfRegel[]; taken: PdfRegel[]; teLaat: PdfRegel[]; klaar: PdfRegel[] }): Promise<Uint8Array> {
   const pdf = await PDFDocument.create()
   pdf.setTitle(`Takenlijst ${p.dag}`)
   pdf.setProducer('NextGen Agency')
@@ -64,7 +64,7 @@ export async function maakTakenlijstPdf(p: { dag: string; voor: string; afsprake
       const links = M + (o.uur ? 62 : 18)
       const tbreed = breedte - (links - M)
       const titelRegels = wikkel(vet, schoon(i.titel), 10.5, tbreed)
-      const sub = [r.pad, r.wie.length ? r.wie.join(', ') : '', r.labels.join(', '), i.locatie ?? '', o.laat && i.eind_op ? `was voor ${new Date(i.eind_op).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' })}` : ''].filter(Boolean).join('  ·  ')
+      const sub = [r.pad, r.wie.length ? r.wie.join(', ') : '', r.labels.join(', '), i.locatie ?? '', o.laat && (i.eind_op ?? i.deadline_op) ? `was voor ${new Date((i.eind_op ?? i.deadline_op)!).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' })}` : ''].filter(Boolean).join('  ·  ')
       const subRegels = sub ? wikkel(font, schoon(sub), 8.5, tbreed) : []
       const h = titelRegels.length * 13 + subRegels.length * 11 + 8
       ruimte(h)
@@ -89,11 +89,43 @@ export async function maakTakenlijstPdf(p: { dag: string; voor: string; afsprake
     y -= 10
   }
 
+  // Deadlines: bovenaan en opvallend, het uur in een zwart vak.
+  const deadlines = p.deadlines ?? []
+  if (deadlines.length) {
+    ruimte(60)
+    tekst(`DEADLINES · ${deadlines.length}`, M, y, { size: 8.5, f: mono, kleur: ROOD })
+    y -= 8
+    page.drawLine({ start: { x: M, y }, end: { x: A4.w - M, y }, thickness: 1.2, color: MERK_ZWART })
+    y -= 20
+    for (const r of deadlines) {
+      const i = r.item
+      const links = M + 66
+      const tbreed = breedte - 66
+      const titelRegels = wikkel(vet, schoon(i.titel), 12, tbreed)
+      const pl = plaatsVan(i)
+      const gepland = pl?.soort === 'rooster' && i.start_op ? `gepland ${hm(pl.vanMin)}–${hm(pl.totMin)}` : ''
+      const sub = [r.pad, r.wie.length ? r.wie.join(', ') : '', gepland].filter(Boolean).join('  ·  ')
+      const subRegels = sub ? wikkel(font, schoon(sub), 9, tbreed) : []
+      ruimte(titelRegels.length * 15 + subRegels.length * 11 + 14)
+      // Het uur in een zwart vak, met een vakje om af te vinken ernaast.
+      page.drawRectangle({ x: M, y: y - 5, width: 46, height: 18, color: MERK_ZWART })
+      const u = uur(i.deadline_op!, TZ)
+      page.drawText(schoon(u), { x: M + 23 - mono.widthOfTextAtSize(u, 10.5) / 2, y: y, size: 10.5, font: mono, color: rgb(1, 1, 1) })
+      page.drawRectangle({ x: M + 52, y: y - 1, width: 9, height: 9, borderColor: MERK_ZWART, borderWidth: 0.9 })
+      let yy = y
+      for (const t of titelRegels) { tekst(t, links, yy, { size: 12, f: vet }); yy -= 15 }
+      if (i.urgent) tekst('DRINGEND', A4.w - M, y, { size: 7, f: mono, kleur: ROOD, rechts: true })
+      for (const t of subRegels) { tekst(t, links, yy, { size: 9, kleur: GRIJS }); yy -= 11 }
+      y = Math.min(yy, y - 22) - 8
+    }
+    y -= 12
+  }
+
   sectie('Afspraken', p.afspraken, { uur: true })
   sectie('Taken vandaag', p.taken)
   sectie('Nog open van eerder', p.teLaat, { laat: true })
   sectie('Al afgevinkt', p.klaar, { klaar: true })
-  if (!p.afspraken.length && !p.taken.length && !p.teLaat.length && !p.klaar.length) tekst('Niets gepland voor deze dag.', M, y, { size: 11, kleur: GRIJS })
+  if (!deadlines.length && !p.afspraken.length && !p.taken.length && !p.teLaat.length && !p.klaar.length) tekst('Niets gepland voor deze dag.', M, y, { size: 11, kleur: GRIJS })
 
   // Voetregel op elke pagina.
   const n = pdf.getPageCount()

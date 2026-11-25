@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { magIk } from '@/lib/instellingen/laden'
 import type { Actie } from '@/lib/instellingen/model'
-import { controleerItem, isUuid, isKleur, type Item } from '@/lib/agenda/model'
+import { controleerItem, isUuid, isKleur, vandaag, type Item } from '@/lib/agenda/model'
+import { inspreekPrompt, leesInspreekVoorstel, type InspreekContext } from '@/lib/agenda/inspreken'
+import { mijnDeadlines } from '@/lib/agenda/deadlines-server'
+import { schoonDocJson, BEELD_PAD, BEELD_TYPES, MAX_BEELD } from '@/lib/agenda/doc-opmaak'
 import {
   kijkerVan, laadZicht, boomVoor, metToegewezen, meetingsInBereik, itemsInBereik, itemZichtbaar, docZichtbaar, laadPersonen, laadLabels, alleRijen,
   ITEM_VELDEN, type Kijker, type Zicht, type RuwItem,
@@ -61,9 +64,11 @@ export async function GET(req: NextRequest) {
     if (q.get('klaar')) return NextResponse.json(await afgevinkt(admin, k, q.get('persoon'), q.get('na'), q.get('q')))
     if (q.get('doc')) return NextResponse.json(await eenDoc(admin, k, q.get('doc')!))
     if (q.get('bijlage')) return await bijlageOpenen(admin, k, q.get('bijlage')!)
+    if (q.get('docbeeld')) return await docBeeldOpenen(admin, k, q.get('docbeeld')!)
     if (q.get('prullenbak')) return NextResponse.json(await prullenbak(admin, k))
     if (q.get('mail')) return NextResponse.json(await mailVoorstellen(admin, k))
     if (q.get('zoek') !== null) return NextResponse.json(await zoek(admin, k, q.get('zoek') ?? ''))
+    if (q.get('deadlines')) return NextResponse.json({ deadlines: await mijnDeadlines(admin, k.userId) })
     return fout('Onbekende vraag')
   } catch (e) {
     return fout(e instanceof Error ? e.message : 'Er ging iets mis', 500)
@@ -181,9 +186,23 @@ async function afgevinkt(admin: Admin, k: Kijker, persoon: string | null, na: st
 async function eenDoc(admin: Admin, k: Kijker, id: string) {
   if (!isUuid(id)) throw new Error('Onbekend document')
   const z = await laadZicht(admin, k)
-  const { data } = await admin.from('ag_docs').select('id, titel, inhoud, space_id, map_id, lijst_id, item_id, prive, eigenaar_id, kijkers, clickup_parent_id, bijgewerkt_door, updated_at, created_at, verwijderd_op').eq('id', id).maybeSingle()
+  const { data } = await admin.from('ag_docs').select('id, titel, inhoud, inhoud_json, space_id, map_id, lijst_id, item_id, prive, eigenaar_id, kijkers, clickup_parent_id, bijgewerkt_door, updated_at, created_at, verwijderd_op').eq('id', id).maybeSingle()
   if (!data || !docZichtbaar(data as never, z)) throw new Error('Dit document bestaat niet of je kan het niet zien.')
   return { doc: data }
+}
+
+/** Een afbeelding in een document: enkel voor wie het document ziet, via een link van een uur. */
+async function docBeeldOpenen(admin: Admin, k: Kijker, pad: string) {
+  const m = pad.match(BEELD_PAD)
+  if (!m) return fout('Onbekende afbeelding', 404)
+  const { data: d } = await admin.from('ag_docs').select('id, space_id, map_id, lijst_id, prive, eigenaar_id, kijkers, clickup_parent_id').eq('id', m[1]).maybeSingle()
+  const z = await laadZicht(admin, k)
+  if (!d || !docZichtbaar(d as never, z)) return fout('Geen toegang', 403)
+  const { data, error } = await admin.storage.from(BIJLAGE_BUCKET).createSignedUrl(`docs/${pad}`, 3600)
+  if (error || !data?.signedUrl) return fout('De afbeelding kon niet geladen worden.', 404)
+  const r = NextResponse.redirect(data.signedUrl)
+  r.headers.set('Cache-Control', 'private, max-age=3000')
+  return r
 }
 
 /** Een bijlage bekijken of downloaden: een kortlevende link, enkel voor wie de taak ziet. */
@@ -242,11 +261,12 @@ async function zoek(admin: Admin, k: Kijker, tekst: string) {
 const ACTIE_RECHT: Record<string, Actie> = {
   'item.nieuw': 'toevoegen', 'item.wijzig': 'aanpassen', 'item.verwijder': 'verwijderen', 'item.herstel': 'verwijderen',
   'container.nieuw': 'toevoegen', 'container.wijzig': 'aanpassen', 'container.verwijder': 'verwijderen', 'container.herstel': 'verwijderen',
-  'doc.nieuw': 'toevoegen', 'doc.wijzig': 'aanpassen', 'doc.verwijder': 'verwijderen', 'doc.herstel': 'verwijderen',
+  'doc.nieuw': 'toevoegen', 'doc.wijzig': 'aanpassen', 'doc.beeld': 'aanpassen', 'doc.verwijder': 'verwijderen', 'doc.herstel': 'verwijderen',
   'label.bewaar': 'instellingen', 'label.verwijder': 'instellingen', 'klantkleur': 'instellingen',
   'delen': 'bekijken', 'clickup.koppel': 'bekijken', 'clickup.ontkoppel': 'bekijken', 'clickup.nu': 'bekijken',
   'mail.plan': 'toevoegen', 'mail.negeer': 'bekijken', 'mail.terug': 'bekijken',
   'bijlage.upload': 'aanpassen', 'bijlage.bewaar': 'aanpassen', 'bijlage.verwijder': 'aanpassen',
+  'inspreek.lees': 'toevoegen',
 }
 
 export async function POST(req: NextRequest) {
@@ -265,6 +285,7 @@ export async function POST(req: NextRequest) {
     if (actie.startsWith('clickup.')) return NextResponse.json(await clickupActie(c, actie, b))
     if (actie.startsWith('mail.')) return NextResponse.json(await mailActie(c, actie, b))
     if (actie.startsWith('bijlage.')) return NextResponse.json(await bijlageActie(c, actie, b))
+    if (actie === 'inspreek.lees') return NextResponse.json(await inspreekLees(c, b))
     return fout('Onbekende actie')
   } catch (e) {
     const m = e instanceof Error ? e.message : 'Er ging iets mis'
@@ -430,6 +451,12 @@ async function docActie(c: Ctx, actie: string, b: Record<string, unknown>) {
     const upd: Record<string, unknown> = { updated_at: nu(), in_app_gewijzigd_op: nu(), bijgewerkt_door: k.naam }
     if (typeof b.titel === 'string') upd.titel = b.titel.trim().slice(0, 300) || 'Naamloos document'
     if (typeof b.inhoud === 'string') upd.inhoud = b.inhoud.slice(0, 500_000)
+    // De opmaak (koppen, lijsten, tabellen, afbeeldingen …): nagekeken, links en afbeeldingen enkel veilige adressen.
+    if ('inhoud_json' in b) {
+      const json = b.inhoud_json === null ? null : schoonDocJson(b.inhoud_json, d.id)
+      if (b.inhoud_json !== null && !json) throw new Error('Deze opmaak kan niet bewaard worden.')
+      upd.inhoud_json = json
+    }
     // Privé maken en kiezen wie het mag zien. Wie het privé maakt, blijft het zelf altijd zien.
     if ('prive' in b || 'kijkers' in b) {
       const prive = 'prive' in b ? b.prive === true : d.prive
@@ -447,6 +474,19 @@ async function docActie(c: Ctx, actie: string, b: Record<string, unknown>) {
     const { data, error } = await admin.from('ag_docs').update(upd).eq('id', d.id).select('updated_at').single()
     if (error) throw new Error(error.message)
     return { ok: true, versie: data?.updated_at }
+  }
+  // Een afbeelding in het document: de browser laadt rechtstreeks op (link met handtekening).
+  if (actie === 'doc.beeld') {
+    const type = typeof b.type === 'string' ? b.type.toLowerCase() : ''
+    const ext = BEELD_TYPES[type]
+    const grootte = Number(b.grootte)
+    if (!ext) throw new Error('Enkel foto\'s: png, jpg, gif of webp.')
+    if (!Number.isFinite(grootte) || grootte <= 0) throw new Error('Leeg bestand.')
+    if (grootte > MAX_BEELD) throw new Error('De afbeelding is groter dan 10 MB.')
+    const naam = `${d.id}/${crypto.randomUUID()}.${ext}`
+    const { data, error } = await admin.storage.from(BIJLAGE_BUCKET).createSignedUploadUrl(`docs/${naam}`)
+    if (error || !data?.token) throw new Error(error?.message ?? 'Uploadlink maken mislukt')
+    return { ok: true, pad: `docs/${naam}`, token: data.token, bucket: BIJLAGE_BUCKET, src: `/api/admin/agenda?docbeeld=${naam}` }
   }
   if (actie === 'doc.verwijder') { await admin.from('ag_docs').update({ verwijderd_op: nu(), verwijderd_door: k.naam }).eq('id', d.id); return { ok: true } }
   if (actie === 'doc.herstel') { await admin.from('ag_docs').update({ verwijderd_op: null, verwijderd_door: null }).eq('id', d.id); return { ok: true } }
@@ -627,4 +667,45 @@ async function bijlageActie(c: Ctx, actie: string, b: Record<string, unknown>) {
     return { ok: true }
   }
   throw new Error('Onbekende actie')
+}
+
+/**
+ * Een ingesproken taak lezen: enkel een voorstel voor het formulier. Er wordt
+ * niets bewaard; enkel de tekst, de namen van het team en de namen van de
+ * lijsten die jij ziet gaan naar de AI.
+ */
+async function inspreekLees(c: Ctx, b: Record<string, unknown>) {
+  const { admin, k } = c
+  const zin = typeof b.tekst === 'string' ? b.tekst.trim().slice(0, 4000) : ''
+  if (zin.length < 3) throw new Error('Spreek of typ eerst wat er moet gebeuren.')
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) throw new Error('Het lezen van de tekst is niet beschikbaar. Vul het formulier zelf in.')
+  const z = await laadZicht(admin, k)
+  const personen = await laadPersonen(admin)
+  const mapPer = new Map(z.mappen.map((m) => [m.id, m]))
+  const spacePer = new Map(z.spaces.map((sp) => [sp.id, sp.naam]))
+  const lijsten = z.lijsten.filter((l) => z.zichtbaar.lijsten.has(l.id)).slice(0, 400).map((l) => {
+    const m = l.map_id ? mapPer.get(l.map_id) : null
+    const ouder = m?.parent_id ? mapPer.get(m.parent_id)?.naam : null
+    return { id: l.id, label: [spacePer.get(l.space_id ?? ''), ouder, m?.naam, l.naam].filter(Boolean).join(' › ') }
+  })
+  const ctx: InspreekContext = {
+    vandaag: vandaag(),
+    personen: personen.map((p) => ({ id: p.id, naam: p.naam, actief: p.actief, metAccount: !!p.user_id })),
+    lijsten,
+  }
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model: process.env.BLOG_AI_MODEL || 'claude-sonnet-4-6', max_tokens: 900, messages: [{ role: 'user', content: inspreekPrompt(zin, ctx, k.naam) }] }),
+  }).catch(() => null)
+  if (!res || !res.ok) throw new Error('De tekst kon nu niet gelezen worden. Probeer opnieuw of vul het formulier zelf in.')
+  const json = await res.json().catch(() => null) as { content?: { text?: string }[] } | null
+  const text = (json?.content ?? []).map((x) => x.text ?? '').join('')
+  const a = text.indexOf('{'), e = text.lastIndexOf('}')
+  let ruw: unknown = null
+  try { ruw = a >= 0 && e > a ? JSON.parse(text.slice(a, e + 1)) : null } catch { ruw = null }
+  const voorstel = leesInspreekVoorstel(ruw, ctx)
+  if (!voorstel) throw new Error('Ik kon er geen taak uit halen. Zeg minstens wat er moet gebeuren.')
+  return { voorstel }
 }

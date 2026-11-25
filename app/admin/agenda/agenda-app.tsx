@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  ChevronLeft, ChevronRight, ChevronDown, Loader2, Plus, Printer, PanelLeft, Search, Tag, Building2, Eye, EyeOff, Mail, X, Users, List as ListIcon, Maximize2, Minimize2, Layers, Check,
+  ChevronLeft, ChevronRight, ChevronDown, Loader2, Plus, Printer, PanelLeft, Search, Tag, Building2, Eye, EyeOff, Mail, X, Users, List as ListIcon, Maximize2, Minimize2, Layers, Check, Mic,
 } from 'lucide-react'
 import { PersoonFoto } from '@/components/admin/persoon-foto'
 import { zoekVeld } from '@/lib/zoekveld'
@@ -20,6 +20,7 @@ import { ItemVenster, KlantLijst } from './item-venster'
 import { LijstWeergave, wanneer } from './lijst'
 import { DocWeergave } from './doc'
 import { NieuwVenster, AfgevinktPaneel, PrullenbakPaneel, MailPaneel, InstellingenPaneel } from './extra'
+import { InspreekVenster } from './inspreken'
 
 type Modus = Weergave | 'lijst'
 type Paneel = null | 'klaar' | 'prullenbak' | 'instellingen' | 'mail'
@@ -71,6 +72,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
   const [lijstItems, setLijstItems] = useState<Item[] | null>(null)
   const [openItem, setOpenItem] = useState<string | null>(null)
   const [nieuw, setNieuw] = useState<NieuwMoment | null>(null)
+  const [inspreek, setInspreek] = useState(false)
   const [paneel, setPaneel] = useState<Paneel>(null)
   const [mv, setMv] = useState<MeetingVenster>(null)
   const [opties, setOpties] = useState<Opties | null>(null)
@@ -219,11 +221,12 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
     } catch (e) { pasLokaalAan(i.id, { status: i.status, afgerond_op: i.afgerond_op }); toast.error(e instanceof Error ? e.message : 'Mislukt') }
   }
   const verplaats = async (i: Item, v: Verplaatsing) => {
-    const oud = { start_op: i.start_op, eind_op: i.eind_op, heel_dag: i.heel_dag }
+    const oud = { start_op: i.start_op, eind_op: i.eind_op, heel_dag: i.heel_dag, ...('deadline_op' in v ? { deadline_op: i.deadline_op } : {}) }
     pasLokaalAan(i.id, v)
     try {
       await actie({ actie: 'item.wijzig', id: i.id, ...v })
-      const wanneerTekst = v.heel_dag ? kortDag(dagVan(v.eind_op ?? v.start_op ?? new Date().toISOString())) : `${kortDag(dagVan(v.start_op!))} ${uurVan(v.start_op!)}`
+      const wanneerTekst = !v.start_op && v.deadline_op ? `deadline ${kortDag(dagVan(v.deadline_op))} ${uurVan(v.deadline_op)}`
+        : v.heel_dag || !v.start_op ? kortDag(dagVan(v.eind_op ?? v.start_op ?? new Date().toISOString())) : `${kortDag(dagVan(v.start_op))} ${uurVan(v.start_op)}`
       toast.success(`Verplaatst naar ${wanneerTekst}`, { action: { label: 'Ongedaan maken', onClick: () => { pasLokaalAan(i.id, oud); actie({ actie: 'item.wijzig', id: i.id, ...oud }).catch(() => toast.error('Terugzetten mislukt')) } } })
     } catch (e) { pasLokaalAan(i.id, oud); toast.error(e instanceof Error ? e.message : 'Verplaatsen mislukt') }
   }
@@ -238,7 +241,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
   useEffect(() => {
     const t = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
-      if (el?.closest?.('input,textarea,select,[contenteditable="true"]') || e.metaKey || e.ctrlKey || e.altKey || openItem || nieuw || paneel || mv) return
+      if (el?.closest?.('input,textarea,select,[contenteditable="true"]') || e.metaKey || e.ctrlKey || e.altKey || openItem || nieuw || inspreek || paneel || mv) return
       if (e.key === 'Escape' && groot && !pop) { setGroot(false); return }
       if (modus === 'lijst' || keuze?.soort === 'doc') return
       if (e.key === 'ArrowLeft') setDatum((d) => verschuif(weergave, d, -1))
@@ -290,12 +293,16 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
         {/* Bovenbalk (op de computer naast de zwevende knoppen rechtsboven) */}
         <div ref={balkRef} className="flex flex-wrap items-center gap-2 md:min-h-[44px]" style={ruimteRechts ? { paddingRight: ruimteRechts } : undefined}>
           <button type="button" onClick={() => { setToonBoom(!toonBoom); bewaarVoorkeur({ boom: !toonBoom }) }} aria-label={toonBoom ? 'Mappen verbergen' : 'Mappen tonen'} title={toonBoom ? 'Mappen verbergen' : 'Mappen tonen'} className={`order-1 h-9 w-9 shrink-0 rounded-lg border border-gray-200 bg-white flex items-center justify-center hover:border-gray-400 ${focusRing}`}><PanelLeft className="h-4 w-4" /></button>
-          <div className="order-2 min-w-0 flex-1 md:flex-none md:mr-2">
+          {/* Op de gsm enkel een titel als je een map of lijst koos (de knoppen hebben de plaats nodig). */}
+          <div className={`order-2 min-w-0 flex-1 md:flex-none md:mr-2 ${titelKeuze ? '' : 'max-sm:invisible'}`}>
             <h1 className="text-xl font-bold text-gray-900 truncate">{titelKeuze ? titelKeuze[titelKeuze.length - 1] : keuze?.soort === 'doc' ? 'Document' : 'Agenda'}</h1>
             {titelKeuze && titelKeuze.length > 1 && <div className="text-xs text-gray-500 truncate">{titelKeuze.slice(0, -1).join(' › ')}</div>}
           </div>
           {keuze?.soort !== 'doc' && boom.rechten.toevoegen && (
             <button type="button" onClick={() => setNieuw({ dag: modus === 'lijst' ? vandaag() : datum < vandaag() && weergave !== 'dag' ? vandaag() : datum, heelDag: true })} aria-label="Nieuwe taak" className={`order-4 md:order-6 btn-primary !py-2 !px-2.5 md:!px-3.5 !text-sm shrink-0 ${focusRing}`}><Plus className="h-4 w-4" /><span className="hidden md:inline">Nieuwe taak</span></button>
+          )}
+          {keuze?.soort !== 'doc' && boom.rechten.toevoegen && (
+            <button type="button" onClick={() => setInspreek(true)} aria-label="Taak inspreken" title="Taak inspreken" className={`order-4 md:order-6 h-9 w-9 shrink-0 rounded-lg border border-gray-200 bg-white flex items-center justify-center hover:border-gray-400 ${focusRing}`}><Mic className="h-4 w-4" /></button>
           )}
           {keuze?.soort !== 'doc' && (
             <div className="order-5 md:order-3 w-full md:w-auto md:flex-1 flex items-center gap-1.5 min-w-0">
@@ -312,7 +319,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
           )}
           {keuze?.soort !== 'doc' && (
             <button type="button" onClick={() => naarGroot(!groot)} title={groot ? 'Kleiner (Esc)' : 'Groot scherm'} aria-label={groot ? 'Kleiner' : 'Groot scherm'}
-              className={`order-3 md:order-5 h-9 w-9 shrink-0 rounded-lg border bg-white flex items-center justify-center ${groot ? 'border-gray-900' : 'border-gray-200 hover:border-gray-400'} ${focusRing}`}>
+              className={`order-3 md:order-5 h-9 w-9 shrink-0 rounded-lg border bg-white hidden md:flex items-center justify-center ${groot ? 'border-gray-900' : 'border-gray-200 hover:border-gray-400'} ${focusRing}`}>
               {groot ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
             </button>
           )}
@@ -452,6 +459,9 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
       )}
       {mv?.soort === 'annuleer' && (
         <AnnuleerVenster m={mv.meeting} onSluit={() => setMv({ soort: 'detail', id: mv.meeting.id })} onKlaar={(m) => { toast.success('Meeting geannuleerd.'); laadItems(); setMv({ soort: 'detail', id: m.id }) }} />
+      )}
+      {inspreek && (
+        <InspreekVenster boom={boom} onSluit={() => setInspreek(false)} onToegevoegd={(id) => { setInspreek(false); vernieuw(); setOpenItem(id) }} />
       )}
       {paneel === 'klaar' && <AfgevinktPaneel boom={boom} onSluit={() => setPaneel(null)} onOpen={(i) => setOpenItem(i.id)} onVernieuw={vernieuw} />}
       {paneel === 'prullenbak' && <PrullenbakPaneel boom={boom} onSluit={() => setPaneel(null)} onVernieuw={vernieuw} />}

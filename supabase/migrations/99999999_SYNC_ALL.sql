@@ -8221,3 +8221,10 @@ ALTER TABLE public.ag_bijlagen ENABLE ROW LEVEL SECURITY;
 INSERT INTO storage.buckets (id, name, public, file_size_limit)
 VALUES ('agenda', 'agenda', false, 52428800)
 ON CONFLICT (id) DO NOTHING;
+
+-- Agenda: deadline per taak (25 nov 2026). Een taak uit ClickUp met een einduur en zonder start krijgt die als deadline.
+ALTER TABLE public.ag_items ADD COLUMN IF NOT EXISTS deadline_op timestamptz;
+CREATE INDEX IF NOT EXISTS ag_items_deadline_idx ON public.ag_items (deadline_op) WHERE deadline_op IS NOT NULL AND verwijderd_op IS NULL;
+
+-- Agenda: opgemaakte documenten (25 nov 2026). De opmaak als TipTap-JSON; `inhoud` blijft de gewone tekst (zoeken, ClickUp).
+ALTER TABLE public.ag_docs ADD COLUMN IF NOT EXISTS inhoud_json jsonb;
