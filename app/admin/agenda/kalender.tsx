@@ -116,14 +116,17 @@ function Vinkje({ i, onKlaar, klein }: { i: Item; onKlaar: (i: Item) => void; kl
   )
 }
 
-/** Bij hoveren: snel completen (of terug open zetten). */
+/**
+ * Bij hoveren: snel completen (of terug open zetten). Enkel op toestellen met een
+ * muis: op een gsm zou de eerste tik anders deze knop tonen in plaats van de taak te openen.
+ */
 function SnelKlaar({ i, onKlaar, tekst, onder = false }: { i: Item; onKlaar: (i: Item) => void; tekst: boolean; onder?: boolean }) {
   if (!kanAfvinken(i)) return null
   const klaar = i.status === 'klaar'
   return (
     <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onKlaar(i) }}
       title={klaar ? 'Terug open zetten' : 'Complete'} aria-label={klaar ? 'Terug open zetten' : 'Complete'}
-      className={`absolute ${onder ? 'bottom-1' : 'top-1/2 -translate-y-1/2'} right-1 z-[3] hidden group-hover:inline-flex focus:inline-flex items-center gap-1 h-[22px] px-2 rounded-md text-[12px] font-semibold shadow-sm ${klaar ? 'bg-white text-gray-900 border border-gray-200' : 'bg-[#2f7a4b] text-white'} ${focusRing}`}>
+      className={`absolute ${onder ? 'bottom-1' : 'top-1/2 -translate-y-1/2'} right-1 z-[3] hidden [@media(hover:hover)]:group-hover:inline-flex focus-visible:inline-flex items-center gap-1 h-[22px] px-2 rounded-md text-[12px] font-semibold shadow-sm ${klaar ? 'bg-white text-gray-900 border border-gray-200' : 'bg-[#2f7a4b] text-white'} ${focusRing}`}>
       {klaar ? <RotateCcw className="h-3 w-3" /> : <Check className="h-3 w-3" />}{tekst && (klaar ? 'Heropen' : 'Complete')}
     </button>
   )
@@ -155,7 +158,7 @@ function Chip({ i, kleur, onOpen, onKlaar, personen, tijd, sleep, opDag, lang, m
       {!dl && i.deadline_op && <DeadlineLabel i={i} opDag={opDag} klein />}
       {i.prive && <Lock className="h-2.5 w-2.5 shrink-0 opacity-60" />}
       {/* Bij een deadline in de week gaat de plaats naar de titel; wie het doet staat in de taak. */}
-      {!(dl && !lang) && <span className="hidden sm:inline-flex group-hover:invisible"><Avatars ids={i.toegewezen} personen={personen} max={2} maat={20} /></span>}
+      {!(dl && !lang) && <span className="hidden sm:inline-flex [@media(hover:hover)]:group-hover:invisible"><Avatars ids={i.toegewezen} personen={personen} max={2} maat={20} /></span>}
       {magKlaar && <SnelKlaar i={i} onKlaar={onKlaar} tekst={false} />}
     </div>
   )
@@ -485,7 +488,7 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
                             {i.locatie && !i.meet_url && <MapPin className="h-3 w-3 shrink-0" />}
                             <span className="truncate">{hhmm(b.vanMin)}–{hhmm(b.totMin)}</span>
                             <span className="flex-1" />
-                            {hoogte >= 50 && <span className={sl ? 'group-hover:invisible' : ''}><Avatars ids={i.toegewezen} personen={personen} max={3} maat={20} /></span>}
+                            {hoogte >= 50 && <span className={sl ? '[@media(hover:hover)]:group-hover:invisible' : ''}><Avatars ids={i.toegewezen} personen={personen} max={3} maat={20} /></span>}
                           </div>
                         )}
                         </>)}
