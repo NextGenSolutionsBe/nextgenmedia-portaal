@@ -6,10 +6,10 @@ import { Loader2, Printer, Trash2, Eye, Pencil, Lock, Check, ChevronRight, Users
 import { PersoonFoto } from '@/components/admin/persoon-foto'
 import { actie, api, Markdown, vinkRegel, padVan, focusRing, Schakel, ApiFout, Popover, PersonenLijst, type BoomData } from './gedeeld'
 
-type Doc = { id: string; titel: string; inhoud: string | null; space_id: string | null; map_id: string | null; lijst_id: string | null; prive: boolean; eigenaar_id: string | null; kijkers: string[] | null; bijgewerkt_door: string | null; updated_at: string; created_at: string }
+type Doc = { id: string; titel: string; inhoud: string | null; space_id: string | null; map_id: string | null; lijst_id: string | null; prive: boolean; eigenaar_id: string | null; kijkers: string[] | null; item_id?: string | null; bijgewerkt_door: string | null; updated_at: string; created_at: string }
 
 /** Een document als kladblok: lezen of schrijven, bewaart vanzelf, afdrukken als pdf. */
-export function DocWeergave({ id, boom, onVerwijderd, onVernieuw }: { id: string; boom: BoomData; onVerwijderd: () => void; onVernieuw: () => void }) {
+export function DocWeergave({ id, boom, onVerwijderd, onVernieuw, onOpenItem }: { id: string; boom: BoomData; onVerwijderd: () => void; onVernieuw: () => void; onOpenItem?: (id: string) => void }) {
   const [doc, setDoc] = useState<Doc | null>(null)
   const [fout, setFout] = useState<string | null>(null)
   const [titel, setTitel] = useState('')
@@ -91,6 +91,7 @@ export function DocWeergave({ id, boom, onVerwijderd, onVernieuw }: { id: string
   return (
     <div className="card-base !p-0 overflow-hidden flex flex-col min-h-0 h-full">
       <div className="flex items-center gap-2 px-5 py-2.5 border-b border-gray-100">
+        {doc.item_id && onOpenItem && <button type="button" onClick={() => onOpenItem(doc.item_id!)} className={`btn-secondary !py-1 !px-2.5 !text-xs shrink-0 ${focusRing}`}><ChevronRight className="h-3.5 w-3.5 rotate-180" />Naar de taak</button>}
         <div className="flex-1 min-w-0 text-xs text-gray-500 flex items-center gap-1 truncate">{pad.map((p, n) => <span key={n} className="flex items-center gap-1">{p}{n < pad.length - 1 && <ChevronRight className="h-3 w-3" />}</span>)}</div>
         <span className="text-[11px] text-gray-400 flex items-center gap-1">{status === 'bezig' ? <><Loader2 className="h-3 w-3 animate-spin" />Bewaren…</> : status === 'wijziging' ? 'Niet bewaard' : <><Check className="h-3 w-3" />Bewaard</>}</span>
         {mag && <button type="button" onClick={() => { if (bewerk) bewaar(titel, inhoud); setBewerk(!bewerk) }} className={`btn-secondary !py-1 !px-2.5 !text-xs ${focusRing}`}>{bewerk ? <><Eye className="h-3.5 w-3.5" />Lezen</> : <><Pencil className="h-3.5 w-3.5" />Bewerken</>}</button>}
