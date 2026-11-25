@@ -93,15 +93,18 @@ function enkelTeam(titel: string, team: string[]): boolean {
 export function stelLabelVoor(i: LabelInvoer, c: LabelContext): string {
   const t = `${i.titel} `.toLowerCase()
   const lijst = `${i.mapNaam ?? ''} ${i.lijstNaam ?? ''}`.toLowerCase()
-  if (i.priveLijst || R.persoonlijk.test(t)) return 'Persoonlijk'
+  // Een post, reel of story voor de socials is content, wat er ook in de titel staat.
+  if (/^\s*(post|posts|story|stories|reel|reels|carrousel|carousel|video)\b/i.test(i.titel) || /\((meta|linkedin|tiktok|instagram|facebook|yt|youtube)\b/i.test(i.titel)) return 'Content'
+  if (R.persoonlijk.test(t)) return 'Persoonlijk'
   if (R.av.test(t)) return 'Algemene vergadering'
   if (R.event.test(t)) return 'netwerkevent'
   if (R.juridisch.test(t)) return 'juridisch'
-  if (R.personeel.test(t) || /stage|stagiair/.test(lijst)) return 'Personeel'
+  if (R.personeel.test(t)) return 'Personeel'
   if (R.boekhouding.test(t) || /factu/.test(lijst)) return 'boekhouding'
   // Een afspraak: met het team, met een klant die we kennen, of anders iemand die (nog) geen klant is.
   if (R.teamvergadering.test(t)) return 'Teamvergadering'
-  if (i.soort === 'meeting' || R.meeting.test(t) || /meeting|afspraak/.test(t)) {
+  // Enkel de titel: in ClickUp is elke taak met een begin- en einduur een "meeting".
+  if (R.meeting.test(t) || /meeting|afspraak/.test(t)) {
     if (klantInTitel(i.titel, c.klanten)) return 'Klantmeeting'
     if (enkelTeam(i.titel, c.team)) return i.bijKlant ? 'Klantmeeting' : 'Teamvergadering'
     if (i.bijKlant) return 'Klantmeeting'
@@ -115,7 +118,7 @@ export function stelLabelVoor(i: LabelInvoer, c: LabelContext): string {
   if (R.content.test(t) || /contentkalender/.test(lijst)) return 'Content'
   if (R.opvolging.test(t)) return 'Opvolging'
   if (R.kantoor.test(t)) return 'Kantoor'
-  return i.bijKlant ? 'Klantwerk' : 'Intern'
+  return i.priveLijst ? 'Persoonlijk' : i.bijKlant ? 'Klantwerk' : 'Intern'
 }
 
 /** Is dit label een van onze categorieën? (hoofdletters maken niet uit) */

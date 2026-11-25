@@ -61,13 +61,17 @@ export type ModuleInfo = {
  * ze kent) plus de vaste onderdelen die geen modulesleutel hadden. De labels
  * en secties volgen de zijbalk.
  */
+// Zelfde groepen als de zijbalk (components/admin/sidebar.tsx).
 const SECTIE_VAN: Record<string, string> = {
-  clients: 'Klanten & content', contracts: 'Klanten & content', offertes: 'Klanten & content', content: 'Klanten & content', aanvragen: 'Klanten & content', nieuwsbrieven: 'Klanten & content', founders: 'Klanten & content', onze_partners: 'Klanten & content', events: 'Klanten & content', opleveringen: 'Klanten & content', shoots: 'Klanten & content', metricool: 'Klanten & content', blogs: 'Klanten & content', uploads: 'Klanten & content', opdrachten: 'Klanten & content', formulieren: 'Klanten & content',
-  kantoor: 'Kantoor', algemene_contracten: 'Kantoor', partners: 'Partners', assignments: 'Partners', settlements: 'Partners',
-  sales: 'Verkoop', harrie_api: 'Verkoop', meetings: 'Verkoop', nextgensolutions: 'Verkoop',
+  agenda: 'Start', meetings: 'Start',
+  clients: 'Klanten & legal', opdrachten: 'Klanten & legal', aanvragen: 'Klanten & legal', offertes: 'Klanten & legal', contracts: 'Klanten & legal', algemene_contracten: 'Klanten & legal', sales: 'Klanten & legal', harrie_api: 'Klanten & legal',
+  content: 'NextGenMedia', shoots: 'NextGenMedia', opleveringen: 'NextGenMedia', metricool: 'NextGenMedia', blogs: 'NextGenMedia', uploads: 'NextGenMedia', formulieren: 'NextGenMedia', materiaal: 'NextGenMedia',
+  nextgensolutions: 'NextGenSolutions',
   finance: 'Financieel', invoices: 'Financieel', vesting: 'Financieel', purchases: 'Financieel',
-  email: 'Overig', info: 'Overig', materiaal: 'Overig',
-  personeel: 'Beheer', agenda: 'Start',
+  founders: 'Klantapp', onze_partners: 'Klantapp', nieuwsbrieven: 'Klantapp', events: 'Klantapp',
+  kantoor: 'Team & partners', partners: 'Team & partners', assignments: 'Team & partners', settlements: 'Team & partners',
+  email: 'Overig', info: 'Overig',
+  personeel: 'Beheer',
 }
 const HREF_VAN: Record<string, string> = {
   clients: '/admin/clients', contracts: '/admin/contracts', offertes: '/admin/offertes', content: '/admin/services', metricool: '/admin/metricool', blogs: '/admin/blog-calendar', uploads: '/admin/uploads', opdrachten: '/admin/opdrachten', formulieren: '/admin/formulieren', meetings: '/admin/meetings', shoots: '/admin/shoots',
