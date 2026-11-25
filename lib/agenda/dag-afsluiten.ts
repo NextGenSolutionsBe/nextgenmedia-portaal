@@ -40,16 +40,16 @@ export function laatsteDag(i: Pick<Item, 'start_op' | 'eind_op' | 'heel_dag' | '
   return p ? (p.soort === 'rooster' ? p.dag : p.tot) : null
 }
 
-/** Is dit item van jou: je staat erop, of niemand staat erop en jij maakte het. */
-export const vanMij = (i: Pick<Item, 'toegewezen' | 'eigenaar_id'>, ik: string) => i.toegewezen.includes(ik) || (!i.toegewezen.length && i.eigenaar_id === ik)
+/** Is dit item van jou: enkel als je er zelf op staat (assignee). Wat je maakte zonder er zelf op te staan, telt niet. */
+export const vanMij = (i: Pick<Item, 'toegewezen'>, ik: string) => i.toegewezen.includes(ik)
 
 /** Hoe ver terug we open taken meenemen. */
 export const DAGEN_TERUG = 30
 
 /**
  * Wat er bij het afsluiten van `d` op tafel komt:
- * - taken van jou die nog open staan en op `d` of eerder (tot 30 dagen terug) eindigen, oudste eerst;
- * - meetings van jou op `d` (om af te vinken en er meteen taken uit te halen).
+ * - taken waar jij op staat (assignee) die nog open staan en op `d` of eerder (tot 30 dagen terug) eindigen, oudste eerst;
+ * - meetings op `d` waar jij op staat (om af te vinken en er meteen taken uit te halen).
  * Wat over meerdere dagen loopt en pas na `d` eindigt, hoort er niet bij.
  */
 export function afTeSluiten(items: Item[], opts: { ik: string; dag: string }): { taken: Item[]; meetings: Item[] } {

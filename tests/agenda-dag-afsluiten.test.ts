@@ -53,14 +53,17 @@ test('wat op tafel komt: mijn open taken van vandaag en eerder, meetings van van
     it({ id: 'oud', eind_op: iso('2026-09-01', '00:00') }),
     it({ id: 'meeting', bron: 'meeting', soort: 'meeting', heel_dag: false, start_op: iso('2026-11-25', '10:00'), eind_op: iso('2026-11-25', '11:00') }),
     it({ id: 'meetingKlaar', bron: 'meeting', soort: 'meeting', status: 'klaar', heel_dag: false, start_op: iso('2026-11-25', '14:00'), eind_op: iso('2026-11-25', '15:00') }),
+    it({ id: 'meetingCollega', bron: 'meeting', soort: 'meeting', toegewezen: ['bram'], heel_dag: false, start_op: iso('2026-11-25', '16:00'), eind_op: iso('2026-11-25', '17:00') }),
     it({ id: 'meetingGisteren', bron: 'meeting', soort: 'meeting', heel_dag: false, start_op: iso('2026-11-24', '10:00'), eind_op: iso('2026-11-24', '11:00') }),
   ]
   const { taken, meetings } = afTeSluiten(items, { ik: 'ik', dag: '2026-11-25' })
-  assert.deepEqual(taken.map((x) => x.id), ['gisteren', 'vandaag', 'zelfGemaakt'])
+  // Enkel waar jij op staat: een taak die je maakte zonder er zelf op te staan, telt niet.
+  assert.deepEqual(taken.map((x) => x.id), ['gisteren', 'vandaag'])
   // Ook een afgevinkte meeting blijft zichtbaar (je kan er nog taken uit halen).
   assert.deepEqual(meetings.map((x) => x.id), ['meeting', 'meetingKlaar'])
-  assert.ok(vanMij(it({ toegewezen: [], eigenaar_id: 'ik' }), 'ik'))
+  assert.ok(!vanMij(it({ toegewezen: [], eigenaar_id: 'ik' }), 'ik'))
   assert.ok(!vanMij(it({ toegewezen: ['bram'], eigenaar_id: 'ik' }), 'ik'))
+  assert.ok(vanMij(it({ toegewezen: ['bram', 'ik'] }), 'ik'))
 })
 
 test('notitie onderaan de beschrijving en hoe lang open', () => {
