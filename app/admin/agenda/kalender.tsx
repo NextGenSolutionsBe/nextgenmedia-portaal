@@ -140,16 +140,35 @@ function Chip({ i, kleur, onOpen, onKlaar, personen, tijd, sleep, opDag, lang, m
 
 // ── Dag en week ─────────────────────────────────────────────────────────────
 
+/** `opgetild`: met de vinger eerst ingehouden (gsm); loslaten zonder te bewegen opent dan niets. */
 type Sleep =
   | { soort: 'nieuw'; dag: string; van: number; tot: number; x: number; y: number }
-  | { soort: 'verplaats'; item: Item; dagIndex: number; van: number; duur: number; grijpMin: number; x: number; y: number; bewogen: boolean }
-  | { soort: 'rek'; item: Item; dag: string; van: number; tot: number; y: number; bewogen: boolean }
+  | { soort: 'verplaats'; item: Item; dagIndex: number; van: number; duur: number; grijpMin: number; x: number; y: number; bewogen: boolean; opgetild?: boolean }
+  | { soort: 'rek'; item: Item; dag: string; van: number; tot: number; y: number; bewogen: boolean; opgetild?: boolean }
+
+/** Op de gsm eerst zo lang inhouden voor je een blok verplaatst; gewoon vegen = scrollen. */
+const HOUD_MS = 450
+const HOUD_SPELING = 8
 
 function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToevoegen, onOpen, onKlaar, onVerplaats, onNieuw, onDag }: Props) {
   const dagen = useMemo(() => dagenVan(weergave, datum), [weergave, datum])
   const kolommenRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [sleep, setSleep] = useState<Sleep | null>(null)
+  // Met de vinger: een blok wacht eerst tot je het even inhoudt. Beweeg je eerder, dan scroll je gewoon.
+  const houd = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number; item: Item } | null>(null)
+  const aanSlepen = useRef(false)
+  const stopHouden = () => { if (houd.current) { clearTimeout(houd.current.timer); houd.current = null } }
+  useEffect(() => () => stopHouden(), [])
+  // Zolang een opgetild blok meegaat met de vinger, scrollt de pagina niet mee.
+  // Vast luisteraar (niet-passief), zodat de browser het tegenhouden ook echt toelaat.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const f = (e: TouchEvent) => { if (aanSlepen.current) e.preventDefault() }
+    el.addEventListener('touchmove', f, { passive: false })
+    return () => el.removeEventListener('touchmove', f)
+  }, [])
   const [nu, setNu] = useState(() => Date.now())
   const [alleDag, setAlleDag] = useState(false)
   useEffect(() => { const t = setInterval(() => setNu(Date.now()), 60_000); return () => clearInterval(t) }, [])
@@ -221,20 +240,41 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     setSleep({ soort: 'nieuw', dag: d, van, tot: van + SNAP, x: e.clientX, y: e.clientY })
   }
+  /** Muis: meteen. Vinger of pen: pas na even inhouden (met een kort trilsignaal), anders is het scrollen of tikken. */
+  const naInhouden = (e: RPointerEvent, item: Item, begin: (opgetild: boolean) => void) => {
+    const el = e.currentTarget as HTMLElement, id = e.pointerId
+    const vang = () => { try { el.setPointerCapture(id) } catch { /* de vinger is al weg */ } }
+    if (e.pointerType === 'mouse') { vang(); begin(false); return }
+    stopHouden()
+    const timer = setTimeout(() => {
+      houd.current = null
+      aanSlepen.current = true
+      try { navigator.vibrate?.(15) } catch { /* niet elk toestel */ }
+      vang(); begin(true)
+    }, HOUD_MS)
+    houd.current = { timer, x: e.clientX, y: e.clientY, item }
+  }
   const startVerplaats = (e: RPointerEvent, item: Item, dagIndex: number, van: number, tot: number) => {
     if (e.button !== 0) return
     e.stopPropagation()
-    const pos = positie(e.clientX, e.clientY)
-    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-    setSleep({ soort: 'verplaats', item, dagIndex, van, duur: tot - van, grijpMin: pos ? pos.min - van : 0, x: e.clientX, y: e.clientY, bewogen: false })
+    const x = e.clientX, y = e.clientY
+    naInhouden(e, item, (opgetild) => {
+      const pos = positie(x, y)
+      setSleep({ soort: 'verplaats', item, dagIndex, van, duur: tot - van, grijpMin: pos ? pos.min - van : 0, x, y, bewogen: false, opgetild })
+    })
   }
   const startRek = (e: RPointerEvent, item: Item, d: string, van: number, tot: number) => {
     if (e.button !== 0) return
     e.stopPropagation()
-    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-    setSleep({ soort: 'rek', item, dag: d, van, tot, y: e.clientY, bewogen: false })
+    const y = e.clientY
+    naInhouden(e, item, (opgetild) => setSleep({ soort: 'rek', item, dag: d, van, tot, y, bewogen: false, opgetild }))
   }
   const beweeg = (e: RPointerEvent) => {
+    // Nog niet ingehouden en de vinger beweegt: dat is scrollen, geen verplaatsen.
+    if (houd.current) {
+      if (Math.abs(e.clientX - houd.current.x) + Math.abs(e.clientY - houd.current.y) > HOUD_SPELING) stopHouden()
+      return
+    }
     if (!sleep) return
     const pos = positie(e.clientX, e.clientY)
     if (!pos) return
@@ -251,6 +291,9 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
     }
   }
   const los = () => {
+    aanSlepen.current = false
+    // Kort getikt op een blok (niet ingehouden): openen.
+    if (houd.current) { const it = houd.current.item; stopHouden(); onOpen(it); return }
     const s = sleep
     setSleep(null)
     if (!s) return
@@ -259,7 +302,7 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
       onNieuw({ dag: s.dag, vanMin: s.van, totMin: klik ? Math.min(1440, s.van + 60) : s.tot, heelDag: false })
     }
     if (s.soort === 'verplaats') {
-      if (!s.bewogen) { onOpen(s.item); return }
+      if (!s.bewogen) { if (!s.opgetild) onOpen(s.item); return }
       const d = dagen[s.dagIndex]
       onVerplaats(s.item, { start_op: isoOp(d, s.van), eind_op: isoOp(d, s.van + s.duur), heel_dag: false })
     }
@@ -362,7 +405,7 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
             {Array.from({ length: 24 }, (_, h) => h > 0 && <div key={h} className="absolute right-2 -translate-y-1/2 text-[12px] tabular-nums text-gray-500" style={{ top: h * 60 * PX_MIN }}>{String(h).padStart(2, '0')}:00</div>)}
           </div>
           <div ref={kolommenRef} className="relative grid" style={{ gridColumn: `2 / span ${dagen.length}`, gridTemplateColumns: `repeat(${dagen.length}, minmax(0, 1fr))` }}
-            onPointerMove={beweeg} onPointerUp={los} onPointerCancel={() => setSleep(null)}>
+            onPointerMove={beweeg} onPointerUp={los} onPointerCancel={() => { stopHouden(); aanSlepen.current = false; setSleep(null) }}>
             {/* lijnen */}
             <div className="absolute inset-0 pointer-events-none">
               {Array.from({ length: 24 }, (_, h) => <div key={h} className="absolute left-0 right-0 border-t border-gray-100" style={{ top: h * 60 * PX_MIN }} />)}
@@ -376,6 +419,7 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
                   {blokken.map((b) => {
                     const i = b.item
                     const bezig = sleep && sleep.soort !== 'nieuw' && sleep.item.id === i.id && sleep.bewogen
+                    const opgetild = sleep && sleep.soort !== 'nieuw' && sleep.item.id === i.id && sleep.opgetild && !sleep.bewogen
                     const kl = kleur(i)
                     const hoogte = Math.max(22, (b.totMin - b.vanMin) * PX_MIN - 2)
                     const sl = sleepbaar(i, magAanpassen)
@@ -384,8 +428,9 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
                       <div key={`${i.bron}-${i.id}`} data-blok role="button" tabIndex={0}
                         onPointerDown={(e) => (sl ? startVerplaats(e, i, n, b.vanMin, b.totMin) : undefined)}
                         onClick={() => { if (!sl) onOpen(i) }} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
-                        className={`group absolute rounded-lg pl-2 pr-1.5 py-1 overflow-hidden text-[13.5px] leading-snug shadow-[0_1px_3px_rgba(0,0,0,0.08)] cursor-pointer select-none hover:brightness-[0.97] hover:z-[2] ${bezig ? 'opacity-30' : ''} ${focusRing}`}
-                        style={{ ...stijlVan(i, kl), top: b.vanMin * PX_MIN + 1, height: hoogte, left: `calc(${(b.kolom / b.kolommen) * 100}% + 3px)`, width: `calc(${100 / b.kolommen}% - 6px)`, touchAction: sl ? 'none' : undefined }}
+                        onContextMenu={(e) => { if (houd.current || aanSlepen.current) e.preventDefault() }}
+                        className={`group absolute rounded-lg pl-2 pr-1.5 py-1 overflow-hidden text-[13.5px] leading-snug shadow-[0_1px_3px_rgba(0,0,0,0.08)] cursor-pointer select-none [-webkit-touch-callout:none] hover:brightness-[0.97] hover:z-[2] ${bezig ? 'opacity-30' : ''} ${opgetild ? 'z-10 ring-2 ring-gray-900 shadow-lg scale-[1.03]' : ''} transition-transform ${focusRing}`}
+                        style={{ ...stijlVan(i, kl), top: b.vanMin * PX_MIN + 1, height: hoogte, left: `calc(${(b.kolom / b.kolommen) * 100}% + 3px)`, width: `calc(${100 / b.kolommen}% - 6px)` }}
                         title={`${hhmm(b.vanMin)}–${hhmm(b.totMin)} ${i.titel}`}>
                         <div className="flex items-start gap-1">
                           <span className="mt-px"><Vinkje i={i} onKlaar={onKlaar} klein /></span>
