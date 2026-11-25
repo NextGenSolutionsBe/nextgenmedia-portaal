@@ -399,11 +399,11 @@ function Tile({ icon: Icon, label, value, sub, accent }: {
   icon: typeof Clock; label: string; value: string; sub?: string; accent?: boolean
 }) {
   return (
-    <div className={`stat-card ${accent ? 'border-gray-900 bg-gray-100' : ''}`}>
+    <div className={`stat-card min-w-0 ${accent ? 'border-gray-900 bg-gray-100' : ''}`}>
       <div className="flex items-center gap-1.5 text-[11px] text-gray-500 mb-1">
         <Icon className="h-3.5 w-3.5" />{label}
       </div>
-      <div className="text-2xl font-bold tabular tracking-tight">{value}</div>
+      <div className="text-lg sm:text-2xl font-bold tabular tracking-tight">{value}</div>
       {sub && <div className="text-xs text-gray-500 mt-0.5">{sub}</div>}
     </div>
   )

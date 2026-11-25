@@ -340,9 +340,9 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                   <Link
                     key={c.id}
                     href={`/admin/contracts/${c.id}`}
-                    className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors"
+                    className="flex items-center justify-between gap-3 py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors"
                   >
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <div className="text-sm font-medium">{c.title}</div>
                       <div className="text-xs text-gray-400 flex items-center gap-2">
                         <span>

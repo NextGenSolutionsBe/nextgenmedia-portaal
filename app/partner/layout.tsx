@@ -20,7 +20,7 @@ export default async function PartnerLayout({ children }: { children: React.Reac
   return (
     <div className="min-h-screen">
       <PartnerSidebar partnerName={partner?.name ?? 'Partner'} />
-      <main className="md:ml-[var(--sidebar-width)]">
+      <main className="md:ml-[var(--sidebar-width)] overflow-x-clip">
         <div className="max-w-[1200px] mx-auto px-4 pt-20 pb-8 md:pt-6 md:px-6 lg:px-8">
           {children}
         </div>

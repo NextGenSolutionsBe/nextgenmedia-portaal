@@ -885,7 +885,7 @@ function ContractDialoog({ contract, inst, module, klanten, onClose }: { contrac
       <Veld label="Notitie" value={f.notitie} onChange={(v) => set('notitie', v)} />
 
       {/* Wat dit contract oplevert, live. */}
-      <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-sm grid grid-cols-3 gap-3">
+      <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-sm grid grid-cols-1 min-[420px]:grid-cols-3 gap-3">
         <div><div className="text-[11px] text-gray-500">Totaal</div><div className="font-semibold">{totaal === null ? '—' : formatEuro(totaal)}</div></div>
         <div><div className="text-[11px] text-gray-500">Netto kwalificerend</div><div className="font-semibold">{netto === null ? '—' : formatEuro(netto)}</div></div>
         <div><div className="text-[11px] text-gray-500">Meetellend</div><div className="font-semibold">{meetellendLive === null ? '—' : formatEuro(meetellendLive)}</div></div>
@@ -1702,10 +1702,10 @@ function Instellingen({ inst }: { inst: VestingInstellingen }) {
         <div className="card-base space-y-3">
           <h2 className="font-semibold">Contractjaren — tarief boven de goedkope schijf</h2>
           {(['jaar1', 'jaar2', 'jaar3'] as const).map((j, i) => (
-            <div key={j} className="grid grid-cols-3 gap-3">
+            <div key={j} className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <Veld label={`Jaar ${i + 1} — van`} type="date" value={f[`${j}_start`]} onChange={(v) => set(`${j}_start`, v)} />
               <Veld label="t.e.m." type="date" value={f[`${j}_eind`]} onChange={(v) => set(`${j}_eind`, v)} />
-              {P(`${j}_tarief`, '€ omzet per 1%')}
+              <div className="col-span-2 sm:col-span-1">{P(`${j}_tarief`, '€ omzet per 1%')}</div>
             </div>
           ))}
         </div>

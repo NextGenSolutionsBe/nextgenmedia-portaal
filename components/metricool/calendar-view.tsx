@@ -161,7 +161,7 @@ export function MetricoolCalendarView({
               const isToday = dayStr === today
               const items = byDay.get(dayStr) ?? []
               return (
-                <div key={idx} className={`relative border-r border-b border-gray-100 p-1.5 flex flex-col gap-1 min-h-[104px] ${!inMonth ? 'bg-gray-50/50' : ''}`}>
+                <div key={idx} className={`relative border-r border-b border-gray-100 p-1 sm:p-1.5 flex flex-col gap-1 min-h-[56px] sm:min-h-[104px] ${!inMonth ? 'bg-gray-50/50' : ''}`}>
                   <button
                     type="button"
                     onClick={() => items.length > 0 && setDayModal({ key: dayStr, items })}
@@ -169,7 +169,14 @@ export function MetricoolCalendarView({
                     className={`text-[11px] font-medium px-1 py-0.5 rounded-full self-start ${isToday ? 'bg-gray-900 text-white font-semibold' : inMonth ? 'text-gray-700' : 'text-gray-300'} ${items.length > 0 ? 'hover:ring-1 hover:ring-gray-300 cursor-pointer' : ''}`}
                     title={items.length > 0 ? `${items.length} post(s) — bekijk alles` : undefined}
                   >{d.getDate()}</button>
-                  <div className="flex flex-col gap-0.5 overflow-hidden">
+                  {/* Gsm: bolletjes per post, tikken = alle posts van die dag. */}
+                  {items.length > 0 && (
+                    <button type="button" onClick={() => setDayModal({ key: dayStr, items })} className="sm:hidden flex flex-wrap gap-0.5 px-0.5" aria-label={`${items.length} post(s) op ${d.getDate()}`}>
+                      {items.slice(0, 6).map((p) => <span key={p.id} className="h-1.5 w-1.5 rounded-full" style={{ background: dot(p) }} />)}
+                      {items.length > 6 && <span className="text-[9px] leading-none font-semibold text-gray-500">+{items.length - 6}</span>}
+                    </button>
+                  )}
+                  <div className="hidden sm:flex flex-col gap-0.5 overflow-hidden">
                     {items.slice(0, 4).map((p) => (
                       <button key={p.id} onClick={() => setSelected(p)} title={`${showClientName ? p.clientName + ' · ' : ''}${timeLabel(p.datetime)}`}
                         className="text-left text-[11px] px-1.5 py-1 rounded border bg-white hover:bg-gray-50 transition truncate flex items-center gap-1 w-full"

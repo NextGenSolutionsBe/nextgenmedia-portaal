@@ -76,7 +76,7 @@ export default async function PortalLayout({ children }: { children: React.React
         allowedModules={allowedModules}
         lang={lang}
       />
-      <main className="flex-1 min-w-0 md:ml-[var(--sidebar-width)] min-h-screen">
+      <main className="flex-1 min-w-0 md:ml-[var(--sidebar-width)] min-h-screen overflow-x-clip">
         <div className="max-w-[1200px] mx-auto px-4 pt-20 pb-8 md:pt-6 md:px-6 lg:px-8">
           {children}
         </div>
