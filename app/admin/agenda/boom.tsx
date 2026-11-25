@@ -16,6 +16,64 @@ type Soort = 'space' | 'map' | 'lijst'
 
 const OPEN_SLEUTEL = 'ngm-agenda-boom'
 
+// ── Slepen in de boom: docs, lijsten en mappen verplaatsen, taken naar een lijst ──
+type Sleepbaar = { soort: 'doc' | 'lijst' | 'map'; id: string; naam: string }
+const SLEEP_TYPE = 'text/agenda-boom'
+function zetSleep(e: React.DragEvent, s: Sleepbaar) {
+  e.stopPropagation()
+  e.dataTransfer.setData(SLEEP_TYPE, JSON.stringify(s))
+  e.dataTransfer.effectAllowed = 'move'
+}
+/** Wat mag waarin: een doc overal, een lijst in een map of space, een map in een map of space, een taak in een lijst. */
+function aanvaardt(doel: Soort, e: React.DragEvent): boolean {
+  const t = e.dataTransfer.types
+  if (t.includes('text/agenda-item')) return doel === 'lijst'
+  return t.includes(SLEEP_TYPE)
+}
+async function laatVallen(e: React.DragEvent, doel: { soort: Soort; id: string; naam: string }, boom: BoomData, onVernieuw: () => void) {
+  e.preventDefault()
+  e.stopPropagation()
+  const itemId = e.dataTransfer.getData('text/agenda-item')
+  try {
+    if (itemId) {
+      if (doel.soort !== 'lijst') return
+      await actie({ actie: 'item.wijzig', id: itemId, lijst_id: doel.id })
+      onVernieuw()
+      toast.success(`Taak verplaatst naar ${doel.naam}`)
+      return
+    }
+    const ruw = e.dataTransfer.getData(SLEEP_TYPE)
+    if (!ruw) return
+    const s = JSON.parse(ruw) as Sleepbaar
+    if (s.id === doel.id) return
+    const sleutel = doel.soort === 'space' ? 'space_id' : doel.soort === 'map' ? 'map_id' : 'lijst_id'
+    if (s.soort === 'doc') {
+      const d = boom.docs.find((x) => x.id === s.id)
+      await actie({ actie: 'doc.wijzig', id: s.id, naar: { [sleutel]: doel.id } })
+      const terug = d ? (d.lijst_id ? { lijst_id: d.lijst_id } : d.map_id ? { map_id: d.map_id } : d.space_id ? { space_id: d.space_id } : null) : null
+      onVernieuw()
+      toast.success(`"${s.naam}" staat nu in ${doel.naam}`, terug ? { action: { label: 'Ongedaan maken', onClick: () => { actie({ actie: 'doc.wijzig', id: s.id, naar: terug }).then(onVernieuw).catch(() => toast.error('Terugzetten mislukt')) } } } : undefined)
+      return
+    }
+    if (doel.soort === 'lijst') { toast.error('Een lijst of map kan niet in een lijst. Sleep ze naar een map of space.'); return }
+    if (s.soort === 'lijst') {
+      const l = boom.lijsten.find((x) => x.id === s.id)
+      await actie({ actie: 'container.wijzig', soort: 'lijst', id: s.id, ...(doel.soort === 'map' ? { map_id: doel.id } : { space_id: doel.id, map_id: null }) })
+      onVernieuw()
+      const terug = l ? (l.map_id ? { map_id: l.map_id } : { space_id: l.space_id, map_id: null }) : null
+      toast.success(`Lijst "${s.naam}" staat nu in ${doel.naam}`, terug ? { action: { label: 'Ongedaan maken', onClick: () => { actie({ actie: 'container.wijzig', soort: 'lijst', id: s.id, ...terug }).then(onVernieuw).catch(() => toast.error('Terugzetten mislukt')) } } } : undefined)
+      return
+    }
+    if (s.soort === 'map') {
+      const m = boom.mappen.find((x) => x.id === s.id)
+      await actie({ actie: 'container.wijzig', soort: 'map', id: s.id, ...(doel.soort === 'map' ? { parent_id: doel.id } : { space_id: doel.id, parent_id: null }) })
+      onVernieuw()
+      const terug = m ? (m.parent_id ? { parent_id: m.parent_id } : { space_id: m.space_id, parent_id: null }) : null
+      toast.success(`Map "${s.naam}" staat nu in ${doel.naam}`, terug ? { action: { label: 'Ongedaan maken', onClick: () => { actie({ actie: 'container.wijzig', soort: 'map', id: s.id, ...terug }).then(onVernieuw).catch(() => toast.error('Terugzetten mislukt')) } } } : undefined)
+    }
+  } catch (err) { toast.error(err instanceof Error ? err.message : 'Verplaatsen mislukt') }
+}
+
 export function Boom({ boom, keuze, onKies, onVernieuw, onPaneel, onNieuwDoc, onVolledig }: {
   boom: BoomData; keuze: Keuze; onKies: (k: Keuze) => void; onVernieuw: () => void; onVolledig: () => void
   onPaneel: (p: 'klaar' | 'prullenbak' | 'instellingen' | 'mail') => void
@@ -198,9 +256,10 @@ function LijstTak({ l, diepte, boom, keuze, isOpen, toon, wissel, onKies, setNaa
   )
 }
 
-function DocRij({ d, diepte, gekozen, onKies }: { d: BoomData['docs'][number]; diepte: number; gekozen: boolean; onKies: (k: Keuze) => void }) {
+function DocRij({ d, diepte, gekozen, onKies, sleep = true }: { d: BoomData['docs'][number]; diepte: number; gekozen: boolean; onKies: (k: Keuze) => void; sleep?: boolean }) {
   return (
     <button type="button" onClick={() => onKies({ soort: 'doc', id: d.id })} style={{ paddingLeft: 10 + diepte * 14 + 16 }}
+      draggable={sleep} onDragStart={(e) => zetSleep(e, { soort: 'doc', id: d.id, naam: d.titel })} title={sleep ? 'Sleep naar een andere map of lijst' : undefined}
       className={`w-full flex items-center gap-2 rounded-lg pr-2 py-1.5 text-[13px] ${gekozen ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'} ${focusRing}`}>
       <FileText className="h-3.5 w-3.5 shrink-0 opacity-70" /><span className="truncate">{d.titel}</span>{d.prive && <Lock className="h-3 w-3 shrink-0 opacity-60" />}
     </button>
@@ -231,8 +290,14 @@ function Rij({ diepte, soort, id, naam, kleur, eigenKleur, prive, open, onWissel
   }
   const eigen = (boom.leden[`${soort}:${id}`] ?? [])
   const isEigenPrive = eigen.length === 1 && eigen[0] === boom.ik
+  const [erboven, setErboven] = useState(false)
+  const kanSlepen = mag.aanpassen && soort !== 'space'
   return (
-    <div className={`group relative flex items-center rounded-lg ${gekozen ? 'bg-gray-900 text-white' : 'hover:bg-gray-100 text-gray-800'}`} style={{ paddingLeft: 4 + diepte * 14 }}>
+    <div className={`group relative flex items-center rounded-lg ${erboven ? 'ring-2 ring-gray-900 bg-gray-100' : ''} ${gekozen ? 'bg-gray-900 text-white' : 'hover:bg-gray-100 text-gray-800'}`} style={{ paddingLeft: 4 + diepte * 14 }}
+      draggable={kanSlepen} onDragStart={kanSlepen ? (e) => zetSleep(e, { soort: soort as 'map' | 'lijst', id, naam }) : undefined}
+      onDragOver={mag.aanpassen ? (e) => { if (aanvaardt(soort, e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (!erboven) setErboven(true) } } : undefined}
+      onDragLeave={() => setErboven(false)}
+      onDrop={mag.aanpassen ? (e) => { setErboven(false); void laatVallen(e, { soort, id, naam }, boom, onVernieuw) } : undefined}>
       <button type="button" onClick={onWissel} disabled={!onWissel} aria-label={open ? 'Dichtklappen' : 'Openklappen'} aria-expanded={onWissel ? open : undefined}
         className={`h-6 w-5 shrink-0 flex items-center justify-center rounded ${onWissel ? '' : 'invisible'} ${focusRing}`}>
         <ChevronRight className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-90' : ''} opacity-60`} />

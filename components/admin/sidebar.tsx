@@ -1,5 +1,7 @@
 'use client'
 
+import { PersoonFoto } from '@/components/admin/persoon-foto'
+
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -380,7 +382,8 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
             <span className="h-8 w-8 shrink-0 rounded-full bg-white text-gray-900 shadow-sm flex items-center justify-center text-sm font-semibold overflow-hidden">
               {fotoVersie && !fotoKapot
                 ? <img src={`/api/admin/account/foto?v=${encodeURIComponent(fotoVersie)}`} alt="" className="h-full w-full object-cover" onError={() => setFotoKapot(true)} />
-                : (naam || email || '?').charAt(0).toUpperCase()}
+                // Geen eigen foto (Mijn account): die uit Personeel (zelfde voornaam), anders de initiaal.
+                : naam ? <PersoonFoto naam={naam} maat={32} /> : (email || '?').charAt(0).toUpperCase()}
             </span>
             <div className="min-w-0">
               <div className="text-sm font-medium text-gray-900 leading-tight truncate">

@@ -9,7 +9,7 @@ import { Modal } from '@/app/admin/materiaal/dialogen'
 import { PersoonFoto } from '@/components/admin/persoon-foto'
 import { zoekVeld } from '@/lib/zoekveld'
 import { dag, uur, kortDag, plusDagen, vandaag, zoneNaarIso, snelleDeadlines, type Item } from '@/lib/agenda/model'
-import { actie, api, padVan, Popover, PersonenLijst, KleurKeuze, Schakel, Avatars, MapKiezer, MapLabel, WieKiezer, focusRing, type BoomData } from './gedeeld'
+import { actie, api, padVan, Popover, PersonenLijst, KleurKeuze, Schakel, Avatars, MapKiezer, MapLabel, WieKiezer, LabelKeuze, labelVoorstel, focusRing, type BoomData } from './gedeeld'
 import { wanneer } from './lijst'
 
 const hhmm = (min: number) => `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
@@ -38,6 +38,11 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
   const [dlUur, setDlUur] = useState('17:00')
   const deadlineIso = eigenDl ? (dlDag && dlUur ? zoneNaarIso(dlDag, dlUur) : null) : deadline
   const metDeadline = soort === 'taak' && !!deadlineIso
+  // Label: een voorstel uit de titel en de map, tot je zelf iets kiest.
+  const voorstel = useMemo(() => labelVoorstel(boom, { titel, lijst_id: lijst, soort }), [boom, titel, lijst, soort])
+  const [labels, setLabels] = useState<string[]>([])
+  const [labelsGekozen, setLabelsGekozen] = useState(false)
+  useEffect(() => { if (!labelsGekozen) setLabels(voorstel ? [voorstel.id] : []) }, [voorstel, labelsGekozen])
   const [bezig, setBezig] = useState(false)
   const [mapNodig, setMapNodig] = useState(false)
   const sluitPop = useCallback(() => setOpen(null), [])
@@ -54,7 +59,7 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
       const enkelDl = metDeadline && m.heelDag
       const r = await actie({
         actie: 'item.nieuw', titel: titel.trim(), soort, start_op: enkelDl ? null : start, eind_op: enkelDl ? null : eind, heel_dag: enkelDl ? false : m.heelDag,
-        deadline_op: metDeadline ? deadlineIso : null, lijst_id: lijst, toegewezen: wie, prive,
+        deadline_op: metDeadline ? deadlineIso : null, lijst_id: lijst, toegewezen: wie, prive, labels,
       })
       toast.success(soort === 'meeting' ? 'Afspraak in de agenda gezet.' : 'Taak toegevoegd.')
       if (r.id) onTaak(r.id)
@@ -118,6 +123,10 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
       <div>
         <div className="label-mono text-[10px] uppercase text-gray-500 mb-1.5">Wie</div>
         <WieKiezer boom={boom} gekozen={wie} onWissel={(p) => setWie(wie.includes(p) ? wie.filter((x) => x !== p) : [...wie, p])} />
+      </div>
+      <div>
+        <div className="label-mono text-[10px] uppercase text-gray-500 mb-1.5">Label</div>
+        <LabelKeuze boom={boom} gekozen={labels} voorstel={voorstel} onZet={(l) => { setLabels(l); setLabelsGekozen(true) }} />
       </div>
       <Schakel aan={prive} onWissel={() => setPrive(!prive)} label={<span className="text-sm flex items-center gap-1.5"><Lock className="h-3.5 w-3.5" />Privé (enkel jij en wie je je agenda deelt)</span>} />
     </Modal>

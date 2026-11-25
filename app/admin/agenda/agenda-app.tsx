@@ -207,16 +207,19 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
 
   // ── Acties op items ────────────────────────────────────────────────────────
   const pasLokaalAan = (id: string, velden: Partial<Item>) => {
-    setItems((l) => l?.map((x) => (x.id === id && x.bron === 'ag' ? { ...x, ...velden } : x)) ?? null)
+    // Een meeting uit de Meeting Inplanner verschuift hier niet, afvinken wel.
+    setItems((l) => l?.map((x) => (x.id === id && (x.bron === 'ag' || !('start_op' in velden)) ? { ...x, ...velden } : x)) ?? null)
     setLijstItems((l) => l?.map((x) => (x.id === id ? { ...x, ...velden } : x)) ?? null)
   }
   const wisselKlaar = async (i: Item) => {
     if (!boom?.rechten.aanpassen) return
     const status = i.status === 'klaar' ? 'open' : 'klaar'
+    // Een meeting uit de Meeting Inplanner: enkel het vinkje in de agenda (de meeting zelf verandert niet).
+    const zet = (s: 'open' | 'klaar') => (i.bron === 'meeting' ? actie({ actie: 'meeting.klaar', id: i.id, klaar: s === 'klaar' }) : actie({ actie: 'item.wijzig', id: i.id, status: s }))
     pasLokaalAan(i.id, { status, afgerond_op: status === 'klaar' ? new Date().toISOString() : null })
     try {
-      await actie({ actie: 'item.wijzig', id: i.id, status })
-      const terug = () => { pasLokaalAan(i.id, { status: i.status, afgerond_op: i.afgerond_op }); actie({ actie: 'item.wijzig', id: i.id, status: i.status }).catch(() => toast.error('Terugzetten mislukt')) }
+      await zet(status)
+      const terug = () => { pasLokaalAan(i.id, { status: i.status, afgerond_op: i.afgerond_op }); zet(i.status).catch(() => toast.error('Terugzetten mislukt')) }
       toast.success(status === 'klaar' ? `Completed: ${i.titel}` : `Terug open: ${i.titel}`, { action: { label: 'Ongedaan maken', onClick: terug } })
     } catch (e) { pasLokaalAan(i.id, { status: i.status, afgerond_op: i.afgerond_op }); toast.error(e instanceof Error ? e.message : 'Mislukt') }
   }
@@ -282,7 +285,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
         <>
           <div className="md:hidden fixed inset-0 z-40 bg-black/30" onClick={() => setToonBoom(false)} aria-hidden />
           <aside className="fixed md:static inset-y-0 left-0 z-50 md:z-auto w-[86vw] max-w-[320px] md:w-60 shrink-0 bg-white md:card-base md:!p-0 overflow-hidden flex flex-col shadow-xl md:shadow-none">
-            <Boom boom={boom} keuze={keuze} onVernieuw={laadBoom} onNieuwDoc={nieuwDoc}
+            <Boom boom={boom} keuze={keuze} onVernieuw={vernieuw} onNieuwDoc={nieuwDoc}
               onVolledig={() => { setKeuze(null); if (modus === 'lijst') kiesModus('week'); naarGroot(true) }}
               onKies={(k) => { setKeuze(k); if (window.innerWidth < 768) setToonBoom(false) }} onPaneel={(p) => { setPaneel(p); if (window.innerWidth < 768) setToonBoom(false) }} />
           </aside>

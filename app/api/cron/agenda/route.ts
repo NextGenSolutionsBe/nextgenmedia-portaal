@@ -17,8 +17,13 @@ export async function POST(req: NextRequest) {
   const toegang = await cronToegang(req)
   if (toegang === 'onbereikbaar') return NextResponse.json({ error: 'Databank even niet bereikbaar' }, { status: 503 })
   if (toegang !== 'ja') return NextResponse.json({ error: 'Niet geautoriseerd' }, { status: 401 })
-  const b = (await req.json().catch(() => ({}))) as { mail?: unknown; controle?: unknown }
+  const b = (await req.json().catch(() => ({}))) as { mail?: unknown; controle?: unknown; labels?: unknown }
   const admin = createAdminSupabaseClient()
+  if (b.labels === 'proef' || b.labels === 'toepassen') {
+    // Een categorielabel op elke taak die er nog geen heeft (enkel bijzetten, nooit iets weghalen).
+    const { labelAlleTaken } = await import('@/lib/agenda/labels-server')
+    return NextResponse.json({ ok: true, labels: await labelAlleTaken(admin, { proef: b.labels === 'proef' }) })
+  }
   if (b.controle === true) {
     // Enkel aantallen, geen inhoud: werkt de vraag per periode (deze week)?
     const { bereikVan, vandaag } = await import('@/lib/agenda/model')

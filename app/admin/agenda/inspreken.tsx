@@ -1,13 +1,13 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2, Mic, Sparkles, Flag, CalendarPlus, Clock, AlertTriangle } from 'lucide-react'
 import { Modal } from '@/app/admin/materiaal/dialogen'
 import { DicteerKnop } from '@/components/admin/dicteer-knop'
 import { zoneNaarIso, plusDagen, snelleDeadlines, vandaag, dag, uur } from '@/lib/agenda/model'
 import type { InspreekVoorstel } from '@/lib/agenda/inspreken'
-import { actie, api, MapKiezer, MapLabel, WieKiezer, focusRing, type BoomData } from './gedeeld'
+import { actie, api, MapKiezer, MapLabel, WieKiezer, LabelKeuze, labelVoorstel, focusRing, type BoomData } from './gedeeld'
 
 /**
  * Een taak of afspraak inspreken (of typen). De AI vult het formulier in; jij
@@ -70,6 +70,10 @@ function Formulier({ boom, begin, zin, onTerug, onSluit, onToegevoegd }: {
   const [mapNodig, setMapNodig] = useState(false)
   const [bezig, setBezig] = useState(false)
   const zet = <K extends keyof InspreekVoorstel>(k: K, w: InspreekVoorstel[K]) => setF((x) => ({ ...x, [k]: w }))
+  const voorstel = useMemo(() => labelVoorstel(boom, { titel: f.titel, lijst_id: f.lijst_id, soort: f.dag && f.van ? f.soort : 'taak' }), [boom, f.titel, f.lijst_id, f.dag, f.van, f.soort])
+  const [labels, setLabels] = useState<string[]>([])
+  const [labelsGekozen, setLabelsGekozen] = useState(false)
+  useEffect(() => { if (!labelsGekozen) setLabels(voorstel ? [voorstel.id] : []) }, [voorstel, labelsGekozen])
   const deadlineIso = f.deadline_dag && f.deadline_uur ? zoneNaarIso(f.deadline_dag, f.deadline_uur) : null
 
   const voegToe = async () => {
@@ -84,7 +88,7 @@ function Formulier({ boom, begin, zin, onTerug, onSluit, onToegevoegd }: {
       } else if (f.dag) { heelDag = true; eind = zoneNaarIso(f.dag, '00:00') }
       const r = await actie({
         actie: 'item.nieuw', titel: f.titel.trim(), beschrijving: f.beschrijving ?? '', soort: f.dag && f.van ? f.soort : 'taak',
-        start_op: start, eind_op: eind, heel_dag: heelDag, deadline_op: deadlineIso, lijst_id: f.lijst_id, toegewezen: f.toegewezen, urgent: f.urgent,
+        start_op: start, eind_op: eind, heel_dag: heelDag, deadline_op: deadlineIso, lijst_id: f.lijst_id, toegewezen: f.toegewezen, urgent: f.urgent, labels,
       })
       toast.success(f.soort === 'meeting' && f.van ? 'Afspraak in de agenda gezet.' : 'Taak toegevoegd.')
       if (r.id) onToegevoegd(r.id)
@@ -159,6 +163,11 @@ function Formulier({ boom, begin, zin, onTerug, onSluit, onToegevoegd }: {
         </button>
         {mapOpen && <div className="mt-1.5 rounded-xl border border-gray-200"><MapKiezer vol boom={boom} gekozen={f.lijst_id} onKies={(l) => { zet('lijst_id', l); setMapNodig(false); setMapOpen(false) }} /></div>}
         {mapNodig && !f.lijst_id && <p className="text-xs text-red-700 mt-1">Kies eerst bij welke map deze taak hoort.</p>}
+      </div>
+
+      <div>
+        <div className="label-mono text-[10px] uppercase text-gray-500 mb-1.5">Label</div>
+        <LabelKeuze boom={boom} gekozen={labels} voorstel={voorstel} onZet={(l) => { setLabels(l); setLabelsGekozen(true) }} />
       </div>
 
       <button type="button" onClick={() => zet('urgent', !f.urgent)} aria-pressed={f.urgent}

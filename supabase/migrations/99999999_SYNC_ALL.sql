@@ -8228,3 +8228,23 @@ CREATE INDEX IF NOT EXISTS ag_items_deadline_idx ON public.ag_items (deadline_op
 
 -- Agenda: opgemaakte documenten (25 nov 2026). De opmaak als TipTap-JSON; `inhoud` blijft de gewone tekst (zoeken, ClickUp).
 ALTER TABLE public.ag_docs ADD COLUMN IF NOT EXISTS inhoud_json jsonb;
+
+-- Agenda ronde 4 (25 nov 2026): privé en plaats vastzetten tegen de ClickUp-import, categorielabels, meetings afvinken.
+ALTER TABLE public.ag_spaces ADD COLUMN IF NOT EXISTS leden_vast boolean NOT NULL DEFAULT false;
+ALTER TABLE public.ag_mappen ADD COLUMN IF NOT EXISTS leden_vast boolean NOT NULL DEFAULT false;
+ALTER TABLE public.ag_lijsten ADD COLUMN IF NOT EXISTS leden_vast boolean NOT NULL DEFAULT false;
+ALTER TABLE public.ag_mappen ADD COLUMN IF NOT EXISTS plaats_vast boolean NOT NULL DEFAULT false;
+ALTER TABLE public.ag_lijsten ADD COLUMN IF NOT EXISTS plaats_vast boolean NOT NULL DEFAULT false;
+ALTER TABLE public.ag_labels ADD COLUMN IF NOT EXISTS categorie boolean NOT NULL DEFAULT false;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS afgevinkt_op timestamptz;
+ALTER TABLE public.klant_meetings ADD COLUMN IF NOT EXISTS afgevinkt_door text;
+CREATE OR REPLACE FUNCTION public.ag_label_erbij(p_label uuid, p_ids uuid[])
+RETURNS integer LANGUAGE sql SECURITY DEFINER SET search_path TO 'public' AS $$
+  WITH u AS (
+    UPDATE public.ag_items SET labels = array_append(coalesce(labels, '{}'), p_label)
+    WHERE id = ANY(p_ids) AND NOT (p_label = ANY(coalesce(labels, '{}')))
+    RETURNING 1
+  ) SELECT count(*)::int FROM u
+$$;
+REVOKE ALL ON FUNCTION public.ag_label_erbij(uuid, uuid[]) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.ag_label_erbij(uuid, uuid[]) TO service_role;

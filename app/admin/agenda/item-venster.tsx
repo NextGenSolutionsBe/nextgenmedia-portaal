@@ -9,7 +9,7 @@ import { dag, uur, zoneNaarIso, plusDagen, vandaag, isKleur, enkelDeadline, snel
 import { zoekVeld } from '@/lib/zoekveld'
 import { PersoonFoto } from '@/components/admin/persoon-foto'
 import { createClient } from '@/lib/supabase/client'
-import { actie, api, padVan, Lade, Popover, PersonenLijst, KleurKeuze, Schakel, Markdown, vinkRegel, MapKiezer, MapLabel, WieKiezer, focusRing, ApiFout, type BoomData } from './gedeeld'
+import { actie, api, padVan, Lade, Popover, PersonenLijst, KleurKeuze, Schakel, Markdown, vinkRegel, MapKiezer, MapLabel, WieKiezer, labelVoorstel, focusRing, ApiFout, type BoomData } from './gedeeld'
 import { DeadlineLabel, KLAAR_STIJL } from './kalender'
 
 type Bijlage = { id: string; naam: string; type: string | null; grootte: number | null; geupload_door: string | null; created_at: string }
@@ -160,6 +160,16 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd, 
               <span key={l!.id} className="rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ background: l!.kleur, color: '#0f0f0f' }}>{l!.naam}</span>
             )) : <span className="text-gray-400">Geen</span>}
           </button>
+          {/* Nog geen label: het voorstel uit de titel en de map, één klik om toe te voegen. */}
+          {mag && !i.labels.some((l) => labelsPer.has(l)) && (() => {
+            const v = labelVoorstel(boom, { titel: i.titel, lijst_id: i.lijst_id, soort: i.soort })
+            return v ? (
+              <button type="button" onClick={() => bewaar({ labels: [...i.labels, v.id] })} title="Voorstel: klik om toe te voegen"
+                className={`mt-1 inline-flex items-center gap-1 rounded-full border border-dashed border-gray-400 px-2.5 py-0.5 text-xs text-gray-700 hover:border-gray-900 ${focusRing}`}>
+                <Plus className="h-3 w-3" />{v.naam}<span className="text-gray-400">· voorstel</span>
+              </button>
+            ) : null
+          })()}
           <Popover open={open === 'labels'} onSluit={sluit}>
             <div className="w-full md:w-56 p-2 max-h-72 overflow-y-auto">
               {boom.labels.map((l) => {

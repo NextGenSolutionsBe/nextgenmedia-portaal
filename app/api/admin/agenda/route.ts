@@ -7,7 +7,7 @@ import { inspreekPrompt, leesInspreekVoorstel, type InspreekContext } from '@/li
 import { mijnDeadlines } from '@/lib/agenda/deadlines-server'
 import { schoonDocJson, BEELD_PAD, BEELD_TYPES, MAX_BEELD } from '@/lib/agenda/doc-opmaak'
 import {
-  kijkerVan, laadZicht, boomVoor, metToegewezen, meetingsInBereik, itemsInBereik, itemZichtbaar, docZichtbaar, laadPersonen, laadLabels, alleRijen,
+  kijkerVan, laadZicht, boomVoor, metToegewezen, meetingsInBereik, metMeetingStatus, itemsInBereik, itemZichtbaar, docZichtbaar, laadPersonen, laadLabels, alleRijen,
   ITEM_VELDEN, type Kijker, type Zicht, type RuwItem,
 } from '@/lib/agenda/server'
 
@@ -112,11 +112,13 @@ async function bereik(admin: Admin, k: Kijker, van: string | null, tot: string |
   const [z, ruw, mt] = await Promise.all([
     laadZicht(admin, k),
     itemsInBereik(admin, van, tot),
-    magMeetings().then(async (ja) => (ja ? meetingsInBereik(admin, van, tot, await emailNaarPersoon(admin)) : { items: [] as Item[], clickupIds: new Set<string>() })),
+    magMeetings().then(async (ja) => (ja ? meetingsInBereik(admin, van, tot, await emailNaarPersoon(admin)) : { items: [] as Item[], clickupIds: new Set<string>(), perClickup: new Map<string, string>() })),
   ])
-  // Een meeting uit de Meeting Inplanner staat ook in ClickUp: één keer tonen, die van de Meeting Inplanner.
+  // Een meeting uit de Meeting Inplanner staat ook in ClickUp: één keer tonen, die van de Meeting Inplanner
+  // (af als het dubbel in ClickUp af is).
   const items = await metToegewezen(admin, ruw.filter((r) => !r.clickup_id || !mt.clickupIds.has(r.clickup_id)), z, { subtaken: true })
-  return { items: [...items, ...mt.items] }
+  const meetings = metMeetingStatus(mt.items, ruw.filter((r) => r.clickup_id && mt.clickupIds.has(r.clickup_id)), mt.perClickup)
+  return { items: [...items, ...meetings] }
 }
 
 async function container(admin: Admin, k: Kijker, soort: string, id: string | null) {
@@ -267,6 +269,7 @@ const ACTIE_RECHT: Record<string, Actie> = {
   'mail.plan': 'toevoegen', 'mail.negeer': 'bekijken', 'mail.terug': 'bekijken',
   'bijlage.upload': 'aanpassen', 'bijlage.bewaar': 'aanpassen', 'bijlage.verwijder': 'aanpassen',
   'inspreek.lees': 'toevoegen',
+  'meeting.klaar': 'aanpassen',
 }
 
 export async function POST(req: NextRequest) {
@@ -286,6 +289,7 @@ export async function POST(req: NextRequest) {
     if (actie.startsWith('mail.')) return NextResponse.json(await mailActie(c, actie, b))
     if (actie.startsWith('bijlage.')) return NextResponse.json(await bijlageActie(c, actie, b))
     if (actie === 'inspreek.lees') return NextResponse.json(await inspreekLees(c, b))
+    if (actie === 'meeting.klaar') return NextResponse.json(await meetingKlaar(c, b))
     return fout('Onbekende actie')
   } catch (e) {
     const m = e instanceof Error ? e.message : 'Er ging iets mis'
@@ -401,8 +405,44 @@ async function containerActie(c: Ctx, actie: string, b: Record<string, unknown>)
     if ('kleur' in b) upd.kleur = isKleur(b.kleur) ? b.kleur : null
     if ('client_id' in b && soort !== 'space') upd.client_id = isUuid(b.client_id) ? b.client_id : null
     if (verantwoordelijke !== undefined) upd.verantwoordelijke_id = verantwoordelijke
-    await admin.from(TABEL[soort]).update(upd).eq('id', id)
-    if ('prive' in b) await zetPrive(id, b.prive === true, leden)
+    // Verplaatsen (slepen in de boom). De ClickUp-import zet het daarna niet terug (`plaats_vast`).
+    if (soort === 'lijst' && ('map_id' in b || 'space_id' in b)) {
+      if (isUuid(b.map_id)) {
+        const m = z.mappen.find((x) => x.id === b.map_id)
+        if (!m || !z.zichtbaar.mappen.has(m.id)) throw new Error('Onbekende map.')
+        upd.map_id = m.id; upd.space_id = m.space_id
+      } else if (isUuid(b.space_id)) {
+        if (!z.zichtbaar.spaces.has(b.space_id)) throw new Error('Onbekende space.')
+        upd.map_id = null; upd.space_id = b.space_id
+      }
+      upd.plaats_vast = true
+    }
+    if (soort === 'map' && ('parent_id' in b || 'space_id' in b)) {
+      const onder = new Set([id])
+      for (let i = 0; i < 6; i++) for (const m of z.mappen) if (m.parent_id && onder.has(m.parent_id)) onder.add(m.id)
+      let spaceId: string
+      if (isUuid(b.parent_id)) {
+        if (onder.has(b.parent_id)) throw new Error('Een map kan niet in zichzelf of in een eigen submap.')
+        const ouder = z.mappen.find((x) => x.id === b.parent_id)
+        if (!ouder || !z.zichtbaar.mappen.has(ouder.id)) throw new Error('Onbekende map.')
+        upd.parent_id = ouder.id; spaceId = ouder.space_id
+      } else {
+        if (!isUuid(b.space_id) || !z.zichtbaar.spaces.has(b.space_id)) throw new Error('Onbekende space.')
+        upd.parent_id = null; spaceId = b.space_id
+      }
+      upd.space_id = spaceId; upd.plaats_vast = true
+      // Alles eronder volgt naar de nieuwe space.
+      const sub = [...onder].filter((x) => x !== id)
+      if (sub.length) await admin.from('ag_mappen').update({ space_id: spaceId, plaats_vast: true }).in('id', sub)
+      await admin.from('ag_lijsten').update({ space_id: spaceId, plaats_vast: true }).in('map_id', [...onder])
+    }
+    const { error: fw } = await admin.from(TABEL[soort]).update(upd).eq('id', id)
+    if (fw) throw new Error(fw.message)
+    if ('prive' in b) {
+      await zetPrive(id, b.prive === true, leden)
+      // In de app privé (of niet meer) gezet: de ClickUp-import laat dat voortaan staan.
+      await admin.from(TABEL[soort]).update({ leden_vast: true }).eq('id', id)
+    }
     return { ok: true }
   }
   if (actie === 'container.verwijder') {
@@ -451,6 +491,16 @@ async function docActie(c: Ctx, actie: string, b: Record<string, unknown>) {
     const upd: Record<string, unknown> = { updated_at: nu(), in_app_gewijzigd_op: nu(), bijgewerkt_door: k.naam }
     if (typeof b.titel === 'string') upd.titel = b.titel.trim().slice(0, 300) || 'Naamloos document'
     if (typeof b.inhoud === 'string') upd.inhoud = b.inhoud.slice(0, 500_000)
+    // Verplaatsen naar een space, map of lijst (slepen in de boom).
+    if (b.naar && typeof b.naar === 'object') {
+      const naar = b.naar as Record<string, unknown>
+      const { data: metItem } = await admin.from('ag_docs').select('item_id').eq('id', d.id).maybeSingle()
+      if (metItem?.item_id) throw new Error('Dit document hoort bij een taak. Open de taak om het te beheren.')
+      if (isUuid(naar.lijst_id)) { if (!z.zichtbaar.lijsten.has(naar.lijst_id)) throw new Error('Onbekende lijst.'); Object.assign(upd, { lijst_id: naar.lijst_id, map_id: null, space_id: null }) }
+      else if (isUuid(naar.map_id)) { if (!z.zichtbaar.mappen.has(naar.map_id)) throw new Error('Onbekende map.'); Object.assign(upd, { lijst_id: null, map_id: naar.map_id, space_id: null }) }
+      else if (isUuid(naar.space_id)) { if (!z.zichtbaar.spaces.has(naar.space_id)) throw new Error('Onbekende space.'); Object.assign(upd, { lijst_id: null, map_id: null, space_id: naar.space_id }) }
+      else throw new Error('Waarheen?')
+    }
     // De opmaak (koppen, lijsten, tabellen, afbeeldingen …): nagekeken, links en afbeeldingen enkel veilige adressen.
     if ('inhoud_json' in b) {
       const json = b.inhoud_json === null ? null : schoonDocJson(b.inhoud_json, d.id)
@@ -708,4 +758,24 @@ async function inspreekLees(c: Ctx, b: Record<string, unknown>) {
   const voorstel = leesInspreekVoorstel(ruw, ctx)
   if (!voorstel) throw new Error('Ik kon er geen taak uit halen. Zeg minstens wat er moet gebeuren.')
   return { voorstel }
+}
+
+/**
+ * Een meeting uit de Meeting Inplanner afvinken in de agenda (of terug open).
+ * Enkel een vinkje voor de agenda: de meeting zelf (Google, herinnering, mail)
+ * verandert niet. Het dubbel in ClickUp volgt mee.
+ */
+async function meetingKlaar(c: Ctx, b: Record<string, unknown>) {
+  const { admin, k } = c
+  if (!(await magMeetings())) throw new Error('Je kan meetings niet aanpassen.')
+  if (!isUuid(b.id)) throw new Error('Onbekende meeting')
+  const klaar = b.klaar === true
+  const { data: m } = await admin.from('klant_meetings').select('id, clickup_task_id').eq('id', b.id).maybeSingle()
+  if (!m) throw new Error('Deze meeting bestaat niet meer.')
+  const { error } = await admin.from('klant_meetings').update({ afgevinkt_op: klaar ? nu() : null, afgevinkt_door: klaar ? k.naam : null }).eq('id', m.id)
+  if (error) throw new Error(error.message.includes('afgevinkt') ? 'Afvinken kan nog niet (de databank wordt bijgewerkt).' : error.message)
+  if (m.clickup_task_id) {
+    await admin.from('ag_items').update({ status: klaar ? 'klaar' : 'open', afgerond_op: klaar ? nu() : null, afgerond_door: klaar ? k.naam : null, in_app_gewijzigd_op: nu() }).eq('clickup_id', m.clickup_task_id)
+  }
+  return { ok: true }
 }
