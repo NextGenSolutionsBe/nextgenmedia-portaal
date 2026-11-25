@@ -187,5 +187,7 @@ function naarEvent(eig: Eigenschap[], methode: string | null): IcsEvent | null {
 export function kuisBeschrijving(t: string): string {
   const knip = t.search(/_{20,}|Microsoft Teams (?:meeting|vergadering|Need help)|Join on your computer|Deelnemen via je computer|Join Zoom Meeting|Deelnemen aan Zoom-vergadering|Join with Google Meet|Deelnemen met Google Meet|-::~:~::~:~/i)
   const kort = (knip > 0 ? t.slice(0, knip) : knip === 0 ? '' : t)
-  return kort.replace(/<[^>]+>/g, ' ').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+  return kort
+    .replace(/\[(?:cid:|https?:\/\/)[^\]\s]*\]/gi, '') // afbeeldingen uit een handtekening: [https://…/footer.png]
+    .replace(/<[^>]+>/g, ' ').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
 }
