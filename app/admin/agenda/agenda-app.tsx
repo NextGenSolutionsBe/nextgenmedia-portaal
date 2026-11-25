@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  ChevronLeft, ChevronRight, ChevronDown, Loader2, Plus, Printer, PanelLeft, Search, Tag, Building2, Eye, EyeOff, Mail, X, Users, List as ListIcon, Maximize2, Minimize2, Layers, Check, Mic,
+  ChevronLeft, ChevronRight, ChevronDown, Loader2, Plus, Printer, PanelLeft, Search, Tag, Building2, Eye, EyeOff, Mail, X, Users, List as ListIcon, Maximize2, Minimize2, Layers, Check, Mic, MoonStar,
 } from 'lucide-react'
 import { PersoonFoto } from '@/components/admin/persoon-foto'
 import { zoekVeld } from '@/lib/zoekveld'
@@ -21,6 +21,7 @@ import { LijstWeergave, wanneer } from './lijst'
 import { DocWeergave } from './doc'
 import { NieuwVenster, AfgevinktPaneel, PrullenbakPaneel, MailPaneel, InstellingenPaneel } from './extra'
 import { InspreekVenster } from './inspreken'
+import { DagAfsluiten } from './dag-afsluiten'
 
 type Modus = Weergave | 'lijst'
 type Paneel = null | 'klaar' | 'prullenbak' | 'instellingen' | 'mail'
@@ -73,6 +74,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
   const [openItem, setOpenItem] = useState<string | null>(null)
   const [nieuw, setNieuw] = useState<NieuwMoment | null>(null)
   const [inspreek, setInspreek] = useState(false)
+  const [afsluiten, setAfsluiten] = useState(false)
   const [paneel, setPaneel] = useState<Paneel>(null)
   const [mv, setMv] = useState<MeetingVenster>(null)
   const [opties, setOpties] = useState<Opties | null>(null)
@@ -110,7 +112,6 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
     const v = leesVoorkeur()
     const smal = window.innerWidth < 768
     if (v.modus) setModus(v.modus === 'lijst' ? 'week' : v.modus); else if (smal) setModus('dag')
-    if (v.personen) setPersonen(v.personen)
     if (Array.isArray(v.spaces)) setSpaces(v.spaces)
     if (v.kleurMap) setKleurVolgens(v.kleurMap)
     if (typeof v.klaar === 'boolean') setToonKlaar(v.klaar)
@@ -118,9 +119,11 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
     setToonBoom(smal ? false : typeof v.boom === 'boolean' ? v.boom : window.innerWidth >= 1600)
     const q = new URLSearchParams(window.location.search)
     for (const s of ['lijst', 'map', 'space', 'doc'] as const) { const id = q.get(s); if (id) setKeuze({ soort: s, id }) }
+    if (q.get('alles')) setKeuze({ soort: 'alles', id: '1' })
     if (q.get('item')) setOpenItem(q.get('item'))
     if (q.get('datum') && /^\d{4}-\d{2}-\d{2}$/.test(q.get('datum')!)) setDatum(q.get('datum')!)
     if (q.get('paneel') === 'mail') setPaneel('mail')
+    if (q.get('afsluiten')) setAfsluiten(true)
     geladen.current = true
   }, [])
   const bewaarVoorkeur = (v: Voorkeur) => { try { localStorage.setItem(VOORKEUR, JSON.stringify({ ...leesVoorkeur(), ...v })) } catch { /* */ } }
@@ -139,6 +142,9 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
     try { setBoom(await api<BoomData>('/api/admin/agenda?boom=1')); setFout(null) } catch (e) { setFout(e instanceof Error ? e.message : 'Laden mislukt') }
   }, [])
   useEffect(() => { laadBoom() }, [laadBoom])
+  // Bij het openen altijd eerst je eigen agenda (taken en meetings); collega's door op hun naam te klikken.
+  const eigenGezet = useRef(false)
+  useEffect(() => { if (boom && !eigenGezet.current) { eigenGezet.current = true; setPersonen([boom.ik]) } }, [boom])
 
   const weergave: Weergave = modus === 'lijst' ? 'week' : modus
   const bereik = useMemo(() => bereikVan(weergave, datum), [weergave, datum])
@@ -169,6 +175,15 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
     if (!keuze && modus === 'lijst') setModus(leesVoorkeur().modus && leesVoorkeur().modus !== 'lijst' ? leesVoorkeur().modus as Weergave : 'week')
   }, [keuze]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // All tasks = alles van iedereen, als lijst. Ga je er weg, dan komt je eigen filter terug.
+  const personenVoorAlles = useRef<string[] | null>(null)
+  useEffect(() => {
+    if (keuze?.soort === 'alles') {
+      if (personenVoorAlles.current === null) { personenVoorAlles.current = personen; setPersonen([]) }
+      if (modus !== 'lijst') setModus('lijst')
+    } else if (personenVoorAlles.current !== null) { setPersonen(personenVoorAlles.current); personenVoorAlles.current = null }
+  }, [keuze?.soort]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Terug naar het venster = vers laden (iemand anders kan iets aangepast hebben).
   useEffect(() => {
     const f = () => { if (document.visibilityState === 'visible') { if (modus === 'lijst') laadLijst(); else laadItems() } }
@@ -183,6 +198,10 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
   const personenMap = useMemo(() => new Map((boom?.personen ?? []).map((p) => [p.id, p])), [boom])
   const lijstenVanKeuze = useMemo(() => {
     if (!boom || !container) return null
+    if (container.soort === 'alles') {
+      const sp = new Map(boom.spaces.map((x, n) => [x.id, n]))
+      return [...boom.lijsten].sort((a, b) => (sp.get(a.space_id) ?? 99) - (sp.get(b.space_id) ?? 99) || padVan(boom, a.id).join(' › ').localeCompare(padVan(boom, b.id).join(' › '), 'nl')).map((l) => l.id)
+    }
     if (container.soort === 'lijst') return [container.id]
     if (container.soort === 'space') return boom.lijsten.filter((l) => l.space_id === container.id).map((l) => l.id)
     const onder = new Set([container.id])
@@ -191,7 +210,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
   }, [boom, container])
   /** `metKlaar`: afgevinkte altijd meegeven (de lijstweergave toont ze ingeklapt onderaan). */
   const filter = useCallback((l: Item[], metKlaar = false) => {
-    const inLijst = lijstenVanKeuze ? new Set(lijstenVanKeuze) : null
+    const inLijst = lijstenVanKeuze && container?.soort !== 'alles' ? new Set(lijstenVanKeuze) : null
     const spaceVan = new Map((boom?.lijsten ?? []).map((x) => [x.id, x.space_id]))
     return l.filter((i) =>
       // Completed verdwijnt uit de kalender (wit), tenzij je Completed aanzet.
@@ -201,7 +220,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
       (!labels.length || i.labels.some((x) => labels.includes(x))) &&
       (!klant || (ctx && klantVan(i, ctx) === klant)) &&
       (!inLijst || (i.lijst_id && inLijst.has(i.lijst_id))))
-  }, [toonKlaar, personen, labels, klant, ctx, lijstenVanKeuze, spaces, boom])
+  }, [toonKlaar, personen, labels, klant, ctx, lijstenVanKeuze, spaces, boom, container?.soort])
   const zichtbaar = useMemo(() => filter(items ?? []), [filter, items])
   const kleur = useCallback((i: Item) => (ctx ? kleurVan(i, ctx, kleurVolgens) : '#e5e7eb'), [ctx, kleurVolgens])
 
@@ -244,7 +263,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
   useEffect(() => {
     const t = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
-      if (el?.closest?.('input,textarea,select,[contenteditable="true"]') || e.metaKey || e.ctrlKey || e.altKey || openItem || nieuw || inspreek || paneel || mv) return
+      if (el?.closest?.('input,textarea,select,[contenteditable="true"]') || e.metaKey || e.ctrlKey || e.altKey || openItem || nieuw || inspreek || afsluiten || paneel || mv) return
       if (e.key === 'Escape' && groot && !pop) { setGroot(false); return }
       if (modus === 'lijst' || keuze?.soort === 'doc') return
       if (e.key === 'ArrowLeft') setDatum((d) => verschuif(weergave, d, -1))
@@ -266,12 +285,13 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
   const rang = (id: string) => (id === boom.ik ? 0 : boom.zaakvoerders.includes(id) ? 1 : 2)
   const mensen = boom.personen.filter((p) => p.actief && p.user_id).sort((a, b) => rang(a.id) - rang(b.id) || a.naam.localeCompare(b.naam))
   const titelKeuze = keuze && keuze.soort !== 'doc'
-    ? (keuze.soort === 'lijst' ? padVan(boom, keuze.id) : keuze.soort === 'map' ? [boom.mappen.find((m) => m.id === keuze.id)?.naam ?? 'Map'] : [boom.spaces.find((s) => s.id === keuze.id)?.naam ?? 'Space'])
+    ? keuze.soort === 'alles' ? ['All tasks'] : (keuze.soort === 'lijst' ? padVan(boom, keuze.id) : keuze.soort === 'map' ? [boom.mappen.find((m) => m.id === keuze.id)?.naam ?? 'Map'] : [boom.spaces.find((s) => s.id === keuze.id)?.naam ?? 'Space'])
     : null
   const filterTeller = (personen.length ? 1 : 0) + (labels.length ? 1 : 0) + (klant ? 1 : 0) + (spaces.length ? 1 : 0)
   const printUrl = `/api/admin/agenda/print?dag=${modus === 'dag' ? datum : vandaag()}${personen.length ? `&personen=${personen.join(',')}` : ''}${toonKlaar ? '&klaar=1' : ''}`
 
-  const zetPersonen = (n: string[]) => { setPersonen(n); bewaarVoorkeur({ personen: n }) }
+  // Niet onthouden: de agenda opent altijd op je eigen taken en meetings.
+  const zetPersonen = (n: string[]) => setPersonen(n)
   const hoogte = metTopbalk
     ? 'h-[calc(100dvh-92px)] md:h-[calc(100dvh-72px)] md:-mt-16'
     : 'h-[calc(100dvh-80px)] md:h-[calc(100dvh-60px)]'
@@ -285,8 +305,8 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
         <>
           <div className="md:hidden fixed inset-0 z-40 bg-black/30" onClick={() => setToonBoom(false)} aria-hidden />
           <aside className="fixed md:static inset-y-0 left-0 z-50 md:z-auto w-[86vw] max-w-[320px] md:w-60 shrink-0 bg-white md:card-base md:!p-0 overflow-hidden flex flex-col shadow-xl md:shadow-none">
-            <Boom boom={boom} keuze={keuze} onVernieuw={vernieuw} onNieuwDoc={nieuwDoc}
-              onVolledig={() => { setKeuze(null); if (modus === 'lijst') kiesModus('week'); naarGroot(true) }}
+            <Boom boom={boom} keuze={keuze} groot={groot} onVernieuw={vernieuw} onNieuwDoc={nieuwDoc}
+              onVolledig={() => { if (groot) { naarGroot(false); return } setKeuze(null); if (modus === 'lijst') kiesModus('week'); naarGroot(true) }}
               onKies={(k) => { setKeuze(k); if (window.innerWidth < 768) setToonBoom(false) }} onPaneel={(p) => { setPaneel(p); if (window.innerWidth < 768) setToonBoom(false) }} />
           </aside>
         </>
@@ -303,6 +323,9 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
           </div>
           {keuze?.soort !== 'doc' && boom.rechten.toevoegen && (
             <button type="button" onClick={() => setNieuw({ dag: modus === 'lijst' ? vandaag() : datum < vandaag() && weergave !== 'dag' ? vandaag() : datum, heelDag: true })} aria-label="Nieuwe taak" className={`order-4 md:order-6 btn-primary !py-2 !px-2.5 md:!px-3.5 !text-sm shrink-0 ${focusRing}`}><Plus className="h-4 w-4" /><span className="hidden md:inline">Nieuwe taak</span></button>
+          )}
+          {keuze?.soort !== 'doc' && boom.rechten.aanpassen && (
+            <button type="button" onClick={() => setAfsluiten(true)} aria-label="Dag afsluiten" title="Alles wat nog open staat afgaan: gedaan, naar morgen of een andere dag" className={`order-4 md:order-6 h-9 shrink-0 rounded-lg border border-gray-200 bg-white px-2.5 md:px-3 text-sm font-semibold inline-flex items-center gap-1.5 hover:border-gray-400 ${focusRing}`}><MoonStar className="h-4 w-4" /><span className="hidden lg:inline">Dag afsluiten</span></button>
           )}
           {keuze?.soort !== 'doc' && boom.rechten.toevoegen && (
             <button type="button" onClick={() => setInspreek(true)} aria-label="Taak inspreken" title="Taak inspreken" className={`order-4 md:order-6 h-9 w-9 shrink-0 rounded-lg border border-gray-200 bg-white flex items-center justify-center hover:border-gray-400 ${focusRing}`}><Mic className="h-4 w-4" /></button>
@@ -321,9 +344,9 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
             </div>
           )}
           {keuze?.soort !== 'doc' && (
-            <button type="button" onClick={() => naarGroot(!groot)} title={groot ? 'Kleiner (Esc)' : 'Groot scherm'} aria-label={groot ? 'Kleiner' : 'Groot scherm'}
-              className={`order-3 md:order-5 h-9 w-9 shrink-0 rounded-lg border bg-white hidden md:flex items-center justify-center ${groot ? 'border-gray-900' : 'border-gray-200 hover:border-gray-400'} ${focusRing}`}>
-              {groot ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            <button type="button" onClick={() => naarGroot(!groot)} title={groot ? 'Terug naar het gewone scherm (Esc)' : 'Volledige agenda'} aria-label={groot ? 'Volledige agenda uitzetten' : 'Volledige agenda'} aria-pressed={groot}
+              className={`order-3 md:order-5 h-9 shrink-0 rounded-lg border hidden md:flex items-center justify-center gap-1.5 ${groot ? 'px-3 bg-gray-900 text-white border-gray-900 text-sm font-semibold' : 'w-9 bg-white border-gray-200 hover:border-gray-400'} ${focusRing}`}>
+              {groot ? <><Minimize2 className="h-4 w-4" />Volledige agenda</> : <Maximize2 className="h-4 w-4" />}
             </button>
           )}
           {keuze?.soort !== 'doc' && (
@@ -419,7 +442,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
             <DocWeergave key={keuze.id} id={keuze.id} boom={boom} onVernieuw={laadBoom} onVerwijderd={() => { setKeuze(null); laadBoom() }} onOpenItem={(id) => setOpenItem(id)} />
           ) : modus === 'lijst' && lijstenVanKeuze ? (
             <div className="h-full overflow-y-auto pb-6">
-              <LijstWeergave lijstIds={lijstenVanKeuze} items={lijstItems ? filter(lijstItems, true) : null}
+              <LijstWeergave lijstIds={lijstenVanKeuze} items={lijstItems ? filter(lijstItems, true) : null} alles={container?.soort === 'alles'}
                 boom={boom} personen={personenMap} laden magToevoegen={!!boom.rechten.toevoegen}
                 onOpen={open} onKlaar={wisselKlaar} onToegevoegd={laadLijst} onDoc={(id) => setKeuze({ soort: 'doc', id })} />
             </div>
@@ -439,6 +462,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
           onGewijzigd={() => { if (modus === 'lijst') laadLijst(); else laadItems() }}
           onVerwijderd={(id) => { setOpenItem(null); setItems((l) => l?.filter((x) => x.id !== id) ?? null); setLijstItems((l) => l?.filter((x) => x.id !== id) ?? null) }} />
       )}
+      {afsluiten && <DagAfsluiten boom={boom} onSluit={() => { setAfsluiten(false); if (new URLSearchParams(window.location.search).get('afsluiten')) window.history.replaceState(null, '', window.location.pathname) }} onVernieuw={vernieuw} />}
       {nieuw && (
         <NieuwVenster m={nieuw} boom={boom} standaardLijst={keuze?.soort === 'lijst' ? keuze.id : keuze?.soort === 'map' ? boom.lijsten.find((l) => l.map_id === keuze.id)?.id ?? null : null} magMeeting={boom.meetings}
           onSluit={() => setNieuw(null)}

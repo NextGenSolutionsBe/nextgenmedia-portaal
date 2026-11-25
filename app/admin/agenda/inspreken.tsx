@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Loader2, Mic, Sparkles, Flag, CalendarPlus, Clock, AlertTriangle } from 'lucide-react'
+import { Loader2, Mic, Sparkles, Flag, CalendarPlus, Clock, AlertTriangle, MoonStar } from 'lucide-react'
 import { Modal } from '@/app/admin/materiaal/dialogen'
 import { DicteerKnop } from '@/components/admin/dicteer-knop'
 import { zoneNaarIso, plusDagen, snelleDeadlines, vandaag, dag, uur } from '@/lib/agenda/model'
@@ -200,6 +200,7 @@ export function SnelleAgendaKnoppen({ magToevoegen, magMeetings }: { magToevoege
         </button>
       )}
       {magMeetings && <a href="/admin/meetings?plan=1" className="btn-secondary !py-2"><CalendarPlus className="h-4 w-4" />Meeting inplannen</a>}
+      {magToevoegen && <a href="/admin/agenda?afsluiten=1" className="btn-secondary !py-2"><MoonStar className="h-4 w-4" />Dag afsluiten</a>}
       {open && boom && (
         <InspreekVenster boom={boom} onSluit={() => setOpen(false)}
           onToegevoegd={(id) => {

@@ -11,6 +11,7 @@ import { PersoonFoto } from '@/components/admin/persoon-foto'
 import { createClient } from '@/lib/supabase/client'
 import { actie, api, padVan, Lade, Popover, PersonenLijst, KleurKeuze, Schakel, Markdown, vinkRegel, MapKiezer, MapLabel, WieKiezer, labelVoorstel, focusRing, ApiFout, type BoomData } from './gedeeld'
 import { DeadlineLabel, KLAAR_STIJL } from './kalender'
+import { DicteerKnop } from '@/components/admin/dicteer-knop'
 
 type Bijlage = { id: string; naam: string; type: string | null; grootte: number | null; geupload_door: string | null; created_at: string }
 type TaakDoc = { id: string; titel: string; updated_at: string; bijgewerkt_door: string | null }
@@ -210,7 +211,7 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd, 
 
       <div className="lg:order-1 space-y-6 min-w-0">
       {/* Beschrijving */}
-      <Beschrijving waarde={i.beschrijving ?? ''} mag={mag} bewaar={bewaar} />
+      <Beschrijving waarde={i.beschrijving ?? ''} mag={mag} bewaar={bewaar} context={i.titel} />
 
       {/* Bijlagen en docs */}
       <Bijlagen d={d} mag={mag} magToevoegen={!!boom.rechten.toevoegen} herlaad={herlaad} onDoc={onDoc} />
@@ -329,10 +330,20 @@ function Tijden({ i, mag, bewaar }: { i: Item; mag: boolean; bewaar: (v: Record<
 }
 
 /** De beschrijving: lezen (afvinkvakjes werken) of bewerken. */
-function Beschrijving({ waarde, mag, bewaar }: { waarde: string; mag: boolean; bewaar: (v: Record<string, unknown>) => Promise<void> }) {
+function Beschrijving({ waarde, mag, bewaar, context }: { waarde: string; mag: boolean; bewaar: (v: Record<string, unknown>) => Promise<void>; context: string }) {
   const [tekst, setTekst] = useState(waarde)
   const [bewerk, setBewerk] = useState(false)
   const [concept, setConcept] = useState('')
+  // Inspreken zonder eerst op Bewerken te klikken: het vak gaat open met de huidige
+  // tekst. Refs, want de microfoon roept dit twee keer (ruw, daarna opgekuist).
+  const bewerkRef = useRef(false)
+  const tekstRef = useRef(tekst)
+  useEffect(() => { bewerkRef.current = bewerk }, [bewerk])
+  useEffect(() => { tekstRef.current = tekst }, [tekst])
+  const zetIngesproken = useCallback((f: (oud: string) => string) => {
+    if (!bewerkRef.current) { bewerkRef.current = true; setBewerk(true); setConcept(f(tekstRef.current)); return }
+    setConcept(f)
+  }, [])
   useEffect(() => { if (!bewerk) setTekst(waarde) }, [waarde, bewerk])
   const opslaan = async () => {
     setBewerk(false)
@@ -344,7 +355,12 @@ function Beschrijving({ waarde, mag, bewaar }: { waarde: string; mag: boolean; b
     <div>
       <div className="flex items-center justify-between mb-1.5">
         <div className="label-mono text-[10px] uppercase text-gray-500">Beschrijving</div>
-        {mag && !bewerk && <button type="button" onClick={() => { setConcept(tekst); setBewerk(true) }} className="text-xs text-gray-600 flex items-center gap-1 hover:underline"><Pencil className="h-3 w-3" />Bewerken</button>}
+        {mag && (
+          <div className="flex items-center gap-2">
+            <DicteerKnop zet={zetIngesproken} context={context} klein />
+            {!bewerk && <button type="button" onClick={() => { setConcept(tekst); setBewerk(true) }} className="text-xs text-gray-600 flex items-center gap-1 hover:underline"><Pencil className="h-3 w-3" />Bewerken</button>}
+          </div>
+        )}
       </div>
       {bewerk ? (
         <div className="space-y-2">

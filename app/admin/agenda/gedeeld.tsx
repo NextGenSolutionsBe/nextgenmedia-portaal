@@ -258,62 +258,96 @@ export function MapLabel({ boom, lijstId, leeg = 'Kies de map' }: { boom: BoomDa
  */
 export function MapKiezer({ boom, gekozen, onKies, leeg = null, vol = false }: { boom: BoomData; gekozen: string | null; onKies: (lijstId: string | null) => void; leeg?: string | null; vol?: boolean }) {
   const [q, setQ] = useState('')
-  const [open, setOpen] = useState<string | null>(() => (gekozen ? boom.lijsten.find((l) => l.id === gekozen)?.map_id ?? null : null))
   const z = q.trim().toLowerCase()
+  // Open staat enkel de space en de mappen van wat nu gekozen is (of de enige space).
+  const [open, setOpen] = useState<Set<string>>(() => {
+    const s = new Set<string>()
+    const l = gekozen ? boom.lijsten.find((x) => x.id === gekozen) : null
+    if (l) {
+      s.add(`s:${l.space_id}`)
+      let p: string | null = l.map_id, n = 0
+      while (p && n++ < 6) { s.add(`m:${p}`); p = boom.mappen.find((x) => x.id === p)?.parent_id ?? null }
+    } else if (boom.spaces.length === 1) s.add(`s:${boom.spaces[0].id}`)
+    return s
+  })
+  const wissel = (k: string) => setOpen((o) => { const n = new Set(o); if (n.has(k)) n.delete(k); else n.add(k); return n })
   const lijstenVan = (mapId: string) => boom.lijsten.filter((l) => l.map_id === mapId)
+  const subVan = (spaceId: string, parent: string | null) => boom.mappen.filter((x) => x.space_id === spaceId && x.parent_id === parent)
   const past = (t: string) => !z || t.toLowerCase().includes(z)
-  const diepte = (m: { parent_id: string | null }) => { let d = 0, p = m.parent_id; while (p && d < 5) { d++; p = boom.mappen.find((x) => x.id === p)?.parent_id ?? null } return d }
-  // Mappen in boomvolgorde (submappen onder hun map).
-  const geordend = (spaceId: string) => {
-    const uit: typeof boom.mappen = []
-    const voeg = (parent: string | null) => { for (const m of boom.mappen.filter((x) => x.space_id === spaceId && x.parent_id === parent)) { uit.push(m); voeg(m.id) } }
-    voeg(null)
-    return uit
+  // Past een map (of iets eronder) bij de zoekterm?
+  const mapPast = (m: AgMap, spaceNaam: string, d = 0): boolean =>
+    past(`${spaceNaam} ${m.naam} ${lijstenVan(m.id).map((l) => l.naam).join(' ')}`) || (d < 6 && subVan(m.space_id, m.id).some((x) => mapPast(x, spaceNaam, d + 1)))
+  const bevatGekozen = (m: AgMap, d = 0): boolean => lijstenVan(m.id).some((l) => l.id === gekozen) || (d < 6 && subVan(m.space_id, m.id).some((x) => bevatGekozen(x, d + 1)))
+
+  const mapRij = (m: AgMap, spaceNaam: string, diepte: number): ReactNode => {
+    if (!mapPast(m, spaceNaam)) return null
+    const ls = lijstenVan(m.id)
+    const subs = subVan(m.space_id, m.id)
+    const direct = ls.length === 1 && !subs.length
+    const isOpen = !direct && (open.has(`m:${m.id}`) || !!z)
+    const kleur = kleurVanMap(boom, m.id)
+    const bevat = bevatGekozen(m)
+    return (
+      <div key={m.id}>
+        <button type="button" disabled={!ls.length && !subs.length} onClick={() => (direct ? onKies(ls[0].id) : wissel(`m:${m.id}`))}
+          style={{ paddingLeft: 8 + diepte * 14 }} aria-expanded={direct ? undefined : isOpen}
+          className={`w-full flex items-center gap-2 rounded-lg pr-2 py-1.5 text-sm text-left hover:bg-gray-50 disabled:opacity-40 ${bevat ? 'bg-gray-50 font-semibold' : ''} ${focusRing}`}>
+          {direct ? <span className="w-3.5 shrink-0" /> : <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} />}
+          <MapIcoon kleur={kleur} />
+          <span className="flex-1 truncate">{m.naam}</span>
+          {!direct && !isOpen && <span className="text-[11px] text-gray-400 tabular-nums">{ls.length + subs.length}</span>}
+          {direct && gekozen === ls[0].id && <Check className="h-4 w-4" />}
+        </button>
+        {isOpen && (
+          <>
+            {subs.map((x) => mapRij(x, spaceNaam, diepte + 1))}
+            {ls.filter((l) => past(`${spaceNaam} ${m.naam} ${l.naam}`)).map((l) => (
+              <button key={l.id} type="button" onClick={() => onKies(l.id)} style={{ paddingLeft: 8 + (diepte + 1) * 14 + 22 }}
+                className={`w-full flex items-center gap-2 rounded-lg pr-2 py-1.5 text-[13px] text-left hover:bg-gray-50 ${gekozen === l.id ? 'font-semibold' : ''} ${focusRing}`}>
+                <ListIcon className="h-3.5 w-3.5 shrink-0" style={{ color: kleur ? donkerder(kleur, 0.35) : undefined }} />
+                <span className="flex-1 truncate">{l.naam}</span>{gekozen === l.id && <Check className="h-4 w-4" />}
+              </button>
+            ))}
+          </>
+        )}
+      </div>
+    )
   }
+
   return (
     <div className={`w-full ${vol ? '' : 'md:w-[22rem]'} p-2`}>
-      <div className="relative mb-1.5"><Search className="h-3.5 w-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-        <input {...zoekVeld()} autoFocus={vol} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Zoek een klant of map…" className="input-base !py-1.5 !pl-8 text-sm" aria-label="Zoek een map" />
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <div className="relative flex-1"><Search className="h-3.5 w-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <input {...zoekVeld()} autoFocus={vol} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Zoek een klant of map…" className="input-base !py-1.5 !pl-8 text-sm" aria-label="Zoek een map" />
+        </div>
+        {open.size > 0 && !z && <button type="button" onClick={() => setOpen(new Set())} className={`shrink-0 rounded-lg px-2 py-1.5 text-xs text-gray-600 hover:bg-gray-100 ${focusRing}`}>Alles dicht</button>}
       </div>
       <div className={`${vol ? 'max-h-[16rem]' : 'max-h-[22rem]'} overflow-y-auto`}>
         {leeg && <button type="button" onClick={() => onKies(null)} className="w-full text-left rounded-lg px-2 py-1.5 text-sm text-gray-500 hover:bg-gray-50">{leeg}</button>}
         {boom.spaces.map((s) => {
-          const mappen = geordend(s.id).filter((m) => past(`${s.naam} ${m.naam} ${lijstenVan(m.id).map((l) => l.naam).join(' ')}`))
+          const mappen = subVan(s.id, null).filter((m) => mapPast(m, s.naam))
           const los = boom.lijsten.filter((l) => l.space_id === s.id && !l.map_id && past(`${s.naam} ${l.naam}`))
           if (!mappen.length && !los.length) return null
+          const isOpen = open.has(`s:${s.id}`) || !!z
+          const bevat = boom.lijsten.some((l) => l.id === gekozen && l.space_id === s.id)
           return (
-            <div key={s.id} className="mb-1">
-              <div className="label-mono text-[10px] uppercase text-gray-400 px-2 pt-2 pb-1">{s.naam}</div>
-              {mappen.map((m) => {
-                const ls = lijstenVan(m.id)
-                const isOpen = open === m.id || (!!z && ls.length > 1)
-                const kleur = kleurVanMap(boom, m.id)
-                const bevat = ls.some((l) => l.id === gekozen)
-                return (
-                  <div key={m.id}>
-                    <button type="button" disabled={!ls.length} onClick={() => (ls.length === 1 ? onKies(ls[0].id) : setOpen(isOpen ? null : m.id))}
-                      style={{ paddingLeft: 8 + diepte(m) * 14 }}
-                      className={`w-full flex items-center gap-2 rounded-lg pr-2 py-1.5 text-sm text-left hover:bg-gray-50 disabled:opacity-40 ${bevat ? 'bg-gray-50 font-semibold' : ''} ${focusRing}`}>
-                      <MapIcoon kleur={kleur} />
-                      <span className="flex-1 truncate">{m.naam}</span>
-                      {ls.length > 1 && <ChevronRight className={`h-3.5 w-3.5 text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} />}
-                      {ls.length === 1 && gekozen === ls[0].id && <Check className="h-4 w-4" />}
+            <div key={s.id} className="mb-0.5">
+              <button type="button" onClick={() => wissel(`s:${s.id}`)} aria-expanded={isOpen}
+                className={`w-full flex items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-left hover:bg-gray-50 ${focusRing}`}>
+                <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+                <span className={`label-mono text-[10px] uppercase flex-1 truncate ${bevat ? 'text-gray-900' : 'text-gray-500'}`}>{s.naam}</span>
+                {!isOpen && <span className="text-[11px] text-gray-400 tabular-nums">{mappen.length + los.length}</span>}
+              </button>
+              {isOpen && (
+                <>
+                  {mappen.map((m) => mapRij(m, s.naam, 1))}
+                  {los.map((l) => (
+                    <button key={l.id} type="button" onClick={() => onKies(l.id)} style={{ paddingLeft: 8 + 14 }} className={`w-full flex items-center gap-2 rounded-lg pr-2 py-1.5 text-sm text-left hover:bg-gray-50 ${gekozen === l.id ? 'bg-gray-50 font-semibold' : ''} ${focusRing}`}>
+                      <span className="w-3.5 shrink-0" /><ListIcon className="h-4 w-4 shrink-0 text-gray-500" /><span className="flex-1 truncate">{l.naam}</span>{gekozen === l.id && <Check className="h-4 w-4" />}
                     </button>
-                    {isOpen && ls.length > 1 && ls.map((l) => (
-                      <button key={l.id} type="button" onClick={() => onKies(l.id)} style={{ paddingLeft: 30 + diepte(m) * 14 }}
-                        className={`w-full flex items-center gap-2 rounded-lg pr-2 py-1.5 text-[13px] text-left hover:bg-gray-50 ${gekozen === l.id ? 'font-semibold' : ''} ${focusRing}`}>
-                        <ListIcon className="h-3.5 w-3.5 shrink-0" style={{ color: kleur ? donkerder(kleur, 0.35) : undefined }} />
-                        <span className="flex-1 truncate">{l.naam}</span>{gekozen === l.id && <Check className="h-4 w-4" />}
-                      </button>
-                    ))}
-                  </div>
-                )
-              })}
-              {los.map((l) => (
-                <button key={l.id} type="button" onClick={() => onKies(l.id)} className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-left hover:bg-gray-50 ${gekozen === l.id ? 'bg-gray-50 font-semibold' : ''} ${focusRing}`}>
-                  <ListIcon className="h-4 w-4 shrink-0 text-gray-500" /><span className="flex-1 truncate">{l.naam}</span>{gekozen === l.id && <Check className="h-4 w-4" />}
-                </button>
-              ))}
+                  ))}
+                </>
+              )}
             </div>
           )
         })}
