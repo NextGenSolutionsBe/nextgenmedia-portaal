@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchMetLimiet, TijdslimietFout } from '@/lib/fetch-met-limiet'
 import { itemUitClickup, magOverschrijven, naamSleutel, isKleur, type ClickupTaak } from '@/lib/agenda/model'
 import { zorgVoorPersonen, persoonVoorClickup } from '@/lib/agenda/personen-server'
+import { stelLabelVoor, labelInvoerVoor, klantNamenVoorLabels, type LabelContext } from '@/lib/agenda/label-voorstel'
 
 type Admin = SupabaseClient
 
@@ -102,15 +103,19 @@ async function structuur(admin: Admin, cu: Cu, bron: Bron, deadline: number, tel
   const klantVan = new Map<string, string>()
   for (const k of (klanten ?? []) as { id: string; company_name: string | null }[]) if (k.company_name) klantVan.set(naamSleutel(k.company_name), k.id)
 
+  // Wat in de app vastgezet werd (privé of verplaatst), laat de import staan.
+  const vast = await vastgezet(admin)
+
   // Lijsten-met-leden worden over meerdere rondes nagekeken; de structuur zelf telkens volledig.
   if (cursor.ledenIndex === undefined) {
     const { spaces } = await cu.get<{ spaces: CuSpace[] }>(`${V2}/team/${team.id}/space?archived=false`)
     const lijstIds: string[] = []
     for (const [si, s] of (spaces ?? []).entries()) {
-      const { data: sp } = await admin.from('ag_spaces').upsert({ clickup_id: s.id, naam: s.name, kleur: isKleur(s.color) ? s.color : null, prive: !!s.private, volgorde: si, updated_at: new Date().toISOString() }, { onConflict: 'clickup_id' }).select('id').single()
+      const spVast = vast.spaces.has(s.id)
+      const { data: sp } = await admin.from('ag_spaces').upsert({ clickup_id: s.id, naam: s.name, kleur: isKleur(s.color) ? s.color : null, ...(spVast ? {} : { prive: !!s.private }), volgorde: si, updated_at: new Date().toISOString() }, { onConflict: 'clickup_id' }).select('id').single()
       if (!sp) continue
       tellers.spaces = (tellers.spaces ?? 0) + 1
-      if (s.private) {
+      if (s.private && !spVast) {
         const ids: string[] = []
         for (const m of s.members ?? []) { const p = await persoonVoorClickup(admin, m.user, cache, personen); if (p) ids.push(p) }
         await zetLeden(admin, 'space', sp.id, ids)
@@ -120,17 +125,17 @@ async function structuur(admin: Admin, cu: Cu, bron: Bron, deadline: number, tel
         cu.get<{ lists: CuLijst[] }>(`${V2}/space/${s.id}/list?archived=false`),
       ])
       for (const [fi, f] of (folders ?? []).entries()) {
-        const { data: mp } = await admin.from('ag_mappen').upsert({ clickup_id: f.id, space_id: sp.id, naam: f.name, volgorde: f.orderindex ?? fi, client_id: klantVan.get(naamSleutel(f.name)) ?? null, updated_at: new Date().toISOString() }, { onConflict: 'clickup_id' }).select('id').single()
+        const { data: mp } = await admin.from('ag_mappen').upsert({ clickup_id: f.id, ...(vast.mapPlaats.has(f.id) ? {} : { space_id: sp.id }), naam: f.name, volgorde: f.orderindex ?? fi, client_id: klantVan.get(naamSleutel(f.name)) ?? null, updated_at: new Date().toISOString() }, { onConflict: 'clickup_id' }).select('id').single()
         if (!mp) continue
         tellers.mappen = (tellers.mappen ?? 0) + 1
         for (const [li, l] of (f.lists ?? []).entries()) {
-          await bewaarLijst(admin, l, sp.id, mp.id, li)
+          await bewaarLijst(admin, l, sp.id, mp.id, li, vast.lijstPlaats.has(l.id))
           lijstIds.push(l.id)
           tellers.lijsten = (tellers.lijsten ?? 0) + 1
         }
       }
       for (const [li, l] of (los ?? []).entries()) {
-        await bewaarLijst(admin, l, sp.id, null, 1000 + li)
+        await bewaarLijst(admin, l, sp.id, null, 1000 + li, vast.lijstPlaats.has(l.id))
         lijstIds.push(l.id)
         tellers.lijsten = (tellers.lijsten ?? 0) + 1
       }
@@ -147,10 +152,19 @@ async function structuur(admin: Admin, cu: Cu, bron: Bron, deadline: number, tel
     if (Date.now() > deadline) { await admin.from('ag_clickup_bronnen').update({ cursor }).eq('id', bron.id); return { klaar: false, team: team.id } }
     const cid = lijstIds[cursor.ledenIndex!]
     try {
+      const { data: lijst } = await admin.from('ag_lijsten').select('id, map_id, leden_vast').eq('clickup_id', cid).maybeSingle()
+      // Vastgezet in de app: niet aankomen. In een vastgezette privémap: dezelfde mensen als de map.
+      if (lijst?.leden_vast) { cursor.ledenIndex = (cursor.ledenIndex ?? 0) + 1; continue }
+      if (lijst?.map_id && vast.mapLeden.has(lijst.map_id)) {
+        const mapLeden = vast.mapLeden.get(lijst.map_id)!
+        await admin.from('ag_lijsten').update({ prive: true, leden_vast: true }).eq('id', lijst.id)
+        await zetLeden(admin, 'lijst', lijst.id, mapLeden)
+        cursor.ledenIndex = (cursor.ledenIndex ?? 0) + 1
+        continue
+      }
       const { members } = await cu.get<{ members: CuLid[] }>(`${V2}/list/${cid}/member`)
       const metToegang = (members ?? []).filter((m) => volwaardig.includes(m.id))
       const prive = metToegang.length > 0 && metToegang.length < volwaardig.length
-      const { data: lijst } = await admin.from('ag_lijsten').select('id, map_id').eq('clickup_id', cid).maybeSingle()
       if (lijst) {
         await admin.from('ag_lijsten').update({ prive }).eq('id', lijst.id)
         const ids: string[] = []
@@ -165,10 +179,34 @@ async function structuur(admin: Admin, cu: Cu, bron: Bron, deadline: number, tel
   return { klaar: true, team: team.id }
 }
 
-async function bewaarLijst(admin: Admin, l: CuLijst, spaceId: string, mapId: string | null, volgorde: number) {
+/**
+ * Wat de import niet mag aanraken: privé en wie toegang heeft (`leden_vast`,
+ * bv. de privémappen van Bram en Chiara of iets dat in de app privé gezet
+ * werd) en de plaats (`plaats_vast`, in de app verplaatst).
+ */
+async function vastgezet(admin: Admin) {
+  const [sp, mp, lj, ld] = await Promise.all([
+    admin.from('ag_spaces').select('clickup_id').eq('leden_vast', true).not('clickup_id', 'is', null),
+    admin.from('ag_mappen').select('id, clickup_id, leden_vast, plaats_vast, prive').or('leden_vast.eq.true,plaats_vast.eq.true'),
+    admin.from('ag_lijsten').select('clickup_id').eq('plaats_vast', true).not('clickup_id', 'is', null),
+    admin.from('ag_leden').select('doel_id, persoon_id').eq('soort', 'map'),
+  ])
+  const mappen = (mp.data ?? []) as { id: string; clickup_id: string | null; leden_vast: boolean; plaats_vast: boolean; prive: boolean }[]
+  const leden = new Map<string, string[]>()
+  for (const r of (ld.data ?? []) as { doel_id: string; persoon_id: string }[]) leden.set(r.doel_id, [...(leden.get(r.doel_id) ?? []), r.persoon_id])
+  return {
+    spaces: new Set(((sp.data ?? []) as { clickup_id: string }[]).map((x) => x.clickup_id)),
+    mapPlaats: new Set(mappen.filter((m) => m.plaats_vast && m.clickup_id).map((m) => m.clickup_id!)),
+    lijstPlaats: new Set(((lj.data ?? []) as { clickup_id: string }[]).map((x) => x.clickup_id)),
+    // Vastgezette privémappen met hun mensen: lijsten erin volgen die.
+    mapLeden: new Map(mappen.filter((m) => m.leden_vast && m.prive && (leden.get(m.id)?.length ?? 0) > 0).map((m) => [m.id, leden.get(m.id)!])),
+  }
+}
+
+async function bewaarLijst(admin: Admin, l: CuLijst, spaceId: string, mapId: string | null, volgorde: number, plaatsVast = false) {
   const statussen = (l.statuses ?? []).map((s) => ({ status: s.status, kleur: s.color, type: s.type }))
   await admin.from('ag_lijsten').upsert({
-    clickup_id: l.id, space_id: spaceId, map_id: mapId, naam: l.name, volgorde: l.orderindex ?? volgorde,
+    clickup_id: l.id, ...(plaatsVast ? {} : { space_id: spaceId, map_id: mapId }), naam: l.name, volgorde: l.orderindex ?? volgorde,
     ...(statussen.length ? { statussen } : {}), updated_at: new Date().toISOString(),
   }, { onConflict: 'clickup_id' })
 }
@@ -180,7 +218,7 @@ async function zetLeden(admin: Admin, soort: 'space' | 'map' | 'lijst', doel: st
 
 async function mappenPriveUitLijsten(admin: Admin) {
   const [{ data: mappen }, { data: lijsten }, { data: leden }] = await Promise.all([
-    admin.from('ag_mappen').select('id, prive').not('clickup_id', 'is', null),
+    admin.from('ag_mappen').select('id, prive').not('clickup_id', 'is', null).eq('leden_vast', false),
     admin.from('ag_lijsten').select('id, map_id, prive').not('map_id', 'is', null),
     admin.from('ag_leden').select('doel_id, persoon_id').eq('soort', 'lijst'),
   ])
@@ -198,18 +236,39 @@ async function mappenPriveUitLijsten(admin: Admin) {
 
 // ── Taken ───────────────────────────────────────────────────────────────────
 
-type Ctx = { lijsten: Map<string, string>; labels: Map<string, string>; personen: Awaited<ReturnType<typeof zorgVoorPersonen>>; cache: Map<number, string> }
+type LijstRij = { id: string; clickup_id: string | null; naam: string; map_id: string | null; client_id: string | null; space_id: string; prive: boolean; leden_vast: boolean }
+type Ctx = {
+  lijsten: Map<string, string>; labels: Map<string, string>; personen: Awaited<ReturnType<typeof zorgVoorPersonen>>; cache: Map<number, string>
+  /** Lijsten die vergrendeld privé zijn: taken erin krijgen het slotje. */
+  slot: Set<string>
+  /** Onze categorielabels (blijven staan als ClickUp de tags verandert). */
+  categorie: Set<string>
+  labelBoom: { lijsten: LijstRij[]; mappen: { id: string; naam: string; client_id: string | null }[]; spaces: { id: string; naam: string }[] }
+  labelCtx: LabelContext
+}
 
 async function laadCtx(admin: Admin): Promise<Ctx> {
-  const [{ data: lijsten }, { data: labels }, personen] = await Promise.all([
-    admin.from('ag_lijsten').select('id, clickup_id').not('clickup_id', 'is', null),
-    admin.from('ag_labels').select('id, naam'),
+  const [{ data: lijsten }, { data: labels }, personen, { data: mappen }, { data: spaces }, { data: klanten }] = await Promise.all([
+    admin.from('ag_lijsten').select('id, clickup_id, naam, map_id, client_id, space_id, prive, leden_vast'),
+    admin.from('ag_labels').select('id, naam, categorie'),
     zorgVoorPersonen(admin),
+    admin.from('ag_mappen').select('id, naam, client_id'),
+    admin.from('ag_spaces').select('id, naam'),
+    admin.from('clients').select('company_name').is('archived_at', null).limit(3000),
   ])
+  const ls = (lijsten ?? []) as LijstRij[]
+  const lb = (labels ?? []) as { id: string; naam: string; categorie: boolean }[]
   return {
-    lijsten: new Map(((lijsten ?? []) as { id: string; clickup_id: string }[]).map((l) => [l.clickup_id, l.id])),
-    labels: new Map(((labels ?? []) as { id: string; naam: string }[]).map((l) => [l.naam.toLowerCase(), l.id])),
+    lijsten: new Map(ls.filter((l) => l.clickup_id).map((l) => [l.clickup_id!, l.id])),
+    labels: new Map(lb.map((l) => [l.naam.toLowerCase(), l.id])),
     personen, cache: new Map(),
+    slot: new Set(ls.filter((l) => l.leden_vast && l.prive).map((l) => l.id)),
+    categorie: new Set(lb.filter((l) => l.categorie).map((l) => l.id)),
+    labelBoom: { lijsten: ls, mappen: (mappen ?? []) as { id: string; naam: string; client_id: string | null }[], spaces: (spaces ?? []) as { id: string; naam: string }[] },
+    labelCtx: {
+      klanten: klantNamenVoorLabels(((klanten ?? []) as { company_name: string | null }[]).map((k) => k.company_name)),
+      team: [...new Set(personen.filter((p) => p.actief).map((p) => p.naam.split(' ')[0]).filter((n) => n.length >= 3))],
+    },
   }
 }
 
@@ -226,8 +285,8 @@ async function labelId(admin: Admin, ctx: Ctx, naam: string, kleur?: string): Pr
 /** Eén pagina taken bewaren. Geeft het aantal bewaarde (nieuw of bijgewerkt). */
 async function bewaarTaken(admin: Admin, taken: ClickupTaak[], ctx: Ctx): Promise<number> {
   if (!taken.length) return 0
-  const { data: bestaand } = await admin.from('ag_items').select('id, clickup_id, clickup_bijgewerkt_op, in_app_gewijzigd_op').in('clickup_id', taken.map((t) => t.id))
-  const per = new Map(((bestaand ?? []) as { id: string; clickup_id: string; clickup_bijgewerkt_op: string | null; in_app_gewijzigd_op: string | null }[]).map((b) => [b.clickup_id, b]))
+  const { data: bestaand } = await admin.from('ag_items').select('id, clickup_id, clickup_bijgewerkt_op, in_app_gewijzigd_op, labels').in('clickup_id', taken.map((t) => t.id))
+  const per = new Map(((bestaand ?? []) as { id: string; clickup_id: string; clickup_bijgewerkt_op: string | null; in_app_gewijzigd_op: string | null; labels: string[] | null }[]).map((b) => [b.clickup_id, b]))
   const rijen: Record<string, unknown>[] = []
   const toegewezenVan = new Map<string, string[]>()
   for (const t of taken) {
@@ -240,9 +299,18 @@ async function bewaarTaken(admin: Admin, taken: ClickupTaak[], ctx: Ctx): Promis
     const pers: string[] = []
     for (const a of t.assignees ?? []) { const p = await persoonVoorClickup(admin, a, ctx.cache, ctx.personen); if (p) pers.push(p) }
     toegewezenVan.set(t.id, pers)
+    const lijstId = t.list?.id ? ctx.lijsten.get(t.list.id) ?? null : null
+    const al = per.get(t.id)
+    // Onze categorielabels blijven staan; een nieuwe taak krijgt er meteen een (voorstel uit de titel).
+    for (const l of al?.labels ?? []) if (ctx.categorie.has(l) && !labels.includes(l)) labels.push(l)
+    if (!al && !labels.some((l) => ctx.categorie.has(l))) {
+      const naam = stelLabelVoor(labelInvoerVoor({ titel: v.titel, soort: v.soort, lijst_id: lijstId }, ctx.labelBoom), ctx.labelCtx)
+      const id = ctx.labels.get(naam.toLowerCase())
+      if (id && ctx.categorie.has(id)) labels.push(id)
+    }
     rijen.push({
       clickup_id: t.id, ...v, labels, eigenaar_id: eigenaar, gemaakt_door: t.creator?.username ?? null,
-      clickup_lijst_id: t.list?.id ?? null, lijst_id: t.list?.id ? ctx.lijsten.get(t.list.id) ?? null : null,
+      clickup_lijst_id: t.list?.id ?? null, lijst_id: lijstId,
       clickup_parent_id: t.parent ?? null,
       // Elke rij dezelfde kolommen (een bulk-upsert zet ontbrekende op null): de aanmaakdatum uit ClickUp.
       created_at: t.date_created ? new Date(Number(t.date_created)).toISOString() : new Date().toISOString(),
@@ -253,6 +321,9 @@ async function bewaarTaken(admin: Admin, taken: ClickupTaak[], ctx: Ctx): Promis
   const { data: opgeslagen, error } = await admin.from('ag_items').upsert(rijen, { onConflict: 'clickup_id' }).select('id, clickup_id')
   if (error) throw new Error(error.message)
   const ids = (opgeslagen ?? []) as { id: string; clickup_id: string }[]
+  // Taken in een vergrendelde privélijst (bv. Bram Privé) krijgen het slotje.
+  const slotIds = rijen.filter((r) => r.lijst_id && ctx.slot.has(r.lijst_id as string)).map((r) => ids.find((x) => x.clickup_id === r.clickup_id)?.id).filter((x): x is string => !!x)
+  if (slotIds.length) await admin.from('ag_items').update({ prive: true }).in('id', slotIds).eq('prive', false)
   if (ids.length) {
     await admin.from('ag_toegewezen').delete().in('item_id', ids.map((x) => x.id))
     const tw = ids.flatMap((x) => [...new Set(toegewezenVan.get(x.clickup_id) ?? [])].map((p) => ({ item_id: x.id, persoon_id: p })))

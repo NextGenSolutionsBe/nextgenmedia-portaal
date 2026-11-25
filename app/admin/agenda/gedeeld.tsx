@@ -6,6 +6,7 @@ import { PersoonFoto, PersoonKnop } from '@/components/admin/persoon-foto'
 import { zoekVeld } from '@/lib/zoekveld'
 import type { Persoon, Label, Space, Map as AgMap, Lijst, DocKort, Item, KleurContext } from '@/lib/agenda/model'
 import { PALET, mapKleur, isKleur } from '@/lib/agenda/model'
+import { stelLabelVoor, labelInvoerVoor, klantNamenVoorLabels } from '@/lib/agenda/label-voorstel'
 
 export const focusRing = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-1'
 
@@ -355,6 +356,62 @@ export function WieKiezer({ boom, gekozen, onWissel, disabled = false }: { boom:
         </div>
       )}
       <p className="text-[11px] text-gray-400">{gekozen.length > 1 ? `${gekozen.length} mensen samen` : 'Tik om aan of uit te zetten, meerdere kan.'}</p>
+    </div>
+  )
+}
+
+/**
+ * Het voorgestelde label voor een taak (uit de titel en de map), als label-id.
+ * Regels in lib/agenda/label-voorstel.ts: geen AI, meteen klaar.
+ */
+export function labelVoorstel(boom: BoomData, i: { titel: string; lijst_id: string | null; soort?: 'taak' | 'meeting' }): Label | null {
+  if (i.titel.trim().length < 3) return null
+  const ctx = {
+    klanten: klantNamenVoorLabels(boom.klanten.filter((k) => !k.gearchiveerd).map((k) => k.naam)),
+    team: [...new Set(boom.personen.filter((p) => p.actief).map((p) => p.naam.split(' ')[0]).filter((n) => n.length >= 3))],
+  }
+  const naam = stelLabelVoor(labelInvoerVoor(i, boom), ctx)
+  return boom.labels.find((l) => l.naam.toLowerCase() === naam.toLowerCase()) ?? null
+}
+
+/**
+ * Labels kiezen: de gekozen labels met een kruisje, het voorstel als stippellijn
+ * (klik = erbij) en "Ander label" om te zoeken.
+ */
+export function LabelKeuze({ boom, gekozen, onZet, voorstel }: { boom: BoomData; gekozen: string[]; onZet: (labels: string[]) => void; voorstel?: Label | null }) {
+  const [open, setOpen] = useState(false)
+  const sluit = useCallback(() => setOpen(false), [])
+  const per = new Map(boom.labels.map((l) => [l.id, l]))
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {gekozen.map((id) => per.get(id)).filter(Boolean).map((l) => (
+        <span key={l!.id} className="inline-flex items-center gap-1 rounded-full pl-2.5 pr-1 py-0.5 text-xs font-semibold" style={{ background: l!.kleur, color: '#0f0f0f' }}>
+          {l!.naam}
+          <button type="button" onClick={() => onZet(gekozen.filter((x) => x !== l!.id))} aria-label={`${l!.naam} weghalen`} className={`h-4 w-4 rounded-full hover:bg-black/10 flex items-center justify-center ${focusRing}`}><X className="h-3 w-3" /></button>
+        </span>
+      ))}
+      {voorstel && !gekozen.includes(voorstel.id) && (
+        <button type="button" onClick={() => onZet([...gekozen, voorstel.id])} title="Voorstel: klik om toe te voegen"
+          className={`inline-flex items-center gap-1 rounded-full border border-dashed border-gray-400 px-2.5 py-0.5 text-xs text-gray-700 hover:border-gray-900 ${focusRing}`}>
+          <Plus className="h-3 w-3" />{voorstel.naam}<span className="text-gray-400">· voorstel</span>
+        </button>
+      )}
+      <div className="relative">
+        <button type="button" onClick={() => setOpen(!open)} className={`text-xs text-gray-600 hover:text-gray-900 hover:underline ${focusRing}`}>{gekozen.length ? 'Ander label' : 'Label kiezen'}</button>
+        <Popover open={open} onSluit={sluit}>
+          <div className="w-full md:w-56 p-2 max-h-72 overflow-y-auto">
+            {boom.labels.map((l) => {
+              const aan = gekozen.includes(l.id)
+              return (
+                <button key={l.id} type="button" role="checkbox" aria-checked={aan} onClick={() => onZet(aan ? gekozen.filter((x) => x !== l.id) : [...gekozen, l.id])}
+                  className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-gray-50 ${focusRing}`}>
+                  <span className="h-3 w-3 rounded-full" style={{ background: l.kleur }} /><span className="flex-1 text-left">{l.naam}</span>{aan && <Check className="h-4 w-4" />}
+                </button>
+              )
+            })}
+          </div>
+        </Popover>
+      </div>
     </div>
   )
 }

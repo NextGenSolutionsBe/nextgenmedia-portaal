@@ -26,7 +26,9 @@ export const KLAAR_STIJL: React.CSSProperties = {
   borderLeft: '3px solid #4caf73',
   color: '#2b4a36',
 }
-const isKlaar = (i: Item) => i.status === 'klaar' && i.bron === 'ag'
+const isKlaar = (i: Item) => i.status === 'klaar'
+/** Afvinken kan bij taken en bij meetings (ook die uit de Meeting Inplanner). */
+const kanAfvinken = (i: Item) => i.bron === 'ag' || i.bron === 'meeting'
 const stijlVan = (i: Item, kleur: string) => (isKlaar(i) ? KLAAR_STIJL : vlak(kleur))
 
 export function vlak(kleur: string): React.CSSProperties {
@@ -77,8 +79,8 @@ export function DeadlineLabel({ i, opDag, lang = false, klein = false }: { i: Pi
   const laat = l.teLaat && i.status !== 'klaar'
   return (
     <span title={`${l.tekst}${laat ? ' (voorbij)' : ''}`}
-      className={`inline-flex shrink-0 items-center gap-0.5 rounded font-semibold tabular-nums leading-none ${klein ? 'h-[16px] px-1 text-[10.5px]' : 'h-[18px] px-1.5 text-[11px]'} ${i.status === 'klaar' ? 'bg-black/10 text-current' : laat ? 'bg-red-600 text-white' : 'bg-gray-900 text-white'}`}>
-      <Clock className={klein ? 'h-2.5 w-2.5' : 'h-3 w-3'} />{lang ? l.tekst : kort}
+      className={`inline-flex shrink-0 items-center gap-0.5 rounded font-semibold tabular-nums leading-none ${klein ? 'h-[19px] px-1.5 text-[11.5px]' : 'h-[22px] px-2 text-[12.5px]'} ${i.status === 'klaar' ? 'bg-black/10 text-current' : laat ? 'bg-red-600 text-white' : 'bg-gray-900 text-white'}`}>
+      <Clock className={klein ? 'h-3 w-3' : 'h-3.5 w-3.5'} />{lang ? l.tekst : kort}
     </span>
   )
 }
@@ -91,11 +93,11 @@ export function Kalender(p: Props) {
 // ── Een item als blokje ─────────────────────────────────────────────────────
 
 function Vinkje({ i, onKlaar, klein }: { i: Item; onKlaar: (i: Item) => void; klein?: boolean }) {
-  if (i.bron !== 'ag') return null
+  if (!kanAfvinken(i)) return null
   const aan = i.status === 'klaar'
   return (
     <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onKlaar(i) }} aria-label={aan ? 'Terug open zetten' : 'Afvinken'}
-      className={`shrink-0 ${klein ? 'h-3 w-3' : 'h-3.5 w-3.5'} rounded-full border flex items-center justify-center ${aan ? 'bg-[#3f9a64] border-[#3f9a64] text-white' : 'border-current bg-white/60'} ${focusRing}`}>
+      className={`shrink-0 ${klein ? 'h-3.5 w-3.5' : 'h-4 w-4'} rounded-full border flex items-center justify-center ${aan ? 'bg-[#3f9a64] border-[#3f9a64] text-white' : 'border-current bg-white/60'} ${focusRing}`}>
       {aan && <Check className="h-2.5 w-2.5" />}
     </button>
   )
@@ -103,34 +105,34 @@ function Vinkje({ i, onKlaar, klein }: { i: Item; onKlaar: (i: Item) => void; kl
 
 /** Bij hoveren: snel completen (of terug open zetten). */
 function SnelKlaar({ i, onKlaar, tekst, onder = false }: { i: Item; onKlaar: (i: Item) => void; tekst: boolean; onder?: boolean }) {
-  if (i.bron !== 'ag') return null
+  if (!kanAfvinken(i)) return null
   const klaar = i.status === 'klaar'
   return (
     <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onKlaar(i) }}
       title={klaar ? 'Terug open zetten' : 'Complete'} aria-label={klaar ? 'Terug open zetten' : 'Complete'}
-      className={`absolute ${onder ? 'bottom-1' : 'top-1/2 -translate-y-1/2'} right-1 z-[3] hidden group-hover:inline-flex focus:inline-flex items-center gap-1 h-[20px] px-1.5 rounded-md text-[11px] font-semibold shadow-sm ${klaar ? 'bg-white text-gray-900 border border-gray-200' : 'bg-[#2f7a4b] text-white'} ${focusRing}`}>
+      className={`absolute ${onder ? 'bottom-1' : 'top-1/2 -translate-y-1/2'} right-1 z-[3] hidden group-hover:inline-flex focus:inline-flex items-center gap-1 h-[22px] px-2 rounded-md text-[12px] font-semibold shadow-sm ${klaar ? 'bg-white text-gray-900 border border-gray-200' : 'bg-[#2f7a4b] text-white'} ${focusRing}`}>
       {klaar ? <RotateCcw className="h-3 w-3" /> : <Check className="h-3 w-3" />}{tekst && (klaar ? 'Heropen' : 'Complete')}
     </button>
   )
 }
 
-function Chip({ i, kleur, onOpen, onKlaar, personen, tijd, sleep, opDag, lang }: { i: Item; kleur: string; onOpen: (i: Item) => void; onKlaar: (i: Item) => void; personen: Map<string, Persoon>; tijd?: string | null; sleep: boolean; opDag?: string; lang?: boolean }) {
+function Chip({ i, kleur, onOpen, onKlaar, personen, tijd, sleep, opDag, lang, magKlaar }: { i: Item; kleur: string; onOpen: (i: Item) => void; onKlaar: (i: Item) => void; personen: Map<string, Persoon>; tijd?: string | null; sleep: boolean; opDag?: string; lang?: boolean; magKlaar: boolean }) {
   const klaar = isKlaar(i)
   const dl = enkelDeadline(i)
   return (
     <div draggable={sleep} onDragStart={(e) => { e.dataTransfer.setData('text/agenda-item', i.id); e.dataTransfer.effectAllowed = 'move' }}
       onClick={() => onOpen(i)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
-      className={`group relative flex items-center gap-1.5 rounded-md pl-1.5 pr-1 h-[24px] text-[12px] leading-none cursor-pointer select-none hover:brightness-[0.97] ${focusRing}`}
+      className={`group relative flex items-center gap-1.5 rounded-lg pl-2 pr-1 h-[30px] text-[13px] font-medium leading-none cursor-pointer select-none shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:brightness-[0.97] ${focusRing}`}
       style={stijlVan(i, kleur)} title={i.titel}>
       <Vinkje i={i} onKlaar={onKlaar} klein />
-      {i.urgent && !klaar && <Flag className="h-3 w-3 shrink-0 text-red-600 fill-red-600" />}
-      {(i.meet_url || i.bron === 'meeting') && <Video className="h-3 w-3 shrink-0 opacity-70" />}
+      {i.urgent && !klaar && <Flag className="h-3.5 w-3.5 shrink-0 text-red-600 fill-red-600" />}
+      {(i.meet_url || i.bron === 'meeting') && <Video className="h-3.5 w-3.5 shrink-0 opacity-70" />}
       {dl ? <DeadlineLabel i={i} opDag={opDag ?? dag(i.deadline_op!)} lang={lang} klein /> : tijd && <span className="shrink-0 tabular-nums opacity-75">{tijd}</span>}
-      <span className="truncate flex-1">{i.titel}</span>
+      <span className={`truncate flex-1 ${klaar ? 'line-through decoration-1 opacity-80' : ''}`}>{i.titel}</span>
       {!dl && i.deadline_op && <DeadlineLabel i={i} opDag={opDag} klein />}
       {i.prive && <Lock className="h-2.5 w-2.5 shrink-0 opacity-60" />}
-      <span className="hidden sm:inline-flex group-hover:invisible"><Avatars ids={i.toegewezen} personen={personen} max={dl && !lang ? 1 : 2} maat={16} /></span>
-      {sleep && <SnelKlaar i={i} onKlaar={onKlaar} tekst={false} />}
+      <span className="hidden sm:inline-flex group-hover:invisible"><Avatars ids={i.toegewezen} personen={personen} max={dl && !lang ? 1 : 2} maat={20} /></span>
+      {magKlaar && <SnelKlaar i={i} onKlaar={onKlaar} tekst={false} />}
     </div>
   )
 }
@@ -325,14 +327,14 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
                 <div key={d} className="border-l border-gray-100 group relative" onDragOver={(e) => { if (magAanpassen) e.preventDefault() }} onDrop={(e) => dropOpDag(e, d)}
                   onDoubleClick={() => magToevoegen && onNieuw({ dag: d, heelDag: true })}>
                   {magToevoegen && <button type="button" onClick={() => onNieuw({ dag: d, heelDag: true })} aria-label={`Taak op ${kortDag(d)}`} className={`absolute right-1 bottom-1 h-5 w-5 rounded-md bg-white border border-gray-200 text-gray-500 opacity-0 group-hover:opacity-100 focus:opacity-100 flex items-center justify-center z-10 ${focusRing}`}><Plus className="h-3 w-3" /></button>}
-                  {verborgenPerDag.get(n) ? <button type="button" onClick={() => setAlleDag(true)} className="absolute left-1.5 bottom-1 text-[11px] font-semibold text-gray-700 hover:underline z-10">+{verborgenPerDag.get(n)} meer</button> : null}
+                  {verborgenPerDag.get(n) ? <button type="button" onClick={() => setAlleDag(true)} className="absolute left-1.5 bottom-1 text-[12px] font-semibold text-gray-700 hover:underline z-10">+{verborgenPerDag.get(n)} meer</button> : null}
                 </div>
               ))}
             </div>
-            <div className="relative grid gap-y-1 py-2 px-1 pointer-events-none" style={{ gridTemplateColumns: `repeat(${dagen.length}, minmax(0, 1fr))`, gridAutoRows: '24px', minHeight: magToevoegen ? 40 : undefined, paddingBottom: verborgenPerDag.size ? 24 : undefined }}>
+            <div className="relative grid gap-y-1 py-2 px-1 pointer-events-none" style={{ gridTemplateColumns: `repeat(${dagen.length}, minmax(0, 1fr))`, gridAutoRows: '30px', minHeight: magToevoegen ? 44 : undefined, paddingBottom: verborgenPerDag.size ? 24 : undefined }}>
               {balken.filter((b) => b.baan < toonBanen).map((b) => (
                 <div key={`${b.item.bron}-${b.item.id}`} className="pointer-events-auto px-1 min-w-0" style={{ gridColumn: `${b.van + 1} / ${b.tot + 2}`, gridRow: b.baan + 1 }}>
-                  <Chip i={b.item} kleur={kleur(b.item)} onOpen={onOpen} onKlaar={onKlaar} personen={personen} sleep={sleepbaar(b.item, magAanpassen)} opDag={dagen[b.van]} lang={weergave === 'dag'} />
+                  <Chip i={b.item} kleur={kleur(b.item)} onOpen={onOpen} onKlaar={onKlaar} personen={personen} sleep={sleepbaar(b.item, magAanpassen)} magKlaar={magAanpassen} opDag={dagen[b.van]} lang={weergave === 'dag'} />
                 </div>
               ))}
             </div>
@@ -347,7 +349,7 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
       <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0 relative">
         <div className="grid relative" style={{ gridTemplateColumns: cols, height: 1440 * PX_MIN }}>
           <div className="relative">
-            {Array.from({ length: 24 }, (_, h) => h > 0 && <div key={h} className="absolute right-2 -translate-y-1/2 text-[11px] tabular-nums text-gray-500" style={{ top: h * 60 * PX_MIN }}>{String(h).padStart(2, '0')}:00</div>)}
+            {Array.from({ length: 24 }, (_, h) => h > 0 && <div key={h} className="absolute right-2 -translate-y-1/2 text-[12px] tabular-nums text-gray-500" style={{ top: h * 60 * PX_MIN }}>{String(h).padStart(2, '0')}:00</div>)}
           </div>
           <div ref={kolommenRef} className="relative grid" style={{ gridColumn: `2 / span ${dagen.length}`, gridTemplateColumns: `repeat(${dagen.length}, minmax(0, 1fr))` }}
             onPointerMove={beweeg} onPointerUp={los} onPointerCancel={() => setSleep(null)}>
@@ -372,28 +374,28 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
                       <div key={`${i.bron}-${i.id}`} data-blok role="button" tabIndex={0}
                         onPointerDown={(e) => (sl ? startVerplaats(e, i, n, b.vanMin, b.totMin) : undefined)}
                         onClick={() => { if (!sl) onOpen(i) }} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
-                        className={`group absolute rounded-md pl-2 pr-1.5 py-1 overflow-hidden text-[12px] leading-snug shadow-[0_1px_2px_rgba(0,0,0,0.06)] cursor-pointer select-none hover:brightness-[0.97] hover:z-[2] ${bezig ? 'opacity-30' : ''} ${focusRing}`}
+                        className={`group absolute rounded-lg pl-2 pr-1.5 py-1 overflow-hidden text-[13.5px] leading-snug shadow-[0_1px_3px_rgba(0,0,0,0.08)] cursor-pointer select-none hover:brightness-[0.97] hover:z-[2] ${bezig ? 'opacity-30' : ''} ${focusRing}`}
                         style={{ ...stijlVan(i, kl), top: b.vanMin * PX_MIN + 1, height: hoogte, left: `calc(${(b.kolom / b.kolommen) * 100}% + 3px)`, width: `calc(${100 / b.kolommen}% - 6px)`, touchAction: sl ? 'none' : undefined }}
                         title={`${hhmm(b.vanMin)}–${hhmm(b.totMin)} ${i.titel}`}>
                         <div className="flex items-start gap-1">
                           <span className="mt-px"><Vinkje i={i} onKlaar={onKlaar} klein /></span>
-                          {i.urgent && !klaar && <Flag className="h-3 w-3 mt-px shrink-0 text-red-600 fill-red-600" />}
-                          <span className={`font-semibold ${hoogte < 34 ? 'truncate' : hoogte < 70 ? 'line-clamp-2' : 'line-clamp-3'}`}>{i.titel}</span>
+                          {i.urgent && !klaar && <Flag className="h-3.5 w-3.5 mt-px shrink-0 text-red-600 fill-red-600" />}
+                          <span className={`font-semibold ${klaar ? 'line-through decoration-1 opacity-80' : ''} ${hoogte < 34 ? 'truncate' : hoogte < 70 ? 'line-clamp-2' : 'line-clamp-3'}`}>{i.titel}</span>
                           {i.deadline_op && hoogte < 50 && <span className="ml-auto"><DeadlineLabel i={i} opDag={d} klein /></span>}
                         </div>
                         {i.deadline_op && hoogte >= 50 && <div className="mt-0.5"><DeadlineLabel i={i} opDag={d} lang klein /></div>}
                         {hoogte >= 34 && (
-                          <div className={`flex items-center gap-1 mt-0.5 tabular-nums text-[11px] ${klaar ? 'text-[#2b4a36]/80' : 'text-gray-600'}`}>
+                          <div className={`flex items-center gap-1 mt-0.5 tabular-nums text-[12px] ${klaar ? 'text-[#2b4a36]/80' : 'text-gray-600'}`}>
                             {(i.meet_url || i.bron === 'meeting') && <Video className="h-3 w-3 shrink-0" />}
                             {i.locatie && !i.meet_url && <MapPin className="h-3 w-3 shrink-0" />}
                             <span className="truncate">{hhmm(b.vanMin)}–{hhmm(b.totMin)}</span>
                             <span className="flex-1" />
-                            {hoogte >= 50 && <span className={sl ? 'group-hover:invisible' : ''}><Avatars ids={i.toegewezen} personen={personen} max={3} maat={18} /></span>}
+                            {hoogte >= 50 && <span className={sl ? 'group-hover:invisible' : ''}><Avatars ids={i.toegewezen} personen={personen} max={3} maat={20} /></span>}
                           </div>
                         )}
                         {sl && <div onPointerDown={(e) => startRek(e, i, d, b.vanMin, b.totMin)} className="absolute left-0 right-0 bottom-0 h-1.5 cursor-ns-resize" aria-hidden />}
                         {/* Onderaan rechts (waar de foto's staan), zodat de titel leesbaar en klikbaar blijft. */}
-                        {sl && <SnelKlaar i={i} onKlaar={onKlaar} onder={hoogte >= 34} tekst={b.kolommen === 1 && hoogte >= 34} />}
+                        {magAanpassen && <SnelKlaar i={i} onKlaar={onKlaar} onder={hoogte >= 34} tekst={b.kolommen === 1 && hoogte >= 34} />}
                       </div>
                     )
                   })}
@@ -481,7 +483,7 @@ function Maand({ datum, items, kleur, personen, magAanpassen, magToevoegen, onOp
               <div className="hidden sm:block space-y-1">
                 {toon.map((i) => {
                   const p = plaatsVan(i)
-                  return <Chip key={`${i.bron}-${i.id}`} i={i} kleur={kleur(i)} onOpen={onOpen} onKlaar={onKlaar} personen={personen} sleep={sleepbaar(i, magAanpassen)} tijd={p?.soort === 'rooster' ? hhmm(p.vanMin) : null} opDag={d} />
+                  return <Chip key={`${i.bron}-${i.id}`} i={i} kleur={kleur(i)} onOpen={onOpen} onKlaar={onKlaar} personen={personen} sleep={sleepbaar(i, magAanpassen)} tijd={p?.soort === 'rooster' ? hhmm(p.vanMin) : null} opDag={d} magKlaar={magAanpassen} />
                 })}
                 {l.length > toon.length && <button type="button" onClick={() => onDag(d)} className="text-[12px] font-semibold text-gray-700 hover:underline px-1">+{l.length - toon.length} meer</button>}
               </div>
