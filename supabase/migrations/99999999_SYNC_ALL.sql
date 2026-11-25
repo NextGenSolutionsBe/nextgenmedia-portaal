@@ -7935,3 +7935,263 @@ DO $$ BEGIN
     PERFORM cron.schedule('metricool-statistieken', '*/10 * * * *', $job$ SELECT net.http_post( url := 'https://app.nextgenmedia.be/api/cron/metricool-stats', headers := jsonb_build_object( 'Content-Type', 'application/json', 'x-sync-secret', (SELECT waarde FROM public.cron_geheimen WHERE sleutel = 'klantmeetings') ), body := '{}'::jsonb, timeout_milliseconds := 58000 ); $job$);
   END IF;
 END $$;
+
+-- ── Agenda (25 nov 2026): ClickUp in de app. Spaces → mappen → lijsten → taken en meetings, docs, labels.
+-- Enkel de server leest en schrijft (service role); RLS staat aan zonder policies.
+CREATE TABLE IF NOT EXISTS public.ag_personen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid UNIQUE,
+  clickup_id bigint UNIQUE,
+  naam text NOT NULL,
+  email text,
+  kleur text,
+  actief boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.ag_spaces (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  clickup_id text UNIQUE,
+  naam text NOT NULL,
+  kleur text,
+  prive boolean NOT NULL DEFAULT false,
+  volgorde double precision NOT NULL DEFAULT 0,
+  verwijderd_op timestamptz,
+  verwijderd_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.ag_mappen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  space_id uuid NOT NULL REFERENCES public.ag_spaces(id) ON DELETE CASCADE,
+  parent_id uuid REFERENCES public.ag_mappen(id) ON DELETE CASCADE,
+  clickup_id text UNIQUE,
+  naam text NOT NULL,
+  kleur text,
+  client_id uuid,
+  prive boolean NOT NULL DEFAULT false,
+  volgorde double precision NOT NULL DEFAULT 0,
+  verwijderd_op timestamptz,
+  verwijderd_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ag_mappen_space ON public.ag_mappen (space_id);
+CREATE TABLE IF NOT EXISTS public.ag_lijsten (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  space_id uuid NOT NULL REFERENCES public.ag_spaces(id) ON DELETE CASCADE,
+  map_id uuid REFERENCES public.ag_mappen(id) ON DELETE CASCADE,
+  clickup_id text UNIQUE,
+  naam text NOT NULL,
+  kleur text,
+  client_id uuid,
+  prive boolean NOT NULL DEFAULT false,
+  statussen jsonb NOT NULL DEFAULT '[]'::jsonb,
+  volgorde double precision NOT NULL DEFAULT 0,
+  verwijderd_op timestamptz,
+  verwijderd_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ag_lijsten_space ON public.ag_lijsten (space_id);
+CREATE INDEX IF NOT EXISTS ag_lijsten_map ON public.ag_lijsten (map_id);
+-- Leden van een privé space, map of lijst (zoals in ClickUp).
+CREATE TABLE IF NOT EXISTS public.ag_leden (
+  soort text NOT NULL CHECK (soort IN ('space', 'map', 'lijst')),
+  doel_id uuid NOT NULL,
+  persoon_id uuid NOT NULL REFERENCES public.ag_personen(id) ON DELETE CASCADE,
+  PRIMARY KEY (soort, doel_id, persoon_id)
+);
+CREATE TABLE IF NOT EXISTS public.ag_labels (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  naam text NOT NULL,
+  kleur text NOT NULL DEFAULT '#6e6e6e',
+  volgorde double precision NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ag_labels_naam ON public.ag_labels (lower(naam));
+CREATE TABLE IF NOT EXISTS public.ag_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  lijst_id uuid REFERENCES public.ag_lijsten(id) ON DELETE SET NULL,
+  parent_id uuid REFERENCES public.ag_items(id) ON DELETE CASCADE,
+  clickup_id text UNIQUE,
+  soort text NOT NULL DEFAULT 'taak' CHECK (soort IN ('taak', 'meeting')),
+  titel text NOT NULL,
+  beschrijving text,
+  status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'klaar')),
+  clickup_status text,
+  clickup_status_kleur text,
+  urgent boolean NOT NULL DEFAULT false,
+  prioriteit smallint,
+  start_op timestamptz,
+  eind_op timestamptz,
+  heel_dag boolean NOT NULL DEFAULT false,
+  client_id uuid,
+  labels uuid[] NOT NULL DEFAULT '{}',
+  kleur text,
+  locatie text,
+  meet_url text,
+  velden jsonb,
+  prive boolean NOT NULL DEFAULT false,
+  eigenaar_id uuid REFERENCES public.ag_personen(id) ON DELETE SET NULL,
+  afgerond_op timestamptz,
+  afgerond_door text,
+  clickup_url text,
+  clickup_bijgewerkt_op timestamptz,
+  in_app_gewijzigd_op timestamptz,
+  verwijderd_op timestamptz,
+  verwijderd_door text,
+  volgorde double precision NOT NULL DEFAULT 0,
+  gemaakt_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ag_items_eind ON public.ag_items (eind_op) WHERE verwijderd_op IS NULL;
+CREATE INDEX IF NOT EXISTS ag_items_start ON public.ag_items (start_op) WHERE verwijderd_op IS NULL;
+CREATE INDEX IF NOT EXISTS ag_items_lijst ON public.ag_items (lijst_id);
+CREATE INDEX IF NOT EXISTS ag_items_parent ON public.ag_items (parent_id);
+CREATE INDEX IF NOT EXISTS ag_items_afgerond ON public.ag_items (afgerond_op DESC) WHERE status = 'klaar';
+CREATE TABLE IF NOT EXISTS public.ag_toegewezen (
+  item_id uuid NOT NULL REFERENCES public.ag_items(id) ON DELETE CASCADE,
+  persoon_id uuid NOT NULL REFERENCES public.ag_personen(id) ON DELETE CASCADE,
+  PRIMARY KEY (item_id, persoon_id)
+);
+CREATE INDEX IF NOT EXISTS ag_toegewezen_persoon ON public.ag_toegewezen (persoon_id);
+CREATE TABLE IF NOT EXISTS public.ag_docs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  space_id uuid REFERENCES public.ag_spaces(id) ON DELETE CASCADE,
+  map_id uuid REFERENCES public.ag_mappen(id) ON DELETE CASCADE,
+  lijst_id uuid REFERENCES public.ag_lijsten(id) ON DELETE CASCADE,
+  clickup_id text UNIQUE,
+  titel text NOT NULL,
+  inhoud text NOT NULL DEFAULT '',
+  prive boolean NOT NULL DEFAULT false,
+  eigenaar_id uuid REFERENCES public.ag_personen(id) ON DELETE SET NULL,
+  bijgewerkt_door text,
+  verwijderd_op timestamptz,
+  verwijderd_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+-- Wie mag mijn privéagenda zien.
+CREATE TABLE IF NOT EXISTS public.ag_delen (
+  eigenaar_id uuid NOT NULL REFERENCES public.ag_personen(id) ON DELETE CASCADE,
+  kijker_id uuid NOT NULL REFERENCES public.ag_personen(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (eigenaar_id, kijker_id)
+);
+CREATE TABLE IF NOT EXISTS public.ag_klant_kleuren (
+  client_id uuid PRIMARY KEY,
+  kleur text NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+-- Meetinguitnodigingen uit de mail (Teams, Zoom, Meet): enkel een voorstel tot iemand op Inplannen klikt.
+CREATE TABLE IF NOT EXISTS public.ag_mail_voorstellen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  mailbox text NOT NULL,
+  message_id text NOT NULL UNIQUE,
+  van text,
+  van_naam text,
+  onderwerp text,
+  ontvangen_op timestamptz,
+  titel text NOT NULL,
+  start_op timestamptz,
+  eind_op timestamptz,
+  locatie text,
+  meet_url text,
+  platform text,
+  deelnemers jsonb NOT NULL DEFAULT '[]'::jsonb,
+  beschrijving text,
+  bron text NOT NULL DEFAULT 'ics',
+  status text NOT NULL DEFAULT 'voorstel' CHECK (status IN ('voorstel', 'ingepland', 'genegeerd')),
+  item_id uuid REFERENCES public.ag_items(id) ON DELETE SET NULL,
+  beslist_door text,
+  beslist_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ag_mail_voorstellen_status ON public.ag_mail_voorstellen (status, start_op);
+CREATE TABLE IF NOT EXISTS public.ag_mail_scan (
+  mailbox text PRIMARY KEY,
+  uidvalidity bigint,
+  laatste_uid bigint,
+  laatst_gelezen_op timestamptz,
+  fout text
+);
+-- ClickUp-bronnen voor de import: het gedeelde account (token uit de omgeving, token = NULL)
+-- en persoonlijke tokens, zodat ook ieders privélijsten meekomen. Het token verlaat de server nooit.
+CREATE TABLE IF NOT EXISTS public.ag_clickup_bronnen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  sleutel text NOT NULL UNIQUE,
+  persoon_id uuid REFERENCES public.ag_personen(id) ON DELETE SET NULL,
+  token text,
+  clickup_user_id bigint,
+  clickup_naam text,
+  actief boolean NOT NULL DEFAULT true,
+  fase text NOT NULL DEFAULT 'structuur',
+  cursor jsonb NOT NULL DEFAULT '{}'::jsonb,
+  volledig_op timestamptz,
+  laatste_sync_op timestamptz,
+  bezig_sinds timestamptz,
+  tellers jsonb NOT NULL DEFAULT '{}'::jsonb,
+  fout text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.ag_personen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_spaces ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_mappen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_lijsten ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_leden ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_labels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_toegewezen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_docs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_delen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_klant_kleuren ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_mail_voorstellen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_mail_scan ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ag_clickup_bronnen ENABLE ROW LEVEL SECURITY;
+-- Standaardlabels (aanpasbaar in de instellingen van de agenda).
+INSERT INTO public.ag_labels (naam, kleur, volgorde) VALUES
+  ('Shoot', '#f59e0b', 1), ('Lead', '#3b82f6', 2), ('Klantmeeting', '#10b981', 3),
+  ('Teamvergadering', '#8b5cf6', 4), ('Algemene vergadering', '#64748b', 5)
+ON CONFLICT DO NOTHING;
+ALTER TABLE public.ag_items ADD COLUMN IF NOT EXISTS clickup_parent_id text;
+ALTER TABLE public.ag_items ADD COLUMN IF NOT EXISTS clickup_lijst_id text;
+ALTER TABLE public.ag_docs ADD COLUMN IF NOT EXISTS clickup_parent_id text;
+ALTER TABLE public.ag_docs ADD COLUMN IF NOT EXISTS clickup_parent_type text;
+ALTER TABLE public.ag_docs ADD COLUMN IF NOT EXISTS clickup_bijgewerkt_op timestamptz;
+ALTER TABLE public.ag_docs ADD COLUMN IF NOT EXISTS in_app_gewijzigd_op timestamptz;
+CREATE INDEX IF NOT EXISTS ag_items_clickup_parent ON public.ag_items (clickup_parent_id) WHERE clickup_parent_id IS NOT NULL AND parent_id IS NULL;
+CREATE INDEX IF NOT EXISTS ag_items_clickup_lijst ON public.ag_items (clickup_lijst_id) WHERE lijst_id IS NULL;
+-- Na de ClickUp-import: subtaken aan hun taak, taken aan hun lijst, docs aan hun plaats.
+CREATE OR REPLACE FUNCTION public.ag_koppel_ouders() RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE o int; l int; d int;
+BEGIN
+  UPDATE public.ag_items c SET parent_id = p.id
+    FROM public.ag_items p
+    WHERE c.parent_id IS NULL AND c.clickup_parent_id IS NOT NULL AND c.clickup_parent_id = p.clickup_id AND p.id <> c.id;
+  GET DIAGNOSTICS o = ROW_COUNT;
+  UPDATE public.ag_items i SET lijst_id = li.id
+    FROM public.ag_lijsten li
+    WHERE i.lijst_id IS NULL AND i.clickup_lijst_id IS NOT NULL AND i.clickup_lijst_id = li.clickup_id;
+  GET DIAGNOSTICS l = ROW_COUNT;
+  UPDATE public.ag_docs x SET
+      space_id = CASE WHEN x.clickup_parent_type = 'space' THEN (SELECT id FROM public.ag_spaces WHERE clickup_id = x.clickup_parent_id) ELSE x.space_id END,
+      map_id = CASE WHEN x.clickup_parent_type = 'map' THEN (SELECT id FROM public.ag_mappen WHERE clickup_id = x.clickup_parent_id) ELSE x.map_id END,
+      lijst_id = CASE WHEN x.clickup_parent_type = 'lijst' THEN (SELECT id FROM public.ag_lijsten WHERE clickup_id = x.clickup_parent_id) ELSE x.lijst_id END
+    WHERE x.clickup_parent_id IS NOT NULL AND x.space_id IS NULL AND x.map_id IS NULL AND x.lijst_id IS NULL;
+  GET DIAGNOSTICS d = ROW_COUNT;
+  RETURN jsonb_build_object('ouders', o, 'lijsten', l, 'docs', d);
+END $$;
+REVOKE ALL ON FUNCTION public.ag_koppel_ouders() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.ag_koppel_ouders() TO service_role;
+
+-- Agenda: uitnodigingen uit de mail (wijziging of annulering van dezelfde meeting herkennen via de UID uit het agendabestand).
+ALTER TABLE public.ag_mail_voorstellen ADD COLUMN IF NOT EXISTS ics_uid text;
+ALTER TABLE public.ag_mail_voorstellen ADD COLUMN IF NOT EXISTS geannuleerd boolean NOT NULL DEFAULT false;
+ALTER TABLE public.ag_mail_voorstellen ADD COLUMN IF NOT EXISTS vervangt_item_id uuid REFERENCES public.ag_items(id) ON DELETE SET NULL;
+ALTER TABLE public.ag_mail_voorstellen ADD COLUMN IF NOT EXISTS organisator jsonb;
+CREATE INDEX IF NOT EXISTS ag_mail_voorstellen_uid_idx ON public.ag_mail_voorstellen (ics_uid) WHERE ics_uid IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ag_mail_voorstellen_status_idx ON public.ag_mail_voorstellen (status, start_op);

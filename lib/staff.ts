@@ -16,6 +16,8 @@ export type AdminModule = {
 // de middleware gebruikt pathToModule om werknemers óók op API-niveau per module
 // af te schermen (pagina verbergen zonder API-gate is schijnveiligheid).
 export const ADMIN_MODULES: AdminModule[] = [
+  // Agenda: spaces, mappen, lijsten, taken, meetings en docs (de planning die vroeger in ClickUp stond).
+  { key: 'agenda',      label: 'Agenda',               prefixes: ['/admin/agenda', '/api/admin/agenda'] },
   { key: 'clients',     label: 'Klanten',              prefixes: ['/admin/clients', '/api/admin/clients', '/api/admin/tasks'] },
   { key: 'contracts',   label: 'Klantcontracten',      prefixes: ['/admin/contracts', '/api/admin/contracts', '/api/admin/contract-templates'] },
   // Aanvragen van diensten en consultancy uit het klantportaal (geen opdrachten of boekingen).
