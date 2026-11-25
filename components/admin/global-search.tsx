@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Search, Loader2, FileText, Users, Newspaper, Receipt, TrendingUp, ListChecks, UserSquare2, CornerDownLeft, ClipboardPen, Ticket } from 'lucide-react'
 import { zoekVeld } from '@/lib/zoekveld'
+import { NaarBody } from './naar-body'
 
 type Result = { type: string; label: string; title: string; subtitle?: string; href: string }
 
@@ -70,6 +71,7 @@ export function GlobalSearch({ verborgen = false }: { verborgen?: boolean }) {
       </button>}
 
       {open && (
+        <NaarBody>
         <div className="fixed inset-0 z-[60] flex items-start justify-center pt-[12vh] px-4 bg-black/30" onClick={() => setOpen(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
@@ -115,6 +117,7 @@ export function GlobalSearch({ verborgen = false }: { verborgen?: boolean }) {
             </div>
           </div>
         </div>
+        </NaarBody>
       )}
     </>
   )
