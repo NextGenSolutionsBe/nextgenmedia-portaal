@@ -1,0 +1,403 @@
+'use client'
+
+import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
+import { Check, Flag, Video, MapPin, Plus, Lock } from 'lucide-react'
+import {
+  plaatsVan, dagenVan, legUit, vandaag, plusDagen, zoneNaarIso, dag, uur, tekstOp, kortDag,
+  type Item, type Weergave, type Persoon,
+} from '@/lib/agenda/model'
+import { Avatars, focusRing } from './gedeeld'
+
+const PX_MIN = 0.8 // 48 px per uur
+const SNAP = 15
+const DAGNAAM = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo']
+
+export type Verplaatsing = { start_op: string | null; eind_op: string | null; heel_dag: boolean }
+export type NieuwMoment = { dag: string; vanMin?: number; totMin?: number; heelDag: boolean }
+
+type Props = {
+  weergave: Weergave
+  datum: string
+  items: Item[]
+  kleur: (i: Item) => string
+  personen: Map<string, Persoon>
+  magAanpassen: boolean
+  magToevoegen: boolean
+  onOpen: (i: Item) => void
+  onKlaar: (i: Item) => void
+  onVerplaats: (i: Item, v: Verplaatsing) => void
+  onNieuw: (m: NieuwMoment) => void
+  onDag: (d: string) => void
+}
+
+const hhmm = (min: number) => `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
+const snap = (min: number) => Math.max(0, Math.min(1440, Math.round(min / SNAP) * SNAP))
+const isoOp = (d: string, min: number) => (min >= 1440 ? zoneNaarIso(plusDagen(d, 1), '00:00') : zoneNaarIso(d, hhmm(min)))
+const verschuifDagen = (iso: string | null, n: number) => (iso ? zoneNaarIso(plusDagen(dag(iso), n), uur(iso)) : null)
+const dagenTussen = (a: string, b: string) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 86_400_000)
+const sleepbaar = (i: Item, mag: boolean) => mag && i.bron === 'ag'
+
+export function Kalender(p: Props) {
+  if (p.weergave === 'maand') return <Maand {...p} />
+  return <Rooster {...p} />
+}
+
+// ── Een item als blokje ─────────────────────────────────────────────────────
+
+function Vinkje({ i, onKlaar, klein }: { i: Item; onKlaar: (i: Item) => void; klein?: boolean }) {
+  if (i.bron !== 'ag' || i.soort === 'meeting') return null
+  const aan = i.status === 'klaar'
+  return (
+    <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onKlaar(i) }} aria-label={aan ? 'Terug open zetten' : 'Afvinken'}
+      className={`shrink-0 ${klein ? 'h-3 w-3' : 'h-3.5 w-3.5'} rounded-full border flex items-center justify-center ${aan ? 'bg-gray-900 border-gray-900 text-white' : 'border-current bg-white/60'} ${focusRing}`}>
+      {aan && <Check className="h-2.5 w-2.5" />}
+    </button>
+  )
+}
+
+function Chip({ i, kleur, onOpen, onKlaar, personen, tijd, sleep }: { i: Item; kleur: string; onOpen: (i: Item) => void; onKlaar: (i: Item) => void; personen: Map<string, Persoon>; tijd?: string | null; sleep: boolean }) {
+  const klaar = i.status === 'klaar' && i.soort !== 'meeting'
+  return (
+    <div draggable={sleep} onDragStart={(e) => { e.dataTransfer.setData('text/agenda-item', i.id); e.dataTransfer.effectAllowed = 'move' }}
+      onClick={() => onOpen(i)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
+      className={`group flex items-center gap-1 rounded-md px-1.5 py-[3px] text-[11.5px] leading-tight cursor-pointer select-none border border-black/5 hover:brightness-95 ${klaar ? 'opacity-55' : ''} ${focusRing}`}
+      style={{ background: kleur, color: tekstOp(kleur) }} title={i.titel}>
+      <Vinkje i={i} onKlaar={onKlaar} klein />
+      {i.urgent && !klaar && <Flag className="h-3 w-3 shrink-0 text-red-600 fill-red-600" />}
+      {(i.meet_url || i.bron === 'meeting') && <Video className="h-3 w-3 shrink-0 opacity-70" />}
+      {tijd && <span className="shrink-0 tabular-nums opacity-75">{tijd}</span>}
+      <span className={`truncate flex-1 ${klaar ? 'line-through' : ''}`}>{i.titel}</span>
+      {i.prive && <Lock className="h-2.5 w-2.5 shrink-0 opacity-60" />}
+      <Avatars ids={i.toegewezen} personen={personen} max={2} maat={14} />
+    </div>
+  )
+}
+
+// ── Dag en week ─────────────────────────────────────────────────────────────
+
+type Sleep =
+  | { soort: 'nieuw'; dag: string; van: number; tot: number; x: number; y: number }
+  | { soort: 'verplaats'; item: Item; dagIndex: number; van: number; duur: number; grijpMin: number; x: number; y: number; bewogen: boolean }
+  | { soort: 'rek'; item: Item; dag: string; van: number; tot: number; y: number; bewogen: boolean }
+
+function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToevoegen, onOpen, onKlaar, onVerplaats, onNieuw, onDag }: Props) {
+  const dagen = useMemo(() => dagenVan(weergave, datum), [weergave, datum])
+  const kolommenRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [sleep, setSleep] = useState<Sleep | null>(null)
+  const [nu, setNu] = useState(() => Date.now())
+  const [alleDag, setAlleDag] = useState(false)
+  useEffect(() => { const t = setInterval(() => setNu(Date.now()), 60_000); return () => clearInterval(t) }, [])
+
+  // Items per dag: rooster (met uur) en de rij "hele dag" (zonder uur of over meerdere dagen).
+  const { rooster, balken, banen } = useMemo(() => {
+    const rooster = new Map<string, { item: Item; vanMin: number; totMin: number }[]>()
+    const bal: { item: Item; van: number; tot: number }[] = []
+    const eerste = dagen[0], laatste = dagen[dagen.length - 1]
+    for (const i of items) {
+      const p = plaatsVan(i)
+      if (!p) continue
+      if (p.soort === 'rooster') {
+        if (p.dag < eerste || p.dag > laatste) continue
+        rooster.set(p.dag, [...(rooster.get(p.dag) ?? []), { item: i, vanMin: p.vanMin, totMin: p.totMin }])
+      } else {
+        if (p.tot < eerste || p.van > laatste) continue
+        bal.push({ item: i, van: Math.max(0, dagenTussen(eerste, p.van)), tot: Math.min(dagen.length - 1, dagenTussen(eerste, p.tot)) })
+      }
+    }
+    // Balken in banen leggen (langste eerst), zoals een maandkalender.
+    bal.sort((a, b) => a.van - b.van || (b.tot - b.van) - (a.tot - a.van) || Number(a.item.status === 'klaar') - Number(b.item.status === 'klaar') || a.item.titel.localeCompare(b.item.titel))
+    const banenEind: number[] = []
+    const balken = bal.map((b) => {
+      let baan = banenEind.findIndex((e) => e < b.van)
+      if (baan < 0) { baan = banenEind.length; banenEind.push(b.tot) } else banenEind[baan] = b.tot
+      return { ...b, baan }
+    })
+    return { rooster, balken, banen: banenEind.length }
+  }, [items, dagen])
+
+  // Bij een andere week of dag: naar 07:30, of vroeger als er dan al iets staat.
+  const gescrold = useRef<string | null>(null)
+  useEffect(() => {
+    const el = scrollRef.current
+    const sleutel = `${weergave}:${dagen[0]}`
+    if (!el || gescrold.current === sleutel) return
+    let vroegst = 450
+    for (const [, l] of rooster) for (const b of l) vroegst = Math.min(vroegst, b.vanMin)
+    el.scrollTop = Math.max(0, (vroegst - 20) * PX_MIN)
+    if (items.length) gescrold.current = sleutel
+  }, [weergave, dagen, rooster, items.length])
+
+  const MAX_BANEN = weergave === 'dag' ? 8 : 4
+  const toonBanen = alleDag ? banen : Math.min(banen, MAX_BANEN)
+  const verborgenPerDag = useMemo(() => {
+    const m = new Map<number, number>()
+    if (alleDag) return m
+    for (const b of balken) if (b.baan >= MAX_BANEN) for (let d = b.van; d <= b.tot; d++) m.set(d, (m.get(d) ?? 0) + 1)
+    return m
+  }, [balken, alleDag, MAX_BANEN])
+
+  // Pointer → dag en minuut in het rooster.
+  const positie = (x: number, y: number): { dagIndex: number; min: number } | null => {
+    const el = kolommenRef.current
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    const breedte = r.width / dagen.length
+    const dagIndex = Math.max(0, Math.min(dagen.length - 1, Math.floor((x - r.left) / breedte)))
+    return { dagIndex, min: (y - r.top) / PX_MIN }
+  }
+
+  const startNieuw = (e: RPointerEvent, d: string) => {
+    if (!magToevoegen || e.button !== 0) return
+    if ((e.target as HTMLElement).closest('[data-blok]')) return
+    const pos = positie(e.clientX, e.clientY)
+    if (!pos) return
+    const van = Math.min(1440 - SNAP, Math.floor(pos.min / SNAP) * SNAP)
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    setSleep({ soort: 'nieuw', dag: d, van, tot: van + SNAP, x: e.clientX, y: e.clientY })
+  }
+  const startVerplaats = (e: RPointerEvent, item: Item, dagIndex: number, van: number, tot: number) => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    const pos = positie(e.clientX, e.clientY)
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    setSleep({ soort: 'verplaats', item, dagIndex, van, duur: tot - van, grijpMin: pos ? pos.min - van : 0, x: e.clientX, y: e.clientY, bewogen: false })
+  }
+  const startRek = (e: RPointerEvent, item: Item, d: string, van: number, tot: number) => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    setSleep({ soort: 'rek', item, dag: d, van, tot, y: e.clientY, bewogen: false })
+  }
+  const beweeg = (e: RPointerEvent) => {
+    if (!sleep) return
+    const pos = positie(e.clientX, e.clientY)
+    if (!pos) return
+    if (sleep.soort === 'nieuw') setSleep({ ...sleep, tot: Math.max(sleep.van + SNAP, Math.min(1440, Math.ceil(pos.min / SNAP) * SNAP)) })
+    if (sleep.soort === 'verplaats') {
+      const ver = Math.abs(e.clientX - sleep.x) + Math.abs(e.clientY - sleep.y) > 4
+      if (!ver && !sleep.bewogen) return
+      const van = Math.max(0, Math.min(1440 - sleep.duur, snap(pos.min - sleep.grijpMin)))
+      setSleep({ ...sleep, dagIndex: pos.dagIndex, van, bewogen: true })
+    }
+    if (sleep.soort === 'rek') {
+      if (Math.abs(e.clientY - sleep.y) < 3 && !sleep.bewogen) return
+      setSleep({ ...sleep, tot: Math.max(sleep.van + SNAP, Math.min(1440, snap(pos.min))), bewogen: true })
+    }
+  }
+  const los = () => {
+    const s = sleep
+    setSleep(null)
+    if (!s) return
+    if (s.soort === 'nieuw') {
+      const klik = s.tot - s.van <= SNAP
+      onNieuw({ dag: s.dag, vanMin: s.van, totMin: klik ? Math.min(1440, s.van + 60) : s.tot, heelDag: false })
+    }
+    if (s.soort === 'verplaats') {
+      if (!s.bewogen) { onOpen(s.item); return }
+      const d = dagen[s.dagIndex]
+      onVerplaats(s.item, { start_op: isoOp(d, s.van), eind_op: isoOp(d, s.van + s.duur), heel_dag: false })
+    }
+    if (s.soort === 'rek' && s.bewogen) onVerplaats(s.item, { start_op: s.item.start_op ?? isoOp(s.dag, s.van), eind_op: isoOp(s.dag, s.tot), heel_dag: false })
+  }
+
+  // Een blokje uit de rij "hele dag" naar het rooster of naar een andere dag slepen.
+  const dropOpRooster = (e: React.DragEvent, d: string) => {
+    const id = e.dataTransfer.getData('text/agenda-item')
+    const item = items.find((x) => x.id === id)
+    if (!item) return
+    e.preventDefault()
+    const pos = positie(e.clientX, e.clientY)
+    const van = pos ? Math.min(1440 - 60, snap(pos.min)) : 540
+    onVerplaats(item, { start_op: isoOp(d, van), eind_op: isoOp(d, van + 60), heel_dag: false })
+  }
+  const dropOpDag = (e: React.DragEvent, d: string) => {
+    const id = e.dataTransfer.getData('text/agenda-item')
+    const item = items.find((x) => x.id === id)
+    if (!item) return
+    e.preventDefault()
+    const p = plaatsVan(item)
+    const van = p ? (p.soort === 'dag' ? p.van : p.dag) : d
+    const n = dagenTussen(van, d)
+    if (!n && item.heel_dag) return
+    if (item.heel_dag) onVerplaats(item, { start_op: verschuifDagen(item.start_op, n), eind_op: verschuifDagen(item.eind_op, n), heel_dag: true })
+    else onVerplaats(item, { start_op: item.start_op ? zoneNaarIso(d, '04:00') : null, eind_op: zoneNaarIso(d, '04:00'), heel_dag: true })
+  }
+
+  const vandaagD = vandaag()
+  const nuMin = (() => { const t = new Date(nu); return dag(t.toISOString()) === vandaagD ? Number(uur(t.toISOString()).slice(0, 2)) * 60 + Number(uur(t.toISOString()).slice(3)) : -1 })()
+  const cols = `56px repeat(${dagen.length}, minmax(0, 1fr))`
+
+  return (
+    <div className="card-base !p-0 overflow-hidden flex flex-col min-h-0 h-full">
+      {/* Kop met de dagen */}
+      <div className="grid border-b border-gray-200 bg-white" style={{ gridTemplateColumns: cols }}>
+        <div />
+        {dagen.map((d, n) => (
+          <button key={d} type="button" onClick={() => onDag(d)} className={`py-2 text-center border-l border-gray-100 hover:bg-gray-50 ${focusRing}`}>
+            <div className="label-mono text-[10px] text-gray-500 uppercase">{DAGNAAM[(n + (weergave === 'dag' ? (new Date(`${d}T12:00:00Z`).getUTCDay() + 6) % 7 : 0)) % 7]}</div>
+            <div className={`mx-auto mt-0.5 h-7 w-7 rounded-full flex items-center justify-center text-sm font-semibold ${d === vandaagD ? 'bg-gray-900 text-white' : 'text-gray-900'}`}>{Number(d.slice(8))}</div>
+          </button>
+        ))}
+      </div>
+
+      {/* Hele dag: taken zonder uur en wat over meerdere dagen loopt */}
+      {(balken.length > 0 || magToevoegen) && (
+        <div className="grid border-b border-gray-200 bg-gray-50/60" style={{ gridTemplateColumns: cols }}>
+          <div className="label-mono text-[9px] text-gray-400 uppercase px-1.5 pt-2 leading-tight">Hele<br />dag</div>
+          <div className="relative" style={{ gridColumn: `2 / span ${dagen.length}` }}>
+            <div className="absolute inset-0 grid" style={{ gridTemplateColumns: `repeat(${dagen.length}, minmax(0, 1fr))` }}>
+              {dagen.map((d, n) => (
+                <div key={d} className="border-l border-gray-100 group relative" onDragOver={(e) => { if (magAanpassen) e.preventDefault() }} onDrop={(e) => dropOpDag(e, d)}
+                  onDoubleClick={() => magToevoegen && onNieuw({ dag: d, heelDag: true })}>
+                  {magToevoegen && <button type="button" onClick={() => onNieuw({ dag: d, heelDag: true })} aria-label={`Taak op ${kortDag(d)}`} className={`absolute right-1 bottom-1 h-5 w-5 rounded-md bg-white border border-gray-200 text-gray-500 opacity-0 group-hover:opacity-100 focus:opacity-100 flex items-center justify-center z-10 ${focusRing}`}><Plus className="h-3 w-3" /></button>}
+                  {verborgenPerDag.get(n) ? <button type="button" onClick={() => setAlleDag(true)} className="absolute left-1 bottom-1 text-[10px] font-semibold text-gray-600 hover:underline z-10">+{verborgenPerDag.get(n)} meer</button> : null}
+                </div>
+              ))}
+            </div>
+            <div className="relative grid gap-y-[3px] py-1.5 px-0.5 pointer-events-none" style={{ gridTemplateColumns: `repeat(${dagen.length}, minmax(0, 1fr))`, gridAutoRows: '22px', minHeight: magToevoegen ? 34 : undefined, paddingBottom: verborgenPerDag.size ? 22 : undefined }}>
+              {balken.filter((b) => b.baan < toonBanen).map((b) => (
+                <div key={`${b.item.bron}-${b.item.id}`} className="pointer-events-auto px-0.5 min-w-0" style={{ gridColumn: `${b.van + 1} / ${b.tot + 2}`, gridRow: b.baan + 1 }}>
+                  <Chip i={b.item} kleur={kleur(b.item)} onOpen={onOpen} onKlaar={onKlaar} personen={personen} sleep={sleepbaar(b.item, magAanpassen)} />
+                </div>
+              ))}
+            </div>
+            {alleDag && banen > MAX_BANEN && <button type="button" onClick={() => setAlleDag(false)} className="absolute right-2 bottom-1 text-[10px] font-semibold text-gray-600 hover:underline">Minder tonen</button>}
+          </div>
+        </div>
+      )}
+
+      {/* Uurrooster */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0 relative">
+        <div className="grid relative" style={{ gridTemplateColumns: cols, height: 1440 * PX_MIN }}>
+          <div className="relative">
+            {Array.from({ length: 24 }, (_, h) => h > 0 && <div key={h} className="absolute right-1.5 -translate-y-1/2 text-[10px] tabular-nums text-gray-400" style={{ top: h * 60 * PX_MIN }}>{String(h).padStart(2, '0')}:00</div>)}
+          </div>
+          <div ref={kolommenRef} className="relative grid" style={{ gridColumn: `2 / span ${dagen.length}`, gridTemplateColumns: `repeat(${dagen.length}, minmax(0, 1fr))` }}
+            onPointerMove={beweeg} onPointerUp={los} onPointerCancel={() => setSleep(null)}>
+            {/* lijnen */}
+            <div className="absolute inset-0 pointer-events-none">
+              {Array.from({ length: 24 }, (_, h) => <div key={h} className="absolute left-0 right-0 border-t border-gray-100" style={{ top: h * 60 * PX_MIN }} />)}
+            </div>
+            {dagen.map((d, n) => {
+              const blokken = legUit(rooster.get(d) ?? [])
+              return (
+                <div key={d} className={`relative border-l border-gray-100 ${d === vandaagD ? 'bg-gray-50/50' : ''} ${magToevoegen ? 'cursor-crosshair' : ''}`}
+                  onPointerDown={(e) => startNieuw(e, d)} onDragOver={(e) => { if (magAanpassen) e.preventDefault() }} onDrop={(e) => dropOpRooster(e, d)}>
+                  {blokken.map((b) => {
+                    const i = b.item
+                    const bezig = sleep && sleep.soort !== 'nieuw' && sleep.item.id === i.id && sleep.bewogen
+                    const kl = kleur(i)
+                    const hoogte = Math.max(18, (b.totMin - b.vanMin) * PX_MIN - 2)
+                    const sl = sleepbaar(i, magAanpassen)
+                    const klaar = i.status === 'klaar' && i.soort !== 'meeting'
+                    return (
+                      <div key={`${i.bron}-${i.id}`} data-blok role="button" tabIndex={0}
+                        onPointerDown={(e) => (sl ? startVerplaats(e, i, n, b.vanMin, b.totMin) : undefined)}
+                        onClick={() => { if (!sl) onOpen(i) }} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
+                        className={`absolute rounded-md border border-black/10 px-1.5 py-1 overflow-hidden text-[11.5px] leading-tight shadow-sm cursor-pointer select-none ${klaar ? 'opacity-55' : ''} ${bezig ? 'opacity-30' : ''} ${focusRing}`}
+                        style={{ top: b.vanMin * PX_MIN + 1, height: hoogte, left: `calc(${(b.kolom / b.kolommen) * 100}% + 2px)`, width: `calc(${100 / b.kolommen}% - 4px)`, background: kl, color: tekstOp(kl), touchAction: sl ? 'none' : undefined }}
+                        title={`${hhmm(b.vanMin)}–${hhmm(b.totMin)} ${i.titel}`}>
+                        <div className="flex items-start gap-1">
+                          <span className="mt-px"><Vinkje i={i} onKlaar={onKlaar} klein /></span>
+                          {i.urgent && !klaar && <Flag className="h-3 w-3 mt-px shrink-0 text-red-600 fill-red-600" />}
+                          <span className={`font-semibold ${hoogte < 30 ? 'truncate' : 'line-clamp-3'} ${klaar ? 'line-through' : ''}`}>{i.titel}</span>
+                        </div>
+                        {hoogte >= 30 && (
+                          <div className="flex items-center gap-1 mt-0.5 opacity-75 tabular-nums">
+                            {(i.meet_url || i.bron === 'meeting') && <Video className="h-3 w-3 shrink-0" />}
+                            {i.locatie && !i.meet_url && <MapPin className="h-3 w-3 shrink-0" />}
+                            <span className="truncate">{hhmm(b.vanMin)}–{hhmm(b.totMin)}</span>
+                            <span className="flex-1" />
+                            {hoogte >= 44 && <Avatars ids={i.toegewezen} personen={personen} max={3} maat={15} />}
+                          </div>
+                        )}
+                        {sl && <div onPointerDown={(e) => startRek(e, i, d, b.vanMin, b.totMin)} className="absolute left-0 right-0 bottom-0 h-1.5 cursor-ns-resize" aria-hidden />}
+                      </div>
+                    )
+                  })}
+                  {/* Wat je nu sleept */}
+                  {sleep?.soort === 'nieuw' && sleep.dag === d && (
+                    <div className="absolute left-0.5 right-0.5 rounded-md bg-gray-900/80 text-white text-[11px] px-1.5 py-1 pointer-events-none z-20" style={{ top: sleep.van * PX_MIN, height: Math.max(12, (sleep.tot - sleep.van) * PX_MIN) }}>{hhmm(sleep.van)}–{hhmm(sleep.tot)}</div>
+                  )}
+                  {sleep?.soort === 'verplaats' && sleep.bewogen && sleep.dagIndex === n && (
+                    <div className="absolute left-0.5 right-0.5 rounded-md border-2 border-gray-900 bg-white/80 text-[11px] px-1.5 py-1 pointer-events-none z-20 font-semibold" style={{ top: sleep.van * PX_MIN, height: Math.max(18, sleep.duur * PX_MIN) }}>{hhmm(sleep.van)}–{hhmm(sleep.van + sleep.duur)} {sleep.item.titel}</div>
+                  )}
+                  {sleep?.soort === 'rek' && sleep.bewogen && sleep.dag === d && (
+                    <div className="absolute left-0.5 right-0.5 rounded-md border-2 border-gray-900 bg-white/60 text-[11px] px-1.5 py-1 pointer-events-none z-20" style={{ top: sleep.van * PX_MIN, height: (sleep.tot - sleep.van) * PX_MIN }}>tot {hhmm(sleep.tot)}</div>
+                  )}
+                  {d === vandaagD && nuMin >= 0 && (
+                    <div className="absolute left-0 right-0 z-10 pointer-events-none" style={{ top: nuMin * PX_MIN }}>
+                      <div className="h-px bg-red-500" /><div className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-red-500" />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Maand ───────────────────────────────────────────────────────────────────
+
+function Maand({ datum, items, kleur, personen, magAanpassen, magToevoegen, onOpen, onKlaar, onVerplaats, onNieuw, onDag }: Props) {
+  const dagen = useMemo(() => dagenVan('maand', datum), [datum])
+  const maand = datum.slice(0, 7)
+  const perDag = useMemo(() => {
+    const m = new Map<string, Item[]>()
+    const eerste = dagen[0], laatste = dagen[dagen.length - 1]
+    for (const i of items) {
+      const p = plaatsVan(i)
+      if (!p) continue
+      const van = p.soort === 'rooster' ? p.dag : p.van, tot = p.soort === 'rooster' ? p.dag : p.tot
+      if (tot < eerste || van > laatste) continue
+      for (let d = van < eerste ? eerste : van, n = 0; d <= tot && d <= laatste && n < 45; d = plusDagen(d, 1), n++) m.set(d, [...(m.get(d) ?? []), i])
+    }
+    // Hele dag eerst, dan op uur, afgevinkt onderaan.
+    for (const [, l] of m) l.sort((a, b) => Number(a.status === 'klaar' && a.soort !== 'meeting') - Number(b.status === 'klaar' && b.soort !== 'meeting') || Number(!a.heel_dag) - Number(!b.heel_dag) || (a.start_op ?? a.eind_op ?? '').localeCompare(b.start_op ?? b.eind_op ?? ''))
+    return m
+  }, [items, dagen])
+  const vandaagD = vandaag()
+  const drop = (e: React.DragEvent, d: string) => {
+    const item = items.find((x) => x.id === e.dataTransfer.getData('text/agenda-item'))
+    if (!item) return
+    e.preventDefault()
+    const p = plaatsVan(item)
+    const van = p ? (p.soort === 'dag' ? p.van : p.dag) : d
+    const n = dagenTussen(van, d)
+    if (!n) return
+    onVerplaats(item, { start_op: verschuifDagen(item.start_op, n), eind_op: verschuifDagen(item.eind_op, n), heel_dag: item.heel_dag })
+  }
+  return (
+    <div className="card-base !p-0 overflow-hidden flex flex-col h-full min-h-0">
+      <div className="grid grid-cols-7 border-b border-gray-200">
+        {DAGNAAM.map((d) => <div key={d} className="label-mono text-[10px] uppercase text-gray-500 text-center py-2 border-l first:border-l-0 border-gray-100">{d}</div>)}
+      </div>
+      <div className="grid grid-cols-7 flex-1 min-h-0 overflow-y-auto" style={{ gridAutoRows: 'minmax(118px, auto)' }}>
+        {dagen.map((d) => {
+          const l = perDag.get(d) ?? []
+          const toon = l.slice(0, 4)
+          return (
+            <div key={d} className={`group relative border-l border-t border-gray-100 p-1 min-w-0 ${d.slice(0, 7) !== maand ? 'bg-gray-50/70' : ''}`}
+              onDragOver={(e) => { if (magAanpassen) e.preventDefault() }} onDrop={(e) => drop(e, d)}>
+              <div className="flex items-center justify-between mb-0.5">
+                <button type="button" onClick={() => onDag(d)} className={`h-6 min-w-6 px-1 rounded-full text-xs font-semibold ${d === vandaagD ? 'bg-gray-900 text-white' : d.slice(0, 7) !== maand ? 'text-gray-400' : 'text-gray-800'} hover:ring-1 hover:ring-gray-300 ${focusRing}`}>{Number(d.slice(8))}</button>
+                {magToevoegen && <button type="button" onClick={() => onNieuw({ dag: d, heelDag: true })} aria-label={`Nieuw op ${kortDag(d)}`} className={`h-5 w-5 rounded-md text-gray-500 hover:bg-gray-100 opacity-0 group-hover:opacity-100 focus:opacity-100 flex items-center justify-center ${focusRing}`}><Plus className="h-3 w-3" /></button>}
+              </div>
+              <div className="space-y-[3px]">
+                {toon.map((i) => {
+                  const p = plaatsVan(i)
+                  return <Chip key={`${i.bron}-${i.id}`} i={i} kleur={kleur(i)} onOpen={onOpen} onKlaar={onKlaar} personen={personen} sleep={sleepbaar(i, magAanpassen)} tijd={p?.soort === 'rooster' ? hhmm(p.vanMin) : null} />
+                })}
+                {l.length > toon.length && <button type="button" onClick={() => onDag(d)} className="text-[11px] font-semibold text-gray-600 hover:underline px-1">+{l.length - toon.length} meer</button>}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}

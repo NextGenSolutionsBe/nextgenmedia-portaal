@@ -9,7 +9,7 @@ import {
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
   Info, Camera, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
   MailCheck, FolderUp, Handshake, Settings, ClipboardPen, Contact, Timer, Video, Inbox, Clapperboard, Building2, FileSignature, ScrollText, Wallet, PackageCheck, Aperture,
-  Target, LineChart,
+  Target, LineChart, CalendarRange,
 } from 'lucide-react'
 import { canSeeModule } from '@/lib/staff'
 import { DISABLED_MODULE_KEYS } from '@/lib/features'
@@ -42,6 +42,7 @@ const SECTIONS: NavSection[] = [
   {
     items: [
       { label: 'Command Center', href: '/admin', icon: LayoutDashboard, exact: true },
+      { label: 'Agenda', href: '/admin/agenda', icon: CalendarRange, module: 'agenda' },
       { label: 'Dagelijkse planning Chiara', href: '/admin/contentplanning', icon: CalendarDays, module: 'info' },
     ],
   },

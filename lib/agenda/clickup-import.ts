@@ -282,7 +282,7 @@ async function takenPaginas(admin: Admin, cu: Cu, team: string, bron: Bron, dead
 
 // ── Docs ────────────────────────────────────────────────────────────────────
 
-type CuDoc = { id: string; name: string; parent?: { id: string; type: number }; date_updated?: number | string; deleted?: boolean; archived?: boolean }
+type CuDoc = { id: string; name: string; parent?: { id: string; type: number }; date_updated?: number | string; deleted?: boolean; archived?: boolean; creator?: number }
 type CuPagina = { id: string; name?: string; content?: string; pages?: CuPagina[] }
 const PARENT: Record<number, string> = { 4: 'space', 5: 'map', 6: 'lijst' }
 
@@ -299,6 +299,9 @@ function paginasNaarTekst(pag: CuPagina[], titel: string, diepte = 1): string {
 async function docs(admin: Admin, cu: Cu, team: string, bron: Bron, deadline: number, tellers: Record<string, number>, sinds: number | null): Promise<{ klaar: boolean }> {
   const cursor = { ...(bron.cursor ?? {}) } as Record<string, unknown>
   let volgende = (cursor.docsCursor as string | undefined) ?? undefined
+  // De maker wordt de eigenaar: een doc in een map die we niet kennen, ziet enkel hij of zij.
+  const { data: pers } = await admin.from('ag_personen').select('id, clickup_id').not('clickup_id', 'is', null)
+  const persoonVan = new Map(((pers ?? []) as { id: string; clickup_id: number }[]).map((p) => [Number(p.clickup_id), p.id]))
   for (let ronde = 0; ronde < 50; ronde++) {
     if (Date.now() > deadline) { cursor.docsCursor = volgende; await admin.from('ag_clickup_bronnen').update({ cursor }).eq('id', bron.id); return { klaar: false } }
     const p = new URLSearchParams({ limit: '50', deleted: 'false', archived: 'false' })
@@ -310,8 +313,12 @@ async function docs(admin: Admin, cu: Cu, team: string, bron: Bron, deadline: nu
       if (d.deleted || d.archived) continue
       const bijgewerkt = d.date_updated ? new Date(Number(d.date_updated)).toISOString() : null
       if (sinds && bijgewerkt && Date.parse(bijgewerkt) <= sinds) continue
-      const { data: al } = await admin.from('ag_docs').select('id, clickup_bijgewerkt_op, in_app_gewijzigd_op').eq('clickup_id', d.id).maybeSingle()
-      if (al && !magOverschrijven(al as { clickup_bijgewerkt_op: string | null; in_app_gewijzigd_op: string | null }, bijgewerkt)) continue
+      const eigenaar = d.creator ? persoonVan.get(Number(d.creator)) ?? null : null
+      const { data: al } = await admin.from('ag_docs').select('id, eigenaar_id, clickup_bijgewerkt_op, in_app_gewijzigd_op').eq('clickup_id', d.id).maybeSingle()
+      if (al && !magOverschrijven(al as { clickup_bijgewerkt_op: string | null; in_app_gewijzigd_op: string | null }, bijgewerkt)) {
+        if (!al.eigenaar_id && eigenaar) await admin.from('ag_docs').update({ eigenaar_id: eigenaar }).eq('id', al.id)
+        continue
+      }
       let inhoud = ''
       try {
         const pag = await cu.get<CuPagina[] | { pages?: CuPagina[] }>(`${V3}/workspaces/${team}/docs/${d.id}/pages?max_page_depth=-1&content_format=text%2Fmd`)
@@ -320,7 +327,7 @@ async function docs(admin: Admin, cu: Cu, team: string, bron: Bron, deadline: nu
       const type = d.parent ? PARENT[Number(d.parent.type)] ?? null : null
       await admin.from('ag_docs').upsert({
         clickup_id: d.id, titel: (d.name || 'Naamloos document').slice(0, 300), inhoud,
-        clickup_parent_id: type ? d.parent!.id : null, clickup_parent_type: type, clickup_bijgewerkt_op: bijgewerkt,
+        clickup_parent_id: type ? d.parent!.id : null, clickup_parent_type: type, clickup_bijgewerkt_op: bijgewerkt, eigenaar_id: eigenaar,
         ...(al ? {} : { space_id: null, map_id: null, lijst_id: null }), updated_at: new Date().toISOString(),
       }, { onConflict: 'clickup_id' })
       tellers.docs = (tellers.docs ?? 0) + 1
