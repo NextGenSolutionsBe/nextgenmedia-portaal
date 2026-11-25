@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
 async function boom(c: Ctx) {
   const { admin, k } = c
   const z = await laadZicht(admin, k)
-  const [b, personen, labels, klanten, kleuren, delen, bronnen, mail, rechten] = await Promise.all([
+  const [b, personen, labels, klanten, kleuren, delen, bronnen, mail, rechten, rollen] = await Promise.all([
     boomVoor(admin, z),
     laadPersonen(admin),
     laadLabels(admin),
@@ -82,9 +82,12 @@ async function boom(c: Ctx) {
     admin.from('ag_clickup_bronnen').select('id, sleutel, persoon_id, clickup_naam, actief, fase, volledig_op, laatste_sync_op, bezig_sinds, tellers, fout'),
     k.isAdmin ? admin.from('ag_mail_voorstellen').select('id', { count: 'exact', head: true }).eq('status', 'voorstel') : Promise.resolve({ count: 0 }),
     Promise.all((['toevoegen', 'aanpassen', 'verwijderen', 'instellingen'] as Actie[]).map(async (a) => [a, !!(await magIk('agenda', a))] as const)),
+    admin.from('user_roles').select('user_id').eq('role', 'admin'),
   ])
+  const admins = new Set(((rollen.data ?? []) as { user_id: string }[]).map((r) => r.user_id))
   return {
     ik: k.persoonId, isAdmin: k.isAdmin, ...b, personen, labels,
+    zaakvoerders: personen.filter((p) => p.user_id && admins.has(p.user_id)).map((p) => p.id),
     klanten: ((klanten.data ?? []) as { id: string; company_name: string | null; archived_at: string | null }[]).map((x) => ({ id: x.id, naam: x.company_name ?? 'Klant', gearchiveerd: !!x.archived_at })),
     klantKleuren: Object.fromEntries(((kleuren.data ?? []) as { client_id: string; kleur: string }[]).map((x) => [x.client_id, x.kleur])),
     deelIkMet: ((delen.data ?? []) as { eigenaar_id: string; kijker_id: string }[]).filter((d) => d.eigenaar_id === k.persoonId).map((d) => d.kijker_id),

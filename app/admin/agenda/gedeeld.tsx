@@ -17,7 +17,7 @@ export type BoomData = {
   ik: string; isAdmin: boolean
   spaces: Space[]; mappen: AgMap[]; lijsten: LijstMetStatus[]; docs: DocKort[]
   leden: Record<string, string[]>
-  personen: Persoon[]; labels: Label[]; klanten: Klant[]; klantKleuren: Record<string, string>
+  personen: Persoon[]; zaakvoerders: string[]; labels: Label[]; klanten: Klant[]; klantKleuren: Record<string, string>
   deelIkMet: string[]; zieIkVan: string[]
   clickup: ClickupBron[]
   mailVoorstellen: number
