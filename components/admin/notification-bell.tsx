@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Bell, Loader2, Check } from 'lucide-react'
+import { NaarBody } from './naar-body'
 
 type Notif = { id: string; kind: string; priority: 'high' | 'med' | 'low'; title: string; date: string | null; href: string }
 
@@ -18,6 +19,8 @@ export function NotificationBell() {
   const [loading, setLoading] = useState(true)
   const [read, setRead] = useState<Set<string>>(new Set())
   const ref = useRef<HTMLDivElement>(null)
+  // Op de gsm staat het menu in <body> (zie NaarBody): klikken daarin mag het niet sluiten.
+  const paneelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     try { setRead(new Set(JSON.parse(localStorage.getItem(READ_KEY) || '[]'))) } catch { /* */ }
@@ -34,7 +37,11 @@ export function NotificationBell() {
   useEffect(() => { load() }, [load])
 
   useEffect(() => {
-    const onClick = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    const onClick = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (ref.current?.contains(t) || paneelRef.current?.contains(t)) return
+      setOpen(false)
+    }
     document.addEventListener('mousedown', onClick)
     return () => document.removeEventListener('mousedown', onClick)
   }, [])
@@ -44,21 +51,13 @@ export function NotificationBell() {
   const markAll = () => persist(new Set(items.map((n) => n.id)))
   const go = (n: Notif) => { const s = new Set(read); s.add(n.id); persist(s); setOpen(false); router.push(n.href) }
 
-  return (
-    <div className="relative" ref={ref}>
-      <button onClick={() => setOpen((v) => !v)} className="relative h-9 w-9 flex items-center justify-center rounded-full bg-white border border-black/[0.06] shadow-sm hover:border-black/[0.12]" title="Meldingen">
-        <Bell className="h-4 w-4 text-gray-600" />
-        {unread.length > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{unread.length > 99 ? '99+' : unread.length}</span>
-        )}
-      </button>
-      {open && (
-        <div className="fixed inset-x-3 top-14 sm:absolute sm:inset-x-auto sm:top-auto sm:right-0 sm:mt-1 sm:w-80 bg-white border border-gray-200 rounded-xl shadow-lg z-50 overflow-hidden">
+  const paneel = (
+    <>
           <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
             <span className="text-sm font-semibold">Meldingen {unread.length > 0 && <span className="text-gray-400 font-normal">({unread.length})</span>}</span>
             {unread.length > 0 && <button onClick={markAll} className="text-xs text-gray-500 hover:text-black flex items-center gap-1"><Check className="h-3 w-3" />Alles gelezen</button>}
           </div>
-          <div className="max-h-[60vh] overflow-y-auto">
+          <div className="max-h-[calc(100dvh-140px)] sm:max-h-[60vh] overflow-y-auto">
             {loading ? (
               <div className="py-6 text-center text-gray-400"><Loader2 className="h-4 w-4 animate-spin mx-auto" /></div>
             ) : items.length === 0 ? (
@@ -83,7 +82,31 @@ export function NotificationBell() {
               </ul>
             )}
           </div>
-        </div>
+    </>
+  )
+
+  return (
+    <div className="relative" ref={ref}>
+      <button onClick={() => setOpen((v) => !v)} className="relative h-9 w-9 flex items-center justify-center rounded-full bg-white border border-black/[0.06] shadow-sm hover:border-black/[0.12]" title="Meldingen">
+        <Bell className="h-4 w-4 text-gray-600" />
+        {unread.length > 0 && (
+          <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{unread.length > 99 ? '99+' : unread.length}</span>
+        )}
+      </button>
+      {open && (
+        <>
+          {/* Computer: onder de bel. */}
+          <div className="hidden sm:block absolute right-0 mt-1 w-80 bg-white border border-gray-200 rounded-xl shadow-lg z-50 overflow-hidden">
+            {paneel}
+          </div>
+          {/* Gsm: over de volle breedte, buiten het glaspaneel. */}
+          <NaarBody>
+            <div className="sm:hidden fixed inset-0 z-[70] bg-black/20" onClick={() => setOpen(false)} aria-hidden />
+            <div ref={paneelRef} className="sm:hidden fixed inset-x-3 top-[68px] z-[71] bg-white border border-gray-200 rounded-2xl shadow-xl overflow-hidden" role="dialog" aria-label="Meldingen">
+              {paneel}
+            </div>
+          </NaarBody>
+        </>
       )}
     </div>
   )
