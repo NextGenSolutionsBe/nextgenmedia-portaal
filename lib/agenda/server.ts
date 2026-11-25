@@ -105,18 +105,17 @@ export const ITEM_VELDEN = 'id, soort, titel, status, clickup_status, clickup_st
 export async function metToegewezen(admin: Admin, ruw: RuwItem[], z: Zicht, opts: { subtaken?: boolean } = {}): Promise<Item[]> {
   if (!ruw.length) return []
   const ids = ruw.map((r) => r.id)
+  // Per 150 id's (de lijst gaat in de adresregel) en alle stukken tegelijk.
+  const stukken: string[][] = []
+  for (let i = 0; i < ids.length; i += 150) stukken.push(ids.slice(i, i + 150))
+  const [twRijen, subRijen] = await Promise.all([
+    Promise.all(stukken.map((s) => admin.from('ag_toegewezen').select('item_id, persoon_id').in('item_id', s).then((r) => (r.data ?? []) as { item_id: string; persoon_id: string }[]))),
+    opts.subtaken ? Promise.all(stukken.map((s) => admin.from('ag_items').select('parent_id').in('parent_id', s).is('verwijderd_op', null).then((r) => (r.data ?? []) as { parent_id: string }[]))) : Promise.resolve([]),
+  ])
   const tw = new Map<string, string[]>()
-  for (let i = 0; i < ids.length; i += 300) {
-    const { data } = await admin.from('ag_toegewezen').select('item_id, persoon_id').in('item_id', ids.slice(i, i + 300))
-    for (const r of (data ?? []) as { item_id: string; persoon_id: string }[]) tw.set(r.item_id, [...(tw.get(r.item_id) ?? []), r.persoon_id])
-  }
+  for (const r of twRijen.flat()) tw.set(r.item_id, [...(tw.get(r.item_id) ?? []), r.persoon_id])
   const sub = new Map<string, number>()
-  if (opts.subtaken) {
-    for (let i = 0; i < ids.length; i += 300) {
-      const { data } = await admin.from('ag_items').select('parent_id').in('parent_id', ids.slice(i, i + 300)).is('verwijderd_op', null)
-      for (const r of (data ?? []) as { parent_id: string }[]) sub.set(r.parent_id, (sub.get(r.parent_id) ?? 0) + 1)
-    }
-  }
+  for (const r of subRijen.flat()) sub.set(r.parent_id, (sub.get(r.parent_id) ?? 0) + 1)
   return ruw
     .filter((r) => itemZichtbaar(r, tw.get(r.id) ?? [], z))
     .map((r) => {

@@ -212,7 +212,9 @@ export function AgendaApp() {
   if (fout) return <div className="card-base text-sm text-red-700">{fout}</div>
   if (!boom) return <div className="card-base flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-gray-400" /></div>
 
-  const mensen = boom.personen.filter((p) => p.actief && p.user_id)
+  // Ik eerst, dan de zaakvoerders, dan de rest met een account.
+  const rang = (id: string) => (id === boom.ik ? 0 : boom.zaakvoerders.includes(id) ? 1 : 2)
+  const mensen = boom.personen.filter((p) => p.actief && p.user_id).sort((a, b) => rang(a.id) - rang(b.id) || a.naam.localeCompare(b.naam))
   const titelKeuze = keuze && keuze.soort !== 'doc'
     ? (keuze.soort === 'lijst' ? padVan(boom, keuze.id) : keuze.soort === 'map' ? [boom.mappen.find((m) => m.id === keuze.id)?.naam ?? 'Map'] : [boom.spaces.find((s) => s.id === keuze.id)?.naam ?? 'Space'])
     : null
