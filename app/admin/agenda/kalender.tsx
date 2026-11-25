@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { Check, Flag, Video, MapPin, Plus, Lock, RotateCcw, Clock } from 'lucide-react'
 import {
-  plaatsVan, dagenVan, legUit, vandaag, plusDagen, zoneNaarIso, dag, uur, kortDag, enkelDeadline, deadlineLabel,
+  plaatsVan, dagenVan, perDagVan, legUit, vandaag, plusDagen, zoneNaarIso, dag, uur, kortDag, enkelDeadline, deadlineLabel,
   type Item, type Weergave, type Persoon,
 } from '@/lib/agenda/model'
 import { Avatars, focusRing } from './gedeeld'
@@ -87,7 +87,20 @@ export function DeadlineLabel({ i, opDag, lang = false, klein = false }: { i: Pi
 
 export function Kalender(p: Props) {
   if (p.weergave === 'maand') return <Maand {...p} />
+  if (p.weergave === 'planning') return <Planning {...p} />
   return <Rooster {...p} />
+}
+
+/** Gsm-breedte: week en werkweek passen dan op het scherm met compacte blokjes. */
+function useSmal(): boolean {
+  const [smal, setSmal] = useState(false)
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)')
+    const f = () => setSmal(mq.matches)
+    f(); mq.addEventListener('change', f)
+    return () => mq.removeEventListener('change', f)
+  }, [])
+  return smal
 }
 
 // ── Een item als blokje ─────────────────────────────────────────────────────
@@ -116,9 +129,19 @@ function SnelKlaar({ i, onKlaar, tekst, onder = false }: { i: Item; onKlaar: (i:
   )
 }
 
-function Chip({ i, kleur, onOpen, onKlaar, personen, tijd, sleep, opDag, lang, magKlaar }: { i: Item; kleur: string; onOpen: (i: Item) => void; onKlaar: (i: Item) => void; personen: Map<string, Persoon>; tijd?: string | null; sleep: boolean; opDag?: string; lang?: boolean; magKlaar: boolean }) {
+function Chip({ i, kleur, onOpen, onKlaar, personen, tijd, sleep, opDag, lang, magKlaar, compact = false }: { i: Item; kleur: string; onOpen: (i: Item) => void; onKlaar: (i: Item) => void; personen: Map<string, Persoon>; tijd?: string | null; sleep: boolean; opDag?: string; lang?: boolean; magKlaar: boolean; compact?: boolean }) {
   const klaar = isKlaar(i)
   const dl = enkelDeadline(i)
+  // Smalle kolom (week op de gsm): enkel de titel, tikken opent de taak.
+  if (compact) {
+    return (
+      <div onClick={() => onOpen(i)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
+        className={`relative flex items-center rounded-md pl-1 pr-0.5 h-[24px] text-[11px] font-medium leading-none cursor-pointer select-none ${focusRing}`}
+        style={stijlVan(i, kleur)} title={i.titel}>
+        <span className={`truncate ${klaar ? 'line-through decoration-1 opacity-80' : ''}`}>{i.titel}</span>
+      </div>
+    )
+  }
   return (
     <div draggable={sleep} onDragStart={(e) => { e.dataTransfer.setData('text/agenda-item', i.id); e.dataTransfer.effectAllowed = 'move' }}
       onClick={() => onOpen(i)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
@@ -155,6 +178,8 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
   const kolommenRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [sleep, setSleep] = useState<Sleep | null>(null)
+  const smal = useSmal()
+  const compact = smal && dagen.length > 1
   // Met de vinger: een blok wacht eerst tot je het even inhoudt. Beweeg je eerder, dan scroll je gewoon.
   const houd = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number; item: Item } | null>(null)
   const aanSlepen = useRef(false)
@@ -335,18 +360,26 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
 
   const vandaagD = vandaag()
   const nuMin = (() => { const t = new Date(nu); return dag(t.toISOString()) === vandaagD ? Number(uur(t.toISOString()).slice(0, 2)) * 60 + Number(uur(t.toISOString()).slice(3)) : -1 })()
-  const cols = `60px repeat(${dagen.length}, minmax(0, 1fr))`
+  const cols = `${compact ? 34 : 60}px repeat(${dagen.length}, minmax(0, 1fr))`
 
   return (
     <div className="card-base !p-0 overflow-hidden h-full">
-     {/* Op een smal scherm schuift de week opzij; elke dag blijft leesbaar breed. */}
+     {/* Op de gsm past de hele week (of werkweek) op het scherm, met compacte blokjes. */}
      <div className="h-full overflow-x-auto overscroll-x-contain">
-      <div className={`h-full flex flex-col min-h-0 ${weergave === 'week' ? 'min-w-[956px] md:min-w-0' : ''}`}>
+      <div className="h-full flex flex-col min-h-0">
       {/* Kop met de dagen */}
       <div className="grid border-b border-gray-200 bg-white" style={{ gridTemplateColumns: cols }}>
         <div />
         {dagen.map((d) => {
           const wd = weekdag(d)
+          if (compact) {
+            return (
+              <button key={d} type="button" onClick={() => onDag(d)} className={`border-l border-gray-100 py-1.5 flex flex-col items-center gap-0.5 ${focusRing}`}>
+                <span className={`text-[11px] font-semibold capitalize ${d === vandaagD ? 'text-gray-900' : 'text-gray-500'}`}>{DAGNAAM[wd]}</span>
+                <span className={`h-7 min-w-7 px-1 rounded-full flex items-center justify-center text-[14px] font-bold ${d === vandaagD ? 'bg-gray-900 text-white' : 'text-gray-900'}`}>{Number(d.slice(8))}</span>
+              </button>
+            )
+          }
           return (
             <div key={d} className="relative group border-l border-gray-100">
               <button type="button" onClick={() => onDag(d)} className={`w-full h-full py-2.5 px-2 hover:bg-gray-50 flex items-center gap-2 ${weergave === 'dag' ? 'justify-start pl-4' : 'justify-center'} ${magToevoegen ? 'pr-9' : ''} ${focusRing}`}>
@@ -371,7 +404,7 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
       {/* Hele dag: taken zonder uur en wat over meerdere dagen loopt */}
       {(balken.length > 0 || magToevoegen) && (
         <div className="grid border-b border-gray-200 bg-gray-50/60" style={{ gridTemplateColumns: cols }}>
-          <div className="label-mono text-[9px] text-gray-400 uppercase px-2 pt-2.5 leading-tight">Hele<br />dag</div>
+          <div className={`label-mono text-[9px] text-gray-400 uppercase pt-2.5 leading-tight ${compact ? 'px-0.5 text-center' : 'px-2'}`}>{compact ? 'Dag' : <>Hele<br />dag</>}</div>
           <div className="relative" style={{ gridColumn: `2 / span ${dagen.length}` }}>
            <div className={alleDag ? 'max-h-[38vh] overflow-y-auto' : ''}>
             <div className="relative">
@@ -380,14 +413,14 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
                 <div key={d} className="border-l border-gray-100 group relative" onDragOver={(e) => { if (magAanpassen) e.preventDefault() }} onDrop={(e) => dropOpDag(e, d)}
                   onDoubleClick={() => magToevoegen && onNieuw({ dag: d, heelDag: true })}>
                   {magToevoegen && <button type="button" onClick={() => onNieuw({ dag: d, heelDag: true })} aria-label={`Taak op ${kortDag(d)}`} className={`absolute right-1 bottom-1 h-5 w-5 rounded-md bg-white border border-gray-200 text-gray-500 opacity-0 group-hover:opacity-100 focus:opacity-100 flex items-center justify-center z-10 ${focusRing}`}><Plus className="h-3 w-3" /></button>}
-                  {verborgenPerDag.get(n) ? <button type="button" onClick={() => setAlleDag(true)} className="absolute left-1.5 bottom-1 text-[12px] font-semibold text-gray-700 hover:underline z-10">+{verborgenPerDag.get(n)} meer</button> : null}
+                  {verborgenPerDag.get(n) ? <button type="button" onClick={() => setAlleDag(true)} className={`absolute bottom-1 font-semibold text-gray-700 hover:underline z-10 ${compact ? 'left-0.5 text-[10px]' : 'left-1.5 text-[12px]'}`}>+{verborgenPerDag.get(n)}{compact ? '' : ' meer'}</button> : null}
                 </div>
               ))}
             </div>
-            <div className="relative grid gap-y-1 py-2 px-1 pointer-events-none" style={{ gridTemplateColumns: `repeat(${dagen.length}, minmax(0, 1fr))`, gridAutoRows: '30px', minHeight: magToevoegen ? 44 : undefined, paddingBottom: verborgenPerDag.size ? 24 : undefined }}>
+            <div className={`relative grid gap-y-1 py-2 pointer-events-none ${compact ? 'px-0' : 'px-1'}`} style={{ gridTemplateColumns: `repeat(${dagen.length}, minmax(0, 1fr))`, gridAutoRows: compact ? '24px' : '30px', minHeight: magToevoegen ? 44 : undefined, paddingBottom: verborgenPerDag.size ? 24 : undefined }}>
               {balken.filter((b) => b.baan < toonBanen).map((b) => (
-                <div key={`${b.item.bron}-${b.item.id}`} className="pointer-events-auto px-1 min-w-0" style={{ gridColumn: `${b.van + 1} / ${b.tot + 2}`, gridRow: b.baan + 1 }}>
-                  <Chip i={b.item} kleur={kleur(b.item)} onOpen={onOpen} onKlaar={onKlaar} personen={personen} sleep={sleepbaar(b.item, magAanpassen)} magKlaar={magAanpassen} opDag={dagen[b.van]} lang={weergave === 'dag'} />
+                <div key={`${b.item.bron}-${b.item.id}`} className={`pointer-events-auto min-w-0 ${compact ? 'px-0.5' : 'px-1'}`} style={{ gridColumn: `${b.van + 1} / ${b.tot + 2}`, gridRow: b.baan + 1 }}>
+                  <Chip i={b.item} kleur={kleur(b.item)} onOpen={onOpen} onKlaar={onKlaar} personen={personen} sleep={sleepbaar(b.item, magAanpassen)} magKlaar={magAanpassen} opDag={dagen[b.van]} lang={weergave === 'dag'} compact={compact} />
                 </div>
               ))}
             </div>
@@ -402,7 +435,7 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
       <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0 relative">
         <div className="grid relative" style={{ gridTemplateColumns: cols, height: 1440 * PX_MIN }}>
           <div className="relative">
-            {Array.from({ length: 24 }, (_, h) => h > 0 && <div key={h} className="absolute right-2 -translate-y-1/2 text-[12px] tabular-nums text-gray-500" style={{ top: h * 60 * PX_MIN }}>{String(h).padStart(2, '0')}:00</div>)}
+            {Array.from({ length: 24 }, (_, h) => h > 0 && <div key={h} className={`absolute -translate-y-1/2 tabular-nums text-gray-500 ${compact ? 'right-1 text-[10px]' : 'right-2 text-[12px]'}`} style={{ top: h * 60 * PX_MIN }}>{String(h).padStart(2, '0')}{compact ? '' : ':00'}</div>)}
           </div>
           <div ref={kolommenRef} className="relative grid" style={{ gridColumn: `2 / span ${dagen.length}`, gridTemplateColumns: `repeat(${dagen.length}, minmax(0, 1fr))` }}
             onPointerMove={beweeg} onPointerUp={los} onPointerCancel={() => { stopHouden(); aanSlepen.current = false; setSleep(null) }}>
@@ -429,9 +462,16 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
                         onPointerDown={(e) => (sl ? startVerplaats(e, i, n, b.vanMin, b.totMin) : undefined)}
                         onClick={() => { if (!sl) onOpen(i) }} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
                         onContextMenu={(e) => { if (houd.current || aanSlepen.current) e.preventDefault() }}
-                        className={`group absolute rounded-lg pl-2 pr-1.5 py-1 overflow-hidden text-[13.5px] leading-snug shadow-[0_1px_3px_rgba(0,0,0,0.08)] cursor-pointer select-none [-webkit-touch-callout:none] hover:brightness-[0.97] hover:z-[2] ${bezig ? 'opacity-30' : ''} ${opgetild ? 'z-10 ring-2 ring-gray-900 shadow-lg scale-[1.03]' : ''} transition-transform ${focusRing}`}
-                        style={{ ...stijlVan(i, kl), top: b.vanMin * PX_MIN + 1, height: hoogte, left: `calc(${(b.kolom / b.kolommen) * 100}% + 3px)`, width: `calc(${100 / b.kolommen}% - 6px)` }}
+                        className={`group absolute overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.08)] cursor-pointer select-none [-webkit-touch-callout:none] hover:brightness-[0.97] hover:z-[2] ${compact ? 'rounded-md pl-1 pr-0.5 py-0.5 text-[11px] leading-tight' : 'rounded-lg pl-2 pr-1.5 py-1 text-[13.5px] leading-snug'} ${bezig ? 'opacity-30' : ''} ${opgetild ? 'z-10 ring-2 ring-gray-900 shadow-lg scale-[1.03]' : ''} transition-transform ${focusRing}`}
+                        style={{ ...stijlVan(i, kl), top: b.vanMin * PX_MIN + 1, height: hoogte, left: `calc(${(b.kolom / b.kolommen) * 100}% + ${compact ? 1 : 3}px)`, width: `calc(${100 / b.kolommen}% - ${compact ? 2 : 6}px)` }}
                         title={`${hhmm(b.vanMin)}–${hhmm(b.totMin)} ${i.titel}`}>
+                        {compact ? (
+                          // Smalle kolom: de titel (zoveel regels als passen) en bij een groter blok het beginuur.
+                          <>
+                            <span className={`block font-semibold ${b.kolommen > 1 ? 'whitespace-nowrap overflow-hidden' : hoogte < 34 ? 'line-clamp-1' : hoogte < 60 ? 'line-clamp-2' : hoogte < 90 ? 'line-clamp-3' : 'line-clamp-5'} ${klaar ? 'line-through decoration-1 opacity-80' : ''}`}>{i.titel}</span>
+                            {hoogte >= 60 && <span className="block mt-0.5 tabular-nums text-[10px] text-gray-600">{hhmm(b.vanMin)}</span>}
+                          </>
+                        ) : (<>
                         <div className="flex items-start gap-1">
                           <span className="mt-px"><Vinkje i={i} onKlaar={onKlaar} klein /></span>
                           {i.urgent && !klaar && <Flag className="h-3.5 w-3.5 mt-px shrink-0 text-red-600 fill-red-600" />}
@@ -448,9 +488,10 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
                             {hoogte >= 50 && <span className={sl ? 'group-hover:invisible' : ''}><Avatars ids={i.toegewezen} personen={personen} max={3} maat={20} /></span>}
                           </div>
                         )}
+                        </>)}
                         {sl && <div onPointerDown={(e) => startRek(e, i, d, b.vanMin, b.totMin)} className="absolute left-0 right-0 bottom-0 h-1.5 cursor-ns-resize" aria-hidden />}
                         {/* Onderaan rechts (waar de foto's staan), zodat de titel leesbaar en klikbaar blijft. */}
-                        {magAanpassen && <SnelKlaar i={i} onKlaar={onKlaar} onder={hoogte >= 34} tekst={b.kolommen === 1 && hoogte >= 34} />}
+                        {magAanpassen && !compact && <SnelKlaar i={i} onKlaar={onKlaar} onder={hoogte >= 34} tekst={b.kolommen === 1 && hoogte >= 34} />}
                       </div>
                     )
                   })}
@@ -483,24 +524,64 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
 
 // ── Maand ───────────────────────────────────────────────────────────────────
 
+/** Eén item als kaart in een daglijst (maand op de gsm, Planning): titel, wanneer, wie. */
+function DagKaart({ i, kleur, personen, onOpen, onKlaar, opDag }: { i: Item; kleur: string; personen: Map<string, Persoon>; onOpen: (i: Item) => void; onKlaar: (i: Item) => void; opDag: string }) {
+  const klaar = isKlaar(i)
+  const p = plaatsVan(i)
+  const tijd = p?.soort === 'rooster' ? `${hhmm(p.vanMin)}–${hhmm(p.totMin)}` : enkelDeadline(i) ? null : p && p.van !== p.tot ? `${kortDag(p.van)} – ${kortDag(p.tot)}` : 'Hele dag'
+  return (
+    <div role="button" tabIndex={0} onClick={() => onOpen(i)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
+      className={`relative flex items-start gap-2.5 rounded-xl pl-3 pr-2.5 py-2.5 cursor-pointer select-none shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:brightness-[0.98] ${focusRing}`}
+      style={stijlVan(i, kleur)}>
+      <span className="mt-0.5"><Vinkje i={i} onKlaar={onKlaar} /></span>
+      <div className="min-w-0 flex-1">
+        <div className={`flex items-center gap-1.5 text-[14px] font-semibold leading-snug ${klaar ? 'line-through decoration-1 opacity-80' : ''}`}>
+          {i.urgent && !klaar && <Flag className="h-3.5 w-3.5 shrink-0 text-red-600 fill-red-600" />}
+          <span className="truncate">{i.titel}</span>
+          {i.prive && <Lock className="h-3 w-3 shrink-0 opacity-60" />}
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-gray-600">
+          {(i.meet_url || i.bron === 'meeting') && <Video className="h-3.5 w-3.5 shrink-0" />}
+          {tijd && <span className="inline-flex items-center gap-1 tabular-nums"><Clock className="h-3 w-3" />{tijd}</span>}
+          {i.deadline_op && <DeadlineLabel i={i} opDag={opDag} klein />}
+        </div>
+      </div>
+      <span className="shrink-0 self-center"><Avatars ids={i.toegewezen} personen={personen} max={3} maat={22} /></span>
+    </div>
+  )
+}
+
+/** Wat er op één dag staat, als lijst (onder de maand op de gsm). */
+function DagLijst({ d, items, kleur, personen, magToevoegen, onOpen, onKlaar, onNieuw, onDag }: {
+  d: string; items: Item[]; kleur: (i: Item) => string; personen: Map<string, Persoon>; magToevoegen: boolean
+  onOpen: (i: Item) => void; onKlaar: (i: Item) => void; onNieuw: (m: NieuwMoment) => void; onDag: (d: string) => void
+}) {
+  const vandaagD = vandaag()
+  return (
+    <div className="flex-1 min-h-0 overflow-y-auto border-t border-gray-200 bg-gray-50/40">
+      <div className="sticky top-0 z-[1] flex items-center gap-2 px-3 py-2 bg-white/95 backdrop-blur border-b border-gray-100">
+        <span className={`h-8 min-w-8 px-1 rounded-full flex items-center justify-center text-[15px] font-bold ${d === vandaagD ? 'bg-gray-900 text-white' : 'text-gray-900'}`}>{Number(d.slice(8))}</span>
+        <span className="text-[14px] font-semibold text-gray-900 capitalize flex-1 truncate">{new Date(`${d}T12:00:00Z`).toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })}</span>
+        <button type="button" onClick={() => onDag(d)} className={`rounded-lg px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-100 ${focusRing}`}>Dag openen</button>
+        {magToevoegen && <button type="button" onClick={() => onNieuw({ dag: d, heelDag: true })} aria-label={`Taak toevoegen op ${kortDag(d)}`} className={`h-8 w-8 rounded-full bg-gray-900 text-white flex items-center justify-center ${focusRing}`}><Plus className="h-4 w-4" /></button>}
+      </div>
+      <div className="p-2.5 space-y-1.5">
+        {items.length ? items.map((i) => <DagKaart key={`${i.bron}-${i.id}`} i={i} kleur={kleur(i)} personen={personen} onOpen={onOpen} onKlaar={onKlaar} opDag={d} />)
+          : <p className="text-sm text-gray-400 text-center py-6">Niets gepland op deze dag.</p>}
+      </div>
+    </div>
+  )
+}
+
 function Maand({ datum, items, kleur, personen, magAanpassen, magToevoegen, onOpen, onKlaar, onVerplaats, onNieuw, onDag }: Props) {
   const dagen = useMemo(() => dagenVan('maand', datum), [datum])
   const maand = datum.slice(0, 7)
-  const perDag = useMemo(() => {
-    const m = new Map<string, Item[]>()
-    const eerste = dagen[0], laatste = dagen[dagen.length - 1]
-    for (const i of items) {
-      const p = plaatsVan(i)
-      if (!p) continue
-      const van = p.soort === 'rooster' ? p.dag : p.van, tot = p.soort === 'rooster' ? p.dag : p.tot
-      if (tot < eerste || van > laatste) continue
-      for (let d = van < eerste ? eerste : van, n = 0; d <= tot && d <= laatste && n < 45; d = plusDagen(d, 1), n++) m.set(d, [...(m.get(d) ?? []), i])
-    }
-    // Hele dag eerst, dan op uur, afgevinkt onderaan.
-    for (const [, l] of m) l.sort((a, b) => Number(isKlaar(a)) - Number(isKlaar(b)) || Number(!a.heel_dag) - Number(!b.heel_dag) || (a.start_op ?? a.eind_op ?? '').localeCompare(b.start_op ?? b.eind_op ?? ''))
-    return m
-  }, [items, dagen])
+  const perDag = useMemo(() => perDagVan(items, dagen), [items, dagen])
   const vandaagD = vandaag()
+  const smal = useSmal()
+  // Gsm: de aangetikte dag staat onder de maand (standaard vandaag, of de eerste van de maand).
+  const [gekozen, setGekozen] = useState(() => (vandaagD.slice(0, 7) === maand ? vandaagD : `${maand}-01`))
+  useEffect(() => { setGekozen((g) => (g.slice(0, 7) === maand ? g : vandaagD.slice(0, 7) === maand ? vandaagD : `${maand}-01`)) }, [maand, vandaagD])
   const drop = (e: React.DragEvent, d: string) => {
     const item = items.find((x) => x.id === e.dataTransfer.getData('text/agenda-item'))
     if (!item) return
@@ -512,30 +593,55 @@ function Maand({ datum, items, kleur, personen, magAanpassen, magToevoegen, onOp
     if (enkelDeadline(item)) { onVerplaats(item, deadlineVerschoven(item, n)); return }
     onVerplaats(item, { start_op: verschuifDagen(item.start_op, n), eind_op: verschuifDagen(item.eind_op, n), heel_dag: item.heel_dag })
   }
+  const bolletje = (i: Item) => (stijlVan(i, kleur(i)).borderLeft as string).replace('3px solid ', '')
+
+  if (smal) {
+    return (
+      <div className="card-base !p-0 overflow-hidden flex flex-col h-full min-h-0">
+        <div className="grid grid-cols-7 border-b border-gray-200 shrink-0">
+          {DAGNAAM.map((d) => <div key={d} className="text-[11px] font-semibold text-gray-500 text-center py-1.5 capitalize">{d}</div>)}
+        </div>
+        <div className="grid grid-cols-7 shrink-0 auto-rows-[40px]">
+          {dagen.map((d) => {
+            const l = perDag.get(d) ?? []
+            const aan = d === gekozen
+            return (
+              <button key={d} type="button" onClick={() => setGekozen(d)} aria-pressed={aan} aria-label={`${kortDag(d)}, ${l.length} items`}
+                className={`relative flex flex-col items-center pt-1 border-t border-gray-100 ${d.slice(0, 7) !== maand ? 'bg-gray-50/70' : ''} ${aan ? 'ring-2 ring-inset ring-gray-900 rounded-md' : ''} ${focusRing}`}>
+                <span className={`h-[22px] min-w-[22px] px-1 rounded-full flex items-center justify-center text-[13px] font-bold ${d === vandaagD ? 'bg-gray-900 text-white' : d.slice(0, 7) !== maand ? 'text-gray-400' : 'text-gray-800'}`}>{Number(d.slice(8))}</span>
+                {l.length > 0 && (
+                  <span className="mt-0.5 flex items-center gap-0.5">
+                    {l.slice(0, 3).map((i) => <span key={`${i.bron}-${i.id}`} className="h-1.5 w-1.5 rounded-full" style={{ background: bolletje(i) }} />)}
+                    {l.length > 3 && <span className="text-[9px] leading-none font-semibold text-gray-500">+{l.length - 3}</span>}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+        <DagLijst d={gekozen} items={perDag.get(gekozen) ?? []} kleur={kleur} personen={personen} magToevoegen={magToevoegen}
+          onOpen={onOpen} onKlaar={onKlaar} onNieuw={onNieuw} onDag={onDag} />
+      </div>
+    )
+  }
+
   return (
     <div className="card-base !p-0 overflow-hidden flex flex-col h-full min-h-0">
       <div className="grid grid-cols-7 border-b border-gray-200">
         {DAGNAAM.map((d, n) => <div key={d} className="text-[12px] font-semibold text-gray-600 text-center py-2.5 border-l first:border-l-0 border-gray-100"><span className="hidden lg:inline">{DAGNAAM_LANG[n]}</span><span className="lg:hidden capitalize">{d}</span></div>)}
       </div>
-      <div className="grid grid-cols-7 flex-1 min-h-0 overflow-y-auto auto-rows-[minmax(76px,auto)] sm:auto-rows-[minmax(132px,auto)]">
+      <div className="grid grid-cols-7 flex-1 min-h-0 overflow-y-auto auto-rows-[minmax(132px,auto)]">
         {dagen.map((d) => {
           const l = perDag.get(d) ?? []
           const toon = l.slice(0, 4)
           return (
-            <div key={d} className={`group relative border-l border-t border-gray-100 p-1 sm:p-1.5 min-w-0 ${d.slice(0, 7) !== maand ? 'bg-gray-50/70' : ''}`}
+            <div key={d} className={`group relative border-l border-t border-gray-100 p-1.5 min-w-0 ${d.slice(0, 7) !== maand ? 'bg-gray-50/70' : ''}`}
               onDragOver={(e) => { if (magAanpassen) e.preventDefault() }} onDrop={(e) => drop(e, d)}>
               <div className="flex items-center justify-between mb-0.5">
                 <button type="button" onClick={() => onDag(d)} className={`h-7 min-w-7 px-1 rounded-full text-[13px] font-bold ${d === vandaagD ? 'bg-gray-900 text-white' : d.slice(0, 7) !== maand ? 'text-gray-400' : 'text-gray-800'} hover:ring-1 hover:ring-gray-300 ${focusRing}`}>{Number(d.slice(8))}</button>
                 {magToevoegen && <button type="button" onClick={() => onNieuw({ dag: d, heelDag: true })} aria-label={`Nieuw op ${kortDag(d)}`} className={`h-5 w-5 rounded-md text-gray-500 hover:bg-gray-100 opacity-0 group-hover:opacity-100 focus:opacity-100 flex items-center justify-center ${focusRing}`}><Plus className="h-3 w-3" /></button>}
               </div>
-              {/* Gsm: bolletjes per item, tikken = die dag openen. */}
-              {l.length > 0 && (
-                <button type="button" onClick={() => onDag(d)} className="sm:hidden w-full flex flex-wrap gap-1 px-1 pt-0.5" aria-label={`${l.length} items op ${kortDag(d)}`}>
-                  {l.slice(0, 6).map((i) => <span key={`${i.bron}-${i.id}`} className="h-2 w-2 rounded-full" style={{ background: (stijlVan(i, kleur(i)).borderLeft as string).replace('3px solid ', '') }} />)}
-                  {l.length > 6 && <span className="text-[10px] leading-none font-semibold text-gray-600">+{l.length - 6}</span>}
-                </button>
-              )}
-              <div className="hidden sm:block space-y-1">
+              <div className="space-y-1">
                 {toon.map((i) => {
                   const p = plaatsVan(i)
                   return <Chip key={`${i.bron}-${i.id}`} i={i} kleur={kleur(i)} onOpen={onOpen} onKlaar={onKlaar} personen={personen} sleep={sleepbaar(i, magAanpassen)} tijd={p?.soort === 'rooster' ? hhmm(p.vanMin) : null} opDag={d} magKlaar={magAanpassen} />
@@ -543,6 +649,44 @@ function Maand({ datum, items, kleur, personen, magAanpassen, magToevoegen, onOp
                 {l.length > toon.length && <button type="button" onClick={() => onDag(d)} className="text-[12px] font-semibold text-gray-700 hover:underline px-1">+{l.length - toon.length} meer</button>}
               </div>
             </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ── Planning: de week als lijst per dag ─────────────────────────────────────
+
+function Planning({ datum, items, kleur, personen, magToevoegen, onOpen, onKlaar, onNieuw, onDag }: Props) {
+  const dagen = useMemo(() => dagenVan('planning', datum), [datum])
+  const perDag = useMemo(() => perDagVan(items, dagen), [items, dagen])
+  const vandaagD = vandaag()
+  const totaal = useMemo(() => new Set(dagen.flatMap((d) => (perDag.get(d) ?? []).map((i) => `${i.bron}-${i.id}`))).size, [dagen, perDag])
+  return (
+    <div className="card-base !p-0 overflow-hidden h-full flex flex-col min-h-0">
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {!totaal && <p className="text-sm text-gray-500 text-center pt-6">Niets gepland deze week.</p>}
+        {dagen.map((d) => {
+          const l = perDag.get(d) ?? []
+          const wd = weekdag(d)
+          const voorbij = d < vandaagD
+          return (
+            <section key={d} className={`flex gap-3 px-3 sm:px-5 py-3 border-b border-gray-100 last:border-b-0 ${d === vandaagD ? 'bg-gray-50/70' : ''}`}>
+              <button type="button" onClick={() => onDag(d)} title="Dag openen" className={`w-11 shrink-0 flex flex-col items-center pt-0.5 rounded-lg ${focusRing}`}>
+                <span className={`label-mono text-[10px] uppercase ${d === vandaagD ? 'text-gray-900' : 'text-gray-500'}`}>{DAGNAAM[wd]}</span>
+                <span className={`mt-0.5 h-9 min-w-9 px-1 rounded-full flex items-center justify-center text-[17px] font-bold ${d === vandaagD ? 'bg-gray-900 text-white' : voorbij ? 'text-gray-400' : 'text-gray-900'}`}>{Number(d.slice(8))}</span>
+              </button>
+              <div className="flex-1 min-w-0 space-y-1.5">
+                {l.length ? l.map((i) => <DagKaart key={`${i.bron}-${i.id}`} i={i} kleur={kleur(i)} personen={personen} onOpen={onOpen} onKlaar={onKlaar} opDag={d} />)
+                  : <p className="text-sm text-gray-400 pt-2.5">Niets gepland</p>}
+                {magToevoegen && (
+                  <button type="button" onClick={() => onNieuw({ dag: d, heelDag: true })} className={`inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-xs text-gray-500 hover:text-gray-900 hover:bg-gray-100 ${focusRing}`}>
+                    <Plus className="h-3.5 w-3.5" />Taak toevoegen
+                  </button>
+                )}
+              </div>
+            </section>
           )
         })}
       </div>
