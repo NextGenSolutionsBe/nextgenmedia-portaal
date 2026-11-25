@@ -8,7 +8,7 @@ import {
 import { PersoonFoto } from '@/components/admin/persoon-foto'
 import { zoekVeld } from '@/lib/zoekveld'
 import {
-  vandaag, verschuif, bereikVan, dagenVan, kleurVan, klantVan, kortDag, dag as dagVan, uur as uurVan, KLEUR_VOLGENS,
+  vandaag, verschuif, bereikVan, dagenVan, kleurVan, klantVan, kortDag, dag as dagVan, uur as uurVan, KLEUR_VOLGENS, WEERGAVEN, isWeergave,
   type Item, type Weergave, type KleurVolgens,
 } from '@/lib/agenda/model'
 import { PlanVenster, DetailVenster, AnnuleerVenster, api as meetingApi, type Opties, type Meeting } from '@/app/admin/meetings/meetings-client'
@@ -43,15 +43,15 @@ function periodeKort(w: Weergave, d: string): string {
   const f = (x: string, o: Intl.DateTimeFormatOptions) => new Date(`${x}T12:00:00Z`).toLocaleDateString('nl-BE', { ...o, timeZone: 'UTC' })
   if (w === 'dag') return f(d, { weekday: 'short', day: 'numeric', month: 'short' })
   if (w === 'maand') return f(`${d.slice(0, 7)}-15`, { month: 'short', year: 'numeric' })
-  const dagen = dagenVan('week', d)
-  return `${Number(dagen[0].slice(8))} – ${f(dagen[6], { day: 'numeric', month: 'short' })}`
+  const dagen = dagenVan(w, d)
+  return `${Number(dagen[0].slice(8))} – ${f(dagen[dagen.length - 1], { day: 'numeric', month: 'short' })}`
 }
 
 function periodeTitel(w: Weergave, d: string): string {
   if (w === 'dag') return new Date(`${d}T12:00:00Z`).toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
   if (w === 'maand') return new Date(`${d.slice(0, 7)}-15T12:00:00Z`).toLocaleDateString('nl-BE', { month: 'long', year: 'numeric', timeZone: 'UTC' })
-  const dagen = dagenVan('week', d)
-  const a = new Date(`${dagen[0]}T12:00:00Z`), b = new Date(`${dagen[6]}T12:00:00Z`)
+  const dagen = dagenVan(w, d)
+  const a = new Date(`${dagen[0]}T12:00:00Z`), b = new Date(`${dagen[dagen.length - 1]}T12:00:00Z`)
   const zelfdeMaand = a.getUTCMonth() === b.getUTCMonth()
   return `${a.getUTCDate()}${zelfdeMaand ? '' : ` ${a.toLocaleDateString('nl-BE', { month: 'short', timeZone: 'UTC' })}`} – ${b.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}`
 }
@@ -111,7 +111,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
   useEffect(() => {
     const v = leesVoorkeur()
     const smal = window.innerWidth < 768
-    if (v.modus) setModus(v.modus === 'lijst' ? 'week' : v.modus); else if (smal) setModus('dag')
+    if (v.modus && isWeergave(v.modus)) setModus(v.modus); else if (smal) setModus('dag')
     if (Array.isArray(v.spaces)) setSpaces(v.spaces)
     if (v.kleurMap) setKleurVolgens(v.kleurMap)
     if (typeof v.klaar === 'boolean') setToonKlaar(v.klaar)
@@ -272,6 +272,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
       else if (e.key.toLowerCase() === 'd') kiesModus('dag')
       else if (e.key.toLowerCase() === 'w') kiesModus('week')
       else if (e.key.toLowerCase() === 'm') kiesModus('maand')
+      else if (e.key.toLowerCase() === 'p') kiesModus('planning')
     }
     document.addEventListener('keydown', t)
     return () => document.removeEventListener('keydown', t)
@@ -322,22 +323,22 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
             {titelKeuze && titelKeuze.length > 1 && <div className="text-xs text-gray-500 truncate">{titelKeuze.slice(0, -1).join(' › ')}</div>}
           </div>
           {keuze?.soort !== 'doc' && boom.rechten.toevoegen && (
-            <button type="button" onClick={() => setNieuw({ dag: modus === 'lijst' ? vandaag() : datum < vandaag() && weergave !== 'dag' ? vandaag() : datum, heelDag: true })} aria-label="Nieuwe taak" className={`order-4 md:order-6 btn-primary !py-2 !px-2.5 md:!px-3.5 !text-sm shrink-0 ${focusRing}`}><Plus className="h-4 w-4" /><span className="hidden md:inline">Nieuwe taak</span></button>
+            <button type="button" onClick={() => setNieuw({ dag: modus === 'lijst' ? vandaag() : datum < vandaag() && weergave !== 'dag' ? vandaag() : datum, heelDag: true })} aria-label="Nieuwe taak" className={`order-4 md:order-6 btn-primary !py-2 !px-2.5 md:!px-3.5 !text-sm shrink-0 ${focusRing}`}><Plus className="h-4 w-4" /><span className="hidden xl:inline">Nieuwe taak</span></button>
           )}
           {keuze?.soort !== 'doc' && boom.rechten.aanpassen && (
-            <button type="button" onClick={() => setAfsluiten(true)} aria-label="Dag afsluiten" title="Alles wat nog open staat afgaan: gedaan, naar morgen of een andere dag" className={`order-4 md:order-6 h-9 shrink-0 rounded-lg border border-gray-200 bg-white px-2.5 md:px-3 text-sm font-semibold inline-flex items-center gap-1.5 hover:border-gray-400 ${focusRing}`}><MoonStar className="h-4 w-4" /><span className="hidden lg:inline">Dag afsluiten</span></button>
+            <button type="button" onClick={() => setAfsluiten(true)} aria-label="Dag afsluiten" title="Alles wat nog open staat afgaan: gedaan, naar morgen of een andere dag" className={`order-4 md:order-6 h-9 shrink-0 rounded-lg border border-gray-200 bg-white px-2.5 md:px-3 text-sm font-semibold inline-flex items-center gap-1.5 hover:border-gray-400 ${focusRing}`}><MoonStar className="h-4 w-4" /><span className="hidden 2xl:inline">Dag afsluiten</span></button>
           )}
           {keuze?.soort !== 'doc' && boom.rechten.toevoegen && (
             <button type="button" onClick={() => setInspreek(true)} aria-label="Taak inspreken" title="Taak inspreken" className={`order-4 md:order-6 h-9 w-9 shrink-0 rounded-lg border border-gray-200 bg-white flex items-center justify-center hover:border-gray-400 ${focusRing}`}><Mic className="h-4 w-4" /></button>
           )}
           {keuze?.soort !== 'doc' && (
-            <div className="order-5 md:order-3 w-full md:w-auto md:flex-1 flex items-center gap-1.5 min-w-0">
+            <div className="order-5 md:order-3 w-full md:w-auto md:flex-1 md:min-w-[240px] flex items-center gap-1.5 min-w-0">
               {modus !== 'lijst' && (
                 <>
                   <button type="button" onClick={() => setDatum(vandaag())} className={`btn-secondary !py-1.5 !px-3 !text-sm shrink-0 ${focusRing}`}>Vandaag</button>
                   <button type="button" onClick={() => setDatum(verschuif(weergave, datum, -1))} aria-label="Vorige" className={`h-9 w-9 shrink-0 rounded-lg hover:bg-white flex items-center justify-center ${focusRing}`}><ChevronLeft className="h-5 w-5" /></button>
                   <button type="button" onClick={() => setDatum(verschuif(weergave, datum, 1))} aria-label="Volgende" className={`h-9 w-9 shrink-0 rounded-lg hover:bg-white flex items-center justify-center ${focusRing}`}><ChevronRight className="h-5 w-5" /></button>
-                  <span className="text-[15px] font-semibold text-gray-900 capitalize truncate"><span className="xl:hidden">{periodeKort(weergave, datum)}</span><span className="hidden xl:inline">{periodeTitel(weergave, datum)}</span></span>
+                  <span className="text-[15px] font-semibold text-gray-900 capitalize truncate"><span className="2xl:hidden">{periodeKort(weergave, datum)}</span><span className="hidden 2xl:inline">{periodeTitel(weergave, datum)}</span></span>
                   {laden && <Loader2 className="h-4 w-4 animate-spin text-gray-400 shrink-0" />}
                 </>
               )}
@@ -352,9 +353,15 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
           {keuze?.soort !== 'doc' && (
             <div className="order-3 md:order-5 flex shrink-0 rounded-lg border border-gray-200 bg-white p-0.5" role="tablist" aria-label="Weergave">
               {container && <Tab aan={modus === 'lijst'} onClick={() => kiesModus('lijst')}><ListIcon className="h-3.5 w-3.5" /><span className="hidden sm:inline">Lijst</span></Tab>}
-              <Tab aan={modus === 'dag'} onClick={() => kiesModus('dag')}>Dag</Tab>
-              <Tab aan={modus === 'week'} onClick={() => kiesModus('week')}>Week</Tab>
-              <Tab aan={modus === 'maand'} onClick={() => kiesModus('maand')}>Maand</Tab>
+              {/* Breed scherm: alle weergaven als tabbladen; anders één keuzelijst (zoals in ClickUp). */}
+              <span className="hidden 2xl:contents">
+                {WEERGAVEN.map((w) => <Tab key={w.key} aan={modus === w.key} onClick={() => kiesModus(w.key)}>{w.label}</Tab>)}
+              </span>
+              <select value={modus === 'lijst' ? 'lijst' : modus} onChange={(e) => kiesModus(e.target.value as Modus)} aria-label="Weergave"
+                className={`2xl:hidden rounded-md bg-gray-900 text-white text-sm font-semibold pl-2.5 pr-7 py-1 border-0 ${focusRing}`}>
+                {modus === 'lijst' && <option value="lijst">Lijst</option>}
+                {WEERGAVEN.map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
+              </select>
             </div>
           )}
         </div>
@@ -499,7 +506,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
 }
 
 function Tab({ aan, onClick, children }: { aan: boolean; onClick: () => void; children: React.ReactNode }) {
-  return <button type="button" role="tab" aria-selected={aan} onClick={onClick} className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-sm ${aan ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'} ${focusRing}`}>{children}</button>
+  return <button type="button" role="tab" aria-selected={aan} onClick={onClick} className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[13px] ${aan ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'} ${focusRing}`}>{children}</button>
 }
 function Chip({ aan, onClick, children }: { aan: boolean; onClick: () => void; children: React.ReactNode }) {
   return <button type="button" onClick={onClick} aria-pressed={aan} className={`inline-flex items-center gap-1.5 rounded-full border h-8 px-3 text-xs ${aan ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200 text-gray-700 hover:border-gray-400'} ${focusRing}`}>{children}</button>

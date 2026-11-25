@@ -137,11 +137,19 @@ export function snelleDeadlines(nu: Date = new Date()): { label: string; iso: st
   return uit.filter((x) => Date.parse(x.iso) > nu.getTime())
 }
 
+/**
+ * De weergaven van de kalender. Werkweek = maandag tot vrijdag; Planning = de
+ * week als lijst per dag (zoals Schedule in ClickUp).
+ */
+export type Weergave = 'dag' | 'werkweek' | 'week' | 'maand' | 'planning'
+export const WEERGAVEN: { key: Weergave; label: string }[] = [
+  { key: 'dag', label: 'Dag' }, { key: 'werkweek', label: 'Werkweek' }, { key: 'week', label: 'Week' }, { key: 'maand', label: 'Maand' }, { key: 'planning', label: 'Planning' },
+]
+export const isWeergave = (v: unknown): v is Weergave => WEERGAVEN.some((w) => w.key === v)
 /** De dagen van een weergave. */
-export type Weergave = 'dag' | 'week' | 'maand'
 export function dagenVan(w: Weergave, d: string): string[] {
   if (w === 'dag') return [d]
-  if (w === 'week') { const m = maandagVan(d); return Array.from({ length: 7 }, (_, i) => plusDagen(m, i)) }
+  if (w === 'week' || w === 'planning' || w === 'werkweek') { const m = maandagVan(d); return Array.from({ length: w === 'werkweek' ? 5 : 7 }, (_, i) => plusDagen(m, i)) }
   // Maand: van de maandag vóór de eerste tot de zondag na de laatste dag.
   const [j, m] = d.split('-').map(Number)
   const eerste = maandagVan(`${d.slice(0, 7)}-01`)
@@ -153,11 +161,32 @@ export function dagenVan(w: Weergave, d: string): string[] {
 /** Stap vooruit of achteruit in de weergave. */
 export function verschuif(w: Weergave, d: string, n: number): string {
   if (w === 'dag') return plusDagen(d, n)
-  if (w === 'week') return plusDagen(d, 7 * n)
+  if (w !== 'maand') return plusDagen(d, 7 * n)
   const [j, m] = d.split('-').map(Number)
   const t = new Date(Date.UTC(j, m - 1 + n, 1))
   return t.toISOString().slice(0, 10)
 }
+/**
+ * Wat er op elke dag staat (iets over meerdere dagen op elk van die dagen):
+ * eerst wat zonder uur of met enkel een deadline, dan op uur, afgevinkt onderaan.
+ */
+export function perDagVan<T extends MetTijden & { status?: string; titel?: string }>(items: T[], dagen: string[]): globalThis.Map<string, T[]> {
+  const m = new globalThis.Map<string, T[]>()
+  if (!dagen.length) return m
+  const eerste = dagen[0], laatste = dagen[dagen.length - 1]
+  const rang = new globalThis.Map<T, [number, string]>()
+  for (const i of items) {
+    const p = plaatsVan(i)
+    if (!p) continue
+    const van = p.soort === 'rooster' ? p.dag : p.van, tot = p.soort === 'rooster' ? p.dag : p.tot
+    if (tot < eerste || van > laatste) continue
+    rang.set(i, [p.soort === 'rooster' ? 1 : 0, p.soort === 'rooster' ? String(p.vanMin).padStart(4, '0') : ''])
+    for (let d = van < eerste ? eerste : van, n = 0; d <= tot && d <= laatste && n < 45; d = plusDagen(d, 1), n++) m.set(d, [...(m.get(d) ?? []), i])
+  }
+  for (const [, l] of m) l.sort((a, b) => Number(a.status === 'klaar') - Number(b.status === 'klaar') || rang.get(a)![0] - rang.get(b)![0] || rang.get(a)![1].localeCompare(rang.get(b)![1]) || (a.titel ?? '').localeCompare(b.titel ?? ''))
+  return m
+}
+
 /** Begin en einde (ISO) van wat we moeten laden voor deze weergave. */
 export function bereikVan(w: Weergave, d: string): { van: string; tot: string } {
   const dagen = dagenVan(w, d)
