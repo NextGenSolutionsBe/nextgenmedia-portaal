@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  Check, Flag, Loader2, Trash2, ExternalLink, Video, MapPin, Lock, Plus, Tag, Users, Building2, ListTree, Palette, CalendarClock, ChevronRight, Pencil, Search, Paperclip, FileText, FilePlus2,
+  Check, Flag, Loader2, Trash2, ExternalLink, Video, MapPin, Lock, Plus, Tag, Users, Building2, ListTree, Palette, CalendarClock, ChevronRight, Pencil, Search, Paperclip, FileText, FilePlus2, Clock,
 } from 'lucide-react'
-import { dag, uur, zoneNaarIso, plusDagen, vandaag, isKleur, type Item } from '@/lib/agenda/model'
+import { dag, uur, zoneNaarIso, plusDagen, vandaag, isKleur, enkelDeadline, snelleDeadlines, type Item } from '@/lib/agenda/model'
 import { zoekVeld } from '@/lib/zoekveld'
 import { PersoonFoto } from '@/components/admin/persoon-foto'
 import { createClient } from '@/lib/supabase/client'
-import { actie, api, padVan, Lade, Popover, PersonenLijst, KleurKeuze, Schakel, Markdown, vinkRegel, MapKiezer, MapLabel, focusRing, ApiFout, type BoomData } from './gedeeld'
+import { actie, api, padVan, Lade, Popover, PersonenLijst, KleurKeuze, Schakel, Markdown, vinkRegel, MapKiezer, MapLabel, WieKiezer, focusRing, ApiFout, type BoomData } from './gedeeld'
+import { DeadlineLabel, KLAAR_STIJL } from './kalender'
 
 type Bijlage = { id: string; naam: string; type: string | null; grootte: number | null; geupload_door: string | null; created_at: string }
 type TaakDoc = { id: string; titel: string; updated_at: string; bijgewerkt_door: string | null }
@@ -99,7 +100,7 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd, 
       {/* Titel */}
       <div className="flex items-start gap-3">
         <button type="button" disabled={!mag} onClick={() => bewaar({ status: klaar ? 'open' : 'klaar' })} aria-label={klaar ? 'Terug open zetten' : 'Complete'}
-          className={`mt-1.5 h-6 w-6 shrink-0 rounded-full border-2 flex items-center justify-center ${klaar ? 'bg-[#1f5132] border-[#1f5132] text-white' : 'border-gray-400 hover:border-gray-900'} ${focusRing}`}>
+          className={`mt-1.5 h-6 w-6 shrink-0 rounded-full border-2 flex items-center justify-center ${klaar ? 'bg-[#3f9a64] border-[#3f9a64] text-white' : 'border-gray-400 hover:border-gray-900'} ${focusRing}`}>
           {klaar && <Check className="h-3.5 w-3.5" />}
         </button>
         <textarea value={titel} disabled={!mag} rows={1} onChange={(e) => setTitel(e.target.value.replace(/\n/g, ' '))}
@@ -111,9 +112,10 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd, 
 
       {/* Snelle knoppen */}
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" disabled={!mag} onClick={() => bewaar({ status: klaar ? 'open' : 'klaar' })} className={`status-badge !text-xs ${klaar ? '!bg-[#1f5132] !text-white' : ''}`}>
+        <button type="button" disabled={!mag} onClick={() => bewaar({ status: klaar ? 'open' : 'klaar' })} className={`status-badge !text-xs ${klaar ? '!text-[#2b4a36] border-l-[3px] border-l-[#4caf73]' : ''}`} style={klaar ? { background: KLAAR_STIJL.background } : undefined}>
           {klaar ? <><Check className="h-3 w-3" />Completed</> : 'Open · klik om te completen'}
         </button>
+        {i.deadline_op && <DeadlineLabel i={i} lang />}
         {i.soort === 'meeting' && <span className="status-badge !text-xs"><Video className="h-3 w-3" />Meeting</span>}
         {i.clickup_status && <span className="text-[11px] label-mono uppercase px-2 py-0.5 rounded-full border border-gray-200" style={isKleur(i.clickup_status_kleur) ? { borderColor: i.clickup_status_kleur, color: '#272727' } : undefined} title="Status in ClickUp">{i.clickup_status}</span>}
         <button type="button" disabled={!mag} onClick={() => bewaar({ urgent: !i.urgent })} aria-pressed={i.urgent}
@@ -131,20 +133,17 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd, 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] items-start">
       {/* Eigenschappen: rechts op een groot scherm, bovenaan op de gsm */}
       <aside className="lg:order-2 rounded-2xl bg-gray-50 border border-gray-100 p-4 space-y-4 text-sm">
-        <Kop icoon={<CalendarClock className="h-3.5 w-3.5" />}>Wanneer</Kop>
+        {i.soort !== 'meeting' && <>
+          <Kop icoon={<Clock className="h-3.5 w-3.5" />}>Deadline</Kop>
+          <DeadlineVeld i={i} mag={mag} bewaar={bewaar} />
+        </>}
+
+        <Kop icoon={<CalendarClock className="h-3.5 w-3.5" />}>{i.soort === 'meeting' ? 'Wanneer' : 'Wanneer werk je eraan'}</Kop>
         <Tijden i={i} mag={mag} bewaar={bewaar} />
 
         <Kop icoon={<Users className="h-3.5 w-3.5" />}>Wie</Kop>
-        <div className="relative">
-          <button type="button" disabled={!mag} onClick={() => setOpen(open === 'mensen' ? null : 'mensen')} className={`flex flex-wrap items-center gap-1.5 min-h-8 rounded-lg px-1.5 py-1 -mx-1.5 hover:bg-gray-50 text-left ${focusRing}`}>
-            {i.toegewezen.length ? i.toegewezen.map((p) => (
-              <span key={p} className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 pl-0.5 pr-2.5 py-0.5 text-xs"><PersoonFoto naam={personen.get(p)?.naam ?? '?'} maat={20} />{personen.get(p)?.naam ?? 'Onbekend'}</span>
-            )) : <span className="text-gray-400">Niemand</span>}
-          </button>
-          <Popover open={open === 'mensen'} onSluit={sluit}>
-            <PersonenLijst personen={boom.personen} ik={boom.ik} gekozen={i.toegewezen} onWissel={(p) => bewaar({ toegewezen: i.toegewezen.includes(p) ? i.toegewezen.filter((x) => x !== p) : [...i.toegewezen, p] })} />
-          </Popover>
-        </div>
+        <WieKiezer boom={boom} gekozen={i.toegewezen} disabled={!mag}
+          onWissel={(p) => bewaar({ toegewezen: i.toegewezen.includes(p) ? i.toegewezen.filter((x) => x !== p) : [...i.toegewezen, p] })} />
 
         <Kop icoon={<Building2 className="h-3.5 w-3.5" />}>Klant</Kop>
         <div className="relative">
@@ -240,6 +239,35 @@ function TekstVeld({ waarde, mag, plaats, onBewaar }: { waarde: string; mag: boo
   useEffect(() => setV(waarde), [waarde])
   return <input value={v} disabled={!mag} placeholder={plaats} onChange={(e) => setV(e.target.value)} onBlur={() => { if (v.trim() !== waarde) onBewaar(v.trim()) }}
     onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} className="input-base !py-1.5 text-sm" />
+}
+
+/**
+ * De deadline: tegen wanneer het af moet, altijd met uur. Staat er geen ander
+ * moment, dan staat de taak bovenaan die dag. Bij een taak uit ClickUp met enkel
+ * een einde schuift dat einde mee.
+ */
+function DeadlineVeld({ i, mag, bewaar }: { i: Item; mag: boolean; bewaar: (v: Record<string, unknown>) => Promise<void> }) {
+  const gekoppeld = enkelDeadline(i) && !!i.eind_op
+  const zet = (iso: string | null) => bewaar(gekoppeld ? { deadline_op: iso, eind_op: iso } : { deadline_op: iso })
+  const dd = i.deadline_op ? dag(i.deadline_op) : '', du = i.deadline_op ? uur(i.deadline_op) : ''
+  const inp = 'input-base !py-1 !px-2 text-sm'
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <input type="date" disabled={!mag} value={dd} onChange={(e) => e.target.value ? zet(zoneNaarIso(e.target.value, du || '17:00')) : zet(null)} className={`${inp} !w-[9.5rem]`} aria-label="Datum deadline" />
+        <input type="time" step={300} disabled={!mag} value={du} onChange={(e) => e.target.value && zet(zoneNaarIso(dd || vandaag(), e.target.value))} className={`${inp} !w-[6.5rem]`} aria-label="Uur deadline" />
+        {mag && i.deadline_op && <button type="button" onClick={() => zet(null)} className="text-xs text-gray-500 underline">wissen</button>}
+      </div>
+      {mag && (
+        <div className="flex flex-wrap gap-1.5">
+          {snelleDeadlines().map((s) => (
+            <button key={s.label} type="button" onClick={() => zet(s.iso)} aria-pressed={i.deadline_op ? Date.parse(i.deadline_op) === Date.parse(s.iso) : false}
+              className={`text-xs rounded-full border px-2 py-0.5 ${i.deadline_op && Date.parse(i.deadline_op) === Date.parse(s.iso) ? 'bg-gray-900 border-gray-900 text-white' : 'border-gray-200 hover:border-gray-400'} ${focusRing}`}>{s.label}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 /** Datum en uur. Hele dag = enkel datums; anders begin en einde met uur. Alles in Belgische tijd. */

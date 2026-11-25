@@ -38,6 +38,8 @@ export type Item = {
   start_op: string | null
   eind_op: string | null
   heel_dag: boolean
+  /** Tegen wanneer het af moet (altijd met uur). Los van wanneer je eraan werkt (start_op/eind_op). */
+  deadline_op: string | null
   lijst_id: string | null
   parent_id: string | null
   client_id: string | null
@@ -74,7 +76,16 @@ export type Plaats =
   | { soort: 'dag'; van: string; tot: string }
   | null
 
-export function plaatsVan(i: Pick<Item, 'start_op' | 'eind_op' | 'heel_dag'>): Plaats {
+type MetTijden = Pick<Item, 'start_op' | 'eind_op' | 'heel_dag'> & { deadline_op?: string | null }
+
+/** Enkel een deadline (geen eigen tijdstip om eraan te werken): staat bovenaan de dag van de deadline. */
+export function enkelDeadline(i: MetTijden): boolean {
+  if (!i.deadline_op || i.start_op) return false
+  return !i.eind_op || Date.parse(i.eind_op) === Date.parse(i.deadline_op)
+}
+
+export function plaatsVan(i: MetTijden): Plaats {
+  if (enkelDeadline(i)) { const d = dag(i.deadline_op!, TZ); return { soort: 'dag', van: d, tot: d } }
   const s = i.start_op, e = i.eind_op
   if (!s && !e) return null
   if (!i.heel_dag) {
@@ -95,10 +106,35 @@ export function plaatsVan(i: Pick<Item, 'start_op' | 'eind_op' | 'heel_dag'>): P
 }
 
 /** Raakt het item deze dag? */
-export function opDag(i: Pick<Item, 'start_op' | 'eind_op' | 'heel_dag'>, d: string): boolean {
+export function opDag(i: MetTijden, d: string): boolean {
   const p = plaatsVan(i)
   if (!p) return false
   return p.soort === 'rooster' ? p.dag === d : p.van <= d && d <= p.tot
+}
+
+/** De deadline als label: "Deadline 17:00" (op die dag), "Deadline vr 17:00" of "Deadline morgen 17:00". */
+export function deadlineLabel(iso: string, opDeDag?: string, nu: Date = new Date()): { tekst: string; teLaat: boolean; vandaag: boolean } {
+  const d = dag(iso, TZ), u = uur(iso, TZ)
+  const v = vandaag(nu)
+  // Op de dag zelf enkel het uur; elders "vandaag", "morgen" of de dag erbij.
+  const zelfde = opDeDag ? d === opDeDag : d === v
+  const wanneer = zelfde ? '' : d === v ? 'vandaag ' : d === plusDagen(v, 1) ? 'morgen ' : `${kortDag(d)} `
+  return { tekst: `Deadline ${wanneer}${u}`, teLaat: Date.parse(iso) < nu.getTime(), vandaag: d === v }
+}
+
+/** De weekdag (1 = ma … 7 = zo) van een datum. */
+const weekdagVan = (d: string) => ((new Date(`${d}T12:00:00Z`).getUTCDay() + 6) % 7) + 1
+/** Snelle keuzes voor een deadline: vandaag 17:00, morgen 12:00, de eerstvolgende vrijdag 17:00. */
+export function snelleDeadlines(nu: Date = new Date()): { label: string; iso: string }[] {
+  const v = vandaag(nu)
+  const vr = plusDagen(v, (5 - weekdagVan(v) + 7) % 7 || 7)
+  const uit = [
+    { label: 'Vandaag 17:00', iso: zoneNaarIso(v, '17:00') },
+    { label: 'Morgen 12:00', iso: zoneNaarIso(plusDagen(v, 1), '12:00') },
+    { label: 'Morgen 17:00', iso: zoneNaarIso(plusDagen(v, 1), '17:00') },
+    { label: `Vrijdag 17:00`, iso: zoneNaarIso(vr, '17:00') },
+  ]
+  return uit.filter((x) => Date.parse(x.iso) > nu.getTime())
 }
 
 /** De dagen van een weergave. */
@@ -282,7 +318,7 @@ export function veldWaarde(f: NonNullable<ClickupTaak['custom_fields']>[number])
 /** Een ClickUp-taak in de velden van ag_items (zonder lijst, ouder, labels en toegewezenen: die koppelt de import). */
 export function itemUitClickup(t: ClickupTaak): {
   titel: string; beschrijving: string | null; status: Status; clickup_status: string | null; clickup_status_kleur: string | null
-  prioriteit: number | null; urgent: boolean; start_op: string | null; eind_op: string | null; heel_dag: boolean; soort: Soort
+  prioriteit: number | null; urgent: boolean; start_op: string | null; eind_op: string | null; deadline_op: string | null; heel_dag: boolean; soort: Soort
   afgerond_op: string | null; velden: Record<string, unknown> | null; clickup_url: string | null; clickup_bijgewerkt_op: string | null
 } {
   const due = ms(t.due_date), start = ms(t.start_date)
@@ -308,6 +344,8 @@ export function itemUitClickup(t: ClickupTaak): {
     clickup_status_kleur: isKleur(t.status?.color) ? t.status!.color! : null,
     prioriteit, urgent: prioriteit === 1,
     start_op: iso(start), eind_op: iso(due), heel_dag: !metUur,
+    // Een einddatum met uur zonder start = tegen dan moet het af: de deadline.
+    deadline_op: !meeting && start === null && due !== null && dueUur ? iso(due) : null,
     soort: meeting ? 'meeting' : 'taak',
     afgerond_op: klaar ? iso(ms(t.date_done) ?? ms(t.date_closed)) : null,
     velden: Object.keys(velden).length ? velden : null,
@@ -337,7 +375,7 @@ export function naamSleutel(s: string): string {
 
 export type ItemInvoer = {
   titel?: unknown; beschrijving?: unknown; soort?: unknown; status?: unknown; urgent?: unknown; prioriteit?: unknown
-  start_op?: unknown; eind_op?: unknown; heel_dag?: unknown; lijst_id?: unknown; parent_id?: unknown; client_id?: unknown
+  start_op?: unknown; eind_op?: unknown; deadline_op?: unknown; heel_dag?: unknown; lijst_id?: unknown; parent_id?: unknown; client_id?: unknown
   labels?: unknown; kleur?: unknown; locatie?: unknown; meet_url?: unknown; prive?: unknown; toegewezen?: unknown
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -364,7 +402,7 @@ export function controleerItem(b: ItemInvoer, nieuw: boolean): { velden: Record<
   if (heeft('status')) v.status = b.status === 'klaar' ? 'klaar' : 'open'
   if (heeft('urgent')) { v.urgent = b.urgent === true; v.prioriteit = b.urgent === true ? 1 : null }
   if (heeft('prioriteit')) { const p = Number(b.prioriteit); v.prioriteit = [1, 2, 3, 4].includes(p) ? p : null; v.urgent = p === 1 }
-  for (const k of ['start_op', 'eind_op'] as const) {
+  for (const k of ['start_op', 'eind_op', 'deadline_op'] as const) {
     if (!heeft(k)) continue
     const t = tijd(b[k])
     if (t === undefined) return { velden: v, fout: 'Een datum klopt niet.' }
@@ -392,9 +430,10 @@ export function controleerItem(b: ItemInvoer, nieuw: boolean): { velden: Record<
 }
 
 /** Een korte tijdsaanduiding voor in een lijst of de pdf: "09:30–10:00", "Hele dag" of "Tot 14:00". */
-export function tijdTekst(i: Pick<Item, 'start_op' | 'eind_op' | 'heel_dag'>, d?: string): string {
+export function tijdTekst(i: MetTijden, d?: string): string {
   const p = plaatsVan(i)
   if (!p) return 'Geen datum'
+  if (enkelDeadline(i)) return `Tegen ${uur(i.deadline_op!, TZ)}`
   if (p.soort === 'dag') return p.van === p.tot ? 'Hele dag' : `${kortDag(p.van)} – ${kortDag(p.tot)}`
   const u = (n: number) => `${String(Math.floor(n / 60) % 24).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`
   if (!i.start_op) return `Tot ${u(p.totMin)}`

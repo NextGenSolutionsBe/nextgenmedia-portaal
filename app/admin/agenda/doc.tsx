@@ -1,64 +1,84 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { toast } from 'sonner'
-import { Loader2, Printer, Trash2, Eye, Pencil, Lock, Check, ChevronRight, Users, ChevronDown } from 'lucide-react'
+import type { Editor } from '@tiptap/react'
+import { Loader2, Printer, Trash2, Lock, Check, ChevronRight, Users, ChevronDown } from 'lucide-react'
 import { PersoonFoto } from '@/components/admin/persoon-foto'
-import { actie, api, Markdown, vinkRegel, padVan, focusRing, Schakel, ApiFout, Popover, PersonenLijst, type BoomData } from './gedeeld'
+import type { DocNode } from '@/lib/agenda/doc-opmaak'
+import { actie, api, padVan, focusRing, Schakel, ApiFout, Popover, PersonenLijst, type BoomData } from './gedeeld'
 
-type Doc = { id: string; titel: string; inhoud: string | null; space_id: string | null; map_id: string | null; lijst_id: string | null; prive: boolean; eigenaar_id: string | null; kijkers: string[] | null; item_id?: string | null; bijgewerkt_door: string | null; updated_at: string; created_at: string }
+// De editor laadt pas als je een document opent (hij is groot).
+const RijkeEditor = dynamic(() => import('./rijke-editor').then((m) => m.RijkeEditor), {
+  ssr: false, loading: () => <div className="py-16 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>,
+})
 
-/** Een document als kladblok: lezen of schrijven, bewaart vanzelf, afdrukken als pdf. */
+type Doc = { id: string; titel: string; inhoud: string | null; inhoud_json?: DocNode | null; space_id: string | null; map_id: string | null; lijst_id: string | null; prive: boolean; eigenaar_id: string | null; kijkers: string[] | null; item_id?: string | null; bijgewerkt_door: string | null; updated_at: string; created_at: string }
+
+/** Een document zoals in ClickUp: titels, lijsten, markeren, tabellen, afbeeldingen. Bewaart vanzelf, afdrukken als pdf. */
 export function DocWeergave({ id, boom, onVerwijderd, onVernieuw, onOpenItem }: { id: string; boom: BoomData; onVerwijderd: () => void; onVernieuw: () => void; onOpenItem?: (id: string) => void }) {
   const [doc, setDoc] = useState<Doc | null>(null)
   const [fout, setFout] = useState<string | null>(null)
   const [titel, setTitel] = useState('')
-  const [inhoud, setInhoud] = useState('')
-  const [bewerk, setBewerk] = useState(false)
   const [status, setStatus] = useState<'bewaard' | 'bezig' | 'wijziging'>('bewaard')
+  const [sleutel, setSleutel] = useState(0)
   const versie = useRef<string | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const laatste = useRef({ titel: '', inhoud: '' })
+  // Wat nog bewaard moet worden: de titel en (als ze veranderde) de inhoud.
+  const wacht = useRef<{ titel: string; json?: DocNode; tekst?: string } | null>(null)
+  const editorRef = useRef<Editor | null>(null)
   const mag = !!boom.rechten.aanpassen
 
   const laad = useCallback(async () => {
     try {
       const j = await api<{ doc: Doc }>(`/api/admin/agenda?doc=${id}`)
-      setDoc(j.doc); setTitel(j.doc.titel); setInhoud(j.doc.inhoud ?? '')
-      laatste.current = { titel: j.doc.titel, inhoud: j.doc.inhoud ?? '' }
-      versie.current = j.doc.updated_at; setFout(null); setStatus('bewaard')
-      setBewerk(!(j.doc.inhoud ?? '').trim() && mag)
+      setDoc(j.doc); setTitel(j.doc.titel)
+      versie.current = j.doc.updated_at; setFout(null); setStatus('bewaard'); wacht.current = null
+      setSleutel((n) => n + 1)
     } catch (e) { setFout(e instanceof Error ? e.message : 'Laden mislukt') }
-  }, [id, mag])
+  }, [id])
   useEffect(() => { setDoc(null); laad() }, [laad])
 
-  const bewaar = useCallback(async (t: string, h: string) => {
-    if (t === laatste.current.titel && h === laatste.current.inhoud) { setStatus('bewaard'); return }
+  const bewaar = useCallback(async () => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null }
+    const w = wacht.current
+    if (!w) return
+    wacht.current = null
     setStatus('bezig')
     try {
-      const r = await actie<{ ok: true; versie: string }>({ actie: 'doc.wijzig', id, titel: t, inhoud: h, versie: versie.current })
-      versie.current = r.versie; laatste.current = { titel: t, inhoud: h }
-      setStatus('bewaard')
-      if (t !== doc?.titel) onVernieuw()
+      const body: Record<string, unknown> = { actie: 'doc.wijzig', id, titel: w.titel.trim() || 'Naamloos document', versie: versie.current }
+      if (w.json) { body.inhoud_json = w.json; body.inhoud = (w.tekst ?? '').slice(0, 500_000) }
+      const r = await actie<{ ok: true; versie: string }>(body)
+      versie.current = r.versie
+      setStatus(wacht.current ? 'wijziging' : 'bewaard')
+      if (w.titel !== doc?.titel) onVernieuw()
     } catch (e) {
+      // Niet verloren: de wijziging blijft wachten tot de volgende poging.
+      wacht.current = { ...w, ...(wacht.current ?? {}) }
       setStatus('wijziging')
       toast.error(e instanceof Error ? e.message : 'Bewaren mislukt')
-      if (e instanceof ApiFout && e.status === 409) laad()
+      if (e instanceof ApiFout && e.status === 409) { wacht.current = null; laad() }
     }
   }, [id, doc?.titel, onVernieuw, laad])
 
   // Bewaart 1 seconde na het typen, en meteen bij het verlaten.
-  const plan = (t: string, h: string) => {
+  const plan = useCallback((w: { titel?: string; json?: DocNode; tekst?: string }) => {
+    wacht.current = { titel: w.titel ?? wacht.current?.titel ?? titelRef.current, ...(wacht.current?.json ? { json: wacht.current.json, tekst: wacht.current.tekst } : {}), ...(w.json ? { json: w.json, tekst: w.tekst } : {}) }
     setStatus('wijziging')
     if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(() => bewaar(t, h), 1000)
-  }
+    timer.current = setTimeout(() => { void bewaar() }, 1000)
+  }, [bewaar])
+  const titelRef = useRef(titel)
+  titelRef.current = titel
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
   useEffect(() => {
     const weg = (e: BeforeUnloadEvent) => { if (status !== 'bewaard') { e.preventDefault(); e.returnValue = '' } }
     window.addEventListener('beforeunload', weg)
     return () => window.removeEventListener('beforeunload', weg)
   }, [status])
+  // Een ander document openen: wat nog wacht eerst bewaren.
+  useEffect(() => () => { if (wacht.current) void bewaar() }, [bewaar])
 
   const verwijder = async () => {
     if (!doc || !confirm(`"${doc.titel}" naar de prullenbak? Je kan het daar terugzetten.`)) return
@@ -72,17 +92,14 @@ export function DocWeergave({ id, boom, onVerwijderd, onVernieuw, onOpenItem }: 
   const druk = () => {
     const w = window.open('', '_blank', 'width=820,height=900')
     if (!w) { toast.error('Je browser blokkeerde het afdrukvenster.'); return }
-    const html = document.getElementById('agenda-doc-afdruk')?.innerHTML ?? ''
-    const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
-    w.document.write(`<!doctype html><html lang="nl"><head><meta charset="utf-8"><title>${esc(titel)}</title><style>
-      @page{margin:18mm}body{font-family:Archivo,Helvetica,Arial,sans-serif;color:#0f0f0f;font-size:11pt;line-height:1.55}
-      h1{font-size:20pt;margin:0 0 4pt}.meta{font-family:'JetBrains Mono',monospace;font-size:8pt;color:#6e6e6e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:16pt}
-      button{all:unset;display:inline-block;width:10pt;height:10pt;border:1px solid #4b4b4b;border-radius:2pt;margin-right:6pt;vertical-align:-1pt}
-      a{color:#0f0f0f}p{margin:0 0 4pt}</style></head><body><h1>${esc(titel)}</h1>
-      <div class="meta">NextGen Agency · ${esc(padVan(boom, doc?.lijst_id ?? null).join(' › ') || 'Agenda')} · ${new Date().toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' })}</div>${html}</body></html>`)
+    // De HTML komt uit de editor zelf (enkel gekende opmaak), niet uit vrije tekst.
+    const html = editorRef.current?.getHTML() ?? ''
+    const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
+    w.document.write(`<!doctype html><html lang="nl"><head><meta charset="utf-8"><base href="${esc(window.location.origin)}/"><title>${esc(titel)}</title><style>${AFDRUK_CSS}</style></head><body><h1 class="doc-titel">${esc(titel)}</h1>
+      <div class="meta">NextGen Agency · ${esc(padVan(boom, doc?.lijst_id ?? null).join(' › ') || 'Agenda')} · ${new Date().toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' })}</div><div class="ag-doc">${html}</div></body></html>`)
     w.document.close()
     w.focus()
-    setTimeout(() => w.print(), 300)
+    setTimeout(() => w.print(), 500)
   }
 
   if (fout) return <div className="card-base text-sm text-red-700">{fout}</div>
@@ -94,36 +111,39 @@ export function DocWeergave({ id, boom, onVerwijderd, onVernieuw, onOpenItem }: 
         {doc.item_id && onOpenItem && <button type="button" onClick={() => onOpenItem(doc.item_id!)} className={`btn-secondary !py-1 !px-2.5 !text-xs shrink-0 ${focusRing}`}><ChevronRight className="h-3.5 w-3.5 rotate-180" />Naar de taak</button>}
         <div className="flex-1 min-w-0 text-xs text-gray-500 flex items-center gap-1 truncate">{pad.map((p, n) => <span key={n} className="flex items-center gap-1">{p}{n < pad.length - 1 && <ChevronRight className="h-3 w-3" />}</span>)}</div>
         <span className="text-[11px] text-gray-400 flex items-center gap-1">{status === 'bezig' ? <><Loader2 className="h-3 w-3 animate-spin" />Bewaren…</> : status === 'wijziging' ? 'Niet bewaard' : <><Check className="h-3 w-3" />Bewaard</>}</span>
-        {mag && <button type="button" onClick={() => { if (bewerk) bewaar(titel, inhoud); setBewerk(!bewerk) }} className={`btn-secondary !py-1 !px-2.5 !text-xs ${focusRing}`}>{bewerk ? <><Eye className="h-3.5 w-3.5" />Lezen</> : <><Pencil className="h-3.5 w-3.5" />Bewerken</>}</button>}
         <button type="button" onClick={druk} className={`btn-secondary !py-1 !px-2.5 !text-xs ${focusRing}`}><Printer className="h-3.5 w-3.5" />Afdrukken</button>
         {boom.rechten.verwijderen && <button type="button" onClick={verwijder} aria-label="Naar de prullenbak" className={`h-8 w-8 rounded-lg hover:bg-red-50 text-gray-500 hover:text-red-600 flex items-center justify-center ${focusRing}`}><Trash2 className="h-4 w-4" /></button>}
       </div>
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-5 sm:px-10 py-8">
-          <input value={titel} disabled={!mag} onChange={(e) => { setTitel(e.target.value); plan(e.target.value, inhoud) }} onBlur={() => bewaar(titel.trim() || 'Naamloos document', inhoud)}
-            className="w-full text-3xl font-bold bg-transparent border-0 p-0 mb-2 focus:ring-0 focus:outline-none" aria-label="Titel" placeholder="Titel" />
-          <div className="flex flex-wrap items-center gap-3 mb-6 text-xs text-gray-500">
+        <div className="max-w-5xl mx-auto px-4 sm:px-10 pt-4 pb-16">
+          <input value={titel} disabled={!mag} onChange={(e) => { setTitel(e.target.value); plan({ titel: e.target.value }) }} onBlur={() => { void bewaar() }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); editorRef.current?.commands.focus('start') } }}
+            className="w-full text-3xl font-bold bg-transparent border-0 p-0 mt-4 mb-2 focus:ring-0 focus:outline-none" aria-label="Titel" placeholder="Titel" />
+          <div className="flex flex-wrap items-center gap-3 mb-5 text-xs text-gray-500">
             <span>Laatst aangepast {new Date(doc.updated_at).toLocaleString('nl-BE', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Brussels' })}{doc.bijgewerkt_door ? ` door ${doc.bijgewerkt_door}` : ''}</span>
-            <WieZietDit doc={doc} boom={boom} mag={mag} versie={versie} onDoc={(d) => { setDoc(d); onVernieuw() }} />
+            <WieZietDit doc={doc} boom={boom} mag={mag} versie={versie} onDoc={(d) => { setDoc((x) => (x ? { ...x, prive: d.prive, kijkers: d.kijkers, eigenaar_id: d.eigenaar_id, updated_at: d.updated_at } : d)); onVernieuw() }} />
           </div>
-          {bewerk ? (
-            <textarea autoFocus value={inhoud} onChange={(e) => { setInhoud(e.target.value); plan(titel, e.target.value) }} onBlur={() => bewaar(titel, inhoud)}
-              onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); bewaar(titel, inhoud) } }}
-              className="w-full min-h-[60vh] text-[15px] leading-relaxed bg-transparent border-0 p-0 focus:ring-0 focus:outline-none resize-none font-[inherit]"
-              style={{ fieldSizing: 'content' } as React.CSSProperties}
-              placeholder={'Schrijf maar. Koppen met #, lijstjes met -, afvinken met - [ ], vet met **zo**.'} aria-label="Inhoud" />
-          ) : (
-            <div onDoubleClick={() => mag && setBewerk(true)}>
-              {inhoud.trim() ? <Markdown tekst={inhoud} onVink={mag ? (n) => { const t = vinkRegel(inhoud, n); setInhoud(t); bewaar(titel, t) } : undefined} /> : <p className="text-sm text-gray-400">Dit document is nog leeg.</p>}
-            </div>
-          )}
-          {/* Voor het afdrukken: altijd de leesversie, ook tijdens het schrijven. */}
-          <div id="agenda-doc-afdruk" className="hidden" aria-hidden><Markdown tekst={inhoud} /></div>
+          <div onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); void bewaar() } }} onBlur={() => { if (wacht.current) void bewaar() }}>
+            <RijkeEditor key={`${doc.id}:${sleutel}`} docId={doc.id} json={doc.inhoud_json ?? null} markdown={doc.inhoud ?? ''} mag={mag}
+              onKlaar={(e) => { editorRef.current = e }}
+              onWijzig={(json, tekst) => plan({ json, tekst })} />
+          </div>
         </div>
       </div>
     </div>
   )
 }
+
+/** Opmaak voor het afdrukken (zelfde als in de app). */
+const AFDRUK_CSS = `@page{margin:18mm}body{font-family:Archivo,Helvetica,Arial,sans-serif;color:#0f0f0f;font-size:11pt;line-height:1.55}
+.doc-titel{font-size:22pt;margin:0 0 4pt}.meta{font-family:'JetBrains Mono',monospace;font-size:8pt;color:#6e6e6e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:16pt}
+h1{font-size:17pt;margin:14pt 0 6pt}h2{font-size:14pt;margin:12pt 0 5pt}h3{font-size:12pt;margin:10pt 0 4pt}p{margin:0 0 5pt}
+ul,ol{padding-left:18pt;margin:0 0 6pt}ul[data-type="taskList"]{list-style:none;padding-left:2pt}ul[data-type="taskList"] li{display:flex;gap:6pt}
+ul[data-type="taskList"] li>label{flex:none}li[data-checked="true"]>div{text-decoration:line-through;color:#888}
+blockquote{border-left:3px solid #ccc;margin:6pt 0;padding-left:10pt;color:#444}hr{border:0;border-top:1px solid #ddd;margin:12pt 0}
+table{border-collapse:collapse;width:100%;margin:8pt 0}td,th{border:1px solid #ccc;padding:4pt 6pt;vertical-align:top;text-align:left}th{background:#f3f3f3}
+img{max-width:100%;border-radius:6pt}mark{padding:0 1pt;border-radius:2pt}a{color:#0f0f0f}code{font-family:'JetBrains Mono',monospace;font-size:9.5pt;background:#f3f3f3;padding:0 2pt}
+pre{background:#f3f3f3;padding:6pt 8pt;border-radius:4pt;white-space:pre-wrap}`
 
 /** Wie ziet dit doc? Iedereen die de map of lijst ziet, of privé: de eigenaar en wie je toevoegt. */
 function WieZietDit({ doc, boom, mag, versie, onDoc }: { doc: Doc; boom: BoomData; mag: boolean; versie: React.MutableRefObject<string | null>; onDoc: (d: Doc) => void }) {

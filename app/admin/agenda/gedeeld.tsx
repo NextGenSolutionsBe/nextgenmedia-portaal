@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Check, Search, X, Folder, List as ListIcon, ChevronRight } from 'lucide-react'
-import { PersoonFoto } from '@/components/admin/persoon-foto'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Check, Search, X, Folder, List as ListIcon, ChevronRight, Plus } from 'lucide-react'
+import { PersoonFoto, PersoonKnop } from '@/components/admin/persoon-foto'
 import { zoekVeld } from '@/lib/zoekveld'
 import type { Persoon, Label, Space, Map as AgMap, Lijst, DocKort, Item, KleurContext } from '@/lib/agenda/model'
 import { PALET, mapKleur, isKleur } from '@/lib/agenda/model'
@@ -317,6 +317,44 @@ export function MapKiezer({ boom, gekozen, onKies, leeg = null, vol = false }: {
           )
         })}
       </div>
+    </div>
+  )
+}
+
+/**
+ * Wie doet het (meerdere kan): de zaakvoerders en jezelf als knoppen met foto om
+ * aan en uit te tikken, anderen als bolletje met een kruisje, en "Iemand anders"
+ * om te zoeken.
+ */
+export function WieKiezer({ boom, gekozen, onWissel, disabled = false }: { boom: BoomData; gekozen: string[]; onWissel: (id: string) => void; disabled?: boolean }) {
+  const [open, setOpen] = useState(false)
+  const sluit = useCallback(() => setOpen(false), [])
+  const per = new Map(boom.personen.map((p) => [p.id, p]))
+  const snel = [...new Set([boom.ik, ...boom.zaakvoerders])].filter((id) => per.get(id)?.actief)
+  const anderen = gekozen.filter((id) => !snel.includes(id))
+  const voornaam = (id: string) => (per.get(id)?.naam ?? 'Onbekend').split(' ')[0]
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-1.5">
+        {snel.map((id) => <PersoonKnop key={id} naam={per.get(id)?.naam ?? '?'} label={id === boom.ik ? `${voornaam(id)} (ik)` : voornaam(id)} rol="checkbox" klein aan={gekozen.includes(id)} disabled={disabled} onClick={() => onWissel(id)} />)}
+      </div>
+      {anderen.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {anderen.map((id) => (
+            <span key={id} className="inline-flex items-center gap-1.5 rounded-full bg-gray-900 text-white pl-0.5 pr-1 py-0.5 text-xs">
+              <PersoonFoto naam={per.get(id)?.naam ?? '?'} maat={20} />{per.get(id)?.naam ?? 'Onbekend'}
+              {!disabled && <button type="button" onClick={() => onWissel(id)} aria-label={`${per.get(id)?.naam ?? 'Persoon'} weghalen`} className={`h-4 w-4 rounded-full hover:bg-white/20 flex items-center justify-center ${focusRing}`}><X className="h-3 w-3" /></button>}
+            </span>
+          ))}
+        </div>
+      )}
+      {!disabled && (
+        <div className="relative">
+          <button type="button" onClick={() => setOpen(!open)} className={`inline-flex items-center gap-1 text-xs text-gray-600 hover:text-gray-900 hover:underline ${focusRing}`}><Plus className="h-3.5 w-3.5" />Iemand anders</button>
+          <Popover open={open} onSluit={sluit}><PersonenLijst personen={boom.personen} eerst={boom.zaakvoerders} ik={boom.ik} gekozen={gekozen} onWissel={onWissel} /></Popover>
+        </div>
+      )}
+      <p className="text-[11px] text-gray-400">{gekozen.length > 1 ? `${gekozen.length} mensen samen` : 'Tik om aan of uit te zetten, meerdere kan.'}</p>
     </div>
   )
 }

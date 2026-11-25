@@ -8,8 +8,8 @@ import {
 import { Modal } from '@/app/admin/materiaal/dialogen'
 import { PersoonFoto } from '@/components/admin/persoon-foto'
 import { zoekVeld } from '@/lib/zoekveld'
-import { dag, uur, kortDag, plusDagen, vandaag, zoneNaarIso, type Item } from '@/lib/agenda/model'
-import { actie, api, padVan, Popover, PersonenLijst, KleurKeuze, Schakel, Avatars, MapKiezer, MapLabel, focusRing, type BoomData } from './gedeeld'
+import { dag, uur, kortDag, plusDagen, vandaag, zoneNaarIso, snelleDeadlines, type Item } from '@/lib/agenda/model'
+import { actie, api, padVan, Popover, PersonenLijst, KleurKeuze, Schakel, Avatars, MapKiezer, MapLabel, WieKiezer, focusRing, type BoomData } from './gedeeld'
 import { wanneer } from './lijst'
 
 const hhmm = (min: number) => `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
@@ -30,7 +30,14 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
   const [wie, setWie] = useState<string[]>([boom.ik])
   const [prive, setPrive] = useState(false)
   const [soort, setSoort] = useState<'taak' | 'meeting'>(m.heelDag ? 'taak' : 'meeting')
-  const [open, setOpen] = useState<null | 'lijst' | 'wie'>(null)
+  const [open, setOpen] = useState<null | 'lijst'>(null)
+  // Deadline: geen, een snelle keuze of zelf datum en uur.
+  const [deadline, setDeadline] = useState<string | null>(null)
+  const [eigenDl, setEigenDl] = useState(false)
+  const [dlDag, setDlDag] = useState(m.dag)
+  const [dlUur, setDlUur] = useState('17:00')
+  const deadlineIso = eigenDl ? (dlDag && dlUur ? zoneNaarIso(dlDag, dlUur) : null) : deadline
+  const metDeadline = soort === 'taak' && !!deadlineIso
   const [bezig, setBezig] = useState(false)
   const [mapNodig, setMapNodig] = useState(false)
   const sluitPop = useCallback(() => setOpen(null), [])
@@ -43,7 +50,12 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
     try {
       const start = m.heelDag ? null : zoneNaarIso(m.dag, hhmm(m.vanMin ?? 540))
       const eind = m.heelDag ? zoneNaarIso(m.dag, '00:00') : (m.totMin ?? 600) >= 1440 ? zoneNaarIso(plusDagen(m.dag, 1), '00:00') : zoneNaarIso(m.dag, hhmm(m.totMin ?? 600))
-      const r = await actie({ actie: 'item.nieuw', titel: titel.trim(), soort, start_op: start, eind_op: eind, heel_dag: m.heelDag, lijst_id: lijst, toegewezen: wie, prive })
+      // Een taak van een hele dag met een deadline: enkel de deadline (staat bovenaan die dag).
+      const enkelDl = metDeadline && m.heelDag
+      const r = await actie({
+        actie: 'item.nieuw', titel: titel.trim(), soort, start_op: enkelDl ? null : start, eind_op: enkelDl ? null : eind, heel_dag: enkelDl ? false : m.heelDag,
+        deadline_op: metDeadline ? deadlineIso : null, lijst_id: lijst, toegewezen: wie, prive,
+      })
       toast.success(soort === 'meeting' ? 'Afspraak in de agenda gezet.' : 'Taak toegevoegd.')
       if (r.id) onTaak(r.id)
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Toevoegen mislukt') } finally { setBezig(false) }
@@ -83,14 +95,29 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
         {open === 'lijst' && <div className="mt-1.5 rounded-xl border border-gray-200"><MapKiezer vol boom={boom} gekozen={lijst} onKies={(l) => { setLijst(l); setMapNodig(false); sluitPop() }} /></div>}
         {mapNodig && !lijst && <p className="text-xs text-red-700 mt-1">Kies eerst bij welke map deze taak hoort.</p>}
       </div>
-      <div className="grid grid-cols-[80px_1fr] gap-2 items-center text-sm">
-        <span className="text-gray-500">Wie</span>
-        <div className="relative">
-          <button type="button" onClick={() => setOpen(open === 'wie' ? null : 'wie')} className={`flex flex-wrap gap-1 rounded-lg border border-gray-200 px-2 py-1.5 w-full text-left hover:border-gray-400 ${focusRing}`}>
-            {wie.length ? wie.map((p) => <span key={p} className="inline-flex items-center gap-1 rounded-full bg-gray-100 pl-0.5 pr-2 py-0.5 text-xs"><PersoonFoto naam={boom.personen.find((x) => x.id === p)?.naam ?? '?'} maat={18} />{boom.personen.find((x) => x.id === p)?.naam.split(' ')[0]}</span>) : <span className="text-gray-400">Niemand</span>}
-          </button>
+      {soort === 'taak' && (
+        <div>
+          <div className="label-mono text-[10px] uppercase text-gray-500 mb-1.5">Deadline</div>
+          <div className="flex flex-wrap gap-1.5">
+            <button type="button" onClick={() => { setDeadline(null); setEigenDl(false) }} aria-pressed={!deadlineIso} className={`rounded-full border px-2.5 py-1 text-xs ${!deadlineIso ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700 hover:border-gray-400'} ${focusRing}`}>Geen</button>
+            {snelleDeadlines().map((x) => {
+              const aan = !eigenDl && deadline === x.iso
+              return <button key={x.label} type="button" onClick={() => { setDeadline(x.iso); setEigenDl(false) }} aria-pressed={aan} className={`rounded-full border px-2.5 py-1 text-xs ${aan ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700 hover:border-gray-400'} ${focusRing}`}>{x.label}</button>
+            })}
+            <button type="button" onClick={() => setEigenDl(true)} aria-pressed={eigenDl} className={`rounded-full border px-2.5 py-1 text-xs ${eigenDl ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700 hover:border-gray-400'} ${focusRing}`}>Zelf kiezen</button>
+          </div>
+          {eigenDl && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              <input type="date" value={dlDag} onChange={(e) => setDlDag(e.target.value)} className="input-base !py-1 !px-2 text-sm !w-[9.5rem]" aria-label="Datum deadline" />
+              <input type="time" step={300} value={dlUur} onChange={(e) => setDlUur(e.target.value)} className="input-base !py-1 !px-2 text-sm !w-[6.5rem]" aria-label="Uur deadline" />
+            </div>
+          )}
+          {metDeadline && m.heelDag && <p className="text-[11px] text-gray-500 mt-1">De taak staat bovenaan de dag van de deadline, met het uur erbij.</p>}
         </div>
-        {open === 'wie' && <div className="col-span-2 rounded-xl border border-gray-200"><PersonenLijst vol personen={boom.personen} eerst={boom.zaakvoerders} ik={boom.ik} gekozen={wie} onWissel={(p) => setWie(wie.includes(p) ? wie.filter((x) => x !== p) : [...wie, p])} /></div>}
+      )}
+      <div>
+        <div className="label-mono text-[10px] uppercase text-gray-500 mb-1.5">Wie</div>
+        <WieKiezer boom={boom} gekozen={wie} onWissel={(p) => setWie(wie.includes(p) ? wie.filter((x) => x !== p) : [...wie, p])} />
       </div>
       <Schakel aan={prive} onWissel={() => setPrive(!prive)} label={<span className="text-sm flex items-center gap-1.5"><Lock className="h-3.5 w-3.5" />Privé (enkel jij en wie je je agenda deelt)</span>} />
     </Modal>

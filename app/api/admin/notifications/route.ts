@@ -6,6 +6,7 @@ import { vestingMeldingVoor } from '@/lib/vesting-data-server'
 import { regelsMeldingVoor, uitgavenMeldingVoor, laadVennotenData } from '@/lib/vennoot-uitgaven-server'
 import { vestingRegelsMeldingVoor } from '@/lib/vesting-regels-server'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { deadlineMeldingenVoor } from '@/lib/agenda/deadlines-server'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,7 +24,7 @@ export async function GET() {
     // Uitgaven vennoten: één keer laden voor beide meldingen.
     const vennoten = actor.isAdmin ? laadVennotenData(admin, actor.userId) : null
     vennoten?.catch(() => null)
-    const [all, vesting, regels, uitgaven, vestingRegels] = await Promise.all([
+    const [all, vesting, regels, uitgaven, vestingRegels, deadlines] = await Promise.all([
       buildNotifications(),
       // Vesting: enkel voor Marco, Bram en Chiara, en enkel wat zij zelf nog moeten tekenen.
       actor.isAdmin ? extra(() => vestingMeldingVoor(actor.userId)) : [],
@@ -33,6 +34,8 @@ export async function GET() {
       vennoten ? extra(() => uitgavenMeldingVoor(actor.userId, admin, vennoten)) : [],
       // Vesting: de regels wachten op jouw handtekening.
       actor.isAdmin ? extra(() => vestingRegelsMeldingVoor(actor.userId, admin)) : [],
+      // Agenda: jouw deadlines van vandaag (en wat de voorbije week niet af raakte).
+      actorCanSee(actor, 'agenda') ? extra(() => deadlineMeldingenVoor(admin, actor.userId)) : [],
     ])
     const KIND_MODULE: Record<string, string> = {
       invoice: 'invoices', contract: 'contracts', blog: 'blogs', website: 'content', client: 'clients', formulier: 'formulieren', personeel: 'personeel', content: 'content', meeting: 'meetings', aanvraag: 'aanvragen', offerte: 'offertes', oplevering: 'opleveringen', project: 'opdrachten',
@@ -44,7 +47,7 @@ export async function GET() {
       return !mod || actorCanSee(actor, mod)
     })
     // Zelfde volgorde als vroeger: de persoonlijke meldingen bovenaan.
-    const notifications = [...vestingRegels, ...uitgaven, ...regels, ...vesting, ...gefilterd]
+    const notifications = [...deadlines, ...vestingRegels, ...uitgaven, ...regels, ...vesting, ...gefilterd]
     return NextResponse.json({ notifications })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })

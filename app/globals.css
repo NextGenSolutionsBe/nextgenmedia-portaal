@@ -396,3 +396,41 @@ html {
 input[type='search']::-webkit-search-cancel-button,
 input[type='search']::-webkit-search-results-button,
 input[type='search']::-webkit-search-results-decoration { -webkit-appearance: none; appearance: none; display: none; }
+
+/* Agenda: opgemaakte documenten (TipTap), zoals in ClickUp. */
+.ag-doc .ProseMirror { font-size: 15px; line-height: 1.65; color: #0f0f0f; min-height: 45vh; padding-bottom: 4rem; }
+.ag-doc .ProseMirror > * + * { margin-top: 0.55em; }
+.ag-doc .ProseMirror h1 { font-size: 1.85rem; font-weight: 700; line-height: 1.2; margin-top: 1.3em; letter-spacing: -0.01em; }
+.ag-doc .ProseMirror h2 { font-size: 1.4rem; font-weight: 700; line-height: 1.25; margin-top: 1.2em; }
+.ag-doc .ProseMirror h3 { font-size: 1.12rem; font-weight: 600; margin-top: 1.05em; }
+.ag-doc .ProseMirror > h1:first-child, .ag-doc .ProseMirror > h2:first-child, .ag-doc .ProseMirror > h3:first-child { margin-top: 0.2em; }
+.ag-doc .ProseMirror ul { list-style: disc; padding-left: 1.5em; }
+.ag-doc .ProseMirror ol { list-style: decimal; padding-left: 1.6em; }
+.ag-doc .ProseMirror ul ul { list-style: circle; }
+.ag-doc .ProseMirror li { margin-top: 0.2em; }
+.ag-doc .ProseMirror li > p { margin: 0; }
+.ag-doc .ProseMirror li::marker { color: #4b4b4b; }
+.ag-doc .ProseMirror ul[data-type="taskList"] { list-style: none; padding-left: 0.15em; }
+.ag-doc .ProseMirror ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 0.55em; }
+.ag-doc .ProseMirror ul[data-type="taskList"] li > label { flex: none; margin-top: 0.28em; user-select: none; }
+.ag-doc .ProseMirror ul[data-type="taskList"] li > label input { width: 1em; height: 1em; accent-color: #0f0f0f; cursor: pointer; }
+.ag-doc .ProseMirror ul[data-type="taskList"] li > div { flex: 1; min-width: 0; }
+.ag-doc .ProseMirror li[data-checked="true"] > div { text-decoration: line-through; color: #8a8a8a; }
+.ag-doc .ProseMirror blockquote { border-left: 3px solid #0f0f0f; background: #f6f6f6; border-radius: 0 10px 10px 0; padding: 0.6em 1em; color: #272727; }
+.ag-doc .ProseMirror hr { border: 0; border-top: 1px solid #e0e0e0; margin: 1.4em 0; }
+.ag-doc .ProseMirror mark { border-radius: 3px; padding: 0 0.12em; color: inherit; }
+.ag-doc .ProseMirror a { text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.ag-doc .ProseMirror code { background: #f1f1f1; border-radius: 4px; padding: 0.1em 0.3em; font-family: var(--font-mono, ui-monospace), monospace; font-size: 0.88em; }
+.ag-doc .ProseMirror pre { background: #0f0f0f; color: #f5f5f5; border-radius: 10px; padding: 0.8em 1em; overflow-x: auto; font-family: var(--font-mono, ui-monospace), monospace; font-size: 0.88em; }
+.ag-doc .ProseMirror pre code { background: none; padding: 0; color: inherit; }
+.ag-doc .ProseMirror .tableWrapper { overflow-x: auto; margin: 1em 0; }
+.ag-doc .ProseMirror table { border-collapse: collapse; table-layout: fixed; width: 100%; margin: 0; }
+.ag-doc .ProseMirror td, .ag-doc .ProseMirror th { border: 1px solid #e0e0e0; padding: 0.45em 0.65em; vertical-align: top; position: relative; min-width: 70px; box-sizing: border-box; }
+.ag-doc .ProseMirror th { background: #f5f5f5; font-weight: 600; text-align: left; }
+.ag-doc .ProseMirror td > p, .ag-doc .ProseMirror th > p { margin: 0; }
+.ag-doc .ProseMirror .selectedCell::after { content: ''; position: absolute; inset: 0; background: rgba(15, 15, 15, 0.07); pointer-events: none; }
+.ag-doc .ProseMirror .column-resize-handle { position: absolute; right: -2px; top: 0; bottom: -2px; width: 4px; background: #0f0f0f; pointer-events: none; }
+.ag-doc .ProseMirror.resize-cursor { cursor: col-resize; }
+.ag-doc .ProseMirror img { max-width: 100%; height: auto; border-radius: 10px; display: block; }
+.ag-doc .ProseMirror img.ProseMirror-selectednode { outline: 2px solid #0f0f0f; outline-offset: 2px; }
+.ag-doc .ProseMirror p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: #a3a3a3; float: left; height: 0; pointer-events: none; }

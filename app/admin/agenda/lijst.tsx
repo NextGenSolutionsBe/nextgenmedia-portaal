@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { Check, ChevronRight, Flag, FileText, Plus, Loader2, Video, ListTree, Lock } from 'lucide-react'
 import { vandaag, plaatsVan, plusDagen, kortDag, type Item, type Persoon } from '@/lib/agenda/model'
 import { actie, Avatars, focusRing, type BoomData } from './gedeeld'
+import { DeadlineLabel } from './kalender'
 
 /** Alle taken van een lijst, map of space, per lijst gegroepeerd, open eerst. */
 export function LijstWeergave({ lijstIds, items, boom, personen, laden, magToevoegen, onOpen, onKlaar, onToegevoegd, onDoc }: {
@@ -45,7 +46,7 @@ function Groep({ titel, lijstId, items, personen, labels, magToevoegen, onOpen, 
   const [dicht, setDicht] = useState(false)
   const [nieuw, setNieuw] = useState('')
   const [bezig, setBezig] = useState(false)
-  const sleutel = (i: Item) => i.eind_op ?? i.start_op ?? '9999'
+  const sleutel = (i: Item) => i.deadline_op ?? i.eind_op ?? i.start_op ?? '9999'
   const open = items.filter((i) => i.status !== 'klaar').sort((a, b) => Number(b.urgent) - Number(a.urgent) || sleutel(a).localeCompare(sleutel(b)) || a.titel.localeCompare(b.titel))
   const klaar = items.filter((i) => i.status === 'klaar').sort((a, b) => (b.afgerond_op ?? '').localeCompare(a.afgerond_op ?? ''))
   const voegToe = async () => {
@@ -64,7 +65,7 @@ function Groep({ titel, lijstId, items, personen, labels, magToevoegen, onOpen, 
       )}
       {!dicht && (
         <>
-          <div className="hidden sm:grid grid-cols-[1fr_120px_130px] gap-3 px-4 py-1.5 border-b border-gray-100 table-th !bg-transparent">
+          <div className="hidden sm:grid grid-cols-[1fr_120px_150px] gap-3 px-4 py-1.5 border-b border-gray-100 table-th !bg-transparent">
             <span>Taak</span><span>Wie</span><span>Wanneer</span>
           </div>
           <ul className="divide-y divide-gray-100">
@@ -100,7 +101,7 @@ function Rij({ i, personen, labels, onOpen, onKlaar }: { i: Item; personen: Map<
   const telaat = !klaar && i.soort !== 'meeting' && einddag !== null && einddag < vandaag()
   const vandaagD = !klaar && einddag === vandaag()
   return (
-    <li className="grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_120px_130px] gap-3 items-center px-4 py-2 hover:bg-gray-50/70">
+    <li className="grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_120px_150px] gap-3 items-center px-4 py-2 hover:bg-gray-50/70">
       <div className="flex items-center gap-2.5 min-w-0">
         {i.soort === 'meeting' ? <Video className="h-4 w-4 shrink-0 text-gray-400" /> : (
           <button type="button" onClick={() => onKlaar(i)} aria-label={klaar ? 'Terug open zetten' : 'Afvinken'}
@@ -116,7 +117,8 @@ function Rij({ i, personen, labels, onOpen, onKlaar }: { i: Item; personen: Map<
       </div>
       <div className="hidden sm:block"><Avatars ids={i.toegewezen} personen={personen} max={4} maat={20} /></div>
       <div className={`text-xs tabular-nums ${telaat ? 'text-red-600 font-semibold' : vandaagD ? 'text-gray-900 font-semibold' : 'text-gray-500'}`}>
-        {klaar && i.afgerond_op ? `✓ ${new Date(i.afgerond_op).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' })}` : wanneer(i)}
+        {klaar && i.afgerond_op ? `✓ ${new Date(i.afgerond_op).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' })}`
+          : i.deadline_op ? <span className="inline-flex flex-col items-start gap-0.5"><DeadlineLabel i={i} lang />{i.start_op && <span>{wanneer(i)}</span>}</span> : wanneer(i)}
       </div>
     </li>
   )

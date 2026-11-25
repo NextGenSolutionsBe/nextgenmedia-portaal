@@ -7,6 +7,20 @@ import { RecentActivity } from './recent-activity'
 import { OpvolgingPanel } from './opvolging-panel'
 import { TakenBlok } from '@/components/admin/taken-blok'
 import { MailProjecten } from '@/components/admin/mail-projecten'
+import { magIk } from '@/lib/instellingen/laden'
+import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { mijnDeadlines } from '@/lib/agenda/deadlines-server'
+import { DeadlinesBlok } from './agenda/deadlines-blok'
+import { SnelleAgendaKnoppen } from './agenda/inspreken'
+
+/** Jouw deadlines van vandaag (en wat de voorbije week niet af raakte). Niets = geen blok. */
+async function AgendaDeadlines({ userId }: { userId: string }) {
+  const [lijst, aanpassen] = await Promise.all([
+    mijnDeadlines(createAdminSupabaseClient(), userId).catch(() => []),
+    magIk('agenda', 'aanpassen'),
+  ])
+  return <DeadlinesBlok begin={lijst} magAanpassen={!!aanpassen} />
+}
 
 // Compact Command Center: wat beslist moet worden (nieuwe projecten), taken,
 // Op te volgen (enkel blokken waar iets in staat, dringendste eerst) en wat
@@ -25,15 +39,30 @@ export default async function CommandCenter() {
   const actor = await getActor()
   const can = (key: string) => !!actor && actorCanSee(actor, key)
   const isAdmin = !!actor?.isAdmin
+  const [agendaToevoegen, meetingsPlannen] = await Promise.all([
+    can('agenda') ? magIk('agenda', 'toevoegen') : null,
+    can('meetings') ? magIk('meetings', 'toevoegen') : null,
+  ])
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">Command Center</h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          {today.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">Command Center</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {today.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Brussels' })}
+          </p>
+        </div>
+        {/* Snel: een taak inspreken (komt in de agenda) of een meeting inplannen. */}
+        <SnelleAgendaKnoppen magToevoegen={!!agendaToevoegen} magMeetings={!!meetingsPlannen} />
       </div>
+
+      {/* Jouw deadlines van vandaag, het uur groot vooraan. */}
+      {actor && can('agenda') && (
+        <Suspense fallback={null}>
+          <AgendaDeadlines userId={actor.userId} />
+        </Suspense>
+      )}
 
       {/* Nieuwe projecten uit de mail: Ja (projectkaart) of Nee. Enkel als er iets te beslissen is. */}
       {can('opdrachten') && <MailProjecten />}
