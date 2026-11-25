@@ -113,9 +113,18 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd, 
 
       {/* Snelle knoppen */}
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" disabled={!mag} onClick={() => bewaar({ status: klaar ? 'open' : 'klaar' })} className={`status-badge !text-xs ${klaar ? '!text-[#2b4a36] border-l-[3px] border-l-[#4caf73]' : ''}`} style={klaar ? { background: KLAAR_STIJL.background } : undefined}>
-          {klaar ? <><Check className="h-3 w-3" />Completed</> : 'Open · klik om te completen'}
-        </button>
+        {/* Eén duidelijke groene knop om de taak af te ronden; daarna kan je ze terug openzetten. */}
+        {klaar ? (
+          <span className="inline-flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 h-10 rounded-xl px-3.5 text-sm font-semibold text-[#2b4a36] border-l-[3px] border-l-[#4caf73]" style={{ background: KLAAR_STIJL.background }}><Check className="h-4 w-4" />Completed</span>
+            {mag && <button type="button" onClick={() => bewaar({ status: 'open' })} className={`h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-700 hover:border-gray-400 ${focusRing}`}>Terug open</button>}
+          </span>
+        ) : (
+          <button type="button" disabled={!mag} onClick={() => bewaar({ status: 'klaar' })}
+            className={`inline-flex items-center gap-2 h-10 rounded-xl bg-[#2f7a4b] hover:bg-[#276a40] active:bg-[#215a37] text-white px-4 text-sm font-semibold shadow-sm disabled:opacity-50 ${focusRing}`}>
+            <Check className="h-4 w-4" />Complete
+          </button>
+        )}
         {i.deadline_op && <DeadlineLabel i={i} lang />}
         {i.soort === 'meeting' && <span className="status-badge !text-xs"><Video className="h-3 w-3" />Meeting</span>}
         {i.clickup_status && <span className="text-[11px] label-mono uppercase px-2 py-0.5 rounded-full border border-gray-200" style={isKleur(i.clickup_status_kleur) ? { borderColor: i.clickup_status_kleur, color: '#272727' } : undefined} title="Status in ClickUp">{i.clickup_status}</span>}
