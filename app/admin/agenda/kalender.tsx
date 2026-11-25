@@ -8,7 +8,11 @@ import {
 } from '@/lib/agenda/model'
 import { Avatars, focusRing } from './gedeeld'
 
-const PX_MIN = 1 // 60 px per uur
+const PX_MIN = 1 // 60 px per uur (computer)
+const PX_MIN_GSM = 0.6 // 36 px per uur op de gsm, zoals ClickUp: meer van de dag in beeld
+/** Met de vinger een blok aan het verplaatsen (of net gedaan): dan telt een veegbeweging niet als naar de volgende week. */
+export const agendaSleep = { bezig: false, tot: 0 }
+const stopSleep = () => { if (agendaSleep.bezig) { agendaSleep.bezig = false; agendaSleep.tot = Date.now() } }
 const SNAP = 15
 const DAGNAAM = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo']
 const DAGNAAM_LANG = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag']
@@ -93,7 +97,7 @@ export function Kalender(p: Props) {
 
 /** Gsm-breedte: week en werkweek passen dan op het scherm met compacte blokjes. */
 function useSmal(): boolean {
-  const [smal, setSmal] = useState(false)
+  const [smal, setSmal] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches)
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 767px)')
     const f = () => setSmal(mq.matches)
@@ -139,9 +143,10 @@ function Chip({ i, kleur, onOpen, onKlaar, personen, tijd, sleep, opDag, lang, m
   if (compact) {
     return (
       <div onClick={() => onOpen(i)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
-        className={`relative flex items-center rounded-md pl-1 pr-0.5 h-[24px] text-[11px] font-medium leading-none cursor-pointer select-none ${focusRing}`}
+        className={`relative flex items-center rounded pl-1 pr-px h-[22px] text-[11px] font-medium leading-none cursor-pointer select-none overflow-hidden ${focusRing}`}
         style={stijlVan(i, kleur)} title={i.titel}>
-        <span className={`truncate ${klaar ? 'line-through decoration-1 opacity-80' : ''}`}>{i.titel}</span>
+        {/* Zonder puntjes: zo past er meer van de titel in, net als in ClickUp. */}
+        <span className={`whitespace-nowrap overflow-hidden ${klaar ? 'line-through decoration-1 opacity-80' : ''}`}>{i.titel}</span>
       </div>
     )
   }
@@ -183,6 +188,7 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
   const [sleep, setSleep] = useState<Sleep | null>(null)
   const smal = useSmal()
   const compact = smal && dagen.length > 1
+  const pxMin = smal ? PX_MIN_GSM : PX_MIN
   // Met de vinger: een blok wacht eerst tot je het even inhoudt. Beweeg je eerder, dan scroll je gewoon.
   const houd = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number; item: Item } | null>(null)
   const aanSlepen = useRef(false)
@@ -236,7 +242,7 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
     if (!el || gescrold.current === sleutel) return
     let vroegst = 450
     for (const [, l] of rooster) for (const b of l) vroegst = Math.min(vroegst, b.vanMin)
-    el.scrollTop = Math.max(0, (vroegst - 20) * PX_MIN)
+    el.scrollTop = Math.max(0, (vroegst - 20) * pxMin)
     if (items.length) gescrold.current = sleutel
   }, [weergave, dagen, rooster, items.length])
 
@@ -256,7 +262,7 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
     const r = el.getBoundingClientRect()
     const breedte = r.width / dagen.length
     const dagIndex = Math.max(0, Math.min(dagen.length - 1, Math.floor((x - r.left) / breedte)))
-    return { dagIndex, min: (y - r.top) / PX_MIN }
+    return { dagIndex, min: (y - r.top) / pxMin }
   }
 
   const startNieuw = (e: RPointerEvent, d: string) => {
@@ -277,6 +283,7 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
     const timer = setTimeout(() => {
       houd.current = null
       aanSlepen.current = true
+      agendaSleep.bezig = true
       try { navigator.vibrate?.(15) } catch { /* niet elk toestel */ }
       vang(); begin(true)
     }, HOUD_MS)
@@ -320,6 +327,7 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
   }
   const los = () => {
     aanSlepen.current = false
+    stopSleep()
     // Kort getikt op een blok (niet ingehouden): openen.
     if (houd.current) { const it = houd.current.item; stopHouden(); onOpen(it); return }
     const s = sleep
@@ -363,10 +371,10 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
 
   const vandaagD = vandaag()
   const nuMin = (() => { const t = new Date(nu); return dag(t.toISOString()) === vandaagD ? Number(uur(t.toISOString()).slice(0, 2)) * 60 + Number(uur(t.toISOString()).slice(3)) : -1 })()
-  const cols = `${compact ? 34 : 60}px repeat(${dagen.length}, minmax(0, 1fr))`
+  const cols = `${smal ? 40 : 60}px repeat(${dagen.length}, minmax(0, 1fr))`
 
   return (
-    <div className="card-base !p-0 overflow-hidden h-full">
+    <div className="card-base !p-0 overflow-hidden h-full max-md:!rounded-none max-md:!border-x-0 max-md:!shadow-none">
      {/* Op de gsm past de hele week (of werkweek) op het scherm, met compacte blokjes. */}
      <div className="h-full overflow-x-auto overscroll-x-contain">
       <div className="h-full flex flex-col min-h-0">
@@ -420,7 +428,7 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
                 </div>
               ))}
             </div>
-            <div className={`relative grid gap-y-1 py-2 pointer-events-none ${compact ? 'px-0' : 'px-1'}`} style={{ gridTemplateColumns: `repeat(${dagen.length}, minmax(0, 1fr))`, gridAutoRows: compact ? '24px' : '30px', minHeight: magToevoegen ? 44 : undefined, paddingBottom: verborgenPerDag.size ? 24 : undefined }}>
+            <div className={`relative grid pointer-events-none ${compact ? 'gap-y-0.5 py-1 px-0' : 'gap-y-1 py-2 px-1'}`} style={{ gridTemplateColumns: `repeat(${dagen.length}, minmax(0, 1fr))`, gridAutoRows: compact ? '22px' : '30px', minHeight: magToevoegen ? 44 : undefined, paddingBottom: verborgenPerDag.size ? 24 : undefined }}>
               {balken.filter((b) => b.baan < toonBanen).map((b) => (
                 <div key={`${b.item.bron}-${b.item.id}`} className={`pointer-events-auto min-w-0 ${compact ? 'px-0.5' : 'px-1'}`} style={{ gridColumn: `${b.van + 1} / ${b.tot + 2}`, gridRow: b.baan + 1 }}>
                   <Chip i={b.item} kleur={kleur(b.item)} onOpen={onOpen} onKlaar={onKlaar} personen={personen} sleep={sleepbaar(b.item, magAanpassen)} magKlaar={magAanpassen} opDag={dagen[b.van]} lang={weergave === 'dag'} compact={compact} />
@@ -436,16 +444,16 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
 
       {/* Uurrooster */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0 relative">
-        <div className="grid relative" style={{ gridTemplateColumns: cols, height: 1440 * PX_MIN }}>
+        <div className="grid relative" style={{ gridTemplateColumns: cols, height: 1440 * pxMin }}>
           <div className="relative">
-            {Array.from({ length: 24 }, (_, h) => h > 0 && <div key={h} className={`absolute -translate-y-1/2 tabular-nums text-gray-500 ${compact ? 'right-1 text-[10px]' : 'right-2 text-[12px]'}`} style={{ top: h * 60 * PX_MIN }}>{String(h).padStart(2, '0')}{compact ? '' : ':00'}</div>)}
+            {Array.from({ length: 24 }, (_, h) => h > 0 && <div key={h} className={`absolute -translate-y-1/2 tabular-nums text-gray-500 ${smal ? 'right-1 text-[10px]' : 'right-2 text-[12px]'}`} style={{ top: h * 60 * pxMin }}>{String(h).padStart(2, '0')}:00</div>)}
           </div>
           <div ref={kolommenRef} className="relative grid" style={{ gridColumn: `2 / span ${dagen.length}`, gridTemplateColumns: `repeat(${dagen.length}, minmax(0, 1fr))` }}
-            onPointerMove={beweeg} onPointerUp={los} onPointerCancel={() => { stopHouden(); aanSlepen.current = false; setSleep(null) }}>
+            onPointerMove={beweeg} onPointerUp={los} onPointerCancel={() => { stopHouden(); aanSlepen.current = false; stopSleep(); setSleep(null) }}>
             {/* lijnen */}
             <div className="absolute inset-0 pointer-events-none">
-              {Array.from({ length: 24 }, (_, h) => <div key={h} className="absolute left-0 right-0 border-t border-gray-100" style={{ top: h * 60 * PX_MIN }} />)}
-              {Array.from({ length: 24 }, (_, h) => <div key={`h${h}`} className="absolute left-0 right-0 border-t border-dashed border-gray-50" style={{ top: (h * 60 + 30) * PX_MIN }} />)}
+              {Array.from({ length: 24 }, (_, h) => <div key={h} className="absolute left-0 right-0 border-t border-gray-100" style={{ top: h * 60 * pxMin }} />)}
+              {!smal && Array.from({ length: 24 }, (_, h) => <div key={`h${h}`} className="absolute left-0 right-0 border-t border-dashed border-gray-50" style={{ top: (h * 60 + 30) * pxMin }} />)}
             </div>
             {dagen.map((d, n) => {
               const blokken = legUit(rooster.get(d) ?? [])
@@ -457,7 +465,7 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
                     const bezig = sleep && sleep.soort !== 'nieuw' && sleep.item.id === i.id && sleep.bewogen
                     const opgetild = sleep && sleep.soort !== 'nieuw' && sleep.item.id === i.id && sleep.opgetild && !sleep.bewogen
                     const kl = kleur(i)
-                    const hoogte = Math.max(22, (b.totMin - b.vanMin) * PX_MIN - 2)
+                    const hoogte = Math.max(smal ? 16 : 22, (b.totMin - b.vanMin) * pxMin - 2)
                     const sl = sleepbaar(i, magAanpassen)
                     const klaar = isKlaar(i)
                     return (
@@ -465,14 +473,14 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
                         onPointerDown={(e) => (sl ? startVerplaats(e, i, n, b.vanMin, b.totMin) : undefined)}
                         onClick={() => { if (!sl) onOpen(i) }} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
                         onContextMenu={(e) => { if (houd.current || aanSlepen.current) e.preventDefault() }}
-                        className={`group absolute overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.08)] cursor-pointer select-none [-webkit-touch-callout:none] hover:brightness-[0.97] hover:z-[2] ${compact ? 'rounded-md pl-1 pr-0.5 py-0.5 text-[11px] leading-tight' : 'rounded-lg pl-2 pr-1.5 py-1 text-[13.5px] leading-snug'} ${bezig ? 'opacity-30' : ''} ${opgetild ? 'z-10 ring-2 ring-gray-900 shadow-lg scale-[1.03]' : ''} transition-transform ${focusRing}`}
-                        style={{ ...stijlVan(i, kl), top: b.vanMin * PX_MIN + 1, height: hoogte, left: `calc(${(b.kolom / b.kolommen) * 100}% + ${compact ? 1 : 3}px)`, width: `calc(${100 / b.kolommen}% - ${compact ? 2 : 6}px)` }}
+                        className={`group absolute overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.08)] cursor-pointer select-none [-webkit-touch-callout:none] hover:brightness-[0.97] hover:z-[2] ${compact ? 'rounded pl-1 pr-px py-px text-[11px] leading-[13px]' : smal ? 'rounded-md pl-1.5 pr-1 py-0.5 text-[12.5px] leading-tight' : 'rounded-lg pl-2 pr-1.5 py-1 text-[13.5px] leading-snug'} ${bezig ? 'opacity-30' : ''} ${opgetild ? 'z-10 ring-2 ring-gray-900 shadow-lg scale-[1.03]' : ''} transition-transform ${focusRing}`}
+                        style={{ ...stijlVan(i, kl), top: b.vanMin * pxMin + 1, height: hoogte, left: `calc(${(b.kolom / b.kolommen) * 100}% + ${compact ? 1 : 3}px)`, width: `calc(${100 / b.kolommen}% - ${compact ? 2 : 6}px)` }}
                         title={`${hhmm(b.vanMin)}–${hhmm(b.totMin)} ${i.titel}`}>
                         {compact ? (
                           // Smalle kolom: de titel (zoveel regels als passen) en bij een groter blok het beginuur.
                           <>
-                            <span className={`block font-semibold ${b.kolommen > 1 ? 'whitespace-nowrap overflow-hidden' : hoogte < 34 ? 'line-clamp-1' : hoogte < 60 ? 'line-clamp-2' : hoogte < 90 ? 'line-clamp-3' : 'line-clamp-5'} ${klaar ? 'line-through decoration-1 opacity-80' : ''}`}>{i.titel}</span>
-                            {hoogte >= 60 && <span className="block mt-0.5 tabular-nums text-[10px] text-gray-600">{hhmm(b.vanMin)}</span>}
+                            <span className={`block font-medium overflow-hidden ${b.kolommen > 1 ? 'whitespace-nowrap' : ''} ${klaar ? 'line-through decoration-1 opacity-80' : ''}`} style={b.kolommen > 1 ? undefined : { maxHeight: Math.max(13, Math.floor((hoogte - (hoogte >= 52 && b.kolommen === 1 ? 14 : 2)) / 13) * 13) }}>{i.titel}</span>
+                            {hoogte >= 52 && b.kolommen === 1 && <span className="block tabular-nums text-[10px] text-gray-600">{hhmm(b.vanMin)}</span>}
                           </>
                         ) : (<>
                         <div className="flex items-start gap-1">
@@ -500,16 +508,16 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
                   })}
                   {/* Wat je nu sleept */}
                   {sleep?.soort === 'nieuw' && sleep.dag === d && (
-                    <div className="absolute left-0.5 right-0.5 rounded-md bg-gray-900/80 text-white text-[11px] px-1.5 py-1 pointer-events-none z-20" style={{ top: sleep.van * PX_MIN, height: Math.max(12, (sleep.tot - sleep.van) * PX_MIN) }}>{hhmm(sleep.van)}–{hhmm(sleep.tot)}</div>
+                    <div className="absolute left-0.5 right-0.5 rounded-md bg-gray-900/80 text-white text-[11px] px-1.5 py-1 pointer-events-none z-20" style={{ top: sleep.van * pxMin, height: Math.max(12, (sleep.tot - sleep.van) * pxMin) }}>{hhmm(sleep.van)}–{hhmm(sleep.tot)}</div>
                   )}
                   {sleep?.soort === 'verplaats' && sleep.bewogen && sleep.dagIndex === n && (
-                    <div className="absolute left-0.5 right-0.5 rounded-md border-2 border-gray-900 bg-white/80 text-[11px] px-1.5 py-1 pointer-events-none z-20 font-semibold" style={{ top: sleep.van * PX_MIN, height: Math.max(18, sleep.duur * PX_MIN) }}>{hhmm(sleep.van)}–{hhmm(sleep.van + sleep.duur)} {sleep.item.titel}</div>
+                    <div className="absolute left-0.5 right-0.5 rounded-md border-2 border-gray-900 bg-white/80 text-[11px] px-1.5 py-1 pointer-events-none z-20 font-semibold" style={{ top: sleep.van * pxMin, height: Math.max(18, sleep.duur * pxMin) }}>{hhmm(sleep.van)}–{hhmm(sleep.van + sleep.duur)} {sleep.item.titel}</div>
                   )}
                   {sleep?.soort === 'rek' && sleep.bewogen && sleep.dag === d && (
-                    <div className="absolute left-0.5 right-0.5 rounded-md border-2 border-gray-900 bg-white/60 text-[11px] px-1.5 py-1 pointer-events-none z-20" style={{ top: sleep.van * PX_MIN, height: (sleep.tot - sleep.van) * PX_MIN }}>tot {hhmm(sleep.tot)}</div>
+                    <div className="absolute left-0.5 right-0.5 rounded-md border-2 border-gray-900 bg-white/60 text-[11px] px-1.5 py-1 pointer-events-none z-20" style={{ top: sleep.van * pxMin, height: (sleep.tot - sleep.van) * pxMin }}>tot {hhmm(sleep.tot)}</div>
                   )}
                   {d === vandaagD && nuMin >= 0 && (
-                    <div className="absolute left-0 right-0 z-10 pointer-events-none" style={{ top: nuMin * PX_MIN }}>
+                    <div className="absolute left-0 right-0 z-10 pointer-events-none" style={{ top: nuMin * pxMin }}>
                       <div className="h-px bg-red-500" /><div className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-red-500" />
                     </div>
                   )}
@@ -600,7 +608,7 @@ function Maand({ datum, items, kleur, personen, magAanpassen, magToevoegen, onOp
 
   if (smal) {
     return (
-      <div className="card-base !p-0 overflow-hidden flex flex-col h-full min-h-0">
+      <div className="card-base !p-0 overflow-hidden flex flex-col h-full min-h-0 max-md:!rounded-none max-md:!border-x-0 max-md:!shadow-none">
         <div className="grid grid-cols-7 border-b border-gray-200 shrink-0">
           {DAGNAAM.map((d) => <div key={d} className="text-[11px] font-semibold text-gray-500 text-center py-1.5 capitalize">{d}</div>)}
         </div>
@@ -667,7 +675,7 @@ function Planning({ datum, items, kleur, personen, magToevoegen, onOpen, onKlaar
   const vandaagD = vandaag()
   const totaal = useMemo(() => new Set(dagen.flatMap((d) => (perDag.get(d) ?? []).map((i) => `${i.bron}-${i.id}`))).size, [dagen, perDag])
   return (
-    <div className="card-base !p-0 overflow-hidden h-full flex flex-col min-h-0">
+    <div className="card-base !p-0 overflow-hidden h-full flex flex-col min-h-0 max-md:!rounded-none max-md:!border-x-0 max-md:!shadow-none">
       <div className="flex-1 min-h-0 overflow-y-auto">
         {!totaal && <p className="text-sm text-gray-500 text-center pt-6">Niets gepland deze week.</p>}
         {dagen.map((d) => {
