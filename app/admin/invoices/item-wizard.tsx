@@ -525,7 +525,7 @@ function StapArtikelen({ regels, setRegels, btw, inst, artikelen, setArtikelen, 
         <div className="relative">
           <button type="button" onClick={() => setKiezer((x) => !x)} className="btn-secondary text-sm"><Bookmark className="h-4 w-4" />Opgeslagen artikel</button>
           {kiezer && (
-            <div className="absolute z-20 mt-1 w-72 rounded-xl border border-gray-200 bg-white shadow-lg p-1 max-h-72 overflow-y-auto">
+            <div className="absolute z-20 mt-1 w-[min(18rem,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white shadow-lg p-1 max-h-72 overflow-y-auto">
               {artikelen.length === 0 && <div className="px-3 py-2 text-xs text-gray-500">Nog geen opgeslagen artikelen.</div>}
               {artikelen.map((a) => (
                 <button key={a.id} type="button" onClick={() => uitArtikel(a)} className="w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50 text-sm flex items-center justify-between gap-2">

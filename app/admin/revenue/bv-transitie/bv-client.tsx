@@ -169,7 +169,7 @@ export function BvClient({ jaar, rechtenRijen, kostenRijen, verdelingRijen, ezRi
             <p className="text-sm text-gray-500 max-w-2xl">Wat staat er per persoon nog te goed in de BV. Eén regel per factuur of verrekening, met bewijs of factuurnummer.</p>
             <button onClick={() => setRechtDialoog('nieuw')} className="btn-primary text-sm"><Plus className="h-4 w-4" />Regel toevoegen</button>
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {perPersoon.map((p) => <Box key={p.persoon} label={`${PERSOON_LABEL[p.persoon]} — bruto recht`} value={geld(p.bruto)} color={kleur(p.bruto)} />)}
           </div>
           <div className="card-base p-0 overflow-hidden">
@@ -349,7 +349,7 @@ function Verdeling({ rijen, berekend }: { rijen: Winstverdeling[]; berekend: Ret
       </div>
       <div className="card-base">
         <h2 className="font-semibold mb-3">Eindafrekening</h2>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {live.personen.map((p) => (
             <Box key={p.persoon} label={PERSOON_LABEL[p.persoon]} value={geld(p.saldo)} sub={p.betekenis} color={kleur(p.saldo)} />
           ))}
@@ -602,9 +602,9 @@ function KostDialoog({ kost, onClose }: { kost: Kost | null; onClose: () => void
 
 function Kpi({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
   return (
-    <div className="stat-card">
+    <div className="stat-card min-w-0">
       <div className="text-xs text-gray-500 mb-2">{label}</div>
-      <div className={`text-2xl font-bold ${color ?? ''}`}>{value}</div>
+      <div className={`text-lg sm:text-2xl font-bold ${color ?? ''}`}>{value}</div>
       {sub && <div className="text-xs text-gray-400 mt-1">{sub}</div>}
     </div>
   )

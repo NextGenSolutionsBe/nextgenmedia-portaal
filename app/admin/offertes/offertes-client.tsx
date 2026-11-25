@@ -132,7 +132,7 @@ function OffertesLijst({ focus }: { focus: string | null }) {
                   </div>
                   {o.bedrag_excl !== null && o.bedrag_excl !== undefined && <span className="text-sm tabular-nums text-gray-800">{formatEuro(Number(o.bedrag_excl))}</span>}
                   <span className={`status-badge ${KLEUR[w.kleur]}`}>{w.label}</span>
-                  <div className="flex items-center gap-1">
+                  <div className="flex flex-wrap items-center justify-end gap-1">
                     <a href={`/api/admin/offertes/${o.id}/pdf`} target="_blank" rel="noreferrer" className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Pdf bekijken"><Eye className="h-4 w-4" /></a>
                     {o.status !== 'concept' && o.status !== 'ingetrokken' && (
                       <button type="button" onClick={() => navigator.clipboard.writeText(o.link).then(() => toast.success('Link gekopieerd. Openen als team telt niet als geopend.'))} className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Link naar de offerte kopiëren"><Copy className="h-4 w-4" /></button>

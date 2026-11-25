@@ -117,7 +117,7 @@ export default async function PartnerDashboard() {
             <TrendingUp className="h-4 w-4 text-green-500" />
             <span className="text-xs text-gray-500 font-medium">Totaal ontvangen</span>
           </div>
-          <div className="text-2xl font-bold text-green-600">{formatEuro(lifetimeReceived)}</div>
+          <div className="text-lg sm:text-2xl font-bold text-green-600">{formatEuro(lifetimeReceived)}</div>
         </div>
       </div>
 
