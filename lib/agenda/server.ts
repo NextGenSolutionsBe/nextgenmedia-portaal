@@ -32,7 +32,7 @@ export async function kijkerVan(admin: Admin, p: { userId: string; naam: string 
   return { persoonId: persoon.id, userId: p.userId, naam: persoon.naam || p.naam || p.email, isAdmin: p.isAdmin }
 }
 
-const SPACE_VELDEN = 'id, naam, kleur, prive, volgorde, clickup_id'
+const SPACE_VELDEN = 'id, naam, kleur, prive, volgorde, clickup_id, verantwoordelijke_id'
 const MAP_VELDEN = 'id, space_id, parent_id, naam, kleur, client_id, prive, volgorde, clickup_id'
 const LIJST_VELDEN = 'id, space_id, map_id, naam, kleur, client_id, prive, volgorde, clickup_id, statussen'
 
@@ -144,7 +144,8 @@ export async function meetingsInBereik(admin: Admin, van: string, tot: string, p
     }
     items.push({
       id: m.id, bron: 'meeting', soort: 'meeting', titel: m.titel || (m.klant_naam ? `Meeting ${m.klant_naam}` : 'Meeting'), beschrijving: m.beschrijving,
-      status: Date.parse(m.ends_at) < Date.now() ? 'klaar' : 'open', clickup_status: null, clickup_status_kleur: null, urgent: false, prioriteit: null,
+      // Een meeting uit de Meeting Inplanner vink je niet af: ze blijft staan, ook als ze voorbij is.
+      status: 'open', clickup_status: null, clickup_status_kleur: null, urgent: false, prioriteit: null,
       start_op: m.starts_at, eind_op: m.ends_at, heel_dag: false, lijst_id: null, parent_id: null, client_id: m.client_id, labels: [], kleur: null,
       locatie: m.vorm === 'locatie' ? m.locatie : null, meet_url: m.meet_url, prive: false, eigenaar_id: null, toegewezen, afgerond_op: null, afgerond_door: null,
       clickup_url: null, velden: m.bron === 'klantboeking' ? { Bron: 'Klantboeking' } : null, updated_at: m.updated_at,
@@ -160,7 +161,8 @@ export type BoomAntwoord = {
 
 /** De boom zoals de kijker hem mag zien (met de docs, zonder inhoud). */
 export async function boomVoor(admin: Admin, z: Zicht): Promise<BoomAntwoord> {
-  const { data: docs } = await admin.from('ag_docs').select('id, titel, space_id, map_id, lijst_id, prive, eigenaar_id, kijkers, clickup_parent_id, updated_at').is('verwijderd_op', null).order('titel').limit(5000)
+  // Docs die bij een taak horen staan in die taak, niet in de boom.
+  const { data: docs } = await admin.from('ag_docs').select('id, titel, space_id, map_id, lijst_id, prive, eigenaar_id, kijkers, clickup_parent_id, updated_at').is('verwijderd_op', null).is('item_id', null).order('titel').limit(5000)
   const leden: Record<string, string[]> = {}
   for (const [k, v] of z.leden) {
     const [soort, id] = k.split(':')

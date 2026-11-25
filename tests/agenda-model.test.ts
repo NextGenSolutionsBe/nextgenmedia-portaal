@@ -71,6 +71,13 @@ test('kleur: eigen kleur, dan klant (via de map), label of lijst', () => {
   assert.equal(kleurVan(basis, c, 'klant'), '#ff0000')
   assert.equal(kleurVan(basis, c, 'label'), '#00ff00')
   assert.equal(kleurVan({ ...basis, kleur: '#123456' }, c, 'klant'), '#123456')
+  // Map: de kleur van de map (hier via de klant van de map), een eigen mapkleur gaat voor.
+  assert.equal(kleurVan(basis, c, 'map'), '#ff0000')
+  const metMapKleur: KleurContext = { ...c, mappen: { m: { ...c.mappen.m, kleur: '#0000ff' } } }
+  assert.equal(kleurVan(basis, metMapKleur, 'map'), '#0000ff')
+  // Een submap zonder eigen kleur krijgt die van de map erboven.
+  const sub: KleurContext = { ...metMapKleur, mappen: { ...metMapKleur.mappen, s: { id: 's', space_id: 's', parent_id: 'm', naam: 'Sub', kleur: null, client_id: null, prive: false, volgorde: 0, clickup_id: null } }, lijsten: { li: { ...c.lijsten.li, map_id: 's' } } }
+  assert.equal(kleurVan(basis, sub, 'map'), '#0000ff')
 })
 
 test('maand: van maandag tot zondag rond de maand', () => {

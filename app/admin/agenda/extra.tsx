@@ -9,8 +9,7 @@ import { Modal } from '@/app/admin/materiaal/dialogen'
 import { PersoonFoto } from '@/components/admin/persoon-foto'
 import { zoekVeld } from '@/lib/zoekveld'
 import { dag, uur, kortDag, plusDagen, vandaag, zoneNaarIso, type Item } from '@/lib/agenda/model'
-import { actie, api, padVan, Popover, PersonenLijst, KleurKeuze, Schakel, Avatars, focusRing, type BoomData } from './gedeeld'
-import { LijstKiezer } from './item-venster'
+import { actie, api, padVan, Popover, PersonenLijst, KleurKeuze, Schakel, Avatars, MapKiezer, MapLabel, focusRing, type BoomData } from './gedeeld'
 import { wanneer } from './lijst'
 
 const hhmm = (min: number) => `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
@@ -33,10 +32,13 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
   const [soort, setSoort] = useState<'taak' | 'meeting'>(m.heelDag ? 'taak' : 'meeting')
   const [open, setOpen] = useState<null | 'lijst' | 'wie'>(null)
   const [bezig, setBezig] = useState(false)
+  const [mapNodig, setMapNodig] = useState(false)
   const sluitPop = useCallback(() => setOpen(null), [])
   const wanneerTekst = m.heelDag ? `${kortDag(m.dag)}, hele dag` : `${kortDag(m.dag)}, ${hhmm(m.vanMin ?? 540)}–${hhmm(m.totMin ?? 600)}`
   const maak = async () => {
     if (!titel.trim()) return
+    // Elke taak hoort bij een map (klant): zo krijgt ze ook de kleur van die map.
+    if (!lijst) { setMapNodig(true); setOpen('lijst'); return }
     setBezig(true)
     try {
       const start = m.heelDag ? null : zoneNaarIso(m.dag, hhmm(m.vanMin ?? 540))
@@ -64,27 +66,31 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
   return (
     <Modal titel={m.heelDag ? 'Nieuwe taak' : 'Nieuw in de agenda'} sub={wanneerTekst} onSluit={onSluit}
       voet={<><button type="button" onClick={onSluit} className="btn-secondary">Annuleren</button><button type="button" disabled={!titel.trim() || bezig} onClick={maak} className="btn-primary">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Toevoegen</button></>}>
+
       <input autoFocus value={titel} onChange={(e) => setTitel(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') maak() }} className="input-base text-base" placeholder={m.heelDag ? 'Wat moet er gebeuren?' : 'Waarover gaat het?'} aria-label="Titel" maxLength={500} />
       {!m.heelDag && (
         <div className="flex gap-1.5">
           {(['meeting', 'taak'] as const).map((s) => <button key={s} type="button" onClick={() => setSoort(s)} aria-pressed={soort === s} className={`rounded-full border px-3 py-1 text-xs ${soort === s ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700'}`}>{s === 'meeting' ? 'Afspraak' : 'Taak met uur'}</button>)}
         </div>
       )}
+      <div>
+        <div className="label-mono text-[10px] uppercase text-gray-500 mb-1.5">Voor welke map (klant)?</div>
+        <div className="relative">
+          <button type="button" onClick={() => setOpen(open === 'lijst' ? null : 'lijst')} className={`w-full rounded-xl border px-3 py-2.5 text-left text-sm hover:border-gray-400 ${mapNodig && !lijst ? 'border-red-400 bg-red-50/40' : 'border-gray-200'} ${focusRing}`}>
+            <MapLabel boom={boom} lijstId={lijst} leeg="Kies de map, bv. Group Cé of Pitch Please" />
+          </button>
+        </div>
+        {open === 'lijst' && <div className="mt-1.5 rounded-xl border border-gray-200"><MapKiezer vol boom={boom} gekozen={lijst} onKies={(l) => { setLijst(l); setMapNodig(false); sluitPop() }} /></div>}
+        {mapNodig && !lijst && <p className="text-xs text-red-700 mt-1">Kies eerst bij welke map deze taak hoort.</p>}
+      </div>
       <div className="grid grid-cols-[80px_1fr] gap-2 items-center text-sm">
         <span className="text-gray-500">Wie</span>
         <div className="relative">
           <button type="button" onClick={() => setOpen(open === 'wie' ? null : 'wie')} className={`flex flex-wrap gap-1 rounded-lg border border-gray-200 px-2 py-1.5 w-full text-left hover:border-gray-400 ${focusRing}`}>
             {wie.length ? wie.map((p) => <span key={p} className="inline-flex items-center gap-1 rounded-full bg-gray-100 pl-0.5 pr-2 py-0.5 text-xs"><PersoonFoto naam={boom.personen.find((x) => x.id === p)?.naam ?? '?'} maat={18} />{boom.personen.find((x) => x.id === p)?.naam.split(' ')[0]}</span>) : <span className="text-gray-400">Niemand</span>}
           </button>
-          <Popover open={open === 'wie'} onSluit={sluitPop}><PersonenLijst personen={boom.personen} ik={boom.ik} gekozen={wie} onWissel={(p) => setWie(wie.includes(p) ? wie.filter((x) => x !== p) : [...wie, p])} /></Popover>
         </div>
-        <span className="text-gray-500">Lijst</span>
-        <div className="relative">
-          <button type="button" onClick={() => setOpen(open === 'lijst' ? null : 'lijst')} className={`rounded-lg border border-gray-200 px-2.5 py-1.5 w-full text-left truncate hover:border-gray-400 ${focusRing}`}>
-            {lijst ? padVan(boom, lijst).join(' › ') : <span className="text-gray-500">Enkel in de agenda</span>}
-          </button>
-          <Popover open={open === 'lijst'} onSluit={sluitPop}><LijstKiezer boom={boom} gekozen={lijst} onKies={(l) => { setLijst(l); sluitPop() }} /></Popover>
-        </div>
+        {open === 'wie' && <div className="col-span-2 rounded-xl border border-gray-200"><PersonenLijst vol personen={boom.personen} eerst={boom.zaakvoerders} ik={boom.ik} gekozen={wie} onWissel={(p) => setWie(wie.includes(p) ? wie.filter((x) => x !== p) : [...wie, p])} /></div>}
       </div>
       <Schakel aan={prive} onWissel={() => setPrive(!prive)} label={<span className="text-sm flex items-center gap-1.5"><Lock className="h-3.5 w-3.5" />Privé (enkel jij en wie je je agenda deelt)</span>} />
     </Modal>
@@ -135,10 +141,10 @@ export function AfgevinktPaneel({ boom, onSluit, onOpen, onVernieuw }: { boom: B
   }, [items])
   const mensen = boom.personen.filter((p) => p.actief && p.user_id)
   return (
-    <Modal titel="Afgevinkt" sub="Alles wat klaar is, met wanneer het afgevinkt werd. Niets verdwijnt." onSluit={onSluit} breed>
+    <Modal titel="Completed" sub="Alles wat klaar is, met wanneer het completed werd. Niets verdwijnt." onSluit={onSluit} breed>
       <div className="relative">
         <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-        <input {...zoekVeld()} autoFocus value={zoek} onChange={(e) => setZoek(e.target.value)} placeholder="Zoek een taak op naam…" className="input-base !pl-9" aria-label="Zoek in wat afgevinkt is" />
+        <input {...zoekVeld()} autoFocus value={zoek} onChange={(e) => setZoek(e.target.value)} placeholder="Zoek een taak op naam…" className="input-base !pl-9" aria-label="Zoek in wat completed is" />
         {zoek && <button type="button" onClick={() => setZoek('')} aria-label="Zoeken wissen" className="absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7 rounded-lg hover:bg-gray-100 flex items-center justify-center"><X className="h-3.5 w-3.5" /></button>}
       </div>
       <div className="flex flex-wrap gap-1.5">
@@ -148,7 +154,7 @@ export function AfgevinktPaneel({ boom, onSluit, onOpen, onVernieuw }: { boom: B
         ))}
       </div>
       {!items && <div className="py-10 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>}
-      {items && !items.length && <p className="text-sm text-gray-500 py-6 text-center">{q ? `Niets afgevinkt met "${q}" in de naam.` : 'Nog niets afgevinkt.'}</p>}
+      {items && !items.length && <p className="text-sm text-gray-500 py-6 text-center">{q ? `Niets completed met "${q}" in de naam.` : 'Nog niets completed.'}</p>}
       {laden && items && <div className="flex justify-center"><Loader2 className="h-4 w-4 animate-spin text-gray-400" /></div>}
       {perDag.map(([d, l]) => (
         <div key={d}>
@@ -298,8 +304,8 @@ function VoorstelKaart({ v, boom, onKlaar }: { v: Voorstel; boom: BoomData; onKl
               <Popover open={open === 'wie'} onSluit={sluitPop}><PersonenLijst personen={boom.personen} ik={boom.ik} gekozen={wie} onWissel={(p) => setWie(wie.includes(p) ? wie.filter((x) => x !== p) : [...wie, p])} /></Popover>
             </div>
             <div className="relative">
-              <button type="button" onClick={() => setOpen(open === 'lijst' ? null : 'lijst')} className="btn-secondary !py-1 !px-2.5 !text-xs max-w-[260px]"><ListTree className="h-3.5 w-3.5" /><span className="truncate">{lijst ? padVan(boom, lijst).slice(-2).join(' › ') : 'Enkel in de agenda'}</span></button>
-              <Popover open={open === 'lijst'} onSluit={sluitPop}><LijstKiezer boom={boom} gekozen={lijst} onKies={(l) => { setLijst(l); sluitPop() }} /></Popover>
+              <button type="button" onClick={() => setOpen(open === 'lijst' ? null : 'lijst')} className="btn-secondary !py-1 !px-2.5 !text-xs max-w-[260px]"><MapLabel boom={boom} lijstId={lijst} leeg="Map kiezen" /></button>
+              <Popover open={open === 'lijst'} onSluit={sluitPop}><MapKiezer boom={boom} gekozen={lijst} leeg="Enkel in de agenda (geen map)" onKies={(l) => { setLijst(l); sluitPop() }} /></Popover>
             </div>
           </div>
         </div>

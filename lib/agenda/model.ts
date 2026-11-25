@@ -13,7 +13,7 @@ export const TZ = STANDAARD_TIJDZONE
 
 export type Persoon = { id: string; user_id: string | null; naam: string; email: string | null; kleur: string | null; actief: boolean }
 export type Label = { id: string; naam: string; kleur: string; volgorde: number }
-export type Space = { id: string; naam: string; kleur: string | null; prive: boolean; volgorde: number; clickup_id: string | null }
+export type Space = { id: string; naam: string; kleur: string | null; prive: boolean; volgorde: number; clickup_id: string | null; verantwoordelijke_id?: string | null }
 export type Map = { id: string; space_id: string; parent_id: string | null; naam: string; kleur: string | null; client_id: string | null; prive: boolean; volgorde: number; clickup_id: string | null }
 export type Lijst = { id: string; space_id: string; map_id: string | null; naam: string; kleur: string | null; client_id: string | null; prive: boolean; volgorde: number; clickup_id: string | null }
 export type DocKort = { id: string; titel: string; space_id: string | null; map_id: string | null; lijst_id: string | null; prive: boolean; updated_at: string }
@@ -159,8 +159,9 @@ export function legUit<T>(lijst: { item: T; vanMin: number; totMin: number }[]):
 
 // ── Kleuren ─────────────────────────────────────────────────────────────────
 
-export type KleurVolgens = 'klant' | 'label' | 'lijst' | 'status'
+export type KleurVolgens = 'map' | 'klant' | 'label' | 'lijst' | 'status'
 export const KLEUR_VOLGENS: { key: KleurVolgens; label: string }[] = [
+  { key: 'map', label: 'Map' },
   { key: 'klant', label: 'Klant' },
   { key: 'label', label: 'Label' },
   { key: 'lijst', label: 'Lijst' },
@@ -188,6 +189,21 @@ export function klantVan(i: Pick<Item, 'client_id' | 'lijst_id'>, c: Pick<KleurC
   if (!l) return null
   return l.client_id ?? (l.map_id ? c.mappen[l.map_id]?.client_id ?? null : null)
 }
+/**
+ * De kleur van een map zoals je ze overal ziet (boom, kalender): de eigen kleur,
+ * anders die van een bovenliggende map, anders een vaste kleur uit het palet.
+ */
+export function mapKleur(mapId: string | null, c: Pick<KleurContext, 'mappen' | 'klantKleuren'>, metPalet = true): string | null {
+  let m = mapId ? c.mappen[mapId] : undefined
+  const eerste = m
+  for (let i = 0; m && i < 6; i++) {
+    if (isKleur(m.kleur)) return m.kleur
+    if (m.client_id && isKleur(c.klantKleuren[m.client_id])) return c.klantKleuren[m.client_id]
+    m = m.parent_id ? c.mappen[m.parent_id] : undefined
+  }
+  return metPalet && eerste ? paletVoor(eerste.id) : null
+}
+
 /** De kleur van een item in de kalender. Een eigen kleur gaat altijd voor. */
 export function kleurVan(i: Pick<Item, 'kleur' | 'client_id' | 'lijst_id' | 'labels' | 'clickup_status_kleur' | 'status' | 'bron'>, c: KleurContext, volgens: KleurVolgens): string {
   if (isKleur(i.kleur)) return i.kleur
@@ -197,8 +213,10 @@ export function kleurVan(i: Pick<Item, 'kleur' | 'client_id' | 'lijst_id' | 'lab
   const viaLabel = i.labels.map((l) => c.labels[l]?.kleur).find(isKleur) ?? null
   const viaLijst = lijst ? (isKleur(lijst.kleur) ? lijst.kleur : paletVoor(lijst.id)) : null
   const viaStatus = isKleur(i.clickup_status_kleur) ? i.clickup_status_kleur : null
+  // Map: de lijst zelf als die een kleur kreeg, anders de map (of een map erboven), anders de klant.
+  const viaMap = lijst ? (isKleur(lijst.kleur) ? lijst.kleur : mapKleur(lijst.map_id, c)) : null
   const standaard = i.bron === 'meeting' ? '#bbf7d0' : '#e5e7eb'
-  const volgorde = volgens === 'klant' ? [viaKlant, viaLabel, viaLijst] : volgens === 'label' ? [viaLabel, viaKlant, viaLijst] : volgens === 'lijst' ? [viaLijst, viaKlant] : [viaStatus, viaLijst]
+  const volgorde = volgens === 'map' ? [viaMap, viaKlant, viaLabel, viaLijst] : volgens === 'klant' ? [viaKlant, viaLabel, viaLijst] : volgens === 'label' ? [viaLabel, viaKlant, viaLijst] : volgens === 'lijst' ? [viaLijst, viaKlant] : [viaStatus, viaLijst]
   return volgorde.find((x): x is string => !!x) ?? standaard
 }
 /** Leesbare tekstkleur op een achtergrond (zwart op licht, wit op donker). */

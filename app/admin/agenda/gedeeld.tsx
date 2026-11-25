@@ -1,11 +1,11 @@
 'use client'
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Check, Search, X } from 'lucide-react'
+import { Check, Search, X, Folder, List as ListIcon, ChevronRight } from 'lucide-react'
 import { PersoonFoto } from '@/components/admin/persoon-foto'
 import { zoekVeld } from '@/lib/zoekveld'
 import type { Persoon, Label, Space, Map as AgMap, Lijst, DocKort, Item, KleurContext } from '@/lib/agenda/model'
-import { PALET } from '@/lib/agenda/model'
+import { PALET, mapKleur, isKleur } from '@/lib/agenda/model'
 
 export const focusRing = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-1'
 
@@ -218,3 +218,105 @@ export function vinkRegel(tekst: string, regel: number): string {
 }
 
 export type { Persoon, Label, Space, AgMap, Lijst, DocKort, Item }
+
+/** Een donkerdere tint van een kleur (rand of icoon op een lichte achtergrond). */
+export function donkerder(hex: string, t = 0.3): string {
+  if (!isKleur(hex)) return '#4b4b4b'
+  const n = parseInt(hex.slice(1), 16)
+  const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((x) => Math.round(x * (1 - t)))
+  return `rgb(${c.join(',')})`
+}
+
+/** De kleur waarin een map overal verschijnt (boom, kalender, kiezers). */
+export function kleurVanMap(b: BoomData, mapId: string | null): string | null {
+  return mapKleur(mapId, { mappen: Object.fromEntries(b.mappen.map((m) => [m.id, m])), klantKleuren: b.klantKleuren })
+}
+
+/** Een gekleurd mapje: het hele icoon in de kleur van de map. */
+export function MapIcoon({ kleur, maat = 16 }: { kleur: string | null; maat?: number }) {
+  return <Folder className="shrink-0" style={{ width: maat, height: maat, fill: kleur ?? '#e5e7eb', color: kleur ? donkerder(kleur, 0.35) : '#9ca3af' }} aria-hidden />
+}
+
+/** "Verheyen nv › Contentkalender" met het gekleurde mapje (of enkel de map als de lijst zo heet). */
+export function MapLabel({ boom, lijstId, leeg = 'Kies de map' }: { boom: BoomData; lijstId: string | null; leeg?: string }) {
+  const l = lijstId ? boom.lijsten.find((x) => x.id === lijstId) : null
+  if (!l) return <span className="text-gray-400">{leeg}</span>
+  const m = l.map_id ? boom.mappen.find((x) => x.id === l.map_id) : null
+  const kleur = l.kleur && isKleur(l.kleur) ? l.kleur : kleurVanMap(boom, l.map_id)
+  return (
+    <span className="inline-flex items-center gap-2 min-w-0">
+      {m ? <MapIcoon kleur={kleur} /> : <ListIcon className="h-4 w-4 shrink-0 text-gray-500" />}
+      <span className="truncate">{m ? (m.naam === l.naam ? m.naam : <>{m.naam} <span className="text-gray-400">›</span> {l.naam}</>) : l.naam}</span>
+    </span>
+  )
+}
+
+/**
+ * Een map (klant) kiezen, gegroepeerd per space. Een map met één lijst kies je
+ * in één klik; met meer lijsten klapt ze open en kies je de lijst.
+ */
+export function MapKiezer({ boom, gekozen, onKies, leeg = null, vol = false }: { boom: BoomData; gekozen: string | null; onKies: (lijstId: string | null) => void; leeg?: string | null; vol?: boolean }) {
+  const [q, setQ] = useState('')
+  const [open, setOpen] = useState<string | null>(() => (gekozen ? boom.lijsten.find((l) => l.id === gekozen)?.map_id ?? null : null))
+  const z = q.trim().toLowerCase()
+  const lijstenVan = (mapId: string) => boom.lijsten.filter((l) => l.map_id === mapId)
+  const past = (t: string) => !z || t.toLowerCase().includes(z)
+  const diepte = (m: { parent_id: string | null }) => { let d = 0, p = m.parent_id; while (p && d < 5) { d++; p = boom.mappen.find((x) => x.id === p)?.parent_id ?? null } return d }
+  // Mappen in boomvolgorde (submappen onder hun map).
+  const geordend = (spaceId: string) => {
+    const uit: typeof boom.mappen = []
+    const voeg = (parent: string | null) => { for (const m of boom.mappen.filter((x) => x.space_id === spaceId && x.parent_id === parent)) { uit.push(m); voeg(m.id) } }
+    voeg(null)
+    return uit
+  }
+  return (
+    <div className={`w-full ${vol ? '' : 'md:w-[22rem]'} p-2`}>
+      <div className="relative mb-1.5"><Search className="h-3.5 w-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+        <input {...zoekVeld()} autoFocus={vol} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Zoek een klant of map…" className="input-base !py-1.5 !pl-8 text-sm" aria-label="Zoek een map" />
+      </div>
+      <div className={`${vol ? 'max-h-[16rem]' : 'max-h-[22rem]'} overflow-y-auto`}>
+        {leeg && <button type="button" onClick={() => onKies(null)} className="w-full text-left rounded-lg px-2 py-1.5 text-sm text-gray-500 hover:bg-gray-50">{leeg}</button>}
+        {boom.spaces.map((s) => {
+          const mappen = geordend(s.id).filter((m) => past(`${s.naam} ${m.naam} ${lijstenVan(m.id).map((l) => l.naam).join(' ')}`))
+          const los = boom.lijsten.filter((l) => l.space_id === s.id && !l.map_id && past(`${s.naam} ${l.naam}`))
+          if (!mappen.length && !los.length) return null
+          return (
+            <div key={s.id} className="mb-1">
+              <div className="label-mono text-[10px] uppercase text-gray-400 px-2 pt-2 pb-1">{s.naam}</div>
+              {mappen.map((m) => {
+                const ls = lijstenVan(m.id)
+                const isOpen = open === m.id || (!!z && ls.length > 1)
+                const kleur = kleurVanMap(boom, m.id)
+                const bevat = ls.some((l) => l.id === gekozen)
+                return (
+                  <div key={m.id}>
+                    <button type="button" disabled={!ls.length} onClick={() => (ls.length === 1 ? onKies(ls[0].id) : setOpen(isOpen ? null : m.id))}
+                      style={{ paddingLeft: 8 + diepte(m) * 14 }}
+                      className={`w-full flex items-center gap-2 rounded-lg pr-2 py-1.5 text-sm text-left hover:bg-gray-50 disabled:opacity-40 ${bevat ? 'bg-gray-50 font-semibold' : ''} ${focusRing}`}>
+                      <MapIcoon kleur={kleur} />
+                      <span className="flex-1 truncate">{m.naam}</span>
+                      {ls.length > 1 && <ChevronRight className={`h-3.5 w-3.5 text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} />}
+                      {ls.length === 1 && gekozen === ls[0].id && <Check className="h-4 w-4" />}
+                    </button>
+                    {isOpen && ls.length > 1 && ls.map((l) => (
+                      <button key={l.id} type="button" onClick={() => onKies(l.id)} style={{ paddingLeft: 30 + diepte(m) * 14 }}
+                        className={`w-full flex items-center gap-2 rounded-lg pr-2 py-1.5 text-[13px] text-left hover:bg-gray-50 ${gekozen === l.id ? 'font-semibold' : ''} ${focusRing}`}>
+                        <ListIcon className="h-3.5 w-3.5 shrink-0" style={{ color: kleur ? donkerder(kleur, 0.35) : undefined }} />
+                        <span className="flex-1 truncate">{l.naam}</span>{gekozen === l.id && <Check className="h-4 w-4" />}
+                      </button>
+                    ))}
+                  </div>
+                )
+              })}
+              {los.map((l) => (
+                <button key={l.id} type="button" onClick={() => onKies(l.id)} className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-left hover:bg-gray-50 ${gekozen === l.id ? 'bg-gray-50 font-semibold' : ''} ${focusRing}`}>
+                  <ListIcon className="h-4 w-4 shrink-0 text-gray-500" /><span className="flex-1 truncate">{l.naam}</span>{gekozen === l.id && <Check className="h-4 w-4" />}
+                </button>
+              ))}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}

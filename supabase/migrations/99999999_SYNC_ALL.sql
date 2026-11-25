@@ -8198,3 +8198,26 @@ CREATE INDEX IF NOT EXISTS ag_mail_voorstellen_status_idx ON public.ag_mail_voor
 
 -- Agenda: een privé-doc ziet de eigenaar plus wie hier staat (Delen in het doc).
 ALTER TABLE public.ag_docs ADD COLUMN IF NOT EXISTS kijkers uuid[] NOT NULL DEFAULT '{}';
+
+-- Agenda: verantwoordelijke per space, docs bij een taak, bijlagen bij een taak (privébucket agenda, 50 MB).
+ALTER TABLE public.ag_spaces ADD COLUMN IF NOT EXISTS verantwoordelijke_id uuid REFERENCES public.ag_personen(id) ON DELETE SET NULL;
+ALTER TABLE public.ag_docs ADD COLUMN IF NOT EXISTS item_id uuid REFERENCES public.ag_items(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS ag_docs_item_idx ON public.ag_docs (item_id) WHERE item_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS public.ag_bijlagen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  item_id uuid NOT NULL REFERENCES public.ag_items(id) ON DELETE CASCADE,
+  pad text NOT NULL,
+  naam text NOT NULL,
+  type text,
+  grootte bigint,
+  persoon_id uuid REFERENCES public.ag_personen(id) ON DELETE SET NULL,
+  geupload_door text,
+  verwijderd_op timestamptz,
+  verwijderd_door text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ag_bijlagen_item_idx ON public.ag_bijlagen (item_id);
+ALTER TABLE public.ag_bijlagen ENABLE ROW LEVEL SECURITY;
+INSERT INTO storage.buckets (id, name, public, file_size_limit)
+VALUES ('agenda', 'agenda', false, 52428800)
+ON CONFLICT (id) DO NOTHING;

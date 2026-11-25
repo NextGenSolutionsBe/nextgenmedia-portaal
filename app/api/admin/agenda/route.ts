@@ -60,6 +60,7 @@ export async function GET(req: NextRequest) {
     if (q.get('item')) return NextResponse.json(await eenItem(admin, k, q.get('item')!))
     if (q.get('klaar')) return NextResponse.json(await afgevinkt(admin, k, q.get('persoon'), q.get('na'), q.get('q')))
     if (q.get('doc')) return NextResponse.json(await eenDoc(admin, k, q.get('doc')!))
+    if (q.get('bijlage')) return await bijlageOpenen(admin, k, q.get('bijlage')!)
     if (q.get('prullenbak')) return NextResponse.json(await prullenbak(admin, k))
     if (q.get('mail')) return NextResponse.json(await mailVoorstellen(admin, k))
     if (q.get('zoek') !== null) return NextResponse.json(await zoek(admin, k, q.get('zoek') ?? ''))
@@ -148,7 +149,11 @@ async function eenItem(admin: Admin, k: Kijker, id: string) {
     if (zo) ouder = { id: zo.id, titel: zo.titel }
   }
   const extra = data as unknown as { gemaakt_door: string | null; created_at: string }
-  return { item, subtaken, ouder, gemaakt_door: extra.gemaakt_door, gemaakt_op: extra.created_at }
+  const [{ data: bijlagen }, { data: docs }] = await Promise.all([
+    admin.from('ag_bijlagen').select('id, naam, type, grootte, geupload_door, created_at').eq('item_id', id).is('verwijderd_op', null).order('created_at'),
+    admin.from('ag_docs').select('id, titel, updated_at, bijgewerkt_door').eq('item_id', id).is('verwijderd_op', null).order('created_at'),
+  ])
+  return { item, subtaken, ouder, gemaakt_door: extra.gemaakt_door, gemaakt_op: extra.created_at, bijlagen: bijlagen ?? [], docs: docs ?? [] }
 }
 
 async function afgevinkt(admin: Admin, k: Kijker, persoon: string | null, na: string | null, zoek: string | null) {
@@ -176,9 +181,21 @@ async function afgevinkt(admin: Admin, k: Kijker, persoon: string | null, na: st
 async function eenDoc(admin: Admin, k: Kijker, id: string) {
   if (!isUuid(id)) throw new Error('Onbekend document')
   const z = await laadZicht(admin, k)
-  const { data } = await admin.from('ag_docs').select('id, titel, inhoud, space_id, map_id, lijst_id, prive, eigenaar_id, kijkers, clickup_parent_id, bijgewerkt_door, updated_at, created_at, verwijderd_op').eq('id', id).maybeSingle()
+  const { data } = await admin.from('ag_docs').select('id, titel, inhoud, space_id, map_id, lijst_id, item_id, prive, eigenaar_id, kijkers, clickup_parent_id, bijgewerkt_door, updated_at, created_at, verwijderd_op').eq('id', id).maybeSingle()
   if (!data || !docZichtbaar(data as never, z)) throw new Error('Dit document bestaat niet of je kan het niet zien.')
   return { doc: data }
+}
+
+/** Een bijlage bekijken of downloaden: een kortlevende link, enkel voor wie de taak ziet. */
+async function bijlageOpenen(admin: Admin, k: Kijker, id: string) {
+  if (!isUuid(id)) return fout('Onbekende bijlage')
+  const { data: b } = await admin.from('ag_bijlagen').select('id, item_id, pad, naam').eq('id', id).is('verwijderd_op', null).maybeSingle()
+  if (!b) return fout('Deze bijlage bestaat niet meer.', 404)
+  const z = await laadZicht(admin, k)
+  await zichtbaarItem(admin, z, b.item_id)
+  const { data, error } = await admin.storage.from(BIJLAGE_BUCKET).createSignedUrl(b.pad, 120, { download: false })
+  if (error || !data?.signedUrl) return fout('De bijlage kon niet geopend worden.', 500)
+  return NextResponse.redirect(data.signedUrl)
 }
 
 async function prullenbak(admin: Admin, k: Kijker) {
@@ -229,6 +246,7 @@ const ACTIE_RECHT: Record<string, Actie> = {
   'label.bewaar': 'instellingen', 'label.verwijder': 'instellingen', 'klantkleur': 'instellingen',
   'delen': 'bekijken', 'clickup.koppel': 'bekijken', 'clickup.ontkoppel': 'bekijken', 'clickup.nu': 'bekijken',
   'mail.plan': 'toevoegen', 'mail.negeer': 'bekijken', 'mail.terug': 'bekijken',
+  'bijlage.upload': 'aanpassen', 'bijlage.bewaar': 'aanpassen', 'bijlage.verwijder': 'aanpassen',
 }
 
 export async function POST(req: NextRequest) {
@@ -246,6 +264,7 @@ export async function POST(req: NextRequest) {
     if (actie === 'delen') return NextResponse.json(await delen(c, b))
     if (actie.startsWith('clickup.')) return NextResponse.json(await clickupActie(c, actie, b))
     if (actie.startsWith('mail.')) return NextResponse.json(await mailActie(c, actie, b))
+    if (actie.startsWith('bijlage.')) return NextResponse.json(await bijlageActie(c, actie, b))
     return fout('Onbekende actie')
   } catch (e) {
     const m = e instanceof Error ? e.message : 'Er ging iets mis'
@@ -326,14 +345,20 @@ async function containerActie(c: Ctx, actie: string, b: Record<string, unknown>)
   const z = await laadZicht(admin, k, { metVerwijderd: actie === 'container.herstel' })
   const zicht = soort === 'space' ? z.zichtbaar.spaces : soort === 'map' ? z.zichtbaar.mappen : z.zichtbaar.lijsten
   const naam = typeof b.naam === 'string' ? b.naam.trim().slice(0, 200) : ''
-  const zetPrive = async (id: string, prive: boolean) => {
+  const zetPrive = async (id: string, prive: boolean, extra: string[] = []) => {
     await admin.from('ag_leden').delete().eq('soort', soort).eq('doel_id', id)
-    if (prive) await admin.from('ag_leden').insert({ soort, doel_id: id, persoon_id: k.persoonId })
+    if (prive) {
+      const ids = [...new Set([k.persoonId, ...extra.filter(isUuid)])].slice(0, 30)
+      const { data: geldig } = await admin.from('ag_personen').select('id').in('id', ids)
+      await admin.from('ag_leden').insert(((geldig ?? []) as { id: string }[]).map((p) => ({ soort, doel_id: id, persoon_id: p.id })))
+    }
     await admin.from(TABEL[soort]).update({ prive }).eq('id', id)
   }
+  const verantwoordelijke = soort === 'space' && 'verantwoordelijke_id' in b ? (isUuid(b.verantwoordelijke_id) ? b.verantwoordelijke_id : null) : undefined
+  const leden = Array.isArray(b.leden) ? (b.leden as unknown[]).filter(isUuid) : []
   if (actie === 'container.nieuw') {
     if (!naam) throw new Error('Geef een naam.')
-    const rij: Record<string, unknown> = { naam, kleur: isKleur(b.kleur) ? b.kleur : null, volgorde: Date.now() / 1e10 + 1000 }
+    const rij: Record<string, unknown> = { naam, kleur: isKleur(b.kleur) ? b.kleur : null, volgorde: Date.now() / 1e10 + 1000, ...(verantwoordelijke !== undefined ? { verantwoordelijke_id: verantwoordelijke } : {}) }
     if (soort !== 'space') {
       if (!isUuid(b.space_id) || !z.zichtbaar.spaces.has(b.space_id)) throw new Error('Kies een space.')
       rij.space_id = b.space_id
@@ -343,7 +368,8 @@ async function containerActie(c: Ctx, actie: string, b: Record<string, unknown>)
     }
     const { data, error } = await admin.from(TABEL[soort]).insert(rij).select('id').single()
     if (error || !data) throw new Error(error?.message ?? 'Bewaren mislukt')
-    if (b.prive === true) await zetPrive(data.id, true)
+    // Privé: ik, de verantwoordelijke en wie erbij gekozen werd.
+    if (b.prive === true) await zetPrive(data.id, true, [...leden, ...(verantwoordelijke ? [verantwoordelijke] : [])])
     return { ok: true, id: data.id }
   }
   if (!isUuid(b.id) || !zicht.has(b.id)) throw new Error('Die bestaat niet of je kan ze niet zien.')
@@ -353,8 +379,9 @@ async function containerActie(c: Ctx, actie: string, b: Record<string, unknown>)
     if ('naam' in b) { if (!naam) throw new Error('Geef een naam.'); upd.naam = naam }
     if ('kleur' in b) upd.kleur = isKleur(b.kleur) ? b.kleur : null
     if ('client_id' in b && soort !== 'space') upd.client_id = isUuid(b.client_id) ? b.client_id : null
+    if (verantwoordelijke !== undefined) upd.verantwoordelijke_id = verantwoordelijke
     await admin.from(TABEL[soort]).update(upd).eq('id', id)
-    if ('prive' in b) await zetPrive(id, b.prive === true)
+    if ('prive' in b) await zetPrive(id, b.prive === true, leden)
     return { ok: true }
   }
   if (actie === 'container.verwijder') {
@@ -382,7 +409,13 @@ async function docActie(c: Ctx, actie: string, b: Record<string, unknown>) {
   if (actie === 'doc.nieuw') {
     const titel = typeof b.titel === 'string' && b.titel.trim() ? b.titel.trim().slice(0, 300) : 'Nieuw document'
     const rij: Record<string, unknown> = { titel, inhoud: typeof b.inhoud === 'string' ? b.inhoud.slice(0, 500_000) : '', eigenaar_id: k.persoonId, bijgewerkt_door: k.naam, prive: b.prive === true, in_app_gewijzigd_op: nu() }
-    if (isUuid(b.lijst_id)) { if (!z.zichtbaar.lijsten.has(b.lijst_id)) throw new Error('Onbekende lijst.'); rij.lijst_id = b.lijst_id }
+    if (isUuid(b.item_id)) {
+      // Een doc bij een taak: zelfde lijst als de taak, dus dezelfde mensen zien het.
+      const it = await zichtbaarItem(admin, z, b.item_id)
+      rij.item_id = it.id
+      rij.lijst_id = it.lijst_id
+      rij.prive = it.prive
+    } else if (isUuid(b.lijst_id)) { if (!z.zichtbaar.lijsten.has(b.lijst_id)) throw new Error('Onbekende lijst.'); rij.lijst_id = b.lijst_id }
     else if (isUuid(b.map_id)) { if (!z.zichtbaar.mappen.has(b.map_id)) throw new Error('Onbekende map.'); rij.map_id = b.map_id }
     else if (isUuid(b.space_id)) { if (!z.zichtbaar.spaces.has(b.space_id)) throw new Error('Onbekende space.'); rij.space_id = b.space_id }
     const { data, error } = await admin.from('ag_docs').insert(rij).select('id, updated_at').single()
@@ -540,4 +573,58 @@ function deelnemersTekst(org: unknown, deelnemers: unknown): string | null {
   if (o?.email || o?.naam) regels.push(`Organisator: ${[o.naam, o.email ? `<${o.email}>` : null].filter(Boolean).join(' ')}`)
   if (d.length) regels.push(`Deelnemers: ${d.map((x) => x.naam ? `${x.naam} <${x.email}>` : x.email).join(', ')}`)
   return regels.length ? regels.join('\n') : null
+}
+
+// ── Bijlagen bij een taak (pdf, xml, Word, Excel, foto's …) ─────────────────
+
+const BIJLAGE_BUCKET = 'agenda'
+const MAX_BIJLAGE = 50 * 1024 * 1024
+// Geen programma's, scripts of webpagina's.
+const VERBODEN = /\.(exe|msi|bat|cmd|com|scr|ps1|sh|js|mjs|vbs|jar|apk|dmg|app|html?|php|svgz)$/i
+const veiligeNaam = (n: string) => n.normalize('NFKD').replace(/[^\w.\- ]+/g, '').replace(/\s+/g, '-').slice(-120) || 'bestand'
+
+async function bijlageActie(c: Ctx, actie: string, b: Record<string, unknown>) {
+  const { admin, k } = c
+  const z = await laadZicht(admin, k)
+  if (actie === 'bijlage.upload') {
+    const item = await zichtbaarItem(admin, z, b.item_id)
+    const naam = typeof b.naam === 'string' ? b.naam.trim() : ''
+    const grootte = Number(b.grootte)
+    if (!naam) throw new Error('Geen bestandsnaam.')
+    if (VERBODEN.test(naam)) throw new Error('Dit soort bestand kan niet als bijlage (geen programma\'s of webpagina\'s).')
+    if (!Number.isFinite(grootte) || grootte <= 0) throw new Error('Leeg bestand.')
+    if (grootte > MAX_BIJLAGE) throw new Error('Het bestand is groter dan 50 MB.')
+    const pad = `taken/${item.id}/${crypto.randomUUID()}/${veiligeNaam(naam)}`
+    const { data, error } = await admin.storage.from(BIJLAGE_BUCKET).createSignedUploadUrl(pad)
+    if (error || !data?.token) throw new Error(error?.message ?? 'Uploadlink maken mislukt')
+    return { ok: true, pad, token: data.token, bucket: BIJLAGE_BUCKET }
+  }
+  if (actie === 'bijlage.bewaar') {
+    const item = await zichtbaarItem(admin, z, b.item_id)
+    const pad = typeof b.pad === 'string' && b.pad.startsWith(`taken/${item.id}/`) && /^taken\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/[^/]+$/i.test(b.pad) ? b.pad : null
+    if (!pad) throw new Error('Laad het bestand eerst op.')
+    // Staat het er echt? (de browser laadde rechtstreeks op)
+    const map = pad.split('/').slice(0, 3).join('/')
+    const { data: lijst } = await admin.storage.from(BIJLAGE_BUCKET).list(map, { limit: 5 })
+    const bestand = (lijst ?? []).find((f) => `${map}/${f.name}` === pad)
+    if (!bestand) throw new Error('Het bestand is niet (volledig) opgeladen. Probeer opnieuw.')
+    const naam = typeof b.naam === 'string' && b.naam.trim() ? b.naam.trim().slice(0, 200) : pad.split('/').pop()!
+    const { data, error } = await admin.from('ag_bijlagen').insert({
+      item_id: item.id, pad, naam, type: typeof b.type === 'string' ? b.type.slice(0, 120) : null,
+      grootte: Number((bestand.metadata as { size?: number } | null)?.size ?? b.grootte) || null, persoon_id: k.persoonId, geupload_door: k.naam,
+    }).select('id').single()
+    if (error) throw new Error(error.message)
+    await admin.from('ag_items').update({ in_app_gewijzigd_op: nu(), updated_at: nu() }).eq('id', item.id)
+    return { ok: true, id: data?.id }
+  }
+  if (actie === 'bijlage.verwijder') {
+    if (!isUuid(b.id)) throw new Error('Onbekende bijlage')
+    const { data: bl } = await admin.from('ag_bijlagen').select('id, item_id').eq('id', b.id).is('verwijderd_op', null).maybeSingle()
+    if (!bl) throw new Error('Deze bijlage bestaat niet meer.')
+    await zichtbaarItem(admin, z, bl.item_id)
+    // Uit de taak, het bestand zelf blijft bewaard.
+    await admin.from('ag_bijlagen').update({ verwijderd_op: nu(), verwijderd_door: k.naam }).eq('id', bl.id)
+    return { ok: true }
+  }
+  throw new Error('Onbekende actie')
 }

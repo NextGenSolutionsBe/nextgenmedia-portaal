@@ -3,18 +3,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  Check, Flag, Loader2, Trash2, ExternalLink, Video, MapPin, Lock, Plus, Tag, Users, Building2, ListTree, Palette, CalendarClock, ChevronRight, Pencil, Search,
+  Check, Flag, Loader2, Trash2, ExternalLink, Video, MapPin, Lock, Plus, Tag, Users, Building2, ListTree, Palette, CalendarClock, ChevronRight, Pencil, Search, Paperclip, FileText, FilePlus2,
 } from 'lucide-react'
 import { dag, uur, zoneNaarIso, plusDagen, vandaag, isKleur, type Item } from '@/lib/agenda/model'
 import { zoekVeld } from '@/lib/zoekveld'
 import { PersoonFoto } from '@/components/admin/persoon-foto'
-import { actie, api, padVan, Lade, Popover, PersonenLijst, KleurKeuze, Schakel, Markdown, vinkRegel, focusRing, ApiFout, type BoomData } from './gedeeld'
+import { createClient } from '@/lib/supabase/client'
+import { actie, api, padVan, Lade, Popover, PersonenLijst, KleurKeuze, Schakel, Markdown, vinkRegel, MapKiezer, MapLabel, focusRing, ApiFout, type BoomData } from './gedeeld'
 
-type Detail = { item: Item; subtaken: Item[]; ouder: { id: string; titel: string } | null; gemaakt_door: string | null; gemaakt_op: string }
+type Bijlage = { id: string; naam: string; type: string | null; grootte: number | null; geupload_door: string | null; created_at: string }
+type TaakDoc = { id: string; titel: string; updated_at: string; bijgewerkt_door: string | null }
+type Detail = { item: Item; subtaken: Item[]; ouder: { id: string; titel: string } | null; gemaakt_door: string | null; gemaakt_op: string; bijlagen: Bijlage[]; docs: TaakDoc[] }
 
-export function ItemVenster({ id, boom, onSluit, onGewijzigd, onVerwijderd, onOpen }: {
+export function ItemVenster({ id, boom, onSluit, onGewijzigd, onVerwijderd, onOpen, onDoc }: {
   id: string; boom: BoomData
   onSluit: () => void
+  onDoc: (id: string) => void
   onGewijzigd: () => void
   onVerwijderd: (id: string) => void
   onOpen: (id: string) => void
@@ -69,14 +73,14 @@ export function ItemVenster({ id, boom, onSluit, onGewijzigd, onVerwijderd, onOp
       )}>
       {fout && <div className="m-5 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800 p-3">{fout}</div>}
       {!d && !fout && <div className="py-16 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>}
-      {d && <Inhoud d={d} boom={boom} mag={mag} personen={personen} bewaar={bewaar} onOpen={onOpen} herlaad={laad} onGewijzigd={onGewijzigd} />}
+      {d && <Inhoud d={d} boom={boom} mag={mag} personen={personen} bewaar={bewaar} onOpen={onOpen} herlaad={laad} onGewijzigd={onGewijzigd} onDoc={onDoc} />}
     </Lade>
   )
 }
 
-function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd }: {
+function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd, onDoc }: {
   d: Detail; boom: BoomData; mag: boolean; personen: Map<string, BoomData['personen'][number]>
-  bewaar: (v: Record<string, unknown>) => Promise<void>; onOpen: (id: string) => void; herlaad: () => void; onGewijzigd: () => void
+  bewaar: (v: Record<string, unknown>) => Promise<void>; onOpen: (id: string) => void; herlaad: () => void; onGewijzigd: () => void; onDoc: (id: string) => void
 }) {
   const i = d.item
   const [titel, setTitel] = useState(i.titel)
@@ -94,13 +98,10 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd }
 
       {/* Titel */}
       <div className="flex items-start gap-3">
-        {i.soort !== 'meeting' && (
-          <button type="button" disabled={!mag} onClick={() => bewaar({ status: klaar ? 'open' : 'klaar' })} aria-label={klaar ? 'Terug open zetten' : 'Afvinken'}
-            className={`mt-1.5 h-6 w-6 shrink-0 rounded-full border-2 flex items-center justify-center ${klaar ? 'bg-gray-900 border-gray-900 text-white' : 'border-gray-400 hover:border-gray-900'} ${focusRing}`}>
-            {klaar && <Check className="h-3.5 w-3.5" />}
-          </button>
-        )}
-        {i.soort === 'meeting' && <Video className="h-5 w-5 mt-2 shrink-0 text-gray-500" />}
+        <button type="button" disabled={!mag} onClick={() => bewaar({ status: klaar ? 'open' : 'klaar' })} aria-label={klaar ? 'Terug open zetten' : 'Complete'}
+          className={`mt-1.5 h-6 w-6 shrink-0 rounded-full border-2 flex items-center justify-center ${klaar ? 'bg-[#1f5132] border-[#1f5132] text-white' : 'border-gray-400 hover:border-gray-900'} ${focusRing}`}>
+          {klaar && <Check className="h-3.5 w-3.5" />}
+        </button>
         <textarea value={titel} disabled={!mag} rows={1} onChange={(e) => setTitel(e.target.value.replace(/\n/g, ' '))}
           onBlur={() => { const t = titel.trim(); if (t && t !== i.titel) bewaar({ titel: t }); else setTitel(i.titel) }}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLTextAreaElement).blur() } }}
@@ -110,11 +111,10 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd }
 
       {/* Snelle knoppen */}
       <div className="flex flex-wrap items-center gap-2">
-        {i.soort !== 'meeting' ? (
-          <button type="button" disabled={!mag} onClick={() => bewaar({ status: klaar ? 'open' : 'klaar' })} className={`status-badge !text-xs ${klaar ? '!bg-gray-900 !text-white' : ''}`}>
-            {klaar ? <><Check className="h-3 w-3" />Klaar</> : 'Open'}
-          </button>
-        ) : <span className="status-badge !text-xs"><Video className="h-3 w-3" />Meeting</span>}
+        <button type="button" disabled={!mag} onClick={() => bewaar({ status: klaar ? 'open' : 'klaar' })} className={`status-badge !text-xs ${klaar ? '!bg-[#1f5132] !text-white' : ''}`}>
+          {klaar ? <><Check className="h-3 w-3" />Completed</> : 'Open · klik om te completen'}
+        </button>
+        {i.soort === 'meeting' && <span className="status-badge !text-xs"><Video className="h-3 w-3" />Meeting</span>}
         {i.clickup_status && <span className="text-[11px] label-mono uppercase px-2 py-0.5 rounded-full border border-gray-200" style={isKleur(i.clickup_status_kleur) ? { borderColor: i.clickup_status_kleur, color: '#272727' } : undefined} title="Status in ClickUp">{i.clickup_status}</span>}
         <button type="button" disabled={!mag} onClick={() => bewaar({ urgent: !i.urgent })} aria-pressed={i.urgent}
           className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs ${i.urgent ? 'bg-red-50 border-red-300 text-red-700' : 'border-gray-200 text-gray-600 hover:border-gray-400'} ${focusRing}`}>
@@ -177,12 +177,12 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd }
           </Popover>
         </div>
 
-        <Kop icoon={<ListTree className="h-3.5 w-3.5" />}>Lijst</Kop>
+        <Kop icoon={<ListTree className="h-3.5 w-3.5" />}>Map</Kop>
         <div className="relative">
-          <button type="button" disabled={!mag} onClick={() => setOpen(open === 'lijst' ? null : 'lijst')} className={`rounded-lg px-1.5 py-1 -mx-1.5 hover:bg-gray-50 text-left ${focusRing}`}>
-            {lijst ? padVan(boom, lijst.id).join(' › ') : <span className="text-gray-400">Enkel in de agenda</span>}
+          <button type="button" disabled={!mag} onClick={() => setOpen(open === 'lijst' ? null : 'lijst')} className={`rounded-lg px-1.5 py-1 -mx-1.5 hover:bg-gray-50 text-left max-w-full ${focusRing}`}>
+            {lijst ? <MapLabel boom={boom} lijstId={lijst.id} /> : <span className="text-gray-400">Geen map: kies er een</span>}
           </button>
-          <Popover open={open === 'lijst'} onSluit={sluit}><LijstKiezer boom={boom} gekozen={i.lijst_id} onKies={(l) => { bewaar({ lijst_id: l }); sluit() }} /></Popover>
+          <Popover open={open === 'lijst'} onSluit={sluit}><MapKiezer boom={boom} gekozen={i.lijst_id} leeg="Geen map (enkel in de agenda)" onKies={(l) => { bewaar({ lijst_id: l }); sluit() }} /></Popover>
         </div>
 
         <Kop icoon={<Palette className="h-3.5 w-3.5" />}>Kleur</Kop>
@@ -203,6 +203,9 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd }
       {/* Beschrijving */}
       <Beschrijving waarde={i.beschrijving ?? ''} mag={mag} bewaar={bewaar} />
 
+      {/* Bijlagen en docs */}
+      <Bijlagen d={d} mag={mag} magToevoegen={!!boom.rechten.toevoegen} herlaad={herlaad} onDoc={onDoc} />
+
       {/* Subtaken */}
       <Subtaken d={d} boom={boom} mag={mag && !!boom.rechten.toevoegen} personen={personen} onOpen={onOpen} herlaad={() => { herlaad(); onGewijzigd() }} />
 
@@ -220,7 +223,7 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd }
 
       <div className="text-[11px] text-gray-400 border-t border-gray-100 pt-3 space-y-0.5">
         <div>Gemaakt{d.gemaakt_door ? ` door ${d.gemaakt_door}` : ''} op {new Date(d.gemaakt_op).toLocaleString('nl-BE', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Brussels' })}</div>
-        {i.afgerond_op && <div>Afgevinkt{i.afgerond_door ? ` door ${i.afgerond_door}` : ''} op {new Date(i.afgerond_op).toLocaleString('nl-BE', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Brussels' })}</div>}
+        {i.afgerond_op && <div>Completed{i.afgerond_door ? ` door ${i.afgerond_door}` : ''} op {new Date(i.afgerond_op).toLocaleString('nl-BE', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Brussels' })}</div>}
       </div>
       </div>
       </div>
@@ -409,6 +412,78 @@ export function LijstKiezer({ boom, gekozen, onKies, zonder = 'Enkel in de agend
         ))}
         {!rijen.length && <li className="px-2 py-3 text-xs text-gray-500">Niets gevonden.</li>}
       </ul>
+    </div>
+  )
+}
+
+const grootteTekst = (b: number | null) => (!b ? '' : b < 1024 * 1024 ? `${Math.max(1, Math.round(b / 1024))} kB` : `${(b / 1024 / 1024).toFixed(1).replace('.', ',')} MB`)
+
+/** Bestanden en documenten bij een taak: opladen (rechtstreeks naar de opslag), bekijken, weghalen. */
+function Bijlagen({ d, mag, magToevoegen, herlaad, onDoc }: { d: Detail; mag: boolean; magToevoegen: boolean; herlaad: () => void; onDoc: (id: string) => void }) {
+  const [bezig, setBezig] = useState<string | null>(null)
+  const invoer = useRef<HTMLInputElement>(null)
+  const laadOp = async (bestanden: FileList | null) => {
+    if (!bestanden?.length) return
+    for (const f of Array.from(bestanden)) {
+      setBezig(f.name)
+      try {
+        const j = await actie<{ ok: true; pad: string; token: string; bucket: string }>({ actie: 'bijlage.upload', item_id: d.item.id, naam: f.name, grootte: f.size, type: f.type })
+        const { error } = await createClient().storage.from(j.bucket).uploadToSignedUrl(j.pad, j.token, f, { contentType: f.type || 'application/octet-stream', upsert: false })
+        if (error) throw new Error(error.message)
+        await actie({ actie: 'bijlage.bewaar', item_id: d.item.id, pad: j.pad, naam: f.name, grootte: f.size, type: f.type })
+      } catch (e) { toast.error(`${f.name}: ${e instanceof Error ? e.message : 'opladen mislukt'}`) }
+    }
+    setBezig(null)
+    if (invoer.current) invoer.current.value = ''
+    herlaad()
+  }
+  const weg = async (b: Bijlage) => {
+    if (!confirm(`"${b.naam}" uit deze taak halen?`)) return
+    try { await actie({ actie: 'bijlage.verwijder', id: b.id }); herlaad() } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') }
+  }
+  const nieuwDoc = async () => {
+    try { const r = await actie({ actie: 'doc.nieuw', item_id: d.item.id, titel: `Notities: ${d.item.titel}`.slice(0, 300) }); if (r.id) onDoc(r.id) } catch (e) { toast.error(e instanceof Error ? e.message : 'Aanmaken mislukt') }
+  }
+  const leeg = !d.bijlagen.length && !d.docs.length
+  if (leeg && !mag) return null
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="label-mono text-[10px] uppercase text-gray-500">Bijlagen en documenten {!leeg && <span className="text-gray-400">· {d.bijlagen.length + d.docs.length}</span>}</div>
+        {mag && (
+          <div className="flex gap-1.5">
+            {magToevoegen && <button type="button" onClick={nieuwDoc} className="btn-secondary !py-1 !px-2.5 !text-xs"><FilePlus2 className="h-3.5 w-3.5" />Document</button>}
+            <button type="button" disabled={!!bezig} onClick={() => invoer.current?.click()} className="btn-secondary !py-1 !px-2.5 !text-xs">{bezig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}Bestand</button>
+            <input ref={invoer} type="file" multiple className="hidden" onChange={(e) => laadOp(e.target.files)} />
+          </div>
+        )}
+      </div>
+      {leeg ? (
+        <button type="button" disabled={!mag || !!bezig} onClick={() => invoer.current?.click()}
+          onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); laadOp(e.dataTransfer.files) }}
+          className="w-full rounded-xl border border-dashed border-gray-200 px-4 py-5 text-sm text-gray-400 hover:border-gray-400 text-center">
+          {bezig ? `Opladen: ${bezig}…` : 'Sleep hier een pdf, xml, Word- of Excelbestand, of klik om te kiezen'}
+        </button>
+      ) : (
+        <ul className="divide-y divide-gray-100 rounded-xl border border-gray-100" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (mag) laadOp(e.dataTransfer.files) }}>
+          {d.docs.map((x) => (
+            <li key={x.id} className="flex items-center gap-2.5 px-3 py-2">
+              <FileText className="h-4 w-4 text-gray-500 shrink-0" />
+              <button type="button" onClick={() => onDoc(x.id)} className="flex-1 min-w-0 text-left text-sm truncate hover:underline">{x.titel}</button>
+              <span className="text-[11px] text-gray-400 shrink-0">document</span>
+            </li>
+          ))}
+          {d.bijlagen.map((b) => (
+            <li key={b.id} className="flex items-center gap-2.5 px-3 py-2">
+              <Paperclip className="h-4 w-4 text-gray-500 shrink-0" />
+              <a href={`/api/admin/agenda?bijlage=${b.id}`} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 text-sm truncate hover:underline" title={b.naam}>{b.naam}</a>
+              <span className="text-[11px] text-gray-400 shrink-0 hidden sm:inline">{grootteTekst(b.grootte)}{b.geupload_door ? ` · ${b.geupload_door.split(' ')[0]}` : ''}</span>
+              {mag && <button type="button" onClick={() => weg(b)} aria-label={`${b.naam} weghalen`} className={`h-7 w-7 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 flex items-center justify-center shrink-0 ${focusRing}`}><Trash2 className="h-3.5 w-3.5" /></button>}
+            </li>
+          ))}
+          {bezig && <li className="px-3 py-2 text-xs text-gray-500 flex items-center gap-2"><Loader2 className="h-3.5 w-3.5 animate-spin" />Opladen: {bezig}…</li>}
+        </ul>
+      )}
     </div>
   )
 }

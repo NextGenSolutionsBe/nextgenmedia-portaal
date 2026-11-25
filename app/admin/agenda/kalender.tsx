@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
-import { Check, Flag, Video, MapPin, Plus, Lock } from 'lucide-react'
+import { Check, Flag, Video, MapPin, Plus, Lock, RotateCcw } from 'lucide-react'
 import {
   plaatsVan, dagenVan, legUit, vandaag, plusDagen, zoneNaarIso, dag, uur, kortDag,
   type Item, type Weergave, type Persoon,
@@ -20,6 +20,11 @@ function rgb(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
 }
 const mix = (a: [number, number, number], b: [number, number, number], t: number) => `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * t)).join(',')})`
+/** Completed: donkergroen, zodat je in één oogopslag ziet wat al gedaan is. */
+export const KLAAR_STIJL: React.CSSProperties = { background: '#1f5132', borderLeft: '3px solid #0c2a18', color: '#ffffff' }
+const isKlaar = (i: Item) => i.status === 'klaar' && i.bron === 'ag'
+const stijlVan = (i: Item, kleur: string) => (isKlaar(i) ? KLAAR_STIJL : vlak(kleur))
+
 export function vlak(kleur: string): React.CSSProperties {
   const c = rgb(/^#[0-9a-f]{6}$/i.test(kleur) ? kleur : '#e5e7eb')
   const licht = (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) / 255 > 0.6
@@ -63,30 +68,44 @@ export function Kalender(p: Props) {
 // ── Een item als blokje ─────────────────────────────────────────────────────
 
 function Vinkje({ i, onKlaar, klein }: { i: Item; onKlaar: (i: Item) => void; klein?: boolean }) {
-  if (i.bron !== 'ag' || i.soort === 'meeting') return null
+  if (i.bron !== 'ag') return null
   const aan = i.status === 'klaar'
   return (
     <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onKlaar(i) }} aria-label={aan ? 'Terug open zetten' : 'Afvinken'}
-      className={`shrink-0 ${klein ? 'h-3 w-3' : 'h-3.5 w-3.5'} rounded-full border flex items-center justify-center ${aan ? 'bg-gray-900 border-gray-900 text-white' : 'border-current bg-white/60'} ${focusRing}`}>
+      className={`shrink-0 ${klein ? 'h-3 w-3' : 'h-3.5 w-3.5'} rounded-full border flex items-center justify-center ${aan ? 'bg-white border-white text-[#1f5132]' : 'border-current bg-white/60'} ${focusRing}`}>
       {aan && <Check className="h-2.5 w-2.5" />}
     </button>
   )
 }
 
+/** Bij hoveren: snel completen (of terug open zetten). */
+function SnelKlaar({ i, onKlaar, tekst, onder = false }: { i: Item; onKlaar: (i: Item) => void; tekst: boolean; onder?: boolean }) {
+  if (i.bron !== 'ag') return null
+  const klaar = i.status === 'klaar'
+  return (
+    <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onKlaar(i) }}
+      title={klaar ? 'Terug open zetten' : 'Complete'} aria-label={klaar ? 'Terug open zetten' : 'Complete'}
+      className={`absolute ${onder ? 'bottom-1' : 'top-1/2 -translate-y-1/2'} right-1 z-[3] hidden group-hover:inline-flex focus:inline-flex items-center gap-1 h-[20px] px-1.5 rounded-md text-[11px] font-semibold shadow-sm ${klaar ? 'bg-white text-gray-900' : 'bg-[#1f5132] text-white'} ${focusRing}`}>
+      {klaar ? <RotateCcw className="h-3 w-3" /> : <Check className="h-3 w-3" />}{tekst && (klaar ? 'Heropen' : 'Complete')}
+    </button>
+  )
+}
+
 function Chip({ i, kleur, onOpen, onKlaar, personen, tijd, sleep }: { i: Item; kleur: string; onOpen: (i: Item) => void; onKlaar: (i: Item) => void; personen: Map<string, Persoon>; tijd?: string | null; sleep: boolean }) {
-  const klaar = i.status === 'klaar' && i.soort !== 'meeting'
+  const klaar = isKlaar(i)
   return (
     <div draggable={sleep} onDragStart={(e) => { e.dataTransfer.setData('text/agenda-item', i.id); e.dataTransfer.effectAllowed = 'move' }}
       onClick={() => onOpen(i)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
-      className={`group flex items-center gap-1.5 rounded-md pl-1.5 pr-1 h-[24px] text-[12px] leading-none cursor-pointer select-none hover:brightness-[0.97] ${klaar ? 'opacity-55' : ''} ${focusRing}`}
-      style={vlak(kleur)} title={i.titel}>
+      className={`group relative flex items-center gap-1.5 rounded-md pl-1.5 pr-1 h-[24px] text-[12px] leading-none cursor-pointer select-none hover:brightness-[0.97] ${focusRing}`}
+      style={stijlVan(i, kleur)} title={i.titel}>
       <Vinkje i={i} onKlaar={onKlaar} klein />
       {i.urgent && !klaar && <Flag className="h-3 w-3 shrink-0 text-red-600 fill-red-600" />}
       {(i.meet_url || i.bron === 'meeting') && <Video className="h-3 w-3 shrink-0 opacity-70" />}
       {tijd && <span className="shrink-0 tabular-nums opacity-75">{tijd}</span>}
-      <span className={`truncate flex-1 ${klaar ? 'line-through' : ''}`}>{i.titel}</span>
+      <span className="truncate flex-1">{i.titel}</span>
       {i.prive && <Lock className="h-2.5 w-2.5 shrink-0 opacity-60" />}
-      <span className="hidden sm:inline-flex"><Avatars ids={i.toegewezen} personen={personen} max={2} maat={16} /></span>
+      <span className="hidden sm:inline-flex group-hover:invisible"><Avatars ids={i.toegewezen} personen={personen} max={2} maat={16} /></span>
+      {sleep && <SnelKlaar i={i} onKlaar={onKlaar} tekst={false} />}
     </div>
   )
 }
@@ -322,29 +341,31 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
                     const kl = kleur(i)
                     const hoogte = Math.max(22, (b.totMin - b.vanMin) * PX_MIN - 2)
                     const sl = sleepbaar(i, magAanpassen)
-                    const klaar = i.status === 'klaar' && i.soort !== 'meeting'
+                    const klaar = isKlaar(i)
                     return (
                       <div key={`${i.bron}-${i.id}`} data-blok role="button" tabIndex={0}
                         onPointerDown={(e) => (sl ? startVerplaats(e, i, n, b.vanMin, b.totMin) : undefined)}
                         onClick={() => { if (!sl) onOpen(i) }} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
-                        className={`absolute rounded-md pl-2 pr-1.5 py-1 overflow-hidden text-[12px] leading-snug shadow-[0_1px_2px_rgba(0,0,0,0.06)] cursor-pointer select-none hover:brightness-[0.97] ${klaar ? 'opacity-55' : ''} ${bezig ? 'opacity-30' : ''} ${focusRing}`}
-                        style={{ ...vlak(kl), top: b.vanMin * PX_MIN + 1, height: hoogte, left: `calc(${(b.kolom / b.kolommen) * 100}% + 3px)`, width: `calc(${100 / b.kolommen}% - 6px)`, touchAction: sl ? 'none' : undefined }}
+                        className={`group absolute rounded-md pl-2 pr-1.5 py-1 overflow-hidden text-[12px] leading-snug shadow-[0_1px_2px_rgba(0,0,0,0.06)] cursor-pointer select-none hover:brightness-[0.97] hover:z-[2] ${bezig ? 'opacity-30' : ''} ${focusRing}`}
+                        style={{ ...stijlVan(i, kl), top: b.vanMin * PX_MIN + 1, height: hoogte, left: `calc(${(b.kolom / b.kolommen) * 100}% + 3px)`, width: `calc(${100 / b.kolommen}% - 6px)`, touchAction: sl ? 'none' : undefined }}
                         title={`${hhmm(b.vanMin)}–${hhmm(b.totMin)} ${i.titel}`}>
                         <div className="flex items-start gap-1">
                           <span className="mt-px"><Vinkje i={i} onKlaar={onKlaar} klein /></span>
                           {i.urgent && !klaar && <Flag className="h-3 w-3 mt-px shrink-0 text-red-600 fill-red-600" />}
-                          <span className={`font-semibold ${hoogte < 34 ? 'truncate' : hoogte < 70 ? 'line-clamp-2' : 'line-clamp-3'} ${klaar ? 'line-through' : ''}`}>{i.titel}</span>
+                          <span className={`font-semibold ${hoogte < 34 ? 'truncate' : hoogte < 70 ? 'line-clamp-2' : 'line-clamp-3'}`}>{i.titel}</span>
                         </div>
                         {hoogte >= 34 && (
-                          <div className="flex items-center gap-1 mt-0.5 text-gray-600 tabular-nums text-[11px]">
+                          <div className={`flex items-center gap-1 mt-0.5 tabular-nums text-[11px] ${klaar ? 'text-white/80' : 'text-gray-600'}`}>
                             {(i.meet_url || i.bron === 'meeting') && <Video className="h-3 w-3 shrink-0" />}
                             {i.locatie && !i.meet_url && <MapPin className="h-3 w-3 shrink-0" />}
                             <span className="truncate">{hhmm(b.vanMin)}–{hhmm(b.totMin)}</span>
                             <span className="flex-1" />
-                            {hoogte >= 50 && <Avatars ids={i.toegewezen} personen={personen} max={3} maat={18} />}
+                            {hoogte >= 50 && <span className={sl ? 'group-hover:invisible' : ''}><Avatars ids={i.toegewezen} personen={personen} max={3} maat={18} /></span>}
                           </div>
                         )}
                         {sl && <div onPointerDown={(e) => startRek(e, i, d, b.vanMin, b.totMin)} className="absolute left-0 right-0 bottom-0 h-1.5 cursor-ns-resize" aria-hidden />}
+                        {/* Onderaan rechts (waar de foto's staan), zodat de titel leesbaar en klikbaar blijft. */}
+                        {sl && <SnelKlaar i={i} onKlaar={onKlaar} onder={hoogte >= 34} tekst={b.kolommen === 1 && hoogte >= 34} />}
                       </div>
                     )
                   })}
@@ -391,7 +412,7 @@ function Maand({ datum, items, kleur, personen, magAanpassen, magToevoegen, onOp
       for (let d = van < eerste ? eerste : van, n = 0; d <= tot && d <= laatste && n < 45; d = plusDagen(d, 1), n++) m.set(d, [...(m.get(d) ?? []), i])
     }
     // Hele dag eerst, dan op uur, afgevinkt onderaan.
-    for (const [, l] of m) l.sort((a, b) => Number(a.status === 'klaar' && a.soort !== 'meeting') - Number(b.status === 'klaar' && b.soort !== 'meeting') || Number(!a.heel_dag) - Number(!b.heel_dag) || (a.start_op ?? a.eind_op ?? '').localeCompare(b.start_op ?? b.eind_op ?? ''))
+    for (const [, l] of m) l.sort((a, b) => Number(isKlaar(a)) - Number(isKlaar(b)) || Number(!a.heel_dag) - Number(!b.heel_dag) || (a.start_op ?? a.eind_op ?? '').localeCompare(b.start_op ?? b.eind_op ?? ''))
     return m
   }, [items, dagen])
   const vandaagD = vandaag()
@@ -424,7 +445,7 @@ function Maand({ datum, items, kleur, personen, magAanpassen, magToevoegen, onOp
               {/* Gsm: bolletjes per item, tikken = die dag openen. */}
               {l.length > 0 && (
                 <button type="button" onClick={() => onDag(d)} className="sm:hidden w-full flex flex-wrap gap-1 px-1 pt-0.5" aria-label={`${l.length} items op ${kortDag(d)}`}>
-                  {l.slice(0, 6).map((i) => <span key={`${i.bron}-${i.id}`} className="h-2 w-2 rounded-full" style={{ background: (vlak(kleur(i)).borderLeft as string).replace('3px solid ', '') }} />)}
+                  {l.slice(0, 6).map((i) => <span key={`${i.bron}-${i.id}`} className="h-2 w-2 rounded-full" style={{ background: (stijlVan(i, kleur(i)).borderLeft as string).replace('3px solid ', '') }} />)}
                   {l.length > 6 && <span className="text-[10px] leading-none font-semibold text-gray-600">+{l.length - 6}</span>}
                 </button>
               )}

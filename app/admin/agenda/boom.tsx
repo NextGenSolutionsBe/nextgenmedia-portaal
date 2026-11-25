@@ -7,7 +7,8 @@ import {
 } from 'lucide-react'
 import { Modal } from '@/app/admin/materiaal/dialogen'
 import { zoekVeld } from '@/lib/zoekveld'
-import { actie, Popover, KleurKeuze, focusRing, type BoomData, type AgMap } from './gedeeld'
+import { PersoonFoto } from '@/components/admin/persoon-foto'
+import { actie, Popover, KleurKeuze, PersonenLijst, Schakel, MapIcoon, donkerder, kleurVanMap, focusRing, type BoomData, type AgMap } from './gedeeld'
 import { KlantLijst } from './item-venster'
 
 export type Keuze = { soort: 'space' | 'map' | 'lijst' | 'doc'; id: string } | null
@@ -15,14 +16,15 @@ type Soort = 'space' | 'map' | 'lijst'
 
 const OPEN_SLEUTEL = 'ngm-agenda-boom'
 
-export function Boom({ boom, keuze, onKies, onVernieuw, onPaneel, onNieuwDoc }: {
-  boom: BoomData; keuze: Keuze; onKies: (k: Keuze) => void; onVernieuw: () => void
+export function Boom({ boom, keuze, onKies, onVernieuw, onPaneel, onNieuwDoc, onVolledig }: {
+  boom: BoomData; keuze: Keuze; onKies: (k: Keuze) => void; onVernieuw: () => void; onVolledig: () => void
   onPaneel: (p: 'klaar' | 'prullenbak' | 'instellingen' | 'mail') => void
   onNieuwDoc: (waar: { space_id?: string; map_id?: string; lijst_id?: string }) => void
 }) {
   const [open, setOpen] = useState<Set<string>>(new Set())
   const [q, setQ] = useState('')
   const [naam, setNaam] = useState<null | { titel: string; waarde: string; onBewaar: (n: string) => Promise<void> }>(null)
+  const [spaceVenster, setSpaceVenster] = useState<null | { id?: string }>(null)
   useEffect(() => { try { setOpen(new Set(JSON.parse(localStorage.getItem(OPEN_SLEUTEL) ?? '[]'))) } catch { /* */ } }, [])
   const wissel = (id: string) => setOpen((o) => {
     const n = new Set(o)
@@ -86,7 +88,7 @@ export function Boom({ boom, keuze, onKies, onVernieuw, onPaneel, onNieuwDoc }: 
   return (
     <nav className="flex flex-col h-full min-h-0" aria-label="Spaces, mappen en lijsten">
       <div className="p-2 space-y-1.5">
-        <button type="button" onClick={() => onKies(null)} className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-semibold ${!keuze ? 'bg-gray-900 text-white' : 'hover:bg-gray-100 text-gray-900'} ${focusRing}`}>
+        <button type="button" onClick={onVolledig} title="Alles, op groot scherm" className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-semibold ${!keuze ? 'bg-gray-900 text-white' : 'hover:bg-gray-100 text-gray-900'} ${focusRing}`}>
           <CalendarDays className="h-4 w-4" />Volledige agenda
         </button>
         <div className="relative"><Search className="h-3.5 w-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
@@ -96,7 +98,7 @@ export function Boom({ boom, keuze, onKies, onVernieuw, onPaneel, onNieuwDoc }: 
       <div className="flex-1 overflow-y-auto px-2 pb-2 min-h-0">
         {boom.spaces.filter((s) => toon(s.id)).map((s) => (
           <div key={s.id} className="mb-1">
-            <Rij diepte={0} soort="space" id={s.id} naam={s.naam} kleur={s.kleur} prive={s.prive || !!boom.leden[`space:${s.id}`]} open={isOpen(s.id)} onWissel={() => wissel(s.id)}
+            <Rij diepte={0} soort="space" id={s.id} naam={s.naam} kleur={s.kleur} eigenKleur={s.kleur} verantwoordelijke={s.verantwoordelijke_id ?? null} onToegang={() => setSpaceVenster({ id: s.id })} prive={s.prive || !!boom.leden[`space:${s.id}`]} open={isOpen(s.id)} onWissel={() => wissel(s.id)}
               gekozen={keuze?.soort === 'space' && keuze.id === s.id} onKies={() => onKies({ soort: 'space', id: s.id })} boom={boom} onVernieuw={onVernieuw}
               menu={{
                 nieuweMap: mag.toevoegen ? () => maak('map', { space_id: s.id }, `Nieuwe map in ${s.naam}`) : undefined,
@@ -118,7 +120,7 @@ export function Boom({ boom, keuze, onKies, onVernieuw, onPaneel, onNieuwDoc }: 
           </div>
         ))}
         {mag.toevoegen && !zoekt && (
-          <button type="button" onClick={() => maak('space', {}, 'Nieuwe space')} className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-gray-500 hover:bg-gray-100 ${focusRing}`}><Plus className="h-3.5 w-3.5" />Nieuwe space</button>
+          <button type="button" onClick={() => setSpaceVenster({})} className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-gray-500 hover:bg-gray-100 ${focusRing}`}><Plus className="h-3.5 w-3.5" />Nieuwe space</button>
         )}
         {losseDocs.filter((d) => toon(d.id)).length > 0 && (
           <div className="mt-2">
@@ -128,12 +130,13 @@ export function Boom({ boom, keuze, onKies, onVernieuw, onPaneel, onNieuwDoc }: 
         )}
       </div>
       <div className="border-t border-gray-100 p-2 grid grid-cols-2 gap-1">
-        <VoetKnop onClick={() => onPaneel('klaar')} icoon={<CheckCheck className="h-3.5 w-3.5" />}>Afgevinkt</VoetKnop>
+        <VoetKnop onClick={() => onPaneel('klaar')} icoon={<CheckCheck className="h-3.5 w-3.5" />}>Completed</VoetKnop>
         <VoetKnop onClick={() => onPaneel('prullenbak')} icoon={<Trash2 className="h-3.5 w-3.5" />}>Prullenbak</VoetKnop>
         {boom.isAdmin && <VoetKnop onClick={() => onPaneel('mail')} icoon={<Mail className="h-3.5 w-3.5" />} teller={boom.mailVoorstellen}>Uit de mail</VoetKnop>}
         <VoetKnop onClick={() => onPaneel('instellingen')} icoon={<Settings2 className="h-3.5 w-3.5" />}>Instellingen</VoetKnop>
       </div>
       {naam && <NaamVenster titel={naam.titel} waarde={naam.waarde} onSluit={() => setNaam(null)} onBewaar={async (n) => { await naam.onBewaar(n); setNaam(null) }} />}
+      {spaceVenster && <SpaceVenster boom={boom} id={spaceVenster.id} onSluit={() => setSpaceVenster(null)} onKlaar={(id) => { setSpaceVenster(null); onVernieuw(); if (id) { setOpen((o) => new Set([...o, id])); onKies({ soort: 'space', id }) } }} />}
     </nav>
   )
 }
@@ -157,7 +160,7 @@ function MapTak({ m, diepte, boom, keuze, isOpen, toon, wissel, onKies, maak, se
   const mag = boom.rechten
   return (
     <div>
-      <Rij diepte={diepte} soort="map" id={m.id} naam={m.naam} kleur={m.kleur ?? (m.client_id ? boom.klantKleuren[m.client_id] ?? null : null)} prive={m.prive || !!boom.leden[`map:${m.id}`]} open={isOpen(m.id)} onWissel={() => wissel(m.id)}
+      <Rij diepte={diepte} soort="map" id={m.id} naam={m.naam} kleur={kleurVanMap(boom, m.id)} eigenKleur={m.kleur} prive={m.prive || !!boom.leden[`map:${m.id}`]} open={isOpen(m.id)} onWissel={() => wissel(m.id)}
         gekozen={keuze?.soort === 'map' && keuze.id === m.id} onKies={() => onKies({ soort: 'map', id: m.id })} boom={boom} onVernieuw={onVernieuw} klantId={m.client_id}
         menu={{
           nieuweMap: mag.toevoegen && diepte < 4 ? () => maak('map', { space_id: m.space_id, parent_id: m.id }, `Nieuwe map in ${m.naam}`) : undefined,
@@ -187,7 +190,7 @@ function LijstTak({ l, diepte, boom, keuze, isOpen, toon, wissel, onKies, setNaa
   const docs = boom.docs.filter((d) => d.lijst_id === l.id && toon(d.id))
   return (
     <div>
-      <Rij diepte={diepte} soort="lijst" id={l.id} naam={l.naam} kleur={l.kleur} prive={l.prive || !!boom.leden[`lijst:${l.id}`]} open={isOpen(l.id)} onWissel={docs.length ? () => wissel(l.id) : undefined}
+      <Rij diepte={diepte} soort="lijst" id={l.id} naam={l.naam} kleur={l.kleur ?? kleurVanMap(boom, l.map_id)} eigenKleur={l.kleur} prive={l.prive || !!boom.leden[`lijst:${l.id}`]} open={isOpen(l.id)} onWissel={docs.length ? () => wissel(l.id) : undefined}
         gekozen={keuze?.soort === 'lijst' && keuze.id === l.id} onKies={() => onKies({ soort: 'lijst', id: l.id })} boom={boom} onVernieuw={onVernieuw} klantId={l.client_id}
         menu={{ nieuwDoc: boom.rechten.toevoegen ? () => onNieuwDoc({ lijst_id: l.id }) : undefined, hernoem: setNaam }} />
       {isOpen(l.id) && docs.map((d) => <DocRij key={d.id} d={d} diepte={diepte + 1} gekozen={keuze?.soort === 'doc' && keuze.id === d.id} onKies={onKies} />)}
@@ -204,14 +207,14 @@ function DocRij({ d, diepte, gekozen, onKies }: { d: BoomData['docs'][number]; d
   )
 }
 
-function Rij({ diepte, soort, id, naam, kleur, prive, open, onWissel, gekozen, onKies, boom, onVernieuw, menu, klantId }: {
-  diepte: number; soort: Soort; id: string; naam: string; kleur: string | null; prive: boolean; open: boolean; onWissel?: () => void
+function Rij({ diepte, soort, id, naam, kleur, eigenKleur, prive, open, onWissel, gekozen, onKies, boom, onVernieuw, menu, klantId, verantwoordelijke, onToegang }: {
+  diepte: number; soort: Soort; id: string; naam: string; kleur: string | null; eigenKleur: string | null; prive: boolean; open: boolean; onWissel?: () => void
+  verantwoordelijke?: string | null; onToegang?: () => void
   gekozen: boolean; onKies: () => void; boom: BoomData; onVernieuw: () => void; klantId?: string | null
   menu: { nieuweMap?: () => void; nieuweLijst?: () => void; nieuwDoc?: () => void; hernoem: NaamZetter }
 }) {
   const [menuOpen, setMenuOpen] = useState<null | 'menu' | 'kleur' | 'klant'>(null)
   const sluit = useCallback(() => setMenuOpen(null), [])
-  const Icoon = soort === 'space' ? null : soort === 'map' ? Folder : ListIcon
   const mag = boom.rechten
   const wijzig = async (velden: Record<string, unknown>, melding?: string) => {
     try { await actie({ actie: 'container.wijzig', soort, id, ...velden }); onVernieuw(); if (melding) toast.success(melding) } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') }
@@ -237,9 +240,11 @@ function Rij({ diepte, soort, id, naam, kleur, prive, open, onWissel, gekozen, o
       <button type="button" onClick={onKies} className={`flex-1 min-w-0 flex items-center gap-2 py-1.5 pr-1 text-left ${soort === 'space' ? 'text-sm font-semibold' : 'text-[13px]'} ${focusRing} rounded`}>
         {soort === 'space'
           ? <span className="h-5 w-5 shrink-0 rounded-md flex items-center justify-center text-[10px] font-bold" style={{ background: kleur ?? '#272727', color: '#fff' }}>{naam.slice(0, 1).toUpperCase()}</span>
-          : Icoon && <span className="relative shrink-0"><Icoon className="h-3.5 w-3.5 opacity-70" />{kleur && <span className="absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full ring-1 ring-white" style={{ background: kleur }} />}</span>}
+          : soort === 'map' ? <MapIcoon kleur={kleur} />
+          : <ListIcon className="h-3.5 w-3.5 shrink-0" style={{ color: kleur ? donkerder(kleur, 0.35) : undefined }} />}
         <span className="truncate">{naam}</span>
         {prive && <Lock className="h-3 w-3 shrink-0 opacity-60" />}
+        {verantwoordelijke && <span className="ml-auto shrink-0" title={`Verantwoordelijke: ${boom.personen.find((p) => p.id === verantwoordelijke)?.naam ?? ''}`}><PersoonFoto naam={boom.personen.find((p) => p.id === verantwoordelijke)?.naam ?? '?'} maat={18} /></span>}
       </button>
       {(mag.aanpassen || mag.toevoegen || mag.verwijderen) && (
         <div className="relative">
@@ -256,12 +261,13 @@ function Rij({ diepte, soort, id, naam, kleur, prive, open, onWissel, gekozen, o
               <MenuKnop icoon={<Pencil className="h-4 w-4" />} onClick={() => { sluit(); menu.hernoem({ titel: 'Naam aanpassen', waarde: naam, onBewaar: (n) => wijzig({ naam: n }) }) }}>Naam aanpassen</MenuKnop>
               <MenuKnop icoon={<Palette className="h-4 w-4" />} onClick={() => setMenuOpen('kleur')}>Kleur</MenuKnop>
               {soort !== 'space' && <MenuKnop icoon={<Building2 className="h-4 w-4" />} onClick={() => setMenuOpen('klant')}>{klantId ? 'Andere klant' : 'Koppelen aan een klant'}</MenuKnop>}
-              {(isEigenPrive || !eigen.length) && <MenuKnop icoon={isEigenPrive ? <LockOpen className="h-4 w-4" /> : <Lock className="h-4 w-4" />} onClick={() => { sluit(); wijzig({ prive: !isEigenPrive }, isEigenPrive ? 'Iedereen ziet dit weer.' : 'Enkel jij (en wie je je agenda deelt) ziet dit nu.') }}>{isEigenPrive ? 'Niet meer privé' : 'Privé maken (enkel ik)'}</MenuKnop>}
+              {soort === 'space' && onToegang && <MenuKnop icoon={<Lock className="h-4 w-4" />} onClick={() => { sluit(); onToegang() }}>Verantwoordelijke en toegang</MenuKnop>}
+              {soort !== 'space' && (isEigenPrive || !eigen.length) && <MenuKnop icoon={isEigenPrive ? <LockOpen className="h-4 w-4" /> : <Lock className="h-4 w-4" />} onClick={() => { sluit(); wijzig({ prive: !isEigenPrive }, isEigenPrive ? 'Iedereen ziet dit weer.' : 'Enkel jij (en wie je je agenda deelt) ziet dit nu.') }}>{isEigenPrive ? 'Niet meer privé' : 'Privé maken (enkel ik)'}</MenuKnop>}
             </>}
             {mag.verwijderen && <><div className="my-1 border-t border-gray-100" /><MenuKnop icoon={<Trash2 className="h-4 w-4" />} gevaar onClick={verwijder}>Naar de prullenbak</MenuKnop></>}
           </Popover>
           <Popover open={menuOpen === 'kleur'} onSluit={sluit} uitlijnen="rechts" className="p-3 w-64">
-            <KleurKeuze waarde={kleur} onKies={(k) => { sluit(); wijzig({ kleur: k }) }} />
+            <KleurKeuze waarde={eigenKleur} onKies={(k) => { sluit(); wijzig({ kleur: k }) }} leeg="Automatisch" />
           </Popover>
           <Popover open={menuOpen === 'klant'} onSluit={sluit} uitlijnen="rechts">
             <KlantLijst boom={boom} gekozen={klantId ?? null} onKies={(k) => { sluit(); wijzig({ client_id: k }, k ? 'Gekoppeld aan de klant.' : 'Klant losgekoppeld.') }} />
@@ -290,6 +296,59 @@ export function NaamVenster({ titel, waarde, onSluit, onBewaar }: { titel: strin
   return (
     <Modal titel={titel} onSluit={onSluit} voet={<><button type="button" onClick={onSluit} className="btn-secondary">Annuleren</button><button type="button" disabled={!v.trim() || bezig} onClick={ok} className="btn-primary">Bewaren</button></>}>
       <input autoFocus value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') ok() }} className="input-base" placeholder="Naam" aria-label="Naam" maxLength={200} />
+    </Modal>
+  )
+}
+
+/** Nieuwe space (of een bestaande aanpassen): naam, kleur, verantwoordelijke en wie er toegang heeft. */
+function SpaceVenster({ boom, id, onSluit, onKlaar }: { boom: BoomData; id?: string; onSluit: () => void; onKlaar: (id: string | null) => void }) {
+  const bestaand = id ? boom.spaces.find((s) => s.id === id) : null
+  const leden0 = id ? boom.leden[`space:${id}`] ?? [] : []
+  const [naam, setNaam] = useState(bestaand?.naam ?? '')
+  const [kleur, setKleur] = useState<string | null>(bestaand?.kleur ?? null)
+  const [verantwoordelijke, setVerantwoordelijke] = useState<string | null>(bestaand?.verantwoordelijke_id ?? boom.ik)
+  const [prive, setPrive] = useState(bestaand ? leden0.length > 0 : false)
+  const [leden, setLeden] = useState<string[]>(leden0.length ? leden0 : [boom.ik])
+  const [bezig, setBezig] = useState(false)
+  const mensen = boom.personen.filter((p) => p.actief && p.user_id)
+  const bewaar = async () => {
+    if (!naam.trim()) return
+    setBezig(true)
+    try {
+      const velden = { naam: naam.trim(), kleur, verantwoordelijke_id: verantwoordelijke, prive, leden: prive ? [...new Set([...leden, ...(verantwoordelijke ? [verantwoordelijke] : [])])] : [] }
+      if (id) { await actie({ actie: 'container.wijzig', soort: 'space', id, ...velden }); toast.success('Space aangepast.'); onKlaar(null) }
+      else { const r = await actie({ actie: 'container.nieuw', soort: 'space', ...velden }); toast.success('Space aangemaakt.'); onKlaar(r.id ?? null) }
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt'); setBezig(false) }
+  }
+  return (
+    <Modal titel={id ? 'Space aanpassen' : 'Nieuwe space'} onSluit={onSluit}
+      voet={<><button type="button" onClick={onSluit} className="btn-secondary">Annuleren</button><button type="button" disabled={!naam.trim() || bezig} onClick={bewaar} className="btn-primary">{id ? 'Bewaren' : 'Aanmaken'}</button></>}>
+      <input autoFocus value={naam} onChange={(e) => setNaam(e.target.value)} className="input-base" placeholder="Naam van de space" aria-label="Naam" maxLength={200} />
+      <div>
+        <div className="label-mono text-[10px] uppercase text-gray-500 mb-1.5">Kleur</div>
+        <KleurKeuze waarde={kleur} onKies={setKleur} leeg="Zwart" />
+      </div>
+      <div>
+        <div className="label-mono text-[10px] uppercase text-gray-500 mb-1.5">Verantwoordelijke</div>
+        <div className="flex flex-wrap gap-1.5">
+          {mensen.slice().sort((a, b) => Number(boom.zaakvoerders.includes(b.id)) - Number(boom.zaakvoerders.includes(a.id)) || a.naam.localeCompare(b.naam)).map((p) => (
+            <button key={p.id} type="button" onClick={() => setVerantwoordelijke(verantwoordelijke === p.id ? null : p.id)} aria-pressed={verantwoordelijke === p.id}
+              className={`inline-flex items-center gap-1.5 rounded-full border pl-0.5 pr-2.5 py-0.5 text-xs ${verantwoordelijke === p.id ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 hover:border-gray-400'}`}>
+              <PersoonFoto naam={p.naam} maat={22} />{p.naam.split(' ')[0]}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="space-y-2">
+        <Schakel aan={prive} onWissel={() => setPrive(!prive)} label={<span className="text-sm flex items-center gap-1.5"><Lock className="h-3.5 w-3.5" />Privé</span>} />
+        <p className="text-xs text-gray-500">{prive ? 'Enkel deze mensen zien de space en alles wat erin staat:' : 'Iedereen die de agenda gebruikt ziet deze space.'}</p>
+        {prive && (
+          <div className="rounded-xl border border-gray-100">
+            <PersonenLijst vol personen={mensen} eerst={boom.zaakvoerders} ik={boom.ik} gekozen={[...new Set([...leden, ...(verantwoordelijke ? [verantwoordelijke] : [])])]}
+              onWissel={(p) => { if (p === boom.ik) return; setLeden(leden.includes(p) ? leden.filter((x) => x !== p) : [...leden, p]) }} />
+          </div>
+        )}
+      </div>
     </Modal>
   )
 }

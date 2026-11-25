@@ -82,7 +82,7 @@ function Groep({ titel, lijstId, items, personen, labels, magToevoegen, onOpen, 
           {klaar.length > 0 && (
             <div className="border-t border-gray-100">
               <button type="button" onClick={() => setToonKlaar(!toonKlaar)} className={`w-full flex items-center gap-2 px-4 py-2 text-xs text-gray-500 hover:bg-gray-50 ${focusRing}`}>
-                <ChevronRight className={`h-3.5 w-3.5 transition-transform ${toonKlaar ? 'rotate-90' : ''}`} />Afgevinkt ({klaar.length})
+                <ChevronRight className={`h-3.5 w-3.5 transition-transform ${toonKlaar ? 'rotate-90' : ''}`} />Completed ({klaar.length})
               </button>
               {toonKlaar && <ul className="divide-y divide-gray-100">{klaar.slice(0, 300).map((i) => <Rij key={i.id} i={i} personen={personen} labels={labels} onOpen={onOpen} onKlaar={onKlaar} />)}</ul>}
             </div>
