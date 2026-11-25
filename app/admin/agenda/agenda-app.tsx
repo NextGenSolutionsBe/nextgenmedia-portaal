@@ -14,7 +14,7 @@ import {
 import { PlanVenster, DetailVenster, AnnuleerVenster, api as meetingApi, type Opties, type Meeting } from '@/app/admin/meetings/meetings-client'
 import { Modal } from '@/app/admin/materiaal/dialogen'
 import { api, actie, kleurContext, padVan, Popover, PersonenLijst, focusRing, type BoomData } from './gedeeld'
-import { Kalender, type Verplaatsing, type NieuwMoment } from './kalender'
+import { Kalender, agendaSleep, type Verplaatsing, type NieuwMoment } from './kalender'
 import { Boom, type Keuze } from './boom'
 import { ItemVenster, KlantLijst } from './item-venster'
 import { LijstWeergave, wanneer } from './lijst'
@@ -106,6 +106,27 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = oud }
   }, [groot])
+
+  // Gsm: opzij vegen over de kalender = vorige of volgende periode (zoals ClickUp).
+  // Niet tijdens of net na het verslepen van een blok, en niet bij vooral verticaal scrollen.
+  const inhoudRef = useRef<HTMLDivElement>(null)
+  const veeg = useRef<{ x: number; y: number; t: number } | null>(null)
+  const veegStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) { veeg.current = null; return }
+    const t = e.touches[0]
+    veeg.current = { x: t.clientX, y: t.clientY, t: Date.now() }
+  }
+  const veegEind = (e: React.TouchEvent) => {
+    const v = veeg.current
+    veeg.current = null
+    if (!v || modus === 'lijst' || keuze?.soort === 'doc' || agendaSleep.bezig || Date.now() - agendaSleep.tot < 500) return
+    const t = e.changedTouches[0]
+    const dx = t.clientX - v.x, dy = t.clientY - v.y
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.8 || Date.now() - v.t > 800) return
+    const n = dx < 0 ? 1 : -1
+    setDatum((d) => verschuif(weergave, d, n))
+    try { inhoudRef.current?.animate([{ transform: `translateX(${n * 36}px)`, opacity: 0.4 }, { transform: 'none', opacity: 1 }], { duration: 220, easing: 'ease-out' }) } catch { /* oudere browser */ }
+  }
 
   // ── Voorkeuren en adresbalk ────────────────────────────────────────────────
   useEffect(() => {
@@ -318,7 +339,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
         <div ref={balkRef} className="flex flex-wrap items-center gap-2 md:min-h-[44px]" style={ruimteRechts ? { paddingRight: ruimteRechts } : undefined}>
           <button type="button" onClick={() => { setToonBoom(!toonBoom); bewaarVoorkeur({ boom: !toonBoom }) }} aria-label={toonBoom ? 'Mappen verbergen' : 'Mappen tonen'} title={toonBoom ? 'Mappen verbergen' : 'Mappen tonen'} className={`order-1 h-9 w-9 shrink-0 rounded-lg border border-gray-200 bg-white flex items-center justify-center hover:border-gray-400 ${focusRing}`}><PanelLeft className="h-4 w-4" /></button>
           {/* Op de gsm enkel een titel als je een map of lijst koos (de knoppen hebben de plaats nodig). */}
-          <div className={`order-2 min-w-0 flex-1 md:flex-none md:mr-2 ${titelKeuze ? '' : 'max-sm:invisible'}`}>
+          <div className={`min-w-0 md:flex-none md:mr-2 md:order-2 ${titelKeuze ? 'order-0 w-full md:w-auto' : 'hidden md:block'}`}>
             <h1 className="text-xl font-bold text-gray-900 truncate">{titelKeuze ? titelKeuze[titelKeuze.length - 1] : keuze?.soort === 'doc' ? 'Document' : 'Agenda'}</h1>
             {titelKeuze && titelKeuze.length > 1 && <div className="text-xs text-gray-500 truncate">{titelKeuze.slice(0, -1).join(' › ')}</div>}
           </div>
@@ -326,19 +347,21 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
             <button type="button" onClick={() => setNieuw({ dag: modus === 'lijst' ? vandaag() : datum < vandaag() && weergave !== 'dag' ? vandaag() : datum, heelDag: true })} aria-label="Nieuwe taak" className={`order-4 md:order-6 btn-primary !py-2 !px-2.5 md:!px-3.5 !text-sm shrink-0 ${focusRing}`}><Plus className="h-4 w-4" /><span className="hidden xl:inline">Nieuwe taak</span></button>
           )}
           {keuze?.soort !== 'doc' && boom.rechten.aanpassen && (
-            <button type="button" onClick={() => setAfsluiten(true)} aria-label="Dag afsluiten" title="Alles wat nog open staat afgaan: gedaan, naar morgen of een andere dag" className={`order-4 md:order-6 h-9 shrink-0 rounded-lg border border-gray-200 bg-white px-2.5 md:px-3 text-sm font-semibold inline-flex items-center gap-1.5 hover:border-gray-400 ${focusRing}`}><MoonStar className="h-4 w-4" /><span className="hidden 2xl:inline">Dag afsluiten</span></button>
+            <button type="button" onClick={() => setAfsluiten(true)} aria-label="Dag afsluiten" title="Alles wat nog open staat afgaan: gedaan, naar morgen of een andere dag" className={`order-4 md:order-6 h-9 shrink-0 rounded-lg border border-gray-200 bg-white px-2.5 md:px-3 text-sm font-semibold hidden md:inline-flex items-center gap-1.5 hover:border-gray-400 ${focusRing}`}><MoonStar className="h-4 w-4" /><span className="hidden 2xl:inline">Dag afsluiten</span></button>
           )}
           {keuze?.soort !== 'doc' && boom.rechten.toevoegen && (
-            <button type="button" onClick={() => setInspreek(true)} aria-label="Taak inspreken" title="Taak inspreken" className={`order-4 md:order-6 h-9 w-9 shrink-0 rounded-lg border border-gray-200 bg-white flex items-center justify-center hover:border-gray-400 ${focusRing}`}><Mic className="h-4 w-4" /></button>
+            <button type="button" onClick={() => setInspreek(true)} aria-label="Taak inspreken" title="Taak inspreken" className={`order-4 md:order-6 h-9 w-9 shrink-0 rounded-lg border border-gray-200 bg-white hidden md:flex items-center justify-center hover:border-gray-400 ${focusRing}`}><Mic className="h-4 w-4" /></button>
           )}
           {keuze?.soort !== 'doc' && (
-            <div className="order-5 md:order-3 w-full md:w-auto md:flex-1 md:min-w-[240px] flex items-center gap-1.5 min-w-0">
+            <div className="order-2 flex-1 md:order-3 md:flex-1 md:min-w-[240px] flex items-center gap-1.5 min-w-0">
               {modus !== 'lijst' && (
                 <>
-                  <button type="button" onClick={() => setDatum(vandaag())} className={`btn-secondary !py-1.5 !px-3 !text-sm shrink-0 ${focusRing}`}>Vandaag</button>
-                  <button type="button" onClick={() => setDatum(verschuif(weergave, datum, -1))} aria-label="Vorige" className={`h-9 w-9 shrink-0 rounded-lg hover:bg-white flex items-center justify-center ${focusRing}`}><ChevronLeft className="h-5 w-5" /></button>
-                  <button type="button" onClick={() => setDatum(verschuif(weergave, datum, 1))} aria-label="Volgende" className={`h-9 w-9 shrink-0 rounded-lg hover:bg-white flex items-center justify-center ${focusRing}`}><ChevronRight className="h-5 w-5" /></button>
+                  <button type="button" onClick={() => setDatum(vandaag())} className={`btn-secondary !py-1.5 !px-3 !text-sm shrink-0 hidden md:inline-flex ${focusRing}`}>Vandaag</button>
+                  <button type="button" onClick={() => setDatum(verschuif(weergave, datum, -1))} aria-label="Vorige" className={`h-9 w-9 shrink-0 rounded-lg hover:bg-white hidden md:flex items-center justify-center ${focusRing}`}><ChevronLeft className="h-5 w-5" /></button>
+                  <button type="button" onClick={() => setDatum(verschuif(weergave, datum, 1))} aria-label="Volgende" className={`h-9 w-9 shrink-0 rounded-lg hover:bg-white hidden md:flex items-center justify-center ${focusRing}`}><ChevronRight className="h-5 w-5" /></button>
                   <span className="text-[15px] font-semibold text-gray-900 capitalize truncate"><span className="2xl:hidden">{periodeKort(weergave, datum)}</span><span className="hidden 2xl:inline">{periodeTitel(weergave, datum)}</span></span>
+                  {/* Gsm: terug naar vandaag als je weggeveegd bent. */}
+                  {!dagenVan(weergave, datum).includes(vandaag()) && <button type="button" onClick={() => setDatum(vandaag())} className={`md:hidden shrink-0 rounded-full border border-gray-200 bg-white px-2.5 h-7 text-xs font-semibold text-gray-800 ${focusRing}`}>Vandaag</button>}
                   {laden && <Loader2 className="h-4 w-4 animate-spin text-gray-400 shrink-0" />}
                 </>
               )}
@@ -388,6 +411,8 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
                 <PersonenLijst personen={boom.personen} eerst={boom.zaakvoerders} ik={boom.ik} gekozen={personen} onWissel={(p) => zetPersonen(personen.includes(p) ? personen.filter((x) => x !== p) : [...personen, p])} />
               </Popover>
             </div>
+            {boom.rechten.aanpassen && <button type="button" onClick={() => setAfsluiten(true)} className={`md:hidden inline-flex items-center gap-1.5 rounded-full border h-8 px-3 bg-white border-gray-200 text-gray-700 text-xs ${focusRing}`}><MoonStar className="h-3.5 w-3.5" />Dag afsluiten</button>}
+            {boom.rechten.toevoegen && <button type="button" onClick={() => setInspreek(true)} aria-label="Taak inspreken" className={`md:hidden inline-flex items-center gap-1.5 rounded-full border h-8 px-3 bg-white border-gray-200 text-gray-700 text-xs ${focusRing}`}><Mic className="h-3.5 w-3.5" />Inspreken</button>}
             <div className="relative">
               <Chip aan={labels.length > 0} onClick={() => setPop(pop === 'labels' ? null : 'labels')}><Tag className="h-3.5 w-3.5" />{labels.length ? `${labels.length} label${labels.length > 1 ? 's' : ''}` : 'Labels'}<ChevronDown className="h-3.5 w-3.5 opacity-70" /></Chip>
               <Popover open={pop === 'labels'} onSluit={sluitPop}>
@@ -443,8 +468,8 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
           </button>
         )}
 
-        {/* Inhoud */}
-        <div className="flex-1 min-h-0">
+        {/* Inhoud: op de gsm van rand tot rand; opzij vegen = vorige of volgende week (dag, maand). */}
+        <div ref={inhoudRef} className="flex-1 min-h-0 max-md:-mx-4" onTouchStart={veegStart} onTouchEnd={veegEind} onTouchCancel={() => { veeg.current = null }}>
           {keuze?.soort === 'doc' ? (
             <DocWeergave key={keuze.id} id={keuze.id} boom={boom} onVernieuw={laadBoom} onVerwijderd={() => { setKeuze(null); laadBoom() }} onOpenItem={(id) => setOpenItem(id)} />
           ) : modus === 'lijst' && lijstenVanKeuze ? (
