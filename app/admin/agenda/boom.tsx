@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  ChevronRight, Folder, List as ListIcon, FileText, Lock, MoreHorizontal, Plus, CalendarDays, Trash2, CheckCheck, Settings2, Mail, Search, Pencil, Palette, Building2, LockOpen, FolderPlus, ListPlus, FilePlus,
+  ChevronRight, Folder, List as ListIcon, FileText, Lock, MoreHorizontal, Plus, CalendarDays, Trash2, CheckCheck, Settings2, Mail, Search, Pencil, Palette, Building2, LockOpen, FolderPlus, ListPlus, FilePlus, ListChecks, Minimize2,
 } from 'lucide-react'
 import { Modal } from '@/app/admin/materiaal/dialogen'
 import { zoekVeld } from '@/lib/zoekveld'
@@ -11,7 +11,8 @@ import { PersoonFoto } from '@/components/admin/persoon-foto'
 import { actie, Popover, KleurKeuze, PersonenLijst, Schakel, MapIcoon, donkerder, kleurVanMap, focusRing, type BoomData, type AgMap } from './gedeeld'
 import { KlantLijst } from './item-venster'
 
-export type Keuze = { soort: 'space' | 'map' | 'lijst' | 'doc'; id: string } | null
+/** `alles` = All tasks: elke open taak uit alle spaces. */
+export type Keuze = { soort: 'space' | 'map' | 'lijst' | 'doc' | 'alles'; id: string } | null
 type Soort = 'space' | 'map' | 'lijst'
 
 const OPEN_SLEUTEL = 'ngm-agenda-boom'
@@ -74,8 +75,8 @@ async function laatVallen(e: React.DragEvent, doel: { soort: Soort; id: string; 
   } catch (err) { toast.error(err instanceof Error ? err.message : 'Verplaatsen mislukt') }
 }
 
-export function Boom({ boom, keuze, onKies, onVernieuw, onPaneel, onNieuwDoc, onVolledig }: {
-  boom: BoomData; keuze: Keuze; onKies: (k: Keuze) => void; onVernieuw: () => void; onVolledig: () => void
+export function Boom({ boom, keuze, groot = false, onKies, onVernieuw, onPaneel, onNieuwDoc, onVolledig }: {
+  boom: BoomData; keuze: Keuze; groot?: boolean; onKies: (k: Keuze) => void; onVernieuw: () => void; onVolledig: () => void
   onPaneel: (p: 'klaar' | 'prullenbak' | 'instellingen' | 'mail') => void
   onNieuwDoc: (waar: { space_id?: string; map_id?: string; lijst_id?: string }) => void
 }) {
@@ -146,14 +147,22 @@ export function Boom({ boom, keuze, onKies, onVernieuw, onPaneel, onNieuwDoc, on
   return (
     <nav className="flex flex-col h-full min-h-0" aria-label="Spaces, mappen en lijsten">
       <div className="p-2 space-y-1.5">
-        <button type="button" onClick={onVolledig} title="Alles, op groot scherm" className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-semibold ${!keuze ? 'bg-gray-900 text-white' : 'hover:bg-gray-100 text-gray-900'} ${focusRing}`}>
-          <CalendarDays className="h-4 w-4" />Volledige agenda
+        {/* Aan/uit: aan = de agenda over het hele scherm, nog eens klikken = terug. */}
+        <button type="button" onClick={onVolledig} aria-pressed={groot} title={groot ? 'Terug naar het gewone scherm (Esc)' : 'De agenda over het hele scherm'}
+          className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-semibold ${groot ? 'bg-gray-900 text-white' : 'hover:bg-gray-100 text-gray-900'} ${focusRing}`}>
+          <CalendarDays className="h-4 w-4" /><span className="flex-1 text-left">Volledige agenda</span>{groot && <Minimize2 className="h-3.5 w-3.5 opacity-80" />}
         </button>
         <div className="relative"><Search className="h-3.5 w-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input {...zoekVeld()} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Zoek klant, map, lijst…" className="input-base !py-1.5 !pl-8 text-sm" aria-label="Zoek in de boom" />
         </div>
       </div>
       <div className="flex-1 overflow-y-auto px-2 pb-2 min-h-0">
+        {!zoekt && (
+          <button type="button" onClick={() => onKies({ soort: 'alles', id: '1' })} aria-pressed={keuze?.soort === 'alles'}
+            className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-1.5 mb-1 text-sm font-semibold ${keuze?.soort === 'alles' ? 'bg-gray-900 text-white' : 'text-gray-900 hover:bg-gray-100'} ${focusRing}`}>
+            <span className={`h-5 w-5 shrink-0 rounded-md flex items-center justify-center ${keuze?.soort === 'alles' ? 'bg-white text-gray-900' : 'bg-gray-900 text-white'}`}><ListChecks className="h-3 w-3" /></span>All tasks
+          </button>
+        )}
         {boom.spaces.filter((s) => toon(s.id)).map((s) => (
           <div key={s.id} className="mb-1">
             <Rij diepte={0} soort="space" id={s.id} naam={s.naam} kleur={s.kleur} eigenKleur={s.kleur} verantwoordelijke={s.verantwoordelijke_id ?? null} onToegang={() => setSpaceVenster({ id: s.id })} prive={s.prive || !!boom.leden[`space:${s.id}`]} open={isOpen(s.id)} onWissel={() => wissel(s.id)}

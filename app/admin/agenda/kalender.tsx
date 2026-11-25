@@ -305,13 +305,22 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
         {dagen.map((d) => {
           const wd = weekdag(d)
           return (
-            <button key={d} type="button" onClick={() => onDag(d)} className={`py-2.5 px-2 border-l border-gray-100 hover:bg-gray-50 flex items-center gap-2 ${weergave === 'dag' ? 'justify-start pl-4' : 'justify-center'} ${focusRing}`}>
-              <span className={`h-8 min-w-8 px-1 rounded-full flex items-center justify-center text-[15px] font-bold ${d === vandaagD ? 'bg-gray-900 text-white' : 'text-gray-900'}`}>{Number(d.slice(8))}</span>
-              <span className="text-left leading-tight">
-                <span className={`block text-[13px] font-semibold ${d === vandaagD ? 'text-gray-900' : 'text-gray-700'}`}><span className="hidden lg:inline">{DAGNAAM_LANG[wd]}</span><span className="lg:hidden capitalize">{DAGNAAM[wd]}</span></span>
-                {weergave === 'dag' && <span className="block text-[11px] text-gray-500">{new Date(`${d}T12:00:00Z`).toLocaleDateString('nl-BE', { month: 'long', year: 'numeric', timeZone: 'UTC' })}</span>}
-              </span>
-            </button>
+            <div key={d} className="relative group border-l border-gray-100">
+              <button type="button" onClick={() => onDag(d)} className={`w-full h-full py-2.5 px-2 hover:bg-gray-50 flex items-center gap-2 ${weergave === 'dag' ? 'justify-start pl-4' : 'justify-center'} ${magToevoegen ? 'pr-9' : ''} ${focusRing}`}>
+                <span className={`h-8 min-w-8 px-1 rounded-full flex items-center justify-center text-[15px] font-bold ${d === vandaagD ? 'bg-gray-900 text-white' : 'text-gray-900'}`}>{Number(d.slice(8))}</span>
+                <span className="text-left leading-tight">
+                  <span className={`block text-[13px] font-semibold ${d === vandaagD ? 'text-gray-900' : 'text-gray-700'}`}><span className="hidden lg:inline">{DAGNAAM_LANG[wd]}</span><span className="lg:hidden capitalize">{DAGNAAM[wd]}</span></span>
+                  {weergave === 'dag' && <span className="block text-[11px] text-gray-500">{new Date(`${d}T12:00:00Z`).toLocaleDateString('nl-BE', { month: 'long', year: 'numeric', timeZone: 'UTC' })}</span>}
+                </span>
+              </button>
+              {/* Taak toevoegen op die dag: altijd zichtbaar, donkerder als je erover gaat. */}
+              {magToevoegen && (
+                <button type="button" onClick={() => onNieuw({ dag: d, heelDag: true })} title={`Taak toevoegen op ${kortDag(d)}`} aria-label={`Taak toevoegen op ${kortDag(d)}`}
+                  className={`absolute right-1.5 top-1/2 -translate-y-1/2 h-7 w-7 rounded-full border border-gray-200 bg-white text-gray-400 group-hover:text-gray-900 group-hover:border-gray-400 hover:!bg-gray-900 hover:!text-white hover:!border-gray-900 flex items-center justify-center transition ${focusRing}`}>
+                  <Plus className="h-4 w-4" />
+                </button>
+              )}
+            </div>
           )
         })}
       </div>

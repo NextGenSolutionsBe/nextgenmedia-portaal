@@ -11,6 +11,7 @@ import { zoekVeld } from '@/lib/zoekveld'
 import { dag, uur, kortDag, plusDagen, vandaag, zoneNaarIso, snelleDeadlines, type Item } from '@/lib/agenda/model'
 import { actie, api, padVan, Popover, PersonenLijst, KleurKeuze, Schakel, Avatars, MapKiezer, MapLabel, WieKiezer, LabelKeuze, labelVoorstel, focusRing, type BoomData } from './gedeeld'
 import { wanneer } from './lijst'
+import { DicteerKnop } from '@/components/admin/dicteer-knop'
 
 const hhmm = (min: number) => `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
 
@@ -25,7 +26,10 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
   magMeeting: boolean
 }) {
   const [stap, setStap] = useState<'kies' | 'taak'>(m.heelDag || !magMeeting ? 'taak' : 'kies')
+  // De dag van de taak: start op de aangeklikte dag, met één klik een andere.
+  const [opDag, setOpDag] = useState(m.dag)
   const [titel, setTitel] = useState('')
+  const [notitie, setNotitie] = useState('')
   const [lijst, setLijst] = useState<string | null>(standaardLijst)
   const [wie, setWie] = useState<string[]>([boom.ik])
   const [prive, setPrive] = useState(false)
@@ -36,6 +40,8 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
   const [eigenDl, setEigenDl] = useState(false)
   const [dlDag, setDlDag] = useState(m.dag)
   const [dlUur, setDlUur] = useState('17:00')
+  // Zolang je de deadline niet zelf koos, volgt haar datum de dag van de taak.
+  useEffect(() => { if (!eigenDl) setDlDag(opDag) }, [opDag, eigenDl])
   const deadlineIso = eigenDl ? (dlDag && dlUur ? zoneNaarIso(dlDag, dlUur) : null) : deadline
   const metDeadline = soort === 'taak' && !!deadlineIso
   // Label: een voorstel uit de titel en de map, tot je zelf iets kiest.
@@ -46,20 +52,22 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
   const [bezig, setBezig] = useState(false)
   const [mapNodig, setMapNodig] = useState(false)
   const sluitPop = useCallback(() => setOpen(null), [])
-  const wanneerTekst = m.heelDag ? `${kortDag(m.dag)}, hele dag` : `${kortDag(m.dag)}, ${hhmm(m.vanMin ?? 540)}–${hhmm(m.totMin ?? 600)}`
+  const wanneerTekst = m.heelDag ? `${kortDag(opDag)}, hele dag` : `${kortDag(opDag)}, ${hhmm(m.vanMin ?? 540)}–${hhmm(m.totMin ?? 600)}`
   const maak = async () => {
     if (!titel.trim()) return
     // Elke taak hoort bij een map (klant): zo krijgt ze ook de kleur van die map.
     if (!lijst) { setMapNodig(true); setOpen('lijst'); return }
     setBezig(true)
     try {
-      const start = m.heelDag ? null : zoneNaarIso(m.dag, hhmm(m.vanMin ?? 540))
-      const eind = m.heelDag ? zoneNaarIso(m.dag, '00:00') : (m.totMin ?? 600) >= 1440 ? zoneNaarIso(plusDagen(m.dag, 1), '00:00') : zoneNaarIso(m.dag, hhmm(m.totMin ?? 600))
-      // Een taak van een hele dag met een deadline: enkel de deadline (staat bovenaan die dag).
-      const enkelDl = metDeadline && m.heelDag
+      const start = m.heelDag ? null : zoneNaarIso(opDag, hhmm(m.vanMin ?? 540))
+      const eind = m.heelDag ? zoneNaarIso(opDag, '00:00') : (m.totMin ?? 600) >= 1440 ? zoneNaarIso(plusDagen(opDag, 1), '00:00') : zoneNaarIso(opDag, hhmm(m.totMin ?? 600))
+      // Een taak van een hele dag met een deadline op die dag: enkel de deadline
+      // (staat bovenaan die dag). Valt de deadline later, dan blijft de taak op de gekozen dag.
+      const enkelDl = metDeadline && m.heelDag && !!deadlineIso && dag(deadlineIso) === opDag
       const r = await actie({
         actie: 'item.nieuw', titel: titel.trim(), soort, start_op: enkelDl ? null : start, eind_op: enkelDl ? null : eind, heel_dag: enkelDl ? false : m.heelDag,
         deadline_op: metDeadline ? deadlineIso : null, lijst_id: lijst, toegewezen: wie, prive, labels,
+        ...(notitie.trim() ? { beschrijving: notitie.trim() } : {}),
       })
       toast.success(soort === 'meeting' ? 'Afspraak in de agenda gezet.' : 'Taak toegevoegd.')
       if (r.id) onTaak(r.id)
@@ -90,6 +98,7 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
           {(['meeting', 'taak'] as const).map((s) => <button key={s} type="button" onClick={() => setSoort(s)} aria-pressed={soort === s} className={`rounded-full border px-3 py-1 text-xs ${soort === s ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700'}`}>{s === 'meeting' ? 'Afspraak' : 'Taak met uur'}</button>)}
         </div>
       )}
+      <DagKeuze dag={opDag} onKies={setOpDag} />
       <div>
         <div className="label-mono text-[10px] uppercase text-gray-500 mb-1.5">Voor welke map (klant)?</div>
         <div className="relative">
@@ -99,6 +108,14 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
         </div>
         {open === 'lijst' && <div className="mt-1.5 rounded-xl border border-gray-200"><MapKiezer vol boom={boom} gekozen={lijst} onKies={(l) => { setLijst(l); setMapNodig(false); sluitPop() }} /></div>}
         {mapNodig && !lijst && <p className="text-xs text-red-700 mt-1">Kies eerst bij welke map deze taak hoort.</p>}
+      </div>
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <div className="label-mono text-[10px] uppercase text-gray-500">Notities</div>
+          <DicteerKnop zet={setNotitie} context={titel || null} klein />
+        </div>
+        <textarea value={notitie} onChange={(e) => setNotitie(e.target.value)} rows={notitie.split('\n').length > 2 ? 5 : 2} maxLength={20000}
+          className="input-base text-sm" placeholder="Typ of spreek in wat erbij hoort (optioneel)" aria-label="Notities" />
       </div>
       {soort === 'taak' && (
         <div>
@@ -117,7 +134,7 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
               <input type="time" step={300} value={dlUur} onChange={(e) => setDlUur(e.target.value)} className="input-base !py-1 !px-2 text-sm !w-[6.5rem]" aria-label="Uur deadline" />
             </div>
           )}
-          {metDeadline && m.heelDag && <p className="text-[11px] text-gray-500 mt-1">De taak staat bovenaan de dag van de deadline, met het uur erbij.</p>}
+          {metDeadline && m.heelDag && deadlineIso && dag(deadlineIso) !== opDag && <p className="text-[11px] text-gray-500 mt-1">De taak staat op {kortDag(opDag)}, met de deadline erbij.</p>}
         </div>
       )}
       <div>
@@ -130,6 +147,27 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
       </div>
       <Schakel aan={prive} onWissel={() => setPrive(!prive)} label={<span className="text-sm flex items-center gap-1.5"><Lock className="h-3.5 w-3.5" />Privé (enkel jij en wie je je agenda deelt)</span>} />
     </Modal>
+  )
+}
+
+/** Welke dag: vandaag, morgen en de dagen erna met één klik, of zelf een datum. */
+export function DagKeuze({ dag: gekozen, onKies, label = 'Welke dag?' }: { dag: string; onKies: (d: string) => void; label?: string }) {
+  const v = vandaag()
+  const dagen = Array.from({ length: 7 }, (_, n) => plusDagen(v, n))
+  const naam = (d: string, n: number) => n === 0 ? 'Vandaag' : n === 1 ? 'Morgen' : new Date(`${d}T12:00:00Z`).toLocaleDateString('nl-BE', { weekday: 'short', day: 'numeric', timeZone: 'UTC' })
+  const elders = !dagen.includes(gekozen)
+  return (
+    <div>
+      <div className="label-mono text-[10px] uppercase text-gray-500 mb-1.5">{label}</div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {dagen.map((d, n) => {
+          const aan = d === gekozen
+          return <button key={d} type="button" onClick={() => onKies(d)} aria-pressed={aan} className={`rounded-full border px-2.5 py-1 text-xs ${aan ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700 hover:border-gray-400'} ${focusRing}`}>{naam(d, n)}</button>
+        })}
+        <input type="date" value={gekozen} onChange={(e) => { if (e.target.value) onKies(e.target.value) }} aria-label="Andere dag"
+          className={`input-base !py-1 !px-2 text-xs !w-[9.5rem] ${elders ? '!border-gray-900 font-semibold' : ''}`} />
+      </div>
+    </div>
   )
 }
 

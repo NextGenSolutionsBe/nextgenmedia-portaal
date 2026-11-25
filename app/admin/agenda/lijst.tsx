@@ -4,22 +4,44 @@ import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Check, ChevronRight, Flag, FileText, Plus, Loader2, Video, ListTree, Lock } from 'lucide-react'
 import { vandaag, plaatsVan, plusDagen, kortDag, type Item, type Persoon } from '@/lib/agenda/model'
-import { actie, Avatars, focusRing, type BoomData } from './gedeeld'
+import { actie, Avatars, padVan, focusRing, type BoomData } from './gedeeld'
 import { DeadlineLabel } from './kalender'
 
 /** Alle taken van een lijst, map of space, per lijst gegroepeerd, open eerst. */
-export function LijstWeergave({ lijstIds, items, boom, personen, laden, magToevoegen, onOpen, onKlaar, onToegevoegd, onDoc }: {
+export function LijstWeergave({ lijstIds, items, boom, personen, laden, magToevoegen, onOpen, onKlaar, onToegevoegd, onDoc, alles = false }: {
   lijstIds: string[]; items: Item[] | null; boom: BoomData; personen: Map<string, Persoon>; laden: boolean
   magToevoegen: boolean
+  /** All tasks: enkel lijsten met open taken, per space, met het pad als titel. */
+  alles?: boolean
   onOpen: (i: Item) => void; onKlaar: (i: Item) => void; onToegevoegd: () => void; onDoc: (id: string) => void
 }) {
   const labels = useMemo(() => new Map(boom.labels.map((l) => [l.id, l])), [boom.labels])
   const groepen = useMemo(() => {
     const per = new Map<string, Item[]>()
     for (const i of items ?? []) if (!i.parent_id && i.lijst_id) per.set(i.lijst_id, [...(per.get(i.lijst_id) ?? []), i])
-    return lijstIds.map((id) => ({ lijst: boom.lijsten.find((l) => l.id === id)!, items: per.get(id) ?? [] })).filter((g) => g.lijst)
-  }, [items, lijstIds, boom.lijsten])
+    return lijstIds.map((id) => ({ lijst: boom.lijsten.find((l) => l.id === id)!, items: per.get(id) ?? [] })).filter((g) => g.lijst && (!alles || g.items.length))
+  }, [items, lijstIds, boom.lijsten, alles])
   if (!items && laden) return <div className="card-base flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>
+  if (alles) {
+    const spaces = boom.spaces.map((s) => ({ s, groepen: groepen.filter((g) => g.lijst.space_id === s.id) })).filter((x) => x.groepen.length)
+    const totaal = groepen.reduce((n, g) => n + g.items.length, 0)
+    return (
+      <div className="space-y-5">
+        <p className="text-sm text-gray-500">{totaal} open {totaal === 1 ? 'taak' : 'taken'} in {groepen.length} {groepen.length === 1 ? 'lijst' : 'lijsten'}. Wat completed is, staat bij Completed.</p>
+        {spaces.map(({ s, groepen: gs }) => (
+          <div key={s.id} className="space-y-2">
+            <div className="flex items-center gap-2 px-1">
+              <span className="h-5 w-5 shrink-0 rounded-md flex items-center justify-center text-[10px] font-bold text-white" style={{ background: s.kleur ?? '#272727' }}>{s.naam.slice(0, 1).toUpperCase()}</span>
+              <span className="label-mono text-[11px] uppercase text-gray-700">{s.naam}</span>
+              <span className="text-xs text-gray-400">{gs.reduce((n, g) => n + g.items.length, 0)} open</span>
+            </div>
+            {gs.map((g) => <Groep key={g.lijst.id} titel={padVan(boom, g.lijst.id).slice(1).join(' › ') || g.lijst.naam} lijstId={g.lijst.id} items={g.items} personen={personen} labels={labels} magToevoegen={magToevoegen} onOpen={onOpen} onKlaar={onKlaar} onToegevoegd={onToegevoegd} />)}
+          </div>
+        ))}
+        {!groepen.length && <div className="card-base text-sm text-gray-500 py-10 text-center">{items ? 'Er staat niets meer open.' : ''}</div>}
+      </div>
+    )
+  }
   const docs = boom.docs.filter((d) => d.lijst_id && lijstIds.includes(d.lijst_id))
   return (
     <div className="space-y-4">

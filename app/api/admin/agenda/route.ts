@@ -19,6 +19,7 @@ export const maxDuration = 60
  * GET  ?boom=1                    boom, personen, labels, klanten, instellingen
  *      ?van=&tot=                 items en meetings in een periode
  *      ?container=lijst|map|space&id=  alle items van een lijst, map of space
+ *      ?container=alles                open taken uit alles wat je ziet (All tasks)
  *      ?item=<id>                 één item met beschrijving en subtaken
  *      ?klaar=1[&persoon=][&na=]  afgevinkte items, laatst afgevinkt eerst
  *      ?doc=<id> | ?prullenbak=1 | ?mail=1 | ?zoek=<tekst>
@@ -122,6 +123,13 @@ async function bereik(admin: Admin, k: Kijker, van: string | null, tot: string |
 }
 
 async function container(admin: Admin, k: Kijker, soort: string, id: string | null) {
+  // All tasks: elke open taak (zonder subtaken) uit alles wat je ziet. Afgevinkte niet: dat zijn er
+  // duizenden en die staan in Completed. Wie je ziet, beslist itemZichtbaar zoals overal.
+  if (soort === 'alles') {
+    const z = await laadZicht(admin, k)
+    const ruw = await alleRijen<RuwItem>((a, b) => admin.from('ag_items').select(ITEM_VELDEN).is('verwijderd_op', null).is('parent_id', null).neq('status', 'klaar').not('lijst_id', 'is', null).order('id').range(a, b), 5000)
+    return { items: await metToegewezen(admin, ruw, z, { subtaken: true }) }
+  }
   if (!isUuid(id) || !['lijst', 'map', 'space'].includes(soort)) throw new Error('Ongeldige lijst')
   const z = await laadZicht(admin, k)
   let lijsten: string[] = []
