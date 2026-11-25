@@ -78,6 +78,8 @@ test('tijdzones en het Teams-blok onderaan', () => {
   assert.equal(zoneVan('(UTC+01:00) Brussels, Copenhagen, Madrid, Paris'), 'Europe/Brussels')
   assert.equal(zoneVan(undefined), 'Europe/Brussels')
   assert.equal(kuisBeschrijving('Hallo\n\nJoin Zoom Meeting\nhttps://zoom.us/j/1'), 'Hallo')
+  assert.equal(kuisBeschrijving('[https://www.hogeschoolpxl.be/Assets/Footer.png]'), '')
+  assert.equal(kuisBeschrijving('Agenda [cid:image001.png@01DC]\nPunt 1'), 'Agenda \nPunt 1'.replace(' \n', '\n'))
 })
 
 console.log(`\n${n} tests geslaagd\n`)
