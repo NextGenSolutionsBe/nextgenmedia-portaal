@@ -46,6 +46,10 @@ test('werk: content, shoot, website, ads, app, opvolging', () => {
 test('persoonlijk en de terugval volgens de map', () => {
   assert.equal(l('Grasmaaien'), 'Persoonlijk')
   assert.equal(l('Iets', { priveLijst: true }), 'Persoonlijk')
+  assert.equal(l('Meeting Anneke Demo', { priveLijst: true }), 'Lead')
+  assert.equal(l('REEL Recap Pitch day (META)'), 'Content')
+  assert.equal(l('STORY nieuwkomers race sport [META]'), 'Content')
+  assert.equal(l('Statistieken nakijken', { soort: 'meeting', bijKlant: true }), 'Klantwerk')
   assert.equal(l('Plannen november'), 'Intern')
   assert.equal(l('Plannen november', { bijKlant: true }), 'Klantwerk')
   // Elk voorstel is een van de categorieën.

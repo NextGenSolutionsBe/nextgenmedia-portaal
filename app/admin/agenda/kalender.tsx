@@ -79,7 +79,7 @@ export function DeadlineLabel({ i, opDag, lang = false, klein = false }: { i: Pi
   const laat = l.teLaat && i.status !== 'klaar'
   return (
     <span title={`${l.tekst}${laat ? ' (voorbij)' : ''}`}
-      className={`inline-flex shrink-0 items-center gap-0.5 rounded font-semibold tabular-nums leading-none ${klein ? 'h-[19px] px-1.5 text-[11.5px]' : 'h-[22px] px-2 text-[12.5px]'} ${i.status === 'klaar' ? 'bg-black/10 text-current' : laat ? 'bg-red-600 text-white' : 'bg-gray-900 text-white'}`}>
+      className={`inline-flex shrink-0 items-center gap-0.5 rounded font-semibold tabular-nums leading-none whitespace-nowrap ${klein ? 'h-[19px] px-1.5 text-[11.5px]' : 'h-[22px] px-2 text-[12.5px]'} ${i.status === 'klaar' ? 'bg-black/10 text-current' : laat ? 'bg-red-600 text-white' : 'bg-gray-900 text-white'}`}>
       <Clock className={klein ? 'h-3 w-3' : 'h-3.5 w-3.5'} />{lang ? l.tekst : kort}
     </span>
   )
@@ -131,7 +131,8 @@ function Chip({ i, kleur, onOpen, onKlaar, personen, tijd, sleep, opDag, lang, m
       <span className={`truncate flex-1 ${klaar ? 'line-through decoration-1 opacity-80' : ''}`}>{i.titel}</span>
       {!dl && i.deadline_op && <DeadlineLabel i={i} opDag={opDag} klein />}
       {i.prive && <Lock className="h-2.5 w-2.5 shrink-0 opacity-60" />}
-      <span className="hidden sm:inline-flex group-hover:invisible"><Avatars ids={i.toegewezen} personen={personen} max={dl && !lang ? 1 : 2} maat={20} /></span>
+      {/* Bij een deadline in de week gaat de plaats naar de titel; wie het doet staat in de taak. */}
+      {!(dl && !lang) && <span className="hidden sm:inline-flex group-hover:invisible"><Avatars ids={i.toegewezen} personen={personen} max={2} maat={20} /></span>}
       {magKlaar && <SnelKlaar i={i} onKlaar={onKlaar} tekst={false} />}
     </div>
   )
@@ -383,7 +384,7 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
                           <span className={`font-semibold ${klaar ? 'line-through decoration-1 opacity-80' : ''} ${hoogte < 34 ? 'truncate' : hoogte < 70 ? 'line-clamp-2' : 'line-clamp-3'}`}>{i.titel}</span>
                           {i.deadline_op && hoogte < 50 && <span className="ml-auto"><DeadlineLabel i={i} opDag={d} klein /></span>}
                         </div>
-                        {i.deadline_op && hoogte >= 50 && <div className="mt-0.5"><DeadlineLabel i={i} opDag={d} lang klein /></div>}
+                        {i.deadline_op && hoogte >= 50 && <div className="mt-0.5 overflow-hidden"><DeadlineLabel i={i} opDag={d} lang={weergave === 'dag'} klein /></div>}
                         {hoogte >= 34 && (
                           <div className={`flex items-center gap-1 mt-0.5 tabular-nums text-[12px] ${klaar ? 'text-[#2b4a36]/80' : 'text-gray-600'}`}>
                             {(i.meet_url || i.bron === 'meeting') && <Video className="h-3 w-3 shrink-0" />}

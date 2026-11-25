@@ -42,45 +42,40 @@ type NavSection = { title?: string; items: NavEntry[]; open?: boolean }
 // een sectie = werkvolgorde. Gating (module/adminOnly) blijft per item behouden.
 const SECTIONS: NavSection[] = [
   {
+    // Elke dag: het overzicht, de agenda en de meetings samen.
     items: [
       { label: 'Command Center', href: '/admin', icon: LayoutDashboard, exact: true },
       { label: 'Agenda', href: '/admin/agenda', icon: CalendarRange, module: 'agenda' },
-      { label: 'Dagelijkse planning Chiara', href: '/admin/contentplanning', icon: CalendarDays, module: 'info' },
+      { label: 'Meeting Inplanner', href: '/admin/meetings', icon: Video, module: 'meetings', ookModule: 'sales' },
     ],
   },
   {
-    // Van eerste contact tot getekend: wie zijn onze klanten en wat loopt er.
-    title: 'Klanten & projecten',
+    // Algemeen, voor beide bedrijven: klanten, projecten en alles wat getekend wordt.
+    title: 'Klanten & legal',
     open: true,
     items: [
       { label: 'Klanten',     href: '/admin/clients',    icon: Users, module: 'clients' },
       // Eén overzicht voor leads en projecten (vervangt de vroegere pipeline).
       { label: 'Projecten',   href: '/admin/opdrachten', icon: KanbanSquare, module: 'opdrachten' },
-      { label: 'Klantcontracten',  href: '/admin/contracts',  icon: FileText, module: 'contracts' },
-      { label: 'Offertes',    href: '/admin/offertes',   icon: FileSignature, module: 'offertes' },
       { label: 'Aanvragen',   href: '/admin/aanvragen',  icon: Inbox, module: 'aanvragen' },
-      { label: 'Meeting Inplanner', href: '/admin/meetings', icon: Video, module: 'meetings', ookModule: 'sales' },
+      { label: 'Offertes',    href: '/admin/offertes',   icon: FileSignature, module: 'offertes' },
+      { label: 'Klantcontracten',  href: '/admin/contracts',  icon: FileText, module: 'contracts' },
+      // Eigen contracten van NextGenMedia (huur, verzekeringen, NDA's …) met e-sign; enkel zaakvoerders.
+      { label: 'Algemene contracten', href: '/admin/algemene-contracten', icon: ScrollText, module: 'algemene_contracten', adminOnly: true },
     ],
   },
   {
-    // Eigen omgeving van NextGenSolutions: pipeline en cijfers, los van de rest.
-    title: 'NextGenSolutions',
+    // Het werk van NextGenMedia: plannen, maken en opleveren.
+    title: 'NextGenMedia',
     open: true,
     items: [
-      { label: 'Pipeline', href: '/admin/nextgensolutions', icon: Target, module: 'nextgensolutions', exact: true },
-      { label: 'Cijfers', href: '/admin/nextgensolutions/cijfers', icon: LineChart, module: 'nextgensolutions' },
-    ],
-  },
-  {
-    // Het werk zelf: plannen, maken en opleveren.
-    title: 'Uitvoering',
-    items: [
+      { label: 'Dagelijkse planning Chiara', href: '/admin/contentplanning', icon: CalendarDays, module: 'info' },
       // De contentkalenders per klant (ingeplande posts, feedback van de klant).
       { label: 'Social media', href: '/admin/services/social-media', icon: Calendar, module: 'content' },
       // Shoots: kalender, plan per uur en locatie, briefing en mail met het plan.
       { label: 'Shoot planner', href: '/admin/shoots', icon: Aperture, module: 'shoots' },
-      { label: 'Metricool', href: '/admin/metricool', icon: CalendarClock, module: 'metricool', exact: true },
       { label: 'Opleveringen', href: '/admin/opleveringen', icon: PackageCheck, module: 'opleveringen' },
+      { label: 'Metricool', href: '/admin/metricool', icon: CalendarClock, module: 'metricool', exact: true },
       // Enkel nog onderhoud: wanneer start en loopt elk onderhoudscontract af.
       { label: 'Website-onderhoud', href: '/admin/services/website', icon: Globe, module: 'content' },
       {
@@ -96,22 +91,32 @@ const SECTIONS: NavSection[] = [
     ],
   },
   {
+    // Eigen omgeving van NextGenSolutions: pipeline en cijfers, los van de rest.
+    title: 'NextGenSolutions',
+    open: true,
+    items: [
+      { label: 'Pipeline', href: '/admin/nextgensolutions', icon: Target, module: 'nextgensolutions', exact: true },
+      { label: 'Cijfers', href: '/admin/nextgensolutions/cijfers', icon: LineChart, module: 'nextgensolutions' },
+    ],
+  },
+  {
+    // Facturatie en geld: facturen, cijfers, aankopen, vesting en de vennoten.
+    title: 'Financieel',
+    items: [
+      { label: 'Facturen', href: '/admin/invoices',      icon: Receipt, module: 'invoices' },
+      { label: 'Financiën', href: '/admin/revenue/omzet', icon: TrendingUp, module: 'finance' },
+      { label: 'Omzetrapportage', href: '/admin/revenue/rapportage', icon: BarChart3, module: 'finance' },
+      { label: 'Aankopen', href: '/admin/purchases',     icon: ShoppingCart, module: 'purchases' },
+      { label: 'Vesting',  href: '/admin/vesting',       icon: Rocket, module: 'vesting' },
+      { label: 'Uitgaven vennoten', href: '/admin/vennoten', icon: Wallet, module: 'vennoten', adminOnly: true },
+    ],
+  },
+  {
     // Wat klanten in hun app te zien krijgen.
     title: 'Klantapp',
     items: [
       { label: 'Founders of Flanders', href: '/admin/founders-of-flanders', icon: Clapperboard, module: 'founders' },
       { label: 'Onze partners', href: '/admin/onze-partners', icon: Handshake, module: 'onze_partners' },
-    ],
-  },
-  {
-    title: 'Financieel',
-    items: [
-      { label: 'Financiën', href: '/admin/revenue/omzet', icon: TrendingUp, module: 'finance' },
-      { label: 'Omzetrapportage', href: '/admin/revenue/rapportage', icon: BarChart3, module: 'finance' },
-      { label: 'Facturen', href: '/admin/invoices',      icon: Receipt, module: 'invoices' },
-      { label: 'Aankopen', href: '/admin/purchases',     icon: ShoppingCart, module: 'purchases' },
-      { label: 'Vesting',  href: '/admin/vesting',       icon: Rocket, module: 'vesting' },
-      { label: 'Uitgaven vennoten', href: '/admin/vennoten', icon: Wallet, module: 'vennoten', adminOnly: true },
     ],
   },
   {
@@ -121,8 +126,6 @@ const SECTIONS: NavSection[] = [
       // en (voor hoofdbeheerders) de logins met rollen en modules.
       { label: 'Personeel', href: '/admin/personeel', icon: Contact, module: 'personeel', adminOnly: true },
       { label: 'Kantoor', href: '/admin/kantoor', icon: Building2, module: 'kantoor' },
-      // Eigen contracten van NextGenMedia (huur, verzekeringen, NDA's …) met e-sign; enkel zaakvoerders.
-      { label: 'Algemene contracten', href: '/admin/algemene-contracten', icon: ScrollText, module: 'algemene_contracten', adminOnly: true },
       { label: 'Partners',    href: '/admin/partners',    icon: UserSquare2, module: 'partners' },
       { label: 'Opdrachten partners', href: '/admin/assignments', icon: Briefcase, module: 'assignments' },
       { label: 'Settlements', href: '/admin/settlements', icon: ArrowLeftRight, module: 'settlements' },
