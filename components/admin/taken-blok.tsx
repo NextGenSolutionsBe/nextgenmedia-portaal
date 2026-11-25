@@ -47,7 +47,9 @@ export function TakenBlok() {
   const [teTekenen, setTeTekenen] = useState<TeTekenenItem[]>([])
   const [statusFout, setStatusFout] = useState<string | null>(null)
   const [opties, setOpties] = useState<Opties | null>(null)
-  const [wie, setWie] = useState<number | 'mij' | null>(null)
+  // Standaard enkel jouw taken; Iedereen of een collega met één klik.
+  const [wie, setWie] = useState<number | 'mij' | null>('mij')
+  const [optiesKlaar, setOptiesKlaar] = useState(false)
   const [nieuw, setNieuw] = useState(false)
   const [bezig, setBezig] = useState<string | null>(null)
 
@@ -76,7 +78,7 @@ export function TakenBlok() {
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Taken laden mislukt'); setTaken([]) }
   }, [vernieuw])
   useEffect(() => { void laad() }, [laad])
-  useEffect(() => { api<Opties>(undefined, '?opties=1').then(setOpties).catch(() => setOpties(null)) }, [])
+  useEffect(() => { api<Opties>(undefined, '?opties=1').then(setOpties).catch(() => setOpties(null)).finally(() => setOptiesKlaar(true)) }, [])
 
   const mensen = useMemo(() => {
     const m = new Map<number, string>()
@@ -89,10 +91,13 @@ export function TakenBlok() {
     return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1]))
   }, [taken, teTekenen, opties])
   const ik = opties?.ik ?? null
+  // Wie we niet in ClickUp vinden, ziet iedereen; tot we het weten, wachten we even (geen flikkering).
+  const filter = wie === 'mij' && optiesKlaar && !ik ? null : wie
+  const wacht = wie === 'mij' && !optiesKlaar
   const naamVan = (id: number | null) => (id === null ? null : (opties?.leden ?? []).find((l) => l.id === id)?.naam ?? mensen.find(([x]) => x === id)?.[1] ?? null)
-  const zichtbaar = useMemo(() => (taken ?? []).filter((t) => wie === null || (wie === 'mij' ? t.clickup_assignee_id === ik : t.clickup_assignee_id === wie)), [taken, wie, ik])
+  const zichtbaar = useMemo(() => (wacht ? [] : (taken ?? []).filter((t) => filter === null || (filter === 'mij' ? t.clickup_assignee_id === ik : t.clickup_assignee_id === filter))), [taken, filter, ik, wacht])
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const zichtbaarTekenen = useMemo(() => teTekenen.filter((t) => wie === null || isVoor(t, naamVan(wie === 'mij' ? ik : wie))), [teTekenen, wie, ik, opties, mensen])
+  const zichtbaarTekenen = useMemo(() => (wacht ? [] : teTekenen.filter((t) => filter === null || isVoor(t, naamVan(filter === 'mij' ? ik : filter)))), [teTekenen, filter, ik, opties, mensen, wacht])
   const totaal = zichtbaar.length + zichtbaarTekenen.length
   const vd = vandaag()
 
@@ -120,15 +125,15 @@ export function TakenBlok() {
       <div className="flex items-center gap-2 flex-wrap mb-3">
         <ListTodo className="h-4 w-4 text-gray-500" />
         <h2 id="taken-kop" className="text-sm font-semibold text-gray-900">Taken</h2>
-        <span className={`min-w-[1.75rem] text-center rounded-full px-2 py-0.5 text-xs font-bold ${totaal ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-400'}`}>{taken === null ? '…' : totaal}</span>
+        <span className={`min-w-[1.75rem] text-center rounded-full px-2 py-0.5 text-xs font-bold ${totaal ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-400'}`}>{taken === null || wacht ? '…' : totaal}</span>
         <button type="button" onClick={() => setNieuw(true)} className="btn-primary text-xs h-8 ml-auto"><Plus className="h-3.5 w-3.5" />Taak toewijzen</button>
       </div>
 
       {((taken?.length ?? 0) > 0 || teTekenen.length > 0) && (
         <div className="flex gap-1.5 overflow-x-auto pb-2 -mx-1 px-1">
-          <button type="button" onClick={() => setWie(null)} className={chip(wie === null)}>Iedereen</button>
-          {ik && <button type="button" onClick={() => setWie('mij')} className={chip(wie === 'mij')}>Mijn taken</button>}
-          {mensen.filter(([id]) => id !== ik).map(([id, naam]) => <PersoonKnop key={id} naam={naam} klein rol="button" aan={wie === id} onClick={() => setWie(id)} />)}
+          {ik && <button type="button" onClick={() => setWie('mij')} className={chip(filter === 'mij')}>Mijn taken</button>}
+          <button type="button" onClick={() => setWie(null)} className={chip(filter === null)}>Iedereen</button>
+          {mensen.filter(([id]) => id !== ik).map(([id, naam]) => <PersoonKnop key={id} naam={naam} klein rol="button" aan={filter === id} onClick={() => setWie(id)} />)}
         </div>
       )}
 
@@ -140,10 +145,10 @@ export function TakenBlok() {
 
       {statusFout && <p className="text-[11px] text-amber-700 mb-2">{statusFout}</p>}
 
-      {taken === null ? (
+      {taken === null || wacht ? (
         <div className="py-6 flex justify-center"><Loader2 className="h-4 w-4 animate-spin text-gray-400" /></div>
       ) : zichtbaar.length === 0 ? (
-        <p className="text-sm text-gray-400 py-2">{taken.length ? 'Geen andere taken voor deze persoon.' : 'Geen open taken in ClickUp. Wijs er een toe met de knop hierboven.'}</p>
+        <p className="text-sm text-gray-400 py-2">{!taken.length ? 'Geen open taken in ClickUp. Wijs er een toe met de knop hierboven.' : filter === 'mij' ? 'Jij hebt geen open taken. Kies Iedereen om de rest te zien.' : 'Geen andere taken voor deze persoon.'}</p>
       ) : (
         <ul className="divide-y divide-gray-100 -mx-1">
           {zichtbaar.slice(0, 12).map((t) => {
