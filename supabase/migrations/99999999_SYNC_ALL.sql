@@ -8195,3 +8195,6 @@ ALTER TABLE public.ag_mail_voorstellen ADD COLUMN IF NOT EXISTS vervangt_item_id
 ALTER TABLE public.ag_mail_voorstellen ADD COLUMN IF NOT EXISTS organisator jsonb;
 CREATE INDEX IF NOT EXISTS ag_mail_voorstellen_uid_idx ON public.ag_mail_voorstellen (ics_uid) WHERE ics_uid IS NOT NULL;
 CREATE INDEX IF NOT EXISTS ag_mail_voorstellen_status_idx ON public.ag_mail_voorstellen (status, start_op);
+
+-- Agenda: een privé-doc ziet de eigenaar plus wie hier staat (Delen in het doc).
+ALTER TABLE public.ag_docs ADD COLUMN IF NOT EXISTS kijkers uuid[] NOT NULL DEFAULT '{}';

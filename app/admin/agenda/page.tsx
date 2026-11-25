@@ -7,6 +7,8 @@ export const metadata = { title: 'Agenda' }
 
 /** Agenda: spaces, mappen, lijsten, taken, meetings en docs (zie lib/agenda). */
 export default async function AgendaPagina() {
-  if (!(await magIk('agenda', 'bekijken'))) redirect('/admin')
-  return <AgendaApp />
+  const persoon = await magIk('agenda', 'bekijken')
+  if (!persoon) redirect('/admin')
+  // De zwevende knoppen rechtsboven staan er enkel voor admins (zie app/admin/layout.tsx).
+  return <AgendaApp metTopbalk={persoon.isAdmin} />
 }

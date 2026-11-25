@@ -90,9 +90,10 @@ export function itemZichtbaar(i: Pick<RuwItem, 'lijst_id' | 'clickup_lijst_id' |
   return true
 }
 
-export function docZichtbaar(d: { space_id: string | null; map_id: string | null; lijst_id: string | null; prive: boolean; eigenaar_id: string | null; clickup_parent_id?: string | null }, z: Zicht): boolean {
+export function docZichtbaar(d: { space_id: string | null; map_id: string | null; lijst_id: string | null; prive: boolean; eigenaar_id: string | null; clickup_parent_id?: string | null; kijkers?: string[] | null }, z: Zicht): boolean {
   if (d.eigenaar_id === z.ik) return true
-  if (d.prive && !(d.eigenaar_id && z.gedeeldMet.has(d.eigenaar_id))) return false
+  // Privé: de eigenaar, wie in het doc zelf toegevoegd werd, en wie de eigenaar zijn agenda deelde.
+  if (d.prive) return !!d.kijkers?.includes(z.ik) || (!!d.eigenaar_id && z.gedeeldMet.has(d.eigenaar_id))
   if (d.lijst_id) return z.zichtbaar.lijsten.has(d.lijst_id)
   if (d.map_id) return z.zichtbaar.mappen.has(d.map_id)
   if (d.space_id) return z.zichtbaar.spaces.has(d.space_id)
@@ -159,7 +160,7 @@ export type BoomAntwoord = {
 
 /** De boom zoals de kijker hem mag zien (met de docs, zonder inhoud). */
 export async function boomVoor(admin: Admin, z: Zicht): Promise<BoomAntwoord> {
-  const { data: docs } = await admin.from('ag_docs').select('id, titel, space_id, map_id, lijst_id, prive, eigenaar_id, clickup_parent_id, updated_at').is('verwijderd_op', null).order('titel').limit(5000)
+  const { data: docs } = await admin.from('ag_docs').select('id, titel, space_id, map_id, lijst_id, prive, eigenaar_id, kijkers, clickup_parent_id, updated_at').is('verwijderd_op', null).order('titel').limit(5000)
   const leden: Record<string, string[]> = {}
   for (const [k, v] of z.leden) {
     const [soort, id] = k.split(':')
@@ -169,9 +170,9 @@ export async function boomVoor(admin: Admin, z: Zicht): Promise<BoomAntwoord> {
     spaces: z.spaces.filter((s) => z.zichtbaar.spaces.has(s.id)),
     mappen: z.mappen.filter((m) => z.zichtbaar.mappen.has(m.id)),
     lijsten: z.lijsten.filter((l) => z.zichtbaar.lijsten.has(l.id)),
-    docs: ((docs ?? []) as (DocKort & { eigenaar_id: string | null; clickup_parent_id: string | null })[])
+    docs: ((docs ?? []) as (DocKort & { eigenaar_id: string | null; clickup_parent_id: string | null; kijkers: string[] | null })[])
       .filter((d) => docZichtbaar(d, z))
-      .map(({ eigenaar_id: _e, clickup_parent_id: _c, ...d }) => { void _e; void _c; return d }),
+      .map(({ eigenaar_id: _e, clickup_parent_id: _c, kijkers: _k, ...d }) => { void _e; void _c; void _k; return d }),
     leden,
   }
 }

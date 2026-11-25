@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
     if (q.get('van') || q.get('tot')) return NextResponse.json(await bereik(admin, k, q.get('van'), q.get('tot')))
     if (q.get('container')) return NextResponse.json(await container(admin, k, q.get('container')!, q.get('id')))
     if (q.get('item')) return NextResponse.json(await eenItem(admin, k, q.get('item')!))
-    if (q.get('klaar')) return NextResponse.json(await afgevinkt(admin, k, q.get('persoon'), q.get('na')))
+    if (q.get('klaar')) return NextResponse.json(await afgevinkt(admin, k, q.get('persoon'), q.get('na'), q.get('q')))
     if (q.get('doc')) return NextResponse.json(await eenDoc(admin, k, q.get('doc')!))
     if (q.get('prullenbak')) return NextResponse.json(await prullenbak(admin, k))
     if (q.get('mail')) return NextResponse.json(await mailVoorstellen(admin, k))
@@ -151,7 +151,8 @@ async function eenItem(admin: Admin, k: Kijker, id: string) {
   return { item, subtaken, ouder, gemaakt_door: extra.gemaakt_door, gemaakt_op: extra.created_at }
 }
 
-async function afgevinkt(admin: Admin, k: Kijker, persoon: string | null, na: string | null) {
+async function afgevinkt(admin: Admin, k: Kijker, persoon: string | null, na: string | null, zoek: string | null) {
+  const t = (zoek ?? '').trim().replace(/[%_,()"\\]/g, ' ').slice(0, 80)
   const z = await laadZicht(admin, k)
   const uit: Item[] = []
   let cursor = isIso(na) ? new Date(na).toISOString() : null
@@ -159,6 +160,7 @@ async function afgevinkt(admin: Admin, k: Kijker, persoon: string | null, na: st
   for (let ronde = 0; ronde < 6 && uit.length < 150; ronde++) {
     let q = admin.from('ag_items').select(ITEM_VELDEN).is('verwijderd_op', null).eq('status', 'klaar').not('afgerond_op', 'is', null).order('afgerond_op', { ascending: false }).limit(400)
     if (cursor) q = q.lt('afgerond_op', cursor)
+    if (t.length >= 2) q = q.ilike('titel', `%${t}%`)
     const { data } = await q
     const rijen = (data ?? []) as unknown as RuwItem[]
     if (!rijen.length) break
@@ -174,7 +176,7 @@ async function afgevinkt(admin: Admin, k: Kijker, persoon: string | null, na: st
 async function eenDoc(admin: Admin, k: Kijker, id: string) {
   if (!isUuid(id)) throw new Error('Onbekend document')
   const z = await laadZicht(admin, k)
-  const { data } = await admin.from('ag_docs').select('id, titel, inhoud, space_id, map_id, lijst_id, prive, eigenaar_id, clickup_parent_id, bijgewerkt_door, updated_at, created_at, verwijderd_op').eq('id', id).maybeSingle()
+  const { data } = await admin.from('ag_docs').select('id, titel, inhoud, space_id, map_id, lijst_id, prive, eigenaar_id, kijkers, clickup_parent_id, bijgewerkt_door, updated_at, created_at, verwijderd_op').eq('id', id).maybeSingle()
   if (!data || !docZichtbaar(data as never, z)) throw new Error('Dit document bestaat niet of je kan het niet zien.')
   return { doc: data }
 }
@@ -188,7 +190,7 @@ async function prullenbak(admin: Admin, k: Kijker) {
   const lijsten = weg(z.lijsten as unknown as MetV[], z.zichtbaar.lijsten)
   const [{ data: it }, { data: dc }] = await Promise.all([
     admin.from('ag_items').select(`${ITEM_VELDEN}, verwijderd_op, verwijderd_door`).not('verwijderd_op', 'is', null).order('verwijderd_op', { ascending: false }).limit(500),
-    admin.from('ag_docs').select('id, titel, space_id, map_id, lijst_id, prive, eigenaar_id, clickup_parent_id, verwijderd_op, verwijderd_door').not('verwijderd_op', 'is', null).order('verwijderd_op', { ascending: false }).limit(300),
+    admin.from('ag_docs').select('id, titel, space_id, map_id, lijst_id, prive, eigenaar_id, kijkers, clickup_parent_id, verwijderd_op, verwijderd_door').not('verwijderd_op', 'is', null).order('verwijderd_op', { ascending: false }).limit(300),
   ])
   const ruw = (it ?? []) as unknown as (RuwItem & { verwijderd_door: string | null })[]
   const zichtbaar = await metToegewezen(admin, ruw, z)
@@ -388,14 +390,27 @@ async function docActie(c: Ctx, actie: string, b: Record<string, unknown>) {
     return { ok: true, id: data.id, versie: data.updated_at }
   }
   if (!isUuid(b.id)) throw new Error('Onbekend document')
-  const { data: d } = await admin.from('ag_docs').select('id, space_id, map_id, lijst_id, prive, eigenaar_id, clickup_parent_id, updated_at, verwijderd_op').eq('id', b.id).maybeSingle()
+  const { data: d } = await admin.from('ag_docs').select('id, space_id, map_id, lijst_id, prive, eigenaar_id, kijkers, clickup_parent_id, updated_at, verwijderd_op').eq('id', b.id).maybeSingle()
   if (!d || !docZichtbaar(d as never, z)) throw new Error('Dit document bestaat niet of je kan het niet zien.')
   if (actie === 'doc.wijzig') {
     if (typeof b.versie === 'string' && Date.parse(b.versie) !== Date.parse(d.updated_at)) throw new Error('Conflict: iemand anders paste dit document intussen aan. Herlaad om de laatste versie te zien.')
     const upd: Record<string, unknown> = { updated_at: nu(), in_app_gewijzigd_op: nu(), bijgewerkt_door: k.naam }
     if (typeof b.titel === 'string') upd.titel = b.titel.trim().slice(0, 300) || 'Naamloos document'
     if (typeof b.inhoud === 'string') upd.inhoud = b.inhoud.slice(0, 500_000)
-    if ('prive' in b && d.eigenaar_id === k.persoonId) upd.prive = b.prive === true
+    // Privé maken en kiezen wie het mag zien. Wie het privé maakt, blijft het zelf altijd zien.
+    if ('prive' in b || 'kijkers' in b) {
+      const prive = 'prive' in b ? b.prive === true : d.prive
+      upd.prive = prive
+      let eigenaar = d.eigenaar_id as string | null
+      if (prive && !eigenaar) { eigenaar = k.persoonId; upd.eigenaar_id = eigenaar }
+      let kijkers = 'kijkers' in b && Array.isArray(b.kijkers) ? [...new Set((b.kijkers as unknown[]).filter(isUuid))].slice(0, 50) : ((d.kijkers ?? []) as string[])
+      if (prive && eigenaar !== k.persoonId && !kijkers.includes(k.persoonId)) kijkers = [...kijkers, k.persoonId]
+      if (kijkers.length) {
+        const { data: geldig } = await admin.from('ag_personen').select('id').in('id', kijkers)
+        kijkers = ((geldig ?? []) as { id: string }[]).map((x) => x.id)
+      }
+      upd.kijkers = kijkers.filter((x) => x !== eigenaar)
+    }
     const { data, error } = await admin.from('ag_docs').update(upd).eq('id', d.id).select('updated_at').single()
     if (error) throw new Error(error.message)
     return { ok: true, versie: data?.updated_at }

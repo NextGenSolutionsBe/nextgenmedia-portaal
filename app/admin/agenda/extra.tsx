@@ -106,18 +106,23 @@ export function AfgevinktPaneel({ boom, onSluit, onOpen, onVernieuw }: { boom: B
   const [items, setItems] = useState<Item[] | null>(null)
   const [volgende, setVolgende] = useState<string | null>(null)
   const [persoon, setPersoon] = useState<string>('')
+  const [zoek, setZoek] = useState('')
+  const [q, setQ] = useState('')
   const [laden, setLaden] = useState(false)
+  // Zoeken wacht even tot je stopt met typen.
+  useEffect(() => { const t = setTimeout(() => setQ(zoek.trim().length >= 2 ? zoek.trim() : ''), 300); return () => clearTimeout(t) }, [zoek])
   const personen = useMemo(() => new Map(boom.personen.map((p) => [p.id, p])), [boom.personen])
   const laad = useCallback(async (na: string | null) => {
     setLaden(true)
     try {
       const p = new URLSearchParams({ klaar: '1' })
       if (persoon) p.set('persoon', persoon)
+      if (q) p.set('q', q)
       if (na) p.set('na', na)
       const j = await api<{ items: Item[]; volgende: string | null }>(`/api/admin/agenda?${p}`)
       setItems((x) => (na ? [...(x ?? []), ...j.items] : j.items)); setVolgende(j.volgende)
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Laden mislukt') } finally { setLaden(false) }
-  }, [persoon])
+  }, [persoon, q])
   useEffect(() => { setItems(null); laad(null) }, [laad])
   const heropen = async (i: Item) => {
     try { await actie({ actie: 'item.wijzig', id: i.id, status: 'open' }); setItems((x) => x?.filter((y) => y.id !== i.id) ?? null); onVernieuw(); toast.success('Terug open gezet.') } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') }
@@ -131,6 +136,11 @@ export function AfgevinktPaneel({ boom, onSluit, onOpen, onVernieuw }: { boom: B
   const mensen = boom.personen.filter((p) => p.actief && p.user_id)
   return (
     <Modal titel="Afgevinkt" sub="Alles wat klaar is, met wanneer het afgevinkt werd. Niets verdwijnt." onSluit={onSluit} breed>
+      <div className="relative">
+        <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+        <input {...zoekVeld()} autoFocus value={zoek} onChange={(e) => setZoek(e.target.value)} placeholder="Zoek een taak op naam…" className="input-base !pl-9" aria-label="Zoek in wat afgevinkt is" />
+        {zoek && <button type="button" onClick={() => setZoek('')} aria-label="Zoeken wissen" className="absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7 rounded-lg hover:bg-gray-100 flex items-center justify-center"><X className="h-3.5 w-3.5" /></button>}
+      </div>
       <div className="flex flex-wrap gap-1.5">
         <button type="button" onClick={() => setPersoon('')} aria-pressed={!persoon} className={`rounded-full border px-3 py-1 text-xs ${!persoon ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200'}`}>Iedereen</button>
         {mensen.map((p) => (
@@ -138,7 +148,8 @@ export function AfgevinktPaneel({ boom, onSluit, onOpen, onVernieuw }: { boom: B
         ))}
       </div>
       {!items && <div className="py-10 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>}
-      {items && !items.length && <p className="text-sm text-gray-500 py-6 text-center">Nog niets afgevinkt.</p>}
+      {items && !items.length && <p className="text-sm text-gray-500 py-6 text-center">{q ? `Niets afgevinkt met "${q}" in de naam.` : 'Nog niets afgevinkt.'}</p>}
+      {laden && items && <div className="flex justify-center"><Loader2 className="h-4 w-4 animate-spin text-gray-400" /></div>}
       {perDag.map(([d, l]) => (
         <div key={d}>
           <div className="label-mono text-[10px] uppercase text-gray-500 mb-1">{d === 'onbekend' ? 'Onbekend' : d === vandaag() ? 'Vandaag' : d === plusDagen(vandaag(), -1) ? 'Gisteren' : new Date(`${d}T12:00:00Z`).toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}</div>

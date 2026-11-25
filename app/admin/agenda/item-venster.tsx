@@ -59,7 +59,7 @@ export function ItemVenster({ id, boom, onSluit, onGewijzigd, onVerwijderd, onOp
 
   const pad = d ? padVan(boom, d.item.lijst_id) : []
   return (
-    <Lade onSluit={onSluit}
+    <Lade onSluit={onSluit} maat="groot"
       titel={<span className="flex items-center gap-1 min-w-0">{pad.length ? pad.map((s, n) => <span key={n} className="flex items-center gap-1 min-w-0"><span className="truncate">{s}</span>{n < pad.length - 1 && <ChevronRight className="h-3 w-3 shrink-0" />}</span>) : <span>Agenda</span>}</span>}
       acties={d && (
         <>
@@ -89,7 +89,7 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd }
   const klant = i.client_id ? boom.klanten.find((k) => k.id === i.client_id) : null
 
   return (
-    <div className="px-5 sm:px-7 py-5 space-y-5">
+    <div className="px-5 sm:px-8 py-6 space-y-5">
       {d.ouder && <button type="button" onClick={() => onOpen(d.ouder!.id)} className="text-xs text-gray-500 hover:underline flex items-center gap-1"><ChevronRight className="h-3 w-3 rotate-180" />Subtaak van {d.ouder.titel}</button>}
 
       {/* Titel */}
@@ -104,7 +104,7 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd }
         <textarea value={titel} disabled={!mag} rows={1} onChange={(e) => setTitel(e.target.value.replace(/\n/g, ' '))}
           onBlur={() => { const t = titel.trim(); if (t && t !== i.titel) bewaar({ titel: t }); else setTitel(i.titel) }}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLTextAreaElement).blur() } }}
-          className={`flex-1 resize-none text-2xl font-bold leading-tight bg-transparent border-0 p-0 focus:ring-0 focus:outline-none ${klaar ? 'line-through text-gray-400' : 'text-gray-900'}`}
+          className={`flex-1 resize-none text-[26px] font-bold leading-tight bg-transparent border-0 p-0 focus:ring-0 focus:outline-none ${klaar ? 'line-through text-gray-400' : 'text-gray-900'}`}
           style={{ fieldSizing: 'content' } as React.CSSProperties} aria-label="Titel" />
       </div>
 
@@ -128,12 +128,13 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd }
         <Schakel aan={i.prive} disabled={!mag} onWissel={() => bewaar({ prive: !i.prive })} label={<span className="flex items-center gap-1 text-xs text-gray-600"><Lock className="h-3 w-3" />Privé</span>} />
       </div>
 
-      {/* Eigenschappen */}
-      <div className="grid grid-cols-[120px_1fr] gap-x-3 gap-y-3 text-sm items-start">
-        <Kop icoon={<CalendarClock className="h-4 w-4" />}>Wanneer</Kop>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] items-start">
+      {/* Eigenschappen: rechts op een groot scherm, bovenaan op de gsm */}
+      <aside className="lg:order-2 rounded-2xl bg-gray-50 border border-gray-100 p-4 space-y-4 text-sm">
+        <Kop icoon={<CalendarClock className="h-3.5 w-3.5" />}>Wanneer</Kop>
         <Tijden i={i} mag={mag} bewaar={bewaar} />
 
-        <Kop icoon={<Users className="h-4 w-4" />}>Wie</Kop>
+        <Kop icoon={<Users className="h-3.5 w-3.5" />}>Wie</Kop>
         <div className="relative">
           <button type="button" disabled={!mag} onClick={() => setOpen(open === 'mensen' ? null : 'mensen')} className={`flex flex-wrap items-center gap-1.5 min-h-8 rounded-lg px-1.5 py-1 -mx-1.5 hover:bg-gray-50 text-left ${focusRing}`}>
             {i.toegewezen.length ? i.toegewezen.map((p) => (
@@ -145,7 +146,7 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd }
           </Popover>
         </div>
 
-        <Kop icoon={<Building2 className="h-4 w-4" />}>Klant</Kop>
+        <Kop icoon={<Building2 className="h-3.5 w-3.5" />}>Klant</Kop>
         <div className="relative">
           <button type="button" disabled={!mag} onClick={() => setOpen(open === 'klant' ? null : 'klant')} className={`rounded-lg px-1.5 py-1 -mx-1.5 hover:bg-gray-50 text-left ${focusRing}`}>
             {klant ? <span className="inline-flex items-center gap-1.5">{boom.klantKleuren[klant.id] && <span className="h-2.5 w-2.5 rounded-full" style={{ background: boom.klantKleuren[klant.id] }} />}{klant.naam}</span> : <span className="text-gray-400">Geen klant{lijst?.client_id || lijst?.map_id ? ' (volgt de map)' : ''}</span>}
@@ -153,7 +154,7 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd }
           <Popover open={open === 'klant'} onSluit={sluit}><KlantLijst boom={boom} gekozen={i.client_id} onKies={(k) => { bewaar({ client_id: k }); sluit() }} /></Popover>
         </div>
 
-        <Kop icoon={<Tag className="h-4 w-4" />}>Labels</Kop>
+        <Kop icoon={<Tag className="h-3.5 w-3.5" />}>Labels</Kop>
         <div className="relative">
           <button type="button" disabled={!mag} onClick={() => setOpen(open === 'labels' ? null : 'labels')} className={`flex flex-wrap gap-1 min-h-7 rounded-lg px-1.5 py-1 -mx-1.5 hover:bg-gray-50 ${focusRing}`}>
             {i.labels.filter((l) => labelsPer.has(l)).length ? i.labels.map((l) => labelsPer.get(l)).filter(Boolean).map((l) => (
@@ -161,7 +162,7 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd }
             )) : <span className="text-gray-400">Geen</span>}
           </button>
           <Popover open={open === 'labels'} onSluit={sluit}>
-            <div className="w-56 p-2 max-h-72 overflow-y-auto">
+            <div className="w-full md:w-56 p-2 max-h-72 overflow-y-auto">
               {boom.labels.map((l) => {
                 const aan = i.labels.includes(l.id)
                 return (
@@ -176,7 +177,7 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd }
           </Popover>
         </div>
 
-        <Kop icoon={<ListTree className="h-4 w-4" />}>Lijst</Kop>
+        <Kop icoon={<ListTree className="h-3.5 w-3.5" />}>Lijst</Kop>
         <div className="relative">
           <button type="button" disabled={!mag} onClick={() => setOpen(open === 'lijst' ? null : 'lijst')} className={`rounded-lg px-1.5 py-1 -mx-1.5 hover:bg-gray-50 text-left ${focusRing}`}>
             {lijst ? padVan(boom, lijst.id).join(' › ') : <span className="text-gray-400">Enkel in de agenda</span>}
@@ -184,20 +185,21 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd }
           <Popover open={open === 'lijst'} onSluit={sluit}><LijstKiezer boom={boom} gekozen={i.lijst_id} onKies={(l) => { bewaar({ lijst_id: l }); sluit() }} /></Popover>
         </div>
 
-        <Kop icoon={<Palette className="h-4 w-4" />}>Kleur</Kop>
+        <Kop icoon={<Palette className="h-3.5 w-3.5" />}>Kleur</Kop>
         <KleurKeuze waarde={i.kleur} onKies={(k) => mag && bewaar({ kleur: k })} leeg="Automatisch" />
 
         {(i.soort === 'meeting' || i.locatie || i.meet_url) && <>
-          <Kop icoon={<MapPin className="h-4 w-4" />}>Plaats</Kop>
+          <Kop icoon={<MapPin className="h-3.5 w-3.5" />}>Plaats</Kop>
           <TekstVeld waarde={i.locatie ?? ''} mag={mag} plaats="Adres of plaats" onBewaar={(v) => bewaar({ locatie: v || null })} />
-          <Kop icoon={<Video className="h-4 w-4" />}>Link</Kop>
+          <Kop icoon={<Video className="h-3.5 w-3.5" />}>Link</Kop>
           <div className="flex items-center gap-2 min-w-0">
             <div className="flex-1 min-w-0"><TekstVeld waarde={i.meet_url ?? ''} mag={mag} plaats="https://…" onBewaar={(v) => bewaar({ meet_url: v || null })} /></div>
             {i.meet_url && <a href={i.meet_url} target="_blank" rel="noopener noreferrer" className="btn-primary !py-1 !px-2.5 !text-xs shrink-0">Deelnemen</a>}
           </div>
         </>}
-      </div>
+      </aside>
 
+      <div className="lg:order-1 space-y-6 min-w-0">
       {/* Beschrijving */}
       <Beschrijving waarde={i.beschrijving ?? ''} mag={mag} bewaar={bewaar} />
 
@@ -220,12 +222,14 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd }
         <div>Gemaakt{d.gemaakt_door ? ` door ${d.gemaakt_door}` : ''} op {new Date(d.gemaakt_op).toLocaleString('nl-BE', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Brussels' })}</div>
         {i.afgerond_op && <div>Afgevinkt{i.afgerond_door ? ` door ${i.afgerond_door}` : ''} op {new Date(i.afgerond_op).toLocaleString('nl-BE', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Brussels' })}</div>}
       </div>
+      </div>
+      </div>
     </div>
   )
 }
 
 function Kop({ icoon, children }: { icoon: React.ReactNode; children: React.ReactNode }) {
-  return <div className="flex items-center gap-2 text-gray-500 pt-1.5">{icoon}<span>{children}</span></div>
+  return <div className="flex items-center gap-1.5 label-mono text-[10px] uppercase tracking-wide text-gray-500 -mb-2.5">{icoon}<span>{children}</span></div>
 }
 
 function TekstVeld({ waarde, mag, plaats, onBewaar }: { waarde: string; mag: boolean; plaats: string; onBewaar: (v: string) => void }) {
@@ -260,20 +264,20 @@ function Tijden({ i, mag, bewaar }: { i: Item; mag: boolean; bewaar: (v: Record<
     if (i.start_op && Date.parse(nieuw) < Date.parse(i.start_op)) { toast.error('Het einde ligt voor het begin.'); return }
     bewaar({ eind_op: nieuw })
   }
-  const inp = 'input-base !py-1 !px-2 text-sm w-auto'
+  const inp = 'input-base !py-1 !px-2 text-sm'
   return (
     <div className="space-y-2">
       <Schakel aan={i.heel_dag} disabled={!mag} onWissel={() => zetHeleDag(!i.heel_dag)} label={<span className="text-xs text-gray-600">Hele dag (zonder uur)</span>} />
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-xs text-gray-500 w-10">{i.heel_dag ? 'Start' : 'Van'}</span>
-        <input type="date" disabled={!mag} value={sd} onChange={(e) => zetStart(e.target.value, st)} className={inp} aria-label="Startdatum" />
-        {!i.heel_dag && <input type="time" step={300} disabled={!mag} value={st} onChange={(e) => e.target.value && zetStart(sd || ed || vandaag(), e.target.value)} className={inp} aria-label="Startuur" />}
+        <span className="text-xs text-gray-500 w-9">{i.heel_dag ? 'Start' : 'Van'}</span>
+        <input type="date" disabled={!mag} value={sd} onChange={(e) => zetStart(e.target.value, st)} className={`${inp} !w-[9.5rem]`} aria-label="Startdatum" />
+        {!i.heel_dag && <input type="time" step={300} disabled={!mag} value={st} onChange={(e) => e.target.value && zetStart(sd || ed || vandaag(), e.target.value)} className={`${inp} !w-[6.5rem]`} aria-label="Startuur" />}
         {i.heel_dag && sd && <button type="button" onClick={() => bewaar({ start_op: null })} className="text-xs text-gray-500 underline">wissen</button>}
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-xs text-gray-500 w-10">{i.heel_dag ? 'Tegen' : 'Tot'}</span>
-        <input type="date" disabled={!mag} value={ed} onChange={(e) => zetEind(e.target.value, et)} className={inp} aria-label="Einddatum" />
-        {!i.heel_dag && <input type="time" step={300} disabled={!mag} value={et} onChange={(e) => e.target.value && zetEind(ed || sd || vandaag(), e.target.value)} className={inp} aria-label="Einduur" />}
+        <span className="text-xs text-gray-500 w-9">{i.heel_dag ? 'Tegen' : 'Tot'}</span>
+        <input type="date" disabled={!mag} value={ed} onChange={(e) => zetEind(e.target.value, et)} className={`${inp} !w-[9.5rem]`} aria-label="Einddatum" />
+        {!i.heel_dag && <input type="time" step={300} disabled={!mag} value={et} onChange={(e) => e.target.value && zetEind(ed || sd || vandaag(), e.target.value)} className={`${inp} !w-[6.5rem]`} aria-label="Einduur" />}
         {mag && !ed && <>
           <button type="button" onClick={() => zetEind(vandaag(), et)} className="text-xs rounded-full border border-gray-200 px-2 py-0.5 hover:border-gray-400">Vandaag</button>
           <button type="button" onClick={() => zetEind(plusDagen(vandaag(), 1), et)} className="text-xs rounded-full border border-gray-200 px-2 py-0.5 hover:border-gray-400">Morgen</button>
@@ -303,7 +307,7 @@ function Beschrijving({ waarde, mag, bewaar }: { waarde: string; mag: boolean; b
       </div>
       {bewerk ? (
         <div className="space-y-2">
-          <textarea autoFocus value={concept} onChange={(e) => setConcept(e.target.value)} rows={Math.min(24, Math.max(6, concept.split('\n').length + 2))}
+          <textarea autoFocus value={concept} onChange={(e) => setConcept(e.target.value)} rows={Math.min(30, Math.max(10, concept.split('\n').length + 2))}
             onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); opslaan() } }}
             className="input-base text-sm font-mono leading-relaxed" placeholder={'Schrijf hier. Lijstjes met "- ", afvinken met "- [ ] ", vet met **zo**.'} />
           <div className="flex gap-2 justify-end">
@@ -316,7 +320,7 @@ function Beschrijving({ waarde, mag, bewaar }: { waarde: string; mag: boolean; b
           <Markdown tekst={tekst} onVink={mag ? (n) => { const t = vinkRegel(tekst, n); setTekst(t); bewaar({ beschrijving: t }) } : undefined} />
         </div>
       ) : (
-        <button type="button" disabled={!mag} onClick={() => { setConcept(''); setBewerk(true) }} className="w-full text-left rounded-xl border border-dashed border-gray-200 px-3 py-4 text-sm text-gray-400 hover:border-gray-400">Voeg een beschrijving toe…</button>
+        <button type="button" disabled={!mag} onClick={() => { setConcept(''); setBewerk(true) }} className="w-full text-left rounded-xl border border-dashed border-gray-200 px-4 py-8 text-sm text-gray-400 hover:border-gray-400">Voeg een beschrijving toe…</button>
       )}
     </div>
   )
@@ -368,7 +372,7 @@ export function KlantLijst({ boom, gekozen, onKies }: { boom: BoomData; gekozen:
   const [q, setQ] = useState('')
   const lijst = boom.klanten.filter((k) => !k.gearchiveerd && k.naam.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 80)
   return (
-    <div className="w-72 p-2">
+    <div className="w-full md:w-72 p-2">
       <div className="relative mb-1.5"><Search className="h-3.5 w-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
         <input {...zoekVeld()} autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Zoek een klant…" className="input-base !py-1.5 !pl-8 text-sm" aria-label="Zoek een klant" />
       </div>
@@ -391,7 +395,7 @@ export function LijstKiezer({ boom, gekozen, onKies, zonder = 'Enkel in de agend
   const rijen = boom.lijsten.map((l) => ({ l, pad: padVan(boom, l.id) })).filter((x) => !z || x.pad.join(' ').toLowerCase().includes(z))
     .sort((a, b) => a.pad.join('/').localeCompare(b.pad.join('/')))
   return (
-    <div className="w-80 p-2">
+    <div className="w-full md:w-80 p-2">
       <div className="relative mb-1.5"><Search className="h-3.5 w-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
         <input {...zoekVeld()} autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Zoek een lijst, map of klant…" className="input-base !py-1.5 !pl-8 text-sm" aria-label="Zoek een lijst" />
       </div>

@@ -3,14 +3,32 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { Check, Flag, Video, MapPin, Plus, Lock } from 'lucide-react'
 import {
-  plaatsVan, dagenVan, legUit, vandaag, plusDagen, zoneNaarIso, dag, uur, tekstOp, kortDag,
+  plaatsVan, dagenVan, legUit, vandaag, plusDagen, zoneNaarIso, dag, uur, kortDag,
   type Item, type Weergave, type Persoon,
 } from '@/lib/agenda/model'
 import { Avatars, focusRing } from './gedeeld'
 
-const PX_MIN = 0.8 // 48 px per uur
+const PX_MIN = 1 // 60 px per uur
 const SNAP = 15
 const DAGNAAM = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo']
+const DAGNAAM_LANG = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag']
+const weekdag = (d: string) => (new Date(`${d}T12:00:00Z`).getUTCDay() + 6) % 7
+
+/** Rustige kleur zoals ClickUp: een licht vlak met links een streep in de volle kleur, altijd donkere tekst. */
+function rgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.replace('#', ''), 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+const mix = (a: [number, number, number], b: [number, number, number], t: number) => `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * t)).join(',')})`
+export function vlak(kleur: string): React.CSSProperties {
+  const c = rgb(/^#[0-9a-f]{6}$/i.test(kleur) ? kleur : '#e5e7eb')
+  const licht = (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) / 255 > 0.6
+  return {
+    background: mix(c, [255, 255, 255], licht ? 0.45 : 0.86),
+    borderLeft: `3px solid ${licht ? mix(c, [0, 0, 0], 0.28) : `rgb(${c.join(',')})`}`,
+    color: '#1a1a1a',
+  }
+}
 
 export type Verplaatsing = { start_op: string | null; eind_op: string | null; heel_dag: boolean }
 export type NieuwMoment = { dag: string; vanMin?: number; totMin?: number; heelDag: boolean }
@@ -60,15 +78,15 @@ function Chip({ i, kleur, onOpen, onKlaar, personen, tijd, sleep }: { i: Item; k
   return (
     <div draggable={sleep} onDragStart={(e) => { e.dataTransfer.setData('text/agenda-item', i.id); e.dataTransfer.effectAllowed = 'move' }}
       onClick={() => onOpen(i)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
-      className={`group flex items-center gap-1 rounded-md px-1.5 py-[3px] text-[11.5px] leading-tight cursor-pointer select-none border border-black/5 hover:brightness-95 ${klaar ? 'opacity-55' : ''} ${focusRing}`}
-      style={{ background: kleur, color: tekstOp(kleur) }} title={i.titel}>
+      className={`group flex items-center gap-1.5 rounded-md pl-1.5 pr-1 h-[24px] text-[12px] leading-none cursor-pointer select-none hover:brightness-[0.97] ${klaar ? 'opacity-55' : ''} ${focusRing}`}
+      style={vlak(kleur)} title={i.titel}>
       <Vinkje i={i} onKlaar={onKlaar} klein />
       {i.urgent && !klaar && <Flag className="h-3 w-3 shrink-0 text-red-600 fill-red-600" />}
       {(i.meet_url || i.bron === 'meeting') && <Video className="h-3 w-3 shrink-0 opacity-70" />}
       {tijd && <span className="shrink-0 tabular-nums opacity-75">{tijd}</span>}
       <span className={`truncate flex-1 ${klaar ? 'line-through' : ''}`}>{i.titel}</span>
       {i.prive && <Lock className="h-2.5 w-2.5 shrink-0 opacity-60" />}
-      <Avatars ids={i.toegewezen} personen={personen} max={2} maat={14} />
+      <span className="hidden sm:inline-flex"><Avatars ids={i.toegewezen} personen={personen} max={2} maat={16} /></span>
     </div>
   )
 }
@@ -128,7 +146,7 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
     if (items.length) gescrold.current = sleutel
   }, [weergave, dagen, rooster, items.length])
 
-  const MAX_BANEN = weergave === 'dag' ? 8 : 4
+  const MAX_BANEN = weergave === 'dag' ? 6 : 3
   const toonBanen = alleDag ? banen : Math.min(banen, MAX_BANEN)
   const verborgenPerDag = useMemo(() => {
     const m = new Map<number, number>()
@@ -226,43 +244,56 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
 
   const vandaagD = vandaag()
   const nuMin = (() => { const t = new Date(nu); return dag(t.toISOString()) === vandaagD ? Number(uur(t.toISOString()).slice(0, 2)) * 60 + Number(uur(t.toISOString()).slice(3)) : -1 })()
-  const cols = `56px repeat(${dagen.length}, minmax(0, 1fr))`
+  const cols = `60px repeat(${dagen.length}, minmax(0, 1fr))`
 
   return (
-    <div className="card-base !p-0 overflow-hidden flex flex-col min-h-0 h-full">
+    <div className="card-base !p-0 overflow-hidden h-full">
+     {/* Op een smal scherm schuift de week opzij; elke dag blijft leesbaar breed. */}
+     <div className="h-full overflow-x-auto overscroll-x-contain">
+      <div className={`h-full flex flex-col min-h-0 ${weergave === 'week' ? 'min-w-[956px] md:min-w-0' : ''}`}>
       {/* Kop met de dagen */}
       <div className="grid border-b border-gray-200 bg-white" style={{ gridTemplateColumns: cols }}>
         <div />
-        {dagen.map((d, n) => (
-          <button key={d} type="button" onClick={() => onDag(d)} className={`py-2 text-center border-l border-gray-100 hover:bg-gray-50 ${focusRing}`}>
-            <div className="label-mono text-[10px] text-gray-500 uppercase">{DAGNAAM[(n + (weergave === 'dag' ? (new Date(`${d}T12:00:00Z`).getUTCDay() + 6) % 7 : 0)) % 7]}</div>
-            <div className={`mx-auto mt-0.5 h-7 w-7 rounded-full flex items-center justify-center text-sm font-semibold ${d === vandaagD ? 'bg-gray-900 text-white' : 'text-gray-900'}`}>{Number(d.slice(8))}</div>
-          </button>
-        ))}
+        {dagen.map((d) => {
+          const wd = weekdag(d)
+          return (
+            <button key={d} type="button" onClick={() => onDag(d)} className={`py-2.5 px-2 border-l border-gray-100 hover:bg-gray-50 flex items-center gap-2 ${weergave === 'dag' ? 'justify-start pl-4' : 'justify-center'} ${focusRing}`}>
+              <span className={`h-8 min-w-8 px-1 rounded-full flex items-center justify-center text-[15px] font-bold ${d === vandaagD ? 'bg-gray-900 text-white' : 'text-gray-900'}`}>{Number(d.slice(8))}</span>
+              <span className="text-left leading-tight">
+                <span className={`block text-[13px] font-semibold ${d === vandaagD ? 'text-gray-900' : 'text-gray-700'}`}><span className="hidden lg:inline">{DAGNAAM_LANG[wd]}</span><span className="lg:hidden capitalize">{DAGNAAM[wd]}</span></span>
+                {weergave === 'dag' && <span className="block text-[11px] text-gray-500">{new Date(`${d}T12:00:00Z`).toLocaleDateString('nl-BE', { month: 'long', year: 'numeric', timeZone: 'UTC' })}</span>}
+              </span>
+            </button>
+          )
+        })}
       </div>
 
       {/* Hele dag: taken zonder uur en wat over meerdere dagen loopt */}
       {(balken.length > 0 || magToevoegen) && (
         <div className="grid border-b border-gray-200 bg-gray-50/60" style={{ gridTemplateColumns: cols }}>
-          <div className="label-mono text-[9px] text-gray-400 uppercase px-1.5 pt-2 leading-tight">Hele<br />dag</div>
+          <div className="label-mono text-[9px] text-gray-400 uppercase px-2 pt-2.5 leading-tight">Hele<br />dag</div>
           <div className="relative" style={{ gridColumn: `2 / span ${dagen.length}` }}>
+           <div className={alleDag ? 'max-h-[38vh] overflow-y-auto' : ''}>
+            <div className="relative">
             <div className="absolute inset-0 grid" style={{ gridTemplateColumns: `repeat(${dagen.length}, minmax(0, 1fr))` }}>
               {dagen.map((d, n) => (
                 <div key={d} className="border-l border-gray-100 group relative" onDragOver={(e) => { if (magAanpassen) e.preventDefault() }} onDrop={(e) => dropOpDag(e, d)}
                   onDoubleClick={() => magToevoegen && onNieuw({ dag: d, heelDag: true })}>
                   {magToevoegen && <button type="button" onClick={() => onNieuw({ dag: d, heelDag: true })} aria-label={`Taak op ${kortDag(d)}`} className={`absolute right-1 bottom-1 h-5 w-5 rounded-md bg-white border border-gray-200 text-gray-500 opacity-0 group-hover:opacity-100 focus:opacity-100 flex items-center justify-center z-10 ${focusRing}`}><Plus className="h-3 w-3" /></button>}
-                  {verborgenPerDag.get(n) ? <button type="button" onClick={() => setAlleDag(true)} className="absolute left-1 bottom-1 text-[10px] font-semibold text-gray-600 hover:underline z-10">+{verborgenPerDag.get(n)} meer</button> : null}
+                  {verborgenPerDag.get(n) ? <button type="button" onClick={() => setAlleDag(true)} className="absolute left-1.5 bottom-1 text-[11px] font-semibold text-gray-700 hover:underline z-10">+{verborgenPerDag.get(n)} meer</button> : null}
                 </div>
               ))}
             </div>
-            <div className="relative grid gap-y-[3px] py-1.5 px-0.5 pointer-events-none" style={{ gridTemplateColumns: `repeat(${dagen.length}, minmax(0, 1fr))`, gridAutoRows: '22px', minHeight: magToevoegen ? 34 : undefined, paddingBottom: verborgenPerDag.size ? 22 : undefined }}>
+            <div className="relative grid gap-y-1 py-2 px-1 pointer-events-none" style={{ gridTemplateColumns: `repeat(${dagen.length}, minmax(0, 1fr))`, gridAutoRows: '24px', minHeight: magToevoegen ? 40 : undefined, paddingBottom: verborgenPerDag.size ? 24 : undefined }}>
               {balken.filter((b) => b.baan < toonBanen).map((b) => (
-                <div key={`${b.item.bron}-${b.item.id}`} className="pointer-events-auto px-0.5 min-w-0" style={{ gridColumn: `${b.van + 1} / ${b.tot + 2}`, gridRow: b.baan + 1 }}>
+                <div key={`${b.item.bron}-${b.item.id}`} className="pointer-events-auto px-1 min-w-0" style={{ gridColumn: `${b.van + 1} / ${b.tot + 2}`, gridRow: b.baan + 1 }}>
                   <Chip i={b.item} kleur={kleur(b.item)} onOpen={onOpen} onKlaar={onKlaar} personen={personen} sleep={sleepbaar(b.item, magAanpassen)} />
                 </div>
               ))}
             </div>
-            {alleDag && banen > MAX_BANEN && <button type="button" onClick={() => setAlleDag(false)} className="absolute right-2 bottom-1 text-[10px] font-semibold text-gray-600 hover:underline">Minder tonen</button>}
+            </div>
+           </div>
+            {alleDag && banen > MAX_BANEN && <button type="button" onClick={() => setAlleDag(false)} className="absolute right-3 -bottom-0.5 translate-y-full z-10 rounded-full bg-white border border-gray-200 px-2 py-0.5 text-[11px] font-semibold text-gray-700 hover:border-gray-400 shadow-sm">Minder tonen</button>}
           </div>
         </div>
       )}
@@ -271,13 +302,14 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
       <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0 relative">
         <div className="grid relative" style={{ gridTemplateColumns: cols, height: 1440 * PX_MIN }}>
           <div className="relative">
-            {Array.from({ length: 24 }, (_, h) => h > 0 && <div key={h} className="absolute right-1.5 -translate-y-1/2 text-[10px] tabular-nums text-gray-400" style={{ top: h * 60 * PX_MIN }}>{String(h).padStart(2, '0')}:00</div>)}
+            {Array.from({ length: 24 }, (_, h) => h > 0 && <div key={h} className="absolute right-2 -translate-y-1/2 text-[11px] tabular-nums text-gray-500" style={{ top: h * 60 * PX_MIN }}>{String(h).padStart(2, '0')}:00</div>)}
           </div>
           <div ref={kolommenRef} className="relative grid" style={{ gridColumn: `2 / span ${dagen.length}`, gridTemplateColumns: `repeat(${dagen.length}, minmax(0, 1fr))` }}
             onPointerMove={beweeg} onPointerUp={los} onPointerCancel={() => setSleep(null)}>
             {/* lijnen */}
             <div className="absolute inset-0 pointer-events-none">
               {Array.from({ length: 24 }, (_, h) => <div key={h} className="absolute left-0 right-0 border-t border-gray-100" style={{ top: h * 60 * PX_MIN }} />)}
+              {Array.from({ length: 24 }, (_, h) => <div key={`h${h}`} className="absolute left-0 right-0 border-t border-dashed border-gray-50" style={{ top: (h * 60 + 30) * PX_MIN }} />)}
             </div>
             {dagen.map((d, n) => {
               const blokken = legUit(rooster.get(d) ?? [])
@@ -288,28 +320,28 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
                     const i = b.item
                     const bezig = sleep && sleep.soort !== 'nieuw' && sleep.item.id === i.id && sleep.bewogen
                     const kl = kleur(i)
-                    const hoogte = Math.max(18, (b.totMin - b.vanMin) * PX_MIN - 2)
+                    const hoogte = Math.max(22, (b.totMin - b.vanMin) * PX_MIN - 2)
                     const sl = sleepbaar(i, magAanpassen)
                     const klaar = i.status === 'klaar' && i.soort !== 'meeting'
                     return (
                       <div key={`${i.bron}-${i.id}`} data-blok role="button" tabIndex={0}
                         onPointerDown={(e) => (sl ? startVerplaats(e, i, n, b.vanMin, b.totMin) : undefined)}
                         onClick={() => { if (!sl) onOpen(i) }} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
-                        className={`absolute rounded-md border border-black/10 px-1.5 py-1 overflow-hidden text-[11.5px] leading-tight shadow-sm cursor-pointer select-none ${klaar ? 'opacity-55' : ''} ${bezig ? 'opacity-30' : ''} ${focusRing}`}
-                        style={{ top: b.vanMin * PX_MIN + 1, height: hoogte, left: `calc(${(b.kolom / b.kolommen) * 100}% + 2px)`, width: `calc(${100 / b.kolommen}% - 4px)`, background: kl, color: tekstOp(kl), touchAction: sl ? 'none' : undefined }}
+                        className={`absolute rounded-md pl-2 pr-1.5 py-1 overflow-hidden text-[12px] leading-snug shadow-[0_1px_2px_rgba(0,0,0,0.06)] cursor-pointer select-none hover:brightness-[0.97] ${klaar ? 'opacity-55' : ''} ${bezig ? 'opacity-30' : ''} ${focusRing}`}
+                        style={{ ...vlak(kl), top: b.vanMin * PX_MIN + 1, height: hoogte, left: `calc(${(b.kolom / b.kolommen) * 100}% + 3px)`, width: `calc(${100 / b.kolommen}% - 6px)`, touchAction: sl ? 'none' : undefined }}
                         title={`${hhmm(b.vanMin)}–${hhmm(b.totMin)} ${i.titel}`}>
                         <div className="flex items-start gap-1">
                           <span className="mt-px"><Vinkje i={i} onKlaar={onKlaar} klein /></span>
                           {i.urgent && !klaar && <Flag className="h-3 w-3 mt-px shrink-0 text-red-600 fill-red-600" />}
-                          <span className={`font-semibold ${hoogte < 30 ? 'truncate' : 'line-clamp-3'} ${klaar ? 'line-through' : ''}`}>{i.titel}</span>
+                          <span className={`font-semibold ${hoogte < 34 ? 'truncate' : hoogte < 70 ? 'line-clamp-2' : 'line-clamp-3'} ${klaar ? 'line-through' : ''}`}>{i.titel}</span>
                         </div>
-                        {hoogte >= 30 && (
-                          <div className="flex items-center gap-1 mt-0.5 opacity-75 tabular-nums">
+                        {hoogte >= 34 && (
+                          <div className="flex items-center gap-1 mt-0.5 text-gray-600 tabular-nums text-[11px]">
                             {(i.meet_url || i.bron === 'meeting') && <Video className="h-3 w-3 shrink-0" />}
                             {i.locatie && !i.meet_url && <MapPin className="h-3 w-3 shrink-0" />}
                             <span className="truncate">{hhmm(b.vanMin)}–{hhmm(b.totMin)}</span>
                             <span className="flex-1" />
-                            {hoogte >= 44 && <Avatars ids={i.toegewezen} personen={personen} max={3} maat={15} />}
+                            {hoogte >= 50 && <Avatars ids={i.toegewezen} personen={personen} max={3} maat={18} />}
                           </div>
                         )}
                         {sl && <div onPointerDown={(e) => startRek(e, i, d, b.vanMin, b.totMin)} className="absolute left-0 right-0 bottom-0 h-1.5 cursor-ns-resize" aria-hidden />}
@@ -337,6 +369,8 @@ function Rooster({ weergave, datum, items, kleur, personen, magAanpassen, magToe
           </div>
         </div>
       </div>
+      </div>
+     </div>
     </div>
   )
 }
@@ -374,25 +408,32 @@ function Maand({ datum, items, kleur, personen, magAanpassen, magToevoegen, onOp
   return (
     <div className="card-base !p-0 overflow-hidden flex flex-col h-full min-h-0">
       <div className="grid grid-cols-7 border-b border-gray-200">
-        {DAGNAAM.map((d) => <div key={d} className="label-mono text-[10px] uppercase text-gray-500 text-center py-2 border-l first:border-l-0 border-gray-100">{d}</div>)}
+        {DAGNAAM.map((d, n) => <div key={d} className="text-[12px] font-semibold text-gray-600 text-center py-2.5 border-l first:border-l-0 border-gray-100"><span className="hidden lg:inline">{DAGNAAM_LANG[n]}</span><span className="lg:hidden capitalize">{d}</span></div>)}
       </div>
-      <div className="grid grid-cols-7 flex-1 min-h-0 overflow-y-auto" style={{ gridAutoRows: 'minmax(118px, auto)' }}>
+      <div className="grid grid-cols-7 flex-1 min-h-0 overflow-y-auto auto-rows-[minmax(76px,auto)] sm:auto-rows-[minmax(132px,auto)]">
         {dagen.map((d) => {
           const l = perDag.get(d) ?? []
           const toon = l.slice(0, 4)
           return (
-            <div key={d} className={`group relative border-l border-t border-gray-100 p-1 min-w-0 ${d.slice(0, 7) !== maand ? 'bg-gray-50/70' : ''}`}
+            <div key={d} className={`group relative border-l border-t border-gray-100 p-1 sm:p-1.5 min-w-0 ${d.slice(0, 7) !== maand ? 'bg-gray-50/70' : ''}`}
               onDragOver={(e) => { if (magAanpassen) e.preventDefault() }} onDrop={(e) => drop(e, d)}>
               <div className="flex items-center justify-between mb-0.5">
-                <button type="button" onClick={() => onDag(d)} className={`h-6 min-w-6 px-1 rounded-full text-xs font-semibold ${d === vandaagD ? 'bg-gray-900 text-white' : d.slice(0, 7) !== maand ? 'text-gray-400' : 'text-gray-800'} hover:ring-1 hover:ring-gray-300 ${focusRing}`}>{Number(d.slice(8))}</button>
+                <button type="button" onClick={() => onDag(d)} className={`h-7 min-w-7 px-1 rounded-full text-[13px] font-bold ${d === vandaagD ? 'bg-gray-900 text-white' : d.slice(0, 7) !== maand ? 'text-gray-400' : 'text-gray-800'} hover:ring-1 hover:ring-gray-300 ${focusRing}`}>{Number(d.slice(8))}</button>
                 {magToevoegen && <button type="button" onClick={() => onNieuw({ dag: d, heelDag: true })} aria-label={`Nieuw op ${kortDag(d)}`} className={`h-5 w-5 rounded-md text-gray-500 hover:bg-gray-100 opacity-0 group-hover:opacity-100 focus:opacity-100 flex items-center justify-center ${focusRing}`}><Plus className="h-3 w-3" /></button>}
               </div>
-              <div className="space-y-[3px]">
+              {/* Gsm: bolletjes per item, tikken = die dag openen. */}
+              {l.length > 0 && (
+                <button type="button" onClick={() => onDag(d)} className="sm:hidden w-full flex flex-wrap gap-1 px-1 pt-0.5" aria-label={`${l.length} items op ${kortDag(d)}`}>
+                  {l.slice(0, 6).map((i) => <span key={`${i.bron}-${i.id}`} className="h-2 w-2 rounded-full" style={{ background: (vlak(kleur(i)).borderLeft as string).replace('3px solid ', '') }} />)}
+                  {l.length > 6 && <span className="text-[10px] leading-none font-semibold text-gray-600">+{l.length - 6}</span>}
+                </button>
+              )}
+              <div className="hidden sm:block space-y-1">
                 {toon.map((i) => {
                   const p = plaatsVan(i)
                   return <Chip key={`${i.bron}-${i.id}`} i={i} kleur={kleur(i)} onOpen={onOpen} onKlaar={onKlaar} personen={personen} sleep={sleepbaar(i, magAanpassen)} tijd={p?.soort === 'rooster' ? hhmm(p.vanMin) : null} />
                 })}
-                {l.length > toon.length && <button type="button" onClick={() => onDag(d)} className="text-[11px] font-semibold text-gray-600 hover:underline px-1">+{l.length - toon.length} meer</button>}
+                {l.length > toon.length && <button type="button" onClick={() => onDag(d)} className="text-[12px] font-semibold text-gray-700 hover:underline px-1">+{l.length - toon.length} meer</button>}
               </div>
             </div>
           )
