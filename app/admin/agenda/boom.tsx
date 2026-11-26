@@ -326,7 +326,7 @@ function Rij({ diepte, soort, id, naam, kleur, eigenKleur, prive, open, onWissel
             className={`h-6 w-6 mr-1 rounded flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 ${menuOpen ? 'opacity-100' : ''} ${gekozen ? 'hover:bg-white/20' : 'hover:bg-gray-200'} ${focusRing}`}>
             <MoreHorizontal className="h-4 w-4" />
           </button>
-          <Popover open={menuOpen === 'menu'} onSluit={sluit} uitlijnen="rechts" className="w-56 py-1 text-gray-800">
+          <Popover zwevend open={menuOpen === 'menu'} onSluit={sluit} uitlijnen="rechts" className="w-56 py-1 text-gray-800">
             {menu.nieuweLijst && <MenuKnop icoon={<ListPlus className="h-4 w-4" />} onClick={() => { sluit(); menu.nieuweLijst!() }}>Nieuwe lijst</MenuKnop>}
             {menu.nieuweMap && <MenuKnop icoon={<FolderPlus className="h-4 w-4" />} onClick={() => { sluit(); menu.nieuweMap!() }}>Nieuwe map</MenuKnop>}
             {menu.nieuwDoc && <MenuKnop icoon={<FilePlus className="h-4 w-4" />} onClick={() => { sluit(); menu.nieuwDoc!() }}>Nieuw document</MenuKnop>}
@@ -340,10 +340,10 @@ function Rij({ diepte, soort, id, naam, kleur, eigenKleur, prive, open, onWissel
             </>}
             {mag.verwijderen && <><div className="my-1 border-t border-gray-100" /><MenuKnop icoon={<Trash2 className="h-4 w-4" />} gevaar onClick={verwijder}>Naar de prullenbak</MenuKnop></>}
           </Popover>
-          <Popover open={menuOpen === 'kleur'} onSluit={sluit} uitlijnen="rechts" className="p-3 w-64">
+          <Popover zwevend open={menuOpen === 'kleur'} onSluit={sluit} uitlijnen="rechts" className="p-3 w-64">
             <KleurKeuze waarde={eigenKleur} onKies={(k) => { sluit(); wijzig({ kleur: k }) }} leeg="Automatisch" />
           </Popover>
-          <Popover open={menuOpen === 'klant'} onSluit={sluit} uitlijnen="rechts">
+          <Popover zwevend open={menuOpen === 'klant'} onSluit={sluit} uitlijnen="rechts">
             <KlantLijst boom={boom} gekozen={klantId ?? null} onKies={(k) => { sluit(); wijzig({ client_id: k }, k ? 'Gekoppeld aan de klant.' : 'Klant losgekoppeld.') }} />
           </Popover>
         </div>

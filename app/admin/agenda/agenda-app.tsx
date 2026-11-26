@@ -8,7 +8,7 @@ import {
 import { PersoonFoto } from '@/components/admin/persoon-foto'
 import { zoekVeld } from '@/lib/zoekveld'
 import {
-  vandaag, verschuif, bereikVan, dagenVan, kleurVan, klantVan, kortDag, dag as dagVan, uur as uurVan, KLEUR_VOLGENS, WEERGAVEN, isWeergave,
+  vandaag, verschuif, bereikVan, dagenVan, kleurVan, klantVan, herkomstVan, mapKleur, kortDag, dag as dagVan, uur as uurVan, KLEUR_VOLGENS, WEERGAVEN, isWeergave,
   type Item, type Weergave, type KleurVolgens,
 } from '@/lib/agenda/model'
 import { PlanVenster, DetailVenster, AnnuleerVenster, api as meetingApi, type Opties, type Meeting } from '@/app/admin/meetings/meetings-client'
@@ -244,6 +244,12 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
   }, [toonKlaar, personen, labels, klant, ctx, lijstenVanKeuze, spaces, boom, container?.soort])
   const zichtbaar = useMemo(() => filter(items ?? []), [filter, items])
   const kleur = useCallback((i: Item) => (ctx ? kleurVan(i, ctx, kleurVolgens) : '#e5e7eb'), [ctx, kleurVolgens])
+  // Label op elk blok: bij welke klant of map het hoort ("TM Technics").
+  const herkomstCtx = useMemo(() => (ctx && boom ? { ...ctx, klanten: Object.fromEntries(boom.klanten.map((k) => [k.id, k.naam])), leden: boom.leden } : null), [ctx, boom])
+  const herkomst = useCallback((i: Item) => {
+    const h = herkomstCtx ? herkomstVan(i, herkomstCtx) : null
+    return h ? { naam: h.naam, kleur: h.mapId && herkomstCtx ? mapKleur(h.mapId, herkomstCtx) : null } : null
+  }, [herkomstCtx])
 
   // ── Acties op items ────────────────────────────────────────────────────────
   const pasLokaalAan = (id: string, velden: Partial<Item>) => {
@@ -479,7 +485,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
                 onOpen={open} onKlaar={wisselKlaar} onToegevoegd={laadLijst} onDoc={(id) => setKeuze({ soort: 'doc', id })} />
             </div>
           ) : (
-            <Kalender weergave={weergave} datum={datum} items={zichtbaar} kleur={kleur} personen={personenMap}
+            <Kalender weergave={weergave} datum={datum} items={zichtbaar} kleur={kleur} herkomst={herkomst} personen={personenMap}
               magAanpassen={!!boom.rechten.aanpassen} magToevoegen={!!boom.rechten.toevoegen}
               onOpen={open} onKlaar={wisselKlaar} onVerplaats={verplaats} onNieuw={setNieuw}
               onDag={(d) => { setDatum(d); kiesModus('dag') }} />
