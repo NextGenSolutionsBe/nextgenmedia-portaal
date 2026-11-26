@@ -29,6 +29,7 @@ import { OpGetekendZetten, GetekendBuitenApp, type ContractBijlage } from './man
 import { isManueelGetekend } from '@/lib/contracten/manueel-getekend'
 import { contractVerantwoordelijke } from '@/lib/contracten/verantwoordelijke'
 import { ContractVerantwoordelijkeKaart } from './verantwoordelijke'
+import { RecordBedrijfKaart } from '@/components/admin/record-bedrijf-kaart'
 import { isTegentekenaar } from '@/lib/contracten/verantwoordelijke'
 
 async function getContract(id: string) {
@@ -180,6 +181,10 @@ export default async function ContractDetailPage({ params }: { params: { id: str
           )}
         </div>
       </div>
+
+      {statusKey !== 'template' && (
+        <RecordBedrijfKaart tabel="contracts" id={c.id} begin={(c as { bedrijf?: string | null }).bedrijf ?? null} />
+      )}
 
       {statusKey !== 'template' && !/^test$/i.test(String(clientName ?? '').trim()) && (
         <ContractVerantwoordelijkeKaart contractId={c.id} begin={verantwoordelijke} />

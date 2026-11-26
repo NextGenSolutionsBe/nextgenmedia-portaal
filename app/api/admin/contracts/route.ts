@@ -33,6 +33,9 @@ export async function POST(req: NextRequest) {
     const contract_type = typeVanContract(formData.get('contract_type'))
     const duration_type = (formData.get('duration_type') as string | null) || null
     const service_slug = formData.get('service_slug') as string | null
+    // Voor welk bedrijf (verbeterplan fase 1). Zonder dienst is het verplicht; met een dienst volgt het eruit.
+    const bedrijfIn = String(formData.get('bedrijf') ?? '')
+    const bedrijf = ['nextgenmedia', 'nextgensolutions', 'algemeen'].includes(bedrijfIn) ? bedrijfIn : null
     const signer_name = formData.get('signer_name') as string | null
     const signer_email = formData.get('signer_email') as string | null
 
@@ -46,6 +49,9 @@ export async function POST(req: NextRequest) {
     // tekenlink / intern). Enkel een PDF en titel zijn verplicht.
     if (!pdf || !title) {
       return NextResponse.json({ error: 'PDF en titel zijn verplicht' }, { status: 400 })
+    }
+    if (!bedrijf && !service_slug) {
+      return NextResponse.json({ error: 'Kies voor welk bedrijf dit contract is: NextGen Media of NextGen Solutions.' }, { status: 400 })
     }
     // Zelfde grens als het formulier (lib/upload.ts) — maar hier afgedwongen,
     // want een browsercontrole is te omzeilen. Boven ~4,5 MB zou Vercel het
@@ -86,6 +92,7 @@ export async function POST(req: NextRequest) {
         duration_type,
         created_by: user.id,
         service_slug: service_slug || null,
+        bedrijf,
         status: alreadySigned ? 'signed' : 'draft',
         signer_name: signer_name || null,
         signer_email: signer_email || null,

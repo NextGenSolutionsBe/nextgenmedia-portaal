@@ -11,6 +11,8 @@ import { Dialoog, Bevestig, INP } from '@/app/admin/instellingen/ui'
 import { ContracttypesBeheer } from '../contracttypes-beheer'
 import { KlantKiezer, vulOndertekenaar, type KlantOptie } from '@/components/admin/klant-kiezer'
 import { VerantwoordelijkeKiezer } from '@/components/admin/verantwoordelijke-kiezer'
+import { BedrijfKiezer } from '@/components/admin/bedrijf-kiezer'
+import { SERVICE_SLUG_NAAR_DIENST, STANDAARD_DIENSTEN } from '@/lib/bedrijven/model'
 import type { ContractVerantwoordelijke } from '@/lib/contracten/verantwoordelijke'
 
 type Template = {
@@ -281,16 +283,21 @@ function FromTemplateDialog({ template, clients, onClose }: { template: Template
   // Wie volgt het contract op en tekent namens ons tegen (verplicht). Voorstel uit de kaart of de klant.
   const [verantwoordelijke, setVerantwoordelijke] = useState<ContractVerantwoordelijke | null>(null)
   const [zelfGekozen, setZelfGekozen] = useState(false)
+  // Voor welk bedrijf (verbeterplan fase 1): verplicht. Voorstel uit de projectkaart of de dienst.
+  const dienstBedrijf = (slug: string) => STANDAARD_DIENSTEN.find((x) => x.slug === SERVICE_SLUG_NAAR_DIENST[slug])?.bedrijf ?? null
+  const [bedrijf, setBedrijf] = useState<string | null>(() => dienstBedrijf(service))
+  const [bedrijfZelf, setBedrijfZelf] = useState(false)
   useEffect(() => {
     if (zelfGekozen) return
     const q = new URLSearchParams({ ...(clientId ? { client: clientId } : {}), ...(opdrachtId ? { opdracht: opdrachtId } : {}) })
     if (!q.toString()) return
     fetch(`/api/admin/contracts/verantwoordelijke?${q}`, { cache: 'no-store' })
-      .then((r) => r.json()).then((j) => { if (j.voorstel) setVerantwoordelijke(j.voorstel) }).catch(() => null)
+      .then((r) => r.json()).then((j) => { if (j.voorstel) setVerantwoordelijke(j.voorstel); if (j.bedrijf) setBedrijf((b) => b ?? j.bedrijf) }).catch(() => null)
   }, [clientId, opdrachtId, zelfGekozen])
 
   const submit = async () => {
     if (!verantwoordelijke) { setError('Kies wie verantwoordelijk is voor dit contract.'); return }
+    if (!bedrijf) { setError('Kies voor welk bedrijf dit contract is: NextGen Media of NextGen Solutions.'); return }
     setLoading(true); setError(null)
     try {
       const res = await fetch('/api/admin/contracts/from-template', {
@@ -305,6 +312,7 @@ function FromTemplateDialog({ template, clients, onClose }: { template: Template
           expires_at: expiresAt || null,
           ...(opdrachtId ? { opdracht_id: opdrachtId } : {}),
           verantwoordelijke,
+          bedrijf,
         }),
       })
       const json = await readJson(res)
@@ -332,13 +340,17 @@ function FromTemplateDialog({ template, clients, onClose }: { template: Template
             }} />
         </div>
         <div>
+          <span className={lbl} id="tpl-bedrijf-label">Bedrijf *</span>
+          <BedrijfKiezer id="tpl-bedrijf" waarde={bedrijf} onChange={(v) => { setBedrijf(v); setBedrijfZelf(true) }} />
+        </div>
+        <div>
           <span className={lbl} id="tpl-verantwoordelijke-label">Verantwoordelijke *</span>
           <VerantwoordelijkeKiezer id="tpl-verantwoordelijke" waarde={verantwoordelijke} onChange={(v) => { setVerantwoordelijke(v); setZelfGekozen(true) }} />
           <p className="text-[11px] text-gray-400 mt-1">Volgt het contract op en tekent namens ons tegen.</p>
         </div>
         <div>
           <label className={lbl}>Dienst (optioneel)</label>
-          <select className={inp} value={service} onChange={(e) => setService(e.target.value)}>
+          <select className={inp} value={service} onChange={(e) => { setService(e.target.value); const b = dienstBedrijf(e.target.value); if (b && !bedrijfZelf) setBedrijf(b) }}>
             {SERVICES.map((s) => <option key={s.slug} value={s.slug}>{s.label}</option>)}
           </select>
         </div>

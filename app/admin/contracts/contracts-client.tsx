@@ -1,5 +1,6 @@
 'use client'
 
+import { BedrijfLabel } from '@/components/admin/bedrijf-kiezer'
 import { KaartTabel } from '@/components/ui/kaart-tabel'
 
 import { useMemo, useState, useEffect, useCallback } from 'react'
@@ -44,6 +45,8 @@ export type Contract = OverzichtContract & {
   door?: string | null
   /** Verantwoordelijke (= die van de projectkaart): volgt op en tekent namens ons tegen. */
   verantwoordelijke?: string | null
+  /** Voor welk bedrijf (verbeterplan fase 1): nextgenmedia, nextgensolutions of algemeen. */
+  bedrijf?: string | null
   /** Eerste keer dat de klant de tekenlink opende (niet als het team kijkt). */
   klant_geopend_op?: string | null
   /** NextGenMedia tekende na de klant. Getekend zonder dit = wacht op onze handtekening. */
@@ -590,6 +593,7 @@ export function ContractsClient({
                                   <Link href={`/admin/contracts/${c.id}`} className="font-medium hover:text-black">
                                     {c.title}
                                   </Link>
+                                  <span className="ml-1.5 align-middle"><BedrijfLabel bedrijf={c.bedrijf} /></span>
                                   <div className="text-xs text-gray-400 mt-0.5">
                                     {[c.service_slug ? SERVICE_LABELS[c.service_slug] ?? c.service_slug : null, c.verantwoordelijke ? `verantwoordelijke ${c.verantwoordelijke}` : null, c.door ? `door ${c.door}` : null].filter(Boolean).join(' · ')}
                                   </div>

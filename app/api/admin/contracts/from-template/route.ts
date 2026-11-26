@@ -28,6 +28,8 @@ export async function POST(req: NextRequest) {
     const templateId = b.template_id as string
     const client_id = (b.client_id as string) || null
     const service_slug = (b.service_slug as string) || null
+    // Voor welk bedrijf (verbeterplan fase 1): verplicht, tenzij de dienst het al zegt.
+    const bedrijf = ['nextgenmedia', 'nextgensolutions', 'algemeen'].includes(String(b.bedrijf ?? '')) ? String(b.bedrijf) : null
     const signer_name = (b.signer_name as string)?.trim() || null
     const signer_email = (b.signer_email as string)?.trim() || null
     const expires_at = (b.expires_at as string) || null
@@ -36,6 +38,7 @@ export async function POST(req: NextRequest) {
     const contract_type = typeVanContract(b.contract_type)
 
     if (!templateId) return NextResponse.json({ error: 'Template is verplicht' }, { status: 400 })
+    if (!bedrijf && !service_slug) return NextResponse.json({ error: 'Kies voor welk bedrijf dit contract is: NextGen Media of NextGen Solutions.' }, { status: 400 })
 
     const { data: tpl } = await admin.from('contract_templates').select('*').eq('id', templateId).maybeSingle()
     if (!tpl) return NextResponse.json({ error: 'Template niet gevonden' }, { status: 404 })
@@ -54,6 +57,7 @@ export async function POST(req: NextRequest) {
         created_by: user.id,
         template_id: templateId,
         service_slug,
+        bedrijf,
         status: 'draft',
         signer_name,
         signer_email,

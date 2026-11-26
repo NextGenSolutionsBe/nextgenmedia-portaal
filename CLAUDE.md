@@ -41,6 +41,14 @@ Het klantportaal gebruikt een **resolver + service-role** model, niet RLS, als p
 - **Onthouden per serverinstantie**: opslagverbruik 1 uur (`opslagCache` in `lib/notifications.ts`), lijst van accounts voor namen 5 minuten (`gebruikers` in `lib/actor-namen.ts`). Nooit iets dat per gebruiker verschilt.
 - **Pas laden wat je ziet**: een ingeklapt blok laadt zijn kaarten pas bij het openklappen (`PasBijOpenen` in `components/admin/pas-bij-openen.tsx`, bv. Klantapp en toegang op de klantfiche). "Vandaag" telt enkel (drie `count`-vragen) in plaats van het hele notificatiecentrum. Zoeken bij Klanten wacht 250 ms na het typen.
 
+## Bedrijf en dienstencatalogus (verbeterplan fase 1, 26 nov 2026)
+- **Plan en voortgang**: `docs/verbeterplan.md` (100 punten, fasen 0–8) en `docs/verbeterplan-voortgang.md` (wat af is, rijen en checksums). Backup van voor het plan: schema `backup_voor_verbeterplan` (niet via de API bereikbaar), herstellen met `supabase/terugdraaien/herstel-uit-backup.sql`; code van voor het plan = commit `733308a`.
+- **Bedrijf** (`bedrijven`: `nextgenmedia`, `nextgensolutions`, `algemeen`) en **dienst** (`diensten_catalogus`, met subdiensten via `parent_slug`; beheer in Instellingen → **Diensten**) staan als kolom op projectkaarten (`bedrijf`, `dienst_slugs`), offertes, contracten, facturen, factuurregels, maandreeksen, aankopen, kosten, teamtaken, meetings, shoots, opleveringen en aanvragen. Regels in `lib/bedrijven/model.ts`, server `lib/bedrijven/server.ts`, API `/api/admin/bedrijven`.
+- **Vanzelf ingevuld door databanktriggers** (`vul_bedrijf_*`, zelfde regels als `dienst_mapping`): enkel lege velden, nooit uit de verantwoordelijke, nooit een neveneffect. De oude kolommen (`merk`, `diensten`, `service_slug`) blijven en blijven werken.
+- **Te classificeren** (`te_classificeren`, blok op het Command Center voor zaakvoerders): wat geen zeker bedrijf of dienst kreeg, met een voorstel. Kiezen gaat via `zetBedrijfOfDienst` (logboek, en een contract geeft zijn bedrijf door aan zijn facturen zonder bedrijf). Trigger `sync_te_classificeren` sluit een vraag zodra het bedrijf of de dienst er staat.
+- **Weergave Alles / Media / Solutions** (`BedrijfSchakelaar` in de zijbalk, cookie `ngm-bedrijf` + `gebruikers_voorkeuren.bedrijf_filter`, lezen met `leesBedrijfFilter`, filteren met `pastBijFilter`): Algemeen en wat nog geen bedrijf heeft staan altijd in beide.
+- **Nieuw contract en Contract uit template**: bedrijf verplicht (`BedrijfKiezer`), voorstel uit de dienst of de projectkaart; bovenaan het contract `RecordBedrijfKaart`.
+
 ## Platformregels (Platform 1.0 — lees vóór je iets toevoegt)
 - **Geen nieuwe modules zonder expliciete reden.** Het platform is functioneel af; werk bestaande modules uit i.p.v. nieuwe te bouwen.
 - **Klanten zijn de centrale hub.** Beheer klant-gerelateerde info vanaf de klantdetail (`ClientHub`), niet in losse schermen. Nooit dezelfde info op twee plaatsen beheren.

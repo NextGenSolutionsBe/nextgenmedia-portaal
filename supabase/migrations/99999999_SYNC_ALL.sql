@@ -8266,3 +8266,537 @@ create table if not exists public.abm_notities (
 );
 create index if not exists abm_notities_abm on public.abm_notities (abm_id, created_at desc);
 alter table public.abm_notities enable row level security;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Verbeterplan fase 1 (26 nov 2026): bedrijf en dienstencatalogus als basis.
+-- Enkel toevoegend: nieuwe tabellen en nullable kolommen. De backfill schrijft
+-- enkel in de nieuwe kolommen (waar ze nog leeg zijn) en zet updated_at-triggers
+-- even uit, zodat bestaande gegevens en tijdstempels niet veranderen. Wat niet
+-- zeker is, komt in te_classificeren. Terugdraaien: supabase/terugdraaien/fase1.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create table if not exists public.bedrijven (
+  slug text primary key,
+  naam text not null,
+  handelsnaam text,
+  kort text,
+  kleur text,
+  volgorde int not null default 0,
+  actief boolean not null default true,
+  created_at timestamptz not null default now()
+);
+alter table public.bedrijven enable row level security;
+insert into public.bedrijven (slug, naam, handelsnaam, kort, kleur, volgorde) values
+  ('nextgenmedia', 'NextGen Media', 'NextGenMedia', 'Media', '#0F0F0F', 1),
+  ('nextgensolutions', 'NextGen Solutions', 'NextGenSolutions', 'Solutions', '#3B82F6', 2),
+  ('algemeen', 'Algemeen', 'NextGen Agency BV', 'Algemeen', '#6B7280', 3)
+on conflict (slug) do nothing;
+
+create table if not exists public.diensten_catalogus (
+  slug text primary key,
+  naam text not null,
+  bedrijf text not null references public.bedrijven(slug),
+  parent_slug text references public.diensten_catalogus(slug),
+  omschrijving text,
+  inbegrepen text[] not null default '{}',
+  niet_inbegrepen text[] not null default '{}',
+  eenheid text not null default 'eenmalig',
+  terugkerend boolean not null default false,
+  actief boolean not null default true,
+  volgorde int not null default 0,
+  kleur text,
+  min_prijs numeric,
+  min_marge_pct numeric,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'diensten_catalogus_eenheid_check') then
+    alter table public.diensten_catalogus add constraint diensten_catalogus_eenheid_check check (eenheid in ('eenmalig', 'maand', 'uur'));
+  end if;
+end $$;
+alter table public.diensten_catalogus enable row level security;
+insert into public.diensten_catalogus (slug, naam, bedrijf, parent_slug, omschrijving, eenheid, terugkerend, volgorde, kleur) values
+  ('branding', 'Branding', 'nextgenmedia', null, 'Logo, huisstijl en (re)branding.', 'eenmalig', false, 10, '#FDE0DE'),
+  ('social_media', 'Social media', 'nextgenmedia', null, 'Planning, content en beheer van de kanalen.', 'maand', true, 20, '#FFF5C2'),
+  ('marketingstrategie', 'Marketingstrategie & consultancy', 'nextgenmedia', null, 'Richting, plan en advies voor de marketing.', 'uur', false, 30, '#F0E4D6'),
+  ('websites', 'Websites', 'nextgenmedia', null, 'Nieuwe website, redesign, webshop of landingspagina.', 'eenmalig', false, 40, '#ECE2FB'),
+  ('ads', 'Google & Meta Ads', 'nextgenmedia', null, 'Advertenties op Google, Meta, LinkedIn of TikTok.', 'maand', true, 50, '#D6F4EF'),
+  ('foto_video', 'Foto & video', 'nextgenmedia', null, 'Reels, bedrijfsvideo''s, shoots en fotografie.', 'eenmalig', false, 60, '#DCF3E2'),
+  ('ai_automatisatie', 'AI-automatisatie', 'nextgensolutions', null, 'Repetitief werk automatiseren met AI en koppelingen.', 'eenmalig', false, 110, '#DDEBFC'),
+  ('software_op_maat', 'Software op maat', 'nextgensolutions', null, 'Interne tools en software op maat van het bedrijf.', 'eenmalig', false, 120, '#E3E8FD'),
+  ('care', 'Care', 'nextgensolutions', null, 'Maandelijks onderhoud van de automatisaties en software.', 'maand', true, 130, '#E6F0FB')
+on conflict (slug) do nothing;
+insert into public.diensten_catalogus (slug, naam, bedrijf, parent_slug, omschrijving, eenheid, terugkerend, volgorde, kleur) values
+  ('grafisch_ontwerp', 'Grafisch ontwerp', 'nextgenmedia', 'branding', 'Flyers, brochures, visuals, banners en drukwerk.', 'eenmalig', false, 11, '#FDE0DE'),
+  ('emailmarketing', 'E-mailmarketing', 'nextgenmedia', 'marketingstrategie', 'Nieuwsbrieven, campagnes en automatische mails.', 'eenmalig', false, 31, '#F0E4D6'),
+  ('seo', 'SEO', 'nextgenmedia', 'websites', 'Beter gevonden worden in Google.', 'maand', true, 41, '#ECE2FB'),
+  ('website_onderhoud', 'Website-onderhoud', 'nextgenmedia', 'websites', 'Onderhoud en kleine aanpassingen aan de website.', 'maand', true, 42, '#ECE2FB')
+on conflict (slug) do nothing;
+
+-- Oude waarden → catalogus. De oude waarde blijft altijd staan waar ze stond.
+create table if not exists public.dienst_mapping (
+  bron text not null,
+  oude_waarde text not null,
+  dienst_slug text references public.diensten_catalogus(slug),
+  dienst_zeker boolean not null default false,
+  bedrijf text references public.bedrijven(slug),
+  bedrijf_zeker boolean not null default false,
+  opmerking text,
+  primary key (bron, oude_waarde)
+);
+alter table public.dienst_mapping enable row level security;
+insert into public.dienst_mapping (bron, oude_waarde, dienst_slug, dienst_zeker, bedrijf, bedrijf_zeker, opmerking) values
+  ('service_slug', 'social-media', 'social_media', true, 'nextgenmedia', true, null),
+  ('service_slug', 'webdesign', 'websites', true, 'nextgenmedia', true, null),
+  ('service_slug', 'foto-video', 'foto_video', true, 'nextgenmedia', true, null),
+  ('service_slug', 'grafisch-ontwerp', 'grafisch_ontwerp', true, 'nextgenmedia', true, null),
+  ('service_slug', 'marketing-consultancy', 'marketingstrategie', true, 'nextgenmedia', true, null),
+  ('service_slug', 'ads', 'ads', true, 'nextgenmedia', true, null),
+  ('opdracht', 'social_media', 'social_media', true, 'nextgenmedia', true, null),
+  ('opdracht', 'webdesign', 'websites', true, 'nextgenmedia', true, null),
+  ('opdracht', 'foto_video', 'foto_video', true, 'nextgenmedia', true, null),
+  ('opdracht', 'grafisch', 'grafisch_ontwerp', true, 'nextgenmedia', true, null),
+  ('opdracht', 'branding', 'grafisch_ontwerp', true, 'nextgenmedia', true, null),
+  ('opdracht', 'advertising', 'ads', true, 'nextgenmedia', true, null),
+  ('opdracht', 'meta_ads', 'ads', true, 'nextgenmedia', true, null),
+  ('opdracht', 'google_ads', 'ads', true, 'nextgenmedia', true, null),
+  ('opdracht', 'E-mailmarketing', 'emailmarketing', true, 'nextgenmedia', true, null),
+  ('opdracht', 'consultancy', 'marketingstrategie', false, 'nextgenmedia', false, 'Consultancy kan marketing of bedrijfsprocessen zijn.'),
+  ('opdracht', 'ngs', 'ai_automatisatie', false, 'nextgensolutions', true, 'Solutions is zeker, de dienst niet (AI, software op maat of Care).'),
+  ('opdracht', 'Performance marketing', 'ads', false, 'nextgenmedia', true, 'Performance marketing is meestal advertenties.'),
+  ('opdracht', 'founders', 'foto_video', false, 'nextgenmedia', false, 'Founders of Flanders: open vraag.'),
+  ('aanvraag_dienst', 'social_media', 'social_media', true, 'nextgenmedia', true, null),
+  ('aanvraag_dienst', 'foto_video', 'foto_video', true, 'nextgenmedia', true, null),
+  ('aanvraag_dienst', 'content_shoot', 'foto_video', true, 'nextgenmedia', true, null),
+  ('aanvraag_dienst', 'grafisch', 'grafisch_ontwerp', true, 'nextgenmedia', true, null),
+  ('aanvraag_dienst', 'branding', 'grafisch_ontwerp', true, 'nextgenmedia', true, null),
+  ('aanvraag_dienst', 'website', 'websites', true, 'nextgenmedia', true, null),
+  ('aanvraag_dienst', 'seo', 'seo', true, 'nextgenmedia', true, null),
+  ('aanvraag_dienst', 'sea', 'ads', true, 'nextgenmedia', true, null),
+  ('aanvraag_dienst', 'email', 'emailmarketing', true, 'nextgenmedia', true, null),
+  ('aanvraag_dienst', 'ai', 'ai_automatisatie', true, 'nextgensolutions', true, null),
+  ('aanvraag_dienst', 'strategie', 'marketingstrategie', true, 'nextgenmedia', true, null),
+  ('aanvraag_consultancy', 'strategie', 'marketingstrategie', true, 'nextgenmedia', true, null),
+  ('aanvraag_consultancy', 'performance_scan', 'ads', true, 'nextgenmedia', true, null),
+  ('aanvraag_consultancy', 'ads_scan', 'ads', true, 'nextgenmedia', true, null),
+  ('aanvraag_consultancy', 'website_conversie_scan', 'websites', true, 'nextgenmedia', true, null),
+  ('aanvraag_consultancy', 'seo_scan', 'seo', true, 'nextgenmedia', true, null),
+  ('aanvraag_consultancy', 'social_content_strategie', 'social_media', true, 'nextgenmedia', true, null),
+  ('aanvraag_consultancy', 'klantreis_positionering', 'marketingstrategie', true, 'nextgenmedia', true, null),
+  ('aanvraag_consultancy', 'leadgen_funnel', 'marketingstrategie', false, 'nextgenmedia', false, 'Kan marketing of salesproces zijn.'),
+  ('aanvraag_consultancy', 'ai_workshop', 'ai_automatisatie', false, 'nextgensolutions', true, null),
+  ('aanvraag_consultancy', 'ai_scan', 'ai_automatisatie', false, 'nextgensolutions', true, null),
+  ('aanvraag_consultancy', 'workflow_scan', 'ai_automatisatie', false, 'nextgensolutions', true, null),
+  ('aanvraag_consultancy', 'sales_ops_scan', 'software_op_maat', false, 'nextgensolutions', true, null),
+  ('aanvraag_consultancy', 'crm_advies', 'software_op_maat', false, 'nextgensolutions', true, null),
+  ('aanvraag_founders', 'founder_video', 'foto_video', false, 'nextgenmedia', false, 'Founders of Flanders: open vraag.'),
+  ('oplevering', 'video', 'foto_video', true, 'nextgenmedia', true, null),
+  ('oplevering', 'fotos', 'foto_video', true, 'nextgenmedia', true, null),
+  ('oplevering', 'grafisch', 'grafisch_ontwerp', true, 'nextgenmedia', true, null)
+on conflict (bron, oude_waarde) do nothing;
+
+-- Wachtrij voor de zaakvoerders: records zonder zeker bedrijf of dienst.
+create table if not exists public.te_classificeren (
+  id uuid primary key default gen_random_uuid(),
+  tabel text not null,
+  rij_id text not null,
+  veld text not null,
+  voorstel text,
+  reden text,
+  aangemaakt_op timestamptz not null default now(),
+  opgelost_op timestamptz,
+  opgelost_door uuid,
+  opgelost_door_naam text,
+  keuze text,
+  unique (tabel, rij_id, veld)
+);
+create index if not exists te_classificeren_open on public.te_classificeren (tabel, aangemaakt_op) where opgelost_op is null;
+alter table public.te_classificeren enable row level security;
+
+-- Nieuwe kolommen (nullable): bedrijf en dienst.
+alter table public.opdrachten add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.opdrachten add column if not exists dienst_slugs text[];
+alter table public.offertes add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.offertes add column if not exists dienst text references public.diensten_catalogus(slug);
+alter table public.contracts add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.contracts add column if not exists dienst text references public.diensten_catalogus(slug);
+alter table public.invoices add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.invoices add column if not exists dienst text references public.diensten_catalogus(slug);
+alter table public.invoice_lines add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.invoice_lines add column if not exists dienst text references public.diensten_catalogus(slug);
+alter table public.recurring_invoices add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.recurring_invoices add column if not exists dienst text references public.diensten_catalogus(slug);
+alter table public.purchases add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.cost_entries add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.invoice_costs add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.team_taken add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.klant_meetings add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.shoot_briefings add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.shoot_briefings add column if not exists dienst text references public.diensten_catalogus(slug);
+alter table public.opleveringen add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.opleveringen add column if not exists dienst text references public.diensten_catalogus(slug);
+alter table public.klant_aanvragen add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.klant_aanvragen add column if not exists dienst text references public.diensten_catalogus(slug);
+alter table public.ngs_deals add column if not exists dienst text references public.diensten_catalogus(slug);
+create index if not exists opdrachten_bedrijf on public.opdrachten (bedrijf);
+create index if not exists contracts_bedrijf on public.contracts (bedrijf);
+create index if not exists invoices_bedrijf on public.invoices (bedrijf);
+
+-- ── Backfill: enkel duidelijke regels, enkel lege nieuwe kolommen ──────────
+do $$
+declare t text;
+begin
+  -- updated_at-triggers even uit, zodat bestaande tijdstempels niet veranderen.
+  foreach t in array array['invoices:trg_invoices_updated', 'purchases:trg_purchases_updated', 'recurring_invoices:trg_recurring_invoices_updated', 'cost_entries:trg_cost_entries_updated', 'shoot_briefings:trg_shoot_briefings_updated'] loop
+    if exists (select 1 from pg_trigger where tgname = split_part(t, ':', 2)) then
+      execute format('alter table public.%I disable trigger %I', split_part(t, ':', 1), split_part(t, ':', 2));
+    end if;
+  end loop;
+
+  -- Projectkaarten: diensten (enkel zekere mapping), bedrijf uit merk of uit de diensten.
+  update public.opdrachten o set dienst_slugs = s.slugs
+  from (
+    select o2.id, array_agg(distinct m.dienst_slug order by m.dienst_slug) as slugs
+    from public.opdrachten o2
+    cross join lateral unnest(coalesce(o2.diensten, '{}')) d
+    join public.dienst_mapping m on m.bron = 'opdracht' and m.oude_waarde = d and m.dienst_zeker and m.dienst_slug is not null
+    group by o2.id
+  ) s where s.id = o.id and o.dienst_slugs is null;
+
+  update public.opdrachten set bedrijf = merk where bedrijf is null and merk in ('nextgenmedia', 'nextgensolutions');
+
+  update public.opdrachten o set bedrijf = s.b
+  from (
+    select o2.id, min(m.bedrijf) as b
+    from public.opdrachten o2
+    cross join lateral unnest(o2.diensten) d
+    left join public.dienst_mapping m on m.bron = 'opdracht' and m.oude_waarde = d
+    where o2.bedrijf is null and cardinality(o2.diensten) > 0
+    group by o2.id
+    having bool_and(m.bedrijf is not null and m.bedrijf_zeker) and count(distinct m.bedrijf) = 1
+  ) s where s.id = o.id and o.bedrijf is null;
+
+  -- Contracten: dienst uit service_slug; bedrijf uit de dienst of de projectkaart.
+  update public.contracts c set dienst = m.dienst_slug
+  from public.dienst_mapping m
+  where m.bron = 'service_slug' and m.oude_waarde = c.service_slug and m.dienst_zeker and c.dienst is null;
+
+  update public.contracts c set bedrijf = k.bedrijf
+  from public.diensten_catalogus k where k.slug = c.dienst and c.bedrijf is null;
+
+  update public.contracts c set bedrijf = o.bedrijf
+  from public.opdrachten o where o.contract_id = c.id and o.bedrijf is not null and c.bedrijf is null;
+
+  -- Facturen: dienst uit service_slug, anders uit het contract; bedrijf uit de dienst, anders uit het contract.
+  update public.invoices i set dienst = m.dienst_slug
+  from public.dienst_mapping m
+  where m.bron = 'service_slug' and m.oude_waarde = i.service_slug and m.dienst_zeker and i.dienst is null;
+
+  update public.invoices i set dienst = c.dienst
+  from public.contracts c where c.id = i.contract_id and c.dienst is not null and i.dienst is null;
+
+  update public.invoices i set bedrijf = k.bedrijf
+  from public.diensten_catalogus k where k.slug = i.dienst and i.bedrijf is null;
+
+  update public.invoices i set bedrijf = c.bedrijf
+  from public.contracts c where c.id = i.contract_id and c.bedrijf is not null and i.bedrijf is null;
+
+  -- Factuurregels: eigen service_slug, anders de factuur.
+  update public.invoice_lines l set dienst = m.dienst_slug
+  from public.dienst_mapping m
+  where m.bron = 'service_slug' and m.oude_waarde = l.service_slug and m.dienst_zeker and l.dienst is null;
+
+  update public.invoice_lines l set dienst = i.dienst
+  from public.invoices i where i.id = l.invoice_id and i.dienst is not null and l.dienst is null;
+
+  update public.invoice_lines l set bedrijf = k.bedrijf
+  from public.diensten_catalogus k where k.slug = l.dienst and l.bedrijf is null;
+
+  update public.invoice_lines l set bedrijf = i.bedrijf
+  from public.invoices i where i.id = l.invoice_id and i.bedrijf is not null and l.bedrijf is null;
+
+  -- Maandreeksen: via het contract.
+  update public.recurring_invoices r set dienst = c.dienst, bedrijf = coalesce(r.bedrijf, c.bedrijf)
+  from public.contracts c where c.id = r.contract_id and r.dienst is null and c.dienst is not null;
+
+  update public.recurring_invoices r set bedrijf = c.bedrijf
+  from public.contracts c where c.id = r.contract_id and r.bedrijf is null and c.bedrijf is not null;
+
+  -- Kosten op een factuur volgen de factuur.
+  update public.invoice_costs x set bedrijf = i.bedrijf
+  from public.invoices i where i.id = x.invoice_id and i.bedrijf is not null and x.bedrijf is null;
+
+  -- Teamtaken: het gekozen merk.
+  update public.team_taken set bedrijf = merk where bedrijf is null and merk in ('nextgenmedia', 'nextgensolutions');
+
+  -- Shoots: foto & video, dus Media.
+  update public.shoot_briefings set dienst = 'foto_video' where dienst is null;
+  update public.shoot_briefings set bedrijf = 'nextgenmedia' where bedrijf is null;
+
+  -- Opleveringen: video, foto's en grafisch zijn Media.
+  update public.opleveringen o set dienst = m.dienst_slug, bedrijf = coalesce(o.bedrijf, m.bedrijf)
+  from public.dienst_mapping m where m.bron = 'oplevering' and m.oude_waarde = o.soort and m.dienst_zeker and o.dienst is null;
+
+  -- Aanvragen: het type uit de catalogus van de klantapp.
+  update public.klant_aanvragen a set dienst = m.dienst_slug
+  from public.dienst_mapping m where m.bron = 'aanvraag_' || a.soort and m.oude_waarde = a.type and m.dienst_zeker and a.dienst is null;
+
+  update public.klant_aanvragen a set bedrijf = m.bedrijf
+  from public.dienst_mapping m where m.bron = 'aanvraag_' || a.soort and m.oude_waarde = a.type and m.bedrijf_zeker and a.bedrijf is null;
+
+  foreach t in array array['invoices:trg_invoices_updated', 'purchases:trg_purchases_updated', 'recurring_invoices:trg_recurring_invoices_updated', 'cost_entries:trg_cost_entries_updated', 'shoot_briefings:trg_shoot_briefings_updated'] loop
+    if exists (select 1 from pg_trigger where tgname = split_part(t, ':', 2)) then
+      execute format('alter table public.%I enable trigger %I', split_part(t, ':', 1), split_part(t, ':', 2));
+    end if;
+  end loop;
+end $$;
+
+-- ── Te classificeren: wat geen zeker bedrijf of dienst kreeg, met een voorstel ──
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'opdrachten', o.id::text, 'bedrijf',
+  case when 'ngs' = any(coalesce(o.diensten, '{}')) then 'nextgensolutions' else 'nextgenmedia' end,
+  case when coalesce(cardinality(o.diensten), 0) = 0 then 'Projectkaart zonder dienst.'
+       when 'ngs' = any(o.diensten) then 'Diensten van Media en Solutions op één kaart.'
+       else 'Dienst kan bij beide bedrijven horen (bv. consultancy).' end
+from public.opdrachten o where o.bedrijf is null
+on conflict (tabel, rij_id, veld) do nothing;
+
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'opdrachten', o.id::text, 'dienst', min(m.dienst_slug), min(coalesce(m.opmerking, 'Dienst niet zeker.'))
+from public.opdrachten o
+cross join lateral unnest(coalesce(o.diensten, '{}')) d
+join public.dienst_mapping m on m.bron = 'opdracht' and m.oude_waarde = d and not m.dienst_zeker
+where not (coalesce(o.dienst_slugs, '{}') @> array[m.dienst_slug])
+group by o.id
+on conflict (tabel, rij_id, veld) do nothing;
+
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'contracts', c.id::text, 'bedrijf',
+  case when c.tegengetekend_bedrijf = 'NextGenSolutions' then 'nextgensolutions' else 'nextgenmedia' end,
+  'Contract zonder dienst en zonder projectkaart met bedrijf.'
+from public.contracts c where c.bedrijf is null
+on conflict (tabel, rij_id, veld) do nothing;
+
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'contracts', c.id::text, 'dienst',
+  (select o.dienst_slugs[1] from public.opdrachten o where o.contract_id = c.id and cardinality(o.dienst_slugs) = 1 limit 1),
+  'Contract zonder dienst.'
+from public.contracts c where c.dienst is null
+on conflict (tabel, rij_id, veld) do nothing;
+
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'invoices', i.id::text, 'bedrijf', 'nextgenmedia',
+  case when i.contract_id is null then 'Factuur zonder contract en zonder dienst.' else 'Contract van deze factuur heeft nog geen bedrijf.' end
+from public.invoices i where i.bedrijf is null
+on conflict (tabel, rij_id, veld) do nothing;
+
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'recurring_invoices', r.id::text, 'bedrijf', 'nextgenmedia', 'Maandreeks zonder contract met bedrijf.'
+from public.recurring_invoices r where r.bedrijf is null
+on conflict (tabel, rij_id, veld) do nothing;
+
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'klant_meetings', m.id::text, 'bedrijf', 'nextgenmedia', 'Meeting zonder bedrijf.'
+from public.klant_meetings m where m.bedrijf is null
+on conflict (tabel, rij_id, veld) do nothing;
+
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'purchases', p.id::text, 'bedrijf', 'algemeen', 'Aankoop zonder bedrijf.'
+from public.purchases p where p.bedrijf is null
+on conflict (tabel, rij_id, veld) do nothing;
+
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'cost_entries', x.id::text, 'bedrijf', 'algemeen', 'Kost zonder bedrijf.'
+from public.cost_entries x where x.bedrijf is null
+on conflict (tabel, rij_id, veld) do nothing;
+
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'klant_aanvragen', a.id::text, 'bedrijf',
+  (select m.bedrijf from public.dienst_mapping m where m.bron = 'aanvraag_' || a.soort and m.oude_waarde = a.type),
+  'Aanvraag zonder zeker bedrijf.'
+from public.klant_aanvragen a where a.bedrijf is null
+on conflict (tabel, rij_id, veld) do nothing;
+
+insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+select 'opleveringen', o.id::text, 'bedrijf', 'nextgenmedia', 'Oplevering zonder zeker bedrijf.'
+from public.opleveringen o where o.bedrijf is null
+on conflict (tabel, rij_id, veld) do nothing;
+
+-- ── Verbeterplan fase 1b (26 nov 2026): nieuwe records krijgen vanzelf bedrijf en dienst ──
+-- Zelfde vaste regels als de backfill. Vult enkel lege velden, overschrijft nooit een keuze.
+-- Geen enkele trigger verstuurt iets (geen mail, ClickUp, Google of melding).
+create or replace function public.dienst_uit_mapping(p_bron text, p_waarde text) returns text
+language sql stable as $$
+  select dienst_slug from public.dienst_mapping where bron = p_bron and oude_waarde = p_waarde and dienst_zeker
+$$;
+create or replace function public.bedrijf_van_dienst(p_dienst text) returns text
+language sql stable as $$
+  select bedrijf from public.diensten_catalogus where slug = p_dienst
+$$;
+
+create or replace function public.vul_bedrijf_contract() returns trigger language plpgsql as $$
+begin
+  if new.dienst is null and new.service_slug is not null then new.dienst := public.dienst_uit_mapping('service_slug', new.service_slug); end if;
+  if new.bedrijf is null and new.dienst is not null then new.bedrijf := public.bedrijf_van_dienst(new.dienst); end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_contract on public.contracts;
+create trigger trg_vul_bedrijf_contract before insert or update of service_slug, dienst, bedrijf on public.contracts
+  for each row execute function public.vul_bedrijf_contract();
+
+create or replace function public.vul_bedrijf_factuur() returns trigger language plpgsql as $$
+declare c_dienst text; c_bedrijf text;
+begin
+  if new.contract_id is not null then
+    select dienst, bedrijf into c_dienst, c_bedrijf from public.contracts where id = new.contract_id;
+  end if;
+  if new.dienst is null and new.service_slug is not null then new.dienst := public.dienst_uit_mapping('service_slug', new.service_slug); end if;
+  if new.dienst is null then new.dienst := c_dienst; end if;
+  if new.bedrijf is null and new.dienst is not null then new.bedrijf := public.bedrijf_van_dienst(new.dienst); end if;
+  if new.bedrijf is null then new.bedrijf := c_bedrijf; end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_factuur on public.invoices;
+create trigger trg_vul_bedrijf_factuur before insert or update of service_slug, contract_id, dienst, bedrijf on public.invoices
+  for each row execute function public.vul_bedrijf_factuur();
+drop trigger if exists trg_vul_bedrijf_reeks on public.recurring_invoices;
+create trigger trg_vul_bedrijf_reeks before insert or update of service_slug, contract_id, dienst, bedrijf on public.recurring_invoices
+  for each row execute function public.vul_bedrijf_factuur();
+
+create or replace function public.vul_bedrijf_factuurregel() returns trigger language plpgsql as $$
+declare i_dienst text; i_bedrijf text; c_dienst text; c_bedrijf text;
+begin
+  if new.invoice_id is not null then select dienst, bedrijf into i_dienst, i_bedrijf from public.invoices where id = new.invoice_id; end if;
+  if new.contract_id is not null then select dienst, bedrijf into c_dienst, c_bedrijf from public.contracts where id = new.contract_id; end if;
+  if new.dienst is null and new.service_slug is not null then new.dienst := public.dienst_uit_mapping('service_slug', new.service_slug); end if;
+  if new.dienst is null then new.dienst := coalesce(i_dienst, c_dienst); end if;
+  if new.bedrijf is null and new.dienst is not null then new.bedrijf := public.bedrijf_van_dienst(new.dienst); end if;
+  if new.bedrijf is null then new.bedrijf := coalesce(i_bedrijf, c_bedrijf); end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_factuurregel on public.invoice_lines;
+create trigger trg_vul_bedrijf_factuurregel before insert or update of service_slug, invoice_id, contract_id, dienst, bedrijf on public.invoice_lines
+  for each row execute function public.vul_bedrijf_factuurregel();
+
+create or replace function public.vul_bedrijf_factuurkost() returns trigger language plpgsql as $$
+begin
+  if new.bedrijf is null and new.invoice_id is not null then select bedrijf into new.bedrijf from public.invoices where id = new.invoice_id; end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_factuurkost on public.invoice_costs;
+create trigger trg_vul_bedrijf_factuurkost before insert on public.invoice_costs
+  for each row execute function public.vul_bedrijf_factuurkost();
+
+-- Projectkaarten: diensten (zeker) naar de catalogus; manueel toegevoegde catalogusdiensten blijven.
+-- Bedrijf volgt het gekozen merk; anders afgeleid als alle diensten zeker bij één bedrijf horen.
+create or replace function public.vul_bedrijf_opdracht() returns trigger language plpgsql as $$
+declare nieuw_auto text[]; oud_auto text[]; handmatig text[]; afgeleid text; aantal int; onzeker int;
+begin
+  select coalesce(array_agg(distinct m.dienst_slug order by m.dienst_slug), '{}') into nieuw_auto
+  from unnest(coalesce(new.diensten, '{}')) d join public.dienst_mapping m on m.bron = 'opdracht' and m.oude_waarde = d and m.dienst_zeker and m.dienst_slug is not null;
+  if tg_op = 'INSERT' then
+    new.dienst_slugs := case when new.dienst_slugs is null then nullif(nieuw_auto, '{}') else (select array_agg(distinct x order by x) from unnest(new.dienst_slugs || nieuw_auto) x) end;
+  elsif new.diensten is distinct from old.diensten then
+    select coalesce(array_agg(distinct m.dienst_slug), '{}') into oud_auto
+    from unnest(coalesce(old.diensten, '{}')) d join public.dienst_mapping m on m.bron = 'opdracht' and m.oude_waarde = d and m.dienst_zeker and m.dienst_slug is not null;
+    select coalesce(array_agg(x), '{}') into handmatig from unnest(coalesce(old.dienst_slugs, '{}')) x where not (x = any(oud_auto));
+    new.dienst_slugs := (select nullif(coalesce(array_agg(distinct x order by x), '{}'), '{}') from unnest(handmatig || nieuw_auto) x);
+  end if;
+
+  if new.merk in ('nextgenmedia', 'nextgensolutions') and (tg_op = 'INSERT' or new.merk is distinct from old.merk) then
+    new.bedrijf := new.merk;
+  elsif new.bedrijf is null and cardinality(coalesce(new.diensten, '{}')) > 0 then
+    select min(m.bedrijf), count(distinct m.bedrijf), count(*) filter (where m.bedrijf is null or not m.bedrijf_zeker)
+      into afgeleid, aantal, onzeker
+    from unnest(new.diensten) d left join public.dienst_mapping m on m.bron = 'opdracht' and m.oude_waarde = d;
+    if aantal = 1 and onzeker = 0 then new.bedrijf := afgeleid; end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_opdracht on public.opdrachten;
+create trigger trg_vul_bedrijf_opdracht before insert or update of merk, diensten, bedrijf, dienst_slugs on public.opdrachten
+  for each row execute function public.vul_bedrijf_opdracht();
+
+create or replace function public.vul_bedrijf_aanvraag() returns trigger language plpgsql as $$
+declare m record;
+begin
+  select * into m from public.dienst_mapping where bron = 'aanvraag_' || new.soort and oude_waarde = new.type;
+  if found then
+    if new.dienst is null and m.dienst_zeker then new.dienst := m.dienst_slug; end if;
+    if new.bedrijf is null and m.bedrijf_zeker then new.bedrijf := m.bedrijf; end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_aanvraag on public.klant_aanvragen;
+create trigger trg_vul_bedrijf_aanvraag before insert on public.klant_aanvragen
+  for each row execute function public.vul_bedrijf_aanvraag();
+
+create or replace function public.vul_bedrijf_shoot() returns trigger language plpgsql as $$
+begin
+  if new.dienst is null then new.dienst := 'foto_video'; end if;
+  if new.bedrijf is null then new.bedrijf := public.bedrijf_van_dienst(new.dienst); end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_shoot on public.shoot_briefings;
+create trigger trg_vul_bedrijf_shoot before insert on public.shoot_briefings
+  for each row execute function public.vul_bedrijf_shoot();
+
+create or replace function public.vul_bedrijf_oplevering() returns trigger language plpgsql as $$
+declare m record;
+begin
+  if new.dienst is null then
+    select * into m from public.dienst_mapping where bron = 'oplevering' and oude_waarde = new.soort and dienst_zeker;
+    if found then new.dienst := m.dienst_slug; end if;
+  end if;
+  if new.bedrijf is null and new.dienst is not null then new.bedrijf := public.bedrijf_van_dienst(new.dienst); end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_oplevering on public.opleveringen;
+create trigger trg_vul_bedrijf_oplevering before insert or update of soort on public.opleveringen
+  for each row execute function public.vul_bedrijf_oplevering();
+
+create or replace function public.vul_bedrijf_teamtaak() returns trigger language plpgsql as $$
+begin
+  if new.merk in ('nextgenmedia', 'nextgensolutions') and (new.bedrijf is null or tg_op = 'INSERT' or new.merk is distinct from old.merk) then new.bedrijf := new.merk; end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_teamtaak on public.team_taken;
+create trigger trg_vul_bedrijf_teamtaak before insert or update of merk on public.team_taken
+  for each row execute function public.vul_bedrijf_teamtaak();
+
+-- Wachtrij bijhouden: een gekozen bedrijf of dienst lost de open vraag op;
+-- een nieuwe projectkaart, contract of factuur zonder bedrijf komt erbij.
+create or replace function public.sync_te_classificeren() returns trigger language plpgsql as $$
+declare heeft_dienst boolean;
+begin
+  if tg_op = 'UPDATE' and new.bedrijf is not distinct from old.bedrijf
+     and (to_jsonb(new) ->> 'dienst') is not distinct from (to_jsonb(old) ->> 'dienst') then
+    return null;
+  end if;
+  if new.bedrijf is not null then
+    update public.te_classificeren set opgelost_op = now(), keuze = new.bedrijf
+    where tabel = tg_table_name and rij_id = new.id::text and veld = 'bedrijf' and opgelost_op is null;
+  elsif tg_op = 'INSERT' and tg_table_name in ('opdrachten', 'contracts', 'invoices') then
+    insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+    values (tg_table_name, new.id::text, 'bedrijf', 'nextgenmedia', 'Nieuw aangemaakt zonder bedrijf.')
+    on conflict (tabel, rij_id, veld) do nothing;
+  end if;
+  heeft_dienst := tg_table_name in ('contracts', 'invoices', 'recurring_invoices', 'klant_aanvragen', 'opleveringen');
+  if heeft_dienst and (to_jsonb(new) ->> 'dienst') is not null then
+    update public.te_classificeren set opgelost_op = now(), keuze = to_jsonb(new) ->> 'dienst'
+    where tabel = tg_table_name and rij_id = new.id::text and veld = 'dienst' and opgelost_op is null;
+  end if;
+  return null;
+end $$;
+do $$
+declare t text;
+begin
+  foreach t in array array['opdrachten', 'contracts', 'invoices', 'recurring_invoices', 'klant_meetings', 'purchases', 'cost_entries', 'klant_aanvragen', 'opleveringen'] loop
+    execute format('drop trigger if exists trg_sync_te_classificeren on public.%I', t);
+    execute format('create trigger trg_sync_te_classificeren after insert or update on public.%I for each row execute function public.sync_te_classificeren()', t);
+  end loop;
+end $$;
+
+-- Verbeterplan fase 1c (26 nov 2026): eigen weergave Alles / Media / Solutions per gebruiker.
+alter table public.gebruikers_voorkeuren add column if not exists bedrijf_filter text;

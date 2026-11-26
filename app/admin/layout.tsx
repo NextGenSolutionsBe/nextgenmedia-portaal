@@ -6,6 +6,7 @@ import { Toaster } from 'sonner'
 import { leesInstellingen, leesPersoon, leesVoorkeuren } from '@/lib/instellingen/laden'
 import { moduleBeschikbaar, magActie, MODULE_INSTELLINGEN_KEY } from '@/lib/instellingen/model'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { leesBedrijfFilter } from '@/lib/bedrijven/weergave'
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   // Rol + modulerechten komen bij voorkeur uit de middleware, die ze net al
@@ -31,8 +32,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       return data as { id: string; actief: boolean | null } | null
     } catch { return null }
   })()
-  const [instellingen, persoon, voorkeuren, dossier] = await Promise.all([
-    leesInstellingen(), leesPersoon(), leesVoorkeuren(ik.userId), dossierLezing,
+  const [instellingen, persoon, voorkeuren, dossier, bedrijfFilter] = await Promise.all([
+    leesInstellingen(), leesPersoon(), leesVoorkeuren(ik.userId), dossierLezing, leesBedrijfFilter(ik.userId),
   ])
   const verborgenPersoonlijk = persoon ? voorkeuren : []
   const rol = persoon?.rol ?? (role === 'admin' ? 'hoofdbeheerder' : 'medewerker')
@@ -53,6 +54,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         verborgenPersoonlijk={verborgenPersoonlijk}
         toonInstellingen={toonInstellingen}
         mijnWerk={mijnWerk}
+        bedrijfFilter={bedrijfFilter}
       />
       <main className="flex-1 min-w-0 md:ml-[var(--sidebar-width)] min-h-screen overflow-x-clip">
         <div className={`max-w-[1400px] mx-auto px-4 pb-8 md:pt-6 md:px-6 lg:px-8 ${role === 'admin' ? 'pt-0' : 'pt-16'}`}>
