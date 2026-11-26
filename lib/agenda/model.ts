@@ -27,7 +27,8 @@ export type Status = 'open' | 'klaar'
 export type Item = {
   id: string
   /** 'ag' = agenda-item; 'meeting' = uit de Meeting Inplanner (klant_meetings, Google + Meet). */
-  bron: 'ag' | 'meeting'
+  /** ag = taak in de agenda, meeting = Meeting Inplanner, shoot = Shoot planner (enkel tonen; openen gaat naar de planner). */
+  bron: 'ag' | 'meeting' | 'shoot'
   soort: Soort
   titel: string
   beschrijving: string | null
@@ -506,4 +507,38 @@ export function tijdTekst(i: MetTijden, d?: string): string {
 }
 export function kortDag(d: string): string {
   return new Date(`${d}T12:00:00Z`).toLocaleDateString('nl-BE', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })
+}
+
+
+// ── Shoots uit de Shoot planner in de agenda (26 nov 2026) ─────────────────
+
+export type ShootRij = { id: string; client_id: string | null; titel: string | null; shoot_date: string; start_time: string | null; end_time: string | null; location: string | null; status: string | null; betrokkenen: unknown; created_by: string | null; updated_at: string | null }
+
+/**
+ * Een shoot als item in de kalender: op het uur van het programma (begin en
+ * einde uit de planner), zonder uur een hele dag; een einde dat ontbreekt = een uur.
+ * Wie erbij is (op e-mail) en wie ze maakte staan erop, zodat ze in "Mijn agenda" staat.
+ * Afgerond = afgevinkt. Een geannuleerde shoot komt er niet in (zie shootsInBereik).
+ */
+export function shootAlsItem(r: ShootRij, klant: string, perEmail: globalThis.Map<string, string>, perGebruiker: globalThis.Map<string, string>): Item {
+  const uurVan = (t: string | null) => (t && /^\d{1,2}:\d{2}/.test(t) ? t.slice(0, 5).padStart(5, '0') : null)
+  const plus = (t: string, min: number) => { const m = Math.min(23 * 60 + 59, Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5)) + min); return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}` }
+  const start = uurVan(r.start_time)
+  let einde = uurVan(r.end_time)
+  if (start && (!einde || einde <= start)) einde = plus(start, 60)
+  const toegewezen: string[] = []
+  for (const b of Array.isArray(r.betrokkenen) ? r.betrokkenen as { email?: string }[] : []) {
+    const p = b?.email ? perEmail.get(String(b.email).toLowerCase()) : null
+    if (p && !toegewezen.includes(p)) toegewezen.push(p)
+  }
+  const maker = r.created_by ? perGebruiker.get(r.created_by) ?? null : null
+  if (maker && !toegewezen.includes(maker)) toegewezen.push(maker)
+  const klaar = r.status === 'afgerond'
+  return {
+    id: r.id, bron: 'shoot', soort: 'meeting', titel: r.titel?.trim() || `Shoot${klant ? ` ${klant}` : ''}`, beschrijving: null,
+    status: klaar ? 'klaar' : 'open', clickup_status: null, clickup_status_kleur: null, urgent: false, prioriteit: null,
+    start_op: start ? zoneNaarIso(r.shoot_date, start) : null, eind_op: zoneNaarIso(r.shoot_date, start ? einde! : '00:00'), deadline_op: null, heel_dag: !start,
+    lijst_id: null, parent_id: null, client_id: r.client_id, labels: [], kleur: null, locatie: r.location, meet_url: null, prive: false,
+    eigenaar_id: maker, toegewezen, afgerond_op: klaar ? r.updated_at : null, afgerond_door: null, clickup_url: null, velden: null, updated_at: r.updated_at ?? '',
+  }
 }

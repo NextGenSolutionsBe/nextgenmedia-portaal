@@ -37,15 +37,18 @@ const momentopname = (k: string, p: ShootPlan, b: Bestand | null) => JSON.string
 const plakTekst = (oud: string, nieuw: string) => (oud.trim() ? `${oud.trimEnd()}\n\n${nieuw.trim()}` : nieuw.trim())
 
 /** Eén shoot: de briefing, het plan per uur en locatie, wie erbij is en versturen. */
-export function ShootEditor({ id, startDatum, startKlant, magAanpassen, magVerwijderen }: {
+export function ShootEditor({ id, startDatum, startKlant, startVan, startTot, terug, magAanpassen, magVerwijderen }: {
   id: string; startDatum?: string | null; startKlant?: string | null; magAanpassen: boolean; magVerwijderen: boolean
+  /** Vanuit de agenda: het uur dat je koos wordt het eerste tijdstip van het programma. */
+  startVan?: string | null; startTot?: string | null; terug?: 'agenda' | null
 }) {
   const router = useRouter()
   const nieuw = id === 'nieuw'
   const [laden, setLaden] = useState(!nieuw)
   const [fout, setFout] = useState<string | null>(null)
   const [klantId, setKlantId] = useState(startKlant ?? '')
-  const [plan, setPlan] = useState<ShootPlan>({ ...LEEG_PLAN, datum: startDatum ?? '' })
+  const [plan, setPlan] = useState<ShootPlan>({ ...LEEG_PLAN, datum: startDatum ?? '', programma: startVan ? [{ ...leegPunt(startVan), tot: startTot && startTot > startVan ? startTot : '' }] : [] })
+  const terugNaar = terug === 'agenda' ? { href: `/admin/agenda${plan.datum ? `?datum=${plan.datum}` : ''}`, label: 'Terug naar de agenda' } : { href: '/admin/shoots', label: 'Terug naar de planner' }
   const [bestand, setBestand] = useState<Bestand | null>(null)
   const [versie, setVersie] = useState<number | null>(null)
   const [snapshot, setSnapshot] = useState('')
@@ -157,7 +160,7 @@ export function ShootEditor({ id, startDatum, startKlant, magAanpassen, magVerwi
         throw new Error(j.error || 'Bewaren mislukt')
       }
       toast.success(nieuw ? 'Shoot aangemaakt.' : 'Bewaard.')
-      if (nieuw) router.replace(`/admin/shoots/${j.id}`)
+      if (nieuw) router.replace(`/admin/shoots/${j.id}${terug === 'agenda' ? '?terug=agenda' : ''}`)
       else await laad()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt') } finally { setBezig(null) }
   }, [bestand, id, klantId, laad, nieuw, plan, router, versie])
@@ -187,9 +190,9 @@ export function ShootEditor({ id, startDatum, startKlant, magAanpassen, magVerwi
     <div className="space-y-4 pb-24 max-w-4xl">
       {/* Kop */}
       <div className="flex items-start gap-3 flex-wrap">
-        <Link href="/admin/shoots" className="h-9 w-9 rounded-full hover:bg-gray-100 flex items-center justify-center shrink-0" aria-label="Terug naar de planner"><ArrowLeft className="h-4 w-4" /></Link>
+        <Link href={terugNaar.href} className="h-9 w-9 rounded-full hover:bg-gray-100 flex items-center justify-center shrink-0" aria-label={terugNaar.label} title={terugNaar.label}><ArrowLeft className="h-4 w-4" /></Link>
         <div className="min-w-0 flex-1">
-          <div className="text-xs text-gray-500">Shoot planner</div>
+          <div className="text-xs text-gray-500">{terug === 'agenda' ? <Link href={terugNaar.href} className="hover:underline">Agenda</Link> : 'Shoot planner'}</div>
           <h1 className="text-xl font-semibold truncate">{nieuw && !plan.titel ? 'Nieuwe shoot' : shootNaam({ titel: plan.titel, klant: klant?.company_name })}</h1>
           {!nieuw && meta.updated_at && <p className="text-[11px] text-gray-500">Laatst bewaard {new Date(meta.updated_at).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}{meta.bijgewerkt_door ? ` door ${meta.bijgewerkt_door.split('@')[0]}` : ''}</p>}
         </div>

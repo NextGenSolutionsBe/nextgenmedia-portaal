@@ -24,6 +24,8 @@ export type BoomData = {
   clickup: ClickupBron[]
   mailVoorstellen: number
   meetings: boolean
+  /** Mag shoots plannen in de Shoot planner. */
+  shoots?: boolean
   rechten: { toevoegen?: boolean; aanpassen?: boolean; verwijderen?: boolean; instellingen?: boolean }
 }
 

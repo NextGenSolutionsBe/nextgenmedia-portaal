@@ -279,7 +279,11 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
       toast.success(`Verplaatst naar ${wanneerTekst}`, { action: { label: 'Ongedaan maken', onClick: () => { pasLokaalAan(i.id, oud); actie({ actie: 'item.wijzig', id: i.id, ...oud }).catch(() => toast.error('Terugzetten mislukt')) } } })
     } catch (e) { pasLokaalAan(i.id, oud); toast.error(e instanceof Error ? e.message : 'Verplaatsen mislukt') }
   }
-  const open = (i: Item) => { if (i.bron === 'meeting') { laadOpties(); setMv({ soort: 'detail', id: i.id }) } else setOpenItem(i.id) }
+  const open = (i: Item) => {
+    // Een shoot open je in de Shoot planner (met de weg terug naar de agenda).
+    if (i.bron === 'shoot') { window.location.assign(`/admin/shoots/${i.id}?terug=agenda`); return }
+    if (i.bron === 'meeting') { laadOpties(); setMv({ soort: 'detail', id: i.id }) } else setOpenItem(i.id)
+  }
   const laadOpties = useCallback(() => { if (!opties) meetingApi<Opties>('/api/admin/meetings?opties=1').then(setOpties).catch(() => toast.error('De Meeting Inplanner kon niet laden.')) }, [opties])
 
   const nieuwDoc = async (waar: { space_id?: string; map_id?: string; lijst_id?: string }) => {
