@@ -434,3 +434,15 @@ input[type='search']::-webkit-search-results-decoration { -webkit-appearance: no
 .ag-doc .ProseMirror img { max-width: 100%; height: auto; border-radius: 10px; display: block; }
 .ag-doc .ProseMirror img.ProseMirror-selectednode { outline: 2px solid #0f0f0f; outline-offset: 2px; }
 .ag-doc .ProseMirror p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: #a3a3a3; float: left; height: 0; pointer-events: none; }
+/* Beschrijving van een taak: dezelfde opmaak, compacter, brede tabellen schuiven opzij. */
+.ag-doc-kort .ProseMirror { font-size: 14.5px; line-height: 1.6; min-height: 5.5rem; padding-bottom: 0.5rem; }
+.ag-doc-kort .ProseMirror h1 { font-size: 1.45rem; margin-top: 1em; }
+.ag-doc-kort .ProseMirror h2 { font-size: 1.2rem; margin-top: 1em; }
+.ag-doc-kort .ProseMirror h3 { font-size: 1.04rem; margin-top: 0.9em; }
+.ag-doc-kort .ProseMirror .tableWrapper { margin: 0.75em 0; border: 1px solid #e0e0e0; border-radius: 10px; }
+.ag-doc-kort .ProseMirror table { table-layout: auto; width: max-content; min-width: 100%; font-size: 13px; line-height: 1.45; }
+.ag-doc-kort .ProseMirror td, .ag-doc-kort .ProseMirror th { min-width: 4.5rem; max-width: 18rem; border-top: 0; border-left: 0; }
+.ag-doc-kort .ProseMirror tr > *:last-child { border-right: 0; }
+.ag-doc-kort .ProseMirror tr:last-child > td { border-bottom: 0; }
+.ag-doc-kort .ProseMirror a { color: #0f0f0f; }
+.ag-doc-kort .sticky { top: -1px; }

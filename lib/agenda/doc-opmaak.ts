@@ -118,3 +118,109 @@ export function tekstVanDoc(n: DocNode | null | undefined): string {
   if (n.type === 'hardBreak') return '\n'
   return binnen.join(blok || n.type === 'doc' ? '' : '') + (blok ? '\n' : '')
 }
+
+// ── Opgemaakte beschrijving van een taak (26 nov 2026) ──────────────────────
+// De opmaak staat als JSON (ag_items.beschrijving_json); de tekst ernaast
+// (ag_items.beschrijving) is markdown, zodat zoeken, de pdf, Dag afsluiten en
+// het lezen zonder opmaak blijven werken. Markdown verliest enkel de kleuren.
+
+const ontsnap = (t: string) => t.replace(/([\\`*_[\]])/g, '\\$1')
+
+function inlineMd(nodes: DocNode[] | undefined): string {
+  let uit = ''
+  for (const n of nodes ?? []) {
+    if (n.type === 'hardBreak') { uit += '\n'; continue }
+    if (n.type === 'image') { const src = typeof n.attrs?.src === 'string' ? n.attrs.src : ''; if (src) uit += `![${String(n.attrs?.alt ?? '')}](${src})`; continue }
+    if (n.type !== 'text' || !n.text) continue
+    const marks = new Set((n.marks ?? []).map((m) => m.type))
+    const code = marks.has('code')
+    let t = code ? `\`${n.text.replace(/`/g, '')}\`` : ontsnap(n.text)
+    if (!code) {
+      // Spaties aan de rand vallen buiten de tekens (anders leest markdown "** vet**" niet als vet).
+      const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(t)!
+      let kern = m[2]
+      if (kern) {
+        if (marks.has('strike')) kern = `~~${kern}~~`
+        if (marks.has('italic')) kern = `*${kern}*`
+        if (marks.has('bold')) kern = `**${kern}**`
+      }
+      t = m[1] + kern + m[3]
+    }
+    const link = (n.marks ?? []).find((m) => m.type === 'link')
+    if (link && typeof link.attrs?.href === 'string') t = `[${t}](${link.attrs.href})`
+    uit += t
+  }
+  return uit
+}
+
+const inspringen = (t: string, n: number) => t.split('\n').map((r, i) => (i === 0 || !r ? r : ' '.repeat(n) + r)).join('\n')
+
+function blokMd(n: DocNode): string {
+  switch (n.type) {
+    case 'paragraph': {
+      const t = inlineMd(n.content)
+      return /^(#{1,6}\s|>|[-+*]\s|\d+[.)]\s)/.test(t) ? `\\${t}` : t
+    }
+    case 'heading': return `${'#'.repeat(Math.min(3, Math.max(1, Number(n.attrs?.level) || 1)))} ${inlineMd(n.content)}`
+    case 'bulletList': return (n.content ?? []).map((li) => `- ${inspringen(itemMd(li), 2)}`).join('\n')
+    case 'orderedList': {
+      const start = Number(n.attrs?.start) || 1
+      return (n.content ?? []).map((li, i) => `${start + i}. ${inspringen(itemMd(li), 3)}`).join('\n')
+    }
+    case 'taskList': return (n.content ?? []).map((li) => `- [${li.attrs?.checked === true ? 'x' : ' '}] ${inspringen(itemMd(li), 2)}`).join('\n')
+    case 'blockquote': return (n.content ?? []).map(blokMd).join('\n\n').split('\n').map((r) => `> ${r}`).join('\n')
+    case 'horizontalRule': return '---'
+    case 'codeBlock': return `\`\`\`\n${(n.content ?? []).map((c) => c.text ?? '').join('')}\n\`\`\``
+    case 'image': return inlineMd([n])
+    case 'table': {
+      const rijen = (n.content ?? []).map((r) => (r.content ?? []).map((cel) => (cel.content ?? []).map((b) => (b.type === 'paragraph' || b.type === 'heading' ? inlineMd(b.content) : blokMd(b))).join(' ').replace(/\n+/g, ' ').replace(/\|/g, '\\|').trim()))
+      if (!rijen.length) return ''
+      const breed = Math.max(...rijen.map((r) => r.length))
+      const rij = (r: string[]) => `| ${[...r, ...Array(breed - r.length).fill('')].join(' | ')} |`
+      return [rij(rijen[0]), `| ${Array(breed).fill('---').join(' | ')} |`, ...rijen.slice(1).map(rij)].join('\n')
+    }
+    default: return (n.content ?? []).map(blokMd).filter(Boolean).join('\n\n')
+  }
+}
+
+function itemMd(li: DocNode): string {
+  return (li.content ?? []).map(blokMd).join('\n')
+}
+
+/** De opmaak als markdown (de tekst naast de opmaak). */
+export function markdownVanDoc(doc: DocNode | null | undefined): string {
+  if (!doc) return ''
+  return (doc.content ?? []).map(blokMd).filter((b) => b.trim() !== '').join('\n\n').trim()
+}
+
+/** Gewone tekst als alinea's (enkel **vet** wordt herkend, een enkele regelovergang blijft een regel). */
+function alineasUit(tekst: string): DocNode[] {
+  return tekst.split(/\n{2,}/).map((a) => a.trim()).filter(Boolean).map((a) => {
+    const content: DocNode[] = []
+    a.split('\n').forEach((regel, i) => {
+      if (i) content.push({ type: 'hardBreak' })
+      const delen = regel.split(/(\*\*[^*]+\*\*)/)
+      for (const d of delen) {
+        if (!d) continue
+        const vet = /^\*\*([^*]+)\*\*$/.exec(d)
+        content.push(vet ? { type: 'text', text: vet[1], marks: [{ type: 'bold' }] } : { type: 'text', text: d })
+      }
+    })
+    return { type: 'paragraph', ...(content.length ? { content } : {}) }
+  })
+}
+
+/**
+ * De tekst werd buiten de editor aangepast (bv. een notitie bij Dag afsluiten).
+ * Kwam er enkel iets onderaan bij, dan zetten we dat ook onder de opmaak, zodat
+ * markeringen en tabellen blijven. Anders null: dan geldt de tekst.
+ */
+export function vulDocAan(doc: DocNode | null | undefined, oudeTekst: string | null | undefined, nieuweTekst: string | null | undefined): DocNode | null {
+  if (!doc || doc.type !== 'doc') return null
+  const oud = (oudeTekst ?? '').trimEnd()
+  const nieuw = nieuweTekst ?? ''
+  if (!nieuw.startsWith(oud)) return null
+  const extra = nieuw.slice(oud.length).trim()
+  if (!extra) return doc
+  return { ...doc, content: [...(doc.content ?? []), ...alineasUit(extra)] }
+}

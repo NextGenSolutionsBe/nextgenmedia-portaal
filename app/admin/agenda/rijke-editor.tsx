@@ -54,12 +54,17 @@ type Props = {
   json: DocNode | null
   markdown: string
   mag: boolean
-  onWijzig: (json: DocNode, tekst: string) => void
+  /** `e` erbij: zo kan een beschrijving enkel echte invoer bewaren (niet het netjes zetten van tabellen bij het openen). */
+  onWijzig: (json: DocNode, tekst: string, e: Editor) => void
   onKlaar?: (e: Editor) => void
+  /** Beschrijving van een taak: geen foto's, compacter, de balk pas na een klik in de tekst. */
+  kort?: boolean
+  placeholder?: string
 }
 
 /** De editor van een document: zoals ClickUp, met een balk bovenaan. */
-export function RijkeEditor({ docId, json, markdown, mag, onWijzig, onKlaar }: Props) {
+export function RijkeEditor({ docId, json, markdown, mag, onWijzig, onKlaar, kort = false, placeholder }: Props) {
+  const [actief, setActief] = useState(false)
   const opladen = useRef<(f: File) => Promise<void>>(async () => undefined)
   const editor = useEditor({
     immediatelyRender: false,
@@ -75,27 +80,29 @@ export function RijkeEditor({ docId, json, markdown, mag, onWijzig, onKlaar }: P
       TaskList, TaskItem.configure({ nested: true }),
       TableKit.configure({ table: { resizable: true } }),
       Image.configure({ allowBase64: false }),
-      Placeholder.configure({ placeholder: mag ? 'Schrijf hier. Tip: # + spatie = titel, - = lijstje, 1. = nummering, [ ] = afvinklijst.' : 'Dit document is nog leeg.' }),
+      Placeholder.configure({ placeholder: placeholder ?? (mag ? 'Schrijf hier. Tip: # + spatie = titel, - = lijstje, 1. = nummering, [ ] = afvinklijst.' : 'Dit document is nog leeg.') }),
     ],
     content: json ?? markdownNaarHtml(markdown),
     editorProps: {
-      attributes: { class: 'focus:outline-none', 'aria-label': 'Inhoud van het document' },
+      attributes: { class: 'focus:outline-none', 'aria-label': kort ? 'Beschrijving' : 'Inhoud van het document' },
       // Een foto plakken of erin slepen: meteen opladen.
       handlePaste: (_v, e) => {
         const f = [...(e.clipboardData?.files ?? [])].filter((x) => x.type.startsWith('image/'))
-        if (!f.length || !mag) return false
+        if (!f.length || !mag || kort) return false
         f.forEach((x) => void opladen.current(x))
         return true
       },
       handleDrop: (_v, e) => {
         const f = [...((e as DragEvent).dataTransfer?.files ?? [])].filter((x) => x.type.startsWith('image/'))
-        if (!f.length || !mag) return false
+        if (!f.length || !mag || kort) return false
         e.preventDefault()
         f.forEach((x) => void opladen.current(x))
         return true
       },
     },
-    onUpdate: ({ editor: e }) => onWijzig(e.getJSON() as DocNode, e.getText({ blockSeparator: '\n' })),
+    onUpdate: ({ editor: e }) => onWijzig(e.getJSON() as DocNode, e.getText({ blockSeparator: '\n' }), e),
+    // Bij een korte beschrijving komt de balk pas na de eerste klik in de tekst (en blijft dan staan).
+    onFocus: () => setActief(true),
   })
 
   const [beeldBezig, setBeeldBezig] = useState(0)
@@ -117,8 +124,8 @@ export function RijkeEditor({ docId, json, markdown, mag, onWijzig, onKlaar }: P
 
   if (!editor) return <div className="py-16 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>
   return (
-    <div className="ag-doc">
-      {mag && <Balk editor={editor} onBeeld={(f) => opladen.current(f)} beeldBezig={beeldBezig > 0} />}
+    <div className={kort ? 'ag-doc ag-doc-kort' : 'ag-doc'}>
+      {mag && (!kort || actief) && <Balk editor={editor} onBeeld={kort ? undefined : (f) => opladen.current(f)} beeldBezig={beeldBezig > 0} />}
       <EditorContent editor={editor} />
     </div>
   )
@@ -126,7 +133,7 @@ export function RijkeEditor({ docId, json, markdown, mag, onWijzig, onKlaar }: P
 
 // ── De balk ─────────────────────────────────────────────────────────────────
 
-function Balk({ editor, onBeeld, beeldBezig }: { editor: Editor; onBeeld: (f: File) => void; beeldBezig: boolean }) {
+function Balk({ editor, onBeeld, beeldBezig }: { editor: Editor; onBeeld?: (f: File) => void; beeldBezig: boolean }) {
   const s = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
@@ -203,9 +210,11 @@ function Balk({ editor, onBeeld, beeldBezig }: { editor: Editor; onBeeld: (f: Fi
             </div>
           )}
         </div>
-        <Knop label="Afbeelding" onClick={() => fileRef.current?.click()}>{beeldBezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}</Knop>
-        <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple className="hidden"
-          onChange={(e) => { [...(e.target.files ?? [])].forEach(onBeeld); e.target.value = '' }} />
+        {onBeeld && <>
+          <Knop label="Afbeelding" onClick={() => fileRef.current?.click()}>{beeldBezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}</Knop>
+          <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple className="hidden"
+            onChange={(e) => { [...(e.target.files ?? [])].forEach(onBeeld); e.target.value = '' }} />
+        </>}
         <Knop aan={s.tabel} label="Tabel" onClick={() => c().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}><Table2 className="h-4 w-4" /></Knop>
         <span className="flex-1" />
         <Knop label="Ongedaan maken (Ctrl+Z)" disabled={!s.terug} onClick={() => c().undo().run()}><Undo2 className="h-4 w-4" /></Knop>

@@ -8248,3 +8248,21 @@ RETURNS integer LANGUAGE sql SECURITY DEFINER SET search_path TO 'public' AS $$
 $$;
 REVOKE ALL ON FUNCTION public.ag_label_erbij(uuid, uuid[]) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.ag_label_erbij(uuid, uuid[]) TO service_role;
+
+-- Agenda: opgemaakte beschrijving van een taak (26 nov 2026). De tekst (beschrijving, markdown) blijft; de opmaak staat hier.
+alter table public.ag_items add column if not exists beschrijving_json jsonb;
+
+-- Account-based marketing: opvolgen en notities per bedrijf (26 nov 2026).
+alter table public.abm_bedrijven add column if not exists opvolgen_op date;
+create table if not exists public.abm_notities (
+  id uuid primary key default gen_random_uuid(),
+  abm_id uuid not null references public.abm_bedrijven(id) on delete cascade,
+  soort text not null default 'notitie',
+  uitkomst text,
+  telefoon text,
+  tekst text,
+  door text,
+  created_at timestamptz not null default now()
+);
+create index if not exists abm_notities_abm on public.abm_notities (abm_id, created_at desc);
+alter table public.abm_notities enable row level security;

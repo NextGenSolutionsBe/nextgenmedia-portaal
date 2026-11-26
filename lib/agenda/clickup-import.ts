@@ -321,6 +321,8 @@ async function bewaarTaken(admin: Admin, taken: ClickupTaak[], ctx: Ctx): Promis
   const { data: opgeslagen, error } = await admin.from('ag_items').upsert(rijen, { onConflict: 'clickup_id' }).select('id, clickup_id')
   if (error) throw new Error(error.message)
   const ids = (opgeslagen ?? []) as { id: string; clickup_id: string }[]
+  // Nieuwer in ClickUp: de tekst uit ClickUp geldt, een opmaak uit de app valt weg (vóór de migratie: niets te doen).
+  if (ids.length) await admin.from('ag_items').update({ beschrijving_json: null }).in('id', ids.map((x) => x.id)).not('beschrijving_json', 'is', null).then(() => undefined, () => undefined)
   // Taken in een vergrendelde privélijst (bv. Bram Privé) krijgen het slotje.
   const slotIds = rijen.filter((r) => r.lijst_id && ctx.slot.has(r.lijst_id as string)).map((r) => ids.find((x) => x.clickup_id === r.clickup_id)?.id).filter((x): x is string => !!x)
   if (slotIds.length) await admin.from('ag_items').update({ prive: true }).in('id', slotIds).eq('prive', false)
