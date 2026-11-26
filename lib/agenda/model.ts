@@ -5,6 +5,7 @@
 // Een item is een taak of een meeting. Met een uur erbij en begin en einde op
 // dezelfde dag staat het in het uurrooster; al de rest bovenaan de dag.
 import { dag, uur, zoneNaarIso, plusDagen, maandagVan, STANDAARD_TIJDZONE } from '@/lib/meetings/model'
+import { schoonDocJson, markdownVanDoc } from './doc-opmaak'
 
 export { dag, uur, zoneNaarIso, plusDagen, maandagVan }
 export const TZ = STANDAARD_TIJDZONE
@@ -427,7 +428,7 @@ export function naamSleutel(s: string): string {
 // ── Invoer controleren ──────────────────────────────────────────────────────
 
 export type ItemInvoer = {
-  titel?: unknown; beschrijving?: unknown; soort?: unknown; status?: unknown; urgent?: unknown; prioriteit?: unknown
+  titel?: unknown; beschrijving?: unknown; beschrijving_json?: unknown; soort?: unknown; status?: unknown; urgent?: unknown; prioriteit?: unknown
   start_op?: unknown; eind_op?: unknown; deadline_op?: unknown; heel_dag?: unknown; lijst_id?: unknown; parent_id?: unknown; client_id?: unknown
   labels?: unknown; kleur?: unknown; locatie?: unknown; meet_url?: unknown; prive?: unknown; toegewezen?: unknown
 }
@@ -451,6 +452,17 @@ export function controleerItem(b: ItemInvoer, nieuw: boolean): { velden: Record<
     v.titel = t
   }
   if (heeft('beschrijving')) v.beschrijving = typeof b.beschrijving === 'string' ? b.beschrijving.slice(0, 100_000) : null
+  // Opgemaakte beschrijving (editor in het taakvenster): de tekst ernaast maken we zelf uit de opmaak.
+  if (heeft('beschrijving_json')) {
+    if (b.beschrijving_json === null) v.beschrijving_json = null
+    else {
+      const doc = schoonDocJson(b.beschrijving_json)
+      if (!doc) return { velden: v, fout: 'De opmaak van de beschrijving klopt niet.' }
+      const md = markdownVanDoc(doc)
+      v.beschrijving_json = (md.trim() || JSON.stringify(doc).includes('"image"')) ? doc : null
+      v.beschrijving = md.trim() ? md.slice(0, 100_000) : null
+    }
+  }
   if (heeft('soort')) v.soort = b.soort === 'meeting' ? 'meeting' : 'taak'
   if (heeft('status')) v.status = b.status === 'klaar' ? 'klaar' : 'open'
   if (heeft('urgent')) { v.urgent = b.urgent === true; v.prioriteit = b.urgent === true ? 1 : null }

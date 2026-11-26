@@ -1,21 +1,30 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import dynamic from 'next/dynamic'
+import type { Editor } from '@tiptap/react'
 import { toast } from 'sonner'
 import {
-  Check, Flag, Loader2, Trash2, ExternalLink, Video, MapPin, Lock, Plus, Tag, Users, Building2, ListTree, Palette, CalendarClock, ChevronRight, Pencil, Search, Paperclip, FileText, FilePlus2, Clock,
+  Check, Flag, Loader2, Trash2, ExternalLink, Video, MapPin, Lock, Plus, Tag, Users, Building2, ListTree, Palette, CalendarClock, ChevronRight, Search, Paperclip, FileText, FilePlus2, Clock,
 } from 'lucide-react'
 import { dag, uur, zoneNaarIso, plusDagen, vandaag, isKleur, enkelDeadline, snelleDeadlines, type Item } from '@/lib/agenda/model'
 import { zoekVeld } from '@/lib/zoekveld'
 import { PersoonFoto } from '@/components/admin/persoon-foto'
 import { createClient } from '@/lib/supabase/client'
-import { actie, api, padVan, Lade, Popover, PersonenLijst, KleurKeuze, Schakel, Markdown, vinkRegel, MapKiezer, MapLabel, WieKiezer, labelVoorstel, focusRing, ApiFout, type BoomData } from './gedeeld'
+import { actie, api, padVan, Lade, Popover, PersonenLijst, KleurKeuze, Schakel, MapKiezer, MapLabel, WieKiezer, labelVoorstel, focusRing, ApiFout, type BoomData } from './gedeeld'
 import { DeadlineLabel, KLAAR_STIJL } from './kalender'
 import { DicteerKnop } from '@/components/admin/dicteer-knop'
+import type { DocNode } from '@/lib/agenda/doc-opmaak'
+
+// De editor (TipTap) pas laden als een taak opengaat.
+const RijkeEditor = dynamic(() => import('./rijke-editor').then((m) => m.RijkeEditor), {
+  ssr: false,
+  loading: () => <div className="py-6 flex justify-center"><Loader2 className="h-4 w-4 animate-spin text-gray-400" /></div>,
+})
 
 type Bijlage = { id: string; naam: string; type: string | null; grootte: number | null; geupload_door: string | null; created_at: string }
 type TaakDoc = { id: string; titel: string; updated_at: string; bijgewerkt_door: string | null }
-type Detail = { item: Item; subtaken: Item[]; ouder: { id: string; titel: string } | null; gemaakt_door: string | null; gemaakt_op: string; bijlagen: Bijlage[]; docs: TaakDoc[] }
+type Detail = { item: Item; beschrijving_json?: DocNode | null; subtaken: Item[]; ouder: { id: string; titel: string } | null; gemaakt_door: string | null; gemaakt_op: string; bijlagen: Bijlage[]; docs: TaakDoc[] }
 
 export function ItemVenster({ id, boom, onSluit, onGewijzigd, onVerwijderd, onOpen, onDoc }: {
   id: string; boom: BoomData
@@ -39,6 +48,12 @@ export function ItemVenster({ id, boom, onSluit, onGewijzigd, onVerwijderd, onOp
   const mag = !!boom.rechten.aanpassen
   const personen = useMemo(() => new Map(boom.personen.map((p) => [p.id, p])), [boom.personen])
 
+  /** De beschrijving bewaart vanzelf: zonder versiecontrole (enkel de tekst verandert) en zonder de kalender te herladen. */
+  const bewaarBeschrijving = async (json: DocNode) => {
+    if (!d) return
+    const r = await actie<{ ok: true; versie: string | null }>({ actie: 'item.wijzig', id: d.item.id, beschrijving_json: json })
+    if (r.versie) versie.current = r.versie
+  }
   const bewaar = async (velden: Record<string, unknown>) => {
     if (!d) return
     const vorige = d.item
@@ -75,14 +90,14 @@ export function ItemVenster({ id, boom, onSluit, onGewijzigd, onVerwijderd, onOp
       )}>
       {fout && <div className="m-5 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800 p-3">{fout}</div>}
       {!d && !fout && <div className="py-16 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>}
-      {d && <Inhoud d={d} boom={boom} mag={mag} personen={personen} bewaar={bewaar} onOpen={onOpen} herlaad={laad} onGewijzigd={onGewijzigd} onDoc={onDoc} />}
+      {d && <Inhoud d={d} boom={boom} mag={mag} personen={personen} bewaar={bewaar} bewaarBeschrijving={bewaarBeschrijving} onOpen={onOpen} herlaad={laad} onGewijzigd={onGewijzigd} onDoc={onDoc} />}
     </Lade>
   )
 }
 
-function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd, onDoc }: {
+function Inhoud({ d, boom, mag, personen, bewaar, bewaarBeschrijving, onOpen, herlaad, onGewijzigd, onDoc }: {
   d: Detail; boom: BoomData; mag: boolean; personen: Map<string, BoomData['personen'][number]>
-  bewaar: (v: Record<string, unknown>) => Promise<void>; onOpen: (id: string) => void; herlaad: () => void; onGewijzigd: () => void; onDoc: (id: string) => void
+  bewaar: (v: Record<string, unknown>) => Promise<void>; bewaarBeschrijving: (json: DocNode) => Promise<void>; onOpen: (id: string) => void; herlaad: () => void; onGewijzigd: () => void; onDoc: (id: string) => void
 }) {
   const i = d.item
   const [titel, setTitel] = useState(i.titel)
@@ -220,7 +235,7 @@ function Inhoud({ d, boom, mag, personen, bewaar, onOpen, herlaad, onGewijzigd, 
 
       <div className="lg:order-1 space-y-6 min-w-0">
       {/* Beschrijving */}
-      <Beschrijving waarde={i.beschrijving ?? ''} mag={mag} bewaar={bewaar} context={i.titel} />
+      <Beschrijving key={i.id} json={d.beschrijving_json ?? null} markdown={i.beschrijving ?? ''} itemId={i.id} mag={mag} context={i.titel} opslaan={bewaarBeschrijving} />
 
       {/* Bijlagen en docs */}
       <Bijlagen d={d} mag={mag} magToevoegen={!!boom.rechten.toevoegen} herlaad={herlaad} onDoc={onDoc} />
@@ -338,56 +353,94 @@ function Tijden({ i, mag, bewaar }: { i: Item; mag: boolean; bewaar: (v: Record<
   )
 }
 
-/** De beschrijving: lezen (afvinkvakjes werken) of bewerken. */
-function Beschrijving({ waarde, mag, bewaar, context }: { waarde: string; mag: boolean; bewaar: (v: Record<string, unknown>) => Promise<void>; context: string }) {
-  const [tekst, setTekst] = useState(waarde)
-  const [bewerk, setBewerk] = useState(false)
-  const [concept, setConcept] = useState('')
-  // Inspreken zonder eerst op Bewerken te klikken: het vak gaat open met de huidige
-  // tekst. Refs, want de microfoon roept dit twee keer (ruw, daarna opgekuist).
-  const bewerkRef = useRef(false)
-  const tekstRef = useRef(tekst)
-  useEffect(() => { bewerkRef.current = bewerk }, [bewerk])
-  useEffect(() => { tekstRef.current = tekst }, [tekst])
-  const zetIngesproken = useCallback((f: (oud: string) => string) => {
-    if (!bewerkRef.current) { bewerkRef.current = true; setBewerk(true); setConcept(f(tekstRef.current)); return }
-    setConcept(f)
+/**
+ * De beschrijving als opgemaakte tekst, zoals de documenten: koppen, vet, markeren,
+ * lijstjes, afvinklijst, tabellen en links. Wat uit ClickUp komt (markdown) wordt
+ * netjes getoond. Typen bewaart vanzelf; de microfoon zet tekst onderaan.
+ */
+function Beschrijving({ itemId, json, markdown, mag, context, opslaan }: { itemId: string; json: DocNode | null; markdown: string; mag: boolean; context: string; opslaan: (json: DocNode) => Promise<void> }) {
+  const [stand, setStand] = useState<'' | 'bezig' | 'ok' | 'fout'>('')
+  const wacht = useRef<DocNode | null>(null)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const opslaanRef = useRef(opslaan)
+  opslaanRef.current = opslaan
+  const editorRef = useRef<Editor | null>(null)
+  const flush = useCallback(async () => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null }
+    const j = wacht.current
+    if (!j) return
+    wacht.current = null
+    setStand('bezig')
+    try { await opslaanRef.current(j); setStand('ok') } catch (e) { setStand('fout'); toast.error(e instanceof Error ? e.message : 'Bewaren mislukt') }
   }, [])
-  useEffect(() => { if (!bewerk) setTekst(waarde) }, [waarde, bewerk])
-  const opslaan = async () => {
-    setBewerk(false)
-    if (concept === tekst) return
-    setTekst(concept)
-    await bewaar({ beschrijving: concept })
+  // Venster dicht of andere taak: wat nog niet bewaard was, meteen bewaren.
+  useEffect(() => () => { void flush() }, [flush])
+  // Enkel wat iemand zelf doet telt (typen, afvinken, inspreken). Bij het openen zet de editor
+  // tabellen netjes; dat mag niet bewaren, anders telt elke geopende taak als "in de app aangepast".
+  const handmatig = useRef(false)
+  const aangeraakt = useRef(false)
+  const onWijzig = useCallback((j: DocNode, _t: string, e: Editor) => {
+    if (!mag || (!aangeraakt.current && !handmatig.current && !e.isFocused)) return
+    wacht.current = j
+    setStand('')
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = setTimeout(() => { void flush() }, 900)
+  }, [mag, flush])
+  const onKlaar = useCallback((e: Editor) => { editorRef.current = e }, [])
+
+  // Inspreken: de tekst komt als nieuwe alinea onderaan; de opgekuiste versie vervangt daarna die alinea.
+  const dicteer = useRef<{ from: number; to: number; tekst: string } | null>(null)
+  const voegIn = (t: string) => {
+    const e = editorRef.current
+    const tekst = t.trim()
+    if (!e || !tekst) return
+    const alinea = { type: 'paragraph', content: [{ type: 'text', text: tekst }] }
+    handmatig.current = true
+    try {
+      if (e.isEmpty) {
+        e.chain().insertContentAt({ from: 0, to: e.state.doc.content.size }, alinea).run()
+        dicteer.current = { from: 1, to: 1 + tekst.length, tekst }
+        return
+      }
+      const eind = e.state.doc.content.size
+      e.chain().insertContentAt(eind, alinea).run()
+      dicteer.current = { from: eind + 1, to: eind + 1 + tekst.length, tekst }
+    } finally { handmatig.current = false }
   }
+  const zetIngesproken = (f: (oud: string) => string) => {
+    const e = editorRef.current
+    if (!e) return
+    const d = dicteer.current
+    const staatErNog = !!d && d.to <= e.state.doc.content.size && e.state.doc.textBetween(d.from, d.to) === d.tekst
+    if (d && staatErNog) {
+      const nieuw = f(d.tekst)
+      if (nieuw.startsWith(`${d.tekst}\n`)) { voegIn(nieuw.slice(d.tekst.length + 1)); return }
+      if (!nieuw.trim()) return
+      handmatig.current = true
+      try { e.chain().insertContentAt({ from: d.from, to: d.to }, { type: 'text', text: nieuw }).run() } finally { handmatig.current = false }
+      dicteer.current = { from: d.from, to: d.from + nieuw.length, tekst: nieuw }
+      return
+    }
+    voegIn(f(''))
+  }
+
+  if (!mag && !markdown.trim() && !json) return null
   return (
     <div>
       <div className="flex items-center justify-between mb-1.5">
         <div className="label-mono text-[10px] uppercase text-gray-500">Beschrijving</div>
         {mag && (
           <div className="flex items-center gap-2">
+            <span className="text-[11px] text-gray-400" aria-live="polite">{stand === 'bezig' ? 'Bewaren…' : stand === 'ok' ? 'Bewaard' : stand === 'fout' ? 'Niet bewaard' : ''}</span>
             <DicteerKnop zet={zetIngesproken} context={context} klein />
-            {!bewerk && <button type="button" onClick={() => { setConcept(tekst); setBewerk(true) }} className="text-xs text-gray-600 flex items-center gap-1 hover:underline"><Pencil className="h-3 w-3" />Bewerken</button>}
           </div>
         )}
       </div>
-      {bewerk ? (
-        <div className="space-y-2">
-          <textarea autoFocus value={concept} onChange={(e) => setConcept(e.target.value)} rows={Math.min(30, Math.max(10, concept.split('\n').length + 2))}
-            onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); opslaan() } }}
-            className="input-base text-sm font-mono leading-relaxed" placeholder={'Schrijf hier. Lijstjes met "- ", afvinken met "- [ ] ", vet met **zo**.'} />
-          <div className="flex gap-2 justify-end">
-            <button type="button" onClick={() => setBewerk(false)} className="btn-secondary !py-1.5 !text-xs">Annuleren</button>
-            <button type="button" onClick={opslaan} className="btn-primary !py-1.5 !text-xs">Bewaren</button>
-          </div>
-        </div>
-      ) : tekst.trim() ? (
-        <div className="rounded-xl border border-gray-100 bg-gray-50/50 p-3" onDoubleClick={() => { if (mag) { setConcept(tekst); setBewerk(true) } }}>
-          <Markdown tekst={tekst} onVink={mag ? (n) => { const t = vinkRegel(tekst, n); setTekst(t); bewaar({ beschrijving: t }) } : undefined} />
-        </div>
-      ) : (
-        <button type="button" disabled={!mag} onClick={() => { setConcept(''); setBewerk(true) }} className="w-full text-left rounded-xl border border-dashed border-gray-200 px-4 py-8 text-sm text-gray-400 hover:border-gray-400">Voeg een beschrijving toe…</button>
-      )}
+      <div onPointerDownCapture={() => { aangeraakt.current = true }} onKeyDownCapture={() => { aangeraakt.current = true }}
+        className="rounded-xl border border-gray-100 bg-white px-4 py-3 transition-colors hover:border-gray-200 focus-within:border-gray-300">
+        <RijkeEditor docId={itemId} json={json} markdown={markdown} mag={mag} kort onWijzig={onWijzig} onKlaar={onKlaar}
+          placeholder="Schrijf hier. Typ - voor een lijstje, [ ] voor een afvinklijst, # voor een titel. Selecteer tekst om te markeren." />
+      </div>
     </div>
   )
 }

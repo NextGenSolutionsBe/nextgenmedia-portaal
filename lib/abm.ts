@@ -27,6 +27,76 @@ export type AbmBedrijf = AbmRij & {
   id: string; client_id: string | null; opdracht_id: string | null; created_at: string; created_by: string | null
   /** Geen interesse: uit de kolom, in het vuilbakje (terugzetten kan). */
   geen_interesse_op?: string | null; geen_interesse_door?: string | null
+  /** Wanneer we het bedrijf opnieuw contacteren (datum, Belgische dag). */
+  opvolgen_op?: string | null
+  /** De laatste notitie (voor de kaart in de kolom) en hoeveel er zijn. */
+  laatste_notitie?: AbmNotitie | null; aantal_notities?: number
+}
+
+// ── Notities en gesprekken (26 nov 2026) ────────────────────────────────────
+
+export type AbmUitkomst = 'niet_opgenomen' | 'voicemail' | 'terugbellen' | 'gesproken' | 'interesse'
+export const UITKOMSTEN: { key: AbmUitkomst; label: string }[] = [
+  { key: 'niet_opgenomen', label: 'Niet opgenomen' },
+  { key: 'voicemail', label: 'Voicemail ingesproken' },
+  { key: 'terugbellen', label: 'Terugbellen' },
+  { key: 'gesproken', label: 'Gesproken' },
+  { key: 'interesse', label: 'Interesse' },
+]
+export const uitkomstLabel = (u: string | null | undefined) => UITKOMSTEN.find((x) => x.key === u)?.label ?? null
+export type AbmNotitie = { id: string; abm_id: string; soort: 'notitie' | 'gesprek'; uitkomst: AbmUitkomst | null; telefoon: string | null; tekst: string | null; door: string | null; created_at: string }
+
+/** Een notitie of gesprek nakijken. Een gesprek mag zonder tekst (enkel de uitkomst). */
+export function controleerNotitie(b: { tekst?: unknown; soort?: unknown; uitkomst?: unknown; telefoon?: unknown }): { ok: true; waarde: { soort: 'notitie' | 'gesprek'; uitkomst: AbmUitkomst | null; telefoon: string | null; tekst: string | null } } | { ok: false; fout: string } {
+  const soort = b.soort === 'gesprek' ? 'gesprek' : 'notitie'
+  const tekst = typeof b.tekst === 'string' && b.tekst.trim() ? b.tekst.trim().slice(0, 5000) : null
+  const uitkomst = UITKOMSTEN.some((u) => u.key === b.uitkomst) ? (b.uitkomst as AbmUitkomst) : null
+  const telefoon = typeof b.telefoon === 'string' && b.telefoon.trim() ? b.telefoon.trim().slice(0, 40) : null
+  if (!tekst && !uitkomst) return { ok: false, fout: 'Schrijf een notitie of kies hoe het gesprek ging.' }
+  return { ok: true, waarde: { soort: uitkomst ? 'gesprek' : soort, uitkomst, telefoon, tekst } }
+}
+
+/**
+ * Telefoonnummers uit één veld ("+32470831282; 011 45 48 45 / 0479…") als
+ * aparte nummers: netjes om te lezen en als tel:-link (bellen via de gsm, op een
+ * Mac via de gekoppelde iPhone).
+ */
+export function belNummers(tekst: string | null | undefined): { weergave: string; tel: string }[] {
+  if (!tekst) return []
+  const uit: { weergave: string; tel: string }[] = []
+  for (const ruw of tekst.split(/[;,/|]|\s{2,}|\bof\b|\ben\b/i)) {
+    const t = ruw.trim()
+    if (!t) continue
+    let cijfers = t.replace(/[^\d+]/g, '')
+    if (cijfers.startsWith('00')) cijfers = `+${cijfers.slice(2)}`
+    if (/^0\d{8,9}$/.test(cijfers)) cijfers = `+32${cijfers.slice(1)}`
+    if (/^32\d{8,9}$/.test(cijfers)) cijfers = `+${cijfers}`
+    if (!/^\+?\d{6,15}$/.test(cijfers)) continue
+    if (uit.some((x) => x.tel === cijfers)) continue
+    uit.push({ weergave: netNummer(cijfers), tel: cijfers })
+  }
+  return uit
+}
+
+/** +32499433036 → +32 499 43 30 36; +3211212641 → +32 11 21 26 41; +3223456789 → +32 2 345 67 89. */
+export function netNummer(n: string): string {
+  const m = /^\+32(\d{8,9})$/.exec(n)
+  if (!m) return n
+  const r = m[1]
+  if (r.length === 9) return `+32 ${r.slice(0, 3)} ${r.slice(3, 5)} ${r.slice(5, 7)} ${r.slice(7)}`
+  if (/^[2349]/.test(r)) return `+32 ${r[0]} ${r.slice(1, 4)} ${r.slice(4, 6)} ${r.slice(6)}`
+  return `+32 ${r.slice(0, 2)} ${r.slice(2, 4)} ${r.slice(4, 6)} ${r.slice(6)}`
+}
+
+/** "Opvolgen vandaag", "2 dagen te laat", "Opvolgen morgen", "Opvolgen op do 27 nov". */
+export function opvolgLabel(datum: string | null | undefined, vandaag: string): { tekst: string; toon: 'laat' | 'vandaag' | 'later' } | null {
+  if (!datum || !/^\d{4}-\d{2}-\d{2}$/.test(datum)) return null
+  const n = Math.round((Date.parse(`${datum}T12:00:00Z`) - Date.parse(`${vandaag}T12:00:00Z`)) / 86_400_000)
+  if (n < 0) return { tekst: n === -1 ? '1 dag te laat' : `${-n} dagen te laat`, toon: 'laat' }
+  if (n === 0) return { tekst: 'Opvolgen vandaag', toon: 'vandaag' }
+  if (n === 1) return { tekst: 'Opvolgen morgen', toon: 'later' }
+  const d = new Date(`${datum}T12:00:00Z`).toLocaleDateString('nl-BE', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).replace('.', '')
+  return { tekst: `Opvolgen op ${d}`, toon: 'later' }
 }
 
 const sleutel = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '')

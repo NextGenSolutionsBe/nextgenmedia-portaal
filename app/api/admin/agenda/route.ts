@@ -5,7 +5,7 @@ import type { Actie } from '@/lib/instellingen/model'
 import { controleerItem, isUuid, isKleur, vandaag, type Item } from '@/lib/agenda/model'
 import { inspreekPrompt, leesInspreekVoorstel, type InspreekContext } from '@/lib/agenda/inspreken'
 import { mijnDeadlines } from '@/lib/agenda/deadlines-server'
-import { schoonDocJson, BEELD_PAD, BEELD_TYPES, MAX_BEELD } from '@/lib/agenda/doc-opmaak'
+import { schoonDocJson, vulDocAan, BEELD_PAD, BEELD_TYPES, MAX_BEELD, type DocNode } from '@/lib/agenda/doc-opmaak'
 import {
   kijkerVan, laadZicht, boomVoor, metToegewezen, meetingsInBereik, metMeetingStatus, itemsInBereik, itemZichtbaar, docZichtbaar, laadPersonen, laadLabels, alleRijen,
   ITEM_VELDEN, type Kijker, type Zicht, type RuwItem,
@@ -151,7 +151,8 @@ async function container(admin: Admin, k: Kijker, soort: string, id: string | nu
 async function eenItem(admin: Admin, k: Kijker, id: string) {
   if (!isUuid(id)) throw new Error('Onbekend item')
   const z = await laadZicht(admin, k)
-  const { data } = await admin.from('ag_items').select(`${ITEM_VELDEN}, beschrijving, velden, gemaakt_door, created_at, in_app_gewijzigd_op`).eq('id', id).maybeSingle()
+  let { data, error } = await admin.from('ag_items').select(`${ITEM_VELDEN}, beschrijving, beschrijving_json, velden, gemaakt_door, created_at, in_app_gewijzigd_op`).eq('id', id).maybeSingle()
+  if (error && /beschrijving_json/.test(error.message)) ({ data } = await admin.from('ag_items').select(`${ITEM_VELDEN}, beschrijving, velden, gemaakt_door, created_at, in_app_gewijzigd_op`).eq('id', id).maybeSingle())
   if (!data) throw new Error('Dit item bestaat niet meer.')
   const [item] = await metToegewezen(admin, [data as unknown as RuwItem], z, { subtaken: true })
   if (!item) throw new Error('Je kan dit item niet zien.')
@@ -168,7 +169,8 @@ async function eenItem(admin: Admin, k: Kijker, id: string) {
     admin.from('ag_bijlagen').select('id, naam, type, grootte, geupload_door, created_at').eq('item_id', id).is('verwijderd_op', null).order('created_at'),
     admin.from('ag_docs').select('id, titel, updated_at, bijgewerkt_door').eq('item_id', id).is('verwijderd_op', null).order('created_at'),
   ])
-  return { item, subtaken, ouder, gemaakt_door: extra.gemaakt_door, gemaakt_op: extra.created_at, bijlagen: bijlagen ?? [], docs: docs ?? [] }
+  const opmaak = (data as unknown as { beschrijving_json?: DocNode | null }).beschrijving_json ?? null
+  return { item, beschrijving_json: opmaak, subtaken, ouder, gemaakt_door: extra.gemaakt_door, gemaakt_op: extra.created_at, bijlagen: bijlagen ?? [], docs: docs ?? [] }
 }
 
 async function afgevinkt(admin: Admin, k: Kijker, persoon: string | null, na: string | null, zoek: string | null) {
@@ -338,10 +340,13 @@ async function itemActie(c: Ctx, actie: string, b: Record<string, unknown>) {
       velden.afgerond_door = velden.status === 'klaar' ? k.naam : null
     }
     if (nieuw) {
-      const { data, error } = await admin.from('ag_items').insert({
+      const rij = {
         ...velden, eigenaar_id: k.persoonId, gemaakt_door: k.naam, in_app_gewijzigd_op: nu(),
         heel_dag: velden.heel_dag ?? false, labels: velden.labels ?? [],
-      }).select('id').single()
+      }
+      let { data, error } = await admin.from('ag_items').insert(rij).select('id').single()
+      // Vóór de migratie: zonder de opmaak (de tekst staat er wel).
+      if (error && /beschrijving_json/.test(error.message)) { delete (rij as Record<string, unknown>).beschrijving_json; ({ data, error } = await admin.from('ag_items').insert(rij).select('id').single()) }
       if (error || !data) throw new Error(error?.message ?? 'Bewaren mislukt')
       await zetToegewezen(admin, data.id, toegewezen ?? [k.persoonId])
       return { ok: true, id: data.id }
@@ -350,7 +355,16 @@ async function itemActie(c: Ctx, actie: string, b: Record<string, unknown>) {
     // Wie het tegelijk aanpaste, wint niet stil: met `versie` (updated_at zoals gezien) controleren we.
     if (typeof b.versie === 'string' && bestaand.updated_at && Date.parse(b.versie) !== Date.parse(bestaand.updated_at)) throw new Error('Conflict: iemand anders paste dit item intussen aan. Herlaad en probeer opnieuw.')
     if ('status' in velden && velden.status === bestaand.status) { delete velden.afgerond_op; delete velden.afgerond_door }
-    const { data: upd, error } = await admin.from('ag_items').update({ ...velden, in_app_gewijzigd_op: nu(), updated_at: nu() }).eq('id', bestaand.id).select('updated_at').single()
+    // Tekst aangepast buiten de editor (bv. een notitie bij Dag afsluiten): kwam er enkel iets
+    // onderaan bij, dan komt dat ook onder de opmaak; anders geldt de nieuwe tekst.
+    if ('beschrijving' in velden && !('beschrijving_json' in velden)) {
+      const { data: oud, error: e0 } = await admin.from('ag_items').select('beschrijving, beschrijving_json').eq('id', bestaand.id).maybeSingle()
+      const r = oud as { beschrijving: string | null; beschrijving_json: DocNode | null } | null
+      if (!e0 && r?.beschrijving_json) velden.beschrijving_json = vulDocAan(r.beschrijving_json, r.beschrijving, velden.beschrijving as string | null)
+    }
+    const wijziging = { ...velden, in_app_gewijzigd_op: nu(), updated_at: nu() }
+    let { data: upd, error } = await admin.from('ag_items').update(wijziging).eq('id', bestaand.id).select('updated_at').single()
+    if (error && /beschrijving_json/.test(error.message)) { delete (wijziging as Record<string, unknown>).beschrijving_json; ({ data: upd, error } = await admin.from('ag_items').update(wijziging).eq('id', bestaand.id).select('updated_at').single()) }
     if (error) throw new Error(error.message)
     if (toegewezen) await zetToegewezen(admin, bestaand.id, toegewezen)
     return { ok: true, id: bestaand.id, versie: upd?.updated_at ?? null }
