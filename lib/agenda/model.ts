@@ -255,6 +255,30 @@ export function klantVan(i: Pick<Item, 'client_id' | 'lijst_id'>, c: Pick<KleurC
   return l.client_id ?? (l.map_id ? c.mappen[l.map_id]?.client_id ?? null : null)
 }
 /**
+ * Waar een item bij hoort, als label op de kalender ("TM Technics"): de klant,
+ * anders de bovenste map (zoals in de boom), anders de lijst als die direct in
+ * de space staat. Niets bij iemands eigen privémap (daar weet je het al) en niets
+ * zonder lijst of klant.
+ */
+export function herkomstVan(
+  i: Pick<Item, 'client_id' | 'lijst_id'>,
+  c: Pick<KleurContext, 'lijsten' | 'mappen'> & { klanten: Record<string, string>; leden?: Record<string, string[]> },
+): { naam: string; mapId: string | null } | null {
+  const l = i.lijst_id ? c.lijsten[i.lijst_id] : undefined
+  const keten: Map[] = []
+  for (let m = l?.map_id ? c.mappen[l.map_id] : undefined, n = 0; m && n < 8; n++) { keten.push(m); m = m.parent_id ? c.mappen[m.parent_id] : undefined }
+  const top = keten[keten.length - 1] ?? null
+  const eigen = (sleutel: string) => (c.leden?.[sleutel]?.length ?? 0) === 1
+  const prive = (l && eigen(`lijst:${l.id}`)) || keten.some((m) => eigen(`map:${m.id}`))
+  if (i.client_id && c.klanten[i.client_id]) return { naam: c.klanten[i.client_id], mapId: top?.id ?? null }
+  if (prive) return null
+  const klant = klantVan(i, c)
+  if (klant && c.klanten[klant]) return { naam: c.klanten[klant], mapId: top?.id ?? null }
+  if (top) return { naam: top.naam.trim(), mapId: top.id }
+  if (l && l.naam.trim() && l.naam.trim().toLowerCase() !== 'list') return { naam: l.naam.trim(), mapId: null }
+  return null
+}
+/**
  * De kleur van een map zoals je ze overal ziet (boom, kalender): de eigen kleur,
  * anders die van een bovenliggende map, anders een vaste kleur uit het palet.
  */

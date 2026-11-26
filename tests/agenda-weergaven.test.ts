@@ -1,7 +1,7 @@
 // Agenda: werkweek, planning en wat er per dag staat.
 // Uitvoeren: npx tsx tests/agenda-weergaven.test.ts
 import assert from 'node:assert/strict'
-import { dagenVan, verschuif, bereikVan, perDagVan, isWeergave, zoneNaarIso } from '../lib/agenda/model'
+import { dagenVan, verschuif, bereikVan, perDagVan, isWeergave, zoneNaarIso, herkomstVan, type Map as AgMap, type Lijst } from '../lib/agenda/model'
 
 let n = 0
 const test = (naam: string, fn: () => void) => { fn(); n++; console.log(`  ✓ ${naam}`) }
@@ -34,6 +34,28 @@ test('per dag: zonder uur eerst, dan op uur, afgevinkt onderaan, meerdere dagen 
   assert.deepEqual(m.get('2026-11-25')!.map((x) => x.id), ['deadline', 'heledag', 'loopt', 'ochtend', 'middag', 'klaar'])
   assert.deepEqual(m.get('2026-11-24')!.map((x) => x.id), ['loopt'])
   assert.equal(m.get('2026-11-27'), undefined)
+})
+
+test('label per blok: de klant, anders de bovenste map, niets in iemands eigen privémap', () => {
+  const map = (id: string, naam: string, x: Partial<AgMap> = {}): AgMap => ({ id, space_id: 's', parent_id: null, naam, kleur: null, client_id: null, prive: false, volgorde: 0, clickup_id: null, ...x })
+  const lijst = (id: string, naam: string, x: Partial<Lijst> = {}): Lijst => ({ id, space_id: 's', map_id: null, naam, kleur: null, client_id: null, prive: false, volgorde: 0, clickup_id: null, ...x })
+  const mappen = Object.fromEntries([
+    map('tm', 'TM Technics', { client_id: 'k-tm' }), map('shoots', 'Shoots', { parent_id: 'tm' }),
+    map('era', 'ERA Nobis '), map('bram', 'Bram Privé'),
+  ].map((m) => [m.id, m]))
+  const lijsten = Object.fromEntries([
+    lijst('l-tm', 'List', { map_id: 'shoots' }), lijst('l-era', 'List', { map_id: 'era' }), lijst('l-sport', 'Sport', { map_id: 'bram' }),
+    lijst('l-aanvragen', 'Aanvragen'), lijst('l-leeg', 'List'),
+  ].map((l) => [l.id, l]))
+  const c = { mappen, lijsten, klanten: { 'k-tm': 'TM Technics', 'k-ap': 'Apex Fuel' }, leden: { 'map:bram': ['bram'] } }
+  assert.deepEqual(herkomstVan({ client_id: null, lijst_id: 'l-tm' }, c), { naam: 'TM Technics', mapId: 'tm' })
+  assert.deepEqual(herkomstVan({ client_id: null, lijst_id: 'l-era' }, c), { naam: 'ERA Nobis', mapId: 'era' })
+  assert.equal(herkomstVan({ client_id: null, lijst_id: 'l-sport' }, c), null)
+  assert.deepEqual(herkomstVan({ client_id: 'k-ap', lijst_id: 'l-sport' }, c), { naam: 'Apex Fuel', mapId: 'bram' })
+  assert.deepEqual(herkomstVan({ client_id: null, lijst_id: 'l-aanvragen' }, c), { naam: 'Aanvragen', mapId: null })
+  assert.equal(herkomstVan({ client_id: null, lijst_id: 'l-leeg' }, c), null)
+  assert.deepEqual(herkomstVan({ client_id: 'k-tm', lijst_id: null }, c), { naam: 'TM Technics', mapId: null })
+  assert.equal(herkomstVan({ client_id: null, lijst_id: null }, c), null)
 })
 
 console.log(`\n${n} tests geslaagd\n`)

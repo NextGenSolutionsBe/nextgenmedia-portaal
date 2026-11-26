@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Check, Search, X, Folder, List as ListIcon, ChevronRight, Plus } from 'lucide-react'
 import { PersoonFoto, PersoonKnop } from '@/components/admin/persoon-foto'
 import { zoekVeld } from '@/lib/zoekveld'
@@ -73,8 +74,12 @@ export function Avatars({ ids, personen, max = 3, maat = 18 }: { ids: string[]; 
 }
 
 /** Een keuzelijst die opent onder een knop en sluit bij een klik ernaast of Escape. */
-export function Popover({ open, onSluit, children, className = '', uitlijnen = 'links' }: { open: boolean; onSluit: () => void; children: ReactNode; className?: string; uitlijnen?: 'links' | 'rechts' }) {
+export function Popover({ open, onSluit, children, className = '', uitlijnen = 'links', zwevend = false }: { open: boolean; onSluit: () => void; children: ReactNode; className?: string; uitlijnen?: 'links' | 'rechts'; zwevend?: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
+  const plek = useRef<HTMLSpanElement>(null)
+  // Zwevend: op de computer los van de ouder in de pagina, op de plaats van de knop en altijd binnen het scherm.
+  // Nodig in een paneel dat scrollt of smal is (de boom), anders valt het menu eruit of wordt het afgesneden.
+  const [pos, setPos] = useState<{ top: number; left: number; max: number } | 'gsm' | null>(null)
   useEffect(() => {
     if (!open) return
     const klik = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onSluit() }
@@ -83,7 +88,43 @@ export function Popover({ open, onSluit, children, className = '', uitlijnen = '
     document.addEventListener('keydown', toets)
     return () => { clearTimeout(t); document.removeEventListener('mousedown', klik); document.removeEventListener('keydown', toets) }
   }, [open, onSluit])
+  useLayoutEffect(() => {
+    if (!open || !zwevend) { setPos(null); return }
+    const zet = () => {
+      const anker = plek.current?.parentElement, el = ref.current
+      if (!anker || !el) return
+      if (!window.matchMedia('(min-width: 768px)').matches) { setPos('gsm'); return }
+      const r = anker.getBoundingClientRect()
+      const w = el.offsetWidth, h = el.offsetHeight, vw = window.innerWidth, vh = window.innerHeight
+      const left = Math.max(8, Math.min(uitlijnen === 'rechts' ? r.right - w : r.left, vw - w - 8))
+      const onder = vh - r.bottom - 12, boven = r.top - 12
+      const top = h <= onder || onder >= boven ? r.bottom + 4 : Math.max(8, r.top - 4 - Math.min(h, boven))
+      setPos({ top, left, max: Math.max(160, h <= onder || onder >= boven ? onder : boven) })
+    }
+    zet()
+    const scroll = (e: Event) => { if (ref.current && e.target instanceof Node && ref.current.contains(e.target)) return; zet() }
+    window.addEventListener('resize', zet)
+    window.addEventListener('scroll', scroll, true)
+    return () => { window.removeEventListener('resize', zet); window.removeEventListener('scroll', scroll, true) }
+  }, [open, zwevend, uitlijnen])
   if (!open) return null
+  if (zwevend) {
+    const gsm = pos === 'gsm'
+    const vast = pos && pos !== 'gsm' ? pos : null
+    return (
+      <>
+        <span ref={plek} hidden />
+        {createPortal(
+          <>
+            {gsm && <div className="fixed inset-0 z-[80] bg-black/20" aria-hidden onMouseDown={onSluit} />}
+            <div ref={ref} className={`fixed z-[81] bg-white border border-gray-200 ${gsm ? 'inset-x-2 bottom-2 rounded-2xl shadow-2xl max-h-[75dvh] overflow-y-auto' : 'rounded-xl shadow-xl overflow-y-auto'} ${className} ${gsm ? '!w-auto' : ''}`}
+              style={vast ? { top: vast.top, left: vast.left, maxHeight: vast.max } : gsm ? undefined : { top: 0, left: 0, visibility: 'hidden' }}>{children}</div>
+          </>,
+          document.body,
+        )}
+      </>
+    )
+  }
   // Op de gsm een blad onderaan over de volle breedte (een menu in een schuivende rij zou afgesneden worden).
   return (
     <>
