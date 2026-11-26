@@ -1,6 +1,8 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Space, Map as AgMap, Lijst, DocKort, Item, Label, Persoon } from '@/lib/agenda/model'
+import { dag } from '@/lib/meetings/model'
+import { shootAlsItem, type ShootRij } from '@/lib/agenda/model'
 import { persoonVanGebruiker } from '@/lib/agenda/personen-server'
 
 type Admin = SupabaseClient
@@ -152,6 +154,19 @@ export async function meetingsInBereik(admin: Admin, van: string, tot: string, p
     })
   }
   return { items, clickupIds, perClickup: new Map((data ?? []).filter((m) => (m as { clickup_task_id: string | null }).clickup_task_id).map((m) => [(m as { clickup_task_id: string }).clickup_task_id, (m as { id: string }).id])) }
+}
+
+/** Shoots uit de Shoot planner in dezelfde vorm (enkel voor wie de Shoot planner mag zien). Openen gaat naar de planner. */
+export async function shootsInBereik(admin: Admin, van: string, tot: string, perEmail: Map<string, string>, perGebruiker: Map<string, string>): Promise<Item[]> {
+  const { data, error } = await admin.from('shoot_briefings')
+    .select('id, client_id, titel, shoot_date, start_time, end_time, location, status, betrokkenen, created_by, updated_at')
+    .gte('shoot_date', dag(van, 'Europe/Brussels')).lte('shoot_date', dag(tot, 'Europe/Brussels')).limit(500)
+  if (error || !data?.length) return []
+  const rijen = (data as ShootRij[]).filter((r) => r.status !== 'geannuleerd' && /^\d{4}-\d{2}-\d{2}$/.test(r.shoot_date ?? ''))
+  const klantIds = [...new Set(rijen.map((r) => r.client_id).filter((x): x is string => !!x))]
+  const { data: kl } = klantIds.length ? await admin.from('clients').select('id, company_name').in('id', klantIds) : { data: [] }
+  const klant = new Map(((kl ?? []) as { id: string; company_name: string | null }[]).map((k) => [k.id, k.company_name ?? '']))
+  return rijen.map((r) => shootAlsItem(r, r.client_id ? klant.get(r.client_id) ?? '' : '', perEmail, perGebruiker))
 }
 
 /**

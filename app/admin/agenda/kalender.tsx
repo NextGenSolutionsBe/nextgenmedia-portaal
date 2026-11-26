@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
-import { Check, Flag, Video, MapPin, Plus, Lock, RotateCcw, Clock, Folder } from 'lucide-react'
+import { Check, Flag, Video, MapPin, Plus, Lock, RotateCcw, Clock, Folder, Aperture } from 'lucide-react'
 import {
   plaatsVan, dagenVan, perDagVan, legUit, vandaag, plusDagen, zoneNaarIso, dag, uur, kortDag, enkelDeadline, deadlineLabel,
   type Item, type Weergave, type Persoon,
@@ -174,6 +174,7 @@ function Chip({ i, kleur, h, onOpen, onKlaar, personen, tijd, sleep, opDag, lang
       <Vinkje i={i} onKlaar={onKlaar} klein />
       {i.urgent && !klaar && <Flag className="h-3.5 w-3.5 shrink-0 text-red-600 fill-red-600" />}
       {(i.meet_url || i.bron === 'meeting') && <Video className="h-3.5 w-3.5 shrink-0 opacity-70" />}
+      {i.bron === 'shoot' && <Aperture className="h-3.5 w-3.5 shrink-0 opacity-70" aria-label="Shoot" />}
       {dl ? <DeadlineLabel i={i} opDag={opDag ?? dag(i.deadline_op!)} lang={lang} klein /> : tijd && <span className="shrink-0 tabular-nums opacity-75">{tijd}</span>}
       <span className={`truncate min-w-0 flex-auto ${klaar ? 'line-through decoration-1 opacity-80' : ''}`}>{i.titel}</span>
       {/* De titel gaat voor: is het smal, dan krimpt eerst het label (tot enkel het mapje). */}
@@ -514,6 +515,7 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
                         {hoogte >= 34 && (
                           <div className={`flex items-center gap-1 mt-0.5 tabular-nums text-[12px] ${klaar ? 'text-[#2b4a36]/80' : 'text-gray-600'}`}>
                             {(i.meet_url || i.bron === 'meeting') && <Video className="h-3 w-3 shrink-0" />}
+                            {i.bron === 'shoot' && <Aperture className="h-3 w-3 shrink-0" aria-label="Shoot" />}
                             {i.locatie && !i.meet_url && <MapPin className="h-3 w-3 shrink-0" />}
                             <span className={`shrink-0 ${h ? '[@container(max-width:200px)]:hidden' : ''}`}>{hhmm(b.vanMin)}–{hhmm(b.totMin)}</span>
                             {h && <span className="inline-flex min-w-0"><HerkomstLabel h={h} klein /></span>}
@@ -575,6 +577,7 @@ function DagKaart({ i, kleur, h, personen, onOpen, onKlaar, opDag }: { i: Item; 
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-gray-600">
           {(i.meet_url || i.bron === 'meeting') && <Video className="h-3.5 w-3.5 shrink-0" />}
+          {i.bron === 'shoot' && <Aperture className="h-3.5 w-3.5 shrink-0" aria-label="Shoot" />}
           {tijd && <span className="inline-flex items-center gap-1 tabular-nums"><Clock className="h-3 w-3" />{tijd}</span>}
           {i.deadline_op && <DeadlineLabel i={i} opDag={opDag} klein />}
           {h && <span className="inline-flex min-w-0 max-w-full"><HerkomstLabel h={h} /></span>}

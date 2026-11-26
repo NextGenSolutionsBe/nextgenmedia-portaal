@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  Loader2, RotateCcw, CheckSquare, CalendarDays, Video, UserRound, Check, Trash2, Plus, Search, ExternalLink, AlertTriangle, Users, Mail, Lock, ListTree, RefreshCw, Link2, X,
+  Loader2, RotateCcw, CheckSquare, CalendarDays, Video, UserRound, Aperture, Check, Trash2, Plus, Search, ExternalLink, AlertTriangle, Users, Mail, Lock, ListTree, RefreshCw, Link2, X,
 } from 'lucide-react'
 import { Modal } from '@/app/admin/materiaal/dialogen'
 import { PersoonFoto } from '@/components/admin/persoon-foto'
@@ -25,7 +25,7 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
   onMeeting: (soort: 'algemeen' | 'klant') => void
   magMeeting: boolean
 }) {
-  const [stap, setStap] = useState<'kies' | 'taak'>(m.heelDag || !magMeeting ? 'taak' : 'kies')
+  const [stap, setStap] = useState<'kies' | 'taak'>(m.heelDag || (!magMeeting && !boom.shoots) ? 'taak' : 'kies')
   // De dag van de taak: start op de aangeklikte dag, met één klik een andere.
   const [opDag, setOpDag] = useState(m.dag)
   const [titel, setTitel] = useState('')
@@ -73,17 +73,27 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
       if (r.id) onTaak(r.id)
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Toevoegen mislukt') } finally { setBezig(false) }
   }
+  // Een shoot plan je in de Shoot planner (klant, locaties, programma); dag en uur gaan mee.
+  const shootLink = `/admin/shoots/nieuw?datum=${opDag}${m.heelDag ? '' : `&van=${hhmm(m.vanMin ?? 540)}&tot=${hhmm(Math.min(m.totMin ?? 600, 1439))}`}&terug=agenda`
   if (stap === 'kies') {
     return (
       <Modal titel="Wat wil je plannen?" sub={wanneerTekst} onSluit={onSluit}>
         <div className="grid gap-2">
           <Keuze icoon={<CheckSquare className="h-4 w-4" />} titel="Taak of afspraak in de agenda" tekst="Enkel in onze agenda: zonder uitnodiging of mail. Bv. een shoot voorbereiden, een blok focuswerk, tandarts." onClick={() => setStap('taak')} />
-          <Keuze icoon={<CalendarDays className="h-4 w-4" />} titel="Algemene afspraak met Google Meet" tekst="Via de Meeting Inplanner: Google Agenda, Meet-link, uitnodiging en herinnering. Stagebespreking, verzekering, overleg." onClick={() => onMeeting('algemeen')} />
-          <Keuze icoon={<Video className="h-4 w-4" />} titel="Meeting met een klant" tekst="Online of op locatie, gekoppeld aan de klant: uitnodiging, mail en herinnering zoals altijd." onClick={() => onMeeting('klant')} />
-          <a href={`/admin/meetings?tab=agenda`} className={`card-base !p-3 text-left hover:border-gray-400 block ${focusRing}`}>
-            <div className="font-medium flex items-center gap-2"><UserRound className="h-4 w-4" />Verkoopafspraak met een lead<ExternalLink className="h-3.5 w-3.5 text-gray-400" /></div>
-            <div className="text-xs text-gray-600 mt-0.5">Opent Calendar in de Meeting Inplanner, met setter, merk en uitkomst zoals altijd.</div>
-          </a>
+          {boom.shoots && (
+            <a href={shootLink} className={`card-base !p-3 text-left hover:border-gray-400 block ${focusRing}`}>
+              <div className="font-medium flex items-center gap-2"><Aperture className="h-4 w-4" />Contentshoot</div>
+              <div className="text-xs text-gray-600 mt-0.5">In de Shoot planner, met deze dag en dit uur al ingevuld: klant, locatie, programma, wie erbij is en de shotlist. Staat daarna ook in de agenda.</div>
+            </a>
+          )}
+          {magMeeting && <>
+            <Keuze icoon={<CalendarDays className="h-4 w-4" />} titel="Algemene afspraak met Google Meet" tekst="Via de Meeting Inplanner: Google Agenda, Meet-link, uitnodiging en herinnering. Stagebespreking, verzekering, overleg." onClick={() => onMeeting('algemeen')} />
+            <Keuze icoon={<Video className="h-4 w-4" />} titel="Meeting met een klant" tekst="Online of op locatie, gekoppeld aan de klant: uitnodiging, mail en herinnering zoals altijd." onClick={() => onMeeting('klant')} />
+            <a href={`/admin/meetings?tab=agenda`} className={`card-base !p-3 text-left hover:border-gray-400 block ${focusRing}`}>
+              <div className="font-medium flex items-center gap-2"><UserRound className="h-4 w-4" />Verkoopafspraak met een lead<ExternalLink className="h-3.5 w-3.5 text-gray-400" /></div>
+              <div className="text-xs text-gray-600 mt-0.5">Opent Calendar in de Meeting Inplanner, met setter, merk en uitkomst zoals altijd.</div>
+            </a>
+          </>}
         </div>
       </Modal>
     )
@@ -93,6 +103,7 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
       voet={<><button type="button" onClick={onSluit} className="btn-secondary">Annuleren</button><button type="button" disabled={!titel.trim() || bezig} onClick={maak} className="btn-primary">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Toevoegen</button></>}>
 
       <input autoFocus value={titel} onChange={(e) => setTitel(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') maak() }} className="input-base text-base" placeholder={m.heelDag ? 'Wat moet er gebeuren?' : 'Waarover gaat het?'} aria-label="Titel" maxLength={500} />
+      {boom.shoots && <a href={shootLink} className="inline-flex items-center gap-1.5 text-xs text-gray-600 hover:text-black underline underline-offset-2"><Aperture className="h-3.5 w-3.5" />Is het een contentshoot? Plan ze in de Shoot planner</a>}
       {!m.heelDag && (
         <div className="flex gap-1.5">
           {(['meeting', 'taak'] as const).map((s) => <button key={s} type="button" onClick={() => setSoort(s)} aria-pressed={soort === s} className={`rounded-full border px-3 py-1 text-xs ${soort === s ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700'}`}>{s === 'meeting' ? 'Afspraak' : 'Taak met uur'}</button>)}

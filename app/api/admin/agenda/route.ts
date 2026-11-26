@@ -7,7 +7,7 @@ import { inspreekPrompt, leesInspreekVoorstel, type InspreekContext } from '@/li
 import { mijnDeadlines } from '@/lib/agenda/deadlines-server'
 import { schoonDocJson, vulDocAan, BEELD_PAD, BEELD_TYPES, MAX_BEELD, type DocNode } from '@/lib/agenda/doc-opmaak'
 import {
-  kijkerVan, laadZicht, boomVoor, metToegewezen, meetingsInBereik, metMeetingStatus, itemsInBereik, itemZichtbaar, docZichtbaar, laadPersonen, laadLabels, alleRijen,
+  kijkerVan, laadZicht, boomVoor, metToegewezen, meetingsInBereik, shootsInBereik, metMeetingStatus, itemsInBereik, itemZichtbaar, docZichtbaar, laadPersonen, laadLabels, alleRijen,
   ITEM_VELDEN, type Kijker, type Zicht, type RuwItem,
 } from '@/lib/agenda/server'
 
@@ -43,6 +43,13 @@ const isIso = (v: string | null): v is string => !!v && Number.isFinite(Date.par
 
 async function magMeetings(): Promise<boolean> {
   return !!(await magIk('meetings', 'bekijken')) || !!(await magIk('sales', 'bekijken'))
+}
+
+/** Personen op e-mail en op account (voor wie op een shoot staat of ze maakte). */
+async function personenKaart(admin: Admin): Promise<{ email: Map<string, string>; gebruiker: Map<string, string> }> {
+  const { data } = await admin.from('ag_personen').select('id, email, user_id')
+  const r = (data ?? []) as { id: string; email: string | null; user_id: string | null }[]
+  return { email: new Map(r.filter((p) => p.email).map((p) => [p.email!.toLowerCase(), p.id])), gebruiker: new Map(r.filter((p) => p.user_id).map((p) => [p.user_id!, p.id])) }
 }
 
 async function emailNaarPersoon(admin: Admin): Promise<Map<string, string>> {
@@ -104,22 +111,25 @@ async function boom(c: Ctx) {
       .map((x) => ({ ...x, eigen: x.persoon_id === k.persoonId, gedeeld: x.sleutel === 'gedeeld' })),
     mailVoorstellen: mail.count ?? 0,
     meetings: await magMeetings(),
+    shoots: !!(await magIk('shoots', 'toevoegen')),
     rechten: Object.fromEntries(rechten),
   }
 }
 
 async function bereik(admin: Admin, k: Kijker, van: string | null, tot: string | null) {
   if (!isIso(van) || !isIso(tot) || Date.parse(tot) <= Date.parse(van) || Date.parse(tot) - Date.parse(van) > 70 * 86_400_000) throw new Error('Ongeldige periode')
-  const [z, ruw, mt] = await Promise.all([
+  const [z, ruw, mt, shoots] = await Promise.all([
     laadZicht(admin, k),
     itemsInBereik(admin, van, tot),
     magMeetings().then(async (ja) => (ja ? meetingsInBereik(admin, van, tot, await emailNaarPersoon(admin)) : { items: [] as Item[], clickupIds: new Set<string>(), perClickup: new Map<string, string>() })),
+    // Shoots uit de Shoot planner (enkel met recht op de Shoot planner).
+    magIk('shoots', 'bekijken').then(async (ja) => { if (!ja) return [] as Item[]; const p = await personenKaart(admin); return shootsInBereik(admin, van, tot, p.email, p.gebruiker) }).catch(() => [] as Item[]),
   ])
   // Een meeting uit de Meeting Inplanner staat ook in ClickUp: één keer tonen, die van de Meeting Inplanner
   // (af als het dubbel in ClickUp af is).
   const items = await metToegewezen(admin, ruw.filter((r) => !r.clickup_id || !mt.clickupIds.has(r.clickup_id)), z, { subtaken: true })
   const meetings = metMeetingStatus(mt.items, ruw.filter((r) => r.clickup_id && mt.clickupIds.has(r.clickup_id)), mt.perClickup)
-  return { items: [...items, ...meetings] }
+  return { items: [...items, ...meetings, ...shoots] }
 }
 
 async function container(admin: Admin, k: Kijker, soort: string, id: string | null) {

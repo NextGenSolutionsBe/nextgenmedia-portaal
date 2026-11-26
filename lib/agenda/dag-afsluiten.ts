@@ -56,7 +56,8 @@ export function afTeSluiten(items: Item[], opts: { ik: string; dag: string }): {
   const van = plusDagen(opts.dag, -DAGEN_TERUG)
   const taken: Item[] = [], meetings: Item[] = []
   for (const i of items) {
-    if (!vanMij(i, opts.ik)) continue
+    // Een shoot staat in de Shoot planner, niet om hier af te sluiten.
+    if (i.bron === 'shoot' || !vanMij(i, opts.ik)) continue
     const laatste = laatsteDag(i)
     if (!laatste) continue
     const isMeeting = i.bron === 'meeting' || i.soort === 'meeting'
