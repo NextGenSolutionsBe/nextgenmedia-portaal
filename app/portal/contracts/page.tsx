@@ -82,6 +82,7 @@ export default async function PortalContractsPage() {
                       </div>
                       <div className="min-w-0">
                         <div className="font-semibold truncate">{c.title}</div>
+                        {(c as { bedrijf?: string | null }).bedrijf === 'nextgensolutions' && <div className="text-[11px] text-blue-700">NextGen Solutions</div>}
                         <div className="text-xs text-gray-400 mt-0.5">
                           {c.sent_at ? `Verstuurd op ${formatDate(c.sent_at)}` : formatDate(c.created_at)}
                         </div>
@@ -136,6 +137,8 @@ export default async function PortalContractsPage() {
                         </div>
                         <div className="min-w-0">
                           <div className="font-semibold truncate">{c.title}</div>
+                          {(c as { bedrijf?: string | null }).bedrijf === 'nextgensolutions' && <div className="text-[11px] text-blue-700">NextGen Solutions</div>}
+                        {(c as { bedrijf?: string | null }).bedrijf === 'nextgensolutions' && <div className="text-[11px] text-blue-700">NextGen Solutions</div>}
                           <div className="text-xs text-gray-400 mt-0.5">
                             {c.signed_at ? `Getekend op ${formatDate(c.signed_at)}` : formatDate(c.created_at)}
                           </div>

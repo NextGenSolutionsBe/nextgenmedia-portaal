@@ -15,6 +15,11 @@ export type BedrijfRij = {
   kleur: string | null
   volgorde: number
   actief: boolean
+  /** Merkgegevens (fase 2): website, contactadres, antwoordadres voor mails, voettekst op documenten. */
+  website?: string | null
+  email?: string | null
+  antwoord_email?: string | null
+  voettekst?: string | null
 }
 
 export type Eenheid = 'eenmalig' | 'maand' | 'uur'
@@ -122,6 +127,33 @@ export function boom(c: Catalogus, ookInactief = false): { bedrijf: BedrijfRij; 
     .filter((g) => g.diensten.length > 0 || g.bedrijf.slug !== ALGEMEEN)
 }
 
+// ── Merkgegevens per bedrijf (fase 2) ───────────────────────────────────────
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
+
+export type BedrijfInvoer = { naam?: unknown; handelsnaam?: unknown; kort?: unknown; kleur?: unknown; website?: unknown; email?: unknown; antwoord_email?: unknown; voettekst?: unknown }
+
+/** Merkgegevens nakijken. De slug verandert nooit; enkel wat op documenten en mails komt. */
+export function controleerBedrijf(invoer: BedrijfInvoer): { ok: true; waarde: Omit<BedrijfRij, 'slug' | 'volgorde' | 'actief'> } | { ok: false; fout: string } {
+  const t = (v: unknown, max: number) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max)
+  const naam = t(invoer.naam, 80)
+  if (naam.length < 2) return { ok: false, fout: 'Geef het bedrijf een naam.' }
+  const email = t(invoer.email, 160).toLowerCase()
+  const antwoord = t(invoer.antwoord_email, 160).toLowerCase()
+  if (email && !EMAIL_RE.test(email)) return { ok: false, fout: 'Het e-mailadres klopt niet.' }
+  if (antwoord && !EMAIL_RE.test(antwoord)) return { ok: false, fout: 'Het antwoordadres klopt niet.' }
+  const kleur = typeof invoer.kleur === 'string' && /^#[0-9a-fA-F]{6}$/.test(invoer.kleur) ? invoer.kleur : null
+  const website = t(invoer.website, 120).replace(/^https?:\/\//, '').replace(/\/$/, '')
+  return {
+    ok: true,
+    waarde: {
+      naam, handelsnaam: t(invoer.handelsnaam, 80) || null, kort: t(invoer.kort, 30) || null, kleur,
+      website: website || null, email: email || null, antwoord_email: antwoord || null,
+      voettekst: String(invoer.voettekst ?? '').trim().slice(0, 500) || null,
+    },
+  }
+}
+
 // ── Catalogus beheren ───────────────────────────────────────────────────────
 
 export function slugVan(naam: string): string {
@@ -143,7 +175,7 @@ const getalOfNull = (v: unknown, min: number, max: number): number | null | 'fou
   return Math.round(n * 100) / 100
 }
 
-export type DienstInvoer = Partial<Omit<DienstRij, 'inbegrepen' | 'niet_inbegrepen'>> & { inbegrepen?: unknown; niet_inbegrepen?: unknown }
+export type DienstInvoer = Partial<Omit<DienstRij, 'inbegrepen' | 'niet_inbegrepen' | 'min_prijs' | 'min_marge_pct'>> & { inbegrepen?: unknown; niet_inbegrepen?: unknown; min_prijs?: unknown; min_marge_pct?: unknown }
 
 /**
  * Een dienst nakijken voor hij bewaard wordt. `bestaand` = de slug die je
@@ -232,6 +264,32 @@ export function opdrachtSleutelVoor(dienst: string): string | null {
 function hoofdOf(slug: string): string {
   const x = STANDAARD_DIENSTEN.find((y) => y.slug === slug)
   return x?.parent_slug ?? slug
+}
+
+// ── Aanvragen in de klantapp per bedrijf (fase 2, K87) ──────────────────────
+
+/** Bij welk bedrijf hoort een soort aanvraag (zelfde indeling als dienst_mapping). Onbekend = "Iets anders". */
+const AANVRAAG_SOLUTIONS = new Set(['dienst:ai', 'consultancy:ai_workshop', 'consultancy:ai_scan', 'consultancy:workflow_scan', 'consultancy:sales_ops_scan', 'consultancy:crm_advies'])
+const AANVRAAG_ANDERS = new Set(['dienst:overige', 'consultancy:overige'])
+
+export function aanvraagBedrijf(soort: string, type: string): typeof MEDIA | typeof SOLUTIONS | null {
+  const k = `${soort}:${type}`
+  if (AANVRAAG_SOLUTIONS.has(k)) return SOLUTIONS
+  if (AANVRAAG_ANDERS.has(k)) return null
+  return MEDIA
+}
+
+/** Groepen voor de klantapp: eerst marketing (Media), dan bedrijfsprocessen (Solutions), dan iets anders. */
+export function aanvraagGroepen<T extends { key: string }>(soort: string, lijst: T[]): { sleutel: string; titel: string; items: T[] }[] {
+  const titel = soort === 'consultancy'
+    ? { media: 'Marketing', solutions: 'Bedrijfsprocessen en automatisatie', anders: 'Iets anders' }
+    : { media: 'Marketing en content · NextGen Media', solutions: 'Automatisatie en software · NextGen Solutions', anders: 'Iets anders' }
+  const groepen = [
+    { sleutel: 'media', titel: titel.media, items: lijst.filter((x) => aanvraagBedrijf(soort, x.key) === MEDIA) },
+    { sleutel: 'solutions', titel: titel.solutions, items: lijst.filter((x) => aanvraagBedrijf(soort, x.key) === SOLUTIONS) },
+    { sleutel: 'anders', titel: titel.anders, items: lijst.filter((x) => aanvraagBedrijf(soort, x.key) === null) },
+  ]
+  return groepen.filter((g) => g.items.length > 0)
 }
 
 // ── Te classificeren ────────────────────────────────────────────────────────

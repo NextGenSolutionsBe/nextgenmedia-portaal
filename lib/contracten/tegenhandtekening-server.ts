@@ -70,7 +70,8 @@ export async function tegenteken(admin: Admin, contractId: string, inv: Tegentek
   if (dlFout || !bestand) throw new TegentekenFout('Het getekende PDF werd niet gevonden in de opslag.', 500)
   const png = Buffer.from(hand.base64, 'base64')
   const kaart = await kaartVan(admin, contractId)
-  const bedrijf = bedrijfVoorMerk(kaart?.merk)
+  // Het bedrijf van het contract zelf (verbeterplan fase 1) gaat voor; anders het merk van de projectkaart.
+  const bedrijf = bedrijfVoorMerk((c.bedrijf as string | null | undefined) ?? kaart?.merk)
   const op = new Date().toISOString()
   let gestempeld: { bytes: Uint8Array; zone: OnsZone }
   try {

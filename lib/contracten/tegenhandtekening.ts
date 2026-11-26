@@ -81,9 +81,12 @@ export function redenNietTegentekenen(c: ContractStand & { pdf_path?: string | n
   return null
 }
 
-/** Namens welk bedrijf we tekenen (merk van de projectkaart). */
+/** Namens welk bedrijf we tekenen: het bedrijf van het contract, anders het merk van de projectkaart. */
 export const bedrijfVoorMerk = (merk: string | null | undefined): string =>
-  merk === 'nextgensolutions' ? 'NextGenSolutions' : merk === 'foundersofflanders' ? 'Founders of Flanders' : 'NextGenMedia'
+  merk === 'nextgensolutions' ? 'NextGenSolutions'
+    : merk === 'foundersofflanders' ? 'Founders of Flanders'
+    : merk === 'algemeen' ? 'NextGen Agency BV'
+    : 'NextGenMedia'
 
 /** Een naam voor onder de handtekening: opgekuist, 2 tot 80 tekens. */
 export function controleerNaam(v: unknown): string | null {

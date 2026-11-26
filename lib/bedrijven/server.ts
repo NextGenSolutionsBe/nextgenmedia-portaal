@@ -2,7 +2,7 @@ import 'server-only'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { logAudit } from '@/lib/audit'
 import {
-  STANDAARD_CATALOGUS, KLASSIFICATIE_TABELLEN, controleerDienst, controleerKeuze, vindBedrijf, vindDienst,
+  STANDAARD_CATALOGUS, KLASSIFICATIE_TABELLEN, controleerDienst, controleerKeuze, controleerBedrijf, vindBedrijf, vindDienst, type BedrijfInvoer,
   type Catalogus, type BedrijfRij, type DienstRij, type DienstInvoer, type KlassificatieRij, type KlassificatieVeld,
 } from './model'
 
@@ -22,7 +22,7 @@ export async function laadCatalogus(admin: Admin = createAdminSupabaseClient()):
   if (cache && Date.now() - cache.op < CACHE_MS) return cache.waarde
   try {
     const [b, d] = await Promise.all([
-      admin.from('bedrijven').select('slug, naam, handelsnaam, kort, kleur, volgorde, actief').order('volgorde'),
+      admin.from('bedrijven').select('*').order('volgorde'),
       admin.from('diensten_catalogus').select('slug, naam, bedrijf, parent_slug, omschrijving, inbegrepen, niet_inbegrepen, eenheid, terugkerend, actief, volgorde, kleur, min_prijs, min_marge_pct').order('volgorde'),
     ])
     if (b.error || d.error || !b.data?.length) return STANDAARD_CATALOGUS
@@ -62,6 +62,25 @@ export async function bewaarDienst(admin: Admin, invoer: DienstInvoer, bestaand:
     metadata: { oud: oud ? { naam: oud.naam, bedrijf: oud.bedrijf, actief: oud.actief, eenheid: oud.eenheid } : null, nieuw: { naam: c.waarde.naam, bedrijf: c.waarde.bedrijf, actief: c.waarde.actief, eenheid: c.waarde.eenheid } },
   })
   return { ok: true, dienst: c.waarde }
+}
+
+/** Merkgegevens van één bedrijf bewaren (Instellingen → Diensten → Bedrijven). */
+export async function bewaarBedrijf(admin: Admin, slug: string, invoer: BedrijfInvoer, actor: Actor): Promise<{ ok: true } | { ok: false; fout: string }> {
+  vergeetCatalogus()
+  const cat = await laadCatalogus(admin)
+  const oud = vindBedrijf(cat, slug)
+  if (!oud) return { ok: false, fout: 'Dat bedrijf bestaat niet.' }
+  const c = controleerBedrijf(invoer)
+  if (!c.ok) return c
+  const { error } = await admin.from('bedrijven').update({ ...c.waarde, updated_at: new Date().toISOString() }).eq('slug', slug)
+  if (error) return { ok: false, fout: error.message }
+  vergeetCatalogus()
+  await logAudit({
+    action: 'bedrijf.merk', entityType: 'bedrijf', entityId: slug, summary: `Merkgegevens aangepast: ${c.waarde.naam}`,
+    actorUserId: actor.userId, actorEmail: actor.email, ip: actor.ip, userAgent: actor.userAgent,
+    metadata: { oud: { naam: oud.naam, handelsnaam: oud.handelsnaam, website: oud.website ?? null, email: oud.email ?? null, antwoord_email: oud.antwoord_email ?? null }, nieuw: c.waarde },
+  })
+  return { ok: true }
 }
 
 // ── Te classificeren ────────────────────────────────────────────────────────

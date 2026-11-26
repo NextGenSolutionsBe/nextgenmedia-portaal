@@ -6,7 +6,9 @@ import {
   STANDAARD_CATALOGUS, STANDAARD_DIENSTEN, SERVICE_SLUG_NAAR_DIENST, OPDRACHT_DIENST_NAAR_CATALOGUS,
   controleerDienst, controleerKeuze, pastBijFilter, klantBedrijven, klantBedrijfLabel, boom, hoofdDienst,
   bedrijfVanDienst, dienstenLijst, slugVan, opdrachtSleutelVoor, isBedrijfFilter, KLASSIFICATIE_TABELLEN, MEDIA, SOLUTIONS, ALGEMEEN,
+  controleerBedrijf, aanvraagBedrijf, aanvraagGroepen,
 } from '../lib/bedrijven/model'
+import { DIENSTEN as AANVRAAG_DIENSTEN, CONSULTANCY } from '../lib/aanvragen/model'
 
 let n = 0
 const test = (naam: string, fn: () => void) => { fn(); n++; console.log(`  ✓ ${naam}`) }
@@ -119,6 +121,35 @@ test('klant bij Media, Solutions of beide', () => {
   assert.equal(klantBedrijfLabel([MEDIA, SOLUTIONS]), 'Beide')
   assert.equal(klantBedrijfLabel([SOLUTIONS]), 'Solutions')
   assert.equal(klantBedrijfLabel([]), '')
+})
+
+test('merkgegevens nakijken (fase 2)', () => {
+  assert.equal(controleerBedrijf({ naam: '' }).ok, false)
+  assert.equal(controleerBedrijf({ naam: 'NextGen Solutions', email: 'geen-adres' }).ok, false)
+  const r = controleerBedrijf({ naam: ' NextGen  Solutions ', website: 'https://nextgensolutions.be/', antwoord_email: 'Info@NextGenSolutions.be', kleur: '#3B82F6' })
+  assert.ok(r.ok)
+  if (r.ok) {
+    assert.equal(r.waarde.naam, 'NextGen Solutions')
+    assert.equal(r.waarde.website, 'nextgensolutions.be')
+    assert.equal(r.waarde.antwoord_email, 'info@nextgensolutions.be')
+  }
+})
+
+test('aanvragen in de klantapp per bedrijf (zelfde indeling als de databank)', () => {
+  assert.equal(aanvraagBedrijf('dienst', 'ai'), SOLUTIONS)
+  assert.equal(aanvraagBedrijf('dienst', 'social_media'), MEDIA)
+  assert.equal(aanvraagBedrijf('consultancy', 'workflow_scan'), SOLUTIONS)
+  assert.equal(aanvraagBedrijf('consultancy', 'seo_scan'), MEDIA)
+  assert.equal(aanvraagBedrijf('dienst', 'overige'), null)
+  const g = aanvraagGroepen('dienst', AANVRAAG_DIENSTEN)
+  assert.deepEqual(g.map((x) => x.sleutel), ['media', 'solutions', 'anders'])
+  assert.equal(g.reduce((n, x) => n + x.items.length, 0), AANVRAAG_DIENSTEN.length, 'geen enkele dienst valt weg')
+  const c = aanvraagGroepen('consultancy', CONSULTANCY)
+  assert.equal(c.reduce((n, x) => n + x.items.length, 0), CONSULTANCY.length)
+  assert.equal(c[0].titel, 'Marketing')
+  // Elke Solutions-soort in de klantapp staat ook zo in de mapping van de databank.
+  const sql = readFileSync(new URL('../supabase/migrations/99999999_SYNC_ALL.sql', import.meta.url), 'utf8')
+  for (const t of ['ai_workshop', 'ai_scan', 'workflow_scan', 'sales_ops_scan', 'crm_advies']) assert.ok(sql.includes(`('aanvraag_consultancy', '${t}',`) && sql.match(new RegExp(`'aanvraag_consultancy', '${t}', '[a-z_]+', (true|false), 'nextgensolutions'`)), t)
 })
 
 console.log(`\n${n} tests geslaagd\n`)

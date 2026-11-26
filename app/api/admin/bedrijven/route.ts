@@ -4,8 +4,8 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { leesPersoon, magIk } from '@/lib/instellingen/laden'
 import { eisBeheer } from '@/lib/instellingen/api'
 import { requestMeta } from '@/lib/audit'
-import { laadCatalogus, bewaarDienst, klassificatieLijst, klassificeer, bevestigVoorstellen, zetBedrijfOfDienst, type Actor } from '@/lib/bedrijven/server'
-import { isKlassificatieTabel, isBedrijfFilter, BEDRIJF_COOKIE, type KlassificatieVeld, type DienstInvoer } from '@/lib/bedrijven/model'
+import { laadCatalogus, bewaarDienst, bewaarBedrijf, klassificatieLijst, klassificeer, bevestigVoorstellen, zetBedrijfOfDienst, type Actor } from '@/lib/bedrijven/server'
+import { isKlassificatieTabel, isBedrijfFilter, BEDRIJF_COOKIE, type KlassificatieVeld, type DienstInvoer, type BedrijfInvoer } from '@/lib/bedrijven/model'
 
 export const dynamic = 'force-dynamic'
 
@@ -63,6 +63,16 @@ export async function POST(req: NextRequest) {
       const r = await bewaarDienst(admin, (b.invoer ?? {}) as DienstInvoer, typeof b.bestaand === 'string' ? b.bestaand : null, actor)
       if (!r.ok) return NextResponse.json({ error: r.fout }, { status: 400 })
       return NextResponse.json({ ok: true, dienst: r.dienst, catalogus: await laadCatalogus(admin) })
+    }
+
+    if (b.actie === 'bedrijf') {
+      const g = await eisBeheer()
+      if (!g.ok) return g.response
+      if (typeof b.slug !== 'string') return NextResponse.json({ error: 'Kies een bedrijf.' }, { status: 400 })
+      const actor: Actor = { userId: g.persoon.userId, email: g.persoon.email, naam: g.persoon.naam, ...meta }
+      const r = await bewaarBedrijf(admin, b.slug, (b.invoer ?? {}) as BedrijfInvoer, actor)
+      if (!r.ok) return NextResponse.json({ error: r.fout }, { status: 400 })
+      return NextResponse.json({ ok: true, catalogus: await laadCatalogus(admin) })
     }
 
     if (b.actie === 'klassificeer' || b.actie === 'bevestig_alle') {

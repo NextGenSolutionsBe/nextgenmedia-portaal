@@ -147,3 +147,24 @@ opdrachten: bedrijf 11, dienst 14 · contracts: dienst 6 · invoices: bedrijf 10
 
 - B15: de bestaande keuzelijsten (projectkaart, offerte-fiches, klantdiensten, aanvragen) gebruiken nog hun eigen lijst; de catalogus legt er een vertaling over (`dienst_mapping`). Volledig omschakelen gebeurt per scherm in de volgende fasen.
 - A7/A8: de schakelaar filtert Klanten, Klantcontracten en Projecten; Facturen en het Command Center volgen in fase 7 (financieel) en bij de scorecard.
+
+## Fase 2: merk, documenten, mails en klantapp (26 nov 2026)
+
+### Wat er veranderde
+
+- **Merkgegevens per bedrijf** (C18): `bedrijven` kreeg `website`, `email`, `antwoord_email`, `voettekst`. Aan te passen in Instellingen → Diensten → **Bedrijven** (gelogd als `bedrijf.merk`).
+- **Offerte-pdf** (C19): de dienstverlener toonde al de handelsnaam van het merk van de offerte (NextGenSolutions bij een Solutions-offerte). Ongewijzigd gelaten.
+- **Tegentekenen** (C20): "namens …" volgt nu eerst het bedrijf van het contract, daarna het merk van de projectkaart. **Algemene contracten** worden ondertekend "namens NextGen Agency BV". Enkel voor nieuwe handtekeningen; bestaande pdf's blijven exact zoals ze zijn.
+- **Afzender Solutions** (C21): de code stuurt Solutions-mails al vanaf info@nextgensolutions.be zodra dat domein bij Resend geverifieerd is (tot dan vanaf info@nextgenmedia.be met de naam NextGenSolutions en antwoordadres info@nextgensolutions.be). **Nog te doen door jullie**: in Resend het domein nextgensolutions.be toevoegen en de DNS-records die Resend toont (SPF/TXT, DKIM, eventueel MX voor bounces) bij de domeinbeheerder zetten. Resend geeft de exacte waarden per account; die staan niet vast en kan ik niet van hieruit ophalen.
+- **Huisstijl van de mail** (C22): een contractmail opent nu in de huisstijl van het bedrijf van het contract (Solutions = blauw). Offertes en projecten deden dat al. Wisselen blijft kunnen.
+- **Templates per bedrijf** (C23, C24): `email_templates.bedrijf`, `contract_templates.bedrijf`, `offerte_sjablonen.bedrijf` (offertesjablonen overgenomen van hun merk). In het E-mailcenter en bij contracttemplates kies je het bedrijf (leeg = beide); het label staat bij de template. "Contract uit template" neemt het bedrijf van de template als voorstel.
+- **Klantapp** (K86, K87): Diensten aanvragen en Consultancy aanvragen tonen de keuzes per bedrijf ("Marketing en content · NextGen Media", "Automatisatie en software · NextGen Solutions", "Iets anders"). Een contract van Solutions toont "NextGen Solutions" in de contractenlijst van de klant.
+
+### Nog open uit fase 2
+
+- K86 volledig (eigen blok en huisstijl per bedrijf in de hele klantapp), K88 (projectstatus en user stories voor Solutions-klanten, hangt af van fase 5) en K89 (Meeting boeken per bedrijf en vaste blokken, hangt af van fase 3).
+- C18: de merkgegevens staan in de databank en zijn aan te passen; de mailopmaak (`lib/merk-mail.ts`) gebruikt nog de vaste waarden. Omschakelen naar de databank is een volgende stap.
+
+## Waar we stoppen
+
+Op vraag van de zaakvoerders (26 nov 2026): **gestopt na fase 2**. Fasen 3 (teamagenda), 4 (rollen en plug-and-play), 5 (Solutions-levering), 6 (Media-levering en sales), 7 (financieel en ritme) en 8 (documentatie) zijn nog niet begonnen.

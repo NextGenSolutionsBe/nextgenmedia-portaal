@@ -1,5 +1,6 @@
 'use client'
 
+import { BedrijfLabel } from '@/components/admin/bedrijf-kiezer'
 import { useCallback, useEffect, useState } from 'react'
 import { Plus, X, Loader2, Pencil, Trash2, Sparkles, FileText } from 'lucide-react'
 import { PLACEHOLDERS } from '@/lib/email-render'
@@ -19,7 +20,7 @@ const KINDS: { value: string; label: string }[] = [
 ]
 const KIND_LABEL: Record<string, string> = Object.fromEntries(KINDS.map((k) => [k.value, k.label]))
 
-type Template = { id: string; name: string; subject: string; body: string; kind: string | null; cta_text: string | null; cta_link: string | null }
+type Template = { id: string; name: string; subject: string; body: string; kind: string | null; cta_text: string | null; cta_link: string | null; bedrijf?: string | null }
 
 export function TemplatesManager() {
   const [templates, setTemplates] = useState<Template[]>([])
@@ -100,6 +101,7 @@ export function TemplatesManager() {
                   <div className="font-medium text-sm truncate">{t.name}</div>
                   <div className="text-xs text-gray-500 truncate">{t.subject}</div>
                   <span className="status-badge bg-gray-100 text-gray-600 text-[10px] mt-1">{KIND_LABEL[t.kind ?? 'generic'] ?? t.kind}</span>
+                  {t.bedrijf && <span className="ml-1"><BedrijfLabel bedrijf={t.bedrijf} /></span>}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <button onClick={() => setEditing(t)} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400" title="Bewerken"><Pencil className="h-3.5 w-3.5" /></button>
@@ -137,6 +139,7 @@ function TemplateDialog({ template, onClose, onSaved }: { template: Template | n
   const [kind, setKind] = useState(template?.kind ?? 'generic')
   const [ctaText, setCtaText] = useState(template?.cta_text ?? '')
   const [ctaLink, setCtaLink] = useState(template?.cta_link ?? '')
+  const [bedrijf, setBedrijf] = useState<string>(template?.bedrijf ?? '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -144,7 +147,7 @@ function TemplateDialog({ template, onClose, onSaved }: { template: Template | n
     if (!name.trim()) { setError('Naam is verplicht'); return }
     setLoading(true); setError(null)
     try {
-      const payload = { name, subject, body, kind, cta_text: ctaText || null, cta_link: ctaLink || null }
+      const payload = { name, subject, body, kind, cta_text: ctaText || null, cta_link: ctaLink || null, bedrijf: bedrijf || null }
       const res = await fetch('/api/admin/email/templates', {
         method: isEdit ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(isEdit ? { id: template!.id, ...payload } : payload),
@@ -175,6 +178,14 @@ function TemplateDialog({ template, onClose, onSaved }: { template: Template | n
               {!KIND_LABEL[kind] && <option value={kind}>{kind}</option>}
             </select>
             <p className="text-[11px] text-gray-400 mt-1">Bepaalt welke template standaard voorgesteld wordt bij het mailen (bv. vanuit een taak of shoot).</p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Bedrijf</label>
+            <select className={inp} value={bedrijf} onChange={(e) => setBedrijf(e.target.value)}>
+              <option value="">Beide bedrijven</option>
+              <option value="nextgenmedia">NextGen Media</option>
+              <option value="nextgensolutions">NextGen Solutions</option>
+            </select>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Onderwerp</label>
