@@ -1,5 +1,7 @@
 'use client'
 
+import { BedrijfSchakelaar } from './bedrijf-schakelaar'
+import type { BedrijfFilter } from '@/lib/bedrijven/model'
 import { PersoonFoto } from '@/components/admin/persoon-foto'
 
 import Link from 'next/link'
@@ -223,7 +225,7 @@ function NavItem({
   )
 }
 
-export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, fotoVersie = null, instellingen, rol = 'hoofdbeheerder', verborgenPersoonlijk = [], toonInstellingen = false, mijnWerk = false }: {
+export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, fotoVersie = null, instellingen, rol = 'hoofdbeheerder', verborgenPersoonlijk = [], toonInstellingen = false, mijnWerk = false, bedrijfFilter = 'alles' }: {
   allowedModules?: string[]
   isEmployee?: boolean
   /** Voornaam van wie er ingelogd is — voor de begroeting bovenaan. */
@@ -241,6 +243,8 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
   toonInstellingen?: boolean
   /** Heeft deze login een personeelsdossier? Dan staat "Mijn werk" (inklokken, planning) bovenaan. */
   mijnWerk?: boolean
+  /** Eigen weergave Alles / Media / Solutions (verbeterplan fase 1). */
+  bedrijfFilter?: BedrijfFilter
 } = {}) {
   const router = useRouter()
   const { refresh, spinning } = useRefresh()
@@ -396,6 +400,8 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
             </div>
           </Link>
         )}
+
+        <BedrijfSchakelaar huidig={bedrijfFilter} />
 
         {/* Navigation */}
         <nav className="flex-1 px-3 py-3 overflow-y-auto no-scrollbar">

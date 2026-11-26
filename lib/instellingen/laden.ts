@@ -75,13 +75,22 @@ export async function magIk(moduleKey: string, actie: Actie): Promise<IngelogdeP
   return magActie(inst, persoon, moduleKey, actie) ? persoon : null
 }
 
-/** Persoonlijk verborgen tabbladen van de ingelogde gebruiker. */
-export const leesVoorkeuren = cache(async (userId: string): Promise<string[]> => {
+/** De voorkeurenrij van de ingelogde gebruiker (één lezing per verzoek). */
+export const leesVoorkeurRij = cache(async (userId: string): Promise<{ verborgen: string[]; bedrijfFilter: string | null }> => {
   try {
     const admin = createAdminSupabaseClient()
-    const { data } = await admin.from('gebruikers_voorkeuren').select('verborgen_modules').eq('auth_user_id', userId).maybeSingle()
-    return Array.isArray(data?.verborgen_modules) ? (data!.verborgen_modules as string[]) : []
-  } catch { return [] }
+    let r = await admin.from('gebruikers_voorkeuren').select('verborgen_modules, bedrijf_filter').eq('auth_user_id', userId).maybeSingle()
+    // Vóór de migratie bestaat bedrijf_filter nog niet: dan enkel de tabbladen.
+    if (r.error) r = await admin.from('gebruikers_voorkeuren').select('verborgen_modules').eq('auth_user_id', userId).maybeSingle()
+    const data = r.data as { verborgen_modules?: unknown; bedrijf_filter?: unknown } | null
+    return {
+      verborgen: Array.isArray(data?.verborgen_modules) ? (data!.verborgen_modules as string[]) : [],
+      bedrijfFilter: typeof data?.bedrijf_filter === 'string' ? data.bedrijf_filter : null,
+    }
+  } catch { return { verborgen: [], bedrijfFilter: null } }
 })
+
+/** Persoonlijk verborgen tabbladen van de ingelogde gebruiker. */
+export const leesVoorkeuren = cache(async (userId: string): Promise<string[]> => (await leesVoorkeurRij(userId)).verborgen)
 
 export type { Rol }

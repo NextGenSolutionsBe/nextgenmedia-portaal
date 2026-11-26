@@ -8,6 +8,8 @@ import { DURATION_TYPES } from '@/lib/contract-status'
 import { ContracttypeKiezer } from '../contracttype-kiezer'
 import { KlantKiezer, vulOndertekenaar, type KlantOptie } from '@/components/admin/klant-kiezer'
 import { VerantwoordelijkeKiezer } from '@/components/admin/verantwoordelijke-kiezer'
+import { BedrijfKiezer } from '@/components/admin/bedrijf-kiezer'
+import { SERVICE_SLUG_NAAR_DIENST, STANDAARD_DIENSTEN } from '@/lib/bedrijven/model'
 import type { ContractVerantwoordelijke } from '@/lib/contracten/verantwoordelijke'
 
 export default function NewContractPage() {
@@ -18,6 +20,9 @@ export default function NewContractPage() {
   // Wie volgt het contract op en tekent namens ons tegen (verplicht). Voorstel uit de kaart of de klant.
   const [verantwoordelijke, setVerantwoordelijke] = useState<ContractVerantwoordelijke | null>(null)
   const [zelfGekozen, setZelfGekozen] = useState(false)
+  // Voor welk bedrijf (verbeterplan fase 1): verplicht. Voorstel uit de projectkaart of de dienst.
+  const [bedrijf, setBedrijf] = useState<string | null>(null)
+  const [bedrijfZelf, setBedrijfZelf] = useState(false)
   const now = new Date()
   const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   const [form, setForm] = useState({
@@ -60,13 +65,14 @@ export default function NewContractPage() {
     const q = new URLSearchParams({ ...(form.client_id ? { client: form.client_id } : {}), ...(/^[0-9a-f-]{36}$/i.test(opdracht) ? { opdracht } : {}) })
     if (!q.toString()) return
     fetch(`/api/admin/contracts/verantwoordelijke?${q}`, { cache: 'no-store' })
-      .then((r) => r.json()).then((j) => { if (j.voorstel) setVerantwoordelijke(j.voorstel) }).catch(() => null)
+      .then((r) => r.json()).then((j) => { if (j.voorstel) setVerantwoordelijke(j.voorstel); if (j.bedrijf) setBedrijf((b) => b ?? j.bedrijf) }).catch(() => null)
   }, [form.client_id, zelfGekozen])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!file) { setError('Selecteer een PDF-bestand'); return }
     if (!verantwoordelijke) { setError('Kies wie verantwoordelijk is voor dit contract.'); return }
+    if (!bedrijf) { setError('Kies voor welk bedrijf dit contract is: NextGen Media of NextGen Solutions.'); return }
     if (!form.contract_type) { setError('Contracttype is verplicht'); return }
     if (fileTooBig(file)) { setError(`PDF te groot — max ${MAX_UPLOAD_MB} MB. Comprimeer het bestand en probeer opnieuw.`); return }
     setLoading(true)
@@ -85,6 +91,7 @@ export default function NewContractPage() {
       fd.append('already_signed', String(form.already_signed))
       fd.append('start_month', form.start_month)
       fd.append('verantwoordelijke', verantwoordelijke)
+      fd.append('bedrijf', bedrijf)
       // Vanaf een projectkaart (?opdracht=<id>): het contract hangt aan die kaart.
       try { const op = new URLSearchParams(window.location.search).get('opdracht'); if (op && /^[0-9a-f-]{36}$/i.test(op)) fd.append('opdracht_id', op) } catch { /* geen querystring */ }
       fd.append('duration_months', form.duration_months)
@@ -128,6 +135,10 @@ export default function NewContractPage() {
           <p className="text-xs text-gray-400 mt-1">Zonder klant verschijnt het contract niet in een klantportaal — enkel intern + via de publieke tekenlink.</p>
         </div>
         <div>
+          <span className={lbl} id="nieuw-bedrijf-label">Bedrijf *</span>
+          <BedrijfKiezer id="nieuw-bedrijf" waarde={bedrijf} onChange={(v) => { setBedrijf(v); setBedrijfZelf(true) }} />
+        </div>
+        <div>
           <span className={lbl} id="nieuw-verantwoordelijke-label">Verantwoordelijke *</span>
           <VerantwoordelijkeKiezer id="nieuw-verantwoordelijke" waarde={verantwoordelijke} onChange={(v) => { setVerantwoordelijke(v); setZelfGekozen(true) }} />
           <p className="text-xs text-gray-400 mt-1">Volgt het contract op en tekent namens ons tegen zodra de klant getekend heeft.</p>
@@ -148,7 +159,13 @@ export default function NewContractPage() {
         </div>
         <div>
           <label className={lbl}>Dienst (voor portaaltoegang)</label>
-          <select className={inp} value={form.service_slug} onChange={(e) => setForm((p) => ({ ...p, service_slug: e.target.value }))}>
+          <select className={inp} value={form.service_slug} onChange={(e) => {
+            const v = e.target.value
+            setForm((p) => ({ ...p, service_slug: v }))
+            // De dienst zegt het bedrijf, tenzij je het zelf al koos.
+            const dienst = STANDAARD_DIENSTEN.find((x) => x.slug === SERVICE_SLUG_NAAR_DIENST[v])
+            if (dienst && !bedrijfZelf) setBedrijf(dienst.bedrijf)
+          }}>
             <option value="">— Geen koppeling —</option>
             <option value="social-media">Social Media Management</option>
             <option value="webdesign">Website</option>

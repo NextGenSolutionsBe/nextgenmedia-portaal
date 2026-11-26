@@ -9,6 +9,7 @@ Werkt `docs/verbeterplan.md` af. Elke fase: wat er veranderde, rijen en checksum
 - Supabase-project `NextGenApps` (eu-west-1, Postgres 17), organisatie op het **Pro**-plan: dagelijkse backups (7 dagen) staan aan in Supabase. Point-in-time recovery is een betalende extra en staat niet aan.
 - Een eigen `pg_dump` kon niet vanuit deze omgeving: er staat geen databankwachtwoord in de omgeving (en dat hoort er ook niet). Wil je een eigen dump, dan: Supabase → Database → Backups → Download, of lokaal `supabase db dump`.
 - Daarom: elke migratie is enkel toevoegend (nieuwe tabellen en nullable kolommen), backfills schrijven enkel in nieuwe kolommen, en voor en na elke migratie tellen we de rijen en vergelijken we een checksum van de bestaande kolommen.
+- **Eigen backup (26 nov 2026, 21:28 UTC)**: schema `backup_voor_verbeterplan` met een volledige kopie van 236 tabellen van de app (73.518 rijen), niet bereikbaar via de app of de API. Nagekeken: alle aantallen gelijk, klanten, contracten, facturen en agenda identiek. Niet gekopieerd: andere apps, geheimen en logins, het draailogboek `clickup_agenda_runs`. Herstellen: `supabase/terugdraaien/herstel-uit-backup.sql`. Code van voor het plan: commit `733308a` op main.
 - De databank is **gedeeld** met andere apps: `aanbesteding_*`, `community_*` (+ schema `community_inbox`), `harrie_*`, `mcp_oauth_*`. Die tabellen raken we nooit aan.
 
 ### Opslag (buckets)
@@ -111,3 +112,38 @@ Checksum = md5 van alle rijen als json, zonder de nieuwe kolommen (`bedrijf`, `d
 ### Open vragen en de standaardkeuze die we nu nemen
 
 Zie hoofdstuk 6 van het plan. Er werd gevraagd niets te vragen, dus de standaardkeuzes daar gelden tot iemand ze aanpast.
+
+## Fase 1: bedrijf en dienstencatalogus (26 nov 2026)
+
+### Wat er veranderde
+
+- **Databank** (enkel toevoegend): tabellen `bedrijven` (NextGen Media, NextGen Solutions, Algemeen), `diensten_catalogus` (13 diensten, met subdiensten), `dienst_mapping` (oude waarde → catalogus, met wat zeker is), `te_classificeren` (de wachtrij). Kolommen `bedrijf` en waar zinvol `dienst` op projectkaarten (`dienst_slugs`), offertes, contracten, facturen, factuurregels, maandreeksen, aankopen, kosten, factuurkosten, teamtaken, meetings, shoots, opleveringen en aanvragen; `dienst` op Solutions-deals; `gebruikers_voorkeuren.bedrijf_filter`.
+- **Backfill** volgens vaste regels (merk op de kaart, dienst van het contract of de factuur, contract van de factuur, soort oplevering, type aanvraag, shoots = Foto & video). Nooit uit de verantwoordelijke.
+- **Nieuwe records** krijgen hun bedrijf en dienst vanzelf via databanktriggers met dezelfde regels (vullen enkel lege velden, versturen niets). Een nieuwe projectkaart, contract of factuur zonder bedrijf komt in de wachtrij; wie het bedrijf kiest, lost de vraag vanzelf op.
+- **Schermen**: Instellingen → **Diensten** (catalogus beheren), blok **Te classificeren** op het Command Center (zaakvoerders; voorstel bevestigen of iets anders kiezen, per soort alles in één keer), **schakelaar Alles / Media / Solutions** in de zijbalk (per gebruiker onthouden; filtert Klantcontracten, Klanten en Projecten; Algemeen en nog niet geclassificeerd blijven altijd zichtbaar), **bedrijf verplicht** bij Nieuw contract en Contract uit template (voorstel uit de dienst of de projectkaart), **bedrijf groot bovenaan het contract** (aan te passen, gelogd, geeft het door aan facturen zonder bedrijf), label in de contractenlijst, **Klant bij** (Media, Solutions, beide) als kolom en filter op Klanten.
+- **Logboek**: elke keuze van bedrijf of dienst en elke wijziging in de catalogus in het activiteitenlogboek (`bedrijf.zet`, `dienst.zet`, `dienst.nieuw`, `dienst.wijzig`).
+
+### Rijen en checksums na de migratie
+
+Alle 21 tabellen: zelfde aantal rijen en **identieke checksum** van de bestaande kolommen als voor de migratie (zie tabel bij Fase 0). Geen bestaande waarde veranderde. Terugdraaien getest in een transactie (`supabase/terugdraaien/fase1.sql`).
+
+### Bedrijf na de backfill
+
+| Tabel | Media | Solutions | Leeg (in de wachtrij) |
+| --- | --- | --- | --- |
+| opdrachten (138) | 116 | 11 | 11 |
+| contracts (55) | 54 | 1 | 0 |
+| invoices (164) | 153 | 1 | 10 |
+| invoice_lines (164) | 153 | 2 | 9 (volgen hun factuur) |
+| recurring_invoices (6) | 5 | 0 | 1 |
+| klant_aanvragen (4) | 2 | 1 | 1 |
+| opleveringen (5) | 5 | 0 | 0 |
+
+### Te classificeren (77 open vragen)
+
+opdrachten: bedrijf 11, dienst 14 · contracts: dienst 6 · invoices: bedrijf 10 · recurring_invoices: bedrijf 1 · klant_meetings: bedrijf 28 · purchases: bedrijf 2 · cost_entries: bedrijf 4 · klant_aanvragen: bedrijf 1. Elke vraag heeft een voorstel (behalve 2 contracten zonder dienst).
+
+### Nog open uit fase 1
+
+- B15: de bestaande keuzelijsten (projectkaart, offerte-fiches, klantdiensten, aanvragen) gebruiken nog hun eigen lijst; de catalogus legt er een vertaling over (`dienst_mapping`). Volledig omschakelen gebeurt per scherm in de volgende fasen.
+- A7/A8: de schakelaar filtert Klanten, Klantcontracten en Projecten; Facturen en het Command Center volgen in fase 7 (financieel) en bij de scorecard.

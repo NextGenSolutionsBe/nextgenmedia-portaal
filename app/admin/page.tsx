@@ -12,6 +12,14 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { mijnDeadlines } from '@/lib/agenda/deadlines-server'
 import { DeadlinesBlok } from './agenda/deadlines-blok'
 import { SnelleAgendaKnoppen } from './agenda/inspreken'
+import { TeClassificeren } from '@/components/admin/te-classificeren'
+import { aantalTeClassificeren } from '@/lib/bedrijven/server'
+
+/** Te classificeren (verbeterplan fase 1): enkel een telling hier; de lijst laadt pas bij het openklappen. */
+async function TeClassificerenBlok() {
+  const aantal = await aantalTeClassificeren()
+  return aantal > 0 ? <TeClassificeren aantal={aantal} /> : null
+}
 
 /** Jouw deadlines van vandaag (en wat de voorbije week niet af raakte). Niets = geen blok. */
 async function AgendaDeadlines({ userId }: { userId: string }) {
@@ -69,6 +77,13 @@ export default async function CommandCenter() {
 
       {/* Taken aan elkaar toewijzen, gesynchroniseerd met ClickUp. */}
       {actor && <TakenBlok />}
+
+      {/* Te classificeren: records zonder zeker bedrijf of dienst (zaakvoerders). */}
+      {isAdmin && (
+        <Suspense fallback={null}>
+          <TeClassificerenBlok />
+        </Suspense>
+      )}
 
       {/* Op te volgen — bovenaan: concreet wie en wat, per module afgeschermd. */}
       <Suspense fallback={<div className="card-base text-sm text-gray-400">Opvolging laden…</div>}>

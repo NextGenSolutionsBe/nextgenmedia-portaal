@@ -1,5 +1,8 @@
 export const dynamic = 'force-dynamic'
 
+import { leesPersoon } from '@/lib/instellingen/laden'
+import { leesBedrijfFilter } from '@/lib/bedrijven/weergave'
+import { pastBijFilter } from '@/lib/bedrijven/model'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { ContractsClient, type Contract } from './contracts-client'
 import { typeNamen } from '@/lib/contracten/db'
@@ -103,6 +106,7 @@ async function getContracts() {
       client: clientMap.get(c.client_id) ?? null,
       door: c.created_by ? namen[c.created_by]?.kort ?? null : null,
       verantwoordelijke: verantw.get(c.id) ?? null,
+      bedrijf: (c.bedrijf as string | null | undefined) ?? null,
     }
   })
 
@@ -110,7 +114,10 @@ async function getContracts() {
 }
 
 export default async function ContractsPage({ searchParams }: { searchParams: Promise<{ status?: string; tegentekenen?: string }> }) {
-  const { contracts, clients, templates, contracttypes } = await getContracts()
+  const [{ contracts: alle, clients, templates, contracttypes }, persoon] = await Promise.all([getContracts(), leesPersoon()])
+  // Eigen weergave Alles / Media / Solutions (zijbalk). Algemeen en nog niet geclassificeerd blijven altijd zichtbaar.
+  const weergave = await leesBedrijfFilter(persoon?.userId)
+  const contracts = alle.filter((c) => pastBijFilter(weergave, c.bedrijf))
   const sp = await searchParams
   const initialStatus = typeof sp?.status === 'string' ? sp.status : 'all'
 

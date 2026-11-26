@@ -8622,3 +8622,181 @@ insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
 select 'opleveringen', o.id::text, 'bedrijf', 'nextgenmedia', 'Oplevering zonder zeker bedrijf.'
 from public.opleveringen o where o.bedrijf is null
 on conflict (tabel, rij_id, veld) do nothing;
+
+-- ── Verbeterplan fase 1b (26 nov 2026): nieuwe records krijgen vanzelf bedrijf en dienst ──
+-- Zelfde vaste regels als de backfill. Vult enkel lege velden, overschrijft nooit een keuze.
+-- Geen enkele trigger verstuurt iets (geen mail, ClickUp, Google of melding).
+create or replace function public.dienst_uit_mapping(p_bron text, p_waarde text) returns text
+language sql stable as $$
+  select dienst_slug from public.dienst_mapping where bron = p_bron and oude_waarde = p_waarde and dienst_zeker
+$$;
+create or replace function public.bedrijf_van_dienst(p_dienst text) returns text
+language sql stable as $$
+  select bedrijf from public.diensten_catalogus where slug = p_dienst
+$$;
+
+create or replace function public.vul_bedrijf_contract() returns trigger language plpgsql as $$
+begin
+  if new.dienst is null and new.service_slug is not null then new.dienst := public.dienst_uit_mapping('service_slug', new.service_slug); end if;
+  if new.bedrijf is null and new.dienst is not null then new.bedrijf := public.bedrijf_van_dienst(new.dienst); end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_contract on public.contracts;
+create trigger trg_vul_bedrijf_contract before insert or update of service_slug, dienst, bedrijf on public.contracts
+  for each row execute function public.vul_bedrijf_contract();
+
+create or replace function public.vul_bedrijf_factuur() returns trigger language plpgsql as $$
+declare c_dienst text; c_bedrijf text;
+begin
+  if new.contract_id is not null then
+    select dienst, bedrijf into c_dienst, c_bedrijf from public.contracts where id = new.contract_id;
+  end if;
+  if new.dienst is null and new.service_slug is not null then new.dienst := public.dienst_uit_mapping('service_slug', new.service_slug); end if;
+  if new.dienst is null then new.dienst := c_dienst; end if;
+  if new.bedrijf is null and new.dienst is not null then new.bedrijf := public.bedrijf_van_dienst(new.dienst); end if;
+  if new.bedrijf is null then new.bedrijf := c_bedrijf; end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_factuur on public.invoices;
+create trigger trg_vul_bedrijf_factuur before insert or update of service_slug, contract_id, dienst, bedrijf on public.invoices
+  for each row execute function public.vul_bedrijf_factuur();
+drop trigger if exists trg_vul_bedrijf_reeks on public.recurring_invoices;
+create trigger trg_vul_bedrijf_reeks before insert or update of service_slug, contract_id, dienst, bedrijf on public.recurring_invoices
+  for each row execute function public.vul_bedrijf_factuur();
+
+create or replace function public.vul_bedrijf_factuurregel() returns trigger language plpgsql as $$
+declare i_dienst text; i_bedrijf text; c_dienst text; c_bedrijf text;
+begin
+  if new.invoice_id is not null then select dienst, bedrijf into i_dienst, i_bedrijf from public.invoices where id = new.invoice_id; end if;
+  if new.contract_id is not null then select dienst, bedrijf into c_dienst, c_bedrijf from public.contracts where id = new.contract_id; end if;
+  if new.dienst is null and new.service_slug is not null then new.dienst := public.dienst_uit_mapping('service_slug', new.service_slug); end if;
+  if new.dienst is null then new.dienst := coalesce(i_dienst, c_dienst); end if;
+  if new.bedrijf is null and new.dienst is not null then new.bedrijf := public.bedrijf_van_dienst(new.dienst); end if;
+  if new.bedrijf is null then new.bedrijf := coalesce(i_bedrijf, c_bedrijf); end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_factuurregel on public.invoice_lines;
+create trigger trg_vul_bedrijf_factuurregel before insert or update of service_slug, invoice_id, contract_id, dienst, bedrijf on public.invoice_lines
+  for each row execute function public.vul_bedrijf_factuurregel();
+
+create or replace function public.vul_bedrijf_factuurkost() returns trigger language plpgsql as $$
+begin
+  if new.bedrijf is null and new.invoice_id is not null then select bedrijf into new.bedrijf from public.invoices where id = new.invoice_id; end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_factuurkost on public.invoice_costs;
+create trigger trg_vul_bedrijf_factuurkost before insert on public.invoice_costs
+  for each row execute function public.vul_bedrijf_factuurkost();
+
+-- Projectkaarten: diensten (zeker) naar de catalogus; manueel toegevoegde catalogusdiensten blijven.
+-- Bedrijf volgt het gekozen merk; anders afgeleid als alle diensten zeker bij één bedrijf horen.
+create or replace function public.vul_bedrijf_opdracht() returns trigger language plpgsql as $$
+declare nieuw_auto text[]; oud_auto text[]; handmatig text[]; afgeleid text; aantal int; onzeker int;
+begin
+  select coalesce(array_agg(distinct m.dienst_slug order by m.dienst_slug), '{}') into nieuw_auto
+  from unnest(coalesce(new.diensten, '{}')) d join public.dienst_mapping m on m.bron = 'opdracht' and m.oude_waarde = d and m.dienst_zeker and m.dienst_slug is not null;
+  if tg_op = 'INSERT' then
+    new.dienst_slugs := case when new.dienst_slugs is null then nullif(nieuw_auto, '{}') else (select array_agg(distinct x order by x) from unnest(new.dienst_slugs || nieuw_auto) x) end;
+  elsif new.diensten is distinct from old.diensten then
+    select coalesce(array_agg(distinct m.dienst_slug), '{}') into oud_auto
+    from unnest(coalesce(old.diensten, '{}')) d join public.dienst_mapping m on m.bron = 'opdracht' and m.oude_waarde = d and m.dienst_zeker and m.dienst_slug is not null;
+    select coalesce(array_agg(x), '{}') into handmatig from unnest(coalesce(old.dienst_slugs, '{}')) x where not (x = any(oud_auto));
+    new.dienst_slugs := (select nullif(coalesce(array_agg(distinct x order by x), '{}'), '{}') from unnest(handmatig || nieuw_auto) x);
+  end if;
+
+  if new.merk in ('nextgenmedia', 'nextgensolutions') and (tg_op = 'INSERT' or new.merk is distinct from old.merk) then
+    new.bedrijf := new.merk;
+  elsif new.bedrijf is null and cardinality(coalesce(new.diensten, '{}')) > 0 then
+    select min(m.bedrijf), count(distinct m.bedrijf), count(*) filter (where m.bedrijf is null or not m.bedrijf_zeker)
+      into afgeleid, aantal, onzeker
+    from unnest(new.diensten) d left join public.dienst_mapping m on m.bron = 'opdracht' and m.oude_waarde = d;
+    if aantal = 1 and onzeker = 0 then new.bedrijf := afgeleid; end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_opdracht on public.opdrachten;
+create trigger trg_vul_bedrijf_opdracht before insert or update of merk, diensten, bedrijf, dienst_slugs on public.opdrachten
+  for each row execute function public.vul_bedrijf_opdracht();
+
+create or replace function public.vul_bedrijf_aanvraag() returns trigger language plpgsql as $$
+declare m record;
+begin
+  select * into m from public.dienst_mapping where bron = 'aanvraag_' || new.soort and oude_waarde = new.type;
+  if found then
+    if new.dienst is null and m.dienst_zeker then new.dienst := m.dienst_slug; end if;
+    if new.bedrijf is null and m.bedrijf_zeker then new.bedrijf := m.bedrijf; end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_aanvraag on public.klant_aanvragen;
+create trigger trg_vul_bedrijf_aanvraag before insert on public.klant_aanvragen
+  for each row execute function public.vul_bedrijf_aanvraag();
+
+create or replace function public.vul_bedrijf_shoot() returns trigger language plpgsql as $$
+begin
+  if new.dienst is null then new.dienst := 'foto_video'; end if;
+  if new.bedrijf is null then new.bedrijf := public.bedrijf_van_dienst(new.dienst); end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_shoot on public.shoot_briefings;
+create trigger trg_vul_bedrijf_shoot before insert on public.shoot_briefings
+  for each row execute function public.vul_bedrijf_shoot();
+
+create or replace function public.vul_bedrijf_oplevering() returns trigger language plpgsql as $$
+declare m record;
+begin
+  if new.dienst is null then
+    select * into m from public.dienst_mapping where bron = 'oplevering' and oude_waarde = new.soort and dienst_zeker;
+    if found then new.dienst := m.dienst_slug; end if;
+  end if;
+  if new.bedrijf is null and new.dienst is not null then new.bedrijf := public.bedrijf_van_dienst(new.dienst); end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_oplevering on public.opleveringen;
+create trigger trg_vul_bedrijf_oplevering before insert or update of soort on public.opleveringen
+  for each row execute function public.vul_bedrijf_oplevering();
+
+create or replace function public.vul_bedrijf_teamtaak() returns trigger language plpgsql as $$
+begin
+  if new.merk in ('nextgenmedia', 'nextgensolutions') and (new.bedrijf is null or tg_op = 'INSERT' or new.merk is distinct from old.merk) then new.bedrijf := new.merk; end if;
+  return new;
+end $$;
+drop trigger if exists trg_vul_bedrijf_teamtaak on public.team_taken;
+create trigger trg_vul_bedrijf_teamtaak before insert or update of merk on public.team_taken
+  for each row execute function public.vul_bedrijf_teamtaak();
+
+-- Wachtrij bijhouden: een gekozen bedrijf of dienst lost de open vraag op;
+-- een nieuwe projectkaart, contract of factuur zonder bedrijf komt erbij.
+create or replace function public.sync_te_classificeren() returns trigger language plpgsql as $$
+declare heeft_dienst boolean;
+begin
+  if tg_op = 'UPDATE' and new.bedrijf is not distinct from old.bedrijf
+     and (to_jsonb(new) ->> 'dienst') is not distinct from (to_jsonb(old) ->> 'dienst') then
+    return null;
+  end if;
+  if new.bedrijf is not null then
+    update public.te_classificeren set opgelost_op = now(), keuze = new.bedrijf
+    where tabel = tg_table_name and rij_id = new.id::text and veld = 'bedrijf' and opgelost_op is null;
+  elsif tg_op = 'INSERT' and tg_table_name in ('opdrachten', 'contracts', 'invoices') then
+    insert into public.te_classificeren (tabel, rij_id, veld, voorstel, reden)
+    values (tg_table_name, new.id::text, 'bedrijf', 'nextgenmedia', 'Nieuw aangemaakt zonder bedrijf.')
+    on conflict (tabel, rij_id, veld) do nothing;
+  end if;
+  heeft_dienst := tg_table_name in ('contracts', 'invoices', 'recurring_invoices', 'klant_aanvragen', 'opleveringen');
+  if heeft_dienst and (to_jsonb(new) ->> 'dienst') is not null then
+    update public.te_classificeren set opgelost_op = now(), keuze = to_jsonb(new) ->> 'dienst'
+    where tabel = tg_table_name and rij_id = new.id::text and veld = 'dienst' and opgelost_op is null;
+  end if;
+  return null;
+end $$;
+do $$
+declare t text;
+begin
+  foreach t in array array['opdrachten', 'contracts', 'invoices', 'recurring_invoices', 'klant_meetings', 'purchases', 'cost_entries', 'klant_aanvragen', 'opleveringen'] loop
+    execute format('drop trigger if exists trg_sync_te_classificeren on public.%I', t);
+    execute format('create trigger trg_sync_te_classificeren after insert or update on public.%I for each row execute function public.sync_te_classificeren()', t);
+  end loop;
+end $$;
+
+-- Verbeterplan fase 1c (26 nov 2026): eigen weergave Alles / Media / Solutions per gebruiker.
+alter table public.gebruikers_voorkeuren add column if not exists bedrijf_filter text;

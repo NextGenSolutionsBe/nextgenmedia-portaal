@@ -31,7 +31,7 @@ const WEERGAVE_SLEUTEL = 'ngm-opdrachten-weergave'
  * bevestigen, een contract opmaken, laten tekenen en volledig factureren
  * schuiven de kaart vanzelf door; In uitvoering zet je zelf.
  */
-export function OpdrachtenClient() {
+export function OpdrachtenClient({ startBedrijf = '' }: { startBedrijf?: Bedrijf | '' } = {}) {
   const [rijen, setRijen] = useState<KaartOpdracht[]>([])
   const [klanten, setKlanten] = useState<Klant[]>([])
   const [namen, setNamen] = useState<string[]>([])
@@ -49,7 +49,7 @@ export function OpdrachtenClient() {
   const [maand, setMaand] = useState(new Date().getMonth() + 1)
   const [kwartaal, setKwartaal] = useState<1 | 2 | 3 | 4>((Math.floor(new Date().getMonth() / 3) + 1) as 1 | 2 | 3 | 4)
   const [klantFilter, setKlantFilter] = useState('')
-  const [bedrijf, setBedrijf] = useState<Bedrijf | ''>('')
+  const [bedrijf, setBedrijf] = useState<Bedrijf | ''>(startBedrijf)
   const [waardeSchijf, setWaardeSchijf] = useState('alle')
   const [archief, setArchief] = useState<{ op: string | null } | null>(null)
   const [instellingen, setInstellingen] = useState(false)

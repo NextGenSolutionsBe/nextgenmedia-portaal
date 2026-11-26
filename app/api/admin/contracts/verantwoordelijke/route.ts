@@ -22,8 +22,13 @@ export async function GET(req: NextRequest) {
     const p = req.nextUrl.searchParams
     const opdrachtId = UUID.test(p.get('opdracht') ?? '') ? p.get('opdracht') : null
     const clientId = UUID.test(p.get('client') ?? '') ? p.get('client') : null
-    const voorstel = await voorstelVerantwoordelijke(createAdminSupabaseClient(), { opdrachtId, clientId })
-    return NextResponse.json({ voorstel })
+    const admin = createAdminSupabaseClient()
+    const [voorstel, kaart] = await Promise.all([
+      voorstelVerantwoordelijke(admin, { opdrachtId, clientId }),
+      // Bedrijf van de projectkaart als voorstel (verbeterplan fase 1).
+      opdrachtId ? admin.from('opdrachten').select('bedrijf').eq('id', opdrachtId).maybeSingle().then((r: { data: { bedrijf?: string | null } | null }) => r.data, () => null) : null,
+    ])
+    return NextResponse.json({ voorstel, bedrijf: kaart?.bedrijf ?? null })
   } catch (e) { return NextResponse.json({ error: safeMessage(e, 'contract-verantwoordelijke.GET') }, { status: 500 }) }
 }
 

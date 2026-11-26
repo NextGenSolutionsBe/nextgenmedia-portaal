@@ -6,6 +6,24 @@ import Link from 'next/link'
 import { Plus, Building2, Globe } from 'lucide-react'
 import { ClientsSearch } from './clients-search'
 import { leesVerantwoordelijken } from '@/lib/verkoop/verantwoordelijken'
+import { leesPersoon } from '@/lib/instellingen/laden'
+import { leesBedrijfFilter } from '@/lib/bedrijven/weergave'
+import { klantBedrijven, klantBedrijfLabel, MEDIA, SOLUTIONS } from '@/lib/bedrijven/model'
+
+/** Bij welk van onze bedrijven is elke klant klant? Uit de bedrijven van zijn projecten, contracten en facturen. */
+async function klantBedrijvenMap(): Promise<Map<string, string[]>> {
+  const admin = createAdminSupabaseClient()
+  const lees = async (tabel: string) => {
+    try {
+      const { data } = await admin.from(tabel).select('client_id, bedrijf').not('client_id', 'is', null).not('bedrijf', 'is', null).limit(5000)
+      return (data ?? []) as { client_id: string; bedrijf: string }[]
+    } catch { return [] }
+  }
+  const rijen = (await Promise.all([lees('opdrachten'), lees('contracts'), lees('invoices')])).flat()
+  const per = new Map<string, string[]>()
+  for (const r of rijen) per.set(r.client_id, [...(per.get(r.client_id) ?? []), r.bedrijf])
+  return new Map([...per.entries()].map(([k, v]) => [k, klantBedrijven(v)]))
+}
 
 async function getClients() {
   const admin = createAdminSupabaseClient()
@@ -26,12 +44,25 @@ async function getClients() {
 export default async function ClientsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; van?: string }>
+  searchParams: Promise<{ q?: string; van?: string; bij?: string }>
 }) {
-  const { q, van } = await searchParams
-  const [clients, namen] = await Promise.all([getClients(), leesVerantwoordelijken()])
+  const { q, van, bij } = await searchParams
+  const [clients, namen, bijMap, persoon] = await Promise.all([getClients(), leesVerantwoordelijken(), klantBedrijvenMap(), leesPersoon()])
+  // Klant bij: Media, Solutions of beide (verbeterplan fase 1). Zonder eigen keuze volgt het de weergave in de zijbalk.
+  const weergave = await leesBedrijfFilter(persoon?.userId)
+  const bijKeuze = bij === 'media' || bij === 'solutions' || bij === 'beide' || bij === 'alle'
+    ? bij : weergave === MEDIA ? 'media' : weergave === SOLUTIONS ? 'solutions' : 'alle'
+  const bijVan = (id: string) => bijMap.get(id) ?? []
+  const pastBij = (id: string) => {
+    const b = bijVan(id)
+    if (bijKeuze === 'alle') return true
+    if (b.length === 0) return true // nog niets geclassificeerd: nooit stil verbergen
+    if (bijKeuze === 'beide') return b.length === 2
+    return b.includes(bijKeuze === 'media' ? MEDIA : SOLUTIONS)
+  }
 
   const filtered = clients.filter((c) => {
+    if (!pastBij(c.id)) return false
     // "Klant van": een naam, of '-' voor klanten zonder verantwoordelijke.
     if (van === '-' && c.sales_verantwoordelijke) return false
     if (van && van !== '-' && c.sales_verantwoordelijke !== van) return false
@@ -43,10 +74,11 @@ export default async function ClientsPage({
     )
   })
   const aantalVan = (n: string | null) => clients.filter((c) => (n === null ? !c.sales_verantwoordelijke : c.sales_verantwoordelijke === n)).length
-  const filterHref = (v: string | null) => {
+  const filterHref = (v: string | null, b: string | null = bij ?? null) => {
     const p = new URLSearchParams()
     if (q) p.set('q', q)
     if (v) p.set('van', v)
+    if (b) p.set('bij', b)
     const qs = p.toString()
     return `/admin/clients${qs ? `?${qs}` : ''}`
   }
@@ -67,6 +99,14 @@ export default async function ClientsPage({
 
       {/* Search */}
       <ClientsSearch defaultValue={q} />
+
+      {/* Klant bij: Media, Solutions of beide (verbeterplan fase 1) */}
+      <div className="flex items-center gap-1.5 flex-wrap -mt-2">
+        <span className="text-xs text-gray-500 mr-1">Klant bij:</span>
+        {([['alle', 'Alle'], ['media', 'Media'], ['solutions', 'Solutions'], ['beide', 'Beide']] as const).map(([k, l]) => (
+          <Link key={k} href={filterHref(van ?? null, k)} className={chip(bijKeuze === k)}>{l}</Link>
+        ))}
+      </div>
 
       {/* Klant van: wie is het aanspreekpunt / wiens klant is het */}
       <div className="flex items-center gap-1.5 flex-wrap -mt-2">
@@ -101,7 +141,7 @@ export default async function ClientsPage({
                 <li key={client.id}>
                   <Link href={`/admin/clients/${client.id}`} className="flex items-start justify-between gap-3 px-4 py-3 active:bg-gray-50">
                     <div className="min-w-0">
-                      <div className="font-medium text-gray-900 truncate">{client.company_name}</div>
+                      <div className="font-medium text-gray-900 truncate">{client.company_name}{klantBedrijfLabel(bijVan(client.id)) && <span className="ml-1.5 text-[11px] font-normal text-gray-500">· {klantBedrijfLabel(bijVan(client.id))}</span>}</div>
                       {client.niche && <div className="text-xs text-gray-400 mt-0.5 truncate">{client.niche}</div>}
                       {(client.sales_verantwoordelijke || client.appointment_setter) && (
                         <div className="text-[11px] text-gray-500 mt-0.5">
@@ -127,6 +167,7 @@ export default async function ClientsPage({
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="table-th">Bedrijf</th>
+                <th className="table-th">Klant bij</th>
                 <th className="table-th">Diensten</th>
                 <th className="table-th">Klant van</th>
                 <th className="table-th">Status</th>
@@ -154,6 +195,11 @@ export default async function ClientsPage({
                           </div>
                         )}
                       </Link>
+                    </td>
+                    <td className="table-td">
+                      {klantBedrijfLabel(bijVan(client.id))
+                        ? <span className={`status-badge ${bijVan(client.id).length === 2 ? 'bg-gray-100 text-gray-800' : bijVan(client.id).includes(SOLUTIONS) ? 'bg-blue-50 text-blue-700' : 'bg-gray-900 text-white'}`}>{klantBedrijfLabel(bijVan(client.id))}</span>
+                        : <span className="text-gray-400">—</span>}
                     </td>
                     <td className="table-td">
                       <div className="flex flex-wrap gap-1">
