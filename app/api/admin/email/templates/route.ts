@@ -45,6 +45,8 @@ export async function POST(req: NextRequest) {
       kind: String(b.kind || 'generic').trim().slice(0, 40) || 'generic',
       cta_text: b.cta_text || null,
       cta_link: b.cta_link || null,
+      // Voor welk bedrijf (verbeterplan C23); leeg = beide.
+      ...(['nextgenmedia', 'nextgensolutions', 'algemeen'].includes(String(b.bedrijf)) ? { bedrijf: b.bedrijf } : {}),
       created_by: actor.id,
     }).select('id').single()
     if (error) throw new Error(error.message)
@@ -66,6 +68,7 @@ export async function PATCH(req: NextRequest) {
     if (b.kind !== undefined) patch.kind = String(b.kind || 'generic').trim().slice(0, 40) || 'generic'
     if (b.cta_text !== undefined) patch.cta_text = b.cta_text || null
     if (b.cta_link !== undefined) patch.cta_link = b.cta_link || null
+    if (b.bedrijf !== undefined) patch.bedrijf = ['nextgenmedia', 'nextgensolutions', 'algemeen'].includes(String(b.bedrijf)) ? b.bedrijf : null
     if (Object.keys(patch).length === 0) return NextResponse.json({ error: 'Geen wijzigingen' }, { status: 400 })
     const admin = createAdminSupabaseClient()
     const { error } = await admin.from('email_templates').update(patch).eq('id', b.id)

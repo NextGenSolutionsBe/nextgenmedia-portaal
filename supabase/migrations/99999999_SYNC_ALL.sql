@@ -8800,3 +8800,21 @@ end $$;
 
 -- Verbeterplan fase 1c (26 nov 2026): eigen weergave Alles / Media / Solutions per gebruiker.
 alter table public.gebruikers_voorkeuren add column if not exists bedrijf_filter text;
+
+-- ── Verbeterplan fase 2 (26 nov 2026): merk per bedrijf, sjablonen per bedrijf ──
+-- Enkel toevoegend. Merkgegevens per bedrijf (Instellingen → Diensten → Bedrijven),
+-- en een bedrijf op contracttemplates, mailtemplates en offertesjablonen.
+alter table public.bedrijven add column if not exists website text;
+alter table public.bedrijven add column if not exists email text;
+alter table public.bedrijven add column if not exists antwoord_email text;
+alter table public.bedrijven add column if not exists voettekst text;
+alter table public.bedrijven add column if not exists updated_at timestamptz;
+update public.bedrijven set website = 'nextgenmedia.be', email = 'info@nextgenmedia.be', antwoord_email = 'info@nextgenmedia.be' where slug = 'nextgenmedia' and website is null;
+update public.bedrijven set website = 'nextgensolutions.be', email = 'info@nextgensolutions.be', antwoord_email = 'info@nextgensolutions.be' where slug = 'nextgensolutions' and website is null;
+update public.bedrijven set website = 'nextgenagency.be', email = 'legal@nextgenmedia.be', antwoord_email = 'info@nextgenmedia.be' where slug = 'algemeen' and website is null;
+
+alter table public.contract_templates add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.email_templates add column if not exists bedrijf text references public.bedrijven(slug);
+alter table public.offerte_sjablonen add column if not exists bedrijf text references public.bedrijven(slug);
+-- Offertesjablonen hebben al een merk: dat is het bedrijf (enkel de nieuwe kolom, enkel waar leeg).
+update public.offerte_sjablonen set bedrijf = merk where bedrijf is null and merk in ('nextgenmedia', 'nextgensolutions');

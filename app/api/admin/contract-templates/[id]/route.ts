@@ -26,6 +26,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (typeof b.name === 'string') patch.name = b.name.trim()
     if ('category' in b) patch.category = b.category || null
     if (typeof b.active === 'boolean') patch.active = b.active
+    // Voor welk bedrijf is deze template (verbeterplan C24)? Leeg = beide.
+    if ('bedrijf' in b) patch.bedrijf = ['nextgenmedia', 'nextgensolutions', 'algemeen'].includes(String(b.bedrijf)) ? b.bedrijf : null
     if (Object.keys(patch).length === 0) return NextResponse.json({ error: 'Niets om bij te werken' }, { status: 400 })
     patch.updated_at = new Date().toISOString()
 

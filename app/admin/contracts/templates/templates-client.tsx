@@ -11,13 +11,15 @@ import { Dialoog, Bevestig, INP } from '@/app/admin/instellingen/ui'
 import { ContracttypesBeheer } from '../contracttypes-beheer'
 import { KlantKiezer, vulOndertekenaar, type KlantOptie } from '@/components/admin/klant-kiezer'
 import { VerantwoordelijkeKiezer } from '@/components/admin/verantwoordelijke-kiezer'
-import { BedrijfKiezer } from '@/components/admin/bedrijf-kiezer'
+import { BedrijfKiezer, BedrijfLabel } from '@/components/admin/bedrijf-kiezer'
 import { SERVICE_SLUG_NAAR_DIENST, STANDAARD_DIENSTEN } from '@/lib/bedrijven/model'
 import type { ContractVerantwoordelijke } from '@/lib/contracten/verantwoordelijke'
 
 type Template = {
   id: string; name: string; category: string | null; active: boolean
   pdf_path: string | null; field_count: number; created_at: string
+  /** Voor welk bedrijf (verbeterplan C24); leeg = beide. */
+  bedrijf?: string | null
 }
 type Client = KlantOptie
 
@@ -107,7 +109,10 @@ export function TemplatesClient({
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <h3 className="font-semibold truncate">{t.name}</h3>
-                  {t.category && <p className="text-xs text-gray-500 mt-0.5">{t.category}</p>}
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    {t.bedrijf && <BedrijfLabel bedrijf={t.bedrijf} />}
+                    {t.category && <p className="text-xs text-gray-500">{t.category}</p>}
+                  </div>
                 </div>
                 <span className={`status-badge shrink-0 ${t.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
                   {t.active ? 'Actief' : 'Inactief'}
@@ -221,6 +226,7 @@ function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
 function EditDialog({ template, onClose, onDone }: { template: Template; onClose: () => void; onDone: () => void }) {
   const [name, setName] = useState(template.name)
   const [category, setCategory] = useState<string>(template.category ?? '')
+  const [bedrijf, setBedrijf] = useState<string | null>(template.bedrijf ?? null)
   const [loading, setLoading] = useState(false)
   const categories: string[] = [...TEMPLATE_CATEGORIES]
   if (template.category && !categories.includes(template.category)) categories.unshift(template.category)
@@ -231,7 +237,7 @@ function EditDialog({ template, onClose, onDone }: { template: Template; onClose
     try {
       const res = await fetch(`/api/admin/contract-templates/${template.id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), category: category || null }),
+        body: JSON.stringify({ name: name.trim(), category: category || null, bedrijf }),
       })
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j.error || 'Opslaan mislukt')
@@ -254,6 +260,11 @@ function EditDialog({ template, onClose, onDone }: { template: Template; onClose
             <option value="">— Geen categorie —</option>
             {categories.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Bedrijf</label>
+          <BedrijfKiezer waarde={bedrijf} onChange={setBedrijf} />
+          {bedrijf && <button type="button" className="text-[11px] text-gray-500 hover:underline mt-1" onClick={() => setBedrijf(null)}>Voor beide bedrijven</button>}
         </div>
         <p className="text-[11px] text-gray-400">PDF, velden en handtekeningzone pas je aan via &quot;Velden&quot;. Bestaande contracten blijven ongewijzigd.</p>
         <div className="flex gap-2 justify-end pt-1">
@@ -285,7 +296,7 @@ function FromTemplateDialog({ template, clients, onClose }: { template: Template
   const [zelfGekozen, setZelfGekozen] = useState(false)
   // Voor welk bedrijf (verbeterplan fase 1): verplicht. Voorstel uit de projectkaart of de dienst.
   const dienstBedrijf = (slug: string) => STANDAARD_DIENSTEN.find((x) => x.slug === SERVICE_SLUG_NAAR_DIENST[slug])?.bedrijf ?? null
-  const [bedrijf, setBedrijf] = useState<string | null>(() => dienstBedrijf(service))
+  const [bedrijf, setBedrijf] = useState<string | null>(() => (template.bedrijf && template.bedrijf !== "algemeen" ? template.bedrijf : null) ?? dienstBedrijf(service))
   const [bedrijfZelf, setBedrijfZelf] = useState(false)
   useEffect(() => {
     if (zelfGekozen) return

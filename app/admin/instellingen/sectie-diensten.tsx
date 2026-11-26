@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2, Pencil, Plus, Repeat } from 'lucide-react'
 import { Kop, INP, Veld, Dialoog, Schakelaar, Badge, Laden } from './ui'
-import { boom, EENHEDEN, dienstenLijst, type Catalogus, type DienstRij, type Eenheid } from '@/lib/bedrijven/model'
+import { boom, EENHEDEN, dienstenLijst, type Catalogus, type DienstRij, type Eenheid, type BedrijfRij } from '@/lib/bedrijven/model'
 
 type Concept = {
   naam: string; bedrijf: string; parent_slug: string; omschrijving: string
@@ -37,6 +37,23 @@ export function SectieDiensten() {
   const [bewerk, setBewerk] = useState<{ slug: string | null; c: Concept } | null>(null)
   const [bezig, setBezig] = useState(false)
   const [inactief, setInactief] = useState(false)
+  const [merk, setMerk] = useState<{ slug: string; v: Record<string, string> } | null>(null)
+
+  const bewaarMerk = async () => {
+    if (!merk) return
+    setBezig(true)
+    try {
+      const r = await fetch('/api/admin/bedrijven', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actie: 'bedrijf', slug: merk.slug, invoer: merk.v }) })
+      const j = await r.json(); if (!r.ok) throw new Error(j.error || 'Bewaren mislukt')
+      setCat(j.catalogus); setMerk(null)
+      toast.success('Merkgegevens bewaard.')
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt') }
+    finally { setBezig(false) }
+  }
+  const merkVan = (b: BedrijfRij) => ({
+    naam: b.naam, handelsnaam: b.handelsnaam ?? '', kort: b.kort ?? '', kleur: b.kleur ?? '#111111',
+    website: b.website ?? '', email: b.email ?? '', antwoord_email: b.antwoord_email ?? '', voettekst: b.voettekst ?? '',
+  })
 
   const laad = useCallback(async () => {
     try {
@@ -92,6 +109,27 @@ export function SectieDiensten() {
   )
 
   return (
+    <div className="space-y-4">
+    <div className="card-base">
+      <Kop titel="Bedrijven" tekst="Naam, handelsnaam en contactgegevens per bedrijf, zoals ze op documenten en mails komen." />
+      <div className="grid sm:grid-cols-3 gap-3">
+        {[...cat.bedrijven].sort((a, b) => a.volgorde - b.volgorde).map((b) => (
+          <div key={b.slug} className="rounded-xl border border-gray-200 p-3">
+            <div className="flex items-center gap-2">
+              <span className="h-3 w-3 rounded-full" style={{ background: b.kleur ?? '#111' }} />
+              <span className="font-medium text-gray-900 text-sm flex-1 truncate">{b.naam}</span>
+              <button type="button" onClick={() => setMerk({ slug: b.slug, v: merkVan(b) })} className="h-7 w-7 rounded-lg hover:bg-gray-100 flex items-center justify-center" aria-label={`${b.naam} aanpassen`}><Pencil className="h-3.5 w-3.5 text-gray-500" /></button>
+            </div>
+            <div className="text-xs text-gray-500 mt-1.5 space-y-0.5">
+              {b.handelsnaam && <div>Handelsnaam {b.handelsnaam}</div>}
+              {b.website && <div>{b.website}</div>}
+              {b.antwoord_email && <div>Antwoorden naar {b.antwoord_email}</div>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+
     <div className="card-base">
       <Kop titel="Diensten" tekst="De diensten van NextGen Media en NextGen Solutions. Deze lijst geldt overal in de app."
         rechts={<button type="button" className="btn-primary" onClick={() => setBewerk({ slug: null, c: leegConcept('nextgenmedia') })}><Plus className="h-4 w-4" />Dienst toevoegen</button>} />
@@ -160,6 +198,23 @@ export function SectieDiensten() {
           </div>
         </Dialoog>
       )}
+
+      {merk && (
+        <Dialoog titel="Merkgegevens" onSluit={() => !bezig && setMerk(null)} breed>
+          <div className="grid sm:grid-cols-2 gap-3">
+            {([['naam', 'Naam'], ['handelsnaam', 'Handelsnaam'], ['kort', 'Korte naam (in lijsten)'], ['website', 'Website'], ['email', 'Contactadres'], ['antwoord_email', 'Antwoordadres voor mails']] as const).map(([k, l]) => (
+              <Veld key={k} label={l}><input className={INP} value={merk.v[k] ?? ''} onChange={(e) => setMerk((m) => (m ? { ...m, v: { ...m.v, [k]: e.target.value } } : m))} /></Veld>
+            ))}
+            <Veld label="Kleur"><input type="color" className="h-9 w-16 rounded-lg border border-gray-200" value={merk.v.kleur} onChange={(e) => setMerk((m) => (m ? { ...m, v: { ...m.v, kleur: e.target.value } } : m))} /></Veld>
+            <Veld label="Voettekst op documenten" breed><textarea className={INP} rows={2} value={merk.v.voettekst} onChange={(e) => setMerk((m) => (m ? { ...m, v: { ...m.v, voettekst: e.target.value } } : m))} /></Veld>
+          </div>
+          <div className="flex justify-end gap-2 pt-5">
+            <button type="button" className="btn-secondary" onClick={() => setMerk(null)} disabled={bezig}>Annuleren</button>
+            <button type="button" className="btn-primary" onClick={bewaarMerk} disabled={bezig}>{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Bewaren</button>
+          </div>
+        </Dialoog>
+      )}
+    </div>
     </div>
   )
 }

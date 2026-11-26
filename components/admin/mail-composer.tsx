@@ -20,7 +20,7 @@ type Template = { id: string; name: string; subject: string; body: string; kind:
 export type MailContext =
   | { type: 'client'; clientId: string; kind?: string; contractId?: string; shootId?: string; taskId?: string; deadlineId?: string }
   // herinnering: opent met de herinneringsmail i.p.v. de eerste contractmail.
-  | { type: 'contract'; contractId: string; contractTitle: string; signLink: string; defaultEmail?: string | null; signerName?: string | null; clientName?: string | null; expiresAt?: string | null; herinnering?: boolean }
+  | { type: 'contract'; contractId: string; contractTitle: string; signLink: string; defaultEmail?: string | null; signerName?: string | null; clientName?: string | null; expiresAt?: string | null; herinnering?: boolean; merk?: MailMerk | null }
   | { type: 'access'; clientId: string; clientName: string; toEmail: string; tempPassword?: string }
   | { type: 'klantaccount'; clientId: string; clientName: string }
   | { type: 'generic'; toEmail?: string }
@@ -153,6 +153,8 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
           if (suggested) applyTemplate(suggested, vars)
         } else if (context.type === 'contract') {
           setToEmail(context.defaultEmail ?? '')
+          // Huisstijl volgt het bedrijf van het contract (verbeterplan C22); wisselen blijft kunnen.
+          if (context.merk) setMerk(context.merk)
           const vervaldatum = context.expiresAt ? new Date(context.expiresAt + 'T00:00:00').toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' }) : ''
           const vars: MailVars = { klantnaam: context.signerName || context.clientName || 'klant', bedrijfsnaam: context.clientName || '', contractnaam: context.contractTitle, contract_link: context.signLink, datum: vervaldatum }
           setVars(vars)

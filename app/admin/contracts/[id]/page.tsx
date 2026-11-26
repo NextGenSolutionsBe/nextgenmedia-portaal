@@ -141,7 +141,7 @@ export default async function ContractDetailPage({ params }: { params: { id: str
           <ContractGegevens contractId={c.id} isSigned={!!isSigned} klanten={data.klantenLijst}
             begin={{ title: c.title, client_id: c.client_id ?? null, service_slug: c.service_slug ?? null, signer_name: c.signer_name ?? null, signer_email: c.signer_email ?? null, duration_type: c.duration_type ?? null }} />
           {!isSigned && !nietDoorgegaan && (
-            <ContractMailButton
+            <ContractMailButton bedrijf={(c as { bedrijf?: string | null }).bedrijf ?? null}
               contractId={c.id}
               contractTitle={c.title}
               signLink={signLink}
@@ -154,7 +154,7 @@ export default async function ContractDetailPage({ params }: { params: { id: str
           )}
           {/* Herinnering: enkel voor een verstuurd contract met een tekenlink die nog werkt. */}
           {kanHerinneren && (
-            <ContractMailButton
+            <ContractMailButton bedrijf={(c as { bedrijf?: string | null }).bedrijf ?? null}
               contractId={c.id}
               contractTitle={c.title}
               signLink={signLink}

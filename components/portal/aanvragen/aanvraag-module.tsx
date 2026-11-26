@@ -1,5 +1,6 @@
 'use client'
 
+import { aanvraagGroepen } from '@/lib/bedrijven/model'
 import { TeamFotoKaart, GeenVoorkeur } from '@/components/portal/team-foto-kaart'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -234,13 +235,21 @@ function NieuweAanvraag({ soort, onVerstuurd }: { soort: AanvraagSoort; onVerstu
       {stap === 0 && (
         <div className="space-y-3">
           <p className="text-sm text-gray-600">{soort === 'dienst' ? 'Waarmee kunnen we je helpen?' : 'Waarover wil je advies, een workshop of een scan?'}</p>
-          <div className="grid sm:grid-cols-2 gap-2" role="radiogroup" aria-label={soort === 'dienst' ? 'Dienst' : 'Consultancy'}>
-            {catalogus(soort).map((x) => (
-              <button key={x.key} type="button" role="radio" aria-checked={type === x.key} onClick={() => { setType(x.key); setAntwoorden({}); setFout(null) }}
-                className={`text-left rounded-xl border px-3 py-2.5 transition ${type === x.key ? 'border-gray-900 bg-gray-50 ring-1 ring-gray-900' : 'border-gray-200 hover:border-gray-400'} ${knop}`}>
-                <span className="flex items-center justify-between gap-2"><span className="text-sm font-semibold">{x.label}</span>{type === x.key && <Check className="h-4 w-4 shrink-0" />}</span>
-                <span className="block text-xs text-gray-600 mt-0.5">{x.uitleg}</span>
-              </button>
+          {/* Per bedrijf gegroepeerd (verbeterplan K87): marketing bij NextGen Media, automatisatie bij NextGen Solutions. */}
+          <div className="space-y-4" role="radiogroup" aria-label={soort === 'dienst' ? 'Dienst' : 'Consultancy'}>
+            {aanvraagGroepen(soort, catalogus(soort)).map((g) => (
+              <div key={g.sleutel}>
+                {soort !== 'founders' && <div className="text-[11px] font-mono uppercase tracking-[0.1em] text-gray-400 mb-1.5">{g.titel}</div>}
+                <div className="grid sm:grid-cols-2 gap-2">
+                  {g.items.map((x) => (
+                    <button key={x.key} type="button" role="radio" aria-checked={type === x.key} onClick={() => { setType(x.key); setAntwoorden({}); setFout(null) }}
+                      className={`text-left rounded-xl border px-3 py-2.5 transition ${type === x.key ? 'border-gray-900 bg-gray-50 ring-1 ring-gray-900' : 'border-gray-200 hover:border-gray-400'} ${knop}`}>
+                      <span className="flex items-center justify-between gap-2"><span className="text-sm font-semibold">{x.label}</span>{type === x.key && <Check className="h-4 w-4 shrink-0" />}</span>
+                      <span className="block text-xs text-gray-600 mt-0.5">{x.uitleg}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         </div>

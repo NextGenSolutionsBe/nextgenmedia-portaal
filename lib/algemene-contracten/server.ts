@@ -222,7 +222,7 @@ export async function tekenOns(admin: Admin, id: string, b: Record<string, unkno
   const hand = leesHandtekening(b.handtekening)
   if (!hand.ok) throw new AcFout(hand.fout)
   const op = new Date().toISOString()
-  const r = await stempelEnBewaar(admin, c, 'ons', Buffer.from(hand.base64, 'base64'), b.zone ?? c.ons_zone, blokRegels({ naam, namens: 'NextGenMedia', datum: datumRegel(op) }), op)
+  const r = await stempelEnBewaar(admin, c, 'ons', Buffer.from(hand.base64, 'base64'), b.zone ?? c.ons_zone, blokRegels({ naam, namens: 'NextGen Agency BV', datum: datumRegel(op) }), op)
   const partijZone = 'partij_zone' in b ? zoneOfNull(b.partij_zone, c.paginas ?? undefined) : undefined
   const { data: gelukt, error } = await admin.from('algemene_contracten').update({
     huidig_pad: r.pad, huidig_sha256: r.na, versie: c.versie + 1, ons_zone: r.zone, ...(partijZone !== undefined ? { partij_zone: partijZone } : {}),
