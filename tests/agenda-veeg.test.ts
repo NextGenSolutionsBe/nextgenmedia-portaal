@@ -1,7 +1,7 @@
 // Vegen door de agenda: touchpad (wheel met deltaX) en vinger.
 //   npx tsx tests/agenda-veeg.test.ts
 import assert from 'node:assert/strict'
-import { wiel, vingerRichting, vingerStap, WIEL_DREMPEL, WIEL_STIL, MEE_MAX, type WielStand } from '../lib/agenda/veeg'
+import { wiel, vingerRichting, vingerStap, vingerMee, WIEL_DREMPEL, WIEL_STIL, MEE_MAX, type WielStand } from '../lib/agenda/veeg'
 
 let n = 0
 const test = (naam: string, f: () => void) => { f(); n++; console.log(`  ✓ ${naam}`) }
@@ -72,6 +72,19 @@ test('vinger: ver genoeg of snel genoeg = stap, anders terugveren', () => {
   assert.equal(vingerStap(-40, 80), 1) // korte snelle veeg
   assert.equal(vingerStap(-40, 500), 0) // traag en kort
   assert.equal(vingerStap(10, 50), 0)
+})
+
+test('carrousel: de kalender volgt 1-op-1 en verspringt pas na een kwart van de breedte', () => {
+  let s: WielStand | null = null, t = 0, stap = 0, mee = 0
+  for (const dx of [20, 40, 60, 60]) { const r = wiel(s, dx, 0, t, 800); s = r.s; stap = r.stap || stap; mee = r.mee; t += 16 }
+  assert.equal(stap, 0)
+  assert.equal(mee, -180) // de volgende week staat al voor een stuk in beeld
+  const r = wiel(s, 30, 0, t, 800)
+  assert.equal(r.stap, 1) // 210 > 200 = een kwart van 800
+  assert.equal(vingerStap(-150, 600, 800), 0)
+  assert.equal(vingerStap(-210, 600, 800), 1)
+  assert.equal(vingerMee(-300, 800), -300)
+  assert.equal(vingerMee(-900, 800), -800)
 })
 
 console.log(`\n${n} tests geslaagd\n`)
