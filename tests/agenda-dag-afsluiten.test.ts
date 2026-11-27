@@ -2,7 +2,7 @@
 // Uitvoeren: npx tsx tests/agenda-dag-afsluiten.test.ts
 import assert from 'node:assert/strict'
 import { zoneNaarIso, plaatsVan, type Item } from '../lib/agenda/model'
-import { volgendeWerkdag, naarDag, afTeSluiten, vanMij, notitieErbij, hoeLangOpen } from '../lib/agenda/dag-afsluiten'
+import { volgendeWerkdag, naarDag, afTeSluiten, vanMij, notitieErbij, hoeLangOpen, vanVorigeDagen, verplaatsingen, zoalsHetWas } from '../lib/agenda/dag-afsluiten'
 
 let n = 0
 const test = (naam: string, fn: () => void) => { fn(); n++; console.log(`  ✓ ${naam}`) }
@@ -73,6 +73,41 @@ test('notitie onderaan de beschrijving en hoe lang open', () => {
   assert.equal(hoeLangOpen('2026-11-25', nu), 'vandaag')
   assert.equal(hoeLangOpen('2026-11-24', nu), 'gisteren')
   assert.equal(hoeLangOpen('2026-11-21', nu), '4 dagen geleden')
+})
+
+test('naar vandaag: enkel jouw open taken van vorige dagen, niet die van vandaag', () => {
+  const d = '2026-11-27'
+  const items = [
+    it({ id: 'gisteren', eind_op: iso('2026-11-26', '00:00') }),
+    it({ id: 'uur', start_op: iso('2026-11-26', '14:00'), eind_op: iso('2026-11-26', '15:00'), heel_dag: false }),
+    it({ id: 'vandaag', eind_op: iso('2026-11-27', '00:00') }),
+    it({ id: 'klaar', eind_op: iso('2026-11-26', '00:00'), status: 'klaar' }),
+    it({ id: 'collega', eind_op: iso('2026-11-26', '00:00'), toegewezen: ['ander'] }),
+    it({ id: 'meeting', eind_op: iso('2026-11-26', '00:00'), soort: 'meeting' }),
+    it({ id: 'shoot', eind_op: iso('2026-11-26', '00:00'), bron: 'shoot' }),
+    it({ id: 'loopt', start_op: iso('2026-11-25', '00:00'), eind_op: iso('2026-11-28', '00:00') }),
+    it({ id: 'oud', eind_op: iso('2026-10-01', '00:00') }),
+    it({ id: 'deadline', deadline_op: iso('2026-11-24', '17:00'), heel_dag: false }),
+  ]
+  assert.deepEqual(vanVorigeDagen(items, { ik: 'ik', dag: d }).map((x) => x.id), ['deadline', 'gisteren', 'uur'])
+})
+
+test('naar vandaag: uren blijven, gemiste deadline schuift mee, ongedaan maken zet alles terug', () => {
+  const d = '2026-11-27'
+  const lijst = [
+    it({ id: 'a', start_op: iso('2026-11-26', '14:00'), eind_op: iso('2026-11-26', '15:00'), heel_dag: false }),
+    it({ id: 'b', deadline_op: iso('2026-11-24', '17:00'), heel_dag: false }),
+    it({ id: 'c', start_op: iso('2026-11-24', '00:00'), eind_op: iso('2026-11-26', '00:00'), deadline_op: iso('2026-12-02', '12:00') }),
+  ]
+  const v = verplaatsingen(lijst, d)
+  assert.equal(v.length, 3)
+  assert.deepEqual(plaatsVan(v[0]), { soort: 'rooster', dag: d, vanMin: 840, totMin: 900 })
+  assert.equal(v[1].deadline_op, iso(d, '17:00'))
+  assert.deepEqual(plaatsVan(v[2]), { soort: 'dag', van: d, tot: d })
+  assert.equal(v[2].deadline_op, iso('2026-12-02', '12:00'), 'een latere deadline blijft')
+  const terug = zoalsHetWas(lijst)
+  assert.deepEqual(terug[0], { id: 'a', start_op: iso('2026-11-26', '14:00'), eind_op: iso('2026-11-26', '15:00'), heel_dag: false, deadline_op: null })
+  assert.equal(terug.length, 3)
 })
 
 console.log(`\n${n} tests geslaagd\n`)

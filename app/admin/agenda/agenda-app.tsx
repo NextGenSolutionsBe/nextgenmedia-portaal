@@ -22,6 +22,7 @@ import { DocWeergave } from './doc'
 import { NieuwVenster, AfgevinktPaneel, PrullenbakPaneel, MailPaneel, InstellingenPaneel } from './extra'
 import { InspreekVenster } from './inspreken'
 import { DagAfsluiten } from './dag-afsluiten'
+import { NaarVandaag } from './naar-vandaag'
 
 type Modus = Weergave | 'lijst'
 type Paneel = null | 'klaar' | 'prullenbak' | 'instellingen' | 'mail'
@@ -421,6 +422,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
                 <PersonenLijst personen={boom.personen} eerst={boom.zaakvoerders} ik={boom.ik} gekozen={personen} onWissel={(p) => zetPersonen(personen.includes(p) ? personen.filter((x) => x !== p) : [...personen, p])} />
               </Popover>
             </div>
+            {boom.rechten.aanpassen && <NaarVandaag boom={boom} onVernieuw={vernieuw} gsm />}
             {boom.rechten.aanpassen && <button type="button" onClick={() => setAfsluiten(true)} className={`md:hidden inline-flex items-center gap-1.5 rounded-full border h-8 px-3 bg-white border-gray-200 text-gray-700 text-xs ${focusRing}`}><MoonStar className="h-3.5 w-3.5" />Dag afsluiten</button>}
             {boom.rechten.toevoegen && <button type="button" onClick={() => setInspreek(true)} aria-label="Taak inspreken" className={`md:hidden inline-flex items-center gap-1.5 rounded-full border h-8 px-3 bg-white border-gray-200 text-gray-700 text-xs ${focusRing}`}><Mic className="h-3.5 w-3.5" />Inspreken</button>}
             <div className="relative">
@@ -467,6 +469,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
                 {KLEUR_VOLGENS.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}
               </select>
             </label>
+            {boom.rechten.aanpassen && <NaarVandaag boom={boom} onVernieuw={vernieuw} />}
             <a href={printUrl} target="_blank" rel="noopener noreferrer" className={`inline-flex items-center gap-1.5 rounded-full border h-8 px-3 bg-white border-gray-200 text-gray-700 hover:border-gray-400 text-xs ${focusRing}`} title="Takenlijst als pdf om af te drukken"><Printer className="h-3.5 w-3.5" />{modus === 'dag' && datum !== vandaag() ? 'Takenlijst' : 'Takenlijst vandaag'}</a>
             <Zoeken boom={boom} open={pop === 'zoek'} onOpen={() => setPop('zoek')} onSluit={sluitPop} onKies={(i) => { sluitPop(); open(i) }} />
           </div>

@@ -5,6 +5,7 @@ import type { Actie } from '@/lib/instellingen/model'
 import { controleerItem, isUuid, isKleur, vandaag, type Item } from '@/lib/agenda/model'
 import { inspreekPrompt, leesInspreekVoorstel, type InspreekContext } from '@/lib/agenda/inspreken'
 import { mijnDeadlines } from '@/lib/agenda/deadlines-server'
+import { MAX_VERPLAATS } from '@/lib/agenda/dag-afsluiten'
 import { schoonDocJson, vulDocAan, BEELD_PAD, BEELD_TYPES, MAX_BEELD, type DocNode } from '@/lib/agenda/doc-opmaak'
 import {
   kijkerVan, laadZicht, boomVoor, metToegewezen, meetingsInBereik, shootsInBereik, metMeetingStatus, itemsInBereik, itemZichtbaar, docZichtbaar, laadPersonen, laadLabels, alleRijen,
@@ -281,7 +282,7 @@ async function zoek(admin: Admin, k: Kijker, tekst: string) {
 // ── POST ────────────────────────────────────────────────────────────────────
 
 const ACTIE_RECHT: Record<string, Actie> = {
-  'item.nieuw': 'toevoegen', 'item.wijzig': 'aanpassen', 'item.verwijder': 'verwijderen', 'item.herstel': 'verwijderen',
+  'item.nieuw': 'toevoegen', 'item.wijzig': 'aanpassen', 'item.verplaats': 'aanpassen', 'item.verwijder': 'verwijderen', 'item.herstel': 'verwijderen',
   'container.nieuw': 'toevoegen', 'container.wijzig': 'aanpassen', 'container.verwijder': 'verwijderen', 'container.herstel': 'verwijderen',
   'doc.nieuw': 'toevoegen', 'doc.wijzig': 'aanpassen', 'doc.beeld': 'aanpassen', 'doc.verwijder': 'verwijderen', 'doc.herstel': 'verwijderen',
   'label.bewaar': 'instellingen', 'label.verwijder': 'instellingen', 'klantkleur': 'instellingen',
@@ -339,6 +340,35 @@ async function zetToegewezen(admin: Admin, itemId: string, personen: string[]) {
 async function itemActie(c: Ctx, actie: string, b: Record<string, unknown>) {
   const { admin, k } = c
   const z = await laadZicht(admin, k)
+  // Meerdere items in één keer naar een andere dag (Naar vandaag en Ongedaan maken).
+  // Enkel de datums; wat je niet ziet of niet meer bestaat, slaat de server over.
+  if (actie === 'item.verplaats') {
+    const lijst = Array.isArray(b.wijzigingen) ? (b.wijzigingen as Record<string, unknown>[]).filter((w) => w && isUuid(w.id)) : []
+    if (!lijst.length) throw new Error('Niets om te verplaatsen.')
+    if (lijst.length > MAX_VERPLAATS) throw new Error(`Hoogstens ${MAX_VERPLAATS} taken tegelijk.`)
+    const ids = [...new Set(lijst.map((w) => w.id as string))]
+    const [{ data: rijen }, { data: tw }] = await Promise.all([
+      admin.from('ag_items').select(ITEM_VELDEN).in('id', ids).is('verwijderd_op', null),
+      admin.from('ag_toegewezen').select('item_id, persoon_id').in('item_id', ids),
+    ])
+    const wie = new Map<string, string[]>()
+    for (const t of (tw ?? []) as { item_id: string; persoon_id: string }[]) wie.set(t.item_id, [...(wie.get(t.item_id) ?? []), t.persoon_id])
+    const mag = new Set(((rijen ?? []) as unknown as RuwItem[]).filter((r) => itemZichtbaar(r, wie.get(r.id) ?? [], z)).map((r) => r.id))
+    const updates: { id: string; velden: Record<string, unknown> }[] = []
+    for (const w of lijst) {
+      if (!mag.has(w.id as string)) continue
+      const datums = Object.fromEntries((['start_op', 'eind_op', 'heel_dag', 'deadline_op'] as const).filter((x) => x in w).map((x) => [x, w[x]]))
+      const { velden, fout: f } = controleerItem(datums, false)
+      if (f) throw new Error(f)
+      updates.push({ id: w.id as string, velden })
+    }
+    let verplaatst = 0
+    for (let n = 0; n < updates.length; n += 10) {
+      const res = await Promise.all(updates.slice(n, n + 10).map((u) => admin.from('ag_items').update({ ...u.velden, in_app_gewijzigd_op: nu(), updated_at: nu() }).eq('id', u.id)))
+      verplaatst += res.filter((r) => !r.error).length
+    }
+    return { ok: true, verplaatst, overgeslagen: lijst.length - verplaatst }
+  }
   if (actie === 'item.nieuw' || actie === 'item.wijzig') {
     const nieuw = actie === 'item.nieuw'
     const { velden, toegewezen, fout: f } = controleerItem(b, nieuw)
