@@ -4,6 +4,7 @@ import { PrintButton } from '@/components/print-button'
 import { CheckCircle2, FileText, Shield } from 'lucide-react'
 import { akkoordRegels } from '@/lib/voorwaarden'
 import { NgmKop, NgmLogo, NgmSchil } from '@/components/ngm-merk'
+import { NgsKop, NgsLogo, NgsSchil } from '@/components/ngs-merk'
 
 function formatDateLong(dateStr: string | null | undefined): string {
   if (!dateStr) return '—'
@@ -73,33 +74,16 @@ export default async function ReceiptPage({ params }: { params: { token: string 
   return (
     <Schil ngm={ngm}>
       {/* Header */}
-      {ngm ? (
-        <div className="print:hidden relative">
-          <NgmKop label="Ondertekeningsbewijs" />
-        </div>
-      ) : (
-        <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between print:hidden">
-          <div className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded-lg bg-gray-900 flex items-center justify-center">
-              <span className="font-bold text-white text-xs">N</span>
-            </div>
-            <span className="font-bold text-sm">NextGenSolutions</span>
-          </div>
-          <PrintButton />
-        </header>
-      )}
-      {ngm && <div className="max-w-3xl mx-auto px-4 pt-4 flex justify-end print:hidden"><PrintButton /></div>}
+      <div className="print:hidden relative">
+        {ngm ? <NgmKop label="Ondertekeningsbewijs" /> : <NgsKop label="Ondertekeningsbewijs" />}
+      </div>
+      <div className="max-w-3xl mx-auto px-4 pt-4 flex justify-end print:hidden"><PrintButton /></div>
 
       {/* Print header (only visible when printing) */}
       <div className="hidden print:flex items-center justify-between px-0 pb-6 border-b border-gray-300 mb-8">
         <div className="flex items-center gap-3">
-          {ngm ? <NgmLogo kleur="woud" className="h-7" /> : (
-            <div className="h-10 w-10 rounded-lg bg-gray-900 flex items-center justify-center">
-              <span className="font-bold text-white text-sm">N</span>
-            </div>
-          )}
+          {ngm ? <NgmLogo kleur="woud" className="h-7" /> : <NgsLogo className="h-8" />}
           <div>
-            {!ngm && <div className="font-bold text-gray-900">NextGenSolutions</div>}
             <div className="text-xs text-gray-500">Ondertekeningsbewijs</div>
           </div>
         </div>
@@ -271,5 +255,5 @@ export default async function ReceiptPage({ params }: { params: { token: string 
 }
 
 function Schil({ ngm, children }: { ngm: boolean; children: React.ReactNode }) {
-  return ngm ? <NgmSchil>{children}</NgmSchil> : <div className="min-h-screen">{children}</div>
+  return ngm ? <NgmSchil>{children}</NgmSchil> : <NgsSchil>{children}</NgsSchil>
 }

@@ -6,7 +6,7 @@ import {
   type OfferteInhoud,
 } from '@/lib/offerte-fiche'
 import { offerteVoorwaarden } from '@/lib/offerte-voorwaarden'
-import { merkFonts, merkLogo, ngmFonts, ngmLogo, MERK_ZWART, NGM_PDF } from '@/lib/pdf-merk'
+import { merkFonts, merkLogo, ngmFonts, ngmLogo, ngsFonts, ngsLogo, MERK_ZWART, NGM_PDF, NGS_PDF } from '@/lib/pdf-merk'
 import type { OfferteBedrijf, OfferteContact } from '@/lib/offerte-afzender'
 
 /**
@@ -53,7 +53,13 @@ const NGM: Kleuren = {
   LIJN: NGM_PDF.lijn, VOORWAARDEN: NGM_PDF.varen, VLAK: NGM_PDF.kalk,
   ACCENT: NGM_PDF.woud, OP_ACCENT: NGM_PDF.kalk, HOOG: NGM_PDF.zonnegeel, STREEP: NGM_PDF.zonnegeel,
 }
-const kleurenVan = (merk: MailMerk): Kleuren => (merk === 'nextgenmedia' ? NGM : AGENCY)
+/** NextGenSolutions (lib/ngs-merk.ts): kalk en wit, inkt voor tekst, NextGen-blauw voor wat opvalt. */
+const NGS: Kleuren = {
+  ZWART: NGS_PDF.inkt, DONKER: NGS_PDF.tekstSterk, GRIJS: NGS_PDF.tekst, LICHTGRIJS: NGS_PDF.steen,
+  LIJN: NGS_PDF.lijn, VOORWAARDEN: NGS_PDF.tekst, VLAK: NGS_PDF.kalk,
+  ACCENT: NGS_PDF.blauw, OP_ACCENT: rgb(1, 1, 1), HOOG: rgb(1, 1, 1), STREEP: NGS_PDF.blauw,
+}
+const kleurenVan = (merk: MailMerk): Kleuren => (merk === 'nextgenmedia' ? NGM : merk === 'nextgensolutions' ? NGS : AGENCY)
 
 
 /** Regelafbreking op breedte; te lange woorden worden hard afgebroken. */
@@ -83,10 +89,12 @@ function wikkel(font: PDFFont, tekst: string, grootte: number, breedte: number):
 
 export async function maakOffertePdf(inv: OffertePdfInvoer): Promise<Uint8Array> {
   // NextGenMedia: eigen huisstijl (woud, zonnegeel, Bricolage Grotesque, DM Sans en
-  // DM Mono, het logo). De rest in de huisstijl van NextGen Agency (zwart-wit, Archivo,
-  // JetBrains Mono, het woordmerk). De handelsnaam staat altijd bij de dienstverlener.
+  // DM Mono, het logo). NextGenSolutions: eigen huisstijl (kalk, inkt, NextGen-blauw,
+  // Montserrat, Inter en Jersey 15, het logo). De rest in de huisstijl van NextGen Agency.
+  // De handelsnaam staat altijd bij de dienstverlener.
   const stijl = MERK_STIJL[inv.merk]
   const ngm = inv.merk === 'nextgenmedia'
+  const ngs = inv.merk === 'nextgensolutions'
   const { ZWART, DONKER, GRIJS, LICHTGRIJS, LIJN, VOORWAARDEN, VLAK, ACCENT, OP_ACCENT, HOOG, STREEP } = kleurenVan(inv.merk)
   const i = inv.inhoud
   const a = i.algemeen
@@ -98,7 +106,7 @@ export async function maakOffertePdf(inv: OffertePdfInvoer): Promise<Uint8Array>
   pdf.setSubject(`Offerte voor ${veilig(inv.klant.naam)}`)
   pdf.setAuthor(stijl.naam)
   pdf.setCreator(`${stijl.naam} portaal`)
-  const { font, vet, mono } = ngm ? await ngmFonts(pdf) : await merkFonts(pdf)
+  const { font, vet, mono } = ngm ? await ngmFonts(pdf) : ngs ? await ngsFonts(pdf) : await merkFonts(pdf)
   const breedte = A4.w - M * 2
 
   let page: PDFPage = pdf.addPage([A4.w, A4.h])
@@ -149,6 +157,18 @@ export async function maakOffertePdf(inv: OffertePdfInvoer): Promise<Uint8Array>
     tekst('Offerte', A4.w - M, A4.h - 44, { size: 20, f: vet, kleur: NGM_PDF.kalk, rechts: true })
     tekst(inv.nummer, A4.w - M, A4.h - 58, { size: 9, f: mono, kleur: NGM_PDF.mos, rechts: true })
     if (inv.voorbeeld) tekst('Voorbeeld, nog niet verstuurd', A4.w - M, A4.h - 72, { size: 8, kleur: NGM_PDF.zonnegeel, rechts: true })
+    y = A4.h - KOP - 30
+  } else if (ngs) {
+    // NextGenSolutions: kalk bovenaan, het logo in kleur, een dunne lijn in NextGen-blauw.
+    const KOP = 92
+    page.drawRectangle({ x: 0, y: A4.h - KOP, width: A4.w, height: KOP, color: NGS_PDF.kalk })
+    page.drawRectangle({ x: 0, y: A4.h - KOP, width: A4.w, height: 2, color: NGS_PDF.blauw })
+    const l = await ngsLogo(pdf, 'kleur')
+    if (l) { const h = 30, w = (l.width / l.height) * h; page.drawImage(l, { x: M, y: A4.h - 46 - h / 2, width: w, height: h }) }
+    else tekst('NEXTGEN SOLUTIONS', M, A4.h - 52, { size: 17, f: vet })
+    tekst('Offerte', A4.w - M, A4.h - 44, { size: 20, f: vet, rechts: true })
+    tekst(inv.nummer, A4.w - M, A4.h - 60, { size: 10, f: mono, kleur: NGS_PDF.tekst, rechts: true })
+    if (inv.voorbeeld) tekst('Voorbeeld, nog niet verstuurd', A4.w - M, A4.h - 74, { size: 8, kleur: NGS_PDF.blauw, rechts: true })
     y = A4.h - KOP - 30
   } else {
     page.drawRectangle({ x: 0, y: A4.h - 6, width: A4.w, height: 6, color: ACCENT })
@@ -453,16 +473,17 @@ export async function voegAkkoordPaginaToe(bron: Uint8Array, a: {
   handtekening?: Uint8Array | null; voorwaardenUrl: string
 }): Promise<Uint8Array> {
   const ngm = a.merk === 'nextgenmedia'
+  const ngs = a.merk === 'nextgensolutions'
   const { ZWART, GRIJS, ACCENT } = kleurenVan(a.merk)
   const pdf = await PDFDocument.load(bron, { ignoreEncryption: true })
-  const { font, vet, mono } = ngm ? await ngmFonts(pdf) : await merkFonts(pdf)
+  const { font, vet, mono } = ngm ? await ngmFonts(pdf) : ngs ? await ngsFonts(pdf) : await merkFonts(pdf)
   const p = pdf.addPage([A4.w, A4.h])
   const t = (s: string, x: number, y: number, size = 10, f: PDFFont = font, kleur: RGB = ZWART) => p.drawText(veilig(s), { x, y, size, font: f, color: kleur })
   p.drawRectangle({ x: 0, y: A4.h - 6, width: A4.w, height: 6, color: ACCENT })
   let y = A4.h - 70
-  const l = ngm ? await ngmLogo(pdf, 'woud') : await merkLogo(pdf)
-  if (l) { const h = ngm ? 22 : 40, w = (l.width / l.height) * h; p.drawImage(l, { x: ngm ? M : M - 3, y: ngm ? y : y - 12, width: w, height: h }) }
-  else t(ngm ? 'nextgenmedia.' : 'NEXTGEN AGENCY', M, y, 16, vet)
+  const l = ngm ? await ngmLogo(pdf, 'woud') : ngs ? await ngsLogo(pdf, 'kleur') : await merkLogo(pdf)
+  if (l) { const h = ngm ? 22 : ngs ? 28 : 40, w = (l.width / l.height) * h; p.drawImage(l, { x: ngm || ngs ? M : M - 3, y: ngm || ngs ? y : y - 12, width: w, height: h }) }
+  else t(ngm ? 'nextgenmedia.' : ngs ? 'NEXTGEN SOLUTIONS' : 'NEXTGEN AGENCY', M, y, 16, vet)
   y -= 50
   t('Akkoord met de offerte', M, y, 22, vet)
   y -= 30

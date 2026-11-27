@@ -6,7 +6,7 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage, type PDFIm
 import type { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { sendEmail, baseUrl } from '@/lib/email'
 import { leesInstellingen } from '@/lib/instellingen/laden'
-import { ngmLogoBytes } from '@/lib/pdf-merk'
+import { ngmLogoBytes, ngsLogoBytes } from '@/lib/pdf-merk'
 import { logContractEvent } from '@/lib/contract-audit'
 import { MANUEEL, GEEN_CERTIFICAAT } from '@/lib/contracten/manueel-getekend'
 import {
@@ -382,11 +382,12 @@ export async function archiveerContract(admin: Admin, contractId: string, bron: 
   const instellingen = await leesInstellingen().catch(() => null)
   const doc = instellingen?.documenten
   // Contracten van NextGenMedia (alles behalve NextGenSolutions): logo en woud van NextGenMedia (lib/ngm-merk.ts).
+  // Contracten van NextGenSolutions: logo, inkt en NextGen-blauw van NextGenSolutions (lib/ngs-merk.ts).
   const ngm = (c as { bedrijf?: string | null }).bedrijf !== 'nextgensolutions'
-  const logo = (ngm ? await ngmLogoBytes() : null) ?? await laadLogo(admin, doc?.logo_path)
+  const logo = (ngm ? await ngmLogoBytes() : await ngsLogoBytes()) ?? await laadLogo(admin, doc?.logo_path)
   const certificaat = await maakCertificaatPdf(dossier, ngm
     ? { logo, accent: '#0C2B1E', tekstkleur: '#0C2B1E', voettekst: doc?.voettekst }
-    : { logo, accent: doc?.primaire_kleur, tekstkleur: doc?.secundaire_kleur, voettekst: doc?.voettekst })
+    : { logo, accent: '#1E40AF', tekstkleur: '#0B0B0C', voettekst: doc?.voettekst })
   const hashCert = sha256(certificaat)
   const paden = archiefPaden(contractId, versie)
 

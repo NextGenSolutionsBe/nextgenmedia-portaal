@@ -6,6 +6,7 @@ import { renderTemplate, type MailVars } from '@/lib/email-render'
 import { DEFAULT_TEMPLATES } from '@/lib/email-templates-defaults'
 import { MERK_STIJL, MAIL_MERKEN, type MailMerk } from '@/lib/merk-mail'
 import { NGM } from '@/lib/ngm-merk'
+import { NGS } from '@/lib/ngs-merk'
 import { zonderLosseLink } from '@/lib/email-html'
 import { offerteMail } from '@/lib/offertes'
 import { welkomstMail } from '@/lib/klant-account'
@@ -537,6 +538,24 @@ function MailVoorbeeld({ ngm, stijl, body, knop }: { ngm: boolean; stijl: (typeo
       <div className="px-3 py-2 text-[10px] leading-relaxed" style={{ background: NGM.woud, color: NGM.mos }}>
         {stijl.naam} · {stijl.adres}<br />
         <span className="uppercase tracking-wider" style={{ color: NGM.zonnegeel }}>{NGM.baseline}</span>
+      </div>
+    </div>
+  )
+  // NextGenSolutions (brandkit 2026): logo in kleur op wit, kalk rond, blauwe knop met een pijl.
+  if (stijl.naam === MERK_STIJL.nextgensolutions.naam) return (
+    <div className="rounded-xl overflow-hidden border" style={{ borderColor: NGS.lijn, background: NGS.kalk }}>
+      <div className="px-4 py-3 flex items-center justify-between bg-white border-b" style={{ borderColor: NGS.lijn }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/merk/ngs/logo-kleur.png" alt="NextGenSolutions" className="h-5 w-auto" />
+        <span className="text-[10px]" style={{ color: NGS.tekst }}>Voorbeeld</span>
+      </div>
+      <div className="p-3 bg-white">
+        <div className="text-xs whitespace-pre-wrap" style={{ color: NGS.inkt }}>{body || '—'}</div>
+        {knop && <span className="inline-block mt-2 rounded-full px-4 py-1.5 text-xs font-semibold text-white" style={{ background: NGS.blauw }}>{knop} →</span>}
+      </div>
+      <div className="px-3 py-2 text-[10px] leading-relaxed border-t" style={{ color: NGS.tekst, borderColor: NGS.lijn }}>
+        {stijl.naam} · {stijl.adres}<br />
+        <span className="uppercase tracking-wider font-mono" style={{ color: NGS.tekstSterk }}>{NGS.tagline}</span>
       </div>
     </div>
   )
