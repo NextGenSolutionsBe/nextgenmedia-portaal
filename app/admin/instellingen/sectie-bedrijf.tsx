@@ -26,6 +26,11 @@ export function SectieBedrijf({ ctx }: { ctx: Ctx }) {
             <Tekst label="Btw-nummer" value={v.btw_nummer} onChange={(w) => zet('btw_nummer', w)} placeholder="BE 0xxx.xxx.xxx" hint="Wordt gecontroleerd op een geldig controlegetal." />
           </div>
         </Groep>
+        <Groep titel="Namen in de app">
+          <div className="grid sm:grid-cols-3 gap-3">
+            <Tekst label="Dagelijkse planning van" value={v.planning_persoon ?? 'Chiara'} onChange={(w) => zet('planning_persoon', w)} placeholder="Chiara" hint="In de zijbalk: Dagelijkse planning …" />
+          </div>
+        </Groep>
         <Groep titel="Adressen">
           <div className="grid sm:grid-cols-2 gap-3">
             <Veld label="Maatschappelijke zetel"><textarea className={INP} rows={2} value={v.maatschappelijke_zetel} onChange={(e) => zet('maatschappelijke_zetel', e.target.value)} placeholder={'Straat 1\n3500 Hasselt'} /></Veld>

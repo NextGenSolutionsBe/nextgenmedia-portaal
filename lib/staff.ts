@@ -62,7 +62,7 @@ export const ADMIN_MODULES: AdminModule[] = [
   // Materiaalbeheer: camera's, lenzen, audio… wie heeft wat sinds wanneer.
   { key: 'materiaal',   label: 'Materiaalbeheer',      prefixes: ['/admin/materiaal', '/api/admin/materiaal'] },
   { key: 'email',       label: 'E-mailcenter',         prefixes: ['/admin/email', '/api/admin/email'] },
-  { key: 'info',        label: 'Informatief',          prefixes: ['/admin/informatief', '/admin/onboarding', '/admin/maandplanning', '/admin/contentplanning', '/api/admin/month-planning', '/api/admin/month-planning-clients', '/api/admin/contentplanning'] },
+  { key: 'info',        label: 'Informatief',          prefixes: ['/admin/informatief', '/api/admin/werkinstructies', '/admin/onboarding', '/admin/maandplanning', '/admin/contentplanning', '/api/admin/month-planning', '/api/admin/month-planning-clients', '/api/admin/contentplanning'] },
 ]
 
 /** Modules die ZICHTBAAR/toewijsbaar zijn in de UI. ADMIN_MODULES blijft bewust
@@ -85,6 +85,8 @@ export const STAFF_API_WHITELIST = [
   // Mijn account: enkel het eigen account (naam, e-mail, wachtwoord, foto).
   '/api/admin/account/profiel',
   '/api/admin/account/foto',
+  // Mijn onboarding: enkel de eigen checklist afvinken.
+  '/api/admin/account/onboarding',
   // Taken aan elkaar toewijzen (Command Center): elk teamlid.
   '/api/admin/taken',
   // Profielfoto's van het team bij het kiezen van een persoon (enkel naam en foto).

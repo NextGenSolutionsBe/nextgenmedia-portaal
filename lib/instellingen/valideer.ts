@@ -53,6 +53,7 @@ export function valideerOrganisatie(ruw: unknown): Validatie<Organisatie> {
     iban: tekst(r.iban, 60), bic: tekst(r.bic, 20).toUpperCase(),
     betalingstermijn_dagen: Math.round(getal(r.betalingstermijn_dagen, 30)),
     valuta: tekst(r.valuta, 3).toUpperCase() || 'EUR', tijdzone: tekst(r.tijdzone, 60) || 'Europe/Brussels', datumnotatie: tekst(r.datumnotatie, 20) || 'dd/mm/jjjj',
+    planning_persoon: tekst(r.planning_persoon, 40) || 'Chiara',
   }
   if (!w.vennootschapsnaam && !w.handelsnaam) return { ok: false, fout: 'Vul minstens een vennootschaps- of handelsnaam in.' }
   if (w.btw_nummer && !isGeldigBtw(w.btw_nummer)) return { ok: false, fout: 'Het btw-nummer is niet geldig (verwacht: BE 0xxx.xxx.xxx met een kloppend controlegetal).' }

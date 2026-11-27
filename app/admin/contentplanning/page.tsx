@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { redirect } from 'next/navigation'
-import { magIk } from '@/lib/instellingen/laden'
+import { magIk, leesInstellingen } from '@/lib/instellingen/laden'
 import { ContentplanningClient } from './contentplanning-client'
 
 /**
@@ -10,5 +10,6 @@ import { ContentplanningClient } from './contentplanning-client'
  */
 export default async function ContentplanningPage() {
   if (!(await magIk('info', 'bekijken'))) redirect('/admin')
-  return <ContentplanningClient />
+  const persoon = (await leesInstellingen()).organisatie.planning_persoon ?? 'Chiara'
+  return <ContentplanningClient persoon={persoon} />
 }

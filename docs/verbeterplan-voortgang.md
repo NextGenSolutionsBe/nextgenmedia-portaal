@@ -186,6 +186,31 @@ Hervat op vraag ("ga verder met de punten die nog openstaan").
 
 Nieuwe tabellen `ag_reeksen`, `ag_beschikbaarheid`, `ag_ical_links` (RLS aan, enkel de service-role) en nieuwe kolommen op `ag_items` (`reeks_id`, `reeks_datum`, `clickup_verschil_op`, `clickup_verschil`). Geen backfill. `ag_items`: 5763 rijen voor en na de migratie, identieke checksum van de bestaande kolommen (0c64a21512310c51a8afe3a57b3e43b5). Terugdraaien: `supabase/terugdraaien/fase3.sql`.
 
+## Fase 4: rollen, rechten en plug-and-play (27 nov 2026)
+
+### Wat er veranderde
+
+- **F44 rolsjablonen**: zeven startsjablonen (Zaakvoerder, Operations, Uitvoerder Solutions, Uitvoerder Media, Appointment setter, Lead-onderzoeker, Stagiair) met rol, modules, bedrijf, startpagina en onboarding. Aan te passen of uit te zetten in Instellingen → Medewerkers. De bestaande snelle sets blijven.
+- **F45 toegang per bedrijf**: een werknemer kan beperkt worden tot NextGenMedia of NextGenSolutions. Dan staat zijn weergave vast op dat bedrijf (Klanten, Klantcontracten, Projecten), op de server afgedwongen. RLS speelt hier geen rol: de admin leest via de service-role, de modules blijven het slot.
+- **F46 nieuw account in vier stappen**: gegevens, rol, start en einde, uitnodigen (enkel met vinkje). Dossier, plaats in de teamagenda en onboarding komen vanzelf.
+- **F47 onboarding-checklist** met voortgang, af te vinken door de beheerder en door de persoon zelf (Mijn account).
+- **F48 functieprofiel** in het personeelsdossier.
+- **F49 werkinstructies** in Informatief, per bedrijf, dienst of rol, met versies en "Gelezen".
+- **F51 offboarding** in één venster: wat openstaat, laatste werkdag, login blokkeren, agenda-abonnementen intrekken. Niets verwijderd.
+- **F52**: "Dagelijkse planning Chiara" haalt de naam uit de instellingen (standaard Chiara, dus niets verandert op het scherm).
+- **F54 startpagina per rol** na het inloggen (enkel als de persoon die module heeft). "Mijn werk" (inklokken, planning) bestond al.
+- **F55 studenten**: 650 uur per kalenderjaar, kaart in het dossier, melding vanaf 80%.
+- **M98**: rolsjablonen, toegang, onboarding, vertrek en werkinstructies komen in het activiteitenlogboek.
+
+### Niet gebouwd en waarom
+
+- **F50 klantlogins per medewerker**: de app bewaart geen leesbare wachtwoorden van klanten (bewust, Supabase bewaart ze gehasht). Er is dus niets om per medewerker te delen of in te zien. Komt er ooit een kluis, dan hoort dit erbij.
+- **F53 verantwoordelijken uit Personeel**: de experts komen al uit Personeel. De keuze Marco, Bram, Chiara of Gezamenlijke lead staat nog vast in de code; omschakelen raakt contracten, vesting en tegentekenen en is een aparte stap.
+
+### Databank
+
+Nieuwe tabellen `rol_sjablonen`, `onboarding_stappen`, `werkinstructies`, `werkinstructie_versies`, `werkinstructie_gelezen` (RLS aan, enkel de service-role) en nieuwe kolommen op `staff_members` (`rol_sjabloon`, `bedrijven`, `start_datum`, `eind_datum`, `offboarding_op`, `offboarding_door`, `offboarding_notitie`) en `personeel` (`functieprofiel`). Geen backfill. `staff_members`: 4 rijen voor en na, checksum 0d21aa114ab97bbaf5593113adddfda4 ongewijzigd. `personeel`: 8 rijen voor en na, checksum fba9c44397fef336df46fb59b7d0a865 ongewijzigd. Terugdraaien: `supabase/terugdraaien/fase4.sql`.
+
 ## Waar we stoppen
 
-Op vraag van de zaakvoerders (26 nov 2026) gestopt na fase 2; op 27 nov 2026 hervat. Fase 3 (teamagenda) is af. Fasen 4 (rollen en plug-and-play), 5 (Solutions-levering), 6 (Media-levering en sales), 7 (financieel en ritme) en 8 (documentatie) volgen.
+Op vraag van de zaakvoerders (26 nov 2026) gestopt na fase 2; op 27 nov 2026 hervat. Fasen 3 (teamagenda) en 4 (rollen en plug-and-play) zijn af. Fasen 5 (Solutions-levering), 6 (Media-levering en sales), 7 (financieel en ritme) en 8 (documentatie) volgen.

@@ -7,6 +7,7 @@ import { sanitizeModules } from '@/lib/staff'
 import { eisHoofdbeheerder } from '@/lib/instellingen/api'
 import { STAFF_ROLLEN } from '@/lib/instellingen/model'
 import { isAdminId, adminUid, BAN_DUUR } from '@/lib/instellingen/medewerkers'
+import { netteBedrijven, bedrijvenLabel } from '@/lib/team/rollen'
 
 export const dynamic = 'force-dynamic'
 
@@ -103,6 +104,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       patch.rol = b.rol; wijzigingen.push(`rol → ${b.rol}`)
     }
     if (Array.isArray(b.permissions)) { patch.permissions = sanitizeModules(b.permissions); wijzigingen.push('modules') }
+    // Fase 4: toegang per bedrijf, rolsjabloon, start- en einddatum.
+    if (Array.isArray(b.bedrijven)) { const bd = netteBedrijven(b.bedrijven); patch.bedrijven = bd.length ? bd : null; wijzigingen.push(`toegang → ${bedrijvenLabel(bd)}`) }
+    if ('rol_sjabloon' in b) { patch.rol_sjabloon = typeof b.rol_sjabloon === 'string' && /^[a-z][a-z0-9_]{1,40}$/.test(b.rol_sjabloon) ? b.rol_sjabloon : null; wijzigingen.push(`sjabloon → ${patch.rol_sjabloon ?? 'geen'}`) }
+    for (const veld of ['start_datum', 'eind_datum'] as const) {
+      if (!(veld in b)) continue
+      const v = b[veld]
+      if (v !== null && v !== '' && !(typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v))) return NextResponse.json({ error: 'Kies een geldige datum.' }, { status: 400 })
+      patch[veld] = v || null; wijzigingen.push(`${veld === 'start_datum' ? 'start' : 'einde'} → ${v || 'geen'}`)
+    }
+    if (patch.start_datum && patch.eind_datum && String(patch.eind_datum) < String(patch.start_datum)) return NextResponse.json({ error: 'De einddatum ligt na de startdatum.' }, { status: 400 })
     if (typeof b.actief === 'boolean') {
       if (!b.actief && staff.auth_user_id === g.persoon.userId) return NextResponse.json({ error: 'Je kunt je eigen account niet deactiveren.' }, { status: 400 })
       patch.active = b.actief
@@ -133,7 +144,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       wijzigingen.push('wachtwoord')
     }
 
-    const { error } = await admin.from('staff_members').update(patch).eq('id', id)
+    let { error } = await admin.from('staff_members').update(patch).eq('id', id)
+    // Vóór de migratie van fase 4: zonder de nieuwe velden.
+    if (error && /bedrijven|rol_sjabloon|start_datum|eind_datum/.test(error.message)) {
+      for (const k of ['bedrijven', 'rol_sjabloon', 'start_datum', 'eind_datum']) delete patch[k]
+      ;({ error } = await admin.from('staff_members').update(patch).eq('id', id))
+    }
     if (error) {
       if (oudEmail && staff.auth_user_id) await admin.auth.admin.updateUserById(staff.auth_user_id, { email: oudEmail, email_confirm: true }).catch(() => {})
       throw new Error(error.message)

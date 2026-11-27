@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
  * Command Center op het bedrijf; "Algemeen" en wat nog geen bedrijf heeft,
  * blijft overal zichtbaar. Enkel voor jezelf, onthouden per gebruiker.
  */
-export function BedrijfSchakelaar({ huidig }: { huidig: BedrijfFilter }) {
+export function BedrijfSchakelaar({ huidig, vast = false }: { huidig: BedrijfFilter; vast?: boolean }) {
   const router = useRouter()
   const [keuze, setKeuze] = useState<BedrijfFilter>(huidig)
   const [, start] = useTransition()
@@ -29,6 +29,13 @@ export function BedrijfSchakelaar({ huidig }: { huidig: BedrijfFilter }) {
       toast.error(e instanceof Error ? e.message : 'Bewaren mislukt')
     }
   }
+
+  // Enkel toegang tot één bedrijf (fase 4): de weergave staat vast, niets te kiezen.
+  if (vast) return (
+    <div className="mx-3 mb-1 px-2.5 py-1 rounded-xl bg-white/50 border border-white/80 text-[11px] text-gray-600">
+      Enkel <b>{BEDRIJF_FILTERS.find((f) => f.key === huidig)?.label ?? huidig}</b>
+    </div>
+  )
 
   return (
     <div role="radiogroup" aria-label="Weergave per bedrijf" className="mx-3 mb-1 grid grid-cols-3 gap-0.5 p-0.5 rounded-xl bg-white/50 border border-white/80">

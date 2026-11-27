@@ -7,12 +7,20 @@ import { ADMIN_ID_PREFIX, splitsNaam, type Medewerker } from './medewerkers'
 type AuthUser = { id: string; email?: string | null; created_at?: string; last_sign_in_at?: string | null; banned_until?: string | null; user_metadata?: Record<string, unknown> | null }
 const gebanned = (u: AuthUser | undefined) => !!u?.banned_until && new Date(u.banned_until).getTime() > Date.now()
 
+const STAFF_VELDEN = 'id, auth_user_id, name, email, active, permissions, created_at, last_login_at, voornaam, achternaam, functie, rol, verwijderd_at, uitnodiging_verzonden_at'
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function staffRijen(admin: any): Promise<{ data: unknown[] | null }> {
+  const r = await admin.from('staff_members').select(`${STAFF_VELDEN}, rol_sjabloon, bedrijven, start_datum, eind_datum, offboarding_op`).order('created_at', { ascending: true })
+  if (!r.error) return r
+  return admin.from('staff_members').select(STAFF_VELDEN).order('created_at', { ascending: true })
+}
+
 /** Alle interne accounts: hoofdbeheerders (user_roles admin) + werknemers (staff_members). */
 export async function lijstMedewerkers(): Promise<Medewerker[]> {
   const admin = createAdminSupabaseClient()
   const [{ data: roles }, { data: staff }, { data: login }, { data: totp }, au] = await Promise.all([
     admin.from('user_roles').select('user_id').eq('role', 'admin'),
-    admin.from('staff_members').select('id, auth_user_id, name, email, active, permissions, created_at, last_login_at, voornaam, achternaam, functie, rol, verwijderd_at, uitnodiging_verzonden_at').order('created_at', { ascending: true }),
+    staffRijen(admin),
     admin.from('login_settings').select('auth_user_id, two_factor_required, vrijgesteld_tot'),
     admin.from('user_totp').select('user_id').eq('actief', true),
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }).catch(() => ({ data: { users: [] as AuthUser[] } })),
@@ -36,7 +44,7 @@ export async function lijstMedewerkers(): Promise<Medewerker[]> {
       uitnodigingOp: null, tweeFactor: tweeFactor(uid),
     })
   }
-  type StaffRij = { id: string; auth_user_id: string | null; name: string | null; email: string | null; active: boolean; permissions: string[] | null; created_at: string; last_login_at: string | null; voornaam: string | null; achternaam: string | null; functie: string | null; rol: string | null; verwijderd_at: string | null; uitnodiging_verzonden_at: string | null }
+  type StaffRij = { id: string; auth_user_id: string | null; name: string | null; email: string | null; active: boolean; permissions: string[] | null; created_at: string; last_login_at: string | null; voornaam: string | null; achternaam: string | null; functie: string | null; rol: string | null; verwijderd_at: string | null; uitnodiging_verzonden_at: string | null; rol_sjabloon?: string | null; bedrijven?: string[] | null; start_datum?: string | null; eind_datum?: string | null; offboarding_op?: string | null }
   for (const s of (staff ?? []) as StaffRij[]) {
     if (s.auth_user_id && adminIds.has(s.auth_user_id)) continue
     const u = s.auth_user_id ? users.get(s.auth_user_id) : undefined
@@ -48,6 +56,7 @@ export async function lijstMedewerkers(): Promise<Medewerker[]> {
       actief: s.active !== false && !s.verwijderd_at, gearchiveerd: !!s.verwijderd_at,
       laatsteLogin: u?.last_sign_in_at ?? s.last_login_at, aangemaakt: s.created_at, uitnodigingOp: s.uitnodiging_verzonden_at,
       tweeFactor: tweeFactor(s.auth_user_id),
+      rolSjabloon: s.rol_sjabloon ?? null, bedrijven: s.bedrijven ?? [], startDatum: s.start_datum ?? null, eindDatum: s.eind_datum ?? null, offboardingOp: s.offboarding_op ?? null,
     })
   }
   return uit

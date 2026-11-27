@@ -115,6 +115,8 @@ export type Organisatie = {
   vennootschapsnaam: string; handelsnaam: string; ondernemingsnummer: string; btw_nummer: string
   maatschappelijke_zetel: string; facturatieadres: string; email: string; telefoon: string; website: string
   iban: string; bic: string; betalingstermijn_dagen: number; valuta: string; tijdzone: string; datumnotatie: string
+  /** Fase 4: wie de dagelijkse contentplanning doet ("Dagelijkse planning Chiara"). Een naam uit de instellingen, niet uit de code. */
+  planning_persoon: string
 }
 export type FacturatieInstellingen = {
   standaard_btw_pct: number; betalingstermijn_dagen: number; standaard_omschrijving: string
@@ -143,6 +145,7 @@ export const STANDAARD_ORGANISATIE: Organisatie = {
   vennootschapsnaam: 'NextGenMedia', handelsnaam: 'NextGenMedia', ondernemingsnummer: '', btw_nummer: '',
   maatschappelijke_zetel: '', facturatieadres: '', email: 'info@nextgenmedia.be', telefoon: '', website: 'https://nextgenmedia.be',
   iban: '', bic: '', betalingstermijn_dagen: 30, valuta: 'EUR', tijdzone: 'Europe/Brussels', datumnotatie: 'dd/mm/jjjj',
+  planning_persoon: 'Chiara',
 }
 export const STANDAARD_FACTURATIE: FacturatieInstellingen = {
   standaard_btw_pct: 21, betalingstermijn_dagen: 30, standaard_omschrijving: '',
