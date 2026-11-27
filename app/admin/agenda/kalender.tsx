@@ -480,8 +480,9 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
               {dagen.map((d, n) => (
                 <div key={d} className={`border-l border-gray-100 group relative transition-colors ${dropDag === n ? 'bg-gray-200/60' : ''}`}
                   onDoubleClick={() => magToevoegen && onNieuw({ dag: d, heelDag: true })}>
-                  {magToevoegen && <button type="button" onClick={() => onNieuw({ dag: d, heelDag: true })} aria-label={`Taak op ${kortDag(d)}`} className={`absolute right-1 bottom-1 h-5 w-5 rounded-md bg-white border border-gray-200 text-gray-500 opacity-0 group-hover:opacity-100 focus:opacity-100 flex items-center justify-center z-10 ${focusRing}`}><Plus className="h-3 w-3" /></button>}
-                  {verborgenPerDag.get(n) ? <button type="button" onClick={() => setAlleDag(true)} className={`absolute bottom-1 font-semibold text-gray-700 hover:underline z-10 ${compact ? 'left-0.5 text-[10px]' : 'left-1.5 text-[12px]'}`}>+{verborgenPerDag.get(n)}{compact ? '' : ' meer'}</button> : null}
+                  {magToevoegen && <button type="button" onClick={() => onNieuw({ dag: d, heelDag: true })} aria-label={`Taak op ${kortDag(d)}`} className={`absolute right-1 bottom-1 h-5 w-5 rounded-md bg-white border border-gray-200 text-gray-500 hidden [@media(hover:hover)]:flex opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus:opacity-100 items-center justify-center z-10 ${focusRing}`}><Plus className="h-3 w-3" /></button>}
+                  {/* Eén tik klapt open: niets in deze cel verschijnt bij "hover" op een gsm (anders slikt iOS de eerste tik in). */}
+                  {verborgenPerDag.get(n) ? <button type="button" onClick={() => setAlleDag(true)} className={`absolute bottom-0 font-semibold text-gray-700 [@media(hover:hover)]:hover:underline z-10 touch-manipulation rounded-md ${compact ? 'left-0 text-[11px] px-1.5 py-1' : 'left-1 text-[12px] px-1 py-1'}`}>+{verborgenPerDag.get(n)}{compact ? '' : ' meer'}</button> : null}
                 </div>
               ))}
             </div>
@@ -494,7 +495,7 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
             </div>
             </div>
            </div>
-            {alleDag && banen > MAX_BANEN && <button type="button" onClick={() => setAlleDag(false)} className="absolute right-3 -bottom-0.5 translate-y-full z-10 rounded-full bg-white border border-gray-200 px-2 py-0.5 text-[11px] font-semibold text-gray-700 hover:border-gray-400 shadow-sm">Minder tonen</button>}
+            {alleDag && banen > MAX_BANEN && <button type="button" onClick={() => setAlleDag(false)} className="absolute right-3 -bottom-0.5 translate-y-full z-10 rounded-full bg-white border border-gray-200 px-2.5 py-1 text-[11px] font-semibold text-gray-700 [@media(hover:hover)]:hover:border-gray-400 shadow-sm touch-manipulation">Minder tonen</button>}
           </div>
         </div>
       )}
@@ -714,7 +715,7 @@ function Maand({ datum, items, kleur, herkomst, personen, magAanpassen, magToevo
               onDragOver={(e) => { if (magAanpassen) e.preventDefault() }} onDrop={(e) => drop(e, d)}>
               <div className="flex items-center justify-between mb-0.5">
                 <button type="button" onClick={() => onDag(d)} className={`h-7 min-w-7 px-1 rounded-full text-[13px] font-bold ${d === vandaagD ? 'bg-gray-900 text-white' : d.slice(0, 7) !== maand ? 'text-gray-400' : 'text-gray-800'} hover:ring-1 hover:ring-gray-300 ${focusRing}`}>{Number(d.slice(8))}</button>
-                {magToevoegen && <button type="button" onClick={() => onNieuw({ dag: d, heelDag: true })} aria-label={`Nieuw op ${kortDag(d)}`} className={`h-5 w-5 rounded-md text-gray-500 hover:bg-gray-100 opacity-0 group-hover:opacity-100 focus:opacity-100 flex items-center justify-center ${focusRing}`}><Plus className="h-3 w-3" /></button>}
+                {magToevoegen && <button type="button" onClick={() => onNieuw({ dag: d, heelDag: true })} aria-label={`Nieuw op ${kortDag(d)}`} className={`h-5 w-5 rounded-md text-gray-500 hover:bg-gray-100 hidden [@media(hover:hover)]:flex opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus:opacity-100 items-center justify-center ${focusRing}`}><Plus className="h-3 w-3" /></button>}
               </div>
               <div className="space-y-1">
                 {toon.map((i) => {
