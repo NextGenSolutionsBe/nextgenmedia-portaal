@@ -1,5 +1,6 @@
 import { safeMessage } from '@/lib/api-error'
 import { MAX_UPLOAD_MB, fileTooBig } from '@/lib/upload'
+import { haalOpgeladenPdf, isOpgeladenPad, ruimOpgeladenOp } from '@/lib/contracten/pdf-opgeladen-server'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient, insertResilient , isActiveStaff } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
@@ -40,6 +41,8 @@ export async function POST(req: NextRequest) {
     const admin = createAdminSupabaseClient()
     const formData = await req.formData()
     const pdf = formData.get('pdf') as File | null
+    // Of rechtstreeks opgeladen in de opslag (tot 10 MB, lib/contracten/pdf-opladen.ts).
+    const pdfPad = isOpgeladenPad(formData.get('pdf_pad')) ? String(formData.get('pdf_pad')) : null
     const name = (formData.get('name') as string)?.trim()
     const category = (formData.get('category') as string)?.trim() || null
     if (!name) return NextResponse.json({ error: 'Naam is verplicht' }, { status: 400 })
@@ -47,6 +50,8 @@ export async function POST(req: NextRequest) {
     if (pdf && fileTooBig(pdf)) {
       return NextResponse.json({ error: `PDF te groot — max ${MAX_UPLOAD_MB} MB. Comprimeer het bestand en probeer opnieuw.` }, { status: 413 })
     }
+
+    const pdfBytes = pdfPad ? await haalOpgeladenPdf(admin, pdfPad) : pdf ? new Uint8Array(await pdf.arrayBuffer()) : null
 
     const { data: tpl, error: tplErr } = await insertResilient(
       admin,
@@ -57,17 +62,17 @@ export async function POST(req: NextRequest) {
     if (tplErr || !tpl) throw new Error(tplErr?.message ?? 'Aanmaken mislukt')
     const templateId = tpl.id as string
 
-    if (pdf) {
-      const arrayBuffer = await pdf.arrayBuffer()
+    if (pdfBytes) {
       const pdfPath = `templates/${templateId}.pdf`
       const { error: uploadErr } = await admin.storage
         .from('contracts')
-        .upload(pdfPath, Buffer.from(arrayBuffer), { contentType: 'application/pdf', upsert: true })
+        .upload(pdfPath, Buffer.from(pdfBytes), { contentType: 'application/pdf', upsert: true })
       if (uploadErr) {
         await admin.from('contract_templates').delete().eq('id', templateId)
         throw new Error(`PDF upload mislukt: ${uploadErr.message}`)
       }
       await admin.from('contract_templates').update({ pdf_path: pdfPath }).eq('id', templateId)
+      if (pdfPad) await ruimOpgeladenOp(admin, pdfPad)
     }
 
     try { revalidatePath('/admin/contracts/templates') } catch { }

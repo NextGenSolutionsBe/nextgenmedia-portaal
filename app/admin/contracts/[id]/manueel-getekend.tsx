@@ -4,7 +4,8 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { CheckCircle2, Download, Loader2, Paperclip, Trash2, Undo2, X, FileText } from 'lucide-react'
-import { fileTooBig, readJson, MAX_UPLOAD_MB } from '@/lib/upload'
+import { readJson, pdfTeGroot, MAX_PDF_MB } from '@/lib/upload'
+import { laadContractBijlageOp } from '@/lib/contracten/pdf-opladen'
 import { ONDERTEKEND_VIA, type OndertekendVia } from '@/lib/contracten/manueel-getekend'
 
 export type ContractBijlage = { id: string; naam: string; grootte: number | null; created_by: string | null; created_at: string }
@@ -15,10 +16,8 @@ const grootteTekst = (b: number | null) => (b == null ? '' : b < 1024 * 1024 ? `
 
 /** Eén bestand opladen als bijlage bij het contract. Gooit met een leesbare fout. */
 async function laadOp(contractId: string, file: File) {
-  if (fileTooBig(file)) throw new Error(`"${file.name}" is te groot (max ${MAX_UPLOAD_MB} MB).`)
-  const fd = new FormData()
-  fd.append('file', file)
-  await readJson(await fetch(`/api/admin/contracts/${contractId}/bijlagen`, { method: 'POST', body: fd }))
+  // Rechtstreeks naar de opslag, tot 10 MB (Vercel weigert grotere verzoeken).
+  await laadContractBijlageOp(contractId, file)
 }
 
 /**
@@ -34,7 +33,7 @@ export function OpGetekendZetten({ contractId }: { contractId: string }) {
   const [bestelbon, setBestelbon] = useState('')
   const [bestanden, setBestanden] = useState<File[]>([])
   const [bezig, setBezig] = useState(false)
-  const teGroot = bestanden.filter((f) => fileTooBig(f))
+  const teGroot = bestanden.filter((f) => pdfTeGroot(f))
 
   const bevestig = async () => {
     if (bezig || teGroot.length) return
@@ -99,14 +98,14 @@ export function OpGetekendZetten({ contractId }: { contractId: string }) {
               <div className="space-y-2">
                 <div className="text-xs text-gray-500">{via === 'bestelbon' ? 'De bestelbon' : 'Bijlage'} <span className="text-gray-400">({via === 'bestelbon' ? 'pdf of foto' : 'optioneel, bv. het mailverkeer'})</span></div>
                 {bestanden.map((f, i) => (
-                  <div key={`${f.name}-${i}`} className={`flex items-center justify-between gap-2 rounded-lg border px-2 py-1.5 text-sm ${fileTooBig(f) ? 'border-red-200 bg-red-50' : 'border-gray-200'}`}>
+                  <div key={`${f.name}-${i}`} className={`flex items-center justify-between gap-2 rounded-lg border px-2 py-1.5 text-sm ${pdfTeGroot(f) ? 'border-red-200 bg-red-50' : 'border-gray-200'}`}>
                     <span className="truncate flex items-center gap-1.5"><Paperclip className="h-3.5 w-3.5 text-gray-400 shrink-0" />{f.name}</span>
                     <span className="flex items-center gap-2 shrink-0 text-xs text-gray-400">{grootteTekst(f.size)}
                       <button type="button" onClick={() => setBestanden(bestanden.filter((_, j) => j !== i))} className="hover:text-black" aria-label={`${f.name} weghalen`}><X className="h-3.5 w-3.5" /></button>
                     </span>
                   </div>
                 ))}
-                {teGroot.length > 0 && <div className="text-xs text-red-600">Max {MAX_UPLOAD_MB} MB per bestand.</div>}
+                {teGroot.length > 0 && <div className="text-xs text-red-600">Max {MAX_PDF_MB} MB per bestand.</div>}
                 <label className="btn-secondary text-sm cursor-pointer w-fit"><Paperclip className="h-4 w-4" />Bestand kiezen
                   <input type="file" className="hidden" multiple onChange={(e) => { setBestanden([...bestanden, ...Array.from(e.target.files ?? [])]); e.target.value = '' }} />
                 </label>

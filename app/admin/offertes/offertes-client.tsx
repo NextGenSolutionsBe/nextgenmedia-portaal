@@ -125,7 +125,7 @@ function OffertesLijst({ focus }: { focus: string | null }) {
               const w = offerteWeergave(o, nu)
               return (
                 <li key={o.id} id={`offerte-${o.id}`} className={`card-base !p-3 !pl-6 relative flex flex-wrap items-center gap-x-3 gap-y-2 ${focus === o.id ? 'ring-2 ring-gray-900' : ''}`}>
-                  <span className="absolute left-2.5 top-3 bottom-3 w-1.5 rounded-full" style={{ background: MERK_STIJL[o.merk].accent }} title={MERK_STIJL[o.merk].naam} />
+                  <span className="absolute left-2.5 top-3 bottom-3 w-1.5 rounded-full" style={{ background: MERK_STIJL[o.merk].kleur }} title={MERK_STIJL[o.merk].naam} />
                   <div className="min-w-0 w-full sm:w-auto sm:flex-1">
                     <p className="text-sm font-semibold text-gray-900 truncate">{o.klant_naam ?? '—'} <span className="font-normal text-gray-500">· {o.offertenummer ? `${o.offertenummer} · ` : ''}{o.titel}</span>{o.getekend_op && <PenLine className="inline h-3.5 w-3.5 ml-1 text-green-700" aria-label="Getekend" />}</p>
                     <p className="text-xs text-gray-500 truncate">{w.sub}{o.bestelbon_nummer && <span className="ml-1.5 rounded-full bg-amber-100 text-amber-900 px-1.5 py-0.5 text-[10.5px] font-semibold">Bestelbon {o.bestelbon_nummer}</span>}</p>
@@ -277,7 +277,7 @@ function SjabloonForm({ s, onKlaar, onAnnuleer }: { s?: Sjabloon; onKlaar: () =>
           <div className="grid grid-cols-2 gap-1.5">
             {(['nextgenmedia', 'nextgensolutions'] as MailMerk[]).map((m) => (
               <button key={m} type="button" onClick={() => setMerk(m)} className={`rounded-lg border-2 px-2 py-1.5 text-xs font-semibold ${merk === m ? '' : 'border-gray-200 text-gray-600'}`}
-                style={merk === m ? { background: MERK_STIJL[m].accent, borderColor: MERK_STIJL[m].accent, color: MERK_STIJL[m].opAccent } : undefined}>{m === 'nextgenmedia' ? 'Media' : 'Solutions'}</button>
+                style={merk === m ? { background: MERK_STIJL[m].kleur, borderColor: MERK_STIJL[m].kleur, color: MERK_STIJL[m].opKleur } : undefined}>{m === 'nextgenmedia' ? 'Media' : 'Solutions'}</button>
             ))}
           </div>
         </div>
@@ -310,7 +310,7 @@ function SjabloonRij({ s, onGewijzigd }: { s: Sjabloon; onGewijzigd: () => void 
   }
   return (
     <li className={`card-base !p-3 !pl-6 relative flex flex-wrap items-center gap-x-3 gap-y-2 ${s.actief ? '' : 'opacity-60'}`}>
-      <span className="absolute left-2.5 top-3 bottom-3 w-1.5 rounded-full" style={{ background: MERK_STIJL[s.merk].accent }} />
+      <span className="absolute left-2.5 top-3 bottom-3 w-1.5 rounded-full" style={{ background: MERK_STIJL[s.merk].kleur }} />
       <div className="min-w-0 w-full sm:w-auto sm:flex-1 flex items-start gap-2">
         <FileText className="h-4 w-4 text-gray-400 mt-0.5 shrink-0" />
         <div className="min-w-0">

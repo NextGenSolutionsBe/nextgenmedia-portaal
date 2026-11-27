@@ -55,6 +55,8 @@ export function SignatureZoneEditor({
       const j = await res.json(); if (!res.ok) throw new Error(j.error)
       setFields(j.fields ?? [])
       if (j.signature) setZone((z) => ({ ...z, sig_page: j.signature.page, sig_x_pct: j.signature.x, sig_y_pct: j.signature.y, sig_width: j.signature.width, sig_height: j.signature.height }))
+      // Onze zone (tegentekenen) in het kader naast dat van de klant, als er nog geen gekozen was.
+      if (j.ons) setOns((o) => (o ? { page: j.ons.page, x: j.ons.x, y: j.ons.y, w: j.ons.width, h: j.ons.height } : o))
       toast.success(`${(j.fields ?? []).length} veld(en) gedetecteerd. Controleer en pas aan.`)
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Analyse mislukt') } finally { setAnalyzing(false) }
   }

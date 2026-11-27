@@ -128,6 +128,10 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
         <textarea value={notitie} onChange={(e) => setNotitie(e.target.value)} rows={notitie.split('\n').length > 2 ? 5 : 2} maxLength={20000}
           className="input-base text-sm" placeholder="Typ of spreek in wat erbij hoort (optioneel)" aria-label="Notities" />
       </div>
+      <div>
+        <div className="label-mono text-[10px] uppercase text-gray-500 mb-1.5">Wie</div>
+        <WieKiezer boom={boom} gekozen={wie} onWissel={(p) => setWie(wie.includes(p) ? wie.filter((x) => x !== p) : [...wie, p])} />
+      </div>
       {soort === 'taak' && (
         <div>
           <div className="label-mono text-[10px] uppercase text-gray-500 mb-1.5">Deadline</div>
@@ -148,10 +152,6 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
           {metDeadline && m.heelDag && deadlineIso && dag(deadlineIso) !== opDag && <p className="text-[11px] text-gray-500 mt-1">De taak staat op {kortDag(opDag)}, met de deadline erbij.</p>}
         </div>
       )}
-      <div>
-        <div className="label-mono text-[10px] uppercase text-gray-500 mb-1.5">Wie</div>
-        <WieKiezer boom={boom} gekozen={wie} onWissel={(p) => setWie(wie.includes(p) ? wie.filter((x) => x !== p) : [...wie, p])} />
-      </div>
       <div>
         <div className="label-mono text-[10px] uppercase text-gray-500 mb-1.5">Label</div>
         <LabelKeuze boom={boom} gekozen={labels} voorstel={voorstel} onZet={(l) => { setLabels(l); setLabelsGekozen(true) }} />

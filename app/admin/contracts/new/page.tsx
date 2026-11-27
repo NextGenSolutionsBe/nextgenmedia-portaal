@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { ChevronLeft, Loader2, Upload } from 'lucide-react'
-import { readJson, fileTooBig, MAX_UPLOAD_MB } from '@/lib/upload'
+import { readJson, pdfTeGroot, MAX_PDF_MB } from '@/lib/upload'
+import { laadContractPdfOp } from '@/lib/contracten/pdf-opladen'
 import { DURATION_TYPES } from '@/lib/contract-status'
 import { ContracttypeKiezer } from '../contracttype-kiezer'
 import { KlantKiezer, vulOndertekenaar, type KlantOptie } from '@/components/admin/klant-kiezer'
@@ -74,13 +75,15 @@ export default function NewContractPage() {
     if (!verantwoordelijke) { setError('Kies wie verantwoordelijk is voor dit contract.'); return }
     if (!bedrijf) { setError('Kies voor welk bedrijf dit contract is: NextGen Media of NextGen Solutions.'); return }
     if (!form.contract_type) { setError('Contracttype is verplicht'); return }
-    if (fileTooBig(file)) { setError(`PDF te groot — max ${MAX_UPLOAD_MB} MB. Comprimeer het bestand en probeer opnieuw.`); return }
+    if (pdfTeGroot(file)) { setError(`PDF te groot — max ${MAX_PDF_MB} MB. Comprimeer het bestand en probeer opnieuw.`); return }
     setLoading(true)
     setError(null)
 
     try {
+      // De pdf gaat rechtstreeks naar de opslag (tot 10 MB); het aanmaken haalt hem daar op.
+      const pad = await laadContractPdfOp(file)
       const fd = new FormData()
-      fd.append('pdf', file)
+      fd.append('pdf_pad', pad)
       fd.append('client_id', form.client_id)
       fd.append('title', form.title)
       fd.append('contract_type', form.contract_type)

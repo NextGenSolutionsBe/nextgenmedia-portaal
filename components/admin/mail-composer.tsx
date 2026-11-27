@@ -5,6 +5,8 @@ import { Mail, X, Loader2, Send, CheckCircle2 } from 'lucide-react'
 import { renderTemplate, type MailVars } from '@/lib/email-render'
 import { DEFAULT_TEMPLATES } from '@/lib/email-templates-defaults'
 import { MERK_STIJL, MAIL_MERKEN, type MailMerk } from '@/lib/merk-mail'
+import { NGM } from '@/lib/ngm-merk'
+import { zonderLosseLink } from '@/lib/email-html'
 import { offerteMail } from '@/lib/offertes'
 import { welkomstMail } from '@/lib/klant-account'
 import { mailVoorstel } from '@/lib/algemene-contracten/model'
@@ -259,10 +261,14 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
   const applyTemplate = (t: Template, vars: MailVars) => {
     setTemplateId(t.id)
     setSubject(renderTemplate(t.subject, vars))
-    setBody(renderTemplate(t.body, vars))
     // Bij contracten is de knop altijd "Bekijken" met de tekenlink, wat de template ook zegt.
-    setCtaText(context.type === 'contract' ? CONTRACT_KNOP : renderTemplate(t.cta_text ?? '', vars))
-    setCtaLink(context.type === 'contract' ? context.signLink : renderTemplate(t.cta_link ?? '', vars))
+    // Een template met {{contract_link}} in de tekst maar zonder knop krijgt de knop "Bekijken".
+    const linkInTekst = !t.cta_link?.trim() && t.body.includes('{{contract_link}}') && vars.contract_link ? String(vars.contract_link) : ''
+    const knopLink = context.type === 'contract' ? context.signLink : linkInTekst || renderTemplate(t.cta_link ?? '', vars)
+    // Staat dezelfde link nog eens los in de tekst (bv. {{contract_link}}), dan blijft enkel de knop.
+    setBody(zonderLosseLink(renderTemplate(t.body, vars), knopLink))
+    setCtaText(context.type === 'contract' || (linkInTekst && !t.cta_text?.trim()) ? CONTRACT_KNOP : renderTemplate(t.cta_text ?? '', vars))
+    setCtaLink(knopLink)
   }
   const onPick = (id: string) => {
     const t = templates.find((x) => x.id === id)
@@ -478,7 +484,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
                   {MAIL_MERKEN.map((m) => (
                     <button key={m} type="button" onClick={() => kiesMerk(m)}
                       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors ${merk === m ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-50'}`}>
-                      <span className="h-2.5 w-2.5 rounded-full border border-black/10" style={{ background: MERK_STIJL[m].accent }} />{MERK_STIJL[m].naam}
+                      <span className="h-2.5 w-2.5 rounded-full border border-black/10" style={{ background: MERK_STIJL[m].kleur }} />{MERK_STIJL[m].naam}
                     </button>
                   ))}
                 </div>
@@ -497,19 +503,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
               <div><label className="block text-xs font-medium text-gray-600 mb-1">Knop-link</label><input className={`${inp} ${context.type === 'offerte' || context.type === 'algemeen_contract' || isShoot ? 'bg-gray-50 text-gray-500' : ''}`} value={ctaLink} onChange={(e) => setCtaLink(e.target.value)} readOnly={context.type === 'offerte' || context.type === 'algemeen_contract' || isShoot} title={context.type === 'offerte' ? 'De knop opent altijd de offerte' : context.type === 'algemeen_contract' ? 'Elke ontvanger krijgt een eigen link (30 dagen geldig)' : isShoot ? 'Elke ontvanger krijgt een eigen link naar het shootplan (geldig tot twee weken na de shoot)' : undefined} placeholder="https://…" /></div>
             </div>
             {/* Preview */}
-            <div className="rounded-lg border border-gray-100 bg-gray-50 overflow-hidden">
-              <div className="px-3 py-2 bg-white text-sm font-extrabold tracking-tight text-gray-900" style={{ borderBottom: `3px solid ${stijl.accent}` }}>
-                {stijl.deel1}<span style={{ borderBottom: `3px solid ${stijl.accent}` }}>{stijl.deel2}</span>
-                <span className="float-right text-[11px] font-normal text-gray-400 pt-0.5">Voorbeeld</span>
-              </div>
-              <div className="p-3">
-                <div className="text-xs text-gray-700 whitespace-pre-wrap">{body || '—'}</div>
-                {ctaText && ctaLink && (
-                  <span className="inline-block mt-2 rounded-lg bg-gray-900 px-4 py-1.5 text-xs font-semibold text-white" style={{ borderBottom: `3px solid ${stijl.accent}` }}>{ctaText}</span>
-                )}
-                <div className="mt-3 text-[10px] text-gray-400">{stijl.naam} · {stijl.adres}</div>
-              </div>
-            </div>
+            <MailVoorbeeld ngm={stijl.naam === MERK_STIJL.nextgenmedia.naam} stijl={stijl} body={body} knop={ctaText && ctaLink ? ctaText : null} />
             {error && <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</div>}
             <div className="flex gap-2 pt-1">
               <button onClick={send} disabled={sending || (meer ? !aanLijst.length : !toEmail) || (context.type === 'meeting' && !afzender?.ok)} className="btn-primary flex-1 justify-center">{sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}{context.type === 'meeting' ? 'Versturen' : meer && aanLijst.length > 1 ? `Verstuur naar ${aanLijst.length} personen` : 'Verstuur'}</button>
@@ -523,6 +517,43 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
 }
 
 const CONTRACT_KNOP = 'Bekijken'
+
+/**
+ * Voorbeeld zoals de mail vertrekt (lib/email-html.ts). NextGenMedia: kop in woud met het
+ * logo, tekst in woud, knop in zonnegeel en voet in woud met de baseline. NextGenSolutions: blauw.
+ */
+function MailVoorbeeld({ ngm, stijl, body, knop }: { ngm: boolean; stijl: (typeof MERK_STIJL)[MailMerk]; body: string; knop: string | null }) {
+  if (ngm) return (
+    <div className="rounded-lg overflow-hidden border" style={{ borderColor: NGM.lijn, background: NGM.kalk }}>
+      <div className="px-4 py-3 flex items-center justify-between" style={{ background: NGM.woud }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/merk/ngm/logo-zonnegeel.png" alt="NextGenMedia" className="h-4 w-auto" />
+        <span className="text-[10px] font-normal" style={{ color: NGM.mos }}>Voorbeeld</span>
+      </div>
+      <div className="p-3 bg-white">
+        <div className="text-xs whitespace-pre-wrap" style={{ color: NGM.woud }}>{body || '—'}</div>
+        {knop && <span className="inline-block mt-2 rounded-full px-4 py-1.5 text-xs font-bold" style={{ background: NGM.zonnegeel, color: NGM.woud }}>{knop}</span>}
+      </div>
+      <div className="px-3 py-2 text-[10px] leading-relaxed" style={{ background: NGM.woud, color: NGM.mos }}>
+        {stijl.naam} · {stijl.adres}<br />
+        <span className="uppercase tracking-wider" style={{ color: NGM.zonnegeel }}>{NGM.baseline}</span>
+      </div>
+    </div>
+  )
+  return (
+    <div className="rounded-lg border border-gray-100 bg-gray-50 overflow-hidden">
+      <div className="px-3 py-2 bg-white text-sm font-extrabold tracking-tight text-gray-900" style={{ borderBottom: `3px solid ${stijl.accent}` }}>
+        {stijl.deel1}<span style={{ borderBottom: `3px solid ${stijl.accent}` }}>{stijl.deel2}</span>
+        <span className="float-right text-[11px] font-normal text-gray-400 pt-0.5">Voorbeeld</span>
+      </div>
+      <div className="p-3">
+        <div className="text-xs text-gray-700 whitespace-pre-wrap">{body || '—'}</div>
+        {knop && <span className="inline-block mt-2 rounded-lg bg-gray-900 px-4 py-1.5 text-xs font-semibold text-white" style={{ borderBottom: `3px solid ${stijl.accent}` }}>{knop}</span>}
+        <div className="mt-3 text-[10px] text-gray-400">{stijl.naam} · {stijl.adres}</div>
+      </div>
+    </div>
+  )
+}
 
 const SOORT_LABEL: Record<Ontvanger['soort'], string> = { eigenaar: 'Hoofdaccount', gebruiker: 'Gebruiker', klantadres: 'Algemeen adres van de klant' }
 

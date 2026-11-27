@@ -4,6 +4,13 @@
 
 export const MAX_UPLOAD_MB = 4
 
+/** Contracten en templates: de pdf gaat rechtstreeks naar de opslag (lib/contracten/pdf-opladen.ts), dus tot 10 MB. */
+export const MAX_PDF_MB = 10
+
+export function pdfTeGroot(file: File | null | undefined): boolean {
+  return !!file && file.size > MAX_PDF_MB * 1024 * 1024
+}
+
 export function fileTooBig(file: File | null | undefined): boolean {
   return !!file && file.size > MAX_UPLOAD_MB * 1024 * 1024
 }
