@@ -80,7 +80,7 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
   const [kopieInfo, setKopieInfo] = useState(true)
   // Algemeen contract: de huidige PDF (met de handtekeningen) als bijlage meesturen.
   const [bijlage, setBijlage] = useState(true)
-  // Huisstijl van de mail: NextGenMedia (geel) of NextGenSolutions (blauw). Meetingmails vertrekken altijd van NextGenMedia.
+  // Huisstijl van de mail: NextGenMedia (woud en zonnegeel) of NextGenSolutions (blauw). Meetingmails vertrekken altijd van NextGenMedia.
   const [merk, setMerk] = useState<MailMerk>('nextgenmedia')
   // Projectkaart: klant, contract (voor de herinnering via de contractroute) en het beste adres per soort voorstel.
   const [project, setProject] = useState<{ client_id: string | null; contract_id: string | null; adressen: { contract: string | null; offerte: string | null; klant: string | null } } | null>(null)

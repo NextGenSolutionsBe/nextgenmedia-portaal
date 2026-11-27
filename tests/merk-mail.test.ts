@@ -4,12 +4,12 @@ import { mailMerkVan, merkStijl, MERK_STIJL } from '../lib/merk-mail'
 import { bouwNieuwsbriefMail } from '../lib/nieuwsbrief-mail'
 import { valideerNieuwsbrief } from '../lib/nieuwsbrieven'
 
-// Standaard = NextGenMedia, geel (zoals voorheen).
+// Standaard = NextGenMedia.
 const ngm = buildEmailHtml({ bodyText: 'Hallo', ctaText: 'Open', ctaLink: 'https://app.nextgenmedia.be' })
-// Huisstijl NextGen Agency (23 nov 2026): woordmerk als afbeelding, zwart, geen geel meer.
-assert.ok(ngm.includes('/merk/logo-mail.png') && ngm.includes('#0f0f0f'))
-assert.ok(!ngm.includes('#fff848'))
-assert.ok(ngm.includes('NextGenMedia · info@nextgenmedia.be'))
+// Huisstijl NextGenMedia (27 nov 2026): logo in zonnegeel op woud, knop in zonnegeel, de baseline. Geen oud geel, geen woordmerk van NextGen Agency.
+assert.ok(ngm.includes('/merk/ngm/logo-mail.png') && ngm.includes('#0C2B1E') && ngm.includes('#FDDB57'))
+assert.ok(!ngm.includes('#fff848') && !ngm.includes('/merk/logo-mail.png'))
+assert.ok(ngm.includes('info@nextgenmedia.be') && ngm.includes('From concept to impact.'))
 assert.ok(!ngm.includes('#3b82f6'))
 
 // NextGenSolutions = blauw, eigen naam en adres, geen geel.
@@ -30,10 +30,10 @@ assert.equal(MERK_STIJL.nextgensolutions.van, 'NextGenSolutions <info@nextgensol
 // Nieuwsbrief in de huisstijl van het merk.
 const basis = { titel: 'Test', categorie: 'projecten' as const, samenvatting: null, cover_pad: null, cover_youtube_id: null, blokken: [] }
 const nb1 = bouwNieuwsbriefMail(basis, { appLink: 'https://app/x', afmeldLink: 'https://app/af' })
-assert.ok(nb1.html.includes('/merk/logo-mail.png') && nb1.html.includes('klant bent bij NextGenMedia'))
+assert.ok(nb1.html.includes('/merk/ngm/logo-mail.png') && nb1.html.includes('#0C2B1E') && nb1.html.includes('klant bent bij NextGenMedia'))
 const nb2 = bouwNieuwsbriefMail({ ...basis, merk: 'nextgensolutions' }, { appLink: 'https://app/x', afmeldLink: 'https://app/af' })
 assert.ok(nb2.html.includes('#3b82f6') && nb2.html.includes('klant bent bij NextGenSolutions'))
-assert.ok(!nb2.html.includes('/merk/logo-mail.png'))
+assert.ok(!nb2.html.includes('/merk/logo-mail.png') && !nb2.html.includes('/merk/ngm/'))
 
 // Validatie bewaart het merk (onbekend = NextGenMedia).
 const v1 = valideerNieuwsbrief({ titel: 'Een titel', categorie: 'projecten', blokken: [], merk: 'nextgensolutions' })

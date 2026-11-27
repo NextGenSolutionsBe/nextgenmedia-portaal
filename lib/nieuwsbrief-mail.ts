@@ -2,7 +2,8 @@ import { publiekeUrl } from '@/lib/marketing-media'
 import { youtubeKijkUrl, youtubeThumb, youtubeId } from '@/lib/youtube'
 import { PROVIDER_LABEL } from '@/lib/embeds'
 import { categorieLabel, leesTekst, type Blok, type Inline, type Nieuwsbrief } from '@/lib/nieuwsbrieven'
-import { merkStijl } from '@/lib/merk-mail'
+import { merkStijl, mailMerkVan } from '@/lib/merk-mail'
+import { NGM } from '@/lib/ngm-merk'
 
 /**
  * De nieuwsbrief als mail: dezelfde blokken, in mailveilige HTML (tabellen en
@@ -62,18 +63,27 @@ function blokTekst(b: Blok): string {
 
 export function bouwNieuwsbriefMail(n: Pick<Nieuwsbrief, 'titel' | 'categorie' | 'samenvatting' | 'cover_pad' | 'cover_youtube_id' | 'blokken'> & { categorie_label?: string | null; merk?: string | null }, o: { appLink: string; afmeldLink: string }): { onderwerp: string; html: string; tekst: string } {
   const m = merkStijl(n.merk)
+  // NextGenMedia: eigen huisstijl (kop in woud met het logo in zonnegeel, knop in zonnegeel).
+  const ngm = mailMerkVan(n.merk) === 'nextgenmedia'
+  const achter = ngm ? NGM.kalk : '#f4f4f5'
+  const kop = ngm
+    ? `<tr><td style="padding:22px 32px;background:${NGM.woud}"><img src="${m.logo}" alt="${m.naam}" width="170" style="display:inline-block;width:170px;height:auto;border:0;vertical-align:middle"><span style="float:right;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;font-family:'DM Mono','Courier New',monospace;color:${NGM.mos};padding-top:6px">${esc(categorieLabel(n.categorie, n.categorie_label))}</span></td></tr>`
+    : `<tr><td style="padding:20px 32px;border-bottom:${m.logo ? '1px solid #e0e0e0' : `4px solid ${m.accent}`}">${m.logo ? `<img src="${m.logo}" alt="${m.naam}" width="120" style="display:inline-block;width:120px;height:auto;border:0;vertical-align:middle">` : `<span style="font-size:16px;font-weight:800;color:#111;letter-spacing:-0.02em">${m.deel1}<span style="border-bottom:3px solid ${m.accent}">${m.deel2}</span></span>`}<span style="float:right;font-size:12px;color:#71717a;padding-top:2px">${esc(categorieLabel(n.categorie, n.categorie_label))}</span></td></tr>`
+  const knop = ngm
+    ? `display:inline-block;background:${NGM.zonnegeel};color:${NGM.woud};text-decoration:none;font-weight:700;font-size:15px;padding:12px 26px;border-radius:999px`
+    : `${KNOP};border-bottom:3px solid ${m.accent}`
   const cover = publiekeUrl(n.cover_pad) ?? (n.cover_youtube_id ? youtubeThumb(n.cover_youtube_id) : null)
   const html = `<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(n.titel)}</title></head>
-<body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5"><tr><td align="center" style="padding:24px 12px">
+<body style="margin:0;padding:0;background:${achter};font-family:${ngm ? "'DM Sans'," : ''}-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${achter}"><tr><td align="center" style="padding:24px 12px">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:#fff;border-radius:16px;overflow:hidden">
-<tr><td style="padding:20px 32px;border-bottom:${m.logo ? '1px solid #e0e0e0' : `4px solid ${m.accent}`}">${m.logo ? `<img src="${m.logo}" alt="${m.naam}" width="120" style="display:inline-block;width:120px;height:auto;border:0;vertical-align:middle">` : `<span style="font-size:16px;font-weight:800;color:#111;letter-spacing:-0.02em">${m.deel1}<span style="border-bottom:3px solid ${m.accent}">${m.deel2}</span></span>`}<span style="float:right;font-size:12px;color:#71717a;padding-top:2px">${esc(categorieLabel(n.categorie, n.categorie_label))}</span></td></tr>
+${kop}
 ${cover ? `<tr><td><a href="${esc(o.appLink)}"><img src="${esc(cover)}" alt="" width="600" style="width:100%;height:auto;display:block"></a></td></tr>` : ''}
 <tr><td style="padding:28px 32px 8px">
-<h1 style="margin:0 0 12px;font-size:28px;line-height:1.2;color:#111">${esc(n.titel)}</h1>
+<h1 style="margin:0 0 12px;font-size:28px;line-height:1.2;color:${ngm ? NGM.woud : '#111'}">${esc(n.titel)}</h1>
 ${n.samenvatting ? `<p style="margin:0 0 20px;font-size:18px;line-height:1.5;color:#52525b">${esc(n.samenvatting)}</p>` : ''}
 ${n.blokken.map(blokHtml).join('\n')}
-<p style="margin:24px 0 8px"><a href="${esc(o.appLink)}" style="${KNOP};border-bottom:3px solid ${m.accent}">Lees verder in je klantapp</a></p>
+<p style="margin:24px 0 8px"><a href="${esc(o.appLink)}" style="${knop}">Lees verder in je klantapp</a></p>
 </td></tr>
 <tr><td style="padding:20px 32px 28px;border-top:1px solid #f4f4f5;font-size:12px;line-height:1.6;color:#a1a1aa">${m.naam} · ${m.adres}<br>Je krijgt deze nieuwsbrief omdat je klant bent bij ${m.naam}. Liever geen nieuwsbrief meer? <a href="${esc(o.afmeldLink)}" style="color:#71717a">Afmelden</a>.</td></tr>
 </table></td></tr></table></body></html>`

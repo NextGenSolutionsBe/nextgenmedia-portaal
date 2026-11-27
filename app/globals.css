@@ -446,3 +446,35 @@ input[type='search']::-webkit-search-results-decoration { -webkit-appearance: no
 .ag-doc-kort .ProseMirror tr:last-child > td { border-bottom: 0; }
 .ag-doc-kort .ProseMirror a { color: #0f0f0f; }
 .ag-doc-kort .sticky { top: -1px; }
+
+/* ── Huisstijl NextGenMedia (27 nov 2026, lib/ngm-merk.ts, components/ngm-merk.tsx) ──
+   Enkel binnen .ngm: de publieke pagina's van NextGenMedia (shootplan, meeting
+   boeken, tekenen en offertes van NextGenMedia). Woud draagt, zonnegeel licht op
+   (knoppen, accenten op woud), kalk geeft rust. De rest van de app blijft NextGen Agency. */
+.ngm {
+  --ngm-woud: #0C2B1E; --ngm-zonnegeel: #FDDB57; --ngm-kalk: #FAF7EE; --ngm-mos: #A9BFA9; --ngm-varen: #4F6B5A; --ngm-lijn: #E6E0D0;
+  font-family: var(--font-ngm-tekst), ui-sans-serif, system-ui, sans-serif;
+  background: var(--ngm-kalk);
+  color: var(--ngm-woud);
+  position: relative;
+  z-index: 0;
+}
+.ngm h1, .ngm h2, .ngm h3 { font-family: var(--font-ngm-titel), var(--font-ngm-tekst), sans-serif; color: var(--ngm-woud); letter-spacing: -0.02em; }
+.ngm h1 { font-weight: 800; }
+.ngm h2, .ngm h3 { font-weight: 700; }
+.ngm .ngm-label, .ngm .label-mono { font-family: var(--font-ngm-mono), ui-monospace, monospace; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; }
+.ngm .text-gray-900, .ngm .text-gray-800, .ngm .text-gray-700, .ngm .text-black { color: var(--ngm-woud); }
+.ngm .text-gray-600, .ngm .text-gray-500, .ngm .text-gray-400 { color: var(--ngm-varen); }
+.ngm .border-gray-100, .ngm .border-gray-200, .ngm .border-gray-300 { border-color: var(--ngm-lijn); }
+.ngm .bg-gray-50 { background-color: var(--ngm-kalk); }
+.ngm .bg-gray-100 { background-color: #F1ECDF; }
+.ngm .bg-gray-900, .ngm .bg-black { background-color: var(--ngm-woud); }
+.ngm .border-geel { border-color: var(--ngm-zonnegeel); }
+.ngm .card-base, .ngm .bg-white.border { background-color: #fff; border-color: var(--ngm-lijn); }
+.ngm .btn-primary { background: var(--ngm-zonnegeel); color: var(--ngm-woud); border-color: var(--ngm-zonnegeel); border-radius: 9999px; font-weight: 700; box-shadow: none; }
+.ngm .btn-primary:hover:not(:disabled) { background: #F7CF3E; border-color: #F7CF3E; }
+.ngm .btn-primary:disabled { opacity: 0.55; }
+.ngm .btn-secondary { background: #fff; color: var(--ngm-woud); border-color: var(--ngm-lijn); border-radius: 9999px; }
+.ngm .btn-secondary:hover:not(:disabled) { border-color: var(--ngm-woud); }
+.ngm .input-base:focus { border-color: var(--ngm-woud); box-shadow: 0 0 0 3px rgba(12, 43, 30, 0.12); }
+.ngm input[type=checkbox] { accent-color: var(--ngm-woud); }

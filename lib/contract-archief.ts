@@ -6,6 +6,7 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage, type PDFIm
 import type { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { sendEmail, baseUrl } from '@/lib/email'
 import { leesInstellingen } from '@/lib/instellingen/laden'
+import { ngmLogoBytes } from '@/lib/pdf-merk'
 import { logContractEvent } from '@/lib/contract-audit'
 import { MANUEEL, GEEN_CERTIFICAAT } from '@/lib/contracten/manueel-getekend'
 import {
@@ -380,8 +381,12 @@ export async function archiveerContract(admin: Admin, contractId: string, bron: 
 
   const instellingen = await leesInstellingen().catch(() => null)
   const doc = instellingen?.documenten
-  const logo = await laadLogo(admin, doc?.logo_path)
-  const certificaat = await maakCertificaatPdf(dossier, { logo, accent: doc?.primaire_kleur, tekstkleur: doc?.secundaire_kleur, voettekst: doc?.voettekst })
+  // Contracten van NextGenMedia (alles behalve NextGenSolutions): logo en woud van NextGenMedia (lib/ngm-merk.ts).
+  const ngm = (c as { bedrijf?: string | null }).bedrijf !== 'nextgensolutions'
+  const logo = (ngm ? await ngmLogoBytes() : null) ?? await laadLogo(admin, doc?.logo_path)
+  const certificaat = await maakCertificaatPdf(dossier, ngm
+    ? { logo, accent: '#0C2B1E', tekstkleur: '#0C2B1E', voettekst: doc?.voettekst }
+    : { logo, accent: doc?.primaire_kleur, tekstkleur: doc?.secundaire_kleur, voettekst: doc?.voettekst })
   const hashCert = sha256(certificaat)
   const paden = archiefPaden(contractId, versie)
 

@@ -1,8 +1,8 @@
 import 'server-only'
 import { readFile } from 'fs/promises'
 import path from 'path'
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib'
-import { leesInstellingen } from '@/lib/instellingen/laden'
+import { PDFDocument, rgb, type PDFFont, type PDFPage } from 'pdf-lib'
+import { monoLabel, ngmFonts, ngmLogo, NGM_PDF } from '@/lib/pdf-merk'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import {
   splitsInRegels, veilig, datumLang, datumKort, heeftInhoud,
@@ -25,11 +25,11 @@ type Admin = { from: (t: string) => any }
 const A4 = { w: 595.28, h: 841.89 }
 const MARGE = 48
 const ONDER = 60              // vrije ruimte onderaan voor de voettekst
-const GEEL = rgb(0.059, 0.059, 0.059) /* huisstijl NextGen Agency: zwart (vroeger geel) */
-const ZWART = rgb(0.07, 0.07, 0.07)
-const GRIJS = rgb(0.42, 0.45, 0.5)
-const LIJN = rgb(0.85, 0.86, 0.88)
-const LICHT = rgb(0.96, 0.965, 0.975)
+// Huisstijl NextGenMedia (lib/ngm-merk.ts): woud, zonnegeel, kalk.
+const ZWART = NGM_PDF.woud
+const GRIJS = NGM_PDF.varen
+const LIJN = NGM_PDF.lijn
+const LICHT = NGM_PDF.kalk
 
 const LOGO_BUCKET = 'contracts'
 
@@ -83,12 +83,9 @@ export async function laadLogo(logoPath: string | undefined): Promise<Uint8Array
 }
 
 export async function maakShootDocument(invoer: MaakShootDocumentInvoer): Promise<Uint8Array> {
-  const inst = await leesInstellingen().catch(() => null)
-  const doc = inst?.documenten
-  const org = inst?.organisatie
-  const ACCENT = kleurUitHex(doc?.primaire_kleur, GEEL)
-  const TEKST = kleurUitHex(doc?.secundaire_kleur, ZWART)
-  const bedrijfsnaam = veilig(org?.handelsnaam || org?.vennootschapsnaam || 'NextGen Media') || 'NextGen Media'
+  const ACCENT = NGM_PDF.woud
+  const TEKST = NGM_PDF.woud
+  const bedrijfsnaam = 'NextGenMedia'
 
   const klantNaam = veilig(invoer.klantNaam) || 'Klant'
   const projectNaam = veilig(invoer.projectNaam) || 'Social media'
@@ -99,8 +96,7 @@ export async function maakShootDocument(invoer: MaakShootDocumentInvoer): Promis
   pdf.setSubject(projectNaam)
   pdf.setAuthor(`${bedrijfsnaam} portaal`)
   pdf.setCreator(`${bedrijfsnaam} portaal`)
-  const font = await pdf.embedFont(StandardFonts.Helvetica)
-  const vet = await pdf.embedFont(StandardFonts.HelveticaBold)
+  const { font, vet, nadruk, titel: titelFont, mono } = await ngmFonts(pdf)
 
   const breedte = A4.w - MARGE * 2
   let page: PDFPage = pdf.addPage([A4.w, A4.h])
@@ -109,9 +105,8 @@ export async function maakShootDocument(invoer: MaakShootDocumentInvoer): Promis
   // ── Paginabeheer ────────────────────────────────────────────────────────────
   const nieuwePagina = () => {
     page = pdf.addPage([A4.w, A4.h])
-    y = A4.h - MARGE
-    page.drawRectangle({ x: MARGE, y: y - 2, width: breedte, height: 2.5, color: ACCENT })
-    y -= 22
+    page.drawRectangle({ x: 0, y: A4.h - 8, width: A4.w, height: 8, color: ACCENT })
+    y = A4.h - MARGE - 6
   }
   /** Zorgt dat `nodig` punten aaneengesloten beschikbaar zijn (anders nieuwe pagina). */
   const ruimte = (nodig: number) => { if (y - nodig < ONDER) nieuwePagina() }
@@ -128,7 +123,7 @@ export async function maakShootDocument(invoer: MaakShootDocumentInvoer): Promis
     if (!schoon) return
     const regels = wikkel(font, schoon, REGEL, tekstBreedte)
     ruimte(vinkregelHoogte(regels))
-    page.drawRectangle({ x: MARGE + 1, y: y - VAK + 1, width: VAK, height: VAK, borderColor: rgb(0.35, 0.35, 0.35), borderWidth: 0.9 })
+    page.drawRectangle({ x: MARGE + 1, y: y - VAK + 1, width: VAK, height: VAK, borderColor: NGM_PDF.woud, borderWidth: 0.9 })
     regels.forEach((r, i) => page.drawText(r, { x: MARGE + VAK_AFSTAND, y: y - REGEL + 1.5 - i * INTERLINIE, size: REGEL, font, color: ZWART }))
     y -= vinkregelHoogte(regels)
   }
@@ -142,8 +137,10 @@ export async function maakShootDocument(invoer: MaakShootDocumentInvoer): Promis
     y -= 8
     const t = wikkel(vet, veilig(titel), 13, breedte)
     t.forEach((r, i) => page.drawText(r, { x: MARGE, y: y - 12 - i * 16, size: 13, font: vet, color: TEKST }))
+    const laatste = t[t.length - 1] ?? ''
+    page.drawCircle({ x: MARGE + vet.widthOfTextAtSize(laatste, 13) + 4, y: y - 10.2 - (t.length - 1) * 16, size: 2.1, color: NGM_PDF.zonnegeel })
     y -= 12 + (t.length - 1) * 16 + 6
-    page.drawRectangle({ x: MARGE, y, width: breedte, height: 1.2, color: ACCENT })
+    page.drawRectangle({ x: MARGE, y, width: breedte, height: 0.8, color: LIJN })
     y -= 10
     if (sub) {
       page.drawText(veilig(sub), { x: MARGE, y: y - 7, size: 9, font, color: GRIJS })
@@ -155,28 +152,21 @@ export async function maakShootDocument(invoer: MaakShootDocumentInvoer): Promis
     const eerste = eersteRegel ? vinkregelHoogte(wikkel(font, veilig(eersteRegel), REGEL, tekstBreedte)) : 0
     ruimte(24 + eerste)
     y -= 6
-    page.drawText(veilig(titel), { x: MARGE, y: y - 10, size: 10.5, font: vet, color: TEKST })
+    page.drawText(veilig(titel), { x: MARGE, y: y - 10, size: 10.5, font: nadruk, color: TEKST })
     y -= 20
   }
 
-  // ── Kop van pagina 1 ────────────────────────────────────────────────────────
-  try {
-    const logoBytes = await laadLogo(doc?.logo_path)
-    if (logoBytes) {
-      const isJpeg = logoBytes[0] === 0xff && logoBytes[1] === 0xd8
-      const logo = isJpeg ? await pdf.embedJpg(logoBytes) : await pdf.embedPng(logoBytes)
-      const h = 42, w = (logo.width / logo.height) * h
-      page.drawImage(logo, { x: MARGE, y: y - h, width: w, height: h })
-    }
-  } catch { /* zonder logo verder */ }
-  page.drawText(bedrijfsnaam, { x: A4.w - MARGE - vet.widthOfTextAtSize(bedrijfsnaam, 12), y: y - 14, size: 12, font: vet, color: TEKST })
-  page.drawText('Shootvoorbereiding', { x: A4.w - MARGE - font.widthOfTextAtSize('Shootvoorbereiding', 9), y: y - 28, size: 9, font, color: GRIJS })
-  y -= 62
-  page.drawRectangle({ x: MARGE, y, width: breedte, height: 4, color: ACCENT })
-  y -= 34
-
-  page.drawText('Shootvoorbereiding', { x: MARGE, y, size: 22, font: vet, color: TEKST })
-  y -= 30
+  // ── Kop van pagina 1: een vlak in woud met het logo in zonnegeel ──────────
+  const KOP = 140
+  page.drawRectangle({ x: 0, y: A4.h - KOP, width: A4.w, height: KOP, color: NGM_PDF.woud })
+  const logo = await ngmLogo(pdf, 'zonnegeel')
+  if (logo) { const h = 20, w = (logo.width / logo.height) * h; page.drawImage(logo, { x: MARGE, y: A4.h - 30 - h, width: w, height: h }) }
+  monoLabel(page, mono, 'Shootvoorbereiding', A4.w - MARGE, A4.h - 44, 8, NGM_PDF.mos, true)
+  const titel = 'Shootvoorbereiding'
+  page.drawText(titel, { x: MARGE, y: A4.h - 98, size: 24, font: titelFont, color: NGM_PDF.kalk })
+  page.drawCircle({ x: MARGE + titelFont.widthOfTextAtSize(titel, 24) + 6, y: A4.h - 95.4, size: 3.6, color: NGM_PDF.zonnegeel })
+  page.drawText(veilig(`${klantNaam}  ·  ${projectNaam}`), { x: MARGE, y: A4.h - KOP + 22, size: 10, font, color: NGM_PDF.mos })
+  y = A4.h - KOP - 26
 
   // Gegevensblok: klant, project, shootdatum, tijdstip, locatie.
   const rijen: [string, string][] = [
@@ -194,10 +184,10 @@ export async function maakShootDocument(invoer: MaakShootDocumentInvoer): Promis
   const gerenderd = rijen.map(([l, w]) => [l, wikkel(font, veilig(w), 10, breedte - labelBreedte - 24)] as const)
   for (const [, r] of gerenderd) blokHoogte += Math.max(1, r.length) * 14 + 4
   page.drawRectangle({ x: MARGE, y: y - blokHoogte, width: breedte, height: blokHoogte, color: LICHT })
-  page.drawRectangle({ x: MARGE, y: y - blokHoogte, width: 3, height: blokHoogte, color: ACCENT })
+  page.drawRectangle({ x: MARGE, y: y - blokHoogte, width: 3, height: blokHoogte, color: NGM_PDF.zonnegeel })
   let ry = y - 8
   for (const [label, regels] of gerenderd) {
-    page.drawText(label, { x: MARGE + 14, y: ry - 9, size: 9, font: vet, color: GRIJS })
+    monoLabel(page, mono, label, MARGE + 14, ry - 9, 7.5, GRIJS)
     regels.forEach((r, i) => page.drawText(r, { x: MARGE + 14 + labelBreedte, y: ry - 9 - i * 14, size: 10, font, color: ZWART }))
     ry -= Math.max(1, regels.length) * 14 + 4
   }
@@ -239,12 +229,10 @@ export async function maakShootDocument(invoer: MaakShootDocumentInvoer): Promis
 
   // ── Voettekst op elke pagina (na afloop: dan kennen we het totaal) ──────────
   const paginas = pdf.getPages()
-  const links = veilig(`${bedrijfsnaam} · Shootvoorbereiding`)
   paginas.forEach((p, i) => {
-    const rechts = `Pagina ${i + 1} van ${paginas.length}`
     p.drawRectangle({ x: MARGE, y: 40, width: breedte, height: 0.8, color: LIJN })
-    p.drawText(links, { x: MARGE, y: 27, size: 8, font, color: GRIJS })
-    p.drawText(rechts, { x: A4.w - MARGE - font.widthOfTextAtSize(rechts, 8), y: 27, size: 8, font, color: GRIJS })
+    monoLabel(p, mono, `${bedrijfsnaam}  ·  Shootvoorbereiding`, MARGE, 27, 7, GRIJS)
+    monoLabel(p, mono, `${i + 1} / ${paginas.length}`, A4.w - MARGE, 27, 7, GRIJS, true)
   })
 
   return pdf.save()
