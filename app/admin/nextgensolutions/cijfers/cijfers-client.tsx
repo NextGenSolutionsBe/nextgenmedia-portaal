@@ -14,7 +14,7 @@ import { OmzetGrafiek } from './omzet-grafiek'
  * gewonnen en verloren in de gekozen periode, wat er elke maand binnenkomt
  * en wat er open staat. Per bron en waarom deals niet doorgingen.
  */
-export function CijfersClient({ deals, vandaag }: { deals: Deal[]; vandaag: string }) {
+export function CijfersClient({ deals, vandaag, gefactureerd = [] }: { deals: Deal[]; vandaag: string; gefactureerd?: { maand: string; bedrag: number; verstuurd: boolean }[] }) {
   const nu = vandaag.slice(0, 7)
   const [soort, setSoort] = useState<PeriodeSoort | 'alles'>('jaar')
   const [periode, setPeriode] = useState(() => periodeVan('jaar', nu))
@@ -27,6 +27,9 @@ export function CijfersClient({ deals, vandaag }: { deals: Deal[]; vandaag: stri
   const label = alles ? 'altijd' : periode.label
   const isNu = !alles && periode.maanden.includes(nu)
   const maxPipe = Math.max(...c.pipeline.map((p) => p.waarde), 1)
+  const fact = gefactureerd.filter((f) => alles || periode.maanden.includes(f.maand))
+  const factVerstuurd = fact.filter((f) => f.verstuurd).reduce((t, f) => t + f.bedrag, 0)
+  const factKlaar = fact.filter((f) => !f.verstuurd).reduce((t, f) => t + f.bedrag, 0)
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -50,8 +53,9 @@ export function CijfersClient({ deals, vandaag }: { deals: Deal[]; vandaag: stri
       </div>
 
       {/* Kerncijfers */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2 sm:gap-3">
-        <Tegel label={`Omzet ${label}`} waarde={eur(c.omzet)} sub="eenmalig + maandbedragen" nadruk />
+      <div className="grid grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7 gap-2 sm:gap-3">
+        <Tegel label={`Omzet ${label} (prognose)`} waarde={eur(c.omzet)} sub="uit de pipeline: eenmalig + maandbedragen" nadruk />
+        <Tegel label={`Gefactureerd ${label}`} waarde={eur(factVerstuurd)} sub={factKlaar ? `+ ${eur(factKlaar)} klaar om te versturen` : 'facturen NextGenSolutions'} />
         <Tegel label="Gewonnen" waarde={eur(c.gewonnen.waarde)} sub={`${c.gewonnen.aantal} ${c.gewonnen.aantal === 1 ? 'deal' : 'deals'}${c.gewonnen.nieuweMrr ? ` · +${eur(c.gewonnen.nieuweMrr)}/m` : ''}`} />
         <Tegel label="Win rate" waarde={c.winrate === null ? '—' : `${Math.round(c.winrate * 100)}%`} sub={`${c.gewonnen.aantal} won · ${c.verloren} lost`} />
         <Tegel label="Gemiddelde deal" waarde={c.gemiddeld === null ? '—' : eur(c.gemiddeld)} sub={c.doorlooptijd === null ? 'doorlooptijd —' : `${c.doorlooptijd} dagen tot getekend`} />

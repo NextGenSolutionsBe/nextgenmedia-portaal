@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
-  Info, Camera, ClipboardList, BookOpen, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
+  Info, Camera, ClipboardList, BookOpen, Wrench, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
   MailCheck, FolderUp, Handshake, Settings, ClipboardPen, Contact, Timer, Video, Inbox, Clapperboard, Building2, FileSignature, ScrollText, Wallet, PackageCheck, Aperture,
   Target, LineChart, CalendarRange,
 } from 'lucide-react'
@@ -98,6 +98,7 @@ const SECTIONS: NavSection[] = [
     open: true,
     items: [
       { label: 'Pipeline', href: '/admin/nextgensolutions', icon: Target, module: 'nextgensolutions', exact: true },
+      { label: 'Levering', href: '/admin/nextgensolutions/levering', icon: Wrench, module: 'nextgensolutions' },
       { label: 'Cijfers', href: '/admin/nextgensolutions/cijfers', icon: LineChart, module: 'nextgensolutions' },
     ],
   },

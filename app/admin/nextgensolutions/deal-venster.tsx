@@ -11,6 +11,7 @@ import {
 } from '@/lib/ngs/model'
 import { Chip, FASE_STIJL, Venster, dagKort, eur, eurCent, inp, lbl, post, tijdstip } from './ui'
 import { PersoonKnop } from '@/components/admin/persoon-foto'
+import { DealLevering } from './deal-levering'
 
 type Velden = {
   bedrijf: string; contactpersoon: string; email: string; telefoon: string; titel: string; diensten: string[]
@@ -193,6 +194,8 @@ export function DealVenster({ deal, ik, namen, onSluit, onKlaar, onVerplaats, on
 
       <ClickupTaken api={`/api/admin/nextgensolutions/deals/${deal.id}/taken`} waarbij="deal" standaardMerk="nextgensolutions" titel="Opvolgtaken (ClickUp)"
         klant={deal.bedrijf} context={[deal.bedrijf, deal.titel].filter(Boolean).join(' · ')} onGewijzigd={() => { laadNotities(); onVernieuw() }} />
+
+      <DealLevering deal={deal} onVernieuw={onVernieuw} />
 
       <details className="rounded-xl border border-gray-100" open={gewijzigd ? true : undefined}>
         <summary className="px-3.5 py-2.5 text-sm font-semibold cursor-pointer select-none">Gegevens</summary>

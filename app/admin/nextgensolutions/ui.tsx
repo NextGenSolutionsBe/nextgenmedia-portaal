@@ -32,8 +32,8 @@ export async function post(body: Record<string, unknown>) {
 }
 
 /** Bovenaan elke pagina: wie we zijn (logo en NextGenSolutions) en de twee tabbladen. */
-export function Kop({ actief, titel, sub, rechts }: { actief: 'pipeline' | 'cijfers'; titel: string; sub?: React.ReactNode; rechts?: React.ReactNode }) {
-  const tab = (k: 'pipeline' | 'cijfers', href: string, label: string) => (
+export function Kop({ actief, titel, sub, rechts }: { actief: 'pipeline' | 'levering' | 'cijfers'; titel: string; sub?: React.ReactNode; rechts?: React.ReactNode }) {
+  const tab = (k: 'pipeline' | 'levering' | 'cijfers', href: string, label: string) => (
     <Link href={href} aria-current={actief === k ? 'page' : undefined}
       className={`px-3.5 py-1.5 rounded-full text-sm transition ${actief === k ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-600 hover:text-gray-900'}`}>{label}</Link>
   )
@@ -47,6 +47,7 @@ export function Kop({ actief, titel, sub, rechts }: { actief: 'pipeline' | 'cijf
         </div>
         <nav className="inline-flex p-1 rounded-full bg-gray-100" aria-label="NextGenSolutions">
           {tab('pipeline', '/admin/nextgensolutions', 'Pipeline')}
+          {tab('levering', '/admin/nextgensolutions/levering', 'Levering')}
           {tab('cijfers', '/admin/nextgensolutions/cijfers', 'Cijfers')}
         </nav>
       </div>

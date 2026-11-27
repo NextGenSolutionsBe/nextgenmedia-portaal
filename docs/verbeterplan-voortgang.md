@@ -211,6 +211,34 @@ Nieuwe tabellen `ag_reeksen`, `ag_beschikbaarheid`, `ag_ical_links` (RLS aan, en
 
 Nieuwe tabellen `rol_sjablonen`, `onboarding_stappen`, `werkinstructies`, `werkinstructie_versies`, `werkinstructie_gelezen` (RLS aan, enkel de service-role) en nieuwe kolommen op `staff_members` (`rol_sjabloon`, `bedrijven`, `start_datum`, `eind_datum`, `offboarding_op`, `offboarding_door`, `offboarding_notitie`) en `personeel` (`functieprofiel`). Geen backfill. `staff_members`: 4 rijen voor en na, checksum 0d21aa114ab97bbaf5593113adddfda4 ongewijzigd. `personeel`: 8 rijen voor en na, checksum fba9c44397fef336df46fb59b7d0a865 ongewijzigd. Terugdraaien: `supabase/terugdraaien/fase4.sql`.
 
+## Fase 5: NextGenSolutions als volwaardige omgeving en levering (27 nov 2026)
+
+### Wat er veranderde
+
+- **D25 deal aan een klant**: optioneel, met de gewone klantkiezer (bestaand of nieuw, VIES). De pipeline-schermen blijven.
+- **D27 Closed Won**: in het dealvenster de volgende stappen op een klik: leveringsproject starten, contract opmaken (facturen volgen zoals bij elk getekend contract), tijdscan inplannen. Er wordt niets vanzelf aangemaakt.
+- **D29 prognose en omzet**: Cijfers toont naast de omzet uit de pipeline ook wat gefactureerd is (facturen met bedrijf NextGenSolutions).
+- **D30 Solutions-blok op de klantfiche**: deals, leveringsprojecten en Care.
+- **D31 vesting**: voorstel voor inbound of outbound uit het bedrijf en de bron; aanduiden en tekenen blijft bij de drie, rekenregels ongewijzigd.
+- **G56 projectfases** Briefing, User stories, Wacht op akkoord, In bouw, Review klant, Klaar, Care, met de regels die de volgorde bewaken.
+- **G57 briefing** als vast formulier, verplicht voor user stories; AI-voorstel uit de tijdscan-notities, een mens bevestigt.
+- **G58 tijdscan**: datum, notitiesjabloon en een knop om ze in te plannen in de Meeting Inplanner; gekoppeld aan de deal via het project. (Geen apart meetingtype in de Meeting Inplanner: dat zou de bestaande meetingflow raken.)
+- **G59/G60 user stories** met acceptatiecriteria, schatting, status, bestede uren en een definitie van klaar per story.
+- **G61 plan met vaste prijs** uit de goedgekeurde stories; melding als er 5 dagen na de tijdscan geen plan is.
+- **G62 wekelijkse review** van 30 minuten als herhalende afspraak in de agenda (enkel op een klik); notities worden actiepunten.
+- **G63 Care-register** per klant.
+- **G64**: acceptatie per user story, schatting tegenover bestede uren, en een link naar Opleveringen voor de demo-video en handleiding (die module deed al alle bestandstypes per klant).
+
+### Niet gebouwd en waarom
+
+- **D26** (de Solutions-pipeline als weergave van Projecten, deals migreren): op 22 nov 2026 werd uitdrukkelijk gekozen voor een eigen omgeving los van Projecten. Migreren zou dat terugdraaien en is niet zonder risico op dubbels; de koppeling loopt nu via de klant.
+- **D28** (dienstkeuze AI-automatisatie, Software op maat, Care): op 22 nov 2026 vervangen door vrije info. Care staat nu als register, niet als dienstkeuze op de deal.
+- **K88** (projectstatus en user stories in de klantapp): de klant keurt stories nu goed via ons (vinkje "klant akkoord"). Een eigen scherm in de klantapp is een nieuwe portaalmodule en volgt als jullie dat willen.
+
+### Databank
+
+Nieuwe kolom `ngs_deals.client_id` (leeg, FK naar klanten met ON DELETE SET NULL) en nieuwe tabellen `ngs_projecten`, `ngs_user_stories`, `ngs_care` (RLS aan, enkel de service-role). Geen backfill. `ngs_deals`: 16 rijen voor en na, checksum 37e438a38f460f7822c2c2a2ea7b314a ongewijzigd. Terugdraaien: `supabase/terugdraaien/fase5.sql`.
+
 ## Waar we stoppen
 
-Op vraag van de zaakvoerders (26 nov 2026) gestopt na fase 2; op 27 nov 2026 hervat. Fasen 3 (teamagenda) en 4 (rollen en plug-and-play) zijn af. Fasen 5 (Solutions-levering), 6 (Media-levering en sales), 7 (financieel en ritme) en 8 (documentatie) volgen.
+Op vraag van de zaakvoerders (26 nov 2026) gestopt na fase 2; op 27 nov 2026 hervat. Fasen 3 (teamagenda), 4 (rollen en plug-and-play) en 5 (Solutions-levering) zijn af. Fasen 6 (Media-levering en sales), 7 (financieel en ritme) en 8 (documentatie) volgen.

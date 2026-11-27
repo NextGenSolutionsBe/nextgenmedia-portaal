@@ -41,7 +41,7 @@ export async function GET() {
       actor.isAdmin ? extra(() => algemeneMeldingVoor(admin, actor.userId)) : [],
     ])
     const KIND_MODULE: Record<string, string> = {
-      invoice: 'invoices', contract: 'contracts', blog: 'blogs', website: 'content', client: 'clients', formulier: 'formulieren', personeel: 'personeel', content: 'content', meeting: 'meetings', aanvraag: 'aanvragen', offerte: 'offertes', oplevering: 'opleveringen', project: 'opdrachten',
+      invoice: 'invoices', contract: 'contracts', blog: 'blogs', website: 'content', client: 'clients', formulier: 'formulieren', personeel: 'personeel', content: 'content', meeting: 'meetings', aanvraag: 'aanvragen', offerte: 'offertes', oplevering: 'opleveringen', project: 'opdrachten', ngs: 'nextgensolutions',
     }
     const gefilterd = all.filter((n) => {
       const mod = KIND_MODULE[n.kind]

@@ -8985,3 +8985,87 @@ INSERT INTO public.rol_sjablonen (key, naam, omschrijving, rol, modules, bedrijv
  ('lead_onderzoeker','Lead-onderzoeker','Bedrijven opzoeken en aanvullen in Account-based marketing.','medewerker','{opdrachten,agenda,info}','{}','["Inloggen en tweestapsverificatie instellen","Mijn account: foto en naam nakijken","Rondleiding in de app (Command Center, Agenda, je modules)","ClickUp koppelen (Agenda → Instellingen → ClickUp)","Beschikbaarheid invullen (Agenda → Instellingen)","Werkinstructies van je rol lezen (Informatief)","Personeelsdossier aanvullen (contract, documenten)","Account-based marketing: importeren en aanvullen"]','/admin/opdrachten',6,true),
  ('stagiair','Stagiair','Leest mee en werkt aan wat in de agenda staat.','medewerker','{agenda,info,uploads}','{}','["Inloggen en tweestapsverificatie instellen","Mijn account: foto en naam nakijken","Rondleiding in de app (Command Center, Agenda, je modules)","ClickUp koppelen (Agenda → Instellingen → ClickUp)","Beschikbaarheid invullen (Agenda → Instellingen)","Werkinstructies van je rol lezen (Informatief)","Personeelsdossier aanvullen (contract, documenten)","Stageovereenkomst in het personeelsdossier","Eerste week: dagelijks Dag afsluiten"]','/admin/agenda',7,true)
 ON CONFLICT (key) DO NOTHING;
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Verbeterplan fase 5: NextGenSolutions als volwaardige omgeving en levering
+-- (27 nov 2026). Enkel toevoegen: een optionele klant op een deal en nieuwe
+-- tabellen voor de levering (RLS aan, enkel de service-role). Geen bestaande
+-- data gewijzigd. Terugdraaien: supabase/terugdraaien/fase5.sql
+-- ════════════════════════════════════════════════════════════════════════════
+
+ALTER TABLE public.ngs_deals ADD COLUMN IF NOT EXISTS client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS ngs_deals_client ON public.ngs_deals (client_id) WHERE client_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS public.ngs_projecten (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id uuid REFERENCES public.ngs_deals(id) ON DELETE SET NULL,
+  client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  titel text NOT NULL,
+  fase text NOT NULL DEFAULT 'briefing',
+  fase_sinds timestamptz NOT NULL DEFAULT now(),
+  verantwoordelijke text,
+  briefing jsonb NOT NULL DEFAULT '{}'::jsonb,
+  briefing_bevestigd_op timestamptz,
+  briefing_bevestigd_door text,
+  tijdscan_op date,
+  tijdscan_notities text,
+  plan_uurtarief numeric,
+  plan_prijs numeric,
+  plan_goedgekeurd_op timestamptz,
+  plan_goedgekeurd_door text,
+  review_dag integer,
+  review_uur text,
+  review_reeks_id uuid,
+  acties jsonb NOT NULL DEFAULT '[]'::jsonb,
+  gearchiveerd_op timestamptz,
+  created_by text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ngs_projecten_deal ON public.ngs_projecten (deal_id) WHERE deal_id IS NOT NULL AND gearchiveerd_op IS NULL;
+CREATE INDEX IF NOT EXISTS ngs_projecten_client ON public.ngs_projecten (client_id);
+ALTER TABLE public.ngs_projecten ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS public.ngs_user_stories (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES public.ngs_projecten(id) ON DELETE CASCADE,
+  nummer integer NOT NULL,
+  titel text NOT NULL,
+  als text NOT NULL DEFAULT '',
+  wil text NOT NULL DEFAULT '',
+  zodat text NOT NULL DEFAULT '',
+  acceptatiecriteria text[] NOT NULL DEFAULT '{}',
+  schatting_uren numeric,
+  bestede_uren numeric NOT NULL DEFAULT 0,
+  status text NOT NULL DEFAULT 'voorstel',
+  dod jsonb NOT NULL DEFAULT '[]'::jsonb,
+  klant_akkoord_op timestamptz,
+  klant_akkoord_door text,
+  volgorde integer NOT NULL DEFAULT 0,
+  verwijderd_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (project_id, nummer)
+);
+ALTER TABLE public.ngs_user_stories ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS public.ngs_care (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL,
+  project_id uuid REFERENCES public.ngs_projecten(id) ON DELETE SET NULL,
+  naam text NOT NULL,
+  omschrijving text,
+  systemen text[] NOT NULL DEFAULT '{}',
+  status text NOT NULL DEFAULT 'actief',
+  care_contract boolean NOT NULL DEFAULT false,
+  maandbedrag numeric,
+  controle_elke_dagen integer,
+  laatste_controle date,
+  notitie text,
+  gearchiveerd_op timestamptz,
+  created_by text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ngs_care_client ON public.ngs_care (client_id);
+ALTER TABLE public.ngs_care ENABLE ROW LEVEL SECURITY;

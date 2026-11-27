@@ -64,9 +64,11 @@ export type Deal = {
   verloren_reden: string | null
   created_at: string
   created_by: string | null
+  /** Fase 5: de klant in de app (optioneel; de pipeline werkt ook zonder). */
+  client_id?: string | null
 }
 
-export type DealInvoer = Omit<Deal, 'id' | 'fase' | 'fase_sinds' | 'gewonnen_op' | 'verloren_op' | 'verloren_reden' | 'created_at' | 'created_by'>
+export type DealInvoer = Omit<Deal, 'id' | 'fase' | 'fase_sinds' | 'gewonnen_op' | 'verloren_op' | 'verloren_reden' | 'created_at' | 'created_by' | 'client_id'>
 
 const DAG = /^\d{4}-\d{2}-\d{2}$/
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/

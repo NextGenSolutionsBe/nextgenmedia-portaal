@@ -313,13 +313,28 @@ export function procentUitleg(c: Pick<ContractWeergave, 'teltVoorAandeel' | 'ruw
  * outbound = afspraak 50% + closing 50%; inbound NextGenSolutions = Marco closet
  * 50%, Bram closet 25%; inbound NextGenMedia = 0%. Leeg = nog niet aangeduid.
  */
-export function LeadKiezer({ waarde, onChange, bezig }: { waarde: Herkomst | null; onChange: (v: Herkomst) => void; bezig?: boolean }) {
+export function LeadKiezer({ waarde, onChange, bezig, contractId }: { waarde: Herkomst | null; onChange: (v: Herkomst) => void; bezig?: boolean; contractId?: string | null }) {
   const [inboundOpen, setInboundOpen] = useState(false)
+  // Fase 5: een voorstel uit het bedrijf van het contract en de bron van de projectkaart (enkel als er nog niets aangeduid is).
+  const [voorstel, setVoorstel] = useState<{ voorstel: Herkomst | null; bron: string | null } | null>(null)
+  useEffect(() => {
+    if (waarde !== null || !contractId) return
+    let levend = true
+    fetch(`/api/admin/vesting/lead-voorstel?contract=${contractId}`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((j) => { if (levend && j?.voorstel) setVoorstel(j) }).catch(() => null)
+    return () => { levend = false }
+  }, [waarde, contractId])
+  const voorstelLabel = (k: Herkomst) => (k === 'outbound' ? 'Outbound' : LEAD_SOORTEN.find((l) => l.key === k)?.label ?? k)
   const inbound = waarde !== null && waarde !== 'outbound'
   const knop = (aan: boolean) => `rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-60 ${aan ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'}`
   const sub = (aan: boolean) => `text-xs mt-0.5 ${aan ? 'text-gray-300' : 'text-gray-500'}`
   return (
     <div className="space-y-2">
+      {waarde === null && voorstel?.voorstel && (
+        <div className="flex items-center gap-2 flex-wrap rounded-lg border border-dashed border-gray-300 px-3 py-2 text-xs text-gray-600">
+          <span className="flex-1 min-w-0">Voorstel uit de projectkaart{voorstel.bron ? ` (bron ${voorstel.bron})` : ''}: <b className="text-gray-900">{voorstelLabel(voorstel.voorstel)}</b>. Kijk het na, het telt pas als je het aanduidt.</span>
+          <button type="button" disabled={bezig} onClick={() => onChange(voorstel.voorstel!)} className="btn-secondary !py-1 !text-xs">Overnemen</button>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Inbound of outbound?">
         <button type="button" role="radio" aria-checked={waarde === 'outbound'} disabled={bezig} onClick={() => { setInboundOpen(false); onChange('outbound') }} className={knop(waarde === 'outbound')}>
           <div className="text-sm font-medium">Outbound</div>
