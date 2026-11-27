@@ -149,6 +149,25 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ ok: true, status: newStatus })
     }
 
+    // Klant of project (fase 7): los van de goedkeuring, geen nieuwe versie. De kost volgt mee.
+    if (action === 'koppel') {
+      const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      const clientId = typeof body.client_id === 'string' && UUID.test(body.client_id) ? body.client_id : null
+      const opdrachtId = clientId && typeof body.opdracht_id === 'string' && UUID.test(body.opdracht_id) ? body.opdracht_id : null
+      if (opdrachtId) {
+        const { data: o } = await admin.from('opdrachten').select('client_id').eq('id', opdrachtId).maybeSingle()
+        if (!o || o.client_id !== clientId) return NextResponse.json({ error: 'Dat project hoort niet bij die klant.' }, { status: 400 })
+      }
+      const { error } = await admin.from('purchases').update({ client_id: clientId, opdracht_id: opdrachtId }).eq('id', purchase_id)
+      if (error) return NextResponse.json({ error: /client_id|opdracht_id/.test(error.message) ? 'De databank kent deze koppeling nog niet (migratie).' : error.message }, { status: 400 })
+      if (p.cost_entry_id) await admin.from('cost_entries').update({ client_id: clientId, opdracht_id: opdrachtId }).eq('id', p.cost_entry_id).then(() => null, () => null)
+      await logAudit({
+        action: 'purchase.koppel', entityType: 'purchase', entityId: purchase_id, summary: `Aankoop "${p.title}" ${clientId ? 'gekoppeld aan een klant' : 'losgekoppeld'}`,
+        actorUserId: actor.id, actorEmail: actor.email ?? null, metadata: { client_id: clientId, opdracht_id: opdrachtId }, ip: meta.ip, userAgent: meta.userAgent,
+      })
+      return NextResponse.json({ ok: true })
+    }
+
     if (action === 'add_cost') {
       if (!['approved', 'approved_under_threshold'].includes(p.status)) return NextResponse.json({ error: 'Alleen goedgekeurde aankopen' }, { status: 400 })
       if (p.cost_entry_id) return NextResponse.json({ error: 'Al toegevoegd als kost' }, { status: 400 })
@@ -156,6 +175,8 @@ export async function PATCH(req: NextRequest) {
         name: p.title, category: p.category || 'Aankoop', type: 'one_time',
         cost_date: p.entry_date, amount_excl: p.amount_excl, vat_pct: p.vat_pct,
         notes: `Aankoop goedgekeurd in app${p.supplier ? ' · ' + p.supplier : ''}`,
+        ...(p.client_id ? { client_id: p.client_id, opdracht_id: p.opdracht_id ?? null } : {}),
+        ...(p.bedrijf ? { bedrijf: p.bedrijf } : {}),
       }).select('id').single()
       if (error) throw new Error(error.message)
       await admin.from('purchases').update({ cost_entry_id: cost.id }).eq('id', purchase_id)

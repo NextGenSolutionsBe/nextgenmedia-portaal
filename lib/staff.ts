@@ -87,6 +87,8 @@ export const STAFF_API_WHITELIST = [
   '/api/admin/account/foto',
   // Mijn onboarding: enkel de eigen checklist afvinken.
   '/api/admin/account/onboarding',
+  // Mijn 1-op-1's: enkel gesprekken over mij of die ik voerde (lezen).
+  '/api/admin/account/een-op-een',
   // Taken aan elkaar toewijzen (Command Center): elk teamlid.
   '/api/admin/taken',
   // Profielfoto's van het team bij het kiezen van een persoon (enkel naam en foto).

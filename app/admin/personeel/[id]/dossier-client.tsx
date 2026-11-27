@@ -12,6 +12,7 @@ import { KOST_SOORTEN, LIJN_SUGGESTIES, type KostLijn, type KostSoort, type Tari
 import { Bevestig, Dialoog } from '@/app/admin/instellingen/ui'
 import { PlanningTab } from '../planning-tab'
 import { FunctieprofielTab, StudentUrenKaart } from './functieprofiel'
+import { EenOpEenTab } from './een-op-een'
 import { EXPERTISES } from '@/lib/aanvragen/model'
 
 type Medewerker = Record<string, unknown> & {
@@ -33,7 +34,7 @@ type Dossier = {
 type Intern = { id: string; email: string | null; name: string | null; rol?: string | null; permissions?: string[]; active?: boolean | null }
 
 // Inklokken, uren en kosten zijn weg: dossier, planning (beschikbaarheid + inboekingen), account en logboek.
-const TABS = [['gegevens', 'Gegevens'], ['functie', 'Functieprofiel'], ['documenten', 'Documenten'], ['planning', 'Planning'], ['tarief', 'Tarief'], ['account', 'Account'], ['logboek', 'Logboek']] as const
+const TABS = [['gegevens', 'Gegevens'], ['functie', 'Functieprofiel'], ['een_op_een', "1-op-1's"], ['documenten', 'Documenten'], ['planning', 'Planning'], ['tarief', 'Tarief'], ['account', 'Account'], ['logboek', 'Logboek']] as const
 type Tab = (typeof TABS)[number][0]
 const DAGEN = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo']
 
@@ -75,6 +76,7 @@ export function DossierClient({ id }: { id: string }) {
       </div>
       {tab === 'gegevens' && <><StudentUrenKaart id={id} /><Gegevens d={d} onKlaar={laad} /></>}
       {tab === 'functie' && <FunctieprofielTab id={id} />}
+      {tab === 'een_op_een' && <EenOpEenTab id={id} />}
       {tab === 'documenten' && <Documenten id={id} d={d} onKlaar={laad} />}
       {tab === 'planning' && <PlanningTab personeelId={id} />}
       {tab === 'tarief' && d.magFinancieel && <TariefTab id={id} tarieven={d.tarieven ?? []} onKlaar={laad} />}

@@ -6,6 +6,13 @@ import { createClient, createAdminSupabaseClient , isActiveStaff } from '@/lib/s
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+/** Klant en project van een kost: enkel geldige id's, anders leeg. Een project zonder klant telt niet. */
+function koppelingVan(b: Record<string, unknown>): { client_id: string | null; opdracht_id: string | null } {
+  const c = typeof b.client_id === 'string' && UUID.test(b.client_id) ? b.client_id : null
+  return { client_id: c, opdracht_id: c && typeof b.opdracht_id === 'string' && UUID.test(b.opdracht_id) ? b.opdracht_id : null }
+}
+
 async function requireAdmin() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -57,6 +64,7 @@ export async function POST(req: NextRequest) {
         vat_pct: vat_pct != null && vat_pct !== '' ? (leesGetal(vat_pct) ?? 21) : 21,
         notes: notes?.trim() || null,
         created_by: actor.id,
+        ...koppelingVan(body),
       })
       .select('*')
       .single()
@@ -116,6 +124,8 @@ export async function PATCH(req: NextRequest) {
     }
     if (heeft('category')) patch.category = String(body.category ?? '').trim() || null
     if (heeft('notes')) patch.notes = String(body.notes ?? '').trim() || null
+    // Klant en project (fase 7): optioneel, voor de marge per klant en project.
+    if (heeft('client_id') || heeft('opdracht_id')) Object.assign(patch, koppelingVan(body))
 
     if (heeft('amount_excl')) {
       const bedrag = (leesGetal(body.amount_excl) ?? NaN)

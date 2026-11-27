@@ -9,6 +9,7 @@ import { KlantKiezer, type KlantOptie } from '@/components/admin/klant-kiezer'
 import { MailDialog } from '@/components/admin/mail-composer'
 import { MERK_STIJL, type MailMerk } from '@/lib/merk-mail'
 import { GELDIG_DAGEN, type Offerte } from '@/lib/offertes'
+import { minimumCheck, controleerReden } from '@/lib/financieel/fase7'
 import {
   ALGEMEEN, DIENST_FICHES, PRIJS, berekenPrijs, controleerOpmaak, euro, ficheVan, leesInhoud, legeInhoud, isGeldigBedrag, isVerantwoordelijke, verantwoordelijkeNaam, VERANTWOORDELIJKEN,
   type DienstFicheKey, type OfferteInhoud, type Veld, type Waarden, type Verantwoordelijke,
@@ -169,10 +170,15 @@ export function OfferteOpmaken({ beginKlant, opdrachtId, offerteId }: { beginKla
   const wisselDienst = (d: DienstFicheKey) => setInhoud((i) => (i.diensten.includes(d) ? { ...i, diensten: i.diensten.filter((x) => x !== d) } : { ...i, diensten: [...i.diensten, d] }))
 
   const prijs = useMemo(() => berekenPrijs(inhoud.prijs, inhoud.extra), [inhoud.prijs, inhoud.extra])
+  // Minimumprijs en minimale marge uit de dienstencatalogus (fase 7): doorgaan kan, met een reden.
+  const [catalogus, setCatalogus] = useState<{ slug: string; naam: string; min_prijs: number | null; min_marge_pct: number | null }[]>([])
+  const [minReden, setMinReden] = useState('')
+  useEffect(() => { fetch('/api/admin/bedrijven').then((r) => (r.ok ? r.json() : null)).then((j) => { if (j?.catalogus?.diensten) setCatalogus(j.catalogus.diensten) }).catch(() => null) }, [])
+  const minimum = useMemo(() => minimumCheck(inhoud.diensten, prijs, inhoud.prijs, catalogus), [inhoud.diensten, prijs, inhoud.prijs, catalogus])
   const fouten = controleerOpmaak(inhoud, { klant: !!klant, verantwoordelijke: wie, vandaag: vandaag() })
   // Een verstuurde offerte verandert niet meer: bewaren maakt dan een kopie met een nieuw nummer.
   const verstuurd = !!offerteId && status !== null && status !== 'concept'
-  const body = () => ({ client_id: klant?.id ?? null, opdracht_id: project, merk, verantwoordelijke: wie, inhoud })
+  const body = () => ({ client_id: klant?.id ?? null, opdracht_id: project, merk, verantwoordelijke: wie, inhoud, ...(minimum.onder ? { minimum_reden: minReden } : {}) })
 
   const voorbeeld = async () => {
     const venster = window.open('', '_blank')
@@ -187,6 +193,7 @@ export function OfferteOpmaken({ beginKlant, opdrachtId, offerteId }: { beginKla
 
   const bewaar = async (versturen: boolean) => {
     if (fouten.length) { setToonFouten(true); toast.error(fouten[0].fout); return }
+    if (minimum.onder && !controleerReden(minReden)) { toast.error('Onder het minimum: geef eerst een reden om toch door te gaan.'); document.getElementById('minimum-reden')?.focus(); return }
     setBezig(versturen ? 'verstuur' : 'bewaar')
     try {
       const { offerte } = offerteId && !verstuurd
@@ -318,6 +325,13 @@ export function OfferteOpmaken({ beginKlant, opdrachtId, offerteId }: { beginKla
               {prijs.lijnen.map((l, i) => <li key={i} className="flex justify-between gap-2"><span className="truncate">{l.omschrijving}{l.detail ? <span className="text-gray-400"> · {l.detail}</span> : null}</span><span className="tabular-nums shrink-0">{euro(l.bedrag)}</span></li>)}
               {prijs.budgetApart > 0 && <li className="flex justify-between gap-2 text-gray-400"><span>Advertentiebudget (apart)</span><span className="tabular-nums">{euro(prijs.budgetApart)}</span></li>}
             </ul>
+          )}
+          {minimum.onder && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-2.5 space-y-1.5">
+              {minimum.redenen.map((r, i) => <p key={i} className="text-[11px] text-amber-900">{r}</p>)}
+              <label htmlFor="minimum-reden" className="block text-[11px] font-semibold text-amber-900">Waarom toch? (komt in de tijdlijn van de offerte)</label>
+              <textarea id="minimum-reden" rows={2} className={`${INP} text-xs`} value={minReden} onChange={(e) => setMinReden(e.target.value)} placeholder="Bv. instapprijs voor een vaste klant, rest volgt in een tweede fase" maxLength={500} />
+            </div>
           )}
           {toonFouten && fouten.length > 0 && (
             <ul className="rounded-lg bg-red-50 border border-red-200 p-2 text-[11px] text-red-800 space-y-0.5">{fouten.map((f, i) => <li key={i}>{f.fout}</li>)}</ul>

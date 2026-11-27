@@ -2,6 +2,7 @@
 
 import { leesGetal } from '@/lib/getal'
 import { useState } from 'react'
+import { KlantProjectKiezer } from '@/components/admin/klant-project-kiezer'
 import { useRouter } from 'next/navigation'
 import { Plus, X, Loader2, Repeat2, ArrowDownRight, Clapperboard } from 'lucide-react'
 import type { Cost } from './cost-table'
@@ -51,6 +52,8 @@ export function CostDialog({ cost, onClose }: { cost?: Cost | null; onClose: () 
     billing_frequency: (cost?.billing_frequency as Freq) || 'monthly',
     notes: cost?.notes ?? '',
   })
+  // Klant en project (fase 7): optioneel, zodat de kost meetelt in de marge.
+  const [koppeling, setKoppeling] = useState<{ client_id: string | null; opdracht_id: string | null }>({ client_id: (cost as { client_id?: string | null } | null | undefined)?.client_id ?? null, opdracht_id: (cost as { opdracht_id?: string | null } | null | undefined)?.opdracht_id ?? null })
 
   const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900/15 focus:border-gray-900'
   const lbl = 'block text-xs font-medium text-gray-600 mb-1'
@@ -78,6 +81,7 @@ export function CostDialog({ cost, onClose }: { cost?: Cost | null; onClose: () 
           end_date: type === 'recurring' ? (form.end_date || null) : undefined,
           billing_frequency: type === 'recurring' ? form.billing_frequency : undefined,
           notes: form.notes,
+          client_id: koppeling.client_id, opdracht_id: koppeling.opdracht_id,
         }),
       })
       const json = await res.json()
@@ -187,6 +191,8 @@ export function CostDialog({ cost, onClose }: { cost?: Cost | null; onClose: () 
             <label className={lbl}>Notitie</label>
             <input className={inp} value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} placeholder="Optioneel" />
           </div>
+
+          <KlantProjectKiezer clientId={koppeling.client_id} opdrachtId={koppeling.opdracht_id} onChange={setKoppeling} id="kost-klant" />
 
           {error && <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</div>}
 

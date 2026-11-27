@@ -1,6 +1,9 @@
 export const dynamic = 'force-dynamic'
 
 import { Suspense } from 'react'
+import Link from 'next/link'
+import { RitmeClient } from './ritme/ritme-client'
+import { WerkvoorraadBlok } from './ritme/werkvoorraad'
 import { getActor, actorCanSee } from '@/lib/actor-modules'
 import { TodayPanel } from './today-panel'
 import { RecentActivity } from './recent-activity'
@@ -42,11 +45,12 @@ async function AgendaDeadlines({ userId }: { userId: string }) {
 // (iedereen mag /admin), dus filteren we hier zelf. Een appointment setter met
 // enkel de Verkoop-module hoort hier geen klanten, contracten of facturen te
 // zien — die ziet enkel zijn eigen pipeline.
-export default async function CommandCenter() {
+export default async function CommandCenter({ searchParams }: { searchParams?: { tab?: string } }) {
   const today = new Date()
   const actor = await getActor()
   const can = (key: string) => !!actor && actorCanSee(actor, key)
   const isAdmin = !!actor?.isAdmin
+  const ritme = isAdmin && searchParams?.tab === 'ritme'
   const [agendaToevoegen, meetingsPlannen] = await Promise.all([
     can('agenda') ? magIk('agenda', 'toevoegen') : null,
     can('meetings') ? magIk('meetings', 'toevoegen') : null,
@@ -64,6 +68,16 @@ export default async function CommandCenter() {
         {/* Snel: een taak inspreken (komt in de agenda) of een meeting inplannen. */}
         <SnelleAgendaKnoppen magToevoegen={!!agendaToevoegen} magMeetings={!!meetingsPlannen} />
       </div>
+
+      {/* Ritme (fase 7): scorecard, weekoverleg, doelen, beslissingen en beloftes als tabblad, enkel voor de zaakvoerders. */}
+      {isAdmin && (
+        <div className="flex gap-1">
+          {([['', 'Vandaag'], ['ritme', 'Ritme']] as const).map(([k, l]) => (
+            <Link key={k} href={k ? `/admin?tab=${k}` : '/admin'} prefetch={false} className={`rounded-lg px-3 py-1.5 text-sm font-medium ${ritme === !!k ? 'bg-black text-white' : 'bg-white border border-gray-200 text-gray-700'}`}>{l}</Link>
+          ))}
+        </div>
+      )}
+      {ritme ? <RitmeClient /> : <>
 
       {/* Jouw deadlines van vandaag, het uur groot vooraan. */}
       {actor && can('agenda') && (
@@ -95,6 +109,9 @@ export default async function CommandCenter() {
         <TodayPanel modules={actor?.modules ?? null} />
       </Suspense>
 
+      {/* Werkvoorraad per bedrijf (fase 7): weken getekend werk. */}
+      {isAdmin && <WerkvoorraadBlok />}
+
       {/* Recente activiteit — ingeklapt onderaan: nuttig om iets terug te vinden, geen dagelijkse actie. Admin-only (audit-log). */}
       {isAdmin && (
         <details className="card-base group">
@@ -108,6 +125,7 @@ export default async function CommandCenter() {
           </div>
         </details>
       )}
+      </>}
     </div>
   )
 }

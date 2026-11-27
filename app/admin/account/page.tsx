@@ -2,6 +2,7 @@ import { UserCircle } from 'lucide-react'
 import { BeveiligingClient } from './beveiliging-client'
 import { ProfielClient } from './profiel-client'
 import { OnboardingClient } from './onboarding-client'
+import { MijnEenOpEen } from './een-op-een-client'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,6 +21,7 @@ export default function AccountPage({ searchParams }: { searchParams?: { instell
         <p className="text-sm text-gray-500 mt-0.5">Je foto, naam, login en beveiliging.</p>
       </div>
       <OnboardingClient />
+      <MijnEenOpEen />
       <ProfielClient />
       <BeveiligingClient verplichtMelding={searchParams?.instellen === '1'} />
     </div>

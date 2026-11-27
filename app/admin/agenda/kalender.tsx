@@ -1,5 +1,6 @@
 'use client'
 
+import { isTik, isZijwaarts, VEEG_RUST_MS } from '@/lib/agenda/veeg'
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { Check, Flag, Video, MapPin, Plus, Lock, RotateCcw, Clock, Folder, Aperture } from 'lucide-react'
 import {
@@ -11,7 +12,7 @@ import { Avatars, focusRing, donkerder } from './gedeeld'
 const PX_MIN = 1 // 60 px per uur (computer)
 const PX_MIN_GSM = 0.6 // 36 px per uur op de gsm, zoals ClickUp: meer van de dag in beeld
 /** Met de vinger een blok aan het verplaatsen (of net gedaan): dan telt een veegbeweging niet als naar de volgende week. */
-export const agendaSleep = { bezig: false, tot: 0 }
+export const agendaSleep = { bezig: false, tot: 0, veegOp: 0 }
 /** Enkel taken uit de agenda zelf (geen meetings of shoots) worden voorgeladen bij hoveren (item-venster.tsx). */
 const voorladenId = (i: Item) => (i.bron === 'ag' ? i.id : undefined)
 const stopSleep = () => { if (agendaSleep.bezig) { agendaSleep.bezig = false; agendaSleep.tot = Date.now() } }
@@ -299,12 +300,16 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
     return { dagIndex, min: (y - r.top) / pxMin }
   }
 
+  // Vinger of pen op een leeg moment: pas bij loslaten, en enkel als het een korte tik was (geen veeg of scroll).
+  const tik = useRef<{ x: number; y: number; t: number; dag: string; van: number } | null>(null)
+  const netGeveegd = () => Date.now() - agendaSleep.veegOp < VEEG_RUST_MS
   const startNieuw = (e: RPointerEvent, d: string) => {
     if (!magToevoegen || e.button !== 0) return
     if ((e.target as HTMLElement).closest('[data-blok]')) return
     const pos = positie(e.clientX, e.clientY)
     if (!pos) return
     const van = Math.min(1440 - SNAP, Math.floor(pos.min / SNAP) * SNAP)
+    if (e.pointerType !== 'mouse') { tik.current = { x: e.clientX, y: e.clientY, t: performance.now(), dag: d, van }; return }
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     setSleep({ soort: 'nieuw', dag: d, van, tot: van + SNAP, x: e.clientX, y: e.clientY })
   }
@@ -339,6 +344,8 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
     naInhouden(e, item, (opgetild) => setSleep({ soort: 'rek', item, dag: d, van, tot, y, bewogen: false, opgetild }))
   }
   const beweeg = (e: RPointerEvent) => {
+    // Een tik die beweegt is vegen of scrollen: dan plant hij niets.
+    if (tik.current && !isTik(e.clientX - tik.current.x, e.clientY - tik.current.y, 0)) tik.current = null
     // Nog niet ingehouden en de vinger beweegt: dat is scrollen, geen verplaatsen.
     if (houd.current) {
       if (Math.abs(e.clientX - houd.current.x) + Math.abs(e.clientY - houd.current.y) > HOUD_SPELING) stopHouden()
@@ -347,7 +354,11 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
     if (!sleep) return
     const pos = positie(e.clientX, e.clientY)
     if (!pos) return
-    if (sleep.soort === 'nieuw') setSleep({ ...sleep, tot: Math.max(sleep.van + SNAP, Math.min(1440, Math.ceil(pos.min / SNAP) * SNAP)) })
+    if (sleep.soort === 'nieuw') {
+      // Vooral opzij (of net geveegd met de touchpad): geen nieuwe afspraak.
+      if (isZijwaarts(e.clientX - sleep.x, e.clientY - sleep.y) || netGeveegd()) { try { (e.target as HTMLElement).releasePointerCapture?.(e.pointerId) } catch { /* al los */ } setSleep(null); return }
+      setSleep({ ...sleep, tot: Math.max(sleep.van + SNAP, Math.min(1440, Math.ceil(pos.min / SNAP) * SNAP)) })
+    }
     if (sleep.soort === 'verplaats') {
       const ver = Math.abs(e.clientX - sleep.x) + Math.abs(e.clientY - sleep.y) > 4
       if (!ver && !sleep.bewogen) return
@@ -359,15 +370,23 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
       setSleep({ ...sleep, tot: Math.max(sleep.van + SNAP, Math.min(1440, snap(pos.min))), bewogen: true })
     }
   }
-  const los = () => {
+  const los = (e?: RPointerEvent) => {
     aanSlepen.current = false
     stopSleep()
+    // Kort getikt op een leeg moment (vinger of pen): daar iets plannen. Na een veeg nooit.
+    const t = tik.current
+    tik.current = null
+    if (t) {
+      if (e && isTik(e.clientX - t.x, e.clientY - t.y, performance.now() - t.t) && !netGeveegd()) onNieuw({ dag: t.dag, vanMin: t.van, totMin: Math.min(1440, t.van + 60), heelDag: false })
+      return
+    }
     // Kort getikt op een blok (niet ingehouden): openen.
     if (houd.current) { const it = houd.current.item; stopHouden(); onOpen(it); return }
     const s = sleep
     setSleep(null)
     if (!s) return
     if (s.soort === 'nieuw') {
+      if (netGeveegd()) return
       const klik = s.tot - s.van <= SNAP
       onNieuw({ dag: s.dag, vanMin: s.van, totMin: klik ? Math.min(1440, s.van + 60) : s.tot, heelDag: false })
     }
@@ -487,7 +506,7 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
             {Array.from({ length: 24 }, (_, h) => h > 0 && <div key={h} className={`absolute -translate-y-1/2 tabular-nums text-gray-500 ${smal ? 'right-1 text-[10px]' : 'right-2 text-[12px]'}`} style={{ top: h * 60 * pxMin }}>{String(h).padStart(2, '0')}:00</div>)}
           </div>
           <div ref={kolommenRef} className="relative grid" style={{ gridColumn: `2 / span ${dagen.length}`, gridTemplateColumns: kolTpl }}
-            onPointerMove={beweeg} onPointerUp={los} onPointerCancel={() => { stopHouden(); aanSlepen.current = false; stopSleep(); setSleep(null) }}>
+            onPointerMove={beweeg} onPointerUp={los} onPointerCancel={() => { tik.current = null; stopHouden(); aanSlepen.current = false; stopSleep(); setSleep(null) }}>
             {/* lijnen */}
             <div className="absolute inset-0 pointer-events-none">
               {Array.from({ length: 24 }, (_, h) => <div key={h} className="absolute left-0 right-0 border-t border-gray-100" style={{ top: h * 60 * pxMin }} />)}

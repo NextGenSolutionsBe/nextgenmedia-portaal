@@ -16,6 +16,7 @@ import { moetOpvolgen as mailMoetOpvolgen, DREMPELS as MAIL_DREMPELS } from '@/l
 import { teDoen, gewenst, beschikbaar, meeting as meetingLabel, looptAf, info as infoLabel, taakLabel, vergelijkLabels, brusselDag, plusDagen, plusWerkdagen, type OpvolgLabel, type OpvolgTaak, type TaakVoorstel } from '@/lib/opvolging-label'
 import { taakIsAf } from '@/lib/sales/lead-taken'
 import { tegentekenSleutel } from '@/lib/contracten/tegenhandtekening-server'
+import { verlengingNodig, verlengingDeadline } from '@/lib/financieel/fase7'
 
 // Eén bron voor meldingen + "Vandaag": alles live afgeleid uit bestaande data
 // (geen nieuwe tabel). Gelezen/niet-gelezen wordt client-side in localStorage
@@ -406,7 +407,7 @@ export type OpvolgItem = {
   /** Om een taak bij deze regel te maken. */
   nieuweTaak?: TaakVoorstel | null
 }
-export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'tegentekenen' | 'facturen' | 'mails' | 'meetings' | 'projecten' | 'content' | 'onderhoud' | 'opleveringen' | 'offertes'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
+export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'tegentekenen' | 'facturen' | 'mails' | 'meetings' | 'projecten' | 'content' | 'onderhoud' | 'opleveringen' | 'offertes' | 'verlengen'; titel: string; totaal: number; items: OpvolgItem[]; alles: string; leeg: string }
 
 const OPVOLG_MAX = 5
 const dagKort = (d: string) => new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' })
@@ -434,6 +435,7 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
     mag('contracts') ? opvolgContracten() : null,
     mag('contracts') ? opvolgTegentekenen() : null,
     mag('contracts') ? opvolgFacturenPlannen() : null,
+    mag('contracts') ? opvolgVerlengen() : null,
     mag('opdrachten') ? opvolgMails() : null,
     mag('meetings') ? opvolgMeetings() : null,
     mag('opdrachten') ? opvolgProjecten() : null,
@@ -676,6 +678,36 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
             href: `/admin/opdrachten?opdracht=${r.id}`, dringend: dagen >= 14,
             label: teDoen(plusDagen(brusselDag(r.status_gewijzigd_op ?? r.created_at), 7), vandaag),
             nieuweTaak: projectTaak(r.id, ['Opvolgen', 'Bellen', 'Mail sturen'], (r.client_id ? namen.get(r.client_id) : r.klant_vrij) || null),
+          }
+        }),
+      }
+    } catch { return null }
+  }
+
+  /**
+   * Contracten die binnen 60 dagen aflopen (verbeterplan fase 7, punt 83): een
+   * verlengingsgesprek, uiterlijk 45 dagen voor het einde. Enkel een regel met
+   * een voorstel voor de taak; er wordt niets vanzelf ingepland.
+   */
+  async function opvolgVerlengen(): Promise<OpvolgGroep | null> {
+    try {
+      const tot = plusDagen(vandaag, 60)
+      const { data } = await admin.from('contracts').select('id, title, client_id, status, end_date, looptijd_status, stop_datum')
+        .eq('status', 'signed').gte('end_date', vandaag).lte('end_date', tot).order('end_date').limit(200)
+      const rijen = ((data ?? []) as { id: string; title: string | null; client_id: string | null; status: string; end_date: string; looptijd_status: string | null; stop_datum: string | null }[])
+        .filter((c) => verlengingNodig(c, vandaag) !== null)
+      if (!rijen.length) return null
+      const namen = await klantNamen(rijen.map((r) => r.client_id ?? ''))
+      return {
+        key: 'verlengen', titel: 'Verlengingsgesprek', totaal: rijen.length, alles: '/admin/contracts', leeg: 'Geen contracten die binnenkort aflopen.',
+        items: rijen.slice(0, OPVOLG_MAX).map((c) => {
+          const klant = c.client_id ? namen.get(c.client_id) ?? null : null
+          const over = verlengingNodig(c, vandaag) ?? 0
+          return {
+            id: c.id, titel: klant ?? c.title ?? 'Contract', sub: `${c.title ?? 'Contract'} · loopt af op ${dagKort(c.end_date)} (nog ${over} ${over === 1 ? 'dag' : 'dagen'})`.slice(0, 80),
+            href: `/admin/contracts/${c.id}`, dringend: over <= 30,
+            label: teDoen(verlengingDeadline(c.end_date, vandaag), vandaag),
+            nieuweTaak: teamTaak('verlengen', c.id, ['Verlengingsgesprek', 'Verlenging voorstellen', 'Klant bellen over de verlenging'], klant, c.client_id),
           }
         }),
       }

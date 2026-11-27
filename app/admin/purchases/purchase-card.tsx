@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 import { formatEuro, formatDate } from '@/lib/utils'
 import { FOUNDER_EMAILS, founderName } from '@/lib/founders'
 import { PurchaseForm } from './purchase-form'
+import { KoppelKlant } from './koppel-klant'
 
 export type Approval = { id: string; approver_email: string; decision: string; comment: string | null; decided_at: string }
 export type Purchase = {
@@ -20,6 +21,8 @@ export type Purchase = {
   confirmed_at?: string | null; confirmed_by_email?: string | null
   /** Optioneel: waar je het bestelt. */
   bestel_link?: string | null
+  /** Optioneel (fase 7): voor welke klant of welk project. */
+  client_id?: string | null; opdracht_id?: string | null; klant_naam?: string | null
 }
 export type Certificaat = { version: number; certificate_no: string; file_name: string; status: 'actueel' | 'vervangen'; generated_at: string }
 export type Wijziging = { id: number; version: number | null; actie: string; actor_email: string | null; oud: Record<string, unknown> | null; nieuw: Record<string, unknown> | null; opmerking: string | null; created_at: string }
@@ -121,6 +124,7 @@ export function PurchaseCard({ purchase: p, approvals, currentEmail, attachmentU
           <a href={p.bestel_link} target="_blank" rel="noopener noreferrer nofollow" className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline" title={p.bestel_link}><ExternalLink className="h-3 w-3" />Bestelpagina · {linkDomein(p.bestel_link)}</a>
         )}
         {attachmentUrl && <a href={attachmentUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"><Paperclip className="h-3 w-3" />Bijlage</a>}
+        {!archief && <KoppelKlant purchaseId={p.id} clientId={p.client_id ?? null} opdrachtId={p.opdracht_id ?? null} klantNaam={p.klant_naam ?? null} />}
         {/* Bewijsdocument: één per bevestigde versie; downloaden geeft altijd hetzelfde bestand. */}
         {bevestigd && r.bewijs && (
           <a href={`/api/admin/purchases/${p.id}/bewijs`} className="inline-flex items-center gap-1 text-xs text-blue-700 hover:underline" title={actueel ? `${actueel.certificate_no} · ${actueel.file_name}` : 'Bewijsdocument (wordt bij de eerste download aangemaakt)'}>

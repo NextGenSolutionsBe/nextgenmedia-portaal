@@ -28,6 +28,7 @@ import { ClientFormulieren } from './client-formulieren'
 import { OffertesBij } from '@/components/admin/offertes-bij'
 import { SolutionsBlok } from '@/components/admin/solutions-blok'
 import { DoorgevenKnop } from '@/components/admin/doorgeven-knop'
+import { KlantWaarde } from '@/components/admin/klant-waarde'
 
 async function getClient(id: string) {
   const admin = createAdminSupabaseClient()
@@ -214,6 +215,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
           {/* NextGenSolutions: deals, levering en Care (enkel als er iets is) */}
           <SolutionsBlok clientId={id} />
+          <KlantWaarde clientId={id} />
 
           {/* Klanttaken */}
           <div id="taken" className="scroll-mt-20">

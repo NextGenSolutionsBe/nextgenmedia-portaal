@@ -79,6 +79,7 @@ export function useVeeg(el: HTMLElement | null, opts: { actief: boolean; stap: (
       const r = wiel(wielStand, dx, dy, performance.now(), breedte())
       wielStand = r.s
       if (!r.vang) return
+      agendaSleep.veegOp = Date.now() // loslaten na een veeg plant geen afspraak
       e.preventDefault() // geen "vorige pagina" van de browser en niet de pagina opzij
       if (r.stap) { verder(r.stap); return }
       if (!wielStand?.vast) zet(r.mee)
@@ -104,6 +105,7 @@ export function useVeeg(el: HTMLElement | null, opts: { actief: boolean; stap: (
         if (vinger.richting === 'opzij' && scrolltZelf(e.target, el, -dx)) vinger.richting = 'scroll'
       }
       if (vinger.richting !== 'opzij') return
+      agendaSleep.veegOp = Date.now() // loslaten na een veeg plant geen afspraak
       if (e.cancelable) e.preventDefault() // niet tegelijk op en neer scrollen
       vinger.dx = dx
       zet(vingerMee(dx, breedte()))
@@ -112,6 +114,7 @@ export function useVeeg(el: HTMLElement | null, opts: { actief: boolean; stap: (
       const v = vinger
       vinger = null
       if (!v || v.richting !== 'opzij') return
+      agendaSleep.veegOp = Date.now()
       const n = vingerStap(v.dx, performance.now() - v.t, breedte())
       if (n) verder(n); else zet(0, true)
     }

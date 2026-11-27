@@ -22,6 +22,13 @@ export default async function PurchasesPage() {
     laadAankoopActor(),
   ])
   const alle = (pRows ?? []) as Purchase[]
+  // Klantnaam bij aankopen die aan een klant hangen (fase 7).
+  const klantIds = [...new Set(alle.map((p) => p.client_id).filter((x): x is string => !!x))]
+  if (klantIds.length) {
+    const { data: kl } = await admin.from('clients').select('id, company_name').in('id', klantIds)
+    const naam = new Map(((kl ?? []) as { id: string; company_name: string }[]).map((k) => [k.id, k.company_name]))
+    for (const p of alle) if (p.client_id) p.klant_naam = naam.get(p.client_id) ?? null
+  }
   // Verwijderde aanvragen horen niet in het actieve overzicht en tellen nergens mee.
   const purchases = alle.filter((p) => !p.deleted_at)
   const verwijderd = alle.filter((p) => !!p.deleted_at)

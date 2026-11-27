@@ -263,6 +263,35 @@ Nieuwe kolom `ngs_deals.client_id` (leeg, FK naar klanten met ON DELETE SET NULL
 
 `shoot_briefings`: nieuwe kolommen `tijd_rijden_min`, `tijd_shoot_min`, `tijd_nabewerking_min`, `afspraak_soort` (leeg). `diensten_catalogus.deliverables` (jsonb, standaard leeg). `opdrachten_bron_check` verruimd met de nieuwe bronnen (de oude blijven toegelaten). Geen backfill. Checksums voor en na gelijk: `shoot_briefings` 4 rijen 41f91ee70b2fa5a3918a60cfd5bf4caf, `diensten_catalogus` 13 rijen f22935d1d3afa7ff09b955bac0f0d958, `opdrachten` 140 rijen (id + bron) fdd4671c3188a40dcea08af1d0260838. Terugdraaien: `supabase/terugdraaien/fase6.sql`.
 
+## Fase 7: financieel, scorecard en ritme (27 nov 2026)
+
+### Wat er veranderde
+
+- **J78 omzet per bedrijf**: de Omzetrapportage (Financiën) heeft een filter Bedrijf, een blok Omzet per bedrijf (terugkerend en eenmalig) en een blad Bedrijven in de Excel. Per dienst en per maand bestond al.
+- **J79 maanddoel per bedrijf**: in de facturenplanner onder de omzetmeter per bedrijf gefactureerd en gepland tegenover een eigen doel, en hoe ver we staan tegenover de ambitie van € 100.000 per maand. Het bestaande doel (€ 30.000) blijft het doel van nu tot de zaakvoerders het aanpassen (knop Doelen).
+- **J80 aankopen en kosten aan een klant of project**: bij een kost (Financiën → Kosten) en op elke aankoop ("Klant of project") optioneel een klant en een project. Een aankoop koppelen maakt geen nieuwe versie en raakt de goedkeuring niet; wordt ze een kost, dan gaat de koppeling mee.
+- **J81 en J84 klantwaarde en marge**: op de klantfiche een uitklapblok met wat de klant over de hele relatie opbracht, per bedrijf, wat nog te factureren is, de kosten, de marge en de marge per project. Met een intern uurtarief (zaakvoerders, standaard leeg) tellen de uren van shoots en Solutions-stories mee.
+- **J82 minimumprijs en minimale marge**: in de offerte-editor een waarschuwing als het honorarium onder de minimumprijs van de gekozen diensten zit (of de marge onder het minimum). Doorgaan kan enkel met een reden; die komt in de tijdlijn van de offerte (`offerte_events`, soort `onder_minimum`). Zonder minimum in de catalogus verandert er niets.
+- **J83 verlengingsgesprek**: getekende, lopende contracten die binnen 60 dagen aflopen staan in Op te volgen (blok Verlengingsgesprek, uiterlijk 45 dagen voor het einde) met een taak-voorstel. Er wordt niets vanzelf ingepland.
+- **J85 export**: knop Export boekhouding bij Facturen: een CSV met één regel per factuurregel, met handelsnaam, bedrijf en dienst.
+- **L90 scorecard**: tien wekelijkse cijfers, vanzelf uit de app, 13 weken, met eigenaar en doel (groen of rood). Tab Ritme op het Command Center (zaakvoerders).
+- **L91 weekoverleg** met vaste agenda (goed nieuws, scorecard, kwartaaldoelen, klanten en team, beloftes van vorige week, problemen, afspraken). Notities per punt; elk actiepunt (wie, wat, aan wie, tegen wanneer) kan een taak worden via Taken toewijzen.
+- **L92 kwartaaldoelen** per bedrijf en per persoon, met status.
+- **L93 beslissingenlog** met stemming: aangenomen bij twee keer voor, verworpen bij twee keer tegen.
+- **L94 taak als belofte**: bij Taak toewijzen optioneel "Beloofd aan"; tab Beloftes per persoon (ook de actiepunten van het weekoverleg), wat te laat is eerst.
+- **L95 1-op-1's**: tab in het personeelsdossier (datum, notities, afspraken), en de medewerker ziet ze bij Mijn account.
+- **L96 gedragsafspraken en rolverdeling**: een werkinstructie kan een vaste pagina zijn; ze staat bovenaan Informatief, met versies, en iedereen bevestigt ("Ik bevestig deze afspraken").
+- **L97 werkvoorraad per bedrijf** op het Command Center (zaakvoerders): getekend en nog te factureren, in weken aan het tempo van de laatste 13 weken (onder 2, 2 tot 4, boven 4 weken).
+
+### Niet gebouwd en waarom
+
+- **De inhoud** van de gedragsafspraken, de doelen per cijfer en de kwartaaldoelen: dat is aan de zaakvoerders. De app biedt de plek.
+- **Het weekoverleg of de 1-op-1's inplannen**: harde regel 9 (nooit iets in iemands agenda zetten). Een vaste reeks maken kan al via de teamagenda.
+
+### Databank
+
+Nieuwe kolommen (leeg): `purchases.client_id`, `purchases.opdracht_id`, `cost_entries.opdracht_id`, `team_taken.beloofd_aan`, `werkinstructies.soort` (standaard `instructie`). Nieuwe tabellen met RLS aan (enkel service-role): `ritme_weekoverleg`, `ritme_kwartaaldoelen`, `ritme_beslissingen`, `ritme_stemmen`, `een_op_een`. Instellingen in `app_settings`: `maanddoelen`, `intern_uurtarief`, `scorecard`. Geen backfill. Checksums voor en na gelijk: `purchases` 2 rijen befd59039b73bf9eaf2e3d527cbfd433, `cost_entries` 4 rijen 7b739133a0827326ed614e1e524411e0, `team_taken` 6 rijen 242cc99a8f0917ecb1f16d297d6bd367, `werkinstructies` 0 rijen. Terugdraaien: `supabase/terugdraaien/fase7.sql`.
+
 ## Waar we stoppen
 
-Op vraag van de zaakvoerders (26 nov 2026) gestopt na fase 2; op 27 nov 2026 hervat. Fasen 3 (teamagenda), 4 (rollen en plug-and-play), 5 (Solutions-levering) en 6 (Media-levering en sales) zijn af. Fasen 7 (financieel en ritme) en 8 (documentatie) volgen.
+Op vraag van de zaakvoerders (26 nov 2026) gestopt na fase 2; op 27 nov 2026 hervat. Fasen 3 (teamagenda), 4 (rollen en plug-and-play), 5 (Solutions-levering), 6 (Media-levering en sales) en 7 (financieel en ritme) zijn af. Fase 8 (documentatie) volgt.
