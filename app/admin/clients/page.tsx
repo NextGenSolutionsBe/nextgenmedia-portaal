@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic'
 
+import { WachtOpKlant } from '@/components/admin/wacht-op-klant'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { SERVICE_LABELS } from '@/lib/utils'
 import Link from 'next/link'
@@ -96,6 +97,9 @@ export default async function ClientsPage({
           Klant toevoegen
         </Link>
       </div>
+
+      {/* Wat zit vast bij klanten (fase 6): pas geladen bij het openklappen. */}
+      <WachtOpKlant />
 
       {/* Search */}
       <ClientsSearch defaultValue={q} />

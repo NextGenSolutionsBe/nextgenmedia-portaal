@@ -7,6 +7,7 @@
 // worden uit het plan afgeleid, zodat klantfiche, klantapp en het bestaande
 // shootdocument blijven kloppen.
 
+import type { ShootTijd } from './tijd'
 import type { Ontvanger } from '@/lib/opleveringen-ontvangers'
 
 export const SHOOT_STATUSSEN = ['concept', 'gepland', 'afgerond', 'geannuleerd'] as const
@@ -49,11 +50,13 @@ export type Shoot = ShootPlan & {
   briefing_type: string | null
   laatst_verstuurd_op: string | null
   updated_at: string | null
+  /** Fase 6: tijd per onderdeel en soort afspraak (los van het plan). */
+  tijd?: ShootTijd
   bijgewerkt_door: string | null
 }
 
 /** Een shoot in de kalender of de lijst met komende shoots. */
-export type ShootKort = Pick<Shoot, 'id' | 'client_id' | 'klant' | 'titel' | 'datum' | 'status' | 'start' | 'einde'> & { locaties: string[]; punten: number; mensen: number; verstuurd: string | null }
+export type ShootKort = Pick<Shoot, 'id' | 'client_id' | 'klant' | 'titel' | 'datum' | 'status' | 'start' | 'einde'> & { locaties: string[]; punten: number; mensen: number; verstuurd: string | null; tijd?: ShootTijd }
 
 export const LEEG_PLAN: ShootPlan = {
   titel: '', datum: '', status: 'gepland', doel: '', locaties: [], programma: [], betrokkenen: [], paklijst: [], shotlist: [], praktisch: '', briefing: '',

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Loader2, MapPin, Plus, Send, Users } from 'lucide-react'
 import { vandaagBrussel } from '@/lib/content/deadline-model'
 import { datumKort, maandNaam, maandRaster, plusDagen, shootNaam, STATUS_INFO, tijdBereik, volgendeMaand, type ShootKort } from '@/lib/shoots/model'
+import { shootRapport, urenTekst, afspraakLabel, LEGE_TIJD } from '@/lib/shoots/tijd'
 
 const DAGEN = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo']
 
@@ -38,6 +39,8 @@ export function ShootPlanner({ magToevoegen }: { magToevoegen: boolean }) {
     return m
   }, [shoots])
 
+  // Rapport van de maand (fase 6): per klant de shoots, de tijd en de soort afspraak.
+  const rapport = useMemo(() => shootRapport((shoots ?? []).filter((s) => s.datum.slice(0, 7) === maand).map((s) => ({ ...(s.tijd ?? LEGE_TIJD), client_id: s.client_id, klant: s.klant, datum: s.datum, status: s.status }))), [shoots, maand])
   const nieuw = (datum?: string) => router.push(`/admin/shoots/nieuw${datum ? `?datum=${datum}` : ''}`)
 
   return (
@@ -85,6 +88,26 @@ export function ShootPlanner({ magToevoegen }: { magToevoegen: boolean }) {
         </div>
         <p className="sm:hidden px-4 py-3 text-xs text-gray-500">Op de gsm zie je hieronder de komende shoots.</p>
       </div>
+
+      {rapport.length > 0 && (
+        <details className="card-base">
+          <summary className="cursor-pointer select-none font-semibold text-sm">Rapport <span className="capitalize">{maandNaam(maand)}</span> <span className="text-gray-500 font-normal">· {rapport.reduce((t, r) => t + r.shoots, 0)} shoots · {urenTekst(rapport.reduce((t, r) => t + r.totaal, 0))}</span></summary>
+          <div className="overflow-x-auto mt-3">
+            <table className="w-full text-sm min-w-[560px]">
+              <thead><tr className="text-left text-[11px] text-gray-500"><th className="py-1.5 font-medium">Klant</th><th className="font-medium">Shoots</th><th className="font-medium">Rijden</th><th className="font-medium">Shoot</th><th className="font-medium">Nabewerking</th><th className="font-medium">Samen</th><th className="font-medium">Afspraak</th></tr></thead>
+              <tbody className="divide-y divide-gray-50">
+                {rapport.map((r) => (
+                  <tr key={r.client_id}>
+                    <td className="py-1.5 font-medium">{r.klant}</td><td>{r.shoots}</td><td>{urenTekst(r.rijden)}</td><td>{urenTekst(r.shoot)}</td><td>{urenTekst(r.nabewerking)}</td>
+                    <td className="font-semibold">{urenTekst(r.totaal)}{r.zonderTijd ? <span className="text-[11px] text-amber-700 font-normal"> · {r.zonderTijd} zonder tijd</span> : null}</td>
+                    <td className="text-xs text-gray-600">{Object.entries(r.perAfspraak).map(([k, n]) => `${n}× ${afspraakLabel(k === 'onbekend' ? null : k).toLowerCase()}`).join(', ')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
 
       <section className="space-y-2">
         <h2 className="font-semibold text-gray-900">Komende shoots</h2>

@@ -91,6 +91,9 @@ export const STAFF_API_WHITELIST = [
   '/api/admin/taken',
   // Profielfoto's van het team bij het kiezen van een persoon (enkel naam en foto).
   '/api/admin/team-fotos',
+  // Bedrijven en dienstencatalogus: lezen voor elk teamlid; elke schrijfactie
+  // controleert zelf (beheer, zaakvoerder of de module van het record).
+  '/api/admin/bedrijven',
 ]
 
 /** Gevoelige API-paden die ALTIJD admin-only blijven, ook al valt het pad binnen

@@ -239,6 +239,30 @@ Nieuwe tabellen `rol_sjablonen`, `onboarding_stappen`, `werkinstructies`, `werki
 
 Nieuwe kolom `ngs_deals.client_id` (leeg, FK naar klanten met ON DELETE SET NULL) en nieuwe tabellen `ngs_projecten`, `ngs_user_stories`, `ngs_care` (RLS aan, enkel de service-role). Geen backfill. `ngs_deals`: 16 rijen voor en na, checksum 37e438a38f460f7822c2c2a2ea7b314a ongewijzigd. Terugdraaien: `supabase/terugdraaien/fase5.sql`.
 
+## Fase 6: levering Media en sales (27 nov 2026)
+
+### Wat er veranderde
+
+- **H65 standaard-deliverables per dienst**: in Instellingen → Diensten per dienst een lijstje zoals "12 posts per maand". De contentkalender (admin, Social media) toont per klant voor deze en volgende maand hoeveel er gepland staat tegenover wat standaard afgesproken is. Enkel een richtlijn: er wordt niets aangemaakt.
+- **H66/H67 tijd per shoot en soort afspraak**: in de editor van de Shoot planner rijden, shoot en nabewerking (typen zoals 1u30 of 90) en binnen retainer, brandingtraject of eenmalig. Onder de kalender een rapport per maand per klant (aantal shoots, tijd per onderdeel, per soort afspraak; geannuleerd telt niet).
+- **H68 rol op de planning**: elke vaste taak en elke reeks van de dagelijkse planning kan een rol of naam krijgen (Instellingen van de planning). Die staat als label bij de taak en de reeks. Leeg = de planningspersoon zoals vroeger.
+- **H69 revisierondes per klant**: in Opleveringen een uitklapblok met per klant het aantal opleveringen, rondes, gemiddelde en hoe vaak alle rondes opgebruikt waren.
+- **H70 wacht op de klant**: op Klanten een uitklapblok met per klant wat er op hen wacht (contract tekenen, offerte beantwoorden, content goedkeuren, oplevering bekijken, offerte op een aanvraag) en hoe lang al. Enkel een overzicht, nooit een herinnering vanzelf.
+- **I71–I73 verkoopcijfers** (`/admin/opdrachten/verkoop`, linkje onderaan Projecten): trechter per bedrijf met conversie per stap (Media op het bord Projecten, Solutions uit de pipeline), resultaat per bron, redenen van verlies, salesactiviteit per persoon uit de ABM-belnotities, en geplande salesuren (vaste blokken Sales in de teamagenda) tegenover gehouden verkoopafspraken. Per maand, kwartaal of jaar.
+- **I74 Lead-onderzoeker**: zat al in fase 4 als rolsjabloon (Projecten en ABM, geen financiën of contracten).
+- **I75 doorgeven aan het andere bedrijf**: knop op de klantfiche en het projectvenster. Naar Solutions = een deal in Afspraak gekoppeld aan de klant; naar Media = een kaart in Opvolging (verantwoordelijke verplicht). Bron "Bestaande klant", met een notitie; er vertrekt geen mail.
+- **I76 één bronnenlijst**: Outbound, Inbound website, Doorverwezen, Netwerk, Lezing, Event, Bestaande klant, voor Projecten en NextGenSolutions. Oude waarden (inbound, doorverwijzing, andere) blijven geldig en leesbaar; er werd niets omgezet. De vesting-suggestie leest beide.
+- **I77 redenen van verlies ook voor Media**: bij Verloren op Projecten dezelfde snelle keuzes als bij Solutions (Te duur, Geen budget of timing, Koos een andere partij, Geen reactie meer, Niet de juiste fit) of vrije tekst.
+
+### Niet gebouwd en waarom
+
+- **H65, factuurplanning**: de facturen uit het contract komen uit het contract zelf (AI leest prijzen en posten). De standaard-deliverables daar ook in steken kan botsen met wat in het contract staat; wat in het contract staat gaat voor. De deliverables voeden dus enkel de contentkalender.
+- **I71 per bedrijf**: de ABM-lijst kent geen bedrijf (NextGenMedia of NextGenSolutions) per prospect, dus de activiteit staat per persoon. De trechters staan wel per bedrijf.
+
+### Databank
+
+`shoot_briefings`: nieuwe kolommen `tijd_rijden_min`, `tijd_shoot_min`, `tijd_nabewerking_min`, `afspraak_soort` (leeg). `diensten_catalogus.deliverables` (jsonb, standaard leeg). `opdrachten_bron_check` verruimd met de nieuwe bronnen (de oude blijven toegelaten). Geen backfill. Checksums voor en na gelijk: `shoot_briefings` 4 rijen 41f91ee70b2fa5a3918a60cfd5bf4caf, `diensten_catalogus` 13 rijen f22935d1d3afa7ff09b955bac0f0d958, `opdrachten` 140 rijen (id + bron) fdd4671c3188a40dcea08af1d0260838. Terugdraaien: `supabase/terugdraaien/fase6.sql`.
+
 ## Waar we stoppen
 
-Op vraag van de zaakvoerders (26 nov 2026) gestopt na fase 2; op 27 nov 2026 hervat. Fasen 3 (teamagenda), 4 (rollen en plug-and-play) en 5 (Solutions-levering) zijn af. Fasen 6 (Media-levering en sales), 7 (financieel en ritme) en 8 (documentatie) volgen.
+Op vraag van de zaakvoerders (26 nov 2026) gestopt na fase 2; op 27 nov 2026 hervat. Fasen 3 (teamagenda), 4 (rollen en plug-and-play), 5 (Solutions-levering) en 6 (Media-levering en sales) zijn af. Fasen 7 (financieel en ritme) en 8 (documentatie) volgen.

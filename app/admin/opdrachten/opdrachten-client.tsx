@@ -332,6 +332,10 @@ export function OpdrachtenClient({ startBedrijf = '' }: { startBedrijf?: Bedrijf
           }} />
       )}
 
+      <div className="flex justify-end gap-4">
+        <a href="/admin/opdrachten/verkoop" className="text-xs text-gray-500 hover:text-gray-900 underline">Verkoopcijfers</a>
+      </div>
+
       {archief && (
         <div className="text-right">
           <a href="/api/admin/opdrachten/pipeline-archief" className="text-xs text-gray-400 hover:text-gray-700 inline-flex items-center gap-1" title={archief.op ? `Bewaard op ${new Date(archief.op).toLocaleDateString('nl-BE')}` : undefined}>

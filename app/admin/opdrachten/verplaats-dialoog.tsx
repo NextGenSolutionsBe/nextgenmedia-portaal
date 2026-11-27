@@ -1,5 +1,6 @@
 'use client'
 
+import { VERLIES_REDENEN } from '@/lib/sales/bronnen'
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Loader2, X, Send, FileSignature, Ban, CheckCircle2, Euro } from 'lucide-react'
@@ -191,6 +192,7 @@ export function VerplaatsDialoog({ o, soort, doel = 'offerte', contracten, onClo
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="vd-reden">Waarom? <span className="text-gray-400">optioneel</span></label>
+                <div className="flex gap-1.5 flex-wrap mb-2">{VERLIES_REDENEN.map((r) => <button key={r} type="button" onClick={() => setReden(r)} className={`px-2.5 py-1 rounded-full text-xs border ${reden === r ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white hover:border-gray-400'}`}>{r}</button>)}</div>
                 <input id="vd-reden" className="input-base" value={reden} onChange={(e) => setReden(e.target.value)} maxLength={500} placeholder="Bv. te duur, kiest voor een andere partij, budget bevroren" />
               </div>
             </>

@@ -4,7 +4,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { leesPersoon, magIk } from '@/lib/instellingen/laden'
 import { eisBeheer } from '@/lib/instellingen/api'
 import { requestMeta } from '@/lib/audit'
-import { laadCatalogus, bewaarDienst, bewaarBedrijf, klassificatieLijst, klassificeer, bevestigVoorstellen, zetBedrijfOfDienst, type Actor } from '@/lib/bedrijven/server'
+import { laadCatalogus, laadDeliverables, bewaarDeliverables, bewaarDienst, bewaarBedrijf, klassificatieLijst, klassificeer, bevestigVoorstellen, zetBedrijfOfDienst, type Actor } from '@/lib/bedrijven/server'
 import { isKlassificatieTabel, isBedrijfFilter, BEDRIJF_COOKIE, type KlassificatieVeld, type DienstInvoer, type BedrijfInvoer } from '@/lib/bedrijven/model'
 
 export const dynamic = 'force-dynamic'
@@ -31,6 +31,7 @@ export async function GET(req: NextRequest) {
       if (!persoon.isAdmin) return NextResponse.json({ error: 'Enkel voor de zaakvoerders' }, { status: 403 })
       return NextResponse.json({ catalogus, wachtrij: await klassificatieLijst(admin) })
     }
+    if (req.nextUrl.searchParams.get('deliverables') === '1') return NextResponse.json({ catalogus, deliverables: await laadDeliverables(admin) })
     return NextResponse.json({ catalogus })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
@@ -63,6 +64,16 @@ export async function POST(req: NextRequest) {
       const r = await bewaarDienst(admin, (b.invoer ?? {}) as DienstInvoer, typeof b.bestaand === 'string' ? b.bestaand : null, actor)
       if (!r.ok) return NextResponse.json({ error: r.fout }, { status: 400 })
       return NextResponse.json({ ok: true, dienst: r.dienst, catalogus: await laadCatalogus(admin) })
+    }
+
+    if (b.actie === 'deliverables') {
+      const g = await eisBeheer()
+      if (!g.ok) return g.response
+      if (typeof b.slug !== 'string') return NextResponse.json({ error: 'Kies een dienst.' }, { status: 400 })
+      const actor: Actor = { userId: g.persoon.userId, email: g.persoon.email, naam: g.persoon.naam, ...meta }
+      const r = await bewaarDeliverables(admin, b.slug, String(b.tekst ?? ''), actor)
+      if (!r.ok) return NextResponse.json({ error: r.fout }, { status: 400 })
+      return NextResponse.json({ ok: true, deliverables: await laadDeliverables(admin) })
     }
 
     if (b.actie === 'bedrijf') {

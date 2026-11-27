@@ -13,6 +13,7 @@
 // gefactureerd, voorschotten en maandfacturen samen). In uitvoering zetten
 // gebeurt altijd met de hand.
 
+import { BRONNEN_LIJST, isBronKey, bronNaam } from '@/lib/sales/bronnen'
 import { statusInfo, type OpdrachtStatus, type Koppelingen, type FactuurKoppeling } from '@/lib/opdrachten'
 import { canonicalStatus } from '@/lib/contract-status'
 import { normalizeBtw } from '@/lib/btw'
@@ -229,13 +230,11 @@ export function projectVerantwoordelijke(v: unknown): ProjectVerantwoordelijke |
 
 // ── Bron en offertekanaal ───────────────────────────────────────────────────
 
-export type Bron = 'inbound' | 'outbound'
-export const BRONNEN: { key: Bron; label: string; uitleg: string }[] = [
-  { key: 'inbound', label: 'Inbound', uitleg: 'De klant kwam zelf met de vraag.' },
-  { key: 'outbound', label: 'Outbound', uitleg: 'Wij gingen er zelf op af.' },
-]
-export const isBron = (v: unknown): v is Bron => v === 'inbound' || v === 'outbound'
-export const bronLabel = (v: string | null | undefined): string | null => BRONNEN.find((b) => b.key === v)?.label ?? null
+/** Eén bronnenlijst voor de hele app (fase 6, lib/sales/bronnen.ts). "inbound" van vroeger blijft geldig. */
+export type Bron = string
+export const BRONNEN: { key: Bron; label: string; uitleg: string }[] = BRONNEN_LIJST.map((b) => ({ key: b.key, label: b.label, uitleg: b.uitleg }))
+export const isBron = (v: unknown): v is Bron => isBronKey(v)
+export const bronLabel = (v: string | null | undefined): string | null => (v ? bronNaam(v) : null)
 
 /** Voorstel voor de bron uit de leadbron van de pipeline (website = inbound, outbound = outbound; de rest weten we niet). */
 export function bronUitLead(leadbron: string | null | undefined): Bron | null {

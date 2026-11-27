@@ -225,3 +225,17 @@ export function volgendeStap(o: {
       return { tekst: 'Deel de eerste versie met de klant', dringend: false, klaar: false }
   }
 }
+
+// ── Revisierondes per klant (verbeterplan fase 6, punt 69) ──────────────────
+
+/** Per klant: hoeveel opleveringen, hoeveel revisierondes gebruikt en hoeveel opleveringen al hun rondes opgebruikten. */
+export function revisiesPerKlant(lijst: { client_id: string; klant_naam: string | null; revisies: { gebruikt: number; max: number } }[]): { client_id: string; klant: string; opleveringen: number; rondes: number; gemiddeld: number; opgebruikt: number }[] {
+  const m = new Map<string, { client_id: string; klant: string; opleveringen: number; rondes: number; opgebruikt: number }>()
+  for (const o of lijst) {
+    const r = m.get(o.client_id) ?? { client_id: o.client_id, klant: o.klant_naam ?? 'Klant', opleveringen: 0, rondes: 0, opgebruikt: 0 }
+    r.opleveringen++; r.rondes += o.revisies.gebruikt
+    if (o.revisies.max > 0 && o.revisies.gebruikt >= o.revisies.max) r.opgebruikt++
+    m.set(o.client_id, r)
+  }
+  return [...m.values()].map((r) => ({ ...r, gemiddeld: Math.round((r.rondes / r.opleveringen) * 10) / 10 })).sort((a, b) => b.rondes - a.rondes || b.opleveringen - a.opleveringen)
+}

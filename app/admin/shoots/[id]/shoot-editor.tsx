@@ -1,5 +1,6 @@
 'use client'
 
+import { AFSPRAKEN, LEGE_TIJD, controleerTijd, totaalMin, urenTekst, type ShootTijd } from '@/lib/shoots/tijd'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -33,7 +34,7 @@ const leegPunt = (van: string): ProgrammaPunt => ({ id: nieuwId(), van, tot: '',
 const leegeLocatie = (): ShootLocatie => ({ id: nieuwId(), naam: '', adres: '', contact: '', telefoon: '', notitie: '' })
 const leegPersoon = (): Betrokkene => ({ id: nieuwId(), naam: '', rol: '', email: '', telefoon: '' })
 /** Vergelijkbare stand van het formulier, om te weten of er iets niet bewaard is. */
-const momentopname = (k: string, p: ShootPlan, b: Bestand | null) => JSON.stringify({ k, p: normaliseerPlan(p), b: b?.pad ?? null })
+const momentopname = (k: string, p: ShootPlan, b: Bestand | null, t: ShootTijd = LEGE_TIJD) => JSON.stringify({ k, p: normaliseerPlan(p), b: b?.pad ?? null, t: controleerTijd(t) })
 const plakTekst = (oud: string, nieuw: string) => (oud.trim() ? `${oud.trimEnd()}\n\n${nieuw.trim()}` : nieuw.trim())
 
 /** Eén shoot: de briefing, het plan per uur en locatie, wie erbij is en versturen. */
@@ -51,6 +52,9 @@ export function ShootEditor({ id, startDatum, startKlant, startVan, startTot, te
   const terugNaar = terug === 'agenda' ? { href: `/admin/agenda${plan.datum ? `?datum=${plan.datum}` : ''}`, label: 'Terug naar de agenda' } : { href: '/admin/shoots', label: 'Terug naar de planner' }
   const [bestand, setBestand] = useState<Bestand | null>(null)
   const [versie, setVersie] = useState<number | null>(null)
+  // Fase 6: tijd per onderdeel (in minuten, of zoals je het typt: 1u30) en soort afspraak.
+  const [tijd, setTijd] = useState<{ rijden_min: string; shoot_min: string; nabewerking_min: string; afspraak: string }>({ rijden_min: '', shoot_min: '', nabewerking_min: '', afspraak: '' })
+  const tijdNaarTekst = (t: ShootTijd | undefined) => ({ rijden_min: t?.rijden_min ? String(t.rijden_min) : '', shoot_min: t?.shoot_min ? String(t.shoot_min) : '', nabewerking_min: t?.nabewerking_min ? String(t.nabewerking_min) : '', afspraak: t?.afspraak ?? '' })
   const [snapshot, setSnapshot] = useState('')
   const [meta, setMeta] = useState<{ bijgewerkt_door: string | null; updated_at: string | null }>({ bijgewerkt_door: null, updated_at: null })
   const [verzonden, setVerzonden] = useState<Verzonden[]>([])
@@ -61,7 +65,7 @@ export function ShootEditor({ id, startDatum, startKlant, startVan, startTot, te
   const [vraagWeg, setVraagWeg] = useState(false)
   const bestandInvoer = useRef<HTMLInputElement>(null)
 
-  const vuil = nieuw || momentopname(klantId, plan, bestand) !== snapshot
+  const vuil = nieuw || momentopname(klantId, plan, bestand, controleerTijd(tijd)) !== snapshot
 
   const laad = useCallback(async () => {
     if (nieuw) return
@@ -72,10 +76,10 @@ export function ShootEditor({ id, startDatum, startKlant, startVan, startTot, te
       const s = j.shoot
       const p = normaliseerPlan(s)
       const b = s.briefing_pad ? { pad: s.briefing_pad, naam: s.briefing_naam ?? 'briefing', type: s.briefing_type ?? '' } : null
-      setKlantId(s.client_id); setPlan(p); setBestand(b); setVersie(s.versie)
+      setKlantId(s.client_id); setPlan(p); setBestand(b); setVersie(s.versie); setTijd(tijdNaarTekst(s.tijd))
       setMeta({ bijgewerkt_door: s.bijgewerkt_door, updated_at: s.updated_at })
       setVerzonden(j.verzonden ?? [])
-      setSnapshot(momentopname(s.client_id, p, b))
+      setSnapshot(momentopname(s.client_id, p, b, controleerTijd(s.tijd)))
     } catch (e) { setFout(e instanceof Error ? e.message : 'Laden mislukt') } finally { setLaden(false) }
   }, [id, nieuw])
 
@@ -152,7 +156,7 @@ export function ShootEditor({ id, startDatum, startKlant, startVan, startTot, te
     if (!plan.datum) { toast.error('Kies de datum van de shoot.'); return }
     setBezig('bewaren')
     try {
-      const body = { client_id: klantId, plan, versie: versie ?? undefined, briefing_pad: bestand?.pad ?? null, briefing_naam: bestand?.naam ?? null, briefing_type: bestand?.type ?? null }
+      const body = { client_id: klantId, plan, versie: versie ?? undefined, briefing_pad: bestand?.pad ?? null, briefing_naam: bestand?.naam ?? null, briefing_type: bestand?.type ?? null, tijd }
       const r = await fetch(nieuw ? '/api/admin/shoots' : `/api/admin/shoots/${id}`, { method: nieuw ? 'POST' : 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const j = await r.json()
       if (!r.ok) {
@@ -163,7 +167,7 @@ export function ShootEditor({ id, startDatum, startKlant, startVan, startTot, te
       if (nieuw) router.replace(`/admin/shoots/${j.id}${terug === 'agenda' ? '?terug=agenda' : ''}`)
       else await laad()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt') } finally { setBezig(null) }
-  }, [bestand, id, klantId, laad, nieuw, plan, router, versie])
+  }, [bestand, id, klantId, laad, nieuw, plan, router, versie, tijd])
 
   useEffect(() => {
     const toets = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (magAanpassen && !bezig) void bewaar() } }
@@ -388,6 +392,25 @@ export function ShootEditor({ id, startDatum, startKlant, startVan, startTot, te
           <label className={`${LBL} flex items-center gap-1.5`}><Info className="h-3.5 w-3.5" />Praktisch</label>
           <textarea rows={3} className={INP} value={plan.praktisch} onChange={(e) => zet({ praktisch: e.target.value })} placeholder="Dresscode, catering, wat als het regent …" />
         </div>
+      </section>
+
+      {/* Tijd en afspraak (fase 6): voor het rapport per klant. */}
+      <section className="card-base space-y-3">
+        <h2 className="font-semibold text-sm">Tijd en afspraak</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {([['rijden_min', 'Rijden'], ['shoot_min', 'Shoot'], ['nabewerking_min', 'Nabewerking']] as const).map(([k, l]) => (
+            <label key={k} className="block"><span className={LBL}>{l} <span className="text-gray-400 font-normal">(min of 1u30)</span></span>
+              <input className={INP} inputMode="text" value={tijd[k]} onChange={(e) => setTijd({ ...tijd, [k]: e.target.value })} placeholder="bv. 90" disabled={!magAanpassen} />
+            </label>
+          ))}
+          <label className="block"><span className={LBL}>Afspraak</span>
+            <select className={INP} value={tijd.afspraak} onChange={(e) => setTijd({ ...tijd, afspraak: e.target.value })} disabled={!magAanpassen}>
+              <option value="">Niet aangeduid</option>
+              {AFSPRAKEN.map((a) => <option key={a.key} value={a.key}>{a.label}</option>)}
+            </select>
+          </label>
+        </div>
+        {totaalMin(controleerTijd(tijd)) > 0 && <p className="text-xs text-gray-500">Samen {urenTekst(totaalMin(controleerTijd(tijd)))}.</p>}
       </section>
 
       {/* Verstuurd naar */}
