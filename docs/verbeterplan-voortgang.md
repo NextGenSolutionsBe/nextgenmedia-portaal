@@ -165,6 +165,27 @@ opdrachten: bedrijf 11, dienst 14 · contracts: dienst 6 · invoices: bedrijf 10
 - K86 volledig (eigen blok en huisstijl per bedrijf in de hele klantapp), K88 (projectstatus en user stories voor Solutions-klanten, hangt af van fase 5) en K89 (Meeting boeken per bedrijf en vaste blokken, hangt af van fase 3).
 - C18: de merkgegevens staan in de databank en zijn aan te passen; de mailopmaak (`lib/merk-mail.ts`) gebruikt nog de vaste waarden. Omschakelen naar de databank is een volgende stap.
 
+## Fase 3: teamagenda (27 nov 2026)
+
+Hervat op vraag ("ga verder met de punten die nog openstaan").
+
+### Wat er veranderde
+
+- **E32 teamweergave**: knop Team in de agenda; dag = kolom per persoon, week = rij per persoon met capaciteit. De agenda opent nog altijd op je eigen agenda (uitdrukkelijke vraag van 25 nov 2026), dus niet standaard Team voor zaakvoerders.
+- **E33**: meetings uit de Meeting Inplanner staan al in dezelfde kalender (sinds 25 nov); Calendar blijft voor het plannen met Google.
+- **E34 Bezet**: privé-items en items uit lijsten die je niet ziet, als "Bezet" zonder titel in de teamweergave.
+- **E35/E37 reeksen**: vaste blokken (Sales, Focuswerk, Overleg, Opleiding), herhalende afspraken en taken, met uitzondering per keer. Niets vooraf ingevuld.
+- **E36**: klantboekingen (`/boeken`, klantapp) en de vrije momenten van Calendar nooit in een vast blok; intern een waarschuwing met de reden.
+- **E38/E40 beschikbaarheid en capaciteit**: per persoon per weekdag; gepland tegenover beschikbaar per dag en per week, rood bij overboeking.
+- **E41**: geen master-omschakeling (open vraag: eerst een conflictenlijst). Lijst "Verschillen met ClickUp" met App-versie houden of ClickUp-versie overnemen; niets automatisch verwijderd.
+- **E42 Week plannen** naast Dag afsluiten.
+- **E43 agenda-abonnement** (iCal) per persoon en per team, in te trekken.
+- **E39 kleur en filter op bedrijf**: nog niet. Agenda-items hebben (nog) geen bedrijf; komt samen met fase 7 (bedrijf op taken en lijsten).
+
+### Databank
+
+Nieuwe tabellen `ag_reeksen`, `ag_beschikbaarheid`, `ag_ical_links` (RLS aan, enkel de service-role) en nieuwe kolommen op `ag_items` (`reeks_id`, `reeks_datum`, `clickup_verschil_op`, `clickup_verschil`). Geen backfill. `ag_items`: 5763 rijen voor en na de migratie, identieke checksum van de bestaande kolommen (0c64a21512310c51a8afe3a57b3e43b5). Terugdraaien: `supabase/terugdraaien/fase3.sql`.
+
 ## Waar we stoppen
 
-Op vraag van de zaakvoerders (26 nov 2026): **gestopt na fase 2**. Fasen 3 (teamagenda), 4 (rollen en plug-and-play), 5 (Solutions-levering), 6 (Media-levering en sales), 7 (financieel en ritme) en 8 (documentatie) zijn nog niet begonnen.
+Op vraag van de zaakvoerders (26 nov 2026) gestopt na fase 2; op 27 nov 2026 hervat. Fase 3 (teamagenda) is af. Fasen 4 (rollen en plug-and-play), 5 (Solutions-levering), 6 (Media-levering en sales), 7 (financieel en ritme) en 8 (documentatie) volgen.

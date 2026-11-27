@@ -105,7 +105,7 @@ export function docZichtbaar(d: { space_id: string | null; map_id: string | null
 export const ITEM_VELDEN = 'id, soort, titel, status, clickup_status, clickup_status_kleur, urgent, prioriteit, start_op, eind_op, deadline_op, heel_dag, lijst_id, parent_id, client_id, labels, kleur, locatie, meet_url, prive, eigenaar_id, afgerond_op, afgerond_door, clickup_url, clickup_id, clickup_lijst_id, updated_at'
 
 /** Items met hun toegewezenen en het aantal subtaken, enkel wat de kijker mag zien. */
-export async function metToegewezen(admin: Admin, ruw: RuwItem[], z: Zicht, opts: { subtaken?: boolean } = {}): Promise<Item[]> {
+export async function metToegewezen(admin: Admin, ruw: RuwItem[], z: Zicht, opts: { subtaken?: boolean; bezet?: { start_op: string; eind_op: string; personen: string[] }[] } = {}): Promise<Item[]> {
   if (!ruw.length) return []
   const ids = ruw.map((r) => r.id)
   // Per 150 id's (de lijst gaat in de adresregel) en alle stukken tegelijk.
@@ -119,6 +119,14 @@ export async function metToegewezen(admin: Admin, ruw: RuwItem[], z: Zicht, opts
   for (const r of twRijen.flat()) tw.set(r.item_id, [...(tw.get(r.item_id) ?? []), r.persoon_id])
   const sub = new Map<string, number>()
   for (const r of subRijen.flat()) sub.set(r.parent_id, (sub.get(r.parent_id) ?? 0) + 1)
+  // Teamagenda: wat je niet mag zien maar wel tijd inneemt, enkel als "Bezet" (geen titel, geen id).
+  if (opts.bezet) {
+    for (const r of ruw) {
+      if (r.heel_dag || !r.start_op || !r.eind_op || r.status === 'klaar' || itemZichtbaar(r, tw.get(r.id) ?? [], z)) continue
+      const personen = tw.get(r.id)?.length ? tw.get(r.id)! : r.eigenaar_id ? [r.eigenaar_id] : []
+      if (personen.length) opts.bezet.push({ start_op: r.start_op, eind_op: r.eind_op, personen })
+    }
+  }
   return ruw
     .filter((r) => itemZichtbaar(r, tw.get(r.id) ?? [], z))
     .map((r) => {

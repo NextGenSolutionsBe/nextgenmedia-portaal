@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
   ChevronLeft, ChevronRight, ChevronDown, Loader2, Plus, Printer, PanelLeft, Search, Tag, Building2, Eye, EyeOff, Mail, X, Users, List as ListIcon, Maximize2, Minimize2, Layers, Check, Mic, MoonStar,
+  CalendarRange, Repeat,
 } from 'lucide-react'
 import { PersoonFoto } from '@/components/admin/persoon-foto'
 import { zoekVeld } from '@/lib/zoekveld'
@@ -16,6 +17,9 @@ import { Modal } from '@/app/admin/materiaal/dialogen'
 import { api, actie, kleurContext, padVan, Popover, PersonenLijst, focusRing, type BoomData } from './gedeeld'
 import { Kalender, type Verplaatsing, type NieuwMoment } from './kalender'
 import { useVeeg } from './veeg'
+import { TeamDag, TeamWeek, type TeamData } from './team'
+import { ReeksFormulier, ReeksVenster, teamActie } from './reeks'
+import { WeekPlannen } from './week-plannen'
 import { Boom, type Keuze } from './boom'
 import { ItemVenster, KlantLijst, voorladen } from './item-venster'
 import { LijstWeergave, wanneer } from './lijst'
@@ -79,6 +83,13 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
   const [nieuw, setNieuw] = useState<NieuwMoment | null>(null)
   const [inspreek, setInspreek] = useState(false)
   const [afsluiten, setAfsluiten] = useState(false)
+  // Teamagenda (verbeterplan fase 3): kolom per persoon (dag) of rij per persoon (week). Nooit standaard aan.
+  const [team, setTeam] = useState(false)
+  const [teamData, setTeamData] = useState<TeamData>({ bezet: [], beschikbaarheid: [] })
+  const [weekPlannen, setWeekPlannen] = useState(false)
+  const [reeksItem, setReeksItem] = useState<Item | null>(null)
+  const [nieuweReeks, setNieuweReeks] = useState<null | { dag?: string; van?: string; tot?: string }>(null)
+  const [instellingenTab, setInstellingenTab] = useState<'beschikbaarheid' | 'abonnement' | 'verschillen' | undefined>(undefined)
   const [paneel, setPaneel] = useState<Paneel>(null)
   const [mv, setMv] = useState<MeetingVenster>(null)
   const [opties, setOpties] = useState<Opties | null>(null)
@@ -180,10 +191,10 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
     const n = ++vraag.current
     setLaden(true)
     try {
-      const j = await api<{ items: Item[] }>(`/api/admin/agenda?van=${encodeURIComponent(bereik.van)}&tot=${encodeURIComponent(bereik.tot)}`)
-      if (n === vraag.current) setItems(j.items)
+      const j = await api<{ items: Item[] } & Partial<TeamData>>(`/api/admin/agenda?van=${encodeURIComponent(bereik.van)}&tot=${encodeURIComponent(bereik.tot)}${team ? '&team=1' : ''}`)
+      if (n === vraag.current) { setItems(j.items); if (team) setTeamData({ bezet: j.bezet ?? [], beschikbaarheid: j.beschikbaarheid ?? [] }) }
     } catch (e) { if (n === vraag.current) toast.error(e instanceof Error ? e.message : 'Agenda laden mislukt') } finally { if (n === vraag.current) setLaden(false) }
-  }, [bereik])
+  }, [bereik, team])
   useEffect(() => { if (modus !== 'lijst') laadItems() }, [laadItems, modus])
 
   const container = keuze && keuze.soort !== 'doc' ? keuze : null
@@ -236,19 +247,21 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
     return boom.lijsten.filter((l) => l.map_id && onder.has(l.map_id)).map((l) => l.id)
   }, [boom, container])
   /** `metKlaar`: afgevinkte altijd meegeven (de lijstweergave toont ze ingeklapt onderaan). */
-  const filter = useCallback((l: Item[], metKlaar = false) => {
+  const filter = useCallback((l: Item[], metKlaar = false, zonderPersonen = false) => {
     const inLijst = lijstenVanKeuze && container?.soort !== 'alles' ? new Set(lijstenVanKeuze) : null
     const spaceVan = new Map((boom?.lijsten ?? []).map((x) => [x.id, x.space_id]))
     return l.filter((i) =>
       // Completed verdwijnt uit de kalender (wit), tenzij je Completed aanzet.
       (metKlaar || toonKlaar || i.status !== 'klaar') &&
       (!spaces.length || (!!i.lijst_id && spaces.includes(spaceVan.get(i.lijst_id) ?? ''))) &&
-      (!personen.length || i.toegewezen.some((p) => personen.includes(p))) &&
+      (zonderPersonen || !personen.length || i.toegewezen.some((p) => personen.includes(p)) || (!i.toegewezen.length && !!i.eigenaar_id && personen.includes(i.eigenaar_id) && i.bron === 'reeks')) &&
       (!labels.length || i.labels.some((x) => labels.includes(x))) &&
       (!klant || (ctx && klantVan(i, ctx) === klant)) &&
       (!inLijst || (i.lijst_id && inLijst.has(i.lijst_id))))
   }, [toonKlaar, personen, labels, klant, ctx, lijstenVanKeuze, spaces, boom, container?.soort])
   const zichtbaar = useMemo(() => filter(items ?? []), [filter, items])
+  // In de teamweergave staat iedereen in een eigen kolom: daar filteren we niet op personen.
+  const teamZichtbaar = useMemo(() => (team ? filter(items ?? [], false, true) : []), [team, filter, items])
   const kleur = useCallback((i: Item) => (ctx ? kleurVan(i, ctx, kleurVolgens) : '#e5e7eb'), [ctx, kleurVolgens])
   // Label op elk blok: bij welke klant of map het hoort ("TM Technics").
   const herkomstCtx = useMemo(() => (ctx && boom ? { ...ctx, klanten: Object.fromEntries(boom.klanten.map((k) => [k.id, k.naam])), leden: boom.leden } : null), [ctx, boom])
@@ -265,6 +278,12 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
   }
   const wisselKlaar = async (i: Item) => {
     if (!boom?.rechten.aanpassen) return
+    // Een keer van een herhalende taak afvinken: die keer wordt een gewone (afgevinkte) taak.
+    if (i.bron === 'reeks') {
+      if (i.reeks?.soort !== 'taak') return
+      try { await teamActie({ actie: 'reeks.keer', id: i.id, klaar: true }); toast.success(`Completed: ${i.titel}`); vernieuw() } catch (e) { toast.error(e instanceof Error ? e.message : 'Mislukt') }
+      return
+    }
     const status = i.status === 'klaar' ? 'open' : 'klaar'
     // Een meeting uit de Meeting Inplanner: enkel het vinkje in de agenda (de meeting zelf verandert niet).
     const zet = (s: 'open' | 'klaar') => (i.bron === 'meeting' ? actie({ actie: 'meeting.klaar', id: i.id, klaar: s === 'klaar' }) : actie({ actie: 'item.wijzig', id: i.id, status: s }))
@@ -288,6 +307,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
   const open = (i: Item) => {
     // Een shoot open je in de Shoot planner (met de weg terug naar de agenda).
     if (i.bron === 'shoot') { window.location.assign(`/admin/shoots/${i.id}?terug=agenda`); return }
+    if (i.bron === 'reeks') { setReeksItem(i); return }
     if (i.bron === 'meeting') { laadOpties(); setMv({ soort: 'detail', id: i.id }) } else { setVoorlopig(i); setOpenItem(i.id) }
   }
   const laadOpties = useCallback(() => { if (!opties) meetingApi<Opties>('/api/admin/meetings?opties=1').then(setOpties).catch(() => toast.error('De Meeting Inplanner kon niet laden.')) }, [opties])
@@ -325,6 +345,9 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
   const titelKeuze = keuze && keuze.soort !== 'doc'
     ? keuze.soort === 'alles' ? ['All tasks'] : (keuze.soort === 'lijst' ? padVan(boom, keuze.id) : keuze.soort === 'map' ? [boom.mappen.find((m) => m.id === keuze.id)?.naam ?? 'Map'] : [boom.spaces.find((s) => s.id === keuze.id)?.naam ?? 'Space'])
     : null
+  // Teamweergave: de gekozen mensen (vanaf twee), anders iedereen met een account.
+  const teamMensen = personen.length > 1 ? mensen.filter((p) => personen.includes(p.id)) : mensen
+  const teamProps = { dagen: dagenVan(weergave, datum), items: teamZichtbaar, team: teamData, mensen: teamMensen, kleur, onOpen: open, onDag: (d: string) => { setDatum(d); kiesModus('dag') } }
   const filterTeller = (personen.length ? 1 : 0) + (labels.length ? 1 : 0) + (klant ? 1 : 0) + (spaces.length ? 1 : 0)
   const printUrl = `/api/admin/agenda/print?dag=${modus === 'dag' ? datum : vandaag()}${personen.length ? `&personen=${personen.join(',')}` : ''}${toonKlaar ? '&klaar=1' : ''}`
 
@@ -364,6 +387,9 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
           )}
           {keuze?.soort !== 'doc' && boom.rechten.aanpassen && (
             <button type="button" onClick={() => setAfsluiten(true)} aria-label="Dag afsluiten" title="Alles wat nog open staat afgaan: gedaan, naar morgen of een andere dag" className={`order-4 md:order-6 h-9 shrink-0 rounded-lg border border-gray-200 bg-white px-2.5 md:px-3 text-sm font-semibold hidden md:inline-flex items-center gap-1.5 hover:border-gray-400 ${focusRing}`}><MoonStar className="h-4 w-4" /><span className="hidden 2xl:inline">Dag afsluiten</span></button>
+          )}
+          {keuze?.soort !== 'doc' && boom.rechten.aanpassen && (
+            <button type="button" onClick={() => setWeekPlannen(true)} aria-label="Week plannen" title="Je open taken over de week verdelen" className={`order-4 md:order-6 h-9 shrink-0 rounded-lg border border-gray-200 bg-white px-2.5 md:px-3 text-sm font-semibold hidden md:inline-flex items-center gap-1.5 hover:border-gray-400 ${focusRing}`}><CalendarRange className="h-4 w-4" /><span className="hidden 2xl:inline">Week plannen</span></button>
           )}
           {keuze?.soort !== 'doc' && boom.rechten.toevoegen && (
             <button type="button" onClick={() => setInspreek(true)} aria-label="Taak inspreken" title="Taak inspreken" className={`order-4 md:order-6 h-9 w-9 shrink-0 rounded-lg border border-gray-200 bg-white hidden md:flex items-center justify-center hover:border-gray-400 ${focusRing}`}><Mic className="h-4 w-4" /></button>
@@ -427,7 +453,10 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
                 <PersonenLijst personen={boom.personen} eerst={boom.zaakvoerders} ik={boom.ik} gekozen={personen} onWissel={(p) => zetPersonen(personen.includes(p) ? personen.filter((x) => x !== p) : [...personen, p])} />
               </Popover>
             </div>
+            <Chip aan={team} onClick={() => { const nu = !team; setTeam(nu); if (nu && (modus === 'maand' || modus === 'lijst')) kiesModus('week') }}><Users className="h-3.5 w-3.5" />Team</Chip>
+            {boom.rechten.toevoegen && <Chip aan={false} onClick={() => setNieuweReeks({ dag: modus === 'dag' ? datum : vandaag() })}><Repeat className="h-3.5 w-3.5" />Vast blok</Chip>}
             {boom.rechten.aanpassen && <NaarVandaag boom={boom} onVernieuw={vernieuw} gsm />}
+            {boom.rechten.aanpassen && <button type="button" onClick={() => setWeekPlannen(true)} className={`md:hidden inline-flex items-center gap-1.5 rounded-full border h-8 px-3 bg-white border-gray-200 text-gray-700 text-xs ${focusRing}`}><CalendarRange className="h-3.5 w-3.5" />Week plannen</button>}
             {boom.rechten.aanpassen && <button type="button" onClick={() => setAfsluiten(true)} className={`md:hidden inline-flex items-center gap-1.5 rounded-full border h-8 px-3 bg-white border-gray-200 text-gray-700 text-xs ${focusRing}`}><MoonStar className="h-3.5 w-3.5" />Dag afsluiten</button>}
             {boom.rechten.toevoegen && <button type="button" onClick={() => setInspreek(true)} aria-label="Taak inspreken" className={`md:hidden inline-flex items-center gap-1.5 rounded-full border h-8 px-3 bg-white border-gray-200 text-gray-700 text-xs ${focusRing}`}><Mic className="h-3.5 w-3.5" />Inspreken</button>}
             <div className="relative">
@@ -496,6 +525,9 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
                 boom={boom} personen={personenMap} laden magToevoegen={!!boom.rechten.toevoegen}
                 onOpen={open} onKlaar={wisselKlaar} onToegevoegd={laadLijst} onDoc={(id) => setKeuze({ soort: 'doc', id })} />
             </div>
+          ) : team && weergave !== 'maand' ? (
+            // Teamagenda: op de dag een kolom per persoon, anders een rij per persoon met de capaciteit.
+            (weergave === 'dag' ? <TeamDag {...teamProps} /> : <TeamWeek {...teamProps} />)
           ) : (
             <Kalender weergave={weergave} datum={datum} items={zichtbaar} kleur={kleur} herkomst={herkomst} personen={personenMap}
               magAanpassen={!!boom.rechten.aanpassen} magToevoegen={!!boom.rechten.toevoegen}
@@ -543,7 +575,10 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
       {paneel === 'klaar' && <AfgevinktPaneel boom={boom} onSluit={() => setPaneel(null)} onOpen={(i) => setOpenItem(i.id)} onVernieuw={vernieuw} />}
       {paneel === 'prullenbak' && <PrullenbakPaneel boom={boom} onSluit={() => setPaneel(null)} onVernieuw={vernieuw} />}
       {paneel === 'mail' && <MailPaneel boom={boom} onSluit={() => setPaneel(null)} onVernieuw={vernieuw} onOpenItem={(id) => { setPaneel(null); setOpenItem(id) }} />}
-      {paneel === 'instellingen' && <InstellingenPaneel boom={boom} onSluit={() => setPaneel(null)} onVernieuw={vernieuw} />}
+      {paneel === 'instellingen' && <InstellingenPaneel boom={boom} startTab={instellingenTab} onSluit={() => { setPaneel(null); setInstellingenTab(undefined) }} onVernieuw={vernieuw} onOpenItem={(id) => setOpenItem(id)} />}
+      {weekPlannen && <WeekPlannen boom={boom} onSluit={() => setWeekPlannen(false)} onVernieuw={vernieuw} />}
+      {reeksItem && <ReeksVenster item={reeksItem} boom={boom} onSluit={() => setReeksItem(null)} onVernieuw={vernieuw} onOpenItem={(id) => { setReeksItem(null); setOpenItem(id) }} />}
+      {nieuweReeks && <ReeksFormulier boom={boom} standaard={nieuweReeks} onSluit={() => setNieuweReeks(null)} onBewaard={() => { setNieuweReeks(null); vernieuw() }} />}
     </div>
   )
 }

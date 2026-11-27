@@ -27,8 +27,8 @@ export type Status = 'open' | 'klaar'
 export type Item = {
   id: string
   /** 'ag' = agenda-item; 'meeting' = uit de Meeting Inplanner (klant_meetings, Google + Meet). */
-  /** ag = taak in de agenda, meeting = Meeting Inplanner, shoot = Shoot planner (enkel tonen; openen gaat naar de planner). */
-  bron: 'ag' | 'meeting' | 'shoot'
+  /** ag = taak in de agenda, meeting = Meeting Inplanner, shoot = Shoot planner (enkel tonen; openen gaat naar de planner), reeks = een keer uit een reeks. */
+  bron: 'ag' | 'meeting' | 'shoot' | 'reeks'
   soort: Soort
   titel: string
   beschrijving: string | null
@@ -58,6 +58,8 @@ export type Item = {
   velden: Record<string, unknown> | null
   subtaken?: number
   updated_at: string
+  /** Een keer uit een reeks (vast blok, herhalende afspraak of taak; lib/agenda/reeksen.ts). */
+  reeks?: { id: string; soort: 'blok' | 'afspraak' | 'taak'; blok_type: string | null; datum: string }
 }
 
 // ── Datums ──────────────────────────────────────────────────────────────────
@@ -417,6 +419,26 @@ export function magOverschrijven(bestaand: { clickup_bijgewerkt_op: string | nul
   if (bestaand.clickup_bijgewerkt_op && cu <= Date.parse(bestaand.clickup_bijgewerkt_op)) return false
   if (bestaand.in_app_gewijzigd_op && cu <= Date.parse(bestaand.in_app_gewijzigd_op)) return false
   return true
+}
+
+/**
+ * Verschil met ClickUp (verbeterplan fase 3): ClickUp kreeg een nieuwere versie, maar het item werd
+ * nadien in de app aangepast, dus de import laat de app-versie staan. Is wat ClickUp zegt anders,
+ * dan komt het op de lijst "Verschillen met ClickUp" (niets gaat stil verloren). Null = geen verschil.
+ */
+export type ClickupVerschil = { bijgewerkt: string; titel: string; status: string; start_op: string | null; eind_op: string | null; deadline_op: string | null }
+export function clickupVerschil(
+  bestaand: { clickup_bijgewerkt_op: string | null; in_app_gewijzigd_op: string | null; titel: string; status: string; start_op: string | null; eind_op: string | null; deadline_op: string | null; clickup_verschil?: { bijgewerkt?: string } | null } | null,
+  v: { clickup_bijgewerkt_op: string | null; titel: string; status: string; start_op: string | null; eind_op: string | null; deadline_op: string | null },
+): ClickupVerschil | null {
+  if (!bestaand || !v.clickup_bijgewerkt_op || !bestaand.in_app_gewijzigd_op) return null
+  const cu = Date.parse(v.clickup_bijgewerkt_op)
+  if (bestaand.clickup_bijgewerkt_op && cu <= Date.parse(bestaand.clickup_bijgewerkt_op)) return null // niets nieuws in ClickUp
+  if (cu > Date.parse(bestaand.in_app_gewijzigd_op)) return null // ClickUp is nieuwer: de import neemt het gewoon over
+  if (bestaand.clickup_verschil?.bijgewerkt === v.clickup_bijgewerkt_op) return null // al gemeld (of al gezien)
+  const zelfde = (a: string | null, b: string | null) => (a && b ? Date.parse(a) === Date.parse(b) : !a && !b)
+  const anders = bestaand.titel !== v.titel || bestaand.status !== v.status || !zelfde(bestaand.start_op, v.start_op) || !zelfde(bestaand.eind_op, v.eind_op) || !zelfde(bestaand.deadline_op, v.deadline_op)
+  return anders ? { bijgewerkt: v.clickup_bijgewerkt_op, titel: v.titel, status: v.status, start_op: v.start_op, eind_op: v.eind_op, deadline_op: v.deadline_op } : null
 }
 
 /** Klantnaam en mapnaam vergelijken (zonder rechtsvorm, hoofdletters of leestekens). */

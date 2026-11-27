@@ -5,6 +5,7 @@ import { haalSyncTaken, clickupConfigured, type SyncTaak } from '@/lib/clickup'
 import { syncGezondheid } from '@/lib/sales/clickup-agenda-sync'
 import { isBookable, mergeIntervals, type Interval } from '@/lib/sales/availability'
 import { veiligeFout } from '@/lib/meetings/server'
+import { vasteBlokkenVoor } from '@/lib/agenda/team-server'
 import {
   voegSamen, clickupMeetingBezet, zelfdePersoon, clickupPersoon,
   type KalenderItem, type MeetingBron, type AfspraakBron,
@@ -26,6 +27,8 @@ export type KalenderData = {
   bronnen: { google: { ok: boolean; fout: string | null }; clickup: { ok: boolean; fout: string | null } }
   syncWaarschuwing: string | null
   regels: { slotMin: number; duurMin: number; tijdzone: string }
+  /** Vaste blokken uit de teamagenda (verbeterplan fase 3): niet boekbaar, intern een waarschuwing. */
+  blokken?: { start: string; eind: string; titel: string }[]
 }
 
 export type Negeer = { meetingId?: string | null; afspraakId?: string | null }
@@ -101,7 +104,9 @@ export async function kalenderData(admin: Admin, opts: {
         })
         .catch(() => undefined)
     : Promise.resolve(undefined)
-  const [cu, gg, mtRes, clickupMetMelding] = await Promise.all([clickupP, googleP, meetingsP, syncP])
+  // Vaste blokken uit de teamagenda (Sales, Focuswerk …): klantboekingen nooit daarin, intern een waarschuwing.
+  const blokkenP = vasteBlokkenVoor(admin, assignee, ruimVan, ruimTot)
+  const [cu, gg, mtRes, clickupMetMelding, blokken] = await Promise.all([clickupP, googleP, meetingsP, syncP, blokkenP])
   const meetings = ((mtRes as { data: (MeetingBron & { agenda_id: string })[] | null }).data ?? [])
   const meetingsFout = (mtRes as { error?: { message?: string } | null }).error?.message ?? null
 
@@ -111,6 +116,7 @@ export async function kalenderData(admin: Admin, opts: {
   const extraBezet = mergeIntervals([
     ...clickupMeetingBezet(cu.taken.filter((t) => !eigenTaken.has(t.id))),
     ...meetings.filter((m) => m.id !== negeerMeeting?.id).map((m) => ({ start: Date.parse(m.starts_at), end: Date.parse(m.ends_at) })),
+    ...blokken.map((b) => ({ start: b.start, end: b.end })),
   ])
   const negeerBlok = negeerMeeting ? { start: Date.parse(negeerMeeting.starts_at), end: Date.parse(negeerMeeting.ends_at) } : null
 
@@ -153,6 +159,7 @@ export async function kalenderData(admin: Admin, opts: {
 
   return {
     agendas, agendaId: agenda.id, items,
+    blokken: blokken.filter((b) => b.end > opts.van && b.start < opts.tot).map((b) => ({ start: new Date(b.start).toISOString(), eind: new Date(b.end).toISOString(), titel: b.titel })),
     segmenten: betrouwbaar && opts.vrij !== false ? segmenten : [],
     beschikbaarheid: { ok: betrouwbaar, fout: betrouwbaar ? null : `Vrije momenten kunnen nu niet betrouwbaar berekend worden. ${fouten.join(' ')}`.trim() },
     bronnen: {
@@ -192,7 +199,9 @@ export async function controleerConflicten(admin: Admin, opts: { agendaId: strin
     .filter((i) => !(opts.negeer?.meetingId && i.id === opts.negeer.meetingId && (i.bron === 'meeting' || i.bron === 'klantboeking')))
     .filter((i) => !(opts.negeer?.afspraakId && i.id === opts.negeer.afspraakId && i.bron === 'afspraak'))
     .filter((i) => Date.parse(i.start) < opts.eind && opts.start < Date.parse(i.eind))
-    .map((i) => ({ titel: i.titel, start: i.start, eind: i.eind, bron: i.bron }))
+    .map((i) => ({ titel: i.titel, start: i.start, eind: i.eind, bron: i.bron as string }))
+  // Een vast blok (Sales, Focuswerk …) is geen verbod intern, wel een waarschuwing met de reden.
+  for (const b of d.blokken ?? []) if (Date.parse(b.start) < opts.eind && opts.start < Date.parse(b.eind)) lijst.push({ titel: `Vast blok: ${b.titel}`, start: b.start, eind: b.eind, bron: 'blok' })
   const fouten = [d.bronnen.google.fout, d.bronnen.clickup.fout].filter(Boolean) as string[]
   return { betrouwbaar: fouten.length === 0, fout: fouten.length ? fouten.join(' ') : null, lijst }
 }
