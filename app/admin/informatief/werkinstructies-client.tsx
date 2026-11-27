@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2, Plus, Check, Pencil, Archive, RotateCcw, History, ChevronDown, X } from 'lucide-react'
 import { zoekVeld } from '@/lib/zoekveld'
-import { leesStand, LEES_LABEL, type Werkinstructie, type LeesStand } from '@/lib/team/werkinstructies'
+import { leesStand, LEES_LABEL, sorteerInstructies, type Werkinstructie, type LeesStand } from '@/lib/team/werkinstructies'
 
 type Data = {
   instructies: Werkinstructie[]
@@ -47,7 +47,7 @@ export function WerkinstructiesClient() {
 
   const lijst = useMemo(() => {
     const q = zoek.trim().toLowerCase()
-    return (d?.instructies ?? []).filter((i) => !q || `${i.titel} ${i.inhoud}`.toLowerCase().includes(q))
+    return sorteerInstructies((d?.instructies ?? []).filter((i) => !q || `${i.titel} ${i.inhoud}`.toLowerCase().includes(q)))
   }, [d, zoek])
   const dienstNaam = (s: string | null) => (s ? d?.diensten.find((x) => x.slug === s)?.naam ?? s : null)
   const rolNaam = (s: string | null) => (s ? d?.sjablonen.find((x) => x.key === s)?.naam ?? s : null)
@@ -72,10 +72,10 @@ export function WerkinstructiesClient() {
           const isOpen = open === i.id
           const labels = [i.bedrijf ? BEDRIJF[i.bedrijf] ?? i.bedrijf : null, dienstNaam(i.dienst_slug), rolNaam(i.rol_sjabloon)].filter(Boolean) as string[]
           return (
-            <li key={i.id} className={`card-base !p-0 ${i.gearchiveerd_op ? 'opacity-60' : ''}`}>
+            <li key={i.id} className={`card-base !p-0 ${i.gearchiveerd_op ? 'opacity-60' : ''} ${i.soort === 'afspraken' ? 'ring-1 ring-gray-900' : ''}`}>
               <button type="button" onClick={() => setOpen(isOpen ? null : i.id)} className="w-full text-left px-4 py-3 flex items-start gap-3">
                 <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-sm">{i.titel}</div>
+                  <div className="font-semibold text-sm">{i.titel}{i.soort === 'afspraken' && <span className="ml-2 label-mono text-gray-500">Vaste pagina</span>}</div>
                   <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[11px]">
                     {labels.length ? labels.map((l) => <span key={l} className="rounded-full border border-gray-200 px-2 py-0.5 text-gray-600">{l}</span>) : <span className="text-gray-400">Voor iedereen</span>}
                     <span className="text-gray-400">· versie {i.versie} · {datum(i.updated_at)}</span>
@@ -88,7 +88,7 @@ export function WerkinstructiesClient() {
                 <div className="px-4 pb-4 space-y-3 border-t border-gray-100 pt-3">
                   <div className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{i.inhoud}</div>
                   <div className="flex flex-wrap items-center gap-2">
-                    {!i.gearchiveerd_op && stand !== 'gelezen' && <button type="button" disabled={!!bezig} onClick={() => post({ actie: 'gelezen', id: i.id }, i.id, 'Gelezen.')} className="btn-primary !py-1.5 !text-sm">{bezig === i.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Gelezen</button>}
+                    {!i.gearchiveerd_op && stand !== 'gelezen' && <button type="button" disabled={!!bezig} onClick={() => post({ actie: 'gelezen', id: i.id }, i.id, i.soort === 'afspraken' ? 'Bevestigd.' : 'Gelezen.')} className="btn-primary !py-1.5 !text-sm">{bezig === i.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}{i.soort === 'afspraken' ? 'Ik bevestig deze afspraken' : 'Gelezen'}</button>}
                     {d.magBeheren && <button type="button" onClick={() => setBewerk(i)} className="btn-secondary !py-1.5 !text-sm"><Pencil className="h-3.5 w-3.5" />Aanpassen</button>}
                     {d.magBeheren && <Versies id={i.id} />}
                     {d.magBeheren && (i.gearchiveerd_op
@@ -144,6 +144,7 @@ function InstructieVenster({ i, d, onSluit, onBewaar, bezig }: { i: Werkinstruct
   const [bedrijf, setBedrijf] = useState(i?.bedrijf ?? '')
   const [dienst, setDienst] = useState(i?.dienst_slug ?? '')
   const [rol, setRol] = useState(i?.rol_sjabloon ?? '')
+  const [afspraken, setAfspraken] = useState(i?.soort === 'afspraken')
   const INP = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-gray-900/15'
   return (
     <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4" onClick={onSluit}>
@@ -156,10 +157,11 @@ function InstructieVenster({ i, d, onSluit, onBewaar, bezig }: { i: Werkinstruct
           <label className="block"><span className="text-xs font-medium text-gray-600">Dienst</span><select className={INP} value={dienst} onChange={(e) => setDienst(e.target.value)}><option value="">Geen</option>{d.diensten.filter((x) => !bedrijf || !x.bedrijf || x.bedrijf === bedrijf).map((x) => <option key={x.slug} value={x.slug}>{x.naam}</option>)}</select></label>
           <label className="block"><span className="text-xs font-medium text-gray-600">Enkel voor rol</span><select className={INP} value={rol} onChange={(e) => setRol(e.target.value)}><option value="">Iedereen</option>{d.sjablonen.map((x) => <option key={x.key} value={x.key}>{x.naam}</option>)}</select></label>
         </div>
+        <label className="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={afspraken} onChange={(e) => setAfspraken(e.target.checked)} />Vaste pagina: gedragsafspraken en rolverdeling (bovenaan, iedereen bevestigt)</label>
         {i && <p className="text-[11px] text-gray-500">Pas je de titel of de tekst aan, dan wordt het versie {i.versie + 1} en vraagt de app iedereen ze opnieuw te lezen. Enkel labels aanpassen doet dat niet.</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onSluit} className="btn-secondary" disabled={bezig}>Annuleren</button>
-          <button type="button" disabled={bezig} onClick={() => onBewaar({ actie: i ? 'wijzig' : 'nieuw', id: i?.id, versie: i?.versie, titel, inhoud, bedrijf: bedrijf || null, dienst_slug: dienst || null, rol_sjabloon: rol || null })} className="btn-primary">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Bewaren</button>
+          <button type="button" disabled={bezig} onClick={() => onBewaar({ actie: i ? 'wijzig' : 'nieuw', id: i?.id, versie: i?.versie, titel, inhoud, bedrijf: bedrijf || null, dienst_slug: dienst || null, rol_sjabloon: rol || null, soort: afspraken ? 'afspraken' : 'instructie' })} className="btn-primary">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Bewaren</button>
         </div>
       </div>
     </div>

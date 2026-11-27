@@ -37,6 +37,8 @@ const ALLE_DIENSTEN = [...Object.keys(DIENST_LABELS), DOORGEREKEND, NIET_GECATEG
 const STATUS_LABEL: Record<FeitStatus, string> = { betaald: 'Betaald', gedeeltelijk: 'Gedeeltelijk betaald', open: 'Openstaand', gecrediteerd: 'Gecrediteerd' }
 const PRESETS: [string, string][] = [['deze_maand', 'Deze maand'], ['vorige_maand', 'Vorige maand'], ['dit_kwartaal', 'Dit kwartaal'], ['vorig_kwartaal', 'Vorig kwartaal'], ['dit_jaar', 'Dit jaar'], ['vorig_jaar', 'Vorig jaar'], ['laatste_12', 'Laatste 12 maanden']]
 const sel = 'rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm'
+const BEDRIJF_NAAM: Record<string, string> = { nextgenmedia: 'NextGenMedia', nextgensolutions: 'NextGenSolutions', algemeen: 'Algemeen' }
+const bedrijfNaam = (k: string) => BEDRIJF_NAAM[k] ?? 'Nog geen bedrijf'
 const bucketLabel = (b: string) => /^\d{4}-\d{2}$/.test(b) ? `${['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'][Number(b.slice(5)) - 1]} ${b.slice(2, 4)}` : b.replace('-', ' ')
 
 function Groei({ p, verschil }: { p: number | null; verschil?: number }) {
@@ -92,6 +94,7 @@ export function RapportageClient() {
   const [van, setVan] = useState(''); const [tot, setTot] = useState('')
   const [dienst, setDienst] = useState(''); const [klant, setKlant] = useState('')
   const [status, setStatus] = useState<FeitStatus | ''>(''); const [type, setType] = useState<'' | 'eenmalig' | 'terugkerend'>('')
+  const [bedrijf, setBedrijf] = useState('')
   const [gran, setGran] = useState<Gran>('maand')
   const [lijnen, setLijnen] = useState<string[]>([])
   const [toonTotaal, setToonTotaal] = useState(true)
@@ -106,10 +109,11 @@ export function RapportageClient() {
   const sleutel = preset === 'specifiek' && specifiek ? specifiek : preset === 'aangepast' && van && tot ? `aangepast:${van}:${tot}` : preset
   const P: Periode = periodeVan(sleutel, vandaag)
   const V: Periode = vorigePeriode(P)
-  const f = useMemo(() => filterFeiten(data?.feiten ?? [], { dienst: dienst || null, klant: klant || null, status: status || null, type: type || null }), [data, dienst, klant, status, type])
+  const f = useMemo(() => filterFeiten(data?.feiten ?? [], { dienst: dienst || null, klant: klant || null, status: status || null, type: type || null, bedrijf: bedrijf || null }), [data, dienst, klant, status, type, bedrijf])
   const t = useMemo(() => totalen(f, P), [f, P.van, P.tot]) // eslint-disable-line react-hooks/exhaustive-deps
   const tv = useMemo(() => totalen(f, V), [f, V.van, V.tot]) // eslint-disable-line react-hooks/exhaustive-deps
   const perDienst = useMemo(() => groepeer(f, P, V, 'dienst'), [f, P.van, P.tot, V.van, V.tot]) // eslint-disable-line react-hooks/exhaustive-deps
+  const perBedrijf = useMemo(() => groepeer(f, P, V, 'bedrijf'), [f, P.van, P.tot, V.van, V.tot]) // eslint-disable-line react-hooks/exhaustive-deps
   const perKlant = useMemo(() => groepeer(f, P, V, 'client_id'), [f, P.van, P.tot, V.van, V.tot]) // eslint-disable-line react-hooks/exhaustive-deps
   const evo = useMemo(() => evolutie(f, P, gran, lijnen), [f, P.van, P.tot, gran, lijnen]) // eslint-disable-line react-hooks/exhaustive-deps
   const rec = useMemo(() => f.filter((x) => x.recurring), [f])
@@ -133,15 +137,17 @@ export function RapportageClient() {
   }, [jaar])
 
   const werkmap = (): Werkmap => {
-    const filters = [{ label: 'Periode', waarde: `${P.label || `${datumKort(P.van)} – ${datumKort(P.tot)}`} (${datumKort(P.van)} – ${datumKort(P.tot)})` }, ...(dienst ? [{ label: 'Dienst', waarde: dienstLabel(dienst) }] : []), ...(klant ? [{ label: 'Klant', waarde: klantNaam(klant) }] : []), ...(status ? [{ label: 'Status', waarde: STATUS_LABEL[status] }] : []), ...(type ? [{ label: 'Soort', waarde: type }] : [])]
+    const filters = [{ label: 'Periode', waarde: `${P.label || `${datumKort(P.van)} – ${datumKort(P.tot)}`} (${datumKort(P.van)} – ${datumKort(P.tot)})` }, ...(dienst ? [{ label: 'Dienst', waarde: dienstLabel(dienst) }] : []), ...(klant ? [{ label: 'Klant', waarde: klantNaam(klant) }] : []), ...(status ? [{ label: 'Status', waarde: STATUS_LABEL[status] }] : []), ...(type ? [{ label: 'Soort', waarde: type }] : []), ...(bedrijf ? [{ label: 'Bedrijf', waarde: bedrijf === 'geen' ? 'Nog geen bedrijf' : bedrijfNaam(bedrijf) }] : [])]
     const e = (c: number) => ({ v: c / 100, stijl: 'euro' as const })
     return {
-      bestandsnaam: 'omzetrapportage', titel: 'Omzetrapportage NextGenMedia', filters, bron: 'Facturenmodule (live)',
+      bestandsnaam: 'omzetrapportage', titel: 'Omzetrapportage NextGen Agency', filters, bron: 'Facturenmodule (live)',
       bladen: [
         { naam: 'Samenvatting', titel: 'Kerncijfers (excl. btw)', blokken: [{ soort: 'kpis', items: [
           { label: 'Gefactureerde omzet', waarde: e(t.gefactureerd) }, { label: 'Ontvangen (op betaaldatum)', waarde: e(t.ontvangen) }, { label: 'Betaaldatum onbekend', waarde: e(t.ontvangenOnbekend) },
           { label: 'Openstaand', waarde: e(t.open) }, { label: 'Terugkerende omzet', waarde: e(t.recurring) }, { label: 'Vorige periode', waarde: e(tv.gefactureerd) }, { label: 'Aantal facturen', waarde: t.aantal },
         ] }] },
+        { naam: 'Bedrijven', titel: 'Omzet per bedrijf', blokken: [{ soort: 'tabel', kolommen: [{ kop: 'Bedrijf' }, { kop: 'Gefactureerd', stijl: 'euro' }, { kop: 'Ontvangen', stijl: 'euro' }, { kop: 'Openstaand', stijl: 'euro' }, { kop: 'Facturen', stijl: 'aantal' }, { kop: 'Vorige periode', stijl: 'euro' }, { kop: 'Groei %', stijl: 'getal' }, { kop: 'Aandeel %', stijl: 'getal' }],
+          rijen: perBedrijf.map((g) => [bedrijfNaam(g.sleutel), g.gefactureerd / 100, g.ontvangen / 100, g.open / 100, g.aantal, g.vorige / 100, g.groeiPct, g.aandeel]) }] },
         { naam: 'Diensten', titel: 'Omzet per dienst', blokken: [{ soort: 'tabel', kolommen: [{ kop: 'Dienst' }, { kop: 'Gefactureerd', stijl: 'euro' }, { kop: 'Ontvangen', stijl: 'euro' }, { kop: 'Openstaand', stijl: 'euro' }, { kop: 'Facturen', stijl: 'aantal' }, { kop: 'Vorige periode', stijl: 'euro' }, { kop: 'Groei %', stijl: 'getal' }, { kop: 'Aandeel %', stijl: 'getal' }],
           rijen: perDienst.map((g) => [dienstLabel(g.sleutel), g.gefactureerd / 100, g.ontvangen / 100, g.open / 100, g.aantal, g.vorige / 100, g.groeiPct, g.aandeel]),
           totaal: ['Totaal', { f: 'SUM(B{R1}:B{R2})', stijl: 'totaal_euro' }, { f: 'SUM(C{R1}:C{R2})', stijl: 'totaal_euro' }, { f: 'SUM(D{R1}:D{R2})', stijl: 'totaal_euro' }, null, { f: 'SUM(F{R1}:F{R2})', stijl: 'totaal_euro' }, null, null] }] },
@@ -191,7 +197,8 @@ export function RapportageClient() {
         <select className={`${sel} max-w-[200px]`} value={klant} onChange={(e) => setKlant(e.target.value)} aria-label="Klant"><option value="">Alle klanten</option>{Object.entries(data.klanten).filter(([id]) => data.feiten.some((x) => x.client_id === id)).sort((a, b) => a[1].localeCompare(b[1], 'nl')).map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>
         <select className={sel} value={status} onChange={(e) => setStatus(e.target.value as FeitStatus | '')} aria-label="Factuurstatus"><option value="">Alle statussen</option>{(Object.keys(STATUS_LABEL) as FeitStatus[]).map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}</select>
         <select className={sel} value={type} onChange={(e) => setType(e.target.value as typeof type)} aria-label="Eenmalig of terugkerend"><option value="">Eenmalig + terugkerend</option><option value="eenmalig">Eenmalig</option><option value="terugkerend">Terugkerend</option></select>
-        {(dienst || klant || status || type) && <button type="button" onClick={() => { setDienst(''); setKlant(''); setStatus(''); setType('') }} className="btn-secondary text-xs"><X className="h-3.5 w-3.5" />Filters wissen</button>}
+        <select className={sel} value={bedrijf} onChange={(e) => setBedrijf(e.target.value)} aria-label="Bedrijf"><option value="">Beide bedrijven</option>{Object.entries(BEDRIJF_NAAM).map(([k, l]) => <option key={k} value={k}>{l}</option>)}<option value="geen">Nog geen bedrijf</option></select>
+        {(dienst || klant || status || type || bedrijf) && <button type="button" onClick={() => { setDienst(''); setKlant(''); setStatus(''); setType(''); setBedrijf('') }} className="btn-secondary text-xs"><X className="h-3.5 w-3.5" />Filters wissen</button>}
         <div className="flex-1" />
         <span className="text-xs text-gray-500">{datumKort(P.van)} – {datumKort(P.tot)} · vergeleken met {datumKort(V.van)} – {datumKort(V.tot)}</span>
         <ExportKnop werkmap={werkmap} label="Excel" className="btn-secondary text-xs" title="Exporteert exact de huidige selectie" />
@@ -206,6 +213,26 @@ export function RapportageClient() {
         <Kpi titel="Omzetgroei" waarde={pct(groeiPct)} uitleg={`Gefactureerde omzet t.o.v. ${datumKort(V.van)} – ${datumKort(V.tot)}.`} sub={<Groei p={groeiPct} verschil={t.gefactureerd - tv.gefactureerd} />} />
         <Kpi titel="Facturen" waarde={String(t.aantal)} uitleg="Aantal uitgereikte facturen (en gefactureerde maanden van terugkerende facturatie) in deze periode." />
       </div>
+
+      {/* Omzet per bedrijf (fase 7) */}
+      {perBedrijf.length > 0 && (
+        <section className="card-base space-y-3">
+          <div className="flex items-baseline justify-between gap-2 flex-wrap"><h2 className="font-semibold">Omzet per bedrijf</h2><span className="text-xs text-gray-500">Gefactureerd, terugkerend en eenmalig · som = {eur(perBedrijf.reduce((s, g) => s + g.gefactureerd, 0))}</span></div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {perBedrijf.map((g) => {
+              const rec = f.filter((x) => x.recurring && (x.bedrijf ?? '—') === g.sleutel && x.datum >= P.van && x.datum <= P.tot).reduce((s2, x) => s2 + x.bedrag, 0)
+              return (
+                <button key={g.sleutel} type="button" onClick={() => setBedrijf(g.sleutel === '—' ? 'geen' : g.sleutel)} className="text-left rounded-xl border border-gray-200 p-3 hover:border-gray-400">
+                  <div className="text-xs text-gray-500">{bedrijfNaam(g.sleutel)}</div>
+                  <div className="text-lg sm:text-2xl font-semibold tabular-nums">{eur0(g.gefactureerd)}</div>
+                  <div className="text-[11px] text-gray-500 tabular-nums">{eur0(rec)} terugkerend · {eur0(g.gefactureerd - rec)} eenmalig</div>
+                  <div className="mt-0.5"><Groei p={g.groeiPct} /></div>
+                </button>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Omzet per dienst */}
       <section className="card-base space-y-3">

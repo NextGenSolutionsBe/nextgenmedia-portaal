@@ -8,7 +8,8 @@ import { laadSjablonen } from '@/lib/team/rollen-server'
 import { controleerInstructie, nieuweVersieNodig, geldtVoor, type Werkinstructie } from '@/lib/team/werkinstructies'
 
 export const dynamic = 'force-dynamic'
-const VELDEN = 'id, titel, inhoud, bedrijf, dienst_slug, rol_sjabloon, versie, gearchiveerd_op, gewijzigd_door, updated_at'
+// soort (fase 7): 'afspraken' = de vaste pagina met gedragsafspraken en rolverdeling.
+const VELDEN = 'id, titel, inhoud, bedrijf, dienst_slug, rol_sjabloon, versie, gearchiveerd_op, gewijzigd_door, updated_at, soort'
 const UUID = /^[0-9a-f-]{36}$/i
 
 /** Wie mag werkinstructies schrijven? Een hoofdbeheerder of een beheerder met Informatief. */

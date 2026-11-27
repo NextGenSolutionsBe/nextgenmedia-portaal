@@ -81,6 +81,8 @@ export type Moment = {
   verantwoordelijke: string | null
   /** Wie de factuur (of reeks) aanmaakte — Bram, Marco, Chiara… */
   door?: string | null
+  /** NextGenMedia of NextGenSolutions (fase 7, maanddoel per bedrijf). */
+  bedrijf?: string | null
   volledig: boolean
   ontbrekend: string[]
   contract_id: string | null
@@ -479,6 +481,12 @@ export function maandOverzicht(momenten: Moment[], ym: string): MaandOverzicht {
     if (t === 'gefactureerd') { gef += m.bedrag_excl; nG++ } else if (t === 'te_factureren') { open += m.bedrag_excl; nO++ }
   }
   return { gefactureerd: r2(gef), open: r2(open), totaal: r2(gef + open), aantalGefactureerd: nG, aantalOpen: nO }
+}
+
+/** Per bedrijf: gefactureerd en nog te factureren in de maand (zelfde regels als het maandoverzicht). */
+export function maandPerBedrijf(momenten: Moment[], ym: string): { bedrijf: string | null; bedrag: number; gefactureerd: boolean }[] {
+  return momenten.filter((m) => ymVan(m.datum) === ym && telt(m) && ['gefactureerd', 'te_factureren'].includes(String(tabVan(m))))
+    .map((m) => ({ bedrijf: m.bedrijf ?? null, bedrag: m.bedrag_excl, gefactureerd: tabVan(m) === 'gefactureerd' }))
 }
 
 export type OmzetMeter = { gefactureerd: number; open: number; verwacht: number; doel: number; pct: number; nodig: number; bereikt: boolean; vulGefactureerd: number; vulOpen: number }

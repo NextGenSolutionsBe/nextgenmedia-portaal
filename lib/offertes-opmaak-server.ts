@@ -12,6 +12,8 @@ import {
   type OfferteInstellingen, type OfferteContact,
 } from '@/lib/offerte-afzender'
 import { maakOffertePdf } from '@/lib/offerte-pdf'
+import { laadCatalogus } from '@/lib/bedrijven/server'
+import { minimumCheck, controleerReden } from '@/lib/financieel/fase7'
 
 /**
  * Offertes opmaken in de app (serverkant). Een opgemaakte offerte is een
@@ -173,12 +175,32 @@ async function vulKaartAan(admin: Admin, opdrachtId: string | null, v: Invoer, o
   if (Object.keys(patch).length) await admin.from('opdrachten').update({ ...patch, updated_at: nu() }).eq('id', opdrachtId)
 }
 
+/**
+ * Minimumprijs en minimale marge per dienst (verbeterplan fase 7, punt 82):
+ * onder het minimum mag, maar enkel met een reden. Die reden komt in de
+ * tijdlijn van de offerte. Zonder minimum in de catalogus verandert er niets.
+ */
+async function bewaakMinimum(admin: Admin, v: { inhoud: OfferteInhoud }, excl: number, b: Record<string, unknown>): Promise<{ reden: string; redenen: string[]; minimum: number; honorarium: number } | null> {
+  const cat = await laadCatalogus(admin as never).catch(() => null)
+  if (!cat) return null
+  const c = minimumCheck(v.inhoud.diensten, { excl }, v.inhoud.prijs, cat.diensten)
+  if (!c.onder) return null
+  const reden = controleerReden(b.minimum_reden)
+  if (!reden) throw new OfferteFout(`${c.redenen[0]} Geef een reden om toch door te gaan.`, 422)
+  return { reden, redenen: c.redenen, minimum: c.minimum, honorarium: c.honorarium }
+}
+async function logMinimum(admin: Admin, offerteId: string, m: { reden: string; redenen: string[]; minimum: number; honorarium: number } | null, door: string | null) {
+  if (!m) return
+  try { await admin.from('offerte_events').insert({ offerte_id: offerteId, soort: 'onder_minimum', meta: { ...m, door } }) } catch { /* logboek is een extra */ }
+}
+
 /** Nieuwe opgemaakte offerte (concept). Daarna versturen via de MailComposer, zoals elke offerte. */
 export async function maakOpgemaakteOfferte(admin: Admin, b: Record<string, unknown>, door: { userId: string | null; email: string | null }): Promise<Offerte> {
   const v = await leesInvoer(admin, b, null)
   const klant = await klantVoorPdf(admin, v.clientId, v.klantNaam)
   if (!klant) throw new OfferteFout('Die klant bestaat niet.')
   const prijs = berekenPrijs(v.inhoud.prijs, v.inhoud.extra)
+  const minimum = await bewaakMinimum(admin, v, prijs.excl, b)
   const bytes = await bouwOffertePdf(admin, { inhoud: v.inhoud, merk: v.merk, verantwoordelijke: v.verantwoordelijke, nummer: v.nummer, klant })
   const pdf = await bewaarPdf(admin, bytes, v.nummer, klant.naam)
   const o = await maakOfferte(admin, {
@@ -195,11 +217,12 @@ export async function maakOpgemaakteOfferte(admin: Admin, b: Record<string, unkn
   if (error && /column|schema cache/i.test(error.message)) ({ data, error } = await admin.from('offertes').update({ updated_at: nu() }).eq('id', o.id).select('*').single())
   if (error) throw new Error(error.message)
   await vulKaartAan(admin, (data as Offerte).opdracht_id, v, o.id).catch(() => null)
+  await logMinimum(admin, o.id, minimum, door.email)
   return data as Offerte
 }
 
 /** Een concept aanpassen: nieuwe pdf, zelfde link. Verstuurd = vast; maak dan een kopie. */
-export async function wijzigOpgemaakteOfferte(admin: Admin, id: string, b: Record<string, unknown>): Promise<Offerte> {
+export async function wijzigOpgemaakteOfferte(admin: Admin, id: string, b: Record<string, unknown>, door: string | null = null): Promise<Offerte> {
   const o = await leesOfferte(admin, id)
   if (!o) throw new OfferteFout('Offerte niet gevonden.', 404)
   if (o.bron !== 'opgemaakt') throw new OfferteFout('Deze offerte is een pdf; die pas je niet aan in de app.', 409)
@@ -208,6 +231,7 @@ export async function wijzigOpgemaakteOfferte(admin: Admin, id: string, b: Recor
   const klant = await klantVoorPdf(admin, v.clientId, v.klantNaam)
   if (!klant) throw new OfferteFout('Die klant bestaat niet.')
   const prijs = berekenPrijs(v.inhoud.prijs, v.inhoud.extra)
+  const minimum = await bewaakMinimum(admin, v, prijs.excl, b)
   const bytes = await bouwOffertePdf(admin, { inhoud: v.inhoud, merk: v.merk, verantwoordelijke: v.verantwoordelijke, nummer: v.nummer, klant })
   const pdf = await bewaarPdf(admin, bytes, v.nummer, klant.naam)
   const { data, error } = await admin.from('offertes').update({
@@ -222,6 +246,7 @@ export async function wijzigOpgemaakteOfferte(admin: Admin, id: string, b: Recor
     await admin.from('opdrachten').update({ bedrag_excl: prijs.excl || null, updated_at: nu() }).eq('id', na.opdracht_id).eq('aangemaakt_door_offerte', id).then(() => null, () => null)
     await vulKaartAan(admin, na.opdracht_id, v, id).catch(() => null)
   }
+  await logMinimum(admin, id, minimum, door)
   return na
 }
 

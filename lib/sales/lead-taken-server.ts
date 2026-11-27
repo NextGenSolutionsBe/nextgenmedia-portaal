@@ -409,7 +409,7 @@ const TEAM: Bron = {
   omschrijving: (t, _c, marker) => teamTaakOmschrijving({ link: `${baseUrl().replace(/\/$/, '')}/admin`, klant: t.klant_naam ?? null, notitie: t.notitie, door: t.created_by_email, marker }),
 }
 
-export async function maakTeamTaak(admin: Admin, b: LeadTaakInvoer & { aanvraag_sleutel?: unknown; client_id?: unknown; opvolg_ref?: unknown }, door: { userId: string | null; email: string | null }): Promise<{ taak: TaakRij; herhaald: boolean }> {
+export async function maakTeamTaak(admin: Admin, b: LeadTaakInvoer & { aanvraag_sleutel?: unknown; client_id?: unknown; opvolg_ref?: unknown; beloofd_aan?: unknown }, door: { userId: string | null; email: string | null }): Promise<{ taak: TaakRij; herhaald: boolean }> {
   const extra: Record<string, unknown> = {}
   if (typeof b.client_id === 'string' && UUID.test(b.client_id)) {
     const { data: k } = await admin.from('clients').select('id, company_name').eq('id', b.client_id).maybeSingle()
@@ -419,9 +419,15 @@ export async function maakTeamTaak(admin: Admin, b: LeadTaakInvoer & { aanvraag_
   }
   // Vanuit een regel in "Op te volgen": de regel vindt haar taak terug.
   if (typeof b.opvolg_ref === 'string' && OPVOLG_REF.test(b.opvolg_ref)) extra.opvolg_ref = b.opvolg_ref
+  // Taak als belofte (fase 7): aan wie we het beloofden.
+  if (typeof b.beloofd_aan === 'string' && b.beloofd_aan.trim()) extra.beloofd_aan = b.beloofd_aan.trim().slice(0, 80)
   try {
     return await maakTaak(admin, TEAM, TEAM_ID, b, door, extra)
   } catch (e) {
+    if (extra.beloofd_aan && e instanceof Error && !(e instanceof LeadTaakFout) && /beloofd_aan/i.test(e.message)) {
+      const { beloofd_aan: _b, ...zonder } = extra
+      return maakTaak(admin, TEAM, TEAM_ID, b, door, zonder)
+    }
     // Vóór de migratie bestaat de kolom nog niet: dan zonder koppeling.
     if (extra.opvolg_ref && e instanceof Error && !(e instanceof LeadTaakFout) && /opvolg_ref/i.test(e.message)) {
       const { opvolg_ref: _weg, ...zonder } = extra

@@ -57,13 +57,20 @@ export async function GET(req: NextRequest) {
         try {
           const invIds = [...new Set(r.momenten.filter((m) => m.bron === 'invoice').map((m) => m.bronId))]
           const recIds = [...new Set(r.momenten.filter((m) => m.bron === 'recurring').map((m) => m.bronId))]
-          const [inv, rec] = await Promise.all([
-            invIds.length ? admin.from('invoices').select('id, created_by').in('id', invIds) : Promise.resolve({ data: [] as { id: string; created_by: string | null }[] }),
-            recIds.length ? admin.from('recurring_invoices').select('id, created_by').in('id', recIds) : Promise.resolve({ data: [] as { id: string; created_by: string | null }[] }),
-          ])
-          const door = new Map<string, string | null>([...(inv.data ?? []), ...(rec.data ?? [])].map((x) => [x.id, x.created_by]))
+          type R = { id: string; created_by: string | null; bedrijf?: string | null }
+          const lees = async (t: string, ids: string[]): Promise<R[]> => {
+            if (!ids.length) return []
+            const a = await admin.from(t).select('id, created_by, bedrijf').in('id', ids)
+            if (!a.error) return (a.data ?? []) as R[]
+            const b = await admin.from(t).select('id, created_by').in('id', ids)
+            return (b.data ?? []) as R[]
+          }
+          const [inv, rec] = await Promise.all([lees('invoices', invIds), lees('recurring_invoices', recIds)])
+          const door = new Map<string, string | null>([...inv, ...rec].map((x) => [x.id, x.created_by]))
+          // Bedrijf per factuur (fase 7): voor het maanddoel per bedrijf.
+          const bedrijf = new Map<string, string | null>([...inv, ...rec].map((x) => [x.id, x.bedrijf ?? null]))
           const namen = await leesActorNamen(admin, [...door.values()])
-          for (const m of r.momenten) { const u = door.get(m.bronId); if (u) m.door = namen[u]?.kort ?? null }
+          for (const m of r.momenten) { const u = door.get(m.bronId); if (u) m.door = namen[u]?.kort ?? null; m.bedrijf = bedrijf.get(m.bronId) ?? null }
         } catch { /* lijst werkt ook zonder namen */ }
       })(),
     ])

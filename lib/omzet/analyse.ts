@@ -39,6 +39,8 @@ export type Feit = {
   betaaldatum: string | null
   open: number
   status: FeitStatus
+  /** NextGenMedia, NextGenSolutions of algemeen (fase 7); leeg = nog geen bedrijf. */
+  bedrijf?: string | null
 }
 
 const c = (euro: unknown) => Math.round((Number(euro) || 0) * 100)
@@ -60,14 +62,14 @@ export type RuweFactuur = {
   id: string; client_id: string | null; invoice_date: string | null; description: string | null; status: string | null
   amount_excl: number | string | null; amount_incl: number | string | null; service_slug: string | null; kind?: string | null; source?: string | null
   factuur_type?: string | null; terugkerende_omzet?: boolean | null; betaalstatus?: string | null; betaald_bedrag?: number | string | null
-  betaald_op?: string | null; credited_at?: string | null; extern_factuurnummer?: string | null; reference?: string | null
+  betaald_op?: string | null; credited_at?: string | null; extern_factuurnummer?: string | null; reference?: string | null; bedrijf?: string | null
 }
 export type RuweRegel = {
   id: string; invoice_id: string | null; recurring_id: string | null; aantal: number | string | null; prijs_excl: number | string | null
   btw_pct: number | string | null; korting_pct: number | string | null; korting_eur?: number | string | null; is_extra: boolean | null
-  service_slug?: string | null; artikel?: string | null; omschrijving?: string | null
+  service_slug?: string | null; artikel?: string | null; omschrijving?: string | null; bedrijf?: string | null
 }
-export type RuweReeks = { id: string; client_id: string | null; description: string | null; amount_excl: number | string | null; service_slug: string | null; start_month?: string; end_month?: string | null; active?: boolean | null; deleted_at?: string | null }
+export type RuweReeks = { id: string; client_id: string | null; description: string | null; amount_excl: number | string | null; service_slug: string | null; start_month?: string; end_month?: string | null; active?: boolean | null; deleted_at?: string | null; bedrijf?: string | null }
 export type RuweMaand = { recurring_id: string; month: string; status: string | null; amount_excl?: number | string | null; billing_date?: string | null; invoice_id?: string | null; betaald_op?: string | null; verwijderd_op?: string | null; extern_factuurnummer?: string | null }
 
 const regelCent = (r: RuweRegel) => c(berekenRegel({ aantal: Number(r.aantal) || 0, prijs_excl: Number(r.prijs_excl) || 0, btw_pct: Number(r.btw_pct) || 0, korting_pct: Number(r.korting_pct) || 0, korting_eur: Number(r.korting_eur) || 0 }).excl)
@@ -93,8 +95,8 @@ export function bouwFeiten(facturen: RuweFactuur[], regels: RuweRegel[], reeksen
     if (!uitgereikt(f.status) || !f.invoice_date) continue
     const eigen = perFactuur.get(f.id) ?? []
     const delen = eigen.length
-      ? eigen.map((r) => ({ sleutel: r.id, cent: regelCent(r), dienst: dienstVan(r, f.service_slug), tekst: r.artikel || r.omschrijving || f.description || 'Factuur' }))
-      : [{ sleutel: `${f.id}:0`, cent: c(f.amount_excl), dienst: dienstVan(null, f.service_slug), tekst: f.description || 'Factuur' }]
+      ? eigen.map((r) => ({ sleutel: r.id, cent: regelCent(r), dienst: dienstVan(r, f.service_slug), tekst: r.artikel || r.omschrijving || f.description || 'Factuur', bedrijf: r.bedrijf ?? f.bedrijf ?? null }))
+      : [{ sleutel: `${f.id}:0`, cent: c(f.amount_excl), dienst: dienstVan(null, f.service_slug), tekst: f.description || 'Factuur', bedrijf: f.bedrijf ?? null }]
     const totaal = delen.reduce((t, d) => t + d.cent, 0)
     const incl = Number(f.amount_incl) || 0
     const gecrediteerd = String(f.status).toLowerCase() === 'gecrediteerd'
@@ -107,8 +109,8 @@ export function bouwFeiten(facturen: RuweFactuur[], regels: RuweRegel[], reeksen
     const recurring = f.source === 'recurring' || f.factuur_type === 'terugkerend' || f.terugkerende_omzet === true || maandFactuur.has(f.id)
     const basis = { factuur: `inv:${f.id}`, invoice_id: f.id, recurring_id: null, ref: f.extern_factuurnummer || f.reference || null, client_id: f.client_id, recurring }
     delen.forEach((d, i) => {
-      uit.push({ ...basis, sleutel: `inv:${d.sleutel}`, omschrijving: d.tekst, dienst: d.dienst, datum: dag(f.invoice_date)!, soort: 'factuur', bedrag: d.cent, ontvangen: ontvangenDelen[i], betaaldatum: ontvangenDelen[i] ? dag(f.betaald_op) : null, open: openDelen[i], status })
-      if (gecrediteerd) uit.push({ ...basis, sleutel: `cred:${d.sleutel}`, omschrijving: `Creditnota — ${d.tekst}`, dienst: d.dienst, datum: dag(f.credited_at) ?? dag(f.invoice_date)!, soort: 'credit', bedrag: -d.cent, ontvangen: 0, betaaldatum: null, open: 0, status })
+      uit.push({ ...basis, sleutel: `inv:${d.sleutel}`, omschrijving: d.tekst, dienst: d.dienst, datum: dag(f.invoice_date)!, soort: 'factuur', bedrag: d.cent, ontvangen: ontvangenDelen[i], betaaldatum: ontvangenDelen[i] ? dag(f.betaald_op) : null, open: openDelen[i], status, bedrijf: d.bedrijf })
+      if (gecrediteerd) uit.push({ ...basis, sleutel: `cred:${d.sleutel}`, omschrijving: `Creditnota — ${d.tekst}`, dienst: d.dienst, datum: dag(f.credited_at) ?? dag(f.invoice_date)!, soort: 'credit', bedrag: -d.cent, ontvangen: 0, betaaldatum: null, open: 0, status, bedrijf: d.bedrijf })
     })
   }
 
@@ -130,6 +132,7 @@ export function bouwFeiten(facturen: RuweFactuur[], regels: RuweRegel[], reeksen
         sleutel: `rec:${r.id}:${maand}:${d.sleutel}`, factuur: `rec:${r.id}:${maand}`, invoice_id: null, recurring_id: r.id, ref: m.extern_factuurnummer ?? null,
         omschrijving: d.tekst, client_id: r.client_id, dienst: d.dienst, recurring: true, datum: dag(m.billing_date) ?? `${maand}-01`, soort: 'factuur',
         bedrag: d.cent, ontvangen: betaald ? d.cent : 0, betaaldatum: betaald ? dag(m.betaald_op) : null, open: betaald ? 0 : d.cent, status: betaald ? 'betaald' : 'open',
+        bedrijf: r.bedrijf ?? null,
       })
     })
   }
@@ -181,9 +184,9 @@ export function vorigePeriode(p: Periode): Periode {
 }
 
 // ── Filters en totalen ──────────────────────────────────────────────────────
-export type Filter = { dienst?: string | null; klant?: string | null; status?: FeitStatus | null; type?: 'eenmalig' | 'terugkerend' | null }
+export type Filter = { dienst?: string | null; klant?: string | null; status?: FeitStatus | null; type?: 'eenmalig' | 'terugkerend' | null; bedrijf?: string | null }
 export function filter(feiten: Feit[], f: Filter): Feit[] {
-  return feiten.filter((x) => (!f.dienst || x.dienst === f.dienst) && (!f.klant || x.client_id === f.klant) && (!f.status || x.status === f.status) && (!f.type || (f.type === 'terugkerend') === x.recurring))
+  return feiten.filter((x) => (!f.dienst || x.dienst === f.dienst) && (!f.klant || x.client_id === f.klant) && (!f.status || x.status === f.status) && (!f.type || (f.type === 'terugkerend') === x.recurring) && (!f.bedrijf || (f.bedrijf === 'geen' ? !x.bedrijf : x.bedrijf === f.bedrijf)))
 }
 const inP = (d: string | null, p: Periode) => !!d && d >= p.van && d <= p.tot
 
@@ -208,11 +211,11 @@ export function totalen(feiten: Feit[], p: Periode): Totalen {
 
 export type Groep = { sleutel: string; gefactureerd: number; ontvangen: number; open: number; aantal: number; vorige: number; groeiPct: number | null; aandeel: number }
 /** Groeperen per dienst of klant; de som over alle groepen = het totaal. */
-export function groepeer(feiten: Feit[], p: Periode, vorige: Periode, op: 'dienst' | 'client_id'): Groep[] {
+export function groepeer(feiten: Feit[], p: Periode, vorige: Periode, op: 'dienst' | 'client_id' | 'bedrijf'): Groep[] {
   const m = new Map<string, Groep & { _f: Set<string> }>()
   const g = (k: string) => { let x = m.get(k); if (!x) { x = { sleutel: k, gefactureerd: 0, ontvangen: 0, open: 0, aantal: 0, vorige: 0, groeiPct: null, aandeel: 0, _f: new Set() }; m.set(k, x) } return x }
   for (const x of feiten) {
-    const k = String((op === 'dienst' ? x.dienst : x.client_id) ?? '—')
+    const k = String((op === 'dienst' ? x.dienst : op === 'bedrijf' ? x.bedrijf : x.client_id) ?? '—')
     if (inP(x.datum, p)) { const y = g(k); y.gefactureerd += x.bedrag; if (x.soort === 'factuur') { y.open += x.open; y._f.add(x.factuur) } }
     if (x.soort === 'factuur' && x.ontvangen && inP(x.betaaldatum, p)) g(k).ontvangen += x.ontvangen
     if (inP(x.datum, vorige)) g(k).vorige += x.bedrag

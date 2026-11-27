@@ -16,9 +16,11 @@ export type Werkinstructie = {
   gearchiveerd_op: string | null
   gewijzigd_door: string | null
   updated_at: string
+  /** 'afspraken' = de vaste pagina met gedragsafspraken en rolverdeling (fase 7, punt 96), bovenaan en te bevestigen. */
+  soort?: 'instructie' | 'afspraken'
 }
 
-export type InstructieInvoer = Pick<Werkinstructie, 'titel' | 'inhoud' | 'bedrijf' | 'dienst_slug' | 'rol_sjabloon'>
+export type InstructieInvoer = Pick<Werkinstructie, 'titel' | 'inhoud' | 'bedrijf' | 'dienst_slug' | 'rol_sjabloon'> & { soort: 'instructie' | 'afspraken' }
 
 const SLUG = /^[a-z0-9][a-z0-9_-]{0,60}$/
 
@@ -30,7 +32,8 @@ export function controleerInstructie(b: Record<string, unknown>): { ok: true; in
   const bedrijf = b.bedrijf === MEDIA || b.bedrijf === SOLUTIONS ? b.bedrijf : null
   const dienst_slug = typeof b.dienst_slug === 'string' && SLUG.test(b.dienst_slug) ? b.dienst_slug : null
   const rol_sjabloon = typeof b.rol_sjabloon === 'string' && /^[a-z][a-z0-9_]{1,40}$/.test(b.rol_sjabloon) ? b.rol_sjabloon : null
-  return { ok: true, invoer: { titel, inhoud, bedrijf, dienst_slug, rol_sjabloon } }
+  const soort = b.soort === 'afspraken' ? 'afspraken' : 'instructie'
+  return { ok: true, invoer: { titel, inhoud, bedrijf, dienst_slug, rol_sjabloon, soort } }
 }
 
 /** Is er inhoudelijk iets veranderd (dan een nieuwe versie)? Enkel labels aanpassen telt niet. */
@@ -58,3 +61,7 @@ export function leesStand(versie: number, gelezenVersies: number[]): LeesStand {
 }
 
 export const LEES_LABEL: Record<LeesStand, string> = { gelezen: 'Gelezen', nieuwe_versie: 'Nieuwe versie', ongelezen: 'Nog niet gelezen' }
+
+/** Vaste pagina's (gedragsafspraken) eerst, dan alfabetisch. */
+export const sorteerInstructies = <T extends Pick<Werkinstructie, 'titel' | 'soort'>>(l: T[]): T[] =>
+  [...l].sort((a, b) => Number(b.soort === 'afspraken') - Number(a.soort === 'afspraken') || a.titel.localeCompare(b.titel, 'nl'))

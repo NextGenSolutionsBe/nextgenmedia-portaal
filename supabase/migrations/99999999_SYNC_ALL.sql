@@ -9091,3 +9091,86 @@ DO $$ BEGIN
     ALTER TABLE public.opdrachten ADD CONSTRAINT opdrachten_bron_check CHECK (bron IS NULL OR bron IN ('inbound','outbound','inbound_website','doorverwezen','netwerk','lezing','event','bestaande_klant','doorverwijzing','andere'));
   END IF;
 END $$;
+
+-- ── Verbeterplan fase 7: financieel, scorecard en ritme (27 nov 2026) ──────
+-- Additief: nieuwe kolommen (leeg) en nieuwe tabellen met RLS aan (enkel service-role).
+ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL;
+ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS opdracht_id uuid REFERENCES public.opdrachten(id) ON DELETE SET NULL;
+ALTER TABLE public.cost_entries ADD COLUMN IF NOT EXISTS opdracht_id uuid REFERENCES public.opdrachten(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS purchases_client ON public.purchases(client_id) WHERE client_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS cost_entries_client ON public.cost_entries(client_id) WHERE client_id IS NOT NULL;
+ALTER TABLE public.team_taken ADD COLUMN IF NOT EXISTS beloofd_aan text;
+ALTER TABLE public.werkinstructies ADD COLUMN IF NOT EXISTS soort text NOT NULL DEFAULT 'instructie';
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'werkinstructies_soort_check') THEN
+    ALTER TABLE public.werkinstructies ADD CONSTRAINT werkinstructies_soort_check CHECK (soort IN ('instructie','afspraken'));
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS public.ritme_weekoverleg (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  week date NOT NULL UNIQUE,
+  notities jsonb NOT NULL DEFAULT '{}'::jsonb,
+  acties jsonb NOT NULL DEFAULT '[]'::jsonb,
+  aanwezig text[] NOT NULL DEFAULT '{}',
+  afgesloten_op timestamptz,
+  bijgewerkt_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.ritme_kwartaaldoelen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  kwartaal text NOT NULL CHECK (kwartaal ~ '^\d{4}-Q[1-4]$'),
+  titel text NOT NULL,
+  bedrijf text CHECK (bedrijf IS NULL OR bedrijf IN ('nextgenmedia','nextgensolutions')),
+  eigenaar text NOT NULL,
+  status text NOT NULL DEFAULT 'op_schema' CHECK (status IN ('op_schema','achter','af','niet_gehaald')),
+  notitie text,
+  gemaakt_door text,
+  gearchiveerd_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ritme_kwartaaldoelen_kw ON public.ritme_kwartaaldoelen(kwartaal);
+CREATE TABLE IF NOT EXISTS public.ritme_beslissingen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  titel text NOT NULL,
+  toelichting text,
+  bedrijf text CHECK (bedrijf IS NULL OR bedrijf IN ('nextgenmedia','nextgensolutions')),
+  voorgesteld_door text,
+  status text NOT NULL DEFAULT 'open' CHECK (status IN ('open','aangenomen','verworpen')),
+  beslist_op timestamptz,
+  gearchiveerd_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.ritme_stemmen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  beslissing_id uuid NOT NULL REFERENCES public.ritme_beslissingen(id) ON DELETE CASCADE,
+  auth_user_id uuid NOT NULL,
+  naam text,
+  stem text NOT NULL CHECK (stem IN ('voor','tegen','onthouding')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (beslissing_id, auth_user_id)
+);
+CREATE TABLE IF NOT EXISTS public.een_op_een (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  personeel_id uuid NOT NULL REFERENCES public.personeel(id) ON DELETE CASCADE,
+  medewerker_user_id uuid,
+  met_user_id uuid,
+  met_naam text,
+  datum date NOT NULL,
+  notities text,
+  afspraken jsonb NOT NULL DEFAULT '[]'::jsonb,
+  verwijderd_op timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS een_op_een_personeel ON public.een_op_een(personeel_id);
+CREATE INDEX IF NOT EXISTS een_op_een_mensen ON public.een_op_een(medewerker_user_id, met_user_id);
+ALTER TABLE public.ritme_weekoverleg ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ritme_kwartaaldoelen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ritme_beslissingen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ritme_stemmen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.een_op_een ENABLE ROW LEVEL SECURITY;

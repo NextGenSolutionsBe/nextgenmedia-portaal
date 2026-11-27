@@ -37,13 +37,13 @@ export async function GET() {
     if (!(await magIk('finance', 'bekijken'))) return NextResponse.json({ error: 'Geen toegang tot de omzetrapportage.' }, { status: 403 })
     const admin = createAdminSupabaseClient() as unknown as Admin
     const [facturen, reeksen, maanden, klanten] = await Promise.all([
-      alles<RuweFactuur>(() => admin.from('invoices').select('id, client_id, invoice_date, description, status, amount_excl, amount_incl, service_slug, kind, source, factuur_type, terugkerende_omzet, betaalstatus, betaald_bedrag, betaald_op, credited_at, extern_factuurnummer, reference').order('invoice_date')),
-      alles<RuweReeks>(() => admin.from('recurring_invoices').select('id, client_id, description, amount_excl, service_slug, start_month, end_month, active, deleted_at')),
+      alles<RuweFactuur>(() => admin.from('invoices').select('id, client_id, invoice_date, description, status, amount_excl, amount_incl, service_slug, kind, source, factuur_type, terugkerende_omzet, betaalstatus, betaald_bedrag, betaald_op, credited_at, extern_factuurnummer, reference, bedrijf').order('invoice_date')),
+      alles<RuweReeks>(() => admin.from('recurring_invoices').select('id, client_id, description, amount_excl, service_slug, start_month, end_month, active, deleted_at, bedrijf')),
       alles<RuweMaand>(() => admin.from('recurring_invoice_months').select('recurring_id, month, status, amount_excl, billing_date, invoice_id, betaald_op, verwijderd_op, extern_factuurnummer')),
       alles<{ id: string; company_name: string }>(() => admin.from('clients').select('id, company_name')),
     ])
     const regels: RuweRegel[] = []
-    const velden = 'id, invoice_id, recurring_id, aantal, prijs_excl, btw_pct, korting_pct, korting_eur, is_extra, service_slug, artikel, omschrijving'
+    const velden = 'id, invoice_id, recurring_id, aantal, prijs_excl, btw_pct, korting_pct, korting_eur, is_extra, service_slug, artikel, omschrijving, bedrijf'
     for (const s of stukken(facturen.map((f) => f.id))) { const { data, error } = await admin.from('invoice_lines').select(velden).in('invoice_id', s); if (error) throw new Error(error.message); regels.push(...(data ?? [])) }
     for (const s of stukken(reeksen.map((r) => r.id))) { const { data, error } = await admin.from('invoice_lines').select(velden).in('recurring_id', s); if (error) throw new Error(error.message); regels.push(...(data ?? [])) }
     const feiten = bouwFeiten(facturen, regels, reeksen, maanden)

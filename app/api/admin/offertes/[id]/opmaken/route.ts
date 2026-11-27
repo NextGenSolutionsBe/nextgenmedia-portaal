@@ -18,7 +18,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!user) return NextResponse.json({ error: 'Geen toegang' }, { status: 403 })
     const { id } = await params
     const b = await req.json().catch(() => ({})) as Record<string, unknown>
-    const o = await wijzigOpgemaakteOfferte(createAdminSupabaseClient(), id, b)
+    const o = await wijzigOpgemaakteOfferte(createAdminSupabaseClient(), id, b, user.email ?? null)
     await logAudit({ action: 'offerte.aangepast', entityType: 'offerte', entityId: id, summary: `Offerte ${o.offertenummer ?? ''} "${o.titel}" aangepast (concept)`, actorUserId: user.id, actorEmail: user.email ?? null, ...requestMeta(req) })
     return NextResponse.json({ offerte: { ...o, link: publiekeLink(o) } })
   } catch (e) { return fout(e, 'offerte.opmaken.PATCH') }

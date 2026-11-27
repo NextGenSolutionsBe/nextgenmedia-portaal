@@ -196,6 +196,7 @@ function TaakToewijzen({ opties, onSluit, onKlaar }: { opties: Opties | null; on
   const [merk, setMerk] = useState<'nextgenmedia' | 'nextgensolutions'>('nextgenmedia')
   const [deadline, setDeadline] = useState(plusDagen(1))
   const [notitie, setNotitie] = useState('')
+  const [beloofdAan, setBeloofdAan] = useState('')
   const [bezig, setBezig] = useState(false)
   const [sleutel] = useState(() => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : '00000000-0000-4000-8000-000000000000'))
   const lijst = opties?.lijsten.find((l) => l.merk === merk)
@@ -217,7 +218,7 @@ function TaakToewijzen({ opties, onSluit, onKlaar }: { opties: Opties | null; on
     if (!assignee) { toast.error('Kies voor wie de taak is.'); return }
     setBezig(true)
     try {
-      const j = await api<{ taak: Taak }>({ method: 'POST', body: JSON.stringify({ aanvraag_sleutel: sleutel, omschrijving, deadline, notitie, assignee_id: assignee, merk }) })
+      const j = await api<{ taak: Taak }>({ method: 'POST', body: JSON.stringify({ aanvraag_sleutel: sleutel, omschrijving, deadline, notitie, assignee_id: assignee, merk, ...(beloofdAan.trim() ? { beloofd_aan: beloofdAan.trim() } : {}) }) })
       if (j.taak.sync_status === 'ok') toast.success(`Taak voor ${voornaam(j.taak.clickup_assignee_naam)} staat in ClickUp.`)
       else toast.error(j.taak.sync_fout ?? 'Bewaard, maar nog niet in ClickUp.')
       onKlaar({ ...j.taak, soort: 'team', project: null })
@@ -275,6 +276,8 @@ function TaakToewijzen({ opties, onSluit, onKlaar }: { opties: Opties | null; on
               </div>
 
               <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="taak-beloofd">Beloofd aan <span className="text-gray-400 font-normal">(optioneel: een klant of collega die erop rekent)</span></label>
+                <input id="taak-beloofd" className="input-base mb-3" value={beloofdAan} onChange={(e) => setBeloofdAan(e.target.value)} maxLength={80} placeholder="Bv. Bakkerij Peeters of Bram" />
                 <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="taak-notitie">Notitie <span className="text-gray-400 font-normal">(optioneel)</span></label>
                 <textarea id="taak-notitie" rows={2} className="input-base" value={notitie} onChange={(e) => setNotitie(e.target.value)} maxLength={5000} placeholder="Extra uitleg of een link" />
               </div>

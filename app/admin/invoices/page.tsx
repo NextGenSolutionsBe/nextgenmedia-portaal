@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { PlannerClient } from './planner/planner-client'
+import { ExportFacturatie } from './export-facturatie'
 
 /**
  * Facturen = interne facturatieplanner: één lijst (en kalender) van alles wat
@@ -12,9 +13,12 @@ export default function InvoicesPage({ searchParams }: { searchParams?: { maand?
   const maand = /^\d{4}-\d{2}$/.test(searchParams?.maand ?? '') ? `${searchParams!.maand}-01` : null
   return (
     <div className="space-y-5 animate-fade-in">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-semibold">Facturen</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Wat moet wanneer voor wie gefactureerd worden.</p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-semibold">Facturen</h1>
+          <p className="text-sm text-gray-500 mt-0.5">Wat moet wanneer voor wie gefactureerd worden.</p>
+        </div>
+        <ExportFacturatie />
       </div>
       <PlannerClient startCategorie={searchParams?.categorie ?? null} startWeergave={searchParams?.weergave ?? 'lijst'} startDatum={maand} startFactuur={/^[0-9a-f-]{36}$/i.test(searchParams?.factuur ?? '') ? searchParams!.factuur! : null} />
     </div>

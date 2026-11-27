@@ -7,7 +7,7 @@ import {
   vandaagBrussel, isDatum, ymVan, plusDagen, maandStart, maandEind, maandRooster, roosterBereik, weekBereik, shiftYM,
   maandNaam, datumKort, DAGEN_KORT, euro, euro2, kort, pasFiltersToe, dagTotalen, sorteer, filtersActief,
   LEEG_FILTERS, PLANNER_STATUSSEN, STATUS_INFO, isMaandloos, FASEN, FASE_INFO, faseKpi, resultaat, maandKpi,
-  TABS, tabVan, inTab, sorteerWerklijst, tabTellingen, rondeItems, maandOverzicht, omzetMeter, MAAND_DOEL,
+  TABS, tabVan, inTab, sorteerWerklijst, tabTellingen, rondeItems, maandOverzicht, omzetMeter, maandPerBedrijf,
   type Moment, type Filters, type Sortering, type Tab,
 } from '@/lib/facturatie/planner-model'
 import { PlannerDetail, DagPaneel, StatusBadge, type Actie } from './planner-detail'
@@ -20,6 +20,7 @@ import { KilometerVenster } from '../kilometer-venster'
 import { ExportKnop } from '@/components/admin/export-knop'
 import { facturenWerkmap, type FactuurExportRij } from '@/lib/excel/rapporten/facturen'
 import { zoekVeld } from '@/lib/zoekveld'
+import { MaanddoelPerBedrijf, useMaanddoelen } from './maanddoel-bedrijf'
 
 /**
  * Facturen = interne facturatieplanner en communicatietool. Het team geeft aan
@@ -112,7 +113,10 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
   const zichtbaarOpenTotaal = Math.round(zichtbaarOpen.reduce((s, m) => s + m.bedrag_excl, 0) * 100) / 100
   // Maandoverzicht en omzetmeter: altijd de VOLLEDIGE maand, los van zoeken/filters/tab.
   const overzicht = useMemo(() => maandOverzicht(alle, ym), [alle, ym])
-  const meter = useMemo(() => omzetMeter(alle, ym), [alle, ym])
+  const doelen = useMaanddoelen()
+  const MAAND_DOEL = doelen.doelen.totaal
+  const meter = useMemo(() => omzetMeter(alle, ym, MAAND_DOEL), [alle, ym, MAAND_DOEL])
+  const perBedrijf = useMemo(() => maandPerBedrijf(alle, ym), [alle, ym])
   const lijstTotaal = lijst.filter((m) => m.status !== 'geannuleerd' && m.status !== 'gecrediteerd').reduce((s, m) => s + m.bedrag_excl, 0)
   const perDag = useMemo(() => { const m = new Map<string, Moment[]>(); for (const x of gefilterd.filter((y) => filters.toonGeannuleerd || (y.status !== 'geannuleerd' && y.status !== 'gecrediteerd'))) { const l = m.get(x.datum) ?? []; l.push(x); m.set(x.datum, l) } return m }, [gefilterd, filters.toonGeannuleerd])
   const totalen = useMemo(() => dagTotalen(gefilterd), [gefilterd])
@@ -253,6 +257,7 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
             <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-gray-300" /><b className="tabular-nums">{euro2(meter.open)}</b> nog te factureren</span>
             {!meter.bereikt && <span className="inline-flex items-center gap-1.5 text-gray-500"><span className="h-2.5 w-2.5 rounded-sm bg-gray-200 border border-gray-300" />{euro2(meter.nodig)} resterend tot het doel</span>}
           </div>
+          <MaanddoelPerBedrijf rijen={perBedrijf} doelen={doelen.doelen} kanAanpassen={doelen.kanAanpassen} onDoelen={doelen.zet} />
           {eerderAchterstallig.length > 0 && (
             <button type="button" onClick={() => { setAnker(eerderAchterstallig[0].datum); setTab('te_factureren') }} className="mt-2 inline-flex items-center gap-1 rounded-full bg-orange-500 text-white px-2.5 py-0.5 text-[11px] font-medium hover:bg-orange-600">
               <AlertTriangle className="h-3 w-3" />{eerderAchterstallig.length} achterstallig in eerdere maanden — bekijken

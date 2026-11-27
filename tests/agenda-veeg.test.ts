@@ -1,7 +1,7 @@
 // Vegen door de agenda: touchpad (wheel met deltaX) en vinger.
 //   npx tsx tests/agenda-veeg.test.ts
 import assert from 'node:assert/strict'
-import { wiel, vingerRichting, vingerStap, vingerMee, WIEL_DREMPEL, WIEL_STIL, MEE_MAX, type WielStand } from '../lib/agenda/veeg'
+import { wiel, vingerRichting, vingerStap, vingerMee, isTik, isZijwaarts, WIEL_DREMPEL, WIEL_STIL, MEE_MAX, type WielStand } from '../lib/agenda/veeg'
 
 let n = 0
 const test = (naam: string, f: () => void) => { f(); n++; console.log(`  ✓ ${naam}`) }
@@ -85,6 +85,16 @@ test('carrousel: de kalender volgt 1-op-1 en verspringt pas na een kwart van de 
   assert.equal(vingerStap(-210, 600, 800), 1)
   assert.equal(vingerMee(-300, 800), -300)
   assert.equal(vingerMee(-900, 800), -800)
+})
+
+test('vegen plant nooit een afspraak: enkel een korte tik of een sleep op en neer', () => {
+  assert.equal(isTik(2, 3, 150), true)
+  assert.equal(isTik(40, 2, 150), false, 'opzij geveegd')
+  assert.equal(isTik(0, 20, 150), false, 'gescrold')
+  assert.equal(isTik(1, 1, 900), false, 'ingehouden')
+  assert.equal(isZijwaarts(120, 10), true)
+  assert.equal(isZijwaarts(20, 2), false, 'nog te kort')
+  assert.equal(isZijwaarts(40, 90), false, 'een afspraak trekken gaat op en neer')
 })
 
 console.log(`\n${n} tests geslaagd\n`)

@@ -80,3 +80,15 @@ export function vingerStap(dx: number, ms: number, breedte?: number): 0 | 1 | -1
 
 /** Gsm: de kalender volgt de vinger, met wat weerstand; met een carrousel 1-op-1. */
 export const vingerMee = (dx: number, breedte?: number) => (breedte ? Math.max(-breedte, Math.min(breedte, dx)) : Math.max(-140, Math.min(140, dx * 0.7)))
+
+// ── Iets plannen op een leeg moment, zonder dat vegen dat doet (27 nov 2026) ──
+
+/** Zo lang na een veeg telt loslaten niet als "hier iets plannen". */
+export const VEEG_RUST_MS = 500
+/** Vinger of pen: enkel een korte tik op een leeg moment plant iets. */
+export const TIK_SPELING = 8
+export const TIK_MS = 600
+export const isTik = (dx: number, dy: number, ms: number) => Math.abs(dx) <= TIK_SPELING && Math.abs(dy) <= TIK_SPELING && ms <= TIK_MS
+
+/** Muis: een sleep die vooral opzij gaat is geen nieuwe afspraak (een afspraak trek je op en neer). */
+export const isZijwaarts = (dx: number, dy: number) => Math.abs(dx) > 30 && Math.abs(dx) > Math.abs(dy) * 1.5
