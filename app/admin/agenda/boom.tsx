@@ -323,7 +323,7 @@ function Rij({ diepte, soort, id, naam, kleur, eigenKleur, prive, open, onWissel
       {(mag.aanpassen || mag.toevoegen || mag.verwijderen) && (
         <div className="relative">
           <button type="button" onClick={() => setMenuOpen(menuOpen ? null : 'menu')} aria-label={`Menu ${naam}`}
-            className={`h-6 w-6 mr-1 rounded flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 ${menuOpen ? 'opacity-100' : ''} ${gekozen ? 'hover:bg-white/20' : 'hover:bg-gray-200'} ${focusRing}`}>
+            className={`h-6 w-6 mr-1 rounded flex items-center justify-center ${menuOpen ? '' : '[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus:opacity-100'} ${gekozen ? 'hover:bg-white/20' : 'hover:bg-gray-200'} ${focusRing}`}>
             <MoreHorizontal className="h-4 w-4" />
           </button>
           <Popover zwevend open={menuOpen === 'menu'} onSluit={sluit} uitlijnen="rechts" className="w-56 py-1 text-gray-800">
