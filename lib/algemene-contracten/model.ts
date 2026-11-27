@@ -34,6 +34,12 @@ export type AlgemeenContract = {
   ons_zone: Zone | null
   ons_getekend_op: string | null
   ons_getekend_door: string | null
+  /** Wie van ons tekent (Marco, Bram, Chiara). Leeg = één van ons volstaat. */
+  ons_tekenaars?: string[] | null
+  /** De plaats van de handtekening per persoon, zolang die nog niet tekende. */
+  ons_zones?: Record<string, Zone> | null
+  /** Elke handtekening van ons apart (sinds 27 nov 2026). */
+  ons_handtekeningen?: OnsHandtekening[] | null
   partij_nodig: boolean
   partij_zone: Zone | null
   partij_getekend_op: string | null
@@ -121,8 +127,80 @@ export function aantalIn(contracten: Pick<AlgemeenContract, 'map_id' | 'gearchiv
 /** De mappen waarmee de module start; eigen mappen komen erbij. */
 export const STANDAARD_MAPPEN = ['Huurovereenkomsten', 'Verzekeringen', 'Commissieregelingen', 'Partnerships', "NDA's", 'Andere']
 
-/** Wie namens NextGenMedia tekent (zelfde keuze als bij projecten). */
+/** Wie namens NextGenMedia tekent (zelfde keuze als bij projecten). Oud veld, enkel nog voor contracten van vóór 27 nov 2026. */
 export const ONDERTEKENAARS = ['Marco', 'Bram', 'Chiara', 'Gezamenlijke lead'] as const
+
+// ── Onze handtekeningen (meerdere mensen) ───────────────────────────────────
+
+/** Wie namens NextGen Agency BV kan tekenen. Elk tekent met het eigen account. */
+export const PERSONEN = ['Marco', 'Bram', 'Chiara'] as const
+export type Persoon = (typeof PERSONEN)[number]
+
+export type OnsHandtekening = { persoon: string; naam: string; email: string | null; op: string; zone: Zone | null }
+
+/** De persoon bij een naam of e-mail: "Chiara Walmagh" of "chiara@…" = Chiara. Onbekend = de voornaam zelf. */
+export function persoonVan(naam: string | null | undefined): string | null {
+  const v = String(naam ?? '').trim().split(/[\s@.]+/)[0] ?? ''
+  if (!v) return null
+  return PERSONEN.find((p) => p.toLowerCase() === v.toLowerCase()) ?? v.charAt(0).toUpperCase() + v.slice(1)
+}
+
+type OnsVelden = Pick<AlgemeenContract, 'ons_nodig' | 'ondertekenaar' | 'ons_getekend_op' | 'ons_getekend_door' | 'ons_zone'> & Partial<Pick<AlgemeenContract, 'ons_tekenaars' | 'ons_handtekeningen' | 'ons_zones' | 'gearchiveerd_op'>>
+
+/** Alle handtekeningen van ons. Een handtekening van vóór 27 nov 2026 staat enkel in ons_getekend_* en telt mee. */
+export function handtekeningenOns(c: OnsVelden): OnsHandtekening[] {
+  if (c.ons_handtekeningen?.length) return c.ons_handtekeningen
+  if (!c.ons_getekend_op) return []
+  const naam = c.ons_getekend_door ?? 'NextGen Agency BV'
+  return [{ persoon: persoonVan(naam) ?? naam, naam, email: null, op: c.ons_getekend_op, zone: c.ons_zone ?? null }]
+}
+
+/** Wie van ons moet tekenen. Leeg = één van ons volstaat (zo werkte het vóór 27 nov 2026, of niemand gekozen). */
+export function tekenaarsOns(c: OnsVelden): string[] {
+  if (c.ons_tekenaars?.length) return Array.from(new Set(c.ons_tekenaars))
+  const o = c.ondertekenaar
+  return o && (PERSONEN as readonly string[]).includes(o) ? [o] : []
+}
+
+const getekend = (h: OnsHandtekening[], p: string) => h.some((x) => x.persoon.toLowerCase() === p.toLowerCase())
+
+/** Zijn al onze handtekeningen er? */
+export function onsKlaar(c: OnsVelden, h: OnsHandtekening[] = handtekeningenOns(c)): boolean {
+  const lijst = tekenaarsOns(c)
+  return lijst.length ? lijst.every((p) => getekend(h, p)) : h.length > 0
+}
+
+/** Wie van ons moet nog tekenen (voor de taken). Niemand gekozen en nog niet getekend = Marco en Bram, zoals vroeger. */
+export function wieMoetNog(c: OnsVelden): string[] {
+  if (!c.ons_nodig || c.gearchiveerd_op) return []
+  const h = handtekeningenOns(c)
+  const lijst = tekenaarsOns(c)
+  if (lijst.length) return lijst.filter((p) => !getekend(h, p))
+  return h.length ? [] : ['Marco', 'Bram']
+}
+
+/** "Bram en Chiara", "Marco, Bram en Chiara". */
+export const namenLijst = (l: string[]): string => (l.length <= 1 ? l.join('') : `${l.slice(0, -1).join(', ')} en ${l[l.length - 1]}`)
+
+/** Mag deze persoon (nog) tekenen? null = ja. Wie niet gekozen werd, mag ook tekenen en komt er dan bij. */
+export function redenOnsNiet(c: OnsVelden, persoon?: string | null): string | null {
+  if (c.gearchiveerd_op) return 'Dit contract is gearchiveerd.'
+  if (!c.ons_nodig) return 'Voor dit contract is geen handtekening van ons nodig. Zet het aan bij de gegevens.'
+  if (!persoon) return 'Je naam ontbreekt op je account. Vul ze in bij Mijn account.'
+  if (getekend(handtekeningenOns(c), persoon)) return 'Je hebt dit contract al ondertekend.'
+  return null
+}
+
+/** Waar de handtekening van deze persoon komt: de eigen plaats, anders naast de vorige handtekening, anders de standaardplek. */
+export function zoneVoor(c: OnsVelden, persoon: string, paginas = 1): Zone {
+  const eigen = c.ons_zones?.[persoon]
+  if (eigen) return eigen
+  const h = handtekeningenOns(c)
+  if (!h.length && c.ons_zone) return c.ons_zone
+  const vorige = [...h].reverse().find((x) => x.zone)?.zone
+  if (vorige) return { ...vorige, x: vorige.x <= 45 ? vorige.x + 40 : Math.max(2, vorige.x - 40) }
+  return standaardZone('ons', paginas)
+}
 
 /** Waar staat het contract? Eerst wij (als wij moeten tekenen), dan de andere partij. */
 export function statusVan(c: Pick<AlgemeenContract, 'ons_nodig' | 'ons_getekend_op' | 'partij_nodig' | 'partij_getekend_op'>): AcStatus {
@@ -139,9 +217,14 @@ export const STATUS_INFO: Record<AcStatus, { label: string; cls: string }> = {
 }
 
 /** Het label van de status, met de naam van de andere partij als we die kennen. */
-export const statusLabel = (c: Parameters<typeof statusVan>[0] & { tegenpartij?: string | null }): string => {
+export const statusLabel = (c: Parameters<typeof statusVan>[0] & { tegenpartij?: string | null } & Partial<OnsVelden>): string => {
   const s = statusVan(c)
-  return s === 'wacht_op_partij' && c.tegenpartij ? `Wacht op ${c.tegenpartij}` : STATUS_INFO[s].label
+  if (s === 'wacht_op_partij' && c.tegenpartij) return `Wacht op ${c.tegenpartij}`
+  if (s === 'wacht_op_ons' && 'ondertekenaar' in c) {
+    const nog = tekenaarsOns(c as OnsVelden).length ? wieMoetNog(c as OnsVelden) : []
+    if (nog.length) return `Wacht op ${namenLijst(nog)}`
+  }
+  return STATUS_INFO[s].label
 }
 
 const EMAIL = /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/
@@ -166,7 +249,7 @@ export function controleerLabels(v: unknown): string[] {
 export type ContractVelden = {
   titel: string; map_id: string | null; tegenpartij: string | null; tegenpartij_email: string | null
   labels: string[]; notitie: string | null; begin_datum: string | null; eind_datum: string | null
-  ons_nodig: boolean; partij_nodig: boolean; ondertekenaar: string | null
+  ons_nodig: boolean; partij_nodig: boolean; ondertekenaar: string | null; ons_tekenaars: string[] | null
 }
 
 /**
@@ -206,6 +289,16 @@ export function controleerVelden(b: Record<string, unknown>, deel = false): { ve
     const o = b.ondertekenaar
     if (o !== null && o !== undefined && o !== '' && !ONDERTEKENAARS.includes(o as (typeof ONDERTEKENAARS)[number])) return { fout: 'Kies Marco, Bram, Chiara of Gezamenlijke lead.' }
     v.ondertekenaar = typeof o === 'string' && o ? o : null
+  }
+  // Wie van ons tekent: Marco, Bram en/of Chiara. Leeg = één van ons. Het oude veld volgt mee.
+  if ('ons_tekenaars' in b) {
+    const l = Array.isArray(b.ons_tekenaars) ? b.ons_tekenaars : []
+    if (l.some((x) => !(PERSONEN as readonly unknown[]).includes(x))) return { fout: 'Kies Marco, Bram en/of Chiara.' }
+    const tekenaars = PERSONEN.filter((p) => l.includes(p))
+    // Wie aangeduid is, moet tekenen: wie "Wij tekenen" aanzet, duidt minstens één persoon aan.
+    if (!tekenaars.length && (v.ons_nodig ?? b.ons_nodig !== false)) return { fout: 'Duid aan wie van ons tekent (Marco, Bram en/of Chiara).' }
+    v.ons_tekenaars = tekenaars.length ? tekenaars : null
+    v.ondertekenaar = tekenaars[0] ?? null
   }
   return { velden: v }
 }
@@ -264,9 +357,9 @@ export function labelsInGebruik(lijst: Pick<AlgemeenContract, 'labels' | 'gearch
 }
 
 /** Een bestandsnaam voor de download: titel + "getekend". */
-export function downloadNaam(c: Pick<AlgemeenContract, 'titel' | 'ons_getekend_op' | 'partij_getekend_op'>): string {
+export function downloadNaam(c: Pick<AlgemeenContract, 'titel' | 'ons_getekend_op' | 'partij_getekend_op'> & Partial<Pick<AlgemeenContract, 'ons_handtekeningen'>>): string {
   const basis = c.titel.normalize('NFKD').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-').slice(0, 80) || 'contract'
-  return `${basis}${c.ons_getekend_op || c.partij_getekend_op ? '-getekend' : ''}.pdf`
+  return `${basis}${c.ons_getekend_op || c.partij_getekend_op || c.ons_handtekeningen?.length ? '-getekend' : ''}.pdf`
 }
 
 /** Mag de andere partij via de link (nog) tekenen? null = ja, anders waarom niet. */
@@ -277,13 +370,6 @@ export function redenPartijNiet(c: Pick<AlgemeenContract, 'partij_nodig' | 'part
   return null
 }
 
-/** Mogen wij (nog) tekenen? null = ja. */
-export function redenOnsNiet(c: Pick<AlgemeenContract, 'ons_nodig' | 'ons_getekend_op' | 'gearchiveerd_op'>): string | null {
-  if (c.gearchiveerd_op) return 'Dit contract is gearchiveerd.'
-  if (!c.ons_nodig) return 'Voor dit contract is geen handtekening van ons nodig. Zet het aan bij de gegevens.'
-  if (c.ons_getekend_op) return 'Dit contract is al door ons ondertekend.'
-  return null
-}
 
 /** De regels onder een handtekening op de PDF: naam (en voor wie) en het moment van tekenen. */
 export function blokRegels(o: { naam: string; namens?: string | null; datum: string }): string[] {
@@ -305,4 +391,64 @@ export function mailVoorstel(c: Pick<AlgemeenContract, 'titel' | 'tegenpartij' |
     tekst: `${aanhef}\n\nIn bijlage het ondertekende document "${c.titel}". Je kan het ook bekijken en downloaden via de knop hieronder.\n\nMet vriendelijke groet,\nNextGenMedia`,
     knop: 'Document bekijken',
   }
+}
+
+// ── Gegevens uit de PDF (AI-voorstel bij het opladen) ───────────────────────
+
+export type AcVoorstel = {
+  titel: string | null
+  map_id: string | null
+  tegenpartij: string | null
+  tegenpartij_email: string | null
+  begin_datum: string | null
+  eind_datum: string | null
+  labels: string[]
+  /** Moet NextGen Agency BV tekenen, en wie van ons (zoals het in het document staat). */
+  ons_nodig: boolean | null
+  ons_tekenaars: string[]
+  partij_nodig: boolean | null
+  notitie: string | null
+}
+
+const LEEG_VOORSTEL: AcVoorstel = { titel: null, map_id: null, tegenpartij: null, tegenpartij_email: null, begin_datum: null, eind_datum: null, labels: [], ons_nodig: null, ons_tekenaars: [], partij_nodig: null, notitie: null }
+
+const echteDatum = (v: unknown): string | null => {
+  if (typeof v !== 'string' || !DATUM.test(v)) return null
+  const d = new Date(`${v}T12:00:00Z`)
+  return Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === v ? v : null
+}
+
+/**
+ * Het antwoord van de AI nakijken: enkel wat klopt komt mee. Een map enkel als die
+ * bestaat (op pad of naam), wie van ons tekent enkel Marco, Bram of Chiara, eigen
+ * bedrijf nooit als andere partij. Niets wordt bewaard: het scherm vult enkel lege velden in.
+ */
+export function leesAcVoorstel(text: string, mappen: Map[]): AcVoorstel {
+  const a = text.indexOf('{'), z = text.lastIndexOf('}')
+  if (a === -1 || z <= a) return { ...LEEG_VOORSTEL }
+  let p: Record<string, unknown>
+  try { p = JSON.parse(text.slice(a, z + 1)) } catch { return { ...LEEG_VOORSTEL } }
+  const v: AcVoorstel = { ...LEEG_VOORSTEL }
+  v.titel = tekst(p.titel, 200)
+  const mapTekst = tekst(p.map, 200)?.toLowerCase()
+  if (mapTekst) {
+    const b = boom(mappen)
+    v.map_id = b.find((x) => x.pad.toLowerCase() === mapTekst)?.map.id ?? b.find((x) => x.map.naam.toLowerCase() === mapTekst)?.map.id ?? null
+  }
+  const partij = tekst(p.tegenpartij, 200)
+  v.tegenpartij = partij && !/^next\s*gen/i.test(partij) ? partij : null
+  const e = tekst(p.tegenpartij_email, 200)?.toLowerCase() ?? null
+  v.tegenpartij_email = e && EMAIL.test(e) && !/@nextgen(media|solutions|agency)\.be$/.test(e) ? e : null
+  v.begin_datum = echteDatum(p.begin_datum)
+  v.eind_datum = echteDatum(p.eind_datum)
+  if (v.begin_datum && v.eind_datum && v.eind_datum < v.begin_datum) v.eind_datum = null
+  v.labels = controleerLabels(Array.isArray(p.labels) ? p.labels.slice(0, 4) : [])
+  v.ons_nodig = typeof p.ons_nodig === 'boolean' ? p.ons_nodig : null
+  const wie = Array.isArray(p.ons_tekenaars) ? p.ons_tekenaars.map((x) => persoonVan(String(x))) : []
+  v.ons_tekenaars = PERSONEN.filter((x) => wie.includes(x))
+  if (v.ons_tekenaars.length && v.ons_nodig === null) v.ons_nodig = true
+  v.partij_nodig = typeof p.partij_nodig === 'boolean' ? p.partij_nodig : null
+  const n = typeof p.notitie === 'string' ? p.notitie.trim().slice(0, 600) : ''
+  v.notitie = n || null
+  return v
 }

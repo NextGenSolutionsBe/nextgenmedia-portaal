@@ -8,6 +8,7 @@
 // Afgeleid uit de gegevens zelf: wie tekent, ziet de taak vanzelf verdwijnen.
 
 import { wieTekentTegen, contractVerantwoordelijke, isTegentekenaar, TEGENTEKENAARS, type Tegentekenaar } from './contracten/verantwoordelijke'
+import { wieMoetNog, type AlgemeenContract } from './algemene-contracten/model'
 
 export type TeTekenenSoort = 'regels_vesting' | 'regels_vennoten' | 'vesting' | 'uitgaven' | 'tegentekenen' | 'algemeen'
 export type TeTekenenItem = {
@@ -65,7 +66,7 @@ export function tegentekenTaken(contracten: TegentekenContract[], nu = new Date(
   return uit
 }
 
-export type AlgemeenTeTekenen = { id: string; titel: string; tegenpartij: string | null; created_at: string; ondertekenaar: string | null }
+export type AlgemeenTeTekenen = { id: string; titel: string; tegenpartij: string | null; created_at: string; ondertekenaar: string | null } & Partial<Pick<AlgemeenContract, 'ons_nodig' | 'ons_tekenaars' | 'ons_handtekeningen' | 'ons_getekend_op' | 'ons_getekend_door' | 'ons_zone'>>
 
 /**
  * Algemene contracten (huur, verzekering, NDA …) die op onze handtekening
@@ -75,7 +76,11 @@ export type AlgemeenTeTekenen = { id: string; titel: string; tegenpartij: string
 export function algemeneTaken(lijst: AlgemeenTeTekenen[], nu = new Date()): TeTekenenItem[] {
   const per = new Map<Tegentekenaar, AlgemeenTeTekenen[]>()
   const gesorteerd = [...lijst].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
-  for (const c of gesorteerd) for (const p of wieTekentTegen(c.ondertekenaar)) per.set(p, [...(per.get(p) ?? []), c])
+  // Iedereen die aangeduid is en nog niet tekende, krijgt de taak (niemand aangeduid, van vroeger = Marco en Bram).
+  for (const c of gesorteerd) {
+    const nog = wieMoetNog({ ons_nodig: c.ons_nodig ?? true, ondertekenaar: c.ondertekenaar, ons_tekenaars: c.ons_tekenaars, ons_handtekeningen: c.ons_handtekeningen, ons_getekend_op: c.ons_getekend_op ?? null, ons_getekend_door: c.ons_getekend_door ?? null, ons_zone: c.ons_zone ?? null })
+    for (const p of nog) if (isTegentekenaar(p)) per.set(p, [...(per.get(p) ?? []), c])
+  }
   const uit: TeTekenenItem[] = []
   for (const p of TEGENTEKENAARS) {
     const l = per.get(p) ?? []

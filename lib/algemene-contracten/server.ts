@@ -6,9 +6,10 @@ import { buildEmailHtml, buildEmailText } from '@/lib/email-html'
 import { mailMerkVan, MERK_STIJL } from '@/lib/merk-mail'
 import { INFO_ADRES } from '@/lib/meetings/meeting-mail'
 import { pdfInfo, stempelBlok } from './pdf'
+import { leesContractPdf } from './ai'
 import {
-  blokRegels, controleerMapnaam, controleerVelden, downloadNaam, magIn, redenOnsNiet, redenPartijNiet, standaardZone, zoneOfNull,
-  type AlgemeenContract, type Map, type Zone,
+  blokRegels, controleerMapnaam, controleerVelden, downloadNaam, handtekeningenOns, magIn, onsKlaar, persoonVan, redenOnsNiet, redenPartijNiet, standaardZone, tekenaarsOns, wieMoetNog, zoneOfNull, zoneVoor,
+  type AcVoorstel, type AlgemeenContract, type Map, type OnsHandtekening, type Zone,
 } from './model'
 
 /**
@@ -39,7 +40,7 @@ const veiligeNaam = (naam: string) => naam.normalize('NFKD').replace(/[^\w.\-]+/
 const stempel = (op: string) => op.replace(/[^0-9]/g, '').slice(0, 17)
 const basis = () => baseUrl().replace(/\/$/, '')
 
-export const KOLOMMEN = 'id, map_id, titel, tegenpartij, tegenpartij_email, labels, notitie, begin_datum, eind_datum, bestand_naam, bestand_grootte, ons_nodig, ondertekenaar, ons_zone, ons_getekend_op, ons_getekend_door, partij_nodig, partij_zone, partij_getekend_op, partij_naam, partij_geopend_op, laatst_verstuurd_op, gearchiveerd_op, created_at, created_by, versie, paginas'
+export const KOLOMMEN = 'id, map_id, titel, tegenpartij, tegenpartij_email, labels, notitie, begin_datum, eind_datum, bestand_naam, bestand_grootte, ons_nodig, ondertekenaar, ons_tekenaars, ons_zones, ons_handtekeningen, ons_zone, ons_getekend_op, ons_getekend_door, partij_nodig, partij_zone, partij_getekend_op, partij_naam, partij_geopend_op, laatst_verstuurd_op, gearchiveerd_op, created_at, created_by, versie, paginas'
 
 type Volledig = AlgemeenContract & { bestand_pad: string; huidig_pad: string | null; paginas: number | null }
 
@@ -108,22 +109,47 @@ export async function maakContract(admin: Admin, b: Record<string, unknown>, doo
 
 // ── Aanpassen, archiveren, verwijderen ──────────────────────────────────────
 
-export async function wijzigContract(admin: Admin, id: string, b: Record<string, unknown>, door: string | null): Promise<void> {
+/**
+ * Gegevens, plaatsen en archiveren. `ik` = wie dit vraagt: `mijn_zone` bewaart de plaats van jouw handtekening.
+ * Wie van ons tekent aanpassen herrekent of al onze handtekeningen er zijn (een nieuwe persoon = weer "wacht op ons").
+ */
+export async function wijzigContract(admin: Admin, id: string, b: Record<string, unknown>, door: string | null, ik?: string | null): Promise<void> {
   const c = await laadContract(admin, id)
   const upd: Record<string, unknown> = {}
   const v = controleerVelden(b, true)
   if ('fout' in v) throw new AcFout(v.fout)
   Object.assign(upd, v.velden)
+  const h = handtekeningenOns(c)
   if ('ons_zone' in b) upd.ons_zone = zoneOfNull(b.ons_zone, c.paginas ?? undefined)
+  if ('mijn_zone' in b) {
+    const p = persoonVan(ik)
+    const z = zoneOfNull(b.mijn_zone, c.paginas ?? undefined)
+    if (p && z) upd.ons_zones = { ...(c.ons_zones ?? {}), [p]: z }
+  }
   if ('partij_zone' in b) upd.partij_zone = zoneOfNull(b.partij_zone, c.paginas ?? undefined)
   if ('archief' in b) upd.gearchiveerd_op = b.archief ? new Date().toISOString() : null
   // Wat al getekend werd, blijft "nodig": een handtekening verdwijnt nooit uit de status.
-  if (upd.ons_nodig === false && c.ons_getekend_op) delete upd.ons_nodig
+  if (upd.ons_nodig === false && h.length) delete upd.ons_nodig
   if (upd.partij_nodig === false && c.partij_getekend_op) delete upd.partij_nodig
+  // Wie getekend heeft, blijft op de lijst van wie tekent.
+  if ('ons_tekenaars' in upd && h.length) {
+    const lijst = [...((upd.ons_tekenaars as string[] | null) ?? [])]
+    for (const x of h) if (!lijst.some((p) => p.toLowerCase() === x.persoon.toLowerCase())) lijst.push(x.persoon)
+    upd.ons_tekenaars = lijst
+  }
+  if ('ons_tekenaars' in upd) {
+    const na = { ...c, ...upd } as typeof c
+    const klaar = !!na.ons_nodig && onsKlaar(na, h)
+    // De handtekeningen apart bewaren (ook die van vóór de lijst), zodat er nooit één verloren gaat.
+    if (h.length) upd.ons_handtekeningen = h
+    if (klaar && !c.ons_getekend_op) { upd.ons_getekend_op = h[h.length - 1].op; upd.ons_getekend_door = h.map((x) => x.naam).join(' en ') }
+    if (!klaar && c.ons_getekend_op && na.ons_nodig) { upd.ons_getekend_op = null; upd.ons_getekend_door = null }
+  }
   if (!Object.keys(upd).length) return
-  const { error } = await admin.from('algemene_contracten').update({ ...upd, updated_at: new Date().toISOString() }).eq('id', id)
+  const { data: gelukt, error } = await admin.from('algemene_contracten').update({ ...upd, updated_at: new Date().toISOString() }).eq('id', id).eq('versie', c.versie).select('id')
   if (error) throw new AcFout(error.message, 500)
-  const velden = Object.keys(upd).filter((k) => !k.endsWith('_zone'))
+  if (!(gelukt ?? []).length) throw new AcFout('Er werd net getekend op dit contract. Herlaad de pagina en probeer opnieuw.', 409)
+  const velden = Object.keys(upd).filter((k) => !k.endsWith('_zone') && !['ons_zones', 'ons_handtekeningen', 'ons_getekend_op', 'ons_getekend_door', 'ondertekenaar'].includes(k))
   if ('archief' in b) await logEvent(admin, id, b.archief ? 'gearchiveerd' : 'teruggezet', door)
   else if (velden.length) await logEvent(admin, id, 'aangepast', door, { velden })
 }
@@ -131,7 +157,7 @@ export async function wijzigContract(admin: Admin, id: string, b: Record<string,
 /** Verwijderen kan enkel zolang niemand tekende (een vergissing bij het opladen); anders archiveren. */
 export async function verwijderContract(admin: Admin, id: string): Promise<void> {
   const c = await laadContract(admin, id)
-  if (c.ons_getekend_op || c.partij_getekend_op) throw new AcFout('Er staat al een handtekening op. Archiveer het contract in de plaats.', 409)
+  if (handtekeningenOns(c).length || c.partij_getekend_op) throw new AcFout('Er staat al een handtekening op. Archiveer het contract in de plaats.', 409)
   await admin.storage.from(AC_BUCKET).remove([c.bestand_pad]).catch(() => null)
   const { error } = await admin.from('algemene_contracten').delete().eq('id', id)
   if (error) throw new AcFout(error.message, 500)
@@ -212,26 +238,40 @@ async function stempelEnBewaar(admin: Admin, c: Volledig, wie: 'ons' | 'partij',
   return { pad, zone: g.zone, voor: sha(bron), na: sha(g.bytes) }
 }
 
-/** Wij tekenen (een zaakvoerder), met naam uit het account en datum en uur van tekenen. */
-export async function tekenOns(admin: Admin, id: string, b: Record<string, unknown>, door: { userId: string; email: string | null; naam: string; ip?: string | null; ua?: string | null }): Promise<{ op: string }> {
+/**
+ * Eén van ons tekent, met de naam uit het account en datum en uur van tekenen.
+ * Elke aangeduide persoon tekent apart; wie niet aangeduid was, mag ook tekenen en komt erbij.
+ * Pas als iedereen getekend heeft, staat het contract op "getekend" (ons_getekend_op).
+ */
+export async function tekenOns(admin: Admin, id: string, b: Record<string, unknown>, door: { userId: string; email: string | null; naam: string; ip?: string | null; ua?: string | null }): Promise<{ op: string; klaar: boolean; nog: string[] }> {
   const c = await laadContract(admin, id)
-  const reden = redenOnsNiet(c)
-  if (reden) throw new AcFout(reden, c.ons_getekend_op ? 409 : 400)
   const naam = controleerNaam(door.naam)
   if (!naam) throw new AcFout('Je naam ontbreekt op je account. Vul ze in bij Mijn account.')
+  const persoon = persoonVan(naam)
+  const reden = redenOnsNiet(c, persoon)
+  if (reden) throw new AcFout(reden, /al ondertekend/.test(reden) ? 409 : 400)
   const hand = leesHandtekening(b.handtekening)
   if (!hand.ok) throw new AcFout(hand.fout)
   const op = new Date().toISOString()
-  const r = await stempelEnBewaar(admin, c, 'ons', Buffer.from(hand.base64, 'base64'), b.zone ?? c.ons_zone, blokRegels({ naam, namens: 'NextGen Agency BV', datum: datumRegel(op) }), op)
+  const r = await stempelEnBewaar(admin, c, 'ons', Buffer.from(hand.base64, 'base64'), b.zone ?? zoneVoor(c, persoon!, c.paginas ?? 1), blokRegels({ naam, namens: 'NextGen Agency BV', datum: datumRegel(op) }), op)
   const partijZone = 'partij_zone' in b ? zoneOfNull(b.partij_zone, c.paginas ?? undefined) : undefined
+  const handtekeningen: OnsHandtekening[] = [...handtekeningenOns(c), { persoon: persoon!, naam, email: door.email, op, zone: r.zone }]
+  const lijst = tekenaarsOns(c)
+  const tekenaars = lijst.length && !lijst.some((p) => p.toLowerCase() === persoon!.toLowerCase()) ? [...lijst, persoon!] : lijst
+  const na = { ...c, ons_tekenaars: tekenaars.length ? tekenaars : null }
+  const klaar = onsKlaar(na, handtekeningen)
   const { data: gelukt, error } = await admin.from('algemene_contracten').update({
-    huidig_pad: r.pad, huidig_sha256: r.na, versie: c.versie + 1, ons_zone: r.zone, ...(partijZone !== undefined ? { partij_zone: partijZone } : {}),
-    ons_getekend_op: op, ons_getekend_door: naam, ons_getekend_email: door.email, ons_user_id: door.userId, updated_at: op,
-  }).eq('id', id).eq('versie', c.versie).is('ons_getekend_op', null).select('id')
+    huidig_pad: r.pad, huidig_sha256: r.na, versie: c.versie + 1, ons_zone: r.zone, ons_zones: { ...(c.ons_zones ?? {}), [persoon!]: r.zone },
+    ...(partijZone !== undefined ? { partij_zone: partijZone } : {}),
+    ons_handtekeningen: handtekeningen, ...(tekenaars.length ? { ons_tekenaars: tekenaars } : {}),
+    ons_getekend_op: klaar ? c.ons_getekend_op ?? op : null, ons_getekend_door: klaar ? handtekeningen.map((x) => x.naam).join(' en ') : null,
+    ...(c.ons_getekend_op ? {} : { ons_getekend_email: door.email, ons_user_id: door.userId }), updated_at: op,
+  }).eq('id', id).eq('versie', c.versie).select('id')
   if (error) throw new AcFout(error.message, 500)
   if (!(gelukt ?? []).length) throw new AcFout('Er werd net iets anders op dit contract getekend. Herlaad de pagina.', 409)
-  await logEvent(admin, id, 'ons_getekend', door.email ?? naam, { naam, zone: r.zone, sha256_voor: r.voor, sha256_na: r.na, ip: door.ip ?? null, ua: door.ua ?? null })
-  return { op }
+  await logEvent(admin, id, 'ons_getekend', door.email ?? naam, { naam, persoon, zone: r.zone, sha256_voor: r.voor, sha256_na: r.na, ip: door.ip ?? null, ua: door.ua ?? null })
+  const nog = tekenaars.filter((p) => !handtekeningen.some((x) => x.persoon.toLowerCase() === p.toLowerCase()))
+  return { op, klaar, nog }
 }
 
 // ── Persoonlijke link voor de andere partij ─────────────────────────────────
@@ -387,4 +427,48 @@ export async function ruimAlgemeneContractenOp(admin: Admin, max = 100): Promise
     if (e) throw new Error(e.message)
   }
   return { verwijderd: deel.length }
+}
+
+// ── Gegevens uit de PDF lezen (voorstel bij het opladen) ────────────────────
+
+/** Hoe groot een PDF mag zijn om te laten lezen (de AI aanvaardt tot ±32 MB per vraag, base64 maakt het een derde groter). */
+const MAX_LEZEN = 15 * 1024 * 1024
+
+/** Een net opgeladen PDF (nog geen contract) laten lezen: titel, map, andere partij, datums, wie tekent … Enkel een voorstel. */
+export async function leesOpgeladenPdf(admin: Admin, pad: unknown): Promise<AcVoorstel | null> {
+  if (typeof pad !== 'string' || !/^origineel\/[0-9a-f-]{36}\/[^/]+$/i.test(pad)) throw new AcFout('Laad eerst een PDF op.')
+  const [{ data: bestand, error }, { data: rijen }] = await Promise.all([
+    admin.storage.from(AC_BUCKET).download(pad),
+    admin.from('algemene_contract_mappen').select('*'),
+  ])
+  if (error || !bestand) throw new AcFout('De PDF is niet (volledig) opgeladen.')
+  const bytes = new Uint8Array(await bestand.arrayBuffer())
+  if (!bytes.length || bytes.length > MAX_LEZEN) return null
+  if (Buffer.from(bytes.slice(0, 1024)).toString('latin1').indexOf('%PDF') === -1) throw new AcFout('Dit is geen PDF.')
+  const mappen = ((rijen ?? []) as Map[]).map((x) => ({ id: x.id, naam: x.naam, volgorde: x.volgorde, parent_id: x.parent_id ?? null }))
+  const vandaag = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Brussels' })
+  return leesContractPdf(Buffer.from(bytes).toString('base64'), mappen, vandaag)
+}
+
+// ── Melding in het belletje: wat op jouw handtekening wacht ─────────────────
+
+/** Eén melding voor wie nog moet tekenen (Marco, Bram, Chiara), net als de taak in het Command Center. */
+export async function algemeneMeldingVoor(admin: Admin, userId: string): Promise<{ id: string; kind: string; priority: 'high' | 'med'; title: string; date: string | null; href: string }[]> {
+  const { data: u } = await admin.auth.admin.getUserById(userId)
+  if (!u?.user) return []
+  const { leesProfiel } = await import('@/lib/account-server')
+  const profiel = await leesProfiel(u.user).catch(() => null)
+  const persoon = persoonVan(profiel ? `${profiel.voornaam} ${profiel.achternaam}` : u.user.email)
+  if (!persoon) return []
+  const { data } = await admin.from('algemene_contracten')
+    .select('id, titel, tegenpartij, created_at, ons_nodig, ondertekenaar, ons_tekenaars, ons_handtekeningen, ons_getekend_op, ons_getekend_door, ons_zone, gearchiveerd_op')
+    .eq('ons_nodig', true).is('ons_getekend_op', null).is('gearchiveerd_op', null).order('created_at').limit(500)
+  const open = ((data ?? []) as AlgemeenContract[]).filter((c) => wieMoetNog(c).includes(persoon))
+  if (!open.length) return []
+  const een = open[0]
+  return [{
+    id: `algemeen-contract:${persoon}:${open.map((c) => c.id.slice(0, 8)).join('.')}`, kind: 'algemeen_contract', priority: 'high',
+    title: open.length === 1 ? `“${[een.tegenpartij, een.titel].filter(Boolean).join(' – ')}” wacht op jouw handtekening` : `${open.length} algemene contracten wachten op jouw handtekening`,
+    date: een.created_at, href: `/admin/algemene-contracten/${een.id}/tekenen`,
+  }]
 }

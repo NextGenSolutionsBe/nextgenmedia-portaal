@@ -83,7 +83,7 @@ export async function teTekenenOverzicht(admin: Admin): Promise<TeTekenenItem[]>
     }, []),
     // Algemene contracten (huur, verzekering, NDA …) die op onze handtekening wachten.
     veilig('algemeen', async (): Promise<TeTekenenItem[]> => {
-      const { data, error } = await admin.from('algemene_contracten').select('id, titel, tegenpartij, created_at, ondertekenaar')
+      const { data, error } = await admin.from('algemene_contracten').select('id, titel, tegenpartij, created_at, ondertekenaar, ons_nodig, ons_tekenaars, ons_handtekeningen, ons_getekend_op, ons_getekend_door, ons_zone')
         .eq('ons_nodig', true).is('ons_getekend_op', null).is('gearchiveerd_op', null).limit(500)
       if (error) throw new Error(error.message)
       return algemeneTaken((data ?? []) as AlgemeenTeTekenen[])

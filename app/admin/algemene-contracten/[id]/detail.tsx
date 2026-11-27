@@ -7,26 +7,28 @@ import { toast } from 'sonner'
 import { Archive, ArchiveRestore, ChevronLeft, Clock, Download, FileText, Loader2, MapPin, PenLine, Save, Trash2 } from 'lucide-react'
 import { MailDialog } from '@/components/admin/mail-composer'
 import { PdfVakken } from '@/components/esign/pdf-vakken'
-import { ONDERTEKENAARS, STATUS_INFO, boom, padNaam, statusLabel, statusVan, type AlgemeenContract, type Map } from '@/lib/algemene-contracten/model'
+import { PERSONEN, STATUS_INFO, boom, handtekeningenOns, namenLijst, padNaam, redenOnsNiet, statusLabel, statusVan, tekenaarsOns, wieMoetNog, type AlgemeenContract, type Map } from '@/lib/algemene-contracten/model'
 import { LabelsVeld } from '../overzicht'
 import { PersoonKnop } from '@/components/admin/persoon-foto'
 
 const moment = (iso: string) => new Date(iso).toLocaleString('nl-BE', { timeZone: 'Europe/Brussels', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 
 const ACTIE: Record<string, string> = {
-  opgeladen: 'Opgeladen', ons_getekend: 'Ondertekend namens NextGenMedia', partij_getekend: 'Ondertekend door de andere partij',
+  opgeladen: 'Opgeladen', ons_getekend: 'Ondertekend namens NextGen Agency BV', partij_getekend: 'Ondertekend door de andere partij',
   verstuurd: 'Verstuurd', geopend: 'Geopend door de andere partij', aangepast: 'Gegevens aangepast', gearchiveerd: 'Gearchiveerd', teruggezet: 'Uit het archief gehaald',
 }
 
 type Tijd = { actie: string; door: string | null; details: Record<string, unknown> | null; created_at: string }
 
-export function AcDetail({ contract: c, heeftGetekendeVersie, mappen, tijdlijn, labelVoorstellen, versturenOpen }: {
+export function AcDetail({ contract: c, heeftGetekendeVersie, mappen, tijdlijn, labelVoorstellen, versturenOpen, ik }: {
   contract: AlgemeenContract
   heeftGetekendeVersie: boolean
   mappen: Map[]
   tijdlijn: Tijd[]
   labelVoorstellen: string[]
   versturenOpen: boolean
+  /** Wie kijkt (Marco, Bram, Chiara): of jij nog moet tekenen. */
+  ik: string | null
 }) {
   const router = useRouter()
   const [mail, setMail] = useState(versturenOpen && !c.gearchiveerd_op)
@@ -34,6 +36,8 @@ export function AcDetail({ contract: c, heeftGetekendeVersie, mappen, tijdlijn, 
   const s = statusVan(c)
   const partij = c.tegenpartij || 'de andere partij'
   const pdf = `/api/admin/algemene-contracten/${c.id}/pdf`
+  // Jij moet tekenen: aangeduid en nog niet getekend (of niemand aangeduid, van vroeger, en nog niemand tekende).
+  const ikMoet = !!ik && !redenOnsNiet(c, ik) && (wieMoetNog(c).includes(ik) || (s === 'wacht_op_ons' && !tekenaarsOns(c).length))
 
   const patch = async (b: Record<string, unknown>, wat: string, melding: string) => {
     setBezig(wat)
@@ -69,9 +73,9 @@ export function AcDetail({ contract: c, heeftGetekendeVersie, mappen, tijdlijn, 
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {s === 'wacht_op_ons' && !c.gearchiveerd_op && <Link href={`/admin/algemene-contracten/${c.id}/tekenen`} className="btn-primary text-sm"><PenLine className="h-4 w-4" />Tekenen</Link>}
-          {c.partij_nodig && !c.partij_getekend_op && !c.gearchiveerd_op && s !== 'wacht_op_ons' && <Link href={`/admin/algemene-contracten/${c.id}/tekenen`} className="btn-secondary text-sm"><MapPin className="h-4 w-4" />Plaats voor {partij}</Link>}
-          {!c.gearchiveerd_op && <button type="button" onClick={() => setMail(true)} className={s === 'wacht_op_ons' ? 'btn-secondary text-sm' : 'btn-primary text-sm'}>Versturen</button>}
+          {ikMoet && <Link href={`/admin/algemene-contracten/${c.id}/tekenen`} className="btn-primary text-sm"><PenLine className="h-4 w-4" />Tekenen</Link>}
+          {c.partij_nodig && !c.partij_getekend_op && !c.gearchiveerd_op && !ikMoet && <Link href={`/admin/algemene-contracten/${c.id}/tekenen`} className="btn-secondary text-sm"><MapPin className="h-4 w-4" />Plaats voor {partij}</Link>}
+          {!c.gearchiveerd_op && <button type="button" onClick={() => setMail(true)} className={s === 'wacht_op_ons' || ikMoet ? 'btn-secondary text-sm' : 'btn-primary text-sm'}>Versturen</button>}
           <a href={`${pdf}?download=1`} className="btn-secondary text-sm"><Download className="h-4 w-4" />{heeftGetekendeVersie ? 'Getekende PDF' : 'PDF'}</a>
           <button type="button" disabled={!!bezig} onClick={() => patch({ archief: !c.gearchiveerd_op }, 'archief', c.gearchiveerd_op ? 'Uit het archief gehaald.' : 'Gearchiveerd. Je vindt het terug onder Archief.')} className="btn-secondary text-sm" title={c.gearchiveerd_op ? 'Uit het archief halen' : 'Archiveren'}>
             {bezig === 'archief' ? <Loader2 className="h-4 w-4 animate-spin" /> : c.gearchiveerd_op ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}{c.gearchiveerd_op ? 'Terugzetten' : 'Archiveren'}
@@ -97,7 +101,7 @@ export function AcDetail({ contract: c, heeftGetekendeVersie, mappen, tijdlijn, 
         <PdfVakken key={`${c.id}-${c.versie}`} pdfUrl={pdf} vakken={[]} />
 
         <div className="space-y-4">
-          <Handtekeningen c={c} />
+          <Handtekeningen c={c} ik={ik} />
           <Gegevens c={c} mappen={mappen} labelVoorstellen={labelVoorstellen} bezig={bezig === 'gegevens'} onBewaar={(b) => patch(b, 'gegevens', 'Bewaard.')} />
 
           <div className="card-base space-y-2">
@@ -105,7 +109,7 @@ export function AcDetail({ contract: c, heeftGetekendeVersie, mappen, tijdlijn, 
             <a href={`${pdf}?download=1`} className="flex items-center gap-2 text-sm text-gray-700 hover:text-black"><Download className="h-4 w-4" />{heeftGetekendeVersie ? 'Getekende versie downloaden' : 'PDF downloaden'}</a>
             {heeftGetekendeVersie && <a href={`${pdf}?origineel=1&download=1`} className="flex items-center gap-2 text-sm text-gray-700 hover:text-black"><FileText className="h-4 w-4" />Origineel (zonder handtekeningen)</a>}
             <div className="flex flex-wrap gap-3 pt-1 text-xs">
-              {!c.ons_getekend_op && !c.partij_getekend_op && (
+              {!handtekeningenOns(c).length && !c.partij_getekend_op && (
                 <button type="button" disabled={!!bezig} onClick={verwijder} className="inline-flex items-center gap-1 text-gray-500 hover:text-red-600">{bezig === 'verwijder' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}Verwijderen</button>
               )}
             </div>
@@ -119,7 +123,7 @@ export function AcDetail({ contract: c, heeftGetekendeVersie, mappen, tijdlijn, 
                   <li key={i} className="flex gap-2 text-xs">
                     <Clock className="h-3.5 w-3.5 text-gray-400 mt-0.5 shrink-0" />
                     <div className="min-w-0">
-                      <div className="text-gray-800">{ACTIE[t.actie] ?? t.actie}{t.actie === 'verstuurd' && typeof t.details?.aan === 'string' ? ` naar ${t.details.aan}` : ''}{(t.actie === 'ons_getekend' || t.actie === 'partij_getekend') && typeof t.details?.naam === 'string' ? ` · ${t.details.naam}` : ''}</div>
+                      <div className="text-gray-800">{t.actie === 'ons_getekend' && !t.details?.persoon && typeof t.details?.naam === 'string' ? 'Ondertekend' : ACTIE[t.actie] ?? t.actie}{t.actie === 'verstuurd' && typeof t.details?.aan === 'string' ? ` naar ${t.details.aan}` : ''}{(t.actie === 'ons_getekend' || t.actie === 'partij_getekend') && typeof t.details?.naam === 'string' ? ` · ${t.details.naam}` : ''}</div>
                       <div className="text-gray-500">{moment(t.created_at)}{t.door && t.actie !== 'ons_getekend' && t.actie !== 'partij_getekend' ? ` · ${t.door}` : ''}</div>
                     </div>
                   </li>
@@ -141,24 +145,43 @@ export function AcDetail({ contract: c, heeftGetekendeVersie, mappen, tijdlijn, 
   )
 }
 
-function Handtekeningen({ c }: { c: AlgemeenContract }) {
+function Handtekeningen({ c, ik }: { c: AlgemeenContract; ik: string | null }) {
   const partij = c.tegenpartij || 'De andere partij'
-  const rij = (wie: string, nodig: boolean, op: string | null, door: string | null, open: string) => (
-    <li className="flex items-start gap-2 text-sm">
+  const rij = (key: string, wie: string, nodig: boolean, op: string | null, door: string | null, open: string, actie?: React.ReactNode) => (
+    <li key={key} className="flex items-start gap-2 text-sm">
       <span className={`mt-1.5 h-2 w-2 rounded-full shrink-0 ${!nodig ? 'bg-gray-300' : op ? 'bg-green-500' : 'bg-amber-400'}`} />
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <div className="font-medium text-gray-900">{wie}</div>
         <div className="text-xs text-gray-500">{!nodig ? 'Hoeft niet te tekenen' : op ? `${door ?? 'Getekend'} · ${moment(op)}` : open}</div>
       </div>
+      {actie}
     </li>
   )
+  const h = handtekeningenOns(c)
+  const lijst = tekenaarsOns(c)
+  const tekenKnop = (label: string) => <Link href={`/admin/algemene-contracten/${c.id}/tekenen`} className="btn-secondary !py-1 !px-2.5 text-xs shrink-0"><PenLine className="h-3.5 w-3.5" />{label}</Link>
+  const kanIk = !!ik && !redenOnsNiet(c, ik)
+  // Elke persoon van ons apart: wie aangeduid is, en wie (ook zonder aanduiding) al tekende.
+  const personen = Array.from(new Set([...lijst, ...h.map((x) => x.persoon)]))
   return (
     <div className="card-base">
       <h2 className="text-sm font-semibold mb-2">Handtekeningen</h2>
       <ul className="space-y-2.5">
-        {rij('NextGenMedia', c.ons_nodig, c.ons_getekend_op, c.ons_getekend_door, `Nog te tekenen${c.ondertekenaar ? ` door ${c.ondertekenaar === 'Gezamenlijke lead' ? 'Marco of Bram' : c.ondertekenaar}` : ''}`)}
-        {rij(partij, c.partij_nodig, c.partij_getekend_op, c.partij_naam, c.partij_geopend_op ? `Geopend op ${moment(c.partij_geopend_op)}, nog niet getekend` : c.laatst_verstuurd_op ? 'Verstuurd, nog niet geopend' : 'Nog niet verstuurd')}
+        {c.ons_nodig && personen.map((p) => {
+          const x = h.find((y) => y.persoon.toLowerCase() === p.toLowerCase())
+          const ikBen = !!ik && ik.toLowerCase() === p.toLowerCase()
+          return rij(`ons-${p}`, `${p} · NextGen Agency BV`, true, x?.op ?? null, x?.naam ?? null, ikBen ? 'Jij moet nog tekenen' : 'Nog te tekenen', !x && ikBen && kanIk && !c.gearchiveerd_op ? tekenKnop('Tekenen') : undefined)
+        })}
+        {c.ons_nodig && !personen.length && rij('ons', 'NextGen Agency BV', true, null, null, 'Nog te tekenen door één van ons', kanIk && !c.gearchiveerd_op ? tekenKnop('Tekenen') : undefined)}
+        {!c.ons_nodig && rij('ons', 'NextGen Agency BV', false, null, null, '')}
+        {rij('partij', partij, c.partij_nodig, c.partij_getekend_op, c.partij_naam, c.partij_geopend_op ? `Geopend op ${moment(c.partij_geopend_op)}, nog niet getekend` : c.laatst_verstuurd_op ? 'Verstuurd, nog niet geopend' : 'Nog niet verstuurd')}
       </ul>
+      {c.ons_nodig && kanIk && personen.length > 0 && !personen.some((p) => p.toLowerCase() === ik!.toLowerCase()) && !c.gearchiveerd_op && (
+        <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between gap-2 text-xs text-gray-500">
+          <span>Moet jij ook tekenen?</span>{tekenKnop('Ook tekenen')}
+        </div>
+      )}
+      {c.ons_nodig && wieMoetNog(c).length > 0 && personen.length > 1 && <p className="mt-2 text-[11px] text-gray-500">Getekend als {namenLijst(lijst)} allemaal tekenden.</p>}
     </div>
   )
 }
@@ -168,8 +191,9 @@ function Gegevens({ c, mappen, labelVoorstellen, bezig, onBewaar }: {
 }) {
   const begin = () => ({
     titel: c.titel, map_id: c.map_id ?? '', tegenpartij: c.tegenpartij ?? '', tegenpartij_email: c.tegenpartij_email ?? '', labels: c.labels,
-    begin_datum: c.begin_datum ?? '', eind_datum: c.eind_datum ?? '', notitie: c.notitie ?? '', ons_nodig: c.ons_nodig, ondertekenaar: c.ondertekenaar ?? '', partij_nodig: c.partij_nodig,
+    begin_datum: c.begin_datum ?? '', eind_datum: c.eind_datum ?? '', notitie: c.notitie ?? '', ons_nodig: c.ons_nodig, ons_tekenaars: tekenaarsOns(c), partij_nodig: c.partij_nodig,
   })
+  const getekend = handtekeningenOns(c).map((x) => x.persoon)
   const [v, setV] = useState(begin)
   const gewijzigd = JSON.stringify(v) !== JSON.stringify(begin())
   const LBL = 'block text-xs font-medium text-gray-600 mb-1'
@@ -195,11 +219,18 @@ function Gegevens({ c, mappen, labelVoorstellen, bezig, onBewaar }: {
       <div><label className={LBL}>Labels</label><LabelsVeld waarde={v.labels} onChange={(l) => setV({ ...v, labels: l })} voorstellen={labelVoorstellen} /></div>
       <div className="space-y-1.5">
         <label className="flex items-center gap-2 text-sm cursor-pointer">
-          <input type="checkbox" disabled={!!c.ons_getekend_op} checked={v.ons_nodig} onChange={(e) => setV({ ...v, ons_nodig: e.target.checked })} className="h-4 w-4 accent-gray-900" />Wij tekenen
+          <input type="checkbox" disabled={getekend.length > 0} checked={v.ons_nodig} onChange={(e) => setV({ ...v, ons_nodig: e.target.checked })} className="h-4 w-4 accent-gray-900" />Wij tekenen
         </label>
-        {v.ons_nodig && !c.ons_getekend_op && (
-          <div className="ml-6 flex gap-1.5 flex-wrap" role="radiogroup" aria-label="Wie tekent namens ons">
-            {ONDERTEKENAARS.map((o) => <PersoonKnop key={o} naam={o} label={o === 'Gezamenlijke lead' ? 'Marco of Bram' : o} klein aan={v.ondertekenaar === o} onClick={() => setV({ ...v, ondertekenaar: o })} />)}
+        {v.ons_nodig && (
+          <div className="ml-6">
+            <p className="text-xs text-gray-500 mb-1">Wie tekent? Iedereen die je aanduidt, tekent.</p>
+            <div className="flex gap-1.5 flex-wrap" role="group" aria-label="Wie tekent namens ons">
+              {PERSONEN.map((o) => {
+                const al = getekend.some((g) => g.toLowerCase() === o.toLowerCase())
+                const aan = al || v.ons_tekenaars.includes(o)
+                return <PersoonKnop key={o} naam={o} label={al ? `${o} ✓` : o} klein rol="checkbox" aan={aan} onClick={() => { if (!al) setV({ ...v, ons_tekenaars: aan ? v.ons_tekenaars.filter((x) => x !== o) : [...v.ons_tekenaars, o] }) }} />
+              })}
+            </div>
           </div>
         )}
         <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -209,7 +240,7 @@ function Gegevens({ c, mappen, labelVoorstellen, bezig, onBewaar }: {
       <div><label className={LBL}>Notitie</label><textarea className="input-base min-h-[70px]" value={v.notitie} maxLength={4000} onChange={(e) => setV({ ...v, notitie: e.target.value })} /></div>
       {gewijzigd && (
         <div className="flex gap-2">
-          <button type="button" disabled={bezig} onClick={async () => { await onBewaar({ ...v, map_id: v.map_id || null, begin_datum: v.begin_datum || null, eind_datum: v.eind_datum || null, ondertekenaar: v.ondertekenaar || null }) }} className="btn-primary text-sm">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Bewaren</button>
+          <button type="button" disabled={bezig || (v.ons_nodig && !v.ons_tekenaars.length && !getekend.length)} title={v.ons_nodig && !v.ons_tekenaars.length && !getekend.length ? 'Duid aan wie van ons tekent' : undefined} onClick={async () => { await onBewaar({ ...v, map_id: v.map_id || null, begin_datum: v.begin_datum || null, eind_datum: v.eind_datum || null, ons_tekenaars: v.ons_nodig ? Array.from(new Set([...v.ons_tekenaars, ...getekend.filter((g) => (PERSONEN as readonly string[]).includes(g))])) : [] }) }} className="btn-primary text-sm">{bezig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Bewaren</button>
           <button type="button" onClick={() => setV(begin())} className="btn-secondary text-sm">Annuleren</button>
         </div>
       )}

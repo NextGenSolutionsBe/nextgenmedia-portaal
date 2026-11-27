@@ -8818,3 +8818,11 @@ alter table public.email_templates add column if not exists bedrijf text referen
 alter table public.offerte_sjablonen add column if not exists bedrijf text references public.bedrijven(slug);
 -- Offertesjablonen hebben al een merk: dat is het bedrijf (enkel de nieuwe kolom, enkel waar leeg).
 update public.offerte_sjablonen set bedrijf = merk where bedrijf is null and merk in ('nextgenmedia', 'nextgensolutions');
+
+-- ── Algemene contracten: meerdere ondertekenaars van ons (27 nov 2026) ──────
+-- Wie van ons tekent (Marco, Bram, Chiara; leeg = één van ons), de zone per
+-- persoon en elke handtekening apart. Enkel nieuwe kolommen; een handtekening
+-- van vóór deze migratie blijft in ons_getekend_* en telt gewoon mee.
+alter table public.algemene_contracten add column if not exists ons_tekenaars text[];
+alter table public.algemene_contracten add column if not exists ons_zones jsonb;
+alter table public.algemene_contracten add column if not exists ons_handtekeningen jsonb;

@@ -1,15 +1,16 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Archive, ArchiveRestore, ChevronRight, FileText, Folder, FolderOpen, FolderPlus, Loader2, Pencil, Plus, Search, Trash2, Upload, X } from 'lucide-react'
+import { Archive, ArchiveRestore, ChevronRight, FileText, Folder, FolderOpen, FolderPlus, Loader2, Pencil, Plus, Search, Sparkles, Trash2, Undo2, Upload, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { zoekVeld } from '@/lib/zoekveld'
 import {
-  ONDERTEKENAARS, STATUS_INFO, aantalIn, boom, filter, kinderen, labelsInGebruik, looptAf, magIn, nakomelingen, padNaam, padVan, statusLabel, statusVan,
+  PERSONEN, STATUS_INFO, aantalIn, boom, filter, kinderen, labelsInGebruik, looptAf, magIn, nakomelingen, padNaam, padVan, statusLabel, statusVan,
   type AcStatus, type AlgemeenContract, type Map,
+  type AcVoorstel,
 } from '@/lib/algemene-contracten/model'
 import { PersoonKnop } from '@/components/admin/persoon-foto'
 
@@ -361,7 +362,11 @@ export function LabelsVeld({ waarde, onChange, voorstellen }: { waarde: string[]
   )
 }
 
-/** Een PDF opladen: rechtstreeks naar de opslag, daarna de gegevens en wie moet tekenen. */
+/**
+ * Een PDF opladen: rechtstreeks naar de opslag zodra je ze kiest, daarna leest de app ze
+ * en vult de lege velden in (enkel een voorstel, Ongedaan maken kan). Pas bij
+ * "Opladen" wordt het een contract.
+ */
 function OpladenVenster({ mappen, beginMap, labels, onSluit, onKlaar }: {
   mappen: Map[]; beginMap: string | null; labels: string[]; onSluit: () => void; onKlaar: (id: string, tekenen: boolean) => void
 }) {
@@ -375,32 +380,80 @@ function OpladenVenster({ mappen, beginMap, labels, onSluit, onKlaar }: {
   const [eind, setEind] = useState('')
   const [notitie, setNotitie] = useState('')
   const [onsNodig, setOnsNodig] = useState(true)
-  const [ondertekenaar, setOndertekenaar] = useState('')
+  const [tekenaars, setTekenaars] = useState<string[]>([])
   const [partijNodig, setPartijNodig] = useState(false)
   const [bezig, setBezig] = useState<string | null>(null)
+  // De PDF staat al in de opslag (bij het kiezen opgeladen), en wat de app eruit las.
+  const [opgeladen, setOpgeladen] = useState<{ pad: string; bestand: File } | null>(null)
+  const [lezen, setLezen] = useState(false)
+  const [ingevuld, setIngevuld] = useState<null | { velden: string[]; terug: () => void }>(null)
+  const geraakt = useRef(new Set<string>())
+  const huidig = useRef({ titel, mapId, tegenpartij, email, lbls, begin, eind, notitie, onsNodig, tekenaars, partijNodig })
+  huidig.current = { titel, mapId, tegenpartij, email, lbls, begin, eind, notitie, onsNodig, tekenaars, partijNodig }
+  const standaardTitel = useRef('')
+  const raak = (veld: string) => geraakt.current.add(veld)
   const LBL = 'block text-xs font-medium text-gray-600 mb-1'
 
-  const kies = (f: File | null) => {
+  const upload = async (f: File): Promise<string> => {
+    const r1 = await fetch('/api/admin/algemene-contracten/upload', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ naam: f.name.toLowerCase().endsWith('.pdf') ? f.name : `${f.name}.pdf`, grootte: f.size }) })
+    const up = await r1.json(); if (!r1.ok) throw new Error(up.error || 'Opladen mislukt')
+    const { error } = await createClient().storage.from(up.bucket).uploadToSignedUrl(up.pad, up.token, f, { contentType: 'application/pdf', upsert: false })
+    if (error) throw new Error(error.message)
+    return up.pad as string
+  }
+
+  /** Het voorstel van de AI over de lege velden leggen; wat je zelf aanpaste of invulde, blijft staan. */
+  const vulIn = (v: AcVoorstel) => {
+    const nu = huidig.current
+    const vrij = (veld: string, leeg: boolean) => leeg && !geraakt.current.has(veld)
+    const velden: string[] = []
+    const terug: (() => void)[] = []
+    const zet = <T,>(veld: string, leeg: boolean, nieuw: T | null | undefined, oud: T, set: (x: T) => void, naam: string) => {
+      if (nieuw === null || nieuw === undefined || (Array.isArray(nieuw) && !nieuw.length) || !vrij(veld, leeg)) return
+      set(nieuw); terug.push(() => set(oud)); velden.push(naam)
+    }
+    zet('titel', !nu.titel.trim() || nu.titel === standaardTitel.current, v.titel, nu.titel, setTitel, 'titel')
+    zet('map', !nu.mapId, v.map_id, nu.mapId, setMapId, 'map')
+    zet('tegenpartij', !nu.tegenpartij.trim(), v.tegenpartij, nu.tegenpartij, setTegenpartij, 'andere partij')
+    zet('email', !nu.email.trim(), v.tegenpartij_email, nu.email, setEmail, 'e-mail')
+    zet('begin', !nu.begin, v.begin_datum, nu.begin, setBegin, 'begin')
+    zet('eind', !nu.eind, v.eind_datum, nu.eind, setEind, 'einde')
+    zet('labels', !nu.lbls.length, v.labels, nu.lbls, setLbls, 'labels')
+    zet('notitie', !nu.notitie.trim(), v.notitie, nu.notitie, setNotitie, 'notitie')
+    zet('ons', true, v.ons_nodig, nu.onsNodig, setOnsNodig, 'wij tekenen')
+    zet('tekenaars', !nu.tekenaars.length, v.ons_tekenaars, nu.tekenaars, setTekenaars, 'wie tekent')
+    zet('partij', true, v.partij_nodig, nu.partijNodig, setPartijNodig, 'andere partij tekent')
+    if (velden.length) setIngevuld({ velden, terug: () => { terug.forEach((f) => f()); setIngevuld(null) } })
+  }
+
+  const kies = async (f: File | null) => {
     if (!f) return
     if (!/\.pdf$/i.test(f.name) && f.type !== 'application/pdf') { toast.error('Enkel PDF. Een Word-document sla je eerst op als PDF (Bestand → Opslaan als → PDF).'); return }
     if (f.size > 50 * 1024 * 1024) { toast.error('Het bestand is groter dan 50 MB.'); return }
-    setBestand(f)
-    if (!titel.trim()) setTitel(f.name.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ').trim())
+    setBestand(f); setOpgeladen(null); setIngevuld(null)
+    const t = f.name.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ').trim()
+    if (!huidig.current.titel.trim() || huidig.current.titel === standaardTitel.current) { setTitel(t); standaardTitel.current = t }
+    setLezen(true)
+    try {
+      const pad = await upload(f)
+      setOpgeladen({ pad, bestand: f })
+      const r = await fetch('/api/admin/algemene-contracten/lezen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pad }) })
+      const j = await r.json().catch(() => ({}))
+      if (r.ok && j.voorstel) vulIn(j.voorstel as AcVoorstel)
+    } catch { /* lezen is een hulp: lukt het niet, dan vul je zelf in */ } finally { setLezen(false) }
   }
 
   const bewaar = async () => {
     if (!bestand) { toast.error('Kies eerst een PDF.'); return }
     if (!titel.trim()) { toast.error('Geef het contract een titel.'); return }
+    if (onsNodig && !tekenaars.length) { toast.error('Duid aan wie van ons tekent.'); return }
     try {
       setBezig('Opladen…')
-      const r1 = await fetch('/api/admin/algemene-contracten/upload', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ naam: bestand.name.toLowerCase().endsWith('.pdf') ? bestand.name : `${bestand.name}.pdf`, grootte: bestand.size }) })
-      const up = await r1.json(); if (!r1.ok) throw new Error(up.error || 'Opladen mislukt')
-      const { error } = await createClient().storage.from(up.bucket).uploadToSignedUrl(up.pad, up.token, bestand, { contentType: 'application/pdf', upsert: false })
-      if (error) throw new Error(error.message)
+      const pad = opgeladen?.bestand === bestand ? opgeladen.pad : await upload(bestand)
       setBezig('Bewaren…')
       const r2 = await fetch('/api/admin/algemene-contracten', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pad: up.pad, bestand_naam: bestand.name, titel, map_id: mapId || null, tegenpartij, tegenpartij_email: email, labels: lbls, begin_datum: begin || null, eind_datum: eind || null, notitie, ons_nodig: onsNodig, ondertekenaar: onsNodig ? ondertekenaar || null : null, partij_nodig: partijNodig }),
+        body: JSON.stringify({ pad, bestand_naam: bestand.name, titel, map_id: mapId || null, tegenpartij, tegenpartij_email: email, labels: lbls, begin_datum: begin || null, eind_datum: eind || null, notitie, ons_nodig: onsNodig, ons_tekenaars: onsNodig ? tekenaars : [], partij_nodig: partijNodig }),
       })
       const j = await r2.json(); if (!r2.ok) throw new Error(j.error || 'Bewaren mislukt')
       toast.success(onsNodig ? 'Opgeladen. Zet nu je handtekening.' : 'Opgeladen.')
@@ -423,53 +476,61 @@ function OpladenVenster({ mappen, beginMap, labels, onSluit, onKlaar }: {
             <span className="text-[11px] text-gray-500">Enkel PDF, tot 50 MB. Een Word-document sla je eerst op als PDF.</span>
             <input type="file" accept="application/pdf,.pdf" className="sr-only" onChange={(e) => kies(e.target.files?.[0] ?? null)} />
           </label>
+          {lezen && <div className="flex items-center gap-2 text-xs text-gray-600"><Loader2 className="h-3.5 w-3.5 animate-spin" />De PDF wordt gelezen om de gegevens in te vullen…</div>}
+          {ingevuld && !lezen && (
+            <div className="flex items-start gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
+              <Sparkles className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+              <span className="flex-1">Uit de PDF ingevuld: {ingevuld.velden.join(', ')}. Kijk het even na.</span>
+              <button type="button" onClick={ingevuld.terug} className="inline-flex items-center gap-1 font-medium text-gray-900 hover:underline shrink-0"><Undo2 className="h-3.5 w-3.5" />Ongedaan maken</button>
+            </div>
+          )}
 
           <div>
             <label className={LBL}>Titel</label>
-            <input className="input-base" value={titel} onChange={(e) => setTitel(e.target.value)} maxLength={200} placeholder="bv. Huurovereenkomst kantoor Corda Campus" />
+            <input className="input-base" value={titel} onChange={(e) => { raak('titel'); setTitel(e.target.value) }} maxLength={200} placeholder="bv. Huurovereenkomst kantoor Corda Campus" />
           </div>
           <div className="grid sm:grid-cols-2 gap-3">
             <div>
               <label className={LBL}>Map</label>
-              <select className="input-base" value={mapId} onChange={(e) => setMapId(e.target.value)}>
+              <select className="input-base" value={mapId} onChange={(e) => { raak('map'); setMapId(e.target.value) }}>
                 <option value="">Zonder map</option>
                 {boom(mappen).map(({ map: m, pad }) => <option key={m.id} value={m.id}>{pad}</option>)}
               </select>
             </div>
             <div>
               <label className={LBL}>Andere partij</label>
-              <input className="input-base" value={tegenpartij} onChange={(e) => setTegenpartij(e.target.value)} maxLength={200} placeholder="bv. AG Insurance" />
+              <input className="input-base" value={tegenpartij} onChange={(e) => { raak('tegenpartij'); setTegenpartij(e.target.value) }} maxLength={200} placeholder="bv. AG Insurance" />
             </div>
             <div>
               <label className={LBL}>E-mail andere partij <span className="text-gray-400 font-normal">(optioneel)</span></label>
-              <input type="email" className="input-base" value={email} onChange={(e) => setEmail(e.target.value)} maxLength={200} placeholder="naam@bedrijf.be" />
+              <input type="email" className="input-base" value={email} onChange={(e) => { raak('email'); setEmail(e.target.value) }} maxLength={200} placeholder="naam@bedrijf.be" />
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <div><label className={LBL}>Begin</label><input type="date" className="input-base" value={begin} onChange={(e) => setBegin(e.target.value)} /></div>
-              <div><label className={LBL}>Loopt tot</label><input type="date" className="input-base" value={eind} onChange={(e) => setEind(e.target.value)} /></div>
+              <div><label className={LBL}>Begin</label><input type="date" className="input-base" value={begin} onChange={(e) => { raak('begin'); setBegin(e.target.value) }} /></div>
+              <div><label className={LBL}>Loopt tot</label><input type="date" className="input-base" value={eind} onChange={(e) => { raak('eind'); setEind(e.target.value) }} /></div>
             </div>
           </div>
           <div>
             <label className={LBL}>Labels</label>
-            <LabelsVeld waarde={lbls} onChange={setLbls} voorstellen={labels} />
+            <LabelsVeld waarde={lbls} onChange={(l) => { raak('labels'); setLbls(l) }} voorstellen={labels} />
           </div>
 
           <fieldset className="rounded-xl border border-gray-200 p-3 space-y-2.5">
             <legend className="px-1 text-xs font-medium text-gray-600">Wie moet tekenen?</legend>
             <label className="flex items-start gap-2 text-sm cursor-pointer">
-              <input type="checkbox" checked={onsNodig} onChange={(e) => setOnsNodig(e.target.checked)} className="h-4 w-4 mt-0.5 accent-gray-900" />
-              <span><b className="font-medium">Wij (NextGenMedia)</b><span className="block text-xs text-gray-500">Met je handtekening, je naam en datum en uur eronder.</span></span>
+              <input type="checkbox" checked={onsNodig} onChange={(e) => { raak('ons'); setOnsNodig(e.target.checked) }} className="h-4 w-4 mt-0.5 accent-gray-900" />
+              <span><b className="font-medium">Wij (NextGen Agency BV)</b><span className="block text-xs text-gray-500">Elk met de eigen handtekening, met naam en datum en uur eronder.</span></span>
             </label>
             {onsNodig && (
               <div className="ml-6">
-                <p className="text-xs text-gray-500 mb-1">Wie tekent?</p>
-                <div className="flex gap-1.5 flex-wrap" role="radiogroup" aria-label="Wie tekent namens ons">
-                  {ONDERTEKENAARS.map((o) => <PersoonKnop key={o} naam={o} label={o === 'Gezamenlijke lead' ? 'Marco of Bram' : o} klein aan={ondertekenaar === o} onClick={() => setOndertekenaar(o)} />)}
+                <p className="text-xs text-gray-500 mb-1">Wie tekent? Iedereen die je aanduidt, tekent en krijgt een taak.</p>
+                <div className="flex gap-1.5 flex-wrap" role="group" aria-label="Wie tekent namens ons">
+                  {PERSONEN.map((o) => <PersoonKnop key={o} naam={o} klein rol="checkbox" aan={tekenaars.includes(o)} onClick={() => { raak('tekenaars'); setTekenaars(tekenaars.includes(o) ? tekenaars.filter((x) => x !== o) : [...tekenaars, o]) }} />)}
                 </div>
               </div>
             )}
             <label className="flex items-start gap-2 text-sm cursor-pointer">
-              <input type="checkbox" checked={partijNodig} onChange={(e) => setPartijNodig(e.target.checked)} className="h-4 w-4 mt-0.5 accent-gray-900" />
+              <input type="checkbox" checked={partijNodig} onChange={(e) => { raak('partij'); setPartijNodig(e.target.checked) }} className="h-4 w-4 mt-0.5 accent-gray-900" />
               <span><b className="font-medium">De andere partij</b><span className="block text-xs text-gray-500">Krijgt een persoonlijke link per mail en tekent op de plek die jij aanduidt.</span></span>
             </label>
             {!onsNodig && !partijNodig && <p className="text-xs text-gray-500">Niemand tekent: het contract wordt gewoon bewaard (bv. een al getekende polis).</p>}
@@ -477,11 +538,11 @@ function OpladenVenster({ mappen, beginMap, labels, onSluit, onKlaar }: {
 
           <div>
             <label className={LBL}>Notitie <span className="text-gray-400 font-normal">(optioneel)</span></label>
-            <textarea className="input-base min-h-[70px]" value={notitie} onChange={(e) => setNotitie(e.target.value)} maxLength={4000} placeholder="bv. Opzeggen 3 maanden voor de einddatum." />
+            <textarea className="input-base min-h-[70px]" value={notitie} onChange={(e) => { raak('notitie'); setNotitie(e.target.value) }} maxLength={4000} placeholder="bv. Opzeggen 3 maanden voor de einddatum." />
           </div>
           <div className="flex gap-2 justify-end">
             <button type="button" onClick={onSluit} className="btn-secondary text-sm">Annuleren</button>
-            <button type="button" onClick={bewaar} disabled={!!bezig || !bestand} className="btn-primary text-sm">{bezig ? <><Loader2 className="h-4 w-4 animate-spin" />{bezig}</> : <><Upload className="h-4 w-4" />{onsNodig || partijNodig ? 'Opladen en verder' : 'Opladen'}</>}</button>
+            <button type="button" onClick={bewaar} disabled={!!bezig || !bestand || (onsNodig && !tekenaars.length)} title={onsNodig && !tekenaars.length ? 'Duid aan wie van ons tekent' : undefined} className="btn-primary text-sm">{bezig ? <><Loader2 className="h-4 w-4 animate-spin" />{bezig}</> : <><Upload className="h-4 w-4" />{onsNodig || partijNodig ? 'Opladen en verder' : 'Opladen'}</>}</button>
           </div>
         </div>
       </div>
