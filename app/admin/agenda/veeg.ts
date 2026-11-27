@@ -37,33 +37,54 @@ export function useVeeg(el: HTMLElement | null, opts: { actief: boolean; stap: (
     let wielStand: WielStand | null = null
     let terugTimer: ReturnType<typeof setTimeout> | null = null
 
+    // Met een carrousel (data-veeg-spoor: de vorige en volgende periode staan ernaast) schuift het
+    // spoor 1-op-1 mee; zonder (teamweergave) schuift de inhoud wat mee en springt de nieuwe periode in.
+    const spoor = () => el.querySelector<HTMLElement>(':scope > [data-veeg-spoor]')
+    const breedte = () => (spoor() ? el.clientWidth : undefined)
+    let bezigMetAnimatie = false
     const zet = (px: number, glad = false) => {
-      el.style.transition = glad ? 'transform 180ms ease-out' : 'none'
-      el.style.transform = px ? `translateX(${px}px)` : ''
+      const doel = spoor() ?? el
+      doel.style.transition = glad ? 'transform 220ms cubic-bezier(.2,.8,.2,1)' : 'none'
+      doel.style.transform = px ? `translateX(${px}px)` : ''
     }
     const verder = (n: 1 | -1) => {
-      zet(0)
-      laatst.current.stap(n)
-      // De nieuwe periode komt van de kant waar je naartoe veegde.
-      try { el.animate([{ transform: `translateX(${n * 48}px)`, opacity: 0.35 }, { transform: 'none', opacity: 1 }], { duration: 200, easing: 'cubic-bezier(.2,.8,.2,1)' }) } catch { /* oudere browser */ }
+      const s = spoor()
+      if (!s) {
+        zet(0)
+        laatst.current.stap(n)
+        // De nieuwe periode komt van de kant waar je naartoe veegde.
+        try { el.animate([{ transform: `translateX(${n * 48}px)`, opacity: 0.35 }, { transform: 'none', opacity: 1 }], { duration: 200, easing: 'cubic-bezier(.2,.8,.2,1)' }) } catch { /* oudere browser */ }
+        return
+      }
+      // Carrousel: helemaal doorschuiven naar de buurperiode, dan pas de datum wisselen (het spoor springt dan stil terug).
+      bezigMetAnimatie = true
+      s.style.transition = 'transform 260ms cubic-bezier(.2,.8,.2,1)'
+      s.style.transform = `translateX(${-n * el.clientWidth}px)`
+      let klaar = false
+      const af = () => { if (klaar) return; klaar = true; s.removeEventListener('transitionend', af); bezigMetAnimatie = false; laatst.current.stap(n) }
+      s.addEventListener('transitionend', af)
+      setTimeout(af, 320)
     }
-    const magNu = () => laatst.current.actief && !agendaSleep.bezig && Date.now() - agendaSleep.tot > 400
+    const magNu = () => laatst.current.actief && !bezigMetAnimatie && !agendaSleep.bezig && Date.now() - agendaSleep.tot > 400
 
     // ── Touchpad (laptop): wheel met deltaX ───────────────────────────────
     const opWiel = (e: WheelEvent) => {
-      if (e.ctrlKey || !magNu()) return // ctrl = inzoomen met twee vingers
+      if (e.ctrlKey) return // ctrl = inzoomen met twee vingers
       const f = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientWidth : 1
       const dx = e.deltaX * f, dy = e.deltaY * f
+      // Tijdens het doorschuiven: de naloop van de touchpad bijhouden (geen tweede stap), niets anders.
+      if (bezigMetAnimatie) { if (wielStand) wielStand = wiel(wielStand, dx, dy, performance.now(), breedte()).s; if (Math.abs(dx) > Math.abs(dy)) e.preventDefault(); return }
+      if (!magNu()) return
       if (!wielStand && (Math.abs(dx) <= Math.abs(dy) || nietHier(e.target) || scrolltZelf(e.target, el, dx))) return
-      const r = wiel(wielStand, dx, dy, performance.now())
+      const r = wiel(wielStand, dx, dy, performance.now(), breedte())
       wielStand = r.s
       if (!r.vang) return
       e.preventDefault() // geen "vorige pagina" van de browser en niet de pagina opzij
       if (r.stap) { verder(r.stap); return }
-      zet(r.mee)
+      if (!wielStand?.vast) zet(r.mee)
       // Vingers los zonder genoeg te vegen: terugveren.
       if (terugTimer) clearTimeout(terugTimer)
-      terugTimer = setTimeout(() => { if (wielStand && !wielStand.vast) zet(0, true); wielStand = null }, 240)
+      terugTimer = setTimeout(() => { if (wielStand && !wielStand.vast && !bezigMetAnimatie) zet(0, true); wielStand = null }, 160)
     }
 
     // ── Vinger (gsm) ───────────────────────────────────────────────────────
@@ -85,13 +106,13 @@ export function useVeeg(el: HTMLElement | null, opts: { actief: boolean; stap: (
       if (vinger.richting !== 'opzij') return
       if (e.cancelable) e.preventDefault() // niet tegelijk op en neer scrollen
       vinger.dx = dx
-      zet(vingerMee(dx))
+      zet(vingerMee(dx, breedte()))
     }
     const opEind = () => {
       const v = vinger
       vinger = null
       if (!v || v.richting !== 'opzij') return
-      const n = vingerStap(v.dx, performance.now() - v.t)
+      const n = vingerStap(v.dx, performance.now() - v.t, breedte())
       if (n) verder(n); else zet(0, true)
     }
     const opAnnuleer = () => { if (vinger?.richting === 'opzij') zet(0, true); vinger = null }

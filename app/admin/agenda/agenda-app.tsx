@@ -20,6 +20,7 @@ import { useVeeg } from './veeg'
 import { TeamDag, TeamWeek, type TeamData } from './team'
 import { ReeksFormulier, ReeksVenster, teamActie } from './reeks'
 import { WeekPlannen } from './week-plannen'
+import { VeegSpoor } from './veeg-spoor'
 import { Boom, type Keuze } from './boom'
 import { ItemVenster, KlantLijst, voorladen } from './item-venster'
 import { LijstWeergave, wanneer } from './lijst'
@@ -80,6 +81,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
   const [openItem, setOpenItem] = useState<string | null>(null)
   // Wat de kalender al van de geopende taak weet: het venster toont dat meteen.
   const [voorlopig, setVoorlopig] = useState<Item | null>(null)
+  const laatstVerplaatst = useRef(new Map<string, number>())
   const [nieuw, setNieuw] = useState<NieuwMoment | null>(null)
   const [inspreek, setInspreek] = useState(false)
   const [afsluiten, setAfsluiten] = useState(false)
@@ -187,14 +189,42 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
   const weergave: Weergave = modus === 'lijst' ? 'week' : modus
   const bereik = useMemo(() => bereikVan(weergave, datum), [weergave, datum])
   const vraag = useRef(0)
+  // Wat al geladen is per periode: een periode die je al zag (of die naast de huidige voorgeladen werd)
+  // staat meteen in beeld, ververst op de achtergrond. Zo toont het vegen de volgende week al.
+  const voorraad = useRef(new Map<string, { items: Item[]; t: number }>())
+  const [voorraadVersie, setVoorraadVersie] = useState(0)
+  // Voor welke periode de geladen lijst geldt (net na het vegen is dat nog even de vorige).
+  const [itemsVan, setItemsVan] = useState('')
+  const sleutelVan = (b: { van: string; tot: string }) => `${b.van}|${b.tot}`
+  const bewaarVoorraad = (k: string, l: Item[]) => {
+    voorraad.current.set(k, { items: l, t: Date.now() })
+    if (voorraad.current.size > 12) voorraad.current.delete(voorraad.current.keys().next().value as string)
+  }
   const laadItems = useCallback(async () => {
     const n = ++vraag.current
-    setLaden(true)
+    const k = sleutelVan(bereik)
+    const al = !team ? voorraad.current.get(k) : undefined
+    if (al) { setItems(al.items); setItemsVan(k) }
+    setLaden(!al)
     try {
       const j = await api<{ items: Item[] } & Partial<TeamData>>(`/api/admin/agenda?van=${encodeURIComponent(bereik.van)}&tot=${encodeURIComponent(bereik.tot)}${team ? '&team=1' : ''}`)
-      if (n === vraag.current) { setItems(j.items); if (team) setTeamData({ bezet: j.bezet ?? [], beschikbaarheid: j.beschikbaarheid ?? [] }) }
+      if (!team) bewaarVoorraad(k, j.items)
+      if (n === vraag.current) { setItems(j.items); setItemsVan(k); if (team) setTeamData({ bezet: j.bezet ?? [], beschikbaarheid: j.beschikbaarheid ?? [] }) }
     } catch (e) { if (n === vraag.current) toast.error(e instanceof Error ? e.message : 'Agenda laden mislukt') } finally { if (n === vraag.current) setLaden(false) }
-  }, [bereik, team])
+    // De vorige en volgende periode alvast laden (voor het vegen), enkel als ze er nog niet (vers) zijn.
+    if (!team && n === vraag.current) {
+      for (const m of [1, -1]) {
+        const b = bereikVan(weergave, verschuif(weergave, datum, m))
+        const kb = sleutelVan(b), c = voorraad.current.get(kb)
+        if (c && Date.now() - c.t < 45_000) continue
+        api<{ items: Item[] }>(`/api/admin/agenda?van=${encodeURIComponent(b.van)}&tot=${encodeURIComponent(b.tot)}`)
+          .then((j) => { bewaarVoorraad(kb, j.items); setVoorraadVersie((v) => v + 1) }).catch(() => null)
+      }
+    }
+  }, [bereik, team, weergave, datum]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Wat je hier aanpast (verplaatsen, afvinken), staat ook in de voorraad van deze periode.
+  useEffect(() => { if (items && !team && itemsVan === sleutelVan(bereik)) bewaarVoorraad(itemsVan, items) }, [items]) // eslint-disable-line react-hooks/exhaustive-deps
+  const burenItems = useCallback((d: string) => voorraad.current.get(sleutelVan(bereikVan(weergave, d)))?.items ?? [], [weergave, voorraadVersie]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (modus !== 'lijst') laadItems() }, [laadItems, modus])
 
   const container = keuze && keuze.soort !== 'doc' ? keuze : null
@@ -295,6 +325,8 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
     } catch (e) { pasLokaalAan(i.id, { status: i.status, afgerond_op: i.afgerond_op }); toast.error(e instanceof Error ? e.message : 'Mislukt') }
   }
   const verplaats = async (i: Item, v: Verplaatsing) => {
+    // Wat je net naar een dag sleepte, komt onderaan bij die dag (tot je de agenda herlaadt).
+    laatstVerplaatst.current.set(i.id, Date.now())
     const oud = { start_op: i.start_op, eind_op: i.eind_op, heel_dag: i.heel_dag, ...('deadline_op' in v ? { deadline_op: i.deadline_op } : {}) }
     pasLokaalAan(i.id, v)
     try {
@@ -516,7 +548,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
         )}
 
         {/* Inhoud: op de gsm van rand tot rand; opzij vegen = vorige of volgende week (dag, maand). */}
-        <div ref={setInhoud} className="flex-1 min-h-0 max-md:-mx-4 overscroll-x-none touch-pan-y touch-pinch-zoom">
+        <div ref={setInhoud} className="flex-1 min-h-0 max-md:-mx-4 overscroll-x-none touch-pan-y touch-pinch-zoom relative overflow-hidden">
           {keuze?.soort === 'doc' ? (
             <DocWeergave key={keuze.id} id={keuze.id} boom={boom} onVernieuw={laadBoom} onVerwijderd={() => { setKeuze(null); laadBoom() }} onOpenItem={(id) => setOpenItem(id)} />
           ) : modus === 'lijst' && lijstenVanKeuze ? (
@@ -529,10 +561,13 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
             // Teamagenda: op de dag een kolom per persoon, anders een rij per persoon met de capaciteit.
             (weergave === 'dag' ? <TeamDag {...teamProps} /> : <TeamWeek {...teamProps} />)
           ) : (
-            <Kalender weergave={weergave} datum={datum} items={zichtbaar} kleur={kleur} herkomst={herkomst} personen={personenMap}
-              magAanpassen={!!boom.rechten.aanpassen} magToevoegen={!!boom.rechten.toevoegen}
-              onOpen={open} onKlaar={wisselKlaar} onVerplaats={verplaats} onNieuw={setNieuw}
-              onDag={(d) => { setDatum(d); kiesModus('dag') }} />
+            // Carrousel: de vorige en volgende periode staan ernaast, zodat vegen meeschuift.
+            <VeegSpoor weergave={weergave} datum={datum} render={(d, huidig) => (
+              <Kalender weergave={weergave} datum={d} items={huidig && itemsVan === sleutelVan(bereik) ? zichtbaar : filter(burenItems(d))} kleur={kleur} herkomst={herkomst} personen={personenMap}
+                magAanpassen={!!boom.rechten.aanpassen} magToevoegen={!!boom.rechten.toevoegen} laatst={laatstVerplaatst.current}
+                onOpen={open} onKlaar={wisselKlaar} onVerplaats={verplaats} onNieuw={setNieuw}
+                onDag={(x) => { setDatum(x); kiesModus('dag') }} />
+            )} />
           )}
         </div>
       </section>

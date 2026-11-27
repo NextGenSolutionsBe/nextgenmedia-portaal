@@ -79,6 +79,8 @@ type Props = {
   onVerplaats: (i: Item, v: Verplaatsing) => void
   onNieuw: (m: NieuwMoment) => void
   onDag: (d: string) => void
+  /** Net versleept (id → tijdstip): komt onderaan bij zijn dag in de rij "Hele dag". */
+  laatst?: Map<string, number>
 }
 
 const hhmm = (min: number) => `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
@@ -161,8 +163,8 @@ function Chip({ i, kleur, h, onOpen, onKlaar, personen, tijd, sleep, opDag, lang
   if (compact) {
     return (
       <div data-item={voorladenId(i)} onClick={() => onOpen(i)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
-        className={`relative flex items-center rounded pl-1 pr-px h-[22px] text-[11px] font-medium leading-none cursor-pointer select-none overflow-hidden ${focusRing}`}
-        style={stijlVan(i, kleur)} title={h ? `${i.titel} · ${h.naam}` : i.titel}>
+        className={`relative flex items-center rounded-[4px] pl-[3px] pr-0 h-[22px] text-[11.5px] font-normal tracking-[-0.01em] leading-none cursor-pointer select-none overflow-hidden ${focusRing}`}
+        style={{ ...stijlVan(i, kleur), borderLeftWidth: 2 }} title={h ? `${i.titel} · ${h.naam}` : i.titel}>
         {/* Zonder puntjes: zo past er meer van de titel in, net als in ClickUp. */}
         <span className={`whitespace-nowrap overflow-hidden ${klaar ? 'line-through decoration-1 opacity-80' : ''}`}>{i.titel}</span>
       </div>
@@ -202,7 +204,7 @@ type Sleep =
 const HOUD_MS = 450
 const HOUD_SPELING = 8
 
-function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpassen, magToevoegen, onOpen, onKlaar, onVerplaats, onNieuw, onDag }: Props) {
+function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpassen, magToevoegen, onOpen, onKlaar, onVerplaats, onNieuw, onDag, laatst }: Props) {
   const dagen = useMemo(() => dagenVan(weergave, datum), [weergave, datum])
   const kolommenRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -226,6 +228,18 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
   }, [])
   const [nu, setNu] = useState(() => Date.now())
   const [alleDag, setAlleDag] = useState(false)
+  // Op de gsm in de week: zaterdag en zondag smaller, zodat de werkdagen meer tekst tonen (zoals Work week in ClickUp).
+  const gewichten = useMemo(() => dagen.map((d) => (compact && weergave === 'week' && weekdag(d) >= 5 ? 0.55 : 1)), [dagen, compact, weergave])
+  const kolTpl = gewichten.map((g) => `minmax(0, ${g}fr)`).join(' ')
+  /** Welke dag ligt onder x (rekening houdend met smallere weekenddagen)? */
+  const dagOnder = (x: number, r: DOMRect): number => {
+    const totaal = gewichten.reduce((a, b) => a + b, 0)
+    let rest = ((x - r.left) / r.width) * totaal
+    for (let n = 0; n < gewichten.length; n++) { rest -= gewichten[n]; if (rest < 0) return n }
+    return gewichten.length - 1
+  }
+  // Slepen in de rij "Hele dag": de dag waarboven je loslaat (ook als daar al taken staan).
+  const [dropDag, setDropDag] = useState<number | null>(null)
   useEffect(() => { const t = setInterval(() => setNu(Date.now()), 60_000); return () => clearInterval(t) }, [])
 
   // Items per dag: rooster (met uur) en de rij "hele dag" (zonder uur of over meerdere dagen).
@@ -245,7 +259,7 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
       }
     }
     // Balken in banen leggen (langste eerst), zoals een maandkalender.
-    bal.sort((a, b) => a.van - b.van || (b.tot - b.van) - (a.tot - a.van) || Number(a.item.status === 'klaar') - Number(b.item.status === 'klaar') || a.item.titel.localeCompare(b.item.titel))
+    bal.sort((a, b) => a.van - b.van || (b.tot - b.van) - (a.tot - a.van) || (laatst?.get(a.item.id) ?? 0) - (laatst?.get(b.item.id) ?? 0) || Number(a.item.status === 'klaar') - Number(b.item.status === 'klaar') || a.item.titel.localeCompare(b.item.titel))
     const banenEind: number[] = []
     const balken = bal.map((b) => {
       let baan = banenEind.findIndex((e) => e < b.van)
@@ -281,8 +295,7 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
     const el = kolommenRef.current
     if (!el) return null
     const r = el.getBoundingClientRect()
-    const breedte = r.width / dagen.length
-    const dagIndex = Math.max(0, Math.min(dagen.length - 1, Math.floor((x - r.left) / breedte)))
+    const dagIndex = Math.max(0, Math.min(dagen.length - 1, dagOnder(x, r)))
     return { dagIndex, min: (y - r.top) / pxMin }
   }
 
@@ -392,7 +405,7 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
 
   const vandaagD = vandaag()
   const nuMin = (() => { const t = new Date(nu); return dag(t.toISOString()) === vandaagD ? Number(uur(t.toISOString()).slice(0, 2)) * 60 + Number(uur(t.toISOString()).slice(3)) : -1 })()
-  const cols = `${smal ? 40 : 60}px repeat(${dagen.length}, minmax(0, 1fr))`
+  const cols = `${smal ? 34 : 60}px ${kolTpl}`
 
   return (
     <div className="card-base !p-0 overflow-hidden h-full max-md:!rounded-none max-md:!border-x-0 max-md:!shadow-none">
@@ -439,17 +452,21 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
           <div className={`label-mono text-[9px] text-gray-400 uppercase pt-2.5 leading-tight ${compact ? 'px-0.5 text-center' : 'px-2'}`}>{compact ? 'Dag' : <>Hele<br />dag</>}</div>
           <div className="relative" style={{ gridColumn: `2 / span ${dagen.length}` }}>
            <div className={alleDag ? 'max-h-[38vh] overflow-y-auto' : ''}>
-            <div className="relative">
-            <div className="absolute inset-0 grid" style={{ gridTemplateColumns: `repeat(${dagen.length}, minmax(0, 1fr))` }}>
+            {/* Loslaten mag overal in de rij, ook bovenop andere taken: de dag onder de muis telt. */}
+            <div className="relative"
+              onDragOver={(e) => { if (!magAanpassen || !e.dataTransfer.types.includes('text/agenda-item')) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; const n = dagOnder(e.clientX, e.currentTarget.getBoundingClientRect()); if (n !== dropDag) setDropDag(n) }}
+              onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropDag(null) }}
+              onDrop={(e) => { const n = dagOnder(e.clientX, e.currentTarget.getBoundingClientRect()); setDropDag(null); dropOpDag(e, dagen[n]) }}>
+            <div className="absolute inset-0 grid" style={{ gridTemplateColumns: kolTpl }}>
               {dagen.map((d, n) => (
-                <div key={d} className="border-l border-gray-100 group relative" onDragOver={(e) => { if (magAanpassen) e.preventDefault() }} onDrop={(e) => dropOpDag(e, d)}
+                <div key={d} className={`border-l border-gray-100 group relative transition-colors ${dropDag === n ? 'bg-gray-200/60' : ''}`}
                   onDoubleClick={() => magToevoegen && onNieuw({ dag: d, heelDag: true })}>
                   {magToevoegen && <button type="button" onClick={() => onNieuw({ dag: d, heelDag: true })} aria-label={`Taak op ${kortDag(d)}`} className={`absolute right-1 bottom-1 h-5 w-5 rounded-md bg-white border border-gray-200 text-gray-500 opacity-0 group-hover:opacity-100 focus:opacity-100 flex items-center justify-center z-10 ${focusRing}`}><Plus className="h-3 w-3" /></button>}
                   {verborgenPerDag.get(n) ? <button type="button" onClick={() => setAlleDag(true)} className={`absolute bottom-1 font-semibold text-gray-700 hover:underline z-10 ${compact ? 'left-0.5 text-[10px]' : 'left-1.5 text-[12px]'}`}>+{verborgenPerDag.get(n)}{compact ? '' : ' meer'}</button> : null}
                 </div>
               ))}
             </div>
-            <div className={`relative grid pointer-events-none ${compact ? 'gap-y-0.5 py-1 px-0' : 'gap-y-1 py-2 px-1'}`} style={{ gridTemplateColumns: `repeat(${dagen.length}, minmax(0, 1fr))`, gridAutoRows: compact ? '22px' : '30px', minHeight: magToevoegen ? 44 : undefined, paddingBottom: verborgenPerDag.size ? 24 : undefined }}>
+            <div className={`relative grid pointer-events-none ${compact ? 'gap-y-0.5 py-1 px-0' : 'gap-y-1 py-2 px-1'}`} style={{ gridTemplateColumns: kolTpl, gridAutoRows: compact ? '22px' : '30px', minHeight: magToevoegen ? 44 : undefined, paddingBottom: verborgenPerDag.size ? 24 : undefined }}>
               {balken.filter((b) => b.baan < toonBanen).map((b) => (
                 <div key={`${b.item.bron}-${b.item.id}`} className={`pointer-events-auto min-w-0 ${compact ? 'px-0.5' : 'px-1'}`} style={{ gridColumn: `${b.van + 1} / ${b.tot + 2}`, gridRow: b.baan + 1 }}>
                   <Chip i={b.item} kleur={kleur(b.item)} h={herkomst?.(b.item)} onOpen={onOpen} onKlaar={onKlaar} personen={personen} sleep={sleepbaar(b.item, magAanpassen)} magKlaar={magAanpassen} opDag={dagen[b.van]} lang={weergave === 'dag'} compact={compact} />
@@ -469,7 +486,7 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
           <div className="relative">
             {Array.from({ length: 24 }, (_, h) => h > 0 && <div key={h} className={`absolute -translate-y-1/2 tabular-nums text-gray-500 ${smal ? 'right-1 text-[10px]' : 'right-2 text-[12px]'}`} style={{ top: h * 60 * pxMin }}>{String(h).padStart(2, '0')}:00</div>)}
           </div>
-          <div ref={kolommenRef} className="relative grid" style={{ gridColumn: `2 / span ${dagen.length}`, gridTemplateColumns: `repeat(${dagen.length}, minmax(0, 1fr))` }}
+          <div ref={kolommenRef} className="relative grid" style={{ gridColumn: `2 / span ${dagen.length}`, gridTemplateColumns: kolTpl }}
             onPointerMove={beweeg} onPointerUp={los} onPointerCancel={() => { stopHouden(); aanSlepen.current = false; stopSleep(); setSleep(null) }}>
             {/* lijnen */}
             <div className="absolute inset-0 pointer-events-none">
@@ -495,8 +512,8 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
                         onPointerDown={(e) => (sl ? startVerplaats(e, i, n, b.vanMin, b.totMin) : undefined)}
                         onClick={() => { if (!sl) onOpen(i) }} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
                         onContextMenu={(e) => { if (houd.current || aanSlepen.current) e.preventDefault() }}
-                        className={`group absolute overflow-hidden [container-type:inline-size] shadow-[0_1px_3px_rgba(0,0,0,0.08)] cursor-pointer select-none [-webkit-touch-callout:none] hover:brightness-[0.97] hover:z-[2] ${compact ? 'rounded pl-1 pr-px py-px text-[11px] leading-[13px]' : smal ? 'rounded-md pl-1.5 pr-1 py-0.5 text-[12.5px] leading-tight' : 'rounded-lg pl-2 pr-1.5 py-1 text-[13.5px] leading-snug'} ${bezig ? 'opacity-30' : ''} ${opgetild ? 'z-10 ring-2 ring-gray-900 shadow-lg scale-[1.03]' : ''} transition-transform ${focusRing}`}
-                        style={{ ...stijlVan(i, kl), top: b.vanMin * pxMin + 1, height: hoogte, left: `calc(${(b.kolom / b.kolommen) * 100}% + ${compact ? 1 : 3}px)`, width: `calc(${100 / b.kolommen}% - ${compact ? 2 : 6}px)` }}
+                        className={`group absolute overflow-hidden [container-type:inline-size] shadow-[0_1px_3px_rgba(0,0,0,0.08)] cursor-pointer select-none [-webkit-touch-callout:none] hover:brightness-[0.97] hover:z-[2] ${compact ? 'rounded-[4px] pl-[3px] pr-0 py-px text-[11.5px] leading-[13px] tracking-[-0.01em]' : smal ? 'rounded-md pl-1.5 pr-1 py-0.5 text-[12.5px] leading-tight' : 'rounded-lg pl-2 pr-1.5 py-1 text-[13.5px] leading-snug'} ${bezig ? 'opacity-30' : ''} ${opgetild ? 'z-10 ring-2 ring-gray-900 shadow-lg scale-[1.03]' : ''} transition-transform ${focusRing}`}
+                        style={{ ...stijlVan(i, kl), ...(compact ? { borderLeftWidth: 2 } : {}), top: b.vanMin * pxMin + 1, height: hoogte, left: `calc(${(b.kolom / b.kolommen) * 100}% + ${compact ? 1 : 3}px)`, width: `calc(${100 / b.kolommen}% - ${compact ? 2 : 6}px)` }}
                         title={`${hhmm(b.vanMin)}–${hhmm(b.totMin)} ${i.titel}${h ? ` · ${h.naam}` : ''}`}>
                         {compact ? (
                           // Smalle kolom: de titel (zoveel regels als passen) en bij een groter blok het beginuur.
