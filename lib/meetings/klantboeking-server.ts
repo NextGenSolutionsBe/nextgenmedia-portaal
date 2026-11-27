@@ -14,6 +14,7 @@ import {
   stapGoogle, stapClickup, planHerinnering, bestaatGoogleAfspraak, annuleer, bewaarMeeting, leesMeeting, veiligeFout, type MeetingRij,
 } from '@/lib/meetings/server'
 import { isEmail, type Persoon } from '@/lib/meetings/model'
+import { vasteBlokkenVoor } from '@/lib/agenda/team-server'
 
 /**
  * Klantboeking — server. Klanten boeken zelf een gratis meeting: via de publieke
@@ -191,7 +192,10 @@ export async function berekenVrijeSlots(admin: Admin, opts: { nu?: Date; van?: n
   }
   const zonderEigen = (l: Interval[]) => (eigen ? l.filter((b) => !(b.start === eigen!.start && b.end === eigen!.end)) : l)
 
-  const slots = vrijeSlots(kandidaten, { werkuren, bezet: [...zonderEigen(google), ...clickup, ...meetings] })
+  // Vaste blokken uit de teamagenda (Sales, Focuswerk …) van de agenda-eigenaar en het gekozen teamlid: nooit boekbaar.
+  const blokken = (await Promise.all([...new Set([agenda.clickup_assignee_id, teamlid?.clickup_user_id].filter((x) => x !== null && x !== undefined && String(x) !== ''))]
+    .map((id) => vasteBlokkenVoor(admin, id as string | number, van, tot)))).flat().map((b) => ({ start: b.start, end: b.end }))
+  const slots = vrijeSlots(kandidaten, { werkuren, bezet: [...zonderEigen(google), ...clickup, ...meetings, ...blokken] })
   const waarde = { agendaId: agenda.id, slots }
   cache.set(sleutel, { tot: Date.now() + CACHE_MS, waarde })
   return waarde

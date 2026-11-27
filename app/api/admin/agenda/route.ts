@@ -5,6 +5,8 @@ import type { Actie } from '@/lib/instellingen/model'
 import { controleerItem, isUuid, isKleur, vandaag, type Item } from '@/lib/agenda/model'
 import { inspreekPrompt, leesInspreekVoorstel, type InspreekContext } from '@/lib/agenda/inspreken'
 import { mijnDeadlines } from '@/lib/agenda/deadlines-server'
+import { reeksenInBereik, laadBeschikbaarheid } from '@/lib/agenda/team-server'
+import type { Bezet } from '@/lib/agenda/team'
 import { MAX_VERPLAATS } from '@/lib/agenda/dag-afsluiten'
 import { schoonDocJson, vulDocAan, BEELD_PAD, BEELD_TYPES, MAX_BEELD, type DocNode } from '@/lib/agenda/doc-opmaak'
 import {
@@ -67,7 +69,7 @@ export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams
   try {
     if (q.get('boom')) return NextResponse.json(await boom(c))
-    if (q.get('van') || q.get('tot')) return NextResponse.json(await bereik(admin, k, q.get('van'), q.get('tot')))
+    if (q.get('van') || q.get('tot')) return NextResponse.json(await bereik(admin, k, q.get('van'), q.get('tot'), q.get('team') === '1'))
     if (q.get('container')) return NextResponse.json(await container(admin, k, q.get('container')!, q.get('id')))
     if (q.get('item')) return NextResponse.json(await eenItem(admin, k, q.get('item')!))
     if (q.get('klaar')) return NextResponse.json(await afgevinkt(admin, k, q.get('persoon'), q.get('na'), q.get('q')))
@@ -117,20 +119,27 @@ async function boom(c: Ctx) {
   }
 }
 
-async function bereik(admin: Admin, k: Kijker, van: string | null, tot: string | null) {
+async function bereik(admin: Admin, k: Kijker, van: string | null, tot: string | null, team = false) {
   if (!isIso(van) || !isIso(tot) || Date.parse(tot) <= Date.parse(van) || Date.parse(tot) - Date.parse(van) > 70 * 86_400_000) throw new Error('Ongeldige periode')
-  const [z, ruw, mt, shoots] = await Promise.all([
+  const [z, ruw, mt, shoots, beschikbaarheid] = await Promise.all([
     laadZicht(admin, k),
     itemsInBereik(admin, van, tot),
     magMeetings().then(async (ja) => (ja ? meetingsInBereik(admin, van, tot, await emailNaarPersoon(admin)) : { items: [] as Item[], clickupIds: new Set<string>(), perClickup: new Map<string, string>() })),
     // Shoots uit de Shoot planner (enkel met recht op de Shoot planner).
     magIk('shoots', 'bekijken').then(async (ja) => { if (!ja) return [] as Item[]; const p = await personenKaart(admin); return shootsInBereik(admin, van, tot, p.email, p.gebruiker) }).catch(() => [] as Item[]),
+    team ? laadBeschikbaarheid(admin) : Promise.resolve(null),
   ])
   // Een meeting uit de Meeting Inplanner staat ook in ClickUp: één keer tonen, die van de Meeting Inplanner
   // (af als het dubbel in ClickUp af is).
-  const items = await metToegewezen(admin, ruw.filter((r) => !r.clickup_id || !mt.clickupIds.has(r.clickup_id)), z, { subtaken: true })
+  // Teamweergave: wat je niet mag zien maar tijd inneemt, als "Bezet" (zonder titel).
+  const bezet: Bezet[] | undefined = team ? [] : undefined
+  const [items, reeksen] = await Promise.all([
+    metToegewezen(admin, ruw.filter((r) => !r.clickup_id || !mt.clickupIds.has(r.clickup_id)), z, { subtaken: true, bezet }),
+    // Vaste blokken en herhalende afspraken of taken (enkel de keren in deze periode).
+    reeksenInBereik(admin, z, van, tot, bezet).catch(() => [] as Item[]),
+  ])
   const meetings = metMeetingStatus(mt.items, ruw.filter((r) => r.clickup_id && mt.clickupIds.has(r.clickup_id)), mt.perClickup)
-  return { items: [...items, ...meetings, ...shoots] }
+  return { items: [...items, ...meetings, ...shoots, ...reeksen], ...(team ? { bezet, beschikbaarheid } : {}) }
 }
 
 async function container(admin: Admin, k: Kijker, soort: string, id: string | null) {

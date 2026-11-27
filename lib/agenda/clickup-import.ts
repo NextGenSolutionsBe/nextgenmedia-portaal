@@ -1,7 +1,7 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchMetLimiet, TijdslimietFout } from '@/lib/fetch-met-limiet'
-import { itemUitClickup, magOverschrijven, naamSleutel, isKleur, type ClickupTaak } from '@/lib/agenda/model'
+import { itemUitClickup, magOverschrijven, clickupVerschil, naamSleutel, isKleur, type ClickupTaak, type ClickupVerschil } from '@/lib/agenda/model'
 import { zorgVoorPersonen, persoonVoorClickup } from '@/lib/agenda/personen-server'
 import { stelLabelVoor, labelInvoerVoor, klantNamenVoorLabels, type LabelContext } from '@/lib/agenda/label-voorstel'
 
@@ -285,14 +285,25 @@ async function labelId(admin: Admin, ctx: Ctx, naam: string, kleur?: string): Pr
 /** Eén pagina taken bewaren. Geeft het aantal bewaarde (nieuw of bijgewerkt). */
 async function bewaarTaken(admin: Admin, taken: ClickupTaak[], ctx: Ctx): Promise<number> {
   if (!taken.length) return 0
-  const { data: bestaand } = await admin.from('ag_items').select('id, clickup_id, clickup_bijgewerkt_op, in_app_gewijzigd_op, labels').in('clickup_id', taken.map((t) => t.id))
-  const per = new Map(((bestaand ?? []) as { id: string; clickup_id: string; clickup_bijgewerkt_op: string | null; in_app_gewijzigd_op: string | null; labels: string[] | null }[]).map((b) => [b.clickup_id, b]))
+  type Bestaand = { id: string; clickup_id: string; clickup_bijgewerkt_op: string | null; in_app_gewijzigd_op: string | null; labels: string[] | null; titel: string; status: string; start_op: string | null; eind_op: string | null; deadline_op: string | null; clickup_verschil?: { bijgewerkt?: string } | null }
+  const ids0 = taken.map((t) => t.id)
+  const r0 = await admin.from('ag_items').select('id, clickup_id, clickup_bijgewerkt_op, in_app_gewijzigd_op, labels, titel, status, start_op, eind_op, deadline_op, clickup_verschil').in('clickup_id', ids0)
+  // Vóór de migratie van fase 3: zonder clickup_verschil.
+  const bestaand: unknown[] | null = r0.error ? (await admin.from('ag_items').select('id, clickup_id, clickup_bijgewerkt_op, in_app_gewijzigd_op, labels, titel, status, start_op, eind_op, deadline_op').in('clickup_id', ids0)).data : r0.data
+  const per = new Map(((bestaand ?? []) as Bestaand[]).map((b) => [b.clickup_id, b]))
+  const verschillen: { id: string; v: ClickupVerschil }[] = []
   const rijen: Record<string, unknown>[] = []
   const toegewezenVan = new Map<string, string[]>()
   for (const t of taken) {
     if (t.archived) continue
     const v = itemUitClickup(t)
-    if (!magOverschrijven(per.get(t.id) ?? null, v.clickup_bijgewerkt_op)) continue
+    if (!magOverschrijven(per.get(t.id) ?? null, v.clickup_bijgewerkt_op)) {
+      // In de app aangepast terwijl ClickUp iets anders zegt: op de lijst "Verschillen met ClickUp".
+      const b = per.get(t.id) ?? null
+      const vs = clickupVerschil(b, v as Parameters<typeof clickupVerschil>[1])
+      if (b && vs) verschillen.push({ id: b.id, v: vs })
+      continue
+    }
     const labels: string[] = []
     for (const tag of t.tags ?? []) { const id = await labelId(admin, ctx, tag.name, tag.tag_bg); if (id) labels.push(id) }
     const eigenaar = t.creator?.id ? await persoonVoorClickup(admin, { id: t.creator.id, username: t.creator.username, email: t.creator.email }, ctx.cache, ctx.personen) : null
@@ -317,6 +328,7 @@ async function bewaarTaken(admin: Admin, taken: ClickupTaak[], ctx: Ctx): Promis
       updated_at: new Date().toISOString(),
     })
   }
+  for (const x of verschillen) await admin.from('ag_items').update({ clickup_verschil_op: new Date().toISOString(), clickup_verschil: x.v }).eq('id', x.id).then(() => undefined, () => undefined)
   if (!rijen.length) return 0
   const { data: opgeslagen, error } = await admin.from('ag_items').upsert(rijen, { onConflict: 'clickup_id' }).select('id, clickup_id')
   if (error) throw new Error(error.message)

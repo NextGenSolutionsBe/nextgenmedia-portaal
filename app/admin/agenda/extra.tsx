@@ -12,6 +12,7 @@ import { dag, uur, kortDag, plusDagen, vandaag, zoneNaarIso, snelleDeadlines, ty
 import { actie, api, padVan, Popover, PersonenLijst, KleurKeuze, Schakel, Avatars, MapKiezer, MapLabel, WieKiezer, LabelKeuze, labelVoorstel, focusRing, type BoomData } from './gedeeld'
 import { wanneer } from './lijst'
 import { DicteerKnop } from '@/components/admin/dicteer-knop'
+import { BeschikbaarheidTab, AbonnementTab, VerschillenTab } from './team-instellingen'
 
 const hhmm = (min: number) => `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
 
@@ -411,11 +412,12 @@ function VoorstelKaart({ v, boom, onKlaar }: { v: Voorstel; boom: BoomData; onKl
 
 // ── Instellingen ────────────────────────────────────────────────────────────
 
-export function InstellingenPaneel({ boom, onSluit, onVernieuw }: { boom: BoomData; onSluit: () => void; onVernieuw: () => void }) {
-  const [tab, setTab] = useState<'labels' | 'klanten' | 'delen' | 'clickup'>(boom.rechten.instellingen ? 'labels' : 'delen')
+export function InstellingenPaneel({ boom, onSluit, onVernieuw, startTab, onOpenItem }: { boom: BoomData; onSluit: () => void; onVernieuw: () => void; startTab?: 'beschikbaarheid' | 'abonnement' | 'verschillen'; onOpenItem?: (id: string) => void }) {
+  const [tab, setTab] = useState<'labels' | 'klanten' | 'delen' | 'clickup' | 'beschikbaarheid' | 'abonnement' | 'verschillen'>(startTab ?? (boom.rechten.instellingen ? 'labels' : 'delen'))
   const tabs = [
     ...(boom.rechten.instellingen ? [{ k: 'labels' as const, l: 'Labels' }, { k: 'klanten' as const, l: 'Kleur per klant' }] : []),
-    { k: 'delen' as const, l: 'Mijn agenda delen' }, { k: 'clickup' as const, l: 'ClickUp' },
+    { k: 'delen' as const, l: 'Mijn agenda delen' }, { k: 'beschikbaarheid' as const, l: 'Beschikbaarheid' }, { k: 'abonnement' as const, l: 'Agenda-abonnement' },
+    { k: 'clickup' as const, l: 'ClickUp' }, { k: 'verschillen' as const, l: 'Verschillen met ClickUp' },
   ]
   return (
     <Modal titel="Instellingen agenda" onSluit={onSluit} breed>
@@ -426,6 +428,9 @@ export function InstellingenPaneel({ boom, onSluit, onVernieuw }: { boom: BoomDa
       {tab === 'klanten' && <KlantKleuren boom={boom} onVernieuw={onVernieuw} />}
       {tab === 'delen' && <Delen boom={boom} onVernieuw={onVernieuw} />}
       {tab === 'clickup' && <Clickup boom={boom} onVernieuw={onVernieuw} />}
+      {tab === 'beschikbaarheid' && <BeschikbaarheidTab boom={boom} />}
+      {tab === 'abonnement' && <AbonnementTab />}
+      {tab === 'verschillen' && <VerschillenTab onOpenItem={(id) => { onSluit(); onOpenItem?.(id) }} />}
     </Modal>
   )
 }

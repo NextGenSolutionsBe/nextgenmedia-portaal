@@ -8826,3 +8826,65 @@ update public.offerte_sjablonen set bedrijf = merk where bedrijf is null and mer
 alter table public.algemene_contracten add column if not exists ons_tekenaars text[];
 alter table public.algemene_contracten add column if not exists ons_zones jsonb;
 alter table public.algemene_contracten add column if not exists ons_handtekeningen jsonb;
+
+-- ── Verbeterplan fase 3 (27 nov 2026): teamagenda ───────────────────────────
+-- Enkel toevoegend. Reeksen (vaste blokken, herhalende afspraken en taken), beschikbaarheid
+-- per persoon, iCal-links en verschillen met ClickUp. RLS aan, enkel de service-role (zoals ag_*).
+create table if not exists public.ag_reeksen (
+  id uuid primary key default gen_random_uuid(),
+  -- blok = vast blok (Sales, Focuswerk, Overleg, Opleiding …); afspraak; taak
+  soort text not null default 'blok' check (soort in ('blok', 'afspraak', 'taak')),
+  blok_type text,
+  titel text not null,
+  kleur text,
+  personen uuid[] not null default '{}',
+  lijst_id uuid references public.ag_lijsten(id) on delete set null,
+  prive boolean not null default false,
+  -- 1 = maandag … 7 = zondag
+  dagen smallint[] not null default '{}',
+  interval_weken smallint not null default 1 check (interval_weken between 1 and 8),
+  van text,
+  tot text,
+  start_datum date not null,
+  eind_datum date,
+  uitzonderingen date[] not null default '{}',
+  eigenaar_id uuid references public.ag_personen(id) on delete set null,
+  gemaakt_door text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  verwijderd_op timestamptz
+);
+create index if not exists ag_reeksen_actief on public.ag_reeksen (start_datum) where verwijderd_op is null;
+alter table public.ag_reeksen enable row level security;
+
+-- Een keer van een herhalende taak die afgevinkt of aangepast werd, wordt een gewoon item.
+alter table public.ag_items add column if not exists reeks_id uuid references public.ag_reeksen(id) on delete set null;
+alter table public.ag_items add column if not exists reeks_datum date;
+create unique index if not exists ag_items_reeks_keer on public.ag_items (reeks_id, reeks_datum) where reeks_id is not null;
+
+-- Wanneer iemand normaal werkt (per weekdag), als lichte achtergrond en voor de capaciteit.
+create table if not exists public.ag_beschikbaarheid (
+  persoon_id uuid not null references public.ag_personen(id) on delete cascade,
+  weekdag smallint not null check (weekdag between 1 and 7),
+  van text not null,
+  tot text not null,
+  updated_at timestamptz not null default now(),
+  primary key (persoon_id, weekdag)
+);
+alter table public.ag_beschikbaarheid enable row level security;
+
+-- Agenda-abonnement (iCal) per persoon: enkel de SHA-256 van de link, in te trekken.
+create table if not exists public.ag_ical_links (
+  id uuid primary key default gen_random_uuid(),
+  persoon_id uuid not null references public.ag_personen(id) on delete cascade,
+  team boolean not null default false,
+  token_hash text not null unique,
+  created_at timestamptz not null default now(),
+  ingetrokken_op timestamptz,
+  laatst_gebruikt_op timestamptz
+);
+alter table public.ag_ical_links enable row level security;
+
+-- Verschillen met ClickUp: de import sloeg een nieuwere ClickUp-versie over omdat het item in de app aangepast werd.
+alter table public.ag_items add column if not exists clickup_verschil_op timestamptz;
+alter table public.ag_items add column if not exists clickup_verschil jsonb;

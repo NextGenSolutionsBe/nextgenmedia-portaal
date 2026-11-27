@@ -34,7 +34,7 @@ export const KLAAR_STIJL: React.CSSProperties = {
 }
 const isKlaar = (i: Item) => i.status === 'klaar'
 /** Afvinken kan bij taken en bij meetings (ook die uit de Meeting Inplanner). */
-const kanAfvinken = (i: Item) => i.bron === 'ag' || i.bron === 'meeting'
+const kanAfvinken = (i: Item) => i.bron === 'ag' || i.bron === 'meeting' || (i.bron === 'reeks' && i.reeks?.soort === 'taak')
 const stijlVan = (i: Item, kleur: string) => (isKlaar(i) ? KLAAR_STIJL : vlak(kleur))
 
 export function vlak(kleur: string): React.CSSProperties {
