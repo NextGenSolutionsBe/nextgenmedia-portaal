@@ -1,5 +1,7 @@
 'use client'
 
+import { bronNaam } from '@/lib/sales/bronnen'
+import { DoorgevenKnop } from '@/components/admin/doorgeven-knop'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -403,11 +405,14 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
             )}
           </section>
 
+          {o && <div className="px-5"><DoorgevenKnop opdrachtId={o.id} clientId={o.client_id ?? null} van={(o.merk ?? bedrijfVan(null, o.diensten)) === 'nextgensolutions' ? 'nextgensolutions' : 'nextgenmedia'} klein /></div>}
+
           <div className="flex items-center gap-2 text-xs text-gray-500">
             <label htmlFor="opdracht-bron">Bron (optioneel)</label>
             <select id="opdracht-bron" className="text-xs border border-gray-200 rounded-md bg-white px-2 py-1" value={c.bron} onChange={(e) => zet('bron', e.target.value as Bron | '')}>
               <option value="">Onbekend</option>
               {BRONNEN.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
+              {c.bron && !BRONNEN.some((b) => b.key === c.bron) && <option value={c.bron}>{bronNaam(c.bron)}</option>}
             </select>
           </div>
 

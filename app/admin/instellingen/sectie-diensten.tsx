@@ -5,23 +5,26 @@ import { toast } from 'sonner'
 import { Loader2, Pencil, Plus, Repeat } from 'lucide-react'
 import { Kop, INP, Veld, Dialoog, Schakelaar, Badge, Laden } from './ui'
 import { boom, EENHEDEN, dienstenLijst, type Catalogus, type DienstRij, type Eenheid, type BedrijfRij } from '@/lib/bedrijven/model'
+import { deliverablesTekst, deliverableTekst, type Deliverable } from '@/lib/bedrijven/deliverables'
 
 type Concept = {
   naam: string; bedrijf: string; parent_slug: string; omschrijving: string
   inbegrepen: string; niet_inbegrepen: string; eenheid: Eenheid; terugkerend: boolean; actief: boolean
   volgorde: string; min_prijs: string; min_marge_pct: string; kleur: string
+  deliverables: string
 }
 
 const leegConcept = (bedrijf: string): Concept => ({
   naam: '', bedrijf, parent_slug: '', omschrijving: '', inbegrepen: '', niet_inbegrepen: '', eenheid: 'eenmalig',
-  terugkerend: false, actief: true, volgorde: '', min_prijs: '', min_marge_pct: '', kleur: '#E5E7EB',
+  terugkerend: false, actief: true, volgorde: '', min_prijs: '', min_marge_pct: '', kleur: '#E5E7EB', deliverables: '',
 })
 
-const conceptVan = (x: DienstRij): Concept => ({
+const conceptVan = (x: DienstRij, d: Deliverable[] = []): Concept => ({
   naam: x.naam, bedrijf: x.bedrijf, parent_slug: x.parent_slug ?? '', omschrijving: x.omschrijving ?? '',
   inbegrepen: x.inbegrepen.join('\n'), niet_inbegrepen: x.niet_inbegrepen.join('\n'), eenheid: x.eenheid,
   terugkerend: x.terugkerend, actief: x.actief, volgorde: String(x.volgorde), min_prijs: x.min_prijs === null ? '' : String(x.min_prijs),
   min_marge_pct: x.min_marge_pct === null ? '' : String(x.min_marge_pct), kleur: x.kleur ?? '#E5E7EB',
+  deliverables: deliverablesTekst(d),
 })
 
 const euro = (n: number) => n.toLocaleString('nl-BE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
@@ -38,6 +41,7 @@ export function SectieDiensten() {
   const [bezig, setBezig] = useState(false)
   const [inactief, setInactief] = useState(false)
   const [merk, setMerk] = useState<{ slug: string; v: Record<string, string> } | null>(null)
+  const [deliv, setDeliv] = useState<Record<string, Deliverable[]>>({})
 
   const bewaarMerk = async () => {
     if (!merk) return
@@ -57,9 +61,9 @@ export function SectieDiensten() {
 
   const laad = useCallback(async () => {
     try {
-      const r = await fetch('/api/admin/bedrijven', { cache: 'no-store' })
+      const r = await fetch('/api/admin/bedrijven?deliverables=1', { cache: 'no-store' })
       const j = await r.json(); if (!r.ok) throw new Error(j.error || 'Laden mislukt')
-      setCat(j.catalogus)
+      setCat(j.catalogus); setDeliv(j.deliverables ?? {})
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Laden mislukt') }
   }, [])
   useEffect(() => { laad() }, [laad])
@@ -76,7 +80,15 @@ export function SectieDiensten() {
       }
       const r = await fetch('/api/admin/bedrijven', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actie: 'dienst', bestaand: bewerk.slug, invoer }) })
       const j = await r.json(); if (!r.ok) throw new Error(j.error || 'Bewaren mislukt')
-      setCat(j.catalogus); setBewerk(null)
+      setCat(j.catalogus)
+      const slug: string | undefined = j.dienst?.slug ?? bewerk.slug ?? undefined
+      if (slug && c.deliverables.trim() !== deliverablesTekst(deliv[bewerk.slug ?? ''] ?? []).trim()) {
+        const d = await fetch('/api/admin/bedrijven', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actie: 'deliverables', slug, tekst: c.deliverables }) })
+        const dj = await d.json()
+        if (!d.ok) toast.error(dj.error || 'Deliverables niet bewaard')
+        else setDeliv(dj.deliverables ?? {})
+      }
+      setBewerk(null)
       toast.success(bewerk.slug ? 'Dienst aangepast.' : 'Dienst toegevoegd.')
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Bewaren mislukt') }
     finally { setBezig(false) }
@@ -97,12 +109,13 @@ export function SectieDiensten() {
           {!x.actief && <Badge kleur="grijs">uit</Badge>}
         </div>
         {x.omschrijving && <div className="text-xs text-gray-500 truncate">{x.omschrijving}</div>}
+        {(deliv[x.slug] ?? []).length > 0 && <div className="text-xs text-gray-500 truncate">Standaard: {(deliv[x.slug] ?? []).map(deliverableTekst).join(' · ')}</div>}
       </div>
       <div className="hidden sm:block text-xs text-gray-500 text-right shrink-0">
         {EENHEDEN.find((e) => e.key === x.eenheid)?.label}
         {x.min_prijs !== null && <div>min. {euro(x.min_prijs)}</div>}
       </div>
-      <button type="button" onClick={() => setBewerk({ slug: x.slug, c: conceptVan(x) })} className="h-8 w-8 rounded-lg hover:bg-gray-100 flex items-center justify-center shrink-0" aria-label={`${x.naam} aanpassen`}>
+      <button type="button" onClick={() => setBewerk({ slug: x.slug, c: conceptVan(x, deliv[x.slug]) })} className="h-8 w-8 rounded-lg hover:bg-gray-100 flex items-center justify-center shrink-0" aria-label={`${x.naam} aanpassen`}>
         <Pencil className="h-4 w-4 text-gray-500" />
       </button>
     </div>
@@ -176,6 +189,9 @@ export function SectieDiensten() {
             <Veld label="Omschrijving" breed><input className={INP} value={bewerk.c.omschrijving} onChange={(e) => zet({ omschrijving: e.target.value })} maxLength={500} /></Veld>
             <Veld label="Standaard inbegrepen" hint="Eén punt per regel."><textarea className={INP} rows={4} value={bewerk.c.inbegrepen} onChange={(e) => zet({ inbegrepen: e.target.value })} /></Veld>
             <Veld label="Niet inbegrepen" hint="Eén punt per regel."><textarea className={INP} rows={4} value={bewerk.c.niet_inbegrepen} onChange={(e) => zet({ niet_inbegrepen: e.target.value })} /></Veld>
+            <Veld label="Standaard deliverables" hint="Eén per regel, bv. 12 posts per maand. De contentkalender toont het naast wat gepland staat." breed>
+              <textarea className={INP} rows={3} value={bewerk.c.deliverables} onChange={(e) => zet({ deliverables: e.target.value })} placeholder={'12 posts per maand\n4 reels per maand'} />
+            </Veld>
             <Veld label="Eenheid">
               <select className={INP} value={bewerk.c.eenheid} onChange={(e) => { const v = e.target.value as Eenheid; zet({ eenheid: v, terugkerend: v === 'maand' ? true : bewerk.c.terugkerend }) }}>
                 {EENHEDEN.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}

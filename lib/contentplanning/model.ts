@@ -99,6 +99,8 @@ export type CpInstellingen = {
   routine_links: Link[]
   /** Werkwijze (stappenplan) per reeks, sleutel '1' | '2' | '3', in het tekstformaat van `leesWerkwijze`. */
   reeks_detail: Record<string, string>
+  /** Wie de reeks doet (rol of naam), sleutel '1' | '2' | '3' (fase 6, punt 68). Leeg = de planningspersoon. */
+  reeks_rol: Record<string, string>
   /** Vaste klant met een eigen workflow (INN · SLL · K · J): taken op vaste weekdagen (of één keer per week). */
   vaste_naam: string
   vaste_sub: string
@@ -143,7 +145,11 @@ export function leesMeetingExtra(v: unknown): MeetingExtra[] {
   }).filter((x): x is MeetingExtra => !!x)
 }
 /** `dagen`: 1 = maandag … 5 = vrijdag. Leeg = één keer per week, op een dag naar keuze. */
-export type VasteTaak = { key: string; titel: string; detail: string; dagen?: number[] }
+/** `rol`: wie de taak doet (rolsjabloon of naam, verbeterplan fase 6, punt 68). Leeg = de planningspersoon. */
+export type VasteTaak = { key: string; titel: string; detail: string; dagen?: number[]; rol?: string }
+
+/** Een rol netjes: tekst, hoogstens 40 tekens; leeg = niets. */
+export const leesRol = (v: unknown): string | undefined => { const t = typeof v === 'string' ? v.trim().slice(0, 40) : ''; return t || undefined }
 
 /**
  * Extra taak bij één klant, telkens die klant in de gekozen reeks zit. Afvinken
@@ -298,6 +304,7 @@ export const STANDAARD_CP: CpInstellingen = {
 ## Bestaande klant
 - Doorsturing checken`,
   },
+  reeks_rol: {},
   vaste_naam: 'INN · SLL · K · J',
   vaste_sub: 'Inner Stance, Straight Line Leadership en de persoonlijke kanalen van Kristof en Johan',
   vaste_taken: [
@@ -341,7 +348,8 @@ export function leesCp(ruw: unknown): CpInstellingen {
     reeks_detail: { ...STANDAARD_CP.reeks_detail, ...(r.reeks_detail && typeof r.reeks_detail === 'object' ? r.reeks_detail : {}) },
     vaste_naam: typeof r.vaste_naam === 'string' && r.vaste_naam.trim() ? r.vaste_naam : STANDAARD_CP.vaste_naam,
     vaste_sub: typeof r.vaste_sub === 'string' ? r.vaste_sub : STANDAARD_CP.vaste_sub,
-    vaste_taken: Array.isArray(r.vaste_taken) ? r.vaste_taken.filter((t) => t && typeof t.key === 'string').map((t) => ({ key: t.key, titel: String(t.titel ?? ''), detail: String(t.detail ?? ''), dagen: leesDagen(t.dagen) })) : STANDAARD_CP.vaste_taken,
+    vaste_taken: Array.isArray(r.vaste_taken) ? r.vaste_taken.filter((t) => t && typeof t.key === 'string').map((t) => ({ key: t.key, titel: String(t.titel ?? ''), detail: String(t.detail ?? ''), dagen: leesDagen(t.dagen), ...(leesRol(t.rol) ? { rol: leesRol(t.rol) } : {}) })) : STANDAARD_CP.vaste_taken,
+    reeks_rol: Object.fromEntries(['1', '2', '3'].flatMap((k) => { const v = leesRol((r.reeks_rol as Record<string, unknown> | undefined)?.[k]); return v ? [[k, v]] : [] })),
     bord_verborgen: Array.isArray(r.bord_verborgen) ? r.bord_verborgen.filter((x): x is string => typeof x === 'string') : [],
     meeting_verborgen: Array.isArray(r.meeting_verborgen) ? r.meeting_verborgen.filter((x): x is string => typeof x === 'string') : [],
     meeting_extra: Array.isArray(r.meeting_extra) ? leesMeetingExtra(r.meeting_extra) : STANDAARD_CP.meeting_extra,

@@ -1,4 +1,5 @@
 import 'server-only'
+import { controleerTijd } from './tijd'
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import { baseUrl, sendEmailMetAfzenderTerugval, EMAIL_FROM, resendKeyFor } from '@/lib/email'
 import { buildEmailHtml, buildEmailText } from '@/lib/email-html'
@@ -49,6 +50,7 @@ function naarShoot(r: any, klant: string | null): Shoot {
     start: r.start_time ?? null, einde: r.end_time ?? null, versie: Number(r.versie ?? 1) || 1,
     briefing_pad: r.briefing_pad ?? null, briefing_naam: r.briefing_naam ?? null, briefing_type: r.briefing_type ?? null,
     laatst_verstuurd_op: r.laatst_verstuurd_op ?? null, updated_at: r.updated_at ?? null, bijgewerkt_door: r.bijgewerkt_door ?? null,
+    tijd: controleerTijd({ rijden_min: r.tijd_rijden_min ?? null, shoot_min: r.tijd_shoot_min ?? null, nabewerking_min: r.tijd_nabewerking_min ?? null, afspraak: r.afspraak_soort ?? null }),
   }
 }
 
@@ -73,7 +75,7 @@ export async function laadShoots(admin: Admin, o: { van: string; tot?: string | 
     const s = naarShoot(r, namen.get(r.client_id)?.naam ?? null)
     return {
       id: s.id, client_id: s.client_id, klant: s.klant, titel: s.titel, datum: s.datum, status: s.status, start: s.start, einde: s.einde,
-      locaties: s.locaties.map((l) => l.naam), punten: s.programma.length, mensen: s.betrokkenen.length, verstuurd: s.laatst_verstuurd_op,
+      locaties: s.locaties.map((l) => l.naam), punten: s.programma.length, mensen: s.betrokkenen.length, verstuurd: s.laatst_verstuurd_op, tijd: s.tijd,
     }
   }).sort((a: ShootKort, b: ShootKort) => `${a.datum}${a.start ?? '99'}`.localeCompare(`${b.datum}${b.start ?? '99'}`))
 }
@@ -113,6 +115,11 @@ export async function bewaarShoot(admin: Admin, id: string | null, b: Record<str
     client_id: clientId, shoot_date: plan.datum, start_time: a.start_time, end_time: a.end_time, location: a.location, briefing: plan.briefing || null,
     titel: plan.titel || null, status: plan.status, doel: plan.doel || null, locaties: plan.locaties, programma: plan.programma, betrokkenen: plan.betrokkenen,
     paklijst: plan.paklijst, shotlist: plan.shotlist, praktisch: plan.praktisch || null, bijgewerkt_door: door.email, updated_at: new Date().toISOString(),
+  }
+  // Fase 6: tijd per onderdeel en soort afspraak (vóór de migratie vallen die kolommen weg, zie veerkrachtig).
+  if (b.tijd && typeof b.tijd === 'object') {
+    const t = controleerTijd(b.tijd)
+    Object.assign(rij, { tijd_rijden_min: t.rijden_min, tijd_shoot_min: t.shoot_min, tijd_nabewerking_min: t.nabewerking_min, afspraak_soort: t.afspraak })
   }
   if (b.briefing_pad === null) Object.assign(rij, { briefing_pad: null, briefing_naam: null, briefing_type: null })
   else if (isBriefingPad(b.briefing_pad)) {

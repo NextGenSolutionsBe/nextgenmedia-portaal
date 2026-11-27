@@ -338,7 +338,7 @@ async function leesKoppelingen(admin: Admin, b: Record<string, unknown>, patch: 
 /** Velden van het bord: bron, diensten, offertekanaal en -datum, reden van stoppen. */
 function leesKanban(b: Record<string, unknown>, patch: Record<string, unknown>): string | null {
   if ('bron' in b) {
-    if (b.bron && !isBron(b.bron)) return 'Kies inbound of outbound.'
+    if (b.bron && !isBron(b.bron)) return 'Kies een bron uit de lijst.'
     patch.bron = b.bron || null
   }
   if ('diensten' in b) patch.diensten = normaliseerDiensten(b.diensten)

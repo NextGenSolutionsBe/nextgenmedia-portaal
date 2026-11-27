@@ -13,6 +13,7 @@ import { laadOpleveringBestandOp, type Voortgang } from '@/lib/oplevering-upload
 import {
   STATUS_INFO, versieLabel, beschikbaarheid, grootteLabel, tijdLabel, bestandSoort, formaatLabel, volgendeStap, OPLEVERING_SOORTEN, soortInfo, soortVan,
   type OpleveringStatus, type OpleveringSoort,
+  revisiesPerKlant,
 } from '@/lib/opleveringen'
 import { zoekVeld } from '@/lib/zoekveld'
 import type { OpleveringVolledig } from '@/lib/opleveringen-server'
@@ -106,6 +107,26 @@ export function OpleveringenAdmin({ magToevoegen, magAanpassen, magVerwijderen }
           return <button key={s.key} type="button" onClick={() => setSoortFilter(s.key)} className={`${chip(soortFilter === s.key)} inline-flex items-center gap-1`}><OpleveringIcoon soort={s.key} className="h-3.5 w-3.5" />{s.label} ({n})</button>
         })}
       </div>
+
+      {/* Fase 6: revisierondes per klant (wie vraagt veel bij). */}
+      {lijst && lijst.length > 0 && (() => {
+        const perKlant = revisiesPerKlant(lijst).filter((r) => r.rondes > 0)
+        if (!perKlant.length) return null
+        return (
+          <details className="card-base !py-3">
+            <summary className="cursor-pointer select-none text-sm font-semibold">Revisierondes per klant <span className="font-normal text-gray-500">· {perKlant.reduce((t, r) => t + r.rondes, 0)} rondes</span></summary>
+            <ul className="mt-2 divide-y divide-gray-50 text-sm">
+              {perKlant.map((r) => (
+                <li key={r.client_id} className="flex items-center gap-3 py-1.5">
+                  <span className="flex-1 min-w-0 truncate font-medium">{r.klant}</span>
+                  <span className="text-xs text-gray-600">{r.rondes} {r.rondes === 1 ? 'ronde' : 'rondes'} over {r.opleveringen} {r.opleveringen === 1 ? 'oplevering' : 'opleveringen'} (gem. {String(r.gemiddeld).replace('.', ',')})</span>
+                  {r.opgebruikt > 0 && <span className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-full px-2">{r.opgebruikt}× alles opgebruikt</span>}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )
+      })()}
 
       {lijst === null ? <div className="card-base flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>
         : zichtbaar.length === 0 ? (

@@ -27,6 +27,7 @@ import { ClientCms } from './client-cms'
 import { ClientFormulieren } from './client-formulieren'
 import { OffertesBij } from '@/components/admin/offertes-bij'
 import { SolutionsBlok } from '@/components/admin/solutions-blok'
+import { DoorgevenKnop } from '@/components/admin/doorgeven-knop'
 
 async function getClient(id: string) {
   const admin = createAdminSupabaseClient()
@@ -146,6 +147,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             <FileText className="h-4 w-4" />
             Nieuw contract
           </Link>
+          <DoorgevenKnop clientId={id} van={null} />
           <DeleteClientButton clientId={id} companyName={client.company_name} />
         </div>
       </div>

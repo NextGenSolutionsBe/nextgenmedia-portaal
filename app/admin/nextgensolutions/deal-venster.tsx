@@ -7,7 +7,7 @@ import { leesGetal } from '@/lib/getal'
 import { ClickupTaken, NieuweTaak } from '@/components/admin/clickup-taken'
 import { DicteerKnop } from '@/components/admin/dicteer-knop'
 import {
-  BRONNEN, FASES, STANDAARD_LOOPTIJD, VERLOREN_REDENEN, dealWaarde, faseLabel, type Deal, type Fase,
+  BRONNEN, FASES, STANDAARD_LOOPTIJD, VERLOREN_REDENEN, dealWaarde, faseLabel, bronLabel, type Deal, type Fase,
 } from '@/lib/ngs/model'
 import { Chip, FASE_STIJL, Venster, dagKort, eur, eurCent, inp, lbl, post, tijdstip } from './ui'
 import { PersoonKnop } from '@/components/admin/persoon-foto'
@@ -80,7 +80,10 @@ function Formulier({ v, zet, namen }: { v: Velden; zet: (p: Partial<Velden>) => 
       </div>
       <div>
         <span className={lbl}>Bron</span>
-        <div className="flex gap-1.5 flex-wrap">{BRONNEN.map((b) => <Chip key={b.key} aan={v.bron === b.key} onClick={() => zet({ bron: v.bron === b.key ? '' : b.key })}>{b.label}</Chip>)}</div>
+        <div className="flex gap-1.5 flex-wrap">
+          {BRONNEN.map((b) => <Chip key={b.key} aan={v.bron === b.key} onClick={() => zet({ bron: v.bron === b.key ? '' : b.key })}>{b.label}</Chip>)}
+          {v.bron && !BRONNEN.some((b) => b.key === v.bron) && <Chip aan onClick={() => zet({ bron: '' })}>{bronLabel(v.bron)}</Chip>}
+        </div>
       </div>
     </div>
   )

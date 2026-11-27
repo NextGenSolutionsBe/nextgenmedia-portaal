@@ -5,6 +5,8 @@
  * tests/ngs-levering.test.ts. De pipeline zelf (lib/ngs/model.ts) verandert niet.
  */
 
+import { bronRichting } from '@/lib/sales/bronnen'
+
 // ── Projectfases ─────────────────────────────────────────────────────────────
 
 export const PROJECT_FASES = [
@@ -298,10 +300,9 @@ export function leesLeveringVoorstel(tekst: string): { briefing: BriefingVoorste
  * tekenen blijft bij de drie vennoten, de rekenregels veranderen niet.
  */
 export function leadSoortVoorstel(bedrijf: string | null | undefined, bron: string | null | undefined, verantwoordelijke: string | null | undefined): string | null {
-  const b = String(bron ?? '').toLowerCase()
-  if (!b) return null
-  if (b === 'outbound') return 'outbound'
-  if (b !== 'inbound') return null
+  const richting = bronRichting(String(bron ?? '').toLowerCase())
+  if (!richting) return null
+  if (richting === 'outbound') return 'outbound'
   if (bedrijf === 'nextgenmedia') return 'inbound_ngm'
   if (bedrijf !== 'nextgensolutions') return null
   const w = String(verantwoordelijke ?? '').toLowerCase()

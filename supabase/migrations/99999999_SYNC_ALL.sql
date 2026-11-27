@@ -9069,3 +9069,25 @@ CREATE TABLE IF NOT EXISTS public.ngs_care (
 );
 CREATE INDEX IF NOT EXISTS ngs_care_client ON public.ngs_care (client_id);
 ALTER TABLE public.ngs_care ENABLE ROW LEVEL SECURITY;
+
+-- ── Verbeterplan fase 6: levering Media en sales (27 nov 2026) ─────────────
+-- Additief: nieuwe kolommen en een ruimere bronnencontrole (enkel extra waarden).
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS tijd_rijden_min integer;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS tijd_shoot_min integer;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS tijd_nabewerking_min integer;
+ALTER TABLE public.shoot_briefings ADD COLUMN IF NOT EXISTS afspraak_soort text;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'shoot_briefings_afspraak_soort_check') THEN
+    ALTER TABLE public.shoot_briefings ADD CONSTRAINT shoot_briefings_afspraak_soort_check CHECK (afspraak_soort IS NULL OR afspraak_soort IN ('retainer','traject','eenmalig'));
+  END IF;
+END $$;
+ALTER TABLE public.diensten_catalogus ADD COLUMN IF NOT EXISTS deliverables jsonb NOT NULL DEFAULT '[]'::jsonb;
+-- Eén bronnenlijst (lib/sales/bronnen.ts): de oude waarden blijven geldig.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'opdrachten_bron_check' AND pg_get_constraintdef(oid) NOT LIKE '%bestaande_klant%') THEN
+    ALTER TABLE public.opdrachten DROP CONSTRAINT opdrachten_bron_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'opdrachten_bron_check') THEN
+    ALTER TABLE public.opdrachten ADD CONSTRAINT opdrachten_bron_check CHECK (bron IS NULL OR bron IN ('inbound','outbound','inbound_website','doorverwezen','netwerk','lezing','event','bestaande_klant','doorverwijzing','andere'));
+  END IF;
+END $$;

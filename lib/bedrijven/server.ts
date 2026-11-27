@@ -5,6 +5,7 @@ import {
   STANDAARD_CATALOGUS, KLASSIFICATIE_TABELLEN, controleerDienst, controleerKeuze, controleerBedrijf, vindBedrijf, vindDienst, type BedrijfInvoer,
   type Catalogus, type BedrijfRij, type DienstRij, type DienstInvoer, type KlassificatieRij, type KlassificatieVeld,
 } from './model'
+import { leesDeliverables, netteDeliverables, type Deliverable } from './deliverables'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Admin = { from: (t: string) => any }
@@ -232,4 +233,36 @@ export async function bevestigVoorstellen(admin: Admin, tabel: string, veld: Kla
     if (r.ok) aantal++; else mislukt++
   }
   return { ok: true, aantal, mislukt }
+}
+
+// ── Standaard-deliverables per dienst (fase 6, punt 65) ─────────────────────
+// Aparte vraag, zodat de catalogus blijft werken vóór de migratie.
+
+/** Per dienst de standaard-deliverables. Kolom ontbreekt of fout = leeg. */
+export async function laadDeliverables(admin: Admin = createAdminSupabaseClient()): Promise<Record<string, Deliverable[]>> {
+  try {
+    const { data, error } = await admin.from('diensten_catalogus').select('slug, deliverables')
+    if (error || !data) return {}
+    const uit: Record<string, Deliverable[]> = {}
+    for (const r of data as { slug: string; deliverables: unknown }[]) {
+      const l = netteDeliverables(r.deliverables)
+      if (l.length) uit[r.slug] = l
+    }
+    return uit
+  } catch { return {} }
+}
+
+export async function bewaarDeliverables(admin: Admin, slug: string, tekst: string, actor: Actor): Promise<{ ok: true; deliverables: Deliverable[] } | { ok: false; fout: string }> {
+  const cat = await laadCatalogus(admin)
+  const dienst = vindDienst(cat, slug)
+  if (!dienst) return { ok: false, fout: 'Die dienst bestaat niet meer.' }
+  const lijst = leesDeliverables(tekst)
+  const { error } = await admin.from('diensten_catalogus').update({ deliverables: lijst, updated_at: new Date().toISOString() }).eq('slug', slug)
+  if (error) return { ok: false, fout: /deliverables/.test(error.message) ? 'De databank kent de deliverables nog niet (migratie).' : error.message }
+  await logAudit({
+    action: 'dienst.deliverables', entityType: 'dienst', entityId: slug, summary: `Deliverables aangepast: ${dienst.naam}`,
+    actorUserId: actor.userId, actorEmail: actor.email, ip: actor.ip, userAgent: actor.userAgent,
+    metadata: { deliverables: lijst },
+  })
+  return { ok: true, deliverables: lijst }
 }

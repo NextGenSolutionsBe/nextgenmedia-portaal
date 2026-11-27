@@ -3,6 +3,7 @@
 // projecten of facturen, enkel deals van NextGen Solutions.
 
 import { leesGetal } from '@/lib/getal'
+import { BRONNEN_LIJST, isBronKey, bronNaam, VERLIES_REDENEN } from '@/lib/sales/bronnen'
 
 // ── Fases ───────────────────────────────────────────────────────────────────
 
@@ -26,16 +27,11 @@ export const DIENSTEN = [
 ] as const
 export const dienstLabel = (k: string) => DIENSTEN.find((d) => d.key === k)?.label ?? k
 
-export const BRONNEN = [
-  { key: 'inbound', label: 'Inbound' },
-  { key: 'outbound', label: 'Outbound' },
-  { key: 'netwerk', label: 'Netwerk' },
-  { key: 'doorverwijzing', label: 'Doorverwezen' },
-  { key: 'andere', label: 'Andere' },
-] as const
-export const bronLabel = (k: string | null) => BRONNEN.find((b) => b.key === k)?.label ?? 'Onbekend'
+/** Eén bronnenlijst voor de hele app (fase 6, lib/sales/bronnen.ts); inbound, doorverwijzing en andere van vroeger blijven geldig. */
+export const BRONNEN: { key: string; label: string }[] = BRONNEN_LIJST.map((b) => ({ key: b.key, label: b.label }))
+export const bronLabel = (k: string | null) => bronNaam(k)
 
-export const VERLOREN_REDENEN = ['Te duur', 'Geen budget of timing', 'Koos een andere partij', 'Geen reactie meer', 'Niet de juiste fit']
+export const VERLOREN_REDENEN = VERLIES_REDENEN
 
 /** Zonder looptijd tellen we het maandbedrag voor één jaar in de waarde. */
 export const STANDAARD_LOOPTIJD = 12
@@ -113,7 +109,7 @@ export function controleerDeal(b: Record<string, unknown>): { ok: true; waarde: 
       bedrijf, contactpersoon: tekst(b.contactpersoon, 160), email, telefoon: tekst(b.telefoon, 40), titel: metRegels(b.titel, 2000),
       diensten: DIENSTEN.map((d) => d.key).filter((k) => lijst.includes(k)),
       afspraak_op: afspraak, waarde_eenmalig: eenmalig, waarde_maandelijks: maandelijks, looptijd_maanden: looptijd, start_datum: start,
-      bron: BRONNEN.some((x) => x.key === b.bron) ? String(b.bron) : null,
+      bron: isBronKey(b.bron) ? String(b.bron) : null,
       verantwoordelijke: tekst(b.verantwoordelijke, 80),
     },
   }

@@ -12,6 +12,7 @@ import { SendMailButton } from '@/components/admin/send-mail-button'
 import { GoedkeuringDeadlines } from '@/components/admin/goedkeuring-deadlines'
 import { GoedkeuringAanvragen } from '@/components/admin/goedkeuring-aanvragen'
 import { ShootDocumentKnop } from '@/components/shoot-document-knop'
+import { DeliverablesStand } from '@/components/admin/deliverables-stand'
 import { KanaalKeuze, TypeKeuze } from '@/components/calendar/kalender-keuzes'
 import { toast } from 'sonner'
 import { ROL_INFO, type KalenderRol } from '@/lib/content/kalender-rol'
@@ -484,6 +485,8 @@ export function SocialMediaAdmin({
           <ClickUpSyncControl clientId={selectedClient} />
         </div>
       )}
+
+      {selectedClient && <DeliverablesStand items={clientItems} />}
 
       {/* Stats */}
       {selectedClient && (
