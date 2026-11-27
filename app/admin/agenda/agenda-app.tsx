@@ -41,7 +41,7 @@ type MeetingVenster =
 
 const VOORKEUR = 'ngm-agenda-voorkeur'
 // `kleurMap`: de kleurkeuze sinds de mapkleuren (de oude `kleur` stond standaard op klant).
-type Voorkeur = { modus?: Modus; personen?: string[]; spaces?: string[]; kleurMap?: KleurVolgens; klaar?: boolean; boom?: boolean }
+type Voorkeur = { modus?: Modus; personen?: string[]; spaces?: string[]; kleurMap?: KleurVolgens; klaar?: boolean; boom?: boolean; zicht?: number }
 const leesVoorkeur = (): Voorkeur => { try { return JSON.parse(localStorage.getItem(VOORKEUR) ?? '{}') as Voorkeur } catch { return {} } }
 const hhmm = (min: number) => `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
 
@@ -99,6 +99,8 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
   const [spaces, setSpaces] = useState<string[]>([])
   // Groot scherm: de kalender over het hele scherm, ook over de zijbalk van de app.
   const [groot, setGroot] = useState(false)
+  // Gsm, week en werkweek: hoeveel dagen in beeld (knijpen met twee vingers in de kalender). Leeg = de hele week.
+  const [zicht, setZicht] = useState<number | null>(null)
   const sluitPop = useCallback(() => setPop(null), [])
   const geladen = useRef(false)
   // De zwevende knoppen rechtsboven (meldingen, Nieuw): de bovenbalk laat er plaats voor, gemeten want hun plek hangt af van de schermbreedte.
@@ -128,7 +130,16 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
   // twee vingers op de touchpad van een laptop (veeg.ts). De kalender schuift mee en verspringt dan.
   // Als element in de state: de kalender verschijnt pas na het laden van de boom.
   const [inhoud, setInhoud] = useState<HTMLDivElement | null>(null)
-  useVeeg(inhoud, { actief: modus !== 'lijst' && keuze?.soort !== 'doc', stap: (n) => setDatum((d) => verschuif(weergave, d, n)) })
+  useVeeg(inhoud, {
+    actief: modus !== 'lijst' && keuze?.soort !== 'doc',
+    stap: (n) => setDatum((d) => {
+      const nieuw = verschuif(weergave, d, n)
+      // Ingezoomd op de gsm kom je aan de rand van een week binnen: verder = maandag, terug = de laatste dag.
+      const dagen = dagenVan(weergave, nieuw)
+      const ingezoomd = (weergave === 'week' || weergave === 'werkweek') && !!zicht && zicht < dagen.length && window.innerWidth < 768
+      return ingezoomd ? (n > 0 ? dagen[0] : dagen[dagen.length - 1]) : nieuw
+    }),
+  })
   // Een taak al laden zodra de muis er even op blijft (of de vinger erop drukt): openen is dan meteen klaar.
   useEffect(() => {
     const el = inhoud
@@ -155,6 +166,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
     if (Array.isArray(v.spaces)) setSpaces(v.spaces)
     if (v.kleurMap) setKleurVolgens(v.kleurMap)
     if (typeof v.klaar === 'boolean') setToonKlaar(v.klaar)
+    if (typeof v.zicht === 'number') setZicht(v.zicht)
     // Zelf gekozen = onthouden; anders enkel open op een groot scherm, zodat de kalender op een laptop de ruimte krijgt.
     setToonBoom(smal ? false : typeof v.boom === 'boolean' ? v.boom : window.innerWidth >= 1600)
     const q = new URLSearchParams(window.location.search)
@@ -562,8 +574,8 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
             (weergave === 'dag' ? <TeamDag {...teamProps} /> : <TeamWeek {...teamProps} />)
           ) : (
             // Carrousel: de vorige en volgende periode staan ernaast, zodat vegen meeschuift.
-            <VeegSpoor weergave={weergave} datum={datum} render={(d, huidig) => (
-              <Kalender weergave={weergave} datum={d} items={huidig && itemsVan === sleutelVan(bereik) ? zichtbaar : filter(burenItems(d))} kleur={kleur} herkomst={herkomst} personen={personenMap}
+            <VeegSpoor weergave={weergave} datum={datum} render={(d, huidig, kant) => (
+              <Kalender weergave={weergave} datum={d} kant={kant} zicht={zicht} onZicht={(k) => { setZicht(k); bewaarVoorkeur({ zicht: k }) }} items={huidig && itemsVan === sleutelVan(bereik) ? zichtbaar : filter(burenItems(d))} kleur={kleur} herkomst={herkomst} personen={personenMap}
                 magAanpassen={!!boom.rechten.aanpassen} magToevoegen={!!boom.rechten.toevoegen} laatst={laatstVerplaatst.current}
                 onOpen={open} onKlaar={wisselKlaar} onVerplaats={verplaats} onNieuw={setNieuw}
                 onDag={(x) => { setDatum(x); kiesModus('dag') }} />
