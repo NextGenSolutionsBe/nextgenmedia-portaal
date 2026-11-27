@@ -15,6 +15,13 @@ import { DicteerKnop } from '@/components/admin/dicteer-knop'
 import { BeschikbaarheidTab, AbonnementTab, VerschillenTab } from './team-instellingen'
 
 const hhmm = (min: number) => `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
+const isUur = (t: string) => /^\d{2}:\d{2}$/.test(t)
+const naarMin = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5))
+const duurTekst = (min: number) => { const h = Math.floor(min / 60), m = min % 60; return h ? `${h} u${m ? ` ${m}` : ''}` : `${m} min` }
+
+/** Hoe het in de agenda komt: een taak op de dag (zonder uur), een taak van zoveel tot zoveel, of een afspraak. */
+type Wijze = 'zonder' | 'uur' | 'afspraak'
+const WIJZEN: { key: Wijze; label: string }[] = [{ key: 'zonder', label: 'Taak zonder uur' }, { key: 'uur', label: 'Taak met uur' }, { key: 'afspraak', label: 'Afspraak' }]
 
 // ── Nieuw: wat wil je plannen? ──────────────────────────────────────────────
 
@@ -34,7 +41,20 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
   const [lijst, setLijst] = useState<string | null>(standaardLijst)
   const [wie, setWie] = useState<string[]>([boom.ik])
   const [prive, setPrive] = useState(false)
-  const [soort, setSoort] = useState<'taak' | 'meeting'>(m.heelDag ? 'taak' : 'meeting')
+  const [wijze, setWijze] = useState<Wijze>(m.heelDag ? 'zonder' : 'afspraak')
+  const soort: 'taak' | 'meeting' = wijze === 'afspraak' ? 'meeting' : 'taak'
+  const metUur = wijze !== 'zonder'
+  // Van en tot: uit het aangeklikte moment, anders 09:00–10:00. Een einde om 00:00 = middernacht.
+  const [van, setVan] = useState(hhmm(m.heelDag ? 540 : m.vanMin ?? 540))
+  const [tot, setTot] = useState(m.heelDag ? '10:00' : (m.totMin ?? 600) >= 1440 ? '00:00' : hhmm(m.totMin ?? 600))
+  const vanMin = isUur(van) ? naarMin(van) : NaN
+  const totMin = !isUur(tot) ? NaN : tot === '00:00' && vanMin > 0 ? 1440 : naarMin(tot)
+  const uurFout = metUur && !(totMin > vanMin)
+  // Het begin verschuiven neemt het einde mee (de duur blijft), zoals in Google Agenda.
+  const zetVan = (v: string) => {
+    if (isUur(v) && totMin > vanMin) { const t = naarMin(v) + (totMin - vanMin); setTot(t >= 1440 ? '00:00' : hhmm(t)) }
+    setVan(v)
+  }
   const [open, setOpen] = useState<null | 'lijst'>(null)
   // Deadline: geen, een snelle keuze of zelf datum en uur.
   const [deadline, setDeadline] = useState<string | null>(null)
@@ -54,19 +74,20 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
   const [mapNodig, setMapNodig] = useState(false)
   const sluitPop = useCallback(() => setOpen(null), [])
   const wanneerTekst = m.heelDag ? `${kortDag(opDag)}, hele dag` : `${kortDag(opDag)}, ${hhmm(m.vanMin ?? 540)}–${hhmm(m.totMin ?? 600)}`
+  const nuTekst = `${kortDag(opDag)}, ${metUur ? (uurFout ? 'uur nog niet juist' : `${van}–${tot}`) : 'zonder uur'}`
   const maak = async () => {
-    if (!titel.trim()) return
+    if (!titel.trim() || uurFout) return
     // Elke taak hoort bij een map (klant): zo krijgt ze ook de kleur van die map.
     if (!lijst) { setMapNodig(true); setOpen('lijst'); return }
     setBezig(true)
     try {
-      const start = m.heelDag ? null : zoneNaarIso(opDag, hhmm(m.vanMin ?? 540))
-      const eind = m.heelDag ? zoneNaarIso(opDag, '00:00') : (m.totMin ?? 600) >= 1440 ? zoneNaarIso(plusDagen(opDag, 1), '00:00') : zoneNaarIso(opDag, hhmm(m.totMin ?? 600))
-      // Een taak van een hele dag met een deadline op die dag: enkel de deadline
+      const start = metUur ? zoneNaarIso(opDag, van) : null
+      const eind = !metUur ? zoneNaarIso(opDag, '00:00') : totMin >= 1440 ? zoneNaarIso(plusDagen(opDag, 1), '00:00') : zoneNaarIso(opDag, tot)
+      // Een taak zonder uur met een deadline op die dag: enkel de deadline
       // (staat bovenaan die dag). Valt de deadline later, dan blijft de taak op de gekozen dag.
-      const enkelDl = metDeadline && m.heelDag && !!deadlineIso && dag(deadlineIso) === opDag
+      const enkelDl = metDeadline && !metUur && !!deadlineIso && dag(deadlineIso) === opDag
       const r = await actie({
-        actie: 'item.nieuw', titel: titel.trim(), soort, start_op: enkelDl ? null : start, eind_op: enkelDl ? null : eind, heel_dag: enkelDl ? false : m.heelDag,
+        actie: 'item.nieuw', titel: titel.trim(), soort, start_op: enkelDl ? null : start, eind_op: enkelDl ? null : eind, heel_dag: enkelDl ? false : !metUur,
         deadline_op: metDeadline ? deadlineIso : null, lijst_id: lijst, toegewezen: wie, prive, labels,
         ...(notitie.trim() ? { beschrijving: notitie.trim() } : {}),
       })
@@ -75,7 +96,9 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Toevoegen mislukt') } finally { setBezig(false) }
   }
   // Een shoot plan je in de Shoot planner (klant, locaties, programma); dag en uur gaan mee.
-  const shootLink = `/admin/shoots/nieuw?datum=${opDag}${m.heelDag ? '' : `&van=${hhmm(m.vanMin ?? 540)}&tot=${hhmm(Math.min(m.totMin ?? 600, 1439))}`}&terug=agenda`
+  const shootLink = stap === 'kies'
+    ? `/admin/shoots/nieuw?datum=${opDag}${m.heelDag ? '' : `&van=${hhmm(m.vanMin ?? 540)}&tot=${hhmm(Math.min(m.totMin ?? 600, 1439))}`}&terug=agenda`
+    : `/admin/shoots/nieuw?datum=${opDag}${metUur && !uurFout ? `&van=${van}&tot=${hhmm(Math.min(totMin, 1439))}` : ''}&terug=agenda`
   if (stap === 'kies') {
     return (
       <Modal titel="Wat wil je plannen?" sub={wanneerTekst} onSluit={onSluit}>
@@ -100,17 +123,50 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
     )
   }
   return (
-    <Modal titel={m.heelDag ? 'Nieuwe taak' : 'Nieuw in de agenda'} sub={wanneerTekst} onSluit={onSluit}
-      voet={<><button type="button" onClick={onSluit} className="btn-secondary">Annuleren</button><button type="button" disabled={!titel.trim() || bezig} onClick={maak} className="btn-primary">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Toevoegen</button></>}>
+    <Modal titel={wijze === 'afspraak' ? 'Nieuw in de agenda' : 'Nieuwe taak'} sub={nuTekst} onSluit={onSluit}
+      voet={<><button type="button" onClick={onSluit} className="btn-secondary">Annuleren</button><button type="button" disabled={!titel.trim() || bezig || uurFout} onClick={maak} className="btn-primary">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Toevoegen</button></>}>
 
       <input autoFocus value={titel} onChange={(e) => setTitel(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') maak() }} className="input-base text-base" placeholder={m.heelDag ? 'Wat moet er gebeuren?' : 'Waarover gaat het?'} aria-label="Titel" maxLength={500} />
       {boom.shoots && <a href={shootLink} className="inline-flex items-center gap-1.5 text-xs text-gray-600 hover:text-black underline underline-offset-2"><Aperture className="h-3.5 w-3.5" />Is het een contentshoot? Plan ze in de Shoot planner</a>}
-      {!m.heelDag && (
-        <div className="flex gap-1.5">
-          {(['meeting', 'taak'] as const).map((s) => <button key={s} type="button" onClick={() => setSoort(s)} aria-pressed={soort === s} className={`rounded-full border px-3 py-1 text-xs ${soort === s ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700'}`}>{s === 'meeting' ? 'Afspraak' : 'Taak met uur'}</button>)}
+      <DagKeuze dag={opDag} onKies={setOpDag} />
+      {/* Hoe: zonder uur, met uur (van–tot) of als afspraak; daaronder meteen de deadline. */}
+      <div>
+        <div className="flex flex-wrap gap-1.5">
+          {WIJZEN.map((w) => <button key={w.key} type="button" onClick={() => setWijze(w.key)} aria-pressed={wijze === w.key} className={`rounded-full border px-3 py-1 text-xs ${wijze === w.key ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700 hover:border-gray-400'} ${focusRing}`}>{w.label}</button>)}
+        </div>
+        {metUur && (
+          <div className="mt-2.5">
+            <div className="label-mono text-[10px] uppercase text-gray-500 mb-1.5">Van – tot</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <input type="time" step={300} value={van} onChange={(e) => zetVan(e.target.value)} className="input-base !py-1 !px-2 text-sm !w-[7rem]" aria-label="Van" />
+              <span className="text-sm text-gray-500">tot</span>
+              <input type="time" step={300} value={tot} onChange={(e) => setTot(e.target.value)} className={`input-base !py-1 !px-2 text-sm !w-[7rem] ${uurFout ? '!border-red-400' : ''}`} aria-label="Tot" />
+              {!uurFout && <span className="text-xs text-gray-500 tabular-nums">{duurTekst(totMin - vanMin)}</span>}
+            </div>
+            {uurFout && <p className="text-xs text-red-700 mt-1">Het einde moet na het begin liggen.</p>}
+          </div>
+        )}
+      </div>
+      {soort === 'taak' && (
+        <div>
+          <div className="label-mono text-[10px] uppercase text-gray-500 mb-1.5">Deadline</div>
+          <div className="flex flex-wrap gap-1.5">
+            <button type="button" onClick={() => { setDeadline(null); setEigenDl(false) }} aria-pressed={!deadlineIso} className={`rounded-full border px-2.5 py-1 text-xs ${!deadlineIso ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700 hover:border-gray-400'} ${focusRing}`}>Geen</button>
+            {snelleDeadlines().map((x) => {
+              const aan = !eigenDl && deadline === x.iso
+              return <button key={x.label} type="button" onClick={() => { setDeadline(x.iso); setEigenDl(false) }} aria-pressed={aan} className={`rounded-full border px-2.5 py-1 text-xs ${aan ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700 hover:border-gray-400'} ${focusRing}`}>{x.label}</button>
+            })}
+            <button type="button" onClick={() => setEigenDl(true)} aria-pressed={eigenDl} className={`rounded-full border px-2.5 py-1 text-xs ${eigenDl ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700 hover:border-gray-400'} ${focusRing}`}>Zelf kiezen</button>
+          </div>
+          {eigenDl && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              <input type="date" value={dlDag} onChange={(e) => setDlDag(e.target.value)} className="input-base !py-1 !px-2 text-sm !w-[9.5rem]" aria-label="Datum deadline" />
+              <input type="time" step={300} value={dlUur} onChange={(e) => setDlUur(e.target.value)} className="input-base !py-1 !px-2 text-sm !w-[6.5rem]" aria-label="Uur deadline" />
+            </div>
+          )}
+          {metDeadline && !metUur && deadlineIso && dag(deadlineIso) !== opDag && <p className="text-[11px] text-gray-500 mt-1">De taak staat op {kortDag(opDag)}, met de deadline erbij.</p>}
         </div>
       )}
-      <DagKeuze dag={opDag} onKies={setOpDag} />
       <div>
         <div className="label-mono text-[10px] uppercase text-gray-500 mb-1.5">Voor welke map (klant)?</div>
         <div className="relative">
@@ -133,26 +189,6 @@ export function NieuwVenster({ m, boom, standaardLijst, onSluit, onTaak, onMeeti
         <div className="label-mono text-[10px] uppercase text-gray-500 mb-1.5">Wie</div>
         <WieKiezer boom={boom} gekozen={wie} onWissel={(p) => setWie(wie.includes(p) ? wie.filter((x) => x !== p) : [...wie, p])} />
       </div>
-      {soort === 'taak' && (
-        <div>
-          <div className="label-mono text-[10px] uppercase text-gray-500 mb-1.5">Deadline</div>
-          <div className="flex flex-wrap gap-1.5">
-            <button type="button" onClick={() => { setDeadline(null); setEigenDl(false) }} aria-pressed={!deadlineIso} className={`rounded-full border px-2.5 py-1 text-xs ${!deadlineIso ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700 hover:border-gray-400'} ${focusRing}`}>Geen</button>
-            {snelleDeadlines().map((x) => {
-              const aan = !eigenDl && deadline === x.iso
-              return <button key={x.label} type="button" onClick={() => { setDeadline(x.iso); setEigenDl(false) }} aria-pressed={aan} className={`rounded-full border px-2.5 py-1 text-xs ${aan ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700 hover:border-gray-400'} ${focusRing}`}>{x.label}</button>
-            })}
-            <button type="button" onClick={() => setEigenDl(true)} aria-pressed={eigenDl} className={`rounded-full border px-2.5 py-1 text-xs ${eigenDl ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700 hover:border-gray-400'} ${focusRing}`}>Zelf kiezen</button>
-          </div>
-          {eigenDl && (
-            <div className="flex flex-wrap gap-1.5 mt-2">
-              <input type="date" value={dlDag} onChange={(e) => setDlDag(e.target.value)} className="input-base !py-1 !px-2 text-sm !w-[9.5rem]" aria-label="Datum deadline" />
-              <input type="time" step={300} value={dlUur} onChange={(e) => setDlUur(e.target.value)} className="input-base !py-1 !px-2 text-sm !w-[6.5rem]" aria-label="Uur deadline" />
-            </div>
-          )}
-          {metDeadline && m.heelDag && deadlineIso && dag(deadlineIso) !== opDag && <p className="text-[11px] text-gray-500 mt-1">De taak staat op {kortDag(opDag)}, met de deadline erbij.</p>}
-        </div>
-      )}
       <div>
         <div className="label-mono text-[10px] uppercase text-gray-500 mb-1.5">Label</div>
         <LabelKeuze boom={boom} gekozen={labels} voorstel={voorstel} onZet={(l) => { setLabels(l); setLabelsGekozen(true) }} />
