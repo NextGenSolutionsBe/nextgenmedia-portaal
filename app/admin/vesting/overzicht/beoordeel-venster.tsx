@@ -85,7 +85,7 @@ export function BeoordeelVenster({ k, klanten, onClose, onToegevoegd }: {
 
       <section>
         <h3 className="text-sm font-semibold text-gray-900 mb-2">Hoe kwam de opdracht binnen?</h3>
-        <LeadKiezer waarde={lead} onChange={setLead} />
+        <LeadKiezer waarde={lead} onChange={setLead} contractId={k.id} />
       </section>
 
       <section>

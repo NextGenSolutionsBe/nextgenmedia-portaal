@@ -331,6 +331,14 @@ export async function buildNotifications(): Promise<Notif[]> {
     } catch { /* tabellen bestaan pas na de migratie */ }
   })
 
+  // NextGenSolutions-levering (fase 5): geen plan 5 dagen na de tijdscan, Care-controle te laat.
+  blok(async (out) => {
+    try {
+      const { leveringMeldingen } = await import('@/lib/ngs/levering-server')
+      for (const m of await leveringMeldingen(admin)) out.push({ id: m.id, kind: 'ngs', priority: m.hoog ? 'high' : 'med', title: m.titel, date: m.datum, href: m.href })
+    } catch { /* tabellen bestaan pas na de migratie */ }
+  })
+
   // Websiteonderhoud: binnen 30 dagen af, verlopen of zonder startdatum. De id
   // bevat de einddatum, zodat een verlengd pakket later opnieuw meldt.
   blok(async (out) => {

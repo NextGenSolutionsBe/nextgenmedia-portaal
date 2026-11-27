@@ -26,6 +26,7 @@ import { FEATURES } from '@/lib/features'
 import { ClientCms } from './client-cms'
 import { ClientFormulieren } from './client-formulieren'
 import { OffertesBij } from '@/components/admin/offertes-bij'
+import { SolutionsBlok } from '@/components/admin/solutions-blok'
 
 async function getClient(id: string) {
   const admin = createAdminSupabaseClient()
@@ -208,6 +209,9 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
           {/* Gepland in maanden */}
           <ClientMonths clientId={id} />
+
+          {/* NextGenSolutions: deals, levering en Care (enkel als er iets is) */}
+          <SolutionsBlok clientId={id} />
 
           {/* Klanttaken */}
           <div id="taken" className="scroll-mt-20">

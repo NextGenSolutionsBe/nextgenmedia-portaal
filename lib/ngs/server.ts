@@ -31,6 +31,7 @@ function naarDeal(r: Record<string, unknown>): Deal {
     start_datum: r.start_datum ? String(r.start_datum).slice(0, 10) : null, bron: (r.bron as string | null) ?? null, verantwoordelijke: (r.verantwoordelijke as string | null) ?? null,
     gewonnen_op: r.gewonnen_op ? String(r.gewonnen_op).slice(0, 10) : null, verloren_op: r.verloren_op ? String(r.verloren_op).slice(0, 10) : null,
     verloren_reden: (r.verloren_reden as string | null) ?? null, created_at: String(r.created_at), created_by: (r.created_by as string | null) ?? null,
+    client_id: (r.client_id as string | null) ?? null,
   }
 }
 

@@ -94,7 +94,7 @@ export function ContractVenster({ c, vennoten, ik, laatste, onLaatste, onClose, 
             Nog niet aangeduid. Tot dan rekent dit contract zoals nu: met de afspraak en closing hieronder.
           </p>
         )}
-        <LeadKiezer waarde={c.herkomst} bezig={bezig === 'lead'} onChange={(v) => patch({ lead_soort: v }, 'lead')} />
+        <LeadKiezer waarde={c.herkomst} bezig={bezig === 'lead'} contractId={c.contract_id} onChange={(v) => patch({ lead_soort: v }, 'lead')} />
         {eigenVerdeling && (
           <p className="mt-2 text-xs text-amber-800">
             Voor dit contract geldt een eigen verdeling van {c.toerekening_pct}%. Die gaat voor op de regels.{' '}
