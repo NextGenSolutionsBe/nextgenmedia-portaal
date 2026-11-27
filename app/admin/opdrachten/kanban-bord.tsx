@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { MessageSquare, Plus, MoreHorizontal, Check, FileSignature, AlertCircle, Send, Mail, ListPlus, X } from 'lucide-react'
+import { MessageSquare, Plus, MoreHorizontal, Check, FileSignature, AlertCircle, Send, Mail, ListPlus, X, Trash2 } from 'lucide-react'
 import { NieuweTaak } from '@/components/admin/clickup-taken'
 import { offerteBevestigdLabel } from '@/lib/opdrachten-offerte-model'
 import {
@@ -26,7 +26,9 @@ const FASE_STIP: Record<KolomKey, string> = {
  * muis; op een touchscherm (en voor wie liever klikt) via het menu "…" op de
  * kaart. De kleur van de dienst is een stip, het bedrag staat rechts.
  */
-export function KanbanBord({ kaarten, laden, onOpen, onVerplaats, onNieuw, voor, opvolging, onVernieuw }: {
+export function KanbanBord({ kaarten, laden, onOpen, onVerplaats, onNieuw, onVerwijder, voor, opvolging, onVernieuw }: {
+  /** "Kaart verwijderen" in het menu van de kaart. */
+  onVerwijder?: (o: KaartOpdracht) => void
   /** Na een taak via de kaart: het bord stil herladen (de notitie verschijnt). */
   onVernieuw?: () => void
   /** Een eigen kolom vooraan (Account-based marketing). */
@@ -99,6 +101,7 @@ export function KanbanBord({ kaarten, laden, onOpen, onVerplaats, onNieuw, voor,
                   onTaak={() => { setMenuId(null); setTaakVoor(o) }}
                   onMenu={() => setMenuId(menuId === o.id ? null : o.id)}
                   onKolom={(k) => { setMenuId(null); if (k !== kolomVan(o.status)) onVerplaats(o, k) }}
+                  onVerwijder={onVerwijder ? () => { setMenuId(null); onVerwijder(o) } : undefined}
                   onDragStart={(e) => { e.dataTransfer.setData('text/plain', o.id); e.dataTransfer.effectAllowed = 'move'; setSleepId(o.id); setMenuId(null) }}
                   onDragEnd={() => { setSleepId(null); setDoel(null) }} />
               ))}
@@ -152,8 +155,9 @@ function TaakVenster({ o, onSluit, onKlaar }: { o: KaartOpdracht; onSluit: () =>
   )
 }
 
-function Kaart({ o, sleept, menuOpen, onOpen, onTaak, onMenu, onKolom, onDragStart, onDragEnd, opvolging }: {
+function Kaart({ o, sleept, menuOpen, onOpen, onTaak, onMenu, onKolom, onVerwijder, onDragStart, onDragEnd, opvolging }: {
   onTaak: () => void
+  onVerwijder?: () => void
   opvolging?: { dringend: boolean; tekst: string; telt: boolean }
   o: KaartOpdracht
   sleept: boolean
@@ -258,7 +262,7 @@ function Kaart({ o, sleept, menuOpen, onOpen, onTaak, onMenu, onKolom, onDragSta
           className="h-6 w-6 rounded-md flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-900 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100">
           <ListPlus className="h-4 w-4" />
         </button>
-        <button type="button" onClick={onMenu} aria-label="Verplaatsen naar een andere fase" title="Verplaatsen"
+        <button type="button" onClick={onMenu} aria-label="Verplaatsen of verwijderen" title="Verplaatsen of verwijderen"
           className={`h-6 w-6 rounded-md flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-900 ${menuOpen ? 'bg-gray-100 text-gray-900' : 'sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100'}`}>
           <MoreHorizontal className="h-4 w-4" />
         </button>
@@ -272,6 +276,12 @@ function Kaart({ o, sleept, menuOpen, onOpen, onTaak, onMenu, onKolom, onDragSta
                 {k.key === kolom && <Check className="h-3.5 w-3.5 ml-auto" />}
               </button>
             ))}
+            {onVerwijder && <>
+              <div className="my-1 border-t border-gray-100" />
+              <button type="button" onClick={onVerwijder} className="w-full text-left text-[13px] px-2 py-1.5 rounded-md text-red-700 hover:bg-red-50 flex items-center gap-2">
+                <Trash2 className="h-3.5 w-3.5" />Kaart verwijderen
+              </button>
+            </>}
           </div>
         )}
       </div>
