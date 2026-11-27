@@ -220,7 +220,7 @@ export function OfferteOpmaken({ beginKlant, opdrachtId, offerteId }: { beginKla
                 {(['nextgenmedia', 'nextgensolutions'] as MailMerk[]).map((m) => (
                   <button key={m} type="button" onClick={() => setMerk(m)} aria-pressed={merk === m}
                     className={`rounded-lg border-2 px-2 py-2 text-xs font-semibold ${merk === m ? '' : 'border-gray-200 text-gray-600'}`}
-                    style={merk === m ? { background: MERK_STIJL[m].accent, borderColor: MERK_STIJL[m].accent, color: MERK_STIJL[m].opAccent } : undefined}>{MERK_STIJL[m].naam}</button>
+                    style={merk === m ? { background: MERK_STIJL[m].kleur, borderColor: MERK_STIJL[m].kleur, color: MERK_STIJL[m].opKleur } : undefined}>{MERK_STIJL[m].naam}</button>
                 ))}
               </div>
             </div>
@@ -308,7 +308,7 @@ export function OfferteOpmaken({ beginKlant, opdrachtId, offerteId }: { beginKla
             <p className="text-xs text-gray-500">{String(inhoud.algemeen.offertenummer ?? '') || 'Nieuw nummer'}{klant ? ` · ${klant.company_name}` : ''}</p>
             <p className="font-semibold text-gray-900 leading-snug">{String(inhoud.algemeen.projectnaam ?? '') || 'Nog geen projectnaam'}</p>
           </div>
-          <div className="rounded-xl p-3" style={{ background: MERK_STIJL[merk].accent, color: MERK_STIJL[merk].opAccent }}>
+          <div className="rounded-xl p-3" style={{ background: MERK_STIJL[merk].kleur, color: MERK_STIJL[merk].opKleur }}>
             <p className="text-[11px] font-semibold uppercase tracking-wide opacity-80">Totaal excl. btw</p>
             <p className="text-2xl font-semibold tabular-nums">{euro(prijs.excl)}</p>
             <p className="text-xs opacity-80">{euro(prijs.incl)} incl. {String(prijs.btwPct).replace('.', ',')}% btw{prijs.maandelijks ? ` · ${euro(prijs.maandelijks)} per maand` : ''}</p>

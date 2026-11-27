@@ -49,7 +49,7 @@ export default async function PortalOffertesPage() {
             return (
               <li key={o.id} className="card-base !p-0 overflow-hidden">
                 <div className="flex">
-                  <span className="w-1.5 shrink-0" style={{ background: m.accent }} />
+                  <span className="w-1.5 shrink-0" style={{ background: m.kleur }} />
                   <div className="flex-1 min-w-0 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center gap-3">
                     <div className="min-w-0 flex-1">
                       <p className="text-xs text-gray-500">{[o.offertenummer, m.naam].filter(Boolean).join(' · ')}</p>

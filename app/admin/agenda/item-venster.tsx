@@ -24,26 +24,49 @@ const RijkeEditor = dynamic(() => import('./rijke-editor').then((m) => m.RijkeEd
 
 type Bijlage = { id: string; naam: string; type: string | null; grootte: number | null; geupload_door: string | null; created_at: string }
 type TaakDoc = { id: string; titel: string; updated_at: string; bijgewerkt_door: string | null }
-type Detail = { item: Item; beschrijving_json?: DocNode | null; subtaken: Item[]; ouder: { id: string; titel: string } | null; gemaakt_door: string | null; gemaakt_op: string; bijlagen: Bijlage[]; docs: TaakDoc[] }
+type Detail = { item: Item; beschrijving_json?: DocNode | null; subtaken: Item[]; ouder: { id: string; titel: string } | null; gemaakt_door: string | null; gemaakt_op: string; bijlagen: Bijlage[]; docs: TaakDoc[]; voorlopig?: true }
 
-export function ItemVenster({ id, boom, onSluit, onGewijzigd, onVerwijderd, onOpen, onDoc }: {
+/**
+ * Sneller openen: een taak wordt al geladen zodra de muis erover gaat (of de vinger erop
+ * drukt), en het venster toont meteen wat de kalender al weet. Hoogstens 15 seconden oud.
+ */
+const voorraad = new Map<string, { t: number; p: Promise<Detail> }>()
+export function voorladen(id: string): Promise<Detail> {
+  const v = voorraad.get(id)
+  if (v && Date.now() - v.t < 15_000) return v.p
+  const p = api<Detail>(`/api/admin/agenda?item=${id}`)
+  p.catch(() => voorraad.delete(id))
+  voorraad.set(id, { t: Date.now(), p })
+  if (voorraad.size > 40) voorraad.delete(voorraad.keys().next().value as string)
+  return p
+}
+const vanVoorraad = (id: string) => { const p = voorladen(id); voorraad.delete(id); return p }
+const voorlopigeDetail = (i: Item): Detail => ({ item: i, subtaken: [], ouder: null, gemaakt_door: null, gemaakt_op: '', bijlagen: [], docs: [], voorlopig: true })
+
+export function ItemVenster({ id, boom, voorlopig, onSluit, onGewijzigd, onVerwijderd, onOpen, onDoc }: {
   id: string; boom: BoomData
+  /** Wat de kalender al van de taak weet: meteen tonen, de rest komt erbij. */
+  voorlopig?: Item | null
   onSluit: () => void
   onDoc: (id: string) => void
   onGewijzigd: () => void
   onVerwijderd: (id: string) => void
   onOpen: (id: string) => void
 }) {
-  const [d, setD] = useState<Detail | null>(null)
+  const [d, setD] = useState<Detail | null>(() => (voorlopig && voorlopig.id === id && voorlopig.bron === 'ag' ? voorlopigeDetail(voorlopig) : null))
   const [fout, setFout] = useState<string | null>(null)
-  const versie = useRef<string | null>(null)
-  const laad = useCallback(async () => {
+  const versie = useRef<string | null>(voorlopig && voorlopig.id === id ? voorlopig.updated_at : null)
+  // Iets bewaard terwijl de taak nog laadde: daarna nog eens vers ophalen, zodat niets terugspringt.
+  const bewaardTijdensLaden = useRef(0)
+  const laad = useCallback(async (vers = true) => {
     try {
-      const j = await api<Detail>(`/api/admin/agenda?item=${id}`)
+      const teller = bewaardTijdensLaden.current
+      let j = await (vers ? api<Detail>(`/api/admin/agenda?item=${id}`) : vanVoorraad(id))
+      if (bewaardTijdensLaden.current !== teller) j = await api<Detail>(`/api/admin/agenda?item=${id}`)
       setD(j); versie.current = j.item.updated_at; setFout(null)
     } catch (e) { setFout(e instanceof Error ? e.message : 'Laden mislukt') }
   }, [id])
-  useEffect(() => { setD(null); laad() }, [laad])
+  useEffect(() => { void laad(false) }, [laad])
 
   const mag = !!boom.rechten.aanpassen
   const personen = useMemo(() => new Map(boom.personen.map((p) => [p.id, p])), [boom.personen])
@@ -57,6 +80,7 @@ export function ItemVenster({ id, boom, onSluit, onGewijzigd, onVerwijderd, onOp
   const bewaar = async (velden: Record<string, unknown>) => {
     if (!d) return
     const vorige = d.item
+    if (d.voorlopig) bewaardTijdensLaden.current++
     setD({ ...d, item: { ...d.item, ...velden } as Item })
     try {
       const r = await actie<{ ok: true; versie: string | null }>({ actie: 'item.wijzig', id: d.item.id, versie: versie.current, ...velden })
@@ -90,7 +114,7 @@ export function ItemVenster({ id, boom, onSluit, onGewijzigd, onVerwijderd, onOp
       )}>
       {fout && <div className="m-5 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800 p-3">{fout}</div>}
       {!d && !fout && <div className="py-16 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>}
-      {d && <Inhoud d={d} boom={boom} mag={mag} personen={personen} bewaar={bewaar} bewaarBeschrijving={bewaarBeschrijving} onOpen={onOpen} herlaad={laad} onGewijzigd={onGewijzigd} onDoc={onDoc} />}
+      {d && <Inhoud d={d} boom={boom} mag={mag} personen={personen} bewaar={bewaar} bewaarBeschrijving={bewaarBeschrijving} onOpen={onOpen} herlaad={() => void laad()} onGewijzigd={onGewijzigd} onDoc={onDoc} />}
     </Lade>
   )
 }
@@ -158,17 +182,18 @@ function Inhoud({ d, boom, mag, personen, bewaar, bewaarBeschrijving, onOpen, he
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] items-start">
       {/* Eigenschappen: rechts op een groot scherm, bovenaan op de gsm */}
       <aside className="lg:order-2 rounded-2xl bg-gray-50 border border-gray-100 p-4 space-y-4 text-sm">
-        {i.soort !== 'meeting' && <>
-          <Kop icoon={<Clock className="h-3.5 w-3.5" />}>Deadline</Kop>
-          <DeadlineVeld i={i} mag={mag} bewaar={bewaar} />
-        </>}
-
+        {/* Volgorde op vraag: eerst wanneer, dan wie, dan pas de deadline. */}
         <Kop icoon={<CalendarClock className="h-3.5 w-3.5" />}>{i.soort === 'meeting' ? 'Wanneer' : 'Wanneer werk je eraan'}</Kop>
         <Tijden i={i} mag={mag} bewaar={bewaar} />
 
         <Kop icoon={<Users className="h-3.5 w-3.5" />}>Wie</Kop>
         <WieKiezer boom={boom} gekozen={i.toegewezen} disabled={!mag}
           onWissel={(p) => bewaar({ toegewezen: i.toegewezen.includes(p) ? i.toegewezen.filter((x) => x !== p) : [...i.toegewezen, p] })} />
+
+        {i.soort !== 'meeting' && <>
+          <Kop icoon={<Clock className="h-3.5 w-3.5" />}>Deadline</Kop>
+          <DeadlineVeld i={i} mag={mag} bewaar={bewaar} />
+        </>}
 
         <Kop icoon={<Building2 className="h-3.5 w-3.5" />}>Klant</Kop>
         <div className="relative">
@@ -234,14 +259,23 @@ function Inhoud({ d, boom, mag, personen, bewaar, bewaarBeschrijving, onOpen, he
       </aside>
 
       <div className="lg:order-1 space-y-6 min-w-0">
-      {/* Beschrijving */}
-      <Beschrijving key={i.id} json={d.beschrijving_json ?? null} markdown={i.beschrijving ?? ''} itemId={i.id} mag={mag} context={i.titel} opslaan={bewaarBeschrijving} />
+      {d.voorlopig ? (
+        // De beschrijving, bijlagen en subtaken komen er zo bij (de rest staat er al).
+        <div className="space-y-3" aria-busy="true">
+          <div className="label-mono text-[10px] uppercase text-gray-500">Beschrijving</div>
+          <div className="h-24 rounded-xl border border-gray-100 bg-gray-50 animate-pulse" />
+          <div className="h-10 rounded-xl bg-gray-50 animate-pulse" />
+        </div>
+      ) : <>
+        {/* Beschrijving */}
+        <Beschrijving key={i.id} json={d.beschrijving_json ?? null} markdown={i.beschrijving ?? ''} itemId={i.id} mag={mag} context={i.titel} opslaan={bewaarBeschrijving} />
 
-      {/* Bijlagen en docs */}
-      <Bijlagen d={d} mag={mag} magToevoegen={!!boom.rechten.toevoegen} herlaad={herlaad} onDoc={onDoc} />
+        {/* Bijlagen en docs */}
+        <Bijlagen d={d} mag={mag} magToevoegen={!!boom.rechten.toevoegen} herlaad={herlaad} onDoc={onDoc} />
 
-      {/* Subtaken */}
-      <Subtaken d={d} boom={boom} mag={mag && !!boom.rechten.toevoegen} personen={personen} onOpen={onOpen} herlaad={() => { herlaad(); onGewijzigd() }} />
+        {/* Subtaken */}
+        <Subtaken d={d} boom={boom} mag={mag && !!boom.rechten.toevoegen} personen={personen} onOpen={onOpen} herlaad={() => { herlaad(); onGewijzigd() }} />
+      </>}
 
       {/* Velden uit ClickUp */}
       {i.velden && Object.keys(i.velden).length > 0 && (
@@ -256,7 +290,7 @@ function Inhoud({ d, boom, mag, personen, bewaar, bewaarBeschrijving, onOpen, he
       )}
 
       <div className="text-[11px] text-gray-400 border-t border-gray-100 pt-3 space-y-0.5">
-        <div>Gemaakt{d.gemaakt_door ? ` door ${d.gemaakt_door}` : ''} op {new Date(d.gemaakt_op).toLocaleString('nl-BE', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Brussels' })}</div>
+        {d.gemaakt_op && <div>Gemaakt{d.gemaakt_door ? ` door ${d.gemaakt_door}` : ''} op {new Date(d.gemaakt_op).toLocaleString('nl-BE', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Brussels' })}</div>}
         {i.afgerond_op && <div>Completed{i.afgerond_door ? ` door ${i.afgerond_door}` : ''} op {new Date(i.afgerond_op).toLocaleString('nl-BE', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Brussels' })}</div>}
       </div>
       </div>

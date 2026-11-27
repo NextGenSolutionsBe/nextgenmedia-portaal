@@ -2,6 +2,7 @@ import { safeMessage } from '@/lib/api-error'
 import { waitUntil } from '@vercel/functions'
 import { planNaOndertekening } from '@/lib/facturatie/contract-plan-server'
 import { MAX_UPLOAD_MB, fileTooBig } from '@/lib/upload'
+import { haalOpgeladenPdf, isOpgeladenPad, ruimOpgeladenOp } from '@/lib/contracten/pdf-opgeladen-server'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient, insertResilient , isActiveStaff } from '@/lib/supabase/server'
 import { randomUUID } from 'crypto'
@@ -27,6 +28,8 @@ export async function POST(req: NextRequest) {
     const admin = createAdminSupabaseClient()
     const formData = await req.formData()
     const pdf = formData.get('pdf') as File | null
+    // Of rechtstreeks opgeladen in de opslag (tot 10 MB, lib/contracten/pdf-opladen.ts).
+    const pdfPad = isOpgeladenPad(formData.get('pdf_pad')) ? String(formData.get('pdf_pad')) : null
     const client_id = formData.get('client_id') as string
     const title = formData.get('title') as string
     // Elk contract heeft een type; niets gekozen → 'Niet toegewezen'.
@@ -47,7 +50,7 @@ export async function POST(req: NextRequest) {
 
     // client_id is OPTIONEEL: een contract mag zonder klant bestaan (publieke
     // tekenlink / intern). Enkel een PDF en titel zijn verplicht.
-    if (!pdf || !title) {
+    if ((!pdf && !pdfPad) || !title) {
       return NextResponse.json({ error: 'PDF en titel zijn verplicht' }, { status: 400 })
     }
     if (!bedrijf && !service_slug) {
@@ -56,9 +59,12 @@ export async function POST(req: NextRequest) {
     // Zelfde grens als het formulier (lib/upload.ts) — maar hier afgedwongen,
     // want een browsercontrole is te omzeilen. Boven ~4,5 MB zou Vercel het
     // verzoek sowieso kaal weigeren; zo blijft de melding altijd de onze.
-    if (fileTooBig(pdf)) {
+    if (pdf && fileTooBig(pdf)) {
       return NextResponse.json({ error: `PDF te groot — max ${MAX_UPLOAD_MB} MB. Comprimeer het bestand (bv. "Opslaan als PDF met verkleind formaat") en probeer opnieuw.` }, { status: 413 })
     }
+
+    // De pdf zelf: uit het formulier (klein) of uit de opslag (rechtstreeks opgeladen, tot 10 MB).
+    const pdfBytes = pdfPad ? await haalOpgeladenPdf(admin, pdfPad) : new Uint8Array(await pdf!.arrayBuffer())
 
     // Aantal maanden afleiden uit het contractduur-type (eenmalig/onbepaald = geen einddatum).
     const PRESET_MONTHS: Record<string, number> = { maandelijks: 1, '3m': 3, '6m': 6, '12m': 12 }
@@ -108,11 +114,10 @@ export async function POST(req: NextRequest) {
     const contractId = contract.id as string
 
     // Upload PDF
-    const arrayBuffer = await pdf.arrayBuffer()
     const pdfPath = `${client_id || 'algemeen'}/${contractId}.pdf`
     const { error: uploadErr } = await admin.storage
       .from('contracts')
-      .upload(pdfPath, Buffer.from(arrayBuffer), {
+      .upload(pdfPath, Buffer.from(pdfBytes), {
         contentType: 'application/pdf',
         upsert: true,
       })
@@ -122,6 +127,8 @@ export async function POST(req: NextRequest) {
       await admin.from('contracts').delete().eq('id', contractId)
       throw new Error(`PDF upload mislukt: ${uploadErr.message}`)
     }
+
+    if (pdfPad) await ruimOpgeladenOp(admin, pdfPad)
 
     // For an already-signed upload, the uploaded PDF IS the signed document, so
     // store it as signed_pdf_path too (client + admin can download it directly).

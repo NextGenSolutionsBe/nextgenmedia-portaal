@@ -2,8 +2,8 @@
 // client-componenten gebruikt (badges in pipeline, agenda en Focus Mode).
 //
 // Waarom dit bestaat: met twee merken in één scherm moet je in een oogopslag
-// zien waarvoor je aan het bellen of boeken bent. Geel = NextGenMedia (de
-// huisstijlkleur van het platform), blauw = NextGenSolutions. De kleuren
+// zien waarvoor je aan het bellen of boeken bent. Woud (groen) = NextGenMedia,
+// blauw = NextGenSolutions. De kleuren
 // hangen aan de pipeline-KEY, niet aan de naam — namen kunnen wijzigen.
 
 export type MerkStijl = {
@@ -23,9 +23,10 @@ const NEUTRAAL: MerkStijl = {
 
 const STIJLEN: Record<string, MerkStijl> = {
   nextgenmedia: {
-    badge: 'bg-gray-900 border-gray-900 text-white',
-    stip: 'bg-gray-900 border border-gray-900',
-    balk: 'bg-gray-900',
+    // Woud uit de huisstijl van NextGenMedia (lib/ngm-merk.ts), nooit geel.
+    badge: 'bg-[#0C2B1E] border-[#0C2B1E] text-white',
+    stip: 'bg-[#0C2B1E] border border-[#0C2B1E]',
+    balk: 'bg-[#0C2B1E]',
   },
   nextgensolutions: {
     badge: 'bg-blue-500 border-blue-600 text-white',

@@ -161,25 +161,32 @@ async function container(admin: Admin, k: Kijker, soort: string, id: string | nu
 
 async function eenItem(admin: Admin, k: Kijker, id: string) {
   if (!isUuid(id)) throw new Error('Onbekend item')
-  const z = await laadZicht(admin, k)
-  let { data, error } = await admin.from('ag_items').select(`${ITEM_VELDEN}, beschrijving, beschrijving_json, velden, gemaakt_door, created_at, in_app_gewijzigd_op`).eq('id', id).maybeSingle()
-  if (error && /beschrijving_json/.test(error.message)) ({ data } = await admin.from('ag_items').select(`${ITEM_VELDEN}, beschrijving, velden, gemaakt_door, created_at, in_app_gewijzigd_op`).eq('id', id).maybeSingle())
-  if (!data) throw new Error('Dit item bestaat niet meer.')
-  const [item] = await metToegewezen(admin, [data as unknown as RuwItem], z, { subtaken: true })
-  if (!item) throw new Error('Je kan dit item niet zien.')
-  const { data: subs } = await admin.from('ag_items').select(ITEM_VELDEN).eq('parent_id', id).is('verwijderd_op', null).order('created_at').limit(300)
-  const subtaken = await metToegewezen(admin, (subs ?? []) as unknown as RuwItem[], z)
-  let ouder: { id: string; titel: string } | null = null
-  if (item.parent_id) {
-    const { data: o } = await admin.from('ag_items').select(ITEM_VELDEN).eq('id', item.parent_id).maybeSingle()
-    const [zo] = o ? await metToegewezen(admin, [o as unknown as RuwItem], z) : []
-    if (zo) ouder = { id: zo.id, titel: zo.titel }
+  // Alles wat niet van elkaar afhangt tegelijk: zicht, de taak, subtaken, bijlagen en docs.
+  // Wat je niet mag zien, wordt daarna weggefilterd (bijlagen en docs enkel als je de taak ziet).
+  const haalItem = async () => {
+    const { data, error } = await admin.from('ag_items').select(`${ITEM_VELDEN}, beschrijving, beschrijving_json, velden, gemaakt_door, created_at, in_app_gewijzigd_op`).eq('id', id).maybeSingle()
+    if (error && /beschrijving_json/.test(error.message)) return (await admin.from('ag_items').select(`${ITEM_VELDEN}, beschrijving, velden, gemaakt_door, created_at, in_app_gewijzigd_op`).eq('id', id).maybeSingle()).data
+    return data
   }
-  const extra = data as unknown as { gemaakt_door: string | null; created_at: string }
-  const [{ data: bijlagen }, { data: docs }] = await Promise.all([
+  const [z, data, { data: subs }, { data: bijlagen }, { data: docs }] = await Promise.all([
+    laadZicht(admin, k),
+    haalItem(),
+    admin.from('ag_items').select(ITEM_VELDEN).eq('parent_id', id).is('verwijderd_op', null).order('created_at').limit(300),
     admin.from('ag_bijlagen').select('id, naam, type, grootte, geupload_door, created_at').eq('item_id', id).is('verwijderd_op', null).order('created_at'),
     admin.from('ag_docs').select('id, titel, updated_at, bijgewerkt_door').eq('item_id', id).is('verwijderd_op', null).order('created_at'),
   ])
+  if (!data) throw new Error('Dit item bestaat niet meer.')
+  const ouderId = (data as unknown as { parent_id?: string | null }).parent_id ?? null
+  const [[item], subtaken, ouders] = await Promise.all([
+    metToegewezen(admin, [data as unknown as RuwItem], z, { subtaken: true }),
+    metToegewezen(admin, (subs ?? []) as unknown as RuwItem[], z),
+    ouderId
+      ? admin.from('ag_items').select(ITEM_VELDEN).eq('id', ouderId).maybeSingle().then(({ data: o }) => (o ? metToegewezen(admin, [o as unknown as RuwItem], z) : []))
+      : Promise.resolve([] as Item[]),
+  ])
+  if (!item) throw new Error('Je kan dit item niet zien.')
+  const ouder = ouders[0] ? { id: ouders[0].id, titel: ouders[0].titel } : null
+  const extra = data as unknown as { gemaakt_door: string | null; created_at: string }
   const opmaak = (data as unknown as { beschrijving_json?: DocNode | null }).beschrijving_json ?? null
   return { item, beschrijving_json: opmaak, subtaken, ouder, gemaakt_door: extra.gemaakt_door, gemaakt_op: extra.created_at, bijlagen: bijlagen ?? [], docs: docs ?? [] }
 }

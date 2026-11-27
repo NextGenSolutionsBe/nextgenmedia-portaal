@@ -31,6 +31,7 @@ import { contractVerantwoordelijke } from '@/lib/contracten/verantwoordelijke'
 import { ContractVerantwoordelijkeKaart } from './verantwoordelijke'
 import { RecordBedrijfKaart } from '@/components/admin/record-bedrijf-kaart'
 import { isTegentekenaar } from '@/lib/contracten/verantwoordelijke'
+import { VeldenZoeken } from '@/components/admin/velden-zoeken'
 
 async function getContract(id: string) {
   try {
@@ -181,6 +182,11 @@ export default async function ContractDetailPage({ params }: { params: { id: str
           )}
         </div>
       </div>
+
+      {/* Opgeladen zonder velden: meteen zoeken (geen omweg via AI-velden & zone). */}
+      <VeldenZoeken contractId={c.id} nodig={!isSigned && !nietDoorgegaan && statusKey !== 'template' && !!c.pdf_path
+        && !(Array.isArray(c.detected_fields) && c.detected_fields.length)
+        && !(events ?? []).some((e: { event_type?: string }) => e.event_type === 'ai_analyzed')} />
 
       {statusKey !== 'template' && (
         <RecordBedrijfKaart tabel="contracts" id={c.id} begin={(c as { bedrijf?: string | null }).bedrijf ?? null} />

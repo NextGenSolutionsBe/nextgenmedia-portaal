@@ -24,8 +24,8 @@ const vandaag = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe
 const plusDagen = (n: number) => { const d = new Date(`${vandaag()}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10) }
 const voornaam = (n: string | null | undefined) => (n ?? '').trim().split(/\s+/)[0] || '—'
 const MERKEN = [
-  { key: 'nextgenmedia', label: 'NextGenMedia', kleur: MERK_STIJL.nextgenmedia.accent, tekst: '#111111' },
-  { key: 'nextgensolutions', label: 'NextGenSolutions', kleur: MERK_STIJL.nextgensolutions.accent, tekst: '#ffffff' },
+  { key: 'nextgenmedia', label: 'NextGenMedia', kleur: MERK_STIJL.nextgenmedia.kleur, tekst: MERK_STIJL.nextgenmedia.opKleur },
+  { key: 'nextgensolutions', label: 'NextGenSolutions', kleur: MERK_STIJL.nextgensolutions.kleur, tekst: MERK_STIJL.nextgensolutions.opKleur },
 ] as const
 
 async function api<T>(init?: RequestInit, qs = ''): Promise<T> {

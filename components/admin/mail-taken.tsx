@@ -135,7 +135,7 @@ function ZetTaak({ t, leden, ik, onSluit, onKlaar }: { t: MailTaak; leden: Lid[]
         <input type="date" min={vandaag()} className="px-2 py-1.5 text-sm border border-gray-200 rounded-lg" value={deadline} onChange={(e) => setDeadline(e.target.value)} aria-label="Deadline" title="Leeg = over twee werkdagen" />
         <div className="inline-flex rounded-lg border border-gray-200 p-0.5">
           {(['nextgenmedia', 'nextgensolutions'] as const).map((m) => (
-            <button key={m} type="button" onClick={() => setMerk(m)} className={`px-2 py-1 rounded-md text-xs ${merk === m ? 'text-white' : 'text-gray-600'}`} style={merk === m ? { background: m === 'nextgenmedia' ? '#111' : MERK_STIJL.nextgensolutions.accent } : undefined}>{m === 'nextgenmedia' ? 'NGM' : 'NGS'}</button>
+            <button key={m} type="button" onClick={() => setMerk(m)} className={`px-2 py-1 rounded-md text-xs ${merk === m ? 'text-white' : 'text-gray-600'}`} style={merk === m ? { background: MERK_STIJL[m].kleur } : undefined}>{m === 'nextgenmedia' ? 'NGM' : 'NGS'}</button>
           ))}
         </div>
       </div>

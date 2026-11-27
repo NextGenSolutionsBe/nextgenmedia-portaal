@@ -119,7 +119,7 @@ function OfferteVenster({ clientId, opdrachtId, klantNaam, merkStandaard, onSlui
               <div className="space-y-3">
                 {groepen.map(({ m, lijst }) => (
                   <div key={m}>
-                    <p className="text-[11px] text-gray-500 mb-1 flex items-center gap-1.5"><span className="h-2 w-2 rounded-full ring-1 ring-black/10" style={{ background: MERK_STIJL[m].accent }} />{MERK_STIJL[m].naam}</p>
+                    <p className="text-[11px] text-gray-500 mb-1 flex items-center gap-1.5"><span className="h-2 w-2 rounded-full ring-1 ring-black/10" style={{ background: MERK_STIJL[m].kleur }} />{MERK_STIJL[m].naam}</p>
                     <div className="grid grid-cols-2 gap-2">
                       {lijst.map((s) => (
                         <button key={s.id} type="button" onClick={() => kies(s)} aria-pressed={keuze === s.id}
@@ -176,7 +176,7 @@ function OfferteVenster({ clientId, opdrachtId, klantNaam, merkStandaard, onSlui
                 {(['nextgenmedia', 'nextgensolutions'] as MailMerk[]).map((m) => (
                   <button key={m} type="button" onClick={() => setMerk(m)} aria-pressed={merk === m}
                     className={`rounded-xl border-2 px-3 py-2 text-sm font-semibold text-left ${merk === m ? '' : 'border-gray-200 text-gray-700'}`}
-                    style={merk === m ? { background: MERK_STIJL[m].accent, borderColor: MERK_STIJL[m].accent, color: MERK_STIJL[m].opAccent } : undefined}>
+                    style={merk === m ? { background: MERK_STIJL[m].kleur, borderColor: MERK_STIJL[m].kleur, color: MERK_STIJL[m].opKleur } : undefined}>
                     {MERK_STIJL[m].naam}
                   </button>
                 ))}

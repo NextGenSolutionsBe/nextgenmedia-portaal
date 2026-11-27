@@ -117,6 +117,22 @@ export function buildEmailHtml(opts: EmailHtmlOpts): string {
 </body></html>`
 }
 
+/**
+ * De link van de knop nog eens los in de tekst (een template met {{contract_link}} op een
+ * eigen regel) ziet er rommelig uit: die lange link met codes laten we weg, de knop blijft.
+ * "via onderstaande link" wordt dan "via onderstaande knop". Andere links blijven staan.
+ */
+export function zonderLosseLink(tekst: string, link: string | null | undefined): string {
+  const l = (link ?? '').trim()
+  if (!l || l.length < 12 || !(tekst ?? '').includes(l)) return tekst ?? ''
+  const esc = l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  let t = tekst
+    .split('\n').filter((r) => r.trim().replace(/^[<(\[]|[>)\]]$/g, '') !== l).join('\n')
+    .replace(new RegExp(`[ \\t]*[:\\-–]?[ \\t]*[<(\\[]?${esc}[>)\\]]?`, 'g'), '')
+  t = t.replace(/\b(onderstaande|volgende) link\b/gi, (_m, w: string) => `${w} knop`)
+  return t.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
 /** Platte-tekstversie (fallback voor mailclients zonder HTML). */
 export function buildEmailText(opts: EmailHtmlOpts): string {
   let t = opts.bodyText ?? ''

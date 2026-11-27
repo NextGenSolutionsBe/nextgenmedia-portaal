@@ -12,6 +12,8 @@ const PX_MIN = 1 // 60 px per uur (computer)
 const PX_MIN_GSM = 0.6 // 36 px per uur op de gsm, zoals ClickUp: meer van de dag in beeld
 /** Met de vinger een blok aan het verplaatsen (of net gedaan): dan telt een veegbeweging niet als naar de volgende week. */
 export const agendaSleep = { bezig: false, tot: 0 }
+/** Enkel taken uit de agenda zelf (geen meetings of shoots) worden voorgeladen bij hoveren (item-venster.tsx). */
+const voorladenId = (i: Item) => (i.bron === 'ag' ? i.id : undefined)
 const stopSleep = () => { if (agendaSleep.bezig) { agendaSleep.bezig = false; agendaSleep.tot = Date.now() } }
 const SNAP = 15
 const DAGNAAM = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo']
@@ -158,7 +160,7 @@ function Chip({ i, kleur, h, onOpen, onKlaar, personen, tijd, sleep, opDag, lang
   // Smalle kolom (week op de gsm): enkel de titel, tikken opent de taak.
   if (compact) {
     return (
-      <div onClick={() => onOpen(i)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
+      <div data-item={voorladenId(i)} onClick={() => onOpen(i)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
         className={`relative flex items-center rounded pl-1 pr-px h-[22px] text-[11px] font-medium leading-none cursor-pointer select-none overflow-hidden ${focusRing}`}
         style={stijlVan(i, kleur)} title={h ? `${i.titel} · ${h.naam}` : i.titel}>
         {/* Zonder puntjes: zo past er meer van de titel in, net als in ClickUp. */}
@@ -167,7 +169,7 @@ function Chip({ i, kleur, h, onOpen, onKlaar, personen, tijd, sleep, opDag, lang
     )
   }
   return (
-    <div draggable={sleep} onDragStart={(e) => { e.dataTransfer.setData('text/agenda-item', i.id); e.dataTransfer.effectAllowed = 'move' }}
+    <div data-item={voorladenId(i)} draggable={sleep} onDragStart={(e) => { e.dataTransfer.setData('text/agenda-item', i.id); e.dataTransfer.effectAllowed = 'move' }}
       onClick={() => onOpen(i)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
       className={`group relative flex items-center gap-1.5 rounded-lg pl-2 pr-1 h-[30px] text-[13px] font-medium leading-none cursor-pointer select-none shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:brightness-[0.97] ${focusRing}`}
       style={stijlVan(i, kleur)} title={h ? `${i.titel} · ${h.naam}` : i.titel}>
@@ -489,7 +491,7 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
                     const sl = sleepbaar(i, magAanpassen)
                     const klaar = isKlaar(i)
                     return (
-                      <div key={`${i.bron}-${i.id}`} data-blok role="button" tabIndex={0}
+                      <div key={`${i.bron}-${i.id}`} data-blok data-item={voorladenId(i)} role="button" tabIndex={0}
                         onPointerDown={(e) => (sl ? startVerplaats(e, i, n, b.vanMin, b.totMin) : undefined)}
                         onClick={() => { if (!sl) onOpen(i) }} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
                         onContextMenu={(e) => { if (houd.current || aanSlepen.current) e.preventDefault() }}
@@ -565,7 +567,7 @@ function DagKaart({ i, kleur, h, personen, onOpen, onKlaar, opDag }: { i: Item; 
   const p = plaatsVan(i)
   const tijd = p?.soort === 'rooster' ? `${hhmm(p.vanMin)}–${hhmm(p.totMin)}` : enkelDeadline(i) ? null : p && p.van !== p.tot ? `${kortDag(p.van)} – ${kortDag(p.tot)}` : 'Hele dag'
   return (
-    <div role="button" tabIndex={0} onClick={() => onOpen(i)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
+    <div data-item={voorladenId(i)} role="button" tabIndex={0} onClick={() => onOpen(i)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
       className={`relative flex items-start gap-2.5 rounded-xl pl-3 pr-2.5 py-2.5 cursor-pointer select-none shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:brightness-[0.98] ${focusRing}`}
       style={stijlVan(i, kleur)}>
       <span className="mt-0.5"><Vinkje i={i} onKlaar={onKlaar} /></span>

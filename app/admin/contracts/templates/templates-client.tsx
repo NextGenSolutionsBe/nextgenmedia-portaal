@@ -6,7 +6,8 @@ import { useRouter } from 'next/navigation'
 import { Plus, LayoutTemplate, Loader2, Upload, Trash2, Sliders, Send, X, FileText, Pencil, Tags } from 'lucide-react'
 import { toast } from 'sonner'
 import { TEMPLATE_CATEGORIES } from '@/lib/contract-status'
-import { fileTooBig, MAX_UPLOAD_MB, readJson } from '@/lib/upload'
+import { pdfTeGroot, MAX_PDF_MB, readJson } from '@/lib/upload'
+import { laadContractPdfOp } from '@/lib/contracten/pdf-opladen'
 import { Dialoog, Bevestig, INP } from '@/app/admin/instellingen/ui'
 import { ContracttypesBeheer } from '../contracttypes-beheer'
 import { KlantKiezer, vulOndertekenaar, type KlantOptie } from '@/components/admin/klant-kiezer'
@@ -172,13 +173,14 @@ function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
 
   const submit = async () => {
     if (!name.trim()) { setError('Naam is verplicht'); return }
-    if (file && fileTooBig(file)) { setError(`PDF te groot — max ${MAX_UPLOAD_MB} MB.`); return }
+    if (file && pdfTeGroot(file)) { setError(`PDF te groot — max ${MAX_PDF_MB} MB.`); return }
     setLoading(true); setError(null)
     try {
       const fd = new FormData()
       fd.append('name', name)
       fd.append('category', category)
-      if (file) fd.append('pdf', file)
+      // De pdf gaat rechtstreeks naar de opslag (tot 10 MB).
+      if (file) fd.append('pdf_pad', await laadContractPdfOp(file))
       const res = await fetch('/api/admin/contract-templates', { method: 'POST', body: fd })
       const json = await readJson(res)
       toast.success('Template aangemaakt')

@@ -24,6 +24,10 @@ export type MerkStijl = {
   accent: string
   /** Tekstkleur op het accent (knoppen). */
   opAccent: string
+  /** Kleur van het merk in de app zelf (bolletjes, streepjes, gekozen knop): NextGenMedia = woud, nooit geel. */
+  kleur: string
+  /** Tekstkleur op die kleur. */
+  opKleur: string
   adres: string
   website: string
   /** Afzender in "Naam <adres>"-vorm. */
@@ -36,8 +40,8 @@ export type MerkStijl = {
 export const AGENCY_LOGO_MAIL = 'https://app.nextgenmedia.be/merk/logo-mail.png'
 
 export const MERK_STIJL: Record<MailMerk, MerkStijl> = {
-  nextgenmedia: { naam: 'NextGenMedia', deel1: 'NextGen', deel2: 'Media', accent: NGM.zonnegeel, opAccent: NGM.woud, adres: 'info@nextgenmedia.be', website: 'nextgenmedia.be', van: 'NextGenMedia <info@nextgenmedia.be>', logo: NGM_LOGO.mail },
-  nextgensolutions: { naam: 'NextGenSolutions', deel1: 'NextGen', deel2: 'Solutions', accent: '#3b82f6', opAccent: '#ffffff', adres: 'info@nextgensolutions.be', website: 'nextgensolutions.be', van: 'NextGenSolutions <info@nextgensolutions.be>' },
+  nextgenmedia: { naam: 'NextGenMedia', deel1: 'NextGen', deel2: 'Media', accent: NGM.zonnegeel, opAccent: NGM.woud, kleur: NGM.woud, opKleur: NGM.kalk, adres: 'info@nextgenmedia.be', website: 'nextgenmedia.be', van: 'NextGenMedia <info@nextgenmedia.be>', logo: NGM_LOGO.mail },
+  nextgensolutions: { naam: 'NextGenSolutions', deel1: 'NextGen', deel2: 'Solutions', accent: '#3b82f6', opAccent: '#ffffff', kleur: '#3b82f6', opKleur: '#ffffff', adres: 'info@nextgensolutions.be', website: 'nextgensolutions.be', van: 'NextGenSolutions <info@nextgensolutions.be>' },
 }
 
 export function isMailMerk(v: unknown): v is MailMerk {

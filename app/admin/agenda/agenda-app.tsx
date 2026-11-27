@@ -14,9 +14,10 @@ import {
 import { PlanVenster, DetailVenster, AnnuleerVenster, api as meetingApi, type Opties, type Meeting } from '@/app/admin/meetings/meetings-client'
 import { Modal } from '@/app/admin/materiaal/dialogen'
 import { api, actie, kleurContext, padVan, Popover, PersonenLijst, focusRing, type BoomData } from './gedeeld'
-import { Kalender, agendaSleep, type Verplaatsing, type NieuwMoment } from './kalender'
+import { Kalender, type Verplaatsing, type NieuwMoment } from './kalender'
+import { useVeeg } from './veeg'
 import { Boom, type Keuze } from './boom'
-import { ItemVenster, KlantLijst } from './item-venster'
+import { ItemVenster, KlantLijst, voorladen } from './item-venster'
 import { LijstWeergave, wanneer } from './lijst'
 import { DocWeergave } from './doc'
 import { NieuwVenster, AfgevinktPaneel, PrullenbakPaneel, MailPaneel, InstellingenPaneel } from './extra'
@@ -73,6 +74,8 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
   const [laden, setLaden] = useState(false)
   const [lijstItems, setLijstItems] = useState<Item[] | null>(null)
   const [openItem, setOpenItem] = useState<string | null>(null)
+  // Wat de kalender al van de geopende taak weet: het venster toont dat meteen.
+  const [voorlopig, setVoorlopig] = useState<Item | null>(null)
   const [nieuw, setNieuw] = useState<NieuwMoment | null>(null)
   const [inspreek, setInspreek] = useState(false)
   const [afsluiten, setAfsluiten] = useState(false)
@@ -108,26 +111,28 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
     return () => { document.body.style.overflow = oud }
   }, [groot])
 
-  // Gsm: opzij vegen over de kalender = vorige of volgende periode (zoals ClickUp).
-  // Niet tijdens of net na het verslepen van een blok, en niet bij vooral verticaal scrollen.
-  const inhoudRef = useRef<HTMLDivElement>(null)
-  const veeg = useRef<{ x: number; y: number; t: number } | null>(null)
-  const veegStart = (e: React.TouchEvent) => {
-    if (e.touches.length !== 1) { veeg.current = null; return }
-    const t = e.touches[0]
-    veeg.current = { x: t.clientX, y: t.clientY, t: Date.now() }
-  }
-  const veegEind = (e: React.TouchEvent) => {
-    const v = veeg.current
-    veeg.current = null
-    if (!v || modus === 'lijst' || keuze?.soort === 'doc' || agendaSleep.bezig || Date.now() - agendaSleep.tot < 500) return
-    const t = e.changedTouches[0]
-    const dx = t.clientX - v.x, dy = t.clientY - v.y
-    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.8 || Date.now() - v.t > 800) return
-    const n = dx < 0 ? 1 : -1
-    setDatum((d) => verschuif(weergave, d, n))
-    try { inhoudRef.current?.animate([{ transform: `translateX(${n * 36}px)`, opacity: 0.4 }, { transform: 'none', opacity: 1 }], { duration: 220, easing: 'ease-out' }) } catch { /* oudere browser */ }
-  }
+  // Opzij vegen over de kalender = vorige of volgende periode: met de vinger op de gsm en met
+  // twee vingers op de touchpad van een laptop (veeg.ts). De kalender schuift mee en verspringt dan.
+  // Als element in de state: de kalender verschijnt pas na het laden van de boom.
+  const [inhoud, setInhoud] = useState<HTMLDivElement | null>(null)
+  useVeeg(inhoud, { actief: modus !== 'lijst' && keuze?.soort !== 'doc', stap: (n) => setDatum((d) => verschuif(weergave, d, n)) })
+  // Een taak al laden zodra de muis er even op blijft (of de vinger erop drukt): openen is dan meteen klaar.
+  useEffect(() => {
+    const el = inhoud
+    if (!el) return
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const idVan = (t: EventTarget | null) => (t instanceof Element ? t.closest<HTMLElement>('[data-item]')?.dataset.item ?? null : null)
+    const over = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') return
+      const id = idVan(e.target)
+      if (timer) clearTimeout(timer)
+      timer = id ? setTimeout(() => { void voorladen(id).catch(() => null) }, 90) : null
+    }
+    const neer = (e: PointerEvent) => { const id = idVan(e.target); if (id) void voorladen(id).catch(() => null) }
+    el.addEventListener('pointerover', over)
+    el.addEventListener('pointerdown', neer)
+    return () => { if (timer) clearTimeout(timer); el.removeEventListener('pointerover', over); el.removeEventListener('pointerdown', neer) }
+  }, [inhoud])
 
   // ── Voorkeuren en adresbalk ────────────────────────────────────────────────
   useEffect(() => {
@@ -283,7 +288,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
   const open = (i: Item) => {
     // Een shoot open je in de Shoot planner (met de weg terug naar de agenda).
     if (i.bron === 'shoot') { window.location.assign(`/admin/shoots/${i.id}?terug=agenda`); return }
-    if (i.bron === 'meeting') { laadOpties(); setMv({ soort: 'detail', id: i.id }) } else setOpenItem(i.id)
+    if (i.bron === 'meeting') { laadOpties(); setMv({ soort: 'detail', id: i.id }) } else { setVoorlopig(i); setOpenItem(i.id) }
   }
   const laadOpties = useCallback(() => { if (!opties) meetingApi<Opties>('/api/admin/meetings?opties=1').then(setOpties).catch(() => toast.error('De Meeting Inplanner kon niet laden.')) }, [opties])
 
@@ -482,7 +487,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
         )}
 
         {/* Inhoud: op de gsm van rand tot rand; opzij vegen = vorige of volgende week (dag, maand). */}
-        <div ref={inhoudRef} className="flex-1 min-h-0 max-md:-mx-4" onTouchStart={veegStart} onTouchEnd={veegEind} onTouchCancel={() => { veeg.current = null }}>
+        <div ref={setInhoud} className="flex-1 min-h-0 max-md:-mx-4 overscroll-x-none touch-pan-y touch-pinch-zoom">
           {keuze?.soort === 'doc' ? (
             <DocWeergave key={keuze.id} id={keuze.id} boom={boom} onVernieuw={laadBoom} onVerwijderd={() => { setKeuze(null); laadBoom() }} onOpenItem={(id) => setOpenItem(id)} />
           ) : modus === 'lijst' && lijstenVanKeuze ? (
@@ -502,7 +507,7 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
 
       {/* Vensters */}
       {openItem && (
-        <ItemVenster key={openItem} id={openItem} boom={boom} onSluit={() => setOpenItem(null)} onOpen={(id) => setOpenItem(id)}
+        <ItemVenster key={openItem} id={openItem} boom={boom} voorlopig={voorlopig?.id === openItem ? voorlopig : null} onSluit={() => setOpenItem(null)} onOpen={(id) => setOpenItem(id)}
           onDoc={(id) => { setOpenItem(null); setKeuze({ soort: 'doc', id }) }}
           onGewijzigd={() => { if (modus === 'lijst') laadLijst(); else laadItems() }}
           onVerwijderd={(id) => { setOpenItem(null); setItems((l) => l?.filter((x) => x.id !== id) ?? null); setLijstItems((l) => l?.filter((x) => x.id !== id) ?? null) }} />
