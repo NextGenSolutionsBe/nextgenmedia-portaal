@@ -1,6 +1,25 @@
 import { redirect } from 'next/navigation'
 import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
 import { FEATURES } from '@/lib/features'
+import { pathToModule } from '@/lib/staff'
+import { netteStartpagina } from '@/lib/team/rollen'
+
+/**
+ * Startpagina van een werknemer volgens zijn rolsjabloon (fase 4), enkel als hij
+ * die module mag zien. Zonder sjabloon of bij twijfel: het Command Center.
+ */
+async function startpaginaVan(admin: ReturnType<typeof createAdminSupabaseClient>, userId: string): Promise<string> {
+  try {
+    const { data: s, error } = await admin.from('staff_members').select('rol_sjabloon, permissions').eq('auth_user_id', userId).maybeSingle()
+    const rij = s as { rol_sjabloon: string | null; permissions: string[] | null } | null
+    if (error || !rij?.rol_sjabloon) return '/admin'
+    const { data: sj } = await admin.from('rol_sjablonen').select('startpagina').eq('key', rij.rol_sjabloon).maybeSingle()
+    const pad = netteStartpagina((sj as { startpagina: string | null } | null)?.startpagina)
+    if (!pad) return '/admin'
+    const module = pathToModule(pad)
+    return !module || (rij.permissions ?? []).includes(module) ? pad : '/admin'
+  } catch { return '/admin' }
+}
 
 export default async function Home() {
   const supabase = await createClient()
@@ -28,7 +47,8 @@ export default async function Home() {
   }
 
   // Werknemers horen — net als admins — in het admin-portaal.
-  if (role === 'admin' || role === 'employee') redirect('/admin')
+  if (role === 'admin') redirect('/admin')
+  if (role === 'employee') redirect(await startpaginaVan(admin, user.id))
   if (role === 'client') redirect('/portal')
 
   /**

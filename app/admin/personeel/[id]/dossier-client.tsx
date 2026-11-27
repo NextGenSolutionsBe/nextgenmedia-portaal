@@ -11,6 +11,7 @@ import { MEDEWERKER_TYPES, DOCUMENT_MAPPEN, ACCOUNT_LABEL, typeLabel, typeKleur,
 import { KOST_SOORTEN, LIJN_SUGGESTIES, type KostLijn, type KostSoort, type Tarief } from '@/lib/personeel/kost'
 import { Bevestig, Dialoog } from '@/app/admin/instellingen/ui'
 import { PlanningTab } from '../planning-tab'
+import { FunctieprofielTab, StudentUrenKaart } from './functieprofiel'
 import { EXPERTISES } from '@/lib/aanvragen/model'
 
 type Medewerker = Record<string, unknown> & {
@@ -32,7 +33,7 @@ type Dossier = {
 type Intern = { id: string; email: string | null; name: string | null; rol?: string | null; permissions?: string[]; active?: boolean | null }
 
 // Inklokken, uren en kosten zijn weg: dossier, planning (beschikbaarheid + inboekingen), account en logboek.
-const TABS = [['gegevens', 'Gegevens'], ['documenten', 'Documenten'], ['planning', 'Planning'], ['tarief', 'Tarief'], ['account', 'Account'], ['logboek', 'Logboek']] as const
+const TABS = [['gegevens', 'Gegevens'], ['functie', 'Functieprofiel'], ['documenten', 'Documenten'], ['planning', 'Planning'], ['tarief', 'Tarief'], ['account', 'Account'], ['logboek', 'Logboek']] as const
 type Tab = (typeof TABS)[number][0]
 const DAGEN = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo']
 
@@ -72,7 +73,8 @@ export function DossierClient({ id }: { id: string }) {
       <div className="flex gap-1.5 overflow-x-auto pb-1">
         {tabs.map(([k, l]) => <button key={k} type="button" onClick={() => router.replace(`/admin/personeel/${id}?tab=${k}`, { scroll: false })} className={`px-3 py-2 rounded-lg text-sm font-medium border whitespace-nowrap ${tab === k ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>{l}</button>)}
       </div>
-      {tab === 'gegevens' && <Gegevens d={d} onKlaar={laad} />}
+      {tab === 'gegevens' && <><StudentUrenKaart id={id} /><Gegevens d={d} onKlaar={laad} /></>}
+      {tab === 'functie' && <FunctieprofielTab id={id} />}
       {tab === 'documenten' && <Documenten id={id} d={d} onKlaar={laad} />}
       {tab === 'planning' && <PlanningTab personeelId={id} />}
       {tab === 'tarief' && d.magFinancieel && <TariefTab id={id} tarieven={d.tarieven ?? []} onKlaar={laad} />}

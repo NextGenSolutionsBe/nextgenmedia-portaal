@@ -76,15 +76,13 @@ export const getUserRole = cache(async (userId: string): Promise<string | undefi
 /** De staff-rij (actief + rechten). staff_members is de bron van waarheid. */
 export const getStaffRow = cache(async (
   userId: string,
-): Promise<{ id?: string; active?: boolean; permissions?: string[]; name?: string | null; rol?: string } | null> => {
+): Promise<{ id?: string; active?: boolean; permissions?: string[]; name?: string | null; rol?: string; bedrijven?: string[] | null } | null> => {
   try {
     const admin = createAdminSupabaseClient()
-    const { data } = await admin
-      .from('staff_members')
-      .select('id, active, permissions, name, rol')
-      .eq('auth_user_id', userId)
-      .maybeSingle()
-    return (data as { id?: string; active?: boolean; permissions?: string[]; name?: string | null; rol?: string } | null) ?? null
+    // Fase 4: ook de toegang per bedrijf. Bestaat die kolom (nog) niet, dan zonder.
+    let r = await admin.from('staff_members').select('id, active, permissions, name, rol, bedrijven').eq('auth_user_id', userId).maybeSingle()
+    if (r.error) r = await admin.from('staff_members').select('id, active, permissions, name, rol').eq('auth_user_id', userId).maybeSingle()
+    return (r.data as { id?: string; active?: boolean; permissions?: string[]; name?: string | null; rol?: string; bedrijven?: string[] | null } | null) ?? null
   } catch {
     return null
   }

@@ -21,6 +21,12 @@ export type Medewerker = {
   uitnodigingOp: string | null
   /** 2FA: app gekoppeld, nog geen app (koppelt bij volgende login), of door een admin uitgezet. */
   tweeFactor: 'app' | 'nog_niet' | 'uit'
+  /** Fase 4: rolsjabloon, toegang per bedrijf (leeg = alle), start, einde, vertrek. */
+  rolSjabloon?: string | null
+  bedrijven?: string[]
+  startDatum?: string | null
+  eindDatum?: string | null
+  offboardingOp?: string | null
 }
 
 export const ADMIN_ID_PREFIX = 'admin:'

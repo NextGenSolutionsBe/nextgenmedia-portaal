@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, Users, FileText, UserSquare2, ArrowLeftRight, TrendingUp,
   LogOut, ChevronDown, Globe, Calendar, Briefcase, RefreshCcw, Menu, X,
-  Info, Camera, ClipboardList, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
+  Info, Camera, ClipboardList, BookOpen, CalendarDays, ShoppingCart, Mail, Receipt, Newspaper, Rocket, CalendarClock, BarChart3, KanbanSquare,
   MailCheck, FolderUp, Handshake, Settings, ClipboardPen, Contact, Timer, Video, Inbox, Clapperboard, Building2, FileSignature, ScrollText, Wallet, PackageCheck, Aperture,
   Target, LineChart, CalendarRange,
 } from 'lucide-react'
@@ -71,7 +71,7 @@ const SECTIONS: NavSection[] = [
     title: 'NextGenMedia',
     open: true,
     items: [
-      { label: 'Dagelijkse planning Chiara', href: '/admin/contentplanning', icon: CalendarDays, module: 'info' },
+      { label: 'Dagelijkse planning', href: '/admin/contentplanning', icon: CalendarDays, module: 'info' },
       // De contentkalenders per klant (ingeplande posts, feedback van de klant).
       { label: 'Social media', href: '/admin/services/social-media', icon: Calendar, module: 'content' },
       // Shoots: kalender, plan per uur en locatie, briefing en mail met het plan.
@@ -140,6 +140,7 @@ const SECTIONS: NavSection[] = [
       {
         label: 'Informatief', href: '/admin/informatief', icon: Info, module: 'info',
         children: [
+          { label: 'Werkinstructies', href: '/admin/informatief', icon: BookOpen },
           { label: 'Onboarding Info', href: '/admin/onboarding',   icon: ClipboardList },
         ],
       },
@@ -225,7 +226,7 @@ function NavItem({
   )
 }
 
-export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, fotoVersie = null, instellingen, rol = 'hoofdbeheerder', verborgenPersoonlijk = [], toonInstellingen = false, mijnWerk = false, bedrijfFilter = 'alles' }: {
+export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, fotoVersie = null, instellingen, rol = 'hoofdbeheerder', verborgenPersoonlijk = [], toonInstellingen = false, mijnWerk = false, bedrijfFilter = 'alles', bedrijfVast = false }: {
   allowedModules?: string[]
   isEmployee?: boolean
   /** Voornaam van wie er ingelogd is — voor de begroeting bovenaan. */
@@ -245,6 +246,8 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
   mijnWerk?: boolean
   /** Eigen weergave Alles / Media / Solutions (verbeterplan fase 1). */
   bedrijfFilter?: BedrijfFilter
+  /** Fase 4: enkel toegang tot één bedrijf, dan staat de weergave vast. */
+  bedrijfVast?: boolean
 } = {}) {
   const router = useRouter()
   const { refresh, spinning } = useRefresh()
@@ -292,7 +295,9 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
     .map((s) => ({
       title: s.title,
       open: s.open ?? false,
-      items: s.items.filter(canSee).map((it, i) => [it, i] as const).sort((a, b) => (volgordeVan(a[0]) - volgordeVan(b[0])) || (a[1] - b[1])).map(([it]) => it),
+      items: s.items.filter(canSee).map((it, i) => [it, i] as const).sort((a, b) => (volgordeVan(a[0]) - volgordeVan(b[0])) || (a[1] - b[1])).map(([it]) => it)
+        // De naam van wie de dagelijkse planning doet, komt uit de instellingen (fase 4), niet uit de code.
+        .map((it) => (it.href === '/admin/contentplanning' ? { ...it, label: `Dagelijkse planning ${(instellingen?.organisatie.planning_persoon ?? 'Chiara').trim()}`.trim() } : it)),
     }))
     .filter((s) => s.items.length > 0)
 
@@ -401,7 +406,7 @@ export function AdminSidebar({ allowedModules, isEmployee = false, naam, email, 
           </Link>
         )}
 
-        <BedrijfSchakelaar huidig={bedrijfFilter} />
+        <BedrijfSchakelaar huidig={bedrijfFilter} vast={bedrijfVast} />
 
         {/* Navigation */}
         <nav className="flex-1 px-3 py-3 overflow-y-auto no-scrollbar">

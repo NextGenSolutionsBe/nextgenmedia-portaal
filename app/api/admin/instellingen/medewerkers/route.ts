@@ -9,6 +9,8 @@ import { sanitizeModules } from '@/lib/staff'
 import { eisBeheer, eisHoofdbeheerder } from '@/lib/instellingen/api'
 import { STAFF_ROLLEN } from '@/lib/instellingen/model'
 import { lijstMedewerkers } from '@/lib/instellingen/medewerkers-server'
+import { netteBedrijven } from '@/lib/team/rollen'
+import { laadSjablonen, stappenToevoegen, onboardingOverzicht } from '@/lib/team/rollen-server'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,7 +18,8 @@ export const dynamic = 'force-dynamic'
 export async function GET() {
   try {
     const g = await eisBeheer(); if (!g.ok) return g.response
-    return NextResponse.json({ medewerkers: await lijstMedewerkers(), ik: g.persoon.userId, magBeheren: g.persoon.isAdmin })
+    const [medewerkers, onboarding] = await Promise.all([lijstMedewerkers(), onboardingOverzicht(createAdminSupabaseClient())])
+    return NextResponse.json({ medewerkers, onboarding: Object.fromEntries(onboarding), ik: g.persoon.userId, magBeheren: g.persoon.isAdmin })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
@@ -37,6 +40,12 @@ export async function POST(req: NextRequest) {
     const rol = STAFF_ROLLEN.includes(b.rol as never) ? (b.rol as string) : 'medewerker'
     const permissions = sanitizeModules(b.permissions)
     const wachtwoord = typeof b.password === 'string' && b.password ? b.password : null
+    // Fase 4: rolsjabloon, toegang per bedrijf, start- en einddatum (alles optioneel).
+    const datum = (v: unknown) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null)
+    const start_datum = datum(b.start_datum), eind_datum = datum(b.eind_datum)
+    if (start_datum && eind_datum && eind_datum < start_datum) return NextResponse.json({ error: 'De einddatum ligt na de startdatum.' }, { status: 400 })
+    const bedrijven = netteBedrijven(b.bedrijven)
+    const sjabloon = typeof b.sjabloon === 'string' && b.sjabloon ? (await laadSjablonen(createAdminSupabaseClient(), true)).find((x) => x.key === b.sjabloon) ?? null : null
     if (!voornaam) return NextResponse.json({ error: 'Voornaam is verplicht.' }, { status: 400 })
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return NextResponse.json({ error: 'Vul een geldig e-mailadres in.' }, { status: 400 })
     if (wachtwoord && wachtwoord.length < 8) return NextResponse.json({ error: 'Een wachtwoord telt minstens 8 tekens.' }, { status: 400 })
@@ -56,9 +65,12 @@ export async function POST(req: NextRequest) {
     const rolRij = await admin.from('user_roles').upsert({ user_id: uid, role: 'employee' }, { onConflict: 'user_id,role' })
     if (rolRij.error) console.warn('user_roles employee insert overgeslagen:', rolRij.error.message)
 
-    const { data: row, error: rowErr } = await admin.from('staff_members')
-      .insert({ auth_user_id: uid, name: naam, email, active: true, permissions, created_by: g.persoon.userId, voornaam, achternaam: achternaam || null, functie, rol })
-      .select('id').single()
+    const basis = { auth_user_id: uid, name: naam, email, active: true, permissions, created_by: g.persoon.userId, voornaam, achternaam: achternaam || null, functie, rol }
+    const fase4 = { rol_sjabloon: sjabloon?.key ?? null, bedrijven: bedrijven.length ? bedrijven : null, start_datum, eind_datum }
+    let ins = await admin.from('staff_members').insert({ ...basis, ...fase4 }).select('id').single()
+    // Vóór de migratie van fase 4 bestaan die kolommen nog niet: dan zonder.
+    if (ins.error && /rol_sjabloon|bedrijven|start_datum|eind_datum/.test(ins.error.message)) ins = await admin.from('staff_members').insert(basis).select('id').single()
+    const { data: row, error: rowErr } = ins
     if (rowErr || !row) {
       await admin.auth.admin.deleteUser(uid).catch(() => {})
       return NextResponse.json({ error: `Medewerker aanmaken mislukt: ${rowErr?.message ?? 'onbekend'}` }, { status: 400 })
@@ -68,8 +80,10 @@ export async function POST(req: NextRequest) {
     await logAudit({
       action: 'staff.created', entityType: 'staff_member', entityId: row.id, summary: `Medewerker aangemaakt (${email}, ${rol})`,
       actorUserId: g.persoon.userId, actorEmail: g.persoon.email, actorRole: 'admin',
-      metadata: { rol, functie, modules: permissions, wachtwoordGezet: !!wachtwoord }, ip: meta.ip, userAgent: meta.userAgent,
+      metadata: { rol, functie, modules: permissions, wachtwoordGezet: !!wachtwoord, sjabloon: sjabloon?.key ?? null, bedrijven, start_datum, eind_datum }, ip: meta.ip, userAgent: meta.userAgent,
     })
+    // Onboarding-checklist uit het sjabloon (best-effort: het account bestaat al).
+    if (sjabloon?.onboarding.length) { try { await stappenToevoegen(admin, row.id, sjabloon.onboarding) } catch { /* */ } }
     // Werknemers en Personeel zijn één geheel: elke interne login krijgt een
     // personeelsdossier (uren, planning, documenten) op dezelfde login.
     try { await dossierVoorWerknemer(admin, { id: row.id, auth_user_id: uid, email, name: naam, voornaam, achternaam: achternaam || null, functie, active: true }, g.persoon.email) } catch { /* dossier is best-effort */ }

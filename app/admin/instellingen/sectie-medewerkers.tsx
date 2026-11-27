@@ -4,12 +4,14 @@ import { KaartTabel } from '@/components/ui/kaart-tabel'
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
-import { Plus, Loader2, Power, Archive, RotateCcw, Mail, Pencil, KeyRound, ShieldCheck, ShieldOff, Trash2, Smartphone } from 'lucide-react'
+import { Plus, Loader2, Power, Archive, RotateCcw, Mail, Pencil, KeyRound, ShieldCheck, ShieldOff, Trash2, Smartphone, ListChecks, LogOut } from 'lucide-react'
 import { VISIBLE_ADMIN_MODULES, STAFF_PRESETS, ADMIN_MODULES } from '@/lib/staff'
 import { STAFF_ROLLEN, ROL_LABEL, ROLLEN, type Rol } from '@/lib/instellingen/model'
 import { volledigeNaam, type Medewerker } from '@/lib/instellingen/medewerkers'
 import { LoginSettingsCard } from '@/app/admin/werknemers/login-settings-card'
 import { Kop, Badge, Bevestig, Dialoog, INP, Laden, datumTijd, Veld } from './ui'
+import { NieuwAccount, OnboardingVenster, OffboardingVenster, Rolsjablonen, BedrijfKeuze, useSjablonen } from './medewerkers-fase4'
+import { bedrijvenLabel, sjabloonToepassen, type Bedrijf } from '@/lib/team/rollen'
 
 const moduleLabel = (k: string) => ADMIN_MODULES.find((m) => m.key === k)?.label ?? k
 const API = '/api/admin/instellingen/medewerkers'
@@ -30,12 +32,15 @@ export function SectieMedewerkers({ isAdmin }: { isAdmin: boolean }) {
   const [vraag, setVraag] = useState<Vraag | null>(null)
   const [bezig, setBezig] = useState(false)
   const [bevestigTekst, setBevestigTekst] = useState('')
+  const [onboarding, setOnboarding] = useState<Record<string, { gedaan: number; totaal: number }>>({})
+  const [onboardingVan, setOnboardingVan] = useState<Medewerker | null>(null)
+  const [vertrekVan, setVertrekVan] = useState<Medewerker | null>(null)
 
   const laad = useCallback(async () => {
     try {
       const r = await fetch(API, { cache: 'no-store' })
       const j = await r.json(); if (!r.ok) throw new Error(j.error)
-      setRijen(j.medewerkers ?? []); setIk(j.ik ?? null)
+      setRijen(j.medewerkers ?? []); setIk(j.ik ?? null); setOnboarding(j.onboarding ?? {})
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Laden mislukt'); setRijen([]) }
   }, [])
   useEffect(() => { laad() }, [laad])
@@ -88,7 +93,12 @@ export function SectieMedewerkers({ isAdmin }: { isAdmin: boolean }) {
                     </td>
                     <td className="px-2 py-2.5 text-gray-700">{m.functie ?? <span className="text-gray-300">—</span>}</td>
                     <td className="px-2 py-2.5"><Badge kleur={m.rol === 'hoofdbeheerder' ? 'amber' : m.rol === 'beheerder' ? 'blauw' : 'grijs'}>{ROL_LABEL[m.rol]}</Badge></td>
-                    <td className="px-2 py-2.5 text-[11px] text-gray-600 max-w-[220px]">{m.permissions === null ? 'Alle modules' : m.permissions.length ? m.permissions.map(moduleLabel).join(', ') : <span className="text-amber-700">geen modules</span>}</td>
+                    <td className="px-2 py-2.5 text-[11px] text-gray-600 max-w-[220px]">
+                      {m.permissions === null ? 'Alle modules' : m.permissions.length ? m.permissions.map(moduleLabel).join(', ') : <span className="text-amber-700">geen modules</span>}
+                      {!m.isAdmin && (m.bedrijven?.length ?? 0) > 0 && <div className="mt-0.5 font-medium text-gray-700">Enkel {bedrijvenLabel(m.bedrijven)}</div>}
+                      {!m.isAdmin && onboarding[m.id] && onboarding[m.id].totaal > 0 && <div className="mt-0.5 text-gray-500">Onboarding {onboarding[m.id].gedaan}/{onboarding[m.id].totaal}</div>}
+                      {!m.isAdmin && m.eindDatum && <div className="mt-0.5 text-gray-500">Tot {m.eindDatum}</div>}
+                    </td>
                     <td className="px-2 py-2.5">
                       <div className="flex items-center gap-1 flex-wrap">
                         {m.gearchiveerd ? <Badge kleur="grijs">Gearchiveerd</Badge> : m.actief ? <Badge kleur="groen">Actief</Badge> : <Badge kleur="rood">Inactief</Badge>}
@@ -103,6 +113,8 @@ export function SectieMedewerkers({ isAdmin }: { isAdmin: boolean }) {
                       {isAdmin && (
                         <div className="flex items-center justify-end gap-0.5">
                           <Knop titel="Bewerken" onClick={() => setBewerk(m)}><Pencil className="h-3.5 w-3.5" /></Knop>
+                          {!m.isAdmin && !m.gearchiveerd && <Knop titel="Onboarding" onClick={() => setOnboardingVan(m)}><ListChecks className="h-3.5 w-3.5" /></Knop>}
+                          {!m.isAdmin && !m.gearchiveerd && !zelf && <Knop titel="Vertrek (offboarding)" onClick={() => setVertrekVan(m)}><LogOut className="h-3.5 w-3.5" /></Knop>}
                           {!m.gearchiveerd && !zelf && <Knop titel={m.actief ? 'Deactiveren' : 'Activeren'} onClick={() => setVraag({ soort: m.actief ? 'deactiveer' : 'activeer', m })}><Power className={`h-3.5 w-3.5 ${m.actief ? '' : 'text-green-600'}`} /></Knop>}
                           {!m.isAdmin && !m.gearchiveerd && m.email && <Knop titel="Uitnodiging versturen" onClick={() => setVraag({ soort: 'uitnodiging', m })}><Mail className="h-3.5 w-3.5" /></Knop>}
                           {m.gearchiveerd && <Knop titel="Herstellen" onClick={() => setVraag({ soort: 'herstel', m })}><RotateCcw className="h-3.5 w-3.5" /></Knop>}
@@ -122,7 +134,13 @@ export function SectieMedewerkers({ isAdmin }: { isAdmin: boolean }) {
       {/* Tweestapsverificatie per account (authenticator-app). */}
       {isAdmin && <LoginSettingsCard />}
 
-      {(nieuw || bewerk) && <Formulier m={bewerk} onSluit={() => { setNieuw(false); setBewerk(null) }} onKlaar={() => { setNieuw(false); setBewerk(null); laad() }} />}
+      {/* Rolsjablonen (fase 4): vertrekpunt voor een nieuw account. */}
+      <Rolsjablonen isAdmin={isAdmin} />
+
+      {nieuw && <NieuwAccount onSluit={() => setNieuw(false)} onKlaar={() => { setNieuw(false); laad() }} />}
+      {bewerk && <Formulier m={bewerk} onSluit={() => setBewerk(null)} onKlaar={() => { setBewerk(null); laad() }} />}
+      {onboardingVan && <OnboardingVenster m={onboardingVan} onSluit={() => setOnboardingVan(null)} onVeranderd={laad} />}
+      {vertrekVan && <OffboardingVenster m={vertrekVan} onSluit={() => setVertrekVan(null)} onKlaar={() => { setVertrekVan(null); laad() }} />}
 
       {vraag && vraag.soort === 'definitief' && (
         <Dialoog titel="Medewerker verwijderen" onSluit={() => setVraag(null)}>
@@ -175,6 +193,11 @@ function Formulier({ m, onSluit, onKlaar }: { m: Medewerker | null; onSluit: () 
   const [rol, setRol] = useState<Rol>(m && m.rol !== 'hoofdbeheerder' ? m.rol : 'medewerker')
   const [password, setPassword] = useState('')
   const [perms, setPerms] = useState<string[]>(m?.permissions ?? [])
+  const [bedrijven, setBedrijven] = useState<Bedrijf[]>((m?.bedrijven ?? []) as Bedrijf[])
+  const [sjabloon, setSjabloon] = useState<string | null>(m?.rolSjabloon ?? null)
+  const [start, setStart] = useState(m?.startDatum ?? '')
+  const [eind, setEind] = useState(m?.eindDatum ?? '')
+  const { sjablonen } = useSjablonen()
   const [saving, setSaving] = useState(false)
   const [fout, setFout] = useState<string | null>(null)
   const toggle = (k: string) => setPerms((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]))
@@ -186,7 +209,7 @@ function Formulier({ m, onSluit, onKlaar }: { m: Medewerker | null; onSluit: () 
     if (password && password.length < 8) { setFout('Een wachtwoord telt minstens 8 tekens.'); return }
     setSaving(true)
     try {
-      const body = admin ? { voornaam, achternaam, email: email.trim(), ...(password ? { password } : {}) } : { voornaam, achternaam, email: email.trim(), functie, rol, permissions: perms, ...(password ? { password } : {}) }
+      const body = admin ? { voornaam, achternaam, email: email.trim(), ...(password ? { password } : {}) } : { voornaam, achternaam, email: email.trim(), functie, rol, permissions: perms, bedrijven, rol_sjabloon: sjabloon, start_datum: start || null, eind_datum: eind || null, ...(password ? { password } : {}) }
       const r = await fetch(isEdit ? `${API}/${m!.id}` : API, { method: isEdit ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const j = await r.json(); if (!r.ok) throw new Error(j.error || 'Mislukt')
       toast.success(isEdit ? 'Medewerker bijgewerkt.' : j.uitnodigingNodig ? 'Medewerker aangemaakt. Verstuur een uitnodiging zodra je wilt dat hij of zij kan inloggen.' : 'Medewerker aangemaakt.')
@@ -220,6 +243,24 @@ function Formulier({ m, onSluit, onKlaar }: { m: Medewerker | null; onSluit: () 
         {isEdit && email.trim().toLowerCase() !== (m?.email ?? '').toLowerCase() && (
           <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">Dit adres is ook de login. Na het opslaan werkt <b>{m?.email}</b> niet meer om aan te melden; dat wordt <b>{email.trim()}</b>.</div>
         )}
+        {!admin && (
+          <div className="grid sm:grid-cols-3 gap-2">
+            <Veld label="Rolsjabloon" hint="Kiezen zet rol, modules en toegang zoals in het sjabloon.">
+              <select className={INP} value={sjabloon ?? ''} onChange={(e) => {
+                const k = e.target.value || null
+                setSjabloon(k)
+                const sj = sjablonen?.find((x) => x.key === k)
+                if (sj) { const t = sjabloonToepassen(sj, VISIBLE_ADMIN_MODULES.map((x) => x.key)); setRol(t.rol); setPerms(t.permissions); setBedrijven(t.bedrijven) }
+              }}>
+                <option value="">Geen</option>
+                {(sjablonen ?? []).map((x) => <option key={x.key} value={x.key}>{x.naam}</option>)}
+              </select>
+            </Veld>
+            <Veld label="Eerste werkdag"><input type="date" className={INP} value={start} onChange={(e) => setStart(e.target.value)} /></Veld>
+            <Veld label="Laatste werkdag"><input type="date" className={INP} value={eind} onChange={(e) => setEind(e.target.value)} /></Veld>
+          </div>
+        )}
+        {!admin && <div><label className="text-xs font-medium text-gray-600 block mb-1">Toegang</label><BedrijfKeuze waarde={bedrijven} onChange={setBedrijven} /><p className="text-[11px] text-gray-400 mt-1">Bij één bedrijf ziet de medewerker in Klanten, Klantcontracten en Projecten enkel dat bedrijf (en wat Algemeen of nog niet ingedeeld is).</p></div>}
         {!admin && (
           <div>
             <div className="flex items-center justify-between mb-1">

@@ -317,6 +317,17 @@ export async function buildNotifications(): Promise<Notif[]> {
       const vergeten = actief.filter((x) => Date.now() - new Date(x.start_at).getTime() > 10 * 3600000)
       for (const v of vergeten) out.push({ id: `personeel:vergeten:${v.id}`, kind: 'personeel', priority: 'high', title: 'Een medewerker is vergeten uit te klokken', date: v.start_at, href: `/admin/personeel/${v.personeel_id}?tab=uren` })
       for (const d of docs) out.push({ id: `personeel:doc:${d.id}:${d.vervalt_op}`, kind: 'personeel', priority: d.vervalt_op < todayISO() ? 'high' : 'low', title: `Personeelsdocument ${d.vervalt_op < todayISO() ? 'vervallen' : 'vervalt binnenkort'} — ${d.naam}`, date: d.vervalt_op, href: `/admin/personeel/${d.personeel_id}?tab=documenten` })
+      // Studenten: 650 uur per kalenderjaar, melding vanaf 80% (fase 4).
+      const { studentenStand } = await import('@/lib/team/rollen-server')
+      for (const st of await studentenStand(admin)) {
+        if (st.stand.niveau === 'ok') continue
+        const jaar = todayISO().slice(0, 4)
+        out.push({
+          id: `personeel:student:${st.id}:${jaar}:${st.stand.niveau}`, kind: 'personeel', priority: st.stand.niveau === 'over' ? 'high' : 'med',
+          title: st.stand.niveau === 'over' ? `${st.naam} zit aan ${st.stand.uren} van de ${st.stand.grens} studentenuren dit jaar` : `${st.naam} zit aan ${st.stand.pct}% van de ${st.stand.grens} studentenuren (${st.stand.uren} uur, nog ${st.stand.over} uur)`,
+          date: todayISO(), href: `/admin/personeel/${st.id}`,
+        })
+      }
     } catch { /* tabellen bestaan pas na de migratie */ }
   })
 

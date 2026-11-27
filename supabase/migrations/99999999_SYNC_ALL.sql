@@ -8888,3 +8888,100 @@ alter table public.ag_ical_links enable row level security;
 -- Verschillen met ClickUp: de import sloeg een nieuwere ClickUp-versie over omdat het item in de app aangepast werd.
 alter table public.ag_items add column if not exists clickup_verschil_op timestamptz;
 alter table public.ag_items add column if not exists clickup_verschil jsonb;
+-- ════════════════════════════════════════════════════════════════════════════
+-- Verbeterplan fase 4: rollen, rechten en plug-and-play (27 nov 2026).
+-- Enkel toevoegen: nieuwe tabellen (RLS aan, enkel de service-role) en nieuwe
+-- kolommen (leeg). Geen bestaande data gewijzigd. Terugdraaien:
+-- supabase/terugdraaien/fase4.sql
+-- ════════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS public.rol_sjablonen (
+  key text PRIMARY KEY,
+  naam text NOT NULL,
+  omschrijving text,
+  rol text NOT NULL DEFAULT 'medewerker',
+  modules text[] NOT NULL DEFAULT '{}',
+  bedrijven text[] NOT NULL DEFAULT '{}',
+  onboarding jsonb NOT NULL DEFAULT '[]'::jsonb,
+  startpagina text,
+  volgorde integer NOT NULL DEFAULT 0,
+  actief boolean NOT NULL DEFAULT true,
+  standaard boolean NOT NULL DEFAULT false,
+  gewijzigd_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.rol_sjablonen ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS rol_sjabloon text;
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS bedrijven text[];
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS start_datum date;
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS eind_datum date;
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS offboarding_op timestamptz;
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS offboarding_door text;
+ALTER TABLE public.staff_members ADD COLUMN IF NOT EXISTS offboarding_notitie text;
+
+CREATE TABLE IF NOT EXISTS public.onboarding_stappen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  staff_id uuid NOT NULL REFERENCES public.staff_members(id) ON DELETE CASCADE,
+  titel text NOT NULL,
+  volgorde integer NOT NULL DEFAULT 0,
+  gedaan_op timestamptz,
+  gedaan_door text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS onboarding_stappen_staff ON public.onboarding_stappen (staff_id, volgorde);
+ALTER TABLE public.onboarding_stappen ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE public.personeel ADD COLUMN IF NOT EXISTS functieprofiel jsonb;
+
+-- Werkinstructies in Informatief: per bedrijf, dienst of rol, met versies en "Gelezen".
+CREATE TABLE IF NOT EXISTS public.werkinstructies (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  titel text NOT NULL,
+  inhoud text NOT NULL DEFAULT '',
+  bedrijf text,
+  dienst_slug text,
+  rol_sjabloon text,
+  versie integer NOT NULL DEFAULT 1,
+  gearchiveerd_op timestamptz,
+  gemaakt_door text,
+  gewijzigd_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.werkinstructies ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS public.werkinstructie_versies (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  instructie_id uuid NOT NULL REFERENCES public.werkinstructies(id) ON DELETE CASCADE,
+  versie integer NOT NULL,
+  titel text NOT NULL,
+  inhoud text NOT NULL DEFAULT '',
+  opgeslagen_door text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (instructie_id, versie)
+);
+ALTER TABLE public.werkinstructie_versies ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS public.werkinstructie_gelezen (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  instructie_id uuid NOT NULL REFERENCES public.werkinstructies(id) ON DELETE CASCADE,
+  versie integer NOT NULL,
+  auth_user_id uuid NOT NULL,
+  naam text,
+  gelezen_op timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (instructie_id, versie, auth_user_id)
+);
+ALTER TABLE public.werkinstructie_gelezen ENABLE ROW LEVEL SECURITY;
+
+-- De zeven startsjablonen (enkel als ze er nog niet staan; aanpassen kan in Instellingen).
+INSERT INTO public.rol_sjablonen (key, naam, omschrijving, rol, modules, bedrijven, onboarding, startpagina, volgorde, standaard) VALUES
+ ('zaakvoerder','Zaakvoerder','Alles zien en beheren. Een hoofdbeheerder blijft een apart admin-account.','beheerder','{}','{}','["Inloggen en tweestapsverificatie instellen","Mijn account: foto en naam nakijken","Rondleiding in de app (Command Center, Agenda, je modules)","ClickUp koppelen (Agenda → Instellingen → ClickUp)","Beschikbaarheid invullen (Agenda → Instellingen)","Werkinstructies van je rol lezen (Informatief)","Personeelsdossier aanvullen (contract, documenten)","Financieel overzicht en vesting doornemen"]','/admin',1,true),
+ ('operations','Operations','Klanten, projecten, contracten, meetings en levering opvolgen.','medewerker','{agenda,clients,contracts,aanvragen,offertes,opdrachten,meetings,opleveringen,shoots,content,uploads,formulieren,materiaal,email,info}','{}','["Inloggen en tweestapsverificatie instellen","Mijn account: foto en naam nakijken","Rondleiding in de app (Command Center, Agenda, je modules)","ClickUp koppelen (Agenda → Instellingen → ClickUp)","Beschikbaarheid invullen (Agenda → Instellingen)","Werkinstructies van je rol lezen (Informatief)","Personeelsdossier aanvullen (contract, documenten)","Projecten en Op te volgen doornemen","Meeting Inplanner: een meeting plannen"]','/admin',2,true),
+ ('uitvoerder_solutions','Uitvoerder Solutions','Werkt aan AI-automatisatie en software voor NextGenSolutions.','medewerker','{agenda,nextgensolutions,opdrachten,meetings,uploads,info}','{nextgensolutions}','["Inloggen en tweestapsverificatie instellen","Mijn account: foto en naam nakijken","Rondleiding in de app (Command Center, Agenda, je modules)","ClickUp koppelen (Agenda → Instellingen → ClickUp)","Beschikbaarheid invullen (Agenda → Instellingen)","Werkinstructies van je rol lezen (Informatief)","Personeelsdossier aanvullen (contract, documenten)","Pipeline NextGenSolutions doornemen","Projecten van Solutions bekijken"]','/admin/agenda',3,true),
+ ('uitvoerder_media','Uitvoerder Media','Content, shoots en opleveringen voor NextGenMedia.','medewerker','{agenda,content,metricool,shoots,opleveringen,uploads,blogs,clients,info}','{nextgenmedia}','["Inloggen en tweestapsverificatie instellen","Mijn account: foto en naam nakijken","Rondleiding in de app (Command Center, Agenda, je modules)","ClickUp koppelen (Agenda → Instellingen → ClickUp)","Beschikbaarheid invullen (Agenda → Instellingen)","Werkinstructies van je rol lezen (Informatief)","Personeelsdossier aanvullen (contract, documenten)","Contentkalender en Metricool doornemen","Shoot planner en opleveringen bekijken"]','/admin/agenda',4,true),
+ ('appointment_setter','Appointment setter','Afspraken boeken voor de zaakvoerders.','medewerker','{sales,meetings,agenda}','{}','["Inloggen en tweestapsverificatie instellen","Mijn account: foto en naam nakijken","Rondleiding in de app (Command Center, Agenda, je modules)","ClickUp koppelen (Agenda → Instellingen → ClickUp)","Beschikbaarheid invullen (Agenda → Instellingen)","Werkinstructies van je rol lezen (Informatief)","Personeelsdossier aanvullen (contract, documenten)","Meeting Inplanner: een verkoopafspraak boeken"]','/admin/meetings',5,true),
+ ('lead_onderzoeker','Lead-onderzoeker','Bedrijven opzoeken en aanvullen in Account-based marketing.','medewerker','{opdrachten,agenda,info}','{}','["Inloggen en tweestapsverificatie instellen","Mijn account: foto en naam nakijken","Rondleiding in de app (Command Center, Agenda, je modules)","ClickUp koppelen (Agenda → Instellingen → ClickUp)","Beschikbaarheid invullen (Agenda → Instellingen)","Werkinstructies van je rol lezen (Informatief)","Personeelsdossier aanvullen (contract, documenten)","Account-based marketing: importeren en aanvullen"]','/admin/opdrachten',6,true),
+ ('stagiair','Stagiair','Leest mee en werkt aan wat in de agenda staat.','medewerker','{agenda,info,uploads}','{}','["Inloggen en tweestapsverificatie instellen","Mijn account: foto en naam nakijken","Rondleiding in de app (Command Center, Agenda, je modules)","ClickUp koppelen (Agenda → Instellingen → ClickUp)","Beschikbaarheid invullen (Agenda → Instellingen)","Werkinstructies van je rol lezen (Informatief)","Personeelsdossier aanvullen (contract, documenten)","Stageovereenkomst in het personeelsdossier","Eerste week: dagelijks Dag afsluiten"]','/admin/agenda',7,true)
+ON CONFLICT (key) DO NOTHING;

@@ -133,7 +133,7 @@ export function KlantFiche({ clientId, maand, data, doe, vandaag, onSluit, onTaa
 
   if (!klant) return null
   return (
-    <Paneel breed titel={klant.company_name} sub={<>{cp?.actief === false ? 'Niet (meer) in de dagelijkse planning' : `Dagelijkse planning Chiara · ${maandNaam(maand)}`} · <Link href={`/admin/clients/${clientId}`} className="underline">klanthub</Link></>} onSluit={onSluit}>
+    <Paneel breed titel={klant.company_name} sub={<>{cp?.actief === false ? 'Niet (meer) in de dagelijkse planning' : `Dagelijkse planning · ${maandNaam(maand)}`} · <Link href={`/admin/clients/${clientId}`} className="underline">klanthub</Link></>} onSluit={onSluit}>
       {!cp?.actief && kanBeheren && <button type="button" onClick={() => doe('klant.voegtoe', { client_id: clientId }, { melding: 'Toegevoegd aan de dagelijkse planning.' })} className="btn-primary text-sm"><Plus className="h-4 w-4" />Aan de dagelijkse planning toevoegen</button>}
       {ontbreekt && <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">Nog in te vullen: {ontbreekt}</div>}
 
