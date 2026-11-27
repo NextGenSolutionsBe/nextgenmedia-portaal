@@ -29,6 +29,8 @@ export type AbmBedrijf = AbmRij & {
   geen_interesse_op?: string | null; geen_interesse_door?: string | null
   /** Wanneer we het bedrijf opnieuw contacteren (datum, Belgische dag). */
   opvolgen_op?: string | null
+  /** Voor welk bedrijf we dit bedrijf benaderen (NextGenMedia of NextGenSolutions); leeg = nog niet gekozen. */
+  bedrijf?: string | null
   /** De laatste notitie (voor de kaart in de kolom) en hoeveel er zijn. */
   laatste_notitie?: AbmNotitie | null; aantal_notities?: number
 }

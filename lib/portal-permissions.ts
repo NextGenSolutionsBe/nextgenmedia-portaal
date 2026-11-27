@@ -4,7 +4,7 @@
 
 import { FEATURES } from '@/lib/features'
 
-export const PORTAL_MODULES = ['social_media', 'metricool', 'cms', 'website', 'contracts', 'blogs', 'tasks', 'files', 'meetings', 'diensten', 'consultancy', 'founders', 'nieuws', 'partners', 'events', 'opleveringen', 'offertes'] as const
+export const PORTAL_MODULES = ['social_media', 'metricool', 'cms', 'website', 'contracts', 'blogs', 'tasks', 'files', 'meetings', 'diensten', 'consultancy', 'founders', 'nieuws', 'partners', 'events', 'opleveringen', 'offertes', 'solutions'] as const
 export type PortalModule = (typeof PORTAL_MODULES)[number]
 
 // Acties per module (de "actie-rechten").
@@ -26,6 +26,7 @@ export const MODULE_ACTIONS: Record<PortalModule, string[]> = {
   events:       ['view', 'inschrijven'],
   opleveringen: ['view', 'download', 'feedback'],
   offertes:     ['view', 'download'],
+  solutions:    ['view', 'goedkeuren'],
 }
 
 export const MODULE_LABELS: Record<PortalModule, string> = {
@@ -46,6 +47,7 @@ export const MODULE_LABELS: Record<PortalModule, string> = {
   events:       'Workshops & events',
   opleveringen: 'Opleveringen (video\'s, ontwerpen, foto\'s en documenten bekijken, downloaden en feedback)',
   offertes:     'Offertes (bekijken, downloaden en aanvaarden)',
+  solutions:    'Software en automatisatie (projectstatus, user stories goedkeuren, Care)',
 }
 
 // Welke modules hebben een werkende pagina/route. Een module die hier op false
@@ -70,6 +72,7 @@ export const MODULE_IMPLEMENTED: Record<PortalModule, boolean> = {
   events:       false,  // verborgen op vraag (2 nov 2026): de app is een werkomgeving, geen marketingkanaal; code en gegevens blijven (/portal/events)
   opleveringen: true,             // /portal/opleveringen — video's, ontwerpen, foto's en documenten bekijken, downloaden, feedback en revisierondes (3 dagen beschikbaar)
   offertes:     true,             // /portal/offertes — verstuurde offertes bekijken, downloaden en (via de offertepagina) aanvaarden
+  solutions:    true,             // /portal/solutions — project bij NextGen Solutions: status, user stories goedkeuren, Care (verbeterplan K88)
 }
 
 /**
@@ -78,7 +81,7 @@ export const MODULE_IMPLEMENTED: Record<PortalModule, boolean> = {
  * module staat pas uit als iemand ze uitdrukkelijk uitvinkt (opgeslagen als
  * false). Meeting boeken en diensten of consultancy aanvragen horen bij elke klant.
  */
-export const STANDAARD_AAN: readonly PortalModule[] = ['meetings', 'diensten', 'consultancy', 'founders', 'nieuws', 'partners', 'events', 'opleveringen', 'offertes']
+export const STANDAARD_AAN: readonly PortalModule[] = ['meetings', 'diensten', 'consultancy', 'founders', 'nieuws', 'partners', 'events', 'opleveringen', 'offertes', 'solutions']
 
 export const ACTION_LABELS: Record<string, string> = {
   view: 'Bekijken',
@@ -94,6 +97,7 @@ export const ACTION_LABELS: Record<string, string> = {
   book: 'Boeken, verplaatsen en annuleren',
   aanvragen: 'Aanvragen indienen en offertes beslissen',
   inschrijven: 'Inschrijven en uitschrijven',
+  goedkeuren: 'User stories goedkeuren',
 }
 
 export type Permissions = Partial<Record<PortalModule, Record<string, boolean>>>

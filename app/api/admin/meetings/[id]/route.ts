@@ -13,6 +13,7 @@ import {
   leesMeeting, bewaarMeeting, stapGoogle, stapClickup, planHerinnering, herinneringOpnieuw, annuleer, annuleerGoogle,
   annuleerClickup, bouwHerinnering, laatsteHerinnering, veiligeFout, type HerinneringRij, type MeetingRij,
 } from '@/lib/meetings/server'
+import { laadMerkGegevens } from '@/lib/merk-mail-server'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -42,6 +43,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     if (!m || !magMeeting(r, m, 'bekijken')) return NextResponse.json({ error: 'Meeting niet gevonden' }, { status: 404 })
     const lijst = await herinneringen(admin, m.id)
     const laatste = lijst[lijst.length - 1] ?? null
+    await laadMerkGegevens() // contactadres, website en voettekst uit Instellingen → Bedrijven
     const mail = bouwHerinnering(m, laatste?.ontvangers?.length ? laatste.ontvangers : m.klant_ontvangers)
 
     // Wie heeft de uitnodiging al beantwoord? Best-effort: Google mag traag zijn.

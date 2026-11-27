@@ -6,6 +6,7 @@ import { mailMerkVan, MERK_STIJL } from '@/lib/merk-mail'
 import { buildEmailHtml, buildEmailText } from '@/lib/email-html'
 import { logContractEvent } from '@/lib/contract-audit'
 import { revalidatePath } from 'next/cache'
+import { laadMerkGegevens } from '@/lib/merk-mail-server'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
@@ -70,6 +71,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const merk = mailMerkVan(b.merk)
     const van = merk === 'nextgenmedia' ? EMAIL_FROM : MERK_STIJL[merk].van
+    await laadMerkGegevens() // contactadres, website en voettekst uit Instellingen → Bedrijven
     const htmlOpts = { bodyText: body, ctaText, ctaLink, merk }
     const html = buildEmailHtml(htmlOpts)
     const text = buildEmailText(htmlOpts)

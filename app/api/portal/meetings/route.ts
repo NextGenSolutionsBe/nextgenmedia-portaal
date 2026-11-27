@@ -30,7 +30,7 @@ export async function GET() {
   if (!g.ok) return g.response
   try {
     const admin = createAdminSupabaseClient()
-    const [lijst, team] = await Promise.all([klantappMeetings(admin, g.session.clientId), meetingTeam(admin).catch(() => [])])
+    const [lijst, team] = await Promise.all([klantappMeetings(admin, g.session.clientId), meetingTeam(admin, g.session.clientId).catch(() => [])])
     return NextResponse.json({
       meetings: lijst.map((m) => klantappWeergave(m)),
       // Met wie kan de klant boeken (naam, rol, grote foto); leeg = geen keuze tonen.

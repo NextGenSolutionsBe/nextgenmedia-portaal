@@ -9,9 +9,10 @@ import {
 import { PersoonFoto } from '@/components/admin/persoon-foto'
 import { zoekVeld } from '@/lib/zoekveld'
 import {
-  vandaag, verschuif, bereikVan, dagenVan, kleurVan, klantVan, herkomstVan, mapKleur, kortDag, dag as dagVan, uur as uurVan, KLEUR_VOLGENS, WEERGAVEN, isWeergave,
+  vandaag, verschuif, bereikVan, dagenVan, kleurVan, klantVan, herkomstVan, mapKleur, kortDag, dag as dagVan, uur as uurVan, KLEUR_VOLGENS, WEERGAVEN, isWeergave, bedrijfVanItem,
   type Item, type Weergave, type KleurVolgens,
 } from '@/lib/agenda/model'
+import { pastBijFilter, BEDRIJF_FILTERS, type BedrijfFilter } from '@/lib/bedrijven/model'
 import { PlanVenster, DetailVenster, AnnuleerVenster, api as meetingApi, type Opties, type Meeting } from '@/app/admin/meetings/meetings-client'
 import { Modal } from '@/app/admin/materiaal/dialogen'
 import { api, actie, kleurContext, padVan, Popover, PersonenLijst, focusRing, type BoomData } from './gedeeld'
@@ -63,7 +64,9 @@ function periodeTitel(w: Weergave, d: string): string {
   return `${a.getUTCDate()}${zelfdeMaand ? '' : ` ${a.toLocaleDateString('nl-BE', { month: 'short', timeZone: 'UTC' })}`} – ${b.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}`
 }
 
-export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
+export function AgendaApp({ metTopbalk = true, startBedrijf = 'alles' }: { metTopbalk?: boolean; startBedrijf?: BedrijfFilter }) {
+  // Weergave Alles / Media / Solutions (zijbalk) als startfilter; hier even anders te kiezen.
+  const [bedrijfW, setBedrijfW] = useState<BedrijfFilter>(startBedrijf)
   const [boom, setBoom] = useState<BoomData | null>(null)
   const [fout, setFout] = useState<string | null>(null)
   const [keuze, setKeuze] = useState<Keuze>(null)
@@ -299,8 +302,9 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
       (zonderPersonen || !personen.length || i.toegewezen.some((p) => personen.includes(p)) || (!i.toegewezen.length && !!i.eigenaar_id && personen.includes(i.eigenaar_id) && i.bron === 'reeks')) &&
       (!labels.length || i.labels.some((x) => labels.includes(x))) &&
       (!klant || (ctx && klantVan(i, ctx) === klant)) &&
+      (bedrijfW === 'alles' || !ctx || pastBijFilter(bedrijfW, bedrijfVanItem(i, ctx))) &&
       (!inLijst || (i.lijst_id && inLijst.has(i.lijst_id))))
-  }, [toonKlaar, personen, labels, klant, ctx, lijstenVanKeuze, spaces, boom, container?.soort])
+  }, [toonKlaar, personen, labels, klant, ctx, lijstenVanKeuze, spaces, boom, container?.soort, bedrijfW])
   const zichtbaar = useMemo(() => filter(items ?? []), [filter, items])
   // In de teamweergave staat iedereen in een eigen kolom: daar filteren we niet op personen.
   const teamZichtbaar = useMemo(() => (team ? filter(items ?? [], false, true) : []), [team, filter, items])
@@ -542,6 +546,10 @@ export function AgendaApp({ metTopbalk = true }: { metTopbalk?: boolean }) {
             <Chip aan={toonKlaar} onClick={() => { setToonKlaar(!toonKlaar); bewaarVoorkeur({ klaar: !toonKlaar }) }}>{toonKlaar ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}Completed</Chip>
             {filterTeller > 0 && <button type="button" onClick={() => { setLabels([]); setKlant(null); zetPersonen([]); zetSpaces([]) }} className="text-xs text-gray-500 hover:underline inline-flex items-center gap-0.5"><X className="h-3 w-3" />Wis filters</button>}
             <span className="flex-1 hidden md:block" />
+            <select value={bedrijfW} onChange={(e) => setBedrijfW(e.target.value as BedrijfFilter)} aria-label="Bedrijf" title="Enkel wat bij dit bedrijf hoort (uit de map of de klant); wat geen bedrijf heeft, staat altijd erbij"
+              className={`input-base !py-1 !px-2 !text-xs w-auto ${bedrijfW !== 'alles' ? '!border-gray-900 font-semibold' : ''}`}>
+              {BEDRIJF_FILTERS.map((b) => <option key={b.key} value={b.key}>{b.key === 'alles' ? 'Alle bedrijven' : `Enkel ${b.label}`}</option>)}
+            </select>
             <label className="text-xs text-gray-500 flex items-center gap-1.5">Kleur
               <select value={kleurVolgens} onChange={(e) => { setKleurVolgens(e.target.value as KleurVolgens); bewaarVoorkeur({ kleurMap: e.target.value as KleurVolgens }) }} className="input-base !py-1 !px-2 !text-xs w-auto" aria-label="Kleur volgens">
                 {KLEUR_VOLGENS.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}

@@ -5,6 +5,7 @@ import { isEmail, MAX_PERSONEN } from '@/lib/meetings/model'
 import { veiligeFout, type MeetingRij } from '@/lib/meetings/server'
 import { splitsAdressen, INFO_ADRES } from '@/lib/meetings/meeting-mail'
 import { controleerAfzender } from '@/lib/meetings/afzender'
+import { laadMerkGegevens } from '@/lib/merk-mail-server'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Admin = { from: (t: string) => any }
@@ -50,6 +51,7 @@ export async function verstuurMeetingMail(admin: Admin, m: MeetingRij, b: Meetin
   const afzender = await controleerAfzender()
   if (!afzender.ok) return fout(503, afzender.fout)
 
+  await laadMerkGegevens() // contactadres, website en voettekst uit Instellingen → Bedrijven
   const html = buildEmailHtml({ bodyText: tekst, ctaText: ctaTekst, ctaLink })
   const text = buildEmailText({ bodyText: tekst, ctaText: ctaTekst, ctaLink })
   const nu = () => new Date().toISOString()

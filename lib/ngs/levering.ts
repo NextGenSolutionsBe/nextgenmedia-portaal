@@ -310,3 +310,26 @@ export function leadSoortVoorstel(bedrijf: string | null | undefined, bron: stri
   if (w.startsWith('bram')) return 'inbound_ngs_bram'
   return null
 }
+
+// ── Klantapp (verbeterplan K88, 27 nov 2026) ─────────────────────────────────
+
+/** Vanaf deze fases ziet de klant de user stories (daarvoor zijn het nog werkversies van ons). */
+export const KLANT_ZIET_STORIES: readonly ProjectFase[] = ['akkoord', 'bouw', 'review', 'klaar', 'care']
+/** In deze fases kan de klant een user story zelf goedkeuren. */
+export const KLANT_KEURT_GOED: readonly ProjectFase[] = ['akkoord', 'bouw', 'review']
+export const klantZietStories = (fase: ProjectFase) => KLANT_ZIET_STORIES.includes(fase)
+export function magKlantGoedkeuren(fase: ProjectFase, s: { klant_akkoord_op: string | null }): boolean {
+  return KLANT_KEURT_GOED.includes(fase) && !s.klant_akkoord_op
+}
+/** Wat de klant over de fase leest: kort en zonder intern jargon. */
+export const KLANT_FASE_UITLEG: Record<ProjectFase, string> = {
+  briefing: 'We zetten samen op papier wat er moet gebeuren.',
+  user_stories: 'We schrijven uit wat de oplossing precies moet kunnen.',
+  akkoord: 'Klaar voor jouw akkoord. Kijk de user stories na en keur ze goed.',
+  bouw: 'We bouwen.',
+  review: 'Klaar om te testen. We overlopen het samen.',
+  klaar: 'Opgeleverd.',
+  care: 'Opgeleverd en in onderhoud (Care).',
+}
+/** De status van een story zoals de klant ze leest ("Goedgekeurd" is intern: door ons ingepland). */
+export const KLANT_STORY_STATUS: Record<StoryStatus, string> = { voorstel: 'Voorstel', goedgekeurd: 'Gepland', bouw: 'In bouw', review: 'Te testen', klaar: 'Klaar' }

@@ -11,6 +11,7 @@ import {
   blokRegels, controleerMapnaam, controleerVelden, downloadNaam, handtekeningenOns, magIn, onsKlaar, persoonVan, redenOnsNiet, redenPartijNiet, standaardZone, tekenaarsOns, wieMoetNog, zoneOfNull, zoneVoor,
   type AcVoorstel, type AlgemeenContract, type Map, type OnsHandtekening, type Zone,
 } from './model'
+import { laadMerkGegevens } from '@/lib/merk-mail-server'
 
 /**
  * Algemene contracten, de serverkant (regels in ./model.ts). Enkel de
@@ -359,6 +360,7 @@ export async function verstuurMail(admin: Admin, id: string, b: Record<string, u
   const van = merk === 'nextgenmedia' ? EMAIL_FROM : MERK_STIJL[merk].van
   const knop = String(b.cta_text ?? '').trim() || 'Document bekijken'
   const url = await maakLink(admin, id, aan, door.email)
+  await laadMerkGegevens() // contactadres, website en voettekst uit Instellingen → Bedrijven
   const html = buildEmailHtml({ bodyText: tekst, ctaText: knop, ctaLink: url, merk })
   const text = buildEmailText({ bodyText: tekst, ctaText: knop, ctaLink: url, merk })
   const htmlLog = buildEmailHtml({ bodyText: tekst, ctaText: knop, ctaLink: `${basis()}/document/(persoonlijke link)`, merk })

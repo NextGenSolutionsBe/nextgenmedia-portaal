@@ -16,6 +16,7 @@ import {
   googleEventId, googleOmschrijving, genodigden, clickupMarker, clickupTaakNaam, clickupOmschrijving,
   kiesHerinnering, magNogVersturen, herinneringsMail, STANDAARD_TIJDZONE, type Persoon, type Koppelingen,
 } from '@/lib/meetings/model'
+import { laadMerkGegevens } from '@/lib/merk-mail-server'
 
 /**
  * Meetingplanner — de stappen naast de databank. Hergebruikt de Google-koppeling
@@ -372,6 +373,7 @@ export async function verstuurHerinnering(admin: Admin, h: HerinneringRij): Prom
     return 'mislukt'
   }
 
+  await laadMerkGegevens() // contactadres, website en voettekst uit Instellingen → Bedrijven
   const mail = bouwHerinnering(m, Array.isArray(r.ontvangers) && r.ontvangers.length ? r.ontvangers : m.klant_ontvangers)
   const res = await sendEmail({
     to: ontvangers, subject: mail.onderwerp, text: mail.tekst, html: mail.html,
@@ -491,6 +493,7 @@ async function verstuurAfspraakHerinnering(admin: Admin, r: HerinneringRij, zet:
     organisator_naam: (agenda as { name?: string } | null)?.name?.split(/\s+[—-]\s+/)[0] ?? null,
     ontvangers, afzender: merkNaam, locatie: a.meet_url ? null : a.adres,
   })
+  await laadMerkGegevens() // contactadres, website en voettekst uit Instellingen → Bedrijven
   const html = buildEmailHtml({ bodyText: mail.tekst, ctaText: mail.ctaTekst, ctaLink: mail.ctaLink, merk: mailMerkVan(merk?.key) })
   const from = merk?.reminder_from || defaultFromFor(merk?.key) || EMAIL_FROM
   // NextGenSolutions: zolang dat domein niet geverifieerd is bij Resend, vertrekt

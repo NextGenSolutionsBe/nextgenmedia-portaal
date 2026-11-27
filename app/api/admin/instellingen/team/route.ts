@@ -24,12 +24,12 @@ export async function GET() {
     const g = await eisBeheer(); if (!g.ok) return g.response
     const admin = createAdminSupabaseClient()
     const [{ data: leden }, { data: agendas }, { data: inst }, clickup] = await Promise.all([
-      admin.from('personeel').select('id, voornaam, achternaam, functie, expert_rollen, expertises, profielfoto_pad, actief, expert_zichtbaar, meeting_zichtbaar, meeting_agenda_id, clickup_user_id, klantapp_volgorde').eq('actief', true),
+      admin.from('personeel').select('id, voornaam, achternaam, functie, expert_rollen, expertises, profielfoto_pad, actief, expert_zichtbaar, meeting_zichtbaar, meeting_agenda_id, clickup_user_id, klantapp_volgorde, klantapp_bedrijven').eq('actief', true),
       admin.from('sales_calendar_connections').select('id, name, status, active, provider').eq('active', true).order('name'),
       admin.from('app_settings').select('value').eq('key', TEAM_KLANTAPP_SLEUTEL).maybeSingle(),
       listClickupMembers().catch(() => []),
     ])
-    const rijen = (leden ?? []) as { id: string; voornaam: string; achternaam: string | null; functie: string | null; expert_rollen: string[] | null; expertises: string[] | null; profielfoto_pad: string | null; actief: boolean; expert_zichtbaar: boolean | null; meeting_zichtbaar: boolean | null; meeting_agenda_id: string | null; clickup_user_id: number | null; klantapp_volgorde: number | null }[]
+    const rijen = (leden ?? []) as { id: string; voornaam: string; achternaam: string | null; functie: string | null; expert_rollen: string[] | null; expertises: string[] | null; profielfoto_pad: string | null; actief: boolean; expert_zichtbaar: boolean | null; meeting_zichtbaar: boolean | null; meeting_agenda_id: string | null; clickup_user_id: number | null; klantapp_volgorde: number | null; klantapp_bedrijven?: string[] | null }[]
     const paden = rijen.map((r) => r.profielfoto_pad).filter((x): x is string => !!x)
     const urls = new Map<string, string>()
     if (paden.length) {
@@ -43,7 +43,7 @@ export async function GET() {
         .map((r) => ({
           id: r.id, naam: [r.voornaam, r.achternaam].filter(Boolean).join(' '), rol: (r.expert_rollen ?? [])[0] ?? r.functie ?? null,
           expertises: (r.expertises ?? []).map((e) => label.get(e as never) ?? e), foto_url: r.profielfoto_pad ? urls.get(r.profielfoto_pad) ?? null : null,
-          expert_zichtbaar: r.expert_zichtbaar === true, meeting_zichtbaar: r.meeting_zichtbaar === true, meeting_agenda_id: r.meeting_agenda_id,
+          expert_zichtbaar: r.expert_zichtbaar === true, meeting_zichtbaar: r.meeting_zichtbaar === true, meeting_agenda_id: r.meeting_agenda_id, klantapp_bedrijven: r.klantapp_bedrijven ?? [],
           clickup_user_id: r.clickup_user_id ? Number(r.clickup_user_id) : null, klantapp_volgorde: r.klantapp_volgorde,
         })),
       agendas: ((agendas ?? []) as { id: string; name: string; status: string; provider: string }[]).filter((a) => a.provider === 'google').map((a) => ({ id: a.id, naam: a.name, gekoppeld: a.status === 'connected' })),
@@ -70,6 +70,8 @@ export async function PATCH(req: NextRequest) {
     const patch: Record<string, unknown> = {}
     if (typeof b.expert_zichtbaar === 'boolean') patch.expert_zichtbaar = b.expert_zichtbaar
     if (typeof b.meeting_zichtbaar === 'boolean') patch.meeting_zichtbaar = b.meeting_zichtbaar
+    // Bij welk bedrijf in Meeting boeken (leeg = beide; verbeterplan K89).
+    if (Array.isArray(b.klantapp_bedrijven)) patch.klantapp_bedrijven = [...new Set((b.klantapp_bedrijven as unknown[]).map(String).filter((x) => x === 'nextgenmedia' || x === 'nextgensolutions'))]
     if ('meeting_agenda_id' in b) {
       const a = b.meeting_agenda_id ? String(b.meeting_agenda_id) : null
       if (a) {

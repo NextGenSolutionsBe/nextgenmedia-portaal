@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { magIk } from '@/lib/instellingen/laden'
 import type { Actie } from '@/lib/instellingen/model'
-import { controleerItem, isUuid, isKleur, vandaag, type Item } from '@/lib/agenda/model'
+import { controleerItem, isUuid, isKleur, vandaag, enkelBedrijfPerKlant, type Item } from '@/lib/agenda/model'
 import { inspreekPrompt, leesInspreekVoorstel, type InspreekContext } from '@/lib/agenda/inspreken'
 import { mijnDeadlines } from '@/lib/agenda/deadlines-server'
 import { reeksenInBereik, laadBeschikbaarheid } from '@/lib/agenda/team-server'
@@ -89,7 +89,10 @@ export async function GET(req: NextRequest) {
 async function boom(c: Ctx) {
   const { admin, k } = c
   const z = await laadZicht(admin, k)
-  const [b, personen, labels, klanten, kleuren, delen, bronnen, mail, rechten, rollen] = await Promise.all([
+  // Bij welk bedrijf een klant klant is (kleur en filter op bedrijf, verbeterplan E39): tegelijk met de rest.
+  const bedrijfRijen = Promise.all((['opdrachten', 'contracts', 'offertes'] as const).map((t) =>
+    admin.from(t).select('client_id, bedrijf').not('client_id', 'is', null).in('bedrijf', ['nextgenmedia', 'nextgensolutions']).limit(5000)))
+  const [b, personen, labels, klanten, kleuren, delen, bronnen, mail, rechten, rollen, bd] = await Promise.all([
     boomVoor(admin, z),
     laadPersonen(admin),
     laadLabels(admin),
@@ -100,13 +103,16 @@ async function boom(c: Ctx) {
     k.isAdmin ? admin.from('ag_mail_voorstellen').select('id', { count: 'exact', head: true }).eq('status', 'voorstel') : Promise.resolve({ count: 0 }),
     Promise.all((['toevoegen', 'aanpassen', 'verwijderen', 'instellingen'] as Actie[]).map(async (a) => [a, !!(await magIk('agenda', a))] as const)),
     admin.from('user_roles').select('user_id').eq('role', 'admin'),
+    bedrijfRijen,
   ])
+  const klantBedrijf = enkelBedrijfPerKlant(bd.flatMap((r) => (r.data ?? []) as { client_id: string | null; bedrijf: string | null }[]))
   const admins = new Set(((rollen.data ?? []) as { user_id: string }[]).map((r) => r.user_id))
   return {
     ik: k.persoonId, isAdmin: k.isAdmin, ...b, personen, labels,
     zaakvoerders: personen.filter((p) => p.user_id && admins.has(p.user_id)).map((p) => p.id),
     klanten: ((klanten.data ?? []) as { id: string; company_name: string | null; archived_at: string | null }[]).map((x) => ({ id: x.id, naam: x.company_name ?? 'Klant', gearchiveerd: !!x.archived_at })),
     klantKleuren: Object.fromEntries(((kleuren.data ?? []) as { client_id: string; kleur: string }[]).map((x) => [x.client_id, x.kleur])),
+    klantBedrijf,
     deelIkMet: ((delen.data ?? []) as { eigenaar_id: string; kijker_id: string }[]).filter((d) => d.eigenaar_id === k.persoonId).map((d) => d.kijker_id),
     zieIkVan: ((delen.data ?? []) as { eigenaar_id: string; kijker_id: string }[]).filter((d) => d.kijker_id === k.persoonId).map((d) => d.eigenaar_id),
     // Nooit een token naar het scherm: enkel wie, welke fase en hoe ver.
@@ -482,6 +488,8 @@ async function containerActie(c: Ctx, actie: string, b: Record<string, unknown>)
     if ('naam' in b) { if (!naam) throw new Error('Geef een naam.'); upd.naam = naam }
     if ('kleur' in b) upd.kleur = isKleur(b.kleur) ? b.kleur : null
     if ('client_id' in b && soort !== 'space') upd.client_id = isUuid(b.client_id) ? b.client_id : null
+    // Bedrijf van een map (en alles eronder): NextGenMedia, NextGenSolutions, algemeen of leeg = vanzelf.
+    if ('bedrijf' in b && soort === 'map') upd.bedrijf = ['nextgenmedia', 'nextgensolutions', 'algemeen'].includes(String(b.bedrijf)) ? String(b.bedrijf) : null
     if (verantwoordelijke !== undefined) upd.verantwoordelijke_id = verantwoordelijke
     // Verplaatsen (slepen in de boom). De ClickUp-import zet het daarna niet terug (`plaats_vast`).
     if (soort === 'lijst' && ('map_id' in b || 'space_id' in b)) {

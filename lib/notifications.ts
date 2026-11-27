@@ -17,6 +17,7 @@ import { teDoen, gewenst, beschikbaar, meeting as meetingLabel, looptAf, info as
 import { taakIsAf } from '@/lib/sales/lead-taken'
 import { tegentekenSleutel } from '@/lib/contracten/tegenhandtekening-server'
 import { verlengingNodig, verlengingDeadline } from '@/lib/financieel/fase7'
+import { pastBijFilter, MEDIA, type BedrijfFilter } from '@/lib/bedrijven/model'
 
 // Eén bron voor meldingen + "Vandaag": alles live afgeleid uit bestaande data
 // (geen nieuwe tabel). Gelezen/niet-gelezen wordt client-side in localStorage
@@ -412,10 +413,14 @@ export type OpvolgGroep = { key: 'aanvragen' | 'contracten' | 'tegentekenen' | '
 const OPVOLG_MAX = 5
 const dagKort = (d: string) => new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' })
 
-export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGroep[]> {
+export async function buildOpvolging(modules: string[] | null, weergave: BedrijfFilter = 'alles'): Promise<OpvolgGroep[]> {
   let admin: ReturnType<typeof createAdminSupabaseClient>
   try { admin = createAdminSupabaseClient() } catch { return [] }
   const mag = (m: string) => modules === null || modules.includes(m)
+  // Weergave Alles / Media / Solutions (zijbalk): enkel wat bij dat bedrijf hoort. Algemeen en
+  // nog niet geclassificeerd staan altijd in beide (pastBijFilter), zodat er nooit iets stil verdwijnt.
+  const past = (bedrijf: string | null | undefined) => pastBijFilter(weergave, bedrijf)
+  const opBedrijf = <Q extends { or: (f: string) => Q }>(q: Q): Q => (weergave === 'alles' ? q : q.or(`bedrijf.is.null,bedrijf.in.(algemeen,${weergave})`))
   const klantNamen = async (ids: string[]): Promise<Map<string, string>> => {
     const uniek = [...new Set(ids.filter(Boolean))]
     if (!uniek.length) return new Map()
@@ -490,9 +495,9 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
 
   async function opvolgAanvragen(): Promise<OpvolgGroep | null> {
     try {
-      const { data, count } = await admin.from('klant_aanvragen')
+      const { data, count } = await opBedrijf(admin.from('klant_aanvragen')
         .select('id, client_id, soort, type_label, status, periode_van, created_at', { count: 'exact' })
-        .in('status', ['ontvangen', 'in_behandeling', 'offerte', 'aanvaard']).order('created_at', { ascending: false }).limit(50)
+        .in('status', ['ontvangen', 'in_behandeling', 'offerte', 'aanvaard'])).order('created_at', { ascending: false }).limit(50)
       const rijen = (data ?? []) as { id: string; client_id: string; soort: string; type_label: string; status: keyof typeof AANVRAAG_STATUS; periode_van: string | null; created_at: string }[]
       // Nieuw binnengekomen eerst, dan wie de offerte aanvaardde (in te plannen).
       const rang: Record<string, number> = { ontvangen: 0, aanvaard: 1, in_behandeling: 2, offerte: 3 }
@@ -513,7 +518,7 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
 
   async function opvolgContracten(): Promise<OpvolgGroep | null> {
     try {
-      const { data } = await admin.from('contracts').select('id, title, status, sent_at, created_at, expires_at, client_id').limit(500)
+      const { data } = await opBedrijf(admin.from('contracts').select('id, title, status, sent_at, created_at, expires_at, client_id')).limit(500)
       const rijen = ((data ?? []) as { id: string; title: string; status: string; sent_at?: string | null; created_at?: string | null; expires_at?: string | null; client_id?: string | null }[])
         .map((c) => ({ c, fu: followUp(c) })).filter((x) => x.fu.needs)
         .sort((a, b) => (a.fu.level === 'urgent' ? 0 : 1) - (b.fu.level === 'urgent' ? 0 : 1) || (a.c.sent_at ?? a.c.created_at ?? '').localeCompare(b.c.sent_at ?? b.c.created_at ?? ''))
@@ -538,9 +543,9 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
    */
   async function opvolgTegentekenen(): Promise<OpvolgGroep | null> {
     try {
-      const { data, count, error } = await admin.from('contracts')
+      const { data, count, error } = await opBedrijf(admin.from('contracts')
         .select(`id, title, client_id, signed_at, signer_name, ${KLANT_TEKENDE_IN_APP}`, { count: 'exact' })
-        .in('status', ['signed', 'getekend']).is('tegengetekend_op', null)
+        .in('status', ['signed', 'getekend']).is('tegengetekend_op', null))
         .order('signed_at', { ascending: false, nullsFirst: false }).limit(OPVOLG_MAX)
       if (error) return null
       const rijen = (data ?? []) as { id: string; title: string; client_id: string | null; signed_at: string | null; signer_name: string | null }[]
@@ -566,8 +571,8 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
    */
   async function opvolgFacturenPlannen(): Promise<OpvolgGroep | null> {
     try {
-      const { data, error } = await admin.from('contracts').select('id, title, client_id, signed_at, looptijd_status')
-        .in('status', ['signed', 'getekend']).order('signed_at', { ascending: false, nullsFirst: false }).limit(400)
+      const { data, error } = await opBedrijf(admin.from('contracts').select('id, title, client_id, signed_at, looptijd_status')
+        .in('status', ['signed', 'getekend'])).order('signed_at', { ascending: false, nullsFirst: false }).limit(400)
       if (error) return null
       const lopend = ((data ?? []) as { id: string; title: string; client_id: string | null; signed_at: string | null; looptijd_status: string | null }[])
         .filter((c) => !c.looptijd_status || c.looptijd_status === 'lopend')
@@ -605,7 +610,12 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
    */
   async function opvolgMails(): Promise<OpvolgGroep | null> {
     try {
-      const lijst = (await laadOpvolgingen(admin)).filter((x) => mailMoetOpvolgen(x.opvolging))
+      let lijst = (await laadOpvolgingen(admin)).filter((x) => mailMoetOpvolgen(x.opvolging))
+      if (lijst.length && weergave !== 'alles') {
+        const { data: bd } = await admin.from('opdrachten').select('id, bedrijf').in('id', lijst.map((x) => x.project.id))
+        const bedrijfVan = new Map(((bd ?? []) as { id: string; bedrijf: string | null }[]).map((r) => [r.id, r.bedrijf]))
+        lijst = lijst.filter((x) => past(bedrijfVan.get(x.project.id)))
+      }
       if (!lijst.length) return null
       const rang: Record<string, number> = { akkoord: 0, weigering: 1, wacht_op_ons: 2, geen_reactie: 3, na_meeting: 4 }
       lijst.sort((a, b) => Number(b.opvolging!.dringend) - Number(a.opvolging!.dringend) || (rang[a.opvolging!.status] ?? 9) - (rang[b.opvolging!.status] ?? 9) || a.opvolging!.sinds.localeCompare(b.opvolging!.sinds))
@@ -635,7 +645,7 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
     try {
       const nuIso = new Date().toISOString()
       const [km, sa] = await Promise.all([
-        admin.from('klant_meetings').select('id, titel, klant_naam, starts_at, client_id', { count: 'exact' }).eq('status', 'ingepland').gte('starts_at', nuIso).order('starts_at').limit(OPVOLG_MAX),
+        opBedrijf(admin.from('klant_meetings').select('id, titel, klant_naam, starts_at, client_id', { count: 'exact' }).eq('status', 'ingepland').gte('starts_at', nuIso)).order('starts_at').limit(OPVOLG_MAX),
         admin.from('sales_appointments').select('id, titel, starts_at', { count: 'exact' }).eq('status', 'scheduled').gte('starts_at', nuIso).order('starts_at').limit(OPVOLG_MAX),
       ])
       const items = [
@@ -661,10 +671,10 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
   async function opvolgProjecten(): Promise<OpvolgGroep | null> {
     try {
       const grens = new Date(Date.now() - 7 * 86_400_000).toISOString()
-      const { data, count } = await admin.from('opdrachten')
+      const { data, count } = await opBedrijf(admin.from('opdrachten')
         .select('id, titel, client_id, klant_vrij, status, status_gewijzigd_op, created_at, diensten', { count: 'exact' })
         .in('status', ['open', 'voorstel_gevraagd', 'voorstel_bezig', 'voorstel_klaar', 'voorstel_voorgelegd', 'interesse'])
-        .lt('status_gewijzigd_op', grens).order('status_gewijzigd_op', { ascending: true }).limit(OPVOLG_MAX)
+        .lt('status_gewijzigd_op', grens)).order('status_gewijzigd_op', { ascending: true }).limit(OPVOLG_MAX)
       const rijen = (data ?? []) as { id: string; titel: string; client_id: string | null; klant_vrij: string | null; status: string; status_gewijzigd_op: string | null; created_at: string; diensten?: string[] | null }[]
       const namen = await klantNamen(rijen.map((r) => r.client_id ?? ''))
       const offerte = new Set(['voorstel_klaar', 'voorstel_voorgelegd'])
@@ -692,8 +702,8 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
   async function opvolgVerlengen(): Promise<OpvolgGroep | null> {
     try {
       const tot = plusDagen(vandaag, 60)
-      const { data } = await admin.from('contracts').select('id, title, client_id, status, end_date, looptijd_status, stop_datum')
-        .eq('status', 'signed').gte('end_date', vandaag).lte('end_date', tot).order('end_date').limit(200)
+      const { data } = await opBedrijf(admin.from('contracts').select('id, title, client_id, status, end_date, looptijd_status, stop_datum')
+        .eq('status', 'signed').gte('end_date', vandaag).lte('end_date', tot)).order('end_date').limit(200)
       const rijen = ((data ?? []) as { id: string; title: string | null; client_id: string | null; status: string; end_date: string; looptijd_status: string | null; stop_datum: string | null }[])
         .filter((c) => verlengingNodig(c, vandaag) !== null)
       if (!rijen.length) return null
@@ -720,6 +730,7 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
    * contracten vragen geen actie.
    */
   async function opvolgOnderhoud(): Promise<OpvolgGroep | null> {
+    if (!past(MEDIA)) return null // websites horen bij NextGen Media
     try {
       const { data } = await admin.from('clients')
         .select('id, company_name, maintenance_included, maintenance_start_date, maintenance_months').eq('maintenance_included', true).limit(1000)
@@ -745,7 +756,7 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
    */
   async function opvolgOpleveringen(): Promise<OpvolgGroep | null> {
     try {
-      const { data: ops } = await admin.from('opleveringen').select('id, titel, client_id, max_revisies, updated_at').is('gearchiveerd_op', null).order('updated_at', { ascending: false }).limit(200)
+      const { data: ops } = await opBedrijf(admin.from('opleveringen').select('id, titel, client_id, max_revisies, updated_at').is('gearchiveerd_op', null)).order('updated_at', { ascending: false }).limit(200)
       const rijen = (ops ?? []) as { id: string; titel: string; client_id: string; max_revisies: number | null }[]
       if (!rijen.length) return null
       const ids = rijen.map((r) => r.id)
@@ -792,8 +803,8 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
     try {
       const week = new Date(Date.now() - 7 * 86_400_000).toISOString()
       const [{ data: open, error }, { data: ok }] = await Promise.all([
-        admin.from('offertes').select('id, client_id, klant_naam, titel, status, verstuurd_op, klant_geopend_op, geldig_tot, geaccepteerd_op, geaccepteerd_door').eq('status', 'verstuurd').order('verstuurd_op', { ascending: true }).limit(300),
-        admin.from('offertes').select('id, client_id, klant_naam, titel, status, verstuurd_op, klant_geopend_op, geldig_tot, geaccepteerd_op, geaccepteerd_door').eq('status', 'geaccepteerd').gte('geaccepteerd_op', week).order('geaccepteerd_op', { ascending: false }).limit(50),
+        opBedrijf(admin.from('offertes').select('id, client_id, klant_naam, titel, status, verstuurd_op, klant_geopend_op, geldig_tot, geaccepteerd_op, geaccepteerd_door').eq('status', 'verstuurd')).order('verstuurd_op', { ascending: true }).limit(300),
+        opBedrijf(admin.from('offertes').select('id, client_id, klant_naam, titel, status, verstuurd_op, klant_geopend_op, geldig_tot, geaccepteerd_op, geaccepteerd_door').eq('status', 'geaccepteerd').gte('geaccepteerd_op', week)).order('geaccepteerd_op', { ascending: false }).limit(50),
       ])
       if (error) return null
       type R = Pick<Offerte, 'id' | 'client_id' | 'klant_naam' | 'titel' | 'status' | 'verstuurd_op' | 'klant_geopend_op' | 'geldig_tot' | 'geaccepteerd_op' | 'geaccepteerd_door'>
@@ -822,6 +833,7 @@ export async function buildOpvolging(modules: string[] | null): Promise<OpvolgGr
   }
 
   async function opvolgContent(): Promise<OpvolgGroep | null> {
+    if (!past(MEDIA)) return null // de contentkalender hoort bij NextGen Media
     try {
       const { data } = await admin.from('social_content_items').select('client_id, reviewed_at, updated_at').eq('status', 'changes_requested').limit(2000)
       const perKlant = new Map<string, { n: number; laatste: string }>()

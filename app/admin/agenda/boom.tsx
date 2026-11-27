@@ -3,13 +3,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  ChevronRight, Folder, List as ListIcon, FileText, Lock, MoreHorizontal, Plus, CalendarDays, Trash2, CheckCheck, Settings2, Mail, Search, Pencil, Palette, Building2, LockOpen, FolderPlus, ListPlus, FilePlus, ListChecks, Minimize2,
+  ChevronRight, Folder, List as ListIcon, FileText, Lock, MoreHorizontal, Plus, CalendarDays, Trash2, CheckCheck, Settings2, Mail, Search, Pencil, Palette, Building2, LockOpen, FolderPlus, ListPlus, FilePlus, ListChecks, Minimize2, Briefcase,
 } from 'lucide-react'
 import { Modal } from '@/app/admin/materiaal/dialogen'
 import { zoekVeld } from '@/lib/zoekveld'
 import { PersoonFoto } from '@/components/admin/persoon-foto'
 import { actie, Popover, KleurKeuze, PersonenLijst, Schakel, MapIcoon, donkerder, kleurVanMap, focusRing, type BoomData, type AgMap } from './gedeeld'
 import { KlantLijst } from './item-venster'
+import { BEDRIJF_KLEUR } from '@/lib/agenda/model'
+
+const BEDRIJF_NAMEN: Record<string, string> = { nextgenmedia: 'NextGenMedia', nextgensolutions: 'NextGenSolutions', algemeen: 'Algemeen' }
 
 /** `alles` = All tasks: elke open taak uit alle spaces. */
 export type Keuze = { soort: 'space' | 'map' | 'lijst' | 'doc' | 'alles'; id: string } | null
@@ -281,7 +284,9 @@ function Rij({ diepte, soort, id, naam, kleur, eigenKleur, prive, open, onWissel
   gekozen: boolean; onKies: () => void; boom: BoomData; onVernieuw: () => void; klantId?: string | null
   menu: { nieuweMap?: () => void; nieuweLijst?: () => void; nieuwDoc?: () => void; hernoem: NaamZetter }
 }) {
-  const [menuOpen, setMenuOpen] = useState<null | 'menu' | 'kleur' | 'klant'>(null)
+  const [menuOpen, setMenuOpen] = useState<null | 'menu' | 'kleur' | 'klant' | 'bedrijf'>(null)
+  // Bedrijf van een map (verbeterplan E39): kleur en filter op bedrijf in de agenda.
+  const bedrijfNu = soort === 'map' ? boom.mappen.find((m) => m.id === id)?.bedrijf ?? null : null
   const sluit = useCallback(() => setMenuOpen(null), [])
   const mag = boom.rechten
   const wijzig = async (velden: Record<string, unknown>, melding?: string) => {
@@ -335,6 +340,7 @@ function Rij({ diepte, soort, id, naam, kleur, eigenKleur, prive, open, onWissel
               <MenuKnop icoon={<Pencil className="h-4 w-4" />} onClick={() => { sluit(); menu.hernoem({ titel: 'Naam aanpassen', waarde: naam, onBewaar: (n) => wijzig({ naam: n }) }) }}>Naam aanpassen</MenuKnop>
               <MenuKnop icoon={<Palette className="h-4 w-4" />} onClick={() => setMenuOpen('kleur')}>Kleur</MenuKnop>
               {soort !== 'space' && <MenuKnop icoon={<Building2 className="h-4 w-4" />} onClick={() => setMenuOpen('klant')}>{klantId ? 'Andere klant' : 'Koppelen aan een klant'}</MenuKnop>}
+              {soort === 'map' && <MenuKnop icoon={<Briefcase className="h-4 w-4" />} onClick={() => setMenuOpen('bedrijf')}>Bedrijf{bedrijfNu ? `: ${BEDRIJF_NAMEN[bedrijfNu] ?? bedrijfNu}` : ''}</MenuKnop>}
               {soort === 'space' && onToegang && <MenuKnop icoon={<Lock className="h-4 w-4" />} onClick={() => { sluit(); onToegang() }}>Verantwoordelijke en toegang</MenuKnop>}
               {soort !== 'space' && (isEigenPrive || !eigen.length) && <MenuKnop icoon={isEigenPrive ? <LockOpen className="h-4 w-4" /> : <Lock className="h-4 w-4" />} onClick={() => { sluit(); wijzig({ prive: !isEigenPrive }, isEigenPrive ? 'Iedereen ziet dit weer.' : 'Enkel jij (en wie je je agenda deelt) ziet dit nu.') }}>{isEigenPrive ? 'Niet meer privé' : 'Privé maken (enkel ik)'}</MenuKnop>}
             </>}
@@ -342,6 +348,13 @@ function Rij({ diepte, soort, id, naam, kleur, eigenKleur, prive, open, onWissel
           </Popover>
           <Popover zwevend open={menuOpen === 'kleur'} onSluit={sluit} uitlijnen="rechts" className="p-3 w-64">
             <KleurKeuze waarde={eigenKleur} onKies={(k) => { sluit(); wijzig({ kleur: k }) }} leeg="Automatisch" />
+          </Popover>
+          <Popover zwevend open={menuOpen === 'bedrijf'} onSluit={sluit} uitlijnen="rechts" className="w-60 py-1 text-gray-800">
+            {([['nextgenmedia', 'NextGenMedia'], ['nextgensolutions', 'NextGenSolutions'], ['algemeen', 'Algemeen'], [null, 'Vanzelf (uit de klant)']] as const).map(([k, l]) => (
+              <MenuKnop key={l} icoon={<span className="h-3 w-3 rounded-full" style={{ background: k ? BEDRIJF_KLEUR[k] : '#e5e7eb' }} />} onClick={() => { sluit(); wijzig({ bedrijf: k }, k ? `Deze map hoort nu bij ${l}.` : 'Het bedrijf komt weer vanzelf uit de klant.') }}>
+                <span className={bedrijfNu === k ? 'font-semibold' : ''}>{l}</span>
+              </MenuKnop>
+            ))}
           </Popover>
           <Popover zwevend open={menuOpen === 'klant'} onSluit={sluit} uitlijnen="rechts">
             <KlantLijst boom={boom} gekozen={klantId ?? null} onKies={(k) => { sluit(); wijzig({ client_id: k }, k ? 'Gekoppeld aan de klant.' : 'Klant losgekoppeld.') }} />

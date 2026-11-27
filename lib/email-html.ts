@@ -52,6 +52,7 @@ function ngmHtml(opts: EmailHtmlOpts): string {
         <tr><td style="padding:18px 32px 20px;background:${NGM.woud}">
           <p style="margin:0;font-size:12px;line-height:1.6;color:${NGM.mos}">
             ${m.naam} · <a href="mailto:${m.adres}" style="color:${NGM.mos};text-decoration:none">${m.adres}</a> · <a href="https://${m.website}" style="color:${NGM.mos};text-decoration:none">${m.website}</a><br>
+            ${m.voettekst ? `${escapeHtml(m.voettekst)}<br>` : ''}
             <span style="font-family:'DM Mono','Courier New',monospace;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:${NGM.zonnegeel}">${NGM.baseline}</span>
           </p>
         </td></tr>
@@ -97,6 +98,7 @@ function ngsHtml(opts: EmailHtmlOpts): string {
         <tr><td style="padding:18px 32px 20px;background:${NGS.kalk};border-top:1px solid ${NGS.lijn}">
           <p style="margin:0;font-size:12px;line-height:1.6;color:${NGS.tekst}">
             ${m.naam} · ${m.adres} · <a href="https://${m.website}" style="color:${NGS.blauw};text-decoration:none">${m.website}</a><br>
+            ${m.voettekst ? `${escapeHtml(m.voettekst)}<br>` : ''}
             <span style="font-family:'Courier New',monospace;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:${NGS.tekstSterk}">${NGS.tagline}</span>
           </p>
         </td></tr>
@@ -186,5 +188,6 @@ export function buildEmailText(opts: EmailHtmlOpts): string {
   if (opts.ctaText && opts.ctaLink) t += `\n\n${opts.ctaText}: ${opts.ctaLink}`
   const m = merkStijl(opts.merk)
   t += `\n\n— ${m.naam} · ${m.adres}`
+  if (m.voettekst) t += `\n${m.voettekst}`
   return t
 }

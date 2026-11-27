@@ -10,6 +10,8 @@ import { Kop, INP } from './ui'
 type Lid = {
   id: string; naam: string; rol: string | null; expertises: string[]; foto_url: string | null
   expert_zichtbaar: boolean; meeting_zichtbaar: boolean; meeting_agenda_id: string | null; clickup_user_id: number | null; klantapp_volgorde: number | null
+  /** Bij welk bedrijf in Meeting boeken; leeg = beide. */
+  klantapp_bedrijven?: string[]
 }
 type Data = { leden: Lid[]; agendas: { id: string; naam: string; gekoppeld: boolean }[]; clickupLeden: { id: number; naam: string }[]; instelling: { diensten_iedereen: boolean } }
 
@@ -100,6 +102,20 @@ export function SectieTeam() {
               </div>
               <Schakel aan={l.expert_zichtbaar} onZet={(v) => zetLid(l, { expert_zichtbaar: v })} icoon={Sparkles} titel="Kies jouw expert" sub="Bij diensten en consultancy aanvragen" />
               <Schakel aan={l.meeting_zichtbaar} onZet={(v) => zetLid(l, { meeting_zichtbaar: v })} icoon={Video} titel="Meeting boeken" sub="Klant kan een meeting met deze persoon boeken" />
+              {l.meeting_zichtbaar && (
+                <div>
+                  <p className="block text-[11px] font-medium text-gray-600 mb-1">Voor klanten van</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {([['nextgenmedia', 'NextGenMedia'], ['nextgensolutions', 'NextGenSolutions']] as const).map(([k, lbl]) => {
+                      const nu = l.klantapp_bedrijven ?? []
+                      const aan = nu.includes(k)
+                      return <button key={k} type="button" aria-pressed={aan} onClick={() => zetLid(l, { klantapp_bedrijven: aan ? nu.filter((x) => x !== k) : [...nu, k] })}
+                        className={`rounded-full border px-2.5 py-1 text-xs ${aan ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700 hover:border-gray-400'}`}>{lbl}</button>
+                    })}
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-1">{(l.klantapp_bedrijven ?? []).length ? 'Een klant van enkel het andere bedrijf ziet deze persoon niet.' : 'Niets aangeduid = voor klanten van beide bedrijven.'}</p>
+                </div>
+              )}
               {l.meeting_zichtbaar && (
                 <div>
                   <label className="block text-[11px] font-medium text-gray-600 mb-1" htmlFor={`ag-${l.id}`}>Agenda voor vrije momenten</label>

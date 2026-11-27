@@ -60,8 +60,8 @@ export default async function VerkoopPagina({ searchParams }: { searchParams: { 
         <section className="card-base space-y-2">
           <h2 className="font-semibold text-sm">Salesactiviteit (Account-based marketing)</h2>
           {!c.activiteit.length ? <p className="text-sm text-gray-500">Nog geen gesprekken genoteerd bij Account-based marketing in deze periode.</p> : (
-            <table className="w-full text-sm"><thead><tr className="text-left text-[11px] text-gray-500"><th className="py-1 font-medium">Wie</th><th className="font-medium">Gesprekken</th><th className="font-medium">Gesproken</th><th className="font-medium">Interesse</th><th className="font-medium">Niet bereikt</th></tr></thead>
-              <tbody className="divide-y divide-gray-50">{c.activiteit.map((a) => <tr key={a.wie}><td className="py-1">{a.wie}</td><td>{a.gesprekken}</td><td>{a.gesproken}</td><td>{a.interesse}</td><td>{a.nietOpgenomen}</td></tr>)}</tbody></table>
+            <table className="w-full text-sm"><thead><tr className="text-left text-[11px] text-gray-500"><th className="py-1 font-medium">Wie</th><th className="font-medium">Gesprekken</th><th className="font-medium">Gesproken</th><th className="font-medium">Interesse</th><th className="font-medium">Niet bereikt</th><th className="font-medium">Media</th><th className="font-medium">Solutions</th></tr></thead>
+              <tbody className="divide-y divide-gray-50">{c.activiteit.map((a) => <tr key={a.wie}><td className="py-1">{a.wie}</td><td>{a.gesprekken}</td><td>{a.gesproken}</td><td>{a.interesse}</td><td>{a.nietOpgenomen}</td><td>{a.media ?? 0}</td><td>{a.solutions ?? 0}</td></tr>)}</tbody></table>
           )}
         </section>
         <section className="card-base space-y-2">
