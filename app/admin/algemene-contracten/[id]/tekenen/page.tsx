@@ -4,12 +4,12 @@ import { ChevronLeft } from 'lucide-react'
 import { createAdminSupabaseClient, requireAdmin } from '@/lib/supabase/server'
 import { leesProfiel } from '@/lib/account-server'
 import { laadContract, pdfLink } from '@/lib/algemene-contracten/server'
-import { standaardZone } from '@/lib/algemene-contracten/model'
+import { handtekeningenOns, persoonVan, redenOnsNiet, standaardZone, wieMoetNog, zoneVoor, type AlgemeenContract } from '@/lib/algemene-contracten/model'
 import { AcTekenScherm } from './teken-scherm'
 
 export const dynamic = 'force-dynamic'
 
-/** Tekenen namens NextGenMedia en/of de plek voor de andere partij aanduiden. Enkel zaakvoerders. */
+/** Tekenen namens NextGen Agency BV (elk met het eigen account) en/of de plek voor de andere partij aanduiden. Enkel zaakvoerders. */
 export default async function AcTekenenPagina({ params }: { params: Promise<{ id: string }> }) {
   const ik = await requireAdmin()
   if (!ik) redirect('/admin')
@@ -21,11 +21,18 @@ export default async function AcTekenenPagina({ params }: { params: Promise<{ id
   const [pdfUrl, profiel, { data: open }] = await Promise.all([
     pdfLink(admin, c, { seconden: 3600 }),
     leesProfiel(ik).catch(() => null),
-    // Wat daarna nog op onze handtekening wacht (oudste eerst), voor "Ondertekenen en volgende".
-    admin.from('algemene_contracten').select('id').eq('ons_nodig', true).is('ons_getekend_op', null).is('gearchiveerd_op', null).neq('id', id).order('created_at').limit(1),
+    // Wat daarna nog op jouw handtekening wacht (oudste eerst), voor "Ondertekenen en volgende".
+    admin.from('algemene_contracten').select('id, ons_nodig, ondertekenaar, ons_tekenaars, ons_handtekeningen, ons_getekend_op, ons_getekend_door, ons_zone, gearchiveerd_op')
+      .eq('ons_nodig', true).is('ons_getekend_op', null).is('gearchiveerd_op', null).neq('id', id).order('created_at').limit(200),
   ])
   const naam = (profiel ? `${profiel.voornaam} ${profiel.achternaam}`.trim() : '') || (ik.email ?? '').split('@')[0]
+  const persoon = persoonVan(naam)
   const paginas = c.paginas ?? 1
+  const mijn = persoon ? handtekeningenOns(c).find((h) => h.persoon.toLowerCase() === persoon.toLowerCase()) ?? null : null
+  const reden = redenOnsNiet(c, persoon)
+  // Collega's die nog tekenen en hun plaats al kozen: grijs op de PDF, zodat je er niet over tekent.
+  const anderen = wieMoetNog(c).filter((p) => p !== persoon && c.ons_zones?.[p]).map((p) => ({ persoon: p, zone: c.ons_zones![p] }))
+  const volgende = ((open ?? []) as AlgemeenContract[]).find((x) => persoon && wieMoetNog(x).includes(persoon))
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -41,12 +48,14 @@ export default async function AcTekenenPagina({ params }: { params: Promise<{ id
         pdfUrl={pdfUrl}
         naam={naam}
         tegenpartij={c.tegenpartij}
-        onsKan={c.ons_nodig && !c.ons_getekend_op && !c.gearchiveerd_op}
-        onsGetekend={c.ons_getekend_op ? { door: c.ons_getekend_door, op: c.ons_getekend_op } : null}
+        onsKan={!reden}
+        reden={reden}
+        onsGetekend={mijn ? { door: mijn.naam, op: mijn.op } : null}
+        anderen={anderen}
         partijPlaatsen={c.partij_nodig && !c.partij_getekend_op && !c.gearchiveerd_op}
-        beginOns={c.ons_zone ?? standaardZone('ons', paginas)}
+        beginOns={persoon ? zoneVoor(c, persoon, paginas) : standaardZone('ons', paginas)}
         beginPartij={c.partij_zone ?? standaardZone('partij', paginas)}
-        volgendeId={((open ?? []) as { id: string }[])[0]?.id ?? null}
+        volgendeId={volgende?.id ?? null}
       />
     </div>
   )

@@ -13,7 +13,8 @@ export type Vak = {
   key: string
   /** Wat in het vak staat zolang er nog geen handtekening is. */
   label: string
-  kleur: 'geel' | 'blauw'
+  /** Geel = jouw handtekening, blauw = de andere partij, grijs = een collega die nog tekent. */
+  kleur: 'geel' | 'blauw' | 'grijs'
   zone: Zone
   /** De getekende handtekening (PNG data-URL), om te tonen in het vak. */
   png?: string | null
@@ -26,6 +27,7 @@ export type Vak = {
 const STIJL = {
   geel: { vak: 'border-amber-500 bg-amber-100/60', tekst: 'text-amber-900', hoek: 'bg-amber-600' },
   blauw: { vak: 'border-blue-500 bg-blue-100/60', tekst: 'text-blue-900', hoek: 'bg-blue-600' },
+  grijs: { vak: 'border-dashed border-gray-400 bg-gray-100/50', tekst: 'text-gray-600', hoek: 'bg-gray-500' },
 }
 
 /**

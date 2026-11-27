@@ -190,7 +190,7 @@ async function main() {
     assert.equal(c.partij_zone.x, 60, 'de plek voor de andere partij is mee bewaard')
     assert.ok(a.opslag.has('origineel/x/huur.pdf'), 'origineel blijft')
     assert.ok(a.t.algemene_contract_events.some((e) => e.actie === 'ons_getekend'))
-    await assert.rejects(server.tekenOns(a, 'c1', { handtekening: hand }, { userId: 'u', email: 'b@test', naam: 'Bram Reinquin' }), /al door ons ondertekend/)
+    await assert.rejects(server.tekenOns(a, 'c1', { handtekening: hand }, { userId: 'u', email: 'b@test', naam: 'Bram Reinquin' }), /al ondertekend/)
   })
 
   await test('versturen: persoonlijke link, PDF als bijlage, link niet in het logboek', async () => {
@@ -297,6 +297,72 @@ async function main() {
     assert.equal(per('algemeen:Bram')?.wat, '2 algemene contracten tekenen')
     assert.equal(per('algemeen:Bram')?.dringend, true)
     assert.equal(per('algemeen:Bram')?.href, '/admin/algemene-contracten/a/tekenen')
+  })
+
+
+  await test('meerdere ondertekenaars: elk tekent apart, pas getekend als iedereen tekende, taak per persoon', async () => {
+    const a = nepAdmin({ contracten: [contract({ ondertekenaar: 'Bram', ons_tekenaars: ['Bram', 'Chiara'], partij_nodig: false })] })
+    a.opslag.set('origineel/x/huur.pdf', await voorbeeldPdf(2))
+    const hand = await pngDataUrl()
+    const c = a.t.algemene_contracten[0]
+    assert.deepEqual(model.wieMoetNog(c), ['Bram', 'Chiara'])
+    const r1 = await server.tekenOns(a, 'c1', { handtekening: hand }, { userId: 'u1', email: 'bram@test', naam: 'Bram Reinquin' })
+    assert.equal(r1.klaar, false)
+    assert.deepEqual(r1.nog, ['Chiara'])
+    assert.equal(c.ons_getekend_op, null, 'nog niet getekend: Chiara moet nog')
+    assert.equal(model.statusVan(c), 'wacht_op_ons')
+    assert.equal(model.statusLabel(c), 'Wacht op Chiara')
+    const taken = algemeneTaken([c], new Date('2026-11-11T10:00:00Z'))
+    assert.deepEqual(taken.map((x) => x.id), ['algemeen:Chiara'], 'Bram tekende: enkel Chiara heeft nog een taak')
+    // Chiara kiest eerst haar plaats, dan tekent ze op die plaats.
+    await server.wijzigContract(a, 'c1', { mijn_zone: { page: 2, x: 50, y: 80, w: 180, h: 60 } }, 'chiara@test', 'Chiara Walmagh')
+    assert.equal(c.ons_zones.Chiara.x, 50)
+    await assert.rejects(server.tekenOns(a, 'c1', { handtekening: hand }, { userId: 'u1', email: 'bram@test', naam: 'Bram Reinquin' }), /al ondertekend/)
+    const r2 = await server.tekenOns(a, 'c1', { handtekening: hand }, { userId: 'u2', email: 'chiara@test', naam: 'Chiara Walmagh' })
+    assert.equal(r2.klaar, true)
+    assert.ok(c.ons_getekend_op)
+    assert.equal(c.ons_getekend_door, 'Bram Reinquin en Chiara Walmagh')
+    assert.deepEqual(c.ons_handtekeningen.map((h: any) => h.persoon), ['Bram', 'Chiara'])
+    assert.equal(c.ons_handtekeningen[1].zone.x, 50, 'op de plaats die Chiara koos')
+    assert.equal(c.versie, 3)
+    assert.equal(algemeneTaken([c]).length, 0)
+  })
+
+  await test('een handtekening van vroeger telt mee; iemand aanduiden zet het contract terug op wacht', async () => {
+    const a = nepAdmin({ contracten: [contract({ ondertekenaar: null, partij_nodig: false, ons_getekend_op: '2026-11-27T11:26:30Z', ons_getekend_door: 'Bram Reinquin', ons_zone: { page: 2, x: 8, y: 78, w: 200, h: 70 }, huidig_pad: 'getekend/c1.pdf' })] })
+    const c = a.t.algemene_contracten[0]
+    assert.deepEqual(model.handtekeningenOns(c).map((h) => h.persoon), ['Bram'])
+    assert.equal(model.statusVan(c), 'getekend')
+    await assert.rejects(server.wijzigContract(a, 'c1', { ons_nodig: true, ons_tekenaars: [] }, 'x'), /Duid aan/)
+    await server.wijzigContract(a, 'c1', { ons_tekenaars: ['Chiara'] }, 'bram@test')
+    assert.deepEqual(c.ons_tekenaars, ['Chiara', 'Bram'], 'wie al tekende, blijft erbij')
+    assert.equal(c.ons_getekend_op, null, 'Chiara moet nog: weer wachten op ons')
+    assert.equal(c.ons_handtekeningen.length, 1, 'de handtekening van Bram is apart bewaard')
+    assert.deepEqual(model.wieMoetNog(c), ['Chiara'])
+    // De plaats van Chiara: naast die van Bram.
+    assert.equal(model.zoneVoor(c, 'Chiara', 2).x, 48)
+    // Wie niet aangeduid is, mag ook tekenen.
+    assert.equal(model.redenOnsNiet(c, 'Marco'), null)
+    assert.match(String(model.redenOnsNiet(c, 'Bram')), /al ondertekend/)
+    await assert.rejects(server.verwijderContract(a, 'c1'), /handtekening/)
+  })
+
+  await test('gegevens uit de PDF: enkel wat klopt, bestaande map, wie van ons tekent', () => {
+    const mappen = [{ id: 'm1', naam: 'Boekhoudkundig & fiscaal', volgorde: 1, parent_id: null }, { id: 'm2', naam: 'Auto', volgorde: 1, parent_id: 'm3' }, { id: 'm3', naam: 'Verzekeringen', volgorde: 2, parent_id: null }]
+    const v = model.leesAcVoorstel('Hier: {"titel":"Volmacht Carmans Accountants","map":"Boekhoudkundig & fiscaal","tegenpartij":"Carmans G. Accountants & Belastingconsulenten BV","tegenpartij_email":"Petra.Surinx@carmansaccountants.be","begin_datum":"2026-11-06","eind_datum":"2026-02-30","labels":["volmacht","btw","fiscaal","x","y"],"ons_nodig":true,"ons_tekenaars":["Bram Reinquin","Chiara Walmagh","Jan"],"partij_nodig":false,"notitie":"Volmacht voor btw en Ondernemingsloket."}', mappen)
+    assert.equal(v.titel, 'Volmacht Carmans Accountants')
+    assert.equal(v.map_id, 'm1')
+    assert.equal(v.tegenpartij_email, 'petra.surinx@carmansaccountants.be')
+    assert.equal(v.begin_datum, '2026-11-06')
+    assert.equal(v.eind_datum, null, '30 februari bestaat niet')
+    assert.deepEqual(v.labels, ['volmacht', 'btw', 'fiscaal', 'x'])
+    assert.deepEqual(v.ons_tekenaars, ['Bram', 'Chiara'])
+    assert.equal(v.partij_nodig, false)
+    assert.equal(model.leesAcVoorstel('{"map":"Verzekeringen / Auto","tegenpartij":"NextGen Agency BV","tegenpartij_email":"info@nextgenmedia.be"}', mappen).map_id, 'm2')
+    const eigen = model.leesAcVoorstel('{"tegenpartij":"NextGen Agency BV","tegenpartij_email":"info@nextgenmedia.be"}', mappen)
+    assert.equal(eigen.tegenpartij, null, 'nooit onszelf als andere partij')
+    assert.equal(eigen.tegenpartij_email, null)
+    assert.deepEqual(model.leesAcVoorstel('geen json', mappen).labels, [])
   })
 
   console.log(`\n${ok} tests geslaagd\n`)
