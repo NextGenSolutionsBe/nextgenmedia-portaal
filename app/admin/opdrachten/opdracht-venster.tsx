@@ -440,7 +440,7 @@ export function OpdrachtVenster({ o, nieuwKolom, klanten, contracten, facturen, 
           <button type="button" onClick={sluit} className="btn-secondary ml-auto">Sluiten</button>
           {o && (
             <button type="button" onClick={() => onVerwijder(o)} title="Kaart verwijderen" aria-label="Kaart verwijderen"
-              className="h-10 w-10 rounded-xl flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4" /></button>
+              className="h-10 px-3 rounded-xl flex items-center gap-1.5 text-sm font-medium text-red-700 border border-red-200 bg-white hover:bg-red-50"><Trash2 className="h-4 w-4" /><span className="hidden sm:inline">Verwijderen</span></button>
           )}
         </footer>
       </aside>

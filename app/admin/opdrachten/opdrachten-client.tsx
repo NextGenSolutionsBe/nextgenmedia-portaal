@@ -170,14 +170,16 @@ export function OpdrachtenClient({ startBedrijf = '' }: { startBedrijf?: Bedrijf
   }, [zetStatus])
 
   const verwijder = async (o: KaartOpdracht) => {
-    if (!confirm(`"${o.titel}" verwijderen?\n\nGaat het project niet door, zet de kaart dan op Verloren: zo blijft ze terugvindbaar. Verwijderen haalt ook alle notities weg.`)) return
+    if (!confirm(`Kaart "${o.titel}" verwijderen?\n\nDe notities van de kaart gaan mee weg. Mails, meetings, offertes en contracten blijven bestaan.\nGaat het project gewoon niet door? Zet de kaart dan op Verloren, zo blijft ze terugvindbaar.`)) return
     try {
       const res = await fetch(`/api/admin/opdrachten?id=${o.id}`, { method: 'DELETE' })
-      const j = await res.json(); if (!res.ok) throw new Error(j.error)
+      const j = await res.json().catch(() => ({})); if (!res.ok) throw new Error(j.error || 'Verwijderen mislukt')
       setRijen((p) => p.filter((x) => x.id !== o.id))
       setVenster(null)
-      toast.success('Verwijderd.')
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt') }
+      toast.success(j.naar ? `Verwijderd. Wat eraan hing staat nu op "${j.naar.titel}".` : 'Kaart verwijderd.')
+      // Een andere kaart kan het contract of de offerte overgenomen hebben.
+      if (j.naar) void laad({ stil: true })
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Verwijderen mislukt', { duration: 9000 }) }
   }
 
   const vensterKaart = venster?.id ? rijen.find((r) => r.id === venster.id) ?? null : null
@@ -298,6 +300,7 @@ export function OpdrachtenClient({ startBedrijf = '' }: { startBedrijf?: Bedrijf
         <KanbanBord kaarten={zichtbaar} laden={laden} opvolging={opvolging} voor={<AbmKolom onVernieuw={() => laad({ stil: true })} />} onVernieuw={() => laad({ stil: true })}
           onOpen={(o) => setVenster({ id: o.id, kolom: kolomVan(o.status) })}
           onVerplaats={verplaats}
+          onVerwijder={verwijder}
           onNieuw={(k) => setVenster({ id: null, kolom: k })} />
       ) : (
         <Lijst kaarten={zichtbaar} onOpen={(o) => setVenster({ id: o.id, kolom: kolomVan(o.status) })} />

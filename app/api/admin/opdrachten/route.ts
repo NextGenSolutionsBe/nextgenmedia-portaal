@@ -17,6 +17,7 @@ import {
 } from '@/lib/opdrachten-kanban'
 import { laadAflettering } from '@/lib/contracten/aflettering-server'
 import { voegNotitieToe, notitieSamenvatting, type Auteur } from '@/lib/opdrachten-notities'
+import { verwijderKaart } from '@/lib/opdrachten-verwijderen-server'
 import { leesAdminIdentiteit } from '@/lib/admin-identiteit'
 import type { OfferteOpKaart } from '@/lib/offertes'
 
@@ -608,17 +609,18 @@ export async function DELETE(req: NextRequest) {
     if (!id) return NextResponse.json({ error: 'id ontbreekt' }, { status: 400 })
 
     const admin = createAdminSupabaseClient()
-    const { error } = await admin.from('opdrachten').delete().eq('id', id)
-    if (error) throw new Error(error.message)
+    // Wat aan de kaart hangt verhuist of wordt losgekoppeld (anders weigert de databank).
+    const uit = await verwijderKaart(admin, id, await auteurVan(actor))
+    if (!uit.ok) return NextResponse.json({ error: uit.reden }, { status: uit.status })
 
     const meta = requestMeta(req)
     await logAudit({
       action: 'opdracht.delete', entityType: 'opdracht', entityId: id,
-      summary: 'Opdracht verwijderd',
+      summary: uit.naar ? `Opdracht verwijderd; contract of offerte naar "${uit.naar.titel}"` : 'Opdracht verwijderd',
       actorUserId: actor.id, actorEmail: actor.email ?? null, actorRole: 'admin',
       ip: meta.ip, userAgent: meta.userAgent,
     })
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({ ok: true, naar: uit.naar })
   } catch (err) {
     return NextResponse.json({ error: safeMessage(err) }, { status: 400 })
   }
