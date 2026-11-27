@@ -292,6 +292,10 @@ Nieuwe kolom `ngs_deals.client_id` (leeg, FK naar klanten met ON DELETE SET NULL
 
 Nieuwe kolommen (leeg): `purchases.client_id`, `purchases.opdracht_id`, `cost_entries.opdracht_id`, `team_taken.beloofd_aan`, `werkinstructies.soort` (standaard `instructie`). Nieuwe tabellen met RLS aan (enkel service-role): `ritme_weekoverleg`, `ritme_kwartaaldoelen`, `ritme_beslissingen`, `ritme_stemmen`, `een_op_een`. Instellingen in `app_settings`: `maanddoelen`, `intern_uurtarief`, `scorecard`. Geen backfill. Checksums voor en na gelijk: `purchases` 2 rijen befd59039b73bf9eaf2e3d527cbfd433, `cost_entries` 4 rijen 7b739133a0827326ed614e1e524411e0, `team_taken` 6 rijen 242cc99a8f0917ecb1f16d297d6bd367, `werkinstructies` 0 rijen. Terugdraaien: `supabase/terugdraaien/fase7.sql`.
 
+## Fase 8: documentatie (27 nov 2026)
+
+"NextGen Agency: de app van A tot Z" (Claude Doc) is bijgewerkt met fasen 3 tot 7, telkens in het hoofdstuk waar het hoort: Command Center (tab Ritme, werkvoorraad, verlengingsgesprek), 5.14 Teamagenda en 5.15 Vegen of iets plannen, 7.6 tot 7.8 (wacht op de klant, klantwaarde en marge, doorgeven), 8.9 en 8.10 (bronnen en verlies, verkoopcijfers), 10.4 (minimumprijs), 13.11 (tijd, revisies, afspraken, rol op de planning), NextGenSolutions (levering en Care), 15.6 en 15.7 (omzet per bedrijf, maanddoel, export, kosten aan een klant of project) en 17.7 tot 17.9 (rollen, onboarding en vertrek, 1-op-1's, werkinstructies en gedragsafspraken). CLAUDE.md en deze voortgang volgden per fase.
+
 ## Waar we stoppen
 
-Op vraag van de zaakvoerders (26 nov 2026) gestopt na fase 2; op 27 nov 2026 hervat. Fasen 3 (teamagenda), 4 (rollen en plug-and-play), 5 (Solutions-levering), 6 (Media-levering en sales) en 7 (financieel en ritme) zijn af. Fase 8 (documentatie) volgt.
+Alle fasen (0 tot 8) zijn af op 27 nov 2026. Wat bewust niet gebouwd werd en waarom, staat per fase onder "Niet gebouwd en waarom".
