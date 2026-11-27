@@ -21,6 +21,7 @@ import { ExportKnop } from '@/components/admin/export-knop'
 import { facturenWerkmap, type FactuurExportRij } from '@/lib/excel/rapporten/facturen'
 import { zoekVeld } from '@/lib/zoekveld'
 import { MaanddoelPerBedrijf, useMaanddoelen } from './maanddoel-bedrijf'
+import { pastBijFilter, BEDRIJF_FILTERS, type BedrijfFilter } from '@/lib/bedrijven/model'
 
 /**
  * Facturen = interne facturatieplanner en communicatietool. Het team geeft aan
@@ -38,7 +39,9 @@ const MAX_DAGEN = 1200
 const sel = 'rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs'
 type WizardStaat = { invoiceId: string } | { recurringMaand: { recurring_id: string; maand: string; momentId: string } } | { datum: string } | null
 
-export function PlannerClient({ startWeergave, startDatum, startFactuur = null }: { startCategorie?: string | null; startWeergave: string | null; startDatum: string | null; startFactuur?: string | null }) {
+export function PlannerClient({ startWeergave, startDatum, startFactuur = null, startBedrijf = 'alles' }: { startCategorie?: string | null; startWeergave: string | null; startDatum: string | null; startFactuur?: string | null; startBedrijf?: BedrijfFilter }) {
+  // Weergave Alles / Media / Solutions uit de zijbalk; hier even op Alles te zetten.
+  const [bedrijf, setBedrijf] = useState<BedrijfFilter>(startBedrijf)
   const [vandaag] = useState(() => vandaagBrussel())
   const [weergave, setWeergave] = useState<Weergave>(startWeergave === 'maand' || startWeergave === 'week' ? startWeergave : 'lijst')
   const [tab, setTab] = useState<Tab>(isDatum(startDatum) || startFactuur ? 'alles' : 'te_factureren')
@@ -91,7 +94,9 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
   const ververs = useCallback(() => { cache.current.clear(); setVersie((v) => v + 1) }, [])
 
   // ── Afgeleide gegevens ──
-  const alle = useMemo(() => data?.momenten ?? [], [data])
+  // De omzetmeter en het doel per bedrijf rekenen altijd met alles; lijsten en cijfers volgen de weergave.
+  const alleBedrijven = useMemo(() => data?.momenten ?? [], [data])
+  const alle = useMemo(() => alleBedrijven.filter((m) => pastBijFilter(bedrijf, m.bedrijf)), [alleBedrijven, bedrijf])
   const gefilterd = useMemo(() => pasFiltersToe(alle, { ...filters, toonGeannuleerd: true, fase: '', categorie: null }, vandaag), [alle, filters, vandaag])
   const open = useMemo(() => gefilterd.filter((m) => tabVan(m) === 'te_factureren'), [gefilterd])
   // Achterstallig blijft in zijn eigen geplande maand; hier enkel een wegwijzer naar eerdere maanden.
@@ -115,8 +120,8 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
   const overzicht = useMemo(() => maandOverzicht(alle, ym), [alle, ym])
   const doelen = useMaanddoelen()
   const MAAND_DOEL = doelen.doelen.totaal
-  const meter = useMemo(() => omzetMeter(alle, ym, MAAND_DOEL), [alle, ym, MAAND_DOEL])
-  const perBedrijf = useMemo(() => maandPerBedrijf(alle, ym), [alle, ym])
+  const meter = useMemo(() => omzetMeter(alleBedrijven, ym, MAAND_DOEL), [alleBedrijven, ym, MAAND_DOEL])
+  const perBedrijf = useMemo(() => maandPerBedrijf(alleBedrijven, ym), [alleBedrijven, ym])
   const lijstTotaal = lijst.filter((m) => m.status !== 'geannuleerd' && m.status !== 'gecrediteerd').reduce((s, m) => s + m.bedrag_excl, 0)
   const perDag = useMemo(() => { const m = new Map<string, Moment[]>(); for (const x of gefilterd.filter((y) => filters.toonGeannuleerd || (y.status !== 'geannuleerd' && y.status !== 'gecrediteerd'))) { const l = m.get(x.datum) ?? []; l.push(x); m.set(x.datum, l) } return m }, [gefilterd, filters.toonGeannuleerd])
   const totalen = useMemo(() => dagTotalen(gefilterd), [gefilterd])
@@ -291,6 +296,11 @@ export function PlannerClient({ startWeergave, startDatum, startFactuur = null }
               ))}
             </div>
             <button type="button" onClick={() => setToonFilters((v) => !v)} className={`btn-secondary text-xs ${filtersActief(filters) ? 'ring-1 ring-black' : ''}`}><Filter className="h-3.5 w-3.5" />Filters{filtersActief(filters) ? ' •' : ''}</button>
+            {startBedrijf !== 'alles' && (
+              <select value={bedrijf} onChange={(e) => setBedrijf(e.target.value as BedrijfFilter)} className={`${sel} ${bedrijf !== 'alles' ? '!border-gray-900 font-semibold' : ''}`} aria-label="Bedrijf" title="Weergave uit de zijbalk; hier even op Alles te zetten">
+                {BEDRIJF_FILTERS.map((b) => <option key={b.key} value={b.key}>{b.key === 'alles' ? 'Alle bedrijven' : `Enkel ${b.label}`}</option>)}
+              </select>
+            )}
             {filtersActief(filters) && <button type="button" onClick={() => setFilters(LEEG_FILTERS)} className="btn-secondary text-xs"><X className="h-3.5 w-3.5" />Wissen</button>}
             <ExportKnop werkmap={exportWerkmap} label="Excel" className="btn-secondary text-xs" title="Exporteer de lijst naar Excel" />
             {laden && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}

@@ -19,6 +19,8 @@ import type { Nieuwsbrief } from '@/lib/nieuwsbrieven'
 import type { Partner } from '@/lib/partners'
 import { meetingTeam } from '@/lib/meetings/klantboeking-server'
 import { portaalEvents } from '@/lib/events-server'
+import { portaalSolutions } from '@/lib/ngs/levering-server'
+import { projectFaseLabel } from '@/lib/ngs/levering'
 
 export default async function PortalDashboard() {
   const session = await resolvePortalSession()
@@ -90,15 +92,18 @@ export default async function PortalDashboard() {
   // Dashboard: uitgelicht nieuws, snelkoppelingen en partners, enkel voor modules met recht.
   const magModule = (m: PortalModule) => MODULE_IMPLEMENTED[m] && sessionCan(session, m, 'view')
   const mag = { diensten: magModule('diensten'), consultancy: magModule('consultancy'), founders: magModule('founders'), meetings: magModule('meetings'), bestanden: magModule('files'), events: magModule('events') }
-  const [{ data: nieuwsRij }, team, evts, { data: partnerRijen }] = await Promise.all([
+  const [{ data: nieuwsRij }, team, evts, { data: partnerRijen }, solutions] = await Promise.all([
     magModule('nieuws')
       ? admin.from('nieuwsbrieven').select('id, titel, slug, categorie, categorie_label, samenvatting, cover_pad, cover_youtube_id, cover_formaat, cover_embed, blokken, uitgelicht, gepubliceerd_op, auteur_naam')
         .eq('status', 'gepubliceerd').eq('uitgelicht', true).order('gepubliceerd_op', { ascending: false }).limit(1).maybeSingle()
       : Promise.resolve({ data: null }),
-    mag.meetings ? meetingTeam(admin).catch(() => []) : Promise.resolve([]),
+    mag.meetings ? meetingTeam(admin, clientId).catch(() => []) : Promise.resolve([]),
     mag.events ? portaalEvents(admin, clientId).catch(() => []) : Promise.resolve([]),
     magModule('partners') ? admin.from('onze_partners').select('*').eq('zichtbaar', true).order('volgorde').order('created_at') : Promise.resolve({ data: [] }),
+    // Klant bij NextGen Solutions: een eigen blok (verbeterplan K86/K88).
+    magModule('solutions') ? portaalSolutions(admin, clientId).catch(() => ({ projecten: [], care: [] })) : Promise.resolve({ projecten: [], care: [] }),
   ])
+  const solutionsOpen = solutions.projecten.reduce((n, p) => n + (p.stories ?? []).filter((s) => s.magGoedkeuren).length, 0)
   const nieuwsItem = nieuwsRij ? (() => { const { blokken: _b, ...rest } = metExtra(nieuwsRij as Nieuwsbrief); void _b; return rest })() : null
   const komend = evts.filter((e) => e.status === 'gepubliceerd' && Date.parse(e.einde_op) > Date.now())
   const volgend = komend.find((e) => e.mijn.length > 0) ?? komend[0] ?? null
@@ -158,6 +163,20 @@ export default async function PortalDashboard() {
       )}
 
       {nieuwsItem && <UitgelichtNieuws item={nieuwsItem} />}
+
+      {/* NextGen Solutions: eigen blok met het eigen beeldmerk en blauw. */}
+      {(solutions.projecten.length > 0 || solutions.care.length > 0) && (
+        <Link href="/portal/solutions" className="card-base flex items-center gap-4 hover:shadow-md transition-shadow border-l-4" style={{ borderLeftColor: '#1E40AF' }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logos/nextgensolutions-icoon-128.png" alt="NextGen Solutions" className="h-10 w-10 rounded-lg shrink-0" />
+          <div className="min-w-0 flex-1">
+            <div className="text-xs text-gray-500">Software en automatisatie · NextGen Solutions</div>
+            <div className="font-semibold truncate">{solutions.projecten[0] ? `${solutions.projecten[0].titel} · ${projectFaseLabel(solutions.projecten[0].fase)}` : `${solutions.care.length} in Care`}</div>
+            {solutionsOpen > 0 && <div className="text-xs font-medium mt-0.5" style={{ color: '#1E40AF' }}>{solutionsOpen} user stor{solutionsOpen === 1 ? 'y wacht' : 'ies wachten'} op jouw akkoord</div>}
+          </div>
+          <ArrowRight className="h-4 w-4 text-gray-400 shrink-0" />
+        </Link>
+      )}
 
       <Snelkoppelingen mag={mag} team={team.map((t) => ({ id: t.id, voornaam: t.voornaam, foto_url: t.foto_url }))} event={eventMini} aantalEvents={komend.length} />
 

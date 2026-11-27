@@ -4,6 +4,7 @@ import { createClient, createAdminSupabaseClient , isActiveStaff } from '@/lib/s
 import { sendEmailMetAfzenderTerugval, EMAIL_FROM, resendKeyFor } from '@/lib/email'
 import { mailMerkVan, MERK_STIJL } from '@/lib/merk-mail'
 import { buildEmailHtml, buildEmailText } from '@/lib/email-html'
+import { laadMerkGegevens } from '@/lib/merk-mail-server'
 
 // Gebruikt cookies/sessie: nooit statisch renderen.
 export const dynamic = 'force-dynamic'
@@ -89,6 +90,7 @@ export async function POST(req: NextRequest) {
     // Merk: huisstijl en afzender (NextGenSolutions valt terug op het hoofdadres zolang dat domein niet geverifieerd is).
     const merk = mailMerkVan(b.merk)
     const van = merk === 'nextgenmedia' ? EMAIL_FROM : MERK_STIJL[merk].van
+    await laadMerkGegevens() // contactadres, website en voettekst uit Instellingen → Bedrijven
     const htmlOpts = { bodyText: body, ctaText, ctaLink, merk }
     const html = buildEmailHtml(htmlOpts)
     const text = buildEmailText(htmlOpts)

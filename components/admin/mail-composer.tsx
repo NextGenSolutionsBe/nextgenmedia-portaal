@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Mail, X, Loader2, Send, CheckCircle2 } from 'lucide-react'
 import { renderTemplate, type MailVars } from '@/lib/email-render'
 import { DEFAULT_TEMPLATES } from '@/lib/email-templates-defaults'
-import { MERK_STIJL, MAIL_MERKEN, type MailMerk } from '@/lib/merk-mail'
+import { MERK_STIJL, MAIL_MERKEN, merkStijl, zetMerkGegevens, type MailMerk, type MerkGegevens } from '@/lib/merk-mail'
 import { NGM } from '@/lib/ngm-merk'
 import { NGS } from '@/lib/ngs-merk'
 import { zonderLosseLink } from '@/lib/email-html'
@@ -92,7 +92,19 @@ export function MailDialog({ context, onClose, onSent }: { context: MailContext;
     const a = pr.adressen
     return (kind === 'contract' ? a.contract : kind === 'offerte' ? a.offerte : null) || a.klant || a.contract || a.offerte || ''
   }
-  const stijl = MERK_STIJL[context.type === 'meeting' ? 'nextgenmedia' : merk]
+  // Contactadres, website en voettekst uit Instellingen → Bedrijven, zodat het voorbeeld de voet toont zoals ze vertrekt.
+  const [, setGegevens] = useState(0)
+  useEffect(() => {
+    let weg = false
+    fetch('/api/admin/bedrijven', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((j: { catalogus?: { bedrijven?: ({ slug: string } & MerkGegevens & { email?: string | null })[] } } | null) => {
+      if (weg || !j?.catalogus?.bedrijven) return
+      const g: Partial<Record<MailMerk, MerkGegevens>> = {}
+      for (const b of j.catalogus.bedrijven) if ((MAIL_MERKEN as string[]).includes(b.slug)) g[b.slug as MailMerk] = { adres: b.email, website: b.website, voettekst: b.voettekst }
+      zetMerkGegevens(g); setGegevens((x) => x + 1)
+    }).catch(() => null)
+    return () => { weg = true }
+  }, [])
+  const stijl = merkStijl(context.type === 'meeting' ? 'nextgenmedia' : merk)
   // Wisselen van merk past ook de merknaam in onderwerp en tekst aan ("Met vriendelijke groet, NextGenMedia").
   const kiesMerk = (m: MailMerk) => {
     if (m === merk) return
@@ -536,7 +548,8 @@ function MailVoorbeeld({ ngm, stijl, body, knop }: { ngm: boolean; stijl: (typeo
         {knop && <span className="inline-block mt-2 rounded-full px-4 py-1.5 text-xs font-bold" style={{ background: NGM.zonnegeel, color: NGM.woud }}>{knop}</span>}
       </div>
       <div className="px-3 py-2 text-[10px] leading-relaxed" style={{ background: NGM.woud, color: NGM.mos }}>
-        {stijl.naam} · {stijl.adres}<br />
+        {stijl.naam} · {stijl.adres} · {stijl.website}<br />
+        {stijl.voettekst && <>{stijl.voettekst}<br /></>}
         <span className="uppercase tracking-wider" style={{ color: NGM.zonnegeel }}>{NGM.baseline}</span>
       </div>
     </div>
@@ -554,7 +567,8 @@ function MailVoorbeeld({ ngm, stijl, body, knop }: { ngm: boolean; stijl: (typeo
         {knop && <span className="inline-block mt-2 rounded-full px-4 py-1.5 text-xs font-semibold text-white" style={{ background: NGS.blauw }}>{knop} →</span>}
       </div>
       <div className="px-3 py-2 text-[10px] leading-relaxed border-t" style={{ color: NGS.tekst, borderColor: NGS.lijn }}>
-        {stijl.naam} · {stijl.adres}<br />
+        {stijl.naam} · {stijl.adres} · {stijl.website}<br />
+        {stijl.voettekst && <>{stijl.voettekst}<br /></>}
         <span className="uppercase tracking-wider font-mono" style={{ color: NGS.tekstSterk }}>{NGS.tagline}</span>
       </div>
     </div>

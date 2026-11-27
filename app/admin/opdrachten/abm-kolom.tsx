@@ -317,6 +317,12 @@ function BedrijfDetail({ b, onSluit, onVernieuw, onInteresse }: { b: Bedrijf; on
   const [gesprek, setGesprek] = useState<{ weergave: string; tel: string } | null>(null)
   const [uitkomst, setUitkomst] = useState<AbmUitkomst | null>(null)
   const [opvolgen, setOpvolgen] = useState<string | null>(b.opvolgen_op ?? null)
+  const [voor, setVoor] = useState<string | null>(b.bedrijf ?? null)
+  const zetVoor = async (k: string) => {
+    const vorig = voor, nieuw = voor === k ? null : k
+    setVoor(nieuw)
+    try { await post('/api/admin/abm', { actie: 'bedrijf', id: b.id, bedrijf: nieuw }); onVernieuw() } catch (e) { setVoor(vorig); toast.error(e instanceof Error ? e.message : 'Mislukt') }
+  }
   const [gegevensOpen, setGegevensOpen] = useState(false)
   const nummers = useMemo(() => belNummers(b.telefoon), [b.telefoon])
   const vandaag = vandaagBE()
@@ -472,6 +478,15 @@ function BedrijfDetail({ b, onSluit, onVernieuw, onInteresse }: { b: Bedrijf; on
           <span className="text-[11px] text-gray-400 hidden sm:inline">Cmd/Ctrl + Enter om toe te voegen</span>
           <button type="button" onClick={voegToe} disabled={bezig === 'notitie' || (!tekst.trim() && !uitkomst)} className="btn-primary !py-1.5 text-sm ml-auto">{bezig === 'notitie' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}Toevoegen</button>
         </div>
+      </section>
+
+      {/* Voor welk bedrijf: zo staan de belresultaten per bedrijf in de verkoopcijfers. */}
+      <section className="flex items-center gap-2 flex-wrap">
+        <h4 className="label-mono text-[10px] uppercase text-gray-500">Voor</h4>
+        {([['nextgenmedia', 'NextGenMedia'], ['nextgensolutions', 'NextGenSolutions']] as const).map(([k, l]) => (
+          <button key={k} type="button" onClick={() => zetVoor(k)} aria-pressed={voor === k}
+            className={`rounded-full border px-2.5 py-1 text-xs ${voor === k ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700 hover:border-gray-400'}`}>{l}</button>
+        ))}
       </section>
 
       {/* Opvolgen */}

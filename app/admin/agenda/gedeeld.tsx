@@ -26,6 +26,8 @@ export type BoomData = {
   meetings: boolean
   /** Mag shoots plannen in de Shoot planner. */
   shoots?: boolean
+  /** Klanten die maar bij één bedrijf klant zijn (voor kleur en filter op bedrijf). */
+  klantBedrijf?: Record<string, string>
   rechten: { toevoegen?: boolean; aanpassen?: boolean; verwijderen?: boolean; instellingen?: boolean }
 }
 
@@ -45,6 +47,7 @@ export function kleurContext(b: BoomData): KleurContext {
     labels: Object.fromEntries(b.labels.map((l) => [l.id, l])),
     lijsten: Object.fromEntries(b.lijsten.map((l) => [l.id, l])),
     mappen: Object.fromEntries(b.mappen.map((m) => [m.id, m])),
+    klantBedrijf: b.klantBedrijf ?? {},
   }
 }
 

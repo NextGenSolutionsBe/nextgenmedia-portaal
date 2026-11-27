@@ -9174,3 +9174,19 @@ ALTER TABLE public.ritme_kwartaaldoelen ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ritme_beslissingen ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ritme_stemmen ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.een_op_een ENABLE ROW LEVEL SECURITY;
+
+-- ── Open punten verbeterplan (27 nov 2026) ───────────────────────────────────
+-- E39: bedrijf op een agenda-map (kleur en filter op bedrijf). I71: voor welk bedrijf een
+-- ABM-bedrijf benaderd wordt. K89: bij welk bedrijf een teamlid in Meeting boeken staat
+-- (leeg = beide). Enkel toevoegend, leeg, geen backfill. Terugdraaien: supabase/terugdraaien/open-punten.sql
+alter table public.ag_mappen add column if not exists bedrijf text;
+alter table public.abm_bedrijven add column if not exists bedrijf text;
+alter table public.personeel add column if not exists klantapp_bedrijven text[];
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'ag_mappen_bedrijf_check') then
+    alter table public.ag_mappen add constraint ag_mappen_bedrijf_check check (bedrijf is null or bedrijf in ('nextgenmedia', 'nextgensolutions', 'algemeen'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'abm_bedrijven_bedrijf_check') then
+    alter table public.abm_bedrijven add constraint abm_bedrijven_bedrijf_check check (bedrijf is null or bedrijf in ('nextgenmedia', 'nextgensolutions', 'algemeen'));
+  end if;
+end $$;

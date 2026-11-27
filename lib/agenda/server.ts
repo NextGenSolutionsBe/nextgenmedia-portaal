@@ -35,7 +35,7 @@ export async function kijkerVan(admin: Admin, p: { userId: string; naam: string 
 }
 
 const SPACE_VELDEN = 'id, naam, kleur, prive, volgorde, clickup_id, verantwoordelijke_id'
-const MAP_VELDEN = 'id, space_id, parent_id, naam, kleur, client_id, prive, volgorde, clickup_id'
+const MAP_VELDEN = 'id, space_id, parent_id, naam, kleur, client_id, prive, volgorde, clickup_id, bedrijf'
 const LIJST_VELDEN = 'id, space_id, map_id, naam, kleur, client_id, prive, volgorde, clickup_id, statussen'
 
 /** Met `metVerwijderd` ook wat in de prullenbak zit (met verwijderd_op), om terug te zetten. */
@@ -139,11 +139,11 @@ export async function metToegewezen(admin: Admin, ruw: RuwItem[], z: Zicht, opts
 /** Meetings uit de Meeting Inplanner in dezelfde vorm (enkel voor wie de module Meetings mag zien). */
 export async function meetingsInBereik(admin: Admin, van: string, tot: string, persoonVoorEmail: Map<string, string>): Promise<{ items: Item[]; clickupIds: Set<string>; perClickup: Map<string, string> }> {
   const { data } = await admin.from('klant_meetings')
-    .select('id, titel, beschrijving, starts_at, ends_at, status, client_id, klant_naam, meet_url, locatie, vorm, organisator_email, clickup_task_id, bron, updated_at, deelnemers, afgevinkt_op, afgevinkt_door')
+    .select('id, titel, beschrijving, starts_at, ends_at, status, client_id, klant_naam, meet_url, locatie, vorm, organisator_email, clickup_task_id, bron, updated_at, deelnemers, afgevinkt_op, afgevinkt_door, bedrijf')
     .lt('starts_at', tot).gt('ends_at', van).neq('status', 'geannuleerd').limit(1000)
   const clickupIds = new Set<string>()
   const items: Item[] = []
-  for (const m of (data ?? []) as { id: string; titel: string | null; beschrijving: string | null; starts_at: string; ends_at: string; status: string; client_id: string | null; klant_naam: string | null; meet_url: string | null; locatie: string | null; vorm: string | null; organisator_email: string | null; clickup_task_id: string | null; bron: string | null; updated_at: string; deelnemers: unknown; afgevinkt_op?: string | null; afgevinkt_door?: string | null }[]) {
+  for (const m of (data ?? []) as { id: string; titel: string | null; beschrijving: string | null; starts_at: string; ends_at: string; status: string; client_id: string | null; klant_naam: string | null; meet_url: string | null; locatie: string | null; vorm: string | null; organisator_email: string | null; clickup_task_id: string | null; bron: string | null; updated_at: string; deelnemers: unknown; afgevinkt_op?: string | null; afgevinkt_door?: string | null; bedrijf?: string | null }[]) {
     if (m.clickup_task_id) clickupIds.add(m.clickup_task_id)
     const toegewezen: string[] = []
     const org = m.organisator_email ? persoonVoorEmail.get(m.organisator_email.toLowerCase()) : null
@@ -158,7 +158,7 @@ export async function meetingsInBereik(admin: Admin, van: string, tot: string, p
       status: m.afgevinkt_op ? 'klaar' : 'open', clickup_status: null, clickup_status_kleur: null, urgent: false, prioriteit: null,
       start_op: m.starts_at, eind_op: m.ends_at, deadline_op: null, heel_dag: false, lijst_id: null, parent_id: null, client_id: m.client_id, labels: [], kleur: null,
       locatie: m.vorm === 'locatie' ? m.locatie : null, meet_url: m.meet_url, prive: false, eigenaar_id: null, toegewezen, afgerond_op: m.afgevinkt_op ?? null, afgerond_door: m.afgevinkt_door ?? null,
-      clickup_url: null, velden: m.bron === 'klantboeking' ? { Bron: 'Klantboeking' } : null, updated_at: m.updated_at,
+      clickup_url: null, velden: m.bron === 'klantboeking' ? { Bron: 'Klantboeking' } : null, updated_at: m.updated_at, bedrijf: m.bedrijf ?? null,
     })
   }
   return { items, clickupIds, perClickup: new Map((data ?? []).filter((m) => (m as { clickup_task_id: string | null }).clickup_task_id).map((m) => [(m as { clickup_task_id: string }).clickup_task_id, (m as { id: string }).id])) }

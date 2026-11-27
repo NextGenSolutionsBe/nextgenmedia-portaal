@@ -20,7 +20,7 @@ export async function laadVerkoopcijfers(admin: Admin, van: string, tot: string)
   const [kaarten, deals, notities, afspraken, reeksen, personen] = await Promise.all([
     veilig(admin.from('opdrachten').select('status, bron, stop_reden, offerte_op, offerte_via, contract_id, created_at, bedrijf, merk').gte('created_at', vanIso).lte('created_at', totIso).limit(5000)),
     veilig(admin.from('ngs_deals').select('fase, bron, verloren_reden, created_at').is('verwijderd_op', null).gte('created_at', vanIso).lte('created_at', totIso).limit(5000)),
-    veilig(admin.from('abm_notities').select('door, uitkomst, soort, created_at').gte('created_at', vanIso).lte('created_at', totIso).limit(20000)),
+    veilig(admin.from('abm_notities').select('door, uitkomst, soort, created_at, abm_id').gte('created_at', vanIso).lte('created_at', totIso).limit(20000)),
     veilig(admin.from('sales_appointments').select('starts_at, ends_at, aanwezigheid, status').eq('aanwezigheid', 'gehouden').gte('starts_at', vanIso).lte('starts_at', totIso).limit(5000)),
     laadReeksen(admin, van, tot).catch(() => []),
     veilig(admin.from('ag_personen').select('id, naam').limit(500)),
@@ -49,8 +49,20 @@ export async function laadVerkoopcijfers(admin: Admin, van: string, tot: string)
       media: verliesRedenen(media.filter((k) => kolomVan(k.status) === 'stopgezet').map((k) => k.stop_reden)),
       solutions: verliesRedenen(deals.filter((d) => d.fase === 'lost').map((d) => d.verloren_reden)),
     },
-    activiteit: salesActiviteit(notities),
+    activiteit: salesActiviteit(await metAbmBedrijf(admin, notities as (AbmNotitie & { abm_id?: string | null })[])),
     uren: { ...salesUren(gepland, gedaan), perPersoon, afspraken: afspraken.length },
   }
 }
 export type Verkoopcijfers = Awaited<ReturnType<typeof laadVerkoopcijfers>>
+
+/** Het bedrijf van het ABM-bedrijf bij elke belnotitie (voor de activiteit per bedrijf). */
+async function metAbmBedrijf(admin: Admin, notities: (AbmNotitie & { abm_id?: string | null })[]): Promise<AbmNotitie[]> {
+  const ids = [...new Set(notities.map((n) => n.abm_id).filter((x): x is string => !!x))]
+  if (!ids.length) return notities
+  const per = new Map<string, string | null>()
+  for (let i = 0; i < ids.length; i += 300) {
+    const { data } = await admin.from('abm_bedrijven').select('id, bedrijf').in('id', ids.slice(i, i + 300))
+    for (const r of (data ?? []) as { id: string; bedrijf: string | null }[]) per.set(r.id, r.bedrijf)
+  }
+  return notities.map((n) => ({ ...n, bedrijf: n.abm_id ? per.get(n.abm_id) ?? null : null }))
+}

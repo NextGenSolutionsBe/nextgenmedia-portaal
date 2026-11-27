@@ -6,6 +6,7 @@ import { mailMerkVan, MERK_STIJL } from '@/lib/merk-mail'
 import { logAudit, requestMeta } from '@/lib/audit'
 import { safeMessage } from '@/lib/api-error'
 import { AccountFout, klantAccount, maakActivatie } from '@/lib/klant-account-server'
+import { laadMerkGegevens } from '@/lib/merk-mail-server'
 
 export const dynamic = 'force-dynamic'
 const UUID = /^[0-9a-f-]{36}$/i
@@ -43,6 +44,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const van = merk === 'nextgenmedia' ? EMAIL_FROM : MERK_STIJL[merk].van
     const knop = String(b.cta_text ?? '').trim() || 'Wachtwoord kiezen'
     const { url } = await maakActivatie(admin, { clientId: id, userId: acc.userId, email: acc.email, door: user.email ?? null })
+    await laadMerkGegevens() // contactadres, website en voettekst uit Instellingen → Bedrijven
     const html = buildEmailHtml({ bodyText: tekst, ctaText: knop, ctaLink: url, merk })
     const text = buildEmailText({ bodyText: tekst, ctaText: knop, ctaLink: url, merk })
     // Voor het logboek: dezelfde mail, maar zonder de persoonlijke link.

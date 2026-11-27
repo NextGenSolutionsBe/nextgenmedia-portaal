@@ -101,7 +101,7 @@ export default async function CommandCenter({ searchParams }: { searchParams?: {
 
       {/* Op te volgen — bovenaan: concreet wie en wat, per module afgeschermd. */}
       <Suspense fallback={<div className="card-base text-sm text-gray-400">Opvolging laden…</div>}>
-        <OpvolgingPanel modules={actor?.modules ?? null} />
+        <OpvolgingPanel modules={actor?.modules ?? null} userId={actor?.userId ?? null} />
       </Suspense>
 
       {/* Vandaag — enkel wat niet al bij "Op te volgen" staat (blogs, websitefeedback, klanttaken). */}

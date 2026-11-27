@@ -11,6 +11,7 @@ import {
   belangrijkeWijziging, LAATSTE_HERINNERING_MS, HERINNERING_VOORAF_MS,
   type KlantEvent, type Inschrijving, type GeldigEvent,
 } from '@/lib/events'
+import { laadMerkGegevens } from '@/lib/merk-mail-server'
 
 /**
  * Workshops & events op de server: publiceren (Google-event, online met Meet),
@@ -252,6 +253,7 @@ export async function stuurBevestiging(admin: Admin, inschrijvingId: string): Pr
   const app = appLinkVoor(e.id)
   const doorAnder = i.ingeschreven_door_naam && i.ingeschreven_door_naam.trim().toLowerCase() !== i.naam.trim().toLowerCase() ? i.ingeschreven_door_naam : null
   const mail = bevestigingsMail(e, { naam: i.naam, email: i.email }, { appLink: app, doorAnder })
+  await laadMerkGegevens() // contactadres, website en voettekst uit Instellingen → Bedrijven
   const html = buildEmailHtml({ bodyText: mail.tekst, ctaText: mail.ctaTekst, ctaLink: mail.ctaLink })
   const sleutel = `event-bevestiging-${i.id}`
   const res = await sendEmail({
@@ -287,6 +289,7 @@ async function stuurHerinnering(admin: Admin, i: Inschrijving, e: KlantEvent): P
   if (!afzender.ok) { await zet({ herinnering_status: 'mislukt', herinnering_fout: afzender.fout }); return 'mislukt' }
   const app = appLinkVoor(e.id)
   const mail = herinneringsMail(e, { naam: i.naam, email: i.email }, { appLink: app })
+  await laadMerkGegevens() // contactadres, website en voettekst uit Instellingen → Bedrijven
   const html = buildEmailHtml({ bodyText: mail.tekst, ctaText: mail.ctaTekst, ctaLink: mail.ctaLink })
   const sleutel = `event-herinnering-${i.id}`
   const res = await sendEmail({ to: i.email, subject: mail.onderwerp, text: `${mail.tekst}\n\n${mail.ctaTekst}: ${mail.ctaLink}`, html, idempotencyKey: sleutel })

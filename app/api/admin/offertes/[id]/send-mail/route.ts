@@ -7,6 +7,7 @@ import { logAudit, requestMeta } from '@/lib/audit'
 import { leesAdminIdentiteit } from '@/lib/admin-identiteit'
 import { leesOfferte, markeerVerstuurd, publiekeLink } from '@/lib/offertes-server'
 import { fout } from '../../_fout'
+import { laadMerkGegevens } from '@/lib/merk-mail-server'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,6 +47,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const van = merk === 'nextgenmedia' ? EMAIL_FROM : MERK_STIJL[merk].van
     const link = publiekeLink(o)
     const knop = String(b.cta_text ?? '').trim() || 'Offerte bekijken'
+    await laadMerkGegevens() // contactadres, website en voettekst uit Instellingen → Bedrijven
     const html = buildEmailHtml({ bodyText: tekst, ctaText: knop, ctaLink: link, merk })
     const text = buildEmailText({ bodyText: tekst, ctaText: knop, ctaLink: link, merk })
     const t = () => new Date().toISOString()

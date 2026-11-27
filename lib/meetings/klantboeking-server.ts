@@ -7,7 +7,7 @@ import { clickupConfigured, haalSyncTaken } from '@/lib/clickup'
 import { zelfdePersoon } from '@/lib/meetings/kalender'
 import { getOrCreateSalesOrg, loadCalendar } from '@/lib/sales/service'
 import {
-  kandidaatSlots, vrijeSlots, clickupBezet, valideerBoeking, redenNietBoekbaar, bevestigingsMail, kbTitel,
+  kandidaatSlots, vrijeSlots, clickupBezet, valideerBoeking, redenNietBoekbaar, bevestigingsMail, kbTitel, teamVoorKlant,
   KB_DUUR_MIN, type Interval, type BoekingInvoer,
 } from '@/lib/meetings/klantboeking'
 import {
@@ -15,6 +15,7 @@ import {
 } from '@/lib/meetings/server'
 import { isEmail, type Persoon } from '@/lib/meetings/model'
 import { vasteBlokkenVoor } from '@/lib/agenda/team-server'
+import { laadMerkGegevens } from '@/lib/merk-mail-server'
 
 /**
  * Klantboeking — server. Klanten boeken zelf een gratis meeting: via de publieke
@@ -98,7 +99,7 @@ async function zusterIds(admin: Admin, a: Agenda): Promise<string[]> {
 // altijd naar het gekozen teamlid.
 
 export type Teamlid = { id: string; voornaam: string; achternaam: string | null; clickup_user_id: number | null; meeting_agenda_id: string | null }
-export type TeamKeuze = { id: string; naam: string; voornaam: string; rol: string | null; foto_url: string | null }
+export type TeamKeuze = { id: string; naam: string; voornaam: string; rol: string | null; foto_url: string | null; bedrijven: string[] }
 const PERSONEEL_FOTOS = 'personeel'
 
 async function leesTeamlid(admin: Admin, id: unknown): Promise<Teamlid | null> {
@@ -110,12 +111,25 @@ async function leesTeamlid(admin: Admin, id: unknown): Promise<Teamlid | null> {
   return { id: t.id, voornaam: t.voornaam, achternaam: t.achternaam, clickup_user_id: t.clickup_user_id ? Number(t.clickup_user_id) : null, meeting_agenda_id: t.meeting_agenda_id }
 }
 
-/** De teamleden waarmee een klant een meeting kan boeken, met een grote foto. */
-export async function meetingTeam(admin: Admin): Promise<TeamKeuze[]> {
-  const { data } = await admin.from('personeel').select('id, voornaam, achternaam, functie, expert_rollen, profielfoto_pad, klantapp_volgorde')
-    .eq('actief', true).eq('meeting_zichtbaar', true)
-  const lijst = ((data ?? []) as { id: string; voornaam: string; achternaam: string | null; functie: string | null; expert_rollen: string[] | null; profielfoto_pad: string | null; klantapp_volgorde: number | null }[])
+/** Bij welke bedrijven is deze klant klant (uit projecten, contracten en offertes)? */
+export async function klantBedrijvenVan(admin: Admin, clientId: string): Promise<string[]> {
+  const rijen = await Promise.all((['opdrachten', 'contracts', 'offertes'] as const).map((t) =>
+    admin.from(t).select('bedrijf').eq('client_id', clientId).in('bedrijf', ['nextgenmedia', 'nextgensolutions']).limit(200)))
+  return [...new Set(rijen.flatMap((r) => ((r.data ?? []) as { bedrijf: string }[]).map((x) => x.bedrijf)))]
+}
+
+/**
+ * De teamleden waarmee een klant een meeting kan boeken, met een grote foto. Met een klant:
+ * is die maar bij één bedrijf klant, dan enkel wie daarbij hoort (personeel.klantapp_bedrijven, leeg = beide).
+ */
+export async function meetingTeam(admin: Admin, clientId?: string | null): Promise<TeamKeuze[]> {
+  const kol = 'id, voornaam, achternaam, functie, expert_rollen, profielfoto_pad, klantapp_volgorde'
+  let { data, error } = await admin.from('personeel').select(`${kol}, klantapp_bedrijven`).eq('actief', true).eq('meeting_zichtbaar', true)
+  if (error) ({ data } = await admin.from('personeel').select(kol).eq('actief', true).eq('meeting_zichtbaar', true)) // vóór de migratie
+  let lijst = ((data ?? []) as { id: string; voornaam: string; achternaam: string | null; functie: string | null; expert_rollen: string[] | null; profielfoto_pad: string | null; klantapp_volgorde: number | null; klantapp_bedrijven?: string[] | null }[])
+    .map((t) => ({ ...t, bedrijven: t.klantapp_bedrijven ?? [] }))
     .sort((a, b) => (a.klantapp_volgorde ?? 99) - (b.klantapp_volgorde ?? 99) || a.voornaam.localeCompare(b.voornaam, 'nl'))
+  if (clientId) lijst = teamVoorKlant(lijst, await klantBedrijvenVan(admin, clientId).catch(() => []))
   const paden = lijst.map((t) => t.profielfoto_pad).filter((x): x is string => !!x)
   const urls = new Map<string, string>()
   if (paden.length && admin.storage) {
@@ -126,6 +140,7 @@ export async function meetingTeam(admin: Admin): Promise<TeamKeuze[]> {
     id: t.id, voornaam: t.voornaam, naam: [t.voornaam, t.achternaam].filter(Boolean).join(' '),
     rol: (t.expert_rollen ?? [])[0] ?? t.functie ?? null,
     foto_url: t.profielfoto_pad ? urls.get(t.profielfoto_pad) ?? null : null,
+    bedrijven: t.bedrijven,
   }))
 }
 
@@ -248,6 +263,7 @@ export async function stuurBevestiging(admin: Admin, m: MeetingRij, beheer: Behe
     onderwerp: m.boeker_reden ?? null, organisator: { naam: m.organisator_naam, email: m.organisator_email },
     viaKlantapp: beheer.soort === 'klantapp',
   })
+  await laadMerkGegevens() // contactadres, website en voettekst uit Instellingen → Bedrijven
   const html = buildEmailHtml({ bodyText: mail.tekst, ctaText: mail.ctaTekst, ctaLink: mail.ctaLink })
   const merk = beheer.soort === 'link' ? hashToken(beheer.token).slice(0, 12) : 'klantapp'
   const sleutel = `kb-${m.id}-${merk}-${new Date(m.starts_at).getTime()}${opnieuw ? `-r${Date.now()}` : ''}`

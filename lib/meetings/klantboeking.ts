@@ -11,6 +11,31 @@
 import { STANDAARD_TIJDZONE, zoneNaarIso, dag, uur, datumLang, datumKort, isEmail, tijdzoneLabel } from '@/lib/meetings/model'
 import { clickupMeetingBezet, type ClickupTaak } from '@/lib/meetings/kalender'
 
+/**
+ * Meeting boeken per bedrijf (verbeterplan K89). `bedrijven` van een teamlid = bij welk
+ * bedrijf hij in de klantapp staat (leeg = beide). Een klant die maar bij één bedrijf
+ * klant is, ziet enkel wie daarbij hoort; anders staan ze per bedrijf gegroepeerd.
+ */
+export type MetBedrijven = { bedrijven?: string[] | null }
+export function teamVoorKlant<T extends MetBedrijven>(team: T[], klantBedrijven: string[]): T[] {
+  if (klantBedrijven.length !== 1) return team
+  const b = klantBedrijven[0]
+  const uit = team.filter((t) => !t.bedrijven?.length || t.bedrijven.includes(b))
+  return uit.length ? uit : team
+}
+export function teamGroepen<T extends MetBedrijven>(team: T[]): { titel: string | null; leden: T[] }[] {
+  const enkel = (t: T, b: string) => t.bedrijven?.length === 1 && t.bedrijven[0] === b
+  const media = team.filter((t) => enkel(t, 'nextgenmedia'))
+  const solutions = team.filter((t) => enkel(t, 'nextgensolutions'))
+  if (!media.length || !solutions.length) return [{ titel: null, leden: team }]
+  const rest = team.filter((t) => !media.includes(t) && !solutions.includes(t))
+  return [
+    { titel: 'Marketing en content · NextGen Media', leden: media },
+    { titel: 'Automatisatie en software · NextGen Solutions', leden: solutions },
+    ...(rest.length ? [{ titel: 'Voor beide', leden: rest }] : []),
+  ]
+}
+
 export const KB_DUUR_MIN = 30
 export const KB_STAP_MIN = 30
 export const KB_MIN_VOORAF_UUR = 72

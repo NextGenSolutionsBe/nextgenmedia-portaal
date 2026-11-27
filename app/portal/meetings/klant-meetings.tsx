@@ -6,6 +6,7 @@ import { Loader2, Video, Clock, ArrowLeft, Check, AlertTriangle, CalendarCheck, 
 import { datumLang, uur, isEmail } from '@/lib/meetings/model'
 import { Tijdkiezer, type Dag } from '@/app/boeken/tijdkiezer'
 import { TeamFotoKaart, GeenVoorkeur } from '@/components/portal/team-foto-kaart'
+import { teamGroepen } from '@/lib/meetings/klantboeking'
 
 /**
  * Klantapp — Meeting boeken en Mijn meetings. Eerst met wie (Bram, Marco,
@@ -20,7 +21,7 @@ type Meeting = {
   magAnnuleren: boolean; magVerplaatsen: boolean; onderwerp: string | null
   deelnemers: { naam: string | null; email: string }[]; organisator: string; teamlid_id?: string | null
 }
-type TeamKeuze = { id: string; naam: string; voornaam: string; rol: string | null; foto_url: string | null }
+type TeamKeuze = { id: string; naam: string; voornaam: string; rol: string | null; foto_url: string | null; bedrijven?: string[] }
 type Overzicht = {
   meetings: Meeting[]
   team?: TeamKeuze[]
@@ -229,9 +230,15 @@ function Boeken({ data, onGeboekt }: { data: Overzicht; onGeboekt: () => void })
           </div>
           <div className="space-y-3" role="radiogroup" aria-label="Met wie">
             <GeenVoorkeur tekst="Maakt niet uit" sub="Het eerste vrije moment bij ons team" gekozen={teamlid === ''} onKies={() => setTeamlid('')} />
-            <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:grid-cols-3 gap-4 max-w-4xl">
-              {team.map((t) => <TeamFotoKaart key={t.id} naam={t.naam} foto={t.foto_url} gekozen={teamlid === t.id} onKies={() => setTeamlid(t.id)} />)}
-            </div>
+            {/* Klant bij beide bedrijven: per bedrijf de juiste mensen (verbeterplan K89). */}
+            {teamGroepen(team).map((g) => (
+              <div key={g.titel ?? 'team'} className="space-y-2">
+                {g.titel && <p className="text-xs font-semibold text-gray-600">{g.titel}</p>}
+                <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:grid-cols-3 gap-4 max-w-4xl">
+                  {g.leden.map((t) => <TeamFotoKaart key={t.id} naam={t.naam} foto={t.foto_url} gekozen={teamlid === t.id} onKies={() => setTeamlid(t.id)} />)}
+                </div>
+              </div>
+            ))}
           </div>
           <button type="button" onClick={() => { setStart(null); setKiezerSleutel((x) => x + 1); setStap('tijd') }} className={`btn-primary w-full sm:w-auto justify-center ${knop}`}>Verder{gekozenLid ? `: met ${gekozenLid.voornaam}` : ''}</button>
         </div>

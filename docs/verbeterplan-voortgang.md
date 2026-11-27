@@ -296,6 +296,33 @@ Nieuwe kolommen (leeg): `purchases.client_id`, `purchases.opdracht_id`, `cost_en
 
 "NextGen Agency: de app van A tot Z" (Claude Doc) is bijgewerkt met fasen 3 tot 7, telkens in het hoofdstuk waar het hoort: Command Center (tab Ritme, werkvoorraad, verlengingsgesprek), 5.14 Teamagenda en 5.15 Vegen of iets plannen, 7.6 tot 7.8 (wacht op de klant, klantwaarde en marge, doorgeven), 8.9 en 8.10 (bronnen en verlies, verkoopcijfers), 10.4 (minimumprijs), 13.11 (tijd, revisies, afspraken, rol op de planning), NextGenSolutions (levering en Care), 15.6 en 15.7 (omzet per bedrijf, maanddoel, export, kosten aan een klant of project) en 17.7 tot 17.9 (rollen, onboarding en vertrek, 1-op-1's, werkinstructies en gedragsafspraken). CLAUDE.md en deze voortgang volgden per fase.
 
+## Open punten afgewerkt (27 nov 2026)
+
+Op vraag ("maak ook al die andere fases af") de punten die per fase nog open stonden.
+
+### Wat er veranderde
+
+- **A7/A8 schakelaar op Facturen en het Command Center**: de weergave Alles / Media / Solutions geldt nu ook voor de facturenplanner (startfilter, ter plekke op Alle bedrijven te zetten; de omzetmeter en het doel per bedrijf rekenen altijd met alles) en voor Op te volgen (aanvragen, contracten, tegentekenen, facturen plannen, verlengingen, mails, meetings, projecten, opleveringen en offertes op hun bedrijf; feedback op content en website-onderhoud zijn Media; leadafspraken staan altijd). Wat geen bedrijf heeft, staat in elke weergave.
+- **C18 merkgegevens in mails**: contactadres, website en een voettekst uit Instellingen → Diensten → Bedrijven komen in de voet van elke mail (ook in het voorbeeld). Ongeldige waarden vallen terug op de vaste. De afzender verandert niet mee.
+- **E39 agenda per bedrijf**: bedrijf per map (menu van de map), anders uit de eigen map NextGenMedia of NextGenSolutions of uit de klant als die maar bij één bedrijf klant is; meetings hun eigen bedrijf, shoots Media. Kleur volgens bedrijf en een filter per bedrijf.
+- **I71 ABM per bedrijf**: per ABM-bedrijf "Voor NextGenMedia of NextGenSolutions"; de verkoopcijfers tonen de gesprekken per persoon ook per bedrijf.
+- **K89 Meeting boeken per bedrijf**: per teamlid "Voor klanten van" (leeg = beide). Een klant van één bedrijf ziet enkel wie daarbij hoort; een klant van beide ziet het team per bedrijf. Vaste blokken golden al.
+- **K88 en K86 Solutions in de klantapp**: nieuwe portaalmodule Software en automatisatie (enkel in het menu met een lopend project of Care): fase met uitleg, doel, vaste prijs, user stories vanaf Wacht op akkoord met **Goedkeuren**, en de Care-status. Op het dashboard van de klantapp een eigen blok in het blauw van NextGen Solutions.
+
+### Databank
+
+Nieuwe kolommen, leeg, geen backfill: `ag_mappen.bedrijf`, `abm_bedrijven.bedrijf` (beide met een controle op nextgenmedia, nextgensolutions of algemeen) en `personeel.klantapp_bedrijven`. Checksums voor en na gelijk: `ag_mappen` 46 rijen 61f69d225018c7d28b4c0c7946b3b11d, `abm_bedrijven` 313 rijen 589c6b86499a0ddbdb98d0b8d1b973fa, `personeel` 8 rijen 4cfe972cc00e537e3506209791d5598f. Terugdraaien: `supabase/terugdraaien/open-punten.sql`.
+
+### Wat nog openstaat en waarom
+
+- **Te classificeren**: 77 vragen (57 bedrijf, 20 dienst), elk met een voorstel. Dat zijn beslissingen voor de zaakvoerders (blok op het Command Center); de app gokt niet.
+- **Resend**: het domein nextgensolutions.be verifiëren (DNS-records uit Resend) kan enkel bij jullie domeinbeheer.
+- **B15** (de catalogus voedt elke keuzelijst): de oude lijsten dragen sleutels die contracten, facturen, kleuren en de vesting gebruiken. De vertaling (`dienst_mapping`) doet het werk; alles omzetten raakt bestaande gegevens en is niet nodig om per bedrijf en dienst te rapporteren.
+- **F53** (verantwoordelijken uit Personeel): de keuze Marco, Bram, Chiara of Gezamenlijke lead bepaalt wie tegentekent en telt mee in de vesting. Omschakelen verandert wie ondertekent; dat doen we niet zonder jullie uitdrukkelijke beslissing.
+- **E41** (de app als master van ClickUp): open vraag uit het plan; de lijst Verschillen met ClickUp staat er.
+- **F50, D26, D28, H65 (factuurplanning)**: zie de reden per fase hierboven.
+- **Inhoud**: minimumprijzen en deliverables per dienst, het interne uurtarief, de doelen van de scorecard en de tekst van de gedragsafspraken vullen jullie in.
+
 ## Waar we stoppen
 
-Alle fasen (0 tot 8) zijn af op 27 nov 2026. Wat bewust niet gebouwd werd en waarom, staat per fase onder "Niet gebouwd en waarom".
+Alle fasen (0 tot 8) zijn af op 27 nov 2026, en de open punten die de app zelf kan afwerken ook. Wat bewust niet gebouwd werd en waarom, staat per fase onder "Niet gebouwd en waarom" en hierboven.

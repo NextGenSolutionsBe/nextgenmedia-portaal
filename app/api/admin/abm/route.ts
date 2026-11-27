@@ -104,6 +104,14 @@ export async function POST(req: NextRequest) {
       if (error) throw new Error(error.message)
       return NextResponse.json({ ok: true })
     }
+    // Voor welk bedrijf we dit bedrijf benaderen (salesactiviteit per bedrijf, verbeterplan I71).
+    if (b.actie === 'bedrijf') {
+      if (!(await magIk('opdrachten', 'aanpassen'))) return NextResponse.json({ error: 'Je mag dit niet aanpassen.' }, { status: 403 })
+      const keuze = ['nextgenmedia', 'nextgensolutions'].includes(String(b.bedrijf)) ? String(b.bedrijf) : null
+      const { error } = await admin.from('abm_bedrijven').update({ bedrijf: keuze, updated_at: new Date().toISOString() }).eq('id', id)
+      if (error) throw new Error(error.message)
+      return NextResponse.json({ ok: true })
+    }
     if (b.actie === 'verwijder') {
       const p = await magIk('opdrachten', 'verwijderen')
       if (!p) return NextResponse.json({ error: 'Je mag dit niet verwijderen.' }, { status: 403 })

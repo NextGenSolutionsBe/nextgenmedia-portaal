@@ -4,7 +4,7 @@ import { controleerReeks } from '@/lib/agenda/reeksen'
 import {
   netteBriefing, briefingOntbreekt, TIJDSCAN_SJABLOON, controleerStory, nieuweDod, netteDod, waaromNietKlaar,
   planUitStories, waaromNietNaar, isProjectFase, isStoryStatus, projectFaseLabel, storyStatusLabel, actiepuntenUit,
-  controleerCare, planTeLaat, volgendeControle,
+  controleerCare, planTeLaat, volgendeControle, klantZietStories, magKlantGoedkeuren,
   type Briefing, type ProjectFase, type UserStory, type CareItem, type Actiepunt, type StoryInvoer,
 } from './levering'
 
@@ -412,4 +412,68 @@ export async function gefactureerdSolutions(admin: Admin): Promise<{ maand: stri
   return ((data ?? []) as { invoice_date: string | null; invoice_month: string | null; amount_excl: number | null; status: string }[])
     .map((r) => ({ maand: String(r.invoice_date ?? r.invoice_month ?? '').slice(0, 7), bedrag: Number(r.amount_excl ?? 0), verstuurd: r.status === 'verstuurd' || r.status === 'betaald' }))
     .filter((r) => /^\d{4}-\d{2}$/.test(r.maand))
+}
+
+
+// ── Klantapp (verbeterplan K88) ──────────────────────────────────────────────
+//
+// Enkel voor de geresolveerde klant (lib/portal-auth.ts): de pagina en de route geven
+// session.clientId mee. De klant ziet nooit interne uren, notities, acties of de tijdscan.
+
+export type KlantStory = Pick<UserStory, 'id' | 'nummer' | 'titel' | 'als' | 'wil' | 'zodat' | 'acceptatiecriteria' | 'status' | 'klant_akkoord_op' | 'klant_akkoord_door'> & { magGoedkeuren: boolean }
+export type KlantProject = {
+  id: string; titel: string; fase: ProjectFase; fase_sinds: string
+  doel: string | null; prijs: number | null; plan_goedgekeurd_op: string | null
+  stories: KlantStory[] | null
+}
+export type KlantCare = Pick<CareItem, 'id' | 'naam' | 'omschrijving' | 'systemen' | 'status' | 'care_contract' | 'laatste_controle'> & { volgende: string | null }
+
+export async function portaalSolutions(admin: Admin, clientIdIn: unknown): Promise<{ projecten: KlantProject[]; care: KlantCare[] }> {
+  const clientId = moetId(clientIdIn, 'Klant')
+  const [{ data: pr }, { data: cr }] = await Promise.all([
+    admin.from('ngs_projecten').select('*').eq('client_id', clientId).is('gearchiveerd_op', null).order('created_at', { ascending: false }).limit(20),
+    admin.from('ngs_care').select('*').eq('client_id', clientId).is('gearchiveerd_op', null).order('created_at').limit(50),
+  ])
+  const projecten = ((pr ?? []) as Record<string, unknown>[]).map(naarProject)
+  const ids = projecten.filter((p) => klantZietStories(p.fase)).map((p) => p.id)
+  const { data: st } = ids.length
+    ? await admin.from('ngs_user_stories').select('*').in('project_id', ids).is('verwijderd_op', null).order('volgorde').order('nummer')
+    : { data: [] }
+  const stories = ((st ?? []) as Record<string, unknown>[]).map(naarStory)
+  const dag = vandaag()
+  return {
+    projecten: projecten.map((p) => ({
+      id: p.id, titel: p.titel, fase: p.fase, fase_sinds: p.fase_sinds,
+      doel: p.briefing_bevestigd_op ? (p.briefing.doel || null) : null,
+      prijs: p.plan_goedgekeurd_op ? p.plan_prijs : null, plan_goedgekeurd_op: p.plan_goedgekeurd_op,
+      stories: klantZietStories(p.fase)
+        ? stories.filter((s) => s.project_id === p.id).map((s) => ({
+          id: s.id, nummer: s.nummer, titel: s.titel, als: s.als, wil: s.wil, zodat: s.zodat, acceptatiecriteria: s.acceptatiecriteria,
+          status: s.status, klant_akkoord_op: s.klant_akkoord_op, klant_akkoord_door: s.klant_akkoord_door, magGoedkeuren: magKlantGoedkeuren(p.fase, s),
+        }))
+        : null,
+    })),
+    care: ((cr ?? []) as Record<string, unknown>[]).map(naarCare).filter((c) => c.status !== 'gestopt').map((c) => ({
+      id: c.id, naam: c.naam, omschrijving: c.omschrijving, systemen: c.systemen, status: c.status, care_contract: c.care_contract,
+      laatste_controle: c.laatste_controle, volgende: volgendeControle(c, dag).op,
+    })),
+  }
+}
+
+/** De klant keurt een user story goed in de klantapp. Enkel een story van een eigen, lopend project; twee keer = één akkoord. */
+export async function klantKeurtStoryGoed(admin: Admin, clientIdIn: unknown, storyIdIn: unknown, door: string): Promise<{ nummer: number; titel: string; projectId: string }> {
+  const clientId = moetId(clientIdIn, 'Klant')
+  const storyId = moetId(storyIdIn, 'User story')
+  const { data: sr } = await admin.from('ngs_user_stories').select('*').eq('id', storyId).is('verwijderd_op', null).maybeSingle()
+  if (!sr) throw new LeveringFout('User story niet gevonden.', 404)
+  const s = naarStory(sr as Record<string, unknown>)
+  const { data: pr } = await admin.from('ngs_projecten').select('*').eq('id', s.project_id).eq('client_id', clientId).is('gearchiveerd_op', null).maybeSingle()
+  if (!pr) throw new LeveringFout('User story niet gevonden.', 404)
+  const p = naarProject(pr as Record<string, unknown>)
+  if (s.klant_akkoord_op) return { nummer: s.nummer, titel: s.titel, projectId: p.id }
+  if (!magKlantGoedkeuren(p.fase, s)) throw new LeveringFout('Deze user story kan je nu niet goedkeuren.', 409)
+  const { error } = await admin.from('ngs_user_stories').update({ klant_akkoord_op: nu(), klant_akkoord_door: door.slice(0, 200), updated_at: nu() }).eq('id', s.id).is('klant_akkoord_op', null)
+  if (error) throw new Error(error.message)
+  await tijdlijn(admin, p.deal_id, `Klant keurde user story ${s.nummer} goed in de klantapp (${s.titel})`, door)
+  return { nummer: s.nummer, titel: s.titel, projectId: p.id }
 }

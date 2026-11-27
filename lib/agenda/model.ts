@@ -15,7 +15,7 @@ export const TZ = STANDAARD_TIJDZONE
 export type Persoon = { id: string; user_id: string | null; naam: string; email: string | null; kleur: string | null; actief: boolean }
 export type Label = { id: string; naam: string; kleur: string; volgorde: number }
 export type Space = { id: string; naam: string; kleur: string | null; prive: boolean; volgorde: number; clickup_id: string | null; verantwoordelijke_id?: string | null }
-export type Map = { id: string; space_id: string; parent_id: string | null; naam: string; kleur: string | null; client_id: string | null; prive: boolean; volgorde: number; clickup_id: string | null }
+export type Map = { id: string; space_id: string; parent_id: string | null; naam: string; kleur: string | null; client_id: string | null; prive: boolean; volgorde: number; clickup_id: string | null; bedrijf?: string | null }
 export type Lijst = { id: string; space_id: string; map_id: string | null; naam: string; kleur: string | null; client_id: string | null; prive: boolean; volgorde: number; clickup_id: string | null }
 export type DocKort = { id: string; titel: string; space_id: string | null; map_id: string | null; lijst_id: string | null; prive: boolean; updated_at: string }
 export type Boom = { spaces: Space[]; mappen: Map[]; lijsten: Lijst[]; docs: DocKort[] }
@@ -60,6 +60,8 @@ export type Item = {
   updated_at: string
   /** Een keer uit een reeks (vast blok, herhalende afspraak of taak; lib/agenda/reeksen.ts). */
   reeks?: { id: string; soort: 'blok' | 'afspraak' | 'taak'; blok_type: string | null; datum: string }
+  /** Meetings en shoots: het bedrijf dat erop staat (taken halen het uit hun map of klant, bedrijfVanItem). */
+  bedrijf?: string | null
 }
 
 // ── Datums ──────────────────────────────────────────────────────────────────
@@ -228,14 +230,29 @@ export function legUit<T>(lijst: { item: T; vanMin: number; totMin: number }[]):
 
 // ── Kleuren ─────────────────────────────────────────────────────────────────
 
-export type KleurVolgens = 'map' | 'klant' | 'label' | 'lijst' | 'status'
+export type KleurVolgens = 'map' | 'klant' | 'label' | 'lijst' | 'status' | 'bedrijf'
 export const KLEUR_VOLGENS: { key: KleurVolgens; label: string }[] = [
   { key: 'map', label: 'Map' },
   { key: 'klant', label: 'Klant' },
   { key: 'label', label: 'Label' },
   { key: 'lijst', label: 'Lijst' },
   { key: 'status', label: 'Status' },
+  { key: 'bedrijf', label: 'Bedrijf' },
 ]
+/**
+ * Klanten die maar bij één bedrijf klant zijn, uit de bedrijven op hun projecten,
+ * contracten en offertes. Bij beide (of geen) staat de klant er niet in.
+ */
+export function enkelBedrijfPerKlant(rijen: { client_id: string | null; bedrijf: string | null }[]): Record<string, string> {
+  const per = new globalThis.Map<string, Set<string>>()
+  for (const r of rijen) {
+    if (!r.client_id || (r.bedrijf !== 'nextgenmedia' && r.bedrijf !== 'nextgensolutions')) continue
+    per.set(r.client_id, (per.get(r.client_id) ?? new Set()).add(r.bedrijf))
+  }
+  return Object.fromEntries([...per].filter(([, b]) => b.size === 1).map(([k, b]) => [k, [...b][0]]))
+}
+/** Kleur per bedrijf (verbeterplan E39): NextGenMedia woud, NextGenSolutions blauw, algemeen grijs. */
+export const BEDRIJF_KLEUR: Record<string, string> = { nextgenmedia: '#4f6b5a', nextgensolutions: '#1e40af', algemeen: '#9ca3af' }
 /** Een rustig palet voor klanten en lijsten zonder eigen kleur (vast per id, zodat het niet verspringt). */
 export const PALET = ['#fde68a', '#fbcfe8', '#c7d2fe', '#bbf7d0', '#fed7aa', '#bae6fd', '#ddd6fe', '#fecaca', '#d9f99d', '#e5e7eb']
 export function paletVoor(sleutel: string): string {
@@ -250,6 +267,8 @@ export type KleurContext = {
   labels: Record<string, Label>
   lijsten: Record<string, Lijst>
   mappen: Record<string, Map>
+  /** Klanten die maar bij één bedrijf klant zijn (uit hun projecten, contracten en offertes). */
+  klantBedrijf?: Record<string, string>
 }
 /** De klant van een item: eigen keuze, anders die van de lijst of de map. */
 export function klantVan(i: Pick<Item, 'client_id' | 'lijst_id'>, c: Pick<KleurContext, 'lijsten' | 'mappen'>): string | null {
@@ -297,8 +316,32 @@ export function mapKleur(mapId: string | null, c: Pick<KleurContext, 'mappen' | 
   return metPalet && eerste ? paletVoor(eerste.id) : null
 }
 
+/** De eigen bedrijven als map ("NextGenMedia", "NextGen Solutions"): dat is altijd dat bedrijf. */
+function eigenBedrijfVanNaam(naam: string): string | null {
+  const n = naam.toLowerCase().replace(/[^a-z]/g, '')
+  return n === 'nextgenmedia' ? 'nextgenmedia' : n === 'nextgensolutions' ? 'nextgensolutions' : null
+}
+/**
+ * Bij welk bedrijf een item hoort (verbeterplan E39), zonder te gokken: wat op een
+ * meeting of shoot staat, anders wat op de map (of een map erboven) gekozen werd,
+ * anders de eigen map van NextGenMedia of NextGenSolutions, anders de klant als die
+ * maar bij één bedrijf klant is. Anders niets: dat staat dan in elke weergave.
+ */
+export function bedrijfVanItem(i: Pick<Item, 'client_id' | 'lijst_id'> & { bedrijf?: string | null }, c: Pick<KleurContext, 'lijsten' | 'mappen' | 'klantBedrijf'>): string | null {
+  if (i.bedrijf) return i.bedrijf
+  const l = i.lijst_id ? c.lijsten[i.lijst_id] : undefined
+  for (let m = l?.map_id ? c.mappen[l.map_id] : undefined, n = 0; m && n < 8; n++) {
+    if (m.bedrijf) return m.bedrijf
+    const eigen = eigenBedrijfVanNaam(m.naam)
+    if (eigen) return eigen
+    m = m.parent_id ? c.mappen[m.parent_id] : undefined
+  }
+  const klant = klantVan(i, c)
+  return klant ? c.klantBedrijf?.[klant] ?? null : null
+}
+
 /** De kleur van een item in de kalender. Een eigen kleur gaat altijd voor. */
-export function kleurVan(i: Pick<Item, 'kleur' | 'client_id' | 'lijst_id' | 'labels' | 'clickup_status_kleur' | 'status' | 'bron'>, c: KleurContext, volgens: KleurVolgens): string {
+export function kleurVan(i: Pick<Item, 'kleur' | 'client_id' | 'lijst_id' | 'labels' | 'clickup_status_kleur' | 'status' | 'bron' | 'bedrijf'>, c: KleurContext, volgens: KleurVolgens): string {
   if (isKleur(i.kleur)) return i.kleur
   const lijst = i.lijst_id ? c.lijsten[i.lijst_id] : null
   const klant = klantVan(i, c)
@@ -309,6 +352,7 @@ export function kleurVan(i: Pick<Item, 'kleur' | 'client_id' | 'lijst_id' | 'lab
   // Map: de lijst zelf als die een kleur kreeg, anders de map (of een map erboven), anders de klant.
   const viaMap = lijst ? (isKleur(lijst.kleur) ? lijst.kleur : mapKleur(lijst.map_id, c)) : null
   const standaard = i.bron === 'meeting' ? '#bbf7d0' : '#e5e7eb'
+  if (volgens === 'bedrijf') { const b = bedrijfVanItem(i, c); return (b && BEDRIJF_KLEUR[b]) || '#e5e7eb' }
   const volgorde = volgens === 'map' ? [viaMap, viaKlant, viaLabel, viaLijst] : volgens === 'klant' ? [viaKlant, viaLabel, viaLijst] : volgens === 'label' ? [viaLabel, viaKlant, viaLijst] : volgens === 'lijst' ? [viaLijst, viaKlant] : [viaStatus, viaLijst]
   return volgorde.find((x): x is string => !!x) ?? standaard
 }
@@ -562,5 +606,6 @@ export function shootAlsItem(r: ShootRij, klant: string, perEmail: globalThis.Ma
     start_op: start ? zoneNaarIso(r.shoot_date, start) : null, eind_op: zoneNaarIso(r.shoot_date, start ? einde! : '00:00'), deadline_op: null, heel_dag: !start,
     lijst_id: null, parent_id: null, client_id: r.client_id, labels: [], kleur: null, locatie: r.location, meet_url: null, prive: false,
     eigenaar_id: maker, toegewezen, afgerond_op: klaar ? r.updated_at : null, afgerond_door: null, clickup_url: null, velden: null, updated_at: r.updated_at ?? '',
+    bedrijf: 'nextgenmedia', // contentshoots zijn foto en video: een dienst van NextGen Media
   }
 }

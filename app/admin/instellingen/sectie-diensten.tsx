@@ -222,7 +222,7 @@ export function SectieDiensten() {
               <Veld key={k} label={l}><input className={INP} value={merk.v[k] ?? ''} onChange={(e) => setMerk((m) => (m ? { ...m, v: { ...m.v, [k]: e.target.value } } : m))} /></Veld>
             ))}
             <Veld label="Kleur"><input type="color" className="h-9 w-16 rounded-lg border border-gray-200" value={merk.v.kleur} onChange={(e) => setMerk((m) => (m ? { ...m, v: { ...m.v, kleur: e.target.value } } : m))} /></Veld>
-            <Veld label="Voettekst op documenten" breed><textarea className={INP} rows={2} value={merk.v.voettekst} onChange={(e) => setMerk((m) => (m ? { ...m, v: { ...m.v, voettekst: e.target.value } } : m))} /></Veld>
+            <Veld label="Voettekst onderaan elke mail" breed><textarea className={INP} rows={2} value={merk.v.voettekst} onChange={(e) => setMerk((m) => (m ? { ...m, v: { ...m.v, voettekst: e.target.value } } : m))} /></Veld>
           </div>
           <div className="flex justify-end gap-2 pt-5">
             <button type="button" className="btn-secondary" onClick={() => setMerk(null)} disabled={bezig}>Annuleren</button>

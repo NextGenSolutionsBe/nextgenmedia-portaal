@@ -22,7 +22,7 @@ export default async function PortalLayout({ children }: { children: React.React
   const veilig = async <T,>(lezing: () => PromiseLike<{ data: any; count?: number | null }>, uit: (r: { data: any; count?: number | null }) => T, terugval: T): Promise<T> => {
     try { return uit(await lezing()) } catch { return terugval }
   }
-  const [, client, hasMetricool, hasCms, hasWebsitePage, hasOpleveringen, hasOffertes, activeServices, hasBlogs, kalenderRol, lang] = await Promise.all([
+  const [, client, hasMetricool, hasCms, hasWebsitePage, hasOpleveringen, hasOffertes, activeServices, hasBlogs, kalenderRol, lang, hasSolutions] = await Promise.all([
     // Best-effort laatste-login registreren (subaccounts).
     touchLastLogin(session),
     veilig(() => admin.from('clients').select('id, company_name').eq('id', id).maybeSingle(), (r) => r.data as { id: string; company_name: string | null } | null, null),
@@ -56,6 +56,14 @@ export default async function PortalLayout({ children }: { children: React.React
     // Een klant met rol "Geen toegang" in de contentplanning ziet de kalender ook niet in het menu.
     leesKalenderRol(admin, id).catch(() => null),
     getLang(),
+    // Software en automatisatie: enkel in het menu als er een project of Care bij NextGen Solutions loopt.
+    (async () => {
+      const [p, c] = await Promise.all([
+        veilig(() => admin.from('ngs_projecten').select('id').eq('client_id', id).is('gearchiveerd_op', null).limit(1), (r) => (r.data ?? []).length > 0, false),
+        veilig(() => admin.from('ngs_care').select('id').eq('client_id', id).is('gearchiveerd_op', null).limit(1), (r) => (r.data ?? []).length > 0, false),
+      ])
+      return p || c
+    })(),
   ])
 
   // Modules waarvoor deze gebruiker view-recht heeft (owner = alles).
@@ -73,6 +81,7 @@ export default async function PortalLayout({ children }: { children: React.React
         hasWebsitePage={hasWebsitePage}
         hasOpleveringen={hasOpleveringen}
         hasOffertes={hasOffertes}
+        hasSolutions={hasSolutions}
         allowedModules={allowedModules}
         lang={lang}
       />

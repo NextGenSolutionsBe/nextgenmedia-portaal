@@ -36,6 +36,8 @@ export type MerkStijl = {
   van: string
   /** Woordmerk als afbeelding (absolute link, ook in mailclients); zonder = het woordmerk in tekst. */
   logo?: string
+  /** Extra regel onderaan elke mail (Instellingen → Diensten → Bedrijven). */
+  voettekst?: string | null
 }
 
 /** Het woordmerk NEXTGEN AGENCY voor mails (public/merk/logo-mail.png, 360 × 109). Niet meer voor NextGenMedia. */
@@ -55,6 +57,31 @@ export function mailMerkVan(v: unknown): MailMerk {
   return isMailMerk(v) ? v : 'nextgenmedia'
 }
 
+/**
+ * Merkgegevens uit de databank (Instellingen → Diensten → Bedrijven, verbeterplan C18):
+ * contactadres, website en voettekst in de voet van de mail. Op de server gevuld door
+ * laadMerkGegevens (lib/merk-mail-server.ts) vlak voor een mail gebouwd wordt; leeg of
+ * ongeldig = de vaste waarden hierboven. De afzender (Resend) verandert nooit mee.
+ */
+export type MerkGegevens = { adres?: string | null; website?: string | null; voettekst?: string | null }
+let opMaat: Partial<Record<MailMerk, MerkGegevens>> = {}
+export function zetMerkGegevens(g: Partial<Record<MailMerk, MerkGegevens>>): void { opMaat = g }
+const isMailAdres = (v: unknown): v is string => typeof v === 'string' && /^[^\s@<>"]+@[^\s@<>"]+\.[a-z]{2,}$/i.test(v.trim())
+/** "https://www.nextgenmedia.be/" → "www.nextgenmedia.be"; enkel een gewone domeinnaam. */
+export function netteWebsite(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const w = v.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '')
+  return /^[a-z0-9.-]+\.[a-z]{2,}(\/[^\s<>"]*)?$/i.test(w) ? w : null
+}
 export function merkStijl(m: unknown): MerkStijl {
-  return MERK_STIJL[mailMerkVan(m)]
+  const k = mailMerkVan(m)
+  const basis = MERK_STIJL[k]
+  const g = opMaat[k]
+  if (!g) return basis
+  return {
+    ...basis,
+    adres: isMailAdres(g.adres) ? g.adres.trim() : basis.adres,
+    website: netteWebsite(g.website) ?? basis.website,
+    voettekst: typeof g.voettekst === 'string' && g.voettekst.trim() ? g.voettekst.trim().slice(0, 300) : null,
+  }
 }

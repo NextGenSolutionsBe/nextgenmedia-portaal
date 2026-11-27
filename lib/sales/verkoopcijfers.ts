@@ -85,9 +85,10 @@ export function verliesRedenen(redenen: (string | null)[]): { reden: string; aan
 
 // ── Salesactiviteit uit ABM (punt 71) ───────────────────────────────────────
 
-export type AbmNotitie = { door: string | null; uitkomst: string | null; soort: string | null; created_at: string }
+export type AbmNotitie = { door: string | null; uitkomst: string | null; soort: string | null; created_at: string; bedrijf?: string | null }
 
-export type Activiteit = { wie: string; gesprekken: number; gesproken: number; interesse: number; terugbellen: number; nietOpgenomen: number }
+/** Per persoon; `media` en `solutions` = gesprekken voor dat bedrijf (het bedrijf op het ABM-bedrijf, punt 71). */
+export type Activiteit = { wie: string; gesprekken: number; gesproken: number; interesse: number; terugbellen: number; nietOpgenomen: number; media?: number; solutions?: number }
 
 /** Per persoon: hoeveel gesprekken (elke notitie met een uitkomst) en wat eruit kwam. */
 export function salesActiviteit(notities: AbmNotitie[]): Activiteit[] {
@@ -95,8 +96,10 @@ export function salesActiviteit(notities: AbmNotitie[]): Activiteit[] {
   for (const n of notities) {
     if (!n.uitkomst) continue
     const wie = (n.door ?? 'Onbekend').trim() || 'Onbekend'
-    const a = m.get(wie) ?? { wie, gesprekken: 0, gesproken: 0, interesse: 0, terugbellen: 0, nietOpgenomen: 0 }
+    const a: Activiteit = m.get(wie) ?? { wie, gesprekken: 0, gesproken: 0, interesse: 0, terugbellen: 0, nietOpgenomen: 0 }
     a.gesprekken++
+    if (n.bedrijf === 'nextgenmedia') a.media = (a.media ?? 0) + 1
+    else if (n.bedrijf === 'nextgensolutions') a.solutions = (a.solutions ?? 0) + 1
     const u = n.uitkomst.toLowerCase()
     if (u.includes('interesse')) { a.interesse++; a.gesproken++ }
     else if (u.includes('gesproken')) a.gesproken++
