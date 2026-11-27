@@ -1,20 +1,63 @@
 // Bouwt een nette, responsive HTML-mail in de huisstijl van het merk
-// (NextGenMedia = NextGen Agency zwart-wit met woordmerk, NextGenSolutions blauw).
-// Puur, zodat het overal bruikbaar is.
-import { merkStijl, type MailMerk } from './merk-mail'
+// (NextGenMedia = eigen huisstijl: woud, zonnegeel en kalk met het logo;
+// NextGenSolutions blauw). Puur, zodat het overal bruikbaar is.
+import { merkStijl, mailMerkVan, type MailMerk } from './merk-mail'
+import { NGM } from './ngm-merk'
 
 function escapeHtml(s: string): string {
   return (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 /** Tekst → HTML-alinea's: lege regel = nieuwe alinea, enkele newline = <br>. */
-function paragraphs(text: string): string {
+function paragraphs(text: string, kleur = '#272727'): string {
   return (text ?? '')
     .split(/\n\s*\n/)
     .map((p) => p.trim())
     .filter(Boolean)
-    .map((p) => `<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#272727">${escapeHtml(p).replace(/\n/g, '<br>')}</p>`)
+    .map((p) => `<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:${kleur}">${escapeHtml(p).replace(/\n/g, '<br>')}</p>`)
     .join('')
+}
+
+/** NextGenMedia: kop in woud met het logo in zonnegeel, tekst in woud op wit, knop in zonnegeel, voet in woud met de baseline. */
+function ngmHtml(opts: EmailHtmlOpts): string {
+  const m = merkStijl('nextgenmedia')
+  const hasCta = !!(opts.ctaText && opts.ctaLink)
+  const cta = hasCta
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 24px">
+         <tr><td style="border-radius:999px;background:${NGM.zonnegeel}">
+           <a href="${escapeHtml(opts.ctaLink!)}" target="_blank"
+              style="display:inline-block;padding:13px 28px;font-size:15px;font-weight:700;color:${NGM.woud};text-decoration:none;border-radius:999px">
+             ${escapeHtml(opts.ctaText!)}
+           </a>
+         </td></tr>
+       </table>`
+    : ''
+  return `<!DOCTYPE html>
+<html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting"><meta name="color-scheme" content="light only"></head>
+<body style="margin:0;padding:0;background:${NGM.kalk}">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${NGM.kalk};padding:24px 12px;font-family:'DM Sans','Helvetica Neue',Arial,sans-serif">
+    <tr><td align="center">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid ${NGM.lijn}">
+        <!-- Kop -->
+        <tr><td style="background:${NGM.woud};padding:26px 32px 24px">
+          <img src="${m.logo}" alt="${m.naam}" width="190" height="27" style="display:block;width:190px;height:auto;border:0">
+        </td></tr>
+        <!-- Tekst -->
+        <tr><td style="padding:34px 32px 26px">
+          ${paragraphs(opts.bodyText, NGM.woud)}
+          ${cta}
+        </td></tr>
+        <!-- Voet -->
+        <tr><td style="padding:18px 32px 20px;background:${NGM.woud}">
+          <p style="margin:0;font-size:12px;line-height:1.6;color:${NGM.mos}">
+            ${m.naam} · <a href="mailto:${m.adres}" style="color:${NGM.mos};text-decoration:none">${m.adres}</a> · <a href="https://${m.website}" style="color:${NGM.mos};text-decoration:none">${m.website}</a><br>
+            <span style="font-family:'DM Mono','Courier New',monospace;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:${NGM.zonnegeel}">${NGM.baseline}</span>
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`
 }
 
 export type EmailHtmlOpts = {
@@ -27,6 +70,7 @@ export type EmailHtmlOpts = {
 
 /** Branded HTML-mail. Tabellen + inline styles voor maximale mailclient-support. */
 export function buildEmailHtml(opts: EmailHtmlOpts): string {
+  if (mailMerkVan(opts.merk) === 'nextgenmedia') return ngmHtml(opts)
   const m = merkStijl(opts.merk)
   const ACCENT = m.accent
   const hasCta = !!(opts.ctaText && opts.ctaLink)

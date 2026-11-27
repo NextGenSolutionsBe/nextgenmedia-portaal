@@ -1,2 +1,4 @@
 Archivo (Omnibus-Type) en JetBrains Mono (JetBrains): SIL Open Font License 1.1
 https://openfontlicense.org — gebruikt in de pdf's van de app (lib/pdf-merk.ts).
+Bricolage Grotesque (Mathieu Triay), DM Sans en DM Mono (Colophon Foundry): SIL Open Font License 1.1
+— de huisstijl van NextGenMedia in de pdf's (ngmFonts in lib/pdf-merk.ts).

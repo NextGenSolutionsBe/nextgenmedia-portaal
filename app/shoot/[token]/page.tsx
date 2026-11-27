@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 import type { Metadata } from 'next'
 import { headers } from 'next/headers'
 import { Aperture } from 'lucide-react'
-import { Logo } from '@/components/logo'
+import { NgmKop, NgmSchil, NgmVoet } from '@/components/ngm-merk'
 import { createAdminSupabaseClient, getSessionUser, getUserRole, isActiveStaff } from '@/lib/supabase/server'
 import { isAutomatischeBezoeker } from '@/lib/klant-geopend'
 import { markeerGeopend, vindLink } from '@/lib/shoots/server'
@@ -21,16 +21,12 @@ export default async function ShootPagina({ params }: { params: Promise<{ token:
   const admin = createAdminSupabaseClient()
   const l = await vindLink(admin, token)
 
-  const kop = (
-    <header className="bg-white/80 backdrop-blur border-b border-gray-200 px-4 py-4 flex items-center gap-3">
-      <Logo className="h-8 w-8" />
-      <span className="font-semibold text-sm">NextGenMedia</span>
-    </header>
-  )
+  // In de huisstijl van NextGenMedia (components/ngm-merk.tsx).
+  const kop = <NgmKop label="Shootplan" breedte="2xl" />
 
   if (!l) {
     return (
-      <div className="min-h-screen flex flex-col">
+      <NgmSchil>
         {kop}
         <div className="flex-1 flex items-center justify-center p-4">
           <div className="bg-white border border-gray-200 rounded-2xl p-8 text-center max-w-md">
@@ -39,7 +35,7 @@ export default async function ShootPagina({ params }: { params: Promise<{ token:
             <p className="text-sm text-gray-500">Ze is verlopen of de shoot is niet meer beschikbaar. Vraag NextGenMedia om een nieuwe link.</p>
           </div>
         </div>
-      </div>
+      </NgmSchil>
     )
   }
 
@@ -53,9 +49,10 @@ export default async function ShootPagina({ params }: { params: Promise<{ token:
   if (!team && !isAutomatischeBezoeker(ua)) await markeerGeopend(admin, l.linkId).catch(() => null)
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <NgmSchil>
       {kop}
       <ShootplanWeergave s={l.shoot} pdf={`/api/shoot/${token}/pdf`} />
-    </div>
+      <NgmVoet />
+    </NgmSchil>
   )
 }

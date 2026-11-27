@@ -9,6 +9,7 @@ import { offerteVanToken, registreerGeopend } from '@/lib/offertes-server'
 import { isAutomatischeBezoeker } from '@/lib/klant-geopend'
 import { merkStijl } from '@/lib/merk-mail'
 import { Woordmerk } from '@/components/logo'
+import { NgmKop, NgmSchil, NgmVoet } from '@/components/ngm-merk'
 import { AccepteerKnop } from './accepteer-knop'
 import { getekendOp } from '@/lib/offerte-fiche'
 
@@ -26,8 +27,11 @@ export default async function OffertePagina({ params }: { params: { token: strin
   const admin = createAdminSupabaseClient()
   const o = await offerteVanToken(admin, params.token)
   if (!o || o.status === 'concept') notFound()
-  // Elke offerte in de huisstijl van NextGen Agency (zwart-wit), ongeacht het merk.
-  const m = { ...merkStijl(o.merk), accent: '#0f0f0f', opAccent: '#ffffff' }
+  // Offertes van NextGenMedia in de huisstijl van NextGenMedia (woud en zonnegeel);
+  // de andere in de huisstijl van NextGen Agency (zwart-wit).
+  const ngm = o.merk === 'nextgenmedia'
+  const m = ngm ? merkStijl(o.merk) : { ...merkStijl(o.merk), accent: '#0f0f0f', opAccent: '#ffffff' }
+  const Schil = ({ children }: { children: React.ReactNode }) => (ngm ? <NgmSchil>{children}{<NgmVoet />}</NgmSchil> : <div className="min-h-screen">{children}</div>)
   const vandaag = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Brussels' })
   const verlopen = o.status === 'verstuurd' && !!o.geldig_tot && o.geldig_tot < vandaag
 
@@ -42,7 +46,7 @@ export default async function OffertePagina({ params }: { params: { token: strin
     }
   }
 
-  const kop = (
+  const kop = ngm ? <NgmKop label="Offerte" breedte="4xl" /> : (
     <header className="bg-white border-b border-gray-200">
       <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between gap-3">
         <Woordmerk className="h-9" />
@@ -53,18 +57,18 @@ export default async function OffertePagina({ params }: { params: { token: strin
 
   if (o.status === 'ingetrokken') {
     return (
-      <div className="min-h-screen">{kop}
+      <Schil>{kop}
         <main className="max-w-xl mx-auto p-6"><div className="bg-white rounded-2xl border border-gray-200 p-8 text-center">
           <FileText className="h-8 w-8 text-gray-400 mx-auto mb-2" />
           <h1 className="text-lg font-semibold">Deze offerte is niet meer geldig.</h1>
           <p className="text-sm text-gray-500 mt-1">Neem contact op met {m.naam} via {m.adres} als je vragen hebt.</p>
         </div></main>
-      </div>
+      </Schil>
     )
   }
 
   return (
-    <div className="min-h-screen">
+    <Schil>
       {kop}
       <main className="max-w-4xl mx-auto px-4 py-6 space-y-5">
         <section className="bg-white rounded-2xl border border-gray-200 p-5 sm:p-6">
@@ -100,6 +104,6 @@ export default async function OffertePagina({ params }: { params: { token: strin
 
         <p className="text-xs text-gray-500 text-center">Vragen over deze offerte? Mail naar {m.adres}.</p>
       </main>
-    </div>
+    </Schil>
   )
 }

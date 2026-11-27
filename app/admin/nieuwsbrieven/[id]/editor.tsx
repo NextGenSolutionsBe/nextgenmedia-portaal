@@ -135,7 +135,7 @@ export function NieuwsbriefEditor({ id, magAanpassen, magVerwijderen }: { id: st
               </div>
               <div><label className={LBL} htmlFor="nb-merk">Van</label>
                 <select id="nb-merk" className={INP} value={c.merk} onChange={(e) => zet('merk', mailMerkVan(e.target.value))}>
-                  {MAIL_MERKEN.map((m) => <option key={m} value={m}>{MERK_STIJL[m].naam} ({m === 'nextgenmedia' ? 'geel' : 'blauw'})</option>)}
+                  {MAIL_MERKEN.map((m) => <option key={m} value={m}>{MERK_STIJL[m].naam} ({m === 'nextgenmedia' ? 'woud en zonnegeel' : 'blauw'})</option>)}
                 </select>
               </div>
               <label className="flex items-center gap-2 text-sm cursor-pointer sm:col-span-2"><input type="checkbox" checked={c.uitgelicht} onChange={(e) => zet('uitgelicht', e.target.checked)} /><Star className="h-4 w-4 text-amber-500" />Uitgelicht bovenaan de feed</label>

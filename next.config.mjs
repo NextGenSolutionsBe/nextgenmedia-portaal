@@ -57,7 +57,7 @@ const nextConfig = {
     // De lettertypes van de huisstijl (Archivo, JetBrains Mono) voor de pdf's
     // (lib/pdf-merk.ts) en het woordmerk (public/logo-pdf.png) mee in elke functie.
     outputFileTracingIncludes: {
-      '/**/*': ['./lib/fonts/**/*', './public/logo-pdf.png'],
+      '/**/*': ['./lib/fonts/**/*', './public/logo-pdf.png', './public/merk/ngm/logo-pdf.png', './public/merk/ngm/logo-zonnegeel.png', './public/merk/ngm/logo-kalk.png'],
     },
     serverActions: {
       bodySizeLimit: '10mb',
