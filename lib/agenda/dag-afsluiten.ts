@@ -92,3 +92,28 @@ export function notitieErbij(beschrijving: string | null, notitie: string, d: st
   const oud = (beschrijving ?? '').trimEnd()
   return `${oud ? `${oud}\n\n` : ''}**Dag afgesloten ${datum}:** ${n}`
 }
+
+/**
+ * Naar vandaag: jouw open taken van de vorige dagen (tot 30 dagen terug, niet die van
+ * vandaag zelf), oudste eerst. Zelfde regels als Dag afsluiten: enkel waar jij op staat,
+ * geen meetings of shoots, afgevinkt niet.
+ */
+export function vanVorigeDagen(items: Item[], opts: { ik: string; dag: string }): Item[] {
+  return afTeSluiten(items, { ik: opts.ik, dag: plusDagen(opts.dag, -1) }).taken
+}
+
+export type Verplaatsing = NaarDag & { id: string }
+
+/** De nieuwe datums van elk item op `doel` (uren blijven, zie naarDag). Wat geen plaats heeft, valt weg. */
+export function verplaatsingen(items: Item[], doel: string): Verplaatsing[] {
+  const r: Verplaatsing[] = []
+  for (const i of items) { const v = naarDag(i, doel); if (v) r.push({ id: i.id, ...v }) }
+  return r
+}
+
+/** De datums zoals ze waren (om ongedaan te maken). */
+export const zoalsHetWas = (items: Item[]): Verplaatsing[] =>
+  items.map((i) => ({ id: i.id, start_op: i.start_op, eind_op: i.eind_op, heel_dag: i.heel_dag, deadline_op: i.deadline_op }))
+
+/** Hoeveel items in één keer verplaatst mogen worden. */
+export const MAX_VERPLAATS = 200
