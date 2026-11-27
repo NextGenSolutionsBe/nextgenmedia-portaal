@@ -1,7 +1,8 @@
 'use client'
 
-import { isTik, isZijwaarts, VEEG_RUST_MS } from '@/lib/agenda/veeg'
-import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
+import { isTik, isZijwaarts, VEEG_RUST_MS, vingerRichting } from '@/lib/agenda/veeg'
+import { schaalVoor, weekendGewicht, maxBegin, klem, verend, naarStap, zichtVoor, beginNaKnijpen, beginNaVegen, snelheid, dagVanDeel, deelVanDag, RUIM_TOT } from '@/lib/agenda/zoom'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { Check, Flag, Video, MapPin, Plus, Lock, RotateCcw, Clock, Folder, Aperture } from 'lucide-react'
 import {
   plaatsVan, dagenVan, perDagVan, legUit, vandaag, plusDagen, zoneNaarIso, dag, uur, kortDag, enkelDeadline, deadlineLabel,
@@ -12,7 +13,7 @@ import { Avatars, focusRing, donkerder } from './gedeeld'
 const PX_MIN = 1 // 60 px per uur (computer)
 const PX_MIN_GSM = 0.6 // 36 px per uur op de gsm, zoals ClickUp: meer van de dag in beeld
 /** Met de vinger een blok aan het verplaatsen (of net gedaan): dan telt een veegbeweging niet als naar de volgende week. */
-export const agendaSleep = { bezig: false, tot: 0, veegOp: 0 }
+export const agendaSleep = { bezig: false, tot: 0, veegOp: 0, pan: false }
 /** Enkel taken uit de agenda zelf (geen meetings of shoots) worden voorgeladen bij hoveren (item-venster.tsx). */
 const voorladenId = (i: Item) => (i.bron === 'ag' ? i.id : undefined)
 const stopSleep = () => { if (agendaSleep.bezig) { agendaSleep.bezig = false; agendaSleep.tot = Date.now() } }
@@ -82,6 +83,11 @@ type Props = {
   onDag: (d: string) => void
   /** Net versleept (id → tijdstip): komt onderaan bij zijn dag in de rij "Hele dag". */
   laatst?: Map<string, number>
+  /** Gsm, week en werkweek: hoeveel dagen je ziet (knijpen met twee vingers). Leeg = de hele week. */
+  zicht?: number | null
+  onZicht?: (k: number) => void
+  /** In de carrousel: -1 = vorige periode (toont het einde), 1 = volgende (toont het begin), 0 = wat je ziet. */
+  kant?: -1 | 0 | 1
 }
 
 const hhmm = (min: number) => `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
@@ -205,14 +211,43 @@ type Sleep =
 const HOUD_MS = 450
 const HOUD_SPELING = 8
 
-function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpassen, magToevoegen, onOpen, onKlaar, onVerplaats, onNieuw, onDag, laatst }: Props) {
+/** Breedte per dag (fr): het weekend smaller zolang de hele week past (`weekend` = gsm-week). */
+const gewichtenVan = (dagen: string[], weekend: boolean, s: number) => dagen.map((d) => (weekend && weekdag(d) >= 5 ? weekendGewicht(s) : 1))
+const kolTplVan = (g: number[]) => g.map((x) => `minmax(0, ${x}fr)`).join(' ')
+
+function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpassen, magToevoegen, onOpen, onKlaar, onVerplaats, onNieuw, onDag, laatst, zicht, onZicht, kant = 0 }: Props) {
   const dagen = useMemo(() => dagenVan(weergave, datum), [weergave, datum])
   const kolommenRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const wortelRef = useRef<HTMLDivElement>(null)
   const [sleep, setSleep] = useState<Sleep | null>(null)
   const smal = useSmal()
   const compact = smal && dagen.length > 1
   const pxMin = smal ? PX_MIN_GSM : PX_MIN
+  // Inzoomen op de gsm (week en werkweek): k dagen in beeld, de strook met alle dagen is n/k keer zo breed.
+  const zoombaar = compact && (weergave === 'week' || weergave === 'werkweek') && !!onZicht
+  const nDagen = dagen.length
+  const k = zoombaar ? zichtVoor(nDagen, zicht) : nDagen
+  const schaal = schaalVoor(nDagen, k)
+  const [eersteKeuze, setEerste] = useState(() => {
+    if (kant < 0) return nDagen // de vorige week: het einde (wordt geklemd)
+    if (kant > 0) return 0
+    const i = dagen.indexOf(datum)
+    return i >= 0 ? i : datum > dagen[nDagen - 1] ? nDagen : 0
+  })
+  // In de carrousel toont de vorige week altijd het einde en de volgende het begin: vegen loopt zo door.
+  useEffect(() => { if (kant < 0) setEerste(nDagen); else if (kant > 0) setEerste(0) }, [kant, nDagen])
+  // Naar een dag gesprongen (Vandaag, een datum) die nu niet in beeld is: daar beginnen.
+  useEffect(() => {
+    if (kant !== 0 || !zoombaar) return
+    const i = dagen.indexOf(datum)
+    if (i < 0) return
+    setEerste((e) => { const nu = Math.max(0, Math.min(nDagen - k, e)); return i < nu || i >= nu + k ? i : e })
+  }, [datum, kant]) // eslint-disable-line react-hooks/exhaustive-deps
+  const eerste = Math.max(0, Math.min(nDagen - k, eersteKeuze))
+  const begin = schaal > 1 ? eerste / nDagen : 0
+  // Meer tonen in een blok als er plaats is (drie dagen of minder).
+  const blokCompact = compact && !(zoombaar && k <= RUIM_TOT)
   // Met de vinger: een blok wacht eerst tot je het even inhoudt. Beweeg je eerder, dan scroll je gewoon.
   const houd = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number; item: Item } | null>(null)
   const aanSlepen = useRef(false)
@@ -230,8 +265,9 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
   const [nu, setNu] = useState(() => Date.now())
   const [alleDag, setAlleDag] = useState(false)
   // Op de gsm in de week: zaterdag en zondag smaller, zodat de werkdagen meer tekst tonen (zoals Work week in ClickUp).
-  const gewichten = useMemo(() => dagen.map((d) => (compact && weergave === 'week' && weekdag(d) >= 5 ? 0.55 : 1)), [dagen, compact, weergave])
-  const kolTpl = gewichten.map((g) => `minmax(0, ${g}fr)`).join(' ')
+  // Ingezoomd zijn ze even breed als de andere dagen.
+  const gewichten = useMemo(() => gewichtenVan(dagen, compact && weergave === 'week', schaal), [dagen, compact, weergave, schaal])
+  const kolTpl = kolTplVan(gewichten)
   /** Welke dag ligt onder x (rekening houdend met smallere weekenddagen)? */
   const dagOnder = (x: number, r: DOMRect): number => {
     const totaal = gewichten.reduce((a, b) => a + b, 0)
@@ -398,6 +434,162 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
     if (s.soort === 'rek' && s.bewogen) onVerplaats(s.item, { start_op: s.item.start_op ?? isoOp(s.dag, s.van), eind_op: isoOp(s.dag, s.tot), heel_dag: false })
   }
 
+  // ── Inzoomen (gsm, week en werkweek): knijpen met twee vingers, ingezoomd dag per dag opzij schuiven ──
+  // Tijdens het gebaar zetten we breedte en begin rechtstreeks op de pagina (vlot, zonder alles opnieuw
+  // op te bouwen); pas na het loslaten komt de keuze in de state en wordt het aantal dagen onthouden.
+  const live = useRef({ s: schaal, o: begin })
+  const stand = useRef({ n: nDagen, k, dagen, week: weergave === 'week', onZicht })
+  stand.current = { n: nDagen, k, dagen, week: weergave === 'week', onZicht }
+  const gebaar = useRef(false)
+  useLayoutEffect(() => { if (!gebaar.current) live.current = { s: schaal, o: begin } }, [schaal, begin])
+  useEffect(() => {
+    const w = wortelRef.current
+    if (!w || !zoombaar) return
+    const g = (s: number) => gewichtenVan(stand.current.dagen, stand.current.week, s)
+    const pasToe = (s: number, o: number) => {
+      live.current = { s, o }
+      w.style.setProperty('--zs', String(s))
+      w.style.setProperty('--zo', String(o))
+      // In de week wordt het weekend geleidelijk even breed als de rest.
+      if (stand.current.week) {
+        const tpl = kolTplVan(g(s))
+        w.querySelectorAll<HTMLElement>('[data-strook-grid]').forEach((el) => { el.style.gridTemplateColumns = tpl })
+      }
+    }
+    let anim = 0
+    let lopend: { s: number; o: number; klaar: () => void } | null = null
+    const animeer = (s1: number, o1: number, ms: number, klaar: () => void) => {
+      cancelAnimationFrame(anim)
+      const { s: s0, o: o0 } = live.current
+      const t0 = performance.now()
+      lopend = { s: s1, o: o1, klaar }
+      const stap = (t: number) => {
+        const p = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - p, 3)
+        pasToe(s0 + (s1 - s0) * e, o0 + (o1 - o0) * e)
+        if (p < 1) { anim = requestAnimationFrame(stap); return }
+        lopend = null
+        klaar()
+      }
+      anim = requestAnimationFrame(stap)
+    }
+    // Een nieuwe aanraking tijdens het uitlopen: meteen op de eindplek zetten.
+    const maakAf = () => { if (!lopend) return; cancelAnimationFrame(anim); const l = lopend; lopend = null; pasToe(l.s, l.o); l.klaar() }
+    const legVast = (k1: number, e1: number) => {
+      gebaar.current = false
+      setEerste(e1)
+      if (k1 !== stand.current.k) stand.current.onZicht?.(k1)
+    }
+    const venster = () => w.querySelector<HTMLElement>('[data-zoom-venster]')?.getBoundingClientRect() ?? null
+    // Een gebaar is nooit een tik: niets plannen, geen blok optillen.
+    const geenTik = () => { tik.current = null; stopHouden(); agendaSleep.veegOp = Date.now() }
+
+    let knijp: { d0: number; s0: number; dag: number; W: number; links: number; fx: number } | null = null
+    let veeg: { x: number; y: number; o0: number; W: number; richting: 'opzij' | null; sporen: { x: number; t: number }[] } | null = null
+    let wachtTotLos = false // na het knijpen telt een overblijvende vinger niet als vegen
+
+    const opStart = (e: TouchEvent) => {
+      if (agendaSleep.bezig) return
+      maakAf()
+      if (e.touches.length >= 2) {
+        const a = e.touches[0], b = e.touches[1]
+        const r = venster()
+        const d0 = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+        if (!r?.width || d0 < 16) return
+        const fx = (a.clientX + b.clientX) / 2 - r.left
+        const { s, o } = live.current
+        veeg = null
+        // De dag onder je vingers (bv. 4,5 = midden vrijdag) blijft daar staan.
+        knijp = { d0, s0: s, dag: dagVanDeel(o + fx / (s * r.width), g(s)), W: r.width, links: r.left, fx }
+        gebaar.current = true
+        agendaSleep.pan = true
+        geenTik()
+        return
+      }
+      if (knijp || wachtTotLos || e.touches.length !== 1) return
+      const t = e.touches[0]
+      const r = venster()
+      if (!r?.width) return
+      veeg = { x: t.clientX, y: t.clientY, o0: live.current.o, W: r.width, richting: null, sporen: [{ x: t.clientX, t: performance.now() }] }
+    }
+    const opBeweeg = (e: TouchEvent) => {
+      if (knijp) {
+        if (e.touches.length < 2) return
+        if (e.cancelable) e.preventDefault() // niet de hele pagina inzoomen
+        const a = e.touches[0], b = e.touches[1]
+        const s = Math.max(1, Math.min(stand.current.n, (knijp.s0 * Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)) / knijp.d0))
+        knijp.fx = (a.clientX + b.clientX) / 2 - knijp.links
+        pasToe(s, klem(deelVanDag(knijp.dag, g(s)) - knijp.fx / (s * knijp.W), s))
+        agendaSleep.veegOp = Date.now()
+        return
+      }
+      if (!veeg || e.touches.length !== 1) return
+      if (agendaSleep.bezig) { veeg = null; return }
+      const t = e.touches[0]
+      const dx = t.clientX - veeg.x, dy = t.clientY - veeg.y
+      if (!veeg.richting) {
+        const r = vingerRichting(dx, dy)
+        if (!r) return
+        const { s } = live.current
+        // Enkel als er in die richting nog dagen zijn; anders gaat de veeg naar de vorige of volgende week (veeg.ts).
+        const kan = s > 1.001 && (dx < 0 ? veeg.o0 < maxBegin(s) - 0.001 : veeg.o0 > 0.001)
+        if (r !== 'opzij' || !kan) { veeg = null; return }
+        veeg.richting = 'opzij'
+        gebaar.current = true
+        agendaSleep.pan = true
+        geenTik()
+      }
+      if (e.cancelable) e.preventDefault()
+      agendaSleep.veegOp = Date.now()
+      const { s } = live.current
+      pasToe(s, verend(veeg.o0 - dx / (s * veeg.W), s))
+      veeg.sporen.push({ x: t.clientX, t: performance.now() })
+      if (veeg.sporen.length > 8) veeg.sporen.shift()
+    }
+    const opEind = (e: TouchEvent) => {
+      if (knijp) {
+        if (e.touches.length >= 2) return
+        const { n } = stand.current
+        const k1 = naarStap(n, live.current.s, knijp.s0)
+        const e1 = beginNaKnijpen(knijp.dag / n, knijp.fx / knijp.W, n, k1)
+        const s1 = schaalVoor(n, k1)
+        knijp = null
+        wachtTotLos = e.touches.length > 0
+        if (!wachtTotLos) agendaSleep.pan = false
+        agendaSleep.veegOp = Date.now()
+        animeer(s1, s1 > 1 ? e1 / n : 0, 240, () => legVast(k1, e1))
+        return
+      }
+      if (wachtTotLos) { if (!e.touches.length) { wachtTotLos = false; agendaSleep.pan = false } return }
+      const v = veeg
+      veeg = null
+      if (!v || v.richting !== 'opzij') return
+      agendaSleep.pan = false
+      agendaSleep.veegOp = Date.now()
+      const { n, k: k1 } = stand.current
+      const { s, o } = live.current
+      const e1 = beginNaVegen(o, -snelheid(v.sporen), s * v.W, n, k1, Math.round(v.o0 * n))
+      animeer(s, e1 / n, 260, () => legVast(k1, e1))
+    }
+    // Safari zoomt anders de hele pagina in (gesturestart); de rest van de pagina blijft gewoon in te zoomen.
+    const geenPaginaZoom = (e: Event) => e.preventDefault()
+    w.addEventListener('touchstart', opStart, { passive: true })
+    w.addEventListener('touchmove', opBeweeg, { passive: false })
+    w.addEventListener('touchend', opEind)
+    w.addEventListener('touchcancel', opEind)
+    w.addEventListener('gesturestart', geenPaginaZoom)
+    w.addEventListener('gesturechange', geenPaginaZoom)
+    return () => {
+      cancelAnimationFrame(anim)
+      if (gebaar.current) { gebaar.current = false; agendaSleep.pan = false }
+      w.removeEventListener('touchstart', opStart)
+      w.removeEventListener('touchmove', opBeweeg)
+      w.removeEventListener('touchend', opEind)
+      w.removeEventListener('touchcancel', opEind)
+      w.removeEventListener('gesturestart', geenPaginaZoom)
+      w.removeEventListener('gesturechange', geenPaginaZoom)
+    }
+  }, [zoombaar]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Een blokje uit de rij "hele dag" naar het rooster of naar een andere dag slepen.
   const dropOpRooster = (e: React.DragEvent, d: string) => {
     const id = e.dataTransfer.getData('text/agenda-item')
@@ -424,21 +616,27 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
 
   const vandaagD = vandaag()
   const nuMin = (() => { const t = new Date(nu); return dag(t.toISOString()) === vandaagD ? Number(uur(t.toISOString()).slice(0, 2)) * 60 + Number(uur(t.toISOString()).slice(3)) : -1 })()
-  const cols = `${smal ? 34 : 60}px ${kolTpl}`
+  const cols = `${smal ? 34 : 60}px minmax(0, 1fr)`
+  // De strook met alle dagen: ingezoomd breder dan het scherm en opzij geschoven (--zs, --zo).
+  const strook: React.CSSProperties | undefined = zoombaar ? { width: 'calc(var(--zs, 1) * 100%)', transform: 'translateX(calc(var(--zo, 0) * -100%))' } : undefined
+  const venster = zoombaar ? 'overflow-hidden' : ''
 
   return (
-    <div className="card-base !p-0 overflow-hidden h-full max-md:!rounded-none max-md:!border-x-0 max-md:!shadow-none">
+    <div ref={wortelRef} className={`card-base !p-0 overflow-hidden h-full max-md:!rounded-none max-md:!border-x-0 max-md:!shadow-none ${zoombaar ? 'touch-pan-y' : ''}`}
+      style={zoombaar ? ({ '--zs': String(schaal), '--zo': String(begin) } as React.CSSProperties) : undefined}>
      {/* Op de gsm past de hele week (of werkweek) op het scherm, met compacte blokjes. */}
      <div className="h-full overflow-x-auto overscroll-x-contain">
       <div className="h-full flex flex-col min-h-0">
       {/* Kop met de dagen */}
       <div className="grid border-b border-gray-200 bg-white" style={{ gridTemplateColumns: cols }}>
         <div />
+        <div className={`min-w-0 ${venster}`}>
+        <div data-strook-grid className="grid h-full" style={{ gridTemplateColumns: kolTpl, ...strook }}>
         {dagen.map((d) => {
           const wd = weekdag(d)
           if (compact) {
             return (
-              <button key={d} type="button" onClick={() => onDag(d)} className={`border-l border-gray-100 py-1.5 flex flex-col items-center gap-0.5 ${focusRing}`}>
+              <button key={d} type="button" onClick={() => { if (!netGeveegd()) onDag(d) }} className={`border-l border-gray-100 py-1.5 flex flex-col items-center gap-0.5 ${focusRing}`}>
                 <span className={`text-[11px] font-semibold capitalize ${d === vandaagD ? 'text-gray-900' : 'text-gray-500'}`}>{DAGNAAM[wd]}</span>
                 <span className={`h-7 min-w-7 px-1 rounded-full flex items-center justify-center text-[14px] font-bold ${d === vandaagD ? 'bg-gray-900 text-white' : 'text-gray-900'}`}>{Number(d.slice(8))}</span>
               </button>
@@ -463,20 +661,23 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
             </div>
           )
         })}
+        </div>
+        </div>
       </div>
 
       {/* Hele dag: taken zonder uur en wat over meerdere dagen loopt */}
       {(balken.length > 0 || magToevoegen) && (
         <div className="grid border-b border-gray-200 bg-gray-50/60" style={{ gridTemplateColumns: cols }}>
           <div className={`label-mono text-[9px] text-gray-400 uppercase pt-2.5 leading-tight ${compact ? 'px-0.5 text-center' : 'px-2'}`}>{compact ? 'Dag' : <>Hele<br />dag</>}</div>
-          <div className="relative" style={{ gridColumn: `2 / span ${dagen.length}` }}>
+          <div className="relative min-w-0">
            <div className={alleDag ? 'max-h-[38vh] overflow-y-auto' : ''}>
+            <div className={venster}>
             {/* Loslaten mag overal in de rij, ook bovenop andere taken: de dag onder de muis telt. */}
-            <div className="relative"
+            <div className="relative" style={strook}
               onDragOver={(e) => { if (!magAanpassen || !e.dataTransfer.types.includes('text/agenda-item')) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; const n = dagOnder(e.clientX, e.currentTarget.getBoundingClientRect()); if (n !== dropDag) setDropDag(n) }}
               onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropDag(null) }}
               onDrop={(e) => { const n = dagOnder(e.clientX, e.currentTarget.getBoundingClientRect()); setDropDag(null); dropOpDag(e, dagen[n]) }}>
-            <div className="absolute inset-0 grid" style={{ gridTemplateColumns: kolTpl }}>
+            <div data-strook-grid className="absolute inset-0 grid" style={{ gridTemplateColumns: kolTpl }}>
               {dagen.map((d, n) => (
                 <div key={d} className={`border-l border-gray-100 group relative transition-colors ${dropDag === n ? 'bg-gray-200/60' : ''}`}
                   onDoubleClick={() => magToevoegen && onNieuw({ dag: d, heelDag: true })}>
@@ -486,12 +687,13 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
                 </div>
               ))}
             </div>
-            <div className={`relative grid pointer-events-none ${compact ? 'gap-y-0.5 py-1 px-0' : 'gap-y-1 py-2 px-1'}`} style={{ gridTemplateColumns: kolTpl, gridAutoRows: compact ? '22px' : '30px', minHeight: magToevoegen ? 44 : undefined, paddingBottom: verborgenPerDag.size ? 24 : undefined }}>
+            <div data-strook-grid className={`relative grid pointer-events-none ${compact ? 'gap-y-0.5 py-1 px-0' : 'gap-y-1 py-2 px-1'}`} style={{ gridTemplateColumns: kolTpl, gridAutoRows: compact ? '22px' : '30px', minHeight: magToevoegen ? 44 : undefined, paddingBottom: verborgenPerDag.size ? 24 : undefined }}>
               {balken.filter((b) => b.baan < toonBanen).map((b) => (
                 <div key={`${b.item.bron}-${b.item.id}`} className={`pointer-events-auto min-w-0 ${compact ? 'px-0.5' : 'px-1'}`} style={{ gridColumn: `${b.van + 1} / ${b.tot + 2}`, gridRow: b.baan + 1 }}>
                   <Chip i={b.item} kleur={kleur(b.item)} h={herkomst?.(b.item)} onOpen={onOpen} onKlaar={onKlaar} personen={personen} sleep={sleepbaar(b.item, magAanpassen)} magKlaar={magAanpassen} opDag={dagen[b.van]} lang={weergave === 'dag'} compact={compact} />
                 </div>
               ))}
+            </div>
             </div>
             </div>
            </div>
@@ -506,7 +708,8 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
           <div className="relative">
             {Array.from({ length: 24 }, (_, h) => h > 0 && <div key={h} className={`absolute -translate-y-1/2 tabular-nums text-gray-500 ${smal ? 'right-1 text-[10px]' : 'right-2 text-[12px]'}`} style={{ top: h * 60 * pxMin }}>{String(h).padStart(2, '0')}:00</div>)}
           </div>
-          <div ref={kolommenRef} className="relative grid" style={{ gridColumn: `2 / span ${dagen.length}`, gridTemplateColumns: kolTpl }}
+          <div data-zoom-venster className={`relative min-w-0 ${venster}`}>
+          <div ref={kolommenRef} data-strook-grid className="relative grid" style={{ gridTemplateColumns: kolTpl, height: 1440 * pxMin, ...strook }}
             onPointerMove={beweeg} onPointerUp={los} onPointerCancel={() => { tik.current = null; stopHouden(); aanSlepen.current = false; stopSleep(); setSleep(null) }}>
             {/* lijnen */}
             <div className="absolute inset-0 pointer-events-none">
@@ -530,12 +733,12 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
                     return (
                       <div key={`${i.bron}-${i.id}`} data-blok data-item={voorladenId(i)} role="button" tabIndex={0}
                         onPointerDown={(e) => (sl ? startVerplaats(e, i, n, b.vanMin, b.totMin) : undefined)}
-                        onClick={() => { if (!sl) onOpen(i) }} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
+                        onClick={() => { if (!sl && !netGeveegd()) onOpen(i) }} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i) }}
                         onContextMenu={(e) => { if (houd.current || aanSlepen.current) e.preventDefault() }}
-                        className={`group absolute overflow-hidden [container-type:inline-size] shadow-[0_1px_3px_rgba(0,0,0,0.08)] cursor-pointer select-none [-webkit-touch-callout:none] hover:brightness-[0.97] hover:z-[2] ${compact ? 'rounded-[4px] pl-[3px] pr-0 py-px text-[11.5px] leading-[13px] tracking-[-0.01em]' : smal ? 'rounded-md pl-1.5 pr-1 py-0.5 text-[12.5px] leading-tight' : 'rounded-lg pl-2 pr-1.5 py-1 text-[13.5px] leading-snug'} ${bezig ? 'opacity-30' : ''} ${opgetild ? 'z-10 ring-2 ring-gray-900 shadow-lg scale-[1.03]' : ''} transition-transform ${focusRing}`}
-                        style={{ ...stijlVan(i, kl), ...(compact ? { borderLeftWidth: 2 } : {}), top: b.vanMin * pxMin + 1, height: hoogte, left: `calc(${(b.kolom / b.kolommen) * 100}% + ${compact ? 1 : 3}px)`, width: `calc(${100 / b.kolommen}% - ${compact ? 2 : 6}px)` }}
+                        className={`group absolute overflow-hidden [container-type:inline-size] shadow-[0_1px_3px_rgba(0,0,0,0.08)] cursor-pointer select-none [-webkit-touch-callout:none] hover:brightness-[0.97] hover:z-[2] ${blokCompact ? 'rounded-[4px] pl-[3px] pr-0 py-px text-[11.5px] leading-[13px] tracking-[-0.01em]' : smal ? 'rounded-md pl-1.5 pr-1 py-0.5 text-[12.5px] leading-tight' : 'rounded-lg pl-2 pr-1.5 py-1 text-[13.5px] leading-snug'} ${bezig ? 'opacity-30' : ''} ${opgetild ? 'z-10 ring-2 ring-gray-900 shadow-lg scale-[1.03]' : ''} transition-transform ${focusRing}`}
+                        style={{ ...stijlVan(i, kl), ...(blokCompact ? { borderLeftWidth: 2 } : {}), top: b.vanMin * pxMin + 1, height: hoogte, left: `calc(${(b.kolom / b.kolommen) * 100}% + ${blokCompact ? 1 : 3}px)`, width: `calc(${100 / b.kolommen}% - ${blokCompact ? 2 : 6}px)` }}
                         title={`${hhmm(b.vanMin)}–${hhmm(b.totMin)} ${i.titel}${h ? ` · ${h.naam}` : ''}`}>
-                        {compact ? (
+                        {blokCompact ? (
                           // Smalle kolom: de titel (zoveel regels als passen) en bij een groter blok het beginuur.
                           <>
                             <span className={`block font-medium overflow-hidden ${b.kolommen > 1 ? 'whitespace-nowrap' : ''} ${klaar ? 'line-through decoration-1 opacity-80' : ''}`} style={b.kolommen > 1 ? undefined : { maxHeight: Math.max(13, Math.floor((hoogte - (hoogte >= 52 && b.kolommen === 1 ? 14 : 2)) / 13) * 13) }}>{i.titel}</span>
@@ -565,7 +768,7 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
                         </>)}
                         {sl && <div onPointerDown={(e) => startRek(e, i, d, b.vanMin, b.totMin)} className="absolute left-0 right-0 bottom-0 h-1.5 cursor-ns-resize" aria-hidden />}
                         {/* Onderaan rechts (waar de foto's staan), zodat de titel leesbaar en klikbaar blijft. */}
-                        {magAanpassen && !compact && <SnelKlaar i={i} onKlaar={onKlaar} onder={hoogte >= 34} tekst={b.kolommen === 1 && hoogte >= 34} />}
+                        {magAanpassen && !blokCompact && <SnelKlaar i={i} onKlaar={onKlaar} onder={hoogte >= 34} tekst={b.kolommen === 1 && hoogte >= 34} />}
                       </div>
                     )
                   })}
@@ -587,6 +790,7 @@ function Rooster({ weergave, datum, items, kleur, herkomst, personen, magAanpass
                 </div>
               )
             })}
+          </div>
           </div>
         </div>
       </div>

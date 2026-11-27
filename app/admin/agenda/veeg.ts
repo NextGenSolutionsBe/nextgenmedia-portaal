@@ -91,13 +91,16 @@ export function useVeeg(el: HTMLElement | null, opts: { actief: boolean; stap: (
     // ── Vinger (gsm) ───────────────────────────────────────────────────────
     let vinger: { x: number; y: number; t: number; richting: 'opzij' | 'scroll' | null; dx: number } | null = null
     const opStart = (e: TouchEvent) => {
-      if (e.touches.length !== 1 || !magNu() || nietHier(e.target)) { vinger = null; return }
+      // Een tweede vinger = knijpen (inzoomen in de kalender): de veeg stopt en de kalender veert terug.
+      if (e.touches.length !== 1 || !magNu() || nietHier(e.target)) { if (vinger?.richting === 'opzij') zet(0, true); vinger = null; return }
       const t = e.touches[0]
       vinger = { x: t.clientX, y: t.clientY, t: performance.now(), richting: null, dx: 0 }
     }
     const opBeweeg = (e: TouchEvent) => {
       if (!vinger || e.touches.length !== 1) return
       if (agendaSleep.bezig) { vinger = null; zet(0, true); return } // een blok wordt versleept
+      // Ingezoomd schuift de kalender zelf dag per dag (kalender.tsx); pas aan de rand is het een andere week.
+      if (agendaSleep.pan) { if (vinger.richting === 'opzij') zet(0, true); vinger = null; return }
       const t = e.touches[0]
       const dx = t.clientX - vinger.x, dy = t.clientY - vinger.y
       if (!vinger.richting) {
