@@ -71,7 +71,10 @@ export function bouwNieuwsbriefMail(n: Pick<Nieuwsbrief, 'titel' | 'categorie' |
     : `<tr><td style="padding:20px 32px;border-bottom:${m.logo ? '1px solid #e0e0e0' : `4px solid ${m.accent}`}">${m.logo ? `<img src="${m.logo}" alt="${m.naam}" width="120" style="display:inline-block;width:120px;height:auto;border:0;vertical-align:middle">` : `<span style="font-size:16px;font-weight:800;color:#111;letter-spacing:-0.02em">${m.deel1}<span style="border-bottom:3px solid ${m.accent}">${m.deel2}</span></span>`}<span style="float:right;font-size:12px;color:#71717a;padding-top:2px">${esc(categorieLabel(n.categorie, n.categorie_label))}</span></td></tr>`
   const knop = ngm
     ? `display:inline-block;background:${NGM.zonnegeel};color:${NGM.woud};text-decoration:none;font-weight:700;font-size:15px;padding:12px 26px;border-radius:999px`
-    : `${KNOP};border-bottom:3px solid ${m.accent}`
+    : mailMerkVan(n.merk) === 'nextgensolutions'
+      // NextGenSolutions: de blauwe knop, volledig rond (brandkit 2026).
+      ? `display:inline-block;background:${m.accent};color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 26px;border-radius:999px`
+      : `${KNOP};border-bottom:3px solid ${m.accent}`
   const cover = publiekeUrl(n.cover_pad) ?? (n.cover_youtube_id ? youtubeThumb(n.cover_youtube_id) : null)
   const html = `<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(n.titel)}</title></head>
 <body style="margin:0;padding:0;background:${achter};font-family:${ngm ? "'DM Sans'," : ''}-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">

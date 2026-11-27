@@ -3,6 +3,7 @@
 // NextGenSolutions blauw). Puur, zodat het overal bruikbaar is.
 import { merkStijl, mailMerkVan, type MailMerk } from './merk-mail'
 import { NGM } from './ngm-merk'
+import { NGS } from './ngs-merk'
 
 function escapeHtml(s: string): string {
   return (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -60,6 +61,51 @@ function ngmHtml(opts: EmailHtmlOpts): string {
 </body></html>`
 }
 
+/**
+ * NextGenSolutions (brandkit 2026): kalk als achtergrond, een witte kaart met een fijne rand, het logo
+ * in kleur bovenaan, tekst in inkt en tekstgrijs, één blauwe knop met een pijl, voet met het label in kapitalen.
+ */
+function ngsHtml(opts: EmailHtmlOpts): string {
+  const m = merkStijl('nextgensolutions')
+  const hasCta = !!(opts.ctaText && opts.ctaLink)
+  const cta = hasCta
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 24px">
+         <tr><td style="border-radius:999px;background:${NGS.blauw}">
+           <a href="${escapeHtml(opts.ctaLink!)}" target="_blank"
+              style="display:inline-block;padding:14px 26px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:999px;font-family:Inter,Arial,Helvetica,sans-serif">
+             ${escapeHtml(opts.ctaText!)} &rarr;
+           </a>
+         </td></tr>
+       </table>`
+    : ''
+  return `<!DOCTYPE html>
+<html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting"><meta name="color-scheme" content="light only"></head>
+<body style="margin:0;padding:0;background:${NGS.kalk}">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${NGS.kalk};padding:24px 12px;font-family:Inter,Arial,Helvetica,sans-serif">
+    <tr><td align="center">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid ${NGS.lijn}">
+        <!-- Kop -->
+        <tr><td style="padding:26px 32px 18px;border-bottom:1px solid ${NGS.lijn}">
+          <img src="${m.logo}" alt="${m.naam}" width="180" style="display:block;width:180px;height:auto;border:0">
+        </td></tr>
+        <!-- Tekst -->
+        <tr><td style="padding:30px 32px 24px">
+          ${paragraphs(opts.bodyText, NGS.inkt)}
+          ${cta}
+        </td></tr>
+        <!-- Voet -->
+        <tr><td style="padding:18px 32px 20px;background:${NGS.kalk};border-top:1px solid ${NGS.lijn}">
+          <p style="margin:0;font-size:12px;line-height:1.6;color:${NGS.tekst}">
+            ${m.naam} · ${m.adres} · <a href="https://${m.website}" style="color:${NGS.blauw};text-decoration:none">${m.website}</a><br>
+            <span style="font-family:'Courier New',monospace;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:${NGS.tekstSterk}">${NGS.tagline}</span>
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`
+}
+
 export type EmailHtmlOpts = {
   bodyText: string
   ctaText?: string | null
@@ -71,6 +117,7 @@ export type EmailHtmlOpts = {
 /** Branded HTML-mail. Tabellen + inline styles voor maximale mailclient-support. */
 export function buildEmailHtml(opts: EmailHtmlOpts): string {
   if (mailMerkVan(opts.merk) === 'nextgenmedia') return ngmHtml(opts)
+  if (mailMerkVan(opts.merk) === 'nextgensolutions') return ngsHtml(opts)
   const m = merkStijl(opts.merk)
   const ACCENT = m.accent
   const hasCta = !!(opts.ctaText && opts.ctaLink)

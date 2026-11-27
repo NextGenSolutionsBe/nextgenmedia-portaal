@@ -10,6 +10,7 @@ import { isAutomatischeBezoeker } from '@/lib/klant-geopend'
 import { merkStijl } from '@/lib/merk-mail'
 import { Woordmerk } from '@/components/logo'
 import { NgmKop, NgmSchil, NgmVoet } from '@/components/ngm-merk'
+import { NgsKop, NgsSchil, NgsVoet } from '@/components/ngs-merk'
 import { AccepteerKnop } from './accepteer-knop'
 import { getekendOp } from '@/lib/offerte-fiche'
 
@@ -27,11 +28,12 @@ export default async function OffertePagina({ params }: { params: { token: strin
   const admin = createAdminSupabaseClient()
   const o = await offerteVanToken(admin, params.token)
   if (!o || o.status === 'concept') notFound()
-  // Offertes van NextGenMedia in de huisstijl van NextGenMedia (woud en zonnegeel);
-  // de andere in de huisstijl van NextGen Agency (zwart-wit).
+  // Offertes van NextGenMedia in de huisstijl van NextGenMedia (woud en zonnegeel), van
+  // NextGenSolutions in die van NextGenSolutions (kalk, inkt, NextGen-blauw); de rest NextGen Agency.
   const ngm = o.merk === 'nextgenmedia'
-  const m = ngm ? merkStijl(o.merk) : { ...merkStijl(o.merk), accent: '#0f0f0f', opAccent: '#ffffff' }
-  const Schil = ({ children }: { children: React.ReactNode }) => (ngm ? <NgmSchil>{children}{<NgmVoet />}</NgmSchil> : <div className="min-h-screen">{children}</div>)
+  const ngs = o.merk === 'nextgensolutions'
+  const m = ngm || ngs ? merkStijl(o.merk) : { ...merkStijl(o.merk), accent: '#0f0f0f', opAccent: '#ffffff' }
+  const Schil = ({ children }: { children: React.ReactNode }) => (ngm ? <NgmSchil>{children}{<NgmVoet />}</NgmSchil> : ngs ? <NgsSchil>{children}<NgsVoet /></NgsSchil> : <div className="min-h-screen">{children}</div>)
   const vandaag = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Brussels' })
   const verlopen = o.status === 'verstuurd' && !!o.geldig_tot && o.geldig_tot < vandaag
 
@@ -46,7 +48,7 @@ export default async function OffertePagina({ params }: { params: { token: strin
     }
   }
 
-  const kop = ngm ? <NgmKop label="Offerte" breedte="4xl" /> : (
+  const kop = ngm ? <NgmKop label="Offerte" breedte="4xl" /> : ngs ? <NgsKop label="Offerte" breedte="4xl" /> : (
     <header className="bg-white border-b border-gray-200">
       <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between gap-3">
         <Woordmerk className="h-9" />

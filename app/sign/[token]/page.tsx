@@ -6,8 +6,8 @@ import { headers } from 'next/headers'
 import { isAutomatischeBezoeker, toestelVan } from '@/lib/klant-geopend'
 import { FileText, CheckCircle2, Clock } from 'lucide-react'
 import { SignatureForm } from './signature-form'
-import { Logo } from '@/components/logo'
 import { NgmKop, NgmSchil, NgmVoet } from '@/components/ngm-merk'
+import { NgsKop, NgsSchil, NgsVoet } from '@/components/ngs-merk'
 import { logContractEvent } from '@/lib/contract-audit'
 import { isNietDoorgegaan } from '@/lib/contract-status'
 
@@ -24,7 +24,8 @@ export default async function SignContractPage({ params }: { params: { token: st
   if (!contract) notFound()
   // Contracten van NextGenMedia (alles behalve NextGenSolutions) in de huisstijl van NextGenMedia.
   const ngm = (contract as { bedrijf?: string | null }).bedrijf !== 'nextgensolutions'
-  const Schil = ({ children }: { children: React.ReactNode }) => (ngm ? <NgmSchil>{children}</NgmSchil> : <div className="min-h-screen flex flex-col">{children}</div>)
+  // NextGenMedia of NextGenSolutions: elk in de eigen huisstijl (lib/ngm-merk.ts, lib/ngs-merk.ts).
+  const Schil = ({ children }: { children: React.ReactNode }) => (ngm ? <NgmSchil>{children}</NgmSchil> : <NgsSchil>{children}</NgsSchil>)
 
   // ── Vervaldatum: verlopen tekenlink blokkeert toegang ──────────────────────
   const alreadySignedStatus = contract.status === 'signed' || contract.status === 'getekend'
@@ -51,12 +52,7 @@ export default async function SignContractPage({ params }: { params: { token: st
   if (nietGeldig) {
     return (
       <Schil>
-        {ngm ? <NgmKop label="Contract" /> : (
-          <header className="bg-white border-b border-gray-200 px-4 py-4 flex items-center gap-3">
-            <Logo className="h-8 w-8" />
-            <span className="font-bold text-sm">NextGenSolutions</span>
-          </header>
-        )}
+        {ngm ? <NgmKop label="Contract" /> : <NgsKop label="Contract" />}
         <div className="flex-1 flex items-center justify-center p-4">
           <div className="bg-white border border-gray-200 rounded-2xl p-8 text-center max-w-md">
             <div className="h-12 w-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
@@ -73,12 +69,7 @@ export default async function SignContractPage({ params }: { params: { token: st
   if (isExpired) {
     return (
       <Schil>
-        {ngm ? <NgmKop label="Contract" /> : (
-          <header className="bg-white border-b border-gray-200 px-4 py-4 flex items-center gap-3">
-            <Logo className="h-8 w-8" />
-            <span className="font-bold text-sm">NextGenSolutions</span>
-          </header>
-        )}
+        {ngm ? <NgmKop label="Contract" /> : <NgsKop label="Contract" />}
         <div className="flex-1 flex items-center justify-center p-4">
           <div className="bg-white border border-gray-200 rounded-2xl p-8 text-center max-w-md">
             <div className="h-12 w-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3">
@@ -146,15 +137,7 @@ export default async function SignContractPage({ params }: { params: { token: st
   return (
     <Schil>
       {/* Header */}
-      {ngm ? <NgmKop label="Contractondertekening" sticky /> : (
-        <header className="bg-white border-b border-gray-200 px-4 py-4 flex items-center justify-between sticky top-0 z-10">
-          <div className="flex items-center gap-3">
-            <Logo className="h-8 w-8" />
-            <span className="font-bold text-sm">NextGenSolutions</span>
-          </div>
-          <span className="text-xs text-gray-400 hidden sm:block">Contractondertekening</span>
-        </header>
-      )}
+      {ngm ? <NgmKop label="Contractondertekening" sticky /> : <NgsKop label="Contractondertekening" sticky />}
 
       <div className="flex-1 max-w-3xl mx-auto w-full px-4 py-6 space-y-5">
         {/* Title */}
@@ -220,7 +203,7 @@ export default async function SignContractPage({ params }: { params: { token: st
           />
         )}
       </div>
-      {ngm && <NgmVoet />}
+      {ngm ? <NgmVoet /> : <NgsVoet />}
     </Schil>
   )
 }

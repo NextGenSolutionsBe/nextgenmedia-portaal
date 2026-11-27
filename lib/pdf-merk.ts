@@ -88,3 +88,40 @@ export function monoLabel(page: PDFPage, mono: PDFFont, tekst: string, x: number
   for (const c of Array.from(t)) { page.drawText(c, { x: xx, y, size, font: mono, color: kleur }); xx += mono.widthOfTextAtSize(c, size) + extra }
   return w
 }
+
+// ── Huisstijl NextGenSolutions in pdf's (brandkit 2026) ─────────────────────
+// Montserrat (koppen), Inter (tekst) en Jersey 15 (labels), kalk, inkt en NextGen-blauw.
+// Zie lib/ngs-merk.ts. Lukt een lettertype niet, dan Helvetica.
+
+export const NGS_PDF = {
+  kalk: hex('#F4F3EF'), inkt: hex('#0B0B0C'), blauw: hex('#1E40AF'), ijs: hex('#E8EDFB'), tekst: hex('#5E5E5E'),
+  tekstSterk: hex('#3A3A3A'), steen: hex('#6F6E6A'), lijn: hex('#DEDDD8'), akkoord: hex('#1E7341'), signaal: hex('#7B97F7'),
+}
+
+/** font = Inter Regular, nadruk = Inter SemiBold, vet = Montserrat Bold, titel = Montserrat SemiBold, mono = Jersey 15 (labels). */
+export async function ngsFonts(pdf: PDFDocument): Promise<NgmFonts> {
+  try {
+    const [r, sb, b, t, m] = await Promise.all([
+      lees('Inter-Regular.ttf'), lees('Inter-SemiBold.ttf'), lees('Montserrat-Bold.ttf'), lees('Montserrat-SemiBold.ttf'), lees('Jersey15-Regular.ttf'),
+    ])
+    pdf.registerFontkit(fontkit)
+    const [font, nadruk, vet, titel, mono] = await Promise.all([r, sb, b, t, m].map((x) => pdf.embedFont(new Uint8Array(x), { subset: true })))
+    return { font, nadruk, vet, titel, mono, eigen: true }
+  } catch {
+    const [font, vet, mono] = await Promise.all([
+      pdf.embedFont(StandardFonts.Helvetica), pdf.embedFont(StandardFonts.HelveticaBold), pdf.embedFont(StandardFonts.Courier),
+    ])
+    return { font, nadruk: vet, vet, titel: vet, mono, eigen: false }
+  }
+}
+
+/** Het logo van NextGenSolutions: in kleur (op wit of kalk) of wit (op inkt). public/merk/ngs/. */
+export async function ngsLogo(pdf: PDFDocument, kleur: 'kleur' | 'wit' = 'kleur'): Promise<PDFImage | null> {
+  const naam = kleur === 'kleur' ? 'logo-pdf.png' : 'logo-wit.png'
+  try { return await pdf.embedPng(new Uint8Array(await readFile(path.join(process.cwd(), 'public', 'merk', 'ngs', naam)))) } catch { return null }
+}
+
+/** De ruwe bytes van het NextGenSolutions-logo (in kleur), voor wie zelf insluit (certificaat). */
+export async function ngsLogoBytes(): Promise<Uint8Array | null> {
+  try { return new Uint8Array(await readFile(path.join(process.cwd(), 'public', 'merk', 'ngs', 'logo-pdf.png'))) } catch { return null }
+}
