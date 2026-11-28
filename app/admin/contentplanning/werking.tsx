@@ -7,11 +7,18 @@ import {
   REEKSEN, MAANDSTART, DAG_KORT, eersteWerkdag, faseplanVanMaand, reeksPeriodes, leesWerkwijze, maandag, maandVan, plusDagen, plusMaanden, weekdagNr, werkdagenVanMaand,
   werkwijze1Beurten, inReeks1, REEKS1_AANPASSINGEN, reeks1AanpassingenCheckDatum, type Reeks, type Werk1Beurt,
   vasteTakenVanDag, isDagtaak, leesKlantTaken, klantTaakSleutel, maandStart, type VasteTaak,
-  shootHerinnering, shootSleutel, vervolgSleutel,
+  shootHerinnering, shootSleutel, vervolgSleutel, wieDoet, REEKS_SOORT,
 } from '@/lib/contentplanning/model'
 import { Paneel, focusRing } from './bouwstenen'
 import type { BordCel, CpData, Doe, Weergave } from './types'
 import { MAANDEN, datumLang, datumNl } from './types'
+import { STANDAARD_WERKING } from '@/lib/werking/instellingen'
+
+/** Planning Media: wie standaard welk werk doet (Instellingen → Werking). */
+const eigenaarsVan = (d: CpData) => d.eigenaars ?? STANDAARD_WERKING.planning
+function WieChip({ naam }: { naam: string }) {
+  return <span className="ml-2 align-middle rounded-full bg-cp-achtergrond border border-cp-rand px-2 py-0.5 text-cp-klein font-normal text-cp-zacht">{naam}</span>
+}
 
 /**
  * Dagelijkse werking — Chiara’s werkscherm (dag · week · maand). Per dag de
@@ -348,7 +355,7 @@ export function VasteKlant({ data, doe, anker, kanSchrijven, modus = 'dag' }: { 
           <input type="checkbox" className={VINK} checked={!!c} disabled={!kanSchrijven} aria-label={`${t.titel} afvinken ${wanneer}`} onChange={(e) => zet(t.key, datum, e.target.checked)} />
           <DagLabel dagen={t.dagen} />
           <span className="flex-1 min-w-0">
-            <span className="block text-cp-basis font-medium">{t.titel}{t.rol && <span className="ml-2 align-middle rounded-full bg-cp-achtergrond border border-cp-rand px-2 py-0.5 text-cp-klein font-normal text-cp-zacht">{t.rol}</span>}</span>
+            <span className="block text-cp-basis font-medium">{t.titel}<WieChip naam={wieDoet(t, eigenaarsVan(data))} /></span>
             {c && <span className="block text-cp-klein text-cp-zacht"><Check className="inline h-3.5 w-3.5 -mt-0.5" /> Gedaan {wanneer}{c.door ? ` · ${c.door}` : ''}{isDagtaak(t) && (t.dagen?.length ?? 0) > 1 ? ' · morgen staat ze er weer' : ''}</span>}
           </span>
           {detailKnop(t)}
@@ -374,7 +381,7 @@ export function VasteKlant({ data, doe, anker, kanSchrijven, modus = 'dag' }: { 
             <div key={t.key} className="rounded-xl border border-cp-rand">
               <div className="flex items-center gap-3 px-3 pt-3">
                 <DagLabel dagen={t.dagen} />
-                <span className="text-cp-basis font-medium flex-1 min-w-0">{t.titel}{t.rol && <span className="ml-2 align-middle rounded-full bg-cp-achtergrond border border-cp-rand px-2 py-0.5 text-cp-klein font-normal text-cp-zacht">{t.rol}</span>}</span>
+                <span className="text-cp-basis font-medium flex-1 min-w-0">{t.titel}<WieChip naam={wieDoet(t, eigenaarsVan(data))} /></span>
                 <span className="text-cp-klein text-cp-zacht shrink-0">{klaar}/{dagen.length}</span>
                 {detailKnop(t)}
               </div>
@@ -472,7 +479,7 @@ function ReeksKaart({ r, maand, data, doe, datum, kanSchrijven, onWerkwijze, onK
   const info = REEKSEN[r - 1]
   const vink = (c: BordCel, gedaan: boolean) => doe('reeksvink.zet', { client_id: c.client_id, maand, reeks: r, gedaan, datum }, { stil: true })
   // Extra taken bij een klant in deze reeks (bv. Verheyen: meeting op het einde van de maand inplannen); afvinken per maand.
-  // Vaste vervolgstappen bij elke klant in deze reeks (reeks 1: contentkalender genereren, taak Bram shootbriefing), plus de eigen extra taken.
+  // Vaste vervolgstappen bij elke klant in deze reeks (reeks 1: contentkalender genereren, shootbriefing), plus de eigen extra taken.
   const extra = (cid: string) => [
     ...data.instellingen.reeks_vervolg.filter((t) => t.reeks === r).map((t) => ({ ...t, sleutel: vervolgSleutel(cid, t.key) })),
     ...leesKlantTaken(data.cpKlanten.find((k) => k.client_id === cid)?.extra_taken).filter((t) => t.reeks === r && !t.algemeen).map((t) => ({ ...t, sleutel: klantTaakSleutel(cid, t.key) })),
@@ -487,7 +494,7 @@ function ReeksKaart({ r, maand, data, doe, datum, kanSchrijven, onWerkwijze, onK
       <div className={`px-5 py-4 ${info.zacht} flex items-center gap-3 flex-wrap`}>
         <div className="min-w-0 flex-1">
           <h2 className={klein ? 'text-cp-basis font-semibold' : 'text-cp-kop'}>{info.label}</h2>
-          <p className="text-cp-klein text-cp-zacht">{p ? `${datumNl(p.van)} – ${datumNl(p.tot)} · ` : ''}{klaar.length}/{lijst.length} klaar{data.instellingen.reeks_rol?.[String(r)] ? ` · ${data.instellingen.reeks_rol[String(r)]}` : ''}</p>
+          <p className="text-cp-klein text-cp-zacht">{p ? `${datumNl(p.van)} – ${datumNl(p.tot)} · ` : ''}{klaar.length}/{lijst.length} klaar · {data.instellingen.reeks_rol?.[String(r)] || eigenaarsVan(data)[REEKS_SOORT[r]]}</p>
         </div>
         <button type="button" onClick={onWerkwijze} className={KNOP}><BookOpen className="h-4 w-4" />Werkwijze</button>
       </div>
@@ -531,7 +538,7 @@ function ReeksKaart({ r, maand, data, doe, datum, kanSchrijven, onWerkwijze, onK
                         <input type="checkbox" className="h-5 w-5 mt-0.5 shrink-0 cursor-pointer accent-[var(--cp-klaar)]" checked={!!ck} disabled={!kanSchrijven}
                           aria-label={`${w.naam.get(c.client_id)}: ${t.titel} afvinken`}
                           onChange={(e) => doe('routine.check', { routine_key: t.sleutel, datum: maandStart(maand), aan: e.target.checked }, { stil: true })} />
-                        <span className={`text-cp-klein ${ck ? 'line-through text-cp-zacht' : 'font-medium'}`}>{t.titel}{ck?.door ? <span className="text-cp-zacht font-normal"> · {ck.door}</span> : null}</span>
+                        <span className={`text-cp-klein ${ck ? 'line-through text-cp-zacht' : 'font-medium'}`}>{t.titel}<WieChip naam={wieDoet(t, eigenaarsVan(data), REEKS_SOORT[r])} />{ck?.door ? <span className="text-cp-zacht font-normal"> · {ck.door}</span> : null}</span>
                       </li>
                     )
                   })}

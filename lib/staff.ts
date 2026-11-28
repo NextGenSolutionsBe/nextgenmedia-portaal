@@ -44,6 +44,8 @@ export const ADMIN_MODULES: AdminModule[] = [
   // Ook bereikbaar met de module Verkoop (zie SHARED_API / SHARED_PAGES).
   { key: 'meetings',    label: 'Meeting Inplanner',    prefixes: ['/admin/meetings', '/api/admin/meetings'] },
   { key: 'nextgensolutions', label: 'NextGenSolutions', prefixes: ['/admin/nextgensolutions', '/api/admin/nextgensolutions'] },
+  // Levering van NextGenSolutions apart (28 nov 2026): wie bouwt (Uitvoerder Solutions) ziet geen pipeline, dealwaarden of omzet.
+  { key: 'ngs_levering', label: 'NextGenSolutions: levering', prefixes: ['/admin/nextgensolutions/levering', '/api/admin/nextgensolutions/levering'] },
   { key: 'sales',       label: 'Verkoop',              prefixes: ['/admin/sales', '/api/admin/sales'] },
   { key: 'invoices',    label: 'Facturen',             prefixes: ['/admin/invoices', '/api/admin/invoices'] },
   { key: 'vesting',     label: 'Vesting',              prefixes: ['/admin/vesting', '/api/admin/vesting'] },
@@ -128,6 +130,8 @@ const SHARED_API: Array<{ test: (p: string) => boolean; modules: string[] }> = [
   // Meeting Inplanner: de centrale meetingmodule. Setters (Verkoop) boeken er
   // hun afspraken in, dus wie Verkoop mag, mag ook hier binnen.
   { test: (p) => p === '/api/admin/meetings' || p.startsWith('/api/admin/meetings/') || p.startsWith('/api/admin/meetings?'), modules: ['meetings', 'sales'] },
+  // Levering van Solutions: met het eigen recht, of met de hele module NextGenSolutions.
+  { test: (p) => p === '/api/admin/nextgensolutions/levering' || p.startsWith('/api/admin/nextgensolutions/levering/') || p.startsWith('/api/admin/nextgensolutions/levering?'), modules: ['ngs_levering', 'nextgensolutions'] },
   // Offertes versturen kan ook vanuit een projectkaart of de klantdetail.
   { test: (p) => p === '/api/admin/offertes' || p.startsWith('/api/admin/offertes/') || p.startsWith('/api/admin/offertes?'), modules: ['offertes', 'opdrachten', 'clients'] },
   // Mail-composer: content (scripts/shoot), klanten (hub), contracten, blogs, partners.
@@ -151,6 +155,7 @@ export function modulesForApiPath(path: string): string[] | null {
 /** Pagina's die bij meer dan één module horen: één ervan volstaat (zie SHARED_API). */
 const SHARED_PAGES: Array<{ test: (p: string) => boolean; modules: string[] }> = [
   { test: (p) => p === '/admin/meetings' || p.startsWith('/admin/meetings/') || p.startsWith('/admin/meetings?'), modules: ['meetings', 'sales'] },
+  { test: (p) => p === '/admin/nextgensolutions/levering' || p.startsWith('/admin/nextgensolutions/levering/') || p.startsWith('/admin/nextgensolutions/levering?'), modules: ['ngs_levering', 'nextgensolutions'] },
 ]
 
 /** Module(s) die toegang geven tot een /admin-pagina; null = niet gegate. */

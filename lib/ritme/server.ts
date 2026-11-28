@@ -1,8 +1,13 @@
 import 'server-only'
 import { randomUUID } from 'node:crypto'
 import { logAudit } from '@/lib/audit'
+import { leesInstellingen, bewaarInstelling } from '@/lib/instellingen/laden'
+import { vergeetInstellingenCache } from '@/lib/instellingen/edge'
+import { leesVennoten, VENNOTEN_SLEUTEL } from '@/lib/vesting-akkoord'
+import { controleerReeks } from '@/lib/agenda/reeksen'
+import { isDomein, eigenaarVanDomein, isEigenaar, domeinLabel, eindUur } from '@/lib/werking/instellingen'
 import {
-  CIJFERS, leesScorecard, weken, perWeek, maandagVan, leesActies, leesNotities, controleerActie, controleerDoel, isStem, uitslag, werkvoorraad,
+  CIJFERS, leesScorecard, weken, perWeek, maandagVan, leesActies, leesNotities, controleerActie, controleerDoel, isStem, uitslag, werkvoorraad, beslisWijze, startStatus,
   type CijferKey, type ScorecardInstellingen, type Week, type Actiepunt, type Belofte, type Stem,
 } from './model'
 
@@ -172,6 +177,47 @@ export async function doelActie(admin: Admin, b: Record<string, unknown>, ik: Ik
   throw new RitmeFout('Onbekende actie')
 }
 
+/**
+ * Weekoverleg: het vaste moment (nieuwe werking, 28 nov 2026). Pas na de klik
+ * "Vast moment instellen" komt er een vast blok Overleg in de agenda van de
+ * drie vennoten (ag_reeksen). Staat het er al, dan wordt hetzelfde blok
+ * aangepast (nooit een tweede). Het moment komt uit Instellingen → Werking.
+ */
+export async function zetVastMoment(admin: Admin, ik: Ik): Promise<{ reeks_id: string; nieuw: boolean }> {
+  const inst = await leesInstellingen()
+  const w = inst.werking.weekoverleg
+  const { data: vrij } = await admin.from('app_settings').select('value').eq('key', VENNOTEN_SLEUTEL).maybeSingle()
+  const vennoten = leesVennoten(vrij?.value)
+  const userIds = Object.values(vennoten).flatMap((v) => v.user_ids)
+  const { data: pers } = userIds.length ? await admin.from('ag_personen').select('id, user_id').in('user_id', userIds) : { data: [] }
+  const personen = ((pers ?? []) as { id: string; user_id: string }[]).map((p) => p.id)
+  if (!personen.length) throw new RitmeFout('De vennoten staan nog niet in de agenda. Open de agenda één keer en probeer opnieuw.', 409)
+  const eigen = ((pers ?? []) as { id: string; user_id: string }[]).find((p) => p.user_id === ik.userId)?.id ?? null
+  const c = controleerReeks({ soort: 'blok', blok_type: 'overleg', titel: 'Weekoverleg', personen, dagen: [w.dag], interval_weken: 1, van: w.van, tot: eindUur(w.van, w.duur_min), start_datum: vandaagBrussel(), prive: false })
+  if (!c.ok) throw new RitmeFout(c.fout)
+  let id: string | null = null
+  if (w.reeks_id) {
+    const { data: bestaand } = await admin.from('ag_reeksen').select('id').eq('id', w.reeks_id).is('verwijderd_op', null).maybeSingle()
+    if (bestaand) {
+      const { soort: _s, start_datum: _st, ...wijzig } = c.reeks
+      void _s; void _st
+      const { error } = await admin.from('ag_reeksen').update({ ...wijzig, updated_at: nu() }).eq('id', bestaand.id)
+      if (error) throw new Error(error.message)
+      id = bestaand.id
+    }
+  }
+  const nieuw = !id
+  if (!id) {
+    const { data, error } = await admin.from('ag_reeksen').insert({ ...c.reeks, eigenaar_id: eigen, gemaakt_door: ik.naam ?? ik.email }).select('id').single()
+    if (error) throw new Error(error.message)
+    id = data.id as string
+  }
+  await bewaarInstelling(admin, 'werking', { ...inst.werking, weekoverleg: { ...w, reeks_id: id } }, ik.email)
+  vergeetInstellingenCache()
+  await logAudit({ action: 'overleg.vast_moment', entityType: 'ag_reeks', entityId: id, summary: `Weekoverleg vast gezet: ${['ma', 'di', 'wo', 'do', 'vr'][w.dag - 1]} ${w.van}–${eindUur(w.van, w.duur_min)}`, actorUserId: ik.userId, actorEmail: ik.email })
+  return { reeks_id: id, nieuw }
+}
+
 // ── 93. Beslissingen ────────────────────────────────────────────────────────
 
 export async function beslissingen(admin: Admin) {
@@ -186,20 +232,48 @@ export async function beslissingActie(admin: Admin, b: Record<string, unknown>, 
   if (b.actie === 'beslissing.nieuw') {
     const titel = String(b.titel ?? '').trim().slice(0, 200)
     if (titel.length < 3) throw new RitmeFout('Wat wordt er beslist?')
-    const { data, error } = await admin.from('ritme_beslissingen').insert({
+    const werking = (await leesInstellingen()).werking
+    const domein = isDomein(b.domein) ? b.domein : 'meerdere'
+    const eigenaar = eigenaarVanDomein(werking, domein)
+    const wijze = beslisWijze(domein, eigenaar)
+    const status = startStatus(wijze, isEigenaar(eigenaar, ik.naam))
+    const rij: Record<string, unknown> = {
       titel, toelichting: String(b.toelichting ?? '').trim().slice(0, 5000) || null,
       bedrijf: b.bedrijf === 'nextgenmedia' || b.bedrijf === 'nextgensolutions' ? b.bedrijf : null,
-      voorgesteld_door: ik.naam ?? ik.email, status: 'open',
-    }).select('id').single()
-    if (error) throw new Error(error.message)
-    await logAudit({ action: 'beslissing.nieuw', entityType: 'beslissing', entityId: data.id, summary: `Beslissing voorgesteld: ${titel}`, actorUserId: ik.userId, actorEmail: ik.email })
+      voorgesteld_door: ik.naam ?? ik.email, status, domein, eigenaar: wijze === 'eigenaar' ? eigenaar : null,
+      ...(status === 'aangenomen' ? { beslist_op: nu() } : {}),
+    }
+    let r = await admin.from('ritme_beslissingen').insert(rij).select('id').single()
+    // Vóór de migratie (zonder domein en eigenaar): enkel een stemming kan dan.
+    if (r.error && /domein|eigenaar/.test(r.error.message ?? '')) {
+      if (wijze === 'eigenaar') throw new RitmeFout('Beslissingen per domein werken pas na de update van de databank.', 503)
+      const { domein: _d, eigenaar: _e, ...zonder } = rij
+      void _d; void _e
+      r = await admin.from('ritme_beslissingen').insert(zonder).select('id').single()
+    }
+    if (r.error) throw new Error(r.error.message)
+    const samenvatting = status === 'aangenomen' ? `Beslist (${domeinLabel(domein)}): ${titel}` : wijze === 'eigenaar' ? `Beslissing voor ${eigenaar} (${domeinLabel(domein)}): ${titel}` : `Beslissing voorgesteld: ${titel}`
+    await logAudit({ action: 'beslissing.nieuw', entityType: 'beslissing', entityId: r.data.id, summary: samenvatting, actorUserId: ik.userId, actorEmail: ik.email, metadata: { domein, eigenaar, wijze } })
     return
   }
   const id = String(b.id ?? '')
   if (!UUID.test(id)) throw new RitmeFout('Onbekende beslissing', 404)
-  const { data: bes } = await admin.from('ritme_beslissingen').select('id, titel, status').eq('id', id).maybeSingle()
+  const { data: bes } = await admin.from('ritme_beslissingen').select('*').eq('id', id).maybeSingle()
   if (!bes) throw new RitmeFout('Onbekende beslissing', 404)
+  const eigenaarVan = typeof bes.eigenaar === 'string' && bes.eigenaar ? bes.eigenaar as string : null
+  if (b.actie === 'beslissing.beslis') {
+    // Binnen één domein: enkel de eigenaar beslist, zonder stemming.
+    if (!eigenaarVan) throw new RitmeFout('Hierover stemmen jullie.', 409)
+    if (!isEigenaar(eigenaarVan, ik.naam)) throw new RitmeFout(`Dit beslist ${eigenaarVan}.`, 403)
+    if (bes.status !== 'open') throw new RitmeFout('Hierover is al beslist.', 409)
+    const besluit = b.besluit === 'nee' ? 'verworpen' : 'aangenomen'
+    const { data: gezet } = await admin.from('ritme_beslissingen').update({ status: besluit, beslist_op: nu(), updated_at: nu() }).eq('id', id).eq('status', 'open').select('id')
+    if (!gezet?.length) throw new RitmeFout('Hierover is al beslist.', 409)
+    await logAudit({ action: 'beslissing.beslis', entityType: 'beslissing', entityId: id, summary: `${besluit === 'aangenomen' ? 'Beslist' : 'Niet gedaan'}: "${bes.titel}" (${eigenaarVan})`, actorUserId: ik.userId, actorEmail: ik.email })
+    return
+  }
   if (b.actie === 'beslissing.stem') {
+    if (eigenaarVan) throw new RitmeFout(`Dit beslist ${eigenaarVan}, zonder stemming.`, 409)
     if (bes.status !== 'open') throw new RitmeFout('Over deze beslissing is al gestemd.', 409)
     if (!isStem(b.stem)) throw new RitmeFout('Kies voor, tegen of onthouding.')
     const { error } = await admin.from('ritme_stemmen').upsert({ beslissing_id: id, auth_user_id: ik.userId, naam: ik.naam ?? ik.email, stem: b.stem, updated_at: nu() }, { onConflict: 'beslissing_id,auth_user_id' })

@@ -163,6 +163,20 @@ export function uitslag(stemmen: { stem: Stem }[], nodig = 2): 'aangenomen' | 'v
   return 'open'
 }
 
+/**
+ * Beslissingen per domein (nieuwe werking, 28 nov 2026). Binnen één domein
+ * beslist de eigenaar, zonder stemming: legt die het zelf vast, dan is het
+ * meteen beslist; legt iemand anders het vast, dan wacht het op de eigenaar.
+ * Over meerdere domeinen (of geen) blijft het de stemming twee op drie.
+ */
+export type BeslisWijze = 'eigenaar' | 'stemming'
+export function beslisWijze(domein: string | null | undefined, eigenaar: string | null): BeslisWijze {
+  return domein && domein !== 'meerdere' && eigenaar ? 'eigenaar' : 'stemming'
+}
+export function startStatus(wijze: BeslisWijze, ikBenEigenaar: boolean): 'open' | 'aangenomen' {
+  return wijze === 'eigenaar' && ikBenEigenaar ? 'aangenomen' : 'open'
+}
+
 // ── 94. Beloftes ────────────────────────────────────────────────────────────
 
 export type Belofte = { id: string; wat: string; wie: string | null; aan_wie: string; tegen: string | null; klaar: boolean }

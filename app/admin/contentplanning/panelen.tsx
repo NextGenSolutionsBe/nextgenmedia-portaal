@@ -5,9 +5,10 @@ import Link from 'next/link'
 import { Loader2, Trash2, Plus, ExternalLink, Pause, Play, Archive, X, Pencil, Lightbulb } from 'lucide-react'
 import { INP } from '@/app/admin/instellingen/ui'
 import {
-  REEKSEN, ACTIVITEIT_RITME_LABEL, verwachteDatum, ritmeVan, beurten, isKlaar, FASE_KEYS, FASE_LABEL, dagenLabel, leesKlantTaken,
+  REEKSEN, ACTIVITEIT_RITME_LABEL, verwachteDatum, ritmeVan, beurten, isKlaar, FASE_KEYS, FASE_LABEL, dagenLabel, leesKlantTaken, REEKS_SOORT,
   type ActiviteitRitme, type CpInstellingen, type Onderdeel, type Status, type VasteTaak, type Reeks, type Ritme, type KlantTaak,
 } from '@/lib/contentplanning/model'
+import { WERK_SOORTEN, STANDAARD_WERKING } from '@/lib/werking/instellingen'
 import { Paneel, Notities, StatusBadge, TaakKaart, focusRing } from './bouwstenen'
 import type { Batch, CpData, Doe, Notitie, Taak } from './types'
 import { MAANDEN, datumNl, maandNaam } from './types'
@@ -316,7 +317,7 @@ export function InstellingenPaneel({ data, doe, onSluit }: { data: CpData; doe: 
           {REEKSEN.map((r) => (
             <div key={r.nr}>
               <label className={`${lbl} flex items-center gap-1.5`}><span className={`h-2 w-2 rounded-full ${r.kleur}`} />{r.label}</label>
-              <input className={`${INP} mb-1.5`} list="cp-rollen" value={v.reeks_rol?.[String(r.nr)] ?? ''} onChange={(e) => setV({ ...v, reeks_rol: { ...(v.reeks_rol ?? {}), [String(r.nr)]: e.target.value } })} placeholder="Wie doet deze reeks? (rol of naam, leeg = de planning)" aria-label={`Rol voor ${r.label}`} maxLength={40} />
+              <input className={`${INP} mb-1.5`} list="cp-rollen" value={v.reeks_rol?.[String(r.nr)] ?? ''} onChange={(e) => setV({ ...v, reeks_rol: { ...(v.reeks_rol ?? {}), [String(r.nr)]: e.target.value } })} placeholder={`Wie doet deze reeks? Leeg = ${(data.eigenaars ?? STANDAARD_WERKING.planning)[REEKS_SOORT[r.nr]]}`} aria-label={`Rol voor ${r.label}`} maxLength={40} />
               <textarea rows={10} className={`${INP} font-mono text-xs`} value={v.reeks_detail[String(r.nr)] ?? ''} onChange={(e) => setV({ ...v, reeks_detail: { ...v.reeks_detail, [String(r.nr)]: e.target.value } })} />
             </div>
           ))}
@@ -331,7 +332,12 @@ export function InstellingenPaneel({ data, doe, onSluit }: { data: CpData; doe: 
           {v.vaste_taken.map((t, i) => (
             <div key={t.key} className="rounded-xl border border-gray-200 p-2.5 space-y-1.5">
               <div className="flex gap-1.5"><input className={INP} value={t.titel} onChange={(e) => zetV(i, { titel: e.target.value })} aria-label="Taak" /><button type="button" onClick={() => setV({ ...v, vaste_taken: v.vaste_taken.filter((_, j) => j !== i) })} className={`h-9 w-9 shrink-0 rounded-lg hover:bg-red-50 text-red-600 flex items-center justify-center ${focusRing}`} aria-label="Taak verwijderen"><Trash2 className="h-4 w-4" /></button></div>
-              <input className={INP} list="cp-rollen" value={t.rol ?? ''} onChange={(e) => zetV(i, { rol: e.target.value || undefined })} placeholder="Wie doet dit? (rol of naam, leeg = de planning)" aria-label={`Rol voor ${t.titel}`} maxLength={40} />
+              <div className="flex gap-1.5">
+                <select className={INP} value={t.soort ?? 'management'} onChange={(e) => zetV(i, { soort: e.target.value as VasteTaak['soort'] })} aria-label={`Soort werk voor ${t.titel}`}>
+                  {WERK_SOORTEN.map((w) => <option key={w.key} value={w.key}>{w.label} · {(data.eigenaars ?? STANDAARD_WERKING.planning)[w.key]}</option>)}
+                </select>
+                <input className={INP} list="cp-rollen" value={t.rol ?? ''} onChange={(e) => zetV(i, { rol: e.target.value || undefined })} placeholder="Iemand anders? (leeg = volgens het soort werk)" aria-label={`Rol voor ${t.titel}`} maxLength={40} />
+              </div>
               {/* Op welke dagen? Geen dag = één keer per week. */}
               <div className="flex items-center gap-1 flex-wrap text-xs">
                 <span className="text-gray-500 mr-1">Dagen:</span>

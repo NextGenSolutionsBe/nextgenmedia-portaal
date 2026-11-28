@@ -9,6 +9,7 @@
 // komen uit de bestaande Maandplanning (standaard + handmatige aanpassingen).
 
 // ── Maandplanning-fases (bron van de reeksen per dag) ───────────────────────
+import type { WerkSoort } from '@/lib/werking/instellingen'
 export type FaseKey = 'ideeen' | 'intakes' | 'scripts' | 'shoots' | 'edit' | 'feedback' | 'aanpassingen' | 'stats'
 export const FASE_KEYS: FaseKey[] = ['ideeen', 'intakes', 'scripts', 'shoots', 'edit', 'feedback', 'aanpassingen', 'stats']
 export const FASE_LABEL: Record<FaseKey, string> = {
@@ -146,10 +147,23 @@ export function leesMeetingExtra(v: unknown): MeetingExtra[] {
 }
 /** `dagen`: 1 = maandag … 5 = vrijdag. Leeg = één keer per week, op een dag naar keuze. */
 /** `rol`: wie de taak doet (rolsjabloon of naam, verbeterplan fase 6, punt 68). Leeg = de planningspersoon. */
-export type VasteTaak = { key: string; titel: string; detail: string; dagen?: number[]; rol?: string }
+export type VasteTaak = { key: string; titel: string; detail: string; dagen?: number[]; rol?: string; soort?: WerkSoort }
 
 /** Een rol netjes: tekst, hoogstens 40 tekens; leeg = niets. */
 export const leesRol = (v: unknown): string | undefined => { const t = typeof v === 'string' ? v.trim().slice(0, 40) : ''; return t || undefined }
+export const leesSoort = (v: unknown): WerkSoort | undefined => (v === 'management' || v === 'uitvoering' || v === 'shoot' ? v : undefined)
+
+/** Planning Media (28 nov 2026): het soort werk van een reeks, als de reeks zelf geen naam heeft. */
+export const REEKS_SOORT: Record<Reeks, WerkSoort> = { 1: 'management', 2: 'uitvoering', 3: 'management' }
+
+/**
+ * Wie doet deze taak? Een eigen naam op de taak gaat voor, dan de eigenaar van
+ * het soort werk (Instellingen → Werking). Zonder soort: management. De oude
+ * tekst "Taak Bram: …" in een titel telt niet meer: de eigenaar komt uit het soort.
+ */
+export function wieDoet(t: { rol?: string; soort?: WerkSoort }, eigenaars: Record<WerkSoort, string>, std: WerkSoort = 'management'): string {
+  return t.rol?.trim() || eigenaars[t.soort ?? std]
+}
 
 /**
  * Extra taak bij één klant, telkens die klant in de gekozen reeks zit. Afvinken
@@ -157,7 +171,7 @@ export const leesRol = (v: unknown): string | undefined => { const t = typeof v 
  * bovenaan de reeks staat zodra die begint, ook als de klant er die maand niet
  * in zit (bv. Verheyen bij reeks 1: meeting einde van de maand vastleggen).
  */
-export type KlantTaak = { key: string; titel: string; reeks: Reeks; algemeen?: boolean }
+export type KlantTaak = { key: string; titel: string; reeks: Reeks; algemeen?: boolean; soort?: WerkSoort; rol?: string }
 
 /** Weekdagen nakijken: enkel 1 tot 5, zonder dubbels, gesorteerd. */
 export function leesDagen(v: unknown): number[] {
@@ -185,7 +199,9 @@ export function leesKlantTaken(v: unknown): KlantTaak[] {
     const titel = String(r.titel ?? '').replace(/\s+/g, ' ').trim().slice(0, 300)
     const reeks = Number(r.reeks)
     const key = String(r.key ?? '').replace(/[^a-z0-9_]/gi, '').slice(0, 30)
-    return titel && isReeks(reeks) && key ? { key, titel, reeks, ...(r.algemeen === true ? { algemeen: true } : {}) } : null
+    const soort = leesSoort(r.soort)
+    const rol = leesRol(r.rol)
+    return titel && isReeks(reeks) && key ? { key, titel, reeks, ...(r.algemeen === true ? { algemeen: true } : {}), ...(soort ? { soort } : {}), ...(rol ? { rol } : {}) } : null
   }).filter((t): t is KlantTaak => !!t)
 }
 /** Afvinken van een klanttaak: per klant, taak en maand (datum = eerste dag van de maand). */
@@ -329,8 +345,8 @@ export const STANDAARD_CP: CpInstellingen = {
   // INN, SLL, K en J zijn samen één klant: één rij.
   meeting_extra: [{ key: 'inn_sll_k_j', naam: 'INN · SLL · K · J', client_id: null }],
   reeks_vervolg: [
-    { key: 'kalender_bram', titel: 'Contentkalender genereren', reeks: 1 },
-    { key: 'shootbriefing', titel: 'Taak Bram: shootbriefing opstellen & doorsturen', reeks: 1 },
+    { key: 'kalender_bram', titel: 'Contentkalender genereren', reeks: 1, soort: 'management' },
+    { key: 'shootbriefing', titel: 'Shootbriefing opstellen & doorsturen', reeks: 1, soort: 'shoot' },
   ],
 }
 
@@ -348,7 +364,7 @@ export function leesCp(ruw: unknown): CpInstellingen {
     reeks_detail: { ...STANDAARD_CP.reeks_detail, ...(r.reeks_detail && typeof r.reeks_detail === 'object' ? r.reeks_detail : {}) },
     vaste_naam: typeof r.vaste_naam === 'string' && r.vaste_naam.trim() ? r.vaste_naam : STANDAARD_CP.vaste_naam,
     vaste_sub: typeof r.vaste_sub === 'string' ? r.vaste_sub : STANDAARD_CP.vaste_sub,
-    vaste_taken: Array.isArray(r.vaste_taken) ? r.vaste_taken.filter((t) => t && typeof t.key === 'string').map((t) => ({ key: t.key, titel: String(t.titel ?? ''), detail: String(t.detail ?? ''), dagen: leesDagen(t.dagen), ...(leesRol(t.rol) ? { rol: leesRol(t.rol) } : {}) })) : STANDAARD_CP.vaste_taken,
+    vaste_taken: Array.isArray(r.vaste_taken) ? r.vaste_taken.filter((t) => t && typeof t.key === 'string').map((t) => ({ key: t.key, titel: String(t.titel ?? ''), detail: String(t.detail ?? ''), dagen: leesDagen(t.dagen), ...(leesRol(t.rol) ? { rol: leesRol(t.rol) } : {}), ...(leesSoort(t.soort) ? { soort: leesSoort(t.soort) } : {}) })) : STANDAARD_CP.vaste_taken,
     reeks_rol: Object.fromEntries(['1', '2', '3'].flatMap((k) => { const v = leesRol((r.reeks_rol as Record<string, unknown> | undefined)?.[k]); return v ? [[k, v]] : [] })),
     bord_verborgen: Array.isArray(r.bord_verborgen) ? r.bord_verborgen.filter((x): x is string => typeof x === 'string') : [],
     meeting_verborgen: Array.isArray(r.meeting_verborgen) ? r.meeting_verborgen.filter((x): x is string => typeof x === 'string') : [],

@@ -36,7 +36,7 @@ const WEERGAVEN: { key: Weergave; label: string; icon: typeof ListChecks }[] = [
 const isWeergave = (v: unknown): v is Weergave => WEERGAVEN.some((w) => w.key === v)
 const MODI: { key: WerkModus; label: string }[] = [{ key: 'dag', label: 'Dag' }, { key: 'week', label: 'Week' }, { key: 'maand', label: 'Maand' }]
 
-export function ContentplanningClient({ persoon = 'Chiara' }: { persoon?: string } = {}) {
+export function ContentplanningClient() {
   const vandaag = useMemo(() => vandaagBE(), [])
   const [weergave, setWeergave] = useState<Weergave>('werking')
   const [werkModus, setWerkModus] = useState<WerkModus>('dag')
@@ -152,7 +152,7 @@ export function ContentplanningClient({ persoon = 'Chiara' }: { persoon?: string
   return (
     <div className="font-cp text-cp-ink space-y-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h1 className="text-cp-titel">Dagelijkse planning {persoon}</h1>
+        <h1 className="text-cp-titel">Planning Media</h1>
         {data?.kan.beheren && <button type="button" onClick={() => setPaneel({ soort: 'instellingen' })} className={`inline-flex items-center gap-2 h-11 px-4 rounded-cp border border-cp-rand bg-cp-vlak text-cp-basis font-medium hover:border-cp-ink transition-colors ${focusRing}`}><Settings2 className="h-5 w-5" />Instellingen</button>}
       </div>
 

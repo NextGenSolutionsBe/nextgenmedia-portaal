@@ -9,6 +9,7 @@ import {
   OVERLEG_AGENDA, DOEL_STATUS, kleurVan, kwartaalVan, volgendKwartaal, beloftesPerPersoon, maandagVan, CIJFERS,
   type Actiepunt, type AgendaKey, type Belofte, type Stem, type ScorecardInstellingen, type Week,
 } from '@/lib/ritme/model'
+import { DOMEINEN, domeinLabel, isEigenaar, eindUur } from '@/lib/werking/instellingen'
 
 const TABS = [['scorecard', 'Scorecard'], ['overleg', 'Weekoverleg'], ['doelen', 'Kwartaaldoelen'], ['beslissingen', 'Beslissingen'], ['beloftes', 'Beloftes']] as const
 type Tab = (typeof TABS)[number][0]
@@ -30,8 +31,8 @@ async function api<T>(url: string, body?: unknown): Promise<T> {
  * Center. Scorecard (13 weken, eigenaar en doel per cijfer), weekoverleg met
  * vaste agenda, kwartaaldoelen, beslissingen (twee van de drie) en beloftes.
  */
-export function RitmeClient() {
-  const [tab, setTab] = useState<Tab>('scorecard')
+export function RitmeClient({ start }: { start?: string }) {
+  const [tab, setTab] = useState<Tab>(TABS.some(([k]) => k === start) ? (start as Tab) : 'scorecard')
   return (
     <div className="space-y-4">
       <div className="flex gap-1 flex-wrap">{TABS.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={`rounded-lg px-3 py-1.5 text-sm font-medium ${tab === k ? 'bg-black text-white' : 'bg-white border border-gray-200 text-gray-700'}`}>{l}</button>)}</div>
@@ -114,16 +115,19 @@ function ScorecardInstellen({ inst, onSluit, onBewaard }: { inst: ScorecardInste
 
 // ── Weekoverleg ────────────────────────────────────────────────────────────
 
+type Moment = { dag: number; van: string; duur_min: number; reeks_id: string | null }
+const DAG_LANG = ['maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag']
 type Overleg = { week: string; notities: Partial<Record<AgendaKey, string>>; acties: Actiepunt[]; aanwezig: string[]; afgesloten_op: string | null; bijgewerkt_door: string | null }
 
 function Weekoverleg() {
   const [week, setWeek] = useState(maandagVan(vandaag()))
-  const [d, setD] = useState<{ overleg: Overleg; vorige: Overleg | null; metTaak: string[] } | null>(null)
+  const [d, setD] = useState<{ overleg: Overleg; vorige: Overleg | null; metTaak: string[]; moment?: Moment } | null>(null)
+  const [zetBezig, setZetBezig] = useState(false)
   const [notities, setNotities] = useState<Partial<Record<AgendaKey, string>>>({})
   const [vuil, setVuil] = useState(false)
   const [taakVoor, setTaakVoor] = useState<Actiepunt | null>(null)
   const laad = useCallback(() => {
-    api<{ overleg: Overleg; vorige: Overleg | null; metTaak: string[] }>(`/api/admin/ritme?deel=overleg&week=${week}`).then((x) => { setD(x); setNotities(x.overleg.notities); setVuil(false) }).catch((e) => toast.error(e.message))
+    api<{ overleg: Overleg; vorige: Overleg | null; metTaak: string[]; moment?: Moment }>(`/api/admin/ritme?deel=overleg&week=${week}`).then((x) => { setD(x); setNotities(x.overleg.notities); setVuil(false) }).catch((e) => toast.error(e.message))
   }, [week])
   useEffect(() => { laad() }, [laad])
   const post = async (b: Record<string, unknown>, ok?: string) => {
@@ -132,8 +136,20 @@ function Weekoverleg() {
   if (!d) return <div className="card-base py-10 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>
   const o = d.overleg
   const vorigeOpen = (d.vorige?.acties ?? []).filter((a) => !a.klaar)
+  const m = d.moment
+  const zetVast = async () => {
+    setZetBezig(true)
+    try { const j = await api<{ nieuw: boolean }>('/api/admin/ritme', { actie: 'overleg.vast_moment' }); toast.success(j.nieuw ? 'Het weekoverleg staat vast in jullie agenda.' : 'Het vaste moment is aangepast.'); laad() } catch (e) { toast.error((e as Error).message) } finally { setZetBezig(false) }
+  }
   return (
     <div className="space-y-3">
+      {m && (
+        <div className="card-base flex items-center gap-2 flex-wrap text-sm">
+          <span className="text-gray-700">{m.reeks_id ? 'Vast moment' : 'Voorstel'}: <b>{DAG_LANG[m.dag - 1]} {m.van}–{eindUur(m.van, m.duur_min)}</b>, Marco, Bram en Chiara</span>
+          <span className="flex-1" />
+          <button type="button" disabled={zetBezig} onClick={zetVast} className={m.reeks_id ? 'btn-secondary text-xs' : 'btn-primary text-xs'}>{zetBezig && <Loader2 className="h-3.5 w-3.5 animate-spin" />}{m.reeks_id ? 'Opnieuw vastzetten' : 'Vast moment instellen'}</button>
+        </div>
+      )}
       <div className="card-base flex items-center gap-2 flex-wrap">
         <button type="button" onClick={() => setWeek(plusDagen(week, -7))} className="h-8 w-8 rounded-lg hover:bg-gray-100 flex items-center justify-center" aria-label="Vorige week"><ChevronLeft className="h-4 w-4" /></button>
         <span className="font-semibold text-sm">Week van {dagKort(week)}</span>
@@ -272,51 +288,73 @@ function DoelVenster({ d, kwartaal, onSluit, onBewaard }: { d: Doel | null; kwar
 
 // ── Beslissingen ───────────────────────────────────────────────────────────
 
-type Beslissing = { id: string; titel: string; toelichting: string | null; bedrijf: string | null; voorgesteld_door: string | null; status: 'open' | 'aangenomen' | 'verworpen'; beslist_op: string | null; created_at: string; stemmen: { auth_user_id: string; naam: string | null; stem: Stem }[] }
+type Beslissing = { id: string; titel: string; toelichting: string | null; bedrijf: string | null; voorgesteld_door: string | null; status: 'open' | 'aangenomen' | 'verworpen'; beslist_op: string | null; created_at: string; domein?: string | null; eigenaar?: string | null; stemmen: { auth_user_id: string; naam: string | null; stem: Stem }[] }
 const UITSLAG: Record<string, string> = { open: 'Open', aangenomen: 'Aangenomen', verworpen: 'Verworpen' }
+type Domeinen = Record<string, string>
+
+function statusTekst(b: Beslissing): string {
+  if (!b.eigenaar) return UITSLAG[b.status]
+  if (b.status === 'open') return `Wacht op ${b.eigenaar}`
+  return b.status === 'aangenomen' ? `Beslist door ${b.eigenaar}` : `${b.eigenaar}: niet doen`
+}
 
 function Beslissingen() {
   const [lijst, setLijst] = useState<Beslissing[] | null>(null)
+  const [ik, setIk] = useState<string | null>(null)
+  const [domeinen, setDomeinen] = useState<Domeinen>({})
   const [nieuw, setNieuw] = useState(false)
-  const laad = useCallback(() => { api<{ beslissingen: Beslissing[] }>('/api/admin/ritme?deel=beslissingen').then((j) => setLijst(j.beslissingen)).catch((e) => toast.error(e.message)) }, [])
+  const laad = useCallback(() => { api<{ beslissingen: Beslissing[]; ik: string | null; domeinen: Domeinen }>('/api/admin/ritme?deel=beslissingen').then((j) => { setLijst(j.beslissingen); setIk(j.ik); setDomeinen(j.domeinen ?? {}) }).catch((e) => toast.error(e.message)) }, [])
   useEffect(() => { laad() }, [laad])
   const stem = async (id: string, s: Stem) => { try { await api('/api/admin/ritme', { actie: 'beslissing.stem', id, stem: s }); laad() } catch (e) { toast.error((e as Error).message) } }
+  const beslis = async (id: string, besluit: 'ja' | 'nee') => { try { await api('/api/admin/ritme', { actie: 'beslissing.beslis', id, besluit }); laad() } catch (e) { toast.error((e as Error).message) } }
   return (
     <div className="card-base space-y-3">
-      <div className="flex items-center justify-between"><h2 className="font-semibold">Beslissingen</h2><button type="button" onClick={() => setNieuw(true)} className="btn-primary text-sm"><Plus className="h-4 w-4" />Beslissing voorstellen</button></div>
-      <p className="text-xs text-gray-500">Aangenomen zodra twee van de drie zaakvoerders voor stemmen; verworpen bij twee keer tegen.</p>
+      <div className="flex items-center justify-between"><h2 className="font-semibold">Beslissingen</h2><button type="button" onClick={() => setNieuw(true)} className="btn-primary text-sm"><Plus className="h-4 w-4" />Beslissing</button></div>
+      <p className="text-xs text-gray-500">Binnen één domein beslist de eigenaar. Over meerdere domeinen: twee van de drie.</p>
       {!lijst ? <Loader2 className="h-4 w-4 animate-spin text-gray-400" /> : !lijst.length ? <p className="text-sm text-gray-500">Nog geen beslissingen.</p> : (
         <ul className="divide-y divide-gray-100">
           {lijst.map((b) => (
             <li key={b.id} className="py-2.5 space-y-1">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className={`text-[11px] border rounded-full px-2 py-0.5 ${b.status === 'aangenomen' ? 'bg-green-50 text-[#166534] border-green-200' : b.status === 'verworpen' ? 'bg-red-50 text-red-700 border-red-200' : 'border-gray-200 text-gray-600'}`}>{UITSLAG[b.status]}</span>
+                <span className={`text-[11px] border rounded-full px-2 py-0.5 ${b.status === 'aangenomen' ? 'bg-green-50 text-[#166534] border-green-200' : b.status === 'verworpen' ? 'bg-red-50 text-red-700 border-red-200' : 'border-gray-200 text-gray-600'}`}>{statusTekst(b)}</span>
                 <span className="font-medium text-sm flex-1">{b.titel}</span>
-                <span className="text-xs text-gray-500">{b.voorgesteld_door} · {dagKort(b.created_at)}</span>
+                <span className="text-xs text-gray-500">{domeinLabel(b.domein)} · {b.voorgesteld_door} · {dagKort(b.created_at)}</span>
               </div>
               {b.toelichting && <p className="text-sm text-gray-700 whitespace-pre-wrap">{b.toelichting}</p>}
               <div className="flex items-center gap-2 flex-wrap text-xs">
-                {b.stemmen.map((s) => <span key={s.auth_user_id} className="rounded-full border border-gray-200 px-2 py-0.5">{s.naam}: {s.stem}</span>)}
-                {b.status === 'open' && (['voor', 'tegen', 'onthouding'] as Stem[]).map((s) => <button key={s} type="button" onClick={() => stem(b.id, s)} className="btn-secondary !py-1 text-xs">{s === 'voor' ? <Check className="h-3 w-3" /> : null}{s[0].toUpperCase() + s.slice(1)}</button>)}
+                {!b.eigenaar && b.stemmen.map((s) => <span key={s.auth_user_id} className="rounded-full border border-gray-200 px-2 py-0.5">{s.naam}: {s.stem}</span>)}
+                {!b.eigenaar && b.status === 'open' && (['voor', 'tegen', 'onthouding'] as Stem[]).map((s) => <button key={s} type="button" onClick={() => stem(b.id, s)} className="btn-secondary !py-1 text-xs">{s === 'voor' ? <Check className="h-3 w-3" /> : null}{s[0].toUpperCase() + s.slice(1)}</button>)}
+                {b.eigenaar && b.status === 'open' && isEigenaar(b.eigenaar, ik) && (<>
+                  <button type="button" onClick={() => beslis(b.id, 'ja')} className="btn-secondary !py-1 text-xs"><Check className="h-3 w-3" />Beslist</button>
+                  <button type="button" onClick={() => beslis(b.id, 'nee')} className="btn-secondary !py-1 text-xs"><X className="h-3 w-3" />Niet doen</button>
+                </>)}
               </div>
             </li>
           ))}
         </ul>
       )}
-      {nieuw && <BeslissingVenster onSluit={() => setNieuw(false)} onBewaard={() => { setNieuw(false); laad() }} />}
+      {nieuw && <BeslissingVenster ik={ik} domeinen={domeinen} onSluit={() => setNieuw(false)} onBewaard={() => { setNieuw(false); laad() }} />}
     </div>
   )
 }
 
-function BeslissingVenster({ onSluit, onBewaard }: { onSluit: () => void; onBewaard: () => void }) {
-  const [v, setV] = useState({ titel: '', toelichting: '', bedrijf: '' })
+function BeslissingVenster({ ik, domeinen, onSluit, onBewaard }: { ik: string | null; domeinen: Domeinen; onSluit: () => void; onBewaard: () => void }) {
+  const [v, setV] = useState({ titel: '', toelichting: '', bedrijf: '', domein: 'meerdere' })
   const [bezig, setBezig] = useState(false)
+  const eigenaar = v.domein !== 'meerdere' ? domeinen[v.domein] ?? null : null
+  const zelf = !!eigenaar && isEigenaar(eigenaar, ik)
+  const knop = zelf ? 'Beslissen' : eigenaar ? `Voorleggen aan ${eigenaar}` : 'Ter stemming voorleggen'
   return (
-    <Venster titel="Beslissing voorstellen" onSluit={onSluit}>
+    <Venster titel="Beslissing" onSluit={onSluit}>
       <input className="input-base" value={v.titel} onChange={(e) => setV({ ...v, titel: e.target.value })} placeholder="Wat beslissen we?" aria-label="Beslissing" autoFocus />
       <textarea className="input-base" rows={4} value={v.toelichting} onChange={(e) => setV({ ...v, toelichting: e.target.value })} placeholder="Toelichting (waarom, wat kost het, wat als we het niet doen)" aria-label="Toelichting" />
+      <select className="input-base" value={v.domein} onChange={(e) => setV({ ...v, domein: e.target.value })} aria-label="Domein">
+        {DOMEINEN.map((d) => <option key={d.key} value={d.key}>{d.label}{domeinen[d.key] ? ` · ${domeinen[d.key]}` : ''}</option>)}
+        <option value="meerdere">Meerdere domeinen · stemming</option>
+      </select>
       <select className="input-base" value={v.bedrijf} onChange={(e) => setV({ ...v, bedrijf: e.target.value })} aria-label="Bedrijf"><option value="">Beide bedrijven</option><option value="nextgenmedia">NextGenMedia</option><option value="nextgensolutions">NextGenSolutions</option></select>
-      <button type="button" disabled={bezig} onClick={async () => { setBezig(true); try { await api('/api/admin/ritme', { actie: 'beslissing.nieuw', ...v }); toast.success('Voorgesteld.'); onBewaard() } catch (e) { toast.error((e as Error).message) } finally { setBezig(false) } }} className="btn-primary w-full justify-center">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}Voorstellen</button>
+      <p className="text-xs text-gray-500">{zelf ? 'Dit is jouw domein: het wordt meteen bewaard als beslist, zonder stemming.' : eigenaar ? `${eigenaar} beslist hierover.` : 'Twee van de drie stemmen beslissen.'}</p>
+      <button type="button" disabled={bezig} onClick={async () => { setBezig(true); try { await api('/api/admin/ritme', { actie: 'beslissing.nieuw', ...v }); toast.success(zelf ? 'Beslist.' : 'Voorgelegd.'); onBewaard() } catch (e) { toast.error((e as Error).message) } finally { setBezig(false) } }} className="btn-primary w-full justify-center">{bezig && <Loader2 className="h-4 w-4 animate-spin" />}{knop}</button>
     </Venster>
   )
 }
